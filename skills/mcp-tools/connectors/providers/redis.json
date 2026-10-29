@@ -1,0 +1,184 @@
+{
+  "schemaVersion": 1,
+  "id": "redis",
+  "name": "Redis",
+  "category": "数据库",
+  "description": "Redis 通用连接器：PING 连接检测、SCAN 游标扫描键名、TYPE 键类型、GET 字符串值（≤2MB）。仅固定四条只读命令，不执行任意命令。",
+  "runtimeKind": "redis",
+  "officialDocs": [
+    "https://redis.io/docs/latest/commands/ping/",
+    "https://redis.io/docs/latest/commands/scan/",
+    "https://redis.io/docs/latest/commands/type/",
+    "https://redis.io/docs/latest/commands/get/",
+    "https://redis.io/docs/latest/develop/reference/protocol-spec/"
+  ],
+  "authDocs": [
+    "https://redis.io/docs/latest/operate/rs/security/tls/"
+  ],
+  "baseUrl": "http://redis-runtime.local",
+  "fields": [
+    {
+      "key": "REDIS_HOST",
+      "label": "Redis 主机（远程主机强制 TLS；localhost/127.0.0.1/::1 可明文）",
+      "secret": false,
+      "required": true,
+      "pattern": "^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,252}|::1)$",
+      "example": ""
+    },
+    {
+      "key": "REDIS_PORT",
+      "label": "端口",
+      "secret": false,
+      "required": false,
+      "pattern": "^[0-9]{1,5}$",
+      "default": "6379",
+      "example": ""
+    },
+    {
+      "key": "REDIS_USER",
+      "label": "ACL 用户名（可选）",
+      "secret": false,
+      "required": false,
+      "pattern": "^\\S{1,512}$",
+      "example": ""
+    },
+    {
+      "key": "REDIS_PASSWORD",
+      "label": "密码（ACL/requirepass；无密码留空）",
+      "secret": true,
+      "required": false,
+      "example": ""
+    },
+    {
+      "key": "REDIS_DB",
+      "label": "逻辑数据库编号（0-15）",
+      "secret": false,
+      "required": false,
+      "pattern": "^(?:[0-9]|1[0-5])$",
+      "default": "0",
+      "example": ""
+    },
+    {
+      "key": "REDIS_TLS",
+      "label": "是否启用 TLS（远程主机必须为 true）",
+      "secret": false,
+      "required": false,
+      "pattern": "^(true|false)$",
+      "default": "true",
+      "example": ""
+    },
+    {
+      "key": "REDIS_CA_PEM",
+      "label": "TLS CA PEM（可选，换行写作\\n；远程连接始终校验证书）",
+      "secret": false,
+      "required": false,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "none"
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "ping",
+      "description": "连接检测（PING，返回 PONG + 服务端信息）。无分页。出处：https://redis.io/docs/latest/commands/ping/",
+      "method": "GET",
+      "path": "/ping",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "scan_keys",
+      "description": "使用 SCAN 遍历键名；COUNT 是工作量提示，实际返回可多于或少于 count，不截断服务器页；next_cursor 为 0 表示结束，非快照，响应超过 2 MB 拒绝。",
+      "method": "GET",
+      "path": "/keys",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "type": "string",
+            "pattern": "^[0-9]{1,20}$",
+            "description": "上一页返回的 next_cursor，首页不传或传 0",
+            "maxLength": 256
+          },
+          "match": {
+            "type": "string",
+            "description": "glob 模式过滤，如 user:*",
+            "maxLength": 256
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "description": "SCAN 工作量提示，非返回条数上限"
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_type",
+      "description": "查询键类型（TYPE，返回 none/string/list/set/zset/hash/stream 等）。无分页。出处：https://redis.io/docs/latest/commands/type/",
+      "method": "GET",
+      "path": "/keys/{key}/type",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "键名（禁止控制字符与换行）"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_value",
+      "description": "只读字符串键，最大 1 MiB；使用有界 GETRANGE，不下载超大值。二进制值返回 base64；其他键类型不支持。",
+      "method": "GET",
+      "path": "/keys/{key}/value",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "键名（禁止控制字符与换行）"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    }
+  ],
+  "limitations": [
+    "只提供固定 PING/SCAN/TYPE/GET 四条只读命令；不提供任意命令执行，不提供 KEYS/SMEMBERS 等无界命令。",
+    "远程主机强制 TLS 且始终校验证书（自签名请提供 CA PEM）；localhost/127.0.0.1/::1 允许明文本机调试。",
+    "SCAN 是游标遍历，结果不构成某一时刻的完整快照；扫描期间写入的键可能不出现。",
+    "SCAN COUNT 仅是提示，不截断页以免丢键；键名页超过 2 MB 拒绝。GET 字符串通过 GETRANGE 有界读取 1 MiB，读取期间可能发生并发变化。",
+    "使用 redis-py 5.x（MIT），远程强制 TLS，始终验证证书与主机名；本机明文需显式关闭 TLS。"
+  ]
+}

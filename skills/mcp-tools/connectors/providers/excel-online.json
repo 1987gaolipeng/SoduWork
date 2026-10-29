@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "id": "excel-online",
+  "name": "Excel Online",
+  "category": "数据与表格",
+  "description": "Excel Online 通用连接器：工作簿工作表列表、已用区域读取、向表添加行。基于 Microsoft Graph v1.0 Excel（workbook 资源），委托式令牌由用户安全填入。",
+  "officialDocs": [
+    "https://learn.microsoft.com/graph/api/workbook-list-worksheets",
+    "https://learn.microsoft.com/graph/api/worksheet-usedrange",
+    "https://learn.microsoft.com/graph/api/table-post-rows",
+    "https://learn.microsoft.com/en-us/graph/api/tablerowcollection-add?view=graph-rest-1.0"
+  ],
+  "authDocs": [
+    "https://learn.microsoft.com/graph/auth/"
+  ],
+  "baseUrl": "https://graph.microsoft.com/v1.0",
+  "fields": [
+    {
+      "key": "MSFT_ACCESS_TOKEN",
+      "label": "Microsoft Graph 访问令牌",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "tokenKey": "MSFT_ACCESS_TOKEN",
+    "header": "Authorization",
+    "prefix": "Bearer"
+  },
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "tools": [
+    {
+      "name": "list_worksheets",
+      "description": "列出工作簿工作表（driveItem 级 workbook）。分页：@odata.nextLink。出处：https://learn.microsoft.com/graph/api/workbook-list-worksheets",
+      "method": "GET",
+      "path": "/me/drive/items/{item_id}/workbook/worksheets",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9!_-]{6,152}$",
+            "description": "Excel 文件的 driveItem ID",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "item_id"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_used_range",
+      "description": "读取工作表已用区域的值。无分页。出处：https://learn.microsoft.com/graph/api/worksheet-usedrange",
+      "method": "GET",
+      "path": "/me/drive/items/{item_id}/workbook/worksheets/{worksheet_id}/usedRange",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9!_-]{6,152}$",
+            "description": "driveItem ID",
+            "maxLength": 10000
+          },
+          "worksheet_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "工作表 ID 或名称"
+          }
+        },
+        "required": [
+          "item_id",
+          "worksheet_id"
+        ],
+        "maxProperties": 50
+      },
+      "fixedQuery": {
+        "$select": "address,values"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "add_table_row",
+      "description": "向现有 Excel 表格末尾批量追加行（二维 values 数组）。需要已授权写入和 Microsoft 委派 Files.ReadWrite 权限。",
+      "method": "POST",
+      "path": "/me/drive/items/{item_id}/workbook/tables/{table_id}/rows/add",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9!_-]{6,152}$",
+            "description": "driveItem ID",
+            "maxLength": 10000
+          },
+          "table_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "表 ID 或名称"
+          },
+          "values": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 10000
+              },
+              "maxItems": 100
+            },
+            "description": "最多 100 行，每行最多 100 个单元格，单元格以文本传入"
+          }
+        },
+        "required": [
+          "item_id",
+          "table_id",
+          "values"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "values": "$values"
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "按委托权限建模，仅访问 me（个人 OneDrive）下文件；SharePoint 站点内工作簿需用 sites 端点另配。",
+    "访问令牌约 1 小时过期，需用户安全填入并手动更新；自动续期为宿主侧适配项，本连接器未实现。",
+    "add_table_row 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

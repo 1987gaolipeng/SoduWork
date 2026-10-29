@@ -1,0 +1,195 @@
+/* Project detail only. The project ledger and shared controls keep their own layout. */
+.pg-detail{display:flex;flex-direction:column;gap:14px;container:project-detail / inline-size;width:100%;min-width:0}
+.pg-detail .pg-detail-head{display:block;min-height:0;margin:0;padding:16px 20px 0;border-radius:12px;box-shadow:none}
+.pg-detail .pg-detail-topline{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.pg-detail .pg-back{align-self:auto;gap:5px;padding:0;border:0;font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.5}
+.pg-detail .pg-detail-topline .livedot{margin:0;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.pg-detail .pg-detail-identity{display:flex;align-items:center;gap:12px;min-width:0}
+.pg-detail .pg-project-mark{width:44px;height:44px;flex:none;border:1px solid color-mix(in srgb,var(--accent) 18%,var(--line));border-radius:11px}
+.pg-detail .pg-detail-title{flex:1;min-width:0}
+.pg-detail .pg-detail-title>div{display:flex;align-items:center;flex-wrap:wrap;gap:10px;letter-spacing:0;font-family:var(--sans)}
+.pg-detail .pg-detail-title h2{margin:0;font:650 23px/1.3 var(--display,var(--sans));white-space:normal;overflow-wrap:anywhere;letter-spacing:-.02em}
+.pg-detail .pg-detail-state{flex:none;padding:3px 8px;border-radius:6px;background:var(--surface-2);color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:500}
+.pg-detail .pg-detail-title .pg-detail-meta{gap:6px 16px;margin-top:5px;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:400;line-height:1.5}
+.pg-detail .pg-detail-actions{display:flex;flex:none;align-items:center;flex-wrap:wrap;gap:8px 14px;margin-left:auto}
+.pg-detail .pg-detail-actions .btn{white-space:nowrap}
+.pg-detail .pg-detail-description{max-width:78ch;margin:13px 0 18px;color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), 13px);line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere}
+.pg-detail .pg-detail-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin:0;padding:15px 0 17px;border-top:1px solid var(--line-2)}
+.pg-detail .pg-detail-metrics>div{min-width:0;padding:0 22px;border-left:1px solid var(--line-2)}
+.pg-detail .pg-detail-metrics>div:first-child{padding-left:0;border-left:0}
+.pg-detail .pg-detail-metrics dt{color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.pg-detail .pg-detail-metrics dd{margin:6px 0 0;color:var(--ink);font:650 22px/1.2 var(--display,var(--sans));font-variant-numeric:tabular-nums}
+.pg-detail .pg-detail-metrics small{display:block;margin-top:5px;color:var(--ink-3);font:14.5px/1.5 var(--sans);overflow-wrap:anywhere}
+
+.pg-detail .pg-tabs{gap:4px;margin:0;padding:5px;border:1px solid var(--line);border-radius:10px;background:var(--surface);box-shadow:none;overflow-x:auto}
+.pg-detail .pg-tabs>button{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:38px;flex:none;padding:0 16px;border-radius:7px;font-size:max(var(--font-min-readable, 14.5px), 13px);white-space:nowrap}
+.pg-detail .pg-tabs>button>svg{width:15px;height:15px;flex:none}
+.pg-detail .pg-tabs>button.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.pg-detail .pg-tabs>button.on::after{display:none}
+.pg-detail .pg-tabs>button>i{margin:0;padding:1px 6px;border-radius:5px;font:14.5px/1.5 var(--sans);font-variant-numeric:tabular-nums}
+.pg-detail .pg-tabs>button.on>i{background:var(--surface);color:var(--accent)}
+.pg-detail .pg-detail-body{min-width:0;padding:0}
+.pg-detail .pg-detail-warning{display:flex;align-items:center;gap:10px;margin-bottom:14px;padding:10px 13px;border:1px solid color-mix(in srgb,var(--warn) 30%,var(--line));border-radius:8px;background:var(--warn-soft);color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.pg-detail .pg-detail-warning>svg{width:16px;height:16px;flex:none;color:var(--warn)}
+.pg-detail .pg-detail-warning>span{flex:1;min-width:0}
+.pg-detail :is(.pg-readiness,.pg-work-panel,.pg-owner-panel,.pg-task-summary,.pg-integration,.pg-repo-editor){min-width:0;border-radius:12px;box-shadow:none}
+.pg-detail :is(.pg-panel-head h3,.pg-readiness h3,.pg-task-summary h3){margin:0;font-size:max(var(--font-min-readable, 14.5px), 14px);font-weight:650;line-height:1.5}
+.pg-detail :is(.pg-panel-head p,.pg-readiness p){margin:4px 0 0;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.6}
+.pg-detail .pg-panel-head{min-height:0;gap:16px;flex-wrap:wrap;padding:16px 18px}
+.pg-detail .pg-panel-head>div:first-child{flex:1 1 240px;min-width:0}
+.pg-detail .pg-panel-head>.pg-repo-head-actions{flex:0 1 auto;flex-wrap:wrap;justify-content:flex-end}
+.pg-detail .pg-empty{min-height:0;padding:28px 18px}
+.pg-detail .pg-empty>b{font-size:max(var(--font-min-readable, 14.5px), 14px)}
+.pg-detail .pg-empty>p{max-width:440px;font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.7}
+
+/* Ownership and progress are peers; readiness remains a compact configuration index. */
+.pg-detail .pg-overview{gap:14px}
+.pg-detail .pg-overview-grid{grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:14px}
+.pg-detail .pg-owner-panel{display:grid;grid-template-columns:42px minmax(0,1fr);align-content:start;align-items:start;gap:12px;padding:18px}
+.pg-detail .pg-owner-avatar{width:42px;height:42px;border-radius:10px;font-size:16px}
+.pg-detail .pg-owner-panel small{font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.5}
+.pg-detail .pg-owner-panel b{display:block;margin-top:3px;font-size:16px;line-height:1.5;overflow-wrap:anywhere}
+.pg-detail .pg-owner-panel p{margin-top:5px;font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.6}
+.pg-detail .pg-owner-edit{grid-column:1/-1;min-width:0;width:auto;gap:8px;margin-top:4px;padding-top:14px;border-top:1px solid var(--line-2)}
+.pg-detail .pg-owner-edit .f-in{flex:1;min-width:0;max-width:none}
+.pg-detail .pg-task-summary{display:flex;flex-direction:column;gap:12px;padding:18px}
+.pg-detail .pg-task-summary>header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.pg-detail .pg-task-summary>header button{gap:4px;font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.pg-detail .pg-task-summary>header button svg{width:13px;height:13px}
+.pg-detail .pg-task-summary>.pg-task-completion{display:flex;flex-direction:row;align-items:baseline;flex-wrap:wrap;gap:7px;padding:0;border:0}
+.pg-detail .pg-task-completion>b{font:650 25px/1.2 var(--display,var(--sans));font-variant-numeric:tabular-nums}
+.pg-detail .pg-task-completion>b>small{font-size:max(var(--font-min-readable, 14.5px), 14px);color:var(--ink-3);font-weight:400}
+.pg-detail .pg-task-completion>span{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-3)}
+.pg-detail .pg-task-completion>em{margin-left:auto;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px);font-style:normal}
+.pg-detail .pg-task-summary>.pg-task-progress{display:block;height:6px;min-height:6px;overflow:hidden;padding:0;border:0;border-radius:9px;background:var(--surface-2)}
+.pg-detail .pg-task-progress>i{display:block;height:100%;border-radius:inherit;background:var(--accent)}
+.pg-detail .pg-task-summary>dl{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;width:100%;margin:0;padding-top:1px}
+.pg-detail .pg-task-summary>dl>div{display:flex;align-items:baseline;justify-content:space-between;gap:8px;text-align:left}
+.pg-detail .pg-task-summary dt{font:14.5px/1.5 var(--sans);color:var(--ink-3)}
+.pg-detail .pg-task-summary dd{margin:0;font:600 15px/1.5 var(--sans);color:var(--ink);font-variant-numeric:tabular-nums}
+.pg-detail .pg-readiness{padding:0;overflow:hidden}
+.pg-detail .pg-readiness>header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0;padding:16px 18px;border-bottom:1px solid var(--line-2)}
+.pg-detail .pg-readiness>header>span{flex:none;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.pg-detail .pg-readiness>div{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;align-items:stretch;padding:4px}
+.pg-detail .pg-readiness button{display:flex;align-items:center;gap:10px;min-width:0;width:auto;padding:16px 12px;border-radius:8px}
+.pg-detail .pg-readiness button:hover{background:var(--surface-1)}
+.pg-detail .pg-readiness button>span{width:32px;height:32px;flex:none;border:0;border-radius:8px;background:var(--surface-2)}
+.pg-detail .pg-readiness button.done>span{background:var(--ok-soft);color:var(--ok)}
+.pg-detail .pg-readiness button>div{min-width:0;flex:1}
+.pg-detail .pg-readiness button b{font-size:max(var(--font-min-readable, 14.5px), 13px);color:var(--ink)}
+.pg-detail .pg-readiness button small{font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.6;white-space:normal;overflow-wrap:anywhere}
+.pg-detail .pg-readiness button>svg{width:13px;height:13px;flex:none;color:var(--ink-3)}
+
+/* A repository's identity, branch mapping, and delivery configuration stay together. */
+.pg-detail .pg-repo-row{grid-template-columns:36px minmax(0,1fr) minmax(210px,.9fr) auto;grid-template-areas:'icon primary source actions' 'health health health health';gap:13px 14px;min-height:0;padding:16px 18px;border-bottom:1px solid var(--line)}
+.pg-detail .pg-repo-row:last-child{border-bottom:0}
+.pg-detail .pg-repo-icon{grid-area:icon;align-self:start;margin-top:2px;border-radius:9px}
+.pg-detail .pg-repo-primary{grid-area:primary;align-self:start}
+.pg-detail .pg-repo-primary>div{gap:7px;flex-wrap:wrap}
+.pg-detail .pg-repo-primary b{font-size:max(var(--font-min-readable, 14.5px), 14px);overflow-wrap:anywhere}
+.pg-detail .pg-repo-primary span{font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.pg-detail .pg-repo-primary code{margin-top:6px;font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.6;white-space:normal;overflow-wrap:anywhere}
+.pg-detail .pg-repo-source{grid-area:source;display:flex;align-self:start;gap:3px;min-width:0}
+.pg-detail .pg-repo-source small{font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.5}
+.pg-detail .pg-repo-source b{font:550 14.5px/1.5 var(--mono);white-space:normal;overflow-wrap:anywhere}
+.pg-detail .pg-repo-source a,.pg-detail .pg-repo-source>span{font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.5}
+.pg-detail .pg-row-actions{grid-area:actions;align-self:start;justify-content:flex-start;gap:5px 14px;flex-wrap:wrap}
+.pg-detail .pg-repo-health{grid-area:health;gap:7px 9px;margin:0 -18px -16px;padding:11px 18px;border-top:1px solid var(--line-2);background:var(--surface-1)}
+.pg-detail .pg-repo-config-label{margin-right:3px;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.pg-detail .pg-status-chip{padding:3px 7px;border-radius:5px;font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.5}
+.pg-detail .pg-repo-flow-note{margin-left:auto;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.5}
+
+/* Repository forms use the same detail hierarchy without altering field behavior. */
+.pg-detail .pg-repo-editor>header{min-height:0;align-items:center;flex-wrap:wrap;gap:12px;padding:16px 18px}
+.pg-detail .pg-repo-editor header>div{flex:1;min-width:180px}
+.pg-detail .pg-repo-editor header>div>small{display:none}
+.pg-detail .pg-repo-editor header h3{margin:0;font-size:16px;line-height:1.5;overflow-wrap:anywhere}
+.pg-detail .pg-repo-editor header p{margin-top:4px;font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.6}
+.pg-detail .pg-repo-editor header>.ml-auto{display:none}
+.pg-detail .pg-subtabs{gap:5px;padding:6px 12px;overflow-x:auto;background:var(--surface-1)}
+.pg-detail .pg-subtabs>button{flex:none;height:35px;font-size:max(var(--font-min-readable, 14.5px), 12px);white-space:nowrap}
+.pg-detail .pg-subtabs>button.on{background:var(--surface);box-shadow:none;color:var(--accent)}
+.pg-detail .pg-editor-body{min-height:0;padding:20px;max-width:1100px}
+.pg-detail .pg-section-title{align-items:flex-start;flex-wrap:wrap;gap:4px 12px;margin-bottom:17px;padding-bottom:11px}
+.pg-detail .pg-section-title>b{font-size:max(var(--font-min-readable, 14.5px), 14px)}
+.pg-detail .pg-section-title>span,.pg-detail .pg-field>small{font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.6}
+.pg-detail .pg-field>span{font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.pg-detail .pg-form-grid{gap:16px}
+.pg-detail .pg-flow-panel{flex-wrap:wrap;padding:16px;gap:12px;border-radius:9px;align-items:flex-start}
+.pg-detail .pg-flow-panel>div:first-child{flex:1 1 250px}
+.pg-detail .pg-flow-panel>div:first-child>small{font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.pg-detail .pg-flow-panel>div:last-child{flex-wrap:wrap}
+.pg-detail .pg-callout{padding:12px;border-radius:8px}
+.pg-detail .pg-callout b{font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.pg-detail .pg-callout span{font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.65}
+.pg-detail .pg-repo-editor>footer{gap:10px;flex-wrap:wrap;padding:12px 18px}
+.pg-detail .pg-repo-editor>footer>span{flex:1 1 280px;font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.6}
+
+.pg-detail .pg-graph-scroll{max-width:100%;padding:20px;scrollbar-width:thin;overscroll-behavior-x:contain}
+.pg-detail .pg-stage{width:250px}
+.pg-detail .pg-stage>header{grid-template-columns:34px 1fr;margin-bottom:12px}
+.pg-detail .pg-stage>header>span{width:27px;height:27px;border-radius:7px;font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.pg-detail .pg-stage>header b{font-size:max(var(--font-min-readable, 14.5px), 13px)}
+.pg-detail .pg-stage>header small{margin-top:2px;font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.pg-detail .pg-stage-arrow{width:36px}
+.pg-detail .pg-task-node{min-height:110px;margin-bottom:10px;padding:13px;border-radius:9px;background:var(--surface)}
+.pg-detail .pg-task-node.done{background:color-mix(in srgb,var(--ok-soft) 28%,var(--surface))}
+.pg-detail .pg-task-state{margin-bottom:9px;font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.pg-detail .pg-task-node>b{font-size:max(var(--font-min-readable, 14.5px), 13px);line-height:1.6;overflow-wrap:anywhere}
+.pg-detail .pg-task-node>small{padding-top:9px;font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.5}
+.pg-detail .pg-integration{display:grid;grid-template-columns:42px minmax(0,1fr);align-items:start;gap:12px;padding:20px}
+.pg-detail .pg-integration-icon{width:42px;height:42px;border-radius:10px}
+.pg-detail .pg-integration small{font:14.5px/1.5 var(--sans);letter-spacing:0}
+.pg-detail .pg-integration h3{margin-top:3px;font-size:15px}
+.pg-detail .pg-integration p{margin-top:5px;font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.7}
+.pg-detail .pg-integration-action{grid-column:2;min-width:0;max-width:580px;width:100%;padding-top:4px}
+.pg-detail .pg-integration-action .f-in{flex:1;min-width:0}
+
+@container project-detail (max-width:1100px){
+  .pg-detail .pg-detail-identity{flex-wrap:wrap}
+  .pg-detail .pg-detail-actions{margin-left:56px;width:calc(100% - 56px)}
+  .pg-detail .pg-readiness>div{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .pg-detail .pg-repo-row{grid-template-columns:36px minmax(0,1fr) auto;grid-template-areas:'icon primary actions' '. source source' 'health health health'}
+}
+@container project-detail (max-width:800px){
+  .pg-detail .pg-overview-grid{grid-template-columns:1fr}
+  .pg-detail .pg-detail-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 0}
+  .pg-detail .pg-detail-metrics>div:nth-child(3){padding-left:0;border-left:0}
+  .pg-detail .pg-detail-head{padding-inline:16px}
+  .pg-detail .pg-detail-title h2{font-size:21px}
+  .pg-detail .pg-tabs>button{padding-inline:12px}
+  .pg-detail .pg-panel-head>.pg-repo-head-actions{width:auto;justify-content:flex-start}
+  .pg-detail .pg-repo-head-actions .btn{flex:none}
+  .pg-detail .pg-repo-flow-note{width:100%;margin-left:0}
+  .pg-detail .pg-repo-editor>header>.btn-primary{margin-left:0}
+  .pg-detail .pg-flow-panel{flex-direction:row}
+}
+@container project-detail (max-width:520px){
+  .pg-detail .pg-detail-head{padding:13px 12px 0}
+  .pg-detail .pg-detail-topline{margin-bottom:13px}
+  .pg-detail .pg-project-mark{width:36px;height:36px;border-radius:9px}
+  .pg-detail .pg-detail-identity{gap:10px}
+  .pg-detail .pg-detail-title h2{font-size:19px}
+  .pg-detail .pg-detail-actions{width:100%;margin-left:0;gap:8px 12px}
+  .pg-detail .pg-detail-description{margin-block:12px 15px}
+  .pg-detail .pg-detail-metrics>div{padding-inline:14px}
+  .pg-detail .pg-detail-metrics dd{font-size:20px}
+  .pg-detail .pg-tabs>button{padding-inline:11px}
+  .pg-detail .pg-tabs>button>svg{display:none}
+  .pg-detail .pg-readiness>div{grid-template-columns:1fr}
+  .pg-detail .pg-readiness button{padding:12px}
+  .pg-detail .pg-readiness>header{align-items:center;flex-direction:row;padding:14px}
+  .pg-detail .pg-panel-head{padding:14px}
+  .pg-detail .pg-repo-row{grid-template-columns:32px minmax(0,1fr);grid-template-areas:'icon primary' '. source' '. actions' 'health health';padding:14px;gap:11px}
+  .pg-detail .pg-repo-icon{width:32px;height:32px}
+  .pg-detail .pg-repo-health{margin:0 -14px -14px;padding:10px 14px}
+  .pg-detail .pg-repo-config-label{width:100%}
+  .pg-detail .pg-owner-panel,.pg-detail .pg-task-summary{padding:15px}
+  .pg-detail .pg-task-completion>em{width:100%;margin-left:0}
+  .pg-detail .pg-editor-body{padding:15px}
+  .pg-detail .pg-form-grid{grid-template-columns:1fr}
+  .pg-detail .pg-integration{padding:15px;grid-template-columns:36px minmax(0,1fr)}
+  .pg-detail .pg-integration-icon{width:36px;height:36px}
+  .pg-detail .pg-integration-action{grid-column:1/-1}
+  .pg-detail .pg-detail-warning{flex-wrap:wrap}
+}

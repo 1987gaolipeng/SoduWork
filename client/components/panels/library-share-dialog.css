@@ -1,0 +1,25 @@
+/* The global reset clears dialog's UA margin:auto; restore viewport centering. */
+dialog.library-share-dialog{position:fixed;inset:0;margin:auto;width:min(520px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:hidden;border-radius:16px}
+.library-share-dialog .library-share-card{max-height:calc(100dvh - 34px);overflow:hidden}
+.library-share-dialog .library-share-head,.library-share-dialog .library-share-file,.library-share-dialog .library-share-search,.library-share-dialog .library-share-foot{flex-shrink:0}
+.library-share-dialog .library-share-head{padding:20px 22px 14px}
+.library-share-dialog .library-share-head b{font-size:17px}
+.library-share-dialog .library-share-file{margin:14px 22px 12px;padding:10px 12px}
+.library-share-dialog .library-share-search{display:flex;align-items:center;gap:10px;margin:0 22px 10px;color:var(--ink-3);font-size:12px}
+.library-share-dialog .library-share-search input{min-width:0;flex:1;height:34px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font:inherit;font-size:13px;background:var(--bg-0);color:var(--ink)}
+.library-share-dialog .library-share-members{min-height:64px;flex:1 1 auto;max-height:260px;overflow:auto;padding:0 22px 8px;overscroll-behavior:contain}
+.library-share-dialog .library-share-member{border:1px solid transparent;margin:2px 0}
+.library-share-dialog .library-share-member:has(input:checked){background:color-mix(in srgb,var(--accent) 9%,var(--bg-0));border-color:color-mix(in srgb,var(--accent) 28%,var(--line))}
+.library-share-dialog .library-share-member input{flex:0 0 16px;width:16px;height:16px;margin:0;cursor:pointer;opacity:1;appearance:auto;pointer-events:auto}
+.library-share-dialog .library-share-member[hidden],.library-share-dialog [data-library-share-empty][hidden],.library-share-dialog [data-library-share-error][hidden]{display:none!important}
+.library-share-dialog .library-share-member-copy{flex:1;min-width:0}
+.library-share-dialog .library-share-member-copy b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.library-share-dialog .library-share-note{flex-shrink:0;margin:8px 22px 14px}
+.library-share-dialog .library-share-note textarea{resize:none;min-height:54px;max-height:72px}
+.library-share-dialog .library-share-foot{padding:12px 22px 16px;flex-wrap:wrap;gap:10px}
+.library-share-dialog [data-library-share-status]{font-variant-numeric:tabular-nums}
+.library-share-dialog [data-library-share-error]{margin:0 22px 10px;color:var(--s-cancel);font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.library-share-dialog [data-library-share-empty]{padding:20px 0;color:var(--ink-3);font-size:13px;text-align:center}
+.library-share-dialog :is(input,textarea,button):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media(max-height:640px){.library-share-dialog .library-share-head{padding:14px 18px 10px}.library-share-dialog .library-share-file{margin:10px 18px;padding:8px 10px}.library-share-dialog .library-share-note{margin:6px 18px 10px}.library-share-dialog .library-share-note textarea{min-height:40px;height:40px}.library-share-dialog .library-share-foot{padding:10px 18px}}
+@media(max-width:480px){.library-share-dialog .library-share-foot>[data-library-share-status]{flex-basis:100%}.library-share-dialog .library-share-foot button{flex:1}.library-share-dialog .library-share-head span{font-size:12px}}

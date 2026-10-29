@@ -1,0 +1,33 @@
+.plugin-tool-access{display:grid;gap:12px;margin-top:16px;padding:15px;border:1px solid var(--line);border-radius:13px;background:color-mix(in srgb,var(--surface) 94%,var(--bg))}
+.plugin-tool-servers{display:grid;gap:10px}
+.plugin-tool-servers>article{overflow:hidden;border:1px solid var(--line);border-radius:11px;background:var(--surface)}
+.plugin-tool-servers>article>header{display:flex;align-items:center;gap:12px;min-height:48px;padding:7px 10px;border-bottom:1px solid color-mix(in srgb,var(--line) 76%,transparent)}
+.plugin-tool-servers>article>header>span{display:flex;align-items:center;min-width:0;gap:9px;margin-right:auto}
+.plugin-tool-servers>article>header svg{width:17px;height:17px;color:var(--accent)}
+.plugin-tool-servers>article>header span span{display:grid;min-width:0;gap:1px}
+.plugin-tool-servers>article>header b{overflow:hidden;color:var(--ink);font-size:max(var(--font-min-readable, 14.5px), 13px);font-weight:610;text-overflow:ellipsis;white-space:nowrap}
+.plugin-tool-servers>article>header small{color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.plugin-tool-servers>article>header button{padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--ink-3);font:inherit;font-size:max(var(--font-min-readable, 14.5px), 12px);cursor:pointer}
+.plugin-tool-servers>article>header button:hover{border-color:color-mix(in srgb,var(--accent) 35%,var(--line));color:var(--accent)}
+.plugin-tool-servers>article>p{margin:0;padding:12px;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.plugin-tool-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--line)}
+.plugin-tool-list>label{display:grid;grid-template-columns:18px minmax(0,1fr) auto;align-items:center;gap:8px;min-height:54px;padding:8px 10px;background:var(--surface);cursor:pointer}
+.plugin-tool-list>label:hover{background:color-mix(in srgb,var(--accent) 3.5%,var(--surface))}
+.plugin-tool-list input{width:15px;height:15px;margin:0;accent-color:var(--accent)}
+.plugin-tool-list span{display:grid;min-width:0;gap:2px}
+.plugin-tool-list b{overflow:hidden;color:var(--ink);font-size:max(var(--font-min-readable, 14.5px), 12.5px);font-weight:570;text-overflow:ellipsis;white-space:nowrap}
+.plugin-tool-list small{overflow:hidden;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px);text-overflow:ellipsis;white-space:nowrap}
+.plugin-tool-list em{padding:2px 6px;border-radius:999px;font-size:max(var(--font-min-readable, 14.5px), 12px);font-style:normal;white-space:nowrap}
+.plugin-tool-list em.is-low{background:var(--ok-soft);color:var(--ok)}
+.plugin-tool-list em.is-medium{background:var(--warn-soft);color:var(--warn)}
+.plugin-tool-list em.is-high{background:var(--crit-soft);color:var(--crit)}
+.plugin-tool-state{display:flex;align-items:center;gap:9px;min-height:44px;padding:0 10px;border:1px dashed var(--line);border-radius:10px;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.plugin-tool-state>i{width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:plugin-tool-spin .8s linear infinite}
+.plugin-tool-state.is-error{border-style:solid;border-color:color-mix(in srgb,#e5484d 25%,var(--line));color:var(--crit)}
+.plugin-tool-state.is-error svg{width:17px;height:17px}
+.plugin-tool-state.is-error span{display:grid;gap:1px}.plugin-tool-state.is-error small{color:var(--ink-3)}
+.plugin-tool-note{margin:0;color:var(--warn);font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.plugin-tool-confirm{display:grid;grid-template-columns:18px minmax(0,1fr);align-items:center;gap:9px;padding:10px;border:1px solid color-mix(in srgb,#e5484d 23%,var(--line));border-radius:10px;background:color-mix(in srgb,#fff1f2 60%,var(--surface));cursor:pointer}
+.plugin-tool-confirm input{width:15px;height:15px;margin:0;accent-color:#dc2626}.plugin-tool-confirm span{display:grid;gap:2px}.plugin-tool-confirm b{color:var(--crit);font-size:max(var(--font-min-readable, 14.5px), 12.5px);font-weight:610}.plugin-tool-confirm small{color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px)}
+@keyframes plugin-tool-spin{to{transform:rotate(360deg)}}
+@media(max-width:760px){.plugin-tool-list{grid-template-columns:1fr}.plugin-tool-access{padding:12px}}

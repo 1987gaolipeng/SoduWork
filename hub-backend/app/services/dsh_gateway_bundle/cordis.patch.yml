@@ -1,0 +1,5 @@
+# DSH already composes this official adapter. Only declare the current route;
+# per-run values live in environment variables, never in this bundle.
+- id: llm-pi-ai
+  config:
+    providers: !!js "JSON.parse(process.env.SODUWORK_DSH_PROVIDERS || '{}')"

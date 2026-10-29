@@ -1,0 +1,176 @@
+
+
+
+
+.con-panel{
+  /*
+   * Inset the console slightly within the workbench. Use fixed edge offsets instead of
+   * translate(-50%,-50%) to avoid fractional-pixel text blur.
+   */
+  position:fixed;z-index:70;
+  top:44px;bottom:44px;left:56px;right:56px;
+  /*
+   * Allow widths up to 2200 px so terminals can use large displays effectively.
+   */
+  margin:0 auto;max-width:2200px;
+  background:var(--bg-0);border-radius:var(--r-xl);box-shadow:var(--shadow-xl);
+  display:flex;flex-direction:column;overflow:hidden;
+  opacity:0;pointer-events:none;transition:opacity .16s ease;
+}
+.con-panel.show{opacity:1;pointer-events:auto}
+
+.con-head{
+  display:flex;align-items:center;gap:10px;padding:11px 14px;flex-shrink:0;
+  border-bottom:1px solid var(--line-2);cursor:default;
+}
+.con-title{
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-md) * var(--font-scale,1)));color:var(--ink);font-weight:600;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:34%;
+}
+.con-meta{color:var(--ink-4);white-space:nowrap;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)))}
+.con-gauge-slot{display:flex;width:160px;flex-shrink:0}
+.con-tabs{display:flex;gap:2px;margin-left:auto;background:var(--bg-2);
+  border-radius:var(--r-sm);padding:2px;flex-shrink:0}
+.con-tab{
+  border:none;background:none;border-radius:calc(var(--r-sm) - 1px);
+  padding:4px 13px;color:var(--ink-4);font-family:inherit;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));
+}
+.con-tab.is-on{background:var(--bg-0);color:var(--ink);font-weight:600;box-shadow:var(--shadow-xs)}
+.con-tab:not(.is-on):hover{color:var(--ink-2)}
+.con-acts{display:flex;gap:6px;align-items:center;flex-shrink:0}
+.con-btn{
+  font-family:inherit;padding:4px 11px;border-radius:var(--r-sm);
+  border:1px solid var(--line-3);background:var(--bg-0);color:var(--ink-4);
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));
+}
+.con-btn:hover{border-color:var(--accent);color:var(--accent)}
+.con-btn.is-on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.con-btn-stop{color:var(--s-doing);border-color:color-mix(in srgb,var(--s-doing) 45%,transparent)}
+.con-x{background:none;border:none;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 14px);
+  padding:3px 7px;border-radius:var(--r-sm)}
+.con-x:hover{background:var(--bg-2);color:var(--ink-2)}
+
+/* Animate status lights only for actively running work. */
+.con-lamp{width:8px;height:8px;border-radius:50%;background:var(--ink-5);flex-shrink:0}
+.con-lamp-run{background:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);
+  animation:consoleLampPulse 3.4s ease-in-out infinite}
+@keyframes consoleLampPulse{0%,100%{opacity:.45}50%{opacity:1}}
+.con-lamp-ok{background:var(--s-done)}
+.con-lamp-bad{background:var(--s-urgent,#e5484d)}
+.con-lamp-stop{background:var(--ink-5)}
+
+/* Keep the estimated label when the gateway does not provide the context-window capacity. */
+.con-gauge{display:flex;align-items:center;gap:7px;width:100%}
+.con-gauge-bar{flex:1;height:5px;border-radius:3px;background:var(--line-3);overflow:hidden}
+.con-gauge-bar i{display:block;height:100%;background:var(--accent);border-radius:3px;
+  transition:width .4s ease}
+.con-gauge.is-warm .con-gauge-bar i{background:var(--s-doing)}
+.con-gauge.is-hot .con-gauge-bar i{background:var(--s-urgent,#e5484d)}
+.con-gauge-t{color:var(--ink-5);white-space:nowrap;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)))}
+.con-gauge-t em{font-style:normal;color:var(--ink-5);opacity:.8;margin-left:4px;
+  padding:0 3px;border:1px solid var(--line-3);border-radius:3px}
+/* Show cumulative usage and duration with lower emphasis than the current context gauge. */
+.con-cost{color:var(--ink-5);opacity:.85;white-space:nowrap;margin-left:8px;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)))}
+
+.con-warn{
+  padding:8px 14px;background:color-mix(in srgb,var(--s-doing) 10%,transparent);
+  color:var(--ink-2);line-height:1.6;flex-shrink:0;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));
+}
+
+/* Selectable live/raw output lets users copy commands and paths. */
+.con-body{
+  flex:1;min-height:0;overflow:auto;padding:10px 14px 14px;background:var(--bg-1);
+  -webkit-user-select:text;user-select:text;
+}
+.con-row{display:flex;gap:9px;line-height:1.7;padding:1px 0;align-items:baseline}
+.con-t{flex-shrink:0;color:var(--ink-5);font-variant-numeric:tabular-nums;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)))}
+.con-k{flex-shrink:0;width:1.2em;text-align:center;color:var(--ink-5);
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)))}
+.con-x2,.con-row .con-x{min-width:0;word-break:break-word;color:var(--ink-2);
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));
+  background:none;border:none;padding:0;cursor:auto}
+.con-row .con-x b{color:var(--accent);font-weight:600;margin-right:4px}
+/*
+ * Use monospace for actions and output; use body typography for explanatory text.
+ */
+.con-row.is-do .con-x, .con-row.is-out .con-x{
+  font-family:var(--font-mono);
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));color:var(--ink-3);
+}
+.con-row.is-say .con-x{color:var(--ink)}
+.con-row.is-say .con-k{color:var(--accent)}
+/* Keep the thinking/step heartbeat visible while the model produces no text. */
+.con-row.is-step{opacity:.8}
+.con-row.is-step .con-x{color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)))}
+.con-row.is-sys .con-x{color:var(--accent)}
+.con-row.is-sys{background:var(--accent-soft);border-radius:var(--r-sm);padding:2px 6px;margin:2px -6px}
+.con-pre{
+  margin:0;white-space:pre-wrap;word-break:break-all;color:var(--ink-3);
+  font-family:var(--font-mono);line-height:1.55;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));
+}
+.con-blank{
+  height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;color:var(--ink-4);padding:24px;line-height:1.8;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));
+}
+.con-blank-s{color:var(--ink-5);font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)))}
+
+/*
+ * Use a dark background for real PTY output so ANSI colors remain readable.
+ */
+.con-termwrap{flex:1;min-height:0;display:flex;flex-direction:column;background:#12161d}
+.con-term{flex:1;min-height:0;padding:6px 8px}
+.con-term .xterm{height:100%}
+.con-termbar{
+  display:flex;align-items:center;gap:10px;padding:6px 12px;flex-shrink:0;
+  border-top:1px solid #222a36;background:#0e1218;
+}
+
+
+.con-termdir{
+  flex:1;min-width:0;color:#7f8ba3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-family:var(--font-mono);
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));
+  border:none;background:none;text-align:left;padding:3px 6px;border-radius:var(--r-sm);
+  user-select:text;-webkit-user-select:text;
+  transition:background .13s,color .13s;
+}
+.con-termdir:hover{background:#1b212b;color:#a9b4c8}
+.con-termdir.is-copied{color:#7fd6a2;background:rgba(127,214,162,.10)}
+.con-termdir.is-copyfail{color:#e4a14b;background:rgba(228,161,75,.10)}
+/* Switch between the task's conversation terminal and a shell in the same workspace. */
+.con-tmode{display:flex;gap:2px;background:#1b212b;border-radius:var(--r-sm);padding:2px;flex-shrink:0}
+.con-tmbtn{
+  border:none;background:none;font-family:inherit;color:#7f8ba3;
+  padding:3px 11px;border-radius:calc(var(--r-sm) - 1px);
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));
+}
+.con-tmbtn.is-on{background:#2b3442;color:#cfe0ff}
+.con-tmbtn:not(.is-on):hover{color:#aab6cc}
+.con-termbar .con-btn{background:#1b212b;border-color:#2b3442;color:#9aa6bd}
+.con-termbar .con-btn:hover{border-color:#7aa2f7;color:#9ec1ff}
+
+.con-say{display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--line-2);flex-shrink:0}
+.con-in{
+  flex:1;min-width:0;font-family:inherit;padding:7px 11px;border-radius:var(--r-sm);
+  border:1px solid var(--line-3);background:var(--bg-0);color:var(--ink);
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));
+}
+.con-in:focus{outline:none;border-color:var(--accent)}
+.con-send{
+  font-family:inherit;padding:7px 18px;border-radius:var(--r-sm);border:none;
+  background:var(--accent);color:#fff;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));
+}
+.con-foot{
+  padding:8px 14px 11px;color:var(--ink-5);line-height:1.6;flex-shrink:0;
+  border-top:1px solid var(--line-2);
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));
+}
+.con-foot b{color:var(--ink-3)}

@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "key": "knowledge-synthesis",
+  "name": "材料研读与知识综述",
+  "version": "1.0.3",
+  "category": "research",
+  "description": "从多份企业材料中抽取事实、统一术语、识别冲突并形成带来源定位的知识综述，适合制度、项目和方案资料汇总。",
+  "author": "SoduWork",
+  "instructions": "你是企业材料研读与知识综合专家。只使用当前任务明确提供的文档、附件和已授权上下文，不搜索或读取未授权位置。先建立材料清单、时间范围、版本和来源身份，再抽取关键事实、定义、规则、决策和例外。对同一事项的冲突内容按来源、版本和日期并列呈现，不擅自消除冲突；每个关键结论都给出可回到原材料的文件名、章节、页码或段落定位。最终输出结论先行的知识综述与来源映射，不复制大段原文，不把推断写成制度事实。",
+  "entrypoints": {"conversation": true, "task": true, "automation": false},
+  "inputs": [
+    {"key": "question", "label": "要回答的问题", "type": "textarea", "required": false},
+    {"key": "scope", "label": "材料范围", "type": "textarea", "required": false},
+    {"key": "audience", "label": "使用对象", "type": "text", "required": false}
+  ],
+  "outputs": [
+    {"key": "brief", "label": "知识综述", "accept": ["deliverables/knowledge-brief.docx"]},
+    {"key": "sourceMap", "label": "来源映射", "accept": ["deliverables/source-map.md"]}
+  ],
+  "capabilities": {"network": false, "skills": [], "mcpServers": [], "runtime": ["files"]},
+  "evaluations": [{
+    "key": "policy-synthesis",
+    "name": "制度材料综述",
+    "instruction": "根据几份存在版本差异的制度摘要，形成供员工使用的规则综述和来源映射。",
+    "inputs": {"question": "当前适用规则、主要例外和仍需确认的冲突是什么？", "scope": "任务中提供的制度摘要", "audience": "普通员工与部门负责人"},
+    "criteria": [
+      "输出可打开的知识综述和独立来源映射",
+      "关键结论均能定位到文件、章节或段落",
+      "版本冲突、未知项和推断被明确标识",
+      "不虚构来源、不擅自把冲突内容合并成确定规则"
+    ],
+    "expectedOutputs": ["synthesize.brief", "synthesize.source_map"]
+  }],
+  "workflow": {"nodes": [
+    {
+      "key": "synthesize", "type": "ai", "name": "研读与综合",
+      "capabilities": {"network": false, "skills": [], "mcpServers": [], "runtime": ["files"]},
+      "outputs": [
+        {"key": "brief", "kind": "file", "label": "知识综述", "path": "deliverables/knowledge-brief.docx", "required": true},
+        {"key": "source_map", "kind": "file", "label": "来源映射", "path": "deliverables/source-map.md", "required": true}
+      ],
+      "config": {"prompt": "研读当前任务提供的全部材料，先建立来源清单和版本关系，再围绕插件输入的问题制作 deliverables/knowledge-brief.docx 与 deliverables/source-map.md。综述包含执行摘要、统一术语、关键事实、规则或决策、冲突与例外、未知项和建议；来源映射逐条给出结论与文件名、章节、页码或段落定位。不得访问未授权目录，不得虚构出处。完成后重新打开 Word 文件检查。"},
+      "retry": {"maxAttempts": 2}
+    },
+    {
+      "key": "validate", "type": "validate", "name": "成果完整性检查", "dependsOn": ["synthesize"],
+      "config": {"rules": [
+        {"type": "file", "name": "知识综述完整", "nameEquals": "deliverables/knowledge-brief.docx", "minBytes": 2500},
+        {"type": "file", "name": "来源映射完整", "nameEquals": "deliverables/source-map.md", "minBytes": 400}
+      ]}
+    },
+    {
+      "key": "review", "type": "ai_review", "name": "独立来源复核", "dependsOn": ["synthesize", "validate"],
+      "inputs": [
+        {"key": "brief", "fromNode": "synthesize", "outputKey": "brief", "label": "待审综述", "required": true},
+        {"key": "source_map", "fromNode": "synthesize", "outputKey": "source_map", "label": "待审来源映射", "required": true}
+      ],
+      "capabilities": {"network": false, "skills": [], "mcpServers": [], "runtime": ["files"]},
+      "outputs": [{"key": "review", "kind": "decision", "label": "知识综述复核结论", "path": "reviews/knowledge-review.md", "required": true}],
+      "config": {"prompt": "独立对照原始材料、知识综述和来源映射，抽查关键结论的定位，检查版本冲突、例外、未知项和事实边界。将结果写入 reviews/knowledge-review.md；关键结论无法定位、冲突被隐藏或出现虚构来源时判定不通过。"}
+    },
+    {"key": "accept", "type": "human_review", "name": "知识责任人验收", "dependsOn": ["review"], "config": {"summary": "请确认综述、冲突和来源定位符合企业事实"}},
+    {"key": "publish", "type": "publish", "name": "交付知识综述", "dependsOn": ["accept"], "config": {"message": "知识综述和来源映射已通过验收并交付"}}
+  ]}
+}

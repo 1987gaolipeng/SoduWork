@@ -1,0 +1,188 @@
+{
+  "schemaVersion": 1,
+  "id": "asana",
+  "name": "Asana",
+  "category": "项目管理",
+  "description": "Asana 通用连接器：当前用户、工作区列表、任务列表与创建。基于 Asana REST API 1.0，Personal Access Token 鉴权，不绑定任何汇报场景。",
+  "officialDocs": [
+    "https://developers.asana.com/reference/getusers",
+    "https://developers.asana.com/reference/getworkspaces",
+    "https://developers.asana.com/reference/gettasks",
+    "https://developers.asana.com/reference/createtask"
+  ],
+  "authDocs": [
+    "https://developers.asana.com/docs/personal-access-token"
+  ],
+  "baseUrl": "https://app.asana.com/api/1.0",
+  "fields": [
+    {
+      "key": "ASANA_PAT",
+      "label": "Personal Access Token",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "tokenKey": "ASANA_PAT",
+    "header": "Authorization",
+    "prefix": "Bearer"
+  },
+  "headers": {
+    "Accept": "application/json"
+  },
+  "tools": [
+    {
+      "name": "get_current_user",
+      "description": "获取当前用户。无分页。出处：https://developers.asana.com/reference/getusers",
+      "method": "GET",
+      "path": "/users/me",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_workspaces",
+      "description": "列出工作区。分页：limit（1-100 默认 20）+ offset 游标（响应体 next_page.offset）。出处：https://developers.asana.com/reference/getworkspaces",
+      "method": "GET",
+      "path": "/workspaces",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "description": "每页条数"
+          },
+          "offset": {
+            "type": "string",
+            "description": "上一页 next_page.offset",
+            "maxLength": 10000
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "query": {
+        "limit": "limit",
+        "offset": "offset"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_tasks",
+      "description": "列出任务，须提供 assignee 或 project（API 强制，缺则 400）。分页：limit + offset 游标。出处：https://developers.asana.com/reference/gettasks",
+      "method": "GET",
+      "path": "/tasks",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "assignee": {
+            "type": "string",
+            "description": "用户 GID 或 me",
+            "maxLength": 10000
+          },
+          "project": {
+            "type": "string",
+            "description": "项目 GID",
+            "maxLength": 10000
+          },
+          "completed_since": {
+            "type": "string",
+            "description": "过滤已完成时间边界",
+            "maxLength": 10000
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "description": "每页条数"
+          },
+          "offset": {
+            "type": "string",
+            "description": "上一页 next_page.offset",
+            "maxLength": 10000
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "query": {
+        "assignee": "assignee",
+        "project": "project",
+        "completed_since": "completed_since",
+        "limit": "limit",
+        "offset": "offset"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_task",
+      "description": "创建任务（POST /tasks，data.name + data.projects/workspace 必其一）。写入操作：运行前必须获得用户明确授权。出处：https://developers.asana.com/reference/createtask",
+      "method": "POST",
+      "path": "/tasks",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "任务名"
+          },
+          "projects": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 10000
+            },
+            "minItems": 0,
+            "maxItems": 1,
+            "description": "项目 GID 数组（与 workspace 二选一）"
+          },
+          "workspace": {
+            "type": "string",
+            "description": "工作区 GID（与 projects 二选一）",
+            "maxLength": 10000
+          },
+          "notes": {
+            "type": "string",
+            "description": "任务说明",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "data": {
+          "name": "$name",
+          "projects": "$projects",
+          "workspace": "$workspace",
+          "notes": "$notes"
+        }
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "list_tasks 必须至少提供 assignee 或 project，否则 API 返回 400。",
+    "分页游标在响应体 next_page.offset，末页 next_page 为 null。",
+    "create_task 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

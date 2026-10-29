@@ -1,0 +1,403 @@
+{
+  "schemaVersion": 1,
+  "key": "product-incubator",
+  "name": "产品孵化",
+  "version": "1.0.0",
+  "category": "dev",
+  "description": "从产品想法持续推进到可运行、可验收、可发布的完整产品；包含真实开发、测试修复、商业运营准备和断点续作。",
+  "instructions": "作为产品孵化负责人，先读取 product-incubator/SKILL.md，逐阶段完成真实产品，不只写方案。工作流节点只做当前阶段；普通会话按技能阶段推进并保留进度、工具输出和成果。每次恢复先核对 .soduwork/product-incubation.json 与真实文件。未经明确授权不得生产发布、付费或外发消息，不能伪造市场验证。",
+  "entrypoints": {
+    "conversation": true,
+    "task": true,
+    "automation": true
+  },
+  "inputs": [
+    {
+      "key": "brief",
+      "label": "产品想法与目标",
+      "type": "textarea",
+      "placeholder": "要为谁解决什么问题，已有的工程、材料和期望交付范围；也可以直接在对话中提供。"
+    },
+    {
+      "key": "constraints",
+      "label": "约束与已有材料",
+      "type": "textarea",
+      "placeholder": "技术栈、预算、时间、现有工程或上一轮孵化包。不填写任何密钥。"
+    }
+  ],
+  "capabilities": {
+    "skills": [
+      "product-incubator"
+    ],
+    "mcpServers": [],
+    "runtime": [
+      "files",
+      "terminal",
+      "browser"
+    ],
+    "network": false
+  },
+  "workflow": {
+    "nodes": [
+      {
+        "key": "discover",
+        "type": "ai",
+        "name": "验证产品方向",
+        "dependsOn": [],
+        "outputs": [
+          {
+            "key": "brief",
+            "kind": "file",
+            "path": "product-brief.md",
+            "label": "产品定义与验证假设",
+            "required": true
+          },
+          {
+            "key": "state",
+            "kind": "file",
+            "path": "incubation-state.json",
+            "label": "孵化进度",
+            "required": true
+          },
+          {
+            "key": "decision",
+            "kind": "decision",
+            "path": "decision.json",
+            "label": "阶段验收决定",
+            "required": true
+          }
+        ],
+        "config": {
+          "prompt": "先读取 product-incubator 的 SKILL.md 和 references/delivery-contract.md（个人内置资源位于 references/incubator/）。只执行当前阶段；读取全部上游材料和原始附件，不丢失约束。每次交接写 incubation-state.json，记录目标、证据、源码包、未完成项和下一步。不同节点可能在不同执行机和目录：使用已校验的上游文件，不依赖绝对路径、共享会话记忆或上一台机器。\n区分用户事实、外部证据和待验证假设，形成目标用户、核心痛点、替代方案、价值主张、商业模式、成本边界和本轮可交付范围。没有访谈/付费证据就标记未验证，不虚构调研或收入。整理原始文本及附件索引；已有工程/状态先审计并恢复，不重做已验收工作。输出 product-brief.md、incubation-state.json；方向缺失到无法推进时 decision=blocked。方向可验证但尚未验证时允许提出明确实验并交用户确认，不把它写成市场成功。",
+          "timeoutSeconds": 7200
+        },
+        "retry": {
+          "maxAttempts": 3
+        }
+      },
+      {
+        "key": "confirm_scope",
+        "type": "human_review",
+        "name": "确认方向与范围",
+        "dependsOn": [
+          "discover"
+        ],
+        "outputs": [],
+        "config": {
+          "action": "uat",
+          "summary": "确认目标用户、核心问题、本轮交付范围与预算边界。确认仅允许本地开发和验证，不授权收费、外发消息或生产发布。"
+        },
+        "retry": {
+          "maxAttempts": 1
+        }
+      },
+      {
+        "key": "design",
+        "type": "ai",
+        "name": "设计完整产品",
+        "dependsOn": [
+          "discover",
+          "confirm_scope"
+        ],
+        "outputs": [
+          {
+            "key": "spec",
+            "kind": "file",
+            "path": "product-spec.md",
+            "label": "产品与技术规格",
+            "required": true
+          },
+          {
+            "key": "acceptance",
+            "kind": "file",
+            "path": "acceptance.json",
+            "label": "验收清单",
+            "required": true
+          },
+          {
+            "key": "state",
+            "kind": "file",
+            "path": "incubation-state.json",
+            "label": "孵化进度",
+            "required": true
+          }
+        ],
+        "config": {
+          "prompt": "先读取 product-incubator 的 SKILL.md 和 references/delivery-contract.md（个人内置资源位于 references/incubator/）。只执行当前阶段；读取全部上游材料和原始附件，不丢失约束。每次交接写 incubation-state.json，记录目标、证据、源码包、未完成项和下一步。不同节点可能在不同执行机和目录：使用已校验的上游文件，不依赖绝对路径、共享会话记忆或上一台机器。\n形成 product-spec.md、acceptance.json 和 incubation-state.json：关键用户旅程、页面与交互、数据模型、接口、身份与权限、异常恢复、商业计费方案、非功能指标、可复现验收命令。商业化范围按产品性质适配，不强加 SaaS；支付默认沙箱。acceptance.json 按指南声明必须通过的验收项，已有基础尽量复用。所有必需功能都必须进入可追踪的行动清单，不停在静态原型。",
+          "timeoutSeconds": 7200
+        },
+        "retry": {
+          "maxAttempts": 3
+        }
+      },
+      {
+        "key": "implement",
+        "type": "ai",
+        "name": "持续开发可运行产品",
+        "dependsOn": [
+          "discover",
+          "design"
+        ],
+        "outputs": [
+          {
+            "key": "source",
+            "kind": "file",
+            "path": "product-source.zip",
+            "label": "可运行产品源码包",
+            "required": true
+          },
+          {
+            "key": "report",
+            "kind": "file",
+            "path": "build-report.md",
+            "label": "开发与测试证据",
+            "required": true
+          },
+          {
+            "key": "state",
+            "kind": "file",
+            "path": "incubation-state.json",
+            "label": "孵化进度",
+            "required": true
+          },
+          {
+            "key": "decision",
+            "kind": "decision",
+            "path": "decision.json",
+            "label": "阶段验收决定",
+            "required": true
+          }
+        ],
+        "config": {
+          "prompt": "先读取 product-incubator 的 SKILL.md 和 references/delivery-contract.md（个人内置资源位于 references/incubator/）。只执行当前阶段；读取全部上游材料和原始附件，不丢失约束。每次交接写 incubation-state.json，记录目标、证据、源码包、未完成项和下一步。不同节点可能在不同执行机和目录：使用已校验的上游文件，不依赖绝对路径、共享会话记忆或上一台机器。\n将规格拆为可验收纵向功能，循环实现→运行→测试→修复→记录，再做下一项，直到本轮必须项完成。提供真实前后端/持久化/必要权限和业务流程；不允许用假按钮、固定响应或空壳代替已承诺功能。每项至少验证成功、错误和空状态；保存真实命令输出。每类同因失败最多连续修复三次，仍失败写阻断和精确恢复步骤，不无限重试或伪造成功。已有代码先保留修改再增量改进。产出 product-source.zip（含源码、锁文件、数据库迁移、测试、运行说明、.soduwork/product-incubation.json；排除密钥、依赖缓存和用户私有数据）、build-report.md、incubation-state.json 和 decision.json。decision=proceed 仅表示开发阶段真实通过，后续必须独立验证。",
+          "timeoutSeconds": 14400
+        },
+        "retry": {
+          "maxAttempts": 3
+        }
+      },
+      {
+        "key": "qualify",
+        "type": "ai",
+        "name": "联调测试与质量修复",
+        "dependsOn": [
+          "design",
+          "implement"
+        ],
+        "outputs": [
+          {
+            "key": "candidate",
+            "kind": "file",
+            "path": "release-candidate.zip",
+            "label": "修复后发布候选",
+            "required": true
+          },
+          {
+            "key": "evidence",
+            "kind": "file",
+            "path": "quality-evidence.json",
+            "label": "可复核测试证据",
+            "required": true
+          },
+          {
+            "key": "report",
+            "kind": "file",
+            "path": "quality-report.md",
+            "label": "质量报告",
+            "required": true
+          },
+          {
+            "key": "state",
+            "kind": "file",
+            "path": "incubation-state.json",
+            "label": "孵化进度",
+            "required": true
+          },
+          {
+            "key": "decision",
+            "kind": "decision",
+            "path": "decision.json",
+            "label": "阶段验收决定",
+            "required": true
+          }
+        ],
+        "config": {
+          "prompt": "先读取 product-incubator 的 SKILL.md 和 references/delivery-contract.md（个人内置资源位于 references/incubator/）。只执行当前阶段；读取全部上游材料和原始附件，不丢失约束。每次交接写 incubation-state.json，记录目标、证据、源码包、未完成项和下一步。不同节点可能在不同执行机和目录：使用已校验的上游文件，不依赖绝对路径、共享会话记忆或上一台机器。\n从已校验源码包解压到当前节点的候选目录，不修改上游原件。独立启动产品并从界面完成关键旅程；检查数据持久化、访问控制、异常处理、性能预算、依赖与许可证、可访问性及敏感信息。发现问题在候选目录实际修复、重跑原失败项和回归测试，持续完成验收清单；每类同因失败三次后阻断。保存带命令、退出码、日志文件和日期的 quality-evidence.json，禁止从文案推断测试通过。生成 release-candidate.zip（包含 .soduwork/product-incubation.json）、quality-report.md、incubation-state.json；仍缺必须项 decision=blocked。",
+          "timeoutSeconds": 14400
+        },
+        "retry": {
+          "maxAttempts": 3
+        }
+      },
+      {
+        "key": "review",
+        "type": "ai_review",
+        "name": "独立验收发布候选",
+        "dependsOn": [
+          "design",
+          "qualify"
+        ],
+        "outputs": [
+          {
+            "key": "report",
+            "kind": "file",
+            "path": "review-report.md",
+            "label": "独立验收报告",
+            "required": true
+          },
+          {
+            "key": "decision",
+            "kind": "decision",
+            "path": "decision.json",
+            "label": "阶段验收决定",
+            "required": true
+          }
+        ],
+        "config": {
+          "prompt": "先读取 product-incubator 的 SKILL.md 和 references/delivery-contract.md（个人内置资源位于 references/incubator/）。只执行当前阶段；读取全部上游材料和原始附件，不丢失约束。每次交接写 incubation-state.json，记录目标、证据、源码包、未完成项和下一步。不同节点可能在不同执行机和目录：使用已校验的上游文件，不依赖绝对路径、共享会话记忆或上一台机器。\n这是独立只读复核：解压候选到隔离目录运行测试，逐项核对原验收要求和真实证据，不修改源码、降低标准或只相信上一阶段总结。按指南使用 release-check.cjs 检查证据引用与覆盖，再实际复跑关键检查。报告缺陷、严重度、复现方法和需返工项；任何必须项未通过、缺证据或存在高危问题都 decision=blocked，不能放行。通过才 decision=proceed。输出 review-report.md 和 decision.json。",
+          "timeoutSeconds": 7200
+        },
+        "retry": {
+          "maxAttempts": 3
+        }
+      },
+      {
+        "key": "prepare_release",
+        "type": "ai",
+        "name": "准备上线与商业运营",
+        "dependsOn": [
+          "discover",
+          "design",
+          "qualify",
+          "review"
+        ],
+        "outputs": [
+          {
+            "key": "plan",
+            "kind": "file",
+            "path": "release-plan.md",
+            "label": "发布与回滚方案",
+            "required": true
+          },
+          {
+            "key": "business",
+            "kind": "file",
+            "path": "business-playbook.md",
+            "label": "商业运营手册",
+            "required": true
+          },
+          {
+            "key": "state",
+            "kind": "file",
+            "path": "incubation-state.json",
+            "label": "孵化进度",
+            "required": true
+          }
+        ],
+        "config": {
+          "prompt": "先读取 product-incubator 的 SKILL.md 和 references/delivery-contract.md（个人内置资源位于 references/incubator/）。只执行当前阶段；读取全部上游材料和原始附件，不丢失约束。每次交接写 incubation-state.json，记录目标、证据、源码包、未完成项和下一步。不同节点可能在不同执行机和目录：使用已校验的上游文件，不依赖绝对路径、共享会话记忆或上一台机器。\n读取已通过的候选，不改源码。形成 release-plan.md（明确目标环境/版本/配置项、迁移备份、发布步骤、健康检查、回滚、监控与告警、支持联系人）、business-playbook.md（定价假设、沙箱计费测试、上线文案、获客实验、激活/留存/付费指标口径和支持流程），及 incubation-state.json。缺生产凭据不伪造；说明待用户配置。默认目标是可发布的完整产品，不购买域名、不创建收费资源、不向真实用户发消息。",
+          "timeoutSeconds": 7200
+        },
+        "retry": {
+          "maxAttempts": 3
+        }
+      },
+      {
+        "key": "accept_release",
+        "type": "human_review",
+        "name": "验收产品与发布方案",
+        "dependsOn": [
+          "qualify",
+          "review",
+          "prepare_release"
+        ],
+        "outputs": [],
+        "config": {
+          "action": "uat",
+          "summary": "验收真实可运行产品、测试证据和发布/回滚方案。默认只交付可发布版本；如需上线，必须另行明确授权目标环境、版本及操作范围。此确认不代表已部署或已商业化。"
+        },
+        "retry": {
+          "maxAttempts": 1
+        }
+      },
+      {
+        "key": "deliver",
+        "type": "ai",
+        "name": "交付产品并验证授权范围",
+        "dependsOn": [
+          "qualify",
+          "prepare_release",
+          "accept_release"
+        ],
+        "outputs": [
+          {
+            "key": "delivery",
+            "kind": "file",
+            "path": "product-delivery.zip",
+            "label": "完整产品交付包",
+            "required": true
+          },
+          {
+            "key": "report",
+            "kind": "file",
+            "path": "delivery-report.md",
+            "label": "交付与验证说明",
+            "required": true
+          },
+          {
+            "key": "state",
+            "kind": "file",
+            "path": "incubation-state.json",
+            "label": "持续迭代状态",
+            "required": true
+          },
+          {
+            "key": "decision",
+            "kind": "decision",
+            "path": "decision.json",
+            "label": "阶段验收决定",
+            "required": true
+          }
+        ],
+        "config": {
+          "prompt": "先读取 product-incubator 的 SKILL.md 和 references/delivery-contract.md（个人内置资源位于 references/incubator/）。只执行当前阶段；读取全部上游材料和原始附件，不丢失约束。每次交接写 incubation-state.json，记录目标、证据、源码包、未完成项和下一步。不同节点可能在不同执行机和目录：使用已校验的上游文件，不依赖绝对路径、共享会话记忆或上一台机器。\n将已验收候选、运行和发布说明交付为 product-delivery.zip，并生成 delivery-report.md 和 incubation-state.json。默认 readiness=release_ready，清楚给出本地启动方式、可打开的成果链接、未配置的生产项和下一轮行动。仅当本次会话存在针对精确目标环境和版本的明确发布授权且凭据通过已授权连接提供时才实际部署，先备份验证回滚，再上线后真实探活；未执行或失败不能写 launched。不要将人工验收或插件 publish 节点当成生产发布授权。填写 .soduwork/delivery.json，保留其他成果，只登记用户成品。未满足本轮已确认的必须项仍为 blocked，不能宣称完成。",
+          "timeoutSeconds": 7200
+        },
+        "retry": {
+          "maxAttempts": 3
+        }
+      },
+      {
+        "key": "accept_delivery",
+        "type": "human_review",
+        "name": "确认交付与下一轮",
+        "dependsOn": [
+          "deliver"
+        ],
+        "outputs": [],
+        "config": {
+          "action": "uat",
+          "summary": "确认交付包可打开、产品可运行，核对实际发布状态与未完成事项。后续迭代复用孵化状态；生产经营指标须以真实数据为准。"
+        },
+        "retry": {
+          "maxAttempts": 1
+        }
+      },
+      {
+        "key": "complete",
+        "type": "publish",
+        "name": "本轮孵化完成",
+        "dependsOn": [
+          "accept_delivery"
+        ],
+        "outputs": [],
+        "config": {
+          "message": "本轮产品已验收并保留孵化状态。实际上线与经营结果以交付证据为准；继续迭代时复用交付包和未完成清单。"
+        },
+        "retry": {
+          "maxAttempts": 1
+        }
+      }
+    ]
+  }
+}

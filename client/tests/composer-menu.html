@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="vivid" data-skin="glass" data-desk-panel="workspace">
+<head><meta charset="utf-8"><base href="../"><title>输入框菜单 · 隔离验收</title>
+<link rel="stylesheet" href="theme/variables.css">
+<link rel="stylesheet" href="components/panels/panels-base.css">
+<link rel="stylesheet" href="components/panels/agent-brand.css">
+<link rel="stylesheet" href="components/panels/panels-chat.css">
+<link rel="stylesheet" href="components/panels/chat-plugin-mention.css">
+<link rel="stylesheet" href="components/workspace/workspace-shell.css">
+<link rel="stylesheet" href="components/workspace/window-menu.css">
+<link rel="stylesheet" href="components/workspace/workspace-page-layout.css">
+<link rel="stylesheet" href="theme/workspace-experience.css">
+<link rel="stylesheet" href="components/panels/work-composer.css">
+<link rel="stylesheet" href="components/panels/panels-compose-model-picker.css">
+<link rel="stylesheet" href="components/panels/conversation-attachments.css">
+<link rel="stylesheet" href="components/panels/work-intent.css">
+<link rel="stylesheet" href="theme/cursor.css">
+<style>
+body{margin:0;font-family:var(--font-ui);background:var(--bg-1)}
+.cp-hero{font-size:26px;color:var(--ink)}.cp-hero-note{font-size:14px;color:var(--ink-3)}
+.cp-foot,#cpChat{display:none}.cp-modelpop:not(.show){display:none}
+</style>
+<script>
+window.fixtureCalls=[];window.fixtureErrors=[];window.catalogFails=false;
+window.addEventListener('error',e=>fixtureErrors.push(e.message));
+window.addEventListener('unhandledrejection',e=>fixtureErrors.push(String(e.reason)));
+window.fetch=()=>{throw Error('No network allowed in composer fixture')};
+const names=['产品创新引擎（开源项目 × 论文调研）','精美 PPT 工坊','会议到行动','智能体产品设计','材料研读与知识综述','深度研究','PDF 工具箱','网页采集'];
+const fixturePluginIcon='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jxqkAAAAASUVORK5CYII=';
+window.fixtureCatalog=names.map((name,i)=>({pluginId:'plugin-'+i,name,description:[
+ '发现可复用的开源项目，把研究转化为可执行的产品方案。',
+ '从材料到故事线，制作可以直接演示的文稿。',
+ '整理会议纪要、决定与行动项。'][i%3],installed:true,organizationWide:true,
+ capabilities:{skills:['method-'+i]},version:'1.0.0',versionId:'version-'+i,...(i===0?{icon:fixturePluginIcon}:{})}));
+fixtureCatalog.push({pluginId:'disabled',name:'已停用的个人插件',personal:true,enabled:false},
+ {pluginId:'not-installed',name:'未安装插件',installed:false},
+ {pluginId:'task-only',name:'工程专用工作流',installed:true,entrypoints:{conversation:false}});
+window.SoduWorkAPI={
+ pluginCatalog:async()=>{fixtureCalls.push(['catalog']);if(catalogFails)throw Error('offline');return{items:fixtureCatalog}},
+ myModels:async()=>({usable:[{name:'demo-model',label:'企业默认模型 · 超长名称验证工具栏收缩'}],
+  defaultModel:'demo-model',defaultModels:{pi:'demo-model','codex-harness':'demo-model'},defaultModelErrors:{}})
+};
+window.soduWorkAPI={conversationSession:{
+ workdir:async()=>({ok:true,dir:'C:/isolated'}),setMode:async(mode)=>({ok:true,mode:mode||'full'}),
+ capabilities:async()=>({ok:true,items:[{id:'browser',label:'浏览器',description:'在网页中检索与验证信息',selectable:true,selected:true}]}),
+ probe:async(id)=>{fixtureCalls.push(['probe',id]);return{ok:true,
+  accessControl:{supported:true,schema:'soduwork.access-policy/v1',modes:['standard','readonly','full']}}},
+ runtimes:async()=>({ok:true,runtimes:[{id:'pi',displayName:'Pi',summary:'日常办公与连续对话',goalMode:'native'},
+  {id:'codex-harness',displayName:'Codex Harness',summary:'工程任务与完整交付',goalMode:'native'}]}),
+ deleteHistory:async(id)=>{fixtureCalls.push(['delete',id]);return{ok:false,cancelled:true}},
+ archiveHistory:async(id)=>{fixtureCalls.push(['archive',id]);return{ok:false,cancelled:true}},
+ history:async()=>({ok:true,chats:[]})
+}};
+window.petSay=(...args)=>fixtureCalls.push(['toast',...args]);
+window.WorkspaceHost={open:(...args)=>fixtureCalls.push(['route',...args])};
+window.NativeChat={hasSession:()=>false,reset:()=>{},refreshHistory:()=>{},
+ enter:async(...args)=>{fixtureCalls.push(['send',...args]);return false}};
+</script>
+<script src="core/skin-registry.js"></script>
+<script src="core/plugin-icon.js"></script>
+<script src="components/workspace/workspace-chat-history.js"></script>
+<script src="components/workspace/workspace-chat-list.js"></script>
+<script src="components/workspace/workspace-shell.js"></script>
+<script src="components/panels/agent-brand.js"></script>
+<script src="components/panels/work-composer.js"></script>
+<script src="components/panels/work-intent.js"></script>
+<script src="components/panels/conversation-attachments.js"></script>
+<script src="components/panels/compose-candidate-navigation.js"></script>
+<script src="components/panels/chat-plugin-mention-model.js"></script>
+<script src="components/panels/chat-plugin-mention.js"></script>
+<script src="components/panels/panels-compose-runtime.js"></script>
+<script src="components/panels/panels-compose-capabilities.js"></script>
+<script src="components/panels/panels-compose-model-picker.js"></script>
+<script src="components/panels/compose-surface.js"></script>
+<script src="components/panels/panels-compose.js"></script>
+</head><body><script>
+WorkspaceShell.mount();WorkspaceShell.setActive('create');WorkspaceShell.setChats([
+ {id:'fixture-a',title:'设计一个可直接演示的企业网站',adapterId:'pi',status:'idle'},
+ {id:'fixture-b',title:'整理会议纪要与行动项',adapterId:'pi',status:'idle'}]);
+newChatSession();
+</script></body></html>

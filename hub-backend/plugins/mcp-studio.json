@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "key": "mcp-studio",
+  "name": "MCP 快速配置",
+  "version": "1.1.0",
+  "category": "dev",
+  "description": "在对话中创建、检查 MCP 配置，交付导入文件，指导客户端测试和公司共享。",
+  "instructions": "先读取已安装 mcp-studio 的 SKILL.md；在当前对话整理连接要求，生成配置并用随包脚本静态检查。交付可下载文件。凭据只在配置页填写，连接须实测后启用，共享须管理员审核。不执行未确认的命令，不自动改变公司权限。",
+  "entrypoints": {
+    "conversation": true,
+    "task": true,
+    "automation": false
+  },
+  "inputs": [],
+  "capabilities": {
+    "network": false,
+    "skills": [
+      "mcp-studio"
+    ],
+    "mcpServers": [],
+    "runtime": [
+      "files",
+      "terminal"
+    ]
+  }
+}

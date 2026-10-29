@@ -1,0 +1,45 @@
+.locale-settings{position:relative;flex:none;z-index:60}
+.locale-settings .locale-settings-trigger{display:flex;align-items:center;gap:6px;width:auto;max-width:160px;padding:0 10px}
+.locale-settings-trigger svg{width:17px;height:17px;flex:none}
+.locale-settings-trigger span{font-size:max(var(--font-min-readable, 14.5px), 12px);white-space:nowrap}
+.locale-settings-popover{position:absolute;right:0;top:calc(100% + 8px);width:220px;max-width:calc(100vw - 24px);display:grid;gap:12px;padding:14px;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 24px rgba(20,30,50,.12)}
+.locale-settings-popover>b{font-size:max(var(--font-min-readable, 14.5px), 13px)}
+.locale-settings-popover label{display:grid;gap:7px;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.locale-settings .locale-language-select{width:100%;min-width:0;height:38px;min-height:38px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink-2);font:14.5px/1.5 var(--sans)}
+.locale-settings .locale-language-select>.select-menu-trigger{min-height:0;padding:0 11px;font:14.5px/1.5 var(--sans)}
+.locale-settings .locale-language-select:is(.is-open,:focus-within){border-color:color-mix(in srgb,var(--accent) 55%,var(--line));box-shadow:none;outline:none}
+.locale-settings .locale-language-select>.select-menu-trigger:is(:focus,:focus-visible){outline:none;box-shadow:none}
+.locale-settings .locale-language-select:has(>.select-menu-trigger:focus-visible){outline:2px solid color-mix(in srgb,var(--accent) 30%,transparent);outline-offset:2px}
+/* Open upward within the settings panel, keeping both options inside its
+   scroll boundary and the logout action clear. */
+.locale-settings .locale-language-select>.select-menu-popover{top:auto;bottom:calc(100% + 6px);left:auto;right:0;max-width:calc(100vw - 48px)}
+/*
+ * Expand locale options in document flow so the bottom-anchored scrolling card does not
+ * clip them. Retain popup styling and the selector border.
+ */
+.locale-settings.is-floating .locale-language-select.is-open{flex-direction:column;height:auto;background:transparent;border-color:transparent;box-shadow:none}
+.locale-settings.is-floating .locale-language-select.is-open>.select-menu-trigger{border:1px solid color-mix(in srgb,var(--accent) 55%,var(--line))}
+.locale-settings.is-floating .locale-language-select.is-open>.select-menu-popover{position:static;width:100%;min-width:0;max-width:none;max-height:min(280px,40vh);margin-top:6px}
+.locale-settings.is-floating{position:fixed;right:18px;bottom:18px}
+.locale-settings.is-floating .locale-settings-trigger{background:var(--surface);border:1px solid var(--line);border-radius:9px}
+.locale-settings.is-floating .locale-settings-popover{top:auto;bottom:calc(100% + 8px);padding-top:24px}
+.locale-settings.is-inline{z-index:auto;padding:10px 1px;border-bottom:1px solid var(--line-2)}
+.locale-settings.is-inline label{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0;color:var(--ink-3);font:14.5px/1.5 var(--sans)}
+.locale-settings.is-inline label>span{flex:none}
+.locale-settings.is-inline .locale-language-select{flex:0 1 140px;max-width:140px}
+.app .profile-menu{right:auto;width:260px;max-width:calc(100vw - 24px);max-height:calc(100dvh - 100px);overflow:auto;overscroll-behavior:contain}
+@media(max-width:1100px){
+  .app .sidebar{overflow:visible}
+  .app .nav{margin-right:56px}
+  .app .side-foot-wrap{position:absolute;display:block;top:14px;right:12px;width:40px;margin:0;border:0;background:transparent}
+  .app .side-foot{display:flex;justify-content:center;min-height:36px;padding:4px;border:0;border-radius:8px}
+  .app .side-foot :is(.u,.profile-trigger-icon){display:none}
+  .app .side-foot .avatar{width:28px;height:28px;flex:0 0 28px}
+  .app .profile-menu{top:calc(100% + 8px);bottom:auto;right:0;left:auto}
+}
+@media(max-width:760px){
+  .app .nav{margin-right:0}
+  .app .brand{padding-right:64px}
+  .app .side-foot-wrap{top:10px}
+}
+@media(max-width:640px){.locale-settings .locale-settings-trigger{width:34px;padding:0;justify-content:center}.locale-settings-trigger span{display:none}.locale-settings.is-floating{right:12px;bottom:12px}}

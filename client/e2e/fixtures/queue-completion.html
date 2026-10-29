@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="ruby"><meta charset="utf-8"><title>队列完成状态 · 隔离回归</title>
+<link rel="stylesheet" href="../../theme/variables.css">
+<link rel="stylesheet" href="../../components/panels/panels-chat.css">
+<link rel="stylesheet" href="../../components/panels/chat-collaboration.css">
+<style>
+*{box-sizing:border-box}body{margin:0;background:var(--bg-1);color:var(--ink);font:15px var(--font-ui)}
+main{max-width:980px;width:100%;height:100vh;display:flex;flex-direction:column;margin:auto}header{padding:24px;color:var(--ink-3)}
+#transcript{padding:24px;line-height:1.8}#nchatInput{height:96px}#fixtureSend{float:right;margin:12px;padding:8px 16px}
+.fixture-message{padding:12px 0}.fixture-message.user{text-align:right}#fixtureStatus{padding-top:16px;color:var(--ink-3)}
+</style>
+<main><header>隔离验收：真实队列与界面，执行结果为测试夹具</header><div class="nchat-main">
+<section class="nchat-content-area"><div id="transcript" class="nchat-scroll"><p>网站制作任务已返回结果。</p><div id="fixtureMessages"></div><div id="fixtureStatus"></div></div></section>
+<div class="nchat-foot"><div class="nchat-footin nchat-compose-shell"><div class="nchat-entry-dock">
+<div id="nchatQueue" class="nchat-queue"></div><div class="nbox"><textarea id="nchatInput" placeholder="接着说…"></textarea><button id="fixtureSend">发送</button></div>
+</div></div></div></div></main>
+<script src="../../components/panels/chat-collaboration-store.js"></script>
+<script src="../../components/panels/chat-task-session.js"></script>
+<script src="../../components/panels/chat-task-start.js"></script>
+<script src="../../components/panels/chat-task-controller.js"></script>
+<script src="../../components/panels/chat-send-queue.js"></script>
+<script>
+window.fixtureErrors=[];
+addEventListener('error',e=>fixtureErrors.push(String(e.message)));
+addEventListener('unhandledrejection',e=>fixtureErrors.push(String(e.reason)));
+const api=soduWorkAPI.conversationSession;
+const task={id:'site',title:'制作示例企业酷炫官网',status:'done',
+ workRouting:{conversationTurn:{conversationId:'fixture-chat',state:'waiting'}}};
+window.SoduWorkAPI={getTask:async()=>structuredClone(task)};
+const ctx={_sessionId:'fixture-chat',_ref:'fixture-chat',_viewEpoch:1,_sessionOptions:{adapterId:'pi'},
+ _collabTasks:new Map(),_collabStarts:new Set(),_localQueue:[],_collabPollTimer:1,
+ _snap:{status:'idle',execution:{queue:[],turnQueue:{tasks:[]}}},
+ esc:s=>String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'),
+ _mount:()=>document.querySelector('main'),_api:()=>api,_render:()=>ctx._renderQueue(ctx._mount())};
+Object.assign(ctx,ChatTaskController.create(ctx),ChatSendQueue.create(ctx));
+ctx._bindCollaborationTask(task.id,task.title,{persist:false,taskMeta:task});
+window.fixtureContext=ctx;
+function update(snapshot){
+ ctx._snap=snapshot;ctx._render();
+ document.querySelector('#fixtureMessages').innerHTML=(snapshot.messages||[]).map(row=>
+  '<div class="fixture-message '+ctx.esc(row.role)+'">'+ctx.esc(row.text)+'</div>').join('');
+ document.querySelector('#fixtureStatus').textContent=snapshot.execution.running?'正在执行当前消息…':'';
+}
+api.onEvent(event=>{if(event.ref===ctx._ref&&event.snapshot)update(event.snapshot)});
+document.querySelector('#fixtureSend').onclick=async()=>{
+ const input=document.querySelector('#nchatInput'),text=input.value.trim();if(!text)return;input.value='';
+ const result=await api.send(ctx._ref,text,[],{});if(!result.ok)throw Error(result.reason);update(result.snapshot);
+};
+document.querySelector('#nchatQueue').onclick=event=>{
+ const button=event.target.closest('[data-queue-action]');
+ if(button)void ctx._queueAction(button.dataset.queueAction,button.dataset.queueId||'',button.dataset.taskId||'');
+};
+window.configureTask=(status,queueState,ai)=>{
+ task.status=status;task.ai=ai;
+ task.workRouting=queueState==='idle'?{}:{conversationTurn:{conversationId:'fixture-chat',state:queueState}};
+ const entry=ctx._collabTasks.get('site');
+ entry.task=structuredClone(task);entry.queueState=queueState;ctx._render();
+};
+api.snapshot(ctx._ref).then(result=>{update(result.snapshot);window.fixtureReady=true});
+</script></html>

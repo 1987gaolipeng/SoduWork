@@ -1,0 +1,26 @@
+{
+  "name": "hub-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "SoduWork 企业级 AI Native 管理端（React + Vite）",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test:i18n": "node --test tests/i18n.test.mjs",
+    "audit:i18n": "node scripts/audit-i18n.mjs",
+    "test:i18n:browser": "node tests/run-i18n-browser.cjs",
+    "test:org-memory:browser": "node tests/run-org-memory-browser.cjs",
+    "test:cloud-runners:browser": "npm run build && node tests/run-cloud-runner-management-browser.cjs",
+    "test:public-pages:browser": "npm run build && node tests/public-pages-browser.cjs"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.2.0",
+    "vite": "^7.3.7"
+  }
+}

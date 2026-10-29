@@ -1,0 +1,56 @@
+.app .content .admin-access-page {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 14px;
+}
+.app .content .admin-access-page .admin-access-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+.app .content .admin-access-summary > .stat {
+  min-width: 0;
+  padding: 14px 16px;
+}
+.app .content .admin-access-summary .sv { font-variant-numeric: tabular-nums; }
+.app .content .admin-access-summary .sl { line-height: 1.5; }
+.app .content .admin-access-page > .admin-filterbar { margin: 0; }
+.app .content .admin-access-page .admin-filterbar .btn {
+  min-height: var(--filter-height);
+}
+.admin-access-note {
+  min-width: 0;
+  margin: 0;
+  color: var(--ink-3);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  line-height: 1.6;
+}
+.admin-filterbar > .admin-access-note { flex: 1 1 300px; }
+.app .content .admin-access-actions-col { width: 88px; text-align: left; }
+.admin-audit-filter { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.admin-audit-filter-label { flex: 0 0 auto; color: var(--ink-2); font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.app .content .admin-audit-table { min-width: 840px; table-layout: fixed; }
+.admin-audit-table .audit-col-time { width: 160px; }
+.admin-audit-table .audit-col-actor { width: 14%; }
+.admin-audit-table .audit-col-action { width: 20%; }
+.admin-audit-table .audit-col-target { width: 20%; }
+.app .content .admin-audit-table th { text-align: left; }
+.app .content .admin-audit-table td { vertical-align: top; overflow-wrap: anywhere; }
+.admin-audit-time { color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.admin-audit-action { display: inline-flex; align-items: baseline; gap: 7px; color: var(--ink); }
+.admin-audit-action > i { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; }
+.admin-audit-detail { color: var(--ink-3); line-height: 1.6; white-space: pre-wrap; }
+.app .content .admin-audit-page > .list-pager { margin: 0; }
+@media (max-width: 600px) {
+  .app .content .admin-access-page .admin-access-summary { gap: 8px; }
+  .app .content .admin-access-summary > .stat { padding: 12px 10px; }
+  .app .content .admin-access-summary .sv { font-size: 21px; }
+  .app .content .admin-access-summary .sl { font-size: max(var(--font-min-readable, 14.5px), 12px); }
+}
+/* Use a neutral avatar placeholder in the new-user dialog. */
+.ava-placeholder{width:46px;height:46px;border-radius:50%;flex:0 0 46px;background:var(--surface-2,#f2f5f9);color:var(--ink-3,#98a2b3);display:flex;align-items:center;justify-content:center;border:1px solid var(--line,#e3e8ef)}
+.ava-placeholder svg{width:22px;height:22px}

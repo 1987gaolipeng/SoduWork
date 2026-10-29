@@ -1,0 +1,299 @@
+/* Theme-aware application catalog with search, refresh, add, personal and marketplace tabs, grouped two-column listings, and creation and installation dialogs. */
+
+.sch-panel.appsx {
+  width: min(1080px, calc(100vw - 72px));
+  max-height: min(86vh, 880px);
+  background: var(--bg-0);
+}
+
+/* Draggable page header with title, subtitle, and actions. */
+.appsx-top {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 24px;
+  padding: 26px 36px 0; user-select: none;
+}
+.appsx-title {
+  margin: 0; font-family: var(--font-display); font-size: 24px; line-height: 1.25;
+  font-weight: 700; color: var(--ink); letter-spacing: .2px;
+  display: inline-flex; align-items: center;
+}
+.appsx-title-gift { display: inline-flex; width: 27px; height: 27px; margin-right: 10px; flex: none; }
+.appsx-title-gift svg { width: 100%; height: 100%; }
+.appsx-sub { margin: 6px 0 0; font-size: 13.5px; color: var(--ink-3); }
+.appsx-tools { display: flex; align-items: center; gap: 10px; flex: none; padding-top: 2px; }
+.appsx-search {
+  display: flex; align-items: center; gap: 8px;
+  width: min(300px, 30vw); height: 38px; padding: 0 12px;
+  border: 1px solid var(--line-3); border-radius: var(--r-md); background: var(--bg-0);
+  color: var(--ink-4);
+  transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
+}
+.appsx-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.appsx-search svg { width: 16px; height: 16px; flex: none; }
+.appsx-search input {
+  flex: 1; min-width: 0; border: 0; outline: 0; background: transparent;
+  font: inherit; font-size: 13px; color: var(--ink);
+}
+.appsx-search input::placeholder { color: var(--ink-4); }
+.appsx-icon-btn {
+  width: 36px; height: 36px; flex: none; display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: var(--r-full); background: transparent; color: var(--ink-3); cursor: pointer;
+  transition: background .15s var(--ease), color .15s var(--ease);
+}
+.appsx-icon-btn:hover { background: var(--bg-2); color: var(--ink-2); }
+.appsx-icon-btn svg { width: 17px; height: 17px; }
+.appsx-icon-btn.is-spinning svg { animation: appsx-spin .7s var(--ease); }
+@keyframes appsx-spin { to { transform: rotate(360deg); } }
+
+/* Primary add/install button. */
+.appsx-pill {
+  display: inline-flex; align-items: center; gap: 6px; flex: none;
+  height: 36px; padding: 0 16px; border: 0; border-radius: var(--r-full);
+  background: var(--ink); color: var(--bg-0);
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: background .15s var(--ease), transform .1s var(--ease);
+}
+.appsx-pill:hover { background: color-mix(in srgb, var(--ink) 84%, #000); }
+.appsx-pill:active { transform: scale(.98); }
+.appsx-pill svg { width: 13px; height: 13px; }
+.appsx-pill.small { height: 32px; padding: 0 14px; font-size: 12.5px; }
+
+/* Open the creation window directly from the Add button. */
+
+/* Use neutral theme tokens for local installation badges, independent of application type. */
+.appsx-source-tag {
+  flex: none; display: inline-flex; align-items: center;
+  height: 18px; padding: 0 8px; border-radius: var(--r-full);
+  font-size: 12px; font-weight: 500; line-height: 1; white-space: nowrap;
+  color: var(--ink-3); background: var(--bg-2); border: 1px solid var(--line);
+}
+.appsx-card-headline { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.appsx-card-headline b { min-width: 0; }
+
+/* Personal and marketplace tabs. */
+.appsx-tabs { display: flex; align-items: center; gap: 4px; padding: 0; }
+.appsx-tab {
+  padding: 7px 16px; border: 0; border-radius: var(--r-full); background: transparent;
+  color: var(--ink-3); font: inherit; font-size: 14px; font-weight: 500; cursor: pointer;
+  transition: background .15s var(--ease), color .15s var(--ease);
+}
+.appsx-tab:hover { color: var(--ink); }
+.appsx-tab.active { background: var(--bg-2); color: var(--ink); font-weight: 600; }
+
+/* Scrollable content. */
+.appsx-scroll { flex: 1; min-height: 0; overflow: auto; padding: 18px 36px 30px; }
+
+/* Sections and two-column grid. */
+.appsx-section { margin-top: 26px; min-width: 0; overflow: hidden; }
+.appsx-sec-head { display: flex; align-items: center; gap: 5px; }
+.appsx-sec-head h2 { margin: 0; font-size: 17px; font-weight: 700; color: var(--ink); }
+.appsx-section-empty { margin: 12px 0 0; color: var(--ink-3); font-size: 13px; line-height: 1.6; }
+.appsx-market-error { padding: 12px 14px; border-radius: var(--r-md); background: var(--bg-1); color: var(--ink-2); font-size: 13px; line-height: 1.6; }
+.appsx-card-add { flex: none; display: inline-flex; align-items: center; justify-content: center; color: var(--accent); }
+.appsx-card-add svg { width: 20px; height: 20px; }
+.appsx-sec-head svg { width: 16px; height: 16px; color: var(--ink-4); }
+.appsx-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  column-gap: 56px; row-gap: 4px; margin-top: 10px;
+}
+.appsx-card {
+  display: flex; align-items: center; gap: 14px;
+  padding: 10px; border-radius: 12px; cursor: pointer;
+  transition: background .15s var(--ease);
+}
+.appsx-card:hover { background: var(--bg-1); }
+.appsx-card:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.appsx-card.is-opening { opacity: .6; pointer-events: none; }
+.appsx-app-ico {
+  flex: none; width: 46px; height: 46px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 12px; background: var(--accent-soft); color: var(--accent); overflow: hidden;
+}
+.appsx-app-ico svg { width: 22px; height: 22px; }
+.appsx-app-ico.has-img { background: var(--bg-0); border: 1px solid var(--line-2); }
+.appsx-app-ico img { width: 100%; height: 100%; object-fit: cover; border-radius: 11px; }
+.appsx-app-ico.big { width: 44px; height: 44px; }
+.appsx-app-ico.big svg { width: 22px; height: 22px; }
+.appsx-card-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.appsx-card-txt b {
+  font-size: 14px; font-weight: 600; color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.appsx-card-txt small {
+  font-size: 12.5px; color: var(--ink-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.appsx-card-acts {
+  flex: none; display: inline-flex; align-items: center; gap: 2px;
+  opacity:1;
+}
+.appsx-card-acts .appsx-set{opacity:0;pointer-events:none;transition:opacity .14s var(--ease)}
+.appsx-card:hover .appsx-card-acts .appsx-set,
+.appsx-card:focus-within .appsx-card-acts .appsx-set{opacity:1;pointer-events:auto}
+.appsx-act {
+  width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: var(--r-full); background: transparent; color: var(--ink-3);
+  cursor: pointer; transition: background .15s var(--ease), color .15s var(--ease);
+}
+.appsx-act svg { width: 16px; height: 16px; }
+.appsx-act:hover { background: var(--bg-3); color: var(--ink); }
+.appsx-fav{flex:none}
+.appsx-fav:not(.is-fav){color:var(--ink-3)}
+.appsx-fav.is-fav { color: #e8a013; }
+.appsx-fav.is-fav svg path { fill: #e8a013; stroke: #e8a013; }
+
+/* Recommendation covers fill cards; a light frosted footer overlays metadata, with columns based on available width. */
+.appsx-cover-card{--appsx-card-radius:12px;--appsx-card-inner-radius:calc(var(--appsx-card-radius) - 1px);position:relative;display:flex;flex-direction:column;align-items:stretch;gap:0;padding:0;border:1px solid var(--line);border-radius:var(--appsx-card-radius);background:var(--bg-0);width:100%;max-width:680px;min-width:0;min-height:240px;max-height:340px;aspect-ratio:2;overflow:hidden;isolation:isolate;clip-path:inset(0 round var(--appsx-card-radius))}
+.appsx-cover{position:absolute;inset:0;aspect-ratio:auto;overflow:hidden;border-radius:var(--appsx-card-inner-radius);background:var(--bg-2);display:flex;align-items:center;justify-content:center;color:var(--accent)}
+.appsx-cover>img{display:block;width:100%;height:100%;object-fit:cover}
+.appsx-cover>img[hidden]{display:none}
+.appsx-cover>span svg{width:40px;height:40px}
+/* Join the frosted layer to the cover and clip lower corners through the parent clip-path, including composited layers. */
+.appsx-cover-info{position:absolute;inset:auto 0 0;z-index:2;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;padding:8px 16px 12px;background:color-mix(in srgb,var(--bg-0) 78%,transparent);border-top:1px solid color-mix(in srgb,var(--bg-0) 55%,transparent);border-radius:0 0 var(--appsx-card-inner-radius) var(--appsx-card-inner-radius);overflow:hidden;backdrop-filter:blur(18px) saturate(1.2);-webkit-backdrop-filter:blur(18px) saturate(1.2)}
+.appsx-cover-copy{min-width:0}
+.appsx-cover-actions{display:flex;flex-direction:column;align-items:stretch;gap:6px;min-width:88px}
+.appsx-cover-tools{display:flex;align-items:center;justify-content:center;gap:4px}
+.appsx-cover-meta{display:flex;align-items:center;gap:8px;padding-top:0;min-width:0}
+.appsx-cover-meta .appsx-app-ico{box-sizing:border-box;width:36px;height:36px;padding:3px;border-radius:50%}
+.appsx-cover-meta .appsx-card-txt b{font-size:24px;line-height:1.3;font-weight:700}
+.appsx-card-open{flex:none;padding:8px 16px;border:1px solid #111;border-radius:var(--r-full);background:#111;color:#fff;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.appsx-card-open:hover{background:#292929;border-color:#292929}
+.appsx-cover-desc{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;margin:6px 0 0;height:38px;min-height:38px;line-height:19px;font-size:12.5px;color:var(--ink-2)}
+[data-apps-section="recommended"]{container:apps-recommendations / inline-size}
+[data-apps-section="recommended"] .appsx-grid{gap:18px;grid-template-columns:minmax(0,680px);justify-content:start;overflow:hidden}
+[data-apps-section="recommended"] .appsx-grid:has(> :only-child){justify-content:start}
+@container apps-recommendations (min-width:680px){[data-apps-section="recommended"] .appsx-grid{grid-template-columns:repeat(2,minmax(0,680px));justify-content:start}}
+.appsx-secret-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:var(--bg-1)}
+.appsx-secret-edit{border:0;background:transparent;color:var(--accent);font:inherit;cursor:pointer}
+.appsx-field input[hidden]{display:none}
+
+/* Application settings overlay. */
+.appsx-mask {
+  position: fixed; inset: 0; z-index: 96; display: none;
+  background: color-mix(in srgb, var(--ink) 32%, transparent);
+}
+.appsx-mask.show { display: flex; align-items: center; justify-content: center; }
+.appsx-modal {
+  display: flex; flex-direction: column;
+  width: min(620px, calc(100vw - 32px)); max-height: 88vh; overflow: hidden;
+  background: var(--bg-0); border: 1px solid var(--line);
+  border-radius: var(--r-lg, 14px); box-shadow: var(--shadow-pop, 0 18px 50px -12px rgba(15, 23, 42, .35));
+}
+.appsx-modal-head {
+  flex: none;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 15px 18px 11px; border-bottom: 1px solid var(--line-2);
+}
+.appsx-modal-head b { font-size: 14px; color: var(--ink); }
+.appsx-modal-body { padding: 14px 18px 4px; display: grid; gap: 13px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.appsx-field { display: grid; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
+.appsx-field input, .appsx-field textarea {
+  box-sizing: border-box; min-width: 0; width: 100%; font: inherit; color: var(--ink); background: var(--bg-1);
+  border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; resize: vertical;
+}
+.appsx-field input:focus, .appsx-field textarea:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.appsx-modal-note { margin: 0; font-size: 12px; line-height: 1.55; color: var(--ink-3); }
+.appsx-modal-foot { flex: none; display: flex; align-items: center; justify-content: flex-end; padding: 10px 18px 16px; }
+.appsx-modal-foot .push { flex: 1; }
+.appsx-remove { border: 0; padding: 7px 0; background: transparent; color: var(--s-critical, #c64151); font: inherit; font-size: 12.5px; cursor: pointer; }
+.appsx-remove:hover { color: color-mix(in srgb, var(--s-critical, #c64151) 78%, var(--ink)); }
+.appsx-settings-error { color: var(--s-critical, #c64151); font-size: 12px; line-height: 1.5; }
+.appsx-settings-error[hidden] { display: none; }
+
+/* Application creation dialog with three application types. */
+.appsx-create { width: min(460px, calc(100vw - 32px)); }
+.appsx-create-body { gap: 12px; }
+.appsx-create-options { display: grid; gap: 10px; }
+.appsx-create-opt {
+  position: relative;
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--bg-0); color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+  transition: border-color .15s var(--ease), background .15s var(--ease), box-shadow .15s var(--ease);
+}
+.appsx-create-opt:hover { background: var(--bg-1); }
+.appsx-create-easy {
+  position: absolute; top: -1px; right: -1px; padding: 2px 10px;
+  border-radius: 0 12px 0 8px; background: #18181b; color: #fff;
+  font-size: 12px; font-weight: 600; line-height: 18px; white-space: nowrap;
+}
+.appsx-create-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.appsx-create-opt.selected {
+  border-color: var(--accent); background: var(--accent-soft);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.appsx-create-ico {
+  flex: none; width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 11px; background: var(--bg-2); color: var(--accent);
+}
+.appsx-create-ico svg { width: 20px; height: 20px; }
+.appsx-create-txt { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.appsx-create-txt b { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.appsx-create-txt small { font-size: 12px; line-height: 1.5; color: var(--ink-3); }
+.appsx-create-mark {
+  flex: none; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; border: 1.5px solid var(--line-3); color: transparent;
+  transition: border-color .15s var(--ease), background .15s var(--ease), color .15s var(--ease);
+}
+.appsx-create-mark svg { width: 12px; height: 12px; }
+.appsx-create-opt.selected .appsx-create-mark { border-color: var(--accent); background: var(--accent); color: #fff; }
+.appsx-create-foot { gap: 8px; flex-wrap: wrap; }
+
+/* Empty, loading, and inline feedback states. */
+.appsx-empty {
+  margin: 52px auto 8px; max-width: 430px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+.appsx-empty-ico {
+  width: 52px; height: 52px; margin-bottom: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 16px; background: var(--bg-2); color: var(--ink-4);
+}
+.appsx-empty-ico svg { width: 25px; height: 25px; }
+.appsx-empty b { font-size: 15px; color: var(--ink); }
+.appsx-empty span { font-size: 12.5px; color: var(--ink-3); line-height: 1.6; }
+.appsx-empty .appsx-pill { margin-top: 14px; }
+.appsx-loading { padding: 52px 0; text-align: center; font-size: 13px; color: var(--ink-4); }
+.apps-inline-note {
+  margin: 0 0 12px; padding: 9px 12px; border-radius: var(--r-md);
+  background: var(--bg-2); font-size: 12.5px; color: var(--ink-2);
+}
+
+/* Use one column and a narrower search field in small windows. */
+@media (max-width: 920px) {
+  .appsx-top { flex-wrap: wrap; gap: 14px; }
+  .appsx-tools { flex: 1 1 100%; min-width: 0; flex-wrap: wrap; }
+  .appsx-search { flex: 1 1 160px; width: auto; }
+  .appsx-grid { grid-template-columns: 1fr; column-gap: 0; }
+}
+
+/* In full-page workspace mode, align with page gutters and let sidebar navigation handle closing. */
+html[data-desk-panel="workspace"] #appsPanel :is(.appsx-top,.appsx-tabs,.appsx-scroll) {
+  padding-left: clamp(18px, 2vw, 34px);
+  padding-right: clamp(18px, 2vw, 34px);
+}
+html[data-desk-panel="workspace"] #appsClose { display: none; }
+
+/* Self-contained installation confirmation independent of the capability-panel modal shell. */
+.apps-modal-layer {
+  position: fixed; inset: 0; z-index: 10060;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, .32);
+}
+.apps-modal-layer[hidden] { display: none; }
+.apps-modal {
+  width: min(420px, calc(100vw - 48px));
+  background: var(--bg-0);
+  border-radius: var(--r-lg);
+  padding: 18px 18px 14px;
+  box-shadow: var(--shadow-xl);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.apps-modal header b { font-size: 14px; color: var(--ink); display: block; }
+.apps-modal header small { color: var(--ink-3); font-size: 12px; }
+.apps-modal-body .apps-install-head { display: flex; gap: 12px; align-items: flex-start; }
+.apps-modal-body .apps-install-head b { font-size: 13px; color: var(--ink); }
+.apps-modal-body .apps-install-head p { margin: 2px 0; font-size: 12px; color: var(--ink-2); }
+.apps-modal-body .apps-install-head em { font-style: normal; font-size: 12px; color: var(--ink-3); }
+.apps-modal-note { margin: 0; font-size: 12px; color: var(--ink-3); }
+.apps-modal-error { margin: 0; font-size: 12px; color: #d1242f; }
+.apps-modal footer { display: flex; gap: 8px; }
+.apps-modal footer .push { flex: 1; }

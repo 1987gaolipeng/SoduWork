@@ -1,0 +1,20 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>Custom Agent integration verification</title>
+<link rel="stylesheet" href="components/panels/panels-agents.css">
+<link rel="stylesheet" href="components/panels/custom-agents.css">
+<link rel="stylesheet" href="components/panels/work-composer.css">
+<style>
+:root{--bg-0:#fff;--bg-2:#f6f7f9;--ink:#20252d;--ink-2:#515b69;--ink-3:#74808d;--line:#e3e7ed;--accent:#476dde;--accent-hover:#355aca;--accent-soft:#edf1ff;--s-urgent:#ba3030;--shadow-xl:0 16px 48px #16213f22}
+:root{--bg-1:#fafbfc;--ink-1:#20252d;--ink-4:#747b84;--ink-5:#848b95;--font-ui:system-ui}
+body{font-family:system-ui;margin:0;background:#fff;color:var(--ink);font-size:14px}*{box-sizing:border-box}button{font:inherit;cursor:pointer}svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6}#composer{margin:20px;position:relative}.sch-panel{display:none;margin:20px}.sch-panel.show{display:block}.sch-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:16px}.sch-h-txt{flex:1;min-width:180px;display:grid;gap:4px}.sch-h-sub{font-style:normal;color:var(--ink-3)}.sch-h-kicker{display:none}.sch-h-acts,.ag-tabs{display:flex;gap:8px}.btn-mini{border:1px solid var(--line);padding:8px 12px;border-radius:8px;background:#fff;color:var(--ink)}.sch-body{padding-top:20px}.ag-blank{display:grid;justify-items:center;gap:12px;padding:32px;color:var(--ink-3)}.np-close{display:none}#compose-host{display:inline-block}.wc-popover{max-width:calc(100vw - 40px)}
+</style></head><body><section id="composer"><h2>New conversation</h2><div id="compose-host"></div><button id="cpIntentMenu">Goal</button></section>
+<script src="components/panels/work-composer.js"></script><script src="components/panels/panels-compose-runtime.js"></script>
+<script src="components/panels/custom-agents.js"></script><script src="components/panels/panels-agents.js"></script>
+<script>
+// Only the host page and offline Hub directory are fixtures. Feature renderers are production scripts.
+window.SoduWorkAPI={agentSetup:async()=>null};window.petSay=message=>{window.lastNotice=message};
+const composeHost=document.querySelector('#compose-host');composeHost.innerHTML=ComposeRuntime.controls('<svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="4"/></svg>');
+ComposeRuntime.bind(composeHost,{api:()=>soduWorkAPI.conversationSession,say:petSay,refresh:()=>{},close:()=>document.querySelector('#cpRuntimePop').classList.remove('show')});
+document.querySelector('#cpRuntime').addEventListener('click',()=>document.querySelector('#cpRuntimePop').classList.toggle('show'));
+document.querySelector('#cpRuntimePop').style.bottom='auto';document.querySelector('#cpRuntimePop').style.top='100%';
+openAgentsPanel();window.fixtureReady=true;
+</script></body></html>

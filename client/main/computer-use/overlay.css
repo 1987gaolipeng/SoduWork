@@ -1,0 +1,42 @@
+@font-face{font-family:SoduWorkUI;src:local('Alibaba PuHuiTi'),local('Alibaba PuHuiTi 3.0');font-display:swap}
+:root{
+  color-scheme:light;--bg-0:#fff;--ink:#242427;--ink-2:#62646d;--line:#e7e8ee;
+  --font-ui:SoduWorkUI,'Alibaba PuHuiTi','Segoe UI Variable','Segoe UI',sans-serif;
+  --control-cyan:#18cce9;--control-blue:#5285ff;--control-violet:#a36bff;
+  --control-pink:#f56baa;--control-amber:#ffbc67;--control-mint:#43dcc1;
+  --spectrum:var(--control-cyan),var(--control-blue),var(--control-violet),var(--control-pink),var(--control-amber),var(--control-mint),var(--control-cyan);
+  --rainbow:conic-gradient(from 35deg,var(--spectrum));
+}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;pointer-events:none;user-select:none}
+/* Light lives at the physical display edge. The center stays fully transparent;
+   narrow gradient strips avoid a full-screen blurred compositing surface. */
+.screen-edge{position:fixed;inset:0;isolation:isolate;animation:breathe 2.8s ease-in-out infinite}
+.edge-light{position:absolute;display:block;background:linear-gradient(90deg,var(--spectrum));background-size:220% 100%;filter:saturate(1.28) brightness(1.06);animation:spectrum-flow 10s ease-in-out infinite alternate}
+.edge-top,.edge-bottom{left:0;right:0;height:42px}
+.edge-top{top:0;mask-image:linear-gradient(#000f 0%,#000d 46%,transparent 100%)}
+.edge-bottom{bottom:0;mask-image:linear-gradient(transparent 0%,#000d 54%,#000f 100%);animation-direction:alternate-reverse}
+.edge-left,.edge-right{top:0;bottom:0;width:42px;background-image:linear-gradient(180deg,var(--spectrum));background-size:100% 220%;animation-name:spectrum-flow-vertical}
+.edge-left{left:0;mask-image:linear-gradient(90deg,#000f 0%,#000d 46%,transparent 100%);animation-direction:alternate-reverse}
+.edge-right{right:0;mask-image:linear-gradient(90deg,transparent 0%,#000d 54%,#000f 100%)}
+.edge-trace{position:absolute;inset:0;border-radius:0;background:var(--rainbow);padding:4px;filter:saturate(1.35) drop-shadow(0 0 8px color-mix(in srgb,var(--control-violet) 28%,transparent));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);mask-composite:exclude}
+.control-pill{position:fixed;top:16px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:10px;max-width:calc(100vw - 32px);min-height:44px;padding:8px 15px 8px 10px;border:1px solid color-mix(in srgb,var(--ink) 12%,var(--bg-0));border-radius:999px;background:var(--bg-0);box-shadow:0 6px 28px #10172c25,0 1px 5px #10172c16;color:var(--ink);font:600 14.5px/1.4 var(--font-ui);white-space:nowrap}
+.soduwork-mark{display:grid;place-items:center;width:27px;height:27px;flex:none;position:relative;border-radius:50%;background:var(--rainbow);padding:1.5px;box-shadow:0 0 9px #a36bff25}
+.soduwork-mark::before{content:'';position:absolute;inset:2px;background:var(--bg-0);border-radius:inherit}
+.soduwork-mark svg{position:relative;width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round}
+.divider{height:16px;width:1px;flex:none;background:var(--line);margin:0 2px}
+.escape-hint{display:flex;align-items:center;gap:7px;font-size:max(var(--font-min-readable, 14.5px), 13px);font-weight:400;color:var(--ink-2)}
+kbd{display:inline-flex;align-items:center;justify-content:center;min-width:32px;height:23px;padding:0 5px;border:1px solid var(--line);border-radius:6px;font:600 14.5px/1 'Segoe UI',sans-serif;letter-spacing:.3px;color:var(--ink);box-shadow:0 1px 0 var(--line)}
+.cursor-halo{position:fixed;left:0;top:0;width:54px;height:54px;will-change:transform;display:none}
+.cursor-halo::before,.cursor-halo i{position:absolute;inset:0;content:'';border-radius:50%;background:var(--rainbow);padding:2.75px;-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);mask-composite:exclude}
+.cursor-halo::before{inset:-8px;padding:8px;filter:blur(7px) saturate(1.35);opacity:.82}
+.cursor-halo i{padding:2.25px;animation:halo-flow 5.5s linear infinite;opacity:1;filter:saturate(1.35)}
+body[data-stopping=true] .screen-edge,body[data-stopping=true] .edge-light,body[data-stopping=true] .cursor-halo i{animation:none}
+body[data-stopping=true] .screen-edge,body[data-stopping=true] .cursor-halo{opacity:.45}
+body[data-stopping=true] .escape-hint,body[data-stopping=true] .divider{display:none}
+@keyframes breathe{0%,100%{opacity:.52;filter:saturate(.95) brightness(.96)}35%{opacity:.82}50%{opacity:1;filter:saturate(1.25) brightness(1.08)}70%{opacity:.78}}
+@keyframes spectrum-flow{from{background-position:0% 0%}to{background-position:100% 0%}}
+@keyframes spectrum-flow-vertical{from{background-position:0% 0%}to{background-position:0% 100%}}
+@keyframes halo-flow{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.screen-edge,.edge-light,.cursor-halo i{animation:none}.screen-edge{opacity:.85}}
+@media(max-width:620px){.control-pill{gap:7px;padding:7px 12px 7px 9px;font-size:max(var(--font-min-readable, 14.5px), 13px)}.escape-hint{font-size:max(var(--font-min-readable, 14.5px), 12px)}.soduwork-mark{width:24px;height:24px}.divider{margin:0}}
+@media(max-width:440px){.control-pill{flex-wrap:wrap;justify-content:center;width:max-content;border-radius:20px}.control-pill #controlLabel{white-space:normal;max-width:calc(100vw - 105px)}.control-pill .divider{display:none}.escape-hint{justify-content:center;flex-basis:100%;padding:2px 0}.edge-top,.edge-bottom{height:23px}.edge-left,.edge-right{width:23px}}

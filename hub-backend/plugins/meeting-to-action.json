@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "key": "meeting-to-action",
+  "name": "会议到行动",
+  "version": "1.0.3",
+  "category": "office",
+  "description": "把会议录音转写稿、聊天记录或笔记整理成忠于原文的会议纪要、决策和可追踪行动清单。",
+  "author": "SoduWork",
+  "instructions": "你是会议信息整理与行动闭环专家。只根据任务提供的录音转写、聊天记录、附件或笔记工作，不凭空补充发言、决策、负责人和截止日期。区分已确认决策、讨论观点、待确认事项、风险和行动项；行动项必须尽量包含负责人、截止时间、依赖和完成标准，原文没有时明确写“待确认”。合并重复表述但保留重要分歧。交付正式纪要和可筛选的行动清单，重新打开文件检查内容、表头、日期和临时文件。",
+  "entrypoints": {"conversation": true, "task": true, "automation": true},
+  "inputs": [
+    {"key": "meetingName", "label": "会议名称", "type": "text", "required": false},
+    {"key": "meetingDate", "label": "会议日期", "type": "text", "required": false},
+    {"key": "focus", "label": "重点关注", "type": "textarea", "required": false}
+  ],
+  "outputs": [
+    {"key": "minutes", "label": "正式会议纪要", "accept": ["deliverables/meeting-minutes.docx"]},
+    {"key": "actions", "label": "行动项清单", "accept": ["deliverables/action-items.xlsx"]}
+  ],
+  "capabilities": {"network": false, "skills": [], "mcpServers": [], "runtime": ["files"]},
+  "evaluations": [{
+    "key": "project-meeting",
+    "name": "项目推进会议",
+    "instruction": "根据给定会议记录生成正式纪要和行动项工作簿。",
+    "inputs": {"meetingName": "项目周会", "meetingDate": "2026-08-18", "focus": "决策、阻塞和下周行动；原文缺少负责人时标注待确认"},
+    "criteria": [
+      "输出可打开的会议纪要 DOCX 和行动项 XLSX",
+      "决策、观点、风险、待确认项和行动项分类明确",
+      "不编造原文没有的负责人、日期或结论",
+      "行动清单包含负责人、截止时间、依赖、状态和完成标准字段"
+    ],
+    "expectedOutputs": ["summarize.minutes", "summarize.actions"]
+  }],
+  "workflow": {"nodes": [
+    {
+      "key": "summarize", "type": "ai", "name": "整理纪要与行动",
+      "capabilities": {"network": false, "skills": [], "mcpServers": [], "runtime": ["files"]},
+      "outputs": [
+        {"key": "minutes", "kind": "file", "label": "正式会议纪要", "path": "deliverables/meeting-minutes.docx", "required": true},
+        {"key": "actions", "kind": "file", "label": "行动项清单", "path": "deliverables/action-items.xlsx", "required": true}
+      ],
+      "config": {"prompt": "根据任务正文、附件、转写和插件输入制作 deliverables/meeting-minutes.docx 与 deliverables/action-items.xlsx。纪要包含会议基本信息、目标、关键讨论、确认决策、风险、待确认项和行动摘要；行动表包含事项、负责人、截止时间、依赖、状态、完成标准和原文依据。原文缺失的信息必须标待确认，不得臆造。完成后重新打开两个文件并检查。"},
+      "retry": {"maxAttempts": 2}
+    },
+    {
+      "key": "validate", "type": "validate", "name": "文件完整性检查", "dependsOn": ["summarize"],
+      "config": {"rules": [
+        {"type": "file", "name": "会议纪要完整", "nameEquals": "deliverables/meeting-minutes.docx", "minBytes": 2500},
+        {"type": "file", "name": "行动项清单完整", "nameEquals": "deliverables/action-items.xlsx", "minBytes": 2500}
+      ]}
+    },
+    {
+      "key": "review", "type": "ai_review", "name": "独立忠实性复核", "dependsOn": ["summarize", "validate"],
+      "inputs": [
+        {"key": "minutes", "fromNode": "summarize", "outputKey": "minutes", "label": "待审纪要", "required": true},
+        {"key": "actions", "fromNode": "summarize", "outputKey": "actions", "label": "待审行动表", "required": true}
+      ],
+      "capabilities": {"network": false, "skills": [], "mcpServers": [], "runtime": ["files"]},
+      "outputs": [{"key": "review", "kind": "decision", "label": "会议整理复核结论", "path": "reviews/meeting-review.md", "required": true}],
+      "config": {"prompt": "将纪要和行动表与原始会议材料逐项对照，检查是否遗漏关键决策、混淆观点与结论、编造负责人或日期、丢失分歧，以及行动项是否可追踪。将结论写入 reviews/meeting-review.md；出现实质性臆造时判定不通过。"}
+    },
+    {"key": "accept", "type": "human_review", "name": "参会方验收", "dependsOn": ["review"], "config": {"summary": "请确认纪要、决策和行动项与会议事实一致"}},
+    {"key": "publish", "type": "publish", "name": "发布会议结果", "dependsOn": ["accept"], "config": {"message": "会议纪要和行动项已通过验收并交付"}}
+  ]}
+}

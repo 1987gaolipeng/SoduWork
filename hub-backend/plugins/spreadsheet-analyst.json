@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "key": "spreadsheet-analyst",
+  "name": "表格与数据分析师",
+  "version": "1.0.3",
+  "category": "office",
+  "description": "把原始数据整理成口径明确、公式可复核、图表可解释的 Excel 工作簿，并保留数据质量与分析说明。",
+  "author": "SoduWork",
+  "openSource": {
+    "license": "Apache-2.0",
+    "repository": "https://github.com/iOfficeAI/OfficeCLI",
+    "upstreamVersion": "v1.0.143@fd4adab4dbe3",
+    "adaptation": "借鉴其工作簿读写与公式操作方法，增加 SoduWork 的数据质量检查、结论审查、人工验收和证据留存；不强制安装上游 CLI。"
+  },
+  "instructions": "你是企业数据分析与电子表格交付专家。先确认数据范围、字段含义、统计口径、缺失值、异常值和目标问题，原始数据与加工结果分层保存，不静默覆盖来源。工作簿应包含必要的数据说明、清洗结果、分析表、公式、图表和结论；公式必须引用正确范围，数字、百分比、货币和日期使用正确格式。不得编造缺失数据或把相关性写成因果。交付前重新打开工作簿，检查工作表数量、表头、筛选、冻结窗格、公式错误、空白异常、图表引用和临时文件。",
+  "entrypoints": {"conversation": true, "task": true, "automation": true},
+  "inputs": [
+    {"key": "question", "label": "要回答的业务问题", "type": "textarea", "required": false},
+    {"key": "metricRules", "label": "指标口径", "type": "textarea", "required": false}
+  ],
+  "outputs": [{"key": "workbook", "label": "分析工作簿", "accept": ["deliverables/analysis.xlsx"]}],
+  "capabilities": {"network": false, "skills": [], "mcpServers": [], "runtime": ["files"]},
+  "evaluations": [{
+    "key": "sales-analysis",
+    "name": "销售经营分析",
+    "instruction": "根据一组示例销售记录制作可复核的经营分析工作簿，给出趋势、结构和异常结论。",
+    "inputs": {"question": "本季度销售变化、区域结构和需要关注的异常是什么？", "metricRules": "收入按含税订单金额统计，取消订单排除"},
+    "criteria": [
+      "输出 deliverables/analysis.xlsx 且可按标准格式重新打开并读取关键单元格",
+      "原始数据、口径说明、分析结果和图表分层清晰",
+      "公式无 REF、DIV/0、VALUE 等错误且关键数字可复核",
+      "结论与数据一致并明确限制和异常值处理"
+    ],
+    "expectedOutputs": ["analyse.workbook"]
+  }],
+  "workflow": {"nodes": [
+    {
+      "key": "analyse", "type": "ai", "name": "整理与分析",
+      "capabilities": {"network": false, "skills": [], "mcpServers": [], "runtime": ["files"]},
+      "outputs": [{"key": "workbook", "kind": "file", "label": "分析工作簿", "path": "deliverables/analysis.xlsx", "required": true}],
+      "config": {"prompt": "读取任务附件中的表格、CSV 或结构化材料，按插件输入明确口径，制作 deliverables/analysis.xlsx。至少包含口径说明、原始或清洗数据、分析结果与必要图表；保留来源数据，不伪造缺失值。设置表头、筛选、冻结窗格、列宽和正确数字格式。完成后重新打开并检查公式、工作表、图表引用和关键汇总。"},
+      "retry": {"maxAttempts": 2}
+    },
+    {
+      "key": "validate", "type": "validate", "name": "文件完整性检查", "dependsOn": ["analyse"],
+      "config": {"rules": [{"type": "file", "name": "XLSX 成品存在且不是空壳", "nameEquals": "deliverables/analysis.xlsx", "minBytes": 3000}]}
+    },
+    {
+      "key": "review", "type": "ai_review", "name": "独立数据复核", "dependsOn": ["analyse", "validate"],
+      "inputs": [{"key": "workbook", "fromNode": "analyse", "outputKey": "workbook", "label": "待审工作簿", "required": true}],
+      "capabilities": {"network": false, "skills": [], "mcpServers": [], "runtime": ["files"]},
+      "outputs": [{"key": "review", "kind": "decision", "label": "数据复核结论", "path": "reviews/spreadsheet-review.md", "required": true}],
+      "config": {"prompt": "独立打开 deliverables/analysis.xlsx，复核指标口径、源数据保留、公式引用、汇总数字、错误单元格、图表范围和结论是否匹配，把逐项结果写入 reviews/spreadsheet-review.md；关键数字不可复核时判定不通过。"}
+    },
+    {"key": "accept", "type": "human_review", "name": "业务验收", "dependsOn": ["review"], "config": {"summary": "请验收数据口径、分析结论和工作簿可用性"}},
+    {"key": "publish", "type": "publish", "name": "交付工作簿", "dependsOn": ["accept"], "config": {"message": "分析工作簿已通过验收并交付"}}
+  ]}
+}

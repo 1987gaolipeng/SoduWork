@@ -1,0 +1,195 @@
+{
+  "schemaVersion": 1,
+  "id": "confluence",
+  "name": "Confluence Cloud",
+  "category": "知识库",
+  "description": "Confluence Cloud 通用连接器：当前用户、空间列表、CQL 内容搜索、创建页面。仅 {TENANT}.atlassian.net，Basic 鉴权，不绑定任何汇报场景。",
+  "officialDocs": [
+    "https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-space/",
+    "https://developer.atlassian.com/cloud/confluence/rest/v1/api-group-users/",
+    "https://developer.atlassian.com/cloud/confluence/rest/v1/api-group-content/",
+    "https://developer.atlassian.com/cloud/confluence/rest/v1/api-group-content/#api-wiki-rest-api-content-post"
+  ],
+  "authDocs": [
+    "https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/",
+    "https://developer.atlassian.com/cloud/confluence/rest/v1/intro/#authentication"
+  ],
+  "baseUrl": "https://{TENANT}.atlassian.net",
+  "fields": [
+    {
+      "key": "TENANT",
+      "label": "Confluence Cloud 站点子域",
+      "secret": false,
+      "required": true,
+      "pattern": "^[a-z0-9][a-z0-9-]{0,58}[a-z0-9]$",
+      "example": ""
+    },
+    {
+      "key": "CONFLUENCE_EMAIL",
+      "label": "Atlassian 账户邮箱",
+      "secret": false,
+      "required": true,
+      "pattern": "^[^@\\s]+@[^@\\s]+\\.[a-z]{2,}$",
+      "example": ""
+    },
+    {
+      "key": "CONFLUENCE_API_TOKEN",
+      "label": "API Token",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "basic",
+    "usernameKey": "CONFLUENCE_EMAIL",
+    "passwordKey": "CONFLUENCE_API_TOKEN"
+  },
+  "headers": {
+    "Accept": "application/json"
+  },
+  "tools": [
+    {
+      "name": "get_current_user",
+      "description": "获取当前认证用户（v1 端点）。无分页。出处：https://developer.atlassian.com/cloud/confluence/rest/v1/api-group-users/#api-wiki-rest-api-user-current-get",
+      "method": "GET",
+      "path": "/wiki/rest/api/user/current",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_spaces",
+      "description": "列出空间（v2 端点）。分页：limit（默认 200 最大 250）+ cursor 游标（_links.next）。出处：https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-space/#api-wiki-api-v2-spaces-get",
+      "method": "GET",
+      "path": "/wiki/api/v2/spaces",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 250,
+            "default": 200,
+            "description": "每页条数"
+          },
+          "cursor": {
+            "type": "string",
+            "description": "上一页 _links.next 游标",
+            "maxLength": 10000
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "query": {
+        "limit": "limit",
+        "cursor": "cursor"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "search_content_cql",
+      "description": "按 CQL 搜索内容（v1 端点，CQL 原样透传）。分页：limit + cursor（响应体 _links.next）。出处：https://developer.atlassian.com/cloud/confluence/rest/v1/api-group-content/#api-wiki-rest-api-content-search-get",
+      "method": "GET",
+      "path": "/wiki/rest/api/content/search",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cql": {
+            "type": "string",
+            "minLength": 1,
+            "description": "CQL 查询语句",
+            "maxLength": 10000
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 25,
+            "description": "每页条数"
+          },
+          "cursor": {
+            "type": "string",
+            "description": "下一页游标",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "cql"
+        ],
+        "maxProperties": 50
+      },
+      "query": {
+        "cql": "cql",
+        "limit": "limit",
+        "cursor": "cursor"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_page",
+      "description": "创建页面（POST /wiki/rest/api/content，storage 格式正文）。写入操作：运行前必须获得用户明确授权。出处：https://developer.atlassian.com/cloud/confluence/rest/v1/api-group-content/#api-wiki-rest-api-content-post",
+      "method": "POST",
+      "path": "/wiki/rest/api/content",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "space_key": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9]{1,255}$",
+            "description": "空间 Key",
+            "maxLength": 10000
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "页面标题"
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "description": "XHTML storage 格式正文",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "space_key",
+          "title",
+          "body"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "type": "page",
+        "title": "$title",
+        "space": {
+          "key": "$space_key"
+        },
+        "body": {
+          "storage": {
+            "value": "$body",
+            "representation": "storage"
+          }
+        }
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "仅适用 Confluence Cloud；Server/Data Center 未覆盖。",
+    "v2（spaces，limit/cursor）与 v1（user/content search，_links.next）端点并存，分页语义以各自文档为准；官方推进 v2 全覆盖后需迁移。",
+    "CQL 原样透传，语法正确性由调用方负责。",
+    "create_page 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

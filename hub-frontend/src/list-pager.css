@@ -1,0 +1,12 @@
+/* Compact pagination shared by operations and audit views. */
+.list-pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+.list-pager > span { color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); font-variant-numeric: tabular-nums; }
+.list-pager > div { display: flex; flex-shrink: 0; gap: 6px; }
+.list-pager button { padding: 6px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--ink-2); font: 14.5px var(--sans); cursor: pointer; }
+.list-pager button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-2); }
+.list-pager button:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 2px; }
+.list-pager button:disabled { opacity: .4; cursor: default; }
+@media (max-width: 700px) {
+  .list-pager { flex-wrap: wrap; }
+  .list-pager > div { margin-left: auto; }
+}

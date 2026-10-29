@@ -1,0 +1,113 @@
+/* Dense shared administration layout for clients, Runners, and usage. */
+.execution-network{display:grid;gap:14px;min-width:0}
+.en-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:5px;
+  border:1px solid var(--line);border-radius:14px;background:color-mix(in srgb,var(--surface-2) 78%,transparent)}
+.en-tabs button{display:grid;grid-template-columns:32px auto;grid-template-rows:auto auto;column-gap:10px;
+  align-items:center;min-width:0;padding:10px 12px;border:1px solid transparent;border-radius:10px;
+  background:transparent;color:var(--ink-3);text-align:left;cursor:pointer;transition:background .14s,border-color .14s,color .14s}
+.en-tabs button>span{grid-row:1/3;display:grid;place-items:center;width:32px;height:32px;border-radius:9px;
+  background:var(--surface);border:1px solid var(--line)}
+.en-tabs button svg{width:16px;height:16px}
+.en-tabs button b{min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:max(var(--font-min-readable, 14.5px), 13px);font-weight:650;color:var(--ink-2);white-space:nowrap}
+.en-tabs button small{margin-top:2px;font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.en-tabs button:hover{background:color-mix(in srgb,var(--surface) 72%,transparent)}
+.en-tabs button.on{background:var(--surface);border-color:color-mix(in srgb,var(--accent) 28%,var(--line));
+  box-shadow:0 4px 14px rgba(38,63,94,.06)}
+.en-tabs button.on>span{background:var(--accent-soft);border-color:transparent;color:var(--accent)}
+.en-tabs button.on b{color:var(--ink)}
+
+.en-panel,.execution-network>.rb-card,.execution-network>.card{min-width:0;margin:0;border:1px solid var(--line);
+  border-radius:14px;background:var(--surface);box-shadow:0 5px 18px rgba(38,63,94,.045);overflow:hidden}
+.en-panel-head{display:flex;align-items:center;gap:16px;min-height:64px;padding:13px 16px;border-bottom:1px solid var(--line)}
+.en-panel-head>div{min-width:0}
+.en-panel-head h2{margin:0;font-size:15px;font-weight:680;color:var(--ink)}
+.en-panel-head p{margin:4px 0 0;font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-4)}
+.en-panel-head>.btn{margin-left:auto;flex:0 0 auto}
+.en-filters{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);
+  background:color-mix(in srgb,var(--surface-2) 40%,var(--surface))}
+.en-filters .searchbox{width:min(340px,40vw);height:34px;background:var(--surface)}
+.en-filters .searchbox .clr{border:0;background:none;color:var(--ink-4);cursor:pointer}
+.en-filter-tabs{display:flex;align-items:center;gap:4px;min-width:0;overflow-x:auto}
+.en-filter-tabs button{display:inline-flex;align-items:center;gap:6px;height:31px;padding:0 10px;border:1px solid transparent;
+  border-radius:8px;background:transparent;color:var(--ink-3);font:inherit;font-size:max(var(--font-min-readable, 14.5px), 12px);white-space:nowrap;cursor:pointer}
+.en-filter-tabs button b{min-width:18px;padding:1px 5px;border-radius:10px;background:var(--surface-2);
+  color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:650;text-align:center}
+.en-filter-tabs button:hover{color:var(--ink);background:var(--surface)}
+.en-filter-tabs button.on{border-color:color-mix(in srgb,var(--accent) 24%,var(--line));background:var(--accent-soft);color:var(--accent)}
+.en-filter-tabs button.on b{background:var(--surface);color:var(--accent)}
+
+.en-table-wrap{max-width:100%;overflow:auto}
+.en-table{width:100%;min-width:880px;border-collapse:separate;border-spacing:0}
+.en-table th{position:sticky;top:0;z-index:1;height:36px;padding:0 12px;border-bottom:1px solid var(--line);
+  background:color-mix(in srgb,var(--surface-2) 72%,var(--surface));color:var(--ink-4);
+  font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:620;letter-spacing:.02em;text-align:left}
+.en-table td{height:58px;padding:7px 12px;border-bottom:1px solid color-mix(in srgb,var(--line) 76%,transparent);
+  color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), 12px);vertical-align:middle}
+.en-table tr:last-child td{border-bottom:0}
+.en-table tbody tr{transition:background .12s}
+.en-table tbody tr:hover{background:color-mix(in srgb,var(--accent-soft) 35%,var(--surface))}
+.en-device{display:flex;align-items:center;gap:9px;min-width:250px}
+
+
+.en-device .en-avatar{display:grid;place-items:center;width:30px;height:30px;flex:0 0 30px;border-radius:9px;
+  color:#fff;font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:700}
+.en-device>span:last-child,.en-stack{display:flex;min-width:0;flex-direction:column;gap:3px}
+.en-device b{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:max(var(--font-min-readable, 14.5px), 12.5px);font-weight:650;color:var(--ink)}
+.en-device small,.en-stack small{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-4)}
+.en-stack b{font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:600;color:var(--ink-2)}
+.execution-network :is(.en-panel,.rb-card,.card) > .list-pager{margin:0;padding:12px 16px;
+  border-top:1px solid var(--line-2);background:var(--surface)}
+.en-state,.en-empty{display:flex;align-items:center;justify-content:center;gap:11px;min-height:190px;padding:30px;color:var(--ink-3)}
+.en-state>svg,.en-empty>svg{width:22px;height:22px;color:var(--ink-4)}
+.en-state>div{display:flex;min-width:0;flex-direction:column;gap:3px}
+.en-empty{flex-direction:column}
+.en-state b,.en-empty b{font-size:max(var(--font-min-readable, 14.5px), 13px);color:var(--ink-2)}
+.en-state span,.en-empty span{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-4)}
+.en-state .btn{margin-left:8px}
+.en-state.bad>svg{color:var(--danger)}
+.en-spinner{width:20px;height:20px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:en-spin .8s linear infinite}
+@keyframes en-spin{to{transform:rotate(360deg)}}
+
+/* Load usage only when selected and preserve table density. */
+.execution-network>.card .card-head{min-height:62px;padding:12px 16px}
+.execution-network>.card table th{position:sticky;top:0;background:var(--surface-2)}
+.execution-network>.card table td{height:48px}
+
+@media(max-width:900px){
+  .en-tabs button{grid-template-columns:28px auto;padding:8px}
+  .en-tabs button>span{width:28px;height:28px}
+  .en-tabs button small{display:none}
+  .en-filters{align-items:stretch;flex-direction:column}
+  .en-filters .searchbox{width:100%}
+}
+@media(max-width:620px){
+  .en-tabs{grid-template-columns:1fr}
+  .en-tabs button small{display:block}
+  .en-panel-head p{display:none}
+}
+.usage-filters>span{margin-left:auto;font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-4);white-space:nowrap}
+.usage-filters .searchbox{width:min(360px,48vw)}
+
+/* Identify mobile device platforms with compact badges. */
+.en-form-badge{margin-left:6px;padding:1px 6px;border-radius:999px;background:rgba(37,99,235,.1);
+  color:var(--accent,#2563eb);font-size:max(var(--font-min-readable, 14.5px), 12px);font-style:normal;font-weight:700;vertical-align:1px}
+
+/* Use status dots for online state instead of full-row color bands. */
+.en-device>i{display:none}
+.en-filters{flex-wrap:wrap;align-items:center}
+.en-filter-tabs{padding:3px;border:1px solid var(--line);border-radius:9px;background:var(--surface-1)}
+.en-filter-tabs button{min-height:29px}
+.en-filter-tabs button.on{box-shadow:0 2px 7px -5px var(--accent)}
+@media(max-width:1050px){.en-filters .searchbox{width:100%;flex:1 1 100%}}
+
+/* Use compact single-row navigation tabs. */
+.execution-network>.en-tabs{display:flex;align-items:center;gap:4px;width:max-content;max-width:100%;padding:3px;border-radius:10px;background:var(--surface-1);box-shadow:none}
+.execution-network>.en-tabs button{display:inline-flex;align-items:center;justify-content:flex-start;min-height:36px;padding:6px 11px;gap:7px;border-radius:8px}
+.execution-network>.en-tabs button>span{flex:0 0 24px;width:24px;height:24px;border-radius:7px}.execution-network>.en-tabs button small{display:none}.execution-network>.en-tabs button b{font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.25}
+.execution-network>.en-tabs button.on{background:var(--surface);box-shadow:var(--shadow-sm)}
+@media(max-width:620px){.execution-network>.en-tabs{width:100%;overflow-x:auto}.execution-network>.en-tabs button{flex:0 0 auto}.execution-network>.en-tabs button small{display:none}}
+
+/* Place tools and summaries directly beneath identifying tabs. */
+.app .content .execution-network .en-panel > .en-filters { padding-top: 16px; }
+.app .content .execution-network .cap-head { min-height: 0; padding: 14px 18px; border-bottom: 0; }
+.app .content .execution-network .cap-head p { margin: 0; line-height: 1.6; }

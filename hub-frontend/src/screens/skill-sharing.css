@@ -1,0 +1,37 @@
+.skill-sharing{margin:20px 24px;padding:18px 20px;border:1px solid var(--line);border-radius:12px;background:var(--bg-0)}
+.skill-sharing>header{display:flex;align-items:center;gap:16px;margin-bottom:14px}
+.skill-sharing>header>div{flex:1;min-width:0}.skill-sharing b{font-size:max(var(--font-min-readable, 14.5px), 14px);font-weight:600}
+.skill-sharing p{font-size:max(var(--font-min-readable, 14.5px), 13px);line-height:1.6;color:var(--ink-3);margin:4px 0}
+.skill-sharing-empty{padding:12px 0}
+.skill-sharing-list{display:flex;flex-direction:column;max-height:350px;overflow:auto}
+.skill-sharing-row{display:flex;align-items:center;gap:14px;width:100%;text-align:left;padding:13px 0;border:0;border-top:1px solid var(--line);background:none;font:inherit;font-size:max(var(--font-min-readable, 14.5px), 13px);color:var(--ink-2)}
+.skill-sharing-row:hover{background:var(--bg-1)}.skill-sharing-copy{min-width:0;flex:1;display:flex;flex-direction:column;gap:4px}
+.skill-sharing-copy small{font-size:max(var(--font-min-readable, 14.5px), 12px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-3)}
+.skill-sharing-icon{width:34px;height:34px;border:1px solid var(--line);border-radius:9px;display:grid;place-items:center}
+.skill-sharing-icon svg{width:18px;height:18px}.skill-sharing-row code{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-3)}
+.skill-sharing-state{font-size:max(var(--font-min-readable, 14.5px), 12px);padding:4px 8px;border-radius:6px;background:var(--bg-2)}
+.skill-sharing-state.pending{color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--bg-0))}
+.skill-review .modal{width:min(980px,calc(100vw - 40px));max-width:980px!important;max-height:calc(100vh - 40px)}
+.skill-review .modal-body{overflow:auto;min-height:0}.skill-review{color:var(--ink);font:inherit;font-size:max(var(--font-min-readable, 14.5px), 13px)}
+.skill-review-meta{display:flex;gap:18px;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px);margin-bottom:14px}
+.skill-review-meta code{font-size:max(var(--font-min-readable, 14.5px), 12px)}.skill-review-note{font-size:max(var(--font-min-readable, 14.5px), 13px);line-height:1.65;overflow-wrap:anywhere}
+.skill-review-package{display:grid;grid-template-columns:220px minmax(0,1fr);height:360px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--bg-0)}
+.skill-review-package>nav{overflow:auto;padding:8px;background:var(--bg-1);border-right:1px solid var(--line)}
+.skill-review-package>nav button{display:flex;gap:8px;align-items:flex-start;width:100%;padding:9px 8px;border:0;background:none;color:var(--ink-2);text-align:left;font:inherit;font-size:max(var(--font-min-readable, 14.5px), 13px);border-radius:7px}
+.skill-review-package>nav button.on{background:color-mix(in srgb,var(--accent) 9%,var(--bg-0));color:var(--accent)}
+.skill-review-package>nav svg{width:15px;height:18px;flex-shrink:0}.skill-review-package>nav span{overflow-wrap:anywhere}
+.skill-review-package>section{display:flex;flex-direction:column;min-width:0;min-height:0}
+.skill-review-package header{display:flex;gap:12px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--line)}
+.skill-review-package header b{flex:1;min-width:0;overflow-wrap:anywhere;font-size:max(var(--font-min-readable, 14.5px), 13px)}
+.skill-review-content{flex:1;min-height:0;overflow:auto;padding:16px}
+.skill-review-content pre{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:14.5px/1.75 var(--mono,monospace)}
+.skill-review-content pre.skill-source-prose{font-family:inherit;font-size:max(var(--font-min-readable, 14.5px), 14px)}
+.skill-review-content img{max-width:100%;height:auto}
+.skill-review-decision{margin-top:16px;display:flex;flex-direction:column;gap:12px}
+.skill-review-decision>label:first-child{display:flex;flex-direction:column;gap:6px}
+.skill-review-decision small{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-3);margin-left:8px}
+.skill-review-decision textarea{font:inherit;font-size:max(var(--font-min-readable, 14.5px), 13px);color:var(--ink);background:var(--bg-1);border:1px solid var(--line);border-radius:8px;min-height:64px;padding:10px;resize:vertical}
+.skill-review-consent{display:flex;align-items:flex-start;gap:8px;font-size:max(var(--font-min-readable, 14.5px), 13px);line-height:1.6}
+.skill-review-error{font-size:max(var(--font-min-readable, 14.5px), 13px);color:var(--crit);padding-top:10px}
+.skill-review :focus-visible,.skill-sharing :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media(max-width:720px){.skill-review-package{grid-template-columns:150px minmax(0,1fr)}.skill-sharing-row code{display:none}}

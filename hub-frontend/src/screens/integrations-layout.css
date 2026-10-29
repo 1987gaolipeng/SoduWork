@@ -1,0 +1,112 @@
+/* Integration pages contain long external names and status explanations.
+   Let each content group wrap before the card can clip its text or actions. */
+.integrations-hub { min-width: 0; max-width: 100%; }
+.integrations-hub .hubtabs { flex-wrap: wrap; max-width: 100%; }
+.integrations-hub .hubtab { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.integrations-hub .integration-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+}
+.app .integrations-hub .integration-toolbar > .hintline {
+  flex: 1 1 440px; min-width: 0; max-width: 100%;
+  white-space: normal; overflow-wrap: anywhere;
+}
+.integrations-hub .integration-toolbar-actions {
+  display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px;
+  min-width: 0; max-width: 100%; margin-left: auto;
+}
+.integrations-hub .integration-toolbar-actions > .btn { flex: 0 0 auto; }
+.integrations-hub .rm-sw { min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+
+.integrations-hub .rm-pend-top,
+.integrations-hub .repo-row { min-width: 0; flex-wrap: wrap; align-items: center; }
+.integrations-hub .rm-row-summary {
+  display: flex; flex: 1 1 280px; flex-wrap: wrap; align-items: center; gap: 8px;
+  min-width: 0; max-width: 100%;
+}
+.integrations-hub :is(.repo-name, .repo-dir, .repo-nogit, .repo-branch, .tag, .rm-badge) {
+  min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere;
+}
+.integrations-hub .repo-name { flex-shrink: 1; }
+.integrations-hub .repo-dir { overflow: visible; text-overflow: clip; }
+.integrations-hub .rm-badge { margin-left: 0; }
+.integrations-hub .rm-map-controls {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  min-width: 0; max-width: 100%; margin-top: 12px; padding-top: 10px;
+  border-top: 1px solid var(--line-2);
+}
+.integrations-hub .rm-map-select.select-menu { flex: 1 1 240px; width: auto; min-width: 0; max-width: 440px; }
+.integrations-hub .rm-map-select.select-menu .select-menu-trigger { padding-block: 7px; }
+.integrations-hub .rm-map-select .select-menu-trigger span {
+  white-space: normal; overflow-wrap: anywhere; overflow: visible; text-overflow: clip;
+}
+.integrations-hub .rm-row-actions { margin-left: auto; }
+.integrations-hub .rm-batch-reason {
+  flex: 0 1 42%; min-width: 120px; max-width: 520px; margin-left: auto;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.6;
+}
+
+.integrations-hub .int-top { align-items: center; }
+.integrations-hub .int-top > div { min-width: 0; }
+.integrations-hub .int-name {
+  display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%;
+}
+.integrations-hub .int-name-text {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.integrations-hub .int-health { flex: 0 0 auto; margin-left: 0; white-space: nowrap; }
+.integrations-hub .endpoint {
+  flex-wrap: nowrap; overflow: hidden;
+}
+.integrations-hub .integration-endpoint-path {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.integrations-hub .endpoint .tok { flex: 0 0 auto; margin-left: auto; }
+.integrations-hub .int-stats {
+  display: flex; flex-wrap: wrap; gap: 12px 26px; align-items: flex-start;
+}
+.integrations-hub .int-stats > div { flex: 0 1 auto; min-width: 88px; max-width: 100%; overflow-wrap: anywhere; }
+.integrations-hub .int-stats .v { line-height: 1.4; }
+.integrations-hub .card-head { flex-wrap: wrap; align-items: baseline; }
+.integrations-hub .card-head > * { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.integrations-hub .integration-bindings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.integrations-hub .bind-row { flex-wrap: wrap; }
+.integrations-hub .bind-row > * { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.integrations-hub .binding-row-actions { margin-left: auto; }
+.integrations-hub .ua-top { flex-wrap: wrap; overflow-wrap: anywhere; }
+.integrations-hub .intcard > .int-actions { width: 100%; margin-top: 3px; }
+.integrations-hub .ua-item { display: flex; flex-direction: column; min-width: 0; }
+.integrations-hub .ua-actions.admin-card-actions { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--line-2); }
+.integrations-hub .integration-alert-card { display: flex; flex-direction: column; }
+.integrations-hub .integration-alert-body { padding: 16px 18px; }
+.integrations-hub .integration-alert-actions { margin-top: auto; padding: 12px 18px; border-top: 1px solid var(--line-2); }
+.integrations-hub .integration-alert-controls {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 6px;
+}
+.integrations-hub .integration-alert-controls > input { flex: 1 1 320px; min-width: 0; }
+
+/* Keep empty states intentional instead of leaving a large, unstructured white block. */
+.integrations-hub > .card .empty {
+  min-height: 126px; display: grid; place-content: center; text-align: center;
+  padding: 30px 22px; line-height: 1.65;
+}
+
+@media (max-width: 760px) {
+  .integrations-hub .hubtabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
+  .integrations-hub .hubtab { flex: 0 0 auto; }
+  .integrations-hub .integration-toolbar { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
+  .integrations-hub .integration-toolbar-actions { margin-left: 0; justify-content: flex-start; }
+  .integrations-hub .rm-map-select.select-menu { max-width: 100%; }
+  .integrations-hub .rm-batch-reason { flex-basis: 100%; margin-left: 0; }
+  .integrations-hub .integration-bindings { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 460px) {
+  .integrations-hub .int-name { align-items: flex-start; flex-wrap: wrap; row-gap: 4px; }
+  .integrations-hub .int-health { margin-right: auto; }
+  .integrations-hub .endpoint { gap: 7px; padding-inline: 9px; }
+  .integrations-hub .endpoint .tok { max-width: 42%; }
+  .integrations-hub .int-stats { gap: 10px 16px; }
+}

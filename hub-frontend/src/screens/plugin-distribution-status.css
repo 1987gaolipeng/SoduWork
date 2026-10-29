@@ -1,0 +1,154 @@
+.plugin-distribution-status {
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.plugin-distribution-status > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 13px;
+}
+
+.plugin-distribution-status > header h3 {
+  margin: 3px 0 0;
+  color: var(--ink-2);
+  font-size: max(var(--font-min-readable, 14.5px), 14px);
+  font-weight: 640;
+}
+
+.plugin-distribution-status > header p {
+  margin: 4px 0 0;
+  color: var(--ink-3);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  line-height: 1.5;
+}
+
+.plugin-distribution-status > header > em {
+  max-width: 280px;
+  padding: 6px 9px;
+  border-radius: 7px;
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 9%, var(--surface));
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  font-style: normal;
+  line-height: 1.45;
+}
+
+.plugin-distribution-status > header > em.is-ready {
+  color: var(--auto-green);
+  background: color-mix(in srgb, var(--auto-green) 8%, var(--surface));
+}
+
+.plugin-release-channels {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.plugin-release-channels > article {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 78px;
+  padding: 12px;
+  background: var(--surface-1);
+}
+
+.plugin-release-channels > article + article {
+  border-left: 1px solid var(--line);
+}
+
+.plugin-release-channel-icon {
+  display: grid;
+  place-items: center;
+  width: 31px;
+  height: 31px;
+  border-radius: 8px;
+  color: var(--ink-4);
+  background: var(--surface);
+}
+
+.plugin-release-channel-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.plugin-release-channels article > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.plugin-release-channels small {
+  color: var(--ink-4);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+}
+
+.plugin-release-channels b {
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  font-weight: 610;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-release-channels p {
+  overflow: hidden;
+  color: var(--ink-4);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-release-channels article > i {
+  padding: 3px 6px;
+  border-radius: 6px;
+  color: var(--ink-4);
+  background: var(--surface-2);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.plugin-release-channels > article.is-ready {
+  background: color-mix(in srgb, var(--auto-green) 3%, var(--surface));
+}
+
+.plugin-release-channels > article.is-ready .plugin-release-channel-icon {
+  color: var(--auto-green);
+  background: color-mix(in srgb, var(--auto-green) 8%, var(--surface));
+}
+
+.plugin-release-channels > article.is-ready > i {
+  color: var(--auto-green);
+  background: color-mix(in srgb, var(--auto-green) 8%, var(--surface));
+}
+
+@media (max-width: 720px) {
+  .plugin-distribution-status > header {
+    display: grid;
+  }
+
+  .plugin-distribution-status > header > em {
+    max-width: none;
+  }
+
+  .plugin-release-channels {
+    grid-template-columns: 1fr;
+  }
+
+  .plugin-release-channels > article + article {
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+}

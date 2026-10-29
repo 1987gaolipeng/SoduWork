@@ -1,0 +1,66 @@
+<!doctype html><html data-desk-panel="workspace" data-workspace-view="models" data-theme="azure" data-skin="flat"><head>
+<meta charset="utf-8"><title>Model settings — isolated UI regression</title>
+<link rel="stylesheet" href="../../theme/variables.css">
+<link rel="stylesheet" href="../../components/panels/panels-schedules.css">
+<link rel="stylesheet" href="../../components/panels/panels-agents.css">
+<link rel="stylesheet" href="../../components/panels/panels-connections.css">
+<link rel="stylesheet" href="../../components/panels/model-capabilities.css">
+<link rel="stylesheet" href="../../components/workspace/workspace-shell.css">
+<link rel="stylesheet" href="../../components/workspace/workspace-page-layout.css">
+<link rel="stylesheet" href="../../desk-window.css">
+<link rel="stylesheet" href="../../theme/workspace-experience.css">
+<link rel="stylesheet" href="../../theme/workspace-page-heads.css">
+</head><body>
+<script>
+window.errors=[];addEventListener('error',e=>errors.push(e.message));
+addEventListener('unhandledrejection',e=>errors.push(String(e.reason?.stack||e.reason)));
+// Match core/store.js: top-level lexical helpers are not window properties.
+const esc=v=>String(v??'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
+window.petSay=message=>window.notice=message;window._humanErr=e=>e.message;
+window.saved=[];window.testCalls=[];window.capabilityCalls=[];window.testFailure=false;window.saveFailure=false;window.capabilityFailure=false;
+window.fixture={providers:[
+ {id:'company',name:'共享模型服务',baseUrl:'https://gateway.example.test/v1',kind:'openai-compat',keySet:true,modelNames:['default-multimodal'],modelDefs:[{name:'default-multimodal',modality:'chat',config:{imageRouting:'native'}}]},
+ {id:'personal',name:'OpenAI 兼容（个人）',baseUrl:'https://personal.example.test/v1',kind:'openai-compat',myKeySet:true,myKeyLen:32,modelNames:[]},
+ {id:'deepseek',name:'DeepSeek',baseUrl:'https://api.example.test/v1',modelNames:['deepseek-chat','deepseek-reasoner']},
+ {id:'glm',name:'智谱 GLM',baseUrl:'https://glm.example.test/v1',modelNames:['glm-flash']},
+ {id:'claude',name:'Anthropic Claude',baseUrl:'https://claude.example.test',kind:'anthropic',modelNames:['claude-model']},
+ {id:'local',name:'本机开发服务',baseUrl:'http://127.0.0.1:11434/v1',personal:true,authMode:'none',modelNames:['local-model']}
+],myModels:[{providerId:'personal',name:'business-review-model',label:'business-review-model',config:{thinkingMode:'always',thinkingFormat:'zai',imageRouting:'auto',capabilities:{imageInput:'unknown'},maxOutputTokens:8192},ctxWindow:128000}],
+usable:[{providerId:'company',name:'default-multimodal',keyFrom:'org'},{providerId:'personal',name:'business-review-model',keyFrom:'mine'}]};
+window.SoduWorkAPI={myModels:async()=>structuredClone(fixture),hubBase:()=> 'isolated-model-ui',
+checkMyModelCapabilities:async body=>{capabilityCalls.push(structuredClone(body));await new Promise(r=>setTimeout(r,240));if(capabilityFailure)throw Error('能力检测未完成，请重试');const checks=Object.fromEntries(body.checks.map(key=>[key,{status:'passed',code:'verified'}]));const capabilityProfile=Object.fromEntries(['imageInput','toolCalling','streaming'].map(key=>[key,{state:'supported',source:'verified'}]));return {ok:true,checks,capabilityProfile,checkedAt:'2026-09-30T08:00:00Z',configRevision:'fixture-v1',runtimeRevision:'fixture-run-v1'};},
+saveMyModels:async body=>{if(saveFailure)throw Error('模拟保存失败');saved.push(structuredClone(body));fixture.myModels=structuredClone(body.models);for(const provider of body.providers){let p=fixture.providers.find(x=>x.id===provider.id);if(!p){p={...provider,modelNames:[]};fixture.providers.push(p)}else Object.assign(p,provider);if(body.keys[p.id]){p.myKeySet=true;p.myKeyLen=body.keys[p.id].length}}},
+testMyModel:async id=>{testCalls.push(id);await new Promise(r=>setTimeout(r,160));return testFailure?{ok:false,detail:'连接失败：请检查 API 地址与凭据'}:{ok:true,detail:'连接成功 · 测试模型可用'}}};
+window.WorkspaceHost={open:()=>{}};
+</script>
+<script src="../../core/locales/en-US.js"></script>
+<script src="../../core/locales/en-US-workspace.js"></script>
+<script src="../../core/locales/en-US-chat.js"></script>
+<script src="../../core/locales/en-US-shared.js"></script>
+<script src="../../core/locales/en-US-actions.js"></script>
+<script src="../../core/locales/en-US-shell.js"></script>
+<script src="../../core/locales/en-US-capability-pages.js"></script>
+<script src="../../core/locales/en-US-chat-pages.js"></script>
+<script src="../../core/locales/en-US-work-pages.js"></script>
+<script src="../../core/locales/en-US-runtime-pages.js"></script>
+<script src="../../core/locales/en-US-plugin-pages.js"></script>
+<script src="../../core/locales/en-US-trace-pages.js"></script>
+<script src="../../core/locales/en-US-native.js"></script>
+<script src="../../core/locales/en-US-dynamic-pages.js"></script>
+<script src="../../core/locales/en-US-dynamic-work.js"></script>
+<script src="../../core/locales/en-US-dynamic-trace.js"></script>
+<script src="../../core/locales/en-US-notification-pages.js"></script>
+<script src="../../core/locales/en-US-final-pages.js"></script>
+<script src="../../core/locales/en-US-library.js"></script>
+<script src="../../core/i18n-dom.js"></script>
+<script src="../../core/i18n.js"></script>
+<script src="../../components/workspace/workspace-chat-history.js"></script>
+<script src="../../components/workspace/workspace-chat-list.js"></script>
+<script src="../../components/workspace/workspace-shell.js"></script>
+<script src="../../components/panels/model-capabilities.js"></script>
+<script src="../../components/panels/model-catalog-editor.js"></script>
+<script src="../../components/panels/panels-models.js"></script>
+<script>WorkspaceShell.mount();WorkspaceShell.setActive('models');openModelsPanel();
+window.selectService=id=>document.querySelector('[data-mdselect="'+id+'"]').click();
+window.fill=(selector,value)=>{const el=document.querySelector(selector);el.value=value;el.dispatchEvent(new Event('input',{bubbles:true}));};
+</script></body></html>

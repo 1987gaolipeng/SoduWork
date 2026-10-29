@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="ruby">
+<meta charset="utf-8">
+<title>任务队列移除 · 隔离回归</title>
+<link rel="stylesheet" href="../../theme/variables.css">
+<link rel="stylesheet" href="../../components/panels/panels-chat.css">
+<link rel="stylesheet" href="../../components/panels/chat-collaboration.css">
+<link rel="stylesheet" href="../../components/panels/work-intent.css">
+<style>
+*{box-sizing:border-box}body{margin:0;background:var(--bg-1);color:var(--ink);font:15px var(--font-ui)}
+main{max-width:980px;width:100%;height:100vh;display:flex;flex-direction:column;margin:0 auto}main>header{padding:24px;flex:none}#transcript{line-height:1.8}#transcript>p{max-width:760px;margin:16px auto;padding:0 24px}
+#nchatInput{height:100px}.fixture-bar{height:40px;padding:0 20px;color:var(--ink-3);font-size:13px}#status{position:fixed;left:12px;top:2px;font-size:13px}
+</style>
+<main><header>独立测试会话 · 不连接后台、不执行真实任务</header>
+<div class="nchat-main">
+<section class="nchat-content-area"><div id="transcript" class="nchat-scroll"><p>原有对话内容保持不变。</p><p>从添加任务入口选入两项工作，暂不发送。</p></div>
+<div id="host" class="nchat-collab-slot"></div></section><div id="nchatTaskSuggest"></div>
+<div class="nchat-foot"><div class="nchat-footin nchat-compose-shell"><div class="nchat-entry-dock">
+<div id="nchatQueue" class="nchat-queue"></div><div class="nbox"><textarea id="nchatInput" placeholder="接着说…"></textarea><div class="fixture-bar">工作区 · 模型选择</div></div>
+</div></div></div></div><div id="status" role="status"></div></main>
+<script src="../../components/panels/chat-collaboration-store.js"></script>
+<script src="../../components/panels/chat-collaboration.js"></script>
+<script src="../../components/panels/chat-task-start.js"></script>
+<script src="../../components/panels/chat-task-controller.js"></script>
+<script src="../../components/panels/chat-send-queue.js"></script>
+<script src="../../components/panels/work-intent.js"></script>
+<script>
+window.fixtureErrors=[];
+addEventListener('error',e=>fixtureErrors.push(String(e.message)));
+addEventListener('unhandledrejection',e=>fixtureErrors.push(String(e.reason)));
+const tasks=[
+ {id:'one',title:'从 GitHub 整理 MIT 开源项目',description:'保留任务完整说明和材料',status:'todo',repoId:'fixture-repo',attachments:[{id:'brief',name:'需求材料.txt'}]},
+ {id:'two',title:'每日检索 GitHub 热门项目',description:'另一项任务不受影响',status:'todo',repoId:'fixture-repo'},
+];
+let ctx,view;window.sent=[];window.notices=[];
+function petSay(text){notices.push(text);document.querySelector('#status').textContent=text}
+window.SoduWorkAPI={
+ getTasksSnapshot:async()=>({online:true,items:structuredClone(tasks)}),
+ getTask:async id=>structuredClone(tasks.find(t=>t.id===id)),
+ listAIAgents:async()=>({agents:[{id:'local:pi',name:'Pi'},{id:'local:codex',name:'Codex'}]}),
+};
+function openFixture(id='chat-a'){
+ if(view)view.destroy();
+ ctx={_sessionId:id,_ref:id,_viewEpoch:(ctx?ctx._viewEpoch:0)+1,_sessionOptions:{adapterId:'pi'},
+  _collabTasks:new Map(),_collabStarts:new Set(),_localQueue:[],_collabPicker:{open:false,tasks:[]},
+  _snap:{status:'idle',messages:[],execution:{queue:[]}},_collabPollTimer:1,_taskOpenSeq:0,
+  esc:s=>String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'),
+  _mount:()=>document.querySelector('main'),_ensure:async()=>true,refreshHistory(){},
+  _api:()=>({bindTask:async(ref,taskId,title)=>{
+   const all=JSON.parse(localStorage.getItem('fixture-bindings')||'{}'),rows=all[ref]||[];
+   all[ref]=rows.filter(r=>r.taskId!==taskId).concat({taskId,title});
+   localStorage.setItem('fixture-bindings',JSON.stringify(all));return{ok:true};
+  }}),
+  _send:async(text,options)=>{sent.push({text,options});return true},
+  _render:()=>{ctx._renderQueue(ctx._mount());ctx._renderTaskStartPrompt();view.render(ctx._collabState())},
+ };
+ Object.assign(ctx,ChatTaskController.create(ctx),ChatSendQueue.create(ctx));
+ view=ChatCollaboration.create({host:document.querySelector('#host'),onAction:ctx._collabAction});
+ const bindings=JSON.parse(localStorage.getItem('fixture-bindings')||'{}')[id]||[];
+ bindings.forEach(row=>ctx._bindCollaborationTask(row.taskId,row.title,{persist:false}));
+ ctx._restoreCollaboration(id);ctx._render();window.fixtureContext=ctx;
+}
+document.querySelector('#nchatQueue').addEventListener('click',event=>{
+ const action=event.target.closest('[data-queue-action]');
+ if(action)void ctx._queueAction(action.dataset.queueAction,action.dataset.queueId||'',action.dataset.taskId||'');
+});
+document.querySelector('#nchatTaskSuggest').addEventListener('click',event=>{
+ if(event.target.closest('[data-task-start-cancel]')){ctx._taskStartPrompt=null;ctx._renderTaskStartPrompt()}
+ if(event.target.closest('[data-task-start-dispatch]')){
+  const prompt=ctx._taskStartPrompt, candidate=prompt.agents.find(r=>r.id===document.querySelector('#nchatTaskAgent').value);
+  void ctx._startTask(prompt.task,{candidate,retry:prompt.retry});
+ }
+});
+openFixture();window.fixtureReady=true;
+</script>
+</html>

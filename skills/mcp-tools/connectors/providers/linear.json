@@ -1,0 +1,170 @@
+{
+  "schemaVersion": 1,
+  "id": "linear",
+  "name": "Linear",
+  "category": "项目管理",
+  "description": "Linear 通用连接器：当前用户、团队与 Issue 列表、创建 Issue。Linear 仅有 GraphQL API，固定查询白名单 + $param 变量；Personal API Key 走原始 Authorization 头（无 Bearer）。",
+  "officialDocs": [
+    "https://developers.linear.app/docs/graphql/working-with-the-graphql-api",
+    "https://studio.apollographql.com/public/Linear-API/variant/current/schema"
+  ],
+  "authDocs": [
+    "https://developers.linear.app/docs/oauth/authentication-and-authorization",
+    "https://linear.app/settings/security"
+  ],
+  "baseUrl": "https://api.linear.app",
+  "fields": [
+    {
+      "key": "LINEAR_API_KEY",
+      "label": "Personal API Key",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "header",
+    "tokenKey": "LINEAR_API_KEY",
+    "header": "Authorization"
+  },
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "tools": [
+    {
+      "name": "get_viewer",
+      "description": "固定 GraphQL 查询 viewer 身份。无分页。Personal API Key 的 Authorization 头不带 Bearer 前缀（OAuth access token 才用 Bearer）。出处：https://developers.linear.app/docs/graphql/working-with-the-graphql-api",
+      "method": "POST",
+      "path": "/graphql",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "body": {
+        "query": "{ viewer { id name email } }"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_teams",
+      "description": "固定 GraphQL 查询：teams(first:$first,after:$after)。分页：Relay cursor（hasNextPage/endCursor），first 上限 250。variables 仅 $param 引用。出处：https://developers.linear.app/docs/graphql/working-with-the-graphql-api",
+      "method": "POST",
+      "path": "/graphql",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "first": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 250,
+            "default": 50,
+            "description": "每页条数"
+          },
+          "after": {
+            "type": "string",
+            "description": "上一页 endCursor",
+            "maxLength": 10000
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "body": {
+        "query": "query Teams($first: Int!, $after: String) { teams(first: $first, after: $after) { nodes { id name key } pageInfo { hasNextPage endCursor } } }",
+        "variables": {
+          "first": "$first",
+          "after": "$after"
+        }
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_issues",
+      "description": "固定 GraphQL 查询：issues(first,after)，不开放 IssueFilter 等复杂变量以限制查询面。分页：Relay cursor，first 上限 250。出处：https://developers.linear.app/docs/graphql/working-with-the-graphql-api",
+      "method": "POST",
+      "path": "/graphql",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "first": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 250,
+            "default": 50,
+            "description": "每页条数"
+          },
+          "after": {
+            "type": "string",
+            "description": "上一页 endCursor",
+            "maxLength": 10000
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "body": {
+        "query": "query Issues($first: Int!, $after: String) { issues(first: $first, after: $after) { nodes { id identifier title updatedAt state { name } } pageInfo { hasNextPage endCursor } } }",
+        "variables": {
+          "first": "$first",
+          "after": "$after"
+        }
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_issue",
+      "description": "固定 GraphQL mutation：issueCreate(input:{title,teamId,description})。写入操作：运行前必须获得用户明确授权。出处：https://developers.linear.app/docs/graphql/working-with-the-graphql-api",
+      "method": "POST",
+      "path": "/graphql",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "Issue 标题"
+          },
+          "team_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "团队 UUID（来自 list_teams）",
+            "maxLength": 10000
+          },
+          "description": {
+            "type": "string",
+            "description": "Issue 描述",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "title",
+          "team_id"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "query": "mutation IssueCreate($title: String!, $teamId: String!, $description: String) { issueCreate(input: { title: $title, teamId: $teamId, description: $description }) { success issue { id identifier } } }",
+        "variables": {
+          "title": "$title",
+          "teamId": "$team_id",
+          "description": "$description"
+        }
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "Personal API Key 鉴权为 Authorization: <apiKey>（无 Bearer 前缀）；Bearer 仅用于 OAuth access token，运行器按 auth.prefix 缺省处理。",
+    "GraphQL 仅允许固定 query 白名单 + variables 限 $param 引用（first/after/title/teamId/description）；调用方不得改写 query 字符串。",
+    "OAuth2 授权流（浏览器授权 + 自动刷新）当前客户端不支持，待宿主适配；本定义按 Personal API Key。",
+    "create_issue 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

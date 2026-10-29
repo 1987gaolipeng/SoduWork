@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "key": "web-collect",
+  "name": "网页采集 · 定向信息收集",
+  "version": "1.0.2",
+  "category": "research",
+  "description": "面向明确目标的网页信息采集：按给定站点或主题逐页浏览、抽取关键信息，整理成结构化的采集报告并逐条留下来源链接，经独立审查与人工验收后交付。适合行情比价、公开资料汇总、页面内容核对这类定向采集活。",
+  "author": "SoduWork",
+  "openSource": {
+    "license": "MIT",
+    "repository": "https://github.com/browser-use/browser-use",
+    "upstreamVersion": "0.3.x",
+    "adaptation": "借鉴其浏览器代理的页面理解与操作方法，改造成 SoduWork 的定向采集流程：目标先行、逐条留源、独立审查与人工验收；采集只读公开页面，不代填任何凭据。"
+  },
+  "instructions": "你是网页信息采集专家。先弄清要采什么、判定标准和覆盖范围，再用浏览器逐页获取；每条信息必须带来源 URL 和获取时间，分不清一手与转述时明确标注。遇到登录墙、验证码或付费墙一律绕开并如实记录「未能覆盖」，绝不虚构页面内容。产出以「结论先行 + 逐条证据」组织，冲突信息并列呈现并说明取舍。",
+  "entrypoints": {"conversation": true, "task": true, "automation": false},
+  "inputs": [
+    {"key": "targets", "label": "目标站点或主题", "type": "textarea", "required": false},
+    {"key": "fields", "label": "要采集哪些字段", "type": "text", "required": false},
+    {"key": "coverage", "label": "覆盖范围要求", "type": "text", "required": false}
+  ],
+  "outputs": [{"key": "findings", "label": "采集报告", "accept": ["deliverables/web-findings.md"]}],
+  "capabilities": {"network": true, "skills": ["browser-use"], "mcpServers": [], "runtime": ["browser", "files"]},
+  "evaluations": [{
+    "key": "product-scan",
+    "name": "公开产品信息采集",
+    "instruction": "从指定的公开产品页面采集名称、定价、发布时间与关键特性，整理成对照表。",
+    "inputs": {"targets": "任务正文给出的公开产品页", "fields": "名称、定价、发布时间、关键特性", "coverage": "每个字段都要有来源链接"},
+    "criteria": [
+      "输出 deliverables/web-findings.md 且结论先行",
+      "每条信息都带可点开的来源 URL 与获取时间",
+      "未覆盖到的目标如实列出原因，不虚构页面内容",
+      "冲突信息并列呈现并说明取舍"
+    ],
+    "expectedOutputs": ["collect.findings"]
+  }],
+  "workflow": {"nodes": [
+    {
+      "key": "collect", "type": "ai", "name": "逐页采集",
+      "capabilities": {"network": true, "skills": ["browser-use"], "mcpServers": [], "runtime": ["browser", "files"]},
+      "outputs": [{"key": "findings", "kind": "file", "label": "采集报告", "path": "deliverables/web-findings.md", "required": true}],
+      "config": {"prompt": "依据任务正文与插件输入完成定向网页采集，产出 deliverables/web-findings.md。先列出目标清单和判定标准，再逐页获取；每条信息必须带来源 URL 和获取时间。遇到登录墙、验证码或付费墙绕开并如实记录未覆盖项，绝不虚构页面内容。报告结论先行，证据逐条列出，冲突信息并列说明。不要向用户提问。"},
+      "retry": {"maxAttempts": 2}
+    },
+    {
+      "key": "validate", "type": "validate", "name": "报告完整性检查", "dependsOn": ["collect"],
+      "config": {"rules": [{"type": "file", "name": "采集报告存在且不是空壳", "nameEquals": "deliverables/web-findings.md", "minBytes": 800}]}
+    },
+    {
+      "key": "review", "type": "ai_review", "name": "独立来源核查", "dependsOn": ["collect", "validate"],
+      "inputs": [{"key": "findings", "fromNode": "collect", "outputKey": "findings", "label": "待核报告", "required": true}],
+      "capabilities": {"network": true, "skills": ["browser-use"], "mcpServers": [], "runtime": ["browser", "files"]},
+      "outputs": [{"key": "review", "kind": "decision", "label": "来源核查结论", "path": "reviews/web-findings-review.md", "required": true}],
+      "config": {"prompt": "独立审查 deliverables/web-findings.md：抽查关键结论对应的来源链接是否真实可达、内容是否与报告一致，核对覆盖范围与任务要求的差距。将逐条结论写入 reviews/web-findings-review.md；发现虚构来源或关键覆盖缺口时明确判定不通过。"}
+    },
+    {"key": "accept", "type": "human_review", "name": "业务验收", "dependsOn": ["review"], "config": {"summary": "请核对采集结论与来源是否可用"}},
+    {"key": "publish", "type": "publish", "name": "交付采集报告", "dependsOn": ["accept"], "config": {"message": "采集报告已通过来源核查与验收并交付"}}
+  ]}
+}

@@ -1,0 +1,181 @@
+.plugin-lifecycle {
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.plugin-lifecycle > header {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.plugin-lifecycle > header > div {
+  min-width: 0;
+  margin-right: auto;
+}
+
+.plugin-lifecycle > header .eyebrow {
+  display: block;
+  color: var(--ink-4);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  letter-spacing: .08em;
+}
+
+.plugin-lifecycle > header b {
+  display: inline-block;
+  margin-top: 3px;
+  color: var(--ink-2);
+  font-size: max(var(--font-min-readable, 14.5px), 14px);
+  font-weight: 640;
+}
+
+.plugin-lifecycle > header small {
+  margin-left: 8px;
+  color: var(--ink-3);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+}
+
+.plugin-lifecycle > header em {
+  color: var(--ink-3);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.plugin-lifecycle-track {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-1);
+}
+
+.plugin-lifecycle-track > button {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 2px 9px;
+  min-width: 0;
+  min-height: 70px;
+  padding: 13px 10px 11px;
+  border: 0;
+  border-top: 2px solid var(--line);
+  border-right: 1px solid var(--line);
+  color: var(--ink-3);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.plugin-lifecycle-track > button:last-of-type {
+  border-right: 0;
+}
+
+.plugin-lifecycle-track > button:hover {
+  background: var(--surface);
+}
+
+.plugin-lifecycle-track > button > span {
+  grid-row: 1 / 3;
+  display: grid;
+  place-items: center;
+  width: 27px;
+  height: 27px;
+  border-radius: 8px;
+  color: var(--ink-4);
+  background: var(--surface-2);
+}
+
+.plugin-lifecycle-track svg {
+  width: 13px;
+  height: 13px;
+}
+
+.plugin-lifecycle-track b,
+.plugin-lifecycle-track small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-lifecycle-track b {
+  color: var(--ink-2);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  font-weight: 620;
+}
+
+.plugin-lifecycle-track small {
+  margin-top: 1px;
+  color: var(--ink-4);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+}
+
+.plugin-lifecycle-track > button.state-done {
+  border-top-color: var(--auto-green);
+}
+
+.plugin-lifecycle-track > button.state-done > span {
+  color: var(--auto-green);
+  background: color-mix(in srgb, var(--auto-green) 9%, var(--surface));
+}
+
+.plugin-lifecycle-track > button.state-active {
+  border-top-color: var(--auto-blue);
+  background: color-mix(in srgb, var(--auto-blue) 4%, var(--surface));
+}
+
+.plugin-lifecycle-track > button.state-active > span {
+  color: var(--auto-blue);
+  background: color-mix(in srgb, var(--auto-blue) 9%, var(--surface));
+}
+
+.plugin-lifecycle-track > button.state-active b {
+  color: var(--auto-blue);
+}
+
+.plugin-lifecycle-track > button.state-blocked {
+  border-top-color: var(--crit);
+  background: color-mix(in srgb, var(--crit) 3%, var(--surface));
+}
+
+.plugin-lifecycle-track > button.state-blocked > span {
+  color: var(--crit);
+  background: color-mix(in srgb, var(--crit) 8%, var(--surface));
+}
+
+.plugin-lifecycle-link {
+  display: none;
+}
+
+.plugin-lifecycle-track > button:focus-visible {
+  z-index: 1;
+  outline: 2px solid color-mix(in srgb, var(--auto-blue) 48%, transparent);
+  outline-offset: -2px;
+}
+
+@media (max-width: 700px) {
+  .plugin-lifecycle > header small {
+    display: none;
+  }
+
+  .plugin-lifecycle-track {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .plugin-lifecycle-track > button:nth-of-type(2) {
+    border-right: 0;
+  }
+
+  .plugin-lifecycle-track > button:nth-of-type(n + 3) {
+    border-top-width: 1px;
+  }
+}

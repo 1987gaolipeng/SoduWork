@@ -1,0 +1,375 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('./renderer-source.cjs');
+const path = require('node:path');
+const vm = require('node:vm');
+const bytes = Buffer.from([0, 255, 13, 10, 42]);
+const binary = () => ({ ok: true, name: 'private.bin', mimeType: 'application/octet-stream', size: 5, data: 'AP8NCio=' });
+const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
+const tick = () => new Promise(resolve => setImmediate(resolve));
+const stale = error => error.code === 'STALE_TASK_SCOPE';
+const shareOptions = { requestId: '6107d6aa-adbf-45ed-8c41-e3de833ee8a3' };
+
+test('explicit local sharing sends the current filename and exact bytes only to notification storage', async () => {
+  const h = harness(); await h.signIn('alice');
+  h.native = async () => ({ ...binary(), name: 'renamed.bin' });
+  await h.api.shareLibraryItem('local-one', ['bob'], 'Review', shareOptions);
+  assert.equal(h.calls.length, 1); assert.match(h.calls[0].url, /\/library\/share-local$/);
+  const body = JSON.parse(h.calls[0].request.body);
+  assert.deepEqual(body, { requestId: shareOptions.requestId, localItemId: 'local-one', filename: 'renamed.bin',
+    contentType: 'application/octet-stream', data: binary().data, recipientUserIds: ['bob'], note: 'Review' });
+  assert.deepEqual(h.nativeCalls.map(row => row.action), ['readBinary']);
+  await h.api.shareLibraryItem('local-one', ['bob'], 'Review', shareOptions);
+  assert.equal(JSON.parse(h.calls[1].request.body).requestId, shareOptions.requestId);
+});
+
+test('the final owner-check await cannot dispatch old bytes after its internal scope assertion', async () => {
+  const context = { Blob, Uint8Array, atob, queueMicrotask };
+  vm.createContext(context);
+  vm.runInContext(`var owner='A',contexts=0,sends=[],listeners=[];
+    var window={addEventListener:(type,fn)=>listeners.push(fn),soduWorkAPI:{localLibrary:{
+      context(){contexts++;if(contexts===2)queueMicrotask(()=>queueMicrotask(()=>{owner='B';listeners.forEach(fn=>fn())}));return Promise.resolve({owner:'A'});},
+      call(){return Promise.resolve({ok:true,name:'private.txt',size:1,data:'QQ=='})}
+    }}};
+    var api={shareLocalLibraryFile:async body=>{sends.push({account:owner,data:body.data});return{ok:true}}};
+    var deps={scope:()=>owner,assertScope:captured=>{if(captured!==owner)throw Object.assign(Error('changed'),{code:'STALE_TASK_SCOPE'})},blobToBase64:async()=> 'QQ=='};`, context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../api-library-local.js'), 'utf8'), context);
+  vm.runInContext('window.SoduWorkLocalLibraryAPI.install(api,deps)', context);
+  await assert.rejects(vm.runInContext(`api.shareLibraryItem('local-one',['recipient'],'',{requestId:'${shareOptions.requestId}'})`, context), stale);
+  assert.equal(context.contexts, 2);
+  assert.equal(context.sends.length, 0, 'The stale bytes must be rejected before the HTTP dispatch');
+});
+
+for (const boundary of ['read', 'encode', 'native-owner']) test(`local sharing stops after account changes during ${boundary}`, async () => {
+  const h = harness(); await h.signIn('alice');
+  if (boundary === 'read') h.native = async () => { await h.signIn('bob'); return binary(); };
+  if (boundary === 'encode') h.encode = async () => { await h.signIn('bob'); return binary().data; };
+  if (boundary === 'native-owner') h.native = async () => { h.bridge.localLibrary.context = async () => ({ owner: 'owner-bob' }); return binary(); };
+  await assert.rejects(h.api.shareLibraryItem('local-one', ['bob'], '', shareOptions), stale);
+  assert.equal(h.calls.length, 0);
+});
+
+test('saving a received notification explicitly uses the authenticated snapshot and native duplicate checks', async () => {
+  const h = harness(); await h.signIn('alice');
+  h.fetch = async () => new Response(JSON.stringify({ id: 'attachment-one', filename: 'renamed.bin', size: 5, url: '/attachments/safe', contentType: 'application/octet-stream' }));
+  const downloads = [];
+  h.bridge.readAttachmentBinary = async body => { downloads.push(body); return { ...binary(), name: 'untrusted.bin' }; };
+  assert.equal(h.nativeCalls.length, 0);
+  await h.api.saveMateMessageFileToLibrary('attachment-one');
+  assert.match(h.calls[0].url, /\/team\/message-files\/attachment-one$/);
+  assert.equal(downloads[0].filename, 'renamed.bin');
+  const saved = h.nativeCalls[0]; assert.equal(saved.action, 'upload');
+  assert.equal(saved.payload.name, 'renamed.bin'); assert.equal(saved.payload.dataBase64, binary().data);
+  assert.equal(saved.payload.owner, 'owner-alice'); assert.equal(saved.payload.storage, 'local');
+  h.native = async () => ({ ok: false, code: 'LIBRARY_NAME_CONFLICT', message: '存在同名资料' });
+  await assert.rejects(h.api.saveMateMessageFileToLibrary('attachment-one'), error => error.code === 'LIBRARY_NAME_CONFLICT');
+  assert(h.nativeCalls.every(row => row.action === 'upload'));
+});
+
+for (const changed of ['account', 'bytes']) test(`received snapshot save rejects changed ${changed} before native mutation`, async () => {
+  const h = harness(); await h.signIn('alice');
+  h.fetch = async () => new Response(JSON.stringify({ id: 'attachment-one', filename: 'renamed.bin', size: 5, url: '/attachments/safe' }));
+  h.bridge.readAttachmentBinary = async () => {
+    if (changed === 'account') await h.signIn('bob');
+    return { ...binary(), data: changed === 'bytes' ? 'AA==' : binary().data };
+  };
+  await assert.rejects(h.api.saveMateMessageFileToLibrary('attachment-one'), error => changed === 'account' ? stale(error) : error.code === 'LOCAL_LIBRARY_BINARY_INVALID');
+  assert.equal(h.nativeCalls.length, 0);
+});
+
+function harness(options = {}) {
+  let user = 'alice';
+  const values = new Map([['soduwork_work_hub_url', 'http://hub-a:8989']]);
+  const h = { calls: [], nativeCalls: [], reads: 0, encode: async blob => Buffer.from(await blob.arrayBuffer()).toString('base64') };
+  h.native = async action => action === 'readBinary' ? binary() : action === 'status'
+    ? { ok: true, backend: 'local', available: true, configured: true, state: 'available' }
+    : action === 'list' ? { folders: [], items: [{ id: 'local-one', backend: 'local' }] }
+    : { ok: true, item: { id: 'local-one' } };
+  h.fetch = async () => new Response(JSON.stringify({ ok: true, folders: [], items: [], item: { id: 'remote-one' } }));
+  const bridge = {
+    deviceAuthBootstrap: async () => ({ ok: true, stored: true, clientId: 'device-1', user: { id: user }, session: 'session-' + user, expiresIn: 1800 }),
+    localLibrary: { context: async () => ({ owner: 'owner-' + user }), call: async (action, payload) => {
+      h.nativeCalls.push({ action, payload }); return h.native(action, payload);
+    } },
+  };
+  if (options.noBridge) delete bridge.localLibrary;
+  const listeners = new Map();
+  const window = { __SODUWORK_TEST_HUB_CONFIG__: { allowSwitch: true }, soduWorkAPI: bridge,
+    addEventListener(type, callback) { if (!listeners.has(type)) listeners.set(type, []); listeners.get(type).push(callback); },
+    dispatchEvent(event) { for (const callback of listeners.get(event.type) || []) callback(event); } };
+  const context = { window, User: { id: 'device-1' }, navigator: { platform: 'test' },
+    localStorage: { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, String(value)), removeItem: key => values.delete(key) },
+    fetch: async (url, request) => { h.calls.push({ url, request }); return h.fetch(url, request); },
+    URL, URLSearchParams, FormData, Blob, File, Response, Uint8Array, atob, AbortController,
+    FileReader: class { async readAsDataURL(blob) { this.result = 'data:application/octet-stream;base64,' + await h.encode(blob); this.onload(); } },
+    CustomEvent: class { constructor(type) { this.type = type; } }, console: { log() {}, error() {} }, setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0,
+  };
+  const helper = path.join(__dirname, '../api-library-local.js');
+  if (!options.noHelper && fs.existsSync(helper)) vm.runInNewContext(fs.readFileSync(helper, 'utf8'), context);
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../api.js'), 'utf8'), context);
+  h.api = window.SoduWorkAPI; h.bridge = bridge;
+  h.signIn = async next => { user = next; await h.api.registerClient(); };
+  h.switchScope = async kind => kind === 'user' ? h.signIn('bob') : h.api.setHubEnvironment('development', 'http://hub-b:8989');
+  return h;
+}
+
+test('the default library and local folders never call Hub, including while Hub is offline', async () => {
+  const h = harness(); await h.signIn('alice'); h.fetch = async () => { throw Error('Hub offline'); };
+  assert.equal((await h.api.listLibrary()).items[0].id, 'local-one');
+  await h.api.listLibrary({ storage: 'nfs', folderId: 'local-folder-one' });
+  await h.api.createLibraryFolder('Folder');
+  await h.api.createLibraryItem({ content: 'private' });
+  await h.api.emptyLibraryTrash();
+  assert.equal(h.calls.length, 0);
+  assert.deepEqual(h.nativeCalls.map(c => c.action), ['list', 'list', 'createFolder', 'createItem', 'emptyTrash']);
+  assert(h.nativeCalls.every(c => c.payload.owner === 'owner-alice'));
+});
+
+test('local IDs route every read and mutation to the native owner, not an HTTP item endpoint', async () => {
+  const h = harness(); await h.signIn('alice');
+  await h.api.updateLibraryFolder('local-folder-one', { name: 'New' });
+  await h.api.deleteLibraryFolder('local-folder-one');
+  await h.api.readLibraryContent('local-one', { preview: true });
+  await h.api.updateLibraryItem('local-one', { favorite: true });
+  await h.api.associateLibrarySource('local-one', { sessionId: 's-1' });
+  await h.api.deleteLibraryItem('local-one'); await h.api.restoreLibraryItem('local-one'); await h.api.purgeLibraryItem('local-one');
+  await h.api.openLibraryExternally('local-one'); await h.api.revealLibraryItem('local-one'); await h.api.downloadLibraryItem('local-one', 'private.bin');
+  assert.equal(h.calls.length, 0);
+  assert.deepEqual(h.nativeCalls.map(c => c.action), ['updateFolder', 'deleteFolder', 'readContent', 'updateItem', 'associateSource', 'deleteItem', 'restoreItem', 'purgeItem', 'openExternal', 'reveal', 'exportFile']);
+  assert(h.nativeCalls.every(c => c.payload.owner === 'owner-alice' && c.payload.id.startsWith('local-')));
+  assert.equal(h.nativeCalls[2].payload.preview, true);
+});
+
+test('file uploads preserve exact bytes, names, source, and empty files on the client', async () => {
+  const h = harness(); await h.signIn('alice');
+  await h.api.uploadLibraryFile(new File([bytes], '中文.bin', { type: 'application/octet-stream' }), '', '', { type: 'conversation', sessionId: 's-1' });
+  await h.api.uploadLibraryFile(new File([], 'empty.txt'), '', 'local');
+  assert.equal(h.calls.length, 0);
+  const payload = h.nativeCalls[0].payload;
+  assert.deepEqual(Buffer.from(payload.dataBase64, 'base64'), bytes); assert.equal(payload.name, '中文.bin');
+  assert.equal(payload.source.sessionId, 's-1'); assert.equal(h.nativeCalls[1].payload.dataBase64, '');
+  const got = await h.api.readLibraryBinary('local-one');
+  assert.deepEqual(Buffer.from(await got.blob.arrayBuffer()), bytes); assert.equal(got.name, 'private.bin');
+});
+
+for (const options of [{ noBridge: true }, { noHelper: true }]) {
+  test(`missing ${options.noBridge ? 'native bridge' : 'adapter asset'} cannot silently create server-local data`, async () => {
+    const h = harness(options); await h.signIn('alice');
+    for (const action of [() => h.api.listLibrary(), () => h.api.createLibraryItem({ content: 'private' }),
+      () => h.api.uploadLibraryFile(new File([bytes], 'private.bin')), () => h.api.deleteLibraryItem('local-one')]) {
+      await assert.rejects(action(), error => error.code === 'LOCAL_LIBRARY_UNAVAILABLE');
+    }
+    assert.equal(h.calls.length, 0);
+  });
+}
+
+test('storage status keeps native availability when Hub fails and exposes the actual remote error', async () => {
+  const h = harness(); await h.signIn('alice');
+  h.fetch = async () => new Response(JSON.stringify({ detail: { code: 'UPSTREAM_DOWN', message: '远程网关不可用' } }), { status: 503 });
+  const result = await h.api.getLibraryStorageStatus();
+  assert.equal(result.default, 'local'); assert.equal(result.storage.local.available, true);
+  assert.equal(result.storage.remote.available, false); assert.equal(result.storage.remote.code, 'UPSTREAM_DOWN');
+  assert.equal(result.storage.remote.message, '远程网关不可用');
+  const local = await h.api.listLibrary(); assert.equal(local.items[0].id, 'local-one');
+});
+
+test('server local health never substitutes for an unavailable native library', async () => {
+  const h = harness({ noBridge: true }); await h.signIn('alice');
+  h.fetch = async () => new Response(JSON.stringify({ default: 'nfs', remoteBackend: 'nfs', storage: {
+    local: { available: true }, remote: { available: true, backend: 'nfs' }, nfs: { available: true, backend: 'nfs' },
+  } }));
+  const result = await h.api.getLibraryStorageStatus();
+  assert.equal(result.default, 'local'); assert.equal(result.local.available, false); assert.equal(result.local.code, 'LOCAL_LIBRARY_UNAVAILABLE');
+  assert.equal(result.storage.remote.available, true);
+});
+
+test('a legacy flat Hub MinIO capability remains remote while its local capability never replaces the client', async () => {
+  const h = harness(); await h.signIn('alice');
+  h.fetch = async () => new Response(JSON.stringify({ ok: true, local: { available: false }, minio: { configured: true, available: true } }));
+  const result = await h.api.getLibraryStorageStatus();
+  assert.equal(result.storage.local.available, true); assert.equal(result.remoteBackend, 'minio');
+  assert.equal(result.storage.remote.available, true); assert.equal(result.storage.remote.backend, 'minio');
+  assert.equal(result.storage.minio.available, true);
+});
+
+test('remote copies preserve conversation provenance from the native item', async () => {
+  const h = harness(); await h.signIn('alice');
+  h.native = async action => action === 'readBinary' ? { ...binary(), item: { sourceType: 'conversation', sessionId: 'conversation-one', conversationTitle: '设计评审' } } : { ok: true };
+  await h.api.copyLocalLibraryItemToRemote('local-one', 'nfs');
+  const form = h.calls[0].request.body;
+  assert.equal(form.get('sourceType'), 'conversation'); assert.equal(form.get('sessionId'), 'conversation-one'); assert.equal(form.get('conversationTitle'), '设计评审');
+});
+
+test('remote roots expose historical Hub local files through a separate, read-only virtual directory', async () => {
+  const h = harness(); await h.signIn('alice');
+  const root = await h.api.listLibrary({ storage: 'nfs', scope: 'all' });
+  assert.equal(root.folders[0].id, 'server-history-root'); assert.equal(root.folders[0].storageOrigin, 'server-history');
+  h.fetch = async () => new Response(JSON.stringify({ folders: [{ id: 'old-folder', parentId: '', name: 'Old' }], items: [{ id: 'old-item', backend: 'local' }] }));
+  const old = await h.api.listLibrary({ storage: 'nfs', folderId: 'server-history-root' });
+  assert.equal(new URL(h.calls[1].url).searchParams.get('storage'), 'local');
+  assert.equal(new URL(h.calls[1].url).searchParams.has('folderId'), false);
+  assert.equal(old.folders[0].id, 'server-history-old-folder'); assert.equal(old.items[0].id, 'old-item');
+  assert.equal(old.items[0].storageOrigin, 'server-history');
+  await h.api.listLibrary({ storage: 'nfs', folderId: 'server-history-old-folder' });
+  assert.equal(new URL(h.calls[2].url).searchParams.get('folderId'), 'old-folder');
+  await h.api.updateLibraryItem('old-item', { favorite: true });
+  assert.equal(h.nativeCalls.length, 0); assert.match(h.calls[3].url, /items\/old-item$/);
+  for (const action of [() => h.api.createLibraryFolder('new', 'server-history-root', 'nfs'),
+    () => h.api.uploadLibraryFile(new File([bytes], 'x'), 'server-history-old-folder', 'nfs'),
+    () => h.api.createLibraryItem({ folderId: 'server-history-root', storage: 'nfs' }),
+    () => h.api.updateLibraryFolder('server-history-old-folder', { name: 'new' }),
+    () => h.api.deleteLibraryFolder('server-history-root')]) {
+    await assert.rejects(action(), error => error.code === 'LIBRARY_HISTORY_READ_ONLY');
+  }
+  assert.equal(h.calls.length, 4);
+});
+
+test('historical trash is flat Hub-local data and its explicit empty action never clears NFS or client trash', async () => {
+  const h = harness(); await h.signIn('alice');
+  h.fetch = async () => new Response(JSON.stringify({ folders: [], items: [{ id: 'old-deleted', backend: 'local', isDeleted: true }], trashCount: 1 }));
+  const result = await h.api.listLibrary({ storage: 'nfs', scope: 'trash', folderId: 'server-history-old-folder' });
+  const query = new URL(h.calls[0].url).searchParams;
+  assert.equal(query.get('storage'), 'local'); assert.equal(query.get('scope'), 'trash'); assert.equal(query.has('folderId'), false);
+  assert.equal(result.items[0].id, 'old-deleted'); assert.equal(result.items[0].storageOrigin, 'server-history');
+  assert.equal(result.trashCount, 1);
+  await h.api.restoreLibraryItem('old-deleted');
+  await h.api.emptyLibraryTrash('nfs', { storageOrigin: 'server-history' });
+  assert.match(h.calls[1].url, /items\/old-deleted\/restore$/);
+  assert.equal(new URL(h.calls[2].url).searchParams.get('storage'), 'local'); assert.equal(h.calls[2].request.method, 'DELETE');
+  assert.equal(h.nativeCalls.length, 0);
+  await h.api.emptyLibraryTrash('nfs');
+  assert.equal(new URL(h.calls[3].url).searchParams.get('storage'), 'nfs');
+  await h.api.emptyLibraryTrash('local');
+  assert.equal(h.nativeCalls[0].action, 'emptyTrash'); assert.equal(h.calls.length, 4);
+});
+
+test('copying client bytes to NFS uses multipart, preserves the local source, and records the remote copy', async () => {
+  const h = harness(); await h.signIn('alice');
+  const result = await h.api.copyLocalLibraryItemToRemote('local-one', { storage: 'nfs', folderId: 'remote-folder' });
+  assert.equal(result.item.id, 'remote-one'); assert.equal(result.copied, true); assert.equal(result.localItemId, 'local-one');
+  assert.equal(h.calls.length, 1); const request = h.calls[0].request;
+  assert.equal(request.method, 'POST'); assert.match(h.calls[0].url, /items\/upload$/);
+  assert.equal(request.body.get('storage'), 'nfs'); assert.equal(request.body.get('folderId'), 'remote-folder');
+  assert.equal(request.body.get('rejectDuplicateName'), 'true');
+  assert.deepEqual(Buffer.from(await request.body.get('file').arrayBuffer()), bytes);
+  assert.deepEqual(h.nativeCalls.map(c => c.action), ['readBinary', 'updateItem']);
+  assert.equal(h.nativeCalls[1].payload.body.extra.lastRemoteCopy.id, 'remote-one');
+  assert.equal(h.nativeCalls[1].payload.body.storage, undefined);
+});
+
+test('empty client files create an exact empty remote file without using the non-empty upload endpoint', async () => {
+  const h = harness(); await h.signIn('alice');
+  h.native = async action => action === 'readBinary' ? { ...binary(), data: '', size: 0, name: 'empty.bin' } : { ok: true };
+  const result = await h.api.copyLocalLibraryItemToRemote('local-one', 'nfs');
+  assert.equal(result.copied, true); assert.equal(h.calls.length, 1);
+  assert.match(h.calls[0].url, /\/library\/items$/);
+  const body = JSON.parse(h.calls[0].request.body);
+  assert.equal(body.kind, 'file'); assert.equal(body.filename, 'empty.bin'); assert.equal(body.content, ''); assert.equal(body.storage, 'nfs');
+  assert.equal(body.rejectDuplicateName, true);
+  assert.deepEqual(h.nativeCalls.map(c => c.action), ['readBinary', 'updateItem']);
+});
+
+test('failed remote copies leave the source unchanged, while metadata failure cannot hide a successful copy', async () => {
+  const h = harness(); await h.signIn('alice');
+  h.fetch = async () => new Response('NFS unavailable', { status: 503 });
+  await assert.rejects(h.api.copyLocalLibraryItemToRemote('local-one', 'nfs'));
+  assert.deepEqual(h.nativeCalls.map(c => c.action), ['readBinary']);
+  h.fetch = async () => new Response('{"ok":true,"item":{"id":"remote-one"}}');
+  h.native = async action => action === 'readBinary' ? binary() : { ok: false, code: 'DISK_FULL', message: '磁盘已满' };
+  const copy = await h.api.copyLocalLibraryItemToRemote('local-one', 'nfs');
+  assert.equal(copy.item.id, 'remote-one'); assert.equal(copy.copyRecordSaved, false);
+  assert(h.nativeCalls.every(c => c.action !== 'deleteItem'));
+});
+
+test('explicit remote copies reuse a recorded item only after verifying its current name and bytes', async () => {
+  const h = harness(); await h.signIn('alice');
+  h.native = async action => action === 'readBinary' ? { ...binary(), item: { extra: { lastRemoteCopy: { id: 'remote-existing', storage: 'nfs', folderId: '' } } } } : { ok: true };
+  h.fetch = async () => new Response(bytes, { headers: { 'Content-Disposition': 'attachment; filename="private.bin"' } });
+  const reused = await h.api.copyLocalLibraryItemToRemote('local-one', { storage: 'nfs', reuseExisting: true });
+  assert.equal(reused.item.id, 'remote-existing'); assert.equal(reused.reused, true);
+  assert(h.calls.every(c => c.request.method === 'GET'));
+  assert.deepEqual(h.nativeCalls.map(c => c.action), ['readBinary']);
+  h.calls.length = 0;
+  h.fetch = async (_url, request) => request.method === 'GET'
+    ? new Response('different bytes', { headers: { 'Content-Disposition': 'attachment; filename="private.bin"' } })
+    : new Response(JSON.stringify({ detail: { code: 'LIBRARY_NAME_CONFLICT', message: '已有同名资料' } }), { status: 409 });
+  await assert.rejects(h.api.copyLocalLibraryItemToRemote('local-one', { storage: 'nfs', reuseExisting: true }), error => error.code === 'LIBRARY_NAME_CONFLICT');
+  assert.equal(h.calls.at(-1).request.body.get('rejectDuplicateName'), 'true');
+});
+
+test('a remote copy cannot reuse an item after the native account changes during verification', async () => {
+  const h = harness(); await h.signIn('alice');
+  h.native = async () => ({ ...binary(), item: { extra: { lastRemoteCopy: { id: 'remote-existing', storage: 'nfs' } } } });
+  h.fetch = async () => {
+    h.bridge.localLibrary.context = async () => ({ owner: 'owner-bob' });
+    return new Response(bytes, { headers: { 'Content-Disposition': 'attachment; filename="private.bin"' } });
+  };
+  await assert.rejects(h.api.copyLocalLibraryItemToRemote('local-one', { storage: 'nfs', reuseExisting: true }), stale);
+  assert.equal(h.calls.length, 1); assert.equal(h.calls[0].request.method, 'GET');
+});
+
+test('a changed native owner cannot receive the previous owner’s bytes while renderer auth is catching up', async () => {
+  const h = harness(), encode = deferred(); await h.signIn('alice'); h.encode = () => encode.promise;
+  let currentOwner = 'owner-alice'; h.bridge.localLibrary.context = async () => ({ owner: currentOwner });
+  h.native = async (action, payload) => payload.owner !== currentOwner ? { ok: false, code: 'STALE_TASK_SCOPE', message: '账号已切换' } : { ok: true };
+  const pending = h.api.uploadLibraryFile(new File([bytes], 'private.bin'));
+  await tick(); currentOwner = 'owner-bob'; encode.resolve('AP8NCio=');
+  await assert.rejects(pending, stale);
+  assert.equal(h.nativeCalls[0].payload.owner, 'owner-alice'); assert.equal(h.calls.length, 0);
+});
+
+test('switching away and back still cancels a pending copy instead of reviving an old operation', async () => {
+  const h = harness(), read = deferred(); await h.signIn('alice'); h.native = () => read.promise;
+  const pending = h.api.copyLocalLibraryItemToRemote('local-one', 'nfs');
+  await tick(); await h.signIn('bob'); await h.signIn('alice'); read.resolve(binary());
+  await assert.rejects(pending, stale); assert.equal(h.calls.length, 0);
+});
+
+test('cancelling local export is returned normally and never falls through to a browser download', async () => {
+  const h = harness(); await h.signIn('alice'); h.native = async () => ({ ok: false, cancelled: true });
+  const result = await h.api.downloadLibraryItem('local-one', 'private.bin');
+  assert.equal(result.cancelled, true); assert.equal(h.calls.length, 0);
+});
+
+test('local archive and cross-storage PATCH cannot upload or expose private bytes implicitly', async () => {
+  const h = harness(); await h.signIn('alice');
+  for (const [action, code] of [
+    [() => h.api.getLibraryArchive('local-one'), 'LOCAL_LIBRARY_ARCHIVE_UNSUPPORTED'],
+    [() => h.api.readLibraryArchiveFile('local-one', 'private.txt'), 'LOCAL_LIBRARY_ARCHIVE_UNSUPPORTED'],
+    [() => h.api.updateLibraryItem('local-one', { storage: 'nfs' }), 'LOCAL_LIBRARY_COPY_REQUIRED'],
+    [() => h.api.copyLocalLibraryItemToRemote('local-one', 'local'), 'LIBRARY_REMOTE_REQUIRED'],
+    [() => h.api.uploadLibraryFile(new File([bytes], 'x'), 'local-folder-one', 'nfs'), 'LIBRARY_FOLDER_BACKEND_MISMATCH'],
+  ]) await assert.rejects(action(), error => error.code === code);
+  assert.equal(h.calls.length, 0); assert.equal(h.nativeCalls.length, 0);
+});
+
+for (const scope of ['user', 'hub']) {
+  test(`pending owner lookup cannot dispatch an old local mutation after ${scope} changes`, async () => {
+    const h = harness(), owner = deferred(); await h.signIn('alice');
+    h.bridge.localLibrary.context = () => owner.promise;
+    const result = h.api.createLibraryItem({ content: 'private' });
+    await h.switchScope(scope); owner.resolve({ owner: 'owner-alice' });
+    await assert.rejects(result, stale); assert.equal(h.nativeCalls.length, 0); assert.equal(h.calls.length, 0);
+  });
+  test(`pending local copy read cannot upload old bytes after ${scope} changes`, async () => {
+    const h = harness(), read = deferred(); await h.signIn('alice'); h.native = () => read.promise;
+    const result = h.api.copyLocalLibraryItemToRemote('local-one', 'nfs');
+    await tick(); await h.switchScope(scope); read.resolve(binary());
+    await assert.rejects(result, stale); assert.equal(h.calls.length, 0);
+  });
+  test(`local file encoding cannot dispatch to the next ${scope}`, async () => {
+    const h = harness(), encode = deferred(); await h.signIn('alice'); h.encode = () => encode.promise;
+    const result = h.api.uploadLibraryFile(new File([bytes], 'private.bin'));
+    await tick(); await h.switchScope(scope); encode.resolve('AP8NCio=');
+    await assert.rejects(result, stale); assert.equal(h.nativeCalls.length, 0); assert.equal(h.calls.length, 0);
+  });
+  test(`a late remote copy result cannot annotate the next ${scope}'s local library`, async () => {
+    const h = harness(), body = deferred(); await h.signIn('alice');
+    h.fetch = async () => ({ ok: true, status: 200, text: () => body.promise });
+    const result = h.api.copyLocalLibraryItemToRemote('local-one', 'nfs');
+    await tick(); await h.switchScope(scope); body.resolve('{"ok":true,"item":{"id":"remote-one"}}');
+    await assert.rejects(result, stale); assert.deepEqual(h.nativeCalls.map(c => c.action), ['readBinary']);
+    assert.equal(h.calls[0].request.headers.Authorization, 'Device session-alice');
+  });
+}

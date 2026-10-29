@@ -1,0 +1,121 @@
+/* Execution crew bead chain for message heads (chat-crew.js).
+   Attribution heads fully use the bead-chain language: message heads carry the crew
+   (.nchat-crew) while tool-group heads are single beads (bare beads in agent-brand.css).
+   This section only covers bead shapes for message-head chains and the popover semantics. */
+.nchat-agent-source.nchat-crew{
+  cursor:pointer;
+}
+.nchat-agent-source.nchat-crew:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 65%,transparent);outline-offset:2px}
+
+/* Every bead is a white circle — the 30px primary leads, 19px collaborators stack to the
+   right, and a count bead closes the chain. The stroke ring uses --line-3 (12% black):
+   white beads on a near-white background need a visible outline to not look "open",
+   and a light shadow seats the beads on the page. Strokes are real borders (anti-aliased,
+   closed); expanding box-shadow rasterizes gaps at the circle's tangents (fig-1 regression),
+   so only the blurred soft shadow remains. */
+.nchat-agent-source.nchat-crew .crew-stack{
+  position:relative;display:inline-flex;align-items:center;overflow:visible;
+  /* without inline-flex the beads are grid block boxes and stack vertically (collaborator beads dropping under the primary) */
+}
+.nchat-agent-source.nchat-crew .agent-brand{
+  border:1px solid var(--line-3);border-radius:999px;background:var(--bg-0);color-scheme:light;
+  box-shadow:0 1px 2px rgba(15,23,42,.1);
+  overflow:visible;   /* the active bead's pulse ring draws outside the box */
+}
+.nchat-agent-source.nchat-crew .crew-avatar{
+  --agent-brand-size:30px;width:30px;height:30px;flex:0 0 30px;
+}
+.nchat-agent-source.nchat-crew .crew-avatar>img{width:19px;height:19px;max-width:none;object-fit:contain}
+.nchat-agent-source.nchat-crew .crew-sub{
+  position:relative;flex:0 0 19px;width:19px;height:19px;margin-left:-8px;
+  transition:margin-left .16s ease,opacity .16s ease;
+}
+.nchat-agent-source.nchat-crew .crew-sub>img{width:14px;height:14px;max-width:none;object-fit:contain;opacity:.72}
+.nchat-agent-source.nchat-crew:hover .crew-sub{margin-left:-4px}
+.nchat-agent-source.nchat-crew:hover .crew-sub>img{opacity:.9}
+/* Collaborators beyond the inline limit: the trailing count bead (one shade darker, distinct from white beads) */
+.nchat-agent-source.nchat-crew .crew-count{
+  position:relative;flex:0 0 19px;width:19px;height:19px;margin-left:-8px;
+  border:1px solid var(--line-3);border-radius:999px;background:var(--bg-3);color:var(--ink-3);box-sizing:border-box;
+  box-shadow:0 1px 2px rgba(15,23,42,.08);
+  display:grid;place-items:center;
+  font-size:max(var(--font-min-readable,14.5px),10px);font-weight:600;font-variant-numeric:tabular-nums;line-height:1;
+}
+/* Running engine bead: full color + active ring + on top (pulse ring must not clip neighbors) + the built-in nchat-pulse rhythm (panels-chat.css) */
+.nchat-agent-source.nchat-crew .crew-sub.is-on{z-index:1}
+.nchat-agent-source.nchat-crew .crew-sub.is-on>img{opacity:1}
+/* Active bead accent ring: also a real stroke, outer edge aligned with the old shadow ring (1.5px off the bead) to avoid tangent gaps */
+.nchat-agent-source.nchat-crew .crew-sub.is-on::before{content:"";position:absolute;inset:-2.5px;border-radius:999px;
+  border:1.5px solid color-mix(in srgb,var(--accent) 55%,transparent)}
+.nchat-agent-source.nchat-crew .crew-stack.is-running .crew-sub.is-on::after{
+  content:"";position:absolute;inset:-3px;border-radius:999px;
+  border:2px solid color-mix(in srgb,var(--accent) 55%,transparent);animation:nchat-pulse 1.4s ease-in-out infinite}
+@media(prefers-reduced-motion:reduce){.crew-stack.is-running .crew-sub.is-on::after{animation:none;opacity:.6}}
+
+/* Execution detail popover: light card, positioned relative to the bead chain */
+#crewPop{position:fixed;z-index:180;box-sizing:border-box;max-height:min(360px,calc(100vh - 32px));overflow-y:auto;
+  padding:8px;border:1px solid var(--line);border-radius:16px;background:var(--bg-0);
+  box-shadow:0 8px 32px color-mix(in srgb,var(--ink) 14%,transparent);
+  color:var(--ink-2);font-size:max(var(--font-min-readable,14.5px),12px)}
+.crew-pop-head{display:flex;align-items:baseline;gap:8px;padding:4px 6px 8px;border-bottom:1px solid var(--line-2)}
+.crew-pop-head b{color:var(--ink);font-size:max(var(--font-min-readable,14.5px),13px);font-weight:600}
+.crew-pop-task{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--ink-4);font-size:max(var(--font-min-readable,14.5px),11px)}
+.crew-pop-body{padding-top:4px}
+.crew-pop-row{display:flex;align-items:center;gap:9px;padding:7px 6px}
+.crew-pop-row+.crew-pop-row{border-top:1px solid var(--line-2)}
+.crew-pop-row>.agent-brand{--agent-brand-size:24px;width:24px;height:24px;flex:0 0 24px;
+  border:0;background:transparent;box-shadow:none;border-radius:0}
+.crew-pop-row>.agent-brand>img{width:20px;height:20px;object-fit:contain}
+.crew-pop-row>.agent-brand-pi>img{width:20px;height:20px;max-width:none}
+.crew-pop-name{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--ink-2);font-size:max(var(--font-min-readable,14.5px),12.5px);font-weight:500}
+.crew-pop-model{flex:none;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--ink-4);font-size:max(var(--font-min-readable,14.5px),10.5px)}
+.crew-pop-state{flex:none;display:inline-flex;align-items:center;gap:5px;
+  font-size:max(var(--font-min-readable,14.5px),11px);font-weight:500;line-height:20px}
+.crew-pop-state.is-done{color:var(--s-done)}
+.crew-pop-state.is-doing{color:var(--s-doing)}
+.crew-pop-state.is-doing>i{width:7px;height:7px;border-radius:999px;background:var(--s-doing);animation:nchat-pulse 1.1s ease-in-out infinite}
+.crew-pop-state.is-bad{color:var(--danger,#e0454b)}
+.crew-pop-state.is-wait{color:var(--ink-3)}
+.crew-pop-row.is-empty{color:var(--ink-3);font-size:max(var(--font-min-readable,14.5px),12px);justify-content:center;text-align:center}
+
+/* ---- Session-head "crew status bar" (chat-crew.js paintHead):
+   order = plugin workflow node order (never shifts with state); the engine currently
+   executing per the workflow stays highlighted in place. Beads share the message-head
+   language (agent-brand white circles) in an independent scope, size settled at 20px. */
+.nchat-head-actions .nchat-crewline{
+  display:inline-flex;align-items:center;gap:9px;height:36px;padding:0 13px 0 9px;margin-right:4px;
+  border:1px solid var(--line);border-radius:999px;background:var(--bg-1);cursor:pointer;
+  font:500 max(var(--font-min-readable,14.5px),12px)/1 var(--font-ui);color:var(--ink-2);
+}
+.nchat-head-actions .nchat-crewline .crew-stack{position:relative;display:inline-flex;align-items:center;overflow:visible}
+.nchat-head-actions .nchat-crewline:hover{border-color:color-mix(in srgb,var(--accent) 42%,var(--line))}
+/* Previous-round terminal state: dim the bar — it describes the previous round, not current activity */
+.nchat-head-actions .nchat-crewline.is-stale{opacity:.62}
+.nchat-head-actions .nchat-crewline.is-stale:hover{opacity:1}
+.nchat-head-actions .nchat-crewline:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 65%,transparent);outline-offset:2px}
+.nchat-head-actions .nchat-crewline .crew-sub{
+  position:relative;--agent-brand-size:20px;flex:0 0 20px;width:20px;height:20px;margin-left:-7px;
+  border:1px solid var(--line-3);border-radius:999px;overflow:visible;
+  box-shadow:0 1px 2px rgba(18,24,38,.14); /* real stroke closes the ring (same fig-1 fix); ring/dot draw outside the box */
+}
+.nchat-head-actions .nchat-crewline .crew-sub:first-child{margin-left:0}
+.nchat-head-actions .nchat-crewline .crew-sub>img{width:13px;height:13px;max-width:none;object-fit:contain;opacity:.82}
+.nchat-head-actions .nchat-crewline .crew-sub.is-on>img{opacity:1}
+/* Running bead: accent ring + orange dot pulse (same language as the message-head chain and the popover doing state) */
+.nchat-head-actions .nchat-crewline .crew-sub.is-on.is-run{z-index:1}
+.nchat-head-actions .nchat-crewline .crew-sub.is-on.is-run::after{
+  content:"";position:absolute;inset:-3px;border-radius:999px;
+  border:1.5px solid color-mix(in srgb,var(--accent) 55%,transparent);
+  animation:nchat-pulse 1.4s ease-in-out infinite}
+.nchat-head-actions .nchat-crewline .crew-dot{
+  position:absolute;left:-2px;bottom:-2px;width:8px;height:8px;border-radius:999px;
+  background:var(--s-doing);box-shadow:0 0 0 2px var(--bg-0);animation:nchat-pulse 1.1s ease-in-out infinite}
+.nchat-head-actions .nchat-crewline .nchat-crewline-text{white-space:nowrap}
+.nchat-head-actions .nchat-crewline .nchat-crewline-text b{color:var(--ink);font-weight:600}
+.nchat-head-actions .nchat-crewline .nchat-crewline-text span{color:var(--ink-3)}
+@media(prefers-reduced-motion:reduce){
+  .nchat-head-actions .nchat-crewline .crew-sub.is-on.is-run::after,
+  .nchat-head-actions .nchat-crewline .crew-dot{animation:none;opacity:.6}}

@@ -1,0 +1,45 @@
+<!doctype html><meta charset="utf-8"><title>任务转交回归</title>
+<link rel="stylesheet" href="../../components/workspace/workspace-shell.css">
+<link rel="stylesheet" href="../../components/panels/panels-chat.css">
+<link rel="stylesheet" href="../../components/requirements/requirements-board.css">
+<style>
+:root{--bg-0:#fff;--bg-1:#f8fafc;--bg-2:#f1f5f9;--line:#e2e8f0;--ink-1:#182230;--ink-2:#344054;--ink-3:#475467;--ink-4:#667085;--ink-5:#98a2b3;--accent:#3884ff;--accent-soft:#edf4ff}
+body{font:14px "Segoe UI Variable Text",sans-serif;background:var(--bg-1);padding:40px}main{max-width:760px;margin:auto}.cp-draft{display:block}#status{margin:24px}
+</style>
+<main><h2>任务转交 · 保留原会话</h2><div id="cpDraft" class="cp-draft"></div><textarea id="cpInput" hidden></textarea><textarea id="nchatInput" placeholder="继续对话"></textarea><div id="status"></div></main>
+<script>
+window.calls={bound:[],opened:[],details:[],created:[],uploads:[],persisted:[],execution:[]};window.tasks=[];
+window.ComposeSurface={create:()=>({_panel:()=>null})};
+window.NativeChat={hasSession:()=>true,bindTask:(...a)=>calls.bound.push(a),enter(){},openTask:(...a)=>calls.opened.push(a)};
+window.petSay=message=>document.getElementById('status').textContent=message;
+window.openDetailEntry=id=>{calls.details.push(id);petSay('查看已转交任务的进展');};
+window.Store={persistTask:async id=>{calls.persisted.push(id);return true},dropTask(){}};
+window.SoduWorkAPI={
+ taskExecutionOptions:async()=>{calls.execution.push('options');throw Error('Runner offline');},
+ listTeammates:async()=>[{id:'recipient-1',name:'演示同事',canReceive:true,org:'测试组'}],
+ workCatalog:async()=>{calls.execution.push('catalog');return{scenarios:[]};},
+ createAssignedTask:async body=>{calls.created.push({kind:'assigned',body});await new Promise(r=>setTimeout(r,100));return{task:{id:body.taskId,title:body.title},targetName:'演示同事'}},
+ uploadAttachment:async(id,file)=>{calls.uploads.push({id,name:file.name,size:file.size,bytes:Array.from(new Uint8Array(await file.arrayBuffer()))});return{id:file.name}}
+};
+</script>
+<script src="../../components/panels/compose-surface.js"></script>
+<script>ComposeSurface.create=()=>({_panel:()=>null});</script>
+<script src="../../components/panels/panels-compose.js"></script>
+<script src="../../components/panels/chat-work-intent.js"></script>
+<script src="../../components/panels/task-execution-client.js"></script>
+<script src="../../components/panels/panels-compose-submit.js"></script>
+<script src="../../components/panels/task-priority.js"></script>
+<script src="../../components/panels/compose-selection-position.js"></script>
+<script src="../../components/panels/requirement-routing.js"></script>
+<script src="../../core/requirements.js"></script>
+<script src="../../components/requirements/requirement-fields.js"></script>
+<script src="../../components/panels/panels-compose-draft.js"></script>
+<script>
+window.openScenario=async kind=>{
+ ComposeDraft.clear();
+ Object.keys(calls).forEach(key=>calls[key]=[]);tasks.length=0;document.getElementById('status').textContent='';
+ const bridge=ChatWorkIntent.create({_taskAttachments:[],_bindCollaborationTask:(...a)=>calls.bound.push(a)})._chatDraftBridge();
+ const options={...bridge,atts:()=>[new File(['原始文字材料'], '说明.txt',{type:'text/plain'}),new File([Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9n8AAAAASUVORK5CYII='),c=>c.charCodeAt(0))],'截图.png',{type:'image/png'})]};
+ await ComposeDraft.openWith({title:'验证转交与图片材料',note:'原始任务说明，不得丢失。',kind:kind==='self'?'ticket':'bug',workScenarioKey:'ignored-scene',flow:'ignored-flow',checklist:['图片可复制并粘贴'],assigneeUserId:kind==='self'?'':'recipient-1'},options);
+};
+</script>

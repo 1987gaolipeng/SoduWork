@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "key": "deep-research",
+  "name": "深度研究",
+  "version": "1.0.3",
+  "category": "research",
+  "description": "围绕明确问题规划研究、检索多类来源、交叉验证证据，并交付带引用、限制与可行动结论的研究报告。",
+  "author": "SoduWork",
+  "openSource": {
+    "license": "MIT",
+    "repository": "https://github.com/langchain-ai/open_deep_research",
+    "upstreamVersion": "main@1b7d2e80db9f",
+    "adaptation": "借鉴其研究规划、多来源检索和报告生成方法，改造成 SoduWork 的底座无关流程，并增加独立证据审查、人工验收和来源留痕。"
+  },
+  "instructions": "你是证据驱动的企业研究员。先把请求转成研究问题、范围、时间边界和判断标准，形成检索计划后再调查。优先使用一手、权威、近期来源；关键结论尽量由两个相互独立的来源支持。保存来源标题、发布者、日期、URL、访问日期和它支持的论点，严格区分事实、来源观点、推断和建议。主动寻找反例、冲突证据和信息缺口，不得编造引用或用搜索摘要代替阅读原文。最终报告应结论先行，包含方法、证据、分析、建议、风险、限制和完整来源表。",
+  "entrypoints": {"conversation": true, "task": true, "automation": false},
+  "inputs": [
+    {"key": "researchQuestion", "label": "研究问题", "type": "textarea", "required": false},
+    {"key": "scope", "label": "范围与时间边界", "type": "textarea", "required": false},
+    {"key": "decision", "label": "研究要支持的决策", "type": "textarea", "required": false}
+  ],
+  "outputs": [
+    {"key": "report", "label": "研究报告", "accept": ["deliverables/research-report.md"]},
+    {"key": "sources", "label": "来源与证据表", "accept": ["deliverables/sources.md"]}
+  ],
+  "capabilities": {"network": true, "skills": ["browser-use"], "mcpServers": [], "runtime": ["browser", "files"]},
+  "evaluations": [{
+    "key": "market-landscape",
+    "name": "市场格局研究",
+    "instruction": "研究一个公开软件市场的主要参与者、差异、趋势和采用风险，为采购选型提供建议。",
+    "inputs": {"researchQuestion": "该市场有哪些代表性方案，差异和主要风险是什么？", "scope": "近两年公开资料", "decision": "形成初步采购短名单"},
+    "criteria": [
+      "输出研究报告和独立来源表",
+      "关键事实有可访问的来源、日期和对应论点",
+      "至少覆盖一手来源、独立来源和反向证据",
+      "事实、推断、建议和未知项明确分开"
+    ],
+    "expectedOutputs": ["research.report", "research.sources"]
+  }],
+  "workflow": {"nodes": [
+    {
+      "key": "research", "type": "ai", "name": "规划与研究",
+      "capabilities": {"network": true, "skills": ["browser-use"], "mcpServers": [], "runtime": ["browser", "files"]},
+      "outputs": [
+        {"key": "report", "kind": "file", "label": "研究报告", "path": "deliverables/research-report.md", "required": true},
+        {"key": "sources", "kind": "file", "label": "来源与证据表", "path": "deliverables/sources.md", "required": true}
+      ],
+      "config": {"prompt": "围绕任务正文和插件输入执行完整研究。先确定问题树和检索计划，再使用浏览器读取原始页面并交叉验证。生成 deliverables/research-report.md 与 deliverables/sources.md。报告必须结论先行并包含方法、证据、冲突、建议、风险和限制；来源表逐条写标题、发布者、日期、URL、访问日期和支持论点。不得编造来源，不得只基于搜索结果摘要。"},
+      "retry": {"maxAttempts": 2}
+    },
+    {
+      "key": "validate-report", "type": "validate", "name": "研究成果完整性检查", "dependsOn": ["research"],
+      "config": {"rules": [
+        {"type": "file", "name": "研究报告完整", "nameEquals": "deliverables/research-report.md", "minBytes": 1200},
+        {"type": "file", "name": "来源表完整", "nameEquals": "deliverables/sources.md", "minBytes": 500}
+      ]}
+    },
+    {
+      "key": "review", "type": "ai_review", "name": "独立证据审查", "dependsOn": ["research", "validate-report"],
+      "inputs": [
+        {"key": "report", "fromNode": "research", "outputKey": "report", "label": "待审报告", "required": true},
+        {"key": "sources", "fromNode": "research", "outputKey": "sources", "label": "待审来源表", "required": true}
+      ],
+      "capabilities": {"network": true, "skills": ["browser-use"], "mcpServers": [], "runtime": ["browser", "files"]},
+      "outputs": [{"key": "review", "kind": "decision", "label": "证据审查结论", "path": "reviews/research-review.md", "required": true}],
+      "config": {"prompt": "独立审查研究报告和来源表，抽查关键链接及其支持关系，检查来源质量、时效、相互独立性、冲突证据、事实与推断边界和建议是否超出证据，把结论写入 reviews/research-review.md。存在伪造引用、关键链接不可核验或核心结论无证据时判定不通过。"}
+    },
+    {"key": "accept", "type": "human_review", "name": "决策方验收", "dependsOn": ["review"], "config": {"summary": "请验收研究范围、证据和决策价值"}},
+    {"key": "publish", "type": "publish", "name": "交付研究", "dependsOn": ["accept"], "config": {"message": "研究报告与来源证据已通过验收并交付"}}
+  ]}
+}

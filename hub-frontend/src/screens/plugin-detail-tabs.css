@@ -1,0 +1,129 @@
+/* Stable navigation for the plugin management workspace and detail read model. */
+.plugin-view-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 46px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.plugin-view-tabs button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--ink-3);
+  background: transparent;
+  font: inherit;
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  cursor: pointer;
+}
+
+.plugin-view-tabs button:hover {
+  color: var(--ink);
+  background: var(--surface-1);
+}
+
+.plugin-view-tabs button.on {
+  color: var(--auto-blue);
+  background: color-mix(in srgb, var(--auto-blue) 7%, var(--surface));
+}
+
+.plugin-view-tabs button.on::after {
+  position: absolute;
+  right: 10px;
+  bottom: -7px;
+  left: 10px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--auto-blue);
+  content: "";
+}
+
+.plugin-view-tabs svg {
+  width: 15px;
+  height: 15px;
+}
+
+.plugin-view-tabs b {
+  min-width: 19px;
+  padding: 1px 5px;
+  border-radius: 9px;
+  color: inherit;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  font-weight: 650;
+  text-align: center;
+}
+
+.plugin-detail-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0 -2px 17px;
+  padding: 5px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-1);
+  scrollbar-width: none;
+}
+
+.plugin-detail-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.plugin-detail-tabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--ink-3);
+  background: transparent;
+  font: inherit;
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.plugin-detail-tabs button:hover {
+  color: var(--ink);
+}
+
+.plugin-detail-tabs button.on {
+  border-color: var(--line);
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 2px 7px rgba(38, 53, 76, .055);
+}
+
+.plugin-detail-tabs svg {
+  width: 14px;
+  height: 14px;
+}
+
+.plugin-detail-tabs b {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  color: var(--ink-3);
+  background: var(--surface-2);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  font-weight: 620;
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .plugin-view-tabs { padding: 0 12px; }
+  .plugin-detail-tabs { justify-content: flex-start; }
+}

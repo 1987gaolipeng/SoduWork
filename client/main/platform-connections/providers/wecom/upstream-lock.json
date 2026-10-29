@@ -1,0 +1,10 @@
+{
+  "provider": "wecom",
+  "package": "@wecom/cli",
+  "version": "1.3.4",
+  "entry": "bin/wecom.js",
+  "nodeMinimum": 20,
+  "npmIntegrity": "sha512-vz47EsT/BKkHBONVt94xhZtUWhvMR4uF9Y4TTNUwF7PnLETqyFyrNNHwG3aTLmhMNC/ecqRWUUqvNgP90nreaQ==",
+  "npmTarball": "https://registry.npmjs.org/@wecom/cli/-/cli-1.3.4.tgz",
+  "runtimeReleaseSource": "https://registry.npmjs.org/@wecom%2fcli/1.3.4"
+}

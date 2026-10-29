@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="azure"><head><meta charset="utf-8">
+<title>MCP catalog — isolated layout regression</title>
+<link rel="stylesheet" href="../../theme/variables.css">
+<link rel="stylesheet" href="../../components/panels/panels-schedules.css">
+<link rel="stylesheet" href="../../components/panels/panels-capabilities.css">
+<link rel="stylesheet" href="../../components/panels/panels-capability-mcp.css">
+<link rel="stylesheet" href="../../components/panels/panels-capability-plugins.css">
+<link rel="stylesheet" href="../../components/panels/capability-type-scale.css">
+<link rel="stylesheet" href="../../components/panels/plugin-presentation.css">
+<style>*{box-sizing:border-box}body{margin:0;font:14px/1.5 var(--font-ui);color:var(--ink);background:var(--bg-0)}.cap-panel{height:100vh}</style>
+</head><body><div class="cap-panel"><div class="cap-shell cap-tab-mcp">
+<div class="cap-toolbar"><div class="cap-toolbar-inner"><nav class="cap-tabs">
+<button class="cap-tab">插件 <i>3</i></button><button class="cap-tab">连接器 <i>1</i></button>
+<button class="cap-tab on">MCP <i>1</i></button><button class="cap-tab">技能 <i>10</i></button><button class="cap-tab">市场 <i>26</i></button>
+</nav></div></div>
+<main class="cap-content" id="content">
+<section class="cap-section"><header class="cap-section-head"><b>公司发布的连接</b><span>管理员审查并维护，按需选择，不会整库注入</span><em>1 项</em></header>
+<div class="cap-grid"><button class="cap-card cap-mcp-card on" data-company-mcp="示例工具">
+<span class="cap-card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M8 12h8m-4-4v8"/></svg></span>
+<span class="cap-card-main"><span class="cap-card-title"><b>示例工具</b><em>公司发布</em></span><span class="cap-card-desc">隔离布局验证 · 不连接真实服务</span><span class="cap-passport"><span>管理员审查</span><span>HTTP 服务</span></span></span><span class="cap-switch"></span>
+</button></div></section>
+<section class="cap-section"><header class="cap-section-head"><b>我的连接</b><span>只随我的任务运行，密钥不会回显</span><em>0 项</em></header><div class="cap-empty"><b>还没有个人连接</b>从可信模板开始，或接入一个已知的 HTTP MCP 地址。</div></section>
+<details class="cap-section cap-template-section"><summary><div class="cap-section-head"><b>常用模板</b><span>选择模板，快速添加一个连接</span><em>2 项</em></div></summary><div class="cap-template-row">
+<button class="cap-template"><b>文件与目录</b><span>在明确授权的目录内读取、搜索和整理文件。</span><em>可能写入</em></button>
+<button class="cap-template"><b>Git 仓库</b><span>读取仓库历史、差异与状态，并在授权时执行仓库操作。</span><em>可能写入</em></button>
+</div></details></main></div></div>
+<script src="../../components/panels/panels-capability-mcp.js"></script>
+<script>
+window.errors=[];window.modalTitles=[];
+addEventListener('error',e=>errors.push(e.message));
+addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
+window.closeModal=()=>document.getElementById('fixtureModal')?.remove();
+SoduWorkMcpManagement.enhance(document.getElementById('content'),{
+ api:{myMcpSubmissions:async()=>({items:[]})},
+ h:v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),
+ say:message=>errors.push(message),errorText:e=>e.message,load:()=>{},closeModal,
+ mcp:{company:[{id:'fixture-only',name:'示例工具'}],personal:[]},
+ openModal:(title,subtitle,body,foot)=>{
+   closeModal();modalTitles.push(title);const layer=document.createElement('div');layer.id='fixtureModal';
+   layer.innerHTML='<div class="cap-modal">'+body+'<footer>'+foot+'</footer></div>';
+   document.body.append(layer);return layer;
+ }
+});window.fixtureReady=true;
+</script></body></html>

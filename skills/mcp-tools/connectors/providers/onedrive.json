@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 1,
+  "id": "onedrive",
+  "name": "OneDrive",
+  "category": "云存储",
+  "description": "OneDrive 通用连接器：驱动器信息、根目录/子目录列表、上传小文件。基于 Microsoft Graph v1.0 drive 资源，委托式令牌由用户安全填入。",
+  "officialDocs": [
+    "https://learn.microsoft.com/graph/api/drive-get",
+    "https://learn.microsoft.com/graph/api/driveitem-list-children",
+    "https://learn.microsoft.com/graph/api/driveitem-put-content"
+  ],
+  "authDocs": [
+    "https://learn.microsoft.com/graph/auth/"
+  ],
+  "baseUrl": "https://graph.microsoft.com/v1.0",
+  "fields": [
+    {
+      "key": "MSFT_ACCESS_TOKEN",
+      "label": "Microsoft Graph 访问令牌",
+      "secret": true,
+      "required": true,
+      "example": ""
+    },
+    {
+      "key": "DRIVE_ID",
+      "label": "已有 OneDrive 的 Drive ID",
+      "secret": false,
+      "required": true,
+      "pattern": "^[A-Za-z0-9!_-]{1,200}$"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "tokenKey": "MSFT_ACCESS_TOKEN",
+    "header": "Authorization",
+    "prefix": "Bearer"
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "get_drive",
+      "description": "读取已存在的 Drive，避免 /me/drive 自动创建存储。",
+      "method": "GET",
+      "path": "/drives/{DRIVE_ID}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_children",
+      "description": "列出驱动器项子级。分页：@odata.nextLink。出处：https://learn.microsoft.com/graph/api/driveitem-list-children",
+      "method": "GET",
+      "path": "/drives/{DRIVE_ID}/items/{item_id}/children",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9!_-]{1,152}$",
+            "description": "驱动器项 ID（root 表示根目录）",
+            "maxLength": 10000
+          },
+          "top": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 100,
+            "description": "每页数量"
+          },
+          "skip_token": {
+            "type": "string",
+            "maxLength": 8192,
+            "description": "上一页 @odata.nextLink 查询参数中的 $skiptoken，按原值传入；没有下一页时不填写"
+          }
+        },
+        "required": [
+          "item_id"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true,
+      "query": {
+        "$top": "top",
+        "$skiptoken": "skip_token"
+      }
+    },
+    {
+      "name": "get_item",
+      "description": "获取驱动器项元信息。无分页。出处：https://learn.microsoft.com/graph/api/driveitem-get",
+      "method": "GET",
+      "path": "/drives/{DRIVE_ID}/items/{item_id}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9!_-]{1,152}$",
+            "description": "驱动器项 ID",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "item_id"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "upload_small_file",
+      "description": "上传 ≤4MB 文件（POST /me/drive/root:/{path}:/content，与官方 PUT 语义等效，Graph 同时支持 POST；Content-Type 为文件 MIME）。写入操作：运行前必须获得用户明确授权。出处：https://learn.microsoft.com/graph/api/driveitem-put-content",
+      "method": "PUT",
+      "path": "/drives/{DRIVE_ID}/items/{parent_id}:/{file_name}:/content",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "parent_id": {
+            "type": "string",
+            "description": "父文件夹 ID，根目录填 root",
+            "pattern": "^[A-Za-z0-9!_-]{1,152}$"
+          },
+          "file_name": {
+            "type": "string",
+            "description": "文件名，不含目录分隔符",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^[^/\\\\]+$"
+          },
+          "content": {
+            "type": "string",
+            "description": "UTF-8 文本内容",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "parent_id",
+          "file_name",
+          "content"
+        ],
+        "maxProperties": 50
+      },
+      "body": "$content",
+      "readOnly": false,
+      "bodyEncoding": "text"
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "按委托权限建模（OneDrive personal/business 通用 Graph 端点）；应用权限全租户场景未覆盖。",
+    "访问令牌约 1 小时过期，需用户安全填入并手动更新；自动续期为宿主侧适配项，本连接器未实现。",
+    "upload_small_file 走 PUT 原始内容体（非 JSON），仅支持 ≤4MB；大文件分片上传待扩展。",
+    "upload_small_file 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

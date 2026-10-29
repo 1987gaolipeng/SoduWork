@@ -1,0 +1,5 @@
+# Offline backend release gates, including Runner packaging recipe checks.
+# Install in the test venv with: python -m pip install -r requirements-test.txt
+-r requirements.txt
+# Keep the recipe checker on the same version as requirements-runner-build.txt.
+pyinstaller==6.21.0

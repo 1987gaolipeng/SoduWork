@@ -1,0 +1,88 @@
+{
+  "schema": 1,
+  "description": "随桌面安装器分发的原生构件清单（源树静态盘点）。这不是最终安装包的逐件核验记录：每平台最终产物由构建机在打包时生成核验并输出到安装包内 third-party/inventory。",
+  "generatedAt": "2026-10-22",
+  "inventoryBasis": [
+    "client/package.json（build.extraResources、electron-builder ^26.15.3）",
+    "client/package-lock.json（锁定版本与 npm integrity）",
+    "client/THIRD_PARTY_NOTICES.md（外壳组件既有声明）"
+  ],
+  "platforms": {
+    "windows": [
+      {
+        "id": "electron-runtime",
+        "component": "Electron 44.7.0（内嵌 Chromium 与 Node.js）",
+        "role": "应用运行时",
+        "version": "44.7.0",
+        "license": "MIT（Electron 许可；内嵌组件以 Electron 官方 THIRD_PARTY_NOTICES 为准）",
+        "source": "https://github.com/electron/electron/releases/tag/v44.7.0",
+        "evidence": "client/package-lock.json node_modules/electron"
+      },
+      {
+        "id": "portablegit",
+        "component": "PortableGit（含 MSYS2 运行时组件）",
+        "role": "终端/Git 外壳",
+        "version": "2.55.0(4)",
+        "license": "GPL-2.0 及随附组件各自许可",
+        "source": "https://github.com/git-for-windows/git/releases/tag/v2.55.0.windows.4",
+        "correspondingSource": "third-party/windows-shell-corresponding-source.md",
+        "evidence": "client/THIRD_PARTY_NOTICES.md"
+      },
+      {
+        "id": "sevenzip",
+        "component": "7-Zip（electron-builder app-builder 工具集随发）",
+        "role": "压缩/解包",
+        "version": "24.09",
+        "license": "LGPL-2.1 及随附 BSD/unRAR 限制条款",
+        "source": "https://www.7-zip.org/download.html",
+        "correspondingSource": "third-party/windows-shell-corresponding-source.md",
+        "evidence": "client/THIRD_PARTY_NOTICES.md"
+      },
+      {
+        "id": "pi-runtime-tree",
+        "component": "pi/node_modules production dependency tree",
+        "role": "Locked production dependencies preserving npm hoisting and nested versions",
+        "version": "1.4.0",
+        "license": "MIT",
+        "source": "https://www.npmjs.com/package/@earendil-works/pi-coding-agent",
+        "evidence": "third-party/manifest.json notices[pi]"
+      },
+      {
+        "id": "ssh2-and-deps",
+        "component": "ssh2 + asn1 + bcrypt-pbkdf + safer-buffer + tweetnacl",
+        "role": "SSH 连接（纯 JavaScript，无原生二进制）",
+        "version": "锁文件锁定",
+        "license": "MIT（ssh2）及各依赖标识，见 manifest.lockLicenseEvidence",
+        "evidence": "third-party/manifest.json"
+      },
+      {
+        "id": "skills-bundled",
+        "component": "Project-owned bundled skill guides",
+        "role": "Skill resources declared in the public source profile",
+        "license": "MIT, project copyright MDiRi",
+        "evidence": "tools/distribution/PUBLIC-SOURCE.json skills; skills/THIRD-PARTY.md; root LICENSE"
+      },
+      {
+        "id": "third-party-notices",
+        "component": "third-party/ 目录与合规盘点（../third-party → third-party；.runtime/compliance → third-party/inventory）",
+        "role": "随包许可文件与构建期盘点产物",
+        "license": "（各文件自身许可）",
+        "evidence": "client/package.json build.extraResources；tools/check-third-party.cjs"
+      },
+      {
+        "id": "pi-wasm-assets",
+        "component": "@silvia-odwyer/photon-node 0.3.4 and quickjs-wasi 3.6.2",
+        "role": "WASM assets shipped with Pi 1.4.0",
+        "license": "MIT; retain installed original notices",
+        "evidence": "client/package-lock.json; generated third-party/inventory/npm-notices.json"
+      }
+    ],
+    "linux": [],
+    "macos": []
+  },
+  "limits": [
+    "Linux 与 macOS 平台清单需在对应平台构建机产出最终安装包时按同一 schema 登记后追加。",
+    "Electron 内嵌的 Chromium/ffmpeg 等组件许可以 Electron 官方随版本发布的 THIRD_PARTY_NOTICES 为准，本清单不逐项复制。",
+    "最终安装包内构件逐件核验属发布门禁动作；构建脚本应将核验结果输出至安装包内 third-party/inventory 供随包审查。"
+  ]
+}

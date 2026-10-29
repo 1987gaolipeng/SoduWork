@@ -1,0 +1,199 @@
+{
+  "schemaVersion": 1,
+  "id": "airtable",
+  "name": "Airtable",
+  "category": "数据与表格",
+  "description": "Airtable 通用连接器：Base 列表、表结构、记录列表与创建。基于 Airtable Web API v0，Personal Access Token 鉴权，不绑定任何汇报场景。",
+  "officialDocs": [
+    "https://airtable.com/developers/web/api/introduction",
+    "https://airtable.com/developers/web/api/list-bases",
+    "https://airtable.com/developers/web/api/get-base-schema",
+    "https://airtable.com/developers/web/api/list-records",
+    "https://airtable.com/developers/web/api/create-records"
+  ],
+  "authDocs": [
+    "https://airtable.com/developers/web/api/scopes"
+  ],
+  "baseUrl": "https://api.airtable.com/v0",
+  "fields": [
+    {
+      "key": "AIRTABLE_PAT",
+      "label": "Personal Access Token",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "tokenKey": "AIRTABLE_PAT",
+    "header": "Authorization",
+    "prefix": "Bearer"
+  },
+  "headers": {
+    "Accept": "application/json"
+  },
+  "tools": [
+    {
+      "name": "list_bases",
+      "description": "列出可访问 Base。分页：响应体 offset 游标。出处：https://airtable.com/developers/web/api/list-bases",
+      "method": "GET",
+      "path": "/meta/bases",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "offset": {
+            "type": "string",
+            "description": "上一页响应体 offset",
+            "maxLength": 10000
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "query": {
+        "offset": "offset"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_base_schema",
+      "description": "获取 Base 表结构。分页：响应体 offset（表很多时）。出处：https://airtable.com/developers/web/api/get-base-schema",
+      "method": "GET",
+      "path": "/meta/bases/{base_id}/tables",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "base_id": {
+            "type": "string",
+            "pattern": "^app[A-Za-z0-9]{10,}$",
+            "description": "Base ID（app 开头）",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "base_id"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_records",
+      "description": "列出记录。分页：响应体 offset 游标；pageSize 1-100 默认 100，maxRecords 限总量。tableIdOrName 用表名时需 URL 编码。出处：https://airtable.com/developers/web/api/list-records",
+      "method": "GET",
+      "path": "/{base_id}/{table_id_or_name}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "base_id": {
+            "type": "string",
+            "pattern": "^app[A-Za-z0-9]{10,}$",
+            "description": "Base ID",
+            "maxLength": 10000
+          },
+          "table_id_or_name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "表 ID（tbl 开头）或 URL 编码表名",
+            "maxLength": 10000
+          },
+          "page_size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 100,
+            "description": "每页条数"
+          },
+          "max_records": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "最大返回记录数",
+            "maximum": 100000
+          },
+          "view": {
+            "type": "string",
+            "description": "视图 ID 或名称",
+            "maxLength": 10000
+          },
+          "filter_by_formula": {
+            "type": "string",
+            "description": "Airtable 公式过滤（原样透传）",
+            "maxLength": 10000
+          },
+          "offset": {
+            "type": "string",
+            "description": "上一页响应体 offset",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "base_id",
+          "table_id_or_name"
+        ],
+        "maxProperties": 50
+      },
+      "query": {
+        "pageSize": "page_size",
+        "maxRecords": "max_records",
+        "view": "view",
+        "filterByFormula": "filter_by_formula",
+        "offset": "offset"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_record",
+      "description": "创建记录（POST，records 数组包 fields 对象）。fields 为 $param 引用保留对象类型。写入操作：运行前必须获得用户明确授权。出处：https://airtable.com/developers/web/api/create-records",
+      "method": "POST",
+      "path": "/{base_id}/{table_id_or_name}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "base_id": {
+            "type": "string",
+            "pattern": "^app[A-Za-z0-9]{10,}$",
+            "description": "Base ID",
+            "maxLength": 10000
+          },
+          "table_id_or_name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "表 ID 或 URL 编码表名",
+            "maxLength": 10000
+          },
+          "fields": {
+            "type": "object",
+            "description": "字段名到值的映射（叶子值为简单 JSON 类型：字符串/数字/布尔/null；最多 50 键）",
+            "additionalProperties": true,
+            "maxProperties": 50
+          }
+        },
+        "required": [
+          "base_id",
+          "table_id_or_name",
+          "fields"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "records": [
+          {
+            "fields": "$fields"
+          }
+        ]
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "PAT 按 Base 授权，未授权 Base 不可见；写入需 data.records:write scope。",
+    "filterByFormula 原样透传，表达式正确性由调用方负责。",
+    "create_record 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

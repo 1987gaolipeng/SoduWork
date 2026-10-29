@@ -1,0 +1,19 @@
+.plugin-app-tag {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  font-weight: 650;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.plugin-app-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.plugin-review-callout .plugin-app-tag { margin-inline-start: 8px; }
+@media (max-width: 620px) {
+  .plugin-detail-overlay .plugin-title-aside .plugin-title-state { grid-template-columns: minmax(0, 1fr); }
+}

@@ -1,0 +1,250 @@
+'use strict';
+// Real Electron preload, production sidebar/header and production title/history IPC.
+// Session inventories are fixtures; no agents, business records or network are used.
+const { app, BrowserWindow, ipcMain, net } = require('electron');
+const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
+const root = process.argv[2];
+if (!root || !path.isAbsolute(root)) throw Error('Absolute evidence directory required');
+fs.mkdirSync(root, { recursive: true });
+const profile = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'soduwork-sidebar-e2e-'));
+app.setPath('userData', profile);
+const report = { ok:false, cases:[], screenshots:[] };
+let win;
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const js = code => win.webContents.executeJavaScript(code);
+async function until(code) { for(let i=0;i<100;i++){if(await js(code))return;await delay(40);}throw Error('Timed out: '+code); }
+function key(code){win.webContents.sendInputEvent({type:'keyDown',keyCode:code});if(code==='ENTER')win.webContents.sendInputEvent({type:'char',keyCode:'\r'});win.webContents.sendInputEvent({type:'keyUp',keyCode:code});}
+async function escape(){key('ESC');await until('!document.querySelector(".nchat-rename-dialog") && document.querySelector("#nchatTitleMenu").hidden');}
+async function shot(name){await delay(150);const file=path.join(root,name+'.png');fs.writeFileSync(file,(await win.webContents.capturePage()).toPNG());report.screenshots.push(file);}
+async function run(){
+  const rows=Array.from({length:50},(_,i)=>({id:'chat-'+i,title:i===0?'整理本周项目进展':'项目讨论与方案复核 '+(i+1),
+    at:10000-i,adapterId:['pi','codex','opencode'][i%3],state:i===0?'running':'completed',live:i===0}));
+  const bridge=require('../main/agent-runtime/pi-session-bridge');
+  let missing=false, slow=false, listener;
+  const live={ref:'fixture-live',sessionId:'chat-0',cwd:root,historyRow:()=>rows[0],snapshot:()=>({messages:[]}),
+    status:()=> 'idle',on:fn=>{listener=fn;}};
+  bridge.findBySessionId=id=>id==='chat-0'?live:null;
+  bridge.archivedConversation=async(_app,id)=>{if(slow)await delay(200);return missing?null:rows.find(row=>row.id===id);};
+  bridge.history=async()=>({ok:true,chats:rows});
+  bridge.get=ref=>ref===live.ref?live:null;
+  require('../main/pi-session/ipc').install({app,ipcMain,BrowserWindow,identityOf:()=>({hub:'http://127.0.0.1:1',clientId:'fixture'}),capabilityGrantsOf:()=>[]});
+  win=new BrowserWindow({show:false,width:1100,height:720,webPreferences:{preload:path.join(__dirname,'../preload.js'),
+    contextIsolation:true,nodeIntegration:false,offscreen:true,backgroundThrottling:false}});
+  win.webContents.on('console-message',(_e,level,message)=>{if(level>=3)report.console=(report.console||[]).concat(message);});
+  // Use the real trusted desktop origin; only the isolated page content is a
+  // fixture. Production IPC still enforces its sender/frame checks.
+  const {pathToFileURL}=require('node:url');
+  const ownerURL=pathToFileURL(path.join(__dirname,'../desk.html')).href;
+  const html=fs.readFileSync(path.join(__dirname,'fixtures/sidebar-renaming.html'),'utf8')
+    .replaceAll('../../','./');
+  win.webContents.session.protocol.handle('file',request=>request.url===ownerURL
+    ?new Response(html,{headers:{'content-type':'text/html; charset=utf-8'}})
+    :net.fetch(request.url,{bypassCustomProtocolHandlers:true}));
+  await win.loadURL(ownerURL);
+  await until('document.querySelectorAll(".ws-chat-row").length===50');
+  assert.equal(await js('document.querySelector(".ws-new-chat button span").textContent'),'新对话');
+  assert.equal(await js('document.querySelector("#wsSideScroll .ws-nav-item span").textContent'),'自动化');
+  assert.ok(await js('[...document.querySelectorAll(".ws-section-label,.ws-section-toggle")].every(el=>parseFloat(getComputedStyle(el).fontSize)===14.5)'));
+  assert.ok(await js('["wsPinnedToggle","wsChatsToggle"].every(id=>{const button=document.getElementById(id);return button.tagName==="BUTTON"&&button.getAttribute("aria-expanded")==="true"&&!document.getElementById(button.getAttribute("aria-controls")).hidden})'));
+  assert.ok(await js('document.querySelector("#wsPinnedBox").hidden'));
+  report.cases.push('new conversation label; Automation is first scrolling item; group labels reduced by 1px');
+  assert.ok(await js('document.querySelector("#wsRecentBox").parentElement===document.querySelector("#wsSideScroll").parentElement'), 'recent tasks must be a sibling of the upper scrollport');
+  const fixed=await js('JSON.stringify([".ws-brand",".ws-new-chat",".ws-profile-row"].map(s=>document.querySelector(s).getBoundingClientRect().top))');
+  await js('document.querySelector("#wsSideScroll").scrollTop=420');
+  assert.equal(await js('JSON.stringify([".ws-brand",".ws-new-chat",".ws-profile-row"].map(s=>document.querySelector(s).getBoundingClientRect().top))'),fixed);
+  assert.ok(await js('document.querySelector("[data-view=schedules]").getBoundingClientRect().bottom<document.querySelector("#wsSideScroll").getBoundingClientRect().top'));
+  assert.ok(await js('[...document.querySelectorAll("#wsSideScroll .ws-nav,#wsSideScroll .ws-list-body")].every(el=>getComputedStyle(el).overflowY!=="auto")'));
+  report.cases.push('one scrollport moves navigation and history while brand/new conversation/account stay fixed');
+  const name='客户年度方案 · 复核完成';
+  assert.equal(await js('document.querySelectorAll(".ws-chat-rename").length'),50);
+  assert.ok(await js('[...document.querySelectorAll(".ws-chat-rename")].every(button=>button.closest(".ws-chat-menu").hidden&&button.getClientRects().length===0)'));
+  await js('document.querySelector("[data-chat-menu]").click()');
+  assert.equal(await js('document.querySelector("[data-chat-menu]").getAttribute("aria-expanded")'),'true');
+  assert.equal(await js('document.activeElement.getAttribute("role")'),'menuitem');
+  await shot('title-menu');await escape();
+  assert.ok(await js('document.querySelector("#nchatTitleMenu").hidden&&document.activeElement.matches("[data-chat-menu]")'));
+  win.webContents.sendInputEvent({type:'keyDown',keyCode:'R',modifiers:['control','alt']});
+  win.webContents.sendInputEvent({type:'keyUp',keyCode:'R',modifiers:['control','alt']});
+  await until('!!document.querySelector(".nchat-rename-dialog[open]")');
+  assert.ok(await js('document.querySelector("input.nchat-rename-input").selectionEnd===document.querySelector("input.nchat-rename-input").value.length'));
+  await escape();
+  report.cases.push('sidebar rename actions stay inside closed row menus; title menu focus, Escape and Ctrl+Alt+R work');
+  await js('startRename("chat-0");typeName('+JSON.stringify(name)+')');
+  assert.equal(await js('opens.length'),0);
+  key('ENTER');await until('!document.querySelector(".nchat-rename-form")');
+  assert.equal(await js('chatName("chat-0")'),name);
+  assert.equal(await js('document.querySelector("#nchatTitle").textContent'),name);
+  const opened=await js('soduWorkAPI.conversationSession.open({chatId:"chat-0"})');
+  assert.equal(opened.ok,true,JSON.stringify(opened));assert.equal(opened.title,name);
+  listener({kind:'state'},live.snapshot());await delay(150);
+  assert.equal(await js('chatName("chat-0")'),name);
+  report.cases.push('rename a running chat via UI; Enter saves through IPC; reopening and stream presence preserve the name');
+  await js('startRename("chat-0");typeName("不保存")');await escape();
+  await js('startRename("chat-0");typeName("不保存")');await js('document.querySelector(".nchat-rename-close").click()');
+  assert.equal(await js('chatName("chat-0")'),name);
+  await js('startRename("chat-0");typeName("   ")');key('ENTER');
+  await until('document.querySelector(".nchat-rename-error")?.hidden===false');
+  assert.equal(await js('chatName("chat-0")'),name);await escape();
+  report.cases.push('Escape cancels; empty names are rejected without changing saved title');
+  for(const id of ['chat-1','chat-2']){
+    await js('startRename('+JSON.stringify(id)+');typeName("跨 Agent 改名 '+id+'")');key('ENTER');
+    await until('!document.querySelector(".nchat-rename-form")');assert.equal(await js('chatName('+JSON.stringify(id)+')'),'跨 Agent 改名 '+id);
+  }
+  report.cases.push('Codex and OpenCode histories also support persistent renaming');
+  missing=true;
+  await js('startRename("chat-3");typeName("失败时保留草稿")');key('ENTER');
+  await until('document.querySelector(".nchat-rename-error")?.hidden===false');
+  assert.equal(await js('document.querySelector(".nchat-rename-input").value'),'失败时保留草稿');
+  missing=false;slow=true;key('ENTER');
+  await until('document.querySelector(".nchat-rename-form")?.getAttribute("aria-busy")==="true"');
+  assert.ok(await js('document.querySelector(".nchat-rename-form button[type=submit]").disabled'));
+  await until('!document.querySelector(".nchat-rename-form")');slow=false;
+  report.cases.push('missing conversation fails visibly, preserves draft, retries once and disables duplicate submits');
+  await js('startRename("chat-0");typeName("正在编辑不丢失")');
+  listener({kind:'state'},live.snapshot());await delay(150);
+  assert.ok(await js('document.activeElement===document.querySelector(".nchat-rename-input")'));
+  assert.equal(await js('document.querySelector(".nchat-rename-input").value'),'正在编辑不丢失');await escape();
+  await js('WorkspaceShell.setChats('+JSON.stringify(rows)+')');
+  assert.equal(await js('chatName("chat-0")'),name);
+  report.cases.push('live events keep editor focus/draft; stale history cannot undo a saved name');
+  await js('row("chat-0").querySelector(".ws-chat-pin").click()');
+  assert.ok(await js('document.querySelector("#wsPinnedChats .ws-chat-row")===row("chat-0")'));
+  win.webContents.reload();await until('document.querySelectorAll(".ws-chat-row").length===50');
+  assert.equal(await js('chatName("chat-0")'),name);
+  assert.equal(await js('chatName("chat-1")'),'跨 Agent 改名 chat-1');
+  await js('soduWorkAPI.conversationSession.open({chatId:"chat-0"}).then(got=>ChatChrome.resume(got.title))');
+  assert.equal(await js('document.querySelector("#nchatTitle").textContent'),name);
+  report.cases.push('renderer reload restores saved names and pinning');
+  // The two chat groups are independent preferences, not part of a history snapshot.
+  await js('window.foldRow=row("chat-0");window.foldHeader=document.querySelector("#wsPinnedToggle");window.beforeFoldOpens=opens.length;foldHeader.click()');
+  assert.ok(await js('document.querySelector("#wsPinnedChats").hidden&&!document.querySelector("#wsChats").hidden'));
+  assert.equal(await js('document.querySelector("#wsPinnedToggle").title'),'展开置顶');
+  assert.equal(await js('getComputedStyle(document.querySelector("#wsPinnedChats")).display'),'none');
+  await js('WorkspaceShell.setChats('+JSON.stringify(rows)+');WorkspaceShell.upsertChat({id:"chat-4",title:"更新后的讨论",at:9996,state:"running"});WorkspaceShell.setActiveChat("chat-4")');
+  listener({kind:'state'},live.snapshot());await delay(150);
+  assert.ok(await js('foldRow===row("chat-0")&&foldHeader===document.querySelector("#wsPinnedToggle")&&document.querySelector("#wsPinnedChats").hidden'));
+  assert.equal(await js('chatName("chat-4")'),'更新后的讨论');
+  assert.equal(await js('opens.length===beforeFoldOpens'),true,'folding must not open a new conversation');
+  await js('document.querySelector("#wsChatsToggle").click();WorkspaceShell.setActive("settings");WorkspaceShell.setActive("create")');
+  assert.ok(await js('["#wsPinnedChats","#wsChats"].every(s=>{const el=document.querySelector(s);return el.hidden&&el.getClientRects().length===0})'));
+  await js('document.querySelector("#wsChatsToggle").focus();row("chat-4").querySelector(".ws-chat").focus()');
+  assert.equal(await js('document.activeElement.id'),'wsChatsToggle','collapsed descendants must not receive focus');
+  assert.equal(await js('document.querySelector("#wsRecentToggle").getAttribute("aria-expanded")'),'false');
+  report.cases.push('independent collapse keeps mounted rows and live updates; no navigation side effects or hidden focus targets');
+  // Simulate a changed pin inventory while both groups are collapsed.
+  await js('window.fixturePinsKey="soduwork_work_chat_pins_v1:"+encodeURIComponent(SoduWorkAPI.hubBase());localStorage.setItem(fixturePinsKey,"[]");WorkspaceShell.setChats('+JSON.stringify(rows)+')');
+  assert.ok(await js('document.querySelector("#wsPinnedBox").hidden'));
+  await js('localStorage.setItem(fixturePinsKey,JSON.stringify(["chat-0","chat-4"]));WorkspaceShell.setChats('+JSON.stringify(rows)+')');
+  assert.ok(await js('!document.querySelector("#wsPinnedBox").hidden&&document.querySelector("#wsPinnedChats").hidden&&document.querySelector("#wsChats").hidden&&row("chat-4").parentElement.id==="wsPinnedChats"'));
+  await js('localStorage.setItem(fixturePinsKey,JSON.stringify(["chat-0"]));WorkspaceShell.setChats('+JSON.stringify(rows)+')');
+  win.webContents.reload();await until('document.querySelectorAll(".ws-chat-row").length===50');
+  assert.ok(await js('["wsPinnedToggle","wsChatsToggle"].every(id=>document.getElementById(id).getAttribute("aria-expanded")==="false")'));
+  assert.ok(await js('document.querySelector("#wsPinnedChats").hidden&&document.querySelector("#wsChats").hidden'));
+  report.cases.push('empty/repopulated pin group retains collapse preference; both preferences survive renderer reload');
+  win.webContents.debugger.attach('1.3');
+  await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true});
+  await js('document.querySelector("#wsPinnedToggle").focus()');key('ENTER');
+  await until('!document.querySelector("#wsPinnedChats").hidden');
+  assert.ok(await js('document.querySelector("#wsChats").hidden'));
+  win.webContents.sendInputEvent({type:'keyDown',keyCode:'Space'});
+  win.webContents.sendInputEvent({type:'char',keyCode:' '});
+  win.webContents.sendInputEvent({type:'keyUp',keyCode:'Space'});
+  await until('document.querySelector("#wsPinnedChats").hidden');
+  assert.equal(await js('document.activeElement.id'),'wsPinnedToggle');
+  await js('document.querySelector("#wsChatsToggle").focus()');key('ENTER');
+  await until('!document.querySelector("#wsChats").hidden');
+  await js('document.querySelector("#wsSideScroll").scrollTop=0');
+  const foldedShot=path.join(root,'sidebar-folded.png');
+  fs.writeFileSync(foldedShot,(await win.webContents.capturePage({x:0,y:0,width:240,height:680})).toPNG());report.screenshots.push(foldedShot);
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
+  assert.equal(await js('getComputedStyle(document.querySelector("#wsPinnedToggle svg")).transitionDuration'),'0s');
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[]});
+  win.webContents.debugger.detach();
+  await js('document.querySelector("#wsPinnedToggle").click();WorkspaceShell.setActiveChat("chat-0")');
+  report.cases.push('native Enter/Space toggles each group, retains focus and respects reduced motion');
+  await js('document.querySelector(".ws-new-chat button").click()');
+  assert.deepEqual(await js('opens.at(-1)'),{key:'create',options:{newSession:true}});
+  await js('WorkspaceShell.setActive("settings")');
+  assert.equal(await js('getComputedStyle(document.querySelector(".ws-new-chat")).display'),'none');
+  await js('WorkspaceShell.setActive("create")');
+  report.cases.push('new conversation action and settings/return navigation stay intact');
+  await js('document.querySelector("#wsSideScroll").scrollTop=0');await shot('sidebar-light');
+  const accent=await js('getComputedStyle(document.documentElement).getPropertyValue("--accent")');
+  await js('document.documentElement.dataset.theme="warm";startRename("chat-0")');
+  assert.notEqual(await js('getComputedStyle(document.documentElement).getPropertyValue("--accent")'),accent);
+  assert.equal(await js('getComputedStyle(document.querySelector(".nchat-rename-input")).fontSize'),'14px');
+  await shot('sidebar-edit-warm');await escape();
+  report.cases.push('rename editor follows theme accent and keeps 14px input type');
+  win.setSize(760,480);await delay(100);
+  for (const height of [720,480,360]) {
+    win.setSize(760,height);await delay(100);
+    const measure=()=>js('(()=>{const rect=s=>{const r=document.querySelector(s).getBoundingClientRect();return {top:r.top,bottom:r.bottom,height:r.height}};return {upper:rect("#wsSideScroll"),recent:rect("#wsRecentBox"),profile:rect(".ws-profile-row"),side:rect(".ws-side"),tasks:rect("#wsRecent"),scroll:document.querySelector("#wsSideScroll").scrollTop}})()');
+    await js('document.querySelector("#wsSideScroll").scrollTop=200');
+    const collapsed=await measure();
+    await js('document.querySelector("#wsRecentToggle").click()');
+    const expanded=await measure();
+    assert.ok(expanded.upper.height<collapsed.upper.height, 'expanding tasks reduces upper viewport');
+    assert.ok(expanded.upper.height>40, 'upper navigation remains reachable');
+    assert.equal(expanded.profile.top,collapsed.profile.top, 'account stays anchored');
+    assert.equal(expanded.scroll,collapsed.scroll, 'expanding does not jump chat scroll position');
+    assert.ok(expanded.upper.bottom<=expanded.recent.top+1);
+    assert.ok(expanded.recent.bottom<=expanded.profile.top+1);
+    assert.ok(expanded.profile.bottom<=expanded.side.bottom);
+    await js('document.querySelector("#wsSideScroll").scrollTop=100000');
+    assert.deepEqual((await measure()).recent,expanded.recent, 'upper scroll cannot move the task dock');
+    const upperEnd=(await measure()).scroll;
+    await js('document.querySelector("#wsRecent").scrollTop=100000');
+    assert.equal((await measure()).scroll,upperEnd, 'task scroll cannot move upper navigation');
+    assert.ok(await js('(()=>{const last=document.querySelector("#wsRecent .ws-task:last-child").getBoundingClientRect(),scroll=document.querySelector("#wsRecent").getBoundingClientRect();return last.top>=scroll.top&&last.bottom<=scroll.bottom+1;})()'));
+    assert.ok(await js('["#wsSideScroll","#wsRecent",".ws-side"].every(s=>{const el=document.querySelector(s);return el.scrollWidth<=el.clientWidth})'));
+    assert.ok(await js('document.querySelector(".ws-side").scrollHeight<=document.querySelector(".ws-side").clientHeight'));
+    await shot('sidebar-expanded-'+height);
+    await js('document.querySelector("#wsRecentToggle").click()');
+    assert.equal((await measure()).upper.height,collapsed.upper.height);
+    assert.equal(await js('document.querySelector("#wsRecentToggle").getAttribute("aria-expanded")'),'false');
+  }
+  report.cases.push('720/480/360px heights: fixed task dock expands upward, independent task scroll, stable account and no outer overflow');
+  win.setSize(760,480);await delay(100);
+  await js('document.querySelector("#wsRecentToggle").click();document.querySelector("#wsRecent").scrollTop=0;document.querySelector("#wsSideScroll").scrollTop=150');
+  const wheelPoint=await js('(()=>{const r=document.querySelector("#wsRecent").getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()');
+  win.webContents.debugger.attach('1.3');
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseMoved',...wheelPoint});
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',...wheelPoint,deltaY:150,deltaX:0});
+  await until('document.querySelector("#wsRecent").scrollTop>0');
+  assert.equal(await js('document.querySelector("#wsSideScroll").scrollTop'),150);
+  await js('document.querySelector("#wsRecent").scrollTop=100000');
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',...wheelPoint,deltaY:150,deltaX:0});await delay(200);
+  assert.equal(await js('document.querySelector("#wsSideScroll").scrollTop'),150, 'wheel at task boundary does not chain to upper scrollport');
+  win.webContents.debugger.detach();
+  await js('document.querySelector("#wsRecent .ws-task:last-child").click()');
+  assert.equal((await js('opens.at(-1)')).options.taskId,'task-7');
+  await js('document.querySelector("#wsRecentToggle").click()');
+  report.cases.push('real mouse wheel scrolls tasks independently even at boundary; last task still opens its conversation');
+  await js('WorkspaceShell.setTasks([]);document.querySelector("#wsRecentToggle").click()');
+  assert.ok(await js('document.querySelector("#wsRecent .ws-list-empty")?.textContent==="还没有任务"'));
+  assert.ok(await js('document.querySelector(".ws-side").scrollHeight<=document.querySelector(".ws-side").clientHeight'));
+  await js('WorkspaceShell.setActive("settings")');
+  assert.equal(await js('getComputedStyle(document.querySelector("#wsRecentBox")).display'),'none');
+  await js('WorkspaceShell.setActive("create");document.querySelector("#wsRecentToggle").focus()');
+  key('ENTER');
+  await until('document.querySelector("#wsRecentToggle").getAttribute("aria-expanded")==="false"');
+  assert.equal(await js('document.querySelector("#wsRecentToggle").getAttribute("aria-expanded")'),'false');
+  await shot('sidebar-short-window');
+  report.cases.push('empty task dock, settings/return and keyboard collapse remain usable');
+  const rejected=await js('soduWorkAPI.conversationSession.renameHistory("missing","unknown")');assert.equal(rejected.ok,false);
+  // Storage failures must not prevent the shell mounting or using the controls.
+  win.webContents.debugger.attach('1.3');
+  const storageFault=await win.webContents.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument',{source:'Storage.prototype.getItem=function(){throw Error("fixture: storage denied")};Storage.prototype.setItem=function(){throw Error("fixture: storage denied")};'});
+  win.webContents.reload();await until('document.querySelectorAll(".ws-chat-row").length===50');
+  assert.equal(await js('document.querySelector("#wsChatsToggle").getAttribute("aria-expanded")'),'true');
+  await js('document.querySelector("#wsChatsToggle").click()');
+  assert.ok(await js('document.querySelector("#wsChats").hidden'));
+  await js('document.querySelector("#wsChatsToggle").click()');
+  assert.ok(await js('!document.querySelector("#wsChats").hidden'));
+  await win.webContents.debugger.sendCommand('Page.removeScriptToEvaluateOnNewDocument',{identifier:storageFault.identifier});
+  win.webContents.debugger.detach();
+  report.cases.push('denied storage reads/writes fall back to expanded defaults and working toggles');
+  assert.deepEqual(await js('errors'),[]);report.ok=true;
+}
+app.whenReady().then(run).catch(async error=>{report.error=error.stack;if(win){report.ui=await js('({focused:document.activeElement?.outerHTML,error:document.querySelector(".nchat-rename-error")?.textContent,editor:document.querySelector(".nchat-rename-form")?.outerHTML})');await shot('failure');}})
+  .finally(()=>{fs.writeFileSync(path.join(root,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));if(win)win.destroy();app.exit(report.ok?0:1);});

@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>新建对话路由走查</title>
+<style>#out{white-space:pre-wrap}.compose-panel:not(.show){display:none}</style>
+</head>
+<body>
+<pre id="out">START</pre>
+<script>
+window.addEventListener('error',e=>{document.getElementById('out').textContent='FAIL  '+e.message+' @ '+e.filename+':'+e.lineno+'\n\nnew conversation smoke: 0 passed, 1 failed'});
+window.addEventListener('unhandledrejection',e=>{document.getElementById('out').textContent='FAIL  '+(e.reason&&e.reason.stack||e.reason)+'\n\nnew conversation smoke: 0 passed, 1 failed'});
+let seq=0,eventSink=null;
+const opened=[],closed=[],sent=[],routes=[];
+const snap=()=>({status:'idle',statusText:'',messages:[],tools:[],usage:null,pendingUi:null});
+window.SoduWorkAPI={myModels:async()=>({usable:[]})};
+window.soduWorkAPI={conversationSession:{
+  capabilities:async()=>({ok:true,items:[]}),
+  history:async()=>({ok:true,chats:[]}),
+  probe:async()=>({ok:true}),
+  open:async()=>({ok:false}),
+  onEvent:(fn)=>{eventSink=fn;return()=>{eventSink=null}},
+  send:async(ref,text)=>{sent.push({ref,text});return {ok:true}},
+  close:(ref)=>{closed.push(ref)},cancel:()=>{}
+}};
+/* Create distinct refs for new sessions while preserving chatId evidence on resume. */
+window.soduWorkAPI.conversationSession.open=async(options={})=>{
+  opened.push({...options});
+  const ref=options.chatId?'history:'+options.chatId:'new:'+(++seq);
+  return {ok:true,ref,sessionId:options.chatId||'fixture-'+seq,model:{},snapshot:snap()};
+};
+window.__deskPanel='workspace';
+window.workRoot=()=>'';
+</script>
+<script src='../components/panels/work-intent.js'></script>
+<script src='../components/panels/work-composer.js'></script>
+<script src="../components/workspace/workspace-chat-history.js"></script>
+<script src="../components/workspace/workspace-chat-list.js"></script>
+<script src="../components/workspace/workspace-shell.js"></script>
+<script src="../components/panels/chat-dom-patch.js"></script>
+<script src="../components/panels/panels-chat-tools.js"></script>
+<script src="../components/panels/chat-task-start.js"></script>
+<script src="../components/panels/chat-task-controller.js"></script>
+<script src="../components/panels/chat-context-meter.js"></script>
+<script src="../components/panels/chat-scroll-follow.js"></script>
+<script src="../components/panels/chat-markdown.js"></script>
+<script src="../components/panels/chat-acceptance-results.js"></script>
+<script src="../components/panels/chat-message-renderer.js"></script>
+<script src="../components/panels/chat-send-queue.js"></script>
+<script src="../components/panels/chat-work-intent.js"></script>
+<script src="../components/panels/chat-draft-recovery.js"></script>
+<script src="../components/panels/chat-composer-bindings.js"></script>
+<script src="../components/panels/chat-session-controller.js"></script>
+<script src="../components/panels/panels-chat.js"></script>
+<script src="../components/panels/panels-compose-work-actions.js"></script>
+<script src="../components/panels/panels-compose-capabilities.js"></script>
+<script src="../components/panels/compose-surface.js"></script>
+<script src="../components/panels/panels-compose.js"></script>
+<script>
+window.WorkspaceHost={open:(view,payload={})=>{
+  routes.push({view,payload:{...payload}});
+  WorkspaceShell.setActive(view);
+  if(view==='create')openComposePanel(payload);
+}};
+</script>
+<script src="../core/win-bridge.js"></script>
+<script>
+(async()=>{
+  let pass=0,fail=0;const lines=[];
+  const chk=(name,ok)=>{ok?pass++:fail++;lines.push((ok?'PASS  ':'FAIL  ')+name)};
+  const waitFor=async(fn)=>{for(let i=0;i<80;i++){if(fn())return true;await new Promise(r=>setTimeout(r,10))}return false};
+  const sendFirst=async(text)=>{
+    const input=document.getElementById('cpInput');input.value=text;
+    document.getElementById('cpGo').click();
+    return waitFor(()=>sent.some(x=>x.text===text));
+  };
+
+  WorkspaceShell.mount();WorkspaceShell.setActive('create');
+  openComposePanel({newSession:true});
+  chk('第一条消息真实建立会话',await sendFirst('第一条对话'));
+  chk('第一条会话拿到独立 ref',sent[0]&&sent[0].ref==='new:1');
+
+  document.querySelector('.ws-nav-item[data-view="create"]').click();
+  chk('主菜单新建携带明确的新会话意图',routes.at(-1).payload.newSession===true);
+  chk('再次点击同一页也会关闭旧会话',closed.filter(x=>x==='new:1').length===1);
+  chk('新建后回到空白起手式',document.getElementById('composePanel').dataset.stage==='compose'&&!NativeChat.hasSession());
+  chk('旧消息 DOM 已清理',document.getElementById('cpChat').innerHTML==='');
+
+  chk('第二条消息可以继续发送',await sendFirst('第二条对话'));
+  const second=sent.find(x=>x.text==='第二条对话');
+  chk('连续新建得到不同会话',!!second&&second.ref==='new:2');
+
+  document.querySelector('.ws-nav-item[data-view="create"]').click();
+  const longGoal='创建一个可直接运行的精美射击小游戏，并完成自动化试玩验证。'+
+    '请保证交互、视觉、稳定性和最终交付都可以直接检查。'.repeat(24);
+  const goalInput=document.getElementById('cpInput');goalInput.value=longGoal;
+  goalInput.dispatchEvent(new Event('input',{bubbles:true}));
+  document.getElementById('cpIntentMenu').click();
+  const criteria=document.getElementById('cpIntentAcceptance');
+  criteria.value='打开即可游玩\n控制台没有错误\n完成自动化试玩验证';
+  criteria.dispatchEvent(new Event('input',{bubbles:true}));
+  const inlineBrief=document.getElementById('cpIntentBrief');
+  chk('设定目标仍在同一个输入框内联完成',
+    inlineBrief.classList.contains('show')&&!!inlineBrief.closest('.work-composer'));
+  document.getElementById('cpGo').click();
+  chk('目标与完成标准一次进入同一工作会话',await waitFor(()=>opened.some(x=>x.goal===longGoal))&&
+    opened.at(-1).acceptance==='打开即可游玩\n控制台没有错误\n完成自动化试玩验证');
+  chk('发送后目标填写区立即收起',await waitFor(()=>!inlineBrief.classList.contains('show')&&
+    document.getElementById('composePanel').dataset.stage==='chat'));
+  chk('长目标发送后默认折叠且保留展开入口',await waitFor(()=>document.querySelector('.nuser-long'))&&
+    !document.querySelector('.nuser-long').open&&!!document.querySelector('.nuser-long .nuser-more'));
+  chk('目标和完成标准附着在同一条用户消息',!!document.querySelector('.nuser-goalmeta')&&
+    !!document.querySelector('.nuser-criteria'));
+  const goalRail=document.getElementById('nchatIntentRail');
+  const entryDock=document.querySelector('.nchat-entry-dock');
+  chk('真实会话中的队列与输入框共用定位容器',!!entryDock&&
+    document.getElementById('nchatQueue').parentElement===entryDock&&
+    document.querySelector('.nbox').parentElement===entryDock);
+  chk('目标进度条位于加号下方并与任务共用输入框上沿',!!goalRail&&!!entryDock&&
+    goalRail.parentElement.classList.contains('nqueue-goal-slot')&&entryDock.contains(goalRail)&&
+    !document.querySelector('.nbox').contains(goalRail));
+  chk('目标状态只用轻提示而不复制任务工作台',
+    !!goalRail&&goalRail.classList.contains('show')&&
+    goalRail.dataset.state==='running'&&!document.querySelector('.ncw-workbrief'));
+  WorkspaceShell.setChats([{id:'saved-7',title:'历史会话',cwd:'C:\\workdir'}]);
+  document.querySelector('[data-chat-id="saved-7"]').click();
+  chk('历史入口带 chatId 而不冒充新建',routes.at(-1).payload.chatId==='saved-7'&&!routes.at(-1).payload.newSession);
+  chk('历史会话按原 id 续接',await waitFor(()=>opened.some(x=>x.chatId==='saved-7')));
+
+  /* Drafts must survive the real history/new-session route, including the
+     first-message composer which has no server conversation id yet. */
+  const historyDraft=document.getElementById('nchatInput');
+  historyDraft.value='历史会话里尚未发送的内容';
+  historyDraft.dispatchEvent(new Event('input',{bubbles:true}));
+  document.querySelector('.ws-nav-item[data-view="create"]').click();
+  const freshDraft=document.getElementById('cpInput');
+  freshDraft.value='新会话里尚未发送的内容';
+  freshDraft.dispatchEvent(new Event('input',{bubbles:true}));
+  document.querySelector('[data-chat-id="saved-7"]').click();
+  chk('切回历史会话恢复未发送内容',await waitFor(()=>document.getElementById('nchatInput')?.value==='历史会话里尚未发送的内容'));
+  document.querySelector('.ws-nav-item[data-view="create"]').click();
+  chk('切回新会话恢复起手式草稿',document.getElementById('cpInput')?.value==='新会话里尚未发送的内容');
+
+  openPiChatEntry();
+  chk('普通新会话不继承当前会话工作目录',!routes.at(-1).payload.cwd);
+  chk('桌宠新对话入口也明确新建',routes.at(-1).payload.newSession===true&&!routes.at(-1).payload.chatId);
+  openPiChatEntry('saved-8');
+  chk('桌宠历史入口仍只续接指定会话',routes.at(-1).payload.chatId==='saved-8'&&!routes.at(-1).payload.newSession);
+  await waitFor(()=>opened.some(x=>x.chatId==='saved-8'));
+  openCreateEntry({tab:'task'});
+  chk('普通新建需求入口不继承当前会话工作目录',!routes.at(-1).payload.cwd);
+  chk('统一新建入口不会恢复上一条会话',routes.at(-1).payload.newSession===true);
+
+  document.getElementById('out').textContent=lines.join('\n')+'\n\nnew conversation smoke: '+pass+' passed, '+fail+' failed';
+})().catch(e=>{document.getElementById('out').textContent='FAIL  '+(e&&e.stack||e)+'\n\nnew conversation smoke: 0 passed, 1 failed'});
+</script>
+</body>
+</html>

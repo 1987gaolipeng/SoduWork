@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "id": "elevenlabs",
+  "name": "ElevenLabs",
+  "category": "图像与影音",
+  "description": "ElevenLabs 通用连接器：用户信息、语音列表、文本转语音合成。基于 ElevenLabs API，xi-api-key 鉴权。合成端点按使用量计费：定义仅供审阅，不得在未授权下执行。",
+  "officialDocs": [
+    "https://elevenlabs.io/docs/api-reference/endpoint/get-user",
+    "https://elevenlabs.io/docs/api-reference/endpoint/get-voices",
+    "https://elevenlabs.io/docs/api-reference/endpoint/text-to-speech"
+  ],
+  "authDocs": [
+    "https://elevenlabs.io/docs/api-reference/introduction#authentication"
+  ],
+  "baseUrl": "https://api.elevenlabs.io",
+  "fields": [
+    {
+      "key": "ELEVENLABS_KEY",
+      "label": "API Key",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "header",
+    "tokenKey": "ELEVENLABS_KEY",
+    "header": "xi-api-key"
+  },
+  "headers": {
+    "Accept": "application/json"
+  },
+  "tools": [
+    {
+      "name": "get_user",
+      "description": "获取用户订阅与用量（GET /v1/user）。无分页。出处：https://elevenlabs.io/docs/api-reference/endpoint/get-user",
+      "method": "GET",
+      "path": "/v1/user",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_voices",
+      "description": "列出可用语音（GET /v1/voices）。无分页（一次返回全量）。出处：https://elevenlabs.io/docs/api-reference/endpoint/get-voices",
+      "method": "GET",
+      "path": "/v1/voices",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "text_to_speech",
+      "description": "文本转语音并返回 JSON（POST /v1/text-to-speech/{voice_id}/with-timestamps，官方返回 audio_base64 + 字符级 alignment 的 JSON；音频 ≤2MB，超出拒绝）。计费操作：消耗字符额度，执行前必须获得用户明确授权。出处：https://elevenlabs.io/docs/api-reference/endpoint/text-to-speech",
+      "method": "POST",
+      "path": "/v1/text-to-speech/{voice_id}/with-timestamps",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "voice_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9]{16,30}$",
+            "description": "voice ID（list_voices 获取）",
+            "maxLength": 10000
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000,
+            "description": "合成文本"
+          },
+          "model_id": {
+            "type": "string",
+            "enum": [
+              "eleven_multilingual_v2",
+              "eleven_turbo_v2_5",
+              "eleven_flash_v2_5"
+            ],
+            "default": "eleven_multilingual_v2",
+            "description": "模型",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "voice_id",
+          "text"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "text": "$text",
+        "model_id": "$model_id"
+      },
+      "readOnly": false,
+      "responseEncoding": "json"
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "鉴权头为 xi-api-key: <key>（非 Bearer）。",
+    "text_to_speech 消耗订阅字符额度（计费）：任何执行都需要用户逐次明确授权；返回 JSON（audio_base64 与 alignment），非二进制流；响应含 base64 音频，上限 2MB，超出拒绝；工具声明 responseEncoding=json，运行器按 JSON 解析交付。",
+    "本定义仅声明接口结构，不执行、不预授权。"
+  ]
+}

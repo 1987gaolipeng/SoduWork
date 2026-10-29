@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "id": "dropbox",
+  "name": "Dropbox",
+  "category": "云存储",
+  "description": "Dropbox 通用连接器：账户信息、文件夹列表（RPC list_folder）、创建文件夹。基于 Dropbox HTTP 内容/RPC API，OAuth 访问令牌由用户安全填入。",
+  "officialDocs": [
+    "https://www.dropbox.com/developers/documentation/http/documentation",
+    "https://www.dropbox.com/developers/documentation/http/documentation#users-get_current_account",
+    "https://www.dropbox.com/developers/documentation/http/documentation#files-list_folder",
+    "https://www.dropbox.com/developers/documentation/http/documentation#files-create_folder_v2"
+  ],
+  "authDocs": [
+    "https://www.dropbox.com/developers/reference/authenticator"
+  ],
+  "baseUrl": "https://api.dropboxapi.com/2",
+  "fields": [
+    {
+      "key": "DROPBOX_ACCESS_TOKEN",
+      "label": "OAuth 访问令牌",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "tokenKey": "DROPBOX_ACCESS_TOKEN",
+    "header": "Authorization",
+    "prefix": "Bearer"
+  },
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "tools": [
+    {
+      "name": "get_current_account",
+      "description": "获取当前账户信息（RPC users/get_current_account；无参方法不发请求体，body=null）。无分页。出处：https://www.dropbox.com/developers/documentation/http/documentation#users-get_current_account",
+      "method": "POST",
+      "path": "/users/get_current_account",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "body": null,
+      "readOnly": true
+    },
+    {
+      "name": "list_folder",
+      "description": "列出文件夹内容（RPC files/list_folder）。分页：响应 has_more + cursor，续页走 list_folder/continue（本定义只声明首页）。出处：https://www.dropbox.com/developers/documentation/http/documentation#files-list_folder",
+      "method": "POST",
+      "path": "/files/list_folder",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "文件夹路径，空字符串为根目录",
+            "maxLength": 10000
+          },
+          "recursive": {
+            "type": "boolean",
+            "default": false,
+            "description": "递归"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2000,
+            "description": "首页条数上限"
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "body": {
+        "path": "$path",
+        "recursive": "$recursive",
+        "limit": "$limit"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_folder_continue",
+      "description": "续页列出文件夹内容（RPC files/list_folder/continue，传入上一页返回的 cursor）。分页：cursor 驱动，has_more=true 时继续。出处：https://www.dropbox.com/developers/documentation/http/documentation#files-list_folder-continue",
+      "method": "POST",
+      "path": "/files/list_folder/continue",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "type": "string",
+            "minLength": 1,
+            "description": "上一页响应的 cursor",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "cursor"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "cursor": "$cursor"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_folder",
+      "description": "创建文件夹（RPC files/create_folder_v2，autorename 固定 false）。写入操作：运行前必须获得用户明确授权。出处：https://www.dropbox.com/developers/documentation/http/documentation#files-create_folder_v2",
+      "method": "POST",
+      "path": "/files/create_folder_v2",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "新文件夹路径",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "path": "$path",
+        "autorename": false
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "Dropbox 为 RPC 风格：全部业务请求为 POST + JSON body；Content-Type: application/json 由连接器级 headers 声明。",
+    "短时令牌（sl. 开头）过期后需用户重新获取；自动续期为宿主侧适配项，本连接器未实现。",
+    "create_folder 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

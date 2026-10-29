@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>SoduWork 截图</title>
+  <link rel="stylesheet" href="screenshot.css">
+</head>
+<body>
+  <main id="captureSurface" aria-label="截图框选区域">
+    <img id="desktopImage" alt="" draggable="false">
+    <canvas id="annotationCanvas" aria-hidden="true"></canvas>
+    <div id="shadeTop" class="shade"></div><div id="shadeLeft" class="shade"></div>
+    <div id="shadeRight" class="shade"></div><div id="shadeBottom" class="shade"></div>
+    <div id="selection" hidden>
+      <div id="selectionSize"></div>
+      <i data-handle="nw"></i><i data-handle="n"></i><i data-handle="ne"></i><i data-handle="e"></i>
+      <i data-handle="se"></i><i data-handle="s"></i><i data-handle="sw"></i><i data-handle="w"></i>
+    </div>
+  </main>
+  <div id="captureHint" role="status">正在准备截图… <button type="button" data-action="cancel">取消</button></div>
+  <section id="toolbar" aria-label="截图编辑工具" hidden>
+    <div class="tool-row">
+      <span id="toolbarGrip" title="拖动工具栏" aria-label="拖动工具栏"><svg viewBox="0 0 12 24"><path d="M4 6h.01M8 6h.01M4 12h.01M8 12h.01M4 18h.01M8 18h.01"/></svg></span>
+      <div class="tool-group" aria-label="标注工具">
+        <button data-tool="select" title="移动选区" aria-label="移动选区"><svg><path d="m5 3 13 8-7 2-3 7z"/></svg></button>
+        <button data-tool="rect" title="矩形" aria-label="矩形"><svg><rect x="4" y="5" width="16" height="14" rx="1"/></svg></button>
+        <button data-tool="ellipse" title="椭圆" aria-label="椭圆"><svg><ellipse cx="12" cy="12" rx="8" ry="7"/></svg></button>
+        <button data-tool="arrow" title="箭头" aria-label="箭头"><svg><path d="M5 19 19 5M8 5h11v11"/></svg></button>
+        <button data-tool="pen" title="画笔" aria-label="画笔"><svg><path d="m15 4 5 5M4 20l1-6L16 3a2 2 0 0 1 3 0l2 2a2 2 0 0 1 0 3L10 19z"/></svg></button>
+        <button data-tool="text" title="文字" aria-label="文字"><svg><path d="M4 6V4h16v2M12 4v16M8 20h8"/></svg></button>
+        <button data-tool="mosaic" title="马赛克" aria-label="马赛克"><svg><path d="M4 4h16v16H4zM4 9h16M4 15h16M9 4v16M15 4v16"/></svg></button>
+      </div>
+      <div class="tool-group history-group">
+        <button data-action="undo" title="撤销 (Ctrl+Z)" aria-label="撤销"><svg><path d="m8 4-5 5 5 5M3 9h10a7 7 0 0 1 7 7v4"/></svg></button>
+        <button data-action="redo" title="重做 (Ctrl+Shift+Z)" aria-label="重做"><svg><path d="m16 4 5 5-5 5M21 9H11a7 7 0 0 0-7 7v4"/></svg></button>
+      </div>
+      <div class="tool-group finish-group">
+        <button data-action="reselect" title="重新框选" aria-label="重新框选"><svg><path d="M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5M8 8h8v8H8z"/></svg></button>
+        <button data-action="save" title="另存为图片 (Ctrl+S)" aria-label="另存为图片"><svg><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg></button>
+        <button data-action="cancel" title="取消 (Esc)" aria-label="取消截图"><svg><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+        <button data-action="copy" class="complete" title="完成并复制 (Enter)" aria-label="完成并复制"><svg><path d="m5 12 4 4L19 6"/></svg><span>完成</span></button>
+      </div>
+    </div>
+    <div class="options-row">
+      <span id="activeToolName">移动选区</span>
+      <div id="colorOptions" class="color-options" role="group" aria-label="标注颜色">
+        <button data-color="#ed4747" aria-label="红色" style="--swatch:#ed4747"></button>
+        <button data-color="#f4bd28" aria-label="黄色" style="--swatch:#f4bd28"></button>
+        <button data-color="#29ad75" aria-label="绿色" style="--swatch:#29ad75"></button>
+        <button data-color="#3986ed" aria-label="蓝色" style="--swatch:#3986ed"></button>
+        <button data-color="#8b5cd6" aria-label="紫色" style="--swatch:#8b5cd6"></button>
+        <button data-color="#ffffff" aria-label="白色" style="--swatch:#ffffff"></button>
+        <button data-color="#202124" aria-label="黑色" style="--swatch:#202124"></button>
+      </div>
+      <label id="strokeControl">粗细 <select id="strokeWidth" aria-label="线条粗细"><option value="2">细</option><option value="4" selected>中</option><option value="7">粗</option></select></label>
+      <label id="textControl" hidden>字号 <select id="textSize" aria-label="文字大小"><option value="16">16</option><option value="22" selected>22</option><option value="30">30</option><option value="40">40</option></select></label>
+      <label id="mosaicControl" hidden>强度 <select id="mosaicSize" aria-label="马赛克强度"><option value="10">小</option><option value="18" selected>中</option><option value="28">大</option></select></label>
+      <span class="finish-hint">完成后可直接粘贴</span>
+    </div>
+  </section>
+  <textarea id="textEditor" aria-label="截图标注文字" placeholder="输入文字" spellcheck="false" maxlength="2000" hidden></textarea>
+  <div id="editorStatus" role="alert" hidden></div>
+  <div id="reselectConfirm" role="dialog" aria-label="重新框选" hidden>
+    <p>重新框选会清除当前标注。</p><div><button data-action="keep">继续编辑</button><button data-action="clear-reselect" class="confirm">清除并重选</button></div>
+  </div>
+  <script src="screenshot-model.js"></script>
+  <script src="screenshot-paint.js"></script>
+  <script src="screenshot-editor.js"></script>
+</body>
+</html>

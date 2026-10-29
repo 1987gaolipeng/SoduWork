@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>当前需求池与桌面刷新回归</title></head>
+<body>
+<iframe id="board" src="../e2e/fixtures/requirements-board.html" style="width:1200px;height:800px"></iframe>
+<pre id="out">START</pre>
+<script>
+let petPaints = 0, dockPaints = 0;
+function updatePet() { petPaints++; }
+function _paintDock() { dockPaints++; }
+</script>
+<script src="../components/pet/pet-refresh.js"></script>
+<script>
+const output = document.getElementById('out');
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+window.addEventListener('error', event => {
+  output.textContent = 'FAIL ' + event.message + '\n\nrender throttle smoke: 0 passed, 1 failed';
+});
+document.getElementById('board').addEventListener('load', async event => {
+  let passed = 0, failed = 0;
+  const lines = [];
+  const check = (name, ok) => {
+    ok ? passed++ : failed++;
+    lines.push((ok ? 'PASS ' : 'FAIL ') + name);
+  };
+  try {
+    const frame = event.target.contentWindow;
+    for (let i = 0; i < 100 && !frame.document.querySelector('[data-rq-open]'); i++) await wait(20);
+    await wait(50); // let the fixture's project directory settle before comparing nodes
+    const board = frame.RequirementsBoard;
+    board.render(true);
+    const card = () => frame.document.querySelector('[data-rq-open="ready-0"]');
+    check('真实需求池已加载', Boolean(card()));
+    let previous = card();
+    for (let i = 0; i < 20; i++) board.render();
+    check('内容未变的推送保留鼠标下的实际需求节点', card() === previous);
+    frame.eval("tasks.find(task => task.id === 'ready-0').title = '需求标题已经更新'");
+    board.render();
+    check('需求内容变化必须重画并显示新内容', card() !== previous && card().textContent.includes('需求标题已经更新'));
+    previous = card();
+    frame.eval("tasks.find(task => task.id === 'ready-0').status = 'doing'");
+    board.render();
+    check('需求阶段变化必须重画', card() !== previous);
+    previous = card();
+    petPaints = dockPaints = 0;
+    for (let i = 0; i < 20; i++) renderSoon();
+    await wait(260);
+    check('桌面连续刷新合并一次小球和快捷入口绘制', petPaints === 1 && dockPaints === 1);
+    check('桌面刷新不重建工作区需求节点', card() === previous);
+    petPaints = dockPaints = 0;
+    renderSoon(); render();
+    await wait(260);
+    check('直接刷新取消已排队刷新且立即生效', petPaints === 1 && dockPaints === 1);
+    check('当前需求池无脚本错误', frame.eval('fixtureErrors.length') === 0);
+  } catch (error) {
+    failed++; lines.push('FAIL ' + error.stack);
+  }
+  output.textContent = lines.join('\n') + '\n\nrender throttle smoke: ' + passed + ' passed, ' + failed + ' failed';
+});
+</script>
+</body></html>

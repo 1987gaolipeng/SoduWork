@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 1,
+  "id": "hubspot",
+  "name": "HubSpot",
+  "category": "客户管理",
+  "description": "HubSpot 通用连接器：联系人列表/详情、公司列表、创建联系人。基于 HubSpot CRM API v3，Private App Token 鉴权，不绑定任何汇报场景。",
+  "officialDocs": [
+    "https://developers.hubspot.com/docs/api/crm/contacts",
+    "https://developers.hubspot.com/docs/api/crm/companies",
+    "https://developers.hubspot.com/beta-docs/reference/api/crm/objects/contacts#get-cr-m-v3-objects-contacts"
+  ],
+  "authDocs": [
+    "https://developers.hubspot.com/docs/api/private-apps"
+  ],
+  "baseUrl": "https://api.hubapi.com",
+  "fields": [
+    {
+      "key": "HUBSPOT_TOKEN",
+      "label": "Private App Token",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "tokenKey": "HUBSPOT_TOKEN",
+    "header": "Authorization",
+    "prefix": "Bearer"
+  },
+  "headers": {
+    "Accept": "application/json"
+  },
+  "tools": [
+    {
+      "name": "list_contacts",
+      "description": "列出联系人，properties 白名单固定 firstname,lastname,email,lifecyclestage。分页：limit（1-100 默认 10）+ after 游标（响应 paging.next.after）。出处：https://developers.hubspot.com/docs/api/crm/contacts",
+      "method": "GET",
+      "path": "/crm/v3/objects/contacts",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 10,
+            "description": "每页条数"
+          },
+          "after": {
+            "type": "string",
+            "description": "上一页 paging.next.after 游标",
+            "maxLength": 10000
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "fixedQuery": {
+        "properties": "firstname,lastname,email,lifecyclestage"
+      },
+      "query": {
+        "limit": "limit",
+        "after": "after"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_contact",
+      "description": "按 contactId 获取联系人详情。无分页。出处：https://developers.hubspot.com/beta-docs/reference/api/crm/objects/contacts#get-cr-m-v3-objects-contacts-contact-id",
+      "method": "GET",
+      "path": "/crm/v3/objects/contacts/{contact_id}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contact_id": {
+            "type": "string",
+            "pattern": "^[0-9]{5,20}$",
+            "description": "联系人 ID",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "contact_id"
+        ],
+        "maxProperties": 50
+      },
+      "fixedQuery": {
+        "properties": "firstname,lastname,email,lifecyclestage"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_companies",
+      "description": "列出公司，properties 白名单固定 name,domain,industry。分页：limit + after 游标。出处：https://developers.hubspot.com/docs/api/crm/companies",
+      "method": "GET",
+      "path": "/crm/v3/objects/companies",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 10,
+            "description": "每页条数"
+          },
+          "after": {
+            "type": "string",
+            "description": "上一页游标",
+            "maxLength": 10000
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "fixedQuery": {
+        "properties": "name,domain,industry"
+      },
+      "query": {
+        "limit": "limit",
+        "after": "after"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_contact",
+      "description": "创建联系人（properties 对象整体传入）。写入操作：运行前必须获得用户明确授权。出处：https://developers.hubspot.com/docs/api/crm/contacts",
+      "method": "POST",
+      "path": "/crm/v3/objects/contacts",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "properties": {
+            "type": "object",
+            "description": "属性名到值的映射，至少含 email（叶子值为简单 JSON 类型：字符串/数字/布尔/null；最多 50 键）",
+            "additionalProperties": true,
+            "maxProperties": 50
+          }
+        },
+        "required": [
+          "properties"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "properties": "$properties"
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "Private App Token 需在 HubSpot 后台创建并勾选 scopes（contacts/companies 读取或写入）；未授权数据不可见。",
+    "OAuth 公开应用授权流当前客户端不支持，待宿主适配。",
+    "create_contact 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

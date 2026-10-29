@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "id": "huawei-cloud",
+  "name": "华为云 ECS",
+  "category": "云服务",
+  "description": "华为云 ECS 通用连接器（SDK-HMAC-SHA256 签名，只读）：查 API 版本、列云服务器、查单台详情。支持临时访问密钥。不提供任意云 API 透传。",
+  "runtimeKind": "huawei-cloud",
+  "officialDocs": [
+    "https://support.huaweicloud.com/api-ecs/zh-cn_topic_0094148850.html",
+    "https://support.huaweicloud.com/api-ecs/ecs_02_0104.html"
+  ],
+  "authDocs": [
+    "https://support.huaweicloud.com/devg-apisign/api-sign-provide.html"
+  ],
+  "baseUrl": "https://ecs.{HUAWEI_REGION}.myhuaweicloud.com",
+  "fields": [
+    {
+      "key": "HUAWEI_REGION",
+      "label": "区域（如 cn-north-4、ap-southeast-3）",
+      "secret": false,
+      "required": true,
+      "pattern": "^[a-z]{2}(?:-[a-z0-9]+){1,4}$",
+      "example": "cn-north-4"
+    },
+    {
+      "key": "HUAWEI_PROJECT_ID",
+      "label": "项目 ID（32 位十六进制，控制台-我的凭证获取）",
+      "secret": false,
+      "required": true,
+      "pattern": "^[0-9a-f]{32}$",
+      "example": ""
+    },
+    {
+      "key": "HUAWEI_ACCESS_KEY",
+      "label": "Access Key（AK）",
+      "secret": false,
+      "required": true,
+      "pattern": "^\\S{8,4096}$",
+      "example": ""
+    },
+    {
+      "key": "HUAWEI_SECRET_KEY",
+      "label": "Secret Access Key（SK）",
+      "secret": true,
+      "required": true,
+      "example": ""
+    },
+    {
+      "key": "HUAWEI_SECURITY_TOKEN",
+      "label": "临时访问密钥 SecurityToken（使用临时凭据时必填）",
+      "secret": true,
+      "required": false,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "none"
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "get_api_versions",
+      "description": "查询 ECS API 版本列表（GET /，无需项目 ID，作为连接检测）。无分页。出处：https://support.huaweicloud.com/api-ecs/ecs_01_0001.html",
+      "method": "GET",
+      "path": "/",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_servers",
+      "description": "查询 ECS 实例列表，每页最多 100 台，使用返回的 marker 继续；连接检测只请求 1 台并丢弃资源内容。",
+      "method": "GET",
+      "path": "/v1/{HUAWEI_PROJECT_ID}/cloudservers/detail",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "description": "每页条数（limit，本连接器上限 100）"
+          },
+          "marker": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F-]{1,64}$",
+            "maxLength": 64,
+            "description": "上一页最后一台服务器 ID"
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_server",
+      "description": "查询单台云服务器详情（GET /v1/{project_id}/servers/{server_id}）。无分页。出处：https://support.huaweicloud.com/api-ecs/ecs_01_0009.html",
+      "method": "GET",
+      "path": "/v1/{HUAWEI_PROJECT_ID}/cloudservers/{server_id}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "server_id": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F-]{1,64}$",
+            "description": "云服务器 ID",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "server_id"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    }
+  ],
+  "limitations": [
+    "仅提供所列固定只读查询，不执行任意云 API，也不创建、启停或删除资源。",
+    "需要平台账号及对应资源的只读权限；首次连接会实际检查授权。",
+    "已按官方接口复核；尚无真实云账号验收，签名与响应测试不能替代实际授权验证。",
+    "响应最多 2 MB；分页工具需使用返回的分页参数继续读取。"
+  ]
+}

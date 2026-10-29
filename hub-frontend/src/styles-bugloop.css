@@ -1,0 +1,38 @@
+/*
+ * Issue-resolution styles for capability indicators, field mapping, repository mapping,
+ * and batch dispatch. Keep hover geometry stable to avoid repeated hit-boundary
+ * transitions.
+ */
+
+/* Enable repository capability indicators only when configuration is complete. */
+.repo-cap{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-4);border:1px solid var(--line);border-radius:20px;
+  padding:2px 9px;white-space:nowrap}
+.repo-cap.on{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 40%,transparent);
+  background:color-mix(in srgb,var(--ok) 8%,transparent)}
+/* Post-execution repository, merge-target, and workspace fields. */
+.repo-auto{margin-top:10px;padding:10px;border-radius:10px;background:var(--surface-2);
+  border:1px solid var(--line)}
+.repo-auto .f-lbl{margin-bottom:8px}
+
+/* Align fixed-width field labels with external-platform field inputs. */
+.fm-row{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.fm-k{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-2);width:150px;flex-shrink:0}
+
+/* Repository mapping and automatic dispatch. */
+.rm-badge{margin-left:8px;font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--warn);background:var(--warn-soft);
+  border-radius:20px;padding:2px 9px;white-space:nowrap}
+.rm-arrow{color:var(--ink-4);display:inline-flex}
+.rm-arrow svg{width:14px;height:14px}
+.rm-pend{padding:10px 2px;border-bottom:1px solid var(--line)}
+.rm-pend:last-of-type{border-bottom:none}
+.rm-pend.off{opacity:.72}
+.rm-pend-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.rm-samples{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;padding-left:2px}
+.rm-samples span{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-3);background:var(--bg-2);border-radius:6px;
+  padding:2px 8px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rm-dir{margin-top:6px;font-family:ui-monospace,Consolas,monospace;font-size:max(var(--font-min-readable, 14.5px), 12px);
+  color:var(--ink-3);word-break:break-all}
+/* Emphasize the enabled dispatch switch because it permits actual execution. */
+.rm-sw{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-3);border:1px solid var(--line);border-radius:20px;padding:3px 10px}
+.rm-sw.on{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent);
+  background:var(--warn-soft)}

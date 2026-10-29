@@ -1,0 +1,78 @@
+/* A quiet catalog. Container queries follow the actual work area, not the monitor. */
+.plugin-page .plugin-catalog { container: plugin-cards / inline-size; min-width: 0; }
+.plugin-page .plugin-catalog .plugin-card-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: 16px; align-items: stretch; padding: 16px 4px 18px 0;
+}
+@container plugin-cards (min-width: 900px) {
+  .plugin-page .plugin-catalog .plugin-card-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@container plugin-cards (min-width: 1240px) {
+  .plugin-page .plugin-catalog .plugin-card-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+.plugin-page .plugin-catalog .plugin-card-grid > .plugin-card-shell {
+  position: relative; min-width: 0; padding: 20px; border: 0; border-radius: 12px;
+  background: var(--surface-1); box-shadow: none;
+  transition: background-color .15s ease;
+}
+.plugin-page .plugin-catalog .plugin-card-grid > .plugin-card-shell:hover {
+  border: 0; background: color-mix(in srgb, var(--surface-1) 78%, var(--surface-2)); box-shadow: none;
+}
+.plugin-page .plugin-catalog .plugin-card-grid > .plugin-card-shell.is-selected { background: var(--accent-soft); box-shadow: none; }
+.plugin-page .plugin-catalog .plugin-card-shell:focus-within { outline: 2px solid var(--accent); outline-offset: -2px; }
+.plugin-page .plugin-catalog .plugin-card-head { align-items: center; gap: 13px; padding: 0 0 16px; }
+.plugin-page .plugin-catalog .is-featured .plugin-card-head { padding-right: 50px; }
+.plugin-page .plugin-catalog .plugin-card-recommended-mark { position: absolute; top: 14px; right: 14px; width: 44px; height: 44px; pointer-events: none; }
+.plugin-page .plugin-catalog .plugin-card-icon {
+  width: 48px; height: 48px; border: 0; border-radius: 12px;
+  color: var(--accent); background: var(--surface); overflow: hidden;
+}
+.plugin-page .plugin-catalog .plugin-card-icon svg { width: 26px; height: 26px; }
+.plugin-page .plugin-catalog .plugin-card-icon img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.plugin-page .plugin-catalog .plugin-card-identity { flex: 1; min-width: 0; }
+.plugin-page .plugin-catalog .plugin-card-name {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  min-width: 0; margin: 0; overflow: hidden; white-space: normal;
+  color: var(--ink); font-size: 17px; font-weight: 650; line-height: 1.45; letter-spacing: 0;
+}
+.plugin-page .plugin-catalog .plugin-card-byline {
+  display: block; margin: 4px 0 0; overflow: hidden; text-overflow: ellipsis;
+  color: var(--ink-3); font-size: 14.5px; font-weight: 400; white-space: nowrap; line-height: 1.5;
+}
+.plugin-page .plugin-catalog .plugin-card-shell > .plugin-card {
+  display: flex; flex: 1; align-items: stretch; gap: 0; width: 100%; height: auto;
+  min-height: 150px; margin: 0; padding: 0; border: 0; border-radius: 0;
+  background: transparent; box-shadow: none; text-align: left; font-weight: 400;
+}
+.plugin-page .plugin-catalog .plugin-card-shell > .plugin-card:hover { background: transparent; box-shadow: none; }
+.plugin-page .plugin-catalog .plugin-card-description {
+  min-height: 48px; margin: 0 0 12px; color: var(--ink-2); font-size: 14.5px;
+  line-height: 1.65; -webkit-line-clamp: 2;
+}
+.plugin-page .plugin-catalog .plugin-card-capabilities { gap: 0; margin: 0 0 14px; color: var(--ink-3); }
+.plugin-page .plugin-catalog .plugin-card-capabilities > span {
+  padding: 0; border: 0; border-radius: 0; background: transparent; color: inherit; font-size: 14.5px; line-height: 1.7;
+}
+.plugin-page .plugin-catalog .plugin-card-capabilities > span + span::before { content: '·'; padding-inline: 7px; }
+.plugin-page .plugin-catalog .plugin-card-footer {
+  gap: 8px; flex-wrap: wrap; min-height: 32px; margin-top: auto; padding: 0;
+  border: 0; color: var(--ink-3); font-size: 14.5px;
+}
+.plugin-page .plugin-catalog .plugin-card-footer > span:first-child {
+  flex: 1; min-width: 0; max-width: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.plugin-page .plugin-catalog .plugin-card-footer .plugin-card-version { flex: none; max-width: 100px; }
+.plugin-page .plugin-catalog .plugin-card-footer > svg { flex: none; margin-left: 0; }
+.plugin-page .plugin-catalog .plugin-card-management {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 6px 12px; padding-top: 12px; margin-top: 6px;
+}
+.plugin-page .plugin-catalog .plugin-card-shelf-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.plugin-page .plugin-catalog .plugin-card-shelf-actions .plugin-card-quick-action {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 30px; padding: 3px 0;
+  border: 0; border-radius: 4px; color: var(--ink-2); background: transparent; box-shadow: none;
+  font: 400 14.5px/1.5 var(--sans); cursor: pointer;
+}
+.plugin-page .plugin-catalog .plugin-card-shelf-actions .plugin-card-quick-action:hover { color: var(--accent); background: transparent; box-shadow: none; }
+.plugin-page .plugin-catalog .plugin-card-shelf-actions .is-danger { color: var(--crit); }
+.plugin-page .plugin-catalog .plugin-card-state { font-size: 14.5px; font-weight: 400; }

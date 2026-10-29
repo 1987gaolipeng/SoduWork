@@ -1,0 +1,12 @@
+/* Shared locale editor styles match administration form grids. */
+.loc-block{margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
+.loc-block>summary{cursor:pointer;color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:600;user-select:none}
+.loc-block[open]>summary{margin-bottom:12px}
+.loc-block>summary:hover{color:var(--accent)}
+.loc-grid{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+.loc-grid label{display:grid;gap:6px;color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.loc-grid label.wide{grid-column:1/-1}
+.loc-grid input,.loc-grid textarea{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:9px;background:var(--surface-2);color:var(--ink);font:inherit;font-size:max(var(--font-min-readable, 14.5px), 13px);padding:9px 10px;outline:none}
+.loc-grid textarea{resize:vertical;line-height:1.55}
+.loc-grid input:focus,.loc-grid textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 14%,transparent)}
+@media(max-width:620px){.loc-grid{grid-template-columns:1fr}.loc-grid label.wide{grid-column:auto}}

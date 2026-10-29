@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "key": "skill-studio",
+  "name": "Skill 创建与优化",
+  "version": "1.0.1",
+  "category": "dev",
+  "description": "把业务流程沉淀为可复用 Skill，支持新建、调整、校验和多平台导出。交付真实技能包、资源、变更说明与验证报告。",
+  "instructions": "先读取已安装 skill-studio 的 SKILL.md。在当前会话内梳理业务资料，按其方法新建或调整 Skill，再用随包的 skill-package.cjs 校验、导出。交付真实文件与压缩包，不以 JSON 或计划代替成果。支持通用 Agent Skills、Codex、Claude Code、GitHub Copilot 与 SoduWork 布局；不自动迁移宿主专属权限。保留原包与无关文件，明确静态校验和业务实测的区别。安装、外发、发布或企业审核必须经用户授权。",
+  "entrypoints": {
+    "conversation": true,
+    "task": true,
+    "automation": false
+  },
+  "inputs": [],
+  "capabilities": {
+    "network": false,
+    "skills": [
+      "skill-studio"
+    ],
+    "mcpServers": [],
+    "runtime": [
+      "files",
+      "terminal"
+    ]
+  }
+}

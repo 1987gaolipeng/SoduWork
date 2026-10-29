@@ -1,0 +1,178 @@
+{
+  "schemaVersion": 1,
+  "id": "yuque",
+  "name": "语雀",
+  "category": "知识库",
+  "description": "语雀通用连接器：当前用户、知识库列表、文档列表与创建。基于语雀开放 API v2（www.yuque.com/api/v2），Personal Token 鉴权。",
+  "officialDocs": [
+    "https://www.yuque.com/yuque/developer/api",
+    "https://www.yuque.com/yuque/developer/users",
+    "https://www.yuque.com/yuque/developer/repos",
+    "https://www.yuque.com/yuque/developer/docs"
+  ],
+  "authDocs": [
+    "https://www.yuque.com/yuque/developer/personal-token"
+  ],
+  "baseUrl": "https://www.yuque.com/api/v2",
+  "fields": [
+    {
+      "key": "YUQUE_TOKEN",
+      "label": "个人访问令牌",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "header",
+    "tokenKey": "YUQUE_TOKEN",
+    "header": "X-Auth-Token"
+  },
+  "headers": {
+    "Accept": "application/json"
+  },
+  "tools": [
+    {
+      "name": "get_current_user",
+      "description": "获取当前认证用户。无分页。出处：https://www.yuque.com/yuque/developer/users",
+      "method": "GET",
+      "path": "/users/me",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_user_repos",
+      "description": "列出用户/组织的知识库。分页：offset + limit（默认 20 最大 100）。出处：https://www.yuque.com/yuque/developer/repos",
+      "method": "GET",
+      "path": "/users/{user_login}/repos",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "user_login": {
+            "type": "string",
+            "minLength": 1,
+            "description": "用户/组织 login",
+            "maxLength": 10000
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "偏移量",
+            "maximum": 100000
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "description": "每页条数"
+          }
+        },
+        "required": [
+          "user_login"
+        ],
+        "maxProperties": 50
+      },
+      "query": {
+        "offset": "offset",
+        "limit": "limit"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_repo_docs",
+      "description": "列出知识库下文档。分页：offset + limit。出处：https://www.yuque.com/yuque/developer/docs",
+      "method": "GET",
+      "path": "/repos/{repo_id}/docs",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repo_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "description": "知识库 ID 或 login/namespace",
+            "maxLength": 10000
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "偏移量",
+            "maximum": 100000
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "description": "每页条数"
+          }
+        },
+        "required": [
+          "repo_id"
+        ],
+        "maxProperties": 50
+      },
+      "query": {
+        "offset": "offset",
+        "limit": "limit"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_doc",
+      "description": "在知识库创建文档（POST，title+slug+format 固定 markdown）。写入操作：运行前必须获得用户明确授权。出处：https://www.yuque.com/yuque/developer/docs",
+      "method": "POST",
+      "path": "/repos/{repo_id}/docs",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repo_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "description": "知识库 ID",
+            "maxLength": 10000
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "文档标题"
+          },
+          "body": {
+            "type": "string",
+            "description": "Markdown 正文",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "repo_id",
+          "title"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "title": "$title",
+        "body": "$body",
+        "format": "markdown"
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "鉴权为 X-Auth-Token 头（Personal Token）；OAuth 2.0 应用授权流当前客户端不支持，待宿主适配。",
+    "分页为 offset/limit 页码式，非游标；并发写入时可能有位移。",
+    "create_doc 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

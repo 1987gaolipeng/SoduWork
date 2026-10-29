@@ -1,0 +1,43 @@
+.plugin-access-policy { margin: 18px 0; padding: 22px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); color: var(--ink); }
+.plugin-access-policy > header { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 22px; }
+.plugin-access-mark { display: grid; place-items: center; flex: 0 0 38px; height: 38px; border-radius: 11px; background: var(--accent-soft); color: var(--accent); }
+.plugin-access-policy h3 { margin: 0; font-size: 17px; font-weight: 700; }
+.plugin-access-policy p { margin: 6px 0 0; font-size: 14px; line-height: 1.6; color: var(--ink-3); }
+.plugin-access-live { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; margin-left: auto; padding: 5px 9px; border-radius: 20px; background: var(--ok-soft); color: var(--ok); font-size: 12px; font-weight: 600; }
+.plugin-access-live i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.plugin-access-rules { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.plugin-access-rule { min-width: 0; }
+.plugin-access-rule > label { display: flex; align-items: center; gap: 7px; margin-bottom: 10px; font-size: 14px; font-weight: 650; }
+.plugin-access-rule > label svg { width: 16px; height: 16px; color: var(--ink-3); }
+.plugin-access-rule .select-menu { width: 100%; }
+.plugin-access-rule-help { min-height: 44px; }
+.plugin-access-picker { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-top: 10px; }
+.plugin-access-picker-head { display: flex; align-items: center; gap: 8px; padding: 9px 11px; border-bottom: 1px solid var(--line); background: var(--surface-1); }
+.plugin-access-picker-head input { min-width: 0; width: 100%; border: 0; border-radius: 4px; padding: 5px 3px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; }
+.plugin-access-picker-head input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.plugin-access-picker-head > span { flex: 0 0 auto; color: var(--ink-3); font-size: 12px; }
+.plugin-access-options { max-height: 230px; overflow-y: auto; overscroll-behavior: contain; padding: 5px; }
+.plugin-access-options > label { display: flex; align-items: center; gap: 10px; margin: 0; padding: 9px 8px; border-radius: 6px; cursor: pointer; }
+.plugin-access-options > label:hover { background: var(--surface-1); }
+.plugin-access-options input { flex: 0 0 auto; accent-color: var(--accent); }
+.plugin-access-options label > span { min-width: 0; display: grid; gap: 2px; font-size: 13px; overflow-wrap: anywhere; }
+.plugin-access-options b { font-weight: 550; }
+.plugin-access-options small { color: var(--ink-3); font-size: 12px; }
+.plugin-access-options > p, .plugin-access-required { padding: 8px 10px; }
+.plugin-access-policy .plugin-access-required { margin: 0; color: var(--warn); font-size: 12px; }
+.plugin-access-policy > footer { display: flex; gap: 20px; align-items: center; margin-top: 22px; padding-top: 17px; border-top: 1px solid var(--line); }
+.plugin-access-policy footer > p { margin: 0; flex: 1; font-size: 12px; }
+.plugin-access-policy footer > div { display: flex; flex: 0 0 auto; gap: 8px; }
+.plugin-access-policy .plugin-access-error { display: flex; align-items: center; gap: 12px; padding: 10px 12px; margin: 10px 0; border-radius: 8px; background: var(--warn-soft); color: var(--warn); font-size: 13px; overflow-wrap: anywhere; }
+.plugin-access-error button { flex: 0 0 auto; margin-left: auto; border: 0; background: transparent; color: inherit; text-decoration: underline; cursor: pointer; }
+@media (max-width: 700px) {
+  .plugin-access-policy { padding: 16px; }
+  .plugin-access-policy > header { flex-wrap: wrap; }
+  .plugin-access-policy > header > div { flex: 1; min-width: 160px; }
+  .plugin-access-live { margin-left: 50px; }
+  .plugin-access-rules { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .plugin-access-rule-help { min-height: 0; }
+  .plugin-access-policy > footer { flex-wrap: wrap; gap: 12px; }
+  .plugin-access-policy footer > p { flex-basis: 100%; }
+  .plugin-access-policy footer > div { margin-left: auto; }
+}

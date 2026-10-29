@@ -1,0 +1,63 @@
+.app .content .model-provider .model-chips {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 7px;
+}
+.app .content .model-provider .model-chip {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 7px 10px;
+  padding: 8px;
+  overflow: visible;
+}
+.app .content .model-provider .model-chip.off { opacity: .75; }
+.model-chip-identity {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 170px;
+  align-items: center;
+  gap: 7px;
+}
+.app .content .model-chip-identity .model-kind {
+  align-self: center;
+  flex: none;
+  padding: 3px 5px;
+  border-radius: 4px;
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  line-height: 1.4;
+}
+.app .content .model-chip-identity code {
+  min-width: 0;
+  padding: 0;
+  overflow-wrap: anywhere;
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  line-height: 1.5;
+}
+.model-chip-actions,
+.model-card-action-group {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.model-chip-actions { margin-left: auto; }
+.model-chip-danger {
+  display: inline-flex;
+  padding-left: 6px;
+  border-left: 1px solid var(--line);
+}
+.app .content .model-provider .model-provider-actions {
+  justify-content: flex-start;
+  padding: 11px 16px;
+  margin-top: auto;
+}
+.model-card-danger-group { margin-left: auto; }
+@media (max-width: 460px) {
+  .model-chip-identity { flex-basis: 100%; }
+  .model-chip-actions { margin-left: 0; }
+}

@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 1,
+  "key": "project-validation-release",
+  "name": "缺陷闭环 · 修复发布与验证",
+  "version": "1.5.6",
+  "category": "dev",
+  "description": "面向已有工程的缺陷闭环：先形成稳定复现和可执行性结论，再在隔离分支修复，经过固定提交真实自测、AI 独立审查和自动合并；最后按项目环境链发布，并核对部署版本、健康检查与发布后验证证据。",
+  "author": "SoduWork",
+  "process": {
+    "enterprise": true,
+    "label": "企业研发流程",
+    "route": "稳定复现 → AI 修复 → 门禁与评审 → 合并 → 按项目环境链发布",
+    "environments": [
+      {"label": "项目配置的交付环境", "scope": "department"}
+    ]
+  },
+  "inputs": [
+    {"key": "verificationFocus", "label": "本轮重点验证", "type": "text", "required": false},
+    {"key": "knownRisk", "label": "已知风险或限制", "type": "text", "required": false}
+  ],
+  "outputs": [
+    {"key": "requirements", "label": "本轮修复基线", "accept": ["requirements.md"]},
+    {"key": "preflight", "label": "复现与执行结论", "accept": ["workflow-decision.json"]},
+    {"key": "code", "label": "固定代码版本", "accept": ["git-commit"]},
+    {"key": "review", "label": "独立审查报告", "accept": ["code-review.json"]},
+    {"key": "evidence", "label": "回归、发布与验证证据", "accept": ["quality", "deployment", "verification"]}
+  ],
+  "capabilities": {
+    "network": true,
+    "skills": [],
+    "mcpServers": []
+  },
+  "workflow": {
+    "nodes": [
+      {
+        "key": "scope",
+        "type": "ai",
+        "name": "明确本轮修复边界",
+        "outputs": [
+          {"key": "requirements", "kind": "file", "label": "本轮修复基线 requirements.md", "path": "requirements.md", "required": true},
+          {"key": "preflight", "kind": "decision", "label": "复现与执行结论 workflow-decision.json", "path": "workflow-decision.json", "required": true}
+        ],
+        "config": {
+          "agentKind": "local:pi",
+          "runnerTags": ["docker"],
+          "preflightEvidenceMode": "contract-source-runtime",
+          "executionPolicy": {
+            "containerOrchestration": "forbid",
+            "maxVerificationCommands": 2,
+            "adHocProbe": "forbid",
+            "commandTimeoutSeconds": 300,
+            "authoritativeQuality": true
+          },
+          "prompt": "你是负责已有产品缺陷闭环的资深产品与技术负责人。读取任务正文、附件、历史证据、用户反馈、仓库现状和插件输入，必须同时交付 requirements.md 与 workflow-decision.json。requirements.md 只描述本轮必须闭环的问题，包含：现状、稳定复现步骤与预期/实际结果、用户影响、根因假设、P0 修复范围、明确非目标、受影响的完整前后端或服务链路、数据与权限影响、回归范围、兼容与回滚考虑，以及标题为‘验收标准’的逐条可测试清单；保留已有正确实现，不重建工程。随后做真实执行预检：必须已经找到稳定可复现的现有缺陷，执行机具备本工程真实自测所需工具链，仓库与依赖可访问，凭据和输入足够，且改动边界安全可控；全部满足才允许继续。当前仓库是本节点的只读检查副本：除根目录 requirements.md 与 workflow-decision.json 外，禁止创建或切换分支，禁止修改、创建、删除源码、测试、配置或其他仓库文件，禁止提交和推送；若复现必须临时改代码或加探针，先复制到系统临时目录。workflow-decision.json 必须是 UTF-8 JSON，字段为：schemaVersion 固定为 1；outcome 只能是 proceed 或 blocked；summary 是结论；reasonCode 只能是 ready、missing_toolchain、missing_credentials、missing_input、no_reproducible_issue、unsafe_change、other；evidence 是事实证据数组；nextAction 是解除阻断的具体动作。outcome 为 proceed 时 reasonCode 必须是 ready；任何前置条件不满足时必须 blocked，给出非 ready 原因与 nextAction。不要用假设掩盖缺失的工具链、凭据、输入或复现依据，不向用户追问，不停下来等待确认；由 SoduWork 根据结构化结论自动停止并提示处理。完成后把两个文件都作为附件交回 SoduWork。"
+        },
+        "retry": {"maxAttempts": 3}
+      },
+      {
+        "key": "implement",
+        "type": "ai",
+        "name": "修复并提交代码",
+        "outputs": [
+          {"key": "code", "kind": "git", "label": "已推送的代码提交", "required": true}
+        ],
+        "dependsOn": ["scope"],
+        "config": {
+          "agentKind": "local:pi",
+          "runnerTags": ["docker"],
+          "executionPolicy": {
+            "containerOrchestration": "forbid",
+            "maxVerificationCommands": 1,
+            "adHocProbe": "forbid",
+            "commandTimeoutSeconds": 600,
+            "authoritativeQuality": true
+          },
+          "prompt": "你是维护该工程的高级工程师。先读取 requirements.md、workflow-decision.json、任务历史、仓库约定和当前分支，只修复本轮 P0 范围。先用现有证据稳定复现缺陷；能够自动化时必须先补一条修复前失败的回归测试，再完成最小根因修复并证明同一测试修复后通过。无法自动化时，必须留下可重复的人工复现步骤、修复前后对照与原因，不得用口头结论代替证据。涉及界面时要同时核对真实交互、加载、空状态、错误状态与视觉回归；涉及服务时要核对接口、数据、权限、并发与幂等边界。保持架构和视觉语言，禁止使用假数据冒充可用能力，禁止改动无关模块，禁止重新初始化工程。运行项目现有检查并修复失败，提交并推送任务分支；代码工程的交付物是 Git 分支与固定提交，不要打源码压缩包。结果中说明提交、根因、最小改动、修复前失败与修复后通过的证据、影响面、风险与回滚点。不要向用户提问；只有缺少外部授权或凭据时才以明确阻塞结果结束。"
+        },
+        "retry": {"maxAttempts": 3}
+      },
+      {
+        "key": "quality",
+        "type": "quality",
+        "name": "隔离质量检查",
+        "dependsOn": ["implement"],
+        "config": {
+          "commands": [
+            {"name": "Git 提交完整性", "argv": ["git", "show", "--check", "--format=", "HEAD"], "timeoutSeconds": 60},
+            {"name": "工程真实自测", "argv": ["project:selftest"], "timeoutSeconds": 1200}
+          ],
+          "onFailure": {"retryFrom": "implement", "maxRounds": 2}
+        },
+        "retry": {"maxAttempts": 3}
+      },
+      {
+        "key": "review",
+        "type": "ai_review",
+        "name": "AI 独立代码审查",
+        "outputs": [
+          {"key": "review", "kind": "file", "label": "结构化代码审查报告 code-review.json", "path": "code-review.json", "required": true}
+        ],
+        "dependsOn": ["quality"],
+        "config": {
+          "agentKind": "local:codex",
+          "model": "gpt-5.6-sol",
+          "reasoningEffort": "max",
+          "runnerTags": ["docker"],
+          "executionPolicy": {
+            "containerOrchestration": "forbid",
+            "maxVerificationCommands": 0,
+            "adHocProbe": "forbid",
+            "commandTimeoutSeconds": 300,
+            "authoritativeQuality": true
+          },
+          "prompt": "你是独立于开发会话的高级代码审查员。读取 requirements.md、任务上下文、质量门禁证据，并审查 SoduWork 指定的固定提交相对目标分支的完整差异。重点检查：验收标准覆盖、真实交互、权限与数据边界、错误和空状态、并发与幂等、安全、性能、兼容性、测试可信度及无关改动。不得修改、提交或合并代码。必须生成 code-review.json，格式为 {\"schemaVersion\":1,\"verdict\":\"pass|changes_requested\",\"summary\":\"...\",\"findings\":[{\"severity\":\"blocker|major|minor\",\"file\":\"...\",\"line\":1,\"message\":\"...\",\"suggestion\":\"...\"}],\"checks\":[\"...\"]}。存在 blocker 或 major 时 verdict 必须是 changes_requested；没有阻断问题才能 pass。把该 JSON 作为附件交回 SoduWork，不要向用户提问。",
+          "onFailure": {"retryFrom": "implement", "maxRounds": 5}
+        },
+        "retry": {"maxAttempts": 5}
+      },
+      {
+        "key": "merge",
+        "type": "merge",
+        "name": "自动合并固定代码版本",
+        "dependsOn": ["review"],
+        "config": {
+          "autoSubmit": true,
+          "onFailure": {"retryFrom": "implement", "maxRounds": 2},
+          "onReject": {"retryFrom": "implement", "maxRounds": 2}
+        },
+        "retry": {"maxAttempts": 2}
+      },
+      {
+        "key": "releaseChain",
+        "type": "deploy_chain",
+        "name": "走完项目验证环境链",
+        "dependsOn": ["merge"],
+        "config": {
+          "onFailure": {"retryFrom": "implement", "maxRounds": 2}
+        },
+        "retry": {"maxAttempts": 2}
+      },
+      {
+        "key": "verifyRelease",
+        "type": "validate",
+        "name": "发布后回归核对",
+        "dependsOn": ["releaseChain", "merge"],
+        "config": {
+          "deployVerify": true,
+          "shaCheck": true,
+          "http": []
+        },
+        "retry": {"maxAttempts": 2}
+      },
+      {
+        "key": "publish",
+        "type": "publish",
+        "name": "完成验证交付",
+        "dependsOn": ["verifyRelease"],
+        "config": {"message": "本轮缺陷已稳定复现并修复，通过固定提交自测、AI 独立审查和自动合并；已按项目环境链发布，并核对部署版本、健康检查及发布后回归证据"}
+      }
+    ]
+  },
+  "evaluations": [
+    {
+      "key": "reproducible-regression",
+      "name": "可复现缺陷修复基线",
+      "instruction": "根据明确的用户路径、预期结果、实际结果和日志证据，为一个跨客户端与后端的稳定回归缺陷形成最小修复基线。证据充分时给出 proceed 结论，但评测阶段不得修改源码。",
+      "inputs": {
+        "symptom": "客户端创建任务成功，但派给本机 Agent 后没有执行会话，刷新后仍无进展。",
+        "reproduction": "使用已登录且在线的本机 Agent 创建一次性任务并勾选建完交给 AI，连续三次稳定复现。",
+        "evidence": "创建接口返回任务 ID；派活接口失败；Runner 在线且空闲；任务事件只有 created 没有 ai.dispatched。"
+      },
+      "criteria": [
+        "requirements.md 区分预期与实际结果，给出稳定复现路径、用户影响和根因边界",
+        "最小修复范围覆盖真实受影响链路及回归范围，不顺手重构无关模块",
+        "验收标准包含修复前失败与修复后通过证据、状态一致性、错误反馈和重复派活幂等",
+        "workflow-decision.json 使用证据给出 proceed/ready，并记录风险与后续验证动作",
+        "评测阶段不修改源码、不创建分支、不合并或发布"
+      ],
+      "expectedOutputs": [
+        "scope.requirements",
+        "scope.preflight"
+      ]
+    },
+    {
+      "key": "unreproducible-report",
+      "name": "不可复现缺陷不臆测",
+      "instruction": "处理一条只有“偶尔打不开”描述、没有环境、步骤、日志或截图的缺陷报告。不得杜撰根因或直接进入开发，必须形成可行动的阻断结论。",
+      "inputs": {
+        "symptom": "偶尔打不开",
+        "environment": "未提供",
+        "evidence": "未提供"
+      },
+      "criteria": [
+        "requirements.md 明确列出已知事实、不可复现原因、所需最小证据和安全复现计划",
+        "workflow-decision.json 返回 blocked/no_reproducible_issue 或 blocked/missing_input",
+        "nextAction 给出非技术用户也能补齐的环境、步骤、时间和证据清单",
+        "不把猜测写成根因，不执行源码、仓库、合并或发布副作用"
+      ],
+      "expectedOutputs": [
+        "scope.requirements",
+        "scope.preflight"
+      ]
+    }
+  ]
+}

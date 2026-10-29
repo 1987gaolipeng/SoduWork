@@ -1,0 +1,134 @@
+{
+  "version": 1,
+  "date": "2026-10-20",
+  "sourceCommit": "b39944068cb7f855729732b646e72f15b47e7305",
+  "limit": 800,
+  "policy": "Advisory review baseline, not a size exemption or mandatory split target. Review responsibilities, dependencies and behavior before extracting modules.",
+  "files": [
+    {
+      "file": "client/core/locales/ja-JP-gap-pages.js",
+      "lines": 7848,
+      "category": "resource"
+    },
+    {
+      "file": "client/core/locales/ko-KR-gap-pages.js",
+      "lines": 7848,
+      "category": "resource"
+    },
+    {
+      "file": "hub-backend/app/services/workflow_engine.py",
+      "lines": 2388,
+      "category": "runtime"
+    },
+    {
+      "file": "client/api.js",
+      "lines": 2270,
+      "category": "runtime"
+    },
+    {
+      "file": "hub-backend/runner_main.py",
+      "lines": 2178,
+      "category": "runtime"
+    },
+    {
+      "file": "hub-backend/app/api/admin.py",
+      "lines": 2003,
+      "category": "runtime"
+    },
+    {
+      "file": "hub-backend/app/api/tasks.py",
+      "lines": 1895,
+      "category": "runtime"
+    },
+    {
+      "file": "client/main/agent-runtime/runner-adapter.js",
+      "lines": 1576,
+      "category": "runtime"
+    },
+    {
+      "file": "hub-backend/app/services/local_base.py",
+      "lines": 1134,
+      "category": "runtime"
+    },
+    {
+      "file": "hub-backend/app/services/ai_local.py",
+      "lines": 1121,
+      "category": "runtime"
+    },
+    {
+      "file": "hub-backend/app/services/deployments.py",
+      "lines": 1084,
+      "category": "runtime"
+    },
+    {
+      "file": "hub-backend/app/services/local_stream.py",
+      "lines": 1053,
+      "category": "runtime"
+    },
+    {
+      "file": "hub-backend/app/services/ai_exec.py",
+      "lines": 1033,
+      "category": "runtime"
+    },
+    {
+      "file": "hub-backend/app/services/workflow_runs.py",
+      "lines": 1018,
+      "category": "runtime"
+    },
+    {
+      "file": "hub-backend/app/models.py",
+      "lines": 1011,
+      "category": "runtime"
+    },
+    {
+      "file": "hub-backend/app/api/library.py",
+      "lines": 982,
+      "category": "runtime"
+    },
+    {
+      "file": "hub-backend/app/services/execution_sessions.py",
+      "lines": 952,
+      "category": "runtime"
+    },
+    {
+      "file": "client/main/pi-session/event-stream.test.js",
+      "lines": 903,
+      "category": "test"
+    },
+    {
+      "file": "hub-backend/app/services/release_control.py",
+      "lines": 852,
+      "category": "runtime"
+    },
+    {
+      "file": "client/components/panels/panels-library.css",
+      "lines": 845,
+      "category": "style"
+    },
+    {
+      "file": "client/components/panels/panels-plugin-maker.js",
+      "lines": 831,
+      "category": "runtime"
+    },
+    {
+      "file": "client/components/panels/panels-chat.css",
+      "lines": 828,
+      "category": "style"
+    },
+    {
+      "file": "client/components/team/team.js",
+      "lines": 821,
+      "category": "runtime"
+    },
+    {
+      "file": "hub-backend/app/api/runner_ws.py",
+      "lines": 805,
+      "category": "runtime"
+    },
+    {
+      "file": "hub-backend/app/services/project_setup.py",
+      "lines": 804,
+      "category": "runtime"
+    }
+  ]
+}

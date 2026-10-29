@@ -1,0 +1,87 @@
+<!doctype html>
+<!-- Browser regression for shared task facts in wide details and narrow execution views, with usable stage navigation and no hidden horizontal overflow. -->
+<html lang="zh-CN"><head><meta charset="utf-8">
+<link rel="stylesheet" href="../theme/variables.css">
+<link rel="stylesheet" href="../components/panels/task-trace-view.css">
+<style>
+body{margin:0;padding:24px;background:var(--bg-1);font-family:var(--font-ui)}
+.hosts{display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:18px}.host{min-width:0}
+#out{position:fixed;inset:0;z-index:9;margin:0;padding:12px;background:#fff;font:12px/1.7 monospace}
+</style></head><body>
+<div class="hosts"><main class="host" id="taskHost"></main><aside class="host" id="executionHost"></aside></div>
+<pre id="out"></pre>
+<script>window.SoduWorkAPI={attachmentUrl:item=>item.url||''};</script>
+<script src="../components/panels/task-trace-execution-details.js"></script>
+<script src="../components/panels/task-trace-view.js"></script>
+<script src="../components/panels/task-trace-runtime.js"></script>
+<script>
+let ok=0,fail=0;const lines=[];
+if(new URLSearchParams(location.search).has('visual'))document.getElementById('out').hidden=true;
+function chk(name,cond,extra){if(cond){ok++;lines.push('  PASS  '+name);}else{fail++;lines.push('  FAIL  '+name+(extra?'  << '+extra:''));}}
+const now=Date.now();
+const phase=(key,name,state,count,evidence)=>({key,name,state,stageCount:count,evidenceCount:evidence});
+const stage=(id,key,category,kind,name,state,extra)=>Object.assign({id,key,category,kind,name,state,attempt:1,
+  actor:{},startedAt:now-600000,finishedAt:state==='running'?null:now-120000,evidence:[],sessions:[],
+  decisions:[],deployments:[],outputs:[],error:{message:'',retryable:false}},extra||{});
+const session={id:'session-1',status:'done',assignee:'Codex',host:'办公电脑',engine:'codex',model:'company/code',
+  identity:{runnerId:'runner-office-01',runnerVersion:'1.8.7',host:'办公电脑',agentCli:'codex',
+    agentName:'Codex',agentVersion:'0.42.0',agentSessionId:'thread-soduwork-001',model:'company/code',
+    selectionSource:'scheduler',selectionReason:'任务归属人的在线客户端优先'},
+  workDir:'D:\\SoduWork\\forum',startedAt:new Date(now-600000).toISOString(),finishedAt:new Date(now-240000).toISOString(),items:[
+    {kind:'step',text:'拆分页面、接口和验证三步',at:new Date(now-590000).toISOString()},
+    {kind:'do',tool:'browser',text:'验证分享经验可以打开',at:new Date(now-260000).toISOString()}]};
+const stages=[
+  stage('spec','spec','understand','spec','确认需求边界','succeeded',{evidence:[{kind:'text',title:'验收口径',summary:'详情可以打开'}]}),
+  stage('code','code','execute','ai','实现论坛','succeeded',{sessions:[session],evidence:[{kind:'commit',title:'代码提交',summary:'8a44158f'}]}),
+  stage('quality','quality','verify','quality','工程质量门禁','succeeded',{evidence:[{kind:'check',title:'自动化测试',summary:'42 项通过',producer:{name:'质量 Runner'},verification:{state:'passed'}}]}),
+  stage('publish','publish','deliver','publish','发布到 staging','running',{evidence:[
+    {kind:'image',isImage:true,title:'staging 页面验证截图',size:43,producer:{name:'Browser Use'},
+      url:'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='}
+  ],deployments:[{id:'d1',environmentName:'staging 验证环境',state:'running',runnerId:'runner-staging',
+    commit:'8a44158f',result:{stage:'check'},verification:{state:'running',planned:2,completed:1,
+      passed:1,failed:0,checks:[{name:'首页可访问',type:'http',ok:true,detail:'GET → HTTP 200'}]}}]})];
+const trace={schemaVersion:'1.0',task:{id:'task-1',title:'示例社区增加经验分享论坛',status:'doing'},runs:[],stages,
+  phases:[phase('understand','理解工作','succeeded',1,1),phase('organize','组织协作','succeeded',0,0),
+    phase('execute','执行工作','succeeded',1,1),phase('verify','确认结果','succeeded',1,1),
+    phase('deliver','交付发布','running',1,0),phase('evolve','评价沉淀','planned',0,0)],
+  summary:{totalStages:4,completedStages:3,currentStageId:'publish',currentStageName:'发布到 staging',
+    currentState:'running',nextAction:'等待 staging 健康检查返回'},
+  card:{taskId:'task-1',projectName:'示例社区',pluginName:'示例独立发布流程',stage:{state:'running'},
+    executor:{assignee:'staging Runner',host:'192.0.2.10'}},
+  delivery:{schemaVersion:'1.0',authority:'workflow',state:'running',manifest:{primary:[],supporting:[],evidence:[]},blockers:[]},
+  approvals:[],deployments:[],artifacts:[],attachments:[],timeline:[],ai:[session],execution:{sessions:[session]}};
+
+Promise.all([
+  TaskExecutionJourney.mount(document.getElementById('taskHost'),{trace,taskId:'task-1',variant:'task',refreshMs:0}),
+  TaskExecutionJourney.mount(document.getElementById('executionHost'),{trace,taskId:'task-1',variant:'execution',refreshMs:0})
+]).then(()=>{
+  const task=document.getElementById('taskHost'),live=document.getElementById('executionHost');
+  chk('宽屏和窄栏都完整展示六段企业工作闭环',task.querySelectorAll('.tfd-loop-strip li').length===6&&
+    live.querySelectorAll('.tfd-loop-strip li').length===6);
+  const loop=live.querySelector('.tfd-loop-strip');
+  chk('AI 办公区窄栏不依赖横向滚动才能看全流程',loop.scrollWidth<=loop.clientWidth+1,
+    loop.scrollWidth+'/'+loop.clientWidth);
+  chk('首屏明确告诉用户下一步是什么',task.querySelector('.tfd-next')?.textContent.includes('等待 staging 健康检查返回'));
+  task.querySelector('.tfd-loop [data-tfd-stage="quality"]').click();
+  chk('点击上层闭环会联动下层阶段与阶段详情',task.querySelector('.tfd-route li.is-selected b')?.textContent==='工程质量门禁'&&
+    task.querySelector('.tfd-node[open] summary b')?.textContent==='工程质量门禁');
+  live.querySelector('.tfd-loop [data-tfd-stage="code"]').click();
+  /* Show only conversation highlights in the trace; full activity belongs in live conversation. */
+  chk('AI 会话给出重点进展而不是整条事件流',live.textContent.includes('停在')&&live.textContent.includes('拆分页面'));
+  chk('真实会话展示 Runner、Agent CLI 版本、模型、CLI 会话号与调度原因',
+    live.textContent.includes('Runner 1.8.7')&&live.textContent.includes('codex 0.42.0')&&
+    live.textContent.includes('company/code')&&live.textContent.includes('任务归属人的在线客户端优先')&&
+    [...live.querySelectorAll('[data-tfd-copy]')].some(button=>button.getAttribute('data-tfd-copy')==='thread-soduwork-001'));
+  task.querySelector('.tfd-loop [data-tfd-stage="publish"]').click();
+  chk('发布阶段展示上线后验证结果且图片证据可直接预览',
+    task.textContent.includes('上线后验证')&&task.textContent.includes('首页可访问')&&
+    task.textContent.includes('GET → HTTP 200')&&task.textContent.includes('取证 Runner runner-staging')&&
+    task.textContent.includes('Browser Use')&&task.querySelectorAll('.tfd-evidence-gallery img').length===1);
+  task.querySelector('.tfd-loop [data-tfd-stage="quality"]').click();
+  chk('普通检查标明取证执行者',task.textContent.includes('取证 · 质量 Runner'));
+  chk('工作目录仍可复制而不是只展示截断文本',[...live.querySelectorAll('[data-tfd-copy]')]
+    .some(button=>button.getAttribute('data-tfd-copy')==='D:\\SoduWork\\forum'));
+  document.getElementById('out').textContent=lines.join('\n')+'\n\ntask execution journey: '+ok+' passed, '+fail+' failed';
+  document.title=fail?'FAIL '+fail:'ALL PASS '+ok;
+}).catch(error=>{document.getElementById('out').textContent='FAIL 运行异常 << '+error.stack;document.title='FAIL';});
+</script></body></html>

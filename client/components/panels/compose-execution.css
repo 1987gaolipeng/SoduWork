@@ -1,0 +1,13 @@
+/* The execution location is a secondary composer setting. Local remains the
+   default and cloud is selected from the + menu. */
+.cp-more-execution{align-items:flex-start;text-align:left}
+.cp-more-execution .cp-more-execution-icon{display:grid;place-items:center;flex:0 0 auto;width:28px;height:28px;border-radius:8px;color:var(--ink-3);background:var(--bg-1)}
+.cp-more-execution .cp-more-execution-icon svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.cp-more-execution>span:nth-child(2){min-width:0;display:flex;flex:1;flex-direction:column;gap:2px}
+.cp-more-execution>span:nth-child(2) b{font-size:max(var(--font-min-readable,14.5px),14px);font-weight:500;color:var(--ink-2)}
+.cp-more-execution>span:nth-child(2) i{font-size:max(var(--font-min-readable,14.5px),13px);font-style:normal;line-height:1.4;color:var(--ink-4)}
+.cp-more-execution .wc-check{margin-left:auto;align-self:center;color:var(--accent);font-size:max(var(--font-min-readable,14.5px),14px)}
+.cp-more-execution.on{background:color-mix(in srgb,var(--accent) 8%,var(--bg-0))}
+.cp-more-execution.on .cp-more-execution-icon{color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,var(--bg-0))}
+.cp-more-execution.on>span:nth-child(2) b{color:var(--accent)}
+.is-cloud-compose #cpPermission,.is-cloud-compose #cpWorkspace,.is-cloud-compose #cpAbility,.is-cloud-compose .wi-tools,.is-cloud-compose .wc-more-section,.is-cloud-compose .cp-thinking{display:none!important}

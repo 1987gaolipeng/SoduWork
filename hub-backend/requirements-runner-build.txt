@@ -1,0 +1,10 @@
+# Build-time dependency only; the delivered Runner does not need PyInstaller.
+-r requirements-runner.txt
+pyinstaller==6.21.0
+
+# Build the Linux venv with python-build-standalone using the glibc 2.17 baseline.
+# Freezing the Ubuntu 24.04 system Python can link libpython against GLIBC_2.38,
+# which prevents the Runner from starting on Ubuntu 22.04.
+# Download: https://github.com/astral-sh/python-build-standalone/releases
+# Extract cpython-3.12.*-x86_64-unknown-linux-gnu-install_only.tar.gz into hub-backend/.venv/.
+# Then run: .venv/bin/python -m pip install -r requirements-runner-build.txt

@@ -1,0 +1,635 @@
+html.soduwork-auth-pending body > :not(#soduWorkClientAuthGate) {
+  visibility: hidden !important;
+}
+html.soduwork-auth-pending #soduWorkClientAuthGate {
+  visibility: visible !important;
+}
+body.soduwork-client-auth-open {
+  overflow: hidden !important;
+}
+.soduwork-auth-gate[hidden] {
+  display: none !important;
+}
+.soduwork-auth-gate {
+  --auth-blue: #3278f5;
+  --auth-ink: #172033;
+  --auth-muted: #738096;
+  position: fixed;
+  inset: 0;
+  z-index: 2147483600;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  overflow: auto;
+  color: var(--auth-ink);
+  background:
+    radial-gradient(circle at 18% 18%, rgba(77, 136, 255, .09), transparent 28%),
+    radial-gradient(circle at 82% 86%, rgba(42, 193, 163, .08), transparent 25%),
+    #f7f9fc;
+  font-family: "Alibaba PuHuiTi 3.0", "Alibaba PuHuiTi", Inter, "Segoe UI", sans-serif;
+}
+.soduwork-auth-ambient {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(rgba(79, 104, 143, .035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(79, 104, 143, .035) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: linear-gradient(to bottom, #000, transparent 78%);
+}
+.soduwork-auth-card {
+  position: relative;
+  width: min(440px, calc(100vw - 40px));
+  padding: 30px;
+  border: 1px solid rgba(138, 153, 178, .22);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, .94);
+  box-shadow: 0 28px 70px rgba(38, 56, 88, .14), 0 2px 8px rgba(38, 56, 88, .05);
+  backdrop-filter: blur(24px);
+}
+/*
+ * Custom WCO title bar: explicitly mark empty areas draggable and exempt every interactive
+ * control.
+ */
+.soduwork-auth-gate {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.soduwork-auth-gate input,
+.soduwork-auth-gate button,
+.soduwork-auth-gate summary {
+  -webkit-app-region: no-drag;
+}
+.soduwork-auth-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.soduwork-auth-brand > span:last-child {
+  display: grid;
+  gap: 1px;
+}
+.soduwork-auth-brand b {
+  color: #20293a;
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -.2px;
+}
+.soduwork-auth-brand small {
+  color: #9aa3b2;
+  font-size: max(var(--font-min-readable, 14.5px), 9px);
+  letter-spacing: .9px;
+  text-transform: uppercase;
+}
+.soduwork-auth-mark { display:block;flex:none;width:34px;height:34px;object-fit:contain; }
+.soduwork-auth-copy {
+  margin: 30px 0 24px;
+}
+.soduwork-auth-kicker {
+  color: var(--auth-blue);
+  font-size: max(var(--font-min-readable, 14.5px), 10px);
+  font-weight: 650;
+  letter-spacing: 1.4px;
+}
+.soduwork-auth-copy h1 {
+  margin: 7px 0 9px;
+  color: #182134;
+  font-size: 29px;
+  font-weight: 650;
+  letter-spacing: -.8px;
+}
+.soduwork-auth-copy p {
+  margin: 0;
+  color: var(--auth-muted);
+  font-size: max(var(--font-min-readable, 14.5px), 13px);
+  line-height: 1.7;
+}
+.soduwork-auth-form {
+  display: grid;
+  gap: 14px;
+}
+.soduwork-auth-connection {
+  padding: 12px 14px;
+  border: 1px solid #e4e9f1;
+  border-radius: 12px;
+  background: #f8faff;
+  font-size: max(var(--font-min-readable, 14.5px), 13px);
+}
+.soduwork-auth-connection summary { cursor: pointer; color: var(--auth-ink); }
+.soduwork-auth-connection > label { margin: 14px 0 7px; color: var(--auth-muted); }
+.soduwork-auth-connection-row { display: flex; gap: 8px; }
+.soduwork-auth-connection-row input { min-width: 0; flex: 1; }
+.soduwork-auth-connect {
+  flex: none;
+  padding: 0 12px;
+  border: 1px solid #dfe4ec;
+  border-radius: 10px;
+  background: #fff;
+  color: var(--auth-blue);
+  font: inherit;
+  cursor: pointer;
+}
+.soduwork-auth-connect:focus-visible { outline: 2px solid var(--auth-blue); outline-offset: 2px; }
+.soduwork-auth-connect:disabled { opacity: .55; cursor: wait; }
+.soduwork-auth-connection p { margin: 9px 0 0; line-height: 1.65; color: var(--auth-muted); }
+.soduwork-auth-form label {
+  display: grid;
+  gap: 7px;
+}
+.soduwork-auth-form label > span {
+  color: #465167;
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  font-weight: 560;
+}
+.soduwork-auth-form label em {
+  color: #a4acb8;
+  font-style: normal;
+  font-weight: 400;
+}
+.soduwork-auth-form input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 45px;
+  padding: 0 13px;
+  color: #202a3d;
+  border: 1px solid #dfe4ec;
+  border-radius: 11px;
+  outline: 0;
+  background: #fbfcfe;
+  font: inherit;
+  font-size: max(var(--font-min-readable, 14.5px), 13px);
+  transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+.soduwork-auth-form input:hover {
+  border-color: #cdd5e1;
+  background: #fff;
+}
+.soduwork-auth-form input:focus {
+  border-color: #75a6fb;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(50, 120, 245, .11);
+}
+.soduwork-auth-form input::placeholder {
+  color: #b0b8c5;
+}
+.soduwork-auth-pw-wrap {
+  position: relative;
+  display: block;
+}
+.soduwork-auth-pw-wrap #soduWorkAuthPassword {
+  padding-right: 46px;
+}
+.soduwork-auth-pw-eye {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  width: 32px;
+  height: 32px;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #8a94a6;
+  cursor: pointer;
+  transition: background .16s ease, color .16s ease;
+}
+.soduwork-auth-pw-eye:hover {
+  background: #eef2f8;
+  color: #465167;
+}
+.soduwork-auth-pw-eye:focus-visible {
+  outline: 2px solid var(--auth-blue);
+  outline-offset: 1px;
+}
+.soduwork-auth-pw-eye:disabled {
+  opacity: .45;
+  cursor: default;
+}
+.soduwork-auth-eye-icon {
+  display: block;
+  width: 19px;
+  height: 19px;
+}
+.soduwork-auth-pw-eye .icon-hide { display: none; }
+.soduwork-auth-pw-eye.is-on .icon-view { display: none; }
+.soduwork-auth-pw-eye.is-on .icon-hide { display: block; }
+.soduwork-auth-first {
+  margin-top: -2px;
+}
+.soduwork-auth-first summary {
+  width: max-content;
+  color: #7d889b;
+  cursor: pointer;
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  list-style: none;
+}
+.soduwork-auth-first summary::-webkit-details-marker {
+  display: none;
+}
+.soduwork-auth-first summary::before {
+  content: "+";
+  display: inline-grid;
+  width: 17px;
+  height: 17px;
+  margin-right: 5px;
+  place-items: center;
+  border-radius: 5px;
+  background: #f0f3f8;
+  color: #6d788a;
+}
+.soduwork-auth-first[open] summary {
+  margin-bottom: 12px;
+}
+.soduwork-auth-first[open] summary::before {
+  content: "\2212";
+}
+.soduwork-auth-status {
+  min-height: 18px;
+  padding: 1px 2px;
+  color: #7e8898;
+  font-size: max(var(--font-min-readable, 14.5px), 11.5px);
+  line-height: 1.5;
+}
+.soduwork-auth-status:empty {
+  min-height: 0;
+}
+.soduwork-auth-status.is-error,
+.soduwork-auth-status.is-quota {
+  padding: 9px 11px;
+  border: 1px solid #f0d6d9;
+  border-radius: 9px;
+  color: #b64852;
+  background: #fff7f7;
+}
+.soduwork-auth-status.is-quota {
+  border-color: #f0dbb5;
+  color: #9b681b;
+  background: #fffaf0;
+}
+.soduwork-auth-recovery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: -3px;
+}
+.soduwork-auth-recovery[hidden],
+.soduwork-auth-recovery button[hidden] {
+  display: none;
+}
+.soduwork-auth-recovery button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #dfe5ee;
+  border-radius: 8px;
+  color: #5f6d82;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: max(var(--font-min-readable, 14.5px), 11px);
+  transition: border-color .15s ease, color .15s ease, background .15s ease;
+}
+.soduwork-auth-recovery button:hover:not(:disabled) {
+  border-color: #a9c7fb;
+  color: #286fe7;
+  background: #f7faff;
+}
+.soduwork-auth-recovery button:focus-visible {
+  outline: 3px solid rgba(50, 120, 245, .14);
+  outline-offset: 1px;
+}
+.soduwork-auth-recovery button:disabled {
+  cursor: wait;
+  opacity: .58;
+}
+.soduwork-auth-production {
+  border-color: #cfe0ff !important;
+  color: #286fe7 !important;
+  background: #f5f8ff !important;
+}
+.soduwork-auth-status.is-success {
+  color: #149b75;
+}
+.soduwork-auth-submit {
+  display: flex;
+  height: 45px;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 0;
+  border-radius: 11px;
+  color: #fff;
+  background: var(--auth-blue);
+  box-shadow: 0 8px 18px rgba(50, 120, 245, .22);
+  cursor: pointer;
+  font: inherit;
+  font-size: max(var(--font-min-readable, 14.5px), 13px);
+  font-weight: 600;
+  transition: transform .15s ease, background .15s ease, box-shadow .15s ease;
+}
+.soduwork-auth-submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: #246be8;
+  box-shadow: 0 11px 22px rgba(50, 120, 245, .27);
+}
+.soduwork-auth-submit:disabled {
+  cursor: wait;
+  opacity: .78;
+}
+.soduwork-auth-submit i {
+  width: 7px;
+  height: 7px;
+  border-top: 1.7px solid currentColor;
+  border-right: 1.7px solid currentColor;
+  transform: rotate(45deg);
+}
+.soduwork-auth-submit.is-busy i {
+  width: 12px;
+  height: 12px;
+  border: 1.7px solid rgba(255, 255, 255, .45);
+  border-top-color: #fff;
+  border-radius: 50%;
+  transform: none;
+  animation: soduwork-auth-spin .75s linear infinite;
+}
+.soduwork-auth-card footer {
+  display: flex;
+  margin-top: 20px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #a0a9b7;
+  font-size: max(var(--font-min-readable, 14.5px), 10px);
+}
+.soduwork-auth-secure {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.soduwork-auth-secure i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #31bd93;
+  box-shadow: 0 0 0 3px rgba(49, 189, 147, .11);
+}
+/* Show the launch-mode badge for source launches only, distinguishing them from installed clients. */
+.soduwork-auth-form-badge {
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: color-mix(in srgb, #e8930c 14%, transparent);
+  color: #b06e0a;
+  font-size: max(var(--font-min-readable, 14.5px), 10.5px);
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+.soduwork-auth-hub b {
+  color: #7b8699;
+  font-weight: 500;
+}
+.soduwork-account-settings .set-kline {
+  margin-bottom: 12px;
+}
+.soduwork-account-badge {
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: #158c6b;
+  background: #eaf8f3;
+  font-size: max(var(--font-min-readable, 14.5px), 10px);
+}
+.soduwork-account-person {
+  display: grid;
+  grid-template-columns: 36px 1fr auto;
+  align-items: center;
+  gap: 10px;
+}
+.soduwork-account-person > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+}
+.soduwork-account-person b,
+.soduwork-account-person small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.soduwork-account-person b {
+  color: var(--text, #1f2937);
+  font-size: max(var(--font-min-readable, 14.5px), 13px);
+  font-weight: 600;
+}
+.soduwork-account-person small {
+  margin-top: 2px;
+  color: var(--muted, #8a94a4);
+  font-size: max(var(--font-min-readable, 14.5px), 10px);
+}
+.soduwork-account-avatar {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 50%;
+  overflow: hidden;
+  color: #2c70e8;
+  background: #eaf2ff;
+  font-size: max(var(--font-min-readable, 14.5px), 13px);
+  font-weight: 650;
+}
+.soduwork-account-logout {
+  color: #687387 !important;
+  background: #fff !important;
+}
+.soduwork-account-person[data-account-profile-editor] { cursor: pointer; }
+.soduwork-account-person[data-account-profile-editor]:focus-visible { outline: 2px solid var(--settings-accent, #397fe9); outline-offset: 4px; border-radius: 12px; }
+
+.ac-confirm-copy { margin: 0; color: var(--ink-2, #24324a); font-size: 14px; line-height: 1.7; }
+.ac-confirm-actions { margin-top: 20px; }
+
+/* Password-change dialog. */
+.soduwork-pwd-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(23, 34, 53, .42);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .18s ease;
+  overflow-y: auto;
+}
+.soduwork-pwd-mask.is-open { opacity: 1; pointer-events: auto; }
+.soduwork-pwd-mask [hidden] { display: none !important; }
+.soduwork-pwd-card {
+  width: min(420px, 100%);
+  padding: 18px 20px;
+  border: 1px solid var(--settings-line, #dfe7f1);
+  border-radius: 18px;
+  background: var(--settings-paper, #fff);
+  box-shadow: 0 24px 64px rgba(23, 34, 53, .22);
+  transform: translateY(8px) scale(.98);
+  transition: transform .18s ease;
+}
+.soduwork-pwd-mask.is-open .soduwork-pwd-card { transform: none; }
+.soduwork-pwd-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.soduwork-pwd-title { flex: 1; font: 650 16px/1.4 var(--font-ui, sans-serif); color: var(--ink, #172235); }
+.soduwork-pwd-close {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-3, #64748b);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color .14s, color .14s;
+}
+.soduwork-pwd-close:hover { background: var(--settings-canvas, #f6f8fb); color: var(--settings-accent, #397fe9); }
+.soduwork-pwd-sub { margin-bottom: 10px; color: var(--ink-3, #64748b); font-size: 13px; }
+.soduwork-pwd-field { display: grid; gap: 5px; margin-bottom: 10px; }
+.soduwork-pwd-field > span:first-child { font-size: 13px; font-weight: 600; color: var(--ink-2, #24324a); }
+.soduwork-pwd-form input[type="password"],
+.soduwork-pwd-form input[type="text"] {
+  width: 100%;
+  min-height: 42px;
+  box-sizing: border-box;
+  padding: 10px 44px 10px 12px;
+  border: 1px solid var(--settings-line, #dfe7f1);
+  border-radius: 10px;
+  background: var(--settings-paper, #fff);
+  color: var(--ink-2, #24324a);
+  font: 400 14.5px/1.5 var(--font-ui, sans-serif);
+  transition: border-color .16s, box-shadow .16s;
+}
+.soduwork-pwd-form input:focus {
+  border-color: var(--settings-accent, #397fe9);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--settings-accent, #397fe9) 12%, transparent);
+}
+.soduwork-pwd-tips { display: grid; gap: 5px; }
+.soduwork-pwd-tips[hidden] { display: none; }
+.soduwork-pwd-strength { display: flex; align-items: center; gap: 10px; }
+.soduwork-pwd-strength-bar {
+  flex: 1;
+  height: 6px;
+  border: 1px solid var(--settings-line, #dfe7f1);
+  border-radius: 999px;
+  background: var(--settings-canvas, #f6f8fb);
+  overflow: hidden;
+}
+.soduwork-pwd-strength-bar b {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: 999px;
+  background: transparent;
+  transition: width .22s ease, background-color .22s ease;
+}
+.soduwork-pwd-strength em {
+  flex: none;
+  min-width: 30px;
+  color: var(--ink-3, #64748b);
+  font-size: 12.5px;
+  font-style: normal;
+  text-align: right;
+}
+.soduwork-pwd-hint { color: var(--ink-3, #64748b); font-size: 12.5px; }
+.soduwork-pwd-hint.is-ok { color: var(--s-success, #2e9e6b); }
+.soduwork-pwd-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
+.soduwork-pwd-cancel {
+  min-height: 40px;
+  padding: 9px 16px;
+  border: 1px solid var(--settings-line, #dfe7f1);
+  border-radius: 10px;
+  background: var(--settings-paper, #fff);
+  color: var(--ink-2, #24324a);
+  font: 600 14px/1.5 var(--font-ui, sans-serif);
+  cursor: pointer;
+  transition: background-color .16s, border-color .16s;
+}
+.soduwork-pwd-cancel:hover { background: var(--settings-canvas, #f6f8fb); border-color: color-mix(in srgb, var(--settings-accent, #397fe9) 40%, var(--settings-line, #dfe7f1)); }
+.soduwork-pwd-submit {
+  min-height: 40px;
+  padding: 9px 16px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: var(--settings-accent, #397fe9);
+  color: #fff;
+  font: 600 14px/1.5 var(--font-ui, sans-serif);
+  cursor: pointer;
+  transition: background-color .16s, opacity .16s;
+}
+.soduwork-pwd-submit:hover:not(:disabled) { background: color-mix(in srgb, var(--settings-accent, #397fe9) 88%, #172235); }
+.soduwork-pwd-submit:disabled { opacity: .55; cursor: default; }
+.soduwork-pwd-msg { min-height: 20px; margin-top: 4px; font-size: 13px; }
+.soduwork-pwd-msg.is-error { color: var(--s-critical, #c64151); }
+.soduwork-pwd-msg.is-busy { color: var(--ink-3, #64748b); }
+.soduwork-pwd-done { display: block; padding: 14px 4px 6px; text-align: center; }
+.soduwork-pwd-done[hidden] { display: none; }
+.soduwork-pwd-done svg { width: 44px; height: 44px; color: var(--s-success, #2e9e6b); }
+.soduwork-pwd-done b { display: block; margin-top: 8px; color: var(--s-success, #2e9e6b); font: 650 15.5px/1.5 var(--font-ui, sans-serif); }
+.soduwork-pwd-done span { display: block; margin-top: 4px; color: var(--ink-3, #64748b); font-size: 13px; }
+.soduwork-account-quota {
+  margin-top: 10px;
+}
+@keyframes soduwork-auth-spin {
+  to { transform: rotate(360deg); }
+}
+@media (max-width: 560px) {
+  .soduwork-auth-gate {
+    align-items: start;
+    padding: 18px;
+  }
+  .soduwork-auth-card {
+    box-sizing: border-box;
+    width: 100%;
+    margin-top: 5vh;
+    padding: 24px 20px;
+    border-radius: 18px;
+  }
+  .soduwork-auth-card footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .soduwork-auth-submit,
+  .soduwork-auth-form input,
+  .soduwork-auth-recovery button {
+    transition: none;
+  }
+}
+.soduwork-quota-notice {
+  position: fixed;
+  top: 48px;
+  right: 20px;
+  z-index: 1200;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: min(560px, calc(100vw - 40px));
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-0);
+  color: var(--ink);
+  box-shadow: 0 4px 18px #00000012;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.soduwork-quota-notice[hidden] { display: none; }
+.soduwork-quota-notice button {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+}

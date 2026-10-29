@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "id": "mailchimp",
+  "name": "Mailchimp",
+  "category": "营销分析",
+  "description": "Mailchimp Marketing 通用连接器：账户信息、受众列表、添加订阅成员。基于 Mailchimp Marketing API v3，Basic 鉴权（任意用户名 + API Key），数据中心 DC 决定 baseUrl。",
+  "officialDocs": [
+    "https://mailchimp.com/developer/marketing/api/root/get-api-root-information/",
+    "https://mailchimp.com/developer/marketing/api/lists/get-lists-info/",
+    "https://mailchimp.com/developer/marketing/api/list-members/add-member-to-list/"
+  ],
+  "authDocs": [
+    "https://mailchimp.com/developer/marketing/guides/quick-start/#generate-your-api-key"
+  ],
+  "baseUrl": "https://{DC}.api.mailchimp.com/3.0",
+  "fields": [
+    {
+      "key": "DC",
+      "label": "数据中心（API Key 尾部后缀，如 us21）",
+      "secret": false,
+      "required": true,
+      "pattern": "^us\\d{1,2}$",
+      "example": ""
+    },
+    {
+      "key": "MAILCHIMP_USER",
+      "label": "Basic 鉴权用户名（官方约定任意字符串，惯例用邮箱）",
+      "secret": false,
+      "required": true,
+      "pattern": "^[^\\s:]{1,100}$",
+      "example": ""
+    },
+    {
+      "key": "MAILCHIMP_API_KEY",
+      "label": "API Key（32 位 hex-usNN 格式）",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "basic",
+    "usernameKey": "MAILCHIMP_USER",
+    "passwordKey": "MAILCHIMP_API_KEY"
+  },
+  "headers": {
+    "Accept": "application/json"
+  },
+  "tools": [
+    {
+      "name": "get_account_root",
+      "description": "获取账户根信息（GET /，account_id、total_subscribers 等）。无分页。出处：https://mailchimp.com/developer/marketing/api/root/get-api-root-information/",
+      "method": "GET",
+      "path": "/",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_audiences",
+      "description": "列出受众（lists）。分页：count（1-1000 默认 10）+ offset 页偏移。出处：https://mailchimp.com/developer/marketing/api/lists/get-lists-info/",
+      "method": "GET",
+      "path": "/lists",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 10,
+            "description": "每页条数"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "偏移量",
+            "maximum": 100000
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "query": {
+        "count": "count",
+        "offset": "offset"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "add_list_member",
+      "description": "向受众添加成员（POST /lists/{list_id}/members，status 固定 pending 双确认）。写入操作：运行前必须获得用户明确授权。出处：https://mailchimp.com/developer/marketing/api/list-members/add-member-to-list/",
+      "method": "POST",
+      "path": "/lists/{list_id}/members",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "list_id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{32}$",
+            "description": "受众 ID",
+            "maxLength": 10000
+          },
+          "email_address": {
+            "type": "string",
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[a-z]{2,}$",
+            "description": "邮箱",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "list_id",
+          "email_address"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "email_address": "$email_address",
+        "status": "pending"
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "Basic 鉴权：用户名任意、密码为 API Key；DC 后缀决定 baseUrl（{DC}.api.mailchimp.com）。",
+    "add_list_member 固定 status=pending（需联系人确认），不直接 subscribed，规避垃圾订阅风险。",
+    "add_list_member 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

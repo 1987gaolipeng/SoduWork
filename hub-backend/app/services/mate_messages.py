@@ -1,0 +1,191 @@
+from datetime import datetime, timezone
+from urllib.parse import urlparse, quote
+import ipaddress
+import logging
+import uuid
+
+from fastapi import HTTPException
+from sqlalchemy import select, or_, and_, update, func, case
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from .. import models
+from ..schemas import _ms
+from ..auth import sign_claims
+from ..config import get_settings
+from . import task_assignment
+
+log = logging.getLogger("uvicorn.error")
+
+
+def _safe_website(value):
+    if not isinstance(value, dict):
+        return {}
+    if str(value.get("status") or "") in {"packaged", "zip_only"}:
+        entry = str(value.get("entry") or "index.html").replace("\\", "/").lstrip("/")[:240]
+        if ".." in entry.split("/"):
+            return {"status": "blocked", "reason": "invalid website entry"}
+        return {"status": "packaged", "entry": entry}
+    raw = str(value.get("url") or "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = urlparse(raw)
+        host = (parsed.hostname or "").lower().rstrip(".")
+        if parsed.scheme not in {"http", "https"} or not host:
+            return {"status": "blocked", "reason": "website URL must use HTTP(S)"}
+        if host in {"localhost", "localhost.localdomain"}:
+            return {"status": "blocked", "reason": "local URLs are not shareable"}
+        try:
+            ip = ipaddress.ip_address(host)
+            if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_unspecified:
+                return {"status": "blocked", "reason": "private or local URLs are not shareable"}
+        except ValueError:
+            pass
+        return {"status": "available", "url": raw[:1000], "title": str(value.get("title") or "")[:160]}
+    except ValueError:
+        return {"status": "blocked", "reason": "invalid website URL"}
+
+
+def _public_preview(row):
+    website = dict(row.website or {})
+    if website.get("status") != "packaged":
+        return website
+    base = str(get_settings().hub_public_url or "").strip().rstrip("/")
+    try:
+        parsed = urlparse(base)
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme not in {"http", "https"} or host in {"localhost", "127.0.0.1", "::1"}:
+            return website
+        try:
+            ip = ipaddress.ip_address(host)
+            if ip.is_private or ip.is_loopback or ip.is_link_local:
+                return website
+        except ValueError:
+            pass
+    except ValueError:
+        return website
+    token = sign_claims({"messageId": row.id, "recipientId": row.recipient_id},
+                        ttl_seconds=24 * 60 * 60, token_type="mate-preview")
+    entry = str(website.get("entry") or "index.html").strip().lstrip("/") or "index.html"
+    website["previewUrl"] = base + "/api/v1/team/messages/" + quote(row.id, safe="") + "/preview/" + quote(entry, safe="/") + "?ticket=" + quote(token, safe="")
+    website["status"] = "available"
+    return website
+
+
+def public(row, sender=None, recipient=None):
+    names = ((sender.display_name or sender.username), (recipient.display_name or recipient.username)) if sender and recipient else ("", "")
+    delivered = bool(row.delivered_at)
+    task_id = str(row.conversation_id or "").removeprefix("task:") if str(row.conversation_id or "").startswith("task:") else ""
+    return {
+        "id": row.id, "messageId": row.client_message_id,
+        "senderId": row.sender_id, "recipientId": row.recipient_id,
+        "senderName": names[0], "recipientName": names[1],
+        "conversationId": row.conversation_id, "text": row.text,
+        "kind": "task_assignment" if task_id else "mate_message", "taskId": task_id,
+        "status": "read" if row.read_at else ("delivered" if delivered else row.status or "accepted"),
+        "deliveredAt": _ms(row.delivered_at), "readAt": _ms(row.read_at),
+        "createdAt": _ms(row.created_at), "attachments": list(row.attachments or []),
+        "website": _public_preview(row),
+    }
+
+
+async def create(session: AsyncSession, sender, recipient, payload, text, attachments, *, task_id=""):
+    client_id = str((payload or {}).get("messageId") or uuid.uuid4())[:64]
+    conversation_id = str((payload or {}).get("conversationId") or "")[:180]
+    if task_id:
+        conversation_id = "task:" + str(task_id)
+    elif conversation_id.startswith("task:") or client_id.startswith(("task:", "handoff:")):
+        raise HTTPException(400, "需求交办通知只能通过需求交办入口创建")
+    existing = (await session.execute(select(models.MateMessage).where(
+        models.MateMessage.sender_id == sender.id,
+        models.MateMessage.recipient_id == recipient.id,
+        models.MateMessage.client_message_id == client_id,
+    ))).scalar_one_or_none()
+    if existing:
+        return existing
+    row = models.MateMessage(
+        sender_id=sender.id, recipient_id=recipient.id, client_message_id=client_id,
+        conversation_id=conversation_id,
+        text=str(text or "")[:500], status="accepted", attachments=list(attachments or []),
+        website=_safe_website((payload or {}).get("website")),
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def list_for(session: AsyncSession, client, folder="received", limit=100, before=""):
+    me = await session.get(models.User, client.user_ref) if client.user_ref else None
+    if me is None or not me.is_active:
+        return {"ok": False, "items": [], "nextCursor": ""}
+    side = str(folder or "received").lower()
+    column = models.MateMessage.sender_id if side == "sent" else models.MateMessage.recipient_id
+    query = select(models.MateMessage).where(column == me.id)
+    if before:
+        cursor = (await session.execute(select(models.MateMessage).where(
+            models.MateMessage.id == str(before), column == me.id))).scalar_one_or_none()
+        if cursor is None:
+            raise HTTPException(400, "通知分页位置已失效，请刷新重试")
+        query = query.where(or_(models.MateMessage.created_at < cursor.created_at,
+            and_(models.MateMessage.created_at == cursor.created_at, models.MateMessage.id < cursor.id)))
+    size = max(1, min(int(limit or 100), 200))
+    rows = list((await session.execute(query.order_by(
+        models.MateMessage.created_at.desc(), models.MateMessage.id.desc()).limit(size + 1))).scalars())
+    more = len(rows) > size
+    rows = rows[:size]
+    ids = {x.sender_id for x in rows} | {x.recipient_id for x in rows}
+    users = {}
+    if ids:
+        users = {u.id: u for u in (await session.execute(select(models.User).where(models.User.id.in_(ids)))).scalars().all()}
+    return {"ok": True, "folder": "sent" if side == "sent" else "received",
+            "nextCursor": rows[-1].id if more else "",
+            "items": [public(row, users.get(row.sender_id), users.get(row.recipient_id)) for row in rows]}
+
+
+async def publish_event(device_id, event, *, user_id):
+    from ..realtime import hub
+    try:
+        await hub.publish(device_id, event, user_id=user_id)
+    except Exception as exc:  # The committed inbox remains recoverable through list_for.
+        log.warning("通知实时推送失败，可从收件箱恢复：%s", type(exc).__name__)
+
+
+async def publish_state(session, row, event_type, *, recipients=True):
+    sender = await session.get(models.User, row.sender_id)
+    recipient = await session.get(models.User, row.recipient_id)
+    value = public(row, sender, recipient)
+    event = {**value, "type": event_type, "messageId": row.id,
+             "serverMessageId": row.id, "clientMessageId": row.client_message_id}
+    users = {row.sender_id, row.recipient_id} if recipients else {row.sender_id}
+    for uid in users:
+        for box in await task_assignment.active_devices(session, uid):
+            await publish_event(box.id, event, user_id=uid)
+
+
+async def _acknowledge(session: AsyncSession, client, message_id, *, read=False):
+    me = await session.get(models.User, client.user_ref) if client.user_ref else None
+    row = await session.get(models.MateMessage, str(message_id or ""), with_for_update=True, populate_existing=True)
+    if me is None or not me.is_active or row is None or row.recipient_id != me.id:
+        raise HTTPException(404, "Message not found")
+    now = datetime.now(timezone.utc)
+    condition = or_(models.MateMessage.read_at.is_(None), models.MateMessage.delivered_at.is_(None)) if read else models.MateMessage.delivered_at.is_(None)
+    values = {"delivered_at": func.coalesce(models.MateMessage.delivered_at, models.MateMessage.read_at, now),
+              "status": "read" if read else case((models.MateMessage.read_at.is_not(None), "read"), else_="delivered")}
+    if read:
+        values["read_at"] = func.coalesce(models.MateMessage.read_at, now)
+    changed = (await session.execute(update(models.MateMessage).where(
+        models.MateMessage.id == row.id, condition).values(**values).execution_options(synchronize_session=False))).rowcount
+    await session.commit()
+    await session.refresh(row)
+    if changed:
+        await publish_state(session, row, "mate_message_read" if row.read_at else "mate_message_delivered")
+    return {"ok": True, "messageId": row.id, "status": "read" if row.read_at else "delivered",
+            "deliveredAt": _ms(row.delivered_at), "readAt": _ms(row.read_at)}
+
+
+async def mark_delivered(session: AsyncSession, client, message_id):
+    return await _acknowledge(session, client, message_id)
+
+
+async def mark_read(session: AsyncSession, client, message_id):
+    return await _acknowledge(session, client, message_id, read=True)

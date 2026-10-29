@@ -1,0 +1,752 @@
+{
+  "airtable": {
+    "file": "airtable.svg",
+    "product": "Airtable",
+    "source": "https://airtable.com/newsroom",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "asana": {
+    "file": "asana.svg",
+    "product": "Asana",
+    "source": "https://asana.com/brand",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "guidelines": "https://asana.com/brand",
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "canva": {
+    "file": "canva.svg",
+    "product": "Canva",
+    "source": "https://www.canva.com",
+    "collection": "simple-icons@11.15.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "clickup": {
+    "file": "clickup.svg",
+    "product": "ClickUp",
+    "source": "https://clickup.com/brand",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "confluence": {
+    "file": "confluence.svg",
+    "product": "Confluence",
+    "source": "https://www.atlassian.com/company/news/press-kit",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "discord": {
+    "file": "discord.svg",
+    "product": "Discord",
+    "source": "https://discord.com/branding",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "guidelines": "https://discord.com/branding",
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "dropbox": {
+    "file": "dropbox.svg",
+    "product": "Dropbox",
+    "source": "https://www.dropbox.com/branding",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "elevenlabs": {
+    "file": "elevenlabs.svg",
+    "product": "ElevenLabs",
+    "source": "https://elevenlabs.io/brand",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "guidelines": "https://elevenlabs.io/brand",
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "excel-online": {
+    "file": "category-spreadsheet.svg",
+    "product": "Microsoft Excel",
+    "source": "https://learn.microsoft.com/en-us/graph/api/resources/excel",
+    "sourcePurpose": "product-documentation; not artwork origin",
+    "collection": "SoduWork original category icons 2026-10-17",
+    "artworkOrigin": "original-category-artwork",
+    "category": "spreadsheet",
+    "license": {"type": "MIT", "file": "LICENSE.original-icons.txt"},
+    "rightsNote": "原创功能类别图标，不复刻产品标识；产品名称用于识别连接目标，不表示官方合作、认证或背书。",
+    "previousArtwork": {
+      "file": "excel-online.svg",
+      "product": "Microsoft Excel",
+      "source": "https://developer.microsoft.com/en-us/fluentui#/styles/web/colors/products",
+      "collection": "simple-icons@11.15.0",
+      "license": {"type": "custom", "url": "https://aka.ms/fluentui-assets-license"},
+      "guidelines": "https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks",
+      "status": "not-distributed",
+      "reason": "原图形的再分发或商标使用授权尚未充分核实，先以原创类别图标替代；此记录不包含原图形。"
+    }
+  },
+  "figma": {
+    "file": "figma.svg",
+    "product": "Figma",
+    "source": "https://www.figma.com/using-the-figma-brand/",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "guidelines": "https://www.figma.com/using-the-figma-brand/",
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "ga4": {
+    "file": "ga4.svg",
+    "product": "Google Analytics",
+    "source": "https://marketingplatform.google.com/intl/en_uk/about/analytics/",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "github": {
+    "file": "github.svg",
+    "product": "GitHub",
+    "source": "https://github.com/logos",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "guidelines": "https://github.com/logos",
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "gitlab": {
+    "file": "gitlab.svg",
+    "product": "GitLab",
+    "source": "https://about.gitlab.com/press/press-kit/",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "guidelines": "https://about.gitlab.com/handbook/marketing/corporate-marketing/brand-activation/trademark-guidelines/",
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "gmail": {
+    "file": "gmail.svg",
+    "product": "Gmail",
+    "source": "https://fonts.gstatic.com/s/i/productlogos/gmail_2020q4/v8/192px.svg",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "google-ads": {
+    "file": "google-ads.svg",
+    "product": "Google Ads",
+    "source": "https://ads.google.com/home/",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "google-calendar": {
+    "file": "google-calendar.svg",
+    "product": "Google Calendar",
+    "source": "https://fonts.gstatic.com/s/i/productlogos/calendar_2020q4/v8/192px.svg",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "google-drive": {
+    "file": "google-drive.svg",
+    "product": "Google Drive",
+    "source": "https://developers.google.com/drive/web/branding",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "google-meet": {
+    "file": "google-meet.svg",
+    "product": "Google Meet",
+    "source": "https://about.google/brand-resource-center/logos-list/",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "google-sheets": {
+    "file": "google-sheets.svg",
+    "product": "Google Sheets",
+    "source": "https://sheets.google.com",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "hubspot": {
+    "file": "hubspot.svg",
+    "product": "HubSpot",
+    "source": "https://www.hubspot.com/style-guide",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "guidelines": "https://www.hubspot.com/style-guide",
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "intercom": {
+    "file": "intercom.svg",
+    "product": "Intercom",
+    "source": "https://www.intercom.com/press",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "guidelines": "https://www.intercom.com/press",
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "jira": {
+    "file": "jira.svg",
+    "product": "Jira",
+    "source": "https://atlassian.design/resources/logo-library",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "guidelines": "https://atlassian.design/foundations/logos/",
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "linear": {
+    "file": "linear.svg",
+    "product": "Linear",
+    "source": "https://linear.app",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "mailchimp": {
+    "file": "mailchimp.svg",
+    "product": "MailChimp",
+    "source": "https://mailchimp.com/about/brand-assets",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "guidelines": "https://mailchimp.com/about/brand-assets",
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "microsoft-teams": {
+    "file": "category-meeting.svg",
+    "product": "Microsoft Teams",
+    "source": "https://learn.microsoft.com/en-us/microsoftteams/platform/",
+    "sourcePurpose": "product-documentation; not artwork origin",
+    "collection": "SoduWork original category icons 2026-10-17",
+    "artworkOrigin": "original-category-artwork",
+    "category": "meeting",
+    "license": {"type": "MIT", "file": "LICENSE.original-icons.txt"},
+    "rightsNote": "原创功能类别图标，不复刻产品标识；产品名称用于识别连接目标，不表示官方合作、认证或背书。",
+    "previousArtwork": {
+      "file": "microsoft-teams.svg",
+      "product": "Microsoft Teams",
+      "source": "https://developer.microsoft.com/en-us/fluentui#/styles/web/colors/products",
+      "collection": "simple-icons@11.15.0",
+      "license": {"type": "custom", "url": "https://aka.ms/fluentui-assets-license"},
+      "guidelines": "https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks",
+      "status": "not-distributed",
+      "reason": "原图形的再分发或商标使用授权尚未充分核实，先以原创类别图标替代；此记录不包含原图形。"
+    }
+  },
+  "miro": {
+    "file": "miro.svg",
+    "product": "Miro",
+    "source": "https://miro.com",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "mysql": {
+    "file": "mysql.svg",
+    "product": "MySQL",
+    "source": "https://www.mysql.com/about/legal/logos.html",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "guidelines": "https://www.mysql.com/about/legal/logos.html",
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "notion": {
+    "file": "notion.svg",
+    "product": "Notion",
+    "source": "https://www.notion.so",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "onedrive": {
+    "file": "category-cloud.svg",
+    "product": "Microsoft OneDrive",
+    "source": "https://learn.microsoft.com/en-us/onedrive/developer/",
+    "sourcePurpose": "product-documentation; not artwork origin",
+    "collection": "SoduWork original category icons 2026-10-17",
+    "artworkOrigin": "original-category-artwork",
+    "category": "cloud",
+    "license": {"type": "MIT", "file": "LICENSE.original-icons.txt"},
+    "rightsNote": "原创功能类别图标，不复刻产品标识；产品名称用于识别连接目标，不表示官方合作、认证或背书。",
+    "previousArtwork": {
+      "file": "onedrive.svg",
+      "product": "Microsoft OneDrive",
+      "source": "https://developer.microsoft.com/en-us/fluentui#/styles/web/colors/products",
+      "collection": "simple-icons@11.15.0",
+      "license": {"type": "custom", "url": "https://aka.ms/fluentui-assets-license"},
+      "guidelines": "https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks",
+      "status": "not-distributed",
+      "reason": "原图形的再分发或商标使用授权尚未充分核实，先以原创类别图标替代；此记录不包含原图形。"
+    }
+  },
+  "outlook": {
+    "file": "category-email.svg",
+    "product": "Microsoft Outlook",
+    "source": "https://learn.microsoft.com/en-us/graph/outlook-mail-concept-overview",
+    "sourcePurpose": "product-documentation; not artwork origin",
+    "collection": "SoduWork original category icons 2026-10-17",
+    "artworkOrigin": "original-category-artwork",
+    "category": "email",
+    "license": {"type": "MIT", "file": "LICENSE.original-icons.txt"},
+    "rightsNote": "原创功能类别图标，不复刻产品标识；产品名称用于识别连接目标，不表示官方合作、认证或背书。",
+    "previousArtwork": {
+      "file": "outlook.svg",
+      "product": "Microsoft Outlook",
+      "source": "https://developer.microsoft.com/en-us/outlook/docs",
+      "collection": "simple-icons@11.15.0",
+      "license": {"type": "CC0-1.0"},
+      "guidelines": "https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks",
+      "status": "not-distributed",
+      "reason": "原图形的再分发或商标使用授权尚未充分核实，先以原创类别图标替代；此记录不包含原图形。"
+    }
+  },
+  "postgres": {
+    "file": "postgres.svg",
+    "product": "PostgreSQL",
+    "source": "https://wiki.postgresql.org/wiki/Logo",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "guidelines": "https://www.postgresql.org/about/policies/trademarks/",
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "s3": {
+    "file": "s3.svg",
+    "product": "Amazon S3",
+    "source": "https://aws.amazon.com/architecture/icons",
+    "collection": "simple-icons@11.15.0",
+    "license": {"type": "CC0-1.0"},
+    "guidelines": "https://aws.amazon.com/architecture/icons",
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "salesforce": {
+    "file": "salesforce.svg",
+    "product": "Salesforce",
+    "source": "https://brand.salesforce.com/content/logo-guidelines",
+    "collection": "simple-icons@11.15.0",
+    "license": {"type": "CC0-1.0"},
+    "guidelines": "https://brand.salesforce.com/content/logo-guidelines",
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "sharepoint": {
+    "file": "category-documents.svg",
+    "product": "Microsoft SharePoint",
+    "source": "https://learn.microsoft.com/en-us/sharepoint/dev/",
+    "sourcePurpose": "product-documentation; not artwork origin",
+    "collection": "SoduWork original category icons 2026-10-17",
+    "artworkOrigin": "original-category-artwork",
+    "category": "documents",
+    "license": {"type": "MIT", "file": "LICENSE.original-icons.txt"},
+    "rightsNote": "原创功能类别图标，不复刻产品标识；产品名称用于识别连接目标，不表示官方合作、认证或背书。",
+    "previousArtwork": {
+      "file": "sharepoint.svg",
+      "product": "Microsoft SharePoint",
+      "source": "https://developer.microsoft.com/en-us/fluentui#/styles/web/colors/products",
+      "collection": "simple-icons@11.15.0",
+      "license": {"type": "custom", "url": "https://aka.ms/fluentui-assets-license"},
+      "guidelines": "https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks",
+      "status": "not-distributed",
+      "reason": "原图形的再分发或商标使用授权尚未充分核实，先以原创类别图标替代；此记录不包含原图形。"
+    }
+  },
+  "shopify": {
+    "file": "shopify.svg",
+    "product": "Shopify",
+    "source": "https://www.shopify.com/brand-assets",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "guidelines": "https://www.shopify.com/brand-assets",
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "slack": {
+    "file": "slack.svg",
+    "product": "Slack",
+    "source": "https://slack.com/brand-guidelines",
+    "collection": "simple-icons@11.15.0",
+    "license": {"type": "CC0-1.0"},
+    "guidelines": "https://slack.com/brand-guidelines",
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "stripe": {
+    "file": "stripe.svg",
+    "product": "Stripe",
+    "source": "https://stripe.com/newsroom/information",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "telegram": {
+    "file": "telegram.svg",
+    "product": "Telegram",
+    "source": "https://telegram.org/tour/screenshots",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "trello": {
+    "file": "trello.svg",
+    "product": "Trello",
+    "source": "https://atlassian.design/resources/logo-library",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "guidelines": "https://atlassian.design/foundations/logos",
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "zendesk": {
+    "file": "zendesk.svg",
+    "product": "Zendesk",
+    "source": "https://brandland.zendesk.com",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "guidelines": "https://brandland.zendesk.com",
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "zoho-crm": {
+    "file": "zoho-crm.svg",
+    "product": "Zoho",
+    "source": "https://www.zoho.com/branding",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "zoom": {
+    "file": "zoom.svg",
+    "product": "Zoom",
+    "source": "https://brand.zoom.us/media-library/",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "guidelines": "https://brand.zoom.us/usage-legal/",
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "wecom": {
+    "file": "category-chat.svg",
+    "product": "企业微信",
+    "source": "https://developer.work.weixin.qq.com/document/",
+    "sourcePurpose": "product-documentation; not artwork origin",
+    "collection": "SoduWork original category icons 2026-10-17",
+    "artworkOrigin": "original-category-artwork",
+    "category": "chat",
+    "license": {"type": "MIT", "file": "LICENSE.original-icons.txt"},
+    "rightsNote": "原创功能类别图标，不复刻产品标识；产品名称用于识别连接目标，不表示官方合作、认证或背书。",
+    "previousArtwork": {
+      "file": "wecom.png",
+      "source": "https://wwcdn.weixin.qq.com/node/wwnl/wwnl/style/images/independent/favicon/favicon_48h$c976bd14.png",
+      "page": "https://work.weixin.qq.com",
+      "license": {"type": "Product trademark; used to identify its connector"},
+      "status": "not-distributed",
+      "reason": "原图形的再分发或商标使用授权尚未充分核实，先以原创类别图标替代；此记录不包含原图形。"
+    }
+  },
+  "dingtalk": {
+    "file": "category-chat.svg",
+    "product": "钉钉",
+    "source": "https://open.dingtalk.com/document/",
+    "sourcePurpose": "product-documentation; not artwork origin",
+    "collection": "SoduWork original category icons 2026-10-17",
+    "artworkOrigin": "original-category-artwork",
+    "category": "chat",
+    "license": {"type": "MIT", "file": "LICENSE.original-icons.txt"},
+    "rightsNote": "原创功能类别图标，不复刻产品标识；产品名称用于识别连接目标，不表示官方合作、认证或背书。",
+    "previousArtwork": {
+      "file": "dingtalk.png",
+      "source": "https://gw.alicdn.com/imgextra/i3/O1CN014ZbI6ZTEhdC0ttN2_!!6000000003783-2-tps-444-444.png",
+      "page": "https://www.dingtalk.com",
+      "license": {"type": "Product trademark; used to identify its connector"},
+      "status": "not-distributed",
+      "reason": "原图形的再分发或商标使用授权尚未充分核实，先以原创类别图标替代；此记录不包含原图形。"
+    }
+  },
+  "feishu": {
+    "file": "category-chat.svg",
+    "product": "飞书",
+    "source": "https://open.feishu.cn/document/",
+    "sourcePurpose": "product-documentation; not artwork origin",
+    "collection": "SoduWork original category icons 2026-10-17",
+    "artworkOrigin": "original-category-artwork",
+    "category": "chat",
+    "license": {"type": "MIT", "file": "LICENSE.original-icons.txt"},
+    "rightsNote": "原创功能类别图标，不复刻产品标识；产品名称用于识别连接目标，不表示官方合作、认证或背书。",
+    "previousArtwork": {
+      "file": "feishu.ico",
+      "source": "https://www.feishu.cn/favicon.ico",
+      "page": "https://www.feishu.cn",
+      "license": {"type": "Product trademark; used to identify its connector"},
+      "status": "not-distributed",
+      "reason": "原图形的再分发或商标使用授权尚未充分核实，先以原创类别图标替代；此记录不包含原图形。"
+    }
+  },
+  "yuque": {
+    "file": "category-documents.svg",
+    "product": "语雀",
+    "source": "https://www.yuque.com/yuque/developer",
+    "sourcePurpose": "product-documentation; not artwork origin",
+    "collection": "SoduWork original category icons 2026-10-17",
+    "artworkOrigin": "original-category-artwork",
+    "category": "documents",
+    "license": {"type": "MIT", "file": "LICENSE.original-icons.txt"},
+    "rightsNote": "原创功能类别图标，不复刻产品标识；产品名称用于识别连接目标，不表示官方合作、认证或背书。",
+    "previousArtwork": {
+      "file": "yuque.png",
+      "source": "https://mdn.alipayobjects.com/huamei_0prmtq/afts/img/A*vMxOQIh4KBMAAAAAAAAAAAAADvuFAQ/original",
+      "page": "https://www.yuque.com",
+      "license": {"type": "Product trademark; used to identify its connector"},
+      "status": "not-distributed",
+      "reason": "原图形的再分发或商标使用授权尚未充分核实，先以原创类别图标替代；此记录不包含原图形。"
+    }
+  },
+  "runway": {
+    "file": "category-video.svg",
+    "product": "Runway",
+    "source": "https://docs.dev.runwayml.com/",
+    "sourcePurpose": "product-documentation; not artwork origin",
+    "collection": "SoduWork original category icons 2026-10-17",
+    "artworkOrigin": "original-category-artwork",
+    "category": "video",
+    "license": {"type": "MIT", "file": "LICENSE.original-icons.txt"},
+    "rightsNote": "原创功能类别图标，不复刻产品标识；产品名称用于识别连接目标，不表示官方合作、认证或背书。",
+    "previousArtwork": {
+      "file": "runway.png",
+      "source": "https://runwayml.com/icon.png?icon.35ps9bmugbe1e.png",
+      "page": "https://runwayml.com",
+      "license": {"type": "Product trademark; used to identify its connector"},
+      "status": "not-distributed",
+      "reason": "原图形的再分发或商标使用授权尚未充分核实，先以原创类别图标替代；此记录不包含原图形。"
+    }
+  },
+  "kling": {
+    "file": "category-video.svg",
+    "product": "可灵 Kling",
+    "source": "https://app.klingai.com/global/dev/document-api",
+    "sourcePurpose": "product-documentation; not artwork origin",
+    "collection": "SoduWork original category icons 2026-10-17",
+    "artworkOrigin": "original-category-artwork",
+    "category": "video",
+    "license": {"type": "MIT", "file": "LICENSE.original-icons.txt"},
+    "rightsNote": "原创功能类别图标，不复刻产品标识；产品名称用于识别连接目标，不表示官方合作、认证或背书。",
+    "previousArtwork": {
+      "file": "kling.png",
+      "source": "https://p4-kling.klingai.com/kcdn/cdn-kcdn112452/kling-homepage-aio/logo-80x80.png",
+      "page": "https://klingai.com",
+      "license": {"type": "Product trademark; used to identify its connector"},
+      "status": "not-distributed",
+      "reason": "原图形的再分发或商标使用授权尚未充分核实，先以原创类别图标替代；此记录不包含原图形。"
+    }
+  },
+  "volcengine-ark": {
+    "file": "category-cloud.svg",
+    "product": "火山方舟 Ark",
+    "source": "https://www.volcengine.com/docs/82379",
+    "sourcePurpose": "product-documentation; not artwork origin",
+    "collection": "SoduWork original category icons 2026-10-17",
+    "artworkOrigin": "original-category-artwork",
+    "category": "cloud",
+    "license": {"type": "MIT", "file": "LICENSE.original-icons.txt"},
+    "rightsNote": "原创功能类别图标，不复刻产品标识；产品名称用于识别连接目标，不表示官方合作、认证或背书。",
+    "previousArtwork": {
+      "file": "volcengine-ark.png",
+      "source": "https://portal.volccdn.com/obj/volcfe/misc/favicon.png",
+      "page": "https://www.volcengine.com",
+      "license": {"type": "Product trademark; used to identify its connector"},
+      "status": "not-distributed",
+      "reason": "原图形的再分发或商标使用授权尚未充分核实，先以原创类别图标替代；此记录不包含原图形。"
+    }
+  },
+  "tencent-meeting": {
+    "file": "category-meeting.svg",
+    "product": "腾讯会议",
+    "source": "https://meeting.tencent.com/support/",
+    "sourcePurpose": "product-documentation; not artwork origin",
+    "collection": "SoduWork original category icons 2026-10-17",
+    "artworkOrigin": "original-category-artwork",
+    "category": "meeting",
+    "license": {"type": "MIT", "file": "LICENSE.original-icons.txt"},
+    "rightsNote": "原创功能类别图标，不复刻产品标识；产品名称用于识别连接目标，不表示官方合作、认证或背书。",
+    "previousArtwork": {
+      "file": "tencent-meeting.png",
+      "source": "https://cdn.meeting.tencent.com/assets/next-website/logo128.png",
+      "page": "https://meeting.tencent.com",
+      "license": {"type": "Product trademark; used to identify its connector"},
+      "status": "not-distributed",
+      "reason": "原图形的再分发或商标使用授权尚未充分核实，先以原创类别图标替代；此记录不包含原图形。"
+    }
+  },
+  "sqlite": {
+    "file": "sqlite.svg",
+    "product": "SQLite",
+    "source": "https://github.com/sqlite/sqlite/blob/43e862723ec680542ca6f608f9963c0993dd7324/art/sqlite370.eps",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "redis": {
+    "file": "redis.svg",
+    "product": "Redis",
+    "source": "https://redis.io/brand-guidelines",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "mongodb": {
+    "file": "mongodb.svg",
+    "product": "MongoDB",
+    "source": "https://www.mongodb.com/pressroom",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "clickhouse": {
+    "file": "clickhouse.svg",
+    "product": "ClickHouse",
+    "source": "https://github.com/ClickHouse/ClickHouse/blob/12bd453a43819176d25ecf247033f6cb1af54beb/website/images/logo-clickhouse.svg",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "elasticsearch": {
+    "file": "elasticsearch.svg",
+    "product": "Elasticsearch",
+    "source": "https://www.elastic.co/brand",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "aws-ec2": {
+    "file": "aws-ec2.svg",
+    "product": "Amazon EC2",
+    "source": "https://aws.amazon.com/architecture/icons",
+    "collection": "simple-icons@11.15.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "aliyun-ecs": {
+    "file": "aliyun-ecs.svg",
+    "product": "Alibaba Cloud",
+    "source": "https://www.alibabagroup.com/en/ir/reports",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "huawei-cloud": {
+    "file": "huawei-cloud.svg",
+    "product": "Huawei",
+    "source": "https://e.huawei.com/ph/material/partner/0a72728b864949c48b22106454352483",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "azure": {
+    "file": "category-cloud.svg",
+    "product": "Microsoft Azure",
+    "source": "https://learn.microsoft.com/en-us/azure/",
+    "sourcePurpose": "product-documentation; not artwork origin",
+    "collection": "SoduWork original category icons 2026-10-17",
+    "artworkOrigin": "original-category-artwork",
+    "category": "cloud",
+    "license": {"type": "MIT", "file": "LICENSE.original-icons.txt"},
+    "rightsNote": "原创功能类别图标，不复刻产品标识；产品名称用于识别连接目标，不表示官方合作、认证或背书。",
+    "previousArtwork": {
+      "file": "azure.svg",
+      "product": "Microsoft Azure",
+      "source": "https://github.com/microsoft/vscode-azureresourcegroups/blob/0a06362e82170fd7f8dc2496286825b1a69cc42b/resources/azure.svg",
+      "collection": "simple-icons@11.15.0",
+      "license": {"type": "CC0-1.0"},
+      "status": "not-distributed",
+      "reason": "原图形的再分发或商标使用授权尚未充分核实，先以原创类别图标替代；此记录不包含原图形。"
+    }
+  },
+  "google-cloud": {
+    "file": "google-cloud.svg",
+    "product": "Google Cloud",
+    "source": "https://cloud.google.com",
+    "collection": "simple-icons@16.35.0",
+    "license": {"type": "CC0-1.0"},
+    "artworkOrigin": "third-party-icon-collection",
+    "rightsNote": "CC0-1.0 描述图标集合的版权许可，不授予产品商标权；实际使用仍须核对权利人品牌规范，不表示官方合作或背书。"
+  },
+  "tencent-cloud": {
+    "file": "category-cloud.svg",
+    "product": "腾讯云",
+    "source": "https://cloud.tencent.com/document",
+    "sourcePurpose": "product-documentation; not artwork origin",
+    "collection": "SoduWork original category icons 2026-10-17",
+    "artworkOrigin": "original-category-artwork",
+    "category": "cloud",
+    "license": {"type": "MIT", "file": "LICENSE.original-icons.txt"},
+    "rightsNote": "原创功能类别图标，不复刻产品标识；产品名称用于识别连接目标，不表示官方合作、认证或背书。",
+    "previousArtwork": {
+      "file": "tencent-cloud.ico",
+      "product": "腾讯云",
+      "source": "https://cloudcache.tencent-cloud.com/qcloud/favicon.ico?t=201902181234",
+      "collection": "official-site-favicon",
+      "license": {"type": "Product trademark"},
+      "status": "not-distributed",
+      "reason": "原图形的再分发或商标使用授权尚未充分核实，先以原创类别图标替代；此记录不包含原图形。"
+    }
+  },
+  "volcengine-ecs": {
+    "file": "category-cloud.svg",
+    "product": "火山引擎",
+    "source": "https://www.volcengine.com/docs/6396",
+    "sourcePurpose": "product-documentation; not artwork origin",
+    "collection": "SoduWork original category icons 2026-10-17",
+    "artworkOrigin": "original-category-artwork",
+    "category": "cloud",
+    "license": {"type": "MIT", "file": "LICENSE.original-icons.txt"},
+    "rightsNote": "原创功能类别图标，不复刻产品标识；产品名称用于识别连接目标，不表示官方合作、认证或背书。",
+    "previousArtwork": {
+      "file": "volcengine-ecs.png",
+      "product": "火山引擎",
+      "source": "https://portal.volccdn.com/obj/volcfe/misc/favicon.png",
+      "collection": "official-site-favicon",
+      "license": {"type": "Product trademark"},
+      "status": "not-distributed",
+      "reason": "原图形的再分发或商标使用授权尚未充分核实，先以原创类别图标替代；此记录不包含原图形。"
+    }
+  }
+}

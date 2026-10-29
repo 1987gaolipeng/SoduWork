@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="vivid" data-skin="glass">
+<head><meta charset="utf-8"><title>个人入口 · 隔离验收</title>
+<link rel="stylesheet" href="../theme/variables.css">
+<link rel="stylesheet" href="../components/workspace/workspace-shell.css">
+<link rel="stylesheet" href="../components/workspace/workspace-page-layout.css">
+<style>
+body{margin:0;padding:28px;box-sizing:border-box;background:var(--bg-0);overflow:auto}
+h1{margin:0 0 8px;font-size:22px}body>p{margin:0 0 28px;color:var(--ink-3);font-size:13px}
+.workspace-shell{position:relative;inset:auto;display:block;width:280px}
+#workspaceShell[hidden]{display:none}
+.ws-side{padding:12px}.ws-side>:not(.ws-profile-row){display:none!important}
+#wsResizer{display:none}#out{display:none}
+#profileGallery{display:grid;grid-template-columns:repeat(3,300px);gap:22px}
+.sample{--ws-side:color-mix(in srgb,var(--bg-1) 88%,var(--bg-2));padding:16px;border:1px solid var(--line);border-radius:18px;background:var(--ws-side)}
+.sample h2{margin:0 0 18px;color:var(--ink-3);font-size:12px;font-weight:500}
+.sample .ws-profile{width:100%}.sample .ws-profile-row{padding-bottom:4px}
+</style>
+<script>
+window.profileCalls=[];
+window.profileErrors=[];
+window.addEventListener('error',e=>profileErrors.push(e.message));
+window.addEventListener('unhandledrejection',e=>profileErrors.push(String(e.reason)));
+window.fetch=()=>{throw Error('No network allowed in profile fixture')};
+window.WorkspaceHost={open:(...args)=>profileCalls.push(args)};
+window.SoduWorkAPI={
+  hubBase:()=> 'http://isolated.invalid',
+  hubConfig:()=>({}),
+  clientAuthPolicy:async()=>({allowSelfRegistration:false}),
+  registerClient:async()=>({ok:true,user:{displayName:'张三',username:'fixture-user'}})
+};
+</script>
+<script src="../core/skin-registry.js"></script>
+<script src="../components/workspace/workspace-chat-history.js"></script>
+<script src="../components/workspace/workspace-chat-list.js"></script>
+<script src="../components/workspace/workspace-shell.js"></script>
+</head><body>
+<h1>我的 · 随皮肤呈现</h1><p>姓名徽章 / 真实连接状态 / 原有设置入口</p>
+<div id="profileGallery"></div><pre id="out"></pre>
+<script>WorkspaceShell.mount();WorkspaceShell.setConnected(true);</script>
+<script src="../components/client-auth/client-auth.js"></script>
+</body></html>

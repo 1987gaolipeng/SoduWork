@@ -1,0 +1,266 @@
+{
+  "schemaVersion": 1,
+  "agents": [
+    {
+      "accessControl": {
+        "schema": "soduwork.access-policy/v1",
+        "supported": true,
+        "modes": [
+          "standard",
+          "readonly",
+          "full"
+        ],
+        "approval": "tool-hook",
+        "sandbox": false
+      },
+      "id": "pi",
+      "displayName": "Pi",
+      "transport": "direct",
+      "modelMode": "managed",
+      "goalMode": "native",
+      "group": "recommended",
+      "order": 10,
+      "summary": "低延迟办公与连续对话，原生支持目标执行",
+      "runner": {
+        "adapter": "native"
+      },
+      "install": {
+        "installer": "npm",
+        "pkg": "@earendil-works/pi-coding-agent",
+        "blurb": "轻快，原生支持技能（Agent Skills，和 Claude Code 同一套标准）。",
+        "warn": "npm 上的 pi 是个圆周率玩具、@oh-my-pi 那个是第三方 fork —— 认准上面这个全名。",
+        "config_how": "SoduWork 替它写 ~/.pi/agent/models.json（它只认这个文件）。里面的密钥只写成变量名，明文不落盘。",
+        "config_path": "~/.pi/agent/models.json"
+      }
+    },
+    {
+      "accessControl": {
+        "schema": "soduwork.access-policy/v1",
+        "supported": true,
+        "modes": [
+          "standard",
+          "readonly",
+          "full"
+        ],
+        "approval": "native-acp",
+        "sandbox": false
+      },
+      "id": "codex-harness",
+      "displayName": "Codex Harness",
+      "transport": "runner",
+      "modelMode": "managed",
+      "goalMode": "native",
+      "group": "recommended",
+      "order": 20,
+      "summary": "深度工程与完整交付，使用企业模型持续执行",
+      "runner": {
+        "adapter": "acp",
+        "bins": [
+          "codex-acp",
+          "codex-acp.cmd",
+          "codex-acp.exe"
+        ],
+        "args": [],
+        "home": {
+          "env": "CODEX_HOME",
+          "folder": ".codex-harness"
+        }
+      },
+      "install": {
+        "installer": "npm",
+        "pkg": "@agentclientprotocol/codex-acp",
+        "source": "https://github.com/agentclientprotocol/codex-acp",
+        "blurb": "Apache-2.0 开源的 Codex Agent Harness；通过 ACP 接入，使用 SoduWork 分配的企业模型。",
+        "warn": "Codex Harness 使用 OpenAI Responses 协议；所选企业模型网关必须提供 /responses 接口。",
+        "config_how": "SoduWork 每次派活时把模型、网关和临时凭据注入独立进程，明文不落盘，也不读取个人 Codex 账号。",
+        "config_path": "",
+        "install_how": ""
+      }
+    },
+    {
+      "accessControl": {
+        "schema": "soduwork.access-policy/v1",
+        "supported": true,
+        "modes": [
+          "standard",
+          "readonly",
+          "full"
+        ],
+        "approval": "native-acp",
+        "sandbox": false
+      },
+      "id": "opencode",
+      "displayName": "OpenCode",
+      "transport": "runner",
+      "modelMode": "managed",
+      "goalMode": "native",
+      "group": "more",
+      "order": 30,
+      "summary": "开放工程 Agent，使用企业模型执行代码与命令",
+      "runner": {
+        "adapter": "native"
+      },
+      "install": {
+        "installer": "managed",
+        "pkg": "opencode-ai",
+        "source": "OpenCode 官方原生发行版",
+        "blurb": "开源编码 Agent；按需安装，使用企业模型执行代码与命令。",
+        "config_how": "不用配。SoduWork 在派活那一刻把模型配置塞进它的环境变量里，不落文件——写成文件会被这台机器的透明加密弄成密文，它自己就读不了了。",
+        "config_path": ""
+      }
+    },
+    {
+      "accessControl": {
+        "schema": "soduwork.access-policy/v1",
+        "supported": true,
+        "modes": [
+          "standard",
+          "readonly",
+          "full"
+        ],
+        "approval": "native-acp",
+        "sandbox": false
+      },
+      "id": "codex",
+      "displayName": "Codex",
+      "transport": "runner",
+      "modelMode": "account",
+      "goalMode": "native",
+      "group": "more",
+      "order": 50,
+      "summary": "使用本机 Codex 账号，保留原生规划与执行能力",
+      "runner": {
+        "adapter": "native"
+      },
+      "install": {
+        "installer": "npm",
+        "pkg": "@openai/codex",
+        "blurb": "OpenAI 官方 CLI。用它自己的账号（ChatGPT 登录或 OpenAI key），不吃 SoduWork 这边的模型配置。",
+        "warn": "这是个人账号版。需要使用企业模型时，请安装旁边的 Codex Harness；企业网关需支持 OpenAI Responses 接口。",
+        "config_how": "它自己管登录。没登录过的话，去执行机上跑一次 codex login 按提示登录（或给它环境变量 OPENAI_API_KEY）。个人登录与企业 Codex Harness 完全隔离。",
+        "config_path": ""
+      }
+    },
+    {
+      "accessControl": {
+        "schema": "soduwork.access-policy/v1",
+        "supported": true,
+        "modes": [
+          "standard",
+          "readonly",
+          "full"
+        ],
+        "approval": "native-acp",
+        "sandbox": false
+      },
+      "id": "qwen",
+      "displayName": "Qwen Code",
+      "transport": "runner",
+      "modelMode": "managed",
+      "goalMode": "native",
+      "group": "more",
+      "order": 60,
+      "summary": "通过 ACP 接入，使用企业模型完成自主执行",
+      "runner": {
+        "adapter": "acp",
+        "bins": [
+          "qwen",
+          "qwen.cmd",
+          "qwen.exe"
+        ],
+        "args": [
+          "--acp",
+          "--experimental-skills"
+        ],
+        "home": {
+          "env": "QWEN_HOME",
+          "folder": ".qwen"
+        }
+      },
+      "install": {
+        "installer": "npm",
+        "pkg": "@qwen-code/qwen-code",
+        "source": "",
+        "blurb": "Apache-2.0 开源编码 Agent；通过 ACP 接入，支持OpenAI 兼容模型。",
+        "warn": "",
+        "config_how": "SoduWork 每次派活时通过环境变量注入模型配置和密钥，明文不落盘。",
+        "config_path": "",
+        "install_how": ""
+      }
+    },
+    {
+      "accessControl": {
+        "schema": "soduwork.access-policy/v1",
+        "supported": true,
+        "modes": [
+          "standard",
+          "readonly",
+          "full"
+        ],
+        "approval": "native-acp",
+        "sandbox": false
+      },
+      "id": "dsh",
+      "displayName": "DeepSeek Harness",
+      "transport": "runner",
+      "modelMode": "managed",
+      "goalMode": "native",
+      "group": "more",
+      "order": 70,
+      "summary": "轻量 Harness，使用企业模型完成持续执行",
+      "runner": {
+        "adapter": "acp",
+        "bins": [
+          "dsh-acp",
+          "dsh-acp.cmd",
+          "dsh-acp.exe"
+        ],
+        "args": [],
+        "home": {
+          "env": "DSH_HOME",
+          "folder": ".dsh"
+        }
+      },
+      "install": {
+        "installer": "npm",
+        "pkg": "@openma/deepseek-harness-acp",
+        "source": "",
+        "blurb": "MIT 开源的 DeepSeek 官方 Agent 框架（dsh）；通过 ACP 接入，支持OpenAI 兼容模型或个人 DeepSeek Key。",
+        "warn": "",
+        "config_how": "SoduWork 每次派活时通过环境变量注入模型配置和密钥，明文不落盘。",
+        "config_path": "",
+        "install_how": ""
+      }
+    },
+    {
+      "accessControl": {
+        "schema": "soduwork.access-policy/v1",
+        "supported": true,
+        "modes": ["standard", "readonly", "full"],
+        "approval": "native-acp",
+        "sandbox": false
+      },
+      "id": "harness2",
+      "displayName": "Google Harness²",
+      "transport": "runner",
+      "modelMode": "managed",
+      "goalMode": "native",
+      "group": "more",
+      "order": 80,
+      "summary": "通过 OpenCode 直接执行；Google Research 推演核心用于显式诊断",
+      "runner": {
+        "adapter": "native"
+      },
+      "install": {
+        "installer": "bundled",
+        "pkg": "",
+        "source": "https://github.com/google-research/harness2",
+        "blurb": "日常对话通过 OpenCode 直接执行；Google Research Harness² 的实验性推演仅用于显式诊断。",
+        "warn": "",
+        "config_how": "直接使用「我的模型」中选定的企业模型；模型凭据仅注入本次进程，不写入文件。",
+        "config_path": "",
+        "install_how": "Harness² 核心随 SoduWork 内置；首次使用时点「装上」准备执行组件。"
+      }
+    }
+  ]
+}

@@ -1,0 +1,216 @@
+{
+  "schemaVersion": 1,
+  "key": "software-delivery",
+  "name": "需求到生产 · 标准研发交付",
+  "version": "1.7.6",
+  "category": "dev",
+  "description": "从需求澄清、可执行性预检与基线确认，到隔离分支实现、固定提交真实自测、AI 独立审查与自动合并；最后按项目绑定的企业环境链发布，核对部署版本和健康检查证据后完成交付。",
+  "author": "SoduWork",
+  "process": {
+    "enterprise": true,
+    "label": "企业研发流程",
+    "route": "需求基线 → AI 实现 → 门禁与评审 → 合并 → 按项目环境链发布",
+    "environments": [
+      {"label": "项目配置的交付环境", "scope": "department"}
+    ]
+  },
+  "inputs": [
+    {"key": "businessGoal", "label": "业务目标", "type": "text", "required": false},
+    {"key": "constraints", "label": "工程限制", "type": "text", "required": false}
+  ],
+  "outputs": [
+    {"key": "requirements", "label": "需求基线", "accept": ["requirements.md"]},
+    {"key": "preflight", "label": "执行前置结论", "accept": ["workflow-decision.json"]},
+    {"key": "code", "label": "代码版本", "accept": ["git-commit"]},
+    {"key": "review", "label": "独立审查报告", "accept": ["code-review.json"]},
+    {"key": "evidence", "label": "发布与验证证据", "accept": ["quality", "deployment", "verification"]}
+  ],
+  "capabilities": {
+    "network": true,
+    "skills": [],
+    "mcpServers": []
+  },
+  "workflow": {
+    "nodes": [
+      {
+        "key": "analyze",
+        "type": "ai",
+        "name": "形成需求基线",
+        "outputs": [
+          {"key": "requirements", "kind": "file", "label": "需求基线 requirements.md", "path": "requirements.md", "required": true},
+          {"key": "preflight", "kind": "decision", "label": "执行前置结论 workflow-decision.json", "path": "workflow-decision.json", "required": true}
+        ],
+        "config": {
+          "agentKind": "local:pi",
+          "runnerTags": ["docker"],
+          "executionPolicy": {
+            "containerOrchestration": "forbid",
+            "maxVerificationCommands": 0,
+            "adHocProbe": "forbid",
+            "commandTimeoutSeconds": 300,
+            "authoritativeQuality": true
+          },
+          "prompt": "你是负责把企业需求变成可交付工程基线的资深产品与技术负责人。读取任务正文、附件、历史证据、插件输入、仓库约定与现有架构，必须同时交付 requirements.md 与 workflow-decision.json。requirements.md 必须包含：问题与业务目标、用户与场景、现状约束、P0 范围、明确非目标、完整前后端或服务边界、页面或接口行为、数据与权限、异常和空状态、兼容与回滚考虑、风险与假设，以及标题为‘验收标准’的逐条可测试清单；不得只做后端或只做界面而遗漏完整用户路径。随后做真实执行预检：确认需求输入足够形成完整 P0、执行机具备本工程所需工具链、仓库与依赖可访问、凭据充分、改动边界安全可控；全部满足才允许继续。当前仓库是本节点的只读检查副本：除根目录 requirements.md 与 workflow-decision.json 外，禁止创建或切换分支，禁止修改、创建、删除源码、测试、配置或其他仓库文件，禁止提交和推送；若必须实验，复制到系统临时目录。workflow-decision.json 必须是 UTF-8 JSON，字段为：schemaVersion 固定为 1；outcome 只能是 proceed 或 blocked；summary 是结论；reasonCode 只能是 ready、missing_toolchain、missing_credentials、missing_input、unsafe_change、other；evidence 是事实证据数组；nextAction 是解除阻断的具体动作。outcome 为 proceed 时 reasonCode 必须是 ready；任何前置条件不满足时必须 blocked，给出非 ready 原因与 nextAction。不要用假设掩盖缺失的工具链、凭据或关键输入，不向用户提问，不停下来等待确认；由 SoduWork 根据结构化结论自动停止并提示处理。完成后把两个文件都作为附件交回 SoduWork。"
+        },
+        "retry": {"maxAttempts": 3}
+      },
+      {
+        "key": "baseline",
+        "type": "spec",
+        "name": "需求基线审批",
+        "dependsOn": ["analyze"],
+        "config": {
+          "files": ["requirements.md"],
+          "summary": "确认需求范围、假设与逐条验收标准",
+          "onReject": {"retryFrom": "analyze", "maxRounds": 2}
+        },
+        "retry": {"maxAttempts": 3}
+      },
+      {
+        "key": "implement",
+        "type": "ai",
+        "name": "工程实现",
+        "outputs": [
+          {"key": "code", "kind": "git", "label": "已推送的代码提交", "required": true}
+        ],
+        "dependsOn": ["baseline"],
+        "config": {
+          "agentKind": "local:pi",
+          "runnerTags": ["docker"],
+          "executionPolicy": {
+            "containerOrchestration": "forbid",
+            "maxVerificationCommands": 6,
+            "adHocProbe": "forbid",
+            "commandTimeoutSeconds": 600,
+            "authoritativeQuality": true
+          },
+          "prompt": "你是这份代码库的高级工程师。先阅读 requirements.md、仓库约定和现有架构，再在任务专属分支上完成 P0 范围。必须按 requirements.md 覆盖完整用户路径：涉及界面时同时完成前端交互、状态与视觉细节，涉及服务时完成后端接口、数据、权限和错误边界，不得只交付其中一半。保持现有设计语言和工程边界，补齐类型、错误处理、加载与空状态、权限和必要测试；禁止改写无关代码，禁止使用假数据冒充真实能力。运行项目现有检查；界面改动必须留下关键路径可复核证据，服务改动必须留下接口或集成验证证据。修复失败后提交并推送工作分支，在结果中说明提交、变更范围、逐条验收标准的验证证据、已知风险和回滚点。不要向用户提问；遇到非权限型歧义采用最小、可逆实现，只有缺少凭据或外部授权时才以明确阻塞结果结束。"
+        },
+        "retry": {"maxAttempts": 3}
+      },
+      {
+        "key": "quality",
+        "type": "quality",
+        "name": "工程质量门禁",
+        "dependsOn": ["implement"],
+        "config": {
+          "commands": [
+            {"name": "Git 提交完整性", "argv": ["git", "show", "--check", "--format=", "HEAD"], "timeoutSeconds": 60},
+            {"name": "工程真实自测", "argv": ["project:selftest"], "timeoutSeconds": 1200}
+          ],
+          "onFailure": {"retryFrom": "implement", "maxRounds": 3}
+        },
+        "retry": {"maxAttempts": 3}
+      },
+      {
+        "key": "review",
+        "type": "ai_review",
+        "name": "AI 独立代码审查",
+        "outputs": [
+          {"key": "review", "kind": "file", "label": "结构化代码审查报告 code-review.json", "path": "code-review.json", "required": true}
+        ],
+        "dependsOn": ["quality"],
+        "config": {
+          "agentKind": "local:codex",
+          "model": "gpt-5.6-sol",
+          "reasoningEffort": "max",
+          "runnerTags": ["docker"],
+          "executionPolicy": {
+            "containerOrchestration": "forbid",
+            "maxVerificationCommands": 0,
+            "adHocProbe": "forbid",
+            "commandTimeoutSeconds": 300,
+            "authoritativeQuality": true
+          },
+          "prompt": "你是独立于开发会话的高级代码审查员。读取 requirements.md、任务上下文、质量门禁证据，并审查 SoduWork 指定的固定提交相对目标分支的完整差异。重点检查：验收标准覆盖、架构边界、权限与数据安全、错误处理、并发与幂等、性能、兼容性、测试可信度及无关改动。不得修改、提交或合并代码。必须生成 code-review.json，格式为 {\"schemaVersion\":1,\"verdict\":\"pass|changes_requested\",\"summary\":\"...\",\"findings\":[{\"severity\":\"blocker|major|minor\",\"file\":\"...\",\"line\":1,\"message\":\"...\",\"suggestion\":\"...\"}],\"checks\":[\"...\"]}。存在 blocker 或 major 时 verdict 必须是 changes_requested；没有阻断问题才能 pass。把该 JSON 作为附件交回 SoduWork，不要向用户提问。",
+          "onFailure": {"retryFrom": "implement", "maxRounds": 5}
+        },
+        "retry": {"maxAttempts": 5}
+      },
+      {
+        "key": "merge",
+        "type": "merge",
+        "name": "自动合并固定版本",
+        "dependsOn": ["review"],
+        "config": {
+          "autoSubmit": true,
+          "onFailure": {"retryFrom": "implement", "maxRounds": 2},
+          "onReject": {"retryFrom": "implement", "maxRounds": 2}
+        },
+        "retry": {"maxAttempts": 2}
+      },
+      {
+        "key": "releaseChain",
+        "type": "deploy_chain",
+        "name": "走完企业发布链",
+        "dependsOn": ["merge"],
+        "config": {
+          "onFailure": {"retryFrom": "implement", "maxRounds": 2}
+        },
+        "retry": {"maxAttempts": 2}
+      },
+      {
+        "key": "verifyRelease",
+        "type": "validate",
+        "name": "核对发布后事实",
+        "dependsOn": ["releaseChain", "merge"],
+        "config": {
+          "deployVerify": true,
+          "shaCheck": true,
+          "http": []
+        },
+        "retry": {"maxAttempts": 2}
+      },
+      {
+        "key": "publish",
+        "type": "publish",
+        "name": "完成交付",
+        "dependsOn": ["verifyRelease"],
+        "config": {"message": "需求已通过基线确认、工程门禁、AI 独立审查与自动合并，并按项目环境链发布；部署版本和发布后健康检查证据均已核对"}
+      }
+    ]
+  },
+  "evaluations": [
+    {
+      "key": "complete-product-change",
+      "name": "完整产品需求交付基线",
+      "instruction": "为一个同时影响后端接口、管理端页面和桌面客户端的新需求建立可执行交付基线。不得只规划后端；需要覆盖用户入口、数据与权限、安装升级、项目环境链、健康检查、回滚和人工验收证据。输入充分时给出 proceed 结论。",
+      "inputs": {
+        "request": "增加企业级项目交付状态总览：员工在客户端查看，管理员在管理端配置可见范围，并随桌面客户端版本一起交付。",
+        "targetEnvironment": "项目绑定的验证环境与生产环境链",
+        "acceptanceEvidence": "接口检查、真实页面、客户端版本、健康检查和截图"
+      },
+      "criteria": [
+        "requirements.md 明确用户场景、现状能力缺口、目标行为、P0 范围与非目标",
+        "影响面同时覆盖后端、管理端、客户端、数据权限、安装升级和发布回滚，不把完整需求缩成单层实现",
+        "验收标准逐条可测试，包含正常、错误、空状态、权限、兼容、性能和视觉交互要求",
+        "workflow-decision.json 使用事实证据给出 proceed/ready，并列明后续节点仍需验证的风险",
+        "评测阶段只生成需求与决策文件，不修改源码、不创建分支、不合并或发布"
+      ],
+      "expectedOutputs": [
+        "analyze.requirements",
+        "analyze.preflight"
+      ]
+    },
+    {
+      "key": "missing-delivery-input",
+      "name": "发布输入不足时安全阻断",
+      "instruction": "评估一个要求上线但没有目标工程、环境链、访问授权或验收口径的模糊需求。不得猜测环境或伪造凭据，必须形成可行动的阻断结论。",
+      "inputs": {
+        "request": "把这个功能做好后尽快上线",
+        "targetProject": "未提供",
+        "targetEnvironment": "未提供"
+      },
+      "criteria": [
+        "requirements.md 明确记录已知事实、关键缺口和最小可确认范围，不虚构工程或环境",
+        "workflow-decision.json 返回 blocked，reasonCode 使用 missing_input 或 missing_credentials",
+        "nextAction 准确列出解除阻断所需的工程、环境、授权和验收信息",
+        "不因追求自动化而执行任何源码、仓库、合并或发布副作用"
+      ],
+      "expectedOutputs": [
+        "analyze.requirements",
+        "analyze.preflight"
+      ]
+    }
+  ]
+}

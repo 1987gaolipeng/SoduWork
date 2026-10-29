@@ -1,0 +1,179 @@
+{
+  "schemaVersion": 1,
+  "id": "zendesk",
+  "name": "Zendesk",
+  "category": "客户服务",
+  "description": "Zendesk Support 通用连接器：当前用户、工单列表/详情、创建工单。基于 Zendesk REST API v2，Basic 鉴权（用户名为 email/token 格式），不绑定任何汇报场景。",
+  "officialDocs": [
+    "https://developer.zendesk.com/api-reference/ticketing/introduction/",
+    "https://developer.zendesk.com/api-reference/ticketing/account-configuration/users/#show-the-currently-authenticated-user",
+    "https://developer.zendesk.com/api-reference/ticketing/ticket-management/tickets/#list-tickets",
+    "https://developer.zendesk.com/api-reference/ticketing/ticket-management/tickets/#create-ticket"
+  ],
+  "authDocs": [
+    "https://developer.zendesk.com/api-reference/ticketing/introduction/#authentication"
+  ],
+  "baseUrl": "https://{SUBDOMAIN}.zendesk.com/api/v2",
+  "fields": [
+    {
+      "key": "SUBDOMAIN",
+      "label": "Zendesk 子域（yourcompany.zendesk.com 的 yourcompany）",
+      "secret": false,
+      "required": true,
+      "pattern": "^[a-z0-9][a-z0-9-]{0,58}[a-z0-9]$",
+      "example": ""
+    },
+    {
+      "key": "ZENDESK_EMAIL",
+      "label": "用户邮箱（API token 鉴权时用户名格式为 email/token）",
+      "secret": false,
+      "required": true,
+      "pattern": "^[^@\\s]+@[^@\\s]+\\.[a-z]{2,}$",
+      "example": ""
+    },
+    {
+      "key": "ZENDESK_API_TOKEN",
+      "label": "API Token",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "basic",
+    "usernameKey": "ZENDESK_EMAIL",
+    "passwordKey": "ZENDESK_API_TOKEN",
+    "usernameSuffix": "/token"
+  },
+  "headers": {
+    "Accept": "application/json"
+  },
+  "tools": [
+    {
+      "name": "get_current_user",
+      "description": "获取当前认证用户（GET /users/me.json）。无分页。出处：https://developer.zendesk.com/api-reference/ticketing/account-configuration/users/#show-the-currently-authenticated-user",
+      "method": "GET",
+      "path": "/users/me.json",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_tickets",
+      "description": "列出工单。分页：per_page（1-100 默认 100）+ page 页码，响应 meta.has_more / links.next。出处：https://developer.zendesk.com/api-reference/ticketing/ticket-management/tickets/#list-tickets",
+      "method": "GET",
+      "path": "/tickets.json",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "per_page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 100,
+            "description": "每页条数"
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1,
+            "description": "页码",
+            "maximum": 10000
+          },
+          "sort_order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "default": "desc",
+            "description": "排序方向",
+            "maxLength": 10000
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "query": {
+        "per_page": "per_page",
+        "page": "page",
+        "sort_order": "sort_order"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_ticket",
+      "description": "获取工单详情（GET /tickets/{id}.json）。无分页。出处：https://developer.zendesk.com/api-reference/ticketing/ticket-management/tickets/#show-ticket",
+      "method": "GET",
+      "path": "/tickets/{ticket_id}.json",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "ticket_id": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "工单 ID",
+            "maximum": 2000000000
+          }
+        },
+        "required": [
+          "ticket_id"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_ticket",
+      "description": "创建工单（POST /tickets.json，subject+comment.body）。写入操作：运行前必须获得用户明确授权。出处：https://developer.zendesk.com/api-reference/ticketing/ticket-management/tickets/#create-ticket",
+      "method": "POST",
+      "path": "/tickets.json",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "工单主题"
+          },
+          "comment_body": {
+            "type": "string",
+            "minLength": 1,
+            "description": "首条评论正文",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "subject",
+          "comment_body"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "ticket": {
+          "subject": "$subject",
+          "comment": {
+            "body": "$comment_body"
+          }
+        }
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "仅适用 Zendesk Support（子域式部署）；Suite 其他产品线未覆盖。",
+    "API token 鉴权 Basic 用户名为 email/token 字面量格式：运行器按 auth.usernameSuffix 在邮箱后拼接 /token 后缀（usernameSuffix 声明于 auth），密码为 token。",
+    "list_tickets 为全量工单列表，建议配合侧写筛选；侧写（search.json）端点未收录，待扩展。",
+    "create_ticket 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

@@ -1,0 +1,148 @@
+'use strict';
+
+// First-message cloud creation. Only explicitly attached files leave this
+// device; the local directory and native Agent are never opened or migrated.
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const durableFiles = require('../verified-file-replace.cjs');
+const { connectionScope: scope } = require('../platform-connections/runtime.cjs');
+const digest = data => crypto.createHash('sha256').update(data).digest('hex');
+const MAX_BYTES = 96 * 1024 * 1024;
+
+function create({ app, root, read, save, identity, request, publicRecord }) {
+  const pending = new Map();
+  function options(input) {
+    if (!/^[a-f0-9-]{36}$/i.test(input.requestId || '')) throw Error('云端请求标识无效');
+    if (!/^[a-z][a-z0-9._-]{0,47}$/.test(input.agentId || '')) throw Error('请选择执行底座');
+    const text = String(input.text || '').trim();
+    if (!text || text.length > 50000) throw Error('请输入 1 到 50000 字的消息');
+    if (input.skills?.length || input.plugins?.length || input.intent === 'goal') {
+      throw Error('云端会话使用服务器已配置的能力；本机技能、插件和目标模式请在本地使用');
+    }
+    return { sessionId: 'cloud-' + input.requestId, agentId: input.agentId,
+      text, title: text.replace(/\s+/g, ' ').slice(0, 80), model: String(input.model || ''), requiredSkills: [] };
+  }
+  async function files(items) {
+    if (!Array.isArray(items) || items.length > 20) throw Error('每次最多添加 20 个附件');
+    let total = 0;
+    const names = new Set(), result = [];
+    for (const item of items) {
+      const name = String(item.name || path.basename(item.path || '')).normalize('NFC');
+      if (!name || name.length > 200 || name !== name.trim() || name.endsWith('.') || /[\\/:*?"<>|\x00-\x1f\x7f]/.test(name) ||
+          /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?$/i.test(name) || names.has(name.toLowerCase())) throw Error('请使用不同名称的普通文件附件');
+      names.add(name.toLowerCase());
+      let bytes;
+      if (item.path) {
+        const stat = await fs.stat(item.path);
+        if (!stat.isFile()) throw Error('云端暂不支持文件夹附件，请选择文件');
+        if (total + stat.size > MAX_BYTES) throw Error('附件总大小不能超过 96 MB');
+        bytes = await fs.readFile(item.path);
+      } else if (item.data instanceof ArrayBuffer || ArrayBuffer.isView(item.data)) bytes = Buffer.from(item.data instanceof ArrayBuffer ? new Uint8Array(item.data) : item.data);
+      else throw Error('附件无法读取，请重新选择');
+      total += bytes.length;
+      if (!bytes.length) throw Error('不能上传空文件');
+      if (total > MAX_BYTES) throw Error('附件总大小不能超过 96 MB');
+      result.push({ name, bytes, sha256: digest(bytes), type: String(item.type || item.mimeType || '') });
+    }
+    return result;
+  }
+  function selection(items = []) {
+    if (!Array.isArray(items) || items.length > 20) throw Error('每次最多添加 20 个附件');
+    return items.map(item => [String(item.name || path.basename(item.path || '')).normalize('NFC'),
+      item.path ? path.resolve(item.path) : '', item.path ? '' : digest(Buffer.from(item.data instanceof ArrayBuffer ? new Uint8Array(item.data) : item.data || []))]);
+  }
+  async function submit(record) {
+    const current = await identity(record), form = new FormData();
+    form.append('options', JSON.stringify(record.cloudStart.options));
+    for (const file of record.cloudStart.files) {
+      const bytes = await fs.readFile(file.path);
+      if (digest(bytes) !== file.sha256) throw Error('待发送附件已变化，请保留现场后重新创建会话');
+      form.append('files', new Blob([bytes], { type: file.type }), file.name);
+    }
+    // A lost reply cannot cause a new task on retry: requestId is durable.
+    const reply = await request(current, '/cloud-conversations/' + record.transferId, { method: 'POST', body: form });
+    if (reply.transferId !== record.transferId || !['prepared', 'committing', 'committed', 'aborted'].includes(reply.phase)) throw Error('云端回执不匹配，请重试核对原请求');
+    if (reply.source?.sessionId !== record.sessionId || reply.source?.adapterId !== record.adapterId ||
+        reply.source?.entryKind !== 'cloud' || reply.phase === 'committed' && (!reply.taskId || !reply.ref)) throw Error('云端会话回执不完整，请重试核对原请求');
+    const next = { ...record, phase: reply.phase, taskId: reply.taskId || '', ref: reply.ref || '',
+      ...(reply.deliveryMode === 'git' ? { deliveryPresentation: 'summary', codeDelivery: reply.codeDelivery || { kind: 'git' } } : {}),
+      target: reply.target || null, error: reply.error || '', at: Date.now(),
+      remoteState: ['running', 'queued', 'done', 'completed', 'failed', 'stopped'].includes(reply.status) ? reply.status : 'queued' };
+    await save(next);
+    return { ok: reply.phase === 'committed', sessionId: record.sessionId, handoff: publicRecord(next),
+      reason: reply.phase === 'committed' ? '' : reply.error || '正在确认云端是否已接收，请重试核对，消息不会重复派发' };
+  }
+  async function start(input = {}) {
+    const config = options(input), key = config.sessionId;
+    if (pending.has(key)) throw Error('正在创建这条云端会话，请稍候');
+    const job = (async () => {
+      const current = await identity(), old = read(key);
+      if (old) await identity(old);
+      const chosen = selection(input.attachments);
+      if (old) {
+        if (JSON.stringify(old.cloudStart?.options) !== JSON.stringify(config) || JSON.stringify(old.cloudStart?.selection) !== JSON.stringify(chosen)) {
+          throw Error('上一条云端请求尚需确认，请保持原消息重试，或打开历史会话核对');
+        }
+        if (old.phase === 'committed') return { ok: true, sessionId: key, handoff: publicRecord(old) };
+        if (old.phase === 'aborted') throw Error('这条云端请求已取消，请开启新会话');
+        return submit(old);
+      }
+      const attached = await files(input.attachments || []);
+      const cache = path.join(app.getPath('userData'), 'cloud-conversations', input.requestId);
+      await fs.mkdir(cache, { recursive: true, mode: 0o700 });
+      const stored = [];
+      for (const [index, file] of attached.entries()) {
+        const target = path.join(cache, 'input-' + index);
+        await fs.writeFile(target, file.bytes, { mode: 0o600 });
+        stored.push({ name: file.name, path: target, sha256: file.sha256, type: file.type });
+      }
+      const cwd = path.join(cache, 'results');
+      await fs.mkdir(cwd, { recursive: true });
+      const record = { sessionId: key, transferId: input.requestId, owner: scope(current), entryKind: 'cloud',
+        phase: 'committing', title: config.title, at: Date.now(), cwd, adapterId: config.agentId,
+        options: { model: config.model }, cloudStart: { options: config, files: stored, selection: chosen } };
+      await fs.mkdir(root, { recursive: true, mode: 0o700 });
+      await durableFiles.writeFile(path.join(root, record.transferId + '.view.json'), JSON.stringify({ cwd,
+        adapterId: config.agentId, model: config.model,
+        snapshot: { messages: [], tools: [], pendingUser: { role: 'user', text: config.text, attachments: stored.map(file => ({ name: file.name })), sentAt: Date.now(), done: true },
+          adapterId: config.agentId, displayName: config.agentId,
+          modelSelection: { name: config.model }, execution: { cloud: true }, status: 'idle' } }), { mode: 0o600 });
+      await save(record);
+      return submit(record);
+    })().finally(() => pending.delete(key));
+    pending.set(key, job); return job;
+  }
+  async function history() {
+    const owner = scope(await identity());
+    const entries = await fs.readdir(root).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
+    const rows = [];
+    for (const name of entries.filter(name => /^[a-f0-9]{64}\.json$/.test(name))) {
+      let record;
+      try { record = JSON.parse(await fs.readFile(path.join(root, name), 'utf8')); }
+      catch (error) { console.warn('[cloud-start] Unreadable history receipt:', name, error.code || 'invalid JSON'); continue; }
+      if (record.entryKind !== 'cloud' || record.owner !== owner || record.hidden) continue;
+      // The receipt's `cwd` is a private cache on this computer.  It is only
+      // used to replay remote artifacts and must never be exposed as a local
+      // working directory or inherited by the next local conversation.
+      rows.push({ id: record.sessionId, title: record.title, at: record.at, cwd: '',
+        workspaceName: '云端环境', workspaceLabel: '云端环境', locationMode: 'remote',
+        location: 'cloud', adapterId: record.activeExecutionSelection?.agentId || record.adapterId, taskId: record.taskId || '', state: record.remoteState || (record.phase === 'committed' ? 'idle' : 'waiting'),
+        cloud: true });
+    }
+    return { ok: true, chats: rows };
+  }
+  async function forget(id) {
+    const record = read(id);
+    if (!record || record.entryKind !== 'cloud') return { ok: false, notFound: true };
+    await identity(record);
+    if (record.taskId) {
+      const status = await request(await identity(record), '/tasks/' + encodeURIComponent(record.taskId) + '/ai-status');
+      if (!['done', 'completed', 'failed', 'stopped'].includes(status.status || status.state)) throw Error('云端会话仍在执行，请先停止或等待完成');
+    } else throw Error('请先核对这条云端请求是否已接收');
+    await save({ ...record, hidden: true }); // Keep the durable execution fence.
+    return { ok: true, id };
+  }
+  return { start, history, forget, retry: submit };
+}
+module.exports = { create };

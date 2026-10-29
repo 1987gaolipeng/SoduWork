@@ -1,0 +1,128 @@
+/*
+ * Page layouts emphasize scanning for operations, grouping for configuration, and
+ * verifiable facts for governance.
+ */
+
+/* Shared page structure. */
+.content{width:100%;margin:0 auto}
+.content>.toolbar:first-child,
+.content>.hubtabs:first-child{margin-top:0}
+.content>.toolbar:first-child{margin-bottom:16px}
+.toolbar .hintline{max-width:920px;line-height:1.55}
+.toolbar .hintline b{color:var(--ink);font-weight:720}
+.toolbar{display:flex;align-items:center;flex-wrap:wrap;min-width:0}
+.toolbar .searchbox,.toolbar .search-box{flex:1 1 280px;min-width:220px;max-width:520px}
+.toolbar .btn,.toolbar button{white-space:nowrap}
+.tablewrap .tscroll:focus-visible{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--accent) 45%,transparent)}
+.tablewrap .tscroll thead th{position:sticky;top:0;z-index:2;background:var(--surface-1)}
+.filterbar{min-height:48px;margin:0 0 16px;padding:6px 8px;border:1px solid var(--line);border-radius:13px;background:var(--surface);box-shadow:var(--shadow-sm)}
+.filterbar .srcfilter{margin-left:auto!important}
+.searchbox,.search-box{border-radius:9px;background:var(--surface-1)}
+.srcfilter{row-gap:6px}
+.srcpill{min-height:30px;display:inline-flex;align-items:center;gap:5px;padding:5px 10px;cursor:pointer;user-select:none}
+.srcpill b{font:720 14.5px var(--mono)}
+.subdept{margin-bottom:16px}
+.subdept-head{min-height:38px;margin:0;padding:0 2px 10px;border-bottom:1px solid var(--line)}
+.subdept-name{font-family:var(--display);font-size:max(var(--font-min-readable, 14.5px), 14px)}
+
+/* Overview prioritizes metrics, risks, and department status. */
+.app[data-screen="overview"] .tiles{grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.app[data-screen="overview"] .tile{min-height:106px;background:linear-gradient(145deg,var(--surface),var(--surface-1))}
+.app[data-screen="overview"] .tile:nth-child(1){border-top:2px solid var(--c-blue)}
+.app[data-screen="overview"] .tile:nth-child(2){border-top:2px solid var(--c-green)}
+.app[data-screen="overview"] .tile:nth-child(3){border-top:2px solid var(--c-orange)}
+.app[data-screen="overview"] .tile:nth-child(4){border-top:2px solid var(--c-rose)}
+.app[data-screen="overview"] .tile::after{width:70px;height:70px;right:-28px;top:-28px;opacity:.38}
+.app[data-screen="overview"] .riskbar{border:1px solid color-mix(in srgb,var(--crit) 18%,var(--line));background:linear-gradient(90deg,var(--crit-soft),var(--surface) 68%)}
+.app[data-screen="overview"] .card>.deptgrid{padding:14px 16px 16px}
+.app[data-screen="overview"] .deptgrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.app[data-screen="overview"] .deptcard{border-radius:12px;background:var(--surface-1)}
+.app[data-screen="overview"] .deptcard.risk{background:linear-gradient(90deg,var(--crit-soft),var(--surface-1) 40%)}
+.app[data-screen="overview"] .split{grid-template-columns:minmax(0,1.28fr) minmax(330px,.72fr);margin-top:16px}
+.app[data-screen="overview"] .srcbar,.app[data-screen="overview"] .mini-tiles{padding:16px}
+/* Project groups contain repository cards with progress and code links. */
+/* Use lightweight group headers above full-width repository rows. */
+.app[data-screen="projects"] .subdept{padding:0;border:none;background:none;margin-bottom:20px}
+.app[data-screen="projects"] .subdept-head{display:flex;align-items:baseline;gap:9px;padding:0 2px 9px}
+.app[data-screen="projects"] .subdept-name{font-size:max(var(--font-min-readable, 14.5px), 14px);font-weight:650}
+.app[data-screen="projects"] .subdept-agg{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-3)}
+.app[data-screen="projects"] .pj-grid{display:flex;flex-direction:column;gap:9px}
+/* Repository rows pair identity with progress statistics. */
+.app[data-screen="projects"] .pj-card{position:relative;display:flex;align-items:center;gap:22px;min-height:64px;padding:13px 22px;border-radius:13px;background:var(--surface);box-shadow:var(--shadow-sm);overflow:hidden;transition:box-shadow .15s,border-color .15s}
+
+.app[data-screen="projects"] .pj-card:hover{box-shadow:var(--shadow);border-color:color-mix(in srgb,var(--accent) 40%,var(--line))}
+.app[data-screen="projects"] .pj-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.app[data-screen="projects"] .pj-card-name{display:flex;align-items:center;gap:10px;font-size:14.5px;font-weight:650}
+.app[data-screen="projects"] .pj-card-desc{color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12.5px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:600px}
+.app[data-screen="projects"] .pj-stat{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;gap:6px;min-width:196px}
+.app[data-screen="projects"] .pj-card-bar{width:184px;height:6px;border-radius:99px;margin:0}
+.app[data-screen="projects"] .pj-card-bar>i{background:var(--pj-accent,var(--accent))}
+.app[data-screen="projects"] .pj-card-foot{display:flex;gap:14px;font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-3)}
+.app[data-screen="projects"] .pj-graph-wrap{padding:18px}
+.app[data-screen="projects"] .pj-col{min-width:220px}
+.app[data-screen="projects"] .pj-node{background:var(--surface);box-shadow:none}
+.app[data-screen="projects"] .repo-row{min-height:52px;padding:10px 4px;flex-wrap:wrap}
+/* Keep empty repository and task sections compact. */
+.app[data-screen="projects"] .empty{padding:28px 18px}
+
+/* Two-column platform configuration with aligned information and actions. */
+.app[data-screen="integrations"] .intgrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+.app[data-screen="roles"] .intgrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:stretch}
+.app[data-screen="integrations"] .intcard,
+.app[data-screen="roles"] .intcard{padding:16px;border-radius:13px;background:var(--surface)}
+.app[data-screen="integrations"] .int-actions{margin-top:3px;padding-top:12px;border-top:1px solid var(--line-2)}
+.app[data-screen="roles"] .int-actions{margin-top:auto;padding-top:11px;border-top:1px solid var(--line-2)}
+.app[data-screen="integrations"] .endpoint{background:var(--surface-1)}
+.app[data-screen="models"] .model-provider-grid{gap:12px}
+.app[data-screen="models"] .model-provider{border-radius:13px}
+
+/* Organization governance prioritizes tables and trees for row-by-row review. */
+.app[data-screen="users"] .statrow,
+.app[data-screen="roles"] .statrow{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));max-width:720px}
+.app[data-screen="users"] .stat,
+.app[data-screen="roles"] .stat{min-width:0;border-radius:12px;box-shadow:none}
+.app[data-screen="users"] .tablewrap{border-radius:13px;box-shadow:var(--shadow-sm)}
+.app[data-screen="users"] tbody tr{height:58px}
+.app[data-screen="orgs"] .content>.card{max-width:100%}
+.app[data-screen="orgs"] .orgtree{padding:10px 12px 16px}
+.app[data-screen="orgs"] .org-row{min-height:48px;border-bottom:1px solid var(--line-2);border-radius:0}
+.app[data-screen="orgs"] .org-row:last-child{border-bottom:0}
+.app[data-screen="orgs"] .org-row:hover{background:var(--surface-1)}
+.app[data-screen="orgs"] .org-ico{width:34px;height:34px;border-radius:10px}
+.app[data-screen="roles"] .intcard{min-height:190px}
+.app[data-screen="roles"] .role-card-perms{padding:11px;border-radius:10px;background:var(--surface-1)}
+.app[data-screen="audit"] .srcfilter{margin-bottom:12px;padding:4px 0}
+.app[data-screen="audit"] .card{max-width:100%}
+.app[data-screen="audit"] .audit-row{min-height:60px;padding:12px 17px}
+.app[data-screen="audit"] .audit-act{border-radius:7px}
+.app[data-screen="audit"] .audit-time{margin-left:auto;text-align:right}
+
+/* Responsive layouts preserve navigation and business terminology. */
+@media(max-width:1380px){
+  .app[data-screen="projects"] .pj-grid{grid-template-columns:repeat(2,minmax(250px,1fr))}
+}
+@media(max-width:980px){
+  .app[data-screen="overview"] .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .app[data-screen="overview"] .split{grid-template-columns:1fr}
+  .app[data-screen="overview"] .deptgrid{grid-template-columns:1fr}
+  .app[data-screen="projects"] .pj-grid{grid-template-columns:1fr}
+  .app[data-screen="integrations"] .intgrid,
+  .app[data-screen="roles"] .intgrid{grid-template-columns:1fr}
+}
+@media(max-width:760px){
+  .content{padding:16px 14px 32px}
+  .filterbar{align-items:stretch}.filterbar .searchbox,.filterbar .search-box{flex:1 1 100%;min-width:0}
+  .filterbar .srcfilter{margin-left:0!important}
+  .app[data-screen="overview"] .riskbar{align-items:flex-start;flex-wrap:wrap}
+  .app[data-screen="overview"] .riskbar-acts{width:100%;padding-left:43px}
+  .app[data-screen="users"] .statrow,.app[data-screen="roles"] .statrow{grid-template-columns:1fr 1fr;max-width:none}
+  .audit-row{align-items:flex-start;flex-wrap:wrap}.audit-time{width:100%;padding-left:88px;text-align:left!important}
+  .repo-row{align-items:flex-start}.repo-row .ml-auto{display:none}
+  .toolbar .searchbox,.toolbar .search-box{flex-basis:100%;max-width:none}
+}
+@media(max-width:520px){
+  .app[data-screen="overview"] .tiles{grid-template-columns:1fr 1fr}
+  .app[data-screen="overview"] .tile{min-height:96px;padding:14px}.app[data-screen="overview"] .tile .val{font-size:24px}
+  .app[data-screen="users"] .statrow,.app[data-screen="roles"] .statrow{grid-template-columns:1fr}
+  .subdept{padding:12px!important}.dr-card{padding:15px!important}
+}

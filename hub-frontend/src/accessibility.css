@@ -1,0 +1,102 @@
+/* Shared text colors: normal-size text is checked against every base surface.
+   Decorative brand colors stay independent from readable status/link colors. */
+:root, :root[data-theme="light"] {
+  --ink: #122238;
+  --ink-2: #42516a;
+  --ink-3: #536176;
+  --ink-4: #596579;
+  --sidebar-muted: #536176;
+  --accent: #2053a8;
+  --accent-2: #19458e;
+  --accent-soft: rgba(32,83,168,.08);
+  --on-accent: #fff;
+  --ok: #076047;
+  --ok-soft: rgba(7,96,71,.08);
+  --warn: #7a4a06;
+  --warn-soft: rgba(122,74,6,.08);
+  --crit: #a0243b;
+  --crit-soft: rgba(160,36,59,.08);
+  --text-purple: #6246a8;
+  --danger-fill: #ad2b3f;
+  --on-danger: #fff;
+  --avatar-fill: linear-gradient(135deg,#245cb9,#087052);
+  --ink-1: var(--ink);
+  --ink-5: var(--ink-4);
+  --muted: var(--ink-3);
+  --danger: var(--crit);
+  --auto-blue: var(--accent);
+  --auto-green: var(--ok);
+  --auto-amber: var(--warn);
+  --auto-coral: var(--crit);
+  --auto-navy: #223d65;
+}
+:root[data-theme="dark"] {
+  --ink: #edf3fb;
+  --ink-2: #c5d0df;
+  --ink-3: #b2bfd1;
+  --ink-4: #a7b6ca;
+  --sidebar-muted: #b2bfd1;
+  --accent: #9ac0ff;
+  --accent-2: #b3d0ff;
+  --accent-soft: rgba(154,192,255,.09);
+  --on-accent: #081426;
+  --ok: #75dfbd;
+  --ok-soft: rgba(117,223,189,.09);
+  --warn: #f5c77f;
+  --warn-soft: rgba(245,199,127,.09);
+  --crit: #ffa4ae;
+  --crit-soft: rgba(255,164,174,.09);
+  --text-purple: #cbb7ff;
+}
+
+/* Keep readable text on inactive records; disabled controls retain their cues. */
+:is(.app, .modal) :is(.intcard.off, .model-provider.disabled, .model-chip.off, .at-card.off,
+  .sch-card.off, .mcp-item.off, .rm-pend.off, .om-card.is-archived,
+  .cap-mcp-import-row.duplicate, .gov-attention-row.quiet, .publisher-row.revoked,
+  .wc-row.disabled, .rb-cap.is-missing, .plugin-audience-people .is-inactive,
+  .typecard.dim, .cap-limit.disabled),
+.app .plugin-page .binding-row.disabled,
+.app .content .model-provider .model-chip.off,
+.app .oi-table tr.is-off .oi-plugin-name { opacity: 1; }
+.app .plugin-catalog-status button span, .app .pg-filter button i { opacity: 1; }
+
+.toast { color: var(--sidebar-ink); }
+.btn-danger { background: var(--danger-fill); color: var(--on-danger); }
+.app .avatar, .app .side-foot .avatar, :is(.app, .modal) .cli .ava,
+:is(.app, .modal) .bp .av, .app .en-device .en-avatar { background: var(--avatar-fill); color: #fff; }
+:is(.app, .modal) .prio-high { color: var(--warn); }
+:is(.app, .modal) .prio-critical { color: var(--crit); }
+:root .src-ext { color: var(--ok); background: var(--ok-soft); }
+.login-story-brand small { color: #afc0d8; letter-spacing: .06em; }
+.plugin-page :is(.plugin-logo, .plugin-preview-logo) { background: var(--auto-navy); }
+.plugin-sim-verdict > i, .riskbar-ico { color: var(--on-accent); }
+.compatibility-signal { background: color-mix(in srgb, currentColor 7%, var(--surface)); }
+.plugin-catalog-fields .select-menu { color: var(--ink); background: var(--surface); }
+
+/* The shared 14.5px floor keeps formerly tiny labels and counters readable. */
+.brand { gap: 8px; padding-inline: 14px; }
+.brand-copy { flex: 1; }
+.brand-copy small { letter-spacing: .035em; line-height: 1.4; }
+.brand-edition { flex: none; padding-inline: 5px; line-height: 1.4; }
+small, sub, sup { font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.nav-label { letter-spacing: .035em; }
+.nav-label b { height: auto; min-height: 20px; min-width: 20px; }
+.env small, .side-context small { line-height: 1.4; }
+:is(.app .content, .modal) :is(.tag, .chip, .plugin-card-state, .plugin-card-chip) { line-height: 1.5; }
+.wc-checks button i { width: 18px; height: 18px; line-height: 1; }
+.modal-head .mx { display: grid; place-items: center; min-width: 32px; min-height: 32px; }
+
+/* Keyboard focus is visible on the scrolling region itself, without moving it. */
+[role="region"][tabindex="0"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: 8px;
+}
+.modal[role="dialog"]:focus { outline: none; }
+.modal .domrow .f-lbl { flex: none; margin: 0; }
+.modal .domrow .f-in { min-width: 0; }
+.modal :is(.poschip, .seg .s):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (forced-colors: active) {
+  [role="region"][tabindex="0"]:focus-visible,
+  .modal :is(.poschip, .seg .s):focus-visible { outline-color: Highlight; }
+}

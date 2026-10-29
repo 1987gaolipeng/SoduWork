@@ -1,0 +1,172 @@
+{
+  "schemaVersion": 1,
+  "id": "clickup",
+  "name": "ClickUp",
+  "category": "项目管理",
+  "description": "ClickUp 通用连接器：当前用户、工作区列表、任务列表与创建。基于 ClickUp API v2，Personal Token 鉴权，不绑定任何汇报场景。",
+  "officialDocs": [
+    "https://developer.clickup.com/reference/getauthorizeduser",
+    "https://developer.clickup.com/reference/getteams",
+    "https://developer.clickup.com/reference/gettasks",
+    "https://developer.clickup.com/reference/createtask"
+  ],
+  "authDocs": [
+    "https://developer.clickup.com/docs/personal-tokens"
+  ],
+  "baseUrl": "https://api.clickup.com/api/v2",
+  "fields": [
+    {
+      "key": "CLICKUP_TOKEN",
+      "label": "Personal Token",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "header",
+    "tokenKey": "CLICKUP_TOKEN",
+    "header": "Authorization"
+  },
+  "headers": {
+    "Accept": "application/json"
+  },
+  "tools": [
+    {
+      "name": "get_authorized_user",
+      "description": "获取当前授权用户。无分页。出处：https://developer.clickup.com/reference/getauthorizeduser",
+      "method": "GET",
+      "path": "/user",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_workspaces",
+      "description": "列出可用工作区（Team）。无游标分页，一次返回全量。出处：https://developer.clickup.com/reference/getteams",
+      "method": "GET",
+      "path": "/team",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_tasks",
+      "description": "列出工作区任务。分页：page（从 0 开始，每页默认 50 最大 100），响应体 last_page 标记末页。出处：https://developer.clickup.com/reference/gettasks",
+      "method": "GET",
+      "path": "/team/{team_id}/task",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "team_id": {
+            "type": "string",
+            "pattern": "^[0-9]{5,15}$",
+            "description": "工作区 ID",
+            "maxLength": 10000
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "页码，从 0 开始",
+            "maximum": 10000
+          },
+          "statuses": {
+            "type": "string",
+            "description": "逗号分隔状态名",
+            "maxLength": 10000
+          },
+          "assignees": {
+            "type": "string",
+            "description": "逗号分隔负责人 ID",
+            "maxLength": 10000
+          },
+          "subtasks": {
+            "type": "boolean",
+            "default": true,
+            "description": "含子任务"
+          },
+          "order_by": {
+            "type": "string",
+            "enum": [
+              "created",
+              "updated",
+              "due_date"
+            ],
+            "description": "排序字段",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "team_id"
+        ],
+        "maxProperties": 50
+      },
+      "query": {
+        "page": "page",
+        "statuses": "statuses",
+        "assignees": "assignees",
+        "subtasks": "subtasks",
+        "order_by": "order_by"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_task",
+      "description": "创建任务（POST /list/{list_id}/task，name 必填；list_id 来自目标列表）。写入操作：运行前必须获得用户明确授权。出处：https://developer.clickup.com/reference/createtask",
+      "method": "POST",
+      "path": "/list/{list_id}/task",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "list_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{5,25}$",
+            "description": "目标列表 ID",
+            "maxLength": 10000
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "任务名"
+          },
+          "content": {
+            "type": "string",
+            "description": "任务描述",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "list_id",
+          "name"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "name": "$name",
+        "content": "$content"
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "鉴权为 Authorization: <personal token> 原始值（无 Bearer 前缀），官方 Personal Token 文档如此约定。",
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "ClickUp API v2 为现行稳定版；官方 v3 部分端点已推出，接入时按官方复核。",
+    "分页为页码式（page + last_page），非游标，并发修改时页码语义可能与快照不符。",
+    "create_task 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

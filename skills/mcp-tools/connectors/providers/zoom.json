@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 1,
+  "id": "zoom",
+  "name": "Zoom",
+  "category": "沟通协作",
+  "description": "Zoom 通用连接器：当前用户、会议列表、创建会议。基于 Zoom Meeting API v2，OAuth 访问令牌由用户安全填入（Server-to-Server OAuth 由用户侧生成后填入）。",
+  "officialDocs": [
+    "https://developers.zoom.us/docs/api/meetings/",
+    "https://developers.zoom.us/docs/api/rest/reference/zoom-api/methods/#operation/user",
+    "https://developers.zoom.us/docs/api/rest/reference/zoom-api/methods/#operation/meetings",
+    "https://developers.zoom.us/docs/api/rest/reference/zoom-api/methods/#operation/meetingCreate"
+  ],
+  "authDocs": [
+    "https://developers.zoom.us/docs/integrations/oauth/"
+  ],
+  "baseUrl": "https://api.zoom.us/v2",
+  "fields": [
+    {
+      "key": "ZOOM_ACCESS_TOKEN",
+      "label": "Zoom 访问令牌",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "tokenKey": "ZOOM_ACCESS_TOKEN",
+    "header": "Authorization",
+    "prefix": "Bearer"
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "get_me",
+      "description": "获取当前用户信息（GET /users/me）。无分页。出处：https://developers.zoom.us/docs/api/rest/reference/zoom-api/methods/#operation/user",
+      "method": "GET",
+      "path": "/users/me",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_meetings",
+      "description": "列出用户会议（type 固定 scheduled）。分页：next_page_token + page_size（1-300 默认 30）。出处：https://developers.zoom.us/docs/api/rest/reference/zoom-api/methods/#operation/meetings",
+      "method": "GET",
+      "path": "/users/me/meetings",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "page_size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 300,
+            "default": 30,
+            "description": "每页条数"
+          },
+          "next_page_token": {
+            "type": "string",
+            "description": "上一页 next_page_token",
+            "maxLength": 10000
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "fixedQuery": {
+        "type": "scheduled"
+      },
+      "query": {
+        "page_size": "page_size",
+        "next_page_token": "next_page_token"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_meeting",
+      "description": "获取会议详情（GET /meetings/{meetingId}）。无分页。出处：https://developers.zoom.us/docs/api/rest/reference/zoom-api/methods/#operation/meeting",
+      "method": "GET",
+      "path": "/meetings/{meeting_id}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "meeting_id": {
+            "type": "string",
+            "pattern": "^[0-9]{9,15}$",
+            "description": "会议 ID（数字）",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "meeting_id"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_meeting",
+      "description": "创建会议（POST /users/me/meetings）。写入操作：运行前必须获得用户明确授权。出处：https://developers.zoom.us/docs/api/rest/reference/zoom-api/methods/#operation/meetingCreate",
+      "method": "POST",
+      "path": "/users/me/meetings",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "topic": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "会议主题"
+          },
+          "start_time": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z$",
+            "description": "开始时间（UTC，yyyy-MM-ddTHH:mm:ssZ）",
+            "maxLength": 10000
+          },
+          "duration": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1440,
+            "description": "时长（分钟）"
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA 时区，如 Asia/Shanghai",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "topic",
+          "start_time",
+          "duration"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "topic": "$topic",
+        "start_time": "$start_time",
+        "duration": "$duration",
+        "timezone": "$timezone"
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "JWT 凭据方式已被 Zoom 弃用，本定义按 access token（OAuth 或 Server-to-Server OAuth）建模；令牌约 1 小时过期，需用户安全填入并手动更新，自动续期为宿主侧适配项，本连接器未实现。",
+    "create_meeting 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

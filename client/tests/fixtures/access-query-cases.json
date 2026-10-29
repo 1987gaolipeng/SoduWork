@@ -1,0 +1,222 @@
+[
+  {
+    "command": "pwd",
+    "allow": true
+  },
+  {
+    "command": "ls",
+    "allow": true
+  },
+  {
+    "command": "ls -lah .",
+    "allow": true
+  },
+  {
+    "command": "cat report.txt",
+    "allow": true
+  },
+  {
+    "command": "cat 'report name.txt' AGENTS.md",
+    "allow": true
+  },
+  {
+    "command": "head -n 10 report.txt",
+    "allow": true
+  },
+  {
+    "command": "tail -c20 report.txt",
+    "allow": true
+  },
+  {
+    "command": "wc -l report.txt",
+    "allow": true
+  },
+  {
+    "command": "rg --no-config --files .",
+    "allow": true
+  },
+  {
+    "command": "rg --no-config -n needle report.txt",
+    "allow": true
+  },
+  {
+    "command": "cat .env",
+    "allow": false
+  },
+  {
+    "command": "cat .ENV",
+    "allow": false
+  },
+  {
+    "command": "cat report.txt ../outside.txt",
+    "allow": false
+  },
+  {
+    "command": "cat link/outside.txt",
+    "allow": false
+  },
+  {
+    "command": "cat @report.txt",
+    "allow": false
+  },
+  {
+    "command": "ls ..",
+    "allow": false
+  },
+  {
+    "command": "ls -LR .",
+    "allow": false
+  },
+  {
+    "command": "tail -f report.txt",
+    "allow": false
+  },
+  {
+    "command": "rg needle report.txt",
+    "allow": true
+  },
+  {
+    "command": "rg --no-config needle .",
+    "allow": true
+  },
+  {
+    "command": "rg --no-config --pre python needle report.txt",
+    "allow": false
+  },
+  {
+    "command": "rg --no-config --files --follow .",
+    "allow": false
+  },
+  {
+    "command": "cat report.txt > new.txt",
+    "allow": false
+  },
+  {
+    "command": "cat report.txt; whoami",
+    "allow": false
+  },
+  {
+    "command": "cat report.txt && pwd",
+    "allow": false
+  },
+  {
+    "command": "cat $(pwd)/report.txt",
+    "allow": false
+  },
+  {
+    "command": "cat `pwd`/report.txt",
+    "allow": false
+  },
+  {
+    "command": "cat %USERPROFILE%/secret",
+    "allow": false
+  },
+  {
+    "command": "cat $HOME/secret",
+    "allow": false
+  },
+  {
+    "command": "cat *.txt",
+    "allow": false
+  },
+  {
+    "command": "cat \"report.txt\"\"\"",
+    "allow": false
+  },
+  {
+    "command": "cat 'report.txt",
+    "allow": false
+  },
+  {
+    "command": "cat report.txt\npwd",
+    "allow": false
+  },
+  {
+    "command": "git status",
+    "allow": false
+  },
+  {
+    "command": "npm test",
+    "allow": false
+  },
+  {
+    "command": "python -c pass",
+    "allow": false
+  },
+  {
+    "command": "powershell -Command Get-Content report.txt",
+    "allow": false
+  },
+  {
+    "command": "find . -exec rm . \\;",
+    "allow": false
+  },
+  {
+    "command": "rg -ni 'needle|fixture' .",
+    "allow": true
+  },
+  {
+    "command": "rg 'needle.*fixture'",
+    "allow": true
+  },
+  {
+    "command": "rg --hidden needle .",
+    "allow": true
+  },
+  {
+    "command": "rg -C 2 needle report.txt",
+    "allow": true
+  },
+  {
+    "command": "rg --files",
+    "allow": true
+  },
+  {
+    "command": "grep -nF needle report.txt",
+    "allow": true
+  },
+  {
+    "command": "grep -r needle .",
+    "allow": false
+  },
+  {
+    "command": "grep -f .env report.txt",
+    "allow": false
+  },
+  {
+    "command": "head -20 report.txt",
+    "allow": true
+  },
+  {
+    "command": "tail --lines=20 report.txt",
+    "allow": true
+  },
+  {
+    "command": "rg --follow needle .",
+    "allow": false
+  },
+  {
+    "command": "rg --pre=python needle .",
+    "allow": false
+  },
+  {
+    "command": "rg --glob '**/*' needle .",
+    "allow": false
+  },
+  {
+    "command": "rg needle .env",
+    "allow": false
+  },
+  {
+    "command": "rg needle link",
+    "allow": false
+  },
+  {
+    "command": "rg \"$(whoami)\" report.txt",
+    "allow": false
+  },
+  {
+    "command": "rg -n needle . > output.txt",
+    "allow": false
+  }
+]

@@ -1,0 +1,279 @@
+/* SoduWork admin palette — see docs/design/admin-ui-color-standard.md.
+   Shared tokens cover lazy-loaded screens; scoped primitives preserve their layouts. */
+:root, :root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #fff;
+  --surface: #fff;
+  --surface-1: #f6f8fb;
+  --surface-2: #edf3fe;
+  --surface-3: #e8edf4;
+  --raised: #fff;
+  --ink: #263244;
+  --ink-2: #4c596d;
+  --ink-3: #606c80;
+  --ink-4: #606c80;
+  --line: #e8edf4;
+  --line-2: #e8edf4;
+  --line-3: #dce5f2;
+  --accent: #1d58d5;
+  --action-fill: #2468f2;
+  --accent-2: #1d58d5;
+  --accent-soft: #e9f1ff;
+  --on-accent: #fff;
+  --ok: #147451;
+  --ok-soft: #ecf8f2;
+  --warn: #875510;
+  --warn-soft: #fff6e6;
+  --crit: #b7393d;
+  --crit-soft: #fff0f0;
+  --online: var(--ok);
+  --offline: #98a2b3;
+  --danger-fill: #c43f43;
+  --on-danger: #fff;
+  --sidebar: #f6f8fb;
+  --sidebar-2: #f6f8fb;
+  --sidebar-ink: var(--ink);
+  --sidebar-muted: var(--ink-3);
+  --sidebar-line: var(--line);
+  --radius: 7px;
+  --radius-sm: 4px;
+  --shadow: 0 8px 28px rgb(38 50 68 / 8%);
+  --shadow-sm: none;
+  --focus: 0 0 0 3px rgb(36 104 242 / 16%);
+  --avatar-fill: var(--action-fill);
+  --auto-navy: var(--ink);
+  --bg-0: var(--surface);
+  --bg-1: var(--surface-1);
+  --bg-2: var(--surface-2);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b1018;
+  --surface: #151b25;
+  --surface-1: #101620;
+  --surface-2: #1b263a;
+  --surface-3: #35435a;
+  --raised: #151b25;
+  --ink: #e8ecf2;
+  --ink-2: #c1cad8;
+  --ink-3: #a4b1c5;
+  --ink-4: #a4b1c5;
+  --line: #2b3341;
+  --line-2: #2b3341;
+  --line-3: #35435a;
+  --accent: #85b1ff;
+  --action-fill: #85b1ff;
+  --accent-2: #a4c4ff;
+  --accent-soft: #1c2b46;
+  --on-accent: #101620;
+  --ok: #75dfbd;
+  --ok-soft: #15372e;
+  --warn: #f5c77f;
+  --warn-soft: #392e1c;
+  --crit: #ffa4ae;
+  --crit-soft: #3b222b;
+  --danger-fill: #c43f43;
+  --sidebar: #101620;
+  --sidebar-2: #101620;
+  --shadow: 0 8px 28px rgb(0 0 0 / 28%);
+  --focus: 0 0 0 3px rgb(133 177 255 / 22%);
+}
+
+/* Navigation and work canvas: continuous surfaces, quiet dividers. */
+.app { grid-template-columns: 224px minmax(0, 1fr); }
+.app .sidebar { border-right: 1px solid var(--line); }
+.app .sidebar > .brand {
+  position: relative; display: grid; grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px; min-height: 86px; padding: 20px 16px;
+}
+.app .brand-copy { min-width: 0; }
+.app .brand-copy b { letter-spacing: 0; font-weight: 650; }
+.app .brand-copy small { white-space: nowrap; letter-spacing: 0; overflow: hidden; text-overflow: ellipsis; }
+.app .sidebar > .brand > .brand-edition {
+  position: absolute; top: 5px; right: 8px; margin: 0; padding: 2px 5px;
+  border-radius: 4px; background: var(--surface); font-weight: 450; line-height: 1.2;
+}
+.app .main { background: var(--bg); }
+.app .nav { padding-inline: 14px; }
+.app .nav-label { padding: 16px 10px 7px; letter-spacing: 0; font-weight: 500; }
+.app .nav-label b { border: 0; background: var(--surface); border-radius: 4px; }
+.app .nav-item { min-height: 38px; padding: 9px 10px; border-radius: 5px; font-weight: 450; }
+.app .nav-item:hover { background: var(--surface-2); }
+.app .nav-item.active { background: var(--accent-soft); color: var(--accent); box-shadow: none; font-weight: 600; }
+.app .nav-item.active .nav-copy { font-weight: 600; letter-spacing: 0; }
+.app .nav-item.active .ico { filter: none; }
+.app .side-foot-wrap { background: var(--sidebar); }
+.app .side-foot .avatar, .app .profile-menu .avatar { background: var(--accent-soft); color: var(--accent); box-shadow: none; }
+.app .avatar, :is(.app, .modal) .cli .ava, :is(.app, .modal) .bp .av,
+.app .en-device .en-avatar { color: var(--on-accent); }
+.app .side-context { border-radius: 5px; background: var(--surface); }
+.app .topbar { background: var(--surface); backdrop-filter: none; }
+.app .topbar-inner { min-height: 76px; padding-inline: 30px; max-width: 1760px; }
+.app .page-mark { border: 0; background: var(--accent-soft); border-radius: 5px; box-shadow: none; }
+.app .page-title h1 { font-size: 23px; font-weight: 600; letter-spacing: 0; }
+.app .page-route { letter-spacing: 0; font-weight: 450; }
+.app .content { max-width: 1760px; padding: 24px 30px 40px; }
+.app .env, .app .icon-btn { border-radius: 5px; box-shadow: none; }
+.app .profile-menu { border-radius: 7px; box-shadow: var(--shadow); }
+
+/* Shared panels plus every screen's domain-specific panels. No dimensions,
+   overflow, display, ordering or visibility are changed by this treatment. */
+.app .content :is(
+  .card, .tablewrap, .intcard, .tcard, .stat, .tile, .mini-tile, .pj-card,
+  .flowcard, .subdept, .mcp-card, .sch-card, .gov-section, .gov-metric,
+  .oi-panel, .oi-metric, .oi-metrics, .ops-command, .ops-ledger, .ops-metrics, .ops-panel,
+  .en-panel, .en-stat, .rb-card, .rb-metric, .cr-panel, .cr-card,
+  .ugc-panel, .ugc-metric, .ugc-card, .pg-ledger, .pg-summary, .pg-panel,
+  .rc-panel, .rc-card, .rc-list, .rc-source, .model-provider, .model-runtime, .model-catalog-summary-card,
+  .cap-panel, .cap-card, .cap-admin-panel, .cap-admin-card, .cap-admin-metric, .at-card, .at-summary,
+  .plugin-card, .plugin-workbench, .plugin-catalog-policy, .plugin-detail-section,
+  .plugin-admin-card, .plugin-index, .binding-row, .publisher-row,
+  .om-card, .wc-panel, .wc-card, .wc-list, .idp-row, .rolecard, .typecard,
+  .og-workbench, .og-scope-card, .client-release-card, .cr-head, .cr-list, .cr-attempts,
+  .pg-hero, .pg-readiness, .pg-work-panel, .pg-owner-panel, .pg-task-summary,
+  .pg-integration, .pg-repo-editor, .pg-flow-panel, .plugin-card-shell
+) { border-color: var(--line); border-radius: 7px; background: var(--surface); box-shadow: none; }
+/* One continuous background per statistics group, with quiet internal spacing. */
+.app {
+  --summary-start: #eaf1ff; --summary-end: #f8fbff; --summary-line: #dce7fb;
+  --summary-fill: linear-gradient(110deg, var(--summary-start), var(--summary-end));
+}
+:root[data-theme="dark"] .app {
+  --summary-start: #1c2b46; --summary-end: #171f2d; --summary-line: #304261;
+}
+.app .content :is(.model-runtime, .pg-detail-metrics, .og-scope-card) {
+  --line: var(--summary-line);
+  background: var(--summary-fill); border: 0 !important; box-shadow: none;
+}
+/* The legacy design system makes these containers transparent with !important.
+   Override that presentation here, leaving their responsive column rules intact. */
+.app .content :is(.gov-ledger, .oi-metrics, .ugc-metrics, .rb-summary,
+  .admin-access-summary, .at-summary, .cap-summary, .cap-admin-metrics,
+  .wc-intro-metrics, .ops-ledger, .ops-metrics, .org-governance > .og-summary) {
+  --line: var(--summary-line);
+  gap: 0 !important; padding: 0 !important;
+  border: 0 !important; border-radius: 7px;
+  background: var(--summary-fill) !important; box-shadow: none !important;
+}
+.app .content :is(.gov-metric, .oi-stat, .ugc-metric, .rb-summary > div,
+  .admin-access-summary > .stat, .at-summary > span, .cap-summary > article,
+  .cap-admin-metric, .wc-intro-metrics > span, .ops-ledger > article,
+  .ops-metrics > article, .og-summary > div, .model-runtime .model-catalog-summary-card) {
+  border: 0 !important; border-radius: 0; background: transparent; box-shadow: none;
+}
+.app .content .admin-access-summary > .stat { flex: 1 1 0; }
+.app .content .og-summary { gap: 0; }
+.app .content :is(.card-head, .gov-section > header, .en-panel > header, .rb-card > header) {
+  background: var(--surface); border-bottom-color: var(--line);
+}
+.app .content :is(.tile, .gov-metric) { border-top-width: 1px; }
+.app .content .tile::after { display: none; }
+.app .content :is(.tile .val, .stat .sv, .gov-metric > b) { font-weight: 600; }
+.app .content .empty::before { background: var(--line-3); }
+.app .content :is(.toolbar, .filterbar, .admin-filterbar, .rc-toolbar,
+  .en-filters, .rb-filterbar, .oi-filters, .plugin-catalog-filter-row) {
+  background: transparent; border-color: transparent; border-radius: 0; box-shadow: none;
+}
+
+/* Controls preserve heights, hit areas, keyboard focus and all disabled states. */
+:is(.app, .modal) :is(.btn, .f-in, .f-sel, .field-control, .select-menu,
+  .searchbox, .search-box, .rc-search, .oi-search-field, .plugin-catalog-search,
+  .cap-admin-search, .srcpill, .seg .s, .bp) { border-radius: 4px; }
+:is(.app, .modal) :is(.btn-primary, .admin-card-action.btn-primary) {
+  background: var(--action-fill); border-color: var(--action-fill); color: var(--on-accent); box-shadow: none;
+}
+:is(.app, .modal) .btn-primary:hover:not(:disabled) { background: var(--accent-2); border-color: var(--accent-2); }
+:is(.app, .modal) :is(.btn-ghost, .f-in, .f-sel, .field-control, .select-menu,
+  .searchbox, .rc-search, .oi-search-field, .plugin-catalog-search, .cap-admin-search) {
+  background-color: var(--surface); border-color: var(--line); box-shadow: none;
+}
+:is(.app, .modal) :is(.btn-ghost, .srcpill):hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+:is(.app, .modal) :is(.f-in, .f-sel, .field-control, .select-menu):focus-within {
+  border-color: var(--accent);
+}
+:is(.app, .modal) :is(input, select, textarea, button):focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+:is(.app, .modal) .select-menu-popover { border-radius: 5px; background: var(--surface); box-shadow: var(--shadow); }
+:is(.app, .modal) .select-menu-option { border-radius: 3px; }
+:is(.app, .modal) .select-menu-option[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); }
+.app .content :is(.hubtabs, .en-tabs) { border-radius: 5px; background: var(--surface-1); box-shadow: none; }
+.app .content :is(.hubtab, .en-tabs button) { border-radius: 4px; }
+.app .content :is(.hubtab.on, .en-tabs button.on) { color: var(--accent); background: var(--accent-soft); border-color: transparent; box-shadow: none; }
+.app .content :is(.srcpill.on, .seg .s.on, .bp.on) { color: var(--accent); background: var(--accent-soft); }
+.app .content .ugc-filterbar { background: var(--surface-1); border-color: var(--line); border-radius: 5px; }
+.app .content .ugc-filterbar > label { border-radius: 4px; }
+.app .content :is(.chip, .flag, .pill, .tag, .sysbadge) { border-radius: 4px; }
+
+/* Dedicated governance controls previously carried independent white/blue values. */
+.app .content .plugin-page :is(.plugin-catalog-policy, .plugin-workbench-v2,
+  .plugin-detail-card, .plugin-distribution-status, .plugin-lifecycle, .plugin-version-history) {
+  border-color: var(--line); border-radius: 7px; background: var(--surface); box-shadow: none;
+}
+:is(.app .content, .modal, .plugin-detail-overlay) .plugin-catalog-fields .select-menu {
+  background: var(--surface); color: var(--ink); border-color: var(--line); border-radius: 4px;
+}
+:is(.app .content, .modal, .plugin-detail-overlay) .plugin-catalog-save {
+  background: var(--action-fill); color: var(--on-accent); border-radius: 4px; box-shadow: none;
+}
+:is(.app .content, .modal, .plugin-detail-overlay) .plugin-catalog-save:disabled {
+  background: var(--surface-3); color: var(--ink-3);
+}
+:is(.app .content, .modal, .plugin-detail-overlay) :is(.plugin-catalog-state, .plugin-catalog-choice-note) {
+  border-color: var(--line); border-radius: 5px;
+}
+.app .content :is(.og-summary > div, .rc-head-stats > div, .en-summary > div, .rb-summary > div) {
+  border-color: var(--line); border-radius: 7px; box-shadow: none;
+}
+
+/* Tables remain scrollable with their existing sticky headings and actions. */
+.app .content thead th { background: var(--surface-1); color: var(--ink-3); border-color: var(--line); letter-spacing: 0; font-weight: 500; }
+.app .content tbody td { border-color: var(--line); }
+.app .content tbody tr:hover { background: color-mix(in srgb, var(--accent-soft) 40%, var(--surface)); }
+.app .content :is(.gov-dept-head, .pg-ledger > header, .rc-table-head) { background: var(--surface-1); }
+
+/* Dialogs and drawers share the same palette, including portals outside .app. */
+.modal-mask, .at-overlay { background: rgb(15 23 42 / 30%); backdrop-filter: blur(3px); }
+.modal, .at-modal { border-radius: 8px; border-color: var(--line); background: var(--surface); box-shadow: var(--shadow); }
+.modal :is(.modal-head, .modal-foot), .at-modal-head { background: var(--surface); border-color: var(--line); }
+.modal :is(.f-in, .f-sel, textarea), .at-editor :is(input, textarea, select) { background-color: var(--surface); border-color: var(--line); border-radius: 4px; }
+.toast { background: var(--ink); color: var(--surface); border-color: transparent; border-radius: 5px; }
+
+/* The login entry uses the admin palette; the public marketing page keeps its scope. */
+.public-login.public-theme {
+  --p-paper: #fff; --p-surface: #fff; --p-ink: #263244; --p-copy: #4c596d;
+  --p-muted: #667085; --p-line: #e8edf4; --p-teal: #2468f2;
+  --p-teal-soft: #e9f1ff; --p-blue: #2468f2;
+}
+.public-login .login-story { background: #f6f8fb; color: var(--p-ink); }
+.public-login .login-story :is(.public-brand, h2) { color: var(--p-ink); }
+.public-login .login-story :is(p, .login-story-ledger, .login-story-bottom) { color: var(--p-copy); }
+.public-login .login-story .public-eyebrow { color: var(--p-teal); }
+.public-login .login-story-ledger { border-color: var(--p-line); }
+.public-login .login-story-ledger > div { color: var(--p-ink); }
+.public-login .login-story-ledger > div > span:first-child {
+  color: var(--p-teal); border-color: var(--p-line); background: var(--p-surface); border-radius: 4px;
+}
+.public-login .login-story-ledger small { color: var(--p-muted); }
+.public-login .login-story-bottom > i { background: var(--p-teal); }
+.public-login .login-field .f-in { border-color: var(--p-line); }
+.public-login .login-field .f-in:focus { border-color: var(--p-teal); box-shadow: 0 0 0 3px rgb(36 104 242 / 16%); }
+.public-login .login-submit { border-radius: 4px; box-shadow: none; }
+.public-login .login-submit:hover:not(:disabled) { background: #1d58d5; }
+.public-login .login-field .f-in { border-radius: 4px; }
+
+/* Keep existing narrow-screen navigation and all page-specific responsive grids. */
+@media (max-width: 1100px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .app .sidebar > .brand { min-height: 68px; padding: 14px 16px; }
+  .app .topbar-inner { padding-inline: 20px; }
+  .app .content { padding: 20px 20px 32px; }
+}
+@media (max-width: 760px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .app .sidebar > .brand { min-height: 58px; padding: 11px 14px; }
+  .app .topbar-inner { padding-inline: 14px; }
+  .app .content { padding: 16px 14px 28px; }
+  .app .page-title h1 { font-size: 20px; }
+}

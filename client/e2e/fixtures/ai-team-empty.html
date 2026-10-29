@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="azure"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<base href="../../">
+<title>AI workbench empty state · isolated regression</title>
+<link rel="stylesheet" href="theme/variables.css">
+<link rel="stylesheet" href="components/panels/panels-desk.css">
+<link rel="stylesheet" href="components/panels/panels-aidesk-control.css">
+<link rel="stylesheet" href="components/panels/agent-brand.css">
+<link rel="stylesheet" href="components/panels/panels-aidesk-office.css">
+<style>body{margin:0;font:14px/1.5 var(--font-ui);background:var(--bg-1)}</style>
+</head><body>
+<main id="aiDeskPanel" class="desk-panel show">
+  <header class="dk-head"><div class="dk-title">AI 团队 <span class="dk-sub" id="dkSub"></span></div></header>
+  <div class="dk-main dk-office-layout"><section id="dkRoster" class="dk-roster dk-office-stage"></section><aside id="dkBody" class="dk-body dk-office-inspector"></aside></div>
+</main>
+<script>
+window.errors=[];window.navigations=[];
+addEventListener('error',e=>errors.push(e.message));
+addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let tasks=[];
+function petSay(){}
+function _sinceTxt(){return '刚刚';}
+window.openCreateEntry=options=>navigations.push({view:'create',options});
+window.openHistoryEntry=()=>navigations.push({view:'history'});
+window.openAgentsEntry=()=>navigations.push({view:'agents'});
+window.openTaskConversation=(id,title,options)=>navigations.push({view:'task',id,options});
+</script>
+<script src="core/locales/en-US.js"></script>
+<script src="core/locales/en-US-workspace.js"></script>
+<script src="core/locales/en-US-chat.js"></script>
+<script src="core/locales/en-US-shared.js"></script>
+<script src="core/locales/en-US-actions.js"></script>
+<script src="core/locales/en-US-shell.js"></script>
+<script src="core/locales/en-US-capability-pages.js"></script>
+<script src="core/locales/en-US-chat-pages.js"></script>
+<script src="core/locales/en-US-work-pages.js"></script>
+<script src="core/locales/en-US-runtime-pages.js"></script>
+<script src="core/locales/en-US-plugin-pages.js"></script>
+<script src="core/locales/en-US-trace-pages.js"></script>
+<script src="core/locales/en-US-native.js"></script>
+<script src="core/locales/en-US-dynamic-pages.js"></script>
+<script src="core/locales/en-US-dynamic-work.js"></script>
+<script src="core/locales/en-US-dynamic-trace.js"></script>
+<script src="core/locales/en-US-notification-pages.js"></script>
+<script src="core/locales/en-US-final-pages.js"></script>
+<script src="core/locales/en-US-library.js"></script>
+<script src="core/i18n-dom.js"></script>
+<script src="core/i18n.js"></script>
+<script src="components/panels/agent-brand.js"></script>
+<script src="components/panels/panels-desk.js"></script>
+<script src="components/panels/panels-desk-agent.js"></script>
+<script src="components/panels/panels-aidesk-office.js"></script>
+<script>
+window.setFixture=(kind='new')=>{
+  const desks=kind==='offline'?[]:[{key:'pi',name:'Pi',cli:'Pi',cliKey:'pi',machineLabel:'本机',online:true,tasks:[]},
+    {key:'codex',name:'Codex',cli:'Codex',cliKey:'codex',machineLabel:'本机',online:true,tasks:[]}];
+  const rows=kind==='done'?[{id:'delivered-1',title:'已交付的工作',phase:'done',deskKey:'pi',cli:'Pi',agent:'Pi',artifacts:1}]:
+    kind==='active'?[{id:'active-1',title:'进行中的工作',phase:'running',deskKey:'pi',cli:'Pi',agent:'Pi',lastAction:'整理材料'}]:[];
+  _deskData={desks,tasks:rows,summary:{running:kind==='active'?1:0,done:kind==='done'?1:0}};
+  _dkPick='__all__';_dkPhase='all';_dkView='board';_renderDesks();
+};
+setFixture();
+</script></body></html>

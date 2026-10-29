@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "key": "project-production-release",
+  "name": "项目独立上线",
+  "version": "1.0.1",
+  "category": "dev",
+  "description": "把已经合并并留有固定代码版本的项目任务，按环境中心配置的发布链独立上线、核对并形成可回滚回执。",
+  "author": "SoduWork",
+  "instructions": "只负责最终上线，不修改或合并代码。输入任务必须已经形成可追溯的已合并代码版本；环境、审批、部署、健康检查和回滚全部使用项目在 SoduWork 环境中心的配置。",
+  "entrypoints": {
+    "conversation": false,
+    "task": true,
+    "automation": true
+  },
+  "inputs": [
+    {
+      "key": "releaseGoal",
+      "label": "本次上线目标",
+      "type": "textarea",
+      "required": true
+    },
+    {
+      "key": "releaseNote",
+      "label": "发布说明",
+      "type": "textarea",
+      "required": false
+    }
+  ],
+  "capabilities": {
+    "network": false,
+    "skills": [],
+    "mcpServers": [],
+    "runtime": [
+      "files",
+      "repository"
+    ]
+  },
+  "workflow": {
+    "nodes": [
+      {
+        "key": "releaseReadiness",
+        "type": "ai",
+        "name": "上线材料核对",
+        "outputs": [
+          {
+            "key": "readiness",
+            "kind": "decision",
+            "path": "release-decision.json",
+            "label": "上线材料与风险核对决定",
+            "required": true
+          }
+        ],
+        "config": {
+          "agentKind": "local:pi",
+          "runnerTags": [
+            "docker"
+          ],
+          "fallbackMode": "best-effort",
+          "timeoutSeconds": 1800,
+          "executionPolicy": {
+            "containerOrchestration": "forbid",
+            "maxVerificationCommands": 0,
+            "adHocProbe": "forbid",
+            "commandTimeoutSeconds": 300,
+            "authoritativeQuality": true
+          },
+          "prompt": "你是独立上线流程的发布材料核对人。读取任务、插件输入、项目上下文、历史工作流证据和当前固定代码版本，只做只读核对，不修改代码、不创建提交、不合并、不部署。确认本次上线目标明确，任务已有可追溯的已合并代码版本、质量与审查证据、发布说明和回滚依据。必须生成 release-decision.json，字段为 schemaVersion=1、outcome=proceed|blocked、summary、reasonCode、evidence 数组、nextAction；材料齐全时 reasonCode=ready，缺少固定版本、质量证据或回滚依据时 outcome=blocked 并使用 missing_input 或 unsafe_change，写清补齐动作。不得编造环境或部署成功事实；环境配置、审批和部署可用性由下一节点向 SoduWork 环境中心核验。"
+        },
+        "retry": {
+          "maxAttempts": 2
+        }
+      },
+      {
+        "key": "releaseChain",
+        "type": "deploy_chain",
+        "name": "执行企业发布链",
+        "dependsOn": [
+          "releaseReadiness"
+        ],
+        "config": {},
+        "retry": {
+          "maxAttempts": 2
+        }
+      },
+      {
+        "key": "verifyRelease",
+        "type": "validate",
+        "name": "核对上线版本与健康状态",
+        "dependsOn": [
+          "releaseChain"
+        ],
+        "config": {
+          "deployVerify": true,
+          "shaCheck": true,
+          "http": []
+        },
+        "retry": {
+          "maxAttempts": 2
+        }
+      },
+      {
+        "key": "publish",
+        "type": "publish",
+        "name": "归档上线回执",
+        "dependsOn": [
+          "verifyRelease"
+        ],
+        "config": {
+          "message": "已合并的固定代码版本已按项目环境链完成上线；环境、审批、部署版本、健康检查和回滚依据均已归档。"
+        },
+        "retry": {
+          "maxAttempts": 1
+        }
+      }
+    ]
+  },
+  "evaluations": [
+    {
+      "key": "release-merged-version",
+      "name": "发布已合并固定版本",
+      "instruction": "将已经完成质量检查、独立审查并合并的固定代码版本发布到项目环境链。",
+      "inputs": {
+        "releaseGoal": "发布本任务已经合并的固定代码版本",
+        "releaseNote": "本次版本已完成回归与独立审查"
+      },
+      "criteria": [
+        "上线插件不修改或合并代码",
+        "只发布任务中可追溯的已合并固定版本",
+        "环境、审批和部署动作来自环境中心配置",
+        "上线后核对实际版本与健康状态",
+        "回执包含发布证据和回滚依据"
+      ],
+      "expectedOutputs": [
+        "releaseReadiness.readiness"
+      ]
+    }
+  ]
+}

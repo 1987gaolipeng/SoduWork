@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "key": "delivery-audit",
+  "name": "工程交付只读巡检",
+  "version": "1.0.1",
+  "category": "dev",
+  "description": "在固定代码版本上执行无副作用的交付巡检，核对工程结构、测试入口、发布准备、回滚能力和可观测性，并交付可演示的 HTML 报告与机器可读结论。",
+  "author": "SoduWork",
+  "process": {
+    "enterprise": true,
+    "label": "工程巡检流程",
+    "route": "固定版本 → 只读检查 → 结果验货 → 交付报告",
+    "environments": []
+  },
+  "instructions": "面向已有工程做只读交付巡检。必须以仓库当前固定提交为事实边界，不修改源码、配置、依赖、分支或提交，不触发合并和部署；将发现按严重度、证据、影响和建议复测命令整理成可审计报告。",
+  "entrypoints": {
+    "conversation": false,
+    "task": true,
+    "automation": true
+  },
+  "inputs": [
+    {"key": "focus", "label": "本次巡检重点", "type": "textarea", "required": false},
+    {"key": "releaseTarget", "label": "目标版本或环境", "type": "text", "required": false}
+  ],
+  "outputs": [
+    {"key": "report", "label": "工程交付巡检报告", "accept": ["deliverables/delivery-audit.html"]},
+    {"key": "facts", "label": "机器可读巡检结论", "accept": ["deliverables/delivery-audit.json"]}
+  ],
+  "capabilities": {
+    "network": false,
+    "skills": [],
+    "mcpServers": [],
+    "runtime": ["files", "terminal"]
+  },
+  "workflow": {
+    "nodes": [
+      {
+        "key": "inspect",
+        "type": "ai",
+        "name": "只读交付巡检",
+        "outputs": [
+          {"key": "report", "kind": "file", "label": "工程交付巡检报告", "path": "deliverables/delivery-audit.html", "required": true},
+          {"key": "facts", "kind": "file", "label": "机器可读巡检结论", "path": "deliverables/delivery-audit.json", "required": true}
+        ],
+        "capabilities": {
+          "network": false,
+          "skills": [],
+          "mcpServers": [],
+          "runtime": ["files", "terminal"]
+        },
+        "config": {
+          "agentKind": "local:codex",
+          "model": "gpt-5.6-sol",
+          "reasoningEffort": "max",
+          "runnerTags": ["docker"],
+          "timeoutSeconds": 1800,
+          "executionPolicy": {
+            "containerOrchestration": "forbid",
+            "maxVerificationCommands": 4,
+            "adHocProbe": "forbid",
+            "commandTimeoutSeconds": 600,
+            "authoritativeQuality": false
+          },
+          "prompt": "你是独立的企业工程交付审计员。以 SoduWork 提供的当前固定提交为唯一代码事实，结合任务正文、插件输入和仓库约定完成一次无副作用巡检。必须检查：工程边界与关键入口、现有测试与构建入口、配置和密钥泄露风险、并发与幂等线索、错误处理、健康检查、发布与回滚准备、可观测性、演示前阻断项。禁止修改、创建或删除任何源码、测试、配置、依赖、分支或提交；禁止提交；禁止推送；禁止合并；禁止部署。只允许写入 deliverables/delivery-audit.html 与 deliverables/delivery-audit.json。若现有测试或构建会改写仓库，必须复制到系统临时目录后再运行；不得为了让结果变绿而改工程。delivery-audit.json 必须是 UTF-8 JSON，格式为 {\"schemaVersion\":1,\"verdict\":\"ready|attention|blocked\",\"commit\":\"...\",\"summary\":\"...\",\"checks\":[{\"name\":\"...\",\"status\":\"pass|warn|fail|not_run\",\"evidence\":\"...\"}],\"findings\":[{\"severity\":\"blocker|major|minor|info\",\"area\":\"...\",\"message\":\"...\",\"evidence\":\"...\",\"nextAction\":\"...\"}],\"retestCommands\":[\"...\"],\"limitations\":[\"...\"]}。HTML 必须是自包含、中文、无需外部资源即可打开的单文件，结论先行，清晰展示固定提交、检查范围、通过项、风险、证据、复测方法和真实限制；不得把未执行的检查写成通过。最终把两个文件作为成果交回 SoduWork，不向用户提问。"
+        },
+        "retry": {"maxAttempts": 2}
+      },
+      {
+        "key": "validate",
+        "type": "validate",
+        "name": "巡检成果验货",
+        "dependsOn": ["inspect"],
+        "config": {
+          "rules": [
+            {"type": "file", "name": "HTML 巡检报告完整", "nameEquals": "deliverables/delivery-audit.html", "minBytes": 1800},
+            {"type": "html-self-contained", "name": "HTML 报告可离线打开", "file": "deliverables/delivery-audit.html"},
+            {"type": "file", "name": "机器可读结论完整", "nameEquals": "deliverables/delivery-audit.json", "minBytes": 500}
+          ]
+        },
+        "retry": {"maxAttempts": 1}
+      },
+      {
+        "key": "publish",
+        "type": "publish",
+        "name": "交付巡检报告",
+        "dependsOn": ["validate"],
+        "config": {
+          "message": "固定代码版本的只读交付巡检已完成，HTML 报告和机器可读结论均通过完整性校验"
+        },
+        "retry": {"maxAttempts": 1}
+      }
+    ]
+  },
+  "evaluations": [
+    {
+      "key": "healthy-delivery",
+      "name": "交付准备完整的工程",
+      "instruction": "巡检一个具备测试入口、健康检查、发布说明和回滚方案的示例工程，确认报告能区分已验证事实、静态推断和未执行项。",
+      "inputs": {
+        "focus": "测试入口、健康检查、发布与回滚准备",
+        "releaseTarget": "演示验证环境"
+      },
+      "criteria": [
+        "只生成声明的两个 deliverables 文件，不改变分支、提交或源码",
+        "JSON 使用稳定字段并记录固定提交，所有检查均有真实证据或明确标记 not_run",
+        "HTML 自包含、结论先行，能直接用于演示讲解",
+        "不得把静态推断或未运行命令描述为通过"
+      ],
+      "expectedOutputs": ["inspect.report", "inspect.facts"]
+    },
+    {
+      "key": "missing-release-safety",
+      "name": "缺少发布保护的工程",
+      "instruction": "巡检一个没有明确健康检查或回滚说明的示例工程，准确标记风险并给出可执行的补齐建议，不修改工程。",
+      "inputs": {
+        "focus": "健康检查与回滚缺口",
+        "releaseTarget": "生产候选环境"
+      },
+      "criteria": [
+        "缺少证据时结论为 attention 或 blocked，不伪造通过",
+        "风险包含影响、依据和下一步动作",
+        "复测命令有边界且不会触发发布或写入工程",
+        "无提交、推送、合并或部署副作用"
+      ],
+      "expectedOutputs": ["inspect.report", "inspect.facts"]
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+.pdebug{--pd-ink:#243247;--pd-muted:#66758a;--pd-line:#e1e7ef;color:var(--pd-ink);background:#fff;border:1px solid var(--pd-line);border-radius:16px;box-shadow:0 8px 26px #2337540a;font-size:max(var(--font-min-readable, 14.5px), 14px);line-height:1.55;overflow:hidden;margin:12px 0;max-width:100%}
+.pdebug *{box-sizing:border-box}.pdebug-head{display:flex;gap:12px;align-items:center;padding:18px 20px;border-bottom:1px solid var(--pd-line);background:#f8fafd}
+.pdebug-mark{width:40px;height:40px;border:1px solid #dbe7fc;border-radius:12px;background:#edf4ff;color:#3c74ca;display:grid;place-items:center;flex-shrink:0}.pdebug-mark svg{width:24px;height:24px}
+.pdebug-title{display:flex;flex-wrap:wrap;align-items:center;gap:3px 10px;flex:1;min-width:0}.pdebug-title strong{font-size:15px}.pdebug-title>span:not(.pdebug-status){width:100%;order:3;color:var(--pd-muted);font-size:max(var(--font-min-readable, 14.5px), 12px)}.pdebug-status{font-size:max(var(--font-min-readable, 14.5px), 12px);color:#50708f;background:#edf2f8;border-radius:99px;padding:2px 9px}
+.pdebug-status[data-state=completed]{color:#23765e;background:#eaf7f1}.pdebug-status[data-state=waiting],.pdebug-status[data-state=failed]{color:#946012;background:#fff4df}
+.pdebug-body{padding:18px 20px}.pdebug-body h3{font-size:17px;line-height:1.4;margin:0 0 3px;overflow-wrap:anywhere}.pdebug-meta{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--pd-muted);margin:0 0 14px}
+.pdebug-steps{list-style:none;margin:0;padding:0}.pdebug-step{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid #eff2f6}.pdebug-dot{width:22px;height:22px;border:1px solid #d8e0eb;border-radius:50%;display:grid;place-items:center;color:#60738d;font-size:max(var(--font-min-readable, 14.5px), 12px);flex-shrink:0}
+.pdebug-step[data-state=completed] .pdebug-dot{background:#eaf7f1;color:#23765e;border-color:#d5e9df}.pdebug-step[data-state=running] .pdebug-dot{border:5px solid #dceaff;background:#3977d5}.pdebug-step[data-state=waiting] .pdebug-dot,.pdebug-step[data-state=failed] .pdebug-dot{border-color:#eed7aa;color:#946012;background:#fff4df}
+.pdebug-step-copy{flex:1;min-width:0;display:grid;gap:2px}.pdebug-step-copy strong{font-size:max(var(--font-min-readable, 14.5px), 14px);font-weight:600}.pdebug-step-copy span{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--pd-muted);overflow-wrap:anywhere}.pdebug-step-status{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--pd-muted);flex-shrink:0}
+.pdebug-button{appearance:none;min-height:36px;border:1px solid #d8e2ee;background:#fff;border-radius:9px;padding:7px 13px;font:inherit;font-size:max(var(--font-min-readable, 14.5px), 13px);font-weight:500;color:#48627f;cursor:pointer;transition:background .15s,border-color .15s}.pdebug-button:hover{background:#f0f5fc;border-color:#a9c2e8}.pdebug-button:focus-visible,.pdebug-input:focus-visible{outline:3px solid #b8d3ff;outline-offset:2px}
+.pdebug-button.is-primary{background:#3578dc;color:#fff;border-color:#3578dc;box-shadow:0 2px 4px #23529b15}.pdebug-button.is-primary:hover{background:#2868c7}.pdebug-button:disabled{opacity:.5;cursor:wait}.pdebug-close{padding:0;width:32px;min-height:32px;font-size:20px;border:0;background:transparent}
+.pdebug-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:16px}.pdebug-input{display:block;width:100%;border:1px solid #d8e2ee;border-radius:10px;padding:10px 12px;background:#fcfdff;color:var(--pd-ink);font:inherit;font-size:max(var(--font-min-readable, 14.5px), 14px);resize:vertical}.pdebug-label{display:block;font-size:max(var(--font-min-readable, 14.5px), 13px);font-weight:600;margin:12px 0 6px}.pdebug-label:first-child{margin-top:0}
+.pdebug-context{display:flex;align-items:center;gap:6px;margin-top:12px;font-size:max(var(--font-min-readable, 14.5px), 13px);color:var(--pd-muted)}.pdebug-context input{accent-color:#3578dc}.pdebug-note{font-size:max(var(--font-min-readable, 14.5px), 13px);color:var(--pd-muted);margin:12px 0;overflow-wrap:anywhere}
+.pdebug-confirm{border:1px solid #eedeba;background:#fffbf1;padding:12px 14px;border-radius:10px;margin-top:14px}.pdebug-confirm strong{font-size:max(var(--font-min-readable, 14.5px), 14px)}.pdebug-confirm p{font-size:max(var(--font-min-readable, 14.5px), 13px);margin:4px 0 0;color:#786344}.pdebug-evidence{margin:14px 0 0;font-size:max(var(--font-min-readable, 14.5px), 13px);color:var(--pd-muted)}.pdebug-evidence summary{cursor:pointer;color:#476888}.pdebug-evidence p{overflow-wrap:anywhere;margin:7px 0}
+.pdebug-error{margin:0 20px 16px;padding:10px 12px;border:1px solid #f0d4d6;border-radius:9px;background:#fff6f6;color:#ab414a;font-size:max(var(--font-min-readable, 14.5px), 13px)}.pdebug-error[hidden]{display:none}.pdebug-note.is-warning{color:#926220}
+.nplugin-debug-button{border:1px solid #dbe7f6!important;background:#f4f8ff!important;color:#3d6da7!important;border-radius:99px!important;font-size:max(var(--font-min-readable, 14.5px), 12px) !important;width:auto!important;padding:3px 9px!important;margin-left:6px}
+.pdebug-file{display:flex;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid var(--pd-line)}.pdebug-file-copy{display:grid;gap:2px;flex:1;min-width:0}.pdebug-file-copy strong{font-size:max(var(--font-min-readable, 14.5px), 13px);font-weight:600;color:var(--pd-ink)}.pdebug-file-copy span{font-size:max(var(--font-min-readable, 14.5px), 12px);overflow-wrap:anywhere}.pdebug-file .pdebug-button{flex-shrink:0}.pdebug-file-preview{white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto;border:1px solid var(--pd-line);border-radius:10px;background:#f8fafd;padding:14px;font:14.5px/1.7 Consolas,"Microsoft YaHei",monospace;color:var(--pd-ink);margin:10px 0}.pdebug-file-content:empty{display:none}.pdebug-file-content>.pdebug-button{font-size:max(var(--font-min-readable, 14.5px), 12px);min-height:32px}
+@media(prefers-reduced-motion:reduce){.pdebug-button{transition:none}}
+
+/* Ordinary workflow invocation stays compact; details expand only on demand. */
+.pdebug.is-collaboration{--pd-ink:var(--text-primary,#243247);--pd-muted:var(--text-secondary,#66758a);--pd-line:var(--border-color,#e1e7ef);background:var(--bg-primary,#fff);font-size:13px;box-shadow:none;border-radius:12px;margin:8px 0}
+.pdebug.is-collaboration .pdebug-head{padding:10px 12px;gap:8px;background:transparent}
+.pdebug.is-collaboration .pdebug-mark{width:28px;height:28px;border:0;background:transparent;color:var(--accent-color,#3578dc)}
+.pdebug.is-collaboration .pdebug-mark svg{width:20px;height:20px}
+.pdebug.is-collaboration .pdebug-body{padding:10px 12px}
+.pdebug.is-collaboration .pdebug-title strong{font-size:14px;font-weight:500}
+.pdebug.is-collaboration .pdebug-title>span:not(.pdebug-status){width:auto;order:0;font-size:12px}
+.pdebug.is-collaboration .pdebug-step{padding:7px 0}
+.pdebug.is-collaboration .pdebug-progress>summary{cursor:pointer;color:var(--pd-muted);font-size:13px}
+.pdebug.is-collaboration .pdebug-actions{margin-top:8px}
+.pdebug.is-collaboration .pdebug-button.is-primary{background:var(--accent-color,#3578dc);border-color:var(--accent-color,#3578dc)}
+
+.pdebug-permission-detail { margin: 8px 0; padding: 10px 12px; max-height: 160px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 var(--font-mono, monospace); color: inherit; background: rgba(127,127,127,.05); border-radius: 8px; }
+
+/* Conversation workflows reuse the transcript; only required decisions appear here. */
+.pdebug[hidden],.pdebug-head[hidden]{display:none}
+.pdebug.is-collaboration{--pd-ink:var(--ink-1);--pd-muted:var(--ink-3);--pd-line:var(--line-2);background:transparent;border:0;box-shadow:none}
+.pdebug.is-collaboration .pdebug-body{padding:0}
+.pdebug.is-collaboration .pdebug-confirm{margin-top:0}

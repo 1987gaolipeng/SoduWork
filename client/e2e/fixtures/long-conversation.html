@@ -1,0 +1,35 @@
+<!doctype html><meta charset="utf-8">
+<link rel="stylesheet" href="../../theme/variables.css">
+<link rel="stylesheet" href="../../components/panels/panels-chat.css">
+<style>#root{height:600px}#nchatScroll{height:600px;overflow:auto}</style>
+<div id="root"><div id="nchatScroll"><div id="nchatList" class="nchat-inner"></div></div></div>
+<script src="../../vendor/markdown/marked.umd.js"></script>
+<script src="../../vendor/markdown/purify.min.js"></script>
+<script src="../../components/panels/chat-thinking-collapse.js"></script>
+<script src="../../components/panels/chat-dom-patch.js"></script>
+<script src="../../components/panels/panels-chat-tools.js"></script>
+<script src="../../components/panels/chat-context-meter.js"></script>
+<script src="../../components/panels/chat-scroll-follow.js"></script>
+<script src="../../components/panels/chat-markdown.js"></script>
+<script src="../../components/panels/chat-acceptance-results.js"></script>
+<script src="../../components/panels/chat-message-renderer.js"></script>
+<script>
+let parses=0;const originalParse=marked.parse;window.marked={...marked,parse:(...args)=>{parses++;return originalParse(...args)}};
+const noop=()=>{};
+window.ctx={_ref:'test-long',_sessionOptions:{},_collabTasks:new Map(),_collabEntries:()=>[],
+ _openTool:new Set(),_openThink:new Set(),_openToolGroup:new Set(),_pendingAttachmentNames:[],
+ _outs:[],_api:()=>null,_mount:()=>document.querySelector('#root'),_messageWindowSize:80,
+ _syncThinkingClock:noop,_renderQueue:noop,_renderTaskStartPrompt:noop,_syncSlowStatusTicker:noop,
+ _thinkingStatusHtml:()=>'',esc:ChatTools.esc,
+ _snap:{status:'idle',tools:[],messages:[]}};
+window.renderer=ChatMessageRenderer.create(ctx);
+window.fill=(count)=>{
+ ctx._snap.messages=Array.from({length:count},(_,i)=>i%2===0?{role:'user',text:'需求 '+i}:
+ {role:'assistant',blocks:[{index:0,kind:'text',text:'## 回复 '+i+'\n\n**结论**\n\n'+('示例内容，完整保留。 '.repeat(80))} ]});
+ ctx._snap.tools=Array.from({length:count},(_,i)=>({id:'tool-'+i,after:i,name:'bash',args:{command:'echo done'},state:'done',result:'done'}));
+};
+window.draw=()=>{const before=parses,start=performance.now();renderer._render();return {ms:performance.now()-start,
+ parses:parses-before,messages:document.querySelectorAll('[data-chat-node^="message:"]').length,tools:document.querySelectorAll('.ntool').length,
+ first:document.querySelector('.nmsg')?.dataset.chatNode,total:ctx._snap.messages.length,
+ older:!!document.querySelector('[data-load-older]')}};
+</script>

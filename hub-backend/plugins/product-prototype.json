@@ -1,0 +1,315 @@
+{
+  "schemaVersion": 1,
+  "key": "product-prototype",
+  "name": "智能体产品设计",
+  "version": "2.0.2",
+  "category": "dev",
+  "description": "把业务需求设计成目标、计划、工具、权限、证据和人工门禁完整可见的智能体产品，并交付可点击、可验收的单文件 HTML 原型。",
+  "author": "SoduWork",
+  "instructions": "面向需要 AI 助手、任务智能体或人机协同工作台的需求，先使用 agent-product-design 定义工作与智能体契约，再按本项目设计约定形成有业务辨识度的交互原型。不得把普通表单、仪表盘或带聊天框的静态页面冒充智能体产品。",
+  "entrypoints": {
+    "conversation": true,
+    "task": true,
+    "automation": true
+  },
+  "inputs": [
+    {
+      "key": "audience",
+      "label": "目标用户",
+      "type": "text",
+      "required": false,
+      "placeholder": "例如：合同审核人员、业务负责人"
+    },
+    {
+      "key": "agentRole",
+      "label": "智能体角色",
+      "type": "text",
+      "required": false,
+      "placeholder": "例如：合同版本审核智能体"
+    },
+    {
+      "key": "autonomy",
+      "label": "协作方式",
+      "type": "select",
+      "required": false,
+      "default": "collaborative",
+      "options": [
+        {
+          "value": "advisory",
+          "label": "建议型：只分析和建议"
+        },
+        {
+          "value": "collaborative",
+          "label": "协作型：关键动作前确认"
+        },
+        {
+          "value": "autonomous",
+          "label": "自动型：授权范围内自主完成"
+        }
+      ]
+    },
+    {
+      "key": "style",
+      "label": "品牌与视觉偏好",
+      "type": "text",
+      "required": false
+    }
+  ],
+  "outputs": [
+    {
+      "key": "requirements",
+      "label": "需求与验收基线",
+      "accept": [
+        "requirements.md"
+      ]
+    },
+    {
+      "key": "agentDesign",
+      "label": "智能体产品契约",
+      "accept": [
+        "agent-design.md"
+      ]
+    },
+    {
+      "key": "prototype",
+      "label": "智能体交互原型",
+      "accept": [
+        "prototype.html"
+      ]
+    },
+    {
+      "key": "review",
+      "label": "独立体验审查",
+      "accept": [
+        "reviews/agent-product-review.md"
+      ]
+    }
+  ],
+  "capabilities": {
+    "network": false,
+    "skills": [
+      "agent-product-design"
+    ],
+    "mcpServers": [],
+    "runtime": [
+      "files",
+      "browser"
+    ]
+  },
+  "workflow": {
+    "nodes": [
+      {
+        "key": "define",
+        "type": "ai",
+        "name": "定义智能体产品",
+        "capabilities": {
+          "network": false,
+          "skills": [
+            "agent-product-design"
+          ],
+          "mcpServers": [],
+          "runtime": [
+            "files"
+          ]
+        },
+        "outputs": [
+          {
+            "key": "requirements",
+            "kind": "file",
+            "label": "需求与验收基线 requirements.md",
+            "path": "requirements.md",
+            "required": true
+          },
+          {
+            "key": "agentDesign",
+            "kind": "file",
+            "label": "智能体产品契约 agent-design.md",
+            "path": "agent-design.md",
+            "required": true
+          }
+        ],
+        "config": {
+          "agentKind": "local:codex",
+          "model": "gpt-5.6-sol",
+          "timeoutSeconds": 3600,
+          "prompt": "先完整读取 agent-product-design Skill，再结合任务正文、附件、讨论和插件输入完成产品定义。输出 requirements.md 与 agent-design.md。requirements.md 必须包含目标用户、业务结果、输入、完整主流程、信息架构、页面或工作区、异常与空状态、范围与非目标，以及标题为“验收标准”的逐条可测试清单。agent-design.md 必须定义智能体角色、目标、计划、工具与数据来源、权限级别、上下文与记忆、人审门禁、过程证据、失败重试、恢复与取消、最终成果和评价方式。要区分真实可用能力与原型模拟，不得把普通聊天框、表单或仪表盘称为智能体。不要向用户追问；信息不足时记录最小可逆假设。完成后把两个文件作为成果交回 SoduWork。"
+        },
+        "retry": {
+          "maxAttempts": 2
+        }
+      },
+      {
+        "key": "prototype",
+        "type": "ai",
+        "name": "制作智能体交互原型",
+        "dependsOn": [
+          "define"
+        ],
+        "inputs": [
+          {
+            "key": "requirements",
+            "fromNode": "define",
+            "outputKey": "requirements",
+            "label": "需求基线",
+            "required": true
+          },
+          {
+            "key": "agentDesign",
+            "fromNode": "define",
+            "outputKey": "agentDesign",
+            "label": "智能体产品契约",
+            "required": true
+          }
+        ],
+        "capabilities": {
+          "network": false,
+          "skills": [
+            "agent-product-design"
+          ],
+          "mcpServers": [],
+          "runtime": [
+            "files",
+            "browser"
+          ]
+        },
+        "outputs": [
+          {
+            "key": "prototype",
+            "kind": "file",
+            "label": "智能体交互原型 prototype.html",
+            "path": "prototype.html",
+            "required": true
+          }
+        ],
+        "config": {
+          "agentKind": "local:codex",
+          "model": "gpt-5.6-sol",
+          "timeoutSeconds": 5400,
+          "prompt": "读取 agent-product-design Skill，以及 requirements.md、agent-design.md。制作 prototype.html：它必须是完整、自包含、双击即可运行的单文件 HTML，CSS 和 JavaScript 全部内嵌，不使用 CDN、外链字体、外部图片或构建步骤。原型必须让用户真实点击演示智能体的工作循环，而不是展示静态看板：至少呈现任务或会话主体、目标与完成标准、可更新计划、当前步骤、精简的工具活动、权限或人审门禁、验证证据、成果交付、失败重试与人工接管。用本地确定性状态机演示正常完成、等待授权、失败后重试三条路径，并明确标注外部系统为原型模拟。视觉必须由真实业务语境推导，有清晰层级、专业排版、响应式、键盘可操作和 reduced-motion 支持。完成后在浏览器中逐条点击主流程、门禁和失败恢复，修复布局溢出与无效控件，再把 prototype.html 作为成果交回 SoduWork。"
+        },
+        "retry": {
+          "maxAttempts": 2
+        }
+      },
+      {
+        "key": "validate",
+        "type": "validate",
+        "name": "结构与离线检查",
+        "dependsOn": [
+          "prototype"
+        ],
+        "config": {
+          "rules": [
+            {
+              "type": "file",
+              "name": "需求基线已生成",
+              "nameEquals": "requirements.md",
+              "minBytes": 500
+            },
+            {
+              "type": "file",
+              "name": "智能体产品契约已生成",
+              "nameEquals": "agent-design.md",
+              "minBytes": 800
+            },
+            {
+              "type": "file",
+              "name": "交互原型已生成",
+              "nameEquals": "prototype.html",
+              "minBytes": 5000
+            },
+            {
+              "type": "html-self-contained",
+              "name": "原型可离线独立运行",
+              "file": "prototype.html"
+            }
+          ]
+        }
+      },
+      {
+        "key": "experience-review",
+        "type": "ai_review",
+        "name": "独立智能体体验审查",
+        "dependsOn": [
+          "define",
+          "prototype",
+          "validate"
+        ],
+        "inputs": [
+          {
+            "key": "requirements",
+            "fromNode": "define",
+            "outputKey": "requirements",
+            "label": "需求基线",
+            "required": true
+          },
+          {
+            "key": "agentDesign",
+            "fromNode": "define",
+            "outputKey": "agentDesign",
+            "label": "智能体产品契约",
+            "required": true
+          },
+          {
+            "key": "prototype",
+            "fromNode": "prototype",
+            "outputKey": "prototype",
+            "label": "待审原型",
+            "required": true
+          }
+        ],
+        "capabilities": {
+          "network": false,
+          "skills": [
+            "agent-product-design"
+          ],
+          "mcpServers": [],
+          "runtime": [
+            "files",
+            "browser"
+          ]
+        },
+        "outputs": [
+          {
+            "key": "review",
+            "kind": "decision",
+            "label": "智能体体验审查结论",
+            "path": "reviews/agent-product-review.md",
+            "required": true
+          }
+        ],
+        "config": {
+          "agentKind": "local:codex",
+          "model": "gpt-5.6-sol",
+          "timeoutSeconds": 3600,
+          "prompt": "作为独立审查员，读取 agent-product-design Skill、requirements.md、agent-design.md，并在浏览器中实际操作 prototype.html。逐条核对验收标准，重点判断它是否真的是可理解、可控、可验收的智能体产品：目标、计划、工具活动、权限、人审门禁、证据、结果、失败重试、恢复和人工接管是否都能在交互中看见并操作；同时检查业务理解、文案、信息层级、视觉辨识度、窄屏、键盘和 reduced-motion。把证据、阻断问题和 pass 或 changes_requested 结论写入 reviews/agent-product-review.md。只有主流程、门禁和失败恢复都实际可操作且没有阻断问题时才能 pass；不得替制作节点自我背书。"
+        },
+        "retry": {
+          "maxAttempts": 2
+        }
+      },
+      {
+        "key": "review",
+        "type": "human_review",
+        "name": "需求方验收",
+        "dependsOn": [
+          "experience-review"
+        ],
+        "config": {
+          "summary": "请按真实业务任务体验智能体主流程、授权门禁、失败恢复和成果证据"
+        }
+      },
+      {
+        "key": "publish",
+        "type": "publish",
+        "name": "交付智能体产品原型",
+        "dependsOn": [
+          "review"
+        ],
+        "config": {
+          "message": "智能体产品方案与可交互原型已通过独立审查和需求方验收"
+        }
+      }
+    ]
+  }
+}

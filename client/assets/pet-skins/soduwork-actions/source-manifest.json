@@ -1,0 +1,9 @@
+{
+  "frameDurationMilliseconds": 250,
+  "actions": [
+    {"name":"休息","path":"休息/frames","frameCount":1,"loop":false},
+    {"name":"打起精神","path":"打起精神/frames","frameCount":4,"loop":true},
+    {"name":"兴奋工作中","path":"兴奋工作中/frames","frameCount":7,"loop":true},
+    {"name":"完成","path":"完成/frames","frameCount":1,"loop":false}
+  ]
+}

@@ -1,0 +1,76 @@
+'use strict';
+// Content integrity for a Git checkout or a standalone source archive.
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const { execFileSync } = require('node:child_process');
+const { snapshotFiles } = require('./source-files.cjs');
+const MARKER = 'tools/distribution/SOURCE-MANIFEST.json';
+const SCOPE = 'Current source snapshot only; not Git history, complete secret detection or legal clearance.';
+
+function canonicalBytes(data) {
+  // Git archives contain LF while Windows checkouts can contain CRLF. Only
+  // normalize valid UTF-8 text; binary content must retain its exact bytes.
+  if (data.includes(0)) return data;
+  const value = data.toString('utf8');
+  if (!Buffer.from(value, 'utf8').equals(data)) return data;
+  return Buffer.from(value.replace(/\r\n/g, '\n'), 'utf8');
+}
+
+function entry(root, name) {
+  if (!name || name.includes('\\') || name.includes(':') || name.startsWith('/') ||
+      name.split('/').some(part => !part || part === '.' || part === '..')) throw Error('Invalid source path');
+  let full = root;
+  for (const part of name.split('/')) {
+    full = path.join(full, part);
+    if (fs.lstatSync(full).isSymbolicLink()) throw Error('Symbolic link in source: ' + name);
+  }
+  if (!fs.statSync(full).isFile()) throw Error('Source is not a regular file: ' + name);
+  const data = canonicalBytes(fs.readFileSync(full));
+  return { path: name, bytes: data.length, sha256: crypto.createHash('sha256').update(data).digest('hex') };
+}
+
+function check(root, { writeManifest = false } = {}) {
+  root = path.resolve(root);
+  const ownGit = fs.existsSync(path.join(root, '.git'));
+  if (writeManifest && !ownGit) throw Error('Writing a manifest requires its own Git checkout');
+  const names = ownGit
+    ? execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
+      .split('\0').filter(name => name && name !== MARKER).sort()
+    : snapshotFiles(root);
+  if (!names?.length) throw Error('No source inventory');
+  const files = names.map(name => entry(root, name));
+  const marker = path.join(root, MARKER);
+  if (writeManifest) {
+    fs.mkdirSync(path.dirname(marker), { recursive: true });
+    fs.writeFileSync(marker, JSON.stringify({ schema: 1, ok: true, distribution: 'public-source', scope: SCOPE, files }, null, 2) + '\n');
+  } else {
+    snapshotFiles(root);
+    const manifest = JSON.parse(fs.readFileSync(marker, 'utf8'));
+    if (manifest.distribution !== 'public-source' || manifest.scope !== SCOPE ||
+        JSON.stringify([...manifest.files].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)) !== JSON.stringify(files)) {
+      throw Error('Source manifest does not match current files');
+    }
+    if (!ownGit) {
+      const expected = new Set([...names, MARKER]);
+      function walk(folder, prefix = '') {
+        for (const item of fs.readdirSync(folder, { withFileTypes: true })) {
+          const name = prefix + item.name;
+          if (item.isSymbolicLink()) throw Error('Symbolic link in source: ' + name);
+          if (item.isDirectory()) walk(path.join(folder, item.name), name + '/');
+          else if (!expected.has(name)) throw Error('Unlisted source file: ' + name);
+        }
+      }
+      walk(root);
+    }
+  }
+  return { ok: true, files: files.length };
+}
+
+if (require.main === module) {
+  try {
+    if (process.argv.slice(2).some(arg => arg !== '--write-manifest')) throw Error('Usage: check-source-manifest.cjs [--write-manifest]');
+    console.log(JSON.stringify(check(path.resolve(__dirname, '..'), { writeManifest: process.argv.includes('--write-manifest') })));
+  } catch (error) { console.error(error.message); process.exitCode = 1; }
+}
+module.exports = { check, canonicalBytes };

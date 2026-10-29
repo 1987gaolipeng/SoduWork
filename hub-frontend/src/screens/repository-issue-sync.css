@@ -1,0 +1,56 @@
+.modal.repository-issue-sync { width: min(760px, calc(100vw - 32px)); }
+.rc-page .rc-row-state { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; text-align: left; }
+.rc-page .rc-row-actions { flex-wrap: wrap; gap: 8px 12px; }
+.rc-issue-status { display: flex; flex-direction: column; gap: 2px; color: var(--ink-4); font-size: var(--font-min-readable, 14.5px); line-height: 1.4; }
+.rc-issue-status.on { color: var(--ok); }
+.rc-issue-status.bad { color: var(--crit); }
+.rc-issue-status small { color: var(--ink-4); font-size: inherit; }
+.rc-issue-dialog { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.rc-issue-dialog p { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }
+.rc-issue-intro { color: var(--ink); }
+.rc-issue-note { color: var(--ink-3); font-size: var(--font-min-readable, 14.5px); }
+.rc-issue-toggle { display: flex; align-items: flex-start; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-1); cursor: pointer; }
+.rc-issue-toggle input { width: 18px; height: 18px; margin-top: 3px; accent-color: var(--accent); flex: 0 0 auto; }
+.rc-issue-toggle span { display: flex; flex-direction: column; gap: 4px; }
+.rc-issue-toggle small { color: var(--ink-3); line-height: 1.5; font-size: var(--font-min-readable, 14.5px); }
+.rc-issue-field { display: flex; flex-direction: column; gap: 6px; }
+.rc-issue-health { border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.rc-issue-health dl { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0; }
+.rc-issue-health dl div { min-width: 0; }
+.rc-issue-health dt { color: var(--ink-3); font-size: var(--font-min-readable, 14.5px); }
+.rc-issue-health dd { margin: 4px 0 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.rc-issue-run { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.rc-issue-run small { color: var(--ink-3); font-size: var(--font-min-readable, 14.5px); }
+.rc-issue-error, .rc-issue-notice { padding: 10px 12px; border-radius: 8px; overflow-wrap: anywhere; line-height: 1.5; }
+.rc-issue-error { color: var(--crit); background: var(--crit-soft); }
+.rc-issue-notice { color: var(--ok); background: var(--ok-soft); }
+.rc-issue-members { min-width: 0; }
+.rc-issue-members-title { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.rc-issue-members-title h4 { margin: 0; font-size: 16px; }
+.rc-issue-members-title span { color: var(--ink-3); font-size: var(--font-min-readable, 14.5px); }
+.rc-issue-member-list { margin-top: 12px; max-height: 360px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.rc-issue-member { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(140px, 1.3fr) auto; gap: 10px; align-items: center; padding: 12px; border-bottom: 1px solid var(--line); }
+.rc-issue-member:last-child { border-bottom: 0; }
+.rc-issue-member-name { min-width: 0; display: flex; flex-direction: column; gap: 3px; overflow-wrap: anywhere; }
+.rc-issue-member-name small, .rc-issue-member-name span { font-size: var(--font-min-readable, 14.5px); color: var(--ink-3); }
+.rc-issue-member-name .linked { color: var(--ok); }
+.rc-issue-member-name .pending { color: var(--warn); }
+.rc-issue-member .f-sel { min-width: 0; width: 100%; }
+.rc-issue-writebacks { min-width: 0; }
+.rc-issue-writebacks h4 { margin: 0 0 8px; font-size: 16px; }
+.rc-issue-writeback-list { display: flex; flex-direction: column; gap: 10px; margin: 12px 0 0; padding: 0; list-style: none; }
+.rc-issue-writeback { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-1); }
+.rc-issue-writeback-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.rc-issue-writeback-heading a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; font-weight: 600; }
+.rc-issue-writeback-state { color: var(--warn); }
+.rc-issue-writeback-error { color: var(--crit); white-space: pre-wrap; }
+.rc-issue-writeback-meta { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--ink-3); font-size: var(--font-min-readable, 14.5px); font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) {
+  .rc-page .rc-row-state { align-items: flex-end; }
+  .rc-page .rc-row-state .rc-issue-status { text-align: right; }
+}
+@media (max-width: 540px) {
+  .rc-issue-health dl { grid-template-columns: 1fr; }
+  .rc-issue-member { grid-template-columns: minmax(0, 1fr) auto; }
+  .rc-issue-member-name { grid-column: 1 / -1; }
+}

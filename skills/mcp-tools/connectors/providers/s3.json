@@ -1,0 +1,219 @@
+{
+  "schemaVersion": 1,
+  "id": "s3",
+  "name": "S3 / MinIO 对象存储",
+  "category": "云存储",
+  "description": "S3 兼容对象存储通用连接器：桶列表、对象列表、对象读取与写入。鉴权为 AWS Signature V4（请求级签名），由运行器专用运行时计算，连接器不持有静态 Bearer。兼容 AWS S3 与 MinIO 自托管端点。",
+  "runtimeKind": "s3",
+  "officialDocs": [
+    "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListBuckets.html",
+    "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html",
+    "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html",
+    "https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-header-based-auth.html"
+  ],
+  "authDocs": [
+    "https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-header-based-auth.html"
+  ],
+  "baseUrl": "{S3_ENDPOINT}",
+  "fields": [
+    {
+      "key": "S3_ENDPOINT",
+      "label": "S3 兼容端点（仅 https 主机；本机 MinIO 调试允许 http://localhost 或 http://127.0.0.1）",
+      "secret": false,
+      "required": true,
+      "pattern": "^(https://[a-z0-9][a-z0-9.-]*(:[0-9]{2,5})?|http://(localhost|127\\.0\\.0\\.1)(:[0-9]{2,5})?)$",
+      "example": ""
+    },
+    {
+      "key": "S3_REGION",
+      "label": "区域（AWS 区域代码或 MinIO 自定义区域）",
+      "secret": false,
+      "required": true,
+      "pattern": "^[a-z0-9-]{2,25}$",
+      "example": ""
+    },
+    {
+      "key": "S3_ACCESS_KEY_ID",
+      "label": "Access Key ID（AWS 固定 20 位或 MinIO 自定义，不做前缀假设）",
+      "secret": false,
+      "required": true,
+      "pattern": "^\\S{8,4096}$",
+      "example": ""
+    },
+    {
+      "key": "S3_SECRET_ACCESS_KEY",
+      "label": "Secret Access Key",
+      "secret": true,
+      "required": true,
+      "example": ""
+    },
+    {
+      "key": "S3_SESSION_TOKEN",
+      "label": "会话令牌",
+      "secret": true,
+      "required": false,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "none"
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "list_buckets",
+      "description": "分页列出账号可见桶，每次最多100个；继续读取使用 ContinuationToken。",
+      "method": "GET",
+      "path": "/",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "max_buckets": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 100
+          },
+          "continuation_token": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true,
+      "query": {
+        "max-buckets": "max_buckets",
+        "continuation-token": "continuation_token"
+      }
+    },
+    {
+      "name": "list_objects",
+      "description": "列出桶内对象（GET /{bucket}，list-type=2 即 ListObjectsV2）。分页：continuation-token（响应 NextContinuationToken），max-keys 1-1000。出处：https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html",
+      "method": "GET",
+      "path": "/{bucket}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "pattern": "^(?![0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$)[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
+            "description": "桶名",
+            "maxLength": 10000
+          },
+          "prefix": {
+            "type": "string",
+            "description": "前缀过滤",
+            "maxLength": 10000
+          },
+          "max_keys": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 1000,
+            "description": "每页条数"
+          },
+          "continuation_token": {
+            "type": "string",
+            "description": "上一页 NextContinuationToken",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "bucket"
+        ],
+        "maxProperties": 50
+      },
+      "fixedQuery": {
+        "list-type": "2"
+      },
+      "query": {
+        "prefix": "prefix",
+        "max-keys": "max_keys",
+        "continuation-token": "continuation_token"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_object",
+      "description": "读取对象内容（GET /{bucket}/{key}），以文本返回且仅支持 ≤2MB 对象（超出直接拒绝，不截断）；本连接器不承诺落盘，响应体由运行器按工具返回值交付。无分页（Range 请求未收录）。出处：https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html",
+      "method": "GET",
+      "path": "/{bucket}/{key}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "pattern": "^(?![0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$)[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
+            "description": "桶名",
+            "maxLength": 10000
+          },
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "对象键（运行器 URL 编码）"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "put_object",
+      "description": "写入对象（PUT /{bucket}/{key}，Payload SHA256 参与 SigV4 签名；含会话令牌时附 x-amz-security-token）。写入操作：运行前必须获得用户明确授权。出处：https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html",
+      "method": "PUT",
+      "path": "/{bucket}/{key}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "pattern": "^(?![0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$)[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
+            "description": "桶名",
+            "maxLength": 10000
+          },
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "对象键"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "description": "文本内容",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "bucket",
+          "key",
+          "content"
+        ],
+        "maxProperties": 50
+      },
+      "body": "$content",
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "SigV4 每请求签名（canonical request + HMAC-SHA256 链），无法用静态 Bearer 表达，因此标记 runtimeKind=s3，由运行器专用运行时实现（或复用成熟 S3 客户端库）。",
+    "存在 S3_SESSION_TOKEN 时，运行器须把该值作为 x-amz-security-token 参与签名头集合。",
+    "get_object 仅返回 ≤2MB 的对象内容，更大对象直接拒绝（不截断）；本定义不承诺把响应落盘，交付形态由运行器决定。",
+    "Secret Access Key 仅用于本机签名，不发送；临时会话 Token 通过 HTTPS 请求头发送，不写入日志。",
+    "put_object 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。",
+    "put_object 使用 PUT 方法（S3 官方对 PutObject 的定义，无法用 POST 表达；S3 的 POST 仅用于表单上传）。",
+    "Multipart Upload 未收录；大文件上传待扩展。"
+  ]
+}

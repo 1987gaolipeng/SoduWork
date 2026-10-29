@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "id": "google-ads",
+  "name": "Google Ads",
+  "category": "数据分析",
+  "description": "Google Ads API 通用连接器：可访问客户列表、GAQL searchStream 查询（固定白名单）。developer-token 走连接器级 headers 的字段引用扩展；OAuth 令牌由用户安全填入。资金敏感：本定义不收录任何写操作。",
+  "officialDocs": [
+    "https://developers.google.com/google-ads/api/rest/reference/rest/v19/customers/listAccessibleCustomers",
+    "https://developers.google.com/google-ads/api/rest/reference/rest/v19/customers.googleAds/searchStream",
+    "https://developers.google.com/google-ads/api/docs/query/overview"
+  ],
+  "authDocs": [
+    "https://developers.google.com/google-ads/api/docs/oauth/overview"
+  ],
+  "baseUrl": "https://googleads.googleapis.com",
+  "fields": [
+    {
+      "key": "GOOGLE_ACCESS_TOKEN",
+      "label": "Google OAuth 访问令牌",
+      "secret": true,
+      "required": true,
+      "example": ""
+    },
+    {
+      "key": "GOOGLE_ADS_DEVELOPER_TOKEN",
+      "label": "Developer Token",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "tokenKey": "GOOGLE_ACCESS_TOKEN",
+    "header": "Authorization",
+    "prefix": "Bearer"
+  },
+  "headers": {
+    "developer-token": "{GOOGLE_ADS_DEVELOPER_TOKEN}"
+  },
+  "tools": [
+    {
+      "name": "list_accessible_customers",
+      "description": "列出当前授权可访问的客户 ID（GET /v19/customers:listAccessibleCustomers）。无分页。出处：https://developers.google.com/google-ads/api/rest/reference/rest/v19/customers/listAccessibleCustomers",
+      "method": "GET",
+      "path": "/v26/customers:listAccessibleCustomers",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "search_stream",
+      "description": "GAQL searchStream（POST /v19/customers/{customerId}/googleAds:searchStream，body.query 固定白名单：campaign 基础列表）。只读查询，不开放任意 GAQL。出处：https://developers.google.com/google-ads/api/rest/reference/rest/v19/customers.googleAds/searchStream",
+      "method": "POST",
+      "path": "/v26/customers/{customer_id}/googleAds:searchStream",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "customer_id": {
+            "type": "string",
+            "pattern": "^[0-9]{8,12}$",
+            "description": "客户 ID（不带连字符）",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "customer_id"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "query": "SELECT campaign.id, campaign.name, campaign.status, metrics.clicks, metrics.impressions FROM campaign ORDER BY metrics.impressions DESC LIMIT 100"
+      },
+      "readOnly": true
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "developer-token 经连接器级 headers 的 {FIELD} 引用注入（本 schema 的扩展约定），运行器在注入前必须校验字段存在且为 secret。",
+    "searchStream 的 query 为固定 GAQL 白名单（campaign 列表），不允许任意查询注入。",
+    "Google Ads 账户资金敏感：本连接器仅收录只读工具，任何修改出价/预算的端点均不收录。",
+    "访问令牌约 1 小时过期，需用户安全填入并手动更新；自动续期为宿主侧适配项，本连接器未实现。"
+  ]
+}

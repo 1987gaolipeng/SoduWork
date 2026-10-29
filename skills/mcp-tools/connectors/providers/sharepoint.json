@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "id": "sharepoint",
+  "name": "SharePoint Online",
+  "category": "云存储",
+  "description": "SharePoint Online 通用连接器：站点列表、站点驱动器、文档库文件列表。基于 Microsoft Graph v1.0 sites 资源，委托式令牌由用户安全填入。",
+  "officialDocs": [
+    "https://learn.microsoft.com/graph/api/site-list",
+    "https://learn.microsoft.com/graph/api/site-list-drives",
+    "https://learn.microsoft.com/graph/api/driveitem-list-children"
+  ],
+  "authDocs": [
+    "https://learn.microsoft.com/graph/auth/"
+  ],
+  "baseUrl": "https://graph.microsoft.com/v1.0",
+  "fields": [
+    {
+      "key": "MSFT_ACCESS_TOKEN",
+      "label": "Microsoft Graph 访问令牌",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "tokenKey": "MSFT_ACCESS_TOKEN",
+    "header": "Authorization",
+    "prefix": "Bearer"
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "search_sites",
+      "description": "按关键字搜索站点（GET /sites?search=）。无游标分页（官方按关键字一次性返回）。出处：https://learn.microsoft.com/graph/api/site-list",
+      "method": "GET",
+      "path": "/sites",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "search": {
+            "type": "string",
+            "minLength": 1,
+            "description": "站点关键字",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "search"
+        ],
+        "maxProperties": 50
+      },
+      "query": {
+        "search": "search"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_site_drives",
+      "description": "列出站点文档库（drive 集合）。分页：@odata.nextLink。出处：https://learn.microsoft.com/graph/api/site-list-drives",
+      "method": "GET",
+      "path": "/sites/{site_id}/drives",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9,{},!._-]{10,220}$",
+            "description": "站点 ID 或 hostname,path 形式",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "site_id"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_drive_root_children",
+      "description": "列出文档库根目录子项。分页：@odata.nextLink。出处：https://learn.microsoft.com/graph/api/driveitem-list-children",
+      "method": "GET",
+      "path": "/sites/{site_id}/drive/root/children",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9,{},!._-]{10,220}$",
+            "description": "站点 ID",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "site_id"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "按委托权限建模；应用权限访问站点需管理员同意，未覆盖。",
+    "访问令牌约 1 小时过期，需用户安全填入并手动更新；自动续期为宿主侧适配项，本连接器未实现。",
+    "本连接器为纯只读集合（站点/文档库/目录遍历），无写入工具；文件上传需按目标库策略单独评估后扩展。"
+  ]
+}

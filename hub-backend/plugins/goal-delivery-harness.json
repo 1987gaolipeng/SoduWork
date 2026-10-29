@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "key": "goal-delivery-harness",
+  "name": "\u76ee\u6807\u4ea4\u4ed8 Harness",
+  "version": "1.0.2",
+  "category": "dev",
+  "description": "SoduWork built-in durable goal and delivery harness.",
+  "author": "SoduWork",
+  "instructions": "Maintain a durable goal ledger and progress ledger. Define objective, acceptance criteria, deliverables and constraints before execution. Treat tool events, files and test results as evidence. Diagnose and retry failures; re-plan when stalled; verify every acceptance criterion. On completion create .soduwork/delivery.json with {\"schemaVersion\":1,\"summary\":\"delivery summary\",\"deliverables\":[{\"path\":\"relative/path\",\"kind\":\"document|presentation|spreadsheet|pdf|website|image|archive|file\",\"title\":\"name\",\"summary\":\"description\",\"primary\":true}]}. Register only final user-consumable deliverables. Source, dependencies, config, logs, tests, review JSON and screenshots are process evidence. For websites register one directly openable built entry HTML. Do not create a manifest for ordinary answers without a file deliverable.",
+  "entrypoints": {
+    "conversation": true,
+    "task": true,
+    "automation": false
+  },
+  "inputs": [],
+  "outputs": [
+    {"key": "delivery", "label": "\u6700\u7ec8\u4ea4\u4ed8\u6e05\u5355", "accept": [".soduwork/delivery.json"]}
+  ],
+  "capabilities": {
+    "network": false,
+    "skills": [],
+    "mcpServers": [],
+    "runtime": []
+  }
+}

@@ -1,0 +1,197 @@
+{
+  "schemaVersion": 1,
+  "id": "jira",
+  "name": "Jira Cloud",
+  "category": "项目管理",
+  "description": "Jira Cloud 通用连接器：当前用户、JQL 搜索、Issue 详情与创建。仅 {TENANT}.atlassian.net，Basic 鉴权（邮箱 + API Token），不绑定任何汇报场景。",
+  "officialDocs": [
+    "https://developer.atlassian.com/cloud/jira/platform/rest/v3/intro/",
+    "https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-myself/#api-rest-api-3-myself-get",
+    "https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-search/#api-rest-api-3-search-jql-post",
+    "https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issues/#api-rest-api-3-issue-post",
+    "https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/"
+  ],
+  "authDocs": [
+    "https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/",
+    "https://developer.atlassian.com/cloud/jira/platform/rest/v3/intro/#authentication"
+  ],
+  "baseUrl": "https://{TENANT}.atlassian.net",
+  "fields": [
+    {
+      "key": "TENANT",
+      "label": "Jira Cloud 站点子域（yourcompany.atlassian.net 的 yourcompany）",
+      "secret": false,
+      "required": true,
+      "pattern": "^[a-z0-9][a-z0-9-]{0,58}[a-z0-9]$",
+      "example": ""
+    },
+    {
+      "key": "JIRA_EMAIL",
+      "label": "Atlassian 账户邮箱",
+      "secret": false,
+      "required": true,
+      "pattern": "^[^@\\s]+@[^@\\s]+\\.[a-z]{2,}$",
+      "example": ""
+    },
+    {
+      "key": "JIRA_API_TOKEN",
+      "label": "API Token",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "basic",
+    "usernameKey": "JIRA_EMAIL",
+    "passwordKey": "JIRA_API_TOKEN"
+  },
+  "headers": {
+    "Accept": "application/json"
+  },
+  "tools": [
+    {
+      "name": "get_myself",
+      "description": "获取当前认证用户。无分页。出处：https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-myself/#api-rest-api-3-myself-get",
+      "method": "GET",
+      "path": "/rest/api/3/myself",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "search_issues_jql",
+      "description": "按 JQL 搜索（官方新版 POST /rest/api/3/search/jql，nextPageToken 分页）。body 中 fields 为固定白名单，jql/nextPageToken 为 $param 动态变量（未传省略）。出处：https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-search/#api-rest-api-3-search-jql-post",
+      "method": "POST",
+      "path": "/rest/api/3/search/jql",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "jql": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000,
+            "description": "JQL 查询语句"
+          },
+          "next_page_token": {
+            "type": "string",
+            "description": "上一页响应的 nextPageToken",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "jql"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "jql": "$jql",
+        "fields": [
+          "summary",
+          "status",
+          "updated"
+        ],
+        "nextPageToken": "$next_page_token"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_issue",
+      "description": "获取 Issue 详情（fields 白名单固定 summary,status,updated 控制体积）。无分页。出处：https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issues/#api-rest-api-3-issue-issueidorkey-get",
+      "method": "GET",
+      "path": "/rest/api/3/issue/{issue_id_or_key}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "issue_id_or_key": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{3,}$",
+            "description": "Issue ID 或 Key（ABC-123）",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "issue_id_or_key"
+        ],
+        "maxProperties": 50
+      },
+      "fixedQuery": {
+        "fields": "summary,status,updated"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_issue",
+      "description": "创建 Issue（POST /rest/api/3/issue，需 project key、summary、issue type）。写入操作：运行前必须获得用户明确授权。出处：https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issues/#api-rest-api-3-issue-post",
+      "method": "POST",
+      "path": "/rest/api/3/issue",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "project_key": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9]{0,9}$",
+            "description": "项目 Key",
+            "maxLength": 10000
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "标题"
+          },
+          "issue_type": {
+            "type": "string",
+            "enum": [
+              "Task",
+              "Bug",
+              "Story",
+              "Subtask"
+            ],
+            "default": "Task",
+            "description": "Issue 类型",
+            "maxLength": 10000
+          },
+          "description": {
+            "type": "string",
+            "description": "描述（Atlassian Document Format 由运行器包装为 ADF）",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "project_key",
+          "summary"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "fields": {
+          "project": {
+            "key": "$project_key"
+          },
+          "summary": "$summary",
+          "issuetype": {
+            "name": "$issue_type"
+          },
+          "description": "$description"
+        }
+      },
+      "readOnly": false,
+      "bodyEncoding": "jira-issue"
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "仅适用 Jira Cloud；Server/Data Center 未覆盖。旧 POST /rest/api/3/search 已弃用，本定义用官方推荐 /search/jql + nextPageToken。",
+    "Basic 鉴权用户名为邮箱、密码为 API Token。",
+    "create_issue 为写入操作，必须获得用户明确授权后由运行器执行；description 需按 ADF（Atlassian Document Format）包装由运行器实现；本定义不执行任何请求。"
+  ]
+}

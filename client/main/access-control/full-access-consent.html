@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>SoduWork</title>
+  <link rel="stylesheet" href="../../theme/variables.css">
+  <link rel="stylesheet" href="full-access-consent.css">
+  <script src="full-access-consent-view.js" defer></script>
+</head>
+<body>
+  <main class="consent" role="dialog" aria-modal="true" aria-labelledby="consentTitle" aria-describedby="consentImpact consentScope">
+    <header class="consent-header">
+      <span class="soduwork-signature" aria-label="SoduWork">SoduWork<span aria-hidden="true"></span></span>
+      <span class="consent-category" data-text="category"></span>
+      <button type="button" id="consentClose" class="close-button" data-label="close"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg></button>
+    </header>
+    <div class="consent-content">
+      <h1 id="consentTitle" data-text="title"></h1>
+      <p id="consentImpact" class="consent-impact" data-text="impact"></p>
+      <section class="scope-summary" id="consentScope" aria-labelledby="scopeLabel">
+        <div class="scope-boundary"><span id="scopeLabel" class="scope-label" data-text="scope"></span><strong data-text="scopeValue"></strong></div>
+        <span class="scope-access"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m12 3 8 3.5v5c0 4.5-3.3 7.8-8 9.5-4.7-1.7-8-5-8-9.5v-5L12 3Z"/><path d="M12 8v5m0 3h.01"/></svg><span data-text="full"></span></span>
+      </section>
+      <details class="permission-details" id="permissionDetails">
+        <summary><span class="details-show" data-text="detailShow"></span><span class="details-hide" data-text="detailHide"></span><svg aria-hidden="true" viewBox="0 0 16 16"><path d="m6 4 4 4-4 4"/></svg></summary>
+        <dl class="permission-list">
+          <div><dt data-text="files"></dt><dd data-text="filesDetail"></dd></div>
+          <div><dt data-text="terminal"></dt><dd data-text="terminalDetail"></dd></div>
+          <div><dt data-text="network"></dt><dd data-text="networkDetail"></dd></div>
+        </dl>
+      </details>
+      <p class="consent-adjustment" data-text="adjustment"></p>
+    </div>
+    <footer class="consent-footer">
+      <label class="acknowledgement"><input id="consentAcknowledged" type="checkbox"><span class="checkbox-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m3.5 8 3 3 6-6"/></svg></span><span data-text="acknowledge"></span></label>
+      <div class="consent-actions"><button type="button" id="consentCancel" class="cancel-button" data-text="cancel" autofocus></button><button type="button" id="consentAllow" class="allow-button" data-text="allow" disabled></button></div>
+    </footer>
+  </main>
+</body>
+</html>

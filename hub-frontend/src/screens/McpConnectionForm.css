@@ -1,0 +1,26 @@
+
+.connector-form{display:flex;flex-direction:column;gap:20px;color:var(--ink)}
+.connector-form-intro{display:flex;gap:14px;align-items:center;padding-bottom:20px;border-bottom:1px solid var(--line)}
+.connector-form-intro>svg,.connector-form-intro>img{width:36px;height:36px;flex:none;object-fit:contain}
+.connector-form-intro strong{font-size:15px;font-weight:500}
+.connector-form-intro p{margin:5px 0 0;color:var(--ink-3);font-size:13px;line-height:1.6}
+.connector-form fieldset{min-width:0;margin:0;padding:0;border:0;display:flex;flex-direction:column;gap:18px}
+.connector-form .f-lbl{font-size:13px;font-weight:500}.connector-form .f-lbl em{font-weight:400;font-size:12px;font-style:normal;color:var(--ink-3);margin-left:4px}
+.connector-form .f-in{font-size:14px;border-radius:8px}.connector-form textarea{resize:vertical}
+.connector-fields{display:grid;gap:16px}
+.connector-form-help{font-size:13px;align-self:flex-start;color:var(--accent)}
+.connector-advanced{border-top:1px solid var(--line)}
+.connector-advanced>summary{padding:16px 0 0;display:flex;justify-content:space-between;align-items:center;cursor:pointer;font-size:13px;color:var(--ink-3);list-style:none}
+.connector-advanced summary::-webkit-details-marker{display:none}
+.connector-advanced>summary svg{width:14px;height:14px}.connector-advanced[open]>summary svg{transform:rotate(90deg)}
+.connector-advanced-body{padding-top:18px;display:flex;flex-direction:column;gap:18px}
+.connector-form .connector-auth summary{font-size:13px;cursor:pointer;color:var(--ink-3);margin-bottom:12px}
+.connector-write{align-items:flex-start;font-size:13px}.connector-write small{display:block;font-size:12px;color:var(--ink-3);margin-top:4px}
+.connector-extra-actions{display:flex;flex-wrap:wrap;gap:8px}
+.connector-form .connector-status{padding:12px 14px;background:var(--surface-1);border:1px solid var(--line);border-radius:9px;font-size:13px;line-height:1.6}
+.connector-status b{display:block;font-weight:500}.connector-status span{display:block;font-size:12px;margin-top:3px;color:var(--ink-3)}
+.connector-form .connector-status.bad{border-color:var(--crit);color:var(--crit)}
+.connector-form .connector-consent{margin:0;font-size:12px;line-height:1.6;color:var(--ink-3)}
+@media(max-width:520px){.connector-form .df-grid{grid-template-columns:1fr}}
+
+.modal.connector-form-modal{width:min(560px,calc(100vw - 32px))}.connector-form-modal .modal-title{font-weight:500}.connector-form-modal .modal-body{padding:22px 24px}.connector-form-modal .modal-foot{padding:16px 24px}

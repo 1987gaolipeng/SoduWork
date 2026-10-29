@@ -1,0 +1,13 @@
+.im-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.im-connections { display: grid; gap: 10px; }
+.im-connection { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border, #e5e7eb); }
+.im-connection > div { min-width: 0; display: grid; gap: 4px; }
+.im-connection span, .im-connection b { overflow-wrap: anywhere; }
+.im-connection button { flex-shrink: 0; }
+[data-im-body] { display: grid; gap: 12px; min-width: 0; }
+[data-im-body] .cap-field { margin: 0; min-width: 0; }
+[data-im-body] .cap-input { width: 100%; min-width: 0; box-sizing: border-box; }
+[data-im-body] > .btn-mini { justify-self: start; }
+.im-message { padding: 12px 0; border-bottom: 1px solid var(--border, #e5e7eb); overflow-wrap: anywhere; }
+.im-message p { margin: 0 0 6px; }
+@media (max-width: 600px) { .im-remote .connector-section-heading { align-items: start; flex-direction: column; gap: 10px; } }

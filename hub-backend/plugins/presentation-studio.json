@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "key": "presentation-studio",
+  "name": "演示文稿工坊",
+  "version": "1.0.3",
+  "category": "office",
+  "description": "从目标、材料和数据构建故事线清晰、视觉统一、可直接演讲的 PowerPoint，并执行内容与版式审查。",
+  "author": "SoduWork",
+  "openSource": {
+    "license": "Apache-2.0",
+    "repository": "https://github.com/iOfficeAI/OfficeCLI",
+    "upstreamVersion": "v1.0.143@fd4adab4dbe3",
+    "adaptation": "借鉴其演示文稿结构化生成能力，增加 SoduWork 的受众分析、视觉验收、独立审查和可追溯交付；不强制安装上游 CLI。"
+  },
+  "instructions": "你是企业演示文稿策划、编辑和视觉质检专家。先明确听众、场合、核心结论和演讲时长，再设计叙事结构；每页只表达一个重点，结论优先，避免把长文复制到页面。使用一致的比例、主题、网格、字体、色彩和留白；数据优先使用可编辑图表，必要时补充演讲备注。所有事实和图表必须可追溯，不制作虚假数据。交付 PPTX 前重新打开并检查每页文字溢出、遮挡、低对比、错位、残留占位符、页面顺序、图表和备注，最终只登记可直接演示的成品。",
+  "entrypoints": {"conversation": true, "task": true, "automation": false},
+  "inputs": [
+    {"key": "audience", "label": "听众", "type": "text", "required": false},
+    {"key": "duration", "label": "演讲时长", "type": "text", "required": false},
+    {"key": "brandRules", "label": "品牌与视觉要求", "type": "textarea", "required": false}
+  ],
+  "outputs": [{"key": "presentation", "label": "正式演示文稿", "accept": ["deliverables/presentation.pptx"]}],
+  "capabilities": {"network": false, "skills": [], "mcpServers": [], "runtime": ["files"]},
+  "evaluations": [{
+    "key": "quarterly-review",
+    "name": "季度经营复盘",
+    "instruction": "制作一份面向管理层的季度经营复盘演示稿，包含结论、指标、问题和下季度行动。",
+    "inputs": {"audience": "经营管理层", "duration": "15 分钟", "brandRules": "清晰克制、数据优先"},
+    "criteria": [
+      "输出 deliverables/presentation.pptx 且可按标准格式重新打开并逐页读取",
+      "故事线完整并能在约定时长内讲清",
+      "每页重点明确，字号、对比度、对齐和留白适合投屏",
+      "包含演讲备注且不存在占位符、溢出或伪造数据"
+    ],
+    "expectedOutputs": ["design.presentation"]
+  }],
+  "workflow": {"nodes": [
+    {
+      "key": "design", "type": "ai", "name": "策划与制作",
+      "capabilities": {"network": false, "skills": [], "mcpServers": [], "runtime": ["files"]},
+      "outputs": [{"key": "presentation", "kind": "file", "label": "正式演示文稿", "path": "deliverables/presentation.pptx", "required": true}],
+      "config": {"prompt": "依据任务正文、附件和插件输入制作 deliverables/presentation.pptx。先形成结论驱动的故事线，再生成真实可编辑的 PPTX，不得用图片合集或改后缀文件冒充。必须包含标题页、核心结论、主体论证和行动收束，按场合补充演讲备注。完成后重新打开并逐页检查结构、文字、图表、对齐、溢出和残留占位符。"},
+      "retry": {"maxAttempts": 2}
+    },
+    {
+      "key": "validate", "type": "validate", "name": "文件完整性检查", "dependsOn": ["design"],
+      "config": {"rules": [{"type": "file", "name": "PPTX 成品存在且不是空壳", "nameEquals": "deliverables/presentation.pptx", "minBytes": 5000}]}
+    },
+    {
+      "key": "review", "type": "ai_review", "name": "独立演示审查", "dependsOn": ["design", "validate"],
+      "inputs": [{"key": "presentation", "fromNode": "design", "outputKey": "presentation", "label": "待审演示稿", "required": true}],
+      "capabilities": {"network": false, "skills": [], "mcpServers": [], "runtime": ["files"]},
+      "outputs": [{"key": "review", "kind": "decision", "label": "演示审查结论", "path": "reviews/presentation-review.md", "required": true}],
+      "config": {"prompt": "独立打开并审查 deliverables/presentation.pptx，从业务故事线、内容准确性、每页信息密度、字体与对比、对齐与溢出、图表可读性、演讲备注和残留占位符逐项判断，把结论写入 reviews/presentation-review.md。阻断性问题必须判定不通过。"}
+    },
+    {"key": "accept", "type": "human_review", "name": "演讲方验收", "dependsOn": ["review"], "config": {"summary": "请验收故事线、视觉效果和演讲可用性"}},
+    {"key": "publish", "type": "publish", "name": "交付演示稿", "dependsOn": ["accept"], "config": {"message": "演示文稿已通过验收并交付"}}
+  ]}
+}

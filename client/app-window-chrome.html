@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:">
+<style>
+  :root { color-scheme:light; --bg:#f3f4f6; --text:#3f3f46; --hover:#e4e4e7; --active:#fff; --focus:#6366f1; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); overflow:hidden; color:var(--text); font:12px 'Segoe UI','Microsoft YaHei',sans-serif; cursor:default; }
+  #bar { display:flex; align-items:center; gap:5px; height:30px; padding:0 150px 0 10px; -webkit-app-region:drag; user-select:none; }
+  /* macOS native traffic lights occupy the left edge of the hidden title bar. */
+  html[data-platform="darwin"] #bar { padding-left:88px; padding-right:10px; }
+  #logo { display:grid; place-items:center; width:22px; height:22px; margin-right:3px; flex:none; border-radius:6px; color:var(--text); background:transparent; }
+  #logo img { width:100%; height:100%; object-fit:contain; border-radius:6px; }
+  svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; pointer-events:none; }
+  button { font:inherit; color:inherit; border:0; background:transparent; cursor:pointer; -webkit-app-region:no-drag; }
+  button:disabled { opacity:.32; cursor:default; }
+  button:focus-visible { outline:2px solid var(--focus); outline-offset:-2px; }
+  .action { display:grid; place-items:center; width:26px; height:26px; flex:none; padding:0; border-radius:6px; }
+  button:not(:disabled):hover { background:var(--hover); }
+  #tabs { display:flex; align-items:end; gap:3px; min-width:0; flex:1; height:100%; overflow-x:auto; scrollbar-width:none; -webkit-app-region:drag; }
+  #tabs::-webkit-scrollbar { display:none; }
+  .tab { display:flex; align-items:center; flex:0 1 195px; min-width:86px; max-width:220px; height:27px; border-radius:7px 7px 0 0; background:#e9eaed; -webkit-app-region:no-drag; }
+  #drag-space { flex:0 0 48px; align-self:stretch; -webkit-app-region:drag; }
+  .tab[aria-selected="true"] { background:var(--active); box-shadow:0 -1px 3px #00000005; }
+  .tab-select { display:flex; align-items:center; gap:6px; flex:1; min-width:0; height:100%; padding:0 9px; border-radius:7px 0 0 0; text-align:left; }
+  .tab-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .tab-close { display:grid; place-items:center; width:20px; height:20px; flex:none; margin-right:4px; padding:0; border-radius:4px; }
+  .busy { width:10px; height:10px; flex:none; border:1.5px solid #d4d4d8; border-top-color:var(--focus); border-radius:50%; animation:spin .9s linear infinite; }
+  .busy[hidden] { display:none; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  @media(prefers-reduced-motion:reduce) { .busy { animation:none; } }
+</style>
+</head>
+<body>
+<div id="bar">
+  <div id="logo" aria-label="应用"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg></div>
+  <button id="back" class="action" type="button" title="返回上一页" aria-label="返回上一页" disabled><svg viewBox="0 0 24 24"><path d="m14 6-6 6 6 6M8 12h12"/></svg></button>
+  <div id="tabs" role="tablist" aria-label="应用页面"></div>
+  <div id="drag-space" aria-hidden="true"></div>
+  <button id="refresh" class="action" type="button" title="刷新当前页面，保留右侧对话" aria-label="刷新当前页面"><svg viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M19 11a7 7 0 0 0-12-5L4 9m1 4a7 7 0 0 0 12 5l3-3"/></svg></button>
+  <button id="settings" class="action" type="button" title="打开主窗口的应用管理" aria-label="应用设置"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3" fill="var(--bg)"/><circle cx="15" cy="17" r="3" fill="var(--bg)"/></svg></button>
+</div>
+<script>
+  (() => {
+    const api = window.soduWorkWindowChrome, tabs = document.getElementById('tabs');
+    document.documentElement.dataset.platform = api.platform;
+    const act = (name, id) => api.action(name, id).catch(() => {});
+    function render(state) {
+      if (!state || !Array.isArray(state.tabs)) return;
+      document.getElementById('back').disabled = !state.canBack;
+      const ids = new Set(state.tabs.map(tab => tab.id));
+      for (const node of [...tabs.children]) if (!ids.has(node.dataset.id)) node.remove();
+      for (const tab of state.tabs) {
+        let node = [...tabs.children].find(node => node.dataset.id === tab.id);
+        if (!node) {
+          node = document.createElement('div'); node.className = 'tab'; node.dataset.id = tab.id;
+          node.setAttribute('role', 'tab');
+          const select = document.createElement('button'); select.className = 'tab-select'; select.type = 'button';
+          const busy = document.createElement('span'); busy.className = 'busy'; busy.hidden = true;
+          const label = document.createElement('span'); label.className = 'tab-label';
+          select.append(busy, label); select.onclick = () => act('select', tab.id);
+          const close = document.createElement('button'); close.className = 'tab-close'; close.type = 'button';
+          close.textContent = '×'; close.onclick = () => act('close', tab.id);
+          node.append(select, close); tabs.append(node);
+          node.onauxclick = event => { if (event.button === 1) { event.preventDefault(); act('close', tab.id); } };
+        }
+        node.setAttribute('aria-selected', String(tab.id === state.activeId));
+        node.querySelector('.tab-label').textContent = tab.title;
+        node.querySelector('.tab-select').title = tab.title;
+        node.querySelector('.busy').hidden = !tab.loading;
+        node.querySelector('.tab-close').setAttribute('aria-label', '关闭 ' + tab.title);
+      }
+      if (state.activeId !== tabs.dataset.active) {
+        tabs.dataset.active = state.activeId;
+        [...tabs.children].find(node => node.dataset.id === state.activeId)?.scrollIntoView({ block:'nearest', inline:'nearest' });
+      }
+      const logo = document.getElementById('logo'); logo.title = state.appLabel || '应用';
+      if (state.icon && !logo.querySelector('img')) { const img = document.createElement('img'); img.src = state.icon; img.alt = ''; logo.replaceChildren(img); }
+    }
+    api.onTabs(render);
+    api.action('state').then(result => render(result.state)).catch(() => {});
+    for (const [id, action] of [['back','back'],['refresh','refresh'],['settings','apps']]) document.getElementById(id).onclick = () => act(action);
+    document.getElementById('bar').ondblclick = event => { if (!event.target.closest('button,.tab')) act('maximize'); };
+    tabs.onkeydown = event => {
+      const nodes = [...tabs.children], index = nodes.findIndex(node => node.dataset.id === tabs.dataset.active);
+      if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
+      event.preventDefault();
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? nodes.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + nodes.length) % nodes.length;
+      if (nodes[next]) { act('select', nodes[next].dataset.id); nodes[next].querySelector('button').focus(); }
+    };
+  })();
+</script>
+</body>
+</html>

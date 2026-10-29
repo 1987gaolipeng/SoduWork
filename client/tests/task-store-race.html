@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>任务队列竞态回归</title></head>
+<body><pre id="out">START</pre>
+<script>
+localStorage.removeItem('soduwork_work_task_ops_v1');
+localStorage.removeItem('soduwork_work_task_shadow_v1');
+localStorage.removeItem('soduwork_work_tasks_v5');
+window.SoduWorkAPI = {};
+const output = document.getElementById('out');
+window.addEventListener('error', e => {
+  output.textContent = 'FAIL  ' + e.message + '\n\ntask store race smoke: 0 passed, 1 failed';
+});
+window.addEventListener('unhandledrejection', e => {
+  output.textContent = 'FAIL  ' + String(e.reason && e.reason.stack || e.reason) +
+    '\n\ntask store race smoke: 0 passed, 1 failed';
+});
+</script>
+<script src="../core/task-sync.js"></script>
+<script src="../core/store-lifecycle.js"></script>
+<script src="../core/store.js"></script>
+<script>
+const server = new Map();
+const clone = value => JSON.parse(JSON.stringify(value));
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+let hold = null;
+let started = '';
+let rejectDelete = false;
+
+function pause(kind) {
+  let release;
+  hold = { kind, promise: new Promise(resolve => { release = resolve; }), release };
+  started = '';
+}
+async function maybePause(kind) {
+  if (!hold || hold.kind !== kind) return;
+  const current = hold;
+  started = kind;
+  await current.promise;
+  if (hold === current) hold = null;
+}
+async function waitStarted(kind) {
+  for (let i = 0; i < 80; i++) {
+    if (started === kind) return true;
+    await wait(5);
+  }
+  return false;
+}
+function canonical(id, data, previous) {
+  return Object.assign({ id, origin: 'local' }, previous || {}, clone(data || {}));
+}
+
+SoduWorkAPI.putTask = async (id, data) => {
+  await maybePause('put');
+  const before = server.get(id);
+  const row = canonical(id, data, before);
+  server.set(id, row);
+  Store.applyServerEvent({ type: before ? 'task.updated' : 'task.created', task: clone(row) });
+  return clone(row);
+};
+SoduWorkAPI.patchTask = async (id, data) => {
+  await maybePause('patch');
+  const before = server.get(id);
+  if (!before) throw new Error('HTTP 404');
+  const row = canonical(id, data, before);
+  server.set(id, row);
+  Store.applyServerEvent({ type: 'task.updated', task: clone(row) });
+  return clone(row);
+};
+SoduWorkAPI.deleteTask = async id => {
+  await maybePause('delete');
+  if (rejectDelete) { rejectDelete = false; throw new Error('HTTP 403'); }
+  server.delete(id);
+  Store.applyServerEvent({ type: 'task.deleted', id });
+  return { ok: true };
+};
+
+function task(id, note) {
+  return { id, title: id, source: '', note, status: 'todo', handler: 'me',
+    priority: 'normal', tags: [], progress: [], deps: [], origin: 'local',
+    canDeleteRequirement: true, canEditRequirement: true };
+}
+function reset(rows) {
+  clearTimeout(Store._syncT); clearTimeout(Store._taskRetryT);
+  Store._taskFlushPromise = null;
+  Store._taskInFlight = Object.create(null);
+  Store._tasks = clone(rows || []);
+  Store._setShadow(rows || []);
+  Store._writeTaskOps([]);
+  Store._mirrorTasks(false);
+  server.clear();
+  (rows || []).forEach(row => server.set(row.id, clone(row)));
+  hold = null; started = '';
+  rejectDelete = false;
+}
+
+(async () => {
+  let passed = 0, failed = 0;
+  const lines = [];
+  const check = (name, ok) => {
+    ok ? passed++ : failed++;
+    lines.push((ok ? 'PASS  ' : 'FAIL  ') + name);
+  };
+
+  reset([task('patch-race', 'base')]);
+  pause('patch');
+  Store.tasks[0].note = 'first write'; Store.save();
+  const patching = Store._flushTaskOps();
+  check('修改请求已真实进入发送态', await waitStarted('patch'));
+  Store._taskInFlight = Object.create(null); // simulate the other renderer window
+  Store.tasks[0].note = 'base'; Store.save();
+  hold.release(); await patching;
+  check('改了又改回以用户最后意图为准', server.get('patch-race').note === 'base');
+  check('早到的更新回声没有覆盖最后意图', Store.tasks[0].note === 'base');
+  check('补偿更新完成后队列清空', !Store._readTaskOps().length);
+
+  reset([]);
+  pause('put');
+  Store.tasks.push(task('create-race', 'temporary')); Store.save();
+  const creating = Store._flushTaskOps();
+  check('创建请求已真实进入发送态', await waitStarted('put'));
+  Store._taskInFlight = Object.create(null); // rely on the persisted sentAt marker
+  Store.removeTask('create-race', 0);
+  hold.release(); await creating;
+  check('新建刚出网就删除不会在服务端复活', !server.has('create-race'));
+  check('创建回声不会让已删卡片复活', !Store.tasks.some(x => x.id === 'create-race'));
+  check('补偿删除完成后队列清空', !Store._readTaskOps().length);
+
+  reset([task('delete-race', 'keep')]);
+  pause('delete');
+  const removed = Store.removeTask('delete-race', 0);
+  const deleting = Store._flushTaskOps();
+  check('删除请求已真实进入发送态', await waitStarted('delete'));
+  check('撤销操作被接受', Store.restoreTask(removed.task, removed.index));
+  hold.release(); await deleting;
+  check('删除出网后撤销会幂等恢复服务端任务', server.has('delete-race'));
+  check('早到的删除回声不会移走恢复卡片', Store.tasks.some(x => x.id === 'delete-race'));
+  check('补偿恢复完成后队列清空', !Store._readTaskOps().length);
+
+  reset([Object.assign(task('managed-task', 'server owned'), { origin: 'dispatch' })]);
+  rejectDelete = true;
+  Store.removeTask('managed-task', 0);
+  await Store._flushTaskOps();
+  check('服务端拒绝删除时任务立即恢复', Store.tasks.some(x => x.id === 'managed-task'));
+  check('拒绝删除不会留下永久阻塞命令', !Store._readTaskOps().length);
+
+  output.textContent = lines.join('\n') + '\n\ntask store race smoke: ' +
+    passed + ' passed, ' + failed + ' failed';
+  document.title = failed ? 'FAIL ' + failed : 'ALL PASS ' + passed;
+})();
+</script></body></html>

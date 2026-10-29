@@ -1,0 +1,68 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SoduWork output preview regression</title>
+<link rel="stylesheet" href="../../components/panels/panels-chat.css">
+<link rel="stylesheet" href="../../components/panels/chat-media.css">
+<link rel="stylesheet" href="../../components/panels/code-workbench.css">
+<link rel="stylesheet" href="../../vendor/codemirror/codemirror.css">
+<link rel="stylesheet" href="../../components/panels/conversation-attachments.css">
+<style>
+:root{--bg-0:#fff;--bg-1:#f6f7f9;--bg-2:#eef0f3;--line:#e5e7eb;--ink-1:#20242b;--ink-2:#323842;--ink-3:#636d79;--ink-4:#79818c;--ink-5:#929ba6;--accent:#377fee;--accent-soft:#edf4ff}
+body{margin:0;font:15px/1.7 "Segoe UI","Microsoft YaHei",sans-serif;color:var(--ink-1);background:var(--bg-1)}
+body.dark{--bg-0:#20242b;--bg-1:#181c22;--bg-2:#2b3039;--line:#3d4551;--ink-1:#eef0f4;--ink-2:#dde2e9;--ink-3:#b4bdcc;--ink-4:#a1aaba;--ink-5:#98a4b4;--accent:#86b3ff;--accent-soft:#293951}
+header{height:54px;padding:0 24px;display:flex;align-items:center;gap:16px;background:var(--bg-0);border-bottom:1px solid var(--line)}
+header span{font-size:12px;color:var(--ink-3)}
+#chat{height:calc(100vh - 55px);position:relative;display:flex}
+.nchat-stage{height:100%;display:flex;min-height:0}
+.nchat-main{min-width:0;flex:1;padding:24px;overflow:auto;box-sizing:border-box}
+#list{max-width:760px;margin:auto}
+.nmsg{margin:0 0 20px}
+.nmsg.ai{max-width:none;padding:0}
+.user{color:var(--ink-3)}
+.nmd{font-size:15px}
+#open-md{font:inherit;border:0;background:transparent;color:var(--accent);cursor:pointer;padding:0}
+</style>
+<header><b>SoduWork</b><span>对话成果预览 · 隔离测试</span></header>
+<main class="nchat" id="chat"><div class="nchat-stage"><section class="nchat-main"><div id="list"></div></section></div></main>
+<script src="../../vendor/markdown/marked.umd.js"></script>
+<script src="../../vendor/markdown/purify.min.js"></script>
+<script src="../../vendor/codemirror/codemirror.js"></script>
+<script src="../../vendor/markdown/diff.min.js"></script>
+<script src="../../vendor/codemirror/mode/javascript/javascript.js"></script>
+<script src="../../vendor/codemirror/mode/python/python.js"></script>
+<script src="../../vendor/codemirror/mode/xml/xml.js"></script>
+<script src="../../vendor/codemirror/mode/css/css.js"></script>
+<script src="../../vendor/codemirror/mode/markdown/markdown.js"></script>
+<script src="../../vendor/codemirror/mode/yaml/yaml.js"></script>
+<script src="../../components/panels/chat-media.js"></script>
+<script src="../../components/panels/chat-output-links.js"></script>
+<script src="../../components/panels/chat-dom-patch.js"></script>
+<script src="../../components/panels/panels-chat-tools.js"></script>
+<script src="../../components/panels/chat-workspace-info.js"></script>
+<script src="../../components/panels/chat-workspace-split.js"></script>
+<script src="../../components/panels/chat-workspace-controls.js"></script>
+<script src="../../components/panels/panels-chat-workspace.js"></script>
+<script src="../../components/panels/conversation-attachments.js"></script>
+<script>
+window.errors=[];addEventListener('error',e=>errors.push(e.message));
+window.configure=files=>{
+  window.files=files;window.ref='preview-fixture';
+  ChatWorkbench.bind(document.querySelector('#chat'),()=>({ref}));
+  ChatWorkbench.render(document.querySelector('#chat'),{messages:[
+    {role:'user',blocks:[{kind:'text',text:'请生成图片和检查说明。'}]},
+    {role:'assistant',blocks:[{kind:'text',text:window.previewMarkdown || '![生成截图](preview.png) [检查说明](report.md)'}]}
+  ]},files);
+  window.repaint=()=>{
+    const prose=ChatOutputLinks.sanitize(marked.parse(window.previewMarkdown || '已生成检查截图和 [检查说明](report.md)。\n\n![生成截图](preview.png)'),DOMPurify);
+    const html='<div data-chat-node="message:0" class="nmsg user">请生成截图，并整理一份 Markdown 检查说明。</div>'+
+      '<div data-chat-node="message:1" class="nmsg ai"><div class="ntext nmd">'+prose+'</div></div>';
+    ChatTools.patchList(document.querySelector('#list'),ChatOutputLinks.decorate(html,files,ref));
+    ChatOutputLinks.hydrateImages(document.querySelector('#list'),files,{api:soduWorkAPI.conversationSession,ref});
+  };
+  repaint();
+};
+document.querySelector('#list').addEventListener('click',e=>{
+  const link=e.target.closest('[data-open-app]');
+  if(link)ChatWorkbench.openOutput(link.dataset.openApp);
+});
+</script>

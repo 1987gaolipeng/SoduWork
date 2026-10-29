@@ -1,0 +1,77 @@
+/*
+ * Assign each module one identity color and its light background. Keep module identity
+ * separate from task-status tokens and semantic warning colors.
+ */
+html[data-skin="box"]{
+  --box-ui-orange:color-mix(in srgb,var(--boxlid-1) 55%,var(--ink));
+  --box-ui-blue:color-mix(in srgb,var(--boxlid-2) 75%,var(--ink));
+  --box-ui-green:color-mix(in srgb,var(--boxlid-3) 55%,var(--ink));
+  --box-ui-rose:color-mix(in srgb,var(--boxlid-4) 70%,var(--ink));
+  --box-ui-violet:#7656b2;
+  --box-ui-color:var(--box-ui-violet);
+  --accent:var(--box-ui-color);--accent-hover:color-mix(in srgb,var(--accent) 84%,var(--ink));
+  --accent-soft:color-mix(in srgb,var(--accent) 7%,transparent);
+  --accent-soft-2:color-mix(in srgb,var(--accent) 12%,transparent);
+  --brand-grad:linear-gradient(var(--accent),var(--accent));
+  --win-on-grad:linear-gradient(var(--accent),var(--accent));
+}
+
+/* Use stable module identities, never DOM position, to keep navigation and pages consistent. */
+html[data-skin="box"] :is([data-rail-view="create"],[data-view="create"],[data-rail-view="history"],[data-view="history"],#historyBoard,.edge-dock .ed-home,.edge-dock .ed-taskboard,#windowMenu-file){--box-ui-color:var(--box-ui-blue)}
+html[data-skin="box"] :is([data-rail-view="schedules"],[data-view="schedules"],#schPanel,.edge-dock .ed-automation,.window-menu .wm-sidebar){--box-ui-color:var(--box-ui-orange)}
+html[data-skin="box"] :is([data-rail-view="library"],[data-view="library"],#libraryPanel,[data-rail-view="briefs"],[data-view="briefs"],#briefPanel,#windowMenu-view){--box-ui-color:var(--box-ui-green)}
+html[data-skin="box"] :is([data-rail-view="aidesk"],[data-view="aidesk"],#aiDeskPanel,[data-rail-view="team"],[data-view="team"],#teamPanel,[data-rail-view="notices"],[data-view="notices"],#noticePanel,.edge-dock .ed-notice){--box-ui-color:var(--box-ui-rose)}
+html[data-skin="box"] :is([data-rail-view="skills"],[data-view="skills"],#capPanel,#appsPanel,[data-view="models"],#mdPanel,#windowMenu-help){--box-ui-color:var(--box-ui-violet)}
+
+/* Derive local tokens at each module so descendants inherit that module's single hue. */
+html[data-skin="box"] :is(.ws-rail-button,.ws-nav-item,.edge-dock .ed-view,.window-menu button,#schPanel,#historyBoard,#libraryPanel,#briefPanel,#aiDeskPanel,#teamPanel,#noticePanel,#capPanel,#appsPanel,#mdPanel){
+  --accent:var(--box-ui-color);--accent-hover:color-mix(in srgb,var(--accent) 84%,var(--ink));
+  --accent-soft:color-mix(in srgb,var(--accent) 7%,transparent);
+  --accent-soft-2:color-mix(in srgb,var(--accent) 12%,transparent);
+}
+
+html[data-skin="box"] .ws-rail-button{
+  color:var(--ink-3);border-color:transparent;
+  background:transparent;box-shadow:none;
+}
+/* Use neutral sidebar icons at rest and theme colors on hover or selection, without borders or shadows. */
+html[data-skin="box"] .ws-rail-button:is(.active,:hover){
+  color:var(--accent);border-color:transparent;
+  background:color-mix(in srgb,var(--accent) 9%,var(--bg-0));
+  box-shadow:none;
+}
+html[data-skin="box"] .ws-nav-item.active{background:var(--accent-soft);color:var(--accent)}
+html[data-skin="box"] .ws-nav-item.active::before{background:var(--accent)}
+html[data-skin="box"] #mdPanel .cfg-nav-item.is-selected{
+  border-color:color-mix(in srgb,var(--accent) 36%,var(--bg-0));background:var(--accent-soft);
+}
+html[data-skin="box"] :is(#mdPanel .cfg-detail-icon,#mdPanel .md-provider-icon,.wm-current){color:var(--accent);background:var(--accent-soft)}
+
+/* Window menus gain a single color on interaction, without a decorative rainbow strip. */
+html[data-skin="box"] .window-menu button:is(:hover,[aria-expanded="true"]):not(:disabled){background:var(--accent-soft);color:var(--accent)}
+
+/* Primary actions follow their module. Permission and danger controls are not selected. */
+html[data-skin="box"] :is(#schPanel,#historyBoard,#capPanel,#aiDeskPanel,#mdPanel,#libraryPanel,#briefPanel) .ws-page-head
+  :is(.btn-mini.primary,.sch-create-trigger):not(:disabled),
+html[data-skin="box"] :is(#mdPanel .md-test.primary,.cp-primary):not(:disabled){
+  background:var(--accent);border-color:transparent;color:#fff;
+  box-shadow:0 1px 3px color-mix(in srgb,var(--accent) 14%,transparent);text-shadow:none;
+}
+html[data-skin="box"] :is(#schPanel,#historyBoard,#capPanel,#aiDeskPanel,#mdPanel,#libraryPanel,#briefPanel) .ws-page-head
+  :is(.btn-mini.primary,.sch-create-trigger):hover:not(:disabled),
+html[data-skin="box"] :is(#mdPanel .md-test.primary,.cp-primary):hover:not(:disabled){
+  background:var(--accent-hover);color:#fff;border-color:transparent;filter:none;
+}
+html[data-skin="box"] #schPanel .sch-create-chevron{border-left-color:#ffffff40}
+
+html[data-skin="box"] .edge-dock .ed-view{color:var(--accent)}
+html[data-skin="box"] .edge-dock .ed-view:is(.active,:hover){
+  color:var(--accent);background:color-mix(in srgb,var(--accent) 9%,var(--bg-0));
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 22%,transparent);
+}
+html[data-skin="box"] .edge-dock .ed-count{background:var(--box-ui-blue);color:#fff}
+
+@media (forced-colors:active){
+  html[data-skin="box"] .ws-rail-button.active,
+  html[data-skin="box"] #mdPanel .cfg-nav-item.is-selected{border-color:Highlight}
+}

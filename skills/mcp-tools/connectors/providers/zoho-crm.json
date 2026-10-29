@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 1,
+  "id": "zoho-crm",
+  "name": "Zoho CRM",
+  "category": "客户管理",
+  "description": "Zoho CRM 通用连接器：当前用户、模块记录列表、创建记录。基于 Zoho CRM API v6，鉴权头为 Authorization: Zoho-oauthtoken <token>（含空格），API host 按数据中心映射为官方 host（ZAPI_HOST）。",
+  "officialDocs": [
+    "https://www.zoho.com/crm/developer/docs/api/v6/get-records.html",
+    "https://www.zoho.com/crm/developer/docs/api/v6/insert-records.html",
+    "https://www.zoho.com/crm/developer/docs/api/v6/get-users.html",
+    "https://www.zoho.com/crm/developer/docs/api/v6/access-token.html"
+  ],
+  "authDocs": [
+    "https://www.zoho.com/crm/developer/docs/api/v6/access-token.html"
+  ],
+  "baseUrl": "https://{ZAPI_HOST}",
+  "fields": [
+    {
+      "key": "ZAPI_HOST",
+      "label": "数据中心 API host（官方映射：全球=www.zohoapis.com，EU=www.zohoapis.eu，IN=www.zohoapis.in，日本=www.zohoapis.jp，澳洲=www.zohoapis.com.au，沙特=www.zohoapis.sa，中国=www.zohoapis.com.cn）",
+      "secret": false,
+      "required": true,
+      "pattern": "^www\\.zohoapis\\.(com|eu|in|jp|com\\.au|sa|com\\.cn)$",
+      "example": ""
+    },
+    {
+      "key": "ZOHO_ACCESS_TOKEN",
+      "label": "OAuth access token",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "header",
+    "tokenKey": "ZOHO_ACCESS_TOKEN",
+    "header": "Authorization",
+    "prefix": "Zoho-oauthtoken "
+  },
+  "headers": {
+    "Accept": "application/json"
+  },
+  "tools": [
+    {
+      "name": "get_current_user",
+      "description": "获取当前用户（GET /crm/v6/users，type 固定 CurrentUser）。无分页。出处：https://www.zoho.com/crm/developer/docs/api/v6/get-users.html",
+      "method": "GET",
+      "path": "/crm/v6/users",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "fixedQuery": {
+        "type": "CurrentUser"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_records",
+      "description": "列出模块记录（GET /crm/v6/{module}）。分页：page（从 1）+ per_page（1-2000 默认 200），响应 info.more_records。出处：https://www.zoho.com/crm/developer/docs/api/v6/get-records.html",
+      "method": "GET",
+      "path": "/crm/v6/{module}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "module": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{1,40}$",
+            "description": "模块名，如 Leads、Contacts",
+            "maxLength": 10000
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000,
+            "default": 1,
+            "description": "页码"
+          },
+          "per_page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2000,
+            "default": 200,
+            "description": "每页条数"
+          },
+          "sort_by": {
+            "type": "string",
+            "description": "排序字段",
+            "maxLength": 10000
+          },
+          "sort_order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "default": "desc",
+            "description": "排序方向",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "module"
+        ],
+        "maxProperties": 50
+      },
+      "query": {
+        "page": "page",
+        "per_page": "per_page",
+        "sort_by": "sort_by",
+        "sort_order": "sort_order"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_record",
+      "description": "创建记录（POST /crm/v6/{module}，data 数组包字段对象）。写入操作：运行前必须获得用户明确授权。出处：https://www.zoho.com/crm/developer/docs/api/v6/insert-records.html",
+      "method": "POST",
+      "path": "/crm/v6/{module}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "module": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{1,40}$",
+            "description": "模块名",
+            "maxLength": 10000
+          },
+          "fields": {
+            "type": "object",
+            "additionalProperties": true,
+            "maxProperties": 50,
+            "description": "字段名到值的映射（简单 JSON 值），由调用方按模块元数据确认字段名"
+          }
+        },
+        "required": [
+          "module",
+          "fields"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "data": [
+          "$fields"
+        ]
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "鉴权头为 Authorization: Zoho-oauthtoken <token>（前缀后必须跟单个空格），非 Bearer。",
+    "API host 必须按数据中心使用官方 host（www.zohoapis.com/.eu/.in/.jp/.com.au/.sa/.com.cn），不接受抽象的 DC 代号；token 交换用的 accounts.zoho*.com 域与本连接器无关（access token 由用户先获取再填入）。",
+    "access token 约 1 小时过期，需用户安全填入并手动更新；自动续期为宿主侧适配项，本连接器未实现。",
+    "create_record 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

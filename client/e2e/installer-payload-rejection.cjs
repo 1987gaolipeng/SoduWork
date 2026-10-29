@@ -1,0 +1,88 @@
+'use strict';
+// Follow a completed installer-update.cjs run. Reuse ONLY its isolated fixture/profile/appId.
+// Build a valid NSIS container containing one file that disagrees with its payload inventory.
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const os = require('node:os');
+const { spawn } = require('node:child_process');
+const { build, Platform, Arch } = require('./fixtures/isolated-installer-build.cjs');
+function run(file, args, extraEnv = {}) {
+  const env = { ...process.env, ...extraEnv };
+  delete env.ELECTRON_RUN_AS_NODE;
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, args, { env, windowsHide: true, stdio: 'ignore' });
+    child.once('error', reject);
+    child.once('exit', resolve);
+  });
+}
+async function main() {
+  const evidence = path.resolve(process.argv[2]);
+  const data = JSON.parse(await fs.readFile(evidence, 'utf8'));
+  const { root, installed, id, mode } = data;
+  assert.equal(path.dirname(root), os.tmpdir());
+  assert.ok(path.basename(root).startsWith('soduwork-update-e2e-'));
+  assert.equal(path.dirname(installed), root);
+  assert.match(id, /^com\.soduwork\.update\.e2e\.\d+$/);
+  assert.ok(['currentuser', 'allusers'].includes(mode));
+  const client = path.resolve(__dirname, '..');
+  const prepackaged = path.join(root, 'dist', 'win-unpacked');
+  const license = path.join(prepackaged, '.soduwork-prune.cjs');
+  const original = await fs.readFile(license);
+  const manifestPath = path.join(prepackaged, '.soduwork-payload.json');
+  const originalManifest = await fs.readFile(manifestPath);
+  const before = await fs.readFile(path.join(installed, '.soduwork-active'), 'utf8');
+  const base = JSON.parse(await fs.readFile(path.join(client, 'package.json'), 'utf8')).build;
+  let setup;
+  if (process.argv.includes('--reuse')) setup = path.join(root, 'corrupt-dist', 'SoduWork-1.0.1-Setup.exe');
+  else {
+    const staging = path.join(client, '.runtime/installer');
+    await require('../scripts/native-payload.cjs').writeNativePayload(prepackaged, staging);
+    await require('./fixtures/native-payload-fault.cjs').mutateStagedPayload(prepackaged, staging,
+      '.soduwork-prune.cjs', bytes => Buffer.concat([Buffer.alloc(4096, 65), bytes]));
+    const outputs = await build({
+      targets: Platform.WINDOWS.createTarget(['nsis'], Arch.x64), projectDir: client, prepackaged,
+      config: {
+        appId: id, productName: 'SoduWork',
+        directories: { app: path.join(root, 'fixture'), output: path.join(root, 'corrupt-dist'),
+          buildResources: path.join(client, 'build') },
+        afterPack: null, afterSign: null, extraResources: [],
+        win: { target: ['nsis'], icon: path.join(client, 'icon.ico'), executableName: 'SoduWork', signAndEditExecutable: false },
+        nsis: { ...base.nsis, include: path.join(client, 'build/installer.nsh'),
+          installerIcon: path.join(client, 'icon.ico'), uninstallerIcon: path.join(client, 'icon.ico'),
+          createDesktopShortcut: false, createStartMenuShortcut: false, runAfterFinish: false },
+        compression: 'store', npmRebuild: false,
+      },
+    });
+    setup = outputs.find(file => file.endsWith('.exe'));
+    assert.ok(setup);
+    assert.deepEqual(await fs.readFile(manifestPath), originalManifest, 'test must not regenerate the inventory');
+  }
+  const code = await run(setup, ['/S', '/' + mode, '--updated', '/D=' + installed]);
+  assert.equal(code, 2, 'corrupted payload must fail before activation');
+  assert.equal(await fs.readFile(path.join(installed, '.soduwork-active'), 'utf8'), before);
+  const details = JSON.parse(await fs.readFile(path.join(installed, '.soduwork-update-details.json'), 'utf8'));
+  assert.equal(details.ok, false);
+  assert.equal(details.error.path, '.soduwork-prune.cjs');
+  assert.equal(details.error.expectedSize, original.length);
+  assert.equal(details.error.actualSize, original.length + 4096);
+  assert.match(await fs.readFile(path.join(installed, '.soduwork-update.log'), 'utf8'), /payload-verification-failed/);
+  const launchOutput = path.join(root, 'launched-after-rejection-' + Date.now() + '.json');
+  const launchCode = await run(path.join(installed, 'SoduWork.exe'), [], {
+    SODUWORK_UPDATE_E2E_PROFILE: path.join(root, 'profile'), SODUWORK_UPDATE_E2E_OUTPUT: launchOutput,
+  });
+  assert.equal(launchCode, 0);
+  const deadline = Date.now() + 30000;
+  while (!(await fs.access(launchOutput).then(() => true, () => false))) {
+    if (Date.now() >= deadline) throw Error('Previous version did not produce its launch receipt');
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  const launched = JSON.parse(await fs.readFile(launchOutput, 'utf8'));
+  assert.equal(launched.exe, path.join(installed, '.soduwork-versions', before, 'SoduWork.exe'));
+  assert.equal(await fs.readFile(path.join(root, 'profile', 'sentinel.txt'), 'utf8'), 'keep user data');
+  const result = { root, installed, setup, code, activeVersionUnchanged: true,
+    previousVersionLaunched: true, userDataPreserved: true, details };
+  await fs.writeFile(path.join(path.dirname(evidence), 'payload-rejection.json'), JSON.stringify(result, null, 2));
+  console.log('PASS: real NSIS rejects modified runtime cleanup script; active version and user data preserved.');
+}
+main().catch(error => { console.error(error); process.exitCode = 1; });

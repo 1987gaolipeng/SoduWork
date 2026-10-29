@@ -1,0 +1,194 @@
+/*
+ * Repository-catalog styles use shared design tokens across themes.
+ */
+.rc-page { display: flex; flex-direction: column; gap: 16px; }
+/* Empty repository directories should keep their banner and controls in the
+   same readable column as the other sparse admin pages on ultra-wide shells. */
+.app .content > .rc-page { width: 100%; max-width: none; margin-inline: 0; }
+.app .content > .rc-page:has(.pg-empty) { max-width: 1180px; margin-inline: auto; }
+
+/* Emphasize summary values over descriptions. */
+.rc-head-stats { display: flex; gap: 10px; }
+.rc-head-stats > div { min-width: 92px; padding: 10px 14px; border: 1px solid var(--line);
+  border-radius: 11px; background: var(--surface-1); display: flex; flex-direction: column; gap: 2px; }
+.rc-head-stats b { font-size: 18px; font-weight: 660; font-variant-numeric: tabular-nums; }
+.rc-head-stats b.ok { color: var(--ok); }
+.rc-head-stats b.bad { color: var(--crit); }
+.rc-head-stats span { color: var(--ink-4); font-size: max(var(--font-min-readable, 14.5px), 12px); }
+
+/* Provider badges use 26px list and 34px source-card sizes. */
+.rc-mark { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px;
+  background: var(--surface-2); color: var(--ink-3); font: 650 14.5px var(--mono); flex: 0 0 auto; }
+.rc-mark.lg { width: 34px; height: 34px; border-radius: 9px; font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.rc-mark.rc-pv-gitlab { background: color-mix(in srgb, #e8663a 14%, var(--surface-2)); color: #c94f24; }
+.rc-mark.rc-pv-gerrit { background: color-mix(in srgb, #2a9d8f 14%, var(--surface-2)); color: #1f7d72; }
+
+/* Source cards contain primary information, errors, and expandable account settings. */
+.rc-sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 12px; }
+.rc-source { border: 1px solid var(--line); border-radius: 13px; background: var(--surface);
+  box-shadow: var(--shadow-sm); overflow: hidden; }
+.rc-source.bad { border-color: color-mix(in srgb, var(--crit) 34%, var(--line)); }
+.rc-source-main { display: flex; align-items: center; gap: 12px; padding: 13px 15px; }
+.rc-source-id { min-width: 0; flex: 1; }
+.rc-source-id b { display: block; font-size: max(var(--font-min-readable, 14.5px), 13.5px); font-weight: 630; }
+.rc-source-id small { display: block; margin-top: 2px; color: var(--ink-4); font: 14.5px var(--mono);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rc-source-nums { display: flex; gap: 16px; margin-right: 4px; }
+.rc-source-nums > div { display: flex; flex-direction: column; gap: 1px; }
+.rc-source-nums b { display: flex; align-items: center; gap: 5px; font-size: max(var(--font-min-readable, 14.5px), 13px); font-weight: 640;
+  font-variant-numeric: tabular-nums; }
+.rc-source-nums b.ok { color: var(--ok); font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.rc-source-nums b.bad { color: var(--crit); font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.rc-source-nums b i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.rc-source-nums span { color: var(--ink-4); font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.rc-source-act { display: flex; align-items: center; gap: 7px; }
+
+/* Summarize account configuration and identity in a chip before expanding its form. */
+.rc-acct { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px;
+  border: 1px dashed color-mix(in srgb, var(--warn) 45%, var(--line)); border-radius: 8px;
+  background: var(--warn-soft); color: var(--ink-2); font-size: max(var(--font-min-readable, 14.5px), 12px); cursor: pointer; }
+.rc-acct.set { border-style: solid; border-color: var(--line); background: var(--surface-1); }
+.rc-acct:hover { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.rc-acct svg { width: 12px; height: 12px; }
+.rc-acct svg:last-child { transition: transform .15s ease; color: var(--ink-4); }
+.rc-acct.open svg:last-child { transform: rotate(90deg); }
+
+.rc-source-err { padding: 8px 15px; border-top: 1px solid color-mix(in srgb, var(--crit) 22%, var(--line));
+  background: var(--crit-soft); color: var(--crit); font-size: max(var(--font-min-readable, 14.5px), 12px); line-height: 1.5; }
+
+.rc-source-cfg { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 13px 15px;
+  border-top: 1px solid var(--line-2); background: var(--surface-1); }
+.rc-cfg-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; }
+.rc-cfg-actions small { color: var(--ink-4); font-size: max(var(--font-min-readable, 14.5px), 12px); line-height: 1.5; }
+.rc-probe { grid-column: 1 / -1; display: flex; align-items: center; gap: 7px; padding: 8px 11px;
+  border-radius: 9px; font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.rc-probe svg { width: 13px; height: 13px; flex: 0 0 auto; }
+.rc-probe.ok { background: var(--ok-soft); color: var(--ok); }
+.rc-probe.bad { background: var(--crit-soft); color: var(--crit); }
+
+/* Search and filters. */
+.rc-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.rc-search { flex: 1 1 320px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--line);
+  border-radius: 10px; padding: 8px 12px; background: var(--surface); }
+.rc-search:focus-within { border-color: var(--accent); box-shadow: var(--focus); }
+/* Constrain unsized SVG icons through their container. */
+.rc-search svg { width: 15px; height: 15px; flex: 0 0 auto; color: var(--ink-4); }
+.rc-search input { border: 0; outline: 0; flex: 1; background: transparent; font-size: max(var(--font-min-readable, 14.5px), 13px); color: var(--ink); }
+.rc-source .btn svg, .rc-row .btn svg { width: 14px; height: 14px; }
+.rc-filters { display: flex; gap: 6px; }
+.rc-filters button { border: 1px solid var(--line); background: var(--surface); border-radius: 999px;
+  padding: 4px 12px; font-size: max(var(--font-min-readable, 14.5px), 12px); color: var(--ink-3); cursor: pointer; }
+.rc-filters button.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+/* Repository list. */
+.rc-list { border: 1px solid var(--line); border-radius: 13px; overflow: hidden; background: var(--surface);
+  box-shadow: var(--shadow-sm); }
+.rc-row { display: flex; align-items: center; gap: 12px; padding: 10px 15px; border-bottom: 1px solid var(--line-2); }
+.rc-row:last-child { border-bottom: 0; }
+.rc-row:hover { background: var(--surface-1); }
+.rc-name { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.rc-name b { display: flex; align-items: center; gap: 6px; font-size: max(var(--font-min-readable, 14.5px), 13px); font-weight: 620; }
+.rc-name b a { display: none; color: var(--ink-4); line-height: 0; }
+.rc-name b a svg { width: 12px; height: 12px; }
+.rc-row:hover .rc-name b a { display: inline-flex; }
+.rc-name b a:hover { color: var(--accent); }
+.rc-name small { font: 14.5px var(--mono); color: var(--ink-4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rc-branch { font-style: normal; font-size: max(var(--font-min-readable, 14.5px), 12px); color: var(--ink-3); background: var(--surface-2);
+  border-radius: 6px; padding: 2px 8px; font-family: var(--mono); }
+.rc-flag { font-style: normal; font-size: max(var(--font-min-readable, 14.5px), 12px); color: var(--warn); background: var(--warn-soft);
+  border-radius: 6px; padding: 2px 8px; }
+
+.rc-map-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.rc-map-grid label { display: flex; flex-direction: column; gap: 4px; font-size: max(var(--font-min-readable, 14.5px), 12px); color: var(--ink-3); }
+.rc-map-note { margin-top: 12px; font-size: max(var(--font-min-readable, 14.5px), 12px); color: var(--ink-4); }
+
+@media (max-width: 860px) {
+  .rc-sources { grid-template-columns: 1fr; }
+  .rc-source-cfg { grid-template-columns: 1fr; }
+}
+
+/* Use consistent lightweight surfaces for sources, filters, and catalog rows. */
+.rc-page{gap:14px}
+.rc-page>.pg-panel-head{padding-bottom:4px}
+.rc-head-stats{margin-left:auto}
+.rc-head-stats>div{min-width:100px;padding:9px 13px;border-color:var(--line);background:var(--surface)}
+.rc-sources{gap:10px}
+.rc-source{border-color:var(--line);background:color-mix(in srgb,var(--surface) 96%,var(--bg))}
+.rc-source-main{min-height:72px;padding:12px 14px}
+.rc-toolbar{padding:7px;border-radius:12px}
+.rc-toolbar.is-empty{opacity:.7}
+.app .content .rc-toolbar.is-empty{display:none}
+.rc-search{min-height:36px;padding:7px 11px}
+.rc-filters{padding:3px;border:1px solid var(--line);border-radius:9px;background:var(--surface-1)}
+.rc-filters button{min-height:29px;border-color:transparent;border-radius:7px;padding:4px 10px;background:transparent}
+.rc-filters button:hover{background:var(--surface)}
+.rc-filters button.on{border-color:color-mix(in srgb,var(--accent) 25%,var(--line));background:var(--accent-soft);box-shadow:0 2px 7px -5px var(--accent)}
+.rc-filters button:disabled{cursor:not-allowed;opacity:.72}
+.rc-list{padding:6px;background:color-mix(in srgb,var(--surface) 84%,var(--bg))}
+.rc-row{min-height:62px;margin:4px 0;padding:10px 12px;border:1px solid transparent;border-radius:10px;background:var(--surface)}
+.rc-row:hover{border-color:color-mix(in srgb,var(--accent) 20%,var(--line));background:var(--surface);box-shadow:0 5px 14px -13px rgba(28,62,101,.45)}
+.rc-row .btn{flex:0 0 auto}
+.rc-name b a{display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:7px;background:var(--surface-1)}
+.rc-name b a:hover{background:var(--accent-soft)}
+.rc-page>.pg-panel-head>div:first-child>small,.rc-page>.pg-panel-head>div:first-child>p{display:none}
+.rc-page>.pg-panel-head{min-height:56px;padding:10px 14px;align-items:center}
+.rc-page>.pg-panel-head h3{margin:0;font-size:max(var(--font-min-readable, 14.5px), 14px)}
+.rc-list{max-height:var(--viewport-list-height,calc(100vh - 330px));min-height:0;overflow:auto;padding:0;background:var(--surface)}
+.rc-table-head,.rc-row{display:grid;grid-template-columns:64px minmax(220px,1.8fr) minmax(120px,.75fr) minmax(90px,.55fr) minmax(180px,.8fr);align-items:center;gap:16px}
+.rc-table-head{position:sticky;top:0;z-index:2;min-height:40px;padding:0 14px;border-bottom:1px solid var(--surface-3);background:var(--surface-2);color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:700;letter-spacing:.04em;box-shadow:inset 0 -2px 0 color-mix(in srgb,var(--accent) 22%,transparent)}
+.rc-row{min-height:56px;margin:0;padding:8px 14px;border:0;border-bottom:1px solid var(--line-2);border-radius:0}
+.rc-row:last-child{border-bottom:0}.rc-row-state{min-width:0}.rc-flag.active{color:var(--ok);background:var(--ok-soft)}.rc-row-actions{display:flex;justify-content:flex-end}.rc-row-actions .btn{font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.rc-table-head>span:nth-child(n+3),.rc-row>.rc-branch,.rc-row>.rc-row-state{text-align:center;justify-self:center}
+.rc-table-head>span:last-child{justify-self:start;text-align:left}
+.rc-name b{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rc-row>.rc-branch{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rc-list:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media(max-width:760px){.rc-table-head{display:none}.rc-row{grid-template-columns:34px minmax(0,1fr) auto;gap:8px}.rc-row .rc-branch{grid-column:2}.rc-row-state{grid-column:3;grid-row:1}.rc-row-actions{grid-column:2/4;justify-content:flex-start}}
+@media(max-width:760px){.rc-head-stats{width:100%;margin-left:0}.rc-toolbar{align-items:stretch;flex-direction:column}.rc-search{flex-basis:auto}.rc-filters{overflow:auto}}
+
+/*
+ * Keep empty catalogs compact with a guidance banner followed by filters; retain
+ * source-card layouts when sources exist.
+ */
+.rc-sources:has(> .pg-empty) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 84px;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.rc-sources:has(> .pg-empty) .pg-empty {
+  display: grid;
+  grid-template-columns: 38px minmax(0, auto);
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 12px;
+  padding: 0;
+  text-align: left;
+}
+.rc-sources:has(> .pg-empty) .pg-empty > span {
+  grid-row: 1 / -1;
+  margin: 0;
+}
+.rc-sources:has(> .pg-empty) .pg-empty > b { align-self: end; }
+.rc-sources:has(> .pg-empty) .pg-empty > p {
+  align-self: start;
+  max-width: 620px;
+  margin: 3px 0 0;
+}
+.rc-page > .rc-toolbar .admin-filter-options { margin-left: 0; }
+@media (max-width: 760px) {
+  .rc-sources:has(> .pg-empty) { justify-content: flex-start; }
+  .rc-sources:has(> .pg-empty) .pg-empty { grid-template-columns: 34px minmax(0, 1fr); }
+}
+
+/* Share search width and scroll boundaries across mapping and catalog pages. */
+.rm-toolbar{min-width:0}
+.rm-search{width:min(100%,520px);flex:1 1 360px}
+.rm-map-groups{display:flex;flex-direction:column;gap:12px;max-height:var(--viewport-list-height,none)}
+.rm-map-list{flex:0 1 auto;min-height:100px;padding:14px 16px;overflow:auto}
+.rm-map-list>.empty{padding:24px 16px}
+@media(max-width:760px){.rm-search{width:100%;flex-basis:auto}}

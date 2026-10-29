@@ -1,0 +1,145 @@
+/*
+ * Static capability illustration based on the reference operations login page; preserve
+ * the existing authentication form.
+ */
+:root .public-login.workbench-login {
+  --p-paper: #fff; --p-surface: #fff; --p-ink: #1b2232; --p-copy: #606878;
+  --p-muted: #687080; --p-line: #e7e9f0; --p-teal: #65578a;
+  --p-teal-soft: #f1eef8; --login-action: #151922; --login-action-hover: #303342;
+  --login-on-action: #fff; --login-mesh: #a49bbf; --login-field: rgb(245 246 250 / 76%);
+  --login-panel: rgb(255 255 255 / 82%); --login-halo: #eee9f8;
+  position: relative; isolation: isolate; display: grid;
+  grid-template-columns: minmax(0, 1fr) 424px;
+  grid-template-rows: auto 1fr; align-items: center; column-gap: 80px; row-gap: 32px;
+  width: 100%; min-height: 100vh; min-height: 100svh;
+  padding: 30px max(32px, calc((100vw - 1120px) / 2)) 38px;
+  color: var(--p-ink); background: var(--p-paper); color-scheme: light;
+}
+.workbench-login::before {
+  content: ""; position: absolute; z-index: -1; inset: 0; pointer-events: none;
+  background: radial-gradient(ellipse at 62% 39%, var(--login-halo), transparent 42%),
+    radial-gradient(ellipse at 25% 75%, color-mix(in srgb, var(--login-halo) 50%, transparent), transparent 38%);
+  opacity: .7;
+}
+.workbench-login .login-workbench-header {
+  grid-column: 1 / -1; display: flex; align-items: center; gap: 20px; min-width: 0;
+}
+.workbench-login .login-workbench-header .public-brand { gap: 11px; }
+.workbench-login .login-workbench-header .logo-box { width: 44px; height: 44px; }
+.workbench-login .login-workbench-header .public-brand b { font-size: 25px; letter-spacing: 0; }
+.workbench-login .login-platform-caption { color: var(--p-muted); font-size: 15px; }
+.workbench-login .login-workbench-header .public-login-back { margin-left: auto; align-self: center; font-size: 14.5px; }
+.public-login.workbench-login .login-story {
+  display: block; min-width: 0; min-height: 0; padding: 12px 0;
+  background: transparent; border: 0; border-radius: 0; overflow: visible;
+}
+.workbench-login .login-capability-orbit { position: relative; width: 100%; max-width: 520px; aspect-ratio: 1.04; margin: 0 auto; }
+.workbench-login .login-orbit-mesh { position: absolute; inset: 0; width: 100%; height: 100%; color: var(--login-mesh); pointer-events: none; }
+.workbench-login .login-orbit-core {
+  position: absolute; z-index: 1; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 76%; text-align: center; pointer-events: none;
+}
+.workbench-login .login-orbit-core::before {
+  content: ""; position: absolute; z-index: -1; inset: -40px -8px;
+  background: radial-gradient(ellipse, var(--p-paper) 34%, color-mix(in srgb, var(--p-paper) 85%, transparent) 48%, transparent 72%);
+}
+.public-login.workbench-login .login-story h2 {
+  margin: 0; color: var(--p-ink); font-size: clamp(28px, 2.7vw, 40px);
+  font-weight: 600; line-height: 1.45; letter-spacing: -.02em;
+}
+:root:not([lang="zh-CN"]) .workbench-login .login-orbit-core h2 {
+  font-size: clamp(23px, 2.2vw, 32px); line-height: 1.3;
+}
+.workbench-login .login-orbit-label {
+  position: absolute; z-index: 2; transform: translate(-50%, -50%);
+  padding: 8px 10px; width: max-content; max-width: 40%; border-radius: 6px; background: var(--login-panel);
+  color: var(--p-copy); font-size: 17px; font-weight: 500; text-align: center; line-height: 1.5;
+}
+.workbench-login .orbit-conversation { left: 50%; top: 11%; }
+.workbench-login .orbit-team { left: 84%; top: 31%; }
+.workbench-login .orbit-automation { left: 81%; top: 70%; }
+.workbench-login .orbit-plugins { left: 52%; top: 89%; }
+.workbench-login .orbit-memory { left: 20%; top: 70%; }
+.workbench-login .orbit-permissions { left: 17%; top: 32%; }
+.workbench-login .login-orbit-description {
+  max-width: 440px; margin: 22px auto 0; color: var(--p-muted); font-size: 14.5px;
+  line-height: 1.9; text-align: center;
+}
+.public-login.workbench-login .public-login-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 0; }
+.public-login.workbench-login .login-card {
+  display: flex; flex-direction: column; width: 100%; max-width: none; margin: 0;
+  padding: 38px 36px 30px; border: 1px solid color-mix(in srgb, var(--p-line) 45%, transparent);
+  border-radius: 22px; background: var(--login-panel);
+  box-shadow: -18px -18px 48px -14px rgb(36 44 68 / 16%); backdrop-filter: blur(28px);
+}
+.public-login.workbench-login .login-head { margin-bottom: 26px; }
+.public-login.workbench-login .login-head .public-eyebrow { font-size: 14.5px; letter-spacing: .04em; color: var(--p-muted); }
+.public-login.workbench-login .login-title { margin: 8px 0; font-size: 30px; line-height: 1.4; font-weight: 600; }
+.public-login.workbench-login .login-sub { color: var(--p-copy); font-size: 15px; line-height: 1.8; }
+.public-login.workbench-login .login-field { margin-bottom: 20px; }
+.public-login.workbench-login .f-lbl { margin-bottom: 9px; color: var(--p-copy); font-weight: 500; }
+.public-login.workbench-login .login-field .f-in {
+  height: 49px; min-height: 49px; padding: 11px 14px; border: 1px solid var(--p-line);
+  border-radius: 10px; color: var(--p-ink); background: var(--login-field); box-shadow: none; font-size: 15px;
+}
+.public-login.workbench-login .login-field .f-in::placeholder { color: var(--p-muted); }
+.public-login.workbench-login .login-field .f-in:focus {
+  border-color: var(--p-teal); background: var(--p-surface); box-shadow: 0 0 0 3px color-mix(in srgb, var(--p-teal) 10%, transparent);
+}
+.public-login.workbench-login .login-password input { padding-right: 68px; }
+.public-login.workbench-login .login-password-toggle { color: var(--p-muted); border-radius: 7px; }
+:root .public-login.workbench-login .login-submit {
+  min-height: 49px; margin-top: 7px; border: 1px solid var(--login-action); border-radius: 10px;
+  background: var(--login-action); color: var(--login-on-action); box-shadow: 0 5px 12px rgb(21 25 34 / 8%); font-size: 15px;
+}
+:root .public-login.workbench-login .login-submit:hover:not(:disabled) { background: var(--login-action-hover); border-color: var(--login-action-hover); }
+.public-login.workbench-login .login-help { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--p-line); font-size: 14.5px; }
+.workbench-login .public-login-footer { padding: 20px 8px 0; color: var(--p-muted); font-size: 14.5px; line-height: 1.8; }
+.public-login.workbench-login .login-mobile-brand { display: none; }
+
+:root[data-theme="dark"] .public-login.workbench-login {
+  --p-paper: #0b1018; --p-surface: #151b25; --p-ink: #e8ecf2; --p-copy: #c1cad8;
+  --p-muted: #a4b1c5; --p-line: #354052; --p-teal: #c1b6df; --p-teal-soft: #302b42;
+  --login-action: #e8ecf2; --login-action-hover: #fff; --login-on-action: #151922;
+  --login-mesh: #9e91c0; --login-field: rgb(26 33 47 / 80%);
+  --login-panel: rgb(21 27 37 / 86%); --login-halo: #30283f; color-scheme: dark;
+}
+@media (min-width: 1600px) {
+  :root .public-login.workbench-login { grid-template-columns: minmax(0, 1fr) 440px; }
+  .public-login.workbench-login .login-card { padding: 44px 40px 34px; }
+}
+@media (max-width: 1100px) {
+  :root .public-login.workbench-login { grid-template-columns: minmax(0, 1fr) 380px; column-gap: 36px; }
+  .public-login.workbench-login .login-card { padding: 34px 28px 26px; }
+  .workbench-login .login-orbit-label { font-size: 14.5px; padding: 6px; }
+  .workbench-login .login-platform-caption { display: none; }
+}
+@media (max-width: 760px) {
+  :root .public-login.workbench-login { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto 1fr; gap: 24px; padding: 24px 22px 30px; }
+  .workbench-login .login-workbench-header { width: 100%; max-width: 440px; margin: 0 auto; gap: 10px; flex-wrap: wrap; }
+  .workbench-login .login-workbench-header .logo-box { width: 34px; height: 34px; }
+  .workbench-login .login-workbench-header .public-brand b { font-size: 22px; }
+  .workbench-login .login-workbench-header .public-login-back { margin-left: 0; width: 100%; }
+  .public-login.workbench-login .login-story { width: 100%; max-width: 440px; margin: 0 auto; padding: 0; }
+  .workbench-login .login-capability-orbit {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;
+    max-width: 340px; aspect-ratio: auto; padding-top: 172px;
+  }
+  .workbench-login .login-orbit-mesh { height: 172px; }
+  .workbench-login .login-orbit-core { top: 80px; width: 100%; }
+  .workbench-login .login-orbit-label {
+    position: static; transform: none; width: auto; max-width: none; min-height: 38px;
+    display: flex; align-items: center; justify-content: center; padding: 6px 8px;
+    border: 1px solid var(--p-line); font-size: 14.5px;
+  }
+  .public-login.workbench-login .login-story h2 { font-size: 26px; }
+  .workbench-login .login-orbit-description { margin-top: 8px; }
+  .public-login.workbench-login .public-login-main { width: 100%; max-width: 440px; margin: 0 auto; }
+  .public-login.workbench-login .login-card { padding: 30px 28px 24px; border-radius: 18px; }
+}
+@media (max-width: 380px) {
+  :root .public-login.workbench-login { padding: 20px 18px 26px; }
+  .public-login.workbench-login .login-card { padding: 27px 22px 22px; }
+  .public-login.workbench-login .login-title { font-size: 27px; }
+  .public-login.workbench-login .login-story h2 { font-size: 23px; }
+}

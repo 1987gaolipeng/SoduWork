@@ -1,0 +1,597 @@
+/* SoduWork plugin governance workspace.
+   One stable directory, one decision surface, one release rail. */
+.plugin-page {
+  min-width: 0;
+  color: var(--ink);
+}
+
+.plugin-admin-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 56px;
+  padding: 9px 20px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 95%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.plugin-admin-toolbar > nav,
+.plugin-admin-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.plugin-admin-toolbar > nav {
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-1);
+}
+
+.plugin-admin-toolbar > nav button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--ink-3);
+  background: transparent;
+  font: inherit;
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  cursor: pointer;
+}
+
+.plugin-admin-toolbar > nav button:hover {
+  color: var(--ink);
+}
+
+.plugin-admin-toolbar > nav button.on {
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 1px 4px rgba(28, 44, 68, .08);
+}
+
+.plugin-admin-toolbar > nav b {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  color: var(--ink-3);
+  background: var(--surface-2);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  font-weight: 620;
+  text-align: center;
+}
+
+.plugin-admin-actions .btn {
+  min-height: 34px;
+  padding: 6px 11px;
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+}
+
+.plugin-admin-actions .plugin-icon-action {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  padding: 0;
+}
+
+.plugin-admin-actions .plugin-icon-action svg {
+  width: 15px;
+  height: 15px;
+}
+
+.plugin-admin-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-right: 5px;
+  color: var(--ink-3);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  white-space: nowrap;
+}
+
+.plugin-admin-status i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--auto-green);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--auto-green) 10%, transparent);
+}
+
+.plugin-page .plugin-workbench-v2 {
+  grid-template-columns: 334px minmax(0, 1fr);
+  min-height: 660px;
+  margin: 12px 20px 24px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 6px 22px rgba(32, 47, 68, .045);
+}
+
+.plugin-page .plugin-directory {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  max-height: calc(100vh - 190px);
+  padding: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-1) 92%, var(--surface));
+}
+
+.plugin-directory-head {
+  display: grid;
+  gap: 11px;
+  padding: 17px 15px 11px;
+}
+
+.plugin-directory-head > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.plugin-directory-head > div b {
+  color: var(--ink-2);
+  font-size: max(var(--font-min-readable, 14.5px), 14px);
+  font-weight: 640;
+}
+
+.plugin-directory-head > div span {
+  color: var(--ink-4);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+}
+
+.plugin-directory-head label {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 37px;
+  padding: 0 32px 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.plugin-directory-head label:focus-within {
+  border-color: color-mix(in srgb, var(--auto-blue) 40%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--auto-blue) 8%, transparent);
+}
+
+.plugin-directory-head label > svg {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin-right: 8px;
+  color: var(--ink-4);
+}
+
+.plugin-directory-head input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: var(--ink);
+  background: transparent;
+  font: inherit;
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+}
+
+.plugin-directory-head label > button {
+  position: absolute;
+  right: 7px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: var(--ink-4);
+  background: transparent;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.plugin-directory-head label > button:hover {
+  color: var(--ink);
+  background: var(--surface-1);
+}
+
+.plugin-directory-filters {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  padding: 0 11px 11px;
+  border-bottom: 1px solid var(--line);
+}
+
+.plugin-directory-filters button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--ink-3);
+  background: transparent;
+  font: inherit;
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  cursor: pointer;
+}
+
+.plugin-directory-filters button:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+}
+
+.plugin-directory-filters button.on {
+  color: var(--auto-blue);
+  background: var(--surface);
+  box-shadow: 0 1px 4px rgba(32, 48, 70, .055);
+}
+
+.plugin-directory-filters span {
+  color: var(--ink-4);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+}
+
+.plugin-directory-list {
+  min-height: 0;
+  padding: 8px 9px 14px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-color: color-mix(in srgb, var(--ink-4) 42%, transparent) transparent;
+  scrollbar-width: thin;
+}
+
+.plugin-directory-list > button {
+  position: relative;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 68px;
+  margin: 0 0 3px;
+  padding: 10px 10px 10px 12px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--ink);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.plugin-directory-list > button::before {
+  position: absolute;
+  inset: 10px auto 10px 0;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: transparent;
+  content: "";
+}
+
+.plugin-directory-list > button:hover {
+  background: color-mix(in srgb, var(--surface) 74%, transparent);
+}
+
+.plugin-directory-list > button.on {
+  border-color: color-mix(in srgb, var(--auto-blue) 14%, var(--line));
+  background: color-mix(in srgb, var(--auto-blue) 4%, var(--surface));
+}
+
+.plugin-directory-list > button.on::before {
+  background: var(--auto-blue);
+}
+
+.plugin-directory-list .plugin-glyph {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  font-size: max(var(--font-min-readable, 14.5px), 13px);
+  font-weight: 640;
+}
+
+.plugin-directory-list > button[data-state="attention"] .plugin-glyph {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, var(--surface));
+}
+
+.plugin-directory-list > button[data-state="available"] .plugin-glyph {
+  color: var(--auto-green);
+  background: color-mix(in srgb, var(--auto-green) 9%, var(--surface));
+}
+
+.plugin-directory-list .plugin-index-copy,
+.plugin-directory-list .plugin-directory-item-title {
+  min-width: 0;
+}
+
+.plugin-directory-list .plugin-directory-item-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.plugin-directory-list .plugin-directory-item-title b {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: max(var(--font-min-readable, 14.5px), 12.5px);
+  font-weight: 620;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-directory-list .plugin-index-copy > small {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--ink-4);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-directory-list .plugin-index-copy small i {
+  color: color-mix(in srgb, var(--ink-4) 65%, transparent);
+  font-style: normal;
+}
+
+.plugin-directory-list .plugin-index-copy small em {
+  flex: none;
+  margin-left: 2px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  color: var(--auto-blue);
+  background: color-mix(in srgb, var(--auto-blue) 7%, transparent);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  font-style: normal;
+}
+
+.plugin-directory-state {
+  flex: none;
+  max-width: 78px;
+  padding: 2px 6px;
+  overflow: hidden;
+  border-radius: 6px;
+  color: var(--ink-3);
+  background: var(--surface-2);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  font-weight: 560;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-directory-state.state-available {
+  color: var(--auto-green);
+  background: color-mix(in srgb, var(--auto-green) 8%, var(--surface));
+}
+
+.plugin-directory-state.state-attention {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, var(--surface));
+}
+
+.plugin-directory-empty {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  min-height: 240px;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.plugin-directory-empty svg {
+  width: 20px;
+  height: 20px;
+  margin-bottom: 9px;
+}
+
+.plugin-directory-empty b {
+  color: var(--ink-2);
+  font-size: max(var(--font-min-readable, 14.5px), 13px);
+  font-weight: 620;
+}
+
+.plugin-directory-empty span {
+  margin-top: 5px;
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+}
+
+.plugin-page .plugin-canvas-v2 {
+  min-width: 0;
+  min-height: 660px;
+  padding: 22px 25px 30px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.plugin-page .plugin-titlebar-v3 {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 248px;
+  align-items: start;
+  gap: 14px;
+  padding: 0 0 18px;
+}
+
+.plugin-titlebar-v3 .plugin-logo-v2 {
+  width: 42px;
+  height: 42px;
+  border: 1px solid color-mix(in srgb, var(--auto-blue) 10%, var(--line));
+  border-radius: 10px;
+  color: var(--auto-blue);
+  background: color-mix(in srgb, var(--auto-blue) 8%, var(--surface));
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.plugin-titlebar-v3 .plugin-logo-v2 i {
+  display: none;
+}
+
+.plugin-title-kicker {
+  display: block;
+  overflow: hidden;
+  color: var(--ink-4);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  letter-spacing: .015em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-titlebar-v3 .plugin-title-copy h3 {
+  margin: 4px 0 3px;
+  color: var(--ink);
+  font-size: 20px;
+  font-weight: 670;
+  line-height: 1.25;
+}
+
+.plugin-titlebar-v3 .plugin-title-copy p {
+  max-width: 760px;
+  margin: 0;
+  color: var(--ink-3);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  line-height: 1.55;
+}
+
+.plugin-title-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.plugin-title-meta > span {
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--ink-3);
+  background: var(--surface-1);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+}
+
+.plugin-title-meta .enterprise-flow {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 9%, var(--surface));
+}
+
+.plugin-title-meta .state-ready {
+  color: var(--auto-green);
+  background: color-mix(in srgb, var(--auto-green) 8%, var(--surface));
+}
+
+.plugin-title-meta .state-quarantined {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 9%, var(--surface));
+}
+
+.plugin-title-meta .state-revoked {
+  color: var(--crit);
+  background: color-mix(in srgb, var(--crit) 7%, var(--surface));
+}
+
+.plugin-title-aside {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding-left: 16px;
+  border-left: 1px solid var(--line);
+}
+
+.plugin-title-state {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.plugin-title-state small {
+  color: var(--ink-4);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  letter-spacing: .08em;
+}
+
+.plugin-title-state b {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-2);
+  font-size: max(var(--font-min-readable, 14.5px), 12.5px);
+  font-weight: 640;
+}
+
+.plugin-title-state b i {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--ink-4);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--ink-4) 10%, transparent);
+}
+
+.plugin-title-state > span {
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  line-height: 1.45;
+  text-overflow: ellipsis;
+}
+
+.plugin-title-state.tone-ready b i {
+  background: var(--auto-green);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--auto-green) 10%, transparent);
+}
+
+.plugin-title-state.tone-live b i {
+  background: var(--auto-blue);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--auto-blue) 10%, transparent);
+}
+
+.plugin-title-state.tone-attention b i {
+  background: var(--warn);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn) 11%, transparent);
+}
+
+.plugin-title-state.tone-danger b i {
+  background: var(--crit);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--crit) 9%, transparent);
+}
+
+.plugin-titlebar-v3 .plugin-title-actions {
+  display: flex;
+  justify-content: flex-start;
+  gap: 7px;
+  flex-wrap: nowrap;
+}
+
+.plugin-titlebar-v3 .plugin-title-actions .btn {
+  min-height: 32px;
+  padding: 5px 9px;
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  white-space: nowrap;
+}

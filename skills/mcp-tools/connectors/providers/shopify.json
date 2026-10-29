@@ -1,0 +1,167 @@
+{
+  "schemaVersion": 1,
+  "id": "shopify",
+  "name": "Shopify",
+  "category": "电商",
+  "description": "Shopify 通用连接器：店铺信息、产品 GraphQL 查询、创建产品。基于 GraphQL Admin API 2026-10（当前稳定版本），X-Shopify-Access-Token 鉴权，仅 {SHOP}.myshopify.com。",
+  "officialDocs": [
+    "https://shopify.dev/docs/api/admin-graphql",
+    "https://shopify.dev/docs/api/usage/versioning",
+    "https://shopify.dev/docs/api/admin-graphql/latest/queries/shop",
+    "https://shopify.dev/docs/api/admin-graphql/latest/queries/products",
+    "https://shopify.dev/docs/api/admin-graphql/latest/mutations/productCreate"
+  ],
+  "authDocs": [
+    "https://shopify.dev/docs/apps/build/authentication-authorization/access-tokens"
+  ],
+  "baseUrl": "https://{SHOP}.myshopify.com",
+  "fields": [
+    {
+      "key": "SHOP",
+      "label": "店铺子域（yourstore.myshopify.com 的 yourstore）",
+      "secret": false,
+      "required": true,
+      "pattern": "^[a-z0-9][a-z0-9-]{0,58}[a-z0-9]$",
+      "example": ""
+    },
+    {
+      "key": "SHOP_TOKEN",
+      "label": "Admin API Access Token（shpat_ 开头，Custom App）",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "header",
+    "tokenKey": "SHOP_TOKEN",
+    "header": "X-Shopify-Access-Token"
+  },
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "tools": [
+    {
+      "name": "get_shop",
+      "description": "固定 GraphQL 查询 shop：店铺名、主域名、套餐名。无分页。出处：https://shopify.dev/docs/api/admin-graphql/latest/queries/shop",
+      "method": "POST",
+      "path": "/admin/api/2026-10/graphql.json",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "body": {
+        "query": "{ shop { name primaryDomain { url } plan { displayName } } }"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_products",
+      "description": "固定 GraphQL 查询 products(first,after,query)。分页：Relay cursor（pageInfo.hasNextPage/endCursor），first 上限 250。variables 仅 $param 引用。出处：https://shopify.dev/docs/api/admin-graphql/latest/queries/products",
+      "method": "POST",
+      "path": "/admin/api/2026-10/graphql.json",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "first": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 250,
+            "default": 50,
+            "description": "每页条数"
+          },
+          "after": {
+            "type": "string",
+            "description": "上一页 endCursor",
+            "maxLength": 10000
+          },
+          "query": {
+            "type": "string",
+            "description": "产品过滤表达式（如 status:active）",
+            "maxLength": 10000
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "body": {
+        "query": "query Products($first: Int!, $after: String, $query: String) { products(first: $first, after: $after, query: $query) { nodes { id title status updatedAt } pageInfo { hasNextPage endCursor } } }",
+        "variables": {
+          "first": "$first",
+          "after": "$after",
+          "query": "$query"
+        }
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_product",
+      "description": "固定 GraphQL 查询 product(id:$id)。无分页。出处：https://shopify.dev/docs/api/admin-graphql/latest/queries/product",
+      "method": "POST",
+      "path": "/admin/api/2026-10/graphql.json",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^gid://shopify/Product/[0-9]+$",
+            "description": "产品全局 ID（gid://shopify/Product/…）",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "query": "query Product($id: ID!) { product(id: $id) { id title status totalInventory createdAt } }",
+        "variables": {
+          "id": "$id"
+        }
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_product",
+      "description": "固定 GraphQL mutation productCreate(product:{title})。写入操作：运行前必须获得用户明确授权。出处：https://shopify.dev/docs/api/admin-graphql/latest/mutations/productCreate",
+      "method": "POST",
+      "path": "/admin/api/2026-10/graphql.json",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "产品标题"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "query": "mutation ProductCreate($title: String!) { productCreate(product: { title: $title }) { product { id } userErrors { field message } } }",
+        "variables": {
+          "title": "$title"
+        }
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "API 版本 2026-10 为官方版本页确认的当前稳定版本（旧 2024-10 已过期）。",
+    "鉴权头为 X-Shopify-Access-Token（非 Bearer）；Custom App token 在店铺后台生成并勾选权限。",
+    "GraphQL 仅固定 query 白名单 + $param 变量；REST Admin API 未收录（官方已主推 GraphQL）。",
+    "create_product 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

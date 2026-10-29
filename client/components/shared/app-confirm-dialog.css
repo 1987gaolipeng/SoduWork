@@ -1,0 +1,25 @@
+/*
+ * Themed confirmation dialog using shared panel tokens, 14px corners, and 34px buttons.
+ * Separate the primary question from its consequences.
+ */
+.app-confirm-dialog{border:0;padding:0;background:transparent;width:min(440px,calc(100vw - 32px));}
+.app-confirm-dialog[open]{position:fixed!important;top:50%!important;left:50%!important;right:auto!important;bottom:auto!important;margin:0!important;transform:translate(-50%,-50%)!important;max-height:calc(100vh - 32px);border:0;padding:0;background:transparent;}
+.app-confirm-dialog:focus,.app-confirm-dialog:focus-visible{outline:none;}
+.app-confirm-dialog::backdrop{background:rgba(16,22,32,.34);backdrop-filter:blur(2px);}
+.app-confirm-card{display:flex;flex-direction:column;gap:14px;padding:22px 24px 18px;border:1px solid var(--line);border-radius:14px;background:var(--bg-0);box-shadow:var(--shadow-xl);}
+.app-confirm-head{display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.app-confirm-title{margin:0;color:var(--ink);font-size:18px;font-weight:650;line-height:1.3;}
+.app-confirm-close{width:28px;height:28px;padding:0;border:0;border-radius:7px;background:transparent;color:var(--ink-3);font-size:22px;line-height:1;cursor:pointer;}
+.app-confirm-close:hover{background:var(--bg-1);color:var(--ink);}
+.app-confirm-message{margin:0;color:var(--ink);font-size:max(var(--font-min-readable, 14.5px), 15px);font-weight:600;line-height:1.5;word-break:break-word;}
+.app-confirm-detail{margin:0;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 13px);line-height:1.6;word-break:break-word;}
+.app-confirm-foot{display:flex;justify-content:flex-end;gap:9px;margin-top:2px;}
+.app-confirm-foot button{height:34px;padding:0 16px;border:0;border-radius:8px;font:600 14.5px/1 var(--font-ui);cursor:pointer;}
+.app-confirm-cancel{background:var(--bg-2);color:var(--ink-2);}
+.app-confirm-cancel:hover{background:var(--bg-3);color:var(--ink);}
+.app-confirm-submit{background:var(--accent);color:#fff;}
+.app-confirm-submit:hover:not(:disabled){background:var(--accent-hover);}
+.app-confirm-submit.app-confirm-danger{background:#e5484d;}
+.app-confirm-submit.app-confirm-danger:hover:not(:disabled){background:#d13438;}
+.app-confirm-foot button:disabled{border-color:var(--line);background:var(--bg-3);color:var(--ink-4);cursor:default;}
+.app-confirm-foot button:focus-visible,.app-confirm-close:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 65%,transparent);outline-offset:2px;}

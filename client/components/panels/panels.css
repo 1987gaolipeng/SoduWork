@@ -1,0 +1,466 @@
+/* AI delivery acceptance: render files in the attachment area and link service or website results through artifactUrl. */
+.detail-art{display:flex;flex-direction:column;gap:8px}
+.art-link{
+  display:flex;align-items:center;gap:8px;
+  padding:9px 11px;border-radius:var(--r-md);
+  background:var(--accent-soft);border:1px solid var(--line-2);
+  color:var(--accent);font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));font-weight:600;
+  text-decoration:none;overflow:hidden;
+}
+.art-link:hover{background:var(--accent-soft-2)}
+.art-ico{flex-shrink:0;width:14px;height:14px}
+.art-txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.art-review-btn{
+  align-self:flex-start;padding:7px 16px;border:none;border-radius:var(--r-sm);
+  background:var(--accent);color:#fff;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));font-weight:600;
+  font-family:inherit;
+}
+.art-review-btn:hover{filter:brightness(1.06)}
+.art-review-btn:disabled{opacity:.6;cursor:default}
+/* Review confirmation matches the administration timeline's artifact.reviewed event. */
+.art-reviewed{
+  display:flex;align-items:center;gap:6px;
+  align-self:flex-start;padding:6px 12px;border-radius:var(--r-sm);
+  background:rgba(34,193,151,.12);color:var(--s-done);
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));font-weight:600;
+}
+.art-reviewed .ico{width:15px;height:15px;vertical-align:0}
+
+/*
+ * Task deliverables show complete filenames, authors, and open actions in full-width rows;
+ * uploaded reference materials remain separate.
+ */
+.art-files{display:flex;flex-direction:column;gap:7px}
+.art-file{
+  display:flex;align-items:center;gap:11px;width:100%;
+  padding:10px 12px;border:1px solid var(--line-2);border-radius:var(--r-md);
+  background:var(--bg-1);font-family:inherit;text-align:left;
+  transition:border-color .14s,background-color .14s,transform .1s;
+}
+.art-file:hover{border-color:var(--accent);background:var(--accent-soft);box-shadow:0 2px 8px -3px rgba(30,50,92,.26)}
+.art-file:active{transform:scale(.99)}
+.art-file-ico{display:flex;line-height:1;flex-shrink:0;color:var(--ink-4)}
+.art-file-ico .ico{width:20px;height:20px;vertical-align:0}
+.art-file-main{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+/* Allow enough line height to avoid clipping glyph descenders. */
+.art-file-main b{
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-base) * var(--font-scale,1)));line-height:1.5;font-weight:600;color:var(--ink);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.art-file-main i{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));line-height:1.4;font-style:normal;color:var(--ink-4)}
+.art-file-go{flex-shrink:0;color:var(--ink-5);font-size:max(var(--font-min-readable, 14.5px), 13px)}
+.art-file:hover .art-file-go{color:var(--accent)}
+
+/*
+ * Outputs originate in the execution machine's workspace. Only returned artifacts count as
+ * delivered; the machine and path help recover missing outputs manually.
+ */
+.art-runner{display:flex;align-items:center;gap:7px;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));color:var(--ink-4);line-height:1.7}
+.art-runner .ico{width:14px;height:14px;color:var(--ink-5)}
+.art-runner b{color:var(--ink-3);font-weight:700}
+/* Stack the explanation and recovery details above right-aligned actions to avoid cramped text wrapping. */
+.art-stall{display:flex;flex-direction:column;gap:7px;padding:10px 12px;border-radius:var(--r-md);
+  background:color-mix(in srgb,var(--s-doing) 9%,transparent);
+  border:1px solid color-mix(in srgb,var(--s-doing) 24%,transparent);
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));color:var(--ink-2);line-height:1.7}
+.art-stall .ico{width:15px;height:15px;flex-shrink:0;margin-right:5px;vertical-align:-3px;color:var(--s-doing)}
+.art-stall>span{min-width:0}
+.art-stall b{font-weight:700}
+.art-stall-sub{margin-top:3px;color:var(--ink-4);word-break:break-all}
+.art-stall code{display:inline-block;font-family:var(--font-mono);font-size:max(var(--font-min-readable, 14.5px), 11px);
+  padding:1px 5px;border-radius:4px;background:var(--bg-2);color:var(--ink-3);word-break:break-all}
+/*
+ * Code delivery uses progress, success, and critical colors. Never change geometry on
+ * hover: edge hit-testing can repeatedly toggle Electron mouse passthrough and cause
+ * flickering.
+ */
+.art-code{display:flex;flex-direction:column;gap:7px;padding:10px 12px;border-radius:var(--r-md);
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));color:var(--ink-2);line-height:1.7}
+.art-code>span{min-width:0}
+.art-code b{font-weight:700}
+.art-code .ico{width:15px;height:15px;flex-shrink:0;margin-right:5px;vertical-align:-3px}
+.art-code code{display:inline-block;font-family:var(--font-mono);font-size:max(var(--font-min-readable, 14.5px), 11px);
+  padding:1px 5px;border-radius:4px;background:var(--bg-2);color:var(--ink-3);word-break:break-all}
+.art-code-c{margin-top:3px;color:var(--ink-3);word-break:break-all}
+/* Code delivery lists project and Git references with aligned labels. */
+.art-code-row{display:flex;gap:8px;margin-top:4px;color:var(--ink-3);min-width:0}
+.art-code-row i{flex-shrink:0;width:34px;color:var(--ink-4);font-style:normal}
+.art-git{color:var(--accent);word-break:break-all;text-decoration:none}
+.art-git:hover{text-decoration:underline}
+/* Collapse extra deliverables to keep the section a compact overview. */
+.art-more{
+  margin-top:6px;border:1px dashed var(--line-3);background:none;color:var(--ink-4);
+  border-radius:var(--r-sm);padding:3px 10px;font-family:inherit;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));
+  transition:color .16s ease,border-color .16s ease;
+}
+.art-more:hover{border-color:var(--accent);color:var(--accent)}
+/* Preserve Git output line breaks in a bounded monospace region. */
+.art-code-tail{margin-top:6px;padding:6px 8px;border-radius:var(--r-sm);background:var(--bg-2);
+  color:var(--ink-4);font-family:var(--font-mono);font-size:max(var(--font-min-readable, 14.5px), 11px);line-height:1.5;
+  white-space:pre-wrap;max-height:76px;overflow:auto}
+.art-code.is-committed{background:color-mix(in srgb,var(--s-doing) 9%,transparent);
+  border:1px solid color-mix(in srgb,var(--s-doing) 24%,transparent)}
+.art-code.is-committed .ico{color:var(--s-doing)}
+.art-code.is-merged{background:color-mix(in srgb,var(--s-done) 10%,transparent);
+  border:1px solid color-mix(in srgb,var(--s-done) 26%,transparent)}
+.art-code.is-merged .ico{color:var(--s-done)}
+/* Use the existing --s-critical token and its fallback. */
+.art-code.is-conflict{background:color-mix(in srgb,var(--s-critical,#e0475e) 9%,transparent);
+  border:1px solid color-mix(in srgb,var(--s-critical,#e0475e) 26%,transparent)}
+.art-code.is-conflict .ico{color:var(--s-critical,#e0475e)}
+
+
+
+
+
+
+.detail-title,.detail-note,.detail-sub,.detail-sec-hint,.col-label-hint,.dtl-v,.tl-note,.tl-actor,.chat-bubble,.chat-b-sub,.chat-sys-txt,.chat-who,.cmt-body,.cmt-meta,.cmt-strip-last,.art-txt,.art-file-main,.art-stall,.art-runner,.art-tip,.art-code,.att-fname,.att-fsize,.att-name-ov,.fwd-prev-t,.fwd-prev-b,.fwd-sub,.fwd-nm,.live-txt,.live-main,.live-list,.np-item,.tlp-item{
+  -webkit-user-select:text;user-select:text;
+}
+
+
+
+
+
+.np-item,.tlp-item{cursor:default}
+/* Use theme colors for text selection. */
+::selection{background:var(--accent-soft-2);color:var(--ink)}
+
+/* Reject a deliverable and request rework. */
+.art-reject-btn{padding:7px 14px;border:1px solid var(--line);border-radius:var(--r-sm);
+  background:var(--bg-0);color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));font-weight:600;
+  font-family:inherit;transition:border-color .14s,color .14s}
+.art-reject-btn:hover{border-color:var(--s-cancel);color:var(--s-cancel)}
+.art-reject{margin-top:9px;padding:10px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--bg-0)}
+.reject-in{width:100%;box-sizing:border-box;resize:vertical;padding:8px 10px;
+  border:1px solid var(--line-2);border-radius:var(--r-md);background:var(--bg-1);
+  color:var(--ink);font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));font-family:inherit;line-height:1.6;outline:none}
+.reject-in:focus{border-color:var(--accent);background:var(--bg-0);box-shadow:0 0 0 3px var(--accent-soft)}
+.reject-acts{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
+.reject-tip{flex:1;min-width:0;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));color:var(--s-cancel);line-height:1.6}
+.reject-btn1,.reject-btn2{padding:6px 13px;border-radius:var(--r-sm);font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));
+  font-weight:700;font-family:inherit;border:1px solid transparent}
+.reject-btn1{background:var(--accent);color:#fff}
+.reject-btn1:hover:not(:disabled){filter:brightness(1.06)}
+.reject-btn2{background:var(--bg-0);color:var(--ink-3);border-color:var(--line)}
+.reject-btn2:hover:not(:disabled){border-color:var(--ink-4);color:var(--ink-2)}
+.reject-btn1:disabled,.reject-btn2:disabled{opacity:.6;cursor:default}
+.chat-sys-txt .sys-ico.is-bad{color:var(--s-cancel)}
+
+/* Read-only execution activity: messages, commands, and files. */
+.art-live-btn{padding:7px 13px;border:1px solid var(--line);border-radius:var(--r-sm);
+  background:var(--bg-0);color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));font-weight:600;
+  font-family:inherit;transition:border-color .14s,color .14s,background-color .14s}
+.art-live-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+/*
+ * Overlay the progress column to provide enough width for commands and paths.
+ */
+.ai-live{position:absolute;right:16px;top:56px;bottom:16px;width:430px;z-index:5;
+  display:flex;flex-direction:column;
+  border:1px solid var(--line);border-radius:var(--r-lg);
+  background:var(--bg-0);box-shadow:0 14px 40px rgba(0,0,0,.16);overflow:hidden}
+.live-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line-2);
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));color:var(--ink)}
+.live-head b{font-weight:700}
+.live-state{margin-left:auto;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));color:var(--ink-4)}
+.live-list{flex:1;min-height:0;overflow-y:auto;padding:8px 6px;background:var(--bg-1)}
+.live-list::-webkit-scrollbar{width:6px}
+.live-list::-webkit-scrollbar-thumb{background:var(--line-3);border-radius:99px}
+.live-row{display:flex;align-items:flex-start;gap:7px;padding:4px 7px;border-radius:var(--r-sm);
+  font-size:max(var(--font-min-readable, 14.5px), 11.5px);line-height:1.65;color:var(--ink-3)}
+.live-row+.live-row{margin-top:1px}
+.live-t{flex:0 0 auto;color:var(--ink-5);font-variant-numeric:tabular-nums}
+.live-ico{width:13px;height:13px;flex-shrink:0;margin-top:2px;color:var(--ink-5)}
+.live-main{flex:1;min-width:0;display:flex;flex-direction:column}
+.live-main b{font-size:max(var(--font-min-readable, 14.5px), 10.5px);font-weight:700;color:var(--ink-4);line-height:1.6}
+.live-txt{word-break:break-word;white-space:pre-wrap}
+.live-row.is-say{background:var(--accent-soft)}
+.live-row.is-say .live-ico,.live-row.is-say b{color:var(--accent)}
+.live-row.is-say .live-txt{color:var(--ink-2)}
+.live-row.is-do .live-txt{font-family:var(--font-mono);font-size:max(var(--font-min-readable, 14.5px), 11px);color:var(--ink-2)}
+.live-row.is-out .live-txt{color:var(--ink-4);font-family:var(--font-mono);font-size:max(var(--font-min-readable, 14.5px), 10.5px)}
+.live-row.is-me{background:var(--accent-soft-2)}
+.live-row.is-me .live-ico,.live-row.is-me b{color:var(--accent)}
+.live-row.is-me .live-txt{color:var(--ink)}
+/* Send a message to the agent; this is not a TTY input. */
+.live-say{display:flex;gap:7px;padding:8px 10px;border-top:1px solid var(--line-2);background:var(--bg-0)}
+.live-in{flex:1;min-width:0;box-sizing:border-box;padding:7px 11px;border:1px solid var(--line);
+  border-radius:9px;background:var(--bg-0);color:var(--ink);font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));font-family:inherit}
+.live-in:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.live-send{flex:0 0 auto;border:none;border-radius:9px;background:var(--accent);color:#fff;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));font-weight:700;padding:0 14px;font-family:inherit}
+.live-send:disabled{opacity:.6;cursor:default}
+.live-foot{padding:6px 10px;border-top:1px solid var(--line-2);font-size:max(var(--font-min-readable, 14.5px), 10.5px);color:var(--ink-5);line-height:1.6}
+
+.art-remind-btn{align-self:flex-end;padding:6px 14px;border:none;border-radius:var(--r-sm);
+  background:var(--s-doing);color:#fff;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));font-weight:700;
+  font-family:inherit}
+.art-remind-btn:hover:not(:disabled){filter:brightness(1.06)}
+.art-remind-btn:disabled{opacity:.65;cursor:default}
+
+/* Keep review and dispatch actions in one compact row. */
+.art-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:2px}
+.art-ai-btn{
+  padding:7px 14px;border:1px solid var(--line);border-radius:var(--r-sm);
+  background:var(--bg-0);color:var(--ink-2);
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));font-weight:600;font-family:inherit;
+  transition:border-color .14s,color .14s,background-color .14s;
+}
+.art-ai-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.art-ai-btn:disabled{opacity:.6;cursor:default}
+/* Show pending delivery as a status action that still allows redispatch. */
+.art-ai-btn.is-running{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.art-tip{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));color:var(--ink-4);line-height:1.6}
+
+/* Forwarding offers AI executors and colleagues in one panel. Show the executor CLI kind or colleague availability. */
+.detail-fwd{
+  position:absolute;top:15px;right:52px;z-index:3;
+  display:flex;align-items:center;gap:5px;
+  height:30px;padding:0 11px;
+  border:1px solid var(--line);border-radius:var(--r-full);
+  background:var(--bg-0);color:var(--ink-3);
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));font-weight:600;font-family:inherit;
+  transition:border-color .14s,color .14s,background-color .14s;
+}
+.detail-fwd .ico{width:14px;height:14px}
+.detail-fwd:hover,.detail-fwd.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.detail-fwd.is-running{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.detail-fwd.is-running .ico{animation:fwdPulse 1.8s ease-in-out infinite}
+@keyframes fwdPulse{0%,100%{opacity:1}50%{opacity:.45}}
+.fwd-pop{
+  position:absolute;top:52px;right:16px;z-index:6;width:344px;
+  padding:12px;border:1px solid var(--line);border-radius:var(--r-lg);
+  background:var(--bg-0);box-shadow:0 14px 40px rgba(0,0,0,.16);
+}
+.fwd-head{display:flex;align-items:center;margin-bottom:9px;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));color:var(--ink)}
+.fwd-head b{font-weight:700}
+.fwd-x{margin-left:auto;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 13px);line-height:1;padding:2px 4px}
+.fwd-x:hover{color:var(--ink-2)}
+/* Forward to an agent or a colleague. */
+.fwd-tabs{display:flex;gap:4px;padding:3px;margin-bottom:9px;border-radius:var(--r-md);background:var(--bg-2)}
+.fwd-tab{flex:1;display:flex;align-items:center;justify-content:center;gap:5px;
+  padding:6px 0;border:none;border-radius:var(--r-sm);background:transparent;
+  color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));font-weight:700;font-family:inherit;
+  transition:background-color .14s,color .14s}
+.fwd-tab .ico{width:14px;height:14px}
+.fwd-tab.on{background:var(--bg-0);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.07)}
+.fwd-list{display:flex;flex-direction:column;gap:6px;max-height:206px;overflow-y:auto}
+.fwd-msg{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));color:var(--ink-4);padding:8px 2px;line-height:1.7}
+.fwd-msg.is-err{color:var(--s-cancel)}
+.fwd-msg a{color:var(--accent);text-decoration:underline}
+.fwd-grp{font-size:max(var(--font-min-readable, 14.5px), 10px);font-weight:700;letter-spacing:.06em;color:var(--ink-5);padding:3px 2px 1px;line-height:1.7}
+.fwd-item{display:flex;align-items:center;gap:9px;width:100%;text-align:left;font-family:inherit;
+  padding:8px 10px;border:1px solid var(--line-2);border-radius:var(--r-md);background:var(--bg-1);
+  transition:border-color .14s,background-color .14s,transform .1s}
+.fwd-item:hover{border-color:var(--accent);background:var(--accent-soft);box-shadow:0 2px 8px -3px rgba(30,50,92,.26)}
+.fwd-item:active{transform:scale(.99)}
+.fwd-item.is-disabled{opacity:.5;cursor:default}
+.fwd-item.is-disabled:hover{border-color:var(--line-2);background:var(--bg-1);box-shadow:none}
+.fwd-ava{flex:0 0 auto;width:28px;height:28px;border-radius:50%;background:var(--bg-3);color:var(--ink-2);
+  display:flex;align-items:center;justify-content:center}
+.fwd-ava .ico{width:16px;height:16px}
+.fwd-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.fwd-nm{display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));font-weight:700;color:var(--ink);line-height:1.6}
+.fwd-tag{font-style:normal;font-size:max(var(--font-min-readable, 14.5px), 10px);font-weight:700;line-height:1.7;padding:0 6px;border-radius:99px;
+  background:var(--bg-3);color:var(--ink-3)}
+.fwd-tag.cli-claude{background:rgba(217,119,87,.14);color:#c2673c}
+.fwd-tag.cli-codebuddy{background:rgba(88,120,240,.13);color:#4a6ae0}
+.fwd-tag.cli-opencode{background:rgba(34,160,120,.14);color:#1f8f68}
+.fwd-tag.cli-codex{background:rgba(70,82,96,.14);color:#46525f}
+.fwd-def{font-style:normal;font-size:max(var(--font-min-readable, 14.5px), 10px);font-weight:700;line-height:1.7;padding:0 6px;border-radius:99px;
+  background:var(--accent-soft-2);color:var(--accent)}
+.fwd-state{font-size:max(var(--font-min-readable, 14.5px), 10px);font-weight:700;line-height:1.7;padding:0 6px;border-radius:99px}
+.fwd-state.is-busy{background:color-mix(in srgb,var(--s-doing) 14%,transparent);color:var(--s-doing)}
+.fwd-state.is-off{background:var(--bg-3);color:var(--ink-4)}
+.fwd-sub{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));font-style:normal;color:var(--ink-4);line-height:1.5;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fwd-go{flex:0 0 auto;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));font-weight:600;color:var(--ink-5)}
+.fwd-item:hover .fwd-go{color:var(--accent)}
+/* Show the resolved project path so users can confirm the execution directory. */
+.fwd-repo{margin-top:9px}
+.fwd-repo-sel{width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid var(--line-2);
+  border-radius:var(--r-md);background:var(--bg-1);color:var(--ink);
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));font-family:inherit;outline:none}
+.fwd-repo-sel:focus{border-color:var(--accent);background:var(--bg-0);box-shadow:0 0 0 3px var(--accent-soft)}
+.fwd-flow{display:flex;align-items:center;gap:6px;margin-top:6px;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));color:var(--ink-4);line-height:1.7;user-select:none}
+.fwd-flow input{margin:0;}
+
+
+.fwd-note{width:100%;box-sizing:border-box;margin-top:9px;resize:vertical;
+  padding:8px 10px;border:1px solid var(--line-2);border-radius:var(--r-md);
+  background:var(--bg-1);color:var(--ink);font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));font-family:inherit;line-height:1.6;outline:none}
+.fwd-note:focus{border-color:var(--accent);background:var(--bg-0);box-shadow:0 0 0 3px var(--accent-soft)}
+/* Preview the exact content that will be forwarded. */
+.fwd-foot{display:flex;align-items:baseline;gap:8px;margin-top:7px;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));color:var(--ink-4);line-height:1.7}
+.fwd-foot span{flex:1;min-width:0}
+.fwd-prev-a{flex:0 0 auto;color:var(--accent);font-weight:600}
+.fwd-prev-a:hover{text-decoration:underline}
+.fwd-prev{margin-top:8px;padding:9px 10px;border:1px solid var(--line-2);border-radius:var(--r-md);
+  background:var(--bg-1);max-height:240px;overflow-y:auto}
+.fwd-prev-h{font-size:max(var(--font-min-readable, 14.5px), 10px);font-weight:700;letter-spacing:.06em;color:var(--ink-5);margin-bottom:5px;line-height:1.7}
+.fwd-prev-t{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));font-weight:700;color:var(--ink);line-height:1.6;margin-bottom:5px;word-break:break-word}
+.fwd-prev-b{margin:0;font-family:var(--font-mono);font-size:max(var(--font-min-readable, 14.5px), 11.5px);line-height:1.75;
+  color:var(--ink-3);white-space:pre-wrap;word-break:break-word}
+.art-tip{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));color:var(--ink-4);flex:1;min-width:0}
+
+/* Inline status and priority selectors below the title expand only while the user is choosing a value. */
+.dchip-edit{transition:box-shadow .13s,filter .13s}
+.dchip-edit:hover{filter:brightness(.97);box-shadow:0 0 0 2px var(--accent-soft)}
+.dchip-edit::after{content:'▾';margin-left:5px;font-size:max(var(--font-min-readable, 14.5px), 9px);opacity:.55}
+.chip-pick{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 2px}
+
+/* Expand deliverable screenshots. */
+.art-file .art-thumb{width:34px;height:34px;object-fit:cover;border-radius:6px;display:block}
+.art-file.is-img .art-file-ico{width:34px;height:34px}
+.img-viewer{position:fixed;inset:0;z-index:120;display:none;
+  flex-direction:column;background:rgba(15,18,26,.84)}
+.img-viewer.show{display:flex}
+.iv-bar{display:flex;align-items:center;gap:10px;padding:10px 14px;color:#fff;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)))}
+.iv-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.iv-btn{padding:5px 12px;border:1px solid rgba(255,255,255,.35);border-radius:var(--r-sm);
+  background:rgba(255,255,255,.12);color:#fff;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));font-weight:600;
+  font-family:inherit}
+.iv-btn:hover{background:rgba(255,255,255,.22)}
+.iv-x{padding:5px 10px}
+.iv-body{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;padding:0 18px 18px}
+.iv-img{max-width:100%;max-height:100%;object-fit:contain;border-radius:10px;
+  box-shadow:0 18px 50px rgba(0,0,0,.45);background:#fff}
+
+/* dispatch popup layout hardening */
+.fwd-pop{
+  flex-direction:column;
+  box-sizing:border-box;
+  max-height:min(720px,calc(100vh - 28px));
+  overflow:hidden;
+}
+.fwd-head,.fwd-tabs,.fwd-actions{
+  flex:0 0 auto;
+}
+.fwd-head{
+  min-height:34px;
+}
+.fwd-head small{
+  display:block;
+  margin-top:3px;
+  color:var(--ink-4);
+  font-size:max(var(--font-min-readable, 14.5px), 11px);
+  font-weight:400;
+  line-height:1.45;
+}
+.fwd-scroll{
+  min-height:0;
+  flex:1 1 auto;
+  overflow-y:auto;
+  overflow-x:hidden;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  padding-right:2px;
+}
+.fwd-list{
+  max-height:none;
+  min-height:0;
+  overflow:visible;
+}
+.fwd-mate-list{
+  display:flex;
+  flex-direction:column;
+  gap:7px;
+}
+.fwd-mate-group{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+.fwd-mate-group-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:4px 2px 1px;
+  color:var(--ink-3);
+  font-size:max(var(--font-min-readable, 14.5px), 11px);
+  font-weight:700;
+}
+.fwd-mate-group-head small{
+  color:var(--ink-5);
+  font-weight:600;
+}
+.fwd-mate-toolbar{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.fwd-mate-search{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  min-height:38px;
+  padding:0 11px;
+  border:1px solid var(--line-2);
+  border-radius:var(--r-md);
+  background:var(--bg-1);
+}
+.fwd-mate-search input{
+  min-width:0;
+  flex:1;
+  border:0;
+  outline:0;
+  background:transparent;
+  color:var(--ink);
+  font:inherit;
+}
+.fwd-mate-filters{
+  display:flex;
+  gap:6px;
+}
+.fwd-mate-filter{
+  padding:6px 10px;
+  border:1px solid transparent;
+  border-radius:var(--r-sm);
+  background:transparent;
+  color:var(--ink-4);
+  font:600 14.5px/1.3 inherit;
+}
+.fwd-mate-filter.on{
+  border-color:var(--accent);
+  background:var(--accent-soft);
+  color:var(--accent);
+}
+.fwd-mate-summary{
+  padding:8px 10px;
+  border-radius:var(--r-sm);
+  background:var(--bg-2);
+  color:var(--ink-4);
+  font-size:max(var(--font-min-readable, 14.5px), 11px);
+  line-height:1.55;
+}
+.fwd-actions{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin-top:9px;
+  padding-top:9px;
+  border-top:1px solid var(--line-2);
+}
+.fwd-status{
+  min-width:0;
+  flex:1;
+  color:var(--s-cancel);
+  font-size:max(var(--font-min-readable, 14.5px), 11px);
+  line-height:1.45;
+}
+@media (max-height:620px){
+  .fwd-pop{max-height:calc(100vh - 16px);}
+}
+@media (max-width:520px){
+  .fwd-pop{
+    left:8px;
+    right:8px;
+    top:44px;
+    width:auto;
+  }
+}

@@ -1,0 +1,265 @@
+/*
+ * Shared layout safety contract for the SoduWork admin shell.
+ * Keep overflow local and scrollable; never hide the whole page overflow.
+ */
+.app,
+.app .sidebar,
+.app .main,
+.app .topbar,
+.app .topbar-inner,
+.app .content {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.app .content > *,
+.app .topbar-inner > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Keep normal document scrolling for real content, without stacking a large
+   footer spacer on top of the last module's own trailing margin. */
+.app .content { padding-bottom: 24px; }
+.app .content > :last-child { margin-bottom: 0; }
+
+/* Long deployment versions must never establish the sidebar width. */
+.app .side-context {
+  min-width: 0;
+  max-width: calc(100% - 22px);
+  overflow: hidden;
+}
+.app .side-context > div {
+  width: 0;
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 0;
+  overflow: hidden;
+}
+.app .side-context b,
+.app .side-context small {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Toolbars wrap actions while explanations remain readable. */
+.app .toolbar,
+.app .filterbar,
+.app .srcfilter,
+.app .seg {
+  min-width: 0;
+  max-width: 100%;
+}
+.app .toolbar > * {
+  min-width: 0;
+}
+.app .toolbar > .hintline {
+  flex: 1 1 320px;
+  max-width: 920px;
+  overflow-wrap: anywhere;
+}
+.app .toolbar > .ml-auto {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+.app .srcfilter,
+.app .seg {
+  flex-wrap: wrap;
+}
+.app .srcpill,
+.app .seg .s {
+  max-width: 100%;
+}
+
+/* Wide data remains reachable inside its own surface. */
+.app .tablewrap {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.app .tablewrap > .tscroll,
+.app .tscroll {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.app :where(.card, .ops-panel, .ugc-panel, .intcard, .tcard, .pj-card, .flowcard, .mcp-card, .sch-card) {
+  min-width: 0;
+  max-width: 100%;
+}
+.app :where(img, video, canvas, iframe) {
+  max-width: 100%;
+}
+
+/* Operations: a long Agent inventory is metadata, not a new column. */
+.app[data-screen="operations"] .ops-runner-list,
+.app[data-screen="operations"] .ops-runner-list article {
+  min-width: 0;
+  max-width: 100%;
+}
+.app[data-screen="operations"] .ops-runner-list article {
+  overflow: hidden;
+}
+.app[data-screen="operations"] .ops-runner-name {
+  width: 0;
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 0;
+  overflow: hidden;
+}
+.app[data-screen="operations"] .ops-runner-name > b,
+.app[data-screen="operations"] .ops-runner-name > span {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Usage ledger: model identifiers stay on one clipped metadata line. */
+.app[data-screen="usage"] .ugc-recent-list,
+.app[data-screen="usage"] .ugc-recent-list > div {
+  min-width: 0;
+  max-width: 100%;
+}
+.app[data-screen="usage"] .ugc-recent-list > div {
+  overflow: hidden;
+}
+.app[data-screen="usage"] .ugc-recent-list > div > span {
+  width: 0;
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 0;
+  overflow: hidden;
+}
+.app[data-screen="usage"] .ugc-recent-list > div > span > b,
+.app[data-screen="usage"] .ugc-recent-list > div > span > small {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Repository URLs and skill descriptions are untrusted-length content. */
+.app[data-screen="repositories"] .rc-source-main {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+.app[data-screen="repositories"] .rc-source-id {
+  width: 0;
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 0;
+  overflow: hidden;
+}
+.app[data-screen="repositories"] .rc-source-id > small {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app[data-screen="skills"] :where(.cap-admin, .cap-admin-status, .cap-admin-bar, .cap-admin-body, .cap-admin-grid, .cap-admin-card),
+.app[data-screen="capabilities"] :where(.cap-admin, .cap-admin-status, .cap-admin-bar, .cap-admin-body, .cap-admin-grid, .cap-admin-card) {
+  min-width: 0;
+  max-width: 100%;
+}
+.app[data-screen="skills"] .cap-admin-card-main,
+.app[data-screen="skills"] .cap-admin-submit-list span,
+.app[data-screen="capabilities"] .cap-admin-card-main,
+.app[data-screen="capabilities"] .cap-admin-submit-list span {
+  width: 0;
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 0;
+  overflow: hidden;
+}
+.app[data-screen="skills"] :where(.cap-admin-card-desc, .cap-admin-submit-list small, .sk-desc),
+.app[data-screen="capabilities"] :where(.cap-admin-card-desc, .cap-admin-submit-list small, .sk-desc) {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.app[data-screen="skills"] .cap-admin-submit-list small,
+.app[data-screen="capabilities"] .cap-admin-submit-list small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Work catalog keeps its dense table inside the local horizontal scroller. */
+.app[data-screen="work-catalog"] .wc-scenario-grid {
+  min-width: 980px;
+}
+
+/* Transforming a full-size pseudo element inflates scroll geometry in Chromium. */
+.app[data-screen="insights"] :where(.oi-sk-head, .oi-sk-card, .oi-sk-panel)::after {
+  transform: none;
+  background-size: 220% 100%;
+  animation: oi-shimmer-safe 1.4s linear infinite;
+}
+@keyframes oi-shimmer-safe {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app[data-screen="insights"] :where(.oi-sk-head, .oi-sk-card, .oi-sk-panel)::after {
+    animation: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .app .toolbar > .hintline {
+    flex-basis: 100%;
+    max-width: 100%;
+  }
+  .app .toolbar > .ml-auto {
+    margin-left: 0;
+  }
+}
+
+/* Shared admin rhythm. Keep the work area on one readable measure so that
+   cards on different screens share the same left and right edges. */
+.app {
+  grid-template-columns: 232px minmax(0, 1fr);
+}
+.app .topbar-inner,
+.app .content {
+  width: 100%;
+  max-width: 100%;
+}
+.app .topbar-inner {
+  min-height: 68px;
+  padding: 8px 28px;
+}
+.app .content {
+  padding: 22px 28px 24px;
+}
+.app :where(.card, .tablewrap, .intcard, .tcard, .stat, .pj-card,
+  .flowcard, .subdept, .mcp-card, .sch-card, .gov-section, .ops-panel,
+  .oi-panel) {
+  border-radius: 12px;
+}
+.app :where(.gov-page, .oi-page, .ops-page) {
+  gap: 16px;
+}
+.app :where(.gov-section > header, .ops-panel > header,
+  .oi-page .oi-panel > .oi-panel-header) {
+  min-height: 56px;
+  padding-block: 11px;
+}
+
+@media (max-width: 1100px) {
+  .app { grid-template-columns: 1fr; }
+  .app .content { padding-inline: 24px; }
+}
+@media (max-width: 760px) {
+  .app .content { padding: 18px 16px 36px; }
+}

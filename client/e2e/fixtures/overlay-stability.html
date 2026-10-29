@@ -1,0 +1,21 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../theme/variables.css">
+<link rel="stylesheet" href="../../components/pet/pet.css">
+<style>body{margin:0;background:transparent}#pet{left:180px;top:120px;right:auto;bottom:auto}#taskArea{display:none}</style>
+</head><body>
+<div id="pet" class="pet"><svg id="petSvg" class="pet-svg" viewBox="0 0 72 72"></svg><div class="pet-shadow"></div></div>
+<div id="taskArea"></div>
+<script>
+const pet=document.getElementById('pet'),taskArea=document.getElementById('taskArea');
+const cfg={character:'soduwork',gender:'boy',remind:'off'};const tasks=[];
+window.shapeCalls=[];window.errors=[];
+window.soduWorkAPI={setOverlayShape:r=>shapeCalls.push(r),setIgnoreMouseEvents(){},setAlwaysOnTop(){}};
+addEventListener('error',e=>errors.push(e.message));
+function saveCfg(){}
+</script>
+<script src="../../components/pet/characters.js"></script>
+<script src="../../components/pet/pet-ui.js"></script>
+<script src="../../components/pet/pet-dock.js"></script>
+<script src="../../core/electron.js"></script>
+<script>updatePet();</script>
+</body></html>

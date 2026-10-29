@@ -1,0 +1,10 @@
+.cap-platform-connect{display:grid;gap:16px}.cap-platform-intro,.cap-platform-note{color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 13px);line-height:1.7;margin:0}.cap-platform-state{padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--bg-1);font-weight:600}.cap-platform-state[data-state="connected"]{color:var(--accent)}#capPlatformAuth[hidden]{display:none}#capPlatformAuth{display:grid;gap:12px;justify-items:start}#capPlatformCode{font-size:22px;letter-spacing:3px;padding:8px 12px;background:var(--bg-1);border-radius:8px}.cap-platform-status p{color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 13px)}
+#capPlatformHint{margin:0;color:var(--ink-3);line-height:1.7;overflow-wrap:anywhere}#capPlatformAuthOpen{max-width:100%;white-space:normal;text-align:start}
+
+.cap-modal-foot:has(#capPlatformStart){flex-wrap:wrap}
+
+#capPlatformQr{width:240px;max-width:100%;height:auto;background:#fff;border:12px solid #fff;border-radius:12px;justify-self:center}#capPlatformQr[hidden]{display:none}
+
+.cap-connector-save:not([hidden]){display:flex;align-items:center;gap:10px;color:var(--ink-3);font-size:var(--font-min-readable,12px)}
+
+.cap-platform-disconnect{padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--bg-1)}.cap-platform-disconnect[hidden]{display:none}.cap-platform-disconnect>b{font-weight:500}.cap-platform-disconnect p{margin:8px 0 12px;color:var(--ink-3);line-height:1.7}.cap-platform-disconnect>div{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="azure"><meta charset="utf-8">
+<title>网页批量注释 · 隔离回归</title>
+<link rel="stylesheet" href="../../theme/variables.css">
+<link rel="stylesheet" href="../../components/panels/work-composer.css">
+<link rel="stylesheet" href="../../components/panels/panels-chat.css">
+<link rel="stylesheet" href="../../components/panels/conversation-attachments.css">
+<style>*{box-sizing:border-box}body{margin:0;color:var(--ink-1);background:var(--bg-1);font:14px var(--font-ui)}#cpChat{height:100vh}.nchat{height:100%}</style>
+<div id="cpChat"></div>
+<script>
+window.errors=[];addEventListener('error',e=>errors.push(e.message));addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
+window.notices=[];window.petSay=value=>notices.push(value);
+window.SoduWorkAPI={online:true,myModels:async()=>({usable:[]}),listTeammates:async()=>[],pluginCatalog:async()=>({items:[]})};
+</script>
+<script src="../../vendor/markdown/marked.umd.js"></script>
+<script src="../../vendor/markdown/purify.min.js"></script>
+<script src="../../components/panels/work-intent.js"></script>
+<script src="../../components/panels/work-composer.js"></script>
+<script src="../../components/panels/conversation-attachments.js"></script>
+<script src="../../components/panels/chat-dom-patch.js"></script>
+<script src="../../components/panels/panels-chat-tools.js"></script>
+<script src="../../components/panels/panels-chat-status.js"></script>
+<script src="../../components/panels/chat-output-links.js"></script>
+<script src="../../components/panels/chat-workbench-annotations.js"></script>
+<script src="../../components/panels/chat-workspace-info.js"></script>
+<script src="../../components/panels/chat-workspace-split.js"></script>
+<script src="../../components/panels/chat-workspace-controls.js"></script>
+<script src="../../components/panels/panels-chat-workspace.js"></script>
+<script src="../../components/panels/chat-collaboration-store.js"></script>
+<script src="../../components/panels/chat-session-controls.js"></script>
+<script src="../../components/panels/chat-composer-controls.js"></script>
+<script src="../../components/panels/chat-task-start.js"></script>
+<script src="../../components/panels/chat-task-controller.js"></script>
+<script src="../../components/panels/chat-context-meter.js"></script>
+<script src="../../components/panels/chat-scroll-follow.js"></script>
+<script src="../../components/panels/chat-markdown.js"></script>
+<script src="../../components/panels/chat-acceptance-results.js"></script>
+<script src="../../components/panels/chat-message-renderer.js"></script>
+<script src="../../components/panels/chat-send-queue.js"></script>
+<script src="../../components/panels/chat-work-intent.js"></script>
+<script src="../../components/panels/chat-draft-recovery.js"></script>
+<script src="../../components/panels/chat-composer-bindings.js"></script>
+<script src="../../components/panels/chat-session-controller.js"></script>
+<script src="../../components/panels/panels-chat.js"></script>
+<script>window.fixtureReady=true;</script>
+</html>

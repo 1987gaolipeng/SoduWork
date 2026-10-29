@@ -1,0 +1,197 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* ---------------------------------------------------------------- Development workflow card */
+/* Keep overflow hidden (inherited from .card) so rounded corners clip the header gradient. */
+.df-card{margin-bottom:16px;padding:0}
+/* Primary card heading with accent, description, and actions. */
+.df-head{display:flex;align-items:center;gap:12px;padding:14px 16px;
+  border-bottom:1px solid var(--line-2);
+  background:linear-gradient(180deg,var(--accent-soft),transparent)}
+.df-head-ico{flex:0 0 32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;
+  background:var(--accent);color:var(--on-accent);box-shadow:var(--shadow-sm)}
+.df-head-ico svg{width:17px;height:17px}
+.df-head-txt{min-width:0;display:flex;flex-direction:column;gap:2px}
+.df-title{font-size:14.5px;font-weight:700;color:var(--ink);line-height:1.2}
+/* Keep subtitles readable through sufficient size and contrast. */
+.df-sub{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-2);line-height:1.45}
+.df-acts{display:flex;align-items:center;gap:8px;margin-left:auto;flex-shrink:0}
+
+/*
+ * Distribute workflow summary steps evenly across the card with subtle separators.
+ */
+.df-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));padding:14px 16px}
+.df-cell{display:flex;flex-direction:column;gap:4px;padding:7px 14px 7px 0;min-width:0}
+.df-cell + .df-cell{padding-left:14px;border-left:1px solid var(--line)}
+.df-k{font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:700;letter-spacing:.4px;color:var(--ink-4);text-transform:uppercase}
+.df-v{font-size:max(var(--font-min-readable, 14.5px), 12.5px);color:var(--ink-2);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px}
+.df-v.mono{font-family:var(--mono);font-size:max(var(--font-min-readable, 14.5px), 12px)}
+/* Identify explicit repository overrides with the accent color. */
+.df-v.own{color:var(--accent)}
+.df-v.off{color:var(--ink-4);font-weight:500}
+
+/* Footer explanation and fixed-rule disclosure. */
+.df-foot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:11px 16px;border-top:1px solid var(--line);background:var(--surface-2)}
+/*
+ * Let explanatory text flex while keeping the disclosure action from shrinking.
+ */
+.df-note{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-3);line-height:1.55;min-width:0;flex:1}
+.df-note code,.df-locked code{font-family:var(--mono);font-size:max(var(--font-min-readable, 14.5px), 12px);
+  background:var(--surface-2);border-radius:5px;padding:1px 5px}
+/* Present fixed rules with neutral locked styling rather than warning colors. */
+.df-lock-btn{display:inline-flex;align-items:center;gap:5px;font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-2);
+  background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:4px 12px;
+  white-space:nowrap;flex-shrink:0;
+  cursor:default;transition:border-color .13s,color .13s}
+.df-lock-btn svg{width:13px;height:13px}
+.df-lock-btn:hover{border-color:var(--accent);color:var(--accent)}
+.df-locked{padding:10px 16px 14px;border-top:1px solid var(--line-2);
+  font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-2);line-height:1.9;background:var(--surface-1)}
+.df-locked b{color:var(--ink)}
+.df-locked-i{display:block;padding-left:2px}
+.df-locked-i::before{content:'✕';color:var(--crit);font-weight:700;margin-right:7px}
+
+/* Repository editor summary. */
+/* Use compact summary rows with the same workflow colors. */
+.repo-auto .df-line{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.repo-auto .df-title{font-size:max(var(--font-min-readable, 14.5px), 13px)}
+.df-sum{display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+.df-chip{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-2);background:var(--surface-2);border:1px solid transparent;
+  border-radius:20px;padding:2px 10px;white-space:nowrap;max-width:230px;overflow:hidden;text-overflow:ellipsis}
+.df-chip.own{color:var(--accent);background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 22%,transparent)}
+
+/* Configuration dialog. */
+.df-sec{display:flex;align-items:center;gap:9px;margin:16px 0 10px;padding-bottom:7px;
+  border-bottom:1px solid var(--line-2)}
+.df-sec:first-child{margin-top:0}
+.df-sec-t{font-size:max(var(--font-min-readable, 14.5px), 12.5px);font-weight:700;color:var(--ink);position:relative;padding-left:10px}
+.df-sec-t::before{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);
+  width:3px;height:12px;border-radius:2px;background:var(--accent)}
+.df-sec-d{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-4)}
+.df-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(238px,1fr));gap:12px 14px}
+.df-field{display:flex;flex-direction:column;gap:5px;min-width:0}
+.df-field .f-lbl{margin:0}
+.df-field .f-in{width:100%}
+.df-hint{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-4);line-height:1.5;font-style:normal}
+.df-hint code{font-family:var(--mono);background:var(--surface-2);border-radius:5px;padding:1px 5px}
+.df-preset{max-width:190px;font-size:max(var(--font-min-readable, 14.5px), 12px);padding:5px 9px}
+
+/* Step editor. */
+.df-steps-list{display:flex;flex-direction:column;gap:9px}
+.df-step{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border-radius:var(--radius-sm);
+  background:var(--surface-1);border:1px solid var(--line-2)}
+.df-step.ro{align-items:center;background:transparent;border-color:transparent;padding:4px 10px}
+.df-step-idx{flex:0 0 21px;height:21px;border-radius:50%;background:var(--accent-soft);color:var(--accent);
+  font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:5px}
+.df-step.ro .df-step-idx{margin-top:0}
+.df-step-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.df-step.ro .df-step-body{flex-direction:row;align-items:center;gap:9px}
+.df-step-ro{font-size:max(var(--font-min-readable, 14.5px), 12.5px);color:var(--ink);flex-shrink:0}
+.df-step-ro-d{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.df-step-ops{display:flex;gap:2px;margin-top:4px}
+
+/* Rendered execution-prompt preview. */
+.df-preview{font-family:var(--mono);font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.7;color:var(--ink-2);
+  background:var(--surface-1);border:1px solid var(--line);border-radius:var(--radius-sm);
+  padding:14px 16px;white-space:pre-wrap;word-break:break-word;
+  max-height:min(60vh,540px);overflow:auto}
+
+/* Legacy FlowTemplate card styles are retired. */
+
+/* Scheduled dispatch. */
+/* Use a minimum card width that keeps action buttons on one row. */
+.sch-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:14px}
+.sch-card{border:1px solid var(--line);border-radius:var(--radius);padding:13px 15px;background:var(--raised);
+  display:flex;flex-direction:column;gap:8px;min-width:0;transition:border-color .14s,box-shadow .14s}
+.sch-card:hover{border-color:color-mix(in srgb,var(--accent) 35%,transparent);box-shadow:var(--shadow)}
+.sch-card.off{opacity:.62}
+.sch-top{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.sch-title{font-size:max(var(--font-min-readable, 14.5px), 14px);color:var(--ink)}
+/* Emphasize schedule cadence with an accent surface. */
+.sch-rhythm{font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:700;color:var(--accent);background:var(--accent-soft);
+  border-radius:20px;padding:2px 10px;white-space:nowrap}
+.sch-state{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-4);border:1px solid var(--line);border-radius:20px;padding:1px 9px}
+.sch-state.on{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 40%,transparent)}
+.sch-meta{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-2)}
+.sch-note{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-3);line-height:1.6;max-height:3.2em;overflow:hidden}
+.sch-foot{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:2px;
+  padding-top:9px;border-top:1px solid var(--line-2)}
+.sch-next{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-2);font-weight:600}
+.sch-last{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-4)}
+.sch-err{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--crit);background:var(--crit-soft);border-radius:20px;padding:1px 8px}
+.sch-ops{width:100%;display:flex;justify-content:flex-end;gap:6px;margin-top:2px}
+
+/* MCP servers. */
+.mcp-card{margin-top:16px;padding:0}
+.mcp-list{display:flex;flex-direction:column;gap:1px;background:var(--line-2);border-top:1px solid var(--line-2)}
+.mcp-item{display:flex;align-items:flex-start;gap:12px;padding:12px 16px;background:var(--surface)}
+.mcp-item.off{opacity:.62}
+.mcp-i-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+.mcp-i-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.mcp-i-top b{font-size:max(var(--font-min-readable, 14.5px), 13.5px);color:var(--ink)}
+.mcp-i-off{font-style:normal;font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-4);border:1px solid var(--line);border-radius:20px;padding:1px 9px}
+.mcp-i-env{font-style:normal;font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--warn);background:var(--warn-soft);border-radius:20px;padding:1px 9px}
+.mcp-i-desc{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-3)}
+.mcp-i-cmd{font-family:var(--mono);font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-4);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mcp-i-ops{display:flex;gap:6px;flex-shrink:0}
+.mcp-foot{margin:0;border-radius:0;border-top:1px solid var(--line-2)}
+/* Select stdio or HTTP transport. */
+.mcp-type-pick{display:flex;gap:10px;margin:2px 0 4px}
+.mcp-type-opt{flex:1;display:flex;flex-direction:column;gap:2px;cursor:pointer;
+  padding:10px 12px;border:1px solid var(--line-2);border-radius:var(--radius-sm);position:relative}
+.mcp-type-opt.on{border-color:var(--accent);background:var(--accent-soft-2)}
+.mcp-type-opt input{position:absolute;top:11px;right:11px}
+.mcp-type-opt b{font-size:max(var(--font-min-readable, 14.5px), 13px)}
+.mcp-type-opt small{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-4)}
+/* Empty state with an icon, explanation, and reusable example. */
+.mcp-empty{display:flex;flex-direction:column;align-items:center;gap:9px;text-align:center;
+  padding:34px 20px;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12.5px);line-height:1.8;border-top:1px solid var(--line-2)}
+.mcp-empty-ico{width:46px;height:46px;border-radius:14px;display:flex;align-items:center;justify-content:center;
+  background:var(--accent-soft);color:var(--accent)}
+.mcp-empty-ico svg{width:22px;height:22px}
+.mcp-empty b{font-size:14.5px;color:var(--ink)}
+.mcp-empty-eg em{font-style:normal;font-family:var(--mono);font-size:max(var(--font-min-readable, 14.5px), 12px);
+  background:var(--surface-2);border-radius:20px;padding:3px 12px;color:var(--ink-2)}
+/* Connection-test results show available tools or failure details. */
+.mcp-probe{margin-top:14px;padding:11px 13px;border-radius:var(--radius-sm);font-size:max(var(--font-min-readable, 14.5px), 12.5px);line-height:1.7}
+.mcp-probe.ok{background:color-mix(in srgb,var(--ok) 9%,transparent);
+  border:1px solid color-mix(in srgb,var(--ok) 35%,transparent);color:var(--ink)}
+.mcp-probe.bad{background:var(--crit-soft);border:1px solid color-mix(in srgb,var(--crit) 32%,transparent)}
+.mcp-probe-tools{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
+.mcp-probe-tools em{font-style:normal;font-family:var(--mono);font-size:max(var(--font-min-readable, 14.5px), 12px);
+  background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:2px 10px}
+.mcp-probe-err{margin-top:5px;font-family:var(--mono);font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--crit);
+  white-space:pre-wrap;word-break:break-word;max-height:140px;overflow:auto}
+
+/* Skill catalog. */
+.sk-card{border:1px solid var(--line);border-radius:var(--radius);padding:13px 15px;background:var(--raised);
+  display:flex;flex-direction:column;gap:8px;min-width:0;transition:border-color .14s,box-shadow .14s}
+.sk-card:hover{border-color:color-mix(in srgb,var(--accent) 35%,transparent);box-shadow:var(--shadow)}
+.sk-card.on{border-color:color-mix(in srgb,var(--ok) 42%,transparent);
+  background:color-mix(in srgb,var(--ok) 5%,var(--raised))}
+.sk-top{display:flex;align-items:center;gap:8px}
+.sk-name{margin:0;font-size:max(var(--font-min-readable, 14.5px), 13.5px);color:var(--ink)}
+.sk-src{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-4);background:var(--surface-2);border-radius:20px;
+  padding:2px 9px;white-space:nowrap}
+.sk-desc{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-2);line-height:1.6}
+.sk-compat{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--warn)}
+.sk-path{font-family:var(--mono);font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-4);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sk-dirty{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--warn);background:var(--warn-soft);border-radius:20px;padding:2px 10px}
+.sk-roots{margin-top:16px;line-height:1.85}
+.sk-roots code{font-family:var(--mono);background:var(--surface-2);border-radius:5px;padding:1px 6px}

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>Conversation loading regression</title>
+<link rel="stylesheet" href="../theme/variables.css">
+<link rel="stylesheet" href="../components/panels/panels-chat.css">
+<link rel="stylesheet" href="../components/panels/work-composer.css">
+<style>body{height:100vh}#cpChat{height:85vh;max-width:1040px;margin:auto}#out{white-space:pre-wrap}</style>
+</head><body><div id="cpChat"></div><pre id="out">START</pre>
+<script>
+const pending = [], sent = [], released = [], failures = [], results = [];
+let sink = null, serial = 0;
+window.addEventListener('error', e => failures.push(e.message));
+window.addEventListener('unhandledrejection', e => failures.push(String(e.reason)));
+const snapshot = text => ({status:'idle',tools:[],pendingUi:null,
+  messages:[{id:'answer',role:'assistant',blocks:[{kind:'text',text}]}]});
+window.SoduWorkAPI = {myModels:async()=>({usable:[]})};
+window.soduWorkAPI = {conversationSession:{
+  capabilities:async()=>({ok:true,items:[]}),probe:async()=>({ok:true}),
+  history:async()=>({ok:true,chats:[]}),outputs:async()=>({ok:true,files:[]}),
+  open:async opts => ({ok:true,ref:opts.chatId||'new-'+(++serial),sessionId:opts.chatId||'new-'+serial,
+    model:{},snapshot:snapshot('History '+(opts.chatId||'new')),
+    taskBindings:opts.taskRef?[{taskId:opts.taskRef,taskTitle:'Attached task'}]:[]}),
+  snapshot:ref=>new Promise((resolve,reject)=>pending.push({ref,resolve,reject,subscribed:!!sink})),
+  onEvent:fn=>{sink=fn;return()=>{sink=null}},
+  send:async(ref,text)=>{sent.push({ref,text});return{ok:true}},
+  release:async ref=>{released.push(ref);return{ok:true}},cancel:()=>{}
+}};
+window.composeDraftBridge=()=>({});window.workRoot=()=>'';
+</script>
+<script src="../components/panels/work-composer.js"></script>
+<script src="../components/panels/chat-dom-patch.js"></script>
+<script src="../components/panels/panels-chat-tools.js"></script>
+<script src="../components/panels/chat-task-start.js"></script>
+<script src="../components/panels/chat-task-controller.js"></script>
+<script src="../components/panels/chat-context-meter.js"></script>
+<script src="../components/panels/chat-scroll-follow.js"></script>
+<script src="../components/panels/chat-markdown.js"></script>
+<script src="../components/panels/chat-acceptance-results.js"></script>
+<script src="../components/panels/chat-message-renderer.js"></script>
+<script src="../components/panels/chat-send-queue.js"></script>
+<script src="../components/panels/chat-work-intent.js"></script>
+<script src="../components/panels/chat-draft-recovery.js"></script>
+<script src="../components/panels/chat-composer-bindings.js"></script>
+<script src="../components/panels/chat-session-controller.js"></script>
+<script src="../components/panels/panels-chat.js"></script>
+<script>
+(async()=>{
+  const tick=()=>new Promise(r=>setTimeout(r,30));
+  const check=(name,ok)=>{results.push({name,ok:!!ok});if(!ok)throw Error(name)};
+  const text=()=>document.querySelector('#cpChat').textContent;
+  const enter=async(id,options={})=>{
+    let done=false;
+    NativeChat.enter('',id,options).then(()=>done=true);
+    for(let i=0;i<50&&!done;i++)await tick();
+    check('open resolves without waiting for a delayed snapshot: '+id,done);
+  };
+  await enter('a');
+  check('history is visible before post-open snapshot',text().includes('History a'));
+  check('only one reconciliation and subscribed before requesting',pending.length===1&&pending[0].subscribed);
+  sink({ref:'a',kind:'update',snapshot:snapshot('Latest streamed answer')});
+  pending[0].resolve({ok:true,snapshot:snapshot('Stale snapshot a')});await tick();
+  check('late snapshot does not overwrite newer stream',text().includes('Latest streamed answer')&&!text().includes('Stale snapshot a'));
+  await enter('b');const previous=pending.at(-1);
+  await enter('c');previous.resolve({ok:true,snapshot:snapshot('Wrong conversation b')});await tick();
+  check('switching conversations ignores previous reply',text().includes('History c')&&!text().includes('Wrong conversation b'));
+  pending.at(-1).reject(Error('simulated snapshot interruption'));await tick();
+  check('refresh failure preserves visible history and usable input',text().includes('History c')&&NativeChat.hasSession());
+  await NativeChat.send('Followup after reopening');
+  check('ordinary followup goes to the same conversation',sent.at(-1)?.ref==='c');
+  await enter('task-chat',{taskRef:'task-a',taskSession:true});
+  check('task conversation keeps messages and durable task identity',
+    text().includes('History task-chat')&&NativeChat.sessionInfo().taskIds.join(',')==='task-a');
+  const taskRequest=pending.at(-1);
+  await enter('plain-after-task');
+  taskRequest.resolve({ok:true,snapshot:snapshot('Stale task content')});await tick();
+  check('ordinary conversation does not inherit a task',!NativeChat.sessionInfo().collaboration&&NativeChat.sessionInfo().taskIds.length===0&&text().includes('History plain-after-task'));
+  pending.at(-1).resolve({ok:true,snapshot:snapshot('Caught up after subscribing')});await tick();
+  check('post-subscription reconciliation closes missed-event gap',text().includes('Caught up after subscribing'));
+  NativeChat.reset();await NativeChat.enter('First message');
+  check('new ordinary conversation still sends the first message',sent.at(-1)?.text==='First message'&&sent.at(-1)?.ref.startsWith('new-'));
+  NativeChat.reset();pending.at(-1).resolve({ok:true,snapshot:snapshot('Late new chat')});await tick();
+  check('reset discards a late snapshot',!NativeChat.hasSession()&&!text().includes('Late new chat'));
+  check('no unhandled renderer errors',failures.length===0);
+})().catch(error=>{results.push({name:String(error.stack||error),ok:false})}).finally(()=>{
+  document.querySelector('#out').textContent=JSON.stringify({results,failures});
+  window.testComplete=true;
+});
+</script></body></html>

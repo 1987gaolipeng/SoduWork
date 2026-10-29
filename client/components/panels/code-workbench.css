@@ -1,0 +1,35 @@
+/* Native file editor and change view.  The workbench stays compact in a
+   narrow right pane and inherits SoduWork's theme variables. */
+.ncw-code-surface{display:flex;flex-direction:column;min-height:0;height:100%;background:var(--bg-0,#fff)}
+.ncw-code-toolbar{display:flex;align-items:center;gap:8px;min-height:42px;padding:6px 10px;border-bottom:1px solid var(--line,#e6e9ef);background:color-mix(in srgb,var(--bg-0,#fff) 94%,var(--accent,#4588f5))}
+.ncw-code-title{min-width:0;flex:1;display:flex;align-items:center;gap:7px;color:var(--ink-2,#30343b);font-size:max(var(--font-min-readable,14.5px),13px)}
+.ncw-code-title b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.ncw-code-title small{color:var(--ink-5,#8a8f98);font-size:max(var(--font-min-readable,14.5px),12px);white-space:nowrap}
+.ncw-code-actions{display:flex;align-items:center;gap:4px;flex:none}
+.ncw-code-actions button{appearance:none;display:inline-flex;align-items:center;gap:5px;min-height:28px;padding:4px 8px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--ink-3,#6b7280);font:inherit;font-size:max(var(--font-min-readable,14.5px),12px);cursor:pointer}
+.ncw-code-actions button:hover,.ncw-code-actions button[aria-pressed="true"]{border-color:color-mix(in srgb,var(--accent,#4588f5) 25%,var(--line,#e6e9ef));background:var(--accent-soft,#edf4ff);color:var(--accent,#4588f5)}
+.ncw-code-actions button:disabled{opacity:.45;cursor:default}
+.ncw-code-actions svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.ncw-code-modebar{display:flex;align-items:center;gap:4px;padding:4px 10px;border-bottom:1px solid var(--line,#e6e9ef);background:var(--bg-1,#f8fafc)}
+.ncw-code-modebar button{appearance:none;min-height:26px;padding:3px 8px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--ink-3,#6b7280);font:inherit;font-size:max(var(--font-min-readable,14.5px),12px);cursor:pointer}
+.ncw-code-modebar button:hover,.ncw-code-modebar button[aria-pressed="true"]{background:var(--accent-soft,#edf4ff);color:var(--accent,#4588f5)}
+.ncw-code-modebar button:disabled{opacity:.45;cursor:default}
+/* Let document content fill space below the toolbar so wrapped controls cannot push the last line out of view. */
+.ncw-body:has(>.ncw-markdown,>.ncw-code,>.ncw-code-modebar){display:flex;flex-direction:column}
+.ncw-body>.ncw-code-modebar,.ncw-body>.ncw-truncated{flex:none}
+.ncw-body:has(>.ncw-code-modebar)>:is(.ncw-code-surface,.ncw-diff-surface),
+.ncw-body>.ncw-markdown,.ncw-body>.ncw-code,
+.ncw-body>.ncw-dochead+.ncw-truncated~:is(.ncw-markdown,.ncw-code){flex:1 1 0;min-height:0;height:auto}
+.ncw-code-editor{flex:1;min-width:0;min-height:0;width:100%;overflow:auto}
+.ncw-code-editor .CodeMirror{width:100%;height:100%;font:14px/1.65 var(--mono,ui-monospace,Consolas,monospace);background:var(--bg-0,#fff);color:var(--ink-2,#30343b)}
+.ncw-code-editor .CodeMirror-gutters{border-right:1px solid var(--line,#e6e9ef);background:var(--bg-1,#f8fafc)}
+.ncw-code-editor .CodeMirror-linenumber{color:var(--ink-5,#9aa1ad)}
+.ncw-code-editor textarea.ncw-editor-fallback{box-sizing:border-box;width:100%;height:100%;min-height:260px;padding:14px 16px;border:0;outline:0;resize:none;background:var(--bg-0,#fff);color:var(--ink-2,#30343b);font:14px/1.65 var(--mono,ui-monospace,Consolas,monospace);white-space:pre;tab-size:2}
+.ncw-diff-surface{display:flex;flex-direction:column;min-height:0;height:100%;background:var(--bg-0,#fff)}
+.ncw-diff-summary{display:flex;align-items:center;gap:8px;min-height:42px;padding:6px 10px;border-bottom:1px solid var(--line,#e6e9ef);font-size:max(var(--font-min-readable,14.5px),12px);color:var(--ink-3,#6b7280)}
+.ncw-diff-summary b{color:var(--ink-2,#30343b);font-weight:600}.ncw-diff-summary .add{color:#16803c}.ncw-diff-summary .del{color:#bf3038}
+.ncw-diff-body{flex:1;min-height:0;overflow:auto;font:14px/1.6 var(--mono,ui-monospace,Consolas,monospace)}
+.ncw-diff-body .d2h-wrapper{margin:0}.ncw-diff-body .d2h-file-header{display:none}.ncw-diff-body .d2h-file-wrapper{border:0;margin:0}.ncw-diff-body .d2h-file-diff{overflow:auto}.ncw-diff-body .d2h-diff-table{width:100%;font-size:13px}
+.ncw-diff-empty{display:grid;place-items:center;min-height:180px;padding:24px;text-align:center;color:var(--ink-4,#8a8f98);font:14px/1.6 var(--font-ui,system-ui,sans-serif)}
+.ncw-diff-raw{margin:0;padding:14px 16px;white-space:pre;overflow:auto;color:var(--ink-2,#30343b)}
+.ncw-change-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:999px;background:var(--accent-soft,#edf4ff);color:var(--accent,#4588f5);font-size:12px}

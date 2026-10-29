@@ -1,0 +1,10 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>Cloud handoff verification</title>
+<link rel="stylesheet" href="../../components/panels/panels-chat.css">
+<link rel="stylesheet" href="../../components/panels/chat-cloud-handoff.css">
+<style>:root{--bg-0:#fff;--bg-2:#f6f7f9;--ink:#20252d;--ink-2:#515b69;--ink-3:#74808d;--line:#e3e7ed;--accent:#476dde;--accent-hover:#355aca;--accent-soft:#edf1ff;--s-urgent:#ba3030;--shadow-xl:0 16px 48px #16213f22}body{font-family:system-ui;margin:0;background:#fff}#host{padding:20px}svg{fill:none;stroke:currentColor;stroke-width:1.6}.nchat-head{display:flex;justify-content:space-between}.nchat-title-menu{background:#fff}button{cursor:pointer}</style></head>
+<body><link rel="stylesheet" href="../../components/panels/work-composer.css"><script src="../../components/panels/work-composer.js"></script><main id="host"></main><script src="../../components/panels/chat-cloud-handoff.js"></script>
+<script src="../../components/panels/panels-chat-chrome.js"></script><script>
+const host=document.querySelector('#host');host.innerHTML=ChatChrome.header()+WorkComposer.executionMode('data-chat-execution');
+let snapshot={};window.fixtureRef='fixture-ref';ChatChrome.bind(host,()=>({ref:fixtureRef,snapshot}));ChatChrome.identify('fixture-session');ChatChrome.resume('本地研究任务');
+window.soduWorkAPI.onCloud(value=>{snapshot=value;ChatCloudHandoff.sync(host,snapshot)});window.fixtureReady=true;
+</script></body></html>

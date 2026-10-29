@@ -1,0 +1,432 @@
+/* Operations analytics: shared theme tokens, stable controls, readable charts. */
+.oi-page { gap: 20px; min-width: 0; padding-bottom: 8px; }
+.oi-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 10px; min-height: 34px; }
+.oi-command { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 2px 0; }
+.oi-command h2 { margin: 0 0 5px; font: 650 18px/1.4 var(--display); letter-spacing: -.02em; }
+.oi-command p { margin: 0; color: var(--ink-2); font-size: max(var(--font-min-readable, 14.5px), 12px); line-height: 1.6; }
+.oi-head-actions { display: flex; flex-shrink: 0; align-items: center; gap: 10px; }
+.oi-stamp { color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); font-variant-numeric: tabular-nums; }
+.oi-period { display: inline-flex; align-items: center; gap: 7px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink-2); font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.oi-period svg { width: 14px; height: 14px; }
+.oi-refresh { min-height: 34px; gap: 6px; padding: 7px 11px; border-radius: 8px; font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.oi-crit { color: var(--crit); font-style: normal; font-weight: 650; }
+
+/* One ledger with four distinct measures; each sparkline uses its own scale. */
+.oi-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-sm); }
+.oi-stat { display: flex; min-width: 0; flex-direction: column; padding: 18px 20px 10px; border-right: 1px solid var(--line-2); }
+.oi-stat:last-child { border-right: 0; }
+.oi-stat-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.oi-stat-label { color: var(--ink-2); font-size: max(var(--font-min-readable, 14.5px), 12px); font-weight: 550; }
+.oi-stat-icon { display: grid; width: 28px; height: 28px; flex-shrink: 0; place-items: center; border-radius: 8px; background: var(--accent-soft); color: var(--accent-2); }
+.oi-stat-icon svg { width: 15px; height: 15px; }
+.oi-stat.tone-ok .oi-stat-icon { background: var(--ok-soft); color: var(--ok); }
+.oi-stat.tone-warn .oi-stat-icon { background: var(--warn-soft); color: var(--warn); }
+.oi-stat.tone-crit .oi-stat-icon { background: var(--crit-soft); color: var(--crit); }
+.oi-stat-line { display: flex; min-height: 49px; flex-wrap: wrap; align-items: baseline; gap: 7px; margin-top: 8px; }
+.oi-stat-line > b { color: var(--ink); font: 650 34px/1.2 var(--display); letter-spacing: -.045em; font-variant-numeric: tabular-nums; }
+.oi-stat-unit { color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.oi-stat-sub { margin-bottom: 12px; color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); line-height: 1.6; }
+.oi-stat-sub em { font-style: normal; }
+.oi-delta { display: inline-flex; align-items: baseline; gap: 3px; margin-left: auto; font-size: max(var(--font-min-readable, 14.5px), 12px); font-style: normal; font-weight: 650; }
+.oi-delta > i { color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); font-style: normal; font-weight: 400; }
+.oi-delta.up { color: var(--ok); }
+.oi-delta.down { color: var(--crit); }
+.oi-delta.flat { color: var(--ink-3); }
+.oi-spark { width: 100%; height: 32px; flex-shrink: 0; margin-top: auto; overflow: visible; }
+.oi-spark-line { fill: none; stroke: var(--accent); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.oi-spark-dot { fill: var(--accent); stroke: none; }
+.oi-spark-zero { stroke: var(--surface-3); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.oi-spark-area { fill: color-mix(in srgb, var(--accent) 7%, transparent); }
+.oi-spark.tone-ok .oi-spark-line { stroke: var(--ok); }
+.oi-spark.tone-ok .oi-spark-dot { fill: var(--ok); }
+.oi-spark.tone-ok .oi-spark-area { fill: color-mix(in srgb, var(--ok) 7%, transparent); }
+.oi-spark.tone-warn .oi-spark-line { stroke: var(--warn); }
+.oi-spark.tone-warn .oi-spark-dot { fill: var(--warn); }
+.oi-spark.tone-warn .oi-spark-area { fill: color-mix(in srgb, var(--warn) 7%, transparent); }
+.oi-spark.tone-crit .oi-spark-line { stroke: var(--crit); }
+.oi-spark.tone-crit .oi-spark-dot { fill: var(--crit); }
+.oi-spark.tone-crit .oi-spark-area { fill: color-mix(in srgb, var(--crit) 7%, transparent); }
+
+.oi-overview-grid, .oi-detail-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(300px, 1fr); align-items: stretch; gap: 20px; }
+.oi-detail-grid > .oi-panel { height: 100%; }
+.oi-overview-grid { align-items: stretch; }
+.oi-page .oi-panel { min-width: 0; overflow: visible; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-sm); }
+.oi-page .oi-panel > .oi-panel-header { display: flex; min-height: 76px; align-items: center; justify-content: space-between; gap: 12px; padding: 17px 20px; border-bottom: 1px solid var(--line-2); background: none; }
+.oi-panel-title { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.oi-panel-icon { display: grid; width: 32px; height: 32px; flex-shrink: 0; place-items: center; border: 1px solid var(--line-2); border-radius: 9px; background: var(--surface-1); color: var(--ink-2); }
+.oi-panel-icon svg { width: 17px; height: 17px; }
+.oi-panel-title h3 { margin: 0; color: var(--ink); font: 650 15px/1.4 var(--display); }
+.oi-panel-title p { margin: 3px 0 0; color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); line-height: 1.5; }
+.oi-total-badge, .oi-health-badge { padding: 5px 8px; border-radius: 6px; background: var(--surface-1); color: var(--ink-2); font-size: max(var(--font-min-readable, 14.5px), 12px); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.oi-health-badge.ok { background: var(--ok-soft); color: var(--ok); }
+.oi-health-badge.warn { background: var(--warn-soft); color: var(--warn); }
+.oi-panel .oi-body { padding: 20px; }
+
+/* Main chart: one metric per axis; SVG labels stay at a readable size. */
+.oi-trend-tabs { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface-1); }
+.oi-trend-tabs button { padding: 5px 9px; border: 0; border-radius: 5px; background: transparent; color: var(--ink-2); font: 500 14.5px/1.5 var(--sans); white-space: nowrap; cursor: pointer; }
+.oi-trend-tabs button:hover { color: var(--accent-2); }
+.oi-trend-tabs button[aria-pressed="true"] { background: var(--surface); color: var(--accent-2); box-shadow: var(--shadow-sm); }
+.oi-trend-summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 18px 20px 8px; color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.oi-trend-summary > span { display: inline-flex; align-items: center; gap: 7px; }
+.oi-trend-summary i { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.oi-trend-summary small { font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.oi-trend-summary b { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.oi-trend-summary em { height: 10px; margin: 0 3px; border-left: 1px solid var(--line); }
+.oi-trend-plot { position: relative; margin: 0 20px 0 8px; }
+.oi-trend-plot svg { display: block; width: 100%; height: 226px; overflow: visible; border-radius: 6px; }
+.oi-plot-grid line { stroke: var(--line-2); stroke-dasharray: 3 4; vector-effect: non-scaling-stroke; }
+.oi-plot-grid text, .oi-plot-date { fill: var(--ink-3); font: 14.5px var(--sans); }
+.oi-trend-line { fill: none; stroke: var(--accent); stroke-width: 2.3; stroke-linecap: round; stroke-linejoin: round; }
+.oi-trend-line.is-zero { stroke: var(--surface-3); }
+.oi-trend-guide { stroke: var(--accent); stroke-opacity: .35; stroke-dasharray: 4; }
+.oi-trend-dot { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
+.oi-trend-tooltip { position: absolute; top: 8px; z-index: 3; display: flex; flex-direction: column; gap: 5px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); white-space: nowrap; pointer-events: none; }
+.oi-trend-tooltip.from-left { transform: translateX(10px); }
+.oi-trend-tooltip.from-right { transform: translateX(calc(-100% - 10px)); }
+.oi-trend-tooltip b { color: var(--ink); font-size: 15px; font-variant-numeric: tabular-nums; }
+.oi-trend-tooltip small { margin-left: 5px; color: var(--ink-2); font-size: max(var(--font-min-readable, 14.5px), 12px); font-weight: 400; }
+.oi-chart-foot { margin: 0; padding: 12px 20px 16px; color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); line-height: 1.6; }
+
+/* Department adoption and installed agent coverage. */
+.oi-dept-body { max-height: 324px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+.oi-body > .oi-row + .oi-row { margin-top: 19px; }
+.oi-row { display: grid; grid-template-columns: minmax(75px, .8fr) minmax(60px, 1fr) auto; align-items: center; gap: 6px 12px; }
+.oi-row-name { overflow: hidden; color: var(--ink-2); font-size: max(var(--font-min-readable, 14.5px), 12px); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.oi-track { display: flex; height: 7px; gap: 2px; border-radius: 4px; background: var(--surface-2); }
+.oi-track > i { border-radius: 4px; background: var(--accent); }
+.oi-track > i.seg-ok { background: var(--ok); }
+.oi-track > i.seg-warn { background: var(--warn); }
+.oi-track > i.seg-dim { background: var(--surface-3); }
+.oi-track > i.zero { width: 3px; background: var(--surface-3); }
+.oi-row-val { min-width: 36px; color: var(--ink); font-size: max(var(--font-min-readable, 14.5px), 13px); font-weight: 650; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.oi-row-val > small { margin-left: 3px; color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); font-weight: 400; }
+.oi-row-sub { grid-column: 1 / -1; color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.oi-row-sub em { font-style: normal; font-weight: 600; }
+.oi-row-sub em.ok { color: var(--ok); }
+.oi-row-sub em.warn { color: var(--warn); }
+.oi-note { display: flex; align-items: flex-start; gap: 7px; margin: 20px 0 0; padding-top: 14px; border-top: 1px solid var(--line-2); color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); line-height: 1.65; }
+.oi-note svg { width: 13px; height: 13px; flex-shrink: 0; margin-top: 2px; }
+
+/* Automation card body: 2x2 — bars span the top row, the failing-plan list
+   and the grouped-error summary share the bottom row; extra card height is
+   absorbed by the chart band instead of leaving dead space. */
+.oi-auto-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: minmax(190px, 1fr) auto; gap: 20px; align-items: start; }
+.oi-auto-grid > .oi-chart { display: flex; min-height: 0; flex-direction: column; grid-column: 1 / -1; }
+.oi-auto-grid > .oi-chart .oi-bars { flex: 1 1 auto; height: auto; }
+.oi-auto-grid > .oi-healthy { grid-column: 1 / -1; }
+.oi-chart-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 16px; color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.oi-legend { display: inline-flex; align-items: center; gap: 6px; font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.oi-legend i { width: 7px; height: 7px; border-radius: 2px; }
+.oi-legend i.ok { background: var(--accent); }
+.oi-legend i.bad { margin-left: 5px; background: var(--crit); }
+.oi-legend i.pending { margin-left: 5px; background: var(--warn, #d59a36); }
+.oi-bars { position: relative; display: flex; height: 136px; gap: 5px; border-radius: 4px; background: repeating-linear-gradient(to top, transparent 0, transparent calc(33.333% - 1px), var(--line-2) calc(33.333% - 1px), var(--line-2) 33.333%); }
+.oi-col { display: flex; min-width: 1px; flex: 1 1 0; flex-direction: column; justify-content: flex-end; border-radius: 3px; }
+.oi-col.hot { background: var(--accent-soft); }
+.oi-seg { width: 100%; flex-shrink: 0; }
+.oi-col .oi-seg:first-child { border-radius: 3px 3px 0 0; }
+.oi-seg.ok { background: color-mix(in srgb, var(--accent) 82%, var(--surface)); }
+.oi-seg.bad { background: var(--crit); }
+.oi-seg.pending { background: var(--warn, #d59a36); }
+.oi-seg.none { height: 2px; border-radius: 1px; background: var(--surface-3); }
+.oi-axis { display: flex; justify-content: space-between; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line-2); color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.oi-tip { position: absolute; bottom: calc(100% + 5px); z-index: 5; display: flex; flex-direction: column; gap: 3px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); color: var(--ink-2); font-size: max(var(--font-min-readable, 14.5px), 12px); white-space: nowrap; pointer-events: none; transform: translateX(-50%); }
+.oi-tip.at-left { transform: none; }
+.oi-tip.at-right { transform: translateX(-100%); }
+.oi-tip > b { color: var(--ink); }
+.oi-tip > span { font-variant-numeric: tabular-nums; }
+.oi-tip > span.ok { color: var(--accent); }
+.oi-tip > span.bad { color: var(--crit); }
+.oi-label { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; color: var(--ink-2); font-size: max(var(--font-min-readable, 14.5px), 12px); font-weight: 600; }
+.oi-label em { color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); font-style: normal; font-weight: 400; }
+.oi-fail-list { max-height: 250px; overflow-y: auto; scrollbar-width: thin; }
+.oi-fail-card { padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--crit) 17%, var(--line-2)); border-radius: 8px; background: color-mix(in srgb, var(--crit) 2%, var(--surface)); }
+.oi-fail-card + .oi-fail-card { margin-top: 8px; }
+.oi-fail-head { display: flex; align-items: baseline; gap: 8px; }
+.oi-fail-head > b { overflow: hidden; min-width: 0; flex: 1; color: var(--ink); font-size: max(var(--font-min-readable, 14.5px), 12px); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.oi-off { color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); font-style: normal; white-space: nowrap; }
+.oi-count { flex-shrink: 0; padding: 1px 6px; border-radius: 5px; background: var(--crit-soft); color: var(--crit); font-size: max(var(--font-min-readable, 14.5px), 12px); font-style: normal; font-weight: 650; }
+.oi-fail-meta { display: block; margin-top: 3px; color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.oi-fail-actions { display: flex; justify-content: flex-end; margin-top: 7px; }
+.oi-fail-detail { padding: 3px 7px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--accent-2); font: 14.5px var(--sans); cursor: pointer; }
+.oi-fail-detail:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: var(--accent-soft); }
+.oi-fail-msg { margin: 6px 0 0; color: var(--ink-2); font-size: max(var(--font-min-readable, 14.5px), 12px); line-height: 1.6; overflow-wrap: anywhere; }
+.oi-fail-msg code, .oi-err-row code { margin-left: 6px; padding: 1px 5px; border-radius: 4px; background: var(--surface-2); color: var(--ink-3); font: 500 14.5px var(--mono); }
+.oi-failure-modal { display: flex; min-width: min(560px, 70vw); flex-direction: column; gap: 13px; }
+.oi-failure-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding-bottom: 11px; border-bottom: 1px solid var(--line-2); }
+.oi-failure-modal-head > div { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.oi-failure-modal-head b { font-size: 15px; }
+.oi-failure-modal-head span { color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.oi-failure-modal-head em { flex: none; padding: 4px 8px; border-radius: 999px; background: var(--crit-soft); color: var(--crit); font-size: max(var(--font-min-readable, 14.5px), 12px); font-style: normal; }
+.oi-failure-code { display: flex; align-items: center; gap: 9px; color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.oi-failure-code code { padding: 3px 6px; border-radius: 6px; background: var(--surface-2); color: var(--ink-2); font: 14.5px var(--mono); }
+.oi-failure-copy { max-height: 360px; overflow: auto; margin: 0; padding: 13px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-1); color: var(--ink-2); font: 14.5px/1.65 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.oi-err-list { min-width: 0; }
+.oi-err-list summary { color: var(--ink-2); font-size: max(var(--font-min-readable, 14.5px), 12px); cursor: pointer; }
+.oi-err-list summary span { margin-left: 10px; color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.oi-err-row { display: flex; align-items: baseline; gap: 9px; padding: 9px 0; border-bottom: 1px solid var(--line-2); }
+.oi-err-row > em { flex-shrink: 0; color: var(--crit); font-size: max(var(--font-min-readable, 14.5px), 12px); font-style: normal; font-weight: 650; }
+.oi-err-row > p { margin: 0; color: var(--ink-2); font-size: max(var(--font-min-readable, 14.5px), 12px); line-height: 1.6; overflow-wrap: anywhere; }
+.oi-healthy { display: flex; align-items: center; gap: 12px; padding: 12px 0; color: var(--ok); }
+.oi-healthy svg { width: 29px; height: 29px; flex-shrink: 0; padding: 6px; border-radius: 50%; background: var(--ok-soft); }
+.oi-healthy b { display: block; font-size: max(var(--font-min-readable, 14.5px), 12px); font-weight: 600; }
+.oi-healthy small { display: block; margin-top: 4px; color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.oi-healthy.is-empty { color: var(--ink-2); }
+.oi-healthy.is-empty svg { background: var(--surface-2); }
+
+/* Plugin ledger: names first, aligned numeric columns, scroll within the table. */
+.oi-page .oi-plugins > .oi-panel-header { flex-wrap: wrap; }
+.oi-plugin-tools { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; min-width: 0; max-width: 100%; margin-left: auto; }
+.oi-search-field { position: relative; display: flex; min-width: 0; }
+.oi-search-field > svg { position: absolute; top: 10px; left: 10px; width: 14px; height: 14px; color: var(--ink-3); pointer-events: none; }
+.oi-search { box-sizing: border-box; width: 218px; min-width: 0; height: 34px; padding: 0 10px 0 32px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font: 14.5px var(--sans); }
+.oi-search::placeholder { color: var(--ink-3); }
+.oi-sort { height: 34px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink-2); font: 14.5px var(--sans); }
+.oi-page .select-menu.oi-sort{box-sizing:border-box;width:156px;min-width:156px;height:36px;min-height:36px;padding:0;overflow:visible;background-image:none;background-color:var(--surface-1)}
+.oi-page .select-menu.oi-sort .select-menu-trigger{box-sizing:border-box;gap:8px;padding:0 11px;overflow:visible}
+.oi-page .select-menu.oi-sort .select-menu-trigger span{display:block;flex:1;min-width:0;overflow:visible;text-overflow:clip;white-space:nowrap}
+.oi-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+.oi-filter { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--ink-2); font: 14.5px var(--sans); cursor: pointer; }
+.oi-filter > span { padding: 1px 5px; border-radius: 4px; background: var(--surface-2); font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.oi-filter svg { width: 13px; height: 13px; }
+.oi-filter:hover { background: var(--surface-1); }
+.oi-filter.on { background: var(--accent-soft); color: var(--accent-2); font-weight: 600; }
+.oi-filter.warn { margin-left: auto; color: var(--warn); }
+.oi-filter.warn.on { background: var(--warn-soft); }
+.oi-table-wrap { overflow-x: auto; border: 1px solid var(--line-2); border-radius: 9px; scrollbar-width: thin; }
+.oi-table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.oi-table th { padding: 11px 14px; border-bottom: 1px solid var(--line); background: var(--surface-1); color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); font-weight: 550; text-align: left; white-space: nowrap; }
+.oi-table td { padding: 13px 14px; border-bottom: 1px solid var(--line-2); color: var(--ink-2); vertical-align: middle; }
+.oi-table tbody tr:last-child td { border-bottom: 0; }
+.oi-table tbody tr:hover { background: var(--surface-1); }
+.oi-table th.num, .oi-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.oi-table th.when, .oi-table td.when { color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); text-align: right; white-space: nowrap; }
+.oi-table td.name { min-width: 195px; max-width: 290px; }
+.oi-plugin-name { display: flex; align-items: center; gap: 10px; }
+.oi-plugin-name > div { min-width: 0; }
+.oi-plugin-name b { display: block; overflow: hidden; color: var(--ink); font-size: max(var(--font-min-readable, 14.5px), 12px); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.oi-plugin-name small { display: block; margin-top: 3px; color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.oi-plugin-icon { display: grid; width: 31px; height: 31px; flex-shrink: 0; place-items: center; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface-1); color: var(--ink-2); }
+.oi-plugin-icon svg { width: 15px; height: 15px; }
+.oi-plugin-icon.cat-dev { background: var(--accent-soft); color: var(--accent-2); }
+.oi-plugin-icon.cat-office { background: var(--ok-soft); color: var(--ok); }
+.oi-plugin-icon.cat-research { background: var(--warn-soft); color: var(--warn); }
+.oi-category { padding: 3px 7px; border-radius: 5px; background: var(--surface-1); color: var(--ink-2); font-size: max(var(--font-min-readable, 14.5px), 12px); white-space: nowrap; }
+.oi-table td.num b { color: var(--ink); font-weight: 600; }
+.oi-table td.num small { display: block; color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.oi-table tr.is-off .oi-plugin-name { opacity: .6; }
+.oi-dim { color: var(--ink-3); }
+.oi-rate { padding: 3px 7px; border-radius: 5px; font-size: max(var(--font-min-readable, 14.5px), 12px); font-style: normal; font-weight: 600; }
+.oi-rate.ok { background: var(--ok-soft); color: var(--ok); }
+.oi-rate.mid { background: var(--warn-soft); color: var(--warn); }
+.oi-rate.bad { background: var(--crit-soft); color: var(--crit); }
+.oi-empty { padding: 30px 12px 16px; color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); text-align: center; }
+
+.oi-chart-empty { display: flex; min-height: 220px; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; color: var(--ink-3); text-align: center; }
+.oi-chart-empty svg { width: 26px; height: 26px; color: var(--surface-3); }
+.oi-chart-empty b { color: var(--ink-2); font-size: max(var(--font-min-readable, 14.5px), 12px); font-weight: 550; }
+.oi-chart-empty span { font-size: max(var(--font-min-readable, 14.5px), 12px); line-height: 1.6; }
+.oi-departments .oi-chart-empty { padding: 16px 0; }
+.oi-page :is(button, input, select, summary, [tabindex]):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; box-shadow: none; }
+.oi-skeleton .oi-sk-head { height: 50px; border-radius: 12px; }
+.oi-skeleton .oi-sk-card { height: 170px; }
+.oi-skeleton .oi-sk-panel { min-height: 375px; border-radius: 12px; }
+.oi-sk-head, .oi-sk-card, .oi-sk-panel { position: relative; overflow: hidden; background: var(--surface-2); }
+.oi-sk-head::after, .oi-sk-card::after, .oi-sk-panel::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--surface) 70%, transparent) 50%, transparent 70%); animation: oi-shimmer 1.4s infinite; }
+@keyframes oi-shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) { .oi-sk-head::after, .oi-sk-card::after, .oi-sk-panel::after { animation: none; } }
+
+@media (max-width: 1300px) {
+  .oi-page .oi-usage > .oi-panel-header { flex-wrap: wrap; align-items: flex-start; }
+  .oi-stat { padding-inline: 16px; }
+  .oi-stat-line > b { font-size: 30px; }
+  .oi-delta { margin-left: 0; }
+  .oi-stamp { display: none; }
+}
+@media (max-width: 1100px) {
+  .oi-overview-grid, .oi-detail-grid { grid-template-columns: minmax(0, 1fr); }
+  .oi-dept-body { max-height: 300px; }
+  .oi-page .oi-usage > .oi-panel-header { align-items: center; }
+}
+@media (max-width: 900px) {
+  .oi-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .oi-stat:nth-child(2) { border-right: 0; }
+  .oi-stat:nth-child(-n+2) { border-bottom: 1px solid var(--line-2); }
+  .oi-command { flex-wrap: wrap; }
+  .oi-delta { margin-left: auto; }
+}
+@media (max-width: 600px) {
+  .oi-page { gap: 14px; }
+  .oi-page .oi-panel > .oi-panel-header { flex-wrap: wrap; padding: 15px; }
+  .oi-panel .oi-body { padding: 15px; }
+  .oi-overview-grid, .oi-detail-grid { gap: 14px; }
+  .oi-stat { padding: 14px 13px 8px; }
+  .oi-stat-line > b { font-size: 28px; }
+  .oi-stat-label, .oi-stat-sub { font-size: max(var(--font-min-readable, 14.5px), 12px); }
+  .oi-stat-icon { width: 24px; height: 24px; }
+  .oi-delta { margin-left: 0; }
+  .oi-delta > i { display: none; }
+  .oi-trend-tabs { width: 100%; }
+  .oi-trend-tabs button { flex: 1; }
+  .oi-trend-summary { padding: 15px 15px 8px; }
+  .oi-trend-plot { margin-right: 15px; margin-left: 0; }
+  .oi-chart-foot { padding-inline: 15px; }
+  .oi-auto-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+  .oi-plugin-tools { width: 100%; }
+  .oi-search-field { flex: 1; }
+  .oi-search { width: 100%; }
+  .oi-filter.warn { margin-left: 0; }
+}
+
+/* Align automation health and execution-environment panels as one information group. */
+.oi-detail-grid{align-items:stretch}
+.oi-detail-grid>.oi-panel{height:100%;display:flex;min-height:0;flex-direction:column}
+.oi-detail-grid>.oi-panel>.oi-body{flex:1;min-height:0}
+.oi-automation .oi-body,.oi-agents .oi-body{min-height:320px}
+.oi-agents .oi-body{display:flex;flex-direction:column}
+.oi-agents .oi-body>.oi-note{margin-top:auto}
+.oi-sort{appearance:none;min-width:122px;padding:0 34px 0 12px;background-color:var(--surface-1);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%237d899b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center;cursor:pointer}
+.oi-filters{align-items:center;gap:4px;margin-bottom:16px;padding:4px;border:1px solid var(--line);border-radius:10px;background:var(--surface-1)}
+.oi-filter{min-height:30px;padding:5px 10px;border-color:transparent;border-radius:7px}
+.oi-filter:hover{background:var(--surface)}
+.oi-filter.on{border-color:color-mix(in srgb,var(--accent) 25%,var(--line));background:var(--accent-soft);color:var(--accent-2);box-shadow:0 2px 7px -5px var(--accent)}
+.oi-filter.warn{margin-left:auto}
+@media(max-width:720px){.oi-detail-grid>.oi-panel{height:auto}.oi-automation .oi-body,.oi-agents .oi-body{min-height:0}.oi-filter.warn{margin-left:0}}
+
+/* Final analytics layout pass. The page reads from summary to trend to
+   exceptions, with the same panel width and header rhythm as governance. */
+.oi-page { gap: 16px; }
+.oi-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.oi-stat {
+  min-height: 148px;
+  padding: 16px 18px 12px;
+  border: 1px solid var(--line) !important;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.oi-stat:last-child { border-right: 1px solid var(--line) !important; }
+.oi-overview-grid,
+.oi-detail-grid {
+  grid-template-columns: minmax(0, 1.65fr) minmax(320px, 1fr);
+  gap: 16px;
+}
+.oi-page .oi-panel { border-radius: 12px; }
+.oi-page .oi-panel > .oi-panel-header {
+  min-height: 56px;
+  padding: 11px 18px;
+}
+.oi-panel .oi-body { padding: 18px; }
+.oi-trend-summary { padding: 16px 18px 8px; }
+.oi-trend-plot { margin-right: 18px; margin-left: 0; }
+.oi-trend-plot svg { height: 216px; }
+.oi-dept-body { max-height: var(--viewport-list-height, 324px); }
+.oi-auto-grid {
+  gap: 18px;
+}
+.oi-automation .oi-body,
+.oi-agents .oi-body { min-height: 248px; }
+.oi-plugins .oi-body { padding-top: 16px; }
+.oi-table-wrap { border-radius: 10px; }
+
+@media (max-width: 1100px) {
+  .oi-overview-grid,
+  .oi-detail-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 900px) {
+  .oi-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .oi-stat:nth-child(2) { border-right: 1px solid var(--line) !important; }
+  .oi-stat:nth-child(-n + 2) { border-bottom: 1px solid var(--line) !important; }
+}
+@media (max-width: 600px) {
+  .oi-page { gap: 14px; }
+  .oi-metrics { grid-template-columns: 1fr; }
+  .oi-stat { min-height: 116px; }
+  .oi-stat:nth-child(n) { border-right: 1px solid var(--line) !important; border-bottom: 1px solid var(--line) !important; }
+  .oi-page .oi-panel > .oi-panel-header { padding-inline: 15px; }
+  .oi-panel .oi-body { padding: 15px; }
+  .oi-automation .oi-body,
+  .oi-agents .oi-body { min-height: 0; }
+}
+
+/* Keep empty cards compact while aligning populated peer panels. */
+.oi-detail-grid > .oi-panel:has(.oi-chart-empty) { height: auto; }
+.oi-detail-grid > .oi-panel:has(.oi-chart-empty) > .oi-body { flex: initial; min-height: 0; }
+.oi-detail-grid .oi-chart-empty { min-height: 140px; }
+.oi-automation .oi-body:has(.oi-healthy.is-empty) { min-height: 0; }
+
+/* Keep row labels, bars and totals on one predictable baseline. The previous
+   fractional name column became too narrow in the right-hand panel, forcing
+   bars and values to drift when department or Agent names grew. */
+.oi-row {
+  grid-template-columns: minmax(122px, .9fr) minmax(130px, 1.35fr) minmax(52px, auto);
+  column-gap: 16px;
+}
+.oi-row-name { line-height: 1.35; }
+.oi-row-val { min-width: 52px; }
+.oi-agents .oi-body > .oi-row { flex: 0 0 auto; }
+
+/* The agents panel can be a narrow sibling at 1280px even though the
+   viewport itself is still desktop-sized. Keep the three columns inside the
+   card so bars and totals never push a row beyond its rounded surface. */
+@media (max-width: 1320px) {
+  .oi-row {
+    grid-template-columns: minmax(90px, .8fr) minmax(100px, 1.2fr) minmax(52px, auto);
+    column-gap: 10px;
+  }
+}
+
+/* A healthy automation state is a compact status callout, not a second
+   chart: collapse the 2x2 rows and center the callout across the card. */
+.oi-auto-grid:has(.oi-healthy) { grid-template-rows: none; }
+.oi-auto-grid > .oi-healthy {
+  width: min(100%, 320px);
+  margin-inline: auto;
+}
+@media (max-width: 1100px) {
+  .oi-row { grid-template-columns: minmax(110px, .85fr) minmax(120px, 1.4fr) minmax(48px, auto); column-gap: 12px; }
+}
+@media (max-width: 600px) {
+  .oi-row { grid-template-columns: minmax(90px, .8fr) minmax(100px, 1.2fr) minmax(45px, auto); column-gap: 10px; }
+}
+
+@media (min-width: 1101px) {
+  /* The execution environment list often determines the paired card height;
+     let the 2x2 tracks stretch into it instead of leaving a clipped chart. */
+  .oi-automation .oi-auto-grid { width: 100%; }
+}
+
+/* Final readability pass for the automation health card: the body grid
+   fills the paired-card height, so the 2x2 tracks above absorb the slack. */
+.oi-automation .oi-auto-grid {
+  min-height: 100%;
+}
+.oi-automation .oi-body { min-height: 350px; }
+.oi-automation .oi-body:has(.oi-healthy.is-empty) { min-height: 280px; }
+.oi-automation .oi-chart { min-width: 0; width: 100%; }
+.oi-automation .oi-chart-head { min-height: 26px; margin-bottom: 18px; }
+.oi-automation .oi-bars { min-height: 180px; gap: 6px; }
+.oi-auto-grid > .oi-healthy { padding-block: 16px; }
+.oi-healthy svg { width: 36px; height: 36px; padding: 8px; }
+
+/* At a 1280px desktop viewport the shell leaves too little width for two
+   detailed cards while keeping a readable chart.  Stack the cards before
+   they become cramped; wide desktop layouts remain two-column. */
+@media (max-width: 1320px) {
+  .oi-detail-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 900px) {
+  .oi-automation .oi-auto-grid { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+}
+@media (max-width: 600px) {
+  .oi-automation .oi-body { min-height: 0; }
+  .oi-automation .oi-bars { min-height: 156px; }
+}

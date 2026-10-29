@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 1,
+  "id": "runway",
+  "name": "Runway",
+  "category": "图像与影音",
+  "description": "Runway 通用连接器：组织信息、任务状态查询、图生视频创建。基于 Runway API（docs.dev.runwayml.com），Bearer + X-Runway-Version 头。计费端点：定义仅供审阅，不得在未授权下执行。",
+  "officialDocs": [
+    "https://docs.dev.runwayml.com/api",
+    "https://docs.dev.runwayml.com/api/#organization",
+    "https://docs.dev.runwayml.com/api/#tasks",
+    "https://github.com/runwayml/sdk-node/blob/main/src/resources/image-to-video.ts"
+  ],
+  "authDocs": [
+    "https://docs.dev.runwayml.com/api/#authentication"
+  ],
+  "baseUrl": "https://api.dev.runwayml.com",
+  "fields": [
+    {
+      "key": "RUNWAY_API_KEY",
+      "label": "Runway API Key",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "tokenKey": "RUNWAY_API_KEY",
+    "header": "Authorization",
+    "prefix": "Bearer"
+  },
+  "headers": {
+    "X-Runway-Version": "2024-11-06"
+  },
+  "tools": [
+    {
+      "name": "get_organization",
+      "description": "获取组织与余额信息（GET /v1/organization）。无分页。出处：https://docs.dev.runwayml.com/api/#organization",
+      "method": "GET",
+      "path": "/v1/organization",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_task",
+      "description": "查询生成任务状态（GET /v1/tasks/{id}）。无分页；轮询间隔官方建议 ≥10 秒。出处：https://docs.dev.runwayml.com/api/#tasks",
+      "method": "GET",
+      "path": "/v1/tasks/{task_id}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "pattern": "^[a-f0-9-]{36}$",
+            "description": "任务 UUID",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_image_to_video",
+      "description": "创建 Gen-4 Turbo 图生视频任务。首帧图片使用 HTTPS URL，ratio 使用像素分辨率。计费操作须获得用户明确授权。",
+      "method": "POST",
+      "path": "/v1/image_to_video",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "model": {
+            "type": "string",
+            "enum": [
+              "gen4_turbo"
+            ],
+            "default": "gen4_turbo",
+            "description": "模型",
+            "maxLength": 10000
+          },
+          "prompt_text": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "提示词"
+          },
+          "prompt_image": {
+            "type": "string",
+            "pattern": "^https://[\\S]+$",
+            "description": "首帧图片的 HTTPS URL",
+            "maxLength": 10000
+          },
+          "ratio": {
+            "type": "string",
+            "enum": [
+              "1280:720",
+              "720:1280",
+              "1104:832",
+              "832:1104",
+              "960:960",
+              "1584:672"
+            ],
+            "default": "1280:720",
+            "description": "输出分辨率，使用像素比例",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "model",
+          "prompt_image",
+          "prompt_text",
+          "ratio"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "model": "$model",
+        "promptText": "$prompt_text",
+        "promptImage": "$prompt_image",
+        "ratio": "$ratio"
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "create_image_to_video 为计费端点：任何执行都需要用户逐次明确授权与付费确认；本定义仅为接口描述，不执行、不预授权。",
+    "固定版本头 X-Runway-Version: 2024-11-06；API 契约演进时按官方更新。",
+    "任务为异步：create 后轮询 get_task 至 SUCCEEDED；credit 余额经 get_organization 观察。"
+  ]
+}

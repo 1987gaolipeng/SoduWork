@@ -1,0 +1,14 @@
+{
+  "provider": "feishu",
+  "package": "@larksuiteoapi/lark-mcp",
+  "version": "0.5.1",
+  "entry": "dist/cli.js",
+  "nodeMinimum": 20,
+  "npmIntegrity": "sha512-KgSzQIvVFUTHKjmTvAg3sSeyIZJ35CXMZQ3HygwT8/tQzDkuM4RsUSoVK4TVJKVsKCHP3QBOV9sAyBmMCBNc9g==",
+  "npmTarball": "https://registry.npmjs.org/@larksuiteoapi/lark-mcp/-/lark-mcp-0.5.1.tgz",
+  "registrationSdk": {
+    "package": "@larksuiteoapi/node-sdk",
+    "version": "1.73.3",
+    "npmIntegrity": "sha512-14Zj8r3f5CEIvpRuzb5HSYyp6O092N1kQkGHg6Kwi/c7B0CmXeCHBVM3Pmn0ozP5JvvAQd/PXBzW48rMH6cj4Q=="
+  }
+}

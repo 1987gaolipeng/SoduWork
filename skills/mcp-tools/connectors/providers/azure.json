@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "id": "azure",
+  "name": "Microsoft Azure",
+  "category": "云服务",
+  "description": "Microsoft Azure 通用连接器（OAuth2 客户端凭据流，只读）：列位置、列虚拟机（nextLink 分页）、查单台 VM。不提供任意云 API 透传。",
+  "runtimeKind": "azure",
+  "officialDocs": [
+    "https://learn.microsoft.com/en-us/rest/api/compute/virtual-machines/list",
+    "https://learn.microsoft.com/en-us/rest/api/compute/virtual-machines/get",
+    "https://learn.microsoft.com/en-us/rest/api/resources/subscriptions/list-locations"
+  ],
+  "authDocs": [
+    "https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-client-creds-grant-flow"
+  ],
+  "baseUrl": "https://management.azure.com",
+  "fields": [
+    {
+      "key": "AZURE_TENANT_ID",
+      "label": "租户 ID（GUID）",
+      "secret": false,
+      "required": true,
+      "pattern": "^[0-9a-fA-F-]{36}$",
+      "example": ""
+    },
+    {
+      "key": "AZURE_CLIENT_ID",
+      "label": "应用（客户端）ID",
+      "secret": false,
+      "required": true,
+      "pattern": "^[0-9a-fA-F-]{36}$",
+      "example": ""
+    },
+    {
+      "key": "AZURE_CLIENT_SECRET",
+      "label": "客户端密码",
+      "secret": true,
+      "required": true,
+      "example": ""
+    },
+    {
+      "key": "AZURE_SUBSCRIPTION_ID",
+      "label": "订阅 ID（GUID）",
+      "secret": false,
+      "required": true,
+      "pattern": "^[0-9a-fA-F-]{36}$",
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "none"
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "list_locations",
+      "description": "列出订阅可用位置（GET /subscriptions/{sub}/locations）。连接检测工具，无分页。出处：https://learn.microsoft.com/en-us/rest/api/resources/subscriptions/list-locations",
+      "method": "GET",
+      "path": "/subscriptions/{AZURE_SUBSCRIPTION_ID}/locations",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_virtual_machines",
+      "description": "列出订阅全部虚拟机（GET /subscriptions/{sub}/providers/Microsoft.Compute/virtualMachines，api-version 由宿主固定；官方 nextLink 分页，传入 next_link 继续读取）。出处：https://learn.microsoft.com/en-us/rest/api/compute/virtual-machines/list",
+      "method": "GET",
+      "path": "/subscriptions/{AZURE_SUBSCRIPTION_ID}/providers/Microsoft.Compute/virtualMachines",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "next_link": {
+            "type": "string",
+            "description": "上一页返回的 next_link，仅允许当前订阅的虚拟机列表地址",
+            "maxLength": 2048
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_virtual_machine",
+      "description": "查询单台虚拟机（GET /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Compute/virtualMachines/{vm}）。无分页。出处：https://learn.microsoft.com/en-us/rest/api/compute/virtual-machines/get",
+      "method": "GET",
+      "path": "/subscriptions/{AZURE_SUBSCRIPTION_ID}/resourceGroups/{resource_group}/providers/Microsoft.Compute/virtualMachines/{vm_name}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resource_group": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._()-]{1,90}$",
+            "description": "资源组名",
+            "maxLength": 10000
+          },
+          "vm_name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._()-]{1,64}$",
+            "description": "虚拟机名",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "resource_group",
+          "vm_name"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    }
+  ],
+  "limitations": [
+    "仅提供所列固定只读查询，不执行任意云 API，也不创建、启停或删除资源。",
+    "需要平台账号及对应资源的只读权限；首次连接会实际检查授权。",
+    "已按官方接口复核；尚无真实云账号验收，签名与响应测试不能替代实际授权验证。",
+    "响应最多 2 MB；分页工具需使用返回的分页参数继续读取。",
+    "Azure 列表由服务端决定每页条数，返回 next_link 时可继续；连接检测只读取地域列表。"
+  ]
+}

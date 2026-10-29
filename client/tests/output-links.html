@@ -1,0 +1,111 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>成果链接回归</title>
+<link rel="stylesheet" href="../theme/variables.css"><link rel="stylesheet" href="../components/panels/panels-chat.css">
+<link rel="stylesheet" href="../components/panels/work-composer.css">
+<link rel="stylesheet" href="../components/panels/work-intent.css">
+<style>body{margin:0;background:#f8fafc;font:14px sans-serif}#cpChat{height:700px;max-width:1000px;margin:auto}#out{padding:20px;white-space:pre-wrap}.nchat{height:100%}</style></head>
+<body><div id="cpChat"></div><pre id="out">START</pre>
+<script>
+let sink=null,current='normal',opens=[],calls=[],local={},taskRows={},snapshots={},delayed=null;
+const empty=()=>({status:'idle',messages:[],tools:[],execution:{}});
+window.SoduWorkAPI={myModels:async()=>({usable:[]}),listAttachments:async id=>taskRows[id]||[],
+  attachmentUrl:row=>'https://hub.test'+row.url};
+window.soduWorkAPI={openExternal:async url=>{opens.push(url);return{ok:true}},conversationSession:{
+ capabilities:async()=>({ok:true,items:[]}),history:async()=>({ok:true,chats:[]}),probe:async()=>({ok:true}),
+ open:async opts=>{current=opts.chatId;return{ok:true,ref:current,sessionId:current,model:{},snapshot:snapshots[current]||empty()}},
+ outputs:async ref=>{calls.push(ref);if(delayed&&delayed.ref===ref){const d=delayed;delayed=null;return d.promise}
+   return{ok:true,artifacts:local[ref]||[]}},
+ artifactAction:async(ref,id,action)=>{opens.push({ref,id,action});return{ok:true}},
+ release:async()=>({ok:true}),close:()=>{},cancel:()=>{},
+ onEvent:fn=>{sink=fn;return()=>{sink=null}},send:async()=>({ok:true})
+}};
+window.soduWorkAPI.previewAttachment=async row=>{opens.push(row.url);return{ok:true}};
+window.workRoot=()=>'';window.refreshHistory=()=>{};window.petSay=text=>calls.push({notice:text});
+</script>
+<script src="../vendor/markdown/marked.umd.js"></script><script src="../vendor/markdown/purify.min.js"></script>
+<script src="../components/panels/work-intent.js"></script>
+<script src="../components/panels/work-composer.js"></script>
+<script src="../components/panels/chat-dom-patch.js"></script>
+<script src="../components/panels/panels-chat-tools.js"></script>
+<script src="../components/panels/chat-output-links.js"></script>
+<script src="../components/panels/chat-workspace-info.js"></script><script src="../components/panels/chat-workspace-split.js"></script>
+<script src="../components/panels/chat-workspace-controls.js"></script>
+<script src="../components/panels/panels-chat-workspace.js"></script>
+<script src="../components/panels/chat-task-start.js"></script>
+<script src="../components/panels/chat-task-controller.js"></script>
+<script src="../components/panels/chat-context-meter.js"></script>
+<script src="../components/panels/chat-scroll-follow.js"></script>
+<script src="../components/panels/chat-markdown.js"></script>
+<script src="../components/panels/chat-acceptance-results.js"></script>
+<script src="../components/panels/chat-message-renderer.js"></script>
+<script src="../components/panels/chat-send-queue.js"></script>
+<script src="../components/panels/chat-work-intent.js"></script>
+<script src="../components/panels/chat-draft-recovery.js"></script>
+<script src="../components/panels/chat-composer-bindings.js"></script>
+<script src="../components/panels/chat-session-controller.js"></script>
+<script src="../components/panels/panels-chat.js"></script>
+<script>
+(async()=>{
+const lines=[];let passed=0,failed=0;
+const check=(name,condition,detail)=>{condition?passed++:failed++;lines.push((condition?'PASS ':'FAIL ')+name+(!condition&&detail?' '+JSON.stringify(detail):''))};
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+const until=async fn=>{for(let i=0;i<150;i++){if(fn())return true;await wait(15)}return false};
+const file=(id,name)=>({artifactId:id,name,relative:name,kind:'document',at:1});
+const message=(text,taskId)=>({role:'assistant',taskId,blocks:[{kind:'text',text,index:0}]});
+const set=(ref,text,taskId)=>{snapshots[ref]={...empty(),messages:[message(text,taskId)]}};
+const emit=(kind,snapshot)=>sink({ref:current,kind,snapshot});
+const buttons=()=>[...document.querySelectorAll('#nchatList .noutput-inline')];
+try{
+set('normal','已生成：report.pdf；[完整报告](file:///C:/work/report.pdf)；\n\n'+String.fromCharCode(96)+'汇报 方案.pdf'+String.fromCharCode(96)+'。\n\n[外部网站](https://example.com/report.pdf)');
+local.normal=[file('a','report.pdf'),file('b','汇报 方案.pdf')];
+check('普通历史会话正常打开',await NativeChat.enter(null,'normal'));
+check('正文、绝对 Markdown 和行内代码均可点击',await until(()=>buttons().length===3));
+buttons()[1].click();await wait(20);check('绝对路径链接通过可信成果 ID 打开',opens.at(-1)?.id==='a');
+check('外部链接仍保持原始地址',document.querySelector('.nmd a[href]')?.getAttribute('href')==='https://example.com/report.pdf');
+const style=getComputedStyle(buttons()[0]);check('成果链接具有下划线与点击样式',style.cursor==='pointer'&&style.textDecorationLine.includes('underline'));
+const stable=buttons()[0];emit('snapshot',snapshots.normal);await wait(20);
+check('内容未变的快照不会替换鼠标下的链接节点',buttons()[0]===stable);
+set('late','最终文件 late.pdf');
+await NativeChat.enter(null,'late');check('未知文件不伪造链接',buttons().length===0);
+local.late=[file('late-id','late.pdf')];emit('settled',snapshots.late);
+check('非 streaming 的结束事件会补成果链接',await until(()=>buttons().length===1));
+set('ingest','稍后入库 ingest.pdf');await NativeChat.enter(null,'ingest');
+emit('settled',snapshots.ingest);await wait(100);local.ingest=[file('ingest','ingest.pdf')];
+await wait(200);emit('settled',snapshots.ingest);
+check('实际索引更新事件会补齐晚到的本地成果',await until(()=>buttons().length===1));
+set('task','[任务报告](C:/runner/task/report.pdf) 和 report.pdf','task-1');
+taskRows['task-1']=[{id:'task-file',role:'output',filename:'report.pdf',url:'/api/v1/attachments/task-file?ticket=one'}];
+await NativeChat.enter(null,'task');
+check('任务会话不依赖聊天本地目录的文件',await until(()=>buttons().length===2));
+taskRows['task-1'][0].url='/api/v1/attachments/task-file?ticket=two';
+const openOutput=ChatWorkbench.openOutput,previewRequests=[];
+ChatWorkbench.openOutput=target=>{const ok=openOutput(target);previewRequests.push({target,ok});return ok};
+buttons()[0].click();await wait(30);ChatWorkbench.openOutput=openOutput;
+check('点击使用刷新后的授权地址',opens.at(-1)==='https://hub.test/api/v1/attachments/task-file?ticket=two',
+  {last:opens.at(-1),target:buttons()[0]?.outerHTML,requests:previewRequests,notices:calls.filter(item=>item.notice)});
+check('正文 DOM 不暴露附件票据',!document.querySelector('#nchatList').innerHTML.includes('ticket='));
+set('multi','report.pdf','task-1');snapshots.multi.messages.push(message('report.pdf','task-2'));
+taskRows['task-2']=[{id:'second',role:'output',filename:'report.pdf',url:'/api/v1/attachments/second?ticket=two'}];
+await NativeChat.enter(null,'multi');
+check('同名任务成果按各自任务绑定',await until(()=>buttons().length===2)&&buttons()[0].dataset.openApp!==buttons()[1].dataset.openApp);
+let release;delayed={ref:'stale',promise:new Promise(r=>release=r)};set('stale','stale.pdf');
+await NativeChat.enter(null,'stale');set('fresh','fresh.pdf');local.fresh=[file('fresh','fresh.pdf')];
+await NativeChat.enter(null,'fresh');await until(()=>buttons().length===1);
+release({ok:true,artifacts:[file('stale','stale.pdf')]});await wait(40);
+check('切换会话时旧索引请求不会覆盖当前成果',buttons()[0]?.dataset.openApp==='fresh');
+NativeChat.reset();await NativeChat.enter(null,'multi');
+check('重新打开仍能恢复任务文件链接',await until(()=>buttons().length===2));
+snapshots.multi.messages.push(message('delayed.pdf','task-1'));emit('snapshot',snapshots.multi);
+await wait(2600);
+taskRows['task-1'].push({id:'delayed',role:'output',filename:'delayed.pdf',url:'/api/v1/attachments/delayed?ticket=new'});
+window.dispatchEvent(new CustomEvent('soduwork-work-task-change',{detail:{type:'task.updated',taskId:'task-1'}}));
+check('任务成果晚于短重试窗口入库也由任务事件补齐',await until(()=>buttons().length===3));
+const root=document.createElement('div');root.innerHTML='<div class="ntext"><a>report.pdf</a><pre>report.pdf</pre></div>';
+ChatOutputLinks.linkify(root,[file('a','report.pdf')]);
+check('已被净化掉 href 的文件名可补链且不污染代码块',root.querySelectorAll('button').length===1&&!root.querySelector('pre button'));
+const safe=ChatOutputLinks.sanitize('<a href="javascript:alert(1)">bad</a><img src=x onerror="alert(1)">',DOMPurify);
+check('危险协议和事件仍被过滤',!safe.includes('javascript:')&&!safe.includes('onerror'));
+window.fixtureChecks={passed,failed,lines};window.fixtureReady=true;
+}catch(e){failed++;lines.push('FAIL '+e.stack);window.fixtureChecks={passed,failed,lines};window.fixtureReady=true}
+document.getElementById('out').textContent=lines.join('\n')+'\n\noutput links: '+passed+' passed, '+failed+' failed';
+})();
+</script></body></html>

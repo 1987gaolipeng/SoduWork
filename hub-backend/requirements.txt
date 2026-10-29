@@ -1,0 +1,46 @@
+# Keep FastAPI compatible with the patched Starlette range required below.
+# Earlier constraints pinned Starlette 0.41.3 and prevented the planned security upgrades.
+fastapi>=0.136,<0.144
+uvicorn[standard]>=0.34,<0.35
+sqlalchemy>=2.0,<2.1
+alembic>=1.14,<2
+aiosqlite>=0.20
+asyncpg>=0.30
+# Optional at runtime: only imported when CLUSTER_REDIS_URL enables multi-instance mode.
+redis>=5.2,<6
+pydantic>=2.10,<3
+pydantic-settings>=2.6
+python-dotenv>=1.0
+python-multipart>=0.0.9
+tzdata>=2025.2
+minio>=7.2
+# Direct NFSv3: reuse MIT pyNfsClient codecs with our bounded RPC transport.
+pyNfsClient==0.1.5
+# Python 3.13 removed xdrlib; this PSF-licensed stdlib backport retains its API.
+standard-xdrlib==3.13.0; python_version >= "3.13"
+# NFSv4.1: Apache-2.0 Rust client; published abi3 wheel targets Linux/glibc x86_64.
+nfs-rs==0.8.6; sys_platform == "linux" and platform_machine == "x86_64"
+# Material library editors/exporters (MIT, MIT, MIT respectively).
+python-docx>=1.1,<2
+openpyxl>=3.1,<4
+python-pptx>=1.0,<2
+httpx>=0.28,<0.29
+Pillow>=12.3,<13
+PyJWT[crypto]>=2.10,<3
+# Enforce the Starlette 1.3.1 security baseline and remain below the next major version.
+# This range addresses the security remediation targets tracked for this dependency.
+# Keep the FastAPI constraint compatible with Starlette 1.x.
+starlette>=1.3.1,<2
+# Windows web terminals use the pywinpty ConPTY wheel without a compiler.
+# macOS and Linux use the standard-library pty module and need no extra terminal dependency.
+pywinpty>=3.0; sys_platform == "win32"
+
+# MIT: shared safe YAML frontmatter validation for Agent Skills.
+PyYAML>=6.0.3,<7
+
+# BSD-3-Clause / MIT: bounded, read-only commercial database connectors.
+pg8000==1.31.5
+PyMySQL[rsa]==1.2.3
+
+# Apache-2.0: official MongoDB driver without dynamic downloads or user-supplied runtimes.
+pymongo==4.18.3

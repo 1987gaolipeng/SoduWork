@@ -1,0 +1,56 @@
+<!doctype html><html lang="zh-CN" data-desk-panel="workspace" data-theme="ruby"><meta charset="utf-8"><title>添加待办任务 · 页面回归</title>
+<link rel="stylesheet" href="../theme/variables.css">
+<link rel="stylesheet" href="../components/panels/chat-collaboration.css">
+<link rel="stylesheet" href="../components/requirements/requirements-board.css">
+<link rel="stylesheet" href="../theme/workspace-experience.css">
+
+<style>
+/* Real product theme tokens are intentionally not overridden in this fixture. */
+*{box-sizing:border-box}body{margin:0;background:var(--bg-1);font:var(--text-base) var(--font-ui);color:var(--ink)}
+main{height:100vh;display:flex;flex-direction:column;max-width:1000px;margin:auto}
+header.page-head{padding:24px 32px;border-bottom:1px solid var(--line);font-weight:600}
+.nchat-scroll{padding:40px 65px;line-height:1.9;font-size:15px}.user-message{text-align:right;margin-bottom:30px}
+.user-message span{display:inline-block;padding:12px 18px;border-radius:16px;background:var(--bg-2)}
+#composer{padding:8px 42px 24px}textarea{display:block;width:100%;height:94px;padding:20px;font:inherit;border:1px solid var(--line);border-radius:var(--r-xl);background:var(--bg-0);resize:none}
+#add{display:block;margin:0 auto 12px;padding:8px 15px;border:1px solid var(--accent-soft-2);border-radius:var(--r-full);background:var(--bg-0);color:var(--accent);font:inherit}
+#queue{font-size:13px;padding:0 14px}#queue div{padding:8px;border-bottom:1px solid var(--line)}
+#status{font-size:12px;color:#b44756}
+</style>
+<main><header class="page-head">示例社区 · 上线准备</header>
+<section class="nchat-content-area"><div class="nchat-scroll"><div class="user-message"><span>我们先整理一下上线前需要完成的工作。</span></div>
+<p>页面方案已经确认，可以把待办任务加入这条对话，沿用当前上下文继续推进。</p></div><div id="host" class="nchat-collab-slot"></div></section>
+<div id="composer"><div id="queue"></div><button id="add" data-queue-action="add">＋ 选择需求</button><textarea id="nchatInput" placeholder="接着说…" aria-label="对话输入"></textarea><div id="status"></div></div></main>
+<script src="../core/requirement-session-context.js"></script>
+<script src="../components/requirements/requirement-session-choice.js"></script>
+<script src="../components/panels/chat-collaboration.js"></script>
+<script src="../components/panels/chat-task-start.js"></script>
+<script src="../components/panels/chat-task-controller.js"></script>
+<script>
+const seed=[
+ {id:'design',title:'美化示例社区后台管理界面',projectName:'示例社区',source:'需求池',note:'完整需求说明',status:'todo',attachments:[{id:'screenshot',name:'参考截图.png'}]},
+ {id:'interview',title:'安排产品设计师面试',source:'日常协作',status:'todo'},
+ {id:'report',title:'整理本周经营报告与数据图表',projectName:'经营分析',status:'todo'},
+ {id:'long',title:'完善官网桌面端与窄窗口下的导航、预约表单及错误提示，核对全部交互细节与验收材料',projectName:'企业官网',status:'todo'},
+ {id:'release',title:'核对上线清单与验收材料',projectName:'示例社区',status:'todo'},
+ {id:'running',title:'正在执行不能选',status:'doing'},
+ {id:'completed',title:'已完成不能选',status:'done'},
+ {id:'queued',title:'排队不能选',status:'todo',workRouting:{conversationTurn:{state:'queued'}}},
+];
+let tasks=structuredClone(seed),offline=false,failDetail=false,delayDetail=0,sent=[],bindings=[];
+window.SoduWorkAPI={
+ getTasksSnapshot:async()=>({online:!offline,items:structuredClone(tasks)}),
+ getTask:async(id)=>{if(delayDetail)await new Promise(r=>setTimeout(r,delayDetail));if(failDetail)throw Error('offline');return structuredClone(tasks.find(t=>t.id===id))},
+};
+const ctx={_collabTasks:new Map(),_collabStarts:new Set(),_collabPicker:{open:false,tasks:[]},_sessionId:'chat-a',_ref:'chat-a',
+ _viewEpoch:1,_taskOpenSeq:0,_sessionOptions:{adapterId:'pi'},_snap:{status:'idle',messages:[]},_collabPollTimer:1,
+ _api:()=>({bindTask:async(ref,id)=>{bindings.push({ref,id});return{ok:true}}}),_ensure:async()=>true,
+ _send:async(text,options)=>{sent.push({text,options});return true},refreshHistory:()=>{},
+ _render:()=>{view.render(controller._collabState());document.querySelector('#queue').replaceChildren(...sent.map(s=>{const n=document.createElement('div');n.textContent=s.options.taskTitle;return n}))}};
+function petSay(text){document.getElementById('status').textContent=text}
+const controller=ChatTaskController.create(ctx),view=ChatCollaboration.create({host:document.getElementById('host'),onAction:controller._collabAction});
+document.querySelector('#add').onclick=()=>controller._openTaskPicker();
+function resetFixture(){controller._collabAction('picker-close');tasks=structuredClone(seed);sent=[];bindings=[];offline=false;failDetail=false;delayDetail=0;
+ ctx._collabTasks.clear();ctx._collabStarts.clear();ctx._activeCollabTaskId='';ctx._collaborationTaskId='';ctx._collaborationTask={};
+ ctx._sessionId='chat-a';ctx._ref='chat-a';ctx._viewEpoch++;ctx._sessionOptions={adapterId:'pi'};ctx._render()}
+window.ready=true;
+</script></html>

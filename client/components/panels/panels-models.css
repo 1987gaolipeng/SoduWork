@@ -1,0 +1,130 @@
+/*
+ * Personal models, provider keys, and custom models. Secret inputs use type=password and
+ * autocomplete=new-password; display only credential metadata, never plaintext.
+ */
+/* Summarize availability with counts and search without duplicating provider model lists. */
+.md-top{display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+  padding:2px 2px 12px;border-bottom:1px solid var(--line-2)}
+.md-stat{display:flex;align-items:baseline;gap:5px;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 11.5px)}
+.md-stat b{font-size:19px;font-weight:700;color:var(--ink);line-height:1}
+.md-stat.is-mine b{color:var(--accent)}
+.md-q{flex:1;min-width:130px;margin-left:auto;font:inherit;font-size:max(var(--font-min-readable, 14.5px), 12px);padding:6px 10px;
+  border:1px solid var(--line-3);border-radius:999px;background:var(--bg-0,#fff);color:var(--ink)}
+.md-q:focus{outline:none;border-color:var(--accent)}
+.md-tip{font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.8;color:var(--ink-3);background:var(--accent-soft);
+  border-radius:var(--r-md,10px);padding:10px 13px}
+
+/* One collapsed row per provider; expand infrequent configuration on demand. */
+.md-rows{display:flex;flex-direction:column;gap:6px}
+.md-row{border:1px solid var(--line-2);border-radius:var(--r-md,10px);background:var(--bg-0,#fff);
+  overflow:hidden;transition:border-color .14s var(--ease),box-shadow .16s var(--ease)}
+.md-row.is-open{border-color:var(--line-3);box-shadow:var(--shadow-sm)}
+.md-row.st-mine{border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+.md-row-h{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+  padding:11px 13px;border:none;background:none;font:inherit;color:inherit}
+.md-row-h:hover{background:var(--bg-1)}
+/* Status dots support quick provider-availability scanning. */
+.md-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--line-3)}
+.md-row.st-mine .md-dot{background:var(--accent)}
+.md-row.st-org  .md-dot{background:var(--s-done)}
+.md-row.st-open .md-dot{background:var(--s-doing)}
+.md-row-nm{font-size:max(var(--font-min-readable, 14.5px), 13px);color:var(--ink);font-weight:600;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.md-row-n{font-size:max(var(--font-min-readable, 14.5px), 11.5px);color:var(--ink-5);flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.md-row-st{flex-shrink:0;font-size:max(var(--font-min-readable, 14.5px), 11px);font-weight:600;color:var(--ink-4)}
+.md-row.st-mine .md-row-st{color:var(--accent)}
+.md-row.st-org  .md-row-st{color:var(--s-done)}
+.md-caret{flex-shrink:0;font-size:max(var(--font-min-readable, 14.5px), 10px);color:var(--ink-5);width:12px;text-align:center}
+/* Expanded provider details. */
+.md-row-b{padding:2px 13px 13px;display:flex;flex-direction:column;gap:9px;
+  border-top:1px solid var(--line-2);margin-top:-1px;padding-top:12px}
+.md-keyrow{display:flex;gap:7px;align-items:center}
+.md-eye,.md-test{flex-shrink:0;font:inherit;font-size:max(var(--font-min-readable, 14.5px), 11.5px);padding:6px 11px;
+  border:1px solid var(--line-3);border-radius:var(--r-sm,6px);background:var(--bg-0,#fff);color:var(--ink-3)}
+.md-eye:hover,.md-test:hover{border-color:var(--accent);color:var(--accent)}
+.md-test{font-weight:600}
+.md-meta{display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:max(var(--font-min-readable, 14.5px), 11px);color:var(--ink-5);line-height:1.6}
+.md-mine{color:var(--accent);font-weight:600}
+.md-link{font:inherit;font-size:max(var(--font-min-readable, 14.5px), 11px);border:none;background:none;color:var(--ink-4);
+  text-decoration:underline;text-underline-offset:2px;padding:0}
+.md-link:hover{color:var(--accent)}
+.md-link:disabled{color:var(--ink-5);text-decoration:none}
+/* Show connection-test results beside the relevant provider. */
+.md-test-r{font-weight:600;margin-left:auto;max-width:100%}
+.md-test-r.is-ing{color:var(--ink-4)}
+.md-test-r.is-ok{color:var(--s-done)}
+.md-test-r.is-bad{color:var(--s-doing)}
+/* List and add custom models within their provider. */
+.md-ms{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.md-addwrap{display:inline-flex}
+.md-addin{font:inherit;font-size:max(var(--font-min-readable, 14.5px), 11px);padding:2px 9px;width:150px;
+  border:1px dashed var(--line-3);border-radius:var(--r-sm,6px);background:none;color:var(--ink)}
+.md-addin:focus{outline:none;border-color:var(--accent);border-style:solid}
+.md-url{font-size:max(var(--font-min-readable, 14.5px), 10.5px);color:var(--ink-5);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Loading skeleton and page-level empty state. */
+.md-load{display:flex;align-items:center;gap:7px;font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-4);padding:6px 2px}
+.md-load i{width:34px;height:12px;border-radius:var(--r-sm,6px);background:var(--bg-3);
+  animation:mdSk 1.1s var(--ease) infinite}
+.md-load i:nth-child(2){animation-delay:.14s}
+.md-load i:nth-child(3){animation-delay:.28s}
+@keyframes mdSk{0%,100%{opacity:.45}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.md-load i{animation:none}}
+.md-blank{display:flex;flex-direction:column;align-items:center;gap:9px;text-align:center;
+  padding:46px 20px;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 12.5px);line-height:1.8}
+.md-blank svg{width:40px;height:40px;fill:none;stroke:var(--ink-5);stroke-width:1.4;
+  stroke-linecap:round;stroke-linejoin:round}
+.md-blank b{font-size:max(var(--font-min-readable, 14.5px), 13.5px);color:var(--ink-3)}
+
+.md-sec{display:flex;flex-direction:column;gap:8px}
+.md-sec + .md-sec{margin-top:6px;padding-top:14px;border-top:1px solid var(--line-2)}
+.md-sec-h{display:flex;align-items:baseline;gap:8px;font-size:max(var(--font-min-readable, 14.5px), 12.5px);font-weight:700;color:var(--ink-2)}
+.md-sec-x{font-style:normal;font-weight:400;font-size:max(var(--font-min-readable, 14.5px), 11.5px);color:var(--ink-4)}
+.md-none{font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.8;color:var(--ink-4);
+  border:1px dashed var(--line-3);border-radius:var(--r-md,10px);padding:14px 15px;background:var(--bg-1)}
+.md-list{display:flex;flex-direction:column;gap:6px}
+.md-item{display:flex;align-items:center;gap:10px;padding:9px 12px;
+  border:1px solid var(--line-2);border-radius:var(--r-md,10px);background:var(--bg-0,#fff)}
+.md-item-m{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.md-nm{font-size:max(var(--font-min-readable, 14.5px), 13px);color:var(--ink);line-height:1.4;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.md-sub{font-size:max(var(--font-min-readable, 14.5px), 11px);color:var(--ink-5);line-height:1.4;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Emphasize whether usage uses personal or company credentials. */
+.md-from{flex-shrink:0;font-size:max(var(--font-min-readable, 14.5px), 11px);font-weight:600;border-radius:999px;padding:2px 9px;
+  color:var(--ink-4);background:var(--bg-2)}
+.md-from.is-mine{color:var(--accent);background:var(--accent-soft)}
+/*
+ * Show each provider's available models before its credential input.
+ */
+.md-prov{border:1px solid var(--line-2);border-radius:var(--r-md,10px);padding:11px 13px;
+  background:var(--bg-0,#fff);margin-bottom:8px}
+.md-prov.is-mine{border-color:var(--accent);background:var(--accent-soft)}
+.md-prov.is-noaddr{opacity:.7}
+.md-prov-h{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin-bottom:7px}
+.md-prov-h b{font-size:max(var(--font-min-readable, 14.5px), 12.5px);color:var(--ink)}
+.md-prov-u{font-size:max(var(--font-min-readable, 14.5px), 11px);color:var(--ink-5);flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Status badges distinguish availability and credential ownership. */
+.md-prov-tag{flex-shrink:0;font-size:max(var(--font-min-readable, 14.5px), 10.5px);font-weight:600;border-radius:999px;padding:1px 8px;
+  color:var(--ink-4);background:var(--bg-2)}
+.md-prov-tag.is-mine{color:var(--accent);background:var(--bg-0,#fff)}
+.md-prov-tag.is-org{color:var(--s-done);background:color-mix(in srgb,var(--s-done) 14%,var(--bg-0))}
+.md-prov-tag.is-open{color:var(--s-doing);background:color-mix(in srgb,var(--s-doing) 14%,var(--bg-0))}
+/* Initially show up to six model chips, then expand the remainder. */
+.md-prov-ms{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:9px}
+.md-mtag{font-size:max(var(--font-min-readable, 14.5px), 10.5px);line-height:1.6;color:var(--ink-3);background:var(--bg-2);
+  border-radius:var(--r-sm,6px);padding:2px 7px}
+.md-mtag.is-more{color:var(--ink-5);background:none;border:1px dashed var(--line-3)}
+.md-prov-hint{font-size:max(var(--font-min-readable, 14.5px), 11px);color:var(--ink-5);line-height:1.6}
+.md-prov-b{display:flex;gap:7px;align-items:center}
+.md-in{flex:1;min-width:0;font:inherit;font-size:max(var(--font-min-readable, 14.5px), 12px);padding:6px 9px;
+  border:1px solid var(--line-3);border-radius:var(--r-sm,6px);background:var(--bg-0,#fff);color:var(--ink)}
+.md-in:focus{outline:none;border-color:var(--accent)}
+.md-sel{flex:0 0 160px}
+.md-clear,.md-addbtn{flex-shrink:0;font:inherit;font-size:max(var(--font-min-readable, 14.5px), 11.5px);padding:6px 11px;
+  border:1px solid var(--line-3);border-radius:var(--r-sm,6px);background:var(--bg-0,#fff);color:var(--ink-3)}
+.md-clear:hover,.md-addbtn:hover{border-color:var(--accent);color:var(--accent)}
+.md-clear:disabled{border-color:transparent;background:var(--bg-2);color:var(--ink-4)}
+.md-add{display:flex;gap:7px;align-items:center;margin-top:2px}

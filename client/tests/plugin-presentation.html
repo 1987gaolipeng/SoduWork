@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="vivid" data-skin="glass" data-desk-panel="workspace" data-workspace-view="skills">
+<head><meta charset="utf-8"><title>插件界面 · 隔离验收</title>
+<link rel="stylesheet" href="../theme/variables.css">
+<link rel="stylesheet" href="../components/client-auth/client-auth.css">
+<link rel="stylesheet" href="../components/panels/panels-base.css">
+<link rel="stylesheet" href="../components/panels/agent-brand.css">
+<link rel="stylesheet" href="../components/panels/plugin-ui-host.css">
+<link rel="stylesheet" href="../components/panels/plugin-debug-card.css">
+<link rel="stylesheet" href="../components/panels/plugin-input-sheet.css">
+<link rel="stylesheet" href="../components/panels/work-entry-sheet.css">
+<link rel="stylesheet" href="../components/panels/work-automation-sheet.css">
+<link rel="stylesheet" href="../components/panels/panels-desk.css">
+<link rel="stylesheet" href="../components/panels/notice-type-scale.css">
+<link rel="stylesheet" href="../components/panels/panels-schedules.css">
+<link rel="stylesheet" href="../components/panels/panels-capabilities.css">
+<link rel="stylesheet" href="../components/panels/plugin-install-setup.css">
+<link rel="stylesheet" href="../components/panels/panels-capability-plugins.css">
+<link rel="stylesheet" href="../components/panels/panels-plugin-maker.css">
+<link rel="stylesheet" href="../components/panels/capability-type-scale.css">
+<link rel="stylesheet" href="../components/panels/plugin-presentation.css">
+<link rel="stylesheet" href="../components/panels/panels-agents.css">
+<link rel="stylesheet" href="../components/panels/panels-usage.css">
+<link rel="stylesheet" href="../components/panels/panels-connections.css">
+<link rel="stylesheet" href="../components/panels/panels-runners.css">
+<link rel="stylesheet" href="../components/panels/task-trace-view.css">
+<link rel="stylesheet" href="../components/panels/task-context-view.css">
+<link rel="stylesheet" href="../components/panels/task-trace-rail-view.css">
+<link rel="stylesheet" href="../components/panels/task-evolution-view.css">
+<link rel="stylesheet" href="../components/panels/panels-desk-session.css">
+<link rel="stylesheet" href="../components/panels/panels-aidesk-control.css">
+<link rel="stylesheet" href="../components/panels/panels-aidesk-office.css">
+<link rel="stylesheet" href="../components/panels/panels-detail.css">
+<link rel="stylesheet" href="../components/panels/panels.css">
+<link rel="stylesheet" href="../components/panels/panels-forward-plugin.css">
+<link rel="stylesheet" href="../components/panels/panels-chat.css">
+<link rel="stylesheet" href="../components/panels/chat-collaboration.css">
+<link rel="stylesheet" href="../components/panels/chat-plugin-mention.css">
+<link rel="stylesheet" href="../components/panels/plugin-input-sheet.css">
+<link rel="stylesheet" href="../components/panels/console.css">
+<link rel="stylesheet" href="../components/panels/console-multi.css">
+<link rel="stylesheet" href="../components/workspace/workspace-shell.css">
+<link rel="stylesheet" href="../components/workspace/workspace-page-layout.css">
+<link rel="stylesheet" href="../components/skin-manager/skin-manager.css">
+<link rel="stylesheet" href="../components/team/team.css">
+<link rel="stylesheet" href="../components/reports/work-briefs.css">
+<link rel="stylesheet" href="../components/gantt/gantt.css">
+<link rel="stylesheet" href="../vendor/xterm/xterm.css">
+<link rel="stylesheet" href="../theme/cursor.css">
+<link rel="stylesheet" href="../desk-window.css">
+<link rel="stylesheet" href="../theme/workspace-experience.css">
+<link rel='stylesheet' href='../components/panels/work-composer.css'>
+<link rel='stylesheet' href='../components/panels/panels-compose-model-picker.css'>
+<link rel='stylesheet' href='../components/panels/conversation-attachments.css'>
+<link rel='stylesheet' href='../components/panels/panels-compose-skills.css'>
+<link rel='stylesheet' href='../components/panels/work-intent.css'>
+<link rel="stylesheet" href="../components/settings/settings.css">
+<link rel="stylesheet" href="../components/panels/task-approval-inbox.css">
+<link rel="stylesheet" href="../theme/workspace-page-heads.css">
+<style>
+body{margin:0;background:var(--bg-1)}
+#fixtureLabel{position:fixed;top:30px;left:16px;width:180px;font:13px var(--font-ui);color:var(--ink-3);line-height:1.7}
+#fixtureLabel b{font-size:20px;color:var(--ink)}
+</style>
+<script>
+window.fixtureErrors=[];window.fixtureCalls=[];window.fixtureDrafts=[];
+addEventListener('error',e=>fixtureErrors.push(e.message));
+addEventListener('unhandledrejection',e=>fixtureErrors.push(String(e.reason)));
+window.fetch=()=>{throw Error('Network forbidden in isolated fixture')};
+window.petSay=s=>fixtureCalls.push(['notice',s]);
+window.WorkspaceHost={open:(...args)=>fixtureCalls.push(args)};
+window.SoduWorkSkillCatalogSync={runtimeApi:()=>null,runtimeMap:()=>new Map(),create:()=>({sync(){},stop(){},state:()=>({}),refresh:async()=>({})})};
+window.SoduWorkPluginCatalogSync={create:()=>({start(){},stop(){},refresh(){},isRunning:()=>false})};
+const stepNames=['理解规划：拆解需求并制定调研计划','开源项目调研：寻找可复用构建模块','论文调研：提炼可迁移的技术依据','创新综合：多视角交叉构思','AI 审查：证据核实与可行性评分','人工验收：挑选创意并给出方向','办结沉淀：生成完整交付材料'];
+window.fixtureDraft={
+ key:'product-innovation',version:'1.0.0',name:'产品创新引擎（开源项目 × 论文调研）',template:'workflow',
+ description:'以开源项目与学术论文为双重证据源，完成从产品创意、技术依据到可行性评审的完整研究。',
+ instructions:'先澄清目标和范围，再检索开源项目与论文；每个结论标注可核查来源。交付创新方案、引用清单与验收结论。',
+ skills:['research-01','missing-retained'],mcpServers:['knowledge-base'],runtimeCapabilities:['browser'],
+ entrypoints:{conversation:true,task:true,automation:true},
+ inputs:[{key:'goal',label:'研究目标',type:'textarea',required:true,description:'说明业务问题与预期结果',default:'提高研发协作效率'}],
+ setup:{title:'研究偏好',description:'安装时配置引用格式',preferences:[{key:'language',label:'输出语言',type:'select',default:'zh',options:[{value:'zh',label:'中文'},{value:'en',label:'English'}]}]},
+ evaluationInstruction:'为企业研发团队提出一个有证据支撑的产品方向',evaluationCriteria:['结论有来源','成果包含研究报告'],
+ resources:[{kind:'template',path:'templates/research.md',size:2048},{kind:'example',path:'examples/brief.md',size:1300}],
+ ui:{contributions:[]},workflow:{nodes:stepNames.map((name,i)=>({key:'step_'+i,name,type:i===5?'human_review':i===6?'publish':i===4?'ai_review':'ai',dependsOn:i?['step_'+(i-1)]:[],inputs:[],outputs:[],config:{prompt:'核查资料并交付可供下游使用的结果'}}))}
+};
+const base={personal:false,installed:true,enabled:true,sourceKind:'enterprise',version:'1.0.0',organizationWide:true,
+ entrypoints:{conversation:true,task:true,automation:true},installationState:'installed',
+ capabilities:{skills:['research-01'],mcpServers:[],runtime:['files'],components:[{kind:'instructions',label:'工作说明'},{kind:'skills',label:'Skill',count:2},{kind:'inputs',label:'任务参数',count:6}],permissionSummary:{riskLevel:'low'},qualitySummary:{verified:true},resources:fixtureDraft.resources},
+ workflow:stepNames.map((name,i)=>({name,type:i===5?'human_review':i===6?'publish':i===4?'ai_review':'ai'}))};
+window.fixtureItems=[
+ {...structuredClone(base),personal:true,sourceKind:'personal',pluginId:'personal-test',name:fixtureDraft.name,description:fixtureDraft.description},
+ ...['演示文稿工坊','PDF 工具箱','会议到行动','智能体产品设计','代码修复 · 自动研发闭环','材料研读与知识综述'].map((name,i)=>({
+ ...structuredClone(base),pluginId:'enterprise-'+i,name,description:['从目标、材料和数据搭建故事线，构建可直接演讲的 PowerPoint 演示文稿。','对 PDF 文件做拆分、合并、抽取与整理，并保留完整处理记录。','把会议录音、转写稿或笔记整理为忠于原文的纪要和可执行行动项。'][i%3],
+ ...(i===3?{updateAvailable:true}:i===4?{enabled:false}:{}),
+ }))
+];
+const skills=Array.from({length:42},(_,i)=>({name:'research-'+String(i+1).padStart(2,'0'),description:'检索、核查并整理研究材料；支持附带引用与证据链的团队工作方法。'}));
+window.SoduWorkAPI={
+ capabilityCatalog:async()=>({skills,mcpTemplates:[],summary:{}}),myMcpServers:async()=>({company:[],personal:[],enabledCompany:[]}),
+ pluginCatalog:async()=>({items:fixtureItems,submissions:[],categories:[]}),mySkills:async()=>({skills}),listAIAgents:async()=>({agents:[]}),
+ personalPlugin:async()=>({plugin:{localDraft:structuredClone(fixtureDraft),localVersions:['1.0.0']}}),
+ preflightPluginDraft:async body=>{fixtureDrafts.push(structuredClone(body));return {manifest:{name:body.name,version:body.version},simulation:{order:[]},checks:[{label:'结构预检通过（隔离测试）'}]}},
+ createPluginDraft:async body=>{fixtureCalls.push(['save',structuredClone(body)]);return{message:'隔离保存成功'}},
+ hubConfig:()=>({environment:'development'})
+};
+</script>
+<script src="../core/skin-registry.js"></script>
+<script src="../components/panels/plugin-ui-host.js"></script>
+<script src="../components/panels/plugin-catalog-format.js"></script>
+<script src="../components/panels/plugin-dependency-ux.js"></script>
+<script src="../components/panels/plugin-lifecycle.js"></script>
+<script src="../components/panels/plugin-publication-ux.js"></script>
+<script src="../components/panels/plugin-install-setup.js"></script>
+<script src="../components/panels/plugin-route-directory.js"></script>
+<script src="../components/panels/panels-plugin-maker-utils.js"></script>
+<script src="../components/panels/panels-plugin-maker-skills.js"></script>
+<script src="../core/plugin-icon.js"></script>
+<script src="../core/plugin-platforms.js"></script>
+<script src="../components/panels/plugin-presentation.js"></script>
+<script src="../components/panels/panels-plugin-maker-fields.js"></script>
+<script src="../components/panels/panels-plugin-maker.js"></script>
+<script src="../components/panels/panels-capability-plugins.js"></script>
+<script src="../components/panels/panels-capability-directory.js"></script>
+<script src="../components/panels/panels-capabilities.js"></script>
+<link rel="stylesheet" href="../components/requirements/requirements-board.css">
+</head><body><aside id="fixtureLabel"><b>SoduWork</b><p>插件界面验收<br>本地演示数据<br>不会修改真实插件</p></aside>
+<script>openCapabilityPanel();</script></body></html>

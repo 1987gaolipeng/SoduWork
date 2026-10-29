@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "id": "salesforce",
+  "name": "Salesforce",
+  "category": "客户管理",
+  "description": "Salesforce 通用连接器：账户身份、SOQL 查询、创建记录。基于 Salesforce REST API v62.0，仅 {TENANT}.my.salesforce.com，access token 由用户安全填入。",
+  "officialDocs": [
+    "https://developer.salesforce.com/docs/atlas.en-us.api_rest.meta/api_rest/dome_sobject_retrieve.htm",
+    "https://developer.salesforce.com/docs/atlas.en-us.api_rest.meta/api_rest/resources_query.htm",
+    "https://developer.salesforce.com/docs/atlas.en-us.api_rest.meta/api_rest/dome_sobject_create.htm"
+  ],
+  "authDocs": [
+    "https://help.salesforce.com/s/articleView?id=xcloud.remoteaccess_oauth_token_exchange.htm"
+  ],
+  "baseUrl": "https://{TENANT}.my.salesforce.com",
+  "fields": [
+    {
+      "key": "TENANT",
+      "label": "My Domain 域名前缀（yourcompany.my.salesforce.com 的 yourcompany）",
+      "secret": false,
+      "required": true,
+      "pattern": "^[a-z0-9][a-z0-9-]{0,58}[a-z0-9]$",
+      "example": ""
+    },
+    {
+      "key": "SF_ACCESS_TOKEN",
+      "label": "OAuth access token",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "tokenKey": "SF_ACCESS_TOKEN",
+    "header": "Authorization",
+    "prefix": "Bearer"
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "get_user_info",
+      "description": "获取当前身份（GET /services/oauth2/userinfo，随 token 响应 id 端点）。无分页。出处：https://help.salesforce.com/s/articleView?id=xcloud.remoteaccess_oidc.htm",
+      "method": "GET",
+      "path": "/services/oauth2/userinfo",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "query_soql",
+      "description": "执行 SOQL 查询（GET /services/data/v62.0/query?q=）。分页：响应体 nextRecordsUrl（本定义只声明首页，续页由调用方跟随）。出处：https://developer.salesforce.com/docs/atlas.en-us.api_rest.meta/api_rest/resources_query.htm",
+      "method": "GET",
+      "path": "/services/data/v62.0/query",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "q": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000,
+            "description": "SOQL 查询语句（SELECT 开头）"
+          }
+        },
+        "required": [
+          "q"
+        ],
+        "maxProperties": 50
+      },
+      "query": {
+        "q": "q"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_record",
+      "description": "创建记录（POST /services/data/v62.0/sobjects/{sobject}）。写入操作：运行前必须获得用户明确授权。出处：https://developer.salesforce.com/docs/atlas.en-us.api_rest.meta/api_rest/dome_sobject_create.htm",
+      "method": "POST",
+      "path": "/services/data/v62.0/sobjects/{sobject}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sobject": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]{1,40}$",
+            "description": "对象名，如 Account、Contact",
+            "maxLength": 10000
+          },
+          "fields": {
+            "type": "object",
+            "description": "字段名到值的映射（叶子值为简单 JSON 类型：字符串/数字/布尔/null；最多 50 键）",
+            "additionalProperties": true,
+            "maxProperties": 50
+          }
+        },
+        "required": [
+          "sobject",
+          "fields"
+        ],
+        "maxProperties": 50
+      },
+      "body": "$fields",
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "baseUrl 限定 {TENANT}.my.salesforce.com；沙箱（test.salesforce.com）与 Experience Cloud 域未覆盖。",
+    "access token 约 2 小时过期（取决于 org 策略），需用户安全填入并手动更新；自动续期为宿主侧适配项，本连接器未实现。",
+    "SOQL 仅允许 SELECT 查询；写操作只经 create_record，SOSL/search 端点未收录。",
+    "create_record 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

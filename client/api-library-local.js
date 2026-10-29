@@ -1,0 +1,312 @@
+/*
+ * Renderer library routing. Empty/local storage always means the client PC.
+ * Main owns the files and validates payload.owner against deviceAuth.localOwner.
+ * Local IDs are local-UUID / local-folder-UUID; every other item ID stays on Hub.
+ *
+ * Historical Hub-local data is reachable only through the remote root's virtual
+ * server-history-root / server-history-<Hub folder ID> directories. These carry
+ * storageOrigin=server-history and are read-only navigation, never upload or
+ * folder mutation destinations. Historical item IDs remain unchanged so existing
+ * download/edit/favorite/trash/share endpoints retain their original behavior.
+ * Historical trash keeps the virtual root in list filters; emptyLibraryTrash
+ * requires options.storageOrigin=server-history to target the old Hub-local trash.
+ * Copying a PC item uploads its bytes and keeps the source; it never PATCHes a
+ * backend or automatically moves old data. Explicit sharing sends a notification
+ * snapshot; it does not create a remote library item.
+ */
+(function (global) {
+  'use strict';
+  var HISTORY = 'server-history-', HISTORY_ROOT = HISTORY + 'root';
+  var BINARY_LIMIT = 64 * 1024 * 1024;
+  function failure(code, message) { var e = new Error(message); e.code = code; return e; }
+  function isLocal(id) { return String(id || '').startsWith('local-'); }
+  function isHistory(id) { return String(id || '').startsWith(HISTORY); }
+  function isLocalStorage(storage) { return !storage || storage === 'local'; }
+  function requireRemote(storage) {
+    if (storage !== 'nfs' && storage !== 'minio') throw failure('LIBRARY_REMOTE_REQUIRED', '请选择已连接的远程存储');
+    return storage;
+  }
+  function rejectHistory(id) {
+    if (isHistory(id)) throw failure('LIBRARY_HISTORY_READ_ONLY', '历史服务器目录仅供浏览，请返回远程根目录保存新资料');
+  }
+  function checkFolder(folderId, storage) {
+    rejectHistory(folderId);
+    if (folderId && isLocal(folderId) !== isLocalStorage(storage)) {
+      throw failure('LIBRARY_FOLDER_BACKEND_MISMATCH', '资料和目标文件夹必须位于同一存储');
+    }
+  }
+  function noArchive() { throw failure('LOCAL_LIBRARY_ARCHIVE_UNSUPPORTED', '本机压缩包暂不支持内嵌浏览，请下载原件或使用默认应用打开'); }
+  function unavailable(error, backend) {
+    return { backend: backend || '', state: 'unavailable', configured: false, available: false, enabled: false, connected: false,
+      code: error?.code || (backend === 'local' ? 'LOCAL_LIBRARY_UNAVAILABLE' : 'LIBRARY_REMOTE_UNAVAILABLE'),
+      message: error?.message || '存储暂不可用' };
+  }
+  function historyFolder(row, backend) {
+    return Object.assign({}, row, { id: HISTORY + row.id, parentId: row.parentId ? HISTORY + row.parentId : HISTORY_ROOT,
+      backend: backend, storageOrigin: 'server-history', readOnly: true });
+  }
+  function historyRoot(backend) {
+    return { id: HISTORY_ROOT, parentId: '', name: '历史服务器资料', backend: backend, storageOrigin: 'server-history', readOnly: true };
+  }
+
+  function install(api, dependencies) {
+    var remote = {}, scopeEpoch = 0;
+    global.addEventListener?.('soduwork-data-scope-changed', function () { scopeEpoch += 1; });
+    Object.keys(api).forEach(function (name) { if (typeof api[name] === 'function') remote[name] = api[name].bind(api); });
+    function scope() { return { key: dependencies.scope(), epoch: scopeEpoch }; }
+    function assertScope(value) {
+      dependencies.assertScope(value.key);
+      if (value.epoch !== scopeEpoch) throw failure('STALE_TASK_SCOPE', '当前账号或设备已切换，请重新打开后再操作');
+    }
+    async function localContext(requestScope) {
+      assertScope(requestScope);
+      var bridge = global.soduWorkAPI?.localLibrary;
+      if (!bridge || typeof bridge.context !== 'function' || typeof bridge.call !== 'function') {
+        throw failure('LOCAL_LIBRARY_UNAVAILABLE', '当前客户端不支持本机资料库，请更新客户端后重试');
+      }
+      var context = await bridge.context();
+      assertScope(requestScope);
+      if (!context?.owner || context.ok === false) throw failure(context?.code || 'LOCAL_LIBRARY_UNAVAILABLE', context?.message || context?.reason || '请先登录后使用本机资料库');
+      return { owner: context.owner, bridge: bridge };
+    }
+    async function invoke(action, payload, requestScope, capturedContext) {
+      if (requestScope == null) requestScope = scope();
+      var context = capturedContext || await localContext(requestScope);
+      assertScope(requestScope);
+      var result = await context.bridge.call(action, Object.assign({}, payload, { owner: context.owner }));
+      assertScope(requestScope);
+      if (action === 'exportFile' && result?.cancelled === true) return result;
+      if (result?.ok === false) throw failure(result.code || 'LOCAL_LIBRARY_ERROR', result.message || result.reason || '本机资料库操作失败');
+      if (['deleteItem', 'restoreItem', 'purgeItem', 'emptyTrash'].includes(action)) {
+        global.dispatchEvent?.(new CustomEvent('soduwork-library-changed'));
+      }
+      return result;
+    }
+    async function localBinary(id, requestScope, capturedContext) {
+      var got = await invoke('readBinary', { id: id }, requestScope, capturedContext);
+      assertScope(requestScope);
+      if (typeof got?.data !== 'string' || got.data.length > Math.ceil(BINARY_LIMIT / 3) * 4 ||
+          got.data.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(got.data)) {
+        throw failure('LOCAL_LIBRARY_BINARY_INVALID', '本机文件内容无效或超过 64MB，请下载原件后使用');
+      }
+      var raw = atob(got.data), bytes = new Uint8Array(raw.length);
+      if (bytes.length > BINARY_LIMIT || (got.size != null && Number(got.size) !== bytes.length)) {
+        throw failure('LOCAL_LIBRARY_BINARY_INVALID', '本机文件读取不完整或超过 64MB，请下载原件后使用');
+      }
+      for (var i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
+      var blob = new Blob([bytes], { type: got.mimeType || 'application/octet-stream' });
+      var source = got.source || (got.item?.sourceType ? { type: got.item.sourceType,
+        sessionId: got.item.sessionId || got.item.sourceSessionId || '',
+        conversationTitle: got.item.conversationTitle || got.item.sourceConversationTitle || '' } : null);
+      return { ok: true, blob: blob, name: got.name || '资料', type: blob.type, size: blob.size, source: source,
+        remoteCopy: got.item?.extra?.lastRemoteCopy };
+    }
+
+    api.getLibraryOutputStatus = function (outputKey, file) {
+      return invoke('outputStatus', { outputKey: outputKey, name: file?.name || file?.filename, size: file?.size, sha256: file?.sha256 });
+    };
+    api.listLibrary = async function (filters) {
+      var f = Object.assign({}, filters), storage = f.storage || 'local', folderId = f.folderId || '';
+      if (isHistory(folderId)) {
+        requireRemote(storage);
+        var old = await remote.listLibrary(Object.assign({}, f, { storage: 'local', folderId: f.scope === 'trash' || folderId === HISTORY_ROOT ? '' : folderId.slice(HISTORY.length) }));
+        return Object.assign({}, old, { storage: storage, storageOrigin: 'server-history',
+          folder: folderId === HISTORY_ROOT ? historyRoot(storage) : old.folder ? historyFolder(old.folder, storage) : null,
+          folders: (old.folders || []).map(function (row) { return historyFolder(row, storage); }),
+          items: (old.items || []).map(function (row) { return Object.assign({}, row, { storageOrigin: 'server-history' }); }) });
+      }
+      if (isLocal(folderId) || isLocalStorage(storage)) return invoke('list', Object.assign({}, f, { storage: 'local' }));
+      requireRemote(storage);
+      var result = await remote.listLibrary(Object.assign({}, f, { storage: storage }));
+      if (!folderId && !f.query && (!f.scope || ['all', 'recommended', 'folders'].includes(f.scope))) {
+        result = Object.assign({}, result, { folders: [historyRoot(storage)].concat(result.folders || []) });
+      }
+      return result;
+    };
+    api.getLibraryStorageStatus = async function () {
+      var requestScope = scope();
+      var results = await Promise.allSettled([invoke('status', {}, requestScope), remote.getLibraryStorageStatus()]);
+      assertScope(requestScope);
+      results.forEach(function (entry) { if (entry.status === 'rejected' && entry.reason?.code === 'STALE_TASK_SCOPE') throw entry.reason; });
+      var localResult = results[0].status === 'fulfilled' ? results[0].value : null;
+      var local = localResult ? (localResult.storage?.local || localResult.local || localResult) : unavailable(results[0].reason, 'local');
+      local = Object.assign({}, local, { backend: 'local' });
+      var hub = results[1].status === 'fulfilled' ? results[1].value : {};
+      var storage = Object.assign({}, hub.storage || {});
+      storage.local = local;
+      ['nfs', 'minio'].forEach(function (backend) { storage[backend] = storage[backend] || hub[backend] || unavailable(results[1].reason, backend); });
+      var legacyBackend = ['nfs', 'minio'].includes(hub.remoteBackend) ? hub.remoteBackend
+        : storage.minio.configured || storage.minio.available ? 'minio' : '';
+      storage.remote = storage.remote || hub.remote || (legacyBackend
+        ? Object.assign({}, storage[legacyBackend], { backend: legacyBackend }) : unavailable(results[1].reason));
+      return Object.assign({}, hub, storage, { ok: true, default: 'local', storage: storage, remoteBackend: hub.remoteBackend || storage.remote.backend || '' });
+    };
+    api.createLibraryFolder = async function (name, parentId, storage) {
+      storage = storage || 'local'; checkFolder(parentId, storage);
+      return isLocalStorage(storage) ? invoke('createFolder', { name: name || '', parentId: parentId || '', storage: 'local' })
+        : remote.createLibraryFolder(name, parentId, requireRemote(storage));
+    };
+    api.updateLibraryFolder = async function (id, body) {
+      rejectHistory(id); body = body || {};
+      if (isLocal(id)) {
+        if (body.storage && body.storage !== 'local') throw failure('LOCAL_LIBRARY_COPY_REQUIRED', '本机资料不能直接移动到远程，请保存远程副本');
+        checkFolder(body.parentId, 'local'); return invoke('updateFolder', { id: id, body: body });
+      }
+      rejectHistory(body.parentId);
+      if (isLocal(body.parentId)) throw failure('LIBRARY_FOLDER_BACKEND_MISMATCH', '资料和目标文件夹必须位于同一存储');
+      return remote.updateLibraryFolder(id, body);
+    };
+    api.deleteLibraryFolder = async function (id) {
+      rejectHistory(id); return isLocal(id) ? invoke('deleteFolder', { id: id }) : remote.deleteLibraryFolder(id);
+    };
+    api.createLibraryItem = async function (body) {
+      body = Object.assign({}, body); var storage = body.storage || 'local'; checkFolder(body.folderId, storage);
+      if (isLocalStorage(storage)) return invoke('createItem', Object.assign(body, { storage: 'local' }));
+      return remote.createLibraryItem(Object.assign(body, { storage: requireRemote(storage) }));
+    };
+    api.uploadLibraryFile = async function (file, folderId, storage, source) {
+      var requestScope = scope(); storage = storage || 'local'; checkFolder(folderId, storage);
+      if (!isLocalStorage(storage)) return remote.uploadLibraryFile(file, folderId, requireRemote(storage), source);
+      if (!file) throw new Error('请选择文件');
+      if (Number(file.size) > BINARY_LIMIT) throw failure('LOCAL_LIBRARY_FILE_TOO_LARGE', '文件超过 64MB，暂时无法保存到本机资料库');
+      var context = await localContext(requestScope);
+      var encoded = await dependencies.blobToBase64(file);
+      assertScope(requestScope);
+      return invoke('upload', { dataBase64: encoded, name: file.name || '资料', contentType: file.type || 'application/octet-stream',
+        folderId: folderId || '', source: source || {}, storage: 'local' }, requestScope, context);
+    };
+    api.readLibraryBinary = async function (id) { return isLocal(id) ? localBinary(id, scope()) : remote.readLibraryBinary(id); };
+    api.readLibraryContent = async function (id, options) {
+      return isLocal(id) ? invoke('readContent', { id: id, preview: options?.preview === true }) : remote.readLibraryContent(id, options);
+    };
+    api.updateLibraryItem = async function (id, body) {
+      body = Object.assign({}, body);
+      if (isLocal(id)) {
+        if (body.storage && body.storage !== 'local') throw failure('LOCAL_LIBRARY_COPY_REQUIRED', '本机资料不能直接移动到远程，请保存远程副本');
+        checkFolder(body.folderId, 'local'); return invoke('updateItem', { id: id, body: body });
+      }
+      if (isLocal(body.folderId)) throw failure('LIBRARY_FOLDER_BACKEND_MISMATCH', '资料和目标文件夹必须位于同一存储');
+      if (isHistory(body.folderId)) {
+        body.folderId = body.folderId === HISTORY_ROOT ? '' : body.folderId.slice(HISTORY.length); body.storage = 'local';
+      }
+      return remote.updateLibraryItem(id, body);
+    };
+    ['delete', 'restore', 'purge'].forEach(function (action) {
+      var method = action + 'LibraryItem';
+      api[method] = async function (id) { return isLocal(id) ? invoke(action + 'Item', { id: id }) : remote[method](id); };
+    });
+    api.emptyLibraryTrash = async function (storage, options) {
+      if (options?.storageOrigin === 'server-history') { requireRemote(storage); return remote.emptyLibraryTrash('local'); }
+      return isLocalStorage(storage) ? invoke('emptyTrash', {}) : remote.emptyLibraryTrash(requireRemote(storage));
+    };
+    api.associateLibrarySource = async function (id, source) {
+      return isLocal(id) ? invoke('associateSource', { id: id, source: source || {} }) : remote.associateLibrarySource(id, source);
+    };
+    api.shareLibraryItem = async function (id, recipients, note, options) {
+      if (!isLocal(id)) return remote.shareLibraryItem(id, recipients, note);
+      var requestScope = scope(), context = await localContext(requestScope);
+      var got = await localBinary(id, requestScope, context);
+      if (!got.size || got.size > 24 * 1024 * 1024) throw failure('LIBRARY_SHARE_SIZE', '请选择非空且不超过 24 MB 的文件');
+      var data = await dependencies.blobToBase64(got.blob);
+      assertScope(requestScope);
+      var current = await localContext(requestScope);
+      if (current.owner !== context.owner) throw failure('STALE_TASK_SCOPE', '当前账号已变化，请重新打开资料库');
+      assertScope(requestScope);
+      var result = await remote.shareLocalLibraryFile({ requestId: options?.requestId || global.crypto.randomUUID(),
+        localItemId: id, filename: got.name, contentType: got.type, data: data,
+        recipientUserIds: recipients || [], note: String(note || '') });
+      assertScope(requestScope);
+      return result;
+    };
+    api.saveMateMessageFileToLibrary = async function (id) {
+      var requestScope = scope(), context = await localContext(requestScope);
+      var row = await remote.mateMessageFile(id);
+      assertScope(requestScope);
+      if (typeof global.soduWorkAPI?.readAttachmentBinary !== 'function') throw failure('LOCAL_LIBRARY_UNAVAILABLE', '请更新客户端后保存附件');
+      var got = await global.soduWorkAPI.readAttachmentBinary({ url: api.attachmentUrl(row), filename: row.filename });
+      assertScope(requestScope);
+      if (!got || got.ok === false) throw failure('LOCAL_LIBRARY_BINARY_INVALID', got?.reason || '读取附件失败');
+      var cap = 24 * 1024 * 1024;
+      if (typeof got.data !== 'string' || got.data.length > Math.ceil(cap / 3) * 4 ||
+          got.data.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(got.data)) {
+        throw failure('LOCAL_LIBRARY_BINARY_INVALID', '附件内容无效，请重新下载后保存');
+      }
+      var size = atob(got.data).length;
+      if (size > cap || (row.size != null && Number(row.size) !== size) || (got.size != null && Number(got.size) !== size)) {
+        throw failure('LOCAL_LIBRARY_BINARY_INVALID', '附件读取不完整，请重试');
+      }
+      var current = await localContext(requestScope);
+      if (current.owner !== context.owner) throw failure('STALE_TASK_SCOPE', '当前账号已变化，请重新打开通知');
+      // Use the authorized snapshot name and the normal native upload path,
+      // which rejects duplicate names without replacing the existing file.
+      return invoke('upload', { dataBase64: got.data, name: row.filename || '附件',
+        contentType: row.contentType || row.content_type || got.mimeType || 'application/octet-stream',
+        folderId: '', source: {}, storage: 'local' }, requestScope, context);
+    };
+    api.getLibraryArchive = async function (id) { if (isLocal(id)) noArchive(); return remote.getLibraryArchive(id); };
+    api.readLibraryArchiveFile = async function (id, path, options) { if (isLocal(id)) noArchive(); return remote.readLibraryArchiveFile(id, path, options); };
+    ['openLibraryExternally', 'revealLibraryItem'].forEach(function (method) {
+      api[method] = async function (id, member) {
+        if (!isLocal(id)) return remote[method](id, member);
+        if (member?.path) noArchive();
+        return invoke(method === 'openLibraryExternally' ? 'openExternal' : 'reveal', { id: id });
+      };
+    });
+    api.downloadLibraryItem = async function (id, filename, member) {
+      if (!isLocal(id)) return remote.downloadLibraryItem(id, filename, member);
+      if (member?.path) noArchive();
+      return invoke('exportFile', { id: id, filename: filename || '' });
+    };
+    api.copyLocalLibraryItemToRemote = async function (id, target) {
+      var requestScope = scope(), destination = typeof target === 'string' ? { storage: target } : target || {};
+      var storage = requireRemote(destination.storage), folderId = destination.folderId || '';
+      if (!isLocal(id)) throw failure('LOCAL_LIBRARY_ITEM_REQUIRED', '请选择本机资料');
+      checkFolder(folderId, storage);
+      var context = await localContext(requestScope);
+      var got = await localBinary(id, requestScope, context);
+      var prior = got.remoteCopy;
+      if (destination.reuseExisting === true && prior?.id && prior.storage === storage && (prior.folderId || '') === folderId) {
+        var saved;
+        try { saved = await remote.readLibraryBinary(prior.id); }
+        catch (error) { assertScope(requestScope); if (error?.status !== 404) throw error; }
+        assertScope(requestScope);
+        if (saved?.blob && saved.name === got.name && saved.size === got.size) {
+          var buffers = await Promise.all([got.blob.arrayBuffer(), saved.blob.arrayBuffer()]);
+          assertScope(requestScope);
+          var original = new Uint8Array(buffers[0]), existing = new Uint8Array(buffers[1]);
+          if (original.every(function (value, offset) { return value === existing[offset]; })) {
+            var verifiedContext = await localContext(requestScope);
+            if (verifiedContext.owner !== context.owner) throw failure('STALE_TASK_SCOPE', '当前账号已变化，请重新打开资料库');
+            return { ok: true, item: { id: prior.id }, reused: true, localItemId: id };
+          }
+        }
+      }
+      var current = await localContext(requestScope);
+      if (current.owner !== context.owner) throw failure('STALE_TASK_SCOPE', '当前账号已变化，请重新打开资料库');
+      assertScope(requestScope);
+      var file = new File([got.blob], got.name, { type: got.type });
+      // No await between the scope check and dispatch: the old account's bytes
+      // must never start a request carrying a newly selected account's session.
+      var result = got.size === 0 ? await remote.createLibraryItem({ kind: 'file', title: got.name, filename: got.name,
+        content: '', contentType: got.type, folderId: folderId, storage: storage, rejectDuplicateName: true,
+        sourceType: got.source?.type, sessionId: got.source?.sessionId, conversationTitle: got.source?.conversationTitle,
+      }) : await remote.uploadLibraryFile(file, folderId, storage, Object.assign({}, got.source, { rejectDuplicateName: true }));
+      assertScope(requestScope);
+      if (!result || result.ok === false || !result.item?.id) throw failure('LIBRARY_REMOTE_COPY_FAILED', '远程副本未保存成功，本机原件已保留');
+      var recorded = true;
+      try {
+        await invoke('updateItem', { id: id, body: { extra: { lastRemoteCopy: {
+          id: result.item.id, storage: storage, folderId: folderId, copiedAt: new Date().toISOString(),
+        } } } }, requestScope, context);
+      } catch (error) {
+        assertScope(requestScope);
+        if (error?.code === 'STALE_TASK_SCOPE') throw error;
+        // The copy exists even if recording its ID on the source fails. Returning
+        // a failure here would encourage a duplicate upload on the next retry.
+        recorded = false;
+      }
+      return Object.assign({}, result, { copied: true, localItemId: id, copyRecordSaved: recorded });
+    };
+  }
+  global.SoduWorkLocalLibraryAPI = { install: install };
+})(typeof window !== 'undefined' ? window : this);

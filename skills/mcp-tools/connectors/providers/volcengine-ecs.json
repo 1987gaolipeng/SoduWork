@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "id": "volcengine-ecs",
+  "name": "火山引擎 ECS",
+  "category": "云服务",
+  "description": "火山引擎 ECS 通用连接器（HMAC-SHA256 V4 风格签名，只读）：列实例、列镜像、列机型。签名流程已对官方 SDK（volc-sdk-python SignerV4）实现逐段核对。不提供任意云 API 透传。",
+  "runtimeKind": "volcengine-ecs",
+  "officialDocs": [
+    "https://docs.volcengine.com/docs/ecs/DescribeInstances?lang=en",
+    "https://docs.volcengine.com/docs/ecs/DescribeImages-Queriesimages?lang=en",
+    "https://docs.volcengine.com/docs/ecs/DescribeInstanceTypes-Queriesthelistofinstancetypes?lang=en"
+  ],
+  "authDocs": [
+    "https://www.volcengine.com/docs/6369/67269"
+  ],
+  "baseUrl": "https://ecs.{VOLC_REGION}.volcengineapi.com",
+  "fields": [
+    {
+      "key": "VOLC_REGION",
+      "label": "区域（如 cn-beijing、ap-southeast-1）",
+      "secret": false,
+      "required": true,
+      "pattern": "^[a-z]{2}(?:-[a-z0-9]+){1,4}$",
+      "example": "cn-beijing"
+    },
+    {
+      "key": "VOLC_ACCESS_KEY",
+      "label": "Access Key ID（AK）",
+      "secret": false,
+      "required": true,
+      "pattern": "^\\S{8,4096}$",
+      "example": ""
+    },
+    {
+      "key": "VOLC_SECRET_KEY",
+      "label": "Secret Access Key（SK）",
+      "secret": true,
+      "required": true,
+      "example": ""
+    },
+    {
+      "key": "VOLC_SESSION_TOKEN",
+      "label": "临时会话令牌（使用临时凭据时必填）",
+      "secret": true,
+      "required": false,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "none"
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "describe_instances",
+      "description": "查询 ECS 实例列表，使用 max_results 和 next_token 分页，每页最多 100 条。",
+      "method": "GET",
+      "path": "/",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "max_results": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          },
+          "next_token": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": []
+      },
+      "readOnly": true
+    },
+    {
+      "name": "describe_images",
+      "description": "查询 ECS 镜像列表，使用 max_results 和 next_token 分页，每页最多 100 条。",
+      "method": "GET",
+      "path": "/",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "max_results": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          },
+          "next_token": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": []
+      },
+      "readOnly": true
+    },
+    {
+      "name": "describe_instance_types",
+      "description": "查询 ECS 实例规格，使用 max_results 和 next_token 分页，每页最多 100 条。",
+      "method": "GET",
+      "path": "/",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "max_results": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          },
+          "next_token": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "required": []
+      },
+      "readOnly": true
+    }
+  ],
+  "limitations": [
+    "仅提供所列固定只读查询，不执行任意云 API，也不创建、启停或删除资源。",
+    "需要平台账号及对应资源的只读权限；首次连接会实际检查授权。",
+    "已按官方接口复核；尚无真实云账号验收，签名与响应测试不能替代实际授权验证。",
+    "响应最多 2 MB；分页工具需使用返回的分页参数继续读取。"
+  ]
+}

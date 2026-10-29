@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 1,
+  "id": "volcengine-ark",
+  "name": "火山方舟 Ark",
+  "category": "图像与影音",
+  "description": "火山方舟（Volcengine Ark）通用连接器：文生图（POST /images/generations）、视频生成任务创建与状态查询（contents/generations/tasks）。API Key 为 Bearer。计费端点：定义仅供审阅，不得在未授权下执行。",
+  "officialDocs": [
+    "https://www.volcengine.com/docs/82379/1541523",
+    "https://www.volcengine.com/docs/82379/1520757",
+    "https://www.volcengine.com/docs/82379/1330310"
+  ],
+  "authDocs": [
+    "https://www.volcengine.com/docs/82379/1330310"
+  ],
+  "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+  "fields": [
+    {
+      "key": "ARK_API_KEY",
+      "label": "方舟 API Key",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "tokenKey": "ARK_API_KEY",
+    "header": "Authorization",
+    "prefix": "Bearer"
+  },
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "tools": [
+    {
+      "name": "generate_image",
+      "description": "文生图（POST /images/generations，model 必填如 doubao-seedream-x-x；同步返回 b64_json/url）。计费操作：执行前必须获得用户明确授权与付费确认；本定义不执行任何请求。出处：https://www.volcengine.com/docs/82379/1541523",
+      "method": "POST",
+      "path": "/images/generations",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "description": "模型 ID，如 doubao-seedream-4-0",
+            "maxLength": 10000
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "description": "提示词"
+          },
+          "size": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{2,3}x[1-9][0-9]{2,3}$",
+            "description": "如 1024x1024、2048x2048（宽x高，各 3-4 位数字）",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "model",
+          "prompt"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "model": "$model",
+        "prompt": "$prompt",
+        "size": "$size"
+      },
+      "readOnly": false
+    },
+    {
+      "name": "create_video_task",
+      "description": "创建视频生成任务（POST /contents/generations/tasks，body.content 为 [{type:\"text\",text}] 官方结构，异步）。计费操作：执行前必须获得用户明确授权与付费确认。出处：https://www.volcengine.com/docs/82379/1520757",
+      "method": "POST",
+      "path": "/contents/generations/tasks",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "description": "视频模型 ID，如 doubao-seedance-1-0-pro",
+            "maxLength": 10000
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "description": "提示词"
+          }
+        },
+        "required": [
+          "model",
+          "prompt"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "model": "$model",
+        "content": [
+          {
+            "type": "text",
+            "text": "$prompt"
+          }
+        ]
+      },
+      "readOnly": false
+    },
+    {
+      "name": "get_video_task",
+      "description": "查询视频生成任务状态（GET /contents/generations/tasks/{id}）。无分页；轮询间隔官方建议 ≥10 秒。出处：https://www.volcengine.com/docs/82379/1520757",
+      "method": "GET",
+      "path": "/contents/generations/tasks/{task_id}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{10,}$",
+            "description": "任务 ID（create_video_task 返回）",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "generate_image / create_video_task 为计费端点：任何执行都需要用户逐次明确授权与付费确认；本定义仅为接口描述，不执行、不预授权。",
+    "get_video_task 为免费状态查询（不计费），但任务本体按 create 时刻计费。",
+    "模型可用性与价格以火山方舟控制台实时为准，本定义不锁定模型版本。"
+  ]
+}

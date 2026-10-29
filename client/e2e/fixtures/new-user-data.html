@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="vivid" data-skin="glass" data-desk-panel="workspace" data-workspace-view="history">
+<head><meta charset="UTF-8"><title>新用户数据隔离验证</title>
+<style>#newUserNav button{display:block;width:100%;margin:8px 0;padding:10px 12px;border:1px solid var(--line);border-radius:9px;text-align:left;font:14px var(--font-ui);color:var(--ink-2);background:var(--bg-1)}</style>
+<link rel="stylesheet" href="../../theme/variables.css">
+<link rel="stylesheet" href="../../components/client-auth/client-auth.css">
+<link rel="stylesheet" href="../../components/panels/panels-base.css">
+<link rel="stylesheet" href="../../components/panels/agent-brand.css">
+<link rel="stylesheet" href="../../components/panels/plugin-ui-host.css">
+<link rel="stylesheet" href="../../components/panels/plugin-debug-card.css">
+<link rel="stylesheet" href="../../components/panels/plugin-input-sheet.css">
+<link rel="stylesheet" href="../../components/panels/work-entry-sheet.css">
+<link rel="stylesheet" href="../../components/panels/work-automation-sheet.css">
+<link rel="stylesheet" href="../../components/panels/panels-desk.css">
+<link rel="stylesheet" href="../../components/panels/notice-type-scale.css">
+<link rel="stylesheet" href="../../components/panels/panels-schedules.css">
+<link rel="stylesheet" href="../../components/panels/panels-capabilities.css">
+<link rel="stylesheet" href="../../components/panels/plugin-install-setup.css">
+<link rel="stylesheet" href="../../components/panels/panels-capability-plugins.css">
+<link rel="stylesheet" href="../../components/panels/panels-plugin-maker.css">
+<link rel="stylesheet" href="../../components/panels/capability-type-scale.css">
+<link rel="stylesheet" href="../../components/panels/panels-agents.css">
+<link rel="stylesheet" href="../../components/panels/panels-usage.css">
+<link rel="stylesheet" href="../../components/panels/panels-connections.css">
+<link rel="stylesheet" href="../../components/panels/panels-runners.css">
+<link rel="stylesheet" href="../../components/panels/task-trace-view.css">
+<link rel="stylesheet" href="../../components/panels/task-context-view.css">
+<link rel="stylesheet" href="../../components/panels/task-trace-rail-view.css">
+<link rel="stylesheet" href="../../components/panels/task-evolution-view.css">
+<link rel="stylesheet" href="../../components/panels/panels-desk-session.css">
+<link rel="stylesheet" href="../../components/panels/panels-aidesk-control.css">
+<link rel="stylesheet" href="../../components/panels/panels-aidesk-office.css">
+<link rel="stylesheet" href="../../components/panels/panels-detail.css">
+<link rel="stylesheet" href="../../components/panels/panels.css">
+<link rel="stylesheet" href="../../components/panels/panels-forward-plugin.css">
+<link rel="stylesheet" href="../../components/panels/panels-chat.css">
+<link rel="stylesheet" href="../../components/panels/chat-collaboration.css">
+<link rel="stylesheet" href="../../components/panels/chat-plugin-mention.css">
+<link rel="stylesheet" href="../../components/panels/plugin-input-sheet.css">
+<link rel="stylesheet" href="../../components/panels/console.css">
+<link rel="stylesheet" href="../../components/panels/console-multi.css">
+<link rel="stylesheet" href="../../components/workspace/workspace-shell.css">
+<link rel="stylesheet" href="../../components/workspace/workspace-page-layout.css">
+<link rel="stylesheet" href="../../components/skin-manager/skin-manager.css">
+<link rel="stylesheet" href="../../components/team/team.css">
+<link rel="stylesheet" href="../../components/reports/work-briefs.css">
+<link rel="stylesheet" href="../../components/gantt/gantt.css">
+<link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+<link rel="stylesheet" href="../../theme/cursor.css">
+<link rel="stylesheet" href="../../desk-window.css">
+<link rel="stylesheet" href="../../theme/workspace-experience.css">
+<link rel='stylesheet' href='../../components/panels/work-composer.css'>
+<link rel='stylesheet' href='../../components/panels/panels-compose-model-picker.css'>
+<link rel='stylesheet' href='../../components/panels/conversation-attachments.css'>
+<link rel='stylesheet' href='../../components/panels/panels-compose-skills.css'>
+<link rel='stylesheet' href='../../components/panels/work-intent.css'>
+<link rel="stylesheet" href="../../components/settings/settings.css">
+<link rel="stylesheet" href="../../components/panels/task-approval-inbox.css">
+<link rel="stylesheet" href="../../theme/workspace-page-heads.css">
+<script>
+window.fixtureErrors=[];window.fixtureCalls=[];
+addEventListener('error',e=>fixtureErrors.push(e.message));
+addEventListener('unhandledrejection',e=>fixtureErrors.push(String(e.reason)));
+window.fixtureIdentity={clientId:'new-install',user:{id:'new-user'}};
+window.fixtureTasks=[];window.holdTasks=false;
+window.soduWorkAPI={deviceAuthBootstrap:async()=>({ok:true,stored:true,session:'isolated-session',expiresIn:1800,...fixtureIdentity})};
+window.fetch=async(url,options={})=>{
+ const route=new URL(url).pathname;
+ fixtureCalls.push({route,method:options.method||'GET'});
+ if((options.method||'GET')!=='GET')throw Error('Unexpected mutation in new-user UI fixture');
+ let value={};
+ if(route==='/api/v1/tasks'){
+   if(holdTasks)return new Promise(resolve=>{window.releaseTasks=items=>resolve({ok:true,status:200,text:async()=>JSON.stringify(items)})});
+   value=fixtureTasks;
+ }else if(route==='/api/v1/projects')value=[];
+ else if(route!=='/api/v1/config')throw Error('Unexpected isolated request: '+route);
+ return {ok:true,status:200,text:async()=>JSON.stringify(value)};
+};
+window.WorkspaceHost={open:()=>{}};
+window.WorkEntrySheet={openTask:()=>{}};
+window.openDetailEntry=()=>{};
+window.petSay=()=>{};window.expandForOverlay=()=>{};window.shrinkFromOverlay=()=>{};window.makeDraggable=()=>{};
+window._fmtDate=value=>new Date(value).toLocaleDateString('zh-CN');
+window.User={id:'legacy-browser-id'};
+localStorage.setItem('soduwork_work_task_ops_v1',JSON.stringify([{id:'old-task',kind:'put',token:'old',data:{title:'旧版示例任务',status:'todo'}}]));
+localStorage.setItem('soduwork_work_tasks_v5',JSON.stringify([{id:'old-task',title:'旧版示例任务',status:'todo'}]));
+</script>
+<script src="../../core/api-work-plugins.js"></script><script src="../../api.js"></script>
+<script src="../../core/task-sync.js"></script>
+<script src="../../core/store-lifecycle.js"></script>
+<script src="../../core/store.js"></script>
+<script src="../../core/skin-registry.js"></script>
+<script src="../../components/panels/panels-misc.js"></script>
+<script src="../../components/panels/task-priority.js"></script>
+<script src="../../core/requirements.js"></script>
+<script src="../../components/requirements/requirements-view.js"></script>
+<script src="../../components/requirements/requirements-board.js"></script>
+<script src="../../components/requirements/requirement-confirm.js"></script>
+<link rel="stylesheet" href="../../components/requirements/requirements-board.css">
+<link rel="stylesheet" href="../../components/requirements/requirement-confirm.css">
+</head><body>
+<nav id="newUserNav" style="position:fixed;inset:0 auto 0 0;width:220px;padding:28px 16px;box-sizing:border-box;background:var(--bg-1);font:14px var(--font-ui)">
+<strong style="font-size:20px">SoduWork</strong><p>新用户 · 隔离验收</p>
+<button id="showRequirements">需求池</button>
+</nav>
+<script>
+window.fixtureOpen=view=>{
+ document.documentElement.dataset.workspaceView=view;
+ openTaskCenter();
+};
+document.querySelector('#showRequirements').onclick=()=>fixtureOpen('history');
+window.fixtureReady=(async()=>{
+ await SoduWorkAPI.registerClient();await Store.init();await Store._flushTaskOps();fixtureOpen('history');
+})();
+</script></body></html>

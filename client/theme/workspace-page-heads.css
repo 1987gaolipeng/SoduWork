@@ -1,0 +1,150 @@
+/* One title band for every workspace page. Keep this stylesheet after page CSS.
+   Only top-level headers opt in; section titles and dialogs keep their layout. */
+:is(html[data-desk-panel="workspace"],html[data-desk-panel="add"]){
+  --ws-head-gutter:28px;
+  --ws-head-height:60px;
+}
+:is(html[data-desk-panel="workspace"],html[data-desk-panel="add"]) :is(
+  #schPanel,#historyBoard,#capPanel,#briefPanel,#aiDeskPanel,#teamPanel,#libraryPanel,
+  #usagePanel,#agPanel,#mdPanel,#cloudEnvironmentPanel,#caPanel,#skPanel,#sessionMemoryPanel,#noticePanel,
+  #skinManager,#settingsPanel,#addMask,#archivePanel
+) .ws-page-head{
+  box-sizing:border-box!important;display:flex!important;align-items:flex-start!important;
+  justify-content:space-between!important;flex:0 0 auto!important;flex-wrap:wrap!important;
+  gap:8px 12px!important;min-height:var(--ws-head-height)!important;height:auto!important;
+  padding:12px var(--ws-head-gutter)!important;
+  border:0!important;border-bottom:1px solid var(--line)!important;
+  background:var(--bg-0)!important;box-shadow:none!important;color:var(--ink);cursor:default!important;
+}
+/* Legacy category labels include both DOM nodes and generated content. */
+:is(html[data-desk-panel="workspace"],html[data-desk-panel="add"]) :is(
+  #schPanel,#historyBoard,#capPanel,#briefPanel,#aiDeskPanel,#teamPanel,#libraryPanel,
+  #usagePanel,#agPanel,#mdPanel,#cloudEnvironmentPanel,#caPanel,#skPanel,#sessionMemoryPanel,#noticePanel,
+  #skinManager,#settingsPanel,#addMask
+) .ws-page-head :is(
+  .sch-h-kicker,.br-kicker,.dk-title-kicker,.np-kicker,.cmem-kicker,
+  .set-page-kicker,.detail-page-kicker,.add-page-kicker,
+  .sch-h-ico,.br-title-mark,.set-page-icon,.sm-title .ico,.tp-title .ico
+){display:none!important}
+:is(html[data-desk-panel="workspace"],html[data-desk-panel="add"]) :is(#teamPanel,#skinManager) > .ws-page-head > div:first-child::before,
+html[data-desk-panel="workspace"] #libraryPanel .ws-page-head h1::before{
+  content:none!important;display:none!important;
+}
+:is(html[data-desk-panel="workspace"],html[data-desk-panel="add"]) :is(
+  #schPanel,#historyBoard,#capPanel,#briefPanel,#aiDeskPanel,#teamPanel,
+  #usagePanel,#agPanel,#mdPanel,#cloudEnvironmentPanel,#caPanel,#skPanel,#sessionMemoryPanel,#noticePanel,
+  #skinManager,#settingsPanel,#addMask
+) .ws-page-head > :is(
+  .sch-h-txt,.hb-title,.br-page-title,.dk-title,.np-title,
+  .set-page-title,.detail-page-title,.add-page-title
+),
+:is(html[data-desk-panel="workspace"],html[data-desk-panel="add"]) :is(#teamPanel,#skinManager) > .ws-page-head > div:first-child{
+  display:flex!important;flex-direction:row!important;align-items:center!important;flex-wrap:nowrap!important;
+  flex:1 1 240px!important;min-width:0!important;min-height:35px;margin:0!important;gap:12px!important;
+  color:var(--ink)!important;font:650 18px/1.4 var(--font-display)!important;letter-spacing:-.02em!important;
+  white-space:nowrap;
+}
+:is(html[data-desk-panel="workspace"],html[data-desk-panel="add"]) :is(
+  #schPanel,#historyBoard,#capPanel,#briefPanel,#aiDeskPanel,#teamPanel,#libraryPanel,
+  #usagePanel,#agPanel,#mdPanel,#cloudEnvironmentPanel,#caPanel,#skPanel,#sessionMemoryPanel,#skinManager,#settingsPanel
+) .ws-page-head :is(
+  .sch-h-title,#hbTitleText,.br-page-title h1,.dk-title-name,.tp-title,.sm-title,.set-page-main-title,.library-head h1
+){
+  flex:0 0 auto!important;min-width:0!important;margin:0!important;color:var(--ink)!important;
+  font:650 18px/1.4 var(--font-display)!important;letter-spacing:-.02em!important;white-space:nowrap;
+}
+:is(html[data-desk-panel="workspace"],html[data-desk-panel="add"]) :is(
+  #schPanel,#historyBoard,#capPanel,#briefPanel,#aiDeskPanel,#teamPanel,
+  #usagePanel,#agPanel,#mdPanel,#cloudEnvironmentPanel,#caPanel,#skPanel,#sessionMemoryPanel,#noticePanel,
+  #skinManager,#settingsPanel,#addMask
+) .ws-page-head :is(
+  .sch-h-sub,.hb-count,.br-page-title p,.dk-sub,.tp-sub,.sm-sub,.np-sub,
+  .set-page-sub,.detail-page-sub,.add-page-sub,.sch-h-txt > .cmem-muted
+){
+  min-width:0!important;margin:0!important;color:var(--ink-3)!important;
+  font:400 14.5px/1.5 var(--font-ui)!important;letter-spacing:normal!important;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap!important;
+}
+:is(html[data-desk-panel="workspace"],html[data-desk-panel="add"]) :is(
+  #schPanel,#historyBoard,#capPanel,#briefPanel,#aiDeskPanel,#teamPanel,#libraryPanel,
+  #usagePanel,#agPanel,#mdPanel,#cloudEnvironmentPanel,#caPanel,#skPanel,#sessionMemoryPanel,#noticePanel,#skinManager
+) .ws-page-head > :is(
+  .sch-h-acts,.hb-head-actions,.br-head-actions,.dk-acts,.tp-acts,.np-acts,.cmem-head-actions,.library-toolbar
+){
+  display:flex!important;align-items:center!important;flex:0 1 auto!important;flex-wrap:wrap;
+  min-height:35px;min-width:0;max-width:100%;gap:8px!important;margin:0 0 0 auto!important;
+}
+:is(html[data-desk-panel="workspace"],html[data-desk-panel="add"]) :is(
+  #schPanel,#historyBoard,#capPanel,#briefPanel,#aiDeskPanel,#teamPanel,#libraryPanel,
+  #usagePanel,#agPanel,#mdPanel,#cloudEnvironmentPanel,#caPanel,#skPanel,#sessionMemoryPanel,#noticePanel,#skinManager
+) .ws-page-head :is(
+  .btn-mini,.br-quiet,.dk-agent-manage,.dk-refresh,.np-clear,.cmem-secondary
+){
+  box-sizing:border-box;min-height:32px!important;height:32px!important;padding:0 12px!important;border-radius:var(--r-md)!important;
+  font:600 14.5px/1.2 var(--font-ui)!important;white-space:nowrap;
+  transition:background-color .16s ease,border-color .16s ease,color .16s ease;
+}
+:is(html[data-desk-panel="workspace"],html[data-desk-panel="add"]) :is(#schPanel,#historyBoard,#capPanel,#aiDeskPanel) > .ws-page-head :is(.btn-mini.primary){
+  border:1px solid var(--accent);background:var(--accent);color:#fff;box-shadow:none;
+}
+:is(html[data-desk-panel="workspace"],html[data-desk-panel="add"]) :is(#schPanel,#historyBoard,#capPanel,#aiDeskPanel) > .ws-page-head :is(.btn-mini.primary):hover:not(:disabled){
+  border-color:var(--accent-hover);background:var(--accent-hover);filter:none;
+}
+html[data-desk-panel="workspace"] .ws-page-head .sk-count{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-3)}
+html[data-desk-panel="workspace"] .ws-page-head button:focus-visible{
+  outline:1px solid color-mix(in srgb,var(--ink) 42%,transparent);outline-offset:1px;
+}
+html[data-desk-panel="workspace"] #aiDeskPanel > .ws-page-head .dk-agent-manage{
+  border:1px solid var(--line);background:var(--bg-0);color:var(--ink-2);
+}
+html[data-desk-panel="workspace"] #aiDeskPanel > .ws-page-head .dk-agent-manage:hover{
+  border-color:var(--accent);background:var(--accent-soft);color:var(--accent);
+}
+/* Settings cards may be centered, but their page title uses the shared gutter. */
+html[data-desk-panel="workspace"] #settingsPanel > .ws-page-head{
+  margin:0 calc(-1 * var(--settings-gutter)) 4px!important;
+}
+/* Library owns its scrollport. Let the title band span it without moving the content. */
+html[data-desk-panel="workspace"] #libraryPanel{
+  padding:0 var(--ws-head-gutter) 24px!important;border-radius:18px!important;
+}
+html[data-desk-panel="workspace"] #libraryPanel .ws-page-head{
+  width:auto;max-width:none;margin:0 calc(-1 * var(--ws-head-gutter))!important;
+}
+html[data-desk-panel="workspace"] #libraryPanel .ws-page-head h1{
+  display:flex;flex-direction:row;align-items:center;min-height:35px;
+}
+html[data-desk-panel="workspace"] #libraryPanel .ws-page-head .library-search{max-width:100%;box-sizing:border-box}
+/* Header wrapping must not leave a body sized for the old 72/88px band. */
+html[data-desk-panel="workspace"] #usagePanel > .usage-body{
+  flex:1 1 auto!important;min-height:0!important;height:auto!important;
+}
+html[data-desk-panel="workspace"] :is(#usagePanel,#agPanel) > .ws-page-head :is(.usage-range,.ag-tabs){
+  box-sizing:border-box;min-height:35px;height:35px;padding:2px;max-width:100%;flex-shrink:0;
+}
+html[data-desk-panel="workspace"] :is(#usagePanel,#agPanel) > .ws-page-head :is(.usage-range,.ag-tabs) button{
+  min-height:29px;height:29px;
+}
+html[data-desk-panel="workspace"] #usagePanel > .ws-page-head .usage-refresh{min-height:32px;height:32px;width:32px}
+/* Keep the detail return action while aligning its title with every other page. */
+/* The return button and task assignment action share the title band. */
+/* The create-task form used to inset the header together with its fields. */
+html[data-desk-panel="workspace"][data-workspace-view="add"] #addMask .modal{
+  padding-top:0!important;padding-inline:var(--ws-head-gutter)!important;
+}
+html[data-desk-panel="workspace"][data-workspace-view="add"] #addMask .modal > .ws-page-head{
+  max-width:none!important;margin:0 calc(-1 * var(--ws-head-gutter)) 20px!important;
+}
+@media(max-width:1100px){
+  :is(html[data-desk-panel="workspace"],html[data-desk-panel="add"]){--ws-head-gutter:20px}
+}
+@media(max-width:720px){
+  :is(html[data-desk-panel="workspace"],html[data-desk-panel="add"]){--ws-head-gutter:16px}
+}
+@media(prefers-reduced-motion:reduce){
+  html[data-desk-panel="workspace"] .ws-page-head button{transition:none!important}
+}
+
+html[data-desk-panel="workspace"] #schPanel > .ws-page-head .sch-create-trigger{height:32px;min-height:32px;font-size:max(var(--font-min-readable, 14.5px), 13px)}
+html[data-desk-panel="add"] #addMask .modal{padding-top:0!important;padding-inline:var(--ws-head-gutter)!important}
+html[data-desk-panel="add"] #addMask .modal > .ws-page-head{margin:0 calc(-1 * var(--ws-head-gutter)) 20px!important}

@@ -1,0 +1,235 @@
+{
+  "schemaVersion": 1,
+  "id": "notion",
+  "name": "Notion",
+  "category": "知识库",
+  "description": "Notion 通用连接器：全局搜索、data_source 查询（2025-09-03 起的新模型）、数据库/页面读取、创建评论。固定头 Notion-Version 由 headers 对象声明。",
+  "officialDocs": [
+    "https://developers.notion.com/reference/introduction",
+    "https://developers.notion.com/reference/post-search",
+    "https://developers.notion.com/reference/data-source",
+    "https://developers.notion.com/reference/get-page",
+    "https://developers.notion.com/reference/create-a-comment"
+  ],
+  "authDocs": [
+    "https://developers.notion.com/docs/create-a-notion-integration",
+    "https://developers.notion.com/reference/versioning"
+  ],
+  "baseUrl": "https://api.notion.com",
+  "fields": [
+    {
+      "key": "NOTION_TOKEN",
+      "label": "Internal Integration Token",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "tokenKey": "NOTION_TOKEN",
+    "header": "Authorization",
+    "prefix": "Bearer"
+  },
+  "headers": {
+    "Notion-Version": "2026-03-11"
+  },
+  "tools": [
+    {
+      "name": "search_workspace",
+      "description": "按标题/内容搜索集成可访问的页面与数据库。分页：page_size（1-100）+ start_cursor，响应 has_more/next_cursor。出处：https://developers.notion.com/reference/post-search",
+      "method": "POST",
+      "path": "/v1/search",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "搜索关键词，留空列出全部",
+            "maxLength": 10000
+          },
+          "page_size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 100,
+            "description": "每页条数"
+          },
+          "start_cursor": {
+            "type": "string",
+            "description": "上一页 next_cursor",
+            "maxLength": 10000
+          },
+          "filter": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "property": {
+                "type": "string",
+                "enum": [
+                  "object"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "enum": [
+                  "page",
+                  "data_source"
+                ]
+              }
+            },
+            "required": [
+              "property",
+              "value"
+            ],
+            "description": "可选类型过滤，省略时搜索全部可见对象"
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "body": {
+        "query": "$query",
+        "filter": "$filter",
+        "page_size": "$page_size",
+        "start_cursor": "$start_cursor"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "query_data_source",
+      "description": "查询 data_source（2025-09-03 版本引入的新模型端点 POST /v1/data_sources/{id}/query，替代旧 /databases/{id}/query 作为主查询路径）。分页：page_size + start_cursor。出处：https://developers.notion.com/reference/data-source",
+      "method": "POST",
+      "path": "/v1/data_sources/{data_source_id}/query",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "data_source_id": {
+            "type": "string",
+            "pattern": "^([a-fA-F0-9]{32}|[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})$",
+            "description": "data source ID（32 位十六进制）（接受 32 位十六进制或带连字符 UUID）",
+            "maxLength": 10000
+          },
+          "page_size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 100,
+            "description": "每页条数"
+          },
+          "start_cursor": {
+            "type": "string",
+            "description": "上一页 next_cursor",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "data_source_id"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "page_size": "$page_size",
+        "start_cursor": "$start_cursor"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_database",
+      "description": "获取数据库对象（含其 data_sources 列表，用于先取 data_source_id 再查询）。无分页。出处：https://developers.notion.com/reference/retrieve-a-database",
+      "method": "GET",
+      "path": "/v1/databases/{database_id}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "database_id": {
+            "type": "string",
+            "pattern": "^([a-fA-F0-9]{32}|[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})$",
+            "description": "数据库 ID（接受 32 位十六进制或带连字符 UUID）",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "database_id"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_page",
+      "description": "获取页面属性（不含正文块）。无分页。出处：https://developers.notion.com/reference/get-page",
+      "method": "GET",
+      "path": "/v1/pages/{page_id}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "page_id": {
+            "type": "string",
+            "pattern": "^([a-fA-F0-9]{32}|[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})$",
+            "description": "页面 ID（接受 32 位十六进制或带连字符 UUID）",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "page_id"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_comment",
+      "description": "创建页面评论（POST /v1/comments，需 insert_comment 权限）。写入操作：运行前必须获得用户明确授权。出处：https://developers.notion.com/reference/create-a-comment",
+      "method": "POST",
+      "path": "/v1/comments",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "page_id": {
+            "type": "string",
+            "pattern": "^([a-fA-F0-9]{32}|[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})$",
+            "description": "父页面 ID（接受 32 位十六进制或带连字符 UUID）",
+            "maxLength": 10000
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "description": "评论内容"
+          }
+        },
+        "required": [
+          "page_id",
+          "text"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "parent": {
+          "page_id": "$page_id"
+        },
+        "rich_text": [
+          {
+            "text": {
+              "content": "$text"
+            }
+          }
+        ]
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "固定请求头 Notion-Version: 2026-03-11 由连接器级 headers 声明（官方 versioning 页确认的当前稳定版本）；data_sources 为 2025-09-03 起引入的模型，旧 /databases/{id}/query 不再作为主查询路径。ID 类输入同时接受 32 位十六进制与带连字符 UUID。",
+    "Internal Integration 需用户在 Notion 中把目标页面/数据库显式共享给集成，否则返回空结果而非报错。",
+    "OAuth 公开集成授权流当前客户端不支持，待宿主适配。",
+    "create_comment 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

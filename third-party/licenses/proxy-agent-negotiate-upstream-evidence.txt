@@ -1,0 +1,52 @@
+Upstream evidence only; not a full license grant.
+Exact source: https://raw.githubusercontent.com/TooTallNate/proxy-agents/b7e5f7ccce1a3ac5b339cc4c587974e8989cbc16/packages/negotiate/package.json
+The 1.1.0 npm tarball and tagged source contain no full original license for this package.
+Do not invent a copyright notice. Binary redistribution needs upstream confirmation.
+
+{
+  "name": "proxy-agent-negotiate",
+  "version": "1.1.0",
+  "type": "module",
+  "description": "Negotiate/SPNEGO proxy authentication for proxy-agents",
+  "exports": {
+    "types": "./dist/index.d.ts",
+    "default": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "pack": "node ../../scripts/pack.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TooTallNate/proxy-agents.git",
+    "directory": "packages/negotiate"
+  },
+  "keywords": [
+    "proxy",
+    "negotiate",
+    "kerberos",
+    "spnego",
+    "authentication"
+  ],
+  "author": "Nathan Rajlich <nathan@tootallnate.net> (http://n8.io/)",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsconfig": "workspace:*",
+    "typescript": "catalog:"
+  },
+  "engines": {
+    "node": ">= 20"
+  },
+  "peerDependencies": {
+    "kerberos": "^2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "kerberos": {
+      "optional": true
+    }
+  }
+}

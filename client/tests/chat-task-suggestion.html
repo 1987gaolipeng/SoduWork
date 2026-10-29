@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="vivid">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>对话任务建议走查</title>
+<link rel="stylesheet" href="../theme/variables.css">
+<link rel="stylesheet" href="../components/panels/panels-chat.css">
+<link rel="stylesheet" href="../components/workspace/workspace-shell.css">
+<link rel="stylesheet" href="../components/workspace/workspace-page-layout.css">
+<link rel='stylesheet' href='../components/panels/work-composer.css'>
+<style>
+  body{background:var(--bg-1);height:100vh}.test-shell{width:min(920px,100%);height:100vh;margin:auto;background:var(--bg-0)}
+  #cpChat{height:100%}#out{position:fixed;left:8px;top:8px;z-index:100;background:#fff;padding:8px;white-space:pre-wrap}
+  html.preview #out{display:none}
+</style>
+</head>
+<body>
+<main class="test-shell"><div id="cpChat"></div></main><pre id="out">START</pre>
+<script>
+window.addEventListener('error',e=>{document.getElementById('out').textContent='FAIL  '+e.message+' @ '+e.filename+':'+e.lineno+'\n\nchat task suggestion smoke: 0 passed, 1 failed'});
+window.addEventListener('unhandledrejection',e=>{document.getElementById('out').textContent='FAIL  '+(e.reason&&e.reason.stack||e.reason)+'\n\nchat task suggestion smoke: 0 passed, 1 failed'});
+let eventSink = null;
+let sendCount = 0;
+const baseSnap = {
+  status:'idle',statusText:'',usage:null,pendingUi:null,tools:[],
+  messages:[{id:'m1',role:'assistant',blocks:[{kind:'text',text:'内容已经整理好了。'}]}]
+};
+window.SoduWorkAPI = {
+  listAIAgents:async()=>({agents:[{id:'local:pi',name:'Pi',online:true,cliName:'Pi'}]}),
+  taskExecutionOptions:async()=>({substrates:[{key:'local:pi',name:'Pi',cli:'pi',available:true}],workflows:[],repos:[]}),
+  listTeammates:async()=>({mates:[]}),applicableFlows:async()=>({items:[]}),listRepos:async()=>[],
+  parseTaskText:async()=>({title:'整理日报',note:'整理并提交今天的工作日报。',priority:'normal',checklist:['内容完整']})
+};
+window.soduWorkAPI = {conversationSession:{
+  probe:async()=>({ok:true}),
+  open:async()=>({ok:true,ref:'chat-test',sessionId:'fixture-chat-test',model:{},snapshot:structuredClone(baseSnap)}),
+  onEvent:(fn)=>{eventSink=fn;return()=>{eventSink=null}},
+  send:async()=>{sendCount++;return {ok:true}},close:()=>{},cancel:()=>{}
+}};
+window.composeDraftBridge=()=>({});
+window.workRoot=()=>'';
+window.tasks=[];window.save=()=>{};window.uid=()=>('t'+Date.now());
+</script>
+<script src='../components/panels/work-composer.js'></script>
+<script src="../components/panels/task-priority.js"></script>
+<script src="../components/panels/task-execution-client.js"></script>
+<script src="../components/panels/panels-compose-submit.js"></script>
+<script src="../components/panels/compose-selection-position.js"></script>
+<script src="../components/panels/requirement-routing.js"></script>
+<script src="../components/panels/panels-compose-draft.js"></script>
+<script src="../components/panels/chat-dom-patch.js"></script>
+<script src="../components/panels/panels-chat-tools.js"></script>
+<script src="../components/panels/chat-task-start.js"></script>
+<script src="../components/panels/chat-task-controller.js"></script>
+<script src="../components/panels/chat-context-meter.js"></script>
+<script src="../components/panels/chat-scroll-follow.js"></script>
+<script src="../components/panels/chat-markdown.js"></script>
+<script src="../components/panels/chat-acceptance-results.js"></script>
+<script src="../components/panels/chat-message-renderer.js"></script>
+<script src="../components/panels/chat-send-queue.js"></script>
+<script src="../components/panels/chat-work-intent.js"></script>
+<script src="../components/panels/chat-draft-recovery.js"></script>
+<script src="../components/panels/chat-composer-bindings.js"></script>
+<script src="../components/panels/chat-session-controller.js"></script>
+<script src="../components/panels/panels-chat.js"></script>
+<script>
+(async()=>{
+  const previewMode=new URLSearchParams(location.search).get('preview')||'';
+  const preview=!!previewMode;
+  if(preview)document.documentElement.classList.add('preview');
+  let pass=0,fail=0,lines=[];
+  const wait=(ms=0)=>new Promise(r=>setTimeout(r,ms));
+  const chk=(name,ok)=>{ok?pass++:fail++;lines.push((ok?'PASS  ':'FAIL  ')+name)};
+  const proposal=(id,title='写日报')=>({
+    ...structuredClone(baseSnap),
+    tools:[{id,state:'done',result:JSON.stringify({proposal:{title,note:'手动整理并提交当日日报。',
+      priority:'normal',checklist:['日报内容完整','格式符合要求'],assigneeKind:'ai',agentId:'local:pi'}})}]
+  });
+
+  await NativeChat.enter('');
+  eventSink({ref:'chat-test',snapshot:proposal('p1')});
+  chk('AI 自动建议只显示轻提示',!!document.querySelector('.nchat-task-suggest.show'));
+  chk('AI 自动建议不会直接展开任务表单',!document.querySelector('.cp-draft.show'));
+  const commands=[...document.querySelectorAll('.nts-command kbd')].map(node=>node.textContent.trim());
+  chk('提示只显示统一需求入口，不重复展示旧任务入口',commands.length===1&&commands[0]==='/需求');
+  chk('轻提示只保留关闭动作，不偷偷创建业务对象',
+    !document.querySelector('[data-proposal-act="open"]')&&
+    document.querySelectorAll('[data-proposal-act]').length===1);
+
+  document.querySelector('[data-proposal-act="dismiss"]').click();
+  chk('用户关闭后提示立即让路',!document.querySelector('.nchat-task-suggest.show'));
+  const input=document.querySelector('#nchatInput');input.value='继续聊这个问题';
+  chk('继续消息正常被会话接收',await NativeChat.send());
+  eventSink({ref:'chat-test',snapshot:proposal('p2','第二个建议')});
+  chk('继续对话后本次会话不再自动打扰',!document.querySelector('.nchat-task-suggest.show'));
+  chk('消息仍正常发给 AI',sendCount===1);
+
+  NativeChat.reset();await NativeChat.enter('');
+  eventSink({ref:'chat-test',snapshot:proposal('p3','新的对话建议')});
+  chk('新对话会重新获得一次轻量建议',!!document.querySelector('.nchat-task-suggest.show'));
+  document.querySelector('[data-proposal-act="dismiss"]').click();
+  chk('新对话里的建议同样可以无副作用关闭',!document.querySelector('.nchat-task-suggest.show'));
+
+  let release;
+  const normalListTeammates=SoduWorkAPI.listTeammates;
+  SoduWorkAPI.listTeammates=()=>new Promise(r=>{release=r});
+  const pending=ComposeDraft.openWith({title:'稍后返回的建议',note:'不该重新弹出'}, {variant:'chat'});
+  chk('准备任务时也能立即返回对话',!!document.querySelector('.cp-loading-chat #cpCancel'));
+  document.querySelector('.cp-loading-chat #cpCancel').click();
+  release({mates:[]});await pending;await wait();
+  SoduWorkAPI.listTeammates=normalListTeammates;
+  chk('收起后迟到的请求不能把卡片重新弹出',!document.querySelector('.cp-draft.show'));
+
+  if(preview){
+    SoduWorkAPI.listAIAgents=async()=>({agents:[{id:'local:pi',name:'Pi',online:true,cliName:'Pi'}]});
+    if(previewMode==='suggest'){
+      NativeChat.reset();await NativeChat.enter('');
+      eventSink({ref:'chat-test',snapshot:proposal('preview','整理今天的工作日报')});
+    }else{
+      await ComposeDraft.openWith({title:'整理今天的工作日报',note:'把今天完成的工作、风险和明日计划整理成一份日报。',
+        priority:'normal',checklist:['内容完整','格式清晰'],assigneeKind:'ai',agentId:'local:pi'}, {variant:'chat'});
+    }
+  }
+  document.getElementById('out').textContent=lines.join('\n')+'\n\nchat task suggestion smoke: '+pass+' passed, '+fail+' failed';
+})().catch(e=>{document.getElementById('out').textContent='FAIL  '+(e&&e.stack||e)+'\n\nchat task suggestion smoke: 0 passed, 1 failed'});
+</script>
+</body>
+</html>

@@ -1,0 +1,878 @@
+[
+  {
+    "file": "client/components/panels/chat-message-renderer.js",
+    "source": "需求：",
+    "category": "excluded-internal",
+    "reason": "Matches a persisted conversation prefix to avoid displaying a duplicate work card; not UI copy"
+  },
+  {
+    "file": "client/components/panels/panels-compose-draft.js",
+    "source": "请根据用户的补充更新当前需求。没有提到的字段必须保持，不要删除已有细节。",
+    "category": "excluded-instructions",
+    "reason": "Model instruction for preserving draft fields, not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-compose-draft.js",
+    "source": "当前需求：{value}",
+    "category": "excluded-instructions",
+    "reason": "Structured draft snapshot appended to a model prompt; user input must remain verbatim"
+  },
+  {
+    "file": "client/components/panels/conversation-attachments.js",
+    "source": "粘贴图片-{value}-{value}.{value}",
+    "category": "excluded-data",
+    "reason": "Generated attachment file name; persisted business content"
+  },
+  {
+    "file": "client/components/panels/conversation-attachments.js",
+    "source": "粘贴图片-{value}.{value}",
+    "category": "excluded-data",
+    "reason": "Generated attachment file name; persisted business content"
+  },
+  {
+    "file": "client/components/panels/conversation-attachments.js",
+    "source": "粘贴的文本-{value}.txt",
+    "category": "excluded-data",
+    "reason": "Generated attachment file name; persisted business content"
+  },
+  {
+    "file": "client/components/panels/panels-chat-work-actions.js",
+    "source": "请根据我附上的材料整理准确、可执行的内容。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-chat-work-actions.js",
+    "source": "最近对话（请提炼事实，不要照抄寒暄）： {value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-chat-work-actions.js",
+    "source": "请根据本次附上的材料整理准确、可执行的内容。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-chat-workspace.js",
+    "source": "请参考网页「{value}」：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-chat-workspace.js",
+    "source": "请查看工作区文件「{value}」：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-chat-workspace.js",
+    "source": "请修改网页「{value}」中的这个元素。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-chat-workspace.js",
+    "source": "页面：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-chat-workspace.js",
+    "source": "元素选择器：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-chat-workspace.js",
+    "source": "元素类型：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-chat-workspace.js",
+    "source": "当前内容：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-chat-workspace.js",
+    "source": "元素结构：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-chat-workspace.js",
+    "source": "修改要求：",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-chat.js",
+    "source": "请根据当前对话提供的附件制作一个可复用插件。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-plugin-builder-entry.js",
+    "source": "请根据当前对话提供的附件制作一个可复用插件。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-chat.js",
+    "source": "当前对话附件：{value}。制作时优先引用这些材料；附件二进制仍保留在原对话，需要时请用户重新选择。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-plugin-builder-entry.js",
+    "source": "当前对话附件：{value}。制作时优先引用这些材料；附件二进制仍保留在原对话，需要时请用户重新选择。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-chat.js",
+    "source": "制作插件：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-plugin-builder-entry.js",
+    "source": "制作插件：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-chat.js",
+    "source": "制作插件：",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-plugin-builder-entry.js",
+    "source": "制作插件：",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-chat.js",
+    "source": "请查看并处理我附上的文件。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-compose.js",
+    "source": "请查看并处理我附上的文件。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-compose-draft.js",
+    "source": "请根据用户的补充更新当前任务。没有提到的字段必须保持，不要删除已有细节。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-compose-draft.js",
+    "source": "当前任务：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-compose-draft.js",
+    "source": "用户补充：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/work-automation-sheet.js",
+    "source": "用户补充：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/work-entry-sheet.js",
+    "source": "用户补充：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-compose-draft.js",
+    "source": "补充：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/work-entry-sheet.js",
+    "source": "补充：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-compose-draft.js",
+    "source": "{value} 验收要点（做到这些算完）： {value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-compose-draft.js",
+    "source": "验收要点（做到这些算完）： {value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-plugin-maker.js",
+    "source": "理解目标、输入、限制和完成标准，形成可执行计划后继续。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-plugin-maker.js",
+    "source": "依据上游计划和插件工作方法完成工作，交付可直接验收的结果。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-plugin-maker.js",
+    "source": "检查已合并的代码版本和发布前条件，输出可审核的就绪结论。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-plugin-maker.js",
+    "source": "独立审查上游交付，对照完成标准给出明确结论和证据。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-plugin-maker.js",
+    "source": "按照插件工作方法完成这一环，并交付可供下游使用的结果。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-plugin-maker.js",
+    "source": "{value}结果",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-plugin-maker.js",
+    "source": "{value}结果",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-plugin-maker.js",
+    "source": "独立审查上游结果并给出明确结论。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-plugin-maker.js",
+    "source": "完成本节点工作并交付可验证结果。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/work-entry-sheet.js",
+    "source": "完成标准： - {value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/work-automation-sheet.js",
+    "source": "请根据用户补充更新这条自动化的标题、执行说明和完成标准。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/work-automation-sheet.js",
+    "source": "没有提到的内容必须保留；不要编造执行时间、Agent 或权限。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/work-automation-sheet.js",
+    "source": "当前自动化：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/work-automation-sheet.js",
+    "source": "完成标准： {value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/work-entry-sheet.js",
+    "source": "请根据用户的补充更新当前需求。没有提到的字段必须保持，不要删除已有细节。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/work-entry-sheet.js",
+    "source": "当前需求：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated chat/task/workflow instruction or persisted draft content; not interface copy"
+  },
+  {
+    "file": "client/components/panels/chat-mate-mention.js",
+    "source": "{value} 当前工作：{value} 请补充已完成的进展和后续安排。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated prompt, task instructions, or outgoing message draft; not interface copy"
+  },
+  {
+    "file": "client/components/panels/chat-mate-mention.js",
+    "source": "{value} 目前还没有可总结的工作内容，请补充后再发送。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated prompt, task instructions, or outgoing message draft; not interface copy"
+  },
+  {
+    "file": "client/components/panels/chat-mate-mention.js",
+    "source": "当前工作：{value} 请补充已完成的进展和后续安排。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated prompt, task instructions, or outgoing message draft; not interface copy"
+  },
+  {
+    "file": "client/components/panels/chat-plugin-mention.js",
+    "source": "请根据本轮提供的附件完成。附件：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated prompt, task instructions, or outgoing message draft; not interface copy"
+  },
+  {
+    "file": "client/components/panels/chat-plugin-mention.js",
+    "source": "「{value}」本轮参数： {value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated prompt, task instructions, or outgoing message draft; not interface copy"
+  },
+  {
+    "file": "client/components/panels/chat-work-intent.js",
+    "source": "你：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated prompt, task instructions, or outgoing message draft; not interface copy"
+  },
+  {
+    "file": "client/components/panels/chat-workbench-annotations.js",
+    "source": "请按以下 {value} 条网页注释统一修改并验证。 页面信息与元素结构仅用于定位；修改要求以每条注释为准。 {value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated prompt, task instructions, or outgoing message draft; not interface copy"
+  },
+  {
+    "file": "client/components/panels/chat-workbench-annotations.js",
+    "source": "注释 {value}：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated prompt, task instructions, or outgoing message draft; not interface copy"
+  },
+  {
+    "file": "client/components/panels/chat-workbench-annotations.js",
+    "source": "页面：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated prompt, task instructions, or outgoing message draft; not interface copy"
+  },
+  {
+    "file": "client/components/panels/chat-workbench-annotations.js",
+    "source": "标题：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated prompt, task instructions, or outgoing message draft; not interface copy"
+  },
+  {
+    "file": "client/components/panels/chat-workbench-annotations.js",
+    "source": "元素选择器：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated prompt, task instructions, or outgoing message draft; not interface copy"
+  },
+  {
+    "file": "client/components/panels/chat-workbench-annotations.js",
+    "source": "当前内容：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated prompt, task instructions, or outgoing message draft; not interface copy"
+  },
+  {
+    "file": "client/components/panels/chat-workbench-annotations.js",
+    "source": "元素结构（参考数据）：{value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated prompt, task instructions, or outgoing message draft; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-schedules-editor.js",
+    "source": "汇总我今天的任务进展、成果、风险和明日计划，输出结构清晰的工作简报。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated prompt, task instructions, or outgoing message draft; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-schedules-editor.js",
+    "source": "整理本周完成事项、关键成果、阻塞风险和下周优先级，形成可直接阅读的团队简报。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated prompt, task instructions, or outgoing message draft; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-schedules-editor.js",
+    "source": "打开目标网页，检查可用性、关键数据和异常；保留截图或结果证据，并输出巡检结论。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated prompt, task instructions, or outgoing message draft; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-schedules-editor.js",
+    "source": "打开指定业务系统，按明确规则完成待办或填报；遇到高风险操作时停下等待人工确认，保留操作回执。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated prompt, task instructions, or outgoing message draft; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-schedules-editor.js",
+    "source": "当前从自动化页面进入。请整理用户希望重复执行的工作、执行时间和成果要求，起一个简短明确的自动化名称；缺少的信息先询问，确认配置后才创建，不立即执行工作。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated prompt, task instructions, or outgoing message draft; not interface copy"
+  },
+  {
+    "file": "client/components/panels/panels-schedules-methods.js",
+    "source": "{value} 完成标准： {value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated prompt, task instructions, or outgoing message draft; not interface copy"
+  },
+  {
+    "file": "client/components/panels/plugin-input-sheet.js",
+    "source": "工作目标： {value}",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated prompt, task instructions, or outgoing message draft; not interface copy"
+  },
+  {
+    "file": "client/components/panels/plugin-input-sheet.js",
+    "source": "请使用「{value}」完成这项工作。",
+    "category": "excluded-instructions",
+    "reason": "Reviewed generated prompt, task instructions, or outgoing message draft; not interface copy"
+  },
+  {
+    "file": "client/components/panels/work-intent.js",
+    "source": "一",
+    "category": "excluded-internal",
+    "reason": "Chinese weekday tokens used by schedule parsing, not visible weekday labels"
+  },
+  {
+    "file": "client/components/panels/work-intent.js",
+    "source": "二",
+    "category": "excluded-internal",
+    "reason": "Chinese weekday tokens used by schedule parsing, not visible weekday labels"
+  },
+  {
+    "file": "client/components/panels/work-intent.js",
+    "source": "三",
+    "category": "excluded-internal",
+    "reason": "Chinese weekday tokens used by schedule parsing, not visible weekday labels"
+  },
+  {
+    "file": "client/components/panels/work-intent.js",
+    "source": "四",
+    "category": "excluded-internal",
+    "reason": "Chinese weekday tokens used by schedule parsing, not visible weekday labels"
+  },
+  {
+    "file": "client/components/panels/work-intent.js",
+    "source": "五",
+    "category": "excluded-internal",
+    "reason": "Chinese weekday tokens used by schedule parsing, not visible weekday labels"
+  },
+  {
+    "file": "client/components/panels/work-intent.js",
+    "source": "六",
+    "category": "excluded-internal",
+    "reason": "Chinese weekday tokens used by schedule parsing, not visible weekday labels"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "简体中文",
+    "category": "excluded-language-name",
+    "reason": "Language selector endonym intentionally remains in its own language"
+  },
+  {
+    "file": "client/components/settings/settings.js",
+    "source": "简体中文",
+    "category": "excluded-language-name",
+    "reason": "Language selector endonym intentionally remains in its own language"
+  },
+  {
+    "file": "client/desk.html",
+    "source": "简体中文",
+    "category": "excluded-language-name",
+    "reason": "Language selector endonym intentionally remains in its own language"
+  },
+  {
+    "file": "client/index.html",
+    "source": "简体中文",
+    "category": "excluded-language-name",
+    "reason": "Language selector endonym intentionally remains in its own language"
+  },
+  {
+    "file": "client/components/panels/panels-schedules-methods.js",
+    "source": "一二三四五六日",
+    "category": "excluded-internal",
+    "reason": "Indexed weekday lookup table used to construct the translated full schedule label"
+  },
+  {
+    "file": "client/api.js",
+    "source": "由需求负责人结束本次流程",
+    "category": "excluded-data",
+    "reason": "Default cancellation reason persisted in the workflow audit record; retain the original business record"
+  },
+  {
+    "file": "client/api.js",
+    "source": "产出.zip",
+    "category": "excluded-data",
+    "reason": "Generated download attachment filename; preserve artifact names rather than translating stored data"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "日本語",
+    "category": "excluded-language-name",
+    "reason": "Language selector endonym intentionally remains in its own language"
+  },
+  {
+    "file": "client/desk.html",
+    "source": "日本語",
+    "category": "excluded-language-name",
+    "reason": "Language selector endonym intentionally remains in its own language"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "環境設定",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "ISSUE 作成",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "個人ブリーフ",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "現在のステージ",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "リアルタイム詳細",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "能力センター",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "ソース管理",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "実行",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "準備完了",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "モデル接続",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "個人メモリー",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "ローカル文書",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "個人 AI 使用量",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "AGENT 構成",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "最近のアクティビティ",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "納品準備",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "納品可能",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "ISSUE 概要",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "ISSUE 詳細",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "プラグイン作業台",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "プラグイン設定",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "プロジェクト文脈",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "上流引き継ぎ",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "ステージ詳細",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "納品",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "ISSUE の進行",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "言語",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "簡体字中国語",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "{title}（会話あり）",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "無題",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "無題（会話あり）",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "設定",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "クライアントと作業ディレクトリを管理",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "画面の言語",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "選択後すぐに適用されます。対応言語は今後拡張予定です。",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "再起動して更新",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "ホームへ戻る",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "読み込み中…",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "対話を開いています…",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "新しいチャット",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "新しい対話",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "マイ使用量",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "外観",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "もっと見る",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "ピン留め",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "最近のチャット",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "最近の Issue",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "SoduWork サービスに接続済み",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "サービスに接続中",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "利用可能なモデル: {count} 件",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "チャット {chat} · 画像 {image} · 動画 {video}",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "{count} 社のサービスを設定済み · {personal} 件は個人枠を使用",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "モデル {count} 件",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "{count} 件",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "個人キー設定済み · {count} 桁。リクエストは先に個人枠を使用します",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "「{query}」に一致するサービスやモデルがありません",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  },
+  {
+    "file": "client/core/i18n.js",
+    "source": "最近の課題",
+    "category": "excluded-internal",
+    "reason": "Built-in locale dictionary value (translation data, not translatable source copy)"
+  }
+]

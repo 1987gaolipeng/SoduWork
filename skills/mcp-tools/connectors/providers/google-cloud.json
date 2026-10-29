@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "id": "google-cloud",
+  "name": "Google Cloud Compute",
+  "category": "云服务",
+  "description": "Google Cloud Compute Engine 通用连接器（服务账号 JWT RS256 授权，只读）：列区域、聚合列实例、查单台实例（pageToken 分页）。不提供任意云 API 透传。",
+  "runtimeKind": "google-cloud",
+  "officialDocs": [
+    "https://cloud.google.com/compute/docs/reference/rest/v1/instances/list",
+    "https://cloud.google.com/compute/docs/reference/rest/v1/instances/aggregatedList",
+    "https://cloud.google.com/compute/docs/reference/rest/v1/instances/get",
+    "https://cloud.google.com/compute/docs/reference/rest/v1/instances/aggregatedList"
+  ],
+  "authDocs": [
+    "https://developers.google.com/identity/protocols/oauth2/service-account"
+  ],
+  "baseUrl": "https://compute.googleapis.com",
+  "fields": [
+    {
+      "key": "GCP_PROJECT",
+      "label": "项目 ID",
+      "secret": false,
+      "required": true,
+      "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$",
+      "example": ""
+    },
+    {
+      "key": "GCP_CLIENT_EMAIL",
+      "label": "服务账号邮箱（…@…iam.gserviceaccount.com）",
+      "secret": false,
+      "required": true,
+      "pattern": "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.gserviceaccount\\.com$",
+      "example": ""
+    },
+    {
+      "key": "GCP_PRIVATE_KEY",
+      "label": "服务账号私钥（粘贴完整 PEM）",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "none"
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "list_zones",
+      "description": "列出项目可用区（GET /compute/v1/projects/{p}/zones，maxResults 1-100，pageToken 分页）。连接检测工具。出处：https://cloud.google.com/compute/docs/reference/rest/v1/zones/list",
+      "method": "GET",
+      "path": "/compute/v1/projects/{GCP_PROJECT}/zones",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "page_token": {
+            "type": "string",
+            "description": "上一页响应的 nextPageToken",
+            "maxLength": 2048
+          },
+          "max_results": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_instances",
+      "description": "聚合列出全区域实例（GET /compute/v1/projects/{p}/aggregated/instances，maxResults 1-100 官方上限 500 内收紧，pageToken 分页）。出处：https://cloud.google.com/compute/docs/reference/rest/v1/instances/aggregatedList",
+      "method": "GET",
+      "path": "/compute/v1/projects/{GCP_PROJECT}/aggregated/instances",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "max_results": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "description": "每页条数（maxResults）"
+          },
+          "page_token": {
+            "type": "string",
+            "description": "上一页响应的 nextPageToken",
+            "maxLength": 2048
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_instance",
+      "description": "查询单台实例（GET /compute/v1/projects/{p}/zones/{z}/instances/{name}）。无分页。出处：https://cloud.google.com/compute/docs/reference/rest/v1/instances/get",
+      "method": "GET",
+      "path": "/compute/v1/projects/{GCP_PROJECT}/zones/{zone}/instances/{instance_name}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "zone": {
+            "type": "string",
+            "pattern": "^[a-z]+-[a-z]+[0-9]+-[a-z]$",
+            "description": "可用区（如 us-central1-a）",
+            "maxLength": 10000
+          },
+          "instance_name": {
+            "type": "string",
+            "pattern": "^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$",
+            "description": "实例名"
+          }
+        },
+        "required": [
+          "zone",
+          "instance_name"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    }
+  ],
+  "limitations": [
+    "仅提供所列固定只读查询，不执行任意云 API，也不创建、启停或删除资源。",
+    "需要平台账号及对应资源的只读权限；首次连接会实际检查授权。",
+    "已按官方接口复核；尚无真实云账号验收，签名与响应测试不能替代实际授权验证。",
+    "响应最多 2 MB；分页工具需使用返回的分页参数继续读取。"
+  ]
+}

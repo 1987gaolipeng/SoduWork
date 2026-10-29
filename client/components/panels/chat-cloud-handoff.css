@@ -1,0 +1,37 @@
+.ncloud-dialog{width:580px;font-size:max(var(--font-min-readable,12px),calc(14px * var(--font-scale,1)))}
+.ncloud-dialog [data-cloud-body]{margin-top:20px}
+.ncloud-dialog label{display:grid;gap:7px;margin:14px 0;font-weight:550}
+.ncloud-dialog input,.ncloud-dialog select,.ncloud-dialog textarea{box-sizing:border-box;width:100%;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:9px;font:inherit;font-weight:400;background:var(--bg-0);color:var(--ink)}
+.ncloud-dialog textarea{resize:vertical;min-height:84px;max-height:240px}
+.ncloud-dialog input:focus-visible,.ncloud-dialog select:focus-visible,.ncloud-dialog textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.ncloud-muted{color:var(--ink-3);font-weight:400;line-height:1.7}
+.ncloud-auto{display:flex;align-items:flex-start;gap:12px;padding:14px;border:1px solid var(--line);border-radius:12px;background:color-mix(in srgb,var(--accent) 4%,var(--bg-0))}
+.ncloud-auto>svg{width:24px;height:24px;flex:none;fill:none;stroke:var(--accent);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.ncloud-auto p{margin:5px 0 0}.ncloud-setup-actions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.ncloud-setup-actions button{border:1px solid var(--line);border-radius:8px;padding:7px 11px;font:inherit;background:var(--bg-0);color:var(--ink-2);cursor:pointer}
+.ncloud-files{margin-top:12px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;color:var(--ink-2)}
+.ncloud-files summary{cursor:pointer}
+.ncloud-files ul{max-height:180px;overflow:auto;list-style:none;padding:0;margin:12px 0 0}
+.ncloud-files li{display:flex;justify-content:space-between;gap:16px;padding:5px 0;overflow-wrap:anywhere}
+.ncloud-files small{white-space:nowrap;color:var(--ink-3)}
+.ncloud-receipt{display:flex;align-items:center;gap:10px;color:var(--accent);font-size:16px}
+.ncloud-receipt svg,.nchat-cloud-state svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.nchat-cloud-state{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border:1px solid var(--line);border-radius:8px;background:var(--bg-0);color:var(--ink-3);font:inherit;font-size:max(var(--font-min-readable,12px),12px);white-space:nowrap;cursor:pointer}
+.nchat-cloud-state:hover:not(:disabled){background:var(--bg-2);color:var(--ink)}
+.nchat-cloud-state:disabled{opacity:.5;cursor:default}
+.nchat-cloud-state.is-cloud{color:var(--accent)}
+.nchat-cloud-state:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media(max-width:640px){.nchat-cloud-state{width:32px;height:32px;padding:0;justify-content:center}.nchat-cloud-state span{display:none}.nchat-cloud-state svg{width:17px;height:17px}}
+.nchat-cloud-state[hidden],.ncloud-dialog [hidden]{display:none!important}
+[data-chat-cloud][hidden]{display:none!important}
+
+.ncloud-dialog{overflow:auto}
+.ncloud-dialog .nchat-rename-form>header>div{min-width:0}
+.ncloud-dialog .nchat-rename-close{flex:none}
+.ncloud-dialog p{overflow-wrap:anywhere}
+.ncloud-receipt-card{padding:16px;border:1px solid var(--line);border-radius:12px;background:color-mix(in srgb,var(--accent) 4%,var(--bg-0))}
+.ncloud-receipt svg{flex:none}
+.ncloud-receipt strong{min-width:0;overflow-wrap:anywhere}
+.ncloud-receipt-card .ncloud-target{margin:10px 0 0;color:var(--ink-2);line-height:1.6}
+.ncloud-receipt-card .ncloud-muted{margin:6px 0 0}
+.ncloud-dialog .nchat-rename-form>footer{flex-wrap:wrap}

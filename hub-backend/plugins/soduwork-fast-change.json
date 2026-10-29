@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "key": "soduwork-fast-change",
+  "name": "【SoduWork 专用】快速改动",
+  "version": "1.0.2",
+  "category": "dev",
+  "description": "SoduWork 日间轻量研发：Codex 一次完成 Bug 或小需求的实现、自测、自审与推送，只形成待发布固定提交，不合并、不打包、不部署。",
+  "author": "SoduWork",
+  "process": {
+    "enterprise": true,
+    "label": "SoduWork 日间快速研发",
+    "route": "Codex 实现与自审 → 自测 → 提交任务分支 → 待集中发布",
+    "environments": []
+  },
+  "instructions": "仅用于 SoduWork 自有工程的 Bug 和边界明确的小需求。复用 Codex 原生控制循环，不重复拆分规划、独立 AI Review、合并或发布节点。",
+  "entrypoints": {
+    "conversation": false,
+    "task": true,
+    "automation": true
+  },
+  "inputs": [
+    {
+      "key": "changeType",
+      "label": "改动类型与现象",
+      "type": "textarea",
+      "required": false
+    },
+    {
+      "key": "acceptanceFocus",
+      "label": "重点验收标准",
+      "type": "textarea",
+      "required": false
+    }
+  ],
+  "capabilities": {
+    "network": true,
+    "skills": [],
+    "mcpServers": [],
+    "runtime": [
+      "files",
+      "terminal"
+    ]
+  },
+  "workflow": {
+    "nodes": [
+      {
+        "key": "change",
+        "type": "ai",
+        "name": "Codex 快速修复或实现",
+        "outputs": [
+          {
+            "key": "code",
+            "kind": "git",
+            "label": "已推送的任务分支固定提交",
+            "required": true
+          }
+        ],
+        "config": {
+          "agentKind": "local:codex",
+          "model": "gpt-5.6-sol",
+          "reasoningEffort": "xhigh",
+          "fallbackMode": "strict",
+          "timeoutSeconds": 7200,
+          "executionPolicy": {
+            "containerOrchestration": "forbid",
+            "maxVerificationCommands": 8,
+            "adHocProbe": "allow",
+            "commandTimeoutSeconds": 1200,
+            "authoritativeQuality": false
+          },
+          "prompt": "你是 SoduWork 自有全栈工程的资深维护者。本流程只处理 SoduWork Enterprise AI Native Platform monorepo；若绑定的不是 SoduWork 工程，立即阻断且不改文件。\n\n使用 Codex 自带的规划、实施、检查与复核能力，在一个会话内完成，不额外生成形式化规划，也不等待中途确认。读取任务、附件、历史证据、仓库约定和代码，自动判断 Bug 或小需求。Bug 先定位根因并补可行的回归验证；小需求覆盖完整用户路径。界面改动补齐真实交互、状态、错误和视觉细节；服务改动补齐接口、数据、权限、并发与异常。只做验收所需的最小完整改动，不用假数据，不重建工程，不碰无关模块。\n\n在 SoduWork 隔离工作区和任务分支工作，保留并发改动；禁止 reset --hard、覆盖他人提交或直改受保护分支。运行与风险相称的现有测试、检查或构建，失败须修复。按注入的 SCM 协议提交并推送：GitLab 和通用 Git 均推任务分支，不直接推受保护目标分支。不打源码压缩包。\n\n回执必须包含类型、根因或方案、改动范围、逐条证据、真实测试、远程分支、固定提交、风险和回滚点。禁止合并、改正式版本、打包、部署或访问生产环境；完成只表示“待集中发布”。"
+        },
+        "retry": {
+          "maxAttempts": 2
+        }
+      },
+      {
+        "key": "receipt",
+        "type": "publish",
+        "name": "登记待发布候选",
+        "dependsOn": [
+          "change"
+        ],
+        "config": {
+          "message": "SoduWork 改动已由 Codex 极高模型完成实现、自测、自审、提交和推送，固定提交已登记为待发布候选；尚未合并、打包或上线，请审核并合并所需提交，再按项目配置的发布流程上线。"
+        },
+        "retry": {
+          "maxAttempts": 1
+        }
+      }
+    ]
+  },
+  "evaluations": [
+    {
+      "key": "soduwork-bug-fix",
+      "name": "SoduWork 缺陷快速修复",
+      "instruction": "修复一个可稳定复现的 SoduWork 客户端缺陷，只提交本轮改动到独立任务分支。",
+      "inputs": {
+        "changeType": "Bug：交互状态异常",
+        "acceptanceFocus": "复现消失；回归通过；不影响其他页面"
+      },
+      "criteria": [
+        "仅一个 Codex 实施节点且使用 gpt-5.6-sol xhigh",
+        "形成远程任务分支和固定提交",
+        "有定位、自测、自审与验收证据",
+        "无合并、打包、部署或生产操作"
+      ],
+      "expectedOutputs": [
+        "change.code"
+      ]
+    },
+    {
+      "key": "soduwork-small-requirement",
+      "name": "SoduWork 小需求快速实现",
+      "instruction": "实现边界清晰的 SoduWork 小需求，覆盖完整用户路径并提交独立任务分支。",
+      "inputs": {
+        "changeType": "小需求",
+        "acceptanceFocus": "真实交互、异常和空状态完整"
+      },
+      "criteria": [
+        "不拆分重复规划和独立 AI Review",
+        "Codex 同会话完成实现、测试与复核",
+        "只交付固定提交且不声称上线",
+        "无无关改动并给出回滚点"
+      ],
+      "expectedOutputs": [
+        "change.code"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+/* Share the client's typography, surfaces and borders; keep actions in view. */
+dialog.rq-action-confirm{position:fixed;inset:0;margin:auto;box-sizing:border-box;width:min(440px,calc(100vw - 32px));max-width:calc(100vw - 32px);max-height:calc(100dvh - 32px);padding:0;overflow:hidden;border:1px solid var(--line);border-radius:16px;background:var(--bg-0);color:var(--ink);font-family:var(--font-ui);font-size:var(--font-min-readable,14.5px);box-shadow:0 20px 64px color-mix(in srgb,var(--ink) 22%,transparent)}
+dialog.rq-action-confirm[open]{display:flex;flex-direction:column}
+dialog.rq-action-confirm::backdrop{background:color-mix(in srgb,var(--ink) 24%,transparent)}
+.rq-action-confirm .rq-action-head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex:none;padding:18px 20px 12px}
+.rq-action-confirm .rq-action-head h3{margin:0;color:var(--ink);font-size:18px;font-weight:650;line-height:1.5}
+.rq-action-confirm button{box-sizing:border-box;min-height:38px;padding:8px 16px;border:1px solid var(--line);border-radius:8px;background:var(--bg-0);color:var(--ink-2);font:inherit;line-height:20px;cursor:pointer}
+.rq-action-confirm button:hover{background:var(--bg-1);color:var(--ink)}
+.rq-action-confirm button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.rq-action-confirm .rq-action-close{display:grid;place-items:center;flex:none;width:30px;height:30px;min-height:0;padding:0;border:0;background:transparent;color:var(--ink-3);font-size:22px;line-height:1}
+.rq-action-confirm .rq-action-close:hover{background:var(--bg-1)}
+.rq-action-confirm .rq-action-body{min-height:0;overflow:auto;overscroll-behavior:contain;padding:0 20px 20px;overflow-wrap:anywhere}
+.rq-action-confirm .rq-action-name{margin:0 0 8px;color:var(--ink-2);font-weight:600;line-height:1.6;white-space:pre-wrap}
+.rq-action-confirm .rq-action-name[hidden]{display:none}
+.rq-action-confirm .rq-action-description{margin:0;color:var(--ink-3);line-height:1.65;white-space:pre-wrap}
+.rq-action-confirm .rq-action-foot{display:flex;justify-content:flex-end;gap:10px;flex:none;padding:14px 20px;border-top:1px solid var(--line)}
+.rq-action-confirm .rq-action-danger{border-color:transparent;background:color-mix(in srgb,var(--danger,#e0454b) 85%,#000);color:#fff}
+.rq-action-confirm .rq-action-danger:hover{background:color-mix(in srgb,var(--danger,#e0454b) 75%,#000);color:#fff}

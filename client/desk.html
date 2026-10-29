@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>SoduWork · 工作台</title>
+<!-- Main workspace with native window controls. The workspace shell routes requirements, approvals, AI desks, and personal settings; terminals and multi-session consoles may open separately. URL panel and view parameters select the window role and active page. Keep these windows non-topmost, integrate the menu with native title-bar controls, and use the macOS system menu and traffic lights where available. Legacy main processes retain a separate menu row. Transparent overlays belong to requirement and desktop-pet views; desk-window.css suppresses panel-drawn window controls here. Do not load pet internals or app/app.js: their rendering and polling side effects belong to the original window and must run once. -->
+<script>
+/* Set the window role on the root element before the first paint so desk-window.css applies the correct layout without flashing overlay styles. */
+(function(){
+  var q=new URLSearchParams(location.search);
+  var p=q.get('panel')||'workspace';
+  var T={workspace:'工作区',aidesk:'AI 团队',account:'个人信息',settings:'设置',shortcuts:'快捷键',skin:'外观',notices:'通知',
+         history:'需求池',team:'团队',inbox:'收件箱',daily:'简报',add:'添加需求',
+         detail:'需求详情',multi:'多路控制台',console:'控制台',schedules:'自动化',
+         skills:'插件',apps:'应用',chatbar:'对话',library:'资料库',models:'我的模型','model-editor':'模型配置',agents:'Agent 管理',cloud:'云端环境',codeacct:'代码账号',usage:'我的用量',archive:'归档会话',approvals:'待我确认',briefs:'简报',create:'新建'};
+  if(!T[p])p='workspace';
+  document.documentElement.setAttribute('data-desk-panel',p);
+  document.documentElement.setAttribute('data-window-menu','');
+  window.__deskPanel=p;
+  /* Restore navigation only within this process lifetime; do not read a prior process's page from localStorage. */
+  var requestedView=q.get('view')||'';
+  var v=(requestedView&&T[requestedView]) ? requestedView : '';
+  if(p==='workspace'&&!v)v='create';
+  if(p==='workspace')document.documentElement.setAttribute('data-workspace-view',v||'create');
+  /* Initial open parameters use the URL because desk-open IPC may arrive before its listener is installed. */
+  window.__deskArgs={panel:p,view:v,taskId:q.get('taskId')||'',providerId:q.get('providerId')||'',teamEntry:q.get('teamEntry')||'',
+                     chatId:q.get('chatId')||'',workspaceRestore:q.get('workspaceRestore')||'',tab:q.get('tab')||'',newSession:q.get('newSession')==='1',
+                     approvalId:q.get('approvalId')||'',approvalView:q.get('approvalView')||'',console:q.get('console')==='1',
+                     createRequirement:q.get('createRequirement')==='1'};
+
+
+
+
+  window.__soduworkWindowTitle={label:p==='workspace'?'':T[p],detail:''};
+  document.title=p==='workspace'?'SoduWork':'SoduWork · '+T[p];
+  /* The loading title follows the selected page and is applied after DOMContentLoaded. */
+  document.addEventListener('DOMContentLoaded',function(){
+    var b=document.getElementById('deskBlankTitle');
+    if(b)b.textContent=T[p];
+  });
+})();
+</script>
+<link rel="stylesheet" href="theme/variables.css">
+<link rel="stylesheet" href="components/client-auth/client-auth.css">
+<link rel="stylesheet" href="components/client-auth/account-center.css">
+<link rel="stylesheet" href="components/panels/panels-base.css">
+<link rel="stylesheet" href="components/panels/im-remote.css">
+<link rel="stylesheet" href="components/panels/panels-session-memory.css">
+<link rel="stylesheet" href="components/panels/agent-brand.css">
+<link rel="stylesheet" href="components/requirements/requirements-board.css">
+<link rel="stylesheet" href="components/requirements/requirement-confirm.css">
+<link rel="stylesheet" href="components/panels/plugin-ui-host.css">
+<link rel="stylesheet" href="components/panels/plugin-debug-card.css">
+<link rel="stylesheet" href="components/panels/plugin-input-sheet.css">
+<link rel="stylesheet" href="components/panels/work-entry-sheet.css">
+<link rel="stylesheet" href="components/panels/work-automation-sheet.css">
+<link rel="stylesheet" href="components/panels/chat-work-cards.css">
+<link rel="stylesheet" href="components/panels/panels-desk.css">
+<link rel="stylesheet" href="components/panels/notice-type-scale.css">
+<link rel="stylesheet" href="components/panels/panels-schedules.css">
+<link rel="stylesheet" href="components/panels/panels-apps.css">
+<link rel="stylesheet" href="components/panels/panels-capabilities.css">
+<link rel="stylesheet" href="components/panels/panels-capability-mcp.css">
+<link rel="stylesheet" href="components/panels/plugin-install-setup.css">
+<link rel="stylesheet" href="components/panels/platform-plugin-connect.css">
+<link rel="stylesheet" href="components/panels/panels-capability-plugins.css">
+<link rel="stylesheet" href="components/panels/panels-library.css">
+<link rel="stylesheet" href="components/shared/app-confirm-dialog.css">
+<link rel="stylesheet" href="components/panels/library-share-dialog.css">
+<link rel="stylesheet" href="components/panels/library-preview-pane.css">
+<link rel="stylesheet" href="components/panels/panels-plugin-maker.css">
+<link rel="stylesheet" href="components/panels/capability-type-scale.css">
+<link rel="stylesheet" href="components/panels/plugin-presentation.css">
+<link rel="stylesheet" href="components/panels/panels-agents.css">
+<link rel="stylesheet" href="components/panels/cloud-environments.css">
+<link rel="stylesheet" href="components/panels/custom-agents.css">
+<link rel="stylesheet" href="components/panels/panels-usage.css">
+<link rel="stylesheet" href="components/panels/panels-connections.css">
+<link rel="stylesheet" href="components/panels/model-capabilities.css">
+<link rel="stylesheet" href="components/panels/panels-runners.css">
+<!-- Shared requirement lifecycle components for details, AI desks, and human review. -->
+<link rel="stylesheet" href="components/panels/task-trace-view.css">
+<link rel="stylesheet" href="components/panels/task-context-view.css">
+<link rel="stylesheet" href="components/panels/task-trace-rail-view.css">
+<link rel="stylesheet" href="components/panels/task-evolution-view.css">
+<link rel="stylesheet" href="components/panels/panels-desk-session.css">
+<link rel="stylesheet" href="components/panels/panels-aidesk-control.css">
+<link rel="stylesheet" href="components/panels/panels-aidesk-office.css">
+<link rel="stylesheet" href="components/panels/panel-forms.css">
+<link rel="stylesheet" href="components/panels/panels.css">
+<link rel="stylesheet" href="components/panels/panels-forward-plugin.css">
+<!-- Native conversation rendering connected to the local Pi runtime. -->
+<link rel="stylesheet" href="components/panels/panels-chat.css">
+<link rel="stylesheet" href="components/panels/chat-crew.css">
+<link rel="stylesheet" href="components/panels/code-workbench.css">
+<link rel="stylesheet" href="components/panels/chat-collaboration.css">
+<link rel="stylesheet" href="components/panels/chat-plugin-mention.css">
+<link rel="stylesheet" href="components/panels/plugin-input-sheet.css">
+
+<link rel="stylesheet" href="components/panels/console.css">
+<link rel="stylesheet" href="components/panels/console-multi.css">
+<link rel="stylesheet" href="components/workspace/workspace-shell.css">
+<link rel="stylesheet" href="components/workspace/workspace-sidebar-projects.css">
+<link rel="stylesheet" href="components/workspace/workspace-page-layout.css">
+<link rel="stylesheet" href="components/skin-manager/skin-manager.css">
+<link rel="stylesheet" href="components/team/team.css">
+<link rel="stylesheet" href="components/reports/work-briefs.css">
+<link rel="stylesheet" href="components/gantt/gantt.css">
+<link rel="stylesheet" href="vendor/xterm/xterm.css">
+<!-- Load after component styles so the global cursor policy takes precedence. -->
+<link rel="stylesheet" href="theme/cursor.css">
+<!-- Load after component styles to override panel centering, corners, shadows, and custom window controls. -->
+<link rel="stylesheet" href="desk-window.css">
+<!-- Shared workspace typography, headings, controls, and empty states; each page retains its layout. -->
+<link rel="stylesheet" href="theme/workspace-experience.css">
+<link rel='stylesheet' href='components/panels/work-composer.css'>
+<link rel='stylesheet' href='components/panels/panels-compose-model-picker.css'>
+<link rel='stylesheet' href='components/panels/conversation-attachments.css'>
+<link rel='stylesheet' href='components/panels/panels-compose-skills.css'>
+<link rel='stylesheet' href='components/panels/work-intent.css'>
+<link rel="stylesheet" href="components/settings/settings.css">
+<link rel="stylesheet" href="components/settings/shortcut-settings.css">
+<link rel="stylesheet" href="components/settings/client-update-view.css">
+<link rel="stylesheet" href="components/archive/archive-history-panel.css">
+<link rel="stylesheet" href="theme/workspace-page-heads.css">
+<link rel="stylesheet" href="components/client-auth/personal-account.css">
+<style>
+  /* Normal windows have an opaque background and fill their content area. */
+  html,body{margin:0;padding:0;height:100%;background:var(--bg-1);overflow:hidden}
+  body{font-family:var(--font-ui);color:var(--ink)}
+  /* The AI desk fills this window rather than floating above it. Remove overlay positioning and shadows, and keep its stacking order below settings, notices, skins, and team panels. */
+  #deskRoot{position:absolute;inset:0}
+  .desk-panel.show{position:absolute;inset:0;z-index:1;opacity:1;pointer-events:auto;box-shadow:none;border-radius:0}
+  /* A closed AI desk must disappear; full-window positioning applies only while its show class is active. */
+  .desk-panel:not(.show){display:none}
+  /* Keep a loading or empty state visible when only a secondary page is open. */
+  .desk-blank{
+    position:absolute;inset:0;z-index:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:10px;color:var(--ink-4);
+    -webkit-user-select:none;user-select:none;
+  }
+  .desk-blank b{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xl) * var(--font-scale,1)));color:var(--ink-3);font-weight:700;letter-spacing:2px}
+  .desk-blank span{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)))}
+  .desk-blank svg{width:46px;height:46px;stroke:var(--ink-5,var(--ink-4));stroke-width:1.4;fill:none;
+    stroke-linecap:round;stroke-linejoin:round;opacity:.5}
+  /* This window uses a bottom-right toast for transient messages. */
+  .desk-toast{
+    position:fixed;right:18px;bottom:16px;z-index:200;max-width:460px;
+    background:var(--ink);color:#fff;border-radius:var(--r-md);padding:9px 14px;
+    line-height:1.6;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));
+    box-shadow:var(--shadow-xl);opacity:0;transition:opacity .18s ease;pointer-events:none;
+  }
+  .desk-toast.show{opacity:.94}
+  .ctx-menu{z-index:130}
+</style>
+<link rel="stylesheet" href="components/panels/automation-surface.css">
+<link rel="stylesheet" href="components/panels/notice-surface.css">
+<link rel="stylesheet" href="components/panels/library-transfer.css">
+<link rel="stylesheet" href="components/panels/chat-deliveries.css">
+<link rel="stylesheet" href="components/workspace/window-menu.css">
+<link rel="stylesheet" href="theme/box-theme.css">
+</head>
+<body>
+<!-- Window background shown while a page loads. desk-boot replaces the status text with a specific error if loading fails and keeps the window open for diagnosis. -->
+<div class="desk-blank" id="deskBlank">
+  <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 20h8M12 18v2"/><path d="M7.5 9.5h5M7.5 13h9"/></svg>
+  <b id="deskBlankTitle">SoduWork</b>
+  <span id="deskBlankHint">正在载入…</span>
+</div>
+<div id="deskRoot"></div>
+<!-- Requirement details container used by the AI desk's open action. Secondary views are centered because this window has no dock anchor. -->
+
+
+<!-- Shared panel containers moved from index.html. Notification and history panels create their DOM dynamically and only need their scripts and styles loaded. -->
+<section class="panel personal-account-panel" id="personalAccountPanel" aria-labelledby="personalAccountTitle">
+  <header class="ws-page-head personal-account-head"><h1 id="personalAccountTitle">个人信息</h1><p>管理个人资料、账号安全与登录设备</p></header>
+  <div class="personal-account-body">
+    <div id="personalAccountSummary" class="personal-account-summary"></div>
+    <div id="personalAccountContent" class="personal-account-content ac-center"></div>
+    <section class="personal-account-device" aria-labelledby="personalAccountDeviceTitle" hidden>
+      <h2 id="personalAccountDeviceTitle">当前设备</h2>
+      <label for="boxNameInput">SoduWork 名称</label>
+      <div class="hub-row"><input id="boxNameInput" class="hub-input" type="text" maxlength="30" spellcheck="false" placeholder="没起名时用「用户名 · 主机名」"><button type="button" id="boxNameSave" class="hub-save">保存</button></div>
+      <p class="set-note" id="boxBindNote">绑定信息加载中…</p>
+    </section>
+  </div>
+</section>
+
+<div class="panel" id="settingsPanel">
+  <button class="panel-close" id="settingsClose">✕</button>
+  <div class="set-page-head ws-page-head"><span class="set-page-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="m10 3-.5 2-2 .9-1.9-.5-2 3.4L5 10.3v2.4l-1.4 1.5 2 3.4 1.9-.5 2-.9.5 2h4l.5-2 2-.9 1.9.5 2-3.4-1.4-1.5v-2.4l1.4-1.5-2-3.4-1.9.5-2-.9L14 3Z"/></svg></span><div class="set-page-title"><span class="set-page-kicker" data-i18n="eyebrow.preferences">PREFERENCES</span><span class="set-page-main-title" data-i18n="settings">设置</span><span class="set-page-sub" data-i18n="settingsSub">管理客户端、工作目录与桌面体验</span></div></div>
+  <!-- Desktop shortcuts can each be hidden independently; the main window and tray remain available. -->
+  <div class="set-group set-half"><div class="k">桌面显示</div>
+    <label class="chk-inline"><input type="checkbox" id="dockVisibleChk" checked>贴在屏幕右边的快捷竖条</label>
+    <label class="chk-inline"><input type="checkbox" id="petVisibleChk" checked>桌面上的 SoduWork 小球</label>
+    <label class="chk-inline"><input type="checkbox" id="trayVisibleChk" checked>右下角状态栏里的图标</label>
+    <div class="set-note">这三件都是桌面上的快捷入口，关掉只是不显示——需求、通知、团队都在这扇主窗口里照常用。
+      托盘图标右键也能改这几项。<b id="trayOffNote" style="display:none;font-weight:400">关掉图标后，只能从这儿把它打开；SoduWork 起来时会自己打开主窗口。</b></div></div>
+  <!-- Appearance settings contain skin selection and desktop visibility controls. -->
+  <div class="set-group set-half"><div class="k">外观</div>
+    <div class="hub-row"><span class="set-cur" id="skinCurName">—</span><button id="skinOpenBtn" class="hub-save">更换皮肤</button></div>
+    <div class="set-note">调整 SoduWork 形象与整体配色。</div></div>
+  <div class="set-group set-third"><div class="k">提醒强度</div><div class="seg" id="remindSeg"><button data-remind="off">关闭</button><button class="active" data-remind="light">轻柔</button><button data-remind="strong">明显</button></div><div class="set-note">未完成需求以呼吸光晕提醒。</div></div>
+  <div class="set-group set-third"><div class="k">需求视图大小</div><div class="seg" id="scaleSeg"><button data-scale="small">小</button><button class="active" data-scale="medium">中</button><button data-scale="large">大</button></div><div class="set-note">决定需求视图窗口在桌面上占多大空间。</div></div>
+  <div class="set-group set-third"><div class="k">字体大小</div><div class="seg" id="fontSeg"><button data-font="small">小</button><button class="active" data-font="medium">中</button><button data-font="large">大</button></div><div class="set-note">只调字，不动窗口大小（用户定：两者分开设）。近视眼或高分屏可把字调大。</div></div>
+  <div class="set-group set-language"><div class="k" data-i18n="language">语言</div><label class="settings-select-wrap" for="localeSelect"><select id="localeSelect" class="settings-select" aria-label="语言"><option value="zh-CN" data-i18n="languageZh">简体中文</option><option value="en-US" data-i18n="languageEn">English</option><option value="ja-JP" data-i18n="languageJa">日本語</option><option value="ko-KR" data-i18n="languageKo">한국어</option></select><svg class="settings-select-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 9 5 5 5-5"></path></svg></label><div class="set-note" data-i18n="languageNote">选择后立即应用，后续可扩展更多语言。</div></div>
+  <div class="set-group"><div class="k">工作目录</div>
+    <div class="hub-row"><input id="workRootInput" class="hub-input" type="text" spellcheck="false" placeholder="如 C:\Program Files\code"><button id="workRootSave" class="hub-save">保存</button></div>
+    <div class="set-note" id="workRootNote">本机存放代码的根目录，默认已设为「用户目录\SoduWork」，想换直接改；清空保存即恢复默认。派活给 AI 时，SoduWork 会组合根目录与工程子目录，让执行器在正确位置工作。该设置只保存在本机。</div></div>
+  <div class="set-group set-access-default"><div class="k">默认授权模式</div>
+    <div id="defaultAccessModes" class="set-access-options" role="radiogroup" aria-label="默认授权模式" aria-busy="true">
+      <button type="button" data-default-access="standard" role="radio" aria-checked="true" disabled><b>默认权限</b><small>工作区内处理文件，其他操作按需确认</small></button>
+      <button type="button" data-default-access="readonly" role="radio" aria-checked="false" disabled><b>只读</b><small>查看与分析，不修改文件或运行命令</small></button>
+      <button type="button" data-default-access="full" role="radio" aria-checked="false" disabled><b><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 3v5c0 5-3 8-8 10-5-2-8-5-8-10V6z"/><path d="M12 8v5m0 3v.1"/></svg>完全访问</b><small>减少确认，允许操作工作区外的资源</small></button>
+    </div>
+    <div id="defaultAccessStatus" class="set-note" role="status">正在读取默认授权模式…</div>
+    <div class="set-note">仅保存在此设备，用于支持统一授权的新建对话；已有会话、需求和自动化保持原有权限。</div>
+  </div>
+  <div class="set-group client-update-card">
+    <div class="set-kline"><div class="k">客户端更新</div><span class="client-update-badge" id="clientUpdateBadge">读取中</span></div>
+    <div class="client-update-main">
+      <i class="client-update-dot" id="clientUpdateDot"></i>
+      <div class="client-update-copy"><b id="clientUpdateTitle">正在读取更新状态</b><small id="clientUpdateDetail">正在执行的工作不会被升级打断。</small></div>
+      <button type="button" class="hub-save client-update-action" id="clientUpdateAction">检查更新</button>
+    </div>
+    <div class="update-progress" id="clientUpdateProgress" hidden></div>
+    <div class="client-update-blockers" id="clientUpdateBlockers" hidden></div>
+  </div>
+</div>
+
+<!-- Keyboard shortcuts use the shared workspace shell and a scrollable categorized list. -->
+<section class="shortcuts-page" id="shortcutsPanel" hidden aria-labelledby="shortcutsPageTitle">
+  <header class="shortcuts-page-head">
+    <div class="shortcuts-page-heading"><h1 id="shortcutsPageTitle">快捷键</h1><p>点击快捷键可修改，支持恢复默认。</p></div>
+    <div class="shortcuts-page-actions"><button type="button" class="shortcut-btn" data-shortcut-reset-all>恢复默认</button></div>
+  </header>
+  <div class="shortcuts-toolbar">
+    <label class="shortcuts-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m15.5 15.5 4.5 4.5"></path></svg><input type="search" data-shortcut-search placeholder="搜索功能或快捷键" aria-label="搜索快捷键" autocomplete="off" spellcheck="false"></label>
+  </div>
+  <main class="shortcuts-main" aria-label="快捷键设置">
+    <div class="shortcuts-list" data-shortcut-list></div>
+  </main>
+  <p class="shortcut-status" data-shortcut-status role="status" aria-live="polite"></p>
+</section>
+<section class="archive-history-panel" id="archivePanel" aria-labelledby="archiveHistoryTitle">
+  <header class="archive-history-head ws-page-head">
+    <div class="archive-history-heading"><h1 class="archive-history-title" id="archiveHistoryTitle">归档会话</h1><p class="archive-history-sub">归档的会话和项目会从主列表隐藏，可在这里恢复或彻底删除。</p></div>
+    <button type="button" id="archiveClose" aria-label="关闭归档会话">✕</button>
+  </header>
+  <div class="archive-history-body">
+    <div class="archive-history-filters">
+      <label class="archive-history-search">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4.5 4.5"></path></svg>
+        <input id="archiveHistorySearch" type="search" autocomplete="off" placeholder="搜索归档会话" aria-label="搜索归档会话">
+      </label>
+      <div class="archive-sort-menu" id="archiveHistorySortMenu">
+        <button type="button" class="archive-sort-trigger" id="archiveHistorySortTrigger" aria-haspopup="listbox" aria-expanded="false">
+          <svg class="archive-history-select-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h12M6 12h8M6 19h4"></path><path d="m17 10 3 3-3 3"></path></svg>
+          <span id="archiveHistorySortLabel">更新时间</span><i aria-hidden="true"></i>
+        </button>
+        <div class="archive-sort-options" id="archiveHistorySortOptions" role="listbox" aria-label="排序方式" hidden>
+          <button type="button" role="option" aria-selected="true" data-archive-sort="updated">更新时间</button>
+          <button type="button" role="option" aria-selected="false" data-archive-sort="created">创建时间</button>
+          <button type="button" role="option" aria-selected="false" data-archive-sort="alpha">按字母顺序</button>
+        </div>
+      </div>
+    </div>
+    <div class="archive-history-toolbar">
+      <nav class="archive-history-tabs" role="tablist" aria-label="归档内容类型">
+        <button type="button" id="archiveChatsTab" role="tab" aria-selected="true" aria-controls="archiveChatsPane" data-archive-tab="chats" data-i18n="archive.conversations" data-i18n-source="会话">会话</button>
+        <button type="button" id="archiveProjectsTab" role="tab" aria-selected="false" aria-controls="archiveProjectsPane" data-archive-tab="projects">项目</button>
+      </nav>
+      <span id="archiveHistoryCount"></span>
+    </div>
+    <div id="archiveHistoryStatus" role="status" aria-live="polite"></div>
+    <div class="archive-history-panes">
+      <section class="archive-history-pane is-active" id="archiveChatsPane" data-archive-tabpanel="chats" role="tabpanel" aria-labelledby="archiveChatsTab">
+        <div id="archiveHistoryList" class="archive-history-list"></div>
+      </section>
+      <section class="archive-history-pane" id="archiveProjectsPane" data-archive-tabpanel="projects" role="tabpanel" aria-labelledby="archiveProjectsTab" hidden>
+        <div id="archiveProjectsList" class="archive-history-list"></div>
+      </section>
+    </div>
+  </div>
+</section>
+<div class="skin-manager" id="skinManager">
+  <div class="sm-head ws-page-head"><div><div class="sm-title"><span class="ico"><svg viewBox="0 0 24 24" style="width:15px;height:15px;stroke:var(--accent);stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></span>外观</div><div class="sm-sub">选择皮肤与界面风格</div></div><button class="sm-close" id="skinClose">✕</button></div>
+  <div class="sm-body" id="skinBody"></div>
+</div>
+<div class="team-panel" id="teamPanel">
+  <div class="tp-head ws-page-head">
+    <div><div class="tp-title"><span class="ico"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M15 11a3 3 0 1 0-2.6-4.5"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M14.5 14.5a5.5 5.5 0 0 1 6 5.5"/></svg></span><span id="tpTitleText">团队</span></div><div class="tp-sub">成员与协作</div></div>
+    <div class="tp-acts"><button class="tp-max" id="teamMax" title="最大化（开会/演示用）">⤢</button><button class="tp-close" id="teamClose">✕</button></div>
+  </div>
+  <div class="tp-tabs" id="teamTabs">
+    <button class="active" data-tab="1" data-mgr="1">概览</button>
+    <button data-tab="0" data-mgr="1">团队需求</button>
+    <button class="tp-tab-inbox" data-tab="4">收件箱<b class="tp-tab-badge" id="inboxTabBadge"></b></button>
+  </div>
+  <div class="tp-body" id="teamBody"></div>
+</div>
+
+<!-- Requirement creation in a normal window. desk-window.css removes the former overlay backdrop and expands the form to fill the window. -->
+<div class="mask" id="addMask">
+
+    <div class="modal modal-wide">
+
+      <div class="add-page-head ws-page-head"><div class="add-page-title"><span class="add-page-kicker" data-i18n="eyebrow.create_task">CREATE ISSUE</span>创建需求 <span class="add-page-sub">把目标交给团队或 AI，并持续跟踪结果</span></div></div>
+
+
+      <!-- Two columns keep core fields on the left and supplementary fields on the right, with all fields visible without expanding another section. -->
+
+      <div class="add-cols">
+
+        <div class="add-col">
+
+
+          <div class="field"><label>需求名称<em class="req">*</em></label><input id="inTitle" placeholder="例：写周报" maxlength="60"></div>
+
+          <div class="field" id="assignField" style="display:none"><label>指派给（负责人可派下属；留"我自己"即本机需求）</label><select id="inAssign" class="assign-sel"><option value="">我自己</option></select></div>
+
+          <div class="field add-description"><label>需求描述 <span class="field-help">把背景、目标、验收标准和限制写清楚</span></label><textarea id="inNote" rows="10" placeholder="描述要完成什么、为什么做、做到什么程度，以及可参考的资料…"></textarea></div>
+
+          <div class="field" id="addAttField"><label>附件（图片 / 文档，可多选）</label>
+
+            <div class="add-att-zone" id="addAttZone"><button type="button" class="add-att-pick" id="addAttPick"><span class="add-att-plus">+</span> 选择文件</button><span class="add-att-tip">或拖到这里</span></div>
+
+            <div class="add-att-list" id="addAttList"></div>
+
+            <input type="file" id="addAttInput" multiple style="display:none"></div>
+
+          <div class="field"><label>优先级</label><div class="status-pick" id="prioPick"><label><input type="radio" name="prio" value="low"><span>低</span></label><label><input type="radio" name="prio" value="normal" checked><span>普通</span></label><label><input type="radio" name="prio" value="high"><span>高</span></label><label><input type="radio" name="prio" value="critical"><span>紧急</span></label></div></div>
+
+          <div class="field field-row" id="planRow"><div style="flex:1"><label>计划开始</label><input type="date" id="inStart"></div><div style="flex:1"><label>计划截止</label><input type="date" id="inDue"></div></div>
+
+
+          <div class="field"><label>标签</label><input id="inTags" placeholder="逗号分隔，如 前端,紧急" maxlength="60"></div>
+
+          <div class="field" style="display:none"><label>谁来处理？</label><div class="status-pick" id="handlerPick"><label><input type="radio" name="hd" value="me" checked><span>我自己</span></label></div></div>
+
+        </div>
+
+        <div class="add-col add-col-side">
+
+          <!-- Completion mode, repository, workflow, and execution runtime are separate parts of the same contract. -->
+          <div class="field add-go" id="addGoField" style="display:none">
+            <div class="add-go-head">
+              <span><b>创建后怎么处理</b><small>仅创建、直接交给 Agent，或按企业工作方法自动推进</small></span>
+              <em id="addGoScenario"></em>
+            </div>
+            <div class="add-go-strategy" id="addGoStrategy" role="radiogroup" aria-label="完成方式">
+              <label><input type="radio" name="addGoStrategy" value="manual" checked><span><b>仅创建</b><small>进入需求池</small></span></label>
+              <label><input type="radio" name="addGoStrategy" value="direct"><span><b>AI 直接办理</b><small>一次执行并回传</small></span></label>
+              <label><input type="radio" name="addGoStrategy" value="workflow"><span><b>按企业流程</b><small>分阶段自动推进</small></span></label>
+            </div>
+            <div class="add-go-body" id="addGoBody">
+              <div class="add-go-loading" id="addGoLoading"><i></i><span>正在加载可用执行方式…</span></div>
+              <label class="add-go-control" id="addGoRepoField"><span>关联工程 <i>可选</i></span><select id="addGoRepo" class="assign-sel" disabled><option>正在加载…</option></select></label>
+              <label class="add-go-control" id="addGoWhoField"><span>Agent</span><select id="addGoWho" class="assign-sel" disabled><option>正在加载…</option></select></label>
+              <label class="add-go-control" id="addGoModelField" style="display:none"><span>本次模型 <i>可选</i></span><select id="addGoModel" class="assign-sel"><option value="">跟随管理员默认</option></select></label>
+              <label class="add-go-control" id="addGoFlowField" style="display:none"><span>企业工作方法</span><select id="addGoMode" class="assign-sel" disabled><option>正在加载…</option></select></label>
+              <div class="add-go-plugin" id="addGoPluginConfig" style="display:none"></div>
+              <div class="add-go-tip" id="addGoTip"></div>
+            </div>
+          </div>
+
+          <div class="add-side-title">更多设置</div>
+
+          <div class="field"><label>提醒时间（到点 SoduWork 响铃提醒）</label><input type="datetime-local" id="inRemind"></div>
+
+          <div class="field"><label>初始状态</label><select id="inStatus" class="assign-sel"><option value="todo" selected>待办</option><option value="doing">进行中</option><option value="done">已完成</option><option value="cancel">搁置</option></select></div>
+
+          <div class="field"><label>来源</label><input id="inSource" placeholder="老板 / 群消息 / 自己" maxlength="20"></div>
+
+          <div class="field field-row"><div style="flex:1"><label>提出方（可空）</label><input id="inReqName" placeholder="客户张三 / 王经理" maxlength="30"></div><div style="flex:1.1"><label>联系方式（回执 TA）</label><input id="inReqContact" placeholder="邮箱 / 电话 / 工单号" maxlength="60"></div></div>
+
+
+        </div>
+
+      </div>
+
+      <div class="modal-actions"><button class="btn btn-ghost" id="addCancel">取消</button><button class="btn btn-primary" id="addOk">创建需求</button></div>
+
+    </div>
+
+  </div>
+
+<!-- Context menu for attachments, outputs, and requirement cards. -->
+<div class="ctx-menu" id="ctxMenu"></div>
+
+<script src="api-library-local.js"></script>
+<script src="core/api-work-plugins.js"></script>
+<script src="core/page-performance.js"></script>
+<script src="api.js"></script>
+<script src="components/client-auth/account-ui.js"></script>
+<script src="components/client-auth/email-auth.js"></script>
+<script src="components/client-auth/account-verification.js"></script>
+<script src="components/client-auth/account-center.js"></script>
+<script src="components/client-auth/client-auth.js"></script>
+<script src="components/panels/task-priority.js"></script>
+<script src="core/task-sync.js"></script>
+<script src="core/store-lifecycle.js"></script>
+<script src="core/store.js"></script>
+<script src="core/mate-notice-sync.js"></script>
+<script src="core/locales/en-US.js"></script>
+<script src="core/locales/en-US-workspace.js"></script>
+<script src="core/locales/en-US-chat.js"></script>
+<script src="core/locales/en-US-shared.js"></script>
+<script src="core/locales/en-US-actions.js"></script>
+<script src="core/locales/en-US-shell.js"></script>
+<script src="core/locales/en-US-capability-pages.js"></script>
+<script src="core/locales/en-US-chat-pages.js"></script>
+<script src="core/locales/en-US-cloud-pages.js"></script>
+<script src="core/locales/en-US-work-pages.js"></script>
+<script src="core/locales/en-US-runtime-pages.js"></script>
+<script src="core/locales/en-US-plugin-pages.js"></script>
+<script src="core/locales/en-US-trace-pages.js"></script>
+<script src="core/locales/en-US-native.js"></script>
+<script src="core/locales/en-US-dynamic-pages.js"></script>
+<script src="core/locales/en-US-dynamic-work.js"></script>
+<script src="core/locales/en-US-dynamic-trace.js"></script>
+<script src="core/locales/en-US-notification-pages.js"></script>
+<script src="core/locales/en-US-final-pages.js"></script>
+<script src="core/locales/en-US-library.js"></script>
+<script src="core/locales/en-US-gap-pages.js"></script>
+<script src="core/locales/locale-registry.js"></script>
+<script src="core/locales/ja-JP.js"></script>
+<script src="core/locales/ja-JP-gap-pages.js"></script>
+<script src="core/locales/ko-KR.js"></script>
+<script src="core/locales/ko-KR-gap-pages.js"></script>
+<script src="core/i18n-dom.js"></script>
+<script src="core/i18n.js"></script>
+<script src="core/localized-text.js"></script>
+<script src="core/user.js"></script>
+<script src="core/skin-registry.js"></script>
+<script src="core/drag.js"></script>
+<!-- Cross-window entry routing and synchronization of configuration, skins, notices, and requirements. -->
+<script src="core/win-bridge.js"></script>
+<script src="core/task-conversation-navigation.js"></script>
+<script src="components/gantt/gantt.js"></script>
+<!-- Load the split panel modules together; loading defines functions without rendering panels. -->
+<script src="components/panels/panels-icons.js"></script>
+<script src="components/panels/panels-session-memory.js"></script>
+<!-- Requirement lifecycle components shared by detail, AI desk, and human-review views. -->
+<script src="components/panels/task-trace-execution-details.js"></script>
+<script src="components/panels/task-trace-rail-view.js"></script>
+<script src="components/panels/task-context-view.js"></script>
+<script src="components/panels/task-trace-approval.js"></script>
+<script src="components/panels/task-approval-inbox.js"></script>
+<link rel="stylesheet" href="components/panels/task-approval-inbox.css">
+<script src="components/panels/task-trace-view.js"></script>
+<script src="components/panels/task-evolution-view.js"></script>
+<script src="components/panels/task-trace-runtime.js"></script>
+<script src="components/panels/panels-detail.js"></script>
+<script src="components/panels/plugin-route-directory.js"></script>
+<script src="components/panels/panels-forward-plugin.js"></script>
+<script src="components/panels/panels-forward-select.js"></script>
+<script src="components/panels/panels-forward-picker.js"></script>
+<script src="components/panels/panels-forward-options.js"></script>
+<script src="components/panels/panels-forward.js"></script>
+<script src="components/panels/panels-add-assignment.js"></script>
+<script src="components/panels/task-create-navigation.js"></script>
+<script src="components/panels/panels-add.js"></script>
+<script src="core/requirements.js"></script>
+<script src="core/requirement-session-context.js"></script>
+<script src="components/requirements/requirements-view.js"></script>
+<script src="components/requirements/requirements-board.js"></script>
+<script src="components/requirements/requirement-confirm.js"></script>
+<script src="components/requirements/requirement-session-choice.js"></script>
+<script src="components/requirements/requirement-assignment.js"></script>
+<script src="components/requirements/requirements-detail.js"></script>
+<script src="components/panels/panels-misc.js"></script>
+<script src="components/panels/message-follow-up.js"></script>
+<script src="components/panels/panels-desk.js"></script>
+<script src="components/panels/panels-schedules-methods.js"></script>
+<script src="components/panels/panels-schedules-cards.js"></script>
+<script src="components/panels/schedule-timing.js"></script>
+<script src="components/panels/panels-schedules.js"></script>
+<script src="components/panels/panels-schedules-editor.js"></script>
+<script src="components/panels/panels-schedules-runs.js"></script>
+<script src="components/panels/panels-skills.js"></script>
+<script src="core/app-window-sizing.js"></script>
+<script src="components/panels/panels-apps.js"></script>
+<script src="components/panels/panels-library-dialogs.js"></script>
+<script src="components/panels/library-file-icons.js"></script>
+<script src="components/panels/library-preview-html.js"></script>
+<script src="components/panels/library-preview-archive.js"></script>
+<script src="components/panels/library-preview-pane.js"></script>
+<script src="components/panels/panels-library.js"></script>
+<script src="components/panels/panels-plugin-maker-utils.js"></script>
+<script src="components/panels/panels-plugin-maker-skills.js"></script>
+<script src="core/plugin-icon.js"></script>
+<script src="core/connector-brand.js"></script>
+<script src="components/panels/plugin-presentation.js"></script>
+<script src="components/panels/panels-plugin-maker-fields.js"></script>
+<script src="components/panels/panels-plugin-maker.js"></script>
+<script src="components/panels/plugin-catalog-sync.js"></script>
+<script src="components/panels/skill-catalog-sync.js"></script>
+<script src="components/panels/plugin-publication-ux.js"></script>
+<script src="components/panels/plugin-catalog-format.js"></script>
+<script src="components/panels/plugin-dependency-ux.js"></script>
+<script src="components/panels/plugin-install-setup.js"></script>
+<script src="core/plugin-platforms.js"></script>
+<script src="components/panels/platform-plugin-connect.js"></script>
+<script src="components/panels/plugin-mcp-gate.js"></script>
+<script src="components/panels/plugin-lifecycle.js"></script>
+<script src="components/panels/plugin-access.js"></script>
+<script src="components/panels/panels-capability-plugins.js"></script>
+<script src="components/panels/panels-capability-directory.js"></script>
+<script src="components/panels/connector-export.js"></script>
+<script src="components/panels/panels-capability-mcp.js"></script>
+<script src="components/panels/connector-config.js"></script>
+<script src="components/panels/connector-auth.js"></script>
+<script src="components/panels/connector-editor.js"></script>
+<script src="components/panels/panels-capability-editors.js"></script>
+<script src="components/panels/connector-selection.js"></script>
+  <script src="components/panels/platform-connection-directory.js"></script>
+  <script src="components/panels/im-remote.js"></script>
+  <script src="components/panels/connector-directory.js"></script>
+  <script src="components/panels/panels-capabilities.js"></script>
+<script src="components/panels/model-capabilities.js"></script>
+<script src="components/panels/model-catalog-editor.js"></script>
+<script src="components/panels/panels-models.js"></script>
+<script src="components/panels/panels-runners.js"></script>
+<script src="components/panels/agent-brand.js"></script>
+<script src="components/panels/panels-agents.js"></script>
+<script src="components/panels/cloud-environments.js"></script>
+<script src="components/panels/cloud-environment-setup.js"></script>
+<script src="components/panels/custom-agents.js"></script>
+<script src="components/panels/panels-codeacct.js"></script>
+<script src="components/panels/panels-usage.js"></script>
+<!-- Unified creation routes input to a requirement confirmation card or a native local Pi conversation. Load ComposeDraft and NativeChat before the composer. -->
+<script src='components/panels/work-intent.js'></script>
+<script src='components/panels/work-composer.js'></script>
+<script src="components/panels/panels-compose-runtime.js"></script>
+<link rel="stylesheet" href="components/panels/compose-execution.css">
+<script src="components/panels/compose-execution.js"></script>
+<script src="core/model-choice.js"></script>
+<script src="components/panels/panels-compose-model-picker.js"></script>
+<script src="components/panels/panels-compose-voice.js"></script>
+<script src="components/panels/library-transfer.js"></script>
+<script src="components/panels/library-delivery.js"></script>
+<script src="components/panels/conversation-attachments.js"></script>
+<script src="components/requirements/requirement-fields.js"></script>
+<script src="components/panels/compose-candidate-navigation.js"></script>
+<script src="components/panels/panels-compose-skills.js"></script>
+<script src="components/panels/panels-compose-capabilities.js"></script>
+<script src="components/panels/task-execution-context.js"></script>
+<script src="components/panels/task-execution-client.js"></script>
+<script src="components/panels/panels-compose-submit.js"></script>
+<script src="components/panels/compose-selection-position.js"></script>
+<script src="components/panels/requirement-routing.js"></script>
+<script src="components/panels/panels-compose-draft.js"></script>
+<script src="components/panels/plugin-ui-host.js"></script>
+<script src="components/panels/plugin-debug-card.js"></script>
+<script src="components/panels/plugin-input-sheet.js"></script>
+<script src="components/panels/work-entry-sheet.js"></script>
+<script src="components/panels/work-automation-bindings.js"></script>
+<script src="components/panels/work-automation-view.js"></script>
+<script src="components/panels/work-automation-card-state.js"></script>
+<script src="components/panels/work-automation-sheet.js"></script>
+<script src="components/panels/work-automation-direct.js"></script>
+<script src="components/panels/panels-chat-work-actions.js"></script>
+<script src="components/panels/panels-compose-work-actions.js"></script>
+<script src="components/panels/panels-plugin-builder-entry.js"></script>
+<script src="components/panels/chat-thinking-collapse.js"></script>
+<script src="components/panels/chat-dom-patch.js"></script>
+<script src="components/panels/chat-decorate-carry.js"></script>
+<script src="components/panels/panels-chat-tools.js"></script>
+<script src="components/panels/chat-tool-details.js"></script>
+<script src="components/panels/panels-chat-status.js"></script>
+
+<!-- Conversation output previews use vendored marked and highlight.js; see vendor/markdown/README.md. -->
+<script src="vendor/markdown/marked.umd.js"></script>
+<script src="vendor/markdown/highlight.min.js"></script>
+<script src="vendor/markdown/hljs-theme.js"></script>
+<script src="vendor/markdown/diff.min.js"></script>
+<script src="vendor/markdown/diff2html.min.js"></script>
+<script src="vendor/markdown/d2h-theme.js"></script>
+<script src="vendor/markdown/purify.min.js"></script>
+<!-- CodeMirror is loaded once for the native workbench.  It stays outside the
+     chat renderer so file preview remains lazy and does not change the
+     message stream contract. -->
+<link rel="stylesheet" href="vendor/codemirror/codemirror.css">
+<script src="vendor/codemirror/codemirror.js"></script>
+<script src="vendor/codemirror/mode/javascript/javascript.js"></script>
+<script src="vendor/codemirror/mode/python/python.js"></script>
+<script src="vendor/codemirror/mode/xml/xml.js"></script>
+<script src="vendor/codemirror/mode/css/css.js"></script>
+<script src="vendor/codemirror/mode/markdown/markdown.js"></script>
+<script src="vendor/codemirror/mode/yaml/yaml.js"></script>
+<script src="components/panels/panels-chat-chrome.js"></script>
+<link rel="stylesheet" href="components/panels/chat-cloud-handoff.css">
+<script src="components/panels/chat-cloud-handoff.js"></script>
+<script src="components/panels/chat-plugin-draft-placement.js"></script>
+<link rel="stylesheet" href="components/panels/chat-media.css">
+<script src="components/panels/chat-media.js"></script>
+<script src="components/panels/chat-output-links.js"></script>
+<script src="components/panels/chat-deliveries.js"></script>
+<script src="components/panels/chat-workbench-annotations.js"></script>
+<script src="components/panels/chat-workspace-info.js"></script>
+<script src="components/panels/chat-workspace-split.js"></script>
+<script src="components/workspace/native-preview-overlays.js"></script>
+<script src="components/panels/chat-workspace-controls.js"></script>
+<script src="components/panels/panels-chat-workspace.js"></script>
+<script src="components/panels/chat-collaboration-store.js"></script>
+<script src="components/panels/chat-task-session.js"></script>
+<script src="components/panels/chat-collaboration.js"></script>
+<script src="components/panels/chat-plugin-mention-model.js"></script>
+<script src="components/panels/chat-plugin-mention.js"></script>
+<script src="components/panels/chat-mate-mention.js"></script>
+<script src="components/panels/chat-session-controls.js"></script>
+<script src="components/panels/chat-runtime-picker.js"></script>
+<script src="components/panels/chat-composer-controls.js"></script>
+<script src="components/panels/chat-task-start.js"></script>
+<script src="components/panels/chat-task-controller.js"></script>
+<link rel="stylesheet" href="components/panels/access-controls.css">
+<script src="components/panels/access-controls.js"></script>
+<script src="components/panels/chat-context-meter.js"></script>
+<script src="components/panels/chat-scroll-follow.js"></script>
+<script src="components/panels/chat-markdown.js"></script>
+<script src="components/panels/chat-reading-position.js"></script>
+<script src="components/panels/chat-message-plugins.js"></script>
+<script src="components/panels/chat-acceptance-results.js"></script>
+<script src="components/panels/chat-crew.js"></script>
+<script src="components/panels/chat-turn-summary.js"></script>
+<script src="components/panels/chat-message-renderer.js"></script>
+<script src="components/panels/chat-send-queue.js"></script>
+<script src="components/panels/chat-work-intent.js"></script>
+<script src="components/panels/chat-work-cards.js"></script>
+<script src="components/panels/chat-draft-recovery.js"></script>
+<script src="components/panels/chat-composer-bindings.js"></script>
+<script src="components/panels/chat-session-controller.js"></script>
+<script src="components/panels/panels-chat.js"></script>
+<script src="components/workspace/workspace-chat-history.js"></script>
+<script src="components/workspace/workspace-sidebar-state.js"></script>
+<script src="components/panels/app-conversation-history.js"></script>
+<script src="components/panels/app-composer-bridge.js"></script>
+<script src="components/panels/chatbar-resize.js"></script>
+<script src="components/panels/chatbar-embed.js"></script>
+<script src="components/panels/compose-surface.js"></script>
+<script src="components/settings/access-preferences.js"></script>
+<script src="components/panels/panels-compose.js"></script>
+<!-- AI desk narrative depends on top-level bindings from panels-desk.js and must load after it. -->
+<script src="components/panels/panels-desk-agent.js"></script>
+<script src="components/panels/panels-aidesk-office.js"></script>
+<script src="components/shared/execution-tool-args.js"></script>
+<script src="components/panels/task-execution-stream.js"></script>
+<script src="components/panels/panels.js"></script>
+<script src="vendor/xterm/xterm.js"></script>
+
+<script src="components/panels/console.js"></script>
+<!-- Multi-session console depends on console.js state, rendering helpers, and openConsole. -->
+<script src="components/panels/console-multi.js"></script>
+<!-- Skin state is shared by both windows; the skin selection grid is specific to this workspace. -->
+<script src="components/skin-manager/skin-model.js"></script>
+<script src="components/skin-manager/skin-manager.js"></script>
+<script src="components/settings/client-update-view.js"></script>
+<script src="components/settings/settings.js"></script>
+<script src="core/shortcut-bindings.js"></script>
+<script src="components/settings/shortcut-settings.js"></script>
+<script src="components/team/team-overview.js"></script>
+<script src="components/team/team.js"></script>
+<script src="components/reports/work-briefs.js"></script>
+<script src="components/archive/archive-history-panel.js"></script>
+<script src="components/workspace/workspace-sidebar-drag.js"></script>
+<script src="components/workspace/workspace-sidebar-projects.js"></script>
+<script src="components/shared/icon-registry.js"></script>
+<script src="components/shared/app-confirm-dialog.js"></script>
+<script src="components/workspace/workspace-chat-list.js"></script>
+<script src="components/workspace/workspace-shell.js"></script>
+<script src="components/workspace/workspace-navigation.js"></script>
+<script src="components/workspace/window-menu.js"></script>
+<script src="components/panels/soduwork-app-bridge-host.js"></script>
+<script src="desk-boot.js"></script>
+<link rel="stylesheet" href="components/workspace/file-open.css">
+<script src="components/workspace/file-open.js"></script>
+</body>
+</html>

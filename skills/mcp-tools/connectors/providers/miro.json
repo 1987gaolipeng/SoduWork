@@ -1,0 +1,187 @@
+{
+  "schemaVersion": 1,
+  "id": "miro",
+  "name": "Miro",
+  "category": "设计",
+  "description": "Miro 通用连接器：看板列表/详情、看板条目、创建便签。基于 Miro REST API v2，Access Token 鉴权，不绑定任何汇报场景。",
+  "officialDocs": [
+    "https://developers.miro.com/reference/list-boards",
+    "https://developers.miro.com/reference/get-specific-board",
+    "https://developers.miro.com/reference/get-items",
+    "https://developers.miro.com/reference/create-sticky-note-item"
+  ],
+  "authDocs": [
+    "https://developers.miro.com/docs/getting-started-with-oauth",
+    "https://developers.miro.com/docs/personal-access-token"
+  ],
+  "baseUrl": "https://api.miro.com",
+  "fields": [
+    {
+      "key": "MIRO_TOKEN",
+      "label": "Access Token",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "tokenKey": "MIRO_TOKEN",
+    "header": "Authorization",
+    "prefix": "Bearer"
+  },
+  "headers": {
+    "Accept": "application/json"
+  },
+  "tools": [
+    {
+      "name": "list_boards",
+      "description": "列出可访问看板。分页：limit（1-50 默认 10）+ cursor 游标，响应 total/count 供参考。出处：https://developers.miro.com/reference/list-boards",
+      "method": "GET",
+      "path": "/v2/boards",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 10,
+            "description": "每页条数"
+          },
+          "cursor": {
+            "type": "string",
+            "description": "上一页响应中的游标",
+            "maxLength": 10000
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "query": {
+        "limit": "limit",
+        "cursor": "cursor"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_board",
+      "description": "获取看板详情。无分页。出处：https://developers.miro.com/reference/get-specific-board",
+      "method": "GET",
+      "path": "/v2/boards/{board_id}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "board_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{10,}$",
+            "description": "看板 ID",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "board_id"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_board_items",
+      "description": "列出看板全部条目。分页：limit（1-50 默认 10）+ cursor 游标，type 可过滤便签/图形等。出处：https://developers.miro.com/reference/get-items",
+      "method": "GET",
+      "path": "/v2/boards/{board_id}/items",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "board_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{10,}$",
+            "description": "看板 ID",
+            "maxLength": 10000
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "default": 10,
+            "description": "每页条数"
+          },
+          "cursor": {
+            "type": "string",
+            "description": "上一页游标",
+            "maxLength": 10000
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "sticky_note",
+              "shape",
+              "text",
+              "image",
+              "card",
+              "app_card",
+              "frame"
+            ],
+            "description": "条目类型过滤",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "board_id"
+        ],
+        "maxProperties": 50
+      },
+      "query": {
+        "limit": "limit",
+        "cursor": "cursor",
+        "type": "type"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_sticky_note",
+      "description": "创建便签（content 为富文本，超长截断）。写入操作：运行前必须获得用户明确授权。出处：https://developers.miro.com/reference/create-sticky-note-item",
+      "method": "POST",
+      "path": "/v2/boards/{board_id}/sticky_notes",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "board_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{10,}$",
+            "description": "看板 ID",
+            "maxLength": 10000
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 6000,
+            "description": "便签富文本内容"
+          }
+        },
+        "required": [
+          "board_id",
+          "content"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "data": {
+          "content": "$content"
+        }
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "Miro 完整访问依赖 OAuth2 授权（PAT 仅限个人连接且范围有限），OAuth 授权流当前客户端不支持，待宿主适配。",
+    "分页 limit 上限 50，遍历大看板需多次游标翻页。",
+    "create_sticky_note 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

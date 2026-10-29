@@ -1,0 +1,32 @@
+"""Resolve direct-task models after the actual Agent seat has been selected."""
+from __future__ import annotations
+
+from . import agent_execution_options, ai_exec, ai_exec_route, model_catalog
+
+
+async def prepare(session, client, ctx: dict, assignee: dict,
+                  model: str = "", reasoning_effort: str = "") -> tuple[dict, dict]:
+    cli = ai_exec_route.cli_of(str((assignee or {}).get("id") or ""))
+    cli = cli or str((assignee or {}).get("cli") or "").strip().lower()
+    if not cli:
+        return ctx, {}  # Hosted providers own their execution configuration.
+    kind = "local:" + cli
+    requested = str(model or "").strip()
+    native = agent_execution_options.runtime_options(kind, requested, reasoning_effort)
+    if kind in agent_execution_options.GATEWAY_MODEL_KINDS:
+        wanted = requested or model_catalog.agent_model(client, cli)
+        # Explicit and saved Agent choices must not silently become another model
+        # when their provider/key is removed. resolve() already enforces that rule.
+        llm = await model_catalog.resolve(session, client, wanted)
+        if wanted and not llm:
+            raise ValueError("模型「%s」当前不可用，请重新选择可用模型" % wanted)
+        return ai_exec.with_llm(ctx, llm), native
+
+    # Native-account Agents must not inherit or report the shared model service model.
+    out = dict(ctx or {})
+    for key in ("cfg", "localCfg"):
+        if isinstance(out.get(key), dict):
+            config = dict(out[key])
+            config.pop("llm", None)
+            out[key] = config
+    return out, native

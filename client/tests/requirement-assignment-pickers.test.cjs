@@ -1,0 +1,279 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+function fixture(options = {}, helpers = {}) {
+  const notices = [], nodes = new Map();
+  const ctx = vm.createContext({window: {addEventListener() {}, RequirementAssignment: {scope: () => 1}},
+    document: {getElementById: id => nodes.get(id) || null},
+    esc: value => String(value || ''), _svg: () => '', ...helpers});
+  for (const name of ['panels-forward-plugin', 'panels-forward-picker', 'panels-forward-options']) {
+    const file = path.join(__dirname, '../components/panels/' + name + '.js');
+    vm.runInContext(fs.readFileSync(file, 'utf8'), ctx, {filename: file});
+  }
+  ctx._fwdSetStatus = (...args) => notices.push(args);
+  function update(value) { ctx.options = value; vm.runInContext('_fwdOptions = options', ctx); }
+  update(options);
+  return {ctx, notices, nodes, update, run: source => vm.runInContext(source, ctx)};
+}
+
+const agent = (key, extra = {}) => ({key, name: key, available: true, ...extra});
+const flow = (bindingId, extra = {}) => ({bindingId, name: bindingId, runnable: true,
+  selectionSource: 'installed', workflow: [{type: 'ai', route: {agentSource: 'runtime'}}], ...extra});
+
+test('assignment picker renders untrusted catalog names, identifiers and diagnostics as escaped text', () => {
+  const definition = fs.readFileSync(path.join(__dirname, '../core/store.js'), 'utf8')
+    .split(/\r?\n/).find(line => line.startsWith('const esc='));
+  assert.ok(definition, 'exercise the production shared HTML escape function');
+  const escape = vm.runInNewContext(definition + ';esc');
+  const payload = '"></option><img src=x onerror="window.fixtureXss=1"><script>fixtureXss=1</script>';
+  const h = fixture({substrates: [agent(payload, {name: payload, locationLabel: payload})],
+    workflows: [flow(payload, {name: payload})], models: []}, {esc: escape});
+  h.ctx.payload = payload;
+  h.run('_fwdLocalFailures = [{name: payload, reason: payload}]');
+  h.ctx._fwdPaintSelection = h.ctx._fwdSyncConfirm = () => {};
+  let markup;
+  const box = {set innerHTML(value) {markup = value;},
+    querySelector: () => ({addEventListener() {}}), querySelectorAll: () => []};
+  h.ctx._fwdRenderAIPickers('fixture-task', box);
+  assert.ok(markup.includes(escape(payload)), 'catalog values remain visible as text');
+  assert.ok(!markup.includes(payload), 'no raw catalog value reaches HTML');
+  assert.doesNotMatch(markup, /<(?:img|script)\b/i);
+});
+
+test('assignment methods require builtin or installed provenance plus a binding', () => {
+  const h = fixture();
+  for (const [item, expected] of [
+    [null, false], [{}, false], [{selectionSource: 'installed'}, false],
+    [{bindingId: 'builtin', selectionSource: 'builtin'}, true],
+    [{bindingId: 'installed', selectionSource: 'installed'}, true],
+    [{bindingId: 'legacy', sourceKind: 'builtin'}, true],
+    [{bindingId: 'market', selectionSource: 'market', installed: true}, false],
+    [{bindingId: 'legacy-market', sourceKind: 'market', installed: true}, false],
+    [{bindingId: 'unknown', runnable: true, approved: true}, false],
+    [{bindingId: 'legacy-installed', sourceKind: 'installed'}, false],
+  ]) assert.equal(h.ctx._fwdInstalledMethod(item), expected, JSON.stringify(item));
+});
+
+test('plain execution defaults to a currently available Agent and never to a native conversation', () => {
+  const h = fixture({substrates: [agent('offline', {available: 'offline'}), agent('first'), agent('preferred')],
+    recommendation: {substrateKey: 'preferred'}});
+  h.ctx._fwdRestoreAIChoice();
+  assert.equal(h.run('_fwdSelection.ai.type'), 'direct');
+  assert.equal(h.run('_fwdSelection.ai.id'), 'preferred');
+  assert.equal(h.ctx._fwdChoiceIsCurrent({type: 'native', id: 'pi', available: true}), false);
+
+  h.run('_fwdResetMethodChoice(); _fwdSelection.ai = null');
+  h.update({substrates: [agent('offline', {available: false}), agent('first')],
+    recommendation: {substrateKey: 'offline'}});
+  h.ctx._fwdRestoreAIChoice();
+  assert.equal(h.run('_fwdSelection.ai.id'), 'first', 'an unavailable recommendation cannot win');
+
+  h.run('_fwdResetMethodChoice(); _fwdSelection.ai = null');
+  h.update({substrates: [agent('offline', {available: false})]});
+  h.ctx._fwdRestoreAIChoice();
+  assert.equal(h.run('_fwdSelection.ai'), null, 'no available Agent means no default execution target');
+});
+
+test('refresh preserves a manual Agent and requires a new choice when that Agent disappears', () => {
+  const h = fixture({substrates: [agent('chosen'), agent('replacement')],
+    recommendation: {substrateKey: 'replacement'}});
+  h.ctx._fwdChoose('task', {type: 'direct', id: 'chosen', name: 'Chosen', available: true});
+  h.ctx._fwdRestoreAIChoice();
+  assert.equal(h.run('_fwdSelection.ai.id'), 'chosen');
+  h.update({substrates: [agent('replacement')], recommendation: {substrateKey: 'replacement'}});
+  h.ctx._fwdRestoreAIChoice();
+  assert.equal(h.run('_fwdSelection.ai'), null);
+  assert.match(h.notices.at(-1)[0], /原执行选项已不可用.*重新选择/);
+  h.ctx._fwdRestoreAIChoice();
+  assert.equal(h.run('_fwdSelection.ai'), null, 'later refreshes must not silently replace a manual choice');
+});
+
+test('workflow Agent and model choices survive switches and become stale instead of falling back', () => {
+  const first = flow('first'), second = flow('second');
+  const h = fixture({substrates: [agent('replacement'), agent('chosen')], models: ['chosen-model'], workflows: [first, second]});
+  h.ctx._fwdChoose('task', {type: 'direct', id: 'chosen', name: 'Chosen', available: true});
+  h.ctx._fwdChoose('task', {type: 'workflow', id: first.bindingId, name: first.name, available: true});
+  const initial = h.ctx._fwdAgentPickerState(first);
+  assert.equal(initial.value, 'chosen', 'a new workflow keeps the chosen Agent instead of the first catalog entry');
+  assert.equal(initial.stale, false);
+  // The picker change handlers write this state object; refresh must retain it.
+  initial.state.kind = 'chosen'; initial.state.model = 'chosen-model';
+  h.ctx._fwdAgentPickerState(second).state.kind = 'replacement';
+  const restored = h.ctx._fwdAgentPickerState(first);
+  assert.equal(restored.value, 'chosen');
+  assert.equal(restored.state.model, 'chosen-model');
+  h.update({substrates: [agent('chosen', {available: false}), agent('replacement')], models: ['chosen-model']});
+  const stale = h.ctx._fwdAgentPickerState(first);
+  assert.equal(stale.value, 'chosen', 'retain the unavailable identity so it cannot become automatic routing');
+  assert.equal(stale.state.model, 'chosen-model');
+  assert.equal(stale.stale, true);
+  assert.equal(stale.rows.some(row => row.value === ''), true, 'automatic routing is available but must not replace the choice');
+  assert.match(h.ctx._fwdAgentSummary(stale, first), /原 Agent 已不可用.*重新选择/);
+  assert.equal(h.ctx._fwdAgentPickerState(first).stale, true);
+});
+
+function payloadFixture(kindValue, pickerValue, model = {value: 'chosen-model'}) {
+  const kind = {value: kindValue}, wrap = {hidden: false};
+  const picker = {value: pickerValue, focus() { this.focused = true; }};
+  const card = {getAttribute: name => ({'data-fwp-card': 'flow', 'data-fwp-ready': '1', 'data-fwp-name': 'Workflow'})[name],
+    querySelector: selector => ({'[data-fwp-kind]': kind, '[data-fwp-model]': model, '[data-fwp-model-wrap]': wrap})[selector]};
+  const box = {querySelectorAll: () => [card], querySelector: selector => selector === '#fwdAgentSelect' ? picker : null};
+  return {kind, model, wrap, picker, card, box};
+}
+
+test('stale or mismatched workflow Agent selections cannot produce an execution payload', () => {
+  const h = fixture();
+  for (const selected of ['__unselected__', 'replacement']) {
+    const f = payloadFixture('chosen', selected);
+    const result = h.ctx._fwpPayload(f.box, 'flow', true);
+    assert.equal(result.ok, false);
+    assert.match(result.reason, /原 Agent 已不可用.*重新选择/);
+    assert.equal(f.picker.focused, true);
+  }
+  const valid = payloadFixture('chosen', 'chosen');
+  const result = h.ctx._fwpPayload(valid.box, 'flow', false);
+  assert.equal(result.ok, true);
+  assert.equal(result.body.execution.agentKind, 'chosen');
+  assert.equal(result.body.execution.model, 'chosen-model');
+});
+
+test('Agents that disallow model overrides clear the old workflow model before payload creation', () => {
+  const h = fixture(), f = payloadFixture('fixed-model', 'fixed-model');
+  h.ctx._fwpSyncModel(f.card, {substrates: [agent('fixed-model', {modelPick: false})]});
+  assert.equal(f.model.value, '');
+  assert.equal(f.model.disabled, true);
+  assert.equal(f.wrap.hidden, true);
+  const result = h.ctx._fwpPayload(f.box, 'flow', false);
+  assert.equal(result.ok, true);
+  assert.equal(result.body.execution.agentKind, 'fixed-model');
+  assert.equal(result.body.execution.model, '');
+});
+
+// Model the native select rule that caused the bug: assigning a removed option
+// produces an empty value. Actual browser change/focus behavior is covered by E2E.
+function selectFromHtml(html) {
+  const options = [...html.matchAll(/<option value="([^"]*)"([^>]*)>([^<]*)<\/option>/g)]
+    .map(([, value, attrs, text]) => ({value, selected: /\bselected\b/.test(attrs), disabled: /\bdisabled\b/.test(attrs), text}));
+  let value = (options.find(row => row.selected) || options[0])?.value || '';
+  const listeners = new Map();
+  return {options, disabled: /<select[^>]*\bdisabled\b/.test(html),
+    get value() {return value;}, set value(next) {value = options.some(row => row.value === next) ? next : '';},
+    addEventListener(type, fn) {listeners.set(type, fn);}, focus() {this.focused = true;},
+    change(next) {this.value = next; listeners.get('change')?.({target: this});}};
+}
+
+function directModelFixture() {
+  const options = {substrates: [agent('chosen')], models: ['chosen-model']};
+  const h = fixture(options), dispatches = [];
+  const button = {dataset: {}, disabled: true, textContent: ''};
+  let markup = '';
+  h.nodes.set('fwdConfirm', button);
+  h.nodes.set('fwdDecision', {get innerHTML() {return markup;}, set innerHTML(html) {
+    markup = html;
+    const match = html.match(/<select id="fwdModel"[^>]*>[\s\S]*?<\/select>/);
+    if (match) h.nodes.set('fwdModel', selectFromHtml(match[0]));
+    else h.nodes.delete('fwdModel');
+  }});
+  h.ctx._dispatchAITo = (...args) => dispatches.push(args);
+  h.ctx._fwdChoose('task', {type: 'direct', id: 'chosen', name: 'Chosen', available: true});
+  h.run("_fwdModel = 'chosen-model'");
+  h.ctx._fwdSyncConfirm('task');
+  return {...h, options, button, dispatches};
+}
+
+test('direct model removal stays explicit and blocks confirmation until a valid model or default is chosen', async () => {
+  for (const models of [['replacement-model'], []]) {
+    for (const recovery of ['', ...models]) {
+      const h = directModelFixture();
+      assert.equal(h.nodes.get('fwdModel').value, 'chosen-model');
+      h.update({...h.options, models});
+      h.ctx._fwdSyncConfirm('task');
+      const select = h.nodes.get('fwdModel');
+      assert.equal(select.value, '__unselected__');
+      assert.equal(select.options[0].disabled, true);
+      assert.match(select.options[0].text, /原模型已不可用，请重新选择/);
+      assert.equal(h.run('_fwdModel'), 'chosen-model');
+      assert.equal(h.button.disabled, true);
+      await h.ctx._fwdConfirm('task');
+      assert.equal(h.dispatches.length, 0, 'programmatic confirmation also rejects the stale selection');
+      h.nodes.get('fwdModel').change(recovery);
+      assert.equal(h.run('_fwdModel'), recovery);
+      assert.equal(h.button.disabled, false);
+      await h.ctx._fwdConfirm('task');
+      assert.equal(h.dispatches.length, 1);
+    }
+  }
+});
+
+test('model controls rebuilt while dispatch is busy stay disabled and ignore changes', () => {
+  const h = directModelFixture();
+  h.button.dataset.idleLabel = 'Confirm';
+  h.ctx._fwdSyncConfirm('task');
+  assert.equal(h.nodes.get('fwdModel').disabled, true);
+  h.nodes.get('fwdModel').change('');
+  assert.equal(h.run('_fwdModel'), 'chosen-model');
+  assert.equal(h.button.disabled, true);
+  h.ctx._fwdSetBusy(false);
+  assert.equal(h.nodes.get('fwdModel').disabled, false);
+  assert.equal(h.button.disabled, false);
+});
+
+test('returning from a workflow retains an unavailable direct model instead of changing to default', () => {
+  const h = directModelFixture(), plugin = flow('flow');
+  h.update({...h.options, workflows: [plugin]});
+  h.ctx._fwdChoose('task', {type: 'workflow', id: 'flow', name: 'Workflow', available: true});
+  h.update({...h.options, workflows: [plugin], models: []});
+  h.ctx._fwdChooseNoPlugin('task');
+  assert.equal(h.run('_fwdModel'), 'chosen-model');
+  assert.equal(h.nodes.get('fwdModel').value, '__unselected__');
+  assert.equal(h.button.disabled, true);
+});
+
+test('workflow model removal renders a visible stale choice even without a model catalog and refuses its payload', () => {
+  for (const models of [['replacement-model'], []]) {
+    const plugin = flow('flow'), h = fixture({substrates: [agent('chosen')], models: ['chosen-model']});
+    const saved = h.ctx._fwdAgentPickerState(plugin).state;
+    saved.model = 'chosen-model';
+    h.update({substrates: [agent('chosen')], models});
+    const state = h.ctx._fwdAgentPickerState(plugin);
+    assert.equal(state.state.model, 'chosen-model');
+    assert.equal(state.modelStale, true);
+    const markup = h.ctx._fwpCard(plugin, h.ctx.options, true, state.state);
+    assert.match(markup, /aria-expanded="true"/);
+    const modelHtml = markup.match(/<select data-fwp-model[^>]*>[\s\S]*?<\/select>/)?.[0];
+    assert.ok(modelHtml, 'the stale selector stays visible when the catalog is empty');
+    const model = selectFromHtml(modelHtml), f = payloadFixture('chosen', 'chosen', model);
+    assert.equal(model.value, '__unselected__');
+    assert.equal(model.options[0].disabled, true);
+    const result = h.ctx._fwpPayload(f.box, 'flow', true);
+    assert.equal(result.ok, false);
+    assert.match(result.reason, /原模型已不可用，请重新选择/);
+    assert.equal(model.focused, true);
+    for (const recovery of ['', ...models]) {
+      model.value = recovery;
+      const valid = h.ctx._fwpPayload(f.box, 'flow', false);
+      assert.equal(valid.ok, true);
+      assert.equal(valid.body.execution.model, recovery);
+    }
+  }
+});
+
+test('modelPick false still clears stale direct and workflow model overrides', () => {
+  const direct = directModelFixture();
+  direct.update({substrates: [agent('chosen', {modelPick: false})], models: []});
+  direct.ctx._fwdSyncConfirm('task');
+  assert.equal(direct.run('_fwdModel'), '');
+  assert.equal(direct.nodes.has('fwdModel'), false);
+  assert.equal(direct.button.disabled, false);
+
+  const plugin = flow('flow'), h = fixture({substrates: [agent('chosen')], models: ['chosen-model']});
+  h.ctx._fwdAgentPickerState(plugin).state.model = 'chosen-model';
+  h.update({substrates: [agent('chosen', {modelPick: false})], models: []});
+  const state = h.ctx._fwdAgentPickerState(plugin);
+  assert.equal(state.state.model, '');
+  assert.equal(state.modelStale, false);
+});

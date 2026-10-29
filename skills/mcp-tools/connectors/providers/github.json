@@ -1,0 +1,225 @@
+{
+  "schemaVersion": 1,
+  "id": "github",
+  "name": "GitHub",
+  "category": "研发",
+  "description": "GitHub 通用连接器：当前用户、仓库详情、Issue 列表（含 PR，按 pull_request 字段过滤）、创建 Issue。基于 GitHub REST API，不绑定任何汇报场景。",
+  "officialDocs": [
+    "https://docs.github.com/en/rest",
+    "https://docs.github.com/en/rest/users/users#get-the-authenticated-user",
+    "https://docs.github.com/en/rest/repos/repos#get-a-repository",
+    "https://docs.github.com/en/rest/issues/issues#list-repository-issues",
+    "https://docs.github.com/en/rest/issues/issues#create-an-issue"
+  ],
+  "authDocs": [
+    "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens",
+    "https://docs.github.com/en/rest/using-the-rest-api/getting-started-with-the-rest-api"
+  ],
+  "baseUrl": "https://api.github.com",
+  "fields": [
+    {
+      "key": "GITHUB_TOKEN",
+      "label": "Personal Access Token（classic ghp_ 或 fine-grained github_pat_）",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "tokenKey": "GITHUB_TOKEN",
+    "header": "Authorization",
+    "prefix": "Bearer"
+  },
+  "headers": {
+    "Accept": "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28"
+  },
+  "tools": [
+    {
+      "name": "get_authenticated_user",
+      "description": "获取当前令牌对应身份。无分页。出处：https://docs.github.com/en/rest/users/users#get-the-authenticated-user",
+      "method": "GET",
+      "path": "/user",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_repository",
+      "description": "获取仓库元信息。无分页。出处：https://docs.github.com/en/rest/repos/repos#get-a-repository",
+      "method": "GET",
+      "path": "/repos/{owner}/{repo}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "owner": {
+            "type": "string",
+            "minLength": 1,
+            "description": "所有者登录名",
+            "maxLength": 10000
+          },
+          "repo": {
+            "type": "string",
+            "minLength": 1,
+            "description": "仓库名",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "owner",
+          "repo"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_repository_issues",
+      "description": "列出仓库 Issue 与 Pull Request（GitHub API 语义：Issue 列表同时包含 PR，需按条目是否含 pull_request 字段过滤）。分页：page + per_page（最大 100），下一页在 Link header。出处：https://docs.github.com/en/rest/issues/issues#list-repository-issues",
+      "method": "GET",
+      "path": "/repos/{owner}/{repo}/issues",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "owner": {
+            "type": "string",
+            "minLength": 1,
+            "description": "所有者",
+            "maxLength": 10000
+          },
+          "repo": {
+            "type": "string",
+            "minLength": 1,
+            "description": "仓库名",
+            "maxLength": 10000
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed",
+              "all"
+            ],
+            "default": "open",
+            "description": "状态过滤",
+            "maxLength": 10000
+          },
+          "labels": {
+            "type": "string",
+            "description": "逗号分隔标签",
+            "maxLength": 10000
+          },
+          "sort": {
+            "type": "string",
+            "enum": [
+              "created",
+              "updated",
+              "comments"
+            ],
+            "default": "created",
+            "description": "排序字段",
+            "maxLength": 10000
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "default": "desc",
+            "description": "排序方向",
+            "maxLength": 10000
+          },
+          "per_page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 30,
+            "description": "每页条数"
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1,
+            "description": "页码",
+            "maximum": 10000
+          }
+        },
+        "required": [
+          "owner",
+          "repo"
+        ],
+        "maxProperties": 50
+      },
+      "query": {
+        "state": "state",
+        "labels": "labels",
+        "sort": "sort",
+        "direction": "direction",
+        "per_page": "per_page",
+        "page": "page"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_issue",
+      "description": "创建 Issue（title 必填，body 可选）。写入操作：运行前必须获得用户明确授权。出处：https://docs.github.com/en/rest/issues/issues#create-an-issue",
+      "method": "POST",
+      "path": "/repos/{owner}/{repo}/issues",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "owner": {
+            "type": "string",
+            "minLength": 1,
+            "description": "所有者",
+            "maxLength": 10000
+          },
+          "repo": {
+            "type": "string",
+            "minLength": 1,
+            "description": "仓库名",
+            "maxLength": 10000
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "Issue 标题"
+          },
+          "body": {
+            "type": "string",
+            "description": "Issue 正文（Markdown）",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "title"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "title": "$title",
+        "body": "$body"
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "list_repository_issues 同时返回 Issue 与 PR，调用方需按 pull_request 字段过滤，本定义不隐藏该语义。",
+    "fine-grained PAT 按仓库+权限授权；classic PAT 按 scopes。REST 限速认证后 5000 请求/小时，尊重 Retry-After。",
+    "create_issue 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

@@ -1,0 +1,104 @@
+<!doctype html><html lang="zh-CN" data-desk-panel="workspace" data-window-menu><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cloud environment component acceptance</title>
+<link rel="stylesheet" href="../../theme/variables.css">
+<link rel="stylesheet" href="../../components/client-auth/client-auth.css">
+<link rel="stylesheet" href="../../components/panels/panels-base.css">
+<link rel="stylesheet" href="../../components/panels/panels-session-memory.css">
+<link rel="stylesheet" href="../../components/panels/agent-brand.css">
+<link rel="stylesheet" href="../../components/requirements/requirements-board.css">
+<link rel="stylesheet" href="../../components/panels/plugin-ui-host.css">
+<link rel="stylesheet" href="../../components/panels/plugin-debug-card.css">
+<link rel="stylesheet" href="../../components/panels/plugin-input-sheet.css">
+<link rel="stylesheet" href="../../components/panels/work-entry-sheet.css">
+<link rel="stylesheet" href="../../components/panels/work-automation-sheet.css">
+<link rel="stylesheet" href="../../components/panels/panels-desk.css">
+<link rel="stylesheet" href="../../components/panels/notice-type-scale.css">
+<link rel="stylesheet" href="../../components/panels/panels-schedules.css">
+<link rel="stylesheet" href="../../components/panels/panels-capabilities.css">
+<link rel="stylesheet" href="../../components/panels/panels-capability-mcp.css">
+<link rel="stylesheet" href="../../components/panels/plugin-install-setup.css">
+<link rel="stylesheet" href="../../components/panels/platform-plugin-connect.css">
+<link rel="stylesheet" href="../../components/panels/panels-capability-plugins.css">
+<link rel="stylesheet" href="../../components/panels/panels-library.css">
+<link rel="stylesheet" href="../../components/panels/panels-plugin-maker.css">
+<link rel="stylesheet" href="../../components/panels/capability-type-scale.css">
+<link rel="stylesheet" href="../../components/panels/plugin-presentation.css">
+<link rel="stylesheet" href="../../components/panels/panels-agents.css">
+<link rel="stylesheet" href="../../components/panels/cloud-environments.css">
+<link rel="stylesheet" href="../../components/panels/custom-agents.css">
+<link rel="stylesheet" href="../../components/panels/panels-usage.css">
+<link rel="stylesheet" href="../../components/panels/panels-connections.css">
+<link rel="stylesheet" href="../../components/panels/model-capabilities.css">
+<link rel="stylesheet" href="../../components/panels/panels-runners.css">
+<link rel="stylesheet" href="../../components/panels/task-trace-view.css">
+<link rel="stylesheet" href="../../components/panels/task-context-view.css">
+<link rel="stylesheet" href="../../components/panels/task-trace-rail-view.css">
+<link rel="stylesheet" href="../../components/panels/task-evolution-view.css">
+<link rel="stylesheet" href="../../components/panels/panels-desk-session.css">
+<link rel="stylesheet" href="../../components/panels/panels-aidesk-control.css">
+<link rel="stylesheet" href="../../components/panels/panels-aidesk-office.css">
+<link rel="stylesheet" href="../../components/panels/panel-forms.css">
+<link rel="stylesheet" href="../../components/panels/panels.css">
+<link rel="stylesheet" href="../../components/panels/panels-forward-plugin.css">
+<link rel="stylesheet" href="../../components/panels/panels-chat.css">
+<link rel="stylesheet" href="../../components/panels/chat-collaboration.css">
+<link rel="stylesheet" href="../../components/panels/chat-plugin-mention.css">
+<link rel="stylesheet" href="../../components/panels/plugin-input-sheet.css">
+<link rel="stylesheet" href="../../components/panels/console.css">
+<link rel="stylesheet" href="../../components/panels/console-multi.css">
+<link rel="stylesheet" href="../../components/workspace/workspace-shell.css">
+<link rel="stylesheet" href="../../components/workspace/workspace-sidebar-projects.css">
+<link rel="stylesheet" href="../../components/workspace/workspace-page-layout.css">
+<link rel="stylesheet" href="../../components/skin-manager/skin-manager.css">
+<link rel="stylesheet" href="../../components/team/team.css">
+<link rel="stylesheet" href="../../components/reports/work-briefs.css">
+<link rel="stylesheet" href="../../components/gantt/gantt.css">
+<link rel="stylesheet" href="../../vendor/xterm/xterm.css">
+<link rel="stylesheet" href="../../theme/cursor.css">
+<link rel="stylesheet" href="../../desk-window.css">
+<link rel="stylesheet" href="../../theme/workspace-experience.css">
+<link rel='stylesheet' href='../../components/panels/work-composer.css'>
+<link rel='stylesheet' href='../../components/panels/panels-compose-model-picker.css'>
+<link rel='stylesheet' href='../../components/panels/conversation-attachments.css'>
+<link rel='stylesheet' href='../../components/panels/panels-compose-skills.css'>
+<link rel='stylesheet' href='../../components/panels/work-intent.css'>
+<link rel="stylesheet" href="../../components/settings/settings.css">
+<link rel="stylesheet" href="../../components/settings/client-update-view.css">
+<link rel="stylesheet" href="../../components/archive/archive-history-panel.css">
+<link rel="stylesheet" href="../../theme/workspace-page-heads.css">
+<link rel="stylesheet" href="../../components/panels/automation-surface.css">
+<link rel="stylesheet" href="../../components/panels/notice-surface.css">
+<link rel="stylesheet" href="../../components/panels/library-transfer.css">
+<link rel="stylesheet" href="../../components/panels/chat-deliveries.css">
+<link rel="stylesheet" href="../../components/workspace/window-menu.css">
+<link rel="stylesheet" href="../../theme/box-theme.css">
+<link rel="stylesheet" href="../../components/panels/task-approval-inbox.css">
+<link rel="stylesheet" href="../../components/panels/compose-execution.css">
+<link rel="stylesheet" href="../../components/panels/chat-cloud-handoff.css">
+<link rel="stylesheet" href="../../components/panels/access-controls.css">
+<link rel="stylesheet" href="../../components/workspace/window-menu.css">
+<style>html,body{margin:0;height:100%;overflow:hidden;font-family:var(--font-ui);color:var(--ink);background:var(--bg-1)}:root{--ws-side-w:240px;--ws-main-bg:var(--bg-0)}.fixture-side{position:fixed;top:34px;bottom:0;left:0;width:220px;padding:24px 20px;box-sizing:border-box;font-size:14px}.fixture-side p{margin:0 0 22px}.fixture-side button{font:inherit;display:block;border:0;background:transparent;color:var(--ink-3);padding:10px;width:100%;text-align:left}.fixture-side button[aria-current]{background:var(--accent-soft);color:var(--accent);border-radius:8px}html[data-desk-panel=cloud] .fixture-side{display:none}@media(max-width:700px){:root{--ws-side-w:10px}.fixture-side{display:none}}</style></head>
+<body><header class="window-menu"><span class="wm-title-brand">SoduWork</span><nav><button>文件</button><button>视图</button><button>帮助</button></nav></header><aside class="fixture-side"><p>AI 与账�?/p><button>我的用量</button><button>Agent 管理</button><button>我的模型</button><button aria-current="page">云端环境</button></aside><script>
+if(new URLSearchParams(location.search).has('standalone'))document.documentElement.dataset.deskPanel='cloud';
+window.fixture={owner:'account-a',canCreate:true,requests:[],cloudCalls:[],fail:false,nodes:[
+ {id:'a',name:'我的云端电脑',ownerUserId:'account-a',host:'research-linux',os:'Linux',workRoot:'/srv/my-work',online:true,status:'ready',statusText:'ready',busy:1,maxConcurrent:4,mode:'accepting',canManage:true,credential:{configured:true,canRotate:true},agents:[{id:'pi',name:'Pi',ready:true},{id:'opencode',name:'OpenCode',ready:true}]}
+]};
+window.soduWorkAPI={cloudComputer:{
+ async status(){return fixture.nodes.length?{ok:true,configured:true,host:'192.0.2.8',port:22,username:'runner',authMethod:'password',platform:'linux'}:{ok:true,configured:false}},
+ async test(input){fixture.cloudCalls.push(['test',input]);return {ok:true,code:'SSH_READY',hostFingerprint:'sha256:fixture'}},
+ async save(input){fixture.cloudCalls.push(['save',input]);return {ok:true,persisted:true}},
+ async install(input){fixture.cloudCalls.push(['install',input]);return {ok:true,installed:true,message:'fixture 已完�?Runner 安装'}}
+}};
+window.SoduWorkAPI={
+ hubConfig(){return {hub:'http://127.0.0.1:9080',developmentHub:'http://127.0.0.1:9080'}},
+ taskStorageKey(){return fixture.owner},
+ async cloudEnvironments(){if(fixture.fail)throw Error('连接暂时中断，请重试');return{ok:true,ownership:'personal',environments:fixture.nodes,permissions:{canCreate:fixture.canCreate&&!fixture.nodes.length,limit:1},service:{recommendedHub:'https://soduwork.example.com',local:false}}},
+ async addCloudEnvironment(input){fixture.requests.push(['add',input]);const row={id:'new',name:input.name,ownerUserId:fixture.owner,workRoot:input.workRoot,canManage:true,status:'pending',statusText:'pending',credential:{configured:true,canRotate:true},agents:[]};fixture.nodes=[row];return {ok:true,environment:row,setup:{runnerId:'new',key:'fixture-enrollment-key-123456789',hub:'https://soduwork.example.com',clientHub:'http://127.0.0.1:9080',commands:{linux:'curl -fsSL https://soduwork.example.com/api/v1/download/runner-install.sh | sudo bash -s -- --id new --key fixture-enrollment-key-123456789',windows:'powershell -NoProfile -Command fixture-enrollment-key-123456789'}}}},
+ async rotateCloudEnvironmentCredential(id,input){fixture.requests.push(['rotate',id,input]);return {ok:true,environment:fixture.nodes.find(x=>x.id===id),setup:{runnerId:id,commands:{linux:'echo fixture-rotated-only',windows:'Write-Output fixture-rotated-only'}}}},
+ async updateCloudEnvironment(id,input){fixture.requests.push(['update',id,input]);Object.assign(fixture.nodes.find(x=>x.id===id),input);return{ok:true}},
+ async removeCloudEnvironment(id){fixture.requests.push(['delete',id]);fixture.nodes=fixture.nodes.filter(x=>x.id!==id);return{ok:true}}
+};
+if(new URLSearchParams(location.search).has('live')) {
+  const request=async(route,method='GET',body)=>{const res=await fetch('/api/hub/cloud-environments'+route,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const data=await res.json();if(!res.ok||data.ok===false)throw Error(data.reason||'Request failed');return data};
+  window.SoduWorkAPI={cloudEnvironments:()=>request(''),addCloudEnvironment:input=>request('','POST',input),rotateCloudEnvironmentCredential:(id,input)=>request('/'+encodeURIComponent(id)+'/credentials','POST',input),updateCloudEnvironment:(id,input)=>request('/'+encodeURIComponent(id),'PATCH',input),removeCloudEnvironment:id=>request('/'+encodeURIComponent(id),'DELETE')};
+}
+</script><script src="../../components/panels/cloud-environments.js"></script><script src="../../components/panels/cloud-environment-setup.js"></script><script>openCloudEnvironmentsPanel()</script></body></html>

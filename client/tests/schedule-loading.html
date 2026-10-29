@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<link rel="stylesheet" href="../theme/variables.css">
+<link rel="stylesheet" href="../components/panels/panels-schedules.css">
+<link rel="stylesheet" href="../components/panels/automation-surface.css">
+</head><body><pre id="out"></pre>
+<script>
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function expandForOverlay(){} function shrinkFromOverlay(){} function makeDraggable(){}
+const waits=[];let starts=[];
+const later=value=>new Promise(resolve=>{waits.push(()=>resolve(value));});
+window.SoduWorkAPI={
+  listSchedules(){starts.push(['schedules',performance.now()]);return later([]);},
+  listAIAgents(){starts.push(['agents',performance.now()]);return later({agents:[]});},
+  listRepos(){starts.push(['repos',performance.now()]);return later([]);},
+};
+</script>
+<script src="../components/panels/schedule-timing.js"></script>
+<script src="../components/panels/panels-schedules-methods.js"></script>
+<script src="../components/panels/panels-schedules-cards.js"></script>
+<script src="../components/panels/panels-schedules.js"></script>
+<script src="../components/panels/panels-schedules-editor.js"></script>
+<script>
+(async()=>{
+  let ok=0,fail=0;const lines=[];
+  const chk=(name,cond)=>{(cond?ok++:fail++);lines.push((cond?'PASS  ':'FAIL  ')+name);};
+  openSchedulePanel();
+  chk('首帧立即出现稳定骨架，而不是一行加载文字',!!document.querySelector('.sch-loading')&&
+    !document.getElementById('schBody').textContent.includes('正在拿你的定时任务'));
+  chk('首屏数据没齐前不会让人进入一个空执行者表单',document.getElementById('schNew').disabled);
+  await new Promise(r=>setTimeout(r,0));
+  chk('任务、执行者、工程三份数据并发请求',starts.length===3&&
+    Math.max(...starts.map(x=>x[1]))-Math.min(...starts.map(x=>x[1]))<20);
+  waits.splice(0).forEach(resolve=>resolve());
+  await _schLoading;
+  chk('加载完成后得到可行动空态',document.getElementById('schBody').textContent.includes('还没有定时任务')&&
+    !document.querySelector('.sch-loading'));
+  chk('加载完成后新建恢复可用',!document.getElementById('schNew').disabled);
+
+  _schRows=null;_schAgents=[];_schRepos=[];starts=[];
+  SoduWorkAPI.listSchedules=async()=>{throw new Error('服务暂时不可用');};
+  SoduWorkAPI.listAIAgents=async()=>({agents:[]});SoduWorkAPI.listRepos=async()=>[];
+  await _loadSch();
+  chk('加载失败不伪装成“没有任务”',document.querySelector('.sch-load-fail')&&
+    document.getElementById('schBody').textContent.includes('服务暂时不可用')&&
+    !document.getElementById('schBody').textContent.includes('还没有定时任务'));
+  chk('失败态提供就地重试动作',!!document.getElementById('schRetry'));
+  document.getElementById('out').textContent=lines.join('\n')+'\n\nschedule loading smoke: '+ok+' passed, '+fail+' failed';
+  document.title=fail?'FAIL '+fail:'ALL PASS '+ok;
+})().catch(e=>{document.getElementById('out').textContent='FAIL  '+e.stack+'\n\nschedule loading smoke: 0 passed, 1 failed';});
+</script></body></html>

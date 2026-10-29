@@ -1,0 +1,226 @@
+{
+  "schemaVersion": 1,
+  "id": "gitlab",
+  "name": "GitLab",
+  "category": "研发",
+  "description": "GitLab 通用连接器：项目列表/详情、Issue 列表与创建。基于 GitLab REST API v4，当前先仅支持 gitlab.com（自托管实例待适配），不绑定任何汇报场景。",
+  "officialDocs": [
+    "https://docs.gitlab.com/ee/api/",
+    "https://docs.gitlab.com/ee/api/projects.html",
+    "https://docs.gitlab.com/ee/api/issues.html"
+  ],
+  "authDocs": [
+    "https://docs.gitlab.com/ee/user/profile/personal_access_tokens.html",
+    "https://docs.gitlab.com/ee/api/rest/#personalprojectgroup-and-user-access-tokens"
+  ],
+  "baseUrl": "https://gitlab.com",
+  "fields": [
+    {
+      "key": "GITLAB_TOKEN",
+      "label": "Personal Access Token",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "header",
+    "tokenKey": "GITLAB_TOKEN",
+    "header": "PRIVATE-TOKEN"
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "list_projects",
+      "description": "列出令牌可见项目。分页：page + per_page（最大 100），下一页在 x-next-page 响应头；部分端点强制 keyset 分页时返回 400 提示。出处：https://docs.gitlab.com/ee/api/projects.html#list-all-projects",
+      "method": "GET",
+      "path": "/api/v4/projects",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "search": {
+            "type": "string",
+            "description": "名称/路径模糊过滤",
+            "maxLength": 10000
+          },
+          "membership": {
+            "type": "boolean",
+            "default": true,
+            "description": "仅成员项目"
+          },
+          "order_by": {
+            "type": "string",
+            "enum": [
+              "id",
+              "name",
+              "created_at",
+              "last_activity_at"
+            ],
+            "default": "last_activity_at",
+            "description": "排序字段",
+            "maxLength": 10000
+          },
+          "per_page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "description": "每页条数"
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1,
+            "description": "页码",
+            "maximum": 10000
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "query": {
+        "search": "search",
+        "membership": "membership",
+        "order_by": "order_by",
+        "per_page": "per_page",
+        "page": "page"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_project",
+      "description": "获取项目详情（数字 ID 或 URL 编码 path）。无分页。出处：https://docs.gitlab.com/ee/api/projects.html#get-single-project",
+      "method": "GET",
+      "path": "/api/v4/projects/{project_id}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "数字 ID 或 URL 编码的 namespace/path",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_project_issues",
+      "description": "列出项目 Issue。分页：page + per_page（最大 100），x-next-page 响应头。出处：https://docs.gitlab.com/ee/api/issues.html#list-project-issues",
+      "method": "GET",
+      "path": "/api/v4/projects/{project_id}/issues",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "项目 ID 或编码 path",
+            "maxLength": 10000
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "opened",
+              "closed",
+              "all"
+            ],
+            "default": "opened",
+            "description": "状态",
+            "maxLength": 10000
+          },
+          "labels": {
+            "type": "string",
+            "description": "逗号分隔标签",
+            "maxLength": 10000
+          },
+          "per_page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "description": "每页条数"
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1,
+            "description": "页码",
+            "maximum": 10000
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "maxProperties": 50
+      },
+      "query": {
+        "state": "state",
+        "labels": "labels",
+        "per_page": "per_page",
+        "page": "page"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_project_issue",
+      "description": "创建项目 Issue（POST /projects/{id}/issues，title 必填）。写入操作：运行前必须获得用户明确授权。出处：https://docs.gitlab.com/ee/api/issues.html#new-issue",
+      "method": "POST",
+      "path": "/api/v4/projects/{project_id}/issues",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "项目 ID 或编码 path",
+            "maxLength": 10000
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "Issue 标题"
+          },
+          "description": {
+            "type": "string",
+            "description": "Issue 描述（Markdown）",
+            "maxLength": 10000
+          },
+          "labels": {
+            "type": "string",
+            "description": "逗号分隔标签",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "project_id",
+          "title"
+        ],
+        "maxProperties": 50
+      },
+      "query": {
+        "title": "title",
+        "description": "description",
+        "labels": "labels"
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "本轮先仅支持 gitlab.com（baseUrl 固定）；自托管实例需租户 baseUrl 白名单机制，待适配，不接受自由主机。",
+    "鉴权头为 PRIVATE-TOKEN header（非 Bearer）；OAuth token 走 Bearer，本定义按 PAT。",
+    "部分端点强制 keyset 分页（400 提示），运行器按提示切换。",
+    "create_project_issue 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

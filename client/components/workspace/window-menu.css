@@ -1,0 +1,62 @@
+/* One compact title row, with native caption controls and a safe older-client fallback. */
+html[data-window-menu]{--window-menu-height:34px}
+.window-menu{position:fixed;inset:0 0 auto;z-index:240;height:var(--window-menu-height);box-sizing:border-box;display:flex;align-items:center;gap:6px;padding:0 10px;border-bottom:1px solid var(--line);background:var(--bg-0);color:var(--ink-3);user-select:none}
+.window-menu nav{display:flex;align-items:center;gap:2px;height:100%}
+.window-menu button{appearance:none;display:flex;align-items:center;justify-content:center;height:26px;padding:0 11px;border:0;border-radius:6px;background:transparent;color:inherit;font:400 14.5px/1 var(--font-ui);cursor:default}
+.window-menu .wm-sidebar{width:28px;padding:0}
+.window-menu>[hidden],.window-menu nav[hidden]{display:none}
+
+
+
+html[data-window-titlebar="overlay"] .window-menu{left:env(titlebar-area-x,0px);right:auto;width:env(titlebar-area-width,calc(100% - 138px));-webkit-app-region:drag}
+html[data-window-titlebar="hidden-inset"] .window-menu{padding-left:90px;-webkit-app-region:drag}
+html[data-window-titlebar] .window-menu button,html[data-window-titlebar] .window-menu nav{-webkit-app-region:no-drag;flex:none}
+/* The OS owns the caption buttons; brand text yields before menu controls do. */
+@media(max-width:480px){html[data-window-titlebar="overlay"] .window-menu{gap:2px;padding-left:6px;padding-right:2px}html[data-window-titlebar="overlay"] .window-menu button{padding:0 7px}html[data-window-titlebar="overlay"] .wm-divider{margin:0 1px}}
+.window-menu svg,.wm-popup svg,.wm-dialog>header svg{width:17px;height:17px;flex:none}
+.wm-divider{width:1px;height:14px;background:var(--line);margin:0 2px}
+.window-menu button:hover:not(:disabled),.window-menu button[aria-expanded=true]{background:var(--bg-2);color:var(--ink)}
+.window-menu button:disabled{opacity:.35}
+.window-menu button:focus-visible,.wm-popup button:focus-visible,.wm-dialog button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.wm-popup{position:fixed;z-index:241;top:calc(var(--window-menu-height) + 4px);min-width:222px;max-width:calc(100vw - 16px);box-sizing:border-box;padding:5px;border:1px solid var(--line);border-radius:10px;background:var(--bg-0);box-shadow:0 8px 24px color-mix(in srgb,var(--ink) 12%,transparent);color:var(--ink-2)}
+.wm-popup[hidden]{display:none}
+.wm-popup button{appearance:none;display:flex;align-items:center;gap:10px;width:100%;min-height:34px;padding:7px 9px;border:0;border-radius:6px;color:inherit;background:transparent;text-align:left;font:400 14.5px/1.4 var(--font-ui);cursor:default}
+.wm-popup button>span{flex:1}.wm-popup svg{color:var(--ink-4)}.wm-popup kbd{color:var(--ink-4);font:14.5px var(--font-ui);white-space:nowrap}
+.wm-popup button:hover:not(:disabled),.wm-popup button:focus-visible{background:var(--accent-soft);color:var(--ink)}
+.wm-popup button:disabled{opacity:.4}
+.wm-dialog{position:fixed;width:min(520px,calc(100vw - 40px));max-height:calc(100dvh - 64px);box-sizing:border-box;margin:auto;padding:0;border:1px solid var(--line);border-radius:18px;color:var(--ink-2);background:var(--bg-0);box-shadow:0 24px 80px color-mix(in srgb,var(--ink) 20%,transparent);font:14.5px/1.6 var(--font-ui);overflow:auto}
+.wm-dialog::backdrop{background:color-mix(in srgb,var(--ink) 22%,transparent)}
+.wm-dialog>header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:20px 24px 12px}
+.wm-dialog h2{margin:0;font-size:18px;font-weight:600;color:var(--ink)}
+.wm-dialog>header button{display:grid;place-items:center;width:28px;height:28px;padding:0;border:0;border-radius:7px;color:var(--ink-4);background:transparent;cursor:default}
+.wm-dialog>header button:hover{background:var(--bg-2);color:var(--ink)}
+.wm-dialog-body{padding:0 24px 24px}.wm-description{margin:0 0 16px;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 13px)}
+.wm-releases section{padding:16px 0;border-top:1px solid var(--line)}.wm-releases section:last-child{padding-bottom:0}
+.wm-releases header{display:flex;align-items:center;gap:10px}.wm-releases b{font-size:15px;color:var(--ink)}.wm-releases time{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-4)}
+.wm-current{margin-left:auto;padding:1px 7px;border-radius:5px;color:var(--accent);background:var(--accent-soft);font-size:max(var(--font-min-readable, 14.5px), 11px)}
+.wm-withdrawn{margin-left:auto;padding:1px 7px;border-radius:5px;color:var(--ink-3);background:var(--bg-2);font-size:max(var(--font-min-readable, 14.5px), 11px)}
+.wm-releases ul{margin:10px 0 0;padding-left:18px}.wm-releases li{white-space:pre-wrap;overflow-wrap:anywhere}.wm-releases li+li{margin-top:5px}
+.wm-about-brand{display:flex;align-items:center;gap:16px;padding:16px 0 28px}.wm-about-brand>div{display:flex;flex-direction:column;gap:2px}.wm-about-brand b{font-size:28px;font-weight:600;letter-spacing:-.7px;color:var(--ink)}.wm-about-brand div>span{font-size:max(var(--font-min-readable, 14.5px), 13px);color:var(--ink-3)}
+.wm-brand-mark{display:block;flex:none;width:48px;height:48px;object-fit:contain}
+.wm-about-details{margin:0;border-top:1px solid var(--line);padding-top:16px}.wm-about-details>div{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:5px 0}.wm-about-details dt{color:var(--ink-3)}.wm-about-details dd{margin:0;overflow-wrap:anywhere}
+.wm-about-details button,.wm-retry{border:0;padding:0;background:transparent;font:inherit;color:var(--accent);cursor:default}
+/* These are the same content roots hosted by WorkspaceShell; overlays stay centred. */
+html[data-window-menu] .workspace-shell{top:var(--window-menu-height)}
+html[data-window-menu] .ws-resizer{top:calc(var(--window-menu-height) + 10px)}
+html[data-window-menu][data-desk-panel="workspace"] :is(#aiDeskPanel,#historyBoard,#settingsPanel,#shortcutsPanel,#skinManager,#noticePanel,#teamPanel,#schPanel,#skPanel,#capPanel,#appsPanel,#mdPanel,#agPanel,#cloudEnvironmentPanel,#caPanel,#usagePanel,#sessionMemoryPanel,#composePanel,#libraryPanel,#briefPanel.workspace-hosted,#archivePanel,#addMask.workspace-hosted){top:calc(var(--window-menu-height) + 10px)!important}
+html[data-window-menu]:not([data-desk-panel="workspace"]) :is(#deskRoot,#settingsPanel,#shortcutsPanel,#skinManager,#noticePanel,#historyBoard,#teamPanel,#schPanel,#skPanel,#capPanel,#appsPanel,#mdPanel,#agPanel,#cloudEnvironmentPanel,#caPanel,#usagePanel,#multiPanel,#mcPanel,#aiConsolePanel,#briefPanel,#addMask){top:var(--window-menu-height)!important}
+
+/* Requirement pool: keep the hosted page just below the native menu while
+   reducing the old ten-pixel dead zone to a compact six-pixel frame. */
+html[data-window-menu][data-desk-panel="workspace"]:is([data-workspace-view="history"],[data-workspace-view="workitems"]) #historyBoard.requirements-board{
+  top:calc(var(--window-menu-height) + 6px)!important;
+  right:6px!important;
+  bottom:6px!important;
+}
+html[data-window-sidebar-hidden][data-desk-panel="workspace"]{--ws-main-left:var(--ws-rail-w,52px)!important}
+html[data-window-sidebar-hidden] #workspaceShell{--ws-main-left:var(--ws-rail-w,52px);grid-template-columns:var(--ws-rail-w,52px) minmax(0,1fr)}
+html[data-window-sidebar-hidden] #workspaceShell .ws-side,html[data-window-sidebar-hidden] #wsResizer{display:none}
+
+html[data-window-menu][data-desk-panel="workspace"]:is([data-workspace-view="history"],[data-workspace-view="workitems"]) .window-menu{
+  background:#F9F9F9;
+}

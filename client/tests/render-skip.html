@@ -1,0 +1,196 @@
+<!doctype html>
+<!-- Browser regression for render skipping: unchanged data preserves node identity, while every display-affecting change triggers updates. The backend smoke runner serves this page and reads its results. -->
+<html lang="zh-CN"><head><meta charset="utf-8">
+<link rel="stylesheet" href="../theme/variables.css">
+<link rel="stylesheet" href="../components/panels/panels-desk.css">
+<link rel="stylesheet" href="../components/panels/panels-aidesk-control.css">
+<link rel="stylesheet" href="../components/panels/panels-aidesk-office.css">
+<script>{const q=new URLSearchParams(location.search);if(q.get('preview')==='1')document.documentElement.classList.add('is-preview');if(q.get('theme'))document.documentElement.dataset.theme=q.get('theme');}</script>
+<style>
+html.is-preview #out{display:none!important}
+html.is-preview body{margin:0;background:var(--bg-1)}
+html.is-preview .desk-panel{opacity:1;pointer-events:auto}
+</style>
+</head><body>
+<div id="aiDeskPanel" class="desk-panel show">
+  <div class="dk-head"><div class="dk-title"><span class="dk-title-kicker">SODUWORK · LIVE COLLABORATION</span>AI 团队 <span class="dk-sub">1 条运行中 · 2 条需要处理</span></div>
+  <div class="dk-acts"><span class="dk-live-badge is-live"><i></i><b>LIVE</b></span><button class="dk-agent-manage" data-open-agents="1">Agent 管理</button><button class="dk-refresh">刷新</button></div></div>
+  <div class="dk-main dk-office-layout"><section class="dk-roster dk-office-stage" id="dkRoster"></section>
+  <aside class="dk-body dk-office-inspector" id="dkBody"></aside></div>
+</div>
+<pre id="out" style="position:fixed;inset:0;background:#fff;z-index:9;margin:0;padding:12px;font:12px/1.7 monospace"></pre>
+<script>
+window.addEventListener('error',e=>{document.getElementById('out').textContent='FAIL  '+e.message+' @ '+e.filename+':'+e.lineno+'\n\nrender skip smoke: 0 passed, 1 failed';});
+window.addEventListener('unhandledrejection',e=>{document.getElementById('out').textContent='FAIL  '+String(e.reason&&e.reason.stack||e.reason)+'\n\nrender skip smoke: 0 passed, 1 failed';});
+</script>
+<script>
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let tasks=[];
+function petSay(){}
+const taskNavigations=[];
+window.openTaskConversation=(id,title,options)=>{taskNavigations.push({id,title,options});return Promise.resolve(true)};
+function _dkFocusHtml(t){return '<div class="test-task-focus">'+esc(t.title)+'</div>';}
+</script>
+<script src="../components/panels/panels-desk.js"></script>
+<script src="../components/panels/panels-desk-agent.js"></script>
+<script src="../components/panels/panels-aidesk-office.js"></script>
+<script>
+let ok=0,fail=0;const lines=[];
+function chk(name,cond,extra){ if(cond){ok++;lines.push('  PASS  '+name);}
+  else{fail++;lines.push('  FAIL  '+name+(extra?'  << '+extra:''));} }
+
+/* Minimal fixture matching the production data shape. */
+function mkData(){
+  const t1={id:'t1',title:'完善汇报材料',phase:'running',agent:'DESKTOP-FIXTURE · Pi',
+    cli:'Pi',deskKey:'host:desktop-fixture|pi',runner:{host:'DESKTOP-FIXTURE'},
+    at:'2026-08-04T09:00:00+00:00',lastAction:'正在整理材料',artifacts:0,attention:false,
+    workflow:{runId:'r1',pluginName:'办公交付',nodeName:'内容整理',nodeType:'ai',attempt:1,
+      steps:[{key:'understand',name:'理解工作',state:'succeeded'},{key:'draft',name:'整理材料',state:'running'}]}};
+  const t2={id:'t2',title:'确认汇报口径',phase:'waiting',agent:'DESKTOP-FIXTURE · Pi',
+    cli:'Pi',deskKey:'host:desktop-fixture|pi',runner:{host:'DESKTOP-FIXTURE'},
+    at:'2026-08-04T08:00:00+00:00',lastAction:'等待负责人确认',artifacts:1,attention:true,
+    workflow:{runId:'r2',pluginName:'办公交付',nodeName:'负责人确认',nodeType:'human_review',
+      waitingOn:['张三'],steps:[{key:'draft',name:'整理材料',state:'succeeded'},{key:'review',name:'负责人确认',state:'waiting_human'}]}};
+  const t3={id:'t3',title:'生成演示文稿',phase:'failed',agent:'DESKTOP-FIXTURE · Pi',
+    cli:'Pi',deskKey:'host:desktop-fixture|pi',runner:{host:'DESKTOP-FIXTURE'},
+    at:'2026-08-04T07:00:00+00:00',lastAction:'导出检查未通过',artifacts:0,attention:true,
+    workflow:{runId:'r3',pluginName:'办公交付',nodeName:'格式质检',nodeType:'quality',error:'缺少标题页',canRetryGate:true}};
+  const t4={id:'t4',title:'周报已交付',phase:'done',agent:'DESKTOP-FIXTURE · Pi',
+    cli:'Pi',deskKey:'host:desktop-fixture|pi',runner:{host:'DESKTOP-FIXTURE'},
+    at:'2026-08-04T06:00:00+00:00',lastAction:'工作流已完成',artifacts:3,attention:false,
+    workflow:{runId:'r4',pluginName:'办公交付',nodeName:'交付完成',nodeType:'delivery'}};
+  return{
+  desks:[{key:'host:desktop-fixture|pi',name:'DESKTOP-FIXTURE · Pi',alias:'',cli:'Pi',
+          cliKey:'pi',machineKey:'host:desktop-fixture',machineLabel:'DESKTOP-FIXTURE',
+          host:'DESKTOP-FIXTURE',online:true,busy:true,attention:2,doneCount:7,
+          historyOnly:false,tasks:[t1,t2,t3]},
+         {key:'host:desktop-fixture|opencode',name:'DESKTOP-FIXTURE · OpenCode',alias:'',cli:'OpenCode',
+          cliKey:'opencode',machineKey:'host:desktop-fixture',machineLabel:'DESKTOP-FIXTURE',
+          host:'DESKTOP-FIXTURE',online:true,busy:false,attention:0,doneCount:2,
+          historyOnly:false,tasks:[]},
+         {key:'host:qa-runner|claude',name:'验证机 · Claude Code',alias:'小克',cli:'Claude Code',
+          cliKey:'claude',machineKey:'host:qa-runner',machineLabel:'验证机',
+          host:'QA-RUNNER',online:false,busy:false,attention:0,doneCount:4,
+          historyOnly:false,tasks:[]},
+         {key:'hosted:multica|opencode',name:'阿码',alias:'',cli:'OpenCode',cliKey:'opencode',
+          machineKey:'hosted:multica',machineLabel:'历史记录',online:false,busy:false,
+          attention:0,doneCount:1,historyOnly:true,tasks:[]}],
+  tasks:[t1,t2,t3,t4],summary:{running:1,waiting:1,failed:1,done:1}};}
+
+function paint(mut){
+  _deskData=mkData(); if(mut)mut(_deskData);
+  _renderDesks();
+  return {roster:document.getElementById('dkRoster').firstElementChild,
+          body:document.getElementById('dkBody').firstElementChild,
+          rosterHtml:document.getElementById('dkRoster').innerHTML,
+          bodyHtml:document.getElementById('dkBody').innerHTML};
+}
+
+/* Unchanged data must preserve all existing nodes. */
+const a=paint(null);
+const b=paint(null);
+chk('★没变化时操作台不重建（保留 hover 态和滚动位置）',a.roster===b.roster);
+chk('★没变化时右栏不重建',a.body===b.body);
+chk('★默认主视角是 Agent 席位与全宽操作台，不是统计卡片墙',
+  a.rosterHtml.includes('Agent 席位')&&a.rosterHtml.includes('Agent 操作台')&&
+  a.rosterHtml.includes('aio-work-item')&&a.rosterHtml.includes('aio-deliveries'));
+chk('★执行者、任务和阶段沿同一条协作流展示，不再模拟桌椅房间',
+  a.rosterHtml.includes('aio-teamline')&&a.rosterHtml.includes('aio-work-list')&&
+  a.rosterHtml.includes('aio-work-action')&&!a.rosterHtml.includes('aio-side-rooms'));
+chk('★真实工作流当前节点和等待对象进入协作流',a.rosterHtml.includes('整理材料')&&a.rosterHtml.includes('等待 张三 处理'));
+
+/* ---------- 1.5 Employees, areas, and desktop tasks navigate to their actual details. ---------- */
+document.querySelector('[data-ros="host:desktop-fixture|pi"]').click();
+chk('★点 Agent 会筛选全宽操作台，不再打开重复的右侧观察窗',_dkPick==='host:desktop-fixture|pi'&&
+  document.getElementById('dkRoster').textContent.includes('完善汇报材料')&&
+  !document.getElementById('dkBody').firstElementChild);
+_dkPick='__all__';paint(null);
+document.querySelector('[data-office-phase="attention"]').click();
+chk('★点需关注区域会合并筛出待人审和异常',_dkPhase==='attention'&&
+  document.getElementById('dkRoster').textContent.includes('确认汇报口径')&&
+  document.getElementById('dkRoster').textContent.includes('生成演示文稿')&&
+  document.querySelector('.aio-deliveries').textContent.includes('周报已交付'));
+_dkPhase='all';paint(null);
+document.querySelector('[data-office-enter-task="t1"]').click();
+chk('Task card navigates to its original conversation',taskNavigations.length===1&&taskNavigations[0].id==='t1'&&
+  taskNavigations[0].options.source==='ai-workbench'&&taskNavigations[0].options.navigation===true);
+chk('Navigation never creates a second execution page',_dkView==='board'&&
+  !document.querySelector('.dk-office-layout').classList.contains('is-task-view')&&!document.querySelector('[data-back]'));
+
+const CASES=[
+  ['任务标题变了',d=>{d.tasks[0].title='改了标题';}],
+  ['任务进了别的分组',d=>{d.tasks[0].phase='failed';}],
+  ['卡片上的最后动作变了',d=>{d.tasks[0].lastAction='卡在这儿了';}],
+  ['已交付成果数量变了',d=>{d.tasks[3].artifacts=5;}],
+  ['席位起了自己的名字',d=>{d.desks[0].alias='小P';}],
+  ['机器改了名',d=>{d.desks[0].machineLabel='我的开发机';d.tasks.forEach(t=>{t.machineLabel='我的开发机';});}],
+  ['执行状态变了',d=>{d.desks[0].busy=false;}],
+  ['待处理数量变了',d=>{d.desks[0].busy=false;d.desks[0].attention=1;d.tasks[2].phase='running';}],
+  ['机器掉线了',d=>{d.desks[0].online=false;}],
+  ['没有实时动作时显示当前工作流阶段',d=>{delete d.tasks[0].lastAction;d.tasks[0].workflow.nodeName='材料校对';}],
+  ['底座名变了',d=>{d.desks[0].cli='OpenCode';d.desks[0].name='DESKTOP-FIXTURE · OpenCode';
+    d.tasks.forEach(t=>{t.cli='OpenCode';t.agent='DESKTOP-FIXTURE · OpenCode';});}],
+  ['席位退成只剩历史',d=>{d.desks[0].historyOnly=true;}],
+  ['多了一个席位',d=>{d.desks.push({key:'k3',name:'新来的',cli:'Pi',cliKey:'pi',
+      machineKey:'m3',machineLabel:'新机器',online:true,busy:false,attention:0,
+      doneCount:0,historyOnly:false,tasks:[]});}],
+  ['多了一条活',d=>{d.tasks.push({id:'t5',title:'新活',phase:'running',
+      agent:'x',deskKey:'host:desktop-fixture|pi',runner:{},attention:false});}],
+];
+for(const [name,mut] of CASES){
+  paint(null);                       /* Restore the baseline. */
+  const base=document.getElementById('dkRoster').innerHTML;
+  const baseBody=document.getElementById('dkBody').innerHTML;
+  paint(mut);
+  const now=document.getElementById('dkRoster').innerHTML;
+  const nowBody=document.getElementById('dkBody').innerHTML;
+  chk('★'+name+' → 界面必须跟上',base!==now||baseBody!==nowBody);
+}
+
+/* Keep the office scene understandable with zero or many members. */
+let agentManagerOpens=0;
+window.openAgentsEntry=()=>{agentManagerOpens++;};
+const empty=paint(d=>{d.desks=[];d.tasks=[];d.summary={running:0,waiting:0,failed:0,done:0};d.reason='Runner 尚未连接';});
+chk('★空团队仍展示可行动的协作空态',empty.rosterHtml.includes('等待 Agent 加入')&&
+  empty.rosterHtml.includes('Runner 尚未连接')&&empty.rosterHtml.includes('从第一项工作开始')&&
+  empty.rosterHtml.includes('data-office-new-chat')&&empty.rosterHtml.includes('还没有在线 Agent')&&!empty.bodyHtml);
+document.querySelector('.aio-empty-connection [data-open-agents]').click();
+chk('★协作台空态可以直接进入 Agent 管理',agentManagerOpens===1);
+const crowded=paint(d=>{for(let i=0;i<8;i++)d.desks.push({key:'extra-'+i,name:'执行机 '+i+' · Pi',
+  cli:'Pi',machineKey:'extra-machine-'+i,machineLabel:'执行机 '+i,online:true,busy:false,
+  attention:0,doneCount:0,historyOnly:false,tasks:[]});});
+chk('★Agent 很多时团队条仍展示全部真实席位',
+  (crowded.rosterHtml.match(/class="aio-agent is/g)||[]).length===11&&!crowded.rosterHtml.includes('另有'));
+
+/* Reflect view-state changes. */
+paint(null); const r0=document.getElementById('dkRoster').innerHTML;
+_dkPick='host:desktop-fixture|pi';
+paint(null); const r1=document.getElementById('dkRoster').innerHTML;
+chk('★选择 Agent 后只筛选全宽操作台，不生成重复侧栏',r0!==r1&&
+  !document.getElementById('dkBody').firstElementChild);
+_dkPick='__all__';
+paint(null);
+const filterRoster=document.getElementById('dkRoster').firstElementChild;
+_dkPhase='failed'; const filtered=paint(null);
+chk('★切换状态只更新任务队列并保持单一事实视图',
+  filterRoster===filtered.roster&&document.getElementById('dkRoster').textContent.includes('生成演示文稿')&&
+  !document.getElementById('dkBody').firstElementChild);
+_dkPhase='all';
+
+/* Show every agent's tasks without silent truncation. */
+const many=paint(d=>{for(let i=0;i<12;i++)d.tasks.push({id:'many-'+i,title:'并行任务 '+i,
+  phase:'running',agent:'Agent '+i,deskKey:'agent-'+i,runner:{},attention:false});});
+chk('★★操作台展示全部未完成任务，不只截前 8 条',
+  (many.rosterHtml.match(/class="aio-work-item /g)||[]).length===15);
+
+/* Visual-review mode retains the default product state; test mode keeps node-identity assertions. */
+if(document.documentElement.classList.contains('is-preview')){
+  _dkPhase='all';
+  paint(null);
+}
+
+document.getElementById('out').textContent=lines.join('\n')+
+  '\n\nrender skip smoke: '+ok+' passed, '+fail+' failed';
+document.title=fail?('FAIL '+fail):'ALL PASS '+ok;
+</script>
+</body></html>

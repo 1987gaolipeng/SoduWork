@@ -1,0 +1,79 @@
+'use strict';
+const test = require('node:test'), assert = require('node:assert/strict');
+const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), crypto = require('node:crypto');
+const auth = require('../main/device-auth');
+const access = require('../main/conversation/history-access');
+const memories = require('../main/conversation/session-memory');
+const { identity, sessions } = require('./helpers/platform-session-fixture.cjs');
+const { scope, connectionScope } = require('../main/platform-connections/runtime.cjs');
+function fixture(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-history-account-'));
+  const app = { getPath: () => root }, saved = {};
+  let current = identity(), trustedOwner = scope(current);
+  for (const key of ['identity', 'session', 'profiles', 'localOwner']) saved[key] = auth[key];
+  auth.identity = () => current;
+  auth.session = () => current?.session || '';
+  auth.profiles = () => [];
+  auth.localOwner = () => trustedOwner;
+  t.after(() => { Object.assign(auth, saved); fs.rmSync(root, { recursive: true, force: true }); });
+  for (const [id, actor] of [['alice', identity()], ['bob', identity('two')]]) memories.bind(app, id, actor, [], true);
+  return { app, root, switch(actor) { current = actor; trustedOwner = actor ? scope(actor) : ''; },
+    expire() { current = { ...identity(), session: sessions().expired }; },
+    write(directory, id, value) {
+      const file = path.join(root, directory, crypto.createHash('sha256').update(id).digest('hex') + '.json');
+      fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(value)); return file;
+    } };
+}
+test('ordinary, work and live rows use persisted account ownership and return after switching back', t => {
+  const f = fixture(t), rows = ['alice', 'bob', 'unbound'].map(id => ({ id, count: 1 }));
+  assert.deepEqual(access.visible(f.app, rows).map(row => row.id), ['alice']);
+  f.switch(identity('two'));
+  assert.deepEqual(access.visible(f.app, rows).map(row => row.id), ['bob']);
+  assert.throws(() => access.assertOwner(f.app, 'alice'), /当前账号/);
+  f.switch(identity());
+  assert.deepEqual(access.visible(f.app, rows).map(row => row.id), ['alice']);
+  f.expire();
+  assert.deepEqual(access.visible(f.app, rows).map(row => row.id), ['alice'], 'trusted offline owner remains usable');
+  f.switch(null);
+  assert.deepEqual(access.visible(f.app, rows), []);
+});
+test('damaged or conflicting ownership cannot claim a foreign archive; cloud flag alone is not authority', t => {
+  const f = fixture(t);
+  f.write('requirement-session-context', 'alice', { owner: scope(identity('two')) });
+  assert.deepEqual(access.visible(f.app, [{ id: 'alice' }, { id: 'unknown', cloud: true }]), []);
+  f.write('conversation-handoffs', 'remote', { sessionId: 'remote', owner: connectionScope(identity()), entryKind: 'cloud' });
+  assert.equal(access.visible(f.app, [{ id: 'remote', cloud: true }]).length, 1);
+  f.switch(identity('two'));
+  assert.deepEqual(access.visible(f.app, [{ id: 'remote', cloud: true }]), []);
+});
+test('history IPC rejects foreign rename/archive/restore/delete before touching the runtime', async t => {
+  const f = fixture(t), handlers = new Map(), calls = [];
+  require('../main/pi-session/history-ipc').install({ app: f.app,
+    ipcMain: { handle: (name, fn) => handlers.set(name, fn) }, BrowserWindow: { getAllWindows: () => [] },
+    session: { findBySessionId: () => null, archivedConversation: async () => ({ id: 'alice' }),
+      archiveHistory: async () => { calls.push('archive'); return { ok: true }; },
+      restoreHistory: async () => { calls.push('restore'); return { ok: true }; },
+      permanentlyDeleteHistory: async () => { calls.push('delete'); return { ok: true }; },
+      archivedHistory: async () => ({ ok: true, chats: [{ id: 'alice' }, { id: 'bob' }] }) } });
+  f.switch(identity('two'));
+  for (const name of ['rename', 'archive', 'restore', 'delete', 'permanent-delete']) {
+    const result = await handlers.get('pi-session-history-' + name)({}, 'alice', 'stolen');
+    assert.equal(result.ok, false, name); assert.match(result.reason, /当前账号/);
+  }
+  assert.deepEqual(calls, []);
+  assert.deepEqual((await handlers.get('pi-session-history-archived')()).chats.map(row => row.id), ['bob']);
+  f.switch(identity());
+  assert.equal((await handlers.get('pi-session-history-archive')({}, 'alice')).ok, true);
+  assert.deepEqual(calls, ['archive']);
+});
+test('an in-flight history read cannot return the previous account after login changes', async t => {
+  const f = fixture(t), handlers = new Map();
+  let resolve;
+  require('../main/pi-session/environment-ipc').install({ app: f.app,
+    ipcMain: { handle: (name, fn) => handlers.set(name, fn) },
+    session: { history: () => new Promise(done => { resolve = done; }) } });
+  const pending = handlers.get('pi-session-history')();
+  f.switch(identity('two')); resolve({ ok: true, chats: [{ id: 'alice' }] });
+  const result = await pending;
+  assert.equal(result.ok, false); assert.deepEqual(result.chats, []); assert.match(result.reason, /账号已切换/);
+});

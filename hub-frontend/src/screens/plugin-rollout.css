@@ -1,0 +1,434 @@
+/* Compact enterprise rollout ledger: impact first, action second. */
+.plugin-rollout-panel {
+  position: relative;
+  overflow: hidden;
+  margin: 0 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.plugin-rollout-panel::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--accent);
+  content: "";
+}
+
+.plugin-rollout-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 82px;
+  padding: 16px 18px 15px 20px;
+  border-bottom: 1px solid var(--line-2);
+}
+
+.plugin-rollout-head h3 {
+  margin: 4px 0 3px;
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 15px;
+  font-weight: 710;
+  letter-spacing: -.015em;
+}
+
+.plugin-rollout-head p {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  line-height: 1.5;
+}
+
+.plugin-rollout-target {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: baseline;
+  column-gap: 8px;
+  min-width: 164px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-1);
+}
+
+.plugin-rollout-target small {
+  color: var(--ink-3);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+}
+
+.plugin-rollout-target b {
+  justify-self: end;
+  color: var(--ink);
+  font: 720 14.5px var(--mono);
+}
+
+.plugin-rollout-target em {
+  grid-column: 1 / -1;
+  margin-top: 3px;
+  color: var(--ink-3);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  font-style: normal;
+}
+
+.plugin-rollout-target.is-ready em {
+  color: var(--ok);
+}
+
+.plugin-rollout-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(82px, 116px)) 1fr;
+  gap: 0;
+  min-height: 56px;
+  padding: 0 18px 0 20px;
+  border-bottom: 1px solid var(--line-2);
+  background: var(--surface-1);
+}
+
+.plugin-rollout-summary > span {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 18px 14px 14px 0;
+}
+
+.plugin-rollout-summary small {
+  color: var(--ink-3);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+}
+
+.plugin-rollout-summary b {
+  color: var(--ink);
+  font: 730 16px var(--mono);
+}
+
+.plugin-rollout-summary .has-risk b {
+  color: var(--warn);
+}
+
+.plugin-rollout-summary .has-blocker b {
+  color: var(--crit);
+}
+
+.plugin-rollout-summary button {
+  justify-self: end;
+  align-self: center;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink-2);
+  background: var(--surface);
+  font: inherit;
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  cursor: pointer;
+}
+
+.plugin-rollout-summary button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--line));
+  color: var(--accent);
+}
+
+.plugin-rollout-summary button:disabled {
+  cursor: not-allowed;
+  opacity: .48;
+}
+
+.plugin-rollout-list {
+  overflow-x: auto;
+}
+
+.plugin-rollout-columns,
+.plugin-rollout-row {
+  display: grid;
+  grid-template-columns: 30px minmax(130px, .8fr) minmax(205px, 1.1fr)
+    minmax(220px, 1.55fr) 88px;
+  align-items: center;
+  min-width: 780px;
+}
+
+.plugin-rollout-columns {
+  min-height: 32px;
+  padding: 0 18px 0 20px;
+  border-bottom: 1px solid var(--line-2);
+  color: var(--ink-4);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  font-weight: 680;
+  letter-spacing: .04em;
+}
+
+.plugin-rollout-row {
+  position: relative;
+  min-height: 62px;
+  padding: 8px 18px 8px 20px;
+  border-bottom: 1px solid var(--line-2);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.plugin-rollout-row:last-child {
+  border-bottom: 0;
+}
+
+.plugin-rollout-row:hover {
+  background: color-mix(in srgb, var(--accent-soft) 26%, var(--surface));
+}
+
+.plugin-rollout-row.is-selected {
+  background: color-mix(in srgb, var(--accent-soft) 52%, var(--surface));
+}
+
+.plugin-rollout-row.state-disabled,
+.plugin-rollout-row.state-current,
+.plugin-rollout-row.state-blocked {
+  cursor: default;
+}
+
+.plugin-rollout-check {
+  display: flex;
+  align-items: center;
+}
+
+.plugin-rollout-check input,
+.plugin-rollout-confirm input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.plugin-rollout-scope,
+.plugin-rollout-reading {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.plugin-rollout-scope b {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  font-weight: 660;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-rollout-scope small,
+.plugin-rollout-reading small {
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-rollout-rail {
+  display: grid;
+  grid-template-columns: minmax(56px, auto) minmax(20px, 1fr) 13px minmax(56px, auto);
+  align-items: center;
+  gap: 7px;
+  padding-right: 22px;
+}
+
+.plugin-rollout-rail code {
+  overflow: hidden;
+  color: var(--ink-2);
+  font: 650 14.5px var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-rollout-rail code:last-child {
+  color: var(--accent);
+}
+
+.plugin-rollout-rail i {
+  height: 1px;
+  background: var(--line);
+}
+
+.plugin-rollout-rail svg {
+  width: 13px;
+  height: 13px;
+  color: var(--ink-4);
+}
+
+.plugin-rollout-level,
+.plugin-rollout-state {
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  min-height: 19px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  font-style: normal;
+  font-weight: 680;
+}
+
+.plugin-rollout-level.is-safe,
+.plugin-rollout-level.is-current {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+
+.plugin-rollout-level.is-review {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.plugin-rollout-level.is-breaking {
+  color: var(--crit);
+  background: var(--crit-soft);
+}
+
+.plugin-rollout-state {
+  justify-self: end;
+  color: var(--ink-3);
+  background: var(--surface-2);
+}
+
+.plugin-rollout-state.is-eligible {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.plugin-rollout-state.is-blocked {
+  color: var(--crit);
+  background: var(--crit-soft);
+}
+
+.plugin-rollout-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 66px;
+  padding: 11px 18px 11px 20px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-1);
+}
+
+.plugin-rollout-actions > div {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.plugin-rollout-actions b {
+  color: var(--ink);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  font-weight: 660;
+}
+
+.plugin-rollout-actions small {
+  color: var(--ink-3);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+}
+
+.plugin-rollout-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--crit);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  white-space: nowrap;
+}
+
+.plugin-rollout-empty {
+  padding: 30px 20px;
+  color: var(--ink-3);
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  text-align: center;
+}
+
+.plugin-rollout-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 12px 18px 0 20px;
+  padding: 10px 11px;
+  border: 1px solid color-mix(in srgb, var(--crit) 20%, var(--line));
+  border-radius: 9px;
+  color: var(--crit);
+  background: var(--crit-soft);
+}
+
+.plugin-rollout-error svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.plugin-rollout-error span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.plugin-rollout-error b {
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+}
+
+.plugin-rollout-error small {
+  font-size: max(var(--font-min-readable, 14.5px), 12px);
+  line-height: 1.45;
+}
+
+.plugin-rollout-panel button:focus-visible,
+.plugin-rollout-panel input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 880px) {
+  .plugin-rollout-summary {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .plugin-rollout-summary button {
+    grid-column: 1 / -1;
+    justify-self: start;
+    margin-bottom: 10px;
+  }
+
+  .plugin-rollout-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .plugin-rollout-actions .btn {
+    width: 100%;
+  }
+}
+
+@media (max-width: 620px) {
+  .plugin-rollout-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .plugin-rollout-target {
+    width: 100%;
+  }
+
+  .plugin-rollout-summary {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plugin-rollout-panel *,
+  .plugin-rollout-panel *::before,
+  .plugin-rollout-panel *::after {
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+  }
+}

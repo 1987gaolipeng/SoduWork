@@ -1,0 +1,32 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>新会话执行位置 · 隔离界面验收</title>
+<link rel="stylesheet" href="../../components/workspace/workspace-shell.css">
+<link rel="stylesheet" href="../../components/panels/work-composer.css">
+<link rel="stylesheet" href="../../components/panels/panels-compose-model-picker.css">
+<link rel="stylesheet" href="../../components/panels/compose-execution.css">
+<style>:root{--bg-0:#fff;--bg-2:#f7f8fa;--line:#e4e7ec;--ink:#22252b;--ink-2:#525766;--ink-3:#7b808b;--ink-4:#969ba5;--accent:#4f78df;--font-ui:system-ui}body{font:15px system-ui;margin:0;color:var(--ink);background:#fff}.cp-mid{max-width:780px;margin:90px auto;padding:24px}.cp-hero{font-size:30px;font-weight:650;margin-bottom:12px}.cp-hero-note{color:var(--ink-3);margin-bottom:32px}.wc-input{min-height:130px;padding:20px}.cp-box{width:100%}.cp-chat{display:none}#receipt{max-width:760px;margin:12px auto;padding:12px;white-space:pre-wrap;font-size:14px}button{font:inherit}svg{fill:none;stroke:currentColor;stroke-width:1.7}#narrow{position:fixed;top:20px;right:24px;padding:8px 12px;background:#fff;border:1px solid var(--line);border-radius:8px}</style>
+</head><body><button id="narrow">切换窄屏</button><output id="receipt" aria-live="polite"></output>
+<script src="../../components/panels/work-composer.js"></script>
+<script src="../../components/panels/panels-compose-runtime.js"></script>
+<script src="../../components/panels/compose-execution.js"></script>
+<script src="../../components/panels/compose-surface.js"></script>
+<script>
+const receipt=document.querySelector('#receipt');
+let starts=0;window.petSay=text=>{receipt.textContent=text};
+window.soduWorkAPI={conversationSession:{runtimes:async()=>({ok:true,runtimes:[
+ {id:'pi',displayName:'Pi',modelMode:'managed',group:'recommended',order:10},
+ {id:'codex-harness',displayName:'Codex Harness',modelMode:'managed',group:'recommended',order:20},
+ {id:'qwen',displayName:'Qwen Code',modelMode:'managed',group:'more',order:60}
+]}),probe:async()=>({ok:true}),
+ cloud:{targets:async(agent)=>({ok:true,targets:agent === 'unavailable' ? [] : [{id:'remote',agentId:agent || 'pi'}]}),start:async input=>{starts++;receipt.textContent='cloud-start\n'+input.text+'\nsends:'+starts;return {ok:true,sessionId:'cloud-test'}}}}};window.ComposeModelPicker={ready:async()=>true,value:()=>({modelName:'test-model'})};
+window.NativeChat={enter:async()=>true};window.WorkspaceHost={open:()=>{receipt.textContent='打开云端环境配置'}};
+const surface=ComposeSurface.create({_bind:panel=>{
+  const refresh=()=>{ComposeRuntime.paint(panel);ComposeExecution.paint()};
+  ComposeExecution.bind(panel,refresh);
+  ComposeRuntime.bind(panel,{api:()=>soduWorkAPI.conversationSession,refresh});
+  panel.querySelector('#cpRuntime').addEventListener('click',()=>panel.querySelector('#cpRuntimePop').classList.toggle('show'));
+  panel.querySelector('#cpGo').addEventListener('click',()=>ComposeExecution.value()==='cloud'
+    ? ComposeExecution.start({text:panel.querySelector('#cpInput').value,attachments:[],skills:[],plugins:[]})
+    : petSay('本地会话（隔离验证）'));
+}});const panel=surface._panel();panel.classList.add('show');panel.dataset.stage='compose';panel.style.minHeight='700px';
+document.querySelector('#narrow').onclick=()=>{const mid=document.querySelector('.cp-mid');mid.style.maxWidth=mid.style.maxWidth?'':'480px'};
+</script></body></html>

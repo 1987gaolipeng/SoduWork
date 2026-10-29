@@ -1,0 +1,208 @@
+'use strict';
+// Real Electron fixed-Hub login/settings, storage and IPC. Only explicit loopback fixtures can make HTTP calls.
+const electron = require('electron');
+if (typeof electron === 'string') {
+  const env = { ...process.env };
+  env.SODUWORK_HUB_E2E_RUN_ID = require('node:crypto').randomUUID();
+  for (const key of ['ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'CHROME_CRASHPAD_PIPE_NAME', 'CHROME_CRASHPAD_PIPE_HANDLE', 'ELECTRON_NO_ATTACH_CONSOLE']) delete env[key];
+  const result = require('node:child_process').spawnSync(electron, [__filename], { env, stdio: 'inherit', windowsHide: true, timeout: 90000 });
+  if (result.error) { console.error(result.error.message); process.exit(1); }
+  const receipt = JSON.parse(require('node:fs').readFileSync(require('node:path').resolve(__dirname, '../../outputs/hub-connection/report.json'), 'utf8'));
+  process.exit(result.status === 0 && receipt.ok && receipt.runId === env.SODUWORK_HUB_E2E_RUN_ID ? 0 : 1);
+}
+const { app, BrowserWindow, ipcMain, safeStorage, session } = electron;
+const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), http = require('node:http');
+const { pathToFileURL } = require('node:url');
+const assert = require('node:assert/strict');
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-hub-ui-'));
+app.setName('SoduWorkFixedHubFixture');
+app.setPath('userData', path.join(root, 'profile'));
+app.on('window-all-closed', () => {});
+const client = path.resolve(__dirname, '..'), out = path.resolve(client, '../outputs/hub-connection');
+fs.mkdirSync(out, { recursive: true });
+const report = { ok: false, runId: process.env.SODUWORK_HUB_E2E_RUN_ID, cases: [], profile: root }, servers = [], requests = [];
+let win;
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const run = code => win.webContents.executeJavaScript(code);
+async function until(code) {
+  for (let n = 0; n < 400; n++) {
+    try { if (await run(code)) return; } catch (_) {}
+    await sleep(20);
+  }
+  throw Error('UI timeout: ' + code + '\n' + await run('document.body.innerText'));
+}
+async function click(selector) {
+  const point = await run(`(()=>{const el=document.querySelector(${JSON.stringify(selector)});el.scrollIntoView({block:'center'});const r=el.getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`);
+  win.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 });
+  win.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 });
+  await sleep(60);
+}
+async function fill(selector, value) { await run(`document.querySelector(${JSON.stringify(selector)}).value=${JSON.stringify(value)}`); }
+async function service(label) {
+  const users = new Map(), secrets = new Map();
+  const server = http.createServer(async (req, res) => {
+    let raw = ''; for await (const part of req) raw += part;
+    const body = raw ? JSON.parse(raw) : {}, device = body.device;
+    requests.push({ label, path: req.url, device, key: req.headers['x-device-key'], authorization: req.headers.authorization });
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Content-Type', 'application/json');
+    if (req.method === 'OPTIONS') return res.end('{}');
+    if (req.url.endsWith('/policy')) return res.end(JSON.stringify({ allowSelfRegistration: false }));
+    if (req.url.endsWith('/enroll') || req.url.endsWith('/login')) {
+      if (secrets.has(device)) assert.equal(req.headers['x-device-key'], secrets.get(device));
+      else secrets.set(device, req.headers['x-device-key']);
+      if (req.url.endsWith('/login')) {
+        assert.equal(body.account, label); assert.equal(body.password, 'fixture-password');
+        users.set(device, { id: label, username: label, displayName: label });
+      }
+      const user = users.get(device);
+      return res.end(JSON.stringify(user ? { authState: 'active', session: 'session-' + label,
+        expiresIn: 1800, user } : { authState: 'pending', activationRequired: true }));
+    }
+    res.end(JSON.stringify({ providers: [], usable: [], myModels: [] }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); servers.push(server);
+  return { url: 'http://127.0.0.1:' + server.address().port, users, secrets };
+}
+async function open() {
+  win = new BrowserWindow({ show: false, width: 920, height: 860, webPreferences: {
+    preload: path.join(client, 'preload.js'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
+  await win.loadFile(path.join(root, 'connection.html'));
+}
+app.whenReady().then(async () => {
+  assert.ok(safeStorage.isEncryptionAvailable(), 'OS credential encryption must be available');
+  const a = await service('alice'), b = await service('bob');
+  const endpoint = require('../main/hub-endpoint.cjs');
+  endpoint.initialize(app, {});
+  ipcMain.handle('hub-connection-info', () => endpoint.current(app));
+  ipcMain.on('runtime-form', event => { event.returnValue = 'local-code'; });
+  const allowed = new Set([a.url, b.url]);
+  const originalFetch = global.fetch;
+  global.fetch = (url, options) => {
+    if (!allowed.has(new URL(url).origin)) return Promise.reject(Error('fetch failed (isolated fixture: unreachable service)'));
+    return originalFetch(url, options);
+  };
+  session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
+    callback({ cancel: /^(https?|wss?):/.test(details.url) && !allowed.has(new URL(details.url).origin) });
+  });
+  const auth = require('../main/device-auth');
+  auth.install({ app, ipcMain, safeStorage });
+  ipcMain.handle('hub-environment-select', (_event, hub) => auth.selectHub(app, hub));
+  ipcMain.handle('app-version', () => 'fixture');
+  ipcMain.handle('sys-info', () => ({ platform: 'fixture', hostname: 'isolated' }));
+  ipcMain.handle('runner-configure', () => ({ ok: true }));
+  ipcMain.handle('client-update-status', () => ({ ok: true, currentVersion: 'fixture', phase: 'idle' }));
+  ipcMain.handle('work-root-default', () => path.join(root, 'work'));
+  const url = file => pathToFileURL(path.join(client, file)).href;
+  const desk = fs.readFileSync(path.join(client, 'desk.html'), 'utf8');
+  const panelStart = desk.indexOf('<div class="panel" id="settingsPanel"');
+  const card = desk.slice(panelStart, desk.indexOf('<section class="archive-history-panel"', panelStart));
+  assert.ok(panelStart >= 0 && card.includes('settingsPanel'), 'load the real settings panel markup');
+  fs.writeFileSync(path.join(root, 'connection.html'), `<!doctype html><html><meta charset="utf-8">
+    <link rel="stylesheet" href="${url('theme/variables.css')}">
+    <link rel="stylesheet" href="${url('components/panels/panels-detail.css')}">
+    <link rel="stylesheet" href="${url('components/settings/settings.css')}">
+    <link rel="stylesheet" href="${url('components/client-auth/client-auth.css')}">
+    <style>body{font:15px system-ui;margin:20px;background:white}#settingsPanel{position:relative;margin:20px auto}</style>
+    <body>${card}
+    <script>var cfg={};var User={id:'fixture-renderer'};
+      if (!localStorage.getItem('fixture-history')) {
+        localStorage.setItem('soduwork_work_hub_environment_v1', 'development');
+        localStorage.setItem('soduwork_work_hub_url', 'http://127.0.0.1:18989');
+        localStorage.setItem('soduwork_work_device_secret', 'fixture-old-local-key');
+        localStorage.setItem('fixture-history', 'preserved');
+      }
+    </script>
+    <script src="${url('core/api-work-plugins.js')}"></script><script src="${url('api.js')}"></script>
+    <script src="${url('components/settings/settings.js')}"></script>
+    <script src="${url('components/client-auth/client-auth.js')}"></script></body></html>`);
+  await open();
+  await until('document.querySelector(".soduwork-auth-retry") && !document.querySelector(".soduwork-auth-retry").hidden');
+  assert.equal(await run('SoduWorkAPI.hubBase()'), endpoint.PRODUCTION_HUB);
+  assert.equal(await run('SoduWorkAPI.hubConfig().editable'), true);
+  assert.equal(await run('document.querySelector(".soduwork-auth-form-badge").hidden'), false);
+  assert.equal(await run('document.querySelector(".soduwork-auth-form-badge").textContent'), '本地代码启动');
+  const switchers = '.soduwork-auth-connection,.soduwork-auth-production,.soduwork-auth-local,#soduWorkAuthHub,.soduwork-auth-connect,#hubEnvironmentPicker,#hubUrlInput,#hubUrlSave,[data-hub-env]';
+  assert.equal(await run('document.querySelectorAll(' + JSON.stringify(switchers) + ').length'), 3,
+    'exactly one address panel (details, input, button) is offered to local-code runs');
+  assert.equal(await run('document.querySelector(".soduwork-auth-connection").open'), true,
+    'a connectivity failure auto-expands the address panel for repointing');
+  assert.equal(requests.length, 0, 'offline product verification never reaches a backend');
+  assert.equal(await run('localStorage.getItem("soduwork_work_device_secret")'), null,
+    'retired plaintext device keys are removed from renderer storage even while offline');
+  await click('.soduwork-auth-retry');
+  await until('!document.querySelector(".soduwork-auth-retry").disabled');
+  assert.equal(await run('SoduWorkAPI.hubBase()'), endpoint.PRODUCTION_HUB);
+  fs.writeFileSync(path.join(out, 'fixed-production-login.png'), (await win.webContents.capturePage()).toPNG());
+  win.setSize(420, 760); await sleep(180);
+  assert.equal(await run('document.querySelector(".soduwork-auth-submit").getBoundingClientRect().right <= innerWidth'), true);
+  fs.writeFileSync(path.join(out, 'fixed-production-login-narrow.png'), (await win.webContents.capturePage()).toPNG());
+  report.cases.push('local-code defaults resolve to production and auto-expand the address panel on failure; retry retains production offline');
+
+  /* Test login-gate address changes: reject invalid URLs inline and reload after saving valid ones. */
+  win.destroy(); await open();
+  await until('document.querySelector(".soduwork-auth-connection") && !document.querySelector("#soduWorkAuthHub").disabled');
+  await run('document.querySelector(".soduwork-auth-connection").open = true');
+  await fill('#soduWorkAuthHub', 'https://example.com/api');
+  await click('.soduwork-auth-connect');
+  await until('document.querySelector(".soduwork-auth-status").textContent.includes("后台地址")');
+  assert.equal(await run('SoduWorkAPI.hubBase()'), endpoint.PRODUCTION_HUB);
+  await fill('#soduWorkAuthHub', a.url);
+  await click('.soduwork-auth-connect');
+  await until('SoduWorkAPI.hubBase() === ' + JSON.stringify(a.url));
+  await sleep(1500);
+  /* the saved address must survive the reload; a stale connection snapshot rolls it back */
+  assert.equal(await run('SoduWorkAPI.hubBase()'), a.url, 'saved address survives the reload');
+  await until('document.querySelector("#soduWorkAuthHub") && document.querySelector("#soduWorkAuthHub").value === ' + JSON.stringify(a.url));
+  assert.equal(await run('SoduWorkAPI.hubConfig().editable'), true);
+  assert.ok(requests.every(row => row.label !== 'bob'), 'foreign fixture stays untouched while repointing');
+  fs.writeFileSync(path.join(out, 'local-code-repointed.png'), (await win.webContents.capturePage()).toPNG());
+  report.cases.push('local-code login gate repoints the service in place; invalid addresses are rejected without reload');
+
+  win.destroy();
+  endpoint.initialize(app, { SODUWORK_TEST_HUB_URL: a.url, SODUWORK_USER_DATA: app.getPath('userData') });
+  await open();
+  await until('!document.querySelector(".soduwork-auth-submit").disabled');
+  assert.equal(await run('SoduWorkAPI.hubBase()'), a.url);
+  assert.equal(await run('document.querySelectorAll(' + JSON.stringify(switchers) + ').length'), 0);
+  await fill('#soduWorkAuthAccount', 'alice'); await fill('#soduWorkAuthPassword', 'fixture-password');
+  await click('.soduwork-auth-pw-eye');
+  assert.equal(await run('document.querySelector("#soduWorkAuthPassword").type'), 'text');
+  await click('.soduwork-auth-submit');
+  await until('document.querySelector("#soduWorkClientAuthGate").hidden');
+  assert.equal(await run('document.querySelector("#soduWorkAuthPassword").value'), '');
+  assert.equal(await run('document.querySelector("#soduWorkAuthPassword").type'), 'password');
+  await until('SoduWorkAPI.clientAuthSnapshot().user?.id === "alice"');
+  const identityA = auth.identity(app);
+  assert.equal(identityA.hub, a.url);
+  assert.notEqual(identityA.secret, 'fixture-old-local-key');
+  assert.equal((await run('window.soduWorkAPI.selectHubEnvironment(' + JSON.stringify(b.url) + ')')).ok, false);
+  assert.equal(auth.identity(app).hub, a.url);
+  assert.equal(requests.filter(row => row.label === 'bob').length, 0);
+  assert.ok(requests.filter(row => row.key).every(row => row.key !== 'fixture-old-local-key'));
+  report.cases.push('explicit internal loopback profile supports normal secure login; foreign IPC is rejected without request or identity change');
+
+  win.destroy(); await open();
+  await until('SoduWorkAPI.clientAuthSnapshot().user?.id === "alice"');
+  await until('document.querySelector("#soduWorkClientAuthGate").hidden && !document.documentElement.classList.contains("soduwork-auth-pending")');
+  assert.equal(await run('localStorage.getItem("fixture-history")'), 'preserved');
+  assert.equal(auth.identity(app).clientId, identityA.clientId);
+  const persisted = fs.readFileSync(path.join(root, 'profile/device-auth.json'), 'utf8');
+  assert.ok(!persisted.includes(identityA.secret));
+  await run('document.querySelector("#settingsPanel").classList.add("show")');
+  await sleep(100);
+  assert.equal(await run('document.querySelectorAll(' + JSON.stringify(switchers) + ').length'), 0);
+  fs.writeFileSync(path.join(out, 'fixed-settings.png'), (await win.webContents.capturePage()).toPNG());
+  report.cases.push('window reopen preserves identity/history and OS-encrypted key; real settings markup retains no environment switch');
+  report.requests = { fixture: requests.length, foreignFixture: requests.filter(row => row.label === 'bob').length };
+  report.ok = true;
+}).catch(error => { report.error = error.stack; process.exitCode = 1; }).finally(async () => {
+  if (win && !win.isDestroyed()) win.destroy();
+  for (const server of servers) await new Promise(resolve => {
+    server.close(resolve);
+    server.closeAllConnections();
+  });
+  fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify(report, null, 2));
+  console.log(JSON.stringify(report)); app.exit(report.ok ? 0 : 1);
+});

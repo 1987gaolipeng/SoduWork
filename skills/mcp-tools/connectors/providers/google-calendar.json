@@ -1,0 +1,187 @@
+{
+  "schemaVersion": 1,
+  "id": "google-calendar",
+  "name": "Google Calendar",
+  "category": "办公",
+  "description": "Google Calendar 通用连接器：日历列表、事件列表、创建事件。基于 Google Calendar API v3，OAuth 访问令牌由用户安全填入。",
+  "officialDocs": [
+    "https://developers.google.com/workspace/calendar/api/v3/reference/calendarList/list",
+    "https://developers.google.com/workspace/calendar/api/v3/reference/events/list",
+    "https://developers.google.com/workspace/calendar/api/v3/reference/events/insert"
+  ],
+  "authDocs": [
+    "https://developers.google.com/workspace/calendar/api/guides/auth"
+  ],
+  "baseUrl": "https://www.googleapis.com",
+  "fields": [
+    {
+      "key": "GOOGLE_ACCESS_TOKEN",
+      "label": "Google OAuth 访问令牌",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "tokenKey": "GOOGLE_ACCESS_TOKEN",
+    "header": "Authorization",
+    "prefix": "Bearer"
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "list_calendars",
+      "description": "列出用户日历列表。分页：nextPageToken + maxResults（默认 100 最大 250）。出处：https://developers.google.com/workspace/calendar/api/v3/reference/calendarList/list",
+      "method": "GET",
+      "path": "/calendar/v3/users/me/calendarList",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "max_results": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 250,
+            "default": 100,
+            "description": "每页条数"
+          },
+          "page_token": {
+            "type": "string",
+            "description": "上一页 nextPageToken",
+            "maxLength": 10000
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "query": {
+        "maxResults": "max_results",
+        "pageToken": "page_token"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_events",
+      "description": "列出日历事件（timeMin/timeMax ISO8601，singleEvents+orderBy 固定 true/startTime）。分页：pageToken + maxResults（最大 2500）。出处：https://developers.google.com/workspace/calendar/api/v3/reference/events/list",
+      "method": "GET",
+      "path": "/calendar/v3/calendars/{calendar_id}/events",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "calendar_id": {
+            "type": "string",
+            "pattern": "^[^\\s/]{1,200}$",
+            "description": "日历 ID（primary 或邮箱）",
+            "maxLength": 10000
+          },
+          "time_min": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+Z-]+$",
+            "description": "起始时间 ISO8601",
+            "maxLength": 10000
+          },
+          "time_max": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+Z-]+$",
+            "description": "结束时间 ISO8601",
+            "maxLength": 10000
+          },
+          "max_results": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2500,
+            "default": 250,
+            "description": "每页条数"
+          },
+          "page_token": {
+            "type": "string",
+            "description": "上一页 nextPageToken",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "calendar_id"
+        ],
+        "maxProperties": 50
+      },
+      "fixedQuery": {
+        "singleEvents": "true",
+        "orderBy": "startTime"
+      },
+      "query": {
+        "timeMin": "time_min",
+        "timeMax": "time_max",
+        "maxResults": "max_results",
+        "pageToken": "page_token"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_event",
+      "description": "创建事件（POST events，start/end ISO8601）。写入操作：运行前必须获得用户明确授权。出处：https://developers.google.com/workspace/calendar/api/v3/reference/events/insert",
+      "method": "POST",
+      "path": "/calendar/v3/calendars/{calendar_id}/events",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "calendar_id": {
+            "type": "string",
+            "pattern": "^[^\\s/]{1,200}$",
+            "description": "日历 ID",
+            "maxLength": 10000
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "事件标题"
+          },
+          "start": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+Z-]+$",
+            "description": "开始时间 ISO8601",
+            "maxLength": 10000
+          },
+          "end": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+Z-]+$",
+            "description": "结束时间 ISO8601",
+            "maxLength": 10000
+          },
+          "description": {
+            "type": "string",
+            "description": "事件描述",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "calendar_id",
+          "summary",
+          "start",
+          "end"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "summary": "$summary",
+        "description": "$description",
+        "start": {
+          "dateTime": "$start"
+        },
+        "end": {
+          "dateTime": "$end"
+        }
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "访问令牌约 1 小时过期，需用户安全填入并手动更新；自动续期为宿主侧适配项，本连接器未实现。",
+    "list_events 固定 singleEvents=true&orderBy=startTime；要按原始序列查看重复事件时需另行扩展。",
+    "create_event 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

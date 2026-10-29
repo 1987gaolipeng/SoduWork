@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 1,
+  "id": "kling",
+  "name": "可灵 Kling",
+  "category": "图像与影音",
+  "description": "可灵（Kling AI）通用连接器：文生视频任务创建与状态查询。鉴权为 JWT HS256（access_key/secret_key 签名），由运行器专用运行时签发，连接器不持有静态 Bearer。计费端点：定义仅供审阅。",
+  "runtimeKind": "kling",
+  "officialDocs": [
+    "https://app.klingai.com/global/dev/document-api/apiReference/commonInfo",
+    "https://app.klingai.com/global/dev/document-api/apiReference/commonInfo/authDescription"
+  ],
+  "authDocs": [
+    "https://app.klingai.com/global/dev/document-api/apiReference/commonInfo/authDescription"
+  ],
+  "baseUrl": "https://api-singapore.klingai.com",
+  "fields": [
+    {
+      "key": "KLING_ACCESS_KEY",
+      "label": "Access Key（可灵开放平台 AK）",
+      "secret": false,
+      "required": true,
+      "pattern": "^[A-Za-z0-9]{10,64}$",
+      "example": ""
+    },
+    {
+      "key": "KLING_SECRET_KEY",
+      "label": "Secret Key",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "none"
+  },
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "tools": [
+    {
+      "name": "create_text_to_video",
+      "description": "创建文生视频任务（POST /v1/videos/text2video，异步）。JWT 头 Authorization: Bearer <hs256_jwt> 由运行时以 {iss=access_key, exp, nbf} 生成。计费操作：执行前必须获得用户明确授权与付费确认。出处：https://app.klingai.com/global/dev/document-api/apiReference/commonInfo/authDescription",
+      "method": "POST",
+      "path": "/v1/videos/text2video",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "model_name": {
+            "type": "string",
+            "enum": [
+              "kling-v1",
+              "kling-v1-5",
+              "kling-v1-6",
+              "kling-v2-master"
+            ],
+            "default": "kling-v1-6",
+            "description": "模型版本",
+            "maxLength": 10000
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2500,
+            "description": "提示词"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "std",
+              "pro"
+            ],
+            "default": "std",
+            "description": "生成模式",
+            "maxLength": 10000
+          },
+          "duration": {
+            "type": "string",
+            "enum": [
+              "5",
+              "10"
+            ],
+            "default": "5",
+            "description": "时长（秒，字符串）",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "model_name": "$model_name",
+        "prompt": "$prompt",
+        "mode": "$mode",
+        "duration": "$duration"
+      },
+      "readOnly": false
+    },
+    {
+      "name": "get_video_task",
+      "description": "查询视频任务状态（GET /v1/videos/text2video/{task_id}）。无分页；轮询间隔建议 ≥5 秒。出处：https://app.klingai.com/global/dev/document-api/apiReference/commonInfo",
+      "method": "GET",
+      "path": "/v1/videos/text2video/{task_id}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{10,}$",
+            "description": "任务 ID",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "可灵鉴权为 JWT HS256（端点固定新加坡区域 https://api-singapore.klingai.com）：payload 至少 {iss: access_key, exp, nbf}，Authorization: Bearer <jwt>，无法用静态凭据表达，因此本连接器标记 runtimeKind=kling，由运行器专用运行时生成 JWT（exp 建议 ≤30 分钟）。",
+    "Secret Key 绝不出现在 URL、body 或日志中。",
+    "create_text_to_video 为计费端点：任何执行都需要用户逐次明确授权与付费确认；get_video_task 免费但依赖已创建任务。",
+    "使用 AK/SK 签发 JWT 的 legacy API 合同；不兼容仅发放 API Key 的新账号授权方式。"
+  ]
+}

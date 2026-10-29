@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="vivid" data-skin="glass" data-desk-panel="workspace" data-workspace-view="history">
+<head><meta charset="utf-8"><title>页面标题与皮肤 · 隔离验收</title>
+<link rel="stylesheet" href="../theme/variables.css">
+<link rel="stylesheet" href="../components/client-auth/client-auth.css">
+<link rel="stylesheet" href="../components/panels/panels-base.css">
+<link rel="stylesheet" href="../components/panels/agent-brand.css">
+<link rel="stylesheet" href="../components/panels/plugin-ui-host.css">
+<link rel="stylesheet" href="../components/panels/plugin-debug-card.css">
+<link rel="stylesheet" href="../components/panels/plugin-input-sheet.css">
+<link rel="stylesheet" href="../components/panels/work-entry-sheet.css">
+<link rel="stylesheet" href="../components/panels/work-automation-sheet.css">
+<link rel="stylesheet" href="../components/panels/panels-desk.css">
+<link rel="stylesheet" href="../components/panels/notice-type-scale.css">
+<link rel="stylesheet" href="../components/panels/panels-schedules.css">
+<link rel="stylesheet" href="../components/panels/panels-capabilities.css">
+<link rel="stylesheet" href="../components/panels/plugin-install-setup.css">
+<link rel="stylesheet" href="../components/panels/panels-capability-plugins.css">
+<link rel="stylesheet" href="../components/panels/panels-plugin-maker.css">
+<link rel="stylesheet" href="../components/panels/capability-type-scale.css">
+<link rel="stylesheet" href="../components/panels/panels-agents.css">
+<link rel="stylesheet" href="../components/panels/panels-usage.css">
+<link rel="stylesheet" href="../components/panels/panels-connections.css">
+<link rel="stylesheet" href="../components/panels/panels-runners.css">
+<link rel="stylesheet" href="../components/panels/task-trace-view.css">
+<link rel="stylesheet" href="../components/panels/task-context-view.css">
+<link rel="stylesheet" href="../components/panels/task-trace-rail-view.css">
+<link rel="stylesheet" href="../components/panels/task-evolution-view.css">
+<link rel="stylesheet" href="../components/panels/panels-desk-session.css">
+<link rel="stylesheet" href="../components/panels/panels-aidesk-control.css">
+<link rel="stylesheet" href="../components/panels/panels-aidesk-office.css">
+<link rel="stylesheet" href="../components/panels/panels-detail.css">
+<link rel="stylesheet" href="../components/panels/panels.css">
+<link rel="stylesheet" href="../components/panels/panels-forward-plugin.css">
+<link rel="stylesheet" href="../components/panels/panels-chat.css">
+<link rel="stylesheet" href="../components/panels/chat-collaboration.css">
+<link rel="stylesheet" href="../components/panels/chat-plugin-mention.css">
+<link rel="stylesheet" href="../components/panels/plugin-input-sheet.css">
+<link rel="stylesheet" href="../components/panels/console.css">
+<link rel="stylesheet" href="../components/panels/console-multi.css">
+<link rel="stylesheet" href="../components/workspace/workspace-shell.css">
+<link rel="stylesheet" href="../components/workspace/workspace-page-layout.css">
+<link rel="stylesheet" href="../components/skin-manager/skin-manager.css">
+<link rel="stylesheet" href="../components/team/team.css">
+<link rel="stylesheet" href="../components/reports/work-briefs.css">
+<link rel="stylesheet" href="../components/gantt/gantt.css">
+<link rel="stylesheet" href="../vendor/xterm/xterm.css">
+<link rel="stylesheet" href="../theme/cursor.css">
+<link rel="stylesheet" href="../desk-window.css">
+<link rel="stylesheet" href="../theme/workspace-experience.css">
+<link rel='stylesheet' href='../components/panels/work-composer.css'>
+<link rel='stylesheet' href='../components/panels/panels-compose-model-picker.css'>
+<link rel='stylesheet' href='../components/panels/conversation-attachments.css'>
+<link rel='stylesheet' href='../components/panels/panels-compose-skills.css'>
+<link rel='stylesheet' href='../components/panels/work-intent.css'>
+<link rel="stylesheet" href="../components/settings/settings.css">
+<link rel="stylesheet" href="../components/panels/task-approval-inbox.css">
+<link rel="stylesheet" href="../theme/workspace-page-heads.css">
+<style>
+#fixtureNav{position:fixed;inset:0 auto 0 0;width:220px;box-sizing:border-box;padding:26px 16px;background:var(--bg-1);border-right:1px solid var(--line);font:13px var(--font-ui)}
+#fixtureNav b{display:block;font-size:18px;margin-bottom:6px;color:var(--ink)}
+#fixtureNav p{font-size:12px;color:var(--ink-3);line-height:1.6;margin-bottom:28px}
+#fixtureNav button{display:block;width:100%;text-align:left;padding:11px 12px;margin:4px 0;border:0;border-radius:9px;background:transparent;color:var(--ink-2);font:14px var(--font-ui)}
+#fixtureNav button.active{background:var(--accent-soft);color:var(--accent)}
+#fixtureContent{position:absolute;inset:10px 10px 10px 220px;border:1px solid var(--line);border-radius:18px;overflow:hidden}
+</style>
+<script>
+window.fixtureErrors=[];window.fixtureCalls=[];
+addEventListener('error',e=>fixtureErrors.push(e.message));
+addEventListener('unhandledrejection',e=>fixtureErrors.push(String(e.reason)));
+window.fetch=()=>{throw Error('Network forbidden in isolated UI fixture')};
+window.esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+window.Store={taskState:'ready'};
+window.tasks=[
+{id:'task-a',title:'整理新产品发布方案与交付清单',note:'保留背景与验收条件',source:'需求池',status:'todo',myRoles:['assignee'],createdAt:Date.now()},
+{id:'task-b',title:'验证官网导航与移动端展示',source:'我的',status:'doing',myRoles:['executor'],createdAt:Date.now()},
+{id:'task-c',title:'输出本周用户反馈简报',source:'我的',status:'done',myRoles:['creator'],createdAt:Date.now()}];
+window.statusRaw=s=>'var(--s-'+s+')';
+window._fmtDate=value=>new Date(value).toLocaleDateString('zh-CN');
+window.WorkspaceHost={open:(...args)=>fixtureCalls.push(args)};
+window.WorkEntrySheet={openTask:o=>fixtureCalls.push(['requirement',o])};
+window.openDetailEntry=id=>fixtureCalls.push(['detail',id]);
+window.petSay=s=>fixtureCalls.push(['notice',s]);
+window.expandForOverlay=()=>{};window.shrinkFromOverlay=()=>{};window.makeDraggable=()=>{};
+window._dkView='overview';window._dkBoardShellHtml=()=>'';window._dkUnmountTaskFlow=()=>{};
+window.SoduWorkAPI={
+ getTask:async id=>structuredClone(tasks.find(t=>t.id===id)),listAttachments:async()=>[],
+ hubConfig:()=>({environment:'development'}),getProjects:async()=>[{id:'demo',name:'客户体验'}],
+ listSchedules:async()=>[],listAIAgents:async()=>({agents:[]}),listRepos:async()=>[],
+ capabilityCatalog:async()=>({skills:[],mcpTemplates:[],summary:{}}),
+ myMcpServers:async()=>({company:[],personal:[],enabledCompany:[]}),
+ getWorkReports:async()=>({period:{start:'2026-09-07',end:'2026-09-07',label:'今天'},mine:{hasMaterial:false},capability:{canManage:false}}),
+ generateWorkReports:async()=>{fixtureCalls.push(['generate-brief']);return{}}
+};
+// Controller boundaries are mocked; each actual page creates and binds its own DOM.
+window.SoduWorkSkillCatalogSync={runtimeApi:()=>null,runtimeMap:()=>new Map(),create:()=>({sync(){},stop(){},state:()=>({}),refresh:async()=>({})})};
+window.SoduWorkPluginCatalogSync={create:()=>({start(){},stop(){},refresh(){},isRunning:()=>false})};
+window.SoduWorkCapabilityPlugins={load:async()=>({items:[]}),snapshot:()=>({items:[],submissions:[]}),managedCount:()=>0,
+hasPendingReview:()=>false,render:root=>{root.textContent='隔离样式验收：插件内容不在本次变更范围。'}};
+</script>
+<script src="../core/skin-registry.js"></script>
+<script src="../components/panels/panels-misc.js"></script>
+<script src="../components/panels/panels-desk.js"></script>
+<script src="../components/panels/task-priority.js"></script>
+<script src="../core/requirements.js"></script>
+<script src="../components/requirements/requirements-detail.js"></script>
+<script src="../components/requirements/requirements-board.js"></script>
+<script src="../components/requirements/requirement-confirm.js"></script>
+<script src="../components/panels/panels-schedules-methods.js"></script>
+<script src="../components/panels/panels-schedules-cards.js"></script>
+<script src="../components/panels/panels-schedules.js"></script>
+<script src="../components/panels/panels-schedules-editor.js"></script>
+<script src="../components/panels/panels-schedules-runs.js"></script>
+<script src="../components/panels/plugin-presentation.js"></script>
+<script src="../components/panels/panels-capabilities.js"></script>
+<script src="../components/reports/work-briefs.js"></script>
+<link rel="stylesheet" href="../components/panels/automation-surface.css">
+<link rel="stylesheet" href="../theme/box-theme.css">
+<link rel="stylesheet" href="../components/requirements/requirements-board.css">
+<link rel="stylesheet" href="../components/requirements/requirement-confirm.css">
+</head><body>
+<nav id="fixtureNav"><b>SoduWork</b><p>标题与皮肤验收<br>仅使用本地演示数据</p>
+<button data-test-view="schedules">自动化 · 参考</button>
+<button data-test-view="history">需求池</button><button data-test-view="briefs">简报</button><button data-test-view="skills">插件</button></nav>
+<script>document.getElementById('fixtureNav').insertAdjacentHTML('beforeend','<button data-test-view="aidesk">AI 团队</button>');</script>
+<div id="fixtureContent"></div>
+<script>
+// Only the data/office body boundary is mocked; production openAIDesk creates
+// the header, binds refresh/management and controls the loading button state.
+window._loadDesks=async function(){
+ fixtureCalls.push(['desk-refresh']);
+ if(window.holdDeskRefresh)await new Promise(resolve=>{window.finishDeskRefresh=resolve});
+ document.getElementById('dkSub').textContent='1 条运行中 · 2 条需要处理';
+ const live=document.getElementById('dkLiveStatus');live.classList.add('is-live');live.querySelector('b').textContent='LIVE';
+};
+window.fixtureOpen=function(view){
+ const ids={history:'historyBoard',briefs:'briefPanel',schedules:'schPanel',skills:'capPanel',aidesk:'aiDeskPanel'};
+ const open={history:openTaskCenter,briefs:openBriefsPanel,schedules:openSchedulePanel,skills:openCapabilityPanel,aidesk:openAIDesk};
+ if(document.getElementById('aiDeskPanel'))closeAIDesk();
+ document.documentElement.dataset.workspaceView=view;
+ for(const id of new Set(Object.values(ids)))document.getElementById(id)?.style.setProperty('display','none','important');
+ document.getElementById('fixtureContent').style.display=view==='briefs'?'block':'none';
+ open[view]();
+ if(view==='briefs')document.getElementById('fixtureContent').appendChild(document.getElementById('briefPanel'));
+ document.getElementById(ids[view]).style.setProperty('display','flex','important');
+ document.querySelectorAll('[data-test-view]').forEach(b=>b.classList.toggle('active',b.dataset.testView===view));
+};
+document.querySelectorAll('[data-test-view]').forEach(b=>b.addEventListener('click',()=>fixtureOpen(b.dataset.testView)));
+fixtureOpen('history');
+</script></body></html>

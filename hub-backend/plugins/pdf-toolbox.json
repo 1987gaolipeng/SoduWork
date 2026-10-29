@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "key": "pdf-toolbox",
+  "name": "PDF 工具箱",
+  "version": "1.0.2",
+  "category": "office",
+  "description": "对 PDF 文件做拆分、合并、抽取、加页码或水印、按章节整理等处理，并把「动了什么、结果放在哪」写成处理清单；处理结果经独立核对与人工验收后交付，原始文件永不改动。",
+  "author": "SoduWork",
+  "openSource": {
+    "license": "BSD-3-Clause",
+    "repository": "https://github.com/py-pdf/pypdf",
+    "upstreamVersion": "5.x",
+    "adaptation": "借鉴其 PDF 读写、页面操作与元数据处理方法，改造成 SoduWork 的留痕交付流程：原件只读、结果落 deliverables、处理清单可核对、独立审查加人工验收。"
+  },
+  "instructions": "你是 PDF 处理专家。先确认输入文件与要做的处理，再动手；原始文件一律只读，处理结果全部写入 deliverables/ 目录。每一步处理（拆了几页、合了哪些文件、抽了什么内容）都记入 deliverables/pdf-report.md，写清输入、操作、输出文件名与页数核对结果。扫描件无法抽取文本时如实说明，不得用猜测内容冒充抽取结果。",
+  "entrypoints": {"conversation": true, "task": true, "automation": false},
+  "inputs": [
+    {"key": "operation", "label": "要做什么处理", "type": "text", "required": false},
+    {"key": "pageRules", "label": "页码或章节要求", "type": "text", "required": false}
+  ],
+  "outputs": [{"key": "report", "label": "处理清单", "accept": ["deliverables/pdf-report.md"]}],
+  "capabilities": {"network": false, "skills": [], "mcpServers": [], "runtime": ["files"]},
+  "evaluations": [{
+    "key": "split-and-extract",
+    "name": "拆分并抽取章节",
+    "instruction": "把给定 PDF 按章节拆分成多个文件，并抽取指定章节的文本内容。",
+    "inputs": {"operation": "按章节拆分并抽取指定章节文本", "pageRules": "以书签或目录页界定章节"},
+    "criteria": [
+      "输出 deliverables/pdf-report.md 且逐项列出输入、操作与输出",
+      "拆分后的每个文件页数与清单一致",
+      "抽取文本忠实原文，无法抽取处如实标注",
+      "原始文件未被改动"
+    ],
+    "expectedOutputs": ["work.report"]
+  }],
+  "workflow": {"nodes": [
+    {
+      "key": "work", "type": "ai", "name": "PDF 处理",
+      "capabilities": {"network": false, "skills": [], "mcpServers": [], "runtime": ["files"]},
+      "outputs": [{"key": "report", "kind": "file", "label": "处理清单", "path": "deliverables/pdf-report.md", "required": true}],
+      "config": {"prompt": "依据任务正文、附件与插件输入完成 PDF 处理。原始文件一律只读，处理结果全部写入 deliverables/；每一步操作（输入文件、做了什么、输出文件、页数核对）记入 deliverables/pdf-report.md。扫描件抽不出文本时如实说明，不得用猜测内容冒充。完成后逐个重新打开输出文件核对页数与内容。不要向用户提问；有歧义时做保守假设并在清单中标注。"},
+      "retry": {"maxAttempts": 2}
+    },
+    {
+      "key": "validate", "type": "validate", "name": "处理清单检查", "dependsOn": ["work"],
+      "config": {"rules": [{"type": "file", "name": "处理清单存在且不是空壳", "nameEquals": "deliverables/pdf-report.md", "minBytes": 300}]}
+    },
+    {
+      "key": "review", "type": "ai_review", "name": "独立结果核对", "dependsOn": ["work", "validate"],
+      "inputs": [{"key": "report", "fromNode": "work", "outputKey": "report", "label": "处理清单", "required": true}],
+      "capabilities": {"network": false, "skills": [], "mcpServers": [], "runtime": ["files"]},
+      "outputs": [{"key": "review", "kind": "decision", "label": "核对结论", "path": "reviews/pdf-review.md", "required": true}],
+      "config": {"prompt": "独立核对 deliverables/pdf-report.md 与 deliverables/ 下的实际输出：清单声称的每个文件是否存在、页数是否一致、抽取内容是否忠实。将逐条结论写入 reviews/pdf-review.md；清单与实物不符时明确判定不通过。"}
+    },
+    {"key": "accept", "type": "human_review", "name": "业务验收", "dependsOn": ["review"], "config": {"summary": "请核对处理结果与清单是否一致可用"}},
+    {"key": "publish", "type": "publish", "name": "交付处理结果", "dependsOn": ["accept"], "config": {"message": "PDF 处理结果已通过核对与验收并交付"}}
+  ]}
+}

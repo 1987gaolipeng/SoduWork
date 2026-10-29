@@ -1,0 +1,12 @@
+.cloud-runner-management { max-width: min(620px, calc(100vw - 32px)); }
+.cloud-runner-management .modal-body { gap: 16px; }
+.cloud-runner-management p { font-size: 14px; line-height: 1.7; margin: 0; }
+.crm-identity { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.crm-identity span { color: var(--ink-3); }
+.crm-note { color: var(--ink-2); }
+.crm-field { display: grid; gap: 8px; margin: 0; font-size: 14px; }
+.cloud-runner-management .crm-field .f-in { min-width: 0; padding-block: 0; font-size: 14px; }
+.crm-check { display: flex; align-items: flex-start; gap: 8px; font-size: 14px; line-height: 1.7; }
+.crm-check input { margin-top: 5px; }
+.crm-error { color: var(--crit); }
+.cloud-runner-management .crm-command { width: 100%; min-height: 150px; margin: 0; font-family: monospace; font-size: 12px; resize: vertical; }

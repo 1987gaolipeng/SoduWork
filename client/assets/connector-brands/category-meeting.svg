@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="#6077B5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Original SoduWork category artwork, Copyright (c) 2026 SoduWork contributors. MIT; see LICENSE.original-icons.txt. -->
+  <rect x="2.75" y="4.25" width="22.5" height="16.5" rx="3"/>
+  <circle cx="14" cy="10" r="2.5" fill="#EFF3FC"/>
+  <path d="M9.5 17v-.5a4.5 4.5 0 0 1 9 0v.5M10 24h8M14 20.75V24"/>
+  <path d="M6 10.5v4M22 10.5v4" stroke-opacity=".45"/>
+</svg>

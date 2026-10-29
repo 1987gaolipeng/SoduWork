@@ -1,0 +1,272 @@
+{
+  "sessionId": "01a14536-86a4-7c9f-9c63-bf24a9a5d2e3",
+  "authoring": "SoduWork actual client / local:mcp-studio / Pi",
+  "businessCalls": false,
+  "providers": [
+    {
+      "file": "airtable.json",
+      "generatedSha256": "5e310b5aad0d6dbd6cf95c7d358681374cfb5ddee6cf213f59dfdf9b2b1d12b8"
+    },
+    {
+      "file": "asana.json",
+      "generatedSha256": "2d6a247cdf31b78296c3ae82a0f061d02549b46039ffd419533d4360c284ac65"
+    },
+    {
+      "file": "canva.json",
+      "generatedSha256": "795706dd2ce49443653f3f13516188fbdd8ab1ee03f569aca95e2b1a1f57555f"
+    },
+    {
+      "file": "clickup.json",
+      "generatedSha256": "3df091915c72b2e2a64ac5636fea5f1301506034aff117521487fa84ef20a3c6"
+    },
+    {
+      "file": "confluence.json",
+      "generatedSha256": "906a1a4cbcc628a57d53e34740c33dbca7c427489d7ea0c1e1366a92b01cd863"
+    },
+    {
+      "file": "discord.json",
+      "generatedSha256": "fd1687efc05ff76406006fd014cedeefce0dc84286949843690c8e69e7d152e4"
+    },
+    {
+      "file": "dropbox.json",
+      "generatedSha256": "a6f46ba6c52a81b8925776aec4b59c7a4407c269b448d7fa0b8fc56291c80fe5"
+    },
+    {
+      "file": "elevenlabs.json",
+      "generatedSha256": "d28a25f6be7443ad9e7a1d6d6d78884948466aa1bf670a878c528ced780a3d65"
+    },
+    {
+      "file": "excel-online.json",
+      "generatedSha256": "e0b6cd023ff76ecb0a7acad2f11ba273c0360f992ea50e1c9413e4a2b8fd92dd"
+    },
+    {
+      "file": "figma.json",
+      "generatedSha256": "18ca9eb49830b4372079ad73d4dfef955f50b20c417e465af397a66671394e09"
+    },
+    {
+      "file": "ga4.json",
+      "generatedSha256": "e13c1f4cdc7cf4a0c3daaa9b9db8a5be7d3e3f1a5d553ddf0d879adf31791eb0"
+    },
+    {
+      "file": "github.json",
+      "generatedSha256": "855fc26dff3acc9ddaf3d6508b8574172fad451ed3ba17209d49d5af7cf953dc"
+    },
+    {
+      "file": "gitlab.json",
+      "generatedSha256": "15588839bf9a7f84e1a2466d484da4e4a7eda0f987cf701601a35f0b224987ad"
+    },
+    {
+      "file": "gmail.json",
+      "generatedSha256": "1296807705684ac3c737b0c101eb7450a583ba630c74c6dee4fcf98eb7b59864"
+    },
+    {
+      "file": "google-ads.json",
+      "generatedSha256": "8271a0bc435d6696c9b3a3f512fe9fee61615c6043e58cf8594068345211fe8b"
+    },
+    {
+      "file": "google-calendar.json",
+      "generatedSha256": "f18e865eb30dcac864b9628e3823a944120bd86e6d52d466b8cea99fe8ae9984"
+    },
+    {
+      "file": "google-drive.json",
+      "generatedSha256": "254f7448bc42878bfde45a40cd3bcaed84759859af7166faad69b30b40e58fcc"
+    },
+    {
+      "file": "google-meet.json",
+      "generatedSha256": "f70928bccc0ea2f3f1b4b774d9e23d883af325a33acae502ab8039120f2f1fba"
+    },
+    {
+      "file": "google-sheets.json",
+      "generatedSha256": "bd97f6c4e3d866f8a43d1657c1d4321e60257e02a74138e92ea196263ee90b17"
+    },
+    {
+      "file": "hubspot.json",
+      "generatedSha256": "7e2d33a3b6201bf30358e83f537c26bca6070b3e69dca8cd266359c14e9c2b44"
+    },
+    {
+      "file": "intercom.json",
+      "generatedSha256": "587b3088246d38f1d3241682ee7efd17db178ee25dcf8128aff714a406060b3a"
+    },
+    {
+      "file": "jira.json",
+      "generatedSha256": "57559776d2fc19aa91f2d3a42dbd9af1a316b349e66e41c91c79f3e89133f81c"
+    },
+    {
+      "file": "kling.json",
+      "generatedSha256": "a4a7ef3f70af9f609bf3c4ec7b55c9b0e761eb6576b52e15eed603bf2c83e0e6"
+    },
+    {
+      "file": "linear.json",
+      "generatedSha256": "4a20b9fc1e2433ecbb17fbbea0f081069af240e857f5de4ef5bb86573ed96e17"
+    },
+    {
+      "file": "mailchimp.json",
+      "generatedSha256": "7f20ccac8a6ed3bbc66c3faba3c1c7f38e5daf9892b8579b67c000b78090c79e"
+    },
+    {
+      "file": "microsoft-teams.json",
+      "generatedSha256": "8c38752c18063c272cbc1d225a18443c83da1ac02d97444f33d76296d1facbc4"
+    },
+    {
+      "file": "miro.json",
+      "generatedSha256": "4f3b018cccc2b1b275dd5091abb39723b80a8a5ff047fd93f3af0424727a9e02"
+    },
+    {
+      "file": "mysql.json",
+      "generatedSha256": "3981cebdbe410d37cc55f735e2db931b8f5a19b2a9f2e691ec621ec5fdce2039"
+    },
+    {
+      "file": "notion.json",
+      "generatedSha256": "540c2d209900f108477d707d4fa59283c50b9517e8cc759dc76f951ccf6201cb"
+    },
+    {
+      "file": "onedrive.json",
+      "generatedSha256": "5ad5164869d5edc245225926adfeff3cc1eed0d1e70c22cdfb42c5bc6dba1360"
+    },
+    {
+      "file": "outlook.json",
+      "generatedSha256": "f720dddd9cf2c5563f56435500a58a33c0dcdcdcf97d354dd9a26d52f1af14f5"
+    },
+    {
+      "file": "postgres.json",
+      "generatedSha256": "01c163a64c67ad829d2d9878cfc0239e28a6c939736c712cf7f58aca7c956ba3"
+    },
+    {
+      "file": "runway.json",
+      "generatedSha256": "429e4295f6399c234ea2a53e7810251f5d168842d254c2ff896dbc1060cf7b6c"
+    },
+    {
+      "file": "s3.json",
+      "generatedSha256": "5eddb1473966c4868f9b99afcda10b9409ecdfb9ed7b01c116753a7ebee9cef8"
+    },
+    {
+      "file": "salesforce.json",
+      "generatedSha256": "e7aa12ba65ab82b0913421397f9a54baae161ccb93a4daf793f950e8b015cdbe"
+    },
+    {
+      "file": "sharepoint.json",
+      "generatedSha256": "1c9370949eb7c2f5fe32a0df2e3a8c6b54437462ebbe01122805dfe84c063ab4"
+    },
+    {
+      "file": "shopify.json",
+      "generatedSha256": "96dddfb7d7b0f33090987b27880d98c4730c8afab3fec3f7b84f79a77ffcb576"
+    },
+    {
+      "file": "slack.json",
+      "generatedSha256": "bacc0a05bcab269a171a197411867b5dcf35787dccfcaa8fab0cc2fcfae87792"
+    },
+    {
+      "file": "stripe.json",
+      "generatedSha256": "e46f77726eb1658701323de7322e8b8dbcdd344cb195bf63a71615cbba671d76"
+    },
+    {
+      "file": "telegram.json",
+      "generatedSha256": "4129abb648653e82b98b042288ed720c5e7043b0243626506a257a6792b8de89"
+    },
+    {
+      "file": "tencent-meeting.json",
+      "generatedSha256": "986096defd8b5d789764c1d6ccd9615f35280526788f99f950d94665b1c267fa"
+    },
+    {
+      "file": "trello.json",
+      "generatedSha256": "1735141e597a47cc2eb91f6d8146fcbbabd94e36eb3f22654646507591fb3d1f"
+    },
+    {
+      "file": "volcengine-ark.json",
+      "generatedSha256": "93a3d4db2777083d66b607f72d23cbd32ab298070bf3b184ca3f040b5ef480af"
+    },
+    {
+      "file": "yuque.json",
+      "generatedSha256": "072754382e5a1bf1d5a8ad3bd2d6a8a0dba97b0e46a122139ed235b1066184d6"
+    },
+    {
+      "file": "zendesk.json",
+      "generatedSha256": "4751722c4d06487decc607860149989c05d20caf3509176986274db6ea97c9a0"
+    },
+    {
+      "file": "zoho-crm.json",
+      "generatedSha256": "bc22b28421133f8eba5fc2e08ac753f3e4303b5275388d1af3e1c5b060a7a603"
+    },
+    {
+      "file": "zoom.json",
+      "generatedSha256": "9511e669a06901968ead645941dc903ff777118c561851c91e7b7547d9e479a2"
+    }
+  ],
+  "developerConnectors": {
+    "files": [
+      {
+        "file": "providers/aliyun-ecs.json",
+        "sha256": "7cc98bb6e8e508cc90e578b7d8f4eea973261b2564e7bf8ac302197e27d3fc3f"
+      },
+      {
+        "file": "providers/aws-ec2.json",
+        "sha256": "e2384fb91d78a6eab0eb8f3c45f366cd6510b8285f3195a684b1321920880b1e"
+      },
+      {
+        "file": "providers/azure.json",
+        "sha256": "1be194a2829105e392c9c6237b08f95b7e40ab4fea980cb19dec9d9e98925b6c"
+      },
+      {
+        "file": "providers/clickhouse.json",
+        "sha256": "350571ec3dcc8550578ee28c08f3ffd9d4384f27291ffb6c62457eb9e6a4ff28"
+      },
+      {
+        "file": "providers/elasticsearch.json",
+        "sha256": "68268e39eeef6e2c48342b7989086a416b78c49cd3e53c4213a887492faeef7b"
+      },
+      {
+        "file": "providers/google-cloud.json",
+        "sha256": "89c68f9afd688ce82ffd7b63ab87adf1c8a3670460b9f78d5a8b032a07f4015f"
+      },
+      {
+        "file": "providers/huawei-cloud.json",
+        "sha256": "f944a474a999320aadaecae9649a1c954a46a18daed16a28b3b878cb184157e4"
+      },
+      {
+        "file": "providers/mongodb.json",
+        "sha256": "f8271bf64d4b7d8257c833d5c5b821807e820b5a81acda73f1be1d226c1209ea"
+      },
+      {
+        "file": "providers/redis.json",
+        "sha256": "7f616ba58765b9043e8ce3e4aa98351f104d9e1a2855455fc33b77d17cdcf649"
+      },
+      {
+        "file": "providers/sqlite.json",
+        "sha256": "2cdee8a8e7a5feaefe780a4eba1174681e14d38b54ad572e78c307c63f19387f"
+      },
+      {
+        "file": "providers/tencent-cloud.json",
+        "sha256": "a4e40d0884b4a876ae94f82b575a2ae07f8fceb205015de3256a10b83f7b3bae"
+      },
+      {
+        "file": "providers/volcengine-ecs.json",
+        "sha256": "0a961e0c3505bce50eb1d87b80cdf5968d6b5f1b101f138ee7ffe6ea0b5f6b4c"
+      },
+      {
+        "file": "runtime/cloud-connectors.cjs",
+        "sha256": "5f1b9d93257b3af3ece9b8c40619ce5fa984b3bbd0a3137c4fbfde30285566f9"
+      },
+      {
+        "file": "runtime/cloud-signing.cjs",
+        "sha256": "589f04978d60d40f202a02647d66b6396f8c79bf8b1702715d8bf47fcba6d1ea"
+      },
+      {
+        "file": "runtime/db_connectors.py",
+        "sha256": "1cebf41e530c5fedc95141fe812100d06c286af3a184804adc743ab7bdb4a813"
+      },
+      {
+        "file": "runtime/README.md",
+        "sha256": "46a6c68ee90c74dc9e13f01206f349bb53c4283b6b4135b442a692925f2cd847"
+      },
+      {
+        "file": "tests/run-db-tests.py",
+        "sha256": "97a241fccca2b1564da2c8093686cf8d987b687a3b9e190c1a9d3bf3893f373a"
+      },
+      {
+        "file": "tests/run-tests.cjs",
+        "sha256": "4e50e134a8d20b0348fd65c6bab15ad1c271d99b0133996e924ec184d54a0e0e"
+      }
+    ],
+    "review": "Product integration separately corrected API actions, current signing, token isolation, TLS, drivers, health probes and pagination; generated test counts are not product acceptance."
+  }
+}

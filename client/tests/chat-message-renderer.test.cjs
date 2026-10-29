@@ -1,0 +1,687 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('./renderer-source.cjs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const rendererSource = fs.readFileSync(
+  path.join(__dirname, '../components/panels/chat-message-renderer.js'), 'utf8');
+const taskControllerSource = fs.readFileSync(
+  path.join(__dirname, '../components/panels/chat-task-controller.js'), 'utf8');
+const markdownSource = fs.readFileSync(
+  path.join(__dirname, '../components/panels/chat-markdown.js'), 'utf8');
+const markedSource = fs.readFileSync(
+  path.join(__dirname, '../vendor/markdown/marked.umd.js'), 'utf8');
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[char]));
+}
+
+function setup() {
+  const sandbox = { console };
+  sandbox.window = sandbox;
+  for (const helper of ['chat-context-meter', 'chat-scroll-follow', 'chat-markdown']) {
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../components/panels/' + helper + '.js'), 'utf8'), sandbox);
+  }
+  vm.runInNewContext(rendererSource, sandbox);
+  const ctx = {
+    esc: escapeHtml,
+    _ref: 'markdown-test',
+    _snap: { status: 'idle' },
+    _liveTextKey: '',
+    _openThink: new Set(),
+    _openTool: new Set(),
+    _hotToolBodies: new Set(),
+  };
+  return { sandbox, ctx, renderer: sandbox.ChatMessageRenderer.create(ctx) };
+}
+
+function body(html) {
+  return html.slice(0, html.indexOf('<button'));
+}
+
+test('reasoning closes when a later block starts despite a stale done flag', () => {
+  for (const kind of ['text', 'toolCall', 'thinking']) {
+    const { renderer, ctx } = setup();
+    const thought = { kind: 'thinking', text: 'Plan', done: false };
+    ctx._snap = { status: 'streaming', messages: [{ role: 'assistant', done: false, blocks: [thought] }] };
+    assert.match(renderer._blockHtml(0, thought, 0), /nthink open is-live/);
+    ctx._snap.messages[0].blocks.push({ kind, text: 'Next phase' });
+    assert.doesNotMatch(renderer._blockHtml(0, thought, 0), /nthink open|is-live/);
+    ctx._openThink.add('0:0');
+    assert.match(renderer._blockHtml(0, thought, 0), /nthink open/,
+      'readers can reopen completed reasoning');
+  }
+});
+
+test('manual acceptance analysis is shown as a pending human review result', () => {
+  const { renderer } = setup();
+  const html = renderer._blockHtml(0, {
+    kind: 'text',
+    text: '【验收分析结果】\n需求：写荷花作文\n建议结果：通过\n待人工确认：用途与文风',
+  }, 0);
+  assert.match(html, /nacceptance-result/);
+  assert.match(html, /is-analysis/);
+  assert.match(html, /验收分析结果/);
+  assert.match(html, /待人工确认/);
+  assert.doesNotMatch(html, /自动验收通过/);
+});
+
+test('manual analysis result exposes only the final reject and confirm actions', () => {
+  const { renderer, ctx } = setup();
+  ctx._sessionOptions = { taskRef: 'task-1', approvalId: 'review-1', acceptanceSession: true };
+  const html = renderer._blockHtml(0, {
+    kind: 'text', text: '【验收分析结果】\n需求：写荷花作文\n建议结果：通过',
+  }, 0);
+  assert.match(html, /data-acceptance-result-action="reject"/);
+  assert.match(html, /data-acceptance-result-action="approve"/);
+  assert.doesNotMatch(html, /data-tfd-acceptance-mode/);
+});
+
+test('manual analysis result keeps actions when the model adds a preface and the task id is restored from the binding', () => {
+  const { renderer, ctx } = setup();
+  ctx._sessionOptions = { acceptanceSession: true };
+  ctx._activeCollabTaskId = 'task-restored';
+  ctx._collabTasks = new Map([['task-restored', {
+    trace: { approvals: [{ id: 'review-restored', action: 'review', status: 'pending' }] },
+  }]]);
+  const html = renderer._blockHtml(0, {
+    kind: 'text',
+    text: '我已逐项核对交付物，下面给出结果。\n\n### 【验收分析结果】\n建议结果：通过',
+  }, 0);
+  assert.match(html, /nacceptance-result/);
+  assert.match(html, /data-acceptance-result-task="task-restored"/);
+  assert.match(html, /data-acceptance-result-approval="review-restored"/);
+  assert.match(html, /data-acceptance-result-action="approve"/);
+});
+
+test('manual analysis result provides a separate supplemental-analysis handoff', () => {
+  const { renderer, ctx } = setup();
+  ctx._sessionOptions = { taskRef: 'task-1', approvalId: 'review-1', acceptanceSession: true };
+  const html = renderer._blockHtml(0, {
+    kind: 'text', text: '【验收分析结果】\n建议结果：通过',
+  }, 0);
+  assert.match(html, /data-acceptance-result-analysis/);
+  assert.match(html, /data-acceptance-result-action="analyze"/);
+  assert.match(html, /补充分析项/);
+  assert.match(rendererSource, /data-acceptance-result-action.*analyze/);
+  assert.match(rendererSource, /#nchatInput/);
+  assert.match(rendererSource, /已填入对话框，请按需选择插件后发送/);
+});
+
+test('manual analysis result keeps the human review entry when the active task is known outside session options', () => {
+  const { renderer, ctx } = setup();
+  // Re-opening the execution conversation can restore the native task binding
+  // before the transient acceptance flags.  The result must still expose the
+  // reviewer note and approve/reject controls instead of falling back to plain
+  // Markdown with no way to finish the acceptance round.
+  ctx._sessionOptions = { approvalId: 'review-1', acceptanceExecutionSession: true };
+  ctx._activeCollabTaskId = 'task-1';
+  const html = renderer._blockHtml(0, {
+    kind: 'text', text: '【验收分析结果】\n需求：写荷花作文\n建议结果：通过\n待人工确认：用途与文风',
+  }, 0);
+  assert.match(html, /data-acceptance-result-note/);
+  assert.match(html, /data-acceptance-result-action="reject"/);
+  assert.match(html, /data-acceptance-result-action="approve"/);
+});
+
+test('automatic acceptance output keeps the audit-result label', () => {
+  const { renderer } = setup();
+  const html = renderer._blockHtml(0, {
+    kind: 'text',
+    text: '【验收确认卡】\n需求：写荷花作文\n结果：验收通过',
+  }, 0);
+  assert.match(html, /自动验收审核结果/);
+  assert.match(html, /已确认/);
+});
+
+test('opening an acceptance session suppresses the stale pending card on the source chat', () => {
+  const harness = setupRender();
+  const { renderer, ctx, list, sandbox } = harness;
+  const entry = {
+    taskId: 'task-acceptance',
+    task: { title: '写荷花作文' },
+    nativeTurn: true,
+    trace: { approvals: [{ id: 'approval-1', action: 'review', status: 'pending' }] },
+  };
+  const root = {
+    dataset: {},
+    getAttribute(name) { return name === 'data-task-confirmation' ? entry.taskId : ''; },
+    addEventListener() {},
+    querySelectorAll() { return []; },
+  };
+  ctx._collabEntries = () => [entry];
+  ctx._collabTasks.set(entry.taskId, entry);
+  list.querySelectorAll = selector => selector === '[data-task-confirmation]' ? [root] : [];
+  let onAcceptanceOpened;
+  sandbox.TaskTraceApproval = {
+    html() { return '<section data-acceptance-marker="1"></section>'; },
+    bind(_root, state) { onAcceptanceOpened = state.opts.onAcceptanceOpened; },
+  };
+  renderer._render();
+  assert.match(list.innerHTML, /data-acceptance-marker/);
+  assert.equal(typeof onAcceptanceOpened, 'function');
+  onAcceptanceOpened('approval-1');
+  renderer._render();
+  assert.doesNotMatch(list.innerHTML, /data-acceptance-marker/);
+});
+
+test('acceptance session transcript never renders the original pending decision card', () => {
+  const harness = setupRender();
+  const { renderer, ctx, list, sandbox } = harness;
+  ctx._sessionOptions = { acceptanceSession: true, taskRef: 'task-acceptance', approvalId: 'approval-1' };
+  const entry = { taskId: 'task-acceptance', task: { title: '写荷花作文' }, trace: {
+    approvals: [{ id: 'approval-1', action: 'review', status: 'pending' }],
+  }};
+  ctx._collabEntries = () => [entry];
+  ctx._collabTasks.set(entry.taskId, entry);
+  sandbox.TaskTraceApproval = { html() { return '<section data-acceptance-marker="1"></section>'; }, bind() {} };
+  renderer._render();
+  assert.doesNotMatch(list.innerHTML, /data-acceptance-marker/);
+});
+
+test('a task completed elsewhere hides the stale source acceptance card before trace refresh', () => {
+  const harness = setupRender();
+  const { renderer, ctx, list, sandbox } = harness;
+  const entry = { taskId: 'task-remote-approval', task: { title: '远端验收任务', reviewedAt: '2026-10-18T23:00:00Z' },
+    trace: { approvals: [{ id: 'approval-remote', action: 'review', status: 'pending' }] } };
+  ctx._collabEntries = () => [entry];
+  ctx._collabTasks.set(entry.taskId, entry);
+  sandbox.TaskTraceApproval = { html() { return '<section data-acceptance-marker="1"></section>'; }, bind() {} };
+  renderer._render();
+  assert.doesNotMatch(list.innerHTML, /data-acceptance-marker/);
+});
+
+function setupRender({ earlyTool = false } = {}) {
+  const list = {
+    innerHTML: '', children: [], dataset: {},
+    addEventListener() {},
+    querySelectorAll() { return []; },
+  };
+  const el = {
+    querySelector(selector) {
+      if (selector === '#nchatScroll') return {};
+      if (selector === '#nchatList') return list;
+      return null;
+    },
+  };
+  const sandbox = {
+    console,
+    window: null,
+    ChatContextMeter: { create() { return { _ctxText() { return ''; }, _tokenText() { return ''; }, _ctxHtml() { return ''; } }; } },
+    ChatScrollFollow: { create() { return {
+      _releaseScrollFollow() {}, _ensureScrollFollow() { return { follow: true }; },
+      _nearBottom() { return true; }, _followLatest() {}, _updateScrollButton() {},
+      _preserveReadingPosition() { return () => {}; },
+    }; } },
+    ChatTools: {
+      goalProgressRows() { return [{ progressIndex: 1, html: '<div data-chat-node="goal-progress:phase:understand" class="nprocess ngoal-phase"></div>' }]; },
+      appendTimeline(parts, input, _previous, _anchor, _narrated, _itemHtml, _openGroups,
+        rows, state) {
+        /* An early tool event is the race that used to put goal progress above
+           the optimistic prompt.  Consume one progress row here to model the
+           real timeline helper before the pending user bubble is persisted. */
+        if (earlyTool && input.length && state.index < rows.length) parts.push(rows[state.index++].html);
+      },
+      appendGoalProgress(parts, rows, state) { while (state.index < rows.length) parts.push(rows[state.index++].html); },
+      patchList(host, html) { host.innerHTML = html; },
+      paintSendButton() {},
+    },
+    WorkIntent: {
+      userMessage(text, _goal, tail) { return '<div class="nmsg user"><div class="nbubble">' + escapeHtml(text) + '</div>' + tail + '</div>'; },
+      showGoal() {},
+      phaseView() { return { total: 5, current: 1, completed: 0, phase: { label: '理解目标' } }; },
+    },
+    document: { body: null, querySelector() { return null; }, addEventListener() {} },
+  };
+  sandbox.window = sandbox;
+  vm.runInNewContext(markdownSource, sandbox);
+  vm.runInNewContext(rendererSource, sandbox);
+  const ctx = {
+    esc: escapeHtml, _ref: 'render-test', _snap: {
+      status: 'streaming', messages: [], tools: earlyTool ? [{ id: 'early', state: 'running', after: 0 }] : [], usage: null, pendingUi: null,
+      execution: { running: true, harness: { phases: [] }, quality: {} },
+    },
+    _liveTextKey: '', _openThink: new Set(), _openTool: new Set(), _hotToolBodies: new Set(),
+    _openToolGroup: new Set(), _pending: '创建一个象棋小游戏', _pendingSentAt: Date.now(),
+    _pendingAttachmentNames: [], _pendingPlugins: [], _sessionOptions: { intent: 'goal', mode: 'goal' },
+    _messageWindowSize: 80, _messageAttachments: null, _outs: [], _goalActionPending: '',
+    _mount() { return el; }, _turnMetricsHtml() { return '<div data-chat-node="turn-metrics"></div>'; },
+    _thinkingStatusHtml() { return '<div data-chat-node="runtime-status"></div>'; },
+    _syncThinkingClock() {}, _collabEntries() { return []; }, _collabTasks: new Map(),
+    _collabEntryStatus() {}, _pendingIsConfirmed() { return false; }, _collabStarts: new Set(),
+    _retryDraft: null, _renderQueue() {}, _goalAction() {}, _removeGoal() {}, _answerUi() {},
+    _renderTaskStartPrompt() {}, _syncSlowStatusTicker() {},
+  };
+  sandbox.SoduWorkPluginIcon = require('../core/plugin-icon');
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../components/panels/chat-message-plugins.js'), 'utf8'), sandbox);
+  const renderer = sandbox.ChatMessageRenderer.create(ctx);
+  return { renderer, ctx, list, sandbox };
+}
+
+function setupPickerRender(getTasksSnapshot) {
+  const harness = setupRender();
+  const { ctx, list, renderer, sandbox } = harness;
+  const views = [];
+  let transcript = '', transcriptWrites = 0;
+  Object.defineProperty(list, 'innerHTML', {
+    get() { return transcript; },
+    set(value) { transcript = value; transcriptWrites++; },
+  });
+  sandbox.SoduWorkAPI = { getTasksSnapshot };
+  vm.runInNewContext(taskControllerSource, sandbox);
+  Object.assign(ctx, {
+    _sessionId: 'streaming-conversation', _viewEpoch: 1,
+    _collabPicker: { open: false, tasks: [] },
+    _collabView: { render(state) {
+      views.push({
+        open: state.picker.open, loading: Boolean(state.picker.loading),
+        tasks: Array.from(state.picker.tasks, task => task.id),
+      });
+    } },
+    _render: renderer._render,
+  });
+  const controller = sandbox.ChatTaskController.create(ctx);
+  ctx._collabState = controller._collabState;
+  return { ...harness, controller, views, transcriptWrites: () => transcriptWrites };
+}
+
+test('expanding streaming history renders the requested window before resuming incremental patches', () => {
+  const { renderer, ctx, list, sandbox } = setupRender();
+  let writes = 0;
+  sandbox.ChatTools.patchList = (host, html) => { host.innerHTML = html; writes++; };
+  ctx._pending = '';
+  ctx._sessionOptions = {};
+  ctx._snap.messages = Array.from({ length: 220 }, (_, index) => ({ role: 'user', text: 'Historical request ' + index }));
+  renderer._render();
+  assert.equal((list.innerHTML.match(/data-chat-node="message:/g) || []).length, 80);
+  ctx._messageWindowSize = 160;
+  renderer._render();
+  assert.equal((list.innerHTML.match(/data-chat-node="message:/g) || []).length, 160);
+  assert.match(list.innerHTML, /Historical request 60</);
+  const expandedWrites = writes;
+  renderer._render();
+  assert.equal(writes, expandedWrites, 'unchanged snapshots keep the expanded DOM instead of replacing it');
+});
+
+test('assistant rows expose their absolute history owner even when projected indices have gaps', () => {
+  const { renderer, ctx, list } = setupRender();
+  ctx._pending = '';
+  ctx._snap.messages = [{ role: 'user', text: 'new work' },
+    { role: 'assistant', done: false, blocks: [{ kind: 'thinking', text: 'Reading the skill', done: false }] }];
+  ctx._snap.history = { messageStart: 100, messageIndices: [100, 105] };
+  renderer._render();
+  assert.match(list.innerHTML, /data-message-owner="105"[^>]*data-chat-node="message:1"/);
+  ctx._snap.history = { messageStart: 200 };
+  renderer.reset(); renderer._render();
+  assert.match(list.innerHTML, /data-message-owner="201"[^>]*data-chat-node="message:1"/);
+});
+
+test('workflow controls have trusted message slots and reconcile after transcript rendering', () => {
+  const { renderer, ctx, list, sandbox } = setupRender();
+  const reconciled = [];
+  sandbox.PluginDebugCard = { reconcile: value => reconciled.push(value) };
+  ctx._pending = '';
+  ctx._snap.messages = [{ role: 'user', text: 'work', taskOutputKey: 'run-1:start' },
+    { role: 'assistant', taskOutputKey: 'plugin-debug:run-1:design:1:failed',
+      blocks: [{ kind: 'text', text: 'Paused', done: true }], done: true },
+    { role: 'user', text: 'continue' }];
+  ctx._snap.history = { messageIndices: [100, 105, 107] };
+  renderer._render();
+  assert.match(list.innerHTML, /data-chat-node="message:0"[^>]*data-message-owner="100"/);
+  assert.match(list.innerHTML, /data-workflow-message-key="run-1:start"/);
+  assert.match(list.innerHTML, /data-workflow-message-key="plugin-debug:run-1:design:1:failed"/);
+  assert.equal((list.innerHTML.match(/class="nworkflow-message-slot"/g) || []).length, 2);
+  assert.match(list.innerHTML, /data-chat-node="workflow-history"[^>]*data-workflow-ref="render-test"/);
+  assert.equal(reconciled.at(-1).snapshot, ctx._snap);
+  assert.equal(reconciled.at(-1).list, list);
+});
+
+test('发送中与恢复历史消息的插件图标都位于正文下方并复用菜单图标', async () => {
+  const {renderer,ctx,list,sandbox} = setupRender();
+  const plugin = {pluginId:'builder',name:'插件开发助手',kind:'skill'};
+  sandbox.SoduWorkAPI = {pluginCatalog:async()=>({items:[plugin]})};
+  ctx._pendingPlugins = [{pluginId:plugin.pluginId,name:plugin.name}];
+  renderer._render(); await new Promise(resolve=>setImmediate(resolve));
+  const icon = sandbox.SoduWorkPluginIcon.markup(plugin);
+  assert.ok(list.innerHTML.includes(icon));
+  assert.ok(list.innerHTML.indexOf('nmessage-plugins') > list.innerHTML.indexOf('nbubble'));
+  ctx._snap.messages = [{role:'user',text:ctx._pending,plugins:ctx._pendingPlugins,sentAt:ctx._pendingSentAt}];
+  ctx._pending = ''; ctx._pendingPlugins = []; renderer.reset(); renderer._render();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.ok(list.innerHTML.includes(icon));
+  assert.equal((list.innerHTML.match(/class="nmessage-plugin"/g)||[]).length, 1);
+});
+
+test('应用在每轮完成及失败后显示打开卡片，运行中不提前显示本轮卡片', async () => {
+  const { renderer, ctx, list, sandbox } = setupRender();
+  sandbox.localStorage = { getItem: () => null };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../components/panels/panels-apps.js'), 'utf8'), sandbox);
+  const app = { pluginId: 'local:app', name: '应用卡片', personal: true,
+    ui: { contributions: [{ slot: 'workspace.navigation' }] } };
+  sandbox.SoduWorkAPI = { pluginCatalog: async () => ({ items: [app] }) };
+  ctx._sessionOptions = {}; ctx._pending = ''; ctx._snap.execution = { running: false };
+  ctx._snap.status = 'idle';
+  ctx._snap.messages = [{ role: 'user', text: '/应用 查询', plugins: [app] },
+    { role: 'assistant', blocks: [{ kind: 'text', text: '查询完成' }] }];
+  renderer._render(); await new Promise(resolve => setImmediate(resolve)); renderer._render();
+  assert.match(list.innerHTML, /data-chat-node="application:1"/);
+  assert.ok(list.innerHTML.indexOf('查询完成') < list.innerHTML.indexOf('data-chat-open-app'));
+  ctx._snap.status = 'streaming'; ctx._snap.execution.running = true; renderer._render();
+  assert.doesNotMatch(list.innerHTML, /data-chat-open-app/);
+  ctx._snap.status = 'unreachable'; ctx._snap.execution.running = false;
+  ctx._snap.messages = []; ctx._retryDraft = { plugins: [app], text: '请使用应用' };
+  renderer._render();
+  assert.match(list.innerHTML, /data-chat-node="application:failed"/);
+  assert.match(list.innerHTML, /data-chat-open-app="local:app"/);
+});
+
+test('late Markdown dependencies invalidate the plain fallback cache', () => {
+  const { sandbox, renderer } = setup();
+  const source = '# Title\n\n**bold**\n\n- item';
+  const fallback = renderer._blockHtml(0, { kind: 'text', text: source }, 0);
+  assert.match(body(fallback), /nline/);
+  vm.runInNewContext(markedSource, sandbox);
+  sandbox.DOMPurify = { sanitize: (html) => html };
+  const formatted = renderer._blockHtml(0, { kind: 'text', text: source }, 0);
+  assert.match(body(formatted), /class="nmd"/);
+  assert.doesNotMatch(body(formatted), /# Title|\*\*bold\*\*/);
+});
+
+test('streaming assistant output uses the same Markdown renderer without reparsing every token', () => {
+  const { sandbox, ctx, renderer } = setup();
+  vm.runInNewContext(markedSource, sandbox);
+  sandbox.DOMPurify = { sanitize: (html) => html };
+  ctx._snap = { status: 'streaming' };
+  ctx._liveTextKey = '0:0';
+  const html = renderer._blockHtml(0, { kind: 'text', text: '## Title\n\n**bold**' }, 0);
+  assert.match(body(html), /class="nmd"/);
+  assert.doesNotMatch(body(html), /## Title|\*\*bold\*\*/);
+});
+
+test('streaming text patches preserve the hit target instead of replacing its subtree', () => {
+  assert.match(markdownSource, /function _patchStreamNode\(current, next\)/);
+  assert.match(rendererSource, /const next = text\.cloneNode\(false\);[\s\S]*?_patchStreamNode\(text, next\);/);
+  assert.doesNotMatch(rendererSource, /text\.replaceChildren\(holder\.content\)/);
+});
+
+test('desktop loads Markdown dependencies before the chat renderer', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../desk.html'), 'utf8');
+  const rendererAt = html.indexOf('components/panels/chat-message-renderer.js');
+  const markedAt = html.indexOf('vendor/markdown/marked.umd.js');
+  const purifierAt = html.indexOf('vendor/markdown/purify.min.js');
+  const markdownAt = html.indexOf('components/panels/chat-markdown.js');
+  assert.ok(markedAt >= 0 && purifierAt >= 0 && rendererAt > markedAt && rendererAt > purifierAt);
+  assert.ok(markdownAt > purifierAt && markdownAt < rendererAt);
+});
+
+test('closing a conversation releases its rendered Markdown cache', () => {
+  const { sandbox, renderer } = setup(); let parses = 0;
+  sandbox.marked = { parse: source => { parses++; return '<p>' + source + '</p>'; } };
+  sandbox.DOMPurify = { sanitize: value => value };
+  renderer.rich('retained response'); renderer.rich('retained response');
+  assert.equal(parses, 1);
+  renderer.reset(); renderer.rich('retained response');
+  assert.equal(parses, 2, 'reset must release cache even when reopening the same session');
+  renderer.reset(); renderer.reset();
+});
+
+test('goal send renders its optimistic user message before first progress output', () => {
+  const { renderer, list } = setupRender();
+  renderer._render();
+  const user = list.innerHTML.indexOf('class="nmsg user"');
+  const progress = list.innerHTML.indexOf('goal-progress:phase:understand');
+  const status = list.innerHTML.indexOf('runtime-status');
+  assert.ok(user >= 0, 'optimistic user bubble should be rendered');
+  assert.ok(progress >= 0, 'goal progress should be rendered');
+  assert.ok(status >= 0, 'processing status should be rendered');
+  assert.ok(user < progress, 'goal progress must follow the sent prompt');
+  assert.ok(user < status, 'processing status must follow the sent prompt');
+});
+
+test('goal send keeps the prompt ahead of progress when a tool arrives first', () => {
+  const { renderer, list } = setupRender({ earlyTool: true });
+  renderer._render();
+  const user = list.innerHTML.indexOf('class="nmsg user"');
+  const progress = list.innerHTML.indexOf('goal-progress:phase:understand');
+  assert.ok(user >= 0 && progress >= 0, 'optimistic prompt and progress should both render');
+  assert.ok(user < progress, 'an early tool must not move goal progress above the prompt');
+});
+
+for (const hasSnapshot of [true, false]) {
+  test('requirement picker renders loading, results and close ' +
+    (hasSnapshot ? 'during an unchanged live stream' : 'before the first snapshot'), async () => {
+    let resolveTasks;
+    const { ctx, renderer, controller, views, transcriptWrites } = setupPickerRender(
+      () => new Promise(resolve => { resolveTasks = resolve; }));
+    if (!hasSnapshot) ctx._snap = null;
+    renderer._render();
+    assert.deepEqual(views.at(-1), { open: false, loading: false, tasks: [] });
+    const baseline = transcriptWrites();
+
+    const pending = controller._openTaskPicker();
+    assert.deepEqual(views.at(-1), { open: true, loading: true, tasks: [] });
+    if (hasSnapshot) ctx._snap.usage = { input: 123, output: 456 };
+    renderer._render();
+    assert.deepEqual(views.at(-1), { open: true, loading: true, tasks: [] });
+
+    resolveTasks({ online: true, items: [{ id: 'requirement-a', title: 'A', status: 'todo' }] });
+    await pending;
+    assert.deepEqual(views.at(-1), { open: true, loading: false, tasks: ['requirement-a'] });
+    controller._collabAction('picker-close');
+    assert.deepEqual(views.at(-1), { open: false, loading: false, tasks: [] });
+    assert.equal(transcriptWrites(), baseline,
+      'picker state changes must not require a full transcript render');
+    assert.equal(baseline, hasSnapshot ? 1 : 0);
+  });
+}
+
+for (const fileRead of [false, true]) test('streaming ' + (fileRead ? 'file reads' : 'commands') + ' leave row DOM intact without reading output', () => {
+  const { ctx, renderer, sandbox, list } = setupRender();
+  const toolScope = { ChatDomPatch: require('../components/panels/chat-dom-patch') };
+  toolScope.window = toolScope;
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../components/panels/panels-chat-tools.js'), 'utf8'), toolScope);
+  const tools = toolScope.ChatTools;
+  Object.assign(sandbox.ChatTools, { kind: tools.kind, isCommandTool: tools.isCommandTool, render: tools.render });
+  let renders = 0;
+  sandbox.ChatTools.appendTimeline = (parts, input, _previous, _anchor, _narrated, itemHtml) => {
+    renders++; parts.push(...input.map(itemHtml));
+  };
+  const command = { id: 'live-command', name: fileRead ? 'read' : 'bash', state: 'running', after: 0,
+    args: fileRead ? { path: 'notes.md' } : { command: 'npm test' } };
+  for (const key of ['partial', 'result']) Object.defineProperty(command, key, {
+    get() { throw Error('Streaming summary must not read ' + key); },
+  });
+  ctx._pending = ''; ctx._sessionOptions = {}; ctx._snap.tools = [command];
+  renderer._render();
+  assert.match(list.innerHTML, fileRead ? /data-tool-side="1"/ : /正在运行命令/);
+  if (!fileRead) assert.doesNotMatch(list.innerHTML, /ntool-body|ntool-caret|npm test|data-tool="live-command"/);
+  const before = renders;
+  ctx._snap.usage = { input: 10, output: 20 };
+  renderer._render();
+  assert.equal(renders, before, 'missing command bodies must not trigger a full transcript rerender');
+  command.state = 'done'; renderer._render();
+  assert.ok(renders > before, 'the completed title must still update at settlement');
+  if (fileRead) assert.match(list.innerHTML, /读取/);
+  else { assert.match(list.innerHTML, /运行了命令/); assert.doesNotMatch(list.innerHTML, /ntool-body|ntool-caret|npm test|data-tool="live-command"/); }
+});
+
+
+test('workflow nodes share one turn stack with actual Agent labels, including tool-first nodes', () => {
+  const {renderer,ctx,list,sandbox} = setupRender();
+  sandbox.AgentBrand = require('../components/panels/agent-brand');
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../components/panels/chat-crew.js'), 'utf8'), sandbox);
+  sandbox.ChatTools.appendTimeline = (parts,input) => { for(const tool of input) parts.push('<div class="nmsg ai"><span>'+escapeHtml(tool.id)+'</span></div>'); };
+  const pi={agentId:'pi',runId:'r1',nodeKey:'first'}, qwen={agentId:'qwen',runId:'r1',nodeKey:'second'};
+  ctx._pending='';ctx._sessionOptions={};ctx._snap={status:'idle',messages:[
+    {role:'user',text:'run'},
+    {role:'assistant',sourceAgent:pi,blocks:[{kind:'text',text:'First result'}],done:true},
+    {role:'assistant',sourceAgent:pi,blocks:[{kind:'text',text:'More of first'}],done:true},
+    {role:'assistant',sourceAgent:qwen,blocks:[{kind:'text',text:'Second result'}],done:true},
+    {role:'assistant',blocks:[{kind:'text',text:'Ordinary historical reply'}],done:true},
+  ],tools:[{id:'qwen-tool-start',name:'read',state:'done',after:2,sourceAgent:qwen}]};
+  renderer._render();
+  assert.equal((list.innerHTML.match(/class="nchat-agent-source/g)||[]).length,1);
+  assert.match(list.innerHTML,/data-output-agent="pi"/);assert.match(list.innerHTML,/agent-brand-qwen crew-sub/);
+  assert.ok(list.innerHTML.indexOf('data-output-agent="pi"')<list.innerHTML.indexOf('First result'));
+  assert.ok(list.innerHTML.indexOf('agent-brand-qwen crew-sub')<list.innerHTML.indexOf('<span>qwen-tool-start'));
+  assert.ok(list.innerHTML.includes('aria-label="Qwen Code"'));
+  assert.ok(list.innerHTML.includes('>QW</span>'));
+  assert.match(list.innerHTML,/class="ntext"/);
+  assert.match(list.innerHTML,/与 Qwen Code协作/);
+});
+
+test('one turn aggregates different runs and tool-only collaborators without leaking into the next turn', () => {
+  const { renderer, ctx, list, sandbox } = setupRender();
+  sandbox.AgentBrand = require('../components/panels/agent-brand');
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../components/panels/chat-crew.js'), 'utf8'), sandbox);
+  ctx._pending = ''; ctx._sessionOptions = {};
+  ctx._snap = { status: 'idle', messages: [
+    { role: 'user', text: 'First request' },
+    { role: 'assistant', sourceAgent: { agentId: 'pi', runId: 'first' }, blocks: [{ kind: 'thinking', text: 'Reasoning', done: true }, { kind: 'text', text: 'Initial explanation' }], done: true },
+    { role: 'assistant', sourceAgent: { agentId: 'qwen', runId: 'second' }, blocks: [{ kind: 'text', text: 'Final answer' }], done: true },
+    { role: 'user', text: 'Second request' },
+    { role: 'assistant', sourceAgent: { agentId: 'pi' }, blocks: [{ kind: 'text', text: 'Next answer' }], done: true },
+  ], tools: [{ id: 'read', name: 'read', after: 1, state: 'done', sourceAgent: { agentId: 'claude' } }] };
+  renderer._render();
+  assert.equal((list.innerHTML.match(/class="nchat-agent-source/g) || []).length, 2);
+  assert.match(list.innerHTML, /agent-brand-qwen crew-sub/);
+  assert.match(list.innerHTML, /agent-brand-claude crew-sub/);
+  assert.equal((list.innerHTML.match(/Initial explanation/g) || []).length, 1);
+  assert.ok(list.innerHTML.indexOf('Initial explanation') < list.innerHTML.indexOf('Final answer'));
+  assert.doesNotMatch(list.innerHTML.slice(list.innerHTML.indexOf('Second request')), /crew-sub/);
+});
+
+test('an ordinary preface retains the single task run detail link in the shared stack', () => {
+  const { renderer, ctx, list, sandbox } = setupRender();
+  sandbox.AgentBrand = require('../components/panels/agent-brand');
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../components/panels/chat-crew.js'), 'utf8'), sandbox);
+  ctx._pending = ''; ctx._sessionOptions = {};
+  ctx._snap = { status: 'idle', messages: [
+    { role: 'user', text: 'Work' },
+    { role: 'assistant', sourceAgent: { agentId: 'pi' }, blocks: [{ kind: 'text', text: 'Starting' }], done: true },
+    { role: 'assistant', sourceAgent: { agentId: 'qwen', runId: 'plugin-run' }, taskId: 'task-1', blocks: [{ kind: 'text', text: 'Done' }], done: true },
+  ], tools: [] };
+  renderer._render();
+  assert.equal((list.innerHTML.match(/class="nchat-agent-source/g) || []).length, 1);
+  assert.match(list.innerHTML, /data-output-agent="pi"/);
+  assert.match(list.innerHTML, /data-crew-run="plugin-run"/);
+  assert.match(list.innerHTML, /data-crew-task="task-1"/);
+});
+
+test('a retained running tool from windowed history keeps its own turn identity', () => {
+  const { renderer, ctx, list, sandbox } = setupRender();
+  sandbox.AgentBrand = require('../components/panels/agent-brand');
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../components/panels/chat-crew.js'), 'utf8'), sandbox);
+  sandbox.ChatTools.appendTimeline = (parts, input) => input.forEach(tool => parts.push('<div>' + tool.id + '</div>'));
+  ctx._pending = ''; ctx._sessionOptions = {};
+  ctx._snap = { status: 'streaming', messages: [
+    { role: 'user', text: 'Old turn' },
+    { role: 'assistant', sourceAgent: { agentId: 'pi' }, blocks: [{ kind: 'text', text: 'Old response' }], done: true },
+    { role: 'user', text: 'New turn' },
+    ...Array.from({ length: 81 }, (_, index) => ({ role: 'assistant', sourceAgent: { agentId: 'qwen' }, blocks: [{ kind: 'text', text: 'New response ' + index }], done: true })),
+  ], tools: [{ id: 'older-running-tool', name: 'read', after: 1, state: 'running', sourceAgent: { agentId: 'pi' } }] };
+  renderer._render();
+  assert.equal((list.innerHTML.match(/class="nchat-agent-source/g) || []).length, 2);
+  assert.ok(list.innerHTML.indexOf('data-output-agent="pi"') < list.innerHTML.indexOf('<div>older-running-tool'));
+  assert.ok(list.innerHTML.indexOf('<div>older-running-tool') < list.innerHTML.indexOf('data-output-agent="qwen"'));
+  assert.doesNotMatch(list.innerHTML, /crew-sub/);
+});
+
+test('an untrusted or absent Agent never inherits the current selection label', () => {
+  const {renderer,ctx,list,sandbox}=setupRender();sandbox.AgentBrand=require('../components/panels/agent-brand');
+  ctx._pending='';ctx._sessionOptions={adapterId:'pi'};ctx._snap={status:'idle',messages:[
+    {role:'assistant',sourceAgent:{agentId:'<img onerror=x>'},blocks:[{kind:'text',text:'legacy'}],done:true}
+  ],tools:[]};renderer._render();assert.doesNotMatch(list.innerHTML,/nchat-agent-source|onerror/);
+});
+
+for (const withUser of [true, false]) test('ordinary Agent attribution precedes processing time, withUser=' + withUser, () => {
+  const {renderer,ctx,list,sandbox}=setupRender();sandbox.AgentBrand=require('../components/panels/agent-brand');
+  ctx._pending='';ctx._sessionOptions={adapterId:'qwen'};
+  ctx._snap={status:'idle',messages:[...(withUser?[{role:'user',text:'hello'}]:[]),
+    {role:'assistant',sourceAgent:{agentId:'pi'},blocks:[{kind:'text',text:'First paragraph'}],done:true},
+    {role:'assistant',sourceAgent:{agentId:'pi'},blocks:[{kind:'text',text:'Second paragraph'}],done:true},
+  ],tools:[]};renderer._render();
+  assert.equal((list.innerHTML.match(/class="nchat-agent-source"/g)||[]).length,1);
+  assert.ok(list.innerHTML.indexOf('data-output-agent="pi"')<list.innerHTML.indexOf('data-chat-node="turn-summary:'));
+  assert.ok(list.innerHTML.indexOf('data-chat-node="turn-summary:')<list.innerHTML.indexOf('First paragraph'));
+  assert.doesNotMatch(list.innerHTML,/data-output-agent="qwen"/);
+});
+
+test('reopened latest completed turn uses persisted timing instead of a reset runtime clock', () => {
+  const { renderer, ctx, list } = setupRender();
+  ctx._pending = ''; ctx._sessionOptions = {};
+  ctx._turnMetricsHtml = () => '<div><b data-thinking-elapsed>0s</b><b data-thinking-tokens>51</b></div>';
+  ctx._snap = { status: 'idle', execution: { running: false, elapsedMs: 0 }, tools: [],
+    messages: [{ role: 'user', text: 'Saved request', sentAt: 1000 },
+      { role: 'assistant', done: true, completedAt: 24000, blocks: [{ kind: 'text', text: 'Saved answer' }] }],
+    turnMetrics: [{ fromMessage: 0, toMessage: 1, tokens: 124, elapsedMs: 23000 }] };
+  renderer._render();
+  assert.match(list.innerHTML, /用时 23s/);
+  assert.match(list.innerHTML, /124 tokens/);
+  assert.doesNotMatch(list.innerHTML, /data-thinking-elapsed>0s/);
+  ctx._snap.execution.elapsedMs = 3000;
+  ctx._turnMetricsHtml = () => '<div><b data-thinking-elapsed>3s</b><b data-thinking-tokens>51</b></div>';
+  renderer._render();
+  assert.match(list.innerHTML, /data-thinking-elapsed>23s/);
+  assert.match(list.innerHTML, /data-thinking-tokens>124/);
+  ctx._snap.execution.elapsedMs = 303000;
+  ctx._turnMetricsHtml = () => '<div><b data-thinking-elapsed>5m 03s</b></div>';
+  renderer._render();
+  assert.match(list.innerHTML, /data-thinking-elapsed>23s/);
+  assert.doesNotMatch(list.innerHTML, /5m 03s/);
+});
+
+test('consecutive ordinary turns keep their original Agent after a switch', () => {
+  const {renderer,ctx,list,sandbox}=setupRender();sandbox.AgentBrand=require('../components/panels/agent-brand');
+  ctx._pending='';ctx._sessionOptions={adapterId:'opencode'};
+  ctx._snap={status:'idle',messages:[
+    {role:'user',text:'first'},
+    {role:'assistant',sourceAgent:{agentId:'pi'},blocks:[{kind:'text',text:'Pi answer'}],done:true},
+    {role:'user',text:'second'},
+    {role:'assistant',sourceAgent:{agentId:'qwen'},blocks:[{kind:'text',text:'Qwen answer'}],done:true},
+  ],tools:[]};renderer._render();
+  assert.equal((list.innerHTML.match(/class="nchat-agent-source"/g)||[]).length,2);
+  assert.ok(list.innerHTML.indexOf('data-output-agent="pi"')<list.innerHTML.indexOf('Pi answer'));
+  assert.ok(list.innerHTML.indexOf('data-output-agent="qwen"')<list.innerHTML.lastIndexOf('data-chat-node="turn-summary:'));
+  assert.doesNotMatch(list.innerHTML,/data-output-agent="opencode"/);
+});
+
+test('an older running collaborator updates its turn stack when it settles beyond the recent tool window', () => {
+  const { renderer, ctx, list, sandbox } = setupRender();
+  sandbox.AgentBrand = require('../components/panels/agent-brand');
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../components/panels/chat-crew.js'), 'utf8'), sandbox);
+  let writes = 0;
+  sandbox.ChatTools.patchList = (host, html) => { host.innerHTML = html; writes++; };
+  ctx._pending = ''; ctx._sessionOptions = {};
+  ctx._snap = { status: 'streaming', messages: [
+    { role: 'user', text: 'Run the tool batch' },
+    { role: 'assistant', sourceAgent: { agentId: 'pi' }, blocks: [], done: true },
+  ], tools: Array.from({ length: 43 }, (_, index) => ({
+    id: 'tool-' + index, name: 'read', after: 1,
+    state: index === 1 ? 'running' : 'done', sourceAgent: { agentId: index === 1 ? 'qwen' : 'pi' },
+  })) };
+  const collaborator = ctx._snap.tools[1];
+  for (const field of ['partial', 'result']) Object.defineProperty(collaborator, field, {
+    get() { throw Error('Turn identity must not read the tool ' + field); },
+  });
+  renderer._render();
+  assert.match(list.innerHTML, /agent-brand-qwen crew-sub is-on/);
+  const firstWrites = writes;
+  ctx._snap.usage = { input: 10, output: 20 };
+  renderer._render();
+  assert.equal(writes, firstWrites, 'unchanged running tools retain the streaming fast path');
+
+  collaborator.state = 'done';
+  renderer._render();
+  assert.doesNotMatch(list.innerHTML, /agent-brand-qwen crew-sub is-on/);
+  assert.match(list.innerHTML, /agent-brand-qwen crew-sub/);
+  assert.equal((list.innerHTML.match(/class="nchat-agent-source/g) || []).length, 1);
+  assert.equal(writes, firstWrites + 1, 'settlement must refresh the crew even outside the last 40 tools');
+  renderer._render();
+  assert.equal(writes, firstWrites + 1, 'the unchanged settled snapshot resumes incremental rendering');
+});

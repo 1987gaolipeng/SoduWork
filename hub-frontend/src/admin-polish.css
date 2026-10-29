@@ -1,0 +1,61 @@
+/* Preserve the continuous blue summary, adding quiet boundaries between metrics. */
+.app .content :is(.gov-metric, .oi-stat, .ugc-metric, .rb-summary > div,
+  .admin-access-summary > .stat, .at-summary > span, .cap-summary > article,
+  .cap-admin-metric, .wc-intro-metrics > span, .ops-ledger > article,
+  .ops-metrics > article, .og-summary > div) {
+  position: relative;
+  padding: 18px 22px;
+  font-variant-numeric: tabular-nums;
+}
+.app .content :is(.gov-metric, .oi-stat, .ugc-metric, .rb-summary > div,
+  .admin-access-summary > .stat, .at-summary > span, .cap-summary > article,
+  .cap-admin-metric, .wc-intro-metrics > span, .ops-ledger > article,
+  .ops-metrics > article, .og-summary > div):not(:last-child)::after {
+  content: '';
+  position: absolute;
+  inset: 18px 0 18px auto;
+  width: 1px;
+  background: var(--summary-line);
+  pointer-events: none;
+}
+.app .content .gov-metric { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.app .content .gov-metric > b { grid-column: 1; grid-row: 2; font-size: 28px; line-height: 1.2; }
+.app .content .gov-metric > span { grid-row: 1; }
+.app .content .gov-metric > small { grid-row: 3; }
+
+/* The popup uses the browser top layer, so dialog/body overflow can stay safe. */
+.select-menu-popover.select-menu-searchable {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  min-width: 0;
+  max-width: none;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 6px;
+  color: var(--ink);
+  font: inherit;
+}
+.select-menu-searchable:popover-open { display: flex; flex-direction: column; gap: 5px; }
+.select-menu-input-wrap { position: relative; width: 100%; }
+.select-menu.f-in .select-menu-input.select-menu-trigger { width: 100%; padding-right: 36px; outline: none; border: 0; background: transparent; color: var(--ink); font: inherit; cursor: text; }
+.select-menu-input::placeholder { color: var(--ink-3); opacity: 1; }
+.select-menu:has(.select-menu-input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.select-menu-input-action { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; color: var(--ink-3); background: transparent; font: inherit; cursor: pointer; }
+.select-menu-input-action:hover { background: var(--surface-2); }
+.select-menu-searchable .select-menu-option { position: relative; padding-right: 30px; }
+.select-menu-searchable .select-menu-option[aria-selected="true"]::after { position: absolute; right: 10px; top: 10px; }
+.select-menu-searchable .select-menu-option.is-active { background: var(--accent-soft); color: var(--accent); }
+.select-menu-searchable .select-menu-options { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.select-menu-searchable .select-menu-option { display: flex; flex-direction: column; align-items: stretch; gap: 3px; width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: start; }
+.select-menu-searchable .select-menu-option small { color: var(--ink-3); font-size: 12px; line-height: 1.5; }
+.select-menu-empty { padding: 20px 12px; text-align: center; color: var(--ink-3); }
+.modal.org-editor { min-height: min(440px, calc(100dvh - var(--dialog-gutter) * 2)); }
+.modal.org-editor > .modal-body { flex: 1 1 auto; justify-content: flex-start; }
+
+@media (max-width: 560px) {
+  .app .content :is(.gov-metric, .oi-stat, .ugc-metric, .rb-summary > div,
+    .admin-access-summary > .stat, .at-summary > span, .cap-summary > article,
+    .cap-admin-metric, .wc-intro-metrics > span, .ops-ledger > article,
+    .ops-metrics > article, .og-summary > div) { padding: 14px; }
+}

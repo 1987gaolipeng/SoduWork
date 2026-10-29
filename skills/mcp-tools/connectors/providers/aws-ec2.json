@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "id": "aws-ec2",
+  "name": "Amazon EC2",
+  "category": "云服务",
+  "description": "Amazon EC2 通用连接器（SigV4 签名，只读）：列区域、列实例、列自有镜像。支持临时会话令牌（STS）。不提供任意云 API 透传。",
+  "runtimeKind": "aws-ec2",
+  "officialDocs": [
+    "https://docs.aws.amazon.com/AWSEC2/latest/APIReference/Operation-DescribeRegions.html",
+    "https://docs.aws.amazon.com/AWSEC2/latest/APIReference/Operation-DescribeInstances.html",
+    "https://docs.aws.amazon.com/AWSEC2/latest/APIReference/Operation-DescribeImages.html",
+    "https://docs.aws.amazon.com/AWSEC2/latest/APIReference/Common-Parameters.html"
+  ],
+  "authDocs": [
+    "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_temp.html"
+  ],
+  "baseUrl": "https://ec2.{AWS_REGION}.amazonaws.com",
+  "fields": [
+    {
+      "key": "AWS_REGION",
+      "label": "区域（如 us-east-1、cn-north-1、us-gov-west-1）",
+      "secret": false,
+      "required": true,
+      "pattern": "^[a-z]{2}(-gov)?-[a-z]+-[0-9]$",
+      "example": ""
+    },
+    {
+      "key": "AWS_ACCESS_KEY_ID",
+      "label": "Access Key ID（官方固定 20 位 A-Z0-9，含 AKIA/ASIA 临时前缀）",
+      "secret": false,
+      "required": true,
+      "pattern": "^[A-Z0-9]{16,128}$",
+      "example": ""
+    },
+    {
+      "key": "AWS_SECRET_ACCESS_KEY",
+      "label": "Secret Access Key",
+      "secret": true,
+      "required": true,
+      "example": ""
+    },
+    {
+      "key": "AWS_SESSION_TOKEN",
+      "label": "会话令牌（STS 临时凭据时必填）",
+      "secret": true,
+      "required": false,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "none"
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "describe_regions",
+      "description": "列出可用区域（Action=DescribeRegions，Version=2013-06-15）。连接检测工具，无分页。出处：https://docs.aws.amazon.com/AWSEC2/latest/APIReference/Operation-DescribeRegions.html",
+      "method": "GET",
+      "path": "/",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "describe_instances",
+      "description": "分页列出 EC2 实例（Action=DescribeInstances，Version=2016-11-15；MaxResults 官方范围 5-1000，本连接器取 5-100；NextToken 官方分页）。出处：https://docs.aws.amazon.com/AWSEC2/latest/APIReference/Operation-DescribeInstances.html",
+      "method": "GET",
+      "path": "/",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "max_results": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 100,
+            "default": 20,
+            "description": "每页实例数（MaxResults）"
+          },
+          "next_token": {
+            "type": "string",
+            "description": "上一页返回的 NextToken",
+            "maxLength": 4096
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "describe_images",
+      "description": "分页列出本账号自有 AMI 镜像（Action=DescribeImages，Owner.1=self 固定，Version=2016-11-15；MaxResults 5-100；NextToken 分页）。出处：https://docs.aws.amazon.com/AWSEC2/latest/APIReference/Operation-DescribeImages.html",
+      "method": "GET",
+      "path": "/",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "max_results": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 100,
+            "default": 20,
+            "description": "每页镜像数（MaxResults）"
+          },
+          "next_token": {
+            "type": "string",
+            "description": "上一页返回的 NextToken",
+            "maxLength": 4096
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    }
+  ],
+  "limitations": [
+    "仅提供所列固定只读查询，不执行任意云 API，也不创建、启停或删除资源。",
+    "需要平台账号及对应资源的只读权限；首次连接会实际检查授权。",
+    "已按官方接口复核；尚无真实云账号验收，签名与响应测试不能替代实际授权验证。",
+    "响应最多 2 MB；分页工具需使用返回的分页参数继续读取。"
+  ]
+}

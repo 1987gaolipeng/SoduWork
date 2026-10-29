@@ -1,0 +1,1 @@
+"""SoduWork Hub application package."""

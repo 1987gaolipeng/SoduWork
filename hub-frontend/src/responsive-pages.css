@@ -1,0 +1,53 @@
+/* Full page lists share one budget: filters and pagination keep their natural
+   height; data uses the remaining viewport. Small/empty lists stay compact. */
+.content .admin-viewport-list {
+  min-width: 0;
+  min-height: 0;
+  max-height: var(--viewport-list-height, 65vh);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scroll-padding-block: 44px 12px;
+}
+.content .admin-viewport-list > table { width: 100%; }
+.content .admin-viewport-list thead th,
+.content .admin-viewport-list > .wc-list-head,
+.content .admin-viewport-list.pg-ledger > header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface-2);
+}
+.content .admin-viewport-list.intgrid { align-content: start; padding: 2px 4px 8px 2px; }
+.content .admin-viewport-list:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Account preferences are a compact popover, including in short windows. */
+.locale-settings .locale-settings-popover {
+  width: 260px;
+  max-height: calc(100vh - 100px);
+  max-height: calc(100dvh - 100px);
+  overflow: auto;
+  padding: 16px;
+  gap: 14px;
+}
+.locale-settings-popover > b { padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+
+.content .rc-sources { grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); }
+.content .rc-source { container: repository-source / inline-size; }
+.content .rc-source-main { flex-wrap: wrap; }
+.content .rc-source-act { min-width: 0; max-width: 100%; flex-wrap: wrap; margin-left: auto; }
+.content .rc-source-act > .btn { flex: none; }
+.content .rc-source-act .rc-acct { min-width: 0; max-width: 100%; height: auto; min-height: 30px; padding-block: 5px; white-space: normal; overflow-wrap: anywhere; }
+.content .rc-acct > svg { flex: none; }
+.content .rc-source-id > b { overflow-wrap: anywhere; }
+@container repository-source (max-width: 580px) {
+  .content .rc-source-act { width: 100%; padding-top: 10px; border-top: 1px solid var(--line-2); }
+  .content .rc-source-act > .btn { margin-left: auto; }
+}
+
+@media (max-width: 640px) {
+  .content .admin-viewport-list { scroll-padding-block-start: 40px; }
+}

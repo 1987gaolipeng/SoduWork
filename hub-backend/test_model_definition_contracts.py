@@ -1,0 +1,125 @@
+"""Model definitions preserve strict edits and tolerant historic-row reads."""
+import copy
+import os
+import unittest
+from sqlalchemy import select
+
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+
+from test_model_runtime import IsolatedDatabase
+from app import models
+from app.services import model_catalog, model_definition_contracts as contracts
+
+
+class ModelDefinitionContractsTests(unittest.TestCase):
+    def test_chat_thinking_and_capability_contract_does_not_mutate_input(self):
+        raw = {"thinkingMode": "always", "thinkingFormat": "openai",
+               "thinkingLevelMap": {"off": "provider-off", "high": "provider-high"},
+               "supportsReasoningEffort": True, "imageRouting": "native",
+               "capabilities": {"imageInput": "supported"}, "maxOutputTokens": 2048}
+        before = copy.deepcopy(raw)
+        expected = {**raw, "reasoning": True,
+                    "thinkingLevelMap": {"off": None, "high": "provider-high"}}
+        self.assertEqual(contracts.clean_model_config(raw), expected)
+        self.assertEqual(model_catalog.clean_model_config(raw), expected)
+        self.assertEqual(raw, before)
+
+    def test_media_paths_and_defaults_keep_only_the_declared_generation_fields(self):
+        raw = {"statusPath": "/jobs/{id}", "resultPath": "/jobs/{id}/output",
+               "defaults": {"duration": 5, "model": "cannot override", "stream": True}}
+        expected = {"endpointPath": "/videos/generations", "statusPath": "/jobs/{id}",
+                    "resultPath": "/jobs/{id}/output", "defaults": {"duration": 5}}
+        self.assertEqual(contracts.clean_model_config(raw, "video"), expected)
+        self.assertEqual(model_catalog.model_config(raw, "video"), expected)
+        self.assertEqual(contracts.clean_model_config({}, "image"),
+                         {"endpointPath": "/images/generations", "defaults": {}})
+
+    def test_invalid_edits_raise_but_legacy_reads_fall_back_per_modality(self):
+        cases = [("chat", {"thinkingMode": "unsupported"}),
+                 ("chat", {"imageRouting": "native", "capabilities": {"imageInput": "unsupported"}}),
+                 ("video", {"statusPath": "/jobs/no-id"}),
+                 ("image", {"endpointPath": "https://another.invalid/generate"}),
+                 ("video", {"defaults": {"large": "x" * 13000}})]
+        for modality, raw in cases:
+            with self.subTest(modality=modality, raw=raw):
+                with self.assertRaises(ValueError):
+                    contracts.clean_model_config(raw, modality)
+                self.assertEqual(contracts.model_config(raw, modality),
+                                 contracts.clean_model_config({}, modality))
+        self.assertEqual(contracts.normalize_image_routing("native-first"), "vision-fallback")
+
+
+class BuiltinCatalogTests(IsolatedDatabase):
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        async with self.engine.begin() as connection:
+            await connection.run_sync(models.Milestone.__table__.create)
+            await connection.run_sync(models.User.__table__.create)
+
+    async def test_new_catalog_excludes_retired_or_protocol_incompatible_presets(self):
+        async with self.sessions() as session:
+            await model_catalog.bootstrap(session)
+            rows = (await session.execute(select(models.ModelDef))).scalars().all()
+            names = {row.name for row in rows}
+            self.assertNotIn("kimi-k2-thinking", names)
+            self.assertNotIn("gpt-6.1-sol", names)
+            self.assertIn("kimi-k3", names)
+            self.assertIn("gpt-5.6", names)
+
+    async def test_thinking_presets_reach_the_client_proxy_contract(self):
+        from app.api.ai_proxy import proxy_config
+        async with self.sessions() as session:
+            await model_catalog.bootstrap(session)
+            session.add(models.User(id="catalog-user", username="catalog-user"))
+            client = models.Client(id="catalog-fixture", auth_state="active", user_ref="catalog-user")
+            session.add(client)
+            for provider in ("zhipu", "moonshot"):
+                row = await session.get(models.ModelProvider, provider)
+                row.api_key = "isolated-fixture-key"
+            await session.commit()
+            for name in ("glm-5.3", "kimi-k3"):
+                response = await proxy_config(model=name, agent="pi", client=client, session=session)
+                self.assertTrue(response["ok"], response)
+                self.assertTrue(response["reasoning"])
+                self.assertTrue(response["thinkingAlwaysOn"])
+                self.assertTrue(response["supportsReasoningEffort"])
+                self.assertEqual(response["thinkingFormat"], "openai" if name == "kimi-k3" else "zai")
+                levels = response["thinkingLevelMap"]
+                self.assertEqual({key for key, value in levels.items() if value is not None},
+                                 {"low", "high", "max"})
+                self.assertIsNone(levels["off"])
+            # The tested GLM-5.3 Flash gateway accepts thinking: {type: "disabled"}.
+            # Expose the supported off setting through the built-in model definition.
+            response = await proxy_config(model="glm-5.3-flash", agent="pi", client=client, session=session)
+            self.assertTrue(response["ok"], response)
+            self.assertTrue(response["reasoning"])
+            self.assertNotIn("thinkingAlwaysOn", response)
+            self.assertEqual(response["thinkingMode"], "controllable")
+            levels = response["thinkingLevelMap"]
+            self.assertEqual({key for key, value in levels.items() if value is not None},
+                             {"low", "high", "max"})
+
+    async def test_bootstrap_preserves_existing_rows_and_administrator_overrides(self):
+        async with self.sessions() as session:
+            await model_catalog.bootstrap(session)
+            row = await session.get(models.ModelDef, "zhipu:glm-5.3")
+            row.config = {"thinkingMode": "none"}
+            row.enabled = False
+            provider = await session.get(models.ModelProvider, "zhipu")
+            provider.base_url = "http://fixture.invalid/v1"
+            provider.enabled = False
+            for provider_id, name in (("moonshot", "kimi-k2-thinking"), ("openai", "gpt-6.1-sol")):
+                session.add(models.ModelDef(id=provider_id + ":" + name,
+                            provider_id=provider_id, name=name, enabled=True))
+            await session.commit()
+            await model_catalog.bootstrap(session)
+            self.assertEqual(row.config, {"thinkingMode": "none"})
+            self.assertFalse(row.enabled)
+            self.assertFalse(provider.enabled)
+            self.assertEqual(provider.base_url, "http://fixture.invalid/v1")
+            for mid in ("moonshot:kimi-k2-thinking", "openai:gpt-6.1-sol"):
+                self.assertTrue((await session.get(models.ModelDef, mid)).enabled)
+
+
+if __name__ == "__main__":
+    unittest.main()

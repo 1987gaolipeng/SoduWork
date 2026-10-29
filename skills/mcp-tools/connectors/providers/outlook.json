@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "id": "outlook",
+  "name": "Outlook Mail",
+  "category": "沟通协作",
+  "description": "Outlook Mail 通用连接器：邮件文件夹列表、邮件列表、邮件详情、发送邮件。基于 Microsoft Graph v1.0 mail 资源，委托式令牌由用户安全填入。",
+  "officialDocs": [
+    "https://learn.microsoft.com/graph/api/user-list-mailfolders",
+    "https://learn.microsoft.com/graph/api/user-list-messages",
+    "https://learn.microsoft.com/graph/api/message-get",
+    "https://learn.microsoft.com/graph/api/user-sendmail"
+  ],
+  "authDocs": [
+    "https://learn.microsoft.com/graph/auth/"
+  ],
+  "baseUrl": "https://graph.microsoft.com/v1.0",
+  "fields": [
+    {
+      "key": "MSFT_ACCESS_TOKEN",
+      "label": "Microsoft Graph 访问令牌",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "tokenKey": "MSFT_ACCESS_TOKEN",
+    "header": "Authorization",
+    "prefix": "Bearer"
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "list_mail_folders",
+      "description": "列出邮件文件夹。分页：@odata.nextLink。出处：https://learn.microsoft.com/graph/api/user-list-mailfolders",
+      "method": "GET",
+      "path": "/me/mailFolders",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_messages",
+      "description": "列出收件箱邮件（固定 $top/$skip 分页 + $select 白名单收窄字段）。分页：@odata.nextLink 或 $skip。出处：https://learn.microsoft.com/graph/api/user-list-messages",
+      "method": "GET",
+      "path": "/me/mailFolders/{folder_id}/messages",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "folder_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{6,152}$",
+            "description": "文件夹 ID 或知名名（Inbox）",
+            "maxLength": 10000
+          },
+          "top": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 25,
+            "description": "每页条数（$top）"
+          },
+          "skip": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "跳过条数（$skip）",
+            "maximum": 100000
+          }
+        },
+        "required": [
+          "folder_id"
+        ],
+        "maxProperties": 50
+      },
+      "fixedQuery": {
+        "$select": "subject,from,receivedDateTime,bodyPreview,isRead"
+      },
+      "query": {
+        "$top": "top",
+        "$skip": "skip"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_message",
+      "description": "获取邮件详情。无分页。出处：https://learn.microsoft.com/graph/api/message-get",
+      "method": "GET",
+      "path": "/me/messages/{message_id}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{6,152}$",
+            "description": "邮件 ID",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "message_id"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "send_mail",
+      "description": "发送邮件（POST /me/sendMail，message 对象）。写入操作：运行前必须获得用户明确授权。出处：https://learn.microsoft.com/graph/api/user-sendmail",
+      "method": "POST",
+      "path": "/me/sendMail",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "to": {
+            "type": "string",
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[a-z]{2,}$",
+            "description": "收件人邮箱",
+            "maxLength": 10000
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "主题"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "description": "正文",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "to",
+          "subject",
+          "content"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "message": {
+          "subject": "$subject",
+          "body": {
+            "contentType": "Text",
+            "content": "$content"
+          },
+          "toRecipients": [
+            {
+              "emailAddress": {
+                "address": "$to"
+              }
+            }
+          ]
+        }
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "按委托权限建模；应用权限访问全租户邮箱需管理员同意与政策合规，未覆盖。",
+    "访问令牌约 1 小时过期，需用户安全填入并手动更新；自动续期为宿主侧适配项，本连接器未实现。",
+    "send_mail 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

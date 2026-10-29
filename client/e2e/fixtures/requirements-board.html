@@ -1,0 +1,69 @@
+<!doctype html><html lang="zh-CN" data-theme="vivid" data-desk-panel="workspace" data-workspace-view="history">
+<head><meta charset="utf-8"><title>统一需求池 · 隔离交互验证</title>
+<link rel="stylesheet" href="../../theme/variables.css">
+<link rel="stylesheet" href="../../components/panels/panels-base.css">
+<link rel="stylesheet" href="../../components/panels/panels-desk.css">
+<link rel="stylesheet" href="../../components/requirements/requirements-board.css">
+<link rel="stylesheet" href="../../components/requirements/requirement-confirm.css">
+<link rel="stylesheet" href="../../components/panels/task-trace-view.css">
+<link rel="stylesheet" href="../../components/gantt/gantt.css">
+<link rel="stylesheet" href="../../components/workspace/workspace-shell.css">
+<link rel="stylesheet" href="../../components/workspace/workspace-page-layout.css">
+<link rel="stylesheet" href="../../theme/workspace-experience.css">
+<link rel="stylesheet" href="../../theme/workspace-page-heads.css">
+<style>html{--ws-side-w:60px;--ws-main-left:60px}body{margin:0;background:var(--bg-1);font-family:var(--font-ui)}</style>
+</head><body>
+<script>
+const fixtureErrors=[],fixtureCalls=[];
+const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+window.addEventListener('error',e=>fixtureErrors.push(e.message));
+window.addEventListener('unhandledrejection',e=>fixtureErrors.push(String(e.reason)));
+const fixtureDay=offset=>{const d=new Date();d.setDate(d.getDate()+offset);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+let fixtureIdentity='fixture:alice:tasks';
+let tasks=['intake','clarifying','ready','delivering','delivered','closed'].flatMap((stage,i)=>Array.from({length:i===2?7:1},(_,n)=>({
+ id:stage+'-'+n,title:['整理业务需求与客户背景','确认报表口径和完成标准','自动整理 GitHub 产品方案','生成本周团队简报','官网内容和访问验证已交付','上季度需求归档'][i]+(n?' '+n:''),
+ note:'需求内容与原始材料保持在同一条工作记录中。',kind:i===1?'bug':'requirement',priority:n===2?'high':'normal',
+ status:i===3?'doing':i>=4?'done':'todo',triageStage:stage,archivedAt:i===5?1:null,
+ myRoles:['creator','executor'],assigneeName:n%2?'产品成员':'测试成员',assigneeUserId:n%2?'user-b':'user-a',projectId:n%2?'project-b':'project-a',projectName:n%2?'产品迭代':'业务协作',
+ createdAt:Date.now()-(i*10+n)*60000,updatedAt:Date.now()-(i*10+n)*60000,start:fixtureDay(0),due:fixtureDay(0),
+ requirementVersion:1,canEditRequirement:true,canViewExecution:true,readOnly:false,acceptanceCriteria:['内容完整','文件可打开'],visibility:'organization'
+})));
+Object.assign(tasks.find(t=>t.id==='delivering-0'),{ai:{state:'running',name:'Pi'}});
+Object.assign(tasks.find(t=>t.id==='delivered-0'),{reviewedAt:Date.now()});
+Object.assign(tasks.find(t=>t.id==='ready-0'),{updatedAt:Date.now()+60000});
+Object.assign(tasks.find(t=>t.id==='ready-1'),{createdAt:Date.now()+120000,updatedAt:Date.now()-600000});
+Object.assign(tasks.find(t=>t.id==='ready-2'),{assigneeName:'',assigneeUserId:null,projectId:null,projectName:'',kind:'bug',due:fixtureDay(-1),createdByName:'提出人不是负责人'});
+Object.assign(tasks.find(t=>t.id==='ready-3'),{due:null});
+tasks.push({...tasks[0],id:'approval-only',title:'核对新的交付成果',status:'doing',triageStage:'ready',requirementStage:'reviewing',myRoles:['requester'],ai:{state:'done',name:'OpenCode'}});
+tasks.push({...tasks[0],id:'ai-returned',title:'智能体返回内容尚未提交验收',status:'doing',triageStage:'ready',ai:{state:'done',name:'Pi'}});
+tasks.push({...tasks[0],id:'paused-work',title:'等待外部材料的进行中工作',status:'paused',triageStage:'ready'});
+tasks.push({...tasks[0],id:'shared-only',title:'团队共享的需求',myRoles:[],canEditRequirement:false,canViewExecution:false,readOnly:true});
+let fixtureApprovals=[{taskId:'approval-only',id:'review-1',action:'review'}];
+const Store={taskState:'ready',refreshTasks:async()=>{fixtureCalls.push(['refresh']);RequirementsBoard.render()}};
+const SoduWorkAPI={taskStorageKey:()=>fixtureIdentity,getProjects:async()=>[{id:'project-a',name:'业务协作'},{id:'project-b',name:'产品迭代'}],
+ getTask:async id=>structuredClone(tasks.find(row=>row.id===id)),listAttachments:async()=>[],
+ approvalDetail:async id=>{fixtureCalls.push(['approval-detail',id]);const item=fixtureApprovals.find(row=>row.id===id);return {ok:true,item:{...structuredClone(item),status:'pending',assignment:{reasons:[{label:'需求验收人'}]}}}},
+ patchTask:async(id,patch)=>{fixtureCalls.push(['patch',id,patch]);const task=tasks.find(row=>row.id===id);Object.assign(task,patch,{requirementVersion:task.requirementVersion+1});return structuredClone(task)},
+ submitTaskReview:async id=>{fixtureCalls.push(['submit-review',id]);const task=tasks.find(row=>row.id===id);task.requirementStage='reviewing';return {ok:true,task:structuredClone(task)}},
+ reviewTask:async id=>{fixtureCalls.push(['review',id]);const task=tasks.find(row=>row.id===id);task.status='done';task.reviewedAt=Date.now();delete task.requirementStage;return structuredClone(task)}};
+window.SoduWorkAPI=SoduWorkAPI;
+window.TaskApprovalInbox={snapshot:()=>fixtureApprovals,open:()=>fixtureCalls.push(['approval']),refresh:async()=>{}};
+window.WorkEntrySheet={openTask:options=>fixtureCalls.push(['create',options])};
+window.RequirementAssignment={eligible:task=>window.ChatTaskController.isPickableTask(task),open:async id=>fixtureCalls.push(['assign',id])};
+window.petSay=text=>fixtureCalls.push(['notice',text]);
+window.openDetailEntry=id=>fixtureCalls.push(['journey',id]);
+window.openTaskConversation=async (id,title,options)=>fixtureCalls.push(['chat',id,options]);
+</script>
+<script src="../../components/panels/task-priority.js"></script>
+<script src="../../core/requirements.js"></script>
+<script src="../../components/panels/chat-task-start.js"></script>
+<script src="../../components/panels/chat-task-controller.js"></script>
+<script src="../../components/gantt/gantt.js"></script>
+<script src="../../components/requirements/requirements-view.js"></script>
+<script src="../../components/requirements/requirements-board.js"></script>
+<script src="../../components/requirements/requirement-confirm.js"></script>
+<script src="../../components/panels/task-trace-approval.js"></script>
+<script src="../../components/requirements/requirements-detail.js"></script>
+<script src="../../components/requirements/requirement-fields.js"></script>
+<script>openTaskCenter();</script>
+</body></html>

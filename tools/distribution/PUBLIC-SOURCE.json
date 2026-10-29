@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "id": "opensource-v1",
+  "sourceOnly": true,
+  "copyright": "MDiRi",
+  "skills": [
+    "agent-product-design",
+    "app-developer",
+    "browser-use",
+    "computer-use",
+    "delivery-check",
+    "mcp-studio",
+    "mcp-tools",
+    "office",
+    "pptx",
+    "product-incubator",
+    "skill-studio",
+    "task"
+  ],
+  "buildChecks": [
+    "accept-macos.cjs",
+    "accept-windows.cjs",
+    "acceptance-common.cjs",
+    "installed-client-inspection.cjs",
+    "installed-client-smoke.cjs",
+    "installed-client-timing.cjs",
+    "macos-signature.cjs",
+    "merge-macos.cjs",
+    "publish-client.cjs",
+    "release-artifacts.cjs",
+    "soduwork-acceptance-baselines.json",
+    "verify-client-publication.cjs",
+    "verify-runner-skills.py",
+    "windows-acceptance-support.cjs",
+    "windows-installed-check.cjs"
+  ],
+  "excludedPrefixes": [
+    "docs/design/",
+    "docs/architecture/",
+    "docs/testing/",
+    "tools/mediaops-sync/",
+    "hub-backend/plugins/platforms/",
+    "mobile/",
+    "mobile-web-dist/"
+  ],
+  "excludedFiles": [
+    "PROJECT_CONTEXT.md",
+    ".gitlab-ci.yml",
+    "tools/seed_local_demo_data.py",
+    "tools/cross-release-check.sh",
+    "hub-backend/plugins/img2threejs.json",
+    "hub-backend/plugins/mattpocock-engineering.json",
+    "hub-backend/plugins/superpowers.json",
+    "client/.snyk"
+  ]
+}

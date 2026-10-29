@@ -1,0 +1,581 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+ * theme/cursor.css is the final authority for cursor behavior. Mark actual drag handles
+ * with .drag-handle; do not assign cursor:grab to entire surfaces.
+ */
+
+/* Shared .panel dialog. */
+.panel{
+  position:fixed;z-index:60;
+  top:50%;left:50%;
+  transform:translate(-50%,-50%) scale(.92);
+  max-width:420px;width:calc(100vw - 32px);
+  max-height:85vh;
+  padding:24px 24px 20px;
+  border-radius:var(--r-xl);
+  background:var(--bg-0);
+  box-shadow:var(--shadow-xl);
+  opacity:0;pointer-events:none;
+  overflow-y:auto;
+  transform-origin:center center;
+  transition:transform .24s var(--ease-out),opacity .18s ease;
+  -webkit-user-select:none;user-select:none;
+}
+/* Give task details extra width for timelines, attachments, and collaboration without enlarging other dialogs. */
+#detailPanel{max-width:600px;padding:28px 30px 24px}
+#detailPanel .detail-sec{margin:0 0 22px}
+#detailPanel .detail-sec-title{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-base) * var(--font-scale,1)))}
+#detailPanel .detail-title{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-2xl) * var(--font-scale,1)));line-height:1.35}
+.panel.show{
+  opacity:1;pointer-events:auto;
+  transform:translate(-50%,-50%) scale(1);
+}
+.panel::-webkit-scrollbar{width:6px}
+.panel::-webkit-scrollbar-thumb{background:var(--bg-3);border-radius:3px}
+.panel::-webkit-scrollbar-track{background:transparent}
+
+/* Close button. */
+.panel-close{
+  position:absolute;top:16px;right:16px;
+  width:28px;height:28px;
+  border:none;border-radius:var(--r-sm);
+  background:transparent;
+  color:var(--ink-4);
+  font-size:max(var(--font-min-readable, 14.5px), 14px);
+  display:flex;align-items:center;justify-content:center;
+  transition:background-color .15s ease,color .15s ease,transform .12s ease;
+  z-index:2;
+}
+.panel-close:hover{background:var(--bg-2);color:var(--ink-2);transform:rotate(90deg)}
+.panel-close:active{transform:scale(.88)}
+
+/* Shared .mask backdrop. */
+.mask{
+  position:fixed;inset:0;z-index:55;
+  background:rgba(0,0,0,.3);
+  display:flex;align-items:center;justify-content:center;
+  opacity:0;pointer-events:none;
+  transition:opacity .2s ease;
+}
+.mask.show{opacity:1;pointer-events:auto}
+
+/* New-task .modal dialog. */
+.modal{
+  position:relative;
+  width:380px;max-width:calc(100vw - 32px);
+  max-height:85vh;overflow-y:auto;
+    padding:26px 24px 20px;
+  border-radius:var(--r-xl);
+  background:var(--bg-0);
+  box-shadow:var(--shadow-xl);
+  transform:scale(.92);opacity:0;
+  transition:transform .24s var(--ease-out),opacity .18s ease;
+  /*
+   * Use a top background layer for the four-color brand stripe so rounded clipping applies
+   * and scrolling does not move it.
+   */
+  background:
+    linear-gradient(90deg,#ff9f2e 0 25%,#4f8ff5 25% 50%,#1ec79b 50% 75%,#ef5f92 75% 100%) top/100% 4px no-repeat,
+    var(--bg-0);
+}
+.mask.show .modal{transform:scale(1);opacity:1}
+/* Brief explanatory text below the title. */
+.modal-sub{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));color:var(--ink-4);margin:-14px 0 18px;line-height:1.5}
+/* Required-field indicator. */
+.req{color:#e0475e;font-style:normal;font-weight:800;margin-left:2px}
+.modal::-webkit-scrollbar{width:6px}
+.modal::-webkit-scrollbar-thumb{background:var(--bg-3);border-radius:3px}
+.modal h3{
+  display:flex;align-items:center;gap:8px;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xl) * var(--font-scale,1)));font-weight:700;margin-bottom:20px;
+  color:var(--ink);
+  letter-spacing:-.01em;
+}
+.modal h3 .ico{
+  width:28px;height:28px;border-radius:var(--r-sm);
+  background:var(--accent-soft);
+  color:var(--accent);
+  display:flex;align-items:center;justify-content:center;
+}
+
+/* Form fields. */
+.field{margin-bottom:16px}
+.field-row{display:flex;gap:12px}
+.field-row>div{margin-bottom:0}
+/* Two-column task form: primary fields on the left and supplementary settings on the right. */
+.modal-wide{width:min(1120px,calc(100vw - 40px))}
+.add-cols{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(380px,.85fr);gap:0 24px;align-items:start}
+.add-col{min-width:0}
+.add-col-side{padding-left:24px;border-left:1px solid var(--line-2)}
+.add-side-title{
+  font-size:max(var(--font-min-readable, 14.5px), 11px);font-weight:800;color:var(--ink-4);letter-spacing:.6px;
+  margin:2px 0 12px;display:flex;align-items:center;gap:8px;
+}
+.add-side-title::after{content:'';flex:1;height:1px;background:var(--line-2)}
+/* Choose responsibility mode before repository-specific workflows; keep these concepts in separate controls. */
+.add-go{border:1px solid var(--line-2);border-radius:14px;padding:14px;background:var(--bg-1);transition:border-color .15s,background-color .15s}
+.add-go.is-unavailable{border-style:dashed;background:var(--bg-1)}
+.add-go-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.add-go-head>span{display:flex;min-width:0;flex-direction:column;gap:3px}
+.add-go-head b{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-base) * var(--font-scale,1)));font-weight:620;color:var(--ink);line-height:1.35}
+.add-go-head small{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));font-weight:400;color:var(--ink-4);line-height:1.5}
+.add-go-head em{display:none;max-width:130px;padding:3px 8px;border-radius:999px;background:var(--accent-soft);
+  color:var(--accent);font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));font-style:normal;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.add-go-head em:not(:empty){display:block}
+.add-go-strategy{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:12px}
+.add-go-strategy label{display:block;min-width:0;cursor:pointer}
+.add-go-strategy input{position:absolute;opacity:0;pointer-events:none}
+.add-go-strategy label>span{display:flex;min-height:54px;box-sizing:border-box;flex-direction:column;justify-content:center;
+  gap:2px;padding:8px 9px;border:1px solid var(--line-2);border-radius:10px;background:var(--bg-0);transition:border-color .14s,background-color .14s,box-shadow .14s}
+.add-go-strategy label:hover>span{border-color:var(--line)}
+.add-go-strategy input:focus-visible+span{outline:2px solid var(--accent);outline-offset:2px}
+.add-go-strategy input:checked+span{border-color:color-mix(in srgb,var(--accent) 58%,var(--line));
+  background:color-mix(in srgb,var(--accent-soft) 58%,var(--bg-1));box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 12%,transparent)}
+.add-go-strategy input:disabled+span{opacity:.45;cursor:not-allowed}
+.add-go-strategy b{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));font-weight:580;color:var(--ink-2);white-space:nowrap}
+.add-go-strategy small{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));font-weight:400;color:var(--ink-4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.add-go-strategy label.is-recommended>span::after{content:'推荐';align-self:flex-start;margin-top:2px;color:var(--accent);font-size:max(var(--font-min-readable, 14.5px), 10px);line-height:1}
+.add-go-body{display:flex;flex-direction:column;gap:10px;margin-top:13px;padding-top:12px;border-top:1px solid var(--line-2)}
+.add-go-control{display:block;margin:0}
+.add-go-control>span{display:block;margin:0 0 5px;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));font-weight:560;color:var(--ink-3)}
+.add-go-control>span i{font-style:normal;font-weight:400;color:var(--ink-5);margin-left:4px}
+.add-go-body .assign-sel{width:100%}
+.add-go-loading{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:9px;background:var(--bg-0);
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));color:var(--ink-4);line-height:1.45}
+.add-go-loading i{width:13px;height:13px;flex:none;border:1.5px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:add-go-spin .8s linear infinite}
+.add-go.is-unavailable .add-go-loading i{display:none}
+@keyframes add-go-spin{to{transform:rotate(360deg)}}
+.add-go-tip{min-height:18px;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));color:var(--ink-4);line-height:1.55}
+
+
+
+
+
+input[type=date]{width:100%;box-sizing:border-box;padding:9px 8px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--bg-1);color:var(--ink);font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));font-family:inherit}
+input[type=date]:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+
+/* Priority badges and tag chips. */
+.prio-low{color:var(--ink-4)}
+.prio-high{color:#e07d0a}
+.prio-critical{color:#e0475e}
+.detail-tags{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}
+.detail-tag{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));font-weight:600;color:var(--accent);background:var(--accent-soft);padding:3px 9px;border-radius:var(--r-full,999px)}
+
+/* Section headings. */
+.detail-sec{margin:0 0 16px}
+/*
+ * Use consistent 16 px outline icons, emphasized labels, spacing, and dividers for section
+ * headings.
+ */
+.detail-sec-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;
+  padding-bottom:8px;border-bottom:1px solid var(--line-2)}
+.detail-sec-title{display:flex;align-items:center;gap:7px;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-base) * var(--font-scale,1)));font-weight:800;color:var(--ink-2);letter-spacing:.3px}
+.detail-sec-title .sec-ico{width:16px;height:16px;flex-shrink:0;color:var(--accent);
+  fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.detail-sec-hint{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));color:var(--ink-4);margin-left:auto}
+
+/* Attachment grid and drag/drop upload. */
+.detail-atts-wrap{margin:0 0 16px}
+.detail-atts{display:flex;flex-wrap:wrap;gap:9px;align-items:stretch;border-radius:var(--r-md);transition:box-shadow .14s,background-color .14s}
+.detail-atts.att-drag{box-shadow:0 0 0 2px var(--accent) inset;background:var(--accent-soft,rgba(91,147,240,.08))}
+.att-loading{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));color:var(--ink-5);padding:4px 2px}
+.att-loaderr{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));color:var(--ink-4);padding:4px 2px}
+.att-loaderr a{color:var(--accent);text-decoration:underline}
+.att-hint{flex-basis:100%;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));color:var(--ink-4);margin-top:3px}
+.att-tile{position:relative;box-sizing:border-box;display:flex;font-family:inherit;
+  border-radius:var(--r-md);border:1px solid var(--line-2);background:var(--bg-1);
+  transition:border-color .14s,box-shadow .14s,transform .1s}
+.att-tile:hover{border-color:var(--accent);box-shadow:var(--shadow-sm)}
+.att-tile:active{transform:scale(.98)}
+/* Image tiles. */
+.att-img{width:66px;height:66px;overflow:hidden;padding:0}
+.att-img img{width:100%;height:100%;object-fit:cover;display:block}
+.att-name-ov{position:absolute;left:0;right:0;bottom:0;padding:6px 5px 3px;font-size:max(var(--font-min-readable, 14.5px), 10px);color:#fff;
+  background:linear-gradient(180deg,transparent,rgba(0,0,0,.6));white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0;transition:opacity .14s}
+.att-img:hover .att-name-ov{opacity:1}
+/* Document tiles. */
+.att-file{width:158px;min-height:74px;flex-direction:column;justify-content:center;gap:1px;padding:9px 11px}
+.att-ico{display:flex;align-items:center;justify-content:center;line-height:1;color:var(--ink-4)}
+.att-ico .ico{width:20px;height:20px;vertical-align:0}
+/* Set line-height explicitly so overflow:hidden does not clip glyph descenders. */
+.att-fname{font-size:max(var(--font-min-readable, 14.5px), 12.5px);line-height:1.5;font-weight:600;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.att-fsize{font-size:max(var(--font-min-readable, 14.5px), 11px);line-height:1.4;color:var(--ink-5)}
+/* Dashed add tile doubles as a drop target hint. */
+.att-add{width:66px;height:66px;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  border-style:dashed;background:transparent;color:var(--ink-4)}
+.att-add:hover{color:var(--accent);background:var(--accent-soft,rgba(91,147,240,.06))}
+.att-add-plus{font-size:20px;line-height:1;font-weight:300}
+.att-add-txt{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)))}
+.att-tile[data-preview]{cursor:pointer}
+.att-tile[data-preview]:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 65%,transparent);
+  outline-offset:2px}
+.att-actions{position:absolute;top:5px;right:5px;display:flex;gap:4px;opacity:0;
+  transform:translateY(-2px);transition:opacity .14s,transform .14s;z-index:2}
+.att-tile:hover .att-actions,.att-tile:focus-within .att-actions{opacity:1;transform:none}
+.att-action{width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;
+  border:1px solid color-mix(in srgb,var(--line-2) 80%,transparent);border-radius:7px;
+  background:color-mix(in srgb,var(--bg-1) 92%,transparent);color:var(--ink-4);
+  box-shadow:var(--shadow-sm);transition:color .12s,background-color .12s,border-color .12s}
+.att-action svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;
+  stroke-linecap:round;stroke-linejoin:round}
+.att-download:hover{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 35%,var(--line-2))}
+.att-del:hover{color:#fff;background:var(--s-critical,#e0475e);border-color:transparent}
+.att-action:disabled{opacity:.45;cursor:wait}
+.att-img .att-action{background:rgba(255,255,255,.92)}
+@media (hover:none){.att-actions{opacity:1;transform:none}}
+.field label{
+  display:block;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));font-weight:600;
+  color:var(--ink-3);margin-bottom:6px;
+  letter-spacing:.01em;
+}
+.field input,.field textarea{
+  width:100%;box-sizing:border-box;
+  padding:10px 12px;
+  border:1px solid var(--line);
+  border-radius:var(--r-md);
+  background:var(--bg-1);
+  color:var(--ink);font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-md) * var(--font-scale,1)));
+  font-family:inherit;
+  transition:border-color .15s ease,background-color .15s ease,box-shadow .15s ease;
+}
+.field input::placeholder,.field textarea::placeholder{color:var(--ink-5)}
+.field input:focus,.field textarea:focus{
+  outline:none;
+  border-color:var(--accent);
+  background:var(--bg-0);
+  box-shadow:0 0 0 3px var(--accent-soft);
+}
+.field textarea{resize:vertical;min-height:48px;line-height:1.5}
+.field .set-note{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));color:var(--ink-4);margin-top:6px;line-height:1.5}
+
+/* Status selection. */
+.status-pick{display:flex;flex-wrap:wrap;gap:6px}
+.status-pick label{
+  position:relative;flex:1;min-width:64px;
+  margin-bottom:0;
+}
+.status-pick input{position:absolute;opacity:0;pointer-events:none}
+.status-pick span{
+  display:block;text-align:center;
+  padding:8px 4px;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));font-weight:500;
+  border:1px solid var(--line);
+  border-radius:var(--r-sm);
+  background:var(--bg-1);
+  color:var(--ink-3);
+  transition:background-color .15s ease,color .15s ease,border-color .15s ease,transform .12s ease;
+}
+.status-pick label:active span{transform:scale(.95)}
+.status-pick input:checked + span{
+  background:var(--accent-soft-2);
+  border-color:var(--accent);
+  color:var(--accent);font-weight:600;
+}
+/* Use semantic priority colors: gray for low, blue for normal, orange for high, and red for urgent. */
+#prioPick input[value="low"]:checked + span{background:rgba(140,150,170,.13);border-color:var(--s-cancel);color:#5a6372}
+#prioPick input[value="high"]:checked + span{background:rgba(224,125,10,.12);border-color:#e07d0a;color:#c26a05}
+#prioPick input[value="critical"]:checked + span{background:rgba(224,71,94,.1);border-color:#e0475e;color:#e0475e}
+
+/* Dialog actions. */
+.modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:20px}
+
+/* Shared .btn buttons. */
+.btn{
+  padding:8px 16px;
+  border:none;border-radius:var(--r-md);
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-md) * var(--font-scale,1)));font-weight:600;font-family:inherit;
+  transition:background-color .15s ease,color .15s ease,transform .12s ease,box-shadow .15s ease;
+}
+.btn:active{transform:scale(.96)}
+.btn-primary{
+  background:var(--accent);
+  color:#fff;
+  box-shadow:var(--shadow-xs);
+}
+.btn-primary:hover{
+  background:var(--accent-hover);
+  box-shadow:var(--shadow-sm);
+}
+.btn-ghost{
+  background:var(--bg-2);
+  color:var(--ink-3);
+}
+.btn-ghost:hover{background:var(--bg-3);color:var(--ink-2)}
+/* Accent primary action for opening an external source task. */
+.btn-open-ext{background:var(--accent);color:#fff;box-shadow:var(--shadow-xs)}
+.btn-open-ext:hover{background:var(--accent-hover);box-shadow:var(--shadow-sm)}
+
+/* Context menu. */
+.ctx-menu{
+  position:fixed;z-index:70;
+  min-width:168px;
+  padding:4px;
+  border-radius:var(--r-md);
+  background:var(--bg-0);
+  box-shadow:var(--shadow-lg);
+  opacity:0;pointer-events:none;
+  transform:scale(.94);
+  transform-origin:top left;
+  transition:transform .14s var(--ease-out),opacity .12s ease;
+}
+.ctx-menu.show{opacity:1;pointer-events:auto;transform:scale(1)}
+.ctx-item{
+  display:flex;align-items:center;gap:10px;
+  width:100%;padding:8px 11px;
+  border:none;background:transparent;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-md) * var(--font-scale,1)));color:var(--ink-2);
+  text-align:left;border-radius:var(--r-sm);
+  transition:background-color .12s ease;
+}
+
+
+.ctx-item{font-weight:500;color:var(--ink-2);letter-spacing:.2px}
+.ctx-item:hover{background:var(--bg-1)}
+.ctx-item:active{transform:scale(.985)}
+.ctx-item .ico{width:15px;height:15px;flex-shrink:0;opacity:.55;
+  fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;
+  transition:opacity .12s}
+.ctx-item:hover .ico{opacity:.95}
+/* Use semantic colors to distinguish target statuses. */
+.ctx-item[data-ctx="todo"]:hover{color:var(--s-todo);background:rgba(91,147,240,.09)}
+.ctx-item[data-ctx="doing"]:hover{color:var(--s-doing);background:rgba(245,165,36,.1)}
+.ctx-item[data-ctx="done"]:hover{color:var(--s-done);background:rgba(34,193,151,.1)}
+.ctx-item[data-ctx="cancel"]:hover{color:var(--s-cancel);background:rgba(140,150,170,.12)}
+.ctx-item.danger{color:#e0475e}
+.ctx-item.danger .ico{opacity:.7}
+.ctx-item.danger:hover{background:rgba(224,71,94,.09);color:#e0475e}
+.ctx-sep{height:1px;margin:5px 10px;background:var(--line-2);opacity:.7}
+/* Mark the current status. */
+.ctx-item.checked{color:var(--accent);font-weight:700}
+.ctx-item.checked .ico{opacity:.9}
+.ctx-check{width:13px;height:13px;margin-left:auto;flex-shrink:0;
+  fill:none;stroke:var(--accent);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+/* Show the task title above menu actions for context. */
+.ctx-title{
+  padding:8px 11px 6px;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));font-weight:700;color:var(--ink-4);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;
+  border-bottom:1px solid var(--line-2);margin-bottom:4px;
+}
+
+/* Task-list panel. */
+.task-list-panel{
+  position:fixed;z-index:50;
+  width:256px;max-height:420px;
+  display:flex;flex-direction:column;
+  padding:0;
+  border-radius:var(--r-lg);
+  background:var(--bg-0);
+  box-shadow:var(--shadow-lg);
+  opacity:0;pointer-events:none;
+  transform:scale(.94) translateY(4px);
+  transform-origin:top right;
+  transition:transform .2s var(--ease-out),opacity .15s ease;
+  overflow:hidden;
+}
+.task-list-panel.show{opacity:1;pointer-events:auto;transform:scale(1) translateY(0)}
+.tlp-head{
+  display:flex;align-items:center;gap:7px;
+  padding:11px 15px;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-base) * var(--font-scale,1)));font-weight:700;color:var(--ink-2);letter-spacing:.2px;
+  border-bottom:1px solid var(--line-2);
+  flex-shrink:0;
+}
+.tlp-head .dot{width:8px;height:8px;border-radius:50%}
+.tlp-body{
+  flex:1;overflow-y:auto;
+    scrollbar-width:thin;
+  padding:4px;
+}
+.tlp-body::-webkit-scrollbar{width:4px}
+.tlp-body::-webkit-scrollbar-thumb{background:var(--bg-3);border-radius:2px}
+/*
+ * Sortable rows retain the default hover cursor and use grabbing only while pressed;
+ * core/drag.js handles draggable rows.
+ */
+.tlp-item{
+  display:flex;align-items:center;gap:8px;
+  padding:8px 11px;
+  border-radius:var(--r-sm);
+  transition:background-color .12s ease;
+}
+.tlp-item + .tlp-item{border-top:1px solid var(--line-2)}   /* Separate task rows visually. */
+.tlp-item:hover{background:var(--bg-1)}
+.tlp-item.dragging-row{opacity:.4}
+.tlp-item.drag-over-row{border-top:2px solid var(--accent)}
+.tlp-statusbar{
+  width:3px;height:18px;border-radius:2px;flex-shrink:0;
+  transition:transform .12s ease;
+}
+.tlp-statusbar:hover{transform:scaleX(1.4)}
+.tlp-title{
+  flex:1;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-base) * var(--font-scale,1)));color:var(--ink-2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.tlp-src{
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));color:var(--ink-4);flex-shrink:0;
+  padding:2px 7px;border-radius:var(--r-sm);
+  background:var(--bg-2);
+}
+/* External-task source badges use inline source colors. */
+.tlp-exttag{
+  font-size:max(var(--font-min-readable, 14.5px), 8px);font-weight:800;color:#fff;letter-spacing:.3px;flex-shrink:0;
+  min-width:16px;height:15px;line-height:15px;text-align:center;
+  padding:0 4px;border-radius:var(--r-full);background:#6b5bd2;
+}
+.tlp-empty{padding:24px 12px;text-align:center;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));color:var(--ink-5)}
+/* Search and paginate large task histories rather than rendering all rows at once. */
+.tlp-search{
+  margin:0 10px 8px;padding:6px 10px;border:1px solid var(--line);border-radius:var(--r-sm);
+  background:var(--bg-1);color:var(--ink);font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));font-family:inherit;outline:none;
+}
+.tlp-search:focus{border-color:var(--accent)}
+.tlp-more{
+  display:block;width:calc(100% - 20px);margin:6px 10px 8px;padding:7px 0;
+  border:1px dashed var(--line);border-radius:var(--r-sm);background:none;
+  color:var(--accent);font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));font-weight:600;font-family:inherit;
+}
+.tlp-more:hover{background:var(--accent-soft-2,rgba(79,143,245,.08))}
+
+/*
+ * Dock popups to the parent's left edge. Remove centering transforms and scale animations
+ * that would offset right/top positioning; retain fade-in only.
+ */
+.pop-left{transform:none !important;transition:opacity .16s ease !important}
+
+/* Standalone requirement-pool window shell. */
+.history-board{
+  position:fixed;z-index:64;top:50%;left:50%;
+  width:min(1020px,calc(100vw - 48px));height:min(740px,calc(100vh - 56px));
+  transform:translate(-50%,-50%) scale(.94);transform-origin:center;
+  background:var(--bg-0);border-radius:var(--r-xl);box-shadow:var(--shadow-xl);
+  display:flex;flex-direction:column;overflow:hidden;
+  opacity:0;pointer-events:none;
+  transition:transform .22s var(--ease-out),opacity .16s ease;
+}
+.history-board.show{opacity:1;pointer-events:auto;transform:translate(-50%,-50%) scale(1)}
+.hb-head{display:flex;align-items:center;justify-content:space-between;padding:16px 20px 12px;border-bottom:1px solid var(--line-2);flex-shrink:0}
+.hb-title{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-lg) * var(--font-scale,1)));font-weight:700;color:var(--ink)}
+.hb-count{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));font-weight:400;color:var(--ink-4);margin-left:4px}
+.hb-head-actions{display:flex;align-items:center;gap:8px;margin-left:auto}
+.hb-close{background:none;border:none;color:var(--ink-4);font-size:15px;padding:4px 8px;border-radius:var(--r-sm)}
+.hb-close:hover{background:var(--bg-2);color:var(--ink-2)}
+
+/* Inline title/note/tag editors reveal boundaries on hover or focus and placeholders when empty. */
+.editable{border-radius:var(--r-sm);transition:background-color .12s,box-shadow .12s;outline:none}
+.editable:hover{background:var(--bg-1)}
+.editable:focus{background:var(--bg-0);box-shadow:0 0 0 2px var(--accent-soft)}
+.editable:empty::before{content:attr(data-ph);color:var(--ink-5);pointer-events:none}
+.detail-title.editable{padding:2px 6px;margin-left:-6px}
+
+
+.detail-note.editable{
+  padding:8px 11px;min-height:0;white-space:pre-wrap;line-height:1.65;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));color:var(--ink-2);background:transparent;
+  border:1px solid transparent;border-radius:var(--r-md);margin-top:2px;
+}
+.detail-note.editable:hover{background:var(--bg-1);border-color:var(--line-2)}
+.detail-note.editable:focus{background:var(--bg-0);border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);min-height:52px}
+/* Place the multiline progress composer below the conversation with a send action at the bottom right. */
+.prog-composer .prog-input{
+  min-height:52px;
+  padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-md);
+  background:var(--bg-0);color:var(--ink);font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-md) * var(--font-scale,1)));font-family:inherit;
+  outline:none;transition:border-color .14s,background-color .14s,box-shadow .14s;
+}
+.prog-send-row{display:flex;align-items:center;gap:10px;margin-top:8px}
+.prog-tip{font-size:max(var(--font-min-readable, 14.5px), 11px);color:var(--ink-5)}
+.prog-send-row .prog-log-btn{
+  margin-left:auto;padding:7px 20px;border:none;border-radius:var(--r-md);
+  background:var(--accent);color:#fff;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));font-weight:700;font-family:inherit;
+}
+.prog-send-row .prog-log-btn:hover{filter:brightness(1.06)}
+/* Recurring cadence badge and next due date. */
+.routine-edit{display:flex;flex-direction:column;gap:9px}
+.rc-pill.active{background:rgba(124,108,240,.12);border-color:#7c6cf0;color:#7c6cf0;font-weight:700}
+.rc-off{color:var(--ink-4)}
+.rc-off:hover{border-color:#e0475e;color:#e0475e}
+.routine-next-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.rn-k{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));font-weight:700;color:var(--ink-4);flex:0 0 auto}
+/* Labeled tag row directly below notes. */
+.detail-tagline{display:flex;align-items:baseline;gap:8px;margin:8px 0 2px}
+.detail-tagline .dtl-k{flex:0 0 auto;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));font-weight:700;color:var(--ink-4)}
+.detail-tagline .dtl-v{flex:1;min-width:0;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));color:var(--ink-2);padding:3px 7px}
+/* Match creation-form priority colors: gray, blue, orange, and red. */
+.prio-pill.active{font-weight:700}
+.prio-pill.prio-low.active{background:rgba(140,150,170,.14);border-color:var(--s-cancel);color:#5a6372}
+.prio-pill.prio-normal.active{background:var(--accent-soft-2);border-color:var(--accent);color:var(--accent)}
+.prio-pill.prio-high.active{background:rgba(224,125,10,.12);border-color:#e07d0a;color:#c26a05}
+.prio-pill.prio-critical.active{background:rgba(224,71,94,.1);border-color:#e0475e;color:#e0475e}
+
+/* Recurring tasks show cadence instead of a duration schedule. */
+.routine-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.routine-cycle{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));font-weight:700;color:#7c6cf0;background:rgba(124,108,240,.1);
+  padding:4px 11px;border-radius:var(--r-full)}
+.routine-next,.routine-last{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));color:var(--ink-4)}
+
+/* Planned and actual scheduling details. */
+.sched-grid{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:7px 8px;align-items:center}
+.sched-lbl{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));font-weight:700;color:var(--ink-4);white-space:nowrap}
+.sched-arrow{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));color:var(--ink-5)}
+.sched-in{
+  width:100%;box-sizing:border-box;padding:5px 8px;
+  border:1px solid var(--line);border-radius:var(--r-sm);background:var(--bg-1);
+  color:var(--ink);font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));font-family:inherit;outline:none;
+}
+.sched-in:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.sched-in.sched-act{background:var(--bg-0);border-style:dashed}   /* Use a dashed border for actual execution values to distinguish them from the planned baseline. */
+
+/* Notification center. */
+
+
+#addMask .field>label{display:block;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));
+  font-weight:600;color:var(--ink-3);margin-bottom:7px;letter-spacing:.01em}
+#addMask :is(input[type=text],input[type=date],input[type=datetime-local],textarea,select){
+  width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;
+  background:var(--bg-0);color:var(--ink);font-family:inherit;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));
+  padding:10px 12px;transition:border-color .13s,box-shadow .13s}
+#addMask textarea{min-height:112px;line-height:1.65;resize:vertical}
+#addMask .field-help{margin-left:6px;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));font-weight:400;color:var(--ink-4)}
+#addMask .add-description textarea{min-height:220px;padding:14px 15px;line-height:1.7;resize:vertical}
+#addMask #addAttField{margin-top:-3px;padding:10px 12px 11px;border:1px solid var(--line-2);border-radius:12px;background:var(--bg-1)}
+#addMask #addAttField>label{margin-bottom:6px}
+#addMask .add-att-zone{padding:8px 9px;background:var(--bg-0)}
+#addMask :is(input,textarea,select):hover{border-color:color-mix(in srgb,var(--accent) 35%,var(--line))}
+#addMask :is(input,textarea,select):focus{outline:none;border-color:var(--accent);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 14%,transparent)}
+#addMask ::placeholder{color:var(--ink-5)}
+/* Equal-height selection pills with subtle fill and accent outlines. */
+#addMask :is(.seg,.prio-seg,.kind-seg) label,
+#addMask input[type=radio]+label{border-radius:10px}
+#addMask .field :is(label.on,.seg-on){background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+/* Attachment drop area. */
+#addMask .add-att-zone{border:1.5px dashed var(--line);border-radius:12px;
+  background:color-mix(in srgb,var(--bg-2) 40%,transparent)}
+#addMask .add-att-zone:hover{border-color:var(--accent)}
+/* Distinguish primary and secondary footer actions. */
+#addMask .modal .btn-row button,#addMask #addOk,#addMask #addCancel{border-radius:10px;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-base) * var(--font-scale,1)));padding:9px 22px}
+#addMask #addOk{background:var(--accent);border:1px solid var(--accent);color:#fff;font-weight:600}
+#addMask #addOk:hover{filter:brightness(1.05)}
+#addMask #addOk:disabled{opacity:.6}
+#addMask #addCancel{background:var(--bg-0);border:1px solid var(--line);color:var(--ink-3)}
+/* Spacing for supplementary-settings headings. */
+#addMask .add-side-title{margin:8px 0 14px;font-size:max(var(--font-min-readable, 14.5px), 12px)}
+
+/* The unified requirement board is styled by requirements-board.css. */
+
+:root[lang="en-US"] .add-go-strategy label.is-recommended>span::after{content:"Recommended"}

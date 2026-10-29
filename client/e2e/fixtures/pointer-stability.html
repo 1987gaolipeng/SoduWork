@@ -1,0 +1,29 @@
+<!doctype html><html data-desk-panel="workspace"><meta charset="utf-8">
+<link rel="stylesheet" href="../../theme/variables.css">
+<link rel="stylesheet" href="../../components/panels/panels.css">
+<link rel="stylesheet" href="../../components/panels/panels-chat.css">
+<link rel="stylesheet" href="../../components/workspace/workspace-shell.css">
+<link rel="stylesheet" href="../../theme/cursor.css">
+<link rel="stylesheet" href="../../desk-window.css">
+<link rel="stylesheet" href="../../theme/workspace-experience.css">
+<link rel="stylesheet" href="../../components/panels/work-composer.css">
+<style>
+  /* Compare the settled hover state even when this isolated window is hidden. */
+  *{transition:none!important}
+  body{margin:32px;background:var(--bg-0);color:var(--ink)}
+  #rail{display:flex;flex-direction:row;align-items:center;gap:16px;height:64px;padding:0}
+  #text{margin:24px 0;width:700px;line-height:32px}
+  #composer{width:700px;margin:0;padding:0}
+  #composer textarea{box-sizing:border-box;width:100%;height:96px;resize:none}
+  #send{width:40px;height:36px;margin:8px;border:0;border-radius:8px}
+</style>
+<div id="rail" class="ws-rail">
+  <button id="rail-button" class="ws-rail-button" aria-label="Conversations"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/></svg><span>Conversations</span></button>
+  <button id="rail-update" class="ws-rail-button ws-rail-update" aria-label="Update"><svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18"/></svg></button>
+  <button id="rail-account" class="ws-rail-account" aria-label="Account"><span class="ws-rail-avatar"><span>S</span></span></button>
+</div>
+<div id="text" class="nmd">Selectable answer <strong>with bold text</strong> <em>and emphasis</em> <code>inline code</code> and whitespace.</div>
+<div id="composer" class="nchat-foot"><div class="nchat-footin"><div class="nchat-entry-dock"><div class="nbox work-composer">
+  <textarea id="draft" aria-label="Message">Unsent draft</textarea>
+  <button id="send" class="wc-send" aria-label="Send"><svg viewBox="0 0 24 24"><path d="M12 20V4m-7 7 7-7 7 7"/></svg></button>
+</div></div></div></div>

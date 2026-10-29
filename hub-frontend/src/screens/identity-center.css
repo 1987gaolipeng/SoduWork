@@ -1,0 +1,57 @@
+.idp-page { color: var(--ink); }
+/* Keep the empty and configured states on the same readable measure as the
+   other admin directory pages when the shell grows beyond desktop width. */
+.app .content > .idp-page { width: 100%; max-width: 1180px; margin-inline: auto; }
+.idp-list { display: flex; min-width: 0; flex-direction: column; gap: 10px; }
+.idp-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.idp-logo { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 10px; background: var(--accent-soft); color: var(--accent); font: 750 16px var(--display); }
+.idp-main { min-width: 0; }
+.idp-main > div:first-child { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.idp-main h3 { margin: 0; font-size: max(var(--font-min-readable, 14.5px), 14px); overflow-wrap: anywhere; }
+.idp-main code { padding: 2px 5px; border-radius: 5px; background: var(--surface-2); color: var(--ink-3); font: 14.5px var(--mono); overflow-wrap: anywhere; }
+.idp-main > p { margin: 6px 0 10px; color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); line-height: 1.5; overflow-wrap: anywhere; }
+.idp-status { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); font-weight: 600; }
+.idp-status i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.idp-status.ready { color: var(--ok); }
+.idp-status.failed { color: var(--crit); }
+.idp-login-state { padding-left: 8px; border-left: 1px solid var(--line); color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.idp-login-state.enabled { color: var(--ok); }
+.idp-facts { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.idp-facts span { color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); line-height: 1.6; overflow-wrap: anywhere; }
+.idp-facts b { margin-left: 5px; color: var(--ink-2); font-weight: 600; }
+.idp-actions { grid-column: 2; padding-top: 12px; border-top: 1px solid var(--line-2); }
+.app .content .idp-actions .idp-delete { margin-left: auto; }
+.idp-message { display: flex; align-items: flex-start; gap: 6px; margin-top: 9px; color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); line-height: 1.6; overflow-wrap: anywhere; }
+.idp-message svg { width: 13px; height: 13px; margin-top: 2px; flex: 0 0 auto; }
+.idp-message.failed { color: var(--crit); }
+.idp-message.ready { color: var(--ok); }
+.idp-empty{display:flex;min-height:208px;flex-direction:column;align-items:center;justify-content:center;border:1px dashed var(--line);border-radius:14px;background:var(--surface);text-align:center}.idp-empty-icon{display:grid;width:42px;height:42px;place-items:center;border-radius:12px;background:var(--surface-2);color:var(--accent)}.idp-empty-icon svg{width:19px;height:19px}.idp-empty h3{margin:12px 0 5px;font-size:max(var(--font-min-readable, 14.5px), 14px)}.idp-empty p{max-width:480px;margin-bottom:14px;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.idp-empty-icon.bad{background:var(--crit-soft);color:var(--crit)}
+.idp-protocol-note { display: flex; align-items: flex-start; gap: 7px; margin: 0; color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); line-height: 1.6; }
+.idp-protocol-note > svg { width: 14px; height: 14px; flex: 0 0 auto; margin-top: 2px; color: var(--accent); }
+.idp-form{display:flex;flex-direction:column;gap:14px}.idp-form-note{display:flex;align-items:flex-start;gap:8px;padding:10px 11px;border-radius:9px;background:var(--accent-soft);color:var(--ink-2)}.idp-form-note svg{width:14px;height:14px;flex:0 0 auto;color:var(--accent)}.idp-form-note p{font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.55}.idp-form-note b{font-weight:700}
+.idp-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.idp-form-grid label,.idp-jit-route label,.idp-claims label{display:flex;min-width:0;flex-direction:column;gap:5px}.idp-form-grid label>span,.idp-jit-route label>span,.idp-claims label>span{color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:650}.idp-form-grid label>span small{font-weight:400;color:var(--ink-4)}.idp-form-grid .wide{grid-column:1/-1}.idp-field-help{color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.45}
+.idp-jit{padding:11px;border:1px solid var(--line);border-radius:10px;background:var(--surface-1)}.idp-jit>label{display:flex;align-items:flex-start;gap:8px}.idp-jit>label input{margin-top:3px}.idp-jit>label span{display:flex;flex-direction:column}.idp-jit>label b{font-size:max(var(--font-min-readable, 14.5px), 12px)}.idp-jit>label small{margin-top:2px;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px)}.idp-jit-route{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:11px;padding-top:10px;border-top:1px solid var(--line)}
+.idp-claims{border-top:1px solid var(--line);padding-top:10px}.idp-claims summary{color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px);cursor:pointer}.idp-claims>div{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:10px}.idp-claims .f-in{min-height:34px}
+@media (max-width: 1100px) {
+  .idp-row { grid-template-columns: 40px minmax(0, 1fr); }
+  .idp-actions { grid-column: 2; }
+}
+@media (max-width: 950px) {
+  .idp-form-grid, .idp-jit-route { grid-template-columns: 1fr; }
+  .idp-form-grid .wide { grid-column: auto; }
+  .idp-claims > div { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) {
+  .idp-row { padding: 12px; gap: 10px; }
+  .idp-actions { grid-column: 1 / -1; }
+}

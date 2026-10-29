@@ -1,0 +1,157 @@
+{
+  "schemaVersion": 1,
+  "id": "figma",
+  "name": "Figma",
+  "category": "设计",
+  "description": "Figma 通用连接器：当前用户、文件结构、项目文件列表、文件评论。基于 Figma REST API v1，Personal Access Token 走 X-Figma-Token 头，不绑定任何汇报场景。",
+  "officialDocs": [
+    "https://www.figma.com/developers/api",
+    "https://www.figma.com/developers/api#get-me-endpoint",
+    "https://www.figma.com/developers/api#get-files-endpoint",
+    "https://www.figma.com/developers/api#post-comments-endpoint"
+  ],
+  "authDocs": [
+    "https://help.figma.com/hc/en-us/articles/4404749199767-Manage-personal-access-tokens"
+  ],
+  "baseUrl": "https://api.figma.com",
+  "fields": [
+    {
+      "key": "FIGMA_PAT",
+      "label": "Personal Access Token",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "header",
+    "tokenKey": "FIGMA_PAT",
+    "header": "X-Figma-Token"
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "get_me",
+      "description": "获取当前用户身份。无分页。出处：https://www.figma.com/developers/api#get-me-endpoint",
+      "method": "GET",
+      "path": "/v1/me",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_file",
+      "description": "获取文件完整结构。无分页；depth 限制遍历深度控制响应体积，version 指定历史版本。出处：https://www.figma.com/developers/api#get-files-endpoint",
+      "method": "GET",
+      "path": "/v1/files/{file_key}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "file_key": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9]{10,}$",
+            "description": "文件 Key",
+            "maxLength": 10000
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "description": "文档树遍历深度"
+          },
+          "version": {
+            "type": "string",
+            "description": "历史版本 ID",
+            "maxLength": 10000
+          },
+          "geometry": {
+            "type": "string",
+            "enum": [
+              "paths"
+            ],
+            "description": "返回矢量路径数据",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "file_key"
+        ],
+        "maxProperties": 50
+      },
+      "query": {
+        "depth": "depth",
+        "version": "version",
+        "geometry": "geometry"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_project_files",
+      "description": "列出项目内文件。无分页，一次返回全量。出处：https://www.figma.com/developers/api#get-project-files-endpoint",
+      "method": "GET",
+      "path": "/v1/projects/{project_id}/files",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "pattern": "^[0-9]{5,20}$",
+            "description": "项目数字 ID",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_comment",
+      "description": "在文件上创建评论（message 上限 5000 字符）。写入操作：运行前必须获得用户明确授权。出处：https://www.figma.com/developers/api#post-comments-endpoint",
+      "method": "POST",
+      "path": "/v1/files/{file_key}/comments",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "file_key": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9]{10,}$",
+            "description": "文件 Key",
+            "maxLength": 10000
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 5000,
+            "description": "评论内容"
+          }
+        },
+        "required": [
+          "file_key",
+          "message"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "message": "$message"
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "鉴权头为 X-Figma-Token header（非 Bearer）；OAuth 授权流当前客户端不支持，待宿主适配。",
+    "Figma REST 端点普遍无游标分页；get_file 建议始终带 depth 控制体积。",
+    "create_comment 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

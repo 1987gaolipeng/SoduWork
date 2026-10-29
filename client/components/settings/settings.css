@@ -1,0 +1,299 @@
+/* Settings owns its layout after workspace chrome. Business controls retain their existing hooks. */
+#settingsPanel {
+  --settings-accent: var(--accent, #397fe9);
+  --settings-paper: var(--bg-0, #fff);
+  --settings-canvas: var(--bg-1, #f6f8fb);
+  --settings-line: var(--line, #dfe7f1);
+  --settings-muted: var(--ink-3, #64748b);
+  --settings-small: max(var(--font-min-readable, 14.5px), calc(14.5px * var(--font-scale, 1)));
+  --settings-text: max(var(--font-min-readable, 14.5px), calc(14.5px * var(--font-scale, 1)));
+  --settings-label: max(var(--font-min-readable, 14.5px), calc(14.5px * var(--font-scale, 1)));
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  align-content: start;
+  gap: 16px;
+  width: min(1040px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  box-sizing: border-box;
+  padding: 0 28px 32px;
+  border: 1px solid var(--settings-line);
+  border-radius: 22px;
+  background: var(--settings-canvas);
+  color: var(--ink, #172235);
+  box-shadow: 0 18px 54px rgba(32, 52, 82, .10);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line, #dfe7f1) transparent;
+  overflow-anchor: none;
+}
+#settingsPanel:not(.show) { display: none !important; }
+#settingsPanel > h3 { display: none; }
+#settingsPanel > .set-page-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 88px;
+  box-sizing: border-box;
+  margin: 0 -28px 4px;
+  padding: 19px 28px 17px;
+  border-bottom: 1px solid var(--settings-line);
+  background: var(--settings-paper);
+}
+#settingsPanel > .set-page-head::before { display: none !important; }
+#settingsPanel .set-page-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
+  border: 1px solid color-mix(in srgb, var(--settings-accent) 16%, var(--settings-line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--settings-accent) 8%, var(--settings-paper));
+  color: var(--settings-accent);
+}
+#settingsPanel .set-page-icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+#settingsPanel .set-page-title { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: baseline; gap: 3px 12px; min-width: 0; }
+#settingsPanel .set-page-kicker {
+  grid-column: 1 / -1;
+  font: 650 var(--settings-small)/1.3 var(--font-latin, sans-serif);
+  letter-spacing: .1em;
+  color: var(--settings-accent);
+}
+#settingsPanel .set-page-main-title { grid-column: 1; font: 680 20px/1.25 var(--font-display, sans-serif); letter-spacing: -.02em; }
+#settingsPanel .set-page-sub { color: var(--settings-muted); font: 400 var(--settings-text)/1.5 var(--font-ui, sans-serif); }
+#settingsPanel > .set-group {
+  grid-column: 1 / -1;
+  min-width: 0;
+  margin: 0;
+  padding: 20px;
+  box-sizing: border-box;
+  border: 1px solid var(--settings-line);
+  border-radius: 16px;
+  background: var(--settings-paper);
+  box-shadow: 0 3px 12px rgba(32, 52, 82, .025);
+}
+#settingsPanel > .set-group .k {
+  margin: 0 0 12px;
+  color: var(--ink, #172235);
+  font: 650 var(--settings-label)/1.45 var(--font-ui, sans-serif);
+  letter-spacing: 0;
+}
+#settingsPanel .set-kline { align-items: center; flex-wrap: wrap; gap: 10px; margin: 0 0 14px; }
+#settingsPanel .set-kline .k { margin: 0; }
+#settingsPanel .set-note { margin-top: 10px; color: var(--settings-muted); font-size: var(--settings-small); line-height: 1.65; overflow-wrap: anywhere; }
+#settingsPanel .set-note.is-error { color: var(--s-critical, #c64151); }
+#settingsPanel .hub-row { display: flex; align-items: stretch; gap: 10px; min-width: 0; }
+#settingsPanel .hub-input,
+#settingsPanel .set-cur {
+  flex: 1;
+  min-width: 0;
+  min-height: 42px;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--settings-line);
+  border-radius: 10px;
+  background: var(--settings-paper);
+  color: var(--ink-2, #24324a);
+  font: 400 var(--settings-text)/1.5 var(--font-ui, sans-serif);
+  box-shadow: none;
+}
+#settingsPanel .set-cur { align-content: center; }
+#settingsPanel .hub-input { transition: border-color .16s, box-shadow .16s; }
+#settingsPanel .hub-input:hover:not([readonly]):not(:disabled) { border-color: color-mix(in srgb, var(--settings-accent) 40%, var(--settings-line)); }
+#settingsPanel .hub-input:focus { border-color: var(--settings-accent); outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--settings-accent) 12%, transparent); }
+#settingsPanel .hub-input[readonly] { background: var(--settings-canvas); color: var(--settings-muted); box-shadow: none; }
+#settingsPanel button {
+  font-family: var(--font-ui, sans-serif);
+  font-size: var(--settings-text);
+  transition: background-color .16s, border-color .16s, color .16s, box-shadow .16s;
+}
+#settingsPanel button:active { transform: none; }
+#settingsPanel .hub-save {
+  flex: none;
+  min-height: 42px;
+  padding: 9px 16px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: var(--settings-accent);
+  color: #fff;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  box-shadow: none;
+}
+#settingsPanel .hub-save:hover:not(:disabled) { filter: none; background: color-mix(in srgb, var(--settings-accent) 88%, #172235); }
+#settingsPanel :is(#skinOpenBtn, .soduwork-account-logout, .client-update-action) {
+  border-color: var(--settings-line);
+  background: var(--settings-paper);
+  color: var(--ink-2, #24324a);
+}
+#settingsPanel :is(#skinOpenBtn, .soduwork-account-logout, .client-update-action):hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--settings-accent) 40%, var(--settings-line));
+  background: color-mix(in srgb, var(--settings-accent) 5%, var(--settings-paper));
+  color: var(--settings-accent);
+}
+#settingsPanel :is(button, input):disabled { opacity: .5; cursor: not-allowed; box-shadow: none; filter: none; }
+#settingsPanel :is(button, input):focus-visible { outline: 2px solid var(--settings-accent); outline-offset: 3px; }
+#settingsPanel .chk-inline {
+  min-height: 42px;
+  box-sizing: border-box;
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--settings-line);
+  border-radius: 10px;
+  background: var(--settings-paper);
+  color: var(--ink-2, #24324a);
+  font-size: var(--settings-text);
+  line-height: 1.5;
+  transition: border-color .16s, background-color .16s;
+}
+#settingsPanel .chk-inline:has(input:checked) { background: color-mix(in srgb, var(--settings-accent) 4%, var(--settings-paper)); border-color: color-mix(in srgb, var(--settings-accent) 20%, var(--settings-line)); }
+#settingsPanel .chk-inline:hover { border-color: color-mix(in srgb, var(--settings-accent) 40%, var(--settings-line)); }
+#settingsPanel .chk-inline input { width: 17px; height: 17px; margin: 0 2px 0 0; accent-color: var(--settings-accent); }
+#settingsPanel .seg { min-height: 42px; padding: 4px; gap: 3px; border: 1px solid var(--settings-line); border-radius: 11px; background: var(--settings-canvas); }
+#settingsPanel .seg button { min-width: 0; min-height: 34px; padding: 6px 8px; border: 1px solid transparent; border-radius: 8px; color: var(--settings-muted); font-size: var(--settings-text); }
+#settingsPanel .seg button.active { background: var(--settings-paper); color: var(--settings-accent); border-color: color-mix(in srgb, var(--settings-accent) 20%, var(--settings-line)); box-shadow: 0 1px 4px rgba(32, 52, 82, .07); }
+#settingsPanel .seg button:hover:not(.active) { background: color-mix(in srgb, var(--settings-accent) 5%, var(--settings-paper)); color: var(--ink); }
+#settingsPanel .settings-select-wrap { position: relative; display: block; min-width: 0; }
+#settingsPanel .settings-select {
+  width: 100%;
+  min-height: 42px;
+  box-sizing: border-box;
+  appearance: none;
+  padding: 9px 42px 9px 12px;
+  border: 1px solid var(--settings-line);
+  border-radius: 10px;
+  background: var(--settings-paper);
+  color: var(--ink-2, #24324a);
+  font: 400 var(--settings-text)/1.5 var(--font-ui, sans-serif);
+  cursor: pointer;
+  transition: border-color .16s, box-shadow .16s, background-color .16s;
+}
+#settingsPanel .settings-select:hover { border-color: color-mix(in srgb, var(--settings-accent) 40%, var(--settings-line)); background: color-mix(in srgb, var(--settings-accent) 3%, var(--settings-paper)); }
+#settingsPanel .settings-select:focus { border-color: var(--settings-accent); outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--settings-accent) 12%, transparent); }
+#settingsPanel .settings-select-chevron { position: absolute; top: 50%; right: 13px; width: 16px; height: 16px; transform: translateY(-50%); pointer-events: none; fill: none; stroke: var(--settings-muted); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+#settingsPanel .hub-env-picker { gap: 12px; }
+#settingsPanel .hub-env-option { min-height: 72px; padding: 14px; border-radius: 12px; border-color: var(--settings-line); background: var(--settings-paper); color: var(--ink-2); }
+#settingsPanel .hub-env-option:hover { border-color: color-mix(in srgb, var(--settings-accent) 40%, var(--settings-line)); background: var(--settings-canvas); }
+#settingsPanel .hub-env-option.active { border-color: color-mix(in srgb, var(--settings-accent) 50%, var(--settings-line)); background: color-mix(in srgb, var(--settings-accent) 5%, var(--settings-paper)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--settings-accent) 10%, transparent); }
+#settingsPanel .hub-env-option.active .hub-env-dot { border-color: var(--settings-accent); background: var(--settings-paper); }
+#settingsPanel .hub-env-copy b { font-size: var(--settings-text); }
+#settingsPanel .hub-env-copy small { margin-top: 3px; font-size: var(--settings-small); white-space: normal; color: var(--settings-muted); }
+#settingsPanel .hub-env-address-head { flex-wrap: wrap; font-size: var(--settings-small); line-height: 1.5; }
+#settingsPanel :is(.hub-env-current, .client-update-badge, .client-update-copy small, .client-update-blockers > div, .soduwork-account-badge, .soduwork-account-id) { font-size: var(--settings-small); }
+#settingsPanel .client-update-copy b { font-size: var(--settings-label); }
+.client-update-blockers>div>span{flex:1;min-width:0}
+.client-update-blockers button{flex:none;border:1px solid var(--line);border-radius:6px;background:var(--bg-0);color:var(--ink-2);font:inherit;padding:4px 8px;cursor:pointer}
+.client-update-blockers button:hover{color:var(--accent);border-color:var(--accent)}
+.client-update-blockers p{margin:5px 0 0;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.6}
+#settingsPanel .soduwork-account-name { font-size: var(--settings-label); }
+#settingsPanel .soduwork-account-avatar { width: 42px; height: 42px; border-radius: 50%; color: var(--settings-accent); background: color-mix(in srgb, var(--settings-accent) 8%, var(--settings-paper)); font-size: 18px; overflow: hidden; }
+#settingsPanel .soduwork-account-person { gap: 12px; min-width: 0; }
+#settingsPanel .soduwork-account-person > span:nth-child(2) { min-width: 0; }
+#settingsPanel :is(.soduwork-account-name, .soduwork-account-id) { overflow-wrap: anywhere; }
+
+/* Keep only the shell overrides required by the shared, legacy window chrome. */
+html[data-desk-panel="workspace"] #settingsPanel {
+  --settings-gutter: max(28px, calc((100vw - var(--ws-main-left, var(--ws-side-w, 220px)) - 12px - 1360px) / 2)) !important;
+  display: grid !important;
+  grid-template-columns: repeat(12, minmax(0, 1fr)) !important;
+  padding: 0 var(--settings-gutter) 32px !important;
+  min-height: 0 !important;
+  border: 1px solid var(--settings-line) !important;
+  border-radius: 22px !important;
+  background: var(--settings-canvas) !important;
+  box-shadow: 0 18px 54px rgba(32, 52, 82, .10) !important;
+  overflow-y: auto !important;
+}
+html[data-desk-panel="workspace"] #settingsPanel:not(.show) { display: none !important; }
+html[data-desk-panel="workspace"] #settingsPanel > .set-page-head {
+  display: flex !important;
+  justify-content: flex-start !important;
+  align-items: center !important;
+  gap: 14px !important;
+  width: auto !important;
+  height: auto !important;
+  min-height: 88px !important;
+  margin: 0 calc(-1 * var(--settings-gutter)) 4px !important;
+  padding: 19px 28px 17px !important;
+  background: var(--settings-paper) !important;
+  border-bottom: 1px solid var(--settings-line) !important;
+}
+html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-title {
+  display: grid !important;
+  grid-template-columns: max-content minmax(0, 1fr) !important;
+  grid-template-rows: auto auto !important;
+  align-items: baseline !important;
+  column-gap: 12px !important;
+  row-gap: 3px !important;
+  margin: 0 !important;
+  min-width: 0 !important;
+}
+html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-kicker {
+  grid-column: 1 / -1 !important;
+  grid-row: 1 !important;
+  margin: 0 !important;
+  color: var(--settings-accent) !important;
+  font: 650 var(--settings-small)/1.3 var(--font-latin, sans-serif) !important;
+  letter-spacing: .1em !important;
+}
+html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-main-title {
+  grid-column: 1 !important;
+  grid-row: 2 !important;
+  font: 680 20px/1.25 var(--font-display, sans-serif) !important;
+  color: var(--ink) !important;
+}
+html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-sub {
+  grid-column: 2 !important;
+  grid-row: 2 !important;
+  margin: 0 !important;
+  color: var(--settings-muted) !important;
+  font: 400 var(--settings-text)/1.5 var(--font-ui, sans-serif) !important;
+  white-space: normal !important;
+}
+html[data-desk-panel="workspace"] #settingsPanel > .set-group {
+  grid-column: 1 / -1;
+  width: auto !important;
+  max-width: none !important;
+  margin: 0 !important;
+}
+html[data-desk-panel="workspace"] #settingsPanel > .set-half { grid-column: span 6; }
+html[data-desk-panel="workspace"] #settingsPanel > .set-third { grid-column: span 4; }
+#settingsPanel > .set-half { grid-column: span 6; }
+#settingsPanel > .set-third { grid-column: span 4; }
+@media (max-width: 1100px) {
+  html[data-desk-panel="workspace"] #settingsPanel { --settings-gutter: 24px !important; }
+  html[data-desk-panel="workspace"] #settingsPanel > .set-half { grid-column: 1 / -1; }
+}
+@media (max-width: 900px) {
+  html[data-desk-panel="workspace"] #settingsPanel > .set-third { grid-column: 1 / -1; }
+  html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-title { grid-template-columns: minmax(0, 1fr) !important; grid-template-rows: auto auto auto !important; }
+  html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-sub { grid-column: 1 !important; grid-row: 3 !important; }
+}
+@media (max-width: 640px) {
+  #settingsPanel { padding-inline: 16px; }
+  #settingsPanel > .set-page-head { margin-inline: -16px; padding-inline: 16px; }
+  #settingsPanel > :is(.set-half, .set-third) { grid-column: 1 / -1; }
+  html[data-desk-panel="workspace"] #settingsPanel { --settings-gutter: 16px !important; }
+  html[data-desk-panel="workspace"] #settingsPanel > .set-page-head { padding-inline: 16px !important; }
+  #settingsPanel .hub-row { flex-direction: row; flex-wrap: wrap; }
+  #settingsPanel .hub-row .hub-input, #settingsPanel .hub-row .set-cur { flex-basis: 200px; }
+  #settingsPanel .hub-env-picker { grid-template-columns: minmax(0, 1fr); }
+  #settingsPanel .soduwork-account-person { flex-wrap: wrap; }
+  #settingsPanel .soduwork-account-person > span:nth-child(2) { flex: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #settingsPanel :is(button, input, .chk-inline) { transition: none; }
+}
+
+#settingsPanel .set-access-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+#settingsPanel .set-access-options button { padding: 14px 16px; text-align: left; border: 1px solid var(--settings-line); border-radius: 12px; background: var(--settings-paper); color: var(--ink); }
+#settingsPanel .set-access-options button b { display: flex; align-items: center; gap: 7px; font-size: 15px; font-weight: 600; }
+#settingsPanel .set-access-options button small { display: block; margin-top: 6px; color: var(--settings-muted); font-size: max(var(--font-min-readable, 14.5px), 13px); line-height: 1.6; }
+#settingsPanel .set-access-options button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+#settingsPanel .set-access-options button.active { border-color: var(--settings-accent); background: color-mix(in srgb, var(--settings-accent) 5%, var(--settings-paper)); }
+#settingsPanel .set-access-options button.active b { color: var(--settings-accent); }
+#settingsPanel .set-access-options [data-default-access="full"].active { border-color: var(--s-urgent, #be2943); background: color-mix(in srgb, var(--s-urgent, #be2943) 5%, var(--settings-paper)); }
+#settingsPanel .set-access-options [data-default-access="full"].active b, #settingsPanel .set-note.is-full { color: var(--s-urgent, #be2943); }
+@media (max-width: 680px) { #settingsPanel .set-access-options { grid-template-columns: minmax(0, 1fr); } }

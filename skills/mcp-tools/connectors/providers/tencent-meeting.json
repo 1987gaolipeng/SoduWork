@@ -1,0 +1,186 @@
+{
+  "schemaVersion": 1,
+  "id": "tencent-meeting",
+  "name": "腾讯会议",
+  "category": "沟通协作",
+  "description": "腾讯会议通用连接器：用户信息、用户会议列表（官方 GET /v1/meetings?userid&instanceid）、创建会议。鉴权为请求头签名方案（AppId / X-TC-Key=SecretId / SdkId / X-TC-Timestamp / X-TC-Nonce / X-TC-Signature），由运行器专用运行时按官方算法计算。",
+  "runtimeKind": "tencent-meeting",
+  "officialDocs": [
+    "https://cloud.tencent.com/document/product/1098/60712",
+    "https://cloud.tencent.com/document/product/1098/79666",
+    "https://cloud.tencent.com/document/product/1098/79313"
+  ],
+  "authDocs": [
+    "https://cloud.tencent.com/document/product/1098/60712"
+  ],
+  "baseUrl": "https://api.meeting.qq.com",
+  "fields": [
+    {
+      "key": "TENCENT_APP_ID",
+      "label": "应用 App ID（放入请求头 AppId）",
+      "secret": false,
+      "required": true,
+      "pattern": "^[0-9]{6,20}$",
+      "example": ""
+    },
+    {
+      "key": "TENCENT_SECRET_ID",
+      "label": "SecretId（放入请求头 X-TC-Key，参与签名串首段）",
+      "secret": false,
+      "required": true,
+      "pattern": "^\\S{10,4096}$",
+      "example": ""
+    },
+    {
+      "key": "TENCENT_SDK_ID",
+      "label": "SDK ID（放入请求头 SdkId，与 SecretId 相互独立）",
+      "secret": false,
+      "required": false,
+      "pattern": "^\\S{10,4096}$",
+      "example": ""
+    },
+    {
+      "key": "TENCENT_SECRET_KEY",
+      "label": "Secret Key",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "none"
+  },
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "tools": [
+    {
+      "name": "get_user_info",
+      "description": "按 user_id 获取账户信息（GET /v1/users/{user_id}）。无分页。签名头由运行时按 SecretId/SDKId/SecretKey 计算。出处：https://cloud.tencent.com/document/product/1098/79666",
+      "method": "GET",
+      "path": "/v1/users/{user_id}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "description": "用户 user_id",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_user_meetings",
+      "description": "查询用户会议，按返回 next_pos/next_cursory 继续读取。https://meeting.tencent.com/support/topic/524/index.html",
+      "method": "GET",
+      "path": "/v1/meetings",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "userid": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "instanceid": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "default": 1,
+            "description": "终端设备类型，1=PC"
+          },
+          "pos": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9999999999,
+            "default": 0,
+            "description": "下一页 next_pos（秒）"
+          },
+          "cursory": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9999999999999,
+            "default": 0,
+            "description": "下一页 next_cursory（毫秒）"
+          }
+        },
+        "required": [
+          "userid"
+        ]
+      },
+      "query": {
+        "userid": "userid",
+        "instanceid": "instanceid",
+        "pos": "pos",
+        "cursory": "cursory"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_meeting",
+      "description": "创建会议（POST /v1/meetings，body 必填 userid、instanceid、meeting_type、subject、start_time、end_time，时间为秒级 Unix 时间戳）。写入操作：运行前必须获得用户明确授权。出处：https://cloud.tencent.com/document/product/1098/79313",
+      "method": "POST",
+      "path": "/v1/meetings",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "userid": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "start_time": {
+            "type": "string",
+            "pattern": "^[0-9]{10}$",
+            "description": "开始时间，Unix 秒"
+          },
+          "end_time": {
+            "type": "string",
+            "pattern": "^[0-9]{10}$",
+            "description": "结束时间，Unix 秒"
+          }
+        },
+        "required": [
+          "userid",
+          "subject",
+          "start_time",
+          "end_time"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "userid": "$userid",
+        "subject": "$subject",
+        "instanceid": 1,
+        "type": 0,
+        "meeting_type": 0,
+        "start_time": "$start_time",
+        "end_time": "$end_time"
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "鉴权为请求头签名方案：AppId=<AppId>、X-TC-Key=<SecretId>、SdkId=<SDK ID>（SecretId 与 SDK ID 是两个独立凭据，不能混用）、X-TC-Timestamp=<秒级时间戳>、X-TC-Nonce=<随机串>、X-TC-Signature。",
+    "签名字符串：method + '\\n' + 'X-TC-Key=<SecretId>&X-TC-Nonce=<nonce>&X-TC-Timestamp=<ts>'（参数按字母序） + '\\n' + requestURI（含 query） + '\\n' + body（GET 为空串）；HMAC-SHA256(SecretKey, 签名字符串) 先转 hex，再对 hex 字符串做 Base64，得到 X-TC-Signature。",
+    "list_user_meetings/create_meeting 的时间参数为秒级 Unix 时间戳（非毫秒），已按官方文档核验。",
+    "Secret Key 绝不出现在 URL、body 或日志中。",
+    "create_meeting 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

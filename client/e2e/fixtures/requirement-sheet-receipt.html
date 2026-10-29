@@ -1,0 +1,54 @@
+<!doctype html><meta charset="utf-8"><title>新建需求回执 · 查看详情回归</title>
+<link rel="stylesheet" href="../../components/workspace/workspace-shell.css">
+<link rel="stylesheet" href="../../components/panels/plugin-ui-host.css">
+<link rel="stylesheet" href="../../components/panels/work-entry-sheet.css">
+<link rel="stylesheet" href="../../components/requirements/requirements-board.css">
+<style>
+:root{--bg-0:#fff;--bg-1:#f8fafc;--bg-2:#f1f5f9;--line:#e2e8f0;--line-2:#e2e8f0;--ink:#182230;--ink-1:#182230;--ink-2:#344054;--ink-3:#475467;--ink-4:#667085;--ink-5:#98a2b3;--accent:#3884ff;--accent-soft:#edf4ff}
+body{font:14px "Segoe UI Variable Text",sans-serif;background:var(--bg-1)}#status{position:fixed;left:12px;bottom:12px;z-index:5}
+</style>
+<main><h2>需求池 · 新建需求抽屉</h2><div id="historyBoard"></div></main>
+<div id="status"></div>
+<script>
+window.calls={created:[],assigned:[],persisted:[],uploads:[],details:[]};window.tasks=[];window.serverTasks=new Map();window._uidSeq=0;
+window.uid=()=>'sheet-task-'+(++window._uidSeq);
+window.save=()=>{};
+window.petSay=message=>{document.getElementById('status').textContent=String(message||'');};
+/* Match workspace routing by opening RequirementsDetail directly. */
+window.openDetailEntry=id=>{calls.details.push(id);return window.RequirementsDetail.open(id);};
+window.RequirementsBoard={refresh(){},context:()=>({approvals:new Map(),waiting:new Map()})};
+window.Store={persistTask:async id=>{calls.persisted.push(id);return true},dropTask(){}};
+window.SoduWorkAPI={
+  taskExecutionOptions:async()=>({substrates:[],workflows:[],repos:[]}),
+  workCatalog:async()=>({scenarios:[]}),
+  listTeammates:async()=>({mates:[{id:'colleague',name:'高示例成员',hasBox:true}]}),
+  getProjects:async()=>[],
+  getTask:async id=>{const t=serverTasks.get(id)||tasks.find(x=>x.id===id);if(!t)throw new Error('需求不存在');return t;},
+  createAssignedTask:async body=>{calls.assigned.push(body);const task={...body,id:body.taskId,status:'todo',readOnly:true};serverTasks.set(task.id,task);return{ok:true,task,targetName:'示例成员'};},
+  listAttachments:async()=>[],
+  uploadAttachment:async(id,file)=>{calls.uploads.push(file.name);return{id:file.name}},
+};
+</script>
+<script src="../../components/panels/compose-surface.js"></script>
+<script>ComposeSurface.create=()=>({_panel:()=>null});</script>
+<script src="../../components/panels/panels-compose.js"></script>
+<script src="../../components/panels/task-execution-client.js"></script>
+<script src="../../components/panels/panels-compose-submit.js"></script>
+<script src="../../components/panels/task-priority.js"></script>
+<script src="../../components/panels/compose-selection-position.js"></script>
+<script src="../../components/panels/requirement-routing.js"></script>
+<script src="../../components/panels/panels-compose-draft.js"></script>
+<script src="../../core/requirements.js"></script>
+<script src="../../components/panels/plugin-ui-host.js"></script>
+<script src="../../components/panels/work-entry-sheet.js"></script>
+<script src="../../components/requirements/requirements-detail.js"></script>
+<script>
+window.openSheet=async(mode='self')=>{
+  RequirementsDetail.close();ComposeDraft.clear();Object.keys(calls).forEach(k=>calls[k]=[]);tasks.length=0;serverTasks.clear();
+  document.getElementById('status').textContent='';
+  WorkEntrySheet.openTask({source:'需求池',requirement:true,saveOnly:mode==='self',triageStage:'intake',
+    onCreated:id=>calls.created.push(id),
+    proposal:{title:'制作一个乡村音乐网页',note:'含歌单与播放页',checklist:['页面可打开'],priority:'normal',kind:'requirement',
+      ...(mode==='human'?{assigneeUserId:'colleague'}:{assignee:'me'})}});
+};
+</script>

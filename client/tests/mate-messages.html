@@ -1,0 +1,43 @@
+<!doctype html><html lang="zh"><meta charset="utf-8"><title>@ 同事成果验证</title>
+<link rel="stylesheet" href="../components/panels/chat-plugin-mention.css">
+<link rel="stylesheet" href="../components/panels/notice-type-scale.css">
+<style>
+:root{--font-ui:"Segoe UI","Microsoft YaHei",sans-serif;--accent:#397bfa;--bg-0:#fff;--bg-1:#f6f8fb;--bg-2:#edf1f7;--ink-1:#202a3a;--ink-2:#465267;--ink-3:#65758a;--ink-4:#78879a;--line:#dfe5ed}
+*{box-sizing:border-box}body{margin:0;background:#f6f8fb;font:14px "Segoe UI","Microsoft YaHei",sans-serif;color:var(--ink-1)}
+main{display:grid;grid-template-columns:1fr 1fr;gap:32px;padding:42px}article{border:1px solid var(--line);background:white;padding:26px;border-radius:18px;min-height:650px}h1{font-size:19px}p{color:var(--ink-3)}
+.nbox{position:relative;margin-top:410px;border:1px solid var(--line);border-radius:14px;padding:18px}.nbox>textarea{width:100%;border:0;resize:none;font:inherit;outline:none}.nmate-card{width:430px;max-width:100%}
+.nmate-org{font-size:12px}.notice-panel{position:static}.np-row{display:flex;gap:12px;padding:16px 0;border-bottom:1px solid var(--line)}.np-ico{display:none}.np-time{margin-left:auto;color:var(--ink-3)}.np-day{color:var(--ink-3);margin-top:10px}.np-row .np-copy{min-width:0}
+#status{padding:20px;color:var(--ink-2)}button{font:inherit}
+</style>
+<main><article><h1>对话 · 产品发布材料</h1><p>成果会随留言发给同事，无需重新添加附件。</p><div class="nbox"><textarea id="input" placeholder="输入 @ 选择同事"></textarea></div></article>
+<article class="notice-panel"><h1>同事收到的通知</h1><div id="npSub"></div><div id="npBody"></div></article></main><div id="status" role="status"></div>
+<script src="../components/panels/chat-mate-mention.js"></script>
+<script>
+const base=new URL(location.href).searchParams.get('backend');
+let currentRef='chat-a',currentUser='sender',capture=[],downloaded=[],opened=[],notices=[],failIndex=false,failSend=false,outputMode='normal',failDraft=false,delayDraft=0;
+const binary=btoa(String.fromCharCode(0,1,255,128,13,10));
+async function request(route,body,user=currentUser){
+ const r=await fetch(base+'/api/v1'+route,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','X-Test-User':user},...(body?{body:JSON.stringify(body)}:{})});
+ if(!r.ok){const got=await r.json();throw Error(got.detail||String(r.status))}return r.json();
+}
+const SoduWorkAPI={
+ listAttachments:tid=>request('/tasks/'+tid+'/attachments'),
+ sendMateMessage:async(uid,text,outputs)=>{if(failSend)throw Error('发送失败，请重试');capture.push({uid,text,outputs});return request('/team/mates/'+uid+'/message',{...outputs,text})},
+ mateMessageFile:id=>request('/team/message-files/'+id,null,'recipient'),
+ draftMateMessage:async facts=>{if(delayDraft)await new Promise(r=>setTimeout(r,delayDraft));if(failDraft)throw Error('draft offline');return request('/team/message-draft',facts)},
+ attachmentUrl:file=>base+file.url,
+};
+window.SoduWorkAPI=SoduWorkAPI;
+window.soduWorkAPI={previewAttachment:async({url,filename})=>{const r=await fetch(url);if(!r.ok)throw Error('preview failed');opened.push({filename,bytes:Array.from(new Uint8Array(await r.arrayBuffer()))});return{ok:true}},downloadAttachment:async({url,filename})=>{const r=await fetch(url);if(!r.ok)throw Error('download failed');downloaded.push({filename,bytes:Array.from(new Uint8Array(await r.arrayBuffer()))});return{ok:true}}};
+const api={outputs:async()=>{if(failIndex)throw Error('output read failed');if(outputMode==='truncated')return{ok:true,truncated:true,artifacts:Array.from({length:65},(_,i)=>({artifactId:'artifact-'+i,name:'result-'+String(i+1).padStart(2,'0')+'.md',size:6,at:1}))};return{ok:true,artifacts:outputMode==='none'?[]:[
+ {artifactId:'ppt',name:'release-plan.pptx',size:6,at:1},{artifactId:'image',name:'page-shot.png',size:6,at:1}]}},
+ artifactAction:async(ref,id,action)=>{if(ref!=='chat-a')throw Error('wrong conversation');return{ok:true,name:id==='ppt'?'release-plan.pptx':id==='image'?'page-shot.png':'result-'+id+'.md',data:binary,size:6,at:1}}};
+function petSay(text){document.getElementById('status').textContent=text}
+function esc(text){return String(text||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function _nkIcon(){return ''}function dayLabel(){return ''}
+const handle=ChatMateMention.create({input:document.getElementById('input'),mates:async()=>({mates:[{id:'recipient',name:'林同事',org:'产品设计',hasBox:true}]}),progress:files=>SoduWorkAPI.draftMateMessage(ChatMateMention.progressContext({status:'idle',messages:[
+ {role:'user',text:'整理产品发布材料'},{role:'assistant',blocks:[{kind:'text',text:'已整理发布方案。发布效果尚未验证，需要同事核对材料。'}]}]},{files})),context:()=>({ref:currentRef,api,hub:SoduWorkAPI,taskIds:outputMode==='none'||outputMode==='truncated'?[]:['task']}),send:SoduWorkAPI.sendMateMessage,say:petSay});
+async function refreshNotices(){const events=await (await fetch(base+'/test/events')).json();notices=events.map((e,i)=>({...e,id:e.messageId,at:Date.now(),read:false}));_renderNoticePanel()}
+document.getElementById('npBody').addEventListener('click',e=>{const b=e.target.closest('[data-notice-file]');if(b)void _downloadNoticeFile(b)});
+window.ready=true;
+</script><script src="../components/panels/panels-desk.js"></script></html>

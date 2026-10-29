@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<!-- Localized skin preview harness (tests/skin-preview-harness.html).
+   scripts/generate-skin-previews.mjs opens this page in headless Chrome and renders
+   pets and sample task layouts for ?skin=<skin-id>&locale=<language>. Save screenshots
+   to components/skin-manager/previews/<locale>/<shotFile>.png for en/ja/ko appearance
+   settings. Keep the original zh previews as fallbacks; text-free flat-azure-glass needs no generation.
+   Match layouts and colors to the original zh previews:
+   - Board skins: bear uses glass tubes/orbs; box uses four-color lidded tubes, rounded cubes and an orange halo; diamond uses crystal tubes and desaturated glass orbs.
+   - Quadrant skins: ruby uses red tubes; flat uses three-part blue tubes with a tray. Red means urgent and important, blue important, orange urgent, and gray neither.
+   Orb gradients and glass edges share their source with the legacy task-area.css .ball[data-skin] rules. -->
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../theme/variables.css">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;overflow:hidden}
+  body{font-family:'Segoe UI','Microsoft YaHei','Yu Gothic','Malgun Gothic',sans-serif}
+  #stage{position:relative;width:100vw;height:100vh}
+
+  /* Tube styles. */
+  .tube{position:absolute;border-radius:999px}
+  /* Glass tubes use a light center, cool edges, and outer glow. */
+  .tube.t-glass{left:-24px;right:137px;top:95px;height:62px;
+    background:linear-gradient(180deg,rgba(255,255,255,.97),rgba(240,250,253,.92) 34%,rgba(213,238,249,.88) 72%,rgba(228,244,251,.95));
+    border:2px solid rgba(255,255,255,.95);
+    box-shadow:0 5px 16px rgba(100,150,200,.28),inset 0 2px 4px rgba(255,255,255,.95),inset 0 -3px 5px rgba(140,205,230,.55);}
+  .tube.t-ice{left:-24px;right:137px;top:100px;height:52px;
+    background:linear-gradient(180deg,rgba(250,251,255,.98),rgba(238,243,255,.9) 40%,rgba(219,230,250,.9) 75%,rgba(233,241,255,.96));
+    border:2px solid rgba(255,255,255,.95);
+    box-shadow:0 5px 16px rgba(120,140,200,.26),inset 0 2px 4px rgba(255,255,255,.95),inset 0 -3px 5px rgba(170,190,240,.5);}
+  /* Box tubes use four lid colors with seams. */
+  .tube.t-lid{left:-24px;right:137px;top:108px;height:42px;
+    background:linear-gradient(90deg,var(--boxlid-1) 0 24.3%,var(--box-seam) 24.3% 25.7%,var(--boxlid-2) 25.7% 49.3%,var(--box-seam) 49.3% 50.7%,var(--boxlid-3) 50.7% 74.3%,var(--box-seam) 74.3% 75.7%,var(--boxlid-4) 75.7% 100%);
+    border-radius:0 21px 21px 0;
+    box-shadow:inset 0 3px 4px rgba(255,255,255,.65),inset 0 -3px 5px rgba(20,40,80,.28),0 4px 10px rgba(120,120,140,.25);}
+  /*Single-color pill tubes (ruby / flat) use 2px seams between three segments.*/
+  .tube.t-pill{left:22px;right:22px;top:92px;height:30px;display:flex;gap:3px;padding:0 4px;background:none;box-shadow:none}
+  .tube.t-pill i{flex:1;border-radius:999px}
+  [data-skin="flat"] .tube.t-pill i{border-radius:15px}
+
+  /* Pet preview. */
+  #petSvg{position:absolute;left:50%;transform:translateX(-50%);overflow:visible}
+  .pet-glow{position:absolute;left:50%;transform:translate(-50%,-50%);border-radius:50%;pointer-events:none}
+
+  /* Board group cards. */
+  .groups{position:absolute;left:35px;top:185px;width:677px;display:flex;flex-direction:column;gap:33px}
+  .kgroup{border-radius:30px;padding:18px 20px 24px;
+    background:linear-gradient(180deg,var(--hp-hi,rgba(255,255,255,.66)),var(--hp-lo,rgba(240,246,252,.5)));
+    border:2px solid rgba(255,255,255,.95);
+    box-shadow:0 10px 24px -8px var(--hp-sh,rgba(96,140,190,.25)),inset 0 1px 0 rgba(255,255,255,.95);}
+  .khead{display:flex;align-items:center;gap:14px;padding:4px 4px 16px}
+  .khead .dot{width:19px;height:19px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 3px rgba(255,255,255,.8)}
+  .khead .lb{font-size:40px;font-weight:700;color:#2c3e57;letter-spacing:.5px}
+  .khead .ct{font-size:40px;font-weight:700;color:#2c3e57;margin-left:4px}
+  .balls{display:flex;flex-wrap:wrap;gap:28px 31px}
+  .ball{width:88px;height:88px;display:flex;align-items:center;justify-content:center;font-size:46px;font-weight:700}
+  /* Glass task markers match the glass material. */
+  .ball.rd{border-radius:50%;
+    background:
+      radial-gradient(58% 42% at 50% 85%,rgba(255,255,255,.55),rgba(255,255,255,0) 60%),
+      radial-gradient(circle at 37% 28%,rgba(255,255,255,.96) 0%,var(--gb-light) 50%,var(--gb-edge) 100%);
+    color:var(--gb-ink);text-shadow:0 1px 1px rgba(255,255,255,.85);
+    box-shadow:inset 0 -5px 9px var(--gb-sh),inset 0 3px 6px rgba(255,255,255,.92),
+      inset 0 0 0 1px var(--gb-rim),0 3px 9px -1px var(--gb-glow),0 1px 2px rgba(50,85,140,.15);}
+  .ball.rd.st-doing{--gb-light:#ffedd2;--gb-edge:#ffcf94;--gb-ink:#a8620a;--gb-sh:rgba(190,120,20,.24);--gb-glow:rgba(240,155,40,.42);--gb-rim:rgba(232,165,80,.55)}
+  .ball.rd.st-todo {--gb-light:#dfebff;--gb-edge:#a9c9f5;--gb-ink:#2555b8;--gb-sh:rgba(50,95,185,.26);--gb-glow:rgba(80,140,225,.42);--gb-rim:rgba(95,145,222,.55)}
+  .ball.rd.st-done {--gb-light:#d6f5e8;--gb-edge:#9fe3c9;--gb-ink:#0a7d58;--gb-sh:rgba(20,140,100,.24);--gb-glow:rgba(40,185,145,.4);--gb-rim:rgba(75,195,155,.55)}
+  .ball.rd.st-cancel{--gb-light:#e5ebf3;--gb-edge:#c2cee0;--gb-ink:#565f70;--gb-sh:rgba(80,100,140,.22);--gb-glow:rgba(120,150,195,.34);--gb-rim:rgba(140,160,198,.5)}
+  [data-skin="diamond"] .ball{filter:saturate(.82) brightness(1.05)}
+  /* Rounded box markers match the box material. */
+  .ball.sq{border-radius:24px;
+    background:linear-gradient(155deg,var(--bh),var(--bm) 60%,var(--bl));
+    color:var(--bi);text-shadow:0 1px 1px rgba(255,255,255,.55);
+    box-shadow:inset 0 -4px 7px var(--bs),inset 0 2px 4px rgba(255,255,255,.85),
+      inset 0 0 0 1px rgba(255,255,255,.5),0 4px 10px -3px var(--bg2);
+    position:relative}
+  .ball.sq::after{content:'';position:absolute;left:16%;top:14%;width:30%;height:24%;border-radius:7px;
+    background:radial-gradient(ellipse at 42% 38%,rgba(255,255,255,.95) 0%,rgba(255,255,255,.4) 55%,rgba(255,255,255,0) 85%)}
+  .ball.sq.st-doing{--bh:#fff3e0;--bm:#ffbe6a;--bl:#ff9f2e;--bi:#8a4a06}
+  .ball.sq.st-todo {--bh:#eaf2ff;--bm:#7cadfa;--bl:#4f8ff5;--bi:#1f4c9c}
+  .ball.sq.st-done {--bh:#ddf7ef;--bm:#52ddb9;--bl:#1ec79b;--bi:#086241}
+  .ball.sq.st-cancel{--bh:#eef1f6;--bm:#c9d0da;--bl:#a2abbb;--bi:#454e5c}
+
+  /* Priority quadrants. */
+  .quad-wrap{position:absolute;left:22px;right:22px;top:128px;bottom:14px;display:grid;
+    grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:16px}
+  .qseg{min-width:0;border-radius:16px;padding:12px 14px;display:flex;flex-direction:column;min-height:0;
+    background:linear-gradient(160deg,rgba(255,255,255,.72),rgba(255,240,240,.38));
+    border:1.5px solid rgba(255,255,255,.85);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.8),0 4px 12px -6px rgba(160,80,80,.16)}
+  .qhead{display:flex;align-items:center;gap:10px;padding:2px 2px 12px}
+  .qhead .dot{width:13px;height:13px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 2px rgba(255,255,255,.8)}
+  .qhead .lb{font-size:25px;font-weight:700;color:#28303e;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .qhead .ct{flex-shrink:0;min-width:40px;padding:1px 12px;border-radius:15px;text-align:center;
+    font-size:22px;font-weight:700;color:#3a4354;background:rgba(255,255,255,.95);
+    border:1.5px solid rgba(210,215,225,.55);box-shadow:0 2px 5px rgba(120,90,90,.14)}
+  .qstack{display:flex;flex-direction:column;gap:12px;overflow:hidden}
+  .qstrip{position:relative;display:flex;align-items:center;gap:8px;padding:11px 12px 11px 20px;border-radius:11px;
+    background:linear-gradient(180deg,#ffffff,#fdf5f5);border:1.5px solid rgba(255,255,255,.9);
+    box-shadow:0 3px 8px -3px rgba(150,90,90,.22),inset 0 1px 0 #fff;
+    font-size:24px;font-weight:600;color:#28303e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .qstrip::before{content:'';position:absolute;left:0;top:0;bottom:0;width:5px;border-radius:3px}
+  .q-uu .dot{background:#e0475e} .q-uu .qstrip::before{background:#e0475e}
+  .q-iu .dot{background:var(--s-todo)} .q-iu .qstrip::before{background:var(--s-todo)}
+  .q-un .dot{background:var(--s-doing)} .q-un .qstrip::before{background:var(--s-doing)}
+  .q-in .dot{background:var(--s-cancel)} .q-in .qstrip::before{background:var(--s-cancel)}
+  /* Flat material uses solid colors, borders, and a base tray. */
+  [data-skin="flat"] .qwrap-outer{position:absolute;left:22px;right:22px;top:128px;bottom:14px;background:#eef3fc;border:2px solid #c6d9f4;border-radius:18px}
+  [data-skin="flat"] .quad-wrap{padding:14px}
+  [data-skin="flat"] .qseg{background:#f6f9fe;border:2px solid #c6d9f4;border-radius:14px;box-shadow:none}
+  [data-skin="flat"] .qstrip{background:#fff;border:2px solid #c9dbf4;border-radius:9px;box-shadow:none;color:#173a63}
+  [data-skin="flat"] .qhead .ct{background:#fff;border:2px solid #c6d9f4;box-shadow:none;color:#173a63}
+  [data-skin="flat"] .qhead .lb{color:#173a63}
+  [data-skin="flat"] .tube.t-pill{background:none;box-shadow:none;border:none;padding:0}
+  [data-skin="flat"] .tube.t-pill i{border-radius:15px}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="tube" id="tube"></div>
+  <svg id="petSvg" viewBox="0 0 120 120"></svg>
+  <div id="board"></div>
+</div>
+<script src="../core/skin-registry.js"></script>
+<script src="../components/pet/characters.js"></script>
+<script>
+/* Locale-specific sample content uses runtime status labels and dedicated demonstration task titles. */
+const CONTENT = {
+  'zh-CN': {
+    groups: [
+      { st:'doing',  label:'进行中', count:7,  balls:'写更回团自自优' },
+      { st:'todo',   label:'待办',   count:11, balls:'回整代准写调发监重面撰' },
+      { st:'done',   label:'已完成', count:4,  balls:'修数生修' },
+      { st:'cancel', label:'搁置',   count:3,  balls:'订整采' }
+    ],
+    quads: [
+      { key:'q-uu', label:'紧急且重要', count:2, tasks:['修复线上告警','客户方案评审'] },
+      { key:'q-iu', label:'重要不紧急', count:2, tasks:['季度规划梳理','技术方案调研'] },
+      { key:'q-un', label:'紧急不重要', count:1, tasks:['会议纪要整理'] },
+      { key:'q-in', label:'不急不重要', count:1, tasks:['整理资料归档'] }
+    ]
+  },
+  'en-US': {
+    groups: [
+      { st:'doing',  label:'In progress', count:7,  balls:'WURTAAO' },
+      { st:'todo',   label:'To do',   count:11, balls:'RODPWRSMRID' },
+      { st:'done',   label:'Done',    count:4,  balls:'FDRF' },
+      { st:'cancel', label:'On hold', count:3,  balls:'OTP' }
+    ],
+    quads: [
+      { key:'q-uu', label:'Urgent and important', count:2, tasks:['Fix production alert','Review client proposal'] },
+      { key:'q-iu', label:'Important, not urgent', count:2, tasks:['Quarterly planning review','Research technical options'] },
+      { key:'q-un', label:'Urgent, not important', count:1, tasks:['Organize meeting notes'] },
+      { key:'q-in', label:'Neither urgent nor important', count:1, tasks:['Archive reference docs'] }
+    ]
+  },
+  'ja-JP': {
+    groups: [
+      { st:'doing',  label:'進行中', count:7,  balls:'進更返チ自自最' },
+      { st:'todo',   label:'未着手', count:11, balls:'返整代準書調送監重面書' },
+      { st:'done',   label:'完了',   count:4,  balls:'修整リ修' },
+      { st:'cancel', label:'保留',   count:3,  balls:'注整調' }
+    ],
+    quads: [
+      { key:'q-uu', label:'緊急かつ重要', count:2, tasks:['本番アラートの修正','顧客提案のレビュー'] },
+      { key:'q-iu', label:'重要だが緊急でない', count:2, tasks:['四半期プランの整理','技術方式の調査'] },
+      { key:'q-un', label:'緊急だが重要でない', count:1, tasks:['議事録の整理'] },
+      { key:'q-in', label:'緊急でも重要でもない', count:1, tasks:['資料のアーカイブ整理'] }
+    ]
+  },
+  'ko-KR': {
+    groups: [
+      { st:'doing',  label:'진행 중', count:7,  balls:'문페회팀자자최' },
+      { st:'todo',   label:'할 일',  count:11, balls:'회정위준작조발감리인초' },
+      { st:'done',   label:'완료',   count:4,  balls:'버데배버' },
+      { st:'cancel', label:'보류',   count:3,  balls:'주정조' }
+    ],
+    quads: [
+      { key:'q-uu', label:'긴급하고 중요', count:2, tasks:['운영 알림 수정','고객 제안 검토'] },
+      { key:'q-iu', label:'중요하지만 긴급하지 않음', count:2, tasks:['분기 계획 정리','기술 방안 조사'] },
+      { key:'q-un', label:'긴급하지만 중요하지 않음', count:1, tasks:['회의록 정리'] },
+      { key:'q-in', label:'긴급하지도 중요하지도 않음', count:1, tasks:['자료 아카이브 정리'] }
+    ]
+  }
+};
+
+/*
+ * Per-skin layout matches reference previews. pet defines SVG size, petTop its vertical
+ * origin, tube its style, and glow the background highlight.
+ */
+const LAYOUTS = {
+  'bear-vivid':  { family:'kanban', w:882, h:1401, pet:285, petTop:-22, ballD:88, tube:'glass',
+                   card:{hi:'rgba(248,251,255,.72)',lo:'rgba(238,244,252,.55)',sh:'rgba(96,140,190,.25)'} },
+  'box-biz':     { family:'kanban', w:882, h:1401, pet:175, petTop:26,  ballD:88, tube:'lid', glow:'rgba(255,159,46,.4)',
+                   card:{hi:'rgba(255,252,247,.75)',lo:'rgba(250,240,228,.55)',sh:'rgba(190,140,80,.22)'} },
+  'diamond-ice': { family:'kanban', w:882, h:1401, pet:165, petTop:28,  ballD:88, tube:'ice', glow:'rgba(190,200,255,.4)',
+                   card:{hi:'rgba(250,252,255,.75)',lo:'rgba(238,245,255,.55)',sh:'rgba(110,130,190,.22)'} },
+  'bear-ruby':   { family:'quad', w:732, h:843, pet:146, petTop:-13, tube:'pill', segs:['#f2565e','#e60012','#c8101c'] },
+  'box-ruby':    { family:'quad', w:732, h:843, pet:165, petTop:-2,  tube:'pill', segs:['#ef3b3b','#e60012','#c8101c'] },
+  'flat-azure':  { family:'quad', w:732, h:860, pet:150, petTop:-9,  tube:'pill', segs:['#7db0ff','#4b91f7','#1d5cc0'] },
+  'flat-azure-glass': { family:'quad', w:732, h:860, pet:150, petTop:-9, tube:'pill', segs:['#7db0ff','#4b91f7','#1d5cc0'] }
+};
+
+const qs = new URLSearchParams(location.search);
+const skinId = qs.get('skin') || 'bear-vivid';
+const locale = qs.get('locale') || 'zh-CN';
+const skin = SkinRegistry.getSkin(skinId);
+const L = LAYOUTS[skinId] || LAYOUTS['bear-vivid'];
+const C = CONTENT[locale] || CONTENT['zh-CN'];
+
+/* Apply material, character, and theme selectors from shared variables. */
+const de = document.documentElement;
+de.dataset.skin = skin.material;
+de.dataset.character = skin.character;
+if (skin.palette === 'ruby') de.dataset.theme = 'ruby';
+if (skin.palette === 'azure') de.dataset.theme = 'azure';
+document.body.style.background = skin.bg;
+if (L.card) {
+  de.style.setProperty('--hp-hi', L.card.hi);
+  de.style.setProperty('--hp-lo', L.card.lo);
+  de.style.setProperty('--hp-sh', L.card.sh);
+}
+
+/* Tube and pet rendering. */
+const tube = document.getElementById('tube');
+const pet = document.getElementById('petSvg');
+pet.setAttribute('width', L.pet); pet.setAttribute('height', L.pet);
+pet.style.top = L.petTop + 'px';
+if (L.tube === 'glass' || L.tube === 'ice') {
+  tube.classList.add(L.tube === 'glass' ? 't-glass' : 't-ice');
+} else if (L.tube === 'lid') {
+  tube.classList.add('t-lid');
+} else {
+  tube.classList.add('t-pill');
+  tube.innerHTML = L.segs.map(c => '<i style="background:' + c + '"></i>').join('');
+}
+if (L.glow) {
+  const g = document.createElement('div');
+  g.className = 'pet-glow';
+  const r = L.family === 'kanban' ? 150 : 78;
+  g.style.cssText = 'width:' + r * 2 + 'px;height:' + r * 2 + 'px;top:' + (L.petTop + L.pet * .5) + 'px;' +
+    'background:radial-gradient(circle,' + L.glow + ' 0%,rgba(255,255,255,0) 68%)';
+  document.getElementById('stage').insertBefore(g, pet);
+}
+window.cfg = { character: skin.character, gender: 'boy' };
+renderPetSVG('boy');
+
+/* Board and quadrant rendering. */
+const board = document.getElementById('board');
+const ballCls = (skin.material === 'box') ? 'sq' : 'rd';
+if (L.family === 'kanban') {
+  board.className = 'groups';
+  board.style.left = '35px';
+  board.innerHTML = C.groups.map(g =>
+    '<div class="kgroup">' +
+      '<div class="khead"><span class="dot" style="background:var(--s-' + g.st + ')"></span>' +
+      '<span class="lb">' + g.label + '</span><span class="ct">' + g.count + '</span></div>' +
+      '<div class="balls">' + g.balls.split('').map(ch =>
+        '<div class="ball ' + ballCls + ' st-' + g.st + '">' + ch + '</div>').join('') + '</div>' +
+    '</div>').join('');
+} else {
+  board.className = 'quad-wrap';
+  if (skin.material === 'flat') {
+    /* Insert the flat-material tray before the board so it does not cover content. */
+    const outer = document.createElement('div');
+    outer.className = 'qwrap-outer';
+    board.parentNode.insertBefore(outer, board);
+  }
+  board.innerHTML = C.quads.map(q =>
+    '<div class="qseg ' + q.key + '">' +
+      '<div class="qhead"><span class="dot"></span><span class="lb">' + q.label + '</span>' +
+      '<span class="ct">' + q.count + '</span></div>' +
+      '<div class="qstack">' + q.tasks.map(t =>
+        '<div class="qstrip">' + t + '</div>').join('') + '</div>' +
+    '</div>').join('');
+}
+window.__READY__ = true;
+</script>
+</body>
+</html>

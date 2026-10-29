@@ -1,0 +1,71 @@
+<!doctype html><html lang="zh-CN" data-theme="vivid" data-desk-panel="workspace" data-workspace-view="history">
+<head><meta charset="utf-8"><title>统一需求池 · 隔离 HTTP 验证</title>
+<link rel="stylesheet" href="../../theme/variables.css">
+<link rel="stylesheet" href="../../components/panels/panels-base.css">
+<link rel="stylesheet" href="../../components/panels/panels-desk.css">
+<link rel="stylesheet" href="../../components/workspace/workspace-shell.css">
+<link rel="stylesheet" href="../../components/workspace/workspace-page-layout.css">
+<link rel="stylesheet" href="../../components/requirements/requirements-board.css">
+<link rel="stylesheet" href="../../components/requirements/requirement-confirm.css">
+<link rel="stylesheet" href="../../components/panels/plugin-ui-host.css">
+<link rel="stylesheet" href="../../components/panels/work-entry-sheet.css">
+<link rel="stylesheet" href="../../components/panels/conversation-attachments.css">
+<link rel="stylesheet" href="../../components/panels/library-transfer.css">
+<style>html{--ws-side-w:0px;--ws-main-left:0px}body{margin:0;font-family:var(--font-ui)}#fixtureNotice{position:fixed;z-index:999999;bottom:10px;left:10px;background:white;color:#333;padding:10px;max-width:600px;pointer-events:none}</style>
+</head><body><output id="fixtureNotice"></output>
+<script>
+const parameters = new URLSearchParams(location.search);
+const isolatedHub = parameters.get('hub'), identity = parameters.get('identity');
+if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(isolatedHub) || !['sender','recipient','other'].includes(identity)) throw Error('Explicit isolated target required');
+localStorage.setItem('soduwork_work_hub_environment_v1','development');
+localStorage.setItem('soduwork_work_development_hub_url_v1',isolatedHub);
+localStorage.setItem('soduwork_work_user_id','e2e-'+identity);
+window.fixtureErrors=[];window.fixturePreviews=[];window.fixtureNotices=[];
+window.addEventListener('error',event=>fixtureErrors.push(event.message));
+window.addEventListener('unhandledrejection',event=>fixtureErrors.push(String(event.reason)));
+window.petSay=text=>{fixtureNotices.push(text);document.querySelector('#fixtureNotice').textContent=text};
+window.soduWorkAPI={
+ localLibrary:window.requirementsFixtureLibrary,
+ getHubConnection:async()=>({hub:isolatedHub,internalTest:true,editable:false}),
+ deviceAuthBootstrap:async options=>{
+  const response=await fetch(options.hub+'/api/v1/clients/enroll',{method:'POST',headers:{
+   'Content-Type':'application/json','X-Device-Key':'isolated-requirements-fixture-key-never-production'
+  },body:JSON.stringify({device:options.clientId,name:options.name,platform:options.platform,version:options.version})});
+  const data=await response.json();if(!response.ok)throw Error(JSON.stringify(data));
+  return {...data,ok:!data.activationRequired,stored:true};
+ },
+ readAttachmentBinary:async file=>{
+  if(!file.url.startsWith(isolatedHub+'/'))throw Error('Only fixture downloads allowed');
+  const res=await fetch(file.url);if(!res.ok)throw Error('Download failed '+res.status);
+  const bytes=new Uint8Array(await res.arrayBuffer());
+  return{ok:true,data:btoa(String.fromCharCode(...bytes)),name:file.filename,mimeType:res.headers.get('content-type')};
+ },
+ previewAttachment:async file=>{const got=await soduWorkAPI.readAttachmentBinary(file);fixturePreviews.push({id:file.id,name:file.filename,data:got.data});return{ok:true};},
+};
+</script>
+<script src="../../api-library-local.js"></script>
+<script src="../../core/api-work-plugins.js"></script><script src="../../api.js"></script>
+<script src="../../core/task-sync.js"></script>
+<script src="../../core/store-lifecycle.js"></script>
+<script src="../../core/store.js"></script>
+<script src="../../core/requirements.js"></script>
+<script src="../../components/panels/task-priority.js"></script>
+<script src="../../components/panels/task-execution-context.js"></script>
+<script src="../../components/panels/task-execution-client.js"></script>
+<script src="../../components/panels/plugin-ui-host.js"></script>
+<script src="../../components/panels/conversation-attachments.js"></script>
+<script src="../../components/panels/library-transfer.js"></script>
+<script src="../../components/panels/compose-selection-position.js"></script>
+<script src="../../components/panels/panels-compose-submit.js"></script>
+<script src="../../components/panels/requirement-routing.js"></script>
+<script src="../../components/panels/panels-compose-draft.js"></script>
+<script src="../../components/requirements/requirement-fields.js"></script>
+<script src="../../components/panels/work-entry-sheet.js"></script>
+<script src="../../components/requirements/requirements-view.js"></script>
+<script src="../../components/requirements/requirements-board.js"></script>
+<script src="../../components/requirements/requirement-confirm.js"></script>
+<script src="../../components/requirements/requirements-detail.js"></script>
+<script>
+// Resolve the trusted Hub before Store captures its request scope, as initData does.
+window.fixtureReady=(async()=>{await SoduWorkAPI.registerClient();await Store.hydrate();RequirementsBoard.open();return Store.taskState;})();
+</script></body></html>

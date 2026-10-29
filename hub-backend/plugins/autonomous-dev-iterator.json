@@ -1,0 +1,304 @@
+{
+  "schemaVersion": 1,
+  "key": "autonomous-dev-iterator",
+  "name": "自主迭代研发引擎",
+  "version": "1.0.1",
+  "description": "以深度研究产出创意、GitHub 开源项目为参照基准，进行架构合理性与轻量级判断，研发成型的成品；经质量门自检与 AI 独立审查后交人工验收。多轮持续迭代完善由 SoduWork 任务调度反复触发本流程实现。",
+  "author": "SoduWork",
+  "instructions": "你是自主迭代研发引擎的执行主体。流程由 研究→开源调研→架构评审→实现→质量门→AI 审查→人工验收 组成单轮研发闭环；多轮迭代由 SoduWork 任务调度反复触发本流程完成。每个 AI 节点必须产出可验证文件并写入对应 deliverables：研究写创意与问题定义；开源调研引用真实 GitHub 仓库并给 star/license/活跃度/依赖体积对比；架构评审给出轻量级取舍与可扩展路径；实现产出可运行成品并附验证步骤。轻量级是硬约束：优先小而稳的库、控制依赖总量，重要性级依赖必须说明理由；架构可持续可扩展，禁止一次性脚本式死代码。质量门不过必须回流实现节点重做，严禁带病交付。",
+  "entrypoints": {
+    "conversation": false,
+    "task": true,
+    "automation": true
+  },
+  "inputs": [
+    {
+      "key": "topic",
+      "label": "研发目标主题/创意方向",
+      "type": "text",
+      "required": true
+    },
+    {
+      "key": "githubKeywords",
+      "label": "GitHub 调研关键词(逗号分隔)",
+      "type": "text",
+      "required": false
+    },
+    {
+      "key": "targetRuntime",
+      "label": "目标运行形态",
+      "type": "select",
+      "required": false,
+      "options": [
+        "cli",
+        "web",
+        "plugin",
+        "library",
+        "service"
+      ]
+    },
+    {
+      "key": "lightweightPreferred",
+      "label": "优先轻量级",
+      "type": "boolean",
+      "required": false
+    }
+  ],
+  "outputs": [
+    {
+      "key": "creativestudy",
+      "label": "研究与创意方案",
+      "accept": [
+        "deliverables/research/创意研究.md"
+      ]
+    },
+    {
+      "key": "opensource",
+      "label": "开源对比与选型",
+      "accept": [
+        "deliverables/opensource/开源对比.md"
+      ]
+    },
+    {
+      "key": "architecture",
+      "label": "架构方案",
+      "accept": [
+        "deliverables/architecture/架构方案.md"
+      ]
+    },
+    {
+      "key": "impl",
+      "label": "成品实现与说明",
+      "accept": [
+        "deliverables/impl/"
+      ]
+    },
+    {
+      "key": "selfcheck",
+      "label": "自检报告",
+      "accept": [
+        "deliverables/selfcheck/自检报告.md"
+      ]
+    },
+    {
+      "key": "final",
+      "label": "最终成品清单",
+      "accept": [
+        "deliverables/final/最终成品清单.md"
+      ]
+    }
+  ],
+  "capabilities": {
+    "network": true,
+    "skills": [],
+    "mcpServers": [],
+    "runtime": [
+      "browser",
+      "files"
+    ]
+  },
+  "evaluations": [
+    {
+      "key": "dev-loop",
+      "name": "自主研发循环演示",
+      "instruction": "针对给定主题走完研究→开源→架构→实现→自检→审查的完整闭环并产出可验证成品。",
+      "inputs": {
+        "topic": "轻量级自托管时间追踪 CLI",
+        "lightweightPreferred": true
+      },
+      "criteria": [
+        "研究成果有明确问题定义、目标用户与差异化定位",
+        "开源调研引用真实 GitHub 仓库并有 star/license/活跃度/依赖体积对比",
+        "架构方案有模块边界、扩展点与轻量级取舍",
+        "实现成品可直接运行并附验证步骤",
+        "质量门通过且自检报告量化打分"
+      ],
+      "expectedOutputs": [
+        "selfcheck.selfcheck_report"
+      ]
+    }
+  ],
+  "workflow": {
+    "nodes": [
+      {
+        "key": "research",
+        "type": "ai",
+        "name": "深度研究创意",
+        "config": {
+          "agentKind": "",
+          "runnerTags": [],
+          "prompt": "基于 topic 与 githubKeywords 做真实深度研究，产出：问题定义、目标用户、3 个以上候选创意及差异点、如何以 GitHub 开源项目为参照基准。写入 deliverables/research/创意研究.md。"
+        },
+        "inputs": [],
+        "outputs": [
+          {
+            "key": "research_report",
+            "kind": "file",
+            "label": "创意研究",
+            "path": "deliverables/research/创意研究.md",
+            "required": true
+          }
+        ]
+      },
+      {
+        "key": "opensource",
+        "type": "ai",
+        "name": "GitHub 开源调研",
+        "dependsOn": [
+          "research"
+        ],
+        "config": {
+          "agentKind": "",
+          "runnerTags": [],
+          "prompt": "沿用 research 产出中的关键词，通过 GitHub 搜索真实开源项目，评估 star、license、维护活跃度、依赖与包体积，形成候选短名单与对比表并给出选型结论。写入 deliverables/opensource/开源对比.md。"
+        },
+        "inputs": [
+          {
+            "fromNode": "research",
+            "outputKey": "research_report"
+          }
+        ],
+        "outputs": [
+          {
+            "key": "opensource_report",
+            "kind": "file",
+            "label": "开源对比",
+            "path": "deliverables/opensource/开源对比.md",
+            "required": true
+          }
+        ]
+      },
+      {
+        "key": "architecture",
+        "type": "ai",
+        "name": "架构评审与轻量选型",
+        "dependsOn": [
+          "opensource"
+        ],
+        "config": {
+          "agentKind": "",
+          "runnerTags": [],
+          "prompt": "综合 research 与 opensource 产出，给出架构方案：模块边界、扩展点、配置化入口、数据流；明确为保持轻量级做的取舍与不引入重量级依赖的理由；说明可持续扩展路径与版本约定。写入 deliverables/architecture/架构方案.md。"
+        },
+        "inputs": [
+          {
+            "fromNode": "opensource",
+            "outputKey": "opensource_report"
+          }
+        ],
+        "outputs": [
+          {
+            "key": "architecture_report",
+            "kind": "file",
+            "label": "架构方案",
+            "path": "deliverables/architecture/架构方案.md",
+            "required": true
+          }
+        ]
+      },
+      {
+        "key": "implement",
+        "type": "ai",
+        "name": "研发实现成品",
+        "dependsOn": [
+          "architecture"
+        ],
+        "config": {
+          "agentKind": "",
+          "runnerTags": [],
+          "prompt": "严格按 architecture 产出实现轻量级、可运行、可持续扩展的成品，遵循 lightweightPreferred；附启动与验证步骤与最小测试。写入 deliverables/impl/。",
+          "timeoutSeconds": 3600
+        },
+        "inputs": [
+          {
+            "fromNode": "architecture",
+            "outputKey": "architecture_report"
+          }
+        ],
+        "outputs": [
+          {
+            "key": "impl_code",
+            "kind": "file",
+            "label": "成品实现",
+            "required": true,
+            "path": "deliverables/impl/README.md"
+          }
+        ],
+        "retry": {
+          "maxAttempts": 3
+        }
+      },
+      {
+        "key": "quality",
+        "type": "quality",
+        "name": "质量门检查",
+        "dependsOn": [
+          "implement"
+        ],
+        "config": {
+          "commands": [
+            {
+              "name": "自动化测试",
+              "argv": [
+                "python3",
+                "impl/tests.py"
+              ]
+            }
+          ],
+          "onFailure": "implement"
+        },
+        "inputs": [],
+        "outputs": []
+      },
+      {
+        "key": "selfcheck",
+        "type": "ai_review",
+        "name": "AI 独立自检",
+        "dependsOn": [
+          "quality",
+          "implement"
+        ],
+        "config": {
+          "agentKind": "",
+          "runnerTags": [],
+          "prompt": "对照评估准则逐项打分(0-100)，核对架构合理性与轻量级硬性项，给出量化自检报告与改进清单。写入 deliverables/selfcheck/自检报告.md。",
+          "onFailure": "implement"
+        },
+        "inputs": [
+          {
+            "fromNode": "implement",
+            "outputKey": "impl_code"
+          }
+        ],
+        "outputs": [
+          {
+            "key": "selfcheck_report",
+            "kind": "file",
+            "label": "自检报告",
+            "path": "deliverables/selfcheck/自检报告.md",
+            "required": true
+          }
+        ]
+      },
+      {
+        "key": "finalize",
+        "type": "human_review",
+        "name": "人工验收与办结",
+        "dependsOn": [
+          "selfcheck"
+        ],
+        "config": {
+          "reviewFor": "验收",
+          "message": "研发闭环已完成，请核验成品与自检报告后办结。"
+        },
+        "inputs": [
+          {
+            "fromNode": "selfcheck",
+            "outputKey": "selfcheck_report"
+          }
+        ],
+        "outputs": []
+      }
+    ]
+  }
+}

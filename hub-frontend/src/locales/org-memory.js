@@ -1,0 +1,16 @@
+export default {
+  "自动记忆会持续更新，补充内容将单独保留。": "Automatic memory keeps updating. Your additions are preserved separately.",
+  "从团队已交付的共享工作中自动积累，持续汇成一份组织记忆。": "Completed shared team work automatically accumulates into one organization memory.",
+  "补充与修正": "Add or correct",
+  "等待团队工作沉淀": "Waiting for completed team work",
+  "共享需求完成交付后会自动形成记忆，无需手动创建。也可以补充团队约定。": "Memory forms automatically when shared work is delivered. You can also add team agreements.",
+  "自动沉淀": "Automatically accumulated",
+  "项共享工作": "shared work items",
+  "删除当前记忆并忘记已积累的工作摘要？历史归档会保留，后续新工作仍会自动形成记忆。": "Delete this memory and forget accumulated work summaries? Archives are retained, and new work can still create memory.",
+  '每个组织维护一份共同记忆，保存会更新当前内容。': 'Each organization has one shared memory. Saving updates its current content.',
+  '组织共同记忆': 'Shared organization memory',
+  '组织记忆数据需要合并，请更新服务后重新加载。': 'Organization memory records need consolidation. Update the service and reload.',
+  '建立组织的共同目标、约束与经验，后续在同一份记忆中持续更新。': 'Capture shared goals, constraints and lessons, then keep updating this same memory.',
+  '删除当前组织记忆？历史归档会保留，但不会自动恢复为当前记忆。': 'Delete the current organization memory? Archived records will be kept and will not automatically become current.',
+  '组织记忆已被更新，请保留草稿，关闭编辑后重新加载。': 'Organization memory has changed. Keep your draft, close the editor, then reload.',
+}

@@ -1,0 +1,41 @@
+/* A compact account sheet; the one-time code is the only visual emphasis. */
+dialog.codex-auth-dialog{position:fixed;inset:0;margin:auto;width:min(440px,calc(100vw - 32px));max-height:calc(100dvh - 40px);padding:0;border:1px solid var(--line);border-radius:18px;background:var(--bg-0);color:var(--ink);box-shadow:0 24px 80px rgba(0,0,0,.2);overflow:auto;font:14px/1.5 var(--font-ui)}
+dialog.codex-auth-dialog::backdrop{background:rgba(25,30,40,.32);backdrop-filter:blur(5px)}
+.codex-auth-dialog .codex-auth-card{padding:24px}
+.codex-auth-dialog .codex-auth-head{display:flex;align-items:center;gap:12px}
+.codex-auth-dialog .codex-auth-brand{display:grid;place-items:center;width:42px;height:42px;flex:none;border:1px solid var(--line);border-radius:12px;background:var(--bg-0)}
+.codex-auth-dialog .codex-auth-brand img{width:25px;height:25px}
+.codex-auth-dialog .codex-auth-heading{flex:1;min-width:0}
+.codex-auth-dialog h2{margin:0;font-size:18px;line-height:1.4;font-weight:650}
+.codex-auth-dialog .codex-auth-machine{margin:2px 0 0;color:var(--ink-3);font-size:12px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.codex-auth-dialog button{font:500 13px/1.3 var(--font-ui);cursor:pointer;transition:background-color .12s,color .12s;border-radius:9px}
+.codex-auth-dialog button:disabled{cursor:default;opacity:.5}
+.codex-auth-dialog .codex-auth-close{display:grid;place-items:center;width:30px;height:30px;flex:none;border:0;background:transparent;color:var(--ink-3);font-size:22px}
+.codex-auth-dialog .codex-auth-close:hover{color:var(--ink);background:var(--bg-1)}
+.codex-auth-dialog .codex-auth-body{padding:26px 0 22px}
+.codex-auth-dialog .codex-auth-status{display:flex;align-items:center;gap:9px}
+.codex-auth-dialog h3{margin:0;font-size:15px;font-weight:600}
+.codex-auth-dialog .codex-auth-mark{box-sizing:border-box;width:15px;height:15px;flex:none;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:codex-auth-spin .8s linear infinite;font-style:normal}
+.codex-auth-dialog:is([data-state=ready],[data-state=waiting]) .codex-auth-mark{animation:none;border-color:var(--accent);background:var(--accent-soft)}
+.codex-auth-dialog:is([data-state=succeeded],[data-state=failed],[data-state=expired],[data-state=cancelled]) .codex-auth-mark{animation:none;border:0;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);line-height:1;font-size:13px;font-weight:700}
+.codex-auth-dialog .codex-auth-description{margin:9px 0 0;color:var(--ink-3);font-size:13px;overflow-wrap:anywhere}
+.codex-auth-dialog .codex-auth-device{margin-top:20px;padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--bg-1)}
+.codex-auth-dialog .codex-auth-code-label,.codex-auth-dialog .codex-auth-expiry{display:block;color:var(--ink-3);font-size:12px}
+.codex-auth-dialog .codex-auth-code-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin:8px 0}
+.codex-auth-dialog .codex-auth-code{font:650 25px/1.3 var(--font-ui);letter-spacing:.05em;user-select:all;white-space:nowrap;color:var(--ink)}
+.codex-auth-dialog .codex-auth-copy{flex:none;border:1px solid var(--line);padding:7px 9px;color:var(--ink-2);background:var(--bg-0)}
+.codex-auth-dialog .codex-auth-copy:hover{background:var(--bg-2)}
+.codex-auth-dialog .codex-auth-expiry{font-variant-numeric:tabular-nums}
+.codex-auth-dialog .codex-auth-feedback{margin:10px 0 0;color:var(--ink-3);font-size:12px;min-height:0}
+.codex-auth-dialog .codex-auth-feedback:empty{display:none}
+.codex-auth-dialog .codex-auth-privacy{margin:18px 0 0;color:var(--ink-3);font-size:12px;line-height:1.6}
+.codex-auth-dialog .codex-auth-foot{display:flex;justify-content:flex-end;gap:8px;padding-top:16px;border-top:1px solid var(--line)}
+.codex-auth-dialog .codex-auth-secondary{padding:9px 14px;border:1px solid var(--line);color:var(--ink-2);background:var(--bg-0)}
+.codex-auth-dialog .codex-auth-secondary:hover{background:var(--bg-1)}
+.codex-auth-dialog .codex-auth-primary{padding:9px 15px;border:1px solid transparent;color:white;background:color-mix(in srgb,var(--accent) 80%,#000)}
+.codex-auth-dialog .codex-auth-primary:hover{background:color-mix(in srgb,var(--accent-hover,var(--accent)) 80%,#000)}
+.codex-auth-dialog :is(button,a):focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.codex-auth-dialog [hidden]{display:none!important}
+@keyframes codex-auth-spin{to{transform:rotate(360deg)}}
+@media(max-width:380px){.codex-auth-dialog .codex-auth-card{padding:18px}.codex-auth-dialog .codex-auth-code{font-size:23px}.codex-auth-dialog .codex-auth-foot{flex-wrap:wrap}}
+@media(prefers-reduced-motion:reduce){.codex-auth-dialog *{animation:none!important;transition:none!important}}

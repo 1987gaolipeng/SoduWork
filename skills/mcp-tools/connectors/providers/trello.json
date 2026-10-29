@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 1,
+  "id": "trello",
+  "name": "Trello",
+  "category": "项目管理",
+  "description": "Trello 通用连接器：当前成员、看板与卡片列表、创建卡片。基于 Trello REST API 1.0，key+token 走 query 参数鉴权，不绑定任何汇报场景。",
+  "officialDocs": [
+    "https://developer.atlassian.com/cloud/trello/rest/api-group-members/",
+    "https://developer.atlassian.com/cloud/trello/rest/api-group-boards/",
+    "https://developer.atlassian.com/cloud/trello/rest/api-group-cards/"
+  ],
+  "authDocs": [
+    "https://developer.atlassian.com/cloud/trello/guides/rest-api/authorization/"
+  ],
+  "baseUrl": "https://api.trello.com/1",
+  "fields": [
+    {
+      "key": "TRELLO_KEY",
+      "label": "API Key（Atlassian 开发者平台 Trello Power-Up 页）",
+      "secret": false,
+      "required": true,
+      "pattern": "^[a-f0-9]{32}$",
+      "example": ""
+    },
+    {
+      "key": "TRELLO_TOKEN",
+      "label": "User Token",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "query",
+    "query": {
+      "key": "TRELLO_KEY",
+      "token": "TRELLO_TOKEN"
+    }
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "get_member_me",
+      "description": "获取当前成员信息（fields 白名单固定）。无分页。出处：https://developer.atlassian.com/cloud/trello/rest/api-group-members/#api-members-id-get",
+      "method": "GET",
+      "path": "/members/me",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "fixedQuery": {
+        "fields": "fullName,url,username"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_my_boards",
+      "description": "列出当前成员看板（filter 默认 open）。Trello 列表端点无游标分页，一次返回全量。出处：https://developer.atlassian.com/cloud/trello/rest/api-group-members/#api-members-id-boards-get",
+      "method": "GET",
+      "path": "/members/me/boards",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "fixedQuery": {
+        "filter": "open",
+        "fields": "id,name,url"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_board_cards",
+      "description": "列出看板卡片。无游标分页，一次返回全量；超大看板建议按列表拆分。出处：https://developer.atlassian.com/cloud/trello/rest/api-group-boards/#api-boards-id-cards-get",
+      "method": "GET",
+      "path": "/boards/{board_id}/cards",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "board_id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{24}$",
+            "description": "看板短 ID（24 位十六进制）",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "board_id"
+        ],
+        "maxProperties": 50
+      },
+      "fixedQuery": {
+        "fields": "id,name,url,listId,due"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_card",
+      "description": "创建卡片（POST /cards，idList 必填）。写入操作：运行前必须获得用户明确授权。出处：https://developer.atlassian.com/cloud/trello/rest/api-group-cards/#api-cards-post",
+      "method": "POST",
+      "path": "/cards",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id_list": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{24}$",
+            "description": "目标列表 ID",
+            "maxLength": 10000
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000,
+            "description": "卡片名"
+          },
+          "desc": {
+            "type": "string",
+            "description": "卡片描述",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "id_list",
+          "name"
+        ],
+        "maxProperties": 50
+      },
+      "query": {
+        "idList": "id_list",
+        "name": "name",
+        "desc": "desc"
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "鉴权为 query 参数 key + token（官方授权方式），token 会出现在 URL 中，运行器日志必须脱敏。",
+    "列表端点无游标分页，用固定 fields 收窄响应。",
+    "create_card 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

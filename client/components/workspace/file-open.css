@@ -1,0 +1,16 @@
+.file-open-notices {
+  position: fixed; inset: auto 24px 24px; z-index: 10050;
+  display: grid; gap: 8px; max-height: 35vh; overflow: auto;
+}
+.file-open-notice {
+  display: flex; align-items: center; gap: 12px; padding: 14px 18px;
+  color: var(--ink); background: var(--bg-0);
+  border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 8px 32px #0002; font-size: 14.5px;
+}
+.file-open-notice span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.file-open-notice button {
+  flex: none; padding: 6px 10px; cursor: pointer; font: inherit;
+  color: var(--ink); background: var(--bg-1); border: 1px solid var(--line); border-radius: 6px;
+}
+.file-open-notice button:hover { background: var(--bg-2); }

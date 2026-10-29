@@ -1,0 +1,80 @@
+/* A flat feedback section; scope controls against the host detail's generic form rules. */
+.tev-shell.tev-shell{margin:0;padding:0;border:0;border-top:1px solid var(--line);border-radius:0;background:transparent;overflow:visible}
+.tev-shell>summary{min-height:44px;padding:10px 0;display:flex;align-items:center;justify-content:space-between;gap:12px;list-style:none;cursor:default}
+.tev-shell>summary::-webkit-details-marker,.tev-shell .tev-more>summary::-webkit-details-marker{display:none}
+.tev-shell>summary:hover{color:var(--ink)}
+.tev-shell>summary>span,.tev-shell>summary>span>span{display:flex;align-items:baseline;gap:8px;min-width:0;flex-wrap:wrap}
+.tev-shell>summary>span>i{display:none}
+.tev-shell>summary b{color:var(--ink-2);font-size:max(var(--font-min-readable,12px),14px);font-weight:600}
+.tev-shell>summary small{color:var(--ink-3);font-size:max(var(--font-min-readable,12px),12px);font-weight:400}
+.tev-shell>summary>svg{width:15px;height:15px;flex:none;fill:none;stroke:var(--ink-3);stroke-width:1.8;transition:transform .16s var(--ease)}
+.tev-shell[open]>summary>svg{transform:rotate(180deg)}
+.tev-shell .tev-body{padding:0 0 4px;border:0}
+.tev-shell .tev-body>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:0 0 12px}
+.tev-shell .tev-body>header>div{min-width:0}
+.tev-shell .tev-body>header b{color:var(--ink-2);font-size:max(var(--font-min-readable,12px),13px);font-weight:500}
+.tev-shell .tev-body>header p{max-width:660px;margin:4px 0 0;color:var(--ink-3);font-size:max(var(--font-min-readable,12px),12px);line-height:1.55}
+.tev-shell button{box-sizing:border-box;min-height:32px;padding:5px 11px;border:1px solid var(--line-3);border-radius:var(--r-sm,6px);background:var(--bg-0);color:var(--ink-2);font:400 max(var(--font-min-readable,12px),13px)/1.5 var(--font-ui);white-space:nowrap}
+.tev-shell button:hover{border-color:color-mix(in srgb,var(--accent) 36%,var(--line));color:var(--accent);background:var(--accent-soft)}
+.tev-shell button.is-primary{border-color:var(--accent);background:var(--accent);color:var(--accent-ink,#fff)}
+.tev-shell button:disabled{opacity:.55}
+.tev-shell [hidden]{display:none!important}
+.tev-shell :is(button,summary):focus-visible,.tev-shell .tev-check input:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+
+/* Saved evaluations and controlled suggestions remain part of the same reading surface. */
+.tev-shell .tev-evaluation,.tev-shell .tev-proposal{margin:0 0 12px;padding:0;border:0;border-radius:0;background:transparent}
+.tev-shell .tev-proposal{padding-top:12px;border-top:1px solid var(--line)}
+.tev-shell .tev-evaluation>header,.tev-shell .tev-proposal>header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 0 8px;border:0}
+.tev-shell .tev-evaluation header>div,.tev-shell .tev-proposal header>div{min-width:0;display:flex;align-items:baseline;flex-wrap:wrap;gap:8px}
+.tev-shell .tev-evaluation header span,.tev-shell .tev-proposal header span{color:var(--ink-3);font-size:max(var(--font-min-readable,12px),12px)}
+.tev-shell .tev-evaluation header b,.tev-shell .tev-proposal header b{color:var(--ink-2);font-size:max(var(--font-min-readable,12px),13px);font-weight:600;overflow-wrap:anywhere}
+.tev-shell .tev-evaluation header em,.tev-shell .tev-proposal header em{color:var(--ink-3);font-size:max(var(--font-min-readable,12px),12px);font-style:normal;white-space:nowrap}
+.tev-shell .tev-evaluation ul{list-style:none;margin:0;padding:0}
+.tev-shell .tev-evaluation li{display:grid;grid-template-columns:5px minmax(0,1fr);align-items:baseline;gap:8px;padding:3px 0;color:var(--ink-2);font-size:max(var(--font-min-readable,12px),13px);line-height:1.55;overflow-wrap:anywhere}
+.tev-shell .tev-evaluation li i{width:4px;height:4px;border-radius:50%;background:var(--ink-4)}
+.tev-shell .tev-evaluation li small{grid-column:2;color:var(--ink-3);font-size:max(var(--font-min-readable,12px),12px)}
+.tev-shell .tev-evaluation>p{margin:0;color:var(--ink-3);font-size:max(var(--font-min-readable,12px),12px);line-height:1.55}
+.tev-shell .tev-evaluation>footer{padding:7px 0 0;color:var(--ink-3);font-size:max(var(--font-min-readable,12px),12px)}
+.tev-shell .tev-proposal dl{margin:0;padding:0}
+.tev-shell .tev-proposal dl>div{display:grid;grid-template-columns:76px minmax(0,1fr);gap:8px;padding:4px 0}
+.tev-shell .tev-proposal dt{color:var(--ink-3);font-size:max(var(--font-min-readable,12px),12px)}
+.tev-shell .tev-proposal dd{margin:0;color:var(--ink-2);font-size:max(var(--font-min-readable,12px),13px);line-height:1.55;overflow-wrap:anywhere}
+.tev-shell .tev-next{margin:8px 0;color:var(--ink-3);font-size:max(var(--font-min-readable,12px),12px);line-height:1.55}
+.tev-shell .tev-decisions{display:flex;flex-wrap:wrap;gap:8px;padding:0}
+.tev-shell .tev-reject{display:flex;flex-direction:row;align-items:center;gap:8px;padding:0;margin-top:8px}
+.tev-shell .tev-reject input{box-sizing:border-box;min-width:0;flex:1;width:auto;height:32px;min-height:32px;padding:4px 9px;border:1px solid var(--line-3);border-radius:var(--r-sm,6px);background:var(--bg-0);color:var(--ink);font:400 max(var(--font-min-readable,12px),13px)/1.5 var(--font-ui)}
+
+.tev-shell .tev-form{display:block;margin:0;padding:0;border:0;border-radius:0;background:transparent}
+.tev-shell .tev-form fieldset{min-width:0;margin:0 0 12px;padding:0;border:0}
+.tev-shell .tev-form legend,.tev-shell .tev-field>span{display:block;margin:0 0 6px;color:var(--ink-2);font-size:max(var(--font-min-readable,12px),13px);font-weight:500;line-height:1.5}
+.tev-shell .tev-outcomes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));max-width:390px;gap:3px;padding:3px;border-radius:8px;background:var(--bg-2)}
+.tev-shell .tev-outcomes label{position:relative;display:block;min-width:0;margin:0;padding:0}
+.tev-shell .tev-outcomes input{position:absolute;width:1px;height:1px;min-height:0;min-width:0;margin:0;padding:0;border:0;clip-path:inset(50%);opacity:0;pointer-events:none}
+.tev-shell .tev-outcomes span{min-height:30px;padding:4px 6px;box-sizing:border-box;border:1px solid transparent;border-radius:5px;display:flex;align-items:center;justify-content:center;color:var(--ink-3);font-size:max(var(--font-min-readable,12px),13px);line-height:1.5;text-align:center}
+.tev-shell .tev-outcomes input:checked+span{border-color:var(--line-3);background:var(--bg-0);color:var(--ink);font-weight:600;box-shadow:var(--shadow-xs)}
+.tev-shell .tev-outcomes input:focus-visible+span{outline:2px solid var(--accent);outline-offset:1px}
+.tev-shell .tev-field{display:block;margin:0;min-width:0}
+.tev-shell .tev-field textarea{box-sizing:border-box;width:100%;min-height:64px;resize:vertical;padding:9px 10px;border:1px solid var(--line-3);border-radius:var(--r-sm,6px);background:var(--bg-0);color:var(--ink);font:400 max(var(--font-min-readable,12px),13px)/1.6 var(--font-ui);outline:0}
+.tev-shell .tev-field textarea:focus,.tev-shell .tev-reject input:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.tev-shell .tev-more{margin:10px 0 0;padding:0;border:0;border-radius:0;background:transparent}
+.tev-shell .tev-more>summary{display:flex;align-items:center;gap:6px;width:fit-content;max-width:100%;padding:3px 0;color:var(--ink-2);font-size:max(var(--font-min-readable,12px),12px);line-height:1.5;list-style:none}
+.tev-shell .tev-more>summary::before{content:'';width:5px;height:5px;flex:none;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);margin-right:3px}
+.tev-shell .tev-more[open]>summary::before{transform:rotate(45deg);margin-top:-3px}
+.tev-shell .tev-more>summary span{color:var(--ink-3)}
+.tev-shell .tev-more>div{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding-top:10px}
+.tev-shell .tev-check{display:flex;flex-direction:row;align-items:flex-start;gap:8px;margin:12px 0 0;padding:0;color:var(--ink-2);font-size:max(var(--font-min-readable,12px),12px);font-weight:400;line-height:1.55}
+.tev-shell .tev-check input{appearance:auto;box-sizing:border-box;flex:0 0 16px;width:16px;min-width:16px;height:16px;min-height:16px;margin:2px 0 0;padding:0;border:0;border-radius:0;background:transparent;accent-color:var(--accent)}
+.tev-shell .tev-check span{min-width:0;overflow-wrap:anywhere}
+.tev-shell .tev-form>footer{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:12px 0 0;padding:0}
+.tev-shell .tev-form-error{margin:8px 0 0;color:var(--danger,#b34f55);font-size:max(var(--font-min-readable,12px),12px);line-height:1.5}
+.tev-shell .tev-form-error:empty{display:none}
+.tev-shell .tev-guard{display:flex;align-items:flex-start;gap:7px;margin:12px 0 0;padding:10px 0 0;border-top:1px solid var(--line-2);border-radius:0;background:transparent;color:var(--ink-3);font-size:max(var(--font-min-readable,12px),12px);line-height:1.55}
+.tev-shell .tev-guard i{width:14px;height:14px;flex:0 0 auto;margin-top:2px;border:1px solid var(--line-3);border-radius:50%;display:flex;align-items:center;justify-content:center;font:12px var(--font-ui)}
+@media(max-width:760px){
+  .tev-shell .tev-more>div{grid-template-columns:1fr}
+  .tev-shell .tev-body>header{flex-wrap:wrap}
+  .tev-shell .tev-proposal dl>div{grid-template-columns:1fr;gap:3px}
+  .tev-shell .tev-reject{align-items:stretch;flex-wrap:wrap}
+  .tev-shell .tev-reject input{flex-basis:100%}
+}
+@media(prefers-reduced-motion:reduce){.tev-shell>summary>svg{transition:none}}

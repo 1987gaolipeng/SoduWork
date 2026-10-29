@@ -1,0 +1,48 @@
+<!doctype html><meta charset="utf-8"><title>Isolated tool detail regression</title>
+<link rel="stylesheet" href="../../theme/variables.css">
+<link rel="stylesheet" href="../../components/panels/panels-chat.css">
+<link rel="stylesheet" href="../../components/panels/code-workbench.css">
+<link rel="stylesheet" href="../../vendor/codemirror/codemirror.css">
+<style>body{margin:0}#cpChat{height:100vh}.nchat-scroll{height:calc(100vh - 170px)}.nchat{height:100%}</style>
+<div id="cpChat"></div>
+<script src="../../vendor/markdown/marked.umd.js"></script>
+<script src="../../vendor/markdown/purify.min.js"></script>
+<script src="../../vendor/markdown/highlight.min.js"></script>
+<script src="../../vendor/markdown/diff.min.js"></script>
+<script src="../../vendor/markdown/diff2html.min.js"></script>
+<script src="../../vendor/codemirror/codemirror.js"></script>
+<script src="../../vendor/codemirror/mode/javascript/javascript.js"></script>
+<script src="../../components/panels/chat-thinking-collapse.js"></script>
+<script src="../../components/panels/chat-dom-patch.js"></script>
+<script src="../../components/panels/panels-chat-tools.js"></script>
+<script src="../../components/panels/chat-tool-details.js"></script>
+<script src="../../components/panels/chat-context-meter.js"></script>
+<script src="../../components/panels/chat-scroll-follow.js"></script>
+<script src="../../components/panels/chat-markdown.js"></script>
+<script src="../../components/panels/chat-output-links.js"></script>
+<script src="../../components/panels/chat-workspace-info.js"></script>
+<script src="../../components/panels/chat-workspace-split.js"></script>
+<script src="../../components/panels/chat-workspace-controls.js"></script>
+<script src="../../components/panels/panels-chat-workspace.js"></script>
+<script src="../../components/panels/chat-acceptance-results.js"></script>
+<script src="../../components/panels/chat-message-renderer.js"></script>
+<script src="../../components/panels/chat-composer-bindings.js"></script>
+<script>
+window.errors=[]; addEventListener('error',e=>errors.push(e.message));
+const noop=()=>{};
+window.ctx={_ref:'detail-fixture',_viewEpoch:1,_sessionOptions:{},_collabTasks:new Map(),_collabEntries:()=>[],
+  _openTool:new Set(),_openThink:new Set(),_closedThink:new Set(),_openToolGroup:new Set(),_pendingAttachmentNames:[],
+  _outs:[],_api:()=>soduWorkAPI.conversationSession,_messageWindowSize:80,
+  _syncThinkingClock:noop,_renderQueue:noop,_renderTaskStartPrompt:noop,_syncSlowStatusTicker:noop,
+  _thinkingStatusHtml:()=>'',_ensureHlCss:noop,_ensureCollabView:noop,_conversationDraftText:()=>'',
+  _paintBar:noop,_rememberConversationDraft:noop,_runtimeBusy:()=>true,esc:ChatTools.esc,
+  _snap:{status:'idle',tools:[],messages:[]}};
+const bindings=ChatComposerBindings.create(ctx);ctx._mount=bindings._mount;ctx._mount();
+window.renderer=ChatMessageRenderer.create(ctx);ctx._render=renderer._render;
+window.metrics={highlight:0,diff:0,rebuilds:0};
+const highlight=hljs.highlight, diff=Diff.createTwoFilesPatch, patch=ChatTools.patchList;
+hljs.highlight=(...args)=>{metrics.highlight++;return highlight(...args)};
+Diff.createTwoFilesPatch=(...args)=>{metrics.diff++;return diff(...args)};
+ChatTools.patchList=(...args)=>{metrics.rebuilds++;return patch(...args)};
+window.showSnapshot=snapshot=>{ctx._snap=snapshot;renderer._render();};
+</script>

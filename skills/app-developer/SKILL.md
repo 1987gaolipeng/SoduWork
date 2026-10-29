@@ -1,0 +1,87 @@
+---
+name: app-developer
+description: "开发、调整和验证 SoduWork 应用。基于插件开发规范，贯通应用类型、独立窗口、H5 页面、技能与对话桥，以及草稿预检、安装和导出。"
+---
+
+# SoduWork 应用开发
+
+这是插件开发能力的扩展，沿用同一包格式、会话工具、授权和交付链路。先读本轮资源中的 `plugin-development.md`（插件开发助手的同源规范），再按下面的应用要求实施。普通插件仍使用 method、connector 或 workflow。
+
+## 需求与基础信息
+
+根据用户的业务目标确定页面入口、输入、操作、产出与验证方式。只询问影响结果的缺失信息。已有工程先检查技术栈与当前工作区，保留用户修改；不要用空模板覆盖已有页面。
+
+应用草稿在基础信息中使用 `template: "app"`。纯静态 H5 轻应用默认使用包内入口；HTML、CSS、JS、图片、字体与本地 JSON 数据都随包收集，无需启动 Node/Python/HTTP 服务。必须包含名称、稳定 key、SemVer 版本、用途、业务 instructions，以及 `ui.contributions`：
+
+新应用和改进版本最低提供中文、英文双语。复用插件开发规范的 `locales` 展示配置：至少声明 `zh-CN`、`en-US` 的真实 `name`、`description`，页面入口用 `locales.<语言>.ui.<贡献id>.title/description`。公开参数和安装偏好也按同源规范翻译；用户要求韩语等时追加相应语言。只翻译展示文字，不修改 URL、参数值、权限、MCP 或执行指令。交付前验证中英切换、其他语言回退英文。业务页面按用户明确范围处理；仅翻译清单不能称页面已翻译。
+
+```json
+{
+  "template": "app", "key": "example-app", "name": "示例应用", "version": "0.1.0",
+  "description": "管理当前业务并通过 SoduWork 完成工作",
+  "locales": {
+    "zh-CN": {"name":"示例应用","description":"管理当前业务并通过 SoduWork 完成工作","ui":{"main":{"title":"示例应用"}}},
+    "en-US": {"name":"Example App","description":"Manage work through SoduWork","ui":{"main":{"title":"Example App"}}}
+  },
+  "instructions": "根据用户要求完成当前应用的业务工作，读取真实记录、验证后写回并报告结果。",
+  "inputs": [], "setup": {"preferences": []},
+  "mcpServers": [], "runtimeCapabilities": [],
+  "ui": {"contributions": [{
+    "id": "main", "title": "示例应用", "slot": "workspace.navigation",
+    "source": {"type": "package", "openMode": "workspace", "entry": "ui/index.html",
+      "bridge": {"version": 1, "capabilities": ["conversation.send", "composer.control"]}}
+  }]}
+}
+```
+
+包内入口必须是 `ui/` 下实际存在的 HTML 相对路径，并在 `resources` 中以 kind `ui` 声明。全部运行依赖放在 `ui/`（kind `ui`）或 `assets/`（kind `asset`），使用相对路径，禁止 CDN 依赖，验证离线运行。壳通过内部资源协议读取安装包内容，各应用和账号的浏览器存储隔离，关闭重开及升级保留同一账号/应用的 localStorage/IndexedDB。页面无 Node.js、文件系统和任意 IPC 权限；使用随包 SDK 调用已声明的壳能力。安装只保存资源，点击应用才加载页面，不执行资源里的后端脚本。
+
+已有在线业务服务继续使用 `source: {type:"external",url:"实际HTTP(S)地址",openMode:"workspace"}`。示例域名不能原样交付；该模式仍要求服务实际可用，不把作者电脑的127.0.0.1地址当作可分发服务。不能使用 file/data/javascript URL，不能把账号、密码、凭据放进 URL、草稿、提示词或导出包。
+
+窗口默认 1280×800 逻辑像素、居中、小屏自动适配；不要求用户配置尺寸。只有明确指定时才在根级声明 `appWindow`，详见基础规范。应用由独立窗口承载，主窗口切菜单保留它；多个应用各有独立页面与对话。页面中不要再实现壳的全屏、设置或对话面板。
+
+## 页面、技能和对话
+
+读取随本轮资源提供的 `sdk/README.md`，复制同目录 `sdk/soduwork-app.js` 到业务站点，使用公共函数，不能直接访问 Electron、原生 IPC 或设备身份。资源路径由开发助手运行时装配，SDK 始终来自客户端同一份源码。
+
+- 自然语言自动匹配业务技能，不展示“选择技能”按钮。业务页面可以用“新增系列”“创建话题”等操作打开简单描述表单。
+- 表单提交先用 `soduWorkApp.chat.expand()` 展开右侧对话，再用 `soduWorkApp.chat.send({text, requestId})`。正文包含用户描述、真实业务 ID 和操作范围，由应用壳发送到当前应用的原生对话。
+- 用 `soduWorkApp.createRequestId()`；同一次操作重试沿用同一个 ID，提交期间禁用重复操作。发送失败保留输入和已创建业务记录，允许单独补发；超时先核对对话，避免自动重复业务动作。
+- 回执只证明会话已接收；真实业务完成需要模型执行、业务接口写回和读回证据。使用现有会话运行时与 MCP，不增加平行会话状态。
+- 用 `soduWorkApp.events.onRefresh(callback)` 重新读取当前授权业务数据。壳负责刷新应用；刷新页面保留右侧对话及用户草稿。失败或取消后的刷新也不能被写成成功。
+- 跨域 iframe 双方加载 SDK；顶层 `configure({allowedFrameOrigins:[精确来源]})`，直接子页面 `configure({parentOrigin:精确壳来源})`。走带来源和窗口校验的 postMessage，不能用通配符，不需要注册 URL 协议。任意深层 iframe 转发不在当前支持范围。
+- 业务写回使用真实已配置连接器，或经用户认证的应用自有 MCP。沿用 SDK 和现有连接授权流程，不编造 MCP 名称、绕过 RBAC 或把凭据发送给模型。安装不能隐式执行资源脚本。
+
+## 应用设置与自己的用户登录
+
+应用自身的登录、ukey 和业务鉴权都是可选能力，不是安装、打开应用或使用对话桥的统一前提。允许纯本地、完全单机、无账号轻应用；不需要业务认证时，不生成登录页，不索取 ukey，不声明虚构 MCP 或凭据。示例中 `mcpServers: []` 与仅有对话桥权限的应用可以直接运行。SoduWork 自身的会话身份与应用业务账号分别处理，不能因为使用原生应用窗口就要求业务服务登录。
+
+以下仅适用于用户明确需要业务登录或服务实际要求认证的应用。根据业务真实认证方式集成，ukey 只是字段示例，不是固定必填字段；不需要自动登录时也不必申请设置读写权限。
+
+需要页面自动同步配置时声明 `settings.read`、`settings.write`，用 `soduWorkApp.settings.update({values,secretKeys,expectedRevision})` 写当前应用的参数；任意业务 JSON 参数都沿用此通路，不让用户复制到配置中心。ukey/令牌是敏感参数，系统安全存储保存，禁止放入应用包、提示词或会话正文。
+
+需要自动登录时，页面登录成功后获取自身服务签发的凭据，再一次更新凭据和业务账号标识；退出只结束页面会话并暂停当前窗口自动登录，保留壳内凭据。例如使用 ukey 的服务，重开时通过 `settings.get({keys:['ukey'],includeSecrets:true})` 读取并向业务服务验证，再恢复登录。换号替换凭据，旧异步响应需核对当前账号和设置版本，不覆盖新账号。服务端撤销/禁用必须继续生效，不做两套用户体系的隐式合并。
+
+自有 MCP 声明 `mcp.connect` 后在原生顶层引用 `credentialKey:'ukey'`，壳为技能调用添加认证头；不把密钥交给模型读取。跨域直接 iframe 按 SDK 精确来源授权后可同样读写本应用设置。清单权限、隔离边界、错误和大小限制见 SDK README。验收覆盖登录同步、退出保留、关闭重开自动登录、换号后 MCP 身份、旧授权失效及未授权 iframe。
+
+## 生成、安装和交付
+
+新应用可先运行无第三方依赖的 Node.js 18+ 脚手架，再完善实际业务：
+
+```sh
+node scripts/scaffold.cjs --out /work/new-candidate --key example-app --name "示例应用" --name-en "Example App" --entry ui/index.html
+```
+
+路径使用真实绝对路径，含空格时引用。out 必须是不存在的新目录；不填 `--url` 默认生成包内应用，脚手架生成草稿、可运行页面、同源 SDK 及成果清单。需要在线服务时再显式使用 `--url`；`serve.cjs` 仅供外部 URL 模式开发预览，包内静态应用不需要运行它。
+
+在生成目录完善业务 instructions、页面表单和实际所需的业务技能/资源；资源逐项声明 path/kind。不需要的执行能力不添加。已有业务技能按现有 skills/MCP 契约复用，不复制成假接口。
+
+读取实际 JSON、检查全部文件，合并当前工作目录 `.soduwork/delivery.json` 的已有成果，唯一 primary 指向真实 `soduwork-plugin-draft.json`。清单必须使用 `{"schemaVersion":1,"deliverables":[{"path":"soduwork-plugin-draft.json","kind":"file","title":"应用草稿","primary":true}]}`，字段是 deliverables，不能写成 items。脚手架生成在子目录时，应把子目录内交付路径合并到当前会话的成果清单，不覆盖其他成果。不能声称安装会自动启动本地服务；只有真实服务已运行时页面才能打开。
+
+使用本次回复旁的“检查并安装”：现有链路收集当前会话资源、预检并安装个人应用；不让用户去隐藏目录复制 JSON。需要分发时用原有导出入口生成 `.soduwork-plugin`，升版不覆盖旧版本。个人安装与企业审核/远端上架分别报告。
+
+## 验证
+
+至少验证：草稿预检与资源完整；安装后出现在“应用→我的”；独立窗口打开真实页面；业务操作发送到该应用右侧会话；真实技能执行与业务读回；壳刷新后页面反映记录且对话保留；切主菜单窗口保留、多个应用不串会话；缺连接、重复点击、跨域未授权和发送失败处理；小屏与亮暗主题。
+
+按证据分别记录代码检查、隔离 Chromium/原生桥夹具、真实模型/真实业务实测和部署状态。测试夹具不能证明生产闭环，程序注入点击不能证明原生鼠标穿透。涉及图片/视频收费操作时遵循用户实际授权；没有条件的项目写明未实测，不能用静态成功替代。

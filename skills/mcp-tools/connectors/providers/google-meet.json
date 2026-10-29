@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "id": "google-meet",
+  "name": "Google Meet",
+  "category": "沟通协作",
+  "description": "Google Meet 通用连接器：创建会议空间、获取会议空间详情。基于 Google Meet REST API v2（业务接口）；会议加入链接的发送依赖其他连接器。",
+  "officialDocs": [
+    "https://developers.google.com/workspace/meet/api/guides/meeting-spaces",
+    "https://developers.google.com/workspace/meet/api/rest/v2/spaces/create",
+    "https://developers.google.com/workspace/meet/api/rest/v2/spaces/get"
+  ],
+  "authDocs": [
+    "https://developers.google.com/workspace/meet/api/guides/authorize"
+  ],
+  "baseUrl": "https://meet.googleapis.com",
+  "fields": [
+    {
+      "key": "GOOGLE_ACCESS_TOKEN",
+      "label": "Google OAuth 访问令牌",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "tokenKey": "GOOGLE_ACCESS_TOKEN",
+    "header": "Authorization",
+    "prefix": "Bearer"
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "create_space",
+      "description": "创建会议空间（POST /v2/spaces，返回 meetingUri）。写入型业务动作（产生新资源），按官方语义非只读。出处：https://developers.google.com/workspace/meet/api/rest/v2/spaces/create",
+      "method": "POST",
+      "path": "/v2/spaces",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "body": {},
+      "readOnly": false
+    },
+    {
+      "name": "get_space",
+      "description": "按会议空间名（spaces/{space}）或会议码（translation 到空间名由运行器调用 spaces:translate）获取空间详情。无分页。出处：https://developers.google.com/workspace/meet/api/rest/v2/spaces/get",
+      "method": "GET",
+      "path": "/v2/spaces/{space_id}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "space_id": {
+            "type": "string",
+            "description": "会议空间 ID 或会议码",
+            "pattern": "^[A-Za-z0-9_-]{3,128}$"
+          }
+        },
+        "required": [
+          "space_id"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "Meet API v2 主要面向空间资源管理，不含历史会议列表端点；会议纪要/录制经 Google Drive 访问。",
+    "访问令牌约 1 小时过期，需用户安全填入并手动更新；自动续期为宿主侧适配项，本连接器未实现。",
+    "create_space 会产生新资源（非只读），必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

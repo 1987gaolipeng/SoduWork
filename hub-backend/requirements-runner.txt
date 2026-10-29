@@ -1,0 +1,24 @@
+﻿# Install only the standalone Runner dependencies listed here.
+# The Hub requirements.txt includes server dependencies that the Runner does not need.
+# Runner module imports use websockets, PyYAML for skill validation,
+# and the pure-Python database connector drivers listed below.
+# Avoid installing the full Hub dependency set on Runner machines.
+# Runner uses additional_headers and proxy=None (websockets 15+).
+websockets>=15
+# Windows terminals use pywinpty/ConPTY; Linux and macOS use the standard-library pty module.
+# Windows normally uses the packaged soduwork-runner.exe; this file supports Linux installation.
+pywinpty>=3.0; sys_platform == "win32"
+
+# MIT: shared safe YAML frontmatter validation for Agent Skills.
+PyYAML>=6.0.3,<7
+
+# BSD-3-Clause / MIT: bounded, read-only commercial database connectors.
+pg8000==1.31.5
+PyMySQL[rsa]==1.2.3
+# Apache-2.0 / BSD-3-Clause: RSA authentication and explicit frozen-package notices.
+cryptography==49.0.0
+
+# Apache-2.0: official MongoDB driver without dynamic downloads or user-supplied runtimes.
+pymongo==4.18.3
+# MIT: use the same established Redis client as Hub.
+redis>=5.2,<6

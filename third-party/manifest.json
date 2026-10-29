@@ -1,0 +1,320 @@
+{
+  "schema": 1,
+  "description": "审核过的原始许可快照；许可文件需随各自交付物分发，不能用此清单代替全文。",
+  "notices": [
+    {
+      "id": "harness2",
+      "name": "Google Research Harness²",
+      "version": "0.1.0",
+      "license": "Apache-2.0",
+      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335/LICENSE",
+      "path": "hub-backend/app/services/harness2_vendor/LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "id": "pi",
+      "name": "@earendil-works/pi-*",
+      "version": "1.4.0",
+      "license": "MIT",
+      "source": "https://raw.githubusercontent.com/earendil-works/pi/4a080252f06caf63a525d7873c5d94d3c23887e0/LICENSE",
+      "path": "third-party/licenses/pi-LICENSE.txt",
+      "sha256": "0457f5bcec3b3b211605dfb5d1a49042fd638f3686a410fe099c24a25af13c48"
+    },
+    {
+      "id": "entities",
+      "name": "@nodable/entities",
+      "version": "2.1.0",
+      "license": "MIT",
+      "source": "https://raw.githubusercontent.com/nodable/val-parsers/f1c61a65e7b967c17b13822ef71e91bd25f17ce2/LICENSE",
+      "path": "third-party/licenses/entities-LICENSE.txt",
+      "sha256": "750cb3fb6362804957ef52caaf9b5c824015be44d494637330d7cd8834d31d40"
+    },
+    {
+      "id": "aws-sdk",
+      "name": "@aws-sdk/*",
+      "version": "3.x",
+      "license": "Apache-2.0",
+      "source": "https://raw.githubusercontent.com/aws/aws-sdk-js-v3/v3.997.0/LICENSE",
+      "path": "third-party/licenses/aws-sdk-LICENSE.txt",
+      "sha256": "edea91454b811f127fbdea3d86f378f6719bd372ed440abf82b232f6fca06c3d"
+    },
+    {
+      "id": "xml-naming",
+      "name": "xml-naming",
+      "version": "0.1.0",
+      "license": "MIT",
+      "source": "https://raw.githubusercontent.com/NaturalIntelligence/xml-naming/0330d0cfa57ee483a834c474b2d0a4f0449ee81d/LICENSE",
+      "path": "third-party/licenses/xml-naming-LICENSE.txt",
+      "sha256": "8e75fc0e776c62ccadb8178ece8d3daa9ba7601fb0a49b2dfb0ea9a7a5c0aa07"
+    },
+    {
+      "id": "diff2html",
+      "name": "diff2html",
+      "license": "MIT",
+      "source": "https://github.com/rtfpessoa/diff2html/tree/41fdbdb9cb226a88b5eeafe5231121a7eea91983",
+      "path": "client/vendor/markdown/LICENSE.diff2html",
+      "sha256": "6de794566a8feb4233594420299cec2dbfba51ae57201763541a5e7d627cb245"
+    },
+    {
+      "id": "marked",
+      "name": "marked",
+      "license": "MIT",
+      "source": "https://github.com/markedjs/marked",
+      "path": "client/vendor/markdown/LICENSE.marked",
+      "sha256": "8e3a3f82f59a60958f56ca08f445647c32a4733dc7ca6c2c46f6eb898471ab9c"
+    },
+    {
+      "id": "highlight.js",
+      "name": "highlight.js",
+      "license": "BSD-3-Clause",
+      "source": "https://github.com/highlightjs/highlight.js",
+      "path": "client/vendor/markdown/LICENSE.highlight",
+      "sha256": "6c081431591d9df696c82dc598fe1423765b8a299b200ed00b281afd0f64c490"
+    },
+    {
+      "id": "jsdiff",
+      "name": "jsdiff",
+      "license": "BSD-3-Clause",
+      "source": "https://github.com/kpdecker/jsdiff",
+      "path": "client/vendor/markdown/LICENSE.diff",
+      "sha256": "eda81a415869e67809f6a9f3fd6056062cb83a462118e07eec5e92b2e0c40ce9"
+    },
+    {
+      "id": "DOMPurify",
+      "name": "DOMPurify",
+      "license": "Apache-2.0 OR MPL-2.0",
+      "source": "https://github.com/cure53/DOMPurify",
+      "path": "client/vendor/markdown/LICENSE.dompurify",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "id": "CodeMirror",
+      "name": "CodeMirror",
+      "license": "MIT",
+      "source": "https://github.com/codemirror/codemirror5",
+      "path": "client/vendor/codemirror/LICENSE",
+      "sha256": "168a4becc968f5001e2ee2e0291b6e4daabafc1894a11ade1e11d56e96096e07"
+    },
+    {
+      "id": "xterm",
+      "name": "xterm",
+      "license": "MIT",
+      "source": "https://github.com/xtermjs/xterm.js",
+      "path": "client/vendor/xterm/LICENSE",
+      "sha256": "b569f629d00f2626a8100df2a1798210535621e42164dfd426a6fe5aac7b0ccd"
+    },
+    {
+      "id": "standardwebhooks",
+      "name": "standardwebhooks",
+      "version": "1.1.1",
+      "license": "MIT",
+      "source": "https://raw.githubusercontent.com/standard-webhooks/standard-webhooks/b4d2c14fc5b4ccff3ff271e3b087dff812254c59/libraries/LICENSE",
+      "path": "third-party/licenses/standardwebhooks-LICENSE.txt",
+      "sha256": "5ec8c7b26b64d881a6706617bed25c049f97f2f35de034c756de8546fd6dbe27"
+    },
+    {
+      "id": "proxy-agent-negotiate-evidence",
+      "name": "proxy-agent-negotiate",
+      "version": "1.1.0",
+      "license": "MIT",
+      "licenseNote": "Package metadata declares MIT; complete original notice is missing. This is retained upstream evidence, not clearance.",
+      "source": "https://raw.githubusercontent.com/TooTallNate/proxy-agents/b7e5f7ccce1a3ac5b339cc4c587974e8989cbc16/packages/negotiate/package.json",
+      "path": "third-party/licenses/proxy-agent-negotiate-upstream-evidence.txt",
+      "sha256": "d327e2b2289e1e93d6923162d266a7053c28d33b3ba40b4ad9198252a0c7b61b"
+    },
+    {
+      "id": "dnspython",
+      "name": "dnspython",
+      "version": "2.9.0",
+      "license": "ISC",
+      "source": "https://raw.githubusercontent.com/rthalley/dnspython/e790c8f20a67ad439c7aafef2321e161c6028eee/LICENSE",
+      "path": "third-party/licenses/dnspython-LICENSE.txt",
+      "sha256": "c3ea3ff5654b329c19d3bc5f7481af623c3dded4a6145585499f843ad3d741cd"
+    }
+  ],
+  "piVersion": "1.4.0",
+  "vendored": [
+    {
+      "name": "Google Research Harness² embedded core",
+      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
+      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
+      "path": "hub-backend/app/services/harness2_vendor/UPSTREAM.md",
+      "sha256": "8a36f371dc814302c6dcbaf821d73b0484f03ad7aa9573fa4158fad598528d3e"
+    },
+    {
+      "name": "Google Research Harness² embedded core",
+      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
+      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
+      "path": "hub-backend/app/services/harness2_vendor/__init__.py",
+      "sha256": "de20a79ef3cf3974bf32cb6afdbb32608655676e749a466ffd6c7c173bb7e26a"
+    },
+    {
+      "name": "Google Research Harness² embedded core",
+      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
+      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
+      "path": "hub-backend/app/services/harness2_vendor/config.py",
+      "sha256": "f84cea040d353c0fa50e073fcad4d9fead5a27e479f3bf38c8ddd341e7a7d11c"
+    },
+    {
+      "name": "Google Research Harness² embedded core",
+      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
+      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
+      "path": "hub-backend/app/services/harness2_vendor/core/__init__.py",
+      "sha256": "ce487673e00fd8921139e3afb688c566fc43d9b07acba048d2102663a81f7151"
+    },
+    {
+      "name": "Google Research Harness² embedded core",
+      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
+      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
+      "path": "hub-backend/app/services/harness2_vendor/core/context.py",
+      "sha256": "c817f247a8529744b718d3d4a904bbee4a82b8017dee8f6c182ef97c9cda677d"
+    },
+    {
+      "name": "Google Research Harness² embedded core",
+      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
+      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
+      "path": "hub-backend/app/services/harness2_vendor/core/ledger.py",
+      "sha256": "7059de5d90fc9fb8d4b3b799ff075f09d34f182ba0fdb56eb9d8b8383d0bbf55"
+    },
+    {
+      "name": "Google Research Harness² embedded core",
+      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
+      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
+      "path": "hub-backend/app/services/harness2_vendor/core/prompts.py",
+      "sha256": "53b97d5a83570692520204736238a09eb9ba6897c830aae945a50c45fe2c2691"
+    },
+    {
+      "name": "Google Research Harness² embedded core",
+      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
+      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
+      "path": "hub-backend/app/services/harness2_vendor/core/prompts_base.py",
+      "sha256": "7784590bafc11f09184725f5f8acd3b6f250be4680daed0919f3de96cc2d52f6"
+    },
+    {
+      "name": "Google Research Harness² embedded core",
+      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
+      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
+      "path": "hub-backend/app/services/harness2_vendor/core/proposer.py",
+      "sha256": "286c0a0db1a03be1af1c6636a3416e1dc339c5264d2dd069bfde6a8d950f2488"
+    },
+    {
+      "name": "Google Research Harness² embedded core",
+      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
+      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
+      "path": "hub-backend/app/services/harness2_vendor/core/recursion.py",
+      "sha256": "169661067645b531d7d93d3ff4fb1a3b4d41b8e20ed3c616a47568584cc9e006"
+    },
+    {
+      "name": "Google Research Harness² embedded core",
+      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
+      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
+      "path": "hub-backend/app/services/harness2_vendor/core/spec.py",
+      "sha256": "f245ec9e314778e2a1a51594b906584255b9eed8340c073b864a8a6f2c8dc400"
+    },
+    {
+      "name": "Google Research Harness² embedded core",
+      "version": "1cfe254e8d25b15f37048c3730134686abe60335",
+      "source": "https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335",
+      "path": "hub-backend/app/services/harness2_vendor/core/tree.py",
+      "sha256": "40a5735d0fb30d8dae6a9b1c2c76bc3085995bcc6e84400df7437abac6a13844"
+    },
+    {
+      "name": "diff2html",
+      "version": "3.4.56",
+      "path": "client/vendor/markdown/diff2html.min.js",
+      "sha256": "a2110a09cee157bd5466da77be02107ac81a0baa2bc1f3fe81aac8183314598e"
+    }
+  ],
+  "locks": [
+    "client/package-lock.json",
+    "hub-frontend/package-lock.json"
+  ],
+  "reviewedLicenses": [
+    "MIT",
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "ISC",
+    "BlueOak-1.0.0",
+    "0BSD",
+    "BSD-2-Clause",
+    "Python-2.0",
+    "WTFPL OR ISC",
+    "WTFPL",
+    "Unlicense",
+    "(MIT OR CC0-1.0)",
+    "(WTFPL OR MIT)",
+    "CC-BY-4.0"
+  ],
+  "lockLicenseEvidence": {
+    "node_modules/buildcheck": {
+      "version": "0.0.7",
+      "license": "MIT",
+      "evidence": "npm package LICENSE retained; verified locally 2026-10-17"
+    },
+    "node_modules/cpu-features": {
+      "version": "0.0.10",
+      "license": "MIT",
+      "evidence": "npm package LICENSE retained; verified locally 2026-10-17"
+    },
+    "node_modules/ssh2": {
+      "version": "1.17.0",
+      "license": "MIT",
+      "evidence": "npm package LICENSE retained; verified locally 2026-10-17"
+    }
+  },
+  "skillNotices": [],
+  "runtimeNoticeOverrides": [
+    {
+      "name": "@earendil-works/pi-*",
+      "version": "1.4.0",
+      "notice": "pi"
+    },
+    {
+      "name": "@nodable/entities",
+      "version": "2.1.0",
+      "notice": "entities"
+    },
+    {
+      "name": "xml-naming",
+      "version": "0.1.0",
+      "notice": "xml-naming"
+    },
+    {
+      "name": "@aws-sdk/credential-provider-http",
+      "version": "3.972.78",
+      "notice": "aws-sdk"
+    },
+    {
+      "name": "@aws-sdk/credential-provider-login",
+      "version": "3.972.83",
+      "notice": "aws-sdk"
+    },
+    {
+      "name": "@aws-sdk/nested-clients",
+      "version": "3.997.50",
+      "notice": "aws-sdk"
+    },
+    {
+      "name": "standardwebhooks",
+      "version": "1.1.1",
+      "notice": "standardwebhooks"
+    }
+  ],
+  "runtimeNoticeReviews": [
+    {
+      "name": "proxy-agent-negotiate",
+      "version": "1.1.0",
+      "source": "https://raw.githubusercontent.com/TooTallNate/proxy-agents/b7e5f7ccce1a3ac5b339cc4c587974e8989cbc16/packages/negotiate/package.json",
+      "reason": "Exact npm release and tagged source omit the original full license. MIT is a package metadata declaration only. Original upstream confirmation is required before binary distribution; evidence retained in third-party/licenses/proxy-agent-negotiate-upstream-evidence.txt."
+    }
+  ],
+  "skillLicenseHashes": {},
+  "binaryVendored": [],
+  "pythonNoticeOverrides": [
+    {
+      "name": "dnspython",
+      "version": "2.9.0",
+      "notice": "dnspython"
+    }
+  ]
+}

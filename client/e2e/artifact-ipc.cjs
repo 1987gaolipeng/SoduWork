@@ -1,0 +1,45 @@
+'use strict';
+const electron = require('electron');
+if (typeof electron === 'string') {
+  const env = { ...process.env };
+  for (const key of ['ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'ELECTRON_NO_ATTACH_CONSOLE', 'CHROME_CRASHPAD_PIPE_NAME', 'CHROME_CRASHPAD_PIPE_HANDLE']) delete env[key];
+  const result = require('node:child_process').spawnSync(electron, [__filename], { env, windowsHide: true, stdio: 'inherit', timeout: 60000 });
+  process.exit(result.status ?? 1);
+}
+const { app, BrowserWindow, ipcMain } = electron;
+const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), assert = require('node:assert/strict');
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-artifact-ipc-'));
+app.setPath('userData', path.join(root, 'profile'));
+app.on('window-all-closed', () => {});
+const cwd = path.join(root, 'work'), managed = path.join(root, 'managed'), ref = 'fixture';
+fs.mkdirSync(cwd);
+const inputDir = path.join(managed, 'temp', ref, '.soduwork-inputs');
+fs.mkdirSync(inputDir, { recursive: true });
+const report = path.join(cwd, 'report.md'), foreign = path.join(root, 'private.md');
+fs.writeFileSync(report, '# Delivery\n\nVerified original bytes.');
+fs.writeFileSync(foreign, 'Must not cross the session boundary.');
+const png = electron.nativeImage.createFromBitmap(Buffer.from([255, 0, 0, 255]), { width: 1, height: 1 }).toPNG();
+const picture = path.join(inputDir, 'input.png'); fs.writeFileSync(picture, png);
+const session = { get: id => id === ref ? { cwd } : null };
+const token = require('../main/pi-session/attachment-contract').previewRef;
+require('../main/pi-session/artifact-ipc').install({ app, ipcMain, BrowserWindow, session, workDir: () => managed });
+let win;
+app.whenReady().then(async () => {
+  win = new BrowserWindow({ show: false, webPreferences: { preload: path.resolve(__dirname, '../preload.js'), contextIsolation: true, nodeIntegration: false } });
+  await win.loadURL('data:text/html,<meta charset="utf-8"><title>Isolated artifact IPC</title>');
+  const invoke = (method, ...args) => win.webContents.executeJavaScript(`window.soduWorkAPI.conversationSession[${JSON.stringify(method)}](...${JSON.stringify(args)})`);
+  const text = await invoke('readOutput', ref, report);
+  assert.equal(text.ok, true); assert.equal(text.text, fs.readFileSync(report, 'utf8'));
+  const bytes = await invoke('readOutputBinary', ref, report);
+  assert.equal(bytes.ok, true);
+  const attachment = await invoke('attachmentImage', ref, token(picture));
+  assert.equal(attachment.ok, true); assert.equal(attachment.data, png.toString('base64'));
+  const thumbnail = await invoke('attachmentImage', ref, token(picture), 'thumbnail');
+  assert.equal(thumbnail.ok, true); assert.ok(thumbnail.data.length > 0);
+  assert.equal((await invoke('attachmentImage', ref, token(foreign))).ok, false);
+  assert.equal((await invoke('readOutput', ref, foreign)).ok, false);
+  assert.equal((await invoke('readOutputBinary', ref, foreign)).ok, false);
+  assert.equal((await invoke('readOutput', 'missing', report)).ok, false);
+  console.log(JSON.stringify({ ok: true, checks: 8, boundary: 'Real Electron, production preload and artifact IPC; isolated files, no system apps or business data.' }));
+  app.exit(0);
+}).catch(error => { console.error(error); app.exit(1); });

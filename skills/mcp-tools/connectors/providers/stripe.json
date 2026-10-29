@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "id": "stripe",
+  "name": "Stripe",
+  "category": "支付",
+  "description": "Stripe 通用连接器：账户余额/自身信息、客户列表、创建客户。基于 Stripe REST API，form-encoded 请求体由运行器编码，密钥仅 secret key（不下发 publishable key）。",
+  "officialDocs": [
+    "https://docs.stripe.com/api",
+    "https://docs.stripe.com/api/balance/balance_retrieve",
+    "https://docs.stripe.com/api/customers/list",
+    "https://docs.stripe.com/api/customers/create"
+  ],
+  "authDocs": [
+    "https://docs.stripe.com/keys"
+  ],
+  "baseUrl": "https://api.stripe.com/v1",
+  "fields": [
+    {
+      "key": "STRIPE_SECRET_KEY",
+      "label": "Secret Key（sk_test_ / sk_live_ 开头）",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "tokenKey": "STRIPE_SECRET_KEY",
+    "header": "Authorization",
+    "prefix": "Bearer"
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "get_balance",
+      "description": "获取账户可用与待结算余额（GET /v1/balance）。无分页。Stripe 鉴权为 Bearer secret key。出处：https://docs.stripe.com/api/balance/balance_retrieve",
+      "method": "GET",
+      "path": "/balance",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_account",
+      "description": "获取当前账户信息（GET /v1/account）。无分页。出处：https://docs.stripe.com/api/account",
+      "method": "GET",
+      "path": "/account",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_customers",
+      "description": "列出客户。分页：limit（1-100 默认 10）+ starting_after/ending_before 游标，响应 has_more。出处：https://docs.stripe.com/api/customers/list",
+      "method": "GET",
+      "path": "/customers",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 10,
+            "description": "每页条数"
+          },
+          "starting_after": {
+            "type": "string",
+            "description": "上一页最后一条的 customer id",
+            "maxLength": 10000
+          },
+          "email": {
+            "type": "string",
+            "description": "按邮箱精确过滤",
+            "maxLength": 10000
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "query": {
+        "limit": "limit",
+        "starting_after": "starting_after",
+        "email": "email"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_customer",
+      "description": "创建客户（POST /v1/customers，bodyEncoding=form，application/x-www-form-urlencoded）。写入操作：运行前必须获得用户明确授权。出处：https://docs.stripe.com/api/customers/create",
+      "method": "POST",
+      "path": "/customers",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "type": "string",
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[a-z]{2,}$",
+            "description": "客户邮箱",
+            "maxLength": 10000
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "客户名"
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "body": {
+        "email": "$email",
+        "name": "$name"
+      },
+      "readOnly": false,
+      "bodyEncoding": "form"
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "Stripe POST 请求体为 application/x-www-form-urlencoded（嵌套用方括号如 metadata[key]）；body 中的 $param 由运行器做表单编码，非 JSON。",
+    "仅在 2024-06-20 及以上 API 版本支持创建无参 customer；sk_live_ 为生产密钥，强烈建议先用 sk_test_。",
+    "create_customer 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

@@ -1,0 +1,305 @@
+/* Durable message and receipt reconciliation over the existing notice store.
+   The metadata contains only dismissal markers, never a second message list. */
+(function (global) {
+  'use strict';
+  let epoch = 0, requests = new Map(), lastAttempt = 0;
+  const statusOrder = { accepted: 0, delivered: 1, read: 2 };
+  const legacyReceiptKey = /^(mate_receipt_.+)_(accepted|delivered|read)$/;
+  const api = () => global.SoduWorkAPI || {};
+  const scope = () => api().taskStorageKey?.('notices') || 'soduwork_work_notices_v1';
+  const capture = () => ({ key: scope(), epoch });
+  const current = token => token.key === scope() && token.epoch === epoch;
+  const folderOf = row => row.folder === 'sent' ? 'sent' : 'received';
+  const stamp = value => Number(value) || (Date.parse(value) || 0);
+  const metadataKey = () => scope() + ':sync';
+  function metadata() {
+    try { return migrateMetadata(JSON.parse(localStorage.getItem(metadataKey()) || '{}') || {}); }
+    catch (_) { return {}; }
+  }
+  function migrateMetadata(meta) {
+    // Migrate legacy cleared, read, and notified phase markers together to prevent repeated notifications after upgrades.
+    let changed = false;
+    for (const field of ['ids', 'readIds', 'presentedIds']) {
+      if (!Array.isArray(meta[field])) continue;
+      meta[field] = [...new Set(meta[field].map(key => {
+        const migrated = String(key).replace(legacyReceiptKey, '$1@$2');
+        if (migrated !== key) changed = true;
+        return migrated;
+      }))];
+    }
+    if (changed) try { localStorage.setItem(metadataKey(), JSON.stringify(meta)); } catch (_) { /* Retry migration on the next read. */ }
+    return meta;
+  }
+  function dismissed(row, meta) {
+    // Only dismiss IDs the user actually cleared. Client and server clocks
+    // can differ, so legacy clearedAt values must never hide new messages.
+    return folderOf(row) !== 'sent' && Boolean(meta.ids?.includes(row.id) ||
+      (row.kind === 'mate_receipt' && hasReceiptMarker(row, meta.ids)));
+  }
+  const receiptMarker = row => 'mate_receipt_' + row.serverMessageId + '@' + row.receiptStatus;
+  const receiptMarkers = row => Object.keys(statusOrder).filter(state => statusOrder[state] <= statusOrder[row.receiptStatus])
+    .map(receiptStatus => receiptMarker({ ...row, receiptStatus }));
+  function hasReceiptMarker(row, markers) {
+    // Support legacy highest-phase markers: consuming a terminal phase includes earlier phases without suppressing later transitions.
+    return Boolean(markers?.includes('mate_receipt_' + row.serverMessageId) || Object.keys(statusOrder)
+      .some(state => statusOrder[state] >= statusOrder[row.receiptStatus] &&
+        markers?.includes(receiptMarker({ ...row, receiptStatus: state }))));
+  }
+  function belongsToAccount(row, folder) {
+    const auth = api().clientAuthSnapshot?.() || {}, userId = String(auth.user?.id || '');
+    const ownerId = row.kind === 'mate_receipt' ? row.ownerId
+      : folder === 'sent' ? row.senderId : row.recipientId;
+    // An explicit login requirement is different from legacy/bootstrap APIs
+    // whose authenticated inbox can succeed before the user snapshot arrives.
+    if (ownerId && !userId && auth.state === 'pending') return false;
+    return !userId || !ownerId || String(ownerId) === userId;
+  }
+  function visibleRow(row) {
+    if (!belongsToAccount(row, folderOf(row))) return false;
+    // Only a current Hub projection can disprove a legacy handoff notice.
+    // Missing tasks or direct messages/approvals are not evidence of lost access.
+    if (!/^handoff\./.test(row.kind || '') || !row.taskId) return true;
+    const task = typeof Store === 'undefined' ? null : Store._shadow?.[row.taskId];
+    return !Array.isArray(task?.myRoles) ||
+      task.myRoles.some(role => role === 'creator' || role === 'requester');
+  }
+  function rows(folder) {
+    const meta = metadata();
+    return (typeof notices === 'undefined' ? [] : notices)
+      .filter(row => folderOf(row) === (folder === 'sent' ? 'sent' : 'received') && visibleRow(row) && !dismissed(row, meta))
+      .slice().sort((a, b) => Number(b.at || 0) - Number(a.at || 0));
+  }
+  function repaint() {
+    if (typeof updateNoticeBadge === 'function') updateNoticeBadge();
+    const panel = global.document?.getElementById('noticePanel');
+    if (panel?.classList?.contains('show') && typeof _renderNoticePanel === 'function') _renderNoticePanel();
+  }
+  function commit(next, token) {
+    if (!current(token)) return false;
+    const previous = notices.slice();
+    notices.splice(0, notices.length, ...next);
+    if (_saveNotices() === false) {
+      notices.splice(0, notices.length, ...previous);
+      throw new Error('通知无法保存到本机，请检查存储空间后重试；尚未确认送达。');
+    }
+    repaint(); return true;
+  }
+  function match(row, serverId, messageId, folder, item) {
+    if (row.kind === 'mate_receipt' || folderOf(row) !== folder) return false;
+    if (serverId && row.serverMessageId) return String(row.serverMessageId) === serverId;
+    // Client keys are scoped to a sender/recipient pair on the server. Only
+    // use one to adopt a legacy local row whose sender identity also matches.
+    return Boolean(messageId && String(row.messageId || '') === messageId && item?.senderId &&
+      row.senderId && String(row.senderId) === String(item.senderId) &&
+      (!row.recipientId || !item.recipientId || String(row.recipientId) === String(item.recipientId)));
+  }
+  function normalized(item, folder, previous) {
+    const old = previous || {}, incoming = item.status in statusOrder ? item.status : 'accepted';
+    const status = (statusOrder[old.status] ?? -1) > statusOrder[incoming] ? old.status : incoming;
+    const serverId = String(item.id || item.serverMessageId || '');
+    const clientId = String(item.messageId || item.clientMessageId || serverId);
+    return { ...old, id: old.id || (folder === 'sent' ? 'mate_sent_' : 'mate_') + serverId,
+      folder, serverMessageId: serverId, messageId: clientId,
+      senderId: String(item.senderId || old.senderId || ''), recipientId: String(item.recipientId || old.recipientId || ''),
+      senderName: String(item.senderName || old.senderName || ''), recipientName: String(item.recipientName || old.recipientName || ''),
+      taskId: item.taskId || old.taskId || null, kind: item.kind || old.kind || 'mate_message',
+      at: stamp(item.createdAt) || Number(old.at) || Date.now(),
+      text: String(item.text ?? old.text ?? ''), bodyText: String(item.text ?? old.bodyText ?? old.text ?? ''),
+      attachments: Array.isArray(item.attachments) ? item.attachments : old.attachments || [],
+      website: item.website || old.website || null, status, sentStatus: status,
+      deliveredAt: Math.max(stamp(item.deliveredAt), stamp(old.deliveredAt)) || null,
+      readAt: Math.max(stamp(item.readAt), stamp(old.readAt)) || null,
+      read: folder === 'sent' || Boolean(old.read) || status === 'read' };
+  }
+  function receipts(row, list, meta) {
+    // Maintain one receipt per message and merge legacy per-phase records.
+    const old = list.filter(item => item.kind === 'mate_receipt' && item.serverMessageId === row.serverMessageId);
+    const state = old.reduce((value, item) => statusOrder[item.receiptStatus] > statusOrder[value] ? item.receiptStatus : value,
+      row.status in statusOrder ? row.status : 'accepted');
+    const id = 'mate_receipt_' + row.serverMessageId;
+    const prior = old.find(item => item.receiptStatus === state);
+    const at = (state === 'read' ? row.readAt : state === 'delivered' ? row.deliveredAt : row.at) || prior?.at || row.at;
+    const who = row.recipientName || '对方';
+    const original = String(row.text || '').replace(/\s+/g, ' ').trim();
+    const assigned = row.kind === 'task_assignment' && original.match(/^.+?将需求「([\s\S]+)」交给你$/);
+    const summary = assigned ? assigned[1] : original;
+    const subject = summary ? '\n' + (assigned ? '需求：' : '') + summary.slice(0, 90) + (summary.length > 90 ? '…' : '') : '';
+    const text = (state === 'accepted' ? '已发送给' + who + '，等待对方接收。'
+      : state === 'delivered' ? who + '已收到你发送的消息。' : who + '已读你发送的消息。') + subject;
+    const receipt = { id, folder: 'received', kind: 'mate_receipt', receiptStatus: state, ownerId: row.senderId,
+      serverMessageId: row.serverMessageId, messageId: row.messageId, taskId: row.taskId,
+      senderName: who, recipientName: row.recipientName, at, text, bodyText: text,
+      read: Boolean(old.some(item => item.receiptStatus === state && item.read) ||
+        hasReceiptMarker({ serverMessageId: row.serverMessageId, receiptStatus: state }, meta.readIds)), attachments: [] };
+    for (let index = list.length - 1; index >= 0; index--) if (old.includes(list[index])) list.splice(index, 1);
+    if (!dismissed(receipt, meta)) list.push(receipt);
+  }
+  function migrateReceipts(list, meta) {
+    // Prune orphan records only after fetching all sent-message pages to preserve read state during partial synchronization.
+    const sent = list.filter(row => row.kind !== 'mate_receipt' && folderOf(row) === 'sent' && row.serverMessageId && visibleRow(row));
+    for (const row of sent) receipts(row, list, meta);
+    return list.filter(row => row.kind !== 'mate_receipt' ||
+      (row.serverMessageId && row.id === 'mate_receipt_' + row.serverMessageId && !dismissed(row, meta)));
+  }
+  function merge(items, folder, token, complete = false) {
+    if (!current(token)) return false;
+    const meta = metadata(), list = _readNotices().filter(row => !dismissed(row, meta));
+    for (const item of items) {
+      if (!item?.id || !belongsToAccount(item, folder)) continue;
+      const serverId = String(item.id), clientId = String(item.messageId || item.clientMessageId || '');
+      const index = list.findIndex(row => match(row, serverId, clientId, folder, item));
+      const row = normalized(item, folder, list[index]);
+      if (dismissed(row, meta)) continue;
+      if (index < 0) list.push(row); else list[index] = row;
+      if (folder === 'sent') receipts(row, list, meta);
+    }
+    return commit(folder === 'sent' && complete ? migrateReceipts(list, meta) : list, token);
+  }
+  function updateReceipt(serverId, receipt, token) {
+    if (!current(token)) return false;
+    const list = _readNotices(), index = list.findIndex(row => match(row, serverId, '', 'received'));
+    if (index < 0) return false;
+    list[index] = normalized({ ...list[index], ...receipt, id: serverId,
+      messageId: list[index].messageId, createdAt: list[index].at }, 'received', list[index]);
+    return commit(list, token);
+  }
+  async function acknowledge(items, token) {
+    if (!api().markMateMessageDelivered) return;
+    for (let offset = 0; offset < items.length; offset += 8) {
+      const group = items.slice(offset, offset + 8);
+      const results = await Promise.allSettled(group.map(async item => {
+        if (!current(token)) return;
+        const stored = rows('received').find(row => row.kind !== 'mate_receipt' && row.serverMessageId === String(item.id));
+        if (!stored || stored.status !== 'accepted') return;
+        const result = await api().markMateMessageDelivered(item.id);
+        if (!current(token)) return;
+        if (!result || result.ok === false || !['delivered', 'read'].includes(result.status)) throw new Error('送达回执未获服务确认');
+        updateReceipt(String(item.id), result, token);
+      }));
+      const failed = results.find(result => result.status === 'rejected');
+      if (failed) throw failed.reason;
+    }
+  }
+  function refresh(folder, afterCurrent) {
+    if (!folder) return Promise.all([refresh('received', afterCurrent), refresh('sent', afterCurrent)]).then(() => ({ ok: true }));
+    const target = folder === 'sent' ? 'sent' : 'received', token = capture();
+    const key = token.key + ':' + target;
+    if (requests.has(key)) return afterCurrent
+      ? requests.get(key).catch(() => {}).then(() => current(token) ? refresh(target) : { ok: false, stale: true })
+      : requests.get(key);
+    const work = (async () => {
+      if (!api().mateMessages) throw new Error('当前版本暂不支持通知同步');
+      let cursor = '', seen = new Set();
+      do {
+        const result = await api().mateMessages(target, 200, cursor);
+        if (!current(token)) return { ok: false, stale: true };
+        if (!result || result.ok === false || !Array.isArray(result.items)) throw new Error(result?.reason || '通知暂时无法加载，请重试');
+        if (!merge(result.items, target, token, !result.nextCursor)) return { ok: false, stale: true };
+        if (target === 'received') await acknowledge(result.items, token);
+        cursor = String(result.nextCursor || '');
+        if (cursor && seen.has(cursor)) throw new Error('通知分页没有继续前进，请重试');
+        seen.add(cursor);
+      } while (cursor && current(token));
+      return { ok: current(token) };
+    })();
+    requests.set(key, work);
+    work.finally(() => { if (requests.get(key) === work) requests.delete(key); }).catch(() => {});
+    return work;
+  }
+  async function markRead(serverId) {
+    const token = capture(), id = String(serverId || '');
+    if (!rows('received').some(row => row.kind !== 'mate_receipt' && row.serverMessageId === id)) return false;
+    const result = await api().markMateMessageRead(id);
+    if (!current(token)) return false;
+    if (!result || result.ok === false || result.status !== 'read') throw new Error('已读状态未获服务确认，请重试');
+    return updateReceipt(id, result, token);
+  }
+  function clear() {
+    const token = capture(), meta = metadata();
+    const cleared = rows('received').flatMap(row => row.kind === 'mate_receipt' ? receiptMarkers(row)
+      : row.serverMessageId ? [row.id, 'mate_' + row.serverMessageId] : [row.id]);
+    const ids = [...new Set([...(meta.ids || []), ...cleared])];
+    delete meta.clearedAt;
+    localStorage.setItem(metadataKey(), JSON.stringify({ ...meta, ids }));
+    return commit(notices.filter(row => folderOf(row) === 'sent'), token);
+  }
+  function markLocalRead(id) {
+    const token = capture(), meta = metadata(), list = _readNotices();
+    const row = list.find(item => item.id === id);
+    if (!row || row.read) return false;
+    meta.readIds = [...new Set([...(meta.readIds || []), ...(row.kind === 'mate_receipt' ? receiptMarkers(row) : [id])])];
+    localStorage.setItem(metadataKey(), JSON.stringify(meta));
+    row.read = true;
+    return commit(list, token);
+  }
+  function tick(force) {
+    if (!api().mateMessages) return;
+    if (!force && Date.now() - lastAttempt < 60000) return;
+    lastAttempt = Date.now();
+    void refresh().catch(() => {});
+  }
+  function canPresent(event) {
+    const userId = String(api().clientAuthSnapshot?.().user?.id || '');
+    if (!userId) return false;
+    // Private message bodies belong only to the recipient; delivery and read receipts appear only for the two participants.
+    if (event?.type === 'notice') return String(event.recipientId || '') === userId;
+    return /^mate_message_(accepted|delivered|read)$/.test(event?.type || '') &&
+      (String(event.senderId || '') === userId || String(event.recipientId || '') === userId);
+  }
+  async function present(event) {
+    const token = capture();
+    // Authorize notifications against persisted records before showing content or sound; a socket event alone is insufficient.
+    try { await handle(event); } catch (_) { /* If delivery acknowledgment fails, evaluate the saved original message. */ }
+    if (!current(token) || !canPresent(event)) return null;
+    const isMessage = event.type === 'notice';
+    const userId = String(api().clientAuthSnapshot?.().user?.id || '');
+    if (!isMessage && String(event.senderId || '') !== userId) return null;
+    const serverId = String(isMessage ? event.serverMessageId || '' : event.messageId || '');
+    if (!serverId) return null;
+    const meta = metadata(), list = _readNotices();
+    const row = list.find(item => item.serverMessageId === serverId && folderOf(item) === 'received' &&
+      (isMessage ? item.kind !== 'mate_receipt' : item.kind === 'mate_receipt'));
+    if (!row || row.read || dismissed(row, meta)) return null;
+    const wantedState = String(event.status || event.type.replace('mate_message_', ''));
+    if (!isMessage && (statusOrder[row.receiptStatus] ?? -1) < (statusOrder[wantedState] ?? -1)) return null;
+    const marker = isMessage ? 'mate_notice_' + serverId : receiptMarker(row);
+    if (isMessage ? meta.presentedIds?.includes(marker) : hasReceiptMarker(row, meta.presentedIds)) return null;
+    // Persist notification markers per account to deduplicate concurrent callbacks, reopened windows, and phase replays.
+    const markers = isMessage ? [marker] : receiptMarkers(row);
+    localStorage.setItem(metadataKey(), JSON.stringify({ ...meta,
+      presentedIds: [...new Set([...(meta.presentedIds || []), ...markers])] }));
+    // Recheck account identity before presentation because it may change before a Promise callback runs.
+    return { text: row.bodyText || row.text || '', taskId: row.taskId || null, isCurrent: () => current(token) };
+  }
+  async function handle(event) {
+    if (event?.type === 'notice') {
+      const token = capture();
+      const userId = String(api().clientAuthSnapshot?.().user?.id || '');
+      if (userId && event.recipientId && String(event.recipientId) !== userId) return;
+      // Older events omit the recipient: use the authenticated inbox query
+      // to establish ownership before persisting their body or acknowledging.
+      if (event.serverMessageId && event.recipientId && userId) {
+        const item = { ...event, id: event.serverMessageId, createdAt: event.sentAt || event.createdAt };
+        if (merge([item], 'received', token)) await acknowledge([item], token);
+      }
+      if (current(token)) return refresh('received', true);
+      return;
+    }
+    if (!/^mate_message_(accepted|delivered|read)$/.test(event?.type || '')) return Promise.resolve();
+    const userId = String(api().clientAuthSnapshot?.().user?.id || '');
+    const folder = userId && String(event.senderId) === userId ? 'sent'
+      : userId && String(event.recipientId) === userId ? 'received' : '';
+    if (!folder) return refresh(null, true);
+    // Full server events can be reconciled immediately; older servers are
+    // handled by the same durable list refresh below.
+    if (event.text != null && event.messageId) merge([{ ...event, id: event.messageId,
+      messageId: event.clientMessageId }], folder, capture());
+    return refresh(folder, true);
+  }
+  global.MateNoticeSync = { rows, refresh, markRead, markLocalRead, clear, tick, handle, canPresent, present };
+  global.addEventListener?.('soduwork-work-task-change', repaint);
+  global.addEventListener?.('soduwork-task-source', repaint);
+  global.addEventListener?.('soduwork-device-auth', repaint);
+  global.addEventListener?.('soduwork-client-auth-required', repaint);
+  global.addEventListener?.('soduwork-data-scope-changed', () => { epoch++; requests = new Map(); lastAttempt = 0; });
+})(window);

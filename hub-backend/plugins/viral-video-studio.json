@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "key": "viral-video-studio",
+  "name": "疯传视频成片工坊",
+  "version": "1.0.3",
+  "distribution": "standalone",
+  "category": "office",
+  "description": "从一个主题或产品卖点生成短视频脚本、分镜、字幕和可直接发布到抖音、小红书、视频号、B站、YouTube 或 TikTok 的视频文件。",
+  "author": "SoduWork",
+  "process": {
+    "enterprise": false,
+    "label": "对话式视频制作",
+    "route": "选题 → 脚本与分镜 → 视频生成 → 成片交付"
+  },
+  "instructions": "你是 SoduWork 的短视频制作人。把用户的一句话需求转成可发布的视频成片。\n\n工作规则：\n1. 先理解主题、受众、平台和期望时长；缺少信息时使用合理默认值（短视频默认 9:16、1080p、10 秒），只有会明显影响成片时才追问。内置 Seedance 2.0 单次支持 4-15 秒；用户要求更长时，应先说明当前模型限制并请用户缩短，或改用支持更长视频的模型，不得悄悄截短。\n2. 在调用工具前，先在回复中整理：视频定位、镜头脚本、旁白、屏幕字幕、音乐/音效建议、标题、简介和话题标签。脚本要具体到镜头、景别、动作、节奏和转场，便于模型执行。\n3. 必须先调用 plugin_mcp_list，服务器填写 soduwork-media，确认 generate_video 的真实参数；然后调用 plugin_mcp_call，服务器填写 soduwork-media，工具填写 generate_video。把完整的画面提示词放到 prompt，并传入 platform、duration、aspect_ratio、resolution、generate_audio 等适用参数。\n4. 为每次用户明确要求的新视频指定 generationId；因超时、中断而接续同一视频时，保持 generationId 和所有生成参数不变，先取回原任务。不要因为改标题、简介或文件名重新提交生成；如果提交结果不确定，先提示核对任务记录。用户明确要求重新生成或生成第二个版本时，才更换 generationId。\n5. 工具返回 artifact 之前，不得声称视频已经生成。工具失败时要说明真实原因、保留脚本，并给出可重试的最小修改建议；不要伪造下载地址或外部平台发布结果。\n6. 成功后必须在最终回复中给出视频成果、文件名、平台适配信息、时长/画幅/分辨率（若服务返回）、标题、简介、话题标签和完整脚本。告诉用户视频已保存在当前会话成果区，可预览、下载后发布；SoduWork 不代替用户向外部平台点击发布。\n7. 不要把模型厂商、API Key 或内部连接地址暴露给用户；始终使用当前用户已配置的视频模型。",
+  "entrypoints": {
+    "conversation": true,
+    "task": false,
+    "automation": false
+  },
+  "inputs": [
+    {
+      "key": "topic",
+      "label": "主题或产品卖点",
+      "type": "textarea",
+      "required": true,
+      "description": "例如：为一款面向小企业的 AI 客服制作一条 10 秒宣传视频"
+    },
+    {
+      "key": "platform",
+      "label": "发布平台",
+      "type": "select",
+      "required": false,
+      "options": [
+        "douyin",
+        "xiaohongshu",
+        "weixin",
+        "bilibili",
+        "youtube",
+        "tiktok",
+        "custom"
+      ]
+    },
+    {
+      "key": "duration",
+      "label": "目标时长（秒）",
+      "type": "number",
+      "required": false,
+      "description": "默认 10 秒；实际范围由当前模型决定，内置 Seedance 2.0 支持 4-15 秒"
+    },
+    {
+      "key": "style",
+      "label": "视觉风格",
+      "type": "text",
+      "required": false
+    }
+  ],
+  "outputs": [
+    {
+      "key": "video",
+      "label": "可发布视频成片",
+      "kind": "video",
+      "accept": [
+        "mp4",
+        "webm",
+        "mov"
+      ],
+      "required": true
+    },
+    {
+      "key": "script",
+      "label": "脚本、分镜与发布文案",
+      "kind": "evidence",
+      "accept": [
+        "markdown",
+        "text"
+      ],
+      "required": true
+    }
+  ],
+  "capabilities": {
+    "network": true,
+    "skills": [],
+    "mcpServers": [
+      "soduwork-media"
+    ],
+    "runtime": []
+  },
+  "evaluations": [
+    {
+      "key": "video-artifact",
+      "name": "返回真实视频成果",
+      "instruction": "给出一个短视频主题并指定抖音或小红书，生成脚本后调用 soduwork-media.generate_video。",
+      "inputs": {
+        "topic": "为一款 AI 客服制作 10 秒产品介绍视频",
+        "platform": "douyin",
+        "duration": 10
+      },
+      "criteria": [
+        "调用前给出可执行的镜头脚本和发布文案",
+        "调用 plugin_mcp_list 确认 soduwork-media 工具",
+        "调用 generate_video 后只在返回 artifact 时声称成片完成",
+        "最终回复包含真实视频文件、标题、简介和话题标签"
+      ],
+      "expectedOutputs": [
+        "execute.result"
+      ]
+    }
+  ]
+}

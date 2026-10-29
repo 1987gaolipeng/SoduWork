@@ -1,0 +1,9 @@
+.app .content .role-card .role-card-actions {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-2);
+}
+.role-card-danger-group { margin-left: auto; }
+.role-card .int-top > div { min-width: 0; }
+.role-card .int-name,
+.role-card .role-card-perms > .chip { overflow-wrap: anywhere; }

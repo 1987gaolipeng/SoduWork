@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:">
+  <link rel="stylesheet" href="overlay.css">
+  <title>SoduWork</title>
+</head>
+<body>
+  <div class="screen-edge" aria-hidden="true">
+    <i class="edge-light edge-top"></i><i class="edge-light edge-right"></i>
+    <i class="edge-light edge-bottom"></i><i class="edge-light edge-left"></i>
+    <i class="edge-trace"></i>
+  </div>
+  <div class="cursor-halo" aria-hidden="true"><i></i></div>
+  <div class="control-pill" role="status" aria-live="polite">
+    <span class="soduwork-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5v3m0 11v3M3.5 12h3m11 0h3M6 6l2 2m8 8 2 2M6 18l2-2m8-8 2-2"/><circle cx="12" cy="12" r="3.2"/></svg></span>
+    <span id="controlLabel">SoduWork 正在操作电脑</span>
+    <span class="divider" aria-hidden="true"></span>
+    <span class="escape-hint"><kbd>ESC</kbd><span id="cancelLabel">取消操作</span></span>
+  </div>
+  <script src="overlay-view.js"></script>
+</body>
+</html>

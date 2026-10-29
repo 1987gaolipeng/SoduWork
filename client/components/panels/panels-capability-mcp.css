@@ -1,0 +1,136 @@
+/* MCP lifecycle surfaces inherit the current client theme. */
+/* Match the catalog reading frame instead of stretching to the panel edges. */
+.cap-mcp-manage-bar{box-sizing:border-box;width:100%;max-width:var(--cap-catalog-width,1280px);margin:0 auto;
+  display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:0 2px 24px;font:14.5px/1.5 var(--font-ui)}
+.cap-mcp-manage-bar>div{display:flex;min-width:0;flex:1;flex-direction:column;gap:3px}
+.cap-mcp-manage-bar b{font-family:var(--font-display,var(--font-ui));font-size:16px;line-height:1.4;font-weight:600;color:var(--ink)}
+.cap-mcp-manage-bar span{font-size:max(var(--font-min-readable, 14.5px), 13px);color:var(--ink-3)}
+.cap-mcp-manage-bar svg,.cap-mcp-upload svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.cap-mcp-manage-bar button{display:inline-flex;flex:none;gap:7px;align-items:center;white-space:nowrap;font-family:inherit}
+@media(max-width:680px){.cap-mcp-manage-bar>div{flex-basis:100%}}
+.cap-mcp-company{min-width:0;display:flex;flex-direction:column}
+.cap-mcp-company>.cap-card{width:100%;flex:1}
+.cap-mcp-inspect{align-self:flex-end;border:0;background:none;color:var(--ink-3);font:14.5px var(--font-ui);padding:8px 4px;cursor:pointer}
+.cap-mcp-inspect:hover{color:var(--accent)}
+.cap-mcp-flow{font:14.5px/1.6 var(--font-ui);color:var(--ink-2)}
+.cap-mcp-flow p{margin:12px 0;overflow-wrap:anywhere}
+.cap-mcp-upload{display:grid;grid-template-columns:32px 1fr;align-items:center;gap:3px 12px;border:1px dashed var(--line);border-radius:14px;background:var(--bg-1);padding:20px;position:relative;cursor:pointer}
+.cap-mcp-upload svg{grid-row:1/3;color:var(--accent);width:26px;height:26px}
+.cap-mcp-upload span{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-3)}
+.cap-mcp-upload input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.cap-mcp-upload:focus-within{outline:2px solid var(--accent);outline-offset:3px}
+.cap-mcp-preview-head{display:flex;justify-content:space-between;gap:16px;margin:20px 0 8px}
+.cap-mcp-preview-head b{overflow-wrap:anywhere}
+.cap-mcp-preview-head span{font-size:max(var(--font-min-readable, 14.5px), 12px);flex-shrink:0;color:var(--ink-3)}
+.cap-mcp-import-row{padding:16px 0;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:6px}
+.cap-mcp-import-row header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.cap-mcp-import-row header b{font-size:max(var(--font-min-readable, 14.5px), 14px);font-weight:600;overflow-wrap:anywhere}
+.cap-mcp-import-row em{font-size:max(var(--font-min-readable, 14.5px), 12px);font-style:normal;color:var(--accent);flex-shrink:0}
+.cap-mcp-import-row code{font:14.5px/1.5 var(--font-mono);overflow-wrap:anywhere;color:var(--ink-3)}
+.cap-mcp-import-row>span,.cap-mcp-import-row p{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-3);margin:0}
+.cap-mcp-route{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px;background:var(--bg-1);border:1px solid var(--line);border-radius:12px;margin:18px 0;font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.cap-mcp-route i{font-style:normal;color:var(--ink-4)}
+.cap-mcp-route span{overflow-wrap:anywhere}
+.cap-mcp-feedback{padding:12px 14px;background:color-mix(in srgb,var(--accent) 7%,var(--bg-0));border-radius:10px;color:var(--ink);font-size:max(var(--font-min-readable, 14.5px), 13px)}
+.cap-mcp-feedback.bad{color:var(--crit)}
+.cap-mcp-facts{margin:16px 0}
+.cap-mcp-facts div{display:grid;grid-template-columns:130px 1fr;gap:16px;padding:10px 0;border-bottom:1px solid var(--line)}
+.cap-mcp-facts dt{color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.cap-mcp-facts dd{margin:0;font-size:max(var(--font-min-readable, 14.5px), 13px);overflow-wrap:anywhere}
+.cap-mcp-footnote{flex:1;font:14.5px/1.5 var(--font-ui);color:var(--ink-3)}
+.cap-mcp-tool-chips{display:flex;flex-wrap:wrap;gap:8px;padding-top:12px}
+.cap-mcp-tool-chips code{font:14.5px var(--font-mono);padding:5px 8px;border:1px solid var(--line);border-radius:6px}
+.cap-mcp-modal .btn-mini{font:14.5px/1.4 var(--font-ui);min-height:34px;padding:7px 13px}
+#capModalLayer .cap-mcp-modal .btn-mini.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.cap-mcp-manage-bar .btn-mini{font-size:max(var(--font-min-readable, 14.5px), 13px);min-height:34px}
+.cap-mcp-modal .cap-confirm{font-size:max(var(--font-min-readable, 14.5px), 13px)}
+
+.cap-connector-guidance{color:var(--text-secondary);font-size:12px;line-height:1.6}.cap-connector-guidance p{margin:6px 0}.cap-connector-guidance a{color:var(--accent)}
+[data-export-choices]{max-height:40vh;overflow:auto}.cap-mcp-ops{flex-wrap:wrap}
+
+.cap-panel .cap-ability-icon.icon-mcp:has(.cap-connector-product-icon){background:#fff;border:1px solid var(--line);border-radius:10px;color:inherit}
+.cap-connector-product-icon{display:block;width:28px;height:28px;object-fit:contain;flex:none}
+
+.cap-panel .cap-ability-icon.icon-mcp:has(.cap-connector-product-icon)::before,.cap-panel .cap-ability-icon.icon-mcp:has(.cap-connector-product-icon)::after{display:none}
+
+/* Connection editor: concise primary path, progressive technical settings. */
+.cap-modal.cap-connector-editor{width:min(560px,calc(100vw - 32px));max-height:calc(100dvh - 48px)}
+.cap-connector-editor .cap-modal-head{padding:20px 24px 16px}
+.cap-connector-editor .cap-modal-head b{font-size:17px;font-weight:500}
+.cap-connector-editor .cap-modal-head small{font-size:13px;font-weight:400;color:var(--ink-3)}
+.cap-connector-editor .cap-modal-body{padding:6px 24px 20px;gap:18px}
+.cap-connector-editor .cap-modal-foot{padding:14px 24px;gap:10px;background:var(--bg-0)}
+.cap-connector-editor .connector-intro{display:flex;gap:14px;align-items:center;padding:16px 0 20px;border-bottom:1px solid var(--line)}
+.cap-connector-editor .connector-intro-icon{display:grid;place-items:center;flex:none;width:46px;height:46px;border:1px solid var(--line);border-radius:12px;background:var(--bg-0)}
+.connector-intro-icon>svg{width:24px;height:24px;fill:none;stroke:currentColor}
+.cap-connector-editor .connector-intro strong{font-size:15px;font-weight:500;color:var(--ink)}
+.cap-connector-editor .connector-intro p{font-size:13px;line-height:1.6;color:var(--ink-3);margin:4px 0 0;overflow-wrap:anywhere}
+.cap-connector-editor .cap-field>span{font-size:13px;font-weight:500;color:var(--ink-2)}
+.cap-connector-editor .cap-field em{font-size:12px;font-style:normal;color:var(--ink-3);font-weight:400;margin-left:4px}
+.cap-connector-editor .cap-input,.cap-connector-editor .cap-textarea{font:14px/1.5 var(--font-ui);padding:10px 12px;border-radius:9px;min-width:0}
+.cap-connector-editor .cap-textarea.compact{min-height:70px;resize:vertical}
+.cap-connector-editor .connector-main-fields{grid-template-columns:1fr;gap:16px}
+.cap-connector-editor .connector-main-fields:empty,.cap-connector-editor [data-connector-oauth]:empty{display:none}
+.cap-connector-editor .connector-inline-note{font-size:12px;color:var(--ink-3);margin:0;line-height:1.6;overflow-wrap:anywhere}
+.cap-connector-editor .connector-inline-note:empty{display:none}
+.cap-connector-editor .connector-help{font-size:13px;align-self:flex-start;color:var(--accent);text-decoration:none}
+.cap-connector-editor .connector-help:hover{text-decoration:underline}
+.cap-connector-editor .connector-advanced{border:0;border-top:1px solid var(--line);border-radius:0;background:none;padding:0}
+.cap-connector-editor .connector-advanced summary{display:flex;justify-content:space-between;padding:16px 0 0;font-size:13px;color:var(--ink-3);cursor:pointer;list-style:none}
+.cap-connector-editor .connector-advanced summary::-webkit-details-marker{display:none}
+.cap-connector-editor .connector-advanced summary i{font-style:normal;transition:transform 120ms ease}
+.cap-connector-editor .connector-advanced[open] summary i{transform:rotate(90deg)}
+.cap-connector-editor .cap-mcp-advanced-body{padding:16px 0 0;display:flex;flex-direction:column;gap:16px}
+.cap-connector-editor .connector-extra-actions{display:flex;flex-wrap:wrap;gap:8px}
+.cap-connector-editor .cap-confirm{font-size:13px;color:var(--ink-2);align-items:flex-start}
+.cap-connector-editor .cap-confirm small{display:block;font-size:12px;color:var(--ink-3);margin-top:3px}
+.cap-connector-editor .connector-consent{font-size:12px;line-height:1.6;color:var(--ink-3);margin:0}
+.cap-connector-editor .btn-mini{min-height:36px;font:13px/1.4 var(--font-ui);padding:8px 14px;border-radius:9px}
+.cap-connector-editor .cap-probe-result{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--bg-1)}
+.cap-connector-editor .cap-probe-result[hidden]{display:none}
+.cap-connector-editor .cap-probe-result i{width:6px;height:6px;margin-top:7px;border-radius:50%;background:var(--ink-3);flex:none}
+.cap-connector-editor .cap-probe-result.ok i{background:var(--accent)}
+.cap-connector-editor .cap-probe-result.bad i{background:var(--crit)}
+.cap-connector-editor .cap-probe-result b{display:block;font-size:13px;font-weight:500;color:var(--ink-2)}
+.cap-connector-editor .cap-probe-result span{display:block;font-size:12px;line-height:1.6;margin-top:3px;color:var(--ink-3);overflow-wrap:anywhere}
+.cap-connector-editor :is(button,input,textarea,select,summary,a):focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+@media(max-width:480px){.cap-connector-editor .cap-fields{grid-template-columns:1fr}.cap-connector-editor .cap-modal-head,.cap-connector-editor .cap-modal-foot{padding:16px}.cap-connector-editor .cap-modal-body{padding:6px 16px 16px}}
+
+.connector-auth-state{display:flex;justify-content:space-between;gap:12px;align-items:center;font-size:13px;color:var(--ink-2);line-height:1.6}.connector-link{border:0;padding:6px 0;background:none;color:var(--accent);font:12px/1.5 var(--font-ui);cursor:pointer}.connector-link:hover{text-decoration:underline}.cap-connector-editor label[hidden]{display:none}
+
+/* Keep the original cap-template catalog design in both connector sections. */
+.cap-connections-view{width:100%;color:var(--ink)}
+.cap-connections-view .cap-template-section{overflow:visible}
+.cap-connections-view .cap-template-row{grid-template-columns:repeat(3,minmax(0,1fr))}
+.connector-section-heading{display:flex;align-items:center;gap:12px;padding:16px 18px}
+.connector-section-heading .cap-section-head{flex:1;margin:0;padding:0}
+#commonConnectorsHeading{scroll-margin-top:24px}
+.cap-connections-view .cap-mcp-manage-bar.connector-compact-tools{padding:0;margin:0;width:auto;max-width:none;display:block}
+.connector-connections:empty{display:none}
+.connector-connection-row{overflow:visible;padding-right:42px}
+.connector-manage{position:absolute;inset:0;width:100%;border:0;border-radius:inherit;background:transparent;cursor:pointer}
+.connector-connection-row>.connector-row-actions{position:absolute;right:6px;top:6px;z-index:1}
+.connector-state.attention{color:var(--crit)}
+.connector-row-menu,.connector-toolbar-menu{position:relative;flex:none;font:13px/1.5 var(--font-ui)}
+:is(.connector-row-menu,.connector-toolbar-menu)>summary{list-style:none;cursor:pointer;border-radius:7px;color:var(--ink-3);padding:6px 8px;min-height:32px;display:flex;align-items:center;justify-content:center}
+.connector-row-menu>summary{box-sizing:border-box;width:32px;height:32px;padding:0}
+.connector-toolbar-menu>summary{gap:6px}
+.cap-connections-view .connector-more-icon{display:block;width:18px;height:18px;flex:0 0 18px;fill:currentColor;stroke:none;pointer-events:none}
+:is(.connector-row-menu,.connector-toolbar-menu)>summary::-webkit-details-marker{display:none}
+:is(.connector-row-menu,.connector-toolbar-menu)>summary:hover{background:var(--bg-1);color:var(--ink)}
+.connector-menu-body{position:absolute;z-index:30;top:calc(100% + 5px);right:0;display:flex;flex-direction:column;min-width:158px;padding:5px;border:1px solid var(--line);border-radius:10px;background:var(--bg-0);box-shadow:0 8px 26px color-mix(in srgb,var(--ink) 10%,transparent)}
+.connector-row-menu.drop-up .connector-menu-body{top:auto;bottom:calc(100% + 5px)}
+.connector-menu-body>button,.cap-connections-view .connector-menu-body>button.btn-mini{display:block;width:100%;border:0;background:none;border-radius:6px;padding:9px 10px;color:var(--ink-2);text-align:left;white-space:nowrap;font:13px/1.5 var(--font-ui)}
+.connector-menu-body>button:hover{background:var(--bg-1);color:var(--accent)}.connector-menu-body>button.danger{color:var(--crit)}
+.connector-empty{padding:24px 18px;text-align:center;border-top:1px solid var(--line-2)}
+.connector-empty[hidden]{display:none}.connector-empty b{font-size:14px;font-weight:500}.connector-empty p{color:var(--ink-3);font-size:13px;margin:6px 0 16px}.connector-empty .btn-mini{font-size:13px;min-height:34px;padding:7px 14px}
+.connector-access-note{padding:10px 12px;margin:0 18px 14px;font-size:13px;line-height:1.6;background:var(--bg-1);border-radius:8px;color:var(--ink-3)}
+.cap-connections-view .cap-connector-save{margin:0 18px 12px;display:flex;align-items:center;gap:12px;font-size:12px;color:var(--ink-3)}.cap-connections-view .cap-connector-save[hidden]{display:none}
+.connector-library-tools{display:flex;align-items:center;gap:16px;flex:none}.connector-library-tools .connector-link{white-space:nowrap;color:var(--ink-3)}.connector-library-tools .connector-link:hover{color:var(--accent)}
+.connector-library-card[hidden]{display:none}.connector-library-card{cursor:pointer}
+.connector-library-empty{margin:0;padding:24px 18px;border-top:1px solid var(--line-2);color:var(--ink-3);font:13px/1.7 var(--font-ui);text-align:center}
+.cap-modal.cap-connector-library{width:min(560px,calc(100vw - 32px));max-height:calc(100dvh - 48px)}
+.connector-account-choice{display:block;width:100%;border:0;border-bottom:1px solid var(--line);padding:14px 4px;background:none;font:14px/1.5 var(--font-ui);color:var(--ink);text-align:left}.connector-account-choice:hover{color:var(--accent)}
+:is(.cap-connections-view,.cap-connector-library) :is(button,input,summary):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media(max-width:900px){.cap-connections-view .cap-template-row{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:680px){.cap-connections-view .cap-template-row{grid-template-columns:1fr}.connector-section-heading{flex-wrap:wrap}.connector-library-tools{gap:20px}}

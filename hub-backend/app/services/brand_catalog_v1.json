@@ -1,0 +1,122 @@
+{
+  "ai-errand": {
+    "name": "AI 零活 · 交给 AI 干一件事",
+    "description": "不挂工程、不用改代码的零散活（写材料、做 PPT、整理文档、查资料…）：AI 干完交产出，人验收一次就算完。三类任务里「交给 AI 的零活」走这张。"
+  },
+  "autonomous-dev-iterator": {
+    "name": "自主迭代研发引擎",
+    "description": "以深度研究产出创意、GitHub 开源项目为参照基准，进行架构合理性与轻量级判断，研发成型的成品；经质量门自检与 AI 独立审查后交人工验收。多轮持续迭代完善由 SoduWork 任务调度反复触发本流程实现。"
+  },
+  "deep-research": {
+    "name": "深度研究",
+    "description": "围绕明确问题规划研究、检索多类来源、交叉验证证据，并交付带引用、限制与可行动结论的研究报告。"
+  },
+  "delivery-audit": {
+    "name": "工程交付只读巡检",
+    "description": "在固定代码版本上执行无副作用的交付巡检，核对工程结构、测试入口、发布准备、回滚能力和可观测性，并交付可演示的 HTML 报告与机器可读结论。"
+  },
+  "diagram-studio": {
+    "name": "图表绘制工坊",
+    "description": "把流程、架构、时序、组织关系等内容画成可维护的图：先用 Mermaid 文本把结构说清楚，再渲染成可直接放进文档和汇报的成品图，经独立审查与人工验收后交付；图源随成品一起交付，后续改图不用重画。"
+  },
+  "document-studio": {
+    "name": "专业文档工坊",
+    "description": "把零散材料整理成结构严谨、版式规范、可以直接提交或发布的 Word 文档，并完成文件级与内容级验收。"
+  },
+  "engineering-delivery": {
+    "name": "代码修复 · 自动研发闭环",
+    "description": "面向已有代码工程的纯研发闭环：AI 只读确认修复边界，在隔离工作区实现并按项目 SCM 协议提交，Runner 对固定提交执行权威工程自测，独立 AI 审查后自动合并到目标分支，最后形成可追溯的仓库回执；各节点边界由运行时策略强制约束，不触发任何环境发布。"
+  },
+  "gerrit-autopilot": {
+    "name": "Gerrit 全自动交付",
+    "description": "scm=gerrit 的工程专用：AI 修改 → 本地门禁 → SoduWork 自动评审并投 Code-Review+2 → 合并进目标分支 → CICD 建版本并部署 → 核对制品 SHA。全程无人工门禁，改用逐环节留证（报告/steps/时间线/Gerrit 评论），需要人时主动出声。"
+  },
+  "goal-delivery-harness": {
+    "name": "目标交付 Harness",
+    "description": "SoduWork built-in durable goal and delivery harness."
+  },
+  "img2threejs": {
+    "name": "图片转程序化 3D · img2threejs",
+    "description": "把单张物体或角色参考图重建为可读、可修改、可动画的程序化 Three.js 代码。按阶段完成图像准入、结构与材质规格、逐步建模、渲染对照和质量门校验，交付 TypeScript 模型工厂、规格与验证证据，而不是不可编辑的黑盒网格。"
+  },
+  "knowledge-synthesis": {
+    "name": "材料研读与知识综述",
+    "description": "从多份企业材料中抽取事实、统一术语、识别冲突并形成带来源定位的知识综述，适合制度、项目和方案资料汇总。"
+  },
+  "mattpocock-engineering": {
+    "name": "Matt Pocock 工程方法精选",
+    "description": "从 mattpocock/skills 精选的 10 个工程技能：两轴代码评审、深模块设计、疑难 bug 诊断循环、领域建模、TDD、合并冲突化解、一次性原型、架构改进扫描、拷问式设计（顺手沉淀 ADR）、人工步骤向导。装上后在对话里用 # 按需选用。"
+  },
+  "mcp-studio": {
+    "name": "MCP 快速配置",
+    "description": "在对话中创建、检查 MCP 配置，交付导入文件，指导客户端测试和公司共享。"
+  },
+  "meeting-to-action": {
+    "name": "会议到行动",
+    "description": "把会议录音转写稿、聊天记录或笔记整理成忠于原文的会议纪要、决策和可追踪行动清单。"
+  },
+  "pdf-toolbox": {
+    "name": "PDF 工具箱",
+    "description": "对 PDF 文件做拆分、合并、抽取、加页码或水印、按章节整理等处理，并把「动了什么、结果放在哪」写成处理清单；处理结果经独立核对与人工验收后交付，原始文件永不改动。"
+  },
+  "presentation-studio": {
+    "name": "演示文稿工坊",
+    "description": "从目标、材料和数据构建故事线清晰、视觉统一、可直接演讲的 PowerPoint，并执行内容与版式审查。"
+  },
+  "product-incubator": {
+    "name": "产品孵化",
+    "description": "从产品想法持续推进到可运行、可验收、可发布的完整产品；包含真实开发、测试修复、商业运营准备和断点续作。"
+  },
+  "product-prototype": {
+    "name": "智能体产品设计",
+    "description": "把业务需求设计成目标、计划、工具、权限、证据和人工门禁完整可见的智能体产品，并交付可点击、可验收的单文件 HTML 原型。"
+  },
+  "project-production-release": {
+    "name": "项目独立上线",
+    "description": "把已经合并并留有固定代码版本的项目任务，按环境中心配置的发布链独立上线、核对并形成可回滚回执。"
+  },
+  "project-validation-release": {
+    "name": "缺陷闭环 · 修复发布与验证",
+    "description": "面向已有工程的缺陷闭环：先形成稳定复现和可执行性结论，再在隔离分支修复，经过固定提交真实自测、AI 独立审查和自动合并；最后按项目环境链发布，并核对部署版本、健康检查与发布后验证证据。"
+  },
+  "skill-studio": {
+    "name": "Skill 创建与优化",
+    "description": "把业务流程沉淀为可复用 Skill，支持新建、调整、校验和多平台导出。交付真实技能包、资源、变更说明与验证报告。"
+  },
+  "soduwork-fast-change": {
+    "name": "【SoduWork 专用】快速改动",
+    "description": "SoduWork 日间轻量研发：Codex 一次完成 Bug 或小需求的实现、自测、自审与推送，只形成待发布固定提交，不合并、不打包、不部署。"
+  },
+  "software-delivery": {
+    "name": "需求到生产 · 标准研发交付",
+    "description": "从需求澄清、可执行性预检与基线确认，到隔离分支实现、固定提交真实自测、AI 独立审查与自动合并；最后按项目绑定的企业环境链发布，核对部署版本和健康检查证据后完成交付。"
+  },
+  "spreadsheet-analyst": {
+    "name": "表格与数据分析师",
+    "description": "把原始数据整理成口径明确、公式可复核、图表可解释的 Excel 工作簿，并保留数据质量与分析说明。"
+  },
+  "superpowers": {
+    "name": "Superpowers 工作方法",
+    "description": "obra/superpowers 整套 14 个工作方法技能：头脑风暴、写计划、按计划执行、系统化调试、测试驱动开发、请求/接受代码评审、子代理驱动开发、并行派发代理、git worktree、收尾开发分支、完成前验证、写技能。装上后在对话里用 # 按需选用，using-superpowers 是总入口。"
+  },
+  "viral-video-studio": {
+    "name": "疯传视频成片工坊",
+    "description": "从一个主题或产品卖点生成短视频脚本、分镜、字幕和可直接发布到抖音、小红书、视频号、B站、YouTube 或 TikTok 的视频文件。"
+  },
+  "web-collect": {
+    "name": "网页采集 · 定向信息收集",
+    "description": "面向明确目标的网页信息采集：按给定站点或主题逐页浏览、抽取关键信息，整理成结构化的采集报告并逐条留下来源链接，经独立审查与人工验收后交付。适合行情比价、公开资料汇总、页面内容核对这类定向采集活。"
+  },
+  "wecom": {
+    "name": "企业微信",
+    "description": "复用官方企业微信 CLI 与完整技能套件，处理文档、表格、日程、待办、邮件和授权机器人会话；首次使用需扫码授权。"
+  },
+  "dingtalk": {
+    "name": "钉钉",
+    "description": "复用官方 DWS CLI 与完整产品技能，处理钉钉文档、日程、待办、消息、通讯录等；首次使用需钉钉授权。"
+  },
+  "feishu": {
+    "name": "飞书",
+    "description": "通过官方 MCP 访问本人授权的飞书文档、知识库、多维表格和群组信息。个人首次连接扫码创建应用，再扫码授权账号。"
+  }
+}

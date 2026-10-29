@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "id": "tencent-cloud",
+  "name": "腾讯云 CVM",
+  "category": "云服务",
+  "description": "腾讯云 CVM 通用连接器（TC3-HMAC-SHA256 签名，只读）：列区域、列实例、列镜像。签名已用官方 SDK 测试向量比对通过。不提供任意云 API 透传。",
+  "runtimeKind": "tencent-cloud",
+  "officialDocs": [
+    "https://cloud.tencent.com/document/api/213/15708",
+    "https://cloud.tencent.com/document/api/213/15728",
+    "https://cloud.tencent.com/document/api/213/9388",
+    "https://cloud.tencent.com/document/api/213/15728"
+  ],
+  "authDocs": [
+    "https://cloud.tencent.com/document/api/213/30654"
+  ],
+  "baseUrl": "https://cvm.tencentcloudapi.com",
+  "fields": [
+    {
+      "key": "TENCENT_REGION",
+      "label": "地域（如 ap-guangzhou、ap-beijing、na-ashburn）",
+      "secret": false,
+      "required": true,
+      "pattern": "^[a-z]{2}(?:-[a-z0-9]+){1,4}$",
+      "example": "ap-guangzhou"
+    },
+    {
+      "key": "TENCENT_SECRET_ID",
+      "label": "SecretId",
+      "secret": false,
+      "required": true,
+      "pattern": "^\\S{10,4096}$",
+      "example": ""
+    },
+    {
+      "key": "TENCENT_SECRET_KEY",
+      "label": "SecretKey",
+      "secret": true,
+      "required": true,
+      "example": ""
+    },
+    {
+      "key": "TENCENT_TOKEN",
+      "label": "临时密钥 Token（使用临时凭据时必填）",
+      "secret": true,
+      "required": false,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "none"
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "describe_regions",
+      "description": "列出可用地域（Action=DescribeRegions，Version=2017-03-12，POST JSON body {}）。连接检测工具，无分页。出处：https://cloud.tencent.com/document/api/213/15708",
+      "method": "POST",
+      "path": "/",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "describe_instances",
+      "description": "分页列出 CVM 实例（Action=DescribeInstances，Version=2017-03-12；Limit 1-100 官方上限，Offset 翻页，响应含 TotalCount）。出处：https://cloud.tencent.com/document/api/213/15728",
+      "method": "POST",
+      "path": "/",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000,
+            "default": 0,
+            "description": "偏移量（Offset）"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "description": "每页条数（Limit）"
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "describe_images",
+      "description": "分页列出镜像（Action=DescribeImages，Version=2017-03-12；Limit 1-100，Offset 翻页）。出处：https://cloud.tencent.com/document/api/213/9388",
+      "method": "POST",
+      "path": "/",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000,
+            "default": 0,
+            "description": "偏移量（Offset）"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "description": "每页条数（Limit）"
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    }
+  ],
+  "limitations": [
+    "仅提供所列固定只读查询，不执行任意云 API，也不创建、启停或删除资源。",
+    "需要平台账号及对应资源的只读权限；首次连接会实际检查授权。",
+    "已按官方接口复核；尚无真实云账号验收，签名与响应测试不能替代实际授权验证。",
+    "响应最多 2 MB；分页工具需使用返回的分页参数继续读取。"
+  ]
+}

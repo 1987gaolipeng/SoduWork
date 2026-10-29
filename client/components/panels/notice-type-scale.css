@@ -1,0 +1,23 @@
+/* Notifications: give the message list a calmer, more readable reading scale. */
+.notice-panel .np-title{font-size:17px}
+.notice-panel .np-sub,
+.notice-panel .np-clear{font-size:max(var(--font-min-readable, 14.5px), 13px)}
+.notice-panel .np-day{font-size:max(var(--font-min-readable, 14.5px), 13px)}
+.notice-panel .np-txt{font-size:max(var(--font-min-readable, 14.5px), 14px);line-height:1.58}
+.notice-panel .np-time{font-size:max(var(--font-min-readable, 14.5px), 13px);line-height:1.75}
+.notice-panel .np-empty{font-size:max(var(--font-min-readable, 14.5px), 13px)}
+
+.notice-panel .np-copy{min-width:0;flex:1}
+.notice-panel .np-copy>.np-txt{display:block;white-space:pre-line}
+.notice-panel .np-files{display:grid;gap:5px;margin-top:9px}
+.notice-panel .np-attachment{display:flex;align-items:stretch;gap:0;min-width:0;border:1px solid var(--line);border-radius:10px;background:var(--bg-1);overflow:hidden}
+.notice-panel .np-file{display:flex;align-items:center;gap:9px;text-align:left;min-width:0;flex:1;padding:9px 10px;border:0;background:transparent;color:var(--ink-2);cursor:pointer}
+.notice-panel .np-file>svg{width:20px;height:22px;flex:none;fill:none;stroke:var(--ink-3);stroke-width:1.5;stroke-linejoin:round}
+.notice-panel .np-file>span{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:max(var(--font-min-readable, 14.5px), 13px);font-weight:500}
+.notice-panel .np-file em{display:block;margin-top:3px;font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:400;font-style:normal;color:var(--ink-3)}
+.notice-panel .np-file>small{flex:none;font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--accent)}
+.notice-panel .np-file-download{flex:none;padding:0 10px;border:0;border-left:1px solid var(--line);background:transparent;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px);cursor:pointer}
+.notice-panel .np-file:hover,.notice-panel .np-file-download:hover{background:var(--bg-2)}
+.notice-panel .np-file:focus-visible,.notice-panel .np-file-download:focus-visible{outline:2px solid var(--accent);outline-offset:-3px}
+.notice-panel .np-load-status{display:flex;align-items:center;justify-content:space-between;gap:16px;max-width:960px;margin:12px auto;padding:14px 18px;border:1px solid var(--line);border-radius:12px;background:var(--bg-0);color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 13px);line-height:1.5}
+.notice-panel .np-load-status button{flex:none;padding:6px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg-0);color:var(--accent);font:inherit;cursor:pointer}

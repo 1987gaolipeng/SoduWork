@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SoduWork · 桌面任务助手</title>
+<!-- Theme variables. -->
+<link rel="stylesheet" href="theme/variables.css">
+<!-- Component styles. -->
+<link rel="stylesheet" href="components/pet/pet.css">
+<!-- Panel styles load in cascade order. -->
+<link rel="stylesheet" href="components/panels/panels-base.css">
+<link rel="stylesheet" href="components/panels/im-remote.css">
+<link rel="stylesheet" href="components/panels/panels-session-memory.css">
+<link rel="stylesheet" href="components/panels/agent-brand.css">
+<link rel="stylesheet" href="components/requirements/requirements-board.css">
+<link rel="stylesheet" href="components/requirements/requirement-confirm.css">
+<link rel="stylesheet" href="components/panels/plugin-ui-host.css">
+<link rel="stylesheet" href="components/panels/plugin-debug-card.css">
+<link rel="stylesheet" href="components/panels/plugin-input-sheet.css">
+<link rel="stylesheet" href="components/panels/conversation-attachments.css">
+<link rel="stylesheet" href="components/panels/work-entry-sheet.css">
+<link rel="stylesheet" href="components/panels/work-automation-sheet.css">
+<link rel="stylesheet" href="components/panels/panels-desk.css">
+<link rel="stylesheet" href="components/panels/notice-type-scale.css">
+<link rel="stylesheet" href="components/panels/panels-schedules.css">
+<link rel="stylesheet" href="components/panels/panels-capabilities.css">
+<link rel="stylesheet" href="components/panels/plugin-install-setup.css">
+<link rel="stylesheet" href="components/panels/platform-plugin-connect.css">
+<link rel="stylesheet" href="components/panels/panels-capability-plugins.css">
+<link rel="stylesheet" href="components/panels/panels-plugin-maker.css">
+<link rel="stylesheet" href="components/panels/capability-type-scale.css">
+<link rel="stylesheet" href="components/panels/plugin-presentation.css">
+<link rel="stylesheet" href="components/panels/panels-agents.css">
+<link rel="stylesheet" href="components/panels/codex-auth-dialog.css">
+<link rel="stylesheet" href="components/panels/cloud-environments.css">
+<link rel="stylesheet" href="components/panels/custom-agents.css">
+<link rel="stylesheet" href="components/panels/panels-connections.css">
+<link rel="stylesheet" href="components/panels/model-capabilities.css">
+<!-- Load the shared task trace in desktop-overlay details as well as desk.html. -->
+<link rel="stylesheet" href="components/panels/task-trace-view.css">
+<link rel="stylesheet" href="components/panels/task-context-view.css">
+<link rel="stylesheet" href="components/panels/task-trace-rail-view.css">
+<link rel="stylesheet" href="components/panels/task-evolution-view.css">
+<link rel="stylesheet" href="components/panels/panels-desk-session.css">
+<link rel="stylesheet" href="components/panels/panels-aidesk-control.css">
+<link rel="stylesheet" href="components/panels/panels-aidesk-office.css">
+<link rel="stylesheet" href="components/panels/panel-forms.css">
+<link rel="stylesheet" href="components/settings/client-update-view.css">
+<link rel="stylesheet" href="components/panels/panels.css">
+<link rel="stylesheet" href="components/panels/panels-forward-plugin.css">
+<!-- Load shared cursor policy after component styles so it takes precedence. -->
+<link rel="stylesheet" href="theme/cursor.css">
+<link rel="stylesheet" href="theme/workspace-page-heads.css">
+<!-- Keep desktop-overlay styles here; native workspace and tool-window styles live in desk.html. -->
+<link rel="stylesheet" href="components/panels/automation-surface.css">
+<link rel="stylesheet" href="components/panels/notice-surface.css">
+<link rel="stylesheet" href="components/panels/library-transfer.css">
+<link rel="stylesheet" href="theme/box-theme.css">
+</head>
+<body>
+<!-- Start the watchdog heartbeat before other scripts so later load failures cannot prevent it. -->
+<script>
+(function(){
+  if(!window.soduWorkAPI||!window.soduWorkAPI.sendHeartbeat)return;
+  // Send a heartbeat immediately, then every two seconds.
+  window.soduWorkAPI.sendHeartbeat();
+  setInterval(function(){
+    try{window.soduWorkAPI.sendHeartbeat();}catch(e){}
+  },2000);
+})();
+</script>
+<script src="api-library-local.js"></script>
+<script src="core/plugin-locales.js"></script>
+<script src="core/api-work-plugins.js"></script>
+<script src="core/page-performance.js"></script>
+<script src="api.js"></script>
+<div class="stage">
+  <div class="pet" id="pet">
+    <div class="pet-shadow"></div>
+    <!-- Retain the empty action-ring shell for legacy references; dock navigation owns the entry points. -->
+    <div class="pet-ring" id="petRing" style="display:none">
+      <!-- Legacy ring geometry reserves four positions on the left half-circle. -->
+      <button class="ring-btn" data-act="toggle-tasks" style="--rx:0px;--ry:-88px" title="快捷栏开关"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M8 9.5l1.5 1.5 3-3"/><path d="M8 15h8"/></svg><span class="tip">快捷栏开关</span></button>
+      <button class="ring-btn" data-act="settings" style="--rx:-78px;--ry:-40px" title="设置"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span class="tip">设置</span></button>
+      <button class="ring-btn" data-act="skin" style="--rx:-78px;--ry:40px" title="皮肤管理"><svg viewBox="0 0 24 24"><path d="M3 12c0-4.97 4.03-9 9-9s9 4.03 9 9-4.03 9-9 9"/><path d="M3 12c0 4.97 4.03 9 9 9"/><circle cx="8" cy="10" r="1.5"/><circle cx="12" cy="7" r="1.5"/><circle cx="16" cy="10" r="1.5"/><circle cx="14" cy="14" r="1.5"/></svg><span class="tip">皮肤管理</span></button>
+    </div>
+    <svg class="pet-svg" id="petSvg" viewBox="0 0 120 120"></svg>
+    <!-- SoduWork action art is inserted and controlled by soduwork-pet-skin.js. -->
+    <span class="pet-unread-badge" id="petUnreadBadge" aria-hidden="true" hidden></span>
+  </div>
+  <div class="pet-bubble" id="petBubble"></div>
+  <div class="edge-dock" id="edgeDock" title="桌面快捷导航"></div>
+  <!-- Dock overflow surface for secondary navigation. -->
+  <div class="dock-more" id="dockMore"></div>
+  <!-- The skin shortcut reuses overflow-menu styling and interactive-region registration with its own row layout. -->
+  <div class="dock-more dock-skin" id="dockSkin"></div>
+  <div class="ctx-menu" id="ctxMenu"></div>
+  <!-- Settings, skin management, and team pages live in desk.html. Route through win-bridge Entry functions so opening them does not release the desktop overlay's always-on-top state. -->
+  <!-- Requirement creation lives in the native workspace window rather than a desktop-overlay mask. -->
+</div>
+<!-- Load scripts in dependency order. -->
+<script src="components/panels/task-priority.js"></script>
+<script src="core/task-sync.js"></script>
+<script src="core/store-lifecycle.js"></script>
+<script src="core/store.js"></script>
+<script src="core/mate-notice-sync.js"></script>
+<script src="core/locales/en-US.js"></script>
+<script src="core/locales/en-US-workspace.js"></script>
+<script src="core/locales/en-US-chat.js"></script>
+<script src="core/locales/en-US-shared.js"></script>
+<script src="core/locales/en-US-actions.js"></script>
+<script src="core/locales/en-US-shell.js"></script>
+<script src="core/locales/en-US-capability-pages.js"></script>
+<script src="core/locales/en-US-chat-pages.js"></script>
+<script src="core/locales/en-US-cloud-pages.js"></script>
+<script src="core/locales/en-US-work-pages.js"></script>
+<script src="core/locales/en-US-runtime-pages.js"></script>
+<script src="core/locales/en-US-plugin-pages.js"></script>
+<script src="core/locales/en-US-trace-pages.js"></script>
+<script src="core/locales/en-US-native.js"></script>
+<script src="core/locales/en-US-dynamic-pages.js"></script>
+<script src="core/locales/en-US-dynamic-work.js"></script>
+<script src="core/locales/en-US-dynamic-trace.js"></script>
+<script src="core/locales/en-US-notification-pages.js"></script>
+<script src="core/locales/en-US-final-pages.js"></script>
+<script src="core/locales/en-US-library.js"></script>
+<script src="core/locales/en-US-gap-pages.js"></script>
+<script src="core/locales/locale-registry.js"></script>
+<script src="core/locales/ja-JP.js"></script>
+<script src="core/locales/ja-JP-gap-pages.js"></script>
+<script src="core/locales/ko-KR.js"></script>
+<script src="core/locales/ko-KR-gap-pages.js"></script>
+<script src="core/i18n-dom.js"></script>
+<script src="core/i18n.js"></script>
+<script src="core/user.js"></script>
+<script src="core/skin-registry.js"></script>
+<script src="core/electron.js"></script>
+<script src="core/drag.js"></script>
+<!-- Load the routing and state-invalidation bridge in both windows. -->
+<script src="core/win-bridge.js"></script>
+<script src="core/task-conversation-navigation.js"></script>
+<script src="components/pet/characters.js"></script>
+<script src="components/pet/pet-ui.js"></script>
+<!-- The desktop dock owns shortcuts, positioning, and dragging independently of pet animation. -->
+<script src="components/shared/icon-registry.js"></script>
+<script src="components/pet/pet-dock.js"></script>
+<script src="components/pet/pet-refresh.js"></script>
+<!-- Shared-scope panel modules load declarations before entry bindings; console consumers depend on panels-desk state. -->
+<script src="components/panels/panels-icons.js"></script>
+<script src="components/panels/panels-session-memory.js"></script>
+<script src="components/panels/task-trace-execution-details.js"></script>
+<script src="components/panels/task-trace-rail-view.js"></script>
+<script src="components/panels/task-context-view.js"></script>
+<script src="components/panels/task-trace-approval.js"></script>
+<script src="components/panels/task-approval-inbox.js"></script>
+<link rel="stylesheet" href="components/panels/task-approval-inbox.css">
+<script src="components/panels/task-trace-view.js"></script>
+<script src="components/panels/task-evolution-view.js"></script>
+<script src="components/panels/task-trace-runtime.js"></script>
+<script src="components/panels/panels-detail.js"></script>
+<script src="components/panels/plugin-route-directory.js"></script>
+<script src="components/panels/panels-forward-plugin.js"></script>
+<script src="components/panels/panels-forward-select.js"></script>
+<script src="components/panels/task-execution-context.js"></script>
+<script src="components/panels/task-execution-client.js"></script>
+<script src="components/panels/panels-forward-picker.js"></script>
+<script src="components/panels/panels-forward-options.js"></script>
+<script src="components/panels/panels-forward.js"></script>
+<script src="components/panels/panels-add-assignment.js"></script>
+<script src="components/panels/task-create-navigation.js"></script>
+<script src="components/panels/panels-add.js"></script>
+<script src="core/requirements.js"></script>
+<script src="core/requirement-session-context.js"></script>
+<script src="components/requirements/requirements-view.js"></script>
+<script src="components/requirements/requirements-board.js"></script>
+<script src="components/requirements/requirement-confirm.js"></script>
+<script src="components/requirements/requirement-session-choice.js"></script>
+<script src="components/requirements/requirement-assignment.js"></script>
+<script src="components/requirements/requirements-detail.js"></script>
+<script src="components/panels/plugin-ui-host.js"></script>
+<script src="components/panels/plugin-debug-card.js"></script>
+<script src="components/panels/plugin-input-sheet.js"></script>
+<script src="components/panels/library-transfer.js"></script>
+<script src="components/panels/conversation-attachments.js"></script>
+<script src="components/requirements/requirement-fields.js"></script>
+<script src="components/panels/work-entry-sheet.js"></script>
+<script src="components/panels/panels-misc.js"></script>
+<script src="components/panels/message-follow-up.js"></script>
+<script src="components/panels/panels-desk.js"></script>
+<script src="components/panels/panels-schedules-methods.js"></script>
+<script src="components/panels/schedule-timing.js"></script>
+<script src="components/panels/work-automation-bindings.js"></script>
+<script src="components/panels/work-automation-view.js"></script>
+<script src="components/panels/work-automation-card-state.js"></script>
+<script src="components/panels/work-automation-sheet.js"></script>
+<script src="components/panels/panels-schedules-cards.js"></script>
+<script src="components/panels/panels-schedules.js"></script>
+<script src="components/panels/panels-schedules-editor.js"></script>
+<script src="components/panels/panels-schedules-runs.js"></script>
+<script src="components/panels/panels-skills.js"></script>
+<script src="components/panels/panels-plugin-maker-utils.js"></script>
+<script src="components/panels/panels-plugin-maker-skills.js"></script>
+<script src="core/plugin-icon.js"></script>
+<script src="components/panels/plugin-presentation.js"></script>
+<script src="components/panels/panels-plugin-maker-fields.js"></script>
+<script src="components/panels/panels-plugin-maker.js"></script>
+<script src="components/panels/plugin-catalog-sync.js"></script>
+<script src="components/panels/skill-catalog-sync.js"></script>
+<script src="components/panels/plugin-publication-ux.js"></script>
+<script src="components/panels/plugin-catalog-format.js"></script>
+<script src="components/panels/plugin-dependency-ux.js"></script>
+<script src="components/panels/plugin-install-setup.js"></script>
+<script src="core/plugin-platforms.js"></script>
+<script src="components/panels/platform-plugin-connect.js"></script>
+<script src="components/panels/plugin-mcp-gate.js"></script>
+<script src="components/panels/plugin-lifecycle.js"></script>
+<script src="components/panels/plugin-access.js"></script>
+<script src="components/panels/panels-capability-plugins.js"></script>
+<script src="components/panels/panels-capability-directory.js"></script>
+<script src="components/panels/connector-config.js"></script>
+<script src="components/panels/connector-auth.js"></script>
+<script src="components/panels/connector-editor.js"></script>
+<script src="components/panels/panels-capability-editors.js"></script>
+<script src="components/panels/connector-selection.js"></script>
+  <script src="components/panels/platform-connection-directory.js"></script>
+  <script src="components/panels/im-remote.js"></script>
+  <script src="components/panels/connector-directory.js"></script>
+  <script src="components/panels/panels-capabilities.js"></script>
+<script src="components/panels/model-capabilities.js"></script>
+<script src="components/panels/model-catalog-editor.js"></script>
+<script src="components/panels/panels-models.js"></script>
+<script src="components/panels/agent-brand.js"></script>
+<script src="components/panels/panels-agents.js"></script>
+<script src="components/panels/codex-auth-dialog.js"></script>
+<script src="components/panels/cloud-environments.js"></script>
+<script src="components/panels/cloud-environment-setup.js"></script>
+<script src="components/panels/custom-agents.js"></script>
+<script src="components/panels/panels-codeacct.js"></script>
+<!-- Load execution narrative after panels-desk.js because it reads _deskData and _deskTaskId lexical bindings. -->
+<script src="components/panels/panels-desk-agent.js"></script>
+<script src="components/panels/panels-aidesk-office.js"></script>
+<script src="components/shared/execution-tool-args.js"></script>
+<script src="components/panels/task-execution-stream.js"></script>
+<script src="components/panels/panels.js"></script>
+<!-- Keep the shared skin model here for theme changes and remote commands. Skin grids, terminals, team views, and Gantt UI load in the workspace. -->
+<script src="components/skin-manager/skin-model.js"></script>
+<script src="components/pet/soduwork-pet-skin.js"></script>
+<!-- Load settings helpers in both windows because scale, font, visibility, and workRoot are shared effects despite workspace-only form DOM. -->
+<script src="components/settings/access-preferences.js"></script>
+<script src="components/settings/client-update-view.js"></script>
+<script src="components/settings/settings.js"></script>
+<script src="app/app.js"></script>
+<div id="__errBox" style="position:fixed;top:10px;left:10px;z-index:9999;background:rgba(255,0,0,.9);color:#fff;font-size:max(var(--font-min-readable, 14.5px), 11px);font-family:var(--font-mono);padding:8px 12px;border-radius:8px;max-width:400px;max-height:200px;overflow:auto;pointer-events:auto;white-space:pre-wrap;display:none"></div>
+</body>
+</html>

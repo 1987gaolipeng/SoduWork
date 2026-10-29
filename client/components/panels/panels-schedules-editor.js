@@ -1,0 +1,524 @@
+/*
+ * Create/edit automation in a contextual drawer; restore focus to its trigger on closing.
+ */
+let _schEditorReturnFocus = null;
+let _schEditorRequest = 0;
+
+/*
+ * Load templates only from administrator-configured automation_templates_v1 through
+ * /schedules/templates. Hide the section when unconfigured instead of adding client-side
+ * samples.
+ */
+
+/*
+ * Resolve optional name/description/note/title locale maps through shared
+ * SoduworkLocalizedText helpers for both cards and prefilling.
+ */
+function _schPickLocale(map, locale) {
+  return window.SoduworkLocalizedText.pickLocale(map, locale);
+}
+
+function _schTemplateLocale() {
+  return window.SoduworkLocalizedText.currentLocale();
+}
+
+function _schTemplateText(item, field) {
+  return window.SoduworkLocalizedText.resolve(item, field);
+}
+
+function _schRecipeValues(item) {
+  /*
+   * Use one localized values object for template previews and prefilling; generated
+   * requirement titles and AI instructions follow the selected language.
+   */
+  const locale = _schTemplateLocale();
+  return {
+    title: _schPickLocale(item.titleLocales, locale) ||
+      _schPickLocale(item.nameLocales, locale) || item.title || item.name,
+    note: _schPickLocale(item.noteLocales, locale) || item.note || '',
+    every: item.every || 'daily', atHour: item.atHour, atMinute: item.atMinute,
+    weekday: item.weekday, timeZone: item.timeZone,
+    requiredCapabilities: item.requiredCapabilities || [], retryLimit: item.retryLimit,
+    retryDelayMinutes: item.retryDelayMinutes, pluginBindingId: item.pluginBindingId || '',
+    pluginInputs: item.pluginInputs || {},
+  };
+}
+
+function _schRecipeHtml(compact) {
+  if (!_schTemplates.length) return '';
+  const recipes = _schTemplates.map((item) => {
+    const title = _schTemplateText(item, 'name');
+    const desc = _schTemplateText(item, 'description') || _schTemplateText(item, 'note') || '由管理端配置的自动化模板';
+    return {
+      id: item.id, mark: title.slice(0, 1) || '模', title,
+      desc, descIsUserContent: !!(item.description || item.note),
+      values: _schRecipeValues(item),
+    };
+  });
+  const useLabel = (window.SoduWorkI18n && window.SoduWorkI18n.translateText)
+    ? window.SoduWorkI18n.translateText('使用模板') : '使用模板';
+  return '<section class="sch-recipes' + (compact ? ' compact' : '') + '"><header><div><b>从模板开始</b>' +
+    '<span>选择模板，设置时间与执行方式</span></div></header><div>' +
+    recipes.map((recipe) => '<button type="button" data-sch-recipe="' + esc(recipe.id) +
+      '" aria-haspopup="dialog" data-user-attributes="aria-label" aria-label="' + esc(useLabel) + ' · ' + esc(recipe.title) + '"><i>' + _schVisualIcon('template') +
+      '</i><span><b data-user-content>' + esc(recipe.title) + '</b><small' +
+      (recipe.descIsUserContent ? ' data-user-content' : '') + '>' + esc(recipe.desc) + '</small></span>' +
+      '<em aria-hidden="true">' + _schVisualIcon('arrow') + '</em></button>').join('') + '</div></section>';
+}
+
+function _schBindRecipes(root) {
+  root.querySelectorAll('[data-sch-recipe]').forEach((button) => button.addEventListener('click', () => {
+    const recipeId = button.getAttribute('data-sch-recipe');
+    const remote = _schTemplates.find((item) => item.id === recipeId);
+    if (!remote) return;
+    const recipe = { values: _schRecipeValues(remote) };
+    const draft = Object.assign({ assigneeId: '', repoId: '', flow: false,
+      pluginBindingId: '', personalPluginKey: '', pluginInputs: {},
+      retryLimit: 2, retryDelayMinutes: 5, enabled: true }, recipe.values);
+    void _schPrepareEditor(draft, button);
+  }));
+}
+
+
+function _schDefaultAgentId() {
+  const ready = _schAgents.find(item => item && item.available !== false);
+  return String((ready || _schAgents[0] || {}).id || '');
+}
+
+function _schNormalizeExecutionAgents(result) {
+  return ((result && result.substrates) || []).filter(item => item && item.key).map(item => ({
+    id: String(item.key),
+    name: String(item.name || item.cli || item.key),
+    cli: String(item.cli || ''),
+    available: item.available !== false,
+    note: String(item.note || ''),
+    locationLabel: String(item.locationLabel || ''),
+    onlineSeats: Math.max(0, Number(item.onlineSeats) || 0),
+  }));
+}
+
+/*
+ * Automations and manual tasks share the execution-options contract. Stable local:<cli>
+ * types resolve to an eligible Runner at execution time instead of persisting transient
+ * seats.
+ */
+async function _schLoadExecutionAgents(context) {
+  if (_schAgentLoading) return _schAgentLoading;
+  const scope = _schScope;
+  _schAgentLoading = (async () => {
+    if (SoduWorkAPI.taskExecutionOptions) {
+      try {
+        const result = await SoduWorkAPI.taskExecutionOptions({
+          title: String((context || {}).title || ''),
+          note: String((context || {}).note || ''),
+          tags: [], repoId: String((context || {}).repoId || ''),
+        });
+        const agents = _schNormalizeExecutionAgents(result);
+        if (scope !== _schScope) return [];
+        _schAgentReason = String((((result || {}).availability || {}).agentReason) ||
+          (!agents.length ? '当前设备还没有在线执行底座，请打开 Agent 管理确认 Runner 已启动' : ''));
+        return agents;
+      } catch (_) {
+        if (scope !== _schScope) return [];
+        /* Fall back to legacy agent lists only when the unified-contract API fails. */
+      }
+    }
+    if (SoduWorkAPI.listAIAgents) {
+      const result = await SoduWorkAPI.listAIAgents().catch(() => ({ agents: [] }));
+      if (scope !== _schScope) return [];
+      const agents = ((result && result.agents) || []).filter(item => item && !item.off && item.id)
+        .map(item => ({ ...item, id: String(item.id), name: String(item.name || item.cliName || item.id),
+          available: item.online !== false }));
+      _schAgentReason = String((result && result.reason) ||
+        (!agents.length ? '当前设备还没有在线执行底座，请打开 Agent 管理确认 Runner 已启动' : ''));
+      return agents;
+    }
+    _schAgentReason = '当前客户端不支持读取执行底座，请升级后重试';
+    return [];
+  })().then(agents => {
+    if (scope !== _schScope) return [];
+    _schAgents = Array.isArray(agents) ? agents : [];
+    return _schAgents;
+  }).finally(() => { if (scope === _schScope) _schAgentLoading = null; });
+  return _schAgentLoading;
+}
+
+function _schAgentOptionLabel(agent) {
+  /* Translate option-label fragments when constructing them; retain names and timezones as data. */
+  const _tx = value => (window.SoduWorkI18n && window.SoduWorkI18n.translateText)
+    ? window.SoduWorkI18n.translateText(value) : value;
+  const suffix = [agent.locationLabel,
+    agent.onlineSeats ? _tx(agent.onlineSeats + ' 个在线席位') : '',
+    agent.available === false ? _tx('当前未就绪') : ''].filter(Boolean);
+  return String(agent.name || agent.id) + (suffix.length ? ' · ' + suffix.join(' · ') : '');
+}
+
+function _schAgentOptionsHtml(current) {
+  const selected = String(current || _schDefaultAgentId());
+  const rows = _schAgents.slice();
+  if (selected && !rows.some(item => String(item.id) === selected)) {
+    const saved = (window.SoduWorkI18n && window.SoduWorkI18n.translateText)
+      ? window.SoduWorkI18n.translateText('已保存的执行底座') : '已保存的执行底座';
+    rows.unshift({ id: selected, name: saved, available: false });
+  }
+  if (!rows.length) {
+    const empty = (window.SoduWorkI18n && window.SoduWorkI18n.translateText)
+      ? window.SoduWorkI18n.translateText('当前设备没有可选执行底座') : '当前设备没有可选执行底座';
+    return '<option value="">' + esc(empty) + '</option>';
+  }
+  return rows.map(agent => '<option value="' + esc(agent.id) + '"' +
+    (String(agent.id) === selected ? ' selected' : '') + '>' +
+    esc(_schAgentOptionLabel(agent)) + '</option>').join('');
+}
+
+function _schRefreshAgentField(preferred) {
+  const select = document.getElementById('schWho');
+  if (!select) return;
+  const current = String(select.value || preferred || '');
+  select.innerHTML = _schAgentOptionsHtml(current);
+  select.disabled = !_schAgents.length && !current;
+  const hint = document.getElementById('schWhoHint');
+  if (hint) hint.textContent = _schAgentReason || (_schAgents.length
+    ? '保存的是执行底座类型；每次运行会在当前设备选择可用席位'
+    : '请打开 Agent 管理，确认 Runner 已启动并已连接当前环境');
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function _schEditorDrawerHtml() {
+  const editing = _schEditing && _schEditing !== 'new' ? _schEditing : null;
+  const isEdit = Boolean(editing && editing.id);
+  return '<header class="sch-editor-head"><span class="sch-editor-mark" aria-hidden="true">' +
+    '<svg viewBox="0 0 24 24"><path d="M7 3h7l3 3v15H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/></svg></span>' +
+    '<span class="sch-editor-title"><small>自动化配置</small><h2 id="schEditorTitle">' +
+    (isEdit ? '编辑自动化' : '新建自动化') + '</h2><p>' +
+    (isEdit ? '调整触发方式、执行方法和运行条件，保存后按新设置生效。' :
+      '把重复工作交代清楚，SoduWork 会按时执行，并在对话中保留过程和结果。') +
+    '</p></span><button class="sch-editor-close" data-editor-close aria-label="关闭自动化配置">' +
+    '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>' +
+    '<div class="sch-editor-scroll">' + _schFormHtml(editing) + '</div>';
+}
+
+function _schRenderEditorDrawer(focusDrawer) {
+  const layer = document.getElementById('schEditorLayer');
+  const content = document.getElementById('schEditorContent');
+  if (!layer || !content) return;
+  const isOpen = Boolean(_schEditing);
+  document.querySelectorAll('.sch-item [data-act="edit"]').forEach(button => {
+    const card = button.closest('.sch-item');
+    const sid = card && card.getAttribute('data-sid');
+    button.setAttribute('aria-expanded', String(isOpen && _schEditing !== 'new' &&
+      String((_schEditing || {}).id || '') === sid));
+  });
+  if (!isOpen) {
+    layer.classList.remove('show'); layer.setAttribute('aria-hidden', 'true'); content.innerHTML = '';
+    return;
+  }
+  content.innerHTML = _schEditorDrawerHtml();
+  layer.classList.add('show'); layer.setAttribute('aria-hidden', 'false');
+  content.querySelectorAll('[data-editor-close]').forEach(button =>
+    button.addEventListener('click', () => _schCloseEditor(true)));
+  _wireSchForm();
+  _schBindAgentReload();
+  if (focusDrawer) requestAnimationFrame(() => {
+    const firstInput = content.querySelector('#schTitle');
+    if (firstInput) firstInput.focus({ preventScroll: true });
+  });
+}
+
+function _schAgentFieldHtml(current) {
+  return '<label class="sch-f-lbl" for="schWho">执行底座</label><select class="sch-in" id="schWho" aria-describedby="schWhoHint"' +
+    (!_schAgents.length && !current ? ' disabled' : '') + '>' + _schAgentOptionsHtml(current) + '</select>' +
+    '<div class="sch-executor-tools"><small class="sch-executor-hint" id="schWhoHint">' +
+    esc(_schAgentReason || (_schAgents.length ? '保存的是执行底座类型；运行时选择可用席位' :
+      '请打开 Agent 管理，确认 Runner 已启动并已连接当前环境')) + '</small>' +
+    '<button type="button" class="btn-mini" id="schReloadAgents">刷新底座</button></div>';
+}
+
+async function _schPrepareEditor(value, source) {
+  const request = ++_schEditorRequest;
+  if (source) { source.disabled = true; source.setAttribute('aria-busy', 'true'); }
+  try {
+    const draft = value === 'new' ? {} : value;
+    await Promise.all([_schLoadExecutionAgents(draft), _schLoadPlugins(_schProjectId(draft.repoId)), _schmLoad()]);
+    if (request !== _schEditorRequest || !document.getElementById('schPanel')?.classList.contains('show')) return false;
+    if (value !== 'new' && !value.id && !value.assigneeId) value.assigneeId = _schDefaultAgentId();
+    _schOpenEditor(value, source);
+    return true;
+  } finally {
+    if (source?.isConnected) { source.disabled = false; source.removeAttribute('aria-busy'); }
+  }
+}
+
+function _schBindAgentReload() {
+  const button = document.getElementById('schReloadAgents');
+  if (!button) return;
+  button.addEventListener('click', async () => {
+    const select = document.getElementById('schWho');
+    button.disabled = true;
+    try {
+      await _schLoadExecutionAgents({ title: document.getElementById('schTitle')?.value,
+        note: document.getElementById('schNote')?.value });
+      if (select === document.getElementById('schWho')) _schRefreshAgentField();
+    } finally { button.disabled = false; }
+  });
+}
+
+function _schOpenEditor(value, source) {
+  _schCloseCreateMenu(false);
+  _schCloseRuns(false);
+  _schEditorReturnFocus = source || null;
+  _schEditing = value || 'new';
+  _schRenderEditorDrawer(true);
+}
+
+function _schCloseEditor(restoreFocus) {
+  _schEditorRequest += 1;
+  const returnFocus = _schEditorReturnFocus;
+  _schEditorReturnFocus = null;
+  _schEditing = null;
+  _schRenderEditorDrawer(false);
+  if (restoreFocus && returnFocus && returnFocus.isConnected) {
+    requestAnimationFrame(() => returnFocus.focus({ preventScroll: true }));
+  }
+}
+
+// Account/Hub/device changes invalidate both snapshots and pending responses.
+// Detached requests may finish, but must never refill the next identity's UI.
+function _schResetScope() {
+  _schScope++;
+  closeSchedulePanel();
+  _schRows = null; _schLoading = null; _schLoadError = '';
+  _schAgents = []; _schAgentReason = ''; _schAgentLoading = null;
+  _schRepos = []; _schTemplates = [];
+  _schPluginCache = Object.create(null); _schPluginLoading = Object.create(null);
+  _schmGeneration++; _schmItems = []; _schmLoading = null;
+  _schRunRows = Object.create(null); _schRunLoading = Object.create(null); _schRunErrors = Object.create(null);
+  const body = document.getElementById('schBody');
+  if (body) body.replaceChildren();
+}
+
+/* The creation entry selects input mode; the existing confirmation flow owns saving and starting. */
+let _schCreateDismiss = null;
+
+function _schCreateMenuHtml() {
+  return '<div class="sch-create">' +
+    '<button type="button" class="sch-create-trigger" id="schNew" aria-haspopup="menu" ' +
+    'aria-expanded="false" aria-controls="schCreateMenu"><span>创建</span>' +
+    '<span class="sch-create-chevron" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m6 8 4 4 4-4"/></svg></span></button>' +
+    '<div class="sch-create-menu" id="schCreateMenu" role="menu" aria-label="创建自动化" hidden>' +
+    '<button type="button" role="menuitem" tabindex="-1" data-sch-create="chat">' +
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a8.5 8.5 0 0 1-8.5 8.5 9 9 0 0 1-3.5-.7L3 21l1.7-5a9 9 0 0 1-.7-3.5A8.5 8.5 0 1 1 20 11.5Z"/></svg>' +
+    '<span>对话创建</span></button>' +
+    '<button type="button" role="menuitem" tabindex="-1" data-sch-create="manual">' +
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5.5 4 4M4 20l4.5-1 11-11a2.8 2.8 0 0 0-4-4l-11 11L4 20Z"/></svg>' +
+    '<span>手动配置</span></button></div></div>';
+}
+
+function _schCloseCreateMenu(restoreFocus) {
+  if (_schCreateDismiss) { _schCreateDismiss(); _schCreateDismiss = null; }
+  const menu = document.getElementById('schCreateMenu');
+  const trigger = document.getElementById('schNew');
+  if (menu) menu.hidden = true;
+  if (trigger) {
+    trigger.setAttribute('aria-expanded', 'false');
+    if (restoreFocus) trigger.focus({ preventScroll: true });
+  }
+}
+
+function _schOpenCreateMenu(index) {
+  const trigger = document.getElementById('schNew');
+  const menu = document.getElementById('schCreateMenu');
+  if (!trigger || trigger.disabled || !menu) return;
+  _schCloseCreateMenu(false);
+  menu.hidden = false;
+  trigger.setAttribute('aria-expanded', 'true');
+  const items = menu.querySelectorAll('[role="menuitem"]');
+  items[index === -1 ? items.length - 1 : 0].focus({ preventScroll: true });
+  const root = menu.parentElement;
+  const outside = event => { if (!root.contains(event.target)) _schCloseCreateMenu(false); };
+  document.addEventListener('pointerdown', outside);
+  document.addEventListener('focusin', outside);
+  _schCreateDismiss = () => {
+    document.removeEventListener('pointerdown', outside);
+    document.removeEventListener('focusin', outside);
+  };
+}
+
+async function _schCreateFromChat() {
+  const payload = {
+    tab: 'chat', newSession: true, pluginId: 'work.automation.create', prefill: '/自动化 ',
+    contextPrompts: ['当前从自动化页面进入。请整理用户希望重复执行的工作、执行时间和成果要求，起一个简短明确的自动化名称；缺少的信息先询问，确认配置后才创建，不立即执行工作。'],
+  };
+  const route = typeof openCreateEntry === 'function' ? openCreateEntry :
+    typeof openComposePanel === 'function' ? openComposePanel : null;
+  _schCloseCreateMenu(false);
+  if (!route) {
+    if (typeof petSay === 'function') petSay('对话入口尚未就绪，请稍后重试，或选择手动配置。');
+    document.getElementById('schNew')?.focus({ preventScroll: true });
+    return false;
+  }
+  try {
+    // The shared entry returns void when navigation was handed to the workspace.
+    if (await route(payload) === false) throw new Error('Conversation entry unavailable');
+    closeSchedulePanel();
+    if (typeof petSay === 'function') petSay('描述要自动完成的工作和执行时间，发送后确认配置。');
+    return true;
+  } catch (_) {
+    if (typeof petSay === 'function') petSay('对话暂时没有打开，请重试；也可以选择手动配置。');
+    document.getElementById('schNew')?.focus({ preventScroll: true });
+    return false;
+  }
+}
+
+function _schBindCreateMenu() {
+  const trigger = document.getElementById('schNew');
+  const menu = document.getElementById('schCreateMenu');
+  trigger.addEventListener('click', () => {
+    if (menu.hidden) _schOpenCreateMenu(0); else _schCloseCreateMenu(true);
+  });
+  trigger.parentElement.addEventListener('keydown', event => {
+    const items = Array.from(menu.querySelectorAll('[role="menuitem"]'));
+    const index = items.indexOf(document.activeElement);
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+      event.preventDefault(); event.stopPropagation();
+      if (menu.hidden) { _schOpenCreateMenu(event.key === 'ArrowUp' || event.key === 'End' ? -1 : 0); return; }
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 :
+        (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      items[next].focus();
+    } else if (!menu.hidden && event.key === 'Escape') {
+      event.preventDefault(); event.stopPropagation(); _schCloseCreateMenu(true);
+    } else if (!menu.hidden && event.key === 'Tab') {
+      _schCloseCreateMenu(true); // Native Tab continues out of the menu, without a focus trap.
+    }
+  });
+  menu.addEventListener('click', event => {
+    const item = event.target.closest('[data-sch-create]');
+    if (!item || menu.hidden) return;
+    if (item.dataset.schCreate === 'chat') { void _schCreateFromChat(); return; }
+    _schCloseCreateMenu(false);
+    void _schPrepareEditor('new', trigger);
+  });
+}
+
+function _schOnceFieldsHtml(value) {
+  const zone = value.timeZone || _schBrowserTimeZone();
+  const local = window.ScheduleTiming?.localInput(value.runAt, zone) || '';
+  return '<label class="sch-once-field" id="schOnceWrap"' + (value.every === 'once' ? '' : ' style="display:none"') + '>' +
+    '<span>执行日期时间 · ' + esc(_schTimeZoneLabel(zone)) + '</span>' +
+    '<input class="sch-in" id="schRunAt" type="datetime-local" step="0.001" value="' + esc(local) +
+    '" aria-describedby="schOnceHint"><small id="schOnceHint"></small></label>';
+}
+
+function _schReadTiming() {
+  const existing = _schEditing && _schEditing !== 'new' ? _schEditing : {};
+  const every = document.getElementById('schEvery').value;
+  const timeZone = existing.timeZone || _schBrowserTimeZone();
+  let runAt = '';
+  if (every === 'once') {
+    const local = document.getElementById('schRunAt')?.value || '';
+    const original = window.ScheduleTiming?.localInput(existing.runAt, timeZone) || '';
+    // Native datetime-local can shorten .120 to .12. Compare the wall fields,
+    // preserving the original ISO (including microseconds) when left unchanged.
+    const canonical = value => {
+      const parts = value.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/);
+      return parts ? parts[1] + ':' + (parts[2] || '00') + '.' + (parts[3] || '').padEnd(3, '0') : '';
+    };
+    const same = local && original && canonical(local) === canonical(original);
+    runAt = existing.every === 'once' && same ? existing.runAt
+      : window.ScheduleTiming?.fromLocalInput(local, timeZone) || '';
+  }
+  return { every, runAt, timeZone, ...(existing.id ? { scheduleId: existing.id } : {}) };
+}
+
+function _schTimingError(value, focus) {
+  if (value.every !== 'once') return '';
+  const existing = _schEditing && _schEditing !== 'new' ? _schEditing : undefined;
+  const error = window.ScheduleTiming?.validate(value, existing) ||
+    (!window.ScheduleTiming ? '时间设置尚未就绪，请重新打开自动化' : '');
+  if (error && focus) {
+    const input = document.getElementById('schRunAt');
+    input.classList.add('invalid'); input.setAttribute('aria-invalid', 'true');
+    input.focus({ preventScroll: true });
+    if (typeof petSay === 'function') petSay(_schTx(error));
+  }
+  return error;
+}
+
+function _schSyncTiming(every) {
+  const field = document.getElementById('schOnceWrap');
+  const input = document.getElementById('schRunAt');
+  if (!field || !input) return;
+  field.style.display = every === 'once' ? '' : 'none';
+  input.required = every === 'once';
+  input.classList.remove('invalid'); input.removeAttribute('aria-invalid');
+  const fired = _schEditing && _schEditing.onceFired && _schReadTiming().runAt === _schEditing.runAt;
+  document.getElementById('schOnceHint').textContent = _schTx(fired
+    ? '本次预约已触发；修改为将来时间可重新预约' : '到点触发一次；失败按设置重试');
+}
+
+/*
+ * Preview the next run directly from current selections using the same scheduling rules as
+ * the backend.
+ */
+function _schNextPreview() {
+  const every = document.getElementById('schEvery').value;
+  if (every === 'once') {
+    const timing = _schReadTiming(), previous = _schEditing || {};
+    if (previous.onceFired && timing.runAt === previous.runAt) return _schTx('本次预约已触发');
+    const error = _schTimingError(timing);
+    if (error) return _schTx(error);
+    if (Date.parse(timing.runAt) <= Date.now()) return _schTx('等待补跑一次');
+    return '下一次：' + _schTx(window.ScheduleTiming.summary(timing));
+  }
+  const hh = Math.max(0, Math.min(23, Number(document.getElementById('schH').value || 0)));
+  const mm = Math.max(0, Math.min(59, Number(document.getElementById('schM').value || 0)));
+  const wd = Number(document.getElementById('schWd').value || 1);
+  const now = new Date();
+  const n = new Date(now);
+  if (every === 'hourly') {
+    n.setMinutes(mm, 0, 0);
+    if (n <= now) n.setHours(n.getHours() + 1);
+  } else {
+    n.setHours(hh, mm, 0, 0);
+    if (every === 'weekly') {
+      const cur = n.getDay() === 0 ? 7 : n.getDay();
+      n.setDate(n.getDate() + ((wd - cur) % 7 + 7) % 7);
+      if (n <= now) n.setDate(n.getDate() + 7);
+    } else if (n <= now) n.setDate(n.getDate() + 1);
+  }
+  const sameDay = n.toDateString() === now.toDateString();
+  const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
+  const day = _schTx(sameDay ? '今天' : (n.toDateString() === tomorrow.toDateString() ? '明天'
+    : (n.getMonth() + 1) + '月' + n.getDate() + '日'));
+  return '下一次：' + day + ' ' + _sp2(n.getHours()) + ':' + _sp2(n.getMinutes());
+}
+
+// Share presentation between editing-time and mandatory save-time preflight so stale successful states cannot remain visible.
+function _schRenderPreflight(line, result = {}) {
+  if (!line) return;
+  line.className = 'sch-ready ' + (result.state || 'waiting');
+  line.querySelector('b').textContent = _schTx(result.message || '执行条件待确认');
+  if (result.machine && result.machine.name) {
+    line.querySelector('b').textContent += ' · ' + result.machine.name;
+  }
+  const checks = (result.checks || []).map(item => item.label && _schTx(item.label)).filter(Boolean);
+  const small = line.querySelector('small');
+  small.textContent = checks.join(' · ');
+  line.title = checks.join('\n');
+  if (result.remedy && result.state !== 'ready') {
+    /*
+     * Link missing authorization/runtime results directly to the relevant Runner management
+     * view.
+     */
+    const fix = document.createElement('button');
+    fix.type = 'button';
+    fix.className = 'btn-mini';
+    fix.textContent = '去处理';
+    fix.addEventListener('click', () => {
+      if (typeof openAgentsPanel === 'function') openAgentsPanel({ tab: 'runners' });
+      else if (typeof openAgentsEntry === 'function') openAgentsEntry();
+    });
+    small.appendChild(document.createTextNode(' '));
+    small.appendChild(fix);
+  }
+}

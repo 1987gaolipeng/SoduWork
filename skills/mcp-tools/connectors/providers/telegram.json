@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 1,
+  "id": "telegram",
+  "name": "Telegram Bot API",
+  "category": "沟通协作",
+  "description": "Telegram Bot 通用连接器：Bot 身份、会话信息、消息发送；getUpdates 因 offset 确认语义标注为非只读。token 按 Telegram 规范位于 URL 路径（auth.type=path）。",
+  "officialDocs": [
+    "https://core.telegram.org/bots/api",
+    "https://core.telegram.org/bots/api#getchat",
+    "https://core.telegram.org/bots/api#sendmessage"
+  ],
+  "authDocs": [
+    "https://core.telegram.org/bots/faq#how-do-i-get-a-token"
+  ],
+  "baseUrl": "https://api.telegram.org",
+  "fields": [
+    {
+      "key": "BOT_TOKEN",
+      "label": "Bot Token（@BotFather 创建，格式 数字:字母串）",
+      "secret": true,
+      "required": true,
+      "pattern": "^[0-9]{5,16}:[A-Za-z0-9_-]{30,}$",
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "path",
+    "tokenKey": "BOT_TOKEN"
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "get_me",
+      "description": "获取 Bot 基本身份。无分页。token 由运行器注入路径占位符 {BOT_TOKEN}。出处：https://core.telegram.org/bots/api#getme",
+      "method": "GET",
+      "path": "/bot{BOT_TOKEN}/getMe",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_chat",
+      "description": "获取 chat_id 会话信息。无分页。出处：https://core.telegram.org/bots/api#getchat",
+      "method": "GET",
+      "path": "/bot{BOT_TOKEN}/getChat",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "chat_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "会话 ID（数字或 @channelusername）",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "chat_id"
+        ],
+        "maxProperties": 50
+      },
+      "query": {
+        "chat_id": "chat_id"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_updates",
+      "description": "获取 Bot 收到的更新。注意：请求携带 offset 会确认（消费）此前全部 update_id 小于 offset 的更新，因此本工具不是纯只读（readOnly:false）。分页：offset=上一页最大 update_id+1，limit 1-100。出处：https://core.telegram.org/bots/api#getupdates",
+      "method": "GET",
+      "path": "/bot{BOT_TOKEN}/getUpdates",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "确认游标：会移除所有 update_id 小于该值的更新",
+            "maximum": 2000000000
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 100,
+            "description": "取回条数"
+          },
+          "timeout": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50,
+            "default": 0,
+            "description": "长轮询秒数"
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "query": {
+        "offset": "offset",
+        "limit": "limit",
+        "timeout": "timeout"
+      },
+      "readOnly": false
+    },
+    {
+      "name": "send_message",
+      "description": "发送消息（sendMessage，text 上限 4096 字符）。写入操作：运行前必须获得用户明确授权。出处：https://core.telegram.org/bots/api#sendmessage",
+      "method": "POST",
+      "path": "/bot{BOT_TOKEN}/sendMessage",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "chat_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "目标会话 ID",
+            "maxLength": 10000
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "消息文本"
+          }
+        },
+        "required": [
+          "chat_id",
+          "text"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "chat_id": "$chat_id",
+        "text": "$text"
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "鉴权为 URL 路径 token（/bot<token>/METHOD），auth.type=path 由运行器把 secret 注入 {BOT_TOKEN}；不得拼成 query 或 header。",
+    "get_updates 携带 offset 会确认/消费之前的更新（服务器端移除），本定义已如实标注 readOnly:false；不需要消费语义时不要传 offset（但重复返回旧更新）。",
+    "getUpdates 仅在未设置 webhook 时可用。",
+    "send_message 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

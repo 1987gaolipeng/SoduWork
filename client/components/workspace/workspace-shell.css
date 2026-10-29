@@ -1,0 +1,521 @@
+@import url('./workspace-navigation.css');
+/* Unified creation surface for tasks and conversations, sharing workspace content and composer layout. */
+#composePanel{--ws-main-bg:var(--bg-0);display:none;background:var(--bg-0)}
+#composePanel.show{display:flex;flex-direction:column}
+
+.cp-body{flex:1 1 auto;min-height:0;position:relative}
+/*
+ * data-stage selects the shared compose surface or active conversation surface
+ * independently of intent selection.
+ */
+.cp-task,.cp-chat{position:absolute;inset:0;display:none}
+#composePanel[data-stage="compose"] .cp-task{display:block;overflow-y:auto;overflow-x:hidden}
+#composePanel[data-stage="chat"] .cp-chat{display:block}
+/* Center the requirement composer consistently with conversation entry. */
+.cp-mid{min-height:100%;box-sizing:border-box;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:16px;padding:24px 24px 8vh}
+.cp-hero{font-size:clamp(22px,2.2vw,30px);font-weight:500;color:var(--ink)}
+.cp-box{width:min(760px,100%);border:1px solid color-mix(in srgb,var(--line) 88%,transparent);
+  border-radius:16px;background:var(--bg-0);
+  box-shadow:0 1px 2px rgba(16,24,40,.035),0 0 24px -18px rgba(16,24,40,.24);
+  transition:border-color .16s ease,box-shadow .16s ease}
+.cp-box:focus-within{border-color:color-mix(in srgb,var(--accent) 45%,transparent);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 12%,transparent),0 0 26px -19px rgba(16,24,40,.28)}
+.cp-box>textarea{display:block;width:100%;box-sizing:border-box;min-height:104px;border:0;background:transparent;
+  resize:none;outline:none;font:inherit;font-size:16px;line-height:1.75;color:var(--ink);padding:18px 20px 6px}
+.cp-box>textarea::placeholder{color:var(--ink-5)}
+.cp-box.drag{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 4%,var(--bg-0))}
+.cp-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:4px 14px 12px}
+.cp-bar-right{display:flex;align-items:center;gap:9px;min-width:0}
+.cp-tools{display:flex;align-items:center;gap:4px;min-width:0}
+.cp-tool{appearance:none;border:0;background:transparent;width:28px;height:28px;border-radius:8px;
+  display:grid;place-items:center;color:var(--ink-4);transition:background-color .14s ease,color .14s ease,box-shadow .14s ease}
+.cp-tool:hover{background:color-mix(in srgb,var(--bg-3) 70%,transparent);color:var(--ink-2)}
+.cp-tool.on{background:color-mix(in srgb,var(--s-doing) 16%,transparent);color:var(--s-doing)}
+.cp-tool svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+/* Use a lightweight model button and themed popup list. */
+.cp-modelwrap{position:relative}
+.cp-modelbtn{appearance:none;border:0;background:transparent;font:inherit;font-size:max(var(--font-min-readable, 14.5px), 11.5px);color:var(--ink-4);
+  display:flex;align-items:center;gap:5px;max-width:230px;padding:4px 8px;border-radius:8px;transition:background-color .14s ease,color .14s ease,box-shadow .14s ease}
+.cp-modelbtn:hover{background:color-mix(in srgb,var(--bg-3) 70%,transparent);color:var(--ink-2)}
+.cp-modelbtn svg{width:14px;height:14px;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linejoin:round}
+.cp-modelbtn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cp-modelpop{display:none;position:absolute;left:0;bottom:calc(100% + 6px);z-index:6;min-width:270px;max-width:340px;
+  max-height:280px;overflow-y:auto;padding:5px;background:var(--bg-0);
+  border:1px solid color-mix(in srgb,var(--line) 88%,transparent);border-radius:12px;
+  box-shadow:0 12px 32px -18px rgba(30,45,70,.4),0 2px 8px -6px rgba(30,45,70,.3)}
+.cp-modelpop.show{display:block}
+.cp-mrow{appearance:none;border:0;background:transparent;font:inherit;text-align:left;width:100%;
+  display:flex;align-items:flex-start;gap:8px;padding:7px 9px;border-radius:9px;transition:background-color .12s ease}
+.cp-mrow:hover{background:color-mix(in srgb,var(--bg-3) 70%,transparent)}
+.cp-mtick{width:15px;flex:none;margin-top:2px;opacity:0}
+.cp-mrow.on .cp-mtick,.cp-selrow.on .cp-mtick{opacity:1}
+.cp-mtick svg{width:15px;height:15px;fill:none;stroke:var(--accent);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.cp-mtxt{display:flex;flex-direction:column;gap:1px;min-width:0}
+.cp-mtxt b{font-size:max(var(--font-min-readable, 14.5px), 12.5px);font-weight:400;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cp-mrow.on .cp-mtxt b,.cp-selrow.on .cp-mtxt b{font-weight:500;color:var(--ink)}
+.cp-mtxt i{font-style:normal;font-size:max(var(--font-min-readable, 14.5px), 11px);color:var(--ink-5)}
+/* Attached files. */
+.cp-atts{display:none;flex-wrap:wrap;gap:6px;padding:0 14px 6px}
+.cp-atts.show{display:flex}
+.cp-att{display:inline-flex;align-items:center;gap:6px;max-width:230px;padding:3px 6px 3px 9px;border-radius:8px;
+  background:color-mix(in srgb,var(--bg-3) 60%,transparent);font-size:max(var(--font-min-readable, 14.5px), 11.5px);color:var(--ink-3)}
+.cp-att b{font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cp-att i{font-style:normal;color:var(--ink-5);flex:none}
+.cp-att button{appearance:none;border:0;background:transparent;color:var(--ink-5);font-size:max(var(--font-min-readable, 14.5px), 13px);line-height:1;padding:0 2px}
+.cp-att button:hover{color:var(--ink-2)}
+.cp-tip{font-size:max(var(--font-min-readable, 14.5px), 11.5px);color:var(--ink-5)}
+.cp-go{appearance:none;border:0;background:#f1f2f4;color:#3b3d42;width:30px;height:30px;
+  border-radius:9px;display:grid;place-items:center;transition:opacity .14s ease}
+.cp-go:hover{background:#e7e9ec;color:#2f3237}
+.cp-go svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+/* Present conversation capabilities as a compact runtime summary. */
+.cp-capbar{min-height:36px;box-sizing:border-box;display:flex;align-items:center;gap:9px;padding:7px 14px 9px;
+  border-top:1px solid color-mix(in srgb,var(--line) 55%,transparent)}
+.cp-caplabel{flex:none;color:var(--ink-5);font-size:max(var(--font-min-readable, 14.5px), 11px);white-space:nowrap}.cp-caplist{min-width:0;display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.cp-cap{appearance:none;min-height:26px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--ink-4);
+  display:inline-flex;align-items:center;gap:5px;padding:3px 8px;font:inherit;font-size:max(var(--font-min-readable, 14.5px), 12px);transition:background-color .14s ease,border-color .14s ease,color .14s ease}
+.cp-cap:hover{background:var(--bg-2);color:var(--ink-2)}.cp-cap svg{width:13px;height:13px;flex:none;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.cp-cap i{font-style:normal;color:var(--ink-5);font-size:max(var(--font-min-readable, 14.5px), 10px)}.cp-cap.on{border-color:color-mix(in srgb,var(--accent) 28%,var(--line));background:var(--accent-soft);color:var(--accent)}
+.cp-cap.on i{color:color-mix(in srgb,var(--accent) 72%,var(--ink-4))}.cp-cap.blocked{opacity:.58}.cp-cap.blocked:hover{background:transparent;color:var(--ink-4)}
+.cp-capwait,.cp-capnote{color:var(--ink-5);font-size:max(var(--font-min-readable, 14.5px), 10.5px)}.cp-capnote{margin-left:auto;color:var(--s-doing);white-space:nowrap}
+@media(max-width:720px){.cp-capbar{align-items:flex-start;flex-wrap:wrap}.cp-caplabel{padding-top:5px}.cp-capnote{width:100%;margin-left:0}.cp-cap i{display:none}}
+/* Show confirmation cards inline without navigation. */
+.cp-draft{width:min(760px,100%);display:none}
+.cp-draft.show{display:block}
+.cp-loading{padding:14px 2px;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 13px);text-align:center}
+.cp-card{border:1px solid color-mix(in srgb,var(--accent) 35%,transparent);border-radius:14px;
+  background:var(--bg-0);padding:14px 16px}
+.cp-card-head{display:flex;align-items:center;gap:7px;font-size:max(var(--font-min-readable, 14.5px), 12.5px);color:var(--accent);margin-bottom:10px}
+.cp-card-head svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+
+
+
+
+.cp-title,.cp-note{width:100%;box-sizing:border-box;background:color-mix(in srgb,var(--bg-3) 34%,transparent);
+  border:1px solid color-mix(in srgb,var(--line) 55%,transparent);border-radius:9px;outline:none;
+  font:inherit;color:var(--ink);transition:background-color .14s ease,border-color .14s ease,box-shadow .14s ease}
+.cp-title{font-size:17px;font-weight:500;padding:8px 11px;margin-bottom:8px}
+.cp-note{font-size:max(var(--font-min-readable, 14.5px), 14px);line-height:1.7;color:var(--ink-2);resize:vertical;min-height:96px;padding:10px 11px}
+.cp-title:hover,.cp-note:hover{background:color-mix(in srgb,var(--bg-3) 55%,transparent);
+  border-color:color-mix(in srgb,var(--line) 85%,transparent)}
+.cp-title:focus,.cp-note:focus{background:var(--bg-0);border-color:color-mix(in srgb,var(--accent) 45%,transparent);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 12%,transparent)}
+/* Use a text cursor only within editable fields; retain an arrow elsewhere on the card. */
+.cp-card{cursor:default}
+.cp-title,.cp-note{cursor:text}
+/* Separate summaries from full references and retain source editing so long history cannot crowd out execution instructions. */
+.cp-source-note{margin:10px 0;color:var(--ink-3);font-size:var(--font-min-readable,14.5px)}
+.cp-source-note>summary{cursor:pointer;padding:6px 0;color:var(--accent)}
+.cp-source-note>p{margin:4px 0 8px;line-height:1.6}
+.cp-source-note .cp-note{max-height:300px;overflow:auto}
+.cp-row{display:flex;align-items:center;gap:9px;padding:5px 0;font-size:max(var(--font-min-readable, 14.5px), 12.5px)}
+.cp-k{color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 11.5px);flex:none;width:44px;text-align:right}
+.cp-k2{width:auto;margin-left:12px}
+.cp-none{color:var(--ink-4)}
+/* Fix date-field width to avoid consuming the remaining row. */
+.cp-row input[type="date"]{flex:none;width:148px;box-sizing:border-box;
+  border:1px solid color-mix(in srgb,var(--line) 85%,transparent);
+  border-radius:8px;background:var(--bg-0);font:inherit;font-size:max(var(--font-min-readable, 14.5px), 12.5px);color:var(--ink-2);padding:4px 8px}
+/* Confirmation sections for acceptance criteria and execution method. */
+.cp-sec{margin-top:12px;padding-top:11px;border-top:1px solid color-mix(in srgb,var(--line) 55%,transparent)}
+.cp-sec-h{display:flex;align-items:baseline;gap:8px;font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-3);margin-bottom:7px}
+.cp-sec-h i{font-style:normal;font-size:max(var(--font-min-readable, 14.5px), 11px);color:var(--ink-5)}
+.cp-sec-empty{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-5);padding:2px 0 4px}
+.cp-cks{display:flex;flex-direction:column;gap:5px}
+.cp-ck{display:flex;align-items:center;gap:7px}
+.cp-ck-n{flex:none;width:17px;height:17px;border-radius:50%;font-size:max(var(--font-min-readable, 14.5px), 10.5px);line-height:17px;text-align:center;
+  color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+/* Use persistent light borders and backgrounds for editable fields; change color rather than width. */
+.cp-ck-t{flex:1 1 auto;min-width:0;box-sizing:border-box;font:inherit;font-size:max(var(--font-min-readable, 14.5px), 12.5px);color:var(--ink-2);
+  padding:5px 9px;border-radius:8px;outline:none;cursor:text;
+  background:color-mix(in srgb,var(--bg-3) 34%,transparent);
+  border:1px solid color-mix(in srgb,var(--line) 55%,transparent);
+  transition:background-color .14s ease,border-color .14s ease,box-shadow .14s ease}
+.cp-ck-t:hover{background:color-mix(in srgb,var(--bg-3) 55%,transparent);border-color:color-mix(in srgb,var(--line) 85%,transparent)}
+.cp-ck-t:focus{background:var(--bg-0);border-color:color-mix(in srgb,var(--accent) 45%,transparent);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 12%,transparent)}
+.cp-ck-x{appearance:none;border:0;background:transparent;flex:none;width:22px;height:22px;border-radius:7px;
+  color:var(--ink-5);display:flex;align-items:center;justify-content:center}
+.cp-ck-x:hover{background:color-mix(in srgb,var(--bg-3) 70%,transparent);color:var(--ink-2)}
+.cp-ck-x svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
+.cp-add{appearance:none;border:0;background:transparent;font:inherit;font-size:max(var(--font-min-readable, 14.5px), 11.5px);color:var(--ink-4);
+  display:inline-flex;align-items:center;gap:4px;padding:5px 8px;border-radius:8px;margin-top:5px}
+.cp-add:hover{background:color-mix(in srgb,var(--bg-3) 70%,transparent);color:var(--accent)}
+.cp-add svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
+/* Deemphasize explanations relative to selectable options. */
+.cp-why{font-size:max(var(--font-min-readable, 14.5px), 11.5px);color:var(--ink-5);line-height:1.6;padding:3px 0 3px 53px}
+.cp-why-ai{display:flex;align-items:flex-start;gap:5px;color:var(--ink-4);padding-top:7px}
+.cp-why-ai svg{width:13px;height:13px;flex:none;margin-top:2px;fill:none;stroke:var(--accent);stroke-width:1.5;stroke-linejoin:round}
+/* Use themed popup lists instead of native selects for consistent Windows styling. */
+.cp-sel{position:relative;min-width:0;flex:0 1 auto}
+.cp-selbtn{appearance:none;border:1px solid transparent;background:transparent;font:inherit;
+  display:flex;align-items:center;gap:7px;min-width:0;max-width:100%;padding:4px 6px 4px 9px;border-radius:9px;
+  transition:background-color .14s ease,border-color .14s ease}
+.cp-selbtn b{flex:0 1 auto;min-width:0;font-weight:500;font-size:max(var(--font-min-readable, 14.5px), 12.5px);color:var(--ink-2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Truncate explanatory subtitles before primary names. */
+.cp-selbtn i{flex:0 1 auto;min-width:0;max-width:250px;font-style:normal;font-size:max(var(--font-min-readable, 14.5px), 11.5px);color:var(--ink-5);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cp-selbtn:hover{background:color-mix(in srgb,var(--bg-3) 62%,transparent);
+  border-color:color-mix(in srgb,var(--line) 70%,transparent)}
+.cp-sel.open .cp-selbtn{background:var(--bg-0);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+.cp-selchev{width:13px;height:13px;flex:none;fill:none;stroke:var(--ink-5);stroke-width:1.8;
+  stroke-linecap:round;stroke-linejoin:round}
+.cp-selpop{box-sizing:border-box;position:absolute;left:0;top:calc(100% + 5px);z-index:8;min-width:0;width:250px;max-width:360px;
+  max-height:280px;overflow-y:auto;padding:5px;border-radius:12px;background:var(--bg-0);
+  border:1px solid color-mix(in srgb,var(--line) 85%,transparent);box-shadow:0 10px 28px rgba(0,0,0,.13)}
+.cp-selgrp{font-size:max(var(--font-min-readable, 14.5px), 10.5px);color:var(--ink-5);padding:7px 9px 3px}
+.cp-selrow{appearance:none;border:0;background:transparent;font:inherit;text-align:left;width:100%;
+  display:flex;align-items:flex-start;gap:7px;padding:6px 9px;border-radius:8px}
+.cp-selrow:hover{background:color-mix(in srgb,var(--bg-3) 70%,transparent)}
+.cp-selrow.dis{opacity:.5}
+.cp-selrow.dis:hover{background:transparent}
+/* Combine agents, self, and colleagues in one assignee list with a fixed search area. */
+.cp-selpop-who{display:flex;flex-direction:column;width:min(390px,calc(100vw - 32px));min-width:min(320px,calc(100vw - 32px));
+  max-width:calc(100vw - 32px);max-height:370px;padding:0;overflow:hidden}
+.cp-seltoolbar{padding:10px 10px 8px;background:var(--bg-0);border-bottom:1px solid color-mix(in srgb,var(--line) 70%,transparent)}
+.cp-seltoolbar-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 2px 8px}
+.cp-seltoolbar-head b{font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:600;color:var(--ink-2)}
+.cp-seltoolbar-head span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:max(var(--font-min-readable, 14.5px), 10.5px);color:var(--ink-5)}
+.cp-selsearch{display:flex;align-items:center;gap:7px;height:32px;box-sizing:border-box;padding:0 9px;border:1px solid color-mix(in srgb,var(--line) 82%,transparent);
+  border-radius:9px;background:color-mix(in srgb,var(--bg-3) 36%,transparent);color:var(--ink-5);transition:border-color .14s ease,box-shadow .14s ease,background-color .14s ease}
+.cp-selsearch:focus-within{background:var(--bg-0);border-color:color-mix(in srgb,var(--accent) 48%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 11%,transparent)}
+.cp-selsearch svg{width:14px;height:14px;flex:none;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.cp-selsearch input{min-width:0;flex:1;border:0;outline:0;background:transparent;color:var(--ink-2);font:inherit;font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.cp-selsearch input::placeholder{color:var(--ink-5)}
+.cp-selclear{appearance:none;border:0;background:transparent;color:var(--accent);font:inherit;font-size:max(var(--font-min-readable, 14.5px), 10.5px);padding:5px 2px 1px;cursor:pointer}
+.cp-selclear:hover{text-decoration:underline}
+.cp-selclear[hidden]{display:none}
+.cp-selrows{min-height:0;max-height:278px;overflow-y:auto;padding:5px}
+.cp-row>.cp-k{min-width:64px;white-space:nowrap;font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.cp-selbtn i,.cp-selpop :is(.cp-selgrp,.cp-seltag,.cp-selstate,.cp-mtxt i,.cp-seltoolbar-head span){font-size:max(var(--font-min-readable, 14.5px), 12px)}
+.cp-selgrp{display:flex;align-items:center;gap:6px;padding:8px 9px 4px;color:var(--ink-5);font-size:max(var(--font-min-readable, 14.5px), 10.5px);letter-spacing:.01em}
+.cp-selgrp:after{content:"";height:1px;flex:1;background:color-mix(in srgb,var(--line) 55%,transparent)}
+.cp-selrow{min-height:45px;box-sizing:border-box;align-items:center;gap:8px;padding:7px 9px;cursor:pointer;transition:background-color .12s ease,opacity .12s ease}
+.cp-selrow:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 55%,transparent);outline-offset:-2px}
+.cp-selrow.dis{cursor:not-allowed;opacity:.56}
+.cp-selrow .cp-mtick{margin-top:0}
+.cp-selrow .cp-mtxt{gap:3px;max-width:calc(100% - 22px)}
+.cp-selrow .cp-mtxt b{display:flex;align-items:center;gap:5px;min-width:0;line-height:1.35}
+.cp-seltag{display:inline-block;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:1px 5px;border-radius:5px;background:color-mix(in srgb,var(--bg-3) 80%,transparent);color:var(--ink-5);font-size:max(var(--font-min-readable, 14.5px), 10px);font-weight:400}
+.cp-selstate{display:inline-block;flex:none;font-style:normal;font-size:max(var(--font-min-readable, 14.5px), 10px);font-weight:400;color:var(--ink-5)}
+.cp-selstate.is-ready{color:var(--s-done)}
+.cp-selstate.is-busy{color:var(--s-doing)}
+.cp-selstate.is-off{color:var(--ink-5)}
+.cp-selnotice{display:flex;align-items:center;gap:7px;min-height:52px;padding:8px 10px;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 11.5px)}
+.cp-selnotice b{font-weight:500;color:var(--ink-3)}
+.cp-selnotice span{min-width:0;flex:1;line-height:1.45;color:var(--ink-5)}
+.cp-selnotice button{appearance:none;border:0;background:transparent;color:var(--accent);font:inherit;font-size:max(var(--font-min-readable, 14.5px), 11px);white-space:nowrap;padding:4px;cursor:pointer}
+.cp-selnotice.is-error{margin:4px;border-radius:8px;background:color-mix(in srgb,var(--s-cancel,#d85b54) 7%,transparent);color:var(--s-cancel,#d85b54)}
+.cp-selnotice.is-loading{color:var(--ink-5)}
+@media(max-width:720px){
+  .cp-selpop-who{left:auto;right:0;width:min(390px,calc(100vw - 28px));min-width:min(280px,calc(100vw - 28px));max-width:calc(100vw - 28px)}
+  .cp-seltoolbar-head span{font-size:max(var(--font-min-readable, 14.5px), 10px)}
+}
+@media(prefers-reduced-motion:reduce){.cp-selsearch,.cp-selrow{transition:none}}
+.cp-acts{display:flex;gap:8px;margin-top:12px}
+.cp-primary,.cp-ghost{appearance:none;font:inherit;font-size:max(var(--font-min-readable, 14.5px), 13px);border-radius:9px;padding:7px 16px;transition:background-color .14s ease,color .14s ease,box-shadow .14s ease}
+.cp-primary{border:0;background:var(--accent);color:#fff}
+.cp-primary:hover{opacity:.9}
+.cp-primary:disabled{opacity:.6}
+.cp-ghost{border:1px solid color-mix(in srgb,var(--line) 85%,transparent);background:transparent;color:var(--ink-3)}
+.cp-ghost:hover{background:color-mix(in srgb,var(--bg-3) 60%,transparent);color:var(--ink-2)}
+.cp-ok{border-color:color-mix(in srgb,var(--s-done) 45%,transparent)}
+.cp-okh{color:var(--s-done)}
+.cp-done-title{font-size:16px;font-weight:500;color:var(--ink)}
+.cp-warn{margin-top:8px;font-size:max(var(--font-min-readable, 14.5px), 12.5px);color:var(--s-doing)}
+.cp-parse-warning{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px}
+.cp-parse-warning>span{flex:1 1 240px;min-width:0;overflow-wrap:anywhere;line-height:1.6}
+.cp-parse-retry{flex:none;margin-left:auto;padding:5px 12px;color:var(--accent);border-color:color-mix(in srgb,var(--accent) 24%,transparent)}
+.cp-parse-retry:hover{color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
+.cp-parse-retry:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+
+/*
+ * Use a shared workspace header with a 68px title band, compact section label, clear
+ * status, and right-aligned actions.
+ */
+html[data-desk-panel="workspace"] :is(
+  .dk-head,.hb-head,.ap-head.sch-head,.sch-panel>.sch-head,.sm-head,.tp-head,.np-head,
+  .set-page-head,.detail-page-head,.add-page-head
+){
+  min-height:68px!important;box-sizing:border-box!important;display:flex!important;align-items:center!important;
+  justify-content:space-between!important;gap:12px!important;padding:12px 24px 11px!important;
+  border:0!important;border-bottom:1px solid var(--line-2)!important;
+  background:linear-gradient(90deg,var(--bg-0),color-mix(in srgb,var(--accent) 4%,var(--bg-0)))!important;
+  box-shadow:none!important;flex:0 0 auto!important;cursor:default!important;
+}
+html[data-desk-panel="workspace"] :is(.sch-h-ico,.ap-brand,.sm-title .ico,.tp-title .ico){display:none!important}
+
+html[data-desk-panel="workspace"] :is(
+  .dk-title,.hb-title,.sch-h-txt,.ap-head-copy,.np-title,.set-page-title,.detail-page-title,.add-page-title
+),
+html[data-desk-panel="workspace"] :is(.sm-head,.tp-head)>div:first-child{
+  min-width:0;display:flex!important;align-items:baseline!important;flex-direction:row!important;
+  flex-wrap:wrap!important;gap:0!important;color:var(--ink)!important;
+  font-family:var(--font-display)!important;
+  font-size:20px!important;font-weight:600!important;line-height:1.22!important;letter-spacing:-.018em!important;
+}
+html[data-desk-panel="workspace"] :is(
+  .dk-title-kicker,.sch-h-kicker,.ap-head-copy>span,.np-kicker,
+  .set-page-kicker,.detail-page-kicker,.add-page-kicker
+),
+html[data-desk-panel="workspace"] :is(.sm-head,.tp-head)>div:first-child::before{
+  flex-basis:100%;display:block;margin:0 0 2px;color:var(--accent);font-family:var(--font-latin);
+  font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:600;letter-spacing:1.45px;line-height:1;text-transform:uppercase;
+}
+html[data-desk-panel="workspace"] .sm-head>div:first-child::before{content:"APPEARANCE"}
+html[data-desk-panel="workspace"] .tp-head>div:first-child::before{content:"TEAM SPACE"}
+html[data-desk-panel="workspace"] :is(.sm-title,.tp-title){display:inline-flex!important;align-items:baseline!important;gap:0!important;
+  color:var(--ink)!important;font:inherit!important;letter-spacing:inherit!important}
+html[data-desk-panel="workspace"] :is(.sch-h-title,.ap-head-copy>b){color:var(--ink)!important;font:inherit!important;line-height:inherit!important}
+html[data-desk-panel="workspace"] :is(
+  .dk-sub,.hb-count,.sch-h-sub,.ap-head-copy>small,.np-sub,.sm-sub,.tp-sub,
+  .set-page-sub,.detail-page-sub,.add-page-sub
+){
+  margin:0 0 0 12px!important;color:var(--ink-4)!important;font-family:inherit!important;
+  font-size:max(var(--font-min-readable, 14.5px), 12px) !important;font-weight:400!important;font-style:normal!important;line-height:1.4!important;
+  letter-spacing:0!important;white-space:nowrap;
+}
+html[data-desk-panel="workspace"] :is(.sch-h-acts,.ap-head-actions,.np-acts,.hb-head-actions,.tp-acts,.dk-acts){
+  margin-left:auto!important;display:flex!important;align-items:center!important;gap:8px!important;flex:0 0 auto;
+}
+html[data-desk-panel="workspace"] :is(.sch-h-acts .btn-mini,.ap-icon-btn,.np-clear){
+  min-width:0;min-height:32px;height:32px;box-sizing:border-box;padding:0 13px;border-radius:8px;
+  font-family:inherit;font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:600;box-shadow:var(--shadow-xs);
+}
+
+/* Flatten former overlays into fixed page headers and independently scrolling content. */
+html[data-desk-panel="workspace"] #settingsPanel{padding:0!important;overflow-y:auto!important;overflow-anchor:none}
+html[data-desk-panel="workspace"] #settingsPanel>h3{display:none!important}
+html[data-desk-panel="workspace"] #settingsPanel>.set-page-head{position:sticky;top:0;z-index:3}
+html[data-desk-panel="workspace"] #settingsPanel>.set-group{width:calc(100% - 48px);max-width:720px;margin-left:auto;margin-right:auto}
+html[data-desk-panel="workspace"] #settingsPanel>.set-page-head+h3+.set-group{margin-top:24px}
+.detail-page-head{display:none}
+
+/* Present task creation as a primary page. */
+html[data-desk-panel="workspace"][data-workspace-view="add"] #addMask .modal{padding:0!important;overflow-y:auto!important}
+html[data-desk-panel="workspace"][data-workspace-view="add"] #addMask .modal>*{max-width:none;margin-left:0;margin-right:0}
+html[data-desk-panel="workspace"][data-workspace-view="add"] #addMask :is(.add-cols,.modal-actions){
+  width:calc(100% - 48px);max-width:1180px;margin-left:auto;margin-right:auto
+}
+html[data-desk-panel="workspace"][data-workspace-view="add"] #addMask .add-cols{margin-top:24px}
+html[data-desk-panel="workspace"][data-workspace-view="add"] #addMask .modal-actions{margin-bottom:28px}
+
+/*
+ * Use available width for data and settings pages with an outer safety margin; constrain
+ * reading width inside cards.
+ */
+html[data-desk-panel="workspace"]{--ws-page-gutter:clamp(12px,.8vw,18px)}
+
+html[data-desk-panel="workspace"] :is(
+  #aiDeskPanel .dk-head,#teamPanel .tp-head,
+  #schPanel>.sch-head,#skPanel>.sch-head,#capPanel>.sch-head,#mdPanel>.sch-head,#agPanel>.sch-head,#cloudEnvironmentPanel>.sch-head,#caPanel>.sch-head
+){padding-left:var(--ws-page-gutter)!important;padding-right:var(--ws-page-gutter)!important}
+
+/* Use horizontal execution-workspace space for comparable task columns. */
+html[data-desk-panel="workspace"] #aiDeskPanel .dk-body{
+  padding:16px var(--ws-page-gutter) 26px
+}
+html[data-desk-panel="workspace"] #aiDeskPanel .dk-body>*{
+  width:100%;max-width:1760px;margin-left:auto;margin-right:auto
+}
+
+/* Allow team metrics, members, and trends to use a wide comparison layout. */
+html[data-desk-panel="workspace"] #teamPanel .tp-tabs{
+  padding-left:var(--ws-page-gutter);padding-right:var(--ws-page-gutter)
+}
+html[data-desk-panel="workspace"] #teamPanel .tp-body{
+  padding:14px var(--ws-page-gutter) 22px
+}
+html[data-desk-panel="workspace"] #teamPanel .tp-body>*{
+  width:100%;max-width:1840px;margin-left:auto;margin-right:auto
+}
+html[data-desk-panel="workspace"] #teamPanel .ov-members{
+  grid-template-columns:repeat(auto-fit,minmax(220px,1fr))
+}
+
+/* Align capability pages to the shared content edge; expanded credentials and explanations retain full-width rows. */
+html[data-desk-panel="workspace"] :is(#schPanel,#skPanel,#capPanel,#mdPanel,#agPanel,#cloudEnvironmentPanel,#caPanel) .sch-body{
+  padding:16px var(--ws-page-gutter) 26px
+}
+html[data-desk-panel="workspace"] :is(#mdPanel,#agPanel,#cloudEnvironmentPanel,#caPanel).cfg-panel .sch-body>*{
+  width:100%;max-width:1680px;margin-left:auto;margin-right:auto
+}
+html[data-desk-panel="workspace"] #cloudEnvironmentPanel.cfg-panel .sch-body>.ce-content{max-width:1060px}
+html[data-desk-panel="workspace"] :is(#skPanel,#capPanel) .sch-body>*{width:100%;max-width:1680px;margin-left:auto;margin-right:auto}
+html[data-desk-panel="workspace"] #schPanel .sch-body>*{width:100%;max-width:1480px;margin-left:auto;margin-right:auto}
+
+@media(min-width:1500px){
+  html[data-desk-panel="workspace"] #aiDeskPanel .dk-work-grid{
+    grid-template-columns:repeat(3,minmax(0,1fr))
+  }
+  html[data-desk-panel="workspace"] #aiDeskPanel .dk-work-grid>.dk-work:only-child{
+    grid-column:auto;max-width:760px
+  }
+  html[data-desk-panel="workspace"] #agPanel .rn-grid{
+    grid-template-columns:repeat(auto-fill,minmax(420px,1fr))
+  }
+  html[data-desk-panel="workspace"] #agPanel .ag-rows,
+  html[data-desk-panel="workspace"] #mdPanel .md-rows{
+    grid-template-columns:repeat(auto-fill,minmax(390px,1fr))
+  }
+}
+
+@media(max-width:720px){
+  html[data-desk-panel="workspace"] :is(
+    .dk-head,.hb-head,.ap-head.sch-head,.sch-panel>.sch-head,.sm-head,.tp-head,.np-head,
+    .set-page-head,.detail-page-head,.add-page-head
+  ){padding-left:16px!important;padding-right:16px!important}
+  html[data-desk-panel="workspace"] :is(.dk-sub,.hb-count,.sch-h-sub,.ap-head-copy>small,.np-sub,.sm-sub,.tp-sub,.set-page-sub,.detail-page-sub,.add-page-sub){display:none!important}
+}
+/* Narrow the default sidebar in small windows while preserving explicitly resized widths. */
+@media(max-width:980px){.workspace-shell{grid-template-columns:var(--ws-rail-w,52px) var(--ws-side-w,188px) minmax(0,1fr)}
+  html[data-desk-panel="workspace"] :is(#aiDeskPanel,#historyBoard,#settingsPanel,#shortcutsPanel,#skinManager,#noticePanel,#teamPanel,#schPanel,#skPanel,#capPanel,#appsPanel,#mdPanel,#agPanel,#cloudEnvironmentPanel,#caPanel,#usagePanel,#sessionMemoryPanel,#composePanel,#libraryPanel){left:var(--ws-main-left,248px)!important}
+  html[data-desk-panel="workspace"] #aiDeskPanel{left:var(--ws-main-left,248px)!important}
+  html[data-desk-panel="workspace"] #addMask.workspace-hosted{left:var(--ws-main-left,248px)!important}.ws-brand small{display:none}}
+@media(prefers-reduced-motion:reduce){.ws-nav-item{transition:none}}
+
+
+
+.ws-profile-row{display:flex;flex-shrink:0;align-items:center;gap:6px}
+.ws-profile-row .ws-profile{flex:1;min-width:0;width:auto}  /* Override the full-width base rule to leave room for the update action. */
+.ws-update{flex:0 0 auto;position:relative;width:30px;height:30px;display:grid;place-items:center;
+  border:1px solid color-mix(in srgb,var(--accent) 30%,var(--line-2));border-radius:9px;
+  background:var(--accent-soft);color:var(--accent);cursor:pointer;
+  transition:background-color .14s ease,border-color .14s ease}
+.ws-update:hover{background:color-mix(in srgb,var(--accent) 16%,var(--bg-0))}
+.ws-update svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.9;
+  stroke-linecap:round;stroke-linejoin:round}
+/* Indicate an available update with a corner dot. */
+.ws-update i{position:absolute;top:-2px;right:-2px;width:7px;height:7px;border-radius:50%;
+  background:var(--accent);box-shadow:0 0 0 2px var(--bg-0)}
+.ws-update[hidden]{display:none}   /* Ensure hidden overrides display: grid. */
+.ws-update.is-busy{opacity:.7;cursor:default}
+.ws-update.is-busy i{display:none}
+.ws-update.is-busy svg{animation:wsUpdateSpin 1.1s linear infinite}
+@keyframes wsUpdateSpin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.ws-update.is-busy svg{animation:none}}
+
+/* The update action lives in the rail on conversation pages, where it uses
+   the compact circular treatment shown alongside the account avatar. */
+.ws-rail .ws-rail-update{width:36px;height:36px;border:0;border-radius:50%;background:#3b82f6;color:#fff;box-shadow:0 5px 14px -8px rgba(37,99,235,.58)}
+.ws-rail .ws-rail-update:hover{background:#2563eb;box-shadow:0 7px 16px -8px rgba(37,99,235,.68)}
+.ws-rail .ws-rail-update svg{width:18px;height:18px;stroke-width:2}
+.ws-rail .ws-rail-update i{background:#ef4444;box-shadow:0 0 0 2px color-mix(in srgb,var(--bg-2) 72%,var(--bg-0))}
+
+/* Settings uses the same two-line page-header hierarchy as the other workspace pages.
+   The header owns its vertical space, so the title cannot overlap the first card. */
+html[data-desk-panel="workspace"] #settingsPanel{
+  background:#f7f9fc!important;
+}
+html[data-desk-panel="workspace"] #settingsPanel > .set-page-head{
+  position:sticky!important;
+  top:0!important;
+  z-index:4!important;
+  display:block!important;
+  min-height:104px!important;
+  box-sizing:border-box!important;
+  padding:24px var(--settings-gutter) 18px!important;
+  background:#fff!important;
+  border-bottom:1px solid #e5ebf3!important;
+}
+html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-title{
+  display:grid!important;
+  grid-template-columns:max-content minmax(0,1fr)!important;
+  grid-template-rows:auto auto!important;
+  align-items:baseline!important;
+  column-gap:12px!important;
+  row-gap:4px!important;
+  min-width:0!important;
+  margin:0!important;
+  color:#1c2940!important;
+  font-family:var(--font-display)!important;
+  font-size:25px!important;
+  font-weight:750!important;
+  line-height:1.18!important;
+  letter-spacing:-.035em!important;
+}
+html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-kicker{
+  grid-column:1 / -1!important;
+  grid-row:1!important;
+  display:block!important;
+  margin:0!important;
+  color:#4b8df8!important;
+  font:700 14.5px/1 var(--font-latin,Arial),sans-serif!important;
+  letter-spacing:.16em!important;
+}
+html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-main-title{
+  grid-column:1!important;
+  grid-row:2!important;
+  display:block!important;
+  min-width:max-content!important;
+  margin:0!important;
+  white-space:nowrap!important;
+}
+html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-sub{
+  grid-column:2!important;
+  grid-row:2!important;
+  display:block!important;
+  min-width:0!important;
+  margin:0!important;
+  overflow:hidden!important;
+  color:#718096!important;
+  font-size:max(var(--font-min-readable, 14.5px), 13px) !important;
+  font-weight:450!important;
+  line-height:1.35!important;
+  text-overflow:ellipsis!important;
+  white-space:nowrap!important;
+}
+@media(max-width:760px){
+  html[data-desk-panel="workspace"] #settingsPanel > .set-page-head{
+    min-height:96px!important;
+    padding-left:18px!important;
+    padding-right:18px!important;
+  }
+  html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-title{
+    grid-template-columns:minmax(0,1fr)!important;
+    grid-template-rows:auto auto auto!important;
+  }
+  html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-main-title{
+    grid-column:1!important;
+    grid-row:2!important;
+  }
+  html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-sub{
+    grid-column:1!important;
+    grid-row:3!important;
+  }
+}
+@media(max-width:420px){
+  html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-sub{
+    display:none!important;
+  }
+}
+
+/* The requirement pool keeps its navigation quiet and neutral so the module
+   accent remains reserved for active states and actions. */
+html[data-desk-panel="workspace"]:is([data-workspace-view="history"],[data-workspace-view="workitems"]) :is(.ws-rail,.ws-side,.ws-stage){
+  background:#F9F9F9;
+}
+
+/*
+ * Show up to three workspace.navigation applications using standard navigation styling and
+ * shared spacing.
+ */
+.ws-apps{flex:0 0 auto}
+.ws-apps[hidden]{display:none}
+.ws-apps .ws-nav-group{margin-bottom:8px}
+
+.cp-receipt-time{display:block;font-size:12px;line-height:1.5;color:var(--ink-4);font-variant-numeric:tabular-nums}
+.cp-receipt-meta{display:flex;flex-wrap:wrap;gap:12px 28px;margin-top:14px;font-size:13px;line-height:1.5}
+.cp-receipt-meta>div{display:flex;align-items:baseline;gap:8px;min-width:0;max-width:100%}
+.cp-receipt-label{flex:none;color:var(--ink-4)}
+.cp-receipt-meta [data-user-content]{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px}
+.cp-receipt-meta .cp-receipt-time{font-size:inherit;color:var(--ink-2)}
+.cp-receipt-priority.is-critical{color:var(--danger,#e0454b)}
+.cp-receipt-priority.is-high{color:var(--s-doing,#b8860b)}
+.cp-primary[aria-busy="true"]{display:inline-flex;align-items:center;justify-content:center;gap:7px}
+.cp-primary[aria-busy="true"]::before{content:"";width:12px;height:12px;border:1.5px solid currentColor;border-right-color:transparent;border-radius:50%;animation:cp-submit-spin .8s linear infinite}
+@keyframes cp-submit-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.cp-primary[aria-busy="true"]::before{animation:none}}

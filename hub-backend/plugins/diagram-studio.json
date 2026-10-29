@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "key": "diagram-studio",
+  "name": "图表绘制工坊",
+  "version": "1.0.2",
+  "category": "office",
+  "description": "把流程、架构、时序、组织关系等内容画成可维护的图：先用 Mermaid 文本把结构说清楚，再渲染成可直接放进文档和汇报的成品图，经独立审查与人工验收后交付；图源随成品一起交付，后续改图不用重画。",
+  "author": "SoduWork",
+  "openSource": {
+    "license": "MIT",
+    "repository": "https://github.com/mermaid-js/mermaid",
+    "upstreamVersion": "11.x",
+    "adaptation": "借鉴其文本到图表的声明式绘图方法，改造成 SoduWork 的交付流程：图源与成品同交、事实来源可追、独立审查加人工验收；不虚构图中的系统、角色或数据流。"
+  },
+  "instructions": "你是架构图与流程图专家。先弄清要表达的真实结构（有哪些参与者、什么关系、什么顺序），再选合适的图类型（flowchart/sequence/class/state/ER/gantt 等）。图中的每个节点和连线都必须来自任务给定的事实，不虚构系统或数据流；不确定的部分用虚线并标注「待确认」。交付时同时给出 Mermaid 图源（deliverables/diagram.mmd）与可直接查看的成品（deliverables/diagram.html，内嵌渲染），图面要克制：同层对齐、命名一致、一图只说一件事，超过一件事就拆成多张图。",
+  "entrypoints": {"conversation": true, "task": true, "automation": false},
+  "inputs": [
+    {"key": "diagramType", "label": "想要哪类图", "type": "text", "required": false},
+    {"key": "audience", "label": "给谁看", "type": "text", "required": false}
+  ],
+  "outputs": [
+    {"key": "diagram", "label": "成品图（可直接查看）", "accept": ["deliverables/diagram.html"]},
+    {"key": "source", "label": "Mermaid 图源", "accept": ["deliverables/diagram.mmd"]}
+  ],
+  "capabilities": {"network": false, "skills": [], "mcpServers": [], "runtime": ["files"]},
+  "evaluations": [{
+    "key": "system-flow",
+    "name": "系统交互流程图",
+    "instruction": "根据给定的系统说明画出模块交互时序图，标出关键调用与失败分支。",
+    "inputs": {"diagramType": "时序图", "audience": "研发团队"},
+    "criteria": [
+      "输出 deliverables/diagram.html 与 deliverables/diagram.mmd 且两者一致",
+      "图中每个参与者与调用都能在给定材料中找到出处",
+      "不确定的部分用虚线并标注待确认，未虚构任何模块",
+      "命名一致、层次对齐、一图一事"
+    ],
+    "expectedOutputs": ["draw.diagram", "draw.source"]
+  }],
+  "workflow": {"nodes": [
+    {
+      "key": "draw", "type": "ai", "name": "结构梳理与绘图",
+      "capabilities": {"network": false, "skills": [], "mcpServers": [], "runtime": ["files"]},
+      "outputs": [
+        {"key": "diagram", "kind": "file", "label": "成品图", "path": "deliverables/diagram.html", "required": true},
+        {"key": "source", "kind": "file", "label": "Mermaid 图源", "path": "deliverables/diagram.mmd", "required": true}
+      ],
+      "config": {"prompt": "依据任务正文与插件输入绘图：先梳理真实结构，写出 deliverables/diagram.mmd（Mermaid 图源），再生成 deliverables/diagram.html（内嵌 Mermaid 渲染、双击即可在浏览器查看，不依赖外网资源加载失败时也要给出降级的图源展示）。图中每个节点与连线都要有出处，不虚构；不确定处用虚线标注「待确认」。多个主题拆成多张图放同一 HTML 内分节展示。不要向用户提问。"},
+      "retry": {"maxAttempts": 2}
+    },
+    {
+      "key": "validate", "type": "validate", "name": "成品完整性检查", "dependsOn": ["draw"],
+      "config": {"rules": [
+        {"type": "file", "name": "成品图存在且不是空壳", "nameEquals": "deliverables/diagram.html", "minBytes": 1000},
+        {"type": "file", "name": "图源存在", "nameEquals": "deliverables/diagram.mmd", "minBytes": 50}
+      ]}
+    },
+    {
+      "key": "review", "type": "ai_review", "name": "独立图面审查", "dependsOn": ["draw", "validate"],
+      "inputs": [
+        {"key": "diagram", "fromNode": "draw", "outputKey": "diagram", "label": "成品图", "required": true},
+        {"key": "source", "fromNode": "draw", "outputKey": "source", "label": "图源", "required": true}
+      ],
+      "capabilities": {"network": false, "skills": [], "mcpServers": [], "runtime": ["files"]},
+      "outputs": [{"key": "review", "kind": "decision", "label": "图面审查结论", "path": "reviews/diagram-review.md", "required": true}],
+      "config": {"prompt": "独立审查 deliverables/diagram.mmd 与 deliverables/diagram.html：图中每个节点与连线是否都能在任务材料中找到出处、图源与成品是否一致、Mermaid 语法是否有效、命名与层次是否一致。将逐条结论写入 reviews/diagram-review.md；发现虚构结构或图源与成品不一致时明确判定不通过。"}
+    },
+    {"key": "accept", "type": "human_review", "name": "业务验收", "dependsOn": ["review"], "config": {"summary": "请查看成品图是否准确可用"}},
+    {"key": "publish", "type": "publish", "name": "交付图表", "dependsOn": ["accept"], "config": {"message": "图表已通过审查与验收并交付（含图源，后续可直接改）"}}
+  ]}
+}

@@ -1,0 +1,7 @@
+.fixture-shell { max-width: 1560px; margin: 0 auto; padding: 28px 40px; }
+.fixture-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-bottom: 28px; }
+.fixture-head small { color: var(--ink-3); font-size: 12px; }
+.fixture-head h1 { margin: 8px 0; color: var(--ink); font-size: 26px; }
+.fixture-head p { margin: 0; color: var(--ink-2); font-size: 13px; }
+.fixture-head > span { padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink-3); font-size: 11px; }
+@media(max-width:600px) { .fixture-shell { padding: 20px 16px; } .fixture-head { gap: 8px; } }

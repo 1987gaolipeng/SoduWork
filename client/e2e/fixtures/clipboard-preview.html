@@ -1,0 +1,54 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SoduWork 图片复制回归测试</title>
+<link rel="stylesheet" href="../../components/panels/conversation-attachments.css">
+<style>
+:root {--bg-0:#fff;--bg-1:#f8fafc;--bg-2:#f1f5f9;--line:#e2e8f0;--ink-1:#182230;--ink-2:#344054;--ink-4:#667085;--ink-5:#98a2b3;--accent:#3884ff;--accent-soft:#edf4ff}
+body{font:14px "Microsoft YaHei",sans-serif;margin:32px;background:var(--bg-1);color:var(--ink-1)}
+#status{position:fixed;bottom:12px;left:24px;z-index:99999;background:white;padding:12px;border-radius:12px}
+</style>
+<h2>对话中的图片附件</h2>
+<section id="messages"></section>
+<section id="composer"><textarea id="input"></textarea><div id="tray"></div></section>
+<div id="status" role="status"></div>
+<script src="../../components/panels/conversation-attachments.js"></script>
+<script>
+const api = window.soduWorkAPI.conversationSession;
+const say = value => {document.querySelector('#status').textContent=value;};
+const picker = ConversationAttachments.create({
+  host:document.querySelector('#composer'),input:document.querySelector('#input'),
+  tray:document.querySelector('#tray'),say
+});
+window.renderAttachment = file => {
+  document.querySelector('#messages').innerHTML=ConversationAttachments.messageHtml([file]);
+  ConversationAttachments.hydrateMessageImages(document.querySelector('#messages'),{api,ref:'clipboard-e2e'});
+};
+document.querySelector('#messages').addEventListener('click',event=>{
+  const node=event.target.closest('[data-catt-message-image]');
+  if(node) ConversationAttachments.openMessageImage(node,{api,ref:'clipboard-e2e',say});
+});
+window.loadDraft = (data,mime,name) => {
+  picker.clear();
+  const bytes=Uint8Array.from(atob(data),c=>c.charCodeAt(0));
+  picker.add([new File([bytes],name,{type:mime})],'picker');
+};
+window.fixtureImage = mime => {
+  const canvas=document.createElement('canvas');canvas.width=180;canvas.height=100;
+  const ctx=canvas.getContext('2d');ctx.fillStyle='#307ee8';ctx.fillRect(0,0,180,100);
+  ctx.fillStyle='#fff';ctx.fillRect(20,20,50,50);ctx.fillStyle='#e89d30';ctx.fillRect(100,25,60,55);
+  return canvas.toDataURL(mime).split(',')[1];
+};
+</script>
+<h2>需求详情 · 输入材料</h2>
+<script src="../../core/requirements.js"></script>
+<script src="../../components/requirements/requirements-detail.js"></script>
+<script>
+window.petSay = say;
+window.loadTaskDetail = async file => {
+  window.SoduWorkAPI = {
+    getTask:async id=>({id, title:'Input material', status:'done', canEditRequirement:false, canViewExecution:true}),
+    listAttachments:async()=>[file], attachmentUrl:row=>row.url,
+  };
+  await RequirementsDetail.open('transferred-task');
+};
+</script>

@@ -1,0 +1,210 @@
+{
+  "schemaVersion": 1,
+  "id": "slack",
+  "name": "Slack",
+  "category": "沟通协作",
+  "description": "Slack 工作区通用连接器：身份验证、频道与成员列表、消息读取、消息发送。基于 Slack Web API，不绑定任何汇报场景，供插件与自动化复用。",
+  "officialDocs": [
+    "https://api.slack.com/web",
+    "https://api.slack.com/methods/conversations.list",
+    "https://api.slack.com/methods/users.list",
+    "https://api.slack.com/methods/chat.postMessage"
+  ],
+  "authDocs": [
+    "https://api.slack.com/authentication/token-types",
+    "https://api.slack.com/authentication/basics"
+  ],
+  "baseUrl": "https://slack.com/api",
+  "fields": [
+    {
+      "key": "BOT_TOKEN",
+      "label": "Bot User OAuth Token（xoxb- 开头）",
+      "secret": true,
+      "required": true,
+      "pattern": "^xoxb-[A-Za-z0-9-]{10,}$",
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "tokenKey": "BOT_TOKEN",
+    "header": "Authorization",
+    "prefix": "Bearer"
+  },
+  "headers": {
+    "Accept": "application/json"
+  },
+  "tools": [
+    {
+      "name": "auth_test",
+      "description": "Slack auth.test：验证令牌并返回当前身份。POST 为官方定义，无副作用。分页：无。出处：https://api.slack.com/methods/auth.test",
+      "method": "POST",
+      "path": "/auth.test",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "conversations_list",
+      "description": "列出可见频道。分页：cursor 游标（response_metadata.next_cursor），limit 1-1000 默认 100。出处：https://api.slack.com/methods/conversations.list",
+      "method": "GET",
+      "path": "/conversations.list",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "type": "string",
+            "description": "上一页 next_cursor",
+            "maxLength": 10000
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 100,
+            "description": "每页条数"
+          },
+          "types": {
+            "type": "string",
+            "enum": [
+              "public_channel",
+              "private_channel",
+              "im",
+              "mpim",
+              "public_channel,private_channel",
+              "public_channel,private_channel,im,mpim"
+            ],
+            "default": "public_channel",
+            "description": "频道类型过滤（逗号分隔）",
+            "maxLength": 10000
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "query": {
+        "cursor": "cursor",
+        "limit": "limit",
+        "types": "types"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "users_list",
+      "description": "列出工作区成员。分页：cursor 游标，limit 1-1000 默认 100。出处：https://api.slack.com/methods/users.list",
+      "method": "GET",
+      "path": "/users.list",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "type": "string",
+            "description": "上一页 next_cursor",
+            "maxLength": 10000
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 100,
+            "description": "每页条数"
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "query": {
+        "cursor": "cursor",
+        "limit": "limit"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "conversations_history",
+      "description": "读取频道历史消息。分页：cursor + limit（1-1000 默认 100）。出处：https://api.slack.com/methods/conversations.history",
+      "method": "GET",
+      "path": "/conversations.history",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "pattern": "^[CGD][A-Z0-9]{5,}$",
+            "description": "频道 ID",
+            "maxLength": 10000
+          },
+          "cursor": {
+            "type": "string",
+            "description": "上一页 next_cursor",
+            "maxLength": 10000
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 100,
+            "description": "每页条数"
+          }
+        },
+        "required": [
+          "channel"
+        ],
+        "maxProperties": 50
+      },
+      "query": {
+        "channel": "channel",
+        "cursor": "cursor",
+        "limit": "limit"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "post_message",
+      "description": "向频道发送消息（chat.postMessage）。写入操作：运行前必须获得用户明确授权。出处：https://api.slack.com/methods/chat.postMessage",
+      "method": "POST",
+      "path": "/chat.postMessage",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "pattern": "^[CGD][A-Z0-9]{5,}$",
+            "description": "频道 ID",
+            "maxLength": 10000
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000,
+            "description": "消息文本"
+          }
+        },
+        "required": [
+          "channel",
+          "text"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "channel": "$channel",
+        "text": "$text"
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测；token 有效性取决于工作区管理员安装与授权。",
+    "未邀请机器人的私频道不会出现在 conversations.list/history 结果中。",
+    "post_message 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。",
+    "写入与读取方法需要不同的 bot scopes（channels:history / chat:write 等），按 App 安装页勾选。"
+  ]
+}

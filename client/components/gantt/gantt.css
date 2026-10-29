@@ -1,0 +1,79 @@
+/* ===== Monthly Gantt chart (components/gantt/gantt.css) ===== */
+
+
+
+
+
+
+.gv{display:flex;flex-direction:column;min-height:0}
+.gv-tools{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:2px 2px 10px;font-size:var(--text-xs);color:var(--ink-3)}
+.gv-lg{display:inline-flex;align-items:center;gap:5px;font-weight:600}
+.gv-dot{width:10px;height:10px;border-radius:3px;display:inline-block}
+.gv-dot.gv-run{background:#4f6ef5}
+.gv-dot.gv-done{background:#37c26b}
+.gv-dot.gv-over{background:#f04a4a}
+.gv-dot.gv-td{width:3px;height:12px;border-radius:1px;background:var(--s-doing)}
+.gv-dot.gv-actual{height:5px;border-radius:2px;background:repeating-linear-gradient(90deg,#8a97ad 0 3px,transparent 3px 5px)}
+.gv-dot.gv-we{background:rgba(240,74,74,.12);border:1px solid rgba(240,74,74,.25)}
+.gv-nav{display:inline-flex;align-items:center;gap:6px;margin-left:auto;font-size:var(--text-sm);color:var(--ink-2)}
+.gv-nbtn{border:1px solid var(--line);background:var(--bg-1);border-radius:var(--r-sm);width:22px;height:22px;line-height:1;
+  color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 13px);font-family:inherit}
+.gv-nbtn:hover{border-color:var(--accent);color:var(--accent)}
+.gv-q{width:150px;padding:5px 9px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--bg-1);
+  color:var(--ink);font-size:var(--text-xs);font-family:inherit;outline:none}
+.gv-q:focus{border-color:var(--accent)}
+.gv-od{display:inline-flex;align-items:center;gap:5px;user-select:none}
+.gv-od input{accent-color:var(--accent);}
+.gv-count{color:var(--ink-4)}
+.gv-body{flex:1;min-height:0;overflow:auto;border:1px solid var(--line-2);border-radius:var(--r-md);background:var(--bg-0);scrollbar-width:thin}
+.gv-row{display:flex;border-bottom:1px solid var(--line-2)}
+.gv-row:last-child{border-bottom:none}
+.gv-row:nth-child(even) .gv-lane{background:var(--bg-1)}
+.gv-rowlabel{
+  flex:0 0 118px;min-width:0;padding:7px 10px;border-right:1px solid var(--line-2);
+  display:flex;flex-direction:column;justify-content:center;gap:1px;
+}
+.gv-rowlabel b{font-size:var(--text-sm);font-weight:700;color:var(--ink-2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gv-rowlabel span{font-size:max(var(--font-min-readable, 14.5px), 11px);color:var(--ink-5);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gv-lane{position:relative;flex:1;min-width:420px}
+.gv-cells{position:absolute;inset:0;display:flex;pointer-events:none}
+.gv-cell{flex:1;border-right:1px solid var(--line-2)}
+.gv-cell:last-child{border-right:none}
+.gv-cell.we{background:rgba(240,74,74,.055)}
+.gv-cell.today{box-shadow:inset 2px 0 0 var(--s-doing)}
+/* Column headers. */
+.gv-headrow{position:sticky;top:0;z-index:2;background:var(--bg-0)}
+.gv-headrow .gv-lane{min-height:30px;background:var(--bg-0)!important}
+.gv-headlabel{justify-content:center;font-size:var(--text-xs);color:var(--ink-4)}
+.gv-daynum{display:flex;align-items:center;justify-content:center;font-size:max(var(--font-min-readable, 14.5px), 10.5px);color:var(--ink-4);
+  font-variant-numeric:tabular-nums}
+.gv-daynum.we{color:rgba(240,74,74,.55)}
+.gv-daynum.today{color:var(--s-doing);font-weight:800;box-shadow:inset 2px 0 0 var(--s-doing);background:rgba(245,165,36,.08)}
+/* Task bars. */
+.gv-bar{
+  position:absolute;height:22px;line-height:22px;border-radius:6px;
+  padding:0 8px;box-sizing:border-box;
+  font-size:max(var(--font-min-readable, 14.5px), 11.5px);font-weight:600;color:#fff;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  box-shadow:0 1px 3px rgba(20,40,80,.18);
+  transition:transform .1s ease,box-shadow .12s ease;min-width:22px;
+}
+.gv-bar:hover{box-shadow:0 3px 10px rgba(20,40,80,.32);z-index:3}
+.gv-bar.gv-run{background:#4f6ef5}
+.gv-bar.gv-done{background:#37c26b}
+.gv-bar.gv-over{background:#f04a4a}
+/* Recurring tasks use a full-month dashed rhythm bar rather than a solid duration bar. */
+.gv-bar.gv-routine{
+  background:repeating-linear-gradient(90deg,rgba(124,108,240,.85) 0 10px,rgba(124,108,240,.42) 10px 20px);
+  color:#fff;box-shadow:none;border:1px dashed rgba(124,108,240,.85);
+}
+/* Show actual duration as a darker translucent strip beneath the planned bar to expose schedule variance. */
+.gv-act{position:absolute;height:7px;border-radius:4px;min-width:7px;
+  box-shadow:0 1px 2px rgba(20,40,80,.2);opacity:.92}
+.gv-act-run{background:#2c47c9}
+.gv-act-done{background:#1f9c50}
+.gv-act-over{background:#c22f2f}
+.gv-act-solo{height:22px;line-height:22px;padding:0 8px;box-sizing:border-box;
+  font-size:max(var(--font-min-readable, 14.5px), 11.5px);font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gv-empty{padding:44px 20px;text-align:center;font-size:var(--text-sm);color:var(--ink-5)}

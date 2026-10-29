@@ -1,0 +1,160 @@
+{
+  "schemaVersion": 1,
+  "id": "discord",
+  "name": "Discord",
+  "category": "沟通协作",
+  "description": "Discord 通用连接器（Bot Token）：应用身份、服务器频道列表、频道消息读取与发送。基于 Discord REST API v10，不绑定任何汇报场景。",
+  "officialDocs": [
+    "https://discord.com/developers/docs/reference",
+    "https://discord.com/developers/docs/resources/user#get-current-user",
+    "https://discord.com/developers/docs/resources/guild#list-guild-channels",
+    "https://discord.com/developers/docs/resources/channel#get-channel-messages",
+    "https://discord.com/developers/docs/resources/channel#create-message"
+  ],
+  "authDocs": [
+    "https://discord.com/developers/docs/topics/oauth2#bots",
+    "https://discord.com/developers/docs/reference#authentication"
+  ],
+  "baseUrl": "https://discord.com/api/v10",
+  "fields": [
+    {
+      "key": "BOT_TOKEN",
+      "label": "Bot Token",
+      "secret": true,
+      "required": true,
+      "pattern": "^\\S{10,4096}$",
+      "example": ""
+    },
+    {
+      "key": "GUILD_ID",
+      "label": "目标服务器（Guild）ID，可选，用于频道列表",
+      "secret": false,
+      "required": false,
+      "pattern": "^[0-9]{5,25}$",
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "header",
+    "tokenKey": "BOT_TOKEN",
+    "header": "Authorization",
+    "prefix": "Bot "
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "get_current_user",
+      "description": "获取当前 Bot 用户身份。无分页。出处：https://discord.com/developers/docs/resources/user#get-current-user",
+      "method": "GET",
+      "path": "/users/@me",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_guild_channels",
+      "description": "列出 GUILD_ID 指定服务器的全部频道。无分页（官方一次返回全量）。出处：https://discord.com/developers/docs/resources/guild#list-guild-channels",
+      "method": "GET",
+      "path": "/guilds/{GUILD_ID}/channels",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_channel_messages",
+      "description": "读取频道消息。分页：limit（1-100 默认 50）+ before/after 消息 ID 翻页；读取正文需开启 Message Content Intent。出处：https://discord.com/developers/docs/resources/channel#get-channel-messages",
+      "method": "GET",
+      "path": "/channels/{channel_id}/messages",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel_id": {
+            "type": "string",
+            "pattern": "^[0-9]{5,25}$",
+            "description": "频道 ID",
+            "maxLength": 10000
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50,
+            "description": "取回条数"
+          },
+          "before": {
+            "type": "string",
+            "pattern": "^[0-9]{5,25}$",
+            "description": "取此消息 ID 之前",
+            "maxLength": 10000
+          },
+          "after": {
+            "type": "string",
+            "pattern": "^[0-9]{5,25}$",
+            "description": "取此消息 ID 之后",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "channel_id"
+        ],
+        "maxProperties": 50
+      },
+      "query": {
+        "limit": "limit",
+        "before": "before",
+        "after": "after"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_message",
+      "description": "向频道发送消息（POST /channels/{id}/messages，content 上限 2000 字符）。写入操作：运行前必须获得用户明确授权。出处：https://discord.com/developers/docs/resources/channel#create-message",
+      "method": "POST",
+      "path": "/channels/{channel_id}/messages",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channel_id": {
+            "type": "string",
+            "pattern": "^[0-9]{5,25}$",
+            "description": "频道 ID",
+            "maxLength": 10000
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "description": "消息内容"
+          }
+        },
+        "required": [
+          "channel_id",
+          "content"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "content": "$content"
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测；Bot 必须已通过 OAuth2 scopes 含 bot 邀请进入服务器。",
+    "鉴权头为 Authorization: Bot <token>（Bot 之后必须恰好一个空格再接 token），与 Bearer 不同。",
+    "读取消息正文需在 Developer Portal 开启 Message Content Intent，否则 content 为空。",
+    "create_message 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

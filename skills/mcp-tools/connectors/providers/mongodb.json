@@ -1,0 +1,198 @@
+{
+  "schemaVersion": 1,
+  "id": "mongodb",
+  "name": "MongoDB",
+  "category": "数据库",
+  "description": "MongoDB 通用连接器：ping 连接检测、listCollections 集合列表、find 固定查询（操作符白名单，≤100 条）。禁止任意管道、任意代码与危险操作符。",
+  "runtimeKind": "mongodb",
+  "officialDocs": [
+    "https://www.mongodb.com/docs/manual/reference/command/ping/",
+    "https://www.mongodb.com/docs/manual/reference/command/listCollections/",
+    "https://www.mongodb.com/docs/manual/reference/command/find/",
+    "https://www.mongodb.com/docs/manual/core/security-tls/",
+    "https://www.mongodb.com/docs/manual/reference/connection-string/"
+  ],
+  "authDocs": [
+    "https://www.mongodb.com/docs/manual/core/authentication/"
+  ],
+  "baseUrl": "http://mongodb-runtime.local",
+  "fields": [
+    {
+      "key": "MONGO_HOST",
+      "label": "MongoDB 主机（远程主机强制 TLS；localhost/127.0.0.1/::1 可明文）",
+      "secret": false,
+      "required": true,
+      "pattern": "^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,252}|::1)$",
+      "example": ""
+    },
+    {
+      "key": "MONGO_PORT",
+      "label": "端口",
+      "secret": false,
+      "required": false,
+      "pattern": "^[0-9]{1,5}$",
+      "default": "27017",
+      "example": ""
+    },
+    {
+      "key": "MONGO_DATABASE",
+      "label": "数据库名",
+      "secret": false,
+      "required": true,
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$",
+      "example": ""
+    },
+    {
+      "key": "MONGO_USER",
+      "label": "用户名（建议只读账号）",
+      "secret": false,
+      "required": false,
+      "pattern": "^\\S{1,512}$",
+      "example": ""
+    },
+    {
+      "key": "MONGO_PASSWORD",
+      "label": "密码",
+      "secret": true,
+      "required": false,
+      "example": ""
+    },
+    {
+      "key": "MONGO_AUTH_DB",
+      "label": "鉴权数据库",
+      "secret": false,
+      "required": false,
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$",
+      "default": "admin",
+      "example": ""
+    },
+    {
+      "key": "TLS_CA_PEM",
+      "label": "TLS CA PEM（可选，换行写作\\n；远程连接始终校验证书）",
+      "secret": false,
+      "required": false,
+      "example": ""
+    },
+    {
+      "key": "MONGO_SRV",
+      "label": "使用 DNS SRV（Atlas 等集群）",
+      "secret": false,
+      "required": false,
+      "pattern": "^(true|false)$",
+      "default": "false",
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "none"
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "ping",
+      "description": "连接检测（ping 命令，返回 ok 状态）。无分页。出处：https://www.mongodb.com/docs/manual/reference/command/ping/",
+      "method": "GET",
+      "path": "/ping",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_collections",
+      "description": "列出最多 limit 个集合名，并用 has_more 提示是否截断；没有可续用游标，不承诺完整目录。支持 name_prefix 缩小范围；关闭服务器游标。",
+      "method": "GET",
+      "path": "/collections",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50,
+            "description": "每页集合数"
+          },
+          "name_prefix": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "可选集合名前缀"
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "find_documents",
+      "description": "固定 find 查询，仅允许字段比较和布尔操作符，不执行代码、聚合或任意命令；limit 1-100，skip 0-100000，固定执行时限。无排序时默认按 _id 排序，数据变化时不保证快照。",
+      "method": "GET",
+      "path": "/collections/{collection}/find",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "collection": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$",
+            "description": "集合名",
+            "maxLength": 256
+          },
+          "filter": {
+            "type": "object",
+            "additionalProperties": true,
+            "maxProperties": 50,
+            "description": "查询过滤条件（操作符白名单，值限 JSON 基本类型与一层对象/数组）"
+          },
+          "sort": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_.]{0,62}$|^(1|-1)$"
+              }
+            },
+            "description": "排序字段与方向，如 [[\"created_at\",\"-1\"]]"
+          },
+          "skip": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000,
+            "default": 0,
+            "description": "跳过条数（深翻页建议改用范围条件）"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "description": "读取条数上限"
+          }
+        },
+        "required": [
+          "collection"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    }
+  ],
+  "limitations": [
+    "只提供固定 ping/listCollections/find 三个只读操作；不提供 aggregate 管道、runCommand、mapReduce、eval 与任意代码执行。",
+    "find 的 filter 使用操作符白名单，$where/$function/$accumulator/$mapReduce 等代码类与 $out/$merge 等写类操作符一律拒绝；未知操作符直接拒绝而非透传。",
+    "远程主机强制 TLS 且始终校验证书（Atlas 等云服务默认满足；自签名请提供 CA PEM）；localhost/127.0.0.1/::1 允许明文本机调试。",
+    "最多 100 条、结果不超过 2 MB；需 Runner 内置 pymongo 驱动（新依赖，版本与许可证见交付报告）。",
+    "list_collections 为有界首批读取，has_more 不提供跨调用游标；使用 name_prefix 缩小范围。find 支持 skip/limit 与固定排序，非快照。",
+    "使用 pymongo 4.18.3（Apache-2.0）；TLS CA 按驱动要求写入临时证书文件，连接关闭后清理。"
+  ]
+}

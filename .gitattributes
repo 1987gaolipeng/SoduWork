@@ -1,0 +1,12 @@
+# Use LF for shell scripts developed on Windows and executed on Linux.
+# CRLF shell scripts can fail on Linux with a carriage-return command-not-found error.
+# The reported line can obscure the actual line-ending problem.
+# hub-backend/installers/runner-install.sh is distributed to Linux hosts.
+*.sh text eol=lf
+*.command text eol=lf
+*.cmd text eol=crlf
+ops/soduworkctl text eol=lf
+*.service text eol=lf
+*.timer text eol=lf
+# Preserve the exact pinned upstream license, including its final blank line.
+third-party/licenses/gradle-2.10-LICENSE.txt whitespace=-blank-at-eof

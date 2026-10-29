@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="azure" data-desk-panel="workspace"><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../theme/variables.css">
+<link rel="stylesheet" href="../../components/panels/panels-base.css">
+<link rel="stylesheet" href="../../components/panels/panels-schedules.css">
+<link rel="stylesheet" href="../../components/workspace/workspace-shell.css">
+<link rel="stylesheet" href="../../theme/workspace-experience.css">
+<link rel="stylesheet" href="../../theme/workspace-page-heads.css">
+<link rel="stylesheet" href="../../components/panels/automation-surface.css">
+<style>body{margin:0;font:14px/1.5 var(--font-ui)}html[data-desk-panel="workspace"] #schPanel{position:fixed!important;inset:16px!important;transform:none!important;width:auto!important;height:auto!important;max-height:none!important}</style>
+</head><body><script>
+window.errors=[];window.calls={created:[],updated:[],preflight:[]};
+addEventListener('error',e=>errors.push(e.message));addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
+window.esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function expandForOverlay(){}function shrinkFromOverlay(){}function makeDraggable(){}
+function petSay(s){window.notice=s;}
+window.originalInstant='2099-10-15T04:30:15.123456+00:00';
+window.rows=['pending','consumed'].map((id,i)=>({id,title:i?'已触发的一次性工作':'固定日期完成一次工作',
+ note:'隔离页面验收，保留工作说明与执行记录。',every:'once',runAt:originalInstant,onceFired:!!i,
+ enabled:!i,timeZone:'America/New_York',assigneeId:'local:pi',atHour:9,atMinute:0,weekday:1,
+ repoId:'',flow:false,pluginBindingId:'',personalPluginKey:'',pluginInputs:{},requiredCapabilities:[],
+ retryLimit:2,retryDelayMinutes:5,nextRunAt:i?null:originalInstant,lastRunAt:'2020-01-01T00:00:00Z'}));
+window.SoduWorkAPI={listSchedules:async()=>rows,
+ taskExecutionOptions:async()=>({substrates:[{key:'local:pi',name:'Pi',available:true,onlineSeats:1}]}),
+ listAIAgents:async()=>({agents:[]}),listRepos:async()=>[],listScheduleTemplates:async()=>[],
+ pluginCatalog:async()=>({items:[]}),myModels:async()=>({usable:[]}),
+ preflightSchedule:async body=>{calls.preflight.push(body);return{state:'ready',message:'执行条件已就绪',checks:[]};},
+ createSchedule:async body=>{calls.created.push(body);rows.push({...body,id:'created',onceFired:false,nextRunAt:body.runAt});},
+ updateSchedule:async(id,body)=>{calls.updated.push({id,body});rows=rows.map(row=>row.id===id?
+  {...row,...body,onceFired:body.runAt===row.runAt&&row.onceFired,nextRunAt:body.every==='once'?body.runAt:null}:row);},
+};
+</script>
+<script src="../../components/panels/schedule-timing.js"></script>
+<script src="../../components/panels/panels-schedules-methods.js"></script>
+<script src="../../components/panels/panels-schedules-cards.js"></script>
+<script src="../../components/panels/panels-schedules.js"></script>
+<script src="../../components/panels/panels-schedules-editor.js"></script>
+<script src="../../components/panels/panels-schedules-runs.js"></script>
+<script>openSchedulePanel();</script></body></html>

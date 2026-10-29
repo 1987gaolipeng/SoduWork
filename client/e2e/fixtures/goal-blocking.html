@@ -1,0 +1,19 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8">
+<title>目标受阻恢复回归</title>
+<link rel="stylesheet" href="/theme.css"><link rel="stylesheet" href="/goal.css">
+<style>body{margin:0;background:var(--bg-1,#f7f8fa);font:14px "Microsoft YaHei",sans-serif;color:var(--ink-1,#293241)}main{max-width:850px;margin:40px auto;padding:24px}h1{font-size:22px}#conversation{height:380px}#composer{margin-top:8px;padding:22px;border:1px solid var(--line,#ddd);border-radius:18px;background:var(--bg-0,#fff);height:90px}#status{white-space:pre-wrap;line-height:1.8}a{color:var(--accent,#3478f6)}</style>
+<main><h1>目标模式 · 验收与继续执行</h1><p>隔离测试工程：网页接口与 PDF 交付</p><section id="conversation"><p id="status"></p><a id="output" href="/site" hidden>打开已验证的网站</a></section><section id="goal"></section><div id="composer" contenteditable="true" role="textbox" aria-label="普通对话输入">可以继续普通对话，输入区不受目标状态影响。</div></main>
+<script src="/goal.js"></script><script>
+window.errors=[];window.addEventListener('error',e=>errors.push(e.message));
+const host=document.querySelector('#goal');host.innerHTML=WorkIntent.rail('test');
+window.paint=async function(){
+ const res=await fetch('/state');const h=await res.json();window.current=h;
+ document.querySelector('#status').textContent=h.reason||'验收已通过，网站入口可以打开。';
+ document.querySelector('#output').hidden=h.state!=='completed';
+ WorkIntent.showGoal(host,{mode:'goal',goal:'完成网页接口与报告'},'test',{
+  phases:h.phases,phase:h.phase,failed:h.state==='blocked',ready:h.state==='completed',
+  busy:h.state==='running',canContinue:h.state==='blocked',detail:h.reason,
+  onResume:async()=>{await fetch('/continue',{method:'POST'});await paint();}
+ });
+};paint();
+</script></html>

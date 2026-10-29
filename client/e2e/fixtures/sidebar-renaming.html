@@ -1,0 +1,30 @@
+<!doctype html>
+<html data-desk-panel="workspace" data-skin="flat"><head><meta charset="utf-8">
+<title>Sidebar regression — isolated profile</title>
+<link rel="stylesheet" href="../../theme/variables.css">
+<link rel="stylesheet" href="../../components/workspace/workspace-shell.css">
+<link rel="stylesheet" href="../../components/panels/panels-chat.css">
+<style>
+body{margin:0;font:14px/1.5 var(--font-ui,"Segoe UI",sans-serif)}
+#wsCanvas{background:var(--bg-0)}
+.fixture-copy{padding:32px;color:var(--ink-3)}
+</style></head><body>
+<script>window.errors=[];addEventListener('error',event=>errors.push(event.message));
+window.opens=[];window.petSay=message=>window.lastNotice=message;
+window.WorkspaceHost={open:(key,options)=>{opens.push({key,options});WorkspaceShell.setActive(key)}};
+window.SoduWorkAPI={hubBase:()=> 'isolated-sidebar-test'};</script>
+<script src="../../components/panels/panels-chat-chrome.js"></script>
+<script src="../../components/workspace/workspace-chat-history.js"></script>
+<script src="../../components/workspace/workspace-chat-list.js"></script>
+<script src="../../components/workspace/workspace-shell.js"></script>
+<script>
+WorkspaceShell.mount();WorkspaceShell.setActive('create');
+document.querySelector('#wsCanvas').innerHTML=ChatChrome.header()+'<div class="fixture-copy">会话名称与侧栏交互 · 隔离回归测试</div>';
+ChatChrome.bind(document.querySelector('#wsCanvas'),()=>({ref:'fixture-live'}));
+ChatChrome.identify('chat-0');ChatChrome.resume('整理本周项目进展');
+WorkspaceShell.setTasks(Array.from({length:8},(_,i)=>({id:'task-'+i,title:'行动项 '+(i+1),status:'todo'})));
+window.row=id=>[...document.querySelectorAll('.ws-chat-row')].find(el=>el.querySelector('.ws-chat').dataset.chatId===id);
+window.chatName=id=>row(id)?.querySelector('.ws-chat-title').textContent;
+window.startRename=id=>{ChatChrome.identify(id);ChatChrome.resume(chatName(id));document.querySelector('[data-chat-menu]').click();document.querySelector('[data-chat-rename]').click();};
+window.typeName=value=>{const input=document.querySelector('.nchat-rename-input');input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));};
+</script></body></html>

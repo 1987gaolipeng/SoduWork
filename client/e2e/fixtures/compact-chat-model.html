@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="azure"><head><meta charset="utf-8">
+<title>会话模型选择 · 隔离回归</title>
+<link rel="stylesheet" href="../../theme/variables.css">
+<link rel="stylesheet" href="../../components/panels/work-composer.css">
+<link rel="stylesheet" href="../../components/panels/panels-chat.css">
+<link rel="stylesheet" href="../../components/panels/panels-compose-model-picker.css">
+<style>
+*{box-sizing:border-box}body{margin:0;background:var(--bg-1);color:var(--ink);font:15px var(--font-ui)}
+main{height:100vh;display:flex;flex-direction:column;padding:20px 12px;max-width:900px;margin:auto}
+.fixture-copy{flex:1;padding:20px;font-size:14px;line-height:1.7;color:var(--ink-3)}
+.nbox{align-self:center}#nchatInput{height:100px}
+</style></head><body><main>
+<div class="fixture-copy">当前方案已经整理完成，可以继续补充细节。</div>
+<div id="nchatQueue"></div>
+<div id="old"><button id="nchatMeta" class="nmeta" title="上下文用量" aria-label="查看上下文用量"></button></div>
+</main>
+<script src="../../components/panels/work-composer.js"></script>
+<script src="../../components/panels/chat-session-controls.js"></script>
+<script src="../../components/panels/panels-compose-model-picker.js"></script>
+<script src="../../components/panels/chat-runtime-picker.js"></script>
+<script src="../../components/panels/chat-composer-controls.js"></script>
+<script src="../../components/panels/chat-context-meter.js"></script>
+<script src="../../components/panels/chat-scroll-follow.js"></script>
+<script src="../../components/panels/chat-markdown.js"></script>
+<script src="../../components/panels/chat-acceptance-results.js"></script>
+<script src="../../components/panels/chat-message-renderer.js"></script>
+<script>
+window.errors=[];addEventListener('error',e=>errors.push(e.message));addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
+window.models=[{name:'long-model',label:'fixture-coding-large-model'},{name:'vision',label:'GLM 5.3 Flash'},{name:'short',label:'Pi'}];
+window.state={ref:'isolated-chat',adapterId:'pi',selection:{name:models[0].name,model:models[0]}};
+window.selected=[];window.sent=[];window.notices=[];
+window.SoduWorkAPI={myModels:async()=>({usable:models})};
+window.fixtureRuntimes=['pi','opencode','qwen','codex-harness','dsh','codex','claude'].map(id=>({
+  id,modelMode:['codex','claude'].includes(id)?'account':'managed'
+}));
+window.soduWorkAPI={conversationSession:{runtimes:async()=>({ok:true,runtimes:fixtureRuntimes}),selectModel:async(ref,name)=>{selected.push({ref,name});return{ok:true,selection:{name,model:models.find(r=>r.name===name)}}}}};
+WorkComposer.upgradeChat(document.querySelector('#old'));
+window.contextState={_snap:{contextUsage:{input:28000}},_model:{label:'fixture-coding-large-model',contextWindow:100000,contextWindowKnown:true},esc:s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))};
+window.contextRenderer=ChatMessageRenderer.create(contextState);
+window.renderContext=()=>{document.querySelector('#nchatMeta').innerHTML=contextRenderer._ctxHtml()};
+renderContext();
+document.querySelector('#nchatWdName').textContent='项目工作区';
+window.controls=ChatComposerControls.create(document.querySelector('main'),{state:()=>state,say:s=>notices.push(s),modelSelected:s=>{state.selection=s},thinkingChanged:s=>{state.thinking=s},runtimeSelected:s=>{Object.assign(state,s.snapshot);controls.render()},renderQueue(){},updateQueue(){}});
+controls.render();
+document.querySelector('#nchatSend').addEventListener('click',()=>sent.push(document.querySelector('#nchatInput').value));
+window.fixtureReady=true;
+</script></body></html>

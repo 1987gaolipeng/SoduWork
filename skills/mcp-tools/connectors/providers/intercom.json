@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "id": "intercom",
+  "name": "Intercom",
+  "category": "客户服务",
+  "description": "Intercom 通用连接器：当前管理员、联系人列表、对话列表、创建联系人。基于 Intercom REST API，Access Token 鉴权，不绑定任何汇报场景。",
+  "officialDocs": [
+    "https://developers.intercom.com/docs/references/rest-api/api.intercom.io/Users/",
+    "https://developers.intercom.com/docs/references/rest-api/api.intercom.io/Conversations/",
+    "https://developers.intercom.com/docs/references/rest-api/api.intercom.io/Administrators/"
+  ],
+  "authDocs": [
+    "https://developers.intercom.com/docs/build-an-integration/learn-more/authentication/"
+  ],
+  "baseUrl": "https://api.intercom.io",
+  "fields": [
+    {
+      "key": "INTERCOM_TOKEN",
+      "label": "Access Token",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "tokenKey": "INTERCOM_TOKEN",
+    "header": "Authorization",
+    "prefix": "Bearer"
+  },
+  "headers": {
+    "Accept": "application/json"
+  },
+  "tools": [
+    {
+      "name": "get_current_admin",
+      "description": "获取当前授权管理员身份。无分页。出处：https://developers.intercom.com/docs/references/rest-api/api.intercom.io/Administrators/#getcurrentadmin",
+      "method": "GET",
+      "path": "/me",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_contacts",
+      "description": "列出联系人。分页：per_page（1-150 默认 50）+ starting_after 游标（响应 pages.next.starting_after）。出处：https://developers.intercom.com/docs/references/rest-api/api.intercom.io/Users/#listcontacts",
+      "method": "GET",
+      "path": "/contacts",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "per_page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 150,
+            "default": 50,
+            "description": "每页条数"
+          },
+          "starting_after": {
+            "type": "string",
+            "description": "上一页 pages.next.starting_after",
+            "maxLength": 10000
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "query": {
+        "per_page": "per_page",
+        "starting_after": "starting_after"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_conversations",
+      "description": "列出对话。分页：per_page + starting_after 游标。出处：https://developers.intercom.com/docs/references/rest-api/api.intercom.io/Conversations/#listconversations",
+      "method": "GET",
+      "path": "/conversations",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "per_page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 150,
+            "default": 50,
+            "description": "每页条数"
+          },
+          "starting_after": {
+            "type": "string",
+            "description": "上一页游标",
+            "maxLength": 10000
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "query": {
+        "per_page": "per_page",
+        "starting_after": "starting_after"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "create_contact",
+      "description": "创建联系人（role 固定 user，email 必填）。写入操作：运行前必须获得用户明确授权。出处：https://developers.intercom.com/docs/references/rest-api/api.intercom.io/Users/#createcontact",
+      "method": "POST",
+      "path": "/contacts",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "email": {
+            "type": "string",
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[a-z]{2,}$",
+            "description": "联系人邮箱",
+            "maxLength": 10000
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "description": "联系人姓名"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "maxProperties": 50
+      },
+      "body": {
+        "role": "user",
+        "email": "$email",
+        "name": "$name"
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "鉴权为 Bearer access token（Intercom 后台 App 页生成）；OAuth 授权流当前客户端不支持，待宿主适配。",
+    "分页游标在响应体 pages.next.starting_after，末页 pages.next 为 null。",
+    "create_contact 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

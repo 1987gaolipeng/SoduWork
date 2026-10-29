@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "id": "canva",
+  "name": "Canva",
+  "category": "设计",
+  "description": "Canva Connect 通用连接器：当前用户、设计列表、导出任务状态查询。基于 Canva Connect API v1，OAuth access token 由用户安全填入。",
+  "officialDocs": [
+    "https://www.canva.dev/docs/connect/",
+    "https://www.canva.dev/docs/connect/api-reference/users/get-user-profile/",
+    "https://www.canva.dev/docs/connect/api-reference/designs/list-designs/",
+    "https://www.canva.dev/docs/connect/api-reference/assets/get-asset-upload-job/"
+  ],
+  "authDocs": [
+    "https://www.canva.dev/docs/connect/authentication/"
+  ],
+  "baseUrl": "https://api.canva.com/rest/v1",
+  "fields": [
+    {
+      "key": "CANVA_ACCESS_TOKEN",
+      "label": "Canva Connect OAuth 访问令牌",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "tokenKey": "CANVA_ACCESS_TOKEN",
+    "header": "Authorization",
+    "prefix": "Bearer"
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "get_user_profile",
+      "description": "获取当前用户资料（GET /users/me/profile）。无分页。出处：https://www.canva.dev/docs/connect/api-reference/users/get-user-profile/",
+      "method": "GET",
+      "path": "/users/me/profile",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "list_designs",
+      "description": "列出用户设计。分页：continuation 游标 + limit（1-100 默认 25）。出处：https://www.canva.dev/docs/connect/api-reference/designs/list-designs/",
+      "method": "GET",
+      "path": "/designs",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "按标题过滤",
+            "maxLength": 10000
+          },
+          "continuation": {
+            "type": "string",
+            "description": "上一页 continuation 游标",
+            "maxLength": 10000
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 25,
+            "description": "每页条数"
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "query": {
+        "query": "query",
+        "continuation": "continuation",
+        "limit": "limit"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_design",
+      "description": "获取单个设计详情（GET /designs/{designId}）。无分页。出处：https://www.canva.dev/docs/connect/api-reference/designs/get-design/",
+      "method": "GET",
+      "path": "/designs/{design_id}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "design_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9]{10,50}$",
+            "description": "设计 ID（A 起头的字符串）",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "design_id"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "Canva Connect 走 OAuth2 授权码流；授权与自动刷新当前客户端不支持，待宿主适配，access token 需用户安全填入并手动更新。",
+    "导出/上传为异步 job（create_design_export_job → get job），本定义未收录写入型 job 创建，先覆盖只读面。",
+    "本连接器为纯只读集合，无写入工具。"
+  ]
+}

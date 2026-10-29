@@ -1,0 +1,12 @@
+<!doctype html><meta charset="utf-8"><title>SoduWork 平台连接验收</title>
+<link rel="stylesheet" href="../../theme/tokens.css">
+<link rel="stylesheet" href="../../components/panels/platform-plugin-connect.css">
+<style>body{margin:32px;font:14px 'Segoe UI',sans-serif;background:#fafafa;color:#202124;--ink:#202124;--ink-3:#626970;--bg0:white;--bg1:#f6f8fa;--line:#d9dfe7;--accent:#2869db}.modal{max-width:520px;background:white;border:1px solid #d9dfe7;border-radius:16px;padding:24px}.footer{display:flex;gap:10px;margin-top:20px}.btn-mini{padding:8px 12px;border:1px solid #d9dfe7;background:white;border-radius:8px;cursor:pointer}.primary{background:#2869db;color:white}.push{flex:1}h2{margin-top:0}</style>
+<div id="root"></div>
+<script src="../../core/plugin-platforms.js"></script>
+<script src="../../components/panels/platform-plugin-connect.js"></script>
+<script>
+window.testOpen=function(key){const item={key,personal:true};SoduWorkPlatformConnections.open(item,{
+closeModal(){document.getElementById('root').innerHTML='';},
+openModal(title,subtitle,body,footer){const el=document.createElement('div');el.className='modal';el.innerHTML='<h2>'+title+'</h2><p>'+subtitle+'</p>'+body+'<div class="footer cap-modal-foot">'+footer+'</div>';document.getElementById('root').appendChild(el);return el;},refresh(){window.refreshCount=(window.refreshCount||0)+1;}});};
+</script>

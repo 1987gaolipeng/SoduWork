@@ -1,0 +1,120 @@
+
+
+
+
+.mc-panel{
+  position:fixed;z-index:71;                 /*
+ * Layer this above the single console while preserving visibility of newly opened
+ * individual consoles.
+ */
+  top:44px;bottom:44px;left:56px;right:56px;
+  margin:0 auto;max-width:2200px;
+  background:var(--bg-0);border-radius:var(--r-xl);box-shadow:var(--shadow-xl);
+  display:flex;flex-direction:column;overflow:hidden;
+  opacity:0;pointer-events:none;transition:opacity .16s ease;
+}
+.mc-panel.show{opacity:1;pointer-events:auto}
+
+.mc-head{
+  display:flex;align-items:center;gap:10px;padding:11px 14px;flex-shrink:0;
+  border-bottom:1px solid var(--line-2);
+}
+.mc-title{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-md) * var(--font-scale,1)));color:var(--ink);font-weight:600}
+.mc-sub{color:var(--ink-4);font-weight:400;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)))}
+.mc-acts{display:flex;gap:6px;align-items:center;margin-left:auto;flex-shrink:0}
+.mc-btn{
+  border:1px solid var(--line-1);background:var(--bg-0);
+  border-radius:var(--r-sm);padding:4px 11px;color:var(--ink-3);font-family:inherit;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));
+}
+.mc-btn.is-on{background:var(--accent-soft);border-color:transparent;color:var(--accent);font-weight:600}
+.mc-x{background:none;border:none;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 14px);
+  padding:3px 7px;border-radius:var(--r-sm);line-height:1}
+.mc-x:hover{background:var(--bg-2);color:var(--ink-2)}
+
+/* Divide the available window into terminal cells. JavaScript sets the grid dimensions;
+   use scrolling with a minimum row height only when a terminal would otherwise be too short. */
+.mc-grid{
+  flex:1;min-height:0;overflow:hidden;padding:12px;
+  display:grid;gap:12px;
+}
+.mc-cell{
+  /*
+   * Let the grid allocate height; min-width/min-height:0 prevent xterm's intrinsic size from
+   * expanding cells.
+   */
+  display:flex;flex-direction:column;min-width:0;min-height:0;
+  border:1px solid var(--line-2);border-radius:var(--r-lg);
+  background:var(--bg-1);overflow:hidden;
+}
+.mc-cell.is-idle{opacity:.78}                 /* Dim completed or stopped work to distinguish active execution. */
+
+/* Badges identify terminal mode and manually created consoles. */
+.mc-mode{
+  flex-shrink:0;border-radius:var(--r-sm);padding:1px 6px;
+  background:var(--bg-2);color:var(--ink-4);
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));
+}
+.mc-mode-own{background:var(--accent-soft);color:var(--accent)}
+
+/* New-console selector row. */
+.mc-btn-new{border-color:var(--accent);color:var(--accent);font-weight:600}
+.mc-new{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-shrink:0;
+  padding:10px 14px;border-bottom:1px solid var(--line-2);background:var(--bg-1);
+}
+.mc-new-l{color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)))}
+.mc-new-sel{
+  border:1px solid var(--line-1);border-radius:var(--r-sm);background:var(--bg-0);
+  color:var(--ink-2);font-family:inherit;padding:4px 8px;max-width:340px;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));
+}
+.mc-new-tip{color:var(--ink-5);flex-basis:100%;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)))}
+
+.mc-cell-head{
+  display:flex;align-items:center;gap:8px;padding:8px 10px;flex-shrink:0;
+  border-bottom:1px solid var(--line-2);background:var(--bg-0);
+}
+.mc-lamp{flex-shrink:0}
+.mc-name{
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));color:var(--ink);font-weight:600;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;
+}
+.mc-cli{color:var(--ink-5);white-space:nowrap;flex-shrink:0;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)))}
+.mc-gauge{display:flex;width:118px;flex-shrink:0;margin-left:auto}
+.mc-cellacts{display:flex;gap:4px;flex-shrink:0}
+.mc-tbtn{
+  border:1px solid var(--line-1);background:var(--bg-0);
+  border-radius:var(--r-sm);padding:3px 9px;color:var(--ink-3);font-family:inherit;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));white-space:nowrap;
+}
+.mc-tbtn:hover{border-color:var(--accent);color:var(--accent)}
+.mc-tbtn-stop:hover{border-color:var(--s-cancel,#a2abbb);color:var(--s-doing,#f5a524)}
+.mc-tbtn:disabled{opacity:.55;cursor:default}
+
+.mc-note{
+  flex-shrink:0;padding:5px 10px;background:var(--accent-soft);color:var(--accent);
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)));line-height:1.5;
+}
+
+/*
+ * Each body contains a real xterm session. Keep a dark background for ANSI color contrast.
+ */
+.mc-term{
+  flex:1;min-height:0;overflow:hidden;
+  background:#1b2233;padding:4px 6px;    /* Match _mcTermTheme() to avoid a mismatched border background. */
+}
+.mc-term .xterm{height:100%}
+.mc-term .xterm-viewport{scrollbar-width:thin}
+
+.mc-empty{color:var(--ink-5);padding:6px 8px;
+  font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-xs) * var(--font-scale,1)))}
+.mc-blank{
+  grid-column:1/-1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:8px;padding:70px 20px;color:var(--ink-4);text-align:center;
+}
+.mc-blank b{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-md) * var(--font-scale,1)));color:var(--ink-3)}
+.mc-blank span{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));max-width:420px;line-height:1.7}

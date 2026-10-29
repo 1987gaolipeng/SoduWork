@@ -1,0 +1,42 @@
+/*
+ * Define cursors at semantic region roots: default for ordinary surfaces, pointer for
+ * clickable controls, text for editable and readable text, and grab for handles. Let
+ * descendants inherit naturally; broad cursor overrides would invalidate streamed subtrees
+ * unnecessarily.
+ */
+
+/* Set the root arrow cursor and let ordinary content inherit it. */
+html { cursor: default !important; }
+
+/*
+ * Use text cursors for inputs and conversation text, inherited through inline descendants.
+ */
+input:not(:disabled), textarea:not(:disabled),
+[contenteditable="true"],
+.nmd, .ntext, .nbubble {
+  cursor: text !important;
+}
+
+/* Collapsible message headers use pointer; their content retains default. */
+.nthink, .ntool, .ntool-batch { cursor: default !important; }
+.nthink-head, .ntool-head, .ntool-batch-head { cursor: pointer !important; }
+
+/* Use pointer for ordinary clickable controls. */
+:where(button:not(:disabled):not([aria-disabled="true"]),
+  [role="button"]:not([aria-disabled="true"]):not([disabled]),
+  a:not([aria-disabled="true"]), summary:not([aria-disabled="true"]),
+  input[type="checkbox"]:not(:disabled), input[type="radio"]:not(:disabled), select:not(:disabled)) {
+  cursor: pointer;
+}
+
+/*
+ * Keep action-bar gaps on default and let individual buttons own pointer cursors.
+ */
+.nmessage-footer { cursor: default !important; }
+
+/* Use grab on handles and a global dragging cursor through body.is-grabbing. */
+.drag-handle { cursor: grab !important; }
+body.is-grabbing, body.is-grabbing * { cursor: grabbing !important; }
+
+/* Give resize handles their dedicated horizontal-resize cursor without covering composer input. */
+.ncw-resize { cursor: col-resize !important; }

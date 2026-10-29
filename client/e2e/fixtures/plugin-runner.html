@@ -1,0 +1,61 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>Runner 插件端到端验证</title>
+<link rel="stylesheet" href="../../components/panels/panels-base.css">
+<link rel="stylesheet" href="../../components/panels/panels-chat.css">
+<link rel="stylesheet" href="../../components/panels/chat-plugin-mention.css">
+<style>
+:root{--ink:#23272f;--ink-2:#454b56;--ink-3:#687080;--ink-4:#89919e;--accent:#3b7eee;--line:#e8eaee;--line-2:#e8eaee;--bg-0:#fff;--bg-1:#f7f8fa;--bg-2:#edf0f4}
+*{box-sizing:border-box}body{margin:0;background:#fafbfc;font:14px/1.5 "Segoe UI","Microsoft YaHei",sans-serif;color:var(--ink)}
+main{max-width:1000px;margin:24px auto}header{display:flex;align-items:center;gap:12px;margin-bottom:20px}
+header b{font-size:18px;margin-right:auto}button,select,textarea{font:inherit}button,select{padding:9px 14px;border:1px solid var(--line);border-radius:12px;background:#fff;cursor:pointer}
+#nchatScroll{height:540px;overflow:auto;padding:20px;background:white;border:1px solid var(--line);border-radius:20px}
+#composer{position:relative;margin-top:16px;background:white;border:1px solid var(--line);border-radius:20px;padding:16px}
+textarea{width:100%;height:70px;border:0;resize:none;outline:none;background:transparent}#nchatSend{float:right;background:var(--accent);color:white;width:42px;height:42px;padding:10px}#nchatSend svg{width:20px;height:20px}#composer:after{content:"";display:block;clear:both}
+#status{min-height:28px;color:var(--ink-3);margin:8px 4px}#status.error{color:#b63838}
+#queue{color:var(--ink-3);padding:8px 0}.nplugin-menu{bottom:100%;top:auto}.nchat-list{min-height:100px}
+</style>
+<main id="work"><header><b>Runner 插件验证 · 隔离会话</b><select id="agent"><option value="opencode">OpenCode</option><option value="codex-harness">Codex Harness</option><option value="pi">Pi 普通会话回归</option></select><button id="open">新建会话</button><button id="reopen">重新打开</button></header>
+<div id="nchatScroll"><div id="nchatList" class="nchat-list"></div></div>
+<div id="status" role="status">请选择 Agent 并新建会话</div><div id="queue"></div>
+<div id="composer"><textarea id="nchatInput" placeholder="输入 / 选择插件"></textarea><button id="nchatSend">发送</button></div></main>
+<script src="../../components/panels/chat-dom-patch.js"></script>
+<script src="../../components/panels/panels-chat-tools.js"></script>
+<script src="../../components/panels/chat-context-meter.js"></script>
+<script src="../../components/panels/chat-scroll-follow.js"></script>
+<script src="../../components/panels/chat-markdown.js"></script>
+<script src="../../components/panels/chat-acceptance-results.js"></script>
+<script src="../../components/panels/chat-message-renderer.js"></script>
+<script src="../../components/panels/compose-candidate-navigation.js"></script>
+<script src="../../components/panels/chat-plugin-mention-model.js"></script>
+<script src="../../components/panels/chat-plugin-mention.js"></script>
+<script>
+const api=soduWorkAPI.conversationSession,input=document.getElementById('nchatInput');
+window.testState={ref:'',sessionId:'',snapshot:null,events:[],sends:[],error:''};
+function say(text,error=false){document.getElementById('status').textContent=text;document.getElementById('status').className=error?'error':'';if(error)testState.error=text}
+const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ctx={esc,_mount:()=>document.getElementById('work'),_snap:null,_sessionOptions:{},_collabTasks:new Map(),_collabEntries:()=>[],
+ _syncThinkingClock(){},_renderQueue(){document.getElementById('queue').textContent=(ctx._snap.queue||[]).map(x=>x.position+'. '+x.text).join(' · ')},
+ _thinkingStatusHtml:()=>'',_pending:'',_pendingPlugins:[],_pendingAttachmentNames:[],_openThink:new Set(),_openTool:new Set(),_openToolGroup:new Set(),
+ _outs:[],_messageAttachments:[],_renderTaskStartPrompt(){},_syncSlowStatusTicker(){}};
+const renderer=ChatMessageRenderer.create(ctx);
+function render(snapshot){if(!snapshot)return;ctx._snap=snapshot;testState.snapshot=snapshot;renderer._render();}
+api.onEvent(event=>{if(event.ref!==testState.ref)return;testState.events.push({kind:event.kind,reason:event.reason||'',failureKind:event.failureKind||''});
+ render(event.snapshot);if(event.kind==='error')say(event.reason,true);else if(!testState.error)say(event.snapshot?.running?'Agent 正在执行…':'本轮已完成');});
+const picker=ChatPluginMention.create({input,host:document.getElementById('composer'),catalog:()=>pluginTest.catalog(),say});
+document.getElementById('open').onclick=async()=>{
+ try{testState.error='';say('正在创建…');const result=await api.open({adapterId:document.getElementById('agent').value,capabilities:[],skills:[]});
+ if(!result.ok)throw Error(result.reason);testState.ref=result.ref;testState.sessionId=result.sessionId;picker.clear();render(result.snapshot);say('会话已就绪');}
+ catch(e){say(e.message,true);}
+};
+document.getElementById('reopen').onclick=async()=>{
+ try{const id=testState.sessionId;api.close(testState.ref);testState.ref='';await new Promise(r=>setTimeout(r,200));
+ const result=await api.open({chatId:id});if(!result.ok)throw Error(result.reason);testState.ref=result.ref;testState.sessionId=result.sessionId;render(result.snapshot);say('已恢复同一会话');}
+ catch(e){say(e.message,true);}
+};
+document.getElementById('nchatSend').onclick=async()=>{
+ try{testState.error='';const resolved=await picker.resolve(testState.sessionId,'',input.value);if(!resolved)return;
+ const result=await api.send(testState.ref,resolved.text,[],{plugins:resolved.items,submissionId:'e2e'+Date.now()});
+ testState.sends.push(result);if(!result.ok)throw Error(result.reason);input.value='';picker.clear();render(result.snapshot);say(result.queued?'已加入队列':'已发送');}
+ catch(e){say(e.message,true);}
+};
+document.getElementById('nchatList').addEventListener('click',e=>{const b=e.target.closest('[data-tool]');if(b){const id=b.dataset.tool;ctx._openTool.has(id)?ctx._openTool.delete(id):ctx._openTool.add(id);renderer._render();}});
+</script></html>

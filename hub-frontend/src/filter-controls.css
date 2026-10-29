@@ -1,0 +1,104 @@
+/* Shared filter controls. Page layouts own placement; this file owns their boxes.
+   Search icons participate in flex layout, and only the outer box draws focus. */
+.app {
+  --filter-height: 38px;
+  --filter-search-width: 320px;
+  --filter-option-width: 104px;
+  --filter-select-width: 160px;
+}
+.app .content :is(.admin-filterbar, .filterbar, .en-filters, .rb-filterbar) {
+  display: flex; flex-direction: row; flex-wrap: wrap; align-items: center;
+  gap: 12px; min-width: 0; padding: 12px 14px; margin: 0 0 12px;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface); box-shadow: none;
+}
+.app .content .admin-filter-options {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end;
+  gap: 10px; min-width: 0; max-width: 100%; margin-left: auto;
+}
+.app .content .admin-filter-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.app .content :is(.admin-search, .searchbox, .search-box, .rc-search, .oi-search-field, .plugin-catalog-search, .cap-admin-search, .wc-search, .og-search) {
+  display: flex; align-items: center; gap: 9px; box-sizing: border-box;
+  flex: 0 1 var(--filter-search-width); width: var(--filter-search-width); min-width: 0; max-width: 100%;
+  height: var(--filter-height); min-height: var(--filter-height); padding: 0 11px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface);
+  box-shadow: none; transition: border-color .15s, box-shadow .15s;
+}
+.app .content :is(.admin-search, .searchbox, .search-box, .rc-search, .oi-search-field, .plugin-catalog-search, .cap-admin-search, .wc-search, .og-search) > svg {
+  position: static; flex: 0 0 16px; width: 16px; height: 16px; margin: 0; color: var(--ink-3); pointer-events: none;
+}
+.app .content :is(.admin-search, .searchbox, .search-box, .rc-search, .oi-search-field, .plugin-catalog-search, .cap-admin-search, .wc-search, .og-search) > input {
+  flex: 1 1 0; width: 0; min-width: 0; max-width: 100%; height: 100%; min-height: 0;
+  padding: 0; margin: 0; border: 0; border-radius: 0; background: transparent;
+  color: var(--ink); font: 14.5px/1.5 var(--sans); outline: none; box-shadow: none;
+}
+.app .content :is(.admin-search, .searchbox, .search-box, .rc-search, .oi-search-field, .plugin-catalog-search, .cap-admin-search, .wc-search, .og-search) > input:is(:focus, :focus-visible) {
+  outline: none; box-shadow: none; border: 0;
+}
+.app .content :is(.admin-search, .searchbox, .search-box, .rc-search, .oi-search-field, .plugin-catalog-search, .cap-admin-search, .wc-search, .og-search):focus-within {
+  border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.app .content :is(.admin-search, .searchbox, .search-box, .rc-search, .oi-search-field, .plugin-catalog-search, .cap-admin-search, .wc-search, .og-search) input::placeholder { color: var(--ink-3); opacity: 1; }
+.app .content .filter-input.is-disabled { opacity: .6; }
+.app .content .filter-input input[type="search"]::-webkit-search-cancel-button { display: none; }
+.app .content .filter-clear {
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 18px;
+  width: 18px; height: 18px; min-width: 18px; min-height: 18px; margin: 0; padding: 0;
+  border: 0; border-radius: 50%; background: var(--surface-2); color: var(--ink-3);
+  font: 15px/1 var(--sans); box-shadow: none; text-decoration: none; cursor: pointer;
+  opacity: 0; pointer-events: none; transition: opacity .12s, background-color .12s;
+}
+.app .content :is(.filter-input, .select-menu):is(:hover, :focus-within) > .filter-clear {
+  opacity: 1; pointer-events: auto;
+}
+.app .content .filter-clear:hover { color: var(--ink); background: var(--surface-3); }
+.app .content .filter-clear:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: 2px; }
+.app .content .select-menu > .filter-clear { position: absolute; right: 10px; top: calc(50% - 9px); }
+.app .content .select-menu.has-clear .select-menu-trigger { padding-right: 36px; }
+.app .content .select-menu.has-clear .select-menu-trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app .content .select-menu.has-clear .select-menu-caret { position: absolute; right: 13px; }
+.app .content .select-menu.has-clear:is(:hover, :focus-within) .select-menu-caret { opacity: 0; }
+@media (hover: none) {
+  .app .content :is(.filter-input, .select-menu) > .filter-clear { opacity: 1; pointer-events: auto; }
+  .app .content .select-menu.has-clear .select-menu-caret { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .app .content .filter-clear { transition: none; } }
+/* The organization search fills the row beside the expand/collapse controls. */
+.app .content .og-directory-filter > .og-search { flex: 1 1 0; width: 0; max-width: 100%; margin: 0; }
+.app .content :is(.admin-segmented, .srcfilter, .stfilter, .rb-filters, .en-filter-tabs, .rc-filters, .oi-filters) {
+  display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; gap: 3px;
+  min-width: 0; max-width: 100%; margin-block: 0; padding: 3px;
+  border: 1px solid var(--line); border-radius: 9px; background: var(--surface-1); box-shadow: none;
+}
+.app .content :is(.admin-segmented, .srcfilter, .stfilter, .rb-filters, .en-filter-tabs, .rc-filters, .oi-filters) > button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  flex: 0 0 auto; min-width: var(--filter-option-width); min-height: 30px; height: auto;
+  padding: 6px 10px; border: 1px solid transparent; border-radius: 6px;
+  background: transparent; color: var(--ink-2); font: 14.5px/1.3 var(--sans);
+  white-space: nowrap; cursor: pointer; box-shadow: none;
+}
+.app .content :is(.admin-segmented, .srcfilter, .stfilter, .rb-filters, .en-filter-tabs, .rc-filters, .oi-filters) > button:is(.on, [aria-pressed="true"]) {
+  border-color: color-mix(in srgb, var(--accent) 25%, var(--line));
+  background: var(--accent-soft); color: var(--accent); font-weight: 600;
+}
+.app .content :is(.admin-segmented, .srcfilter, .stfilter, .rb-filters, .en-filter-tabs, .rc-filters, .oi-filters) > button > :is(b, i, span, em) {
+  min-width: 20px; margin: 0; padding: 1px 5px; border-radius: 5px;
+  background: var(--surface); color: inherit; font: 14.5px/1.3 var(--sans); font-variant-numeric: tabular-nums;
+}
+.app .content :is(.admin-filterbar, .filterbar, .en-filters, .rb-filterbar, .oi-plugin-tools) .select-menu { width: var(--filter-select-width); min-width: 0; max-width: 100%; height: var(--filter-height); min-height: var(--filter-height); border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.app .content :is(.admin-filterbar, .filterbar, .en-filters, .rb-filterbar, .oi-plugin-tools) .select-menu-trigger { min-height: 0; padding: 0 11px; font: 14.5px/1.5 var(--sans); }
+.app .content :is(.ugc-filterbar > label, .admin-filter-field) { display: flex; align-items: center; box-sizing: border-box; flex: 0 1 224px; width: 224px; min-width: 0; max-width: 100%; height: var(--filter-height); min-height: var(--filter-height); margin: 0; padding: 0 0 0 10px; gap: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.app .content :is(.ugc-filterbar > label, .admin-filter-field) > span { flex: none; margin: 0; color: var(--ink-3); font: 600 14.5px/1.5 var(--sans); letter-spacing: inherit; white-space: nowrap; }
+.app .content :is(.ugc-filterbar > label, .admin-filter-field) .select-menu { flex: 1; width: 0; min-width: 0; height: 36px; min-height: 36px; border: 0; background: transparent; }
+.app .content :is(.ugc-filterbar > label, .admin-filter-field) .select-menu-trigger { padding: 0 11px; font: 14.5px/1.5 var(--sans); }
+/* Header caption rules must not restyle the selected value inside a filter. */
+.app .content :is(.ugc-filterbar > label, .admin-filter-field) .select-menu-trigger > span { margin: 0; color: inherit; font: inherit; letter-spacing: inherit; }
+.app .content :is(.ugc-filterbar > label, .admin-filter-field) .select-menu.has-clear .select-menu-trigger { padding-right: 36px; }
+.app .content .ugc-filter-pending { flex-basis: 100%; color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); }
+.app .content :is(.filterbar, .rb-filterbar, .en-filters) > :is(.stfilter, .rb-filters) { margin-left: auto; }
+@media (max-width: 760px) {
+  .app .content :is(.admin-filterbar, .filterbar, .en-filters, .rb-filterbar) { padding: 10px; gap: 10px; }
+  .app .content :is(.admin-search, .searchbox, .search-box, .rc-search, .oi-search-field, .plugin-catalog-search, .cap-admin-search, .wc-search) { flex-basis: 100%; width: 100%; order: 0; }
+  .app .content .admin-filter-options { margin-left: 0; justify-content: flex-start; }
+  .app .content :is(.ugc-filterbar > label, .admin-filter-field) { flex: 1 1 220px; }
+}

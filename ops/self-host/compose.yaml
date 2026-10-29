@@ -1,0 +1,69 @@
+# Fresh single-Hub installation; existing cluster files are unchanged.
+services:
+  db:
+    image: postgres:16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: soduwork
+      POSTGRES_DB: soduwork
+      POSTGRES_PASSWORD: ${SODUWORK_DB_PASSWORD:?Run python ops/self-host/deploy.py up}
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U soduwork -d soduwork"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  hub:
+    build:
+      context: ../..
+      dockerfile: ops/self-host/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${SODUWORK_HTTP_PORT:?Run python ops/self-host/deploy.py up}:8989"
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://soduwork:${SODUWORK_DB_PASSWORD:?Run python ops/self-host/deploy.py up}@db:5432/soduwork"
+      ADMIN_USER: admin
+      ADMIN_PASS: ${SODUWORK_ADMIN_PASSWORD:?Run python ops/self-host/deploy.py up}
+      AUTH_SECRET: ${SODUWORK_AUTH_SECRET:?Run python ops/self-host/deploy.py up}
+      CONNECTOR_OAUTH_KEY: ${SODUWORK_OAUTH_KEY:?Run python ops/self-host/deploy.py up}
+      HUB_PUBLIC_URL: ${SODUWORK_PUBLIC_URL:?Run python ops/self-host/deploy.py up}
+      CORS_ORIGINS: "${SODUWORK_PUBLIC_URL:?Run python ops/self-host/deploy.py up},null"
+      SODUWORK_ENV: production
+      DEVICE_AUTH_COMPAT: "false"
+      DB_MIGRATION_MODE: auto
+      HUB_LOCAL_EXECUTION_ENABLED: "false"
+      REPORT_AUTO: "false"
+      REPOSITORY_SYNC_INTERVAL_SECONDS: "0"
+      LIBRARY_STORAGE_BACKEND: local
+      LIBRARY_STORAGE_DIR: uploads/library
+      CLIENT_UPDATE_DIR: /srv/app/hub-backend/client-releases
+    volumes:
+      - uploads:/srv/app/hub-backend/uploads
+      - downloads:/srv/app/hub-backend/downloads
+      - client-releases:/srv/app/hub-backend/client-releases
+      - runtime:/srv/runtime
+      - repos:/srv/app/repos
+      - workspaces:/srv/app/hub-backend/workspaces
+      - releases:/srv/app/hub-backend/releases
+    healthcheck:
+      test: [CMD, python, -c, "import json,urllib.request; assert json.load(urllib.request.urlopen('http://127.0.0.1:8989/readyz',timeout=4))['ready']"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 60s
+    stop_grace_period: 45s
+    security_opt:
+      - no-new-privileges:true
+volumes:
+  database: {}
+  uploads: {}
+  downloads: {}
+  client-releases: {}
+  runtime: {}
+  repos: {}
+  workspaces: {}
+  releases: {}

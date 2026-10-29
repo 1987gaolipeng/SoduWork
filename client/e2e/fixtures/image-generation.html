@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="azure"><head><meta charset="utf-8"><title>图片生成 · 隔离验证</title>
+<link rel="stylesheet" href="../../theme/variables.css">
+<link rel="stylesheet" href="../../components/workspace/workspace-shell.css">
+<link rel="stylesheet" href="../../components/panels/work-composer.css">
+<link rel="stylesheet" href="../../components/panels/panels-chat.css">
+<link rel="stylesheet" href="../../components/panels/code-workbench.css">
+<link rel="stylesheet" href="../../components/panels/panels-compose-model-picker.css">
+<style>*{box-sizing:border-box}body{margin:0;background:var(--bg-1);color:var(--ink-2);font:14px var(--font-ui)}main{max-width:900px;margin:auto;padding:20px 14px}.fixture-note{color:var(--ink-4)}#imageChat{position:relative;height:460px}.compose-panel{position:relative!important;display:block!important}.cp-modelwrap{position:relative}.cp-modelpop.show{display:block}.cp-modelpop{display:none;position:absolute;bottom:40px;right:0;z-index:10}#messages{min-height:100px;overflow:auto}.nmsg{padding:12px;white-space:pre-wrap}.nbox{margin-top:20px}.initial{display:flex;justify-content:flex-end;margin:30px 0 200px}#nchatInput{height:65px}.nmodel-pop{z-index:20}</style>
+</head><body><main>
+<p class="fixture-note">隔离验证：真实客户端组件与 IPC，图片来自本地测试接口。</p>
+<div id="imageChat" class="nchat"><div class="nchat-stage"><section class="nchat-main"><div id="messages"></div></section></div></div><div id="nchatQueue"></div><div id="old"><button id="nchatMeta" class="nmeta"></button></div>
+<div class="compose-panel"><div class="initial"><div class="cp-modelwrap"><button id="cpModelBtn"><span id="cpModelName"></span></button><div id="cpModelPop" class="cp-modelpop"></div></div></div></div>
+</main>
+<script src="../../core/model-choice.js"></script>
+<script src="../../vendor/markdown/marked.umd.js"></script>
+<script src="../../vendor/markdown/purify.min.js"></script>
+<script src="../../components/panels/work-composer.js"></script>
+<script src="../../components/panels/panels-compose-model-picker.js"></script>
+<script src="../../components/panels/chat-session-controls.js"></script>
+<script src="../../components/panels/chat-composer-controls.js"></script>
+<script src="../../components/panels/chat-output-links.js"></script>
+<script src="../../components/panels/chat-dom-patch.js"></script>
+<script src="../../components/panels/panels-chat-tools.js"></script>
+<script src="../../components/panels/chat-workspace-info.js"></script>
+<script src="../../components/panels/chat-workspace-split.js"></script>
+<script src="../../components/panels/chat-workspace-controls.js"></script>
+<script src="../../components/panels/panels-chat-workspace.js"></script>
+<script>
+window.errors=[];addEventListener('error',e=>errors.push(e.message));addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
+const api=soduWorkAPI.conversationSession;
+const imageRow={providerId:'personal',name:'own-image',label:'我的图片模型',keyFrom:'mine',providerName:'个人服务'};
+window.SoduWorkAPI={myModels:async()=>({usable:[{name:'chat-fixture',label:'对话模型'}],mediaUsable:{image:[imageRow]}})};
+window.ComposeRuntime={value:()=> 'pi',catalog:()=>[{id:'pi',modelMode:'managed'}]};
+ComposeModelPicker.bind({escape:s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])),api:()=>api});
+WorkComposer.upgradeChat(document.querySelector('#old'));
+window.chatState={ref:'',adapterId:'pi',selection:{}};
+ChatWorkbench.bind(document.querySelector('#imageChat'),()=>({ref:chatState.ref}));
+window.controls=ChatComposerControls.create(document.querySelector('main'),{
+  state:()=>chatState,say:s=>errors.push(s),modelSelected:s=>chatState.selection=s,renderQueue(){},updateQueue(){}});
+window.lastSnapshot=null;
+let renderVersion=0;
+window.render=async snapshot=>{
+  const version=++renderVersion;
+  lastSnapshot=snapshot;chatState.selection=snapshot.modelSelection;controls.render();
+  const box=document.querySelector('#messages');box.replaceChildren();
+  for(const message of snapshot.messages||[]){const node=document.createElement('div');node.className='nmsg '+(message.role==='assistant'?'ai':'user');const text=message.text||(message.blocks||[]).map(b=>b.text||'').join('');if(message.role==='assistant')node.innerHTML='<div class="nmd">'+ChatOutputLinks.sanitize(marked.parse(text),DOMPurify)+'</div>';else node.textContent=text;box.append(node)}
+  const html=box.innerHTML;
+  const output=await api.outputs(chatState.ref);if(version!==renderVersion)return;window.lastOutputs=output;
+  const files=(output.files||[]).map(f=>({...f,...(output.artifacts||[]).find(a=>a.relative===f.relative)}));
+  box.innerHTML=ChatOutputLinks.decorate(html,files,chatState.ref);
+  ChatOutputLinks.hydrateImages(box,files,{api,ref:chatState.ref});
+  ChatWorkbench.render(document.querySelector('#imageChat'),snapshot,files);
+};
+api.onEvent(event=>{if(event.ref===chatState.ref&&event.snapshot)render(event.snapshot)});
+document.querySelector('#nchatSend').addEventListener('click',async()=>{
+  const result=await api.send(chatState.ref,document.querySelector('#nchatInput').value,[],{submissionId:'ui-image-turn'});
+  if(!result.ok)errors.push(result.reason);
+});
+window.attach=async id=>{const result=await api.open({chatId:id});if(!result.ok)throw Error(result.reason);chatState.ref=result.ref;await render(result.snapshot)};
+window.fixtureReady=true;
+</script></body></html>

@@ -1,0 +1,120 @@
+# Dependencies are large and can be rebuilt with npm install.
+node_modules/
+# GitLab npm download cache; never part of maintained source.
+/.npm/
+
+# Keep local network settings, hosts and secret references out of version control.
+dev-environment.md
+
+# Local databases and secrets.
+# .auth_secret and .admin_pass contain generated development signing secrets and bootstrap passwords; never commit them.
+.auth_secret
+.admin_pass
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite3
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Agent execution workspaces are runtime output, with one Git worktree per execution.
+hub-backend/workspaces/
+
+# Local assistant work directories and generated packages are not project source.
+.workbuddy/
+client/dist*/
+client/.runtime/
+client/.runtime-cache/
+# Local isolated desktop QA profiles contain account data and caches.
+/client/.codex-runtime-profile-*/
+client/runner/soduwork-runner
+
+# Machine-specific, one-off CDP debugging scripts.
+hub-backend/cdp_*.py
+scratchpad/
+
+# Local QA screenshots, reports, builds, and scratch work; keep on this device.
+/outputs/
+/work/
+# Local Electron profiles, debugging scratch files, and media-sync runtime data.
+/_tmp/
+/tools/mediaops-sync/.venv/
+/tools/mediaops-sync/.sync/
+/tools/mediaops-sync/runtime/
+/tools/mediaops-sync/runs/
+/tools/mediaops-sync/config.local.json
+/tools/mediaops-sync/report.json
+# Native CI acceptance receipts, fixtures, and extracted installer payloads.
+/release-evidence/
+
+# Local one-off client packaging entry points; maintained builds use package.json scripts.
+client/build.bat
+client/build.js
+
+# Generated installers, uploaded attachments and update packages are binary runtime output; do not commit them.
+hub-backend/downloads/
+hub-backend/uploads/
+hub-backend/releases/
+# Rebuild plugin ZIP packages from plugins/*.json with pack_plugin.py; the JSON files are the source.
+hub-backend/dist/
+
+# Pipeline-generated Flutter web/PWA assets; retain only the empty-directory contracts.
+mobile-web-dist/
+
+# Logs and operating-system temporary files.
+*.log
+hub-backend/smoke_*.out.txt
+piweb.out
+piweb.err
+Thumbs.db
+.DS_Store
+
+# Backend runtime data, including private user skins; adjust this ignore rule only when needed.
+# backend/skin-server/data/
+
+# Browser-use local validation captures are runtime evidence, not source.
+skills/browser-use/*.png
+skills/browser-use/scripts/*.png
+
+# Python and smoke-test caches are disposable and must not enter candidate commits or acceptance evidence.
+__pycache__/
+*.py[cod]
+*.db2
+
+client/deep-research/
+smoke_*.out.txt
+# Local mobile builds are not part of this source distribution.
+mobile/
+
+# Retired independent conversation prototype. The maintained conversation lives
+# in client/components/panels and client/main/{conversation,agent-runtime,pi-session}.
+/client/pi-chat/
+/client/pi-chat-src/
+/client/pi-chat-preload.js
+/client/e2e/pi-locale.cjs
+
+# Runner is built from hub-backend/runner_main.py; binaries are release artifacts.
+/client/runner/*
+!/client/runner/README.md
+
+# Machine-specific IDE settings, including IntelliJ and PyCharm, stay out of version control.
+.idea/
+
+# Local development launchers isolate source and installed clients; they are not distributed with the repository.
+/start-soduwork-client.ps1
+
+# CI dependency downloads (never publication evidence)
+/.ci-downloads/
+/.cache/pip/
+
+# Internal working records: operational logs and release history notes.
+# Excluded from the public distribution boundary; kept locally for the team.
+/PROJECT_CONTEXT.md
+/docs/qa/
+/docs/context/

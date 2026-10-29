@@ -1,0 +1,182 @@
+{
+  "schemaVersion": 1,
+  "id": "mysql",
+  "name": "MySQL",
+  "category": "数据库",
+  "description": "MySQL 通用连接器：查看表、字段与最多 100 行数据；在只读事务中执行固定语句。",
+  "runtimeKind": "mysql",
+  "officialDocs": [
+    "https://dev.mysql.com/doc/refman/8.4/en/information-schema.html",
+    "https://dev.mysql.com/doc/refman/8.4/en/start-transaction.html",
+    "https://dev.mysql.com/doc/refman/8.4/en/server-system-variables.html#sysvar_multiple_statements"
+  ],
+  "authDocs": [
+    "https://dev.mysql.com/doc/refman/8.4/en/create-user.html"
+  ],
+  "baseUrl": "http://mysql-runtime.local",
+  "fields": [
+    {
+      "key": "MYSQL_HOST",
+      "label": "数据库主机",
+      "secret": false,
+      "required": true,
+      "pattern": "^[a-zA-Z0-9._-]{1,253}$",
+      "example": ""
+    },
+    {
+      "key": "MYSQL_PORT",
+      "label": "端口",
+      "secret": false,
+      "required": false,
+      "pattern": "^[0-9]{2,5}$",
+      "example": "",
+      "default": "3306"
+    },
+    {
+      "key": "MYSQL_DATABASE",
+      "label": "默认数据库名",
+      "secret": false,
+      "required": true,
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$",
+      "example": ""
+    },
+    {
+      "key": "MYSQL_USER",
+      "label": "数据库用户（建议只读账号）",
+      "secret": false,
+      "required": true,
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$",
+      "example": ""
+    },
+    {
+      "key": "MYSQL_PASSWORD",
+      "label": "数据库密码",
+      "secret": true,
+      "required": true,
+      "example": ""
+    },
+    {
+      "key": "TLS_CA_PEM",
+      "label": "TLS CA PEM（可选，换行写作\\n；远程连接始终校验证书）",
+      "secret": false,
+      "required": false,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "none"
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "list_tables",
+      "description": "列出最多 100 张基础表，不执行任意 SQL。 支持 offset（0-10000）按表名分页。",
+      "method": "GET",
+      "path": "/tables",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50,
+            "description": "每页条数"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000,
+            "default": 0,
+            "description": "分页偏移；读取数据时必须同时指定唯一的 order_by 字段。并发数据变动可能影响分页。"
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "query": {
+        "limit": "limit",
+        "offset": "offset"
+      },
+      "readOnly": true
+    },
+    {
+      "name": "describe_table",
+      "description": "获取表结构（宿主固定查询 information_schema.COLUMNS，按 TABLE_SCHEMA=DATABASE() + TABLE_NAME 过滤，只读事务执行）。无分页。出处：https://dev.mysql.com/doc/refman/8.4/en/information-schema-columns-table.html",
+      "method": "GET",
+      "path": "/tables/{table}/columns",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "table": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$",
+            "description": "表名（当前库内）",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "table"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "read_rows",
+      "description": "按行读取表数据（宿主固定 SELECT … FROM `database`.`table` LIMIT n，反引号包裹标识符 + 白名单校验 + 只读事务）。分页：limit（1-100）与 offset（0-10000）；分页必须指定唯一的 order_by 字段。出处：https://dev.mysql.com/doc/refman/8.4/en/select.html",
+      "method": "GET",
+      "path": "/tables/{table}/rows",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "table": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$",
+            "description": "表名（当前库内）",
+            "maxLength": 10000
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "description": "读取行数上限"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000,
+            "default": 0,
+            "description": "分页偏移；读取数据时必须同时指定唯一的 order_by 字段。并发数据变动可能影响分页。"
+          },
+          "order_by": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$",
+            "maxLength": 63,
+            "description": "用于升序排列的唯一字段，例如主键；offset 大于 0 时必填。"
+          }
+        },
+        "required": [
+          "table"
+        ],
+        "maxProperties": 50
+      },
+      "query": {
+        "limit": "limit",
+        "offset": "offset"
+      },
+      "readOnly": true
+    }
+  ],
+  "limitations": [
+    "只提供固定只读操作，不执行用户 SQL，也不提供数据库写入。",
+    "非 localhost 连接必须通过 TLS 证书与主机名校验；自签名证书请提供 CA。",
+    "需升级包含 pg8000 / PyMySQL 的 Runner；最多 100 行、结果不超过 2 MB。",
+    "尚未使用真实业务数据库授权验证。",
+    "数据分页需指定稳定唯一的 order_by；最多跳过 10000 行。非快照，不保证并发修改期间跨页一致。"
+  ]
+}

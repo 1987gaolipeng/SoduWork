@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 1,
+  "id": "google-sheets",
+  "name": "Google Sheets",
+  "category": "数据与表格",
+  "description": "Google Sheets 通用连接器：电子表格元信息、读取值范围、追加行。基于 Google Sheets API v4，OAuth 访问令牌由用户安全填入。",
+  "officialDocs": [
+    "https://developers.google.com/sheets/api/reference/rest/v4/spreadsheets/get",
+    "https://developers.google.com/sheets/api/reference/rest/v4/spreadsheets.values/get",
+    "https://developers.google.com/sheets/api/reference/rest/v4/spreadsheets.values/append"
+  ],
+  "authDocs": [
+    "https://developers.google.com/sheets/api/guides/authorizing"
+  ],
+  "baseUrl": "https://sheets.googleapis.com",
+  "fields": [
+    {
+      "key": "GOOGLE_ACCESS_TOKEN",
+      "label": "Google OAuth 访问令牌",
+      "secret": true,
+      "required": true,
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "tokenKey": "GOOGLE_ACCESS_TOKEN",
+    "header": "Authorization",
+    "prefix": "Bearer"
+  },
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "tools": [
+    {
+      "name": "get_spreadsheet",
+      "description": "获取电子表格元信息（sheets、属性）。无分页。出处：https://developers.google.com/sheets/api/reference/rest/v4/spreadsheets/get",
+      "method": "GET",
+      "path": "/v4/spreadsheets/{spreadsheet_id}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "spreadsheet_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{20,}$",
+            "description": "表格 ID",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "spreadsheet_id"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "get_values",
+      "description": "读取值范围（A1 表示法）。无分页（响应体含全部单元格值，过大范围由 API 限制）。出处：https://developers.google.com/sheets/api/reference/rest/v4/spreadsheets.values/get",
+      "method": "GET",
+      "path": "/v4/spreadsheets/{spreadsheet_id}/values/{range}",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "spreadsheet_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{20,}$",
+            "description": "表格 ID",
+            "maxLength": 10000
+          },
+          "range": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A1 范围，如 Sheet1!A1:D20",
+            "maxLength": 10000
+          }
+        },
+        "required": [
+          "spreadsheet_id",
+          "range"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "append_rows",
+      "description": "追加行（POST append，valueInputOption 固定 USER_ENTERED，values 为二维数组 $param）。写入操作：运行前必须获得用户明确授权。出处：https://developers.google.com/sheets/api/reference/rest/v4/spreadsheets.values/append",
+      "method": "POST",
+      "path": "/v4/spreadsheets/{spreadsheet_id}/values/{range}:append",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "spreadsheet_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{20,}$",
+            "description": "表格 ID",
+            "maxLength": 10000
+          },
+          "range": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A1 范围",
+            "maxLength": 10000
+          },
+          "values": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1000,
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 10000
+              }
+            },
+            "description": "行数组（字符串化单元格）"
+          }
+        },
+        "required": [
+          "spreadsheet_id",
+          "range",
+          "values"
+        ],
+        "maxProperties": 50
+      },
+      "fixedQuery": {
+        "valueInputOption": "USER_ENTERED"
+      },
+      "body": {
+        "values": "$values"
+      },
+      "readOnly": false
+    }
+  ],
+  "limitations": [
+    "静态定义并经格式与来源核验，未做真实连接实测。",
+    "访问令牌约 1 小时过期，需用户安全填入并手动更新；自动续期为宿主侧适配项，本连接器未实现。",
+    "values 单元格以字符串传入，USER_ENTERED 会按表格规则解析（数字/公式）；纯字面量请改用扩展（未收录）。",
+    "append_rows 为写入操作，必须获得用户明确授权后由运行器执行；本定义不执行任何请求。"
+  ]
+}

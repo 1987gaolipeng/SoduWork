@@ -1,0 +1,74 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>SoduWork 插件制作安装验证</title>
+<link rel="stylesheet" href="../../theme/variables.css">
+<link rel="stylesheet" href="../../theme/cursor.css">
+<link rel="stylesheet" href="../../components/panels/panels-base.css">
+<link rel="stylesheet" href="../../components/panels/panels-schedules.css">
+<link rel="stylesheet" href="../../components/panels/panels-capabilities.css">
+<link rel="stylesheet" href="../../components/panels/panels-capability-plugins.css">
+<link rel="stylesheet" href="../../components/panels/panels-plugin-maker.css">
+<link rel="stylesheet" href="../../components/panels/plugin-install-setup.css">
+<link rel="stylesheet" href="../../components/panels/platform-plugin-connect.css">
+<link rel="stylesheet" href="../../components/panels/panels-chat.css">
+<style>
+*{box-sizing:border-box}body{background:var(--bg-0);color:var(--ink);font:14px/1.5 var(--font-ui);margin:0}main{max-width:800px;margin:48px auto;padding:24px}button{font:inherit}#status{padding-top:20px}.fixture-actions{display:flex;flex-wrap:wrap;gap:12px;margin:24px 0}
+</style>
+<main><small>隔离本机安装验证 · 外部平台登录使用测试回复</small><h1>插件制作完成</h1>
+<div class="fixture-actions"><button id="reopen">重新打开会话</button><button id="import">从本机导入</button><button id="use-installed">再次使用已安装插件</button></div>
+<section id="chat"></section><div id="status" role="status"></div></main>
+<script>
+const local = window.soduWorkAPI.personalPlugins;
+window.SoduWorkAPI = {
+  preflightPluginDraft: body => local.preflight(body), createPluginDraft: body => local.create(body),
+  configurePersonalPlugin: (...args) => local.configure(...args),
+  pluginCatalog: async () => {
+    if (window.failCatalog) throw Error('Fixture catalog refresh failure');
+    const result = await local.list({ includeDisabled: true }); return { items: result.items, submissions: [] };
+  },
+  preflightPluginArchive: async file => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte);
+    return local.preflightArchive(file.name, btoa(binary));
+  },
+};
+window.petSay = text => { document.getElementById('status').textContent = text; };
+window.WorkspaceHost = { open: (type, payload) => { window.trial = { type, payload }; } };
+</script>
+<script src="../../core/plugin-platforms.js"></script>
+<script src="../../components/panels/chat-plugin-draft-placement.js"></script>
+<script src="../../components/panels/chat-output-links.js"></script>
+<script src="../../components/panels/panels-plugin-maker-utils.js"></script>
+<script src="../../components/panels/plugin-catalog-format.js"></script>
+<script src="../../components/panels/plugin-lifecycle.js"></script>
+<script src="../../components/panels/plugin-dependency-ux.js"></script>
+<script src="../../components/panels/plugin-install-setup.js"></script>
+<script src="../../components/panels/platform-plugin-connect.js"></script>
+<script src="../../components/panels/plugin-mcp-gate.js"></script>
+<script src="../../components/panels/panels-capability-plugins.js"></script>
+<script src="../../components/panels/panels-capabilities.js"></script>
+<script>
+// Observe the real context supplied by the production conversation action so
+// the import button uses exactly the same modal, setup and trial implementation.
+const openLocal = SoduWorkCapabilityPlugins.openLocalImport;
+SoduWorkCapabilityPlugins.openLocalImport = (body, preview, ctx) => {
+  window.authoringContext = ctx; return openLocal(body, preview, ctx);
+};
+async function renderConversation() {
+  const artifacts = await ChatOutputLinks.load(soduWorkAPI.conversationSession, 'authoring', [], [], null);
+  window.visibleArtifacts = artifacts;
+  document.getElementById('chat').innerHTML = ChatOutputLinks.decorate(
+    '<article class="nmsg ai"><p>插件已经制作完成。检查内容后即可安装使用。</p></article>', artifacts, 'authoring');
+  window.conversationRenderCount = (window.conversationRenderCount || 0) + 1;
+}
+document.getElementById('chat').onclick = event => {
+  const button = event.target.closest('[data-install-plugin-draft]');
+  if (button) openConversationPluginDraft(button.dataset.pluginDraftRef, button.dataset.installPluginDraft, button);
+};
+document.getElementById('reopen').onclick = renderConversation;
+document.getElementById('import').onclick = () => SoduWorkCapabilityPlugins.choosePackage(window.authoringContext);
+document.getElementById('use-installed').onclick = async () => {
+  const result = await local.list({ includeDisabled: true });
+  const item = result.items.find(row => row.key === 'team-brief');
+  await window.authoringContext.tryPlugin(item);
+};
+renderConversation();
+</script></html>

@@ -1,0 +1,95 @@
+/* Shared actions and focus treatment for the management screens. */
+:is(.app .content, .modal) .admin-action-heading { text-align: left; }
+:is(.app .content, .modal) .admin-row-actions {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start;
+  gap: 4px 16px; min-width: 0;
+}
+:is(.app .content, .modal) :is(
+  .admin-text-action, .rowbtn, tbody .btn,
+  .pg-row-actions > button, .at-card-actions > button, .om-actions > button,
+  .binding-actions > button, .publisher-actions > button, .plugin-version-actions > button,
+  .plugin-card-shelf-actions > button, .model-provider-actions > button, .wc-actions > button
+):not(.admin-card-action) {
+  display: inline-flex; align-items: center; justify-content: flex-start; flex: none;
+  width: auto; min-width: 0; height: auto; min-height: 30px; margin: 0; padding: 4px 0;
+  border: 0; border-radius: 3px; background: transparent; box-shadow: none;
+  color: var(--accent); font: 14.5px/1.5 var(--sans); text-align: left;
+  white-space: nowrap; text-decoration: none; cursor: pointer;
+}
+:is(.app .content, .modal) :is(
+  .admin-text-action, .rowbtn, tbody .btn,
+  .pg-row-actions > button, .at-card-actions > button, .om-actions > button,
+  .binding-actions > button, .publisher-actions > button, .plugin-version-actions > button,
+  .plugin-card-shelf-actions > button, .model-provider-actions > button, .wc-actions > button
+):is(:hover, :focus-visible):not(:disabled, .admin-card-action) {
+  background: transparent; border: 0; box-shadow: none;
+  text-decoration: underline; text-underline-offset: 4px;
+}
+:is(.app .content, .modal) :is(.admin-text-action, .rowbtn, tbody .btn):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 3px;
+}
+:is(.app .content, .modal) :is(.admin-text-action, .rowbtn, tbody .btn, .at-card-actions > button, .om-actions > button, .plugin-card-shelf-actions > button, .plugin-version-actions > button, .publisher-actions > button):is(.danger, .is-danger):not(.admin-card-action),
+:is(.app .content, .modal) .pg-row-actions > .pg-danger-link { color: var(--crit); }
+:is(.app .content, .modal) :is(.admin-text-action, .rowbtn, tbody .btn, .plugin-card-shelf-actions > button, .plugin-version-actions > button, .publisher-actions > button):disabled:not(.admin-card-action) {
+  color: var(--ink-3); opacity: .5; cursor: default; text-decoration: none;
+}
+
+/* Only the outer select owns focus. Mouse selection changes the fine border;
+   keyboard navigation retains an explicit but light outline. */
+:is(.app, .modal) .select-menu { transition: border-color .15s ease; }
+:is(.app, .modal) .select-menu:not(.is-disabled):is(.is-open, :focus-within) {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); outline: none; box-shadow: none;
+}
+:is(.app, .modal) .select-menu > .select-menu-trigger:is(:focus, :focus-visible) { outline: none; box-shadow: none; }
+:is(.app, .modal) .select-menu:not(.is-disabled):has(> .select-menu-trigger:focus-visible) {
+  outline: 2px solid color-mix(in srgb, var(--accent) 30%, transparent); outline-offset: 2px; box-shadow: none;
+}
+:is(.app, .modal) .select-menu .select-menu-option:focus-visible { outline: none; box-shadow: none; background: var(--accent-soft); color: var(--accent); }
+.app :is(.ugc-filterbar > label, .admin-filter-field):has(.select-menu:is(.is-open, :focus-within)) { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+.app :is(.ugc-filterbar > label, .admin-filter-field):has(.select-menu-trigger:focus-visible) { outline: 2px solid color-mix(in srgb, var(--accent) 30%, transparent); outline-offset: 2px; }
+.app :is(.ugc-filterbar > label, .admin-filter-field) .select-menu:has(> .select-menu-trigger:focus-visible) { outline: none; }
+:is(.app, .modal) select:is(:focus, :focus-visible) { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); box-shadow: none; outline: none; }
+:is(.app, .modal) select:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 30%, transparent); outline-offset: 2px; }
+
+/* Summary and filters share one quiet surface on the execution and repository pages. */
+.app .content .execution-network :is(.en-panel-head, .rb-card > .card-head) { border-bottom: 0; }
+.app .content .execution-network .rb-summary { border-top: 0; border-bottom: 0; }
+.app .content .execution-network :is(.en-filters, .rb-filterbar) {
+  border: 0; border-radius: 0; box-shadow: none; background: transparent; margin: 0; padding: 10px 16px 16px;
+}
+.app .content .execution-network .rb-action-cell { display: table-cell; vertical-align: middle; }
+.app .content .execution-network .rb-acts { min-width: 190px; gap: 2px 14px; }
+.app .content .rc-page { border: 0; box-shadow: none; background: transparent; overflow: visible; }
+.app .content .rc-page .rc-source { border: 0; box-shadow: none; background: var(--surface); }
+.app .content .rc-page .rc-toolbar { border: 0; box-shadow: none; background: transparent; padding-inline: 0; margin-bottom: 0; }
+.app .content .pg-index .pg-project-actions { justify-content: flex-start; }
+.app .content .rc-row-actions { justify-content: flex-start; }
+@media (prefers-reduced-motion: reduce) { :is(.app, .modal) .select-menu { transition: none; } }
+
+/* Card actions share a quiet, compact treatment; each card owns its placement.
+   Table action columns continue to use the text-only rules above. */
+:is(.app .content, .modal) .admin-card-actions {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  min-width: 0; max-width: 100%;
+}
+:is(.app .content, .modal) .admin-card-action {
+  display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; gap: 5px;
+  width: auto; min-width: 0; height: 30px; min-height: 30px; margin: 0; padding: 4px 10px;
+  border: 0; border-radius: 6px; box-shadow: none;
+  background: var(--surface-2); color: var(--ink-2);
+  font: 14.5px/1.4 var(--sans); white-space: nowrap; text-decoration: none; cursor: pointer;
+}
+:is(.app .content, .modal) .admin-card-action.is-primary { color: var(--accent); background: var(--accent-soft); }
+:is(.app .content, .modal) .admin-card-action:is(.is-danger, .danger) { color: var(--crit); background: transparent; }
+:is(.app .content, .modal) .admin-card-action:is(:hover, :focus-visible):not(:disabled) {
+  border: 0; box-shadow: none; background: var(--surface-3); color: var(--ink); text-decoration: none;
+}
+:is(.app .content, .modal) .admin-card-action.is-primary:is(:hover, :focus-visible):not(:disabled) {
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 17%, var(--surface));
+}
+:is(.app .content, .modal) .admin-card-action:is(.is-danger, .danger):is(:hover, :focus-visible):not(:disabled) {
+  color: var(--crit); background: var(--crit-soft);
+}
+:is(.app .content, .modal) .admin-card-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:is(.app .content, .modal) .admin-card-action:disabled { opacity: .45; cursor: default; text-decoration: none; }
+:is(.app .content, .modal) .admin-card-action > svg { flex: 0 0 14px; width: 14px; height: 14px; }

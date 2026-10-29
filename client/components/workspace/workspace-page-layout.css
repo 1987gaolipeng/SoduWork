@@ -1,0 +1,114 @@
+/* One full-canvas requirement pool, using the existing workspace framing. */
+html[data-desk-panel="workspace"]:is([data-workspace-view="history"],[data-workspace-view="workitems"]) #historyBoard{
+  left:var(--ws-main-left,var(--ws-side-w,220px))!important;right:10px!important;
+  top:10px!important;bottom:10px!important;width:auto!important;height:auto!important;
+  max-width:none!important;max-height:none!important;margin:0!important;transform:none!important;
+  border-radius:18px!important;background:var(--bg-0)!important;overflow:hidden!important;
+}
+html[data-desk-panel="workspace"] #historyBoard.requirements-board > .hb-body{
+  width:100%;max-width:none;min-height:0;height:auto;flex:1 1 auto;background:var(--bg-0);
+}
+
+/* Settings page final layout: full-width title band, centered settings cards. */
+html[data-desk-panel="workspace"] #settingsPanel{
+  --settings-gutter:max(28px,calc((100% - 1180px) / 2))!important;
+  left:var(--ws-main-left,var(--ws-side-w,220px))!important;
+  right:10px!important;
+  top:10px!important;
+  bottom:10px!important;
+  width:auto!important;
+  height:auto!important;
+  min-height:0!important;
+  max-height:none!important;
+  padding:0 var(--settings-gutter) 36px!important;
+  grid-template-columns:repeat(12,minmax(0,1fr))!important;
+  overflow-x:hidden!important;
+  overflow-y:auto!important;
+}
+html[data-desk-panel="workspace"] #settingsPanel > .set-page-head{
+  grid-column:1 / -1!important;
+  width:auto!important;
+  margin:0 calc(var(--settings-gutter) * -1)!important;
+  padding:30px var(--settings-gutter) 24px!important;
+  min-height:0!important;
+  box-sizing:border-box!important;
+  background:#fff!important;
+  border-bottom:1px solid #e5ebf3!important;
+}
+html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-title{
+  display:grid!important;
+  grid-template-columns:max-content minmax(0,1fr)!important;
+  grid-template-rows:auto auto!important;
+  align-items:baseline!important;
+  column-gap:12px!important;
+  row-gap:4px!important;
+  min-width:0!important;
+  margin:0!important;
+  color:#1c2940!important;
+  font-family:var(--font-display)!important;
+  font-size:25px!important;
+  font-weight:750!important;
+  line-height:1.18!important;
+  letter-spacing:-.035em!important;
+}
+html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-kicker{
+  grid-column:1 / -1!important;
+  grid-row:1!important;
+  display:block!important;
+  margin:0!important;
+  color:#4b8df8!important;
+  font:700 14.5px/1 var(--font-latin,Arial),sans-serif!important;
+  letter-spacing:.16em!important;
+}
+html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-main-title{
+  grid-column:1!important;
+  grid-row:2!important;
+  display:block!important;
+  min-width:max-content!important;
+  margin:0!important;
+  white-space:nowrap!important;
+}
+html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-sub{
+  grid-column:2!important;
+  grid-row:2!important;
+  display:block!important;
+  min-width:0!important;
+  margin:0!important;
+  overflow:hidden!important;
+  color:#718096!important;
+  font-size:max(var(--font-min-readable, 14.5px), 13px) !important;
+  font-weight:450!important;
+  line-height:1.35!important;
+  text-overflow:ellipsis!important;
+  white-space:nowrap!important;
+}
+html[data-desk-panel="workspace"] #settingsPanel > .set-group{
+  width:auto!important;
+  max-width:none!important;
+  margin:0!important;
+}
+@media(max-width:980px){
+  html[data-desk-panel="workspace"] #settingsPanel{--settings-gutter:24px!important}
+}
+@media(max-width:720px){
+  html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-title{
+    grid-template-columns:minmax(0,1fr)!important;
+    grid-template-rows:auto auto auto!important;
+  }
+  html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-sub{
+    grid-column:1!important;
+    grid-row:3!important;
+  }
+}
+@media(max-width:560px){
+  html[data-desk-panel="workspace"] #settingsPanel{--settings-gutter:16px!important;padding-bottom:24px!important}
+}
+
+/* The requirement pool sits closer to the workspace navigation.  Keeping the
+   six-pixel frame leaves a clear boundary without wasting a full toolbar row
+   of space on the desktop canvas. */
+html[data-desk-panel="workspace"]:is([data-workspace-view="history"],[data-workspace-view="workitems"]) #historyBoard.requirements-board{
+  top:6px!important;
+  right:6px!important;
+  bottom:6px!important;
+}

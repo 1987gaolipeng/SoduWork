@@ -1,0 +1,135 @@
+/* Automation: a quiet schedule book. Time, work and execution each have one place. */
+#schPanel{
+  --auto-paper:var(--bg-0);--auto-canvas:var(--bg-0);--auto-ink:var(--ink);
+  --auto-muted:var(--ink-3);--auto-line:var(--line);
+  --ws-main-bg:var(--auto-paper);
+  background:var(--auto-paper);
+}
+html[data-desk-panel="workspace"] #schPanel > .sch-body,
+#schPanel > .sch-body{
+  display:block!important;box-sizing:border-box;padding:24px var(--ws-head-gutter,24px) 32px!important;
+  background:var(--auto-canvas);container:automation-content / inline-size;
+}
+html[data-desk-panel="workspace"] #schPanel > .sch-body > :is(.sch-recipes,.sch-list),
+#schPanel > .sch-body > :is(.sch-recipes,.sch-list){width:100%!important;max-width:1520px!important;margin-inline:auto!important}
+#schPanel .sch-list{display:grid;grid-template-columns:1fr;gap:12px;align-items:start!important}
+#schPanel .sch-stale-notice{display:flex;align-items:center;gap:10px;flex-wrap:wrap;box-sizing:border-box;max-width:1520px;margin:0 auto 12px;padding:10px 12px;
+  border:1px solid color-mix(in srgb,var(--s-doing) 40%,var(--line));border-radius:var(--r-sm);background:color-mix(in srgb,var(--s-doing) 8%,var(--bg-0));color:var(--ink-2)}
+#schPanel .sch-stale-notice>div{flex:1 1 210px;min-width:0;overflow-wrap:anywhere;font:400 var(--text-sm)/1.5 var(--font-ui)}
+#schPanel .sch-stale-notice b{color:var(--ink);margin-right:8px;font-weight:600}#schPanel .sch-stale-notice small{display:block;color:var(--ink-3);font-size:var(--text-xs)}
+#schPanel .sch-stale-notice .btn-mini{flex:none;white-space:nowrap}#schPanel .sch-stale-notice .btn-mini:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#schPanel .sch-item{
+  background:var(--auto-paper);border:1px solid var(--auto-line);border-radius:16px;
+  box-shadow:0 2px 7px color-mix(in srgb,var(--ink) 3%,transparent);overflow:hidden;height:auto!important;
+}
+#schPanel .sch-item:hover{border-color:color-mix(in srgb,var(--accent) 24%,var(--auto-line));box-shadow:0 5px 16px color-mix(in srgb,var(--ink) 5%,transparent)}
+#schPanel .sch-item.off{background:var(--auto-paper)}
+#schPanel .sch-item.confirming{border-color:var(--danger,#c43d50)}
+#schPanel .sch-i-body{display:flex;flex:0 0 auto!important;flex-direction:column;align-items:stretch;gap:9px;padding:13px 15px 11px;min-height:0!important}
+#schPanel .sch-i-head{display:grid;grid-template-columns:minmax(0,auto) minmax(28px,1fr) auto;align-items:center;gap:10px;min-width:0}
+#schPanel .sch-i-when{
+  position:static;display:flex;flex-direction:row;align-items:center;justify-content:flex-start;
+  flex:none;min-width:0;flex-wrap:wrap;min-height:28px;gap:3px 7px;padding:0;border:0;color:var(--auto-muted);
+}
+#schPanel .sch-i-when::before,#schPanel .sch-i-when::after{content:none}
+#schPanel .sch-i-when > svg{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+#schPanel .sch-i-when > b{font:500 14.5px/1.4 var(--font-ui)!important;letter-spacing:0!important;color:var(--auto-muted)}
+#schPanel .sch-i-when > i{font:600 20px/1.2 var(--font-latin)!important;letter-spacing:-.025em;color:var(--auto-ink);font-variant-numeric:tabular-nums}
+#schPanel .sch-item.off .sch-i-when > i{color:var(--auto-ink)}
+#schPanel .sch-i-state{margin-left:0;border:1px solid var(--line);border-radius:999px;background:var(--bg-1);padding:3px 8px;color:var(--ink-3);font:500 14.5px/1.3 var(--font-ui);white-space:nowrap}
+#schPanel .sch-i-state.is-enabled{border-color:color-mix(in srgb,var(--accent) 24%,var(--line));background:var(--accent-soft);color:color-mix(in srgb,var(--accent) 60%,var(--ink))}
+#schPanel .sch-i-main{display:flex;flex:1;min-width:0;gap:8px}
+#schPanel .sch-i-top{display:block}
+#schPanel .sch-i-title,#schPanel .sch-item.off .sch-i-title{
+  display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--auto-ink);font:400 14px/1.35 var(--font-ui)!important;letter-spacing:0!important;
+}
+#schPanel .sch-i-note{
+  display:block;max-width:none;margin:0;color:var(--auto-muted);font:400 12px/1.55 var(--font-ui)!important;
+  white-space:pre-line;overflow-wrap:anywhere;
+}
+#schPanel .sch-i-description{margin:0;min-width:0}
+#schPanel .sch-i-description > summary{display:block;list-style:none;cursor:pointer;border-radius:5px}
+#schPanel .sch-i-description > summary::-webkit-details-marker{display:none}
+#schPanel .sch-i-description:not([open]) .sch-i-note{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+#schPanel .sch-i-description[open] .sch-i-note{display:block;-webkit-line-clamp:unset;overflow:visible}
+#schPanel .sch-i-expand{display:inline-flex;align-items:center;gap:3px;margin-top:4px;font:400 12px/1.45 var(--font-ui);color:var(--ink-2)}
+#schPanel .sch-i-expand svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+#schPanel .sch-collapse-label,#schPanel .sch-i-description[open] .sch-expand-label{display:none}
+#schPanel .sch-i-description[open] .sch-collapse-label{display:inline}
+#schPanel .sch-i-description[open] .sch-i-expand svg{transform:rotate(180deg)}
+#schPanel .sch-i-description > summary:hover .sch-i-expand{color:var(--accent)}
+#schPanel .sch-i-assignment{display:flex;justify-content:flex-end;align-items:center;gap:7px;min-width:0;overflow:hidden;font:400 12px/1.45 var(--font-ui);color:var(--ink-2)}
+#schPanel .sch-i-executor{display:inline-flex;align-items:center;justify-content:center;min-width:0;flex:0 0 auto}
+#schPanel .sch-i-agent-brand{--agent-brand-size:22px;width:22px;height:22px;flex:0 0 22px;border:0;border-radius:7px;background:transparent;box-shadow:none;color:var(--auto-muted)}
+#schPanel .sch-i-agent-brand>img{width:72%;height:72%}
+#schPanel .sch-i-agent-brand>svg{width:72%!important;height:72%!important}
+#schPanel .sch-i-assignment .sch-i-method{min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-left:1px solid var(--line-3);padding-left:8px;color:var(--auto-muted)}
+#schPanel .sch-i-meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin-top:0;padding-top:2px;font:400 12px/1.45 var(--font-ui)!important;color:var(--auto-muted)}
+#schPanel .sch-i-meta > span{display:inline-flex;align-items:center;min-width:0;max-width:100%;gap:5px}
+#schPanel .sch-i-meta svg{width:14px;height:14px;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+#schPanel .sch-i-meta b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;color:var(--ink-2)}
+#schPanel .sch-i-meta .sch-i-method{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding-left:11px;border-left:1px solid var(--line-3)}
+#schPanel .sch-i-caps{margin:0;gap:5px}
+#schPanel .sch-i-caps i{border:0;border-radius:5px;background:var(--bg-1);font:400 12px/1.35 var(--font-ui);padding:2px 6px;color:var(--auto-muted)}
+#schPanel .sch-i-err{align-self:flex-start;border-radius:6px;font:400 12px/1.4 var(--font-ui);padding:3px 7px}
+#schPanel .sch-i-foot{gap:8px;padding:6px 11px 6px 15px;min-height:44px!important;background:var(--auto-paper);border-top:1px solid var(--line-2)}
+#schPanel .sch-i-timing{display:flex;flex:1 1 130px;flex-direction:column;min-width:0;gap:3px}
+#schPanel .sch-i-next{font:400 12px/1.45 var(--font-ui)!important;color:var(--ink-2);white-space:normal;overflow-wrap:anywhere}
+#schPanel .sch-i-next::before{width:5px;height:5px;flex-basis:5px;box-shadow:none}
+#schPanel .sch-item.off .sch-i-next{color:var(--auto-muted)}
+#schPanel .sch-i-last{font:400 12px/1.45 var(--font-ui)!important;color:var(--auto-muted)}
+#schPanel .sch-i-ops{gap:3px;margin-left:auto}
+#schPanel .sch-i-ops .sch-icon-action{border-radius:8px}
+#schPanel .sch-i-ops .sch-icon-action[data-act="run"]{border-color:color-mix(in srgb,var(--accent) 15%,var(--line));background:var(--accent-soft);color:var(--accent)}
+#schPanel .sch-i-ops .sch-icon-action[data-act="run"]:hover:not(:disabled){background:var(--accent-soft-2);color:var(--accent-hover,var(--accent));border-color:color-mix(in srgb,var(--accent) 25%,var(--line))}
+/* Templates stay useful without competing with saved automation. */
+#schPanel .sch-recipes{margin:0 auto 24px!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important}
+#schPanel .sch-recipes > header{margin-bottom:12px!important;padding:0!important}
+#schPanel .sch-recipes > header div{display:flex;flex-wrap:wrap;gap:5px 12px!important}
+#schPanel .sch-recipes > header b{color:var(--ink-2)!important;font:600 16px/1.5 var(--font-ui)!important;letter-spacing:0!important}
+#schPanel .sch-recipes > header span{color:var(--auto-muted)!important;font:400 14.5px/1.5 var(--font-ui)!important}
+#schPanel .sch-recipes > div{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px!important}
+#schPanel .sch-recipes button{
+  display:grid;grid-template-columns:32px minmax(0,1fr) 14px!important;align-items:start!important;
+  gap:10px!important;min-height:92px!important;height:100%!important;padding:14px!important;
+  border:1px solid var(--line)!important;border-radius:12px!important;background:var(--bg-0)!important;box-shadow:none!important;
+}
+#schPanel .sch-recipes button:hover,#schPanel .sch-recipes button:focus-visible{border-color:color-mix(in srgb,var(--accent) 28%,var(--line))!important;background:color-mix(in srgb,var(--accent) 3%,var(--auto-paper))!important;box-shadow:0 3px 10px color-mix(in srgb,var(--ink) 5%,transparent)!important}
+#schPanel .sch-recipes button > i{width:32px!important;height:32px!important;border-radius:9px!important;background:var(--accent-soft)!important;color:var(--accent)!important;box-shadow:none!important}
+#schPanel .sch-recipes button > i svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
+#schPanel .sch-recipes button > span{align-self:start!important;justify-content:flex-start!important;gap:5px!important;min-height:0!important}
+#schPanel .sch-recipes button b{color:var(--ink)!important;font:600 16px/1.45 var(--font-ui)!important;white-space:normal!important;overflow-wrap:anywhere}
+#schPanel .sch-recipes button small{color:var(--auto-muted)!important;font:400 14.5px/1.6 var(--font-ui)!important;-webkit-line-clamp:2;overflow-wrap:anywhere}
+#schPanel .sch-recipes button em{display:flex;align-self:start!important;margin-top:7px;padding:0!important;border:0!important;background:none!important;color:var(--ink-3)!important;box-shadow:none!important}
+#schPanel .sch-recipes button:is(:hover,:focus-visible) em{color:var(--accent)!important}
+#schPanel .sch-recipes button em svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+#schPanel .sch-recipes button:focus-visible,#schPanel summary:focus-visible{outline:2px solid var(--accent)!important;outline-offset:3px}
+#schPanel .sk-empty{box-sizing:border-box;min-height:230px;padding:36px 20px!important;gap:10px}
+#schPanel .sk-empty > b{font:600 17px/1.5 var(--font-ui)}
+#schPanel .sk-empty > span:not(.sk-empty-ico){font:400 14.5px/1.7 var(--font-ui);color:var(--auto-muted)}
+#schPanel .sk-empty-eg{display:none}
+@container automation-content (min-width:860px){
+  #schPanel .sch-list{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #schPanel .sch-recipes > div{grid-template-columns:repeat(4,minmax(0,1fr))!important}
+}
+@container automation-content (min-width:1440px){#schPanel .sch-list{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@container automation-content (max-width:560px){
+  #schPanel .sch-recipes > div{grid-template-columns:1fr!important}
+  #schPanel .sch-recipes button{min-height:76px!important}
+  #schPanel .sch-i-body{padding:14px;gap:10px}
+  #schPanel .sch-i-head{gap:8px}
+  #schPanel .sch-i-foot{padding:8px 10px 8px 14px}
+  #schPanel .sch-i-title{font-size:15px!important}
+  #schPanel .sch-i-when > i{font-size:19px!important}
+}
+@container automation-content (max-width:310px){
+  #schPanel .sch-i-head{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:4px 10px}
+  #schPanel .sch-i-when{grid-row:1 / span 2;flex-direction:column;align-items:flex-start;gap:3px}
+  #schPanel .sch-i-when > svg{display:none}
+  #schPanel .sch-i-assignment{grid-column:2;align-self:end}
+  #schPanel .sch-i-state{grid-column:2;justify-self:end}
+}
+@media(prefers-reduced-motion:reduce){#schPanel :is(.sch-item,.sch-recipes button){transition:none!important}}
+.sch-once-field{display:flex;flex:1 1 240px;min-width:0;flex-direction:column;gap:5px;color:var(--ink-2);font-size:12px}
+.sch-once-field .sch-in{width:100%;min-width:0}.sch-once-field small{color:var(--ink-3);font-size:12px;line-height:1.5}

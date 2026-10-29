@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "id": "sqlite",
+  "name": "SQLite",
+  "category": "数据库",
+  "description": "SQLite 通用连接器：只读打开既有数据库文件，查看表、字段与最多 100 行数据。不创建文件、不执行任意 SQL、不写入。",
+  "runtimeKind": "sqlite",
+  "officialDocs": [
+    "https://www.sqlite.org/uri.html",
+    "https://www.sqlite.org/fileformat2.html",
+    "https://www.sqlite.org/pragma.html#pragma_table_info",
+    "https://www.sqlite.org/lang_select.html"
+  ],
+  "authDocs": [
+    "https://www.sqlite.org/uri.html"
+  ],
+  "baseUrl": "http://sqlite-runtime.local",
+  "fields": [
+    {
+      "key": "SQLITE_PATH",
+      "label": "SQLite 数据库文件路径（绝对路径；文件必须已存在，连接器不创建新文件）",
+      "secret": false,
+      "required": true,
+      "pattern": "^(?:[A-Za-z]:[\\\\/]|/)[^\\x00-\\x1f<>|:*?\"]{0,999}$",
+      "example": ""
+    }
+  ],
+  "auth": {
+    "type": "none"
+  },
+  "headers": {},
+  "tools": [
+    {
+      "name": "list_tables",
+      "description": "列出最多 100 张基础表（宿主固定查询 sqlite_master WHERE type='table'，排除 sqlite_ 系统表）。无分页，一次最多 100 条。不执行任意 SQL。出处：https://www.sqlite.org/fileformat2.html 支持 offset（0-10000）按表名分页。",
+      "method": "GET",
+      "path": "/tables",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50,
+            "description": "每页条数"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000,
+            "default": 0,
+            "description": "分页偏移；读取数据时必须同时指定唯一的 order_by 字段。并发数据变动可能影响分页。"
+          }
+        },
+        "required": [],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "describe_table",
+      "description": "获取表结构（宿主固定执行 PRAGMA table_info，表名经标识符白名单校验）。无分页。出处：https://www.sqlite.org/pragma.html#pragma_table_info",
+      "method": "GET",
+      "path": "/tables/{table}/columns",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "table": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$",
+            "description": "表名",
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "table"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    },
+    {
+      "name": "read_rows",
+      "description": "按行读取表数据（宿主固定 SELECT * FROM \"table\" LIMIT n，双引号包裹标识符 + 白名单校验；连接以只读 URI 模式打开）。分页：limit（1-100）与 offset（0-10000）；分页必须指定唯一的 order_by 字段。出处：https://www.sqlite.org/lang_select.html",
+      "method": "GET",
+      "path": "/tables/{table}/rows",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "table": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$",
+            "description": "表名",
+            "maxLength": 256
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "description": "读取行数上限"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000,
+            "default": 0,
+            "description": "分页偏移；读取数据时必须同时指定唯一的 order_by 字段。并发数据变动可能影响分页。"
+          },
+          "order_by": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$",
+            "maxLength": 63,
+            "description": "用于升序排列的唯一字段，例如主键；offset 大于 0 时必填。"
+          }
+        },
+        "required": [
+          "table"
+        ],
+        "maxProperties": 50
+      },
+      "readOnly": true
+    }
+  ],
+  "limitations": [
+    "只读打开既有文件（URI mode=ro），目标文件不存在、损坏或非 SQLite 格式时直接报错，绝不创建新文件。",
+    "只提供固定只读操作，不执行用户 SQL，不提供任何写入；WAL 附属文件只读访问可能受限，请在数据库静默或提供只读副本时使用。",
+    "最多 100 行、结果不超过 2 MB；行数上限不代表已读取整张表。",
+    "数据库文件位于执行机本地，路径必须有执行机文件系统访问权限；连接器不做任何账号鉴权（SQLite 无账号体系）。",
+    "数据分页需指定稳定唯一的 order_by；最多跳过 10000 行。非快照，不保证并发修改期间跨页一致。"
+  ]
+}

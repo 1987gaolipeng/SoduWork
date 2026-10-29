@@ -1,0 +1,170 @@
+/* A normal workspace page; account dialogs keep their existing overlay styles. */
+#personalAccountPanel {
+  --window-main: 1;
+  --settings-accent: var(--accent);
+  --settings-line: var(--line);
+  --settings-canvas: var(--bg-1);
+  --account-text: max(var(--font-min-readable, 14.5px), calc(14.5px * var(--font-scale, 1)));
+  position: fixed;
+  z-index: 20;
+  inset: 10px 10px 10px var(--ws-main-left, var(--ws-side-w, 220px));
+  display: flex;
+  flex-direction: column;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  transform: none;
+  transition: none;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--bg-1);
+  color: var(--ink);
+  box-shadow: none;
+  overflow: hidden;
+  font: 400 var(--account-text)/1.55 var(--font-ui);
+  -webkit-user-select: text;
+  user-select: text;
+}
+#personalAccountPanel:not(.show),
+#personalAccountPanel [hidden] { display: none !important; }
+#personalAccountPanel.show { display: flex; }
+#personalAccountPanel > .personal-account-head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  box-sizing: border-box;
+  min-height: var(--ws-head-height, 60px);
+  padding: 12px var(--ws-head-gutter, 28px);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-0);
+}
+#personalAccountPanel .personal-account-head h1 {
+  margin: 0;
+  color: var(--ink);
+  font: 650 18px/1.4 var(--font-display);
+  letter-spacing: -.02em;
+}
+#personalAccountPanel .personal-account-head p {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: var(--account-text);
+}
+#personalAccountPanel .personal-account-body {
+  width: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  padding: 24px clamp(16px, 3vw, 32px) 32px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+  overflow-anchor: none;
+}
+#personalAccountPanel .personal-account-body > * {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 920px;
+  margin-inline: auto;
+}
+#personalAccountPanel :is(.personal-account-summary, .personal-account-content, .personal-account-device) {
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--bg-0);
+}
+#personalAccountPanel .personal-account-summary:empty { display: none; }
+#personalAccountPanel .personal-account-content,
+#personalAccountPanel .personal-account-device { margin-top: 18px; }
+#personalAccountPanel .personal-account-content { padding-top: 0; }
+#personalAccountPanel :is(h2, h3) {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font: 650 16px/1.5 var(--font-display);
+}
+#personalAccountPanel :is(.ac-muted, .ac-status, .ac-info-row, .ac-form label, .ac-setting-row b, .ac-setting-row > div > span, .ac-avatar-actions .ac-muted, .ac-text) {
+  font-size: var(--account-text);
+}
+#personalAccountPanel :is(.ac-primary, .ac-secondary, .ac-center-tabs button) {
+  font-size: var(--account-text);
+  min-height: 40px;
+}
+#personalAccountPanel .ac-center-tabs {
+  position: static;
+  gap: 24px;
+  padding-top: 18px;
+  margin-bottom: 24px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+#personalAccountPanel .ac-center-tabs button { flex: 0 0 auto; }
+#personalAccountPanel .ac-profile-head { align-items: flex-start; }
+#personalAccountPanel .ac-form input { min-height: 42px; font-size: var(--account-text); }
+#personalAccountPanel .ac-info-row { align-items: flex-start; }
+#personalAccountPanel .ac-info-row :is(b, code) { min-width: 0; overflow-wrap: anywhere; text-align: right; }
+#personalAccountPanel .ac-actions { flex-wrap: wrap; }
+#personalAccountPanel .ac-setting-row { gap: 16px; }
+#personalAccountPanel .ac-setting-row:last-child { border-bottom: 0; }
+#personalAccountPanel .personal-account-summary > .soduwork-account-settings { margin: 0; padding: 0; border: 0; background: transparent; }
+#personalAccountPanel .set-kline { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+#personalAccountPanel :is(.soduwork-account-settings .k, .soduwork-account-name) { font-size: 16px; font-weight: 650; }
+#personalAccountPanel :is(.soduwork-account-id, .soduwork-account-badge, .soduwork-quota-head, .soduwork-quota-note) { font-size: var(--account-text); }
+#personalAccountPanel .soduwork-account-person { grid-template-columns: 52px minmax(0, 1fr) auto; min-width: 0; gap: 14px; }
+#personalAccountPanel .soduwork-account-person > span:nth-child(2) { min-width: 0; }
+#personalAccountPanel :is(.soduwork-account-id, .soduwork-account-name) { overflow-wrap: anywhere; white-space: normal; color: var(--ink); }
+#personalAccountPanel .soduwork-account-id { color: var(--ink-3); }
+#personalAccountPanel .soduwork-account-avatar { width: 52px; height: 52px; border-radius: 50%; flex: none; background: var(--accent-soft); color: var(--accent); overflow: hidden; }
+#personalAccountPanel .soduwork-account-badge { color: var(--s-done); background: color-mix(in srgb, var(--s-done) 10%, var(--bg-0)); }
+#personalAccountPanel .personal-account-device label { display: block; margin: 16px 0 8px; color: var(--ink-2); }
+#personalAccountPanel .hub-row { display: flex; align-items: stretch; gap: 10px; min-width: 0; }
+#personalAccountPanel .hub-input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--line-3);
+  border-radius: var(--r-md);
+  background: var(--bg-0);
+  color: var(--ink);
+  font: inherit;
+}
+#personalAccountPanel .hub-save {
+  flex: none;
+  min-height: 42px;
+  padding: 8px 18px;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: var(--accent);
+  color: #fff;
+  font: 600 var(--account-text)/1.4 var(--font-ui);
+}
+#personalAccountPanel .hub-save:hover:not(:disabled) { background: var(--accent-hover); }
+#personalAccountPanel .hub-save:disabled { opacity: .5; }
+#personalAccountPanel .set-note { margin: 10px 0 0; color: var(--ink-3); overflow-wrap: anywhere; }
+#personalAccountPanel :is(button, input):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 900px) {
+  #personalAccountPanel .personal-account-head p { flex-basis: 100%; }
+  #personalAccountPanel .personal-account-body { padding: 16px; }
+  #personalAccountPanel :is(.personal-account-summary, .personal-account-content, .personal-account-device) { padding-inline: 18px; }
+  #personalAccountPanel .ac-center-tabs { gap: 20px; }
+  #personalAccountPanel .ac-setting-row { flex-wrap: wrap; }
+  #personalAccountPanel .ac-setting-row > div:first-child { flex-basis: 100%; }
+  #personalAccountPanel .ac-setting-row > button { margin-left: auto; }
+}
+@media (max-width: 640px) {
+  #personalAccountPanel > .personal-account-head { padding-inline: 16px; }
+  #personalAccountPanel .ac-profile-head { flex-wrap: wrap; }
+  #personalAccountPanel .ac-profile-fields { flex-basis: 100%; }
+  #personalAccountPanel .soduwork-account-person { flex-wrap: wrap; }
+  #personalAccountPanel .soduwork-account-person > span:nth-child(2) { flex: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #personalAccountPanel :is(button, input) { transition: none; }
+}

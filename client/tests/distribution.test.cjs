@@ -1,0 +1,71 @@
+"use strict";
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const distribution = require('../main/distribution.cjs');
+const endpoint = require('../main/hub-endpoint.cjs');
+const { initializeUserData } = require('../main/userdata-path.cjs');
+const { canonicalBytes, manifestPayload, validateManifest } = require('../main/client-update-contract');
+
+function appFixture(t, isPackaged) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-self-hosted-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  let userData;
+  const app = { isPackaged, getPath: key => key === 'appData' ? root : userData,
+    setPath: (_, value) => { userData = value; } };
+  initializeUserData(app, {});
+  return app;
+}
+
+test('public identity comes from the existing package and accepts empty update trust', () => {
+  const profile = distribution.current();
+  const packageInfo = require('../package.json');
+  assert.equal(profile.distributionId, 'self-hosted');
+  assert.equal(profile.hubOrigin, 'http://127.0.0.1:18989');
+  assert.equal(profile.websiteUrl, packageInfo.homepage || '');
+  assert.equal(profile.appId, packageInfo.build.appId);
+  assert.equal(profile.productName, packageInfo.productName);
+  assert.equal(profile.userDataName, 'SoduWork');
+  assert.equal(profile.workspaceName, 'SoduWork');
+  assert.equal(profile.linuxPackageName, packageInfo.build.deb.packageName);
+  assert.deepEqual(profile.updateTrust, require('../update-trust.json'));
+  assert.deepEqual(profile.updateTrust.keys, {});
+  assert.ok(Object.isFrozen(profile.updateTrust.keys));
+  assert.deepEqual(distribution.fromMetadata(profile), profile);
+  for (const id of ['internal', 'cn', 'global', 'unknown']) {
+    assert.throws(() => distribution.selected({ SODUWORK_DISTRIBUTION: id }), /Unknown/);
+  }
+});
+
+test('bundled metadata cannot inject another Hub or update signing key', () => {
+  const profile = distribution.current();
+  assert.throws(() => distribution.fromMetadata({ ...profile, hubOrigin: 'https://another.example.test' }), /differs/);
+  assert.throws(() => distribution.fromMetadata({ ...profile, updateTrust: { schema: 1,
+    keys: { injected: crypto.randomBytes(32).toString('base64') } } }), /differs/);
+  assert.throws(() => distribution.selected({ SODUWORK_RELEASE_HUB_URL: 'https://another.example.test' }), /does not match/);
+});
+
+test('an otherwise valid signed manifest is rejected when public trust has no keys', () => {
+  const signing = crypto.generateKeyPairSync('ed25519');
+  const manifest = { schema: 1, version: '99.0.0', releaseId: '00000000-0000-4000-8000-000000000001',
+    channel: 'stable', platform: 'win32', arch: 'x64', keyId: 'unregistered',
+    artifact: { name: 'SoduWork-99.0.0-Setup.exe', size: 1048576, sha256: 'a'.repeat(64),
+      url: '/api/v1/client-updates/artifacts/00000000-0000-4000-8000-000000000001' },
+    signature: Buffer.alloc(64).toString('base64') };
+  manifest.signature = crypto.sign(null, canonicalBytes(manifestPayload(manifest)), signing.privateKey).toString('base64');
+  const fixtureTrust = { schema: 1, keys: { unregistered: signing.publicKey.export({ format: 'der', type: 'spki' })
+    .subarray(-32).toString('base64') } };
+  assert.equal(validateManifest(manifest, fixtureTrust, 'win32'), manifest);
+  assert.throws(() => validateManifest(manifest, distribution.current().updateTrust, 'win32'), /不受信任/);
+});
+
+for (const isPackaged of [false, true]) test(`self-hosted ${isPackaged ? 'packaged' : 'source'} clients persist an editable Hub`, t => {
+  const app = appFixture(t, isPackaged);
+  assert.deepEqual(endpoint.initialize(app, {}), { hub: 'http://127.0.0.1:18989', editable: true, internalTest: false });
+  assert.equal(endpoint.prepare(app, 'https://hub.example.test').ok, true);
+  assert.equal(endpoint.initialize(app, {}).hub, 'https://hub.example.test');
+  assert.equal(distribution.publicInfo().websiteUrl, '');
+});

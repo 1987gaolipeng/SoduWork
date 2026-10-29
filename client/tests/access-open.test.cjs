@@ -1,0 +1,368 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), vm = require('node:vm');
+const source = fs.readFileSync(path.join(__dirname, '../main/pi-session/ipc.js'), 'utf8');
+const handler = source.slice(source.indexOf('  async function openConversation('), source.indexOf("  ipcMain.handle('pi-session-open',"));
+
+function fixture(options = {}) {
+  const calls = [], dialogs = [], cwd = os.tmpdir();
+  const emptyStorage = path.join(cwd, 'soduwork-access-open-' + require('node:crypto').randomUUID());
+  const sender = { mainFrame: {}, isDestroyed: () => false,
+    getURL: () => require('node:url').pathToFileURL(path.join(__dirname, '../desk.html')).href };
+  const event = { sender, senderFrame: sender.mainFrame };
+  const context = vm.createContext({
+    _cloudHandoff: { observe() {} },
+    skillTurn: require('../main/pi-session/skill-turn'), sendIdentityOf: null,
+    taskInput: { request: async (_identity, route) => options.request(route) },
+    app: options.app || { getPath: () => emptyStorage }, path, identityOf: options.identityOf || (async () => ({ hub: 'fixture', clientId: 'fixture' })),
+    memories: { context: async () => ({}), attach: async () => {}, assertOwner() {} },
+    pluginGrant: require('../main/pi-session/plugin-grant'),
+    updateWorkloads: { guard: () => ({ ok: true }) },
+    session: { findBySessionId: id => options.live?.sessionId === id ? options.live : null,
+      get: () => options.live,
+      archivedConversation: async () => options.archive || null,
+      historyEntry: async () => ({ entry: options.archive }),
+      open: async value => { if (options.validateWork) await value.validateWorkConversation?.();
+        calls.push(value); return options.openResult || { ok: true, session: { sessionId: 'fixture', cwd,
+        close: async () => {} } }; } },
+    capabilities: { resolve: options.resolve || (async () => ({ catalog: {}, selectedSkills: [], capabilityIds: [] })) },
+    capabilityGrantsOf: null, _skillDirs: () => [], _newSessionCwd: () => cwd, _defaultCwd: () => cwd,
+    workDir: () => cwd, attachments: { stage: async () => ({ files: [], warnings: [] }) },
+    sessionSpec: require('../main/conversation/session-spec'), _conf: () => ({}),
+    BrowserWindow: { fromWebContents: () => ({ fixture: true }) },
+    confirmFullAccess: async parent => {
+      dialogs.push(parent);
+      if (options.delay) await new Promise(resolve => setTimeout(resolve, options.delay));
+      return options.response === 1;
+    },
+    _entryContextPrompts: () => [], _awaitBounded: value => value, OPEN_TIMEOUT_MS: 45000,
+    _bindUsage() {}, _attach() {}, _detach() {}, _wire() {}, _openReply: () => ({ ok: true }),
+    require: name => {
+      if (['../work-preview', '../conversation/app-surfaces.cjs', './app-mcp-grant.cjs'].includes(name)) {
+        return require(path.join(__dirname, '../main/pi-session', name));
+      }
+      if (!['../native-locale.cjs', '../agent-runtime/runtime-catalog', '../access-control/policy', '../access-control/preferences', '../access-control/automation-access', '../conversation/requirement-context', '../conversation/acceptance-session', '../conversation/work-conversation-opening', '../conversation/history-access', '../conversation-connectors.cjs', './resume-cwd', './task-access'].includes(name)) throw Error('Unexpected dependency ' + name);
+      return require(path.join(__dirname, '../main/pi-session', name));
+    },
+  });
+  vm.runInContext(handler, context);
+  return { calls, dialogs, event, open: (raw, source = event) => context.openConversation(source, raw),
+    ...require('../main/access-control/automation-access').service(context.app, context.openConversation) };
+}
+
+function automationIdentity(uid = 'owner') {
+  const now = Math.floor(Date.now() / 1000);
+  const claims = Buffer.from(JSON.stringify({ typ: 'device', uid, cid: 'fixture', iat: now - 60, exp: now + 3600 })).toString('base64url');
+  return { hub: 'http://fixture.invalid', clientId: 'fixture', session: claims + '.' + 'a'.repeat(64) };
+}
+
+test('a live chat moved from the main window into its application resolves the current native app connection', async () => {
+  const preview = require('../main/work-preview'), grants = require('../main/pi-session/plugin-grant');
+  const guard = require('../main/pi-session/app-mcp-grant.cjs');
+  const stored = require('../main/app-conversation-connection.cjs'), originalStoredContext = stored.context,
+    originalAssociation = stored.association;
+  const originalContext = preview.appContextFor, originalResolve = grants.resolve;
+  const appSender = { mainFrame: {}, isDestroyed: () => false,
+    getURL: () => require('node:url').pathToFileURL(path.join(__dirname, '../desk.html')).href };
+  const appEvent = { sender: appSender, senderFrame: appSender.mainFrame };
+  const appContext = { pluginId: 'local:operations', pageUrl: 'https://app.example/',
+    connection: { credentialKey: 'ukey', scope: 'account-app-origin', revision: 1 } };
+  const handle = { sessionId: 'live-app-chat', cwd: os.tmpdir(), close: async () => {} };
+  const options = { openResult: { ok: true, session: handle } }, f = fixture(options);
+  const resolved = [];
+  preview.appContextFor = sender => sender === appSender ? appContext : null;
+  stored.context = (_app, id) => id === appContext.pluginId ? appContext : null;
+  stored.association = (_app, ids) => ids?.length === 1 && ids[0] === appContext.pluginId ? appContext.pluginId : '';
+  grants.resolve = async value => { resolved.push(value.appContext); return { items: [], grant: null }; };
+  try {
+    assert.equal((await f.open({})).ok, true);
+    options.live = handle;
+    const resolvePlugins = f.calls[0].resolvePlugins;
+    await resolvePlugins([appContext.pluginId], '');
+    assert.equal(resolved.at(-1), null);
+    handle.snapshot = () => ({ activePlugins: [appContext.pluginId] });
+    const reattached = await f.open({ chatId: handle.sessionId }, appEvent);
+    assert.equal(reattached.ok, true, reattached.reason);
+    assert.equal(handle.appPluginId, appContext.pluginId, 'reattachment must restore the native app binding');
+    const turn = {}; guard.guardSend(handle, turn); await turn.beforeTurn();
+    await resolvePlugins([appContext.pluginId], '');
+    assert.equal(resolved.at(-1), appContext, 'the original resolver follows the reattached application, not its first window');
+    assert.equal(handle.appPluginId, appContext.pluginId);
+    assert.equal(f.calls.length, 1, 'reattachment keeps one runtime and its existing conversation');
+    assert.equal((await f.open({ chatId: handle.sessionId })).ok, true);
+    const mainTurn = {}; guard.guardSend(handle, mainTurn); await mainTurn.beforeTurn();
+    await resolvePlugins([appContext.pluginId], '');
+    assert.equal(resolved.at(-1), appContext, 'the same application conversation keeps its authorized connection in the main window');
+    assert.equal(handle.appPluginId, appContext.pluginId);
+  } finally { preview.appContextFor = originalContext; grants.resolve = originalResolve; stored.context = originalStoredContext; stored.association = originalAssociation; }
+});
+
+test('opening IPC preserves the runtime task binding mismatch without treating it as success', async () => {
+  const f = fixture({ openResult: { ok: false, code: 'TASK_BINDING_MISMATCH',
+    runtimeError: 'TASK_BINDING_MISMATCH', reason: '这条会话不是该需求的协作会话' } });
+  const result = await f.open({ adapterId: 'pi', taskRef: 'new-task' });
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'TASK_BINDING_MISMATCH');
+  assert.equal(result.runtimeError, 'TASK_BINDING_MISMATCH');
+  assert.equal(f.calls.length, 1);
+});
+test('manual worker choices compile real standard, readonly and confirmed full policies without a renderer', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-manual-open-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const app = { getPath: () => root }, identity = automationIdentity(), f = fixture({ app, identityOf: async () => identity });
+  for (const mode of ['standard', 'readonly', 'full']) {
+    fs.writeFileSync(path.join(root, 'access-preferences.json'), JSON.stringify({ schema: 1, mode, revision: 1, fullConsentVersion: 1 }));
+    const options = { adapterId: 'pi' };
+    const choice = f.captureAutomationAccess(options, identity, 'run-' + mode, 'manual');
+    const opened = await f.openAutomation(options, identity, choice, 'run-' + mode);
+    assert.equal(opened.ok, true, opened.reason);
+    assert.equal(f.calls.at(-1).accessPolicy.mode, mode);
+    assert.equal(f.calls.at(-1).readOnly, mode === 'readonly');
+  }
+  assert.equal(f.dialogs.length, 0, 'existing confirmed default is the native consent source');
+});
+test('unconfirmed full, timer, legacy and renderer-supplied automation choices do not gain full access', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-automation-source-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const app = { getPath: () => root }, identity = automationIdentity(), f = fixture({ app, identityOf: async () => identity });
+  fs.writeFileSync(path.join(root, 'access-preferences.json'), JSON.stringify({ schema: 1, mode: 'full', revision: 1 }));
+  assert.equal(f.captureAutomationAccess({}, identity, 'unconfirmed', 'manual').mode, 'standard');
+  fs.writeFileSync(path.join(root, 'access-preferences.json'), JSON.stringify({ schema: 1, mode: 'full', revision: 2, fullConsentVersion: 1 }));
+  for (const trigger of ['timer', 'retry', undefined, '']) assert.equal(f.captureAutomationAccess({}, identity, 'scheduled', trigger), null);
+  assert.equal((await f.open({}, null)).ok, true);
+  assert.equal(f.calls.at(-1).accessPolicy, null);
+  const choice = f.captureAutomationAccess({}, identity, 'manual', 'manual');
+  assert.equal((await f.open({ accessMode: 'full', automationContext: choice }, null)).ok, false);
+  assert.equal(f.dialogs.length, 0);
+});
+test('a frozen manual choice survives later default changes and rejects wrong run, adapter, revision or account', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-automation-frozen-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const app = { getPath: () => root }, identity = automationIdentity(); let current = identity;
+  const f = fixture({ app, identityOf: async () => current });
+  fs.writeFileSync(path.join(root, 'access-preferences.json'), JSON.stringify({ schema: 1, mode: 'full', revision: 1, fullConsentVersion: 1 }));
+  const choice = f.captureAutomationAccess({ adapterId: 'pi' }, identity, 'manual', 'manual');
+  fs.writeFileSync(path.join(root, 'access-preferences.json'), JSON.stringify({ schema: 1, mode: 'readonly', revision: 2 }));
+  assert.equal((await f.openAutomation({ adapterId: 'pi' }, identity, JSON.parse(JSON.stringify(choice)), 'manual')).ok, true);
+  assert.equal(f.calls.at(-1).accessPolicy.mode, 'full');
+  for (const [options, modified, run] of [[{ adapterId: 'pi' }, choice, 'wrong'], [{ adapterId: 'qwen' }, choice, 'manual'],
+    [{ adapterId: 'pi' }, { ...choice, revision: -1 }, 'manual'], [{ adapterId: 'pi' }, { ...choice, mode: 'forged' }, 'manual']]) {
+    assert.equal((await f.openAutomation(options, identity, modified, run)).ok, false);
+  }
+  current = automationIdentity('other-account');
+  assert.equal((await f.openAutomation({ adapterId: 'pi' }, identity, choice, 'manual')).ok, false);
+  assert.equal(f.calls.length, 1);
+});
+test('account changes during preparation reject the manual choice before creating a runtime', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-automation-switch-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const app = { getPath: () => root }, identity = automationIdentity(); let current = identity;
+  fs.writeFileSync(path.join(root, 'access-preferences.json'), JSON.stringify({ schema: 1, mode: 'full', revision: 1, fullConsentVersion: 1 }));
+  const f = fixture({ app, identityOf: async () => current, resolve: async () => {
+    current = automationIdentity('other-account'); return { catalog: {}, selectedSkills: [], capabilityIds: [] };
+  } });
+  const choice = f.captureAutomationAccess({}, identity, 'manual', 'manual');
+  assert.equal((await f.openAutomation({}, identity, choice, 'manual')).ok, false);
+  assert.equal(f.calls.length, 0);
+});
+
+test('saved defaults reach real opening policy; explicit choices win and untrusted sources cannot inherit full', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-open-default-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const app = { getPath: () => root }, destination = path.join(root, 'access-preferences.json');
+  const f = fixture({ app });
+  fs.writeFileSync(destination, JSON.stringify({ schema: 1, mode: 'readonly', revision: 1 }));
+  for (const adapterId of ['pi', 'opencode', 'qwen', 'codex-harness']) {
+    assert.equal((await f.open({ adapterId })).ok, true);
+    assert.equal(f.calls.at(-1).accessPolicy.mode, 'readonly');
+    assert.equal(typeof f.calls.at(-1).resolveSkills, 'function');
+    assert.equal(typeof f.calls.at(-1).resolveConnectors, 'function');
+  }
+  assert.equal((await f.open({ accessMode: 'standard' })).ok, true);
+  assert.equal(f.calls.at(-1).accessPolicy.mode, 'standard');
+  fs.writeFileSync(destination, JSON.stringify({ schema: 1, mode: 'full', revision: 2, fullConsentVersion: 1 }));
+  assert.equal((await f.open({})).ok, true);
+  assert.equal(f.calls.at(-1).accessPolicy.mode, 'full');
+  assert.equal(f.dialogs.length, 0);
+  const before = f.calls.length;
+  assert.equal((await f.open({}, { ...f.event, senderFrame: {} })).ok, false);
+  for (const url of ['https://example.invalid/desk.html', 'file:///other/desk.html']) {
+    f.event.sender.getURL = () => url;
+    assert.equal((await f.open({})).ok, false);
+    assert.equal((await f.open({ accessMode: 'full' })).ok, false);
+  }
+  assert.equal(f.calls.length, before);
+  assert.equal(f.dialogs.length, 0);
+});
+
+test('本机新建需求继承系统权限，显式选择优先且后台派发不能继承完全访问', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-task-default-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const destination = path.join(root, 'access-preferences.json');
+  const f = fixture({ app: { getPath: () => root } });
+  const task = { taskRef: 'fixture-task', taskSession: true };
+  for (const mode of ['readonly', 'standard', 'full']) {
+    fs.writeFileSync(destination, JSON.stringify({ schema: 1, mode, revision: 1, fullConsentVersion: 1 }));
+    for (const adapterId of ['pi', 'opencode', 'codex-harness', 'qwen']) {
+      const result = await f.open({ ...task, adapterId });
+      assert.equal(result.ok, true, result.reason);
+      assert.equal(f.calls.at(-1).accessPolicy.mode, mode);
+      assert.equal(f.calls.at(-1).readOnly, mode === 'readonly');
+    }
+  }
+  assert.equal((await f.open({ ...task, accessMode: 'full' })).ok, true);
+  assert.equal(f.dialogs.length, 0, '系统设置已确认完全访问，不重复询问同一授权');
+  for (const accessMode of ['standard', 'readonly']) {
+    assert.equal((await f.open({ ...task, accessMode })).ok, true);
+    assert.equal(f.calls.at(-1).accessPolicy.mode, accessMode);
+  }
+  assert.equal((await f.open(task, null)).ok, true);
+  assert.equal(f.calls.at(-1).accessPolicy.mode, 'standard');
+  assert.equal((await f.open({ ...task, accessMode: 'full' }, null)).ok, false);
+  assert.equal((await f.open(task, { ...f.event, senderFrame: {} })).ok, false);
+  fs.writeFileSync(destination, JSON.stringify({ schema: 1, mode: 'full', revision: 2 }));
+  assert.equal((await f.open(task)).ok, true);
+  assert.equal(f.calls.at(-1).accessPolicy.mode, 'standard', '历史未确认的 full 不能提升权限');
+});
+
+test('a composer task full choice uses task-scoped native confirmation and cancellation never falls back to standard', async () => {
+  const options = { taskRef: 'fixture-task', taskSession: true, adapterId: 'pi', accessMode: 'full' };
+  const allowed = fixture({ response: 1 });
+  assert.equal((await allowed.open(options)).ok, true);
+  assert.equal(allowed.calls[0].accessPolicy.mode, 'full');
+  assert.equal(allowed.dialogs.length, 1);
+  const cancelled = fixture();
+  assert.equal((await cancelled.open(options)).cancelled, true);
+  assert.equal(cancelled.calls.length, 0);
+  assert.equal(cancelled.dialogs.length, 1);
+});
+
+test('full access requires native consent before opening; cancel and noninteractive callers cannot enable it', async () => {
+  const cancelled = fixture();
+  assert.equal((await cancelled.open({ accessMode: 'full' })).cancelled, true);
+  assert.equal(cancelled.calls.length, 0);
+  assert.equal(cancelled.dialogs[0].fixture, true);
+  const headless = fixture({ response: 1 });
+  assert.equal((await headless.open({ accessMode: 'full' }, null)).ok, false);
+  assert.equal(headless.calls.length, 0);
+  assert.equal(headless.dialogs.length, 0);
+  const allowed = fixture({ response: 1 });
+  assert.equal((await allowed.open({ accessMode: 'full' })).ok, true);
+  assert.equal(allowed.calls[0].accessPolicy.mode, 'full');
+  assert.equal(allowed.calls[0].accessPolicy.schema, 'soduwork.access-policy/v1');
+});
+
+test('main process compiles policy and ignores renderer-supplied full access on standard or unsupported calls', async () => {
+  const forged = { schema: 'soduwork.access-policy/v1', mode: 'full', revision: 100, workspaceRoot: os.tmpdir() };
+  const standard = fixture();
+  const raw = { accessMode: 'standard', accessPolicy: forged };
+  assert.equal((await standard.open(raw)).ok, true);
+  assert.equal(standard.calls[0].accessPolicy.mode, 'standard');
+  assert.equal(standard.calls[0].accessPolicy.revision, 1);
+  assert.equal(raw.accessPolicy, forged);
+  const legacy = fixture();
+  assert.equal((await legacy.open({ adapterId: 'claude', mode: 'full', accessPolicy: forged })).ok, true);
+  assert.equal(legacy.calls[0].accessPolicy, null);
+  assert.equal(legacy.calls[0].readOnly, false);
+  const newChat = fixture();
+  assert.equal((await newChat.open({ mode: 'full', accessPolicy: forged })).ok, true);
+  assert.equal(newChat.calls[0].accessPolicy.mode, 'standard');
+});
+
+test('async capability failure during full-access consent does not open a session', async () => {
+  const failed = fixture({ response: 1, delay: 30, resolve: async () => { throw Error('capability unavailable'); } });
+  const reply = await failed.open({ accessMode: 'full' });
+  assert.equal(reply.ok, false);
+  assert.match(reply.reason, /capability unavailable/);
+  assert.equal(failed.calls.length, 0);
+});
+
+test('navigating away while a chat is preparing cannot start a session from the old page', async () => {
+  const f = fixture({ resolve: async () => {
+    f.event.sender.getURL = () => 'https://example.invalid/';
+    return { catalog: {}, selectedSkills: [], capabilityIds: [] };
+  } });
+  assert.equal((await f.open({ accessMode: 'standard' })).ok, false);
+  assert.equal(f.calls.length, 0);
+});
+
+test('仅表单会话首次运行继承系统权限及显式选择，真实历史保持原权限', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-work-open-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const app = { getPath: () => root }, owner = automationIdentity(), file = path.join(root, 'work.jsonl');
+  const archive = { id: 'work', path: file, cwd: root, adapterId: 'pi', workOnly: true,
+    workOwner: require('../main/platform-connections/runtime.cjs').scope(owner) };
+  fs.writeFileSync(file, JSON.stringify({ type: 'session', id: 'work' }) + '\n');
+  const f = fixture({ app, identityOf: async () => owner, archive });
+  for (const mode of ['standard', 'readonly', 'full']) {
+    fs.writeFileSync(path.join(root, 'access-preferences.json'), JSON.stringify({ schema: 1, mode, revision: 1, fullConsentVersion: 1 }));
+    const result = await f.open({ chatId: 'work', modelName: 'selected-model' });
+    assert.equal(result.ok, true, result.reason);
+    assert.equal(f.calls.at(-1).accessPolicy?.mode, mode);
+    assert.equal(f.calls.at(-1).modelName, 'selected-model');
+  }
+  assert.equal(f.dialogs.length, 0);
+  assert.equal((await f.open({ chatId: 'work', accessMode: 'readonly' })).ok, true);
+  assert.equal(f.calls.at(-1).accessPolicy.mode, 'readonly');
+  archive.workOnly = false;
+  assert.equal((await f.open({ chatId: 'work', accessMode: 'full' })).ok, true);
+  assert.equal(f.calls.at(-1).accessPolicy, null, '普通存档由底座恢复原权限，不用系统默认覆盖');
+});
+
+test('仅表单会话可以主动选非 Pi 底座与模型，首次打开准备复用同一会话身份', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-work-adapter-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const app = { getPath: () => root }, owner = automationIdentity(), file = path.join(root, 'work.jsonl');
+  const archive = { id: 'work', path: file, cwd: root, adapterId: 'pi', workOnly: true,
+    workOwner: require('../main/platform-connections/runtime.cjs').scope(owner) };
+  fs.writeFileSync(file, JSON.stringify({ type: 'session', id: 'work' }) + '\n');
+  const f = fixture({ app, identityOf: async () => owner, archive });
+  const result = await f.open({ chatId: 'work', adapterId: 'opencode', modelName: 'explicit', accessMode: 'readonly' });
+  assert.equal(result.ok, true, result.reason);
+  assert.equal(f.calls[0].adapterId, 'opencode');
+  assert.equal(f.calls[0].modelName, 'explicit');
+  assert.equal(f.calls[0].workConversation?.id, 'work');
+  assert.equal(f.calls[0].resumePath, '', '不能把 Pi JSONL 交给其他底座恢复');
+  assert.equal(f.calls[0].accessPolicy.mode, 'readonly');
+});
+
+test('生产 IPC 只给通过回执和 Hub 校验的 Pi 首次草稿传递首次绑定选项', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-task-first-open-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const app = { getPath: () => root }, owner = automationIdentity(), file = path.join(root, 'work.jsonl');
+  const archive = { id: 'work', path: file, cwd: root, adapterId: 'pi', workOnly: true,
+    workOwner: require('../main/platform-connections/runtime.cjs').scope(owner) };
+  fs.writeFileSync(file, JSON.stringify({ type: 'session', id: 'work' }) + '\n');
+  const cardsFile = require('../main/conversation/work-conversation-cards').location(app, 'work');
+  fs.mkdirSync(path.dirname(cardsFile), { recursive: true });
+  fs.writeFileSync(cardsFile, JSON.stringify({ version: 1, sessionId: 'work', owner: archive.workOwner,
+    cards: [{ actionId: 'work.requirement.create', state: { phase: 'succeeded', receipt: { id: 'created-task' } } }] }));
+  const routes = [];
+  const f = fixture({ app, archive, identityOf: async () => owner, validateWork: true,
+    request: async route => { routes.push(route); return { id: 'created-task', status: 'todo', ownerClientId: owner.clientId }; } });
+  const options = { chatId: 'work', taskRef: 'created-task', taskTitle: '新需求', taskSession: true,
+    requireTaskBinding: true, modelName: 'chosen-model', workConversationId: 'renderer-cannot-select-lock' };
+  assert.equal((await f.open(options)).ok, true);
+  assert.equal(f.calls[0].requireTaskBinding, false);
+  assert.equal(f.calls[0].workConversationId, 'work');
+  assert.equal(f.calls[0].workConversation, null);
+  assert.equal(f.calls[0].taskRef, 'created-task');
+  assert.equal(f.calls[0].resumePath, file, '继续同一草稿，不另开会话');
+  assert.equal(f.calls[0].modelName, 'chosen-model');
+  assert.deepEqual(routes, ['/tasks/created-task']);
+  const wrong = await f.open({ ...options, taskRef: 'another-task' });
+  assert.equal(wrong.ok, false); assert.match(wrong.reason, /没有该需求的创建回执/);
+  assert.equal(f.calls.length, 1, 'a refusal must not reach the native open boundary');
+  fs.appendFileSync(file, JSON.stringify({ type: 'custom', customType: 'soduwork.access.policy', data: {} }) + '\n');
+  assert.equal((await f.open(options)).ok, true);
+  assert.equal(f.calls.at(-1).requireTaskBinding, true, 'initialized archives retain the original runtime authorization check');
+  assert.equal(f.calls.at(-1).workConversationId, undefined);
+  archive.workOnly = false;
+  assert.equal((await f.open(options)).ok, true);
+  assert.equal(f.calls.at(-1).requireTaskBinding, true, 'ordinary archives must retain their original binding');
+  archive.workOnly = true; archive.workOwner = 'unrelated-owner';
+  const before = f.calls.length;
+  assert.equal((await f.open(options)).ok, false);
+  assert.equal(f.calls.length, before, '其他账号的草稿仍拒绝启动');
+});

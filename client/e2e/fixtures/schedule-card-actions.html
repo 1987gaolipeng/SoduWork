@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="azure" data-desk-panel="workspace"><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../theme/variables.css">
+<link rel="stylesheet" href="../../components/panels/panels-base.css">
+<link rel="stylesheet" href="../../components/panels/panels-schedules.css">
+<link rel="stylesheet" href="../../components/workspace/workspace-shell.css">
+<link rel="stylesheet" href="../../theme/workspace-experience.css">
+<link rel="stylesheet" href="../../theme/workspace-page-heads.css">
+<link rel="stylesheet" href="../../components/panels/automation-surface.css">
+<!-- Match the production CSS order; only the isolated viewport geometry differs. -->
+<style>body{margin:0;font:14px/1.5 var(--font-ui)}html[data-desk-panel="workspace"] #schPanel{position:fixed!important;inset:16px!important;transform:none!important;width:auto!important;height:auto!important;max-height:none!important}</style>
+</head><body>
+<script>
+window.errors=[];window.calls={runs:[],deleted:[],history:[]};
+addEventListener('error',e=>errors.push(e.message));addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
+window.esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function expandForOverlay(){}function shrinkFromOverlay(){}function makeDraggable(){}
+function petSay(s){window.notice=s;}
+const titles=['梳理 GitHub 热门项目，整理企业降本增效的产品思路','每日浏览 Agent 领域投资新闻','水泥原料及产品价格盘点','示例企业产业链每日分析'];
+window.rows=titles.map((title,i)=>({id:'schedule-'+i,title,note:'整理最新动态、重点变化和需要关注的事项，形成一份简洁的工作简报。',enabled:i===2,every:'daily',atHour:[12,10,9,14][i],atMinute:0,assigneeId:'pi',flow:false,repoId:'',nextRunLocal:'明天 09:00',lastError:i===1?'上一次请求失败':'',lastRunAt:i===2?'2026-09-08T01:00:00Z':''}));
+window.SoduWorkAPI={
+ listSchedules:async()=>rows,listAIAgents:async()=>({agents:[{id:'pi',name:'Pi'}]}),listRepos:async()=>[],
+ listScheduleTemplates:async()=>titles.map((name,i)=>({id:'fixture-template-'+i,name,title:name,
+   note:'隔离的管理端模板说明',every:'daily',atHour:9,atMinute:0})),
+ pluginCatalog:async()=>({items:[]}),myModels:async()=>({usable:[]}),
+ runSchedule:sid=>{calls.runs.push(sid);return new Promise((resolve,reject)=>{window.releaseRun=resolve;window.rejectRun=reject;});},
+ listScheduleRuns:async sid=>{calls.history.push(sid);return[];},
+ deleteSchedule:async sid=>{calls.deleted.push(sid);rows=rows.filter(s=>s.id!==sid);},
+};
+</script>
+<script src="../../components/panels/schedule-timing.js"></script>
+<script src="../../components/panels/panels-schedules-methods.js"></script>
+<script src="../../components/panels/panels-schedules-cards.js"></script>
+<script src="../../components/panels/panels-schedules.js"></script>
+<script src="../../components/panels/panels-schedules-editor.js"></script>
+<script src="../../components/panels/panels-schedules-runs.js"></script>
+<script>openSchedulePanel();</script>
+</body></html>

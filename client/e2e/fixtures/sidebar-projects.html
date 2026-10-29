@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN" data-desk-panel="workspace" data-skin="flat"><head><meta charset="utf-8">
+<title>Sidebar projects — isolated test</title>
+<link rel="stylesheet" href="../../theme/variables.css">
+<link rel="stylesheet" href="../../components/workspace/workspace-shell.css">
+<link rel="stylesheet" href="../../components/workspace/workspace-sidebar-projects.css">
+<link rel="stylesheet" href="../../theme/workspace-experience.css">
+<style>body{margin:0;font:14px/1.5 var(--font-ui)}:root{--ws-side-w:280px}.fixture-copy{padding:36px;color:var(--ink-3)}</style>
+</head><body>
+<script>
+window.errors=[];addEventListener('error',event=>errors.push(event.message));
+window.opens=[];window.petSay=message=>window.lastNotice=message;
+window.WorkspaceHost={open:(key,options)=>{opens.push({key,options});WorkspaceShell.setActive(key)}};
+window.fixtureAccount='employee';
+window.SoduWorkAPI={hubBase:()=> 'https://sidebar-fixture.invalid',clientAuthSnapshot:()=>({clientId:'fixture-device',user:{id:fixtureAccount}})};
+</script>
+<script src="../../core/plugin-icon.js"></script>
+<script src="../../components/workspace/workspace-chat-history.js"></script>
+<script src="../../components/workspace/workspace-sidebar-state.js"></script>
+<script src="../../components/workspace/workspace-sidebar-drag.js"></script>
+<script src="../../components/workspace/workspace-sidebar-projects.js"></script>
+<script src="../../components/workspace/workspace-chat-list.js"></script>
+<script src="../../components/workspace/workspace-shell.js"></script>
+<script>
+WorkspaceShell.mount();WorkspaceShell.setActive('create');
+document.querySelector('#wsCanvas').innerHTML='<div class="fixture-copy">项目会话归类 · 隔离交互验证<br>不连接业务服务，不运行 Agent。</div>';
+window.row=id=>[...document.querySelectorAll('.ws-chat-row')].find(el=>el.querySelector('.ws-chat').dataset.chatId===id);
+window.projectId=()=>document.querySelector('.ws-project').dataset.projectId;
+window.drag=(id,target,beforeId)=>{
+ const source=row(id),data=new DataTransfer(),zone=document.querySelector('[data-sidebar-section="'+target+'"]');
+ source.dispatchEvent(new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:data,clientY:200}));
+ const endpoint=beforeId?row(beforeId):zone;
+ const position=endpoint.getBoundingClientRect();
+ endpoint.dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:data,clientY:position.top+1}));
+ endpoint.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:data,clientY:position.top+1}));
+ source.dispatchEvent(new DragEvent('dragend',{bubbles:true,dataTransfer:data}));
+};
+</script></body></html>

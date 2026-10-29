@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "key": "document-studio",
+  "name": "专业文档工坊",
+  "version": "1.0.3",
+  "category": "office",
+  "description": "把零散材料整理成结构严谨、版式规范、可以直接提交或发布的 Word 文档，并完成文件级与内容级验收。",
+  "author": "SoduWork",
+  "openSource": {
+    "license": "Apache-2.0",
+    "repository": "https://github.com/iOfficeAI/OfficeCLI",
+    "upstreamVersion": "v1.0.143@fd4adab4dbe3",
+    "adaptation": "借鉴其结构化文档操作方法，改造成 SoduWork 的任务输入、独立审查、人工验收和可追溯交付流程；不强制安装上游 CLI。"
+  },
+  "instructions": "你是企业级文档编辑与交付专家。先识别文档目的、读者、使用场合、事实来源和验收标准，再完成内容架构、撰写、审校与排版。严格区分已知事实、合理推断和待确认事项，不虚构数据、政策、案例或引用。优先使用用户提供的材料；材料冲突时明确指出。交付 DOCX 时必须使用标题样式、正文样式、合理分页、页眉页脚、表格样式和一致的编号体系，必要时附摘要、目录、结论、行动项与来源。完成后重新打开文件，检查结构、页数、关键内容和临时文件，最后只登记用户真正需要的成品。",
+  "entrypoints": {"conversation": true, "task": true, "automation": false},
+  "inputs": [
+    {"key": "audience", "label": "阅读对象", "type": "text", "required": false},
+    {"key": "documentType", "label": "文档用途", "type": "text", "required": false},
+    {"key": "brandRules", "label": "品牌或格式要求", "type": "textarea", "required": false}
+  ],
+  "outputs": [{"key": "document", "label": "正式 Word 文档", "accept": ["deliverables/document.docx"]}],
+  "capabilities": {"network": false, "skills": [], "mcpServers": [], "runtime": ["files"]},
+  "evaluations": [{
+    "key": "executive-proposal",
+    "name": "管理层方案文档",
+    "instruction": "根据给定业务背景制作一份可提交管理层评审的正式方案文档。",
+    "inputs": {"audience": "公司管理层", "documentType": "项目立项方案", "brandRules": "克制、专业、结论先行"},
+    "criteria": [
+      "输出 deliverables/document.docx 且可按标准格式重新打开并读取关键内容",
+      "包含执行摘要、背景目标、范围、方案、风险、计划和验收标准",
+      "事实、假设和待确认事项边界清晰",
+      "标题层级、编号、表格与页眉页脚一致"
+    ],
+    "expectedOutputs": ["compose.document"]
+  }],
+  "workflow": {"nodes": [
+    {
+      "key": "compose", "type": "ai", "name": "撰写与排版",
+      "capabilities": {"network": false, "skills": [], "mcpServers": [], "runtime": ["files"]},
+      "outputs": [{"key": "document", "kind": "file", "label": "正式 Word 文档", "path": "deliverables/document.docx", "required": true}],
+      "config": {"prompt": "依据任务正文、附件和插件输入制作 deliverables/document.docx。先建立内容大纲和证据边界，再撰写并按正式商务文档标准排版；不得用 Markdown 文本冒充 Word。完成后用 Office 开源组件重新打开，检查标题层级、段落、表格、页眉页脚和关键内容。不要向用户提问；信息不足时做保守假设并在文档中标注。"},
+      "retry": {"maxAttempts": 2}
+    },
+    {
+      "key": "validate", "type": "validate", "name": "文件完整性检查", "dependsOn": ["compose"],
+      "config": {"rules": [{"type": "file", "name": "Word 成品存在且不是空壳", "nameEquals": "deliverables/document.docx", "minBytes": 3000}]}
+    },
+    {
+      "key": "review", "type": "ai_review", "name": "独立内容审校", "dependsOn": ["compose", "validate"],
+      "inputs": [{"key": "document", "fromNode": "compose", "outputKey": "document", "label": "待审文档", "required": true}],
+      "capabilities": {"network": false, "skills": [], "mcpServers": [], "runtime": ["files"]},
+      "outputs": [{"key": "review", "kind": "decision", "label": "文档审校结论", "path": "reviews/document-review.md", "required": true}],
+      "config": {"prompt": "独立审阅 deliverables/document.docx，核对任务目标、事实边界、内容完整性、结构、可读性和版式。将逐条结论与剩余问题写入 reviews/document-review.md；存在阻断性问题时明确判定不通过，不能替制作节点自我背书。"}
+    },
+    {"key": "accept", "type": "human_review", "name": "业务验收", "dependsOn": ["review"], "config": {"summary": "请验收文档内容、事实和正式版式"}},
+    {"key": "publish", "type": "publish", "name": "交付文档", "dependsOn": ["accept"], "config": {"message": "正式文档已通过验收并交付"}}
+  ]}
+}

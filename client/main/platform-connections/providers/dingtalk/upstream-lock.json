@@ -1,0 +1,9 @@
+{
+  "provider": "dingtalk",
+  "package": "dingtalk-workspace-cli",
+  "version": "1.0.61",
+  "entry": "bin/dws.js",
+  "nodeMinimum": 20,
+  "npmIntegrity": "sha512-lYLLqE3jDRqzf3ekjaOnBqD222fsbRkEiO4GsR6k8aMiybEUTQDr7BC9/4Wtm2KeL+PiukBqfZ9EFULS22jdBA==",
+  "npmTarball": "https://registry.npmjs.org/dingtalk-workspace-cli/-/dingtalk-workspace-cli-1.0.61.tgz"
+}

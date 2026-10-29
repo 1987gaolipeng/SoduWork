@@ -1,0 +1,107 @@
+name: Source checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: source-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  startup:
+    name: Source HTTP startup (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Check prerequisites and launcher regressions
+        run: |
+          python start.py --check --desktop
+          python -m unittest tools.dev.test_start_local tools.dev.test_deploy tools.dev.test_source_export tools.security.test_scan_secrets
+      - name: Check public source and documentation
+        run: |
+          node tools/check-public-source.cjs
+          node tools/check-repository-layout.cjs
+          node tools/check-third-party.cjs
+          node tools/check-source-manifest.cjs
+          node tools/brand-keyword-gate.cjs
+          node tools/check-docs.cjs
+          node --test tools/source-manifest.test.cjs tools/check-docs.test.cjs tools/check-source-provenance.test.cjs client/tests/repository-layout.test.cjs
+      - name: Verify isolated HTTP startup, persistence, and shutdown
+        run: python tools/dev/verify_local_start.py
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - run: npm ci
+        working-directory: hub-frontend
+      - run: npm run build
+        working-directory: hub-frontend
+      - run: node --test tests/*.test.mjs
+        working-directory: hub-frontend
+
+  client:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - run: python -m pip install -r hub-backend/requirements-test.txt
+      - run: npm ci
+        working-directory: client
+      - run: npm test
+        working-directory: client
+
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - run: python -m pip install -r hub-backend/requirements-test.txt
+      - run: python quality_gate.py --profile release --scope backend
+        working-directory: hub-backend

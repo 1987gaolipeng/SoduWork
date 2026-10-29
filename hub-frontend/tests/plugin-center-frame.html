@@ -1,0 +1,17 @@
+<!doctype html>
+<html><head><meta charset="UTF-8" /><title>Narrow viewport regression</title><style>html,body{margin:0;background:#e9edf3}iframe{display:block;border:0}pre{display:none}</style></head>
+<body><iframe title="Isolated plugin center"></iframe><pre id="out">RUNNING</pre><script>
+// Chrome's native headless window has a minimum width. A same-origin test frame
+// provides an exact test viewport without cropping or changing app styles.
+const params = new URLSearchParams(location.search)
+const frame = document.querySelector('iframe')
+frame.width = params.get('width') || '390'
+frame.height = params.get('height') || '1000'
+frame.src = './plugin-center-render.html?' + params.toString()
+const timer = setInterval(() => {
+  if (frame.contentDocument?.documentElement.dataset.testComplete) {
+    document.getElementById('out').textContent = frame.contentDocument.getElementById('out').textContent
+    clearInterval(timer)
+  }
+}, 50)
+</script></body></html>

@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "key": "ai-errand",
+  "name": "AI 零活 · 交给 AI 干一件事",
+  "version": "1.0.2",
+  "category": "errand",
+  "description": "不挂工程、不用改代码的零散活（写材料、做 PPT、整理文档、查资料…）：AI 干完交产出，人验收一次就算完。三类任务里「交给 AI 的零活」走这张。",
+  "author": "SoduWork",
+  "inputs": [
+    {"key": "deliverable", "label": "要什么产出", "type": "text", "required": false},
+    {"key": "constraints", "label": "有什么要求", "type": "text", "required": false}
+  ],
+  "outputs": [
+    {"key": "result", "label": "产出物", "accept": []}
+  ],
+  "capabilities": {"network": false, "skills": [], "mcpServers": []},
+  "workflow": {
+    "nodes": [
+      {
+        "key": "work",
+        "type": "ai",
+        "name": "AI 干活",
+        "outputs": [
+          {"key": "result", "kind": "evidence", "label": "产出物", "required": true}
+        ],
+        "config": {
+          "prompt": "把这件事干完，并把成果作为产出物交回 SoduWork。要求：①先想清楚交付物到底该是什么形态（文档、表格、演示稿、一份清单…），选最合适的一种，不要反问；②多个可行做法时自己挑一个，并在结尾用一句话写清「选了什么、因为什么」；③有拦不过去的前提也别停下来问，先按最合理的假设做完，把这些假设列在「还需要人处理」里；④结尾必须是可交付的结果，不能是问句。"
+        },
+        "retry": {"maxAttempts": 2}
+      },
+      {
+        "key": "accept",
+        "type": "human_review",
+        "name": "人工验收",
+        "dependsOn": ["work"],
+        "config": {
+          "summary": "看看 AI 交的东西能不能用；不行就打回让它重做"
+        }
+      },
+      {
+        "key": "publish",
+        "type": "publish",
+        "name": "办结",
+        "dependsOn": ["accept"],
+        "config": {"message": "产出已验收通过，这件事办完了"}
+      }
+    ]
+  }
+}

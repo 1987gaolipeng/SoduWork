@@ -1,0 +1,98 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const crypto = require('node:crypto');
+const read = name => fs.readFileSync(path.join(__dirname, '../components/panels', name), 'utf8');
+
+function fixture(ctx = {}, overrides = {}) {
+  const opened = [], events = [], messages = [];
+  const input = { value: 'original', dispatchEvent: event => events.push(event.type), focus: () => events.push('focus') };
+  const window = { WorkspaceHost: { open: (view, payload) => opened.push({ view, payload }) }, ...overrides };
+  const context = { window, document: { getElementById: () => input }, Event,
+    petSay: message => messages.push(message) };
+  for (const name of ['panels-plugin-builder-entry.js', 'chat-composer-bindings.js']) {
+    vm.runInNewContext(read(name), context, { filename: name });
+  }
+  return { window, opened, input, events, messages, entry: window.ChatComposerBindings.create(ctx) };
+}
+
+test('new-session entries preserve the complete original prompt bytes and synchronous return', () => {
+  // Captured from the original shared entry before consolidating the chat fallback.
+  for (const [seed, context, expected] of [
+    ['  Build reusable report  ', { attachmentNames: ['report.csv', 'plan.md'] }, '1523cf5149c725504cef3efdc8887584d960ef3966e6d93111505ee85f912060'],
+    ['', { attachmentNames: ['input.txt'] }, 'c293fb050ea6d8f933c61156c3cb98bde25ad9df7cabd8268fe09b75c28577d7'],
+    ['', undefined, '856cfd0c031573eecd4fa2259c7ec58443bbd0a247cf72085dae6c02726b5dfd'],
+  ]) {
+    const f = fixture();
+    assert.equal(f.window.PluginBuilderEntry.open(seed, context), true);
+    assert.equal(f.entry._openPluginBuilder(seed, context), true);
+    for (const { view, payload } of f.opened) {
+      assert.equal(view, 'create');
+      assert.equal(crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex'), expected);
+    }
+    assert.deepEqual(f.opened[0].payload, f.opened[1].payload);
+  }
+});
+
+test('attachment names retain normalization and the twelve-name limit in both entries', () => {
+  const f = fixture(), names = ['', null, 7, ...Array.from({ length: 20 }, (_, i) => 'file-' + i)];
+  for (const open of [f.window.PluginBuilderEntry.open, f.entry._openPluginBuilder]) open('seed', { attachmentNames: names });
+  const expected = names.map(String).filter(Boolean).slice(0, 12).join('、');
+  assert.ok(f.opened[0].payload.contextPrompts[2].includes(expected));
+  assert.ok(!f.opened[0].payload.contextPrompts[2].includes('file-19'));
+  assert.deepEqual(f.opened[0].payload, f.opened[1].payload);
+  assert.equal(names.length, 23);
+});
+
+test('new-session fallback uses the compose entry or throws synchronously when unavailable', () => {
+  const calls = [], f = fixture({}, { WorkspaceHost: null, openComposePanel: payload => calls.push(payload) });
+  assert.equal(f.entry._openPluginBuilder('seed'), true);
+  assert.equal(calls[0].newSession, true);
+  const unavailable = fixture({}, { WorkspaceHost: null });
+  assert.throws(() => unavailable.entry._openPluginBuilder('seed'), /插件制作助手暂时没有加载完成/);
+});
+
+test('plugin authoring from an active conversation reuses it and returns a Promise', async () => {
+  let complete, cleared = 0;
+  const ctx = { _ref: 'existing', _pluginMention: {
+    clearAction: () => cleared++, selected: () => [{ pluginId: 'local:plugin-builder' }],
+    select: (id, current) => { assert.equal(id, 'local:plugin-builder'); assert.equal(current(), true);
+      return new Promise(resolve => { complete = resolve; }); },
+  } };
+  const f = fixture(ctx), result = f.entry._openPluginBuilder(' keep history ');
+  assert.equal(typeof result.then, 'function');
+  assert.equal(f.input.value, 'original');
+  complete({ pluginId: 'local:plugin-builder' });
+  assert.equal(await result, true);
+  assert.equal(cleared, 1);
+  assert.equal(f.input.value, '制作插件：keep history');
+  assert.deepEqual(f.events, ['input', 'focus']);
+  assert.deepEqual(f.opened, []);
+});
+
+test('late or failed active selections do not open a new conversation or alter input', async () => {
+  for (const failure of [false, true]) {
+    let complete;
+    const ctx = { _ref: 'old', _pluginMention: { selected: () => [{ pluginId: 'local:plugin-builder' }],
+      select: () => new Promise((resolve, reject) => { complete = failure ? reject : resolve; }) } };
+    const f = fixture(ctx), result = f.entry._openPluginBuilder('seed');
+    if (failure) complete(new Error('selection failed'));
+    else { ctx._ref = ''; complete({ pluginId: 'local:plugin-builder' }); }
+    assert.equal(await result, false);
+    assert.equal(f.input.value, 'original');
+    assert.deepEqual(f.opened, []);
+    assert.equal(f.messages.length, failure ? 1 : 0);
+  }
+});
+
+test('the production workspace loads the shared entry before both composer clients', () => {
+  const desk = fs.readFileSync(path.join(__dirname, '../desk.html'), 'utf8');
+  const shared = desk.indexOf('src="components/panels/panels-plugin-builder-entry.js"');
+  assert.ok(shared >= 0);
+  for (const name of ['chat-composer-bindings.js', 'compose-surface.js']) {
+    assert.ok(shared < desk.indexOf('src="components/panels/' + name + '"'));
+  }
+});

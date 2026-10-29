@@ -1,0 +1,25 @@
+# Optional local PostgreSQL development service; external development databases use DATABASE_URL directly.
+# Local development only; no default database password is supplied.
+# POSTGRES_PASSWORD is mandatory before startup.
+# Production uses deployment-managed secrets instead of this file.
+# Set a strong POSTGRES_PASSWORD in .env before starting the service.
+# Configure DATABASE_URL with the same credentials and the exposed local port.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: soduwork-hub-pg
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-soduwork}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 hub-backend/.env 设置 POSTGRES_PASSWORD（仅本地开发库，生产用平台 secrets）}
+      POSTGRES_DB: ${POSTGRES_DB:-soduwork_hub}
+    ports:
+      - "5433:5432"
+    volumes:
+      - soduwork_hub_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U soduwork -d soduwork_hub"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+volumes:
+  soduwork_hub_pg: {}
