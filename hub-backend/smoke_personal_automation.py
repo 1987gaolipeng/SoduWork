@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Regression checks for public module contracts."""
+"""Offline personal-plugin automation tests covering schedule identity/version metadata, dispatch
+forwarding, device-side pinned/latest resolution, integrity checks, MCP ticket injection, prompt
+composition, and explicit failure when method context is missing.
+"""
 import asyncio
 import json
 import os
@@ -93,11 +96,10 @@ async def hub_side():
         both = models.AiSchedule(title="双选", owner_client_id="c-pa",
                                  assignee_id="local:pi", plugin_binding_id="b-1",
                                  personal_plugin_key="daily-report")
-        try:
-            await sch.validate_execution(session, both)
-            chk("企业绑定与个人插件互斥", False)
-        except ValueError as exc:
-            chk("企业绑定与个人插件互斥", "二选一" in str(exc), exc)
+        await sch.validate_execution(session, both)
+        chk("旧企业工作流绑定被移除，个人插件仍用于普通对话",
+            not both.plugin_binding_id and both.personal_plugin_key == "daily-report"
+            and not both.flow)
 
         noagent = models.AiSchedule(title="没执行人", owner_client_id="c-pa",
                                     personal_plugin_key="daily-report")
@@ -142,68 +144,44 @@ async def hub_side():
         session.add(plan)
         await session.commit()
 
-        captured = {}
-
-        async def fake_dispatch(tid, body, client, session):
-            captured["tid"] = tid
-            captured["body"] = body
-            return {
-                "ok": True, "identifier": "id-1", "provider": "remote",
-                "assigneeId": "runner:r-1:pi", "assigneeName": "我的电脑 · Pi",
-                "assigneeCli": "pi", "model": "fixture-coding-large-model",
-                "runnerId": "r-1", "host": "MY-PC",
-                "pluginSnapshot": {
-                    "scope": "personal", "key": "daily-report", "name": "每日简报",
-                    "versionPolicy": "pinned", "version": "0.1.0",
-                    "checksum": CHECK_V1, "executionMode": "method",
-                },
-            }
-
-        from app.services import ai_exec, task_dispatch
-        from app import realtime
-        real = (task_dispatch.dispatch, ai_exec.load, ai_exec.configured,
-                realtime.hub.publish)
-        task_dispatch.dispatch = fake_dispatch
-        ai_exec.load = lambda *a, **k: _async({})
-        ai_exec.configured = lambda ctx: True
-        realtime.hub.publish = lambda *a, **k: _async(None)
-        try:
+        from sqlalchemy import select
+        from unittest.mock import AsyncMock, patch
+        from app.services import schedule_conversations as chats, task_dispatch
+        with patch.object(task_dispatch, "dispatch", AsyncMock()) as dispatch:
             out = await sch.execute_one(session, plan, trigger="manual")
             await session.commit()
-        finally:
-            (task_dispatch.dispatch, ai_exec.load, ai_exec.configured,
-             realtime.hub.publish) = real
-        chk("执行成功交付", out.get("ok") is True, out)
-        body = captured.get("body") or {}
-        chk("body 带 personalPlugin.key", (body.get("personalPlugin") or {}).get("key") == "daily-report", body)
-        chk("body 带固定版本与校验值",
-            (body.get("personalPlugin") or {}).get("versionPolicy") == "pinned"
-            and (body.get("personalPlugin") or {}).get("version") == "0.1.0"
-            and (body.get("personalPlugin") or {}).get("checksum") == CHECK_V1, body)
-        chk("body 带计划里存的参数值",
-            (body.get("personalPlugin") or {}).get("inputs") == {"city": "合肥"}, body)
-        run_row = (await session.execute(
-            __import__("sqlalchemy").select(models.AiScheduleRun)
-            .where(models.AiScheduleRun.schedule_id == "s-pa"))).scalars().first()
-        chk("执行记录 mode=personal", (run_row.receipt or {}).get("mode") == "personal",
-            run_row.receipt)
+        chk("普通会话已排队而未伪称执行完成",
+            out.get("ok") is True and out.get("waitingForDevice") is True, out)
+        chk("不调用任务派发", dispatch.await_count == 0)
+        run_row = await session.scalar(select(models.AiScheduleRun).where(
+            models.AiScheduleRun.schedule_id == "s-pa"))
         receipt = run_row.receipt or {}
-        chk("执行记录固化实际插件版本",
-            (receipt.get("plugin") or {}).get("name") == "每日简报"
-            and (receipt.get("plugin") or {}).get("version") == "0.1.0"
-            and (receipt.get("plugin") or {}).get("checksum") == CHECK_V1, receipt)
-        chk("执行记录同时保留请求路由与实际 Runner",
-            ((receipt.get("route") or {}).get("requested") or {}).get("assigneeId") == "local:pi"
-            and ((receipt.get("route") or {}).get("resolved") or {}).get("host") == "MY-PC"
-            and ((receipt.get("route") or {}).get("resolved") or {}).get("model")
-            == "fixture-coding-large-model", receipt)
-        task = await session.get(models.Task, captured.get("tid"))
-        task_plugin = (task.work_routing or {}).get("personalPlugin") or {}
-        chk("任务 routing 记下完整个人插件快照",
-            task_plugin.get("key") == "daily-report"
-            and task_plugin.get("version") == "0.1.0"
-            and task_plugin.get("checksum") == CHECK_V1,
-            task.work_routing if task else None)
+        body = receipt.get("conversationInput") or {}
+        chk("会话保留个人插件标识", body.get("personalPlugin", {}).get("key") == "daily-report", body)
+        chk("会话固化版本和校验值", body.get("personalPlugin") == {
+            "key": "daily-report", "versionPolicy": "pinned", "version": "0.1.0",
+            "checksum": CHECK_V1}, body)
+        chk("完整说明与参数进入会话", "按方法写简报" in body["text"] and "合肥" in body["text"])
+        chk("执行记录 mode=personal", receipt.get("mode") == "personal", receipt)
+        chk("排队时不伪造实际执行机", not receipt.get("route", {}).get("resolved"), receipt)
+        chk("保留请求路由", receipt.get("route", {}).get("requested", {}).get("assigneeId") == "local:pi")
+        chk("不产生任务或工作流", not run_row.task_id and not run_row.workflow_run_id
+            and await session.scalar(select(models.Task.id)) is None)
+        client = await session.get(models.Client, "c-pa")
+        claimed = await chats.claim(session, client, run_row.id, "worker-personal")
+        chk("归属设备领取不可变插件快照", claimed.get("input", {}).get("personalPlugin") == body["personalPlugin"])
+        plan.personal_plugin_version = "0.2.0"
+        plan.personal_plugin_checksum = CHECK_V2
+        await session.commit()
+        replay = await chats.claim(session, client, run_row.id, "worker-personal")
+        chk("编辑计划不会改变本次已领取的版本", replay["input"] == claimed["input"])
+        await chats.acknowledge(session, client, run_row.id, {
+            "instanceId": "worker-personal", "state": "running", "conversationId": "chat-personal"})
+        await chats.acknowledge(session, client, run_row.id, {
+            "instanceId": "worker-personal", "state": "succeeded", "conversationId": "chat-personal"})
+        chk("实际对话回执关闭执行记录", run_row.state == "succeeded"
+            and run_row.receipt["conversationId"] == "chat-personal" and run_row.finished_at is not None)
+
 
 
 def _async(value):

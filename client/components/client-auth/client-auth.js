@@ -1,5 +1,27 @@
 (function (global) {
   'use strict';
+  function normalizeSingleLineInput(input) {
+    var raw = String(input.value || '');
+    var clean = raw.replace(/[\r\n]/g, '');
+    if (clean === raw) return;
+    var start = typeof input.selectionStart === 'number' ? input.selectionStart : raw.length;
+    var end = typeof input.selectionEnd === 'number' ? input.selectionEnd : start;
+    var removedBeforeStart = (raw.slice(0, start).match(/[\r\n]/g) || []).length;
+    var removedBeforeEnd = (raw.slice(0, end).match(/[\r\n]/g) || []).length;
+    input.value = clean;
+    try {
+      input.setSelectionRange(
+        Math.max(0, Math.min(clean.length, start - removedBeforeStart)),
+        Math.max(0, Math.min(clean.length, end - removedBeforeEnd))
+      );
+    } catch (_) { /* Some native input implementations do not expose selection APIs. */ }
+  }
+  function bindSingleLineInput(input) {
+    input.addEventListener('beforeinput', function (event) {
+      if (event.inputType === 'insertLineBreak' || event.inputType === 'insertParagraph') event.preventDefault();
+    });
+    input.addEventListener('input', function () { normalizeSingleLineInput(input); });
+  }
 
   /* Outlined password-visibility icons: open eye reveals the value; closed eye hides it. */
   var EYE_VIEW_SVG = '<svg class="soduwork-auth-eye-icon icon-view" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
@@ -316,14 +338,20 @@
     mountConnectionPanel();
     setRecoveryActions(detail);
     setTimeout(function () {
+      // Do not steal focus after the user has started typing. A previous
+      // implementation checked the value after 50ms; the first account
+      // character made that branch focus the password field.
+      if (!gate || gate.hidden || gate.contains(document.activeElement)) return;
       if (accountInput && !accountInput.value) accountInput.focus();
       else if (passwordInput) passwordInput.focus();
     }, 50);
   }
 
   function updateIdentity(user, quota) {
+    if (user?.id && currentUser?.id && user.id !== currentUser.id) currentQuota = null;
     currentUser = user || currentUser;
     currentQuota = quota || currentQuota;
+    global.SoduWorkQuotaNotice?.update({ user: currentUser, quota: currentQuota });
     if (!currentUser) return;
     var name = text(currentUser.displayName).trim() || text(currentUser.username).trim() || '我的';
     ['#wsMine b', '#wsMine .ws-mine-name', '[data-soduwork-user-name]'].forEach(function (selector) {
@@ -375,6 +403,20 @@
     card.querySelector('.soduwork-account-id').textContent = text(currentUser.email || currentUser.username);
     renderAccountAvatar(card.querySelector('.soduwork-account-avatar'), name);
     card.querySelector('.soduwork-account-quota').textContent = quotaCopy(currentQuota);
+  }
+
+  function bindProfileEntry(card) {
+    var entry = card.querySelector('[data-account-profile-editor]');
+    if (!entry || entry.dataset.profileBound) return;
+    entry.dataset.profileBound = '1';
+    function open() { global.AccountCenter?.openProfileEditor?.(); }
+    entry.addEventListener('click', function (event) {
+      open();
+    });
+    entry.addEventListener('keydown', function (event) {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault(); open();
+    });
   }
 
   function bindProfileEntry(card) {
@@ -530,7 +572,7 @@
       '<div class="soduwork-pwd-card" role="dialog" aria-modal="true" aria-labelledby="soduworkPwdTitle">' +
         '<div class="soduwork-pwd-formview">' +
           '<div class="soduwork-pwd-head"><div class="soduwork-pwd-title" id="soduworkPwdTitle">修改密码</div>' +
-            '<button type="button" class="soduwork-pwd-close" aria-label="关闭" title="关闭">✕</button></div>' +
+            '<button type="button" class="soduwork-pwd-close" aria-label="关闭对话框" title="关闭对话框">✕</button></div>' +
           '<div class="soduwork-pwd-sub">修改成功后将退出登录</div>' +
           '<form class="soduwork-pwd-form" novalidate>' +
             '<label class="soduwork-pwd-field" data-pwd-current><span>当前密码</span>' +

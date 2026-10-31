@@ -18,8 +18,11 @@ async def prepare(session, client, ctx: dict, assignee: dict,
         # Explicit and saved Agent choices must not silently become another model
         # when their provider/key is removed. resolve() already enforces that rule.
         llm = await model_catalog.resolve(session, client, wanted)
-        if wanted and not llm:
-            raise ValueError("模型「%s」当前不可用，请重新选择可用模型" % wanted)
+        if not llm:
+            if wanted:
+                raise ValueError("模型「%s」当前不可用，请重新选择可用模型" % wanted)
+            # An empty resolution must not preserve disabled legacy credentials.
+            raise ValueError("当前没有可用的执行模型，请检查模型服务、密钥和启用状态")
         return ai_exec.with_llm(ctx, llm), native
 
     # Native-account Agents must not inherit or report the shared model service model.

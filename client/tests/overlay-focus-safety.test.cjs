@@ -32,7 +32,7 @@ test('覆盖窗失焦保留显示区域，先穿透再通知渲染层确认新�
 });
 
 test('关闭小球只剩竖条时，主进程按真实组件区域持续守住鼠标穿透', () => {
-  const apply = block(main, 'function applyOverlayShape(', 'function parkOverlayShape()');
+  const apply = block(main, 'function applyOverlayShape(', 'function parkOverlayShape(');
   assert.match(apply, /_overlayShape\.resolve\(normalized, bounds\)/);
   assert.match(apply, /_overlayInputRects = normalized/);
   const sync = block(main, 'function _syncOverlayInputNow()', 'function _startOverlayInputGuard()');

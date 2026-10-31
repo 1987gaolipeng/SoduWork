@@ -340,6 +340,37 @@ async def test_runner_passes_trusted_grants(tmp: str) -> None:
         {"seen": seen, "out": out})
 
 
+async def test_admission_cancel_race() -> None:
+    """A completed wake must not consume cancellation of the admission loop."""
+    machine = runner_main.Runner.__new__(runner_main.Runner)
+    resource = SimpleNamespace(limit=1, can_start=True)
+    machine._resource_budget = SimpleNamespace(snapshot=lambda: resource)
+    machine._reap_admission = lambda: None
+    machine._admission = SimpleNamespace(
+        recover=lambda _: None, active_items=lambda: [], starting_count=lambda: 0,
+        claim_next=lambda *_args, **_kwargs: None)
+    class CancelOnWake:
+        first = True
+        def clear(self):
+            pass
+        async def wait(self):
+            if self.first:
+                self.first = False
+                task.cancel()
+                return True
+            await asyncio.Event().wait()
+    machine._admission_wake = CancelOnWake()
+    with patch.object(ai_local, "reclaim", lambda: None), patch.object(ai_local, "_RUNS", {}):
+        task = asyncio.create_task(machine._admission_loop())
+        try:
+            done, _ = await asyncio.wait({task}, timeout=0.5)
+            chk("Runner admission preserves cancellation when its wake finishes concurrently",
+                task in done and task.cancelled())
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
 async def main() -> int:
     with tempfile.TemporaryDirectory(prefix="soduwork-capability-") as tmp:
         test_contract(tmp)
@@ -348,6 +379,7 @@ async def main() -> int:
         await test_runner_second_gate(tmp)
         test_local_gate_uses_runner_grants(tmp)
         await test_runner_passes_trusted_grants(tmp)
+        await test_admission_cancel_race()
     print("\n%d 通过 / %d 失败" % (ok, fail))
     return 1 if fail else 0
 

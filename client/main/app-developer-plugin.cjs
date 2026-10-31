@@ -1,7 +1,12 @@
 'use strict';
 const fs = require('node:fs'), path = require('node:path');
 const base = require('./plugin-builder-plugin.cjs');
-const FILES = ['SKILL.md', 'scripts/scaffold.cjs', 'scripts/serve.cjs'];
+const FILES = ['SKILL.md', 'scripts/scaffold.cjs', 'scripts/serve.cjs', 'scripts/validate.cjs'];
+const VALIDATION_FILES = ['main/plugin-resources.js', 'main/personal-plugin-schema.cjs',
+  'main/personal-plugin-workflow.js', 'main/personal-plugin-agent-route.cjs',
+  'main/plugin-capability-names.cjs', 'core/plugin-platforms.js', 'core/plugin-icon.js',
+  'core/plugin-app-contract.cjs', 'core/plugin-package-page.cjs', 'core/plugin-locales.js',
+  'core/plugin-cover.cjs', 'core/app-window-sizing.js'];
 function body(app) {
   const root = app.isPackaged ? path.join(process.resourcesPath, 'skills/app-developer') : path.resolve(__dirname, '../../skills/app-developer');
   const resource = (name, bytes, kind = 'reference') => ({ path: 'references/developer/' + name, kind, encoding: 'base64', content: Buffer.from(bytes).toString('base64') });
@@ -26,10 +31,12 @@ function body(app) {
     resources: [
       ...base.body().resources,
       ...FILES.map(name => resource(name, fs.readFileSync(path.join(root, name)), name.startsWith('scripts/') ? 'script' : 'reference')),
+      ...VALIDATION_FILES.map(name => resource('validation/' + name,
+        fs.readFileSync(path.resolve(__dirname, '..', name)))),
       resource('plugin-development.md', base.body().instructions),
       resource('sdk/soduwork-app.js', fs.readFileSync(path.resolve(__dirname, '../sdk/soduwork-app.js'))),
       resource('sdk/README.md', fs.readFileSync(path.resolve(__dirname, '../sdk/README.md'))),
     ],
   };
 }
-module.exports = { body, FILES };
+module.exports = { body, FILES, VALIDATION_FILES };

@@ -37,7 +37,7 @@ if(nativePicker){
  fs.writeFileSync(source,JSON.stringify({...draft,resources:draft.resources.map(({path,kind})=>({path,kind}))}));
 }
 const scripts=['panels-plugin-maker-utils','plugin-route-directory','panels-plugin-maker-skills','plugin-presentation','panels-plugin-maker-fields','panels-plugin-maker','plugin-publication-ux','plugin-catalog-format',
-  'plugin-dependency-ux','plugin-install-setup','plugin-lifecycle','plugin-ui-host','panels-capability-plugins','panels-capabilities'];
+  'plugin-dependency-ux','plugin-install-setup','plugin-lifecycle','plugin-ui-host','plugin-access','panels-capability-plugins','panels-capabilities'];
 const styles=['panels-base','panels-schedules','panels-capabilities','panels-capability-plugins','plugin-presentation','panels-plugin-maker','capability-type-scale'];
 const html=`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>插件资源链路验证</title>
 ${styles.map(x=>'<link rel="stylesheet" href="/components/panels/'+x+'.css">').join('')}
@@ -264,7 +264,15 @@ try{
  }
  throw error;
 }finally{
- if(page)page.close();child.kill();server.close();
+ let closed = child.exitCode !== null || child.signalCode !== null;
+ const stopped = closed ? Promise.resolve() : new Promise(resolve => child.once('close', () => { closed = true; resolve(); }));
+ if(page) await page.call('Browser.close').catch(() => {});
+ await Promise.race([stopped, delay(5000)]);
+ if(!closed) { child.kill(); await Promise.race([stopped, delay(5000)]); }
+ if(page)page.close();server.close();
+ assert.ok(closed, 'The isolated Electron fixture must exit before removing its profile');
  // Only the mkdtemp directory created by this test; never a user profile.
- await delay(400);fs.rmSync(root,{recursive:true,force:true,maxRetries:10,retryDelay:150});
+ assert.equal(path.dirname(path.resolve(root)), path.resolve(os.tmpdir()));
+ assert.ok(path.basename(root).startsWith('soduwork-resource-ui-'));
+ fs.rmSync(root,{recursive:true,force:true,maxRetries:10,retryDelay:150});
 }

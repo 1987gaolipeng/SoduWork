@@ -10,7 +10,7 @@ const context = require('./process-context');
 const parent = process.parentPort;
 if (!parent && typeof process.send !== 'function') throw Error('Runtime must be started by its host');
 
-let app, engine, heartbeat, shuttingDown = false;
+let app, engine, heartbeat, shuttingDown = false, powerEpoch = -1;
 const sessions = new Map(), publishers = new Map(), native = new WeakMap(), identities = new WeakMap();
 const METHODS = new Set(['submit', 'continueGoal', 'pauseGoal', 'disableGoal', 'cancel', 'cancelQueued', 'updateQueue',
   'setAccessPolicy', 'selectModel', 'setThinkingMode', 'bindTask', 'answerUi', 'toolDetail', 'snapshot',
@@ -50,6 +50,14 @@ async function bodyData(body) {
     { name, value: new Uint8Array(await value.arrayBuffer()), type: value.type, file: value.name || 'file' });
   return { kind: 'soduwork.multipart', parts };
 }
+function applyHostPowerState(state) {
+  const epoch = state?.epoch;
+  if (!Number.isSafeInteger(epoch) || epoch < 0 || epoch <= powerEpoch) return false;
+  powerEpoch = epoch;
+  if (state.suspended === true) peer.pauseTimeouts();
+  else peer.resumeTimeouts();
+  return true;
+}
 const peer = createRpcPeer({
   send: packet => parent ? parent.postMessage(packet) : process.send(packet),
   callbackTimeoutMs: 0,
@@ -72,8 +80,9 @@ const peer = createRpcPeer({
     throw Error('Unknown host capability');
   },
   handlers: {
-    initialize(data) {
+    initialize(data, _generation, powerState) {
       if (app) throw Error('Runtime is already initialized');
+      applyHostPowerState(powerState);
       app = application(data);
       if (data.resourcesPath && !process.resourcesPath) Object.defineProperty(process, 'resourcesPath', { value: data.resourcesPath });
       require('../native-locale.cjs').setLocale(data.locale);
@@ -95,6 +104,8 @@ const peer = createRpcPeer({
       heartbeat = setInterval(() => peer.notify('heartbeat', []), 1000); heartbeat.unref?.();
       return { pid: process.pid, node: process.versions.node };
     },
+    hostPowerState(state) { return applyHostPowerState(state); },
+    health() { return true; },
     async open(options) {
       if (shuttingDown) throw Error('Runtime is closing');
       const result = await getEngine().open(options);

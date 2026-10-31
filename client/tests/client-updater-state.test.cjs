@@ -7,6 +7,7 @@ const fsp = fs.promises;
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+test.beforeEach(() => require('../main/native-locale.cjs').setLocale('zh-CN'));
 
 const contract = require('../main/client-update-contract');
 const updater = require('../main/client-updater');

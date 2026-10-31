@@ -22,6 +22,7 @@ const STREAM_INTERRUPTION_RE = /^(?:TypeError:\s*)?terminated$|\bother side clos
 // An unrecognized gateway body must not become chat text. In particular, do
 // not strip HTML and retain its internal addresses, request tokens or headers.
 const PRIVATE_RESPONSE_RE = /<\/?[a-z][^>]*>|<!doctype\b|&lt;\/?[a-z]|\b(?:https?|wss?):\/\/|\b(?:\d{1,3}\.){3}\d{1,3}\b|\b(?:authorization|api[-_ ]?key|access[-_ ]?token|password|secret)\s*[:=]|\bbearer\s+\S+/i;
+const IMAGE_REJECTION_RE = /image[_ -]?input[_ -]?(?:rejected|unsupported)|(?:image|vision|multimodal).{0,50}(?:not supported|unsupported|rejected|maximum|limit)/i;
 
 function textOf(value) {
   if (value == null) return '';
@@ -54,6 +55,10 @@ function describe(value) {
   const payload = value && typeof value === 'object' ? value : payloadOf(raw);
   const error = payload && payload.error && typeof payload.error === 'object'
     ? payload.error : payload;
+  const quota = require('../../core/token-quota').detail(payload || raw);
+  if (quota) return { raw, payload, type: 'quota', status: 403, proxy: true, transient: false,
+    retryable: false, code: quota.code, quota: quota.quota,
+    publicText: '当前 AI 使用额度暂不可用，请查看额度详情' };
   const type = String(error && error.type || '');
   const status = statusOf(raw, payload, error);
   const upstream = String(error && error.upstream || '');
@@ -69,6 +74,8 @@ function describe(value) {
   if (proxy || status || transient || privateResponse) {
     if (/context_length_exceeded|context length exceeded|prompt (?:is )?too long/i.test(combined)) {
       publicText = '当前上下文超过模型容量，历史和本轮输入已保留';
+    } else if (IMAGE_REJECTION_RE.test(combined)) {
+      publicText = '当前模型不接受图片输入，请切换支持图片的模型或启用视觉适配';
     } else if (status === 401 || status === 403) {
       publicText = '模型服务拒绝了当前凭据或模型权限';
     } else if (status === 404) {

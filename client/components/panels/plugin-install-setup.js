@@ -536,6 +536,7 @@
     open: open,
     openInline: openInline,
     needs: needs,
+    preferences: { schema: setupOf, render: preferenceSections, collect: collect },
     __test: {
       setupOf: setupOf, requiredMcp: requiredMcp,
       firstValue: firstValue, collect: collect,

@@ -29,6 +29,23 @@ test('session helper keeps the first request as the stable conversation title', 
   assert.equal(helpers.title({ firstMessage: {}, name: '' }), '\u672a\u547d\u540d\u5bf9\u8bdd');
 });
 
+test('attachment transport metadata never leaks into automatic conversation titles', () => {
+  const contract = require('../main/pi-session/attachment-contract');
+  const raw = contract.augment('整理附件', [{ name: '步骤.md', path: 'inputs/步骤.md' }]);
+  assert.equal(helpers.title({ firstMessage: raw }), '整理附件');
+  assert.equal(helpers.title({ userTitle: raw }), raw.replace(/\s+/g, ' ').trim().slice(0, 40));
+  const literal = '示例\n\n' + contract.START + '\n{"example":true}\n' + contract.END;
+  assert.equal(helpers.title({ firstMessage: literal }), literal.replace(/\s+/g, ' ').trim().slice(0, 40));
+});
+
+test('visible title projection returns an empty value for protocol-only text', () => {
+  const connector = require('../main/pi-session/connector-context.cjs');
+  const plugins = require('../main/pi-session/plugin-context');
+  const raw = connector.augment(plugins.augment('', [
+    { pluginId: 'fixture', name: 'Fixture', context: 'private instructions' },
+  ]), 'private connector instructions');
+  assert.equal(helpers.visibleTitleText(raw), '');
+});
 test('session helper returns the latest visible assistant text for review', () => {
   assert.equal(helpers.lastAssistantText({ messages: [
     { role: 'assistant', blocks: [{ kind: 'text', text: 'first' }] },

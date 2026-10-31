@@ -194,12 +194,10 @@ test('IPC 不能把显式本机改选的校验失败降级为无需求普通发�
   let sends = 0;
   f.handle.submit = () => { sends++; return { accepted: true, completion: Promise.resolve({ ok: true }) }; };
   const bridge = { get: ref => ref === f.handle.ref ? f.handle : null, list: () => [], closeAll() {} };
-  const handlers = new Map();
-  loadIpc(bridge).install({ app: f.app, ipcMain: { handle: (name, handler) => handlers.set(name, handler), on() {} },
-    BrowserWindow: { getAllWindows: () => [], fromWebContents: () => null }, identityOf: async () => f.identity() });
+  const { handlers } = await installFixtureIpc(t, f, bridge);
   const result = await handlers.get('pi-session-send')({}, f.handle.ref, '执行', [], { taskId: 'one', submissionId: 'blocked',
     taskExecution: { executionChoice: 'native', agentId: 'local:pi', reuseConversation: true, followUp: true } });
-  assert.equal(result.ok, false); assert.equal(sends, 0);
+  assert.equal(result.ok, false); assert.match(result.reason, /开始|执行/); assert.equal(sends, 0);
 });
 function loadIpc(bridge) {
   const file = require.resolve('../main/pi-session/ipc'), nativeRequire = createRequire(file), module = { exports: {} };
@@ -208,6 +206,33 @@ function loadIpc(bridge) {
   vm.runInThisContext('(function(require,module,exports,__filename,__dirname){\n' + fs.readFileSync(file, 'utf8') + '\n})',
     { filename: file })(load, module, module.exports, file, path.dirname(file));
   return module.exports;
+}
+
+async function installFixtureIpc(t, f, bridge) {
+  // The fixture's signed identity backs both the asynchronous resolver and
+  // offline lookup. Register through the production open before testing reuse.
+  t.mock.method(context, 'cachedIdentity', () => f.identity());
+  let registered = false;
+  const laterOpen = bridge.open;
+  bridge.open = async () => {
+    if (registered) {
+      if (laterOpen) return laterOpen();
+      throw Error('Reuse must not open another runtime');
+    }
+    registered = true;
+    return { ok: true, session: f.handle };
+  };
+  f.handle.on = () => () => {};
+  f.handle.status = () => 'idle';
+  f.handle.close = async () => true;
+  const handlers = new Map(), ipcMain = { handle: (name, handler) => handlers.set(name, handler), on() {} };
+  const installed = loadIpc(bridge).install({ app: f.app, ipcMain,
+    BrowserWindow: { getAllWindows: () => [], fromWebContents: () => null }, identityOf: async () => f.identity() });
+  const opened = await installed.open({ adapterId: f.handle.adapterId, cwd: f.cwd, capabilities: [] });
+  assert.equal(opened.ok, true, opened.reason);
+  assert.equal(opened.ref, f.handle.ref);
+  assert.equal(registered, true, 'fixture setup must register through the actual IPC open');
+  return { handlers, installed };
 }
 
 test('authorized repository reuses a stable native context across different requirements and process reopen', async t => {
@@ -343,9 +368,7 @@ test('all registered Agents use the same IPC reuse boundary and sequential per-r
     };
     const bridge = { get: ref => ref === f.handle.ref ? f.handle : null, list: () => [], closeAll() {},
       open() { newRuntimeCalls++; throw Error('Reuse must not open another runtime'); } };
-    const handlers = new Map(), ipcMain = { handle: (name, handler) => handlers.set(name, handler), on() {} };
-    loadIpc(bridge).install({ app: f.app, ipcMain,
-      BrowserWindow: { getAllWindows: () => [], fromWebContents: () => null }, identityOf: async () => f.identity() });
+    const { handlers } = await installFixtureIpc(t, f, bridge);
     for (const taskId of ['one', 'two']) {
       const result = await handlers.get('pi-session-send')({}, f.handle.ref, 'Execute ' + taskId, [], {
         taskId, submissionId: 'submit-' + taskId, projectId: 'renderer-spoof',
@@ -367,6 +390,8 @@ test('all registered Agents use the same IPC reuse boundary and sequential per-r
     assert.deepEqual(receipts.filter(row => row.action === 'complete').map(row => row.taskId), ['one', 'two']);
     f.switchIdentity(identity('bob'));
     const rejected = await handlers.get('pi-session-bind-task')({}, f.handle.ref, 'two', 'spoof');
-    assert.equal(rejected.ok, false); assert.match(rejected.reason, /账号/);
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.reason, '这条会话已经不在了（可能已关闭）');
+    assert.throws(() => context.assertOwner(f.app, f.handle, f.identity()), /另一个账号/);
   });
 });

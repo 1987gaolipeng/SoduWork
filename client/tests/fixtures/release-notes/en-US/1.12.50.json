@@ -1,0 +1,20 @@
+{
+  "summary": "This update improves conversations, plugin management, and overall reliability.",
+  "sections": [
+    { "id": "conversations", "title": "Smoother conversations", "items": [
+      { "id": "queue", "text": "See queued messages immediately after sending." },
+      { "id": "streaming", "text": "Enjoy more stable formatting as responses stream in." },
+      { "id": "controls", "text": "Annotate content, view grouped commands, and adjust model thinking modes." },
+      { "id": "images", "text": "Select image models and upload multiple images." }
+    ] },
+    { "id": "plugins", "title": "Better plugin management", "items": [
+      { "id": "lifecycle", "text": "Manage plugins throughout their lifecycle." },
+      { "id": "portable", "text": "Import and export plugins in a portable format." },
+      { "id": "categories", "text": "Browse dynamically managed plugin categories." },
+      { "id": "notifications", "text": "Benefit from improvements to platform notification delivery." }
+    ] },
+    { "id": "reliability", "title": "Improved reliability", "items": [
+      { "id": "stability", "text": "Includes updates to server stability, backups, deployment, and session handling." }
+    ] }
+  ]
+}

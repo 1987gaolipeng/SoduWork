@@ -43,6 +43,58 @@ test('automation form uses the existing commercial schedule contract', () => {
   assert.match(automation, /flow: Boolean\(value\.repoId && value\.flow\)/);
 });
 
+test('conversation automation persists an independent model selection', () => {
+  assert.match(cardState, /modelOptions/);
+  assert.match(cardState, /defaultModel/);
+  assert.match(automation, /name="modelName"/);
+  assert.match(automation, /const submittedModel = data\.get\('modelName'\)/);
+  assert.match(automation, /modelName:\s*value\.modelName/);
+});
+
+test('automation sheet translates model selector text on initial render and refresh', () => {
+  const translations = {
+    '模型': 'Model',
+    '可独立选择': 'Choose independently',
+    '请选择模型': 'Choose a model',
+    '当前没有可用模型': 'No models are available',
+    '（已保存，当前不可用）': ' (saved; currently unavailable)',
+    '由底座自身管理模型': 'Managed by this runtime',
+    '当前底座自行管理模型': 'This runtime manages its model',
+    '模型与执行底座独立保存，每次自动化运行使用这里的选择': 'The model is saved independently and each run uses this choice',
+  };
+  const context = { Intl, setTimeout, clearTimeout };
+  context.window = context;
+  context.SoduWorkI18n = { translateText: value => translations[value] || value };
+  const marker = '  global.WorkAutomationSheet = { open, active, refine, close };';
+  vm.runInNewContext(automation.replace(marker,
+    '  global.probe = { state, modelRows, modelField, refreshModelField };\n' + marker), context);
+  const { state, modelRows, modelField, refreshModelField } = context.probe;
+  state.agents = [
+    { id: 'local:pi', modelPick: true },
+    { id: 'local:codex', modelPick: false, nativeModelPick: false },
+  ];
+  state.modelOptions = [{ name: 'gpt-5', label: 'gpt-5' }];
+
+  const initial = modelField('', 'local:pi');
+  assert.match(initial, /Choose a model/);
+  assert.match(initial, /The model is saved independently and each run uses this choice/);
+  assert.doesNotMatch(initial, /请选择模型|模型与执行底座独立保存/);
+  assert.match(modelRows('missing-model', 'local:pi'), /missing-model \(saved; currently unavailable\)/);
+
+  const select = { value: '', innerHTML: '', disabled: false };
+  const form = { elements: { modelName: select, assigneeId: { value: 'local:pi' } } };
+  state.layer = { querySelector(selector) { return selector === '#wazForm' ? form : null; } };
+  refreshModelField();
+  assert.match(select.innerHTML, /Choose a model/);
+  assert.equal(select.disabled, false);
+
+  assert.match(modelField('', 'local:codex'), /Managed by this runtime/);
+  assert.match(modelField('', 'local:codex'), /This runtime manages its model/);
+  assert.doesNotMatch(modelField('', 'local:codex'), /由底座自身管理模型|当前底座自行管理模型/);
+  state.modelOptions = [];
+  assert.match(modelRows('', 'local:pi'), /No models are available/);
+});
+
 test('automation remains an iterative plugin form inside the conversation', () => {
   assert.match(automation, /PluginUIHost\.mount/);
   assert.match(automation, /PluginUIHost\.checkpointCurrent/);
@@ -108,6 +160,34 @@ test('automation payload permissions come from explicit choices and the selected
   assert.deepEqual(Array.from(manual.requiredCapabilities), ['computer']);
   assert.deepEqual(Array.from(bodyOf(manual).requiredCapabilities), ['computer', 'office']);
   assert.deepEqual(Array.from(manual.requiredCapabilities), ['computer'], 'derived method permissions stay out of editable choices');
+});
+
+test('automation editor keeps a saved model when the model control is temporarily disabled', () => {
+  const context = { Intl, setTimeout, clearTimeout };
+  context.window = context;
+  for (const name of ['schedule-timing.js', 'work-automation-bindings.js']) {
+    vm.runInNewContext(read('components', 'panels', name), context);
+  }
+  class FakeFormData {
+    constructor(form) { this.values = form.values; }
+    get(key) { return Object.hasOwn(this.values, key) ? this.values[key] : null; }
+  }
+  context.FormData = FakeFormData;
+  const marker = '  global.WorkAutomationSheet = { open, active, refine, close };';
+  vm.runInNewContext(automation.replace(marker,
+    '  global.probe = { state, valueFromForm };\n' + marker), context);
+  const form = {
+    values: {
+      title: '自动化', note: '执行说明', every: 'daily', clock: '18:00',
+      weekday: '1', assigneeId: 'local:pi', repoId: '', retryLimit: '2',
+      retryDelayMinutes: '5', enabled: 'on',
+      // Disabled controls are omitted by the browser FormData API.
+    },
+    querySelectorAll() { return []; },
+  };
+  context.probe.state.layer = { querySelector(selector) { return selector === '#wazForm' ? form : null; } };
+  context.probe.state.proposal = { modelName: 'chosen-model', timeZone: 'Asia/Shanghai' };
+  assert.equal(context.probe.valueFromForm().modelName, 'chosen-model');
 });
 
 test('rhythm parser reads Chinese clocks and preserves periodic scheduling', () => {

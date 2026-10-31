@@ -1,0 +1,27 @@
+/* Appearance comes from workspace-sidebar-projects.css, shared with Create Project.
+   Only release-note sizing, long-form content and scrolling are specialized here. */
+.release-notes-dialog {
+  position: fixed; inset: 0; width: 520px; height: 640px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow: hidden;
+}
+.release-notes-dialog[open] { display: flex; flex-direction: column; }
+.release-notes-dialog > header, .release-notes-dialog > footer { flex-shrink: 0; }
+.release-notes-dialog .rn-content {
+  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: transparent transparent;
+  overscroll-behavior: contain; padding-inline-end: 8px;
+}
+.release-notes-dialog:hover .rn-content { scrollbar-color: var(--ink-3) transparent; }
+.release-notes-dialog .rn-content::-webkit-scrollbar { width: 6px; }
+.release-notes-dialog .rn-content::-webkit-scrollbar-track { background: transparent; }
+.release-notes-dialog .rn-content::-webkit-scrollbar-thumb { background: transparent; border-radius: 6px; }
+.release-notes-dialog:hover .rn-content::-webkit-scrollbar-thumb { background: var(--ink-3); }
+.release-notes-dialog .rn-content:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.release-notes-dialog article + article { border-top: 1px solid var(--line); margin-top: 24px; padding-top: 12px; }
+.release-notes-dialog h3 { font-size: 1em; margin: 20px 0 8px; color: var(--ink); }
+.release-notes-dialog p, .release-notes-dialog li { line-height: 1.7; overflow-wrap: anywhere; white-space: pre-wrap; }
+.release-notes-dialog ul { padding-inline-start: 22px; }
+.release-notes-dialog li + li { margin-top: 6px; }
+.release-notes-dialog .rn-error { color: var(--ink-3); }
+.release-notes-dialog .rn-error:empty { display: none; }
+
+.client-update-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }

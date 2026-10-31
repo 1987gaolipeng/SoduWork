@@ -309,7 +309,8 @@ test('authorization errors never dispatch or append a pretend success; queued in
   const a=s.send({text:'needs desktop',options:{pluginIds:['p']}});
   const b=s.send({text:'keep this later'});
   const result=await a.completion;
-  assert.equal(result.ok,false);assert.equal(result.failureKind,'plugin-grant');assert.equal(result.retrySafe,true);
+  assert.equal(result.ok,false);assert.equal(result.failureKind,'plugin-grant');assert.equal(result.retrySafe,false);
+  assert.deepEqual(result.pluginAuthorization.missing, ['computer']);
   assert.match(result.reason,/操作电脑/);assert.equal(cleaned,1);assert.equal(h.calls.filter(c=>c.op.startsWith('job.')).length,0);
   assert.equal(s.snapshot().messages.length,0);
   assert.equal(s.snapshot().queue[0].id,b.queueId);

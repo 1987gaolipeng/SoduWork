@@ -24,11 +24,17 @@ function fixture(options = {}) {
     return options.confirm ? options.confirm(parent) : true;
   };
   const consent = require('../main/access-control/new-chat-consent').create({ BrowserWindow, confirmFullAccess });
+  const defaultIdentity = (() => {
+    const now = Math.floor(Date.now() / 1000), clientId = 'fixture';
+    const claims = Buffer.from(JSON.stringify({ typ: 'device', uid: 'fixture-owner', cid: clientId,
+      iat: now - 10, exp: now + 3600 })).toString('base64url');
+    return { hub: 'http://fixture.invalid', clientId, session: claims + '.' + 'a'.repeat(64) };
+  })();
   const context = vm.createContext({
-    _cloudHandoff: { observe() {} },
+    _cloudHandoff: { observe() {} }, _sessionOwners: null, _discardRenderer() {},
     skillTurn: require('../main/pi-session/skill-turn'), sendIdentityOf: null,
     app: options.app || { getPath: () => emptyStorage }, path, newChatAccess: consent,
-    identityOf: async () => options.identity || ({ hub: 'fixture', clientId: 'fixture' }),
+    identityOf: async () => options.identity || defaultIdentity,
     memories: { context: async () => ({}), attach: options.attach || (async () => {}) },
     updateWorkloads: { guard: () => ({ ok: true }) },
     session: { findBySessionId: () => null, archivedConversation: async () => options.archive || null,
@@ -38,8 +44,15 @@ function fixture(options = {}) {
     workDir: () => cwd, attachments: { stage: async () => ({ files: [], warnings: [] }) },
     sessionSpec: require('../main/conversation/session-spec'), _conf: () => ({}), BrowserWindow, confirmFullAccess,
     _entryContextPrompts: () => [], _awaitBounded: options.bounded || (value => value), OPEN_TIMEOUT_MS: 45000,
-    _bindUsage() {}, _attach() {}, _detach() {}, _wire() {}, _openReply: () => ({ ok: true }),
-    require: name => require(path.join(__dirname, '../main/pi-session', name)),
+    _bindUsage() {}, _attach() {}, _detach() {}, _clearRelease() {}, _wire() {}, _openReply: () => ({ ok: true }),
+    require: name => {
+      if (name === '../conversation/history-access') {
+        const actual = require(path.join(__dirname, '../main/pi-session', name));
+        return { ...actual,
+          actor(app, identity) { return actual.actor(app, identity === undefined ? (options.identity || defaultIdentity) : identity); } };
+      }
+      return require(path.join(__dirname, '../main/pi-session', name));
+    },
   });
   vm.runInContext(handler, context);
   const confirm = async (draftId = 'draft-one', adapterId = 'pi') => {

@@ -9,12 +9,14 @@ from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import inspect
+from sqlalchemy import Column, MetaData, String, Table, inspect, select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[1]
 _PROVISIONAL_ADOPTION_REVISIONS = {"0001_commercial_baseline"}
+_SQLITE_MERGE_ALIAS = "0067_merge_release_account_ownership"
+_CANONICAL_MERGE_REVISION = "0067_merge_account_ownership"
 
 
 class SchemaMigrationError(RuntimeError):
@@ -47,17 +49,46 @@ def _stamp_adopted_schema() -> None:
     command.stamp(_config(), "head", purge=True)
 
 
-def _database_state(connection) -> tuple[Literal["empty", "legacy", "versioned"], str | None]:
+def normalize_sqlite_merge_revision(connection) -> bool:
+    """Canonicalize one historical no-op merge marker, without replaying its parents.
+
+    PostgreSQL's VARCHAR(32) version column could never store the former
+    36-character identifier, but SQLite does not enforce that length. The
+    caller owns the transaction; all other version markers remain untouched.
+    """
+    if connection.dialect.name != "sqlite":
+        return False
+    if not inspect(connection).has_table("alembic_version"):
+        return False
+    versions = Table("alembic_version", MetaData(),
+                     Column("version_num", String(32), nullable=False))
+    heads = set(connection.execute(select(versions.c.version_num)).scalars())
+    if _SQLITE_MERGE_ALIAS not in heads:
+        return False
+    old_marker = versions.c.version_num == _SQLITE_MERGE_ALIAS
+    if _CANONICAL_MERGE_REVISION in heads:
+        # A database may already contain both equivalent markers. Coalesce
+        # only this duplicate; never purge unrelated branch heads.
+        connection.execute(versions.delete().where(old_marker))
+    else:
+        connection.execute(versions.update().where(old_marker).values(
+            version_num=_CANONICAL_MERGE_REVISION))
+    return True
+
+
+def _database_state(connection) -> tuple[Literal["empty", "legacy", "versioned"], tuple[str, ...]]:
     inspector = inspect(connection)
     tables = set(inspector.get_table_names())
     business_tables = tables - {"alembic_version"}
     if not business_tables:
-        return "empty", None
+        return "empty", ()
     if "alembic_version" in tables:
-        revision = MigrationContext.configure(connection).get_current_revision()
-        return "versioned", revision
+        # Historical branches may both be applied before their merge revision.
+        # Reading all markers lets the normal Alembic upgrade join those heads.
+        revisions = MigrationContext.configure(connection).get_current_heads()
+        return "versioned", tuple(revisions)
     if {"task", "client"}.issubset(tables):
-        return "legacy", None
+        return "legacy", ()
     sample = ", ".join(sorted(business_tables)[:8])
     raise SchemaMigrationError(
         "Database has tables but is neither a recognized SoduWork database nor versioned: " + sample
@@ -102,7 +133,7 @@ async def migrate_database(
 
     head = _head_revision()
     if normalized_mode == "check":
-        if state != "versioned" or current != head:
+        if state != "versioned" or current != (head,):
             raise SchemaMigrationError(
                 f"Database schema is not ready (state={state}, current={current}, expected={head})"
             )
@@ -112,7 +143,8 @@ async def migrate_database(
     # provisional revision. Replaying the generated baselines would CREATE tables that already
     # exist. Treat only that explicit marker as the one-time legacy adoption path, validate the
     # complete current metadata, then replace it with the permanent head revision.
-    if state == "versioned" and current in _PROVISIONAL_ADOPTION_REVISIONS:
+    if (state == "versioned" and len(current) == 1
+            and current[0] in _PROVISIONAL_ADOPTION_REVISIONS):
         state = "legacy"
 
     if state == "legacy":
@@ -127,7 +159,7 @@ async def migrate_database(
 
     async with engine.begin() as connection:
         final_state, final_revision = await connection.run_sync(_database_state)
-    if final_state != "versioned" or final_revision != head:
+    if final_state != "versioned" or final_revision != (head,):
         raise SchemaMigrationError(
             f"Database migration did not reach head (current={final_revision}, expected={head})"
         )

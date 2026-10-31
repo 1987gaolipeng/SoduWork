@@ -5,16 +5,19 @@ import asyncio
 import base64
 from contextlib import asynccontextmanager
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
 import shutil
 import socket
+import ssl
 import subprocess
 import tempfile
 import threading
 import time
 import urllib.request
+from datetime import datetime, timedelta, timezone
 
 
 def main():
@@ -67,8 +70,28 @@ def main():
         app.dependency_overrides[get_session] = session_override
         listener = socket.socket()
         listener.bind(("127.0.0.1", 0))
-        origin = "http://127.0.0.1:" + str(listener.getsockname()[1])
-        server = uvicorn.Server(uvicorn.Config(app, log_level="error"))
+        # Exercise the production HTTPS-origin checks with an isolated test CA.
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        tls_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        name = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, "isolated-client-release")])
+        now = datetime.now(timezone.utc)
+        certificate = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
+            .public_key(tls_key.public_key()).serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(minutes=1)).not_valid_after(now + timedelta(days=1))
+            .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+            .add_extension(x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]), critical=False)
+            .sign(tls_key, hashes.SHA256()))
+        certificate_file, tls_key_file = root / "fixture-ca.pem", root / "fixture-tls-key.pem"
+        certificate_file.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+        tls_key_file.write_bytes(tls_key.private_bytes(serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+        tls_key_file.chmod(0o600)
+        tls_context = ssl.create_default_context(cafile=str(certificate_file))
+        origin = "https://127.0.0.1:" + str(listener.getsockname()[1])
+        server = uvicorn.Server(uvicorn.Config(app, log_level="error",
+            ssl_certfile=str(certificate_file), ssl_keyfile=str(tls_key_file)))
         thread = threading.Thread(target=lambda: server.run(sockets=[listener]), daemon=True)
         thread.start()
         try:
@@ -82,17 +105,27 @@ def main():
             checkout = root / "checkout"
             for name in ["tools/sign-client-release.mjs", "client/scripts/installer-compatibility-report.cjs",
                          "client/main/client-update-contract.js", "tools/ci/verify-client-publication.cjs",
-                         "tools/ci/release-artifacts.cjs", "tools/ci/publish-client.cjs"]:
+                         "tools/ci/release-artifacts.cjs", "tools/ci/publish-client.cjs",
+                         "tools/ci/client-release-notes.cjs", "tools/ci/release-context.cjs",
+                         "client/main/distribution.cjs", "client/distributions.json",
+                         "tools/ci/client-distribution.cjs", "tools/ci/client-target.cjs",
+                         "tools/ci/distribution-baselines.cjs", "tools/ci/distribution-acceptance-baselines.json",
+                         "tools/ci/soduwork-acceptance-baselines.json",
+                         "tools/ci/release-branches.cjs"]:
                 target = checkout / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(repo / name, target)
             (checkout / "client/package.json").write_text(json.dumps({"version": "9.9.1"}))
             (checkout / "client/update-trust.json").write_text(json.dumps(trust))
+            profiles_file = checkout / "client/distributions.json"
+            profiles = json.loads(profiles_file.read_text())
+            profiles["internal"]["hubOrigin"] = origin
+            profiles_file.write_text(json.dumps(profiles))
             key_file = root / "test.key"
             key_file.write_text(seed)
             key_file.chmod(0o600)
-            dist = checkout / "client/dist"
-            dist.mkdir()
+            dist = checkout / "client/dist/internal"
+            dist.mkdir(parents=True)
             for fmt in ("deb", "rpm", "tar.gz"):
                 (dist / f"SoduWork-9.9.1-linux.{fmt}").write_bytes(b"fixture-installer-only\n" * 60000)
             environment = {**os.environ, "CI_COMMIT_SHA": "a" * 40, "CI_PIPELINE_ID": "1", "CI_JOB_ID": "2",
@@ -109,6 +142,15 @@ def main():
                 assert (result.returncode == 0) == success, result.stdout + result.stderr
                 return result
 
+            evidence = checkout / "release-evidence/client/internal/linux"
+            evidence.mkdir(parents=True)
+            notes = "SoduWork 9.9.1\n\n修复与改进\n• 支持查看版本更新说明。"
+            notes_file = checkout / "release-evidence/client-release-notes.json"
+            notes_record = dict(schema=1, version="9.9.1", sourceCommit="a" * 40, pipelineId="1",
+                tag=environment.get("CI_COMMIT_TAG", ""), previousTag="client-v9.9.0", previousCommit="b" * 40,
+                date="2026-10-15", commits=[], notes=notes,
+                notesSha256=hashlib.sha256(notes.encode()).hexdigest())
+            notes_file.write_text(json.dumps(notes_record), encoding="utf-8")
             node("tools/ci/release-artifacts.cjs", "inventory", "linux")
             build = json.loads((dist / "linux-build.json").read_text())
             evidence = checkout / "release-evidence/linux"
@@ -121,6 +163,23 @@ def main():
             receipt_file = evidence / "acceptance.json"
             receipt_file.write_text(json.dumps(receipt))
             command = "tools/ci/publish-client.cjs"
+            rejected = node(command, "stage", "linux", success=False)
+            assert "manual release gate" in rejected.stderr
+            authorization_file = checkout / "release-evidence/release-authorization.json"
+            authorization = dict(schema=1, ok=True, component="client", version="9.9.1",
+                branch="release/client-9.9.1", tag="client-v9.9.1", sourceCommit="a" * 40,
+                pipelineId="1", platforms=["linux"], distributions=[build["distribution"]])
+            # Synthetic authorization exercises API orchestration only, not a real Git tag or native installer.
+            authorization_file.write_text(json.dumps(authorization))
+            target_authorization_file = evidence.parent / "target-authorization.json"
+            target_authorization_file.write_text(json.dumps(dict(schema=1, ok=True,
+                sourceCommit="a" * 40, pipelineId="1", distribution=build["distribution"])))
+            changed_notes = "Different notes generated after packaging"
+            notes_file.write_text(json.dumps({**notes_record, "notes": changed_notes,
+                "notesSha256": hashlib.sha256(changed_notes.encode()).hexdigest()}), encoding="utf-8")
+            rejected = node(command, "stage", "linux", success=False)
+            assert "Build used different release notes" in rejected.stderr
+            notes_file.write_text(json.dumps(notes_record), encoding="utf-8")
             node(command, "stage", "linux", success=False, extra={"CI_COMMIT_REF_PROTECTED": "false"})
             receipt["ok"] = False
             receipt_file.write_text(json.dumps(receipt))
@@ -135,6 +194,7 @@ def main():
             from cryptography.exceptions import InvalidSignature
             for blob in signed.values():
                 bundle = json.loads(blob)
+                assert bundle["notes"] == notes
                 signature = base64.b64decode(bundle.pop("signature"))
                 canonical = lambda value: json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
                 key.public_key().verify(signature, canonical(bundle))
@@ -152,10 +212,11 @@ def main():
                 request = urllib.request.Request(origin + route,
                     data=json.dumps(body).encode() if body else None,
                     headers={"Content-Type": "application/json", **({"Authorization": "Bearer " + token} if token else {})})
-                with urllib.request.urlopen(request, timeout=10) as response:
+                with urllib.request.urlopen(request, timeout=10, context=tls_context) as response:
                     return json.load(response)
             token = api("/api/v1/admin/login", body={"user": "publisher", "pw": "fixture-password"})["token"]
             rows = api("/api/v1/admin/client-releases", token)["releases"]
+            assert all(row["notes"] == notes for row in rows)
             assert len(rows) == 3 and not any(row["enabled"] for row in rows)
             assert all(row["artifactName"].startswith("SoduWork-") for row in rows)
             # Old alias receipts and added alias entries must never reach activation.
@@ -176,7 +237,7 @@ def main():
             original = corrupt.read_bytes()
             corrupt.write_bytes(b"corrupted")
             node(command, "enable", success=False)
-            failed = json.loads((checkout / "release-evidence/activation.json").read_text())
+            failed = json.loads((evidence.parent / "activation.json").read_text())
             assert not failed["ok"] and len(failed["enabled"]) == 1
             corrupt.write_bytes(original)
             node(command, "enable")
@@ -188,10 +249,10 @@ def main():
             public_info = api("/api/v1/download/client/linux/info")
             for fmt in ("deb", "rpm", "tar.gz"):
                 assert public_info["formats"][fmt]["filename"] == f"SoduWork-9.9.1-linux.{fmt}"
-                with urllib.request.urlopen(origin + "/api/v1/download/client/linux/" + fmt) as response:
+                with urllib.request.urlopen(origin + "/api/v1/download/client/linux/" + fmt, context=tls_context) as response:
                     assert hashlib.sha256(response.read()).hexdigest() == public_info["formats"][fmt]["sha256"]
             node("tools/ci/verify-client-publication.cjs")
-            verification = json.loads((checkout / "release-evidence/publication-verification.json").read_text())
+            verification = json.loads((evidence.parent / "publication-verification.json").read_text())
             assert verification["ok"] and len(verification["artifacts"]) == 3
             print("release pipeline: protected ref, failed receipt, stage, clean retry, complete-set check, integrity rejection and activation retry passed")
         finally:

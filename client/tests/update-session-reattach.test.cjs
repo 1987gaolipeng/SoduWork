@@ -7,6 +7,10 @@ const handler = source.slice(source.indexOf('  async function openConversation('
 
 test('maintenance permits authenticated reattachment but blocks new and archived runtimes', async () => {
   let attached = 0, deniedOwner = false;
+  const now = Math.floor(Date.now() / 1000);
+  const claims = Buffer.from(JSON.stringify({ typ: 'device', uid: 'owner', cid: 'device',
+    iat: now - 10, exp: now + 3600 })).toString('base64url');
+  const identity = { hub: 'http://fixture.invalid', clientId: 'device', session: claims + '.' + 'a'.repeat(64) };
   const live = { ref: 'live-ref', sessionId: 'existing' };
   const frame = {}, event = { senderFrame: frame, sender: { mainFrame: frame,
     isDestroyed: () => false, getURL: () => pathToFileURL(path.resolve(__dirname, '../desk.html')).href } };
@@ -17,7 +21,12 @@ test('maintenance permits authenticated reattachment but blocks new and archived
       if (['../work-preview', '../conversation/app-surfaces.cjs', './app-mcp-grant.cjs'].includes(name)) {
         return require(path.join(__dirname, '../main/pi-session', name));
       }
-      assert.ok(['./task-access', '../access-control/preferences', '../access-control/automation-access', '../conversation/requirement-context', '../conversation/acceptance-session'].includes(name));
+      if (name === '../conversation/history-access') {
+        const actual = require(path.join(__dirname, '../main/pi-session', name));
+        return { ...actual,
+          actor(app, value) { return actual.actor(app, value === undefined ? identity : value); } };
+      }
+      assert.ok(['./task-access', '../access-control/preferences', '../access-control/automation-access', '../conversation/history-access', '../conversation/requirement-context', '../conversation/acceptance-session'].includes(name));
       return require(path.join(__dirname, '../main/pi-session', name));
     },
     updateWorkloads: { guard: () => ({ ok: false, maintenance: true }) },

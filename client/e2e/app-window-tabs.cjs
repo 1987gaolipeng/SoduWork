@@ -42,7 +42,7 @@ app.whenReady().then(async () => {
     res.writeHead(200, { 'Content-Type':'text/html; charset=utf-8' });
     res.end('<!doctype html><title>H5 ' + req.url + '</title><script src="/sdk.js"></script><textarea id="draft"></textarea><a id="blank" target="_blank" href="/linked">Link</a><form id="form" method="post" target="_blank" action="/posted"><input name="payload" value="kept"></form>');
   });
-  fs.writeFileSync(path.join(temp,'host.html'), '<!doctype html><title>Owner</title><script>soduWorkAPI.workPreviewAppHost.onRequest(p=>soduWorkAPI.workPreviewAppHost.respond(p.id,{ok:true,tabId:p.tabId}));</script>');
+  fs.writeFileSync(path.join(temp,'host.html'), '<!doctype html><title>Owner</title><script>window.settingsRequests=[];soduWorkAPI.workPreview.onAppsManage(p=>settingsRequests.push(p));soduWorkAPI.workPreviewAppHost.onRequest(p=>soduWorkAPI.workPreviewAppHost.respond(p.id,{ok:true,tabId:p.tabId}));</script>');
   fs.writeFileSync(path.join(temp,'composer.html'), '<!doctype html><textarea id="draft">对话草稿</textarea><script>window.received=[];soduWorkAPI.workPreview.onComposerSubmit(p=>{received.push(p.text);soduWorkAPI.workPreview.composerSubmitResult({id:p.id,ok:true});});</script>');
   const caps = ['context.read','composer.control','conversation.send','settings.read','settings.write'];
   const plugin = require('../main/personal-plugins').create(app, { key:'tabs-fixture', name:'Tabs fixture', version:'0.1.0', template:'app', description:'Isolated app', instructions:'Fixture only', ui:{ contributions:[{ id:'app', title:'App', slot:'workspace.navigation', source:{ type:'external', url:origin, bridge:{ version:1, capabilities:caps } } }] } }).plugin;
@@ -59,7 +59,7 @@ app.whenReady().then(async () => {
   });
   host = new BrowserWindow({ show:false, webPreferences:{ preload:path.resolve(__dirname,'../preload.js'), contextIsolation:true, sandbox:true } });
   await host.loadFile(path.join(temp,'host.html'));
-  const payload = { tabId:'browser-app', label:'Static application name', url:origin + '/', appBridge:{ appId:'plugin:' + plugin.pluginId, contributionId:'app', origin, version:1, capabilities:caps } };
+  const payload = { tabId:'browser-app', label:'Static application name', appVersion:'0.1.0', url:origin + '/', appBridge:{ appId:'plugin:' + plugin.pluginId, contributionId:'app', origin, version:1, capabilities:caps } };
   assert.equal((await js(host.webContents,'soduWorkAPI.workPreview.showDetached(' + JSON.stringify(payload) + ')')).ok,true);
   const win = windows[0], [chrome, first, composer] = win.contentView.children;
   const action = (name, id) => js(chrome.webContents,'soduWorkWindowChrome.action(' + JSON.stringify(name) + ',' + JSON.stringify(id || '') + ')');
@@ -71,6 +71,10 @@ app.whenReady().then(async () => {
   assert.equal(await js(chrome.webContents,'soduWorkWindowChrome.platform'),process.platform);
   assert.equal(await js(chrome.webContents,'document.documentElement.dataset.platform'),process.platform);
   assert.equal((await state()).canBack,false);
+  assert.equal((await state()).appVersion,'0.1.0');
+  assert.equal(await js(chrome.webContents,'!!document.getElementById("version")'),false,'version no longer occupies title bar space');
+  assert.equal(await js(chrome.webContents,'!!document.getElementById("settings")'),false,'application settings entry is absent from chrome');
+  report.cases.push('Application chrome has neither a settings icon/menu nor version text; refresh, navigation and native controls remain.');
   await js(first.webContents,'document.title="动态标题"');
   await until(() => js(chrome.webContents,'document.querySelector(".tab-label").textContent === "动态标题"'), 'live title');
   await js(first.webContents,'history.pushState({},"","/spa-one");history.pushState({},"","/spa-two");document.title="SPA 页面"');
@@ -176,9 +180,10 @@ app.whenReady().then(async () => {
   const blank = await current(); await js(blank.webContents,'window.close()');
   await until(async () => (await state()).tabs.length === before,'script close tab');
   const firstWindowViews = [...views];
-  assert.equal((await js(host.webContents,'soduWorkAPI.workPreview.showDetached(' + JSON.stringify({ ...payload,tabId:'second-app' }) + ')')).ok,true);
+  assert.equal((await js(host.webContents,'soduWorkAPI.workPreview.showDetached(' + JSON.stringify({ ...payload,appVersion:'',tabId:'second-app' }) + ')')).ok,true);
   const secondWindow = windows[1], secondChrome = secondWindow.contentView.children[0];
   await until(() => !secondChrome.webContents.isLoading(),'second chrome');
+  assert.equal(await js(secondChrome.webContents,'!!document.querySelector("#settings,#version")'),false);
   assert.equal((await action('select','second-app')).ok,false);
   while (!win.isDestroyed()) { const s = await state(); await action('close',s.activeId).catch(() => {}); await delay(20); }
   assert.equal(secondWindow.isDestroyed(),false);

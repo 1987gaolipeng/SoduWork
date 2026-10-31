@@ -4,12 +4,13 @@
  * serialization.
  */
 const path = require('path');
-const session = require('../agent-runtime/pi-session-bridge');
+const runtimeSession = require('../agent-runtime/pi-session-bridge');
 const pluginDraft = require('./plugin-draft');
 const pluginGrant = require('./plugin-grant');
 const attachments = require('./attachments');
 const attachmentContract = require('./attachment-contract');
 const taskInput = require('./task-input');
+const modelConfig = require('./model-config');
 const capabilities = require('../conversation/capabilities');
 const skillRoots = require('../conversation/skill-roots');
 const skillTurn = require('./skill-turn');
@@ -35,7 +36,7 @@ const OPEN_TIMEOUT_MS = 45000;
 const _streamTransport = eventPublication.createStreamScheduler((context, touched, snapshot) =>
   _publish(context.BrowserWindow, context.handle, touched, snapshot));
 const _releaseTimers = new Map();
-const _wired = new WeakSet();
+const _wired = new WeakMap();
 const RELEASE_GRACE_MS = 5 * 60 * 1000;
 const { entryContextPrompts: _entryContextPrompts, awaitOpen: _awaitBounded,
   createConfiguration } = require('./environment-ipc');
@@ -43,6 +44,7 @@ let _app = null;
 let _usage = null;
 let _cloudHandoff = null;
 let _deliverySync = null;
+let _sessionOwners = null;
 const { _conf, _saveConf, workDir, _defaultCwd, _newSessionCwd } = createConfiguration(() => _app);
 /*
  * Rescan local skill directories on capability probes so newly installed skills do not
@@ -62,6 +64,9 @@ function _contextSnapshot(handle, snapshot) {
 }
 function _send(win, handle, touched, snapshot, includeSnapshot, presenceSnapshot) {
   if (!win || win.isDestroyed()) return;
+  if (typeof _sessionOwners !== 'undefined' && _sessionOwners && !_sessionOwners.canAccess(handle)) return;
+  const safePluginAuthorization = includeSnapshot && typeof eventPublication.pluginAuthorization === 'function'
+    ? eventPublication.pluginAuthorization(touched?.pluginAuthorization) : undefined;
   try {
     win.webContents.send('pi-session-event', {
       ref: handle.ref, sessionId: handle.sessionId,
@@ -70,6 +75,8 @@ function _send(win, handle, touched, snapshot, includeSnapshot, presenceSnapshot
       failureKind: includeSnapshot && touched && touched.failureKind || '',
       retrySafe: Boolean(includeSnapshot && touched && touched.retrySafe),
       submissionId: includeSnapshot && touched && touched.submissionId || '',
+      ...(includeSnapshot ? require('../../core/token-quota').fields(touched) : {}),
+      ...(safePluginAuthorization ? { pluginAuthorization: safePluginAuthorization } : {}),
       snapshot: includeSnapshot ? _contextSnapshot(handle, snapshot) : null,
       presence: conversationTitles.decorate(_app, typeof handle.historyRow === 'function'
         ? { ...handle.historyRow(presenceSnapshot || snapshot), ...(handle.requirementContext ? { requirementContext: handle.requirementContext } : {}) } : null),
@@ -94,6 +101,10 @@ function _publish(BrowserWindow, handle, touched, snapshot) {
   _publicationQueue.push(handle.ref, touched, snapshot, { BrowserWindow, handle });
 }
 function _publishNow(BrowserWindow, handle, touched, snapshot, uiSnapshot) {
+  if (typeof _sessionOwners !== 'undefined' && _sessionOwners && !_sessionOwners.canAccess(handle)) {
+    _discardRenderer(handle);
+    return;
+  }
   const owner = handle.attachedWindow;
   require('../conversation/app-surfaces.cjs').all(BrowserWindow.getAllWindows()).forEach((win) => {
     const full = !handle.detached && owner === win;
@@ -119,7 +130,7 @@ function _scheduleRelease(handle) {
   if (!handle || !handle.detached || _isActive(handle) || _releaseTimers.has(handle.ref)) return;
   const timer = setTimeout(() => {
     _releaseTimers.delete(handle.ref);
-    if (handle.detached && !_isActive(handle) && session.get(handle.ref) === handle) {
+    if (handle.detached && !_isActive(handle) && runtimeSession.get(handle.ref) === handle) {
       artifactRuntime.closeRef(handle.ref);
       handle.close();
     }
@@ -130,11 +141,27 @@ function _scheduleRelease(handle) {
 
 function _wire(BrowserWindow, handle) {
   if (!handle || _wired.has(handle)) return;
-  _wired.add(handle);
-  handle.on((touched, snapshot) => {
+  const dispose = handle.on((touched, snapshot) => {
     _push(BrowserWindow, handle, touched, snapshot);
     if (handle.detached) _scheduleRelease(handle);
   });
+  _wired.set(handle, dispose);
+}
+
+function _discardRenderer(handle) {
+  if (!handle) return;
+  _publicationQueue.cancel(handle.ref);
+  _streamTransport.cancel(handle.ref);
+  const dispose = _wired.get(handle);
+  _wired.delete(handle);
+  try { if (typeof dispose === 'function') dispose(); } catch (_) { /* Continue closing renderer ownership. */ }
+  _unwatchOwner(handle);
+  _uiWindow.reset(handle);
+  handle.detached = true;
+  handle.attachedWindow = null;
+  _clearRelease(handle.ref);
+  require('./app-mcp-grant.cjs').unbind(handle);
+  artifactRuntime.closeRef(handle.ref);
 }
 
 function _bindUsage(handle, identity, adapterId) {
@@ -224,6 +251,9 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
   const newChatAccess = require('../access-control/new-chat-consent').create({ BrowserWindow, confirmFullAccess });
   newChatAccess.install(ipcMain);
   const memories = require('../conversation/session-memory').install({ app, ipcMain, dialog, BrowserWindow, identityOf });
+  const startReceipts = require('./start-receipts.cjs').create({
+    app, identityOf: sendIdentityOf || identityOf, request: taskInput.request,
+  });
   _usage = usageReporter.createUsageReporter({ app, identityOf, onQuotaExceeded });
   _usage.flush().catch(() => {});
   const pluginDebug = require('../personal-plugin-debug-ipc').install({
@@ -256,6 +286,28 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     delete opts.appRequestId;
     let accessConsent = null;
     try {
+      const historyAccess = require('../conversation/history-access');
+      const requestActor = historyAccess.actor(app);
+      const connectionOf = value => {
+        try { return require('../platform-connections/runtime.cjs').connectionScope(value); }
+        catch (_) { return ''; }
+      };
+      const failedClosures = new WeakMap();
+      const closeFailedOpen = async (handle) => {
+        if (!handle) return true;
+        if (failedClosures.has(handle)) return failedClosures.get(handle);
+        try { _discardRenderer(handle); } catch (_) { /* Continue with authoritative runtime cleanup. */ }
+        _sessionOwners?.quarantine(handle);
+        const closing = Promise.resolve().then(async () => {
+          let confirmed = false;
+          try { confirmed = typeof handle.close === 'function' && await handle.close() !== false; }
+          catch (_) { /* Keep unconfirmed runtimes quarantined. */ }
+          _sessionOwners?.closed(handle, confirmed);
+          return confirmed;
+        });
+        failedClosures.set(handle, closing);
+        return closing;
+      };
       if (!opts.chatId && (Object.hasOwn(opts, 'accessDraftId') || Object.hasOwn(opts, 'accessConsentId'))) {
         accessConsent = newChatAccess.reserve(event, opts, expectedIdentity);
         delete opts.accessDraftId;
@@ -268,8 +320,18 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
       const identity = await identityOf(app);
       appRequest?.assertActive();
       if (!identity) return { ok: false, reason: '这台电脑还没连上 SoduWork 后台（先打开桌宠登录一次）' };
+      historyAccess.assertCurrent(app, requestActor, identity);
+      const historyActor = historyAccess.actor(app, identity);
+      const openingConnection = connectionOf(identity);
+      const assertHistoryCurrent = async () => {
+        const current = await identityOf(app);
+        historyAccess.assertCurrent(app, historyActor, current);
+        if (expectedIdentity && (!openingConnection || connectionOf(current) !== openingConnection))
+          throw Error('连接环境已切换，本次自动化未启动');
+        return current;
+      };
       if (automationContext) automationAccess.assertCurrent(automationContext, identity);
-      if (expectedIdentity && (identity.hub !== expectedIdentity.hub || identity.clientId !== expectedIdentity.clientId)) {
+      if (expectedIdentity && (!openingConnection || openingConnection !== connectionOf(expectedIdentity))) {
         return { ok: false, reason: '连接环境已切换，本次自动化未启动' };
       }
       // Start the SDK/model work while local capability policy and Skill
@@ -285,6 +347,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
       if (opts.chatId) {
         const live = session.findBySessionId(opts.chatId);
         if (live) {
+          try {
           // A live handle is already attached to this device and must keep the
           // strict memory binding check. Archived history is different: the
           // device session can be in the middle of renewal, so checking its
@@ -293,6 +356,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
           memories.assertOwner(identity, opts.chatId);
           require('../conversation/requirement-context').assertOwner(app, live, identity);
           await require('../conversation/acceptance-session').attach(app, live, { resumed: true }, identity);
+          await assertHistoryCurrent();
           require('../conversation/acceptance-session').assertTask(live, opts.taskRef);
 
           const requestedTaskId = String(opts.taskRef || '').trim();
@@ -305,7 +369,9 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
             await require('../conversation/requirement-context').checkBinding({ app, handle: live, identity,
               identityOf: () => (sendIdentityOf || identityOf)(app) },
               requestedTaskId, route => taskInput.request(identity, route));
+            await assertHistoryCurrent();
             const bound = await live.bindTask(requestedTaskId, opts.taskTitle);
+            await assertHistoryCurrent();
             if (!bound || bound.ok === false) return bound || { ok: false, reason: "需求会话绑定失败" };
           }
           const boundTaskIds = new Set([
@@ -323,19 +389,38 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
             _cloudHandoff.observe(live);
             return _openReply(live, { resumed: true, attached: true, seeded: 0 });
           }
-
+          } catch (error) {
+            // Reattaching must never destroy a runtime that was already live.
+            _discardRenderer(live);
+            throw error;
           }
         }
+      }
       if (opts.chatId && typeof _cloudHandoff.reopen === 'function') {
         const remote = await _cloudHandoff.reopen(opts.chatId,
           'cloud-' + require('node:crypto').randomUUID());
         if (remote) {
+          try {
+            const current = await assertHistoryCurrent();
+            if (!openingConnection || connectionOf(current) !== openingConnection)
+              throw Error('账号或服务已切换，请在当前连接重新打开会话');
+          }
+          catch (error) {
+            await closeFailedOpen(remote);
+            throw error;
+          }
           let handle;
-          try { handle = session.attachView(remote); }
-          catch (error) { remote.close(); throw error; }
-          if (event) _attach(handle, require('../conversation/app-surfaces.cjs').forSender(BrowserWindow, event.sender)); else _detach(handle);
-          _wire(BrowserWindow, handle);
-          return _openReply(handle, { resumed: true, attached: true, cloud: true });
+          try {
+            handle = session.attachView(remote);
+            _sessionOwners?.bind(handle, identity, { connection: true });
+            if (event) _attach(handle, require('../conversation/app-surfaces.cjs').forSender(BrowserWindow, event.sender)); else _detach(handle);
+            _wire(BrowserWindow, handle);
+            return _openReply(handle, { resumed: true, attached: true, cloud: true });
+          } catch (error) {
+            if (handle) await closeFailedOpen(handle);
+            else await closeFailedOpen(remote);
+            throw error;
+          }
         }
       }
       /* Resume the archive identified by the selected history entry. */
@@ -367,6 +452,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
           const got = await session.history(app, Number.MAX_SAFE_INTEGER);
           resume = ((got && got.chats) || []).find((c) => c.id === opts.chatId) || null;
         }
+        await assertHistoryCurrent();
         if (!resume) {
           await capabilityPromise.catch(() => {});
           return { ok: false, notFound: true, reason: '这条对话找不到了（存档可能已被清理）' };
@@ -427,7 +513,12 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
       accessConsent?.assertValid();
       let automationPluginLock = expectedIdentity ? opts.pluginLock : null;
       let openingTimedOut = false;
-      const openingPromise = Promise.resolve().then(() => {
+      const openingPromise = Promise.resolve().then(async () => {
+        await assertHistoryCurrent();
+        if (opts.chatId) {
+          const ownerOptions = historyAccess.isOwnerlessNativeArchive(resume) ? { allowLegacy: true } : {};
+          historyAccess.assertOwner(app, opts.chatId, historyActor, resume, ownerOptions);
+        }
         accessConsent?.assertValid();
         return session.open({
         app, identity, cwd: spec.cwd, ref, runtimeConversationId: resume?.runtimeConversationId,
@@ -505,13 +596,16 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         resourceLoadTimeoutMs: opts.resourceLoadTimeoutMs,
         });
       });
-      accessConsent?.track(openingPromise);
+      // The reservation and immediate rollback share one cleanup promise so
+      // finalization failures cannot close a runtime twice or leak late views.
+      accessConsent?.track(openingPromise.then(result => result?.ok && result.session
+        ? { ...result, session: { close: () => closeFailedOpen(result.session) } } : result));
       // The SDK has no cancellation token. If it returns after the watchdog,
       // close the late session immediately so a retry cannot create a hidden
       // duplicate runtime.
       openingPromise.then((late) => {
-        if (accessConsent || !openingTimedOut || !late || !late.ok || !late.session || typeof late.session.close !== 'function') return;
-        try { late.session.close(); } catch (_) {}
+        if (accessConsent || !openingTimedOut || !late || !late.ok || !late.session) return;
+        return closeFailedOpen(late.session);
       }).catch(() => {});
       let opened;
       try {
@@ -525,6 +619,11 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
       try { appRequest?.assertActive(); } catch (error) { await opened.session.close(); throw error; }
       require('./app-mcp-grant.cjs').bind(opened.session, event?.sender, appPluginId, app, appRequest?.assertActive);
       try {
+        await assertHistoryCurrent();
+        if (opts.chatId) {
+          const ownerOptions = historyAccess.isOwnerlessNativeArchive(resume) ? { allowLegacy: true } : {};
+          historyAccess.assertOwner(app, opts.chatId, historyActor, resume, ownerOptions);
+        }
         await require('../conversation/acceptance-session').attach(app, opened.session,
           resume ? { resumed: true } : { ...opts, resumed: false }, identity);
       } catch (error) { await opened.session.close(); throw error; }
@@ -580,6 +679,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
       await require('../conversation/requirement-context').checkBinding({ app, handle: s, identity,
         identityOf: () => (sendIdentityOf || identityOf)(app) },
         rawTaskId, route => taskInput.request(identity, route));
+      if (session.get(ref) !== s) throw Error('账号已切换，请重新打开会话');
       return await Promise.resolve(s.bindTask(rawTaskId, rawTitle));
     } catch (error) {
       return { ok: false, reason: "需求会话绑定失败：" + String((error && error.message) || error) };
@@ -631,9 +731,16 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
       currentIdentity = current;
     } catch (error) { return { ok: false, reason: String(error.message || error) }; }
     try {
+      if (session.get(ref) !== s) throw Error('账号已切换，请重新打开会话');
       if (_cloudHandoff.guard(s)) return await _cloudHandoff.send(s, text, rawAttachments, rawOptions || {});
     } catch (error) { return { ok: false, reason: String(error.message || error) }; }
-    const debugBlocked = pluginDebug.guard(s);
+    // Scheduled automation is an ordinary one-turn conversation even when the
+    // selected personal plugin happens to be a workflow package.  The debug
+    // bridge owns an interactive plugin-debug run and would otherwise hijack
+    // the automation prompt into the "AI 干活"/workflow path.  Keep that
+    // bridge for user initiated plugin conversations only.
+    const automationTurn = rawOptions?.source === 'automation';
+    const debugBlocked = automationTurn ? '' : pluginDebug.guard(s);
     if (debugBlocked) return { ok: false, reason: debugBlocked };
     let taskTurn = null;
     const taskId = String(rawOptions && rawOptions.taskId || '').trim().slice(0, 120);
@@ -700,6 +807,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
       skills: selectedSkills,
       sentAt: Number.isFinite(rawOptions?.sentAt) && rawOptions.sentAt > 0 ? Math.min(rawOptions.sentAt, Date.now()) : Date.now(),
       projectId: String(taskTurn ? taskTurn.task.projectId || '' : rawOptions && rawOptions.projectId || '').slice(0, 36),
+      repoId: String(taskTurn ? taskTurn.task.repoId || '' : rawOptions && rawOptions.repoId || '').slice(0, 36),
       submissionId: String(rawOptions && rawOptions.submissionId || '')
         .replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64),
     };
@@ -709,12 +817,22 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         authorizeAI, currentIdentity, sendOptions.beforeTurn);
     }
     let workflowTurn;
-    try { require('./app-mcp-grant.cjs').guardSend(s, sendOptions); }
+    try {
+      if (session.get(ref) !== s) throw Error('账号已切换，请重新打开会话');
+      require('./app-mcp-grant.cjs').guardSend(s, sendOptions);
+    }
     catch (error) { return { ok: false, reason: error.message }; }
-    try { workflowTurn = await pluginDebug.submitConversation?.(s, text, staged.files, sendOptions, rawPluginObjects); }
+    try {
+      workflowTurn = automationTurn ? null :
+        await pluginDebug.submitConversation?.(s, text, staged.files, sendOptions, rawPluginObjects);
+    }
     catch (error) {
       if (taskTurn) await taskTurn.afterTurn('stopped').catch(() => {});
       return { ok: false, reason: String(error.message || error) };
+    }
+    if (session.get(ref) !== s) {
+      if (taskTurn?.afterTurn) await taskTurn.afterTurn('stopped').catch(() => {});
+      return { ok: false, reason: '账号已切换，请重新打开会话' };
     }
     const submitted = workflowTurn || (typeof s.submit === 'function'
       ? await s.submit(text, staged.files, sendOptions)
@@ -804,6 +922,8 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
   });
 
   ipcMain.on('pi-session-close', (event, ref) => {
+    const s = session.get(ref);
+    if (!s) return;
     _publicationQueue.cancel(ref);
     _clearRelease(ref);
     _streamTransport.cancel(ref);

@@ -1,10 +1,11 @@
 /* Pure helpers shared by the Pi session loader and history projection. */
 const path = require('path');
+const attachmentContract = require('./attachment-contract');
 
 function entryCandidates(app) {
   const out = [];
   if (app && app.isPackaged) {
-    out.push(path.join(require('../agent-runtime/process-context').current()?.resourcesPath || process.resourcesPath, 'pi', 'node_modules', '@earendil-works',
+    out.push(path.join(require('../agent-runtime/process-context').current()?.resourcesPath || process.resourcesPath, 'pi', '@earendil-works',
       'pi-coding-agent', 'dist', 'index.js'));
   }
   const clientRoot = path.dirname(path.dirname(__dirname));
@@ -44,17 +45,33 @@ function lastAssistantText(snapshot) {
 function visibleTitleText(value) {
   let text = String(value).trimEnd();
   const contexts = [require('./connector-context.cjs'), require('./plugin-context')];
-  for (const context of contexts) {
-    if (!text.endsWith(context.END)) continue;
-    const start = text.lastIndexOf(context.START);
-    if (start < 0 || (start > 0 && !/\r?\n\r?\n$/.test(text.slice(0, start)))) continue;
-    try {
-      const payload = JSON.parse(text.slice(start + context.START.length, -context.END.length));
-      const internal = context === contexts[0] ? typeof payload?.runtimeGuide === 'string' :
-        Array.isArray(payload?.plugins);
-      if (internal) text = text.slice(0, start).trimEnd();
-    } catch (_) { /* Literal tag examples are ordinary title text. */ }
-  }
+  let previous;
+  // Transport envelopes can be appended in either order. Remove only validated
+  // trailing envelopes until the visible first message stops changing.
+  do {
+    previous = text;
+    for (const context of contexts) {
+      if (!text.endsWith(context.END)) continue;
+      const start = text.lastIndexOf(context.START);
+      if (start < 0 || (start > 0 && !/\r?\n\r?\n$/.test(text.slice(0, start)))) continue;
+      try {
+        const payload = JSON.parse(text.slice(start + context.START.length, -context.END.length));
+        const internal = context === contexts[0] ? typeof payload?.runtimeGuide === 'string' :
+          Array.isArray(payload?.plugins);
+        if (internal) text = text.slice(0, start).trimEnd();
+      } catch (_) { /* Literal tag examples are ordinary title text. */ }
+    }
+    // Attachment metadata is an internal transport envelope and must not become
+    // part of a conversation title shown to users. Only strip a complete trailing
+    // envelope so ordinary text after a literal marker is never discarded.
+    if (text.endsWith(attachmentContract.END)) {
+      const start = text.lastIndexOf(attachmentContract.START);
+      if (start >= 0 && (start === 0 || /\r?\n\r?\n$/.test(text.slice(0, start)))) {
+        const parsed = attachmentContract.parse(text);
+        if (parsed.files.length) text = parsed.text;
+      }
+    }
+  } while (text !== previous);
   return text;
 }
 
@@ -76,4 +93,4 @@ function title(session) {
   return text ? text.slice(0, 40) : '\u672a\u547d\u540d\u5bf9\u8bdd';
 }
 
-module.exports = { entryCandidates, explain, lastAssistantText, title };
+module.exports = { entryCandidates, explain, lastAssistantText, title, visibleTitleText };

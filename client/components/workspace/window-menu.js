@@ -176,6 +176,7 @@
   async function command(id) {
     if (global.RequirementConfirm?.isOpen?.()) return;
     if (!['new', 'sidebar', 'history', 'website', 'about', 'quit'].includes(id)) return;
+    if (id === 'history' && window.SoduWorkReleaseNotes) { await window.SoduWorkReleaseNotes.openHistory(); return; }
     if (id === 'history' || id === 'about') { await openHelp(id); return; }
     closeMenu();
     if (id === 'sidebar') { toggleSidebar(); bar.querySelector('[data-window-sidebar]').focus(); return; }

@@ -18,7 +18,7 @@
     const mask = document.createElement('div');
     mask.className = 'ac-mask ' + (className || '');
     mask.innerHTML = '<section class="ac-dialog" role="dialog" aria-modal="true" aria-label="' + esc(title) + '">' +
-      '<header class="ac-dialog-head"><h2>' + esc(title) + '</h2><button type="button" class="ac-icon" data-ac-close aria-label="关闭">×</button></header>' +
+      '<header class="ac-dialog-head"><h2>' + esc(title) + '</h2><button type="button" class="ac-icon" data-ac-close aria-label="关闭对话框">×</button></header>' +
       '<div class="ac-dialog-body">' + body + '</div></section>';
     parent.appendChild(mask);
     let closed = false;
@@ -66,11 +66,24 @@
     return dialog;
   }
   function bindPassword(parent) {
+    const tx = value => (global.SoduWorkI18n && typeof global.SoduWorkI18n.translateText === 'function')
+      ? global.SoduWorkI18n.translateText(value) : value;
+    const refresh = () => parent.querySelectorAll('[data-password-toggle]').forEach(button => {
+      const input = parent.querySelector('#' + button.dataset.passwordToggle);
+      const visible = input && input.type === 'text';
+      button.textContent = tx(visible ? '隐藏' : '显示');
+      button.setAttribute('aria-label', tx(visible ? '隐藏密码' : '显示密码'));
+      button.setAttribute('aria-pressed', String(visible));
+    });
     parent.querySelectorAll('[data-password-toggle]').forEach(button => button.addEventListener('click', () => {
       const input = parent.querySelector('#' + button.dataset.passwordToggle);
-      const visible = input.type === 'password'; input.type = visible ? 'text' : 'password';
-      button.textContent = visible ? '隐藏' : '显示'; button.setAttribute('aria-pressed', String(visible));
+      if (!input) return;
+      input.type = input.type === 'password' ? 'text' : 'password'; refresh();
     }));
+    refresh();
+    const onLocaleChange = () => refresh();
+    global.addEventListener?.('soduwork-locale-change', onLocaleChange);
+    parent._accountUiPasswordLocaleDispose = () => global.removeEventListener?.('soduwork-locale-change', onLocaleChange);
   }
   global.AccountUI = { esc, email, code, error, check, modal, legal, bindPassword };
 })(window);

@@ -114,8 +114,13 @@ export default function ClientReleases() {
     setLoading(true)
     setError('')
     try {
-      const data = await api.clientReleases()
-      setReleases(Array.isArray(data && data.releases) ? data.releases : [])
+      const [data, localized] = await Promise.all([api.clientReleases(), api.clientReleaseNotes().catch(error => {
+        if (error.status === 404) return { notes: [] }; // Rolling upgrade: older Hub.
+        throw error;
+      })]);
+      const byVersion = new Map((localized.notes || []).map(row => [row.version + '/' + row.channel, row]));
+      setReleases((Array.isArray(data?.releases) ? data.releases : []).map(row => ({ ...row,
+        localizedNotes: byVersion.get(row.version + '/' + row.channel)?.locales })))
     } catch (e) {
       setError(e.message || tx("版本列表没有加载出来"))
     }

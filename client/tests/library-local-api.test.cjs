@@ -141,6 +141,120 @@ test('local IDs route every read and mutation to the native owner, not an HTTP i
   assert.equal(h.nativeCalls[2].payload.preview, true);
 });
 
+test('batch delete splits local and remote ids while preserving the result contract', async () => {
+  const h = harness(); await h.signIn('alice');
+  h.native = async action => action === 'deleteItems'
+    ? { ok: true, succeeded: ['local-one'], failed: [] }
+    : { ok: true };
+  h.fetch = async () => new Response(JSON.stringify({ ok: true, succeeded: ['remote-one'], failed: [] }), { status: 200 });
+  const result = await h.api.deleteLibraryItems(['local-one', 'remote-one']);
+  assert.deepEqual(Array.from(result.succeeded), ['local-one', 'remote-one']);
+  assert.deepEqual(Array.from(result.failed), []);
+  assert.deepEqual(h.nativeCalls.map(row => row.action), ['deleteItems']);
+  assert.deepEqual(Array.from(h.nativeCalls[0].payload.ids), ['local-one']);
+  assert.match(h.calls[0].url, /\/library\/items\/batch-delete$/);
+  assert.deepEqual(JSON.parse(h.calls[0].request.body), { itemIds: ['remote-one'] });
+});
+
+test('batch remote copy checks the provider once and copies local items in order', async () => {
+  const h = harness(); await h.signIn('alice');
+  let uploads = 0;
+  h.fetch = async (url, request) => {
+    if (String(url).includes('/library/storage/status')) {
+      return new Response(JSON.stringify({ storage: { remote: { backend: 'nfs', available: true, configured: true } } }));
+    }
+    if (request?.method === 'POST') {
+      uploads += 1;
+      return new Response(JSON.stringify({ ok: true, item: { id: 'remote-' + uploads } }));
+    }
+    return new Response(JSON.stringify({ ok: true }));
+  };
+  const result = await h.api.copyLocalLibraryItemsToRemote(['local-one', 'local-one'], 'nfs');
+  assert.deepEqual(Array.from(result.failed), []);
+  assert.deepEqual(Array.from(result.succeeded, row => row.id), ['local-one']);
+  assert.equal(uploads, 1);
+  assert.deepEqual(h.nativeCalls.map(row => row.action), ['status', 'readBinary', 'updateItem']);
+  assert.equal(h.calls.filter(row => row.request.method === 'POST').length, 1);
+});
+
+test('batch remote copy reports an individual upload failure and continues', async () => {
+  const h = harness(); await h.signIn('alice');
+  let uploads = 0;
+  h.fetch = async (url, request) => {
+    if (String(url).includes('/library/storage/status')) {
+      return new Response(JSON.stringify({ storage: { remote: { backend: 'nfs', available: true, configured: true } } }));
+    }
+    if (request?.method === 'POST') {
+      uploads += 1;
+      if (uploads === 1) return new Response(JSON.stringify({ detail: { code: 'UPSTREAM_DOWN', message: '远端暂不可用' } }), { status: 503 });
+      return new Response(JSON.stringify({ ok: true, item: { id: 'remote-two' } }));
+    }
+    return new Response(JSON.stringify({ ok: true }));
+  };
+  const result = await h.api.copyLocalLibraryItemsToRemote(['local-one', 'local-two'], 'nfs');
+  assert.deepEqual(Array.from(result.succeeded, row => row.id), ['local-two']);
+  assert.equal(result.failed.length, 1); assert.equal(result.failed[0].id, 'local-one');
+  assert.equal(result.failed[0].code, 'UPSTREAM_DOWN'); assert.equal(uploads, 2);
+});
+
+test('batch remote copy does not upload when the selected remote provider is unavailable', async () => {
+  const h = harness(); await h.signIn('alice');
+  h.fetch = async (url, request) => String(url).includes('/library/storage/status')
+    ? new Response(JSON.stringify({ storage: { remote: { backend: 'nfs', available: false, configured: true, code: 'UPSTREAM_DOWN', message: '远端不可用' } } }))
+    : new Response(JSON.stringify({ ok: true, item: { id: 'unexpected' } }));
+  const result = await h.api.copyLocalLibraryItemsToRemote(['local-one'], 'nfs');
+  assert.equal(result.succeeded.length, 0); assert.equal(result.failed[0].code, 'UPSTREAM_DOWN');
+  assert.deepEqual(h.nativeCalls.map(row => row.action), ['status']);
+  assert.equal(h.calls.filter(row => row.request.method === 'POST').length, 0);
+});
+
+test('batch remote copy rejects oversized batches before reading local data', async () => {
+  const h = harness(); await h.signIn('alice');
+  await assert.rejects(h.api.copyLocalLibraryItemsToRemote(Array.from({ length: 101 }, (_, i) => 'local-' + i), 'nfs'), error => error.code === 'LIBRARY_BATCH_LIMIT');
+  assert.equal(h.nativeCalls.length, 0); assert.equal(h.calls.length, 0);
+});
+
+test('batch remote copy reports remote IDs without sending them to the local upload path', async () => {
+  const h = harness(); await h.signIn('alice');
+  h.fetch = async (url, request) => String(url).includes('/library/storage/status')
+    ? new Response(JSON.stringify({ storage: { remote: { backend: 'nfs', available: true, configured: true } } }))
+    : new Response(JSON.stringify({ ok: true, item: { id: 'remote-one' } }));
+  const result = await h.api.copyLocalLibraryItemsToRemote(['remote-existing'], 'nfs');
+  assert.deepEqual(Array.from(result.succeeded), []); assert.equal(result.failed[0].id, 'remote-existing');
+  assert.equal(result.failed[0].code, 'LOCAL_LIBRARY_ITEM_REQUIRED');
+  assert.deepEqual(h.nativeCalls.map(row => row.action), ['status']);
+});
+
+test('batch remote copy stops after the account scope changes during an item', async () => {
+  const h = harness(); await h.signIn('alice');
+  let reads = 0;
+  h.native = async action => {
+    if (action === 'readBinary') { reads += 1; await h.signIn('bob'); return binary(); }
+    return { ok: true };
+  };
+  h.fetch = async (url, request) => String(url).includes('/library/storage/status')
+    ? new Response(JSON.stringify({ storage: { remote: { backend: 'nfs', available: true, configured: true } } }))
+    : new Response(JSON.stringify({ ok: true, item: { id: 'unexpected' } }));
+  await assert.rejects(h.api.copyLocalLibraryItemsToRemote(['local-one', 'local-two'], 'nfs'), stale);
+  assert.equal(reads, 1); assert.equal(h.calls.filter(row => row.request.method === 'POST').length, 0);
+  assert.equal(h.nativeCalls.filter(row => row.action === 'readBinary').length, 1);
+});
+
+test('batch remote copy reuses a verified recorded remote copy on retry', async () => {
+  const h = harness(); await h.signIn('alice');
+  h.native = async action => action === 'readBinary'
+    ? { ...binary(), item: { extra: { lastRemoteCopy: { id: 'remote-existing', storage: 'nfs', folderId: '' } } } }
+    : { ok: true };
+  h.fetch = async (url, request) => {
+    if (String(url).includes('/library/storage/status')) return new Response(JSON.stringify({ storage: { remote: { backend: 'nfs', available: true, configured: true } } }));
+    if (request?.method === 'GET') return new Response(bytes, { headers: { 'Content-Disposition': 'attachment; filename="private.bin"' } });
+    throw Error('unexpected upload');
+  };
+  const result = await h.api.copyLocalLibraryItemsToRemote(['local-one'], 'nfs');
+  assert.equal(result.failed.length, 0); assert.equal(result.succeeded[0].result.reused, true);
+  assert.equal(h.calls.filter(row => row.request.method === 'POST').length, 0);
+});
+
 test('file uploads preserve exact bytes, names, source, and empty files on the client', async () => {
   const h = harness(); await h.signIn('alice');
   await h.api.uploadLibraryFile(new File([bytes], '中文.bin', { type: 'application/octet-stream' }), '', '', { type: 'conversation', sessionId: 's-1' });
@@ -172,6 +286,17 @@ test('storage status keeps native availability when Hub fails and exposes the ac
   assert.equal(result.storage.remote.available, false); assert.equal(result.storage.remote.code, 'UPSTREAM_DOWN');
   assert.equal(result.storage.remote.message, '远程网关不可用');
   const local = await h.api.listLibrary(); assert.equal(local.items[0].id, 'local-one');
+});
+
+test('native IPC errors lose the Electron transport wrapper and retain the local error code', async () => {
+  const h = harness(); await h.signIn('alice');
+  h.native = async action => {
+    if (action === 'list') throw Error("Error invoking remote method 'library-local-call': Error: 本机资料索引损坏；原文件已保留，请勿覆盖索引");
+    return { ok: true };
+  };
+  await assert.rejects(h.api.listLibrary(), error =>
+    error.code === 'LOCAL_LIBRARY_INDEX_CORRUPT' &&
+    error.message === '本机资料索引损坏；原文件已保留，请勿覆盖索引');
 });
 
 test('server local health never substitutes for an unavailable native library', async () => {

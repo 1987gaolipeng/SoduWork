@@ -160,6 +160,10 @@ class OnceLedgerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await self.session.close()
         await self.engine.dispose()
+        # Duplicate-claim IntegrityError tracebacks can retain SQLite cursors in
+        # cycles after dispose; release them before removing the Windows file.
+        import gc
+        gc.collect()
         self.temp.cleanup()
 
     async def execute(self, trigger="timer", result=None):

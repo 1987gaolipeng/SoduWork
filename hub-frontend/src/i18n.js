@@ -2,11 +2,13 @@ import { useSyncExternalStore } from 'react'
 import { dictionary } from './locales/shell.js'
 import { messages } from './locales/messages.js'
 import { messagesByLocale } from './locales/extra-languages.js'
+import quotaMessages from './locales/quota-management.js'
 
 export const LOCALES = Object.freeze({ 'zh-CN': '简体中文', 'en-US': 'English', 'ja-JP': '日本語', 'ko-KR': '한국어' })
 const STORAGE_KEY = 'soduwork.locale'
-const FALLBACK = 'zh-CN'
-const FALLBACKS = Object.freeze({ 'zh-CN': 'zh-CN', 'en-US': 'zh-CN', 'ja-JP': 'en-US', 'ko-KR': 'en-US' })
+const SOURCE_LOCALE = 'zh-CN'
+const FALLBACK = 'en-US'
+const FALLBACKS = Object.freeze({ 'zh-CN': 'zh-CN', 'en-US': 'en-US', 'ja-JP': 'en-US', 'ko-KR': 'en-US' })
 const subscribers = new Set()
 const missing = new Set()
 let locale = readLocale()
@@ -57,8 +59,8 @@ export function translateText(source, values = [], value = getLocale()) {
   const trimmed = text.trim()
   let translated = text
   const locale = normalizeLocale(value)
-  if (locale !== FALLBACK && /[\u3400-\u9fff]/.test(trimmed)) {
-    const result = messagesByLocale[locale]?.[trimmed] ?? (locale === 'en-US' ? messages[trimmed] : messages[trimmed])
+  if (locale !== SOURCE_LOCALE && /[\u3400-\u9fff]/.test(trimmed)) {
+    const result = messagesByLocale[locale]?.[trimmed] ?? (locale === 'en-US' ? (quotaMessages[trimmed] ?? messages[trimmed]) : messages[trimmed])
     if (result != null) translated = text.replace(trimmed, result)
     else missing.add(trimmed)
   }

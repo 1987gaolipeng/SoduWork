@@ -530,6 +530,7 @@
         tabId: 'app-' + String(contribution.pluginId || 'x').replace(/[^a-zA-Z0-9_-]+/g, '-')
           + '-' + String(contribution.id || '0').replace(/[^a-zA-Z0-9_-]+/g, '-').slice(0, 60),
         url, label: contribution.title,
+        appVersion: String(context?.item?.installedVersion || context?.item?.version || '').trim(),
         icon: global.SoduWorkPluginIcon ? global.SoduWorkPluginIcon.source(context && context.item) : '',
         ...(packaged ? { package: { pluginId: contribution.pluginId, contributionId: contribution.id } }
           : { appBridge: previewBridge(contribution, url) }),

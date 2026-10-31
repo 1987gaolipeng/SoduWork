@@ -39,11 +39,49 @@ function createProcessHost(app, options = {}) {
   const handles = new Map(), native = new WeakMap(), identities = new WeakMap(), auths = new Map(), leases = new Map();
   const authKeys = new Map(), capabilities = new Set(), sessionCapabilities = new Map(), propertyCapabilities = new Map();
   const runningCallbacks = new Set();
+  const now = typeof options.now === 'function' ? options.now : Date.now;
+  const stallTimeoutMs = Math.max(1, Number(options.stallTimeoutMs) || 45000);
+  const defaultWatchdogIntervalMs = Math.min(3000, Math.max(1, Math.floor(stallTimeoutMs / 3)));
+  const watchdogIntervalMs = Math.max(1, Number(options.watchdogIntervalMs) || defaultWatchdogIntervalMs);
+  const resumeGapMs = Math.max(watchdogIntervalMs * 2,
+    Number(options.resumeGapMs) || Math.min(stallTimeoutMs, watchdogIntervalMs * 4));
+  const stallProbeTimeoutMs = Math.max(1, Number(options.stallProbeTimeoutMs) || 5000);
+  const watchdogSetInterval = options.watchdogSetInterval || setInterval;
+  const watchdogClearInterval = options.watchdogClearInterval || clearInterval;
+  const powerMonitor = options.powerMonitor;
   let child = null, peer = null, ready = null, dead = false, stopping = null, guard = null, heartbeat = null;
+  let watchdogProbe = null, powerSuspended = false, powerEpoch = 0, powerListenersInstalled = false;
   let cleanupPromise = null, cleanupPending = false, cleanupError = null;
   let startupSettled = null;
-  let lastHeartbeat = Date.now(), initialized = false;
+  let lastHeartbeat = now(), lastWatchdogTick = now(), initialized = false;
   const fail = message => Object.assign(Error(message), { code: 'RUNTIME_PROCESS_GONE' });
+  function resetHeartbeatWindow() { lastHeartbeat = lastWatchdogTick = now(); }
+  function onSuspend() {
+    powerSuspended = true;
+    powerEpoch++;
+    peer?.pauseTimeouts();
+    try { peer?.notify('hostPowerState', [{ suspended: true, epoch: powerEpoch }]); }
+    catch (error) { options.onError?.(error); }
+    resetHeartbeatWindow();
+  }
+  function onResume() {
+    powerSuspended = false;
+    powerEpoch++;
+    resetHeartbeatWindow();
+    try { peer?.notify('hostPowerState', [{ suspended: false, epoch: powerEpoch }]); }
+    catch (error) { options.onError?.(error); }
+    peer?.resumeTimeouts();
+  }
+  function installPowerListeners() {
+    if (powerListenersInstalled || typeof powerMonitor?.on !== 'function') return;
+    powerMonitor.on('suspend', onSuspend); powerMonitor.on('resume', onResume);
+    powerListenersInstalled = true;
+  }
+  function removePowerListeners() {
+    if (!powerListenersInstalled) return;
+    powerMonitor.removeListener?.('suspend', onSuspend); powerMonitor.removeListener?.('resume', onResume);
+    powerListenersInstalled = false;
+  }
   function row(ref) {
     if (!handles.has(ref)) {
       const value = createProcessHandle({ ref,
@@ -167,7 +205,7 @@ function createProcessHost(app, options = {}) {
   }
   function gone(error) {
     if (dead) return;
-    dead = true; clearInterval(heartbeat);
+    dead = true; watchdogClearInterval(heartbeat); removePowerListeners();
     const reason = error instanceof Error ? error : fail('执行服务已退出');
     peer?.close(reason);
     for (const value of handles.values()) value.interrupted(reason);
@@ -179,6 +217,7 @@ function createProcessHost(app, options = {}) {
   async function start() {
     if (dead || stopping) throw fail('执行服务已退出，请重新打开会话');
     if (ready) return ready;
+    installPowerListeners();
     let settleStartup;
     startupSettled = new Promise(resolve => { settleStartup = resolve; });
     const assertLive = () => { if (dead || stopping) throw fail('执行服务已退出，请重新打开会话'); };
@@ -211,7 +250,7 @@ function createProcessHost(app, options = {}) {
       assertLive();
       const handlers = {
         projection(packet) { if (!dead) { try { row(packet.ref).update(packet); } catch (error) { gone(error); void stop(error); } } },
-        heartbeat() { lastHeartbeat = Date.now(); },
+        heartbeat() { lastHeartbeat = now(); },
         async ensureSession(id) {
           const auth = auths.get(id); if (!auth) throw Error('执行身份已失效'); return auth.ensureSession();
         },
@@ -225,14 +264,43 @@ function createProcessHost(app, options = {}) {
       peer = createRpcPeer({ send: packet => child.postMessage ? child.postMessage(packet) : child.send(packet),
         handlers, encodeSpecial, decodeSpecial, callbackTimeoutMs: 0, limits: { bytes: 128 * 1024 * 1024, nodes: 200000 },
         onError: error => options.onError?.(error) });
+      if (powerSuspended) peer.pauseTimeouts();
       child.on('message', packet => { try { peer.receive(packet); } catch (error) { gone(error); } });
-      await peer.call('initialize', [appData(app), generation], { timeoutMs: 15000 });
+      await peer.call('initialize', [appData(app), generation,
+        { suspended: powerSuspended, epoch: powerEpoch }], { timeoutMs: options.initializeTimeoutMs || 15000 });
       assertLive();
-      initialized = true; lastHeartbeat = Date.now();
-      heartbeat = setInterval(() => {
-        if (!dead && Date.now() - lastHeartbeat > (options.stallTimeoutMs || 45000))
-          void stop(fail('会话执行长时间没有响应，已停止执行服务'));
-      }, 3000);
+      initialized = true; resetHeartbeatWindow();
+      heartbeat = watchdogSetInterval(() => {
+        const sampledAt = now(), tickGap = sampledAt - lastWatchdogTick;
+        lastWatchdogTick = sampledAt;
+        if (dead || stopping) return;
+        if (powerSuspended) { lastHeartbeat = sampledAt; return; }
+        // Suspend, Connected Standby and a blocked main loop all delay this
+        // timer together with worker heartbeats. Give the resumed worker a
+        // complete heartbeat window instead of treating wall-clock sleep as
+        // proof that the isolated runtime is hung.
+        if (tickGap > resumeGapMs) { lastHeartbeat = sampledAt; return; }
+        if (sampledAt - lastHeartbeat <= stallTimeoutMs || watchdogProbe) return;
+        // A heartbeat can be delayed behind other IPC after resume or load.
+        // Confirm that the worker event loop is actually unavailable before
+        // interrupting sessions whose tool outcome may still be uncertain.
+        watchdogProbe = peer.call('health', [], { timeoutMs: stallProbeTimeoutMs }).then(
+          () => { lastHeartbeat = now(); },
+          () => {
+            const sampledAfterProbe = now();
+            // The host can suspend while this probe is pending. Its timeout
+            // uses the same wall clock, so re-check host continuity here too;
+            // the watchdog interval and this rejection can run in either order
+            // after resume.
+            if (powerSuspended || sampledAfterProbe - lastWatchdogTick > resumeGapMs) {
+              lastHeartbeat = lastWatchdogTick = sampledAfterProbe;
+              return;
+            }
+            if (!dead && !stopping && sampledAfterProbe - lastHeartbeat > stallTimeoutMs)
+              return stop(fail('会话执行长时间没有响应，已停止执行服务'));
+          }).finally(() => { watchdogProbe = null; });
+        watchdogProbe.catch(() => {});
+      }, watchdogIntervalMs);
       heartbeat.unref?.();
       return peer;
     })().finally(settleStartup).catch(error => { gone(error); throw error; });
@@ -258,7 +326,7 @@ function createProcessHost(app, options = {}) {
     }
     catch (error) {
       releaseCapabilities(prepared.owned);
-      if (error.code === 'RPC_TIMEOUT' && method !== 'history') await stop(error);
+      if (error.code === 'RPC_TIMEOUT' && error.remote !== true && method !== 'history') await stop(error);
       throw error;
     }
   }
@@ -274,7 +342,7 @@ function createProcessHost(app, options = {}) {
     }
     stopping = (async () => {
       if (!cleanupPromise) cleanupPending = true;
-      clearInterval(heartbeat);
+      watchdogClearInterval(heartbeat);
       if (!dead && initialized) {
         try { await peer.call('shutdown', [], { timeoutMs: 2000 }); } catch (_) {}
       }

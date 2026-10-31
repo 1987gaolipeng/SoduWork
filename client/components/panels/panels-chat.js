@@ -106,6 +106,7 @@
     get _outs() { return _outs; }, set _outs(value) { _outs = value; },
     get _outAt() { return _outAt; },
     get _pendingSentAt() { return _pendingSentAt; }, set _pendingSentAt(value) { _pendingSentAt = value; },
+    get _pendingBaseline() { return _pendingBaseline; }, set _pendingBaseline(value) { _pendingBaseline = value; },
     get _pending() { return _pending; }, set _pending(value) { _pending = value; },
     get _pendingLibraryIds() { return _pendingLibraryIds; }, set _pendingLibraryIds(value) { _pendingLibraryIds = value; },
     get _pendingAttachmentNames() { return _pendingAttachmentNames; }, set _pendingAttachmentNames(value) { _pendingAttachmentNames = value; },
@@ -123,6 +124,8 @@
     get _renderQueue() { return _renderQueue; },
     get _renderTaskStartPrompt() { return _renderTaskStartPrompt; },
     get _retryDraft() { return _retryDraft; }, set _retryDraft(value) { _retryDraft = value; },
+    get _pluginAuthorization() { return _pluginAuthorization; }, set _pluginAuthorization(value) { _pluginAuthorization = value; },
+    get _openPluginAuthRecovery() { return _openPluginAuthRecovery; },
     get _send() { return _send; },
     get _sessionId() { return _sessionId; }, set _sessionId(value) { _sessionId = value; },
     get _sessionOpenedAt() { return _sessionOpenedAt; }, set _sessionOpenedAt(value) { _sessionOpenedAt = value; },
@@ -233,6 +236,7 @@
   let _draftStorageTimer = 0;
   let _draftKey = 'new';
   let _retryDraft = null;
+  let _pluginAuthorization = null;
   let _pendingAttachmentNames = [];
   let _pendingLibraryIds = [];
   let _localQueue = [];
@@ -445,7 +449,9 @@
       _renderFrame = setTimeout(paint, 16);
     }
   }
-  function _fail(text, detail, retryDraft) {
+  function _fail(text, detail, retryDraft, failure) {
+    const quota = global.SoduWorkQuota?.detail(failure || detail);
+    if (quota) global.SoduWorkQuotaNotice?.show(quota);
     _taskOpenPending = false;
     const keep = (_snap && _snap.messages) || [];
     const tools = (_snap && _snap.tools) || [];
@@ -457,7 +463,10 @@
     _pendingPlugins = [];
     _pendingAttachmentNames = [];
     _retryDraft = draft;
-    _snap = { ...(_snap || {}), status: 'unreachable', statusText: text + (detail ? '（' + detail + '）' : ''),
+    _pluginAuthorization = failure && failure.pluginAuthorization ? failure.pluginAuthorization : null;
+    _snap = { ...(_snap || {}), status: quota ? 'quota' : 'unreachable',
+              statusText: quota ? '' : text + (detail ? '（' + detail + '）' : ''),
+              code: quota?.code || '', quota: quota?.quota || null,
               messages: keep, tools, usage: (_snap && _snap.usage) || null, pendingUi: null };
     _render();
     _restoreFailedDraft(draft);
@@ -557,8 +566,12 @@
     const initialPlugins = Array.isArray(launchOptions.initialPlugins)
       ? launchOptions.initialPlugins.slice() : [];
     const initialSkills = Array.isArray(launchOptions.skills) ? launchOptions.skills.slice() : [];
+    const initialInputPreparation = launchOptions.inputPreparation && typeof launchOptions.inputPreparation === 'object'
+      ? { ...launchOptions.inputPreparation } : null;
     delete launchOptions.skills; // A picker selection belongs to the first turn, not the session defaults.
     delete launchOptions.initialPlugins;
+    delete launchOptions.inputPreparation;
+    if (initialInputPreparation) launchOptions.inputPreparation = initialInputPreparation;
     const libraryItemIds = Array.isArray(launchOptions.libraryItemIds)
       ? launchOptions.libraryItemIds.filter(id => typeof id === 'string' && id.trim()).map(id => id.trim()) : [];
     delete launchOptions.libraryItemIds;
@@ -638,6 +651,7 @@
     if (workCards?.workOnly && typeof _restoreCollaboration === 'function') _restoreCollaboration(_sessionId);
     if (workCards) _workCards?.restoreRequirements?.();
     _restoreRetainedConversationFailure();
+    global.SoduWorkQuotaNotice?.modelChanged?.(_snap?.modelSelection?.model || _model);
     _render();
     if (inputFiles.length) _rememberConversationDraft(_sessionId);
     if (previewInput) global.ChatWorkbench?.openInput(previewInput);
@@ -648,6 +662,7 @@
     return true;
   }
   function reset() {
+    global.SoduWorkQuotaNotice?.modelChanged?.();
     _workCards?.detach();
     _resetMessageRenderer();
     global.AccessControls?.destroy(document.querySelector('#cpChat .nchat'));
@@ -674,7 +689,7 @@
       else if (typeof api.close === 'function') api.close(releasedRef);
     }
     if (global.PluginDebugCard) PluginDebugCard.close();
-    _ref = ''; _sessionId = ''; _snap = null; _model = null; _pending = ''; _pendingSentAt = 0; _lastProposal = ''; _sessionOptions = {};
+    _ref = ''; _sessionId = ''; _snap = null; _model = null; _pending = ''; _pendingSentAt = 0; _pendingBaseline = null; _lastProposal = ''; _sessionOptions = {};
     _draftKey = 'new';
     _messageWindowSize = 80;
     if (_composerControls) { _composerControls.destroy(); _composerControls = null; }
@@ -709,6 +724,7 @@
     _pendingPlugins = [];
     _submissionDrafts.clear();
     _retryDraft = null;
+    _pluginAuthorization = null;
     const computerGlow = document.getElementById('computerActivityGlow');
     if (computerGlow) computerGlow.remove();
     _pluginResolveSeq += 1;

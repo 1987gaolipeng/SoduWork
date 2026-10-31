@@ -486,7 +486,7 @@
           });
         }
         if (item.template === 'app') {
-          const page = (item.ui?.contributions || []).find(row => row.slot === 'workspace.navigation' && row.source?.type === 'external' && row.source.openMode !== 'external');
+          const page = (item.ui?.contributions || []).find(row => row.slot === 'workspace.navigation' && ['external', 'package'].includes(row.source?.type || row.source?.kind) && row.source.openMode !== 'external');
           if (!page || !window.PluginUIHost?.openContribution) throw Error('应用页面暂时不可用，请刷新应用目录后重试');
           closeModal();
           return PluginUIHost.openContribution(page, { item, detached: true });
@@ -701,6 +701,7 @@
   function openModal(title, sub, body, foot) {
     viewRevision++;
     const layer = ensureModal();
+    layer._publicationClose = null;
     if (layer.pluginPresentationCleanup) layer.pluginPresentationCleanup.abort();
     layer.pluginPresentationCleanup = null;
     layer.connectorDirectoryCleanup?.(); layer.connectorDirectoryCleanup = null;
@@ -728,6 +729,8 @@
     if (layer && (layer._deletePending || layer._installPending)) return;
     viewRevision++;
     if (layer) {
+      const publicationClose = layer._publicationClose;
+      layer._publicationClose = null;
       layer.connectorDirectoryCleanup?.(); layer.connectorDirectoryCleanup = null;
       layer.hidden = true;
       layer._skillView = null;
@@ -742,6 +745,7 @@
       const target = prior?.isConnected ? prior : prior?.id ? document.getElementById(prior.id) : null;
       (target || document.getElementById('capPluginSubmissions'))?.focus({ preventScroll: true });
       layer._returnFocus = null;
+      publicationClose?.();
     }
   }
 
@@ -786,6 +790,27 @@
     if (snapshot.error || snapshot.remoteError) throw Error(snapshot.remoteError || snapshot.error);
     if (!(snapshot.items || []).some(item => item.pluginId === pluginId)) throw Error('应用当前不可用，请刷新市场');
     return SoduWorkCapabilityPlugins.open(pluginId, pluginContext());
+  };
+  window.openCapabilityPluginPublication = async function (item, options) {
+    if (!item?.personal || item.builtIn) throw Error('只有本地安装的应用可以申请上架');
+    const opts = options || {};
+    const scope = SoduWorkAPI.taskStorageKey?.('plugins');
+    const ctx = pluginContext();
+    const isCurrent = () => scope === SoduWorkAPI.taskStorageKey?.('plugins') && (!opts.isCurrent || opts.isCurrent());
+    return window.SoduWorkPluginPublication.openPersonalPublish(item, {
+      ...ctx,
+      openModal: function (...args) {
+        opts.onReady?.();
+        const layer = ctx.openModal(...args);
+        layer._publicationClose = () => { if (isCurrent()) opts.onClose?.(); };
+        return layer;
+      },
+      refresh: function () { window.SoduWorkApps?.render(true); },
+    }, {
+      api: SoduWorkAPI, application: true, isCurrent,
+      copyText: window.SoduWorkPluginCatalogFormat.copyText,
+      load: () => window.SoduWorkCapabilityPlugins.load(),
+    });
   };
   window.closeSkillPanel = closeCapabilityPanel;
   window.openCapabilityPanel = openCapabilityPanel;

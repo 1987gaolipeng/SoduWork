@@ -1,3 +1,4 @@
+import './helpers/chinese-locale.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { pluginIssues, pluginKind, pluginPublication, pluginSource, selectCatalog } from '../src/screens/plugin-catalog-model.js'

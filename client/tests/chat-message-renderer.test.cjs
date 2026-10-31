@@ -184,6 +184,54 @@ test('acceptance session transcript never renders the original pending decision 
   assert.doesNotMatch(list.innerHTML, /data-acceptance-marker/);
 });
 
+test('analysis result keeps the stale same-person acceptance card hidden after a marker refresh', () => {
+  const harness = setupRender();
+  const { renderer, ctx, list, sandbox } = harness;
+  ctx._sessionOptions = { taskRef: 'task-acceptance' };
+  ctx._activeCollabTaskId = 'task-acceptance';
+  ctx._pending = '';
+  ctx._snap = { status: 'idle', messages: [
+    { role: 'user', text: '【验收分析】请核对本次交付成果' },
+    { role: 'assistant', done: true, blocks: [{ kind: 'text', text: '【验收分析结果】\n建议结果：通过' }] },
+  ], tools: [], execution: { running: false, harness: { phases: [] }, quality: {} } };
+  const entry = { taskId: 'task-acceptance', task: { title: '写荷花作文' }, trace: {
+    approvals: [{ id: 'direct:task-acceptance', action: 'review', status: 'pending' }],
+  }};
+  ctx._collabEntries = () => [entry];
+  ctx._collabTasks.set(entry.taskId, entry);
+  sandbox.TaskTraceApproval = {
+    html() { return '<section data-acceptance-marker="1"></section>'; },
+    bind() {},
+  };
+  renderer._render();
+  assert.match(list.innerHTML, /nacceptance-result/);
+  assert.doesNotMatch(list.innerHTML, /data-acceptance-marker/);
+});
+
+test('an older analysis result does not hide a new review card after a later rework turn', () => {
+  const harness = setupRender();
+  const { renderer, ctx, list, sandbox } = harness;
+  ctx._sessionOptions = { taskRef: 'task-acceptance' };
+  ctx._activeCollabTaskId = 'task-acceptance';
+  ctx._pending = '';
+  ctx._snap = { status: 'idle', messages: [
+    { role: 'user', text: '【验收分析】上一轮核对' },
+    { role: 'assistant', done: true, blocks: [{ kind: 'text', text: '【验收分析结果】\n建议结果：退回' }] },
+    { role: 'user', text: '请按验收意见修改后重新提交' },
+  ], tools: [], execution: { running: false, harness: { phases: [] }, quality: {} } };
+  const entry = { taskId: 'task-acceptance', task: { title: '写荷花作文' }, trace: {
+    approvals: [{ id: 'direct:task-acceptance', action: 'review', status: 'pending' }],
+  }};
+  ctx._collabEntries = () => [entry];
+  ctx._collabTasks.set(entry.taskId, entry);
+  sandbox.TaskTraceApproval = {
+    html() { return '<section data-acceptance-marker="1"></section>'; },
+    bind() {},
+  };
+  renderer._render();
+  assert.match(list.innerHTML, /data-acceptance-marker/);
+});
+
 test('a task completed elsewhere hides the stale source acceptance card before trace refresh', () => {
   const harness = setupRender();
   const { renderer, ctx, list, sandbox } = harness;
@@ -450,6 +498,63 @@ test('goal send keeps the prompt ahead of progress when a tool arrives first', (
   const progress = list.innerHTML.indexOf('goal-progress:phase:understand');
   assert.ok(user >= 0 && progress >= 0, 'optimistic prompt and progress should both render');
   assert.ok(user < progress, 'an early tool must not move goal progress above the prompt');
+});
+
+test('a newly echoed prompt consumes its optimistic copy when the echo timestamp is older', () => {
+  const { renderer, ctx, list } = setupRender();
+  const sentAt = Date.now();
+  ctx._pending = 'same request';
+  ctx._pendingSentAt = sentAt;
+  ctx._pendingBaseline = { messageCount: 1, userCount: 1, historyTotal: 1 };
+  ctx._snap = {
+    status: 'streaming',
+    messages: [
+      { role: 'user', text: 'previous request', sentAt: sentAt - 2000 },
+      { role: 'user', text: 'same request', sentAt: sentAt - 500 },
+    ],
+    history: { totalMessages: 2, messageIndices: [0, 1] },
+    tools: [], usage: null, pendingUi: null,
+    execution: { running: true, harness: { phases: [] }, quality: {} },
+  };
+  renderer._render();
+  assert.equal((list.innerHTML.match(/class="nmsg user"/g) || []).length, 2,
+    'the persisted prompt and the prior identical prompt should remain, without a third optimistic copy');
+});
+
+test('an older identical prompt does not consume the current optimistic copy', () => {
+  const { renderer, ctx, list } = setupRender();
+  const sentAt = Date.now();
+  ctx._pending = 'same request';
+  ctx._pendingSentAt = sentAt;
+  ctx._pendingBaseline = { messageCount: 1, userCount: 1, historyTotal: 1 };
+  ctx._snap = {
+    status: 'streaming',
+    messages: [{ role: 'user', text: 'same request', sentAt: sentAt - 5000 }],
+    history: { totalMessages: 1, messageIndices: [0] },
+    tools: [], usage: null, pendingUi: null,
+    execution: { running: true, harness: { phases: [] }, quality: {} },
+  };
+  renderer._render();
+  assert.equal((list.innerHTML.match(/class="nmsg user"/g) || []).length, 2,
+    'an older identical prompt must stay separate from the current optimistic prompt');
+});
+
+test('a submission identity consumes an optimistic copy when the echoed text and time changed', () => {
+  const { renderer, ctx, list } = setupRender();
+  ctx._pending = 'original request';
+  ctx._pendingSentAt = Date.now();
+  ctx._pendingBaseline = { messageCount: 1, historyTotal: 1, submissionId: 'ui-echo-1' };
+  ctx._snap = {
+    status: 'streaming',
+    messages: [{ role: 'user', text: 'rewritten request', sentAt: ctx._pendingSentAt - 3000,
+      submissionId: 'ui-echo-1' }],
+    history: { totalMessages: 2, messageIndices: [0] },
+    tools: [], usage: null, pendingUi: null,
+    execution: { running: true, harness: { phases: [] }, quality: {} },
+  };
+  renderer._render();
+  assert.equal((list.innerHTML.match(/class="nmsg user"/g) || []).length, 1,
+    'the stable submission identity must remove the optimistic duplicate');
 });
 
 for (const hasSnapshot of [true, false]) {

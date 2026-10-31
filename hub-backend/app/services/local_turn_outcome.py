@@ -26,6 +26,11 @@ def observe(cli: str, event: dict, terminal: dict) -> None:
         terminal["outputTruncated"] = True
     elif reason == "stop":
         terminal.pop("outputTruncated", None)
+        # A print-mode Pi process should exit after a final assistant message. Keep a
+        # short-lived settlement candidate so the process watchdog can recover if the
+        # provider leaves the child alive after emitting the complete answer.
+        if event.get("type") == "message_end":
+            terminal["piFinalResponse"] = True
     elif reason in {"error", "aborted"}:
         if not terminal.get("isError"):
             terminal["piSemanticError"] = True

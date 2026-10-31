@@ -585,6 +585,18 @@ async def _persist_upload(session, owner, folder_id, kind, title, filename, cont
                 await session.commit()
                 await session.refresh(existing)
                 return existing
+            if session.bind.dialect.name == "sqlite":
+                # SQLite's save_lock is already a process-wide writer lock.
+                title, filename = await library_names.next_available(
+                    session, owner, backend, folder_id, title, filename)
+            else:
+                # PostgreSQL needs the namespace lock as well as the
+                # conversation lock so concurrent sessions cannot choose the
+                # same suffix. The order is session -> namespace everywhere
+                # this path is used, avoiding a lock inversion.
+                async with library_conversation_save.save_lock(session, owner, library_names.LOCK_KEY):
+                    title, filename = await library_names.next_available(
+                        session, owner, backend, folder_id, title, filename)
             return await _write_upload(session, owner, folder_id, kind, title, filename,
                                        content_type, handle, size, backend, extra)
     async with library_conversation_save.save_lock(session, owner, library_names.LOCK_KEY):

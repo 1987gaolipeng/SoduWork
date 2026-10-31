@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import inspect
+import re
 import time
 from urllib.parse import quote
 
@@ -70,6 +71,12 @@ router = APIRouter(prefix="/api/v1/ai-proxy", tags=["ai-proxy"])
 
 # Client proxy URL prefix; keep client/main.js consistent when changing it.
 PROXY_PATH = "/api/v1/ai-proxy/v1"
+IMAGE_INPUT_REJECTION = re.compile(
+    r"(?:image|vision|multimodal|图片|图像|多模态).{0,80}"
+    r"(?:not supported|unsupported|rejected|拒绝|不支持|上限|数量|超限|maximum|limit)"
+    r"|(?:拒绝|不支持).{0,80}(?:image|vision|multimodal|图片|图像|多模态)",
+    re.IGNORECASE,
+)
 
 
 def _upstream_message(status: int, detail: str, *, responses: bool = False) -> str:
@@ -92,7 +99,7 @@ def _err(status: int, msg: str, upstream: str = "") -> JSONResponse:
                           "status": status}}
     # Keep a machine-readable context error across the proxy boundary while
     # suppressing the raw envelope (which may contain keys or internal URLs).
-    diagnostic = str(upstream or "")[:65536]
+    diagnostic = (str(upstream or "") + " " + str(msg or ""))[:65536]
     if status in (400, 413, 422) and local_context_policy.OVERFLOW.search(diagnostic):
         window = local_context_policy.error_window(diagnostic)
         message = "Context length exceeded."
@@ -100,6 +107,9 @@ def _err(status: int, msg: str, upstream: str = "") -> JSONResponse:
             message += f" maximum context length is {window} tokens."
         body["error"] = {"message": message, "type": "soduwork_proxy_error",
                          "code": "context_length_exceeded", "status": status}
+    elif status in (400, 415, 422) and IMAGE_INPUT_REJECTION.search(diagnostic):
+        body["error"] = {"message": "Image input rejected.", "type": "soduwork_proxy_error",
+                         "code": "image_input_rejected", "status": status}
     if upstream:
         # The raw body can contain internal gateway data and is not a client
         # diagnostic contract. Keep only a size signal in server logs.
@@ -337,6 +347,12 @@ async def _open_then_stream(request: Request, open_call, *, responses: bool = Fa
 
 
 def _proxy_error(exc, *, responses=False):
+    quota = getattr(exc, "quota_detail", None)
+    if quota:
+        return JSONResponse(status_code=exc.status, content={
+            "detail": quota,
+            "error": {**quota, "type": "quota_limit", "status": exc.status},
+        })
     result = _err(exc.status if 400 <= exc.status < 600 else 502,
                   _error_message(exc, responses=responses), exc.body)
     if getattr(exc, "retry_after", 0):
@@ -456,6 +472,7 @@ async def proxy_config(
             "key": proxy_key, "expiresIn": expires_in,
             "mcpKey": mcp_key, "mcpExpiresIn": mcp_expires_in,
             "model": conf["model"],
+            "providerKey": conf.get("provider") or "",
             # Native pixels stay with the selected, declared-capable model.
             # A non-native route needs a separately configured optional adapter.
             "input": ["text", "image"] if image_routing == "native" else ["text"],

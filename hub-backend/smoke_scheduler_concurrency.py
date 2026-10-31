@@ -72,7 +72,7 @@ async def main():
     original_run_one = schedules.run_one
     handoffs = []
 
-    async def fake_run_one(session, schedule, who="", schedule_run_id=""):
+    async def fake_run_one(session, schedule, who="", schedule_run_id="", conversation_title=""):
         handoffs.append(schedule_run_id)
         return {"ok": True, "taskId": "task-from-resume", "identifier": "exec-resumed"}
 

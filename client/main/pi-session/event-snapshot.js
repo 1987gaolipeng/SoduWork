@@ -130,6 +130,7 @@ function snapshot(state, options, { SCOPES, deriveStatus, statusText }) {
         sentAt: m.sentAt || 0, completedAt: m.completedAt || 0,
         ...(m.taskId ? { taskId: String(m.taskId) } : {}),
         ...(m.taskOutputKey ? { taskOutputKey: String(m.taskOutputKey) } : {}),
+        ...(m.role === 'user' && m.submissionId ? { submissionId: String(m.submissionId).slice(0, 128) } : {}),
         errorMessage: modelErrors.forDisplay(m.errorMessage || '', 200), text: m.text || '', attachments: m.attachments || [], plugins: m.plugins || [], blocks,
         scope: scope || SCOPES.NORMAL,
       };

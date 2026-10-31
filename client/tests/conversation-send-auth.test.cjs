@@ -43,9 +43,16 @@ async function fixture(t, spec, legacySendIdentity = false) {
   const app = new EventEmitter();
   app.getPath = () => root;
   app.getVersion = () => '1.12.51-test';
-  const handlers = new Map();
-  const ipcMain = { handle: (name, callback) => handlers.set(name, callback), on() {} };
-  const BrowserWindow = { getAllWindows: () => [], fromWebContents: () => null };
+  const handlers = new Map(), listeners = new Map(), frames = [];
+  const ipcMain = { handle: (name, callback) => handlers.set(name, callback),
+    on: (name, callback) => listeners.set(name, callback) };
+  const mainFrame = {}, sender = { id: 1, mainFrame, isDestroyed: () => false,
+    getURL: () => require('node:url').pathToFileURL(path.resolve(__dirname, '../desk.html')).href,
+    send: (channel, data) => frames.push({ channel, data }) };
+  const window = new EventEmitter();
+  window.webContents = sender; window.isDestroyed = () => false;
+  const event = { sender, senderFrame: mainFrame };
+  const BrowserWindow = { getAllWindows: () => [window], fromWebContents: contents => contents === sender ? window : null };
   const safeStorage = {
     isEncryptionAvailable: () => true,
     getSelectedStorageBackend: () => 'dpapi',
@@ -111,11 +118,15 @@ async function fixture(t, spec, legacySendIdentity = false) {
   assert.equal(enrollment.ok, true);
   const identityOf = (...args) => auth.authenticatedIdentity(...args);
   const model = { id: 'fixture-model', key: 'fixture-only', baseUrl: 'http://model.invalid' };
-  const turns = [], piHistory = new Map(), runnerHistory = new Map();
+  const turns = [], piHistory = new Map(), runnerHistory = new Map(), runnerInventory = new Map(), nativeHandles = new Map(), controls = [];
   let openedNumber = 0;
 
   const engine = {
     probe: () => ({ ok: true }),
+    async historyEntry(_app, id) {
+      return piHistory.has(id) ? { ok: true, entry: { id, path: id, cwd: root, adapterId: 'pi' } }
+        : { ok: false, notFound: true };
+    },
     async open(options) {
       const sessionId = options.resumePath || 'fixture-pi-' + (++openedNumber);
       const messages = piHistory.get(sessionId) || [];
@@ -128,6 +139,9 @@ async function fixture(t, spec, legacySendIdentity = false) {
         status: () => 'idle', inFlight: () => false,
         snapshot: () => ({ status: 'idle', messages: messages.slice(), tools: [] }),
         historyRow: () => ({ id: sessionId, adapterId: 'pi', cwd: root }),
+        cancel() { controls.push('cancel'); },
+        cancelQueued() { controls.push('cancelQueued'); return { ok: true }; },
+        updateQueue() { controls.push('updateQueue'); return { ok: true }; },
         submit(text) {
           turns.push({ adapter: 'pi', text });
           messages.push({ role: 'user', text });
@@ -143,6 +157,7 @@ async function fixture(t, spec, legacySendIdentity = false) {
           listeners.clear();
         },
       };
+      nativeHandles.set(handle.ref, { handle, emit: kind => listeners.forEach(fn => fn({ kind }, handle.snapshot())) });
       return { ok: true, session: handle };
     },
   };
@@ -152,6 +167,8 @@ async function fixture(t, spec, legacySendIdentity = false) {
       const ref = _uuidV5('9af442c8-cd1d-4b91-a668-22da2b2635bf', 'chat:' + input.task.id + ':' + input.cli);
       turns.push({ adapter: input.cli, text: input.ctx.conversationUserText });
       runnerHistory.set(ref, [{ seq: 1, kind: 'say', text: 'Fixture first reply' }]);
+      runnerInventory.set(ref, { ref, cli: input.cli, taskId: input.task.id, workDir: root,
+        state: 'done', started: Date.now() / 1000 });
       return { ok: true, data: { ref } };
     }
     if (op === 'job.comment') {
@@ -166,6 +183,7 @@ async function fixture(t, spec, legacySendIdentity = false) {
       return { ok: true, data: { status: 'done', round: items.length, items } };
     }
     if (op === 'job.stop') return { ok: true, data: { ok: true } };
+    if (op === 'runtime.sessions') return { ok: true, data: { runs: [...runnerInventory.values()] } };
     throw Error('Unexpected isolated RPC: ' + op);
   } };
   bridge = createPiSessionBridge({ app, sessionModule: engine,
@@ -180,16 +198,12 @@ async function fixture(t, spec, legacySendIdentity = false) {
     sendIdentityOf: legacySendIdentity ? (...args) => auth.identity(...args) : identityOf,
   });
   const memories = memory.install({ app, ipcMain: { handle() {} }, identityOf });
-  let serial = 0;
   async function open(resume) {
-    const identity = await identityOf(app);
-    const result = await bridge.open({ app, identity, adapterId: spec.id, cwd: root,
-      ref: 'fixture-' + spec.id + '-' + (++serial), ...(resume ? { resumePath: resume } : {}) });
+    const result = await installed.open({ adapterId: spec.id, cwd: root, capabilities: [],
+      ...(resume ? { chatId: resume } : {}) });
     assert.equal(result.ok, true, result.reason);
-    const handle = result.session;
-    handle.usageIdentity = { hub: identity.hub, clientId: identity.clientId };
-    await memories.attach(handle, identity, { ids: [], items: [], scopes: [] }, [],
-      { resumed: Boolean(resume), workspaceExplicit: false });
+    const handle = bridge.get(result.ref);
+    assert.ok(handle);
     return handle;
   }
   async function send(handle, text) {
@@ -205,6 +219,9 @@ async function fixture(t, spec, legacySendIdentity = false) {
     return result;
   }
   return { root, app, open, send, installed, bridge, turns, memories, handlers,
+    event, listeners, frames, controls,
+    emit: (handle, kind) => nativeHandles.get(handle.ref).emit(kind),
+    openInstalled: options => handlers.get('pi-session-open')(event, { capabilities: [], ...options }),
     identity: () => auth.authenticatedIdentity(app), localIdentity: () => auth.identity(app),
     sessionReady: () => Boolean(auth.session(app)), enrollments: () => enrollmentCount,
     expire: () => { now += 3600 * 1000; },
@@ -220,6 +237,39 @@ async function fixture(t, spec, legacySendIdentity = false) {
   };
 }
 
+test('production installed open keeps token refresh usable and blocks old-account events and ref controls', async t => {
+  const f = await fixture(t, catalog.runtime('pi'));
+  const opened = await f.openInstalled({ adapterId: 'pi' });
+  assert.equal(opened.ok, true, opened.reason);
+  const handle = f.bridge.get(opened.ref);
+  assert.ok(handle, 'the production open registers its runtime handle');
+  const snapshot = () => f.handlers.get('pi-session-snapshot')(f.event, handle.ref);
+  assert.equal(snapshot().ok, true);
+
+  f.expire();
+  await f.identity();
+  assert.equal(snapshot().ok, true, 'renewing the same account token preserves access to the handle');
+  f.emit(handle, 'turn-finished');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(f.frames.some(row => row.channel === 'pi-session-event' && row.data.ref === handle.ref),
+    'the installed observer publishes while its account still owns the handle');
+
+  f.frames.length = 0;
+  f.emit(handle, 'block');
+  assert.equal((await f.login()).ok, true);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  f.emit(handle, 'turn-finished');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.frames.filter(row => row.channel === 'pi-session-event').length, 0,
+    'both the scheduled pre-switch frame and the later old-account event are dropped');
+  assert.equal(snapshot().ok, false, 'a remembered ref cannot read the previous account snapshot');
+  assert.equal(f.installed.find(handle.sessionId), null, 'session-id lookups use the same owner scope');
+  f.listeners.get('pi-session-cancel')(f.event, handle.ref);
+  assert.equal((await f.handlers.get('pi-session-queue-cancel')(f.event, handle.ref, 'queued')).ok, false);
+  assert.equal((await f.handlers.get('pi-session-queue-update')(f.event, handle.ref, 'queued', 'resume')).ok, false);
+  assert.deepEqual(f.controls, [], 'stale-account controls never reach the native runtime');
+});
+
 test('production cloud handoff IPC rejects stale-account conversations before scanning or uploading', async t => {
   const f = await fixture(t, catalog.runtime('pi')), h = await f.open();
   const mainFrame = {}, sender = { mainFrame, isDestroyed: () => false,
@@ -228,9 +278,9 @@ test('production cloud handoff IPC rejects stale-account conversations before sc
   assert.equal((await f.handlers.get('conversation-cloud-preview')({ ...event, senderFrame: {} }, h.ref)).ok, false);
   f.switchAccount();
   const preview = await f.handlers.get('conversation-cloud-preview')(event, h.ref);
-  assert.equal(preview.ok, false); assert.match(preview.reason, /账号|归属/);
+  assert.equal(preview.ok, false); assert.equal(preview.reason, '会话已关闭，请重新打开后再试');
   const confirm = await f.handlers.get('conversation-cloud-confirm')(event, h.ref, { previewId: 'stale', instruction: 'Continue' });
-  assert.equal(confirm.ok, false); assert.match(confirm.reason, /账号|归属/);
+  assert.equal(confirm.ok, false); assert.equal(confirm.reason, '会话已关闭，请重新打开后再试');
   assert.equal(fs.existsSync(path.join(f.root, 'conversation-handoffs')), false);
   assert.equal(f.turns.length, 0);
 });
@@ -291,7 +341,11 @@ for (const spec of catalog.runtimes()) {
     assert.equal(f.localIdentity().clientId, device, 'account changes on the same device');
     const rejected = await f.send(resumed, 'Must not enter account A conversation');
     assert.equal(rejected.ok, false);
-    assert.match(rejected.reason, /另一个账号/);
+    // The shared IPC lookup now hides other accounts' refs before callers can
+    // inspect the runtime or enter their more specific ownership branches.
+    assert.equal(rejected.reason, '这条对话已经不在了（可能已关闭）');
+    const otherIdentity = await f.identity();
+    assert.throws(() => f.memories.assertOwner(otherIdentity, resumed.sessionId), /另一个账号/);
     assert.equal(f.turns.length, 3, 'account mismatch never reaches a model or Runner');
     assert.equal(JSON.parse(fs.readFileSync(path.join(f.root, 'session-memory-bindings', files[0]), 'utf8')).owner,
       binding.owner, 'rejected send cannot relabel prior ownership');
@@ -429,7 +483,7 @@ for (const action of ['login', 'logout']) test(action + ' in flight blocks cache
     assert.equal(f.sessionReady(), false, 'an intermediate pre-login enrollment is not cached');
     const rejected = await f.send(handle, 'Must wait for account transition');
     assert.equal(rejected.ok, false);
-    assert.match(rejected.reason, /账号或服务已变化/);
+    assert.equal(rejected.reason, '这条对话已经不在了（可能已关闭）');
     assert.equal(f.turns.length, 0);
   } finally { held.release(); }
   assert.equal((await changed).ok, true);

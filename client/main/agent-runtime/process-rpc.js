@@ -33,7 +33,9 @@ function errorData(error) {
 function remoteError(data) {
   const normalized = errorData(data);
   const error = fail(normalized.code, normalized.message);
-  return Object.assign(error, normalized);
+  Object.assign(error, normalized);
+  Object.defineProperty(error, 'remote', { value: true, enumerable: false });
+  return error;
 }
 
 /**
@@ -54,19 +56,65 @@ function createRpcPeer(options) {
   if (!Number.isFinite(timeoutMs) || timeoutMs < 0) throw TypeError('Invalid RPC timeout');
   const callbackTimeoutMs = opts.callbackTimeoutMs === undefined ? timeoutMs : opts.callbackTimeoutMs;
   if (!Number.isFinite(callbackTimeoutMs) || callbackTimeoutMs < 0) throw TypeError('Invalid RPC callback timeout');
+  const now = typeof opts.now === 'function' ? opts.now : Date.now;
+  const scheduleTimeout = typeof opts.setTimeout === 'function' ? opts.setTimeout : setTimeout;
+  const cancelTimeout = typeof opts.clearTimeout === 'function' ? opts.clearTimeout : clearTimeout;
+  const timerDriftToleranceMs = opts.timerDriftToleranceMs === undefined ? 1000 : opts.timerDriftToleranceMs;
+  if (!Number.isFinite(timerDriftToleranceMs) || timerDriftToleranceMs < 0)
+    throw TypeError('Invalid RPC timer drift tolerance');
   const handlers = opts.handlers || {};
   const prefix = randomBytes(6).toString('hex');
   const pending = new Map(), incoming = new Map(), exported = new Map(), early = new Map(), settled = new Set();
   const notifications = new Set();
   const exportedIds = new WeakMap(), functions = new Map(), promises = new Map();
   const importedIds = new WeakMap();
-  let serial = 0, closed = null;
+  let serial = 0, closed = null, timeoutsPaused = false;
   const nextId = () => prefix + ':' + (++serial);
   const refCount = () => exported.size + functions.size + promises.size;
   function room() {
     if (refCount() >= limits.refs) throw fail('RPC_REFERENCE_LIMIT', 'Runtime capability limit reached');
   }
   function report(error) { try { opts.onError?.(error); } catch (_) { /* diagnostics cannot stop RPC */ } }
+  function clearRowTimer(row) {
+    if (row?.timer == null) return;
+    cancelTimeout(row.timer); row.timer = null;
+  }
+  function armRowTimer(row) {
+    if (closed || timeoutsPaused || !(row?.remainingMs > 0) || typeof row.onTimeout !== 'function') return;
+    row.armedDelayMs = row.remainingMs;
+    row.deadlineAt = now() + row.remainingMs;
+    row.timer = scheduleTimeout(() => {
+      row.timer = null;
+      const drift = now() - row.deadlineAt;
+      if (drift > timerDriftToleranceMs) {
+        // Timers resume after system sleep or a blocked event loop before IPC
+        // can deliver a power-state event. Exclude that inactive interval and
+        // give the request the budget it had when this timer was armed.
+        row.remainingMs = row.armedDelayMs;
+        armRowTimer(row);
+        return;
+      }
+      row.remainingMs = 0; row.onTimeout();
+    }, row.remainingMs);
+    if (row.unref) row.timer?.unref?.();
+  }
+  function pauseTimeouts() {
+    if (closed || timeoutsPaused) return false;
+    timeoutsPaused = true;
+    const sampledAt = now();
+    for (const row of [...pending.values(), ...early.values()]) {
+      if (row.timer == null) continue;
+      row.remainingMs = Math.max(1, row.deadlineAt - sampledAt);
+      clearRowTimer(row);
+    }
+    return true;
+  }
+  function resumeTimeouts() {
+    if (closed || !timeoutsPaused) return false;
+    timeoutsPaused = false;
+    for (const row of [...pending.values(), ...early.values()]) armRowTimer(row);
+    return true;
+  }
   function send(packet) {
     if (closed) throw closed;
     try {
@@ -78,7 +126,7 @@ function createRpcPeer(options) {
   }
   function cleanupPending(id) {
     const row = pending.get(id);
-    if (row) { pending.delete(id); clearTimeout(row.timer); row.detach?.(); }
+    if (row) { pending.delete(id); clearRowTimer(row); row.detach?.(); }
     return row;
   }
   function close(error) {
@@ -88,7 +136,7 @@ function createRpcPeer(options) {
     for (const row of promises.values()) row.reject(closed);
     for (const controller of incoming.values()) controller.abort(closed);
     for (const controller of notifications) controller.abort(closed);
-    for (const row of early.values()) clearTimeout(row.timer);
+    for (const row of early.values()) clearRowTimer(row);
     pending.clear(); incoming.clear(); notifications.clear(); promises.clear(); functions.clear(); exported.clear();
     early.clear(); settled.clear();
     return true;
@@ -195,7 +243,7 @@ function createRpcPeer(options) {
             importedIds.set(row.promise, { kind, id: data }); created.push({ kind, id: data });
             const waiting = early.get(data);
             if (waiting) {
-              early.delete(data); clearTimeout(waiting.timer);
+              early.delete(data); clearRowTimer(waiting);
               queueMicrotask(() => receive(waiting.packet));
             }
           }
@@ -270,7 +318,11 @@ function createRpcPeer(options) {
       if (!cleanupPending(id)) return;
       row.reject(error); if (!closed) try { send({ type: 'cancel', id }); } catch (_) { /* transport closed */ }
     };
-    if (duration > 0) row.timer = setTimeout(() => abandon(fail('RPC_TIMEOUT', 'Runtime request timed out')), duration);
+    if (duration > 0) {
+      row.remainingMs = duration;
+      row.onTimeout = () => abandon(fail('RPC_TIMEOUT', 'Runtime request timed out'));
+      armRowTimer(row);
+    }
     if (callOptions.signal) {
       const aborted = () => abandon(fail('RPC_ABORTED', 'Runtime request aborted'));
       callOptions.signal.addEventListener('abort', aborted, { once: true });
@@ -307,8 +359,9 @@ function createRpcPeer(options) {
       seen.delete(value);
     }
     try { inspect(packet.value); } catch (error) { report(error); return; }
-    const timer = setTimeout(() => early.delete(packet.id), timeoutMs || 30000); timer.unref?.();
-    early.set(packet.id, { packet, timer });
+    const row = { packet, remainingMs: timeoutMs || 30000, unref: true,
+      onTimeout: () => early.delete(packet.id) };
+    early.set(packet.id, row); armRowTimer(row);
   }
   function receive(packet) {
     if (!packet || packet.namespace !== RPC_NAMESPACE || closed) return false;
@@ -334,7 +387,7 @@ function createRpcPeer(options) {
         } else {
           functions.delete(key); promises.get(key)?.reject(fail('RPC_REFERENCE_RELEASED', 'Runtime capability was revoked'));
           promises.delete(key); rememberSettlement(key);
-          const waiting = early.get(key); clearTimeout(waiting?.timer); early.delete(key);
+          const waiting = early.get(key); clearRowTimer(waiting); early.delete(key);
         }
       }
       return true;
@@ -388,7 +441,7 @@ function createRpcPeer(options) {
     if (revoked.length && !closed) send({ type: 'revoke', ids: revoked });
     return released.length + revoked.length;
   }
-  return { receive, call, notify, close, release,
+  return { receive, call, notify, close, release, pauseTimeouts, resumeTimeouts,
     stats: () => ({ closed: Boolean(closed), pending: pending.size, incoming: incoming.size + notifications.size,
       exported: exported.size, functions: functions.size, promises: promises.size }) };
 }

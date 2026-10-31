@@ -13,10 +13,13 @@
 
   /* Route application settings to the main window's application-management page. */
   if (typeof api.workPreview.onAppsManage === 'function') {
-    api.workPreview.onAppsManage(() => {
+    api.workPreview.onAppsManage(async (payload) => {
       try {
-        if (global.WorkspaceHost && typeof global.WorkspaceHost.open === 'function') global.WorkspaceHost.open('apps');
-      } catch (_) {}
+        if (global.WorkspaceHost && typeof global.WorkspaceHost.open === 'function') await global.WorkspaceHost.open('apps');
+        if (payload?.pluginId && global.SoduWorkApps?.settingsById) await global.SoduWorkApps.settingsById(payload.pluginId);
+      } catch (error) {
+        if (typeof global.petSay === 'function') global.petSay(error.message || '应用设置打开失败');
+      }
     });
   }
 })(window);

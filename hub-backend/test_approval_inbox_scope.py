@@ -51,25 +51,35 @@ class ApprovalInboxScopeTests(unittest.IsolatedAsyncioTestCase):
         await self.http.aclose()
         await self.engine.dispose()
 
+    def stage_seed(self, session, name, *, assignees=("alice",), required=1,
+                   separated=False, index=0):
+        """Stage evidence and immutable assignments without choosing transaction boundaries."""
+        task = models.Task(id="task-" + name, title="Review " + name,
+            note="Confirm the requirement scope", owner_client_id="alice", created_by="alice",
+            assignee_user_id="alice", status="doing")
+        artifact = am.ArtifactVersion(id="artifact-" + name, task_id=task.id, kind="requirement", seq=1,
+            checksum="checksum-" + name, manifest={"title": task.title, "description": task.note,
+                "acceptanceCriteria": ["The scope is clear"], "files": []})
+        request = am.ApprovalRequest(id="request-" + name, task_id=task.id,
+            artifact_version_id=artifact.id, action="baseline", required_count=required,
+            policy_snapshot={"separationOfDuties": separated},
+            created_at=datetime(2026, 10, 1, tzinfo=timezone.utc) + timedelta(seconds=index))
+        session.add_all([task, artifact, request])
+        assignments = [
+            am.ApprovalAssignment(request_id=request.id, user_id=uid, user_name=uid)
+            for uid in assignees
+        ]
+        return request.id, task.id, assignments
+
     async def seed(self, name, *, assignees=("alice",), required=1, separated=False, index=0):
-        """Prepare evidence and explicit immutable assignment snapshots only."""
         async with self.sessions() as session:
-            task = models.Task(id="task-" + name, title="Review " + name,
-                note="Confirm the requirement scope", owner_client_id="alice", created_by="alice",
-                assignee_user_id="alice", status="doing")
-            artifact = am.ArtifactVersion(id="artifact-" + name, task_id=task.id, kind="requirement", seq=1,
-                checksum="checksum-" + name, manifest={"title": task.title, "description": task.note,
-                    "acceptanceCriteria": ["The scope is clear"], "files": []})
-            request = am.ApprovalRequest(id="request-" + name, task_id=task.id,
-                artifact_version_id=artifact.id, action="baseline", required_count=required,
-                policy_snapshot={"separationOfDuties": separated},
-                created_at=datetime(2026, 10, 1, tzinfo=timezone.utc) + timedelta(seconds=index))
-            session.add_all([task, artifact, request])
+            request_id, task_id, assignments = self.stage_seed(
+                session, name, assignees=assignees, required=required,
+                separated=separated, index=index)
             await session.flush()
-            for uid in assignees:
-                session.add(am.ApprovalAssignment(request_id=request.id, user_id=uid, user_name=uid))
+            session.add_all(assignments)
             await session.commit()
-        return request.id, task.id
+        return request_id, task_id
 
     async def inbox(self, who="alice", query=""):
         response = await self.http.get("/api/v1/approvals" + query, headers={"X-Test-Identity": who})
@@ -123,8 +133,15 @@ class ApprovalInboxScopeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("自动", notices[0])
 
     async def test_complete_references_are_independent_of_both_page_limits(self):
-        for index in range(105):
-            await self.seed(f"paged-{index:03}", index=index)
+        assignments = []
+        async with self.sessions() as session:
+            for index in range(105):
+                _request_id, _task_id, staged = self.stage_seed(
+                    session, f"paged-{index:03}", index=index)
+                assignments.extend(staged)
+            await session.flush()
+            session.add_all(assignments)
+            await session.commit()
         normal = await self.inbox()
         self.assertEqual(len(normal["items"]), 60)
         self.assertEqual(normal["pendingCount"], 105)

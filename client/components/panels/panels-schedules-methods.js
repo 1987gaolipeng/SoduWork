@@ -154,6 +154,16 @@ function _schmCaps(plugin) {
     .filter(key => Object.prototype.hasOwnProperty.call(SCHM_CAP_LABEL, key));
 }
 
+function _schmDefaultInputs(plugin) {
+  const values = {};
+  for (const field of (plugin && plugin.inputs) || []) {
+    if (field && field.key && Object.prototype.hasOwnProperty.call(field, 'default')) {
+      values[field.key] = field.default;
+    }
+  }
+  return values;
+}
+
 function _schmConfigHtml(selectedKey, values, snapshot) {
   snapshot = snapshot || {};
   const items = Array.isArray(_schmItems) ? _schmItems : [];
@@ -294,7 +304,10 @@ async function _schmCreateAutomation(text, intent, options) {
       (!window.ScheduleTiming ? '时间设置尚未就绪，请重新打开自动化' : '');
     if (error) { if (typeof petSay === 'function') petSay(error); return false; }
   }
-  const methodKey = String(sch.personalPluginKey || '');
+  // Conversation-created automations are plain chats. A selected personal
+  // method is carried as a local plugin lock; it never creates a task or a
+  // workflow-backed automation.
+  const methodKey = String(sch.personalPluginKey || options?.personalPluginKey || '').trim();
   let method = null;
   if (methodKey) {
     await _schmLoad();
@@ -331,17 +344,49 @@ async function _schmCreateAutomation(text, intent, options) {
     if (typeof petSay === 'function') petSay('还没有可用的执行 Agent，先在「AI 助手」里配一个');
     return false;
   }
+  /*
+   * Conversation-created automations must use the same substrate/model that
+   * was selected in the composer.  Previously this path always used the first
+   * catalog row and the catalog default model, so a Qwen/Codex selection was
+   * silently persisted as Pi and immediate execution opened with the wrong
+   * runtime (or failed model admission).
+   */
+  const requestedAdapter = String(options?.adapterId || '').trim();
+  const selectedAgent = requestedAdapter
+    ? agents.find(agent => {
+      const id = String(agent?.id || '').trim();
+      const cli = String(agent?.cli || '').trim();
+      const localCli = id.replace(/^local:/, '');
+      const runnerCli = id.replace(/^runner:[^:]+:/, '');
+      return requestedAdapter === id || requestedAdapter === cli ||
+        requestedAdapter === localCli || requestedAdapter === runnerCli;
+    })
+    : agents[0];
+  if (!selectedAgent) {
+    if (typeof petSay === 'function') petSay('所选执行底座当前不可用，请刷新后重试');
+    return false;
+  }
+  const hasExplicitModel = Boolean(options && Object.prototype.hasOwnProperty.call(options, 'modelName'));
+  const requestedModel = hasExplicitModel ? String(options.modelName || '').trim() : '';
+  const acceptsModel = selectedAgent.modelPick !== false || selectedAgent.nativeModelPick === true;
+  const selectedModel = acceptsModel
+    ? (hasExplicitModel ? requestedModel
+      : (selectedAgent.nativeModelPick ? '' : String(_schDefaultModel || '')))
+    : '';
   try {
     await SoduWorkAPI.createSchedule({
       title: text.slice(0, 60), note: note.slice(0, 8000),
       every: sch.every, atHour: sch.atHour, atMinute: sch.atMinute,
       runAt: sch.every === 'once' ? sch.runAt : '',
       weekday: sch.weekday, timeZone,
-      assigneeId: agents[0].id, assigneeType: 'agent',
+      assigneeId: selectedAgent.id, assigneeType: 'agent',
+      modelName: selectedModel,
+      repoId: String(sch.repoId || options?.repoId || '').trim(),
       personalPluginKey: methodKey,
       personalPluginVersionPolicy: method ? 'pinned' : 'latest',
-      personalPluginVersion: method ? String(method.version || '') : '',
-      personalPluginChecksum: method ? String(method.checksum || '') : '',
+      personalPluginVersion: method ? (sch.personalPluginVersion || method.version || '') : '',
+      personalPluginChecksum: method ? (sch.personalPluginChecksum || method.checksum || '') : '',
+      pluginInputs: method ? Object.assign(_schmDefaultInputs(method), sch.pluginInputs || {}) : {},
       requiredCapabilities: method ? _schmCaps(method) : [],
       retryLimit: 2, retryDelayMinutes: 5, enabled: true,
     });

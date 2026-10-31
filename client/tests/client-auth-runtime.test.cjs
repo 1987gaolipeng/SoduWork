@@ -12,6 +12,7 @@ const source = fs.readFileSync(
 );
 
 function runtime(loginResult) {
+  const requests = [];
   const values = new Map([
     ['soduwork_work_hub_environment_v1', 'production'],
     ['soduwork_work_user_id', 'client-auth-runtime'],
@@ -53,11 +54,13 @@ function runtime(loginResult) {
     setTimeout,
     clearTimeout,
     console,
+    fetch: async (url, options) => { requests.push({ url, options }); return new Response(JSON.stringify({ user: loginResult.user, quota: loginResult.quota })); },
   };
   vm.runInNewContext(source, context);
   return {
     api: window.SoduWorkAPI,
     events,
+    requests,
     cleared: () => cleared,
     exceed: detail => quotaExceeded(detail),
   };

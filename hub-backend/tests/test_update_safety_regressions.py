@@ -28,7 +28,8 @@ class UpdateSafetyRegressionTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as session:
             session.add_all([
                 models.Task(id="task-1", title="fixture", status=task_status,
-                            owner_client_id="device-a", created_by="user-a"),
+                            owner_client_id="device-a", owner_user_id="user-a",
+                            created_by="user-a"),
                 am.ExecutionSession(
                     id="session-1", task_id="task-1", ref="ref-1",
                     runner_id="runner-1", state="running", last_event_at=now,
@@ -78,12 +79,13 @@ class UpdateSafetyRegressionTests(unittest.IsolatedAsyncioTestCase):
 class AssignmentDeliveryRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_assign_arrival_targets_assignee_account(self):
         task = models.Task(id="task-1", title="handoff", owner_client_id="device-a",
+                           owner_user_id="user-a",
                            assignee_user_id="user-b")
         old = models.Client(id="device-a", user_ref="user-a")
         new = models.Client(id="device-b", user_ref="user-b")
         outgoing = []
 
-        async def capture(device, event):
+        async def capture(device, event, **_route):
             outgoing.append((device, event.get("arrival"),
                              event.get("task", {}).get("readOnly")))
 

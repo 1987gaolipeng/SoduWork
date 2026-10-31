@@ -97,6 +97,17 @@ test('a last-moment identity change is checked again immediately before signalli
   assert.equal(report.skipped[0].reason, 'identity-changed');
 });
 
+test('shutdown skips verified exited root tombstones without redundant OS queries', async () => {
+  const f = fixture(); await f.guard.start();
+  f.rows = [];
+  const before = f.snapshots.length;
+  const report = await f.guard.stop();
+  assert.deepEqual(f.snapshots.slice(before), [undefined]);
+  assert.deepEqual(report.skipped, [{ pid: ROOT, reason: 'exited' }]);
+  assert.deepEqual(report.terminated, []);
+  assert.deepEqual(report.remaining, []);
+});
+
 test('missing root baseline stays closed even if that PID appears later', async () => {
   const f = fixture(); f.rows = [row(CHILD, ROOT)];
   assert.deepEqual(await f.guard.start(), { rootFound: false, tracked: 0 });

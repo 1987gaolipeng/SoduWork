@@ -4,8 +4,8 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
 
-function context(api) {
-  const ctx = vm.createContext({ SoduWorkAPI: api, window: { addEventListener() {} },
+function context(api, bridge) {
+  const ctx = vm.createContext({ SoduWorkAPI: api, window: { addEventListener() {}, soduWorkAPI: bridge },
     esc: value => String(value), Intl, Event, document: { getElementById: () => null } });
   for (const file of ['panels-schedules-methods.js', 'panels-schedules.js', 'panels-schedules-editor.js']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../components/panels', file), 'utf8'), ctx);
@@ -14,9 +14,10 @@ function context(api) {
 }
 const run = (ctx, code) => vm.runInContext(code, ctx);
 const modern = { substrates: [
-  { key: 'local:pi', name: 'Pi', available: true, onlineSeats: 2 },
-  { key: 'local:codex', name: 'Codex', available: true },
-] };
+  { key: 'local:pi', name: 'Pi', available: true, onlineSeats: 2, modelPick: true },
+  { key: 'local:codex', name: 'Codex', available: true, modelPick: false, nativeModelPick: true },
+], modelOptions: [{ name: 'soduwork-prd-large', label: '生产大模型' }],
+  models: [], defaultModel: 'soduwork-prd-large' };
 
 test('all automation openings share stable substrate choices and coalesce pending requests', async () => {
   let resolve, requests = 0, legacy = 0;
@@ -70,6 +71,64 @@ test('refreshing executor options preserves an existing choice and updates only 
   assert.equal(changes, 1);
 });
 
+test('automation editor keeps model selection independent from the chosen Agent', async () => {
+  const ctx = context({ taskExecutionOptions: async () => modern }, {
+    conversationSession: { runtimeModels: async () => ({ models: [{ id: 'gpt-5-codex', label: 'Codex 默认模型' }] }) },
+  });
+  await run(ctx, '_schLoadExecutionAgents({})');
+  assert.match(run(ctx, '_schModelFieldHtml("", "local:pi")'), /soduwork-prd-large/);
+  assert.match(run(ctx, '_schModelFieldHtml("", "local:pi")'), /selected/);
+  assert.match(run(ctx, '_schModelFieldHtml("", "local:codex")'), /gpt-5-codex/);
+  assert.doesNotMatch(run(ctx, '_schModelFieldHtml("", "local:codex")'), /soduwork-prd-large/);
+  assert.doesNotMatch(run(ctx, '_schModelFieldHtml("", "local:codex")'), /<select[^>]+disabled/);
+  assert.equal(run(ctx, '_schAgentAllowsModel("local:codex")'), true);
+  assert.equal(run(ctx, '_schAgentAllowsModel("local:pi")'), true);
+});
+
+test('automation model selector translates labels generated after the editor opens', async () => {
+  const translations = {
+    '模型': 'Model',
+    '请选择模型': 'Choose a model',
+    '当前没有可用模型': 'No models are available',
+    '由底座自身管理模型': 'Managed by this runtime',
+    '当前底座不接受自动化单独指定模型。': 'This runtime does not accept an automation-specific model.',
+    '模型与执行底座独立保存；每次自动化运行都使用这里选择的模型。': 'The model is saved independently from the runtime; each run uses the selected model.',
+  };
+  const ctx = context({ taskExecutionOptions: async () => modern });
+  ctx.window.SoduWorkI18n = { translateText: value => translations[value] || value };
+  await run(ctx, '_schLoadExecutionAgents({})');
+
+  const enabled = run(ctx, '_schModelFieldHtml("", "local:pi")');
+  assert.match(enabled, /Choose a model/);
+  assert.match(enabled, /The model is saved independently from the runtime/);
+  assert.doesNotMatch(enabled, /请选择模型|模型与执行底座独立保存/);
+
+  run(ctx, '_schAgents[1].nativeModelPick = false');
+  const managed = run(ctx, '_schModelFieldHtml("", "local:codex")');
+  assert.match(managed, /Managed by this runtime/);
+  assert.match(managed, /This runtime does not accept an automation-specific model/);
+  assert.doesNotMatch(managed, /由底座自身管理模型|当前底座不接受自动化单独指定模型/);
+});
+
+test('automation model selector strings exist in every supported locale catalog', () => {
+  const keySet = [
+    '模型', '可独立选择', '请选择模型', '当前没有可用模型', '（已保存，当前不可用）',
+    '由底座自身管理模型', '当前底座不接受自动化单独指定模型。', '当前底座自行管理模型',
+    '模型与执行底座独立保存；每次自动化运行都使用这里选择的模型。',
+    '模型与执行底座独立保存，每次自动化运行使用这里的选择',
+  ];
+  const catalogs = {
+    'en-US': require('../core/locales/en-US-runtime-pages.js'),
+    'ja-JP': require('../core/locales/ja-JP-gap-pages.js'),
+    'ko-KR': require('../core/locales/ko-KR-gap-pages.js'),
+  };
+  for (const [locale, catalog] of Object.entries(catalogs)) {
+    for (const key of keySet) {
+      assert.ok(catalog[key] && catalog[key] !== key, `${locale} is missing translation for ${key}`);
+    }
+  }
+});
+
 test('legacy conversation automation path uses the same execution contract', async () => {
   let body;
   const ctx = context({ taskExecutionOptions: async () => modern,
@@ -77,5 +136,46 @@ test('legacy conversation automation path uses the same execution contract', asy
   ctx.petSay = () => {};
   await run(ctx, '_schmCreateAutomation("每天整理日报", {schedule:{every:"daily",atHour:9,atMinute:0,weekday:1},acceptance:"保留来源"})');
   assert.equal(body.assigneeId, 'local:pi');
+  assert.equal(body.modelName, 'soduwork-prd-large');
   assert.match(body.note, /保留来源/);
+});
+
+test('conversation automation carries personal plugin defaults into the saved prompt inputs', async () => {
+  let body;
+  const ctx = context({
+    taskExecutionOptions: async () => ({
+      substrates: [{ key: 'local:pi', cli: 'pi', name: 'Pi', available: true, modelPick: true }],
+      modelOptions: [{ name: 'default-model', label: 'Default' }], defaultModel: 'default-model',
+    }),
+    createSchedule: async value => { body = value; },
+  }, { personalPlugins: { list: async () => ({ items: [{
+    key: 'daily-report', name: '??', version: '1.0.0', checksum: 'a'.repeat(64), enabled: true,
+    entrypoints: { automation: true }, capabilities: { runtime: [] },
+    inputs: [{ key: 'format', type: 'select', default: 'brief' }],
+  }] }) } });
+  ctx.petSay = () => {};
+  await run(ctx, '_schmCreateAutomation("??", {schedule:{every:"daily",atHour:9,atMinute:0,weekday:1,personalPluginKey:"daily-report"}})');
+  assert.equal(body.pluginInputs.format, 'brief');
+});
+
+test('conversation automation preserves the explicitly selected substrate and model', async () => {
+  let body;
+  const ctx = context({
+    taskExecutionOptions: async () => ({
+      substrates: [
+        { key: 'local:pi', cli: 'pi', name: 'Pi', available: true, modelPick: true },
+        { key: 'local:qwen', cli: 'qwen', name: 'Qwen', available: true, modelPick: true },
+      ],
+      modelOptions: [{ name: 'default-model', label: 'Default' }, { name: 'chosen-model', label: 'Chosen' }],
+      defaultModel: 'default-model',
+    }),
+    createSchedule: async value => { body = value; },
+  });
+  ctx.petSay = () => {};
+  await run(ctx, `_schmCreateAutomation("每日整理日报", {
+    schedule:{every:"daily",atHour:9,atMinute:0,weekday:1,repoId:"repo-1"}
+  }, { adapterId: "qwen", modelName: "chosen-model" })`);
+  assert.equal(body.assigneeId, 'local:qwen');
+  assert.equal(body.modelName, 'chosen-model');
+  assert.equal(body.repoId, 'repo-1');
 });

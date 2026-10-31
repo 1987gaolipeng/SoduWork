@@ -7,7 +7,7 @@ const libraryStore=require('../main/library-local-store.cjs'),libraryActions=req
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const [output,hub]=process.argv.slice(2);
 if(!path.isAbsolute(output||'')||!/^http:\/\/127\.0\.0\.1:\d+$/.test(hub||''))throw Error('Explicit evidence directory and isolated Hub required');
-fs.mkdirSync(output,{recursive:true});fs.mkdirSync(path.join(output,'profile'),{recursive:true});app.setPath('userData',path.join(output,'profile'));
+fs.mkdirSync(output,{recursive:true});fs.mkdirSync(path.join(output,'profile'),{recursive:true});const libraryWorkRoot=path.join(output,'workspace');fs.mkdirSync(libraryWorkRoot,{recursive:true});app.setPath('userData',path.join(output,'profile'));
 const report={ok:false,scope:'Production renderer/Store/API + isolated HTTP/SQLite and real local library files; fixture identity/IPC boundary, deterministic provider and preview transport',checks:[]};
 const windows=[];const wait=ms=>new Promise(r=>setTimeout(r,ms));
 async function call(url,method='GET',body){const r=await fetch(hub+url,{method,headers:{'Content-Type':'application/json'},body:body&&JSON.stringify(body)});const data=await r.json();if(!r.ok)throw Error(JSON.stringify(data));return data;}
@@ -22,11 +22,11 @@ ipcMain.handle('requirements-fixture-library',async(event,action,payload={})=>{
   assert.ok(owner&&identities.get(event.sender.id)===identity&&!event.sender.isDestroyed());
   assert.equal(event.senderFrame,event.sender.mainFrame);
   assert.equal(event.sender.getURL().split('?')[0],fixtureUrl);
-  if(action!=='context')assert.equal(payload.owner,owner);
+ if(action!=='context')assert.equal(payload.owner,owner);
  };
- guard();if(action==='context')return{owner};
+ guard();if(action==='context')return{owner,workRoot:payload.workRoot||libraryWorkRoot};
  assert.ok(['upload','list','readContent','readBinary','associateSource'].includes(action));
- const store=libraryStore.create(app,owner,guard);
+ const store=libraryStore.create(app,owner,guard,payload.workRoot||libraryWorkRoot);
  return store.run(index=>libraryActions.execute(store,index,action,payload));
 });
 async function open(identity){
@@ -55,7 +55,7 @@ async function open(identity){
   win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...p});win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...p});await wait(120);
  };
  const fill=async(selector,text)=>{await click(selector);for(const [key,mods] of [['Home',['control']],['End',['control','shift']]]){win.webContents.sendInputEvent({type:'keyDown',keyCode:key,modifiers:mods});win.webContents.sendInputEvent({type:'keyUp',keyCode:key,modifiers:mods});}await win.webContents.insertText(text);};
- await win.loadFile(path.join(__dirname,'fixtures/requirements-integration.html'),{query:{hub,identity}});
+ await win.loadFile(path.join(__dirname,'fixtures/requirements-integration.html'),{query:{hub,identity,workRoot:libraryWorkRoot}});
  assert.equal(await js('fixtureReady'),'ready');
  const file=async(selector,files)=>{
   if(!win.webContents.debugger.isAttached())win.webContents.debugger.attach('1.3');
@@ -127,7 +127,8 @@ app.whenReady().then(async()=>{
   assert.match(localDelivery.id,/^local-/);
   const content=await sender.js(`SoduWorkAPI.readLibraryContent(${JSON.stringify(localDelivery.id)})`);
   assert.equal(content.content,Buffer.from(await sender.js('fixturePreviews.at(-1).data'),'base64').toString('utf8'));
-  const indexFile=path.join(output,'profile/library/accounts',owners.sender,'index.json');
+ const indexFile=path.join(libraryWorkRoot,'SoduWorkLibrary/accounts',owners.sender,'index.json');
+ assert.equal(fs.existsSync(path.join(output,'profile','library')),false,'Local library must stay under the configured work directory');
   assert.ok(JSON.parse(fs.readFileSync(indexFile,'utf8')).items.some(row=>row.id===localDelivery.id));
   assert.equal(sender.network.libraryWrites,0,'ordinary save stays on this PC and does not upload to the Hub library');
   assert.equal((await recipient.js('SoduWorkAPI.listLibrary({})')).items.some(row=>row.filename==='delivery.md'),false);

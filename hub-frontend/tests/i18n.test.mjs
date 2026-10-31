@@ -9,11 +9,12 @@ import { getLocale, setLocale, normalizeLocale, translateText as tx, localeMap, 
 import { count, duration, when, calendarTrend } from '../src/screens/usage-center-format.js'
 
 test('normalizes supported languages and safely falls back', () => {
+  assert.equal(getLocale(), 'en-US')
   assert.equal(normalizeLocale('en-GB'), 'en-US')
   assert.equal(normalizeLocale('zh-CN'), 'zh-CN')
   assert.equal(normalizeLocale('ja'), 'ja-JP')
   assert.equal(normalizeLocale('ko'), 'ko-KR')
-  assert.equal(normalizeLocale('unknown'), 'zh-CN')
+  assert.equal(normalizeLocale('unknown'), 'en-US')
 })
 
 test('additional language catalogs translate authored copy and preserve business data', () => {

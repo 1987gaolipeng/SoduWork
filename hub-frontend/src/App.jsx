@@ -14,6 +14,7 @@ const IntegrationsHub = lazy(() => import('./screens/IntegrationsHub.jsx'))
 const Clients = lazy(() => import('./screens/Clients.jsx'))
 const ClientReleases = lazy(() => import('./screens/ClientReleases.jsx'))
 const UsageCenter = lazy(() => import('./screens/UsageCenter.jsx'))
+const QuotaManagement = lazy(() => import('./screens/QuotaManagement.jsx'))
 const Orgs = lazy(() => import('./screens/Orgs.jsx'))
 const Users = lazy(() => import('./screens/Users.jsx'))
 const Roles = lazy(() => import('./screens/Roles.jsx'))
@@ -55,7 +56,7 @@ const NAV = localeMap(() => ([
   // Treat automation as a plugin execution mode rather than a separate capability catalog.
   { id: 'projects', label: '项目与仓库', sub: '项目、代码仓库、流程和发布目标的治理入口', icon: 'box', Comp: Projects, group: 'AI 运行', perm: 'task.view' },
   { id: 'repositories', label: '仓库目录', sub: '企业代码资产全量目录、同步健康与项目挂载', icon: 'file', Comp: Repositories, group: 'AI 运行', perm: 'task.view' },
-  { id: 'models', label: '模型目录', sub: '模型服务、企业模型与个人额度策略', icon: 'key', Comp: ModelCatalog, group: '能力配置', perm: 'integration.manage' },
+  { id: 'models', label: '模型目录', sub: '模型服务与企业模型配置', icon: 'key', Comp: ModelCatalog, group: '能力配置', perm: 'integration.manage' },
   { id: 'plugins', label: '插件与应用', sub: '企业能力、工作流与运行治理', icon: 'plug', Comp: PluginCenter, group: '能力配置', perm: 'plugin.manage' },
   { id: 'capabilities', label: '能力目录', sub: '统一治理 Skill、连接器与企业开放策略', icon: 'layers', Comp: Capabilities, group: '能力配置', perm: 'integration.manage' },
   { id: 'integrations', label: '系统集成', sub: '外部业务系统、代码平台与消息通道', icon: 'link', Comp: IntegrationsHub, group: '能力配置', perm: 'integration.manage' },

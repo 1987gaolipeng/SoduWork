@@ -89,9 +89,60 @@ test('batch metadata preserves errors/submissions but never copies provider bloc
     failureKind: '', retrySafe: false, submissionId: '', taskId: 'task' });
 });
 
+test('plugin authorization metadata crosses IPC without private grant details', () => {
+  const event = { kind: 'error', reason: 'missing capability', failureKind: 'plugin-grant', retrySafe: true,
+    pluginAuthorization: { missing: ['browser'], missingMcp: ['calendar'],
+      readOnlyConflicts: ['repository'], unsupported: ['secret-runtime'],
+      grant: 'private-ticket' } };
+  assert.deepEqual(fields(event, true, {}), { kind: 'error', reason: 'missing capability',
+    failureKind: 'plugin-grant', retrySafe: true, submissionId: '', taskId: '',
+    pluginAuthorization: { missing: ['browser'], missingMcp: ['calendar'],
+      readOnlyConflicts: ['repository'], unsupported: ['secret-runtime'] } });
+});
+
 test('a failed publication does not crash the microtask or block another session', async () => {
   const received = [], publisher = create(context => { if (context === 'closed') throw Error('closed window'); received.push(context); });
   publisher.push('a', { kind: 'tool' }, {}, 'closed');
   publisher.push('b', { kind: 'settled' }, {}, 'open');
   await Promise.resolve(); assert.deepEqual(received, ['open']);
+});
+
+
+test('quota metadata crosses single and batched IPC only to the owning conversation view', () => {
+  const quota = { enabled: true, exceeded: true, reason: 'model_exhausted', models: [{ model: 'fixture', remaining: 0 }] };
+  const event = { kind: 'error', reason: 'Allowance unavailable', code: 'TOKEN_QUOTA_EXCEEDED', quota, token: 'provider-private' };
+  assert.deepEqual(fields(event, true, {}).quota, quota);
+  assert.equal(fields(event, true, {}).code, 'TOKEN_QUOTA_EXCEEDED');
+  assert.equal(fields(event, false, {}).quota, undefined);
+  assert.equal(fields(event, false, {}).code, undefined);
+  assert.equal(fields(event, true, {}).token, undefined);
+  const fs = require('node:fs'), vm = require('node:vm');
+  const source = fs.readFileSync(require.resolve('../main/pi-session/ipc'), 'utf8');
+  const context = { require: () => require('../core/token-quota'), eventPublication: { fields },
+    conversationTitles: { decorate: () => null }, _contextSnapshot: (_handle, snapshot) => snapshot, _app: {} };
+  vm.runInNewContext(source.slice(source.indexOf('function _send('), source.indexOf('function _publish(')), context);
+  for (const full of [true, false]) {
+    let sent;
+    context._send({isDestroyed: () => false, webContents: {send: (_channel, value) => {sent=value;}}},
+      {ref:'fixture'}, {...event, batch:[event]}, {}, full);
+    assert.equal(sent.code, full ? event.code : undefined);
+    assert.equal(sent.quota, full ? quota : undefined);
+    assert.equal(sent.events[0].quota, full ? quota : undefined);
+    assert.doesNotMatch(JSON.stringify(sent), /provider-private/);
+  }
+});
+
+test('pi-session IPC forwards only bounded plugin authorization metadata', () => {
+  const fs = require('node:fs');
+  const source = fs.readFileSync(require.resolve('../main/pi-session/ipc'), 'utf8');
+  const context = { require: () => require('../core/token-quota'),
+    eventPublication: { fields, pluginAuthorization },
+    conversationTitles: { decorate: () => null }, _contextSnapshot: (_handle, snapshot) => snapshot, _app: {} };
+  vm.runInNewContext(source.slice(source.indexOf('function _send('), source.indexOf('function _publish(')), context);
+  let sent;
+  context._send({ isDestroyed: () => false, webContents: { send: (_channel, value) => { sent = value; } } },
+    { ref: 'fixture', sessionId: 'session' },
+    { kind: 'error', reason: 'missing', failureKind: 'plugin-grant', retrySafe: true,
+      pluginAuthorization: { missing: ['browser'], grant: 'private' } }, {}, true);
+  assert.deepEqual(sent.pluginAuthorization, { missing: ['browser'] });
 });

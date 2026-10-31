@@ -255,6 +255,7 @@
       SoduWorkAPI.personalPlugin(item.pluginId), SoduWorkAPI.pluginAudienceCandidates(),
       SoduWorkAPI.personalPluginPublisherIdentity(),
     ]);
+    if (opts.isCurrent && !opts.isCurrent()) return;
     const detail = detailResult && detailResult.plugin || {};
     const draft = detail.localDraft || {};
     const publisher = publisherResult && publisherResult.identity || {};
@@ -262,7 +263,7 @@
     const people = (peopleResult && peopleResult.items || []).slice(0, 500);
     const orgUnits = (peopleResult && peopleResult.orgUnits || []).slice(0, 500);
     if (!draft.name || !draft.version) throw new Error('个人插件版本不完整，请重新安装后再上传');
-    const layer = ctx.openModal('上传到企业', item.name + ' · v' + item.version,
+    const layer = ctx.openModal(opts.application ? '申请上架' : '上传到企业', item.name + ' · v' + item.version,
       (global.SoduWorkPluginMakerUtils ? global.SoduWorkPluginMakerUtils.resourceMarkup(draft.resources) : '') +
       '<section class="cap-publish-summary"><span><small>\u63d0\u4ea4\u7248\u672c</small><b>' + h(draft.name) + ' \u00b7 v' + h(draft.version) + '</b></span><span><small>\u4f5c\u8005</small><b>' + h(authorName) + '</b></span></section>' +
       '<p class="cap-governance-note"><b>本地版本不会改变。</b>上传的是当前不可变快照，先进入企业隔离区；管理员审核发布后，才按下面的范围可用。</p>' +
@@ -349,6 +350,8 @@
     });
     layer.querySelector('#capPublishCancel').addEventListener('click', ctx.closeModal);
     layer.querySelector('#capPublishDo').addEventListener('click', async function () {
+      const current = () => (!opts.isCurrent || opts.isCurrent()) && !layer.hidden && layer.querySelector('#capPublishDo') === this;
+      if (!current()) return;
       const mode = layer.querySelector('input[name="capAudience"]:checked').value;
       const userIds = mode === 'users' ? [...layer.querySelectorAll('#capAudienceList input:checked')].map(x => x.value) : [];
       const orgUnitIds = mode === 'org_units' ?
@@ -358,21 +361,58 @@
       this.disabled = true; this.textContent = '正在上传…';
       try {
         const signed = await SoduWorkAPI.signPersonalPluginDraft(draft);
+        if (!current()) return;
         const result = await SoduWorkAPI.publishPersonalPlugin(
           draft, mode, userIds, orgUnitIds, signed.signature, signed.identity);
+        if (!current()) return;
         const proof = result && result.preview && result.preview.signature || {};
         const message = proof.state === 'unknown-key'
           ? '插件已签名并进入隔离区；管理员可在版本审查中核对指纹并一键登记发布身份'
           : (result.message || '插件已使用本机发布身份提交企业审核');
         ctx.closeModal(); ctx.say(message); await load(); ctx.refresh();
       } catch (error) {
+        if (!current()) return;
         ctx.say(ctx.errorText(error, '插件没有上传成功'));
         this.disabled = false; this.textContent = '提交审核';
       }
     });
   }
 
+  // Receipts come from the authenticated catalog, never infer a submission from a local click.
+  function personalSubmission(item, rows) {
+    if (!item?.personal || !item.key || !item.version) return null;
+    return (rows || []).filter(row => row.key === item.key && row.version === item.version)
+      .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))[0] || null;
+  }
+
+  async function refreshPersonalSubmission(button, item, options) {
+    if (!button) return;
+    const opts = options || {}, api = opts.api || global.SoduWorkAPI;
+    const scope = api.taskStorageKey?.('plugins');
+    const request = button._publicationRead = (button._publicationRead || 0) + 1;
+    const current = () => button.isConnected && button._publicationRead === request &&
+      scope === api.taskStorageKey?.('plugins') && (!opts.isCurrent || opts.isCurrent());
+    button.disabled = true; button.textContent = '正在读取审核状态…';
+    try {
+      const catalog = await api.pluginCatalog();
+      if (!current()) return;
+      if (!catalog || catalog.remoteError || catalog.error) throw Error(catalog?.remoteError || catalog?.error || '上架状态暂不可用');
+      const receipt = personalSubmission(item, catalog.submissions);
+      button.disabled = Boolean(receipt);
+      button.textContent = !receipt ? '申请上架' :
+        receipt.reviewDecision === 'reject' ? '审核未通过' :
+        receipt.trustState === 'revoked' || receipt.reviewDecision === 'revoke' ? '上架已撤销' :
+        receipt.trustState === 'approved' ? (receipt.catalogReady ? '已上架' : '审核已通过') : '上架审核中';
+      button.title = receipt ? (receipt.reviewNote || currentStep(receipt).detail) : '';
+    } catch (error) {
+      if (!current()) return;
+      button.disabled = true; button.textContent = '上架状态暂不可用';
+      button.title = error.message || '请重新打开设置重试';
+    }
+  }
+
   global.SoduWorkPluginPublication = {
     progress, currentStep, openUpgrade, submissionStrip, openSubmission, openPersonalPublish,
+    personalSubmission, refreshPersonalSubmission,
   };
 })(window);

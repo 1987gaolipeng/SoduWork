@@ -70,7 +70,8 @@ if (typeof electron === 'string') {
     await js(`window.fixtureFiles=[new File(['<html>'+ 'x'.repeat(26300)+'</html>'],'工作目标分析智能体-完整缺陷分析与验收清单-20261015-最终修订版本.html',{type:'text/html'}),
       new File(['%PDF fixture'],'正在归档的补充说明.pdf',{type:'application/pdf'}),new File(['a,b\\n1,2'],'上传失败后可以重试的验收清单.csv',{type:'text/csv'})];
       WorkEntrySheet.openTask({text:'根据附件修复缺陷',proposal:{title:'修复工作目标分析智能体',note:'根据附件缺陷清单完成修复',assignee:'me'},bridge:{atts:()=>fixtureFiles}});void 0;`);
-    await until("document.querySelector('#cpCreate')&&document.querySelector('[data-catt-library-retry]')");
+    await until("document.querySelector('#cpCreate')&&document.querySelectorAll('#wesAttachTray .catt-item').length===3");
+    assert.equal(await js("document.querySelectorAll('.catt-library-state').length"),0);
     await measure('wide', 1200); await measure('narrow', 400); await measure('small', 320);
     win.webContents.setZoomFactor(1.25);
     await measure('zoom-125',500);
@@ -78,11 +79,7 @@ if (typeof electron === 'string') {
     await js("document.documentElement.style.setProperty('--font-min-readable','18px');void 0;");
     await measure('large-font',400);
     await js("document.documentElement.style.removeProperty('--font-min-readable');void 0;");
-    await click('[data-catt-library-retry]');
-    await until("!document.querySelector('[data-catt-library-retry]')");
-    report.actions.push({name:'retry updates same attachment',ok:await js("document.querySelectorAll('#wesAttachTray .catt-item').length===3&&document.querySelectorAll('.catt-library-state')[2].innerText.includes('已自动保存')")});
-    await js('pending.splice(0).forEach(resolve=>resolve({ok:true,item:{id:"pdf-fixture"}}));void 0;');
-    await until("Array.from(document.querySelectorAll('.catt-library-state')).every(e=>e.innerText.includes('已自动保存'))");
+    report.actions.push({name:'conversation attachments stay visible without automatic library upload',ok:await js("document.querySelectorAll('#wesAttachTray .catt-item').length===3&&!document.querySelector('[data-catt-library-retry]')&&!document.querySelector('.catt-library-state')&&uploads.length===0")});
     await click('[data-catt-remove="1"]');
     report.actions.push({name:'remove keeps other filenames',ok:await js("document.querySelectorAll('#wesAttachTray .catt-item').length===2&&!document.querySelector('#wesAttachTray').innerText.includes('正在归档的补充说明.pdf')")});
     await js("window.pickerClicks=0;document.querySelector('#wesAttachInput').addEventListener('click',e=>{pickerClicks++;e.preventDefault()});void 0;");

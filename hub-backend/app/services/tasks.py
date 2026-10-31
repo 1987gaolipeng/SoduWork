@@ -551,7 +551,7 @@ async def update_task(session: AsyncSession, owner_id: str, tid: str, patch: dic
     previous_org = t.shared_org_id
     prev_assignee = t.assignee_user_id
     requirement_edit = "requirementVersion" in patch
-    await task_requirements.apply(session, client, t, patch)
+    edit_facts = await task_requirements.apply(session, client, t, patch)
     if requirement_edit and t.requirement_content:
         content = dict(t.requirement_content)
         for key in {"title", "note"}.intersection(patch):
@@ -785,7 +785,7 @@ async def clear_done(session: AsyncSession, owner_id: str) -> dict:
     )
     rows = res.scalars().all()
     from . import task_maintenance
-    await task_maintenance.ensure_allowed(session, rows, action="delete")
+    await task_maintenance.ensure_allowed(session, rows, action="delete", client=client)
     ids = [t.id for t in rows]
     from . import task_access
     recipients = {t.id: await task_access.recipient_clients(session, t) for t in rows}

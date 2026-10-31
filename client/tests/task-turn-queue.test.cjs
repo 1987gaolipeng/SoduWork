@@ -54,6 +54,17 @@ test('a failed start receipt retries before completion without duplicating succe
 test('task envelope preserves goal, criteria and user supplement', () => {
  const prompt = taskPrompt({title:'报告',note:'分析附件',acceptanceCriteria:['标准一','标准二'],outputRequirements:'HTML'},'额外说明');
  for(const value of ['报告','分析附件','标准一','标准二','HTML','额外说明']) assert.ok(prompt.includes(value));
+ assert.match(prompt,/逐条重读以上验收标准/);
+ assert.match(prompt,/可复核证据/);
+ assert.match(prompt,/不得仅凭自述宣布完成/);
+});
+
+test('task prompt retains the exact original note and supplemental instruction', () => {
+ const raw = '  /需求 #1\r\n' + '正文'.repeat(800) + '\n  ';
+ const extra = '  追加约束\r\n保持CSV  ';
+ const prompt = taskPrompt({ title: 'Fixture', note: raw }, extra);
+ assert.ok(prompt.includes('需求内容\n' + raw));
+ assert.ok(prompt.includes('补充说明\n' + extra));
 });
 
 test('task prompt retains the exact original note and supplemental instruction', () => {

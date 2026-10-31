@@ -17,7 +17,7 @@ if (typeof electron === 'string') {
   const output = path.resolve(__dirname, '../../outputs/app-window-input-20261020');
   fs.mkdirSync(output, { recursive: true });
   app.setPath('userData', path.join(temp, 'profile'));
-  const views = [], handlers = {}, report = { ok: false, cases: [], input: { app: 0, settings: 0, sidebar: 0 },
+  const views = [], handlers = {}, report = { ok: false, cases: [], input: { app: 0, refresh: 0, sidebar: 0 },
     boundary: 'Isolated Electron profile, production work-preview IPC/layout, production title bar/preload, loopback application. Minimal sidebar fixture with production preload; no models/accounts/user windows. Structural checks alone do not prove native mouse input.' };
   let host, detached, server, poll, done = false;
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -47,11 +47,11 @@ if (typeof electron === 'string') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(`<!doctype html><style>body{margin:0;background:#10151c;color:white;font:20px sans-serif}
         button{margin:60px;padding:25px;font:24px sans-serif}</style><button id="test">应用按钮：0</button>
-        <p style="margin:60px">本地隔离窗口：验证应用按钮、标题栏设置与右侧栏。</p>
+        <p style="margin:60px">本地隔离窗口：验证应用按钮、标题栏刷新与右侧栏。</p>
         <script>window.clicks=0;test.onclick=()=>{clicks++;test.textContent='应用按钮：'+clicks;};</script>`);
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    require('../main/work-preview').install({ BrowserWindow,
+    require('../main/work-preview').install({ app, BrowserWindow,
       ipcMain: { handle(name, fn) { handlers[name] = fn; ipcMain.handle(name, fn); }, on: (...args) => ipcMain.on(...args) },
       WebContentsView: function (options) {
         const view = new WebContentsView(options); views.push(view);
@@ -66,13 +66,15 @@ if (typeof electron === 'string') {
     host = new BrowserWindow({ show: false, webPreferences: { contextIsolation: true, nodeIntegration: false,
       preload: path.resolve(__dirname, '../preload.js') } });
     await host.loadFile(path.join(temp, 'host.html'));
-    const originalSend = host.webContents.send.bind(host.webContents);
-    host.webContents.send = (channel, ...args) => {
-      if (channel === 'work-preview-apps-manage') { report.input.settings++; save(); }
-      return originalSend(channel, ...args);
-    };
+    const origin = 'http://127.0.0.1:' + server.address().port;
+    const capabilities = ['conversation.send'];
+    const plugin = require('../main/personal-plugins').create(app, { key:'input-fixture', name:'Input fixture',
+      version:'0.1.0', template:'app', description:'Isolated input fixture', instructions:'Fixture only',
+      ui:{ contributions:[{ id:'main', title:'Input fixture', slot:'workspace.navigation', source:{ type:'external',
+        url:origin, bridge:{ version:1, capabilities } } }] } }).plugin;
     const result = await invoke('show-detached', host.webContents, {
-      tabId: 'input-fixture', label: 'SoduWork input regression', url: 'http://127.0.0.1:' + server.address().port });
+      tabId: 'input-fixture', label: 'SoduWork input regression', url:origin,
+      appBridge:{ appId:'plugin:' + plugin.pluginId, contributionId:'main', origin, version:1, capabilities } });
     assert.equal(result.ok, true, result.reason);
     detached = BrowserWindow.getAllWindows().find(win => win !== host);
     await until(() => views.length >= 3 && views.every(view => !view.webContents.isLoading()), 'views loaded');
@@ -183,8 +185,8 @@ if (typeof electron === 'string') {
     save(); detached.show(); detached.focus();
     detached.on('close', () => {
       if (done) return;
-      const passed = report.input.app > 0 && report.input.settings > 0 && report.input.sidebar > 0;
-      void finish(passed ? null : Error('Interactive input incomplete: click application, settings and sidebar before closing'));
+      const passed = report.input.app > 0 && report.input.refresh > 0 && report.input.sidebar > 0;
+      void finish(passed ? null : Error('Interactive input incomplete: click application, refresh and sidebar before closing'));
     });
     poll = setInterval(async () => {
       try {

@@ -60,6 +60,23 @@ EXPECTED = {
 
 
 class PluginManifestContractTests(unittest.TestCase):
+    def test_personal_package_top_level_mcp_declaration_survives_hub_import(self):
+        manifest = fixture()
+        manifest["mcpServers"] = ["media-ops-cloud"]
+        parsed = plugin_packages.parse(archive(manifest))
+        self.assertEqual(parsed["manifest"]["capabilities"]["mcpServers"], ["media-ops-cloud"])
+        self.assertEqual(parsed["capabilities"]["mcpServers"], ["media-ops-cloud"])
+        self.assertEqual(plugin_packages.personal_draft(parsed)["mcpServers"], ["media-ops-cloud"])
+
+    def test_dual_mcp_declarations_must_agree_and_keep_name_validation(self):
+        manifest = fixture()
+        manifest["mcpServers"] = ["media-ops-cloud", "media-ops-cloud"]
+        manifest["capabilities"]["mcpServers"] = ["media-ops-cloud"]
+        self.assertEqual(plugin_packages.normalize(manifest)[2]["mcpServers"], ["media-ops-cloud"])
+        for value in (["other-server"], [], "media-ops-cloud", ["bad/name"]):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                plugin_packages.normalize({**manifest, "mcpServers": value})
+
     def test_direct_and_workflow_packages_preserve_identity_and_normalized_content(self):
         for workflow in (False, True):
             with self.subTest(workflow=workflow):

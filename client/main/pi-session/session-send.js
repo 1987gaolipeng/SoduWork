@@ -1,6 +1,8 @@
 'use strict';
 
 // State remains owned by the session; accessors keep async transitions live.
+const sessionHelpers = require('./session-helpers');
+
 function create(ctx) {
   const {
     _openTiming, _pluginIds, attachmentContract, attachments, finalAnswer,
@@ -8,6 +10,11 @@ function create(ctx) {
     independentReview, pluginContext, runControl, sessionResources, skillTurn,
     stream, imageRouting, vision, visionContract,
   } = ctx.shared;
+  const titleForTurn = value => {
+    const text = String(value || '').trim();
+    if (!text || !sessionHelpers.visibleTitleText(text).trim()) return '';
+    return sessionHelpers.title({ firstMessage: text });
+  };
   return {
 async send(text, turnAttachments, sendOptions) {
       const turn = sendOptions || {};
@@ -50,7 +57,7 @@ async send(text, turnAttachments, sendOptions) {
         ctx.failedLastTurn = false;
         ctx.imageController = new AbortController();
         runControl.resetTurn(ctx.run, true);
-        ctx.displayTitle = ctx.displayTitle || rawText.replace(/\s+/g, ' ').trim().slice(0, 40);
+        ctx.displayTitle = ctx.displayTitle || titleForTurn(rawText);
         ctx.updatedAt = Date.now();
         try {
           await ctx.beginTurnJournal(turn);
@@ -70,7 +77,8 @@ async send(text, turnAttachments, sendOptions) {
       }
       const ticket = await ctx.refreshModelTicketIfNeeded();
       if (!ticket.ok) {
-        return { ok: false, failureKind: 'model-auth', retrySafe: true, reason: ticket.reason };
+        return { ok: false, failureKind: 'model-auth', retrySafe: true, reason: ticket.reason,
+            ...require('../../core/token-quota').fields(ticket) };
       }
       if (ctx.resourceActivation.required()) {
         ctx.inFlight = true;
@@ -118,7 +126,7 @@ async send(text, turnAttachments, sendOptions) {
       if (!pluginAuthorization.ok) {
         if (pluginGrant && typeof pluginGrant.cleanup === 'function') pluginGrant.cleanup();
         return {
-          ok: false, failureKind: 'plugin-grant', retrySafe: true,
+          ok: false, failureKind: 'plugin-grant', retrySafe: pluginAuthorization.retrySafe !== false,
           reason: pluginAuthorization.reason, pluginAuthorization,
         };
       }
@@ -146,7 +154,7 @@ async send(text, turnAttachments, sendOptions) {
       }
       ctx.goalCancelled = false;
       if (!internal) {
-        ctx.displayTitle = ctx.displayTitle || rawText.replace(/\s+/g, ' ').trim().slice(0, 40);
+        ctx.displayTitle = ctx.displayTitle || titleForTurn(rawText);
         ctx.updatedAt = Date.now();
       }
       if (!runAsGoal) {
@@ -209,6 +217,23 @@ async send(text, turnAttachments, sendOptions) {
           ? (ctx.opts.inputAttachments || []) : [];
         const files = (turnAttachments && turnAttachments.length) ? turnAttachments : first;
         const initialFromMessage = ctx.acc.state.messages.length;
+        const inputPrepText = Object.prototype.hasOwnProperty.call(turn.inputPreparation || {}, 'userText')
+          ? String(turn.inputPreparation.userText || '') : rawText;
+        let materialUnderstanding = { eligible: false, status: 'bypass', prompt: '', rows: [] };
+        if (files.length) {
+          try {
+            materialUnderstanding = await require('../conversation/conversation-input-preparation.cjs').prepare({
+              text: inputPrepText, files, plugins: turnPlugins,
+              fallback: Boolean(turn.inputPreparation?.fallback), signal: turn.signal,
+            });
+          } catch (error) {
+            materialUnderstanding = {
+              eligible: true, status: 'error', rows: [],
+              prompt: '本轮附件理解准备失败：' + String(error?.message || error) +
+                '\n请不要假设附件内容已经读取；如需继续，请先说明处理目标或重新提供材料。',
+            };
+          }
+        }
         const promptText = !runAsGoal && ctx.goal.intent === 'goal'
           ? goalQuality.normalPrompt(rawText) : rawText;
         let modelPrompt = pluginContext.augment(
@@ -236,6 +261,8 @@ async send(text, turnAttachments, sendOptions) {
           modelPrompt = visionContract.augment(modelPrompt, observed);
         }
         if (interrupted()) return { ok: true, cancelled: true, manualStop: true };
+        modelPrompt = require('./input-context.cjs').augment(modelPrompt,
+          materialUnderstanding.eligible ? materialUnderstanding.prompt : '');
         await ctx.beginTurnJournal(turn);
         const completion = await ctx._promptComplete(modelPrompt, { images: nativeImages ? visualInputs : [] });
         if (interrupted()) return { ok: true, cancelled: true, manualStop: true };
@@ -496,6 +523,7 @@ async send(text, turnAttachments, sendOptions) {
           ctx._endGoalTurn();
         }
         return { ok: false, reason: '这一轮没跑成：' + String((e && e.message) || e),
+            ...require('../../core/token-quota').fields(e),
           modelRecoveryGoal: runAsGoal, snapshot: ctx._snapshot() };
       } finally {
         runControl.finishTurn(ctx.run);

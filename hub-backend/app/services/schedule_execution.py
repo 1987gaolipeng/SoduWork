@@ -20,6 +20,23 @@ CAPABILITY_SKILLS = {
     "browser": "browser-use", "computer": "computer-use", "office": "office",
 }
 
+
+def normalize_conversation_schedule(s):
+    """Keep ordinary-chat routing while retaining an optional local plugin.
+
+    Enterprise workflow bindings still belong to the retired task/workflow path
+    and are cleared at the dispatch boundary. A personal plugin is different: the
+    desktop worker resolves its local body and opens the same ordinary chat with
+    a version lock, so clearing it here made the editor's plugin selector appear
+    to work while silently dropping the user's choice.
+    """
+    s.plugin_binding_id = ""
+    # Prompt parameters and the personal-plugin snapshot remain part of the
+    # ordinary conversation envelope; only enterprise bindings and workflow
+    # routing are retired.
+    s.flow = False
+    return s
+
 def required_skill_names(raw) -> list[str]:
     return [CAPABILITY_SKILLS[key] for key in clean_required_capabilities(raw)
             if key in CAPABILITY_SKILLS]
@@ -79,6 +96,65 @@ async def validate_direct_execution(session: AsyncSession, s):
     from . import skills
     return await skills.resolve_named(
         session, required_skill_names(capabilities), client)
+
+
+async def validate_selected_model(session: AsyncSession, s) -> None:
+    """Reject a saved model that the selected Agent cannot actually use.
+
+    The editor performs the same check during preflight, but save and immediate
+    run are also public API boundaries.  Keeping this validation here prevents
+    older clients (or direct API callers) from persisting a gateway model that is
+    unavailable for the selected Agent and only discovering it after dispatch.
+    An empty value deliberately means "follow the Agent default" for legacy rows.
+    """
+    model_name = str(getattr(s, "model_name", "") or "").strip()
+    if not model_name:
+        return
+    aid = str(getattr(s, "assignee_id", "") or "").strip()
+    if not aid:
+        raise ValueError("指定模型前请先选择执行 Agent")
+    client_id = str(getattr(s, "owner_client_id", "") or "").strip()
+    client = await session.get(models.Client, client_id) if client_id else None
+    if client is None:
+        raise ValueError("指定模型前请先选择任务归属的 SoduWork")
+    from . import ai_exec
+    ctx = await ai_exec.load(session, force=True)
+    model_kind = aid if aid.startswith("local:") else (
+        "local:" + aid.rsplit(":", 1)[-1] if aid.startswith("runner:") else aid)
+    state = await _schedule_model_readiness(session, client, ctx, model_kind, model_name)
+    if not state.get("ok"):
+        raise ValueError(str(state.get("detail") or "所选模型不可用")[:240])
+
+
+async def _schedule_model_readiness(session, client, ctx: dict,
+                                    model_kind: str, model_name: str) -> dict:
+    """Resolve schedule model choices from the same live catalog as the editor.
+
+    Legacy Runner dispatch keeps using the synchronous ``ai_exec`` model list,
+    but conversation schedules are populated from ``model_catalog``.choices().
+    Native Agents (currently Codex) retain their own model validation.
+    """
+    from . import agent_execution_options, agent_route_selection, model_catalog
+
+    model_kind, model_name = str(model_kind or "").strip(), str(model_name or "").strip()
+    if not model_name:
+        return {"ok": True, "model": "", "detail": "跟随底座默认模型"}
+    if agent_execution_options.is_native_model_kind(model_kind) or not agent_execution_options.supports_soduwork_model_kind(model_kind):
+        return agent_route_selection.model_readiness(ctx, model_kind, model_name)
+    try:
+        choices = await model_catalog.choices(session, client)
+    except Exception:
+        # Older isolated databases may not yet have the model catalog tables.
+        # Preserve the legacy readiness check there; current Hubs use the live
+        # catalog above and therefore do not silently accept removed models.
+        return agent_route_selection.model_readiness(ctx, model_kind, model_name)
+    allowed = {str(choices.get("default") or "").strip()}
+    allowed.update(str(item or "").strip() for item in choices.get("list") or [])
+    allowed.discard("")
+    if model_name not in allowed:
+        return {"ok": False, "model": model_name,
+                "detail": f"模型「{model_name}」未在当前企业开放的模型清单中"}
+    return {"ok": True, "model": model_name, "detail": f"模型「{model_name}」可用"}
 
 
 async def preflight_execution(session: AsyncSession, s,
@@ -157,6 +233,14 @@ async def _preflight_execution(session: AsyncSession, s,
     except Exception as exc:  # noqa: BLE001
         return {"state": "blocked", "mode": mode,
                 "message": ("读取 Agent 配置失败：" + str(exc))[:240]}
+    model_name = str(getattr(s, "model_name", "") or "").strip()
+    model_kind = aid if aid.startswith("local:") else (
+        "local:" + aid.rsplit(":", 1)[-1] if aid.startswith("runner:") else aid)
+    model_state = await _schedule_model_readiness(session, client, ctx, model_kind, model_name)
+    if not model_state.get("ok"):
+        detail = str(model_state.get("detail") or "模型不可用")[:240]
+        return {"state": "blocked", "mode": mode, "message": detail,
+                "checks": [{"key": "model", "state": "blocked", "label": detail[:180]}]}
     import asyncio
     try:
         picked = await asyncio.to_thread(
@@ -218,6 +302,7 @@ async def _preflight_execution(session: AsyncSession, s,
 async def validate_execution(session: AsyncSession, s,
                              org_ids: set[str] | None = None):
     """Validate the selected immutable automation binding at save and run time."""
+    normalize_conversation_schedule(s)
     validate_timing(s)
     binding_id = str(getattr(s, "plugin_binding_id", "") or "")
     personal_key = str(getattr(s, "personal_plugin_key", "") or "")
@@ -231,11 +316,15 @@ async def validate_execution(session: AsyncSession, s,
         if not str(getattr(s, "assignee_id", "") or ""):
             raise ValueError("个人插件自动化还需要选择执行 Agent")
         s.plugin_inputs = clean_plugin_inputs(getattr(s, "plugin_inputs", {}) or {})
+        await validate_selected_model(session, s)
         await validate_direct_execution(session, s)
         return None
     if not binding_id:
+        await validate_selected_model(session, s)
         await validate_direct_execution(session, s)
         return None
+    if str(getattr(s, "model_name", "") or "").strip():
+        raise ValueError("企业插件自动化不支持单独指定模型")
     client_id = str(getattr(s, "owner_client_id", "") or "")
     client = await session.get(models.Client, client_id) if client_id else None
     if client is None:

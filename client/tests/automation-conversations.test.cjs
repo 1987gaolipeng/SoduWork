@@ -7,8 +7,8 @@ function fixture() {
   const identity = { hub: 'http://example.invalid', clientId: 'device' }, store = new Map(), calls = [], acks = [];
   let finish, status = 'streaming', ackOffline = false;
   const completion = new Promise(resolve => { finish = resolve; });
-  const input = { runId: 'run-1', title: '测试', text: '完整说明\n验收要求\n参数：中文', adapterId: 'pi',
-    attachments: [{ name: 'input.txt', data: 'materials' }], projectId: 'project' };
+  const input = { runId: 'run-1', title: '测试', conversationTitle: '自动化 · 测试 · 2026-10-26 10:20', text: '完整说明\n验收要求\n参数：中文', adapterId: 'pi',
+    attachments: [{ name: 'input.txt', data: 'materials' }], projectId: 'project', repoId: 'repo-1' };
   const journal = { read: key => store.get(key), write: (key, record) => store.set(key, { ...record }) };
   const request = async (_identity, route, body) => {
     if (route.endsWith('/inbox')) return { items: [{ id: input.runId }] };
@@ -32,8 +32,17 @@ test('automation opens and sends an ordinary chat, with complete materials and n
   await worker.tick();
   const open = f.calls[0][1], send = f.calls[1];
   assert.equal(open.intent, 'chat'); assert.equal(open.taskRef, undefined);
+  assert.equal(open.sessionTitle, f.input.conversationTitle);
+  assert.equal(Object.hasOwn(open, 'modelName'), true);
+  assert.equal(open.modelName, '',
+    'an empty automation model must explicitly select the current runtime default');
   assert.equal(send[2], f.input.text); assert.deepEqual(send[3], f.input.attachments);
-  assert.equal(send[4].taskId, undefined); assert.equal(send[4].projectId, 'project');
+  assert.equal(send[4].taskId, undefined); assert.equal(send[4].projectId, f.input.projectId);
+  assert.equal(send[4].repoId, f.input.repoId);
+  assert.equal(send[4].source, 'automation',
+    'scheduled prompts must stay on the ordinary conversation path');
+  assert.equal(open.projectId, f.input.projectId);
+  assert.equal(open.repoId, f.input.repoId);
   assert.equal(send[4].submissionId, 'automation-run-1');
   assert.equal(f.record.conversationId, 'chat-1');
   assert.equal(f.record.phase, 'sending');
@@ -41,6 +50,16 @@ test('automation opens and sends an ordinary chat, with complete materials and n
   f.finish({ ok: true }); await Promise.resolve(); await worker.tick();
   assert.equal(f.acks.at(-1).state, 'succeeded');
   await worker.tick(); assert.equal(f.calls.length, 2);
+});
+
+test('automation publishes the conversation as soon as the ordinary chat is created', async () => {
+  const f = fixture();
+  await createWorker(f.deps).tick();
+  assert.deepEqual(f.acks.map(item => [item.state, item.conversationId]), [
+    ['starting', 'chat-1'],
+    ['running', 'chat-1'],
+  ]);
+  assert.deepEqual(f.calls.map(item => item[0]), ['open', 'send']);
 });
 
 test('manual runs freeze the device access choice before opening the ordinary conversation', async () => {
@@ -59,6 +78,14 @@ test('manual runs freeze the device access choice before opening the ordinary co
     await createWorker(f.deps).tick();
     assert.equal(f.calls[0][1].accessMode, mode);
   }
+});
+
+test('automation records the actionable model error when chat startup is rejected', async () => {
+  const f = fixture();
+  f.deps.conversation.open = async () => ({ ok: false, reason: '模型「旧模型」现在不可用，请重新选择' });
+  await createWorker(f.deps).tick();
+  assert.equal(f.record.state, 'failed');
+  assert.match(f.record.error, /旧模型/);
 });
 
 test('automation opening does not forward policy or consent objects from its envelope', async () => {
@@ -132,10 +159,10 @@ test('switching accounts after manual creation cannot resend from the original c
   assert.equal(f.record.state, 'failed'); assert.equal(f.calls.filter(call => call[0] === 'send').length, 0);
 });
 
-test('waiting for ordinary in-chat input is not success or a task acceptance gate', async () => {
+test('waiting for ordinary in-chat input remains an executing conversation', async () => {
   const f = fixture(), worker = createWorker(f.deps);
   await worker.tick(); f.setStatus('waiting-user'); await worker.tick();
-  assert.equal(f.acks.at(-1).state, 'waiting');
+  assert.equal(f.acks.at(-1).state, 'running');
   f.setStatus('streaming'); await worker.tick(); assert.equal(f.acks.at(-1).state, 'running');
   f.finish({ ok: true }); await Promise.resolve(); await worker.tick();
   assert.equal(f.acks.at(-1).state, 'succeeded');
@@ -164,11 +191,20 @@ test('ambiguous process crash never resends tool side effects', async () => {
 });
 
 test('failed or cancelled turns are not reported as completed', async () => {
-  for (const [result, expected] of [[{ ok: false }, 'failed'], [{ ok: true, cancelled: true }, 'cancelled']]) {
+  for (const [result, expected] of [[{ ok: false }, 'failed'], [{ ok: true, cancelled: true }, 'failed']]) {
     const f = fixture(), worker = createWorker(f.deps); await worker.tick();
     f.finish(result); await Promise.resolve(); await worker.tick();
     assert.equal(f.acks.at(-1).state, expected);
   }
+});
+
+test('terminal conversation results acknowledge the run without waiting for another worker tick', async () => {
+  const f = fixture();
+  await createWorker(f.deps).tick();
+  f.finish({ ok: false });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.acks.at(-1).state, 'failed');
+  assert.equal(f.record.state, 'failed');
 });
 
 test('authentication failure backs off inbox polling and resumes after identity changes', async () => {
@@ -226,7 +262,7 @@ test('durable journal is owner-scoped, contains no prompt and does not ignore co
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('run history renders ordinary chat link, preserves legacy task links, escapes titles', () => {
+test('run history renders ordinary chat links and does not expose task links', () => {
   const context = { _schRunRows: { s: [
     { state: 'succeeded', conversationId: 'chat', conversationTitle: '<ordinary>', receipt: { executionMode: 'soduwork.automation-conversation/v1' } },
     { state: 'waiting', taskId: 'legacy-task', taskTitle: 'Legacy' },
@@ -235,6 +271,6 @@ test('run history renders ordinary chat link, preserves legacy task links, escap
   esc: value => String(value).replace(/</g, '&lt;').replace(/>/g, '&gt;') };
   vm.createContext(context); vm.runInContext(fs.readFileSync(path.join(__dirname, '../components/panels/panels-schedules-runs.js'), 'utf8'), context);
   const html = context._schRunRowsHtml('s');
-  assert.match(html, /data-run-chat="chat"/); assert.match(html, /打开对话/);
-  assert.match(html, /data-run-task="legacy-task"/); assert.match(html, /&lt;ordinary&gt;/);
+  assert.match(html, /data-run-chat="chat"/); assert.match(html, /data-run-chat=""/); assert.match(html, /\u6253\u5f00\u4f1a\u8bdd/);
+  assert.doesNotMatch(html, /data-run-task="legacy-task"/); assert.match(html, /&lt;ordinary&gt;/);
 });

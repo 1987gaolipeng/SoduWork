@@ -203,7 +203,10 @@
       const list = content.querySelector('.ac-device-list');
       for (const item of result.items || []) {
         const row = document.createElement('div'); row.className = 'ac-setting-row'; row.dataset.deviceId = item.id;
-        row.innerHTML = '<div><b>' + text(item.name || item.id) + (item.current ? ' <span class="ac-badge">当前设备</span>' : '') + '</b><span>' + text([item.platform, item.lastSeenAt ? '最近活动 ' + new Date(item.lastSeenAt).toLocaleString() : '暂无活动记录'].filter(Boolean).join(' · ')) + '</span></div>' +
+        const lastActive = item.lastSeenAt
+          ? '<span class="ac-last-active">最近活动 ' + text(new Date(item.lastSeenAt).toLocaleString()) + '</span>'
+          : '<span class="ac-last-active">暂无活动记录</span>';
+        row.innerHTML = '<div><b>' + text(item.name || item.id) + (item.current ? ' <span class="ac-badge">当前设备</span>' : '') + '</b><span>' + text(item.platform || '') + (item.platform ? ' · ' : '') + lastActive + '</span></div>' +
           (item.current ? '' : '<button class="ac-secondary" data-device-remove>删除设备</button>');
         list.appendChild(row);
         const button = row.querySelector('[data-device-remove]');
@@ -248,13 +251,13 @@
     function deletion(stamp) {
       const child = ui().modal(document.body, '注销账号', '<p>即将注销 <strong>' + text(user.displayName || user.username || user.email || user.id) + '</strong>。提交后所有设备将退出登录，账号不可恢复。</p>' +
         '<p class="ac-muted">团队业务记录和必要的审计记录可能保留。本机聊天、下载与工作目录不会由服务器删除，请先备份或自行清理。</p>' +
-        '<form class="ac-form" novalidate><label>输入“注销账号”确认<input name="confirmation" autocomplete="off" placeholder="注销账号"></label><p class="ac-status" role="status" aria-live="polite"></p><div class="ac-actions"><button type="button" class="ac-secondary" data-ac-cancel>取消</button><button class="ac-primary ac-danger-button" type="submit">验证身份并注销</button></div></form>', 'ac-deletion');
+        '<form class="ac-form" novalidate><label>输入“注销账号”确认<input name="confirmation" autocomplete="off" placeholder="注销账号" data-user-attributes="placeholder"></label><p class="ac-status" role="status" aria-live="polite"></p><div class="ac-actions"><button type="button" class="ac-secondary" data-ac-cancel>取消</button><button class="ac-primary ac-danger-button" type="submit">验证身份并注销</button></div></form>', 'ac-deletion');
       const form = child.mask.querySelector('form'), note = form.querySelector('.ac-status');
       const input = form.querySelector('input'), button = form.querySelector('[type="submit"]');
       let busy = false;
       const valid = () => child.active() && alive(stamp);
       form.querySelector('[data-ac-cancel]').onclick = () => child.close();
-      input.oninput = () => { if (note.textContent === '请完整输入“注销账号”。') note.textContent = ''; };
+      input.oninput = () => { note.textContent = ''; };
       form.onsubmit = async event => {
         event.preventDefault(); if (busy || !valid()) return;
         if (input.value !== '注销账号') { note.textContent = '请完整输入“注销账号”。'; input.focus(); return; }

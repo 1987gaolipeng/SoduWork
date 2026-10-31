@@ -7,7 +7,7 @@ window.soduWorkComputerOverlay.onState(state => {
   const nextTheme = JSON.stringify([state.locale, state.theme]);
   if (nextTheme !== themeKey) {
     themeKey = nextTheme;
-    document.documentElement.lang = state.locale || 'zh-CN';
+    document.documentElement.lang = state.locale || 'en-US';
     document.documentElement.style.colorScheme = state.theme?.colorScheme || 'light';
     const tokens = state.theme?.tokens || {};
     for (const name of themeKeys) if (!(name in tokens)) document.documentElement.style.removeProperty(name);

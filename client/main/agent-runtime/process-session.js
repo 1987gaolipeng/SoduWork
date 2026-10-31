@@ -15,6 +15,7 @@ function createProcessSession(options = {}) {
   const hosts = new Map();
   const retired = new Set();
   const retiredProfiles = new WeakMap();
+  let lifecyclePowerMonitor = options.powerMonitor || null;
   let disposed = false;
   const recoveryPending = cause => Object.assign(Error('上次执行的资源仍在回收，请确认回收完成后重试；本次操作未启动'),
     { code: 'RUNTIME_RECOVERY_PENDING', ...(cause ? { cause } : {}) });
@@ -65,7 +66,8 @@ function createProcessSession(options = {}) {
       if (!row) {
         // Host injection is constructor-only trusted test infrastructure;
         // renderer/open arguments never select a host factory or transport.
-        row = { host: (options.hostFactory || createProcessHost)(app, options), app, scope: nextScope };
+        row = { host: (options.hostFactory || createProcessHost)(app,
+          lifecyclePowerMonitor ? { ...options, powerMonitor: lifecyclePowerMonitor } : options), app, scope: nextScope };
         hosts.set(key, row);
       } else if (nextScope) row.scope = nextScope;
       return row.host;
@@ -125,7 +127,8 @@ function createProcessSession(options = {}) {
     async commitArchive(app, plan) { return (await host(app)).call('storage', ['commit', [plan]]); },
     async abandonArchive(app, plan) { return (await host(app)).call('storage', ['abandon', [plan]]); },
     async prepareSkills(app, request) { return (await host(app)).call('prepareSkills', [request], { timeoutMs: 30000 }); },
-    installLifecycle(app) {
+    installLifecycle(app, powerMonitor) {
+      if (powerMonitor) lifecyclePowerMonitor = powerMonitor;
       let finished = false, quitting = null;
       app.on('before-quit', event => {
         if (finished) return;

@@ -29,7 +29,7 @@ const _piSessionIpc = require('./main/pi-session/ipc');
 require('./main/native-theme.cjs').install({ BrowserWindow, ipcMain });
 require('./main/screenshot-service.cjs').install({ getRendererRoot: rendererRoot });
 const _piSessions = require('./main/agent-runtime/pi-session-bridge');
-require('./main/agent-runtime/process-session').installLifecycle(app);
+require('./main/agent-runtime/process-session').installLifecycle(app, powerMonitor);
 require('./main/computer-use/index.cjs').install({ app, BrowserWindow, screen, ipcMain, globalShortcut, powerMonitor, sessions: _piSessions, runner: _runnerRuntime });
 const _workPreview = require('./main/work-preview');
 const _workspaceState = require('./main/workspace-state.cjs').create({ ownerOf: () => {
@@ -96,6 +96,8 @@ if (process.platform === 'win32' && app.isPackaged) {
 }
 
 _deviceAuth.install({ app, ipcMain, safeStorage });
+const _releaseNotes = require('./main/release-notes').register({ app, ipcMain, BrowserWindow, root: __dirname, getRendererRoot: rendererRoot,
+  identityOf: _deviceAuth.identity, authenticatedIdentityOf: _deviceAuth.authenticatedIdentity });
 /* Per-account cloud computer connection settings stay in the encrypted main
    process. The renderer receives metadata only and never handles credentials. */
 _cloudComputerCredentials.install({ app, ipcMain, deviceAuth: _deviceAuth, safeStorage });
@@ -138,9 +140,10 @@ _clientUpdater.install({ app, ipcMain, dialog: require('electron').dialog, Brows
   localWorkloads: () => _updateWorkloads.snapshot(_piSessions),
   stopLocalWorkload: (ref) => _updateWorkloads.stop(_piSessions, ref),
   setLocalDrain: (value) => _updateWorkloads.setDraining(value) });
-_workPreview.install({ ipcMain, BrowserWindow, WebContentsView, screen, shell, app, appIcon: _appIcon, identityOf: _deviceAuth.identity });
+_workPreview.install({ ipcMain, BrowserWindow, WebContentsView, screen, shell, app, appIcon: _appIcon,
+  identityOf: _deviceAuth.identity, authenticatedIdentityOf: _deviceAuth.authenticatedIdentity });
 require('./main/app-settings-ipc.cjs').install({ app, ipcMain, safeStorage,
-  identityOf: _deviceAuth.identity,
+  identityOf: _deviceAuth.authenticatedIdentity,
   ownerOf: () => { const id = _deviceAuth.identity(app), owner = _deviceAuth.localOwner(app); return id && owner ? id.hub + ':' + owner : ''; } });
 _attachmentFiles.install({ app, ipcMain, BrowserWindow, dialog, net, shell, identityOf: _deviceAuth.identity });
 _libraryExternal.install({ app, ipcMain, BrowserWindow, shell });
@@ -711,7 +714,7 @@ ipcMain.on('open-desk-window', (event, payload) => {
    so a tray reopen can restore it even after the renderer/localStorage is gone. */
 _workspaceState.install({ ipcMain, BrowserWindow, getWorkspace: () => _workWindows.get('workspace') });
 
-let _clientLocale = 'zh-CN';
+let _clientLocale = 'en-US';
 const _nativeMessages = require('./main/native-locale.cjs');
 function _nativeText(source) { return _nativeMessages.translate(source); }
 ipcMain.on('client-locale', (_event, locale) => {

@@ -7,11 +7,11 @@ function deferred() { let resolve, reject; const promise = new Promise((yes, no)
   promise.catch(() => {}); return { promise, resolve, reject }; }
 function fixture(t) {
   const generations = [];
-  const runtime = createProcessSession({ recoveryTimeoutMs: 50, hostFactory: target => {
+  const runtime = createProcessSession({ recoveryTimeoutMs: 50, hostFactory: (target, hostOptions) => {
     let dead = false, pending = false, failure = null, gate, cachedRejection;
     const operations = [], handles = new Map();
     const host = {
-      handles, operations, target,
+      handles, operations, target, hostOptions,
       isDead: () => dead,
       call: async (method, args) => { operations.push({ method, args }); return { ok: true }; },
       stop() {
@@ -36,6 +36,13 @@ function fixture(t) {
   t.after(async () => { for (const host of generations) host.clearFailure(); await runtime.dispose(); });
   return { runtime, generations };
 }
+
+test('lifecycle installation forwards Electron power events to each new runtime host', async t => {
+  const f = fixture(t), powerMonitor = {};
+  f.runtime.installLifecycle({ on() {} }, powerMonitor);
+  await f.runtime.open({ app: app('power-monitor') });
+  assert.equal(f.generations[0].hostOptions.powerMonitor, powerMonitor);
+});
 
 test('replacement waits for verified cleanup and concurrent reopen creates one new generation', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });

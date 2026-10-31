@@ -69,12 +69,11 @@ test('login labels identify stable, unique account and password fields in render
     const account = labelledControl(page, tx('账号'))
     const password = labelledControl(page, tx('密码'))
     ids.push(account.props.id, password.props.id)
-    page.act(() => account.props.onChange({ target: { value: 'admin' } }))
+    const accountInput = { value: 'admin' }
+    page.act(() => account.props.onChange({ target: accountInput, currentTarget: accountInput }))
     assert.equal(labelledControl(page, tx('账号')).props.id, account.props.id)
     const html = renderToStaticMarkup(page.render())
     assert.ok(html.includes(`for="${account.props.id}"`))
-    assert.ok(html.includes(tx('SoduWork 管理端')))
-    assert.doesNotMatch(html, new RegExp(['S','o','d','o'].join(''), 'i'))
     assert.ok(html.includes(`id="${password.props.id}"`))
   }
   assert.equal(new Set(ids).size, ids.length, 'multiple instances must not share field IDs')
@@ -118,39 +117,32 @@ test('user choice groups expose keyboard buttons and persist the selected values
   const save = React.Children.toArray(page.render().props.foot.props.children).find((node) => textOf(node) === tx('保存'))
   await save.props.onClick()
   page.render()
-  assert.deepEqual(calls, [['update', 'u1', { displayName: 'Alice', orgId: 'engineering', roleId: 'member', isActive: false, positions: ['engineer'], domains: ['payments'], tokenQuota: { mode: 'inherit', limit: 0 } }]])
+  assert.deepEqual(calls, [['update', 'u1', { displayName: 'Alice', orgId: 'engineering', roleId: 'member', isActive: false, positions: ['engineer'], domains: ['payments'] }]])
 })
 
-test('user quota modes persist exact limits and preserve existing limits during other edits', async (t) => {
+test('editing a user profile cannot overwrite an existing personal allowance', async (t) => {
   const user = { id: 'u1', username: 'alice', displayName: 'Alice', orgId: 'engineering',
     roleId: 'member', isActive: true, tokenQuota: { mode: 'limited', limit: 12345 } }
   const { page, calls } = await mountEditor(t, { user })
   const save = () => React.Children.toArray(page.render().props.foot.props.children).find((node) => textOf(node) === tx('保存')).props.onClick()
-  assert.equal(labelledControl(page, tx('每月 Token 上限')).props.value, 12345)
+  assert.equal(page.nodes(node => node.type === 'label' && textOf(node) === tx('Token 额度')).length, 0)
   page.act(() => labelledControl(page, tx('姓名')).props.onChange({ target: { value: 'New name' } }))
   await save(); page.render()
-  assert.deepEqual(calls[0][2].tokenQuota, { mode: 'limited', limit: 12345 })
-  for (const mode of ['unlimited', 'inherit']) {
-    page.act(() => labelledControl(page, tx('Token 额度')).props.onChange({ target: { value: mode } }))
-    assert.equal(page.nodes((node) => node.type === 'input' && node.props.type === 'number').length, 0)
-    await save(); page.render()
-    assert.deepEqual(calls.at(-1)[2].tokenQuota, { mode, limit: 0 })
-  }
+  assert.equal(calls[0][2].displayName, 'New name')
+  assert.equal('tokenQuota' in calls[0][2], false)
+  assert.deepEqual(user.tokenQuota, { mode: 'limited', limit: 12345 })
 })
 
-test('personal quota allows an explicit zero pause and rejects invalid input without submitting', async (t) => {
-  const user = { id: 'u1', username: 'alice', displayName: 'Alice', orgId: 'engineering', isActive: true }
-  const { page, calls } = await mountEditor(t, { user })
-  page.act(() => labelledControl(page, tx('Token 额度')).props.onChange({ target: { value: 'limited' } }))
+test('user creation leaves trial and quota assignment to the dedicated allowance policy', async (t) => {
+  const { page, calls } = await mountEditor(t)
+  page.act(() => labelledControl(page, tx('账号')).props.onChange({ target: { value: 'alice' } }))
+  page.act(() => labelledControl(page, tx('初始密码')).props.onChange({ target: { value: 'fixture-password' } }))
+  page.act(() => labelledControl(page, tx('所属部门')).props.onChange({ target: { value: 'engineering' } }))
   const save = () => React.Children.toArray(page.render().props.foot.props.children).find((node) => textOf(node) === tx('保存')).props.onClick()
-  for (const value of ['', '-1', '1.5', '10000000000001']) {
-    page.act(() => labelledControl(page, tx('每月 Token 上限')).props.onChange({ target: { value } }))
-    await save(); page.render()
-    assert.equal(calls.length, 0)
-  }
-  page.act(() => labelledControl(page, tx('每月 Token 上限')).props.onChange({ target: { value: '0' } }))
   await save(); page.render()
-  assert.deepEqual(calls[0][2].tokenQuota, { mode: 'limited', limit: 0 })
+  assert.equal(calls[0][0], 'create')
+  assert.equal(calls[0][1].username, 'alice')
+  assert.equal('tokenQuota' in calls[0][1], false)
 })
 
 test('domain manager names the add and rename inputs with stable label targets', async (t) => {

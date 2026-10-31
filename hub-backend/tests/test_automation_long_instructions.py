@@ -49,6 +49,10 @@ class AutomationLongInstructionTests(unittest.IsolatedAsyncioTestCase):
         self.client = await self.session.get(models.Client, "audit-device")
         await schedule_conversations.prepare(self.session, saved, self.client, None, run.id, "pi", {})
         dispatched = run.receipt["conversationInput"]["text"]
+        self.assertEqual(run.receipt["conversationInput"]["personalPlugin"], {
+            "key": "audit-method", "versionPolicy": "latest",
+            "version": "", "checksum": "",
+        })
         self.assertIn(text, dispatched)
         self.assertIn(parameter, dispatched)
         changed = text + "\nUPDATE: never delete source data"

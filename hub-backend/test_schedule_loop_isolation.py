@@ -142,6 +142,7 @@ class ScheduleTickIsolationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_one_lease_error_keeps_appointment_pending_and_allows_other_plans(self):
         self.bad.every, self.bad.run_at = "once", self.good.run_at
+        self.bad.time_zone = "UTC"
         await self.session.commit()
         original = schedules.resource_leases.acquire
 

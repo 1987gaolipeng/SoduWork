@@ -60,10 +60,14 @@ test('automation and UI really call the same chat open/send pipeline; internal c
     });
     assert.equal(typeof service.captureAutomationAccess, 'function', 'manual runs must use a main-process preference source');
     assert.equal(typeof service.openAutomation, 'function', 'worker access context needs a dedicated non-IPC entry');
-    const automated = await service.open({ adapterId: 'pi', intent: 'chat' }, identity);
+    assert.equal(typeof handlers.get('pi-session-automation-open'), 'function',
+      'immediate automation openings need an identity-bound IPC entry');
+    const automated = await service.open({ adapterId: 'pi', intent: 'chat', projectId: 'project-1', repoId: 'repo-1' }, identity);
     assert.equal(automated.ok, true, automated.reason); assert.equal(automated.collaboration, false); assert.equal(handles[0].detached, true);
-    const first = await service.send(automated.ref, '完整自动化说明', [], { submissionId: 'automation-run' });
+    assert.equal(opens[0].projectId, 'project-1'); assert.equal(opens[0].repoId, 'repo-1');
+    const first = await service.send(automated.ref, '完整自动化说明', [], { submissionId: 'automation-run', projectId: 'project-1', repoId: 'repo-1' });
     assert.equal(first.ok, true); assert.equal((await first.completion).ok, true);
+    assert.equal(submits[0].opts.projectId, 'project-1'); assert.equal(submits[0].opts.repoId, 'repo-1');
     const ordinary = await handlers.get('pi-session-open')(event, { adapterId: 'pi', intent: 'chat' });
     assert.equal(ordinary.ok, true); assert.equal(handles[1].detached, false); assert.equal(handles[1].attachedWindow, owner);
     assert.doesNotThrow(() => handles[1].listener({ kind: 'settled' }, handles[1].snapshot()),

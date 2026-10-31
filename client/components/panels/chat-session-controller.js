@@ -58,7 +58,7 @@ async function _ensure(chatId) {
          same explicit, retryable UI used by structured open errors. */
       if (epoch === ctx._viewEpoch) {
         const reason = String((error && error.message) || error || '');
-        ctx._fail('打不开对话', reason);
+        ctx._fail('打不开对话', reason, null, error);
       }
       return false;
     }
@@ -183,6 +183,7 @@ async function _ensureOnce(chatId, epoch) {
       ctx._boundFromServer = expectedTaskId ? serverTaskIds.has(expectedTaskId) : serverTaskIds.size > 0;
       ctx._model = got.model;
       ctx._snap = openedSnapshot;
+      global.SoduWorkQuotaNotice?.modelChanged?.(openedSnapshot.modelSelection?.model || got.model);
       ctx._rememberConversationSnapshot(ctx._sessionId || chatId, ctx._snap);
       if (chatId && String(chatId) !== String(ctx._sessionId || '')) ctx._rememberConversationSnapshot(chatId, ctx._snap);
       if (got.goal) ctx._sessionOptions = { ...ctx._sessionOptions, ...got.goal };
@@ -271,13 +272,17 @@ async function _ensureOnce(chatId, epoch) {
           const canRestore = p.retrySafe === true || global.ChatPluginMention &&
             ChatPluginMention.retryableGrantFailure(p);
           const submittedDraft = ctx._submissionDrafts.get(p.submissionId);
-          const retryDraft = canRestore || submittedDraft?.requirement ? (submittedDraft || null) : null;
+          const permanentPluginAuthorization = Boolean(p.pluginAuthorization &&
+            ['missing', 'readOnlyConflicts', 'unsupported'].some(key =>
+              Array.isArray(p.pluginAuthorization[key]) && p.pluginAuthorization[key].length));
+          const retryDraft = canRestore || submittedDraft?.requirement || permanentPluginAuthorization
+            ? (submittedDraft || null) : null;
           if (retryDraft?.requirement) {
             retryDraft.requirement.deliveryState = 'failed';
             ctx._retainFailedConversationDraft(ctx._draftKeyForCurrentSession(), retryDraft, p.reason || '需求执行失败');
           }
           if (p.submissionId) ctx._submissionDrafts.delete(p.submissionId);
-          ctx._fail('这一轮没跑成', p.reason || '执行底座返回错误', retryDraft);
+          ctx._fail('这一轮没跑成', p.reason || '执行底座返回错误', retryDraft, p);
           if (effects) effects.history = true; else ctx.refreshHistory();
           return;
         }
@@ -289,7 +294,10 @@ async function _ensureOnce(chatId, epoch) {
         ctx._snap = p.snapshot;
         ctx._rememberConversationSnapshot(ctx._sessionId, ctx._snap);
         ctx._lastStatus = ctx._snap && ctx._snap.status;
-        if (p.kind === 'settled' || was === 'streaming' && ctx._lastStatus === 'idle') global.ChatDeliveries?.settled(ctx._ref);
+        if (p.kind === 'settled' || was === 'streaming' && ctx._lastStatus === 'idle') {
+          global.ChatDeliveries?.settled(ctx._ref);
+          if (ctx._lastStatus === 'idle' && !ctx._snap.execution?.turnQueue?.failure) global.SoduWorkQuotaNotice?.refreshIfBlocked();
+        }
         if (ctx._snap.execution && ctx._snap.execution.visible === false) {
           ctx._sessionOptions = { ...ctx._sessionOptions, intent: '', mode: 'chat', goal: '', acceptance: '' };
         }
@@ -327,7 +335,7 @@ async function _ensureOnce(chatId, epoch) {
       ctx.refreshHistory();                 // Show newly opened or resumed conversations in the sidebar immediately.
       return true;
     } catch (e) {
-      if (epoch === ctx._viewEpoch) ctx._fail('开对话时出错', String((e && e.message) || e));
+      if (epoch === ctx._viewEpoch) ctx._fail('开对话时出错', String((e && e.message) || e), null, e);
       return false;
     }
   }
@@ -443,6 +451,12 @@ async function _sendCore(textOverride, sendOptions) {
       };
       ctx._localQueue.push(localQueue);
     } else {
+      const baselineMessages = Array.isArray(ctx._snap?.messages) ? ctx._snap.messages : [];
+      ctx._pendingBaseline = {
+        messageCount: baselineMessages.length,
+        historyTotal: Number.isFinite(Number(ctx._snap?.history?.totalMessages))
+          ? Number(ctx._snap.history.totalMessages) : null,
+      };
       ctx._pending = text;
       ctx._pendingSentAt = sentAt;
       ctx._pendingAttachmentNames = attachmentNames;
@@ -477,6 +491,7 @@ async function _sendCore(textOverride, sendOptions) {
       const api = retainedApi || ctx._api();
       const submissionId = sendOptions?.taskId && /^[a-zA-Z0-9_-]{1,64}$/.test(sendOptions.submissionId || '')
         ? sendOptions.submissionId : 'ui-' + Date.now().toString(36) + '-' + (++ctx._submissionSeq).toString(36);
+      if (!wasRunning && ctx._pendingBaseline) ctx._pendingBaseline.submissionId = submissionId;
       if (failedDraft.requirement) {
         failedDraft.requirement.submissionId = submissionId;
         if (!failedDraft.requirement.conversationId && currentSendView())
@@ -498,6 +513,10 @@ async function _sendCore(textOverride, sendOptions) {
         plugins: resolvedPlugins,
         sentAt,
         projectId: sendProjectId,
+        inputPreparation: sendOptions?.inputPreparation || ctx._sessionOptions?.inputPreparation || {
+          userText: composerText,
+          ...( !composerText.trim() && attachmentRefs.length ? { fallback: true } : {}),
+        },
         submissionId,
         // Ordinary follow-up messages in task sessions also retain task receipts and output collection;
         // corrections after a completed run can create additional task deliverables.
@@ -536,7 +555,7 @@ async function _sendCore(textOverride, sendOptions) {
        * send is accepted and let server queue/transcript rows take over.
        */
       if ((sendTaskId || r?.workflowRun) && r && r.ok) {
-        ctx._pending = ''; ctx._pendingAttachmentNames = []; ctx._pendingPlugins = [];
+        ctx._pending = ''; ctx._pendingAttachmentNames = []; ctx._pendingPlugins = []; ctx._pendingBaseline = null;
         if (reworkSession && ctx._sessionOptions?.reworkSession) {
           /*
            * Load prior attachments fully for the first rework turn in a new session; later messages
@@ -548,8 +567,8 @@ async function _sendCore(textOverride, sendOptions) {
       if (!r || !r.ok) {
         retainFailure(r && r.reason || '发送未能确认，请重试');
         ctx._submissionDrafts.delete(submissionId);
-        if (!wasRunning) ctx._fail('这一轮没发出去', r && r.reason, failedDraft);
-        else if (typeof petSay === 'function') petSay((r && r.reason) || '排队消息没有发出去');
+        if (!wasRunning) ctx._fail('这一轮没发出去', r && r.reason, failedDraft, r);
+        else if (!global.SoduWorkQuotaNotice?.show(r) && typeof petSay === 'function') petSay((r && r.reason) || '排队消息没有发出去');
       } else {
         // A late receipt must preserve new text/skills typed after this send.
         ctx._rememberConversationDraft();
@@ -560,8 +579,8 @@ async function _sendCore(textOverride, sendOptions) {
     } catch (error) {
       retainFailure(String(error && error.message || error));
       if (!currentSendView()) return false;
-      if (!wasRunning) ctx._fail('这一轮没发出去', String((error && error.message) || error), failedDraft);
-      else if (typeof petSay === 'function') petSay('排队消息没有发出去');
+      if (!wasRunning) ctx._fail('这一轮没发出去', String((error && error.message) || error), failedDraft, error);
+      else if (!global.SoduWorkQuotaNotice?.show(error) && typeof petSay === 'function') petSay('排队消息没有发出去');
       return false;
     } finally {
       if (currentSendView()) ctx._localQueue = ctx._localQueue.filter((row) => row !== localQueue);

@@ -18,10 +18,30 @@ function regular(stat) {
   if (!stat.isFile() || stat.isSymbolicLink()) throw error('LOCAL_LIBRARY_UNSAFE_PATH', '资料路径不是普通文件，或包含链接');
   return stat;
 }
-function create(app, owner, guard) {
+async function copyLegacyTree(source, target, guard) {
+  let stat;
+  try { stat = await io.lstat(source); }
+  catch (error) { if (error.code === 'ENOENT') return false; throw error; }
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw error('LOCAL_LIBRARY_UNSAFE_PATH', '旧资料库目录包含链接或不是目录');
+  await io.mkdir(target, { recursive: true, mode: 0o700 }); guard();
+  for (const entry of await io.readdir(source, { withFileTypes: true })) {
+    guard();
+    const from = path.join(source, entry.name), to = path.join(target, entry.name);
+    if (entry.isDirectory()) await copyLegacyTree(from, to, guard);
+    else if (entry.isFile()) {
+      try { await io.copyFile(from, to, require('node:fs').constants.COPYFILE_EXCL); }
+      catch (error) { if (error.code !== 'EEXIST') throw error; }
+    } else throw error('LOCAL_LIBRARY_UNSAFE_PATH', '旧资料库包含不支持的文件类型');
+  }
+  return true;
+}
+
+function create(app, owner, guard, configuredWorkRoot = '') {
   if (!OWNER.test(owner)) throw error('LOCAL_LIBRARY_OWNER_REQUIRED', '请先登录当前账号');
-  const base = path.resolve(app.getPath('userData'));
-  const root = path.join(base, 'library', 'accounts', owner);
+  const base = path.resolve(String(configuredWorkRoot || app.getPath('userData')));
+  const libraryRoot = path.join(base, 'SoduWorkLibrary');
+  const root = path.join(libraryRoot, 'accounts', owner);
+  const legacyRoot = path.join(path.resolve(app.getPath('userData')), 'library', 'accounts', owner);
   const indexPath = path.join(root, 'index.json');
   let staged = false;
   const awaited = async promise => { const value = await promise; guard(); return value; };
@@ -53,12 +73,23 @@ function create(app, owner, guard) {
     return path.join(root, ...key.split('/'));
   }
   async function load() {
-    guard(); await directories(root, true); await directories(path.join(root, 'objects'), true);
+    guard();
+    // Establish and validate every component of the destination before copying
+    // legacy data. This prevents a pre-existing junction in the new workspace
+    // from redirecting migration writes outside the configured work root.
+    await directories(root, true); await directories(path.join(root, 'objects'), true);
+    if (path.resolve(legacyRoot).toLowerCase() !== path.resolve(root).toLowerCase()) {
+      try { await io.lstat(indexPath); }
+      catch (e) { if (e.code !== 'ENOENT') throw e; await copyLegacyTree(legacyRoot, root, guard); }
+    }
     let content;
     try {
       const stat = await checkedFile(indexPath);
       if (stat.size > 32 * 1024 * 1024) throw error('LOCAL_LIBRARY_INDEX_CORRUPT', '本机资料索引过大');
-      content = await awaited(io.readFile(indexPath, 'utf8'));
+      // JSON.stringify() does not write a BOM, but older Windows editors and
+      // profile/sync tools may add one to an otherwise valid UTF-8 index. A
+      // BOM is an encoding marker, not part of the JSON document.
+      content = (await awaited(io.readFile(indexPath, 'utf8'))).replace(/^\uFEFF/, '');
     } catch (e) { if (e.code === 'ENOENT') return { schema: 1, items: [], folders: [], garbage: [] }; throw e; }
     let value;
     try {
@@ -124,7 +155,7 @@ function create(app, owner, guard) {
         // captured owner's validated paths and the committed reference set.
         // Never remove a newly committed object when the final guard failed.
         if (staged) {
-          const recovery = create(app, owner, () => {});
+          const recovery = create(app, owner, () => {}, configuredWorkRoot);
           try { await recovery.garbageCollect(await recovery.load()); } catch { /* Durable garbage entries remain retryable. */ }
         }
       }
@@ -133,6 +164,6 @@ function create(app, owner, guard) {
     try { return await pending; }
     finally { if (queues.get(key) === pending) queues.delete(key); }
   }
-  return { root, libraryRoot: path.join(base, 'library'), run, load, save, write, read, locate, garbageCollect, guard, checkedFile };
+  return { root, libraryRoot, run, load, save, write, read, locate, garbageCollect, guard, checkedFile };
 }
 module.exports = { create, error, clone, OWNER, ITEM, FOLDER, MAX_BYTES };

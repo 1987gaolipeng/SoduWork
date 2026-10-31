@@ -21,6 +21,22 @@ function hubOf(identity) {
     return url.origin + url.pathname.replace(/\/+$/, '');
   } catch (_) { throw Error('验收会话的服务地址无效，请重新登录'); }
 }
+function localHubHost(hostname) {
+  const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (host === 'localhost' || host === '::1' || host === '127.0.0.1') return true;
+  const octets = host.split('.').map(value => Number(value));
+  if (octets.length !== 4 || octets.some(value => !Number.isInteger(value) || value < 0 || value > 255)) return false;
+  return octets[0] === 10 || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+    (octets[0] === 192 && octets[1] === 168);
+}
+function canMigrateLocalHub(app, storedHub, currentHub) {
+  if (app?.isPackaged !== false || storedHub === currentHub) return false;
+  try {
+    const stored = new URL(storedHub), current = new URL(currentHub);
+    return stored.protocol === current.protocol && stored.port === current.port &&
+      localHubHost(stored.hostname) && localHubHost(current.hostname);
+  } catch (_) { return false; }
+}
 function location(app, sessionId) {
   identifier(sessionId, '会话编号');
   if (!app?.getPath) throw Error('无法读取验收会话存储位置');
@@ -92,10 +108,17 @@ function expose(handle, record) {
 async function attach(app, handle, rawOptions = {}, identity) {
   if (!handle?.sessionId) throw Error('无法确认当前会话，请重新打开验收入口');
   const cached = attached.get(handle);
-  const record = cached ? cached.record : read(app, handle.sessionId);
+  let record = cached ? cached.record : read(app, handle.sessionId);
   if (record) {
-    if (record.owner !== scope(identity) || record.hub !== hubOf(identity))
+    const owner = scope(identity), currentHub = hubOf(identity);
+    if (record.owner !== owner || (record.hub !== currentHub && !canMigrateLocalHub(app, record.hub, currentHub)))
       throw Error('这条验收会话属于另一个账号或服务，请切回原账号');
+    if (record.hub !== currentHub) {
+      // Local source runs may change between loopback and a private LAN address.
+      // Persist the current endpoint after ownership has already been verified.
+      save(app, { ...record, owner, hub: currentHub });
+      record = { ...record, owner, hub: currentHub };
+    }
     const selected = selection(record);
     checkRequested(rawOptions, selected);
     checkTask(handle, selected);

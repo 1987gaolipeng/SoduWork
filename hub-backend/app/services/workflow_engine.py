@@ -628,6 +628,13 @@ async def _push_failed(session: AsyncSession, run: am.WorkflowRun, node: dict) -
     task = await session.get(models.Task, run.task_id)
     if task is None:
         return
+    # Scheduled automation no longer owns a Task or workflow.  A legacy run
+    # can still finish here after an upgrade, but it must not publish the old
+    # "AI 干活/需求重试" notification into the ordinary conversation flow.
+    if (getattr(task, "automation_schedule_id", None) or
+            str(getattr(task, "origin", "") or "") == "automation" or
+            str(getattr(task, "source", "") or "") == "定时派活"):
+        return
     kind = str(node.get("type") or "")
     can_retry = kind in RETRYABLE_GATE_TYPES
     where = node.get("name") or node.get("key") or "某一关"

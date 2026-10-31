@@ -43,7 +43,7 @@ html[data-window-titlebar] .window-menu button,html[data-window-titlebar] .windo
 /* These are the same content roots hosted by WorkspaceShell; overlays stay centred. */
 html[data-window-menu] .workspace-shell{top:var(--window-menu-height)}
 html[data-window-menu] .ws-resizer{top:calc(var(--window-menu-height) + 10px)}
-html[data-window-menu][data-desk-panel="workspace"] :is(#aiDeskPanel,#historyBoard,#settingsPanel,#shortcutsPanel,#skinManager,#noticePanel,#teamPanel,#schPanel,#skPanel,#capPanel,#appsPanel,#mdPanel,#agPanel,#cloudEnvironmentPanel,#caPanel,#usagePanel,#sessionMemoryPanel,#composePanel,#libraryPanel,#briefPanel.workspace-hosted,#archivePanel,#addMask.workspace-hosted){top:calc(var(--window-menu-height) + 10px)!important}
+html[data-window-menu][data-desk-panel="workspace"] :is(#aiDeskPanel,#historyBoard,#settingsPanel,#shortcutsPanel,#skinManager,#noticePanel,#teamPanel,#schPanel,#skPanel,#capPanel,#appsPanel,#mdPanel,#agPanel,#cloudEnvironmentPanel,#caPanel,#usagePanel,#sessionMemoryPanel,#composePanel,#libraryPanel,#briefPanel.workspace-hosted,#archivePanel,#personalAccountPanel,#addMask.workspace-hosted){top:calc(var(--window-menu-height) + 10px)!important}
 html[data-window-menu]:not([data-desk-panel="workspace"]) :is(#deskRoot,#settingsPanel,#shortcutsPanel,#skinManager,#noticePanel,#historyBoard,#teamPanel,#schPanel,#skPanel,#capPanel,#appsPanel,#mdPanel,#agPanel,#cloudEnvironmentPanel,#caPanel,#usagePanel,#multiPanel,#mcPanel,#aiConsolePanel,#briefPanel,#addMask){top:var(--window-menu-height)!important}
 
 /* Requirement pool: keep the hosted page just below the native menu while

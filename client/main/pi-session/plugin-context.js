@@ -113,6 +113,7 @@ function authorization(input, options) {
     missingMcp,
     readOnlyConflicts: access,
     unsupported,
+    retrySafe: !missing.length && !access.length && !unsupported.length,
     reason: reasons.join('；'),
   };
 }

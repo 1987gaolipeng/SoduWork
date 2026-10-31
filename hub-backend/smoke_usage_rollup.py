@@ -23,7 +23,7 @@ from sqlalchemy import select  # noqa: E402
 
 from app import automation_models as am  # noqa: E402
 from app import models  # noqa: E402
-from app.db import SessionLocal, init_db  # noqa: E402
+from app.db import SessionLocal, engine, init_db  # noqa: E402
 from app.services import execution_sessions as es, usage_stats  # noqa: E402
 
 ok = fail = 0
@@ -136,4 +136,11 @@ async def main():
     return 1 if fail else 0
 
 
-sys.exit(asyncio.run(main()))
+async def run():
+    try:
+        return await main()
+    finally:
+        await engine.dispose()
+
+
+sys.exit(asyncio.run(run()))

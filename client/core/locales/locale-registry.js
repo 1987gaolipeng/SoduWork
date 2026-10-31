@@ -10,7 +10,7 @@
     'ja-JP': { label: '日本語', fallback: 'en-US' },
     'ko-KR': { label: '한국어', fallback: 'en-US' },
   };
-  const registry = Object.freeze({ defaultLocale: 'zh-CN', locales: Object.freeze(locales) });
+  const registry = Object.freeze({ defaultLocale: 'en-US', locales: Object.freeze(locales) });
   if (typeof module !== 'undefined' && module.exports) module.exports = registry;
   global.SoduWorkLocaleRegistry = registry;
 })(globalThis);

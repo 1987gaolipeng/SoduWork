@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en-US">
 <head>
 <meta charset="UTF-8">
 <title>SoduWork · 工作台</title>
@@ -47,6 +47,7 @@
 <link rel="stylesheet" href="components/panels/im-remote.css">
 <link rel="stylesheet" href="components/panels/panels-session-memory.css">
 <link rel="stylesheet" href="components/panels/agent-brand.css">
+<link rel="stylesheet" href="components/panels/chat-crew.css">
 <link rel="stylesheet" href="components/requirements/requirements-board.css">
 <link rel="stylesheet" href="components/requirements/requirement-confirm.css">
 <link rel="stylesheet" href="components/panels/plugin-ui-host.css">
@@ -72,6 +73,7 @@
 <link rel="stylesheet" href="components/panels/capability-type-scale.css">
 <link rel="stylesheet" href="components/panels/plugin-presentation.css">
 <link rel="stylesheet" href="components/panels/panels-agents.css">
+<link rel="stylesheet" href="components/panels/codex-auth-dialog.css">
 <link rel="stylesheet" href="components/panels/cloud-environments.css">
 <link rel="stylesheet" href="components/panels/custom-agents.css">
 <link rel="stylesheet" href="components/panels/panels-usage.css">
@@ -158,6 +160,7 @@
 <link rel="stylesheet" href="components/panels/library-transfer.css">
 <link rel="stylesheet" href="components/panels/chat-deliveries.css">
 <link rel="stylesheet" href="components/workspace/window-menu.css">
+<link rel="stylesheet" href="components/release-notes/release-notes.css">
 <link rel="stylesheet" href="theme/box-theme.css">
 </head>
 <body>
@@ -221,7 +224,10 @@
     <div class="client-update-main">
       <i class="client-update-dot" id="clientUpdateDot"></i>
       <div class="client-update-copy"><b id="clientUpdateTitle">正在读取更新状态</b><small id="clientUpdateDetail">正在执行的工作不会被升级打断。</small></div>
-      <button type="button" class="hub-save client-update-action" id="clientUpdateAction">检查更新</button>
+      <div class="client-update-actions">
+        <button type="button" class="hub-save client-update-action" id="clientUpdateAction">检查更新</button>
+        <button type="button" class="hub-save client-update-action" id="releaseNotesHistory" data-i18n="releaseNotes.history">查看历史更新</button>
+      </div>
     </div>
     <div class="update-progress" id="clientUpdateProgress" hidden></div>
     <div class="client-update-blockers" id="clientUpdateBlockers" hidden></div>
@@ -391,6 +397,8 @@
 <script src="api-library-local.js"></script>
 <script src="core/api-work-plugins.js"></script>
 <script src="core/page-performance.js"></script>
+<script src="core/token-quota.js"></script>
+<script src="components/client-auth/quota-notice.js"></script>
 <script src="api.js"></script>
 <script src="components/client-auth/account-ui.js"></script>
 <script src="components/client-auth/email-auth.js"></script>
@@ -524,6 +532,7 @@
 <script src="components/panels/panels-runners.js"></script>
 <script src="components/panels/agent-brand.js"></script>
 <script src="components/panels/panels-agents.js"></script>
+<script src="components/panels/codex-auth-dialog.js"></script>
 <script src="components/panels/cloud-environments.js"></script>
 <script src="components/panels/cloud-environment-setup.js"></script>
 <script src="components/panels/custom-agents.js"></script>
@@ -628,6 +637,7 @@
 <script src="components/panels/chat-send-queue.js"></script>
 <script src="components/panels/chat-work-intent.js"></script>
 <script src="components/panels/chat-work-cards.js"></script>
+<script src="components/panels/plugin-auth-recovery.js"></script>
 <script src="components/panels/chat-draft-recovery.js"></script>
 <script src="components/panels/chat-composer-bindings.js"></script>
 <script src="components/panels/chat-session-controller.js"></script>
@@ -637,6 +647,7 @@
 <script src="components/panels/app-conversation-history.js"></script>
 <script src="components/panels/app-composer-bridge.js"></script>
 <script src="components/panels/chatbar-resize.js"></script>
+<script src="components/panels/app-conversation-history.js"></script>
 <script src="components/panels/chatbar-embed.js"></script>
 <script src="components/panels/compose-surface.js"></script>
 <script src="components/settings/access-preferences.js"></script>

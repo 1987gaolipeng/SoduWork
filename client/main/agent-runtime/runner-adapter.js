@@ -23,6 +23,7 @@ const pluginTurn = require('../pi-session/plugin-turn');
 const skillTurn = require('../pi-session/skill-turn');
 const TURN_SKILLS = Symbol('trusted-turn-skills');
 const taskOutputJournal = require('../conversation/task-output-journal');
+const conversationInputPreparation = require('../conversation/conversation-input-preparation.cjs');
 const fileChangeJournal = require('../conversation/file-change-journal');
 const messageTime = require('../conversation/message-time');
 const agentSource = require('../conversation/agent-source.cjs');
@@ -646,6 +647,7 @@ async function createRunnerHandle(request, defaults) {
       if (existing) {
         existing.runnerPersisted = true;
         existing.sentAt = existing.sentAt || messageTime.epoch(item.sentAt) || messageTime.epoch(item.at);
+        if (!existing.submissionId && item.submissionId) existing.submissionId = String(item.submissionId).slice(0, 128);
         return;
       }
       const plugins = publicPluginBadges(item.plugins);
@@ -654,6 +656,7 @@ async function createRunnerHandle(request, defaults) {
       if (Array.isArray(item.plugins)) state.activePluginIds = _pluginIds(plugins);
       state.messages.push({ role: 'user', text: rawText,
         sentAt: messageTime.epoch(item.sentAt) || messageTime.epoch(item.at), attachments: Array.isArray(item.attachments) ? item.attachments : [],
+        ...(item.submissionId ? { submissionId: String(item.submissionId).slice(0, 128) } : {}),
         plugins, runnerPersisted: true });
       return;
     }
@@ -1052,7 +1055,9 @@ async function createRunnerHandle(request, defaults) {
   function appendUser(text, attachments, plugins, sentAt) {
     const badges = publicPluginBadges(plugins);
     if (badges.length) state.activePluginIds = _pluginIds(badges);
+    const id = String(submissionId || '').trim().slice(0, 128);
     state.messages.push({ role: 'user', text, sentAt: messageTime.epoch(sentAt) || Date.now(),
+      ...(id ? { submissionId: id } : {}),
       attachments: Array.isArray(attachments) ? attachments : [], plugins: badges,
       runnerPersisted: false });
   }
@@ -1084,6 +1089,7 @@ async function createRunnerHandle(request, defaults) {
     emit('started');
     const taskContext = taskJournal.context();
     const note = [next.promptText || _conversationPrompt(text, { ...opts, accessPolicy: turnPolicy }),
+      next.materialUnderstandingPrompt,
       ...(opts.contextPrompts || []), taskContext, _goalBrief(opts), _languageContract()].filter(Boolean).join('\n\n');
     const completion = waitForTurn();
     const dispatchedModelId = state.model.id;
@@ -1209,6 +1215,7 @@ async function createRunnerHandle(request, defaults) {
       sentAt: messageTime.epoch(next.sentAt),
       plugins: publicPluginBadges(next.plugins),
       promptText: [next.promptText || _conversationPrompt(text, { ...opts, accessPolicy: turnPolicy }),
+        next.materialUnderstandingPrompt,
         ...(opts.contextPrompts || []), taskContext, _languageContract()].filter(Boolean).join('\n\n'),
       cfg: { ..._runnerConfig(state.model, adapterId, state.capabilityIds), skillSelection: next[TURN_SKILLS] || _skillRows(state.selectedSkills),
         ...(adapterId === 'codex' ? { codex_reasoning_effort: state.agentExecution?.reasoningEffort || '' } : {}),
@@ -1291,12 +1298,21 @@ async function createRunnerHandle(request, defaults) {
             next.options.modelName, next.options.reasoningEffort).level,
         });
         skillSelectionFailure = null;
+        const materialUnderstanding = next.attachments?.length
+          ? conversationInputPreparation.prepareSync({
+            text: Object.prototype.hasOwnProperty.call(next.options.inputPreparation || {}, 'userText')
+              ? next.options.inputPreparation.userText : next.text,
+            files: next.attachments, fallback: Boolean(next.options.inputPreparation?.fallback),
+          }) : { eligible: false, prompt: '' };
+        const preparedOptions = materialUnderstanding.eligible && materialUnderstanding.prompt
+          ? { ...next.options, materialUnderstandingPrompt: materialUnderstanding.prompt }
+          : next.options;
         // Preserve the synchronous start/cancel contract of ordinary turns.
-        if (!pluginTurn.requestedIds(next.options).length && !next.options.skills?.length && typeof opts.resolveConnectors !== 'function') {
-          appendUser(next.text, next.attachments, [], next.options.sentAt);
+        if (!pluginTurn.requestedIds(preparedOptions).length && !preparedOptions.skills?.length && typeof opts.resolveConnectors !== 'function') {
+          appendUser(next.text, next.attachments, [], preparedOptions.sentAt, preparedOptions.submissionId);
           emit('turn-dequeued', { queueId: next.id, taskId: next.options.taskId || '' });
-          return state.started ? continueTurn(next.text, next.attachments, next.options)
-            : dispatch(next.text, next.attachments, next.options);
+          return state.started ? continueTurn(next.text, next.attachments, preparedOptions)
+            : dispatch(next.text, next.attachments, preparedOptions);
         }
         return sendWithPlugins();
       };
@@ -1420,7 +1436,7 @@ async function createRunnerHandle(request, defaults) {
       taskJournal.append(state.seq, { kind: 'message', role, text, files, taskId, taskOutputKey, ...timing, ...source,
         ...(role === 'user' ? { plugins: badges } : {}) });
       if (role === 'user') {
-        appendUser(text, files, [], timing.sentAt);
+        appendUser(text, files, [], timing.sentAt, turnQueue.active()?.options?.submissionId);
         Object.assign(state.messages[state.messages.length - 1], { plugins: badges, taskOutputKey });
         if (taskId) state.messages[state.messages.length - 1].taskId = String(taskId);
       }

@@ -27,14 +27,14 @@ MAX_FILES = 20
 MAX_TOTAL_BYTES = 96 * 1024 * 1024
 
 
-def clean_options(raw):
+def clean_options(raw, has_files=False):
     if not isinstance(raw, dict) or set(raw) - {
-        "sessionId", "agentId", "model", "title", "text", "requiredSkills"
+        "sessionId", "agentId", "model", "title", "text", "userText", "inputPreparation", "requiredSkills"
     }:
         raise HTTPException(400, "云端会话选项不正确；不能指定本地目录、执行机或额外执行配置")
     out = {}
     for key, limit in (("sessionId", 160), ("agentId", 80), ("model", 200),
-                       ("title", 200), ("text", 200000)):
+                       ("title", 200), ("text", 200000), ("userText", 200000)):
         value = raw.get(key, "")
         if not isinstance(value, str) or len(value) > limit or "\0" in value:
             raise HTTPException(400, "云端会话字段不正确：" + key)
@@ -43,7 +43,21 @@ def clean_options(raw):
         raise HTTPException(400, "云端会话编号格式不正确")
     if out["agentId"] not in AGENTS:
         raise HTTPException(422, "当前服务尚未配置此 Agent 的云端执行支持")
-    if not out["text"]:
+    input_preparation = raw.get("inputPreparation")
+    if input_preparation is not None:
+        if (not isinstance(input_preparation, dict)
+                or set(input_preparation) - {"schemaVersion", "userText", "fallback"}):
+            raise HTTPException(400, "云端输入理解选项不正确")
+        user_text = input_preparation.get("userText", raw.get("userText", ""))
+        if not isinstance(user_text, str) or len(user_text) > 50000 or "\0" in user_text:
+            raise HTTPException(400, "云端输入理解的原始文字不正确")
+        out["userText"] = user_text
+        out["inputPreparation"] = {"schemaVersion": 1, "userText": user_text,
+                                    "fallback": input_preparation.get("fallback") is True}
+    else:
+        out["userText"] = str(raw.get("userText", out["text"]))[:200000]
+        out["inputPreparation"] = None
+    if not out["text"] and not has_files:
         raise HTTPException(400, "请输入云端会话的第一条消息")
     required = raw.get("requiredSkills", [])
     if not isinstance(required, list) or len(required) > 100 or any(
@@ -101,7 +115,7 @@ async def _resume(session, client, row, digest):
 async def create(session, client, request_id, raw, uploads):
     user = await handoffs.owner(session, client)
     row_id = handoffs.identity(client.id, request_id)
-    requested = clean_options(raw)
+    requested = clean_options(raw, has_files=bool(uploads))
     inputs = await read_files(uploads)
     descriptor = {"options": requested, "files": [
         {key: item[key] for key in ("name", "contentType", "size", "sha256")} for item in inputs]}
@@ -120,8 +134,10 @@ async def create(session, client, request_id, raw, uploads):
         requested["agentId"], source, requested["requiredSkills"])
     if not available:
         raise HTTPException(409, "暂时没有匹配 Agent、技能且可接单的云端环境，请在「我的 → 云端环境」检查连接、底座和负载")
+    instruction = requested["text"] or "请根据本轮附件和用户说明理解任务后再处理。"
     options = {"assigneeId": available[0]["id"], "agentId": requested["agentId"],
-               "model": requested["model"], "instruction": requested["text"],
+               "model": requested["model"], "instruction": instruction,
+               "userText": requested["userText"], "inputPreparation": requested["inputPreparation"],
                "requiredSkills": requested["requiredSkills"], "personalPlugins": []}
     picked = await handoffs.destination(session, client, options, source)
     # Keep the runner's reachable host alongside the friendly display name.
@@ -148,7 +164,7 @@ async def create(session, client, request_id, raw, uploads):
         row = Handoff(id=row_id, owner_client_id=client.id, owner_user_id=user.id,
             transfer_id=request_id, task_id=tid, sha256="", request_hash=digest,
             storage_key="", backend="", options=options, source=source)
-        task = Task(id=tid, owner_client_id=client.id, title=source["title"], note=requested["text"],
+        task = Task(id=tid, owner_client_id=client.id, title=source["title"], note=instruction,
             kind="task", status="todo", origin="cloud-conversation", created_by=user.id,
             created_by_name=user.display_name or user.username,
             work_routing={"selectedStrategy": "direct", "requiredSkills": requested["requiredSkills"],
@@ -195,8 +211,14 @@ async def dispatch_inputs(session, row, extra):
         if len(data) != item["size"] or hashlib.sha256(data).hexdigest() != item["sha256"]:
             raise ValueError("云端会话附件已变化，请重新发送")
         files.append((item["name"], data, item["contentType"]))
-    return files, {"dispatchId": handoffs.dispatch_id(row), "brief": row.options["instruction"],
-        "conversationMode": "adaptive", "conversationUserText": row.options["instruction"],
+    user_text = row.options.get("userText", row.options["instruction"])
+    prep = row.options.get("inputPreparation")
+    brief = row.options["instruction"]
+    if prep:
+        brief = brief + "\n\n【附件理解约束】先区分步骤、处理对象、模板和参考；用户原始文字为空时，不得把这段兜底说明当成用户目标。"
+    return files, {"dispatchId": handoffs.dispatch_id(row), "brief": brief,
+        "conversationMode": "adaptive", "conversationUserText": user_text,
+        "inputPreparation": prep,
         "agentExecution": extra.get("agentExecution", {}),
         "skills": [selected[name] for name in required], "requiredSkills": required,
         "requiredAgentCapabilities": ["files", "terminal"],

@@ -1,7 +1,11 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const source=fs.readFileSync(path.join(__dirname,'../components/panels/panels-schedules.js'),'utf8');
+const editor=fs.readFileSync(path.join(__dirname,'../components/panels/panels-schedules-editor.js'),'utf8');
+const cards=fs.readFileSync(path.join(__dirname,'../components/panels/panels-schedules-cards.js'),'utf8');
+const runs=fs.readFileSync(path.join(__dirname,'../components/panels/panels-schedules-runs.js'),'utf8');
 const css=fs.readFileSync(path.join(__dirname,'../components/panels/panels-schedules.css'),'utf8');
+const automationCss=fs.readFileSync(path.join(__dirname,'../components/panels/automation-surface.css'),'utf8');
 function context(){const c={esc:s=>String(s).replaceAll('"','&quot;'),window:{addEventListener(){}}};vm.createContext(c);vm.runInContext(source,c);return c;}
 test('all four schedule actions are icon-only named native buttons with original actions',()=>{
   const c=context();
@@ -14,6 +18,22 @@ test('all four schedule actions are icon-only named native buttons with original
     if(['runs','edit'].includes(act))assert.match(html,/aria-haspopup="dialog" aria-expanded="false"/);
   }
 });
+test('schedule status is an accessible enable/disable control and fired one-time plans stay terminal', () => {
+  const c=context();
+  c._schFindPlugin=()=>null; c._schmFind=()=>null; c._schAgents=[]; c._schRepos=[];
+  vm.runInContext(cards,c);
+  const base={id:'one',title:'Work',note:'',every:'daily',atHour:9,atMinute:0,weekday:1,
+    enabled:true,assigneeId:'local:pi',pluginBindingId:'',personalPluginKey:'',repoId:'',flow:false};
+  const enabled=c._schCardHtml(base);
+  assert.match(enabled,/button[^>]+data-act="toggle"[^>]+aria-pressed="true"/);
+  assert.match(enabled,/title="停用自动化"/);
+  const disabled=c._schCardHtml({...base,enabled:false});
+  assert.match(disabled,/button[^>]+data-act="toggle"[^>]+aria-pressed="false"/);
+  assert.match(disabled,/title="启用自动化"/);
+  const fired=c._schCardHtml({...base,every:'once',onceFired:true});
+  assert.doesNotMatch(fired,/data-act="toggle"/);
+  assert.match(fired,/本次预约已触发/);
+});
 test('pending execution keeps an icon and accessible busy state; restoring never returns visible text',()=>{
   const c=context(),attrs={},button={setAttribute:(k,v)=>attrs[k]=v};
   c._schSetRunBusy(button,true);assert.equal(button.disabled,true);assert.equal(attrs['aria-busy'],'true');
@@ -25,6 +45,165 @@ test('repeated execution of an already disabled run button cannot submit again',
   const c=context();vm.runInContext('_schRows=[{id:"one"}]',c);
   c.SoduWorkAPI={runSchedule:()=>{throw Error('must not dispatch')}};
   await c._schAct('run','one',{disabled:true});
+});
+test('enabled automation asks before disabling, while disabled automation enables directly', async () => {
+  const c = context();
+  vm.runInContext(cards, c);
+  let enabled = true, asked = 0, updates = 0, reloads = 0;
+  c.window.confirm = () => { asked++; return false; };
+  c.SoduWorkAPI = { updateSchedule: async (_id, body) => { updates++; enabled = body.enabled; } };
+  c._loadSch = async () => { reloads++; };
+  vm.runInContext('_schRows=[{id:"one",title:"Work",enabled:true}]', c);
+  const button = {disabled:false,isConnected:true,setAttribute(){},removeAttribute(){}};
+  await c._schAct('toggle', 'one', button);
+  assert.equal(asked, 1); assert.equal(updates, 0); assert.equal(enabled, true); assert.equal(button.disabled, false);
+  c.window.confirm = () => { asked++; return true; };
+  await c._schAct('toggle', 'one', button);
+  assert.equal(asked, 2); assert.equal(updates, 1); assert.equal(enabled, false);
+  vm.runInContext('_schRows=[{id:"one",title:"Work",enabled:false}]', c);
+  await c._schAct('toggle', 'one', button);
+  assert.equal(asked, 2); assert.equal(updates, 2); assert.equal(enabled, true); assert.equal(reloads, 2);
+});
+test('disable confirmation prefers the shared accessible dialog over native confirmation', async () => {
+  const c = context(); let options;
+  c.window.SoduWorkConfirmDialog = {open: async value => { options = value; return true; }};
+  c.window.confirm = () => { throw Error('native confirmation must not be used'); };
+  assert.equal(await c._schConfirmDisable({title:'Work'}), true);
+  assert.equal(options.title, '停用自动化？');
+  assert.equal(options.confirm, '停用自动化');
+  assert.equal(options.cancel, '继续运行');
+  assert.equal(options.danger, true);
+});
+
+test('enabled state is a confirmation action and persists the opposite state', async () => {
+  assert.match(cards, /class="sch-i-state[\s\S]*data-act="toggle"/);
+  assert.match(cards, /aria-pressed="\' \+ String\(Boolean\(s\.enabled\)\)/);
+  const c=context(), handlers={}, calls=[]; let closed=0, loaded=0;
+  vm.runInContext(cards,c);
+  const cancel={addEventListener:(_name,fn)=>{handlers.cancel=fn}};
+  const confirm={disabled:false,textContent:'停用',addEventListener:(_name,fn)=>{handlers.confirm=fn}};
+  c.document={body:{}};
+  c.window.AccountUI={modal:()=>({mask:{querySelector:selector=>selector.includes('cancel')?cancel:confirm},close:()=>{closed++}})};
+  c.window.SoduWorkAPI={updateSchedule:async(sid,body)=>calls.push({sid,body})};
+  c._loadSch=async()=>{loaded++};
+  vm.runInContext('_schRows=[{id:"one",title:"Work",enabled:true}]',c);
+  await c._schToggleEnabled('one',{});
+  assert.equal(calls.length,0); handlers.cancel(); assert.equal(calls.length,0);
+  await c._schToggleEnabled('one',{}); await handlers.confirm();
+  assert.equal(JSON.stringify(calls),JSON.stringify([{sid:'one',body:{enabled:false}}]));
+  vm.runInContext('_schRows=[{id:"one",title:"Work",enabled:false}]',c);
+  await c._schToggleEnabled('one',{}); confirm.disabled=false; await handlers.confirm();
+  assert.equal(JSON.stringify(calls),JSON.stringify([{sid:'one',body:{enabled:false}},{sid:'one',body:{enabled:true}}]));
+  assert.equal(closed,3); assert.equal(loaded,2);
+});
+
+test('immediate execution opens the automation chat instead of opening run history', () => {
+  assert.doesNotMatch(source, /await _schLaunchRunConversation/);
+  assert.match(source, /Promise\.resolve\(_schLaunchRunConversation/);
+  assert.doesNotMatch(source, /_schRunOpen\s*=\s*sid/);
+  assert.match(source, /已开启自动化任务/);
+  assert.doesNotMatch(source, /已开始创建普通对话|已安排，客户端将创建普通对话/);
+});
+test('immediate execution does not duplicate a Hub dispatch error prefix', async () => {
+  const c = context(), notices = [];
+  c.petSay = text => notices.push(text);
+  c.SoduWorkAPI = { runSchedule: async () => { throw Error('没派出去：当前执行设备没有可用的普通会话执行端'); } };
+  vm.runInContext('_schRows=[{id:"one",title:"获取天气"}]', c);
+  const button = { disabled: false, isConnected: true, setAttribute() {}, removeAttribute() {} };
+  await c._schAct('run', 'one', button);
+  assert.deepEqual(notices, ['没派出去：当前执行设备没有可用的普通会话执行端']);
+});
+test('run entries open the ordinary automation conversation without task binding', async () => {
+  const c={globalThis:null,closeSchedulePanel(){c.closed=true;},WorkspaceHost:{open:(...args)=>{c.opened=args;return true;}}};
+  c.globalThis=c; vm.createContext(c); vm.runInContext(runs,c);
+  await c._schOpenRunEntryConversation({conversationId:'chat-1',conversationTitle:'自动化 · Work · 2026-10-26 10:20'});
+  assert.equal(c.closed,true);
+  assert.equal(c.opened[0],'create');
+  assert.equal(JSON.stringify(c.opened[1]),JSON.stringify({tab:'chat',chatId:'chat-1',chatTitle:'自动化 · Work · 2026-10-26 10:20',source:'schedule-run',sessionTitle:'自动化 · Work · 2026-10-26 10:20'}));
+});
+test('automation editor persists an explicit model alongside the selected Agent', () => {
+  assert.match(editor, /id="schModel"/);
+  assert.match(source, /modelName:\s*mode === 'direct'/);
+  assert.match(editor, /modelOptions|_schModelOptionsHtml/);
+  assert.match(editor, /schModel/);
+});
+test('changing the execution base clears the previous base model before repainting options', () => {
+  assert.match(editor, /const current = preferred !== undefined\s*\?\s*String\(preferred \|\| ''\)/);
+  assert.match(source, /_schRefreshModelField\(''\)/);
+});
+test('starting a run waits for and opens its ordinary conversation id', async () => {
+  const c={globalThis:null,_schScope:0,_schRunRows:{},closeSchedulePanel(){c.closed=true;},setTimeout:fn=>{fn();return 0;},WorkspaceHost:{open:(...args)=>{c.opened=args;return true;}},SoduWorkAPI:{listScheduleRuns:async()=>[{id:'run-1',conversationId:'chat-1',conversationTitle:'自动化 · Work · 2026-10-26 10:20'}]}};
+  c.globalThis=c; vm.createContext(c); vm.runInContext(runs,c);
+  assert.equal(await c._schLaunchRunConversation('schedule-1',{scheduleRunId:'run-1'},0),true);
+  assert.equal(c.closed,true);
+  assert.equal(c.opened[0],'create');
+  assert.equal(c.opened[1].chatId,'chat-1');
+  assert.equal(c.opened[1].taskSession,undefined);
+});
+test('immediate run opens the selected model and sends one ordinary prompt directly', async () => {
+  const sent = [], acks = [];
+  const c={globalThis:null,_schScope:0,closeSchedulePanel(){c.closed=true;},
+    WorkspaceHost:{open:(...args)=>{c.opened=args;return true;}},
+    soduWorkAPI:{conversationSession:{
+      open:async options=>{c.openOptions=options;return {ok:true,ref:'ref-1',sessionId:'chat-direct'};},
+      send:async(...args)=>{sent.push(args);return {ok:true};},
+      onEvent:()=>()=>{},
+    }},
+    SoduWorkAPI:{acknowledgeScheduleRun:async(_id,body)=>{acks.push(body);return {ok:true};}}};
+  c.globalThis=c; vm.createContext(c); vm.runInContext(runs,c);
+  assert.equal(await c._schLaunchRunConversation('schedule-1',{
+    scheduleRunId:'run-direct', instanceId:'ui-direct', conversationTitle:'自动化 · Work · 2026-10-26 10:20',
+    conversationInput:{adapterId:'pi',modelName:'selected-model',text:'请生成一轮结果',attachments:[]}
+  },0),true);
+  assert.equal(c.closed,true);
+  assert.equal(c.openOptions.modelName,'selected-model');
+  assert.equal(sent.length,1); assert.equal(sent[0][0],'ref-1'); assert.equal(sent[0][1],'请生成一轮结果');
+  assert.deepEqual(acks.map(item=>item.state),['starting','running']);
+  assert.equal(c.opened[1].chatId,'chat-direct');
+});
+test('immediate run with a personal plugin uses the automation open bridge and sends the locked plugin', async () => {
+  const sent = [], calls = [];
+  const c={globalThis:null,_schScope:0,closeSchedulePanel(){c.closed=true;},
+    WorkspaceHost:{open:(...args)=>{c.opened=args;return true;}},
+    soduWorkAPI:{personalPlugins:{list:async()=>({items:[{
+      key:'weekly-report', pluginId:'local:weekly-report', enabled:true,
+      entrypoints:{automation:true}, version:'1.2.0', checksum:'a'.repeat(64),
+    }]})},conversationSession:{
+      open:async()=>{throw Error('ordinary bridge should not be used when automation bridge exists');},
+      openAutomation:async options=>{calls.push(options);return {ok:true,ref:'ref-plugin',sessionId:'chat-plugin'};},
+      send:async(...args)=>{sent.push(args);return {ok:true};}, onEvent:()=>()=>{},
+    }},
+    SoduWorkAPI:{acknowledgeScheduleRun:async()=>({ok:true})}};
+  c.globalThis=c; vm.createContext(c); vm.runInContext(runs,c);
+  assert.equal(await c._schLaunchRunConversation('schedule-plugin',{
+    scheduleRunId:'run-plugin',instanceId:'ui-plugin',conversationTitle:'自动化 · 周报 · 2026-10-27 10:20',
+    conversationInput:{adapterId:'pi',modelName:'selected-model',text:'整理本周工作',attachments:[],
+      personalPlugin:{key:'weekly-report',versionPolicy:'pinned',version:'1.2.0',checksum:'a'.repeat(64)}}
+  },0),true);
+  assert.equal(calls.length,1);
+  assert.equal(JSON.stringify(calls[0].pluginLock), JSON.stringify({
+    pluginId:'local:weekly-report',version:'1.2.0',checksum:'a'.repeat(64)}));
+  assert.equal(sent.length,1);
+  assert.equal(JSON.stringify(sent[0][3].plugins), JSON.stringify([{pluginId:'local:weekly-report'}]));
+  assert.equal(c.opened[1].chatId,'chat-plugin');
+});
+test('standalone run entries use the shared chat bridge when WorkspaceHost is absent', async () => {
+  const c={globalThis:null,closeSchedulePanel(){c.closed=true;},openPiChatEntry:id=>{c.chatId=id;}};
+  c.globalThis=c; vm.createContext(c); vm.runInContext(runs,c);
+  assert.equal(await c._schOpenRunEntryConversation({conversationId:'chat-standalone'}),true);
+  assert.equal(c.closed,true); assert.equal(c.chatId,'chat-standalone');
+});
+
+test('automation run history exposes only the four user-facing states', () => {
+  const c={globalThis:null,SCH_RUN_STATE:{
+    starting:['待执行','starting'], running:['执行中','running'], waiting:['执行中','running'],
+    succeeded:['完成','succeeded'], failed:['失败','failed'], cancelled:['失败','failed']
+  }};
+  c.globalThis=c; vm.createContext(c); vm.runInContext(runs,c);
+  assert.deepEqual(Array.from(c._schConversationRunState({state:'starting'})),['待执行','starting']);
+  assert.deepEqual(Array.from(c._schConversationRunState({state:'waiting'})),['执行中','running']);
+  assert.deepEqual(Array.from(c._schConversationRunState({state:'succeeded'})),['完成','succeeded']);
+  assert.deepEqual(Array.from(c._schConversationRunState({state:'cancelled'})),['失败','failed']);
 });
 
 test('failed delete keeps the plan and reports failure, without a success notification',async()=>{
@@ -48,4 +227,22 @@ test('scoped toolbar styles retain fixed geometry, theme colors, keyboard focus 
   assert.match(css,/@media\(prefers-reduced-motion:reduce\)[^\n]*animation:none/);
   assert.doesNotMatch(css,/\.sch-i-ops \.btn-mini/);
   assert.match(source,/_schConfirmDel\(sid, s\)/);
+});
+test('automation configuration selects have a shared visible affordance and focus state', () => {
+  assert.match(css, /select\.sch-in\{[\s\S]*appearance:none/);
+  assert.match(css, /select\.sch-in:hover:not\(:disabled\)/);
+  assert.match(css, /select\.sch-in:focus-visible/);
+  assert.match(css, /select\.sch-in:disabled/);
+  assert.match(css, /@media\(forced-colors:active\)[\s\S]*background-image:none/);
+  assert.match(css, /@media\(max-width:480px\)[\s\S]*sch-when-pv/);
+});
+
+test('desktop automation cards use three columns and stretch each row to equal height', () => {
+  const layoutCss = css + '\n' + automationCss;
+  assert.match(layoutCss, /@container (?:automation-content )?\(min-width:1240px\)[^{]*\{[^}]*\.sch-list\{grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/,
+    'wide automation lists should render three cards per row');
+  assert.match(layoutCss, /#schPanel \.sch-list\{[\s\S]*align-items:stretch!important/,
+    'grid rows should stretch their cards');
+  assert.match(layoutCss, /#schPanel \.sch-item\{[\s\S]*height:100%!important/,
+    'cards should fill the row height');
 });

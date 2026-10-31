@@ -54,7 +54,12 @@ async function fixture(t, spec, overrides = {}) {
   } } } });
   const handle = getRunnerSessionDetails(session).handle;
   t.after(async () => { released = true; held?.(); preparing?.(); await session.dispose();
-    await require('../main/agent-runtime/process-session').reset(app);
+    try { await require('../main/agent-runtime/process-session').reset(app); }
+    catch (error) {
+      t.diagnostic(JSON.stringify({ cleanup: error.message, report: error.report,
+        errors: Array.from(error.errors || [], item => ({ message: item.message, code: item.code })) }));
+      throw error;
+    }
     await delay(10); fs.rmSync(root, { recursive: true, force: true }); });
   return { root, cwd, base, added, refreshed, session, handle, calls, resolutions,
     get held() { return Boolean(held); }, get preparing() { return Boolean(preparing); },

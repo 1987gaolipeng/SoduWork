@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import logging
+import threading
 import uuid
 from collections import OrderedDict
 
@@ -66,13 +67,20 @@ def remember(ref: str, runner_id: str) -> None:
 def _cached_runner(ref: str):
     """Read only the in-memory mapping without RPC; safe to call from the event loop."""
     ref = str(ref or "")
-    rid = _WHERE.get(ref)
-    if not rid:
-        return None
+    with _WHERE_LOCK:
+        rid = _WHERE.get(ref)
+        if not rid:
+            return None
+        _WHERE.move_to_end(ref)
     r = runner_hub.get(rid)
     if r is not None:
         return r
-    _WHERE.pop(ref, None)
+    # runner_hub.get deliberately stays outside the cache lock. A concurrent
+    # discovery may replace this stale route while the lookup is in progress;
+    # only remove the exact mapping that was observed above.
+    with _WHERE_LOCK:
+        if _WHERE.get(ref) == rid:
+            _WHERE.pop(ref, None)
     return None
 
 

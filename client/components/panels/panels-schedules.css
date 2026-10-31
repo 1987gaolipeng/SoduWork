@@ -88,7 +88,7 @@
  */
 #schPanel .sch-body{container-type:inline-size}
 .sch-list{display:grid;grid-template-columns:1fr;gap:12px;align-items:start}
-@container (min-width:1240px){.sch-list{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}}
+@container (min-width:1240px){.sch-list{grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}}
 .sch-item{border:1px solid var(--line);border-radius:16px;padding:0;
   background:var(--bg-0,#fff);display:flex;flex-direction:column;gap:0;overflow:hidden;
   box-shadow:0 1px 2px rgba(24,35,52,.03),0 8px 24px rgba(24,35,52,.035);
@@ -116,6 +116,13 @@
 .sch-item.off .sch-i-when i{color:var(--ink-4)}
 .sch-i-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
 .sch-i-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sch-i-state{appearance:none;display:inline-flex;align-items:center;justify-content:center;min-height:27px;
+  padding:3px 10px;border:1px solid var(--line-2);border-radius:999px;background:var(--bg-1,#fafbfc);
+  color:var(--ink-3);font:600 max(var(--font-min-readable, 14.5px), 11px)/1.2 var(--font-ui);cursor:pointer}
+.sch-i-state.is-enabled{border-color:color-mix(in srgb,var(--accent) 38%,var(--line));color:var(--accent);background:var(--accent-soft)}
+.sch-i-state:hover:not(:disabled){border-color:var(--accent);color:var(--accent);background:var(--accent-soft-2,var(--accent-soft))}
+.sch-i-state:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sch-i-state:disabled{cursor:wait;opacity:.65}
 .sch-i-title{font-size:14.5px;font-weight:400;color:var(--ink);letter-spacing:-.012em;line-height:1.38}
 .sch-i-off{font-size:max(var(--font-min-readable, 14.5px), 11px);color:var(--ink-4);background:var(--bg-2,#f2f2f4);border-radius:20px;padding:2px 9px}
 .sch-i-meta{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-3);line-height:1.5}
@@ -266,7 +273,7 @@
   .sch-run-drawer-note{margin-inline:14px}
   .sch-run-drawer-body{padding-inline:14px}
   .sch-run{grid-template-columns:18px minmax(0,1fr)}
-  .sch-run>.btn-mini{grid-column:2;justify-self:start;margin-top:2px}
+  .sch-run-side{grid-column:2;justify-self:start;margin-top:2px}
 }
 @media(prefers-reduced-motion:reduce){
   .sch-run-backdrop,.sch-run-drawer{transition:none}
@@ -362,6 +369,36 @@
   border-radius:var(--r-md,10px);background:var(--bg-0,#fff);color:var(--ink);
   font-size:max(var(--font-min-readable, 14.5px), 13px);font-family:inherit}
 .sch-in:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+/* Native selects share the form-field geometry but get a deliberate, compact
+ * affordance so the selected execution base/model is easy to scan. Keep the
+ * browser option menu native for keyboard, screen-reader, and platform support. */
+select.sch-in{
+  appearance:none;-webkit-appearance:none;min-height:40px;padding:9px 36px 9px 12px;
+  cursor:pointer;line-height:1.35;
+  background-color:var(--bg-0,#fff);
+  background-image:linear-gradient(45deg,transparent 50%,var(--ink-3) 50%),
+    linear-gradient(135deg,var(--ink-3) 50%,transparent 50%);
+  background-position:calc(100% - 16px) 50%,calc(100% - 11px) 50%;
+  background-size:5px 5px,5px 5px;background-repeat:no-repeat;
+  transition:border-color .14s ease,box-shadow .14s ease,background-color .14s ease;
+}
+select.sch-in:hover:not(:disabled){border-color:color-mix(in srgb,var(--accent) 42%,var(--line));background-color:color-mix(in srgb,var(--accent-soft) 18%,var(--bg-0,#fff))}
+select.sch-in:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 65%,transparent);outline-offset:1px;box-shadow:0 0 0 3px var(--accent-soft)}
+select.sch-in:disabled{cursor:not-allowed;opacity:.72;color:var(--ink-4);background-color:var(--bg-2,#f2f3f5);background-image:linear-gradient(45deg,transparent 50%,var(--ink-4) 50%),linear-gradient(135deg,var(--ink-4) 50%,transparent 50%)}
+select.sch-in option{background:var(--bg-0,#fff);color:var(--ink)}
+.sch-when-row>select.sch-in{min-width:0}
+.sch-when-row>select.sch-w-wd{min-width:0}
+.sch-clock .sch-in{min-height:40px;padding-inline:8px}
+.sch-retry-row .sch-in{min-height:34px}
+@media(max-width:480px){
+  .sch-when-row>select.sch-in{flex:1 1 100px;max-width:none}
+  .sch-clock{flex:1 1 160px}
+  .sch-when-pv{margin-left:0;width:100%;box-sizing:border-box}
+}
+@media(prefers-reduced-motion:reduce){select.sch-in{transition:none}}
+@media(forced-colors:active){
+  select.sch-in{appearance:auto;-webkit-appearance:auto;background-image:none;background-color:Canvas;color:CanvasText}
+}
 .sch-f-row{display:flex;gap:10px;flex-wrap:wrap}
 .sch-f-row > span{flex:0 0 auto;min-width:96px}
 .sch-chk{display:flex;align-items:center;gap:7px;font-size:max(var(--font-min-readable, 14.5px), 12.5px);color:var(--ink-2)}

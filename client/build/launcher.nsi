@@ -7,6 +7,9 @@ AutoCloseWindow true
 ShowInstDetails nevershow
 BrandingText " "
 SetFont "Segoe UI" 9
+!ifndef SODUWORK_EXECUTABLE_NAME
+  !define SODUWORK_EXECUTABLE_NAME "SoduWork.exe"
+!endif
 Name "SoduWork"
 Caption "SoduWork 正在更新"
 OutFile "${SODUWORK_LAUNCHER_OUT}"
@@ -122,7 +125,11 @@ Function LaunchPayload
   ; Payloads produced after the SoduWork rename ship SoduWork.exe; payloads
   ; installed before the rename ship SoduWork.exe. Try all brands, newest name first,
   ; so one launcher can activate every installed generation.
-  StrCpy $exeName "SoduWork.exe"
+  !if "${SODUWORK_EXECUTABLE_NAME}" == "SoduWork.exe"
+    StrCpy $exeName "SoduWork.exe"
+  !else
+    StrCpy $exeName "${SODUWORK_EXECUTABLE_NAME}"
+  !endif
   tryVersionedExe:
   ${If} $target != ""
   ${AndIf} $1 == ""
@@ -139,6 +146,7 @@ Function LaunchPayload
       Quit
     ${EndIf}
   ${EndIf}
+  !if "${SODUWORK_EXECUTABLE_NAME}" == "SoduWork.exe"
   ${If} $exeName == "SoduWork.exe"
     StrCpy $exeName "SoduWork.exe"
     Goto tryVersionedExe
@@ -161,6 +169,7 @@ Function LaunchPayload
       Quit
     ${EndIf}
   ${EndIf}
+  !endif
   ${If} $updateEnglish != 0
     MessageBox MB_OK|MB_ICONEXCLAMATION "The SoduWork installation is incomplete. Run the installer again to repair it; your sessions and files will not be deleted."
   ${Else}

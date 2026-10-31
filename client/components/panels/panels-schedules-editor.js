@@ -92,6 +92,9 @@ function _schNormalizeExecutionAgents(result) {
     cli: String(item.cli || ''),
     available: item.available !== false,
     note: String(item.note || ''),
+    modelPick: item.modelPick !== false,
+    nativeModelPick: item.nativeModelPick === true,
+    modelSource: String(item.modelSource || ''),
     locationLabel: String(item.locationLabel || ''),
     onlineSeats: Math.max(0, Number(item.onlineSeats) || 0),
   }));
@@ -105,6 +108,7 @@ function _schNormalizeExecutionAgents(result) {
 async function _schLoadExecutionAgents(context) {
   if (_schAgentLoading) return _schAgentLoading;
   const scope = _schScope;
+  _schNativeModelOptions = Object.create(null);
   _schAgentLoading = (async () => {
     if (SoduWorkAPI.taskExecutionOptions) {
       try {
@@ -113,10 +117,17 @@ async function _schLoadExecutionAgents(context) {
           note: String((context || {}).note || ''),
           tags: [], repoId: String((context || {}).repoId || ''),
         });
+        if (scope === _schScope) {
+          _schModelOptions = _schNormalizeModelOptions(result);
+          _schDefaultModel = String((result && result.defaultModel) ||
+            (_schModelOptions[0] && _schModelOptions[0].name) || '').trim();
+        }
         const agents = _schNormalizeExecutionAgents(result);
         if (scope !== _schScope) return [];
         _schAgentReason = String((((result || {}).availability || {}).agentReason) ||
           (!agents.length ? '当前设备还没有在线执行底座，请打开 Agent 管理确认 Runner 已启动' : ''));
+        await _schLoadNativeModelOptions(agents);
+        if (scope !== _schScope) return [];
         return agents;
       } catch (_) {
         if (scope !== _schScope) return [];
@@ -131,6 +142,8 @@ async function _schLoadExecutionAgents(context) {
           available: item.online !== false }));
       _schAgentReason = String((result && result.reason) ||
         (!agents.length ? '当前设备还没有在线执行底座，请打开 Agent 管理确认 Runner 已启动' : ''));
+      await _schLoadNativeModelOptions(agents);
+      if (scope !== _schScope) return [];
       return agents;
     }
     _schAgentReason = '当前客户端不支持读取执行底座，请升级后重试';
@@ -171,6 +184,11 @@ function _schAgentOptionsHtml(current) {
     esc(_schAgentOptionLabel(agent)) + '</option>').join('');
 }
 
+function _schEditorTx(value) {
+  return (window.SoduWorkI18n && typeof window.SoduWorkI18n.translateText === 'function')
+    ? window.SoduWorkI18n.translateText(value) : value;
+}
+
 function _schRefreshAgentField(preferred) {
   const select = document.getElementById('schWho');
   if (!select) return;
@@ -182,6 +200,69 @@ function _schRefreshAgentField(preferred) {
     ? '保存的是执行底座类型；每次运行会在当前设备选择可用席位'
     : '请打开 Agent 管理，确认 Runner 已启动并已连接当前环境');
   select.dispatchEvent(new Event('change', { bubbles: true }));
+  _schRefreshModelField();
+}
+
+function _schModelOptionsHtml(current, options) {
+  const selected = current === undefined || current === null
+    ? '' : String(current || '').trim();
+  const rows = (options || _schModelOptions).slice();
+  if (selected && !rows.some(item => item.name === selected)) {
+    rows.unshift({ name: selected, label: selected + _schEditorTx('（已保存，当前不可用）'), stale: true });
+  }
+  if (!selected) rows.unshift({ name: '', label: _schEditorTx('请选择模型'), placeholder: true });
+  if (!rows.length) return '<option value="">' + esc(_schEditorTx('当前没有可用模型')) + '</option>';
+  return rows.map(item => '<option value="' + esc(item.name) + '"' +
+    (item.name === selected ? ' selected' : '') + (item.stale ? ' disabled' : '') +
+    (item.placeholder ? ' disabled' : '') + '>' +
+    esc(item.label || item.name) + '</option>').join('');
+}
+
+function _schAgentAllowsModel(agentId) {
+  // Gateway and native-per-run runtimes accept an explicit model. A runtime
+  // that owns its account/model remains the one case where an override is not
+  // valid, even though the substrate itself is selectable independently.
+  const id = String(agentId || '').trim();
+  const agent = _schAgents.find(item => String(item.id) === id);
+  return !agent || agent.modelPick !== false || agent.nativeModelPick === true;
+}
+
+function _schModelFieldHtml(current, agentId) {
+  const selected = current === undefined || current === null
+    ? '' : String(current || '').trim();
+  if (!_schAgentAllowsModel(agentId)) {
+    return '<label class="sch-f-lbl" for="schModel">' + esc(_schEditorTx('模型')) +
+      '</label><select class="sch-in" id="schModel" disabled>' +
+      '<option value="">' + esc(_schEditorTx('由底座自身管理模型')) + '</option></select>' +
+      '<small class="sch-executor-hint" id="schModelHint">' +
+      esc(_schEditorTx('当前底座不接受自动化单独指定模型。')) + '</small>';
+  }
+  const options = _schModelOptionsFor(agentId);
+  return '<label class="sch-f-lbl" for="schModel">' + esc(_schEditorTx('模型')) +
+    '</label><select class="sch-in" id="schModel" aria-describedby="schModelHint">' +
+    _schModelOptionsHtml(selected, options) + '</select>' +
+    '<small class="sch-executor-hint" id="schModelHint">' +
+    esc(_schEditorTx('模型与执行底座独立保存；每次自动化运行都使用这里选择的模型。')) + '</small>';
+}
+
+function _schRefreshModelField(preferred) {
+  const select = document.getElementById('schModel');
+  if (!select) return;
+  const current = preferred !== undefined ? String(preferred || '').trim() :
+    String(select.value || '').trim();
+  const agent = document.getElementById('schWho');
+  if (!_schAgentAllowsModel(agent && agent.value)) {
+    select.innerHTML = '<option value="">' + esc(_schEditorTx('由底座自身管理模型')) + '</option>';
+    select.value = '';
+    select.disabled = true;
+    return;
+  }
+  const options = _schModelOptionsFor(agent && agent.value);
+  select.innerHTML = _schModelOptionsHtml(current, options);
+  // Do not replace the explicit model with the substrate default. If the
+  // catalog is temporarily unavailable, retain the saved value so the user
+  // can still see and edit the automation instead of losing its selection.
+  select.disabled = !options.length && !current;
 }
 
 function _schEditorDrawerHtml() {
@@ -231,7 +312,9 @@ function _schAgentFieldHtml(current) {
     '<div class="sch-executor-tools"><small class="sch-executor-hint" id="schWhoHint">' +
     esc(_schAgentReason || (_schAgents.length ? '保存的是执行底座类型；运行时选择可用席位' :
       '请打开 Agent 管理，确认 Runner 已启动并已连接当前环境')) + '</small>' +
-    '<button type="button" class="btn-mini" id="schReloadAgents">刷新底座</button></div>';
+    '<button type="button" class="btn-mini" id="schReloadAgents">刷新底座</button></div>' +
+    _schModelFieldHtml(_schEditing && _schEditing !== 'new'
+      ? _schEditing.modelName : '', current);
 }
 
 async function _schPrepareEditor(value, source) {
@@ -289,6 +372,7 @@ function _schResetScope() {
   closeSchedulePanel();
   _schRows = null; _schLoading = null; _schLoadError = '';
   _schAgents = []; _schAgentReason = ''; _schAgentLoading = null;
+  _schModelOptions = []; _schDefaultModel = ''; _schNativeModelOptions = Object.create(null);
   _schRepos = []; _schTemplates = [];
   _schPluginCache = Object.create(null); _schPluginLoading = Object.create(null);
   _schmGeneration++; _schmItems = []; _schmLoading = null;

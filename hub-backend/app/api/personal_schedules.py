@@ -122,8 +122,8 @@ async def create_my_schedule(body: dict = Body(default_factory=dict),
     s.owner_client_id = client.id          # Bind the schedule to the authenticated client, not a client supplied in the request.
     if not s.title:
         raise HTTPException(status_code=400, detail="请填任务标题")
-    if not s.assignee_id and not s.plugin_binding_id:
-        raise HTTPException(status_code=400, detail="请选把活交给谁")
+    if not s.assignee_id:
+        raise HTTPException(status_code=400, detail="请先选择执行底座")
     from ..services import schedules as sch
     try:
         await sch.validate_execution(session, s)
@@ -190,15 +190,43 @@ async def my_schedule_runs(sid: str, limit: int = 20,
 
 
 @router.post("/schedules/{sid}/run")
-async def run_my_schedule(sid: str, client: Client = Depends(current_client),
+async def run_my_schedule(sid: str, body: dict = Body(default_factory=dict),
+                          client: Client = Depends(current_client),
                           session: AsyncSession = Depends(get_session)):
     """Start an immediate run and return its durable tracking record."""
     from .tasks import _my_sch
 
     from ..services import schedules as sch
     s = await _my_sch(session, sid, client)
-    out = await sch.execute_one(session, s, trigger="manual")
-    await session.commit()
+    instance_id = str(body.get("instanceId") or "").strip()[:80]
+    out = await sch.execute_one(session, s, trigger="manual", execution_instance=instance_id)
     if not out.get("ok"):
+        await session.commit()
         raise HTTPException(status_code=502, detail="没派出去：" + str(out.get("error"))[:200])
-    return {"ok": True, **out}
+    # Immediate execution opens the ordinary chat directly in the desktop
+    # client. Return the immutable conversation envelope created with this run
+    # so the UI can open the selected base/model without waiting for a second
+    # Runner inbox round-trip.
+    from .. import models
+    run = await session.get(models.AiScheduleRun, str(out.get("scheduleRunId") or ""))
+    receipt = dict(run.receipt or {}) if run is not None else {}
+    if instance_id and run is not None:
+        # The immediate button owns the run before the background worker polls
+        # the inbox. This makes the UI open the chat directly and prevents a
+        # second client from consuming the same occurrence first.
+        from ..services import schedule_conversations as conversations
+        claimed = await conversations.claim(session, client, run.id, instance_id)
+        if claimed.get("ok"):
+            receipt = dict(run.receipt or {})
+            out["conversationInput"] = dict(claimed.get("input") or {})
+            out["instanceId"] = instance_id
+        elif claimed.get("busy"):
+            out["busy"] = True
+    await session.commit()
+    # Only return the envelope to the client that successfully claimed this
+    # occurrence.  A busy/terminal response must not let a second client open
+    # and submit the same prompt concurrently.
+    conversation_input = dict(out.get("conversationInput") or {})
+    if not instance_id:
+        conversation_input = dict(receipt.get("conversationInput") or {})
+    return {"ok": True, **out, "conversationInput": conversation_input}

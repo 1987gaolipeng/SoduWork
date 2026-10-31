@@ -315,7 +315,9 @@
         }
         _capabilities = (result && result.items) || [];
         _skills = Array.isArray(result && result.skills) ? result.skills.slice() : [];
-        _pickedCapabilities = new Set(_capabilities.filter((item) => item.selected).map((item) => item.id));
+        const requested = Array.isArray(_requestedCapabilities) ? new Set(_requestedCapabilities.map(String)) : null;
+        _pickedCapabilities = new Set(_capabilities.filter((item) =>
+          item.selectable && item.deviceGranted && (requested ? requested.has(item.id) : item.selected)).map((item) => item.id));
         if (_skillPicker) {
           if (result.policyOk === false && typeof _skillPicker.setError === 'function') {
             _skillPicker.setError(result.policyReason || '\u56e2\u961f Skill \u6682\u65f6\u4e0d\u53ef\u7528');
@@ -409,13 +411,16 @@
     if (global.ComposeExecution?.value() === 'cloud') {
       const cloudViewSeq = _composeViewSeq;
       const accepted = await global.ComposeExecution.start({ text, isCurrent: () => cloudViewSeq === _composeViewSeq,
+        inputPreparation: intentOptions?.inputPreparation,
         prepare: async () => {
           await _pluginSelectTask;
           if (cloudViewSeq !== _composeViewSeq) return {};
           if (_pluginSelectError) throw Error(_pluginSelectError);
           return { attachments: _attachments ? await _attachments.refs(_setupApi()) : [],
             skills: selectedSkills.slice(),
-            plugins: _pluginMention?.selected() || [], intent: intentOptions?.intent, contextPrompts: _entryContextPrompts.slice() };
+            plugins: _pluginMention?.selected() || [], intent: intentOptions?.intent,
+            inputPreparation: intentOptions?.inputPreparation,
+            contextPrompts: _entryContextPrompts.slice() };
         } });
       if (cloudViewSeq !== _composeViewSeq) return false;
       if (accepted) {
@@ -609,7 +614,7 @@
     const text = typed.trim() ? typed : '请查看并处理我附上的文件。';
     if (global.ComposeExecution?.value() === 'cloud') {
       const mode = _intent?.current(text);
-      const accepted = await _enterChat(text, '', mode?.mode === 'goal' ? { intent: 'goal' } : {});
+      const accepted = await _enterChat(text, '', { ...(mode?.mode === 'goal' ? { intent: 'goal' } : {}), inputPreparation });
       if (accepted) { _clearComposeDraft(); if (input) { input.value = ''; input.style.height = ''; } }
       return;
     }
@@ -645,6 +650,10 @@
     const intent = _intent ? _intent.current(text) : { mode: 'chat' };
     let accepted = true;
     if (intent.mode === 'schedule') {
+      /* Schedule creation does not go through ComposeWorkActions.prepareSession
+       * (there is no plugin command), so capture the current runtime/model here
+       * before the asynchronous agent catalog request starts. */
+      const scheduleSelection = global.ComposeModelPicker?.value?.() || { modelName: _pickedModel };
       const scheduleInput = input?.value;
       accepted = await _createAutomation(text, intent, { isCurrent: () => submitViewSeq === _composeViewSeq &&
         submitOwner === (global.SoduWorkAPI?.taskStorageKey?.('ops') || '') && input?.value === scheduleInput &&
@@ -659,9 +668,12 @@
         ComposeDraft.open(text, Object.assign(submittedBridge, { workIntent: intent, attachmentContext }));
       }
     } else {
-      accepted = await _enterChat(text, '', intent.mode === 'goal' ? {
+      accepted = await _enterChat(text, '', {
+        inputPreparation,
+        ...(intent.mode === 'goal' ? {
         intent: 'goal', goal: intent.goal, acceptance: intent.acceptance,
-      } : {});
+        } : {}),
+      });
       if (accepted && _intent) _intent.reset();
     }
     if (!accepted) return;
@@ -720,6 +732,8 @@
       _pluginResolveBusy = false;
       _pluginSelectError = '';
       _pluginSelectTask = Promise.resolve();
+      _requestedCapabilities = Array.isArray(q.capabilities) ? q.capabilities.slice(0, 20) : null;
+      if (_requestedCapabilities) void _loadCapabilities(true);
       _entryContextPrompts = Array.isArray(q.contextPrompts)
         ? q.contextPrompts.map((item) => String(item || '').trim().slice(0, 16000))
           .filter(Boolean).slice(0, 4)
@@ -737,11 +751,14 @@
       if (input && q.prefill) {
         _clearComposeDraft();
         _restoreComposeDraft();
-        input.value = String(q.prefill).slice(0, 8000);
+        input.value = String(q.prefill).slice(0, 50000);
         input.dispatchEvent(new Event('input', { bubbles: true }));
       } else _restoreComposeDraft();
+      if (Array.isArray(q.initialPlugins) && q.initialPlugins.length && _pluginMention?.restore) {
+        _pluginMention.restore(q.initialPlugins);
+      }
       if (Array.isArray(q.initialFiles) && q.initialFiles.length) _attachments?.add(q.initialFiles, 'library');
-      if (q.pluginId && _pluginMention && typeof _pluginMention.select === 'function') {
+      if (!q.initialPlugins?.length && q.pluginId && _pluginMention && typeof _pluginMention.select === 'function') {
         const selectionSeq = _pluginSelectSeq;
         const selection = Promise.resolve().then(() => {
           if (selectionSeq !== _pluginSelectSeq) return null;
@@ -760,7 +777,7 @@
       p.dataset.stage = 'chat'; setTab();
       const accessMode = global.AccessPreferences?.snapshot?.().mode === 'readonly' ? 'readonly' : 'standard';
       return NativeChat.enter('', '', {
-        cwd: q.fileOpen.cwd || '', workspaceLabel: q.fileOpen.cwd ? '文件所在位置' : '临时工作区',
+        cwd: q.fileOpen.cwd || '', workspaceLabel: q.fileOpen.workspaceLabel || (q.fileOpen.cwd ? '文件所在位置' : '临时工作区'),
         adapterId: global.ComposeRuntime?.value?.() || 'pi',
         mode: accessMode === 'readonly' ? 'readonly' : 'full', accessMode,
         inputFiles: [q.fileOpen.file], previewInput: q.fileOpen.preview ? q.fileOpen.file : null,

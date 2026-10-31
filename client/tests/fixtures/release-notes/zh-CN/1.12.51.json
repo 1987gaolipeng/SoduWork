@@ -1,0 +1,59 @@
+{
+  "summary": "本次更新优化了对话体验、插件管理和系统稳定性。",
+  "sections": [
+    {
+      "id": "conversations",
+      "title": "对话更流畅",
+      "items": [
+        {
+          "id": "queue",
+          "text": "消息发送后立即显示排队状态，处理进度更清晰。"
+        },
+        {
+          "id": "streaming",
+          "text": "优化流式回复的排版，减少内容显示不稳定的问题。"
+        },
+        {
+          "id": "controls",
+          "text": "支持内容批注、命令分组展示和模型思考模式调整。"
+        },
+        {
+          "id": "images",
+          "text": "支持选择图像模型及上传多张图片。"
+        }
+      ]
+    },
+    {
+      "id": "plugins",
+      "title": "插件管理更完善",
+      "items": [
+        {
+          "id": "lifecycle",
+          "text": "完善插件全生命周期管理。"
+        },
+        {
+          "id": "portable",
+          "text": "支持以便携格式导入和导出插件。"
+        },
+        {
+          "id": "categories",
+          "text": "支持动态管理的插件分类，方便浏览和查找。"
+        },
+        {
+          "id": "notifications",
+          "text": "优化平台通知的送达处理。"
+        }
+      ]
+    },
+    {
+      "id": "reliability",
+      "title": "运行更稳定",
+      "items": [
+        {
+          "id": "stability",
+          "text": "改进服务端稳定性、备份、部署和会话处理。"
+        }
+      ]
+    }
+  ]
+}

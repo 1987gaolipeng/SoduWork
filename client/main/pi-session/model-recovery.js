@@ -23,7 +23,7 @@ function create() {
     return { text: PROMPT, attachments: [], options: { ...item.options,
       retry: true, modelRecovery: true, continuing: true, goalMode,
       recoveryBeforeTurn: originalBeforeTurn,
-      beforeTurn: async () => { await item.options.beforeRetry?.(); await originalBeforeTurn?.(); },
+      beforeTurn: async function (...args) { await item.options.beforeRetry?.(); await originalBeforeTurn?.apply(this, args); },
     } };
   }
   return { remember, view, take, clear: () => { failed = null; } };

@@ -89,6 +89,30 @@ html[data-window-titlebar="overlay"] .pui-layer.waz-plugin-surface{
   background:var(--bg-0);color:var(--ink);font:400 14.5px/1.55 var(--font-ui,inherit)
 }
 .waz-field input,.waz-field select{height:37px;padding:0 10px}
+.waz-field select{
+  appearance:none;-webkit-appearance:none;min-height:39px;padding:0 36px 0 12px;
+  cursor:pointer;line-height:1.4;
+  background-color:var(--bg-0);
+  background-image:linear-gradient(45deg,transparent 50%,var(--ink-3) 50%),
+    linear-gradient(135deg,var(--ink-3) 50%,transparent 50%);
+  background-position:calc(100% - 16px) 50%,calc(100% - 11px) 50%;
+  background-size:5px 5px,5px 5px;background-repeat:no-repeat;
+  transition:border-color .14s ease,box-shadow .14s ease,background-color .14s ease
+}
+.waz-field select:enabled:hover{
+  border-color:color-mix(in srgb,var(--accent) 42%,var(--line));
+  background-color:color-mix(in srgb,var(--accent-soft) 18%,var(--bg-0))
+}
+.waz-field select:focus-visible{
+  border-color:var(--accent);outline:2px solid color-mix(in srgb,var(--accent) 65%,transparent);
+  outline-offset:1px;box-shadow:0 0 0 3px var(--accent-soft)
+}
+.waz-field select:disabled{
+  cursor:not-allowed;opacity:.72;color:var(--ink-4);background-color:var(--bg-2);
+  background-image:linear-gradient(45deg,transparent 50%,var(--ink-4) 50%),
+    linear-gradient(135deg,var(--ink-4) 50%,transparent 50%)
+}
+.waz-field select option{background:var(--bg-0);color:var(--ink)}
 .waz-field textarea{min-height:76px;padding:9px 10px;resize:vertical}
 .waz-field textarea[name=note]{min-height:108px}
 .waz-title input{height:42px;font-size:14.5px;font-weight:520}
@@ -196,4 +220,8 @@ html[data-window-titlebar="overlay"] .pui-layer.waz-plugin-surface{
 }
 @media(prefers-reduced-motion:reduce){
   .waz-sheet{transition:none}.waz-loading i,.waz-probe.checking>i{animation:none}
+}
+@media(prefers-reduced-motion:reduce){.waz-field select{transition:none}}
+@media(forced-colors:active){
+  .waz-field select{appearance:auto;-webkit-appearance:auto;background-image:none;background-color:Canvas;color:CanvasText}
 }

@@ -30,15 +30,32 @@ async function send(context) {
       state.status = 'unreachable'; state.statusText = prepared.reason;
       state.completion = { reason: 'error', error: prepared.reason };
       emit('changed');
-      return { ok: false, reason: prepared.reason, failureKind: prepared.failureKind, retrySafe: true };
+      return { ok: false, reason: prepared.reason, failureKind: prepared.failureKind,
+        retrySafe: prepared.retrySafe !== false,
+        ...(prepared.pluginAuthorization ? { pluginAuthorization: prepared.pluginAuthorization } : {}) };
     }
     if (prepared.hasSecrets) redactors.add(prepared.redact);
+    let materialUnderstanding = { eligible: false, prompt: '' };
+    if (next.attachments?.length) {
+      try {
+        materialUnderstanding = await require('../conversation/conversation-input-preparation.cjs').prepare({
+          text: Object.prototype.hasOwnProperty.call(next.options.inputPreparation || {}, 'userText')
+            ? next.options.inputPreparation.userText : next.text,
+          files: next.attachments, plugins: prepared.badges,
+          fallback: Boolean(next.options.inputPreparation?.fallback), signal: next.signal,
+        });
+      } catch (error) {
+        materialUnderstanding = { eligible: true, status: 'error', prompt: '本轮附件理解准备失败：' + String(error?.message || error) +
+          '\n请不要假设附件内容已经读取；如需继续，请先说明处理目标或重新提供材料。' };
+      }
+    }
+    const materialPrompt = materialUnderstanding.eligible ? materialUnderstanding.prompt : '';
     const options = { ...next.options, plugins: prepared.badges,
       [TURN_SKILLS]: skillTurn.runnerRows(skillRows(state.selectedSkills), selectedSkills),
       [pluginTurn.RESOURCE_BUNDLES]: prepared.resourceBundles,
-      promptText: prepared.augment([next.options.promptText || conversationPrompt(next.text, current),
+      promptText: prepared.augment([materialPrompt, next.options.promptText || conversationPrompt(next.text, current),
         selectedSkills.prompt].filter(Boolean).join('\n\n')) };
-    appendUser(next.text, next.attachments, prepared.badges, next.options.sentAt);
+    appendUser(next.text, next.attachments, prepared.badges, next.options.sentAt, next.options.submissionId);
     emit('turn-dequeued', { queueId: next.id, taskId: next.options.taskId || '' });
     return await (state.started ? continueTurn(next.text, next.attachments, options)
       : dispatch(next.text, next.attachments, options));

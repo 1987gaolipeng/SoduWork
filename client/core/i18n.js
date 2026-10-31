@@ -15,11 +15,21 @@
   // while this renderer already has the newer packs on disk.
   const localeDefinitions = Object.assign({}, builtInLocaleDefinitions, global.SoduWorkLocaleRegistry?.locales || {});
   const LOCALES = Object.freeze(Object.fromEntries(Object.entries(localeDefinitions).map(([id, item]) => [id, item.label])));
-  const FALLBACKS = Object.freeze(Object.fromEntries(Object.entries(localeDefinitions).map(([id, item]) => [id, item.fallback || 'zh-CN'])));
-  const FALLBACK = global.SoduWorkLocaleRegistry?.defaultLocale || 'zh-CN';
+  const SOURCE_LOCALE = 'zh-CN';
+  const DEFAULT_LOCALE = 'en-US';
+  const FALLBACKS = Object.freeze(Object.fromEntries(Object.entries(localeDefinitions).map(([id, item]) => [id, item.fallback || SOURCE_LOCALE])));
   const KEY = 'locale';
   const DICT = {
     'zh-CN': {
+      "releaseNotes.title": "SoduWork {version} · 此版本新内容",
+      "releaseNotes.updated": "SoduWork 已更新至 {version}",
+      "releaseNotes.history": "查看历史更新",
+      "releaseNotes.backToCurrent": "返回当前版本",
+      "releaseNotes.dismiss": "知道了",
+      "releaseNotes.close": "关闭",
+      "releaseNotes.fallback": "此说明暂未提供当前语言，现显示可用原文。",
+      "releaseNotes.empty": "此版本暂无可用的更新说明。",
+      "releaseNotes.error": "暂时无法读取或保存更新说明，请稍后重试。",
       "eyebrow.task_workspace": "需求工作区",
       "eyebrow.preferences": "偏好设置",
       "eyebrow.create_task": "创建需求",
@@ -75,7 +85,7 @@
       'nav.create': '新对话', 'nav.pichat': '新建对话', 'nav.history': '需求池',
       'nav.briefs': '简报', 'nav.team': '团队',
       'nav.schedules': '自动化', 'nav.skills': '插件', 'nav.models': '我的模型',
-      'nav.agents': 'Agent 管理', 'nav.codeacct': '代码账号', 'nav.memory': '我的记忆',
+      'nav.agents': 'Agent 管理', 'nav.codeacct': '代码账号', 'nav.account': '个人信息', 'nav.memory': '我的记忆',
       'nav.usage': '我的用量', 'nav.notices': '通知', 'nav.skin': '外观',
       'nav.aidesk': 'AI 团队', 'group.collaboration': '协作', 'group.ai': 'AI 与账号',
       'group.preferences': '偏好', 'rail.more': '更多', 'rail.home': '主页',
@@ -88,6 +98,15 @@
       'models.noResults': '没有匹配“{query}”的服务或模型',
     },
     'en-US': {
+      "releaseNotes.title": "What’s new in SoduWork {version}",
+      "releaseNotes.updated": "SoduWork has been updated to {version}",
+      "releaseNotes.history": "View release history",
+      "releaseNotes.backToCurrent": "Back to current version",
+      "releaseNotes.dismiss": "Got it",
+      "releaseNotes.close": "Close",
+      "releaseNotes.fallback": "These notes are not available in your language. Showing the available original text.",
+      "releaseNotes.empty": "No release notes are available for this version.",
+      "releaseNotes.error": "Unable to load or save release notes. Please try again later.",
       "eyebrow.task_workspace": "ISSUE WORKSPACE",
       "eyebrow.preferences": "PREFERENCES",
       "eyebrow.create_task": "CREATE ISSUE",
@@ -143,7 +162,7 @@
       'nav.create': 'New chat', 'nav.pichat': 'New conversation', 'nav.history': 'Issues',
       'nav.briefs': 'Briefs', 'nav.team': 'Team',
       'nav.schedules': 'Automation', 'nav.skills': 'Plugins', 'nav.models': 'My models',
-      'nav.agents': 'Agent management', 'nav.codeacct': 'Code accounts', 'nav.memory': 'My memory',
+      'nav.agents': 'Agent management', 'nav.codeacct': 'Code accounts', 'nav.account': 'Personal info', 'nav.memory': 'My memory',
       'nav.usage': 'My usage', 'nav.notices': 'Notifications', 'nav.skin': 'Appearance',
       'nav.aidesk': 'AI team', 'group.collaboration': 'Collaboration', 'group.ai': 'AI and account',
       'group.preferences': 'Preferences', 'rail.more': 'More', 'rail.home': 'Home',
@@ -160,8 +179,8 @@
   // can start with the highest-value copy and safely inherit English until all
   // source phrases have been translated; Chinese is only the final fallback.
   const localeDict = {
-    'ja-JP': Object.freeze({ ...DICT['en-US'], "eyebrow.task_workspace":"ISSUE ワークスペース","eyebrow.preferences":"環境設定","eyebrow.create_task":"ISSUE 作成","eyebrow.workspace_access":"ワークスペースアクセス","eyebrow.briefs":"ブリーフ","eyebrow.personal_brief":"個人ブリーフ","eyebrow.evidence":"エビデンス","eyebrow.team_brief":"チームブリーフ","eyebrow.teams":"チーム","eyebrow.sources":"ソース","eyebrow.agent_runtime":"AGENT ランタイム","eyebrow.my_agents":"マイ Agent","eyebrow.live_task_queue":"リアルタイム ISSUE キュー","eyebrow.current_stage":"現在のステージ","eyebrow.live_activity":"リアルタイムアクティビティ","eyebrow.live_inspector":"リアルタイム詳細","eyebrow.capability_center":"能力センター","eyebrow.source_control":"ソース管理","eyebrow.execution":"実行","eyebrow.ai_team":"AI チーム","eyebrow.ready":"準備完了","eyebrow.notifications":"通知","eyebrow.tasks":"ISSUE","eyebrow.model_routing":"モデルルーティング","eyebrow.model_connections":"モデル接続","eyebrow.automation":"オートメーション","eyebrow.capabilities":"能力","eyebrow.personal_memory":"個人メモリー","eyebrow.local_document":"ローカル文書","eyebrow.personal_ai_usage":"個人 AI 使用量","eyebrow.work_scenes":"ワークシーン","eyebrow.agent_mix":"AGENT 構成","eyebrow.recent_activity":"最近のアクティビティ","eyebrow.delivery_readiness":"納品準備","eyebrow.ready_to_deliver":"納品可能","eyebrow.requirement_brief":"ISSUE 概要","eyebrow.requirement_detail":"ISSUE 詳細","eyebrow.plugin_work_surface":"プラグイン作業台","eyebrow.plugin_setup":"プラグイン設定","eyebrow.project_context":"プロジェクト文脈","eyebrow.upstream_handoff":"上流引き継ぎ","eyebrow.stage_detail":"ステージ詳細","eyebrow.delivery":"納品","eyebrow.task_journey":"ISSUE の進行","language":"言語","languageZh":"簡体字中国語","languageEn":"English","languageJa":"日本語","languageKo":"한국어","console.task":"{title}","console.taskWithSession":"{title}（会話あり）","console.unnamed":"無題","console.unnamedWithSession":"無題（会話あり）","settings":"設定","preferences":"環境設定","my":"マイ","settingsSub":"クライアントと作業ディレクトリを管理","languageHint":"画面の言語","languageNote":"選択後すぐに適用されます。対応言語は今後拡張予定です。","home":"ホーム","update":"更新","updateRestart":"再起動して更新","backHome":"ホームへ戻る","loading":"読み込み中…","chat.opening":"対話を開いています…","nav.create":"新しいチャット","nav.pichat":"新しい対話","nav.history":"Issue プール","nav.briefs":"ブリーフ","nav.team":"チーム","nav.schedules":"オートメーション","nav.skills":"プラグイン","nav.models":"マイモデル","nav.agents":"Agent 管理","nav.codeacct":"コードアカウント","nav.memory":"マイメモリー","nav.usage":"マイ使用量","nav.notices":"通知","nav.skin":"外観","nav.aidesk":"AI チーム","group.collaboration":"コラボレーション","group.ai":"AI とアカウント","group.preferences":"環境設定","rail.more":"もっと見る","rail.home":"ホーム","newChat":"新しいチャット","pinned":"ピン留め","recentChats":"最近のチャット","recentTasks":"最近の課題","connected":"SoduWork サービスに接続済み","connecting":"サービスに接続中","models.available":"利用可能なモデル: {count} 件","models.types":"チャット {chat} · 画像 {image} · 動画 {video}","models.providers":"{count} 社のサービスを設定済み · {personal} 件は個人枠を使用","models.count":"モデル {count} 件","models.itemCount":"{count} 件","models.keyLength":"個人キー設定済み · {count} 桁。リクエストは先に個人枠を使用します","models.noResults":"「{query}」に一致するサービスやモデルがありません" }),
-    'ko-KR': Object.freeze({ ...DICT['en-US'], "eyebrow.task_workspace":"ISSUE 작업 공간","eyebrow.preferences":"환경 설정","eyebrow.create_task":"ISSUE 만들기","eyebrow.workspace_access":"작업 공간 접근","eyebrow.briefs":"브리프","eyebrow.personal_brief":"개인 브리프","eyebrow.evidence":"증거","eyebrow.team_brief":"팀 브리프","eyebrow.teams":"팀","eyebrow.sources":"출처","eyebrow.agent_runtime":"AGENT 실행 환경","eyebrow.my_agents":"내 Agent","eyebrow.live_task_queue":"실시간 ISSUE 대기줄","eyebrow.current_stage":"지금 단계","eyebrow.live_activity":"실시간 활동","eyebrow.live_inspector":"실시간 세부","eyebrow.capability_center":"능력 센터","eyebrow.source_control":"소스 관리","eyebrow.execution":"실행","eyebrow.ai_team":"AI 팀","eyebrow.ready":"준비 완료","eyebrow.notifications":"알림","eyebrow.tasks":"ISSUE","eyebrow.model_routing":"모델 안내","eyebrow.model_connections":"모델 연결","eyebrow.automation":"자동화","eyebrow.capabilities":"능력","eyebrow.personal_memory":"개인 기억","eyebrow.local_document":"이 기기 문서","eyebrow.personal_ai_usage":"개인 AI 사용량","eyebrow.work_scenes":"작업 장면","eyebrow.agent_mix":"AGENT 분포","eyebrow.recent_activity":"최근 활동","eyebrow.delivery_readiness":"납품 준비","eyebrow.ready_to_deliver":"납품 가능","eyebrow.requirement_brief":"ISSUE 개요","eyebrow.requirement_detail":"ISSUE 세부","eyebrow.plugin_work_surface":"플러그인 작업대","eyebrow.plugin_setup":"플러그인 설정","eyebrow.project_context":"프로젝트 배경","eyebrow.upstream_handoff":"상류 인계","eyebrow.stage_detail":"단계 세부","eyebrow.delivery":"납품","eyebrow.task_journey":"ISSUE 진행","language":"언어","languageZh":"중국어 간체","languageEn":"English","languageJa":"일본어","languageKo":"한국어","console.task":"{title}","console.taskWithSession":"{title}(대화 있음)","console.unnamed":"이름 없음","console.unnamedWithSession":"이름 없음(대화 있음)","settings":"설정","preferences":"환경 설정","my":"내 정보","settingsSub":"클라이언트와 작업 디렉터리 관리","languageHint":"화면 언어","languageNote":"고르면 바로 적용돼요. 앞으로 더 많은 언어를 더할 수 있어요.","home":"홈","update":"업데이트","updateRestart":"다시 시작하고 업데이트","backHome":"홈으로 돌아가기","loading":"로드 중…","chat.opening":"대화를 여는 중…","nav.create":"새 채팅","nav.pichat":"새 대화","nav.history":"Issue 보관함","nav.briefs":"브리프","nav.team":"팀","nav.schedules":"자동화","nav.skills":"플러그인","nav.models":"내 모델","nav.agents":"Agent 관리","nav.codeacct":"코드 계정","nav.memory":"내 기억","nav.usage":"내 사용량","nav.notices":"알림","nav.skin":"꼴","nav.aidesk":"AI 팀","group.collaboration":"협업","group.ai":"AI와 계정","group.preferences":"환경 설정","rail.more":"더 보기","rail.home":"홈","newChat":"새 채팅","pinned":"고정","recentChats":"최근 채팅","recentTasks":"최근 이슈","connected":"SoduWork 서비스에 연결됨","connecting":"서비스에 연결 중","models.available":"쓸 수 있는 모델: {count}개","models.types":"대화 {chat} · 그림 {image} · 영상 {video}","models.providers":"서비스 {count}곳 정함 · {personal}개는 개인 몫 사용","models.count":"모델 {count}개","models.itemCount":"{count}개","models.keyLength":"개인 Key를 정해 뒀고 {count}자예요. 요청은 먼저 개인 몫을 씁니다","models.noResults":"\"{query}\"에 맞는 서비스나 모델이 없어요" }),
+    'ja-JP': Object.freeze({ ...DICT['en-US'], "eyebrow.task_workspace":"ISSUE ワークスペース","eyebrow.preferences":"環境設定","eyebrow.create_task":"ISSUE 作成","eyebrow.workspace_access":"ワークスペースアクセス","eyebrow.briefs":"ブリーフ","eyebrow.personal_brief":"個人ブリーフ","eyebrow.evidence":"エビデンス","eyebrow.team_brief":"チームブリーフ","eyebrow.teams":"チーム","eyebrow.sources":"ソース","eyebrow.agent_runtime":"AGENT ランタイム","eyebrow.my_agents":"マイ Agent","eyebrow.live_task_queue":"リアルタイム ISSUE キュー","eyebrow.current_stage":"現在のステージ","eyebrow.live_activity":"リアルタイムアクティビティ","eyebrow.live_inspector":"リアルタイム詳細","eyebrow.capability_center":"能力センター","eyebrow.source_control":"ソース管理","eyebrow.execution":"実行","eyebrow.ai_team":"AI チーム","eyebrow.ready":"準備完了","eyebrow.notifications":"通知","eyebrow.tasks":"ISSUE","eyebrow.model_routing":"モデルルーティング","eyebrow.model_connections":"モデル接続","eyebrow.automation":"オートメーション","eyebrow.capabilities":"能力","eyebrow.personal_memory":"個人メモリー","eyebrow.local_document":"ローカル文書","eyebrow.personal_ai_usage":"個人 AI 使用量","eyebrow.work_scenes":"ワークシーン","eyebrow.agent_mix":"AGENT 構成","eyebrow.recent_activity":"最近のアクティビティ","eyebrow.delivery_readiness":"納品準備","eyebrow.ready_to_deliver":"納品可能","eyebrow.requirement_brief":"ISSUE 概要","eyebrow.requirement_detail":"ISSUE 詳細","eyebrow.plugin_work_surface":"プラグイン作業台","eyebrow.plugin_setup":"プラグイン設定","eyebrow.project_context":"プロジェクト文脈","eyebrow.upstream_handoff":"上流引き継ぎ","eyebrow.stage_detail":"ステージ詳細","eyebrow.delivery":"納品","eyebrow.task_journey":"ISSUE の進行","language":"言語","languageZh":"簡体字中国語","languageEn":"English","languageJa":"日本語","languageKo":"한국어","console.task":"{title}","console.taskWithSession":"{title}（会話あり）","console.unnamed":"無題","console.unnamedWithSession":"無題（会話あり）","settings":"設定","preferences":"環境設定","my":"マイ","settingsSub":"クライアントと作業ディレクトリを管理","languageHint":"画面の言語","languageNote":"選択後すぐに適用されます。対応言語は今後拡張予定です。","home":"ホーム","update":"更新","updateRestart":"再起動して更新","backHome":"ホームへ戻る","loading":"読み込み中…","chat.opening":"対話を開いています…","nav.create":"新しいチャット","nav.pichat":"新しい対話","nav.history":"Issue プール","nav.briefs":"ブリーフ","nav.team":"チーム","nav.schedules":"オートメーション","nav.skills":"プラグイン","nav.models":"マイモデル","nav.agents":"Agent 管理","nav.codeacct":"コードアカウント","nav.account":"個人情報","nav.memory":"マイメモリー","nav.usage":"マイ使用量","nav.notices":"通知","nav.skin":"外観","nav.aidesk":"AI チーム","group.collaboration":"コラボレーション","group.ai":"AI とアカウント","group.preferences":"環境設定","rail.more":"もっと見る","rail.home":"ホーム","newChat":"新しいチャット","pinned":"ピン留め","recentChats":"最近のチャット","recentTasks":"最近の課題","connected":"SoduWork サービスに接続済み","connecting":"サービスに接続中","models.available":"利用可能なモデル: {count} 件","models.types":"チャット {chat} · 画像 {image} · 動画 {video}","models.providers":"{count} 社のサービスを設定済み · {personal} 件は個人枠を使用","models.count":"モデル {count} 件","models.itemCount":"{count} 件","models.keyLength":"個人キー設定済み · {count} 桁。リクエストは先に個人枠を使用します","models.noResults":"「{query}」に一致するサービスやモデルがありません" }),
+    'ko-KR': Object.freeze({ ...DICT['en-US'], "eyebrow.task_workspace":"ISSUE 작업 공간","eyebrow.preferences":"환경 설정","eyebrow.create_task":"ISSUE 만들기","eyebrow.workspace_access":"작업 공간 접근","eyebrow.briefs":"브리프","eyebrow.personal_brief":"개인 브리프","eyebrow.evidence":"증거","eyebrow.team_brief":"팀 브리프","eyebrow.teams":"팀","eyebrow.sources":"출처","eyebrow.agent_runtime":"AGENT 실행 환경","eyebrow.my_agents":"내 Agent","eyebrow.live_task_queue":"실시간 ISSUE 대기줄","eyebrow.current_stage":"지금 단계","eyebrow.live_activity":"실시간 활동","eyebrow.live_inspector":"실시간 세부","eyebrow.capability_center":"능력 센터","eyebrow.source_control":"소스 관리","eyebrow.execution":"실행","eyebrow.ai_team":"AI 팀","eyebrow.ready":"준비 완료","eyebrow.notifications":"알림","eyebrow.tasks":"ISSUE","eyebrow.model_routing":"모델 안내","eyebrow.model_connections":"모델 연결","eyebrow.automation":"자동화","eyebrow.capabilities":"능력","eyebrow.personal_memory":"개인 기억","eyebrow.local_document":"이 기기 문서","eyebrow.personal_ai_usage":"개인 AI 사용량","eyebrow.work_scenes":"작업 장면","eyebrow.agent_mix":"AGENT 분포","eyebrow.recent_activity":"최근 활동","eyebrow.delivery_readiness":"납품 준비","eyebrow.ready_to_deliver":"납품 가능","eyebrow.requirement_brief":"ISSUE 개요","eyebrow.requirement_detail":"ISSUE 세부","eyebrow.plugin_work_surface":"플러그인 작업대","eyebrow.plugin_setup":"플러그인 설정","eyebrow.project_context":"프로젝트 배경","eyebrow.upstream_handoff":"상류 인계","eyebrow.stage_detail":"단계 세부","eyebrow.delivery":"납품","eyebrow.task_journey":"ISSUE 진행","language":"언어","languageZh":"중국어 간체","languageEn":"English","languageJa":"일본어","languageKo":"한국어","console.task":"{title}","console.taskWithSession":"{title}(대화 있음)","console.unnamed":"이름 없음","console.unnamedWithSession":"이름 없음(대화 있음)","settings":"설정","preferences":"환경 설정","my":"내 정보","settingsSub":"클라이언트와 작업 디렉터리 관리","languageHint":"화면 언어","languageNote":"고르면 바로 적용돼요. 앞으로 더 많은 언어를 더할 수 있어요.","home":"홈","update":"업데이트","updateRestart":"다시 시작하고 업데이트","backHome":"홈으로 돌아가기","loading":"로드 중…","chat.opening":"대화를 여는 중…","nav.create":"새 채팅","nav.pichat":"새 대화","nav.history":"Issue 보관함","nav.briefs":"브리프","nav.team":"팀","nav.schedules":"자동화","nav.skills":"플러그인","nav.models":"내 모델","nav.agents":"Agent 관리","nav.codeacct":"코드 계정","nav.account":"개인 정보","nav.memory":"내 기억","nav.usage":"내 사용량","nav.notices":"알림","nav.skin":"꼴","nav.aidesk":"AI 팀","group.collaboration":"협업","group.ai":"AI와 계정","group.preferences":"환경 설정","rail.more":"더 보기","rail.home":"홈","newChat":"새 채팅","pinned":"고정","recentChats":"최근 채팅","recentTasks":"최근 이슈","connected":"SoduWork 서비스에 연결됨","connecting":"서비스에 연결 중","models.available":"쓸 수 있는 모델: {count}개","models.types":"대화 {chat} · 그림 {image} · 영상 {video}","models.providers":"서비스 {count}곳 정함 · {personal}개는 개인 몫 사용","models.count":"모델 {count}개","models.itemCount":"{count}개","models.keyLength":"개인 Key를 정해 뒀고 {count}자예요. 요청은 먼저 개인 몫을 씁니다","models.noResults":"\"{query}\"에 맞는 서비스나 모델이 없어요" }),
   };
   /* UI copy used by legacy panels that still render their markup locally.  Keeping
      this table phrase based lets those panels participate in locale switching while
@@ -188,13 +207,13 @@
     const raw = String(value || '').trim();
     if (LOCALES[raw]) return raw;
     if (/^en(?:[-_]|$)/i.test(raw)) return 'en-US';
-    if (/^ja(?:[-_]|$)/i.test(raw)) return LOCALES['ja-JP'] ? 'ja-JP' : FALLBACK;
-    if (/^(ko|kr)(?:[-_]|$)/i.test(raw)) return LOCALES['ko-KR'] ? 'ko-KR' : FALLBACK;
-    return FALLBACK;
+    if (/^ja(?:[-_]|$)/i.test(raw)) return LOCALES['ja-JP'] ? 'ja-JP' : DEFAULT_LOCALE;
+    if (/^(ko|kr)(?:[-_]|$)/i.test(raw)) return LOCALES['ko-KR'] ? 'ko-KR' : DEFAULT_LOCALE;
+    return DEFAULT_LOCALE;
   }
   function fallbackLocale(target) {
     const current = normalize(target);
-    return FALLBACKS[current] && FALLBACKS[current] !== current ? FALLBACKS[current] : FALLBACK;
+    return FALLBACKS[current] || SOURCE_LOCALE;
   }
   function catalog(target) { return global.SoduWorkLocaleMessages?.[target] || {}; }
   function config() { return typeof cfg !== 'undefined' ? cfg : global.cfg; }
@@ -213,9 +232,9 @@
   }
   function translateText(value, target = read()) {
     const text = String(value == null ? '' : value);
-    if (target === FALLBACK) return text;
+    if (target === SOURCE_LOCALE) return text;
     const trimmed = text.trim().replace(/\s+/g, ' ');
-    const key = Object.keys(DICT[FALLBACK]).find(key => DICT[FALLBACK][key] === trimmed);
+    const key = Object.keys(DICT[SOURCE_LOCALE]).find(key => DICT[SOURCE_LOCALE][key] === trimmed);
     // Phrase translations are authoritative for ordinary labels. Keyed eyebrows
     // may share Chinese text but use uppercase/plural English (e.g. ISSUES).
     // Only t('eyebrow.…') should select that contextual presentation.
@@ -253,7 +272,7 @@
     const inherited = localeDict[fallbackLocale(read())] || DICT[fallbackLocale(read())] || {};
     const english = DICT['en-US'] || {};
     const template = Object.hasOwn(selected, key) ? selected[key] : Object.hasOwn(inherited, key) ? inherited[key]
-      : Object.hasOwn(english, key) ? english[key] : Object.hasOwn(DICT[FALLBACK], key) ? DICT[FALLBACK][key] : translateText(fallback ?? key);
+      : Object.hasOwn(english, key) ? english[key] : Object.hasOwn(DICT[SOURCE_LOCALE], key) ? DICT[SOURCE_LOCALE][key] : translateText(fallback ?? key);
     return String(template).replace(/\{(\w+)\}/g, (match, name) => params && Object.hasOwn(params, name) ? String(params[name]) : match);
   }
   function applyKeyed(root = global.document) {

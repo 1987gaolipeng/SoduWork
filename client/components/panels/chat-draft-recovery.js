@@ -6,6 +6,7 @@
 (function (global) {
   'use strict';
   function create(ctx) {
+  const uiText = value => global.SoduWorkI18n?.translateText?.(value) || value;
   const recoveringRequirements = new WeakSet();
   // File/Blob objects and native input references stay in memory, scoped to
   // this login. Changing chats must preserve an unsent attachment as well as text.
@@ -98,6 +99,7 @@
     attachmentDrafts.clear(); pluginDrafts.clear(); actionDrafts.clear();
     ctx._draftStorageLoaded = true;
     ctx._retryDraft = null; ctx._pending = ''; ctx._pendingPlugins = []; ctx._pendingAttachmentNames = []; ctx._localQueue = [];
+    ctx._pluginAuthorization = null;
     const input = document.getElementById('nchatInput');
     if (input) input.value = '';
     _withConversationDraftRestore(() => {
@@ -272,6 +274,34 @@
     }
     input.focus();
   }
+  async function _openPluginAuthRecovery() {
+    const draft = ctx._retryDraft;
+    const metadata = ctx._pluginAuthorization;
+    const builder = global.ChatPluginAuthRecovery;
+    if (!draft || !builder || typeof builder.newSessionPayload !== 'function') return false;
+    const el = ctx._mount();
+    const input = el && el.querySelector('#nchatInput');
+    if (_hasNewInputDraft(draft) || _hasNewPluginDraft(draft) || _hasNewSkillDraft(draft)) {
+      if (typeof petSay === 'function') petSay(uiText('输入框里已有新内容，请先发送或清空，再恢复上一轮'));
+      input?.focus?.();
+      return false;
+    }
+    const payload = builder.newSessionPayload(draft, metadata, ctx._sessionOptions);
+    if (!payload || typeof global.WorkspaceHost?.open !== 'function') {
+      if (typeof petSay === 'function') petSay(uiText('请新建会话并开启对应能力后再使用这个插件'));
+      return false;
+    }
+    try {
+      const opened = await Promise.resolve(global.WorkspaceHost.open('create', payload));
+      if (opened === false) throw Error('新会话没有打开');
+      ctx._retryDraft = null;
+      ctx._pluginAuthorization = null;
+      return true;
+    } catch (error) {
+      if (typeof petSay === 'function') petSay(uiText(String(error?.message || '新会话没有打开，请重试')));
+      return false;
+    }
+  }
   function _restoreFailedDraft(draft) {
     if (!draft || draft.requirement) return;
     const el = ctx._mount();
@@ -388,7 +418,7 @@
       say(String(error?.message || error)); return false;
     } finally { recoveringRequirements.delete(draft); }
   }
-  return { _withConversationDraftRestore, _draftKeyForCurrentSession, _draftOwnerScope, _clearConversationDraftScope, _flushConversationDrafts, _rememberConversationText, _rememberConversationDraft, _conversationDraftText, _conversationDraftSkills, _clearConversationDraft, _restoreConversationDraft, _retainFailedConversationDraft, _restoreRetainedConversationFailure, _restoreRetryDraft, _restoreFailedDraft };
+  return { _withConversationDraftRestore, _draftKeyForCurrentSession, _draftOwnerScope, _clearConversationDraftScope, _flushConversationDrafts, _rememberConversationText, _rememberConversationDraft, _conversationDraftText, _conversationDraftSkills, _clearConversationDraft, _restoreConversationDraft, _retainFailedConversationDraft, _restoreRetainedConversationFailure, _restoreRetryDraft, _openPluginAuthRecovery, _restoreFailedDraft };
   }
   global.ChatDraftRecovery = { create };
 })(window);

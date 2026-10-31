@@ -185,6 +185,8 @@ test('real Pi revoked queued skill sends no model request and preserves later in
   assert.equal(retry.queued, false, 'explicit resend starts without a separate resume-queue action');
   assert.equal((await retry.completion).ok, true); assert.equal((await later.completion).ok, true);
   assert.equal(fixture.requests.length, 3); assert.equal(handle.snapshot().status, 'idle');
+  assert.match(JSON.stringify(fixture.requests.at(-1).messages), /soduwork-material-context/);
+  assert.match(JSON.stringify(fixture.requests.at(-1).messages), /retain/);
   assert.deepEqual(handle.snapshot().messages.filter(row => row.role === 'user').map(row => row.text),
     ['Create an isolated report', 'First', '#revoked Do not silently omit', 'Later original input']);
 });

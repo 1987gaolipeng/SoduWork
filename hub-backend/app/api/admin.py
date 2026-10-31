@@ -252,6 +252,8 @@ async def create_user(
     user: User = Depends(require_perm("user.manage")),
     session: AsyncSession = Depends(get_session),
 ):
+    if body.tokenQuota is not None and not has_perm(user, "quota.manage"):
+        raise HTTPException(status_code=403, detail="请由额度管理员调整用户额度")
     if not body.orgId:
         raise HTTPException(status_code=400, detail="请为用户指定所属部门")
     await _assert_org_in_scope(session, user, body.orgId)

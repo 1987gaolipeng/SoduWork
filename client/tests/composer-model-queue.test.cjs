@@ -150,3 +150,14 @@ test('a turn that started during dragging cannot be reordered or resurrected', a
   assert.deepEqual(queue.view().map(row => row.id), [b.id]);
   finish({ ok: true }); await done;
 });
+
+
+test('model resolution preserves quota metadata without exposing arbitrary provider errors', async () => {
+  const quota={enabled:true,exceeded:true,reason:'model_not_allowed'};
+  const denied=harness({resolve:async()=>({ok:false,code:'TOKEN_QUOTA_EXCEEDED',quota,reason:'private provider body'})}).selection;
+  const result=await denied.select('b');assert.equal(result.code,'TOKEN_QUOTA_EXCEEDED');assert.equal(result.quota,quota);
+  assert.doesNotMatch(result.reason,/private provider/);
+  await assert.rejects(denied.applyForTurn('b'),error=>error.code==='TOKEN_QUOTA_EXCEEDED' && error.quota===quota);
+  const failed=harness({resolve:async()=>({ok:false,reason:'secret provider address'})}).selection;
+  assert.doesNotMatch((await failed.select('b')).reason,/secret provider/);
+});

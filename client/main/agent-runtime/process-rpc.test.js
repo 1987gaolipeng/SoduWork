@@ -92,10 +92,13 @@ test('custom codecs restore opaque handles and cannot be forged by ordinary obje
 test('errors and unknown methods reject without invoking inherited handler properties', async t => {
   const { left } = pair(t, {}, { handlers: {
     explode() { throw Object.assign(new Error('denied'), { code: 'DENIED', status: 403, permissionRequired: true, retryable: false }); },
+    remoteTimeout() { throw Object.assign(new Error('worker-side deadline'), { code: 'RPC_TIMEOUT' }); },
   } });
   await assert.rejects(left.call('explode'), { code: 'DENIED', message: 'denied', status: 403, permissionRequired: true, retryable: false });
   await assert.rejects(left.call('not-found'), { code: 'RPC_METHOD_NOT_FOUND' });
   await assert.rejects(left.call('toString'), { code: 'RPC_METHOD_NOT_FOUND' });
+  await assert.rejects(left.call('remoteTimeout'), error =>
+    error.code === 'RPC_TIMEOUT' && error.remote === true);
 });
 
 test('request timeout aborts the remote signal and ignores the late result', async t => {
@@ -109,6 +112,53 @@ test('request timeout aborts the remote signal and ignores the late result', asy
   await left.call('ready'); assert.equal(remoteAborted, true);
   finish({ late: true }); await turn(); await turn();
   assert.equal(left.stats().pending, 0); assert.equal(right.stats().incoming, 0);
+});
+
+test('paused RPC deadlines exclude system suspension time and resume with their remaining budget', async t => {
+  let finish, started = false, settled = false;
+  const { left } = pair(t, {}, { handlers: {
+    slow() { started = true; return new Promise(resolve => { finish = resolve; }); },
+    ready: () => true,
+  } });
+  const pending = left.call('slow', [], { timeoutMs: 100 });
+  while (!started) await turn();
+  assert.equal(left.pauseTimeouts(), true);
+  assert.equal(await left.call('ready', [], { timeoutMs: 20 }), true,
+    'responses can settle while new deadlines remain paused');
+  pending.finally(() => { settled = true; }).catch(() => {});
+  await new Promise(resolve => setTimeout(resolve, 140));
+  assert.equal(settled, false, 'wall-clock sleep must not consume an active RPC deadline');
+  assert.equal(left.resumeTimeouts(), true);
+  finish({ ok: true });
+  assert.deepEqual(await pending, { ok: true });
+  assert.equal(left.pauseTimeouts(), true);
+  assert.equal(left.pauseTimeouts(), false, 'pausing is idempotent');
+  assert.equal(left.resumeTimeouts(), true);
+  assert.equal(left.resumeTimeouts(), false, 'resuming is idempotent');
+});
+
+test('a late timer callback treats event-loop sleep as inactive time before enforcing the deadline', async t => {
+  let now = 1000;
+  const timers = [];
+  const peer = createRpcPeer({
+    now: () => now,
+    timerDriftToleranceMs: 50,
+    setTimeout(callback, delay) {
+      const timer = { callback, delay, cancelled: false };
+      timers.push(timer); return timer;
+    },
+    clearTimeout(timer) { timer.cancelled = true; },
+    send() {},
+  });
+  t.after(() => peer.close());
+  const pending = peer.call('never-replies', [], { timeoutMs: 100 });
+  const first = timers.shift();
+  now = 5000; first.callback();
+  assert.equal(peer.stats().pending, 1);
+  const resumed = timers.shift();
+  assert.equal(resumed.delay, 100, 'resume preserves the pre-sleep request budget');
+  now += 100; resumed.callback();
+  await assert.rejects(pending, { code: 'RPC_TIMEOUT' });
 });
 
 test('AbortSignal cancels only its own request and rejects calls aborted before dispatch', async t => {
@@ -175,18 +225,31 @@ test('exporter can revoke original callbacks without accumulating remote capabil
 
 test('an early completion is retained until its acceptance envelope is decoded', async t => {
   let left, right, response;
-  left = createRpcPeer({ send: packet => queueMicrotask(() => right.receive(structuredClone(packet))) });
+  const timers = [];
+  left = createRpcPeer({
+    timeoutMs: 0,
+    setTimeout(callback, delay) {
+      const timer = { callback, delay, cancelled: false };
+      timers.push(timer); return timer;
+    },
+    clearTimeout(timer) { timer.cancelled = true; },
+    send: packet => queueMicrotask(() => right.receive(structuredClone(packet))),
+  });
   right = createRpcPeer({ handlers: { accept: () => ({ accepted: true, completion: Promise.resolve({ ok: true }) }) },
     send(packet) {
       if (packet.type === 'response') response = structuredClone(packet);
       else if (packet.type === 'settle') {
         left.receive(structuredClone(packet));
+        assert.equal(left.pauseTimeouts(), true);
+        assert.equal(left.resumeTimeouts(), true);
         queueMicrotask(() => left.receive(response));
       } else queueMicrotask(() => left.receive(structuredClone(packet)));
     } });
   t.after(() => { left.close(); right.close(); });
   const accepted = await left.call('accept');
   assert.equal(accepted.accepted, true); assert.deepEqual(await accepted.completion, { ok: true });
+  assert.equal(timers.length, 2, 'pause/resume rearms the buffered completion once');
+  assert.equal(timers.every(timer => timer.cancelled), true, 'the injected timer is cancelled after decoding');
   assert.equal(left.stats().promises, 0);
 });
 

@@ -29,7 +29,7 @@ function fixture(t, options = {}) {
   const wire = [], receivedIdentities = [], auths = [], errors = [], operations = [], projections = new Map();
   const app = { isPackaged: false, getPath: name => path.join(os.tmpdir(), 'soduwork-host-fixture', name),
     getAppPath: () => path.resolve(__dirname, '../..'), getVersion: () => '1.12.94' };
-  let spawns = 0, treeStarts = 0, treeStops = 0, kills = 0, spawnOptions;
+  let spawns = 0, treeStarts = 0, treeStops = 0, kills = 0, spawnOptions, watchdogTick = null, watchdogDelay = null;
   let currentIdentity = { hub: 'https://isolated-hub.example', clientId: 'isolated-device',
     secret: 'host-private-device-secret', session: 'session-0' };
   function projection(ref, revision) {
@@ -58,6 +58,13 @@ function fixture(t, options = {}) {
     handlers: {
       initialize: () => { operations.push('initialize');
         return options.initializeGate ? options.initializeGate.promise : { pid: child.pid, node: process.versions.node }; },
+      hostPowerState: state => {
+        operations.push(state.suspended ? 'host-suspended' : 'host-resumed');
+        if (state.suspended) remote.pauseTimeouts(); else remote.resumeTimeouts();
+        return true;
+      },
+      health: () => { operations.push('health');
+        return options.healthGate ? options.healthGate.promise : true; },
       shutdown: () => { operations.push('shutdown'); return true; },
       echo: value => value,
       inspectIdentity: value => ({ ...value }),
@@ -90,6 +97,16 @@ function fixture(t, options = {}) {
         close() { entry.closed++; } };
       auths.push(entry); return entry;
     }, onError: error => errors.push(error), stallTimeoutMs: options.stallTimeoutMs || 45000,
+    ...(options.now ? { now: options.now } : {}),
+    ...(options.watchdogIntervalMs === undefined ? {} : { watchdogIntervalMs: options.watchdogIntervalMs }),
+    ...(options.resumeGapMs === undefined ? {} : { resumeGapMs: options.resumeGapMs }),
+    ...(options.stallProbeTimeoutMs === undefined ? {} : { stallProbeTimeoutMs: options.stallProbeTimeoutMs }),
+    ...(options.initializeTimeoutMs === undefined ? {} : { initializeTimeoutMs: options.initializeTimeoutMs }),
+    ...(options.powerMonitor ? { powerMonitor: options.powerMonitor } : {}),
+    ...(options.manualWatchdog ? {
+      watchdogSetInterval: (callback, delay) => { watchdogTick = callback; watchdogDelay = delay; return { unref() {} }; },
+      watchdogClearInterval: () => { watchdogTick = null; },
+    } : {}),
     ...(options.cleanupTimeoutMs === undefined ? {} : { cleanupTimeoutMs: options.cleanupTimeoutMs }),
   });
   t.after(async () => {
@@ -100,10 +117,153 @@ function fixture(t, options = {}) {
     remote.close(); child.removeAllListeners();
   });
   return { host, remote, child, wire, operations, receivedIdentities, auths, errors, projection,
+    tickWatchdog() { assert.ok(watchdogTick, 'watchdog must be installed'); watchdogTick(); },
+    get watchdogDelay() { return watchdogDelay; },
     get spawns() { return spawns; }, get treeStarts() { return treeStarts; }, get treeStops() { return treeStops; },
     get kills() { return kills; }, get spawnOptions() { return spawnOptions; },
     get identity() { return currentIdentity; }, set identity(value) { currentIdentity = value; } };
 }
+
+test('a delayed watchdog tick after host suspension grants the runtime a fresh heartbeat window', async t => {
+  let now = 1000;
+  const f = fixture(t, { manualWatchdog: true, now: () => now,
+    watchdogIntervalMs: 5, stallTimeoutMs: 30, resumeGapMs: 10 });
+  await f.host.start();
+  now += 600000;
+  f.tickWatchdog(); await turn();
+  assert.equal(f.host.isDead(), false);
+  assert.equal(f.operations.includes('health'), false, 'resume is not evidence of a worker stall');
+  assert.equal(await f.host.call('echo', ['after-resume']), 'after-resume');
+});
+
+test('power suspend keeps a separately paused worker alive until resume and releases listeners on stop', async t => {
+  let now = 1000;
+  const powerMonitor = new EventEmitter();
+  const f = fixture(t, { manualWatchdog: true, now: () => now, powerMonitor,
+    watchdogIntervalMs: 5, stallTimeoutMs: 30, resumeGapMs: 100 });
+  await f.host.start();
+  assert.equal(powerMonitor.listenerCount('suspend'), 1);
+  assert.equal(powerMonitor.listenerCount('resume'), 1);
+  powerMonitor.emit('suspend');
+  await until(() => f.operations.includes('host-suspended'), 'worker suspend notification');
+  for (let index = 0; index < 4; index++) { now += 31; f.tickWatchdog(); }
+  assert.equal(f.host.isDead(), false);
+  assert.equal(f.operations.includes('health'), false);
+  powerMonitor.emit('resume');
+  await until(() => f.operations.includes('host-resumed'), 'worker resume notification');
+  f.remote.notify('heartbeat', []); await turn();
+  now += 20; f.tickWatchdog();
+  assert.equal(f.host.isDead(), false);
+  await f.host.stop();
+  assert.equal(powerMonitor.listenerCount('suspend'), 0);
+  assert.equal(powerMonitor.listenerCount('resume'), 0);
+});
+
+test('power suspension pauses an in-flight command deadline without replaying the command', async t => {
+  const operationGate = deferred(), powerMonitor = new EventEmitter();
+  let executions = 0, settled = false;
+  const f = fixture(t, { powerMonitor, handlers: {
+    operate() { executions++; return operationGate.promise; },
+  } });
+  const pending = f.host.call('operate', [], { timeoutMs: 40 });
+  await until(() => executions === 1, 'operation accepted before suspend');
+  powerMonitor.emit('suspend');
+  pending.finally(() => { settled = true; }).catch(() => {});
+  await wait(70);
+  assert.equal(settled, false);
+  assert.equal(f.host.isDead(), false);
+  powerMonitor.emit('resume');
+  operationGate.resolve({ ok: true });
+  assert.deepEqual(await pending, { ok: true });
+  assert.equal(executions, 1, 'resume must not replay an uncertain operation');
+  assert.equal(f.host.isDead(), false);
+});
+
+test('power suspension pauses the initialization deadline before the watchdog exists', async t => {
+  const initializeGate = deferred(), powerMonitor = new EventEmitter();
+  const f = fixture(t, { initializeGate, powerMonitor, initializeTimeoutMs: 30 });
+  const starting = f.host.start();
+  await until(() => f.operations.includes('initialize'), 'initialization accepted before suspend');
+  powerMonitor.emit('suspend');
+  await wait(60);
+  assert.equal(f.host.isDead(), false);
+  powerMonitor.emit('resume');
+  initializeGate.resolve({ pid: f.child.pid, node: process.versions.node });
+  await starting;
+  assert.equal(f.host.isDead(), false);
+  assert.equal(await f.host.call('echo', ['ready']), 'ready');
+});
+
+test('a stale heartbeat uses a worker liveness probe before interrupting sessions', async t => {
+  let now = 1000;
+  const f = fixture(t, { manualWatchdog: true, now: () => now,
+    watchdogIntervalMs: 5, stallTimeoutMs: 30, resumeGapMs: 100 });
+  await f.host.start();
+  now += 31;
+  f.tickWatchdog();
+  await until(() => f.operations.includes('health'), 'worker liveness probe');
+  await turn();
+  assert.equal(f.host.isDead(), false);
+  assert.equal(await f.host.call('echo', ['still-live']), 'still-live');
+});
+
+test('a short stall timeout keeps the watchdog sampling faster than the timeout', async t => {
+  let now = 1000;
+  const f = fixture(t, { manualWatchdog: true, now: () => now, stallTimeoutMs: 2000 });
+  await f.host.start();
+  assert.ok(f.watchdogDelay < 2000);
+  for (let elapsed = f.watchdogDelay; elapsed <= 2000; elapsed += f.watchdogDelay) {
+    now += f.watchdogDelay; f.tickWatchdog();
+  }
+  now += f.watchdogDelay; f.tickWatchdog();
+  await until(() => f.operations.includes('health'), 'short-timeout liveness probe');
+  assert.equal(f.host.isDead(), false);
+});
+
+test('suspension while a liveness probe is pending cannot turn its timeout into a runtime interruption', async t => {
+  let now = 1000;
+  const healthGate = deferred(), powerMonitor = new EventEmitter();
+  const f = fixture(t, { manualWatchdog: true, now: () => now, healthGate, powerMonitor,
+    watchdogIntervalMs: 5, stallTimeoutMs: 30, resumeGapMs: 100, stallProbeTimeoutMs: 1000 });
+  await f.host.start();
+  now += 31; f.tickWatchdog();
+  await until(() => f.operations.includes('health'), 'pending pre-suspend liveness probe');
+  powerMonitor.emit('suspend'); now += 11;
+  await wait(20);
+  assert.equal(f.host.isDead(), false);
+  powerMonitor.emit('resume');
+  assert.equal(await f.host.call('echo', ['after-probe-resume']), 'after-probe-resume');
+  healthGate.resolve(true);
+});
+
+test('a resumed worker that stays unresponsive is still stopped after one fresh heartbeat window', async t => {
+  let now = 1000;
+  const healthGate = deferred();
+  const f = fixture(t, { manualWatchdog: true, now: () => now, healthGate,
+    watchdogIntervalMs: 5, stallTimeoutMs: 30, resumeGapMs: 100, stallProbeTimeoutMs: 10 });
+  await f.host.start();
+  now += 600000; f.tickWatchdog();
+  for (let index = 0; index < 4; index++) { now += 10; f.tickWatchdog(); }
+  await until(() => f.operations.includes('health'), 'post-resume liveness probe');
+  await until(() => f.host.isDead(), 'post-resume unresponsive runtime shutdown');
+  assert.equal(f.treeStops, 1);
+  healthGate.resolve(true);
+});
+
+test('an unresponsive worker is stopped after its liveness probe times out', async t => {
+  let now = 1000;
+  const healthGate = deferred();
+  const f = fixture(t, { manualWatchdog: true, now: () => now, healthGate,
+    watchdogIntervalMs: 5, stallTimeoutMs: 30, resumeGapMs: 100, stallProbeTimeoutMs: 10 });
+  await f.host.start();
+  now += 31;
+  f.tickWatchdog();
+  await until(() => f.operations.includes('health'), 'pending worker liveness probe');
+  now += 11;
+  await until(() => f.host.isDead(), 'unresponsive runtime shutdown');
+  assert.equal(f.treeStops, 1);
+  healthGate.resolve(true);
+});
 
 test('runtime retains Windows program directories for shell discovery without forwarding similarly named secrets', t => {
   const values = { ProgramFiles: 'C:\\runtime-fixture\\program64',
@@ -178,6 +338,17 @@ test('a timed-out admission stops the runtime instead of automatically resubmitt
   assert.equal(executions, 1); assert.equal(f.host.isDead(), true); assert.equal(f.treeStops, 1);
   await assert.rejects(f.host.call('operate'), { code: 'RUNTIME_PROCESS_GONE' });
   assert.equal(executions, 1); assert.equal(f.spawns, 1);
+});
+
+test('a worker-side RPC timeout remains a request error and does not kill the host runtime', async t => {
+  const f = fixture(t, { handlers: {
+    remoteTimeout() { throw Object.assign(new Error('worker-side deadline'), { code: 'RPC_TIMEOUT' }); },
+  } });
+  await assert.rejects(f.host.call('remoteTimeout'), error =>
+    error.code === 'RPC_TIMEOUT' && error.remote === true);
+  assert.equal(f.host.isDead(), false);
+  assert.equal(f.treeStops, 0);
+  assert.equal(await f.host.call('echo', ['still-ready']), 'still-ready');
 });
 
 test('an out-of-order projection freezes the accepted handle and immediately shuts down its host', async t => {

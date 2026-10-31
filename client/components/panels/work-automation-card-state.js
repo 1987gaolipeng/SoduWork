@@ -60,6 +60,19 @@
     if (A?.taskExecutionOptions) {
       try {
         const result = await A.taskExecutionOptions({ title: String(seed?.text || '').trim().slice(0, 60), note: String(seed?.text || '').trim().slice(0, 8000), tags: [] });
+        const modelOptions = Array.isArray(result?.modelOptions) ? result.modelOptions.slice() :
+          (Array.isArray(result?.models) ? result.models.map(name => ({ name, label: name })) : []);
+        const nativeAgents = (result?.substrates || []).filter(item => item?.key && item.nativeModelPick);
+        const bridge = global.soduWorkAPI && (global.soduWorkAPI.conversationSession || global.soduWorkAPI.piSession);
+        const nativeModels = Object.create(null);
+        if (bridge && typeof bridge.runtimeModels === 'function') await Promise.all(nativeAgents.map(async item => {
+          const adapter = String(item.cli || item.adapterId || item.key || '').replace(/^local:/, '');
+          if (!adapter) return;
+          try {
+            const value = await bridge.runtimeModels(adapter);
+            nativeModels[item.key] = Array.isArray(value?.models) ? value.models : [];
+          } catch (_) { nativeModels[item.key] = []; }
+        }));
         return { agents: (result?.substrates || []).filter(item => item?.key).map(item => ({
           id: String(item.key), name: String(item.name || item.cli || item.key), adapterId: String(item.adapterId || item.cli || ''),
           available: item.available !== false, note: String(item.note || ''), locationLabel: String(item.locationLabel || ''),
@@ -69,8 +82,9 @@
     }
     const agents = A?.listAIAgents ? await A.listAIAgents().catch(() => ({ agents: [] })) : { agents: [] };
     const repos = A?.listRepos ? await A.listRepos().catch(() => []) : [];
-    return { agents: (agents?.agents || []).filter(agent => agent && !agent.off).map(agent => ({ ...agent, available: agent.online !== false })),
-      repos, reason: String(agents?.reason || '') };
+    return { agents: (agents?.agents || []).filter(agent => agent && !agent.off).map(agent => ({ ...agent, available: agent.online !== false,
+      modelPick: agent.modelPick !== false, nativeModelPick: agent.nativeModelPick === true, modelOptions: agent.modelOptions || [] })),
+      repos, reason: String(agents?.reason || ''), modelOptions: [], defaultModel: '' };
   }
   function savedHtml(value, agent, method, esc) {
     const when = String(value.atHour).padStart(2, '0') + ':' + String(value.atMinute).padStart(2, '0');

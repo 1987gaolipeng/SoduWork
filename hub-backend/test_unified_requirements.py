@@ -1,14 +1,19 @@
 """Real HTTP/SQLite tests for the unified requirement and execution boundary."""
 import os
+import atexit
+import sqlite3
+import shutil
 import tempfile
 import unittest
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from sqlalchemy import create_engine, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app import models
 from app.api import tasks, attachments, retired_endpoints
@@ -49,21 +54,24 @@ class UnifiedRequirementTests(unittest.IsolatedAsyncioTestCase):
         for router in (tasks.router, attachments.router, retired_endpoints.router):
             app.include_router(router)
         async def identity(request: __import__('fastapi').Request):
-            return self.clients[request.headers.get("X-Test-Identity", "owner")]
+            who = request.headers.get("X-Test-Identity")
+            if not who:
+                raise HTTPException(status_code=401, detail="需要有效的 SoduWork 设备会话")
+            return self.clients[who]
         async def db():
             async with self.sessions() as session:
                 yield session
         app.dependency_overrides[current_client] = identity
+        app.dependency_overrides[current_ai_client] = identity
         app.dependency_overrides[get_session] = db
         self.http = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://fixture")
+        self.addAsyncCleanup(self.http.aclose)
         self.publish = patch("app.realtime.hub.publish", new_callable=AsyncMock)
         self.published = self.publish.start()
+        self.addCleanup(self.publish.stop)
 
     async def asyncTearDown(self):
-        self.publish.stop()
-        await self.http.aclose()
-        await self.engine.dispose()
-        self.temp.cleanup()
+        """Registered cleanups also release resources when asyncSetUp fails."""
 
     async def call(self, method, path, who="owner", **kwargs):
         headers = {"X-Test-Identity": who}
@@ -181,6 +189,21 @@ class UnifiedRequirementTests(unittest.IsolatedAsyncioTestCase):
         refreshed = (await self.call("GET", "tasks/shared", "peer")).json()
         self.assertEqual(refreshed["ai"], current["ai"])
 
+    async def test_scheduler_generated_rows_do_not_publish_requirement_updates(self):
+        async with self.sessions() as session:
+            session.add(models.AiSchedule(id="hidden-schedule", title="Scheduled work", owner_client_id="owner"))
+            for tid, markers in (("scheduled-origin", {"origin": "automation"}),
+                                 ("scheduled-source", {"source": "定时派活"})):
+                task = models.Task(id=tid, title="Scheduled execution", owner_client_id="owner",
+                                   shared_org_id="company", automation_schedule_id="hidden-schedule", **markers)
+                session.add(task)
+                task_notifications.enqueue(session, task, "task.updated")
+            await session.commit()
+        self.assertTrue(await task_notifications.run_once(self.sessions))
+        self.assertTrue(await task_notifications.run_once(self.sessions))
+        self.assertFalse(await task_notifications.run_once(self.sessions))
+        self.published.assert_not_awaited()
+
     async def test_creation_default_private_and_explicit_shared(self):
         for extra, expected in (({}, "related"), ({"visibility": "organization", "triageStage": "intake"}, "organization")):
             result = await self.call("POST", "tasks", json={"title": "Created requirement", **extra})
@@ -292,6 +315,55 @@ class UnifiedRequirementTests(unittest.IsolatedAsyncioTestCase):
         response = await self.call("POST", "tasks/shared/submit-review", json={})
         self.assertEqual(response.status_code, 409, response.text)
 
+    async def test_submit_review_authorizes_execution_participant_but_not_company_readers(self):
+        async with self.sessions() as session:
+            task = await session.get(models.Task, "shared")
+            task.status = "doing"
+            task.work_routing = {"executionSubmissionMode": "manual", "conversationTurn": {
+                "conversationId": "review-source", "state": "completed"}}
+            output = await session.get(models.Attachment, "output")
+            output.size, output.uploaded_by = 10, "agent:conversation"
+            output.source_ref = "conversation:review-source"
+            output.evidence_meta = {"sha256": "a" * 64, "round": 1,
+                                    "category": "primary", "verification": {"state": "passed"}}
+            await session.commit()
+        reader = (await self.call("GET", "tasks/shared", "peer")).json()
+        self.assertFalse(reader["canViewExecution"])
+        self.assertFalse(reader["canSubmitReview"])
+        for who in ("peer", "outsider"):
+            response = await self.call("POST", "tasks/shared/submit-review", who, json={})
+            self.assertEqual(response.status_code, 404, response.text)
+        async with self.sessions() as session:
+            self.assertIsNone(await session.scalar(select(automation_models.ApprovalRequest.id)))
+            task = await session.get(models.Task, "shared")
+            task.assignee_user_id = "peer"
+            await session.commit()
+        participant = (await self.call("GET", "tasks/shared", "peer")).json()
+        self.assertTrue(participant["readOnly"], "Assignment does not change the execution device")
+        self.assertFalse(participant["canEditRequirement"])
+        self.assertTrue(participant["canSubmitReview"])
+        submitted = await self.call("POST", "tasks/shared/submit-review", "peer", json={"note": "已自检"})
+        self.assertEqual(submitted.status_code, 200, submitted.text)
+        self.assertEqual(submitted.json()["task"]["requirementStage"], "reviewing")
+        async with self.sessions() as session:
+            request = await session.get(automation_models.ApprovalRequest, submitted.json()["request"]["id"])
+            artifact = await session.get(automation_models.ArtifactVersion, request.artifact_version_id)
+            self.assertEqual((request.task_id, request.action, request.status), ("shared", "review", "pending"))
+            self.assertEqual(artifact.source_ref, "conversation:review-source")
+            self.assertEqual((await session.get(models.Task, "shared")).status, "doing")
+
+    async def test_submit_review_still_rejects_missing_deliverable(self):
+        async with self.sessions() as session:
+            task = await session.get(models.Task, "shared")
+            task.status = "doing"
+            await session.delete(await session.get(models.Attachment, "output"))
+            await session.commit()
+        response = await self.call("POST", "tasks/shared/submit-review", json={})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("没有可审阅的产出", response.json()["detail"])
+        async with self.sessions() as session:
+            self.assertIsNone(await session.scalar(select(automation_models.ApprovalRequest.id)))
+
     async def test_archive_preserves_completed_delivery_and_can_restore(self):
         async with self.sessions() as session:
             task = await session.get(models.Task, "shared")
@@ -307,12 +379,15 @@ class UnifiedRequirementTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json()["requirementStage"], "delivered")
 
     async def test_archived_requirement_cannot_enter_any_executor_until_restored(self):
-        from app.services import ai_exec, agent_runner, conversation_turns, workflow_runs
+        from app.services import ai_exec, agent_runner, conversation_turns, device_auth, workflow_runs
         response = await self.call("PATCH", "tasks/shared", json={"archivedAt": 1234567890000})
         self.assertEqual(response.status_code, 200, response.text)
         for path, body in (("ai-dispatch", {}), ("conversation-turn", {
                 "action": "prepare", "turnId": "test-turn", "conversationId": "test-chat"})):
-            blocked = await self.call("POST", "tasks/shared/" + path, json=body)
+            headers = {}
+            if path == "conversation-turn":
+                headers["Authorization"] = "Device " + device_auth.issue_session(self.clients["owner"])[0]
+            blocked = await self.call("POST", "tasks/shared/" + path, headers=headers, json=body)
             self.assertEqual(blocked.status_code, 409, blocked.text)
             self.assertIn("恢复", blocked.text)
         status = await self.call("PATCH", "tasks/shared", json={"status": "doing"})

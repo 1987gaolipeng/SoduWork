@@ -171,6 +171,7 @@ _WANT_COLUMNS = {
         ("work_routing", "{json}"),
     ],
     "ai_schedule": [
+        ("model_name", "VARCHAR(300) NOT NULL DEFAULT ''"),
         ("created_by", "VARCHAR(36)"),
         ("time_zone", "VARCHAR(64) NOT NULL DEFAULT 'Asia/Shanghai'"),
         ("required_capabilities", "{json} NOT NULL DEFAULT '[]'"),

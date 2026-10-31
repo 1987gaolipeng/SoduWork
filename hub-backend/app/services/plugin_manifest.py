@@ -440,7 +440,17 @@ def normalize(manifest: dict, workflow: dict | None = None) -> tuple[dict, dict,
     name = _text(raw.get("name"), 120)
     if not name:
         raise ValueError("插件必须有名称")
-    manifest_capabilities = _manifest_capabilities(raw.get("capabilities"))
+    declared_capabilities = dict(raw.get("capabilities") or {})
+    # Personal/desktop exports also declare MCP names at the package top level.
+    # Normalize that supported shape at import; never silently drop its grants
+    # or union conflicting declarations across desktop and Hub consumers.
+    if "mcpServers" in raw:
+        package_mcp = _capability_names(raw["mcpServers"], "插件 MCP 服务")
+        if "mcpServers" in declared_capabilities and package_mcp != _capability_names(
+                declared_capabilities["mcpServers"], "插件 MCP 服务"):
+            raise ValueError("插件顶层 mcpServers 与 capabilities.mcpServers 声明不一致")
+        declared_capabilities["mcpServers"] = package_mcp
+    manifest_capabilities = _manifest_capabilities(declared_capabilities)
     instructions = _text(raw.get("instructions"), 12000)
     wf = dict(workflow or raw.get("workflow") or {})
     raw_nodes = wf.get("nodes") or []

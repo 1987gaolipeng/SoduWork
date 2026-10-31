@@ -188,7 +188,9 @@ function createTurnQueue(now, onCompleted) {
         try { await onCompleted(result); } catch (_) { /* Delivery sync never changes task success. */ }
       }
     } catch (error) {
-      record('failed', String(error && error.message || error));
+      result = { ok: false, reason: String(error && error.message || error),
+        ...require('../../core/token-quota').fields(error) };
+      record('failed', result.reason);
       if (pauseRevision === startingPauseRevision) {
         pauseTurn(item, { reason: String(error && error.message || error) });
       }
@@ -196,7 +198,7 @@ function createTurnQueue(now, onCompleted) {
         if (item.executionStarted) await markStarted(item);
         try { await item.options.afterTurn('failed'); } catch (_) { /* Keep the queue paused when the receipt service is unavailable. */ }
       }
-      result = { ok: false, reason: String(error && error.message || error) };
+
     } finally {
       complete(item, result);
       active = null;

@@ -1,6 +1,8 @@
 """Employee plugin catalog read model, including publisher review feedback."""
 from __future__ import annotations
 
+from . import plugin_application_mcp
+
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from sqlalchemy import select
@@ -301,7 +303,8 @@ async def client_catalog(session: AsyncSession, org_id: str | None,
         for item in rows
     }
     mcp_requirements = {
-        item["pluginId"]: set(item["capabilities"].get("mcpServers") or [])
+        item["pluginId"]: set(plugin_application_mcp.company_names(
+            item, item["capabilities"].get("mcpServers") or []))
         for item in rows
     }
     default_plugin_ids = {
@@ -414,6 +417,8 @@ async def client_catalog(session: AsyncSession, org_id: str | None,
                 manifest = product_brand.manifest_display(accepted)
                 report = dict(accepted.capability_report or {})
                 item["conversationVersion"] = accepted.version
+                item["conversationVersionId"] = accepted.id
+                item["conversationUi"] = _public_ui(manifest)
                 item["conversationName"] = str(manifest.get("name") or item["name"])
                 if manifest.get('locales'):
                     item['conversationLocales'] = manifest['locales']
@@ -426,7 +431,7 @@ async def client_catalog(session: AsyncSession, org_id: str | None,
                     "runtime": list(report.get("runtime") or []),
                 }
                 conversation_item["entrypoints"] = manifest.get("entrypoints") or report.get("entrypoints") or {}
-                required = set(report.get("mcpServers") or [])
+                required = set(plugin_application_mcp.company_names(manifest, report.get("mcpServers") or []))
                 conversation_dependency = {"missingMcp": sorted(required - accepted_available)}
         item["conversationUse"] = _conversation_use(conversation_item, conversation_dependency)
         if not item["permissions"]["canUse"]:

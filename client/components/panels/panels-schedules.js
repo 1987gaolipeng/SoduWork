@@ -19,6 +19,9 @@ let _schScope = 0;
 let _schAgents = [];
 let _schAgentReason = '';
 let _schAgentLoading = null;
+let _schModelOptions = [];
+let _schDefaultModel = '';
+let _schNativeModelOptions = Object.create(null);
 let _schRepos = [];
 let _schTemplates = [];
 /*
@@ -80,9 +83,9 @@ function _schRhythm(s) {
 }
 
 const SCH_RUN_STATE = {
-  starting: ['准备中', 'starting'], running: ['执行中', 'running'],
-  waiting: ['待确认', 'waiting'], succeeded: ['已完成', 'succeeded'],
-  failed: ['失败', 'failed'], cancelled: ['已取消', 'cancelled'],
+  starting: ['待执行', 'starting'], running: ['执行中', 'running'],
+  waiting: ['执行中', 'running'], succeeded: ['完成', 'succeeded'],
+  failed: ['失败', 'failed'], cancelled: ['失败', 'failed'],
 };
 const SCH_RUN_TRIGGER = { timer: '按时触发', manual: '手动运行', retry: '自动重试' };
 
@@ -269,12 +272,34 @@ function _schActionButton(action, label) {
       ? ' aria-haspopup="dialog" aria-expanded="false"' : '') + '>' + _schActionIcon(action) + '</button>';
 }
 
+async function _schConfirmDisable(s) {
+  const title = String(s.title || '此自动化');
+  if (window.SoduWorkConfirmDialog && typeof window.SoduWorkConfirmDialog.open === 'function') {
+    return window.SoduWorkConfirmDialog.open({
+      title: '停用自动化？',
+      message: '停用「' + title + '」后，它不会再按计划自动执行。',
+      detail: '已有执行记录和会话会保留。',
+      cancel: '继续运行', confirm: '停用自动化', danger: true,
+    });
+  }
+  return typeof window.confirm === 'function' && window.confirm(
+    '确定停用「' + title + '」吗？停用后不会再按计划自动执行。');
+}
+
 function _schSetRunBusy(button, busy) {
   button.disabled = busy;
   button.setAttribute('aria-busy', String(busy));
   button.setAttribute('aria-label', busy ? '正在提交执行' : '立刻跑一次');
   button.title = busy ? '正在提交执行…' : '立刻跑一次';
   button.innerHTML = _schActionIcon(busy ? 'busy' : 'run');
+}
+
+function _schRunButton(sid, fallback) {
+  const buttons = document.querySelectorAll('.sch-item [data-act="run"]');
+  for (const button of buttons) {
+    if (button.closest('.sch-item')?.getAttribute('data-sid') === sid) return button;
+  }
+  return fallback;
 }
 
 function _renderSchPanel() {
@@ -296,7 +321,7 @@ function _renderSchPanel() {
       '<div class="sk-empty"><span class="sk-empty-ico">' +
       '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 2"/></svg></span>' +
       '<b>还没有定时任务</b>' +
-      '<span>按设定时间交给 AI 执行，在对话中查看过程与结果。<br>点击右上角「创建」，选择对话创建或手动配置。</span>' +
+      '<span>按设定时间创建普通会话，发送提示词并在对话中查看过程与结果。<br>点击右上角「创建」，选择对话创建或手动配置。</span>' +
       '<span class="sk-empty-eg">常见的两种：<em>每天 18:00 · 汇总今天干了什么</em>' +
       '<em>每周一 09:00 · 把上周的 bug 归归类</em></span></div>';
     const recipesHtml = _schRecipeHtml(false);
@@ -335,19 +360,64 @@ async function _schAct(act, sid, btn) {
     _schConfirmDel(sid, s);
     return;
   }
+  if (act === 'toggle') {
+    if (btn.disabled || s.every === 'once' && s.onceFired) return;
+    btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
+    if (s.enabled) {
+      const accepted = await _schConfirmDisable(s);
+      if (!accepted) {
+        btn.disabled = false;
+        btn.removeAttribute('aria-busy');
+        return;
+      }
+    }
+    const next = !s.enabled;
+    try {
+      await SoduWorkAPI.updateSchedule(sid, {enabled: next});
+      if (scope !== _schScope) return;
+      if (typeof petSay === 'function') petSay(next ? '自动化已启用' : '自动化已停用');
+      await _loadSch();
+    } catch (error) {
+      if (scope === _schScope && typeof petSay === 'function') {
+        petSay((next ? '启用' : '停用') + '失败：' + _schErrorText(error));
+      }
+    } finally {
+      if (btn.isConnected) {
+        btn.disabled = false;
+        btn.removeAttribute('aria-busy');
+      }
+    }
+    return;
+  }
   if (act === 'run') {
     if (btn.disabled) return;
     _schSetRunBusy(btn, true);
-    let historyPromise = null;
+    let runButton = btn;
     try {
-      const launched = await SoduWorkAPI.runSchedule(sid);
+      const instanceId = 'ui-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+      const launched = await SoduWorkAPI.runSchedule(sid, { instanceId });
       if (scope !== _schScope) return;
-      _schRunOpen = sid; _schRunLoading[sid] = true; delete _schRunErrors[sid];
-      _schRunReturnFocus = btn; _schRenderRunDrawer(true);
-      historyPromise = SoduWorkAPI.listScheduleRuns(sid, 20);
+      const automationTitle = String(s.title || '未命名自动化').trim();
       if (typeof petSay === 'function') petSay(launched.waitingForDevice
-        ? '已安排，客户端将创建普通对话并发送「' + s.title + '」'
-        : '已交付执行，可在执行记录继续跟踪「' + s.title + '」');
+        ? '已开启自动化任务「' + automationTitle + '」，设备上线后将开始执行'
+        : '已开启自动化任务「' + automationTitle + '」');
+      runButton = _schRunButton(sid, btn);
+      // Immediate execution is a navigation into the ordinary automation chat.
+      // The run drawer is opened only by the explicit history action; showing it
+      // here made a successful launch look like a task-record workflow.
+      if (typeof _schLaunchRunConversation === 'function') {
+        Promise.resolve(_schLaunchRunConversation(sid, { ...launched, scheduleTitle: s.title }, scope))
+          .then(opened => {
+            if (scope !== _schScope) return;
+            _schSetRunBusy(runButton, false);
+            if (!opened && typeof petSay === 'function') petSay('自动化任务已开启，会话正在准备中，请稍后在执行记录中打开');
+          })
+          .catch(() => { if (scope === _schScope) _schSetRunBusy(runButton, false); });
+      }
+      // Refresh card state in the background without taking the user away from
+      // the chat navigation path.
+      void _loadSch();
     } catch (e) {
       if (scope !== _schScope) return;
       _schRunOpen = sid;
@@ -370,6 +440,7 @@ async function _schAct(act, sid, btn) {
         if (_schRunOpen === sid && (_schRunRows[sid] || []).some(run =>
           (run.receipt || {}).executionMode === 'soduwork.automation-conversation/v1')) _schToggleRuns(sid, true);
       }
+      return;
     }
   }
 }
@@ -381,7 +452,7 @@ function _schConfirmDel(sid, s) {
   if (!card || card.querySelector('.sch-confirm')) return;
   const bar = document.createElement('div');
   bar.className = 'sch-confirm';
-  bar.innerHTML = '<span>删掉「' + esc(s.title) + '」？<i>以前它建出来的任务不受影响，只是以后不再自动跑了。</i></span>' +
+  bar.innerHTML = '<span>删掉「' + esc(s.title) + '」？<i>以前的会话记录不受影响，只是以后不再自动执行。</i></span>' +
     '<span class="sch-c-ops"><button class="btn-mini" data-c="no">再想想</button>' +
     '<button class="btn-mini danger-solid" data-c="yes">删除</button></span>';
   card.appendChild(bar);
@@ -411,17 +482,17 @@ function _schBlueprintHtml(s) {
     '<em>\u53ef\u8ffd\u8e2a \u00b7 \u53ef\u91cd\u8bd5 \u00b7 \u7559\u8bc1\u636e</em></header><ol>' +
     '<li><i>1</i><span><small>\u89e6\u53d1</small><b id="schBpWhen">\u6309\u8bbe\u5b9a\u65f6\u95f4</b></span></li>' +
     '<li><i>2</i><span><small>\u6267\u884c</small><b id="schBpWork">' + esc(work) + '</b></span></li>' +
-    '<li><i>3</i><span><small>\u4ea4\u4ed8</small><b>\u521b\u5efa\u4efb\u52a1\u3001\u4fdd\u7559\u8bc1\u636e\u5e76\u901a\u77e5\u4f60</b></span></li>' +
+    '<li><i>3</i><span><small>\u4ea4\u4ed8</small><b>\u6253\u5f00\u666e\u901a\u4f1a\u8bdd\u3001\u53d1\u9001\u63d0\u793a\u8bcd\u5e76\u4fdd\u7559\u5b8c\u6574\u8bb0\u5f55</b></span></li>' +
     '</ol></section>';
 }
 
 function _schFormHtml(s) {
   s = s || { title: '', note: '', every: 'daily', atHour: 18, atMinute: 0, weekday: 1,
-             assigneeId: _schDefaultAgentId(), repoId: '', flow: true,
+             assigneeId: _schDefaultAgentId(), modelName: '', repoId: '', flow: false,
              pluginBindingId: '', personalPluginKey: '', pluginInputs: {},
              requiredCapabilities: [], retryLimit: 2, retryDelayMinutes: 5,
              timeZone: _schBrowserTimeZone(), enabled: true };
-  const mode = s.pluginBindingId ? 'plugin' : 'direct';
+  const mode = 'direct';
   const opt = (list, cur) => list.map(([k, l]) =>
     '<option value="' + k + '"' + (String(k) === String(cur) ? ' selected' : '') + '>' + l + '</option>').join('');
   /* Group fields by work, schedule, and executor. */
@@ -457,8 +528,8 @@ function _schFormHtml(s) {
     _schRepos.map(r => '<option value="' + esc(r.id) + '"' + (r.id === s.repoId ? ' selected' : '') + '>' + esc(r.name) + '</option>').join('') +
     '</select>' +
 
-    sec('怎么执行', '直接交给一个 Agent，或按企业沉淀的方法完整运行') +
-    '<div class="sch-mode-tabs" role="tablist">' +
+    sec('怎么执行', '自动创建普通会话，发送提示词并使用所选底座和模型') +
+    '<div class="sch-mode-tabs" role="tablist" hidden style="display:none">' +
     '<button class="sch-mode-btn' + (mode === 'direct' ? ' on' : '') + '" data-mode="direct" role="tab">直接执行' +
     '<i>适合单步、结果明确的工作</i></button>' +
     '<button class="sch-mode-btn' + (mode === 'plugin' ? ' on' : '') + '" data-mode="plugin" role="tab">插件自动化' +
@@ -488,9 +559,8 @@ function _schFormHtml(s) {
     (Number(s.retryDelayMinutes || 0) === 2 ? ' selected' : '') + '>间隔 2 分钟</option><option value="5"' +
     (Number(s.retryDelayMinutes || 5) === 5 ? ' selected' : '') + '>间隔 5 分钟</option><option value="10"' +
     (Number(s.retryDelayMinutes || 0) === 10 ? ' selected' : '') + '>间隔 10 分钟</option></select></span></div>' +
-    '<label class="sch-chk" id="schFlowWrap"><input type="checkbox" id="schFlow"' + (s.flow ? ' checked' : '') + '>' +
-    '按基础研发流程走<em>复杂标准流程建议使用插件自动化</em></label></div>' +
-    '<div class="sch-exec-block" id="schPluginBlock"><div id="schPluginConfig">' +
+    '<label class="sch-chk" id="schFlowWrap" hidden style="display:none"><input type="checkbox" id="schFlow">按基础研发流程走</label></div>' +
+    '<div class="sch-exec-block" id="schPluginBlock" hidden style="display:none"><div id="schPluginConfig">' +
     _schPluginConfigHtml(s.repoId, s.pluginBindingId, s.pluginInputs || {}) + '</div></div>' +
     '<div class="sch-chk-row">' +
     '<label class="sch-chk"><input type="checkbox" id="schEnabled"' + (s.enabled ? ' checked' : '') + '>' +
@@ -544,20 +614,24 @@ function _wireSchForm() {
       atHour: Number(document.getElementById('schH').value || 0),
       atMinute: Number(document.getElementById('schM').value || 0),
       weekday: Number(document.getElementById('schWd').value || 1),
-      assigneeId: mode === 'direct' ? document.getElementById('schWho').value : '',
+      assigneeId: document.getElementById('schWho').value,
       assigneeType: 'agent',
+      modelName: mode === 'direct' && _schAgentAllowsModel(document.getElementById('schWho')?.value)
+        ? (document.getElementById('schModel')?.value || '') : '',
       repoId: document.getElementById('schRepo').value,
-      flow: mode === 'direct' && document.getElementById('schFlow').checked,
-      pluginBindingId: mode === 'plugin' && plugin ? (plugin.value || '') : '',
+      flow: false,
+      /* Enterprise workflow bindings stay out of the ordinary-chat contract. A
+       * personal plugin is still a valid conversation plugin and is handed to
+       * the local worker through its immutable version snapshot. */
+      pluginBindingId: '',
       personalPluginKey: personalKey,
-      personalPluginVersionPolicy: versionPolicy,
-      personalPluginVersion: personalVersion,
-      personalPluginChecksum: personalChecksum,
+      personalPluginVersionPolicy: personalKey ? versionPolicy : 'latest',
+      personalPluginVersion: personalKey ? personalVersion : '',
+      personalPluginChecksum: personalKey ? personalChecksum : '',
       pluginInputs: mode === 'plugin' ? readPluginInputs() :
         (preserveSnapshot ? Object.assign({}, inputValues) : readMethodInputs()),
-      requiredCapabilities: mode === 'direct'
-        ? (preserveSnapshot ? Array.from(_schEditing.requiredCapabilities || []) :
-          Array.from(document.querySelectorAll('#schCaps input:checked')).map(el => el.value)) : [],
+      requiredCapabilities: Array.from(document.querySelectorAll('#schCaps input:checked'))
+        .map(el => el.value),
       retryLimit: mode === 'direct' && document.getElementById('schRetry').checked
         ? Number(document.getElementById('schRetryLimit').value || 2) : 0,
       retryDelayMinutes: Number(document.getElementById('schRetryDelay').value || 5),
@@ -654,8 +728,7 @@ function _wireSchForm() {
     _schSyncTiming(v);
     document.getElementById('schDirectBlock').style.display = mode === 'direct' ? '' : 'none';
     document.getElementById('schPluginBlock').style.display = mode === 'plugin' ? '' : 'none';
-    document.getElementById('schFlowWrap').style.display =
-      mode === 'direct' && repo.value ? '' : 'none';
+    document.getElementById('schFlowWrap').style.display = 'none';
     const pv = document.getElementById('schPv');
     if (pv) pv.textContent = _schNextPreview();
     const bpWhen = document.getElementById('schBpWhen');
@@ -698,7 +771,13 @@ function _wireSchForm() {
     sync();
   });
   document.getElementById('schWd').addEventListener('change', sync);
-  document.getElementById('schWho').addEventListener('change', scheduleProbe);
+  document.getElementById('schWho').addEventListener('change', () => {
+    // A different substrate may have a different model namespace. Never carry
+    // the previous substrate's explicit model into the new selection.
+    _schRefreshModelField('');
+    scheduleProbe();
+  });
+  document.getElementById('schModel')?.addEventListener('change', scheduleProbe);
   document.querySelectorAll('#schCaps input').forEach(input => input.addEventListener('change', () => {
     input.closest('label').classList.toggle('on', input.checked);
     scheduleProbe();
@@ -722,18 +801,21 @@ function _wireSchForm() {
       if (typeof petSay === 'function') petSay('给它起个名字吧');
       return;
     }
-    if (mode === 'direct' && !body.assigneeId) {
+    if (!body.assigneeId) {
       if (typeof petSay === 'function') petSay('先选把活交给谁'); return;
     }
-    if (mode === 'plugin' && !body.pluginBindingId) {
-      if (typeof petSay === 'function') petSay('先选择一个可运行的自动化插件'); return;
+    const modelOptions = typeof _schModelOptionsFor === 'function'
+      ? _schModelOptionsFor(body.assigneeId) : _schModelOptions;
+    if (_schAgentAllowsModel(body.assigneeId) &&
+        modelOptions.length && !body.modelName) {
+      if (typeof petSay === 'function') petSay('\u8bf7\u9009\u62e9\u4e00\u4e2a\u6a21\u578b'); return;
     }
-    if (mode === 'direct' && body.personalPluginKey) {
+    if (body.personalPluginKey) {
       const method = _schmFind(body.personalPluginKey);
       if (!method) {
         if (typeof petSay === 'function') petSay('这个个人插件已不在本机，请换一个工作方法'); return;
       }
-      const missing = (method.inputs || []).filter(f => f.required && !('default' in f) &&
+      const missing = (method.inputs || []).filter(f => f.required &&
         (body.pluginInputs[f.key] == null || body.pluginInputs[f.key] === ''))
         .map(f => f.label || f.key);
       if (missing.length) {
@@ -764,7 +846,7 @@ function _wireSchForm() {
       if (editingId) await SoduWorkAPI.updateSchedule(editingId, body);
       else await SoduWorkAPI.createSchedule(body);
       if (!isCurrent()) return;
-      if (typeof petSay === 'function') petSay(body.every === 'once' ? '一次性自动化已保存' : '定时任务已保存，到点我自己交给 AI~');
+      if (typeof petSay === 'function') petSay(body.every === 'once' ? '一次性自动化已保存' : '定时任务已保存，到点创建普通会话并发送提示词');
       _schCloseEditor(false); _schRows = null; _loadSch();
     } catch (e) {
       if (!isCurrent()) return;

@@ -8,6 +8,21 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 const publication = read('components/panels/plugin-publication-ux.js');
 const catalog = read('components/panels/panels-capability-plugins.js');
 
+test('personal receipts require the current key and version and select the newest server record', () => {
+  const window = {};
+  require('node:vm').runInNewContext(publication, { window });
+  const find = window.SoduWorkPluginPublication.personalSubmission;
+  const item = { personal: true, key: 'example', version: '2.0.0' };
+  const current = { key: 'example', version: '2.0.0', createdAt: 20, trustState: 'quarantined' };
+  const rows = [{ key: 'other', version: '2.0.0', createdAt: 99 },
+    { key: 'example', version: '1.0.0', createdAt: 98 },
+    { ...current, createdAt: 10 }, current];
+  assert.equal(find(item, rows), current);
+  assert.equal(find({ ...item, personal: false }, rows), null);
+  assert.equal(find({ ...item, key: '' }, rows), null);
+  assert.equal(find({ ...item, version: '3.0.0' }, rows), null);
+});
+
 function ordered(source, first, second) {
   assert.ok(source.indexOf(first) >= 0, `missing ${first}`);
   assert.ok(source.indexOf(second) > source.indexOf(first), `${first} must load before ${second}`);

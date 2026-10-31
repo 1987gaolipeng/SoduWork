@@ -23,8 +23,8 @@ class TurnOutcomeTests(unittest.TestCase):
 
     def event(self, reason):
         terminal = {}
-        local_stream._on_line(self.ref, json.dumps({"type": "agent_end", "messages": [
-            {"role": "assistant", "content": [], "stopReason": reason}]}), terminal)
+        local_stream._on_line(self.ref, json.dumps({"type": "message_end", "message": {
+            "role": "assistant", "content": [], "stopReason": reason}}), terminal)
         return terminal
 
     def finish(self, terminal, **changes):
@@ -69,7 +69,30 @@ class TurnOutcomeTests(unittest.TestCase):
         local_turn_outcome.observe("pi", {"type": "message_end", "message": {
             "role": "assistant", "stopReason": "stop"}}, terminal)
         self.assertNotIn("outputTruncated", terminal)
+        self.assertTrue(terminal["piFinalResponse"])
         self.finish(terminal).assert_not_called()
+        self.assertEqual(self.run["state"], "done")
+
+    def test_agent_end_stop_does_not_preempt_extension_cleanup(self):
+        terminal = {}
+        local_stream._on_line(self.ref, json.dumps({"type": "agent_end", "messages": [
+            {"role": "assistant", "content": [], "stopReason": "stop"}]}), terminal)
+        self.assertNotIn("piFinalResponse", terminal)
+
+    def test_later_pi_events_clear_the_candidate_before_the_grace_expires(self):
+        terminal = {}
+        local_stream._on_line(self.ref, json.dumps({"type": "message_end", "message": {
+            "role": "assistant", "stopReason": "stop"}}), terminal)
+        self.assertGreater(self.run.get("piFinalResponseAt", 0), 0)
+        local_stream._on_line(self.ref, json.dumps({"type": "agent_settled"}), terminal)
+        self.assertNotIn("piFinalResponseAt", self.run)
+
+    def test_watchdog_settlement_accepts_the_killed_pi_exit_code(self):
+        terminal = self.event("stop")
+        self.run["piSettledByWatchdog"] = True
+        with patch.object(local_stream, "_resume", return_value={"ok": True}) as resume:
+            local_stream._finish(self.ref, -9, terminal, "")
+        resume.assert_not_called()
         self.assertEqual(self.run["state"], "done")
 
     def test_progress_and_other_agent_events_do_not_mark_truncation(self):

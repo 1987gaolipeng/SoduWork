@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 import runner_main
+from app.api import runner_ws as runner_ws_api
 from app.services import pty_term
 
 
@@ -51,7 +52,9 @@ class RunnerHandshakeTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         self.deadline = patch.object(runner_main, "HELLO_TIMEOUT_S", 0.02, create=True)
-        self.capabilities = patch.object(runner_main, "_capabilities", return_value={})
+        self.capabilities = patch.object(
+            runner_main, "_capabilities",
+            side_effect=AssertionError("hello must not probe local capabilities"))
         self.platform = patch.object(runner_main.platform, "platform", return_value="fixture-os")
         self.deadline.start()
         self.capabilities.start()
@@ -221,6 +224,44 @@ class RunnerHandshakeTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(TimeoutError, "握手"):
             await asyncio.wait_for(machine._hello(), timeout=0.5)
         self.assertFalse(machine.bin)
+
+
+class HubHelloDeadlineTests(unittest.IsolatedAsyncioTestCase):
+    async def test_authenticated_silent_peer_is_closed_with_hello_timeout_code(self):
+        class SilentSocket:
+            def __init__(self):
+                self.closed = []
+
+            async def receive_json(self):
+                await asyncio.Future()
+
+            async def close(self, code):
+                self.closed.append(code)
+
+        socket = SilentSocket()
+        hello = await runner_ws_api._receive_hello(socket, "fixture-peer", timeout=0.01)
+        self.assertIsNone(hello)
+        self.assertEqual(socket.closed, [4408])
+
+    async def test_legacy_runner_capability_scan_fits_compatibility_window(self):
+        self.assertGreaterEqual(runner_ws_api._HELLO_TIMEOUT_S, 30)
+
+        class SlowLegacySocket:
+            def __init__(self):
+                self.closed = []
+
+            async def receive_json(self):
+                await asyncio.sleep(0.02)
+                return {"op": "hello", "capabilities": {"reportedAt": 1}}
+
+            async def close(self, code):
+                self.closed.append(code)
+
+        socket = SlowLegacySocket()
+        hello = await runner_ws_api._receive_hello(
+            socket, "legacy-runner", timeout=0.1)
+        self.assertEqual(hello["op"], "hello")
+        self.assertEqual(socket.closed, [])
 
 
 if __name__ == "__main__":

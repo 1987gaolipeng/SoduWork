@@ -44,7 +44,7 @@ function createTrustedWindow({ app, BrowserWindow, getRendererRoot }) {
   };
 }
 
-function install({ app, ipcMain, BrowserWindow, dialog, quit, getRendererRoot, shell, openNewConversation }) {
+function install({ app, ipcMain, BrowserWindow, dialog, quit, getRendererRoot, shell, openNewConversation, releaseNotes }) {
   const trustedWindow = createTrustedWindow({ app, BrowserWindow, getRendererRoot });
   let pending = null, quitting = false;
   function requireWindow(event) {
@@ -52,7 +52,17 @@ function install({ app, ipcMain, BrowserWindow, dialog, quit, getRendererRoot, s
     if (!parent) throw new Error('Application menu is only available in the SoduWork window');
     return parent;
   }
-  ipcMain.handle('app-info', event => { requireWindow(event); return appInfo(app); });
+  async function withHistory(info) {
+    if (!releaseNotes) return info;
+    const data = await releaseNotes.list(nativeLocale.getLocale());
+    return { ...info, releaseHistory: data.releases.map(row => ({ version: row.version, date: '',
+      title: row.summary, notes: [row.summary, ...row.sections.flatMap(s => [s.title, ...s.items.map(i => i.text)])] })) };
+  }
+  ipcMain.handle('app-info', event => {
+    requireWindow(event);
+    if (!releaseNotes) return appInfo(app);
+    return withHistory(appInfo(app)).then(info => { requireWindow(event); return info; });
+  });
   async function requestQuit(event) {
     const parent = requireWindow(event);
     if (quitting) return { ok: true, canceled: false };

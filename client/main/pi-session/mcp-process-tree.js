@@ -11,9 +11,18 @@ function exec(file, args) {
 async function snapshot(pid) {
   if (process.platform === 'win32') {
     const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-    const text = await exec(powershell, ['-NoProfile', '-NonInteractive', '-Command',
-      'Get-CimInstance Win32_Process' + (Number.isInteger(pid) ? ' -Filter "ProcessId=' + pid + '"' : '') +
-      ' | Where-Object { $_.CreationDate } | ForEach-Object { [pscustomobject]@{ pid=$_.ProcessId; parent=$_.ParentProcessId; created=([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() } } | ConvertTo-Json -Compress']);
+    const args = ['-NoProfile', '-NonInteractive', '-Command',
+      'Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CreationDate' + (Number.isInteger(pid) ? ' -Filter "ProcessId=' + pid + '"' : '') +
+      ' | Where-Object { $_.CreationDate } | ForEach-Object { [pscustomobject]@{ pid=$_.ProcessId; parent=$_.ParentProcessId; created=([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() } } | ConvertTo-Json -Compress'];
+    let text;
+    try { text = await exec(powershell, args); }
+    catch (error) {
+      // WMI occasionally stalls even after the worker has exited. Retry only a
+      // timed-out read, once, with a fresh identity snapshot. Persistent errors
+      // still reject, and this never retries a process termination operation.
+      if (!error.killed) throw error;
+      text = await exec(powershell, args);
+    }
     const value = text.trim() ? JSON.parse(text) : [];
     return (Array.isArray(value) ? value : [value]).filter(row => {
       // WMI can retain exited process objects while an inspection/security

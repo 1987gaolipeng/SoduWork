@@ -133,7 +133,7 @@
 /* Preview region. */
 .skin-preview{
   position:relative;
-  height:84px;
+  height:96px;
   display:flex;align-items:center;justify-content:center;
   background:var(--bg-1);
   overflow:hidden;
@@ -143,7 +143,7 @@
 }
 /* PNG preview of the pet and task dock. */
 .skin-preview.shot{
-  height:96px;padding:0;align-items:flex-start;
+  padding:0;align-items:flex-start;
   background:linear-gradient(135deg,#eef3f9,#e3ebf5);
 }
 .sp-shot{

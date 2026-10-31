@@ -40,3 +40,17 @@ test('updater installation scope is a closed enum; legacy and malformed markers 
   assert.equal(installMode(process.execPath, () => '/D=other'), '');
   assert.equal(installMode(process.execPath, () => { throw Error('missing'); }), '');
 });
+
+test('cloud clients resolve only their own stable launcher, preserving parallel internal installations', () => {
+  const { getProfile } = require('../main/distribution.cjs');
+  for (const id of ['cn', 'global']) {
+    const profile = getProfile(id), root = path.resolve('parallel-' + id);
+    const name = profile.windowsExecutableName + '.exe';
+    const executable = path.join(root, '.soduwork-versions/ns125.tmp', name);
+    const own = p => [path.join(root, '.soduwork-active'), path.join(root, name)].includes(p);
+    assert.equal(launchPath(executable, own, profile), path.join(root, name));
+    const foreign = p => [path.join(root, '.soduwork-active'), path.join(root, 'SoduWork.exe')].includes(p);
+    assert.equal(installRoot(executable, foreign, profile), path.dirname(executable));
+    assert.equal(launchPath(executable, foreign, profile), executable);
+  }
+});

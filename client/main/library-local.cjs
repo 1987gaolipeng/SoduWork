@@ -10,10 +10,14 @@ const { replaceFile } = require('./verified-file-replace.cjs');
 
 function install(deps) {
   const ownerOf = deps.ownerOf || (() => require('./device-auth.js').localOwner(deps.app));
+  function workRootOf(payload) {
+    const value = String(payload && payload.workRoot || '').trim();
+    return value ? path.resolve(value) : '';
+  }
   function trusted(event) { if (!isTrusted(event)) throw storage.error('LOCAL_LIBRARY_UNTRUSTED', '请在资料库窗口操作本机文件'); }
-  deps.ipcMain.handle('library-local-context', async event => {
+  deps.ipcMain.handle('library-local-context', async (event, payload = {}) => {
     trusted(event); const owner = ownerOf();
-    return { owner: storage.OWNER.test(owner) ? owner : '' };
+    return { owner: storage.OWNER.test(owner) ? owner : '', workRoot: workRootOf(payload) };
   });
   deps.ipcMain.handle('library-local-call', async (event, action, payload = {}) => {
     const owner = String(payload.owner || '');
@@ -21,7 +25,7 @@ function install(deps) {
       trusted(event);
       if (!storage.OWNER.test(owner) || ownerOf() !== owner) throw storage.error('STALE_TASK_SCOPE', '当前账号已变化或尚未登录，请重新打开资料库');
     };
-    guard(); const store = storage.create(deps.app, owner, guard);
+    guard(); const store = storage.create(deps.app, owner, guard, workRootOf(payload));
     return store.run(async index => {
       const result = await execute(store, index, String(action), payload); guard();
       if (!['openExternal', 'reveal', 'exportFile'].includes(action)) return result;

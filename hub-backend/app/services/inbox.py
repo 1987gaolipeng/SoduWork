@@ -44,11 +44,11 @@ async def _me_scope(session: AsyncSession, client: models.Client):
     return me, await scope_for_user(session, me)
 
 
-async def _pool_query(session: AsyncSession, org_ids: set[str]):
-    if not org_ids:
-        return []
-    res = await session.execute(
-        select(models.Task).where(
+def _pool_clauses(org_ids: set[str], client=None):
+    from . import repository_issue_access
+    clauses = []
+    if org_ids:
+        clauses.append(and_(
             models.Task.owner_client_id.is_(None),
             models.Task.pool_org_id.in_(org_ids),
             models.Task.status.in_(("todo", "doing")),
@@ -92,10 +92,19 @@ async def _enrich(session: AsyncSession, rows) -> list[dict]:
     if org_ids:
         orr = await session.execute(select(models.OrgUnit).where(models.OrgUnit.id.in_(org_ids)))
         org_names = {o.id: o.name for o in orr.scalars().all()}
+    projected = {}
+    repository_rows = [task for task in rows if task.origin in {"gitlab_issue", "github_issue"}]
+    if client is not None and repository_rows:
+        from . import task_access, task_requirements
+        apis = await task_access.decorate_many(
+            session, repository_rows, [task_to_api(task) for task in repository_rows], client)
+        apis = await task_requirements.decorate_many(session, client, repository_rows, apis)
+        projected = {task.id: api for task, api in zip(repository_rows, apis)
+                     if api.get("repositoryIssue")}
     now = datetime.now(timezone.utc)
     items = []
     for t in rows:
-        items.append({
+        item = projected.get(t.id, {
             "id": t.id, "title": t.title, "note": t.note,
             "priority": getattr(t, "priority", None) or "normal",
             "start": _ms(getattr(t, "start_at", None)),
@@ -104,10 +113,15 @@ async def _enrich(session: AsyncSession, rows) -> list[dict]:
             "urgent": t.urgent, "important": t.important,
             "domainId": t.domain_id or "", "domainName": dom_names.get(t.domain_id, ""),
             "teamId": t.pool_org_id, "teamName": org_names.get(t.pool_org_id, ""),
+        })
+        item.update({
+            "domainId": t.domain_id or "", "domainName": dom_names.get(t.domain_id, ""),
+            "teamId": t.pool_org_id, "teamName": org_names.get(t.pool_org_id, ""),
             "createdByName": getattr(t, "created_by_name", None) or "",
             "source": t.source,
             "waiting": _humanize(t.created_at, now),   # Calculate time spent waiting in the inbox.
         })
+        items.append(item)
     return items
 
 
@@ -133,7 +147,7 @@ async def list_for_user(session: AsyncSession, me: models.User | None) -> dict:
 async def list_inbox(session: AsyncSession, client: models.Client) -> dict:
     """List claimable tasks in the team's authorized inbox scope."""
     me, _scope = await _me_scope(session, client)
-    return await list_for_user(session, me)
+    return await list_for_user(session, me, client)
 
 
 async def list_for_orgs(session: AsyncSession, org_ids: set[str] | None) -> dict:
@@ -274,6 +288,9 @@ async def assign_to_user(session: AsyncSession, tid: str, target: models.User,
     t = await session.get(models.Task, tid)
     if t is None:
         return {"ok": False, "reason": "not_found"}
+    from . import repository_issue_access
+    if await repository_issue_access.linked(session, tid):
+        return {"ok": False, "reason": "out_of_scope"}
     if t.owner_client_id is not None:
         return {"ok": False, "reason": "already_claimed"}
     if not t.pool_org_id:

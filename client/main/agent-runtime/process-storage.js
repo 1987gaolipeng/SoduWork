@@ -58,7 +58,10 @@ function find(app, supplied) {
 function readOwned(row) {
   const stat = fs.lstatSync(row.file);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size > 256 * 1024) throw denied();
-  if (row.fileIdentity && (stat.dev !== row.fileIdentity.dev || stat.ino !== row.fileIdentity.ino)) throw denied();
+  // NTFS file ids can repeat for a recreated path, so the committed byte size
+  // carries the replacement detection on platforms where dev/ino repeat.
+  if (row.fileIdentity && (stat.dev !== row.fileIdentity.dev || stat.ino !== row.fileIdentity.ino ||
+      (row.fileIdentity.size !== undefined && stat.size !== row.fileIdentity.size))) throw denied();
   const bytes = fs.readFileSync(row.file);
   if (!bytes.subarray(0, row.headerBytes.length).equals(row.headerBytes)) throw denied();
   return { stat, bytes };
@@ -97,7 +100,9 @@ async function commit(app, supplied) {
     manager.appendSessionInfo(row.title);
     manager.appendCustomEntry(ENTRY_TYPE, { version: 1, owner: row.owner });
     row.state = 'committed';
-    row.digest = crypto.createHash('sha256').update(readOwned(row).bytes).digest('hex');
+    const committed = readOwned(row);
+    row.fileIdentity = { dev: committed.stat.dev, ino: committed.stat.ino, size: committed.stat.size };
+    row.digest = crypto.createHash('sha256').update(committed.bytes).digest('hex');
     return { id: row.id, file: row.file, committed: true, sha256: row.digest };
   } catch (error) { row.state = 'failed'; throw error; }
 }

@@ -31,6 +31,7 @@ from app.api import plugin_client_catalog, plugin_client_runs, plugin_permission
 from app.services import (plugin_access, plugin_audience, plugin_catalog,
                           plugin_drafts, plugin_installed, plugin_mcp_gateway,
                           plugin_packages, plugin_service)
+from tests.sqlite_schema import create_fresh_sqlite_schema
 
 
 def draft(**values):
@@ -42,7 +43,7 @@ def draft(**values):
 async def fixture():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        await create_fresh_sqlite_schema(conn, Base.metadata)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     temporary = tempfile.TemporaryDirectory(prefix="soduwork-plugin-access-")
     temporary._storage_patch = patch.object(plugin_packages, "package_root", return_value=temporary.name)

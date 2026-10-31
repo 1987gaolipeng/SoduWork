@@ -154,7 +154,8 @@ function createUsageReporter(options) {
         for (const receipt of snapshot.usageReceipts) {
           add(cumulative, receipt.usage);
           checkpoint({ ...base, usage: { ...cumulative }, model: receipt.model || model,
-            agent: receipt.agent || base.agent, provider: receipt.provider || base.provider,
+            agent: receipt.agent || base.agent,
+            provider: receipt.provider !== undefined ? receipt.provider : base.provider,
             occurredAt: receipt.at ? new Date(receipt.at).toISOString() : base.occurredAt });
         }
       } else checkpoint(base);

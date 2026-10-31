@@ -52,7 +52,7 @@ class ModelDefaultsTests(IsolatedDatabase):
             session.add_all([
                 User(id="fixture-user", username="fixture-user"),
                 Client(id="fixture", user_ref="fixture-user", auth_state="active",
-                       agent_models={"pi": "second", "qwen": "third"}),
+                       agent_models={"pi": "second", "qwen": "third", "harness2": "third"}),
                 ModelProvider(id="fixture", name="Fixture", api_key="fixture-company-private",
                               base_url="http://fixture.invalid/v1"),
                 *[ModelDef(id="fixture:" + name, provider_id="fixture", name=name)
@@ -89,6 +89,7 @@ class ModelDefaultsTests(IsolatedDatabase):
         self.assertEqual(metadata["defaultModel"], metadata["usable"][0]["name"])
         self.assertEqual(metadata["defaultModels"]["pi"], "second")
         self.assertEqual(metadata["defaultModels"]["qwen"], "third")
+        self.assertEqual(metadata["defaultModels"]["harness2"], "third")
         self.assertEqual(metadata["defaultModelErrors"], {})
         self.assertEqual(set(metadata["defaultModels"]), AGENTS)
         self.assertNotIn("fixture-company-private", json.dumps(metadata))

@@ -8,33 +8,42 @@ from fastapi import HTTPException
 
 def schedule_payload(s, *, timestamp, administrative=False) -> dict:
     from ..services import schedules as sch
+    # Automation is a plain conversation. Enterprise workflow bindings are not
+    # exposed, while a personal plugin remains an ordinary-chat plugin resolved
+    # by the owner desktop.
     next_at = sch.next_run_instant(s, s.last_run_at)
     next_local = next_at.astimezone(sch.schedule_zone(s)) if next_at else None
+    personal_key = str(getattr(s, "personal_plugin_key", "") or "")
+    personal_policy = str(getattr(s, "personal_plugin_version_policy", "latest") or "latest")
+    personal_version = str(getattr(s, "personal_plugin_version", "") or "")
+    personal_checksum = str(getattr(s, "personal_plugin_checksum", "") or "")
+    # Old rows may retain version metadata after their personal plugin was
+    # cleared. Do not advertise a phantom pinned plugin to a new editor.
+    if not personal_key:
+        personal_policy, personal_version, personal_checksum = "latest", "", ""
     payload = {"id": s.id, "title": s.title, "note": s.note, "every": s.every,
             "runAt": timestamp(getattr(s, "run_at", None)),
             "onceFired": bool(getattr(s, "once_fired", False)),
             "atHour": s.at_hour, "atMinute": s.at_minute, "weekday": s.weekday,
             "timeZone": sch.clean_time_zone(s.time_zone),
             "assigneeId": s.assignee_id, "assigneeType": s.assignee_type,
-            "repoId": s.repo_id, "flow": bool(s.flow), "enabled": bool(s.enabled),
-            "pluginBindingId": s.plugin_binding_id,
-            "personalPluginKey": str(getattr(s, "personal_plugin_key", "") or ""),
-            "personalPluginVersionPolicy": str(getattr(
-                s, "personal_plugin_version_policy", "") or "latest"),
-            "personalPluginVersion": str(getattr(s, "personal_plugin_version", "") or ""),
-            "personalPluginChecksum": str(getattr(
-                s, "personal_plugin_checksum", "") or ""),
-            "pluginInputs": dict(s.plugin_inputs or {}),
-            "executionMode": ("plugin" if s.plugin_binding_id
-                              else "personal" if getattr(s, "personal_plugin_key", "")
-                              else "direct"),
+            "modelName": str(getattr(s, "model_name", "") or ""),
+            "repoId": s.repo_id, "flow": False, "enabled": bool(s.enabled),
+            "pluginBindingId": "",
+            "personalPluginKey": personal_key,
+            "personalPluginVersionPolicy": personal_policy,
+            "personalPluginVersion": personal_version,
+            "personalPluginChecksum": personal_checksum,
+            "pluginInputs": sch.clean_plugin_inputs(
+                getattr(s, "plugin_inputs", {}) or {}),
+            "executionMode": ("personal" if personal_key else "direct"),
             "requiredCapabilities": list(s.required_capabilities or []),
             "retryLimit": int(s.retry_limit or 0),
             "retryDelayMinutes": int(s.retry_delay_minutes or 5),
             "retryCount": int(s.retry_count or 0),
             "nextRetryAt": timestamp(s.next_retry_at),
             "retrying": bool(s.next_retry_at),
-            "lastRunAt": timestamp(s.last_run_at), "lastTaskId": s.last_task_id,
+            "lastRunAt": timestamp(s.last_run_at), "lastTaskId": "",
             "lastError": s.last_error,
             "nextRunAt": timestamp(next_at),
             "nextRunLocal": next_local.strftime("%Y-%m-%d %H:%M") if next_local else ""}
@@ -66,34 +75,67 @@ def apply_schedule_update(s, body: dict) -> None:
                  ("repoId", "repo_id"), ("ownerClientId", "owner_client_id")):
         if k in body:
             setattr(s, f, str(body.get(k) or "").strip()[:64])
-    if "flow" in body:
-        s.flow = bool(body.get("flow"))
-    if "pluginBindingId" in body:
-        s.plugin_binding_id = str(body.get("pluginBindingId") or "").strip()[:36]
-    if "personalPluginKey" in body:
-        # Normalize shape here; validate_execution handles patterns, exclusions, and executors with HTTP 409 errors.
-        s.personal_plugin_key = str(body.get("personalPluginKey") or "").strip()[:64]
-        if not s.personal_plugin_key:
-            s.personal_plugin_version_policy = "latest"
-            s.personal_plugin_version = ""
-            s.personal_plugin_checksum = ""
-    if "personalPluginVersionPolicy" in body:
-        s.personal_plugin_version_policy = str(
-            body.get("personalPluginVersionPolicy") or "latest").strip().lower()[:16]
-    if "personalPluginVersion" in body:
-        s.personal_plugin_version = str(body.get("personalPluginVersion") or "").strip()[:40]
-    if "personalPluginChecksum" in body:
-        s.personal_plugin_checksum = str(
-            body.get("personalPluginChecksum") or "").strip().lower()[:64]
-    # Hidden form fields can be stale after clearing the plugin selector.
-    # An empty key always means there is no personal-plugin snapshot.
-    if not str(getattr(s, "personal_plugin_key", "") or ""):
-        s.personal_plugin_version_policy = "latest"
-        s.personal_plugin_version = ""
-        s.personal_plugin_checksum = ""
-    if "pluginInputs" in body:
-        try:
+    if "modelName" in body:
+        s.model_name = str(body.get("modelName") or "").strip()[:300]
+    # Enterprise workflow bindings remain retired from the ordinary-conversation
+    # contract. Personal plugins run in the same chat through the local worker,
+    # so preserve their verifiable snapshot when supplied by the editor.
+    s.flow = False
+    s.plugin_binding_id = ""
+    try:
+        if "pluginInputs" in body:
             s.plugin_inputs = sch.clean_plugin_inputs(body.get("pluginInputs"))
+        # Partial updates (for example enable/disable) must not erase the
+        # selected personal-plugin parameters that were saved by the editor.
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    previous_personal_key = str(getattr(s, "personal_plugin_key", "") or "")
+    from ..services.schedule_run_contracts import (
+        clean_personal_plugin_checksum, clean_personal_plugin_key,
+        clean_personal_plugin_version, clean_personal_plugin_version_policy,
+    )
+    if any(key in body for key in ("personalPluginKey", "personalPluginVersionPolicy",
+                                   "personalPluginVersion", "personalPluginChecksum")):
+        try:
+            key_supplied = "personalPluginKey" in body
+            next_key = clean_personal_plugin_key(body.get(
+                "personalPluginKey", getattr(s, "personal_plugin_key", "")))
+            key_changed = key_supplied and next_key != previous_personal_key
+            s.personal_plugin_key = next_key
+            # A key-only partial update starts a new plugin snapshot. Do not
+            # attach the previous plugin's pinned version/checksum to it.
+            snapshot = body if key_changed else {
+                "personalPluginVersionPolicy": body.get(
+                    "personalPluginVersionPolicy",
+                    getattr(s, "personal_plugin_version_policy", "latest")),
+                "personalPluginVersion": body.get(
+                    "personalPluginVersion", getattr(s, "personal_plugin_version", "")),
+                "personalPluginChecksum": body.get(
+                    "personalPluginChecksum", getattr(s, "personal_plugin_checksum", "")),
+            }
+            s.personal_plugin_version_policy = clean_personal_plugin_version_policy(
+                snapshot.get("personalPluginVersionPolicy", "latest"))
+            s.personal_plugin_version = clean_personal_plugin_version(
+                snapshot.get("personalPluginVersion", ""))
+            s.personal_plugin_checksum = clean_personal_plugin_checksum(
+                snapshot.get("personalPluginChecksum", ""))
+            if not s.personal_plugin_key:
+                s.personal_plugin_version_policy = "latest"
+                s.personal_plugin_version = ""
+                s.personal_plugin_checksum = ""
+            elif s.personal_plugin_version_policy == "pinned" and (
+                    not s.personal_plugin_version or not s.personal_plugin_checksum):
+                raise ValueError("固定个人插件版本需要同时保存版本号和校验值，请重新选择该插件")
+            elif s.personal_plugin_version_policy == "latest":
+                s.personal_plugin_version = ""
+                s.personal_plugin_checksum = ""
+            # Plugin inputs belong to the selected personal plugin. A caller
+            # changing or clearing that key without an explicit replacement
+            # must not leave the previous method's parameters attached to a
+            # later ordinary prompt.
+            if (key_changed and
+                    "pluginInputs" not in body):
+                s.plugin_inputs = {}
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     if "requiredCapabilities" in body:
@@ -104,10 +146,10 @@ def apply_schedule_update(s, body: dict) -> None:
     if "retryDelayMinutes" in body:
         s.retry_delay_minutes = max(
             1, min(1440, int(body.get("retryDelayMinutes") or 5)))
-    if any(key in body for key in (
-            "assigneeId", "pluginBindingId", "personalPluginKey",
-            "personalPluginVersionPolicy", "personalPluginVersion", "personalPluginChecksum",
-            "requiredCapabilities")) and (not once_edit or before_execution != schedule_timing.execution_snapshot(s)):
+    if any(key in body for key in ("assigneeId", "modelName", "requiredCapabilities",
+                                   "personalPluginKey", "personalPluginVersionPolicy",
+                                   "personalPluginVersion", "personalPluginChecksum")) and (
+            not once_edit or before_execution != schedule_timing.execution_snapshot(s)):
         s.retry_count, s.next_retry_at = 0, None
     if "enabled" in body:
         s.enabled = bool(body.get("enabled"))

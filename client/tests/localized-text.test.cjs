@@ -53,7 +53,7 @@ test('resolve 缺省 locale 时读当前界面语言', () => {
   assert.equal(t.resolve({ name: 'x', nameLocales: { 'ko-KR': 'y' } }, 'name'), 'y');
 });
 
-test('currentLocale 无 i18n 时缺省 zh-CN', () => {
+test('currentLocale without i18n defaults to English', () => {
   const c = { window: {} };
   vm.createContext(c);
   vm.runInContext(source, c);

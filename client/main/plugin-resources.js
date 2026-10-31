@@ -15,7 +15,7 @@ function resourcePath(value) {
   if (parts.length < 2 || !ROOTS.has(parts[0]) || parts.some(part => !part || part === '.' || part === '..' ||
       part.startsWith('.') || /[. ]$/.test(part) || /[<>"|?*]/.test(part) ||
       /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part))) {
-    throw new Error('资源须放在 templates、examples、assets、scripts、references 或 ui 目录内');
+    throw new Error('资源须放在 templates、examples、assets、scripts、references 或 ui 目录内：' + value);
   }
   if (/\.(?:exe|dll|com|msi|pfx|p12|pem|key)$/i.test(value)) throw new Error('插件资源不能包含安装程序或密钥文件');
   return value;

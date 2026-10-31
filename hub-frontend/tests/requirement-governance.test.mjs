@@ -1,3 +1,4 @@
+import './helpers/chinese-locale.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import * as governance from '../src/screens/requirement-governance.js'

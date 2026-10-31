@@ -86,7 +86,9 @@ def execution_snapshot(s) -> tuple:
     version = ((str(getattr(s, "personal_plugin_version_policy", "") or "latest"),
                 str(getattr(s, "personal_plugin_version", "") or ""),
                 str(getattr(s, "personal_plugin_checksum", "") or "")) if personal else ())
-    return (str(getattr(s, "assignee_id", "") or ""), str(getattr(s, "plugin_binding_id", "") or ""),
+    return (str(getattr(s, "assignee_id", "") or ""),
+            str(getattr(s, "model_name", "") or ""),
+            str(getattr(s, "plugin_binding_id", "") or ""),
             personal, version, tuple(getattr(s, "required_capabilities", None) or []))
 
 

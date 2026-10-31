@@ -82,6 +82,26 @@ test('验收会话隔离账号与 Hub，同一账号重注册设备可恢复', a
   assert.equal(acceptance.get(restored).taskRef, 'task-1');
 });
 
+test('未打包源码客户端允许同一端口的本地 Hub 地址迁移并更新会话归属', async t => {
+  const f = fixture(t), app = { ...f.app, isPackaged: false };
+  await acceptance.attach(app, f.handle, options, identity('verifier', 'http://127.0.0.1:9080'));
+  const restored = { sessionId: 'review-chat' };
+  await acceptance.attach(app, restored, { resumed: true }, identity('verifier', 'http://10.20.0.187:9080', 'new-device'));
+  assert.equal(acceptance.get(restored).taskRef, 'task-1');
+  assert.equal(JSON.parse(fs.readFileSync(metadataFile(f), 'utf8')).hub, 'http://10.20.0.187:9080');
+});
+
+test('本地 Hub 迁移不会跨端口或进入已打包客户端', async t => {
+  const local = fixture(t), localApp = { ...local.app, isPackaged: false };
+  await acceptance.attach(localApp, local.handle, options, identity('verifier', 'http://127.0.0.1:9080'));
+  await assert.rejects(acceptance.attach(localApp, { sessionId: 'review-chat' }, { resumed: true },
+    identity('verifier', 'http://10.20.0.187:9081')), /账号或服务/);
+  const packaged = fixture(t), packagedApp = { ...packaged.app, isPackaged: true };
+  await acceptance.attach(packagedApp, packaged.handle, options, identity('verifier', 'http://127.0.0.1:9080'));
+  await assert.rejects(acceptance.attach(packagedApp, { sessionId: 'review-chat' }, { resumed: true },
+    identity('verifier', 'http://10.20.0.187:9080')), /账号或服务/);
+});
+
 test('损坏或不可读的元数据必须阻断打开，不能降级为普通任务执行', async t => {
   const f = fixture(t);
   await acceptance.attach(f.app, f.handle, options, identity());

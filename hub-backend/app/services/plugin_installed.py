@@ -6,6 +6,7 @@ from sqlalchemy import select
 from .. import automation_models as am
 from . import (mcp_servers, plugin_audience, plugin_installations,
                plugin_marketplace, plugin_setup_contracts, rbac)
+from . import plugin_application_mcp
 
 
 async def resolve(session, org_id, user_id, plugin_ids, *, provision_defaults=True):
@@ -45,7 +46,8 @@ async def resolve(session, org_id, user_id, plugin_ids, *, provision_defaults=Tr
             version = max(candidates, key=_version_key)
             setup = dict(version.manifest or {}).get("setup")
             plugin_setup_contracts.validate(setup, {}, require_required=True)
-            names = list(dict(version.capability_report or {}).get("mcpServers") or [])
+            names = plugin_application_mcp.company_names(
+                dict(version.manifest or {}), dict(version.capability_report or {}).get("mcpServers") or [])
             if names and policy["authentication"] == plugin_marketplace.ON_INSTALL:
                 readiness = await mcp_servers.readiness(session, names)
                 if not readiness.get("ok"):

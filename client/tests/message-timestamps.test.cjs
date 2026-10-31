@@ -24,6 +24,13 @@ test('Pi user sent time and assistant end time are distinct and visible in cache
   assert.equal(acc.snapshot().messages[1].completedAt, end);
   assert.equal(acc.snapshot().messages[1].completedAt, end, 'cached projection retains timing');
 });
+test('Pi user echo preserves the active submission identity for optimistic rendering', () => {
+  const acc = stream.create();
+  const user = { role: 'user', timestamp: start, content: 'question' };
+  times.stampPiEvent({ type: 'message_end', message: user }, start, 'ui-submission-1');
+  acc.push({ type: 'message_end', message: user });
+  assert.equal(acc.snapshot().messages[0].submissionId, 'ui-submission-1');
+});
 test('Pi replay uses append-entry time and never fills unknown old history from reopen time', t => {
   t.mock.method(Date, 'now', () => end + 86400000);
   const entries = [

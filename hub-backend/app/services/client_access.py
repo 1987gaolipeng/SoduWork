@@ -375,8 +375,13 @@ async def quota_status(
 async def assert_quota(session: AsyncSession, user_id: str, *, policy_rows=None) -> dict:
     status = await quota_status(session, user_id, policy_rows=policy_rows)
     if status["exceeded"]:
+        messages = {
+            "trial_expired": "试用已结束，联系管理员分配套餐后即可继续",
+            "model_exhausted": "当前模型的额度已用完，可以选择其他可用模型或联系管理员调整额度",
+            "model_not_allowed": "当前套餐未包含此模型，请选择套餐内的模型或联系管理员",
+        }
         raise ClientAccessError(
-            "\u672c\u6708 AI Token \u989d\u5ea6\u5df2\u7528\u5b8c\uff0c\u8bf7\u8054\u7cfb\u7ba1\u7406\u5458\u8c03\u6574\u989d\u5ea6",
+            messages.get(status.get("reason"), "当前 AI 额度已用完，联系管理员调整后即可继续"),
             code="TOKEN_QUOTA_EXCEEDED",
             status=403,
             meta={"quota": status},

@@ -123,6 +123,43 @@ test('sent image attachments render as clickable previews even when clipboard MI
   assert.match(html, /2\.0 KB/);
 });
 
+test('attachment tray exposes a concise material role hint without claiming files were understood', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'components', 'panels',
+    'conversation-attachments.js'), 'utf8');
+  const context = { window: {} };
+  vm.runInNewContext(source, context);
+  const hint = context.window.ConversationAttachments.understandingHint;
+  assert.equal(typeof hint, 'function');
+  assert.match(hint(1, ''), /可以补一句说明/);
+  assert.match(hint(2, ''), /哪份是步骤，哪份是要处理的文件/);
+  assert.match(hint(1, '请汇总'), /文字说明一起发送/);
+  assert.equal(hint(0, ''), '');
+  assert.doesNotMatch(hint(2, ''), /已理解|已读取正文/);
+});
+
+test('attachment hint follows later typing without changing the attachment rail layout', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'components', 'panels',
+    'conversation-attachments.js'), 'utf8');
+  const context = { window: {} };
+  vm.runInNewContext(source, context);
+  const events = {};
+  const input = { value: '', addEventListener(name, handler) { events[name] = handler; } };
+  const hint = { hidden: true, textContent: '' };
+  const tray = { innerHTML: '', classList: { toggle() {} }, addEventListener() {} };
+  const picker = context.window.ConversationAttachments.create({ input, tray,
+    materialHint: true, hint, onChange() {} });
+  picker.add([
+    new File(['steps'], '步骤.txt', { type: 'text/plain' }),
+    new File(['data'], '数据.txt', { type: 'text/plain' }),
+  ]);
+  assert.equal(hint.hidden, false);
+  assert.match(hint.textContent, /哪份是步骤/);
+  input.value = '只处理第二张表';
+  events.input({ isComposing: false });
+  assert.doesNotMatch(hint.textContent, /哪份是步骤/);
+  assert.match(hint.textContent, /文字说明一起发送/);
+});
+
 test('initial and follow-up composers accept clipboard files and forward attachment payloads', () => {
   const root = path.join(__dirname, '..');
   const read = (...parts) => fs.readFileSync(path.join(root, ...parts), 'utf8');

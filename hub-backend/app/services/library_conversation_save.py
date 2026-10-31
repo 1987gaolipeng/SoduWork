@@ -5,6 +5,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import hashlib
 import json
+import re
 from weakref import WeakValueDictionary
 
 from sqlalchemy import or_, select, text, update
@@ -78,10 +79,15 @@ def _stored_digest(row):
 
 async def find_exact(session, owner, backend, folder_id, session_id, filename, size,
                      digest, *, include_deliveries=True):
-    """Same name is insufficient: verify bytes in a tightly scoped candidate set."""
+    """Verify bytes in a tightly scoped candidate set, including auto-renamed retries."""
+    requested = str(filename or "")
+    dot = requested.rfind(".")
+    stem, extension = (requested[:dot], requested[dot:]) if dot > 0 else (requested, "")
+    renamed = re.compile(r"^" + re.escape(stem) + r"（[0-9]+）" + re.escape(extension) + r"$",
+                         re.IGNORECASE)
     query = select(LibraryItem).where(
         LibraryItem.owner_key == owner, LibraryItem.backend == backend,
-        LibraryItem.folder_id == folder_id, LibraryItem.filename == filename,
+        LibraryItem.folder_id == folder_id,
         LibraryItem.size == size, LibraryItem.deleted_at.is_(None),
         or_(LibraryItem.extra[DELIVERY_KEY]["sessionId"].as_string() == session_id,
             LibraryItem.extra[SOURCE_KEY]["sessionId"].as_string() == session_id),
@@ -90,6 +96,8 @@ async def find_exact(session, owner, backend, folder_id, session_id, filename, s
     # Prefer an already published immutable delivery over a legacy generic copy.
     rows = sorted(rows, key=lambda row: not isinstance((row.extra or {}).get(DELIVERY_KEY), dict))
     for row in rows:
+        if row.filename != requested and not renamed.fullmatch(str(row.filename or "")):
+            continue
         extra = row.extra or {}
         delivery, source = extra.get(DELIVERY_KEY), extra.get(SOURCE_KEY)
         if isinstance(delivery, dict):

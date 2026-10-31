@@ -16,7 +16,7 @@ const templates = Object.entries(messages).filter(([s]) => /\{\w+\}/.test(s)).so
   }).join('');
   return { expression: new RegExp('^' + pattern + '$'), names, target };
 });
-let locale = 'zh-CN';
+let locale = registry.defaultLocale || 'en-US';
 function translate(source) {
   if (typeof source !== 'string') return source;
   if (locale === 'zh-CN') return source === 'Select a project folder to share' ? '选择要分享的项目文件夹' : source;
@@ -53,6 +53,6 @@ function normalize(value) {
   if (/^en(?:[-_]|$)/i.test(raw)) return 'en-US';
   if (/^ja(?:[-_]|$)/i.test(raw)) return 'ja-JP';
   if (/^(ko|kr)(?:[-_]|$)/i.test(raw)) return 'ko-KR';
-  return registry.defaultLocale || 'zh-CN';
+  return registry.defaultLocale || 'en-US';
 }
 module.exports = { translate, dialogOptions, getLocale() { return locale; }, setLocale(value) { locale = normalize(value); }, normalize };

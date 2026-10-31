@@ -39,6 +39,34 @@ _DEAD_GRACE_S = 20
 # produce multi-megabyte JSONL).  Keep a bounded safety net, but measure idle
 # drain time and reset it whenever either stream cursor advances.
 _DURABLE_DRAIN_GRACE_S = 5 * 60
+_PI_SETTLE_GRACE_S = 5
+
+
+def _pi_settlement_due(run: dict, now: float) -> bool:
+    """Return true only after a final Pi response stayed quiet for the settlement grace."""
+    if str((run or {}).get("cli") or "") != "pi":
+        return False
+    try:
+        at = float((run or {}).get("piFinalResponseAt") or 0)
+    except (TypeError, ValueError):
+        return False
+    return bool(at and now - at >= _PI_SETTLE_GRACE_S)
+
+
+def _capture_started(ref: str, spool: dict, owner=None) -> None:
+    at = local_spool.started_at(_store_dir(ref), spool)
+    if not at:
+        return
+    changed = False
+    with _LOCK:
+        run = _RUNS.get(ref)
+        if (run is not None and not run.get('executionStartedAt')
+                and (owner is None or run.get('_workerIdentity') is owner)
+                and (run.get('stream') or {}).get('id') == spool.get('id')):
+            run['executionStartedAt'] = at
+            changed = True
+    if changed:
+        _save_meta(ref)
 
 
 def _capture_started(ref: str, spool: dict, owner=None) -> None:
@@ -292,8 +320,16 @@ def recover(
             started = float(current.get('started') or now)
             if current.get("permissionWaiting"):
                 return
+            if (str(current.get("cli") or "") == "pi"
+                    and (current.get("terminal") or {}).get("piFinalResponse")
+                    and not current.get("piFinalResponseAt")):
+                current["piFinalResponseAt"] = now
             idle, total = now - last, now - started
-            if not current.get('timedOut') and (idle > _IDLE_LIMIT_S or total > _HARD_LIMIT_S):
+            pi_settlement = _pi_settlement_due(current, now)
+            if pi_settlement:
+                current['piSettledByWatchdog'] = True
+                should_kill = True
+            elif not current.get('timedOut') and (idle > _IDLE_LIMIT_S or total > _HARD_LIMIT_S):
                 current['timedOut'] = (
                     '静默 %s 分钟没动静' % int(idle / 60)
                     if idle > _IDLE_LIMIT_S
@@ -301,7 +337,11 @@ def recover(
                 )
                 should_kill = True
         if should_kill:
-            kill_tree(ref)
+            if not kill_tree(ref):
+                with _LOCK:
+                    current = _RUNS.get(ref)
+                    if current is not None:
+                        current.pop('piSettledByWatchdog', None)
 
     def worker() -> None:
         outcome = 'cancelled'
@@ -402,7 +442,19 @@ def _watchdog(ref: str, proc, *, finish: Callable, kill_tree: Callable) -> None:
             durable_progress = None
             if run.get("permissionWaiting"):
                 continue
-            idle, total = time.time() - last, time.time() - started
+            now = time.time()
+            if _pi_settlement_due(run, now):
+                with _LOCK:
+                    current = _RUNS.get(ref)
+                    if current is not None:
+                        current['piSettledByWatchdog'] = True
+                if not kill_tree(ref):
+                    with _LOCK:
+                        current = _RUNS.get(ref)
+                        if current is not None:
+                            current.pop('piSettledByWatchdog', None)
+                return
+            idle, total = now - last, now - started
             if idle > _IDLE_LIMIT_S or total > _HARD_LIMIT_S:
                 reason = (
                     '静默 %s 分钟没动静' % int(idle / 60)

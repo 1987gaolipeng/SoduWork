@@ -185,6 +185,16 @@ class ScheduleRepoScopeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(prepare.await_args.args[3].id, "own")
 
+    async def test_direct_flow_flag_still_uses_plain_conversation_without_task(self):
+        schedule = self.schedule(flow=True)
+        with patch.object(schedule_conversations, "prepare", AsyncMock(
+                return_value={"ok": True})) as prepare:
+            result = await schedules.run_one(
+                self.session, schedule, schedule_run_id="run")
+        self.assertTrue(result["ok"])
+        prepare.assert_awaited_once()
+        self.assertEqual((await self.session.execute(select(models.Task))).scalars().all(), [])
+
     async def test_enterprise_run_rejects_hidden_repository_before_creating_task(self):
         schedule = self.schedule("hidden", plugin_binding_id="binding")
         with patch.object(schedules, "validate_execution", AsyncMock(
@@ -193,6 +203,17 @@ class ScheduleRepoScopeTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["ok"])
         tasks = (await self.session.execute(select(models.Task))).scalars().all()
         self.assertEqual(tasks, [], "Forbidden repository must not create an execution Task")
+
+    async def test_retired_plugin_binding_uses_owner_scoped_conversation_without_task(self):
+        schedule = self.schedule("own", plugin_binding_id="binding")
+        with patch.object(schedule_conversations, "prepare", AsyncMock(
+                return_value={"ok": True, "executionMode": schedule_conversations.PROTOCOL})) as prepare:
+            result = await schedules.run_one(self.session, schedule, schedule_run_id="run")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["executionMode"], schedule_conversations.PROTOCOL)
+        self.assertEqual(schedule.plugin_binding_id, "")
+        self.assertEqual(prepare.await_args.args[3].id, "own")
+        self.assertEqual((await self.session.execute(select(models.Task))).scalars().all(), [])
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@
 </head><body><output id="fixtureNotice"></output>
 <script>
 const parameters = new URLSearchParams(location.search);
-const isolatedHub = parameters.get('hub'), identity = parameters.get('identity');
+const isolatedHub = parameters.get('hub'), identity = parameters.get('identity'), libraryWorkRoot = parameters.get('workRoot') || '';
 if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(isolatedHub) || !['sender','recipient','other'].includes(identity)) throw Error('Explicit isolated target required');
 localStorage.setItem('soduwork_work_hub_environment_v1','development');
 localStorage.setItem('soduwork_work_development_hub_url_v1',isolatedHub);

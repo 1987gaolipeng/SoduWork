@@ -35,6 +35,22 @@ function agentDir(app) {
   return path.join(app.getPath('userData'), 'pi-agent');
 }
 
+// Automation runs are created outside the ordinary composer, so an empty Hub
+// model override should reuse the local selection rather than a stale default.
+function configuredModel(app) {
+  try {
+    const value = JSON.parse(fs.readFileSync(path.join(agentDir(app), 'models.json'), 'utf8'));
+    for (const provider of Object.values(value && value.providers || {})) {
+      for (const model of Array.isArray(provider?.models) ? provider.models : []) {
+        if (String(model?.modality || '').toLowerCase() === 'image') continue;
+        const id = String(model?.id || '').trim();
+        if (id) return id;
+      }
+    }
+  } catch (_) { /* A first run has no local model selection yet. */ }
+  return '';
+}
+
 /*
  * Resolve the authorized model endpoint from Hub and return a readable failure reason when
  * unavailable.
@@ -107,6 +123,7 @@ async function fetchModel(identity, modelName = '', timeoutMs = 8000, fetchImpl 
         key: d.key,
         mcpKey: d.mcpKey || '',
         id: d.model,
+        quotaProvider: d.providerKey || d.provider || '',
         label: d.label || d.model,
         maxOutputTokens: d.maxOutputTokens,
         capabilityProfile: d.capabilityProfile,
@@ -289,7 +306,7 @@ async function prepare(app, identity, modelName = '') {
 }
 
 module.exports = {
-  prepare, fetchModel, fetchSelection, writeModels, writeMcpServers, noProxyFor, agentDir,
+  prepare, fetchModel, fetchSelection, writeModels, writeMcpServers, noProxyFor, agentDir, configuredModel,
   warmupGateway,
   _resetWarmup: () => { _lastWarmupAt = 0; },
   ENV_KEY, ENV_MCP_KEY, ENV_AGENT_DIR, DEFAULT_CTX,

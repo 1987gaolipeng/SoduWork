@@ -31,7 +31,8 @@ function client(saved = {}, blocked = false, options = {}) {
     dispatchEvent: event => { listeners.get(event.type)?.(event); },
     soduWorkAPI: { setLocale: locale => sent.push(locale), onLocaleChange: cb => { listeners.set('ipc-locale', cb); } },
   });
-  vm.runInContext("window = globalThis; let cfg = {locale:'zh-CN'}; let saves = 0; const saveCfg = () => { saves++; };", context);
+  const initialConfig = options.initialLocale ? `{locale:${JSON.stringify(options.initialLocale)}}` : '{}';
+  vm.runInContext(`window = globalThis; let cfg = ${initialConfig}; let saves = 0; const saveCfg = () => { saves++; };`, context);
   for (const file of JSON.parse(fs.readFileSync(path.join(__dirname, '../core/locales/manifest.json'), 'utf8'))) {
     // A legacy renderer can start while the registry script is unavailable;
     // locale packs must still be selectable instead of collapsing to Chinese.
@@ -42,6 +43,15 @@ function client(saved = {}, blocked = false, options = {}) {
   vm.runInContext(script, context);
   return { api: context.SoduWorkI18n, context, storage, listeners, sent, read: code => vm.runInContext(code, context) };
 }
+
+test('new client profiles default to English while explicit locale choices remain intact', () => {
+  const fresh = client({}, false, { initialLocale: null });
+  assert.equal(fresh.api.getLocale(), 'en-US');
+  assert.equal(fresh.context.document.documentElement.lang, 'en-US');
+  const saved = client({}, false, { initialLocale: 'zh-CN' });
+  assert.equal(saved.api.getLocale(), 'zh-CN');
+  assert.deepEqual(saved.api.options().map(item => item.value), ['zh-CN', 'en-US', 'ja-JP', 'ko-KR']);
+});
 
 test('ja-JP and ko-KR translate gap pages, localized templates and Issue terms', () => {
   const c = client();
@@ -67,6 +77,7 @@ test('ja-JP and ko-KR translate gap pages, localized templates and Issue terms',
 });
 test('gantt item counts and routine rhythm labels translate in all locales without term leakage', () => {
   const c = client();
+  c.api.setLocale('zh-CN');
   assert.equal(c.api.translateText('任务 42 项'), '任务 42 项');
   c.api.setLocale('en-US');
   assert.equal(c.api.translateText('任务 42 项'), '42 items');
@@ -101,6 +112,8 @@ test('cloud environment UI translates complete messages while preserving command
 });
 test('complete dynamic templates retain data and safely escape HTML parameters', () => {
   const c = client(); c.api.setLocale('en-US');
+  assert.equal(c.api.translateText('当前模型不接受图片输入，请切换支持图片的模型或启用视觉适配'),
+    'This model rejected image input. Switch to an image-capable model or enable vision fallback.');
   assert.equal(c.api.translateText('本月已用 12 / 300 Tokens'), 'Used this month: 12 / 300 tokens');
   assert.equal(c.api.translateText('在此目录创建会话：D:/保存 & 删除'), 'Start a chat in: D:/保存 & 删除');
   assert.equal(c.api.translateText('在此目录创建会话：D:/保存  &  删除'), 'Start a chat in: D:/保存  &  删除');
@@ -157,6 +170,7 @@ test('accepted remote configuration updates the reload mirror without saving bac
 });
 test('native window titles follow locale while retaining the full user task title', () => {
   const c = client();
+  c.api.setLocale('zh-CN');
   c.api.setWindowTitle('控制台', '保存 · （有会话）');
   assert.equal(c.context.document.title, 'SoduWork · 控制台 · 保存 · （有会话）');
   c.api.setLocale('en-US');
@@ -172,7 +186,7 @@ test('only complete UI messages translate and whitespace is retained', () => {
   assert.equal(c.api.translateText('保存：我的项目'), '保存：我的项目');
   c.api.setLocale('zh-CN');
   assert.equal(c.api.translateText('保存'), '保存');
-  assert.equal(c.api.normalize('xx-YY'), 'zh-CN');
+  assert.equal(c.api.normalize('xx-YY'), 'en-US');
   assert.equal(c.api.normalize('en-GB'), 'en-US');
 });
 

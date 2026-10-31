@@ -67,16 +67,15 @@ test('scheduled computer automation is preflighted and retryable', () => {
   assert.match(css, /\.sch-ready\.blocked/);
   assert.match(css, /\.sch-retry-row/);
 });
-test('自动化执行记录区分派发、待确认、完成和失败', () => {
+test('自动化执行记录展示普通会话、状态和打开入口', () => {
   assert.match(api, /schedules\/.*\/runs/);
   assert.match(panel, /listScheduleRuns/);
-  assert.match(panel, /普通自动化在对话中执行，可查看过程并继续聊/);
-  assert.match(panel, /企业工作流仍以真实节点与审批结果为准/);
+  assert.match(panel, /提示词、模型过程和最终结果都在/);
   assert.match(panel, /data-run-chat/);
   assert.match(panel, /starting:/);
   assert.match(panel, /waiting:/);
   assert.match(panel, /succeeded:/);
-  assert.match(panel, /data-run-task/);
+  assert.doesNotMatch(panel, /data-run-task/);
   assert.match(panel, /receipt\.plugin/);
   assert.match(panel, /receipt\.route/);
   assert.match(panel, /固定版本/);
@@ -116,6 +115,16 @@ test('两个自动化抽屉在桌宠和主窗口都紧随主脚本加载', () =>
     assert.ok(editor > main, '配置抽屉必须在自动化主脚本之后加载');
     assert.ok(runs > main, '执行记录抽屉必须在自动化主脚本之后加载');
   }
+});
+
+test('automation disable confirmation uses the shared accessible dialog in both entry points', () => {
+  assert.match(indexEntry, /components\/shared\/app-confirm-dialog\.css/);
+  assert.match(indexEntry, /components\/shared\/app-confirm-dialog\.js/);
+  assert.match(deskEntry, /components\/shared\/app-confirm-dialog\.css/);
+  assert.match(deskEntry, /components\/shared\/app-confirm-dialog\.js/);
+  assert.match(panel, /SoduWorkConfirmDialog\.open/);
+  assert.match(panel, /继续运行/);
+  assert.match(panel, /停用自动化/);
 });
 
 test('automation templates come only from the admin console (no built-in fallback)', () => {

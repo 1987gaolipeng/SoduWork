@@ -368,6 +368,7 @@
   function rememberSession(row) {
     var previousScope = _deviceId && _clientUser ? taskStorageKey('ops') : '';
     if (row && row.clientId) _deviceId = String(row.clientId);
+    if (row?.user?.id && row.user.id !== _clientUser?.id) _clientQuota = null;
     if (row && row.user) _clientUser = row.user;
     if (row && row.quota) _clientQuota = row.quota;
     if (row && row.session) {
@@ -376,7 +377,7 @@
       _deviceSessionUntil = Date.now() + Math.max(30, Number(row.expiresIn) || 0) * 1000;
       _deviceAuthState = 'active';
     } else if (row && row.code === 'TOKEN_QUOTA_EXCEEDED') {
-      _deviceSession = ''; _deviceSessionUntil = 0; _deviceAuthState = 'quota';
+      if (!hasValidDeviceSession()) _deviceAuthState = 'quota';
       if (row.quota) _clientQuota = row.quota;
     } else if (row && row.activationRequired) {
       _clientUser = null; _clientQuota = null;
@@ -1124,7 +1125,8 @@
       if (r && r.ok === false) {
         throw new Error(r.reason || r.error || r.message || '执行方式暂时无法加载');
       }
-      return r || { repos: [], workflows: [], substrates: [], recommendation: {} };
+      return r || { repos: [], workflows: [], substrates: [], models: [], modelOptions: [],
+        defaultModel: '', recommendation: {} };
     },
     /*
      * Personal skill selection is limited by administrator availability; return skills,
@@ -1526,8 +1528,11 @@
       var r = await jfetch('/schedules/' + encodeURIComponent(sid) + '/runs' + q);
       mark(true); return (r && r.items) || [];
     },
-    async runSchedule(sid) {
-      var r = await jfetch('/schedules/' + encodeURIComponent(sid) + '/run', { method: 'POST' });
+    async runSchedule(sid, options) {
+      var body = options && options.instanceId ? { instanceId: String(options.instanceId) } : {};
+      var r = await jfetch('/schedules/' + encodeURIComponent(sid) + '/run', {
+        method: 'POST', body: JSON.stringify(body)
+      });
       mark(true); return r;
     },
     /* Preview the same backend-generated title, description, and carried materials used by dispatch. */
@@ -2109,6 +2114,13 @@
     async deleteLibraryItem(id) {
       try { var r = await jfetch('/library/items/' + encodeURIComponent(id), { taskScope: taskStorageKey('ops'), method: 'DELETE' }); mark(true); return r; }
       catch (e) { markFromError(e); throw e; }
+    },
+    async deleteLibraryItems(ids) {
+      try {
+        var itemIds = [...new Set((Array.isArray(ids) ? ids : []).map(function (id) { return String(id || '').trim(); }).filter(Boolean))];
+        var r = await jfetch('/library/items/batch-delete', { taskScope: taskStorageKey('ops'), method: 'POST',
+          body: JSON.stringify({ itemIds: itemIds }) }); mark(true); return r;
+      } catch (e) { markFromError(e); throw e; }
     },
     async restoreLibraryItem(id) {
       try { var r = await jfetch('/library/items/' + encodeURIComponent(id) + '/restore', { taskScope: taskStorageKey('ops'), method: 'POST' }); mark(true); return r; }

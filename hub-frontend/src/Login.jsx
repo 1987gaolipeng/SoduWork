@@ -2,6 +2,31 @@ import { translateText as tx, useLocale } from './i18n.js'
 import React, { useEffect, useId, useState } from 'react'
 import { api, setToken, setUser } from './api.js'
 
+function blockAccountLineBreak(event) {
+  if (event.inputType === 'insertLineBreak' || event.inputType === 'insertParagraph') event.preventDefault()
+}
+
+function updateSingleLineAccount(event, setAccount) {
+  const input = event.currentTarget
+  const raw = input.value
+  const value = raw.replace(/[\r\n]/g, '')
+  if (value === raw) {
+    setAccount(value)
+    return
+  }
+  const start = typeof input.selectionStart === 'number' ? input.selectionStart : raw.length
+  const end = typeof input.selectionEnd === 'number' ? input.selectionEnd : start
+  const nextStart = start - (raw.slice(0, start).match(/[\r\n]/g) || []).length
+  const nextEnd = end - (raw.slice(0, end).match(/[\r\n]/g) || []).length
+  setAccount(value)
+  const restore = () => {
+    if (document.activeElement !== input) return
+    try { input.setSelectionRange(Math.max(0, nextStart), Math.max(0, nextEnd)) } catch (_) {}
+  }
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(restore)
+  else setTimeout(restore, 0)
+}
+
 function Brand() { return <span className="public-brand"><img src="/soduwork.png" alt="" className="logo-box" /><b>SoduWork</b></span> }
 export default function Login({ onLogin, onBack, initialError = '' }) {
   useLocale()
@@ -58,10 +83,10 @@ export default function Login({ onLogin, onBack, initialError = '' }) {
     <main className="public-login-main">
       <form onSubmit={submit} className="login-card" aria-labelledby={`${formId}-title`} aria-busy={busy}>
         <div className="login-mobile-brand"><Brand /></div>
-        <div className="login-head"><span className="public-eyebrow">{tx('SoduWork 管理端')}</span><h1 className="login-title" id={`${formId}-title`}>{tx('欢迎回来。')}</h1><p className="login-sub">{tx('登录你的账号，继续管理团队的工作空间。')}</p></div>
+        <div className="login-head"><span className="public-eyebrow">{tx('SODUWORK 管理端')}</span><h1 className="login-title" id={`${formId}-title`}>{tx('欢迎回来。')}</h1><p className="login-sub">{tx('登录你的账号，继续管理团队的工作空间。')}</p></div>
         {err && <div id={`${formId}-error`} className="login-error" role="alert">{err}</div>}
         {providers.length > 0 && <div className="login-sso">{providers.map(item => <button type="button" className="login-sso-button" key={item.key} disabled={busy} onClick={() => window.location.assign(item.startUrl)}><span className="login-sso-mark" aria-hidden="true">S</span><span>{tx('使用 {0} 登录', [item.name])}</span><b aria-hidden="true">→</b></button>)}<div className="login-divider"><span>{tx('或使用 SoduWork 账号')}</span></div></div>}
-        <div className="login-field"><label className="f-lbl" htmlFor={`${formId}-account`}>{tx('账号')}</label><input id={`${formId}-account`} className="f-in" name="username" autoComplete="username" value={user} onChange={event => setAccount(event.target.value)} placeholder={tx('输入你的账号')} autoCapitalize="none" spellCheck={false} required autoFocus aria-describedby={err ? `${formId}-error` : undefined} /></div>
+        <div className="login-field"><label className="f-lbl" htmlFor={`${formId}-account`}>{tx('账号')}</label><input id={`${formId}-account`} className="f-in" name="username" autoComplete="username" value={user} onBeforeInput={blockAccountLineBreak} onChange={event => updateSingleLineAccount(event, setAccount)} placeholder={tx('输入你的账号')} autoCapitalize="none" spellCheck={false} required autoFocus aria-describedby={err ? `${formId}-error` : undefined} /></div>
         <div className="login-field"><label className="f-lbl" htmlFor={`${formId}-password`}>{tx('密码')}</label><div className="login-password"><input id={`${formId}-password`} className="f-in" name="password" autoComplete="current-password" type={revealed ? 'text' : 'password'} value={pass} onChange={event => setPass(event.target.value)} placeholder={tx('输入你的密码')} required aria-describedby={err ? `${formId}-error` : undefined} /><button className="login-password-toggle" type="button" onClick={() => setRevealed(!revealed)} aria-label={revealed ? tx('隐藏密码') : tx('显示密码')} aria-pressed={revealed}>{revealed ? tx('隐藏') : tx('显示')}</button></div></div>
         <button type="submit" className="login-submit" disabled={busy}>{busy ? tx('正在登录…') : tx('进入控制台')}<span aria-hidden="true">→</span></button>
         <p className="login-help">{tx('需要账号或登录帮助？请联系你的企业管理员。')}</p>

@@ -10,7 +10,7 @@ import hashlib
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import models
@@ -19,16 +19,17 @@ from . import schedule_timing
 from .schedule_execution import (
     CAPABILITY_SKILLS, _capability_remediation, capability_save_blocker,
     preflight_execution, required_skill_names, validate_direct_execution,
-    validate_execution,
+    validate_execution, normalize_conversation_schedule,
 )
 from .schedule_repo_scope import resolve_repo
 from .schedule_run_contracts import (
     DIRECT_CAPABILITIES, PERSONAL_PLUGIN_VERSION_POLICIES,
-    RUN_ACTIVE, RUN_TERMINAL, RUN_TRIGGERS,
-    _run_iso, _run_time, apply_attempt_outcome, apply_outcome, begin_run, claim_run,
+    RUN_ACTIVE, RUN_TRIGGERS,
+    _run_iso, _run_time, apply_attempt_outcome, apply_outcome,
+    automation_conversation_title, begin_run, claim_run,
     clean_personal_plugin_checksum, clean_personal_plugin_key,
     clean_personal_plugin_version, clean_personal_plugin_version_policy,
-    clean_plugin_inputs, clean_required_capabilities, derive_run_state,
+    clean_plugin_inputs, clean_required_capabilities,
     error_text, normalize_personal_plugin_snapshot, personal_plugin_spec,
 )
 
@@ -293,8 +294,13 @@ async def _notify_failure(session: AsyncSession, s, out: dict) -> None:
 
 async def execute_one(session: AsyncSession, s, trigger: str = "timer",
                       who: str = "SoduWork（自动化）",
-                      idempotency_key: str = "") -> dict:
+                      idempotency_key: str = "",
+                      execution_instance: str = "") -> dict:
     """Create an immutable attempt before handing work to a substrate."""
+    # Normalize before claiming the occurrence.  Otherwise a legacy row could
+    # leak plugin/workflow fields into the immutable receipt before run_one()
+    # reaches the ordinary-conversation adapter.
+    normalize_conversation_schedule(s)
     if getattr(s, "every", "") == "once" and trigger != "manual" and not s.enabled:
         return {"ok": True, "deduplicated": True, "scheduleRunState": "paused"}
     if idempotency_key:
@@ -304,7 +310,8 @@ async def execute_one(session: AsyncSession, s, trigger: str = "timer",
         await session.refresh(s)
         await session.refresh(run)
         if not claimed and (
-                run.state != "starting" or run.task_id or run.workflow_run_id):
+                run.state != "starting" or run.task_id or run.workflow_run_id or
+                dict(run.receipt or {}).get("executionMode")):
             recovered = {}
             handed_off = bool(run.task_id or run.workflow_run_id or dict(run.receipt or {}).get("executionMode") or
                               run.state in ("running", "waiting", "succeeded"))
@@ -320,12 +327,19 @@ async def execute_one(session: AsyncSession, s, trigger: str = "timer",
                 await session.flush()
             return {
                 "ok": run.state != "failed", "deduplicated": True,
-                "error": run.error or "", "taskId": run.task_id or "",
-                "workflowRunId": run.workflow_run_id or "",
+                "error": run.error or "",
                 "scheduleRunId": run.id, "scheduleRunState": run.state, **recovered,
             }
     else:
         run = await begin_run(session, s, trigger)
+    if execution_instance:
+        # Manual UI launches reserve the occurrence before the local inbox
+        # worker can observe the committed run.  This removes the race between
+        # the button response and the worker's 250ms polling loop.
+        from . import schedule_conversations
+        if not schedule_conversations.reserve_run(run, execution_instance):
+            return {"ok": False, "error": "本次自动化正在另一台执行端启动，请稍后查看执行记录",
+                    "scheduleRunId": run.id, "scheduleRunState": run.state}
     if not schedule_timing.matches(s, run):
         run.state, run.error = "cancelled", "预约日期或归属已变更，本次原预约未继续派发"
         run.finished_at = datetime.now(timezone.utc)
@@ -344,10 +358,15 @@ async def execute_one(session: AsyncSession, s, trigger: str = "timer",
     once_attempt = (getattr(s, "every", "") == "once" or
                     dict(run.receipt or {}).get("timing", {}).get("every") == "once")
     schedule_id, plan_exists = s.id, True
+    # Adapter failures may roll back the transaction and expire both ORM rows.
+    # Capture display/diagnostic values before crossing that boundary.
+    run_id = run.id
+    conversation_title = automation_conversation_title(s, run.started_at)
     try:
-        out = await run_one(session, s, who=who, schedule_run_id=run.id)
+        out = await run_one(session, s, who=who, schedule_run_id=run_id,
+                            conversation_title=conversation_title)
     except Exception as exc:  # noqa: BLE001 - the receipt must survive adapter failures
-        log.exception("自动化启动异常：schedule=%s run=%s", s.id, run.id)
+        log.exception("自动化启动异常：schedule=%s run=%s", schedule_id, run_id)
         out = {"ok": False, "error": str(exc)[:300]}
     # run_one calls task_dispatch.dispatch, which commits and expires all session ORM objects.
     # apply_outcome only assigns values on success, but its failure path reads schedule attributes
@@ -387,14 +406,13 @@ async def reconcile_runs(session: AsyncSession, *, schedule_id: str = "",
                          limit: int = 200) -> list:
     """Reconcile active receipts from task/workflow truth without substrate coupling."""
     state_filter = models.AiScheduleRun.state.in_(RUN_ACTIVE)
+    # Include every old task/workflow-linked row when a schedule's history is
+    # opened. It is migrated below in one place, so the UI never exposes a
+    # retired task status or attempts to recover the old workflow.
+    legacy_links = or_(models.AiScheduleRun.workflow_run_id != "",
+                       models.AiScheduleRun.task_id != "")
     if schedule_id:
-        # Task and workflow retries can recover the same receipt. Revisit terminal
-        # failures only inside one schedule so old failures never starve active work.
-        state_filter = or_(state_filter, and_(
-            models.AiScheduleRun.state == "failed",
-            or_(models.AiScheduleRun.workflow_run_id != "",
-                models.AiScheduleRun.task_id != ""),
-        ))
+        state_filter = or_(state_filter, legacy_links)
     q = select(models.AiScheduleRun).where(state_filter)
     if schedule_id:
         q = q.where(models.AiScheduleRun.schedule_id == schedule_id)
@@ -408,32 +426,23 @@ async def reconcile_runs(session: AsyncSession, *, schedule_id: str = "",
             max(1, min(500, int(limit or 200)))))).scalars().all())
     if not active:
         return active
-
-    task_ids = {item.task_id for item in active if item.task_id}
-    tasks = {}
-    if task_ids:
-        tasks = {item.id: item for item in (await session.execute(
-            select(models.Task).where(models.Task.id.in_(task_ids))
-        )).scalars().all()}
-
-    from .. import automation_models as am
-    workflow_ids = {item.workflow_run_id for item in active if item.workflow_run_id}
-    workflows = {}
-    waiting_human = set()
-    if workflow_ids:
-        workflows = {item.id: item for item in (await session.execute(
-            select(am.WorkflowRun).where(am.WorkflowRun.id.in_(workflow_ids))
-        )).scalars().all()}
-        waiting_human = set((await session.execute(
-            select(am.NodeRun.run_id).where(
-                am.NodeRun.run_id.in_(workflow_ids),
-                am.NodeRun.state == "waiting_human")
-        )).scalars().all())
-
-    from . import tasks as task_service
-    ai = await task_service.ai_states(session, list(task_ids)) if task_ids else {}
     now = datetime.now(timezone.utc)
     for item in active:
+        receipt = dict(item.receipt or {})
+        if item.task_id or item.workflow_run_id:
+            # A legacy run cannot be turned into an ordinary chat after the
+            # fact. Remove its task/workflow ownership and leave a truthful
+            # terminal record that asks the user to run the automation again.
+            item.task_id = ""
+            item.workflow_run_id = ""
+            receipt.pop("taskStatus", None)
+            receipt.pop("workflowState", None)
+            receipt["migratedFrom"] = "legacy-task-workflow"
+            item.receipt = receipt
+            item.state = "failed"
+            item.error = "旧版自动化已迁移为普通会话，请重新执行"
+            item.finished_at = item.finished_at or now
+            continue
         if await schedule_timing.reconcile_pending(session, item, now):
             continue
         if dict(item.receipt or {}).get('executionMode') == 'soduwork.automation-conversation/v1':
@@ -483,16 +492,14 @@ async def reconcile_runs(session: AsyncSession, *, schedule_id: str = "",
     return active
 
 
-def run_to_api(run, task=None) -> dict:
+def run_to_api(run) -> dict:
     started = _run_time(run.started_at)
     finished = _run_time(run.finished_at)
     duration = max(0, int((finished - started).total_seconds())) if started and finished else None
     return {
         "id": run.id, "scheduleId": run.schedule_id, "trigger": run.trigger,
         "state": run.state, "attempt": int(run.attempt or 1),
-        "taskId": run.task_id, "taskTitle": str(getattr(task, "title", "") or ""),
-        "taskStatus": str(getattr(task, "status", "") or ""),
-        "workflowRunId": run.workflow_run_id, "startedAt": _run_iso(run.started_at),
+        "startedAt": _run_iso(run.started_at),
         "finishedAt": _run_iso(run.finished_at), "durationSeconds": duration,
         "error": run.error, "receipt": dict(run.receipt or {}),
         "conversationId": dict(run.receipt or {}).get('conversationId', ''),
@@ -515,13 +522,7 @@ async def list_runs(session: AsyncSession, schedule_id: str, *,
     rows = list((await session.execute(
         q.order_by(models.AiScheduleRun.started_at.desc()).limit(
             max(1, min(100, int(limit or 20)))))).scalars().all())
-    task_ids = {item.task_id for item in rows if item.task_id}
-    tasks = {}
-    if task_ids:
-        tasks = {item.id: item for item in (await session.execute(
-            select(models.Task).where(models.Task.id.in_(task_ids))
-        )).scalars().all()}
-    return [run_to_api(item, tasks.get(item.task_id)) for item in rows]
+    return [run_to_api(item) for item in rows]
 
 
 async def run_one(session: AsyncSession, s, who: str = "SoduWork（定时）",
@@ -542,21 +543,16 @@ async def run_one(session: AsyncSession, s, who: str = "SoduWork（定时）",
         return {"ok": False, "code": "SCHEDULE_OWNER_CHANGED", "error": "执行设备的登录账号已变更，请原账号登录后再执行"}
     try:
         repo = await resolve_repo(session, s, client=client)
+        await validate_execution(session, s)
+        personal = personal_plugin_spec(s)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)[:300]}
 
-    actor_id, actor_name = task_actor(s, client, who)
-    stamp = _now_local(s).strftime("%m-%d %H:%M")
-    plugin_mode = bool(str(getattr(s, "plugin_binding_id", "") or ""))
-    personal = {}
-    if not plugin_mode:
-        try:
-            await validate_execution(session, s)
-            personal = personal_plugin_spec(s)
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)[:300]}
-
     from . import schedule_conversations
+    # Normalize legacy rows before selecting the execution adapter.  This is
+    # deliberately repeated at the dispatch boundary so an old database row
+    # cannot route one more run through the task/workflow engine.
+    normalize_conversation_schedule(s)
     adapter = schedule_conversations.adapter_for(s, client)
     if adapter and schedule_run_id:
         return await schedule_conversations.prepare(session, s, client, repo, schedule_run_id, adapter, personal)
@@ -800,8 +796,8 @@ async def tick(session: AsyncSession) -> dict:
             deduplicated += 1
         elif out.get("ok"):
             fired += 1
-            log.info("自动化「%s」已交付执行（任务 %s，记录 %s）",
-                     s.title, out.get("taskId"), out.get("scheduleRunId"))
+            log.info("自动化「%s」已交付普通会话（记录 %s）",
+                     s.title, out.get("scheduleRunId"))
         else:
             log.warning("自动化启动失败「%s」：%s", s.title, s.last_error)
             await _notify_failure(session, s, out)

@@ -28,6 +28,7 @@ export const dictionary = {
     "nav.operations": "运行监控",
     "nav.clients": "执行网络",
     "nav.usage": "用量与成本",
+    "nav.quotas": "额度管理",
     "nav.projects": "项目与仓库",
     "nav.repositories": "仓库目录",
     "nav.models": "模型目录",
@@ -48,9 +49,10 @@ export const dictionary = {
     "sub.operations": "Hub、Runner、请求与执行链路健康",
     "sub.clients": "集中管理员工终端、Runner 执行机与接单状态",
     "sub.usage": "按成员、场景、Agent 与模型治理企业 AI 消耗",
+    "sub.quotas": "套餐、模型额度与成员分配",
     "sub.projects": "项目、代码仓库、流程和发布目标的治理入口",
     "sub.repositories": "企业代码资产全量目录、同步健康与项目挂载",
-    "sub.models": "模型服务、企业模型与个人额度策略",
+    "sub.models": "模型服务与企业模型配置",
     "sub.plugins": "企业能力、工作流与运行治理",
     "sub.capabilities": "统一治理 Skill、连接器与企业开放策略",
     "sub.integrations": "外部业务系统、代码平台与消息通道",
@@ -92,6 +94,7 @@ export const dictionary = {
     "nav.operations": "Runtime monitoring",
     "nav.clients": "Execution network",
     "nav.usage": "Usage and cost",
+    "nav.quotas": "Quota management",
     "nav.projects": "Projects and repos",
     "nav.repositories": "Repository catalog",
     "nav.models": "Model catalog",
@@ -112,9 +115,10 @@ export const dictionary = {
     "sub.operations": "Hub, Runner, requests and execution health",
     "sub.clients": "Manage employee devices, runners and intake status",
     "sub.usage": "Govern enterprise AI usage by member, scenario, agent and model",
+    "sub.quotas": "Plans, model allowances and member assignments",
     "sub.projects": "Govern projects, repositories, workflows and release targets",
     "sub.repositories": "Enterprise code inventory, sync health and project mounts",
-    "sub.models": "Model services, enterprise models and quota policy",
+    "sub.models": "Model services and enterprise model configuration",
     "sub.plugins": "Enterprise capabilities, workflows and runtime governance",
     "sub.capabilities": "Govern Skills, connectors and open access policy",
     "sub.integrations": "External business systems, code platforms and messaging",
@@ -128,3 +132,8 @@ export const dictionary = {
     "sub.audit": "Critical actions and accountability trail"
   }
 }
+
+Object.assign(dictionary, {
+  'ja-JP': { ...dictionary['ja-JP'], 'nav.quotas': '利用枠の管理', 'sub.quotas': 'プラン、モデル別の利用枠、メンバーへの割り当て' },
+  'ko-KR': { ...dictionary['ko-KR'], 'nav.quotas': '사용량 한도 관리', 'sub.quotas': '요금제, 모델별 한도 및 구성원 할당' },
+})

@@ -8,6 +8,7 @@ const os = require('node:os');
 const vm = require('node:vm');
 const { pathToFileURL } = require('node:url');
 const test = require('node:test');
+test.beforeEach(() => require('../main/native-locale.cjs').setLocale('zh-CN'));
 const { create, overlayTheme, supportsTitlebar } = require('../main/workspace-titlebar.cjs');
 
 function fixture(platform = 'win32') {

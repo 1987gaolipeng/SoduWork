@@ -173,6 +173,34 @@ if (typeof electron === 'string') {
     await js('fixtureEntryAnimation.finish();fixturePreview.close();void 0;');
     report.cases.push('Native titlebar remains clear; preview and backdrop respect its safe area, with visible entry animation frames');
 
+    await js('window.soduWorkAPI={...(window.soduWorkAPI||{}),getWindowTitlebar:async()=>({mode:"overlay"}),setWindowTitlebarTheme:async()=>({ok:true})};void 0;');
+    await js(read('components/workspace/window-menu.js')+'\nvoid 0;');
+    await until('document.documentElement.dataset.windowTitlebar==="overlay"');
+    await open('markdown', false);
+    const motion = await js(`(()=>{const pane=document.querySelector('.library-preview-pane');
+      const animation=pane.getAnimations().find(a=>a.animationName==='library-preview-enter');
+      if(!animation)throw Error('Missing preview entry animation');
+      animation.pause(); window.fixtureEntryAnimation=animation;
+      const sample=time=>{animation.currentTime=time;const s=getComputedStyle(pane),r=pane.getBoundingClientRect();return{opacity:Number(s.opacity),width:r.width,top:r.top}};
+      const duration=animation.effect.getTiming().duration;
+      const first=sample(0),middle=sample(duration/2),last=sample(duration);
+      const bar=document.querySelector('.window-menu').getBoundingClientRect();
+      const backdrop=getComputedStyle(pane,'::backdrop');
+      const close=pane.querySelector('[data-preview-close]');
+      animation.currentTime=duration/2;
+      return{duration,first,middle,last,titlebarBottom:bar.bottom,backdropTop:parseFloat(backdrop.top),
+        closeInitiallyFocused:document.activeElement===close,closeBorder:getComputedStyle(close).borderTopWidth};})()`);
+    assert.ok(motion.last.top >= motion.titlebarBottom+16, 'Preview must leave a clear gap below the native titlebar: '+JSON.stringify(motion));
+    assert.ok(motion.backdropTop >= motion.titlebarBottom, 'Backdrop must not dim only the DOM half of the native titlebar');
+    assert.ok(motion.duration>=240&&motion.duration<=360&&motion.first.opacity===0&&motion.last.opacity===1&&
+      motion.first.width<motion.last.width-8&&motion.middle.opacity>0&&motion.middle.opacity<1,
+      'Entry must have visible intermediate scale and opacity, not only an animation name: '+JSON.stringify(motion));
+    assert.equal(motion.closeInitiallyFocused,false,'Opening by mouse should not put a focus box around the close icon');
+    assert.equal(motion.closeBorder,'0px');
+    report.openingMotion=motion; await shot('preview-entry-midpoint');
+    await js('fixtureEntryAnimation.finish();fixturePreview.close();void 0;');
+    report.cases.push('Native titlebar remains clear; preview and backdrop respect its safe area, with visible entry animation frames');
+
     await open('text'); await until(`document.querySelector('[data-preview-body]').textContent.includes('首行')`);
     assert.equal(await js('document.querySelector("[data-preview-body] pre").textContent'), textSource, 'Text must preserve exact Unicode, tags and newlines');
     assert.equal(await js('document.querySelectorAll("[data-preview-body] b").length'), 0, 'Literal markup must not render as HTML');

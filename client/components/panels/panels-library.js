@@ -6,6 +6,7 @@
   // so omit a duplicate creation action and preserve product menu order for other types.
   const CREATE_ITEMS = [['document', '文档'], ['image', '图像'], ['spreadsheet', '电子表格'], ['presentation', '演示文稿'], ['folder', '文件夹'], ['upload', '上传文件']];
   const STORAGE_TABS = [['local', '本地存储'], ['remote', '远程存储']];
+  const MAX_BATCH_ITEMS = 100;
   const CREATE_PROMPTS = {
     image: '请帮我创建一张图像。请先询问我想要的主题、风格、尺寸和用途，然后开始创作。完成后提醒我可以将成果保存到资料库。',
     document: '请帮我创建一份文档。请先询问文档主题、结构、语气和格式，然后开始撰写。完成后提醒我可以将成果保存到资料库。',
@@ -42,7 +43,7 @@
   };
   const state = { scope: 'recommended', storage: 'local', query: '', folderId: '', folder: null, folders: [], items: [], selected: new Set(), view: 'list', filterKind: 'all', trashCount: 0, showHidden: false, busy: false, error: '', storageStatus: { local: { available: true, configured: true, connected: true }, remote: { backend: '', available: false, configured: false, connected: false } }, storageStatusLoading: false };
   let root, uploadInput, uploadTarget, searchTimer, requestId = 0, storageStatusRequest = 0, previewPane, imageEpoch = 0;
-  let lifecycleEpoch = 0;
+  let lifecycleEpoch = 0, batchBusy = false;
   let loadedFilterKey = '', contentMarkup = '';
   function filterKey() { return JSON.stringify([state.scope, storedBackend(state.folder), state.query, state.folderId]); }
   function hasCurrentSnapshot() { return loadedFilterKey === filterKey(); }
@@ -115,6 +116,17 @@
       '<div class="library-trash-nav" hidden><button data-library-root>' + icon('back') + '返回资料库</button><button data-library-empty-trash class="library-danger">清空回收站</button></div>' +
       '<div class="library-breadcrumb" data-library-breadcrumb hidden></div><div class="library-list-head" data-library-list-head hidden><label class="library-row-select library-list-select"><input type="checkbox" data-library-select-all aria-label="选择全部资料"></label><span>名称</span><span class="library-source-heading">&#26469;&#28304;</span><span data-library-date-heading>修改日期</span><span>大小</span><span></span></div>' +
       '<div class="library-state" data-library-state aria-live="polite" hidden></div><div class="library-content" data-library-content></div><input type="file" data-library-upload hidden multiple></div>';
+    const batchToolbar = document.createElement('div');
+    batchToolbar.className = 'library-batch-toolbar';
+    batchToolbar.dataset.libraryBatchToolbar = '';
+    batchToolbar.hidden = true;
+    batchToolbar.innerHTML = '<span class="library-batch-count" data-library-batch-count></span>' +
+      '<button type="button" data-library-batch-chat>围绕内容开启对话</button>' +
+      '<button type="button" data-library-batch-migrate>批量存储到远端</button>' +
+      '<button type="button" data-library-batch-share>批量分享</button>' +
+      '<button type="button" class="library-danger" data-library-batch-delete>批量删除</button>' +
+      '<button type="button" data-library-batch-clear>取消选择</button>';
+    root.querySelector('[data-library-list-head]').after(batchToolbar);
     uploadInput = root.querySelector('[data-library-upload]');
     root.querySelector('[data-library-hidden-files]').checked = state.showHidden;
     root.addEventListener('click', onClick);
@@ -267,6 +279,126 @@
       else state.selected.delete(target.dataset.librarySelect);
       render();
     }
+  }
+  function selectedRows() {
+    const ids = [...state.selected];
+    return ids.map(id => state.items.find(row => String(row.id) === String(id))).filter(Boolean);
+  }
+  function resultId(value) {
+    return String(value?.id || value?.item?.id || value || '').trim();
+  }
+  async function deleteSelected(button) {
+    const rows = selectedRows();
+    if (!rows.length || batchBusy || state.scope === 'trash') return;
+    if (rows.length > MAX_BATCH_ITEMS) { notify('一次最多批量处理 ' + MAX_BATCH_ITEMS + ' 项资料，请减少选择后重试'); return; }
+    const epoch = lifecycleEpoch, ids = rows.map(row => String(row.id));
+    const names = rows.slice(0, 3).map(displayName).join('、') + (rows.length > 3 ? ' 等' : '');
+    if (!await openConfirmDialog({ title: '批量移入回收站？', description: '选中的 {name} 将移入回收站，仍可恢复。', descriptionParams: { name: names }, confirm: '批量删除' })) return;
+    batchBusy = true; button.disabled = true; closeMenus(); render();
+    try {
+      const result = await global.SoduWorkAPI.deleteLibraryItems(ids);
+      if (epoch !== lifecycleEpoch) return;
+      const succeeded = (result?.succeeded || []).map(resultId).filter(Boolean);
+      const failed = Array.isArray(result?.failed) ? result.failed : [];
+      succeeded.forEach(id => state.selected.delete(id));
+      if (failed.length) notify('已删除 ' + succeeded.length + ' 项，' + failed.length + ' 项失败，请重试');
+      else notify('已将 ' + succeeded.length + ' 项移入回收站');
+      await load();
+    } catch (error) { if (epoch === lifecycleEpoch) await dialogs.showError(error, '批量删除失败'); }
+    finally { if (epoch === lifecycleEpoch) { batchBusy = false; render(); } }
+  }
+  async function migrateSelected(button) {
+    const rows = selectedRows();
+    if (!rows.length || batchBusy || state.scope === 'trash') return;
+    if (rows.length > MAX_BATCH_ITEMS) { notify('一次最多批量处理 ' + MAX_BATCH_ITEMS + ' 项资料，请减少选择后重试'); return; }
+    const copyRows = rows.filter(row => isClientLocal(row) && !row.extra?.soduworkDelivery);
+    if (!copyRows.length) { notify('请选择可存储到远端的本机资料'); return; }
+    const target = state.storageStatus.remote && state.storageStatus.remote.backend;
+    if (state.storageStatusLoading || !target || !state.storageStatus.remote.available) { notify(storageMessage()); return; }
+    const epoch = lifecycleEpoch, skipped = rows.filter(row => isClientLocal(row) && row.extra?.soduworkDelivery).length;
+    const ids = rows.filter(row => !row.extra?.soduworkDelivery).map(row => String(row.id));
+    if (!await openConfirmDialog({
+      title: '批量存储到远端？',
+      description: '将选中的本机资料保存到远端根目录，同时保留本机文件。',
+      confirm: '批量存储到远端',
+    })) return;
+    if (epoch !== lifecycleEpoch || state.storageStatusLoading || !state.storageStatus.remote.available || state.storageStatus.remote.backend !== target) {
+      notify('远程存储状态已变化，请重新选择后重试'); return;
+    }
+    batchBusy = true; button.disabled = true; closeMenus(); render();
+    try {
+      const result = await global.SoduWorkAPI.copyLocalLibraryItemsToRemote(ids, {
+        storage: target,
+        isCurrent: () => epoch === lifecycleEpoch && !state.storageStatusLoading && state.storageStatus.remote.available && state.storageStatus.remote.backend === target,
+      });
+      if (epoch !== lifecycleEpoch) return;
+      const succeeded = (result?.succeeded || []).map(resultId).filter(Boolean);
+      const failed = Array.isArray(result?.failed) ? result.failed : [];
+      succeeded.forEach(id => state.selected.delete(id));
+      const totalFailed = failed.length + skipped;
+      if (totalFailed) notify('已存储 ' + succeeded.length + ' 项，' + totalFailed + ' 项未完成，请重试');
+      else notify('已将 ' + succeeded.length + ' 项资料存储到远端');
+      await load();
+    } catch (error) {
+      if (epoch !== lifecycleEpoch) return;
+      if (error?.code === 'STALE_TASK_SCOPE') notify('账号或存储配置已变化，请重新选择后重试');
+      else await dialogs.showError(error, '批量存储到远端失败');
+    } finally { if (epoch === lifecycleEpoch) { batchBusy = false; render(); } }
+  }
+  async function shareSelected(button) {
+    const rows = selectedRows();
+    if (!rows.length || batchBusy || state.scope === 'trash') return;
+    if (rows.length > MAX_BATCH_ITEMS) { notify('一次最多批量处理 ' + MAX_BATCH_ITEMS + ' 项资料，请减少选择后重试'); return; }
+    const epoch = lifecycleEpoch, ids = rows.map(row => String(row.id));
+    batchBusy = true; button.disabled = true; closeMenus(); render();
+    try {
+      const directory = await global.SoduWorkAPI.listLibraryShareMembers();
+      if (epoch !== lifecycleEpoch) return;
+      const meId = String(directory?.meId || '');
+      const members = (Array.isArray(directory?.members) ? directory.members : [])
+        .filter(member => member.id && !member.isMe && String(member.id) !== meId);
+      if (!members.length) { notify('当前组织没有可分享的其他成员'); return; }
+      const sent = await dialogs.openShareDialog({
+        items: rows.map(row => ({ ...row, displayName: displayName(row), displaySize: formatSize(row.size) })),
+        members, localCopy: rows.every(isClientLocal),
+        onSubmit: async (recipientIds, note) => {
+          const result = await global.SoduWorkAPI.shareLibraryItems(ids, recipientIds, note, { requestId: global.crypto.randomUUID() });
+          const failed = Array.isArray(result?.failed) ? result.failed : [];
+          if (failed.length) notify('已分享 ' + (result?.succeeded?.length || 0) + ' 项，' + failed.length + ' 项失败');
+          else notify('已分享 ' + ids.length + ' 项，成员会收到通知');
+          return true;
+        },
+      });
+      if (epoch !== lifecycleEpoch || !sent) return;
+    } catch (error) { if (epoch === lifecycleEpoch) notify(errorText(error, '批量分享失败，请重试')); }
+    finally { if (epoch === lifecycleEpoch) { batchBusy = false; if (button.isConnected) button.disabled = false; render(); } }
+  }
+  async function discussSelected(button) {
+    const rows = selectedRows();
+    if (!rows.length || batchBusy || state.scope === 'trash') return;
+    if (rows.length > 20) { notify('一次最多围绕 20 项资料开启对话'); return; }
+    const totalSize = rows.reduce((sum, row) => sum + Math.max(0, Number(row.size) || 0), 0);
+    if (totalSize > 256 * 1024 * 1024) { notify('选中资料总大小超过 256 MB，请减少选择后重试'); return; }
+    const epoch = lifecycleEpoch;
+    batchBusy = true; button.disabled = true; closeMenus(); render();
+    try {
+      const files = [];
+      for (const item of rows) {
+        const binary = await global.SoduWorkAPI.readLibraryBinary(item.id);
+        if (epoch !== lifecycleEpoch) return;
+        if (!binary?.blob) throw new Error('读取资料失败：' + displayName(item));
+        files.push(new File([binary.blob], String(item.filename || binary.name || displayName(item)), {
+          type: binary.type || item.contentType || 'application/octet-stream',
+        }));
+      }
+      if (epoch !== lifecycleEpoch) return;
+      const payload = { tab: 'chat', newSession: true, initialFiles: files };
+      if (typeof global.WorkspaceHost?.open === 'function') await global.WorkspaceHost.open('create', payload);
+      else if (typeof global.openComposePanel === 'function') global.openComposePanel(payload);
+      else throw new Error('对话面板暂时不可用');
+      state.selected.clear();
+    } catch (error) { if (epoch === lifecycleEpoch) notify(errorText(error, '读取资料失败，请重试')); }
+    finally { if (epoch === lifecycleEpoch) { batchBusy = false; if (button.isConnected) button.disabled = false; render(); } }
   }
   async function discussItem(button, id) {
     const item = state.items.find(row => row.id === id);
@@ -714,6 +846,20 @@
     const markup = unavailable ? '' : rows.join('');
     if (markup !== contentMarkup) { content.innerHTML = markup; contentMarkup = markup; }
     root.querySelector('[data-library-list-head]').hidden = state.view !== 'list' || unavailable || !rows.length;
+    const batchToolbar = root.querySelector('[data-library-batch-toolbar]');
+    if (batchToolbar) {
+      const selectedCount = state.scope === 'trash' ? 0 : visibleIds.filter(id => state.selected.has(id)).length;
+      batchToolbar.hidden = selectedCount < 1 || unavailable || state.scope === 'trash';
+      const count = batchToolbar.querySelector('[data-library-batch-count]');
+      if (count) count.textContent = '已选择 ' + selectedCount + ' 项';
+      const migrateButton = batchToolbar.querySelector('[data-library-batch-migrate]');
+      if (migrateButton) {
+        const hasLocalSelection = items.some(item => state.selected.has(item.id) && isClientLocal(item) && !item.extra?.soduworkDelivery);
+        const remoteReady = !state.storageStatusLoading && state.storageStatus.remote.available && !!state.storageStatus.remote.backend;
+        migrateButton.hidden = !hasLocalSelection || !remoteReady || state.scope === 'trash';
+      }
+      batchToolbar.querySelectorAll('button').forEach(button => { button.disabled = batchBusy || state.busy; });
+    }
     const selectAll = root.querySelector('[data-library-select-all]');
     if (selectAll) {
       const selectedCount = visibleIds.filter(id => state.selected.has(id)).length;
@@ -746,7 +892,7 @@
         remote: { ...remote, backend, available: !!backend && !!remote.available, configured: !!remote.configured, connected: remote.connected !== undefined ? !!remote.connected : !!remote.available, message: remote.message || '' },
       };
       if (state.storage !== 'local' && backend && state.storage !== backend) {
-        lifecycleEpoch++; requestId++; shareBusy = false; dialogs.close(); previewPane?.close();
+        lifecycleEpoch++; requestId++; shareBusy = false; batchBusy = false; dialogs.close(); previewPane?.close();
         state.storage = backend; state.folderId = ''; state.folder = null; state.selected.clear();
         state.items = []; state.folders = [];
       }
@@ -792,6 +938,7 @@
   function closeLibraryPanel() {
     requestId++; storageStatusRequest++; lifecycleEpoch++; uploadTarget = null; clearTimeout(searchTimer);
     shareBusy = false;
+    batchBusy = false;
     dialogs.close(); previewPane?.close();
     imageEpoch += 1; imageLoads.clear(); imageUrls.forEach(url => { try { URL.revokeObjectURL(url); } catch (_) {} }); imageUrls.clear();
     if (root) { closeMenus(); root.classList.remove('show'); }

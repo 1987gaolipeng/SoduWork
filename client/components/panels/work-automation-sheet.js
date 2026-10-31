@@ -20,7 +20,8 @@
   ];
   let state = {
     surface: null, layer: null, seed: {}, proposal: null,
-    agents: [], repos: [], methods: [], agentReason: '', seq: 0, saved: false, saving: false, createdId: '',
+    agents: [], repos: [], methods: [], modelOptions: [], defaultModel: '', agentReason: '',
+    seq: 0, saved: false, saving: false, createdId: '',
   };
   let identityEpoch = 0;
   let refineTail = Promise.resolve();
@@ -63,6 +64,8 @@
   const esc = (value) => String(value == null ? '' : value)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const tx = value => (global.SoduWorkI18n && typeof global.SoduWorkI18n.translateText === 'function')
+    ? global.SoduWorkI18n.translateText(value) : value;
   const cut = (value, max) => String(value || '').trim().slice(0, max);
   const fullText = value => String(value == null ? '' : value);
   const checks = (value) => Array.isArray(value)
@@ -114,6 +117,7 @@
       flow: Boolean(prior.flow),
       personalPluginKey: prior.personalPluginKey || '',
       pluginInputs: Object.assign({}, prior.pluginInputs || {}),
+      modelName: cut(parsed.modelName || prior.modelName || context.defaultModel || '', 300),
       requiredCapabilities: [...new Set(prior.requiredCapabilities || [])],
       retryLimit: Number.isFinite(Number(prior.retryLimit)) ? Number(prior.retryLimit) : 2,
       retryDelayMinutes: Number(prior.retryDelayMinutes || 5),
@@ -191,7 +195,8 @@
       ? Promise.resolve(_schmLoad()).catch(() => []) : Promise.resolve([]);
     const got = await Promise.all([execution, methods]);
     if (!cards().current(record)) return false;
-    const context = { seed: s, agents: got[0]?.agents || [], repos: got[0]?.repos || [], methods: got[1] || [] };
+    const context = { seed: s, agents: got[0]?.agents || [], repos: got[0]?.repos || [], methods: got[1] || [],
+      modelOptions: got[0]?.modelOptions || [], defaultModel: got[0]?.defaultModel || '' };
     if (visible()) Object.assign(state, context, { agentReason: got[0]?.reason || '' });
     ready = true;
     // Restoration refreshes candidates only; preserve the original date and manual settings without invoking the model again.
@@ -230,6 +235,56 @@
         (String(item.id) === selected ? ' selected' : '') + '>' +
         esc((item.name || item.id) + (suffix.length ? ' · ' + suffix.join(' · ') : '')) + '</option>';
     }).join('');
+  }
+
+  function agentById(id) {
+    return state.agents.find(item => String(item.id) === String(id || '')) || null;
+  }
+
+  function modelRows(current, agentId) {
+    const agent = agentById(agentId);
+    const selected = String(current || '').trim();
+    if (agent && agent.modelPick === false && agent.nativeModelPick !== true) {
+      return '<option value="">' + esc(tx('由底座自身管理模型')) + '</option>';
+    }
+    const source = agent?.nativeModelPick ? agent.modelOptions : state.modelOptions;
+    const rows = Array.isArray(source) ? source.slice() : [];
+    const normalized = rows.map(raw => ({ name: String(raw?.name || raw?.id || raw || '').trim(),
+      label: String(raw?.label || raw?.displayName || raw?.name || raw?.id || raw || '').trim() }))
+      .filter(item => item.name);
+    if (selected && !normalized.some(item => item.name === selected)) {
+      normalized.unshift({ name: selected, label: selected + tx('（已保存，当前不可用）'), stale: true });
+    }
+    if (!normalized.length) return '<option value="">' + esc(tx('当前没有可用模型')) + '</option>';
+    if (!selected) normalized.unshift({ name: '', label: tx('请选择模型'), placeholder: true });
+    return normalized.map(item => '<option value="' + esc(item.name) + '"' +
+      (item.name === selected ? ' selected' : '') + (item.stale || item.placeholder ? ' disabled' : '') + '>' +
+      esc(item.label || item.name) + '</option>').join('');
+  }
+
+  function modelField(current, agentId) {
+    const agent = agentById(agentId);
+    const managed = agent && agent.modelPick === false && agent.nativeModelPick !== true;
+    const options = agent?.nativeModelPick ? agent.modelOptions : state.modelOptions;
+    const disabled = Boolean(managed || ((!Array.isArray(options) || !options.length) && !current));
+    const hint = managed ? tx('当前底座自行管理模型') : tx('模型与执行底座独立保存，每次自动化运行使用这里的选择');
+    return '<label class="waz-field"><span>' + esc(tx('模型')) + ' <small>' + esc(tx('可独立选择')) + '</small></span>' +
+      '<select name="modelName" aria-describedby="wazModelHint"' + (disabled ? ' disabled' : '') + '>' +
+      modelRows(current, agentId) + '</select><small id="wazModelHint" class="waz-field-hint">' + esc(hint) + '</small></label>';
+  }
+
+  function refreshModelField(preferred) {
+    const form = state.layer?.querySelector('#wazForm');
+    const select = form?.elements.modelName;
+    const agent = form?.elements.assigneeId;
+    if (!select || !agent) return;
+    const current = preferred !== undefined ? String(preferred || '').trim() : String(select.value || '').trim();
+    select.innerHTML = modelRows(current, agent.value);
+    const info = agentById(agent.value);
+    const options = info?.nativeModelPick ? info.modelOptions : state.modelOptions;
+    select.disabled = Boolean(info && info.modelPick === false && info.nativeModelPick !== true) ||
+      ((!Array.isArray(options) || !options.length) && !current);
+    select.value = current;
   }
 
   function render(error) {
@@ -285,6 +340,7 @@
                 ? '运行时会在当前设备选择具备所需能力的可用席位'
                 : '请打开 Agent 管理，确认 Runner 已启动并已连接当前环境')) + '</small>' +
               '<button type="button" class="waz-button" data-waz-reload-agents>刷新底座</button></label>' +
+            modelField(p.modelName, p.assigneeId) +
             '<label class="waz-field"><span>关联工程 <small>可选</small></span><select name="repoId">' +
               global.WorkAutomationView.optionRows(state.repos, p.repoId, '不指定工程', p.bindingIssues?.some(item => item.field === 'repoId')) + '</select></label>' +
           '</div>' +
@@ -355,6 +411,13 @@
     const selectedCaps = [...form.querySelectorAll('input[name=capability]:checked')]
       .filter(input => !input.disabled)
       .map(input => input.value);
+    // Browser FormData intentionally omits disabled controls.  A model select
+    // can be temporarily disabled while the execution catalog is refreshing;
+    // keep the already selected value in the draft so a refresh/re-render does
+    // not silently clear the model before the schedule is saved.
+    const submittedModel = data.get('modelName');
+    const modelName = submittedModel == null
+      ? (state.proposal && state.proposal.modelName) : submittedModel;
     return {
       bindingIssues: (state.proposal?.bindingIssues || []).slice(),
       title: cut(data.get('title'), 60),
@@ -370,6 +433,7 @@
       weekday: Math.max(1, Math.min(7, Number(data.get('weekday')) || 1)),
       timeZone: (state.proposal && state.proposal.timeZone) || timeZone(),
       assigneeId: cut(data.get('assigneeId'), 160),
+      modelName: cut(modelName, 300),
       repoId: cut(data.get('repoId'), 80),
       flow: Boolean(data.get('flow')),
       personalPluginKey: cut(data.get('personalPluginKey'), 64),
@@ -402,6 +466,7 @@
       timeZone: value.timeZone || timeZone(),
       assigneeId: value.assigneeId,
       assigneeType: 'agent',
+      modelName: value.modelName || '',
       repoId: value.repoId || '',
       flow: Boolean(value.repoId && value.flow),
       pluginBindingId: '',
@@ -606,6 +671,8 @@
       if (layer !== state.layer || seq !== state.seq || state.saved || state.saving) return;
       state.proposal = valueFromForm();
       state.agents = result.agents;
+      state.modelOptions = result.modelOptions || [];
+      state.defaultModel = result.defaultModel || '';
       state.agentReason = result.reason;
       if (!state.proposal.assigneeId) state.proposal.assigneeId =
         (state.agents.find(item => item.available !== false) || state.agents[0] || {}).id || '';
@@ -631,6 +698,11 @@
       state.proposal.pluginInputs = {};
       render();
       return;
+    }
+    if (event.target.name === 'assigneeId' && event.type === 'change') {
+      const value = valueFromForm();
+      refreshModelField('');
+      state.proposal = { ...value, modelName: '' };
     }
     paintRhythm();
     scheduleProbe();

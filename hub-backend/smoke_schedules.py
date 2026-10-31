@@ -131,12 +131,13 @@ bad = Sch(every="every-minute", at_hour=99, at_minute=99)
 n = S.next_run_after(bad, BASE)
 chk("乱填的时分被夹住、节奏退回每天", n.hour <= 23 and n.minute <= 59, n)
 
-owner = SimpleNamespace(user_ref="user-current")
-stored = Sch(created_by="user-original", created_by_name="最初创建人")
-legacy = Sch(created_by="", created_by_name="当前使用人")
-chk("定时任务生成的新任务保留最初创建人", S.task_actor(stored, owner) == ("user-original", "最初创建人"))
-chk("旧计划没有创建人 id 时回填当前设备归属人", S.task_actor(legacy, owner)[0] == "user-current")
-chk("创建人姓名进入任务和后续审批审计", S.task_actor(stored, owner)[1] == "最初创建人")
+from app.services.schedule_access import is_owner
+owner = SimpleNamespace(id="device", user_ref="user-current")
+stored = SimpleNamespace(owner_client_id="device", owner_user_id="user-original")
+legacy = SimpleNamespace(owner_client_id="device", owner_user_id=None)
+chk("设备换号不接管原账号的普通会话", not is_owner(stored, owner))
+chk("未绑定账号的旧计划不泄露给新登录账号", not is_owner(legacy, owner))
+chk("原账号和设备共同决定归属", is_owner(stored, SimpleNamespace(id="device", user_ref="user-original")))
 
 # Verify capability contracts and bounded retries.
 caps = S.clean_required_capabilities([
@@ -361,15 +362,49 @@ async def _direct_run_contract():
     ai_exec.load, ai_exec.configured = fake_load, lambda ctx: True
     task_dispatch.dispatch = fake_dispatch_task
     try:
-        first = await S.run_one(session, schedule)
-        schedule.last_task_id = first.get("taskId")
-        schedule.next_retry_at = datetime.now(timezone.utc)
-        second = await S.run_one(session, schedule)
-        return first, second, observed
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            client = models.Client(id="client-smoke", user_ref="owner")
+            session.add(client)
+            await session.flush()  # Owner snapshot listeners read the persisted device.
+            plan = models.AiSchedule(id="plan-smoke", title="汇总周报", note="形成可审阅简报",
+                owner_client_id=client.id, owner_user_id="owner", assignee_id="local:pi",
+                required_capabilities=["browser", "computer"], every="daily",
+                plugin_binding_id="retired-enterprise-binding", flow=True,
+                plugin_inputs={"topic": "团队周报"})
+            session.add_all([client, plan]); await session.commit()
+            # Capability authorization has a separate real policy suite; isolate
+            # this handoff test from installed enterprise skill catalogs.
+            with patch.object(S, "validate_execution", AsyncMock()), \
+                 patch.object(task_dispatch, "dispatch", AsyncMock()) as task_rpc, \
+                 patch.object(workflow_engine, "start", AsyncMock()) as workflow_rpc:
+                first = await S.execute_one(session, plan, trigger="timer", idempotency_key="smoke:occurrence")
+                assert first.get("ok"), first
+                await session.commit()
+                again = await S.execute_one(session, plan, trigger="timer", idempotency_key="smoke:occurrence")
+                chk("普通会话入口成功排队", first.get("ok") and first.get("waitingForDevice"), first)
+                chk("同一触发重试复用记录", again.get("deduplicated") and first["scheduleRunId"] == again["scheduleRunId"])
+                chk("旧企业绑定不会启动任务或工作流", task_rpc.await_count == 0 and workflow_rpc.await_count == 0)
+            run = await session.get(models.AiScheduleRun, first["scheduleRunId"])
+            envelope = run.receipt["conversationInput"]
+            chk("执行前生成稳定标识", envelope["runId"] == run.id)
+            chk("触发类型保留", run.trigger == "timer")
+            chk("能力合同固化到会话", envelope["capabilities"] == ["browser", "computer"])
+            chk("对应 Skill 固化到会话", envelope["skills"] == ["browser-use", "computer-use"])
+            chk("完整说明和公开参数不丢失", "形成可审阅简报" in envelope["text"] and "团队周报" in envelope["text"])
+            chk("旧工作流路由被清除", not plan.plugin_binding_id and not plan.flow)
+            chk("不制造隐藏任务", await session.scalar(select(models.Task.id)) is None)
+            await session.refresh(client)  # A duplicate claim rolled back and expired ORM identities.
+            claimed = await chats.claim(session, client, run.id, "worker-smoke")
+            plan.note, plan.plugin_inputs = "新说明", {"topic": "后来修改"}
+            await session.commit()
+            replay = await chats.claim(session, client, run.id, "worker-smoke")
+            chk("已落盘会话可重领且说明保持原快照", claimed["input"] == replay["input"] == envelope)
+            for state in ("running", "succeeded"):
+                await chats.acknowledge(session, client, run.id, {"instanceId": "worker-smoke", "state": state, "conversationId": "chat-smoke"})
+                chk("真实普通会话回执：" + state, run.state == state)
+            chk("完成后保留同一会话和完成时间", run.receipt["conversationId"] == "chat-smoke" and run.finished_at is not None)
     finally:
-        S.validate_execution, S._push_new = original_validate, original_push
-        ai_exec.load, ai_exec.configured = original_load, original_configured
-        task_dispatch.dispatch = original_dispatch
+        await engine.dispose()
 
 
 direct_first, direct_second, direct_observed = asyncio.run(_direct_run_contract())

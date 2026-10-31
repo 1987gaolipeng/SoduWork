@@ -26,6 +26,7 @@ function snapshotWithTimeout(fileChangeJournal, cwd, timeoutMs) {
 
 // State remains owned by the session; accessors keep async transitions live.
 function create(ctx) {
+  const stampUsage = require('./usage-attribution').create(() => ctx.prep);
   const {
     SCOPE_ENTRY_TYPE, fileChangeJournal, goalLoop, goalQuality, goalToolStages,
     mediaArtifacts, messageTime, protocolGuard, runControl, stream,
@@ -182,10 +183,11 @@ function _stopProtocolIssue(issue) {
   }
 
 const onPiEvent = (ev) => {
-    // Stamp the SDK-owned message before provenance projection copies it, so
-    // the same presentation timestamps survive session persistence.
-    try { messageTime.stampPiEvent(ev, ctx.turnQueue.active()?.options?.sentAt); }
-    catch (_) { return; }
+    // Stamp the SDK-owned message before provenance projection creates a copy.
+    // The SDK persists the original object after notifying its subscribers.
+    stampUsage(ev);
+    const activeTurn = ctx.turnQueue.active();
+    messageTime.stampPiEvent(ev, activeTurn?.options?.sentAt, activeTurn?.options?.submissionId);
     ev = require('../conversation/native-agent-source.cjs').event(ev, 'pi');
     if (ev?.type === 'agent_start') void ctx.turnQueue.markStarted?.();
     const isToolStart = ev && ev.type === 'tool_execution_start';

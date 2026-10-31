@@ -63,11 +63,12 @@ app.whenReady().then(async()=>{
  document.querySelector('#messages').addEventListener('click',e=>{const button=e.target.closest('[data-library-output]');if(button)LibraryTransfer.saveDecorated(button);});void 0;`);
  // Native File input events exercise the same controller used by new and existing chats.
  await js(`window.inputFile=new File(['上传的原始内容'],'用户上传.txt',{type:'text/plain'});const dt=new DataTransfer();dt.items.add(inputFile);document.querySelector('#picker').files=dt.files;document.querySelector('#picker').dispatchEvent(new Event('change'));void 0;`);
- await until(`document.querySelector('.catt-library-state')?.textContent.includes('已自动保存')`);
+ await until(`controller.files().length===1`);
  assert.equal(await js('controller.files().length'),1);assert.equal(await js('controller.refs({}).then(refs=>new TextDecoder().decode(refs[0].data))'),'上传的原始内容');
+ assert.equal(await js('document.querySelectorAll(".catt-library-state").length'),0);assert.equal(await js('SoduWorkAPI.listLibrary({scope:"all"}).then(r=>r.items.length)'),0);
  await js(`controller.add([inputFile],'retry');controller.add([new File(['existing'],'库内文件.txt')],'library');`);await tick();
- assert.equal(await js(`SoduWorkAPI.listLibrary({scope:'all'}).then(r=>r.items.length)`),1);
- report.cases.push('Selecting a File automatically uploads exact bytes without changing the conversation attachment; repeated File and library-to-chat import do not duplicate');
+ assert.equal(await js(`SoduWorkAPI.listLibrary({scope:'all'}).then(r=>r.items.length)`),0);
+ report.cases.push('Selecting a File keeps exact bytes in the conversation attachment; explicit library saves are separate');
  let releaseOutputRead;outputReadGate=new Promise(resolve=>releaseOutputRead=resolve);
  await click('[data-library-output="html"]');await until(`document.querySelector('[data-library-output="html"]').disabled`);
  assert.equal(outputReads,1);
@@ -80,7 +81,7 @@ app.whenReady().then(async()=>{
  await until(`['[data-library-output="html"]','[data-wb-library-upload="html"]'].every(selector=>{const button=document.querySelector(selector);return button?.classList.contains('is-saved')&&!button.disabled&&button.getAttribute('aria-busy')==='false';})`);
  assert.equal(outputReads,1);report.cases.push('A pending save survives chat rerender and preview reopening; replacement buttons both finish saved, enabled, and not busy with one original-byte read');
  for(const id of ['png','md']){await js(`ChatWorkbench.openOutput('${id}')`);await until(`!!document.querySelector('[data-wb-library-upload="${id}"]')`);await click(`[data-wb-library-upload="${id}"]`);await until(`document.querySelector('[data-wb-library-upload="${id}"]').classList.contains('is-saved')`);}
- const saved=await js(`SoduWorkAPI.listLibrary({scope:'all'}).then(r=>r.items)`);assert.equal(saved.length,4);
+ const saved=await js(`SoduWorkAPI.listLibrary({scope:'all'}).then(r=>r.items)`);assert.equal(saved.length,3);
  for(const f of sourceFiles){const item=saved.find(i=>i.filename===f.name);assert.ok(item);const result=await js(`SoduWorkAPI.readLibraryBinary(${JSON.stringify(item.id)}).then(async r=>Array.from(new Uint8Array(await r.blob.arrayBuffer())))`);assert.deepEqual(Buffer.from(result),f.data);}
  report.cases.push('Chat HTML and preview PNG/Markdown reach the real isolated local library store; downloading reproduces every original byte; public artifacts need no absolute path');
  await js(`ChatWorkbench.openOutput('html')`);await until(`!!document.querySelector('[data-wb-library-upload="html"]')`);await click('[data-wb-library-upload="html"]');
@@ -95,18 +96,17 @@ app.whenReady().then(async()=>{
  report.cases.push('A fresh transfer controller restores persisted save receipts without rereading or uploading the saved output');
  for(const locale of ['en-US','zh-CN']){await js(`SoduWorkI18n.setLocale('${locale}',{persist:false,broadcast:false})`);await tick();for(const width of [1280,800]){win.setContentSize(width,850);await tick();assert.equal(await js(`document.querySelector('.ncw-browserbar').scrollWidth<=document.querySelector('.ncw-browserbar').clientWidth+1`),true);await shot('chat-'+width+'-'+locale);}}
  report.cases.push('Visible save actions and attachment states switch between Chinese and English; preview toolbars fit wide and narrow panes');
- await js(`window.realUpload=SoduWorkAPI.uploadLibraryFile;SoduWorkAPI.uploadLibraryFile=async()=>{throw Error('isolated-offline')};controller.add([new File(['must survive'],'重试.md',{type:'text/markdown'})],'picker');`);
- await until(`!!document.querySelector('[data-catt-library-retry]')`);assert.equal(await js(`controller.files().some(f=>f.name==='重试.md')`),true);
- await js('SoduWorkAPI.uploadLibraryFile=realUpload;void 0');await click('[data-catt-library-retry]');await until(`[...document.querySelectorAll('.catt-item')].find(row=>row.querySelector('.catt-copy b')?.textContent==='重试.md')?.querySelector('.catt-library-state')?.textContent.includes('已自动保存到资料库')`);
- assert.equal(await js(`SoduWorkAPI.listLibrary({scope:'all'}).then(r=>r.items.length)`),5);report.cases.push('A failed automatic save preserves the attachment and retries from the visible control');
+ await js(`controller.add([new File(['must survive'],'重试.md',{type:'text/markdown'})],'picker');`);
+ await until(`controller.files().some(f=>f.name==='重试.md')`);assert.equal(await js(`document.querySelectorAll('[data-catt-library-retry]').length`),0);
+ assert.equal(await js(`document.querySelectorAll('.catt-library-state').length`),0);assert.equal(await js(`SoduWorkAPI.listLibrary({scope:'all'}).then(r=>r.items.length)`),3);report.cases.push('Conversation attachments remain visible without an automatic upload failure or retry state');
  win.setContentSize(1280,850);
  // Model the workspace host's surface switch using the actual panel/shell
  // styles, including the hosted state that intentionally replaces .show.
  await js(`document.querySelector('#chat').style.display='none';document.querySelector('#attachment-area').style.display='none';document.documentElement.dataset.deskPanel='workspace';document.documentElement.dataset.workspaceView='library';document.documentElement.style.setProperty('--ws-main-left','10px');openLibraryPanel();const panel=document.querySelector('#libraryPanel');panel.classList.remove('show');panel.classList.add('workspace-hosted');panel.scrollTop=0;window.scrollTo(0,0);void 0;`);
- await until(`document.querySelectorAll('.library-file-card').length===5`);
+ await until(`document.querySelectorAll('.library-file-card').length===3`);
  const libraryVisible=await js(`(()=>{const panel=document.querySelector('#libraryPanel'),title=panel.querySelector('[data-library-title]'),card=panel.querySelector('.library-file-card'),r=card.getBoundingClientRect(),s=getComputedStyle(panel);return{visible:panel.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}),opacity:s.opacity,pointerEvents:s.pointerEvents,title:title.textContent,view:document.documentElement.dataset.workspaceView,hosted:panel.classList.contains('workspace-hosted'),hit:panel.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)),width:panel.getBoundingClientRect().width,overflow:panel.scrollWidth>panel.clientWidth+1,filenames:[...panel.querySelectorAll('.library-card-copy b')].map(e=>e.textContent)}})()`);
  report.libraryVisible=libraryVisible;assert.equal(libraryVisible.visible,true);assert.equal(libraryVisible.opacity,'1');assert.equal(libraryVisible.pointerEvents,'auto');assert.equal(libraryVisible.title,'资料库');assert.equal(libraryVisible.view,'library');assert.equal(libraryVisible.hosted,true);assert.equal(libraryVisible.hit,true);assert(libraryVisible.width>1100);assert.equal(libraryVisible.overflow,false);
- assert.deepEqual([...libraryVisible.filenames].sort(),['用户上传.txt','报告.html','结果.png','说明.md','重试.md'].sort());report.libraryVisible=libraryVisible;
+ assert.deepEqual([...libraryVisible.filenames].sort(),['报告.html','结果.png','说明.md'].sort());report.libraryVisible=libraryVisible;
  await shot('library-saved-files');
  assert.deepEqual(await js('errors'),[]);assert.deepEqual(report.errors,[]);report.cases.push('Saved files are discoverable in the production library panel; no renderer exceptions');report.ok=true;
 }).catch(async error=>{report.error=String(error.stack);if(win){report.rendererErrors=await js('window.errors||[]').catch(()=>[]);await shot('failure').catch(()=>{});}}).finally(()=>{fs.writeFileSync(path.join(out,'results.json'),JSON.stringify(report,null,2));fs.writeFileSync(path.join(out,'server.log'),logs);console.log(JSON.stringify(report));if(win)win.destroy();if(server)server.kill();app.exit(report.ok?0:1);});

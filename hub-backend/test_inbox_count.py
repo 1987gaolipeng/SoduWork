@@ -9,6 +9,8 @@ from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app import models
+# Inbox ACL queries reference these tables before any repository model is loaded lazily.
+from app import automation_models, repository_issue_models  # noqa: F401
 from app.db import Base
 from app.services import inbox
 

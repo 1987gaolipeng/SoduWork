@@ -1,6 +1,7 @@
 'use strict';
 
 const test = require('node:test'), assert = require('node:assert/strict');
+test.beforeEach(() => require('../main/native-locale.cjs').setLocale('zh-CN'));
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
 const sessions = require('../main/pi-session/session');
 const segments = require('../main/conversation/runtime-segments');

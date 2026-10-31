@@ -86,7 +86,7 @@ test('补充解析等待期间，新增材料已归入原卡而非等待解析�
   f.sheet.close(false, true); finish(true); await work;
 });
 
-test('恢复卡片的附件不会再次自动上传资料库，正常新增仍会入库', async () => {
+test('恢复卡片和正常新增的附件都不会自动上传资料库', async () => {
   const tracked = [], ctx = { window: null, File, Blob, URL, Uint8Array, console,
     LibraryTransfer: { trackFile: file => { tracked.push(file.name); return {}; } } };
   ctx.window = ctx; vm.createContext(ctx); vm.runInContext(read('conversation-attachments'), ctx);
@@ -94,7 +94,7 @@ test('恢复卡片的附件不会再次自动上传资料库，正常新增仍�
   attachments.add([new File(['旧原文'], '原稿.md')], 'card-restore'); await tick();
   assert.deepEqual(tracked, []);
   attachments.add([new File(['新增'], '补充.md')], 'pick'); await tick();
-  assert.deepEqual(tracked, ['补充.md']); assert.equal(attachments.files().length, 2);
+  assert.deepEqual(tracked, []); assert.equal(attachments.files().length, 2);
   attachments.destroy();
 });
 

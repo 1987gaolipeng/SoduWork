@@ -20,7 +20,7 @@ import sqlalchemy as sa  # noqa: E402
 
 from app import automation_models as am  # noqa: E402
 from app import models  # noqa: E402
-from app.db import SessionLocal, init_db  # noqa: E402
+from app.db import SessionLocal, engine, init_db  # noqa: E402
 from app.services import workflow_contracts, workflow_engine  # noqa: E402
 
 ok = fail = 0
@@ -199,5 +199,12 @@ async def main():
     return fail
 
 
+async def run():
+    try:
+        return await main()
+    finally:
+        await engine.dispose()
+
+
 if __name__ == "__main__":
-    sys.exit(1 if asyncio.run(main()) else 0)
+    sys.exit(1 if asyncio.run(run()) else 0)

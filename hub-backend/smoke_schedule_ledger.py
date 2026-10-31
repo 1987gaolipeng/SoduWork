@@ -20,7 +20,7 @@ sys.path.insert(0, ROOT)
 
 from app import automation_models as am, models  # noqa: E402
 from app.db import SessionLocal, engine, init_db  # noqa: E402
-from app.services import schedules  # noqa: E402
+from app.services import schedules, schedule_conversations as chats  # noqa: E402
 
 
 checks = 0
@@ -58,60 +58,46 @@ async def main():
             task_id=flow_task.id, workflow_run_id=workflow.id, trigger="manual",
             state="running", started_at=now - timedelta(seconds=20),
             receipt={"mode": "plugin"})
-        session.add_all([schedule, done_task, direct_run, flow_task, workflow, flow_run])
+        client = models.Client(id="client-ledger")
+        session.add_all([client, schedule, done_task, direct_run, flow_task, workflow, flow_run])
         await session.commit()
 
         items = await schedules.list_runs(
             session, schedule.id, owner_client_id="client-ledger", limit=20)
         await session.commit()
         by_id = {item["id"]: item for item in items}
-        ok(by_id["run-direct"]["state"] == "succeeded",
-           "completed task did not complete its automation receipt")
-        ok(by_id["run-direct"]["taskTitle"] == "已完成巡检",
-           "receipt lost the related task title")
-        ok(by_id["run-direct"]["durationSeconds"] >= 65,
-           "receipt did not expose stable duration")
-        ok(by_id["run-flow"]["state"] == "failed",
-           "failed workflow did not fail its automation receipt")
-        ok(by_id["run-flow"]["error"] == "健康检查未通过",
-           "workflow error did not reach the receipt")
-        ok(by_id["run-flow"]["trigger"] == "manual",
-           "manual trigger was not preserved")
-
-        workflow.state = "running"
-        workflow.error = ""
-        workflow.finished_at = None
-        await session.commit()
-        items = await schedules.list_runs(
-            session, schedule.id, owner_client_id="client-ledger", limit=20)
-        await session.commit()
-        recovered = {item["id"]: item for item in items}["run-flow"]
-        ok(recovered["state"] == "running",
-           "retried workflow left its automation receipt frozen as failed")
-        ok(recovered["error"] == "",
-           "retried workflow retained the previous terminal error")
-
-        workflow.state = "failed"
-        workflow.error = "retry health check failed"
-        workflow.finished_at = now + timedelta(seconds=3)
-        await session.commit()
-        items = await schedules.list_runs(
-            session, schedule.id, owner_client_id="client-ledger", limit=20)
-        await session.commit()
-        recovered = {item["id"]: item for item in items}["run-flow"]
-        ok(recovered["error"] == "retry health check failed",
-           "a second failure retained stale diagnostics from the first attempt")
-
+        for run_id in ("run-direct", "run-flow"):
+            row = by_id[run_id]
+            ok(row["state"] == "failed", "legacy work must not masquerade as a conversation")
+            ok(row["receipt"]["migratedFrom"] == "legacy-task-workflow", "migration evidence lost")
+            ok("请重新执行" in row["error"], "legacy migration lacks an actionable diagnostic")
+            ok("taskTitle" not in row and "taskStatus" not in row, "retired task UI leaked")
+            ok(row["finishedAt"], "retired receipt has no finish time")
+        ok(by_id["run-flow"]["trigger"] == "manual", "manual trigger lost")
+        ok(by_id["run-direct"]["durationSeconds"] >= 65, "stable duration lost")
         workflow.state = "succeeded"
-        workflow.finished_at = now + timedelta(seconds=5)
         await session.commit()
-        items = await schedules.list_runs(
-            session, schedule.id, owner_client_id="client-ledger", limit=20)
+        again = await schedules.list_runs(session, schedule.id, owner_client_id=client.id)
+        ok(all(row["state"] == "failed" for row in again), "legacy workflow resurrected a retired receipt")
+
+        native = models.AiScheduleRun(id="run-chat", schedule_id=schedule.id,
+            owner_client_id=client.id, trigger="manual", state="starting",
+            started_at=now - timedelta(seconds=20), receipt={})
+        session.add(native)
         await session.commit()
-        recovered = {item["id"]: item for item in items}["run-flow"]
-        ok(recovered["state"] == "succeeded",
-           "successful workflow retry did not close the automation receipt")
-        ok(recovered["finishedAt"], "successful workflow retry lost its finish time")
+        await chats.prepare(session, schedule, client, None, native.id, "pi", {})
+        claimed = await chats.claim(session, client, native.id, "ledger-worker")
+        replay = await chats.claim(session, client, native.id, "ledger-worker")
+        ok(claimed["input"] == replay["input"], "claim retry changed immutable input")
+        for state in ("running", "succeeded"):
+            await chats.acknowledge(session, client, native.id, {
+                "instanceId": "ledger-worker", "state": state, "conversationId": "chat-ledger"})
+            rows = await schedules.list_runs(session, schedule.id, owner_client_id=client.id)
+            item = next(row for row in rows if row["id"] == native.id)
+            ok(item["state"] == state, "real device outcome did not reach history")
+            ok(item["conversationId"] == "chat-ledger", "history lost ordinary conversation identity")
+        ok(item["durationSeconds"] >= 20, "conversation duration lost")
+        ok(not native.task_id and not native.workflow_run_id, "conversation created legacy links")
 
         hidden = await schedules.list_runs(
             session, schedule.id, owner_client_id="another-client", limit=20)

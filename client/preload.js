@@ -76,6 +76,9 @@ const conversationSession = {
   recentPluginDraft: () => ipcRenderer.invoke('pi-session-recent-plugin-draft'),
   pluginDraft: (ref, target) => ipcRenderer.invoke('pi-session-plugin-draft', ref, target),
   open: (opts) => ipcRenderer.invoke('pi-session-open', opts || {}),
+  // Automation openings retain the current main-process identity so a local
+  // personal-plugin lock is verified before the first ordinary-chat turn.
+  openAutomation: (opts) => ipcRenderer.invoke('pi-session-automation-open', opts || {}),
   reserveWorkConversation: options => ipcRenderer.invoke('pi-session-reserve-work', options || {}),
   workCards: sessionId => ipcRenderer.invoke('pi-session-work-cards', sessionId),
   saveWorkCard: (sessionId, card) => ipcRenderer.invoke('pi-session-save-work-card', sessionId, card),
@@ -234,6 +237,66 @@ const workPreviewAppHost = {
   }),
 };
 
+/*
+ * Keep overlay-shape acknowledgements ordered across blur IPC and asynchronous state
+ * queries. The listener is installed during preload evaluation so a blur that arrives
+ * before the renderer binds its DOM consumer can still be replayed once.
+ */
+let overlayShapeRevision = 0;
+let lastOverlayShapeRects = null;
+let pendingOverlayBlur = false;
+let deliveredOverlayBlurRevision = -1;
+const overlayBlurConsumers = new Set();
+
+function validOverlayShapeRevision(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function invokeOverlayBlurConsumer(callback) {
+  try { callback(); } catch (_error) { /* One dismissal failure must not interrupt the bridge. */ }
+}
+
+function receiveOverlayBlurRevision(revision) {
+  if (!validOverlayShapeRevision(revision) || revision < overlayShapeRevision ||
+      revision <= deliveredOverlayBlurRevision) return;
+  overlayShapeRevision = revision;
+  deliveredOverlayBlurRevision = revision;
+  if (!overlayBlurConsumers.size) {
+    pendingOverlayBlur = true;
+    return;
+  }
+  pendingOverlayBlur = false;
+  for (const callback of [...overlayBlurConsumers]) invokeOverlayBlurConsumer(callback);
+}
+
+function observeOverlayShapeState(info) {
+  const revision = info && info.revision;
+  if (!validOverlayShapeRevision(revision) || revision < overlayShapeRevision) return info;
+  const previousRevision = overlayShapeRevision;
+  overlayShapeRevision = revision;
+  if (info.awaitingShape === true) receiveOverlayBlurRevision(revision);
+  else if (revision > previousRevision && lastOverlayShapeRects !== null) {
+    /*
+     * A reloaded renderer can publish its first geometry before the asynchronous
+     * revision query returns. Main correctly rejects that revision-zero packet;
+     * replay the cached geometry once the current main-process revision is known.
+     */
+    ipcRenderer.send('window-set-overlay-shape', lastOverlayShapeRects, overlayShapeRevision);
+  }
+  return info;
+}
+
+function sendOverlayShape(rects) {
+  lastOverlayShapeRects = Array.isArray(rects)
+    ? rects.map(rect => rect && typeof rect === 'object' ? { ...rect } : rect)
+    : rects;
+  ipcRenderer.send('window-set-overlay-shape', lastOverlayShapeRects, overlayShapeRevision);
+}
+
+ipcRenderer.on('overlay-window-blur', (_event, revision) => {
+  receiveOverlayBlurRevision(revision);
+});
+
 const soduWorkBridge = {
   pagePerformance: {
     snapshot: () => { trimPageIpcEvents(); return { available: true, events: pageIpcEvents.map(row => ({ ...row })) }; },
@@ -325,6 +388,13 @@ const soduWorkBridge = {
   },
   checkClientUpdate: (options) => ipcRenderer.invoke('client-update-check', options || {}),
   clientUpdateStatus: () => timedPageInvoke('client-update-status'),
+  releaseNotes: {
+    list: locale => ipcRenderer.invoke('release-notes-list', locale),
+    version: () => ipcRenderer.invoke('release-notes-version'),
+    claim: locale => ipcRenderer.invoke('release-notes-claim', locale),
+    acknowledge: () => ipcRenderer.invoke('release-notes-ack'),
+    release: () => ipcRenderer.invoke('release-notes-release'),
+  },
   installClientUpdate: () => ipcRenderer.invoke('client-update-install'),
   resolveClientUpdate: (action) => ipcRenderer.invoke('client-update-resolve', action || {}),
   onClientUpdateStatus: (cb) => ipcRenderer.on('client-update-status', (_e, status) => {
@@ -385,7 +455,7 @@ const soduWorkBridge = {
   openLibraryExternally: (payload) => ipcRenderer.invoke('library-open-external', payload || {}),
   revealLibraryItem: (payload) => ipcRenderer.invoke('library-reveal', payload || {}),
   localLibrary: {
-    context: () => ipcRenderer.invoke('library-local-context'),
+    context: (payload) => ipcRenderer.invoke('library-local-context', payload || {}),
     call: (action, payload) => ipcRenderer.invoke('library-local-call', action, payload || {}),
   },
   attachmentMaterialize: (payload) => ipcRenderer.invoke('attachment-materialize', payload || {}),

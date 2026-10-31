@@ -3,6 +3,7 @@ const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), path = require('node:path'), os = require('node:os');
 const { EventEmitter } = require('node:events'), { pathToFileURL } = require('node:url');
 const { commandFiles, instanceData, instanceFiles, create, MAX_BYTES } = require('../main/file-open.cjs');
+const artifactRuntime = require('../main/conversation/artifact-runtime');
 async function setup(t) {
   // Match the OS-resolved spelling (e.g. Windows TEMP versus Temp).
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'soduwork-open-file-')));
@@ -52,7 +53,7 @@ test('structured launch requests reject malformed input and never fall back to u
   assert.deepEqual(instanceFiles(args, process.cwd(), false,
     instanceData(['electron.exe', path.resolve('main.js')], process.cwd(), false)), []);
 });
-test('cold OS request survives readiness, deduplicates and opens HTML at its real location', async t => {
+test('cold OS request snapshots previewable files before opening a conversation', async t => {
   const h = await setup(t), file = path.join(h.root, '中文 页面.html');
   await fs.writeFile(file, '<h1>原文件</h1>');
   let prevented = false; h.app.emit('open-file', { preventDefault: () => { prevented = true; } }, file);
@@ -61,8 +62,14 @@ test('cold OS request survives readiness, deduplicates and opens HTML at its rea
   const list = await h.call('list'); assert.equal(list.items.length, 1);
   const result = await h.call('claim', list.items[0].id);
   assert.equal(result.ok, true); assert.equal(result.preview, true);
-  assert.equal(result.cwd, h.root); assert.equal(result.file.path, file);
+  assert.equal(result.isolated, true); assert.equal(result.workspaceLabel, '隔离工作区');
+  assert.equal(result.cwd, path.dirname(result.file.path)); assert.notEqual(result.file.path, file);
+  assert.match(result.file.path, /file-inputs/);
+  assert.equal(await fs.readFile(result.file.path, 'utf8'), '<h1>原文件</h1>');
+  await fs.writeFile(result.file.path, '<h1>模型修改副本</h1>');
   assert.equal(await fs.readFile(file, 'utf8'), '<h1>原文件</h1>');
+  const preview = await artifactRuntime.previewInput({ cwd: result.cwd }, 'file-open-input-preview', result.file.path);
+  assert.equal(preview.ok, true); artifactRuntime.closeRef('file-open-input-preview');
   await h.call('ack', result.id); assert.deepEqual((await h.call('list')).items, []);
 });
 test('unsupported files are prepared once as bounded private attachments without extraction', async t => {
@@ -70,7 +77,9 @@ test('unsupported files are prepared once as bounded private attachments without
   await fs.writeFile(file, bytes); h.broker.enqueue([file]);
   const id = (await h.call('list')).items[0].id;
   const results = await Promise.all([h.call('claim', id), h.call('claim', id)]);
-  const r = results[0]; assert.equal(r.preview, false); assert.equal(r.cwd, '');
+  const r = results[0]; assert.equal(r.preview, false);
+  assert.equal(r.isolated, true); assert.equal(r.workspaceLabel, '隔离工作区');
+  assert.equal(r.cwd, path.dirname(r.file.path));
   assert.notEqual(r.file.path, file); assert.deepEqual(await fs.readFile(r.file.path), bytes);
   assert.equal(results[1].file.path, r.file.path);
   h.identity('b'); assert.equal((await h.call('claim', id)).ok, false);

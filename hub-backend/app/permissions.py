@@ -5,6 +5,7 @@ groups derive from this catalog.
 PERMISSIONS = [
     {"key": "org.manage", "label": "管理组织架构", "group": "组织与用户"},
     {"key": "user.manage", "label": "管理用户", "group": "组织与用户"},
+    {"key": "quota.manage", "label": "管理套餐与额度", "group": "平台治理"},
     {"key": "work.catalog.manage", "label": "管理职业画像与工作场景", "group": "组织与用户"},
     {"key": "role.manage", "label": "管理角色权限", "group": "组织与用户"},
     {"key": "client.view", "label": "查看 SoduWork 终端", "group": "SoduWork 终端"},

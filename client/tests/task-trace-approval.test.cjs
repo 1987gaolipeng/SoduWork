@@ -12,12 +12,14 @@ function fixture(approval = {}, decide = async () => ({ok: true, request: {statu
   const item = {id: 'gate-1', status: 'pending', action: 'baseline', ...approval};
   const state = {trace: {approvals: [item]}, refresh: async () => {}};
   const note = {value: '', focus() { this.focused = true; }}, details = {open: false};
+  const proof = {open: false}, proofBody = {innerHTML: ''};
   const error = {hidden: true}, verify = {checked: false};
   const block = {dataset: {}, hidden: false, isConnected: true, removed: false,
     getAttribute: () => item.id, setAttribute() {}, removeAttribute() {},
     remove() { this.removed = true; this.isConnected = false; },
     querySelector(selector) { return ({'[data-tfd-approval-note]': note, '.tfd-inline-approval-form': details,
-      '[data-tfd-approval-error]': error, '[data-tfd-approval-verify]': verify})[selector]; },
+      '[data-tfd-approval-error]': error, '[data-tfd-approval-verify]': verify,
+      '.tfd-inline-proof': proof, '[data-tfd-proof-body]': proofBody})[selector]; },
     querySelectorAll: () => [approve, reject]};
   const button = action => ({disabled: false, getAttribute: () => action,
     closest: selector => selector === '.tfd-inline-approval' ? block : (action === 'approve' ? approve : reject)});
@@ -30,7 +32,7 @@ function fixture(approval = {}, decide = async () => ({ok: true, request: {statu
   vm.runInNewContext(source, context);
   const api = context.window.TaskTraceApproval;
   api.bind(root, state);
-  return {api, item, state, block, note, details, error, approve, reject, verify, calls, notices, root, window: context.window,
+  return {api, item, state, block, note, details, proof, proofBody, error, approve, reject, verify, calls, notices, root, window: context.window,
     click(target) { handlers.click({target, preventDefault() {}, stopPropagation() {}}); },
     selectMode(value, disabled = false) { handlers.change({target: {value, disabled,
       matches: s => s === '[data-tfd-acceptance-mode]', closest: () => block}}); },
@@ -376,6 +378,15 @@ test('permission or evidence fetch failure fails closed with a retry explanation
   f.api.bind(f.root,f.state);await settle();
   assert.equal(f.approve.disabled,true);assert.equal(f.reject.disabled,true);
   assert.equal(f.block.dataset.approvalAccess,'error');assert.match(f.error.textContent,/重试/);
+});
+
+test('transient evidence failures reveal the retry control inside the proof disclosure', async () => {
+  const f = fixture(); f.block.isConnected = true; f.root.querySelectorAll = () => [f.block];
+  f.window.SoduWorkAPI.approvalDetail = async () => { throw Error('offline'); };
+  f.api.bind(f.root, f.state); await settle();
+  assert.equal(f.block.dataset.approvalAccess, 'error');
+  assert.equal(f.proof.open, true);
+  assert.match(f.proofBody.innerHTML, /data-tfd-proof-retry/);
 });
 
 test('inline evidence is an in-place disclosure without exposing internal version labels', () => {

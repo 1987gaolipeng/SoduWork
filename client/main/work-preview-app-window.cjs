@@ -116,6 +116,7 @@ function create({ owners: OWNERS, getDeps, ownerFor, ownerSession, safeWebUrl,
       if (!lease || owner.closed) return { ok: false, reason: '主窗口已关闭，无法打开应用窗口' };
       packaged?.assertActive();
       const label = String(payload.label || '应用').slice(0, 160);
+      const appVersion = String(payload.appVersion || '').trim().slice(0, 80);
       const id = cleanTabId(payload.tabId) || 'app-' + Date.now().toString(36);
       const existing = owner.views.get(id);
       let sameAccount = true;
@@ -131,6 +132,7 @@ function create({ owners: OWNERS, getDeps, ownerFor, ownerSession, safeWebUrl,
       const item = createView(owner, id, requestedBridge, true, undefined, packaged?.partition);
       item.ref = '';
       item.label = label;
+      item.appVersion = appVersion;
       try { item.icon = require('../core/plugin-icon.js').normalize(payload.icon); } catch (_) { item.icon = ''; }
       item.requested = target;
       const win = new DEPS.BrowserWindow({
@@ -537,9 +539,17 @@ function create({ owners: OWNERS, getDeps, ownerFor, ownerSession, safeWebUrl,
         if (action === 'maximize' && win && !win.isDestroyed()) {
           try { if (win.isMaximized()) win.unmaximize(); else win.maximize(); } catch (_) {}
         }
-        if (action === 'apps' && owner.sender && !owner.sender.isDestroyed()) {
-          try { owner.sender.send('work-preview-apps-manage', { key: item.ref || item.label || '' }); } catch (_) {}
-        }
+        const openSettings = () => {
+          if (!liveContents(owner, item)) return;
+          const pluginId = String(item.appBridge?.appId || '').replace(/^plugin:/, '');
+          if (!pluginId) return;
+          try {
+            if (owner.host.isMinimized()) owner.host.restore();
+            owner.host.show(); owner.host.focus();
+            owner.sender.send('work-preview-apps-manage', { pluginId });
+          } catch (_) {}
+        };
+        if (action === 'apps') openSettings();
         return { ok: true };
       }
     }

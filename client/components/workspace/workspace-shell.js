@@ -63,9 +63,8 @@
     aidesk: lineGlyph(PEOPLE_HEADS + PEOPLE_SHOULDERS),
     pichat: lineGlyph('<path d="M7.5 4h9a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4H9l-5 3v-4.5a4 4 0 0 1-.5-2V8a4 4 0 0 1 4-4Z"/><path d="M8 9h8M8 13h5"/>'),
     create: lineGlyph('<path d="M13 4.5H6.5a2 2 0 0 0-2 2V18a2 2 0 0 0 2 2H18a2 2 0 0 0 2-2v-7"/><path d="m9.5 14.5.75-3.25L18 3.5A1.77 1.77 0 0 1 20.5 6l-7.75 7.75Z"/>'),
-    // A small storage box makes the requirement pool read as a place where
-    // incoming work is collected, rather than another history view.
-    history: lineGlyph('<path d="M4 8.5h16v10.25A1.75 1.75 0 0 1 18.25 20.5H5.75A1.75 1.75 0 0 1 4 18.75Z"/><path d="M3.5 8.5 5.1 4h13.8l1.6 4.5M3.5 8.5h17M9 12h6"/>'),
+    // Pair the request-pool outline with its selected color artwork.
+    history: lineGlyph('<circle cx="6.9" cy="5.6" r="1.2"/><path d="M16.2 3h1.8a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-1.8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M4.1 12.4a2.3 2.3 0 0 1 2.3-2.3h5.5a2.3 2.3 0 0 1 2.3 2.3v4.1a2.3 2.3 0 0 1-2.3 2.3H8.7l-3.35 2.2a.6.6 0 0 1-.95-.45Z"/><path d="M7.2 13.4h3.9"/>'),
     add: lineGlyph('<path d="M12 4.5v15M4.5 12h15"/>'),
     briefs: lineGlyph('<path d="M14 3.5H6.5A1.5 1.5 0 0 0 5 5v14a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19V8.5Z"/><path d="M14 3.5v5h5M8.5 12h7M8.5 16h5"/>'),
     team: lineGlyph(PEOPLE_HEADS + PEOPLE_SHOULDERS),
@@ -173,9 +172,22 @@
 
   const icon = (key) => '<svg viewBox="0 0 24 24">' + (ICONS[key] || ICONS.history) + '</svg>';
   const APP_PAGE_GIFT_MARKUP = '<g stroke="none"><rect x="5" y="12.75" width="14" height="7.5" rx="1.5" fill="#7c5cf0"/><rect x="3.75" y="9.5" width="16.5" height="3.9" rx="1.4" fill="#4f8df7"/><path d="M11.25 13.4v7.4a.75.75 0 0 0 1.5 0v-7.4Z" fill="#ffffff" opacity=".85"/><rect x="5.35" y="4.35" width="3.2" height="3.2" rx=".9" fill="#f59e0b"/><rect x="10.55" y="2.6" width="2.9" height="2.9" rx=".8" fill="#ec4899"/><circle cx="17.35" cy="5.6" r="1.6" fill="#22d3ee"/></g><path d="M12 7.25V5.9" stroke="#7c5cf0" stroke-width="1.5" stroke-linecap="round"/>';
-  const railIcon = (key) => '<svg class="ws-icon-line" viewBox="0 0 24 24" aria-hidden="true" focusable="false" data-icon="' + key + '">' + (ICONS[key] || ICONS.history) + '</svg>' +
+  /* Neutral states are genuine open line drawings, paired with the approved
+     full-color artwork. Keep the same subject, scale and center in both states. */
+  const RAIL_LINE_ICONS = {
+    home: lineGlyph('<path d="M9 7V6a3.5 3.5 0 0 1 3.5-3.5h6A3.5 3.5 0 0 1 22 6v5a3.5 3.5 0 0 1-3.5 3.5H18"/><path d="M2 10.5A3.5 3.5 0 0 1 5.5 7h9a3.5 3.5 0 0 1 3.5 3.5v6a3.5 3.5 0 0 1-3.5 3.5H8l-6 3Z"/><path d="M6.5 11.5h7M6.5 15.5h4.5"/>'),
+    history: lineGlyph('<path d="M6 10H4.75L2.5 15v5A1.5 1.5 0 0 0 4 21.5h16a1.5 1.5 0 0 0 1.5-1.5v-5l-2-5"/><path d="M2.5 15h5l1.5 3h6l1.5-3h5M6.5 15V4A1.5 1.5 0 0 1 8 2.5h7M10 7h3M10 11h2"/><rect x="15.5" y="3" width="6" height="6" rx="1.5"/><path d="m17 6 1 1 2-2"/>'),
+    skills: lineGlyph('<path d="M9 6V4.5a2.5 2.5 0 1 1 5 0V6h4a2 2 0 0 1 2 2v3h-1.5a2.5 2.5 0 1 0 0 5H20v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4h1.5a2.5 2.5 0 1 0 0-5H3V8a2 2 0 0 1 2-2Z"/>'),
+    schedules: lineGlyph('<path d="m12.5 4.5-9 4.75L12 14l3-1.6M3.5 15l8.5 4.75L20.5 15"/><path d="m19 2-5 7h4l-1 5 6-8h-4Z"/>'),
+    library: lineGlyph('<path d="M3 17V6a2 2 0 0 1 2-2h5l3 3h6a2 2 0 0 1 2 2v2M7 15v-4a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v2M10 13h3"/><path d="M5 15h8l2-3h5a1.5 1.5 0 0 1 1.5 1.5v6A1.5 1.5 0 0 1 20 21H5a2 2 0 0 1-2-2v-4Z"/>'),
+  };
+  const RAIL_COLOR_ICONS = new Set(['home', 'history', 'skills', 'schedules', 'library']);
+  const railIcon = (key) => RAIL_COLOR_ICONS.has(key)
+    ? '<svg class="ws-icon-line ws-rail-line-art" viewBox="0 0 24 24" aria-hidden="true" focusable="false" data-icon="' + key + '">' + RAIL_LINE_ICONS[key] + '</svg>' +
+      '<img class="ws-rail-art ws-icon-solid" src="assets/rail-icons/' + key + '.svg" data-icon="' + key + '" alt="" aria-hidden="true" draggable="false">'
+    : '<svg class="ws-icon-line" viewBox="0 0 24 24" aria-hidden="true" focusable="false" data-icon="' + key + '">' + (ICONS[key] || ICONS.history) + '</svg>' +
     (key === 'apps'
-      ? '<svg class="ws-rail-app-icon ws-icon-solid" viewBox="0 0 24 24" data-icon="apps" aria-hidden="true" focusable="false">' + APP_PAGE_GIFT_MARKUP + '</svg>'
+      ? '<svg class="ws-rail-app-icon ws-icon-solid" viewBox="0 0 24 24" data-icon="apps" aria-hidden="true" focusable="false"><g transform="translate(12 11.425) scale(1.15) translate(-12 -11.425)">' + APP_PAGE_GIFT_MARKUP + '</g></svg>'
       : '<svg class="ws-icon-solid" viewBox="0 0 24 24" data-icon="' + key + '" aria-hidden="true" focusable="false">' + (SOLID_ICONS[key] || ICONS[key] || ICONS.history) + '</svg>');
   let root = null, active = '', nav = null, rail = null, railMoreMenu = null, recent = null, chats = null, pinnedChats = null, chatItems = [];
   /*

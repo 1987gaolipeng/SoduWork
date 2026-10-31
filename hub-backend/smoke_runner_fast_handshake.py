@@ -4,6 +4,8 @@ import asyncio
 import json
 import os
 import sys
+import tempfile
+import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -37,13 +39,47 @@ async def main() -> None:
     async def forbidden_refresh(*args, **kwargs):
         raise AssertionError("hello must not wait for local inventory scans")
 
-    runner._refresh_agents = forbidden_refresh
-    await asyncio.wait_for(runner._hello(), timeout=1)
-    assert len(socket.sent) == 1, socket.sent
-    assert socket.sent[0].get("op") == "hello", socket.sent
-    assert socket.sent[0].get("agents") == [], socket.sent
-    assert socket.sent[0].get("inventoryReady") is False, socket.sent
-    assert runner.bin is False
+    old_capabilities = runner_main._capabilities
+    capability_calls = []
+    release_capability_probe = threading.Event()
+    try:
+        def slow_capabilities(*_args, **_kwargs):
+            capability_calls.append(time.monotonic())
+            released_by_event_loop = release_capability_probe.wait(timeout=1)
+            return {"schemaVersion": 3, "available": ["terminal"], "items": [],
+                    "releasedByEventLoop": released_by_event_loop}
+
+        runner_main._capabilities = slow_capabilities
+        runner._refresh_agents = forbidden_refresh
+        await asyncio.wait_for(runner._hello(), timeout=1)
+        assert len(socket.sent) == 1, socket.sent
+        assert socket.sent[0].get("op") == "hello", socket.sent
+        assert socket.sent[0].get("agents") == [], socket.sent
+        assert socket.sent[0].get("inventoryReady") is False, socket.sent
+        assert "capabilities" not in socket.sent[0], socket.sent
+        assert capability_calls == [], capability_calls
+        assert runner.bin is False
+
+        async def no_refresh(*_args, **_kwargs):
+            return None
+
+        beats = []
+
+        async def capture_beat(payload):
+            beats.append(payload)
+
+        runner._refresh_agents = no_refresh
+        runner._refresh_skills = no_refresh
+        runner._session_snapshots = lambda: ([], [])
+        runner._send_strict = capture_beat
+        asyncio.get_running_loop().call_later(0.02, release_capability_probe.set)
+        beat = asyncio.create_task(runner._report_beat())
+        await asyncio.wait_for(beat, timeout=2)
+        assert len(capability_calls) == 1, capability_calls
+        assert beats[0]["capabilities"]["available"] == ["terminal"], beats
+        assert beats[0]["capabilities"]["releasedByEventLoop"] is True, beats
+    finally:
+        runner_main._capabilities = old_capabilities
 
     calls = {"agents": 0, "skills": 0}
     old_agents, old_scan = runner_main._agents, runner_main._scan_skills
@@ -100,7 +136,7 @@ async def main() -> None:
     version = await asyncio.to_thread(agent_setup._short, sys.executable, ["-c", probe_code], 1)
     elapsed = time.monotonic() - started
     assert version == "" and elapsed < 8, (version, elapsed)
-    print("RUNNER_FAST_HANDSHAKE_OK: 8 assertions")
+    print("RUNNER_FAST_HANDSHAKE_OK: 13 assertions")
 
 
 if __name__ == "__main__":

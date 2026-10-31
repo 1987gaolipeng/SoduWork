@@ -12,7 +12,7 @@ function fixture(options = {}) {
     getURL: () => require('node:url').pathToFileURL(path.join(__dirname, '../desk.html')).href };
   const event = { sender, senderFrame: sender.mainFrame };
   const context = vm.createContext({
-    _cloudHandoff: { observe() {} },
+    _cloudHandoff: options.cloudHandoff || { observe() {} },
     skillTurn: require('../main/pi-session/skill-turn'), sendIdentityOf: null,
     taskInput: { request: async (_identity, route) => options.request(route) },
     app: options.app || { getPath: () => emptyStorage }, path, identityOf: options.identityOf || (async () => ({ hub: 'fixture', clientId: 'fixture' })),
@@ -37,9 +37,25 @@ function fixture(options = {}) {
       return options.response === 1;
     },
     _entryContextPrompts: () => [], _awaitBounded: value => value, OPEN_TIMEOUT_MS: 45000,
-    _bindUsage() {}, _attach() {}, _detach() {}, _wire() {}, _openReply: () => ({ ok: true }),
+    newChatAccess: options.newChatAccess,
+    _sessionOwners: options.sessionOwners || {
+      bind(handle, identity, policy) { ownerActions.push(['bind', handle, identity, policy]); },
+      quarantine(handle) { ownerActions.push(['quarantine', handle]); },
+      closed(handle, confirmed) { ownerActions.push(['closed', handle, confirmed]); },
+    },
+    _bindUsage() {}, _attach() { viewAttachments++; },
+    _detach(handle) { viewDetachments++; return options.detach?.(handle); },
+    _discardRenderer(handle) { viewDetachments++; return options.discard?.(handle); },
+    _clearRelease() {},
+    _wire(...args) { return options.wire?.(...args); },
+    _openReply: (...args) => options.openReply ? options.openReply(...args) : ({ ok: true }),
     require: name => {
-      if (['../work-preview', '../conversation/app-surfaces.cjs', './app-mcp-grant.cjs'].includes(name)) {
+      if (name.startsWith('node:')) return require(name);
+      if (name === './app-mcp-grant.cjs') {
+        const actual = require(path.join(__dirname, '../main/pi-session', name));
+        return { ...actual, bind(...args) { rendererGrants++; return actual.bind(...args); } };
+      }
+      if (['../work-preview', '../conversation/app-surfaces.cjs'].includes(name)) {
         return require(path.join(__dirname, '../main/pi-session', name));
       }
       if (!['../native-locale.cjs', '../agent-runtime/runtime-catalog', '../access-control/policy', '../access-control/preferences', '../access-control/automation-access', '../conversation/requirement-context', '../conversation/acceptance-session', '../conversation/work-conversation-opening', '../conversation/history-access', '../conversation-connectors.cjs', './resume-cwd', './task-access'].includes(name)) throw Error('Unexpected dependency ' + name);
@@ -47,7 +63,10 @@ function fixture(options = {}) {
     },
   });
   vm.runInContext(handler, context);
-  return { calls, dialogs, event, open: (raw, source = event) => context.openConversation(source, raw),
+  return { calls, dialogs, ownerActions, event, viewAttachments: () => viewAttachments,
+    viewDetachments: () => viewDetachments, rendererGrants: () => rendererGrants,
+    open: (raw, source = event) => context.openConversation(source, raw),
+    openExpected: (raw, expectedIdentity, source = null) => context.openConversation(source, raw, expectedIdentity),
     ...require('../main/access-control/automation-access').service(context.app, context.openConversation) };
 }
 

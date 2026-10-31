@@ -26,6 +26,8 @@ assert.match(normal[0], /最终答复必须以结果开头/);
 assert.match(normal[0], /最多 3 个关键成果/);
 assert.match(normal[0], /真实成果渲染成可打开的文件链接/);
 assert.match(normal[0], /不逐条翻译命令/);
+assert.match(normal[0], /重新读取用户的目标与验收标准/);
+assert.match(normal[0], /自我声称完成不算证据/);
 assert.match(normal[0], /不在最终答复里重复工作目录/);
 assert.match(normal[0], /真实可访问地址/);
 assert.match(normal[0], /工程类工作以代码仓库/);

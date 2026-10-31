@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en-US">
 <head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:">
@@ -39,7 +39,6 @@
   <div id="tabs" role="tablist" aria-label="应用页面"></div>
   <div id="drag-space" aria-hidden="true"></div>
   <button id="refresh" class="action" type="button" title="刷新当前页面，保留右侧对话" aria-label="刷新当前页面"><svg viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M19 11a7 7 0 0 0-12-5L4 9m1 4a7 7 0 0 0 12 5l3-3"/></svg></button>
-  <button id="settings" class="action" type="button" title="打开主窗口的应用管理" aria-label="应用设置"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3" fill="var(--bg)"/><circle cx="15" cy="17" r="3" fill="var(--bg)"/></svg></button>
 </div>
 <script>
   (() => {
@@ -80,7 +79,7 @@
     }
     api.onTabs(render);
     api.action('state').then(result => render(result.state)).catch(() => {});
-    for (const [id, action] of [['back','back'],['refresh','refresh'],['settings','apps']]) document.getElementById(id).onclick = () => act(action);
+    for (const [id, action] of [['back','back'],['refresh','refresh']]) document.getElementById(id).onclick = () => act(action);
     document.getElementById('bar').ondblclick = event => { if (!event.target.closest('button,.tab')) act('maximize'); };
     tabs.onkeydown = event => {
       const nodes = [...tabs.children], index = nodes.findIndex(node => node.dataset.id === tabs.dataset.active);

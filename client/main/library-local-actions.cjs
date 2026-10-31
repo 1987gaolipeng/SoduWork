@@ -167,6 +167,21 @@ async function execute(store, index, action, payload) {
     index.items = index.items.filter(x => !ids.has(x.id)); await store.save(index); await store.garbageCollect(index);
     return { ok: true, purged: action === 'emptyTrash' ? rows.length : true };
   }
+  if (action === 'deleteItems') {
+    const ids = [...new Set((Array.isArray(body.ids) ? body.ids : []).map(value => String(value || '').trim()).filter(Boolean))];
+    const succeeded = [], failed = [];
+    for (const id of ids) {
+      try {
+        const row = item(index, id);
+        row.deletedAt = now(); row.isDeleted = true; row.favorite = false;
+        succeeded.push(publicRow(row));
+      } catch (failure) {
+        failed.push({ id, code: failure.code || 'LOCAL_LIBRARY_ERROR', message: failure.message || String(failure) });
+      }
+    }
+    await store.save(index); store.guard();
+    return { ok: true, succeeded, failed };
+  }
   const row = item(index, payload.id, action === 'restoreItem');
   if (action === 'readBinary' || action === 'readContent') {
     const bytes = await store.read(row);

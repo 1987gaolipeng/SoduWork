@@ -33,7 +33,10 @@ def image_rejected(error: model_errors.UpstreamError) -> bool:
     return bool(re.search(
         r'(?:model|gateway).{0,100}(?:does not support|doesn.t support|not support|unsupported).{0,40}(?:image|vision|multimodal)'
         r'|(?:image(?:_url| input|s)?|vision|multimodal).{0,60}(?:not supported|unsupported|only supported by certain models)'
-        r'|(?:模型|网关).{0,30}不支持.{0,20}(?:图片|图像|多模态)', message))
+        r'|(?:too many|maximum|limit|supports up to).{0,40}(?:image|vision|multimodal)'
+        r'|(?:image|vision|multimodal).{0,60}(?:count|数量|上限|limit|maximum|最多)'
+        r'|(?:模型|网关).{0,30}不支持.{0,20}(?:图片|图像|多模态)'
+        r'|(?:图片|图像|多模态).{0,30}(?:数量|上限|限制|超限)', message))
 
 
 async def open_request(conf: dict, path: str, payload: dict, analyze):

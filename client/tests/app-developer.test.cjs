@@ -20,6 +20,74 @@ function collected(f) {
     outputSnapshot: () => ({ files: [entry], delivery: { items: [entry] } }) }, entry.artifactId);
 }
 
+test('bundled authoring check uses installer rules, rejects root scripts and missing icons, and preserves portable artwork', async t => {
+  const f = fixture(t);
+  scaffold({ out: f.out, key: 'brainstorm-canvas', name: '头脑风暴画布' });
+  const developer = personal.get(f.app, personal.APP_DEVELOPER_ID);
+  const bundle = resources.materialize(developer.localDraft.resources, f.root, developer.key);
+  const folder = path.join(bundle.directory, 'references/developer');
+  const validator = require(path.join(folder, 'scripts/validate.cjs'));
+  for (const name of require('../main/app-developer-plugin.cjs').VALIDATION_FILES) {
+    assert.deepEqual(fs.readFileSync(path.join(folder, 'validation', name)),
+      fs.readFileSync(path.resolve(__dirname, '..', name)), name + ' must match the installer');
+  }
+  const draft = path.join(f.out, drafts.DRAFT_NAME);
+  const body = JSON.parse(fs.readFileSync(draft, 'utf8'));
+  assert.throws(() => validator.validate(draft, f.root), /缺少专属彩色图标/);
+  body.icon = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jxqkAAAAASUVORK5CYII=';
+  const write = () => fs.writeFileSync(draft, JSON.stringify(body));
+  write();
+  const before = fs.readFileSync(draft);
+  assert.equal(validator.validate(draft, f.root).ok, true);
+  assert.deepEqual(fs.readFileSync(draft), before, 'validation must be read-only');
+  fs.mkdirSync(path.join(f.out, 'assets'));
+  const artwork = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path fill="#7c5cff" d="M8 8h32v32H8z"/><circle fill="#ffc83d" cx="24" cy="24" r="10"/></svg>';
+  fs.writeFileSync(path.join(f.out, 'assets/icon.svg'), artwork);
+  const image = { path: 'assets/icon.svg', kind: 'icon' };
+  body.resources.push(image); write();
+  for (const kind of ['icon', 'assets', 'scripts', 'references']) {
+    image.kind = kind; write();
+    assert.throws(() => validator.validate(draft, f.root), /插件资源类型不合法：assets\/icon\.svg/);
+    const rejected = collected(f);
+    assert.equal(rejected.ok, false); assert.match(rejected.reason, /插件资源类型不合法：assets\/icon\.svg/);
+  }
+  image.kind = 'asset'; write();
+  assert.equal(validator.validate(draft, f.root).ok, true);
+  assert.equal(collected(f).ok, true);
+  for (const name of ['server.cjs', 'start.cmd', 'package.json', 'data/board.json', '../outside.js']) {
+    body.resources.push({ path: name, kind: 'script' }); write();
+    assert.throws(() => validator.validate(draft, f.root), error =>
+      /资源须放在/.test(error.message) && error.message.includes(name));
+    const read = collected(f);
+    assert.equal(read.ok, false); assert.ok(read.reason.includes(name));
+    body.resources.pop();
+  }
+  body.resources.push({ path: 'scripts/server.cjs', kind: 'script' }); write();
+  assert.throws(() => validator.validate(draft, f.root), /ENOENT/);
+  fs.mkdirSync(path.join(f.out, 'scripts'));
+  fs.writeFileSync(path.join(f.out, 'scripts/server.cjs'), 'throw Error("must never execute on install")');
+  assert.equal(validator.validate(draft, f.root).ok, true);
+  body.ui.contributions[0].source.entry = 'ui/missing.html'; write();
+  assert.throws(() => validator.validate(draft, f.root), /入口未包含/);
+  body.ui.contributions[0].source.entry = 'ui/index.html'; write();
+  const checked = validator.validate(draft, f.root);
+  assert.equal(checked.installed, false); assert.equal(checked.runtimeTested, false);
+  const installed = personal.create(f.app, collected(f).body).plugin;
+  assert.equal(installed.icon, body.icon);
+  const file = path.join(f.root, 'brainstorm.soduwork-plugin');
+  await personal.exportToFile(f.app, { showSaveDialog: async () => ({ filePath: file }) }, installed.pluginId);
+  const imported = reader.readPersonalArchive(fs.readFileSync(file));
+  assert.equal(imported.icon, body.icon);
+  const portableArtwork = imported.resources.find(row => row.path === 'assets/icon.svg');
+  assert.equal(portableArtwork.kind, 'asset');
+  assert.equal(Buffer.from(portableArtwork.content, 'base64').toString(), artwork);
+  assert.equal(personal.preflight(imported).manifest.icon, body.icon);
+  for (const guide of [developer.localDraft.instructions, fs.readFileSync(path.join(folder, 'SKILL.md'), 'utf8')]) {
+    assert.match(guide, /彩色图标/); assert.match(guide, /validate\.cjs/);
+    assert.match(guide, /顶层.*icon/); assert.match(guide, /96\s?KB/);
+  }
+});
+
 test('built-in app developer inherits the current plugin contract and exact public SDK, without installation side effects', t => {
   const f = fixture(t), detail = personal.get(f.app, personal.APP_DEVELOPER_ID);
   assert.equal(detail.builtIn, true);
@@ -31,6 +99,17 @@ test('built-in app developer inherits the current plugin contract and exact publ
   const folder = path.join(bundle.directory, 'references/developer');
   assert.equal(fs.readFileSync(path.join(folder, 'plugin-development.md'), 'utf8'), require('../main/plugin-builder-plugin.cjs').body().instructions);
   assert.deepEqual(fs.readFileSync(path.join(folder, 'sdk/soduwork-app.js')), fs.readFileSync(path.resolve(__dirname, '../sdk/soduwork-app.js')));
+  const developerGuide = fs.readFileSync(path.join(folder, 'SKILL.md'), 'utf8');
+  const sdkGuide = fs.readFileSync(path.join(folder, 'sdk/README.md'), 'utf8');
+  assert.match(detail.localDraft.instructions, /机器人[\s\S]*soduWorkApp\.automation\.create/);
+  for (const guide of [developerGuide, sdkGuide]) {
+    assert.match(guide, /应用页面严禁出现“自动化”按钮/);
+    assert.match(guide, /订阅简报/);
+    assert.doesNotMatch(guide, /偷菜/);
+    assert.match(guide, /automation\.create/);
+    assert.match(guide, /不代表业务执行成功|不是执行结果/);
+  }
+  assert.match(developerGuide, /不能编造 SDK 尚未提供的列表、暂停、删除接口/);
   const script = path.join(folder, 'scripts/scaffold.cjs');
   require(script).scaffold({ out: f.out, key: 'notes-demo', name: '便签应用', url: 'http://127.0.0.1:8098/' });
   const resolved = personal.resolve(f.app, [personal.APP_DEVELOPER_ID], { cwd: f.root });

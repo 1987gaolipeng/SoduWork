@@ -355,6 +355,8 @@ async def save_admin_policy(
     user: User = Depends(require_perm("client.assign")),
     session: AsyncSession = Depends(get_session),
 ):
+    if (body.tokenLimitEnabled is not None or body.monthlyTokenLimit is not None) and not has_perm(user, "quota.manage"):
+        raise HTTPException(status_code=403, detail="请在额度管理中调整使用额度")
     try:
         result = await client_access.update_policy(
             session,

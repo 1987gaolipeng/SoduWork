@@ -23,7 +23,7 @@ const APPS_FAV_KEY = 'soduwork-apps-favorites';
 let _appsRenderSeq = 0;
 let _appsCache = null; /* Cache all local and remote applications; tabs and search filter the cache. */
 let _appsSettingsSeq = 0;
-const _appsUi = { tab: 'mine', query: '' };
+const _appsUi = { query: '' };
 
 function appKeyOf(item) {
   return String(item && (item.pluginId || item.key || item.id) || '').trim() || 'unknown';
@@ -126,9 +126,6 @@ function appsPageHtml() {
     '<div class="appsx-tools">' +
     '<label class="appsx-search">' + APPS_ICONS.search +
     '<input id="appsSearch" type="text" placeholder="搜索应用" spellcheck="false" autocomplete="off"></label>' +
-    '<div class="appsx-tabs" role="tablist" aria-label="应用范围">' +
-    '<button class="appsx-tab active" data-tab="mine" role="tab" aria-selected="true" type="button">我的</button>' +
-    '<button class="appsx-tab" data-tab="market" role="tab" aria-selected="false" type="button">市场</button></div>' +
     '<button class="appsx-icon-btn" id="appsRefresh" title="刷新" type="button">' + APPS_ICONS.refresh + '</button>' +
     '<button class="appsx-pill" id="appsAdd" type="button">添加' + APPS_ICONS.plus + '</button>' +
     '<button class="appsx-icon-btn" id="appsClose" title="关闭" type="button">' + APPS_ICONS.close + '</button>' +
@@ -149,18 +146,6 @@ function bindAppsPage(p) {
     openAppsCreateDialog();
   });
   p.querySelector('#appsClose').addEventListener('click', closeAppsPanel);
-  p.querySelectorAll('.appsx-tab').forEach(function (tab) {
-    tab.addEventListener('click', function () {
-      if (_appsUi.tab === this.dataset.tab) return;
-      _appsUi.tab = this.dataset.tab;
-      p.querySelectorAll('.appsx-tab').forEach(function (x) {
-        const active = x === tab;
-        x.classList.toggle('active', active);
-        x.setAttribute('aria-selected', String(active));
-      });
-      renderAppsCatalog(false);
-    });
-  });
 }
 
 /*
@@ -201,12 +186,8 @@ async function loadAppsCatalog() {
   return apps;
 }
 
-function appsForCurrentTab(all) {
-  let list = all.filter(function (app) {
-    return _appsUi.tab === 'market'
-      ? !app.item.personal && app.item.listed !== false
-      : Boolean(app.item.personal || app.item.installed);
-  });
+function appsMatchingQuery(all) {
+  let list = all;
   const query = _appsUi.query.trim().toLowerCase();
   if (query) {
     list = list.filter(function (app) {
@@ -250,6 +231,9 @@ function appsRefreshNotice(body, error) {
   body.querySelector('#appsRefreshNotice')?.remove();
   if (!error) return;
   if (_appsCache) _appsCache.remoteError = String(error.message || error);
+  // A failed refresh is not evidence that the market is empty. Keep cached
+  // cards, but remove a previous empty-state claim until a real fetch succeeds.
+  body.querySelector('[data-apps-section="market"] .appsx-empty')?.remove();
   const notice = document.createElement('p');
   notice.id = 'appsRefreshNotice'; notice.className = 'appsx-market-error';
   notice.setAttribute('role', 'status');
@@ -262,11 +246,12 @@ function appsRefreshNotice(body, error) {
 }
 
 function appsSectionsFor(list) {
-  if (_appsUi.tab === 'market') return [{ key: 'market', label: '市场', items: list }];
+  const installed = list.filter(app => app.item.personal || app.item.installed);
+  const market = list.filter(app => !app.item.personal && app.item.listed !== false);
   const query = _appsUi.query.trim().toLowerCase();
   const recommendations = (_appsCache || []).filter(app => !app.item.personal && app.item.marketPolicy?.featured && app.item.listed !== false)
     .map(app => {
-      const local = list.find(candidate => candidate.item.personal && (
+      const local = installed.find(candidate => candidate.item.personal && (
         candidate.item.sourcePluginId === app.item.pluginId ||
         (candidate.item.key && candidate.item.key === app.item.key && /^https?:/.test(candidate.row.source?.url || '') && candidate.row.source.url === app.row.source?.url)));
       return local ? { ...local, item: { ...local.item, coverUrl: app.item.coverUrl || local.item.coverUrl } } : app;
@@ -274,13 +259,19 @@ function appsSectionsFor(list) {
   // Recommendations are independent exposure groups and may include a favorited installed application.
   // Favorites and the remaining personal list are mutually exclusive to avoid duplicates.
   const ids = favoriteAppIds();
-  const favorites = list.filter(app => ids.indexOf(appKeyOf(app.item)) >= 0)
+  const favorites = installed.filter(app => ids.indexOf(appKeyOf(app.item)) >= 0)
     .sort((a, b) => ids.indexOf(appKeyOf(b.item)) - ids.indexOf(appKeyOf(a.item)));
-  const remaining = list.filter(app => ids.indexOf(appKeyOf(app.item)) < 0);
-  return [{ key: 'recommended', label: '推荐', items: recommendations }, { key: 'favorites', label: '常用', items: favorites }, { key: 'mine', label: '我的', items: remaining }];
+  const remaining = installed.filter(app => ids.indexOf(appKeyOf(app.item)) < 0);
+  return [
+    ...(recommendations.length ? [{ key: 'recommended', label: '推荐', items: recommendations }] : []),
+    ...(favorites.length ? [{ key: 'favorites', label: '常用', items: favorites }] : []),
+    { key: 'mine', label: '我的', items: remaining },
+    { key: 'market', label: '市场', items: market },
+  ];
 }
 
 function appsEmptyHtml(query, section, allInFavorites) {
+  if (!query && (section === 'recommended' || section === 'favorites')) return '';
   if (section === 'recommended') return '<p class="appsx-section-empty">' + (query ? '推荐应用中没有匹配结果。' : '暂无推荐应用。') + '</p>';
   if (section === 'mine' && allInFavorites && !query) {
     return '<p class="appsx-section-empty">已安装的应用可在上方分组中打开。</p>';
@@ -291,7 +282,7 @@ function appsEmptyHtml(query, section, allInFavorites) {
   if (query) {
     return '<div class="appsx-empty"><span class="appsx-empty-ico">' + APPS_ICONS.search + '</span>' +
       '<b>没有找到「' + escapeAppsHtml(query) + '」</b>' +
-      '<span>换个关键词，或切换到「我的 / 市场」试试。</span></div>';
+      '<span>换个关键词，或浏览下方的市场应用。</span></div>';
   }
   if (section === 'mine') {
     return '<div class="appsx-empty"><span class="appsx-empty-ico">' + APPS_GLYPH + '</span>' +
@@ -339,7 +330,7 @@ function appsCardHtml(app, index, recommended, conversation) {
 }
 
 function renderAppsInto(body, all) {
-  const list = [], visible = appsForCurrentTab(all);
+  const list = [], visible = appsMatchingQuery(all);
   let html = '';
   if (all.remoteError) {
     html += '<p class="appsx-market-error" role="status">远端市场暂时无法加载：' + escapeAppsHtml(all.remoteError) + '<button class="btn-mini" type="button" data-apps-retry>重试</button></p>';
@@ -349,7 +340,8 @@ function renderAppsInto(body, all) {
     return '<section class="appsx-section" data-apps-section="' + section.key + '">' +
       '<header class="appsx-sec-head"><h2>' + escapeAppsHtml(section.label) + '</h2></header>' +
       (cards ? '<div class="appsx-grid">' + cards + '</div>' :
-        (section.key === 'market' && all.remoteError ? '' : appsEmptyHtml(_appsUi.query.trim(), section.key, visible.length > 0))) + '</section>';
+        (section.key === 'market' && all.remoteError ? '' : appsEmptyHtml(_appsUi.query.trim(), section.key,
+          visible.some(app => app.item.personal || app.item.installed)))) + '</section>';
   }).join('');
   body.innerHTML = html;
   body.querySelector('[data-apps-retry]')?.addEventListener('click', () => renderAppsCatalog(true));
@@ -388,7 +380,9 @@ async function openAppSettings(app) {
   let record;
   try { record = await appSettingsOf(key); } catch (error) { sayAppsMessage(error.message); return; }
   if (ticket !== _appsSettingsSeq) return;
-  const settings = record.values;
+  const fields = window.SoduWorkPluginInstallSetup?.preferences;
+  const setup = fields ? fields.schema(app.item) : { preferences: [] };
+  setup.preferences = setup.preferences.filter(field => field.key !== 'ukey' && !record.secretKeys.includes(field.key));
   let mask = document.getElementById('appsSettingsMask');
   if (!mask) {
     mask = document.createElement('div');
@@ -402,31 +396,53 @@ async function openAppSettings(app) {
     });
   }
   const modal = mask.querySelector('.appsx-modal');
-  const publicParams = Object.fromEntries(Object.entries(settings).filter(([key]) => key !== 'model'));
-  const paramsText = JSON.stringify(publicParams, null, 2);
-  const hasUkey = record.secretKeys.includes('ukey');
-  const showUkey = hasUkey || app.item.key === 'ops-cloud-console' || app.item.capabilities?.mcpServers?.includes('media-ops-cloud');
+  const icon = window.SoduWorkPluginIcon?.imageFor(app.item) || APPS_GLYPH;
+  const version = String(app.item.installedVersion || app.item.version || '').trim();
   modal.innerHTML =
     '<header class="appsx-modal-head"><b data-user-content>' + escapeAppsHtml(app.title) + ' · 应用设置</b>' +
     '<button class="appsx-icon-btn" id="appsSetClose" type="button">' + APPS_ICONS.close + '</button></header>' +
     '<div class="appsx-modal-body">' +
-    (showUkey ? '<div class="appsx-field"><span>ukey</span><div class="appsx-secret-row"><code id="appsSetUkeyMask">' + escapeAppsHtml(hasUkey ? record.secretMasks?.ukey || '****' : '尚未填写') + '</code>' +
-    '<button class="appsx-secret-edit" id="appsSetUkeyEdit" type="button">' + (hasUkey ? '重新填写' : '填写 ukey') + '</button></div>' +
-    '<input id="appsSetUkey" aria-label="新的 ukey" type="password" autocomplete="new-password" spellcheck="false" placeholder="填写新的 ukey" hidden></div>' : '') +
-    '<label class="appsx-field"><span>默认模型</span>' +
-    '<input id="appsSetModel" type="text" spellcheck="false" autocomplete="off" placeholder="留空则跟随会话当前模型" value="' + escapeAppsHtml(String(settings.model || '')) + '"></label>' +
-    '<label class="appsx-field"><span>应用参数（JSON）</span>' +
-    '<textarea id="appsSetParams" rows="5" spellcheck="false" placeholder="{&quot;temperature&quot;: 0.7}">' + escapeAppsHtml(paramsText) + '</textarea></label>' +
-    '<p class="appsx-modal-note">这些设置只属于「' + escapeAppsHtml(app.title) + '」，由本机安全存储保存，与页面自动同步。未重新填写时保留原凭据。' + escapeAppsHtml(record.secretKeys.length ? ' 已配置：' + record.secretKeys.join('、') : '') + '</p>' +
+    '<section class="appsx-settings-info" aria-label="应用信息"><span class="appsx-settings-icon" role="img" aria-label="应用图标">' + icon + '</span>' +
+    '<div class="appsx-settings-copy"><b class="appsx-settings-name" data-user-content>' + escapeAppsHtml(app.title) + '</b>' +
+    '<span class="appsx-settings-version">' + escapeAppsHtml(version ? '版本 v' + version : '版本未知') + '</span>' +
+    '<p class="appsx-settings-description" data-user-content>' + escapeAppsHtml(app.desc || app.item.description || '暂无描述') + '</p></div></section>' +
+    (setup.preferences.length ? fields.render(setup, app.item.setupConfig || {}, escapeAppsHtml) : '') +
     '<p class="appsx-settings-error" id="appsSetError" role="alert" hidden></p>' +
     '</div>' +
-    '<footer class="appsx-modal-foot"><button class="appsx-remove" id="appsSetRemove" type="button">移除应用</button><span class="push"></span><button class="appsx-pill small" id="appsSetSave" type="button">保存</button></footer>';
+    '<footer class="appsx-modal-foot"><button class="appsx-remove" id="appsSetRemove" type="button">移除应用</button><span class="push"></span>' +
+    (app.item.personal && !app.item.builtIn ? '<button class="appsx-publish" id="appsSetPublish" type="button">申请上架</button>' : '') +
+    (setup.preferences.length ? '<button class="appsx-pill small" id="appsSetSave" type="button">保存</button>' : '') + '</footer>';
   mask.classList.add('show');
   function showError(message) {
     const target = modal.querySelector('#appsSetError'); target.hidden = false; target.textContent = message;
     target.scrollIntoView({ block: 'nearest' });
   }
   modal.querySelector('#appsSetClose').addEventListener('click', closeAppSettings);
+  const refreshPublication = () => window.SoduWorkPluginPublication?.refreshPersonalSubmission(
+    modal.querySelector('#appsSetPublish'), app.item, { isCurrent: () => ticket === _appsSettingsSeq });
+  refreshPublication();
+  modal.querySelector('#appsSetPublish')?.addEventListener('click', async function () {
+    if (ticket !== _appsSettingsSeq) return;
+    this.disabled = true;
+    this.textContent = '正在准备…';
+    const restore = () => {
+      if (ticket !== _appsSettingsSeq) return;
+      mask.classList.add('show');
+      this.focus();
+      refreshPublication();
+    };
+    try {
+      if (!window.openCapabilityPluginPublication) throw Error('上架组件未加载，请重启客户端后重试');
+      await window.openCapabilityPluginPublication(app.item, {
+        isCurrent: () => ticket === _appsSettingsSeq,
+        onReady: () => mask.classList.remove('show'),
+        onClose: restore,
+      });
+    } catch (error) {
+      if (ticket !== _appsSettingsSeq) return;
+      restore(); showError(error.message || '申请上架准备失败');
+    }
+  });
   modal.querySelector('#appsSetRemove').addEventListener('click', async function () {
     if (ticket !== _appsSettingsSeq) return;
     this.disabled = true;
@@ -446,40 +462,34 @@ async function openAppSettings(app) {
       this.disabled = false;
       modal.querySelectorAll('input,textarea,button').forEach(control => { control.disabled = false; });
       this.textContent = '移除应用';
+      refreshPublication();
       showError(String(error && error.message || error));
     }
   });
-  const ukeyInput = modal.querySelector('#appsSetUkey');
-  modal.querySelector('#appsSetUkeyEdit')?.addEventListener('click', function () {
-    ukeyInput.hidden = !ukeyInput.hidden;
-    if (ukeyInput.hidden) { ukeyInput.value = ''; this.textContent = hasUkey ? '重新填写' : '填写 ukey'; }
-    else { this.textContent = '取消填写'; ukeyInput.focus(); }
-  });
-  modal.querySelector('#appsSetSave').addEventListener('click', async function () {
+  modal.querySelector('#appsSetSave')?.addEventListener('click', async function () {
     if (ticket !== _appsSettingsSeq) return;
-    const model = String(modal.querySelector('#appsSetModel').value || '').trim();
-    const raw = rawParamsValue(modal);
-    let params = {};
-    if (raw) {
-      try { params = JSON.parse(raw); }
-      catch (error) { showError('参数不是合法 JSON：' + String(error && error.message || error)); return; }
+    let params;
+    try {
+      const submitted = fields.collect(modal, setup);
+      // Only the declared, visible fields are edited; preserve any hidden legacy preferences.
+      const visible = new Set(setup.preferences.map(field => field.key));
+      params = { ...Object.fromEntries(Object.entries(app.item.setupConfig || {}).filter(([key]) => !visible.has(key))), ...submitted };
     }
-    if (!params || typeof params !== 'object' || Array.isArray(params)) { showError('应用参数必须是 JSON 对象'); return; }
-    if (ukeyInput && !ukeyInput.hidden) {
-      const value = ukeyInput.value.trim();
-      if (!value) { showError('请输入新的 ukey，或取消填写以保留原值'); return; }
-      params.ukey = value;
-    }
+    catch (error) { showError(error.message); return; }
     this.disabled = true;
     modal.querySelectorAll('input,textarea,button').forEach(control => { control.disabled = true; });
-    try { await saveAppSettings(key, { values: { ...params, model }, expectedRevision: record.revision,
-      remove: Object.keys(publicParams).filter(key => !Object.hasOwn(params, key)) }); }
-    catch (error) { showError(error.message); modal.querySelectorAll('input,textarea,button').forEach(control => { control.disabled = false; }); return; }
-    if (ukeyInput) ukeyInput.value = '';
+    try {
+      const result = app.item.personal
+        ? await SoduWorkAPI.configurePersonalPlugin(app.item.pluginId, app.item.checksum, params)
+        : await SoduWorkAPI.setEnterprisePluginInstalled(app.item.pluginId, true, app.item.versionId, params);
+      if (result?.ok === false) throw Error(result.reason || result.error || '应用设置保存失败');
+      if (result?.plugin) Object.assign(app.item, result.plugin);
+      else app.item.setupConfig = params;
+    }
+    catch (error) { showError(error.message); modal.querySelectorAll('input,textarea,button').forEach(control => { control.disabled = false; }); refreshPublication(); return; }
     if (ticket === _appsSettingsSeq) closeAppSettings();
   });
 }
-function rawParamsValue(modal) { return String(modal.querySelector('#appsSetParams').value || '').trim(); }
 function closeAppSettings() {
   ++_appsSettingsSeq;
   const box = document.getElementById('appsSettingsMask');

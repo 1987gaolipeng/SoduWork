@@ -1,0 +1,27 @@
+{
+  "summary": "Bilingual release notes help you discover what changed and browse earlier releases.",
+  "sections": [
+    {
+      "id": "release-notes",
+      "title": "See what changed",
+      "items": [
+        {
+          "id": "first-open",
+          "text": "Release notes appear when you first enter the workspace after an upgrade. Dismissing them prevents repeated prompts for that version."
+        },
+        {
+          "id": "history",
+          "text": "View release history from Settings and return to the current release at any time."
+        },
+        {
+          "id": "reading",
+          "text": "Release notes use the standard dialog design, with all content expanded and scrolling for longer updates."
+        },
+        {
+          "id": "languages",
+          "text": "Read release notes in Simplified Chinese or English, following your interface language."
+        }
+      ]
+    }
+  ]
+}

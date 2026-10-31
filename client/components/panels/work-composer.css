@@ -256,7 +256,8 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
   background:color-mix(in srgb,var(--ink) 6%,transparent);color:var(--ink-2)}
 
 /* The empty composer is a roomy work surface. Its add menu opens downward. */
-.compose-panel[data-stage='compose'] .cp-mid{gap:17px;padding:28px 28px 7vh}
+.compose-panel[data-stage='compose'] .cp-mid{position:relative;gap:17px;padding:28px 28px 7vh}
+.compose-panel[data-stage='compose'] .ai-disclaimer{position:absolute;left:0;right:0;bottom:16px;margin:0}
 .compose-panel[data-stage='compose'] .work-composer.cp-box{width:min(800px,calc(100% - 32px));min-width:280px;max-width:800px;box-sizing:border-box;border-radius:18px;
   box-shadow:0 1px 2px rgba(16,24,40,.035),0 0 26px -19px rgba(16,24,40,.26)}
 .compose-panel[data-stage='compose'] .work-composer.cp-box:focus-within{

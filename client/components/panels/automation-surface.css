@@ -12,7 +12,7 @@ html[data-desk-panel="workspace"] #schPanel > .sch-body,
 }
 html[data-desk-panel="workspace"] #schPanel > .sch-body > :is(.sch-recipes,.sch-list),
 #schPanel > .sch-body > :is(.sch-recipes,.sch-list){width:100%!important;max-width:1520px!important;margin-inline:auto!important}
-#schPanel .sch-list{display:grid;grid-template-columns:1fr;gap:12px;align-items:start!important}
+#schPanel .sch-list{display:grid;grid-template-columns:1fr;gap:12px;align-items:stretch!important}
 #schPanel .sch-stale-notice{display:flex;align-items:center;gap:10px;flex-wrap:wrap;box-sizing:border-box;max-width:1520px;margin:0 auto 12px;padding:10px 12px;
   border:1px solid color-mix(in srgb,var(--s-doing) 40%,var(--line));border-radius:var(--r-sm);background:color-mix(in srgb,var(--s-doing) 8%,var(--bg-0));color:var(--ink-2)}
 #schPanel .sch-stale-notice>div{flex:1 1 210px;min-width:0;overflow-wrap:anywhere;font:400 var(--text-sm)/1.5 var(--font-ui)}
@@ -20,12 +20,13 @@ html[data-desk-panel="workspace"] #schPanel > .sch-body > :is(.sch-recipes,.sch-
 #schPanel .sch-stale-notice .btn-mini{flex:none;white-space:nowrap}#schPanel .sch-stale-notice .btn-mini:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 #schPanel .sch-item{
   background:var(--auto-paper);border:1px solid var(--auto-line);border-radius:16px;
-  box-shadow:0 2px 7px color-mix(in srgb,var(--ink) 3%,transparent);overflow:hidden;height:auto!important;
+  box-shadow:0 2px 7px color-mix(in srgb,var(--ink) 3%,transparent);overflow:hidden;
+  display:flex;flex-direction:column;height:100%!important;
 }
 #schPanel .sch-item:hover{border-color:color-mix(in srgb,var(--accent) 24%,var(--auto-line));box-shadow:0 5px 16px color-mix(in srgb,var(--ink) 5%,transparent)}
 #schPanel .sch-item.off{background:var(--auto-paper)}
 #schPanel .sch-item.confirming{border-color:var(--danger,#c43d50)}
-#schPanel .sch-i-body{display:flex;flex:0 0 auto!important;flex-direction:column;align-items:stretch;gap:9px;padding:13px 15px 11px;min-height:0!important}
+#schPanel .sch-i-body{display:flex;flex:1 1 auto!important;flex-direction:column;align-items:stretch;gap:9px;padding:13px 15px 11px;min-height:0!important}
 #schPanel .sch-i-head{display:grid;grid-template-columns:minmax(0,auto) minmax(28px,1fr) auto;align-items:center;gap:10px;min-width:0}
 #schPanel .sch-i-when{
   position:static;display:flex;flex-direction:row;align-items:center;justify-content:flex-start;
@@ -38,6 +39,13 @@ html[data-desk-panel="workspace"] #schPanel > .sch-body > :is(.sch-recipes,.sch-
 #schPanel .sch-item.off .sch-i-when > i{color:var(--auto-ink)}
 #schPanel .sch-i-state{margin-left:0;border:1px solid var(--line);border-radius:999px;background:var(--bg-1);padding:3px 8px;color:var(--ink-3);font:500 14.5px/1.3 var(--font-ui);white-space:nowrap}
 #schPanel .sch-i-state.is-enabled{border-color:color-mix(in srgb,var(--accent) 24%,var(--line));background:var(--accent-soft);color:color-mix(in srgb,var(--accent) 60%,var(--ink))}
+
+#schPanel button.sch-i-state{appearance:none;cursor:pointer;text-align:center}
+#schPanel button.sch-i-state:hover{border-color:color-mix(in srgb,var(--accent) 38%,var(--line));background:var(--accent-soft-2);color:var(--accent-hover,var(--accent))}
+#schPanel button.sch-i-state:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#schPanel button.sch-i-state:disabled{cursor:wait;opacity:.65}
+.sch-toggle-dialog .ac-dialog{width:min(420px,100%)}
+.sch-toggle-dialog .ac-dialog-body{display:flex;flex-direction:column;gap:8px}
 #schPanel .sch-i-main{display:flex;flex:1;min-width:0;gap:8px}
 #schPanel .sch-i-top{display:block}
 #schPanel .sch-i-title,#schPanel .sch-item.off .sch-i-title{
@@ -113,7 +121,7 @@ html[data-desk-panel="workspace"] #schPanel > .sch-body > :is(.sch-recipes,.sch-
   #schPanel .sch-list{grid-template-columns:repeat(2,minmax(0,1fr))}
   #schPanel .sch-recipes > div{grid-template-columns:repeat(4,minmax(0,1fr))!important}
 }
-@container automation-content (min-width:1440px){#schPanel .sch-list{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@container automation-content (min-width:1240px){#schPanel .sch-list{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @container automation-content (max-width:560px){
   #schPanel .sch-recipes > div{grid-template-columns:1fr!important}
   #schPanel .sch-recipes button{min-height:76px!important}

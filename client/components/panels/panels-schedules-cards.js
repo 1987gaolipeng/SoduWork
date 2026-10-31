@@ -71,12 +71,18 @@ function _schCardHtml(s) {
   const executor = '<span class="sch-i-executor" aria-label="' + esc(who) + '">' + agentBrand + '</span>';
   const methodLabel = method
     ? '<span class="sch-i-method" data-user-content title="' + esc(method) + '">' + esc(method) + '</span>' : '';
+  const stateLabel = fired ? '本次预约已触发' : s.enabled ? '已启用' : '已停用';
+  const stateHtml = fired
+    ? '<span class="sch-i-state">' + stateLabel + '</span>'
+    : '<button type="button" class="sch-i-state' + (s.enabled ? ' is-enabled' : '') +
+      '" data-act="toggle" aria-pressed="' + String(Boolean(s.enabled)) + '" aria-label="' +
+      esc(s.enabled ? '停用自动化' : '启用自动化') + '" title="' +
+      esc(s.enabled ? '停用自动化' : '启用自动化') + '">' + stateLabel + '</button>';
   return '<article class="sch-item' + (s.enabled ? '' : ' off') + '" data-sid="' + esc(s.id) + '">' +
     '<div class="sch-i-body"><div class="sch-i-head"><div class="sch-i-when">' + _schVisualIcon('clock') +
       '<b>' + esc(rh[0]) + '</b><i>' + esc(rh.slice(1).join(' ')) + '</i></div>' +
       '<div class="sch-i-assignment">' + executor + methodLabel + '</div>' +
-      '<span class="sch-i-state' + (s.enabled && !fired ? ' is-enabled' : '') + '">' +
-      (fired ? '本次预约已触发' : s.enabled ? '已启用' : '已停用') + '</span></div>' +
+      stateHtml + '</div>' +
     '<div class="sch-i-main"><div class="sch-i-top"><b class="sch-i-title" data-user-content title="' + esc(s.title) + '">' +
       esc(s.title) + '</b></div>' + _schCardNote(s.note) +
       (repo ? '<div class="sch-i-meta"><span class="sch-i-project">' + _schVisualIcon('folder') + '<b data-user-content title="' + esc(repo) + '">' + esc(repo) + '</b></span>' +
@@ -89,6 +95,44 @@ function _schCardHtml(s) {
     '</span><span class="sch-i-ops" role="group" aria-label="自动化操作">' +
       _schActionButton('run', '立刻跑一次') + _schActionButton('runs', '执行记录') +
       _schActionButton('edit', '编辑自动化') + _schActionButton('del', '删除自动化') + '</span></div></article>';
+}
+
+async function _schToggleEnabled(sid, source) {
+  const schedule = (_schRows || []).find(item => item.id === sid);
+  if (!schedule || !window.SoduWorkAPI?.updateSchedule) return;
+  const enabled = !Boolean(schedule.enabled);
+  const action = enabled ? '\u542f\u7528' : '\u505c\u7528';
+  const title = enabled ? '\u542f\u7528\u81ea\u52a8\u5316' : '\u6682\u505c\u81ea\u52a8\u5316';
+  const consequence = enabled
+    ? '\u542f\u7528\u540e\uff0c\u8be5\u81ea\u52a8\u5316\u4f1a\u6309\u539f\u5b9a\u8ba1\u5212\u7ee7\u7eed\u8fd0\u884c\u3002'
+    : '\u6682\u505c\u540e\u4e0d\u4f1a\u81ea\u52a8\u8fd0\u884c\uff0c\u5df2\u6709\u7684\u6267\u884c\u8bb0\u5f55\u4e0d\u4f1a\u88ab\u5220\u9664\u3002';
+  const ui = window.AccountUI;
+  if (!ui?.modal) return;
+  const dialog = ui.modal(document.body, title,
+    '<p>\u786e\u5b9a\u8981' + action + '\u300c' + esc(schedule.title || '\u81ea\u52a8\u5316') + '\u300d\uff1f</p>' +
+    '<p class=\"ac-muted\">' + consequence + '</p>' +
+    '<div class=\"ac-actions\"><button type=\"button\" class=\"ac-secondary\" data-sch-toggle-cancel>\u53d6\u6d88</button>' +
+    '<button type=\"button\" class=\"ac-primary\" data-sch-toggle-confirm>' + action + '</button></div>',
+    'sch-toggle-dialog');
+  const cancel = dialog.mask.querySelector('[data-sch-toggle-cancel]');
+  const confirm = dialog.mask.querySelector('[data-sch-toggle-confirm]');
+  cancel?.addEventListener('click', () => dialog.close());
+  confirm?.addEventListener('click', async () => {
+    if (confirm.disabled) return;
+    confirm.disabled = true; confirm.textContent = enabled ? '\u6b63\u5728\u542f\u7528\u2026' : '\u6b63\u5728\u505c\u7528\u2026';
+    try {
+      await window.SoduWorkAPI.updateSchedule(sid, { enabled });
+      dialog.close();
+      _schRows = null;
+      await _loadSch();
+      if (typeof petSay === 'function') petSay('\u5df2' + action + '\u81ea\u52a8\u5316\u300c' + (schedule.title || '\u81ea\u52a8\u5316') + '\u300d');
+    } catch (error) {
+      confirm.disabled = false; confirm.textContent = action;
+      const message = dialog.mask.querySelector('[data-sch-toggle-error]') || document.createElement('p');
+      message.setAttribute('data-sch-toggle-error', ''); message.className = 'ac-status ac-danger'; message.textContent = _schErrorText(error);
+      if (!message.parentNode) dialog.mask.querySelector('.ac-dialog-body')?.appendChild(message);
+    }
+  });
 }
 
 function _schCardNext(s) {

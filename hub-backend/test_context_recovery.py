@@ -161,6 +161,13 @@ class ContextRecoveryTests(unittest.TestCase):
         ordinary = _err(400, "请求不正确", '{"api_key":"DO_NOT_EXPOSE"}')
         assert json.loads(ordinary.body)["error"]["code"] == 400
 
+    def test_proxy_preserves_a_safe_image_rejection_code(self):
+        from app.api.ai_proxy import _err
+        response = _err(400, "当前所选模型服务拒绝图片输入，请手动选择支持图片的模型后重试；原图已保留")
+        body = json.loads(response.body)
+        assert body["error"]["code"] == "image_input_rejected"
+        assert body["error"]["message"] == "Image input rejected."
+
 
     def test_real_pi_resume_preserves_plan_tools(self):
         self.mock_attr(base, "_pi_cli_js", lambda: "fixture-cli.js")

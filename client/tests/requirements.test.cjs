@@ -69,6 +69,24 @@ test('unstarted work submits changed metadata and active definitions remain immu
   assert.deepEqual(R.editPatch({...task,readOnly:true,status:'todo'}, {title:'After'}), {title:'After'});
 });
 
+test('execution facts lock definition editing without disabling delivery capabilities', () => {
+  const task = {status:'todo',canEditRequirement:true,canSubmitReview:true,canManageRequirementMaterials:true};
+  for (const fields of [{status:'doing'}, {status:'paused'}, {status:'done'}, {status:'cancel'},
+    {requirementStage:'reviewing'}, {archivedAt:1}, {actualStart:1}, {reviewedAt:1},
+    {hasExecutionHistory:true}, {requirementEditBlocked:true}, {maintenanceBlocked:true},
+    {ai:{state:'running'}}, {ai:{state:'done'}}, {workRouting:{conversationTurn:{state:'done'}}}]) {
+    const item = {...task,...fields};
+    assert.equal(R.canEdit(item), false, JSON.stringify(fields));
+    assert.deepEqual(R.editPatch(item,{title:'Changed',tags:['changed'],visibility:'organization'}), {});
+    assert.equal(R.canManageMaterials(item), true);
+    assert.equal(R.canSubmitReview(item), true);
+  }
+  assert.equal(R.canEdit({...task,ai:{state:'failed'},hasExecutionHistory:false}), true, 'failed preflight alone is not execution');
+  assert.equal(R.canEdit({...task,canEditRequirement:false}), false);
+  assert.equal(R.canOpenConversation({...task,status:'done',myRoles:['assignee']},'local'), false);
+  assert.equal(R.canOpenConversation({...task,status:'doing',requirementStage:'reviewing'},'local'), false);
+});
+
 test('requirements support human assignment and exact tag filtering', () => {
   const task = {id:'tagged', status:'todo', triageStage:'ready', canEditRequirement:true,
     assigneeUserId:'member-1', tags:['growth', 'quarter'], myRoles:['creator']};

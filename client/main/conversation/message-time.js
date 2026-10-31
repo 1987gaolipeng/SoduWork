@@ -5,12 +5,14 @@ function epoch(value) {
     typeof value === 'string' && /^\d{4}-\d{2}-\d{2}[T ]/.test(value) ? Date.parse(value) : 0;
   return Number.isFinite(number) && number > 0 && number <= 8640000000000000 ? number : 0;
 }
-function stampPiEvent(event, sentAt) {
+function stampPiEvent(event, sentAt, submissionId) {
   if (event?.type !== 'message_end' || event.replay) return event;
   const message = event.message;
   if (!message || typeof message !== 'object') return event;
   if (message.role === 'user') {
     message.sentAt = epoch(message.sentAt) || epoch(sentAt) || epoch(message.timestamp) || Date.now();
+    const id = String(submissionId || '').trim();
+    if (id) message.submissionId = id.slice(0, 128);
   } else if (message.role === 'assistant') {
     // The provider timestamp is created when generation begins. The SDK emits
     // this event before appending the same message object to its session file.

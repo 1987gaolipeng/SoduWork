@@ -197,7 +197,7 @@ function _user(content) {
       text: '', attachments: [],
     };
   }
-  const withoutVision = visionContract.parse(plain);
+  const withoutVision = visionContract.parse(require('./input-context.cjs').strip(plain));
   const withPlugins = pluginContext.parse(withoutVision.text);
   const parsed = attachmentContract.parse(withPlugins.text);
   return {
@@ -375,6 +375,7 @@ function apply(state, ev) {
           }
           state.messages.push({ role: 'user', text: visible.text, attachments: visible.attachments,
             sentAt: require('../conversation/message-time').epoch(m.sentAt),
+            ...(m.submissionId ? { submissionId: String(m.submissionId).slice(0, 128) } : {}),
             ...(m.taskId ? { taskId: String(m.taskId) } : {}),
             ...(m.taskOutputKey ? { taskOutputKey: String(m.taskOutputKey) } : {}),
             plugins: Array.isArray(m.plugins) ? require('../conversation/plugin-badges').publicBadges(m.plugins)
@@ -397,7 +398,7 @@ function apply(state, ev) {
       msg.completedAt = require('../conversation/message-time').epoch(m.completedAt);
       msg.usageAt = msg.completedAt || require('../conversation/message-time').epoch(m.timestamp);
       msg.usageModel = String(m.model || '');
-      msg.usageProvider = String(m.provider || '');
+      msg.usageProvider = String(m.usageProvider || '');
       msg.stopReason = String(m.stopReason || '');
       msg.rawStopReason = String(m.rawStopReason || '');
       msg.errorMessage = String(m.errorMessage || '');

@@ -16,12 +16,17 @@ function create({ app, root, read, save, identity, request, publicRecord }) {
     if (!/^[a-f0-9-]{36}$/i.test(input.requestId || '')) throw Error('云端请求标识无效');
     if (!/^[a-z][a-z0-9._-]{0,47}$/.test(input.agentId || '')) throw Error('请选择执行底座');
     const text = String(input.text || '').trim();
-    if (!text || text.length > 50000) throw Error('请输入 1 到 50000 字的消息');
+    if ((!text && !input.attachments?.length) || text.length > 50000) throw Error('请输入消息或添加附件');
     if (input.skills?.length || input.plugins?.length || input.intent === 'goal') {
       throw Error('云端会话使用服务器已配置的能力；本机技能、插件和目标模式请在本地使用');
     }
+    const prep = input.inputPreparation && typeof input.inputPreparation === 'object'
+      ? { schemaVersion: 1, userText: String(input.inputPreparation.userText || '').slice(0, 50000),
+          fallback: input.inputPreparation.fallback === true } : null;
     return { sessionId: 'cloud-' + input.requestId, agentId: input.agentId,
-      text, title: text.replace(/\s+/g, ' ').slice(0, 80), model: String(input.model || ''), requiredSkills: [] };
+      text, userText: prep ? prep.userText : text, inputPreparation: prep,
+      title: (text || prep?.userText || '附件任务').replace(/\s+/g, ' ').slice(0, 80),
+      model: String(input.model || ''), requiredSkills: [] };
   }
   async function files(items) {
     if (!Array.isArray(items) || items.length > 20) throw Error('每次最多添加 20 个附件');

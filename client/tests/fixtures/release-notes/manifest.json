@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "releases": [
+    {
+      "version": "1.12.95",
+      "locales": [
+        "zh-CN",
+        "en-US"
+      ]
+    },
+    {
+      "version": "1.12.51",
+      "locales": [
+        "zh-CN",
+        "en-US"
+      ]
+    },
+    {
+      "version": "1.12.50",
+      "locales": [
+        "zh-CN",
+        "en-US"
+      ]
+    }
+  ]
+}

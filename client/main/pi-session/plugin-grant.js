@@ -197,6 +197,10 @@ async function resolve(options) {
     throw Error('请先从应用壳刷新云端页面并登录，再发送消息');
   }
   if (direct) localMcp = localMcp.filter(name => name !== direct.server);
+  if (direct && remoteIds.includes(direct.pluginId) &&
+      [direct.versionId, direct.contributionId, direct.origin].some(value => typeof value !== 'string' || !value))
+    throw Error('应用连接缺少安装版本绑定，请重新打开应用');
+  await direct?.authorize?.();
   let remote = { ok: true, items: [], mcpGrant: null };
   let identity = null;
   if (remoteIds.length || localMcp.length) {
@@ -207,6 +211,10 @@ async function resolve(options) {
       personalMcpServers: localMcp,
       projectId: String(opts.projectId || '').slice(0, 36),
       conversationId: String(opts.ref || '').slice(0, 120),
+      ...(direct && remoteIds.includes(direct.pluginId) ? { applicationConnection: {
+        pluginId: direct.pluginId, versionId: direct.versionId, contributionId: direct.contributionId,
+        origin: direct.origin, server: direct.server,
+      } } : {}),
     };
     try {
       remote = await request(identity, grantBody, opts.timeoutMs, opts.fetchImpl || global.fetch);

@@ -8,6 +8,9 @@ const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 const { pathToFileURL } = require('node:url');
 const { appInfo, install } = require('../main/app-menu-info.cjs');
+// These assertions exercise Chinese native dialogs explicitly; the product
+// default remains English and has independent locale coverage.
+test.beforeEach(() => require('../main/native-locale.cjs').setLocale('zh-CN'));
 
 function fixture({ version = '1.12.52', showMessageBox, quit, getRendererRoot, shell, openNewConversation } = {}) {
   const root = path.resolve(__dirname, '..'), handlers = new Map(), owners = new Map();

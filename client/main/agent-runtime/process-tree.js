@@ -148,8 +148,9 @@ function createProcessTreeGuard({ pid, platform = process.platform,
   async function finishStop() {
     if (pending) await pending.catch(() => {});
     const report = { terminated: [], skipped: [], remaining: [] }, errors = [];
+    let observed;
     try {
-      const rows = await read(); collect(rows);
+      const rows = await read(); observed = rows; collect(rows);
       if (!root && rows.has(pid)) {
         report.remaining.push(pid);
         errors.push(Error('Runtime process identity was never verified: ' + pid));
@@ -159,6 +160,13 @@ function createProcessTreeGuard({ pid, platform = process.platform,
     const signalled = [];
     for (const row of targets) {
       try {
+        // The complete shutdown snapshot already proves a missing/reused
+        // identity has exited. Avoid another OS query for those tombstones;
+        // live targets still get a fresh identity check immediately before kill.
+        if (observed && !same(row, observed.get(row.pid))) {
+          report.skipped.push({ pid: row.pid, reason: observed.has(row.pid) ? 'identity-changed' : 'exited' });
+          continue;
+        }
         const current = (await read(row.pid)).get(row.pid);
         if (!current || !same(row, current)) {
           report.skipped.push({ pid: row.pid, reason: current ? 'identity-changed' : 'exited' });

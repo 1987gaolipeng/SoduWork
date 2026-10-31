@@ -4,6 +4,7 @@
 import { ja as connectorJa, ko as connectorKo } from './connector-management.js'
 import { ja as cloudRunnerJa, ko as cloudRunnerKo } from './cloud-runner-management.js'
 import { ja as modelJa, ko as modelKo } from './model-capabilities.js'
+import { ja as quotaJa, ko as quotaKo } from './quota-management.js'
 const ja = {
   '编辑推荐': '推薦を編集', '编辑推荐 ': '推薦を編集: ',
   '推荐设置': '推薦設定',
@@ -77,6 +78,6 @@ const ko = {
 };
 
 export const messagesByLocale = Object.freeze({
-  'ja-JP': Object.freeze({ ...ja, ...connectorJa, ...cloudRunnerJa, ...modelJa }),
-  'ko-KR': Object.freeze({ ...ko, ...connectorKo, ...cloudRunnerKo, ...modelKo }),
+  'ja-JP': Object.freeze({ ...ja, ...connectorJa, ...cloudRunnerJa, ...modelJa, ...quotaJa }),
+  'ko-KR': Object.freeze({ ...ko, ...connectorKo, ...cloudRunnerKo, ...modelKo, ...quotaKo }),
 });

@@ -32,8 +32,7 @@ async def report_usage(
     client_access.invalidate_quota(str(client.user_ref or ""))
     quota = await client_access.quota_status(
         session, str(client.user_ref or ""))
-    if quota["exceeded"]:
-        await device_connections.disconnect(client.id, 4403)
+    # Exhaustion changes AI admission, not identity or business connectivity.
     return {"ok": True, "accepted": len(rows),
             "events": [usage_ledger.to_api(row) for row in rows],
             "quota": quota}

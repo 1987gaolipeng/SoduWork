@@ -50,9 +50,9 @@ export default function Users() {
         </div>
       </div>
       <div className="tablewrap"><div ref={listRef} className="tscroll" tabIndex={0} role="region" aria-label={tx("用户列表")}><table>
-        <thead><tr><th scope="col">{tx("用户")}</th><th scope="col">{tx("账号")}</th><th scope="col">{tx("部门")}</th><th scope="col">{tx("角色")}</th><th scope="col">{tx("状态")}</th><th scope="col">{tx("Token 额度")}</th><th scope="col">{tx("最后登录")}</th><th scope="col" className="admin-access-actions-col">{tx("操作")}</th></tr></thead>
+        <thead><tr><th scope="col">{tx("用户")}</th><th scope="col">{tx("账号")}</th><th scope="col">{tx("部门")}</th><th scope="col">{tx("角色")}</th><th scope="col">{tx("状态")}</th><th scope="col">{tx("最后登录")}</th><th scope="col" className="admin-access-actions-col">{tx("操作")}</th></tr></thead>
         <tbody>
-          {filtered.length === 0 && <tr><td colSpan={8}><div className="empty">{ul.length ? tx("没有匹配的用户") : tx("还没有用户")}</div></td></tr>}
+          {filtered.length === 0 && <tr><td colSpan={7}><div className="empty">{ul.length ? tx("没有匹配的用户") : tx("还没有用户")}</div></td></tr>}
           {filtered.map((u) => {
             const nm = u.displayName || u.username
             return (
@@ -62,9 +62,6 @@ export default function Users() {
                 <td>{orgName(u.orgId)}</td>
                 <td>{u.isSuper ? <span className="chip src-ext">{tx("全部权限")}</span> : roleName(u.roleId)}</td>
                 <td><span className={'status-dot ' + (u.isActive ? 'on' : 'off')}><i />{u.isActive ? tx("启用") : tx("停用")}</span></td>
-                <td className="nowrap">{u.tokenQuota?.mode === 'limited'
-                  ? Number(u.tokenQuota.limit).toLocaleString(getLocale()) + " " + tx("Tokens / 自然月")
-                  : tx(u.tokenQuota?.mode === 'unlimited' ? "个人不限额" : "继承统一规则")}</td>
                 <td className="muted nowrap">{u.lastLogin ? new Date(u.lastLogin).toLocaleString(getLocale()) : '—'}</td>
                 <td><div className="admin-row-actions"><button className="admin-text-action" onClick={() => setEdit({ user: u })}>{tx("编辑")}</button></div></td>
               </tr>
@@ -87,8 +84,6 @@ function UserEditor({ user, orgs, roles, onClose, onDone }) {
   const [orgId, setOrgId] = useState(user ? user.orgId || '' : '')
   const [roleId, setRoleId] = useState(user ? user.roleId || '' : '')
   const [isActive, setIsActive] = useState(user ? user.isActive : true)
-  const [quotaMode, setQuotaMode] = useState(user?.tokenQuota?.mode || 'inherit')
-  const [quotaLimit, setQuotaLimit] = useState(user?.tokenQuota?.limit ?? 0)
   const [posSel, setPosSel] = useState(user ? (user.positions || []) : [])
   const [posCat, setPosCat] = useState([])
   const [domSel, setDomSel] = useState(user ? (user.domains || []) : [])
@@ -108,16 +103,11 @@ function UserEditor({ user, orgs, roles, onClose, onDone }) {
   async function save() {
     if (isNew && (!username.trim() || !password)) { toast(tx("请填账号与初始密码")); return }
     if (!orgId) { toast(tx("请选择所属部门")); return }
-    const limit = Number(quotaLimit)
-    if (quotaMode === 'limited' && (quotaLimit === '' || !Number.isSafeInteger(limit) || limit < 0 || limit > 10000000000000)) {
-      toast(tx("个人 Token 上限应为 0 到 10000000000000 的整数")); return
-    }
-    const tokenQuota = { mode: quotaMode, limit: quotaMode === 'limited' ? limit : 0 }
     setBusy(true)
     try {
-      if (isNew) await api.createUser({ username: username.trim(), password, displayName: displayName.trim(), orgId, roleId: roleId || null, positions: posSel, domains: domSel, tokenQuota })
+      if (isNew) await api.createUser({ username: username.trim(), password, displayName: displayName.trim(), orgId, roleId: roleId || null, positions: posSel, domains: domSel })
       else {
-        const body = { displayName: displayName.trim(), orgId, roleId: roleId || null, isActive, positions: posSel, domains: domSel, tokenQuota }
+        const body = { displayName: displayName.trim(), orgId, roleId: roleId || null, isActive, positions: posSel, domains: domSel }
         if (password) body.password = password
         await api.updateUser(user.id, body)
       }
@@ -153,20 +143,6 @@ function UserEditor({ user, orgs, roles, onClose, onDone }) {
         <div style={{ flex: 1 }}><label className="f-lbl" id={`${formId}-role-label`} htmlFor={`${formId}-role`}>{tx("角色（权限）")}</label>
           <SelectMenu id={`${formId}-role`} aria-labelledby={`${formId}-role-label`} className="f-in" value={roleId} onChange={(e) => setRoleId(e.target.value)} disabled={user && user.isSuper}><option value="">{tx("— 无角色 —")}</option>{roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</SelectMenu>
         </div>
-      </div>
-      <div><label className="f-lbl" id={formId + '-quota-label'} htmlFor={formId + '-quota'}>{tx("Token 额度")}</label>
-        <SelectMenu id={formId + '-quota'} aria-labelledby={formId + '-quota-label'} className="f-in" value={quotaMode}
-          onChange={(e) => setQuotaMode(e.target.value)}>
-          <option value="inherit">{tx("继承统一规则")}</option>
-          <option value="limited">{tx("个人月度上限")}</option>
-          <option value="unlimited">{tx("个人不限额")}</option>
-        </SelectMenu>
-        {quotaMode === 'limited' && <div>
-          <label className="f-lbl" htmlFor={formId + '-quota-limit'}>{tx("每月 Token 上限")}</label>
-          <input id={formId + '-quota-limit'} className="f-in" type="number" min="0" max="10000000000000" step="1"
-            value={quotaLimit} onChange={(e) => setQuotaLimit(e.target.value)} />
-        </div>}
-        <p className="muted">{tx("同一账号的所有设备合并计量；0 表示暂停 AI 使用，下个自然月重新计算。")}</p>
       </div>
       <div><div className="f-lbl" id={`${formId}-positions-label`}>{tx("职业画像（可多选，用于理解需求与推荐工作场景，不授予系统权限）")}</div>
         <div className="posgrid" role="group" aria-labelledby={`${formId}-positions-label`}>

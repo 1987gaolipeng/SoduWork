@@ -14,7 +14,7 @@ from ..services import (audit, device_auth, mcp_servers, plugin_audience,
                         plugin_access, plugin_conversation, plugin_drafts, plugin_installations,
                         plugin_marketplace, plugin_mcp_gateway, plugin_mcp_limits, plugin_packages,
                         plugin_service, plugin_setup_contracts, plugin_builtin,
-                        plugin_signatures, rbac)
+                        plugin_signatures, rbac, plugin_application_mcp)
 
 router = APIRouter(prefix="/api/v1", tags=["plugins"])
 
@@ -313,13 +313,26 @@ async def client_plugin_conversation_grant(
         binding_ids = list(result.pop("_bindingIds", []) or [])[:3]
         version_ids = list(result.pop("_versionIds", []) or [])[:3]
         items = list(result.get("items") or [])
+        application_mcp = {}
+        application_binding = body.get("applicationConnection")
+        if application_binding is not None:
+            if not isinstance(application_binding, dict):
+                raise ValueError("应用连接绑定格式无效")
+            version_id = application_binding.get("versionId")
+            if not isinstance(version_id, str) or version_id not in version_ids:
+                raise ValueError("应用连接不属于本轮已安装版本")
+            version = await session.get(am.PluginVersion, version_id)
+            if version is None:
+                raise ValueError("应用安装版本已失效")
+            server = plugin_application_mcp.validate(application_binding, version)
+            application_mcp[version_id] = [server]
         if body.get("resourceProtocol") != 1 and any(
                 dict(item.get("resourceBundle") or {}).get("resources") for item in items):
             raise ValueError("这个插件需要完整文件支持，请先更新 SoduWork 客户端后重试；本轮尚未执行")
         remote_names = sorted({
             str(name) for item in items
             for name in dict(item.get("capabilities") or {}).get("mcpServers") or []
-            if str(name).strip()
+            if str(name).strip() and str(name) not in application_mcp.get(item.get("versionId"), [])
         })
         # SoduWork-owned capabilities are carried in the signed grant, but they
         # are not administrator-managed connector rows.  Keep the dependency
@@ -334,7 +347,11 @@ async def client_plugin_conversation_grant(
                     "插件需要但企业尚未启用的 MCP：" +
                     "、".join(readiness.get("missing") or []))
         if remote_names:
-            await plugin_mcp_gateway.validate_versions(session, client, version_ids)
+            if application_mcp:
+                await plugin_mcp_gateway.validate_versions(
+                    session, client, version_ids, application_mcp=application_mcp)
+            else:
+                await plugin_mcp_gateway.validate_versions(session, client, version_ids)
         personal_real_names = _external_mcp_names(personal_names)
         if personal_real_names:
             # This validates the requested names against the client's selected
@@ -351,7 +368,8 @@ async def client_plugin_conversation_grant(
         ticket, expires_in = device_auth.issue_plugin_mcp_ticket(
             client, binding_ids, personal_names,
             str(body.get("conversationId") or "")[:120],
-            plugin_version_ids=version_ids)
+            plugin_version_ids=version_ids,
+            **({"application_mcp": application_mcp} if application_mcp else {}))
         claims = verify_claims(ticket, token_type="plugin-mcp") or {}
         grant = {
             "ticket": ticket,
@@ -367,6 +385,7 @@ async def client_plugin_conversation_grant(
          "versions": [item.get("version") for item in items],
          "personalMcpServers": personal_names,
          "mcpServers": all_names,
+         "applicationMcpServers": application_mcp,
          "conversationId": str(body.get("conversationId") or "")[:120],
          "mode": "conversation-runtime"})
     return {"ok": True, "items": items, "mcpGrant": grant}

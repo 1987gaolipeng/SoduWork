@@ -420,6 +420,15 @@
       if (row && row.url) { try { global.URL.revokeObjectURL(row.url); } catch (_) { /* ignore */ } }
     };
 
+    function syncHint() {
+      if (o.materialHint !== true || !o.hint) return;
+      const hasFoldedText = rows.some((row) => inputTexts.has(row.file));
+      const hint = understandingHint(rows.length,
+        String(input?.value || '').trim() || (hasFoldedText ? 'folded-text' : ''));
+      o.hint.textContent = hint;
+      o.hint.hidden = !hint;
+    }
+
     function paint() {
       if (!tray) return;
       tray.innerHTML = rows.map((row, index) => {
@@ -434,13 +443,10 @@
             '<button type="button" class="catt-restore" data-catt-restore>在文本框中显示 <span aria-hidden="true">›</span></button></span>' + removeButton + '</article>';
         }
         if (image && row.url && tray.closest?.('.work-composer')) {
-          const saving = row.library?.status === 'saving', failed = row.library?.status === 'error';
           return '<article class="catt-item catt-image">' +
             '<button type="button" class="catt-image-preview catt-openable" data-catt-open="' + index +
             '" data-user-attributes="aria-label" aria-label="' + esc('预览 ' + row.name) + '">' +
             '<img src="' + esc(row.url) + '" alt=""></button>' + removeButton +
-            (saving || failed ? '<span class="catt-image-status' + (failed ? ' is-error' : '') + '" role="status">' +
-              (failed ? '入库失败 <button type="button" class="catt-library-retry" data-catt-library-retry="' + index + '">重试</button>' : '保存中…') + '</span>' : '') +
             '</article>';
         }
         const openable = image || row.kind === 'text';
@@ -453,12 +459,11 @@
           (image && row.url ? '<img src="' + esc(row.url) + '" alt="">' : badge) +
           '<span class="catt-copy"><b data-user-content data-user-attributes="title" title="' + esc(row.name) + '">' + esc(row.name) + '</b><small>' +
             esc(row.kind === 'dir' ? '文件夹' : size(row.size)) + '</small>' +
-            (row.library ? '<small class="catt-library-state' + (row.library.status === 'error' ? ' is-error' : '') + '"><span>' +
-              esc(global.LibraryTransfer.fileStatus(row.library)) + '</span>' + (row.library.status === 'error'
-                ? '<button type="button" class="catt-library-retry" data-catt-library-retry="' + index + '">重试</button>' : '') + '</small>' : '') + '</span>' +
+            '</span>' +
           removeButton +
         '</article>';
       }).join('');
+      syncHint();
       tray.classList.toggle('show', rows.length > 0);
     }
 

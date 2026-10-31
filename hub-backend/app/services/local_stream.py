@@ -686,6 +686,14 @@ def _on_line(ref: str, raw: str, term: dict, stream: str = "out",
     ln = _ANSI.sub("", raw).strip()
     if not ln:
         return
+    # A later non-empty Pi event proves that the previous final-response candidate
+    # was not the end of the turn, so the watchdog must keep waiting.
+    with _LOCK:
+        run = _RUNS.get(ref)
+        if run is None:
+            return
+        if str(run.get("cli") or "") == "pi":
+            run.pop("piFinalResponseAt", None)
     external = _EXTERNAL_DIR.search(ln)
     if external:
         blocked = str(external.group(1) or "").rstrip("*").rstrip("\\/")[:700]
@@ -705,6 +713,13 @@ def _on_line(ref: str, raw: str, term: dict, stream: str = "out",
             new.append({"kind": "out", "tool": "", "text": ln[:300]})
         else:
             local_turn_outcome.observe(str(run.get("cli") or ""), m, term)
+            event_type = str(m.get("type") or "").replace("-", "_").replace(".", "_")
+            if (term.get("piFinalResponse") and event_type == "message_end"
+                    and str(run.get("cli") or "") == "pi"):
+                with _LOCK:
+                    current = _RUNS.get(ref)
+                    if current is not None:
+                        current["piFinalResponseAt"] = time.time()
             context_error = local_context_policy.observe(run, m, term)
             if term.get("overflow") and context_error:
                 with _LOCK:

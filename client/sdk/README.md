@@ -10,6 +10,8 @@
 
 应用清单单独声明 `automation.create`，页面即可在用户提交业务弹窗后调用：
 
+机器人等持续执行业务应用复用此接口。应用页面严禁出现“自动化”按钮，入口、表单和状态用实际业务词语，例如“订阅简报”“定时整理”“每日汇报”；内部 `automation.create` 接口名不变。表单应明示时间、频率和操作范围，用户提交才创建；保存计划不代表业务执行成功，不以页面定时器替代宿主调度。该接口不提供计划查询、暂停或删除能力，不能编造相关 SDK 方法或用本地开关伪装操作成功。
+
 ```js
 const receipt = await soduWorkApp.automation.create({
   text: '每天早上9点收集行业资料，保留来源和摘要',
@@ -86,9 +88,21 @@ if (result.ok) await soduWorkApp.attachments.release(ids);
 
 原生标题栏“刷新”只重新加载应用页面，保留右侧会话及草稿。对话轮次结束由壳通知 `onRefresh`，业务页自行重新读取已授权的数据；失败和取消也可能结束轮次，数据刷新不等于执行成功。
 
+需要业务完成通知时，由应用自己的接口登记 `requestId`，由业务技能在写入并读回后通过应用 MCP 保存结果回执，页面在 `onRefresh`、加载或聚焦时补读消息。业务 `type` 及 JSON 字段由技能与前端共同约定；服务端校验接收人和真实结果，前端使用已支持处理器展示通知／定位内容。重复消息去重，缺失回执保持待确认。此方案按需接入，不要求无账号轻应用建设消息服务。当前 SDK 未提供任意业务消息投递或 `onMessage`；宿主通用投递和应用开发插件／脚手架配套更新见 `docs/development/app-result-messages-backlog.md`（后续待办）。
+
 本接口运行在 SoduWork 原生应用页或它授权的 iframe 中。普通外部浏览器页面没有应用壳时返回未连接，不注册或依赖自定义 URL 协议。
 
-## 应用设置与自动登录（SDK 1.1）
+## 应用自定义设置（SDK 1.1）
+
+应用自行定义参数名称、类型与业务含义；设置读写不要求业务登录或 MCP。新应用不要求、不推荐引入 ukey，认证由实际服务决定，旧应用已有凭据继续兼容。纯本地、单机或无账号应用可直接安装、打开并使用已声明的对话桥；不需要持久化时也不申请设置权限。
+
+### 包内纯静态 H5
+
+轻应用入口可声明为 `ui.contributions[].source: {"type":"package","entry":"ui/index.html","openMode":"workspace","bridge":{"version":1,"capabilities":["conversation.send","composer.control"]}}`。入口及相对引用的 HTML/CSS/JS/图片/JSON/字体都须包含在 `resources`（kind `ui` 或 `asset`）中；入口本身为 kind `ui`。导入后壳直接读取包内资源，不启动 HTTP 服务，不要求业务登录或 ukey。所有依赖随包提供，支持无外网运行。
+
+使用相对路径和标准浏览器 API；localStorage/IndexedDB 按当前账号与应用隔离，关闭重开、同应用升版保留。壳能力仍通过本 SDK 的既有声明与原生桥调用，页面没有 Node.js 或文件系统权限。在线应用的 external/URL 模式继续兼容；包内脚本只在页面中执行，不会自动启动 Python/Node 后端。
+
+本节是可选的业务登录集成示例。纯本地、单机或无账号应用无需登录、ukey、MCP 或设置读写权限，即可安装、打开并使用已声明的对话桥；不要为了使用应用窗口而增加认证。ukey 只是示例凭据名，实际认证由应用业务需求和所连接服务决定。SoduWork 自身的会话身份不等于应用业务账号。
 
 ### 包内纯静态 H5
 
@@ -101,32 +115,37 @@ if (result.ok) await soduWorkApp.attachments.release(ids);
 应用清单额外声明 `settings.read`、`settings.write`。接口只作用于当前已安装、启用的本机应用及其清单来源，页面不能传另一个应用 ID。设置按 SoduWork 登录账号、应用 ID、页面来源隔离，使用系统 safeStorage 加密保存，与“应用 → 应用设置”共用存储。不是 SSO，也不绑定两套用户体系。
 
 ```js
-// H5 用自己的登录接口取得 ukey 后，原子更新任意 JSON 业务参数。
+// 无需业务登录，即可保存任意符合限制的 JSON 参数。
 const state = await soduWorkApp.settings.get();
+if (!state.ok) throw new Error(state.reason);
 const saved = await soduWorkApp.settings.update({
-  values: {ukey: currentUserUkey, accountId: currentUserId, theme: 'dark'},
-  secretKeys: ['ukey'], expectedRevision: state.revision
+  values: {modelId: selectedModelId, theme: 'dark', options: {pageSize: 20}},
+  expectedRevision: state.revision
 });
 if (!saved.ok) throw new Error(saved.reason);
-
-// 再次打开应用：明确读取自己应用的凭据，交给自己的服务验证后恢复登录。
-const stored = await soduWorkApp.settings.get({keys: ['ukey'], includeSecrets: true});
-if (stored.ok && stored.values.ukey) await loginToOwnService(stored.values.ukey);
 ```
 
-`values` 支持字符串、数字、布尔、null、数组及嵌套 JSON 对象；最多 100 个参数、64 KiB、8 层，拒绝原型污染字段。更新合并顶层字段；删除用 `remove:['field']`。普通读取及保存回执隐藏凭据，`secretKeys` 标记的字段和含 ukey/token/password 等名称的字段会被隐藏；明确请求凭据时必须同时指定 `keys`。业务敏感字段应显式标记。不要把读取到的凭据写入日志、提示词、URL、资源或导出包。
+`values` 支持字符串、数字、布尔、null、数组及嵌套 JSON 对象；最多 100 个参数、64 KiB、8 层，拒绝原型污染字段。更新合并顶层字段；删除用 `remove:['field']`。这保存参数值，不会自动生成设置表单，也不会自动向 MCP 或业务服务传参。
 
-当前应用及顶层明确授权的直接 iframe 可以按相同接口读取 ukey，用于页面自动登录；请只授权可信业务来源。此授权不是 SoduWork 账号/设备令牌读取权限。无原生宿主、清单未声明权限、来源改变或应用停用时失败关闭。
+宿主设置弹窗中的普通表单沿用插件 `setup.preferences` 声明、`setupConfig` 安装配置及现有校验/保存链路；未声明时仅展示应用信息，不提供通用 JSON、默认模型或 ukey 输入。桥接设置用于页面自动同步及安全参数，不自动复制到安装偏好；未出现在设置界面的原凭据和值仍保留。敏感 Key 不可放入 `setup.preferences`。
 
-页面退出登录不删除壳内设置：只退出页面会话，并在当前窗口暂停自动登录；关闭后重开再读取 ukey。主动删除凭据需要明确 `remove`，服务端撤销/禁用仍立即拒绝使用。换号后一次写入新 ukey 与账号标识；异步请求在响应后核对当前页面登录账号，并使用 expectedRevision 避免旧请求覆盖新设置。服务器确认登录成功与壳同步失败需分别呈现，允许重试同步。
+用户填写的模型 API Key 等敏感字段应显式加入 `secretKeys`。普通读取及保存回执隐藏敏感字段；明确请求秘密须同时指定 `keys` 与 `includeSecrets:true`。自动名称检测只是补充，不能代替应用的敏感标记。不要把秘密写入日志、提示词、URL、公开 `context`、资源或导出包。
 
-顶层应用为声明的自有 MCP 连接引用设置字段，凭据不经过模型：
+当前应用及顶层明确授权的直接 iframe 可按相同接口读写本应用设置；只授权可信业务来源。这不是 SoduWork 账号/设备令牌读取权限。无原生宿主、清单未声明权限、来源改变或应用停用时失败关闭。
+
+### 按需业务认证与自有 MCP
+
+仅在业务服务要求认证时接入其真实登录/授权方式。自动登录可保存服务签发的凭据及业务账号标识，重开时向原服务验证；页面退出只结束会话并暂停当前窗口自动登录，主动删除凭据使用 `remove`。换号时原子更新，并核对账号与 `expectedRevision`，避免旧异步响应覆盖新设置。服务端撤销/禁用仍生效，业务登录与宿主同步失败分别呈现。
+
+顶层应用为已声明的自有 MCP 引用实际认证字段，凭据不经过模型。下面的 `credentialField` 是应用自己选定且已安全保存的字段名，并非固定名称：
 
 ```js
 await soduWorkAppBridge.mcp.connect({
-  server: 'my-declared-mcp', url: location.origin + '/mcp', credentialKey: 'ukey',
+  server: 'my-declared-mcp', url: location.origin + '/mcp', credentialKey: credentialField,
   context: {spaceId: currentSpaceId}
 });
 ```
 
-`mcp.connect` 仍需单独声明；只允许该应用来源下的 `/mcp` 和已声明的连接器名称。技能复用既有每轮 MCP 调用指南，壳注入 `Authorization: Bearer <ukey>`。每轮生成可撤销的本机代理租约，真实 ukey 不写入 Agent 配置；账号或设置版本改变后旧租约拒绝后续调用，下一轮读取新设置。旧账号已经被服务端接收的操作不能撤回。排队消息也绑定提交时的设置版本，换号后须重新发送。此自有 MCP/设置桥支持本机安装应用；远端 Hub 任务不代读本机安全存储。
+`mcp.connect` 仍需单独声明；只允许该应用来源下的 `/mcp` 和已声明的连接器名称。宿主读取 `credentialKey` 对应的字符串，以 `Authorization: Bearer <应用服务凭据>` 认证，每轮生成可撤销的本机代理租约；真实凭据不写入 Agent 配置。账号或设置版本改变后旧租约拒绝后续调用，下一轮读取新设置。旧账号已被服务端接收的操作不能撤回；排队消息绑定提交时的设置版本，换号后须重新发送。远端 Hub 任务不代读本机安全存储。
+
+当前 `credentialKey` 只映射 MCP 认证字段，不映射任意请求头或工具参数。模型 ID、供应商 Key 等额外配置不会自动随 MCP 调用发送；应用应通过其服务已实现的显式配置接口处理，不能把秘密塞进 `context` 或工具提示词。应用服务凭据与模型供应商 Key 用途不同，不应混用。

@@ -70,6 +70,7 @@
 
   function bindPlaceholder(node) {
     if (!node || !node.querySelector) return node;
+    global.SoduWorkQuotaNotice?.mount(node);
     const input = node.querySelector('.wc-input');
     const rail = node.querySelector('.wc-placeholder-rail');
     if (!input || !rail) return node;
@@ -397,7 +398,7 @@
         label: '能力', value: '基础对话', title: '能力在会话开始时确定', muted: true }) + '</div>';
     const next = replace(node, {
       className: 'nbox', inputId: 'nchatInput', rows: 1, placeholder: '接着说…',
-      beforeInput: '<div class="catt-tray" id="nchatAtts"></div>',
+      beforeInput: '<div class="catt-tray" id="nchatAtts"></div><p class="catt-understanding-hint" id="nchatMaterialHint" role="status" hidden></p>',
       afterInput: syntaxHint() + (global.WorkIntent ? WorkIntent.rail('nchat') : ''),
       tools: '<input type="file" id="nchatFile" multiple hidden>' + more + executionMode('data-chat-execution'),
       sendId: 'nchatSend', sendClass: 'nsend', sendTitle: '发送', context,

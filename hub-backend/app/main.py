@@ -12,7 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .api import admin, agents, ai_proxy, aidesk, approvals, attachments, capabilities, client_updates, clients, delivery, download, environments, evolution, identity, ingest, library, repomap, updates
+from .api import admin, agents, ai_proxy, aidesk, approvals, attachments, capabilities, client_updates, client_release_notes, clients, delivery, download, environments, evolution, identity, ingest, library, repomap, updates
 from .api import admin_cloud_runners, client_auth, cloud_environments, cloud_conversations, conversation_handoffs, deliveries, memory_records, session_memory
 from .api import account_profile, admin_mail, client_email_auth
 from .api import model_runtime as model_runtime_api
@@ -304,6 +304,7 @@ for _r in (account_profile.router, account_profile.admin_router, admin_mail.rout
            library.router, deliveries.router,
            plugins.router, plugins.run_router, plugin_publishers.router, plugin_client_catalog.router, plugin_client_runs.router, plugin_activity.router, plugin_permissions.router, plugin_permissions.admin_router, updates.router, download.router,
            client_updates.router, client_updates.admin_router, client_updates.deployment_router,
+           client_release_notes.router, client_release_notes.admin_router,
            ws.router, term.router, agents.router, runner_ws.router, usage.router, ai_proxy.router,
            trace.router, trace.admin_router, evolution.router, evolution.admin_router, task_mcp.router,
            operations.router, identity.router, reports.router,

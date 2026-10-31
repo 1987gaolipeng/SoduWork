@@ -1,12 +1,19 @@
 """Completion receipts notify actual participants, never implicit managers."""
 import os
+import atexit
+import sqlite3
+import shutil
+import tempfile
 import unittest
+import uuid
 from unittest.mock import AsyncMock, patch
 
 os.environ.setdefault("AUTH_SECRET", "isolated-notice-audience-secret")
 os.environ.setdefault("ADMIN_PASS", "isolated-notice-audience-admin")
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 
+from pathlib import Path
+from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from app import models, realtime
 from app.services import receipts, notify
@@ -15,7 +22,17 @@ from tests.sqlite_schema import create_fresh_sqlite_schema
 
 class NoticeAudienceRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        self.directory = tempfile.TemporaryDirectory(prefix="soduwork-notice-audience-test-")
+        self.addCleanup(self.directory.cleanup)
+        memory_name = "soduwork_notice_audience_" + uuid.uuid4().hex
+        self._schema_anchor = sqlite3.connect(
+            f"file:{memory_name}?mode=memory&cache=shared", uri=True,
+        )
+        self.addCleanup(self._schema_anchor.close)
+        with sqlite3.connect(_schema_template()) as source:
+            source.backup(self._schema_anchor)
+        database_url = f"sqlite+aiosqlite:///file:{memory_name}?mode=memory&cache=shared&uri=true"
+        self.engine = create_async_engine(database_url)
         self.addAsyncCleanup(self.engine.dispose)
         async with self.engine.begin() as connection:
             await create_fresh_sqlite_schema(connection, models.Base.metadata)

@@ -1,0 +1,25 @@
+.soduwork-quota-card {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 14px 16px;
+  color: var(--ink);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  font-size: max(var(--font-min-readable, 14.5px), 13px);
+  line-height: 1.55;
+}
+.soduwork-quota-card[hidden] { display: none; }
+.quota-card-copy b { font-weight: 600; }
+.quota-card-copy p { margin: 4px 0 0; color: var(--ink-3); }
+.quota-card-actions { display: flex; align-items: flex-start; gap: 16px; margin-top: 10px; }
+.quota-card-actions details { min-width: 0; flex: 1; }
+.quota-card-actions summary { width: fit-content; cursor: pointer; user-select: none; }
+.quota-card-actions details p { max-height: min(28vh, 180px); overflow-y: auto; margin: 8px 0 0; white-space: pre-line; overflow-wrap: anywhere; color: var(--ink-3); }
+.quota-card-actions button { flex-shrink: 0; padding: 4px 10px; font: inherit; color: inherit; background: var(--bg-0); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.quota-card-actions button:hover { background: var(--bg-2); }
+.quota-card-actions button:disabled { opacity: .6; cursor: wait; }
+.quota-card-actions :is(button, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.quota-card-feedback { margin: 8px 0 0; color: var(--ink-3); }
+.quota-card-feedback:empty { display: none; }

@@ -79,6 +79,28 @@ test('management editor offers one-time mode and a date-time input in the schedu
   assert.ok(f.timingCalls.some(item => item[0] === 'local' && item[2] === 'Asia/Shanghai'));
 });
 
+test('automation editor keeps the personal plugin chooser visible and persists the selection', async () => {
+  const f = fixture();
+  const checksum = 'a'.repeat(64);
+  f.c._schmFind = key => key === 'daily-report'
+    ? { key, version: '1.0.0', checksum, capabilities: { runtime: [] }, inputs: [] }
+    : null;
+  f.c._schmSnapshotState = () => ({
+    versionPolicy: 'pinned', personalVersion: '1.0.0', personalChecksum: checksum,
+    preserveSnapshot: false,
+  });
+  const html = f.c._schFormHtml({ personalPluginKey: 'daily-report', every: 'once',
+    runAt: future, timeZone: 'Asia/Shanghai', title: '日报', note: '整理日报' });
+  assert.doesNotMatch(html, /id="schMethodWrap" hidden/);
+  f.controls.schMethod.value = 'daily-report';
+  f.wire();
+  await f.save();
+  assert.equal(f.saves[0].body.personalPluginKey, 'daily-report');
+  assert.equal(f.saves[0].body.personalPluginVersionPolicy, 'pinned');
+  assert.equal(f.saves[0].body.personalPluginVersion, '1.0.0');
+  assert.equal(f.saves[0].body.personalPluginChecksum, checksum);
+});
+
 test('one-time save converts the chosen schedule-zone wall time and excludes readonly consumption', async () => {
   const f = fixture(); f.wire(); await f.save();
   assert.equal(f.saves.length, 1);

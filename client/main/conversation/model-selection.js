@@ -44,7 +44,10 @@ function create({ name = '', model, resolve, apply, persist = () => {}, changed 
       selecting = true;
       try {
         const resolved = await resolve(name);
-        if (!resolved || !resolved.ok || !resolved.model) return { ok: false, reason: '该模型当前不可用，请刷新模型列表后重试' };
+        if (!resolved || !resolved.ok || !resolved.model) return { ok: false,
+          reason: require('../../core/token-quota').detail(resolved)
+            ? '当前 AI 使用额度暂不可用，请查看额度详情' : '该模型当前不可用，请刷新模型列表后重试',
+          ...require('../../core/token-quota').fields(resolved) };
         await persist(name);
         selected = name; selectedModel = resolved.model; changed();
         return { ok: true, selection: this.view() };
@@ -55,7 +58,10 @@ function create({ name = '', model, resolve, apply, persist = () => {}, changed 
       if (!needsApply(name)) return;
       const applyingGeneration = generation();
       const resolved = await resolve(name);
-      if (!resolved || !resolved.ok || !resolved.model) throw new Error('本轮所选模型不可用，队列已暂停，请调整模型后重试');
+      if (!resolved || !resolved.ok || !resolved.model) throw Object.assign(
+        new Error(require('../../core/token-quota').detail(resolved)
+          ? '当前 AI 使用额度暂不可用，请查看额度详情' : '本轮所选模型不可用，队列已暂停，请调整模型后重试'),
+        require('../../core/token-quota').fields(resolved));
       try { await apply(resolved.model, name); }
       catch (_) { throw new Error('模型未能切换，队列已暂停，原会话与历史已保留'); }
       active = name; activeModel = resolved.model;

@@ -207,8 +207,10 @@
     return new Promise(resolve => {
       const dialog = document.createElement('dialog'); shareDialog = dialog;
       const epoch = getEpoch(); let settled = false, sending = false;
+      const selectedItems = (Array.isArray(items) && items.length ? items : item ? [item] : []).filter(Boolean);
       const unique = [...new Map(members.filter(member => member.id).map(member => [String(member.id), member])).values()];
       const options = unique.map(member => '<label class="library-share-member"><input type="checkbox" value="' + esc(member.id) + '"><span class="library-share-avatar" aria-hidden="true">' + esc(String(member.name || member.username || '?').trim().slice(0, 1).toUpperCase()) + '</span><span class="library-share-member-copy"><b data-user-content>' + esc(member.name || member.username) + '</b><small data-user-content>' + esc(member.username || '') + '</small></span></label>').join('');
+      const fileRows = selectedItems.map(row => '<li><span class="library-share-file-icon">' + icon('document') + '</span><span><b data-user-content>' + esc(row.displayName || (selectedItems.length === 1 && filename) || row.filename || row.title) + '</b><small>' + esc(row.displaySize || (selectedItems.length === 1 && size) || '') + '</small></span></li>').join('');
       dialog.className = 'library-share-dialog'; dialog.setAttribute('aria-labelledby', 'libraryShareTitle');
       dialog.innerHTML = '<form class="library-share-card" method="dialog"><header class="library-share-head"><div><b id="libraryShareTitle">' + esc(tx('分享资料')) + '</b><span>' + esc(tx(localCopy ? '直接发送文件通知，本机原件保留。是否存入资料库由对方决定。' : '可选择多位组织成员，他们会在通知中心收到文件。')) + '</span></div><button type="button" class="library-share-close" data-library-share-cancel aria-label="' + esc(tx('关闭')) + '">×</button></header>' +
         '<div class="library-share-file"><span class="library-share-file-icon">' + icon('document') + '</span><span><b data-user-content>' + esc(filename || item.filename || item.title) + '</b><small>' + esc(size || '') + '</small></span></div>' +

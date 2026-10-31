@@ -138,6 +138,7 @@ def issue_plugin_mcp_ticket(
     personal_mcp: list[str] | None = None,
     conversation_ref: str = "",
     plugin_version_ids: list[str] | None = None,
+    application_mcp: dict[str, list[str]] | None = None,
 ) -> tuple[str, int]:
     """Issue a short-lived MCP capability for one resolved conversation turn.
 
@@ -162,6 +163,7 @@ def issue_plugin_mcp_ticket(
                 str(value).strip()[:36] for value in (plugin_version_ids or [])
                 if str(value).strip()))[:3],
             "pmcp": personal,
+            **({"appmcp": application_mcp} if application_mcp else {}),
             "ref": str(conversation_ref or "").strip()[:120],
             **plugin_mcp_limits.ticket_claims(),
         },

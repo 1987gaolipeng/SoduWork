@@ -544,7 +544,11 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
      * on reload.
      */
     const owner = mainWindow;
+    _initialPaintReady = false;
+    _initialRevealPending = true;
     parkOverlayShape();
+    _overlayAwaitingShape = true;
+    let navigationStarted = false;
     mainWindow.webContents.on('did-start-loading', () => {
       if (isCurrent(owner)) {
         _navigationId++;
@@ -555,7 +559,10 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
          * be reset afterward.
          */
         startReadyWatchdog();
-        parkOverlayShape();
+        parkOverlayShape(navigationStarted);
+        _overlayAwaitingShape = true;
+        _initialRevealPending = true;
+        navigationStarted = true;
       }
     });
     loadRenderer();
@@ -647,6 +654,8 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
       _overlayInputIgnored = null;
       _overlayShapeEnabled = false;
       _overlayShapeReported = false;
+      _overlayShapeRevision = 0;
+      _overlayAwaitingShape = false;
     });
 
     /*
@@ -796,6 +805,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
     _rendererReady = true;
     revealInitialOverlay();
     resetRendererHealth();
+    revealInitialOverlay();
     if (_readyTimer) { clearTimeout(_readyTimer); _readyTimer = null; }
     console.log('[SAFETY] 渲染进程已就绪');
     /* Keep the overlay parked when no interactive geometry has been reported. */

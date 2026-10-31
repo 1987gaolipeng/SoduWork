@@ -155,6 +155,21 @@ class MultimodalProxyTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn(IMAGE, json.dumps(body), "history retains the original for later model switches")
                 observe.assert_awaited_once()
 
+    async def test_image_count_rejection_falls_back_once_when_provider_reports_a_limit(self):
+        body = payload('/responses')
+        body['input'][0]['content'].extend(
+            {'type': 'input_image', 'image_url': IMAGE + str(index)} for index in range(5))
+        observe = AsyncMock(side_effect=lambda images, _context: {
+            'ok': True, 'imageCount': len(images), 'observation': {'summary': 'all pages'}})
+        response = FakeResponse()
+        error = rejection(400, 'This model supports up to 4 images per request')
+        with patch.object(model_transport, 'open_response', side_effect=[error, response]) as send:
+            self.assertIs(await proxy.open_request(CONF, '/responses', body, observe), response)
+        self.assertEqual(send.call_count, 2)
+        converted = json.loads(send.call_args.args[2])['input'][0]['content']
+        self.assertTrue(all(item.get('type') == 'input_text' for item in converted[1:]))
+        self.assertEqual(observe.await_count, 2)
+
     async def test_auth_transient_and_invalid_images_are_not_downgraded(self):
         errors = [rejection(status) for status in (401,403,429,500,502,504)]
         errors += [rejection(400,"Invalid image format"), rejection(400,"Image too large"),
@@ -229,7 +244,7 @@ class MultimodalProxyTests(unittest.IsolatedAsyncioTestCase):
         import httpx
         from fastapi import FastAPI
         from app.api import ai_proxy
-        client = SimpleNamespace(id="isolated-client")
+        client = SimpleNamespace(id="isolated-client", user_ref="isolated-user")
         app = FastAPI()
         app.include_router(ai_proxy.router)
         app.dependency_overrides[ai_proxy._client_by_bearer] = lambda: client
@@ -238,6 +253,7 @@ class MultimodalProxyTests(unittest.IsolatedAsyncioTestCase):
         conf = {**CONF,"kind":"openai-compat","model":"arbitrary-alias"}
         with patch.object(ai_proxy.model_catalog,"usable",AsyncMock(return_value=[{"name":"arbitrary-alias"}])), \
              patch.object(ai_proxy.model_catalog,"resolve",AsyncMock(return_value=conf)), \
+             patch("app.services.client_access.assert_quota",AsyncMock()) as admission, \
              patch.object(ai_proxy.device_auth,"issue_proxy_ticket",return_value=("fixture-proxy",60)), \
              patch.object(ai_proxy.device_auth,"issue_mcp_ticket",return_value=("fixture-mcp",60)), \
              patch.object(ai_proxy.vision_router,"analyze",AsyncMock()) as observe:
@@ -246,6 +262,8 @@ class MultimodalProxyTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(config["input"],["text", "image"])
                 self.assertEqual(config["imageRouting"],"native")
                 self.assertIs(config["visionFallbackAvailable"], False)
+                admission.assert_awaited_once_with(None, "isolated-user",
+                    provider=conf.get("provider", ""), model="arbitrary-alias")
                 for route in ("/chat/completions","/responses"):
                     for streaming in (True,False):
                         body=payload(route)

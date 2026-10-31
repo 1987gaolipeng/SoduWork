@@ -7,6 +7,7 @@
     return Math.max(current, Math.min(grown, current <= 400 ? 400 : 2000));
   }
   function create(ctx) {
+  const uiText = value => global.SoduWorkI18n?.translateText?.(value) || value;
   const pluginBadges = global.ChatMessagePlugins?.create(ctx, () => { liveStreamShape = null; _render(); });
   const turnSummary = global.ChatTurnSummary?.create(ctx);
   const { _ctxText, _tokenText, _ctxHtml } = global.ChatContextMeter.create(ctx);
@@ -31,12 +32,28 @@
     const text = String(ctx._pending || '');
     if (!text) return false;
     const sentAt = Number(ctx._pendingSentAt || 0);
-    return (messages || []).some(message => {
-      if (!message || message.role !== 'user' || message.text !== text) return false;
-      // Matching text alone is ambiguous when a user sends the same prompt
-      // twice. Require the persisted timestamp for a new pending turn so an
-      // older identical message cannot consume its optimistic bubble/clock.
-      if (!(sentAt > 0)) return true;
+    const baseline = ctx._pendingBaseline || {};
+    const history = ctx._snap?.history || {};
+    const baselineTotal = baseline.historyTotal == null ? NaN : Number(baseline.historyTotal);
+    const baselineMessages = Number(baseline.messageCount);
+    const submissionId = String(baseline.submissionId || '').trim();
+    const normalized = value => String(value || '').trim();
+    const isNewMessage = index => {
+      const rawIndex = Array.isArray(history.messageIndices) ? Number(history.messageIndices[index]) : NaN;
+      if (Number.isFinite(rawIndex) && Number.isFinite(baselineTotal) && baselineTotal >= 0) {
+        return rawIndex >= baselineTotal;
+      }
+      return Number.isFinite(baselineMessages) && index >= baselineMessages;
+    };
+    return (messages || []).some((message, index) => {
+      if (!message || message.role !== 'user') return false;
+      if (submissionId && String(message.submissionId || '').trim() === submissionId) return true;
+      if (message.text !== text && normalized(message.text) !== normalized(text)) return false;
+      // A matching row from the send baseline is the authoritative echo even
+      // when the adapter omits or rounds its timestamp. Older identical rows
+      // still need a timestamp at or after the pending send time.
+      if (isNewMessage(index)) return true;
+      if (!(sentAt > 0)) return false;
       const messageAt = Number(message.sentAt || 0);
       return messageAt >= sentAt;
     });
@@ -433,7 +450,7 @@
         '<section data-chat-node="work-card:' + ctx.esc(card.id) + '" data-work-card-slot="' + ctx.esc(card.id) + '"></section>');
     };
     if (ctx._pending && _pendingIsConfirmed(allMessages)) {
-      ctx._pending = ''; ctx._pendingPlugins = [];
+      ctx._pending = ''; ctx._pendingPlugins = []; ctx._pendingBaseline = null;
     }
     const allTools = global.ChatTools?.displayTools?.(ctx._snap) || ctx._snap.tools || [];
     ctx._liveTextKey = '';
@@ -488,9 +505,10 @@
     const paused = Boolean(execution.limitRequest);
     const budgetStopped = Boolean(execution.stopped && !paused);
     // Length truncation resumes within the same send; suppress premature error banners while execution is still active.
-    const outputIncomplete = st === 'incomplete' && !execution.running;
-    const failed = st === 'unreachable' || st === 'no-output' || outputIncomplete ||
-      budgetStopped || quality.phase === 'blocked';
+    const quotaBlocked = Boolean(global.SoduWorkQuota?.detail(ctx._snap));
+    const outputIncomplete = st === 'incomplete' && !execution.running && !quotaBlocked;
+    const failed = !quotaBlocked && (st === 'unreachable' || st === 'no-output' || outputIncomplete ||
+      budgetStopped || quality.phase === 'blocked');
     const finalReplies = _finalReplyIndexes(allMessages, allTools, !ctx._pending && !execution.running && !qualityBusy && !paused && !failed &&
       !ctx._snap.pendingUi && (!st || st === 'idle'));
     // Before the new user message is echoed, the previous completed answer
@@ -726,7 +744,7 @@
     /* Remove the optimistic copy when the main process echoes the message. */
     if (ctx._pending && _pendingIsConfirmed(allMessages)) {
       ctx._pending = '';
-      ctx._pendingPlugins = [];
+      ctx._pendingPlugins = []; ctx._pendingBaseline = null;
     }
     if (!ctx._pending && ctx._pendingAttachmentNames.length) {
       ctx._pendingAttachmentNames = [];
@@ -753,12 +771,27 @@
      * Display both unreachable errors and runs producing no output, including invalid or
      * unauthorized models rejected upstream without retries.
      */
+    const pluginAuthorizationBlocked = Boolean(ctx._pluginAuthorization &&
+      ['missing', 'readOnlyConflicts', 'unsupported'].some(key =>
+        Array.isArray(ctx._pluginAuthorization[key]) && ctx._pluginAuthorization[key].length));
+    const missingCapabilityLabels = { browser: '浏览网页', office: 'Office 文档', computer: '操作电脑' };
+    const locale = global.SoduWorkI18n?.getLocale?.() || 'zh-CN';
+    const joiner = locale === 'zh-CN' ? '、' : ', ';
+    const colon = locale === 'zh-CN' ? '：' : ': ';
+    const period = locale === 'zh-CN' ? '。' : '. ';
+    const pluginStatus = ctx._pluginAuthorization?.missing?.length
+      ? uiText('当前会话没有授权') + colon + ctx._pluginAuthorization.missing
+        .map(id => uiText(missingCapabilityLabels[id] || id)).join(joiner) + period +
+        uiText('请新建会话并开启对应能力后再使用这个插件') : '';
     parts.push('<div data-chat-node="runtime-error" class="nbad' +
-      (st === 'unreachable' || st === 'no-output' || outputIncomplete || budgetStopped ? ' show' : '') + '">' +
-      '<span class="nbad-copy">' + ctx.esc(budgetStopped ? execution.reason : (ctx._snap.statusText || '')) + '</span>' +
+      (!quotaBlocked && (st === 'unreachable' || st === 'no-output' || outputIncomplete || budgetStopped) ? ' show' : '') + '">' +
+      '<span class="nbad-copy">' + ctx.esc(budgetStopped ? execution.reason : (pluginStatus || ctx._snap.statusText || '')) + '</span>' +
       (execution.modelRecovery && execution.modelRecovery.available ?
-        '<button type="button" data-model-retry="' + ctx.esc(execution.modelRecovery.id) + '">恢复这一轮</button>' :
-        ctx._retryDraft ? '<button type="button" data-plugin-retry>恢复这一轮</button>' : '') + '</div>');
+        '<button type="button" data-model-retry="' + ctx.esc(execution.modelRecovery.id) + '">' + uiText('恢复这一轮') + '</button>' :
+        ctx._retryDraft && ctx._pluginAuthorization?.missing?.length
+          ? '<button type="button" data-plugin-new-session>' + uiText('新建会话并继续') + '</button>'
+          : ctx._retryDraft && !pluginAuthorizationBlocked
+            ? '<button type="button" data-plugin-retry>' + uiText('恢复这一轮') + '</button>' : '') + '</div>');
     if (!busy && failed) {
       const selected = ctx._retryDraft?.plugins?.length ? ctx._retryDraft.plugins :
         allMessages[latestUser]?.plugins?.length ? allMessages[latestUser].plugins : ctx._snap.activePlugins || [];

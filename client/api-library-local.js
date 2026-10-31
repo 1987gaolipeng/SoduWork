@@ -19,9 +19,36 @@
   var HISTORY = 'server-history-', HISTORY_ROOT = HISTORY + 'root';
   var BINARY_LIMIT = 64 * 1024 * 1024;
   function failure(code, message) { var e = new Error(message); e.code = code; return e; }
+  function nativeFailure(error) {
+    var raw = String(error && (error.message || error.reason) || error || '本机资料库操作失败');
+    // Electron prefixes renderer-visible rejections with the IPC method name
+    // and a second `Error:`. Strip that transport detail before it reaches the
+    // library panel, while retaining the useful native error text.
+    var wrapped = raw.match(/^Error invoking remote method '[^']+':\s*Error:\s*([\s\S]*)$/);
+    var message = (wrapped ? wrapped[1] : raw).replace(/^Error:\s*/, '').trim();
+    var code = error && error.code;
+    if (!code && message.indexOf('本机资料索引损坏') >= 0) code = 'LOCAL_LIBRARY_INDEX_CORRUPT';
+    return failure(code || 'LOCAL_LIBRARY_ERROR', message || '本机资料库操作失败');
+  }
   function isLocal(id) { return String(id || '').startsWith('local-'); }
   function isHistory(id) { return String(id || '').startsWith(HISTORY); }
   function isLocalStorage(storage) { return !storage || storage === 'local'; }
+  function storedWorkRoot() {
+    try {
+      const direct = typeof global.workRoot === 'function' ? global.workRoot() : global.localStorage?.getItem('soduwork_work_root');
+      return String(direct || '').trim();
+    } catch (_) { return ''; }
+  }
+  async function currentWorkRoot() {
+    let root = storedWorkRoot();
+    if (!root && global.soduWorkAPI?.getDefaultWorkRoot) {
+      try {
+        root = String(await global.soduWorkAPI.getDefaultWorkRoot() || '').trim();
+        if (root) { try { global.localStorage?.setItem('soduwork_work_root', root); } catch (_) {} }
+      } catch (_) {}
+    }
+    return root;
+  }
   function requireRemote(storage) {
     if (storage !== 'nfs' && storage !== 'minio') throw failure('LIBRARY_REMOTE_REQUIRED', '请选择已连接的远程存储');
     return storage;
@@ -64,16 +91,22 @@
       if (!bridge || typeof bridge.context !== 'function' || typeof bridge.call !== 'function') {
         throw failure('LOCAL_LIBRARY_UNAVAILABLE', '当前客户端不支持本机资料库，请更新客户端后重试');
       }
-      var context = await bridge.context();
+      var root = await currentWorkRoot();
+      var context = await bridge.context({ workRoot: root });
       assertScope(requestScope);
       if (!context?.owner || context.ok === false) throw failure(context?.code || 'LOCAL_LIBRARY_UNAVAILABLE', context?.message || context?.reason || '请先登录后使用本机资料库');
-      return { owner: context.owner, bridge: bridge };
+      return { owner: context.owner, workRoot: context.workRoot || root, bridge: bridge };
     }
     async function invoke(action, payload, requestScope, capturedContext) {
       if (requestScope == null) requestScope = scope();
       var context = capturedContext || await localContext(requestScope);
       assertScope(requestScope);
-      var result = await context.bridge.call(action, Object.assign({}, payload, { owner: context.owner }));
+      var result;
+      try {
+        result = await context.bridge.call(action, Object.assign({}, payload, { owner: context.owner, workRoot: context.workRoot || '' }));
+      } catch (error) {
+        throw nativeFailure(error);
+      }
       assertScope(requestScope);
       if (action === 'exportFile' && result?.cancelled === true) return result;
       if (result?.ok === false) throw failure(result.code || 'LOCAL_LIBRARY_ERROR', result.message || result.reason || '本机资料库操作失败');
@@ -195,6 +228,22 @@
       var method = action + 'LibraryItem';
       api[method] = async function (id) { return isLocal(id) ? invoke(action + 'Item', { id: id }) : remote[method](id); };
     });
+    api.deleteLibraryItems = async function (ids) {
+      var values = [...new Set((Array.isArray(ids) ? ids : []).map(function (id) { return String(id || '').trim(); }).filter(Boolean))];
+      var localIds = values.filter(isLocal), remoteIds = values.filter(function (id) { return !isLocal(id); });
+      var results = { ok: true, succeeded: [], failed: [] };
+      if (localIds.length) {
+        var localResult = await invoke('deleteItems', { ids: localIds });
+        results.succeeded.push(...(localResult.succeeded || []));
+        results.failed.push(...(localResult.failed || []));
+      }
+      if (remoteIds.length) {
+        var remoteResult = await remote.deleteLibraryItems(remoteIds);
+        results.succeeded.push(...(remoteResult.succeeded || []));
+        results.failed.push(...(remoteResult.failed || []));
+      }
+      return results;
+    };
     api.emptyLibraryTrash = async function (storage, options) {
       if (options?.storageOrigin === 'server-history') { requireRemote(storage); return remote.emptyLibraryTrash('local'); }
       return isLocalStorage(storage) ? invoke('emptyTrash', {}) : remote.emptyLibraryTrash(requireRemote(storage));
@@ -306,6 +355,44 @@
         recorded = false;
       }
       return Object.assign({}, result, { copied: true, localItemId: id, copyRecordSaved: recorded });
+    };
+    api.copyLocalLibraryItemsToRemote = async function (ids, target) {
+      var destination = typeof target === 'string' ? { storage: target } : target || {};
+      var values = [...new Set((Array.isArray(ids) ? ids : []).map(function (id) { return String(id || '').trim(); }).filter(Boolean))];
+      if (values.length > 100) throw failure('LIBRARY_BATCH_LIMIT', '一次最多批量处理 100 项资料，请减少选择后重试');
+      var results = { ok: true, succeeded: [], failed: [] };
+      if (!values.length) return results;
+      var storage = requireRemote(destination.storage);
+      var requestScope = scope();
+      var status = await api.getLibraryStorageStatus();
+      assertScope(requestScope);
+      var isCurrent = typeof destination.isCurrent === 'function' ? destination.isCurrent : null;
+      if (isCurrent && !isCurrent()) throw failure('STALE_TASK_SCOPE', '远程存储状态已变化，请重新选择后重试');
+      var reported = status && (status.storage?.remote || status.remote) || {};
+      var remoteReady = reported.available === true && String(reported.backend || '') === storage;
+      var unavailableCode = reported.code || 'LIBRARY_REMOTE_UNAVAILABLE';
+      var unavailableMessage = reported.message || '远程存储状态已变化，请重新选择后重试';
+      for (var i = 0; i < values.length; i += 1) {
+        assertScope(requestScope);
+        if (isCurrent && !isCurrent()) throw failure('STALE_TASK_SCOPE', '远程存储状态已变化，请重新选择后重试');
+        var id = values[i];
+        if (!isLocal(id)) {
+          results.failed.push({ id: id, code: 'LOCAL_LIBRARY_ITEM_REQUIRED', message: '请选择本机资料' });
+          continue;
+        }
+        if (!remoteReady) {
+          results.failed.push({ id: id, code: unavailableCode, message: unavailableMessage });
+          continue;
+        }
+        try {
+          var copied = await api.copyLocalLibraryItemToRemote(id, Object.assign({}, destination, { storage: storage, reuseExisting: true }));
+          results.succeeded.push({ id: id, result: copied });
+        } catch (error) {
+          if (error?.code === 'STALE_TASK_SCOPE') throw error;
+          results.failed.push({ id: id, code: error?.code || 'LIBRARY_REMOTE_COPY_FAILED', message: error?.message || String(error) });
+        }
+      }
+      return results;
     };
   }
   global.SoduWorkLocalLibraryAPI = { install: install };

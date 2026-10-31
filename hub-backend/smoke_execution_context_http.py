@@ -87,7 +87,13 @@ async def seed() -> None:
             id=CLIENT, name='执行上下文冒烟 SoduWork',
             secret_hash=device_auth.hash_secret(SECRET))
         device_auth.activate(client, user)
-        session.add_all([user, client])
+        session.add_all([
+            user, client,
+            models.ModelProvider(id='context-fixture', base_url='https://fixture.invalid/v1',
+                                 api_key='fixture-key', enabled=True),
+            models.ModelDef(id='context-fixture:smoke-model', provider_id='context-fixture',
+                            name='smoke-model', enabled=True),
+        ])
         await session.commit()
         TOKEN = device_auth.issue_session(client)[0]
 
@@ -204,6 +210,20 @@ async def main() -> None:
                         'assigneeType': 'agent', 'model': model,
                         'executionContext': {'strategy': 'direct'}, **extra})
                 return response, task_id
+
+            async with SessionLocal() as session:
+                selected = await session.get(models.ModelDef, 'context-fixture:smoke-model')
+                selected.enabled = False
+                await session.commit()
+            count = len(provider.calls)
+            response, _ = await dispatch_case('pi', '')
+            check('HTTP missing default catalog model refuses dispatch without fallback',
+                  response.status_code == 409 and len(provider.calls) == count
+                  and response.json().get('detail', {}).get('phase') == 'configuration', response.text)
+            async with SessionLocal() as session:
+                selected = await session.get(models.ModelDef, 'context-fixture:smoke-model')
+                selected.enabled = True
+                await session.commit()
 
             async def catalog(_session, _client, wanted=''):
                 if wanted == 'removed-model':

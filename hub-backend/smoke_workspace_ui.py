@@ -4,6 +4,7 @@ and file size.
 """
 import json
 from pathlib import Path
+import json
 
 
 ROOT = Path(__file__).resolve().parents[1]

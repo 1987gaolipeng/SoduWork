@@ -20,6 +20,14 @@ function fixture() {
   return { window, ctx, create, invalidations: () => invalidations };
 }
 
+test('analysis result card recognizes a list-prefixed protocol heading', () => {
+  const f = fixture();
+  const html = f.create().html('- ### 【验收分析结果】\n\n建议结果：通过', 'analysis-1');
+  assert.match(html, /nacceptance-result is-analysis/);
+  assert.doesNotMatch(html, /- ### 【验收分析结果】/);
+  assert.match(html, /建议结果：通过/);
+});
+
 test('supplemental analysis preserves the draft and uses a text node without submitting work', () => {
   const f = fixture();
   let sends = 0, listener, bindings = 0, inputEvent, focused = false;

@@ -18,10 +18,10 @@ function section(start, end) {
 
 test('a rejected history open leaves the loading skeleton and returns a retryable failure', async () => {
   const body = section('  async function _ensure(chatId)', '  async function _ensureOnce');
-  const failures = [];
+  const failures = [], failure = new Error('IPC channel closed');
   const ctx = {
     _ref: '', _openingTask: null, _openingEpoch: -1, _viewEpoch: 4, _busy: false,
-    _ensureOnce: async () => { throw new Error('IPC channel closed'); },
+    _ensureOnce: async () => { throw failure; },
     _fail: (...args) => failures.push(args),
   };
   const vm = require('node:vm');
@@ -30,7 +30,7 @@ test('a rejected history open leaves the loading skeleton and returns a retryabl
   vm.runInContext(body, ctx);
 
   assert.equal(await ctx._ensure('history-a'), false);
-  assert.deepEqual(failures, [['打不开对话', 'IPC channel closed']]);
+  assert.deepEqual(failures, [['打不开对话', 'IPC channel closed', null, failure]]);
   assert.equal(ctx._openingTask, null);
   assert.equal(ctx._busy, false);
   assert.equal(ctx._openingEpoch, -1);

@@ -64,7 +64,7 @@
     const composer = WorkComposer.replace(old, {
       className: 'cp-box', inputId: 'cpInput', rows: 3,
       placeholder: '告诉 SoduWork 你想完成什么…',
-      beforeInput: '<div class="cp-atts catt-tray" id="cpAtts"></div>',
+      beforeInput: '<div class="cp-atts catt-tray" id="cpAtts"></div><p class="catt-understanding-hint" id="cpMaterialHint" role="status" hidden></p>',
       afterInput: WorkComposer.syntaxHint() + intentSurface + '<div class="wc-execution-notice" role="status" hidden><span></span><button type="button" data-execution-configure>配置云端电脑</button></div>',
       tools: '<input type="file" id="cpFile" multiple hidden>' + intentTools,
       sendId: 'cpGo', sendClass: 'cp-go', sendTitle: '开始',
@@ -140,6 +140,7 @@
             '<div class="cp-box">' +
               '<textarea id="cpInput" rows="3" placeholder="告诉 SoduWork 你想完成什么…"></textarea>' +
               '<div class="cp-atts" id="cpAtts"></div>' +
+              '<p class="catt-understanding-hint" id="cpMaterialHint" role="status" hidden></p>' +
               '<div class="cp-bar">' +
                 '<div class="cp-tools">' +
                   '<input type="file" id="cpFile" multiple hidden>' +
@@ -170,6 +171,7 @@
                 '<div class="cp-caplist" id="cpCapList"><span class="cp-capwait">正在检查这台电脑…</span></div>' +
                 '<span class="cp-capnote" id="cpCapNote"></span></div>' +
             '</div>' +
+            '<p class="ai-disclaimer"><span data-i18n="内容由 AI 生成，请核实重要信息">内容由 AI 生成，请核实重要信息</span></p>' +
           '</div>' +
         '</div>' +
         /* NativeChat mounts the conversation content; see panels-chat.js. */
@@ -239,6 +241,7 @@
     if (global.ConversationAttachments) ctx._attachments = ConversationAttachments.create({
       host: p.querySelector('.cp-box'), input, fileInput: p.querySelector('#cpFile'),
       button: null, tray: p.querySelector('#cpAtts'),
+      materialHint: true, hint: p.querySelector('#cpMaterialHint'),
       say: (message) => { if (typeof petSay === 'function') petSay(message); },
       onChange: () => { ctx._pluginMention?.refresh?.(); ctx._rememberComposeDraft(); },
     });

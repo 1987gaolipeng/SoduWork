@@ -391,6 +391,8 @@ async def _resolve_user(session: AsyncSession, row: IdentityProvider, claims: di
                     org_id=row.default_org_id, role_id=row.default_role_id, is_active=True)
         session.add(user)
         await session.flush()
+        from . import quota_plans
+        await quota_plans.register_trial(session, user.id)
         link = IdentityLink(provider_id=row.id, subject=subject, user_id=user.id)
         session.add(link)
     now = datetime.now(timezone.utc)

@@ -89,31 +89,33 @@ function create(deps) {
     if (stat.size > MAX_BYTES) throw Error('文件超过 256 MB，请选择较小的文件');
     const textFile = /\.(?:md|markdown|txt|csv|json|ya?ml|xml|js|jsx|ts|tsx|css|scss|py|java|go|rs|sql|sh|ps1)$/i.test(source);
     const preview = PREVIEW.test(source) && (!textFile || stat.size <= 2 * 1024 * 1024);
-    let target = source;
-    if (!preview) {
-      const dir = path.join(app.getPath('userData'), 'file-inputs',
-        createHash('sha256').update(scope).digest('hex'), row.id);
-      const { assertNoLinks } = require('./plugin-resources');
-      assertNoLinks(app.getPath('userData'), dir);
-      await fs.mkdir(dir, { recursive: true });
-      assertNoLinks(app.getPath('userData'), dir);
-      target = path.join(dir, path.basename(source));
-      assertNoLinks(dir, target);
-      let bytes = 0;
-      await pipeline(createReadStream(source), new Transform({
-        transform(chunk, _encoding, next) {
-          bytes += chunk.length;
-          next(bytes > MAX_BYTES ? Error('文件超过 256 MB，请选择较小的文件') : null, chunk);
-        },
-      }), createWriteStream(target, { mode: 0o600 }));
-      const copied = await fs.stat(target);
-      if (copied.size > MAX_BYTES || copied.size !== stat.size) throw Error('文件正在变化，请重新打开');
-    }
+    // Always make a private snapshot before opening the conversation. Previewable
+    // files used to keep their original path and directory as the session cwd;
+    // a model or tool could then write back to the user's file. The conversation
+    // reads this copy, while generated outputs stay in the session workspace.
+    const dir = path.join(app.getPath('userData'), 'file-inputs',
+      createHash('sha256').update(scope).digest('hex'), row.id);
+    const { assertNoLinks } = require('./plugin-resources');
+    assertNoLinks(app.getPath('userData'), dir);
+    await fs.mkdir(dir, { recursive: true });
+    assertNoLinks(app.getPath('userData'), dir);
+    const target = path.join(dir, path.basename(source));
+    assertNoLinks(dir, target);
+    let bytes = 0;
+    await pipeline(createReadStream(source), new Transform({
+      transform(chunk, _encoding, next) {
+        bytes += chunk.length;
+        next(bytes > MAX_BYTES ? Error('文件超过 256 MB，请选择较小的文件') : null, chunk);
+      },
+    }), createWriteStream(target, { mode: 0o600 }));
+    const copied = await fs.stat(target);
+    if (copied.size > MAX_BYTES || copied.size !== stat.size) throw Error('文件正在变化，请重新打开');
     if (await owner() !== scope) throw Error('登录账号已变化，请重新打开文件');
     const file = { name: path.basename(source), path: target, size: stat.size,
       lastModified: stat.mtimeMs, kind: /\.pdf$/i.test(source) ? 'pdf' : 'file',
       nativeReference: true };
-    row.prepared = { id: row.id, file, preview, cwd: preview ? path.dirname(source) : '',
+    row.prepared = { id: row.id, file, preview, isolated: true,
+      workspaceLabel: '隔离工作区', cwd: path.dirname(target),
       title: path.basename(source) };
     return row.prepared;
   }

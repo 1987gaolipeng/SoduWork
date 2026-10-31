@@ -9,7 +9,7 @@
   function currentLocale() {
     return (global.SoduWorkI18n && global.SoduWorkI18n.getLocale)
       ? String(global.SoduWorkI18n.getLocale() || '')
-      : 'zh-CN';
+      : 'en-US';
   }
 
   /*

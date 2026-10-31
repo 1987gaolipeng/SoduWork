@@ -22,10 +22,10 @@ function fixture(t) {
     dialog: { showSaveDialog: async () => ({ canceled: false, filePath: path.join(root, 'export.txt') }) } };
   const install = () => require('../main/library-local.cjs').install(deps);
   install();
-  return { root, deps, handlers, event, opened, revealed, install, setOwner: value => { owner = value; },
-    call: (action, payload = {}) => handlers.get('library-local-call')(event, action, { owner, ...payload }),
-    context: () => handlers.get('library-local-context')(event),
-    account: (value = OWNER_A) => path.join(root, 'library', 'accounts', value) };
+  return { root, workRoot, deps, handlers, event, opened, revealed, install, setOwner: value => { owner = value; },
+    call: (action, payload = {}) => handlers.get('library-local-call')(event, action, { owner, workRoot, ...payload }),
+    context: () => handlers.get('library-local-context')(event, { workRoot }),
+    account: (value = OWNER_A) => path.join(workRoot, 'SoduWorkLibrary', 'accounts', value) };
 }
 const create = (f, body = {}) => f.call('createItem', { kind: 'document', title: body.filename ? body.filename.replace(/\.[^.]+$/, '') : '说明', content: '原始内容', format: 'txt', ...body });
 const data = value => Buffer.from(value).toString('base64');
@@ -137,7 +137,7 @@ test('favoriting a legacy colliding folder does not reinterpret the operation as
 
 test('client files, nested folders, filters and edits survive store restart without a Hub', async t => {
   const f = fixture(t);
-  assert.deepEqual(await f.context(), { owner: OWNER_A });
+  assert.deepEqual(await f.context(), { owner: OWNER_A, workRoot: f.workRoot });
   assert.equal((await f.call('status')).available, true);
   const parent = (await f.call('createFolder', { name: '项目' })).folder;
   const child = (await f.call('createFolder', { name: '资料', parentId: parent.id })).folder;
@@ -159,6 +159,22 @@ test('client files, nested folders, filters and edits survive store restart with
   assert.equal(Buffer.from((await f.call('readBinary', { id: item.id })).data, 'base64').toString(), '最新中文');
   await f.call('updateItem', { id: item.id, folderId: null });
   await f.call('deleteFolder', { id: child.id }); await f.call('deleteFolder', { id: parent.id });
+});
+
+test('the first work-directory access migrates the legacy userData library without using it afterward', async t => {
+  const f = fixture(t);
+  const store = require('../main/library-local-store.cjs').create(f.deps.app, OWNER_A, () => {});
+  const { execute } = require('../main/library-local-actions.cjs');
+  await store.run(index => execute(store, index, 'upload', { name: 'legacy.txt', dataBase64: data('legacy bytes') }));
+  const legacy = path.join(f.root, 'library', 'accounts', OWNER_A);
+  fs.mkdirSync(path.dirname(legacy), { recursive: true });
+  fs.renameSync(path.join(f.root, 'SoduWorkLibrary', 'accounts', OWNER_A), legacy);
+  fs.rmSync(path.join(f.root, 'SoduWorkLibrary'), { recursive: true, force: true });
+  assert.equal(fs.existsSync(path.join(legacy, 'index.json')), true);
+  const listed = await f.call('list', { scope: 'all' });
+  assert.equal(listed.items[0].filename, 'legacy.txt');
+  assert.equal(fs.existsSync(path.join(f.account(), 'index.json')), true);
+  assert.equal(Buffer.from((await f.call('readBinary', { id: listed.items[0].id })).data, 'base64').toString(), 'legacy bytes');
 });
 
 test('trash retains bytes, restores to root after folder deletion, and purges only deleted files', async t => {
@@ -278,6 +294,16 @@ test('corrupt index fails closed, and directory links cannot redirect local libr
   fs.symlinkSync(outside, f.account(OWNER_B), 'junction');
   await assert.rejects(create(f), /链接|目录/);
   assert.deepEqual(fs.readdirSync(outside), []);
+});
+
+test('UTF-8 BOM does not invalidate an otherwise valid local index', async t => {
+  const f = fixture(t), row = (await create(f)).item;
+  const indexPath = path.join(f.account(), 'index.json');
+  const content = fs.readFileSync(indexPath, 'utf8');
+  fs.writeFileSync(indexPath, '\uFEFF' + content, 'utf8');
+  const listed = await f.call('list');
+  assert.equal(listed.items[0].id, row.id);
+  assert.equal((await f.call('readContent', { id: row.id })).content, '原始内容');
 });
 
 test('large valid base64 imports include 8MiB and the 64MiB boundary without regex stack overflow', async t => {

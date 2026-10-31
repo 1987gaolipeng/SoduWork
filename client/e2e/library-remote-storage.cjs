@@ -31,15 +31,16 @@ if (typeof electron === 'string') {
   app.whenReady().then(async () => {
     win = new BrowserWindow({ show: false, width: 1280, height: 840, webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
     await win.loadFile(path.join(__dirname, 'fixtures/library.html'));
-    await js(`window.calls=[];window.notices=[];window.fixtureStatus={storage:{local:{available:true},remote:{backend:'nfs',configured:true,available:true,connected:true},nfs:{configured:true,available:true},minio:{configured:false,available:false}}};
+    await js(`window.calls=[];window.notices=[];window.batchFixture=false;window.batchCopyFail=false;window.fixtureStatus={storage:{local:{available:true},remote:{backend:'nfs',configured:true,available:true,connected:true},nfs:{configured:true,available:true},minio:{configured:false,available:false}}};
       window.petSay=m=>notices.push(m);window.waitList=false;window.releaseList=null;window.waitUpload=false;window.releaseUpload=null;
       window.SoduWorkAPI={taskStorageKey:()=> 'storage-fixture',getLibraryStorageStatus:async()=>fixtureStatus,
-        listLibrary:async filters=>{calls.push({op:'list',...filters});const result={items:filters.folderId?[]:[{id:filters.storage==='local'?'local-fixture':'file-'+filters.storage,title:'fixture.txt',filename:'fixture.txt',kind:'document',backend:filters.storage,size:7}],folders:filters.folderId?[]:[{id:'folder-'+filters.storage,name:'目录',backend:filters.storage}],folder:filters.folderId?{id:filters.folderId,name:'目录',backend:filters.storage}:null,trashCount:1};if(waitList){waitList=false;await new Promise(r=>releaseList=r);}return result;},
+        listLibrary:async filters=>{calls.push({op:'list',...filters});const batchItems=window.batchFixture&&filters.storage==='local'?[{id:'local-batch-a',title:'batch-a.txt',filename:'batch-a.txt',kind:'document',backend:'local',size:3},{id:'local-batch-b',title:'batch-b.txt',filename:'batch-b.txt',kind:'document',backend:'local',size:4}]:[{id:filters.storage==='local'?'local-fixture':'file-'+filters.storage,title:'fixture.txt',filename:'fixture.txt',kind:'document',backend:filters.storage,size:7}];const result={items:filters.folderId?[]:batchItems,folders:filters.folderId?[]:[{id:'folder-'+filters.storage,name:'目录',backend:filters.storage}],folder:filters.folderId?{id:filters.folderId,name:'目录',backend:filters.storage}:null,trashCount:1};if(waitList){waitList=false;await new Promise(r=>releaseList=r);}return result;},
         uploadLibraryFile:async(file,folderId,storage)=>{calls.push({op:'upload',name:file.name,folderId,storage});if(waitUpload)await new Promise(r=>releaseUpload=r);return{ok:true};},
         createLibraryFolder:async(name,parentId,storage)=>{calls.push({op:'folder',name,parentId,storage});return{folder:{id:'new-'+storage,backend:storage}};},
         createLibraryItem:async body=>{calls.push({op:'document',...body});return{ok:true};},
         updateLibraryItem:async(id,body)=>{calls.push({op:'update',id,...body});return{ok:true};},
         copyLocalLibraryItemToRemote:async(id,storage)=>{calls.push({op:'copy',id,storage});return{ok:true};},
+        copyLocalLibraryItemsToRemote:async(ids,target)=>{calls.push({op:'batch-copy',ids:[...ids],target:typeof target==='string'?target:target.storage});return window.batchCopyFail?{ok:true,succeeded:[],failed:ids.map(id=>({id,code:'UPSTREAM_DOWN',message:'远端不可用'}))}:{ok:true,succeeded:ids.map(id=>({id,result:{ok:true}})),failed:[]};},
         updateLibraryFolder:async(id,body)=>{calls.push({op:'folder-update',id,...body});return{ok:true};},
         emptyLibraryTrash:async storage=>{calls.push({op:'empty',storage});return{ok:true};}
       };void 0;`);
@@ -67,6 +68,24 @@ if (typeof electron === 'string') {
     await until('!document.querySelector("[data-library-menu-toggle=create]").disabled');
     await js('calls=[];void 0;');
     report.cases.push('Confirmed client-local copy submits once to NFS, never PATCHes storage, and preserves the local item');
+    await js('batchFixture=true;void 0;');
+    await status({ storage: { local: available('local'), remote: available('nfs'), nfs: available('nfs') } });
+    await until('document.querySelector("[data-library-select=local-batch-a]")&&document.querySelector("[data-library-select=local-batch-b]")');
+    await click('[data-library-select=local-batch-a]'); await click('[data-library-select=local-batch-b]');
+    await until('document.querySelector("[data-library-batch-migrate]")&&!document.querySelector("[data-library-batch-migrate]").hidden');
+    await click('[data-library-batch-migrate]'); await until('document.querySelector(".library-confirm-dialog")');
+    await click('.library-confirm-submit'); await until('calls.some(c=>c.op==="batch-copy")');
+    assert.deepEqual(await js('calls.find(c=>c.op==="batch-copy")'), { op: 'batch-copy', ids: ['local-batch-a', 'local-batch-b'], target: 'nfs' });
+    await until('!document.querySelector("[data-library-menu-toggle=create]").disabled');
+    assert.equal(await js('document.querySelector("[data-library-batch-migrate]").hidden'), true);
+    report.cases.push('Selected local materials are copied in one ordered batch to NFS and successful selections clear');
+    await js('batchCopyFail=true;calls=[];void 0;');
+    await click('[data-library-select=local-batch-a]'); await until('!document.querySelector("[data-library-batch-migrate]").hidden');
+    await click('[data-library-batch-migrate]'); await until('document.querySelector(".library-confirm-dialog")');
+    await click('.library-confirm-submit'); await until('calls.some(c=>c.op==="batch-copy")');
+    assert.equal(await js('document.querySelector("[data-library-select=local-batch-a]").checked'), true);
+    await js('batchCopyFail=false;void 0;');
+    report.cases.push('A partial batch failure keeps the failed local selection for retry');
     await click('[data-library-storage=remote]'); await until('document.querySelector("[data-library-file-preview=file-nfs]")');
     await upload();
     assert.equal(await js('calls.find(c=>c.op==="upload").storage'), 'nfs');

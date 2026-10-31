@@ -27,6 +27,7 @@ test('real Pi history distinguishes omitted model from default and task turns re
   const oldKey = process.env.SODUWORK_PROXY_KEY; process.env.SODUWORK_PROXY_KEY = 'fixture';
   let modelPath, session;
   const model = name => ({id:name || 'pi-default',label:name || 'Pi default',contextWindow:32000,input:['text'],
+    quotaProvider:name === 'saved-model' ? 'provider-saved' : 'provider-default',
     key:'fixture',baseUrl:'http://127.0.0.1:' + server.address().port + '/v1',proxyExpiresAt:Date.now()+60000});
   config.prepare = async (_, _identity, name) => {
     selections.push(name); const next = model(name); modelPath = config.writeModels(agentDir, next);
@@ -61,12 +62,17 @@ test('real Pi history distinguishes omitted model from default and task turns re
   assert.deepEqual(requests,['pi-default','saved-model']);
   assert.deepEqual(refreshed,['pi-default','saved-model'], 'ticket refresh belongs to the executing turn, not the future composer choice');
   assert.equal(session.snapshot().modelSelection.name,'saved-model');
+  assert.deepEqual(session.snapshot().usageReceipts.map(row => [row.model,row.provider]),
+    [['saved-model','soduwork'],['pi-default','provider-default'],['saved-model','provider-saved']],
+    'new SDK calls retain resolved providers while historical usage remains synthetic');
   await session.close(); session=null;
   for (const choice of [{modelName:''}, {}]) {
     opened=await sessions.open({...options,...choice});
     assert.equal(opened.ok,true,opened.reason); session=opened.session;
     assert.equal(session.snapshot().modelSelection.name,'');
     assert.equal(session.snapshot().modelSelection.activeModel.id,'pi-default');
+    assert.deepEqual(session.snapshot().usageReceipts.map(row => row.provider),
+      ['soduwork','provider-default','provider-saved'], 'archived provider attribution survives reopening');
     await session.close();session=null;
   }
   assert.deepEqual(selections,['saved-model','','']);

@@ -89,6 +89,9 @@ function _set(patch) {
   return _publicState();
 }
 function _trust() {
+  const profile = require('./distribution.cjs').current();
+  // 云端发行版仅信任自己的签名，不回退到内网或另一云环境的公钥。
+  if (profile.distributionId !== 'internal') return profile.updateTrust;
   const candidates = [
     path.join(runtime.app.getAppPath(), 'update-trust.json'),
     path.join(__dirname, '..', 'update-trust.json'),
@@ -820,7 +823,7 @@ async function confirmPending() {
 }
 function install({
   app, ipcMain, dialog, BrowserWindow, identityOf, getWindow,
-  shell = null,
+  shell = null, releaseNotesOf = null,
   localWorkloads = () => ({ safe: true, blockers: [] }),
   setLocalDrain = () => {},
   stopLocalWorkload = async () => { throw Error('当前版本无法直接停止会话'); },
@@ -834,7 +837,7 @@ function install({
   linuxExec = null,
 }) {
   runtime = {
-    app, dialog, BrowserWindow, identityOf, getWindow, shell,
+    app, dialog, BrowserWindow, identityOf, getWindow, shell, releaseNotesOf,
     localWorkloads, setLocalDrain, stopLocalWorkload, beforeExit, wait, launchHelper, schedule, drainPollMs, drainTimeoutMs,
     linuxInstall, linuxExec,
     busy: false,

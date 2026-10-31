@@ -847,7 +847,8 @@ class Runner:
                 task.add_done_callback(self._admission_workers.discard)
             self._admission_wake.clear()
             try:
-                await asyncio.wait_for(self._admission_wake.wait(), timeout=0.75)
+                async with asyncio.timeout(0.75):
+                    await self._admission_wake.wait()
             except asyncio.TimeoutError:
                 pass
 
@@ -891,7 +892,8 @@ class Runner:
         if ws is None:
             raise ConnectionError("尚未连接")
         async with self._send_lock:
-            await asyncio.wait_for(ws.send(payload), timeout=30)
+            async with asyncio.timeout(30):
+                await ws.send(payload)
 
     async def _send(self, msg: dict) -> None:
         try:
@@ -925,7 +927,6 @@ class Runner:
             **admission,
             "skills": self._skill_inventory,
             "skillCatalog": _skill_report(self._skill_catalog),
-            "capabilities": _capabilities(self.work_root, self.capability_grants),
             "tags": self.tags, "caps": [ws_frames.CAP_BIN1, "handoff1", "executionSelection1"],
         }
         message, prefetched = await _negotiate_hello(
@@ -989,6 +990,11 @@ class Runner:
     async def _report_beat(self) -> None:
         await self._refresh_agents()
         await self._refresh_skills()
+        # Capability discovery launches bounded local version probes. Keep those probes
+        # out of both the hello deadline and the event loop; the first post-welcome
+        # heartbeat supplies the authoritative report while the Hub fails closed.
+        capabilities = await asyncio.to_thread(
+            _capabilities, self.work_root, self.capability_grants)
         admission = self._admission_report()
         async with self._snap_lock:
             sessions, advances = await asyncio.to_thread(self._session_snapshots)
@@ -996,7 +1002,7 @@ class Runner:
                               "agents": self._agent_inventory,
                               "skills": self._skill_inventory,
                               "skillCatalog": _skill_report(self._skill_catalog),
-                              "capabilities": _capabilities(self.work_root, self.capability_grants),
+                              "capabilities": capabilities,
                               "workRoot": self.work_root, "tags": self.tags,
                               "sessions": sessions})
             self._apply_marks(advances)

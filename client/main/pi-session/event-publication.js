@@ -32,12 +32,15 @@ function create(publish, { capture = context => context, schedule = queueMicrota
 // Only event metadata crosses IPC. Raw touched blocks/tools may be large and
 // can contain provider-private fields; transcript data belongs in snapshot.
 function fields(event, full, snapshot) {
+  const safeAuthorization = full ? pluginAuthorization(event?.pluginAuthorization) : undefined;
   return {
     kind: event?.kind,
     reason: event?.reason,
     failureKind: full && event?.failureKind || '',
     retrySafe: Boolean(full && event?.retrySafe),
     submissionId: full && event?.submissionId || '',
+    ...(full ? require('../../core/token-quota').fields(event) : {}),
+    ...(safeAuthorization ? { pluginAuthorization: safeAuthorization } : {}),
     taskId: String(event?.taskId || snapshot?.execution?.turnQueue?.activeTaskId || ''),
   };
 }

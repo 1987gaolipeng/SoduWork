@@ -30,3 +30,6 @@
 .cap-actions>div{display:grid;gap:3px}.cap-actions b{color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), 12px)}.cap-actions span{color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 12px)}.cap-actions>.btn{margin-left:auto;flex:0 0 auto}
 @media(max-width:900px){.cap-grid{grid-template-columns:1fr}.cap-fields{grid-template-columns:1fr}}
 @media(max-width:680px){.cap-summary{grid-template-columns:1fr}.cap-head p,.cap-actions>div{display:none}.cap-grid{padding:12px}.cap-summary{margin:12px 12px 0}.cap-actions{justify-content:flex-end}}
+
+.cap-login-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.cap-login-grid{grid-template-columns:minmax(0,1fr)}
+@media(max-width:680px){.cap-login-summary{grid-template-columns:1fr}}

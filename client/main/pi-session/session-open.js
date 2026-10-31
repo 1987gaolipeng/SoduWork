@@ -144,7 +144,8 @@ async function open(opts) {
   // must not make the whole conversation unopenable after that model is
   // removed from the personal model catalog; retry once with the current default and clear
   // the stale selection for future resumes.
-  if (!prep.ok && modelName && !explicitModel) {
+  const canRecoverStaleModel = Boolean(opts.resumePath || opts.resumedConversation);
+  if (!prep.ok && modelName && (!explicitModel || canRecoverStaleModel)) {
     const fallback = await modelConfig.prepare(app, identity, '');
     if (fallback.ok) {
       modelName = '';
@@ -502,7 +503,8 @@ async function open(opts) {
       } catch (_) { /* the request helper can still use the compatibility bridge */ }
       const next = await modelConfig.fetchSelection(identity, name, 8000, global.fetch, true);
       if (!next || !next.ok || !next.model) {
-        return { ok: false, reason: (next && next.reason) || '模型对话凭据刷新失败，请重试' };
+        return { ok: false, reason: (next && next.reason) || '模型对话凭据刷新失败，请重试',
+          ...require('../../core/token-quota').fields(next) };
       }
       if (next.model.modality === 'image') return { ok: true };
       runtime.registerProvider('soduwork', require('../conversation/model-selection').piProvider(next.model));

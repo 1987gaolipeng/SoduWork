@@ -156,7 +156,7 @@ if (typeof electron === 'string') {
       : net.fetch(request.url, { bypassCustomProtocolHandlers: true }));
     fileProtocolInstalled = true;
     await win.loadFile(path.join(client, 'desk.html'));
-    await js('window.notices=[];window.petSay=message=>notices.push(message);void 0;');
+    await js(`localStorage.setItem('soduwork_work_root',${JSON.stringify(libraryWorkRoot)});window.notices=[];window.petSay=message=>notices.push(message);void 0;`);
     for (const name of ['api-library-local.js', 'core/api-work-plugins.js', 'api.js']) await js(fs.readFileSync(path.join(client, name), 'utf8') + '\nvoid 0;');
     assert.equal((await call('registerClient')).ok, true);
     assert.equal(await js('SoduWorkAPI.hubBase()'), origin);
@@ -192,7 +192,8 @@ if (typeof electron === 'string') {
     const item = created.item;
     assert.ok(item.id.startsWith('local-')); assert.equal(item.backend, 'local');
     assert.equal(requests.length, beforeUpload, 'Client-local folder/upload must not contact Hub');
-    const storageRoot = path.join(profile, 'library', 'accounts', accounts.a);
+    const storageRoot = path.join(libraryWorkRoot, 'SoduWorkLibrary', 'accounts', accounts.a);
+    assert.equal(fs.existsSync(path.join(profile, 'library')), false, 'Client library must not fall back into userData');
     const payloadPaths = filesBelow(storageRoot).filter(file => sha(fs.readFileSync(file)) === sha(bytes));
     assert.equal(payloadPaths.length, 1, 'Original binary bytes must be on the client disk');
     assert.equal(sha(await readBytes(item.id)), sha(bytes));

@@ -3,17 +3,18 @@ const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
 const shape = require('../main/overlay-shape');
 const main = fs.readFileSync(path.join(__dirname, '../main/desktop-overlay.cjs'), 'utf8');
-const apply = main.slice(main.indexOf('function applyOverlayShape('), main.indexOf('function parkOverlayShape()'));
+const applyAndPark = main.slice(main.indexOf('function applyOverlayShape('), main.indexOf('function setOverlayIdleInput()'));
 const sync = main.slice(main.indexOf('function _syncOverlayInputNow('), main.indexOf('function _startOverlayInputGuard('));
 
 test('native region dedup keeps show/reload recovery and failed-apply retries working', () => {
   const calls = [];
   let fail = false;
   const scope = { _overlayShape:shape, _overlayShapeEnabled:false, _appliedOverlayShape:[], NATIVE_SHAPE:true,
+    _overlayShapeRevision:0, _overlayAwaitingShape:false, _overlayShapeReported:false, _lastOverlayRects:[],
     _overlayContentSize:()=>({width:1920,height:1080}), _startOverlayInputGuard(){}, _syncOverlayInputNow(){},
     _setOverlayInputIgnored(){},console:{error(){}},
     mainWindow:{isDestroyed:()=>false,setShape(rects){calls.push(rects);if(fail)throw Error('native failure');}} };
-  vm.createContext(scope);vm.runInContext(apply,scope);
+  vm.createContext(scope);vm.runInContext(applyAndPark,scope);
   const rects = [{x:1800,y:200,width:42,height:205}];
   assert.equal(scope.applyOverlayShape(rects),true);
   for(let i=0;i<100;i++) scope.applyOverlayShape(rects);
@@ -24,6 +25,10 @@ test('native region dedup keeps show/reload recovery and failed-apply retries wo
   fail=true;assert.equal(scope.applyOverlayShape([],false),false);
   fail=false;assert.equal(scope.applyOverlayShape(rects),true);assert.equal(calls.length,6);
   assert.equal(scope._overlayShapeEnabled,true);
+  scope._overlayAwaitingShape = true;
+  scope.parkOverlayShape(true);assert.equal(calls.length,7);
+  assert.equal(scope._overlayShapeRevision,1,'invalidating park rejects acknowledgements from the old revision');
+  assert.equal(scope._overlayAwaitingShape,false);
 });
 
 /*
@@ -33,13 +38,14 @@ test('dynamic passthrough accepts regions without setShape and parks on reload',
   const syncs = [];
   const scope = { _overlayShape:shape, _overlayShapeEnabled:false, _appliedOverlayShape:[],
     _overlayInputRects:[], _lastOverlayRects:[], NATIVE_SHAPE:false,
+    _overlayShapeRevision:0, _overlayAwaitingShape:false, _overlayShapeReported:false,
     _overlayContentSize:()=>({width:1920,height:1080}),
     _startOverlayInputGuard(){ scope.guardStarted=true; },
     _syncOverlayInputNow(){ syncs.push(scope._overlayInputRects.slice()); },
     _setOverlayInputIgnored(){}, console:{error(){}},
     /* Omit setShape deliberately; the dynamic path must not call it. */
     mainWindow:{ isDestroyed:()=>false } };
-  vm.createContext(scope); vm.runInContext(apply, scope);
+  vm.createContext(scope); vm.runInContext(applyAndPark, scope);
   const pet = { x:1800, y:900, width:72, height:132 };
   const dock = { x:1880, y:300, width:36, height:500 };
   assert.equal(scope.applyOverlayShape([pet, dock]), true, 'mac 没有 setShape 也必须接受组件区域');
@@ -49,7 +55,7 @@ test('dynamic passthrough accepts regions without setShape and parks on reload',
   assert.deepEqual(scope._appliedOverlayShape, [], 'mac 没有原生裁剪，applied 必须保持为空');
   assert.equal(scope.guardStarted, true, '动态模式必须启动输入守卫');
   assert.deepEqual(syncs, [[pet, dock]]);
-  assert.equal(scope.applyOverlayShape([], false), true, '停放不能因为没有 setShape 而失败');
+  scope.parkOverlayShape();
   assert.deepEqual(scope._overlayInputRects, []);
   assert.deepEqual(syncs[syncs.length-1], []);
 });
@@ -77,6 +83,11 @@ test('dynamic input guard accepts the cursor inside any component and ignores el
   cursor.x = 960; cursor.y = 540;
   scope._syncOverlayInputNow();
   assert.deepEqual(scope.decisions, [true, false, false, true], '离开全部组件必须恢复穿透');
+  scope._overlayAwaitingShape = true;
+  cursor.x = 1805; cursor.y = 905;
+  scope._syncOverlayInputNow();
+  assert.deepEqual(scope.decisions, [true, false, false, true, true],
+    '等待当前 revision 确认时，即使光标在组件内也必须穿透');
 });
 
 test('native platforms keep accepting full input for multi-component shapes', () => {

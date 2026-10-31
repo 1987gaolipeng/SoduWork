@@ -112,9 +112,14 @@ mobile/
 # CI dependency downloads (never publication evidence)
 /.ci-downloads/
 /.cache/pip/
+/.cache/electron/
+/.cache/python/
 
 # Internal working records: operational logs and release history notes.
 # Excluded from the public distribution boundary; kept locally for the team.
 /PROJECT_CONTEXT.md
 /docs/qa/
 /docs/context/
+
+# Some CJK input methods can create a literal '%SystemDrive%' directory under client/ at runtime; never commit it.
+/client/%SystemDrive%/

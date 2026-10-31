@@ -50,8 +50,10 @@ async function prepare(options, turn, cancelled = () => false, turnContext = {})
     };
   } catch (error) {
     cleanup();
-    return { ok: false, failureKind: 'plugin-grant', retrySafe: true,
+    return { ok: false, failureKind: 'plugin-grant',
+      retrySafe: error && error.pluginAuthorization?.retrySafe !== false,
       reason: '插件没能在发送前完成授权：' + redact(error && error.message || error),
+      ...(error && error.pluginAuthorization ? { pluginAuthorization: error.pluginAuthorization } : {}),
       cleanup, redact };
   }
 }

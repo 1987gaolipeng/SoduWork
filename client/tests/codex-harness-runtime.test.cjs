@@ -154,6 +154,8 @@ test('Codex Harness queues follow-ups FIFO, keeps transcript order and supports 
     assert.equal(dispatched.payload.cfg.llm.imageRouting, 'native');
     assert.match(dispatched.payload.task.note, /不要把每条消息默认当成任务/);
     assert.match(dispatched.payload.task.note, /【用户原话】\s*第一轮/);
+    assert.match(dispatched.payload.task.note, /<soduwork-conversation-input-understanding>/);
+    assert.match(dispatched.payload.task.note, /证据\.png/);
     assert.equal(dispatched.payload.ctx.skills[0].description,
       'Design polished interfaces for real users.');
     releaseFirst({ ok: true, data: {

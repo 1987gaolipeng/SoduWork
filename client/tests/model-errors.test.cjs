@@ -48,6 +48,13 @@ test('permanent gateway errors remain non-retryable and both proxy envelope gene
   assert.equal(errors.describe('429: insufficient_quota').retryable, false);
 });
 
+test('image rejection errors explain the safe recovery path without offering a blind retry', () => {
+  const value = { error: { code: 'image_input_rejected', message: 'Image input rejected.', status: 400 } };
+  const info = errors.describe(value);
+  assert.equal(info.retryable, false);
+  assert.equal(errors.forDisplay(value), '当前模型不接受图片输入，请切换支持图片的模型或启用视觉适配（HTTP 400）');
+});
+
 test('public stream snapshots hide gateway bodies but retain interrupted state and completed work', () => {
   const acc = stream.create(), raw = '504 ' + secretBody;
   acc.push({ type: 'agent_start' });

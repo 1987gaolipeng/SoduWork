@@ -11,12 +11,15 @@ function fixture(t, taskFiles = [], preparationError = '') {
   const app = new EventEmitter(); app.getPath = () => directory;
   const handlers = new Map(), submitted = [], stopped = [], prepared = [];
   const handle = { ref: 'qa-ref', sessionId: 'qa-chat', cwd,
+    on: () => () => {},
     snapshot: () => ({ messages: [] }), status: () => 'idle', inFlight: () => false, close() {},
     submit(text, files, options) {
       submitted.push({ text, files, options });
       return { accepted: true, completion: Promise.resolve({ ok: true }) };
     } };
-  const bridge = { get: ref => ref === handle.ref ? handle : null, list: () => [handle], closeAll() {} };
+  let runtimeOpens = 0;
+  const bridge = { get: ref => ref === handle.ref ? handle : null, list: () => [handle], closeAll() {},
+    open() { runtimeOpens++; return { ok: true, session: handle }; } };
   const taskInput = { async prepare(...args) {
     prepared.push(args);
     if (preparationError) throw typeof preparationError === 'string' ? Error(preparationError) : preparationError;
@@ -31,9 +34,20 @@ function fixture(t, taskFiles = [], preparationError = '') {
   vm.runInThisContext('(function(require,module,exports,__filename,__dirname){\n' +
     fs.readFileSync(file, 'utf8') + '\n})', { filename: file })(
     name => mocks[name] || nativeRequire(name), module, module.exports, file, path.dirname(file));
-  const identity = { hub: 'http://isolated.invalid', clientId: 'qa-device' };
-  module.exports.install({ app, ipcMain: { handle: (name, fn) => handlers.set(name, fn), on() {} },
+  const now = Math.floor(Date.now() / 1000);
+  const identity = { hub: 'http://isolated.invalid', clientId: 'qa-device', session:
+    Buffer.from(JSON.stringify({ typ: 'device', uid: 'qa-account', cid: 'qa-device', iat: now, exp: now + 1800 }))
+      .toString('base64url') + '.' + '0'.repeat(64) };
+  t.mock.method(require('../main/conversation/requirement-context'), 'cachedIdentity', () => identity);
+  t.mock.method(global, 'fetch', async url => {
+    if (String(url) === identity.hub + '/api/v1/skills') return Response.json({ skills: [], enabled: [] });
+    if (String(url) === identity.hub + '/api/v1/memories/organization-context')
+      return Response.json({ ok: true, prompt: '' });
+    throw Error('Unexpected fixture network request: ' + String(url));
+  });
+  const installed = module.exports.install({ app, ipcMain: { handle: (name, fn) => handlers.set(name, fn), on() {} },
     BrowserWindow: { getAllWindows: () => [], fromWebContents: () => null }, identityOf: async () => identity });
+  const ready = installed.open({ adapterId: 'pi', cwd, capabilities: [] });
   t.after(async () => {
     app.emit('before-quit'); await new Promise(resolve => setImmediate(resolve));
     assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()));
@@ -41,8 +55,14 @@ function fixture(t, taskFiles = [], preparationError = '') {
     fs.rmSync(directory, { recursive: true, force: true });
   });
   return { cwd, prepared, submitted, stopped, handle,
-    send: (files, execution = {}) => handlers.get('pi-session-send')({}, handle.ref, '本轮用户指令', files,
-      { taskId: 'task', submissionId: 'fixture-turn', taskExecution: execution }) };
+    send: async (files, execution = {}) => {
+      const opened = await ready;
+      assert.equal(opened.ok, true, opened.reason);
+      assert.equal(opened.ref, handle.ref);
+      assert.equal(runtimeOpens, 1, 'fixture setup registers the handle through production open exactly once');
+      return handlers.get('pi-session-send')({}, handle.ref, '本轮用户指令', files,
+        { taskId: 'task', submissionId: 'fixture-turn', taskExecution: execution });
+    } };
 }
 const file = (name, text) => ({ name, data: Buffer.from(text) });
 

@@ -288,7 +288,7 @@ test('a plain text file that merely mentions Esafenet is not treated as encrypte
   assert.equal(picker.names()[0], '说明.md');
 });
 
-test('the library tracks the validated in-memory copy only after hydration, and never for refused rows', async () => {
+test('conversation hydration keeps validated attachments conversation-scoped, and never auto-saves them', async () => {
   const tracked = [];
   const api = loadComponent({
     trackFile(file, options) {
@@ -315,7 +315,7 @@ test('the library tracks the validated in-memory copy only after hydration, and 
   assert.equal(warnings.length, 1);
 });
 
-test('attachment hydration keeps the original conversation when the active source changes', async () => {
+test('attachment hydration keeps the original conversation without auto-saving', async () => {
   const tracked = [];
   const api = loadComponent({
     trackFile(file, options) { tracked.push({ file, options }); return null; },
@@ -327,8 +327,5 @@ test('attachment hydration keeps the original conversation when the active sourc
   source.sessionId = 'second-session';
   source.conversationTitle = 'Second conversation';
   await tick();
-  assert.equal(tracked.length, 1);
-  assert.notEqual(tracked[0].file, file, 'Upload the validated memory copy');
-  assert.equal(tracked[0].options.librarySource.sessionId, 'first-session');
-  assert.equal(tracked[0].options.librarySource.conversationTitle, 'First conversation');
+  assert.equal(tracked.length, 0);
 });

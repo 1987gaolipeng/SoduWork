@@ -12,7 +12,7 @@
       // Models occasionally add a short preface or Markdown heading before the
       // protocol marker. Keep the whole reply in the result card instead of
       // falling back to plain Markdown with no decision controls.
-      const marker = value.match(/(^|\n)[ \t]*(?:#{1,6}[ \t]*)?【(验收分析结果|验收退回卡|验收确认卡)】[ \t]*/);
+      const marker = value.match(/(^|\n)[ \t]*(?:[-*+][ \t]+|\d+[.)][ \t]+|>[ \t]*)?(?:#{1,6}[ \t]*)?【(验收分析结果|验收退回卡|验收确认卡)】[ \t]*/);
       if (!marker) return '';
       const kind = marker[2];
       const analysis = kind === '验收分析结果';
@@ -160,13 +160,22 @@
         ctx._snap?.execution?.cloud === true || ctx._snap?.execution?.mode === 'cloud';
       const acceptanceConversation = ctx._sessionOptions?.acceptanceSession === true ||
         ctx._sessionOptions?.acceptanceExecutionSession === true;
+      const activeTaskId = String(ctx._sessionOptions?.taskRef || ctx._activeCollabTaskId ||
+        ctx._collaborationTaskId || '').trim();
+      const messages = Array.isArray(ctx._snap?.messages) ? ctx._snap.messages : [];
+      const latestUser = messages.findLastIndex?.(message => message?.role === 'user') ??
+        messages.reduce((last, message, index) => message?.role === 'user' ? index : last, -1);
+      const analysisAfterLatestUser = latestUser >= 0 && activeTaskId && activeTaskId === String(entry.taskId || '').trim() &&
+        messages.slice(latestUser + 1).some(message => message?.role === 'assistant' &&
+          (message.blocks || []).some(block => block?.kind === 'text' &&
+            /【验收分析结果】/.test(String(block.text || ''))));
       /*
        * task.updated may arrive before taskTrace after acceptance elsewhere. reviewedAt is
        * authoritative completion evidence; stale approval snapshots must not restore a
        * pending-review card.
        */
       const taskReviewed = Boolean(entry.task?.reviewedAt || entry.task?.reviewed_at);
-      return cloudConversation || acceptanceConversation || taskReviewed ? [] : (entry.trace.approvals || []).filter(a =>
+      return cloudConversation || acceptanceConversation || taskReviewed || analysisAfterLatestUser ? [] : (entry.trace.approvals || []).filter(a =>
         a.status === 'pending' && !a.myDecision && !acceptanceHandoffs.has(acceptanceKey(entry.taskId, a.id)));
     }
 

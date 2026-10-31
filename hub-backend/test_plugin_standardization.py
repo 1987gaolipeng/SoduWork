@@ -360,6 +360,96 @@ class InstalledLifecycleTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await plugin_mcp_gateway._installed_names(self.session, client, claims)
 
+    async def test_market_app_uses_native_connection_without_company_registry(self):
+        from app.api import plugin_client_catalog as api
+        from fastapi import HTTPException
+        version = await self.publish(mcpServers=["business-tools"], ui={"contributions": [{
+            "id": "main", "title": "Business", "slot": "workspace.navigation",
+            "source": {"type": "external", "url": "https://app.example/home",
+                       "bridge": {"version": 1, "capabilities": ["mcp.connect"]}}}]})
+        self.session.add(am.PluginCatalogPolicy(plugin_id=version.plugin_id,
+                         authentication="on_install", installation="available"))
+        await self.session.commit()
+        client = await self.session.get(models.Client, "reader-device")
+        catalog = await plugin_catalog.client_catalog(self.session, "company", user_id="reader")
+        self.assertEqual(catalog["items"][0]["dependencyReadiness"]["requiredMcp"], [])
+        await api.set_client_plugin_installation(version.plugin_id,
+            {"enabled": True, "expectedVersionId": version.id}, client, self.session)
+        binding = {"pluginId": version.plugin_id, "versionId": version.id,
+                   "contributionId": "main", "origin": "https://app.example",
+                   "server": "business-tools"}
+        body = {"pluginIds": [version.plugin_id], "resourceProtocol": 1,
+                "applicationConnection": binding}
+        result = await api.client_plugin_conversation_grant(body, client, self.session)
+        self.assertIsNone(result["mcpGrant"])
+        self.assertEqual(result["items"][0]["versionId"], version.id)
+        self.assertTrue(result["items"][0]["resourceBundle"]["resources"])
+        catalog = await plugin_catalog.client_catalog(self.session, "company", user_id="reader")
+        self.assertEqual(catalog["items"][0]["conversationVersionId"], version.id)
+        self.assertTrue(catalog["items"][0]["conversationUse"]["available"])
+        for change in ({"origin": "https://other.example"}, {"server": "other"},
+                       {"versionId": "not-installed"}, {"contributionId": "other"}):
+            with self.subTest(change=change), self.assertRaises(HTTPException):
+                await api.client_plugin_conversation_grant(
+                    {**body, "applicationConnection": {**binding, **change}}, client, self.session)
+        for invalid in ([], "invalid", {**binding, "token": "must-not-be-sent"}):
+            with self.subTest(binding_type=type(invalid).__name__), self.assertRaises(HTTPException):
+                await api.client_plugin_conversation_grant(
+                    {**body, "applicationConnection": invalid}, client, self.session)
+        with self.assertRaises(HTTPException):
+            await api.client_plugin_conversation_grant(
+                {"pluginIds": [version.plugin_id], "resourceProtocol": 1}, client, self.session)
+        await plugin_installations.uninstall(self.session, "reader", version.plugin_id)
+        with self.assertRaises(HTTPException):
+            await api.client_plugin_conversation_grant(body, client, self.session)
+
+    async def test_mixed_app_ticket_preserves_hub_scope_and_version_revocation(self):
+        from app.api import plugin_client_catalog as api
+        from app.auth import verify_claims
+        from fastapi import HTTPException
+        version = await self.publish(mcpServers=["business-tools", "soduwork-media"], ui={"contributions": [{
+            "id": "main", "title": "Business", "slot": "workspace.navigation",
+            "source": {"type": "external", "url": "https://app.example/home",
+                       "bridge": {"version": 1, "capabilities": ["mcp.connect"]}}}]})
+        await self.install(version)
+        client = await self.session.get(models.Client, "reader-device")
+        client.auth_state = "active"
+        await self.session.commit()
+        binding = {"pluginId": version.plugin_id, "versionId": version.id,
+                   "contributionId": "main", "origin": "https://app.example", "server": "business-tools"}
+        body = {"pluginIds": [version.plugin_id], "resourceProtocol": 1, "applicationConnection": binding}
+        result = await api.client_plugin_conversation_grant(body, client, self.session)
+        self.assertEqual(result["mcpGrant"]["servers"], ["soduwork-media"])
+        claims = verify_claims(result["mcpGrant"]["ticket"], token_type="plugin-mcp")
+        self.assertEqual(claims["appmcp"], {version.id: ["business-tools"]})
+        servers = await plugin_mcp_gateway.authorized_servers(self.session, client, claims)
+        self.assertEqual(set(servers), {"soduwork-media"})
+        await plugin_service.approve_version(self.session, version, False, "Reviewer")
+        with self.assertRaises(ValueError):
+            await plugin_mcp_gateway.authorized_servers(self.session, client, claims)
+        with self.assertRaises(HTTPException):
+            await api.client_plugin_conversation_grant(body, client, self.session)
+
+    async def test_app_ticket_exclusion_is_scoped_to_one_installed_version(self):
+        version = await self.publish(mcpServers=["business-tools", "company-tools"])
+        await self.install(version)
+        client = await self.session.get(models.Client, "reader-device")
+        claims = {"pvids": [version.id], "appmcp": {version.id: ["business-tools"]}}
+        self.assertEqual(await plugin_mcp_gateway._installed_names(self.session, client, claims),
+                         ["company-tools"])
+        with patch.object(plugin_mcp_gateway.mcp_servers, "runtime_for_dispatch",
+                          AsyncMock(return_value=(None, {"servers": {}}))) as runtime:
+            await plugin_mcp_gateway.authorized_servers(self.session, client, claims)
+            self.assertEqual(runtime.await_args.args[1], ["company-tools"])
+        with self.assertRaises(ValueError):
+            await plugin_mcp_gateway._installed_names(
+                self.session, client, {"pvids": [version.id], "appmcp": {version.id: ["undeclared"]}})
+        peer = await self.publish(key="other-business", mcpServers=["business-tools"])
+        await self.install(peer)
+        shared = {"pvids": [version.id, peer.id], "appmcp": {version.id: ["business-tools"]}}
+        self.assertEqual(await plugin_mcp_gateway._installed_names(self.session, client, shared),
+                         ["business-tools", "company-tools"])
+
     async def test_audience_removal_and_package_tampering_fail_closed(self):
         version = await self.publish()
         await self.install(version)

@@ -132,6 +132,32 @@ class OpenCodeRuntimeConfigTests(unittest.TestCase):
         self.assert_config(env)
         self.assertNotIn("agent", json.loads(self.environment["OPENCODE_CONFIG_CONTENT"]))
 
+    def test_harness_identity_is_private_idempotent_and_keeps_executor_contract(self):
+        from copy import deepcopy
+        config = {
+            "model": "company/private-route",
+            "provider": {"company": {"options": {"apiKey": "{env:SODUWORK_LLM_KEY}"}}},
+            "permission": {"edit": "deny", "webfetch": "ask"},
+            "plugin": ["file:///fixture/policy.mjs"],
+            "agent": {"build": {"temperature": 0.2}, "review": {"prompt": "Review only."}},
+        }
+        original = deepcopy(config)
+        env = {**self.environment, "OPENCODE_CONFIG_CONTENT": json.dumps(config)}
+        with patch.object(local_base, "_data_root", return_value=str(self.root / "runner")):
+            harness2_runtime.prepare_executor_config(env)
+            harness2_runtime.prepare_executor_config(env)
+        result = json.loads(env["OPENCODE_CONFIG_CONTENT"])
+        identity = result["agent"]["build"].pop("prompt")
+        self.assertEqual(result, original)
+        self.assertIn("Google Harness²", identity)
+        self.assertIn("not a foundation-model identity", identity)
+        self.assertIn("internal model", identity)
+        self.assertIn("OpenCode", identity)
+        self.assertNotIn("private-route", identity)
+        self.assertNotIn("apiKey", identity)
+        self.assert_config(env)
+        self.assertNotIn("agent", json.loads(self.environment["OPENCODE_CONFIG_CONTENT"]))
+
     def test_source_bridge_redacts_opencode_invalid_config_diagnostic(self):
         diagnostic = "ConfigJsonError: EndOfFileExpected PRIVATE-FIXTURE apiKey=fixture-secret"
         peer = "import sys; print(" + repr(diagnostic) + ",file=sys.stderr)"

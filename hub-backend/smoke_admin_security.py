@@ -122,7 +122,17 @@ def audit_contract() -> None:
                     and "session.add(AuditLog(" in writer
                     and "actor_id=actor.id" in writer
                     and "action=action" in writer and "target_id=row.id" in writer)
-        if "audit.log(" in source or cloud_audit:
+        quota_audit = False
+        if route.endpoint.__module__ == "app.api.quotas":
+            from app.api import quotas
+            writer = inspect.getsource(quotas.record)
+            audit_at = source.find("\n    record(session, user,")
+            commit_at = source.rfind("await session.commit()")
+            quota_audit = (0 <= audit_at < commit_at
+                           and "session.add(AuditLog(" in writer
+                           and "actor_id=actor.id" in writer
+                           and 'detail={"before": before, "after": after}' in writer)
+        if "audit.log(" in source or cloud_audit or quota_audit:
             continue
         for method in methods:
             key = (method, route.path)

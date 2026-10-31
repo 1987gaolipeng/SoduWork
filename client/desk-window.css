@@ -298,3 +298,6 @@ html[data-desk-panel="chatbar"][data-composer-theme="dark"] .nbox .wc-send:not(:
 html[data-desk-panel="chatbar"][data-composer-theme="dark"] .nbox .wc-send:disabled{background:#2d3340;color:#6a7180;box-shadow:inset 0 0 0 1px #3a4150}
 /* Constrain sidebar slash menus to viewport height. */
 html[data-desk-panel="chatbar"] .nplugin-menu{max-height:min(330px,calc(100vh - 200px))}
+
+/* Mirror the shared handle, including its arrow, shape and shadow, at the right edge. */
+html[data-desk-panel="chatbar"] #chatbarPinRight{left:auto;right:0;transform:translateY(-50%) scaleX(-1)}

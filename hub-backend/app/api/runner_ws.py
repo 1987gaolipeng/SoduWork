@@ -67,6 +67,42 @@ def _stop_telemetry(queue: "asyncio.Queue") -> None:
                 return
 
 
+async def _persist_runner_heartbeat(runner, *, force: bool = False) -> bool:
+    """Persist one heartbeat without letting transient storage failures drop the socket.
+
+    ``runner_registry.record`` advances the in-memory write throttle before the
+    surrounding transaction commits. Restore the prior value whenever either
+    step fails so the next heartbeat retries immediately. Identity and lifecycle
+    rejections remain connection-level failures and must reach the WebSocket
+    handler.
+    """
+    previous_write = getattr(runner, "_registry_write", 0.0)
+    try:
+        async with SessionLocal() as session:
+            if force:
+                await runner_registry.record(session, runner, force=True)
+            else:
+                await runner_registry.record(session, runner)
+            await session.commit()
+    except (RunnerIdentityConflict, ValueError):
+        runner._registry_write = previous_write
+        raise
+    except Exception as exc:  # noqa: BLE001 - transient persistence must not drop control channel
+        runner._registry_write = previous_write
+        log.warning("执行机 %s 心跳落库暂失败，下个心跳周期重试：%s",
+                    runner.id, type(exc).__name__)
+        return False
+    return True
+
+
+def _update_runner_capabilities(runner, value, *, persisted: bool) -> bool:
+    """Apply a heartbeat report and say whether its first durable write is due."""
+    if not isinstance(value, dict):
+        return False
+    runner.capabilities = execution_capabilities.clean_report(value)
+    return not persisted and bool(runner.capabilities.get("reportedAt"))
+
+
 async def _auth(token: str, peer: str, device: str = "", secret: str = "",
                 runner_id: str = "", runner_key: str = "") -> tuple[bool, str]:
     """Return authorization and denial reason. Prefer device-specific secrets or per-Runner keys;

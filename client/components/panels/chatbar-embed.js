@@ -199,7 +199,7 @@
     if (!document.getElementById('chatbarPin')) {
       const pin = document.createElement('button');
       pin.type = 'button';
-      pin.id = 'chatbarPin';
+      pin.id = id;
       pin.title = '折叠对话侧栏';
       pin.setAttribute('aria-label', pin.title);
       pin.innerHTML = PIN_SVG;

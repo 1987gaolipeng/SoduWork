@@ -334,6 +334,11 @@ test('queued collaboration freezes the latest conversation only when its turn st
   const result = await f.call({ ...request(f.plugin), attachments: [{ name: 'input.txt', path: file }] });
   assert.equal(result.ok, true, result.reason);
   fs.writeFileSync(file, 'changed after submission');
+  const accepted = core.store(path.join(f.root, 'plugin-debug-runs'), f.handle.sessionId).read().inputAttachments[0];
+  const staged = path.join(f.cwd, accepted.path);
+  assert.notEqual(staged, file);
+  assert.equal(fs.readFileSync(staged, 'utf8'), 'accepted input', 'editing the original must not alter accepted bytes');
+  fs.writeFileSync(staged, 'tampered accepted copy');
   await assert.rejects(f.submissions[0].options.controlled.execute(), /输入附件已变化/);
 });
 

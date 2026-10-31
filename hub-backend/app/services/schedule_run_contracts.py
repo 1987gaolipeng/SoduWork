@@ -10,6 +10,7 @@ import math
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -208,26 +209,49 @@ def _run_iso(value: datetime | None) -> str:
     return value.astimezone(timezone.utc).isoformat() if value else ""
 
 
+def automation_conversation_title(schedule, started_at: datetime | None) -> str:
+    """Return the stable title shared by manual and scheduled automation runs."""
+    title = " ".join(str(getattr(schedule, "title", "") or "自动化").split()) or "自动化"
+    zone_name = str(getattr(schedule, "time_zone", "") or "Asia/Shanghai").strip()
+    try:
+        zone = ZoneInfo(zone_name)
+    except ZoneInfoNotFoundError:
+        zone = ZoneInfo("Asia/Shanghai")
+    started = _run_time(started_at) or datetime.now(timezone.utc)
+    local = started.astimezone(zone)
+    suffix = f" · {local:%Y-%m-%d %H:%M}"
+    prefix = "自动化 · "
+    title = title[:max(1, 200 - len(prefix) - len(suffix))]
+    return f"{prefix}{title}{suffix}"
+
+
 def _new_run(s, trigger: str, idempotency_key: str = ""):
     from .schedule_timing import snapshot
     trigger = trigger if trigger in RUN_TRIGGERS else "timer"
     retrying = trigger == "retry" and bool(getattr(s, "next_retry_at", None))
     attempt = max(1, int(getattr(s, "retry_count", 0) or 0) + 1) if retrying else 1
-    binding_id = str(getattr(s, "plugin_binding_id", "") or "")
-    personal = personal_plugin_spec(s)
-    mode = "plugin" if binding_id else "personal" if personal else "direct"
-    plugin = ({"scope": "enterprise", "bindingId": binding_id}
-              if binding_id else ({"scope": "personal", **personal}
-                                  if personal else {}))
+    # Every schedule run is an ordinary conversation. A personal plugin is a
+    # local conversation lock, not a task/workflow association.
+    try:
+        plugin = personal_plugin_spec(s)
+    except ValueError:
+        # Keep the attempt durable; run_one() will return the actionable
+        # validation error instead of losing the execution record.
+        plugin = {}
+    if plugin:
+        plugin = {"scope": "personal", **plugin}
+    mode = "personal" if plugin else "direct"
     requested = {
         "assigneeId": str(getattr(s, "assignee_id", "") or ""),
         "assigneeType": str(getattr(s, "assignee_type", "") or "agent"),
+        "modelName": str(getattr(s, "model_name", "") or ""),
         "requiredCapabilities": clean_required_capabilities(
             getattr(s, "required_capabilities", None)),
     }
     origin = ({"triggerOrigin": "timer" if trigger == "timer" or (
         trigger == "retry" and bool(getattr(s, "once_fired", False))) else "manual"}
         if getattr(s, "every", "") == "once" else {})
+    started_at = datetime.now(timezone.utc)
     return models.AiScheduleRun(
         idempotency_key=(str(idempotency_key or "")[:180]
                          or "manual:" + uuid.uuid4().hex),
@@ -240,7 +264,7 @@ def _new_run(s, trigger: str, idempotency_key: str = ""):
                  "plugin": plugin, "inputSnapshot": clean_plugin_inputs(
                      getattr(s, "plugin_inputs", {}) or {}),
                  "route": {"requested": requested}, "timing": snapshot(s), **origin},
-        started_at=datetime.now(timezone.utc),
+        started_at=started_at,
     )
 
 

@@ -80,6 +80,19 @@
     };
   }
   function create(ctx) {
+  function _refreshDisclaimer(root) {
+    const node = root?.querySelector?.('.ai-disclaimer [data-i18n]');
+    if (!node) return;
+    const source = node.getAttribute('data-i18n') || '内容由 AI 生成，请核实重要信息';
+    node.textContent = global.SoduWorkI18n?.translateText?.(source) || source;
+  }
+  function _bindDisclaimerLocale(root) {
+    if (!root || root.dataset.disclaimerLocaleBound === 'true') return;
+    const refresh = () => _refreshDisclaimer(root);
+    root.dataset.disclaimerLocaleBound = 'true';
+    global.addEventListener('soduwork-locale-change', refresh);
+    refresh();
+  }
 function _mount() {
     ctx._ensureHlCss();
     // Global keyboard/outside-click behavior of the chain popover binds once; binding failure must not affect the message flow.
@@ -89,7 +102,7 @@ function _mount() {
     const host = document.getElementById('cpChat');
     if (!host) return null;
     let el = host.querySelector('.nchat');
-    if (el) { ctx._ensureCollabView(el); return el; }
+    if (el) { ctx._ensureCollabView(el); _bindDisclaimerLocale(el); return el; }
     host.innerHTML =
       '<div class="nchat">' +
         '<div class="nchat-stage"><div class="nchat-main">' +
@@ -122,6 +135,7 @@ function _mount() {
                 '<svg viewBox="0 0 24 24"><path d="M12 19V6M6.5 11.5 12 6l5.5 5.5"/></svg></button>' +
             '</div>' +
           '</div>' +
+          '<p class="ai-disclaimer"><span data-i18n="内容由 AI 生成，请核实重要信息">内容由 AI 生成，请核实重要信息</span></p>' +
         '</div></div></div>' +
         '</div></div>' +
       '</div>';
@@ -142,6 +156,7 @@ function _mount() {
       dock.insertBefore(rail, dock.firstChild);
     }
     el = host.querySelector('.nchat');
+    _bindDisclaimerLocale(el);
     ctx._ensureCollabView(el);
     // Binding annotations emits input synchronously; seed the saved draft first.
     el.querySelector('#nchatInput').value = ctx._conversationDraftText();
@@ -391,6 +406,7 @@ function _bind(el) {
       ctx._messageAttachments = ConversationAttachments.create({
         host: el.querySelector('.nbox'), input, fileInput: el.querySelector('#nchatFile'),
         button: null, tray: el.querySelector('#nchatAtts'),
+        materialHint: true, hint: el.querySelector('#nchatMaterialHint'),
         librarySource: () => ({ sessionId: ctx._sessionId, conversationTitle: (global.ChatChrome?.sessionTitle || '').trim() }),
         say: (message) => { if (typeof petSay === 'function') petSay(message); },
         onChange: () => {
@@ -559,8 +575,10 @@ function _bind(el) {
         return;
       }
       const pluginRetry = e.target.closest('[data-plugin-retry]');
+      const pluginNewSession = e.target.closest('[data-plugin-new-session]');
       const modelRetry = e.target.closest('[data-model-retry]');
       if (modelRetry) { void ctx._queueAction('retry-model', modelRetry.dataset.modelRetry); return; }
+      if (pluginNewSession) { void ctx._openPluginAuthRecovery(); return; }
       if (pluginRetry) {
         ctx._restoreRetryDraft();
         return;

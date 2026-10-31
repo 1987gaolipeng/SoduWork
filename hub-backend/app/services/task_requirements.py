@@ -239,7 +239,7 @@ async def can_read_attachment(session, client, task, attachment):
     return bool(sources and len(sources) == len(task.legacy_requirements or []))
 
 
-async def decorate(session, client, task, api, *, context=None, prepared=None):
+async def decorate(session, client, task, api, *, context=None, prepared=None, edit_facts=None):
     from . import task_access
     execution = await task_access.can_view(session, client, task)
     authority = await can_manage(session, client, task, context, prepared=prepared)
@@ -368,6 +368,7 @@ async def apply(session, client, task, data, *, creating=False):
             task.archived_at = datetime.now(timezone.utc) if value else None
     if not creating and changed:
         task.requirement_version = int(task.requirement_version or 1) + 1
+    return edit_facts
 
 
 async def refresh_memory(session, task, previous_org=None):
@@ -405,7 +406,7 @@ async def update_shared(session, client, task, data):
         raise HTTPException(409, "需求已进入执行，请由执行人在详情中处理")
     previous_org = task.shared_org_id
     requirement_edit = "requirementVersion" in data
-    await apply(session, client, task, data)
+    edit_facts = await apply(session, client, task, data)
     if restore_cancelled:
         # Restore is maintenance, not a grant to edit execution state generally.
         from . import task_status

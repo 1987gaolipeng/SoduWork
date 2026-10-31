@@ -61,7 +61,7 @@
   }
 
   function reset() { global.WorkComposer?.closeExecutionMenu?.(); cloudProbe++; if (busy) { resetPending = true; return; } revision++; location = 'local'; requestId = ''; global.ComposeRuntime?.setLocation?.('local'); paint(); }
-  async function start({ text, attachments, skills = [], plugins = [], intent, contextPrompts = [], prepare, isCurrent = () => true }) {
+  async function start({ text, attachments, skills = [], plugins = [], intent, inputPreparation, contextPrompts = [], prepare, isCurrent = () => true }) {
     if (busy) return false;
     const agentId = global.ComposeRuntime.value(), selectedLocation = location, owner = ownerScope();
     // A cloud location may auto-select the first installed Harness while its
@@ -74,7 +74,7 @@
     busy = true; paint();
     try {
       if (!current()) return false;
-      if (prepare) ({ attachments, skills = [], plugins = [], intent, contextPrompts = [] } = await prepare());
+      if (prepare) ({ attachments, skills = [], plugins = [], intent, inputPreparation, contextPrompts = [] } = await prepare());
       if (!current()) return false;
       if (skills.length || plugins.length || intent === 'goal') throw Error('本机技能、插件和目标模式请在本地使用；云端使用服务器已配置的能力');
       await global.ComposeRuntime?.refreshAccess?.();
@@ -90,7 +90,7 @@
       requestId ||= global.crypto.randomUUID();
       const requestAgentId = selectedLocation === 'cloud' ? global.ComposeRuntime.value() : agentId;
       const result = await api.start({ requestId, agentId: requestAgentId, model: model.modelName || '',
-        text: [...contextPrompts, text].filter(Boolean).join('\n\n'), attachments, skills: [], plugins: [] });
+        text: [...contextPrompts, text].filter(Boolean).join('\n\n'), inputPreparation, attachments, skills: [], plugins: [] });
       if (!result?.ok) throw Error(result?.reason || '云端会话没有创建成功，原消息已保留');
       if (!current()) { requestId = ''; global.petSay?.(owner === ownerScope() ? '云端会话已创建，可从历史会话中打开' : '云端会话已创建，可切回原账号从历史会话中打开'); return false; }
       const opened = await global.NativeChat.enter('', result.sessionId);

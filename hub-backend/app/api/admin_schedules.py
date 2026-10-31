@@ -88,8 +88,8 @@ async def create_ai_schedule(body: dict = Body(default_factory=dict),
     _sch_apply(s, body)
     if not s.title:
         raise HTTPException(status_code=400, detail="请填任务标题")
-    if not s.assignee_id and not s.plugin_binding_id:
-        raise HTTPException(status_code=400, detail="请选把活交给谁")
+    if not s.assignee_id:
+        raise HTTPException(status_code=400, detail="请先选择执行底座")
     if not s.owner_client_id:
         raise HTTPException(status_code=400, detail="请选任务落在哪台 SoduWork 上")
     try:
@@ -174,5 +174,5 @@ async def run_ai_schedule(sid: str, user: User = Depends(require_perm("task.disp
         raise HTTPException(status_code=502, detail="没派出去：" + str(out.get("error"))[:200])
     await audit.log(session, user, "schedule.run", "schedule", s.id, s.title,
                     {"scheduleRunId": str(out.get("scheduleRunId") or ""),
-                     "taskId": str(out.get("taskId") or "")})
+                     "conversationId": str(out.get("conversationId") or "")})
     return {"ok": True, **out, "schedule": _sch_api(s)}

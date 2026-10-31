@@ -40,6 +40,7 @@ async def negotiate(ws, send, payload: dict, *, timeout: float = HELLO_TIMEOUT_S
                 raise ConnectionError("执行机握手前收到过多后台指令")
 
     try:
-        return await asyncio.wait_for(exchange(), timeout=timeout)
+        async with asyncio.timeout(timeout):
+            return await exchange()
     except TimeoutError as error:
         raise TimeoutError("执行机握手超时：后台未确认上线，将重新连接") from error

@@ -13,6 +13,7 @@ from app import (automation_models, models, session_memory_models, project_conte
                  repository_issue_models, im_models)  # register metadata
 from app.config import get_settings
 from app.db import Base
+from app.schema_migrations import normalize_sqlite_merge_revision
 
 
 config = context.config

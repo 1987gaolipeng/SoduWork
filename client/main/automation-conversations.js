@@ -8,6 +8,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { resultState } = require('./pi-session/task-turn');
 const TERMINAL = new Set(['succeeded', 'failed', 'cancelled']);
+// Keep manual launches responsive: the UI waits for the worker to publish the
+// newly created chat id before navigating, so a one-second poll made the
+// immediate-execution button feel stalled. The inbox is cheap when idle and
+// still coalesces concurrent work through `ticking`.
+const POLL_INTERVAL_MS = 250;
 const keyOf = (identity, runId) => crypto.createHash('sha256')
   .update(String(identity.hub).replace(/\/+$/, '') + '\n' + identity.clientId + '\n' + runId).digest('hex');
 
@@ -90,9 +95,7 @@ function createWorker({ identityOf, request, journal, conversation, catalog,
       await acknowledge(identity, row.id, record); return;
     }
     if (jobs.has(key)) {
-      const handle = conversation.find(record.conversationId);
-      const status = handle && (typeof handle.status === 'function' ? handle.status() : handle.status);
-      record = save(key, { ...record, state: record.needsInput || status === 'waiting-user' ? 'waiting' : 'running' });
+      record = save(key, { ...record, state: 'running' });
       await acknowledge(identity, row.id, record); return;
     }
     const input = claimed.input || {};
@@ -110,9 +113,17 @@ function createWorker({ identityOf, request, journal, conversation, catalog,
         record = save(key, { phase: 'prepared', state: 'running', accessChoice });
       }
       const plugin = pluginSelection(input.personalPlugin, await catalog());
+      const modelName = String(input.modelName || '').trim();
       const options = {
         ...(record && record.conversationId ? { chatId: record.conversationId } : {}),
-        adapterId: input.adapterId, modelName: input.modelName, intent: 'chat',
+        ...(input.conversationTitle ? { sessionTitle: String(input.conversationTitle).trim().slice(0, 240) } : {}),
+        ...(input.projectId ? { projectId: String(input.projectId).trim().slice(0, 160) } : {}),
+        ...(input.repoId ? { repoId: String(input.repoId).trim().slice(0, 160) } : {}),
+        // Always pass the field, including an empty value.  Omitting it lets
+        // legacy runtimes interpret the request as "reuse the last local
+        // model", which can resurrect a stale Runner model instead of using
+        // the selected runtime's current default.
+        adapterId: input.adapterId, modelName, intent: 'chat',
         cwd: input.cwd || '', capabilities: input.capabilities && input.capabilities.length ? input.capabilities : undefined,
         skills: input.skills,
         ...(plugin ? { pluginLock: plugin } : {}),
@@ -121,13 +132,17 @@ function createWorker({ identityOf, request, journal, conversation, catalog,
       const opened = record?.accessChoice
         ? await conversation.openAutomation(options, identity, record.accessChoice, row.id)
         : await conversation.open(options, identity);
-      if (!opened || !opened.ok) throw Error('普通对话未能启动，请检查当前 Agent、模型与工作目录后重试');
+      if (!opened || !opened.ok) throw Error(String(opened && opened.reason || '自动化任务未能启动，请检查当前底座、模型与工作目录后重试'));
       const available = new Set((opened.capabilities || []).map(item => item.id));
       if ((input.capabilities || []).some(id => !available.has(id))) {
         throw Error('本次自动化所需能力尚未安装或授权，请检查能力配置后重试');
       }
+      // Publish the chat as soon as it exists. The UI can then move to the
+      // ordinary conversation immediately while the first prompt is submitted
+      // and streamed there; the prompt itself is still persisted before the
+      // running acknowledgement is sent.
       record = save(key, { ...record, phase: 'created', state: 'running', conversationId: opened.sessionId });
-      await acknowledge(identity, row.id, record);
+      await acknowledge(identity, row.id, { ...record, state: 'starting' });
       const currentIdentity = await identityOf();
       if (stopped || !currentIdentity || keyOf(currentIdentity, row.id) !== key) throw Error('客户端停止或连接环境已切换，本次消息未发送');
       if (record.accessChoice && !require('./access-control/automation-access').matches(record.accessChoice, currentIdentity)) throw Error('连接账号已切换，本次消息未发送');
@@ -135,16 +150,33 @@ function createWorker({ identityOf, request, journal, conversation, catalog,
       // the receipt, never the original message or its external side effects.
       record = save(key, { ...record, phase: 'sending' });
       const sent = await conversation.send(opened.ref, input.text, input.attachments || [], {
-        submissionId: 'automation-' + row.id, projectId: input.projectId || '',
+        // Keep scheduled turns on the ordinary conversation path.  Without
+        // this marker a local workflow plugin is mistaken for an interactive
+        // plugin-debug request by the shared send IPC.
+        source: 'automation',
+        submissionId: 'automation-' + row.id,
+        ...(input.projectId ? { projectId: String(input.projectId).trim().slice(0, 160) } : {}),
+        ...(input.repoId ? { repoId: String(input.repoId).trim().slice(0, 160) } : {}),
         plugins: plugin ? [{ pluginId: plugin.pluginId }] : [],
       });
       if (!sent || !sent.ok) throw Error('自动化消息未被接收，请打开对话查看原因后重试');
+      // The prompt is now in the ordinary conversation.  Publish its id only
+      // after send is accepted so readers always see the complete Q&A chain.
+      record = save(key, { ...record, state: 'running' });
       jobs.set(key, true);
+      await acknowledge(identity, row.id, record);
+      const settle = async (state, error = '') => {
+        const settled = save(key, { ...record, state, error });
+        jobs.delete(key);
+        try {
+          const current = await identityOf();
+          if (current && keyOf(current, row.id) === key) await acknowledge(current, row.id, settled);
+        } catch (_) { onError('自动化回执未能写入，本次内容不会自动重发'); }
+      };
       Promise.resolve(sent.completion).then(result => {
-        const state = { completed: 'succeeded', failed: 'failed', stopped: 'cancelled', waiting: 'waiting' }[resultState(result)];
-        save(key, { ...record, state, needsInput: state === 'waiting',
-          error: state === 'failed' ? '本轮执行未完成，请打开对话查看详细原因并继续。' : '' });
-      }, () => save(key, { ...record, state: 'failed', error: '本轮执行中断，请打开对话查看并继续。' }))
+        const state = { completed: 'succeeded', failed: 'failed', stopped: 'failed', waiting: 'running' }[resultState(result)];
+        return settle(state, state === 'failed' ? '本轮执行未完成，请打开对话查看详细原因并继续。' : '');
+      }, () => settle('failed', '本轮执行中断，请打开对话查看并继续。'))
         .catch(() => onError('自动化回执未能写入，本次内容不会自动重发'));
     } catch (error) {
       if (isAuthError(error)) throw error;
@@ -190,8 +222,8 @@ function install({ app, ipcMain, identityOf, conversation, platformConnections }
       conversation, catalog: () => require('./personal-plugins').catalog(app),
       onError: message => console.warn('[automation-conversation]', message),
     });
-    timer = setInterval(() => worker.tick(), 5000); timer.unref(); worker.tick();
+    timer = setInterval(() => worker.tick(), POLL_INTERVAL_MS); timer.unref(); worker.tick();
   });
   app.on('before-quit', () => { clearInterval(timer); if (worker) worker.stop(); });
 }
-module.exports = { createWorker, diskJournal, pluginSelection, keyOf, install };
+module.exports = { createWorker, diskJournal, pluginSelection, keyOf, install, POLL_INTERVAL_MS };

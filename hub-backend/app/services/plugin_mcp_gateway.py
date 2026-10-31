@@ -256,6 +256,11 @@ async def _installed_names(session, client: models.Client, claims: dict) -> list
     """Revoke an in-flight ticket after uninstall, upgrade or audience removal."""
     from . import plugin_installed
     ids = _names(claims.get("pvids"), 3)
+    application_mcp = claims.get("appmcp") or {}
+    if (not isinstance(application_mcp, dict) or set(application_mcp) - set(ids)
+            or any(not isinstance(names, list) or any(not isinstance(name, str) for name in names)
+                   for names in application_mcp.values())):
+        raise ValueError("本轮应用连接授权范围无效")
     if not ids:
         return []
     owner = await session.get(models.User, client.user_ref)
@@ -270,12 +275,19 @@ async def _installed_names(session, client: models.Client, claims: dict) -> list
         provision_defaults=False)
     if {version.id for _, version, _ in selected} != set(ids):
         raise ValueError("插件安装版本已改变，请重新发送本轮")
-    return sorted({str(name) for _, version, _ in selected
-                   for name in dict(version.capability_report or {}).get("mcpServers") or []})
+    names = set()
+    for _, version, _ in selected:
+        declared = set(dict(version.capability_report or {}).get("mcpServers") or [])
+        excluded = set(application_mcp.get(version.id, []))
+        if not excluded <= declared:
+            raise ValueError("本轮应用连接未在安装版本中声明")
+        names.update(declared - excluded)
+    return sorted(names)
 
 
-async def validate_versions(session, client: models.Client, version_ids: list[str]) -> None:
-    names = await _installed_names(session, client, {"pvids": version_ids})
+async def validate_versions(session, client: models.Client, version_ids: list[str], *,
+                            application_mcp: dict | None = None) -> None:
+    names = await _installed_names(session, client, {"pvids": version_ids, "appmcp": application_mcp or {}})
     real_names = [name for name in names if not plugin_builtin.is_virtual_mcp(name)]
     if real_names:
         # Company/personal connector enablement and tool policy remain the

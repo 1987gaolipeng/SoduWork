@@ -163,6 +163,14 @@ async def get_task(
     return r
 
 
+@router.post("/tasks/{tid}/prepare-execution")
+async def prepare_requirement_execution(
+    tid: str, client: Client = Depends(current_client), session: AsyncSession = Depends(get_session)
+):
+    from ..services import task_execution_claim
+    return await task_execution_claim.prepare(session, client, tid)
+
+
 @router.get("/tasks/{tid}/delivery-state")
 async def get_delivery_state(
     tid: str, client: Client = Depends(current_client), session: AsyncSession = Depends(get_session)
@@ -1754,6 +1762,17 @@ async def auto_review_task_artifact(
     """Apply an authorized review agent's verified decision through the shared approval gate."""
     from ..services import task_acceptance_review
     return await task_acceptance_review.apply(session, client, tid, body)
+
+
+@router.post("/tasks/{tid}/prepare-execution")
+async def prepare_task_execution(
+    tid: str,
+    client: Client = Depends(current_client),
+    session: AsyncSession = Depends(get_session),
+):
+    """Let the current assignee explicitly claim idle execution on this device."""
+    from ..services import task_execution_claim
+    return await task_execution_claim.prepare(session, client, tid)
 
 
 @router.post("/tasks/{tid}/prepare-execution")
