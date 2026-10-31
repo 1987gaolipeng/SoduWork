@@ -5,6 +5,7 @@ import { createComponentHarness } from './helpers/react-harness.mjs'
 
 const source = new URL('../src/screens/OrgMemory.jsx', import.meta.url)
 const Modal = () => null, Confirm = () => null
+const getUser = () => ({ isSuper: false, orgId: 'fixture-org' })
 const current = { id: 'memory-1', title: 'Shared goals', summary: 'Confirmed summary', revision: 7,
   fields: { summary: 'Confirmed summary', goal: 'Deliver reliably', constraints: 'Protect data' } }
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b }); return { promise, resolve, reject } }
@@ -13,7 +14,7 @@ const button = (page, text) => page.nodes((node) => node.type === 'button' &&
   [node.props.children].flat().includes(text))[0]
 async function harness(api, t) {
   const page = await createComponentHarness(source, { dependencies: {
-    '../api.js': { api }, '../ui.jsx': { Modal, Confirm, Icon: () => null, Loading: () => null, toast() {} }, './org-memory.css': {},
+    '../api.js': { api, getUser }, '../ui.jsx': { Modal, Confirm, Icon: () => null, Loading: () => null, toast() {} }, '../FilterControls.jsx': { FilterSelect: 'FilterSelect' }, './org-memory.css': {},
   } })
   t.after(() => page.unmount())
   page.render(); await page.flush()
@@ -105,8 +106,8 @@ test('pending load and save do not update the page after navigation', async () =
     const pending = deferred()
     const page = await createComponentHarness(source, { dependencies: {
       '../api.js': { api: { orgMemories: () => mode === 'load' ? pending.promise : Promise.resolve({ items: [current] }),
-        updateOrgMemory: () => pending.promise } },
-      '../ui.jsx': { Modal, Confirm, Icon: () => null, Loading: () => null, toast() {} }, './org-memory.css': {},
+        updateOrgMemory: () => pending.promise }, getUser },
+      '../ui.jsx': { Modal, Confirm, Icon: () => null, Loading: () => null, toast() {} }, '../FilterControls.jsx': { FilterSelect: 'FilterSelect' }, './org-memory.css': {},
     } })
     page.render(); await page.flush()
     let saving

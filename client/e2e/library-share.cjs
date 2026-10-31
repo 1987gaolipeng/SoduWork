@@ -104,7 +104,7 @@ if (typeof electron === 'string') {
     await until('document.querySelector("[data-library-share=local-share]")');
     const openLocal = async () => { await click('[data-library-menu-toggle="item-local-share"]'); await click('[data-library-share="local-share"]'); await until('document.querySelector(".library-share-dialog")?.open'); };
     await openLocal();
-    assert.match(await js('document.querySelector(".library-share-dialog").textContent'), /是否存入资料库由对方决定/);
+    assert.match(await js('document.querySelector(".library-share-dialog").textContent'), /分享双方可在通知中打开、下载或保存到资料库/);
     await click('[data-library-share-cancel]'); assert.equal(await js('localCopies.length'), 0);
     await openLocal(); await click('.library-share-member:has(input[value="alice"])');
     await verifySubmitHover('local');

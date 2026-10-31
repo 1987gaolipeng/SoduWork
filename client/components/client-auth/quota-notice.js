@@ -131,6 +131,19 @@
     paint();
   }
   function refreshIfBlocked() { if (current?.exceeded) return refresh(); }
+  function markRestored() {
+    if (!current?.exceeded) return false;
+    // A restoration notification is an authoritative user-facing signal. Hide
+    // the stale card immediately, then reconcile with the Hub in the
+    // background so a model-specific limit can still be shown if it remains.
+    current = { ...current, exceeded: false, reason: '', model: null, requestedModel: null };
+    for (const card of cards) delete card.dataset.feedback;
+    global.ClientAuth?.clearQuotaNotice?.();
+    revision++;
+    refreshFlight = null;
+    paint();
+    return refresh();
+  }
   function reset() { current = null; refreshFlight = null; owner = scope(); revision++; paint(); }
   global.addEventListener('soduwork-data-scope-changed', reset);
   global.addEventListener('soduwork-locale-change', paint);

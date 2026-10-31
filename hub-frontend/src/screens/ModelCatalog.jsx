@@ -76,11 +76,13 @@ export default function ModelCatalog() {
   return (
     <>
       <ModelRuntime providers={providers} models={models} catalogSummary={
-        <div className="model-catalog-summary" aria-label={tx("模型目录汇总")}>
-          <div className="model-catalog-summary-card"><span>{tx("服务")}</span><strong>{d ? providers.length : '—'}</strong><small>{d ? tx("{0} 个启用", [enabledProviders]) : tx("正在读取目录")}</small></div>
-          <div className="model-catalog-summary-card"><span>{tx("模型")}</span><strong>{d ? models.length : '—'}</strong><small>{d ? tx("{0} 个可用", [enabledModels]) : tx("正在读取目录")}</small></div>
-          <div className="model-catalog-summary-card"><span>{tx("已就绪服务")}</span><strong>{d ? readyProviders : '—'}</strong><small>{d ? tx("地址与密钥均已配置") : tx("正在读取目录")}</small></div>
-        </div>
+        <section className="model-catalog-summary model-runtime-dimension" aria-label={tx("目录配置")} aria-busy={!d && !error}>
+          <header className="model-dimension-head"><Icon name="box" /><h4>{tx("目录配置")}</h4></header>
+          <div className="model-catalog-summary-card"><span>{tx("服务总数")}</span><strong>{d ? providers.length : '—'}</strong><small>{d ? tx("已启用 {0} · 已停用 {1}", [enabledProviders, providers.length - enabledProviders]) : error ? tx("目录读取失败") : tx("正在读取目录")}</small></div>
+          <div className="model-catalog-summary-card"><span>{tx("模型总数")}</span><strong>{d ? models.length : '—'}</strong><small>{d ? tx("已启用 {0} · 已停用 {1}", [enabledModels, models.length - enabledModels]) : error ? tx("目录读取失败") : tx("正在读取目录")}</small></div>
+          <div className="model-catalog-summary-card"><span>{tx("配置完整服务")}</span><strong>{d ? readyProviders : '—'}</strong><small>{tx("服务已启用，且地址与密钥均已填写。")}</small></div>
+          <p className="model-dimension-note">{error ? tx("目录读取失败") : tx("配置完整仅表示设置已齐全。")}</p>
+        </section>
       } catalogActions={<>
         <button className="btn btn-ghost" onClick={() => setDefaultOpen(true)}><Icon name="key" />{tx("组织默认调用")}</button>
         <button className="btn btn-primary" disabled={!d} onClick={() => setEditP('new')}><Icon name="plus" />{tx("接一个服务")}</button>
@@ -93,7 +95,7 @@ export default function ModelCatalog() {
           const modelsOpen = expandedProviders.has(p.id)
           const modelListId = `model-list-${String(p.id).replace(/[^a-zA-Z0-9_-]/g, '-')}`
           const ready = p.enabled && p.baseUrl && p.keySet
-          const state = ready ? tx("可用") : (!p.enabled ? tx("已停用") : (!p.baseUrl ? tx("缺地址") : tx("缺密钥")))
+          const state = ready ? tx("已配置") : (!p.enabled ? tx("已停用") : (!p.baseUrl ? tx("缺地址") : tx("缺密钥")))
           return (
             <article key={p.id} className={'model-provider' + (p.enabled ? '' : ' disabled') + (modelsOpen ? ' is-models-expanded' : '')}>
               <header className="model-provider-head">
@@ -113,7 +115,7 @@ export default function ModelCatalog() {
 
               <div className={'model-cloud' + (modelsOpen ? ' is-expanded' : ' is-collapsed')}>
                 <div className="model-cloud-label">
-                  <span>{tx("可用模型")}</span><b>{ms.filter((m) => m.enabled).length}/{ms.length}</b>
+                  <span>{tx("已启用模型")}</span><b>{ms.filter((m) => m.enabled).length}/{ms.length}</b>
                 </div>
                 <div id={modelListId} className="model-chips" hidden={!modelsOpen} tabIndex={0} role="region"
                   aria-label={tx("{0}的模型列表", [p.name || p.id])}>

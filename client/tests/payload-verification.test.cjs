@@ -162,7 +162,9 @@ async function bundledNotices(t) {
     'resources/pi/node_modules/tslib/CopyrightNotice.txt',
     'resources/runner/_internal/sdk.dist-info/licenses/LICENSE.APACHE',
     'resources/shell/share/licenses/sdk/COPYING3', 'resources/shell/share/licenses/sdk/README',
-    'resources/shell/share/licenses/sdk/RUNTIME.LIBRARY.EXCEPTION', 'resources/skills/example/LICENSE-MIT'];
+    'resources/shell/share/licenses/sdk/RUNTIME.LIBRARY.EXCEPTION', 'resources/skills/example/LICENSE-MIT',
+    'resources/python/Lib/site-packages/et_xmlfile-2.0.0.dist-info/LICENCE.python',
+    'resources/python/tcl/tk8.6/demos/license.terms', 'resources/python/tcl/tk8.6/license.terms'];
   for (const name of names) {
     await fsp.mkdir(path.dirname(path.join(root, name)), { recursive: true });
     await fsp.writeFile(path.join(root, name), 'Copyright upstream: permission is granted. ' + name);
@@ -223,7 +225,9 @@ test('missing or non-file public notice still fails even when its source copy is
 test('scripts, configuration, prompts and runtime text are strict; all failures are reported together', async t => {
   const { root, names } = await bundledNotices(t);
   const strict = ['resources/pi/node_modules/sdk/index.js', 'resources/pi/node_modules/sdk/package.json',
-    'resources/skills/demo/SKILL.md', 'resources/shell/share/antiword/UTF-8.txt', 'instructions.txt'];
+    'resources/skills/demo/SKILL.md', 'resources/shell/share/antiword/UTF-8.txt', 'instructions.txt',
+    'resources/node/node_modules/npm/node_modules/@npmcli/arborist/bin/license.js',
+    'resources/node/lib/node_modules/npm/node_modules/@npmcli/arborist/bin/license.js'];
   for (const name of strict) {
     fs.mkdirSync(path.dirname(path.join(root, name)), { recursive: true });fs.writeFileSync(path.join(root, name), 'GOOD');
   }
@@ -243,6 +247,31 @@ test('new unknown license names fail at build time; executable-looking names can
     'README.md', 'skills/SKILL.md', 'licenses/index.js']) assert.equal(isNoticePath(name), false, name);
   const root = await fixture(t);fs.writeFileSync(path.join(root, 'LICENSE.NewVendor'), 'Unknown upstream license');
   await assert.rejects(inventory(root), /Unclassified redistribution notice/);
+});
+
+test('runtime notice exceptions stay confined to reviewed documents and exact npm code paths', () => {
+  const { isNoticePath, noticeCandidate } = require('../build/verify-payload.cjs');
+  const documents = ['resources/python/Lib/site-packages/et_xmlfile-2.0.0.dist-info/LICENCE.python',
+    'resources/python/tcl/tk8.6/demos/license.terms', 'resources/python/tcl/tk8.6/license.terms'];
+  for (const document of documents) {
+    assert.equal(isNoticePath(document), true, document);
+    assert.equal(isNoticePath(document.replaceAll('/', '\\')), true, document);
+    assert.equal(noticeCandidate(document), true, document);
+  }
+  for (const code of ['resources/node/node_modules/npm/node_modules/@npmcli/arborist/bin/license.js',
+    'resources/node/lib/node_modules/npm/node_modules/@npmcli/arborist/bin/license.js']) {
+    assert.equal(noticeCandidate(code), false, code);
+    assert.equal(noticeCandidate(code.replaceAll('/', '\\')), false, code);
+    assert.equal(isNoticePath(code), false, code);
+  }
+  for (const unknown of ['LICENCE.python', 'resources/python/tcl/custom/license.terms',
+    'resources/python/Lib/site-packages/other.dist-info/LICENCE.python',
+    'resources/python/Lib/site-packages/et_xmlfile-2.0.0.dist-info/LICENCE.python.js',
+    'resources/node/node_modules/npm/node_modules/other/bin/license.js',
+    'resources/node/node_modules/npm/node_modules/@npmcli/arborist/bin/license.js.exe']) {
+    assert.equal(isNoticePath(unknown), false, unknown);
+    assert.equal(noticeCandidate(unknown), true, unknown);
+  }
 });
 
 test('already protected or binary notice build sources are rejected', async t => {

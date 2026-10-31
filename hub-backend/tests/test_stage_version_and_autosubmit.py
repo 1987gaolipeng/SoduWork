@@ -5,14 +5,16 @@ rather than silent failures or misleading conflict errors.
 """
 
 import json
+import tempfile
 import unittest
+from unittest.mock import patch
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app import automation_models as am, models
 from app.db import Base
-from app.services import conversation_turns, tasks as task_service
+from app.services import conversation_turns, release_control, storage, tasks as task_service
 
 
 class VersionBumpTests(unittest.IsolatedAsyncioTestCase):
@@ -81,6 +83,9 @@ class AutoSubmitTests(unittest.IsolatedAsyncioTestCase):
     """AI delivery submits review automatically and exposes structural validation failures."""
 
     async def _prepared(self):
+        # Artifact bytes stay private to this test, alongside its memory database.
+        storage_root = self.enterContext(tempfile.TemporaryDirectory(prefix="soduwork-stage-review-"))
+        self.enterContext(patch.object(storage, "_LOCAL_DIR", storage_root))
         engine, sessions = await VersionBumpTests._session(self)
         try:
             session = sessions()
@@ -88,9 +93,12 @@ class AutoSubmitTests(unittest.IsolatedAsyncioTestCase):
             session.add(models.Client(id="device-owner", name="本机", user_ref="u-exec"))
             session.add(models.User(id="u-requester", username="requester",
                                     display_name="王振义", is_active=True))
+            session.add(models.User(id="u-exec", username="executor", is_active=True))
+            await session.flush()
             session.add(models.Task(
                 id="essay-task", title="写一篇作文", status="doing",
                 owner_client_id="device-owner", requester_user_id="u-requester",
+                created_by="u-requester",
                 work_routing={"conversationTurn": {"turnId": "turn-1", "conversationId": "conv-1",
                                                    "state": "running"},
                               "outputContract": {"kind": "office-artifact"}}))
@@ -113,10 +121,36 @@ class AutoSubmitTests(unittest.IsolatedAsyncioTestCase):
             # Valid delivery creates a review gate while retaining human approval.
             self.assertEqual([r.action for r in requests], ["review"])
             self.assertEqual([r.status for r in requests], ["pending"])
+            assignments = (await session.scalars(select(am.ApprovalAssignment).where(
+                am.ApprovalAssignment.request_id == requests[0].id))).all()
+            self.assertEqual([row.user_id for row in assignments], ["u-requester"])
             kinds = [row[0] for row in (await session.execute(
                 select(models.TaskEvent.kind).where(
                     models.TaskEvent.task_id == "essay-task"))).all()]
             self.assertIn("artifact.submitted_for_review", kinds)
+        finally:
+            await session.__aexit__(None, None, None)
+            await engine.dispose()
+
+    async def test_requester_alone_cannot_receive_review_without_creator(self):
+        engine, sessions, session, task = await self._prepared()
+        try:
+            task.created_by = None
+            await session.commit()
+            await conversation_turns.deliver_artifacts(
+                session, task,
+                conversation_id="conv-1", turn_id="turn-1", provider="conversation",
+                files=[("review.md", b"Complete report", "text/markdown")])
+            requests = (await session.scalars(select(am.ApprovalRequest).where(
+                am.ApprovalRequest.task_id == task.id))).all()
+            self.assertEqual([row.status for row in requests], ["pending"])
+            assignments = (await session.scalars(select(am.ApprovalAssignment).where(
+                am.ApprovalAssignment.request_id == requests[0].id))).all()
+            self.assertEqual(assignments, [])
+            kinds = (await session.scalars(select(models.TaskEvent.kind).where(
+                models.TaskEvent.task_id == task.id))).all()
+            self.assertIn("approval.unassigned", kinds)
+            self.assertNotIn("artifact.submitted_for_review", kinds)
         finally:
             await session.__aexit__(None, None, None)
             await engine.dispose()
@@ -148,6 +182,52 @@ class AutoSubmitTests(unittest.IsolatedAsyncioTestCase):
                 models.TaskEvent.task_id == "essay-task",
                 models.TaskEvent.kind == "artifact.delivery_waiting_manual"))).scalars().all()
             self.assertEqual(len(details), 1)
+        finally:
+            await session.__aexit__(None, None, None)
+            await engine.dispose()
+
+    async def test_manual_submission_without_deliverable_creates_reviewable_marker(self):
+        """A conversational/manual requirement can be sent for acceptance without inventing a file."""
+        engine, sessions, session, task = await self._prepared()
+        try:
+            task.work_routing = {
+                "conversationTurn": {"turnId": "turn-1", "conversationId": "conv-1", "state": "completed"},
+                "executionSubmissionMode": "manual",
+            }
+            artifact, created = await release_control.ensure_current_output(
+                session, task, source_ref="conversation:conv-1", who="conversation")
+            self.assertTrue(created)
+            self.assertEqual(artifact.kind, "manual")
+            self.assertTrue((artifact.manifest or {}).get("manual"))
+            self.assertTrue((artifact.manifest or {}).get("complete"))
+            request = (await session.execute(select(am.ApprovalRequest).where(
+                am.ApprovalRequest.task_id == task.id,
+                am.ApprovalRequest.artifact_version_id == artifact.id,
+                am.ApprovalRequest.action == "review"))).scalar_one()
+            self.assertEqual(request.status, "pending")
+        finally:
+            await session.__aexit__(None, None, None)
+            await engine.dispose()
+
+    async def test_no_contract_defaults_to_manual_review_marker(self):
+        engine, sessions, session, task = await self._prepared()
+        try:
+            task.work_routing = {
+                "conversationTurn": {"turnId": "turn-1", "conversationId": "conv-1", "state": "completed"},
+            }
+            artifact, created = await release_control.ensure_current_output(session, task, who="conversation")
+            self.assertTrue(created)
+            self.assertEqual(artifact.kind, "manual")
+            self.assertTrue((artifact.manifest or {}).get("manual"))
+        finally:
+            await session.__aexit__(None, None, None)
+            await engine.dispose()
+
+    async def test_declared_output_still_rejects_empty_manual_candidate(self):
+        engine, sessions, session, task = await self._prepared()
+        try:
+            with self.assertRaisesRegex(ValueError, "还没有可审阅的产出"):
+                await release_control.ensure_current_output(session, task, who="conversation")
         finally:
             await session.__aexit__(None, None, None)
             await engine.dispose()
@@ -199,6 +279,10 @@ class AutoSubmitTests(unittest.IsolatedAsyncioTestCase):
             requests = (await session.execute(select(am.ApprovalRequest).where(
                 am.ApprovalRequest.task_id == "essay-task"))).scalars().all()
             self.assertEqual([r.action for r in requests], ["review"])
+            self.assertEqual([r.status for r in requests], ["pending"])
+            assignments = (await session.scalars(select(am.ApprovalAssignment).where(
+                am.ApprovalAssignment.request_id == requests[0].id))).all()
+            self.assertEqual([row.user_id for row in assignments], ["u-requester"])
             # Include valid files in the candidate manifest and retain corrupt files only as evidence.
             artifact = (await session.execute(select(am.ArtifactVersion).where(
                 am.ArtifactVersion.task_id == "essay-task",

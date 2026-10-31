@@ -1,4 +1,4 @@
-(function (global) {
+﻿(function (global) {
   'use strict';
   function create({ state, esc, icon, notify, errorText, load, getEpoch }) {
     let documentDialog, folderDialog, confirmDialog, shareDialog;
@@ -131,9 +131,10 @@
         : esc(description);
       const confirm = options.confirm || '确认';
       const danger = options.danger ? ' library-confirm-danger' : '';
+      const descriptionClass = options.descriptionClass ? ' ' + String(options.descriptionClass).replace(/[^\w-]/g, '') : '';
       dialog.innerHTML = '<form class="library-confirm-card" method="dialog">' +
         '<header class="library-confirm-head"><b id="libraryConfirmDialogTitle">' + esc(title) + '</b><button type="button" class="library-confirm-close" data-library-confirm-cancel aria-label="关闭">×</button></header>' +
-        '<p class="library-confirm-description">' + descriptionMarkup + '</p>' +
+        '<p class="library-confirm-description' + descriptionClass + '">' + descriptionMarkup + '</p>' +
         '<footer class="library-confirm-foot">' + (options.alert ? '' : '<button type="button" class="library-confirm-cancel" data-library-confirm-cancel>取消</button>') + '<button type="submit" class="library-confirm-submit' + danger + '">' + esc(confirm) + '</button></footer></form>';
       const finish = value => {
         if (settled) return;
@@ -208,24 +209,33 @@
       const dialog = document.createElement('dialog'); shareDialog = dialog;
       const epoch = getEpoch(); let settled = false, sending = false;
       const selectedItems = (Array.isArray(items) && items.length ? items : item ? [item] : []).filter(Boolean);
+      const selectedFolders = (Array.isArray(folders) ? folders : []).filter(Boolean);
+      const bundled = bundledOption === true || selectedItems.length + selectedFolders.length > 1 || selectedFolders.length > 0;
       const unique = [...new Map(members.filter(member => member.id).map(member => [String(member.id), member])).values()];
       const options = unique.map(member => '<label class="library-share-member"><input type="checkbox" value="' + esc(member.id) + '"><span class="library-share-avatar" aria-hidden="true">' + esc(String(member.name || member.username || '?').trim().slice(0, 1).toUpperCase()) + '</span><span class="library-share-member-copy"><b data-user-content>' + esc(member.name || member.username) + '</b><small data-user-content>' + esc(member.username || '') + '</small></span></label>').join('');
-      const fileRows = selectedItems.map(row => '<li><span class="library-share-file-icon">' + icon('document') + '</span><span><b data-user-content>' + esc(row.displayName || (selectedItems.length === 1 && filename) || row.filename || row.title) + '</b><small>' + esc(row.displaySize || (selectedItems.length === 1 && size) || '') + '</small></span></li>').join('');
+      const fileRows = selectedItems.map(row => '<li><span class="library-share-file-icon">' + icon('document') + '</span><span><b data-user-content>' + esc(row.displayName || (selectedItems.length === 1 && filename) || row.filename || row.title) + '</b><small>' + esc(row.displaySize || (selectedItems.length === 1 && size) || '') + '</small></span></li>').join('') + selectedFolders.map(row => '<li><span class="library-share-file-icon">' + icon('folder') + '</span><span><b data-user-content>' + esc(row.displayName || row.name || '文件夹') + '</b><small>' + esc(row.displaySize || tx('文件夹内容')) + '</small></span></li>').join('');
+      const shareHint = bundled
+        ? (localCopy
+          ? '选中的文件和文件夹会打包为一个压缩包，仅发送一条通知；本机原件保留。压缩包只能下载或保存到资料库。'
+          : '选中的文件和文件夹会打包为一个压缩包，仅发送一条通知。压缩包只能下载或保存到资料库。')
+        : (localCopy
+          ? '直接发送文件通知，本机原件保留。分享双方可在通知中打开、下载或保存到资料库。'
+          : '可选择所有成员，他们会在通知中心收到文件。');
       dialog.className = 'library-share-dialog'; dialog.setAttribute('aria-labelledby', 'libraryShareTitle');
       dialog.innerHTML = '<form class="library-share-card" method="dialog"><header class="library-share-head"><div><b id="libraryShareTitle">' + esc(tx('分享资料')) + '</b><span>' + esc(tx(localCopy ? '直接发送文件通知，本机原件保留。是否存入资料库由对方决定。' : '可选择多位组织成员，他们会在通知中心收到文件。')) + '</span></div><button type="button" class="library-share-close" data-library-share-cancel aria-label="' + esc(tx('关闭')) + '">×</button></header>' +
         '<div class="library-share-file"><span class="library-share-file-icon">' + icon('document') + '</span><span><b data-user-content>' + esc(filename || item.filename || item.title) + '</b><small>' + esc(size || '') + '</small></span></div>' +
         '<label class="library-share-search"><span>' + esc(tx('分享给')) + '</span><input type="search" data-library-share-search placeholder="' + esc(tx('搜索姓名或账号')) + '" aria-label="' + esc(tx('搜索成员')) + '"></label>' +
         '<div class="library-share-members">' + options + '<p data-library-share-empty hidden>' + esc(tx('没有匹配的成员')) + '</p></div>' +
         '<label class="library-share-note"><span>' + esc(tx('附言（可选）')) + '</span><textarea maxlength="500" data-library-share-note placeholder="' + esc(tx('告诉对方为什么分享这份文件')) + '"></textarea></label>' +
-        '<p data-library-share-error role="alert" hidden></p><footer class="library-share-foot"><span data-library-share-status role="status" aria-live="polite"></span><button type="button" data-library-share-cancel>' + esc(tx('取消')) + '</button><button type="submit" class="library-share-submit" disabled>' + esc(tx('分享文件')) + '</button></footer></form>';
+        '<p data-library-share-error role="alert" hidden></p><footer class="library-share-foot"><span data-library-share-status role="status" aria-live="polite"></span><button type="button" data-library-share-cancel>' + esc(tx('取消')) + '</button><button type="submit" class="library-share-submit" disabled>' + esc(tx(bundled ? '打包并分享' : '分享文件')) + '</button></footer></form>';
       const form = dialog.querySelector('form'), submit = dialog.querySelector('.library-share-submit');
       const status = dialog.querySelector('[data-library-share-status]'), error = dialog.querySelector('[data-library-share-error]');
       const inputs = [...dialog.querySelectorAll('input[type=checkbox]')], search = dialog.querySelector('[data-library-share-search]');
       const selected = () => inputs.filter(input => input.checked).map(input => input.value);
       const refresh = () => {
         const count = selected().length;
-        submit.disabled = sending || !count; submit.textContent = tx(sending ? '正在分享…' : '分享文件');
-        status.textContent = sending ? tx('正在分享…') : count ? tx('已选择 {count} 位成员').replace('{count}', count) : tx('请选择成员');
+        submit.disabled = sending || !count; submit.textContent = tx(sending ? (bundled ? '正在打包并分享…' : '正在分享…') : (bundled ? '打包并分享' : '分享文件'));
+        status.textContent = sending ? tx(bundled ? '正在打包并分享…' : '正在分享…') : count ? tx('已选择 {count} 位成员').replace('{count}', count) : tx('请选择成员');
         inputs.forEach(input => { input.disabled = sending || (count >= 50 && !input.checked); });
         dialog.querySelectorAll('[data-library-share-cancel],textarea,[data-library-share-search]').forEach(control => { control.disabled = sending; });
         form.setAttribute('aria-busy', String(sending));

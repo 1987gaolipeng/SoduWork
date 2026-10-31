@@ -46,6 +46,10 @@
         });
         mark(true);
         pluginsChanged(pluginId);
+        if(active && global.soduWorkAPI?.personalPlugins?.initialize){
+          try{const initialization=await global.soduWorkAPI.personalPlugins.initialize(pluginId);return {...r,initialization};}
+          catch(error){throw Error('即用安装已保存，但数据初始化未完成：'+error.message);}
+        }
         return r || {};
       },
       async probeEnterprisePluginInstallation(pluginId, expectedVersionId, config) {

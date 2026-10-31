@@ -28,11 +28,15 @@ function harness(kind) {
     _send: () => calls.push('send'), makeDraft: () => calls.push('draft'),
     _paintBar() {}, _rememberComposeDraft() {}, _loadModels() {},
     _loadCapabilities() {}, _loadSetup() {}, _bindSetup() {},
+    _canStop: () => false,
     _loadMorePlugins: async () => { warmups++; },
   };
   const runtime = { window: null,
     document: { getElementById: id => node('#' + id), addEventListener() {} },
     WorkComposer: { bindMoreKeyboard() {}, bindScreenshot() {} },
+    // The bindings consult the shared composer-tools globals; only the Enter
+    // contract is under test here, so a minimal stub is enough.
+    ChatTools: { composerHasPayload: () => false, paintSendButton() {} },
     /* compose-surface's recommendation slot retries with delay after a failed load; the sandbox
        has no timer, so stub it as a no-op to keep the pending promise from firing
        unhandledRejection after the test ends. */

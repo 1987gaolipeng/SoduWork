@@ -138,15 +138,29 @@ async function open(opts) {
     return { ok: false, reason: '直接生图请使用普通对话；目标和需求可通过图片插件生成图片' };
   }
   let resetSavedModel = false;
-  let prep = await modelConfig.prepare(app, identity, modelName);
+  const allowHistoricalModel = Boolean(opts.resumePath || opts.resumedConversation);
+  let prep = await modelConfig.prepare(app, identity, modelName, { allowHistorical: allowHistoricalModel });
   _openTiming('model-prepared', openStarted);
   // A conversation can outlive a personal model.  Its historical selection
   // must not make the whole conversation unopenable after that model is
   // removed from the personal model catalog; retry once with the current default and clear
   // the stale selection for future resumes.
   const canRecoverStaleModel = Boolean(opts.resumePath || opts.resumedConversation);
-  if (!prep.ok && modelName && (!explicitModel || canRecoverStaleModel)) {
-    const fallback = await modelConfig.prepare(app, identity, '');
+  // Some older Hub releases returned a successful default configuration even
+  // when the requested historical model had already been retired. Treat a
+  // different returned model as stale in a resumed conversation so the same
+  // recovery path is used instead of letting the SDK fail later with a vague
+  // "model unavailable" error.
+  const returnedModel = String(prep?.model?.id || '').trim();
+  const returnedDifferentModel = Boolean(prep.ok && modelName && returnedModel && returnedModel !== modelName);
+  // A historical archive may predate the durable model-selection entry. In
+  // that case `modelName` is empty, but the Hub can still reject its own stale
+  // Agent preference. Only a resumed conversation may bypass that preference;
+  // new chats keep the strict explicit/default selection behavior.
+  if (canRecoverStaleModel && (!prep.ok || returnedDifferentModel)) {
+    const fallback = await modelConfig.prepare(app, identity, '', {
+      ignoreAgentPreference: true, allowHistorical: allowHistoricalModel,
+    });
     if (fallback.ok) {
       modelName = '';
       prep = fallback;
@@ -330,12 +344,6 @@ async function open(opts) {
     current: () => ({ session: piSession, access, policy: accessPolicy }),
     changed: accessChanged,
     readScope,
-    rememberDefault(mode) {
-      try {
-        if (typeof opts.rememberAccessDefault === 'function') Promise.resolve(opts.rememberAccessDefault(mode)).catch(() => {});
-        else require('../access-control/preferences').rememberFromSession(app, mode);
-      } catch (_) { /* Preference memory is best effort. */ }
-    },
     commitPolicy(policy) {
       accessPolicy = policy; opts.accessPolicy = policy; opts.readOnly = policy.mode === 'readonly';
     },
@@ -388,7 +396,13 @@ async function open(opts) {
   // attachment id in memory so a retry cannot create duplicate output files.
   const materializedMedia = new Set();
   const turnQueue = createTurnQueue(undefined, () => handle.captureDelivery?.());
-  const modelRecovery = require('./model-recovery').create();
+  const modelRecovery = require('./model-recovery').create({
+    beforeRetry: async ({ authExpired } = {}) => {
+      if (!authExpired) return;
+      const refreshed = await refreshModelTicketIfNeeded(true);
+      if (!refreshed.ok) throw new Error(refreshed.reason || '模型会话凭据刷新失败');
+    },
+  });
   let failedLastTurn = false;
   let skillSelectionFailure = null;
   const storedQuality = restoredQuality || (goal.intent === 'goal'
@@ -448,7 +462,7 @@ async function open(opts) {
   // protected by the bounded no-progress guard in session-events instead.
   const maxToolSteps = maxSteps;
   const taskExecutions = new Map();
-  let modelTicketExpiresAt = Number(prep.model && prep.model.proxyExpiresAt) > Date.now()
+  let modelTicketExpiresAt = prep.historical ? 0 : Number(prep.model && prep.model.proxyExpiresAt) > Date.now()
     ? Number(prep.model.proxyExpiresAt) : Date.now() + MODEL_TICKET_FALLBACK_MS;
   let modelTicketRefresh = null;
   function rememberModelTicket(next) {
@@ -489,9 +503,9 @@ async function open(opts) {
       rememberModelTicket(next);
     },
   });
-  async function refreshModelTicketIfNeeded() {
+  async function refreshModelTicketIfNeeded(force = false) {
     if (prep.model.modality === 'image') return { ok: true };
-    if (modelTicketExpiresAt > Date.now() + MODEL_TICKET_REFRESH_SKEW_MS) return { ok: true };
+    if (!force && modelTicketExpiresAt > Date.now() + MODEL_TICKET_REFRESH_SKEW_MS) return { ok: true };
     if (modelTicketRefresh) return modelTicketRefresh;
     modelTicketRefresh = (async () => {
       // A queued task may use a different model from the composer's future

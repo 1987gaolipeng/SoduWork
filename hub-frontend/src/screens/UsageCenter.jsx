@@ -4,7 +4,7 @@ import { api } from '../api.js'
 import { Icon } from '../ui.jsx'
 import { FilterSelect } from '../FilterControls.jsx'
 import { Empty, PanelHead, SceneLedger, TrendPanel } from './usage-center-charts.jsx'
-import { agentName, count, duration, money, numeric, precise, ratio, share, when } from './usage-center-format.js'
+import { agentName, count, duration, money, numeric, precise, ratio, sceneLabel, share, when } from './usage-center-format.js'
 import './usage-center.css'
 
 function mergeOptions(previous, next, key, label) {
@@ -64,7 +64,7 @@ export default function UsageCenter() {
         <option value="">{tx("全部成员")}</option>{userOptions.map((item) => <option value={item.key} key={item.key}>{item.label}</option>)}
       </FilterSelect></label>
       <label><span>{tx("工作场景")}</span><FilterSelect aria-label={tx("工作场景")} resetValue="" value={source} onChange={(e) => setSource(e.target.value)}>
-        <option value="">{tx("全部场景")}</option>{sourceOptions.map((item) => <option value={item.key} key={item.key}>{item.label}</option>)}
+        <option value="">{tx("全部场景")}</option>{sourceOptions.map((item) => <option value={item.key} key={item.key}>{sceneLabel(item.key, item.label)}</option>)}
       </FilterSelect></label>
       <label><span>Agent</span><FilterSelect aria-label="Agent" resetValue="" value={agent} onChange={(e) => setAgent(e.target.value)}>
         <option value="">{tx("全部 Agent")}</option>{agentOptions.map((item) => <option value={item.key} key={item.key}>{item.label}</option>)}
@@ -168,7 +168,7 @@ function RecentLedger({ rows }) {
       <div className="ugc-table-wrap" tabIndex="0" role="region" aria-label={tx("最近用量记录，可横向滚动")}><table className="ugc-recent-table">
         <thead><tr><th>{tx("工作内容 / 场景")}</th><th>{tx("成员")}</th><th>{tx("Agent / 模型")}</th><th className="num">{tx("Token 用量")}</th><th className="num">{tx("已知成本")}</th><th className="num">{tx("时间")}</th></tr></thead>
         <tbody>{rows.slice((current - 1) * 8, current * 8).map((row) => <tr key={row.id}>
-          <td><b className="ugc-record-title" title={row.title}>{row.title || tx("AI 使用")}</b><small>{row.sourceLabel || row.sourceType}</small></td>
+          <td><b className="ugc-record-title" title={row.title}>{row.title || tx("AI 使用")}</b><small>{sceneLabel(row.sourceType, row.sourceLabel)}</small></td>
           <td><span className="ugc-record-user" title={row.user}>{row.user || tx("未绑定用户")}</span></td>
           <td><b className="ugc-record-agent">{agentName(row.agent)}</b><small className="ugc-record-model" title={row.model}>{row.model || tx("跟随默认模型")}</small></td>
           <td className="num" title={precise(row.tokens)}><b>{count(row.tokens)}</b></td><td className="num"><span className={row.costMicrousd ? '' : 'ugc-muted'}>{money(row.costMicrousd, row.costKnown && row.currency === "USD" ? "$0.00" : undefined)}</span></td>

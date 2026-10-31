@@ -1,10 +1,18 @@
+import { ja as capabilityCatalogJa, ko as capabilityCatalogKo } from './capability-catalog.js'
+import { dictionary } from './shell.js'
 // High-value admin-shell translations for the additional locales. The complete
 // English catalog remains the fallback, so adding a locale never leaves a
 // half-rendered page or exposes Chinese source text in an English layout.
+import { ja as governanceJa, ko as governanceKo } from './governance-overview.js'
+import { ja as insightsMetricsJa, ko as insightsMetricsKo } from './insights-metrics.js'
+import { ja as usageCenterJa, ko as usageCenterKo } from './usage-center.js'
+import { ja as modelRuntimeOverviewJa, ko as modelRuntimeOverviewKo } from './model-runtime-overview.js'
 import { ja as connectorJa, ko as connectorKo } from './connector-management.js'
 import { ja as cloudRunnerJa, ko as cloudRunnerKo } from './cloud-runner-management.js'
 import { ja as modelJa, ko as modelKo } from './model-capabilities.js'
 import { ja as quotaJa, ko as quotaKo } from './quota-management.js'
+import { ja as accessCatalogJa, ko as accessCatalogKo } from './access-catalog.js'
+import { ja as operationsJa, ko as operationsKo } from './operations-overview.js'
 const ja = {
   '编辑推荐': '推薦を編集', '编辑推荐 ': '推薦を編集: ',
   '推荐设置': '推薦設定',
@@ -77,7 +85,11 @@ const ko = {
   '安装中': '설치 중', '已推迟': '연기됨', '已安装': '설치됨',
 };
 
+// Authored NAV constants use Chinese source text; fill missing labels from the keyed
+// shell catalog before applying existing page translations. Those catalogs remain authoritative.
+const shellMessages = locale => Object.fromEntries(Object.entries(dictionary['zh-CN']).map(([key, source]) => [source, dictionary[locale][key]]))
+
 export const messagesByLocale = Object.freeze({
-  'ja-JP': Object.freeze({ ...ja, ...connectorJa, ...cloudRunnerJa, ...modelJa, ...quotaJa }),
-  'ko-KR': Object.freeze({ ...ko, ...connectorKo, ...cloudRunnerKo, ...modelKo, ...quotaKo }),
+  'ja-JP': Object.freeze({ ...shellMessages('ja-JP'), ...ja, ...connectorJa, ...cloudRunnerJa, ...modelJa, ...quotaJa, ...accessCatalogJa, ...operationsJa, ...governanceJa, ...insightsMetricsJa, ...usageCenterJa, ...modelRuntimeOverviewJa, ...capabilityCatalogJa }),
+  'ko-KR': Object.freeze({ ...shellMessages('ko-KR'), ...ko, ...connectorKo, ...cloudRunnerKo, ...modelKo, ...quotaKo, ...accessCatalogKo, ...operationsKo, ...governanceKo, ...insightsMetricsKo, ...usageCenterKo, ...modelRuntimeOverviewKo, ...capabilityCatalogKo }),
 });

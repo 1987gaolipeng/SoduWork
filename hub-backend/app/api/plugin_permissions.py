@@ -68,8 +68,10 @@ async def _employee(session, client, plugin_id):
     from .plugin_client_catalog import _client_actor
     actor = await _client_actor(session, client)
     plugin = await session.get(am.Plugin, plugin_id)
-    ancestors = await rbac.ancestor_org_ids(session, actor.org_id)
-    if plugin is None or plugin.org_id is not None and plugin.org_id not in ancestors:
+    company_scope = await rbac.company_org_ids(session, actor)
+    if plugin is None or (plugin.org_id is not None
+                          and company_scope is not None
+                          and plugin.org_id not in company_scope):
         raise HTTPException(404, "插件不存在或不属于当前组织")
     decision = (await plugin_access.decisions(session, [plugin], actor.user_id))[plugin.id]
     versions = (await session.execute(select(am.PluginVersion).where(

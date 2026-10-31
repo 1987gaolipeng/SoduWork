@@ -1,7 +1,7 @@
 import { translateText as tx, localeMap, useLocale } from '../i18n.js'
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Icon } from '../ui.jsx'
-import { calendarTrend, count, money, numeric, precise, ratio, sceneColor, share } from './usage-center-format.js'
+import { calendarTrend, count, money, numeric, precise, ratio, sceneColor, sceneLabel, share } from './usage-center-format.js'
 
 export function PanelHead({ icon, title, description, meta, children }) {
   const uiLocale = useLocale();
@@ -101,15 +101,15 @@ export function SceneLedger({ rows, total, selected, onSelect }) {
   return <section className="ugc-panel ugc-scenes">
     <PanelHead icon="grid" title={tx("场景分布")} description={tx("按 Token 用量占比")} meta={tx("{0} 个场景", [rows.length])} />
     {!rows.length ? <Empty text={tx("暂无场景用量")} /> : <div className="ugc-scene-body">
-      <div className="ugc-scene-overview"><div className="ugc-donut" role="img" aria-label={rows.map((row) => `${row.label} ${share(row.tokens, total)}`).join('，')}>
+      <div className="ugc-scene-overview"><div className="ugc-donut" role="img" aria-label={rows.map((row) => `${sceneLabel(row.key, row.label)} ${share(row.tokens, total)}`).join('，')}>
         <svg viewBox="0 0 120 120" aria-hidden="true"><circle className="ugc-donut-track" cx="60" cy="60" r="48" />
           {rows.map((row) => { const size = ratio(row.tokens, total), start = offset; offset += size
             return size > 0 && <circle key={row.key} cx="60" cy="60" r="48" pathLength="100" stroke={sceneColor(row.key)} strokeDasharray={`${size} ${100 - size}`} strokeDashoffset={-start} /> })}</svg>
         <span><b>{count(total)}</b><small>Tokens</small></span></div>
-        <div className="ugc-scene-lead"><small>{main ? tx("主要用量场景") : tx("尚无 Token 用量")}</small><b title={main?.label}>{main?.label || '—'}</b><span>{main ? share(main.tokens, total) : '0%'}<small>{tx("占当前范围")}</small></span></div></div>
+        <div className="ugc-scene-lead"><small>{main ? tx("主要用量场景") : tx("尚无 Token 用量")}</small><b title={main ? sceneLabel(main.key, main.label) : undefined}>{main ? sceneLabel(main.key, main.label) : '—'}</b><span>{main ? share(main.tokens, total) : '0%'}<small>{tx("占当前范围")}</small></span></div></div>
       <div className="ugc-scene-list">{rows.map((row) => <button type="button" key={row.key} aria-pressed={selected === row.key}
         onClick={() => onSelect(selected === row.key ? '' : row.key)} style={{ '--scene-color': sceneColor(row.key) }}>
-        <i /><b title={row.label}>{row.label}</b><span title={`${precise(row.tokens)} Tokens`}>{count(row.tokens)}</span><em>{share(row.tokens, total)}</em><Icon name="chevron" />
+        <i /><b title={sceneLabel(row.key, row.label)}>{sceneLabel(row.key, row.label)}</b><span title={`${precise(row.tokens)} Tokens`}>{count(row.tokens)}</span><em>{share(row.tokens, total)}</em><Icon name="chevron" />
       </button>)}</div>
       <p className="ugc-chart-note">{tx("选择场景，查看对应成员与模型用量。")}</p>
     </div>}

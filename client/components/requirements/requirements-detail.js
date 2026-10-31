@@ -255,6 +255,7 @@
       if (file) void openAttachment(file.dataset.rqFile);
       const download = event.target.closest('[data-rq-download]');
       if (download) void downloadAttachment(download.dataset.rqDownload);
+      if (event.target.closest('[data-rq-bundle-download],[data-rq-download-bundle]')) void downloadBundle();
       const remove = event.target.closest('[data-rq-remove-file]');
       if (remove) void removeAttachment(remove.dataset.rqRemoveFile);
       if (event.target.closest('[data-rq-artifact]')) global.soduWorkAPI?.openExternal?.(task.artifactUrl);
@@ -563,8 +564,7 @@
     if (!item) {
       /* Use the same directItem predicate for rendering and submission. */
       const waitingNames = R.waitingOn ? R.waitingOn(task, ctx) : [];
-      const direct = task.status === 'done' && !task.reviewedAt &&
-        task.createdBy === global.__teamCap?.meId && !waitingNames.length;
+      const direct = canReviewDirect(task) && !waitingNames.length;
       if (!direct) return;
       bindState([{ id: 'direct:' + task.id, action: 'review', status: 'pending',
         confirmation: { title: '交付验收' } }], {
@@ -581,19 +581,39 @@
       return;
     }
     const normalized = { ...item, status: item.status || 'pending' };
+    if (normalized.action === 'review' && !canReviewDirect(task)) return;
     bindState([normalized]);
+  }
+  function canReviewDirect(item) {
+    if (item?.canReview === true) return true;
+    if (item?.canReview === false) return false;
+    return item?.status === 'done' && !item?.reviewedAt &&
+      item?.createdBy === global.__teamCap?.meId;
   }
   function executionHtml(ctx) {
     if (task.canViewExecution === false) return '';
     const progress = (task.progress || []).slice().reverse();
     const reviewed = task.reviewedAt;
-    const canReview = task.status === 'done' && !reviewed && task.createdBy === global.__teamCap?.meId;
+    const canReview = canReviewDirect(task);
     const routing = task.workRouting || {};
     const outputContract = routing.outputContract || {};
-    const submissionMode = String(routing.executionSubmissionMode ||
+    const hasDeclaredItems = value => Array.isArray(value) ? value.length > 0 :
+      (typeof value === 'string' ? Boolean(value.trim()) : Boolean(value));
+    // A contract kind describes the route, not an actual file to deliver. Older
+    // tasks may retain `kind` while having no declared deliverables at all.
+    const noDeclaredOutput = !hasDeclaredItems(outputContract.expectedArtifacts) &&
+      !hasDeclaredItems(outputContract.deliverables) && !hasDeclaredItems(outputContract.outputs) &&
+      !String(task.artifactUrl || '').trim();
+    // A stale auto mode must not hide the manual completion route when this
+    // requirement has no declared deliverable at all. The user still needs a
+    // way to move the work from doing to the review gate.
+    const submissionMode = noDeclaredOutput ? 'manual' : String(routing.executionSubmissionMode ||
       (outputContract.kind || outputContract.expectedArtifacts ? 'auto' : 'manual'));
     const canSubmitReview = ['doing', 'paused'].includes(String(task.status || '')) &&
       submissionMode === 'manual' && task.canViewExecution !== false && R.canSubmitReview(task);
+    const canMarkComplete = ['doing', 'paused'].includes(String(task.status || '')) &&
+      submissionMode === 'manual' && noDeclaredOutput && task.canViewExecution !== false &&
+      R.canSubmitReview(task);
     const artifact = /^https?:\/\//i.test(task.artifactUrl || '') ? task.artifactUrl : '';
     // For project tasks, waiting at merge or release after review is a valid intermediate state.
     // For non-project tasks, the corresponding unresolved state is blocked.
@@ -622,9 +642,9 @@
       (task.canViewExecution !== false ? '<button type="button" class="rq-primary" data-rq-rework>继续修正</button>' : '') +
       '</div></div>' : '';
     /*
-     * Render exactly one review surface: an assigned Hub card, a creator-direct card when no
-     * approval exists, an assigned-reviewer notice, or a waiting notice. Creators cannot
-     * bypass another assigned reviewer.
+     * Render exactly one review surface: the creator's Hub card, a creator-direct card when no
+     * approval exists, or a waiting notice for every other participant. The executor never gets
+     * a review decision card from a stale assignment snapshot.
      */
     const approvalItem = R.approval(task, ctx);
     const normalized = approvalItem ? { ...approvalItem, status: approvalItem.status || 'pending' } : null;
@@ -642,6 +662,7 @@
      * rendering; otherwise let the card verify permissions with the server.
      */
     const approvalCard = normalized && !waitingNames.length && global.TaskTraceApproval &&
+      (normalized.action !== 'review' || canReview) &&
       !normalized.myDecision
       ? global.TaskTraceApproval.html([normalized], cardOpts, normalized.id)
       : directItem && global.TaskTraceApproval
@@ -652,11 +673,12 @@
         ? '<p class="rq-acceptance-waiting">你的验收意见已提交，等待其余验收人确认；证据对相关人可见。</p>'
         : waitingNames.length
         ? '<p class="rq-acceptance-waiting">交付验收进行中，由 ' + esc(waitingNames.join('、')) + ' 确认；证据对相关人可见。</p>'
-        : '<p class="rq-acceptance-waiting">交付验收进行中，由需求创建人或指定验收人确认；证据对相关人可见。</p>')
+        : '<p class="rq-acceptance-waiting">交付验收进行中，由需求创建人确认；证据对相关人可见。</p>')
       : '';
     return '<section class="rq-delivery"><div class="rq-delivery-head"><div class="rq-delivery-title"><span class="rq-delivery-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 4-4 7-8 9-4-2-8-5-8-9V6zM12 8v5m0 3h.01"/></svg></span><div><h4>验收与交付</h4>' +
       '<p>验收决策、交付链接与执行证据</p></div></div><div class="rq-delivery-head-actions">' +
-      (canSubmitReview ? '<button type="button" class="rq-secondary" data-rq-submit-review>提交验收</button>' : '') +
+      (canSubmitReview ? '<button type="button" class="rq-secondary" data-rq-submit-review>' +
+        (canMarkComplete ? '标记完成' : '提交验收') + '</button>' : '') +
       '<span class="rq-delivery-state ' + deliveryStateClass + '">' + deliveryState + '</span></div></div>' +
       reworkCard +
       (approvalCard ? '<div data-rq-approval-card>' + approvalCard + '</div>' : waitingOthers) +
@@ -694,26 +716,50 @@
     const hasVersionedBatch = deliveryFiles.some(file => roundOf(file) > 0 || batchOf(file) !== 'legacy');
     const isCurrent = file => batchOf(file) === latestBatch && roundOf(file) === latestRound &&
       String(file.role || '') !== 'input';
-    const current = deliveryFiles.filter(file => !hasVersionedBatch || isCurrent(file) ||
+    const current = deliveryFiles.filter(file => ['input', 'evidence', 'verification', 'process'].includes(String(file.role || '')) || !hasVersionedBatch || isCurrent(file) ||
       (roundOf(file) === 0 && String(file.role || '') !== 'output'));
     const archived = deliveryFiles.filter(file => !current.includes(file));
+    const isBundle = file => {
+      const name = String(file?.name || file?.filename || '').toLowerCase();
+      return name.endsWith('.zip') && /(完整产出|交付包|deliverable|artifact|bundle)/i.test(name);
+    };
     const materialRow = file => {
       const name = file.name || file.filename || '附件';
       const extension = String(name).split('.').pop()?.toUpperCase() || 'FILE';
       const round = roundOf(file), version = String(file.versionId || file.evidenceMeta?.versionId || '').trim();
       const validation = String(file.evidenceMeta?.verification?.state || file.validation?.state || '').toLowerCase();
       const validationLabel = validation === 'failed' ? '校验未通过' : validation && validation !== 'passed' ? '待校验' : '';
-      const meta = [extension, file.size ? formatBytes(file.size) : '', round > 0 ? 'v' + round : '', version ? version.slice(0, 12) : '', validationLabel].filter(Boolean).join(' · ');
-      return '<div class="rq-material" role="listitem" data-rq-file-id="' + esc(file.id) + '"><div class="rq-material-info"><span class="rq-material-type" aria-hidden="true">' + esc(extension.slice(0, 4)) + '</span><div><button type="button" class="rq-attachment" data-rq-file="' + esc(file.id) + '">' +
-        esc(name) + '</button>' + (meta ? '<span class="rq-material-meta">' + esc(meta) + '</span>' : '') + '</div></div><div class="rq-material-actions">' +
-        '<button type="button" class="rq-material-icon rq-material-download" title="下载" aria-label="下载" data-rq-download="' + esc(file.id) + '">↓</button>' +
-        (global.LibraryTransfer?.button ? LibraryTransfer.button(libraryFile(file), '', 'data-rq-library') : '') + '</div></div>';
+      const autoBundle = file.autoBundle === true;
+      const meta = [autoBundle ? '自动打包' : extension, file.size ? formatBytes(file.size) : '', round > 0 ? 'v' + round : '', version ? version.slice(0, 12) : '', validationLabel].filter(Boolean).join(' · ');
+      const open = autoBundle
+        ? '<button type="button" class="rq-attachment" data-rq-bundle-download>' + esc(name) + '</button>'
+        : '<button type="button" class="rq-attachment" data-rq-file="' + esc(file.id) + '">' + esc(name) + '</button>';
+      const download = autoBundle
+        ? '<button type="button" class="rq-material-icon rq-material-download" title="下载自动压缩包" aria-label="下载自动压缩包" data-rq-bundle-download>↓</button>'
+        : '<button type="button" class="rq-material-icon rq-material-download" title="下载" aria-label="下载" data-rq-download="' + esc(file.id) + '">↓</button>';
+      return '<div class="rq-material" role="listitem" data-rq-file-id="' + esc(file.id || '') + '"><div class="rq-material-info"><span class="rq-material-type" aria-hidden="true">' + esc(autoBundle ? 'ZIP' : extension.slice(0, 4)) + '</span><div>' +
+        open + (meta ? '<span class="rq-material-meta">' + esc(meta) + '</span>' : '') + '</div></div><div class="rq-material-actions">' +
+        download + (!autoBundle && global.LibraryTransfer?.button ? LibraryTransfer.button(libraryFile(file), '', 'data-rq-library') : '') + '</div></div>';
     };
-    node.innerHTML = (current.length ? current.map(materialRow).join('') : '<p>暂无材料</p>') +
-      (archived.length ? '<details class="rq-material-archive"><summary>过程留档 · ' + archived.length + ' 份<small>历史轮次与未通过校验的文件，仅供追溯</small></summary>' +
-        archived.map(materialRow).join('') + '</details>' : '') +
-      (rework.length ? '<details class="rq-material-rework"><summary>返修参考资料 · ' + rework.length + ' 个<small>仅供返修使用，不计入交付产物</small></summary>' +
-        rework.map(materialRow).join('') + '</details>' : '');
+    const section = (className, key, title, items, hint) => items.length
+      ? '<details class="rq-material-group ' + className + '" data-rq-material-group="' + esc(key) + '"><summary>' + esc(title) + ' · ' + items.length + ' 份<small>' + esc(hint) + '</small></summary>' + items.map(materialRow).join('') + '</details>'
+      : '';
+    const input = current.filter(file => String(file.role || '') === 'input');
+    const evidence = current.filter(file => ['evidence', 'verification', 'process'].includes(String(file.role || '')));
+    const outputs = current.filter(file => String(file.role || '') === 'output');
+    const other = current.filter(file => !['input', 'evidence', 'verification', 'process', 'output'].includes(String(file.role || '')));
+    const storedBundles = outputs.filter(isBundle);
+    const deliverables = outputs.filter(file => !isBundle(file));
+    const autoBundle = deliverables.length > 2 && !storedBundles.length
+      ? [{autoBundle: true, id: '', name: '自动压缩包.zip', size: 0}]
+      : [];
+    const archive = archived.length ? '<details class="rq-material-group rq-material-archive"><summary>历史轮次 · ' + archived.length + ' 份<small>历史交付与未通过校验的文件，仅供追溯</small></summary>' + archived.map(materialRow).join('') + '</details>' : '';
+    node.innerHTML = section('rq-material-input', 'input', '需求资料', [...input, ...other], '创建需求时提供的原始资料') +
+      section('rq-material-evidence', 'evidence', '过程证据', evidence, '截图、验证记录和执行过程材料') +
+      section('rq-material-output', 'output', '交付物', [...deliverables, ...storedBundles, ...autoBundle], '本轮文件与自动压缩包') +
+      archive +
+      (rework.length ? '<details class="rq-material-group rq-material-rework" data-rq-material-group="rework"><summary>返修参考资料 · ' + rework.length + ' 个<small>仅供返修使用，不计入交付产物</small></summary>' +
+        rework.map(materialRow).join('') + '</details>' : '') || '<p>暂无材料</p>';
     if (R.canManageMaterials(task)) node.querySelectorAll('.rq-material').forEach((row, i) => {
       const file = files.find(candidate => String(candidate.id) === row.dataset.rqFileId); if (!file) return;
       const button = document.createElement('button'); button.type = 'button';
@@ -772,6 +818,13 @@
       if (!global.soduWorkAPI?.downloadAttachment) throw new Error('当前客户端不支持附件下载');
       const result = await global.soduWorkAPI.downloadAttachment({...file, url: global.SoduWorkAPI.attachmentUrl(file)});
       if (result?.ok === false && !result.cancelled) throw new Error(result.reason || '下载未完成');
+    } catch (error) { if (request === seq) feedback(errorText(error)); }
+  }
+  async function downloadBundle() {
+    const request = seq;
+    try {
+      if (!task || typeof global.SoduWorkAPI?.downloadArtifactsZip !== 'function') throw new Error('当前客户端不支持自动压缩包下载');
+      await global.SoduWorkAPI.downloadArtifactsZip(task.id, R.content(task).title || task.title || '交付物');
     } catch (error) { if (request === seq) feedback(errorText(error)); }
   }
   async function removeAttachment(id) {

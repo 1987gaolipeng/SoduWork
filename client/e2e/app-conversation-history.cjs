@@ -54,7 +54,7 @@ app.whenReady().then(async () => {
         async create(title){await this.enter('','app-chat-'+Date.now()+'-'+(++count),{chatTitle:title});return info.sessionId;},draft:id=>drafts.get(id)};
     </script><script src="${asset('core/plugin-icon.js')}"></script><script src="${asset('components/workspace/workspace-chat-history.js')}"></script><script src="${asset('components/workspace/workspace-sidebar-state.js')}"></script><script src="${asset('components/panels/app-conversation-history.js')}"></script><script src="${asset('components/panels/panels-chat-chrome.js')}"></script>
     <script>NativeChat.prepare();window.historyReady=SoduWorkAppConversations.start(soduWorkAPI.workPreview.composerHello(),Promise.resolve());</script></body></html>`);
-  server = http.createServer((_request, response) => { response.setHeader('Content-Type', 'text/html; charset=utf-8'); response.end('<title>History fixture</title><h1>应用页面</h1>'); });
+  server = http.createServer((_request, response) => { response.setHeader('Content-Type', 'text/html; charset=utf-8'); response.end('<title>History fixture</title><h1>即用页面</h1>'); });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   require('../main/work-preview').install({ app, ipcMain,
     BrowserWindow: Object.assign(function (options) { const win = new BrowserWindow(options); windows.push(win); return win; }, { fromWebContents: wc => BrowserWindow.fromWebContents(wc) }),

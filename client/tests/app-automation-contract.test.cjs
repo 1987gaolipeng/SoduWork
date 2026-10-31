@@ -11,6 +11,7 @@ test('direct schedule creation is an explicit separate app capability and carrie
 });
 test('invalid context, blank/oversized text or operation ID are rejected without truncating the requirement',()=>{
   const base={text:'每周一9点采集资料',requestId:'one',context:{spaceId:'space-a'}};
-  for(const patch of [{text:''},{text:'字'.repeat(8001)},{requestId:''},{requestId:'bad id'},{context:{}},{context:{spaceId:' space-a'}}])assert.throws(()=>normalize({...base,...patch}));
+  for(const patch of [{text:''},{text:'字'.repeat(8001)},{requestId:''},{requestId:'bad id'},{context:{spaceId:''}},{context:{spaceId:' space-a'}}])assert.throws(()=>normalize({...base,...patch}));
+  assert.equal(normalize({...base,context:{}}).params.context.spaceId,'','hosted apps do not invent a business space; main process verifies installed declaration');
   assert.equal(normalize({...base,text:'字'.repeat(8000)}).params.text.length,8000);
 });

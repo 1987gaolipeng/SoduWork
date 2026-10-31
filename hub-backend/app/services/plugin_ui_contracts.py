@@ -6,9 +6,9 @@ from urllib.parse import urlsplit
 
 MAX_CONTRIBUTIONS = 12
 BRIDGE_CAPABILITIES = {
-    "context.read", "conversation.open", "conversation.send",
+    "ai.generate", "context.read", "directory.read", "messages.read", "library.read", "conversation.open", "conversation.send",
     "requirements.propose", "notifications.send", "composer.control", "mcp.connect", "settings.read", "settings.write",
-    "automation.create",
+    "automation.create", "data.read", "data.write",
 }
 SLOTS = {
     "workspace.navigation", "conversation.sidebar", "task.detail.tab",
@@ -92,7 +92,7 @@ def _package(value: dict) -> dict:
             or any(part.startswith('.') for part in entry.split('/'))):
         raise ValueError("包内页面入口必须是 ui 目录下的 HTML 相对路径")
     if value.get("openMode") not in (None, "workspace"):
-        raise ValueError("包内页面只能由应用壳打开")
+        raise ValueError("包内页面只能由即用壳打开")
     bridge = _bridge(value.get("bridge"))
     return {"type": "package", "entry": entry, "openMode": "workspace",
             **({"bridge": bridge} if bridge is not None else {})}
@@ -145,7 +145,7 @@ def normalize(value, setup: dict | None = None) -> dict:
             raise ValueError(f"插件界面贡献 {key} 缺少内容来源")
         source_type = _text(source.get("type"), 20)
         if source_type == "package" and slot != "workspace.navigation":
-            raise ValueError("包内页面仅支持应用入口 workspace.navigation")
+            raise ValueError("包内页面仅支持即用入口 workspace.navigation")
         normalized_source = (_external(source, setup) if source_type == "external"
                              else _package(source) if source_type == "package"
                              else _builtin(source) if source_type == "builtin" else None)
@@ -180,7 +180,16 @@ def has_contributions(value: dict | None) -> bool:
     return bool(dict(value or {}).get("contributions"))
 
 
-def effective_entrypoints(value, ui: dict | None, *, has_workflow: bool) -> dict[str, bool]:
+def hosted_background(jiyong, ui) -> bool:
+    if not isinstance(jiyong, dict) or not isinstance(jiyong.get('mcp'), dict) or jiyong['mcp'].get('server') != 'soduwork-jiyong':
+        return False
+    pages = [r for r in dict(ui or {}).get('contributions', []) if r.get('slot') == 'workspace.navigation'
+             and r.get('source', {}).get('type') == 'package'
+             and 'mcp.connect' in r['source'].get('bridge', {}).get('capabilities', [])]
+    return len(pages) == 1 and bool({'data.read', 'data.write'} & set(pages[0]['source']['bridge']['capabilities']))
+
+
+def effective_entrypoints(value, ui: dict | None, *, has_workflow: bool, jiyong=None) -> dict[str, bool]:
     """Interactive plugins are never eligible for unattended automation.
 
     This is derived from the immutable UI contract instead of stored as another
@@ -191,13 +200,13 @@ def effective_entrypoints(value, ui: dict | None, *, has_workflow: bool) -> dict
         "conversation": bool(raw.get("conversation", True)),
         "task": bool(raw.get("task", True)),
         "automation": bool(raw.get("automation", has_workflow))
-        and not has_contributions(ui),
+        and (not has_contributions(ui) or hosted_background(jiyong, ui)),
     }
 
 
-def require_unattended(ui: dict | None) -> None:
+def require_unattended(ui: dict | None, *, jiyong=None) -> None:
     """Reject an interactive plugin at the final background-execution boundary."""
-    if has_contributions(ui):
+    if has_contributions(ui) and not hosted_background(jiyong, ui):
         raise ValueError(
             "该插件包含交互页面，只能在会话或需求等可见场景中使用，不能用于后台自动化")
 

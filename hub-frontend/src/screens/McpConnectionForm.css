@@ -5,8 +5,13 @@
 .connector-form-intro strong{font-size:15px;font-weight:500}
 .connector-form-intro p{margin:5px 0 0;color:var(--ink-3);font-size:13px;line-height:1.6}
 .connector-form fieldset{min-width:0;margin:0;padding:0;border:0;display:flex;flex-direction:column;gap:18px}
-.connector-form .f-lbl{font-size:13px;font-weight:500}.connector-form .f-lbl em{font-weight:400;font-size:12px;font-style:normal;color:var(--ink-3);margin-left:4px}
-.connector-form .f-in{font-size:14px;border-radius:8px}.connector-form textarea{resize:vertical}
+.connector-form .f-lbl{font-size:13px;font-weight:500;line-height:1.45;white-space:normal;overflow-wrap:anywhere}.connector-form .f-lbl em{font-weight:400;font-size:12px;font-style:normal;color:var(--ink-3);margin-left:4px}
+.connector-form .f-in{font-size:14px;border-radius:8px;min-width:0;max-width:100%;box-sizing:border-box}.connector-form textarea{resize:vertical}
+.connector-form select.f-in{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.connector-form .connector-auth-headers{min-height:112px;line-height:1.6;resize:vertical}
+.connector-form :is(input,select,textarea):focus{outline:none;box-shadow:none;border-color:var(--accent)}
+.connector-form :is(input,select,textarea):focus-visible{outline:2px solid var(--accent);outline-offset:0;box-shadow:none}
+.connector-form .connector-autogrow{min-height:72px;max-height:320px;overflow-y:auto;resize:none;scrollbar-width:thin}
 .connector-fields{display:grid;gap:16px}
 .connector-form-help{font-size:13px;align-self:flex-start;color:var(--accent)}
 .connector-advanced{border-top:1px solid var(--line)}

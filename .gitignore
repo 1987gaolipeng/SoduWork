@@ -42,6 +42,8 @@ scratchpad/
 # Local QA screenshots, reports, builds, and scratch work; keep on this device.
 /outputs/
 /work/
+# Root launcher runtime data is generated locally and must never enter source checks.
+/.runtime/
 # Local Electron profiles, debugging scratch files, and media-sync runtime data.
 /_tmp/
 /tools/mediaops-sync/.venv/
@@ -114,6 +116,8 @@ mobile/
 /.cache/pip/
 /.cache/electron/
 /.cache/python/
+/.cache/downloads/
+/.cache/win-tools/
 
 # Internal working records: operational logs and release history notes.
 # Excluded from the public distribution boundary; kept locally for the team.

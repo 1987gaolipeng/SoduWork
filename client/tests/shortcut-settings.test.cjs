@@ -15,9 +15,9 @@ test('settings defaults to Ctrl+O and migrates the old default without losing cu
   assert.deepEqual(ShortcutSettings.findConflicts(rows, 'open-settings').map(row => row.id), ['open-library']);
 });
 
-test('ships one fixed catalog of 20 editable actions with unique usable defaults', () => {
+test('ships one fixed catalog of 21 editable actions with unique usable defaults', () => {
   const rows = ShortcutSettings.cloneRows();
-  assert.equal(rows.length, 20);
+  assert.equal(rows.length, 21);
   assert.equal(new Set(rows.map(row => row.id)).size, rows.length);
   for (const id of ['new-chat', 'focus-composer', 'send-message', 'open-home', 'open-task-pool', 'new-requirement',
     'open-acceptance', 'open-plugins', 'open-schedules', 'open-library', 'focus-search', 'toggle-sidebar',

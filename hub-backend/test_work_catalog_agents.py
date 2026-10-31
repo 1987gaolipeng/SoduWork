@@ -20,13 +20,15 @@ def scenario(capabilities):
 class ScenarioAgentTests(unittest.IsolatedAsyncioTestCase):
     async def test_each_declared_agent_and_legacy_alias_is_rejected_as_a_capability(self):
         with patch.object(work_catalog, "validate_profession_ids", new=AsyncMock(return_value=[])):
-            for agent_id in [*AGENTS, "claude-code"]:
+            for agent_id in [*AGENTS, "claude", "claude-code", "claudecode", "claude_code",
+                             "qwen_code", "codex_harness", "deepseek_harness"]:
                 for spelling in [agent_id, agent_id.upper()]:
                     with self.subTest(agent=spelling), self.assertRaisesRegex(ValueError, "不要绑定"):
                         await work_catalog.validate_scenario(None, scenario(["files", spelling]), None)
 
     async def test_real_custom_capabilities_are_preserved_and_matched_without_an_agent_allowlist(self):
-        required = ["files", "enterprise.research", "custom-skill"]
+        required = ["files", "terminal", "repository", "enterprise.research", "custom-skill",
+                    "claude-notes", "claude.code", "enterprise.claude-code", "qwen_code_docs"]
         with patch.object(work_catalog, "validate_profession_ids", new=AsyncMock(return_value=[])):
             values = await work_catalog.validate_scenario(None, scenario(required), None)
         self.assertEqual(values["required_capabilities"], required)

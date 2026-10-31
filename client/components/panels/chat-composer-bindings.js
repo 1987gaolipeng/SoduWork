@@ -4,7 +4,7 @@
   const nextMessageWindowSize = current => Math.min(2000, Math.max(80, Number(current) || 80) + 80);
   // Empty and form-only conversations use new-session options; selecting an option does not initialize an Agent.
   function createDraftControls(ctx) {
-    let destroyed = false, loaded = false, loading = null, catalog = [], defaultMode = 'standard', error = '';
+    let destroyed = false, loaded = false, loading = null, catalog = [], missing = [], defaultMode = 'standard', error = '';
     let choiceScope = null, preferenceVersion = 0;
     const active = () => !destroyed && !ctx._ref && (!ctx._sessionId || ctx._snap?.workOnly === true);
     const scope = () => ({epoch:ctx._viewEpoch, sessionId:ctx._sessionId});
@@ -23,7 +23,17 @@
       loading = Promise.all([api()?.runtimes?.(), global.soduWorkAPI?.accessPreferences?.get?.()]).then(([runtimes, preference]) => {
         if (!matches(requested)) return;
         if (!runtimes?.ok) throw Error(runtimes?.reason || 'Agent 列表暂不可用，请重新打开选择器');
-        catalog = runtimes.runtimes || []; loaded = true; error = '';
+        const declared = Array.isArray(runtimes.runtimes) ? runtimes.runtimes : [];
+        // New bridges expose an explicit availableRuntimes list.  Older
+        // bridges only returned runtimes; keep that legacy response usable
+        // instead of silently dropping every non-Pi draft option.
+        catalog = Array.isArray(runtimes.availableRuntimes)
+          ? runtimes.availableRuntimes
+          : declared;
+        const declaredPi = declared.find(item => item && item.id === 'pi');
+        if (declaredPi && !catalog.some(item => item && item.id === 'pi')) catalog = [declaredPi, ...catalog];
+        missing = Array.isArray(runtimes.missing) ? runtimes.missing : [];
+        loaded = true; error = '';
         if (preferenceAt === preferenceVersion && ['standard', 'readonly', 'full'].includes(preference?.mode)) defaultMode = preference.mode;
       }).catch(reason => { if (matches(requested)) { error = String(reason.message || reason); loaded = true; } })
         .finally(() => { loading = null; paint(); });
@@ -44,7 +54,8 @@
             label:ctx._sessionOptions.modelLabel || ctx._sessionOptions.modelName} : null},
         ...(adapterId === 'codex' ? {thinking:{level:ctx._sessionOptions.reasoningEffort || ''}} : {})};
     }
-    return {active, state, async runtimes() { await load(); return {ok:!error, reason:error, runtimes:catalog}; },
+    return {active, state, async runtimes() { await load(); return {ok:!error, reason:error, runtimes:catalog,
+        availableRuntimes:catalog, missing}; },
       selectRuntime(id) {
         const runtime = catalog.find(item => item.id === id);
         if (!active() || !runtime) return {ok:false, reason:'请选择当前可用的 Agent'};
@@ -98,7 +109,6 @@ function _mount() {
     // Global keyboard/outside-click behavior of the chain popover binds once; binding failure must not affect the message flow.
     try { global.ChatCrew?.bind(); } catch (error) { /* popover degrades to title */ }
     if (!document.getElementById('cpChat')) global.prepareComposePanel?.();
-    if (!document.getElementById('cpChat')) global.prepareComposePanel?.();
     const host = document.getElementById('cpChat');
     if (!host) return null;
     let el = host.querySelector('.nchat');
@@ -139,14 +149,19 @@ function _mount() {
         '</div></div></div>' +
         '</div></div>' +
       '</div>';
-    if (global.WorkComposer) WorkComposer.upgradeChat(host.querySelector('.nbox'), {
-      picker: () => ctx._pluginMention,
-      scope: () => JSON.stringify([ctx._viewEpoch, ctx._ref, ctx._draftScopeEpoch,
-        ctx._draftOwnerScope(), ctx._pluginResolveSeq]),
-      state: () => ({ cloudHandoff: ctx._snap?.cloudHandoff,
-        goal: ctx._sessionOptions.intent === 'goal' || ctx._sessionOptions.mode === 'goal' }),
-      changed: () => ctx._rememberConversationDraft(),
-    });
+    if (global.WorkComposer) {
+      WorkComposer.upgradeChat(host.querySelector('.nbox'), {
+        picker: () => ctx._pluginMention,
+        scope: () => JSON.stringify([ctx._viewEpoch, ctx._ref, ctx._draftScopeEpoch,
+          ctx._draftOwnerScope(), ctx._pluginResolveSeq]),
+        state: () => ({ cloudHandoff: ctx._snap?.cloudHandoff,
+          goal: ctx._sessionOptions.intent === 'goal' || ctx._sessionOptions.mode === 'goal' }),
+        changed: () => ctx._rememberConversationDraft(),
+      });
+      // WorkComposer owns the single nchatSend action. It changes between
+      // send and stop in place, so a running turn never renders two primary
+      // actions beside the composer.
+    }
     const composer = host.querySelector('.nbox.work-composer');
     const rail = composer && composer.querySelector('#nchatIntentRail');
     const dock = composer && composer.closest('.nchat-entry-dock');
@@ -237,6 +252,12 @@ async function _loadChatSkills(force) {
     }
   }
 
+function _canStop() {
+    const snap = ctx._snap || {}, execution = snap.execution || {}, phase = execution.quality?.phase || '';
+    return snap.status === 'streaming' || execution.running === true ||
+      ['executing', 'implementing', 'reviewing', 'repairing'].includes(phase);
+  }
+
 function _bind(el) {
     const input = el.querySelector('#nchatInput');
     if (global.ComposeSkills) {
@@ -244,7 +265,7 @@ function _bind(el) {
         host: el.querySelector('.nbox'), input,
         onChange: names => {
           el.dataset.skillCount = String(names.length);
-          ChatTools.paintSendButton(el, ctx._runtimeBusy(), ctx._messageAttachments);
+          ChatTools.paintSendButton(el, ctx._runtimeBusy(), ctx._messageAttachments, ctx._stopState, _canStop(), ctx._sendState);
           ctx._rememberConversationDraft();
         },
         say: (message) => { if (typeof petSay === 'function') petSay(message); },
@@ -288,16 +309,27 @@ function _bind(el) {
     input.addEventListener('keydown', (e) => {
       // Modified combinations belong to ShortcutSettings; pickers may consume Enter first.
       if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey &&
-          !e.isComposing && !e.defaultPrevented) { e.preventDefault(); ctx._send(); }
+          !e.isComposing && !e.defaultPrevented) {
+        e.preventDefault();
+        const hasPayload = global.ChatTools?.composerHasPayload
+          ? global.ChatTools.composerHasPayload(el, ctx._messageAttachments)
+          : Boolean(String(input.value || '').trim());
+        if ((ctx._sendState === 'sending' && !_canStop()) || ctx._stopState === 'requested') return;
+        if (ctx._stopState === 'timeout' && _canStop()) { ctx._cancel(); return; }
+        if (_canStop() && !hasPayload) { ctx._cancel(); return; }
+        ctx._send();
+      }
     });
     input.addEventListener('input', () => {
       ctx._rememberConversationDraft();
       // CSS caps growth to the viewport and scrolls internally, including restored drafts.
       input.style.height = 'auto';
-      ChatTools.paintSendButton(el, ctx._runtimeBusy(), ctx._messageAttachments);
+      ChatTools.paintSendButton(el, ctx._runtimeBusy(), ctx._messageAttachments, ctx._stopState, _canStop(), ctx._sendState);
     });
     el.querySelector('#nchatSend').addEventListener('click', () => {
-      if (ctx._runtimeBusy() && !ChatTools.composerHasPayload(el, ctx._messageAttachments)) { ctx._cancel(); return; }
+      if ((ctx._sendState === 'sending' && !_canStop()) || ctx._stopState === 'requested') return;
+      if (ctx._stopState === 'timeout' && _canStop()) { ctx._cancel(); return; }
+      if (_canStop()) { ctx._cancel(); return; }
       ctx._send();
     });
     const mic = el.querySelector('#nchatMic');
@@ -406,13 +438,12 @@ function _bind(el) {
       ctx._messageAttachments = ConversationAttachments.create({
         host: el.querySelector('.nbox'), input, fileInput: el.querySelector('#nchatFile'),
         button: null, tray: el.querySelector('#nchatAtts'),
-        materialHint: true, hint: el.querySelector('#nchatMaterialHint'),
         librarySource: () => ({ sessionId: ctx._sessionId, conversationTitle: (global.ChatChrome?.sessionTitle || '').trim() }),
         say: (message) => { if (typeof petSay === 'function') petSay(message); },
         onChange: () => {
           ctx._pluginMention?.refresh?.();
           ctx._rememberConversationDraft();
-          ChatTools.paintSendButton(el, ctx._runtimeBusy(), ctx._messageAttachments);
+          ChatTools.paintSendButton(el, ctx._runtimeBusy(), ctx._messageAttachments, ctx._stopState, _canStop(), ctx._sendState);
         },
       });
     }
@@ -576,7 +607,11 @@ function _bind(el) {
       }
       const pluginRetry = e.target.closest('[data-plugin-retry]');
       const pluginNewSession = e.target.closest('[data-plugin-new-session]');
+      const sessionRetry = e.target.closest('[data-session-retry]');
       const modelRetry = e.target.closest('[data-model-retry]');
+      if (sessionRetry) { sessionRetry.disabled = true; void Promise.resolve(ctx._retryOpenChat?.()).finally(() => {
+        if (sessionRetry.isConnected) sessionRetry.disabled = false;
+      }); return; }
       if (modelRetry) { void ctx._queueAction('retry-model', modelRetry.dataset.modelRetry); return; }
       if (pluginNewSession) { void ctx._openPluginAuthRecovery(); return; }
       if (pluginRetry) {
@@ -600,7 +635,7 @@ function _bind(el) {
         }
         return;
       }
-      const deliveryAction = e.target.closest('[data-delivery-reveal],[data-delivery-archive],[data-delivery-retry],[data-delivery-open],[data-delivery-local],[data-delivery-continue],[data-cloud-artifact-url]');
+      const deliveryAction = e.target.closest('[data-delivery-reveal],[data-delivery-archive],[data-delivery-retry],[data-delivery-open],[data-delivery-local],[data-cloud-artifact-url]');
       if (deliveryAction) { void global.ChatDeliveries?.handle(deliveryAction, ctx._api()); return; }
       const librarySave = e.target.closest('[data-library-output]');
       if (librarySave) { if (!librarySave.disabled) void global.LibraryTransfer?.saveDecorated(librarySave); return; }

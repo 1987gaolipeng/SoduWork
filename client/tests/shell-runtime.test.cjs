@@ -47,7 +47,8 @@ test('configured shell remains a development fallback', () => {
 test('installer prepares and embeds the verified shell runtime', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
   assert.equal(pkg.scripts.prebuild,
-    'npm run prepare:runner && npm run prepare:pi-cache && npm run prepare:shell-runtime');
+    'npm run prepare:runner && npm run prepare:pi-cache && npm run prepare:pi-retry && npm run prepare:shell-runtime');
+  assert.equal(pkg.scripts['prepare:pi-retry'], 'node scripts/patch-pi-retry-schedule.cjs');
   assert.equal(pkg.scripts['prebuild-portable'], pkg.scripts.prebuild);
   const script = fs.readFileSync(path.join(__dirname, '..', 'scripts',
     'prepare-shell-runtime.cjs'), 'utf8');

@@ -2,7 +2,9 @@
 import os
 import base64
 import asyncio
+import io
 import unittest
+import zipfile
 from unittest.mock import AsyncMock, patch
 
 os.environ['DATABASE_URL'] = 'sqlite+aiosqlite:///:memory:'
@@ -189,6 +191,32 @@ class LibrarySharingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({row.evidence_meta['recipientId'] for row in attachments}, {'alice', 'bob'})
         self.assertTrue(all(self.objects[row.storage_key] == b'file content' for row in attachments))
 
+    async def test_sender_and_recipient_can_list_and_access_the_shared_attachment(self):
+        response = await self.post(['alice'])
+        self.assertEqual(response.status_code, 200, response.text)
+
+        async with self.sessions() as session:
+            sender = models.Client(id='sender-device', user_ref='sender')
+            recipient = models.Client(id='alice-device', user_ref='alice')
+            sent = await mate_messages.list_for(session, sender, 'sent')
+            received = await mate_messages.list_for(session, recipient, 'received')
+
+            self.assertEqual(len(sent['items']), 1)
+            self.assertEqual(len(received['items']), 1)
+            sent_attachment = sent['items'][0]['attachments'][0]
+            received_attachment = received['items'][0]['attachments'][0]
+            self.assertEqual(sent_attachment, received_attachment)
+
+            sender_file = await mate_message_files.access(session, sender, sent_attachment['id'])
+            recipient_file = await mate_message_files.access(session, recipient, received_attachment['id'])
+            self.assertEqual(sender_file['filename'], 'fixture.txt')
+            self.assertEqual(recipient_file['filename'], 'fixture.txt')
+            self.assertEqual(sender_file['url'], recipient_file['url'])
+
+            with self.assertRaises(Exception) as denied:
+                await mate_message_files.access(session, models.Client(id='bob-device', user_ref='bob'), sent_attachment['id'])
+            self.assertEqual(denied.exception.status_code, 404)
+
     async def test_realtime_shares_identify_each_recipient_for_account_filtering(self):
         async def devices(session, user_id):
             return [models.Client(id='device-' + user_id, user_ref=user_id)]
@@ -227,6 +255,63 @@ class LibrarySharingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.post(['bob'], item='other-file')).status_code, 404)
         self.assertEqual(await self.records(models.MateMessage), [])
         self.assertEqual(self.objects, {})
+
+    async def test_folder_share_always_creates_zip_and_includes_nested_files(self):
+        async with self.sessions() as session:
+            session.add(LibraryFolder(id='share-folder', owner_key='sender', name='reports', backend='local'))
+            session.add(LibraryFolder(id='share-child', owner_key='sender', parent_id='share-folder', name='2026', backend='local'))
+            session.add(LibraryItem(id='share-root-file', owner_key='sender', folder_id='share-folder', filename='summary.md',
+                                    title='Summary', storage_key='summary-object', backend='local', content_type='text/markdown', size=12))
+            session.add(LibraryItem(id='share-nested-file', owner_key='sender', folder_id='share-child', filename='detail.txt',
+                                    title='Detail', storage_key='detail-object', backend='local', content_type='text/plain', size=12))
+            await session.commit()
+
+        async with self.sessions() as session:
+            result = await library_sharing.share_folders(
+                session, models.Client(id='sender-device', user_ref='sender'), ['share-folder'], ['alice'],
+            )
+        self.assertTrue(result['packaged'])
+        self.assertTrue(result['filename'].endswith('.zip'))
+        self.assertEqual({entry['filename'] for entry in result['files']}, {'summary.md', 'detail.txt'})
+        attachments = await self.records(models.Attachment)
+        self.assertEqual(len(attachments), 1)
+        archive = zipfile.ZipFile(io.BytesIO(self.objects[attachments[0].storage_key]))
+        self.assertEqual(set(archive.namelist()), {'summary.md', 'detail.txt'})
+
+    async def test_local_folder_snapshot_preserves_relative_zip_path_and_rejects_traversal(self):
+        encoded = base64.b64encode(b'hello').decode()
+        snapshots, ids = library_sharing.parse_local_snapshots([{
+            'localItemId': 'local-nested-file', 'filename': 'reports/2026/detail.md',
+            'contentType': 'text/markdown', 'data': encoded,
+        }])
+        self.assertEqual(ids, ['local-nested-file'])
+        _, archive_data, manifest = library_sharing._archive_bytes(snapshots)
+        self.assertEqual(manifest['files'][0]['filename'], 'reports/2026/detail.md')
+        archive = zipfile.ZipFile(io.BytesIO(archive_data))
+        self.assertEqual(archive.namelist(), ['reports/2026/detail.md'])
+        with self.assertRaises(Exception):
+            library_sharing.parse_local_snapshots([{
+                'localItemId': 'local-unsafe', 'filename': '../secret.txt', 'data': encoded,
+            }])
+
+    async def test_batch_share_folder_endpoint_forces_zip_for_a_single_file_folder(self):
+        async with self.sessions() as session:
+            session.add(LibraryFolder(id='single-share-folder', owner_key='sender', name='single', backend='local'))
+            session.add(LibraryItem(id='single-share-file', owner_key='sender', folder_id='single-share-folder',
+                                    filename='only.md', title='Only', storage_key='only-object', backend='local',
+                                    content_type='text/markdown', size=5))
+            await session.commit()
+
+        response = await self.http.post('/api/v1/library/items/batch-share', json={
+            'folderIds': ['single-share-folder'], 'recipientUserIds': ['alice'],
+            'requestId': 'f8b4e70d-6f2e-43d5-9d0a-2b3229fca4fd',
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertTrue(body['packaged'])
+        self.assertTrue(body['filename'].endswith('.zip'))
+        self.assertEqual(body['folderIds'], ['single-share-folder'])
+        self.assertEqual(len(self.objects), 1)
 
     async def test_message_failure_rolls_back_all_recipients_and_uploaded_snapshots(self):
         original = mate_messages.create

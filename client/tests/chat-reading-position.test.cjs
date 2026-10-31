@@ -133,3 +133,22 @@ test('user scrolling while history is loading takes precedence over the old read
   assert.equal(await pending, false);
   assert.equal(view.scroll.scrollTop, 400);
 });
+
+test('search expands the current transcript and locates its actual message indices', async () => {
+  const view = setup(); view.reopen();
+  assert.equal(await view.reading.revealSearchMatch('message-12'), true);
+  assert.equal(view.scroll.scrollTop, 216);
+  assert.equal(view.requests[0].messageLimit, 2000);
+});
+
+test('search positioning cannot scroll a replacement conversation or override user scrolling', async () => {
+  for (const change of ['conversation', 'interaction']) {
+    const view = setup(); view.reopen();
+    let finish; view.pause(new Promise(resolve => { finish = resolve; }));
+    const pending = view.reading.revealSearchMatch('message-12');
+    if (change === 'conversation') { view.ctx._ref = 'other'; view.ctx._viewEpoch++; }
+    else view.scroll.__soduworkScrollFollow.interaction++;
+    view.scroll.scrollTop = 400; finish();
+    assert.equal(await pending, false, change); assert.equal(view.scroll.scrollTop, 400, change);
+  }
+});

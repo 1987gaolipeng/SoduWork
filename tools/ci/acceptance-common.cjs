@@ -8,7 +8,7 @@ const contract = require('./release-artifacts.cjs');
 const { newer, parseVersion } = require('../../client/main/client-update-contract.js');
 function assertUpgradeVersion(previousVersion, candidateVersion) {
   for (const version of [previousVersion, candidateVersion]) {
-    assert.match(version, /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/, 'Invalid upgrade semantic version');
+    assert.match(version, /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-beta\.(1|[1-9]\d*))?$/, 'Invalid upgrade semantic version');
     assert.ok(parseVersion(version).every(Number.isSafeInteger), 'Invalid upgrade semantic version');
   }
   assert.ok(newer(candidateVersion, previousVersion), 'Upgrade requires a real older version');

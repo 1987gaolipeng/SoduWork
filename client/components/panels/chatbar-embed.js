@@ -54,9 +54,8 @@
 
   async function followSession(sessionId) {
     if (!sessionId || sessionId === currentSessionId) return;
-    currentSessionId = sessionId;
     try {
-      if (global.NativeChat && typeof NativeChat.enter === 'function') await NativeChat.enter('', sessionId);
+      if (global.NativeChat && typeof NativeChat.enter === 'function' && await NativeChat.enter('', sessionId)) currentSessionId = sessionId;
     } catch (_) { /* The conversation may already be closed; retain current state. */ }
   }
 
@@ -70,6 +69,21 @@
     submissionTail = submission.catch(() => {});
     return submission;
   });
+  api.workPreview.onComposerAutomation?.(payload=>{
+    const admission=submissionTail.then(async()=>{
+      let result;
+      try{
+        await ready; await global.SoduWorkAppConversations?.ready();
+        if(!global.NativeChat?.runAppAutomation)throw Error('即用对话尚未就绪');
+        result=await NativeChat.runAppAutomation(payload.params,async()=>{
+          const permission=await api.workPreview.authorizeComposerAutomation(payload.id);
+          if(!permission?.ok)throw Error('即用创建权限已变化，请重新发起');
+        });
+      }catch(error){result={ok:false,reason:String(error.message || error)};}
+      await api.workPreview.composerAutomationResult({id:payload.id,result});
+    });
+    submissionTail=admission.catch(()=>{});
+  });
   async function submitFromPage(payload) {
     let ok = false, reason = '';
     try {
@@ -78,16 +92,31 @@
         timer = setTimeout(() => reject(Error('对话初始化尚未完成，请稍后重试')), 30000);
       })]); } finally { clearTimeout(timer); }
       await global.SoduWorkAppConversations?.ready();
+      if (payload.kind === 'mention') {
+        if(!global.NativeChat?.openAppMention)throw Error('当前客户端尚未支持同事提及');
+        const opened=await NativeChat.openAppMention(payload.mention || {});
+        await api.workPreview.composerSubmitResult({id:payload.id,ok:opened?.ok===true,state:opened?.state,reason:opened?.reason});
+        return;
+      }
       if (!global.NativeChat?.send) throw Error('对话尚未就绪');
-      if (NativeChat.isBusy?.()) {
+      if (NativeChat.isBusy?.() || NativeChat.sessionInfo?.()?.sessionUnavailable) {
         // Use the same navigation lifecycle as the new-topic button. Reset
         // retains the old draft and releases its view without stopping its run.
         NativeChat.reset();
-        NativeChat.prepare();
+        await NativeChat.prepare();
       }
       // An explicit override sends the app task without consuming the user's
       // composer text, attachments or selected skills.
-      ok = await NativeChat.send(payload.text, { useComposer: false, ...(payload.attachments?.length ? { attachments: payload.attachments } : {}) });
+      let missingBeforeSend = false;
+      const options = { useComposer: false, ...(payload.attachments?.length ? { attachments: payload.attachments } : {}),
+        onAdmission: result => { missingBeforeSend = result?.notSent === true && result.code === 'SESSION_NOT_FOUND'; } };
+      ok = await NativeChat.send(payload.text, options);
+      // Only a definite missing-session rejection permits one new-topic
+      // attempt. Model/auth/quota failures and uncertain sends are not retried.
+      if (!ok && missingBeforeSend) {
+        NativeChat.reset(); await NativeChat.prepare();
+        ok = await NativeChat.send(payload.text, { ...options, onAdmission: undefined });
+      }
       if (!ok) reason = '发送未被接受，请查看右侧对话中的错误并重试';
     } catch (error) { reason = String(error.message || error); }
     void api.workPreview.composerSubmitResult({ id: payload.id, ok, reason });
@@ -213,7 +242,7 @@
     const originalSend = NativeChat.send.bind(NativeChat);
     NativeChat.send = async (...args) => {
       const result = await originalSend(...args);
-      try { void api.workPreview.composerSent(); } catch (_) {}
+      try { if (result === true) void api.workPreview.composerSent(); } catch (_) {}
       return result;
     };
   }

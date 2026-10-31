@@ -3,6 +3,7 @@
 const protocolGuard = require('../agent-runtime/protocol-guard');
 const agentSource = require('./agent-source.cjs');
 const toolFileLocation = require('./tool-file-location.cjs');
+const attachmentContract = require('../pi-session/attachment-contract');
 
 // Translate executor events into the SAME message/tool contract as an ordinary
 // turn. Cursors and tool identities are scoped to an execution, never a task title.
@@ -119,7 +120,12 @@ function create(handle, taskId, options = {}) {
               ? [ref, item.round || item._round || 1, item.seg || 1, item.streamId].join(':')
               : ref + ':' + item.streamId) : undefined }, taskId, key);
         } else if (item.kind === 'user' && options.includeUser) {
-          call('appendTaskMessage', 'user', raw, (item.attachments || []).map(file => ({ name: String(file.name || '附件') })), taskId, key);
+          // Keep the same public attachment contract as Pi. Older cloud
+          // pages may only contain names; newer runtimes can also provide
+          // type, size, and an already-authorized preview reference.
+          const files = attachmentContract.publicFiles(item.attachments, { derivePreviewRef: false })
+            .map(file => { const copy = { ...file }; if (!copy.previewRef) delete copy.previewRef; return copy; });
+          call('appendTaskMessage', 'user', raw, files, taskId, key);
         } else if (item.kind === 'say') {
           const streaming = options.coalesceText && (item.delta || item.streamId);
           let content = raw, transcriptKey = key;

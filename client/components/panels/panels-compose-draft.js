@@ -68,11 +68,14 @@
     if (!box) return;
     box.classList.add('show');
     /*
-     * Match progress wording to the input source; parsing a complete conversation can take
-     * longer than parsing a single sentence.
+     * Show an explicit thinking state immediately. The user prompt is mounted by
+     * PluginUIHost before this call, so the transcript always reads as:
+     * prompt -> thinking -> populated card.
      */
     _showLoading(box, '正在整理需求说明，最多等待两分钟');
-    _load(text);
+    // Keep the surface mounted while parsing, but expose the same promise to
+    // the action router so a completed card/error has one lifecycle boundary.
+    return _load(text);
   }
 
   function clear(options = {}) {
@@ -107,8 +110,11 @@
 
   function _showLoading(box, text) { box.innerHTML = _loadingHtml(text); }
   function _loadingHtml(text) {
-    if (_opts.variant !== 'chat') return '<div class="cp-loading">' + esc(text) + '…</div>';
-    return '<div class="cp-loading cp-loading-chat"><span>' + esc(text) + '…</span>' +
+    if (_opts.variant !== 'chat') {
+      return '<div class="cp-loading cp-loading-thinking" role="status" aria-live="polite">' +
+        '<i aria-hidden="true"></i><span><b>正在思考</b><small>' + esc(text) + '…</small></span></div>';
+    }
+    return '<div class="cp-loading cp-loading-chat cp-loading-thinking" role="status" aria-live="polite"><i aria-hidden="true"></i><span><b>正在思考</b><small>' + esc(text) + '…</small></span>' +
       '<button class="cp-card-close" id="cpCancel" title="继续对话" aria-label="继续对话">' +
         '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>';
   }
@@ -441,8 +447,8 @@
         (fixedActions ? '<div class="cp-form-materials"></div></div>' : '') +
         '<div class="cp-acts">' +
           '<button class="cp-primary" id="cpCreate">' + esc(_goLabel()) + '</button>' +
-          (inChat ? '<button class="cp-ghost" id="cpCollapse">收起详情</button>' :
-            '<button class="cp-ghost" id="cpCancel">再想想</button>') +
+          (inChat ? '<button class="cp-ghost cp-cancel" data-cp-cancel>取消</button><button class="cp-ghost" id="cpCollapse">收起详情</button>' :
+            '<button class="cp-ghost" id="cpCancel">' + (_opts.requirement ? '取消' : '再想想') + '</button>') +
         '</div>' +
       '</div>';
     box.classList.add('show');
@@ -486,6 +492,7 @@
       '<div class="cp-quick-meta">' + meta.map((s) => '<span>' + esc(s) + '</span>').join('') + '</div>' +
       '<div class="cp-acts">' +
         '<button class="cp-primary" id="cpCreate">' + esc(_goLabel()) + '</button>' +
+        '<button class="cp-ghost cp-cancel" data-cp-cancel>取消</button>' +
         '<button class="cp-ghost" id="cpExpand">检查详情</button>' +
       '</div>' +
     '</div>';
@@ -730,7 +737,7 @@
       }
       if (e.target.closest('#cpExpand')) { _sync(); _detailOpen = true; _render(); return; }
       if (e.target.closest('#cpCollapse')) { _sync(); _detailOpen = false; _render(); return; }
-      if (e.target.closest('#cpCancel')) { clear(); return; }
+      if (e.target.closest('#cpCancel,[data-cp-cancel]')) { clear(); return; }
       if (e.target.closest('#cpCreate')) { _create(); }
     });
 

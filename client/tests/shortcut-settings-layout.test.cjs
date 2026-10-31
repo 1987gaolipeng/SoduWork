@@ -73,6 +73,7 @@ test('只有快捷键列表滚动，标题和搜索固定，空状态不占空�
 
 test('快捷键编辑器使用真实配置存储并注册当前窗口截图能力', () => {
   const source = read('components/settings/shortcut-settings.js');
+  const preload = read('preload.js');
   assert.match(source, /Store\._cfg/);
   assert.match(source, /Store\.saveCfg/);
   assert.match(source, /soduWorkAPI\?\.capturePage/);
@@ -82,5 +83,7 @@ test('快捷键编辑器使用真实配置存储并注册当前窗口截图能�
   const panel = shortcutPanel(read('desk.html'));
   assert.doesNotMatch(panel, /data-shortcut-preview|data-shortcut-copy|data-shortcut-close-preview/);
   assert.match(source, /soduWorkAPI\.startScreenshot\(\{ hideOwner: options\?\.hideOwner === true \}\)/);
+  assert.match(preload, /startScreenshot:\s*\(options\)\s*=>\s*ipcRenderer\.invoke\('screenshot-start',\s*options\s*\|\|\s*\{\}\)/,
+    'preload must forward the hideOwner option to the main-process capture service');
   assert.match(panel, /data-shortcut-status role="status" aria-live="polite"/);
 });

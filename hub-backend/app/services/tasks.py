@@ -500,6 +500,11 @@ async def create_task(
         await session.flush()
     await session.refresh(t)
     api = task_to_api(t)
+    # The create/PUT response is applied to the desktop store immediately,
+    # before the next decorated task-list refresh. Include the resolved assignee
+    # name here so the creation receipt never falls back to a truncated user id.
+    _, assignee_name = await resolve_user(session, t.assignee_user_id)
+    api["assigneeName"] = assignee_name
     return api
 
 

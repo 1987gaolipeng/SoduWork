@@ -1,9 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import connectorConfig from '../../client/components/panels/connector-config.js'
 import { createComponentHarness } from './helpers/react-harness.mjs'
 import { setLocale } from '../src/i18n.js'
 const text=n=>Array.isArray(n)?n.map(text).join(''):n?.props?text(n.props.children):typeof n==='string'?n:''
+const formCss=fs.readFileSync(new URL('../src/screens/McpConnectionForm.css',import.meta.url),'utf8')
 const wait=()=>{let resolve;const promise=new Promise(r=>resolve=r);return{promise,resolve}}
 async function form(t, probe, overrides = {}) {
  const previous=globalThis.window;globalThis.window={SoduWorkConnectorConfig:connectorConfig,dispatchEvent(){}};t.after(()=>{if(previous===undefined)delete globalThis.window;else globalThis.window=previous});
@@ -14,6 +16,11 @@ async function form(t, probe, overrides = {}) {
 test('connect checks once and enables; duplicate clicks cannot create duplicate writes',async t=>{
  const d=wait(),f=await form(t,()=>d.promise);const one=f.footer().props.onClick(),two=f.footer().props.onClick();assert.equal(f.pending.length,1);assert.equal(f.calls.length,0);d.resolve({ok:true,authenticationTested:true});await Promise.all([one,two]);assert.equal(f.calls.length,1);assert.equal(f.calls[0].enabled,true)
 });
+test('connector form keeps long labels readable, removes double focus chrome, and expands auth headers',()=>{
+ assert.match(formCss,/\.connector-form \.f-lbl\{[^}]*overflow-wrap:anywhere/)
+ assert.match(formCss,/\.connector-form \.connector-auth-headers\{[^}]*min-height:112px/)
+ assert.match(formCss,/\.connector-form :is\(input,select,textarea\):focus\{[^}]*box-shadow:none/)
+})
 test('connection labels follow locale while names, auth keys and saved configuration stay intact', async t => {
  t.after(() => setLocale('zh-CN'));
  const initial = {id:'a',name:'用户自定义连接',type:'http',url:'https://example.com/mcp',keycloak:{tokenUrl:'https://auth.example/token',username:'业务账号',password:'fixture-secret'}};

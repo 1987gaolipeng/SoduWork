@@ -21,6 +21,12 @@ async function waitFor(code, name) {
 async function click(text) {
   await js(`(() => { const b=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===${JSON.stringify(text)});if(!b)throw Error('Missing button');b.click() })()`)
 }
+async function chooseOrg(label) {
+  const labelJson = JSON.stringify(label)
+  await js("(() => { const t=document.querySelector('.om-org-select .select-menu-trigger'); if(!t) throw Error('Missing org selector trigger'); t.click() })()")
+  await waitFor('!!document.querySelector(".om-org-select .select-menu-popover [role=\\"option\\"]")', 'org options open')
+  await js('(() => { const options=[...document.querySelectorAll(\'.om-org-select .select-menu-popover [role="option"]\')]; const target=options.find((option)=>option.textContent.trim()===' + labelJson + '); if(!target) throw Error("Missing option: " + ' + labelJson + '); target.click() })()')
+}
 async function input(selector, value) {
   await js(`(() => {const e=document.querySelector(${JSON.stringify(selector)});const proto=e.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(proto,'value').set.call(e,${JSON.stringify(value)});e.dispatchEvent(new Event('input',{bubbles:true}))})()`)
 }
@@ -185,6 +191,16 @@ app.whenReady().then(async () => {
   assert.match((await clientContext.json()).prompt, /复核人签字/)
   await shot('organization-memory-automatic')
   checks.push('Two real team task completions aggregate automatically, remain separate from editable corrections, and reach device conversation context')
+  // Superadministrators can browse another organization's memory from the header.
+  await waitFor('!!document.querySelector(".om-org-select")', 'organization selector appears')
+  await chooseOrg('Other isolated organization')
+  await waitFor('!!document.querySelector(".om-document") && document.body.textContent.includes("其他组织隔离内容")', 'other organization memory loads')
+  assert.ok(await js('document.querySelector(".om-automatic").textContent.includes("1 项共享工作")'))
+  checks.push('Organization selector loads another organization memory for superadministrators')
+  await chooseOrg('Isolated organization')
+  await waitFor('document.body.textContent.includes("复核人签字")', 'own organization memory restored')
+  checks.push('Switching back to the own organization restores its current memory')
+
   const withdrawn = await shared('withdraw')
   assert.equal(withdrawn.item.sourceCount, 1); assert.doesNotMatch(withdrawn.prompt, /月度交付规范/)
   await click('重新加载')

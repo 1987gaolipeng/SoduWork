@@ -12,11 +12,12 @@
 <script>
 const receipt=document.querySelector('#receipt');
 let starts=0;window.petSay=text=>{receipt.textContent=text};
-window.soduWorkAPI={conversationSession:{runtimes:async()=>({ok:true,runtimes:[
+const readyRuntimes=[
  {id:'pi',displayName:'Pi',modelMode:'managed',group:'recommended',order:10},
  {id:'codex-harness',displayName:'Codex Harness',modelMode:'managed',group:'recommended',order:20},
  {id:'qwen',displayName:'Qwen Code',modelMode:'managed',group:'more',order:60}
-]}),probe:async()=>({ok:true}),
+];
+window.soduWorkAPI={conversationSession:{runtimes:async()=>({ok:true,runtimes:readyRuntimes,availableRuntimes:readyRuntimes,missing:[]}),probe:async()=>({ok:true}),
  cloud:{targets:async(agent)=>({ok:true,targets:agent === 'unavailable' ? [] : [{id:'remote',agentId:agent || 'pi'}]}),start:async input=>{starts++;receipt.textContent='cloud-start\n'+input.text+'\nsends:'+starts;return {ok:true,sessionId:'cloud-test'}}}}};window.ComposeModelPicker={ready:async()=>true,value:()=>({modelName:'test-model'})};
 window.NativeChat={enter:async()=>true};window.WorkspaceHost={open:()=>{receipt.textContent='打开云端环境配置'}};
 const surface=ComposeSurface.create({_bind:panel=>{

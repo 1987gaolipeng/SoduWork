@@ -30,6 +30,13 @@ _VERSIONED_PACKAGE = re.compile(r"^SoduWork-(\d+)\.(\d+)\.(\d+)-Setup\.exe$")
 # Public Linux downloads from the release channel.
 _LINUX_FORMAT_SUFFIXES = (("deb", ".deb"), ("rpm", ".rpm"), ("tar.gz", ".tar.gz"))
 
+# The public homepage lists the production channel by default. The staging
+# deployment points this at "beta" so testers download exactly the version
+# under acceptance; production keeps serving the stable channel.
+def _public_channel() -> str:
+    import os
+    return os.environ.get("SODUWORK_PUBLIC_DOWNLOAD_CHANNEL", "stable")
+
 
 def _linux_format(artifact_name: str) -> str:
     lowered = str(artifact_name or "").lower()
@@ -71,7 +78,7 @@ async def _stable_release_rows(session, platform: str, arch: str | None = None):
     """
     filters = [
         ClientRelease.enabled.is_(True),
-        ClientRelease.channel == "stable",
+        ClientRelease.channel == _public_channel(),
         ClientRelease.platform == platform,
     ]
     if arch:
@@ -88,7 +95,7 @@ async def _stable_release_rows(session, platform: str, arch: str | None = None):
         trusted.append(row)
     return sorted(
         trusted,
-        key=lambda row: (client_contract.parse_version(row.version) or (-1, -1, -1),
+        key=lambda row: (client_contract.parse_version(row.version) or (0, 0, 0, 0, 0),
                          -client_contract.format_rank(row.artifact_name),
                          -client_contract.installer_brand_rank(row.artifact_name)),
         reverse=True,
@@ -123,9 +130,9 @@ async def _verified_row_async(row):
 
 @router.get("/client/releases/{release_id}")
 async def client_release_download(release_id: str, session=Depends(get_session)):
-    """Permanent Release links serve only enabled, signed stable installers."""
+    """Permanent Release links serve only enabled, signed installers from the public channel."""
     row = await session.get(ClientRelease, release_id)
-    if row is None or not row.enabled or row.channel != "stable":
+    if row is None or not row.enabled or row.channel != _public_channel():
         raise HTTPException(status_code=404, detail="安装包不存在或尚未发布")
     try:
         client_contract.assert_trusted_release(row)
@@ -157,7 +164,7 @@ async def client_linux_info(session=Depends(get_session)):
     rows = await _linux_release_rows(session)
     if not rows:
         return {"available": False, "version": "", "formats": {}}
-    newest = max(client_contract.parse_version(row.version) or (-1, -1, -1)
+    newest = max(client_contract.parse_version(row.version) or (0, 0, 0, 0, 0)
                  for row in rows)
     version = _version_text(rows, newest)
     formats: dict[str, dict] = {}
@@ -207,7 +214,7 @@ async def client_mac_info(session=Depends(get_session)):
     rows = await _mac_release_rows(session)
     if not rows:
         return {"available": False, "version": "", "arches": {}}
-    newest = max(client_contract.parse_version(row.version) or (-1, -1, -1)
+    newest = max(client_contract.parse_version(row.version) or (0, 0, 0, 0, 0)
                  for row in rows)
     version = _version_text(rows, newest)
     arches: dict[str, dict] = {}

@@ -11,9 +11,13 @@ function fixture() {
     projectId: 'project-a', adapterId: 'qwen', seatId: 'seat-must-not-be-assignee' };
   let opened, refined, release;
   const input = { value: '今天中午12点使用小游戏插件开发够级小游戏', style: {},
-    addEventListener() {}, dispatchEvent() {}, focus() {}, isConnected: true };
+    addEventListener() {}, dispatchEvent() {}, focus() {}, isConnected: true,
+    // showPending now removes previous pending cards and appends into the draft container.
+    querySelector: () => null, appendChild() {} };
   const c = { Event: class { constructor(type) { this.type = type; } },
-    document: { getElementById: () => input }, console };
+    document: { getElementById: () => input,
+      createElement: () => ({ style: {}, dataset: {}, setAttribute() {}, appendChild() {}, append() {},
+        remove() {}, classList: { add() {}, remove() {}, toggle() {} } }) }, console };
   c.window = c;
   vm.createContext(c);
   for (const name of ['plugin-ui-host', 'panels-chat-work-actions', 'panels-compose-work-actions'])

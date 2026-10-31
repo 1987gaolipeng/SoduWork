@@ -59,7 +59,7 @@ async def list_stable_releases(session: AsyncSession = Depends(get_session)):
         ClientRelease.channel == "stable"
     ))).scalars().all())
     rows.sort(key=lambda row: (
-        contract.parse_version(row.version) or (-1, -1, -1),
+        contract.parse_version(row.version) or (0, 0, 0, 0, 0),
         -contract.installer_brand_rank(row.artifact_name), row.id,
     ), reverse=True)
     current_targets = set()

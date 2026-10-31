@@ -24,6 +24,9 @@
 !macroend
 
 !macro customUnInstall
+  !ifmacrodef soduworkPrepareResourceUninstall
+    !insertmacro soduworkPrepareResourceUninstall
+  !endif
   ; An older/parallel installation must not remove a newer installation's entry.
   ReadRegStr $0 SHELL_CONTEXT "${SODUWORK_FILE_VERB}\command" ""
   ${If} $0 == '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" --soduwork-open-file "%1"'

@@ -1,6 +1,7 @@
 import { getLocale, translateText as tx, localeMap, useLocale } from '../i18n.js'
 import React, { useEffect, useId, useRef, useState } from 'react'
 import { Icon } from '../ui.jsx'
+import { summarizeTrend } from './insights-metrics.js'
 
 const METRICS = localeMap(() => ({
   aiSessions: { label: 'AI 会话', unit: '场' },
@@ -19,9 +20,8 @@ export function UsageTrend({ trend }) {
   const plotRef = useRef(null)
   const gradientId = useId().replace(/:/g, '')
   const meta = METRICS[metric]
-  const values = trend.map((day) => Math.max(0, Number(day[metric]) || 0))
-  const peak = Math.max(0, ...values)
-  const average = values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length * 10) / 10 : 0
+  const { values, average, peak: seriesPeak } = summarizeTrend(trend, metric)
+  const peak = seriesPeak ?? 0
   const step = 10 ** Math.floor(Math.log10(Math.max(1, peak / 4)))
   const tickSize = Math.max(1, [1, 2, 3, 5, 10].find((size) => size * step >= peak / 4) * step)
   const ceiling = tickSize * 4
@@ -59,14 +59,14 @@ export function UsageTrend({ trend }) {
 
   return <section className="ops-panel oi-panel oi-usage">
     <header className="oi-panel-header">
-      <div className="oi-panel-title"><span className="oi-panel-icon"><Icon name="activity" /></span><div><h3>{tx("使用趋势")}</h3><p>{tx("近 30 天的每日活跃与产出")}</p></div></div>
+      <div className="oi-panel-title"><span className="oi-panel-icon"><Icon name="activity" /></span><div><h3>{tx("使用趋势")}</h3><p>{tx("近 30 个自然日（北京时间 UTC+8，含今天）")}</p></div></div>
       <div className="oi-trend-tabs" role="group" aria-label={tx("趋势指标")}>
         {Object.entries(METRICS).map(([key, item]) => <button key={key} type="button" aria-pressed={metric === key}
           onClick={() => { setMetric(key); setActive(null) }}>{item.label}</button>)}
       </div>
     </header>
     <div className="oi-trend-summary"><span><i />{meta.label}<small>{tx("单位：")}{meta.unit}</small></span>
-      <span>{tx("日均 ")}<b>{number(average)}</b><em />{tx("单日最高 ")}<b>{number(peak)}</b></span></div>
+      <span>{tx("日均 ")}<b>{average == null ? '—' : number(average)}</b><em />{tx("单日最高 ")}<b>{seriesPeak == null ? '—' : number(seriesPeak)}</b></span></div>
     {values.length === 0 ? <div className="oi-chart-empty"><Icon name="activity" /><b>{tx("暂无趋势数据")}</b><span>{tx("开始使用 SoduWork 后，这里会展示每日变化。")}</span></div> :
       <div className="oi-trend-plot" ref={plotRef}>
         <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" tabIndex="0" role="img"
@@ -83,6 +83,6 @@ export function UsageTrend({ trend }) {
         {selected != null && selected >= 0 && <div className={'oi-trend-tooltip' + (selected < values.length / 2 ? ' from-left' : ' from-right')}
           style={{ left: `${x(selected) / width * 100}%` }}><span>{shortDate(trend[selected].date)} · {meta.label}</span><b>{number(values[selected])}<small>{meta.unit}</small></b></div>}
       </div>}
-    <p className="oi-chart-foot">{peak ? tx("悬停查看每日数据，也可聚焦图表后使用方向键。") : values.length ? tx("当前统计周期内暂无使用记录。") : tx("统计口径与上方指标一致。")}</p>
+    <p className="oi-chart-foot">{peak ? tx("悬停查看每日数据，也可聚焦图表后使用方向键。") : values.length ? tx("当前统计周期内暂无使用记录。") : tx("暂无趋势数据")}</p>
   </section>
 }

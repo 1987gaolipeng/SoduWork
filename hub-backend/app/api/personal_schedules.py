@@ -118,6 +118,11 @@ async def create_my_schedule(body: dict = Body(default_factory=dict),
     s = AiSchedule(created_by=(str(me.id) if me else None),
                    created_by_name=_actor_label(me, client),
                    org_id=(me.org_id if me else None))
+    from ..services.schedule_source_app import clean as clean_source_app
+    try:
+        s.source_app = clean_source_app(body.get("sourceApp"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     _sch_apply(s, body)
     s.owner_client_id = client.id          # Bind the schedule to the authenticated client, not a client supplied in the request.
     if not s.title:

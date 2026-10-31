@@ -96,3 +96,14 @@ test('the production workspace loads the shared entry before both composer clien
     assert.ok(shared < desk.indexOf('src="components/panels/' + name + '"'));
   }
 });
+
+
+test('editing an instant app starts a fresh development chat like plugin improvement, with a full-source edit reference',async()=>{
+ const draft={template:'app',key:'idea',name:'灵感扭蛋机'},f=fixture({}, {
+   SoduWorkAPI:{personalPlugin:async()=>({plugin:{template:'app',name:draft.name,localDraft:draft}})},
+   SoduWorkPluginAccess:{assertEditable:async value=>assert.equal(value,draft)}});
+ await f.window.PluginBuilderEntry.editApp('local:idea');
+ const opened=f.opened[0];assert.equal(opened.view,'create');assert.equal(opened.payload.newSession,true);
+ assert.equal(opened.payload.pluginId,'local:app-developer');assert.equal(opened.payload.pluginEditId,'local:idea');
+ assert.match(opened.payload.prefill,/修改即用/);assert.equal(opened.payload.sessionId,undefined);
+});

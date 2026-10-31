@@ -18,7 +18,7 @@ test('saved output budget and native capability metadata reach both Pi configura
  assert.equal(written.providers.soduwork.models[0].maxTokens,32768);
  assert.deepEqual(written.providers.soduwork.models[0].input,['text','image']);
  assert.ok(!JSON.stringify(written).includes('fixture-key'));
- assert.equal(outputLimit({maxOutputTokens:Infinity}),32768);
+ assert.equal(outputLimit({maxOutputTokens:Infinity}),65536);
  assert.equal(outputLimit({maxOutputTokens:40000,contextWindow:8192}),8192);
 });
 

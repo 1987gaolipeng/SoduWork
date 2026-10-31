@@ -470,7 +470,7 @@
         const detail = result && result.plugin || {};
         if (!detail.localDraft) throw new Error('没有读取到当前插件版本');
         if (typeof ctx.createWithAgent !== 'function') throw new Error('插件开发助手暂不可用');
-        ctx.createWithAgent(detail.localDraft);
+        await ctx.createWithAgent(detail.localDraft, item.pluginId);
       } catch (error) {
         ctx.say(ctx.errorText(error, '没有打开插件改进会话'));
         this.disabled = false;
@@ -585,6 +585,7 @@
     });
   }
   function openLocalImport(body, preview, ctx) {
+    if(preview.ok===false||preview.checks?.some(row=>row.ok===false))throw Error((preview.checks||[]).filter(row=>row.ok===false).map(row=>row.label).join('\n')||'预检仍有未通过项');
     const rawManifest = preview.manifest || {};
     const manifest = global.SoduWorkPluginLocales?.present(rawManifest, global.SoduWorkI18n?.getLocale?.() || global.navigator?.language) || rawManifest;
     const flow = (preview.workflow || {}).nodes || [];
@@ -593,17 +594,17 @@
       (cap.executionMode === 'workflow' || flow.length > 1);
     const resources = manifest.resources || cap.resources || [];
     const application = manifest.template === 'app';
-    const layer = ctx.openModal(application ? '安装应用' : '安装插件', '检查已完成，选择安装方式',
+    const layer = ctx.openModal(application ? '安装即用' : '安装插件', '检查已完成，选择安装方式',
       '<div class="cap-plugin-preview"><span class="cap-plugin-brand ' + toneClass(manifest, hasWorkflow) + ' icon-' + iconKind(manifest, hasWorkflow) + '">' + brandIcon(manifest, hasWorkflow) + "</span><div><b data-user-content>" + h(manifest.name) +
       "</b><p" + (manifest.description ? ' data-user-content' : '') + '>' + h(manifest.description || '没有说明') + '</p><em>v' + h(manifest.version) +
-      ' · ' + (application ? '应用' : hasWorkflow ? flow.length + ' 个步骤' : '直接能力包') + '</em></div></div>' +
+      ' · ' + (application ? '即用' : hasWorkflow ? flow.length + ' 个步骤' : '直接能力包') + '</em></div></div>' +
       '<div class="cap-local-checks"><span>结构检查通过</span><span>仅保存到本机</span></div>' +
       '<div class="cap-local-access"><b>使用时需要</b><span>' + [
         cap.network ? '网络访问' : '无需网络访问',
         ...(cap.runtime || []).filter(x => x !== 'files').map(x => x === 'terminal' ? '运行命令' : x === 'browser' ? '浏览器' : x),
       ].map(label => '<span>' + h(label) + '</span>').join(' · ') + '</span></div>' +
       (global.SoduWorkPluginMakerUtils ? global.SoduWorkPluginMakerUtils.resourceMarkup(resources) : '') +
-      '<p class="cap-local-note">' + (application ? '安装后可在「应用 → 我的」中找到，独立打开工作页面。' : '安装后可在插件中找到；需要的偏好和账号连接会在首次使用时引导设置。') + '</p>' +
+      '<p class="cap-local-note">' + (application ? '安装后可在「即用 → 我的」中找到，独立打开工作页面。' : '安装后可在插件中找到；需要的偏好和账号连接会在首次使用时引导设置。') + '</p>' +
       '<p class="cap-local-error" id="capLocalError" role="alert" hidden></p>',
       '<button class="btn-mini" id="capLocalCancel">取消</button><span class="push"></span>' +
       '<button class="btn-mini" id="capLocalOnly">仅安装</button>' +
@@ -615,9 +616,9 @@
     const installButton = layer.querySelector('#capLocalInstall');
     const errorEl = layer.querySelector('#capLocalError');
     function installed(item, message = '') {
-      const ready = ctx.openModal('安装完成', (application ? '应用' : '插件') + '已保存到我的 SoduWork',
+      const ready = ctx.openModal('安装完成', (application ? '即用' : '插件') + '已保存到我的 SoduWork',
         '<div class="cap-local-success"><span aria-hidden="true">' + ICON.shield + '</span><div><b data-user-content>' + h(item.name) +
-        '</b><p>' + (application ? '可从「应用 → 我的」独立打开。' : '可从插件页面或对话输入框中选择使用。') + '</p></div></div>' +
+        '</b><p>' + (application ? '可从「即用 → 我的」独立打开。' : '可从插件页面或对话输入框中选择使用。') + '</p></div></div>' +
         (message ? '<p class="cap-local-error" role="alert">' + h(message) + '</p>' : ''),
         '<button class="btn-mini" id="capLocalDone">完成</button><span class="push"></span>' +
         '<button class="btn-mini primary" id="capLocalTry">开始使用</button>');

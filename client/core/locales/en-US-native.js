@@ -22,7 +22,7 @@
   "当前版本": "Current version",
   "已撤回": "Withdrawn",
   "当前安装包未附带版本记录。": "This installation does not include release notes.",
-  "应用信息暂不可用，请重试。": "App information is unavailable. Please try again.",
+  "即用信息暂不可用，请重试。": "App information is unavailable. Please try again.",
   "官网暂时无法打开，请重试。": "The website could not be opened. Please try again.",
   "退出未完成，请重试。": "SoduWork could not quit. Please try again.",
   "退出 SoduWork？": "Quit SoduWork?",

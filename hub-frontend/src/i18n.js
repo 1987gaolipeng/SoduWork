@@ -50,6 +50,10 @@ export function t(key, fallback = key, value = getLocale()) {
   return dictionary[locale]?.[key] ?? dictionary[fallbackLocale(locale)]?.[key] ?? dictionary['en-US']?.[key] ?? dictionary[FALLBACK]?.[key] ?? fallback
 }
 
+// Mark an authored key that must remain stable until the UI presents it.
+// The source audit checks this exact key in every supported translated locale.
+export function deferredMessageKey(source) { return source }
+
 // Only authored UI sources are passed here. Never translate a server value,
 // user-entered title, prompt, URL, log or code, even if it equals a UI label.
 // Interpolation happens after translation, preserving user data verbatim.

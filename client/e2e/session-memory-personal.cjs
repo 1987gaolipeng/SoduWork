@@ -6,6 +6,7 @@ if (typeof electron === 'string') {
 }
 const { app, BrowserWindow, ipcMain } = electron;
 const path = require('node:path'), assert = require('node:assert/strict');
+require('./lib/isolated-profile.cjs').isolateProfile(app, 'session-memory-personal');
 let win, item = null, revision = 0, listDelay = 0, failedUpdate = false;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const js = code => win.webContents.executeJavaScript(code);

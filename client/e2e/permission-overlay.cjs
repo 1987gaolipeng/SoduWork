@@ -218,7 +218,13 @@ if (typeof electron === 'string') {
     first.arguments.content = Array.from({ length: 40 }, (_, index) => 'Read-only preview line ' + index).join('\n');
     await pending('overlay-a', [first, second]);
     await until(overlayVisible, 'initial approval overlay');
-    assert.equal(await js('document.querySelectorAll("#nchatList [data-ui-answer=permission]").length'), 0);
+    const modalBlock = await js(`(()=>{const dock=document.querySelector('.nchat-entry-dock'), mode=document.querySelector('#nchatMode'), send=document.querySelector('#nchatSend'); return {
+      blocked:dock?.dataset.permissionBlocked==='true', dockBusy:dock?.getAttribute('aria-busy')==='true',
+      modeInert:!!mode?.inert, sendInert:!!send?.inert,
+      modeHit:!!(mode&&mode.contains(document.elementFromPoint((mode.getBoundingClientRect().left+mode.getBoundingClientRect().right)/2,(mode.getBoundingClientRect().top+mode.getBoundingClientRect().bottom)/2)))
+    };})()`);
+    assert.deepEqual(modalBlock, { blocked:true, dockBusy:true, modeInert:true, sendInert:true, modeHit:false }, 'permission approval blocks lower composer controls');
+    assert.equal(await js('document.querySelector("#nchatMode")?.getAttribute("aria-expanded")'), 'false');
     assert.equal(await js('document.querySelector(".access-request").getAttribute("role")'), 'dialog');
     assert.equal(await js('document.querySelector("#nchatScroll").scrollHeight'), before, 'approval does not enlarge message scroll range');
     assert.equal(await js('document.querySelectorAll(".access-request").length'), 1);
@@ -263,7 +269,9 @@ if (typeof electron === 'string') {
     assert.equal(await js('document.querySelector(".access-count").getAttribute("aria-label")'), '还有 1 项待确认');
     report.cases.push('Compact request supports a 360×480 window with keyboard-reachable decisions, optional session grants, and localized accessible queue count');
     const countBefore = answers.length;
-    await click('#nchatInput');
+    // A pending permission request is modal: a programmatic click on the
+    // composer is ignored just like a real pointer click behind the dialog.
+    await js('document.querySelector("#nchatInput").click();');
     for (const type of ['keyDown', 'keyUp']) win.webContents.sendInputEvent({ type, keyCode: 'Escape' });
     await delay(60); assert.equal(answers.length, countBefore); assert.equal(await js(overlayVisible), true);
     hold = true; await click('.access-request [data-ui-value=once]');
@@ -275,6 +283,8 @@ if (typeof electron === 'string') {
     await until('document.querySelector(".access-request [data-ui-value=deny]")?.dataset.permissionRequest==="second"', 'next queued request');
     await click('.access-request [data-ui-value=deny]');
     await until('!' + overlayVisible, 'queue completed');
+    assert.equal(await js('document.querySelector(".nchat-entry-dock")?.dataset.permissionBlocked || ""'), '');
+    assert.equal(await js('document.querySelector("#nchatMode")?.inert'), false);
     assert.deepEqual(answers.slice(-2).map(row => row.value.decision), ['once', 'deny']);
     report.cases.push('Outside click and Escape never authorize; one reply disables every action and queued requests advance only after acknowledgement');
     await pending('overlay-a', [request('retry-request')]); failNext = true;
@@ -294,10 +304,16 @@ if (typeof electron === 'string') {
     assert.equal(await js('document.querySelector(".access-request [data-ui-value=once]").disabled'), false);
     await pending('overlay-b', []); await until('!' + overlayVisible, 'expired/cancelled authoritative snapshot');
     await pending('overlay-b', [request('stop-request')], { execution: { running: true } });
-    await click('#nchatSend'); await until(() => cancelled === 1, 'stop IPC'); await until('!' + overlayVisible, 'stop removes approval');
+    const cancelledBeforePermission = cancelled;
+    await js('document.querySelector("#nchatSend").click();'); await delay(60);
+    assert.equal(cancelled, cancelledBeforePermission, 'stop/send is blocked while permission is pending');
+    assert.equal(await js(overlayVisible), true);
+    await click('.access-request [data-ui-value=deny]'); await until('!' + overlayVisible, 'permission clears before stop');
+    await pending('overlay-b', [], { execution: { running: true } });
+    await js('document.querySelector("#nchatSend").click();'); await until(() => cancelled === cancelledBeforePermission + 1, 'stop IPC');
     await pending('overlay-b', [request('reset-request')]);
     await js('NativeChat.reset();'); assert.equal(await js('document.querySelectorAll(".nchat-access-overlay").length'), 0);
-    report.cases.push('A late reply cannot overwrite a newly opened chat; expiry/cancellation snapshots, Stop and reset remove the pending overlay');
+    report.cases.push('A late reply cannot overwrite a newly opened chat; pending permission blocks Stop until acknowledgement, then Stop and reset clear the overlay');
 
     // Real SDK tool authorization through the same production dialog, preload and IPC handler.
     const real = add('overlay-real');

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from .. import automation_models as am
+from .. import automation_models as am, models
 from . import (mcp_servers, plugin_audience, plugin_installations,
                plugin_marketplace, plugin_setup_contracts, rbac)
 from . import plugin_application_mcp
@@ -15,7 +15,8 @@ async def resolve(session, org_id, user_id, plugin_ids, *, provision_defaults=Tr
     ids = list(dict.fromkeys(str(item).strip() for item in plugin_ids if str(item).strip()))
     if not ids or len(ids) > 3:
         raise ValueError("一轮对话请选择 1 至 3 个插件")
-    scope = await rbac.ancestor_org_ids(session, org_id) if org_id else set()
+    actor = await session.get(models.User, user_id)
+    scope = await rbac.company_org_ids(session, actor) if actor else set()
     plugins = {row.id: row for row in (await session.execute(
         select(am.Plugin).where(am.Plugin.id.in_(ids)))).scalars().all()}
     versions = list((await session.execute(select(am.PluginVersion).where(
@@ -29,7 +30,8 @@ async def resolve(session, org_id, user_id, plugin_ids, *, provision_defaults=Tr
     for plugin_id in ids:
         plugin = plugins.get(plugin_id)
         if (plugin is None or not plugin.enabled
-                or plugin.org_id is not None and plugin.org_id not in scope):
+                or (plugin.org_id is not None and scope is not None
+                    and plugin.org_id not in scope)):
             raise ValueError("插件不存在或不在当前企业的可用范围内")
         policy = plugin_marketplace.public_policy(policies.get(plugin_id))
         if policy["installation"] == plugin_marketplace.NOT_AVAILABLE:

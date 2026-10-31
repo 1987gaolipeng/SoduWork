@@ -180,7 +180,7 @@ test('packaged worker validates using the parser shipped with its Pi runtime', a
   const yamlRoot = path.dirname(createRequire(entry).resolve('yaml/package.json'));
   const resources = path.join(f.root, 'resources'), sdk = path.join(resources, 'pi/node_modules/@earendil-works/pi-coding-agent');
   fs.mkdirSync(path.join(sdk, 'dist'), { recursive: true }); fs.writeFileSync(path.join(sdk, 'dist/index.js'), '');
-  fs.cpSync(yamlRoot, path.join(sdk, 'node_modules/yaml'), { recursive: true });
+  await fs.promises.cp(yamlRoot, path.join(sdk, 'node_modules/yaml'), { recursive: true });
   process.resourcesPath = resources;
   try {
     const { data } = bundle(GOOD), [record] = await worker.install({ ...f.app, isPackaged: true }, data, cache._digest(data));

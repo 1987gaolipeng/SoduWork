@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>即用 · 灵感便签</title><link rel="stylesheet" href="style.css">
+<body><main>
+<header><div class="brand"><img src="icon.png" alt=""><span>即用实验室 <small>LOCAL / CONNECTED</small></span></div><button id="settings">设置</button></header>
+<section class="intro"><span class="tag">灵感有归处，数据留在本机</span><h1>把今天的想法，<br><em>留给明天。</em></h1><p>独立 SQLite · 跨即用协作 · 关闭窗口后仍保留</p></section>
+<section class="workspace"><aside><label for="target">正在查看</label><select id="target"><option value="">当前即用</option></select><p>选择同账号的另一个即用，直接读取和修改它的便签。</p><button id="refresh">刷新记录</button><hr><button id="ai">交给 AI 整理</button><button id="mention">@ 同事</button><button id="schedule">每天整理便签</button><p>AI 和计划由 SoduWork 执行；点击后可在宿主核对内容。</p></aside>
+<div class="content"><form id="new"><label for="text">记下一条灵感</label><div class="input"><input id="text" maxlength="500" placeholder="一个点子、一件待办、一句想说的话…" required><button>保存便签 +</button></div></form><div class="section-head"><h2>灵感手账</h2><span id="count">0 条</span></div><div id="notes" aria-live="polite"></div><button id="more" hidden>加载更多</button></div></section>
+<footer><span id="status" role="status">正在连接 SoduWork…</span><span>数据不会随窗口关闭而删除</span></footer>
+<dialog id="preferences"><form method="dialog"><h2>你的工作台</h2><label for="nickname">显示名称</label><input id="nickname" maxlength="80"><label for="appearance">色彩</label><select id="appearance"><option value="warm">暖白</option><option value="dark">夜色</option></select><div class="dialog-actions"><button value="cancel">取消</button><button id="save-settings" value="default">保存设置</button></div><p id="settings-status" role="status"></p></form></dialog>
+<dialog id="share"><form method="dialog"><h2>把想法带给同事</h2><label for="share-org">部门</label><select id="share-org"><option value="">全部部门</option></select><label for="share-person">同事</label><select id="share-person"></select><label for="share-text">想说的话</label><textarea id="share-text" maxlength="500" rows="5" placeholder="写下要同步的想法…"></textarea><div class="dialog-actions"><button value="cancel">取消</button><button id="share-open" value="default">到对话中核对</button></div><p id="share-status" role="status"></p></form></dialog>
+</main><script src="soduwork-app.js"></script><script src="app.js"></script></body></html>

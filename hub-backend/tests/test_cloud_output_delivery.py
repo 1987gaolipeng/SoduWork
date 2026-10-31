@@ -99,6 +99,7 @@ class AttachmentOriginTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row.evidence_meta["category"], "primary")
         self.assertEqual(row.role, "output")
         self.assertEqual(attachment_to_api(row)["sha256"], expected)
+        self.assertEqual(attachment_to_api(row)["category"], "primary")
         self.assertEqual(delivery_manifest.item_from_attachment(row)["sha256"], expected)
         return data
 

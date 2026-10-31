@@ -27,6 +27,11 @@ test('library document titles use readable regular weight', () => {
   assert.doesNotMatch(css, /\.library-content\.is-list \.library-card-copy b\{[^}]*font-weight:(?:59|6|7)\d/);
 });
 
+test('wide workspace library selection toolbar follows the panel width', () => {
+  const css = read('components/panels/panels-library.css');
+  assert.match(css, /html\[data-desk-panel="workspace"\] #libraryPanel \.library-batch-toolbar\{[\s\S]*?width:100%;[\s\S]*?max-width:none;[\s\S]*?box-sizing:border-box;/);
+});
+
 test('workspace navigation keeps compact icons and accessible color active states', () => {
   const css = read('components/workspace/workspace-shell.css');
   const js = read('components/workspace/workspace-shell.js');

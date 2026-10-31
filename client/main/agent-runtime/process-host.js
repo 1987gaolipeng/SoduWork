@@ -22,6 +22,12 @@ function environment() {
   for (const [key, value] of Object.entries(process.env)) {
     if (/^(?:PATH|PATHEXT|HOME|USERPROFILE|APPDATA|LOCALAPPDATA|PROGRAMDATA|PROGRAMFILES(?:\(X86\))?|SYSTEMROOT|WINDIR|COMSPEC|SHELL|TMP|TEMP|TMPDIR|LANG|LC_.*|TZ|USER|USERNAME|LOGNAME|XDG_.*|DISPLAY|WAYLAND_DISPLAY|DBUS_SESSION_BUS_ADDRESS|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY|SODUWORK_DESKTOP_CONTROL_ENDPOINT|SODUWORK_OPEN_TIMING)$/i.test(key)) result[key] = value;
   }
+  if (process.env.SODUWORK_RUNTIME_MANAGED === '1') {
+    for (const key of ['SODUWORK_RUNTIME_MANAGED', 'SODUWORK_MANAGED_PYTHON', 'SODUWORK_OFFICE_PYTHON',
+      'PYTHONNOUSERSITE', 'PYTHONDONTWRITEBYTECODE']) {
+      if (process.env[key]) result[key] = process.env[key];
+    }
+  }
   return result;
 }
 function toFormBody(body) {

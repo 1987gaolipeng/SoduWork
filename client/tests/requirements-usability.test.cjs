@@ -92,13 +92,17 @@ test('看板与列表展示服务端更新时间、创建回退和缺失记录�
 
 test('任务时间只接受有效时间，处理数字毫秒、带时区日期、旧创建字段和无效日期', () => {
   const ms = Date.parse('2026-10-23T02:03:04Z');
+  const local = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(ms).map(part => [part.type, part.value]));
+  const expectedLocalTime = `${local.year}/${local.month}/${local.day} ${local.hour}:${local.minute}`;
   for (const value of [ms, String(ms), '2026-10-23T10:03:04+08:00']) {
     const time = R.timeInfo({updatedAt: value, createdAt: ms - 1000});
     assert.equal(time.timestamp, ms);
     assert.equal(time.source, 'updatedAt');
     assert.equal(time.label, '更新');
     assert.equal(time.datetime, '2026-10-23T02:03:04.000Z');
-    assert.match(time.text, /^2026\/10\/23 \d\d:\d\d$/);
+    assert.equal(time.text, expectedLocalTime, 'display the instant in the device timezone, including date rollover');
     assert.match(time.title, /:04（UTC[+-]\d\d:\d\d）$/);
   }
   for (const value of [null, '', '  ', false, true, {}, [], NaN, Infinity, 0, -1, 'invalid', '2026-02-30T10:00:00Z']) {

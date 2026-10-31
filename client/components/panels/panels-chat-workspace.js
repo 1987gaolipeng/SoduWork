@@ -337,6 +337,39 @@
     if (!WB.files.length) return null;
     return addTab({ key: 'files:' + workScope(), kind: 'files', label: '文件' }, true);
   }
+  // A settled delivery can refresh its artifact index more than once (for
+  // example when a local copy is reconciled with the delivery receipt), which
+  // may change the candidate key while the previous preview is still marked
+  // as automatic. Only collapse duplicate previews of the same file; distinct
+  // deliverables keep their own tabs, and user-opened tabs remain untouched.
+  function samePreviewFile(tab, candidate) {
+    if (!tab || !candidate) return false;
+    if (candidate.kind === 'service') return tab.key === candidate.key;
+    const previous = tab.file, next = candidate.item;
+    if (!previous || !next) return false;
+    const previousTask = String(previous.taskId || previous.cloudTaskId || '');
+    const nextTask = String(next.taskId || next.cloudTaskId || '');
+    if (previousTask && nextTask && previousTask !== nextTask) return false;
+    if (artifactKey(previous) && artifactKey(previous) === artifactKey(next)) return true;
+    const normalize = value => String(value || '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/$/, '');
+    const previousRelative = normalize(previous.relative), nextRelative = normalize(next.relative);
+    if (previousRelative && nextRelative && previousRelative === nextRelative) return true;
+    const previousPath = normalize(previous.path), nextPath = normalize(next.path);
+    if (previousPath && nextPath && previousPath === nextPath) return true;
+    return Boolean(previousRelative && nextPath && (nextPath.endsWith('/' + previousRelative) || nextPath === previousRelative));
+  }
+  function removeStaleAutoPreviewTabs(candidate) {
+    const stale = WB.tabs.filter(tab => tab.autoPreview && samePreviewFile(tab, candidate));
+    if (!stale.length) return;
+    const staleIds = new Set(stale.map(tab => tab.id));
+    stale.forEach(tab => {
+      try { tab.dispose?.(); } catch (_) { /* preview already closed */ }
+      try { nativeApi()?.destroy?.(tab.id); } catch (_) { /* preview already closed */ }
+      delete WB.states[tab.id];
+    });
+    WB.tabs = WB.tabs.filter(tab => !staleIds.has(tab.id));
+    if (staleIds.has(WB.active)) WB.active = WB.tabs[WB.tabs.length - 1]?.id || '';
+  }
   /*
    * Resolve tool-card paths through the conversation file index and open code/diff tabs.
    * Return false for missing or native-application files so the caller can handle fallback
@@ -735,6 +768,32 @@
     const explicitImage = selection.images.filter(item => item.changedInTurn)
       .sort((left, right) => Number(right.at || 0) - Number(left.at || 0))[0];
     const firstPreview = firstWeb || firstVideo || firstDocument || firstImage;
+    /*
+     * The conversation text does not always repeat the generated filename.
+     * currentWorkSelection intentionally excludes an unmentioned workspace
+     * file, which is correct for the file summary but used to suppress the
+     * automatic result preview as well.  Once the turn is settled, use the
+     * delivery receipt as a narrowly scoped fallback: only this-turn primary
+     * deliverables may become the automatic candidate.  Historical,
+     * supporting and process-evidence files remain manual-only.
+     */
+    const settled = !global.ChatDeliveries || global.ChatDeliveries.isSettled(snapshot || {});
+    const deliveryFiles = settled && typeof info.currentDeliveryFiles === 'function'
+      ? info.currentDeliveryFiles(snapshot || {}, nextFiles) : [];
+    const deliveryRank = file => {
+      const kind = previewKind(file);
+      if (kind === 'web') return 0;
+      if (kind === 'video') return 1;
+      if (kind === 'markdown') return 2;
+      if (kind === 'image') return 3;
+      if (kind === 'pdf') return 4;
+      if (['document', 'presentation', 'spreadsheet', 'archive'].includes(String(file?.kind || ''))) return 5;
+      return 99;
+    };
+    const firstDelivery = deliveryFiles
+      .filter(file => deliveryRank(file) < 99)
+      .sort((left, right) => deliveryRank(left) - deliveryRank(right) ||
+        Number(right.at || 0) - Number(left.at || 0))[0];
     const live = WB.services.find((item) => item.url && !/失败|停止|failed|stopped/i.test(item.stateSource || item.state || ''));
     // An explicitly presented new screenshot may replace an automatic page,
     // while the existing manual-focus/close guards below remain authoritative.
@@ -743,12 +802,15 @@
       : live ? { kind: 'service', item: live,
       key: scope + ':service:' + live.id + ':' + live.url }
       : firstPreview ? { kind: 'file', item: firstPreview,
-        key: scope + ':artifact:' + artifactKey(firstPreview) } : null;
+        key: scope + ':artifact:' + artifactKey(firstPreview) }
+      : firstDelivery ? { kind: 'file', item: firstDelivery,
+        key: scope + ':artifact:' + artifactKey(firstDelivery) } : null;
     if (!WB.autoOpened && !WB.manualClosed && candidate) {
       resetSplit(root);
       WB.open = true; WB.autoOpened = true;
     }
     if (!WB.manualClosed && candidate && candidate.key !== WB.autoPreviewKey) {
+      removeStaleAutoPreviewTabs(candidate);
       const active = tabById(WB.active);
       const activate = !active || active.autoPreview === true;
       WB.autoPreviewed = true; WB.autoPreviewKey = candidate.key;

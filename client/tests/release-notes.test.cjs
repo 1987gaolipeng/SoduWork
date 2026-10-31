@@ -52,6 +52,20 @@ test('missing content never consumes acknowledgement', t => {
   assert.equal(service.claim(1, 'en-US'), null);
   assert.equal(service.acknowledge(1), false);
 });
+
+test('delayed publication stays pending and prompts once in the selected language', t => {
+  for (const locale of ['zh-CN', 'en-US', 'ja-JP', 'ko-KR']) {
+    const options = fixture(t);
+    let releases = [];
+    const service = createService({ ...options, catalogOf: () => releases });
+    assert.equal(service.claim(1, locale), null);
+    assert.equal(service.acknowledge(1), false);
+    releases = [{ version: options.version, locale, summary: 'Published notes', sections: [] }];
+    assert.equal(service.claim(1, locale).releases[0].locale, locale);
+    assert.equal(service.acknowledge(1), true);
+    assert.equal(service.claim(1, locale), null);
+  }
+});
 test('torn checkpoints preserve acknowledgement; later valid checkpoints recover', t => {
   const options = fixture(t), service = createService(options);
   service.claim(1, 'en-US'); service.acknowledge(1);
@@ -70,10 +84,12 @@ test('failed persistence never acknowledges a release', t => {
   assert(createService(options).claim(2, 'en-US'));
   assert.equal(service.acknowledge(1), true);
 });
-test('invalid English content falls back as a whole and missing bilingual data fails release gate', t => {
+test('invalid English content falls back as a whole and missing bilingual data fails release gate', async t => {
   const options = fixture(t);
   const copy = path.join(options.directory, 'notes');
-  fs.cpSync(root, copy, { recursive: true });
+  // Keep fixture cloning on the portable async implementation: Node 22's
+  // native synchronous copy can abort on Windows before the test executes.
+  await fs.promises.cp(root, copy, { recursive: true });
   fs.writeFileSync(path.join(copy, 'en-US/1.12.50.json'), '{}');
   const result = catalog(copy, '1.12.50', 'en-US')[0];
   assert.equal(result.locale, 'zh-CN'); assert.equal(result.fallback, true);

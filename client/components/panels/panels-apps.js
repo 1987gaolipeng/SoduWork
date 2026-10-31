@@ -50,13 +50,13 @@ function removeFavoriteApp(key) {
 /* App creation still starts with type selection; catalog cards label only local installation sources. */
 const APP_KIND_LABELS = { web: '网页应用', desktop: '桌面客户端', lite: '轻应用' };
 function appSourceTagHtml(app) {
-  return app.item.personal ? '<span class="appsx-source-tag">本机安装</span>' : '';
+  return app.item.personal ? '<span class="appsx-source-tag">本机</span>' : '';
 }
 async function appSettingsOf(key) {
   const api = window.soduWorkAPI?.appSettings;
-  if (!api) throw Error('应用设置需要更新客户端后使用');
+  if (!api) throw Error('即用设置需要更新客户端后使用');
   let result = await api.get(key);
-  if (!result?.ok) throw Error(result?.reason || '应用设置读取失败');
+  if (!result?.ok) throw Error(result?.reason || '即用设置读取失败');
   const legacyKey = 'soduwork-app-settings:' + key;
   const legacy = localStorage.getItem(legacyKey);
   if (legacy) {
@@ -121,13 +121,13 @@ function closeAppsPanel() {
 
 function appsPageHtml() {
   return '<div class="appsx-top">' +
-    '<div class="appsx-title-wrap"><h1 class="appsx-title"><span class="appsx-title-gift" aria-hidden="true">' + APPS_ICONS.gift + '</span>应用</h1>' +
-    '<p class="appsx-sub">连接应用，让 SoduWork 在你的各类工具中协同工作</p></div>' +
+    '<div class="appsx-title-wrap"><h1 class="appsx-title"><span class="appsx-title-gift" aria-hidden="true">' + APPS_ICONS.gift + '</span>即用</h1>' +
+    '<p class="appsx-sub">AI有界面，做事更清晰！即开即用，你的AI场景工作台</p></div>' +
     '<div class="appsx-tools">' +
     '<label class="appsx-search">' + APPS_ICONS.search +
-    '<input id="appsSearch" type="text" placeholder="搜索应用" spellcheck="false" autocomplete="off"></label>' +
+    '<input id="appsSearch" type="text" placeholder="搜索即用" spellcheck="false" autocomplete="off"></label>' +
     '<button class="appsx-icon-btn" id="appsRefresh" title="刷新" type="button">' + APPS_ICONS.refresh + '</button>' +
-    '<button class="appsx-pill" id="appsAdd" type="button">添加' + APPS_ICONS.plus + '</button>' +
+    '<button class="appsx-pill" id="appsAdd" type="button">快速创建即用 ' + APPS_ICONS.plus + '</button>' +
     '<button class="appsx-icon-btn" id="appsClose" title="关闭" type="button">' + APPS_ICONS.close + '</button>' +
     '</div></div>' +
     '<div class="appsx-scroll" id="appsBody"></div>';
@@ -156,7 +156,7 @@ function bindAppsPage(p) {
 async function loadAppsCatalog() {
   const plugins = await Promise.allSettled([(window.SoduWorkAPI && typeof window.SoduWorkAPI.pluginCatalog === 'function')
     ? window.SoduWorkAPI.pluginCatalog() : Promise.resolve({ items:[] })]).then(results => results[0]);
-  const result = plugins.status === 'fulfilled' ? plugins.value : { items:[],remoteError:'插件应用暂时无法加载：' + plugins.reason.message };
+  const result = plugins.status === 'fulfilled' ? plugins.value : { items:[],remoteError:'插件即用暂时无法加载：' + plugins.reason.message };
   if (plugins.status === 'rejected') throw plugins.reason;
   const items = Array.isArray(result && result.items) ? result.items : [];
   const apps = [];
@@ -172,7 +172,7 @@ async function loadAppsCatalog() {
     apps.push({
       item,
       row,
-      title: String(item.name || row.title || '应用'),
+      title: String(item.name || row.title || '即用'),
       desc: String(item.description || row.description || ''),
     });
   });
@@ -206,7 +206,7 @@ async function renderAppsCatalog(force) {
     return;
   }
   const ticket = ++_appsRenderSeq;
-  if (!_appsCache) body.innerHTML = '<div class="appsx-loading">正在载入应用…</div>';
+  if (!_appsCache) body.innerHTML = '<div class="appsx-loading">正在载入即用…</div>';
   let apps;
   try { apps = await loadAppsCatalog(); }
   catch (error) {
@@ -272,31 +272,31 @@ function appsSectionsFor(list) {
 
 function appsEmptyHtml(query, section, allInFavorites) {
   if (!query && (section === 'recommended' || section === 'favorites')) return '';
-  if (section === 'recommended') return '<p class="appsx-section-empty">' + (query ? '推荐应用中没有匹配结果。' : '暂无推荐应用。') + '</p>';
+  if (section === 'recommended') return '<p class="appsx-section-empty">' + (query ? '推荐即用中没有匹配结果。' : '暂无推荐即用。') + '</p>';
   if (section === 'mine' && allInFavorites && !query) {
-    return '<p class="appsx-section-empty">已安装的应用可在上方分组中打开。</p>';
+    return '<p class="appsx-section-empty">已安装的即用可在上方分组中打开。</p>';
   }
   if (section === 'favorites') {
-    return '<p class="appsx-section-empty">' + (query ? '常用应用中没有匹配结果。' : '点击应用卡片上的 ★，将常用应用固定在这里。') + '</p>';
+    return '<p class="appsx-section-empty">' + (query ? '常用即用中没有匹配结果。' : '点击即用卡片上的 ★，将常用即用固定在这里。') + '</p>';
   }
   if (query) {
     return '<div class="appsx-empty"><span class="appsx-empty-ico">' + APPS_ICONS.search + '</span>' +
       '<b>没有找到「' + escapeAppsHtml(query) + '」</b>' +
-      '<span>换个关键词，或浏览下方的市场应用。</span></div>';
+      '<span>换个关键词，或浏览下方的市场即用。</span></div>';
   }
   if (section === 'mine') {
     return '<div class="appsx-empty"><span class="appsx-empty-ico">' + APPS_GLYPH + '</span>' +
-      '<b>还没有我的应用</b>' +
-      '<span>从市场添加远端应用，或导入本机的 .soduwork-plugin 应用包。</span>' +
-      '<button class="appsx-pill small" id="appsEmptyInstall" type="button">安装应用包</button></div>';
+      '<b>还没有我的即用</b>' +
+      '<span>从市场添加远端即用，或导入本机的 .soduwork-plugin 即用包。</span>' +
+      '<button class="appsx-pill small" id="appsEmptyInstall" type="button">安装即用包</button></div>';
   }
   return '<div class="appsx-empty"><span class="appsx-empty-ico">' + APPS_GLYPH + '</span>' +
-    '<b>市场暂无应用</b>' +
-    '<span>这里展示远端发布并向你开放的应用。</span></div>';
+    '<b>市场暂无即用</b>' +
+    '<span>这里展示远端发布并向你开放的即用。</span></div>';
 }
 
 function renderAppsError(body, error) {
-  body.innerHTML = '<div class="appsx-empty" role="status"><b>应用目录暂时无法加载</b><span>' +
+  body.innerHTML = '<div class="appsx-empty" role="status"><b>即用目录暂时无法加载</b><span>' +
     escapeAppsHtml(String(error && error.message || error)) + '</span><button class="appsx-pill small" data-apps-retry>重试</button></div>';
   body.querySelector('[data-apps-retry]').addEventListener('click', () => renderAppsCatalog(true));
 }
@@ -316,17 +316,17 @@ function appsCardHtml(app, index, recommended, conversation) {
     '<span class="appsx-card-txt"><b data-user-content>' + escapeAppsHtml(app.title) + '</b></span></div>' +
     '<p class="appsx-cover-desc" data-user-content>' + escapeAppsHtml(app.desc || '打开应用工作界面') + '</p></div>' +
     '<div class="appsx-cover-actions"><div class="appsx-cover-tools">' + favorite +
-    (!needsSync ? '<button class="appsx-act appsx-set" type="button" title="应用设置" aria-label="应用设置">' + APPS_ICONS.gear + '</button>' : '') + '</div>' +
-    '<button class="appsx-card-open" type="button" aria-label="打开应用">打开应用</button></div></div></div>';
+    (!needsSync ? '<button class="appsx-act appsx-set" type="button" title="即用设置" aria-label="即用设置">' + APPS_ICONS.gear + '</button>' : '') + '</div>' +
+    '<button class="appsx-card-open" type="button" aria-label="打开即用">打开即用</button></div></div></div>';
   return '<div class="appsx-card' + (conversation ? ' nmessage-app-card' : '') + '" ' +
-    (conversation ? 'data-chat-app="' + escapeAppsHtml(key) + '"' : 'data-app-index="' + index + '"') + ' role="button" tabindex="0" title="' + (needsSync ? (app.item.updateAvailable ? '升级并打开应用' : '添加并打开应用') : '打开应用') + '">' +
+    (conversation ? 'data-chat-app="' + escapeAppsHtml(key) + '"' : 'data-app-index="' + index + '"') + ' role="button" tabindex="0" title="' + (needsSync ? (app.item.updateAvailable ? '升级并打开即用' : '添加并打开即用') : '打开即用') + '">' +
     '<span class="appsx-app-ico' + (customIcon ? ' has-img' : '') + '">' + (customIcon || APPS_GLYPH) + '</span>' +
     '<span class="appsx-card-txt"><span class="appsx-card-headline"><b data-user-content>' + escapeAppsHtml(app.title) + '</b>' + appSourceTagHtml(app) + '</span>' +
     '<small data-user-content>' + (app.desc ? escapeAppsHtml(app.desc) : '打开应用工作界面') + '</small></span>' +
     (needsSync ? '<span class="appsx-card-add" aria-hidden="true">' + APPS_ICONS.plus + '</span>' : '') +
     '<span class="appsx-card-acts">' +
-    (!needsSync ? '<button class="appsx-act appsx-set" type="button" title="应用设置" aria-label="应用设置">' + APPS_ICONS.gear + '</button>' : '') +
-    favorite + (conversation ? '<button type="button" class="appsx-card-open" data-chat-open-app="' + escapeAppsHtml(key) + '">打开应用</button>' : '') + '</span></div>';
+    (!needsSync ? '<button class="appsx-act appsx-set" type="button" title="即用设置" aria-label="即用设置">' + APPS_ICONS.gear + '</button>' : '') +
+    favorite + (conversation ? '<button type="button" class="appsx-card-open" data-chat-open-app="' + escapeAppsHtml(key) + '">打开即用</button>' : '') + '</span></div>';
 }
 
 function renderAppsInto(body, all) {
@@ -373,6 +373,21 @@ function renderAppsInto(body, all) {
 }
 
 /* Application settings and H5 settings.get/update share main-process secure storage. */
+function jiyongSettingsFields(item, record) {
+  const declaration = item.conversationJiyong || item.jiyong;
+  const fields = declaration?.parameters?.filter(p => p.display !== 'hidden') || [];
+  const esc = escapeAppsHtml;
+  return {fields, html:fields.map(p => {
+    const value = record.values[p.key] ?? p.default;
+    const attr = ' data-jiyong-parameter="' + esc(p.key) + '"';
+    let input;
+    if (p.display === 'switch') input = '<input type="checkbox"' + attr + (value === true ? ' checked' : '') + '>';
+    else if (p.display === 'select' || p.display === 'multiselect') input = '<select' + attr + (p.display === 'multiselect' ? ' multiple' : '') + '>' + (p.options || []).map(v => '<option value="' + esc(v) + '"' + ((Array.isArray(value) ? value : [value]).includes(v) ? ' selected' : '') + '>' + esc(v) + '</option>').join('') + '</select>';
+    else if (p.display === 'textarea') input = '<textarea' + attr + '>' + esc(value ?? '') + '</textarea>';
+    else input = '<input' + attr + ' type="' + (p.secret || p.display === 'password' ? 'password' : p.display === 'number' ? 'number' : 'text') + '" autocomplete="off" value="' + esc(p.secret ? '' : value ?? '') + '" placeholder="' + (record.configuredKeys.includes(p.key) && p.secret ? '已配置；留空保留原值' : '') + '">';
+    return '<label class="appsx-parameter"><span>' + esc(p.label || p.key) + '</span>' + input + '</label>';
+  }).join('')};
+}
 async function openAppSettings(app) {
   if (!app) return;
   const ticket = ++_appsSettingsSeq;
@@ -383,12 +398,13 @@ async function openAppSettings(app) {
   const fields = window.SoduWorkPluginInstallSetup?.preferences;
   const setup = fields ? fields.schema(app.item) : { preferences: [] };
   setup.preferences = setup.preferences.filter(field => field.key !== 'ukey' && !record.secretKeys.includes(field.key));
+  const declared = jiyongSettingsFields(app.item,record);
   let mask = document.getElementById('appsSettingsMask');
   if (!mask) {
     mask = document.createElement('div');
     mask.id = 'appsSettingsMask';
     mask.className = 'appsx-mask';
-    mask.innerHTML = '<div class="appsx-modal" role="dialog" aria-label="应用设置"></div>';
+    mask.innerHTML = '<div class="appsx-modal" role="dialog" aria-label="即用设置"></div>';
     document.body.appendChild(mask);
     mask.addEventListener('pointerdown', function (event) { if (event.target === mask) closeAppSettings(); });
     document.addEventListener('keydown', function onKey(event) {
@@ -402,22 +418,41 @@ async function openAppSettings(app) {
     '<header class="appsx-modal-head"><b data-user-content>' + escapeAppsHtml(app.title) + ' · 应用设置</b>' +
     '<button class="appsx-icon-btn" id="appsSetClose" type="button">' + APPS_ICONS.close + '</button></header>' +
     '<div class="appsx-modal-body">' +
-    '<section class="appsx-settings-info" aria-label="应用信息"><span class="appsx-settings-icon" role="img" aria-label="应用图标">' + icon + '</span>' +
+    '<section class="appsx-settings-info" aria-label="即用信息"><span class="appsx-settings-icon" role="img" aria-label="即用图标">' + icon + '</span>' +
     '<div class="appsx-settings-copy"><b class="appsx-settings-name" data-user-content>' + escapeAppsHtml(app.title) + '</b>' +
     '<span class="appsx-settings-version">' + escapeAppsHtml(version ? '版本 v' + version : '版本未知') + '</span>' +
     '<p class="appsx-settings-description" data-user-content>' + escapeAppsHtml(app.desc || app.item.description || '暂无描述') + '</p></div></section>' +
+    '<label class="appsx-developer-field"><span>开发者</span>' +
+    (app.item.personal && !app.item.builtIn ? '<input id="appsSetDeveloper" type="text" maxlength="120" value="' + escapeAppsHtml(app.item.authorName || '') + '" placeholder="填写开发者或工作室名称">' : '<b data-user-content>' + escapeAppsHtml(app.item.authorName || '未填写') + '</b>') + '</label>' +
+    '<label class="appsx-developer-field"><span>即用分类</span>' +
+    (app.item.personal && !app.item.builtIn ? '<select id="appsSetCategory">' + APPS_CREATE_CATEGORIES.map(row => '<option value="' + row.id + '"' + (row.id === (app.item.appCategory || 'other') ? ' selected' : '') + '>' + row.title + '</option>').join('') + '</select>' : '<b>' + (APPS_CREATE_CATEGORIES.find(row => row.id === app.item.appCategory)?.title || '其他') + '</b>') + '</label>' +
     (setup.preferences.length ? fields.render(setup, app.item.setupConfig || {}, escapeAppsHtml) : '') +
+    declared.html +
     '<p class="appsx-settings-error" id="appsSetError" role="alert" hidden></p>' +
     '</div>' +
-    '<footer class="appsx-modal-foot"><button class="appsx-remove" id="appsSetRemove" type="button">移除应用</button><span class="push"></span>' +
+    '<footer class="appsx-modal-foot"><button class="appsx-remove" id="appsSetRemove" type="button">移除即用</button><span class="push"></span>' +
     (app.item.personal && !app.item.builtIn ? '<button class="appsx-publish" id="appsSetPublish" type="button">申请上架</button>' : '') +
-    (setup.preferences.length ? '<button class="appsx-pill small" id="appsSetSave" type="button">保存</button>' : '') + '</footer>';
+    (app.item.personal && !app.item.builtIn ? '<button class="appsx-pill small" id="appsSetEdit" type="button">修改即用</button>' : '') +
+    (setup.preferences.length || declared.fields.length || (app.item.personal && !app.item.builtIn) ? '<button class="appsx-pill small" id="appsSetSave" type="button">保存</button>' : '') + '</footer>';
   mask.classList.add('show');
   function showError(message) {
     const target = modal.querySelector('#appsSetError'); target.hidden = false; target.textContent = message;
     target.scrollIntoView({ block: 'nearest' });
   }
   modal.querySelector('#appsSetClose').addEventListener('click', closeAppSettings);
+  modal.querySelector('#appsSetEdit')?.addEventListener('click',async function() {
+    this.disabled = true;
+    try { await window.PluginBuilderEntry.editApp(app.item.pluginId); closeAppSettings(); }
+    catch (error) { this.disabled=false;showError(error.message); }
+  });
+  async function saveAppMetadata() {
+    const developer = modal.querySelector('#appsSetDeveloper'), category = modal.querySelector('#appsSetCategory');
+    if (!developer || !category) return;
+    if (developer.value.trim() === String(app.item.authorName || '') && category.value === (app.item.appCategory || 'other')) return;
+    const saved = await window.soduWorkAPI.personalPlugins.updateMetadata(app.item.pluginId,{author:developer.value.trim(),appCategory:category.value,expectedChecksum:app.item.checksum});
+    if (!saved?.ok) throw Error(saved?.reason || '即用信息保存失败');
+    Object.assign(app.item,saved.plugin);_appsCache=null;void renderAppsCatalog(true);
+  }
   const refreshPublication = () => window.SoduWorkPluginPublication?.refreshPersonalSubmission(
     modal.querySelector('#appsSetPublish'), app.item, { isCurrent: () => ticket === _appsSettingsSeq });
   refreshPublication();
@@ -433,6 +468,7 @@ async function openAppSettings(app) {
     };
     try {
       if (!window.openCapabilityPluginPublication) throw Error('上架组件未加载，请重启客户端后重试');
+      await saveAppMetadata();
       await window.openCapabilityPluginPublication(app.item, {
         isCurrent: () => ticket === _appsSettingsSeq,
         onReady: () => mask.classList.remove('show'),
@@ -447,21 +483,21 @@ async function openAppSettings(app) {
     if (ticket !== _appsSettingsSeq) return;
     this.disabled = true;
     this.textContent = '正在移除…';
-    modal.querySelectorAll('input,textarea,button').forEach(control => { control.disabled = true; });
+    modal.querySelectorAll('input,textarea,select,button').forEach(control => { control.disabled = true; });
     try {
       const result = app.item.personal
         ? await SoduWorkAPI.deletePersonalPlugin(key)
         : await SoduWorkAPI.setEnterprisePluginInstalled(app.item.pluginId, false);
-      if (result && result.ok === false) throw Error(result.reason || result.error || '应用没有移除成功');
+      if (result && result.ok === false) throw Error(result.reason || result.error || '即用没有移除成功');
       removeFavoriteApp(key);
       closeAppSettings();
       _appsCache = null;
       await renderAppsCatalog(true);
-      sayAppsMessage('应用已移除并卸载');
+      sayAppsMessage('即用已移除并卸载');
     } catch (error) {
       this.disabled = false;
-      modal.querySelectorAll('input,textarea,button').forEach(control => { control.disabled = false; });
-      this.textContent = '移除应用';
+      modal.querySelectorAll('input,textarea,select,button').forEach(control => { control.disabled = false; });
+      this.textContent = '移除即用';
       refreshPublication();
       showError(String(error && error.message || error));
     }
@@ -470,23 +506,37 @@ async function openAppSettings(app) {
     if (ticket !== _appsSettingsSeq) return;
     let params;
     try {
-      const submitted = fields.collect(modal, setup);
+      const submitted = setup.preferences.length ? fields.collect(modal, setup) : {};
       // Only the declared, visible fields are edited; preserve any hidden legacy preferences.
       const visible = new Set(setup.preferences.map(field => field.key));
       params = { ...Object.fromEntries(Object.entries(app.item.setupConfig || {}).filter(([key]) => !visible.has(key))), ...submitted };
     }
     catch (error) { showError(error.message); return; }
     this.disabled = true;
-    modal.querySelectorAll('input,textarea,button').forEach(control => { control.disabled = true; });
+    modal.querySelectorAll('input,textarea,select,button').forEach(control => { control.disabled = true; });
     try {
+      await saveAppMetadata();
+      const values = {};
+      for (const p of declared.fields) {
+        const control = modal.querySelector('[data-jiyong-parameter="' + p.key + '"]');
+        if (p.secret && !control.value) continue;
+        const value = p.display === 'switch' ? control.checked : p.display === 'multiselect' ? [...control.selectedOptions].map(o => o.value) : p.type === 'number' ? Number(control.value) : control.value;
+        if (p.type === 'number' && (!control.value.trim() || !Number.isFinite(value))) throw Error('请填写有效数字：' + p.label);
+        values[p.key] = value;
+      }
+      if (Object.keys(values).length) {
+        await saveAppSettings(key,{values,secretKeys:declared.fields.filter(p => p.secret).map(p => p.key),expectedRevision:record.revision});
+        record = await appSettingsOf(key);
+      }
+      if (!setup.preferences.length) { closeAppSettings(); sayAppsMessage('即用设置已保存'); return; }
       const result = app.item.personal
         ? await SoduWorkAPI.configurePersonalPlugin(app.item.pluginId, app.item.checksum, params)
         : await SoduWorkAPI.setEnterprisePluginInstalled(app.item.pluginId, true, app.item.versionId, params);
-      if (result?.ok === false) throw Error(result.reason || result.error || '应用设置保存失败');
+      if (result?.ok === false) throw Error(result.reason || result.error || '即用设置保存失败');
       if (result?.plugin) Object.assign(app.item, result.plugin);
       else app.item.setupConfig = params;
     }
-    catch (error) { showError(error.message); modal.querySelectorAll('input,textarea,button').forEach(control => { control.disabled = false; }); refreshPublication(); return; }
+    catch (error) { showError(error.message); modal.querySelectorAll('input,textarea,select,button').forEach(control => { control.disabled = false; }); refreshPublication(); return; }
     if (ticket === _appsSettingsSeq) closeAppSettings();
   });
 }
@@ -501,18 +551,18 @@ function closeAppSettings() {
    standalone window. */
 async function openAppFromItem(item) {
   if (!item || !window.PluginUIHost || typeof window.PluginUIHost.openContribution !== 'function') {
-    throw Error('应用页面暂时不可用，请刷新应用目录后重试');
+    throw Error('即用页面暂时不可用，请刷新即用目录后重试');
   }
   const key = appKeyOf(item);
   const navRow = (item.ui && Array.isArray(item.ui.contributions) ? item.ui.contributions : [])
     .find(row => row && row.slot === 'workspace.navigation') || null;
-  if (!navRow) throw Error('应用页面不存在，请刷新后重试');
+  if (!navRow) throw Error('即用页面不存在，请刷新后重试');
   if (!item.personal && (!item.installed || item.updateAvailable)) {
     if (!window.SoduWorkAPI || typeof window.SoduWorkAPI.setEnterprisePluginInstalled !== 'function') {
-      throw Error('应用同步入口暂不可用，请更新客户端');
+      throw Error('即用同步入口暂不可用，请更新客户端');
     }
     const result = await window.SoduWorkAPI.setEnterprisePluginInstalled(item.pluginId, true, item.versionId);
-    if (result && result.ok === false) throw Error(result.reason || result.error || '应用同步失败');
+    if (result && result.ok === false) throw Error(result.reason || result.error || '即用同步失败');
     _appsCache = await loadAppsCatalog();
     const body = document.getElementById('appsBody');
     if (body && _appsCache) renderAppsInto(body, _appsCache);
@@ -531,25 +581,25 @@ async function openAppsCard(app, card) {
   const needsSync = !app.item.personal && (!app.item.installed || app.item.updateAvailable);
   if (action && needsSync) action.textContent = '加载中…';
   try { await openAppFromItem(app.item); }
-  catch (error) { sayAppsMessage('应用没能打开：' + String(error && error.message || error)); }
+  catch (error) { sayAppsMessage('即用没能打开：' + String(error && error.message || error)); }
   finally {
     card.classList.remove('is-opening'); card.removeAttribute('aria-busy');
-    if (action) action.textContent = '打开应用';
+    if (action) action.textContent = '打开即用';
   }
 }
 
 async function conversationApplication(pluginId) {
   const scope = window.SoduWorkAPI?.taskStorageKey?.('plugins');
   const apps = await loadAppsCatalog();
-  if (scope !== window.SoduWorkAPI?.taskStorageKey?.('plugins')) throw Error('账号已变化，请重新打开应用');
+  if (scope !== window.SoduWorkAPI?.taskStorageKey?.('plugins')) throw Error('账号已变化，请重新打开即用');
   const app = apps.find(row => row.item.pluginId === pluginId);
-  if (!app) throw Error('应用已停用或不可用，请检查应用列表');
+  if (!app) throw Error('即用已停用或不可用，请检查即用列表');
   return app;
 }
 async function openConversationApplication(pluginId) { return openAppFromItem((await conversationApplication(pluginId)).item); }
 async function settingsConversationApplication(pluginId) { return openAppSettings(await conversationApplication(pluginId)); }
 function conversationCardHtml(item) {
-  return appsCardHtml({ item, title: String(item.name || '应用'), desc: String(item.description || '') }, 0, false, true);
+  return appsCardHtml({ item, title: String(item.name || '即用'), desc: String(item.description || '') }, 0, false, true);
 }
 
 /*
@@ -579,9 +629,9 @@ async function installAppPackage() {
       const draft = preview && preview.personalDraft;
       if (preview && preview.sourceKind === 'personal' && draft && !(preview.capabilities?.adapterBlockers || []).length) {
         confirmAppInstall(draft, preview);
-      } else confirmAppInstall(null, preview, '这个包不是本地应用格式，请从「插件」页安装');
+      } else confirmAppInstall(null, preview, '这个包不是本地即用格式，请从「插件」页安装');
     },
-    error: function (error) { sayAppsMessage('应用包预检没有通过：' + String(error && error.message || error)); },
+    error: function (error) { sayAppsMessage('即用包预检没有通过：' + String(error && error.message || error)); },
   });
 }
 
@@ -662,7 +712,7 @@ function closeAppsCreateDialog() {
 function confirmAppInstall(body, preview, blockedReason) {
   const rawManifest = (preview && preview.manifest) || {};
   const manifest = window.SoduWorkPluginLocales?.present(rawManifest, window.SoduWorkI18n?.getLocale?.() || navigator.language) || rawManifest;
-  const name = String(manifest.name || (body && body.name) || '未命名应用');
+  const name = String(manifest.name || (body && body.name) || '未命名即用');
   const version = String(manifest.version || (body && body.version) || '0.0.0');
   const description = String(manifest.description || (body && body.description) || '');
   let layer = document.getElementById('appsModalLayer');
@@ -678,14 +728,14 @@ function confirmAppInstall(body, preview, blockedReason) {
     layer.addEventListener('mousedown', function (event) { if (event.target === layer) closeAppsModal(); });
   }
   layer.hidden = false;
-  layer.querySelector('#appsModalTitle').textContent = '安装应用';
+  layer.querySelector('#appsModalTitle').textContent = '安装即用';
   layer.querySelector('#appsModalSub').textContent = '检查已完成 · 仅保存到本机 · 免审核免提交';
   layer.querySelector('#appsModalBody').innerHTML =
     '<div class="apps-install-head"><span class="appsx-app-ico big">' + APPS_GLYPH + '</span>' +
     '<div><b data-user-content>' + escapeAppsHtml(name) + '</b><p data-user-content>' + escapeAppsHtml(description || '没有说明') + '</p>' +
-    '<em>v' + escapeAppsHtml(version) + (blockedReason ? '' : ' · 界面应用 · 桥接能力按声明放行') + '</em></div></div>' +
+    '<em>v' + escapeAppsHtml(version) + (blockedReason ? '' : ' · 界面即用 · 桥接能力按声明放行') + '</em></div></div>' +
     (blockedReason ? '<p class="apps-modal-error">' + escapeAppsHtml(blockedReason) + '</p>' : '') +
-    '<p class="apps-modal-note">应用界面将在隔离承载中打开；需要的对话/通知能力按应用清单声明授权。</p>';
+    '<p class="apps-modal-note">即用界面将在隔离承载中打开；需要的对话/通知能力按即用清单声明授权。</p>';
   const foot = layer.querySelector('#appsModalFoot');
   foot.innerHTML = '<button class="btn-mini" id="appsModalCancel">取消</button>' +
     '<span class="push"></span>' +
@@ -697,14 +747,14 @@ function confirmAppInstall(body, preview, blockedReason) {
     this.textContent = '正在安装…';
     try {
       const result = await SoduWorkAPI.createPluginDraft(body);
-      if (!result || result.ok === false || !result.plugin) throw Error(result?.reason || result?.error || '应用没有安装成功');
+      if (!result || result.ok === false || !result.plugin) throw Error(result?.reason || result?.error || '即用没有安装成功');
       layer.hidden = true;
-      sayAppsMessage('应用「' + result.plugin.name + '」已安装，侧边栏与应用页都可以打开');
+      sayAppsMessage('即用「' + result.plugin.name + '」已安装，侧边栏与即用页都可以打开');
       renderAppsCatalog(true);
     } catch (error) {
       this.disabled = false;
       this.textContent = '安装到本机';
-      sayAppsMessage('应用没有安装成功：' + String(error && error.message || error));
+      sayAppsMessage('即用没有安装成功：' + String(error && error.message || error));
     }
   });
 }

@@ -54,3 +54,9 @@ test('runtime directory additions do not broaden credential or arbitrary environ
   assert.deepEqual(filtered(source), { ProgramFiles: source.ProgramFiles,
     'ProgramFiles(x86)': source['ProgramFiles(x86)'], PATH: source.PATH, SystemRoot: source.SystemRoot });
 });
+test('managed tool identity and Python isolation reach the real worker without forwarding injection or secrets', () => {
+  const managed = { SODUWORK_RUNTIME_MANAGED: '1', SODUWORK_MANAGED_PYTHON: 'C:\\product\\python.exe',
+    SODUWORK_OFFICE_PYTHON: 'C:\\product\\python.exe', PYTHONNOUSERSITE: '1', PYTHONDONTWRITEBYTECODE: '1' };
+  assert.deepEqual(filtered({ ...managed, PYTHONPATH: 'untrusted', NODE_OPTIONS: '--inspect', OPENAI_API_KEY: 'secret' }), managed);
+  assert.deepEqual(filtered({ SODUWORK_MANAGED_PYTHON: 'untrusted', PYTHONNOUSERSITE: '1' }), {});
+});

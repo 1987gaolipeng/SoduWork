@@ -56,7 +56,7 @@ test('real Pi SDK transitions keep history, defer an active turn, enforce downgr
   oldAccess.broker.answer({ ...request, decision: 'deny' }); await active;
   assert.equal(fs.existsSync(outside), false);
   await transitions.apply();
-  assert.deepEqual(remembered, ['readonly']);
+  assert.deepEqual(remembered, [], 'changing access in an existing chat must not rewrite the device default');
   assert.equal(live.session.sessionId, sid); assert.equal(live.session.sessionManager, manager);
   assert.ok(live.session.state.messages.length > firstHistoryCount);
   assert.equal(live.policy.mode, 'readonly'); assert.equal(transitions.pending(), null);
@@ -69,14 +69,14 @@ test('real Pi SDK transitions keep history, defer an active turn, enforce downgr
     'import fs from "node:fs"; export default function(pi){ pi.on("tool_call",()=>{fs.appendFileSync(' + JSON.stringify(extensionCalls) + ',"called\\n");}); }');
   const full = rules.next('full', fixture.workspace, live.policy, 2);
   transitions.schedule(full, 2); await transitions.apply();
-  assert.deepEqual(remembered, ['readonly', 'full']);
+  assert.deepEqual(remembered, [], 'full access in an existing chat must stay chat-scoped');
   await send('write', { path: outside, content: 'full consent' });
   assert.equal(fs.readFileSync(outside, 'utf8'), 'full consent');
   assert.ok(live.resources.resourceLoader.getExtensions().extensions.length > 0);
   const callsBeforeDowngrade = fs.readFileSync(extensionCalls, 'utf8');
   const standard = rules.next('standard', fixture.workspace, live.policy, 3);
   transitions.schedule(standard, 3); await transitions.apply();
-  assert.deepEqual(remembered, ['readonly', 'full', 'standard']);
+  assert.deepEqual(remembered, [], 'downgrading an existing chat must stay chat-scoped');
   assert.deepEqual(live.resources.resourceLoader.getExtensions().extensions
     .filter(extension => !extension.hidden || extension.path !== '<inline:soduwork-tool-context>'), [],
   'only the SoduWork-owned context hook remains; disk extensions stay unloaded');

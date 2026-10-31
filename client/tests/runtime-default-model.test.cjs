@@ -39,6 +39,28 @@ test('gateway defaults and explicit selections are scoped by runtime in requests
   } finally { global.fetch = original; config.invalidate(); }
 });
 
+test('historical model recovery can bypass a stale Agent preference without changing normal defaults', async () => {
+  const original = global.fetch;
+  const calls = [];
+  config.invalidate();
+  global.fetch = async raw => {
+    const url = new URL(raw);
+    calls.push(url);
+    return { ok: true, json: async () => ({ ok: true, key: 'fixture-ticket', expiresIn: 3600,
+      model: url.searchParams.get('ignore_preference') ? 'current-model' : 'stale-agent-model' }) };
+  };
+  try {
+    const normal = await config.fetchModel(identity, '', 1000, global.fetch, false, 'pi');
+    const recovered = await config.fetchModel(identity, '', 1000, global.fetch, false, 'pi',
+      { ignoreAgentPreference: true });
+    assert.equal(normal.model.id, 'stale-agent-model');
+    assert.equal(recovered.model.id, 'current-model');
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].searchParams.has('ignore_preference'), false);
+    assert.equal(calls[1].searchParams.get('ignore_preference'), '1');
+  } finally { global.fetch = original; config.invalidate(); }
+});
+
 test('every Runner gateway adapter resolves its own default at open and after model changes; account runtimes bypass it', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-runtime-default-'));
   try {

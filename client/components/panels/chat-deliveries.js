@@ -19,7 +19,7 @@
     savedCrossDevice: '\u5df2\u540c\u6b65 \u00b7 \u53ef\u8de8\u8bbe\u5907\u67e5\u770b',
     collecting: '\u6b63\u5728\u6536\u96c6', retry: '\u91cd\u8bd5\u540c\u6b65',
     save: '\u4fdd\u5b58\u5230\u8d44\u6599\u5e93', openSaved: '\u9884\u89c8\u5df2\u4fdd\u5b58\u7248\u672c',
-    continue: '\u7ee7\u7eed\u4f1a\u8bdd', structure: '\u4fdd\u7559\u76ee\u5f55\u7ed3\u6784',
+    structure: '\u4fdd\u7559\u76ee\u5f55\u7ed3\u6784',
     localSaved: '\u6587\u4ef6\u5728\u672c\u673a \u00b7 \u5df2\u4fdd\u5b58\u5230\u8d44\u6599\u5e93',
     localFiles: '\u6587\u4ef6\u5728\u672c\u673a',
   });
@@ -28,7 +28,6 @@
   const archiveIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M10 4v3h3v3h-3v3h3v4h-3v-4"/></svg>';
   const saveIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 18.25h9a4.25 4.25 0 0 0 .56-8.46A5.75 5.75 0 0 0 6.2 8.5a4.9 4.9 0 0 0 1.3 9.75Z"/><path d="M12 16V9.5m-2.5 2.5L12 9.5l2.5 2.5"/></svg>';
   const previewIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
-  const continueIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13m-5-5 5 5-5 5"/></svg>';
   const action = (attr, label, glyph, hidden = false) => '<button type="button" class="ndelivery-action" ' + attr +
     (hidden ? ' hidden' : '') + ' aria-label="' + esc(label) + '" title="' + esc(label) + '">' + glyph + '<span class="ndelivery-action-label">' + label + '</span></button>';
   function icon(file) {
@@ -162,7 +161,7 @@
         action('data-delivery-archive', '打开压缩包', archiveIcon, count < 2) +
         action('data-delivery-retry', text.save, saveIcon) + action('data-delivery-open', text.openSaved, previewIcon, true) +
         action('data-delivery-local', '在本地继续', localIcon, !group.remote) +
-        action('data-delivery-continue', group.remote ? '在云端继续' : text.continue, continueIcon) + '</div></header>' +
+        '</div></header>' +
         '<details class="ndelivery-files"' + (count === 1 ? ' hidden' : '') + '><summary data-delivery-count>' + count + ' ' + text.files + '</summary><ul>' + available.map(f =>
           '<li><button type="button" data-open-app="' + esc(key(f)) + '"><span data-user-content>' + esc(f.relative || f.name) + '</span><small>' + size(f.size) + '</small></button></li>').join('') + '</ul></details>' +
         '<footer><span data-delivery-status role="status">' + text.preparing + '</span></footer>';

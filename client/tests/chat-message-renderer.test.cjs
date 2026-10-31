@@ -44,6 +44,18 @@ function body(html) {
   return html.slice(0, html.indexOf('<button'));
 }
 
+test('read-aloud controls belong only to completed assistant footers', () => {
+  const { sandbox, renderer } = setup();
+  sandbox.SoduWorkReadAloud = { button: () => '<button data-speech-play>Read aloud</button>' };
+  assert.match(renderer._messageFooter({ role: 'assistant', done: true }, 'Answer', -1, 2), /data-speech-play/);
+  const footer = renderer._messageFooter({ role: 'assistant', done: true, completedAt: 1700000000000 }, 'Answer', -1, 2);
+  assert(footer.indexOf('nmessage-time') < footer.indexOf('data-speech-play'));
+  assert(footer.indexOf('data-speech-play') < footer.indexOf('data-copy-message'));
+  assert.doesNotMatch(renderer._messageFooter({ role: 'user' }, 'Question'), /data-speech-play/);
+  assert.doesNotMatch(renderer._messageFooter({ role: 'assistant', done: false }, 'Partial'), /data-speech-play/);
+  assert.doesNotMatch(renderer._messageFooter({ role: 'assistant', done: true }, '  '), /data-speech-play/);
+});
+
 test('reasoning closes when a later block starts despite a stale done flag', () => {
   for (const kind of ['text', 'toolCall', 'thinking']) {
     const { renderer, ctx } = setup();
@@ -727,13 +739,13 @@ test('reopened latest completed turn uses persisted timing instead of a reset ru
     turnMetrics: [{ fromMessage: 0, toMessage: 1, tokens: 124, elapsedMs: 23000 }] };
   renderer._render();
   assert.match(list.innerHTML, /用时 23s/);
-  assert.match(list.innerHTML, /124 tokens/);
+  assert.doesNotMatch(list.innerHTML, /tokens/);
   assert.doesNotMatch(list.innerHTML, /data-thinking-elapsed>0s/);
   ctx._snap.execution.elapsedMs = 3000;
   ctx._turnMetricsHtml = () => '<div><b data-thinking-elapsed>3s</b><b data-thinking-tokens>51</b></div>';
   renderer._render();
   assert.match(list.innerHTML, /data-thinking-elapsed>23s/);
-  assert.match(list.innerHTML, /data-thinking-tokens>124/);
+  assert.doesNotMatch(list.innerHTML, /data-thinking-tokens/);
   ctx._snap.execution.elapsedMs = 303000;
   ctx._turnMetricsHtml = () => '<div><b data-thinking-elapsed>5m 03s</b></div>';
   renderer._render();

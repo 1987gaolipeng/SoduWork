@@ -41,10 +41,21 @@ const brand = fs.readFileSync(path.join(__dirname,
   '../components/panels/agent-brand.js'), 'utf8');
 const composerCss = fs.readFileSync(path.join(__dirname,
   '../components/panels/work-composer.css'), 'utf8');
+const sessionControlsCss = fs.readFileSync(path.join(__dirname,
+  '../components/panels/chat-session-controls.css'), 'utf8');
+const desk = fs.readFileSync(path.join(__dirname, '../desk.html'), 'utf8');
+const composeSurface = fs.readFileSync(path.join(__dirname,
+  '../components/panels/compose-surface.js'), 'utf8');
 const bridge = fs.readFileSync(path.join(__dirname,
   '../main/agent-runtime/pi-session-bridge.js'), 'utf8');
 const chat = fs.readFileSync(path.join(__dirname,
   '../components/panels/panels-chat.js'), 'utf8');
+const picker = fs.readFileSync(path.join(__dirname,
+  '../components/panels/chat-runtime-picker.js'), 'utf8');
+const workComposer = fs.readFileSync(path.join(__dirname,
+  '../components/panels/work-composer.js'), 'utf8');
+const localeChat = fs.readFileSync(path.join(__dirname,
+  '../core/locales/en-US-chat.js'), 'utf8');
 
 assert.match(runtime, /api\.runtimes/,
   'new conversation must load the authoritative runtime catalog over IPC');
@@ -62,6 +73,20 @@ assert.match(runtime, /iconHtml:\s*brandIcon\(current, 'cpRuntimeIcon'\)/,
   'selected runtime must use the same identity badge as the picker');
 assert.match(runtime, /AgentBrand\.html\(id, \{ className: 'runtime-brand'/,
   'runtime picker must delegate identity rendering to the shared Agent brand contract');
+assert.match(runtime, /#cpRuntimeAvailability/,
+  'new conversation must render a missing-runtime slot beside the selected runtime');
+assert.match(runtime, /cp-runtime-availability-footer/,
+  'new conversation must render runtime management inside the picker footer');
+assert.match(runtime, /missingWrap\.closest\('\.cp-runtimewrap'\)/,
+  'new conversation must keep the missing-runtime slot in the same runtime wrapper');
+assert.match(runtime, /missingWrap\.parentElement === runtimeWrap/,
+  'picker footer must not widen the compact composer toolbar');
+assert.match(composeSurface, /runtimeWrap\.appendChild\(runtimeAvailability\)/,
+  'new conversation must move the missing-runtime slot with the selected runtime button');
+assert.match(sessionControlsCss, /wc-agent-badge\{[^}]*border:1px solid/,
+  'historical conversation runtime trigger must share the outlined selected-runtime treatment');
+assert.match(desk, /components\/panels\/chat-session-controls\.css/,
+  'historical conversation runtime styles must be loaded in production');
 assert.match(runtime, /class='wc-pop-row cp-runtime-row'/,
   'runtime rows must keep explicit icon, copy and status columns');
 assert.match(runtime, /data-state='unknown'/,
@@ -84,6 +109,32 @@ assert.match(bridge, /createRunnerRuntimeAdapter/,
   'the generic runtime registry must register the Runner adapter');
 assert.match(bridge, /runtimeCatalog\.runnerRuntimes\(\)/,
   'all supported Runner runtimes must be registered from one catalog');
+assert.match(bridge, /async function availableRuntimes/,
+  'runtime availability must be health checked without changing the sync catalog API');
+assert.match(bridge, /availableRuntimes: ready/,
+  'the bridge must separate ready rows from the complete catalog');
+assert.match(picker, /availableRuntimes/,
+  'the conversation picker must render the health checked projection');
+assert.match(picker, /cp-runtime-pop/,
+  'historical conversations must use the same runtime picker surface as new conversations');
+assert.match(picker, /wc-pop-row cp-runtime-row/,
+  'historical runtime rows must keep the shared icon, name and status columns');
+assert.match(picker, /nchatRuntimeAvailability/,
+  'historical conversations must expose the missing-runtime stack beside the selected Agent');
+assert.match(picker, /function attachFooter\(\)/,
+  'historical conversations must move the management entry into the picker footer');
+assert.match(workComposer, /data-runtime-more/,
+  'missing runtimes must expose a management entry point');
+assert.match(picker, /translateText/,
+  'picker labels and aria text must go through the locale adapter');
+assert.match(localeChat, /'缺失的执行底座': 'Missing runtimes'/,
+  'runtime availability labels must have an English locale entry');
+assert.match(localeChat, /'打开 Agent 管理': 'Open Agent management'/,
+  'runtime management action must have an English locale entry');
+assert.match(composerCss, /cp-runtimewrap:has\(> \.wc-runtime-availability:not\(\[hidden\]\)\)/,
+  'missing runtime stack must remain visible in the compact composer');
+assert.match(composerCss, /cp-runtime-availability-footer[^}]*border-top/,
+  'runtime management must be visually separated as the picker footer');
 assert.match(bridge, /legacyOptions\.adapterId\s*\|\|\s*'pi'/,
   'Pi remains the explicit default rather than an implicit fallback');
 assert.match(chat, /_sessionOptions\.adapterId/,

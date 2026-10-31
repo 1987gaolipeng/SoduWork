@@ -52,10 +52,40 @@ function configuredModel(app) {
 }
 
 /*
+ * Opening an archived transcript must not depend on a currently usable AI
+ * allowance. The SDK still needs a model-shaped value to hydrate the archive,
+ * but no request is sent until a new turn passes quota admission. Reuse the
+ * last local model metadata when available and mark the result so callers can
+ * force a fresh ticket before any future send.
+ */
+function historicalModel(app, identity, modelName = '') {
+  let stored = null;
+  try {
+    const value = JSON.parse(fs.readFileSync(path.join(agentDir(app), 'models.json'), 'utf8'));
+    const provider = value?.providers?.soduwork;
+    const row = Array.isArray(provider?.models) ? provider.models[0] : null;
+    if (row) stored = { provider, row };
+  } catch (_) { /* A first run may not have local model metadata yet. */ }
+  const id = String(modelName || stored?.row?.id || configuredModel(app) || 'history').trim() || 'history';
+  const baseUrl = String(stored?.provider?.baseUrl || '').trim() ||
+    String(identity?.hub || '').replace(/\/+$/, '') + '/api/v1/ai-proxy/v1';
+  const model = {
+    baseUrl, key: 'history-only', id,
+    label: String(stored?.row?.name || stored?.row?.label || id),
+    input: Array.isArray(stored?.row?.input) && stored.row.input.length ? stored.row.input : ['text'],
+    contextWindow: Number(stored?.row?.contextWindow) || DEFAULT_CTX,
+    maxOutputTokens: Number(stored?.row?.maxTokens) || 8192,
+    historical: true,
+  };
+  return { ok: true, historical: true, provider: 'soduwork', agentDir: agentDir(app), model };
+}
+
+/*
  * Resolve the authorized model endpoint from Hub and return a readable failure reason when
  * unavailable.
  */
-async function fetchModel(identity, modelName = '', timeoutMs = 8000, fetchImpl = global.fetch, force = false, agentId = 'pi') {
+async function fetchModel(identity, modelName = '', timeoutMs = 8000, fetchImpl = global.fetch, force = false,
+  agentId = 'pi', options = {}) {
   if (!identity || !identity.hub || !identity.clientId || (!identity.session && !identity.secret)) {
     return { ok: false, reason: '这台电脑还没连上 SoduWork 后台（先打开桌宠登录一次）' };
   }
@@ -64,11 +94,13 @@ async function fetchModel(identity, modelName = '', timeoutMs = 8000, fetchImpl 
   }
   const hub = String(identity.hub).replace(/\/+$/, '');
   const requestedAgent = String(agentId || 'pi').trim().toLowerCase().replace(/^local:/, '');
+  const ignoreAgentPreference = options && options.ignoreAgentPreference === true;
   const custom = requestedAgent.startsWith('custom-') &&
     require('../agent-runtime/runtime-catalog').runtime(requestedAgent)?.modelMode === 'managed';
   const agent = custom ? 'custom-acp' : requestedAgent;
   const accountScope = accountScopeKey(identity);
-  const cacheKey = hub + '|' + String(identity.clientId || '') + '|' + accountScope + '|' + agent + '|' + String(modelName || '');
+  const cacheKey = hub + '|' + String(identity.clientId || '') + '|' + accountScope + '|' + agent + '|' +
+    String(modelName || '') + '|' + (ignoreAgentPreference ? 'without-preference' : 'with-preference');
   const cacheable = fetchImpl === global.fetch && !!accountScope;
   if (cacheable && force) {
     _modelCache.delete(cacheKey);
@@ -94,7 +126,8 @@ async function fetchModel(identity, modelName = '', timeoutMs = 8000, fetchImpl 
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
   try {
     const query = '?agent=' + encodeURIComponent(agent) + (String(modelName || '').trim()
-      ? '&model=' + encodeURIComponent(String(modelName).trim()) : '');
+      ? '&model=' + encodeURIComponent(String(modelName).trim()) : '') +
+      (ignoreAgentPreference ? '&ignore_preference=1' : '');
     const res = await fetchWithDeviceAuthRetry(identity,
       hub + '/api/v1/ai-proxy/config' + query, {
       signal: ctl.signal,
@@ -103,12 +136,16 @@ async function fetchModel(identity, modelName = '', timeoutMs = 8000, fetchImpl 
       const error = await res.json().catch(() => null);
       const detail = error?.detail;
       const message = typeof detail === 'string' ? detail : detail?.message;
-      return { ok: false, status: res.status,
+      const failure = { ok: false, status: res.status,
         reason: typeof message === 'string' && message.trim()
           ? message.slice(0, 500) : '后台没应答（HTTP ' + res.status + '）',
         ...(typeof detail?.code === 'string' ? { code: detail.code } : {}),
         ...(detail?.code === 'TOKEN_QUOTA_EXCEEDED' ? { quota: detail.quota } : {}),
       };
+      if (options?.allowHistorical && failure.code === 'TOKEN_QUOTA_EXCEEDED') {
+        return historicalModel(options.app, identity, modelName);
+      }
+      return failure;
     }
     const d = await res.json();
     if (!d || !d.ok) return { ok: false, reason: custom && d?.reason === '此底座不使用企业模型配置，请检查执行底座'
@@ -283,13 +320,13 @@ function warmupGateway(baseUrl, apiKey, modelId, fetchImpl = global.fetch) {
 }
 
 /* Prepare the environment required to start a Pi session. */
-async function fetchSelection(identity, name = '', timeoutMs = 8000, fetchImpl = global.fetch, force = false) {
+async function fetchSelection(identity, name = '', timeoutMs = 8000, fetchImpl = global.fetch, force = false, agentId = 'pi', options = {}) {
   if (require('./image-model').imageChoice(name)) return require('./image-model').resolve(identity, name, fetchImpl, force);
-  return fetchModel(identity, name, timeoutMs, fetchImpl, force);
+  return fetchModel(identity, name, timeoutMs, fetchImpl, force, agentId, options);
 }
 
-async function prepare(app, identity, modelName = '') {
-  const got = await fetchSelection(identity, modelName);
+async function prepare(app, identity, modelName = '', options = {}) {
+  const got = await fetchSelection(identity, modelName, 8000, global.fetch, false, 'pi', { ...options, app });
   if (!got.ok) return got;
   const dir = agentDir(app);
   writeModels(dir, got.model);

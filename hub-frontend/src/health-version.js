@@ -1,3 +1,9 @@
+// Keep diagnostic revisions out of the everyday service status summary.
+export function healthReleaseLabel(value) {
+  const raw = String(value || '').trim().replace(/^v/i, '')
+  return /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(raw) ? 'v' + raw : ''
+}
+
 export function healthVersionLabel(value, commit, buildLabel) {
   const raw = String(value || '').trim().replace(/^v/i, '')
   if (!raw) return ''

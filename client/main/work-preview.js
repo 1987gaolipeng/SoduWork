@@ -182,11 +182,21 @@ async function appRequest(event, raw) {
   if (!appBridgeContract.validateOrigin(currentOrigin, item.appBridge.origin)) {
     return { ok: false, code: 'APP_ORIGIN_DENIED', reason: '页面来源已变化，能力已关闭' };
   }
-  if (request.method === 'automation.create') return require('./work-preview-app-automation.cjs').submit({ owner, item, request, deps: DEPS });
+  if (['ai.generate','directory.list','composer.mention','user.getCurrent','notifications.list','library.list','library.read','conversations.list','conversations.messages'].includes(request.method)) {
+    try { request.assertCurrent=(await require('./work-preview-app-connection.cjs').authorize(item,DEPS,capability)).assertCurrent; }
+    catch(error) {return {ok:false,reason:error.message};}
+  }
+  if (request.method === 'ai.generate') return DEPS.appAI(item, request.params, request.assertCurrent);
+  if (request.method.startsWith('conversations.')) {
+    try{return await require('./app-readonly-history.cjs').handle(DEPS.app,request.method,request.params,request.assertCurrent);}
+    catch(error){return {ok:false,code:'APP_HISTORY_READ_FAILED',reason:error.message};}
+  }
+  if (request.method === 'automation.create') return require('./work-preview-app-automation.cjs').submit({ owner, item, request, deps: {...DEPS,expandComposer:(owner,root)=>composerControl(owner,root,{method:'composer.expand',params:{}})} });
   if (request.method.startsWith('attachments.')) return require('./work-preview-app-attachments.cjs').handle(item, request.method, request.params, DEPS);
   if (request.method.startsWith('composer.')) return composerControl(owner, item.appWindowRoot || item, request, item);
   if (request.method === 'mcp.connect') return require('./work-preview-app-connection.cjs').connect(found, request.params, DEPS);
   if (request.method.startsWith('settings.')) return require('./work-preview-app-connection.cjs').settings(found, request, DEPS);
+  if (request.method.startsWith('data.')) return require('./jiyong-runtime.cjs').data(found, request, DEPS);
   if (!owner.sender || owner.sender.isDestroyed()) return closedResult();
   const id = request.id;
   owner.pendingAppRequests = owner.pendingAppRequests || new Map();
@@ -206,7 +216,7 @@ async function appRequest(event, raw) {
       contributionId: item.appBridge.contributionId, method: request.method,
       params: request.params,
     });
-  });
+  }).then(result=>{try{request.assertCurrent?.();return result;}catch(error){return {ok:false,reason:error.message};}});
 }
 
 function snapshot(owner, item, patch) {
@@ -717,7 +727,9 @@ function guardWorkbenchDownload(slot, item) {
 }
 
 function install(deps) {
+  deps.appAI = require('./app-ai-generate.cjs').create(deps);
   DEPS = deps;
+  require('./jiyong-hosted-connection.cjs').configure(deps);
   SESSION_POOL = require('./work-preview-sessions.cjs').create({
     session: deps.session || require('electron').session,
     onError: error => console.error('[work-preview] session cleanup failed; partition quarantined:', error.message),
@@ -795,7 +807,10 @@ function install(deps) {
   deps.ipcMain.handle('work-preview-composer-sent', (event) => {
     try { return composerSent(event); } catch (_) { return { ok: false }; }
   });
+  deps.ipcMain.handle('work-preview-app-data-changed',(event,topic)=>require('./app-data-events.cjs').publish(OWNERS,event,topic));
   deps.ipcMain.handle('work-preview-composer-turn-settled', (event) => composerTurnSettled(event));
+  deps.ipcMain.handle('work-preview-composer-automation-authorize',(event,id)=>require('./work-preview-app-automation.cjs').authorize(event.sender,id));
+  deps.ipcMain.handle('work-preview-composer-automation-result', (event,payload)=>require('./work-preview-app-automation.cjs').finish(event.sender,payload));
   deps.ipcMain.handle('work-preview-composer-submit-result', (event, payload) => require('./work-preview-app-chat.cjs').finish(event.sender, payload));
   deps.ipcMain.handle('work-preview-hide', (event) => {
     const owner = ownerFor(event);

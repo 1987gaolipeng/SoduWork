@@ -523,7 +523,7 @@
        */
       const preview = global.soduWorkAPI && soduWorkAPI.workPreview;
       if (!preview || typeof preview.showDetached !== 'function') {
-        throw new Error('当前窗口不支持独立应用窗口');
+        throw new Error('当前窗口不支持独立即用窗口');
       }
       const result = await preview.showDetached({
         /* Derive tabId from application identity so repeated opens focus the existing window and preserve its state. */
@@ -537,7 +537,7 @@
         windowSettings: contribution.appWindow,
       });
       if (!result || !result.ok) {
-        throw new Error((result && result.reason) || '应用窗口没有打开成功');
+        throw new Error((result && result.reason) || '即用窗口没有打开成功');
       }
       return { detached: true, tabId: result.tabId, url };
     }

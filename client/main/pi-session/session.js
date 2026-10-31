@@ -141,6 +141,10 @@ async function loadSdk(app) {
   // patch before the first ESM import; otherwise the first message after every
   // restart pays the full third-party extension startup cost.
   try { require('../../scripts/patch-pi-extension-cache.cjs').patchPiExtensionCache(); } catch (_) {}
+  // The bundled Pi runtime uses exponential backoff by default. Apply the
+  // companion schedule patch before its first import so session settings can
+  // express SoduWork's bounded 5/15/30/60/120/240 second retry policy.
+  try { require('../../scripts/patch-pi-retry-schedule.cjs').patchPiRetrySchedule(); } catch (_) {}
   const tried = [];
   for (const entry of sessionHelpers.entryCandidates(app)) {
     if (!fs.existsSync(entry)) { tried.push(entry + '（不存在）'); continue; }
@@ -235,7 +239,9 @@ function _historyIndex(app) {
       const binding = _taskBindingFromEntries(entries);
       return {
         id: s.id, path: s.path, cwd: s.cwd || '', usedHarnesses: s.usedHarnesses || [],
-        title: s.workOwner ? s.name || '工作记录' : s.messageCount ? sessionHelpers.title(s) : binding.taskTitle || sessionHelpers.title(s),
+        title: s.workOwner ? s.name || '工作记录' : sessionHelpers.repairPersistedTitle(
+          s.messageCount ? sessionHelpers.title(s) : binding.taskTitle || sessionHelpers.title(s),
+          s.firstMessage),
         ...(s.workOwner ? { workOwner: s.workOwner, workOnly: s.workOnly } : {}),
         taskId: binding.taskId, taskTitle: binding.taskTitle,
         taskIds: binding.taskIds, taskBindings: binding.taskBindings, activeTaskId: binding.activeTaskId,

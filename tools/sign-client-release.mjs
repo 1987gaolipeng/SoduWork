@@ -20,7 +20,9 @@ import { fileURLToPath } from "node:url";
 
 import compatibility from "../client/scripts/installer-compatibility-report.cjs";
 
-const VERSION_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+// Stable releases use canonical x.y.z; staging candidates carry a semver
+// prerelease suffix x.y.z-beta.N so iterating betas never consumes the stable number.
+const VERSION_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-beta\.(1|[1-9]\d*))?$/;
 const KEY_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$/;
 const PKCS8_PREFIX = Buffer.from("302e020100300506032b657004220420", "hex");
 
@@ -97,9 +99,9 @@ async function main() {
   /* Accept the SoduWork- prefix and existing SoduWork-/SoduWork- artifact names for compatibility. */
   const stem = '(?:SoduWork|SoduWork|SoduWork)';
   const patterns = {
-    win32: new RegExp(`^${stem}-(\\d+\\.\\d+\\.\\d+)-Setup\\.exe$`),
-    darwin: new RegExp(`^${stem}-(\\d+\\.\\d+\\.\\d+)-mac(?:-(x64|arm64))?\\.(dmg|zip)$`),
-    linux: new RegExp(`^${stem}-(\\d+\\.\\d+\\.\\d+)-linux(?:-(x64|arm64))?\\.(AppImage|deb|rpm|tar\\.gz)$`),
+    win32: new RegExp(`^${stem}-(${stemVersion})-Setup\\.exe$`),
+    darwin: new RegExp(`^${stem}-(${stemVersion})-mac(?:-(x64|arm64))?\\.(dmg|zip)$`),
+    linux: new RegExp(`^${stem}-(${stemVersion})-linux(?:-(x64|arm64))?\\.(AppImage|deb|rpm|tar\\.gz)$`),
   };
   const match = patterns[platform].exec(name);
   if (!match || !VERSION_RE.test(match[1])) fail(`installer filename does not match the ${platform} convention (SoduWork-x.y.z-...)`);

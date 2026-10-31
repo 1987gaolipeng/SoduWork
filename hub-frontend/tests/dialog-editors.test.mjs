@@ -8,6 +8,7 @@ const Confirm = () => null
 const LocalesEditor = () => null
 const ui = { Modal, Confirm, Icon: () => null, Loading: () => null, SelectMenu: () => null, toast() {} }
 const viewport = { useViewportHeight: () => undefined }
+const getUser = () => ({ isSuper: false, orgId: 'fixture-org' })
 function descendants(value, predicate) {
   if (Array.isArray(value)) return value.flatMap((child) => descendants(child, predicate))
   if (!React.isValidElement(value)) return []
@@ -26,8 +27,8 @@ for (const [file, loadMethod, deleteMethod, item, css] of [
       [deleteMethod]: async (payload) => { requests.push(payload); if (fail) throw new Error('offline'); return { items: [] } },
     }
     const page = await createComponentHarness(new URL('../src/screens/' + file, import.meta.url), {
-      dependencies: { '../api.js': { api }, '../ui.jsx': ui, '../viewport-height.js': viewport,
-        '../components/LocalesEditor.jsx': LocalesEditor, [css]: {} },
+      dependencies: { '../api.js': { api, getUser }, '../ui.jsx': ui, '../viewport-height.js': viewport,
+        '../FilterControls.jsx': { FilterSelect: 'FilterSelect' }, '../components/LocalesEditor.jsx': LocalesEditor, [css]: {} },
     })
     t.after(() => page.unmount())
     page.render(); await page.flush()
@@ -61,8 +62,8 @@ for (const [file, className, value, changeProp, css] of [
       onCancel: () => calls.push('close'), onClose: () => calls.push('close'), busy: false }
     const page = await createComponentHarness(new URL('../src/screens/' + file, import.meta.url), {
       exportName: 'Editor', privateExports: ['Editor'], props,
-      dependencies: { '../api.js': { api: {} }, '../ui.jsx': ui, '../viewport-height.js': viewport,
-        '../components/LocalesEditor.jsx': LocalesEditor, [css]: {} },
+      dependencies: { '../api.js': { api: {}, getUser }, '../ui.jsx': ui, '../viewport-height.js': viewport,
+        '../FilterControls.jsx': { FilterSelect: 'FilterSelect' }, '../components/LocalesEditor.jsx': LocalesEditor, [css]: {} },
     })
     t.after(() => page.unmount())
     const dialog = page.nodes((node) => node.type === Modal)[0]

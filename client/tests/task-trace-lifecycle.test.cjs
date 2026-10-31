@@ -65,6 +65,28 @@ test('task hero and execution rail render one lifecycle title, state and four-st
   }
 });
 
+test('audit timeline renders conversation states and preserves actual event order', () => {
+  const f = fixture();
+  const trace = {
+    ...snapshot(1, 'running', '执行工作'),
+    timeline: [
+      { id: 'first', kind: 'conversation.turn', detail: { state: 'queued', executor: 'native' }, actor: '武娇娇', at: '2026-10-26T08:34:01.120Z' },
+      { id: 'second', kind: 'task.execution_started', detail: { to: 'doing' }, actor: 'SoduWork', at: '2026-10-26T08:34:02.240Z' },
+      { id: 'third', kind: 'conversation.turn', detail: { state: 'running', executor: 'native' }, actor: '武娇娇', at: '2026-10-26T08:40:03.340Z' },
+    ],
+  };
+  const html = f.api.html(trace, {});
+  assert.match(html, /本轮执行完成|执行工作/);
+  assert.match(html, /已开始执行/);
+  assert.match(html, /已排队，等待执行/);
+  const localTime = value => new Date(value).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const latestTime = localTime(trace.timeline[2].at), middleTime = localTime(trace.timeline[1].at);
+  assert.ok(html.includes(latestTime), 'show the event time in the device timezone');
+  assert.doesNotMatch(html, /conversation\.turn/);
+  assert.match(html, /按实际发生时间倒序/);
+  assert.ok(html.indexOf(latestTime) < html.indexOf(middleTime));
+});
+
 test('open trace refreshes after completion and reopening task events', async () => {
   const f = fixture(), root = f.container();
   await f.api.mount(root, { taskId: 'task-1', trace: snapshot(1, 'running', '执行工作'), refreshMs: 0 });

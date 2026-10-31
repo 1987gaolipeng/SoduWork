@@ -46,6 +46,10 @@
     get _openPluginDebug() { return _openPluginDebug; },
     get _mateMention() { return _mateMention; }, set _mateMention(value) { _mateMention = value; },
     get _cancel() { return _cancel; },
+    get _stopState() { return _stopState; },
+    get _sendState() { return _sendState; },
+    get _beginSendState() { return _beginSendState; },
+    get _finishSendState() { return _finishSendState; },
     get _mode() { return _mode; }, set _mode(value) { _mode = value; },
     get _cancelQueued() { return _cancelQueued; },
     get _proposalAction() { return _proposalAction; },
@@ -85,6 +89,7 @@
     get _composerControls() { return _composerControls; }, set _composerControls(value) { _composerControls = value; },
     get _dismissProposal() { return _dismissProposal; },
     get _ensure() { return _ensure; },
+    get _retryOpenChat() { return _retryOpenChat; },
     get _goalAction() { return _goalAction; },
     get _goalActionPending() { return _goalActionPending; }, set _goalActionPending(value) { _goalActionPending = value; },
     get _hotToolBodies() { return _hotToolBodies; }, set _hotToolBodies(value) { _hotToolBodies = value; },
@@ -151,7 +156,7 @@
   };
   const _readingPosition = global.ChatReadingPosition?.create(context);
   const _workCards = global.ChatWorkCards?.create(context);
-  const { _ensureOnce, _ensure, _awaitBounded, _send, _sendCore, _paintOpening } = global.ChatSessionController.create(context);
+  const { _ensureOnce, _ensure, _retryOpenChat, _awaitBounded, _send, _sendCore, _paintOpening } = global.ChatSessionController.create(context);
   const { _bind, _mount, _loadChatSkills, _openPluginBuilder, _toggleChatMic } = global.ChatComposerBindings.create(context);
   const { _collabState, _ensureCollabView, _collabAction, _openTaskPicker, _selectCollabTask, _loadCollabTask, _clearFinishedAcceptanceContext, _loadCollabRun, _scheduleCollabPoll, _taskSnapshotIsStale, _isEmptyStalledSnapshot, _collabTerminal, _collabRunning, _collabStatus, _collabEntryStatus, _collabEntries, _collabQueueMode, _collabProjectId, _setCollabEntryStatus, _nextCollabEntry, _persistTaskBinding, _bindCollaborationTask, _restoreCollaboration, _openTask, _renderTaskStartPrompt, _startTask, _startTaskCommand, enqueueTask } = global.ChatTaskController.create(context);
   const { reset: _resetMessageRenderer, rich, _richPlain, CARET, _ensureHlCss, _inject, _blockHtml, _MCP_SAY, _friendlyTool, _toolHtml, _render, _ctxText, _tokenText, _ctxHtml, _uiHtml } = global.ChatMessageRenderer.create(context);
@@ -182,6 +187,12 @@
   let _pending = '';
   let _pendingSentAt = 0;
   let _lastStatus = '';     // Previous frame state used to detect run completion.
+  let _stopState = 'idle';  // idle | requested | timeout; scoped to the active turn.
+  let _sendState = 'idle';  // idle | sending; scoped to the current submission.
+  let _sendStateToken = 0;
+  let _stopTimer = null;
+  let _stopRequestToken = 0;
+  let _stopReceiptAcknowledged = false;
   let _messageAttachments = null;
   let _messageWindowSize = 80;
   let _pluginMention = null;
@@ -315,13 +326,26 @@
     if (!ref || !api || !api.outputs) return;
     clearTimeout(_outRetryTimer); _outRetryTimer = null;
     let shouldRetry = false;
+    const latestUser = (_snap?.messages || []).findLastIndex(message => message?.role === 'user');
+    const currentTurnTools = (_snap?.tools || []).some(tool => {
+      if (!tool || tool.state !== 'done' || Number(tool.after || 0) < latestUser) return false;
+      const name = String(tool.name || '').toLowerCase();
+      return /write|create|edit|patch|save|download|export|generate|image|document|file|bash|shell|command|exec/.test(name);
+    });
+    // A settled event can arrive immediately after the producer closes its
+    // file handle.  Ordinary local sessions have no task id, so the old retry
+    // gate skipped them and an initially empty scan permanently hid the card
+    // and automatic preview.  Limit this to turns with a file-producing tool
+    // or a file journal, then retry only twice within the same render scope.
+    const localOutputMayBeLate = Boolean(_snap?.fileChanges || _snap?.execution?.fileChanges || currentTurnTools);
     try {
       const taskIds = [..._collabTasks.keys(), ...((_snap || {}).messages || []).map(m => m.taskId).filter(Boolean)];
       // Remote attachments can arrive after the task's completion event.
       // A successful local scan is already complete; do not sweep the same
       // workspace twice more whenever a conversation is opened or settles.
       shouldRetry = taskIds.length > 0 || Boolean(_snap?.cloudHandoff?.taskId ||
-        _snap?.snapshot?.cloudHandoff?.taskId || _snap?.execution?.cloud);
+        _snap?.snapshot?.cloudHandoff?.taskId || _snap?.execution?.cloud) ||
+        localOutputMayBeLate;
       let files = global.ChatOutputLinks
         ? await ChatOutputLinks.load(api, ref, taskIds, _outs, global.SoduWorkAPI)
         : await api.outputs(ref).then(r => {
@@ -441,6 +465,7 @@
     if (_renderFrame) return;
     const paint = () => {
       _renderFrame = 0;
+      _reconcileStopState();
       if (_ref || _snap) _render();
     };
     if (typeof global.requestAnimationFrame === 'function') {
@@ -448,6 +473,60 @@
     } else {
       _renderFrame = setTimeout(paint, 16);
     }
+  }
+  function _stopRoot() {
+    if (!global.document) return null;
+    return global.document.querySelector('#cpChat .nbox') ||
+      global.document.querySelector('.nchat .nbox');
+  }
+  function _clearStopTimer() {
+    if (_stopTimer) { clearTimeout(_stopTimer); _stopTimer = null; }
+  }
+  function _stopCapable() {
+    const execution = _snap?.execution || {}, phase = execution.quality?.phase || '';
+    return _snap?.status === 'streaming' || execution.running === true ||
+      ['executing', 'implementing', 'reviewing', 'repairing'].includes(phase);
+  }
+  function _paintActionState() {
+    const root = _stopRoot();
+    if (!root) return;
+    // The submission IPC can stay pending for the whole model turn. Once the
+    // runtime reports that the turn is actually stoppable, expose the normal
+    // stop action instead of keeping the primary button disabled as "sending".
+    if (_sendState === 'sending' && _stopCapable()) _sendState = 'idle';
+    root.dataset.stopState = _stopState;
+    root.dataset.sendState = _sendState;
+    if (global.ChatTools && typeof ChatTools.paintSendButton === 'function') {
+      ChatTools.paintSendButton(root, _runtimeBusy(), _messageAttachments, _stopState, _stopCapable(), _sendState);
+    }
+  }
+  function _paintStopState() { _paintActionState(); }
+  function _beginSendState() {
+    const token = ++_sendStateToken;
+    if (_stopState === 'timeout') {
+      _stopState = 'idle';
+      _stopReceiptAcknowledged = false;
+    }
+    _sendState = 'sending';
+    _paintActionState();
+    return token;
+  }
+  function _finishSendState(token) {
+    if (token == null || token !== _sendStateToken) return;
+    _sendState = 'idle';
+    _paintActionState();
+  }
+  function _setStopState(value) {
+    _stopState = ['requested', 'timeout'].includes(value) ? value : 'idle';
+    if (_stopState !== 'requested') _stopReceiptAcknowledged = false;
+    _paintStopState();
+  }
+  function _reconcileStopState() {
+    if (_stopState !== 'requested' || !_stopReceiptAcknowledged || _runtimeBusy()) return;
+    _clearStopTimer();
+    _stopState = 'idle';
+    _stopReceiptAcknowledged = false;
+    _paintStopState();
   }
   function _fail(text, detail, retryDraft, failure) {
     const quota = global.SoduWorkQuota?.detail(failure || detail);
@@ -488,7 +567,51 @@
   }
   function _cancel() {
     const api = _api();
-    if (api && _ref) api.cancel(_ref);
+    if (!api || !_ref || _stopState === 'requested') return;
+    const ref = _ref;
+    const token = ++_stopRequestToken;
+    _clearStopTimer();
+    _setStopState('requested');
+    _stopTimer = setTimeout(() => {
+      if (token === _stopRequestToken && _stopState === 'requested') {
+        _stopTimer = null;
+        _setStopState('timeout');
+      }
+    }, 8000);
+    let result;
+    try { result = api.cancel(ref); } catch (_) {
+      if (token === _stopRequestToken) _setStopState('timeout');
+      return;
+    }
+    Promise.resolve(result).then(receipt => {
+      if (token !== _stopRequestToken || !receipt) return;
+      if (receipt.ok === false ||
+          (receipt.accepted === false && receipt.stopping !== true)) {
+        _clearStopTimer();
+        _setStopState('timeout');
+        return;
+      }
+      // Apply the authoritative post-request snapshot before repainting. A
+      // stale streaming frame must not make the stop button look clickable
+      // while a controlled turn is still winding down.
+      if (receipt.snapshot && typeof receipt.snapshot === 'object') {
+        _snap = receipt.snapshot;
+        _lastStatus = _snap.status || _lastStatus;
+      }
+      const acknowledged = receipt.stopped === true ||
+        ['stopped', 'cancelled', 'canceled', 'aborted'].includes(String(receipt.state || '').toLowerCase());
+      if (acknowledged) _stopReceiptAcknowledged = true;
+      if (acknowledged && !_runtimeBusy()) {
+        _clearStopTimer();
+        _setStopState('idle');
+      } else {
+        _scheduleRender();
+      }
+    }).catch(() => {
+      if (token !== _stopRequestToken) return;
+      _clearStopTimer();
+      _setStopState('timeout');
+    });
   }
   async function _answerUi(method, value, button) {
     const api = _api();
@@ -620,7 +743,16 @@
       if (i) i.focus();
     }, 40);
     if (first) {
-      const accepted = await _send(first, { plugins: initialPlugins, skills: initialSkills });
+      // The first turn is sent after the new runtime is opened. Carry the
+      // compose-stage attachment references into that send explicitly; the
+      // chat composer has a different attachment controller and is empty on
+      // first mount, so relying on it drops files when switching to a Runner
+      // runtime (Qwen/DeepSeek/Codex) before sending.
+      const accepted = await _send(first, {
+        plugins: initialPlugins,
+        skills: initialSkills,
+        attachments: Array.isArray(_sessionOptions.attachments) ? _sessionOptions.attachments : [],
+      });
       focusLater();
       return accepted;
     }
@@ -634,10 +766,18 @@
       // conversation. Do not retain its cached transcript or allow draft send.
       if (typeof _conversationSnapshots !== 'undefined') _conversationSnapshots.delete(String(chatId));
       const failedDraftKey = _draftKey;
+      const failedSessionId = String(chatId || _sessionId || '').trim();
+      const failedSessionOptions = { ..._sessionOptions };
       reset();
       _draftKey = failedDraftKey;
+      // Keep the historical identity and its launch options attached to the
+      // error state.  reset() normally clears them because navigation to a
+      // different chat must start clean, but the retry action needs the same
+      // archive id to reopen it instead of creating a new conversation.
+      _sessionId = failedSessionId;
+      _sessionOptions = failedSessionOptions;
       _mount(); _restoreConversationDraft(_draftKey);
-      _snap = {openBlocked: true, messages: [], tools: []};
+      _snap = {openBlocked: true, sessionOpenCode: 'WORK_CARDS_BLOCKED', messages: [], tools: []};
       _taskOpenError = workCards.reason || '工作卡片暂时无法读取，请重新打开这条会话';
       _fail('打不开对话', _taskOpenError);
       return false;
@@ -677,6 +817,12 @@
     _stopSlowStatusTicker();
     _stopThinkingClock();
     _busy = false;
+    _stopRequestToken += 1;
+    _sendStateToken += 1;
+    _sendState = 'idle';
+    _clearStopTimer();
+    _stopState = 'idle';
+    _stopReceiptAcknowledged = false;
     _goalActionPending = '';
     _openingEpoch = -1;
     _openingTask = null;
@@ -756,6 +902,7 @@
       repoId: _snap?.requirementContext?.repoId || _sessionOptions.repoId || active.repoId || '',
       cwd: _wd?.dir || _sessionOptions.cwd || '', model: _workModel(),
       title: global.ChatChrome?.sessionTitle || _sessionOptions.sidebarProjectName || _sessionOptions.workspaceLabel || _wd?.name || '',
+      sessionUnavailable: _snap?.sessionNotFound === true,
       cloudHandoff: _snap?.cloudHandoff?.phase === 'committed',
       collaboration: Boolean(rows.length || _sessionOptions.taskRef || _sessionOptions.taskSession),
       taskIds: rows.map((row) => row.taskId),
@@ -848,12 +995,15 @@
     },
     enqueueTask,
     enter, reset, send: _send, openWorkAction: _openWorkAction,
+    openAppMention: options => _mateMention?.open(options) || {ok:false,reason:'同事发送卡片尚未就绪，请稍后重试'},
+    runAppAutomation: (params,authorize)=>_workCards.runAutomation(params,authorize),
     bindTask: _bindCollaborationTask, openTask: _openTask, openTaskPicker,
     closeTaskPicker: host => { if (_collabPicker.host === host) _collabAction('picker-close'); },
     isBusy: _runtimeBusy,
     hasSession, sessionInfo, refreshHistory, prepare,
     readingPosition: () => _readingPosition?.capture(),
     restoreReadingPosition: (reading, isCurrent) => _readingPosition?.restore(reading, isCurrent),
+    revealSearchMatch: (query, isCurrent) => _readingPosition?.revealSearchMatch(query, isCurrent),
     rememberDraft: (key, text, skills) => _rememberConversationText(key, text, skills),
     rememberComposerDraft: _rememberConversationDraft,
     restoreComposerDraft: _restoreConversationDraft,

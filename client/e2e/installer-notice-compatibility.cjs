@@ -7,7 +7,7 @@ const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
-const { build, Platform, Arch } = require('./fixtures/isolated-installer-build.cjs');
+const { build, createFixtureGuid, fixtureNames, validateFixtureIdentity, prepareFixtureLauncher, Platform, Arch } = require('./fixtures/isolated-installer-build.cjs');
 function run(file, args, extraEnv = {}) {
   const env = { ...process.env, ...extraEnv };
   delete env.ELECTRON_RUN_AS_NODE;
@@ -20,7 +20,11 @@ function run(file, args, extraEnv = {}) {
 }
 async function main() {
   const evidence = path.resolve(process.argv[2]);
-  const { root, id } = JSON.parse(await fs.readFile(evidence, 'utf8'));
+  const data = JSON.parse(await fs.readFile(evidence, 'utf8'));
+  const { root, id } = data;
+  const previous = validateFixtureIdentity(data);
+  const guid = createFixtureGuid();
+  const { productName, executableName, shortcutName } = fixtureNames(guid);
   assert.equal(path.dirname(root), os.tmpdir());
   assert.ok(path.basename(root).startsWith('soduwork-update-e2e-'));
   assert.match(id, /^com\.soduwork\.update\.e2e\.\d+$/);
@@ -28,6 +32,7 @@ async function main() {
   const prepackaged = path.join(root, 'notice-prepackaged');
   await fs.mkdir(prepackaged); // never overwrite a previous run or a production package
   await fs.cp(path.join(root, 'dist/win-unpacked'), prepackaged, { recursive: true });
+  await fs.rename(path.join(prepackaged, previous.executableName + '.exe'), path.join(prepackaged, executableName + '.exe'));
   for (const name of ['resources/optional-agent/LICENSE.txt', 'resources/pi/node_modules/sdk/LICENSE',
     'resources/runner/_internal/sdk.dist-info/licenses/LICENSE.APACHE', 'resources/shell/share/licenses/sdk/COPYING3']) {
     await fs.mkdir(path.dirname(path.join(prepackaged, name)), { recursive: true });
@@ -55,16 +60,17 @@ async function main() {
   }
   await fs.writeFile(manifestPath, JSON.stringify(manifest));
   const base = JSON.parse(await fs.readFile(path.join(client, 'package.json'), 'utf8')).build;
+  await prepareFixtureLauncher(client, { guid, productName, executableName, shortcutName });
   await require('../scripts/native-payload.cjs').writeNativePayload(prepackaged, path.join(client, '.runtime/installer'));
   const outputs = await build({
     targets: Platform.WINDOWS.createTarget(['nsis'], Arch.x64), projectDir: client, prepackaged,
     config: {
-      appId: id + '.notice', productName: 'SoduWork',
+      appId: id + '.notice', productName,
       directories: { app: path.join(root, 'fixture'), output: path.join(root, 'notice-dist'),
         buildResources: path.join(client, 'build') },
       afterPack: null, afterSign: null, extraResources: [],
-      win: { target: ['nsis'], icon: path.join(client, 'icon.ico'), executableName: 'SoduWork', signAndEditExecutable: false },
-      nsis: { ...base.nsis, include: path.join(client, 'build/installer.nsh'),
+      win: { target: ['nsis'], icon: path.join(client, 'icon.ico'), executableName, signAndEditExecutable: false },
+      nsis: { ...base.nsis, guid, shortcutName, artifactName: productName + '-${version}-Setup.exe', include: path.join(client, 'build/installer.nsh'),
         installerIcon: path.join(client, 'icon.ico'), uninstallerIcon: path.join(client, 'icon.ico'),
         createDesktopShortcut: false, createStartMenuShortcut: false, runAfterFinish: false },
       compression: 'store', npmRebuild: false,
@@ -100,8 +106,8 @@ async function main() {
     await new Promise(resolve => setTimeout(resolve, 50));
   }
   const launched = JSON.parse(await fs.readFile(launchOutput, 'utf8'));
-  assert.equal(launched.exe, path.join(version, 'SoduWork.exe'));
-  const result = { root, installed, setup, code, launched: true,
+  assert.equal(launched.exe, path.join(version, executableName + '.exe'));
+  const result = { root, installed, setup, guid, productName, executableName, shortcutName, code, launched: true,
     simulation: '4096 bytes appended to every notice after extraction, before verification; not a live customer protection agent', details };
   await fs.writeFile(path.join(path.dirname(evidence), 'notice-compatibility.json'), JSON.stringify(result, null, 2));
   console.log('PASS: real NSIS installs and launches with all nested notices changed by 4096 bytes after extraction; canonical copies verified.');

@@ -105,10 +105,28 @@
     });
     input.click();
   }
+  const repairs = new Set();
   async function openConversationDraft(ref, target, button, ctx) {
     if (button && button.disabled) return;
     const label = button && button.textContent;
     const errorEl = button?.closest?.('.nplugin-draft')?.querySelector('.nplugin-draft-error');
+    const card = button?.closest?.('.nplugin-draft');
+    let report = card?.querySelector?.('.nplugin-checks');
+    if (!report && card?.appendChild && global.document?.createElement) {
+      report = global.document.createElement('div'); report.className = 'nplugin-checks';
+      report.setAttribute('role','status'); card.appendChild(report);
+    }
+    const checks = [];
+    const paint = () => {
+      if (!report?.replaceChildren) return;
+      report.replaceChildren();
+      for (const row of checks) {
+        const line = global.document.createElement('p'); line.dataset.state = row.state;
+        line.textContent = (row.state === 'passed' ? '✓ ' : row.state === 'failed' ? '✕ ' : '○ ') + row.label;
+        report.appendChild(line);
+      }
+    };
+    let draft;
     if (errorEl) errorEl.hidden = true;
     if (button) { button.disabled = true; button.textContent = '正在检查…'; }
     try {
@@ -116,11 +134,64 @@
       if (!api || typeof api.pluginDraft !== 'function') throw Error('请更新并重启 SoduWork 后安装会话插件');
       const result = await api.pluginDraft(ref, target);
       if (!result || !result.ok) throw Error(result && result.reason || '草稿读取失败');
+      draft = result.body;
+      checks.push({state:'passed',label:'已读取本会话的实际草稿和随包资源'}); paint();
       const preview = await global.SoduWorkAPI.preflightPluginDraft(result.body);
+      if(button?.isConnected===false)return;
+      if(draft.template==='app'){
+        const hint=card?.querySelector?.('.nplugin-draft-copy span');if(hint)hint.textContent='即用已生成，可以检查并安装';
+        const mark=card?.querySelector?.('.nplugin-draft-icon');
+        if(mark?.replaceChildren&&preview.manifest?.icon&&global.document?.createElement){const image=global.document.createElement('img');image.src=preview.manifest.icon;image.alt='';mark.replaceChildren(image);}
+      }
+      for (const check of preview.checks || []) checks.push({state:check.state==='pending'||check.ok==null ? 'pending' : check.ok ? 'passed' : 'failed',label:check.label});
+      checks.push({state:'pending',label:preview.runtime?.executed ? '真实AI、业务授权与视觉质量：待实际操作验收；隔离首屏不代表业务完成' : '业务运行、真实服务授权和视觉质量：尚未执行；安装预检不代表业务验收'}); paint();
+      if (preview.ok === false || preview.checks?.some(check => check.ok === false)) throw Error((preview.checks||[]).filter(check=>check.ok===false).map(check=>check.label).join('\n')||'预检仍有未通过项');
       global.SoduWorkCapabilityPlugins.openLocalImport(result.body, preview, ctx);
     } catch (error) {
+      if(button?.isConnected===false)return;
       const message = errorText(error);
       if (errorEl) { errorEl.textContent = message; errorEl.hidden = false; }
+      checks.push({state:'failed',label:message}); paint();
+      if (report?.appendChild && global.document?.createElement) {
+        const repair = global.document.createElement('button'); repair.type = 'button';
+        repair.className = 'btn-mini'; repair.textContent = '立即修复';
+        const repairKey = ref + '\0' + target;
+        if (repairs.has(repairKey)) { repair.disabled = true; repair.textContent = '原会话正在修复'; }
+        repair.onclick = async () => {
+          if (repair.disabled || repairs.has(repairKey)) return;
+          const api = global.soduWorkAPI && (global.soduWorkAPI.conversationSession || global.soduWorkAPI.piSession);
+          repair.disabled = true; repairs.add(repairKey);
+          let off = () => {}, accepted, expiry, outcome, finished = false;
+          const submissionId = 'repair-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,9);
+          const finish = () => {
+            if (!accepted || !outcome || finished) return;
+            finished = true; off(); clearTimeout(expiry); repairs.delete(repairKey);
+            if (outcome.kind !== 'settled') {
+              repair.disabled = false; repair.textContent = '立即修复';
+              ctx.say(outcome.reason || '修复未完成，可重试或继续在原会话处理'); return;
+            }
+            repair.textContent = '正在重新检查…';
+            if (button?.isConnected !== false) void openConversationDraft(ref,target,button,ctx);
+          };
+          try {
+            if (!api?.send) throw Error('原开发会话发送接口不可用');
+            const prompt = ['请修复本会话刚生成的即用交付包，保留用户已有内容。',
+              '目标成果：' + target, '即用：' + String(draft?.key || '待读取') + '；版本：' + String(draft?.version || '待读取'),
+              '本次检查错误：' + message,
+              '读取实际文件→定位修复→提升版本号→运行随包 validate.cjs→重新登记交付；不要只解释错误，不扩大权限，不修改其他业务工程。'].join('\n');
+            if (api.onEvent) off = api.onEvent(event => {
+              if (event.ref !== ref || !['settled','error','turn-queue-cancelled'].includes(event.kind) || event.submissionId !== submissionId) return;
+              outcome = event; finish();
+            });
+            expiry = setTimeout(() => { off(); repairs.delete(repairKey); repair.disabled = false; repair.textContent = '重新检查'; repair.onclick = () => openConversationDraft(ref,target,button,ctx); }, 600000);
+            accepted = await api.send(ref,prompt,[],{source:'jiyong-repair',submissionId});
+            if (!accepted?.ok) { clearTimeout(expiry); throw Error(accepted?.reason || '修复请求发送失败'); }
+            repair.textContent = accepted?.queued ? '已加入原会话队列' : '已在原会话发起修复';
+            finish();
+          } catch (failure) { off(); clearTimeout(expiry); repairs.delete(repairKey); repair.disabled = false; ctx.say(errorText(failure)); }
+        };
+        report.appendChild(repair);
+      }
       ctx.say(message);
     }
     finally { if (button) { button.disabled = false; button.textContent = label; } }

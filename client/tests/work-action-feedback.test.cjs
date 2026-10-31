@@ -18,7 +18,8 @@ function fixture(kind, { slowAnalysis = false } = {}) {
   vm.runInNewContext(read('plugin-ui-host.js'), scope);
   scope.PluginUIHost.registerAction({ id: 'work.automation.create', command: '自动化', open() {} });
   let openForm = () => open.promise;
-  scope.NativeChat = { clearDraft() { draft = ''; }, prepare() { restoredAtMount = draft; chat.value = draft; }, openWorkAction: () => openForm() };
+  scope.NativeChat = { clearDraft() { draft = ''; }, rememberComposerDraft() { chat.dispatchEvent(); },
+    prepare() { restoredAtMount = draft; chat.value = draft; }, openWorkAction: () => openForm() };
   vm.runInNewContext(read('panels-' + (kind === 'compose' ? 'compose' : 'chat') + '-work-actions.js'), scope);
   const options = { text: original, input, panel: { dataset: { stage: 'compose' } }, hasAttachments: slowAnalysis,
     attachments: { analysis: () => slowAnalysis ? analysis.promise : Promise.resolve([]) }, isCurrent: () => current };
@@ -27,7 +28,7 @@ function fixture(kind, { slowAnalysis = false } = {}) {
   };
   const start = () => kind === 'compose' ? scope.ComposeWorkActions.route(options)
     : scope.ChatWorkActions.route(options, { open: () => openForm() });
-  return { original, input, chat, options, start, draft: () => draft, mountedDraft: () => restoredAtMount,
+  return { original, input, chat, options, start, scope, draft: () => draft, mountedDraft: () => restoredAtMount,
     changeScope() { current = false; }, setOpen(callback) { openForm = callback; },
     finish(value) { analysis.resolve([]); open.resolve(value); } };
 }
@@ -97,6 +98,17 @@ test('compose: mounting the native chat cannot restore the submitted prompt duri
   await Promise.resolve(); await Promise.resolve();
   try { assert.equal(f.mountedDraft(), ''); assert.equal(f.chat.value, ''); }
   finally { f.finish(true); await pending; }
+});
+
+test('compose: consuming the old input card cannot erase text typed in the newly mounted chat', async () => {
+  const f = fixture('compose');
+  f.options.attachments.consumeInputText = () => { f.scope.NativeChat.clearDraft(); return true; };
+  const pending = f.start();
+  await Promise.resolve(); await Promise.resolve();
+  f.chat.value = 'Next unsent request'; f.chat.dispatchEvent();
+  f.finish(true); await pending;
+  assert.equal(f.chat.value, 'Next unsent request');
+  assert.equal(f.draft(), 'Next unsent request');
 });
 
 class Element {

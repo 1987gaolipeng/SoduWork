@@ -372,15 +372,23 @@ function UploadModal({ onClose, onDone }) {
       <p className="cr-upload-hint">{tx("安装包需已按发布流程签名。上传后默认停用，启用时服务端会重验签名与完整性。")}</p>
       <label className="cr-file-field">
         <span>{tx("签名清单（bundle.json）")}</span>
-        <input ref={bundleRef} type="file" accept=".json,application/json" disabled={busy}
+        <input ref={bundleRef} type="file" accept=".json,application/json" disabled={busy} className="cr-file-native"
           onChange={(e) => setBundleName(e.target.files[0] ? e.target.files[0].name : '')} />
-        <small>{bundleName || tx("签名上传脚本输出的 .json 清单")}</small>
+        <span className="cr-file-row">
+          <span className="cr-file-chip btn btn-ghost xs" aria-hidden="true">{tx("选择文件")}</span>
+          <span className="cr-file-name">{bundleName || tx("未选择任何文件")}</span>
+        </span>
+        <small>{tx("签名上传脚本输出的 .json 清单")}</small>
       </label>
       <label className="cr-file-field">
         <span>{tx("安装包")}</span>
-        <input ref={installerRef} type="file" disabled={busy}
+        <input ref={installerRef} type="file" disabled={busy} className="cr-file-native"
           onChange={(e) => setInstallerName(e.target.files[0] ? e.target.files[0].name : '')} />
-        <small>{installerName || tx("SoduWork-x.y.z-Setup.exe / .dmg / .deb / .rpm / .tar.gz / .AppImage")}</small>
+        <span className="cr-file-row">
+          <span className="cr-file-chip btn btn-ghost xs" aria-hidden="true">{tx("选择文件")}</span>
+          <span className="cr-file-name">{installerName || tx("未选择任何文件")}</span>
+        </span>
+        <small>{tx("SoduWork-x.y.z-Setup.exe / .dmg / .deb / .rpm / .tar.gz / .AppImage")}</small>
       </label>
       {error && <div className="cr-upload-error">{error}</div>}
     </div>

@@ -66,8 +66,15 @@ test('same destination rejects duplicate imports and creates, while folders and 
 
 test('renamed file exports its new basename and rejects collisions without modifying bytes', async t => {
   const f = fixture(t), row = (await create(f, { filename: 'before.txt' })).item;
+  await f.call('reveal', { id: row.id });
+  const originalPath = f.revealed.at(-1);
   await f.call('updateItem', { id: row.id, body: { title: 'after' } });
   assert.equal((await f.call('readBinary', { id: row.id })).name, 'after.txt');
+  await f.call('reveal', { id: row.id });
+  assert.equal(path.basename(f.revealed.at(-1)), 'after.txt');
+  assert.equal(fs.existsSync(originalPath), false);
+  await f.call('openExternal', { id: row.id });
+  assert.equal(path.basename(f.opened.at(-1)), 'after.txt');
   const other = (await create(f, { filename: 'taken.txt' })).item;
   await assert.rejects(f.call('updateItem', { id: row.id, body: { title: 'taken.txt' } }), /同名/);
   assert.equal((await f.call('readBinary', { id: row.id })).name, 'after.txt');
@@ -133,6 +140,14 @@ test('favoriting a legacy colliding folder does not reinterpret the operation as
   await create(f, { filename: 'docs', sourceType: 'conversation', sessionId: 'conversation-one' });
   const updated = await f.call('updateFolder', { id: folder.id, body: { favorite: true } });
   assert.equal(updated.folder.favorite, true); assert.equal(updated.folder.name, 'docs');
+});
+
+test('explicit notification saves reject a duplicate filename without replacing the original', async t => {
+  const f = fixture(t);
+  const first = (await f.call('upload', { name: 'shared.txt', dataBase64: data('first') })).item;
+  await assert.rejects(f.call('upload', { name: 'shared.txt', dataBase64: data('second'), rejectDuplicateName: true }), /同名/);
+  assert.equal((await f.call('readContent', { id: first.id })).content, 'first');
+  assert.equal((await f.call('list', { scope: 'all' })).items.length, 1);
 });
 
 test('client files, nested folders, filters and edits survive store restart without a Hub', async t => {

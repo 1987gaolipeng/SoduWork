@@ -130,7 +130,22 @@ function create(app, owner, guard, configuredWorkRoot = '') {
     if (bytes.length > MAX_BYTES) throw error('LOCAL_LIBRARY_TOO_LARGE', '文件超过 64MB，请使用系统打开或导出');
     await checkedFile(target); return bytes;
   }
-  async function locate(row) { const target = objectPath(row._object); await checkedFile(target); return target; }
+  async function locate(row, displayFilename = '') {
+    const target = objectPath(row._object);
+    await checkedFile(target);
+    // Older indexes kept the user-visible title separately from the object key.
+    // Keep those objects readable, but materialize a same-directory alias so the
+    // native shell shows the current filename for open/reveal/export actions.
+    const visible = String(displayFilename || '').trim();
+    if (!visible || path.basename(target) === visible || path.basename(visible) !== visible || /[\x00-\x1f]/.test(visible)) return target;
+    const alias = path.join(path.dirname(target), visible);
+    try { await checkedFile(alias); return alias; }
+    catch (e) { if (e.code !== 'ENOENT') throw e; }
+    guard();
+    try { await awaited(io.copyFile(target, alias, require('node:fs').constants.COPYFILE_EXCL)); }
+    catch (e) { if (e.code !== 'EEXIST') throw e; }
+    guard(); await checkedFile(alias); return alias;
+  }
   async function garbageCollect(index) {
     // Garbage is recorded in the same index commit as the metadata change.
     // Failed removal remains retryable, and never deletes a referenced object.

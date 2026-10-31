@@ -6,7 +6,7 @@ import LocaleSettings from './LocaleSettings.jsx'
 import Landing from './Landing.jsx'
 import { Icon, Loading, ThemeToggle, ToastHost } from './ui.jsx'
 import { getLocale, t } from './i18n.js'
-import { healthVersionLabel } from './health-version.js'
+import { healthReleaseLabel } from './health-version.js'
 
 // Lazy-load management pages so the login introduction does not bundle all plugin, automation, and organization code.
 const Overview = lazy(() => import('./screens/Overview.jsx'))
@@ -176,12 +176,10 @@ export default function App() {
   const Comp = (cur && cur.Comp) || Overview
   const healthOk = health.state === 'ok'
   const healthTitle = healthOk ? t('health.ok') : health.state === 'checking' ? t('health.checking') : t('health.error')
-  const healthVersion = healthVersionLabel(health.version, health.commit, value => tx("构建 {0}", [value]))
+  const healthVersion = healthReleaseLabel(health.version)
   const healthSub = healthOk ? `${t('health.hub')}${healthVersion ? ` · ${healthVersion}` : ''}` :
-    health.state === 'checking' ? (locale === 'en-US' ? 'Reading service health' : tx("正在读取真实健康状态")) :
-      (locale === 'en-US' ? 'Check the admin address or network' : tx("请检查后台地址或网络"))
-  const healthDetail = healthOk && health.version
-    ? `${healthSub} · ${locale === 'en-US' ? 'full build' : tx("完整构建版本")} ${health.commit || health.version}` : healthSub
+    health.state === 'checking' ? tx("正在读取真实健康状态") :
+      tx("请检查后台地址或网络")
 
   const navLabel = (item) => t('nav.' + item.id, item.label)
   const groupLabel = (value) => {
@@ -220,7 +218,7 @@ export default function App() {
               <button type="button" className="nav-label" aria-expanded={collapsedGroups[g] !== true}
                 onClick={() => setCollapsedGroups((old) => ({ ...old, [g]: old[g] !== true }))}><span>{groupLabel(g)}</span></button>
               {collapsedGroups[g] !== true && visible.filter((n) => n.group === g).map((n) => (
-                <button key={n.id} title={t('sub.' + n.id, n.sub)} aria-current={cur && n.id === cur.id ? 'page' : undefined}
+                <button key={n.id} title={navLabel(n) + ' · ' + t('sub.' + n.id, n.sub)} aria-current={cur && n.id === cur.id ? 'page' : undefined}
                   className={'nav-item' + (cur && n.id === cur.id ? ' active' : '')} onClick={() => setActive(n.id)}>
                   <span className="ico"><Icon name={n.icon} /></span><span className="nav-copy">{navLabel(n)}</span>
                 </button>
@@ -259,7 +257,15 @@ export default function App() {
               <h1>{cur && navLabel(cur)}</h1>
             </div>
             <div className="top-actions">
-              <div className={`env is-${health.state}`} title={healthDetail}><span className={healthOk ? "dot" : "dot off"} /><span><b>{healthTitle}</b><small>{healthSub}</small></span></div>
+              <details className={`env is-${health.state}`} onKeyDown={(event) => {
+                if (event.key === 'Escape') { event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus() }
+              }}>
+                <summary aria-label={healthTitle + " · " + tx("服务版本信息")}><span className={healthOk ? "dot" : "dot off"} aria-hidden="true" /><span className="env-copy"><b>{healthTitle}</b><small>{healthSub}</small></span></summary>
+                <dl className="env-details">
+                  <div><dt>{tx("版本")}</dt><dd>{healthVersion || '—'}</dd></div>
+                  <div><dt>{tx("构建")}</dt><dd>{health.commit || health.version || '—'}</dd></div>
+                </dl>
+              </details>
             </div>
           </div>
         </header>

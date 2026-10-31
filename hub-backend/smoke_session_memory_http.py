@@ -1,6 +1,7 @@
 """Isolated real HTTP + migrations: private Codex session imports and explicit recall."""
 from __future__ import annotations
 import asyncio
+import gc
 import json
 import os
 import tempfile
@@ -122,9 +123,14 @@ async def main():
         batch = await asyncio.gather(*(req("POST", payload=body()) for _ in range(3)))
         check("concurrent retries produce one import", all(r.status_code == 200 for r in batch)
               and len({r.json()["item"]["id"] for r in batch}) == 1)
+    assert engine.pool.checkedout() == 0, "HTTP sessions must return every database connection"
     await engine.dispose()
-    print(json.dumps({"ok":True, "checks":len(checks), "database":"isolated temporary SQLite"}, ensure_ascii=False))
+    # Duplicate-import IntegrityError tracebacks retain closed SQLite cursors
+    # in cycles. Collect these before deleting the Windows fixture, after
+    # verifying that no real connection remains checked out.
+    gc.collect()
     _root.cleanup()
+    print(json.dumps({"ok":True, "checks":len(checks), "database":"isolated temporary SQLite"}, ensure_ascii=False))
 
 if __name__ == "__main__":
     asyncio.run(main())

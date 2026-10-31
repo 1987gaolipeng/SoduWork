@@ -15,6 +15,7 @@ from pathlib import Path
 CATALOG_PATH = Path(__file__).with_suffix('.json')
 _ID = re.compile(r'[a-z][a-z0-9-]{0,39}')
 _ENV = re.compile(r'[A-Z_][A-Z0-9_]{0,127}')
+_VERSION = re.compile(r'\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?')
 
 
 def load_catalog(path: Path = CATALOG_PATH) -> dict[str, dict]:
@@ -85,6 +86,9 @@ def validate_catalog(data: dict) -> dict[str, dict]:
             raise ValueError(f'{key}: no reviewed managed installer is registered')
         if install['installer'] == 'npm' and not re.fullmatch(r'(?:@[a-z0-9._-]+/)?[a-z0-9._-]+', str(install.get('pkg') or '')):
             raise ValueError(f'{key}: invalid npm package name')
+        if 'version' in install and (not isinstance(install['version'], str) or
+                                     not _VERSION.fullmatch(install['version'].strip())):
+            raise ValueError(f'{key}: invalid package version')
         result[key] = row
     return result
 

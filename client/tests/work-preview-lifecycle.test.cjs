@@ -431,3 +431,11 @@ test('repeated chat reset and document reload keep only one renderer lifecycle o
     assert.equal(f.sender.listenerCount('destroyed'), 0, 'disposed owners release their own cleanup listener');
   }
 });
+
+
+test('explicitly opening an upgraded app replaces old UI; reopening the same version preserves its live window',async t=>{
+ const f=fixture();t.after(()=>f.call('destroy',''));
+ assert.equal((await f.detached('versioned',{appVersion:'1.0.0'})).ok,true);const first=f.windows.at(-1);
+ assert.equal((await f.detached('versioned',{appVersion:'1.0.0'})).reused,true);assert.equal(f.windows.at(-1),first);
+ assert.equal((await f.detached('versioned',{appVersion:'1.0.1'})).reused,undefined);assert.equal(first.dead,true);assert.notEqual(f.windows.at(-1),first);
+});

@@ -2,7 +2,7 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { REQUIRED_CHECKS, validateReport, readBuildInputs } = require('../scripts/installer-compatibility-report.cjs');
+const { REQUIRED_CHECKS, hashBuildInput, validateReport, readBuildInputs } = require('../scripts/installer-compatibility-report.cjs');
 const artifact = { version: '1.12.37', size: 2000000, sha256: 'a'.repeat(64), platform: 'win32', arch: 'x64' };
 function good() {
   return { schema: 1, kind: 'soduwork-windows-installer-compatibility', ok: true, artifact: { ...artifact },
@@ -10,6 +10,14 @@ function good() {
     evidence: { runtime: { runnerStarted: true, restored: true },
       notices: { compatibilityPassed: true, runtimeCorruptionRejected: true, restored: true } } };
 }
+test('build input hashes are stable across Windows and Linux line endings', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'installer-build-input-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const lf = path.join(root, 'lf.txt'), crlf = path.join(root, 'crlf.txt');
+  fs.writeFileSync(lf, 'first\nsecond\n');
+  fs.writeFileSync(crlf, 'first\r\nsecond\r\n');
+  assert.equal(hashBuildInput(lf), hashBuildInput(crlf));
+});
 test('compatibility receipt accepts only the exact tested artifact and complete checks', () => {
   assert.equal(validateReport(good(), artifact).ok, true);
   for (const key of Object.keys(artifact)) {
@@ -70,8 +78,7 @@ test('real uploader refuses missing or mismatched compatibility evidence before 
   // even when the installer file and every other build input still match.
   const htmlInput = 'scripts/prepare-html-resources.cjs';
   const htmlDigest = valid.buildInputs[htmlInput];
-  assert.equal(htmlDigest, require('node:crypto').createHash('sha256')
-    .update(fs.readFileSync(path.resolve(__dirname, '..', htmlInput))).digest('hex'));
+  assert.equal(htmlDigest, hashBuildInput(path.resolve(__dirname, '..', htmlInput)));
   delete valid.buildInputs[htmlInput];
   fs.writeFileSync(receipt, JSON.stringify(valid));
   assert.match(run().stderr, /build code changed/);

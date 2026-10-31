@@ -115,14 +115,19 @@ test('known terminal empty failures do not invent a continue-queue action', asyn
 
 test('the Agent picker explains unknown execution instead of asking users to wait for a failed turn', () => {
   const handlers = new Map(), notices = [];
-  const pop = {hidden:true, style:{}, setAttribute() {}, addEventListener() {}, remove() {}};
-  const button = {setAttribute() {}, addEventListener:(name, fn) => handlers.set(name, fn), after() {}};
-  const globals = {AbortController, document:{createElement:() => pop, addEventListener() {}}, addEventListener() {}};
+  // The picker now mounts an availability footer element; the DOM stubs must
+  // cover the class/children calls the new markup performs.
+  const element = () => ({hidden:true, style:{}, dataset:{}, classList:{add(){}, remove(){}},
+    setAttribute(){}, addEventListener(){}, remove(){}, append(){}, appendChild(){}, replaceChildren(){}, after(){}});
+  const button = element();
+  button.addEventListener = (name, fn) => handlers.set(name, fn);
+  const globals = {AbortController, document:{createElement:() => element(), addEventListener() {}}, addEventListener() {}};
   globals.window = globals;
   vm.runInNewContext(fs.readFileSync(require.resolve('../components/panels/chat-runtime-picker.js'), 'utf8'), globals);
   const state = {ref:'chat-a', adapterId:'harness2', busy:true, recoveryRequired:true,
     recoveryReason:'执行机无法连接，请先核实执行状态'};
-  globals.ChatRuntimePicker.create({querySelector:() => button}, {state:() => state, say:value => notices.push(value)});
+  globals.ChatRuntimePicker.create({querySelector:selector => selector === '#nchatRuntime' ? button : null},
+    {state:() => state, say:value => notices.push(value)});
   handlers.get('click')({stopPropagation() {}});
   assert.match(notices[0], /无法连接.*核实执行状态/);
   assert.doesNotMatch(notices[0], /等待本轮/);

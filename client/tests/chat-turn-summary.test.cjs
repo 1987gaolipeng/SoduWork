@@ -50,9 +50,12 @@ test('merged continuation keeps only text after its last tool call as the final 
 test('completed current turn uses fixed receipts instead of a still-growing execution clock', () => {
   const view = summary.create({ esc: String });
   const html = view.html({ key: 'reply:2', tokens: 17, elapsedMs: 4000 },
-    '<div class="nturn-metrics"><b data-thinking-elapsed>3s</b>' +
-    '<span data-thinking-estimate aria-label="estimate">≈</span><b data-thinking-tokens>7</b></div>');
-  assert.match(html, /data-thinking-tokens>17<\/b>/);
+    '<div class="nturn-metrics"><span class="nstatus-metric"><span data-thinking-label>已处理</span> ' +
+    '<b data-thinking-elapsed>3s</b></span><span class="nstatus-divider">·</span>' +
+    '<span class="nstatus-metric" title="usage"><span data-thinking-estimate aria-label="estimate">≈</span>' +
+    '<b data-thinking-tokens>7</b><em>tokens</em></span></div>');
+  assert.doesNotMatch(html, /data-thinking-tokens/);
+  assert.doesNotMatch(html, /tokens/);
   assert.match(html, /data-thinking-elapsed>4s<\/b>/);
   assert.doesNotMatch(html, /≈/);
   const reopened = view.html({ key: 'reply:2', tokens: 17, elapsedMs: 4000 },
@@ -94,8 +97,8 @@ test('missing native usage estimates the turn text and thinking and reconciles a
   assert.equal(turn.tokens, 7);
   assert.equal(turn.tokensEstimated, true);
   const view = summary.create({ esc: String });
-  assert.match(view.html(turn, ''), /≈\s*7 tokens/);
-  assert.match(view.html(turn, '<div><b data-thinking-tokens>—</b> tokens</div>'), /≈[\s\S]*data-thinking-tokens>7<\/b>/);
+  assert.doesNotMatch(view.html(turn, ''), /tokens/);
+  assert.doesNotMatch(view.html(turn, '<div><b data-thinking-tokens>—</b> tokens</div>'), /tokens/);
   snap.turnMetrics = [{ fromMessage: 0, toMessage: 2, tokens: 53, elapsedMs: 4000 }];
   [turn] = summary.project(snap, new Set([2]));
   assert.equal(turn.tokens, 53); assert.equal(turn.tokensEstimated, false);

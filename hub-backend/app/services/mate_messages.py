@@ -133,12 +133,17 @@ async def list_for(session: AsyncSession, client, folder="received", limit=100, 
         models.MateMessage.created_at.desc(), models.MateMessage.id.desc()).limit(size + 1))).scalars())
     more = len(rows) > size
     rows = rows[:size]
+    unread = await session.scalar(select(func.count()).select_from(models.MateMessage).where(
+        models.MateMessage.recipient_id == me.id,
+        models.MateMessage.read_at.is_(None),
+    ))
     ids = {x.sender_id for x in rows} | {x.recipient_id for x in rows}
     users = {}
     if ids:
         users = {u.id: u for u in (await session.execute(select(models.User).where(models.User.id.in_(ids)))).scalars().all()}
     return {"ok": True, "folder": "sent" if side == "sent" else "received",
             "nextCursor": rows[-1].id if more else "",
+            "unreadCount": int(unread or 0),
             "items": [public(row, users.get(row.sender_id), users.get(row.recipient_id)) for row in rows]}
 
 

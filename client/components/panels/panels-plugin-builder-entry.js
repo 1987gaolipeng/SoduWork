@@ -5,12 +5,12 @@
   /* App creation starts with type selection in the create-app dialog, then opens this conversation.
      The input receives the selected app-type prefix, and the user supplies the remaining description. */
   const APP_KIND_PROMPTS = {
-    web: '创建网页类应用：',
+    web: '创建网页类即用：',
     desktop: '创建桌面客户端：',
-    lite: '创建轻应用：',
+    lite: '创建即用：',
   };
   function appKindPrompt(kind) {
-    return APP_KIND_PROMPTS[String(kind || '')] || '开发应用：';
+    return APP_KIND_PROMPTS[String(kind || '')] || '开发即用：';
   }
 
   function buildPayload(seed, context, application, appKind) {
@@ -30,7 +30,8 @@
       prefill: (application ? appKindPrompt(appKind) : '\u5236\u4f5c\u63d2\u4ef6\uff1a') + source,
       contextPrompts,
     };
-    if (application) contextPrompts[0] = '【SoduWork 应用开发上下文】基于插件开发规范制作 template=app 的应用，贯通真实页面、技能、当前应用对话和壳刷新，并走当前会话的草稿预检安装链路。';
+    if (application) contextPrompts[0] = '【SoduWork 即用开发上下文】基于插件开发规范制作 template=app 的即用，贯通真实页面、技能、当前即用对话和壳刷新，并走当前会话的草稿预检安装链路。';
+    if (application && ['office','game','robot','other'].includes(context?.appCategory)) contextPrompts.push('即用固定分类：appCategory='+context.appCategory+'；写入草稿顶层，随包提交。');
     return payload;
   }
 
@@ -48,6 +49,18 @@
   }
 
   global.PluginBuilderEntry = {
+    async editApp(pluginId) {
+      const result = await global.SoduWorkAPI.personalPlugin(pluginId);
+      const installed = result?.plugin;
+      if (!installed?.localDraft || installed.template !== 'app') throw Error('即用开发源码不可用');
+      await global.SoduWorkPluginAccess.assertEditable(installed.localDraft);
+      const payload = {newSession:true,pluginId:'local:app-developer',pluginEditId:pluginId,
+        prefill:'修改即用「'+installed.name+'」：',
+        contextPrompts:['修改已安装即用；宿主会将完整基线源码写入本开发会话并提升候选版本。保留稳定标识和用户数据，修改后检查并安装新版本。']};
+      if (global.WorkspaceHost?.open) global.WorkspaceHost.open('create',payload);
+      else if (global.openComposePanel) global.openComposePanel(payload);
+      else throw Error('即用开发入口尚未就绪');
+    },
     open, buildPayload, appKindPrompt,
     openApp: (seed, context, appKind) => open(seed, context, true, appKind),
   };

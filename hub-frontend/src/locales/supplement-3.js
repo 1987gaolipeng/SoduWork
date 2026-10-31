@@ -1,4 +1,11 @@
 export default {
+  "开发者": "Developer",
+  "即用分类": "App category",
+  "工具办公": "Office tools",
+  "小游戏": "Mini games",
+  "机器人": "Robots",
+  "其他": "Other",
+  "未填写": "Not specified",
   "已推荐": "Recommended",
   "目录类型": "Catalog type",
   "全部应用": "All apps",

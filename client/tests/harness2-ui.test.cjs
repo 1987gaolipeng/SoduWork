@@ -28,19 +28,27 @@ test('plugin routes normalize Harness² spellings only when the runtime is in th
   assert.equal(route.normalize('harness20', catalog), 'harness20');
 });
 
-function composerFixture() {
+function composerFixture(catalogAvailable = false) {
   const handlers = new Map(), elements = new Map(), probes = [];
+  let created = 0, changed;
   const element = selector => {
     if (!elements.has(selector)) elements.set(selector, {
-      dataset: {}, classList: { toggle() {}, add() {}, remove() {}, contains: () => false },
-      setAttribute() {}, removeAttribute() {}, querySelector: () => null,
+      dataset: {}, attrs: {}, children: [], classList: { toggle() {}, add() {}, remove() {}, contains: () => false },
+      setAttribute(key, value) { this.attrs[key] = String(value); }, removeAttribute() {}, querySelector: () => null,
+      closest: () => null, append(...nodes) { this.children.push(...nodes); },
+      replaceChildren(...nodes) { this.children = nodes; },
       addEventListener: (event, handler) => handlers.set(selector + ':' + event, handler),
     });
     return elements.get(selector);
   };
-  const root = { querySelector: element, querySelectorAll: () => [] };
+  const root = { querySelector: element, querySelectorAll: () => [], createElement: () => element('created:' + created++) };
+  const rows = JSON.parse(source('../hub-backend/app/agent_catalog.json')).agents.filter(row => ['pi', 'harness2'].includes(row.id));
   const api = {
-    runtimes: async () => { throw Error('catalog temporarily unavailable'); },
+    runtimes: async () => {
+      if (!catalogAvailable) throw Error('catalog temporarily unavailable');
+      return { ok: true, runtimes: rows, availableRuntimes: rows, missing: [] };
+    },
+    onRuntimesChanged: handler => { changed = handler; return () => {}; },
     probe: async id => { probes.push(id); return { ok: id === 'pi' }; },
   };
   const context = { document: root, AgentBrand: brand, WorkComposer: { contextButton: () => '' },
@@ -49,13 +57,25 @@ function composerFixture() {
   vm.runInNewContext(source('components/panels/panels-compose-runtime.js'), context);
   context.ComposeRuntime.bind(root, { api: () => api });
   return { runtime: context.ComposeRuntime, api, probes, element,
+    async catalogChanged() { changed(); for (let i = 0; i < 30; i++) await Promise.resolve(); },
     select: id => handlers.get('#cpRuntimePop:click')({ target: { closest: () => {
       const row = element(id); row.dataset.runtime = id; return row;
     } } }) };
 }
 
-test('fallback picker offers Harness² and gates its selection on the real availability probe', async () => {
+test('failed catalog keeps Harness² discoverable for repair without offering it as a ready choice', async () => {
   const f = composerFixture();
+  await f.runtime.ready();
+  assert.doesNotMatch(f.runtime.controls(''), /data-runtime='harness2'/);
+  assert.deepEqual(Array.from(f.runtime.catalog(), row => row.id), ['pi']);
+  const missing = f.element('#cpRuntimeMissing');
+  assert.ok(missing.children.some(row => row.dataset.runtimeMissing === 'harness2'));
+  assert.match(missing.attrs['aria-label'], /Google Harness²/);
+  assert.equal(f.element('#cpRuntimeMore').hidden, false);
+});
+
+test('health-projected Harness² still requires a current probe and returns after a component repair', async () => {
+  const f = composerFixture(true);
   await f.runtime.ready();
   const html = f.runtime.controls('');
   assert.match(html, /data-runtime='harness2'/);
@@ -63,7 +83,11 @@ test('fallback picker offers Harness² and gates its selection on the real avail
   await f.select('harness2');
   assert.equal(f.probes.at(-1), 'harness2');
   assert.equal(f.runtime.value(), 'pi', 'unavailable runtime must not replace the ready selection');
+  assert.doesNotMatch(f.runtime.controls(''), /data-runtime='harness2'/);
+  assert.ok(f.element('#cpRuntimeMissing').children.some(row => row.dataset.runtimeMissing === 'harness2'));
   f.api.probe = async id => ({ ok: id === 'harness2' });
+  await f.catalogChanged();
+  assert.match(f.runtime.controls(''), /data-runtime='harness2'/);
   await f.select('harness2');
   assert.equal(f.runtime.value(), 'harness2');
   assert.equal(await f.runtime.ready(), true);

@@ -19,7 +19,8 @@ if (typeof electron === 'string') {
 const { app, BrowserWindow } = electron;
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), http = require('node:http');
 const assert = require('node:assert/strict');
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-runtime-process-e2e-'));
+// Windows TEMP can use an 8.3 alias; permission targets use canonical paths.
+const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-runtime-process-e2e-')));
 const profile = path.join(root, 'profile'), cwd = path.join(root, 'workspace');
 fs.mkdirSync(profile); fs.mkdirSync(cwd);
 app.setPath('userData', profile);

@@ -596,6 +596,8 @@ def _run_managed(jid: str, key: str, action: str) -> None:
 def _run_npm(jid: str, key: str, action: str) -> None:
     spec = _SPECS.get(key) or {}
     pkg = spec.get("pkg") or ""
+    version = str(spec.get("version") or "").strip()
+    target_pkg = pkg + ("@" + version if version else "")
     if not pkg:
         _done(jid, False, "该 Agent 缺少安装包定义")
         return
@@ -612,7 +614,7 @@ def _run_npm(jid: str, key: str, action: str) -> None:
     if action == "check":
         # Registry version checks are read-only.
         # Checking a version does not modify installed software.
-        code, out = run(["view", pkg, "version"], timeout=90)
+        code, out = run(["view", target_pkg, "version"], timeout=90)
         latest = (out.strip().splitlines() or [""])[-1].strip()
         # Use package metadata with CLI fallback, matching installation detection.
         # Executable-only installations remain valid.
@@ -653,9 +655,10 @@ def _run_npm(jid: str, key: str, action: str) -> None:
         else:
             _done(jid, False, f"卸载失败（npm 退出码 {code}）", code)
         return
-    # Install and update both select the latest npm package.
+    # Install and update use the catalog pin when one is declared; other
+    # packages retain their existing latest-version behavior.
     runtime_detail = ""
-    code, _ = run(["install", "-g", "--include=optional", "--engine-strict", pkg], timeout=900)
+    code, _ = run(["install", "-g", "--include=optional", "--engine-strict", target_pkg], timeout=900)
     agent_npm_runtime.activate_environment()
     if code == 0 and key == "codex":
         from .codex_account_acp import PACKAGE

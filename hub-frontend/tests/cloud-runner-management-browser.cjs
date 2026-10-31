@@ -19,7 +19,10 @@ async function waitFor(code, name) {
   throw Error('Timed out: ' + name)
 }
 async function point(code) {
-  const b = await js(`(() => {const e=(${code});if(!e)throw Error('Missing element for native click');e.scrollIntoView({block:'center'});const r=e.getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`)
+  await waitFor(`(() => {const e=(${code});return !!e&&!e.disabled&&e.getClientRects().length>0})()`, 'native click target: ' + code)
+  // Resizing and scrolling settle asynchronously in the real renderer. Await
+  // layout before computing native coordinates; keep missing targets as failures.
+  const b = await js(`(async () => {const e=(${code});if(!e)throw Error('Missing native click target: '+${JSON.stringify(code)});e.scrollIntoView({block:'center'});await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));if(!e.isConnected||e.disabled)throw Error('Native click target changed: '+${JSON.stringify(code)});const r=e.getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`)
   win.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, ...b })
   win.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, ...b })
   await sleep(80)

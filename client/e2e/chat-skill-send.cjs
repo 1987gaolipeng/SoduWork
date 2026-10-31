@@ -130,7 +130,7 @@ if (typeof electron === 'string') {
     ipcMain.handle('pi-session-open', () => ({ ok: true, ref: 'skills', sessionId: 'skills', adapterId: 'pi', displayName: 'Pi',
       cwd: fixture.cwd, model: { label: 'Local test model' }, snapshot: handle.snapshot() }));
     ipcMain.handle('pi-session-snapshot', () => ({ ok: true, snapshot: handle.snapshot() }));
-    ipcMain.handle('pi-session-cancel', () => { cancelCalls++; return handle.cancel(); });
+    ipcMain.handle('pi-session-cancel-request', () => { cancelCalls++; return handle.cancel(); });
     ipcMain.handle('conversation-capabilities', () => ({ ok: true, policyOk: true, skills: catalog }));
     for (const [channel, value] of Object.entries({ 'pi-session-probe': { ok: true }, 'pi-session-history': { ok: true, chats: [] }, 'pi-session-outputs': { ok: true, items: [] },
       'pi-session-release': { ok: true }, 'pi-session-runtime-models': { ok: true, items: [] }, 'work-preview-hide': { ok: true }, 'work-preview-destroy': { ok: true } })) ipcMain.handle(channel, () => value);
@@ -178,9 +178,11 @@ if (typeof electron === 'string') {
 
     await type('HOLD_QUEUE'); enterKey(); await until(() => holds.has('HOLD_QUEUE'), 'active stream held');
     await choose('company-research');
-    await until('document.querySelector("#nchatSend").title.includes("排队")', 'queue button rendered');
-    assert.match(await js('document.querySelector("#nchatSend").title'), /排队/);
-    await click('#nchatSend');
+    await until('document.querySelector("#nchatSend").title === "停止生成"', 'single stop button rendered');
+    assert.equal(await js('document.querySelector("#nchatSend").title'), '停止生成');
+    // The single primary action stops the active turn. Enter remains the
+    // explicit queue-send path when a draft is present.
+    enterKey();
     await until(() => handle.snapshot().execution.queue.length === 1, 'skill-only queued');
     assert.equal(cancelCalls, 0); assert.equal(holds.get('HOLD_QUEUE').closed, false);
     holds.get('HOLD_QUEUE').response.end('data: ' + JSON.stringify({ id: 'HOLD_QUEUE', object: 'chat.completion.chunk',
@@ -189,7 +191,7 @@ if (typeof electron === 'string') {
     await settled(5);
     assert.ok(system(fixture.requests[4]).includes('company-research'));
     assert.deepEqual(resolved[resolved.length - 1], ['company-research']);
-    report.cases.push('运行中只选技能时按钮变为排队发送，不会误停止；出队时再加载所选技能。');
+    report.cases.push('运行中始终只有一个停止按钮；保留草稿时按 Enter 才会显式加入队列，出队时再加载所选技能。');
 
     await type('HOLD_STEER'); enterKey(); await until(() => holds.has('HOLD_STEER'), 'steer stream held');
     await choose('web-audit'); enterKey();

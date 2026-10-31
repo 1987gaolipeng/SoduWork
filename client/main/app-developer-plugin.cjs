@@ -1,11 +1,11 @@
 'use strict';
 const fs = require('node:fs'), path = require('node:path');
 const base = require('./plugin-builder-plugin.cjs');
-const FILES = ['SKILL.md', 'scripts/scaffold.cjs', 'scripts/serve.cjs', 'scripts/validate.cjs'];
+const FILES = ['SKILL.md', 'references/bridge-and-delivery.md', 'references/host-sdk.md', 'references/host-data-sdk.md', 'references/fast-ai.md', 'references/development-workflow.md', 'references/design-quality.md', 'references/icon-design.md', 'references/instant-types.md', 'references/robot-persona.md', 'scripts/scaffold.cjs', 'scripts/serve.cjs', 'scripts/validate.cjs'];
 const VALIDATION_FILES = ['main/plugin-resources.js', 'main/personal-plugin-schema.cjs',
   'main/personal-plugin-workflow.js', 'main/personal-plugin-agent-route.cjs',
   'main/plugin-capability-names.cjs', 'core/plugin-platforms.js', 'core/plugin-icon.js',
-  'core/plugin-app-contract.cjs', 'core/plugin-package-page.cjs', 'core/plugin-locales.js',
+  'core/jiyong-initialization.cjs', 'core/plugin-extensions.cjs', 'core/jiyong-contract.cjs', 'core/plugin-app-contract.cjs', 'core/plugin-package-page.cjs', 'core/plugin-locales.js',
   'core/plugin-cover.cjs', 'core/app-window-sizing.js'];
 function body(app) {
   const root = app.isPackaged ? path.join(process.resourcesPath, 'skills/app-developer') : path.resolve(__dirname, '../../skills/app-developer');
@@ -13,10 +13,10 @@ function body(app) {
   return {
     template: 'method', key: 'app-developer', name: '应用开发', version: '1.2.0',
     locales: {
-      'zh-CN': { name: '应用开发', description: '基于插件开发规范，制作带独立窗口、页面与 SoduWork 对话桥的应用，完成预检、安装和交互验证。' },
+      'zh-CN': { name: '即用开发', description: '基于插件开发规范，制作带独立窗口、页面与 SoduWork 对话桥的即用，完成预检、安装和交互验证。' },
       'en-US': { name: 'App Developer', description: 'Build apps with dedicated windows, pages and the SoduWork conversation bridge; verify, install and test interactions.' },
     },
-    description: '基于插件开发规范，制作带独立窗口、页面与 SoduWork 对话桥的应用，完成预检、安装和交互验证。',
+    description: '基于插件开发规范，制作带独立窗口、页面与 SoduWork 对话桥的即用，完成预检、安装和交互验证。',
     instructions: [
       require('./plugin-locale-authoring.cjs'),
       '你是 SoduWork 应用开发助手，复用插件开发助手的规范及现有工具、会话授权、草稿安装与导出链路。',

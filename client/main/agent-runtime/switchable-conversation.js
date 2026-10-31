@@ -27,7 +27,13 @@ function resumeOptions(options) {
   segments.assertOwner(options.app, row, options.identity);
   const canResume = row.active.adapterId !== 'pi' ? row.active.started : row.active.path && fs.existsSync(row.active.path);
   return { row, options: { ...options, adapterId: row.active.adapterId, cwd: row.cwd,
-    resumeCwd: row.cwd, resumePath: canResume ? row.active.path : '', modelName: row.active.modelName,
+    resumeCwd: row.cwd, resumePath: canResume ? row.active.path : '',
+    // A switched conversation still has historical context even when its active
+    // native archive was removed or moved. Mark it as resumed so session-open can
+    // recover an unavailable saved model from the current default instead of
+    // treating the stale selection as a new-chat explicit choice.
+    resumedConversation: true,
+    modelName: row.active.modelName,
     reasoningEffort: row.active.reasoningEffort ?? options.reasoningEffort,
     accessPolicy: row.accessPolicy, readOnly: row.readOnly, activePluginIds: row.activePluginIds,
     contextPrompts: [...(options.contextPrompts || []), segments.brief(row.prefix)] } };

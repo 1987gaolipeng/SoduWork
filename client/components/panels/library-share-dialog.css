@@ -4,6 +4,8 @@ dialog.library-share-dialog{position:fixed;inset:0;margin:auto;width:min(520px,c
 .library-share-dialog .library-share-head,.library-share-dialog .library-share-file,.library-share-dialog .library-share-search,.library-share-dialog .library-share-foot{flex-shrink:0}
 .library-share-dialog .library-share-head{padding:20px 22px 14px}
 .library-share-dialog .library-share-head b{font-size:17px}
+.library-share-dialog .library-share-head span{display:block;margin-top:5px;line-height:1.45;color:var(--ink-3);font-size:12px}
+.library-share-dialog .library-share-bundle-hint{margin:0 22px 8px;padding:8px 10px;border-radius:8px;background:color-mix(in srgb,var(--accent) 8%,var(--bg-1));color:var(--ink-2);font-size:12px;line-height:1.4}
 .library-share-dialog .library-share-file{margin:14px 22px 12px;padding:10px 12px}
 .library-share-dialog .library-share-search{display:flex;align-items:center;gap:10px;margin:0 22px 10px;color:var(--ink-3);font-size:12px}
 .library-share-dialog .library-share-search input{min-width:0;flex:1;height:34px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font:inherit;font-size:13px;background:var(--bg-0);color:var(--ink)}

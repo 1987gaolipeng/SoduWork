@@ -4,7 +4,69 @@
 const fs = require('node:fs/promises'), path = require('node:path'), os = require('node:os');
 const assert = require('node:assert/strict');
 const builder = require('electron-builder');
-const { createHash } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
+const productionGuids = new Set(Object.values(require('../../distributions.json')).map(value => value.nsisGuid.toLowerCase()));
+function validateFixtureGuid(value) {
+  assert.equal(typeof value, 'string', 'Fixture receipt must provide an isolated NSIS GUID');
+  assert.match(value, /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i, 'Invalid fixture NSIS GUID');
+  assert.ok(!productionGuids.has(value.toLowerCase()), 'Installer fixtures cannot use a production NSIS GUID');
+  return value;
+}
+function createFixtureGuid(explicit) {
+  return validateFixtureGuid(explicit === undefined ? randomUUID() : explicit);
+}
+function fixtureNames(guid) {
+  const name = 'SoduWorkE2E_' + validateFixtureGuid(guid).replaceAll('-', '').toLowerCase();
+  return { productName: name, executableName: name, shortcutName: name };
+}
+function validateFixtureIdentity(receipt) {
+  const names = fixtureNames(receipt.guid);
+  for (const key of Object.keys(names)) assert.equal(receipt[key], names[key], 'Fixture receipt has a mismatched ' + key);
+  return names;
+}
+async function prepareFixtureLauncher(client, identity) {
+  const { executableName } = validateFixtureIdentity(identity);
+  const output = path.join(client, '.runtime/installer');
+  await fs.mkdir(output, { recursive: true });
+  const compiler = await require('app-builder-lib/out/toolsets/windows').getMakeNsisPath();
+  const result = require('node:child_process').spawnSync(compiler.path, ['/V2', '/INPUTCHARSET', 'UTF8',
+    '/DSODUWORK_LAUNCHER_OUT=' + path.join(output, 'SoduWorkLauncher.exe'),
+    '/DSODUWORK_EXECUTABLE_NAME=' + executableName + '.exe',
+    '/DSODUWORK_ICON=' + path.join(client, 'icon.ico'), path.join(client, 'build/launcher.nsi')],
+  { windowsHide: true, encoding: 'utf8', env: { ...process.env, ...compiler.env } });
+  assert.equal(result.status, 0, 'Fixture launcher compilation failed: ' + result.stdout + result.stderr);
+}
+async function readFixtureReuse(root, setup, explicitGuid) {
+  assert.equal(path.dirname(root), os.tmpdir(), 'Reused fixture must be a direct TEMP child');
+  assert.ok(path.basename(root).startsWith('soduwork-update-e2e-'));
+  const realRoot = await fs.realpath(root), realTemp = await fs.realpath(os.tmpdir());
+  assert.equal(path.dirname(realRoot), realTemp, 'Reused fixture root cannot redirect outside TEMP');
+  assert.ok(path.basename(realRoot).startsWith('soduwork-update-e2e-'));
+  assert.equal((await fs.lstat(root)).isSymbolicLink(), false, 'Reused fixture root cannot be a link');
+  const config = JSON.parse(await fs.readFile(path.join(root, 'dist-builder.json'), 'utf8'));
+  assert.match(config.appId, /^com\.soduwork\.update\.e2e\.\d+$/, 'Reused fixture appId is invalid');
+  const guid = validateFixtureGuid(config.nsis?.guid);
+  const names = validateFixtureIdentity({ guid, productName: config.productName,
+    executableName: config.win?.executableName, shortcutName: config.nsis?.shortcutName });
+  if (explicitGuid !== undefined) assert.equal(validateFixtureGuid(explicitGuid).toLowerCase(), guid.toLowerCase(), 'Explicit GUID differs from reused fixture');
+  const dist = path.join(root, 'dist');
+  assert.equal(path.resolve(config.directories.output), dist, 'Reused fixture output must be its own dist directory');
+  assert.equal(await fs.realpath(dist), path.join(realRoot, 'dist'), 'Reused fixture dist cannot redirect elsewhere');
+  if (setup !== undefined) {
+    assert.ok(path.isAbsolute(setup), 'Reused fixture Setup must be absolute');
+    assert.equal(path.dirname(path.resolve(setup)), dist, 'Reused fixture Setup must be inside its own dist');
+    assert.equal(path.basename(setup), names.productName + '-1.0.1-Setup.exe', 'Reused fixture Setup name differs from its identity');
+    assert.equal(await fs.realpath(setup), path.join(realRoot, 'dist', path.basename(setup)), 'Reused fixture Setup cannot redirect elsewhere');
+    const metadata = require('node:child_process').spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+      '[Diagnostics.FileVersionInfo]::GetVersionInfo($env:SODUWORK_FIXTURE_SETUP) | Select-Object ProductName,ProductVersion | ConvertTo-Json -Compress'],
+    { env: { ...process.env, SODUWORK_FIXTURE_SETUP: setup }, windowsHide: true, encoding: 'utf8', timeout: 30000 });
+    assert.equal(metadata.status, 0, 'Cannot verify reused fixture Setup metadata');
+    const actual = JSON.parse(metadata.stdout);
+    assert.equal(actual.ProductName, names.productName, 'Reused Setup is not the isolated fixture');
+    assert.equal(actual.ProductVersion, '1.0.1', 'Reused fixture Setup version differs');
+  }
+  return { id: config.appId, guid, ...names };
+}
 async function build(options) {
   const output = path.resolve(options.config.directories.output);
   const root = path.dirname(output);
@@ -32,4 +94,5 @@ async function build(options) {
   await fs.writeFile(configFile, serialized);
   return builder.build({ ...options, config: configFile });
 }
-module.exports = { build, Platform: builder.Platform, Arch: builder.Arch };
+module.exports = { build, createFixtureGuid, validateFixtureGuid, fixtureNames, validateFixtureIdentity,
+  prepareFixtureLauncher, readFixtureReuse, Platform: builder.Platform, Arch: builder.Arch };

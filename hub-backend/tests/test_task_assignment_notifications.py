@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from app import models, automation_models, realtime
 from app.api import clients as api
+from app.api import tasks as task_api
 from app.services import tasks, team, mate_messages, inbox, task_notifications
 
 
@@ -131,6 +132,53 @@ class TaskAssignmentNotificationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(rows), 2)
         self.assertEqual({row["taskId"] for row in rows}, {"handoff"})
         self.assertEqual(len({row["messageId"] for row in rows}), 2)
+
+    async def test_handoff_note_is_persisted_in_task_detail_and_projection(self):
+        await tasks.create_task(self.session, "s1", {
+            "title": "Handoff with context", "note": "Original requirement context",
+        }, notify=False, task_id="handoff-note")
+        frozen = await self.session.get(models.Task, "handoff-note")
+        frozen.requirement_content = {"title": frozen.title, "note": "Frozen source context"}
+        await self.session.commit()
+        result = await api.handoff_my_task(
+            "handoff-note", {"assigneeUserId": "recipient", "note": "先补充复现步骤，再开始执行"},
+            self.sender, self.session)
+
+        task = await self.session.get(models.Task, "handoff-note")
+        self.assertIn("Original requirement context", task.note)
+        self.assertIn("转交补充说明", task.note)
+        self.assertIn("先补充复现步骤，再开始执行", task.note)
+        self.assertIn("先补充复现步骤，再开始执行", result["task"]["note"])
+        # The mutation acknowledgement carries the base task. The detail route
+        # and recipient-specific WS projection add requirementContent after ACLs.
+        detail = await task_api.get_task("handoff-note", self.recipient, self.session)
+        self.assertTrue(detail["canViewExecution"])
+        self.assertIn("Original requirement context", detail["note"])
+        self.assertIn("先补充复现步骤，再开始执行", detail["note"])
+        self.assertIn("Frozen source context", detail["requirementContent"]["note"])
+        self.assertIn("先补充复现步骤，再开始执行", detail["requirementContent"]["note"])
+        self.assertNotIn("Original requirement context", detail["requirementContent"]["note"])
+        self.assertEqual(detail["requirementContent"], task.requirement_content)
+
+        recipient_events = {
+            call.args[0]: call.args[1]["task"] for call in self.publish.await_args_list
+            if call.args[0] in {"r1", "r2"} and call.args[1].get("type") == "task.updated"
+            and (call.args[1].get("task") or {}).get("id") == "handoff-note"
+        }
+        self.assertEqual(set(recipient_events), {"r1", "r2"})
+        for projected in recipient_events.values():
+            self.assertEqual(projected["requirementContent"], detail["requirementContent"])
+            self.assertIn("先补充复现步骤，再开始执行", projected["note"])
+        self.assertFalse(any(call.args[0] == self.other.id for call in self.publish.await_args_list))
+        with self.assertRaises(HTTPException) as denied:
+            await task_api.get_task("handoff-note", self.other, self.session)
+        self.assertEqual(denied.exception.status_code, 404)
+
+        event = (await self.session.scalars(
+            select(models.TaskEvent).where(models.TaskEvent.task_id == "handoff-note")
+        )).all()[-1]
+        self.assertEqual(event.kind, "reassign")
+        self.assertEqual(event.detail.get("note"), "先补充复现步骤，再开始执行")
 
     async def test_legacy_read_record_repairs_missing_delivery_without_rewriting_read_time(self):
         from datetime import datetime, timezone

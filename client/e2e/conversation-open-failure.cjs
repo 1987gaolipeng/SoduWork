@@ -70,8 +70,12 @@ app.whenReady().then(async () => {
   report.cases.push('Denied archive replaces spinner with visible owner error, detaches old handle, preserves draft and prevents accidental open/send.');
   await new Promise(resolve => setTimeout(resolve, 250));
   fs.writeFileSync(path.join(out,'blocked-conversation.png'), (await win.webContents.capturePage()).toPNG());
-  await js(`cardMode='allowed';void 0;`);
-  assert.equal(await js(`NativeChat.enter('', 'original-chat')`), true);
+  await js(`cardMode='allowed';document.querySelector('[data-session-retry]')?.click();void 0;`);
+  await new Promise(resolve => setTimeout(resolve, 250));
+  assert.equal(await js('NativeChat.sessionInfo().sessionId'), 'original-chat');
+  assert.ok(await js('Boolean(NativeChat.sessionInfo().ref)'));
+  assert.equal(await js('Boolean(document.querySelector(".nbad.show"))'), false);
+  report.cases.push('历史会话错误态的“重新打开会话”按钮会接回原会话并清除错误。');
   assert.equal(await js('opened.at(-1).chatId'), 'original-chat');
   assert.equal(await js('document.getElementById("nchatInput").value'), failure.input);
   assert.equal(await js('NativeChat.send()'), true);

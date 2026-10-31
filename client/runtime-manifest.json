@@ -1,0 +1,23 @@
+{
+  "schema": "soduwork.client-runtime/v1",
+  "product": "SoduWork",
+  "supportedPlatforms": ["win32", "darwin", "linux"],
+  "zeroPrerequisitePlatforms": ["win32"],
+  "bundled": {
+    "electron": true,
+    "node": true,
+    "python": true,
+    "runner": {
+      "required": true,
+      "kind": "frozen-executable",
+      "relativePaths": {
+        "win32": "resources/runner/soduwork-runner.exe",
+        "darwin": "resources/runner/soduwork-runner",
+        "linux": "resources/runner/soduwork-runner"
+      }
+    }
+  },
+  "hostPrerequisites": [],
+  "networkInstall": false,
+  "optionalDownloads": true
+}

@@ -66,6 +66,11 @@ async def main():
                 {m.get("id") for m in directory.get("mates", [])}
                 == {"u-mate", "u-nobox", "u-out"}, directory)
 
+            chk("目录返回稳定部门ID与公开组织列表",
+                {row['id'] for row in directory['orgUnits']} == {'o-1', 'o-2'}
+                and all(m.get('orgId') in {'o-1', 'o-2'} for m in directory['mates'])
+                and all(set(row) == {'id', 'name', 'parentId'} for row in directory['orgUnits']), directory)
+
             r = await team.message_mate(s, me, "u-mate", "  项目进展：接口联调完成，明天出包  ")
             chk("同部门同事能收到", r.get("ok") is True, r)
             notices = [(cid, event) for cid, event in pushed if event.get("type") == "notice"]

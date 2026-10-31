@@ -176,8 +176,14 @@ function install({ app, ipcMain, session, identityOf, capabilityGrantsOf, _skill
     catch (e) { return { ok: false, reason: String((e && e.message) || e) }; }
   });
 
-  ipcMain.handle('pi-session-runtimes', () => {
-    try { return { ok: true, runtimes: session.runtimes() }; }
+  ipcMain.handle('pi-session-runtimes', async () => {
+    try {
+      if (typeof session.availableRuntimes === 'function') return await session.availableRuntimes(app);
+      const catalog = session.runtimes();
+      return { ok: true, runtimes: catalog,
+        availableRuntimes: catalog.filter(row => row && row.id === 'pi'),
+        missing: catalog.filter(row => row && row.id !== 'pi') };
+    }
     catch (e) { return { ok: false, reason: String((e && e.message) || e), runtimes: [] }; }
   });
   ipcMain.handle('pi-session-runtime-models', (event, adapterId) => {

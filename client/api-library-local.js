@@ -33,6 +33,12 @@
   function isLocal(id) { return String(id || '').startsWith('local-'); }
   function isHistory(id) { return String(id || '').startsWith(HISTORY); }
   function isLocalStorage(storage) { return !storage || storage === 'local'; }
+  function requestId() {
+    try { if (global.crypto && typeof global.crypto.randomUUID === 'function') return global.crypto.randomUUID(); } catch (_) {}
+    var hex = '0123456789abcdef', value = '';
+    for (var i = 0; i < 32; i += 1) value += hex[Math.floor(Math.random() * hex.length)];
+    return value.slice(0, 8) + '-' + value.slice(8, 12) + '-4' + value.slice(13, 16) + '-' + (8 + Math.floor(Math.random() * 4)).toString(16) + value.slice(17, 20) + '-' + value.slice(20);
+  }
   function storedWorkRoot() {
     try {
       const direct = typeof global.workRoot === 'function' ? global.workRoot() : global.localStorage?.getItem('soduwork_work_root');
@@ -261,7 +267,7 @@
       var current = await localContext(requestScope);
       if (current.owner !== context.owner) throw failure('STALE_TASK_SCOPE', '当前账号已变化，请重新打开资料库');
       assertScope(requestScope);
-      var result = await remote.shareLocalLibraryFile({ requestId: options?.requestId || global.crypto.randomUUID(),
+      var result = await remote.shareLocalLibraryFile({ requestId: options?.requestId || requestId(),
         localItemId: id, filename: got.name, contentType: got.type, data: data,
         recipientUserIds: recipients || [], note: String(note || '') });
       assertScope(requestScope);
@@ -290,7 +296,7 @@
       // which rejects duplicate names without replacing the existing file.
       return invoke('upload', { dataBase64: got.data, name: row.filename || '附件',
         contentType: row.contentType || row.content_type || got.mimeType || 'application/octet-stream',
-        folderId: '', source: {}, storage: 'local' }, requestScope, context);
+        folderId: '', source: {}, rejectDuplicateName: true, storage: 'local' }, requestScope, context);
     };
     api.getLibraryArchive = async function (id) { if (isLocal(id)) noArchive(); return remote.getLibraryArchive(id); };
     api.readLibraryArchiveFile = async function (id, path, options) { if (isLocal(id)) noArchive(); return remote.readLibraryArchiveFile(id, path, options); };

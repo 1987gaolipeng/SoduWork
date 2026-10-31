@@ -157,7 +157,8 @@ app.whenReady().then(async()=>{
  const docTool=probeTools.find(t=>t.name.includes('rawContent'));assert.ok(docTool,'user document tool available');
  const doc=await rpc(mcpConfig,'tools/call',{name:docTool.name,arguments:{path:{document_id:'doc-fixture'}}});
  assert.ok(JSON.stringify(doc).includes('Isolated personal document'),JSON.stringify(doc));
- const scope=runtime.scope(await identityOf()),saved=feishu.read(app,scope,safeStorage);
+ const scope=runtime.platformScope(app,await identityOf(),'feishu'),saved=feishu.read(app,scope,safeStorage);
+ assert.ok(saved,'environment-bound Feishu credentials must be encrypted and persisted');
  saved.expiresAt=1;feishu.save(app,scope,saved,safeStorage);
  await feishu.ensureToken(app,scope,saved,safeStorage,identityOf);
  assert.equal(refreshes,1);

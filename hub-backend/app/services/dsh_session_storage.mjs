@@ -35,11 +35,23 @@ export function publishNewFile(move, lastError, source, target) {
   throw error;
 }
 
+async function runtimeVersion(root) {
+  // The ACP adapter owns the version contract. Reading the installed DSH
+  // manifest keeps this loader aligned when the server ships a new runtime;
+  // hard-coding an older storage package version makes repair/install loop
+  // forever after a runtime upgrade.
+  try {
+    const runtime = JSON.parse(await readFile(join(root, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'), 'utf8'));
+    return String(runtime.version || '').trim();
+  } catch (_) { return ''; }
+}
+
 async function verifiedEntry(root, name) {
   const directory = join(root, 'node_modules', '@deepseek-ai', name);
   const manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'));
-  if (manifest.name !== '@deepseek-ai/' + name || manifest.version !== '0.2.0-rc.2') {
-    throw new Error('DeepSeek Harness storage version has not been verified by this SoduWork release; update SoduWork before running.');
+  const expected = String(process.env.SODUWORK_DSH_STORAGE_VERSION || '').trim() || await runtimeVersion(root);
+  if (manifest.name !== '@deepseek-ai/' + name || !expected || manifest.version !== expected) {
+    throw new Error('DeepSeek Harness storage version does not match the bundled runtime; repair the runtime or update SoduWork before running.');
   }
   return join(directory, 'lib', 'index.js');
 }
@@ -74,11 +86,19 @@ if (runtimeRoot) {
   delete process.env.NODE_OPTIONS;
   if (process.platform === 'win32') {
     const entry = await verifiedEntry(runtimeRoot, 'dsh-session-persistence-jsonl');
-    const { default: Persistence } = await import(pathToFileURL(entry).href);
-    if (typeof Persistence?.prototype?.writeSyncedTempFile !== 'function' || Persistence.prototype.writeSyncedTempFile.length !== 2) {
-      throw new Error('DeepSeek Harness storage interface changed; update its SoduWork adapter before running.');
+    const persistence = await import(pathToFileURL(entry).href);
+    // DSH 0.2.x exposes the JSONL backend as a Cordis `apply` plugin and
+    // owns its current atomic publication path internally. Older releases
+    // exposed a default Persistence class that required our Windows staging
+    // hook. Keep both contracts working so an adapter upgrade does not turn
+    // every install into a permanent "storage interface changed" failure.
+    const Persistence = persistence?.default;
+    if (typeof Persistence?.prototype?.writeSyncedTempFile === 'function'
+        && Persistence.prototype.writeSyncedTempFile.length === 2) {
+      Persistence.prototype.writeSyncedTempFile = writeSyncedTempFile;
+    } else if (typeof persistence?.apply !== 'function') {
+      throw new Error('DeepSeek Harness storage interface is unsupported; update SoduWork before running.');
     }
-    Persistence.prototype.writeSyncedTempFile = writeSyncedTempFile;
     await configureFileStaging(runtimeRoot);
   }
 }

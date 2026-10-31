@@ -21,6 +21,7 @@
     ['open-schedules', '打开自动化', 'Ctrl+Shift+U', 'workspace'],
     ['open-library', '打开资料库', 'Ctrl+Shift+L', 'workspace'],
     ['focus-search', '聚焦当前页面搜索', 'Ctrl+K', 'window'],
+    ['open-global-search', '打开全局搜索', 'Ctrl+Shift+F', 'window'],
     ['toggle-sidebar', '显示 / 隐藏侧栏', 'Ctrl+B', 'window'],
     ['menu-file', '文件菜单', 'Alt+F', 'window'],
     ['menu-view', '视图菜单', 'Alt+V', 'window'],

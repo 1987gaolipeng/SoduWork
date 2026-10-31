@@ -29,6 +29,12 @@ test('conversation plugin picker exposes an explicit open entry without changing
   assert.match(read('components/panels/chat-composer-bindings.js'), /_pluginMention\.open/);
 });
 
+test('requirement dispatch card no longer exposes the low-value raw-text preview', () => {
+  const source = read('components/panels/panels-forward-options.js');
+  assert.doesNotMatch(source, /data-act="fwd-preview"|>查看原文</,
+    '需求执行卡片不再显示查看原文入口');
+});
+
 test('built-in work forms share the slash picker without becoming selected plugins', () => {
   const actions = mention.normalizeActions([{
     id: 'work.requirement.create', command: '/需求', aliases: ['Bug', '工单'],
@@ -56,6 +62,7 @@ test('plugin catalog normalization exposes only the compact conversation picker 
   assert.equal(items[0].pluginId, 'p1');
   assert.equal(items[0].organizationWide, true);
   assert.equal(items[0].icon, 'data:image/png;base64,icon');
+  assert.equal(items[0].template, '');
   const nestedIcon = mention.normalizeCatalog({ items: [{
     pluginId: 'nested', name: 'Nested icon', manifest: { icon: 'data:image/png;base64,nested' },
   }] })[0];
@@ -74,6 +81,16 @@ test('plugin catalog normalization exposes only the compact conversation picker 
   assert.equal(unavailable.length, 1);
   assert.equal(unavailable[0].versionId, 'version-1');
   assert.equal(unavailable[0].conversationUse.code, 'install_required');
+  const apps = mention.normalizeCatalog({ items: [
+    { pluginId: 'app-1', key: 'todo-workbench', name: '待办工作台', template: 'app', ui: { contributions: [] } },
+    { pluginId: 'legacy-app-1', key: 'legacy-workbench', name: '旧版待办工作台', ui: { contributions: [
+      { id: 'main', slot: 'workspace.navigation', source: { type: 'external', url: 'https://example.invalid/app' } },
+    ] } },
+    { pluginId: 'plugin-1', key: 'todo-helper', name: '待办插件', template: 'plugin', installed: true },
+  ] });
+  assert.deepEqual(apps.map(item => item.pluginId), ['plugin-1'],
+    '应用模板或旧版 workspace.navigation 应用不能进入仅插件的对话起手式');
+  assert.equal(apps[0].template, 'plugin');
   const pendingUpgrade = mention.normalizeCatalog({ items: [{
     pluginId: 'enterprise-update', name: 'Needs update',
     installed: true, updateAvailable: true,
@@ -223,7 +240,8 @@ test('new composer routes picked work action capsules while preserving literal s
   assert.doesNotMatch(compose, /SoduWorkAPI\.resolveConversationPlugins/);
   assert.match(compose, /initialPlugins/);
   assert.match(chat, /delete launchOptions\.initialPlugins/);
-  assert.match(chat, /(?:ctx\.)?_send\(first, \{ plugins: initialPlugins, skills: initialSkills \}\)/);
+  assert.match(chat, /(?:ctx\.)?_send\(first,\s*\{\s*plugins: initialPlugins,\s*skills: initialSkills,\s*attachments: Array\.isArray\(_sessionOptions\.attachments\) \? _sessionOptions\.attachments : \[\],?\s*\}\)/,
+    'first-turn handoff preserves both plugin/skill selections and compose-stage attachments');
   const scope = {}; scope.window = scope;
   vm.runInNewContext(read('components', 'panels', 'plugin-ui-host.js'), scope);
   scope.PluginUIHost.registerAction({ id: 'work.requirement.create', command: '需求', open() {} });
@@ -240,6 +258,10 @@ test('conversation picker keeps the full catalog available for scrolling and sea
   const css = read('components', 'panels', 'chat-plugin-mention.css');
   assert.doesNotMatch(picker, /\.slice\(0, 8\)/);
   assert.match(css, /\.nplugin-menu[\s\S]*overflow:auto/);
+  assert.match(css, /\.nplugin-menu\{position:fixed/,
+    'the picker must escape clipped composer containers');
+  assert.match(picker, /function positionMenu\(\)/,
+    'the picker must position itself against the viewport before opening');
 });
 
 test('plugin mutations invalidate every open conversation picker', () => {

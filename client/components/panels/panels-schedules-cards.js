@@ -45,7 +45,7 @@ function _schCardAssignee(id) {
 }
 
 function _schCardNote(note) {
-  const value = String(note || '');
+  const value = String(note || '').split('\n\n即用任务上下文（数据）：\n')[0];
   if (!value) return '';
   if (value.length <= 110 && !value.includes('\n')) return '<p class="sch-i-note" data-user-content>' + esc(value) + '</p>';
   return '<details class="sch-i-description"><summary><span class="sch-i-note" data-user-content>' + esc(value) +
@@ -53,6 +53,19 @@ function _schCardNote(note) {
     '<span class="sch-collapse-label">收起说明</span>' + _schVisualIcon('chevron') + '</span></summary></details>';
 }
 
+function _schAppIdentity(s) {
+  let source=s.sourceApp;
+  if(!source?.name){
+    const line=String(s.note || '').split('即用任务上下文（数据）：\n')[1]?.split('\n')[0];
+    if(line && line.length<150000){try{const prior=JSON.parse(line);source=prior.sourceApp || (prior.appName?{name:prior.appName}:null);}catch(_) {}}
+  }
+  if(!source?.name)return '';
+  const method=_schmFind(s.personalPluginKey);
+  const icon=source.icon || method?.icon || '';
+  const image=/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(icon)?'<img src="'+esc(icon)+'" alt="" width="24" height="24">':'';
+  return '<span class="sch-i-app" data-user-content>'+image+'<b>'+esc(source.name)+'</b>'+
+    (source.characterName?'<span>'+esc(source.characterName)+'</span>':'')+'</span>';
+}
 function _schCardHtml(s) {
   const fired = s.every === 'once' && s.onceFired;
   const who = _schCardAssignee(s.assigneeId);
@@ -69,7 +82,8 @@ function _schCardHtml(s) {
     ? AgentBrand.html(s.assigneeId || who, { className: 'sch-i-agent-brand', title: who })
     : '<span class="sch-i-agent-brand" title="' + esc(who) + '">' + _schVisualIcon('agent') + '</span>';
   const executor = '<span class="sch-i-executor" aria-label="' + esc(who) + '">' + agentBrand + '</span>';
-  const methodLabel = method
+  const appIdentity=_schAppIdentity(s);
+  const methodLabel = method && !appIdentity
     ? '<span class="sch-i-method" data-user-content title="' + esc(method) + '">' + esc(method) + '</span>' : '';
   const stateLabel = fired ? '本次预约已触发' : s.enabled ? '已启用' : '已停用';
   const stateHtml = fired
@@ -81,7 +95,7 @@ function _schCardHtml(s) {
   return '<article class="sch-item' + (s.enabled ? '' : ' off') + '" data-sid="' + esc(s.id) + '">' +
     '<div class="sch-i-body"><div class="sch-i-head"><div class="sch-i-when">' + _schVisualIcon('clock') +
       '<b>' + esc(rh[0]) + '</b><i>' + esc(rh.slice(1).join(' ')) + '</i></div>' +
-      '<div class="sch-i-assignment">' + executor + methodLabel + '</div>' +
+      '<div class="sch-i-assignment">' + appIdentity + executor + methodLabel + '</div>' +
       stateHtml + '</div>' +
     '<div class="sch-i-main"><div class="sch-i-top"><b class="sch-i-title" data-user-content title="' + esc(s.title) + '">' +
       esc(s.title) + '</b></div>' + _schCardNote(s.note) +

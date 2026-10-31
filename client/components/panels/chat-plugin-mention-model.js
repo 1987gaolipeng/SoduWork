@@ -261,6 +261,17 @@
       .map((value) => String(value || '').toLocaleLowerCase()).join(' ');
   }
 
+  /* Applications share the remote catalog with conversation plugins, but their
+     workspace.navigation pages belong in the app rail. Older catalog payloads
+     did not always copy template: "app" through, so the contribution slot is
+     the compatibility boundary for the slash-only plugin picker. */
+  function isWorkspaceApp(item) {
+    if (!item || typeof item !== 'object') return false;
+    if (String(item.template || '').trim().toLowerCase() === 'app') return true;
+    return Array.isArray(item.ui?.contributions) && item.ui.contributions.some((row) =>
+      row && row.slot === 'workspace.navigation');
+  }
+
   function normalizeCatalog(payload) {
     const iconValue = (item) => {
       const source = item && typeof item === 'object' ? item : {};
@@ -272,9 +283,15 @@
         source.presentation && source.presentation.icon];
       return String(candidates.find(value => typeof value === 'string' && value.trim()) || '');
     };
-    return (Array.isArray(payload && payload.items) ? payload.items : []).map((item) => ({
+    return (Array.isArray(payload && payload.items) ? payload.items : [])
+      .filter((item) => item && item.pluginId && !isWorkspaceApp(item))
+      .map((item) => ({
       pluginId: String(item && item.pluginId || ''),
       key: String(item && item.key || ''),
+      // Applications share the catalog with conversation plugins, but the
+      // slash picker is intentionally a plugin-only surface. Preserve the
+      // marker so the boundary stays explicit in the normalized contract.
+      template: String(item && item.template || '').trim().toLowerCase(),
       qualifiedKey: String(item && item.qualifiedKey || item && item.key || ''),
       scope: String(item && item.scope || ''),
       name: String(item && item.name || item && item.key || '企业插件'),
@@ -308,7 +325,7 @@
       item.kind = pluginKind(item);
       item.searchText = searchable(item);
       return item;
-    }).filter((item) => item.pluginId);
+    });
   }
 
   function catalogWarning(payload) {
@@ -323,6 +340,6 @@
   return {
     normalizeActions, pluginBuilderAction, commandText, normalizePluginInputs,
     prepareConversationInputs, preparedConversationText, availability, pluginKind,
-    normalizeCatalog, catalogWarning, retryableGrantFailure,
+    normalizeCatalog, isWorkspaceApp, catalogWarning, retryableGrantFailure,
   };
 });

@@ -40,6 +40,28 @@ test('preview and chat saves share in-flight work, capture the session/file, and
  finish({ok:true});assert.equal(await first,true);assert.equal(await second,true);
  h.upload=async()=>({ok:true});await h.api.saveOutput('session-one',{...file,at:2});assert.equal(h.calls.length,2);
 });
+test('saved output buttons become preview actions and reuse the saved receipt', async () => {
+ const h=harness(), opened=[];
+ h.global.ChatWorkbench={openOutput:id=>{opened.push(id);return true;}};
+ const file={artifactId:'preview-output',name:'report.html',at:1,size:12};
+ const node={dataset:{libraryOutput:'preview-output',libraryRef:'chat',libraryVersion:'1:12'},classList:{toggle(){}},setAttribute(){},innerHTML:''};
+ assert.equal(await h.api.saveOutput('chat',file,node),true);
+ assert.match(node.innerHTML,/library-save-label/);
+ assert.match(h.api.button(file,'chat'),/预览|Preview/);
+ assert.equal(await h.api.saveOutput('chat',file,node),true);
+ assert.deepEqual(opened,['preview-output']);
+});
+test('saved output preview keeps the workbench action and falls back to the library item', async () => {
+ const h=harness(), library=[], workspace=[];
+ h.global.LibraryDelivery={openItem:item=>{library.push(item.id);return true;}};
+ h.global.ChatWorkbench={openOutput:id=>{workspace.push(id);return false;}};
+ const file={artifactId:'library-preview',name:'report.html',at:1,size:12};
+ const node={dataset:{libraryOutput:'library-preview',libraryRef:'chat',libraryVersion:'1:12'},classList:{toggle(){}},setAttribute(){},innerHTML:''};
+ assert.equal(await h.api.saveOutput('chat',file,node),true);
+ assert.equal(await h.api.saveOutput('chat',file,node),true);
+ assert.deepEqual(library,['item']);
+ assert.deepEqual(workspace,['library-preview']);
+});
 test('failed manual save permits retry and an opaque artifact is savable without revealing a local path',async()=>{
  const h=harness();assert.equal(h.api.canSave({artifactId:'opaque'}),true);
  h.upload=async()=>({ok:false,reason:'failed'});assert.equal(await h.api.saveOutput('ref',{artifactId:'opaque'}),false);

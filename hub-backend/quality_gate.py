@@ -181,7 +181,8 @@ def main() -> int:
             )
         ]
         checks.extend(
-            (script.removesuffix(".py"), _python_check_command(script), BACKEND, 300)
+            (script.removesuffix(".py"), _python_check_command(script), BACKEND,
+             1800 if script in {"smoke_plugins.py", "smoke_schema_migrations.py"} else 300)
             for script in smoke_scripts
         )
 

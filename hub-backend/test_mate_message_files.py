@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from app import models
-from app.services import mate_message_files as shares, storage, team
+from app.services import attachment_ownership, mate_message_files as shares, storage, team
 from app.api.attachments import (delete_attachment, download_attachment,
                                  list_conversation_media,
                                  refresh_attachment_access)
@@ -57,8 +57,14 @@ class MateFilesTests(unittest.IsolatedAsyncioTestCase):
             id="conversation-video",task_id="",role="output",filename="video.mp4",
             content_type="video/mp4",storage_key=key,backend=storage.put(
                 key,b"\x00\x00\x00\x18ftypmp42","video/mp4"),size=12,
-            uploaded_by=self.client.id,source_ref="conversation-video:conversation-a")
+            uploaded_by=self.client.id,source_ref="conversation-video:conversation-a",
+            evidence_meta=attachment_ownership.metadata(self.client))
         self.session.add(row);await self.session.commit()
+        # Device identity alone must not grant a later account access.
+        other_account=SimpleNamespace(id=self.client.id,user_ref="other")
+        with self.assertRaises(HTTPException) as denied:
+            await refresh_attachment_access(row.id,other_account,self.session)
+        self.assertEqual(denied.exception.status_code,404)
         access=await refresh_attachment_access(row.id,self.client,self.session)
         self.assertEqual(access["attachmentId"],row.id)
         self.assertIn("ticket=",access["url"])

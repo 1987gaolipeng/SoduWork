@@ -257,7 +257,8 @@
     ]);
     if (opts.isCurrent && !opts.isCurrent()) return;
     const detail = detailResult && detailResult.plugin || {};
-    const draft = detail.localDraft || {};
+    let draft = detail.localDraft || {};
+    const appCategories = [['office','工具办公'],['game','小游戏'],['robot','机器人'],['other','其他']];
     const publisher = publisherResult && publisherResult.identity || {};
     const authorName = draft.author || detail.authorName || item.authorName || publisher.displayName || publisher.name || '\u0053odo \u4e2a\u4eba\u4f5c\u8005';
     const people = (peopleResult && peopleResult.items || []).slice(0, 500);
@@ -265,8 +266,9 @@
     if (!draft.name || !draft.version) throw new Error('个人插件版本不完整，请重新安装后再上传');
     const layer = ctx.openModal(opts.application ? '申请上架' : '上传到企业', item.name + ' · v' + item.version,
       (global.SoduWorkPluginMakerUtils ? global.SoduWorkPluginMakerUtils.resourceMarkup(draft.resources) : '') +
-      '<section class="cap-publish-summary"><span><small>\u63d0\u4ea4\u7248\u672c</small><b>' + h(draft.name) + ' \u00b7 v' + h(draft.version) + '</b></span><span><small>\u4f5c\u8005</small><b>' + h(authorName) + '</b></span></section>' +
-      '<p class="cap-governance-note"><b>本地版本不会改变。</b>上传的是当前不可变快照，先进入企业隔离区；管理员审核发布后，才按下面的范围可用。</p>' +
+      '<section class="cap-publish-summary"><span><small>\u63d0\u4ea4\u7248\u672c</small><b>' + h(draft.name) + ' \u00b7 v' + h(draft.version) + '</b></span><span><small>' + (draft.template === 'app' ? '开发者' : '作者') + '</small><b>' + h(authorName) + '</b></span></section>' +
+      (draft.template === 'app' ? '<label class="cap-field"><span>即用分类</span><select class="cap-select" id="capPublishAppCategory">' + appCategories.map(([id,label]) => '<option value="' + id + '"' + (id === (draft.appCategory || 'other') ? ' selected' : '') + '>' + label + '</option>').join('') + '</select></label>' : '') +
+      (draft.template === 'app' ? '<p class="cap-governance-note">修改分类会保存为新版本；提交后由管理员审核，按所选范围开放。</p>' : '<p class="cap-governance-note"><b>本地版本不会改变。</b>上传的是当前不可变快照，先进入企业隔离区；管理员审核发布后，才按下面的范围可用。</p>') +
       '<section class="cap-publisher-proof"><span><b>本机发布身份</b><em>私钥由系统安全存储保护，只上传签名与公钥</em>' +
         '<code title="' + h(publisher.fingerprint || '') + '">' + h(publisher.keyId || '') +
         ' · ' + h(String(publisher.fingerprint || '').slice(0, 16)) + '…</code></span>' +
@@ -359,7 +361,16 @@
       if (mode === 'users' && !userIds.length) { ctx.say('至少选择一位可以使用插件的成员'); return; }
       if (mode === 'org_units' && !orgUnitIds.length) { ctx.say('至少选择一个可以使用插件的团队或部门'); return; }
       this.disabled = true; this.textContent = '正在上传…';
+      const categoryControl=layer.querySelector('#capPublishAppCategory');if(categoryControl)categoryControl.disabled=true;
       try {
+        const category = layer.querySelector('#capPublishAppCategory');
+        if (category && draft.appCategory !== category.value) {
+          const saved = await global.soduWorkAPI.personalPlugins.updateMetadata(item.pluginId,{author:authorName,appCategory:category.value,expectedChecksum:detail.checksum});
+          if (!current()) return;
+          if (!saved?.ok || !saved.plugin?.localDraft) throw Error(saved?.reason || '即用信息保存失败');
+          Object.assign(detail,saved.plugin);Object.assign(item,saved.plugin);draft=saved.plugin.localDraft;
+          const summary=layer.querySelector('.cap-publish-summary b');if(summary)summary.textContent=draft.name+' · v'+draft.version;
+        }
         const signed = await SoduWorkAPI.signPersonalPluginDraft(draft);
         if (!current()) return;
         const result = await SoduWorkAPI.publishPersonalPlugin(
@@ -373,6 +384,7 @@
       } catch (error) {
         if (!current()) return;
         ctx.say(ctx.errorText(error, '插件没有上传成功'));
+        if(categoryControl)categoryControl.disabled=false;
         this.disabled = false; this.textContent = '提交审核';
       }
     });

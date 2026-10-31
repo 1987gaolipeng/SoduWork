@@ -71,7 +71,7 @@ class DeliveryCollectionsTestCase(unittest.IsolatedAsyncioTestCase):
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.engine.begin() as conn:
             await conn.run_sync(lambda connection: Base.metadata.create_all(connection, tables=[
-                LibraryFolder.__table__, LibraryItem.__table__, Task.__table__,
+                LibraryFolder.__table__, LibraryItem.__table__, Client.__table__, Task.__table__,
                 Attachment.__table__, ConversationHandoff.__table__, ExecutionSession.__table__]))
         self.app = FastAPI()
         self.app.include_router(deliveries.router)
@@ -296,6 +296,9 @@ class DeliveryCollectionsTests(DeliveryCollectionsTestCase):
 
     async def seed_cloud(self, files, *, round_no=1, state="done"):
         async with self.sessions() as session:
+            # Task ownership is frozen from the persisted device/account binding.
+            session.add(Client(id="desktop", user_ref="alice"))
+            await session.flush()
             task = Task(id="cloud-task", owner_client_id="desktop", created_by="alice", title="Cloud report", origin="cloud-conversation")
             handoff = ConversationHandoff(id="handoff", owner_client_id="desktop", owner_user_id="alice",
                 transfer_id="request-one", task_id=task.id, phase="committed",
@@ -312,6 +315,7 @@ class DeliveryCollectionsTests(DeliveryCollectionsTestCase):
                     uploaded_by="agent:runner", role=role,
                     evidence_meta={"round": round_no, "verification": {"state": "passed"}}))
             await session.commit()
+            self.assertEqual(task.owner_user_id, "alice")
 
     async def test_cloud_automatic_snapshot_and_mobile_retry_without_original_device(self):
         await self.seed_cloud([("report.md", b"# Cloud result", "output"),

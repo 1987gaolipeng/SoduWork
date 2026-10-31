@@ -6,6 +6,7 @@
    chooses a safe native preview or an explicit system-app handoff. */
 const fs = require('fs');
 const path = require('path');
+const { marked } = require('../vendor/markdown/marked.umd.js');
 
 const ATTACHMENT_PATH = /^\/api\/v1\/attachments\/([A-Za-z0-9-]{8,64})$/;
 const TICKET = /^[A-Za-z0-9._~-]{16,4096}$/;
@@ -20,6 +21,7 @@ const SYSTEM_OPEN_EXTENSIONS = new Set(['.doc', '.docx', '.xls', '.xlsx', '.ppt'
   '.odt', '.ods', '.odp', '.html', '.htm', '.rtf']);
 function canOpenWithSystem(filename) { return SYSTEM_OPEN_EXTENSIONS.has(path.extname(String(filename || '')).toLowerCase()); }
 const MAX_ATTACHMENT_BYTES = 64 * 1024 * 1024;
+const MAX_MARKDOWN_PREVIEW_BYTES = 2 * 1024 * 1024;
 const WINDOWS_RESERVED = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
 
 let DEPS = null;
@@ -32,6 +34,48 @@ function normalizedType(raw) {
 
 function isInlinePreview(raw) {
   return INLINE_PREVIEW_TYPES.has(normalizedType(raw));
+}
+
+function isMarkdownFilename(filename) {
+  return /\.(?:md|markdown|mdown)$/i.test(String(filename || ''));
+}
+
+function escapeHtml(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, character => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[character]));
+}
+
+function renderMarkdownPreview(filename, data) {
+  const source = Buffer.from(data || []).subarray(0, MAX_MARKDOWN_PREVIEW_BYTES)
+    .toString('utf8').replace(/^\uFEFF/, '');
+  const renderer = new marked.Renderer();
+  // Markdown attachments are untrusted shared bytes. Keep the preview static,
+  // strip raw HTML and images, and leave links inert behind the native window's
+  // navigation guard. This gives headings, lists and code blocks a useful view
+  // without turning a shared document into executable content.
+  renderer.html = token => escapeHtml(token.text || '');
+  renderer.image = token => escapeHtml(token.text || '');
+  renderer.link = function (token) {
+    const label = this.parser.parseInline(token.tokens || [], this.parser.textRenderer);
+    const href = String(token.href || '');
+    if (!/^(?:https?:|mailto:)/i.test(href)) return label;
+    const title = token.title ? ' title="' + escapeHtml(token.title) + '"' : '';
+    return '<a href="' + escapeHtml(href) + '"' + title + ' rel="noreferrer noopener">' + label + '</a>';
+  };
+  let body;
+  try { body = marked.parse(source, { gfm: true, breaks: false, renderer }); }
+  catch (_) { body = '<pre>' + escapeHtml(source) + '</pre>'; }
+  const title = escapeHtml(path.basename(filename || 'Markdown'));
+  const truncated = Buffer.from(data || []).length > MAX_MARKDOWN_PREVIEW_BYTES;
+  const notice = truncated ? '<p class="notice">仅显示前 2 MB，完整内容请下载原文件。</p>' : '';
+  return '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">' +
+    '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\';">' +
+    '<title>' + title + '</title><style>' +
+    ':root{color-scheme:light dark}body{margin:0;padding:32px 40px;background:#fff;color:#1f2329;font:15px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;overflow-wrap:anywhere}' +
+    'main{max-width:960px;margin:0 auto}h1,h2,h3,h4,h5,h6{line-height:1.35;margin:1.3em 0 .55em}h1{font-size:2em;border-bottom:1px solid #d8dee4;padding-bottom:.25em}h2{font-size:1.55em;border-bottom:1px solid #d8dee4;padding-bottom:.2em}p,ul,ol,blockquote,pre,table{margin:0 0 1em}blockquote{border-left:4px solid #d0d7de;color:#57606a;padding:0 1em;margin-left:0}code{padding:.15em .35em;background:#f0f2f4;border-radius:4px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:max(12px,.9em)}pre{padding:14px 16px;overflow:auto;background:#f6f8fa;border-radius:8px}pre code{padding:0;background:transparent}a{color:#0969da}table{border-collapse:collapse;display:block;overflow:auto}th,td{border:1px solid #d0d7de;padding:6px 12px;text-align:left}.notice{padding:10px 12px;color:#9a6700;background:#fff8c5;border:1px solid #d4a72c;border-radius:6px}' +
+    '@media(prefers-color-scheme:dark){body{background:#0d1117;color:#e6edf3}h1,h2{border-color:#30363d}blockquote{border-color:#3b434b;color:#8b949e}code,pre{background:#161b22}a{color:#58a6ff}.notice{color:#d29922;background:#3b2f00;border-color:#6e5c00}}' +
+    '</style></head><body><main data-user-content>' + notice + body + '</main></body></html>';
 }
 
 function safeFilename(raw, fallback) {
@@ -167,11 +211,13 @@ async function showInline(event, filename, result, found) {
     if (/^data:/i.test(url)) return;
     navigationEvent.preventDefault();
   });
-  // CSV/Markdown may otherwise trigger Chromium's download handling. The
-  // already allowlisted text formats are displayed as literal, encoded text.
-  const mime = /^(?:text\/|application\/json$)/.test(result.contentType)
-    ? 'text/plain;charset=' + result.charset : result.contentType;
-  const dataUrl = 'data:' + mime + ';base64,' + result.data.toString('base64');
+  // Markdown gets a static, sanitized document so shared headings, lists and
+  // code blocks are readable. Other text formats remain literal text.
+  const markdown = isMarkdownFilename(filename);
+  const mime = markdown ? 'text/html;charset=utf-8' : (/^(?:text\/|application\/json$)/.test(result.contentType)
+    ? 'text/plain;charset=' + result.charset : result.contentType);
+  const payload = markdown ? Buffer.from(renderMarkdownPreview(filename, result.data), 'utf8') : result.data;
+  const dataUrl = 'data:' + mime + ';base64,' + payload.toString('base64');
   const closeOwnWindow = () => {
     if (PREVIEWS.get(key) === win) closePreview(key);
     else if (!win.isDestroyed()) win.close();
@@ -233,7 +279,7 @@ async function preview(event, raw) {
     return { ok: true, mimeType: result.contentType, data: result.data.toString('base64') };
   }
   if (payload.inlineImage === true) return { ok: false, reason: '这份附件不是支持内嵌预览的图片' };
-  if (!isInlinePreview(result.contentType)) {
+  if (!isInlinePreview(result.contentType) && !isMarkdownFilename(filename)) {
     const downloadUrl = parseAttachmentUrl(payload.url, found.identity.hub);
     return openWithSystem(event, downloadUrl, filename, result, found);
   }
@@ -293,4 +339,5 @@ module.exports = {
   safeFilename,
   parseAttachmentUrl,
   MAX_ATTACHMENT_BYTES, canOpenWithSystem,
+  isMarkdownFilename, renderMarkdownPreview,
 };

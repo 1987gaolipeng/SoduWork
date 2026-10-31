@@ -217,7 +217,7 @@ def apply(ctx: dict, identity: dict, ref: str = "") -> None:
         key, store_path(), str(spec.get("version") or ""),
         str(spec.get("checksum") or ""),
         str(spec.get("versionPolicy") or "latest"))
-    plugin_ui_contracts.require_unattended(body.get("ui"))
+    plugin_ui_contracts.require_unattended(body.get("ui"), jiyong=body.get("jiyong"))
     values = merge_inputs(body.get("inputs"), spec.get("inputs"))
     if body.get('resources'):
         from . import plugin_resources

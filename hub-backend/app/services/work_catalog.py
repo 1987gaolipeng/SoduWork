@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am
 from .. import models
-from ..agent_catalog import AGENTS
+from .agent_naming import cli_from_name
 
 
 PROFILE_DEFINITIONS = [
@@ -189,7 +189,6 @@ SCENARIO_DEFINITIONS = [
 
 _KEY_RE = re.compile(r"^[a-z][a-z0-9-]{1,79}$")
 _CAP_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{0,63}$")
-_SUBSTRATE_CAPS = set(AGENTS)
 
 
 def _items(value, *, limit: int, length: int) -> list[str]:
@@ -578,7 +577,7 @@ async def validate_scenario(
         limit=50, length=64)
     if any(not _CAP_RE.fullmatch(item) for item in capabilities):
         raise ValueError("能力标识格式不正确")
-    if any(item.lower() in _SUBSTRATE_CAPS for item in capabilities):
+    if any(cli_from_name(item) for item in capabilities):
         raise ValueError("请填写浏览、仓库、办公等能力，不要绑定具体 Agent 底座")
     contract = _contract(body.get(
         "outputContract", current.output_contract if current else {}))

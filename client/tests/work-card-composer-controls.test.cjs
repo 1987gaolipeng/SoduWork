@@ -31,9 +31,9 @@ test('仅表单会话的控件继承系统权限，无需打开执行底座', as
   assert.equal(f.calls.length,0);
 });
 test('草稿 Agent/模型选择只返回同一会话的选项，完全访问沿用一次性确认', async()=>{
-  const f=fixture();f.controls.state();await tick();
-  const agent=f.controls.selectRuntime('qwen');assert.equal(agent.ok,true);assert.equal(agent.snapshot.workOnly,true);
-  assert.equal(agent.adapterId,'qwen');assert.equal(f.ctx._sessionId,'work-a');
+  const f=fixture();await f.controls.runtimes();f.controls.state();await tick();
+  const agent=f.controls.selectRuntime('pi');assert.equal(agent.ok,true);assert.equal(agent.snapshot.workOnly,true);
+  assert.equal(agent.adapterId,'pi');assert.equal(f.ctx._sessionId,'work-a');
   const model=f.controls.selectModel('chosen','所选模型');assert.equal(model.selection.name,'chosen');
   assert.equal(await f.controls.chooseAccess('full','pi',{}),true);
   assert.equal(f.ctx._sessionOptions.accessMode,'full');assert.equal(f.ctx._sessionOptions.accessConsentId,'confirmed');
@@ -55,13 +55,13 @@ test('空白页已绑定控件后进入表单历史，复用 DOM 仍能选择执
   const f=fixture();f.ctx._sessionId='';f.ctx._snap=null;
   assert.equal(f.controls.active(),true);
   const initialDraftId = f.controls.state().draftId;
-  await tick();
+  await f.controls.runtimes(); await tick();
   assert.equal(f.controls.selectModel('preselected','预选模型').selection.name,'preselected');
   f.ctx._viewEpoch++;
   assert.notEqual(f.controls.state().draftId,initialDraftId,'new blank views cannot reuse an old picker identity');
   f.ctx._viewEpoch++;f.ctx._sessionId='history-work';f.ctx._snap={workOnly:true};
   assert.equal(f.controls.state().draftOnly,true);await tick();
-  assert.equal(f.controls.selectRuntime('qwen').ok,true);
+  assert.equal(f.controls.selectRuntime('pi').ok,true);
   assert.equal(f.controls.state().accessPolicy.mode,'readonly');
 });
 

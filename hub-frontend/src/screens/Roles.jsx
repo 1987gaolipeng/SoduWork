@@ -49,7 +49,7 @@ export default function Roles() {
               </div>
               <div className="role-card-perms">
                 {r.permissions.length === 0 && <span className="muted" style={{ fontSize: 14.5 }}>{tx("无权限")}</span>}
-                {r.permissions.slice(0, 6).map((k) => { const p = catalog.find((c) => c.key === k); return <span key={k} className="chip src-ext" style={{ fontSize: 14.5 }}>{p ? p.label : k}</span> })}
+                {r.permissions.slice(0, 6).map((k) => { const p = catalog.find((c) => c.key === k); return <span key={k} className="chip src-ext" style={{ fontSize: 14.5 }}>{p ? tx(p.label) : k}</span> })}
                 {r.permissions.length > 6 && <span className="chip" style={{ fontSize: 14.5, background: 'var(--surface-2)', color: 'var(--ink-3)' }}>+{r.permissions.length - 6}</span>}
               </div>
               <footer className="role-card-actions admin-card-actions">
@@ -101,12 +101,12 @@ function RoleEditor({ role, catalog, onClose, onDone }) {
         {groups.map((g) => (
           <div key={g} className="permgroup">
             <div className="permgroup-head">
-              <span className="pg-name">{g}</span>
+              <span className="pg-name">{tx(g)}</span>
               <span className="pg-all" onClick={() => toggleGroup(g)}>{allOn(g) ? tx("取消全选") : tx("全选")}</span>
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {catalog.filter((c) => c.group === g).map((c) => (
-                <span key={c.key} className={'bp' + (keys.has(c.key) ? ' on' : '')} onClick={() => toggle(c.key)} style={{ cursor: 'pointer' }}>{keys.has(c.key) ? '✓ ' : ''}{c.label}</span>
+                <span key={c.key} className={'bp' + (keys.has(c.key) ? ' on' : '')} onClick={() => toggle(c.key)} style={{ cursor: 'pointer' }}>{keys.has(c.key) ? '✓ ' : ''}{tx(c.label)}</span>
               ))}
             </div>
           </div>

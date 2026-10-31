@@ -23,3 +23,19 @@ test('live history titles keep literal attachment tags when no valid envelope ex
   const text = '示例 ' + attachmentContract.START + 'literal';
   assert.equal(historyState.messageTitle({ messages: [{ role: 'user', text }] }), text.slice(0, 40));
 });
+
+test('live history titles remove a persisted attachment envelope truncated before its closing tag', () => {
+  const text = '把更好的复何汉及 ' + attachmentContract.START + ' {"f';
+  assert.equal(historyState.messageTitle({ messages: [{ role: 'user', text }] }), '把更好的复何汉及');
+});
+
+test('live history titles strip material context before attachment and connector envelopes', () => {
+  const connector = require('../main/pi-session/connector-context.cjs');
+  const material = require('../main/pi-session/input-context.cjs');
+  const text = material.augment(
+    connector.augment(attachmentContract.augment('真实标题', [{ name: 'source.txt', path: 'inputs/source.txt' }]),
+      'private connector instructions'),
+    'material evidence',
+  );
+  assert.equal(historyState.messageTitle({ messages: [{ role: 'user', text }] }), '真实标题');
+});

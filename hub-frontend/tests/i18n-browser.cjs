@@ -8,7 +8,10 @@ const http = require('node:http')
 const assert = require('node:assert/strict')
 const { checkAdminLayout } = require('./helpers/admin-layout-browser.cjs')
 const { checkOrgTreeSearch } = require('./helpers/org-tree-search-browser.cjs')
-const { checkInsightsUsage } = require('./helpers/insights-usage-browser.cjs')
+const { checkInsightsUsage, checkInsightsMetricDefinitions } = require('./helpers/insights-usage-browser.cjs')
+const { checkGovernanceOverview } = require('./helpers/governance-overview-browser.cjs')
+const { checkCatalogUsage } = require('./helpers/catalog-usage-browser.cjs')
+const { checkCapabilityCatalog } = require('./helpers/capability-catalog-browser.cjs')
 const root = path.resolve(__dirname, '..')
 const output = process.env.SODUWORK_ADMIN_TEST_OUTPUT ? path.resolve(process.env.SODUWORK_ADMIN_TEST_OUTPUT) : path.resolve(root, '../outputs/i18n-2026-09-29/admin')
 fs.mkdirSync(output, { recursive: true })
@@ -18,6 +21,30 @@ const user = { id: 'fixture-user', username: 'fixture-user', displayName: '新�
 const projects = [{ id: 'fixture-project', name: '保存', group: '新建项目', desc: '客户业务原文', ownerName: '新建项目', tasks: [], total: 0, done: 0 }]
 projects.push(...Array.from({ length: 120 }, (_, i) => ({ ...projects[0], id: 'project-' + i, name: 'Project ' + (i + 1), group: 'Group ' + (i % 4 + 1) })))
 const devices = Array.from({ length: 61 }, (_, i) => ({ id: 'device-' + i, name: 'Device ' + (i + 1), ownerName: 'Fixture user', authState: i >= 55 ? 'pending' : 'active', online: i < 50, platform: i % 3 === 2 ? 'android' : 'win32', version: '1.0', lastSeen: Date.now() }))
+// System catalogs (permissions, role profiles, responsibility domains) parse straight out of the
+// backend source so the admin screens render the real catalog in every locale run.
+const backendSource = rel => require('node:fs').readFileSync(path.resolve(root, '../hub-backend', rel), 'utf8')
+const permissionCatalog = [...backendSource('app/permissions.py').matchAll(/"key": "([^"]+)", "label": "([^"]+)", "group": "([^"]+)"/g)].map(m => ({ key: m[1], label: m[2], group: m[3] }))
+const profileSource = backendSource('app/services/work_catalog.py')
+const profileBlock = profileSource.slice(profileSource.indexOf('PROFILE_DEFINITIONS = ['), profileSource.indexOf('SCENARIO_DEFINITIONS = ['))
+const professions = [...profileBlock.matchAll(/"id": "([^"]+)", "name": "([^"]+)", "category": "([^"]+)"/g)].map((m, i) => ({ id: m[1], name: m[2], category: m[3], sort: i + 1 }))
+const domainSource = backendSource('app/services/rbac.py')
+const domainBlock = domainSource.slice(domainSource.indexOf('SEED_DOMAINS = ['), domainSource.indexOf('async def seed_domains'))
+const domains = [...domainBlock.matchAll(/\("([^"]+)", \d+\)/g)].map((m, i) => ({ id: 'dom-' + (i + 1), name: m[1] }))
+// The operations screen renders Hub-composed zh-CN copy verbatim; parse the real strings so
+// backend rewording surfaces here instead of leaking Chinese through an English fixture.
+const operationsPy = backendSource('app/services/operations.py')
+const backendString = (pattern) => {
+  const match = operationsPy.match(pattern)
+  assert.ok(match, 'operations.py drifted; update the i18n fixture: ' + pattern)
+  return match[1]
+}
+const opsModeLabel = backendString(/"modeLabel": "([^"]+)" if bus\.enabled/)
+const opsClusterNote = backendString(/"clusterNote": "([^"]+)" if bus\.enabled/)
+const opsFailedSuffix = backendString(/"title": f"\{workflow\['failed'\]\} (.+)"/)
+const opsFailedDetail = backendString(/"detail": "(进入[^"]+)"/)
+const opsRunnerTitle = backendString(/"title": "(没有可接活的 Runner)"/)
+const opsRunnerDetail = backendString(/"detail": "(请检查[^"]+)"/)
 const fixtures = {
   '/admin/client-releases': { releases: Array.from({ length: 6 }, (_, i) => ({
     id: 'notes-' + i, version: '2.0.0', channel: 'stable', platform: 'linux', arch: 'x64',
@@ -31,7 +58,12 @@ const fixtures = {
   '/admin/orgs': [{ id: 'fixture-org', name: 'Fixture organization', parentId: null }],
   '/admin/project-owner-options': [{ id: 'fixture-user', name: '新建项目', username: 'fixture-user' }],
   '/admin/clients/page': { items: [], total: 0, counts: {} },
-  '/admin/operations/overview': { database: { ready: true }, hub: { ready: true, nodeId: 'fixture', service: 'Fixture Hub', version: '1.0.0', modeLabel: 'Local test', clusterNote: 'Isolated fixture' }, runners: { items: [], accepting: 0 }, work: {}, requests: {} },
+  '/admin/operations/overview': { database: { ready: true }, hub: { ready: true, nodeId: 'fixture', service: 'Fixture Hub', version: '1.0.0', modeLabel: opsModeLabel, clusterNote: opsClusterNote }, runners: { items: [], accepting: 0 }, work: {}, requests: {},
+    blockers: [
+      { level: 'warning', title: '75 ' + opsFailedSuffix, detail: opsFailedDetail },
+      { level: 'warning', title: opsRunnerTitle, detail: opsRunnerDetail },
+    ],
+    recentFailures: [{ id: 'fixture-failure', taskId: 'fixture-task', error: '', updatedAt: Date.now() }] },
   '/admin/operations/insights': { plugins: Array.from({ length: 30 }, (_, i) => ({ pluginId: 'plugin-' + i, name: 'Plugin ' + (i + 1), enabled: true, category: 'dev', installs: 2, runs30d: 30 - i, conversationUses30d: 2, succeeded30d: 30 - i, failed30d: 0, successRate: 100 })) },
   '/admin/usage/overview': { summary: {}, users: [], bySource: [], byAgent: [], recent: [], trend: [], quality: {}, days: 30 },
   '/admin/model-catalog': { providers: [{ id: 'fixture-provider', name: 'Fixture Provider', enabled: true, baseUrl: 'https://fixture.invalid', keySet: true }], models: [{ id: 'fixture-model', name: 'fixture-model', providerId: 'fixture-provider', enabled: true }] },
@@ -45,6 +77,9 @@ const fixtures = {
   '/admin/capabilities': { cfg: { allowed: [] }, skills: [], mcp: [], packages: [] },
   '/admin/audit': { items: [], total: 0 },
   '/admin/work-catalog': { professions: [], scenarios: [] },
+  '/admin/permissions': permissionCatalog,
+  '/admin/positions': professions,
+  '/admin/domains': domains,
   '/admin/usage/runners': { runners: [] },
 }
 const requests = []
@@ -66,7 +101,8 @@ async function changeLocale(locale) {
   await waitFor(`!!document.querySelector(${JSON.stringify(selector)})`, 'language picker')
   await js(`(()=>{const s=document.querySelector(${JSON.stringify(selector)});if(s.querySelector('.select-menu-trigger').getAttribute('aria-expanded')!=='true')s.querySelector('.select-menu-trigger').click()})()`)
   await waitFor(`!!document.querySelector(${JSON.stringify(selector + ' [role="option"]')})`, 'language options')
-  const optionLabel = locale === 'zh-CN' ? '简体中文' : 'English'
+  const optionLabel = { 'zh-CN': '简体中文', 'en-US': 'English', 'ja-JP': '日本語', 'ko-KR': '한국어' }[locale]
+  assert.ok(optionLabel, 'Unsupported fixture locale: ' + locale)
   await js(`(()=>{const option=[...document.querySelectorAll(${JSON.stringify(selector + ' [role="option"]')})].find(o=>o.textContent.trim()===${JSON.stringify(optionLabel)});if(!option)throw Error('Language option missing');option.click()})()`)
   await waitFor(`document.documentElement.lang===${JSON.stringify(locale)}`, 'locale changed')
   await sleep(120)
@@ -143,20 +179,42 @@ app.whenReady().then(async () => {
   isolated.webRequest.onBeforeRequest((details, done) => done({ cancel: !details.url.startsWith(origin + '/') && !details.url.startsWith('data:') }))
   win = new BrowserWindow({ show: false, width: 1280, height: 900, webPreferences: { session: isolated, offscreen: true, backgroundThrottling: false } })
   win.webContents.on('console-message', (event) => { if (/Error:|Uncaught|React error/.test(event.message)) consoleErrors.push(event.message) })
+  const governanceOnly = process.env.SODUWORK_GOVERNANCE_ONLY === '1'
+  const insightsOnly = process.env.SODUWORK_INSIGHTS_ONLY === '1'
+  const overviewInsightsOnly = process.env.SODUWORK_GOVERNANCE_INSIGHTS_ONLY === '1'
+  const catalogUsageOnly = process.env.SODUWORK_CATALOG_USAGE_ONLY === '1'
+  const capabilityOnly = process.env.SODUWORK_CAPABILITY_ONLY === '1'
+  if (governanceOnly || insightsOnly || overviewInsightsOnly || catalogUsageOnly || capabilityOnly) {
+    if (governanceOnly || overviewInsightsOnly) await checkGovernanceOverview({ win, js, waitFor, sleep, screenshot, changeLocale, origin, fixtures, requests, results })
+    if (insightsOnly || overviewInsightsOnly) await checkInsightsMetricDefinitions({ win, js, waitFor, sleep, screenshot, changeLocale, origin, fixtures, results })
+    if (catalogUsageOnly) await checkCatalogUsage({ win, js, waitFor, sleep, screenshot, changeLocale, origin, fixtures, results })
+    if (capabilityOnly) await checkCapabilityCatalog({ win, js, waitFor, sleep, screenshot, changeLocale, origin, fixtures, requests, results })
+    results.push({ name: 'no renderer errors', ok: consoleErrors.length === 0, consoleErrors })
+    results.push({ name: 'all fixture requests read-only', ok: requests.every(request => request.method === 'GET') })
+    const report = { ok: results.every(r => r.ok), scope: 'Isolated admin page acceptance; four languages and read-only local API fixtures', results, requests, consoleErrors }
+    fs.writeFileSync(path.join(output, 'browser-report.json'), JSON.stringify(report, null, 2))
+    assert.equal(report.ok, true, 'admin page browser checks failed; see browser-report.json')
+    return
+  }
   await win.loadURL(origin + '/?screen=projects')
   await waitFor('!!document.querySelector(".pg-page") || document.body.innerText.includes("New project")', 'projects page')
   await sleep(350)
   assert.equal(await js('document.documentElement.lang'), 'en-US')
   assert.ok(await js('document.body.innerText.includes("保存")'), 'Chinese project name retained')
   assert.deepEqual(await visibleChinese(), [])
-  await waitFor('document.body.innerText.includes("v1.0.5") && document.body.innerText.includes("12345678")', 'Hub version and commit')
-  assert.ok(await js('[...document.querySelectorAll("[title]")].some(e=>e.title.includes("v1.0.5") && e.title.includes("1234567890abcdef1234567890abcdef12345678"))'), 'full Hub identity in tooltip')
+  await waitFor('document.querySelector(".env summary")?.innerText.includes("v1.0.5")', 'Hub release version')
+  assert.equal(await js('document.querySelector(".env summary").innerText.includes("12345678")'), false, 'build revision stays out of the compact status')
+  await js('document.querySelector(".env summary").click()')
+  await waitFor('document.querySelector(".env[open] .env-details")?.innerText.includes("1234567890abcdef1234567890abcdef12345678")', 'full Hub build details')
+  assert.ok(await js('document.querySelector(".env-details").innerText.includes("v1.0.5")'), 'release and complete build identity remain available in details')
+  await js('document.querySelector(".env summary").click()')
   await screenshot('hub-version-en')
   await clickText('New project')
   await waitFor('!!document.querySelector(".modal")', 'new project dialog')
   await js(`(()=>{const e=document.querySelector('.modal input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,'未保存客户项目');e.dispatchEvent(new Event('input',{bubbles:true}));window.fixtureInput=e})()`)
   await changeLocale('zh-CN')
-  assert.ok(await js('document.body.innerText.includes("v1.0.5") && document.body.innerText.includes("构建 12345678")'), 'Chinese Hub version and commit')
+  assert.ok(await js('document.querySelector(".env summary").innerText.includes("v1.0.5") && !document.querySelector(".env summary").innerText.includes("12345678")'), 'Chinese status shows the release without diagnostic build codes')
+  assert.ok(await js('document.querySelector(".env-details").textContent.includes("构建") && document.querySelector(".env-details").textContent.includes("1234567890abcdef1234567890abcdef12345678")'), 'Chinese diagnostic details retain the complete build identity')
   assert.equal(await js('document.querySelector(".modal input").value'), '未保存客户项目')
   assert.equal(await js('document.querySelector(".modal input")===window.fixtureInput'), true, 'input identity retained')
   assert.ok(await js('document.querySelector(".modal").innerText.includes("项目名称")'))
@@ -176,7 +234,11 @@ app.whenReady().then(async () => {
     await screenshot('settings-' + size[0])
   }
   results.push({ name: 'settings switch accessible at 1280 / 760 / 390 px', ok: true })
+  await checkGovernanceOverview({ win, js, waitFor, sleep, screenshot, changeLocale, origin, fixtures, requests, results })
   await checkInsightsUsage({ win, js, waitFor, sleep, screenshot, changeLocale, origin, fixtures, results })
+  await checkInsightsMetricDefinitions({ win, js, waitFor, sleep, screenshot, changeLocale, origin, fixtures, results })
+  await checkCatalogUsage({ win, js, waitFor, sleep, screenshot, changeLocale, origin, fixtures, results })
+  await checkCapabilityCatalog({ win, js, waitFor, sleep, screenshot, changeLocale, origin, fixtures, requests, results })
   await checkOrgTreeSearch({ win, js, waitFor, sleep, screenshot, changeLocale, origin, fixtures, results })
   await checkDepartmentSelect({ win, js, waitFor, sleep, screenshot, changeLocale, origin, fixtures, results })
   await checkAdminLayout({ win, js, waitFor, sleep, screenshot, changeLocale, origin, fixtures, requests, results })
@@ -226,6 +288,18 @@ app.whenReady().then(async () => {
       await waitFor('!document.querySelector(".modal")',screen+' dialog Escape')
     }
   }
+  await win.loadURL(origin + '/?screen=operations')
+  await waitFor('document.querySelector(".app")?.dataset.screen==="operations"', 'operations recheck')
+  await sleep(350)
+  await waitFor('!!document.querySelector(".content")?.innerText && document.querySelector(".content").innerText.trim()!=="Loading…"', 'operations content loaded')
+  await changeLocale('zh-CN'); await changeLocale('en-US')
+  assert.ok(await js('document.body.innerText.includes("Multi-instance control plane")'), 'topology mode label translated')
+  assert.ok(await js('document.body.innerText.includes("75 failed workflows")'), 'failed runs blocker translated')
+  assert.ok(await js('document.body.innerText.includes("No Runners accepting work")'), 'runner blocker translated')
+  assert.ok(await js('document.body.innerText.includes("Workflow run failed")'), 'recent failure fallback translated')
+  assert.deepEqual(await visibleChinese(), [])
+  await screenshot('operations-en')
+  results.push({ name: 'operations backend-composed copy renders translated', ok: true })
   await win.loadURL(origin + '/?screen=client-releases')
   await waitFor('document.querySelectorAll(".cr-row").length===6', 'six client packages')
   assert.equal(await js('document.querySelectorAll(".cr-notes").length'), 1)
@@ -241,6 +315,21 @@ app.whenReady().then(async () => {
     await screenshot('release-notes-' + width)
   }
   results.push({ name: 'six packages share release notes; literal HTML, line breaks, locale and narrow layout', ok: true })
+  await changeLocale('en-US')
+  await clickText('Upload release')
+  await waitFor('!!document.querySelector(".modal")', 'upload release dialog')
+  await waitFor('document.querySelectorAll(".cr-file-native").length === 2', 'two native file inputs')
+  assert.ok(await js('[...document.querySelectorAll(".cr-file-native")].every(e=>{const r=e.getBoundingClientRect();return r.width<=2&&r.height<=2})'), 'native file inputs are visually hidden')
+  assert.deepEqual(await js('[...document.querySelectorAll(".cr-file-chip")].map(e=>e.textContent)'), ['Choose file', 'Choose file'])
+  assert.ok(await js('[...document.querySelectorAll(".cr-file-name")].every(e=>e.textContent==="No file chosen")'), 'empty file name fallback translated')
+  await js('document.querySelector(".cr-notes")?.removeAttribute("open")')
+  assert.deepEqual(await visibleChinese(), [])
+  await screenshot('upload-dialog-en')
+  results.push({ name: 'upload dialog hides native file controls and translates picker copy', ok: true })
+  await responsiveDialog('upload-dialog')
+  await win.webContents.sendInputEvent({type:'keyDown',keyCode:'ESC'})
+  await win.webContents.sendInputEvent({type:'keyUp',keyCode:'ESC'})
+  await waitFor('!document.querySelector(".modal")','upload dialog Escape')
   await win.loadURL(origin + '/?guest=1')
   await waitFor('!!document.querySelector(".locale-settings-trigger")', 'guest language settings')
   await js(`document.querySelector('.locale-settings-trigger').click()`)

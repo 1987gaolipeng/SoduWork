@@ -5,6 +5,7 @@ const {pathToFileURL}=require('node:url');
 const {assertNoLinks}=require('../plugin-resources');
 const LABELS={dingtalk:'钉钉',wecom:'企业微信',feishu:'飞书'};
 const installs=new Map();
+const stoppedChildren=new WeakSet();
 const nodeRuntime=require('../node-runtime.cjs');
 function provider(key){if(!Object.hasOwn(LABELS,key))throw Error('不支持的平台');return{...JSON.parse(fs.readFileSync(path.join(__dirname,'providers',key,'upstream-lock.json'),'utf8')),label:LABELS[key]};}
 function base(app){return path.join(app.getPath('userData'),'platform-connections');}
@@ -36,14 +37,14 @@ function execute(command,args,options={}){let child;const completion=new Promise
 async function inspect(app,key){const p=paths(app,key),a=await adapter(key);const found=a.inspect(p.provider,p.prefix);const sdk=p.provider.registrationSdk;
  if(found.status==='installed'&&sdk){try{const file=path.join(p.prefix,'node_modules',sdk.package,'package.json');assertNoLinks(p.root,file);const installed=JSON.parse(fs.readFileSync(file,'utf8'));const lock=JSON.parse(fs.readFileSync(path.join(p.prefix,'package-lock.json'),'utf8'));if(installed.version!==sdk.version||lock.packages?.['node_modules/'+sdk.package]?.integrity!==sdk.npmIntegrity)found.status='needs_update';}catch(_){found.status='needs_update';}}
  return{...found,provider:key,label:p.provider.label,prefix:p.prefix};}
-function python(){const choices=[path.resolve(__dirname,'../../../hub-backend/.venv/Scripts/python.exe'),path.join(process.resourcesPath||'','python/python.exe')];return choices.find(fs.existsSync)||'python';}
+function python(){const choices=[process.env.SODUWORK_MANAGED_PYTHON,path.join(process.resourcesPath||'',process.platform==='win32'?'python/python.exe':'python/bin/python3'),path.resolve(__dirname,'../../../hub-backend/.venv',process.platform==='win32'?'Scripts/python.exe':'bin/python')];const selected=choices.filter(Boolean).find(fs.existsSync);if(!selected)throw Error('连接组件不完整，请重新安装 SoduWork 后重试（SW-PYTHON-MISSING）');return selected;}
 async function prepare(app,key){const p=paths(app,key),pending=installs.get(p.prefix);if(pending)return pending;const promise=(async()=>{let current=await inspect(app,key);if(current.status==='installed')return current;
  const selected=nodeRuntime.resolve({minimum:p.provider.nodeMinimum||20,requireNpm:true});
  const result=await execute(selected.node,[selected.npm,'install','--engine-strict','--prefix',p.prefix,'--ignore-scripts','--save-exact','--no-audit','--no-fund','--registry=https://registry.npmjs.org',p.provider.package+'@'+p.provider.version,...(p.provider.registrationSdk?[p.provider.registrationSdk.package+'@'+p.provider.registrationSdk.version]:[])],{cwd:p.prefix,env:env(selected),timeout:240000}).completion;
  if(result.code!==0)throw Error('官方运行环境下载失败，请检查网络后重试');
  const lock=JSON.parse(fs.readFileSync(path.join(p.prefix,'package-lock.json'),'utf8'));
  if(lock.packages?.['node_modules/'+p.provider.package]?.integrity!==p.provider.npmIntegrity)throw Error('官方运行包校验不一致，已停止准备');
- if(key==='dingtalk'){const binary=await execute(python(),[path.join(path.dirname(entry(app,key)),'prepare-dingtalk.py'),'--prefix',p.prefix],{cwd:p.prefix,timeout:60000}).completion;if(binary.code!==0)throw Error('钉钉程序校验或解包失败，请检查 Python 3.9 或更高版本是否可用');}
+ if(key==='dingtalk'){const binary=await execute(python(),[path.join(path.dirname(entry(app,key)),'prepare-dingtalk.py'),'--prefix',p.prefix],{cwd:p.prefix,timeout:60000}).completion;if(binary.code!==0)throw Error('钉钉程序校验或解包失败，请重试连接组件准备');}
  current=await inspect(app,key);if(current.status!=='installed')throw Error('运行环境未就绪：'+current.status);return current;})();installs.set(p.prefix,promise);try{return await promise}finally{installs.delete(p.prefix)}}
 async function launch(app,key,scope,args,options={}){const p=paths(app,key,scope),a=await adapter(key);const plan=a.plan(p.provider,{action:'run',prefix:p.prefix,state:p.account,args},env(),node());return execute(plan.command,plan.args,{...options,cwd:options.cwd||plan.cwd,env:plan.env});}
 function _claims(identity){

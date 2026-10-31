@@ -233,7 +233,7 @@
   .ugc-panel-head { flex-wrap: wrap; padding: 15px; }
   .ugc-panel-title p { font-size: max(var(--font-min-readable, 14.5px), 12px); }
   .ugc-chart-tabs { width: 100%; }
-  .ugc-chart-tabs button { flex: 1; }
+  .ugc-chart-tabs button { flex: 1; min-width: 0; white-space: normal; overflow-wrap: break-word; }
   .ugc-trend-summary { padding: 15px 15px 8px; }
   .ugc-plot { margin-inline: 16px; }
   .ugc-chart-note { padding-inline: 15px; }
@@ -286,3 +286,5 @@
   .ugc-scenes .ugc-scene-list { flex: 1 1 auto; min-height: 37.75px; max-height: 190px; width: min(100%, 420px); margin-inline: auto; }
   .ugc-scenes .ugc-chart-note { margin-top: auto; text-align: center; }
 }
+
+:lang(ko) .usage-governance { word-break: keep-all; overflow-wrap: break-word; }

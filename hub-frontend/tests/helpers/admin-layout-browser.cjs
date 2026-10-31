@@ -190,7 +190,7 @@ async function checkAdminLayout({ win, js, waitFor, sleep, screenshot, changeLoc
   record('mail history refresh reads once and renders the returned delivery', historyReads() === beforeHistory + 1)
   await js(`sessionStorage.removeItem('soduwork-execution-tab')`)
 
-  await navigate('models', '.model-runtime-facts strong')
+  await navigate('models', '.model-runtime-live .model-load-card strong')
   for (const locale of ['zh-CN', 'en-US']) {
     await changeLocale(locale)
     for (const size of [[1920,1080], [1280,720], [390,844]]) {
@@ -199,14 +199,22 @@ async function checkAdminLayout({ win, js, waitFor, sleep, screenshot, changeLoc
         const panel = document.querySelector('.model-runtime'), r = panel.getBoundingClientRect();
         return { viewport:[innerWidth,innerHeight], panelHeight:r.height, right:r.right,
           summaryCount:panel.querySelectorAll('.model-catalog-summary-card').length,
-          runtimeCount:panel.querySelectorAll('.model-runtime-facts strong').length,
+          liveCount:panel.querySelectorAll('.model-runtime-live .model-load-card').length,
+          recentCount:panel.querySelectorAll('.model-runtime-recent .model-runtime-stat').length,
+          groups:[...panel.querySelectorAll('.model-runtime-metrics > section')].map(e=>{
+            const b=e.getBoundingClientRect();return {label:e.getAttribute('aria-label'),left:b.left,right:b.right,top:b.top,bottom:b.bottom};
+          }),
           expanded:panel.querySelector('.model-runtime-services-head').getAttribute('aria-expanded'),
           documentWidth:document.documentElement.scrollWidth };
       })()`)
-      record('compact model overview ' + locale + ' ' + size.join('×'), g.summaryCount === 3 && g.runtimeCount === 4 &&
-        g.expanded === 'false' && g.documentWidth <= g.viewport[0] + 1 && g.right <= g.viewport[0] + 1 &&
-        (size[0] < 1900 || g.panelHeight < 240), g)
-      await screenshot('models-compact-' + locale + '-' + size[0])
+      const overlap = g.groups.some((a, i) => g.groups.slice(i + 1).some(b =>
+        Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1))
+      record('model overview separates configuration, live load and hourly outcomes ' + locale + ' ' + size.join('×'),
+        g.summaryCount === 3 && g.liveCount === 2 && g.recentCount === 4 &&
+        g.groups.length === 3 && g.groups.every(group => group.label && group.left >= 0 && group.right <= g.viewport[0] + 1) &&
+        new Set(g.groups.map(group => group.label)).size === 3 && !overlap &&
+        g.expanded === 'false' && g.documentWidth <= g.viewport[0] + 1 && g.right <= g.viewport[0] + 1, g)
+      await screenshot('models-grouped-' + locale + '-' + size[0])
     }
   }
   win.setSize(1440,900); await sleep(180)

@@ -264,6 +264,10 @@ class TaskCreateNotificationIntegrationTests(unittest.IsolatedAsyncioTestCase):
             # durable delivery work before contacting any device.
             response = await asyncio.wait_for(request, 3)
             self.assertEqual(response.status_code, 200, response.text)
+            # The creation receipt is rendered immediately from this PUT
+            # response.  It must carry the resolved owner display name so the
+            # client never falls back to the truncated assignee ID.
+            self.assertEqual(response.json().get("assigneeName"), "user-0")
             self.assertFalse(received)
             from app.services import task_notifications
             sending = asyncio.create_task(task_notifications.run_once(sessions))

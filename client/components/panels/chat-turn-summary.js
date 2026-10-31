@@ -73,25 +73,34 @@
       const label = ctx.esc(tx(open ? '收起过程' : '展开过程'));
       // A completed turn owns immutable timing, including after switching or
       // reopening. A live counter cannot supply a missing historical duration.
+      // Keep the footer focused on elapsed time. Token usage remains in the
+      // immutable turn metrics for compaction/diagnostics, but is not part of
+      // the message metadata shown to users.
       let values = currentMetrics ? currentMetrics.replace(/^<div\b[^>]*>/, '').replace(/<\/div>$/, '')
-        : '<span>' + ctx.esc(tx('用时')) + ' ' + duration(turn.elapsedMs) + '</span><span class="nstatus-divider">·</span><span>' +
-          (turn.tokensEstimated ? '≈ ' : '') + (turn.tokens === null ? '—' : turn.tokens.toLocaleString('en-US')) + ' tokens</span>';
+        : '<span>' + ctx.esc(tx('用时')) + ' ' + duration(turn.elapsedMs) + '</span>';
       values = values.replace(/(<span\b[^>]*\bdata-thinking-label[^>]*>)[\s\S]*?(<\/span>)/,
         (_, before, after) => before + ctx.esc(tx('用时')) + after);
       if (currentMetrics) {
         values = values.replace(/(<b\b[^>]*\bdata-thinking-elapsed[^>]*>)[\s\S]*?(<\/b>)/,
           (_, before, after) => before + duration(turn.elapsedMs) + after);
       }
-      if (currentMetrics && turn.tokens !== null) {
-        values = values.replace(/<span\b[^>]*\bdata-thinking-estimate[^>]*>[\s\S]*?<\/span>/, '')
-          .replace(/(<b\b[^>]*\bdata-thinking-tokens[^>]*>)[\s\S]*?(<\/b>)/,
-            (match, before, after) => (turn.tokensEstimated ? '<span data-thinking-estimate>≈</span>' : '') +
-              before + turn.tokens.toLocaleString('en-US') + after);
+      if (currentMetrics) {
+        values = values
+          // The token metric is a nested status item. Removing only its value
+          // leaves the surrounding `tokens` label visible in completed turns.
+          .replace(/<span\b(?=[^>]*\bclass=["'][^"']*\bnstatus-metric\b[^"']*["'])[^>]*>(?:(?!<span\b(?=[^>]*\bclass=["'][^"']*\bnstatus-metric\b[^"']*["'])[^>]*>)[\s\S])*?<b\b[^>]*\bdata-thinking-tokens\b[^>]*>[\s\S]*?<\/b>[\s\S]*?<\/span>\s*/gi, '')
+          .replace(/<span\b[^>]*\bdata-thinking-estimate[^>]*>[\s\S]*?<\/span>/g, '')
+          .replace(/<b\b[^>]*\bdata-thinking-tokens[^>]*>[\s\S]*?<\/b>/g, '')
+          .replace(/<span\b[^>]*\bdata-thinking-tokens[^>]*>[\s\S]*?<\/span>/g, '')
+          .replace(/<span\b[^>]*>\s*(?:≈\s*)?(?:—|[\d,]+)?\s*tokens\s*<\/span>/gi, '')
+          .replace(/<b\b[^>]*>\s*(?:≈\s*)?(?:—|[\d,]+)?\s*tokens\s*<\/b>/gi, '')
+          .replace(/\s+tokens?\b/gi, '')
+          .replace(/<span\b[^>]*class=["']nstatus-divider["'][^>]*>\s*·\s*<\/span>/g, '');
       }
       return '<div class="nturn-summary" data-chat-node="turn-summary:' + ctx.esc(turn.key) + '">' +
         '<button type="button" data-turn-toggle="' + ctx.esc(turn.key) + '" aria-expanded="' + open +
         '" title="' + label + '" aria-label="' + label + '">' +
-        '<span class="nturn-summary-values" title="' + ctx.esc(tx('包含深度思考与回复；估算值以模型返回用量为准。')) + '">' + values + '</span>' +
+        '<span class="nturn-summary-values" title="' + ctx.esc(tx('包含深度思考与回复')) + '">' + values + '</span>' +
         '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button></div>';
     }
     function apply(list) {

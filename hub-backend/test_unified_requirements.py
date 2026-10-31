@@ -356,6 +356,10 @@ class UnifiedRequirementTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as session:
             task = await session.get(models.Task, "shared")
             task.status = "doing"
+            task.result = ""
+            # Manual confirmation is allowed only when no output was promised.
+            task.work_routing = {**task.work_routing, "executionSubmissionMode": "manual",
+                                 "outputContract": {"kind": "file", "deliverables": ["review.md"]}}
             await session.delete(await session.get(models.Attachment, "output"))
             await session.commit()
         response = await self.call("POST", "tasks/shared/submit-review", json={})
@@ -363,6 +367,26 @@ class UnifiedRequirementTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("没有可审阅的产出", response.json()["detail"])
         async with self.sessions() as session:
             self.assertIsNone(await session.scalar(select(automation_models.ApprovalRequest.id)))
+
+    async def test_submit_review_accepts_manual_confirmation_without_declared_output(self):
+        async with self.sessions() as session:
+            task = await session.get(models.Task, "shared")
+            task.status = "doing"
+            task.result = ""
+            task.work_routing = {"executionSubmissionMode": "manual"}
+            await session.delete(await session.get(models.Attachment, "output"))
+            await session.commit()
+        response = await self.call("POST", "tasks/shared/submit-review", json={})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["task"]["requirementStage"], "reviewing")
+        async with self.sessions() as session:
+            request = await session.get(automation_models.ApprovalRequest, response.json()["request"]["id"])
+            self.assertEqual((request.action, request.status), ("review", "pending"))
+            artifact = await session.get(automation_models.ArtifactVersion, request.artifact_version_id)
+            self.assertEqual(artifact.kind, "manual")
+            self.assertTrue(artifact.manifest["manual"])
+            self.assertEqual(artifact.manifest["primary"], [])
+            self.assertEqual((await session.get(models.Task, "shared")).status, "doing")
 
     async def test_archive_preserves_completed_delivery_and_can_restore(self):
         async with self.sessions() as session:

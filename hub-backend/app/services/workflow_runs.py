@@ -670,11 +670,11 @@ async def _start_unlocked(session: AsyncSession, task: models.Task, binding: am.
     ui = plugin_ui_contracts.public(manifest.get("ui"), manifest.get("setup"))
     entrypoints = plugin_ui_contracts.effective_entrypoints(
         manifest.get("entrypoints") or capability.get("entrypoints") or {}, ui,
-        has_workflow=bool(capability.get("hasWorkflow", True)))
+        has_workflow=bool(capability.get("hasWorkflow", True)), jiyong=manifest.get("jiyong"))
     entrypoint = entrypoint if entrypoint in {"task", "automation"} else "task"
     default = bool(capability.get("hasWorkflow", True)) if entrypoint == "automation" else True
     if entrypoint == "automation":
-        plugin_ui_contracts.require_unattended(ui)
+        plugin_ui_contracts.require_unattended(ui, jiyong=manifest.get("jiyong"))
     if entrypoints.get(entrypoint, default) is False:
         label = "自动化" if entrypoint == "automation" else "需求"
         raise ValueError(f"这个能力包没有开放{label}入口")

@@ -167,6 +167,9 @@ def parse(data: bytes) -> dict:
     resources = plugin_resources.from_archive(
         adapter['manifest'].get('resources'), zf, resource_prefix, normalized['key'])
     plugin_app_contracts.validate_resources(normalized.get('ui'), resources)
+    if normalized.get('jiyong',{}).get('initialization'):
+        from . import jiyong_initialization
+        jiyong_initialization.parse(normalized['jiyong'],resources)
     if resources:
         normalized['resources'] = plugin_resources.summary(resources)
         report['resources'] = normalized['resources']
@@ -337,11 +340,14 @@ def personal_draft(parsed: dict) -> dict:
         "description": _text(manifest.get("description"), 600),
         **({'locales': manifest['locales']} if manifest.get('locales') else {}),
         "author": _text(manifest.get("author"), 120),
+        **({"appCategory": manifest["appCategory"]} if manifest.get("appCategory") is not None else {}),
+        **({"extensions": manifest["extensions"]} if manifest.get("extensions") is not None else {}),
         **({"distribution": _text(manifest.get("distribution"), 24)}
            if _text(manifest.get("distribution"), 24) else {}),
         **({'coverUrl': plugin_covers.normalize(manifest['coverUrl'])} if manifest.get('coverUrl') else {}),
         **({'icon': plugin_icons.normalize(manifest['icon'])} if manifest.get('icon') else {}),
         **({'appWindow': plugin_window_contracts.normalize(manifest['appWindow'])} if manifest.get('appWindow') is not None else {}),
+        **({'jiyong': manifest['jiyong']} if manifest.get('jiyong') else {}),
         "instructions": instructions,
         "inputs": list(manifest.get("inputs") or [])[:50],
         "setup": dict(manifest.get("setup") or {}),

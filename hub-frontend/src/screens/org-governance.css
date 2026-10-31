@@ -45,7 +45,7 @@
   min-height:56px;
   padding:10px 12px;
 }
-.og-directory>header>div:first-child{display:flex;min-width:0;flex:1;flex-direction:column}
+.og-directory>header>div:first-child{display:flex;min-width:fit-content;flex:1;flex-direction:column}
 .og-directory>header b{font-size:max(var(--font-min-readable, 14.5px), 12.5px);font-weight:630}
 .og-directory>header span{margin-top:2px;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 12px);white-space:nowrap}
 .og-tree-tools{display:flex;gap:4px;margin-left:auto}

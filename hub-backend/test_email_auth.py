@@ -43,6 +43,8 @@ TABLES = [models.User.__table__, models.Client.__table__, models.OrgUnit.__table
 
 class EmailAuthTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        from tests.traceback_source_cache import snapshot_loaded_sources
+        self.addCleanup(snapshot_loaded_sources())
         async with engine.begin() as connection:
             await connection.run_sync(lambda c: Base.metadata.create_all(c, tables=TABLES))
             for table in reversed(TABLES):

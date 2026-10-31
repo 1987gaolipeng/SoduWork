@@ -32,7 +32,7 @@ test('own app MCP stays local, grants one turn, redacts and cleans credentials; 
     assert.equal(resolved.grant.redact(params.token), '[已隐藏凭据]'); assert.ok(!resolved.grant.guide.includes(params.token));
     resolved.grant.cleanup(); assert.equal(fs.existsSync(file), false);
     await assert.rejects(grant.resolve({ ...options, appContext: { ...options.appContext, connection: { ...item.appConnection, expiresAt: 1 } } }), /已失效/);
-    await assert.rejects(grant.resolve({ ...options, appContext: { ...options.appContext, connection: null } }), /先从应用/);
+    await assert.rejects(grant.resolve({ ...options, appContext: { ...options.appContext, connection: null } }), /先从即用/);
     await assert.rejects(grant.resolve({ ...options, appContext: { ...options.appContext, connection: { ...item.appConnection, pluginId: 'local:another' } } }), /已失效/);
     assert.equal(connect({ ...params, token: '' }).connected, false);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
@@ -94,4 +94,31 @@ test('native composer surfaces have stable private identities and detach on WebC
     assert.deepEqual(surfaces.all([ordinary]), [ordinary, second]);
     two.emit('destroyed'); assert.deepEqual(surfaces.all([ordinary]), [ordinary]);
   } finally { preview.isAppComposer = original; }
+});
+
+
+test('directory and mention protocol accepts only public bounded fields and explicit capabilities',()=>{
+ assert.equal(contract.METHOD_CAPABILITY['directory.list'],'directory.read');
+ assert.equal(contract.METHOD_CAPABILITY['composer.mention'],'notifications.send');
+ assert.throws(()=>contract.normalizeRequest({id:'x',method:'directory.list',params:{account:'foreign'}}));
+ const valid={recipientUserId:'user-1',text:'核对内容',requestId:'mention-1'};
+ assert.equal(contract.normalizeRequest({id:'x',method:'composer.mention',params:valid}).params.recipientUserId,'user-1');
+ for(const params of [{...valid,text:'x'.repeat(501)},{...valid,recipientUserId:[]},{...valid,requestId:''},{...valid,sendNow:true}])assert.throws(()=>contract.normalizeRequest({id:'x',method:'composer.mention',params}));
+});
+
+test('native mention opens only its own composer, has an honest review receipt, deduplicates and fails a stale scope',async()=>{
+ const chat=require('../main/work-preview-app-chat.cjs'),wc=new EventEmitter();let payload,calls=0,current=true;
+ wc.isDestroyed=()=>false;wc.send=(channel,value)=>{assert.equal(channel,'app-composer-submit');payload=value;calls++;};
+ const item={composer:{view:{webContents:wc}}},params={recipientUserId:'user-1',text:'请核对',requestId:'mention-once'},options={mention:true,assertCurrent:()=>{if(!current)throw Error('账号已变化');}};
+ const promise=chat.send(item,params,item,options);assert.equal(payload.kind,'mention');assert.equal(payload.mention.recipientUserId,'user-1');
+ assert.equal(chat.send(item,params,item,options),promise);assert.equal(chat.finish({}, {id:payload.id,ok:true}).ok,false);
+ chat.finish(wc,{id:payload.id,ok:true,state:'review'});const result=await promise;assert.equal(result.state,'review');assert.equal(result.opened,true);assert.equal(result.accepted,undefined);assert.equal(calls,1);
+ const stale=chat.send(item,{...params,requestId:'stale'},item,options);current=false;chat.finish(wc,{id:payload.id,ok:true,state:'review'});assert.equal((await stale).ok,false);
+});
+
+test('SDK directory and mention use declared request methods and do not run a model turn',async()=>{
+ const calls=[],window={crypto:require('node:crypto').webcrypto,addEventListener(){},soduWorkAppBridge:{request:async(method,params)=>{calls.push({method,params});return {ok:true,state:'review'};},events:{onTurnSettled(){}}}};window.parent=window;
+ const vm=require('node:vm');vm.runInNewContext(fs.readFileSync(path.resolve(__dirname,'../sdk/soduwork-app.js'),'utf8'),{window,location:{origin:'https://fixture.invalid'},document:{referrer:'',querySelectorAll:()=>[]},URL,Set,Map,Promise});
+ await window.soduWorkApp.directory.list();await window.soduWorkApp.chat.mention({recipientUserId:'user-1',text:'内容',requestId:'sdk-mention'});
+ assert.deepEqual(calls.map(row=>row.method),['directory.list','composer.mention']);assert.equal(calls[1].params.recipientUserId,'user-1');assert.equal(calls[1].params.requestId,'sdk-mention');
 });

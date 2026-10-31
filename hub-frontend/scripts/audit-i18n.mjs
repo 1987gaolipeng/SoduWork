@@ -3,6 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { messages } from '../src/locales/messages.js'
+import { messagesByLocale } from '../src/locales/extra-languages.js'
 const require = createRequire(import.meta.url)
 const parser = require('@babel/parser')
 const traverse = require('@babel/traverse').default
@@ -27,6 +28,7 @@ for (const file of files) {
       const value = p.node.value
       if (!han.test(value)) return
       if (isTranslatedLiteral(p)) return record(ui, p.node, value, 'message')
+      if (isCall(p.parentPath, 'deferredMessageKey') && p.key === 0) return record(ui, p.node, value, 'deferred-message')
       if (p.parent.type === 'ObjectProperty' && p.key === 'key') return
       if (p.findParent(q => isCall(q, 'localeMap'))) return record(ui, p.node, value, 'constant-label')
       if (isCall(p.parentPath, 't')) return // Keyed shell dictionary.
@@ -45,7 +47,15 @@ for (const file of files) {
     },
   })
 }
-const missing = ui.filter(row => !(row.source.trim() in messages))
+const missing = ui.flatMap(row => {
+  const key = row.source.trim()
+  if (row.kind !== 'deferred-message') return key in messages ? [] : [row]
+  // Deferred validation keys cross a presentation boundary, so require an explicit
+  // entry in every translated locale rather than accepting the English fallback.
+  return [['en-US', messages], ['ja-JP', messagesByLocale['ja-JP']], ['ko-KR', messagesByLocale['ko-KR']]]
+    .filter(([, catalog]) => !catalog || !(key in catalog))
+    .map(([locale]) => ({ ...row, locale }))
+})
 const unique = new Set(ui.map(row => row.source.trim()))
 const report = { scannedFiles: files.length, uiOccurrences: ui.length, uniqueMessages: unique.size,
   missingMessages: [...new Set(missing.map(row => row.source.trim()))], missingOccurrences: missing, unmarked }

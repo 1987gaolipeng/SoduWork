@@ -38,6 +38,7 @@ test('Chinese filenames and word boundaries',()=>{
 });
 test('settled and controlled completion refresh without a streaming transition',()=>{
   assert(links.shouldRefresh({kind:'settled',snapshot:{status:'idle'}},{status:'idle'}));
+  assert(links.shouldRefresh({kind:'delivery-sync',snapshot:{status:'idle'}},{status:'idle'}));
   assert(links.shouldRefresh({kind:'task-execution',snapshot:{execution:{taskExecutions:[{taskId:'t',runId:'r',status:'completed'}]}}},{status:'idle'}));
   assert(!links.shouldRefresh({kind:'snapshot',snapshot:{status:'idle'}},{status:'idle'}));
   const snapshot={execution:{taskExecutions:[{taskId:'t',runId:'r',status:'completed'}]}};

@@ -192,6 +192,23 @@ test('临时复用会话与独立验收会话模式不交叉复用当前会话',
  assert.equal(out.acceptanceSession,true);
 });
 
+test('原执行会话仍在当前窗口但未出现在历史列表时，验收分析和自动验收都复用它', async () => {
+ for (const acceptanceMode of ['manual', 'auto']) {
+  const f=fixture({
+   SoduWorkAPI:{getTask:async id=>({id,status:'done',workRouting:{conversationTurn:{conversationId:'execution-chat'}}})},
+   soduWorkAPI:{conversationSession:{history:async()=>({chats:[]})}},
+   NativeChat:{sessionInfo:()=>({sessionId:'execution-chat',acceptanceSession:false,acceptanceExecutionSession:false})},
+  });
+  await f.api.open('a','交付结果',{source:'acceptance',acceptanceSession:false,
+   acceptanceExecutionSession:true,reuseExecutionSession:true,acceptanceMode,approvalId:'gate-'+acceptanceMode});
+  assert.equal(f.calls.length,1);
+  assert.equal(f.calls[0].payload.chatId,'execution-chat');
+  assert.equal(f.calls[0].payload.forceNew,false);
+  assert.equal(f.calls[0].payload.acceptanceSession,false);
+  assert.equal(f.calls[0].payload.acceptanceExecutionSession,true);
+ }
+});
+
 test('返修不以有限历史命中判定原会话删除，保留原会话供精确打开',()=>{
  const f=fixture();
  const out=f.api.resolve({taskId:'a',source:'rework',reworkSession:true,navigation:true},

@@ -92,6 +92,30 @@ class NotesTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.put(expectedRevision=1)).status_code, 200)
         self.assertEqual((await self.listing(version="1.2.0")).json()["releases"][0]["revision"], 2)
 
+    async def test_four_languages_round_trip_and_legacy_fallback(self):
+        content = translations()
+        self.assertEqual((await self.put(locales=content)).status_code, 200)
+        legacy = (await self.listing(locale="ja-JP")).json()["releases"][0]
+        published_at = legacy["publishedAt"]
+        self.assertTrue(published_at.endswith("+00:00"))
+        self.assertEqual(legacy["locale"], "en-US")
+        self.assertTrue(legacy["fallback"])
+        for locale, summary in (("ja-JP", "更新内容を改善しました。"),
+                                ("ko-KR", "업데이트 안내를 개선했습니다.")):
+            content[locale] = {"summary": summary, "sections": [
+                {"id": "features", "title": summary, "items": [{"id": "one", "text": summary}]}]}
+        self.assertEqual((await self.put(locales=content, expectedRevision=1)).status_code, 200)
+        for locale in content:
+            row = (await self.listing(locale=locale)).json()["releases"][0]
+            self.assertEqual(row["locale"], locale)
+            self.assertEqual(row["summary"], content[locale]["summary"])
+            self.assertFalse(row["fallback"])
+            self.assertEqual(row["publishedAt"], published_at)
+        content["ko-KR"]["sections"][0]["items"][0]["id"] = "mismatch"
+        self.assertEqual((await self.put(locales=content, expectedRevision=2)).status_code, 422)
+        del content["ko-KR"]
+        self.assertEqual((await self.put(locales=content, expectedRevision=2)).status_code, 422)
+
     async def test_published_history_survives_disabled_installer_and_unreleased_cannot_publish(self):
         self.assertEqual((await self.put()).status_code, 200)
         async with self.sessions() as db:

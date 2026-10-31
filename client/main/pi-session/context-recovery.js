@@ -41,7 +41,7 @@ async function restoreWindow(session, failure) {
   const window = known.get(key);
   if (window && window < Number(session.model.contextWindow || Infinity)) {
     await session.setModel({ ...session.model, contextWindow: window,
-      maxTokens: Math.min(session.model.maxTokens || 32768, Math.floor(window / 4)) });
+      maxTokens: Math.min(session.model.maxTokens || DEFAULT_OUTPUT_TOKENS, Math.floor(window / 4)) });
   }
   configure(session.settingsManager, session.model.contextWindow);
 }

@@ -40,10 +40,11 @@ def main():
         from fastapi import FastAPI
         import uvicorn
         from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-        from app.api import admin, client_updates, download
+        from app.api import admin, client_release_notes, client_updates, download
         from app.auth import hash_password
         from app.db import Base, get_session
         from app.models import Role, User, ClientRelease, AuditLog
+        from app.release_note_models import ClientReleaseNote
         engine = create_async_engine(os.environ["DATABASE_URL"])
         sessions = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -51,7 +52,8 @@ def main():
         async def lifespan(_app):
             async with engine.begin() as conn:
                 await conn.run_sync(lambda c: Base.metadata.create_all(c,
-                    tables=[Role.__table__, User.__table__, ClientRelease.__table__, AuditLog.__table__]))
+                    tables=[Role.__table__, User.__table__, ClientRelease.__table__, ClientReleaseNote.__table__,
+                            AuditLog.__table__]))
             async with sessions() as session:
                 session.add(Role(id="publisher-role", name="CI publisher", permissions=["client.update"]))
                 session.add(User(id="publisher-user", username="publisher", display_name="Fixture publisher",
@@ -61,7 +63,7 @@ def main():
             await engine.dispose()
 
         app = FastAPI(lifespan=lifespan)
-        for router in (admin.router, client_updates.admin_router, download.router):
+        for router in (admin.router, client_release_notes.admin_router, client_updates.admin_router, download.router):
             app.include_router(router)
 
         async def session_override():
@@ -106,7 +108,9 @@ def main():
             for name in ["tools/sign-client-release.mjs", "client/scripts/installer-compatibility-report.cjs",
                          "client/main/client-update-contract.js", "tools/ci/verify-client-publication.cjs",
                          "tools/ci/release-artifacts.cjs", "tools/ci/publish-client.cjs",
-                         "tools/ci/client-release-notes.cjs", "tools/ci/release-context.cjs",
+                         "tools/ci/client-release-notes.cjs", "tools/ci/localized-release-notes.cjs",
+                         "tools/ci/release-notes-ai.cjs",
+                         "tools/ci/release-context.cjs",
                          "client/main/distribution.cjs", "client/distributions.json",
                          "tools/ci/client-distribution.cjs", "tools/ci/client-target.cjs",
                          "tools/ci/distribution-baselines.cjs", "tools/ci/distribution-acceptance-baselines.json",
@@ -144,11 +148,31 @@ def main():
 
             evidence = checkout / "release-evidence/client/internal/linux"
             evidence.mkdir(parents=True)
-            notes = "SoduWork 9.9.1\n\n修复与改进\n• 支持查看版本更新说明。"
+            locales = {
+                "zh-CN": {"summary": "版本更新说明。", "sections": [{
+                    "id": "features", "title": "功能更新",
+                    "items": [{"id": "notes", "text": "支持查看版本更新说明。"}],
+                }]},
+                "en-US": {"summary": "Release update notes.", "sections": [{
+                    "id": "features", "title": "Feature updates",
+                    "items": [{"id": "notes", "text": "View release update notes."}],
+                }]},
+            }
+            notes = "\n".join([
+                "zh-CN", locales["zh-CN"]["summary"], "功能更新", "• 支持查看版本更新说明。",
+                "", "en-US", locales["en-US"]["summary"], "Feature updates", "• View release update notes.",
+            ])
+            for locale, summary, title in (
+                ("ja-JP", "更新内容を確認できます。", "機能更新"),
+                ("ko-KR", "업데이트 내용을 볼 수 있습니다.", "기능 업데이트"),
+            ):
+                locales[locale] = {"summary": summary, "sections": [{"id": "features", "title": title,
+                    "items": [{"id": "notes", "text": summary}]}]}
+                notes += "\n\n" + "\n".join([locale, summary, title, "• " + summary])
             notes_file = checkout / "release-evidence/client-release-notes.json"
             notes_record = dict(schema=1, version="9.9.1", sourceCommit="a" * 40, pipelineId="1",
                 tag=environment.get("CI_COMMIT_TAG", ""), previousTag="client-v9.9.0", previousCommit="b" * 40,
-                date="2026-10-15", commits=[], notes=notes,
+                date="2026-10-15", commits=[], notes=notes, locales=locales,
                 notesSha256=hashlib.sha256(notes.encode()).hexdigest())
             notes_file.write_text(json.dumps(notes_record), encoding="utf-8")
             node("tools/ci/release-artifacts.cjs", "inventory", "linux")
@@ -174,8 +198,22 @@ def main():
             target_authorization_file = evidence.parent / "target-authorization.json"
             target_authorization_file.write_text(json.dumps(dict(schema=1, ok=True,
                 sourceCommit="a" * 40, pipelineId="1", distribution=build["distribution"])))
-            changed_notes = "Different notes generated after packaging"
-            notes_file.write_text(json.dumps({**notes_record, "notes": changed_notes,
+            changed_locales = {
+                "zh-CN": {"summary": "打包后生成了不同说明。", "sections": [{
+                    "id": "features", "title": "功能更新",
+                    "items": [{"id": "notes", "text": "打包后生成了不同说明。"}],
+                }]},
+                "en-US": {"summary": "Different notes were generated after packaging.", "sections": [{
+                    "id": "features", "title": "Feature updates",
+                    "items": [{"id": "notes", "text": "Different notes were generated after packaging."}],
+                }]},
+            }
+            changed_notes = "\n".join([
+                "zh-CN", changed_locales["zh-CN"]["summary"], "功能更新", "• 打包后生成了不同说明。",
+                "", "en-US", changed_locales["en-US"]["summary"], "Feature updates",
+                "• Different notes were generated after packaging.",
+            ])
+            notes_file.write_text(json.dumps({**notes_record, "notes": changed_notes, "locales": changed_locales,
                 "notesSha256": hashlib.sha256(changed_notes.encode()).hexdigest()}), encoding="utf-8")
             rejected = node(command, "stage", "linux", success=False)
             assert "Build used different release notes" in rejected.stderr
@@ -245,6 +283,9 @@ def main():
             node(command, "stage", "linux")
             rows = api("/api/v1/admin/client-releases", token)["releases"]
             assert len(rows) == 3 and all(row["enabled"] for row in rows)
+            published_notes = api("/api/v1/admin/client-release-notes/9.9.1?channel=stable", token)
+            assert published_notes["status"] == "published"
+            assert published_notes["locales"] == locales
             assert all(row["sha256"] == hashlib.sha256((dist / row["artifactName"]).read_bytes()).hexdigest() for row in rows)
             public_info = api("/api/v1/download/client/linux/info")
             for fmt in ("deb", "rpm", "tar.gz"):

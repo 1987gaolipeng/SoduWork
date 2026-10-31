@@ -6,6 +6,7 @@ import { FilterSelect } from '../FilterControls.jsx'
 import ListPager from '../ListPager.jsx'
 import { useViewportHeight } from '../viewport-height.js'
 import './admin-access-pages.css'
+import { detailText } from './audit-detail.js'
 
 const ACTIONS = localeMap(() => ({
   'task.dispatch': { label: "下发需求", c: 'var(--c-blue)' },
@@ -55,6 +56,13 @@ const ACTIONS = localeMap(() => ({
   'task.assign': { label: '收件箱分配', c: 'var(--c-blue)', noFilter: true },
   // Label retired actions in historical records instead of displaying raw slugs.
   'task.agent.takeover': { label: 'AI 接管（已下线）', c: 'var(--offline)', noFilter: true },
+  'plugin.install': { label: '安装插件', c: 'var(--c-green)' },
+  'plugin.upgrade': { label: '升级插件', c: 'var(--c-blue)' },
+  'plugin.enable': { label: '启用插件', c: 'var(--c-green)' },
+  'plugin.uninstall': { label: '卸载插件', c: 'var(--warn)' },
+  'plugin.conversation_grant': { label: '对话授权连接器', c: 'var(--accent)' },
+  'plugin.conversation_use': { label: '对话调用连接器', c: 'var(--accent)' },
+  'team.message': { label: '团队消息', c: 'var(--c-blue)' },
 }))
 const actInfo = (a) => ACTIONS[a] || { label: String(a || tx("未知操作")).replaceAll('.', ' · '), c: 'var(--offline)' }
 /* Filter common actions directly; retain uncommon and historical actions under All. */
@@ -65,20 +73,6 @@ function fmtT(ms) {
   const d = new Date(ms), p = (n) => (n < 10 ? '0' : '') + n
   return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
-function detailText(a) {
-  const d = a.detail || {}
-  const bits = []
-  if (a.action === 'task.dispatch') bits.push(tx("下发 {0} 个 SoduWork", [d.dispatched ?? 0]))
-  else if (a.action === 'task.dispatch.sub') bits.push(tx("「{0}」→ {1} 盒", [d.title || '', d.boxes ?? 0]))
-  else if (a.action === 'task.advance') bits.push('→ ' + (d.toStage || '') + (d.via === 'admin' ? tx(" · 管理端") : tx(" · 桌宠")))
-  else if (a.action === 'task.reject') bits.push(tx("打回 → ") + (d.toStage || '') + (d.note ? ' · ' + d.note : ''))
-  else if (a.action === 'client.assign') bits.push(d.ownerUserId ? tx("归属到用户") : tx("解除归属"))
-  else if (a.action === 'user.update') bits.push((d.fields || []).join('/') + (d.pwChanged ? tx(" +改密码") : ''))
-  else if (a.action === 'role.update') bits.push(tx("权限 {0} 项", [(d.permissions || []).length]))
-  else if (a.action === 'report.generate') bits.push(tx("{0} · 生成 {1} 份", [d.date || '', d.made ?? 0]) + (d.skipped ? tx("，跳过 {0} 人", [d.skipped]) : ''))
-  return bits.join(' · ')
-}
-
 export default function Audit() {
   const uiLocale = useLocale();
   const listRef = useViewportHeight()

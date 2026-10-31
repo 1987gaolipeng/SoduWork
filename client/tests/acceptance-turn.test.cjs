@@ -235,3 +235,24 @@ test('验收准备与排队前复核都要求 Hub 明确授予当前账号决策
     } });
   await assert.rejects(linkedTurn.beforeTurn(), /原执行会话已不存在/);
 });
+test('oversized acceptance context is compacted without losing review metadata', async t => {
+  const f = fixture(t, {
+    task: { id: 't', title: 'Large task', note: 'note-' + 'x'.repeat(70000) },
+    artifact: { version: 'v1', gallery: 'g'.repeat(70000) },
+    evidence: [{ id: 'evidence-1', detail: 'e'.repeat(70000) }],
+    criteria: [
+      { id: 'criterion-one', label: 'criterion-one' },
+      { id: 'criterion-two', label: 'criterion-two' },
+    ],
+  });
+  const turn = await prepare({ identity: {}, taskId: 't',
+    requested: { acceptanceMode: 'auto' }, runtime: f.runtime, request: f.request });
+  assert.ok(turn.text.length < 50000);
+  assert.match(turn.text, /criterion-one/);
+  assert.match(turn.text, /criterion-two/);
+  assert.match(turn.text, /Some content omitted/);
+  assert.ok(turn.reportPath);
+  await turn.beforeTurn();
+  assert.equal(f.calls.length, 2);
+  assert.ok(f.calls.every(c => !c.body));
+});

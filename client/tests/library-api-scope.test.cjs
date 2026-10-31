@@ -192,6 +192,32 @@ test('library sharing keeps the organization recipient scope and optional note',
   assert.equal(responses.length, 0);
 });
 
+test('library shares refresh the sender notification folder after the server accepts them', async () => {
+  const h = harness(); await h.signIn('alice');
+  const refreshes = [];
+  h.window.MateNoticeSync = { refresh: async (...args) => { refreshes.push(args); return { ok: true }; } };
+  h.fetch = async () => new Response(JSON.stringify({ ok: true, shared: 1 }), {
+    status: 200, headers: { 'content-type': 'application/json' }
+  });
+  await h.api.shareLibraryItem('remote-one', ['bob'], '请查收');
+  await h.api.shareLibraryItems(['remote-two'], ['bob'], '请查收');
+  await h.api.shareLocalLibraryFile({ requestId: 'request-one', localItemId: 'local-one', filename: 'one.txt', data: 'QQ==', recipientUserIds: ['bob'] });
+  assert.deepEqual(refreshes, [['sent', true], ['sent', true], ['sent', true]]);
+});
+
+test('library batch shares preserve selected folder ids for server-side packaging', async () => {
+  const h = harness(); await h.signIn('alice');
+  let payload;
+  h.fetch = async (_url, options) => {
+    payload = JSON.parse(options.body);
+    return new Response(JSON.stringify({ ok: true, shared: 1 }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  await h.api.shareLibraryItems(['item-1'], ['bob'], '请查收', { folderIds: ['folder-1', 'folder-1'] });
+  assert.deepEqual(payload.itemIds, ['item-1']);
+  assert.deepEqual(payload.folderIds, ['folder-1']);
+  assert.equal(payload.forcePackage, true);
+});
+
 test('unchanged binary reads and downloads still deliver their original bytes', async () => {
   const h = harness(); await h.signIn('alice');
   h.fetch = async () => new Response(bytes, { headers: { 'content-type': 'application/octet-stream' } });

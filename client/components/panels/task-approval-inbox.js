@@ -9,8 +9,8 @@
   const unavailable = '<p class="task-confirmation-empty" role="alert">暂时无法读取，请关闭后重试。已有审批不会丢失。</p>';
   function snapshot() { return pendingTasks.map(item => ({...item})); }
   /*
-   * mineWaiting identifies tasks on this device awaiting another person's review. Show the
-   * assigned reviewer without granting the creator a duplicate approval action.
+   * mineWaiting identifies tasks on this device awaiting the requirement creator's review.
+   * It is a waiting notice only; it never grants the executor a duplicate approval action.
    */
   function waiting() { return waitingRows.map(row => ({...row})); }
   function update(result) {

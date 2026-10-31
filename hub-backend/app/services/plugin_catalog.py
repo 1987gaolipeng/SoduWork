@@ -210,7 +210,7 @@ async def client_catalog(session: AsyncSession, org_id: str | None,
             entrypoints = dict(manifest.get("entrypoints") or report.get("entrypoints") or {})
             ui = _public_ui(manifest)
             entrypoints = plugin_ui_contracts.effective_entrypoints(
-                entrypoints, ui, has_workflow=has_workflow)
+                entrypoints, ui, has_workflow=has_workflow, jiyong=manifest.get('jiyong'))
             audience_mode = plugin_audience.normalize(version.visibility)
             provenance = _provenance(version)
             market_policy = plugin_marketplace.public_policy(policies.get(plugin.id))
@@ -235,10 +235,13 @@ async def client_catalog(session: AsyncSession, org_id: str | None,
                 "setup": _public_setup(manifest),
                 "ui": ui,
                 "appWindow": plugin_window_contracts.public(manifest.get("appWindow")),
+                **({'jiyong': manifest['jiyong']} if manifest.get('jiyong') else {}),
                 **({'template': 'app'} if manifest.get('template') == 'app' else {}),
                 "provenance": provenance,
+                "appCategory": manifest.get("appCategory") or "other",
                 "authorName": str(manifest.get("author") or provenance["publisherName"])[:120],
                 "authorType": str(provenance.get("publisherType") or "member")[:24],
+                **({"extensions": manifest["extensions"]} if manifest.get("extensions") is not None else {}),
                 "version": version.version, "workflow": ([{
                     "key": str(node.get("key") or "")[:64],
                     "type": str(node.get("type") or "")[:32],
@@ -418,7 +421,12 @@ async def client_catalog(session: AsyncSession, org_id: str | None,
                 report = dict(accepted.capability_report or {})
                 item["conversationVersion"] = accepted.version
                 item["conversationVersionId"] = accepted.id
+                item['conversationChecksum'] = accepted.checksum
                 item["conversationUi"] = _public_ui(manifest)
+                item['conversationJiyong'] = manifest.get('jiyong')
+                item['conversationExtensions'] = manifest.get('extensions')
+                item['conversationAppCategory'] = manifest.get('appCategory') or 'other'
+                item['conversationAuthorName'] = str(manifest.get('author') or provenance['publisherName'])[:120]
                 item["conversationName"] = str(manifest.get("name") or item["name"])
                 if manifest.get('locales'):
                     item['conversationLocales'] = manifest['locales']
@@ -497,8 +505,10 @@ async def client_catalog(session: AsyncSession, org_id: str | None,
                 "icon": plugin_icons.public(manifest.get('icon')),
                 "sourceKind": str(report.get("sourceKind") or plugin.source_kind),
                 "provenance": provenance,
+                "appCategory": manifest.get("appCategory") or "other",
                 "authorName": str(manifest.get("author") or provenance["publisherName"])[:120],
                 "authorType": str(provenance.get("publisherType") or "member")[:24],
+                **({"extensions": manifest["extensions"]} if manifest.get("extensions") is not None else {}),
                 "category": str(market_policy.get("category") or "general"),
                 "marketPolicy": market_policy,
                 "version": version.version,

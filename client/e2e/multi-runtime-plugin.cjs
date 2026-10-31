@@ -103,7 +103,17 @@ async function serve() {
         }
         assert.equal(url.pathname, '/api/v1/ai-proxy/v1/chat/completions');
         assert.equal(request.headers.authorization, 'Bearer loopback-fixture-ticket');
-        const body = JSON.parse(raw), tools = body.tools.map(item => item.function.name);
+        const body = JSON.parse(raw);
+        // Production warms the gateway before the tool-bearing model turn.
+        // Keep the fixture strict while honoring that separate wire contract.
+        if (body.max_tokens === 1 && !body.stream && body.messages?.length === 1 &&
+            body.messages[0].role === 'user' && body.messages[0].content === 'ping') {
+          report.warmups = (report.warmups || 0) + 1;
+          response.writeHead(200, { 'Content-Type': 'application/json' });
+          response.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'pong' } }] }));
+          return;
+        }
+        const tools = body.tools.map(item => item.function.name);
         modelCalls.push({ model: body.model, tools });
         assert.ok(['pi-fixture', 'qwen-fixture'].includes(body.model));
         response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' });
@@ -117,7 +127,16 @@ async function serve() {
             assert.ok(JSON.stringify(body.messages).includes(path.basename(qwenInput)));
             tool(response, body, 'read_file', { file_path: qwenInput });
           } else if (!body.messages.some(message => message.tool_calls?.some(call => call.function.name === 'write_file'))) {
-            assert.ok(JSON.stringify(last).includes(marker), 'Qwen must actually read the verified Pi input before writing');
+            // Qwen may append memory context after a tool result. Match the
+            // actual read by its call id rather than assuming it is last.
+            const readCall = body.messages.flatMap(message => message.tool_calls || [])
+              .find(call => call.function.name === 'read_file');
+            assert.equal(JSON.parse(readCall.function.arguments).file_path, qwenInput);
+            const readResult = body.messages.find(message => message.role === 'tool' && message.tool_call_id === readCall.id);
+            assert.ok(readResult, 'Qwen must return the actual read result before writing');
+            const readText = typeof readResult.content === 'string' ? readResult.content
+              : readResult.content.filter(part => part.type === 'text').map(part => part.text).join('');
+            assert.equal(readText, marker, 'Qwen must actually read the verified Pi input before writing');
             const node = record.nodes.find(item => item.key === 'work');
             tool(response, body, 'write_file', { file_path: path.join(cwd, node.workDir, 'result.md'), content: marker + '\nQWEN-VERIFIED' });
           } else {

@@ -25,7 +25,7 @@ app.whenReady().then(async () => {
   const bundle = resources.materialize(detail.localDraft.resources, root, detail.key);
   const source = path.join(bundle.directory, 'references/developer');
   const candidate = path.join(root, 'candidate');
-  require(path.join(source, 'scripts/scaffold.cjs')).scaffold({ out: candidate, key: 'authored-demo', name: '应用开发闭环样例', url: 'http://127.0.0.1/' });
+  require(path.join(source, 'scripts/scaffold.cjs')).scaffold({ out: candidate, key: 'authored-demo', name: '即用开发闭环样例', url: 'http://127.0.0.1/' });
   server = require(path.join(source, 'scripts/serve.cjs')).serve(path.join(candidate, 'ui'), 0);
   await new Promise(resolve => server.once('listening', resolve));
   const origin = 'http://127.0.0.1:' + server.address().port;

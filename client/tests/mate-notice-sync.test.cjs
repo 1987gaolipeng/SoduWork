@@ -467,6 +467,27 @@ test('当前收件人的私信与正常系统通知仍然提醒', async () => {
   assert.equal(f.alerts.length, 2);
 });
 
+test('额度恢复系统通知触发当前对话额度状态静默刷新', () => {
+  const f = fixture(), refreshes = [];
+  f.ctx.SoduWorkQuotaNotice = { markRestored: () => { refreshes.push('restored'); } };
+  f.event({ type: 'notice', text: '额度已恢复，可继续使用 AI' });
+  assert.deepEqual(refreshes, ['restored']);
+});
+
+test('其他账号的额度通知不影响当前对话额度卡', () => {
+  const f = fixture(), refreshes = [];
+  f.ctx.SoduWorkQuotaNotice = { markRestored: () => { refreshes.push('restored'); } };
+  f.event({ type: 'notice', recipientId: 'user-b', text: '额度已恢复，可继续使用 AI' });
+  assert.deepEqual(refreshes, []);
+});
+
+test('通知同步完成后也会静默刷新已显示的额度卡', async () => {
+  const f = fixture(), refreshes = [];
+  f.ctx.SoduWorkQuotaNotice = { refreshIfBlocked: () => { refreshes.push('refresh'); } };
+  await f.sync.refresh('received');
+  assert.deepEqual(refreshes, ['refresh']);
+});
+
 test('同一持久消息重放只提醒一次，清空后也不会再次弹窗', async () => {
   const f = fixture({ received: [message()] });
   const event = { ...message(), type: 'notice', serverMessageId: 'server-1' };

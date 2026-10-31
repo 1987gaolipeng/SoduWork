@@ -61,6 +61,46 @@ test('work entry discards model preparation after navigation without clearing or
   assert.equal(mounted, 0);
 });
 
+test('requirement routing keeps the typed request and thinking state visible while reserving a conversation', () => {
+  const draft = fakeElement('div');
+  const root = { querySelector: selector => selector === '.nchat-draft' ? draft : null };
+  const { scope } = fixture({ document: { createElement: tag => fakeElement(tag) } });
+  const pending = scope.window.ChatWorkActions.showPending({ text: '整理这份需求' }, { mount: () => root });
+  assert.ok(pending);
+  assert.equal(draft.children.length, 1);
+  assert.equal(draft.children[0].children[0].children[0].textContent, '整理这份需求');
+  const status = draft.children[0].children[1];
+  assert.match(status.children[1].children[0].textContent, /正在思考/);
+  pending.fail(new Error('<img src=x onerror="attack()">Hub 暂时不可用'));
+  assert.equal(draft.children[0].children[1].classList.contains('is-error'), true);
+  assert.match(status.children[1].children[1].textContent, /<img src=x onerror="attack\(\)">Hub 暂时不可用/);
+  assert.equal(status.children[1].children[1].children.length, 0, 'server error remains inert text');
+  pending.remove();
+  assert.equal(draft.children.length, 0);
+});
+
+test('automation routing removes the reservation placeholder after its real plugin surface mounts', () => {
+  // Automation uses data-plugin-surface="work-automation" while the legacy
+  // requirement form used "work-entry". The cleanup must handle both so the
+  // typed prompt is rendered exactly once.
+  assert.match(routeSource, /element\.querySelector\?\.\('\.pui-surface\[data-plugin-surface\]'\)/);
+  assert.doesNotMatch(routeSource, /data-plugin-surface="work-entry"/);
+});
+
+function fakeElement(tag) {
+  const node = { tagName: String(tag || '').toUpperCase(), children: [], parentNode: null,
+    dataset: {}, attributes: {}, className: '', textContent: '', innerHTML: '',
+    classList: { _set: new Set(), add(...names) { names.forEach(name => this._set.add(name)); },
+      contains(name) { return this._set.has(name); } },
+    setAttribute(name, value) { this.attributes[name] = String(value); },
+    appendChild(child) { if (!child) return child; child.parentNode = this; this.children.push(child); return child; },
+    append(...children) { children.forEach(child => this.appendChild(child)); },
+    remove() { if (!this.parentNode) return; const index = this.parentNode.children.indexOf(this); if (index >= 0) this.parentNode.children.splice(index, 1); this.parentNode = null; },
+    querySelector(selector) { return selector === '[data-work-action-pending]' ? this.children.find(child => child.dataset?.workActionPending === 'true') || null : null; },
+  };
+  return node;
+}
+
 test('typing while model preparation is pending keeps the edited draft and does not submit its old contents', async () => {
   let ready, mounted = 0;
   const { scope, mention } = fixture({ NativeChat: { prepare() { mounted++; }, async openWorkAction() { return true; } } });
@@ -162,6 +202,25 @@ test('active chat keeps the selected action when context collection fails', asyn
   assert.equal(mention.action(), selected);
   assert.deepEqual(events, ['input', 'input', 'focus']);
   assert.equal(notices.at(-1), '这次没有打开工作表单，内容已经保留，请重试');
+});
+
+test('unfinished requirement does not capture an unselected ordinary chat turn', async () => {
+  let refined = 0, opened = 0;
+  const { scope } = fixture({
+    WorkEntrySheet: {
+      active: () => ({ actionId: 'work.requirement.create' }),
+      refine: async () => { refined++; return true; },
+    },
+  });
+  const input = { value: '继续讨论刚才的背景', style: {}, dispatchEvent() {}, focus() {} };
+  const result = await scope.window.ChatWorkActions.route({
+    text: input.value, input, attachments: { analysis: async () => [] },
+  }, { open: async () => { opened++; return true; } });
+  assert.equal(result.handled, false);
+  assert.equal(result.accepted, false);
+  assert.equal(refined, 0);
+  assert.equal(opened, 0);
+  assert.equal(input.value, '继续讨论刚才的背景');
 });
 
 test('blank compose entry restores selected content and stage when work sheet opening fails', async () => {

@@ -1,6 +1,15 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
+test('production desk loads the app conversation history runtime exactly once', () => {
+  const desk = fs.readFileSync(path.resolve(__dirname, '../desk.html'), 'utf8');
+  const resources = [
+    '<script src="components/panels/app-conversation-history.js"></script>',
+    '<link rel="stylesheet" href="components/panels/chat-crew.css">',
+    '<link rel="stylesheet" href="components/panels/plugin-input-sheet.css">',
+  ];
+  for (const resource of resources) assert.equal(desk.split(resource).length - 1, 1, resource);
+});
 function fixture() {
   const values = new Map(), listeners = {}, entered = [];
   let owner = 'account-a', device = 'device-a', info = {}, pending = null;

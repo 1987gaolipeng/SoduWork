@@ -21,7 +21,13 @@ const BUILD_INPUTS = Object.freeze([
 function readBuildInputs(client) {
   const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
   return Object.fromEntries(BUILD_INPUTS.map(name => [name,
-    crypto.createHash('sha256').update(fs.readFileSync(path.join(client, name))).digest('hex')]));
+    hashBuildInput(path.join(client, name), fs, crypto)]));
+}
+function hashBuildInput(file, fs = require('node:fs'), crypto = require('node:crypto')) {
+  // Windows checkouts may contain CRLF while Linux publish jobs use LF. Hash the
+  // text content in one canonical form so the same source commit has one receipt.
+  const text = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
+  return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
 }
 function validateReport(report, artifact, expectedInputs) {
   assert.equal(report?.schema, 1, 'Unsupported installer compatibility receipt');
@@ -47,4 +53,4 @@ function validateReport(report, artifact, expectedInputs) {
   if (expectedInputs) assert.deepEqual(report.buildInputs, expectedInputs, 'Installer build code changed after compatibility verification');
   return report;
 }
-module.exports = { REQUIRED_CHECKS, BUILD_INPUTS, readBuildInputs, validateReport };
+module.exports = { REQUIRED_CHECKS, BUILD_INPUTS, hashBuildInput, readBuildInputs, validateReport };

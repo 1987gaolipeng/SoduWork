@@ -1,4 +1,4 @@
-/* SoduWork H5 SDK v1.3.0. Works in native app pages and authorized iframes.
+/* SoduWork H5 SDK v1.6.0. Works in native app pages and authorized iframes.
  * Parent: configure({allowedFrameOrigins:['https://business.example']}).
  * Child: configure({parentOrigin:'https://shell.example'}).
  * await soduWorkApp.chat.send({text:'...', requestId:crypto.randomUUID()}); */
@@ -9,7 +9,7 @@
   const methods = new Set(['context.get', 'composer.send', 'composer.insertText', 'composer.expand', 'composer.collapse', 'settings.get', 'settings.update', 'automation.create',
     'attachments.pick','attachments.begin','attachments.append','attachments.finish','attachments.release','attachments.check']);
   const origins = new Set([location.origin]), pending = new Map();
-  const listeners = new Set();
+  const listeners = new Set(), dataListeners = new Set();
   let parentOrigin = '', inFlight = 0;
   try { if (global.parent !== global && document.referrer) parentOrigin = new URL(document.referrer).origin; } catch (_) {}
   const origin = value => {
@@ -30,10 +30,10 @@
   function invoke(method, params) {
     if (!methods.has(method)) return Promise.reject(Error('H5 桥未开放此方法'));
     if (native?.request) return native.request(method, params || {});
-    if (global.parent === global || !parentOrigin) return Promise.reject(Error('未连接 SoduWork 应用壳，请配置 parentOrigin'));
+    if (global.parent === global || !parentOrigin) return Promise.reject(Error('未连接 SoduWork 即用壳，请配置 parentOrigin'));
     if (pending.size >= 16) return Promise.reject(Error('桥接请求过多'));
     return new Promise((resolve, reject) => {
-      const key = id(), timer = setTimeout(() => { pending.delete(key); reject(Error('应用壳响应超时；请先核对创建/发送结果，勿重复提交')); }, method === 'automation.create' ? 185000 : 65000);
+      const key = id(), timer = setTimeout(() => { pending.delete(key); reject(Error('即用壳响应超时；请先核对创建/发送结果，勿重复提交')); }, method === 'automation.create' ? 185000 : 65000);
       pending.set(key, { resolve, reject, timer });
       global.parent.postMessage({ channel, type: 'request', id: key, method, params: params || {} }, parentOrigin);
     });
@@ -42,6 +42,7 @@
     const data = event.data;
     if (!data || data.channel !== channel || typeof data.id !== 'string' || !/^[A-Za-z0-9-]{1,80}$/.test(data.id)) return;
     if (event.source === global.parent && event.source !== global && event.origin === parentOrigin) {
+      if(data.type==='data-changed'){if(['identity','notifications','conversations','library'].includes(data.topic))dataListeners.forEach(fn=>{try{fn({topic:data.topic});}catch(_){}});return;}
       if (data.type === 'settled') { listeners.forEach(callback => { try { callback({ state: 'settled' }); } catch (_) {} }); return; }
       if (data.type !== 'response') return;
       const row = pending.get(data.id); if (!row) return;
@@ -73,6 +74,11 @@
       } catch (_) {}
     });
   }
+  native?.events?.onDataChanged?.(value=>{
+    if(!['identity','notifications','conversations','library'].includes(value?.topic))return;
+    dataListeners.forEach(fn=>{try{fn({topic:value.topic});}catch(_){}});
+    document.querySelectorAll('iframe').forEach(frame=>{try{const source=new URL(frame.src,location.href).origin;if(origins.has(source))frame.contentWindow.postMessage({channel,type:'data-changed',id:'data',topic:value.topic},source);}catch(_){}});
+  });
   native?.events?.onTurnSettled(settled);
   async function importFile(file, options = {}) {
     if (!file || !Number.isSafeInteger(file.size) || file.size < 0 || file.size > 256 * 1024 * 1024 || typeof file.slice !== 'function') throw Error('文件无效或超过256 MB');
@@ -93,15 +99,24 @@
       return result.item;
     } catch (error) { await invoke('attachments.release', {ids:[started.id]}).catch(() => {}); throw error; }
   }
-  global.soduWorkApp = Object.freeze({ version: '1.3.0', configure, request: invoke, createRequestId: id,
+  global.soduWorkApp = Object.freeze({ version: '1.6.0', configure, request: invoke, createRequestId: id,
+    ai: Object.freeze({generate: options => invoke('ai.generate', {...options, requestId: options?.requestId || id()})}),
+    data: Object.freeze({ apps: () => invoke('data.apps',{}), get: options => invoke('data.get', options), list: options => invoke('data.list', options), batch: options => invoke('data.batch', options), assetPut: options => invoke('data.assetPut',options), assetGet: options => invoke('data.assetGet',options) }),
+    mcp: Object.freeze({connect:options => invoke('mcp.connect',options)}),
     attachments: Object.freeze({ pick: () => invoke('attachments.pick', {}), importFile,
       release: ids => invoke('attachments.release',{ids}), check: ids => invoke('attachments.check',{ids}) }),
+    user: Object.freeze({getCurrent:()=>invoke('user.getCurrent',{})}),
+    notifications: Object.freeze({list:options=>invoke('notifications.list',options||{})}),
+    library: Object.freeze({list:options=>invoke('library.list',options||{}),read:options=>invoke('library.read',options||{})}),
+    conversations: Object.freeze({list:options=>invoke('conversations.list',options||{}),messages:options=>invoke('conversations.messages',options||{})}),
+    directory: Object.freeze({list:() => invoke('directory.list',{})}),
     context: Object.freeze({ get: () => invoke('context.get', {}) }),
     automation: Object.freeze({ create: options => invoke('automation.create', {text: options?.text || '', requestId: options?.requestId || id(), context: options?.context || {}}) }),
     settings: Object.freeze({ get: options => invoke('settings.get', options || {}), update: options => invoke('settings.update', options || {}) }),
     chat: Object.freeze({ send: options => invoke('composer.send', { text: options?.text || '', requestId: options?.requestId || id(), ...(options?.attachmentIds?.length ? {attachmentIds:options.attachmentIds} : {}) }),
+      mention: options => invoke('composer.mention',{recipientUserId:options?.recipientUserId || '',query:options?.query || '',text:options?.text || '',requestId:options?.requestId || id()}),
       insertText: options => invoke('composer.insertText', options || {}),
       expand: () => invoke('composer.expand', {}), collapse: () => invoke('composer.collapse', {}) }),
-    events: Object.freeze({ onRefresh(callback) { listeners.add(callback); return () => listeners.delete(callback); },
+    events: Object.freeze({ onDataChanged(callback){if(typeof callback!=='function')return ()=>{};dataListeners.add(callback);return ()=>dataListeners.delete(callback);}, onRefresh(callback) { listeners.add(callback); return () => listeners.delete(callback); },
       onTurnSettled(callback) { listeners.add(callback); return () => listeners.delete(callback); } }) });
 })(window);

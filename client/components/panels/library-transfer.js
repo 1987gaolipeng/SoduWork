@@ -8,6 +8,7 @@
   const CHECK_PATH = '<path d="M7.5 18.25h9a4.25 4.25 0 0 0 .56-8.46A5.75 5.75 0 0 0 6.2 8.5a4.9 4.9 0 0 0 1.3 9.75Z"/><path d="m9 12.5 2 2 4-4"/>';
   const ICON = '<svg viewBox="0 0 24 24" aria-hidden="true">' + UPLOAD_PATH + '</svg>';
   const SAVED_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true">' + CHECK_PATH + '</svg>';
+  const PREVIEW_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.2 12s3.5-6.5 9.8-6.5S21.8 12 21.8 12s-3.5 6.5-9.8 6.5S2.2 12 2.2 12Z"/><circle cx="12" cy="12" r="2.8"/></svg>';
   const OUTPUT_KINDS = new Set(['website', 'document', 'presentation', 'spreadsheet', 'pdf', 'image', 'video', 'archive']);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const scope = () => global.SoduWorkAPI?.taskStorageKey?.('ops') || '';
@@ -103,6 +104,26 @@
     return String(job?.error?.message || '保存到资料库失败，请重试')
       .replace(/^Error invoking remote method '[^']+':\s*(?:Error:\s*)?/, '').slice(0, 240);
   }
+  function previewSaved(node, file, ref) {
+    const id = key(file) || node?.dataset?.libraryOutput || node?.dataset?.wbLibraryUpload || '';
+    if (!id) return false;
+    const saveKey = node?.dataset?.librarySaveKey || (ref != null ? outputKey(ref, file) : '');
+    const job = saveKey ? outputs.get(saveKey) : null;
+    const item = job?.result?.item;
+    if (global.ChatWorkbench?.openOutput) {
+      try {
+        if (global.ChatWorkbench.openOutput(id) !== false) return true;
+      } catch (_) { /* fall through to the library or inline preview target */ }
+    }
+    if (item && global.LibraryDelivery?.openItem) {
+      Promise.resolve().then(() => global.LibraryDelivery.openItem(item))
+        .catch(error => say(error?.message || '资料预览失败'));
+      return true;
+    }
+    const target = node?.closest?.('.noutput-library-row')?.querySelector('[data-open-app]');
+    if (target && typeof target.click === 'function') { target.click(); return true; }
+    return false;
+  }
   function requirementLabel(job) {
     return job?.status === 'saved' ? '已保存' : job?.status === 'saving' ? '正在保存…' : job?.status === 'error'
       ? (/源文件已丢失/.test(outputError(job)) ? '文件丢失' : '重试') : '';
@@ -111,22 +132,25 @@
     if (!canSave(file)) return '';
     const job = lookup(ref, file);
     const requirement = attr === 'data-rq-library';
-    const label = job?.status === 'saved' ? (requirement ? '已保存到本机资料库' : '已保存到资料库') : job?.status === 'saving' ? '正在保存到资料库…' : job?.status === 'error' ? '重试保存' : (requirement ? '保存到本机资料库' : '保存到资料库');
+    const preview = !requirement && job?.status === 'saved';
+    const label = preview ? tx('预览') : job?.status === 'saved' ? (requirement ? '已保存到本机资料库' : '已保存到资料库') : job?.status === 'saving' ? '正在保存到资料库…' : job?.status === 'error' ? '重试保存' : (requirement ? '保存到本机资料库' : '保存到资料库');
     const title = requirement && job?.status === 'error' ? outputError(job) + '；点击重试' : label;
-    const markup = '<button type="button" class="library-save-action' + (job?.status === 'saved' ? ' is-saved' : job?.status === 'error' && requirement ? ' is-error' : '') + '" data-library-save-key="' + esc(outputKey(ref, file)) + '" data-library-version="' + esc(version(file)) + '" ' + attr + '="' + esc(key(file)) + '" data-library-ref="' + esc(ref || '') +
-      '"' + (job?.status === 'saving' ? ' disabled aria-busy="true"' : '') + ' title="' + esc(title) + '" aria-label="' + esc(title) + '">' + (job?.status === 'saved' ? SAVED_ICON : ICON) + '<span class="library-save-label">' + (requirement ? requirementLabel(job) : label) + '</span></button>';
+    const markup = '<button type="button" class="library-save-action' + (job?.status === 'saved' ? ' is-saved is-preview' : job?.status === 'error' && requirement ? ' is-error' : '') + '" data-library-save-key="' + esc(outputKey(ref, file)) + '" data-library-version="' + esc(version(file)) + '" ' + attr + '="' + esc(key(file)) + '" data-library-ref="' + esc(ref || '') +
+      '"' + (job?.status === 'saving' ? ' disabled aria-busy="true"' : '') + ' title="' + esc(preview ? label : title) + '" aria-label="' + esc(preview ? label : title) + '">' + (preview ? PREVIEW_ICON : job?.status === 'saved' ? SAVED_ICON : ICON) + '<span class="library-save-label">' + (requirement ? requirementLabel(job) : label) + '</span></button>';
     return requirement ? '<span class="rq-library-save">' + markup + '<span class="rq-library-error" role="status"' +
       (job?.status === 'error' ? '' : ' hidden') + '>' + (job?.status === 'error' ? esc(outputError(job)) : '') + '</span></span>' : markup;
   }
   function buttonState(node, job) {
     if (!node) return;
-    const label = job.status === 'saved' ? '已保存到资料库' : job.status === 'saving' ? '正在保存到资料库…' : job.status === 'error' ? '重试保存' : '保存到资料库';
+    const requirement = node.dataset?.rqLibrary != null;
+    const preview = !requirement && job.status === 'saved';
+    const label = preview ? tx('预览') : job.status === 'saved' ? '已保存到资料库' : job.status === 'saving' ? '正在保存到资料库…' : job.status === 'error' ? '重试保存' : '保存到资料库';
     node.disabled = job.status === 'saving'; node.setAttribute('aria-busy', String(job.status === 'saving'));
     node.classList.toggle('is-saved', job.status === 'saved');
-    const requirement = node.dataset?.rqLibrary != null;
-    node.innerHTML = (job.status === 'saved' ? SAVED_ICON : ICON) + '<span class="library-save-label">' + esc(tx(requirement ? requirementLabel(job) : label)) + '</span>';
+    node.classList.toggle('is-preview', preview);
+    node.innerHTML = (preview ? PREVIEW_ICON : job.status === 'saved' ? SAVED_ICON : ICON) + '<span class="library-save-label">' + esc(tx(requirement ? requirementLabel(job) : label)) + '</span>';
     node.classList.toggle('is-error', requirement && job.status === 'error');
-    const title = requirement && job.status === 'error' ? outputError(job) + '；点击重试' : requirement && job.status === 'saved' ? '已保存到本机资料库' : label;
+    const title = preview ? label : requirement && job.status === 'error' ? outputError(job) + '；点击重试' : requirement && job.status === 'saved' ? '已保存到本机资料库' : label;
     node.title = tx(title); node.setAttribute('aria-label', tx(title));
     const error = requirement && node.parentElement?.querySelector('.rq-library-error');
     if (error) { error.hidden = job.status !== 'error'; error.textContent = job.status === 'error' ? outputError(job) : ''; }
@@ -172,7 +196,11 @@
     if (job?.lookup) await job.lookup;
     if (capturedScope !== scope()) return false;
     job = outputs.get(id);
-    if (job?.status === 'saved') { buttonState(node, job); return true; }
+    if (job?.status === 'saved') {
+      buttonState(node, job);
+      if (node && node.dataset?.rqLibrary == null) previewSaved(node, capturedFile, capturedRef);
+      return true;
+    }
     if (!job || job.status === 'error' || job.status === 'new') {
       // Requirement attachments must not inherit an unrelated open chat.
       const capturedSource = capturedFile.taskId && capturedFile.attachmentId ? null : conversationSource();
@@ -282,6 +310,8 @@
   function saveDecorated(node) {
     const ref = node.dataset.libraryRef || '', item = indexed.get(JSON.stringify([ref, node.dataset.libraryOutput, node.dataset.libraryVersion]));
     if (!item || item.scope !== scope()) { say('当前成果暂时无法上传到资料库'); return Promise.resolve(false); }
+    const job = outputs.get(outputKey(ref, item.file));
+    if (job?.status === 'saved') { buttonState(node, job); previewSaved(node, item.file, ref); return Promise.resolve(true); }
     return saveOutput(ref, item.file, node);
   }
   global.addEventListener?.('soduwork-data-scope-changed', () => { revision++; inputs = new WeakMap(); outputs.clear(); indexed.clear(); });

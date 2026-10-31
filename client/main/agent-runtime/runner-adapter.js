@@ -8,6 +8,7 @@ const modelConfig = require('../pi-session/model-config');
 const contextWindow = require('../conversation/context-window');
 const outputs = require('../pi-session/outputs');
 const attachmentContract = require('../pi-session/attachment-contract');
+const attachmentStaging = require('../pi-session/attachments');
 const { createBindings } = require('../conversation/task-bindings');
 const { createTurnQueue } = require('../pi-session/turn-queue');
 const toolGuard = require('../pi-session/tool-guard');
@@ -129,6 +130,15 @@ function _fatalHarnessText(value) {
     ? clean : '';
 }
 
+function _resumeCredentialError(value) {
+  const text = typeof value === 'string' ? value : (() => {
+    const message = value && (value.message || value.reason || value.error);
+    if (message) return String(message);
+    try { return JSON.stringify(value || ''); } catch (_) { return String(value || ''); }
+  })();
+  return /acpbridge|unauthori[sz]ed|凭证|credential|expired|session.*(?:invalid|expired|not found)|\b401\b/i.test(text);
+}
+
 function _eventAt(item) {
   const parsed = Date.parse(String(item && item.at || ''));
   return Number.isFinite(parsed) ? Math.min(Date.now(), parsed) : Date.now();
@@ -160,10 +170,38 @@ function _localFiles(items) {
     return {
       path: source,
       filename: String(item.name || item.filename || path.basename(source)).slice(0, 240),
-      contentType: String(item.type || item.contentType || 'application/octet-stream').slice(0, 160),
+      // Staged desktop attachments use `mimeType`; renderer-native references
+      // historically used `type`/`contentType`. Preserve all three so Runner
+      // can recognise pasted images even when the Electron bridge supplied a
+      // copied staging path instead of the original File object.
+      contentType: String(item.type || item.contentType || item.mimeType || 'application/octet-stream').slice(0, 160),
       size: stat.size,
     };
   }).filter(Boolean).slice(0, 20);
+}
+
+/*
+ * Renderer attachments normally arrive with an absolute path. Clipboard and
+ * drag/drop files can only carry bytes, though, because Chromium does not
+ * expose their original path. Pi stages those bytes before dispatch; Runner
+ * must do the same or a non-Pi turn loses the file when its optimistic bubble
+ * is replaced by the runtime snapshot.
+ */
+async function _prepareRunnerAttachments(items, root) {
+  const source = Array.isArray(items) ? items : [];
+  const pending = source.map((item, index) => ({ item, index }))
+    .filter(({ item }) => item && item.data != null &&
+      !path.isAbsolute(String(item.path || item.stagedPath || '')));
+  if (!pending.length) return source;
+  const staged = await attachmentStaging.stage(path.resolve(String(root || '')), pending.map(({ item }) => item), {
+    stagingDir: path.join(path.resolve(String(root || '')), '.soduwork-inputs'),
+  });
+  if (!staged?.files || staged.files.length !== pending.length) {
+    throw Error('有附件无法复制到当前会话，请重新选择后发送');
+  }
+  const next = source.slice();
+  pending.forEach(({ index }, offset) => { next[index] = staged.files[offset]; });
+  return next;
 }
 
 function _skillRows(skillDirs) {
@@ -360,7 +398,7 @@ function _eventKind(touched, state) {
   return 'state.changed';
 }
 
-async function createRunnerHandle(request, defaults) {
+async function createRunnerHandle(request, defaults, initialSession) {
   const opts = _legacyOptions(request);
   const runtime = defaults.runnerRuntime || runnerRuntime;
   const models = defaults.modelConfig || modelConfig;
@@ -390,7 +428,7 @@ async function createRunnerHandle(request, defaults) {
   const modelPreference = selectionModule.preference(app, runnerRef);
   const savedSelection = modelPreference.readSelection();
   const explicitModel = typeof opts.modelName === 'string';
-  const modelName = explicitModel ? opts.modelName : modelPreference.read() || '';
+  let modelName = explicitModel ? opts.modelName : modelPreference.read() || '';
   const initialThinking = adapterId === 'codex' ? require('./codex-thinking').profile(modelName,
     resumedRef && typeof savedSelection.reasoningEffort === 'string' ? savedSelection.reasoningEffort
       : opts.reasoningEffort || savedSelection.reasoningEffort || '') : null;
@@ -408,14 +446,42 @@ async function createRunnerHandle(request, defaults) {
     }
     accessControl = capability;
   }
-  const prepared = accountModel
+  let prepared = accountModel
     ? { ok: true, model: { id: modelName, name: modelName || displayName, baseUrl: '', key: '' } }
-    : await models.fetchModel(identity, modelName, undefined, undefined, false, adapterId);
+    : await models.fetchModel(identity, modelName, undefined, undefined, false, adapterId,
+      { app, allowHistorical: Boolean(resumedRef || opts.resumedConversation) });
+  // A Runner archive can outlive the model catalog just like a native Pi archive.
+  // Historical model names are hints, not a reason to make the whole conversation
+  // unreadable. Retry only resumed conversations with the current default; new
+  // chats keep an explicit model failure visible so a typo is not silently changed.
+  const canRecoverStaleModel = Boolean(resumedRef || opts.resumedConversation);
+  const returnedModel = String(prepared?.model?.id || '').trim();
+  const returnedDifferentModel = Boolean(prepared?.ok && modelName && returnedModel && returnedModel !== modelName);
+  let resetSavedModel = false;
+  if (canRecoverStaleModel && (!prepared?.ok || returnedDifferentModel)) {
+    const fallback = accountModel
+      ? { ok: true, model: { id: '', name: displayName, baseUrl: '', key: '' } }
+      : await models.fetchModel(identity, '', undefined, undefined, false, adapterId,
+        { app, ignoreAgentPreference: true, allowHistorical: Boolean(resumedRef || opts.resumedConversation) });
+    if (fallback?.ok && fallback.model) {
+      modelName = '';
+      prepared = fallback;
+      resetSavedModel = true;
+    }
+  }
   if (!prepared || !prepared.ok || !prepared.model) {
     throw new RuntimeContractError('RUNNER_MODEL_UNAVAILABLE',
       String(prepared && prepared.reason || displayName + ' 没有可用模型'));
   }
-  if (explicitModel) modelPreference.write(modelName, initialThinking?.level);
+  if (explicitModel || resetSavedModel) {
+    try { modelPreference.write(modelName, initialThinking?.level); }
+    catch (error) {
+      // Clearing a retired historical choice is a best-effort repair. A
+      // filesystem/AV lock must not turn a recoverable conversation into an
+      // open failure; new explicit choices still retain their strict error.
+      if (!resetSavedModel) throw error;
+    }
+  }
 
   const listeners = new Set();
   const redactors = new Set();
@@ -459,6 +525,7 @@ async function createRunnerHandle(request, defaults) {
     disposed: false, polling: false, preparingPlugins: false, timer: null, turnQueue,
     reconnectSince: 0, reconnectAttempts: 0, fileChanges: null,
     recoveryRequired: false, terminalConfirmed: false, recoveryAttempts: 0,
+    initialSession: initialSession || null,
   };
 
   state.modelSelection = selectionModule.create({
@@ -811,7 +878,9 @@ async function createRunnerHandle(request, defaults) {
       return true;
     };
     try {
-      const reply = await runtime.rpc('job.session', {
+      const firstResume = state.initialSession;
+      state.initialSession = null;
+      const reply = firstResume || await runtime.rpc('job.session', {
         ref: state.runnerRef, since: historySince ?? state.seq, limit: 500,
       }, 15000);
       if (unavailable() || stalePoll()) return;
@@ -1293,6 +1362,14 @@ async function createRunnerHandle(request, defaults) {
       if (next.options.controlled) return next.options.controlled.execute(handle, next.text, next.attachments);
       const send = () => {
         if (state.disposed || state.cancelRequested || state.goalPaused || next.stopRequested) return { ok: true, cancelled: true };
+        const byteAttachments = (Array.isArray(next.attachments) ? next.attachments : []).some(item =>
+          item && item.data != null && !path.isAbsolute(String(item.path || item.stagedPath || '')));
+        if (byteAttachments) {
+          return _prepareRunnerAttachments(next.attachments, cwd).then(staged => {
+            next.attachments = staged;
+            return send();
+          });
+        }
         if (adapterId === 'codex') state.agentExecution = _nativeExecution(adapterId, {
           modelName: state.model.id, reasoningEffort: require('./codex-thinking').profile(
             next.options.modelName, next.options.reasoningEffort).level,
@@ -1416,7 +1493,6 @@ async function createRunnerHandle(request, defaults) {
           state.pendingPermissions = result?.pendingPermissions || [];
         } else state.nextAccessPolicy = policy;
         changeConfirmed = true;
-        try { opts.rememberAccessDefault?.(policy.mode); } catch (_) { /* Preference memory is best effort. */ }
         emit('access-changed');
         return { ok: true, effective };
       } finally {
@@ -1819,7 +1895,28 @@ function createRunnerRuntimeAdapter(options) {
       return wrapRunnerSession(handle, request, { ok: true }, runtimeSpec);
     },
     async resumeSession(request) {
-      const handle = await createRunnerHandle(request, defaults);
+      const resumePath = String(_legacyOptions(request).resumePath || '');
+      let initialSession = null;
+      if (resumePath) {
+        // Check immediately available credential errors, but never wait for a
+        // long-polling job.session response before creating the handle. The
+        // normal polling loop remains authoritative for delayed responses.
+        const probe = Promise.resolve().then(() => runtime.rpc('job.session',
+          { ref: resumePath, since: 0, limit: 1 }, 15000));
+        const result = await Promise.race([
+          probe.then(value => ({ settled: true, value }), error => ({ settled: true, error })),
+          new Promise(resolve => setTimeout(() => resolve({ settled: false }), 0)),
+        ]);
+        if (result.settled) {
+          if (result.value?.ok) initialSession = result.value;
+          const failure = result.error || result.value?.error || result.value?.data?.error ||
+            (!result.value?.ok ? result.value : null);
+          if (_resumeCredentialError(failure)) {
+            throw new Error(typeof failure === 'string' ? failure : JSON.stringify(failure));
+          }
+        }
+      }
+      const handle = await createRunnerHandle(request, defaults, initialSession);
       return wrapRunnerSession(handle, request, { ok: true, resumed: true }, runtimeSpec);
     },
     async history(limit = 50) {

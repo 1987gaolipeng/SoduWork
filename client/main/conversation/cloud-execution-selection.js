@@ -15,7 +15,11 @@ function create({ app, read, save, guard, identity, request, view, notify, busy 
     const record = guard(handle), current = await identity(record);
     const data = await request(current, '/conversation-handoffs/targets');
     const allowed = (data.targets || []).filter(r => r.runnerId === record.target?.runnerId);
-    return { ok: true, runtimes: allowed.map(r => catalog.runtime(r.agentId)).filter(Boolean) };
+    const runtimes = allowed.map(r => catalog.runtime(r.agentId)).filter(Boolean);
+    // Cloud targets have already passed the remote target/runner authorization
+    // check above, so expose them through the same projection used by local
+    // health checks. This keeps the renderer strict without hiding cloud agents.
+    return { ok: true, runtimes, availableRuntimes: runtimes, missing: [] };
   }
   function selectExecution(handle, input) { return busy(handle, async () => {
     try {

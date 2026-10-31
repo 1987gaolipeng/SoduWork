@@ -3,6 +3,30 @@
 // source bytes; no separate permissive resource validator is maintained here.
 const fs = require('node:fs'), path = require('node:path');
 const { TextDecoder } = require('node:util');
+const vm = require('node:vm'), { spawnSync } = require('node:child_process');
+function checkSyntax(rows) {
+  let checked = 0;
+  for (const row of rows) {
+    if (!/\.(?:[cm]?js)$/i.test(row.path)) continue;
+    const code = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(row.content, 'base64'));
+    // Compile only, never evaluate app or server code. A valid ES module may
+    // fail Script parsing; Node's module syntax checker handles that case.
+    let classicError;
+    try { if (/\.mjs$/i.test(row.path)) throw Error('module'); new vm.Script(code, {filename:row.path}); }
+    catch (error) { classicError = error; }
+    if (classicError) {
+      if (/\.cjs$/i.test(row.path)) throw Error('JavaScript 语法检查失败：' + row.path + '\n' + classicError.message);
+      const result = spawnSync(process.execPath, ['--check', '--input-type=module'], {
+        input:code, encoding:'utf8', timeout:10000, maxBuffer:65536, windowsHide:true,
+        env:{...process.env,ELECTRON_RUN_AS_NODE:'1'},
+      });
+      if (result.error || result.status !== 0) throw Error('JavaScript 语法检查失败：' + row.path + '\n' +
+        String(result.error?.message || result.stderr || classicError.message).slice(0,2000));
+    }
+    checked++;
+  }
+  return checked;
+}
 function modules() {
   const bundled = path.resolve(__dirname, '../validation');
   const root = fs.existsSync(path.join(bundled, 'main/plugin-resources.js'))
@@ -27,7 +51,8 @@ function validate(draft, workRoot = path.dirname(path.resolve(draft))) {
   const collected = resources.collect(body, file, root);
   const normalized = schema.normalizeBody(collected);
   if (!normalized.icon) throw Error('应用缺少专属彩色图标：请生成 PNG 并写入草稿顶层 icon 后重新校验');
-  return { ok: true, key: normalized.key, version: normalized.version,
+  const syntaxChecked = checkSyntax(normalized.resources || []);
+  return { ok: true, syntaxChecked, key: normalized.key, version: normalized.version,
     resources: resources.summary(normalized.resources || []),
     installed: false, runtimeTested: false };
 }

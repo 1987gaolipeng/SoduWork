@@ -4,11 +4,11 @@ const contextWindow = require('./context-window');
 const thinkingCapabilities = require('./thinking-capabilities');
 const { replaceFileSync } = require('../verified-file-replace.cjs');
 
-// The previous fallback (16k) was routinely consumed by hidden reasoning on
+// The previous fallback (16k/32k) was routinely consumed by hidden reasoning on
 // coding models before they emitted a tool call or a final answer. Keep an
 // explicit server supplied limit authoritative, but give models with missing
 // metadata a usable default. This is still bounded by the model context below.
-const DEFAULT_OUTPUT_TOKENS = 32768;
+const DEFAULT_OUTPUT_TOKENS = 65536;
 
 function publicModel(model) {
   const m = model || {};

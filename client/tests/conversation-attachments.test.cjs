@@ -123,16 +123,16 @@ test('sent image attachments render as clickable previews even when clipboard MI
   assert.match(html, /2\.0 KB/);
 });
 
-test('attachment tray exposes a concise material role hint without claiming files were understood', () => {
+test('attachment tray does not add instructional copy below the file chips', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'components', 'panels',
     'conversation-attachments.js'), 'utf8');
   const context = { window: {} };
   vm.runInNewContext(source, context);
   const hint = context.window.ConversationAttachments.understandingHint;
   assert.equal(typeof hint, 'function');
-  assert.match(hint(1, ''), /可以补一句说明/);
-  assert.match(hint(2, ''), /哪份是步骤，哪份是要处理的文件/);
-  assert.match(hint(1, '请汇总'), /文字说明一起发送/);
+  assert.equal(hint(1, ''), '');
+  assert.equal(hint(2, ''), '');
+  assert.equal(hint(1, '请汇总'), '');
   assert.equal(hint(0, ''), '');
   assert.doesNotMatch(hint(2, ''), /已理解|已读取正文/);
 });
@@ -152,12 +152,12 @@ test('attachment hint follows later typing without changing the attachment rail 
     new File(['steps'], '步骤.txt', { type: 'text/plain' }),
     new File(['data'], '数据.txt', { type: 'text/plain' }),
   ]);
-  assert.equal(hint.hidden, false);
-  assert.match(hint.textContent, /哪份是步骤/);
+  assert.equal(hint.hidden, true);
+  assert.equal(hint.textContent, '');
   input.value = '只处理第二张表';
   events.input({ isComposing: false });
-  assert.doesNotMatch(hint.textContent, /哪份是步骤/);
-  assert.match(hint.textContent, /文字说明一起发送/);
+  assert.equal(hint.textContent, '');
+  assert.equal(hint.hidden, true);
 });
 
 test('initial and follow-up composers accept clipboard files and forward attachment payloads', () => {

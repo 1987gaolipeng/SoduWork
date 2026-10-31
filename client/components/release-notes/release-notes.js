@@ -44,6 +44,13 @@
       const article = node('article', undefined, body);
       article.lang = release.locale;
       if (history) node('h3', 'SoduWork ' + release.version, article).className = 'rn-version';
+      if (release.publishedAt && Number.isFinite(Date.parse(release.publishedAt))) {
+        const published = new Date(release.publishedAt);
+        const time = node('time', new Intl.DateTimeFormat(locale(), {
+          dateStyle: 'medium', timeStyle: 'short',
+        }).format(published), article);
+        time.dateTime = published.toISOString();
+      }
       if (release.fallback) node('p', t('fallback'), article);
       node('p', release.summary, article);
       release.sections.forEach(value => section(value, article));

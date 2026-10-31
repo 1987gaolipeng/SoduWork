@@ -1,6 +1,9 @@
 (function (global) {
   'use strict';
 
+  const tx = value => (global.SoduWorkI18n && typeof global.SoduWorkI18n.translateText === 'function'
+    ? global.SoduWorkI18n.translateText(value) : value) || value;
+
   const EFFORT_LABELS = Object.freeze({
     minimal: '极简', low: '低', medium: '中', high: '高',
     xhigh: '极高', max: '最高', ultra: '超高',
@@ -87,7 +90,7 @@
     const image = imageModels.find(item => global.SoduWorkModelChoice?.imageKey(item) === selected.modelName);
     if (image) return '生成图片 · ' + (image.label || image.name);
     const model = enterpriseModels.find((item) => item.name === selected.modelName);
-    return model ? (model.label || model.name) : '选择模型';
+    return model ? (model.label || model.name) : tx('选择模型');
   }
 
   function clearStaleManagedSelection(row) {
@@ -111,7 +114,7 @@
   }
 
   function heading(subtitle, back = false) {
-    return '<div class="cp-model-heading">' + (back ? '<button type="button" class="cp-model-back" data-native-back aria-label="返回推理设置">‹</button>' : '') + '<span><b>选择模型</b><i>' + escape(subtitle) +
+    return '<div class="cp-model-heading">' + (back ? '<button type="button" class="cp-model-back" data-native-back aria-label="' + escape(tx('返回推理设置')) + '">‹</button>' : '') + '<span><b>' + escape(tx('选择模型')) + '</b><i>' + escape(tx(subtitle)) +
       '</i></span><button type="button" class="cp-model-close" data-model-close aria-label="关闭模型选择">×</button></div>' +
       '<label class="cp-model-search"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg>' +
       '<input type="search" aria-label="搜索模型" placeholder="搜索可用模型" value="' + escape(searchQuery) + '"></label>';
@@ -168,11 +171,11 @@
     const rows = enterpriseModels.map((item) => ({
         name: item.name,
         label: item.label || item.name,
-        sub: [item.providerName, item.keyFrom === 'mine' ? '自己的额度' : ''].filter(Boolean).join(' \u00b7 '),
+        sub: [item.providerName ? tx(item.providerName) : '', item.keyFrom === 'mine' ? tx('自己的额度') : ''].filter(Boolean).join(' \u00b7 '),
       }));
     if (!cloud() && runtime().id === 'pi' && global.SoduWorkModelChoice) rows.push(...imageModels.map(item => ({
       name: SoduWorkModelChoice.imageKey(item), label: item.label || item.name,
-      sub: ['生成图片', item.providerName, item.keyFrom === 'mine' ? '自己的额度' : ''].filter(Boolean).join(' \u00b7 '),
+      sub: [tx('生成图片'), item.providerName ? tx(item.providerName) : '', item.keyFrom === 'mine' ? tx('自己的额度') : ''].filter(Boolean).join(' \u00b7 '),
     })));
     const thinkingLabel = !canThink
       ? '\u5f53\u524d\u6a21\u578b\u4e0d\u63d0\u4f9b\u53ef\u63a7\u601d\u8003'
@@ -212,8 +215,8 @@
     const efforts = effortChoices(selectedModel);
     return '<div class="cp-effort-card' + (!efforts.length ? ' is-unavailable' : '') + '">' +
         '<div class="cp-effort-heading"><span aria-hidden="true"></span>' +
-          '<button type="button" class="cp-native-model-trigger" data-native-list aria-label="选择 Codex 模型" aria-haspopup="dialog"><b data-effort-label>' + escape(EFFORT_LABELS[selected.reasoningEffort] || '选择模型') + '</b>' +
-          '<small>' + escape(selectedModel?.label || 'Codex 默认') + '<span aria-hidden="true"> ›</span></small></button>' +
+          '<button type="button" class="cp-native-model-trigger" data-native-list aria-label="' + escape(tx('选择 Codex 模型')) + '" aria-haspopup="dialog"><b data-effort-label>' + escape(tx(EFFORT_LABELS[selected.reasoningEffort] || '选择模型')) + '</b>' +
+          '<small>' + escape(selectedModel?.label || tx('Codex 默认')) + '<span aria-hidden="true"> ›</span></small></button>' +
           '<button type="button" data-effort-reset aria-label="重置推理强度" title="重置推理强度"' + (!efforts.length ? ' disabled' : '') + '><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 7a6.5 6.5 0 1 1-.3 5M4 3v4h4"/></svg></button></div>' +
         '<div class="cp-effort-track"><div class="cp-effort-fill" aria-hidden="true"><div class="cp-effort-sparks">' +
           [8, 22, 39, 55, 72, 88].map((left, index) => '<span style="--spark-x:' + left + '%;--spark-y:' + (index % 2 ? 68 : 30) + '%;--spark-delay:-' + (index * .21) + 's"></span>').join('') +
@@ -245,7 +248,7 @@
     const slider = card.querySelector('[data-effort-slider]');
     slider.value = index;
     slider.setAttribute('aria-valuetext', EFFORT_LABELS[selected.reasoningEffort] || '不可调节');
-    card.querySelector('[data-effort-label]').textContent = EFFORT_LABELS[selected.reasoningEffort] || '选择模型';
+    card.querySelector('[data-effort-label]').textContent = tx(EFFORT_LABELS[selected.reasoningEffort] || '选择模型');
   }
 
   function previewEffort(event) {
@@ -300,8 +303,8 @@
       ? enterpriseModels.length > 0 || (row.id === 'pi' && imageModels.length > 0) : row.id === 'codex';
     wrap.style.display = supported ? '' : 'none';
     if (cloud() && row.modelMode === 'account') {
-      wrap.style.display = ''; name.textContent = '云端默认模型'; button.disabled = true;
-      button.title = '使用云端执行机账号配置的模型'; close(); return;
+      wrap.style.display = ''; name.textContent = tx('云端默认模型'); button.disabled = true;
+      button.title = tx('使用云端执行机账号配置的模型'); close(); return;
     }
     button.disabled = false;
     if (!supported) {
@@ -313,11 +316,11 @@
     name.textContent = label;
     button.dataset.label = '模型';
     button.dataset.runtimeMode = row.id === 'codex' ? 'native' : 'managed';
-    button.title = (row.id === 'codex' ? 'Codex 设置：' : '模型：') + label;
+    button.title = (row.id === 'codex' ? tx('Codex 设置：') : tx('模型：')) + label;
     button.setAttribute('aria-label', button.title);
     button.setAttribute('aria-haspopup', 'dialog');
     pop.setAttribute('role', 'dialog');
-    pop.setAttribute('aria-label', row.id === 'codex' ? 'Codex 模型与推理设置' : '对话与图片模型选择');
+    pop.setAttribute('aria-label', tx(row.id === 'codex' ? 'Codex 模型与推理设置' : '对话与图片模型选择'));
     const active = document.activeElement;
     const focused = pop.contains?.(active) ? {
       search: active.matches('input[type="search"]'),
@@ -330,6 +333,7 @@
     const scroll = pop.querySelector?.('.cp-model-scroll')?.scrollTop || 0;
     pop.dataset.modelView = row.id === 'codex' ? nativeView : 'managed';
     pop.innerHTML = row.id === 'codex' ? codexHtml(selected) : managedHtml(selected);
+    try { global.SoduWorkI18n?.translateNode?.(pop); } catch (_) {}
     paintEffort();
     filterModels(pop);
     position();
@@ -398,7 +402,7 @@
         nativeLoaded = row.id;
       } catch (error) {
         if (!current()) return;
-        nativeReason = '本机 Codex 模型目录暂时无法读取，可继续使用默认模型';
+        nativeReason = tx('本机 Codex 模型目录暂时无法读取，可继续使用默认模型');
       }
       render();
       notify();
@@ -432,7 +436,7 @@
     if (name) name.textContent = currentLabel(runtime(), selected);
     const button = document.getElementById('cpModelBtn');
     if (button) {
-      button.title = 'Codex 设置：' + currentLabel(runtime(), selected);
+      button.title = tx('Codex 设置：') + currentLabel(runtime(), selected);
       button.setAttribute('aria-label', button.title);
     }
     position();
@@ -472,7 +476,7 @@
     position();
     pop.setAttribute('aria-busy', 'true');
     const empty = pop.querySelector?.('.cp-model-empty');
-    if (empty && !empty.hidden) empty.textContent = '正在加载模型…';
+    if (empty && !empty.hidden) empty.textContent = tx('正在加载模型…');
     await pending;
     pop.setAttribute('aria-busy', 'false');
     if (pop.classList.contains('show')) pop.querySelector?.(runtime().id === 'codex' ? '[data-native-list]' : 'input')?.focus();

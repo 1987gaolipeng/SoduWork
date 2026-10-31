@@ -161,6 +161,14 @@ test('首次通过输入框发送需求失败后仍保留任务归属和完整�
   assert.equal(draft.requirement.taskExecution.followUp,false);
 });
 
+test('从新会话切换到底座后，首条消息仍携带创建页选择的附件', async () => {
+  const refs = [{ name: '人才盘点封面.png', type: 'image/png', data: new Uint8Array([1, 2, 3]) }];
+  const f = fixture({ fresh: true, attachments: Promise.resolve(refs) });
+  f.ctx._ensure = async () => { f.ctx._ref = 'new-runner-ref'; return true; };
+  assert.equal(await f.ctx._sendCore('分析下', { useComposer: false, attachments: refs }), true);
+  assert.deepEqual(f.requests[0][2], refs);
+});
+
 test('发送需求按钮失败后从输入框重发仍准备完整需求材料', async () => {
   const f=fixture(); f.ctx._activeCollabTaskId='todo';
   f.ctx._collabTasks=new Map([['todo',{task:{id:'todo',status:'todo',note:'完整需求'},nativeTurn:true,queueState:'failed'}]]);

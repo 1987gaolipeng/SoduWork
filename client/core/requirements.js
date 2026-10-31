@@ -121,9 +121,21 @@
   }
   function roles(task) { return Array.isArray(task.myRoles) ? task.myRoles : []; }
   function approval(task, context) { return stage(task) === 'closed' ? undefined : context?.approvals?.get(String(task.id)); }
+  // Delivery review is a creator-owned decision.  Keep this presentation
+  // predicate aligned with Hub's authoritative approval routing so stale
+  // inbox snapshots cannot make the executor's card actionable again.
+  function canReview(task) {
+    return Boolean(task && task.canReview !== false &&
+      (task.canReview === true || roles(task).includes('creator')));
+  }
+  function approvalActionable(task, context) {
+    const item = approval(task, context);
+    if (!item || (item.action === 'review' && !canReview(task))) return undefined;
+    return item;
+  }
   function actionable(task, context) {
     if (stage(task) === 'closed') return false;
-    if (approval(task, context)) return true;
+    if (approvalActionable(task, context)) return true;
     if (task.canClaim === true) return true;
     if (stage(task) === 'delivered' || task.canViewExecution === false) return false;
     if (task.status === 'done' && !task.reviewedAt) return false; // After submission, the reviewer owns the decision; role membership alone does not make it actionable.
@@ -174,6 +186,9 @@
     if (task.canClaim === true) return {text: ['github', 'github_issue'].includes(String(task.repositoryIssue?.provider || task.origin || '').toLowerCase()) ?
       '当前团队成员可认领，认领后自动移到待开始，可安排执行' : '仓库成员可认领，认领后自动移到待开始，可安排执行',
       action: '查看并认领', icon: 'confirm', attention: true};
+    if (pending?.action === 'review' && !canReview(task)) {
+      return { text: '等待需求创建人确认交付', action: '查看详情', icon: 'progress' };
+    }
     if (pending) {
       const labels = { baseline: '确认需求与完成标准', review: '核对成果并确认交付', merge: '确认代码合并',
         uat: '确认环境验收结果', deploy: '确认发布' };
@@ -289,7 +304,7 @@
     return { action, patch };
   }
   return { lanes, columns, priorities, sorts, defaults, viewSettings, kinds, scopes, scopeOptions, normalizeScope, content, displayNote, stage, column,
-    day, timeInfo, dateTimestamp, overdue, blocked, roles, approval, waitingOn, actionable, inScope, select, owner, nextStep,
+    day, timeInfo, dateTimestamp, overdue, blocked, roles, approval, canReview, approvalActionable, waitingOn, actionable, inScope, select, owner, nextStep,
     canEdit, canManageMaterials, canSubmitReview, canManageAutomation, canTriage, executing, maintenance,
     canArchive, canDelete, canOpenConversation, editPatch, stagePatch, resolveStageMove };
 });

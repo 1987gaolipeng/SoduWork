@@ -50,19 +50,21 @@ const EXPECT = {
   'ko-KR': { pending: '요청을 이해하는 중…', explain: '결과를 명확히 정리하는 중…', busy: '처리 중' },
 };
 
-test('completed turn labels translate before dynamic duration and token composition', () => {
+test('completed turn labels translate before dynamic duration composition', () => {
   const summary = require('../components/panels/chat-turn-summary');
   for (const locale of ['en-US', 'ja-JP', 'ko-KR']) {
     const i18n = loadI18n(locale);
     const view = summary.create({ esc: value => String(value).replace(/"/g, '&quot;') });
     const turn = { key: 'reply:2', elapsedMs: 23000, tokens: 311 };
     const historical = view.html(turn, '');
-    const current = view.html(turn, '<div><span data-thinking-label>已处理</span> 23s · <b data-thinking-tokens>40</b> tokens</div>');
+    const current = view.html(turn, '<div><span class="nstatus-metric"><span data-thinking-label>已处理</span> ' +
+      '<b data-thinking-elapsed>23s</b></span><span class="nstatus-divider">·</span>' +
+      '<span class="nstatus-metric"><span data-thinking-estimate>≈</span><b data-thinking-tokens>40</b><em>tokens</em></span></div>');
     for (const html of [historical, current]) {
       assert.ok(html.includes(i18n.translateText('展开过程')));
       assert.ok(html.includes(i18n.translateText('用时')));
       assert.match(html, /23s/);
-      assert.match(html, /311/);
+      assert.doesNotMatch(html, /311|tokens/);
       assert.doesNotMatch(html, /用时|展开过程|缺失用量|已处理/);
     }
   }
@@ -116,6 +118,17 @@ test('retry countdown and attempt numbers use each locale catalog', () => {
       assert.doesNotMatch(copy, /模型服务暂时异常/);
     }
   } finally { Date.now = original; }
+});
+
+test('historical chat reopen action uses the selected locale', () => {
+  for (const [locale, expected] of [
+    ['en-US', 'Reopen chat'],
+    ['ja-JP', '会話を開き直す'],
+    ['ko-KR', '대화 다시 열기'],
+  ]) {
+    const i18n = loadI18n(locale);
+    assert.equal(i18n.translateText('重新打开会话'), expected);
+  }
 });
 
 test('nav.agents keeps the Agent product name and localizes surrounding ja/ko copy', () => {

@@ -30,6 +30,15 @@ let _agScope = '';
 const _agProbeBindings = new Map();
 const _agProbeResults = new Map();
 
+/* Agent cards are rendered from local HTML instead of data-i18n templates.
+ * Re-scan each freshly painted surface so changing the interface language
+ * cannot leave the status labels and action copy in Chinese. User-provided
+ * names, versions, paths and diagnostics remain protected by their existing
+ * data-user-content markers. */
+function _agTranslate(root) {
+  try { window.SoduWorkI18n?.translateNode?.(root || document.getElementById('agPanel')); } catch (_) {}
+}
+
 const _AG_ICON = '<svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="12" rx="3"/>' +
   '<path d="M12 3v4M9 13h.01M15 13h.01"/></svg>';
 
@@ -175,6 +184,7 @@ function _agSyncHeader() {
     const on = b.getAttribute('data-agtab') === _agView;
     b.classList.toggle('active', on); b.setAttribute('aria-selected', on ? 'true' : 'false');
   });
+  _agTranslate(p);
 }
 
 function closeAgentsPanel() {
@@ -206,6 +216,7 @@ async function _agLoad(force) {
   if (!loaded) {
     box.innerHTML = '<div class="ag-load"><i></i><i></i><i></i>' +
       '<span>' + (runners ? '正在读取运行节点…' : '正在看执行机上装了哪些…') + '</span></div>';
+    _agTranslate(box);
   }
   let r = null, nodes = null;
   try {
@@ -224,6 +235,7 @@ async function _agLoad(force) {
     const rb = document.getElementById('agRetry');
     if (rb) rb.addEventListener('click', () => _agLoad(true));
     if (!runners) window.CustomAgents?.mount(document.getElementById('agCustomAgents'));
+    _agTranslate(box);
     return;
   }
   if (!_agData) _agData = { env: {}, agents: [], modelCount: 0, runners: [] };
@@ -325,6 +337,7 @@ function _agRender() {
     box.innerHTML = window.RunnerManager
       ? RunnerManager.render(_agData.runners || []) : '<div class="ag-blank">运行节点组件没有加载</div>';
     if (window.RunnerManager) RunnerManager.bind(box, _agLoad, _agData.runners || []);
+    _agTranslate(box);
     return;
   }
   /* Render each machine separately. Every install, uninstall and probe must retain its runnerId. */
@@ -341,6 +354,7 @@ function _agRender() {
   if (wrap) _agBind(wrap);
   _agBind(box);
   window.CustomAgents?.mount(document.getElementById('agCustomAgents'));
+  _agTranslate(box);
 }
 
 function _agMachineHtml(m) {
@@ -464,6 +478,7 @@ function _agDrawerSync() {
     document.body.appendChild(wrap);
   }
   wrap.innerHTML = html;
+  _agTranslate(wrap);
   if (still) wrap.classList.add('is-still');
 }
 let _agDrawerShown = false;

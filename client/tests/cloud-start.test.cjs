@@ -50,13 +50,15 @@ async function fixture(t) {
 for (const runtime of catalog.runtimes()) test(runtime.id + ': starts in cloud without local execution and reopens exactly once', async t => {
   const f = await fixture(t), cloud = f.controller();
   const input = { requestId: crypto.randomUUID(), agentId: runtime.id, text: 'Calculate 17 + 25', model: runtime.modelMode === 'account' ? '' : 'model1',
-    attachments: [{ name: 'input.md', data: Buffer.from('17 + 25') }] };
+    attachments: [{ name: 'input.md', type: 'text/markdown', data: Buffer.from('17 + 25') }] };
   const reply = await cloud.start(input);
   assert.equal(reply.ok, true); assert.equal(reply.handoff.entryKind, 'cloud');
   assert.equal(f.remote().files[0].text, '17 + 25');
   const restarted = f.controller(), view = await f.open(restarted, reply.sessionId);
   assert.equal(view.passiveCloudView, true); assert.equal(view.snapshot().messages.filter(row => row.role === 'user').length, 1);
   assert.equal(view.snapshot().messages[0].attachments[0].name, 'input.md');
+  assert.equal(view.snapshot().messages[0].attachments[0].type, 'text/markdown');
+  assert.equal(view.snapshot().messages[0].attachments[0].size, Buffer.byteLength('17 + 25'));
   assert.equal(view.snapshot().cloudHandoff.target.agentId, runtime.id);
   assert.equal((await restarted.start(input)).sessionId, reply.sessionId); assert.equal(f.starts(), 1);
   assert.equal((await restarted.send(view, 'Continue', [])).accepted, true); assert.equal(f.sends(), 1);

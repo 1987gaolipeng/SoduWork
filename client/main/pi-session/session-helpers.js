@@ -1,6 +1,7 @@
 /* Pure helpers shared by the Pi session loader and history projection. */
 const path = require('path');
 const attachmentContract = require('./attachment-contract');
+const inputContext = require('./input-context.cjs');
 
 function entryCandidates(app) {
   const out = [];
@@ -42,14 +43,30 @@ function lastAssistantText(snapshot) {
   return '';
 }
 
+function truncatedAttachmentTail(value) {
+  const match = String(value || '').match(/^\{\s*"([a-z]*)/i);
+  if (!match || !match[1]) return false;
+  return 'files'.startsWith(match[1].toLowerCase());
+}
+
+function stripMaterialContext(value) {
+  let text = String(value || '').trimEnd();
+  while (text.endsWith(inputContext.END)) {
+    const start = text.lastIndexOf(inputContext.START);
+    if (start < 0 || (start > 0 && !/\r?\n\r?\n$/.test(text.slice(0, start)))) break;
+    const stripped = inputContext.strip(text);
+    if (stripped === text) break;
+    text = stripped;
+  }
+  return text;
+}
+
 function visibleTitleText(value) {
-  let text = String(value).trimEnd();
+  let text = stripMaterialContext(value);
   const contexts = [require('./connector-context.cjs'), require('./plugin-context')];
-  let previous;
-  // Transport envelopes can be appended in either order. Remove only validated
-  // trailing envelopes until the visible first message stops changing.
-  do {
-    previous = text;
+  let changed = true;
+  while (changed) {
+    const before = text;
     for (const context of contexts) {
       if (!text.endsWith(context.END)) continue;
       const start = text.lastIndexOf(context.START);
@@ -62,8 +79,9 @@ function visibleTitleText(value) {
       } catch (_) { /* Literal tag examples are ordinary title text. */ }
     }
     // Attachment metadata is an internal transport envelope and must not become
-    // part of a conversation title shown to users. Only strip a complete trailing
-    // envelope so ordinary text after a literal marker is never discarded.
+    // part of a conversation title shown to users. Complete envelopes require the
+    // full trailing marker; a separately guarded partial `{"files"` prefix covers
+    // titles persisted after an older length limit cut off the closing marker.
     if (text.endsWith(attachmentContract.END)) {
       const start = text.lastIndexOf(attachmentContract.START);
       if (start >= 0 && (start === 0 || /\r?\n\r?\n$/.test(text.slice(0, start)))) {
@@ -71,8 +89,44 @@ function visibleTitleText(value) {
         if (parsed.files.length) text = parsed.text;
       }
     }
-  } while (text !== previous);
+    // Older versions could persist a title after truncating the attachment
+    // envelope itself, leaving only the marker and a partial `{"files"` key.
+    // Treat that reserved prefix as transport metadata, while keeping literal
+    // markers such as `{"example":true}` visible.
+    if (text.includes(attachmentContract.START) && !text.endsWith(attachmentContract.END)) {
+      const start = text.lastIndexOf(attachmentContract.START);
+      const before = text.slice(0, start);
+      const tail = text.slice(start + attachmentContract.START.length).trimStart();
+      if (start >= 0 && (start === 0 || /\s$/.test(before)) && truncatedAttachmentTail(tail)) {
+        text = before.trimEnd();
+      }
+    }
+    changed = text !== before;
+  }
   return text;
+}
+
+function repairPersistedTitle(value, reference) {
+  const text = String(value || '').trim();
+  const internalMarkers = [
+    attachmentContract.START,
+    require('./connector-context.cjs').START,
+    require('./plugin-context').START,
+    inputContext.START,
+  ];
+  const marker = internalMarkers.reduce((position, candidate) => {
+    const at = text.indexOf(candidate);
+    return at >= 0 && (position < 0 || at < position) ? at : position;
+  }, -1);
+  if (!text || marker < 0) return text;
+  const source = String(reference || '').trim();
+  if (source) {
+    const canonical = title({ firstMessage: source });
+    const prefix = text.slice(0, marker).replace(/\s+/g, ' ').trim();
+    if (canonical && (!prefix || canonical.startsWith(prefix) || prefix.startsWith(canonical))) return canonical;
+  }
+  const visible = visibleTitleText(text);
+  return visible !== text ? visible : text;
 }
 
 function title(session) {
@@ -93,4 +147,4 @@ function title(session) {
   return text ? text.slice(0, 40) : '\u672a\u547d\u540d\u5bf9\u8bdd';
 }
 
-module.exports = { entryCandidates, explain, lastAssistantText, title, visibleTitleText };
+module.exports = { entryCandidates, explain, lastAssistantText, title, visibleTitleText, repairPersistedTitle };

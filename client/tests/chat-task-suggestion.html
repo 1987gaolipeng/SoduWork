@@ -105,12 +105,27 @@ window.tasks=[];window.save=()=>{};window.uid=()=>('t'+Date.now());
   let release;
   const normalListTeammates=SoduWorkAPI.listTeammates;
   SoduWorkAPI.listTeammates=()=>new Promise(r=>{release=r});
-  const pending=ComposeDraft.openWith({title:'稍后返回的建议',note:'不该重新弹出'}, {variant:'chat'});
-  chk('准备任务时也能立即返回对话',!!document.querySelector('.cp-loading-chat #cpCancel'));
-  document.querySelector('.cp-loading-chat #cpCancel').click();
+  const pending=ComposeDraft.openWith({title:'稍后返回的建议',note:'准备完成后才显示'}, {variant:'chat'});
+  const preparing=document.querySelector('.cp-draft.show .cp-loading-thinking');
+  const cancel=preparing?.querySelector('#cpCancel');
+  chk('准备任务时显示可取消思考状态，不显示空的需求卡片',
+    preparing?.getAttribute('role')==='status'&&preparing.getAttribute('aria-live')==='polite'&&
+    preparing.querySelector('b')?.textContent==='正在思考'&&
+    preparing.querySelector('small')?.textContent.includes('正在准备需求信息')&&
+    !!cancel&&!cancel.disabled&&cancel.getAttribute('aria-label')==='继续对话'&&
+    !document.querySelector('.cp-draft.show .cp-card, .cp-draft.show #cpCreate'));
+  cancel?.click();
+  const closedImmediately=!document.querySelector('.cp-draft.show');
   release({mates:[]});await pending;await wait();
+  chk('准备期间取消后迟到的请求不能重新弹出卡片',closedImmediately&&!document.querySelector('.cp-draft.show'));
   SoduWorkAPI.listTeammates=normalListTeammates;
-  chk('收起后迟到的请求不能把卡片重新弹出',!document.querySelector('.cp-draft.show'));
+  const complete=ComposeDraft.openWith({title:'准备完成的建议',note:'准备完成后才显示'}, {variant:'chat'});
+  await complete;await wait();
+  const completeCard=document.querySelector('.cp-draft.show .cp-card-quick');
+  chk('数据准备完成后一次性显示带内容卡片',!!completeCard&&
+    completeCard.querySelector('#cpTitle')?.value==='准备完成的建议'&&
+    completeCard.querySelector('.cp-quick-note')?.textContent==='准备完成后才显示'&&
+    !document.querySelector('.cp-draft.show .cp-loading-thinking'));
 
   if(preview){
     SoduWorkAPI.listAIAgents=async()=>({agents:[{id:'local:pi',name:'Pi',online:true,cliName:'Pi'}]});

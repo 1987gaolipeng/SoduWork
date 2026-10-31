@@ -2,6 +2,7 @@
 
 // State remains owned by the session; accessors keep async transitions live.
 const sessionHelpers = require('./session-helpers');
+const modelErrors = require('./model-errors');
 
 function create(ctx) {
   const {
@@ -200,6 +201,7 @@ async send(text, turnAttachments, sendOptions) {
       };
       let restoreSkills = () => {};
       let connectors = null;
+      let modelRequestError = null;
       try {
         const stopped = () => interrupted() || ctx.closed || Boolean(ctx.run.stopReason) || ctx.goalCancelled;
         connectors = await require('./connector-turn.cjs').prepare(resolvedPlugins.applicationUnavailable
@@ -264,7 +266,14 @@ async send(text, turnAttachments, sendOptions) {
         modelPrompt = require('./input-context.cjs').augment(modelPrompt,
           materialUnderstanding.eligible ? materialUnderstanding.prompt : '');
         await ctx.beginTurnJournal(turn);
-        const completion = await ctx._promptComplete(modelPrompt, { images: nativeImages ? visualInputs : [] });
+        let completion;
+        try {
+          completion = await ctx._promptComplete(modelPrompt, { images: nativeImages ? visualInputs : [] });
+        } catch (error) {
+          const described = modelErrors.describe(error);
+          if (described.status === 404) modelRequestError = described;
+          throw error;
+        }
         if (interrupted()) return { ok: true, cancelled: true, manualStop: true };
         if (completion?.incomplete && !ctx.run.stopReason && !ctx.goalCancelled) {
           ctx.acc.markIncomplete(completion.incompleteReason || 'length');
@@ -494,6 +503,20 @@ async send(text, turnAttachments, sendOptions) {
             paused: Boolean(ctx.limitRequest), reason: stalled.reason || String(e.message || e),
             snapshot: ctx._snapshot(),
           };
+        }
+        if (modelRequestError) {
+          const reason = modelRequestError.publicText || '模型服务地址或模型不存在';
+          ctx.failedLastTurn = true;
+          if (runAsGoal) {
+            ctx.qualityPhase = 'paused';
+            ctx.qualityReason = reason;
+            ctx.goalEnabled = false;
+            ctx._setHarness('execute', 'paused', reason);
+            ctx._checkpoint('run.paused', { reason, cause: 'model-unavailable' });
+          }
+          return { ok: false, failureKind: 'model-unavailable', retrySafe: true,
+            requiresModelChange: true, failedModelName: ctx.modelSelection.capture(),
+            reason, modelRecoveryGoal: runAsGoal, snapshot: ctx._snapshot() };
         }
         const protocolRecovering = ctx._scheduleProtocolRecovery({
           goalMode: runAsGoal, request: rawText,

@@ -12,13 +12,18 @@ function scope(identity) {
   catch (_) { return String(identity.hub || '') + '|' + String(identity.clientId || ''); }
 }
 function createProcessSession(options = {}) {
+  const recoveryMaxAttempts = Math.max(1, Math.min(6, Number(options.recoveryMaxAttempts) || 3));
+  const recoveryInitialDelayMs = Math.max(0, Math.min(5000,
+    Number.isFinite(Number(options.recoveryRetryDelayMs)) ? Number(options.recoveryRetryDelayMs) : 100));
   const hosts = new Map();
   const retired = new Set();
   const retiredProfiles = new WeakMap();
   let lifecyclePowerMonitor = options.powerMonitor || null;
   let disposed = false;
-  const recoveryPending = cause => Object.assign(Error('上次执行的资源仍在回收，请确认回收完成后重试；本次操作未启动'),
-    { code: 'RUNTIME_RECOVERY_PENDING', ...(cause ? { cause } : {}) });
+  const recoveryPending = (cause, attempt = 0) => Object.assign(
+    Error('上次执行的资源仍在回收，请确认回收完成后重试；本次操作未启动'),
+    { code: 'RUNTIME_RECOVERY_PENDING', recoveryAttempt: attempt,
+      ...(cause ? { cause } : {}) });
   function retire(row, key) {
     retired.add(row.host); retiredProfiles.set(row.host, key);
     void row.host.stop().catch(() => {});
@@ -75,18 +80,19 @@ function createProcessSession(options = {}) {
   }
   const api = {
     async open(opts) {
-      // Retry only the retirement fence once when cleanup crosses the first
-      // wait window. No new resource is created before cleanup is confirmed.
-      for (let attempt = 0; ; attempt++) {
+      // Retry the retirement fence with bounded backoff. No new resource is
+      // created before cleanup is confirmed.
+      for (let attempt = 0; attempt < recoveryMaxAttempts; attempt++) {
         try {
           return await (await host(opts.app, opts.identity)).call('open', [opts], { timeoutMs: 45000 });
         } catch (error) {
-          if (attempt > 0 || error?.code !== 'RUNTIME_RECOVERY_PENDING') throw error;
-          const delay = Number(options.recoveryRetryDelayMs || 0);
+          if (error?.code !== 'RUNTIME_RECOVERY_PENDING') throw error;
+          if (attempt + 1 >= recoveryMaxAttempts) throw recoveryPending(error, attempt + 1);
+          const delay = Math.min(5000, recoveryInitialDelayMs * (2 ** attempt));
           if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
-          else await Promise.resolve();
         }
       }
+      throw recoveryPending(null, recoveryMaxAttempts);
     },
     get(ref) { for (const value of [...hosts.values()].map(row => row.host).concat([...retired])) {
       const found = value.handles.get(ref); if (found) return found.handle;

@@ -61,7 +61,8 @@ test('real Pi first requirement opens the same work archive, persists its bindin
   const cwd = path.join(root, 'workspace'), agentDir = path.join(root, 'pi-agent');
   fs.mkdirSync(cwd); fs.mkdirSync(agentDir);
   const app = { isPackaged: false, getPath: () => root }, owner = identity();
-  const requests = [], models = [];
+  const requests = [], models = [], prepareOptions = [];
+  let rejectStaleDefault = false;
   const server = http.createServer((req, res) => {
     let raw = ''; req.on('data', bytes => { raw += bytes; });
     req.on('end', () => {

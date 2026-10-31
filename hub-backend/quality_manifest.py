@@ -22,6 +22,8 @@ RELEASE_SMOKES = tuple(sorted((
     "test_health_identity.py",
     "smoke_app_publication.py",
     "test_plugin_app_contracts.py",
+    "test_jiyong_contract.py",
+    "test_schedule_source_app.py",
     "test_plugin_window_contracts.py",
     "test_agent_install_recovery.py",
     "test_requirement_projection.py",

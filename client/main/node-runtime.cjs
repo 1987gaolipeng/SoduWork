@@ -7,7 +7,7 @@ const { spawnSync } = require('node:child_process');
 
 function createResolver({ platform = process.platform, executable = process.execPath,
   versions = process.versions, environment = process.env, io = fs,
-  probe = spawnSync, clock = Date.now } = {}) {
+  probe = spawnSync, clock = Date.now, resourcesPath = process.resourcesPath } = {}) {
   const p = platform === 'win32' ? path.win32 : path.posix;
   const cache = new Map();
   function environmentFor(node) {
@@ -22,10 +22,14 @@ function createResolver({ platform = process.platform, executable = process.exec
     return env;
   }
   function candidates() {
+    if (environment.SODUWORK_RUNTIME_MANAGED === '1') {
+      return resourcesPath ? [p.join(resourcesPath, 'node', platform === 'win32' ? 'node.exe' : 'bin/node')] : [];
+    }
     const folders = String(environment.PATH || environment.Path || '').split(platform === 'win32' ? ';' : ':');
     const paths = folders.filter(Boolean).map(folder => p.join(folder, platform === 'win32' ? 'node.exe' : 'node'));
     if (platform === 'win32') paths.push(p.join(environment.ProgramFiles || 'C:\\Program Files', 'nodejs', 'node.exe'));
     if (!versions.electron) paths.unshift(executable);
+    if (resourcesPath) paths.unshift(p.join(resourcesPath, 'node', platform === 'win32' ? 'node.exe' : 'bin/node'));
     return [...new Set(paths)];
   }
   function npmFor(node) {
@@ -63,11 +67,12 @@ function createResolver({ platform = process.platform, executable = process.exec
     }
     // Approved pure-JS platform launchers can use the embedded runtime, but npm
     // installs must use native Node so native dependencies get the correct ABI.
-    if (!requireNpm && versions.electron && Number(versions.node.split('.')[0]) >= minimum) {
+    if (environment.SODUWORK_RUNTIME_MANAGED !== '1' && !requireNpm && versions.electron && Number(versions.node.split('.')[0]) >= minimum) {
       const value = { node: executable, npm: '', version: versions.node, embedded: true };
       cache.set(key, { at: clock(), value });
       return { ...value, env: environmentFor(executable) };
     }
+    if (environment.SODUWORK_RUNTIME_MANAGED === '1') throw Error('客户端运行组件不完整，请重新安装 SoduWork 后重试（SW-NODE-MISSING）');
     throw Error(`需要 Node.js ${minimum} 或更新版本${requireNpm ? '（包含 npm）' : ''}。${found.length ? '检测到：' + found.join('、') + '。' : ''}请安装后重试；客户端内置 Node 与系统 Node 独立。`);
   };
 }

@@ -226,10 +226,10 @@ function nodeCapabilities(body) {
   };
 }
 
-function externalMcpServers(names) {
+function externalMcpServers(names, body) {
   return (Array.isArray(names) ? names : [])
     .map((name) => String(name || '').trim()).filter(Boolean)
-    .filter((name) => !VIRTUAL_MCP_SERVERS.has(name));
+    .filter((name) => !VIRTUAL_MCP_SERVERS.has(name) && !(name === 'soduwork-jiyong' && body?.jiyong?.mcp?.server === name));
 }
 
 function workflow(body) {
@@ -259,12 +259,12 @@ function build(raw) {
       automation: body.entrypoints?.automation == null
         ? true : Boolean(body.entrypoints.automation),
     }
-    : { conversation: true, task: false, automation: false };
+    : { conversation: true, task: false, automation: Boolean(body.jiyong && body.entrypoints?.automation) };
   const baseCapabilities = nodeCapabilities(body);
   const resultContract = graph.nodes.flatMap((node) => (node.outputs || []).map((output) => ({
     id: node.key + '.' + output.key, nodeKey: node.key, nodeName: node.name, ...output,
   })));
-  const externalMcp = externalMcpServers(body.mcpServers);
+  const externalMcp = externalMcpServers(body.mcpServers, body);
   const evaluationCases = body.evaluationInstruction ? [{
     key: 'representative-case', name: '代表性任务',
     instruction: body.evaluationInstruction, inputs: {},
@@ -333,12 +333,15 @@ function build(raw) {
     setup: body.setup, instructions: body.instructions, entrypoints, capabilities: baseCapabilities,
     evaluations: evaluationCases,
   };
+  if (body.extensions != null) manifest.extensions = body.extensions;
+  if (body.appCategory != null) manifest.appCategory = body.appCategory;
   if (body.distribution) manifest.distribution = body.distribution;
   if (body.locales) manifest.locales = body.locales;
   if (body.template === 'app') manifest.template = 'app';
   if (body.icon) manifest.icon = body.icon;
   if (body.coverUrl) manifest.coverUrl = body.coverUrl;
   if (body.appWindow) manifest.appWindow = body.appWindow;
+  if (body.jiyong) manifest.jiyong = body.jiyong;
   if (body.ui.contributions.length) manifest.ui = body.ui;
   if (body.resources) manifest.resources = pluginResources.summary(body.resources);
   const canonical = JSON.stringify({
@@ -388,15 +391,18 @@ function publicPlugin(plugin, detail) {
   const hasWorkflow = Boolean(version.capabilities.hasWorkflow);
   const ui = (version.manifest || {}).ui || { contributions: [] };
   const interactive = hasInteractiveUi(ui);
-  const externalMcp = externalMcpServers(version.body.mcpServers || []);
+  const externalMcp = externalMcpServers(version.body.mcpServers || [], version.body);
   const out = {
     pluginId: plugin.id, key: plugin.key, name: plugin.name, description: plugin.description,
     ...((version.manifest || {}).locales ? { locales: version.manifest.locales } : {}),
     ...(version.body.template === 'app' ? { template: 'app' } : {}),
+    ...((version.manifest || {}).extensions != null ? {extensions:version.manifest.extensions} : {}),
+    ...(version.body.template === 'app' ? {appCategory:require('../core/plugin-app-contract.cjs').category(version.manifest?.appCategory)} : {}),
     authorName: String((version.manifest || {}).author || version.body.author || 'SoduWork 个人作者'),
     ...((version.manifest || {}).coverUrl ? { coverUrl: version.manifest.coverUrl } : {}),
     ...((version.manifest || {}).icon ? { icon: version.manifest.icon } : {}),
     ...((version.manifest || {}).appWindow ? { appWindow: version.manifest.appWindow } : {}),
+    ...((version.manifest || {}).jiyong ? { jiyong: version.manifest.jiyong } : {}),
     version: version.version, checksum: version.checksum,
     sourceKind: plugin.builtIn ? 'builtin' : (version.capabilities.sourceKind || 'personal'),
     personal: true,
@@ -424,7 +430,7 @@ function publicPlugin(plugin, detail) {
      */
     entrypoints: {
       conversation: true, task: false,
-      automation: !plugin.builtIn && !interactive,
+      automation: !plugin.builtIn && (!interactive || Boolean(version.body.jiyong && version.body.entrypoints?.automation)),
     },
     capabilities: {
       ...(version.body.platforms?.length ? { platforms: version.body.platforms.slice() } : {}),
@@ -492,7 +498,7 @@ function builtinPlugins(app, ids) {
         enabled: true, builtIn: true, currentVersion: body.version, versions: [{ ...version, version: body.version }],
         createdAt: '2026-10-20T00:00:00.000Z', updatedAt: '2026-10-20T00:00:00.000Z' });
     } catch (error) {
-      if (ids) throw new Error('应用开发资源不完整，请修复客户端安装后重试');
+      if (ids) throw new Error('即用开发资源不完整，请修复客户端安装后重试');
       console.warn('[personal-plugins] App Developer unavailable:', error.code || 'invalid-resources');
     }
   }
@@ -585,6 +591,13 @@ async function exportToFile(app, dialog, pluginId) {
 
 function preflight(raw) {
   const version = build(raw);
+  if (version.body.template === 'app') return {ok:true,sourceKind:'personal',manifest:version.manifest,workflow:version.workflow,
+    capabilities:version.capabilities,simulation:version.capabilities.simulation,checks:[
+      {key:'schema',label:'即用声明与页面入口有效',ok:true},
+      {key:'resources',label:'随包资源已收集并通过完整性校验',ok:true},
+      ...(version.body.jiyong?[{key:'storage',label:'数据集合、参数与初始化声明有效',ok:true}]:[]),
+      {key:'secret',label:'包内配置未发现禁止内置的凭据',ok:true},
+    ]};
   return { ok: true, sourceKind: 'personal', manifest: version.manifest, workflow: version.workflow,
     capabilities: version.capabilities, simulation: version.capabilities.simulation, checks: [
       { key: 'schema', label: '个人插件结构完整', ok: true },
@@ -597,6 +610,15 @@ function preflight(raw) {
       { key: 'secret', label: '插件定义不保存真实密钥', ok: true },
       { key: 'local', label: '安装后默认仅自己可见', ok: true },
     ] };
+}
+
+async function preflightCandidate(app,body) {
+  const preview=preflight(body);
+  if(body.template!=='app')return preview;
+  const runtime=await require('./app-candidate-preflight.cjs').run(app,build(body).body);
+  if(runtime.executed)preview.checks.push(...runtime.checks.map(row=>({...row,label:row.label+(row.reason?'：'+row.reason:'')})));
+  else preview.checks.push({key:'app-external',label:'在线服务首屏、业务授权与交互：需实际连接后验证',ok:null,state:'pending'});
+  return {...preview,ok:preview.ok&&runtime.ok!==false,runtime};
 }
 
 function preflightArchive(content) {
@@ -696,7 +718,7 @@ function resolve(app, rawIds, options = {}) {
       ? (version.workflow.nodes || []).map((node) => node.name).filter(Boolean).join(' → ') : '';
       const mcpServers = version.body.mcpServers || [];
       const builtInMcp = mcpServers.filter((name) => VIRTUAL_MCP_SERVERS.has(String(name || '').trim()));
-      const externalMcp = externalMcpServers(mcpServers);
+      const externalMcp = externalMcpServers(mcpServers, version.body);
     const skills = version.body.skills || [];
     const runtime = version.body.runtime || [];
     const acceptance = version.body.evaluationCriteria || [];
@@ -760,12 +782,25 @@ function install({ app, ipcMain, dialog, safeStorage, identityOf, fetchImpl }) {
   ipcMain.handle('personal-plugin-choose-package', () => require('./plugin-package-picker').choose(dialog));
   ipcMain.handle('personal-plugin-list', (_event, options) => ({ ok: true, items: catalog(app, Boolean(options && options.includeDisabled)) }));
   ipcMain.handle('personal-plugin-get', (_event, pluginId) => ({ ok: true, plugin: get(app, pluginId) }));
-  ipcMain.handle('personal-plugin-preflight', async (_event, body) => preflight(await access.body(body)));
+  ipcMain.handle('personal-plugin-preflight', async (_event, body) => preflightCandidate(app,await access.body(body)));
   ipcMain.handle('personal-plugin-preflight-archive', async (_event, _name, content) => {
     const result = preflightArchive(content);
-    return { ...result, personalDraft: await access.body(result.personalDraft) };
+    const body=await access.body(result.personalDraft);
+    return {...result,...await preflightCandidate(app,body),personalDraft:body};
   });
-  ipcMain.handle('personal-plugin-create', async (_event, body) => create(app, await access.body(body)));
+  ipcMain.handle('personal-plugin-initialize',async(_event,pluginId)=>require('./jiyong-initialization.cjs').initialize({app,identityOf,fetchImpl},String(pluginId)));
+  ipcMain.handle('personal-plugin-create', async (_event, body) => {
+    const authorized=await access.body(body), checked=await preflightCandidate(app,authorized);
+    if(checked.ok===false)return {ok:false,installed:false,reason:checked.checks.filter(row=>row.ok===false).map(row=>row.label).join('\n'),checks:checked.checks};
+    // Recheck source authorization after the asynchronous candidate startup.
+    const current=await access.body(body);
+    if(build(current).checksum!==build(authorized).checksum)throw Error('即用候选内容已变化，请重新检查后安装');
+    const result=create(app,current);
+    try{result.initialization=await require('./jiyong-initialization.cjs').initialize({app,identityOf,fetchImpl},result.plugin.pluginId,result.plugin);return result;}
+    catch(error){return {ok:false,installed:true,plugin:result.plugin,reason:'即用已保存，但数据初始化未完成：'+error.message};}
+  });
+  ipcMain.handle('personal-plugin-metadata-update', (_event, pluginId, options) =>
+    require('./personal-plugin-metadata.cjs').update({app,identityOf,pluginId,options}));
   ipcMain.handle('personal-plugin-configure', async (_event, id, checksum, config) => {
     await access.ids([id], 'use'); return configure(app, id, checksum, config);
   });
@@ -791,6 +826,6 @@ function install({ app, ipcMain, dialog, safeStorage, identityOf, fetchImpl }) {
 module.exports = {
   BUILDER_ID, APP_DEVELOPER_ID, SKILL_STUDIO_ID, MCP_STUDIO_ID, PRODUCT_INCUBATOR_ID, build, catalog, get, create, preflight, resolve, setVersion,
   exportDraft, exportToFile, install, publisherIdentity, signPayload, normalizeInstallSetup, configure,
-  preflightArchive,
+  preflightArchive, preflightCandidate,
   _canonicalBytes: canonicalBytes, _read: read, _publicPlugin: publicPlugin,
 };

@@ -23,6 +23,7 @@
     const current = record => owned(record) && record.sessionId === String(ctx._sessionId || '');
     const tell = message => global.petSay?.(message);
     const isRequirement = record => record.actionId === 'work.requirement.create';
+    const isInline = record => isRequirement(record) || (record.actionId==='work.automation.create' && record.seed.source==='web-app');
     const messageOwner = (index) => ctx._snap?.history?.messageIndices?.[index] ??
       ((Number(ctx._snap?.history?.messageStart) || 0) + index);
     function transcriptAnchor() {
@@ -34,7 +35,7 @@
       if (!viewSession || viewSession !== String(ctx._sessionId)) return [];
       const positions = [];
       for (const record of rows(scope(), viewSession).values()) {
-        if (!isRequirement(record)) continue;
+        if (!isInline(record)) continue;
         const anchor = record.seed?.transcriptAnchor;
         let index = -1;
         if (anchor && Number.isSafeInteger(anchor.after) && anchor.after >= -1) {
@@ -262,6 +263,10 @@
         },
         onCardClose: () => {
           if (!owned(record)) return;
+          // Closing an inline requirement also clears the action picker. This
+          // prevents the next ordinary chat turn from inheriting a stale
+          // /新建需求 selection after the card is cancelled.
+          ctx._pluginMention?.clearAction?.();
           record.closed = true; record.version++; queue(record);
           if (active === record) active = null;
           paint();
@@ -307,7 +312,7 @@
     async function prepare(command, options = {}) {
       if (!supported(command?.id)) return options;
       const openingScope = scope(), openingEpoch = ctx._viewEpoch, authEpoch = scopeEpoch;
-      if (!await ensureConversation(command.text)) return null;
+      if (!await ensureConversation(command.title || command.text)) return null;
       if (openingScope !== scope() || openingEpoch !== ctx._viewEpoch || authEpoch !== scopeEpoch) return null;
       const owner = scope(), sessionId = String(ctx._sessionId), id = actionId(command.id);
       if (!ctx._api()?.saveWorkCard) throw Error('会话卡片存储不可用，请重新启动客户端');
@@ -327,7 +332,7 @@
           const {files, ...context} = options.conversationContext; seed.conversationContext = json(context);
         }
         seed.parseText = command.parseText || command.text || '';
-        if (id === 'work.requirement.create') seed.transcriptAnchor = transcriptAnchor();
+        if (id === 'work.requirement.create' || (id==='work.automation.create' && options.source==='web-app')) seed.transcriptAnchor = transcriptAnchor();
         seed.model = typeof options.model === 'function' ? options.model() : options.model || ctx._workModel?.() || '';
         record = {id: 'card-' + crypto.randomUUID(), owner, scopeEpoch, sessionId, actionId: id, prompt: command.text || '',
           seed, state: {phase: 'loading'}, files: [], closed: false, version: 0, revision: 0};
@@ -336,9 +341,34 @@
       }
       if (record.owner !== owner || record.sessionId !== sessionId) return null;
       active = record; viewSession = sessionId; record.closed = false;
-      if (isRequirement(record)) ctx._render?.();
+      if (isInline(record)) ctx._render?.();
       paint();
       return hooks(record, options);
+    }
+    // Direct app requests use the same durable work card as ordinary creation,
+    // without sending a second AI turn or requiring a second Save click.
+    async function runAutomation(params, authorize) {
+      const seed=await prepare({id:'work.automation.create',text:params.text,title:'创建'+(params.context?.appName || '即用')+'的计划'},{source:'web-app'});
+      if(!seed)throw Error('创建对话已变化，请重新发起');
+      const record=active;
+      active=null; paint();
+      let creating=false;
+      try {
+        const result=await global.WorkAutomationDirect.create(params,{authorize,
+          onBeforeCreate:async value=>{
+            await seed.onBeforeSubmit({phase:'submitting',proposal:value});
+            if(!owned(record))throw Error('账号已变化，请重新提交');
+            creating=true;paint();
+          }});
+        update(record,{phase:result.ok?'succeeded':'error',proposal:record.state.proposal,
+          receipt:result.schedule || null,createdId:result.schedule?.id || '',
+          uncertain:!!result.uncertain,error:result.reason || ''});
+        await persist(record);paint();
+        return {...result,...(record.error?{historyWarning:record.error}:{})};
+      }catch(error){
+        update(record,{...record.state,phase:'error',uncertain:creating,error:String(error.message || error)});
+        await persist(record);paint();throw error;
+      }
     }
     async function activate(record) {
       if (!current(record)) return false;
@@ -420,8 +450,9 @@
       return result;
     }
     async function restoreActive() {
-      const last = [...rows(scope(), String(ctx._sessionId)).values()].filter(record => !record.closed ||
-        (isRequirement(record) && record.state.phase === 'succeeded')).at(-1);
+      const last = [...rows(scope(), String(ctx._sessionId)).values()].filter(record =>
+        !(record.actionId==='work.automation.create' && record.seed.source==='web-app') &&
+        (!record.closed || (isRequirement(record) && record.state.phase === 'succeeded'))).at(-1);
       if (last) await activate(last);
     }
     function paint() {
@@ -438,20 +469,25 @@
           const retry = document.createElement('button'); retry.type = 'button'; retry.textContent = '重试保存';
           retry.onclick = () => { record.error = ''; void persist(record); }; error.appendChild(retry); history.appendChild(error);
         }
+        // A requirement is prepared asynchronously. Keep its transcript slot empty
+        // until the parsed draft is ready, otherwise the conversation briefly shows
+        // an empty card before the form has any meaningful content.
+        if (active === record && isRequirement(record) && record.state?.phase === 'loading' &&
+            !cardHost(record)?.querySelector('.pui-surface')) continue;
         if (active === record && (!isRequirement(record) || cardHost(record)?.querySelector('.pui-surface'))) continue;
-        const destination = isRequirement(record) ? cardHost(record) : history;
+        const destination = isInline(record) ? cardHost(record) : history;
         if (!destination) continue;
         const version = String(record.version || 0) + ':' + String(record.revision || 0);
-        if (isRequirement(record) && destination.dataset.workCardVersion === version &&
+        if (isInline(record) && destination.dataset.workCardVersion === version &&
             destination.querySelector('.nchat-work-record')) continue;
-        if (isRequirement(record)) destination.replaceChildren();
+        if (isInline(record)) destination.replaceChildren();
         destination.dataset.workCardVersion = version;
         const row = document.createElement('article'); row.className = 'cp-card nchat-work-record';
         const prompt = document.createElement('p'); prompt.className = 'nchat-work-prompt';
         prompt.textContent = (record.actionId === 'work.automation.create' ? '【自动化】：' : '【需求】：') + record.prompt;
         const title = document.createElement('strong'); title.textContent = record.state.receipt?.title || record.state.draft?.title || record.state.proposal?.title || record.prompt || '工作记录';
         const status = document.createElement('span');
-        status.textContent = ({succeeded:'已创建', submitting:'正在保存', loading:'待完善', error:'需要处理'})[record.state.phase] || '草稿 · 尚未创建';
+        status.textContent = record.seed.source==='web-app' && record.state.phase==='loading'?'正在整理计划…':({succeeded:'已创建', submitting:'正在保存', loading:'待完善', error:'需要处理'})[record.state.phase] || '草稿 · 尚未创建';
         const open = document.createElement('button'); open.type = 'button'; open.className = 'cp-ghost';
         open.textContent = record.state.phase === 'succeeded' ? '查看创建结果' : '继续编辑';
         open.onclick = () => { void activate(record).catch(error => tell(error.message)); };
@@ -490,7 +526,7 @@
       active = null; viewSession = ''; sessions.clear(); draftSelections.clear();
     }
     return {prepare, restore, restoreActive, restoreRequirements, capture, detach, flush, clearScope, paint, timeline, hasCreatedTask,
-      saveDraftSelection, ensureDraftSelectionSaved, draftSelectionError};
+      saveDraftSelection, ensureDraftSelectionSaved, draftSelectionError, runAutomation};
   }
   global.ChatWorkCards = {create};
 })(window);

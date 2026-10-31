@@ -60,6 +60,52 @@
     }
   }
 
+  function translateText(value) {
+    return global.SoduWorkI18n?.translateText?.(value) || value;
+  }
+
+  /* Keep a routed work turn visible while a new conversation is reserved. */
+  function showPending(command, context) {
+    const root = context?.mount?.();
+    const draft = root?.querySelector?.('.nchat-draft');
+    const text = String(command?.text || '').trim();
+    if (!draft || typeof draft.querySelector !== 'function' || !text) return null;
+    draft.querySelector('[data-work-action-pending]')?.remove();
+    const node = document.createElement('div');
+    node.className = 'nchat-work-action-pending';
+    node.dataset.workActionPending = 'true';
+    const prompt = document.createElement('div');
+    prompt.className = 'pui-turn-prompt';
+    const bubble = document.createElement('div');
+    bubble.className = 'pui-turn-prompt-bubble';
+    bubble.setAttribute('role', 'note');
+    bubble.setAttribute('aria-label', translateText('你的补充'));
+    bubble.setAttribute('data-user-content', '');
+    bubble.textContent = text;
+    prompt.appendChild(bubble);
+    const status = document.createElement('div');
+    status.className = 'cp-loading cp-loading-chat cp-loading-thinking';
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    const icon = document.createElement('i'); icon.setAttribute('aria-hidden', 'true');
+    const copy = document.createElement('span'), title = document.createElement('b'), detail = document.createElement('small');
+    title.textContent = translateText('正在思考');
+    detail.textContent = translateText('正在准备需求信息') + '…';
+    copy.append(title, detail); status.append(icon, copy);
+    node.append(prompt, status);
+    draft.appendChild(node);
+    return {
+      node,
+      remove() { node.remove(); },
+      fail(error) {
+        const message = String(error?.message || error || translateText('工作表单没有打开'));
+        status.classList.add('is-error');
+        icon.textContent = '!'; title.textContent = translateText('需求暂时无法打开');
+        detail.textContent = message + '，' + translateText('内容已保留，请重试');
+      },
+    };
+  }
+
   function refersToConversation(text) {
     return /(?:上述|上文|前文)|(?:上面|前面|刚才)(?:提到|生成|整理|说|讨论)的|(?:上面|前面|刚才|这个|这份|这张|这段|该)(?:的)?(?:缺陷|问题|需求|任务|验收|测试|评审|审计|检查|风险|工作|实施|执行|修复|对话|聊天)?(?:清单|列表|方案|报告|结果|内容|记录|计划|文档|材料|结论)|\b(?:above|previous)\s+(?:list|report|plan|result|conversation|message)\b/i.test(text);
   }
@@ -95,7 +141,7 @@
     const input = element && element.querySelector('#nchatInput');
     context.dismissProposal(true);
     try {
-      await PluginUIHost.invoke(action.id, {
+      const invocation = PluginUIHost.invoke(action.id, {
         cardId: options?.cardId, cardState: options?.cardState,
         onCardState: options?.onCardState, onCardClose: options?.onCardClose,
         onBeforeSubmit: options?.onBeforeSubmit,
@@ -115,6 +161,12 @@
         onRefined: () => { if (input) input.focus(); },
         onClose: () => { if (input) input.focus(); },
       });
+      // Work surfaces mount synchronously before their first await. Remove the
+      // reservation placeholder only after the real surface exists. Keep this
+      // generic because both requirements and automations use the same host,
+      // with different data-plugin-surface ids.
+      if (element.querySelector?.('.pui-surface[data-plugin-surface]')) options?.pending?.remove?.();
+      await invocation;
       return true;
     } catch (error) {
       if (typeof global.petSay === 'function') {
@@ -144,7 +196,12 @@
       return { handled: true, accepted: false };
     }
     const current = activeController();
-    if (!command && !(current && detail)) return { handled: false, accepted: false };
+    // An open requirement form must never claim an ordinary chat turn. The
+    // composer only routes to a work form when the user explicitly selected
+    // that action; otherwise the message belongs to the normal conversation.
+    // This also prevents arbitrary follow-up text from refining/submitting an
+    // unfinished requirement after the user has cleared the action picker.
+    if (!command) return { handled: false, accepted: false };
     const bindingContext = bindingsOf(o, ctx, true);
 
     const input = o.input;
@@ -224,5 +281,5 @@
     return { handled: true, accepted: Boolean(accepted) };
   }
 
-  global.ChatWorkActions = { open, route };
+  global.ChatWorkActions = { open, route, showPending };
 })(window);

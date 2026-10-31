@@ -777,9 +777,7 @@ async function _fwdCarry(tid) {
       _fwdTaskId !== carryTask || _fwdTab !== carryTab || _fwdLoadSeq !== carrySeq) return;
   if (carryTab === 'ai') {
     foot.innerHTML = '<span>会带过去：需求标题' + (pieces.length ? ' · ' + esc(pieces.join(' · ')) : '') +
-      '</span><button type="button" class="fwd-prev-a" data-act="fwd-preview">查看原文</button>';
-    const preview = foot.querySelector('[data-act="fwd-preview"]');
-    if (preview) preview.addEventListener('click', () => _fwdPreview(tid));
+      '</span>';
   } else {
     foot.innerHTML = '<span>需求及' + (pieces.length ? esc(pieces.join('、')) : '全部信息') +
       '会一起转到对方 SoduWork</span>';

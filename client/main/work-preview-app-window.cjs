@@ -45,11 +45,11 @@ function create({ owners: OWNERS, getDeps, ownerFor, ownerSession, safeWebUrl,
     }
     const method = request.method;
     try {
-      if (method === 'composer.send') {
+      if (method === 'composer.send' || method === 'composer.mention') {
         composer.expanded = true;
         layoutAllDetached(owner, item);
         composer.view.webContents.send('app-composer-mode', composerModePayload(item));
-        return require('./work-preview-app-chat.cjs').send(item, request.params, attachmentOwner);
+        return require('./work-preview-app-chat.cjs').send(item, request.params, attachmentOwner, {mention:method === 'composer.mention',assertCurrent:request.assertCurrent});
       }
       if (method === 'composer.expand') {
         /* Expand pins the sidebar and reduces application width; collapse returns to the narrow edge rail. */
@@ -107,7 +107,7 @@ function create({ owners: OWNERS, getDeps, ownerFor, ownerSession, safeWebUrl,
     if (!target) return { ok: false, reason: '请提供 http 或 https 地址' };
     const rawBridge = packaged?.bridge || payload.appBridge;
     const requestedBridge = rawBridge ? normalizeAppBridge(rawBridge, target) : null;
-    if (!packaged && new URL(target).hostname.endsWith('.soduwork-app.invalid')) throw Error('包内页面必须通过已安装的应用入口打开');
+    if (!packaged && new URL(target).hostname.endsWith('.soduwork-app.invalid')) throw Error('包内页面必须通过已安装的即用入口打开');
     const windowSettings = windowSizing.normalize(payload.windowSettings);
     owner.detachedOpenings = (owner.detachedOpenings || 0) + 1;
     try {
@@ -339,7 +339,7 @@ function create({ owners: OWNERS, getDeps, ownerFor, ownerSession, safeWebUrl,
       if (item.appBridge) appOwner.associate(view.webContents, item);
       item.composer = { view, dock: 'right', collapsed: false, expanded: false, hover: false, width: 0, railY: .5, railArrival: true, sessionId: '', theme: 'light' }; // Start collapsed as the right-edge rail.
       layoutComposer(owner, item);
-      void view.webContents.loadFile(COMPOSER_PAGE, { query: { panel: 'chatbar', embed: '1' } });
+      void view.webContents.loadFile(COMPOSER_PAGE, { query: { panel: 'chatbar', embed: '1', appDraft: String(item.appBridge?.appId || item.id) } });
     } catch (_) { /* Composer failure must not block the application window. */ }
   }
 
@@ -361,6 +361,8 @@ function create({ owners: OWNERS, getDeps, ownerFor, ownerSession, safeWebUrl,
     try { if (new URL(item.view.webContents.getURL()).origin !== item.appBridge.origin) return null; } catch (_) { return null; }
     const pluginId = String(item.appBridge.appId || '').replace(/^plugin:/, '');
     if (!pluginId) return null;
+      const hosted = require('./jiyong-hosted-connection.cjs').context(getDeps().app,pluginId);
+      if (hosted) return hosted;
     const application = { pluginId,
       pageUrl: require('./application-turn-context.cjs').pageUrl(item.view.webContents.getURL()),
       requiresMcp: item.appBridge.capabilities?.includes('mcp.connect') === true };

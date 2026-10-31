@@ -192,7 +192,10 @@ async function execute(store, index, action, payload) {
     catch { throw error('LOCAL_LIBRARY_ENCODING_UNSUPPORTED', '文件不是 UTF-8 文本，请使用系统应用查看'); }
     return { ok: true, item: publicRow(row), content, preview: { encoding: 'utf-8', truncated: false, totalBytes: bytes.length } };
   }
-  if (['openExternal', 'reveal', 'exportFile'].includes(action)) return { row: { ...row, filename: visibleFilename(row) }, target: await store.locate(row) };
+  if (['openExternal', 'reveal', 'exportFile'].includes(action)) {
+    const filename = visibleFilename(row);
+    return { row: { ...row, filename }, target: await store.locate(row, filename) };
+  }
   if (action === 'deleteItem') { row.deletedAt = now(); row.isDeleted = true; row.favorite = false; }
   else if (action === 'restoreItem') {
     if (!row.deletedAt) throw error('LOCAL_LIBRARY_CONFLICT', '资料不在回收站中');
@@ -202,10 +205,13 @@ async function execute(store, index, action, payload) {
     if (row.sourceType !== 'conversation') checkItemName(index, row);
   } else if (action === 'associateSource') Object.assign(row, source(body));
   else if (action === 'updateItem') {
+    let filenameChanged = false;
     if (has(body, 'folderId')) row.folderId = folder(index, body.folderId)?.id || null;
     if (has(body, 'title')) {
+      const previousFilename = row.filename;
       row.title = name(body.title, row.title);
       row.filename = visibleFilename(row);
+      filenameChanged = row.filename !== previousFilename;
     }
     if (has(body, 'title') || has(body, 'folderId')) checkItemName(index, row);
     favorite(body, row);
@@ -214,12 +220,19 @@ async function execute(store, index, action, payload) {
       if (!/\.(txt|md|markdown|csv|html?|json|xml|ya?ml|log|svg|css|js|ts|py|ini|toml)$/i.test(row.filename) && !/^text\//.test(row.contentType)) throw error('LOCAL_LIBRARY_FORMAT_UNSUPPORTED', '此格式请使用系统应用编辑');
       const bytes = textBytes(row, body), old = row._object;
       row._object = await store.write(bytes, row.filename, index); row.size = bytes.length; index.garbage.push(old);
+    } else if (filenameChanged) {
+      // Keep the object key in sync with the visible name. Write a new object
+      // before committing metadata so a failed index save leaves the original
+      // object usable and the staged copy reclaimable.
+      const old = row._object;
+      row._object = await store.write(await store.read(row), row.filename, index);
+      index.garbage.push(old);
     }
   } else throw error('LOCAL_LIBRARY_ACTION_UNSUPPORTED', '不支持的本机资料操作');
   row.updatedAt = now(); await store.save(index);
   // A failed old-version cleanup must not turn a successful content commit
   // into a failed save. Its garbage entry remains for a later explicit purge.
-  if (action === 'updateItem' && has(body, 'content')) await store.garbageCollect(index).catch(() => {});
+  if (action === 'updateItem' && (has(body, 'content') || has(body, 'title'))) await store.garbageCollect(index).catch(() => {});
   store.guard();
   return { ok: true, item: publicRow(row), ...(action === 'deleteItem' ? { trashed: true } : action === 'restoreItem' ? { restored: true } : {}) };
 }

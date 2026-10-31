@@ -67,6 +67,7 @@ test('runtime, IPC and renderer share one queue contract instead of visually reo
   const ipc = read('main', 'pi-session', 'ipc.js');
   const preload = read('preload.js');
   const chat = read('components', 'panels', 'panels-chat.js');
+  const composer = read('components', 'panels', 'chat-composer-bindings.js');
   const tools = read('components', 'panels', 'panels-chat-tools.js');
 
   assert.match(session, /submit\(text, turnAttachments, sendOptions\)/);
@@ -91,8 +92,17 @@ test('runtime, IPC and renderer share one queue contract instead of visually reo
   assert.match(chat, /id="nchatQueue"/);
   assert.match(chat, /data-queue-draggable draggable="true"/);
   assert.match(chat, /待发送队列/);
-  assert.match(chat, /(?:ctx\.)?_runtimeBusy\(\) && !ChatTools\.composerHasPayload\(el, (?:ctx\.)?_messageAttachments\)/);
-  assert.match(tools, /busy \? '\\u6392\\u961f\\u53d1\\u9001' : '\\u53d1\\u9001'/);
+  // 44efae14 extracted the composer bindings; the queue contract moved with them:
+  // reads the queue state via ChatTools and cancels rather than enqueueing a busy turn.
+  assert.match(composer, /const hasPayload = global\.ChatTools\?\.composerHasPayload/);
+  assert.match(composer, /\(ctx\._sendState === 'sending' && !_canStop\(\)\) \|\| ctx\._stopState === 'requested'/);
+  assert.match(composer, /_canStop\(\) && !hasPayload\) \{ ctx\._cancel\(\); return; \}/);
+  // The send button no longer swaps to a queued-send label; the busy/stop state
+  // contract is asserted on the composer bindings above.
+  assert.match(composer, /if \(_canStop\(\) && !hasPayload\)/);
+  assert.match(tools, /function paintSendButton\(root, busy, attachments, requestedState, stoppable, sendState\)/);
+  assert.match(tools, /showStop = Boolean\(canStop \|\| stopping\)/);
+  assert.match(tools, /\\u505c\\u6b62\\u751f\\u6210/);
   assert.doesNotMatch(chat, /(?:ctx\.)?_snap && (?:ctx\.)?_snap\.status === 'streaming'\) \{ (?:ctx\.)?_cancel\(\)/);
   assert.doesNotMatch(chat, /sort\([^)]*tools/);
 });

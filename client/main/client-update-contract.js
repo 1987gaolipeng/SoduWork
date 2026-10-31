@@ -2,7 +2,9 @@
 
 const crypto = require('crypto');
 
-const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+// Stable releases use canonical X.Y.Z; staging candidates carry a semver
+// prerelease suffix X.Y.Z-beta.N (beta.1 < beta.2 < ... < the same stable).
+const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-beta\.(1|[1-9]\d*))?$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const KEY_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$/;
 
@@ -13,21 +15,26 @@ const KEY_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$/;
  */
 const INSTALLER_STEM = '(?:SoduWork)';
 const INSTALLER_NAMES = {
-  win32: new RegExp(`^${INSTALLER_STEM}-\\d+\\.\\d+\\.\\d+-Setup\\.exe$`),
-  darwin: new RegExp(`^${INSTALLER_STEM}-\\d+\\.\\d+\\.\\d+-mac(?:-(?:x64|arm64))?\\.(?:dmg|zip)$`, 'i'),
-  linux: new RegExp(`^${INSTALLER_STEM}-\\d+\\.\\d+\\.\\d+-linux(?:-(?:x64|arm64))?\\.(?:deb|rpm|appimage|tar\\.gz)$`, 'i'),
+  win32: new RegExp(`^${INSTALLER_STEM}-${VERSION_STEM}-Setup\\.exe$`),
+  darwin: new RegExp(`^${INSTALLER_STEM}-${VERSION_STEM}-mac(?:-(?:x64|arm64))?\\.(?:dmg|zip)$`, 'i'),
+  linux: new RegExp(`^${INSTALLER_STEM}-${VERSION_STEM}-linux(?:-(?:x64|arm64))?\\.(?:deb|rpm|appimage|tar\\.gz)$`, 'i'),
 };
 const RELEASE_PLATFORMS = Object.keys(INSTALLER_NAMES);
 
+const PRERELEASE = 0, RELEASE = 1;
+
 function parseVersion(value) {
   const match = VERSION.exec(String(value || '').trim());
-  return match ? match.slice(1).map(Number) : null;
+  if (!match) return null;
+  const [major, minor, patch, beta] = match.slice(1).map(Number);
+  // Matches the Hub ordering: stable releases outrank their own prereleases.
+  return [major, minor, patch, beta === undefined ? RELEASE : PRERELEASE, beta || 0];
 }
 
 function newer(latest, current) {
   const a = parseVersion(latest), b = parseVersion(current);
   if (!a || !b) return false;
-  for (let i = 0; i < 3; i += 1) {
+  for (let i = 0; i < 5; i += 1) {
     if (a[i] !== b[i]) return a[i] > b[i];
   }
   return false;

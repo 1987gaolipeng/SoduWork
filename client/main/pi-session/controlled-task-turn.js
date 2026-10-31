@@ -47,15 +47,34 @@ function outcome(value, mode) {
 
 function create({ request, task, spec, scope, interval = 1500, wait = ms => new Promise(r => setTimeout(r, ms)) }) {
   const route = '/tasks/' + encodeURIComponent(task.id);
-  let runId = '', stopping = false, stopAcknowledged = false;
+  let runId = '', stopping = false, stopAcknowledged = false, stopPromise = null;
   let latest = null;
   async function cancel() {
     stopping = true;
-    if (!runId) return;
+    if (stopAcknowledged) return { ok: true, accepted: false, stopped: true, alreadyStopped: true };
+    if (stopPromise) return stopPromise;
     // Do not free the queue until the authoritative executor acknowledges stop.
-    await request(spec.mode === 'workflow' ? '/plugin-runs/' + encodeURIComponent(runId) + '/cancel'
-      : route + '/ai-stop', { reason: '用户在当前对话中停止需求' });
-    stopAcknowledged = true;
+    // Keep one in-flight request per execution so repeated UI/queue signals
+    // share the same acknowledgement instead of issuing duplicate /ai-stop
+    // calls.  A rejection is intentionally preserved for the polling loop,
+    // which will retry at its normal interval.
+    stopPromise = Promise.resolve().then(() => {
+      if (!runId) return { ok: true, accepted: true, stopping: true, stopped: false };
+      return request(spec.mode === 'workflow' ? '/plugin-runs/' + encodeURIComponent(runId) + '/cancel'
+        : route + '/ai-stop', { reason: '用户在当前对话中停止需求' }).then((response) => {
+          if (response && response.ok === false) {
+            throw Error(response.reason || '执行机未确认停止');
+          }
+          return response;
+        });
+    }).then((result) => {
+      // A stop requested before the remote run has an id remains pending; the
+      // execution loop must issue the authoritative stop after it starts.
+      if (result && result.stopped === false) return result;
+      stopAcknowledged = true;
+      return { ok: true, accepted: true, stopped: true };
+    }).finally(() => { stopPromise = null; });
+    return stopPromise;
   }
   async function execute(handle, text, files) {
     const output = liveOutput.create(handle, task.id);

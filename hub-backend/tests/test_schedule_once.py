@@ -488,6 +488,64 @@ class OnceLedgerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run.error, "OLD_OCCURRENCE_FAILED")
         self.assertEqual(self.plan.last_error, "")
 
+    async def test_stale_worker_can_promote_legacy_cross_client_false_failure(self):
+        from app.services import schedule_conversations as chats
+        run, _ = await schedules.claim_run(self.session, self.plan, "timer",
+                                           schedules.trigger_identity(self.plan))
+        await chats.prepare(self.session, self.plan, self.client, None, run.id, "pi", {})
+        await chats.claim(self.session, self.client, run.id, "worker-a")
+        await chats.acknowledge(self.session, self.client, run.id, {
+            "instanceId": "worker-a", "conversationId": "shared-chat", "state": "running"
+        })
+        run.state = "failed"
+        run.error = "此触发已在另一客户端创建对话，请打开原对话确认；本次没有重复执行"
+        run.receipt = {**run.receipt, "worker": "worker-b"}
+        self.plan.last_error = run.error
+        await self.session.commit()
+        await chats.acknowledge(self.session, self.client, run.id, {
+            "instanceId": "worker-a", "conversationId": "shared-chat", "state": "succeeded"
+        })
+        self.assertEqual(run.state, "succeeded")
+        self.assertEqual(run.error, "")
+        self.assertEqual(self.plan.last_error, "")
+
+    async def test_previous_worker_can_finish_after_cross_client_lease_takeover(self):
+        from app.services import schedule_conversations as chats
+        run, _ = await schedules.claim_run(self.session, self.plan, "timer",
+                                           schedules.trigger_identity(self.plan))
+        await chats.prepare(self.session, self.plan, self.client, None, run.id, "pi", {})
+        await chats.claim(self.session, self.client, run.id, "worker-a")
+        await chats.acknowledge(self.session, self.client, run.id, {
+            "instanceId": "worker-a", "conversationId": "shared-chat", "state": "running"
+        })
+        run.receipt = {**run.receipt, "leaseUntil": 0}
+        await self.session.commit()
+        takeover = await chats.claim(self.session, self.client, run.id, "worker-b")
+        self.assertTrue(takeover["ok"])
+        self.assertEqual(run.receipt["previousWorker"], "worker-a")
+        await chats.acknowledge(self.session, self.client, run.id, {
+            "instanceId": "worker-a", "conversationId": "shared-chat", "state": "succeeded"
+        })
+        self.assertEqual(run.state, "succeeded")
+        self.assertNotIn("previousWorker", run.receipt)
+
+    async def test_current_worker_completion_clears_takeover_marker(self):
+        from app.services import schedule_conversations as chats
+        run, _ = await schedules.claim_run(self.session, self.plan, "timer",
+                                           schedules.trigger_identity(self.plan))
+        await chats.prepare(self.session, self.plan, self.client, None, run.id, "pi", {})
+        await chats.claim(self.session, self.client, run.id, "worker-a")
+        await chats.acknowledge(self.session, self.client, run.id, {
+            "instanceId": "worker-a", "conversationId": "shared-chat", "state": "running"
+        })
+        run.receipt = {**run.receipt, "leaseUntil": 0}
+        await self.session.commit()
+        await chats.claim(self.session, self.client, run.id, "worker-b")
+        await chats.acknowledge(self.session, self.client, run.id, {
+            "instanceId": "worker-b", "conversationId": "shared-chat", "state": "succeeded"
+        })
+        self.assertNotIn("previousWorker", run.receipt)
+
     async def test_edit_while_dispatch_is_pending_cannot_consume_new_appointment(self):
         future = datetime.now(UTC) + timedelta(days=2)
         async def edit_during_dispatch(*_args, **_kwargs):

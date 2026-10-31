@@ -99,6 +99,10 @@ if (typeof electron === 'string') {
         ellipsis:cards.every(card=>{const d=card.querySelector('small'),s=getComputedStyle(d);return d.scrollWidth>d.clientWidth&&s.textOverflow==='ellipsis'&&s.whiteSpace==='nowrap'}),
         overflow:grid.scrollWidth>grid.clientWidth}})`);
       for (const layout of layouts) assert.deepEqual(layout, {columns,fits:true,ellipsis:true,overflow:false}, 'list layout at '+width);
+      const header = await js(`({title:document.querySelector('.appsx-title-wrap').getBoundingClientRect().left,content:document.querySelector('.appsx-section').getBoundingClientRect().left,tools:document.querySelector('.appsx-tools').getBoundingClientRect().right})`);
+      assert.ok(Math.abs(header.title-header.content)<=9,'title aligns with centered content');
+      const centered = await js(`(()=>{const parent=document.querySelector('.appsx-scroll').getBoundingClientRect();return [...document.querySelectorAll('.appsx-section')].map(s=>{const r=s.getBoundingClientRect();return {width:r.width,center:Math.abs((r.left+r.right)/2-(parent.left+parent.right)/2)}})})()`);
+      for (const section of centered) { assert.ok(section.width<=1440.1,'content width is capped at 1440'); assert.ok(section.center<=9,'all groups share the horizontal center including scroll gutter'); }
       fs.writeFileSync(path.join(out,'list-layout-'+width+'.png'),(await win.webContents.capturePage()).toPNG());
     }
     await js(`appsPanel.style.width='620px'`); await delay(70);
@@ -142,14 +146,17 @@ if (typeof electron === 'string') {
     assert.equal(await js('JSON.stringify(savedSettings).includes("obsolete-legacy-key")'),false);
     assert.equal(await js('localStorage.getItem("soduwork-app-settings:local:ops")'),null);
     await js(`window.publishCalls=[];window.signCalls=[];window.failAudience=false;window.deferDetail=false;
-      SoduWorkAPI.personalPlugin=async id=>{if(deferDetail)await new Promise(r=>window.releaseDetail=r);return {plugin:{localDraft:{name:'运营云端版',version:'0.4.54',ui:{contributions:[{id:'main',slot:'workspace.navigation'}]}}}}};
+      SoduWorkAPI.personalPlugin=async id=>{if(deferDetail)await new Promise(r=>window.releaseDetail=r);return {plugin:{localDraft:{template:'app',author:'即用实验室',appCategory:'other',name:'运营云端版',version:'0.4.54',ui:{contributions:[{id:'main',slot:'workspace.navigation'}]}}}}};
+      soduWorkAPI.personalPlugins={updateMetadata:async(id,options)=>{const plugin=fixtureItems.find(p=>p.pluginId===id);Object.assign(plugin,{authorName:options.author,appCategory:options.appCategory,version:'0.4.55',checksum:'ops-category'});plugin.localDraft={template:'app',key:plugin.key,name:plugin.name,version:plugin.version,author:options.author,appCategory:options.appCategory,ui:plugin.ui};return {ok:true,plugin:{...plugin}}}};
       SoduWorkAPI.pluginAudienceCandidates=async()=>{if(failAudience)throw Error('fixture audience unavailable');return {items:[{id:'person-1',name:'成员',username:'member'}],orgUnits:[]}};
       SoduWorkAPI.personalPluginPublisherIdentity=async()=>({identity:{keyId:'fixture-key',fingerprint:'fixture-fingerprint'}});
       SoduWorkAPI.signPersonalPluginDraft=async draft=>{signCalls.push(draft);return {signature:'fixture-signature',identity:{keyId:'fixture-key'}}};
-      SoduWorkAPI.publishPersonalPlugin=async(...args)=>{publishCalls.push(args);fixtureSubmissions=[{key:'ops',version:'0.4.54',trustState:'quarantined',enabled:false}];return {message:'应用已提交审核'}};
+      SoduWorkAPI.publishPersonalPlugin=async(...args)=>{publishCalls.push(args);fixtureSubmissions=[{key:'ops',version:args[0].version,trustState:'quarantined',enabled:false}];return {message:'应用已提交审核'}};
       document.querySelector('[data-setup-key="modelId"]').value='unsaved-model';appsSetPublish.click()`);
     await until(()=>js('!!document.querySelector("#capPublishDo")'),'shared app publication dialog');
     assert.equal(await js('capModalTitle.textContent'),'申请上架');
+    assert.equal(await js('capPublishAppCategory.value'),'other');
+    assert.equal(await js('document.querySelectorAll("#capPublishAppCategory option").length'),4);
     assert.equal(await js('appsSettingsMask.classList.contains("show")'),false);
     assert.equal(await js('publishCalls.length'),0,'opening application publication does not submit');
     win.show(); win.focus(); win.webContents.invalidate(); await delay(220);
@@ -170,9 +177,13 @@ if (typeof electron === 'string') {
     await until(()=>js('!capModalLayer.hidden'),'publication retry');
     await js(`document.querySelector('input[name="capAudience"][value="users"]').click();capPublishDo.click()`);
     assert.equal(await js('publishCalls.length'),0,'empty audience blocks upload');
-    await js('document.querySelector("#capAudienceList input").click();capPublishDo.click()');
+    await js('document.querySelector("#capAudienceList input").click();capPublishAppCategory.value="game";capPublishDo.click()');
     await until(()=>js('publishCalls.length===1 && capModalLayer.hidden'),'signed publication');
     assert.deepEqual(await js('publishCalls[0].slice(1,5)'),['users',['person-1'],[],'fixture-signature']);
+    assert.equal(await js('publishCalls[0][0].author'),'即用实验室');
+    assert.equal(await js('publishCalls[0][0].appCategory'),'game');
+    assert.equal(await js('publishCalls[0][0].version'),'0.4.55','category selection creates a new immutable version before signing');
+    assert.equal(await js('signCalls[0].appCategory'),'game');
     assert.equal(await js('publishCalls[0][0].ui.contributions[0].slot'),'workspace.navigation','application manifest uses the same publication payload');
     await until(()=>js('appsSetPublish.textContent==="上架审核中" && appsSetPublish.disabled'),'server receipt replaces request listing');
     await js('appsSetPublish.click()');
@@ -185,7 +196,7 @@ if (typeof electron === 'string') {
       [{trustState:'quarantined',reviewDecision:'reject'},'审核未通过'],
       [{trustState:'revoked'},'上架已撤销'],
     ]) {
-      await js(`closeAppSettings();fixtureSubmissions=[{key:'ops',version:'0.4.54',...${JSON.stringify(receipt)}}];openAppSettings({item:fixtureItems.find(x=>x.pluginId==='local:ops'),title:'运营云端版'})`);
+      await js(`closeAppSettings();fixtureSubmissions=[{key:'ops',version:fixtureItems.find(x=>x.pluginId==='local:ops').version,...${JSON.stringify(receipt)}}];openAppSettings({item:fixtureItems.find(x=>x.pluginId==='local:ops'),title:'运营云端版'})`);
       await until(()=>js(`appsSetPublish.textContent===${JSON.stringify(label)} && appsSetPublish.disabled`),'current server receipt: '+label);
     }
     await js(`closeAppSettings();catalogError='fixture review offline';openAppSettings({item:fixtureItems.find(x=>x.pluginId==='local:ops'),title:'运营云端版'})`);
@@ -202,7 +213,7 @@ if (typeof electron === 'string') {
     report.cases.push('Local app settings reuse the production signed publication dialog; cancellation preserves unsaved preferences, audience validation blocks empty selections, errors allow retry, and closed settings discard late results.');
     await js(`document.querySelector('[data-setup-key="modelId"]').value='custom-model';document.querySelector('[data-setup-key="pageSize"]').value='42';appsSetSave.click()`);
     await until(()=>js('!appsSettingsMask.classList.contains("show")'),'declared preference save');
-    assert.deepEqual(await js('configured.at(-1)'),{id:'local:ops',checksum:'ops-v1',config:{modelId:'custom-model',pageSize:42}});
+    assert.deepEqual(await js('configured.at(-1)'),{id:'local:ops',checksum:'ops-category',config:{modelId:'custom-model',pageSize:42}});
     assert.equal(await js('savedSettings.length'),1,'editing declared preferences does not write hidden app credentials');
     await js(`[...document.querySelectorAll('.appsx-card')].find(e=>e.textContent.includes('团队应用')).querySelector('.appsx-set').click()`);
     await until(()=>js('appsSettingsMask.classList.contains("show")'),'metadata only settings');
@@ -300,23 +311,23 @@ if (typeof electron === 'string') {
     assert.equal(rec.inside,true);assert.equal(rec.twoRows,true);assert.equal(rec.action,'打开应用');
     const recommendedActions=await js(`(()=>{const buttons=[...document.querySelectorAll('.appsx-cover-card .appsx-card-open')];return buttons.map(button=>{const style=getComputedStyle(button);return {label:button.textContent,accessibleLabel:button.getAttribute('aria-label'),icon:!!button.querySelector('svg'),background:style.backgroundColor,color:style.color,borderRadius:style.borderRadius,height:button.getBoundingClientRect().height}})})()`);
     assert.ok(recommendedActions.length>=2);
-    assert.ok(recommendedActions.every(action=>action.label==='打开应用'&&action.accessibleLabel==='打开应用'&&!action.icon),'all recommendation installation states use the Open App text button');
+    assert.ok(recommendedActions.every(action=>action.label==='打开即用'&&action.accessibleLabel==='打开即用'&&!action.icon),'all recommendation installation states use the Open App text button');
     assert.ok(recommendedActions.every(action=>JSON.stringify(action)===JSON.stringify(recommendedActions[0])),'uninstalled recommendations use the same button appearance as installed apps');
     const installedOpenBefore=await js('({opened:opened.length,installs:installs.length})');
     await js(`window.originalOpen=PluginUIHost.openContribution;window.testOpenCard=[...document.querySelectorAll('.appsx-cover-card')].find(card=>card.textContent.includes('示例运营应用'));
       PluginUIHost.openContribution=async(row,context)=>{opened.push(context.item.pluginId);await new Promise((resolve,reject)=>{window.finishOpen=resolve;window.failOpen=reject})};
       testOpenCard.querySelector('.appsx-card-open').click()`);
-    assert.equal(await js(`testOpenCard.querySelector('.appsx-card-open').textContent`),'打开应用','an installed app does not display installation loading while its window opens');
+    assert.equal(await js(`testOpenCard.querySelector('.appsx-card-open').textContent`),'打开即用','an installed app does not display installation loading while its window opens');
     assert.equal(await js(`testOpenCard.getAttribute('aria-busy')`),'true');
     await js(`testOpenCard.querySelector('.appsx-card-open').click()`);
     assert.equal(await js('opened.length'),installedOpenBefore.opened+1,'pending opens cannot be duplicated');
     assert.equal(await js('installs.length'),installedOpenBefore.installs,'opening an installed app never reinstalls it');
     await js('finishOpen()');
     await until(()=>js('!testOpenCard.hasAttribute("aria-busy")'),'installed app open settles');
-    assert.equal(await js(`testOpenCard.querySelector('.appsx-card-open').textContent`),'打开应用');
+    assert.equal(await js(`testOpenCard.querySelector('.appsx-card-open').textContent`),'打开即用');
     await js(`testOpenCard.querySelector('.appsx-card-open').click();failOpen(Error('fixture open failed'))`);
     await until(()=>js('!testOpenCard.hasAttribute("aria-busy")'),'failed installed app open settles');
-    assert.equal(await js(`testOpenCard.querySelector('.appsx-card-open').textContent`),'打开应用','a failed window open remains retryable');
+    assert.equal(await js(`testOpenCard.querySelector('.appsx-card-open').textContent`),'打开即用','a failed window open remains retryable');
     assert.equal(await js(`appsBody.textContent.includes('fixture open failed')`),true);
     await js(`PluginUIHost.openContribution=originalOpen;document.querySelector('.apps-inline-note')?.remove();
       window.originalInstall=SoduWorkAPI.setEnterprisePluginInstalled;window.syncAttempts=0;
@@ -326,7 +337,7 @@ if (typeof electron === 'string') {
     await js(`testSyncCard.querySelector('.appsx-card-open').click();failSync(Error('fixture sync failed'))`);
     await until(()=>js('!testSyncCard.hasAttribute("aria-busy")'),'failed app sync settles');
     assert.equal(await js('syncAttempts'),1);
-    assert.equal(await js(`testSyncCard.querySelector('.appsx-card-open').textContent`),'打开应用','failed synchronization restores the action label');
+    assert.equal(await js(`testSyncCard.querySelector('.appsx-card-open').textContent`),'打开即用','failed synchronization restores the action label');
     await js(`SoduWorkAPI.setEnterprisePluginInstalled=originalInstall;document.querySelector('.apps-inline-note')?.remove()`);
     report.cases.push('Installed app opens keep the Open App label and never reinstall; pending duplicate opens are ignored; successful and failed opens clear busy state, and failed synchronization restores a retryable label.');
     fs.writeFileSync(path.join(out,'recommendations-open-uninstalled.png'),(await win.webContents.capturePage()).toPNG());
@@ -348,6 +359,21 @@ if (typeof electron === 'string') {
     assert.equal(await js('savedSettings.length'),1,'hidden credentials remain untouched');
     await js(`document.querySelector('.appsx-cover-card .appsx-set').click()`);
     await until(()=>js('appsSettingsMask.classList.contains("show")'),'remove settings');
+    assert.equal(await js('!!appsSetDeveloper && !!appsSetEdit'),true,'local settings expose developer and edit');
+    await js(`window.metadataCalls=[];soduWorkAPI.personalPlugins={updateMetadata:async(id,options)=>{metadataCalls.push({id,options});const plugin=fixtureItems.find(p=>p.pluginId===id);plugin.authorName=options.author;plugin.appCategory=options.appCategory;plugin.version='0.4.55';plugin.checksum='ops-v2';return {ok:true,plugin:{...plugin}}}};appsSetDeveloper.value='即用实验室';appsSetCategory.value='game';appsSetSave.click()`);
+    await until(()=>js('!appsSettingsMask.classList.contains("show")'),'developer saved as version');
+    assert.equal(await js('metadataCalls[0].options.author'),'即用实验室');
+    assert.equal(await js('metadataCalls[0].options.appCategory'),'game');
+    await js(`document.querySelector('.appsx-cover-card .appsx-set').click()`);
+    await until(()=>js('appsSettingsMask.classList.contains("show")'),'developer settings reopen');
+    assert.equal(await js('appsSetDeveloper.value'),'即用实验室');
+    assert.equal(await js('appsSetCategory.value'),'game');
+    await js(`window.editCalls=[];window.WorkspaceHost={open:(route,payload)=>editCalls.push({route,payload})};window.SoduWorkPluginAccess={assertEditable:async()=>{}};SoduWorkAPI.personalPlugin=async id=>({plugin:{...fixtureItems.find(p=>p.pluginId===id),template:'app',localDraft:{template:'app',name:'疯狂运营'}}});appsSetEdit.click()`);
+    await until(()=>js('editCalls.length===1'),'edit starts development chat');
+    const editEntry=await js('editCalls[0]');assert.equal(editEntry.route,'create');assert.equal(editEntry.payload.newSession,true);assert.equal(editEntry.payload.pluginId,'local:app-developer');assert.equal(editEntry.payload.pluginEditId,'local:ops');assert.equal(editEntry.payload.sessionId,undefined);
+    report.cases.push('Developer metadata saves/reopens and editing uses a fresh app-developer chat with an installed full-source reference.');
+    await js(`document.querySelector('.appsx-cover-card .appsx-set').click()`);
+    await until(()=>js('appsSettingsMask.classList.contains("show")'),'remove after editing');
     await js('appsSetRemove.click()');
     await until(()=>js('!appsSettingsMask.classList.contains("show")'),'app removal');
     assert.deepEqual(await js('removed'), ['local:ops']);
@@ -402,8 +428,10 @@ if (typeof electron === 'string') {
       catalogError='';localStorage.setItem('soduwork-apps-favorites','[]');await SoduWorkApps.render(true);document.querySelector('[data-tab="mine"]').click();
     })()`);
     await until(()=>js('document.querySelectorAll(".appsx-source-tag").length===2'),'local source tags rendered');
-    assert.deepEqual(await js(`Object.fromEntries([...document.querySelectorAll('[data-apps-section="mine"] .appsx-card-headline')].map(row=>[row.querySelector('b').textContent,row.querySelector('.appsx-source-tag')?.textContent||null]))`),
-      {'轻量画板':'本机安装','网页服务':'本机安装','市场已安装应用':null},
+    assert.equal(await js('document.querySelectorAll(".appsx-card-headline .appsx-source-tag").length'),0,'source labels no longer compete with names and hover versions');
+    assert.equal(await js('document.querySelectorAll(".appsx-card-description .appsx-source-tag").length'),2,'source labels sit on the description line');
+    assert.deepEqual(await js(`Object.fromEntries([...document.querySelectorAll('[data-apps-section="mine"] .appsx-card-txt')].map(row=>[row.querySelector('b').textContent,row.querySelector('.appsx-source-tag')?.textContent||null]))`),
+      {'轻量画板':'本机','网页服务':'本机','市场已安装应用':null},
       'local web and light apps have a source label; installed market apps do not');
     const sourceColors=await js(`[...document.querySelectorAll('.appsx-source-tag')].map(tag=>{const s=getComputedStyle(tag);return {color:s.color,background:s.backgroundColor,border:s.borderTopColor,shadow:s.boxShadow,image:s.backgroundImage}})`);
     for(const style of sourceColors){

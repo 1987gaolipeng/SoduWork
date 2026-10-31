@@ -41,7 +41,7 @@
     share: '<path d="M12 16V4M7 9l5-5 5 5M5 20h14"/>',
     error: '<circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 17h.01"/>',
   };
-  const state = { scope: 'recommended', storage: 'local', query: '', folderId: '', folder: null, folders: [], items: [], selected: new Set(), view: 'list', filterKind: 'all', trashCount: 0, showHidden: false, busy: false, error: '', storageStatus: { local: { available: true, configured: true, connected: true }, remote: { backend: '', available: false, configured: false, connected: false } }, storageStatusLoading: false };
+  const state = { scope: 'recommended', storage: 'local', query: '', folderId: '', folder: null, folders: [], items: [], selected: new Set(), selectedFolders: new Set(), view: 'list', filterKind: 'all', trashCount: 0, showHidden: false, busy: false, error: '', storageStatus: { local: { available: true, configured: true, connected: true }, remote: { backend: '', available: false, configured: false, connected: false } }, storageStatusLoading: false };
   let root, uploadInput, uploadTarget, searchTimer, requestId = 0, storageStatusRequest = 0, previewPane, imageEpoch = 0;
   let lifecycleEpoch = 0, batchBusy = false;
   let loadedFilterKey = '', contentMarkup = '';
@@ -55,6 +55,12 @@
   const isStorageError = error => ['LIBRARY_STORAGE_NOT_CONFIGURED', 'LIBRARY_STORAGE_UNAVAILABLE'].includes(String(error && error.code || ''));
   const tx = (source, params) => global.SoduWorkI18n?.t('library.copy', source, params) || String(source).replace(/\{(\w+)\}/g, (all, key) => params?.[key] ?? all);
   const notify = message => { if (typeof global.petSay === 'function') global.petSay(tx(message)); };
+  const newShareRequestId = () => {
+    try { if (global.crypto && typeof global.crypto.randomUUID === 'function') return global.crypto.randomUUID(); } catch (_) {}
+    const hex = '0123456789abcdef'; let value = '';
+    for (let i = 0; i < 32; i += 1) value += hex[Math.floor(Math.random() * hex.length)];
+    return value.slice(0, 8) + '-' + value.slice(8, 12) + '-4' + value.slice(13, 16) + '-' + (8 + Math.floor(Math.random() * 4)).toString(16) + value.slice(17, 20) + '-' + value.slice(20);
+  };
   const hiddenItem = item => typeof (item.extra || {}).hidden === 'boolean' ? item.extra.hidden : String(item.filename || '').startsWith('.');
   // Keep concrete provider names in requests so a configuration refresh cannot
   // redirect a pending upload/editor/move to a different remote service.
@@ -67,6 +73,15 @@
   const providerLabel = backend => backend === 'nfs' ? 'NFS' : backend === 'minio' ? 'MinIO' : '';
   const dialogs = global.SoduWorkLibraryDialogs.create({ state, esc, icon, notify, errorText, load, getEpoch: () => lifecycleEpoch });
   const { openDocumentEditor, openMoveFolderDialog, openConfirmDialog, openNameDialog, openFolderDialog } = dialogs;
+  // The source-conversation action is a blocking navigation failure. Keep it
+  // visible in the center of the page so a bottom-corner pet toast cannot be
+  // missed when the original conversation was deleted.
+  const showSourceUnavailable = () => openConfirmDialog({
+    title: '无法打开原会话',
+    description: '来源会话不可用，原会话可能已被删除。',
+    confirm: '知道了',
+    alert: true,
+  });
   function createMenuMarkup(name) {
     return '<div class="library-menu library-create-menu" data-library-menu="' + name + '" hidden><div class="library-menu-label">创建新内容</div>' + CREATE_ITEMS.map(([kind, label]) => {
       const separator = kind === 'upload' ? ' library-menu-separator' : '';
@@ -121,11 +136,11 @@
     batchToolbar.dataset.libraryBatchToolbar = '';
     batchToolbar.hidden = true;
     batchToolbar.innerHTML = '<span class="library-batch-count" data-library-batch-count></span>' +
-      '<button type="button" data-library-batch-chat>围绕内容开启对话</button>' +
-      '<button type="button" data-library-batch-migrate>批量存储到远端</button>' +
-      '<button type="button" data-library-batch-share>批量分享</button>' +
-      '<button type="button" class="library-danger" data-library-batch-delete>批量删除</button>' +
-      '<button type="button" data-library-batch-clear>取消选择</button>';
+      '<button type="button" data-library-batch-chat>' + esc(tx('围绕内容开启对话')) + '</button>' +
+      '<button type="button" data-library-batch-migrate>' + esc(tx('批量存储到远端')) + '</button>' +
+      '<button type="button" data-library-batch-share>' + esc(tx('批量分享')) + '</button>' +
+      '<button type="button" class="library-danger" data-library-batch-delete>' + esc(tx('批量删除')) + '</button>' +
+      '<button type="button" data-library-batch-clear>' + esc(tx('取消选择')) + '</button>';
     root.querySelector('[data-library-list-head]').after(batchToolbar);
     uploadInput = root.querySelector('[data-library-upload]');
     root.querySelector('[data-library-hidden-files]').checked = state.showHidden;
@@ -180,7 +195,7 @@
       notify(storageMessage());
       return;
     }
-    previewPane?.close(); closeMenus(); state.storage = storage === 'remote' ? state.storageStatus.remote.backend : 'local'; state.folderId = ''; state.folder = null; state.selected.clear(); load();
+    previewPane?.close(); closeMenus(); state.storage = storage === 'remote' ? state.storageStatus.remote.backend : 'local'; state.folderId = ''; state.folder = null; state.selected.clear(); state.selectedFolders.clear(); load();
   }
   async function onClick(event) {
     const button = event.target.closest('button'); if (!button || !root.contains(button)) return;
@@ -200,11 +215,11 @@
       // Move to the collection view when a folder filter is chosen from a
       // file-only scope, otherwise the filter would appear to do nothing.
       if (state.filterKind === 'folder' && !['all', 'folders', 'favorites'].includes(state.scope)) {
-        state.scope = 'all'; state.folderId = ''; state.folder = null; state.selected.clear(); load();
+        state.scope = 'all'; state.folderId = ''; state.folder = null; state.selected.clear(); state.selectedFolders.clear(); load();
       } else render();
       return;
     }
-    if (d.libraryFolder !== undefined) { previewPane?.close(); state.folder = state.folders.find(row => row.id === d.libraryFolder) || null; state.storage = storedBackend(state.folder); state.folderId = d.libraryFolder; state.scope = 'all'; state.selected.clear(); load(); return; }
+    if (d.libraryFolder !== undefined) { previewPane?.close(); state.folder = state.folders.find(row => row.id === d.libraryFolder) || null; state.storage = storedBackend(state.folder); state.folderId = d.libraryFolder; state.scope = 'all'; state.selected.clear(); state.selectedFolders.clear(); load(); return; }
     if (d.libraryDownload !== undefined) {
       closeMenus(); try { await global.SoduWorkAPI.downloadLibraryItem(d.libraryDownload, d.filename); } catch (error) { notify(errorText(error, '下载失败')); } return;
     }
@@ -219,6 +234,7 @@
       return;
     }
     if (d.libraryShare !== undefined) { await shareItem(button, d.libraryShare); return; }
+    if (d.libraryShareFolder !== undefined) { await shareFolder(button, d.libraryShareFolder); return; }
     if (d.libraryOpenSession !== undefined) { openSourceConversation(d.libraryOpenSession); return; }
     if (d.libraryOpenSystem !== undefined) { await openWithSystemApp(d.libraryOpenSystem); return; }
     if (d.libraryReveal !== undefined) { await revealLibraryFile(d.libraryReveal); return; }
@@ -271,6 +287,11 @@
         if (checked) state.selected.add(input.dataset.librarySelect);
         else state.selected.delete(input.dataset.librarySelect);
       });
+      root.querySelectorAll('[data-library-select-folder]').forEach(input => {
+        input.checked = checked;
+        if (checked) state.selectedFolders.add(input.dataset.librarySelectFolder);
+        else state.selectedFolders.delete(input.dataset.librarySelectFolder);
+      });
       render();
       return;
     }
@@ -279,10 +300,19 @@
       else state.selected.delete(target.dataset.librarySelect);
       render();
     }
+    if (target.dataset.librarySelectFolder !== undefined) {
+      if (target.checked) state.selectedFolders.add(target.dataset.librarySelectFolder);
+      else state.selectedFolders.delete(target.dataset.librarySelectFolder);
+      render();
+    }
   }
   function selectedRows() {
     const ids = [...state.selected];
     return ids.map(id => state.items.find(row => String(row.id) === String(id))).filter(Boolean);
+  }
+  function selectedFolderRows() {
+    const ids = [...state.selectedFolders];
+    return ids.map(id => state.folders.find(row => String(row.id) === String(id))).filter(Boolean);
   }
   function resultId(value) {
     return String(value?.id || value?.item?.id || value || '').trim();
@@ -292,8 +322,13 @@
     if (!rows.length || batchBusy || state.scope === 'trash') return;
     if (rows.length > MAX_BATCH_ITEMS) { notify('一次最多批量处理 ' + MAX_BATCH_ITEMS + ' 项资料，请减少选择后重试'); return; }
     const epoch = lifecycleEpoch, ids = rows.map(row => String(row.id));
-    const names = rows.slice(0, 3).map(displayName).join('、') + (rows.length > 3 ? ' 等' : '');
-    if (!await openConfirmDialog({ title: '批量移入回收站？', description: '选中的 {name} 将移入回收站，仍可恢复。', descriptionParams: { name: names }, confirm: '批量删除' })) return;
+    if (!await openConfirmDialog({
+      title: '批量移入回收站？',
+      description: '已选择 {count} 项资料，将移入回收站，仍可恢复。',
+      descriptionParams: { count: rows.length },
+      descriptionClass: 'library-confirm-batch',
+      confirm: '批量删除',
+    })) return;
     batchBusy = true; button.disabled = true; closeMenus(); render();
     try {
       const result = await global.SoduWorkAPI.deleteLibraryItems(ids);
@@ -347,9 +382,10 @@
   }
   async function shareSelected(button) {
     const rows = selectedRows();
-    if (!rows.length || batchBusy || state.scope === 'trash') return;
-    if (rows.length > MAX_BATCH_ITEMS) { notify('一次最多批量处理 ' + MAX_BATCH_ITEMS + ' 项资料，请减少选择后重试'); return; }
-    const epoch = lifecycleEpoch, ids = rows.map(row => String(row.id));
+    const folders = selectedFolderRows();
+    if ((!rows.length && !folders.length) || batchBusy || state.scope === 'trash') return;
+    if (rows.length + folders.length > MAX_BATCH_ITEMS) { notify(tx('一次最多批量处理 {count} 项资料，请减少选择后重试', { count: MAX_BATCH_ITEMS })); return; }
+    const epoch = lifecycleEpoch, ids = rows.map(row => String(row.id)), folderIds = folders.map(row => String(row.id));
     batchBusy = true; button.disabled = true; closeMenus(); render();
     try {
       const directory = await global.SoduWorkAPI.listLibraryShareMembers();
@@ -357,15 +393,19 @@
       const meId = String(directory?.meId || '');
       const members = (Array.isArray(directory?.members) ? directory.members : [])
         .filter(member => member.id && !member.isMe && String(member.id) !== meId);
-      if (!members.length) { notify('当前组织没有可分享的其他成员'); return; }
+      if (!members.length) { notify(tx('当前组织没有可分享的其他成员')); return; }
       const sent = await dialogs.openShareDialog({
         items: rows.map(row => ({ ...row, displayName: displayName(row), displaySize: formatSize(row.size) })),
-        members, localCopy: rows.every(isClientLocal),
+        folders: folders.map(folder => ({ ...folder, displayName: String(folder.name || '文件夹'), displaySize: tx('文件夹内容') })),
+        bundled: rows.length + folders.length > 1 || folders.length > 0,
+        members, localCopy: rows.every(isClientLocal) && folders.every(isClientLocal),
         onSubmit: async (recipientIds, note) => {
-          const result = await global.SoduWorkAPI.shareLibraryItems(ids, recipientIds, note, { requestId: global.crypto.randomUUID() });
+          const result = await global.SoduWorkAPI.shareLibraryItems(ids, recipientIds, note, { requestId: newShareRequestId(), folderIds });
           const failed = Array.isArray(result?.failed) ? result.failed : [];
-          if (failed.length) notify('已分享 ' + (result?.succeeded?.length || 0) + ' 项，' + failed.length + ' 项失败');
-          else notify('已分享 ' + ids.length + ' 项，成员会收到通知');
+          if (failed.length) notify(tx('已分享 {success} 项，{failed} 项失败', { success: result?.succeeded?.length || 0, failed: failed.length }));
+          else notify(rows.length + folders.length > 1 || folders.length
+            ? tx('已将选中的资料打包分享，成员会收到 1 条通知')
+            : tx('已分享 1 项资料，成员会收到通知'));
           return true;
         },
       });
@@ -396,7 +436,7 @@
       if (typeof global.WorkspaceHost?.open === 'function') await global.WorkspaceHost.open('create', payload);
       else if (typeof global.openComposePanel === 'function') global.openComposePanel(payload);
       else throw new Error('对话面板暂时不可用');
-      state.selected.clear();
+      state.selected.clear(); state.selectedFolders.clear();
     } catch (error) { if (epoch === lifecycleEpoch) notify(errorText(error, '读取资料失败，请重试')); }
     finally { if (epoch === lifecycleEpoch) { batchBusy = false; if (button.isConnected) button.disabled = false; render(); } }
   }
@@ -533,7 +573,7 @@
       const meId = String(directory?.meId || '');
       const members = (Array.isArray(directory?.members) ? directory.members : [])
         .filter(member => member.id && !member.isMe && String(member.id) !== meId);
-      if (!members.length) { notify('当前组织没有可分享的其他成员'); return; }
+      if (!members.length) { notify(tx('当前组织没有可分享的其他成员')); return; }
       const shareOptions = { requestId: global.crypto.randomUUID() };
       const sent = await dialogs.openShareDialog({ item, members, filename: displayName(item), size: formatSize(item.size), localCopy,
         onSubmit: async (ids, note) => {
@@ -541,6 +581,24 @@
           return global.SoduWorkAPI.shareLibraryItem(id, ids, note, shareOptions);
         } });
       if (epoch === lifecycleEpoch && sent) notify('文件已分享，成员会收到通知');
+    } catch (error) { if (epoch === lifecycleEpoch) notify(errorText(error, '分享失败，请重试')); }
+    finally { if (epoch === lifecycleEpoch) shareBusy = false; if (button.isConnected) button.disabled = false; }
+  }
+  async function shareFolder(button, id) {
+    const folder = state.folders.find(row => String(row.id) === String(id));
+    if (!folder || button.disabled || shareBusy) return;
+    const epoch = lifecycleEpoch;
+    shareBusy = true; button.disabled = true; closeMenus();
+    try {
+      const directory = await global.SoduWorkAPI.listLibraryShareMembers();
+      if (epoch !== lifecycleEpoch) return;
+      const meId = String(directory?.meId || '');
+      const members = (Array.isArray(directory?.members) ? directory.members : [])
+        .filter(member => member.id && !member.isMe && String(member.id) !== meId);
+      if (!members.length) { notify(tx('当前组织没有可分享的其他成员')); return; }
+      const sent = await dialogs.openShareDialog({ folders: [{ ...folder, displayName: String(folder.name || '文件夹'), displaySize: tx('文件夹内容') }], bundled: true, members,
+        onSubmit: async (ids, note) => global.SoduWorkAPI.shareLibraryItems([], ids, note, { requestId: newShareRequestId(), folderIds: [String(folder.id)] }) });
+      if (epoch === lifecycleEpoch && sent) notify(tx('文件夹已打包分享，成员会收到 1 条通知'));
     } catch (error) { if (epoch === lifecycleEpoch) notify(errorText(error, '分享失败，请重试')); }
     finally { if (epoch === lifecycleEpoch) shareBusy = false; if (button.isConnected) button.disabled = false; }
   }
@@ -690,11 +748,11 @@
     closeMenus();
     const epoch = lifecycleEpoch;
     try { await global.WorkspaceShell?.refreshConversationHistory?.(); }
-    catch (_) { notify('来源会话不可用'); return; }
+    catch (_) { await showSourceUnavailable(); return; }
     if (epoch !== lifecycleEpoch) return;
     const escapeSelector = typeof global.CSS?.escape === 'function' ? global.CSS.escape : (value) => value.replace(/"/g, '\\"');
     const row = root.ownerDocument.querySelector('.ws-chat[data-chat-id="' + escapeSelector(id) + '"]');
-    if (!row || !global.WorkspaceHost?.open) { notify('来源会话不可用'); return; }
+    if (!row || !global.WorkspaceHost?.open) { await showSourceUnavailable(); return; }
     const title = row.querySelector('.ws-chat-title')?.textContent || '';
     global.WorkspaceHost.open('create', { tab: 'chat', chatId: id, chatTitle: title });
   }
@@ -746,7 +804,7 @@
     const deleteAction = canDelete
       ? '<button class="library-danger" data-library-delete-folder="' + id + '">' + icon('trash') + '删除空文件夹</button>'
       : '<button class="library-danger" type="button" disabled title="请先移除文件夹中的资料和子文件夹">' + icon('trash') + '仅空文件夹可删除</button>';
-    return '<article class="library-card library-folder-card"><span class="library-row-select" aria-hidden="true"></span><button class="library-card-main" data-library-folder="' + id + '"><span class="library-card-name"><span class="library-card-preview">' + icon('folder') + '</span><span class="library-card-copy"><b data-user-content>' + esc(folder.name) + '</b><small>' + tx('文件夹') + (folder.favorite ? ' · ' + tx('已收藏') : '') + '</small></span></span><span class="library-card-date">' + esc(formatDate(folder.updatedAt)) + '</span><span class="library-card-size">—</span><span class="library-card-grid-date">' + tx('已修改') + ' · ' + esc(formatGridDate(folder.updatedAt)) + '</span></button>' + (folder.storageOrigin === 'server-history' ? '' : '<div class="library-menu-wrap library-card-actions"><button class="library-icon-button" data-library-menu-toggle="folder-' + id + '" aria-label="文件夹操作" aria-expanded="false">' + icon('more') + '</button><div class="library-menu library-item-menu" data-library-menu="folder-' + id + '" hidden><button data-library-favorite-folder="' + id + '" data-value="' + !!folder.favorite + '">' + icon('star') + (folder.favorite ? '取消收藏' : '添加到收藏夹') + '</button><button data-library-rename-folder="' + id + '">' + icon('edit') + '重命名</button>' + deleteAction + '</div></div>') + '</article>';
+    return '<article class="library-card library-folder-card"><label class="library-row-select"><input type="checkbox" data-library-select-folder="' + id + '" data-user-attributes="aria-label" aria-label="' + esc(tx('选择文件夹：{name}', { name: folder.name })) + '"' + (state.selectedFolders.has(String(folder.id)) ? ' checked' : '') + '></label><button class="library-card-main" data-library-folder="' + id + '"><span class="library-card-name"><span class="library-card-preview">' + icon('folder') + '</span><span class="library-card-copy"><b data-user-content>' + esc(folder.name) + '</b><small>' + tx('文件夹') + (folder.favorite ? ' · ' + tx('已收藏') : '') + '</small></span></span><span class="library-card-date">' + esc(formatDate(folder.updatedAt)) + '</span><span class="library-card-size">—</span><span class="library-card-grid-date">' + tx('已修改') + ' · ' + esc(formatGridDate(folder.updatedAt)) + '</span></button>' + (folder.storageOrigin === 'server-history' ? '' : '<div class="library-menu-wrap library-card-actions"><button class="library-icon-button" data-library-menu-toggle="folder-' + id + '" aria-label="' + esc(tx('文件夹操作')) + '" aria-expanded="false">' + icon('more') + '</button><div class="library-menu library-item-menu" data-library-menu="folder-' + id + '" hidden><button data-library-share-folder="' + id + '">' + icon('share') + tx('分享文件夹') + '</button><button data-library-favorite-folder="' + id + '" data-value="' + !!folder.favorite + '">' + icon('star') + (folder.favorite ? tx('取消收藏') : tx('添加到收藏夹')) + '</button><button data-library-rename-folder="' + id + '">' + icon('edit') + tx('重命名') + '</button>' + deleteAction + '</div></div>') + '</article>';
   }
   function emptyMarkup() {
     if (state.busy) return '<span class="library-spinner" aria-hidden="true"></span><b>正在加载资料库</b>';
@@ -838,6 +896,8 @@
     const visibleIds = items.map(item => item.id);
     if (!state.busy && previewPane?.selectedId() && !visibleIds.includes(previewPane.selectedId())) previewPane.close();
     state.selected.forEach(id => { if (!visibleIds.includes(id)) state.selected.delete(id); });
+    const visibleFolderIds = folders.map(folder => String(folder.id));
+    state.selectedFolders.forEach(id => { if (!visibleFolderIds.includes(String(id))) state.selectedFolders.delete(id); });
     const content = root.querySelector('[data-library-content]');
     content.className = 'library-content is-' + state.view;
     const rows = folders.map(folderRow).concat(items.map(itemRow));
@@ -848,24 +908,47 @@
     root.querySelector('[data-library-list-head]').hidden = state.view !== 'list' || unavailable || !rows.length;
     const batchToolbar = root.querySelector('[data-library-batch-toolbar]');
     if (batchToolbar) {
-      const selectedCount = state.scope === 'trash' ? 0 : visibleIds.filter(id => state.selected.has(id)).length;
+      const selectedCount = state.scope === 'trash' ? 0 : visibleIds.filter(id => state.selected.has(id)).length + visibleFolderIds.filter(id => state.selectedFolders.has(id)).length;
       batchToolbar.hidden = selectedCount < 1 || unavailable || state.scope === 'trash';
       const count = batchToolbar.querySelector('[data-library-batch-count]');
-      if (count) count.textContent = '已选择 ' + selectedCount + ' 项';
+      if (count) count.textContent = tx('已选择 {count} 项', { count: selectedCount });
+      const batchLabels = [
+        ['[data-library-batch-chat]', '围绕内容开启对话'],
+        ['[data-library-batch-migrate]', '批量存储到远端'],
+        ['[data-library-batch-share]', '批量分享'],
+        ['[data-library-batch-delete]', '批量删除'],
+        ['[data-library-batch-clear]', '取消选择'],
+      ];
+      batchLabels.forEach(([selector, source]) => {
+        const button = batchToolbar.querySelector(selector);
+        if (button) button.textContent = tx(source);
+      });
+      const hasFolderSelection = visibleFolderIds.some(id => state.selectedFolders.has(id));
+      ['[data-library-batch-chat]', '[data-library-batch-migrate]', '[data-library-batch-delete]'].forEach(selector => {
+        const action = batchToolbar.querySelector(selector);
+        if (action) {
+          action.disabled = hasFolderSelection || batchBusy || state.busy;
+          action.title = hasFolderSelection ? tx('文件夹只能用于批量分享') : '';
+        }
+      });
       const migrateButton = batchToolbar.querySelector('[data-library-batch-migrate]');
       if (migrateButton) {
         const hasLocalSelection = items.some(item => state.selected.has(item.id) && isClientLocal(item) && !item.extra?.soduworkDelivery);
         const remoteReady = !state.storageStatusLoading && state.storageStatus.remote.available && !!state.storageStatus.remote.backend;
         migrateButton.hidden = !hasLocalSelection || !remoteReady || state.scope === 'trash';
       }
-      batchToolbar.querySelectorAll('button').forEach(button => { button.disabled = batchBusy || state.busy; });
+      batchToolbar.querySelectorAll('button').forEach(button => {
+        const restricted = hasFolderSelection && ['libraryBatchChat', 'libraryBatchMigrate', 'libraryBatchDelete'].some(key => button.dataset[key] !== undefined);
+        button.disabled = batchBusy || state.busy || restricted;
+      });
     }
     const selectAll = root.querySelector('[data-library-select-all]');
     if (selectAll) {
-      const selectedCount = visibleIds.filter(id => state.selected.has(id)).length;
-      selectAll.disabled = !visibleIds.length || unavailable;
-      selectAll.checked = visibleIds.length > 0 && selectedCount === visibleIds.length;
-      selectAll.indeterminate = selectedCount > 0 && selectedCount < visibleIds.length;
+      const allSelectable = visibleIds.length + visibleFolderIds.length;
+      const selectedCount = visibleIds.filter(id => state.selected.has(id)).length + visibleFolderIds.filter(id => state.selectedFolders.has(id)).length;
+      selectAll.disabled = !allSelectable || unavailable;
+      selectAll.checked = allSelectable > 0 && selectedCount === allSelectable;
+      selectAll.indeterminate = selectedCount > 0 && selectedCount < allSelectable;
     }
     const empty = root.querySelector('[data-library-state]'); empty.hidden = !state.error && !unavailable && !!rows.length; empty.innerHTML = emptyMarkup();
     // emptyMarkup() recreates the center action each render, so apply the
@@ -893,7 +976,7 @@
       };
       if (state.storage !== 'local' && backend && state.storage !== backend) {
         lifecycleEpoch++; requestId++; shareBusy = false; batchBusy = false; dialogs.close(); previewPane?.close();
-        state.storage = backend; state.folderId = ''; state.folder = null; state.selected.clear();
+        state.storage = backend; state.folderId = ''; state.folder = null; state.selected.clear(); state.selectedFolders.clear();
         state.items = []; state.folders = [];
       }
     } catch (error) {
@@ -934,7 +1017,23 @@
       }
     } finally { if (request === requestId) { state.busy = false; render(); } }
   }
-  function openLibraryPanel() { ensureRoot().classList.add('show'); loadStorageStatus(); load(); }
+  async function openLibraryPanel(options) {
+    ensureRoot().classList.add('show');
+    if (!options?.itemId) { loadStorageStatus(); return load(); }
+    const epoch = ++lifecycleEpoch;
+    state.scope = 'recommended'; state.folderId = ''; state.folder = null;
+    state.storage = ['minio', 'nfs'].includes(options.storage) ? options.storage : 'local';
+    state.query = String(options.query || '');
+    root.querySelector('[data-library-search]').value = state.query;
+    await loadStorageStatus();
+    if (epoch !== lifecycleEpoch || !root.matches('.show,.workspace-hosted')) return;
+    await load();
+    if (epoch !== lifecycleEpoch || !root.matches('.show,.workspace-hosted')) return;
+    const item = state.items.find(row => row.id === options.itemId && !row.deletedAt);
+    if (!item) throw Error('SEARCH_LIBRARY_UNAVAILABLE');
+    previewPane ||= global.SoduWorkLibraryPreview.create({ root, openSource: openSourceConversation });
+    return previewPane.open(item);
+  }
   function closeLibraryPanel() {
     requestId++; storageStatusRequest++; lifecycleEpoch++; uploadTarget = null; clearTimeout(searchTimer);
     shareBusy = false;
@@ -951,7 +1050,7 @@
     loadedFilterKey = '';
     Object.assign(state, { scope: 'recommended', storage: 'local', query: '', folderId: '', folder: null, folders: [], items: [], trashCount: 0, error: '', busy: false,
       storageStatus: { local: { available: true }, remote: { backend: '', available: false } } });
-    state.selected.clear();
+    state.selected.clear(); state.selectedFolders.clear();
     if (root) { root.querySelector('[data-library-search]').value = ''; render(); }
     if (visible) openLibraryPanel();
   });

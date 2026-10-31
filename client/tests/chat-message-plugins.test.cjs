@@ -63,7 +63,7 @@ test('恶意名称和不安全图标不能作为 HTML 或外部图片加载', as
   const html = f.view.html([{...badge,name:'<img src=x onerror=alert(1)>'}]);
   assert.match(html, /&lt;img/); assert.doesNotMatch(html, /<img|https:\/\//);
 });
-test('应用卡片在正常使用后可打开应用，普通插件仍只显示原徽标', async () => {
+test('应用卡片在正常使用后可打开即用，普通插件仍只显示原徽标', async () => {
   const app = { ...badge, pluginId: 'local:app', name: '已配置应用', description: '应用一行简介', personal: true,
     ui: { contributions: [{ slot: 'workspace.navigation' }] } };
   const f = fixture(async () => ({ items: [app, badge] }));
@@ -71,7 +71,7 @@ test('应用卡片在正常使用后可打开应用，普通插件仍只显示�
   await tick();
   const html = f.view.cards([{ pluginId: app.pluginId }, badge]);
   assert.match(html, /data-chat-open-app="local:app"/);
-  assert.match(html, /已配置应用/); assert.match(html, /打开应用/);
+  assert.match(html, /已配置应用/); assert.match(html, /打开即用/);
   assert.match(html, /appsx-card-txt/); assert.match(html, /应用一行简介/);
   assert.match(html, /appsx-set/); assert.match(html, /appsx-fav/);
   assert.match(html, /data-chat-app="local:app" role="button" tabindex="0"/);

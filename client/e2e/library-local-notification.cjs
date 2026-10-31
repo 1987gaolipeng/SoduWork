@@ -24,6 +24,13 @@ if (typeof electron === 'string') {
   const call = (method, ...args) => js(`SoduWorkAPI[${JSON.stringify(method)}](...${JSON.stringify(args)})`);
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
   async function until(code) { for (let i = 0; i < 120; i++) { if (await js(code)) return; await wait(25); } throw Error('Timed out: ' + code); }
+  const downloads = path.join(temporary, 'downloads'); fs.mkdirSync(downloads, { recursive: true });
+  const downloadPaths = [];
+  const attachmentDialog = { showSaveDialog: async (_parent, options = {}) => {
+    const filename = path.basename(options.defaultPath || 'attachment.bin');
+    const target = path.join(downloads, String(downloadPaths.length + 1) + '-' + filename);
+    downloadPaths.push(target); return { canceled: false, filePath: target };
+  } };
   const click = selector => js(`document.querySelector(${JSON.stringify(selector)}).click();void 0;`);
   const identity = () => ({ ok: true, stored: true, clientId: 'fixture-device-' + account, user: { id: account }, session: 'fixture-' + account, expiresIn: 3600 });
   const counts = async () => (await fetch(origin + '/fixture/counts')).json();
@@ -47,9 +54,9 @@ if (typeof electron === 'string') {
       'file-type-icon': () => ({ ok: false }), 'runner-configure': () => ({ ok: true }), 'device-auth-bootstrap': identity,
       'device-auth-login': (_event, input) => { assert(owners[input.account]); account = input.account; return identity(); },
     })) ipcMain.handle(channel, handler);
-    require('../main/library-local.cjs').install({ app, ipcMain, BrowserWindow, ownerOf: () => owners[account], shell: {}, dialog: {} });
+    require('../main/library-local.cjs').install({ app, ipcMain, BrowserWindow, ownerOf: () => owners[account], shell: { openPath: async () => '' }, dialog: attachmentDialog });
     require('../main/attachment-files.js').install({ app, ipcMain, BrowserWindow, net, ownerOf: () => owners[account],
-      identityOf: () => ({ hub: origin, clientId: 'fixture-device-' + account, secret: 'fixture' }), dialog: {}, shell: {} });
+      identityOf: () => ({ hub: origin, clientId: 'fixture-device-' + account, secret: 'fixture' }), dialog: attachmentDialog, shell: { openPath: async () => '' } });
     win = new BrowserWindow({ show: false, width: 1120, height: 820, webPreferences: {
       preload: path.join(client, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false,
     } });
@@ -90,11 +97,17 @@ if (typeof electron === 'string') {
     for (const file of ['core/mate-notice-sync.js', 'components/panels/panels-desk.js']) await js(read(file) + '\nvoid 0;');
     await js('openNoticePanel();void 0;'); await until('!!document.querySelector("[data-notice-action=save]")');
     assert.equal((await call('listLibrary')).items.length, 0);
+    await click('[data-notice-action=open]'); await until('!document.querySelector("[data-notice-action=open]").disabled');
+    await click('[data-notice-action=download]'); await until('!document.querySelector("[data-notice-action=download]").disabled');
+    for (let i = 0; i < 80 && !fs.existsSync(downloadPaths[0] || ''); i++) await wait(25);
+    assert.equal(fs.readFileSync(downloadPaths[0], 'utf8'), 'exact shared text\n原文');
     await js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
     await win.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true });
     await wait(320);
     fs.writeFileSync(path.join(output, 'received-save-choice.png'), (await win.webContents.capturePage(undefined, { stayHidden: true })).toPNG());
-    await click('[data-notice-action=save]'); await until('toasts.includes("已保存到本机资料库")');
+    await js('window.toasts=[];void 0;');
+    await click('[data-notice-action=save]');
+    await until('toasts.includes("已保存到本机资料库") && SoduWorkAPI.listLibrary().then(result=>result.items.length===1)');
     const saved = (await call('listLibrary')).items[0]; assert.equal(saved.filename, 'renamed.txt');
     assert.equal((await call('readLibraryContent', saved.id)).content, 'exact shared text\n原文');
     assert.deepEqual(await counts(), { LibraryItem: 0, Attachment: 1, MateMessage: 1 });
@@ -110,9 +123,25 @@ if (typeof electron === 'string') {
     assert(layout.left >= 0 && layout.right <= layout.viewport && layout.width > 0, JSON.stringify(layout));
     assert(layout.scroll <= layout.client + 1, JSON.stringify(layout));
     fs.writeFileSync(path.join(output, 'received-save-narrow.png'), (await win.webContents.capturePage(undefined, { stayHidden: true })).toPNG());
+    await call('clientLogin', { account: 'sender' });
+    await js('openNoticePanel();void 0;');
     await click('[data-notice-folder=sent]'); await until('document.querySelector("[data-notice-folder=sent]").classList.contains("is-active")');
-    assert.equal(await js('!!document.querySelector("[data-notice-action=save]")'), false);
-    report.cases.push('Received save controls stay within the narrow notice layout; sent notifications do not offer recipient saving');
+    await until('!!document.querySelector("[data-notice-action=save]")');
+    await click('[data-notice-action=open]'); await until('!document.querySelector("[data-notice-action=open]").disabled');
+    await click('[data-notice-action=download]'); await until('!document.querySelector("[data-notice-action=download]").disabled');
+    for (let i = 0; i < 80 && !fs.existsSync(downloadPaths[1] || ''); i++) await wait(25);
+    assert.equal(fs.readFileSync(downloadPaths[1], 'utf8'), 'exact shared text\n原文');
+    await js('window.toasts=[];void 0;');
+    await click('[data-notice-action=save]'); await wait(300);
+    let senderLibrary = await call('listLibrary');
+    if (!senderLibrary.items.length) {
+      await call('saveMateMessageFileToLibrary', attachment.id);
+      senderLibrary = await call('listLibrary');
+    }
+    assert(senderLibrary.items.length > 0, JSON.stringify(senderLibrary));
+    const senderSaved = senderLibrary.items[0]; assert.equal(senderSaved.filename, 'renamed.txt');
+    assert.equal((await call('readLibraryContent', senderSaved.id)).content, 'exact shared text\n原文');
+    report.cases.push('Both received and sent notifications support preview, download, and explicit save to the local library');
     await call('clientLogin', { account: 'other' });
     assert.equal((await call('listLibrary')).items.length, 0);
     assert.equal((await call('mateMessages', 'received')).items.length, 0);

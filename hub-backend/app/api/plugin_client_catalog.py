@@ -44,7 +44,8 @@ async def _client_actor(session: AsyncSession, client: Client):
     return SimpleNamespace(
         id=user.id, user_id=user.id, client_id=client.id,
         display_name=user.display_name or user.username,
-        username=user.username, org_id=user.org_id,
+        username=user.username, org_id=user.org_id, is_super=bool(user.is_super),
+        is_active=bool(user.is_active),
     )
 
 
@@ -56,7 +57,7 @@ async def _client_plugin_bytes(file: UploadFile) -> bytes:
 
 
 async def _catalog_item(session: AsyncSession, actor, plugin_id: str) -> dict:
-    visible_orgs = await rbac.ancestor_org_ids(session, actor.org_id)
+    visible_orgs = await rbac.company_org_ids(session, actor)
     snapshot = await plugin_service.client_catalog(
         session, actor.org_id, "", actor.user_id,
         visible_org_ids=visible_orgs)
@@ -79,7 +80,7 @@ async def client_plugin_catalog(
     session: AsyncSession = Depends(get_session),
 ):
     actor = await _client_actor(session, client)
-    visible_orgs = await rbac.ancestor_org_ids(session, actor.org_id)
+    visible_orgs = await rbac.company_org_ids(session, actor)
     return await plugin_service.client_catalog(
         session, actor.org_id, actor.id, actor.user_id,
         visible_org_ids=visible_orgs)
@@ -100,7 +101,7 @@ async def client_plugin_recommendations(
     actor = await _client_actor(session, client)
     if surface not in plugin_marketplace.RECOMMENDATION_SURFACES:
         raise HTTPException(status_code=422, detail="未知的推荐位置")
-    visible_orgs = await rbac.ancestor_org_ids(session, actor.org_id)
+    visible_orgs = await rbac.company_org_ids(session, actor)
     items = await plugin_marketplace.active_recommendations(
         session, visible_orgs, surface)
     return {"items": items}

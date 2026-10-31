@@ -43,7 +43,7 @@ test('application conversations restore configured ukey without an app window an
         type: 'external', url: f.binding.origin, bridge: { version: 1, capabilities: ['mcp.connect'] },
       } }] } };
     const plugin = personal.create(f.app, body).plugin, binding = { ...f.binding, pluginId: plugin.pluginId };
-    assert.throws(() => appConnections.context(f.app, plugin.pluginId), /尚未配置连接.*打开应用/);
+    assert.throws(() => appConnections.context(f.app, plugin.pluginId), /尚未配置连接.*打开即用/);
     store.update(binding, { values: { ukey: 'fixture-conversation-key', theme: 'dark' } });
     const current = appConnections.context(f.app, plugin.pluginId);
     assert.equal(current.connection.token, 'fixture-conversation-key');

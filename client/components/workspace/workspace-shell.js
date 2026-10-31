@@ -113,7 +113,7 @@
     history: ['需求池', '收集需求，安排执行，跟进交付'], add: ['创建需求', '把目标交给团队或 AI'],
     briefs: ['简报', '查看个人日报、周报与团队概况'],
     team: ['团队', '查看成员、负载与协作需求'], schedules: ['自动化', '让重复工作按计划自动执行'],
-    skills: ['插件', '使用技能、连接器与企业插件扩展能力'], apps: ['应用', '点开就是工作界面；本地安装免审核免提交'], models: ['我的模型', '配置个人模型与调用额度'],
+    skills: ['插件', '使用技能、连接器与企业插件扩展能力'], apps: ['即用', '点开就是工作界面；本地安装免审核免提交'], models: ['我的模型', '配置个人模型与调用额度'],
     agents: ['Agent 管理', '管理 Agent、Runner 与可用状态'], codeacct: ['代码账号', '管理代码提交身份与访问凭据'],
     cloud: ['云端环境', '管理负责执行会话的云端服务器'],
     memory: ['我的记忆', '导入会话，确认摘要后用于后续工作'],
@@ -156,7 +156,7 @@
      groups with a separator in between. */
   const RAIL_ITEMS = [
     ['create', '主页', 'home'],
-    ['apps', '应用', 'apps'],
+    ['apps', '即用', 'apps'],
     ['history', '需求池', 'history'],
     ['skills', '插件', 'skills'],
     ['schedules', '自动化', 'schedules'],
@@ -425,7 +425,7 @@
       '<nav class="ws-rail" id="wsRail" aria-label="工作区快捷导航"></nav>' +
       '<aside class="ws-side">' +
         '<div class="ws-brand"><img class="ws-mark" src="icon.png" alt="" draggable="false">' +
-          '<span><b>SoduWork</b></span></div>' +
+        '<span><b>SoduWork</b></span><button type="button" id="wsGlobalSearch" class="ws-global-search" aria-label="全局搜索" title="全局搜索 · Ctrl+Shift+F"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button></div>' +
         '<button class="ws-back" id="wsBack"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>' +
           '<span>返回主页</span></button>' +
         '<nav class="ws-new-chat" aria-label="新对话">' + navHtml([['', ['create']]]) + '</nav>' +
@@ -480,6 +480,8 @@
     recent = root.querySelector('#wsRecent');
     chats = root.querySelector('#wsChats');
     pinnedChats = root.querySelector('#wsPinnedChats');
+    root.querySelector('#wsGlobalSearch').addEventListener('click', () => global.SoduWorkGlobalSearch?.open());
+    global.SoduWorkGlobalSearch?.refreshEntry();
     if (global.WorkspaceSidebarProjects) sidebarProjects = global.WorkspaceSidebarProjects.create({
       root, getItems: () => chatItems, render: renderChats, legacyPins: legacyPinnedIds,
     });
@@ -786,6 +788,9 @@
   }
 
   global.WorkspaceShell = { mount, setActive, setTasks, setChats, upsertChat, removeChat, setActiveChat, renameChat,
+                            searchChats: () => chatItems.filter(row => !row.pending).map(row => ({ ...row })),
+                            searchProjects: () => sidebarProjects?.searchProjects() || [],
+                            openSearchProject: id => sidebarProjects?.openSearchProject(id),
                             newSessionContext, newSessionPayload, projectForChat, fileChatInProject,
                             refreshConversationHistory, setApprovalCount, setNoticeCount, setConnected, refreshNav, setUpdateState,
                             refreshRecentWorkspace,

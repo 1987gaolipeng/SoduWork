@@ -172,9 +172,7 @@
   max-width: 100%;
 }
 .app[data-screen="skills"] .cap-admin-card-main,
-.app[data-screen="skills"] .cap-admin-submit-list span,
-.app[data-screen="capabilities"] .cap-admin-card-main,
-.app[data-screen="capabilities"] .cap-admin-submit-list span {
+.app[data-screen="capabilities"] .cap-admin-card-main {
   width: 0;
   min-width: 0;
   max-width: 100%;
@@ -186,8 +184,8 @@
   max-width: 100%;
   overflow-wrap: anywhere;
 }
-.app[data-screen="skills"] .cap-admin-submit-list small,
-.app[data-screen="capabilities"] .cap-admin-submit-list small {
+.app[data-screen="skills"] .cap-admin-submit-list small:not(.cap-admin-submit-origin),
+.app[data-screen="capabilities"] .cap-admin-submit-list small:not(.cap-admin-submit-origin) {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;

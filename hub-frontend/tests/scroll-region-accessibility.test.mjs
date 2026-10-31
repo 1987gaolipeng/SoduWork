@@ -4,6 +4,8 @@ import test from 'node:test'
 import React from 'react'
 import { createComponentHarness } from './helpers/react-harness.mjs'
 import * as requirementGovernance from '../src/screens/requirement-governance.js'
+import * as operationsCopy from '../src/screens/operations-copy.js'
+import * as insightsMetrics from '../src/screens/insights-metrics.js'
 
 // Exercise the real screen JSX. This checks authored focus/region semantics,
 // not browser tab order, actual scrolling, computed CSS, or assistive technology.
@@ -40,11 +42,14 @@ async function mountScreen(t, name) {
     dependencies: {
       '../api.js': { api, can: () => true },
       './requirement-governance.js': requirementGovernance,
+      './operations-copy.js': operationsCopy,
+      './insights-metrics.js': insightsMetrics,
       '../ui.jsx': { AUTO: 5000, Icon: 'Icon', Modal: 'Modal', Loading: 'Loading', ErrorState: 'ErrorState',
         navTo: () => {}, useAsync: (read) => ({ data: read(), loading: false, error: null }) },
       '../viewport-height.js': { useViewportHeight: () => null },
       '../FilterControls.jsx': { FilterInput: 'FilterInput', FilterSelect: 'FilterSelect' },
       '../ListPager.jsx': 'ListPager',
+      './operations-copy.js': { operationsText: (value) => value },
       './operations-insights-charts.jsx': { UsageTrend: 'UsageTrend' },
       './overview.css': {}, './operations-insights.css': {}, './operations-center.css': {},
     },

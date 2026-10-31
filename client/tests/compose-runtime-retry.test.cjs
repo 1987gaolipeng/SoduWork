@@ -5,10 +5,15 @@ const source = fs.readFileSync(path.join(__dirname, '../components/panels/panels
 const flush = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 const fullCatalog = ['pi', 'codex-harness', 'opencode', 'qwen', 'dsh', 'codex'].map(id => ({ id }));
-function fixture(first) {
+function fixture(first, options = {}) {
   const handlers = new Map(), timers = new Map(), elements = new Map(); let calls = 0;
   let owner = 'hub-a/device/user-a';
   const listeners = new Map();
+  const healthProject = reply => {
+    if (!reply || !reply.ok || Array.isArray(reply.availableRuntimes)) return reply;
+    const rows = Array.isArray(reply.runtimes) ? reply.runtimes : [];
+    return { ...reply, availableRuntimes: rows, missing: [] };
+  };
   const element = selector => {
     if (!elements.has(selector)) elements.set(selector, { dataset: {},
     classList: { toggle() {}, add() {}, remove() {}, contains() { return false; } },
@@ -31,11 +36,28 @@ function fixture(first) {
       return handlers.get('#cpRuntimePop:click')({ target: { closest: () => row } }); },
     expire: () => { for (const fn of [...timers.values()]) fn(); } };
 }
+
+test('a legacy declaration-only response never exposes unverified non-Pi runtimes', async () => {
+  const f = fixture(() => ({ ok: true, runtimes: fullCatalog }), { project: false });
+  await f.runtime.ready();
+  assert.deepEqual(f.runtime.catalog().map(row => row.id), ['pi']);
+  assert.doesNotMatch(f.runtime.controls(''), /data-runtime='opencode'/);
+});
+
+test('an incomplete health projection cannot remove the resident Pi entry', async () => {
+  const f = fixture(() => ({ ok: true,
+    runtimes: [{ id: 'pi', displayName: 'Pi' }, { id: 'opencode', displayName: 'OpenCode' }],
+    availableRuntimes: [{ id: 'opencode', displayName: 'OpenCode' }],
+    missing: [] }));
+  await f.runtime.ready();
+  assert.equal(Array.from(f.runtime.catalog(), row => row.id).join(','), 'pi,opencode');
+});
+
 for (const failed of ['rejection', 'invalid', 'empty']) {
   test(`failed ${failed} catalog is retried on reopen and then cached only after a valid response`, async () => {
     const f = fixture(() => { if (failed === 'rejection') throw Error('startup IPC failed');
       return failed === 'invalid' ? { ok: false, runtimes: fullCatalog } : { ok: true, runtimes: [] }; });
-    await f.runtime.ready(); assert.equal(f.runtime.catalog().length, 7);
+    await f.runtime.ready(); assert.equal(f.runtime.catalog().length, 1);
     f.click(); f.click(); f.bind(); await f.runtime.ready(); await flush();
     assert.equal(f.calls(), 2); assert.equal(f.runtime.catalog().length, 6);
     f.click(); f.bind(); await f.runtime.ready(); assert.equal(f.calls(), 2);
@@ -160,7 +182,7 @@ test('cloud selection exposes the actual paused/offline diagnosis and an absent 
 });
 test('a timed-out catalog releases its pending slot and a late result cannot replace the recovered catalog', async () => {
   const old = deferred(), f = fixture(() => old.promise); await flush(); f.expire(); await f.runtime.ready();
-  assert.equal(f.runtime.catalog().length, 7); f.click(); await flush();
+  assert.equal(f.runtime.catalog().length, 1); f.click(); await flush();
   assert.equal(f.calls(), 2); assert.equal(f.runtime.catalog().length, 6);
   old.resolve({ ok: true, runtimes: [{ id: 'obsolete' }] }); await flush();
   assert.equal(f.runtime.catalog().length, 6); assert.ok(!f.runtime.catalog().some(row => row.id === 'obsolete'));
@@ -197,7 +219,7 @@ test('runtime-added events refresh the catalog once, preserve the selected Agent
   f.api.onRuntimesChanged = listener => { listeners.add(listener); return () => listeners.delete(listener); };
   f.bind(); f.bind(); assert.equal(listeners.size, 1);
   const next = [...fullCatalog, { id: 'custom-new', displayName: 'New ACP Agent' }];
-  f.api.runtimes = async () => ({ ok: true, runtimes: next });
+  f.api.runtimes = async () => ({ ok: true, runtimes: next, availableRuntimes: next, missing: [] });
   for (const listener of listeners) listener(); await flush();
   assert.equal(f.runtime.catalog().length, 7); assert.equal(f.runtime.value(), 'pi');
   old.resolve({ ok: true, runtimes: [{ id: 'obsolete' }] }); await flush();

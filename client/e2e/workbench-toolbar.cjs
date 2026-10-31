@@ -51,9 +51,9 @@ if (typeof electron === 'string') {
     assert.equal(await js('document.querySelector("[data-wb-image-copy]").getAttribute("aria-label")'), '复制图片');
     await js('SoduWorkI18n.setLocale("en-US");'); await click('[data-wb-library-upload]');
     await js('SoduWorkI18n.setLocale("zh-CN");finishUpload({ok:true});void 0;'); await delay(100);
-    assert.equal(await js('document.querySelector("[data-wb-library-upload]").title'), '已保存到资料库');
-    assert.equal(await js('document.querySelector("[data-wb-library-upload]").getAttribute("aria-label")'), '已保存到资料库');
-    report.cases.push('Repeated copy and pending upload recover source-language tooltips and accessible names after a locale switch');
+    assert.equal(await js('document.querySelector("[data-wb-library-upload]").title'), '预览');
+    assert.equal(await js('document.querySelector("[data-wb-library-upload]").getAttribute("aria-label")'), '预览');
+    report.cases.push('Repeated copy and pending upload switch the linked library action to preview after saving and preserve accessible names after a locale switch');
     for (const width of [850, 360]) {
       win.setSize(width, 650); await delay(80);
       for (const locale of ['en-US', 'zh-CN']) {

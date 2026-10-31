@@ -203,6 +203,22 @@ test('the current task can expose a trusted remote result while another task rem
     'explicit current-task ownership retains a trusted remote result outside the local cwd');
 });
 
+test('settled delivery receipt exposes an unmentioned primary result only to automatic preview', () => {
+  const generated = file('outputs/site.html', { kind: 'website', changedInTurn: true });
+  const evidence = file('checks/shot.png', { kind: 'image', changedInTurn: true, primary: false, processEvidence: true });
+  const snapshot = { messages: [message('user', '生成网页', 1000), message('assistant', '已经完成。', 1200)], tools: [],
+    deliverySync: { currentTurn: true, artifactVersions: [{ id: generated.artifactId, at: generated.at, size: generated.size }] } };
+  assert.deepEqual(info.currentDeliveryFiles(snapshot, [generated, evidence]), [generated]);
+  assert.deepEqual(info.currentDeliveryFiles({ ...snapshot, deliverySync: { ...snapshot.deliverySync, currentTurn: false } }, [generated]), []);
+  assert.deepEqual(info.currentDeliveryFiles({ messages: snapshot.messages, tools: [] }, [generated]), [],
+    'a changedInTurn flag without a session receipt must not cross a shared workspace boundary');
+  const nextTurn = { ...snapshot, messages: [...snapshot.messages, message('user', '继续聊天', 2000)],
+    deliverySync: undefined, fileChanges: { cwd: '/project', capturedAt: 1300,
+      files: [{ path: 'outputs/site.html', action: 'modified', after: { exists: true } }] } };
+  assert.deepEqual(info.currentDeliveryFiles(nextTurn, [generated]), [],
+    'a prior turn journal cannot auto-open again after the user starts a new turn');
+});
+
 test('the real workbench sends scoped summary rows and never auto-opens another conversations newer output', () => {
   const node = () => ({ dataset: {}, setAttribute() {}, classList: { toggle() {}, remove() {} } });
   const nodes = { '.ncw': node(), '.ncw-tabs': node(), '.ncw-body': node() };
@@ -233,4 +249,8 @@ test('the real workbench sends scoped summary rows and never auto-opens another 
   ] }, files);
   assert.deepEqual(Array.from(summary.summary.files, row => row.path), ['mine.md'],
     'restored conversations resolve absolute tool paths from the actual opened cwd, without an intent cwd or journal');
+  const generated = file('outputs/site.html', { kind: 'website', changedInTurn: true });
+  wb.render(root, { messages: [message('user', '生成网页', 4000), message('assistant', '已经完成。', 4200)], tools: [],
+    deliverySync: { currentTurn: true, artifactVersions: [{ id: generated.artifactId, at: generated.at, size: generated.size }] } }, [generated]);
+  assert.equal(wb.state().open, true, 'a settled primary delivery opens even when the answer omits its filename');
 });

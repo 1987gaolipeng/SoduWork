@@ -11,18 +11,24 @@ public class SoduWorkLauncherSwapObserver {
   [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr CreateFileW(string name,uint access,uint share,IntPtr security,uint creation,uint flags,IntPtr template);
   [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
   public class Sample { public int AttributeError,OpenError;public long ElapsedTicks; }
-  public class Result { public int Samples,AttributeMisses,OpenMisses,ExitCode; public long ElapsedMs;public List<Sample> FirstMisses=new List<Sample>(); }
+  public class Result { public int Samples,AttributeMisses,OpenMisses,ExitCode; public double MaxMissWindowMs;public long ElapsedMs;public List<Sample> FirstMisses=new List<Sample>(); }
   public static Result Run(string exe,string entry) {
     var result=new Result();var clock=Stopwatch.StartNew();bool running=true;
     var observer=new Thread(()=>{
+      long lastGood=0,missStart=0;bool inMiss=false;
       while(Volatile.Read(ref running)) {
+        long tick=clock.ElapsedTicks;
         uint attr=GetFileAttributesW(entry);int attrError=attr==UInt32.MaxValue?Marshal.GetLastWin32Error():0;
         IntPtr handle=CreateFileW(entry,0x80000000,7,IntPtr.Zero,3,0,IntPtr.Zero);
         int openError=handle==new IntPtr(-1)?Marshal.GetLastWin32Error():0;
         if(openError==0)CloseHandle(handle);
+        bool miss=attrError!=0||openError!=0;
         result.Samples++;if(attrError!=0)result.AttributeMisses++;if(openError!=0)result.OpenMisses++;
-        if((attrError!=0||openError!=0)&&result.FirstMisses.Count<20)result.FirstMisses.Add(new Sample {AttributeError=attrError,OpenError=openError,ElapsedTicks=clock.ElapsedTicks});
+        if(miss){if(!inMiss){inMiss=true;missStart=lastGood;}}
+        else{if(inMiss){var ms=(tick-missStart)*1000.0/Stopwatch.Frequency;if(ms>result.MaxMissWindowMs)result.MaxMissWindowMs=ms;inMiss=false;}lastGood=tick;}
+        if((attrError!=0||openError!=0)&&result.FirstMisses.Count<20)result.FirstMisses.Add(new Sample {AttributeError=attrError,OpenError=openError,ElapsedTicks=tick});
       }
+      if(inMiss){var ms=(clock.ElapsedTicks-missStart)*1000.0/Stopwatch.Frequency;if(ms>result.MaxMissWindowMs)result.MaxMissWindowMs=ms;}
     });
     observer.Start();
     try {

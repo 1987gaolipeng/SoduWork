@@ -58,6 +58,12 @@ async function _ensure(chatId) {
          same explicit, retryable UI used by structured open errors. */
       if (epoch === ctx._viewEpoch) {
         const reason = String((error && error.message) || error || '');
+        if (chatId) {
+          const previousSnapshot = ctx._snap || {};
+          ctx._snap = { ...previousSnapshot, sessionNotFound: false,
+            sessionOpenCode: typeof error?.code === 'string' ? error.code : '',
+            execution: previousSnapshot.execution ? { ...previousSnapshot.execution, modelRecovery: null } : previousSnapshot.execution };
+        }
         ctx._fail('打不开对话', reason, null, error);
       }
       return false;
@@ -77,8 +83,9 @@ async function _ensureOnce(chatId, epoch) {
       // Opening validates the selected runtime and permissions in the main
       // process. A separate serial probe delays model/policy preparation and
       // repeats CLI discovery; use the authoritative open result instead.
+      const resumeAsOrdinary = ctx._sessionOptions.resumeAsOrdinary === true;
       const openOptions = chatId
-        ? { ...ctx._sessionOptions, chatId, requireTaskBinding: Boolean(ctx._sessionOptions.taskRef) }
+        ? { ...ctx._sessionOptions, chatId, requireTaskBinding: !resumeAsOrdinary && Boolean(ctx._sessionOptions.taskRef) }
         : { ...ctx._sessionOptions };
       let openTimedOut = false;
       const openPromise = Promise.resolve().then(() => api.open(openOptions));
@@ -94,7 +101,14 @@ async function _ensureOnce(chatId, epoch) {
       } catch (error) {
         openTimedOut = error && error.code === 'SODUWORK_OPEN_TIMEOUT';
         if (openTimedOut) {
-          if (epoch === ctx._viewEpoch) ctx._fail('打开对话超时', '执行底座超过 30 秒没有响应，请重试');
+          if (epoch === ctx._viewEpoch) {
+            if (chatId) {
+              const previousSnapshot = ctx._snap || {};
+              ctx._snap = { ...previousSnapshot, sessionNotFound: false, sessionOpenCode: 'SODUWORK_OPEN_TIMEOUT',
+                execution: previousSnapshot.execution ? { ...previousSnapshot.execution, modelRecovery: null } : previousSnapshot.execution };
+            }
+            ctx._fail('打开对话超时', '执行底座超过 30 秒没有响应，请重试');
+          }
           return false;
         }
         throw error;
@@ -126,6 +140,7 @@ async function _ensureOnce(chatId, epoch) {
           ctx._snap.sessionNotFound = Boolean(chatId && got && got.notFound === true);
           ctx._snap.sessionOpenCode = typeof got?.code === 'string' ? got.code : '';
         }
+        ctx._fail('\u5f00\u4e0d\u4e86\u5bf9\u8bdd', reason, null, got);
         return false;
       }
       const openedRef = String(got.ref || '').trim();
@@ -154,10 +169,13 @@ async function _ensureOnce(chatId, epoch) {
       }
       if (global.ChatWorkbenchAnnotations) ChatWorkbenchAnnotations.render();
       if (global.PluginDebugCard) PluginDebugCard.restore({ ref: ctx._ref });
-      const expectedTaskId = String(ctx._sessionOptions.taskRef || '').trim();
-      const serverTaskRows = Array.isArray(got.taskBindings) ? got.taskBindings :
+      // A failed historical task attach can still return persisted task bindings.
+      // A user clicking “重新打开会话” asked to continue the transcript as an
+      // ordinary chat; do not silently reactivate those bindings on this retry.
+      const expectedTaskId = resumeAsOrdinary ? '' : String(ctx._sessionOptions.taskRef || '').trim();
+      const serverTaskRows = resumeAsOrdinary ? [] : (Array.isArray(got.taskBindings) ? got.taskBindings :
         (Array.isArray(got.taskIds) ? got.taskIds.map((taskId) => ({ taskId })) :
-          (got.taskId ? [{ taskId: got.taskId, title: got.taskTitle }] : []));
+          (got.taskId ? [{ taskId: got.taskId, title: got.taskTitle }] : [])));
       const serverTaskIds = new Set(serverTaskRows.map((row) =>
         String(row && (row.taskId || row.id) || '').trim()).filter(Boolean));
       if (expectedTaskId && chatId && !serverTaskIds.has(expectedTaskId) && !ctx._sessionOptions.attachTask) {
@@ -203,6 +221,17 @@ async function _ensureOnce(chatId, epoch) {
       if (got.snapshot?.cloudHandoff?.phase === 'committed') ctx._sessionOptions = { ...ctx._sessionOptions, intent: '', goal: '' };
       ctx._sessionOptions = { ...ctx._sessionOptions, adapterId: got.adapterId || openedSnapshot.adapterId || ctx._sessionOptions.adapterId || 'pi',
         displayName: got.displayName || openedSnapshot.displayName || '', accessControl: got.accessControl || openedSnapshot.accessControl };
+      if (resumeAsOrdinary) {
+        // The marker is renderer-only and must never leak into the persisted
+        // goal/task session options after the ordinary archive is reopened.
+        const ordinaryOptions = { ...ctx._sessionOptions };
+        delete ordinaryOptions.resumeAsOrdinary;
+        delete ordinaryOptions.taskSession;
+        delete ordinaryOptions.taskRef;
+        delete ordinaryOptions.taskTitle;
+        delete ordinaryOptions.requireTaskBinding;
+        ctx._sessionOptions = ordinaryOptions;
+      }
       ctx._wd = { dir: got.cwd || '', name: got.workspaceName || ctx._sessionOptions.workspaceLabel || '工作区' };
       ctx._mode = got.mode || ctx._mode;
       ctx._sessionCaps = got.capabilities || ctx._sessionCaps;
@@ -211,9 +240,9 @@ async function _ensureOnce(chatId, epoch) {
         const id = String(row && (row.taskId || row.id) || '').trim();
         if (id) ctx._bindCollaborationTask(id, row.title || row.taskTitle || (id === expectedTaskId ? ctx._sessionOptions.taskTitle : '当前协作需求'), { persist: false });
       });
-      const serverActive = String(got.activeTaskId || expectedTaskId || got.taskId || '').trim();
+      const serverActive = resumeAsOrdinary ? '' : String(got.activeTaskId || expectedTaskId || got.taskId || '').trim();
       if (serverActive && ctx._collabTasks.has(serverActive)) ctx._selectCollabTask(serverActive, { keepPicker: true });
-      const shouldRestoreCollaboration = Boolean(
+      const shouldRestoreCollaboration = !resumeAsOrdinary && Boolean(
         ctx._sessionOptions.taskSession || expectedTaskId || serverTaskIds.size || serverActive,
       );
       if (shouldRestoreCollaboration) ctx._restoreCollaboration(ctx._sessionId, expectedTaskId || serverActive);
@@ -338,6 +367,40 @@ async function _ensureOnce(chatId, epoch) {
       if (epoch === ctx._viewEpoch) ctx._fail('开对话时出错', String((e && e.message) || e), null, e);
       return false;
     }
+  }
+
+/* Retry a historical archive after a failed attach.  The archive is still
+ * readable, but a stale taskRef/requireTaskBinding from the original entry can
+ * block opening the ordinary conversation on the current device.  Retrying as
+ * a normal chat keeps the persisted transcript and never dispatches the task;
+ * any later task execution still goes through the normal server-side checks. */
+async function _retryOpenChat() {
+    const chatId = String(ctx._sessionId || '').trim();
+    if (!chatId || ctx._ref) return Boolean(ctx._ref);
+    if (ctx._openingTask) return Boolean(await ctx._openingTask);
+    const previous = ctx._sessionOptions || {};
+    const options = { ...previous, resumeAsOrdinary: true };
+    delete options.taskSession;
+    delete options.taskRef; delete options.taskTitle; delete options.requireTaskBinding;
+    ctx._sessionOptions = options;
+    // Prevent a stale collaboration selection from turning the first follow-up
+    // message into an unauthorized task execution after the archive is reopened.
+    ctx._activeCollabTaskId = '';
+    ctx._collaborationTaskId = '';
+    ctx._collaborationTask = null;
+    ctx._taskSession = null;
+    if (ctx._snap) {
+      ctx._snap = { ...ctx._snap, status: 'starting', statusText: '', openBlocked: false,
+        sessionOpenCode: '', sessionNotFound: false };
+      ctx._render?.();
+    }
+    const opened = await _ensure(chatId);
+    if (opened) {
+      ctx._taskOpenError = '';
+      ctx._render?.();
+      return true;
+    }
+    return false;
   }
 
 async function _send(textOverride, sendOptions) {
@@ -467,6 +530,7 @@ async function _sendCore(textOverride, sendOptions) {
     if (fromComposer) ctx._messageAttachments.clear();
     if (input && useComposer) { input.value = ''; input.style.height = 'auto'; }
     if (useComposer) ctx._clearConversationDraft(undefined, { preserveRequirement: true });
+    const sendToken = typeof ctx._beginSendState === 'function' ? ctx._beginSendState() : null;
     // Consume the sent draft only; snapshots never refill it from runtime state.
     if (fromComposer) ctx._pluginMention?.consume?.(resolvedPlugins);
     if (fromComposer) ctx._skillPicker?.consume(selectedSkills);
@@ -479,6 +543,7 @@ async function _sendCore(textOverride, sendOptions) {
       const ready = retainedRef ? true : await _ensure(); if (ready && !retainedRef && ctx._ref) { retainedRef = String(ctx._ref).trim(); retainedApi = ctx._api(); }
       if (currentSendView()) sendDraftKey = ctx._draftKeyForCurrentSession();
       if (!ready || (localQueue && localQueue.cancelled)) {
+        if (!ready && ctx._snap?.sessionNotFound === true) sendOptions?.onAdmission?.({ notSent: true, code: 'SESSION_NOT_FOUND' });
         if (!ready) { retainFailure('会话尚未打开，这一轮未发送'); if (currentSendView()) ctx._restoreFailedDraft(failedDraft);
           // Remove the optimistic bubble when no send occurred.
           ctx._pending = ''; ctx._pendingAttachmentNames = []; ctx._pendingPlugins = [];
@@ -525,6 +590,8 @@ async function _sendCore(textOverride, sendOptions) {
         retry: Boolean(sendOptions && sendOptions.retry),
         skills: skillSubmission.skills.slice(),
       });
+      if (r?.ok === false && r.notSent === true && r.code === 'SESSION_NOT_FOUND' && !r.uncertain)
+        sendOptions?.onAdmission?.({ notSent: true, code: r.code });
       // Do not show an optimistic queue row while a normal send is still
       // being acknowledged. The runtime can accept the turn immediately
       // even when the renderer briefly classified the previous snapshot as
@@ -583,6 +650,7 @@ async function _sendCore(textOverride, sendOptions) {
       else if (!global.SoduWorkQuotaNotice?.show(error) && typeof petSay === 'function') petSay('排队消息没有发出去');
       return false;
     } finally {
+      if (typeof ctx._finishSendState === 'function') ctx._finishSendState(sendToken);
       if (currentSendView()) ctx._localQueue = ctx._localQueue.filter((row) => row !== localQueue);
       releaseSubmit();
       if (currentSendView() && ctx._snap) ctx._render();
@@ -605,7 +673,7 @@ function _paintOpening() {
             '<span class="nchat-opening-line"></span><span class="nchat-opening-line"></span>' +
             '<span class="nchat-opening-line"></span></div></div></div>';
   }
-  return { _ensureOnce, _ensure, _awaitBounded, _send, _sendCore, _paintOpening };
+  return { _ensureOnce, _ensure, _retryOpenChat, _awaitBounded, _send, _sendCore, _paintOpening };
   }
   global.ChatSessionController = { create };
 })(window);

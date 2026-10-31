@@ -33,24 +33,26 @@ if (typeof electron === 'string') {
       await js(fs.readFileSync(path.join(client, 'components/panels', name + '.js'), 'utf8') + '\nvoid 0;');
     await js(`window.controllers={};window.calls=[];window.errors=[];window.drafts={new:'',chat:''};window.draftKey='new';
       addEventListener('error',e=>errors.push(e.message));addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
-      for(const id of ['cpInput','nchatInput']){const input=document.getElementById(id);controllers[id]=ConversationAttachments.create({input});input.addEventListener('input',()=>drafts[draftKey]=input.value)}
+      for(const id of ['cpInput','nchatInput']){const input=document.getElementById(id);controllers[id]=ConversationAttachments.create({input});input.addEventListener('input',()=>drafts[draftKey]=controllers[id].submissionText(input.value))}
       window.SoduWorkAPI={parseTaskText:(text,model,attachments)=>{calls.push({text,attachments});return new Promise(resolve=>window.finishParse=()=>resolve({title:'报表自动化',note:text,checklist:['交付CSV']}))},
         taskExecutionOptions:async()=>({substrates:[{key:'local:pi',name:'Fixture Pi',available:true}],repos:[]})};
       window.NativeChat={prepare(){const input=document.getElementById('nchatInput');input.value=drafts.new;input.dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('cpInput').hidden=true;input.hidden=false},
-        clearDraft:key=>drafts[key||draftKey]='',openWorkAction:async(command,options)=>WorkAutomationSheet.open({
+        clearDraft:key=>drafts[key||draftKey]='',rememberComposerDraft(){const input=document.getElementById('nchatInput');drafts[draftKey]=controllers.nchatInput.submissionText(input.value)},openWorkAction:async(command,options)=>WorkAutomationSheet.open({
         host:document.getElementById('host'),text:command.text,...options})}; void 0;`);
     const text = '每日上午9点生成报告。' + '用户原文和执行边界。'.repeat(250) + '\n最后要求：交付CSV';
     for (const id of ['cpInput', 'nchatInput']) {
       for (const selectedAction of [false, true]) {
         const pasted = selectedAction ? text : '/自动化 ' + text;
         await js(`draftKey=${JSON.stringify(id === 'cpInput' ? 'new' : 'chat')};finishParse=null;document.getElementById('cpInput').hidden=${id !== 'cpInput'};document.getElementById('nchatInput').hidden=${id !== 'nchatInput'};void 0;`);
-        const allowed = await js(`(()=>{const input=document.getElementById('${id}');input.value='';input.focus();
+        const allowed = await js(`(()=>{const input=document.getElementById('${id}');controllers.${id}.clear();input.value='';input.focus();
           const data=new DataTransfer();data.setData('text/plain',${JSON.stringify(pasted)});
           return input.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}))})()`);
-        assert.equal(allowed, true);
-        await win.webContents.insertText(pasted);
-        assert.equal(await js(`document.getElementById('${id}').value`), pasted);
-        await js(`window.routeOptions={text:document.getElementById('${id}').value,input:document.getElementById('${id}'),
+        // Current contract folds >1500-character input into an inert input card.
+        // The complete original body, including literal slash text, must survive.
+        assert.equal(allowed, false);
+        assert.equal(await js(`controllers.${id}.submissionText(document.getElementById('${id}').value)`), pasted);
+        assert.equal(await js(`document.getElementById('${id}').value`), '');
+        await js(`window.routeOptions={text:controllers.${id}.submissionText(document.getElementById('${id}').value),input:document.getElementById('${id}'),
           hasAttachments:controllers.${id}.has(),attachments:controllers.${id}};
           window.selectedAction=${selectedAction ? "PluginUIHost.actions().find(row=>row.id==='work.automation.create')" : 'null'};
           routeOptions.${id === 'cpInput' ? 'pluginMention' : 'mention'}={action:()=>window.selectedAction};
@@ -58,7 +60,7 @@ if (typeof electron === 'string') {
           window.pendingRoute=${id === 'cpInput' ? 'ComposeWorkActions.route(routeOptions)' : 'ChatWorkActions.route(routeOptions,{open:NativeChat.openWorkAction})'};void 0;`);
         if (!selectedAction) {
           assert.equal((await js('pendingRoute')).handled, false);
-          assert.equal(await js(`document.getElementById('${id}').value`), pasted);
+          assert.equal(await js(`controllers.${id}.submissionText(document.getElementById('${id}').value)`), pasted);
           assert.equal(await js('drafts[draftKey]'), pasted);
           assert.equal(await js('calls.length === callCountBefore'), true);
           assert.equal(await js('Boolean(window.finishParse)'), false);

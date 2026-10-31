@@ -407,6 +407,7 @@ async def _client_by_bearer(
 async def proxy_config(
     model: str = "",
     agent: str = "pi",
+    ignore_preference: bool = False,
     client: Client = Depends(current_ai_client),
     session: AsyncSession = Depends(get_session),
 ):
@@ -425,7 +426,9 @@ async def proxy_config(
                 "reason": "此底座不使用企业模型配置，请检查执行底座"}
     # Match controlled dispatch: explicit choice > Agent preference > company
     # default. A removed preference is an actionable error, never a silent swap.
-    want = str(model or "").strip() or ("" if custom_acp else model_catalog.agent_model(client, cli))
+    want = str(model or "").strip() or (
+        "" if custom_acp or ignore_preference else model_catalog.agent_model(client, cli)
+    )
     usable = await model_catalog.usable(session, client)
     if want and not any(item["name"] == want for item in usable):
         return {"ok": False, "path": PROXY_PATH,

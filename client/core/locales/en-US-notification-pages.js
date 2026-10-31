@@ -1,5 +1,18 @@
 (function (global) {
   const messages = {
+    "请选择要发送的成果（最多20份）": "Select up to 20 outputs to share.",
+    "通知内容最多500字": "Keep your notification within 500 characters.",
+    "当前客户端尚未支持同事提及": "Update SoduWork to mention colleagues.",
+    "即用提供的内容，核对后发送": "Provided by your app. Review before sending.",
+    "请先完成或关闭当前同事发送卡片": "Finish or close the current notification first.",
+    "SoduWork 账号已变化，请重新选择同事": "Your SoduWork account changed. Select a colleague again.",
+    "这位同事不在可联系目录中或尚未启用 SoduWork": "This colleague is unavailable or has not enabled SoduWork.",
+    "发送卡片或账号已变化，请重新选择同事": "The notification or account changed. Select a colleague again.",
+    "同事发送卡片尚未就绪，请稍后重试": "Notifications are not ready yet. Try again in a moment.",
+    "当前客户端尚未支持同事目录": "This client does not support the colleague directory yet.",
+    "SoduWork 账号已变化，请重新读取同事目录": "Your SoduWork account changed. Reload the colleague directory.",
+    "同事目录读取失败": "Could not load the colleague directory.",
+
     "连接 Codex": "Connect Codex",
     "正在检查登录状态": "Checking sign-in status",
     "优先使用这台机器已有的 Codex 登录。": "Use the existing Codex sign-in on this computer first.",

@@ -212,7 +212,7 @@
     form.addEventListener('submit', event => { event.preventDefault(); if (node.dataset.created) { close(); return; } if (!form.reportValidity()) return; void run(node, async () => { const payload = {workRoot: form.elements.workRoot.value.trim()}; if (form.elements.hub.value.trim()) payload.hub = form.elements.hub.value.trim(); const platform = 'linux'; const result = checked(await global.SoduWorkAPI.rotateCloudEnvironmentCredential(row.id, payload), node); showOneTimeCredential(node, result, platform, '新的接入凭据', onChange); onChange?.(); }); });
   }
   function agent(setup) {
-    const node = dialog('准备云端 Agent', '在目标电脑安装所需 Agent 后，刷新环境状态即可使用。', '<p>请在目标电脑上安装 Node.js 22.19 或更新版本，然后执行：</p><div class="ce-command"><pre translate="no">' + esc(setup?.command || 'npm install -g @earendil-works/pi-coding-agent') + '</pre></div><p class="ce-help">安装完成后重启 Runner，系统会自动重新检测 Agent。</p>', '知道了');
+    const node = dialog('准备云端 Agent', '在目标电脑安装所需 Agent 后，刷新环境状态即可使用。', '<p>请在目标电脑上安装 Node.js 22.19 或更新版本，然后执行：</p><div class="ce-command"><pre translate="no">' + esc(setup?.command || 'npm install -g @earendil-works/pi-coding-agent@0.84.4') + '</pre></div><p class="ce-help">安装完成后重启 Runner，系统会自动重新检测 Agent。</p>', '知道了');
     if (node) node.querySelector('form').addEventListener('submit', event => { event.preventDefault(); close(); });
   }
   const scopeChanged = () => { if (active && !isCurrent(active)) invalidate(); };

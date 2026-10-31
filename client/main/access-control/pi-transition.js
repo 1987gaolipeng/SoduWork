@@ -29,7 +29,6 @@ function create({ cwd, pending = null, current, preload = async () => undefined,
       live.session.sessionManager.appendCustomEntry('soduwork.access.policy', policy);
       live.access.upgradeToFull(policy);
       commitPolicy(policy);
-      rememberDefault(policy.mode);
       changed();
       return { ok: true, effective: 'current-turn' };
     },
@@ -71,7 +70,6 @@ function create({ cwd, pending = null, current, preload = async () => undefined,
           commit({ ...prepared, access, policy });
           if (rememberAfterApply && nextPolicy === null) {
             rememberAfterApply = false;
-            rememberDefault(policy.mode);
           }
           try { live.access?.broker.close(); } catch (_) { /* committed policy remains authoritative */ }
           try { live.session.dispose(); } catch (_) { /* do not dispose the replacement on cleanup failure */ }

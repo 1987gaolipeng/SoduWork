@@ -194,12 +194,12 @@ async function resolve(options) {
   if (opts.appContext && localMcp.length && !direct) {
     const fallback = conversationFallback(local.items || []);
     if (fallback) return fallback;
-    throw Error('请先从应用壳刷新云端页面并登录，再发送消息');
+    throw Error('请先从即用壳刷新云端页面并登录，再发送消息');
   }
   if (direct) localMcp = localMcp.filter(name => name !== direct.server);
   if (direct && remoteIds.includes(direct.pluginId) &&
       [direct.versionId, direct.contributionId, direct.origin].some(value => typeof value !== 'string' || !value))
-    throw Error('应用连接缺少安装版本绑定，请重新打开应用');
+    throw Error('应用连接缺少安装版本绑定，请重新打开即用');
   await direct?.authorize?.();
   let remote = { ok: true, items: [], mcpGrant: null };
   let identity = null;

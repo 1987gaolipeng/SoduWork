@@ -36,6 +36,19 @@ test('dialog and secondary layouts load before the final containment guards', as
   }
 })
 
+test('org directory title keeps a shrink floor so the nowrap create button wraps instead of overlapping', async () => {
+  const sheet = postcss.parse(await fs.readFile(new URL('../src/screens/org-governance.css', import.meta.url), 'utf8'))
+  let declared = false
+  sheet.walkRules((rule) => {
+    if (!rule.selectors.includes('.og-directory>header>div:first-child')) return
+    rule.walkDecls('min-width', (decl) => {
+      declared = true
+      assert.doesNotMatch(decl.value, /^0$/, 'min-width:0 lets the create button crush the title into a character column')
+    })
+  })
+  assert.ok(declared, 'the directory title block must declare an intrinsic shrink floor')
+})
+
 test('capability workspace rows do not take the intrinsic height of the complete catalog', async () => {
   const sheet = postcss.parse(await fs.readFile(new URL('../src/screens/capability-center.css', import.meta.url), 'utf8'))
   let tracks = 0

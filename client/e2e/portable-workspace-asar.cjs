@@ -2,6 +2,7 @@
 // This regression deliberately runs the real worker from an Electron ASAR.
 // Plain Node/source-mode tests cannot prove packaged worker resolution works.
 const { app } = require('electron');
+require('./lib/isolated-profile.cjs').isolateProfile(app, 'portable-workspace-asar');
 const fs = require('node:fs/promises'), path = require('node:path'), os = require('node:os');
 const output = path.resolve(process.argv[2] || '../outputs/portable-asar-report.json');
 const report = { ok: false };

@@ -131,7 +131,25 @@ async def company_org_ids(session: AsyncSession, user: models.User | None, *, pa
             select(models.OrgUnit.id, models.OrgUnit.parent_id)
         )).all()
         parents = {str(oid): (str(pid) if pid else "") for oid, pid in rows}
-    current = str(user.org_id)
+    return await company_org_ids_for_org(session, user.org_id, parents=parents)
+
+
+async def company_org_ids_for_org(session: AsyncSession, org_id: str | None, *, parents=None) -> set[str]:
+    """Return the complete company tree containing ``org_id``.
+
+    This is the read/visibility boundary for company-wide capabilities. It is
+    intentionally separate from ``scope_org_ids``: management remains scoped
+    to an administrator's subtree, while a policy explicitly granted to all
+    company members must reach sibling departments as well.
+    """
+    if not org_id:
+        return set()
+    if parents is None:
+        rows = (await session.execute(
+            select(models.OrgUnit.id, models.OrgUnit.parent_id)
+        )).all()
+        parents = {str(oid): (str(pid) if pid else "") for oid, pid in rows}
+    current = str(org_id)
     if current not in parents:
         return set()
     seen: set[str] = set()

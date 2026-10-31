@@ -46,14 +46,28 @@ test('HTML and Office documents download once to a contained Unicode path before
   assert.equal(h.state.fetched.length,4);
 });
 
-test('Markdown, CSV, JSON and plain text retain Unicode and use a passive text viewer', async t=>{
+test('Markdown renders as a safe native preview while CSV, JSON and plain text stay literal', async t=>{
   const h=harness(t);
   for(const [filename,type] of [['报告.md','text/markdown'],['说明.txt','text/plain'],['数据.csv','text/csv'],['资料.json','application/json']]){
     h.state.type=type;assert.equal((await h.open(filename)).native,true);
-    const w=h.state.windows.at(-1);assert.ok(w.url.startsWith('data:text/plain;charset=utf-8;base64,'));assert.deepEqual(Buffer.from(w.url.split(',')[1],'base64'),h.state.data);
+    const w=h.state.windows.at(-1);
+    if (/\.md$/i.test(filename)) {
+      assert.ok(w.url.startsWith('data:text/html;charset=utf-8;base64,'));
+      const html=Buffer.from(w.url.split(',')[1],'base64').toString();
+      assert.match(html,/data-user-content/);assert.match(html,/仅显示|<main/);
+    } else {
+      assert.ok(w.url.startsWith('data:text/plain;charset=utf-8;base64,'));assert.deepEqual(Buffer.from(w.url.split(',')[1],'base64'),h.state.data);
+    }
     assert.equal(w.options.webPreferences.javascript,false);assert.equal(w.options.webPreferences.sandbox,true);assert.equal(w.options.webPreferences.nodeIntegration,false);
   }
   h.state.type='text/plain; charset="windows-1252"';await h.open('latin.txt');assert.match(h.state.windows.at(-1).url,/charset=windows-1252/);
+});
+
+test('Markdown filename preview is independent of a generic server MIME and strips active content', async t=>{
+  const h=harness(t);h.state.type='application/octet-stream';h.state.data=Buffer.from('# 标题\n\n<script>alert(1)</script>\n\n![远程图片](https://evil.example/x.png)');
+  assert.equal((await h.open('说明.md')).native,true);
+  const html=Buffer.from(h.state.windows.at(-1).url.split(',')[1],'base64').toString();
+  assert.ok(html.includes('<h1>标题</h1>'));assert.doesNotMatch(html,/<script>/);assert.doesNotMatch(html,/evil\.example\/x\.png/);
 });
 
 test('native preview load failure rejects instead of reporting success', async t=>{

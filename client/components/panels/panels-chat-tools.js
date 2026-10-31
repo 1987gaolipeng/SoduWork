@@ -481,16 +481,38 @@
     const files = attachments && typeof attachments.names === 'function' ? attachments.names() : [];
     return Boolean(text || files.length || Number(root && root.dataset && root.dataset.annotationCount) || Number(root && root.dataset && root.dataset.skillCount));
   }
-  function paintSendButton(root, busy, attachments) {
-    const send = root && root.querySelector('#nchatSend');
+  function paintSendButton(root, busy, attachments, requestedState, stoppable, sendState) {
+    if (!root || typeof root.querySelector !== 'function') return;
+    const send = root.querySelector('#nchatSend');
     if (!send) return;
-    const stop = Boolean(busy && !composerHasPayload(root, attachments));
-    send.classList.toggle('stop', stop);
-    send.title = stop ? '\u505c\u6b62\u751f\u6210' : (busy ? '\u6392\u961f\u53d1\u9001' : '\u53d1\u9001');
-    send.setAttribute('aria-label', send.title);
-    const html = stop
-      ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3"/></svg>'
-      : '<svg viewBox="0 0 24 24"><path d="M12 19V6M6.5 11.5 12 6l5.5 5.5"/></svg>';
+    const state = String(requestedState || root.dataset?.stopState ||
+      root.querySelector('.nbox')?.dataset?.stopState || 'idle');
+    // A requested stop remains visibly pending until its receipt arrives;
+    // runtime snapshots can briefly report idle while the active turn is still
+    // settling, so busy alone must not clear this state.
+    const stopping = state === 'requested';
+    const canStop = stoppable === undefined ? Boolean(busy) : Boolean(stoppable);
+    // Once the runtime has accepted the turn, the same submission may still
+    // be awaiting its final IPC receipt. The visible action must already be
+    // stop in that window; only a not-yet-stoppable submission shows sending.
+    const sending = String(sendState || root.dataset?.sendState || 'idle') === 'sending' && !canStop;
+    // Timeout is an internal cancellation outcome. Keep the action surface in
+    // the normal send/stop state instead of exposing a third retry action.
+    const showStop = Boolean(canStop || stopping);
+    const transient = Boolean(sending || stopping);
+    const title = stopping ? '\u505c\u6b62\u4e2d\u2026' : sending ? '\u53d1\u9001\u4e2d\u2026' :
+      showStop ? '\u505c\u6b62\u751f\u6210' : '\u53d1\u9001';
+    send.classList.toggle('stop', showStop && !transient);
+    send.classList.toggle('stop-pending', transient);
+    send.disabled = transient;
+    send.setAttribute('aria-busy', String(transient));
+    send.title = title;
+    send.setAttribute('aria-label', title);
+    const html = transient
+      ? '<span class="nsend-spinner" aria-hidden="true"></span>'
+      : showStop
+        ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3"/></svg>'
+        : '<svg viewBox="0 0 24 24"><path d="M12 19V6M6.5 11.5 12 6l5.5 5.5"/></svg>';
     if (send._sendMarkup !== html) { send.innerHTML = html; send._sendMarkup = html; }
   }
   function toggleGroup(target, openGroups) {

@@ -5,7 +5,7 @@ function binding(item, deps, capability) {
   appOwner.assertCurrent(item);
   const pluginId = String(item.appBridge?.appId || '').replace(/^plugin:/, '');
   const installed = require('./personal-plugins').get(deps.app, pluginId);
-  if (!installed?.enabled) throw Error('应用已停用或卸载');
+  if (!installed?.enabled) throw Error('即用已停用或卸载');
   if (capability) {
     const source = installed.ui?.contributions?.find(row => row.id === item.appBridge.contributionId)?.source;
     const origin = source?.type === 'package' ? require('../core/plugin-package-page.cjs').origin(pluginId) : source?.type === 'external' ? new URL(source.url).origin : '';
@@ -21,7 +21,7 @@ async function settingsBinding(item, deps, capability) {
     appOwner.assertCurrent(item);
     if (store.scope(bound) !== scope || String(item.appBridge?.appId || '').replace(/^plugin:/, '') !== pluginId ||
         item.appBridge?.origin !== bound.origin || item.view?.webContents?.isDestroyed() ||
-        (item.view && new URL(item.view.webContents.getURL()).origin !== bound.origin)) throw Error('应用身份或来源已变化，请重新打开应用');
+        (item.view && new URL(item.view.webContents.getURL()).origin !== bound.origin)) throw Error('应用身份或来源已变化，请重新打开即用');
   };
   const installed = await require('./app-installed-remote.cjs').get(deps, pluginId, assertCurrent);
   const source = installed.ui?.contributions?.find(row => row.id === item.appBridge.contributionId && row.slot === 'workspace.navigation')?.source;
@@ -36,11 +36,13 @@ function settings({ item }, request, deps) {
   const read = request.method === 'settings.get';
   const capability = read ? 'settings.read' : 'settings.write', action = read ? 'get' : 'update';
   if (String(item.appBridge?.appId || '').replace(/^plugin:/, '').startsWith('local:')) {
-    return store[action](binding(item, deps, capability), request.params);
+    const bound = binding(item, deps, capability);
+    const installed = require('./personal-plugins').get(deps.app, bound.pluginId);
+    return require('./jiyong-runtime.cjs').parameters(bound, installed, action, request.params);
   }
-  return settingsBinding(item, deps, capability).then(({ bound, assertCurrent }) => {
+  return settingsBinding(item, deps, capability).then(({ bound, assertCurrent, installed }) => {
     assertCurrent();
-    return store[action](bound, request.params);
+    return require('./jiyong-runtime.cjs').parameters(bound, installed, action, request.params);
   });
 }
 function connect({ owner, item }, params, deps) {
@@ -65,7 +67,7 @@ function connect({ owner, item }, params, deps) {
 }
 async function connectRemote(item, params, deps) {
   const { bound, assertCurrent, installed } = await settingsBinding(item, deps, 'mcp.connect');
-  if (!installed.capabilities?.mcpServers?.includes(params.server)) throw Error('当前应用版本未声明该 MCP 连接器，请更新应用');
+  if (!installed.capabilities?.mcpServers?.includes(params.server)) throw Error('当前即用版本未声明该 MCP 连接器，请更新应用');
   const target = new URL(params.url);
   if (target.origin !== bound.origin || target.pathname !== '/mcp' || target.search || target.hash || target.username || target.password)
     throw Error('应用只能连接自己来源下的 /mcp 服务');
@@ -104,7 +106,21 @@ function resolve(item, deps, assertActive = () => {}) {
     return { token, revision: row.revision };
   };
   const current = read();
-  return { ...connection, token: current.token, revision: current.revision, readCurrent: read,
+  const resolved = { ...connection, token: current.token, revision: current.revision, readCurrent: read,
     inspect: action => require('./work-preview-app-inspect.cjs').inspect(item, action, read) };
+  return require('./jiyong-mcp-bindings.cjs').extend(resolved,remote ? {jiyong:connection.jiyong} : require('./personal-plugins').get(deps.app,bound.pluginId),bound);
 }
-module.exports = { connect, settings, resolve };
+async function authorize(item, deps, capability) {
+  const pluginId = String(item.appBridge?.appId || '').replace(/^plugin:/, '');
+  if (!pluginId.startsWith('local:')) return settingsBinding(item, deps, capability);
+  const bound = binding(item, deps, capability), scope = store.scope(bound);
+  const installed = require('./personal-plugins').get(deps.app, pluginId);
+  const version = installed.checksum;
+  const assertCurrent = () => {
+    binding(item, deps, capability);
+    if (store.scope(bound) !== scope || require('./personal-plugins').get(deps.app,pluginId).checksum !== version ||
+        item.view?.webContents?.isDestroyed() || (item.view && new URL(item.view.webContents.getURL()).origin !== bound.origin)) throw Error('即用身份、版本或页面已变化');
+  };
+  return {bound,installed,assertCurrent};
+}
+module.exports = { connect, settings, resolve, authorize };

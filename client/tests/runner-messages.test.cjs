@@ -56,7 +56,8 @@ test('archived Codex streamed warnings stay hidden across history pages', async 
   const warning = 'Warning: Model metadata for `private-model` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.';
   const adapter = createRunnerRuntimeAdapter({ runtimeSpec: catalog.runtime('codex-harness'),
     modelConfig: { fetchModel: async () => ({ ok: true, model: { id: 'fixture', key: 'fixture' } }) },
-    runnerRuntime: { async rpc(op) {
+    runnerRuntime: { async rpc(op, payload) {
+      if (op === 'job.session' && payload.limit === 1) return { ok: true, data: { status: 'done' } };
       if (op === 'job.session') return { ok: true, data: { status: 'done', seq: 4, items: ++polls === 1 ? [
         { seq: 1, kind: 'user', text: 'Create a report' },
         { seq: 2, kind: 'text', streamId: 'reply', text: warning.slice(0, 60), delta: true },
@@ -143,7 +144,8 @@ for (const adapterId of ['harness2', 'opencode']) test(adapterId + ' publishes c
   const ready = new Promise(resolve => { release = resolve; });
   const adapter = createRunnerRuntimeAdapter({ runtimeSpec: catalog.runtime(adapterId),
     modelConfig: { fetchModel: async () => ({ ok: true, model: { id: 'fixture', key: 'fixture' } }) },
-    runnerRuntime: { async rpc(op) {
+    runnerRuntime: { async rpc(op, payload) {
+      if (op === 'job.session' && payload.limit === 1) return { ok: true, data: { status: 'done' } };
       if (op === 'job.session') {
         await ready;
         return { ok: true, data: { status: 'done', items: [
@@ -291,6 +293,7 @@ test('restoring a settled paginated archive drains all thinking chunks before se
     modelConfig: { fetchModel: async () => ({ ok: true, model: { id: 'fixture', key: 'fixture' } }) },
     runnerRuntime: { async rpc(op, payload) {
       if (op === 'job.session') {
+        if (payload.limit === 1) return { ok: true, data: { status: 'done' } };
         calls++;
         return { ok: true, data: { status: 'done', seq: 3, items: calls === 1 ?
           [{ seq: 1, kind: 'thinking', streamId: 'old', text: 'partial', done: false }] :
@@ -318,6 +321,7 @@ test('paginated restoration never publishes an earlier turn timer before the fin
     modelConfig: { fetchModel: async () => ({ ok: true, model: { id: 'fixture', key: 'fixture' } }) },
     runnerRuntime: { async rpc(op, payload) {
       if (op === 'job.session') {
+        if (payload.limit === 1) return { ok: true, data: { status: 'done' } };
         calls++; cursors.push(payload.since);
         if (calls === 1) return { ok: true, data: { status: 'done', seq: 4, started: previous / 1000,
           ended: ended / 1000, items: [

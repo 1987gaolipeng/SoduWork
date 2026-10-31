@@ -163,6 +163,18 @@ class HandoffTests(unittest.IsolatedAsyncioTestCase):
         targets = await self.http.get("/api/v1/conversation-handoffs/targets")
         self.assertEqual(targets.status_code, 200, targets.text)
         self.assertEqual([x["id"] for x in targets.json()["targets"]], ["runner:cloud:codex"])
+        # A mobile/Web device can hand off to another desktop client owned by the
+        # same account. The current device remains excluded at the target boundary.
+        from app.automation_models import RunnerNode
+        async with db.SessionLocal() as session:
+            session.add(models.Client(id="u-desktop", user_ref="owner", auth_state="active"))
+            row = await session.get(RunnerNode, "cloud")
+            row.client_id = "u-desktop"
+            await session.commit()
+        self.runner.client_id = "u-desktop"
+        personal = await self.http.get("/api/v1/conversation-handoffs/targets?agentId=codex")
+        self.assertEqual(personal.status_code, 200, personal.text)
+        self.assertEqual([x["id"] for x in personal.json()["targets"]], ["runner:cloud:codex"])
         with self.subTest("same device and unauthorized devices never qualify"):
             self.runner.client_id = self.client.id
             self.assertEqual((await self.http.get("/api/v1/conversation-handoffs/targets")).json()["targets"], [])

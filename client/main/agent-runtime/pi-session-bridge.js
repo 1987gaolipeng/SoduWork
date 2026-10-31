@@ -191,6 +191,15 @@ function createPiSessionBridge(options) {
     });
   }
 
+  function canRecoverExpiredRunnerResume(error, options, restored) {
+    if (!restored || String(restored.active?.adapterId || 'pi') === 'pi' || !options?.resumePath) return false;
+    const text = String(error && (error.message || error.reason || error) || '').toLowerCase();
+    // Runner session ids are provider-side credentials. A 401/expired-session
+    // response must create a fresh native session while the public conversation
+    // keeps its persisted prefix and audit history.
+    return /acpbridge|unauthori[sz]ed|凭证|credential|expired|session.*(invalid|expired|not found)|\b401\b/.test(text);
+  }
+
   async function openNative(legacyOptions) {
     const adapterId = String(legacyOptions.adapterId || 'pi');
     const request = { adapterId, consumer: legacyOptions.intent === 'goal' ? 'goal' : 'chat',
@@ -227,7 +236,17 @@ function createPiSessionBridge(options) {
         throw new RuntimeContractError('GOAL_MODE_UNSUPPORTED',
           '当前 Agent 暂不支持目标模式，请选择其他 Agent 或取消目标后发送');
       }
-      const opened = await openNative(legacyOptions);
+      let opened;
+      try {
+        opened = await openNative(legacyOptions);
+      } catch (error) {
+        if (!canRecoverExpiredRunnerResume(error, legacyOptions, restored)) throw error;
+        // The transcript is already in runtime-segments.prefix. Do not replay
+        // the dead provider session; start a clean native segment and let the
+        // normal persistence callback replace the active descriptor.
+        legacyOptions = { ...legacyOptions, resumePath: '', resumeCwd: '', runtimeConversationId: '' };
+        opened = await openNative(legacyOptions);
+      }
       record = opened.record; const details = opened.details;
       let raw = details.handle;
       await legacyOptions.validateWorkConversation?.();
@@ -235,6 +254,17 @@ function createPiSessionBridge(options) {
         restored = require('../conversation/work-conversation-opening').bootstrapRecord(legacyOptions.workConversation, raw, legacyOptions);
         await runtimeSegments.save(legacyOptions.app, restored); workCommitted = true;
         await legacyOptions.validateWorkConversation();
+      }
+      // Runner archives may have been opened with a retired model and then
+      // recovered to the current default. Keep the public manifest aligned
+      // with the live native segment so the next reopen does not keep offering
+      // the dead model name.
+      if (restored && raw.adapterId !== 'pi' && typeof raw.snapshot === 'function') {
+        const selected = raw.snapshot()?.modelSelection?.name;
+        if (typeof selected === 'string' && restored.active?.modelName !== selected) {
+          restored = { ...restored, active: { ...restored.active, modelName: selected } };
+          void runtimeSegments.save(legacyOptions.app, restored).catch(() => {});
+        }
       }
       const ref = String(raw.ref || '');
       const sessionId = String(restored?.id || raw.sessionId || record.session.id || '');
@@ -552,6 +582,50 @@ function createPiSessionBridge(options) {
     }).filter(Boolean);
   }
 
+  // The catalog is only a declaration of what this build knows about. UI
+  // pickers must use a health-checked projection so an installed-but-offline
+  // Runner cannot be selected and leave the conversation on a dead path.
+  const availabilityCache = { app: null, at: 0, value: null, flight: null };
+  const AVAILABILITY_TTL_MS = 30000;
+  async function availableRuntimes(app, options = {}) {
+    const owner = app || opts.app || null;
+    const force = options && options.force === true;
+    if (!force && availabilityCache.value && availabilityCache.app === owner &&
+        Date.now() - availabilityCache.at < AVAILABILITY_TTL_MS) {
+      return availabilityCache.value;
+    }
+    if (!force && availabilityCache.flight && availabilityCache.app === owner) {
+      return availabilityCache.flight;
+    }
+    const catalogRows = runtimes();
+    const job = Promise.all(catalogRows.map(async (row) => {
+      let health;
+      try {
+        health = await registry.detect(row.id, { app: owner });
+      } catch (error) {
+        health = { ok: false, reason: _reason(error), state: 'error' };
+      }
+      const value = health && typeof health === 'object' ? { ...health } : { ok: false, state: 'unknown' };
+      // Pi is the local compatibility runtime and remains available as the
+      // recovery path even while its optional probe is warming up or fails.
+      const ready = row.id === 'pi' || value.ok === true;
+      return { row, health: value, ready };
+    })).then(results => {
+      const ready = results.filter(item => item.ready).map(item => ({
+        ...item.row, availability: { ...item.health, ok: true },
+      }));
+      const missing = results.filter(item => !item.ready).map(item => ({
+        ...item.row, availability: item.health,
+      }));
+      const value = { ok: true, runtimes: catalogRows, availableRuntimes: ready, missing,
+        checkedAt: Date.now() };
+      availabilityCache.app = owner; availabilityCache.at = Date.now(); availabilityCache.value = value;
+      return value;
+    }).catch(error => ({ ok: false, reason: _reason(error), runtimes: [], availableRuntimes: [], missing: catalogRows }));
+    availabilityCache.app = owner; availabilityCache.flight = job;
+    return job.finally(() => { if (availabilityCache.flight === job) availabilityCache.flight = null; });
+  }
+
   function addRuntime(declaration) {
     const spec = defaultRuntimeCatalog.normalize(declaration);
     if (spec.transport !== 'runner') throw new RuntimeContractError('INVALID_RUNTIME_CATALOG', 'A Runner adapter is required');
@@ -566,6 +640,7 @@ function createPiSessionBridge(options) {
     try { runtimeCatalog.addRuntime(spec); }
     catch (error) { unregister(); throw error; }
     runnerAdapters.push(adapter);
+    availabilityCache.value = null; availabilityCache.at = 0;
     return spec;
   }
 
@@ -650,6 +725,7 @@ function createPiSessionBridge(options) {
     closeAll,
     probe,
     runtimes,
+    availableRuntimes,
     addRuntime,
     history,
     archivedHistory,

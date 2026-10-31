@@ -14,7 +14,11 @@ const MAX_TITLE = 160;
 const MAX_RECIPIENT = 120;
 
 const CAPABILITIES = Object.freeze([
+  'ai.generate',
   'context.read',
+  'directory.read',
+  'messages.read',
+  'library.read',
   'conversation.open',
   'conversation.send',
   'requirements.propose',
@@ -24,10 +28,21 @@ const CAPABILITIES = Object.freeze([
   'settings.read',
   'settings.write',
   'automation.create',
+  'data.read',
+  'data.write',
 ]);
 
 const METHOD_CAPABILITY = Object.freeze({
+  'ai.generate': 'ai.generate',
+  'user.getCurrent':'context.read',
+  'notifications.list':'messages.read',
+  'conversations.list':'messages.read',
+  'conversations.messages':'messages.read',
+  'library.list':'library.read',
+  'library.read':'library.read',
   'context.get': 'context.read',
+  'directory.list': 'directory.read',
+  'composer.mention': 'notifications.send',
   'conversation.open': 'conversation.open',
   'conversation.send': 'conversation.send',
   'requirements.propose': 'requirements.propose',
@@ -48,6 +63,12 @@ const METHOD_CAPABILITY = Object.freeze({
   'settings.get': 'settings.read',
   'settings.update': 'settings.write',
   'automation.create': 'automation.create',
+  'data.get': 'data.read',
+  'data.apps': 'data.read',
+  'data.list': 'data.read',
+  'data.batch': 'data.write',
+  'data.assetPut': 'data.write',
+  'data.assetGet': 'data.read',
 });
 
 const METHODS = new Set(Object.keys(METHOD_CAPABILITY));
@@ -107,6 +128,38 @@ function normalizeRequest(raw) {
   const params = raw.params == null ? {} : raw.params;
   if (!params || typeof params !== 'object' || Array.isArray(params)) throw new Error('应用请求参数格式无效');
   const out = { version: VERSION, id, method, params: {} };
+  if (method === 'ai.generate') {
+    out.params = require('./app-ai-generate.cjs').normalize(params);
+    return out;
+  }
+  if (['user.getCurrent','notifications.list','library.list','library.read','conversations.list','conversations.messages'].includes(method)) {
+    const names={ 'user.getCurrent':[], 'notifications.list':['source','folder','before','offset','limit'], 'library.list':['storage','folderId','query','offset','limit'], 'library.read':['id','format','offset','length'], 'conversations.list':['offset','limit','archived'], 'conversations.messages':['id','segmentId','offset','limit','after'] }[method];
+    if(Object.keys(params).some(key=>!names.includes(key)))throw Error('宿主只读查询包含不支持的参数');
+    for(const key of ['id','segmentId','before','folderId','query'])if(params[key]!=null && (typeof params[key]!=='string'||params[key].length>300||/[\x00-\x1f]/.test(params[key])))throw Error('只读查询标识或文本无效');
+    for(const key of ['offset','after'])if(params[key]!=null && (!Number.isSafeInteger(params[key])||params[key]<0||params[key]>10000000))throw Error('分页位置无效');
+    for(const [key,max]of [['limit',100],['length',262144]])if(params[key]!=null && (!Number.isSafeInteger(params[key])||params[key]<1||params[key]>max))throw Error('分页大小无效');
+    if(['library.read','conversations.messages'].includes(method)&&!params.id)throw Error('缺少记录标识');
+    for(const [key,values]of [['source',['server','center']],['storage',['local','nfs','minio']],['format',['text','base64']],['folder',['received','sent']]])if(params[key]!=null&&!values.includes(params[key]))throw Error('查询类型无效');
+    if(params.archived!=null&&typeof params.archived!=='boolean')throw Error('归档标记无效');
+    out.params={...params};return out;
+  }
+  if (method === 'directory.list') {
+    if (Object.keys(params).length) throw Error('同事目录不接受账号或任意查询参数');
+    return out;
+  }
+  if (method === 'composer.mention') {
+    if (Object.keys(params).some(key=>!['recipientUserId','query','text','requestId'].includes(key))) throw Error('同事提及参数无效');
+    for(const [key,max] of [['recipientUserId',MAX_RECIPIENT],['query',120],['text',500],['requestId',100]]) {
+      if(params[key] != null && (typeof params[key] !== 'string' || params[key].length>max))throw Error('同事提及参数无效：'+key);
+    }
+    if(!/^[A-Za-z0-9_.:-]{1,100}$/.test(params.requestId || ''))throw Error('同事提及需要有效请求编号');
+    out.params={recipientUserId:text(params.recipientUserId,MAX_RECIPIENT),query:text(params.query,120).replace(/^@/,''),text:String(params.text || ''),requestId:params.requestId};
+    return out;
+  }
+  if (method.startsWith('data.')) {
+    out.params = method.startsWith('data.asset') ? require('../core/jiyong-contract.cjs').assetRequest(method,params) : require('../core/jiyong-contract.cjs').json(params);
+    return out;
+  }
   if (method.startsWith('attachments.')) {
     const attachments = require('./work-preview-app-attachments.cjs');
     if (method === 'attachments.pick') return out;
@@ -133,8 +186,8 @@ function normalizeRequest(raw) {
     if (typeof params.requestId !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(params.requestId)) throw Error('创建自动化需要有效请求编号');
     const context = params.context || {};
     const spaceId = text(context.spaceId, 160);
-    if (!spaceId || spaceId !== context.spaceId) throw Error('请选择有效的当前空间');
-    out.params = { text: params.text.trim(), requestId: params.requestId, context: { spaceId, spaceName: text(context.spaceName, 160), page: text(context.page, 2000) } };
+    if (context.spaceId != null && (!spaceId || spaceId !== context.spaceId)) throw Error('请选择有效的当前空间');
+    out.params = { text: params.text.trim(), requestId: params.requestId, context: { spaceId, spaceName: text(context.spaceName, 160), page: text(context.page, 2000), characterName: text(context.characterName, 120) } };
     return out;
   }
   if (method.startsWith('settings.')) {
@@ -183,7 +236,7 @@ function normalizeRequest(raw) {
     return out;
   }
   if (method === 'conversation.open') {
-    out.params.title = text(params.title || '应用会话', MAX_TITLE);
+    out.params.title = text(params.title || '即用会话', MAX_TITLE);
     if (params.projectId != null) out.params.projectId = text(params.projectId, 160);
     return out;
   }

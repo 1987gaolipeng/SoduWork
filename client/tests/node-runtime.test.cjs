@@ -46,3 +46,16 @@ test('cached probes expire so an installed upgrade is detected without restartin
   select(); select(); assert.equal(count, 1);
   now = 30001; select(); assert.equal(count, 2);
 });
+test('bundled native Node/npm wins over host tools and works with empty PATH', () => {
+  const select = resolver({ '/product/node/bin/node': 'v22.23.3', '/product/node/lib/node_modules/npm/bin/npm-cli.js': '' },
+    { resourcesPath: '/product', environment: { PATH: '' } });
+  const runtime = select({ requireNpm: true });
+  assert.equal(runtime.node, '/product/node/bin/node');
+  assert.equal(runtime.npm, '/product/node/lib/node_modules/npm/bin/npm-cli.js');
+  assert.equal(runtime.embedded, false);
+});
+test('installed product never repairs missing managed Node by selecting a host installation', () => {
+  const select = resolver({ '/new/bin/node': 'v22.23.3', '/new/lib/node_modules/npm/bin/npm-cli.js': '' },
+    { resourcesPath: '/product', environment: { PATH: '/new/bin', SODUWORK_RUNTIME_MANAGED: '1' } });
+  assert.throws(() => select({ requireNpm: true }), /SW-NODE-MISSING/);
+});

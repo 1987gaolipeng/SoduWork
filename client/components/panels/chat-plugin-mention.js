@@ -200,6 +200,30 @@
       input.removeAttribute('aria-activedescendant');
     }
 
+    function positionMenu() {
+      if (menu.hidden) return;
+      const rect = host.getBoundingClientRect?.();
+      if (!rect || !Number.isFinite(rect.left)) return;
+      const gap = 8, viewportWidth = eventRoot?.innerWidth || window.innerWidth || 1024;
+      const viewportHeight = eventRoot?.innerHeight || window.innerHeight || 768;
+      const width = Math.min(410, Math.max(180, viewportWidth - 32), Math.max(180, rect.width - 32));
+      const left = Math.max(8, Math.min(rect.left + 16, viewportWidth - width - 8));
+      const below = viewportHeight - rect.bottom - gap;
+      const above = rect.top - gap;
+      const useAbove = above >= 150 && below < 220;
+      const available = Math.max(120, Math.min(330, useAbove ? above : below));
+      menu.style.setProperty('--nplugin-left', left + 'px');
+      menu.style.width = width + 'px';
+      menu.style.maxHeight = available + 'px';
+      if (useAbove) {
+        menu.style.setProperty('--nplugin-top', 'auto');
+        menu.style.setProperty('--nplugin-bottom', Math.max(8, viewportHeight - rect.top + gap) + 'px');
+      } else {
+        menu.style.setProperty('--nplugin-bottom', 'auto');
+        menu.style.setProperty('--nplugin-top', Math.min(viewportHeight - 120, rect.bottom + gap) + 'px');
+      }
+    }
+
     function renderStrip() {
       strip.replaceChildren();
       strip.hidden = !selectedAction && !selected.length;
@@ -316,6 +340,7 @@
       menuItems = [];
       input.removeAttribute('aria-activedescendant');
       menu.hidden = false;
+      positionMenu();
       if (loading && !catalog.length && !actions.length) {
         const state = document.createElement('div');
         state.className = 'nplugin-state';
@@ -563,6 +588,7 @@
     input.addEventListener('input', update);
     input.addEventListener('click', update);
     input.addEventListener('keydown', onKeydown, true);
+    eventRoot?.addEventListener('resize', positionMenu);
     document.addEventListener('mousedown', onDocumentMouseDown);
     if (eventRoot) eventRoot.addEventListener('soduwork:plugins-changed', onCatalogChanged);
 

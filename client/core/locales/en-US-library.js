@@ -1,4 +1,4 @@
-/* Library UI, file operations, and user-visible handoff copy. File names and
+﻿/* Library UI, file operations, and user-visible handoff copy. File names and
    document contents are parameters, never recursively translated. */
 (function (global) {
   'use strict';
@@ -8,7 +8,24 @@
     '当前文件夹下已有同名资料，请重命名后重试': 'A file with this name already exists in this folder. Rename it and try again.',
     '目标文件夹中已存在同名资料，请重命名后重试': 'A file with this name already exists in the destination folder. Rename it and try again.',
     '当前文件夹下已有同名文件夹，请重命名后重试': 'A folder with this name already exists here. Rename it and try again.',
-    '直接发送文件通知，本机原件保留。是否存入资料库由对方决定。': 'Send the file as a notification and keep the original on this computer. Recipients choose whether to save it to their library.',
+    '直接发送文件通知，本机原件保留。分享双方可在通知中打开、下载或保存到资料库。': 'Send the file as a notification and keep the original on this computer. The recipient can open, download, or save it to their library from the notification.',
+    '打包分享资料': 'Share materials as a bundle',
+    '多个文件会自动打包为一个压缩包，仅发送一条通知；本机原件保留。分享双方可在通知中打开、下载或保存到资料库。': 'Multiple files are packed into one ZIP and sent as a single notification; the originals remain on this computer. Recipients can open, download, or save the bundle to their library from the notification.',
+    '多个文件会自动打包为一个压缩包，仅发送一条通知；分享双方可在通知中打开、下载或保存到资料库。': 'Multiple files are packed into one ZIP and sent as a single notification; recipients can open, download, or save the bundle to their library from the notification.',
+    '选中的文件和文件夹会打包为一个压缩包，仅发送一条通知；本机原件保留。压缩包只能下载或保存到资料库。': 'Selected files and folders are packed into one ZIP and sent as a single notification; the originals remain on this computer. ZIP bundles can only be downloaded or saved to the library.',
+    '选中的文件和文件夹会打包为一个压缩包，仅发送一条通知。压缩包只能下载或保存到资料库。': 'Selected files and folders are packed into one ZIP and sent as a single notification. ZIP bundles can only be downloaded or saved to the library.',
+    '将自动打包为一个压缩包，仅发送一条通知': 'Files will be packed into one ZIP and sent as a single notification',
+    '打包并分享': 'Pack and share',
+    '正在打包并分享…': 'Packing and sharing…',
+    '一次最多批量处理 {count} 项资料，请减少选择后重试': 'You can process up to {count} items at once. Reduce your selection and try again.',
+    '当前组织没有可分享的其他成员': 'There are no other members in the current organization to share with.',
+    '已分享 {success} 项，{failed} 项失败': 'Shared {success} items; {failed} failed.',
+    '已将选中的资料打包分享，成员会收到 1 条通知': 'The selected materials were packed and shared. Members will receive one notification.',
+    '已分享 1 项资料，成员会收到通知': 'The item was shared. Members will receive a notification.',
+    '文件夹已打包分享，成员会收到 1 条通知': 'The folder was packed and shared. Members will receive one notification.',
+    '文件夹内没有可分享的资料': 'This folder has no shareable materials.',
+    '分享文件夹': 'Share folder',
+    '可选择所有成员，他们会在通知中心收到文件。': 'Choose any member; they will receive the file in the notification center.',
     '请先配置并连接远程存储后分享': 'Configure and connect remote storage before sharing.',
     '下载 ZIP': 'Download ZIP',
     'ZIP 成果包': 'ZIP bundle',
@@ -144,6 +161,7 @@
     '这个空文件夹': 'this empty folder',
     '移入回收站？': 'Move to trash?',
     '“{name}”移入回收站后仍可恢复。': 'You can restore “{name}” after moving it to trash.',
+    '已选择 {count} 项资料，将移入回收站，仍可恢复。': '{count} selected items will be moved to trash and can still be restored.',
     '移入回收站': 'Move to trash',
     '已移入回收站': 'Moved to trash',
     '恢复失败': 'Could not restore the item',
@@ -242,6 +260,12 @@
     '演示文稿最多支持 100 页': 'Presentations support up to 100 slides',
     '本地存储暂不可用': 'Local storage is temporarily unavailable',
     '远程存储暂不可用': 'Remote storage is temporarily unavailable',
+    '已选择 {count} 项': 'Selected {count} items',
+    '围绕内容开启对话': 'Chat about selected items',
+    '批量存储到远端': 'Save selected to remote',
+    '批量分享': 'Share selected',
+    '批量删除': 'Delete selected',
+    '取消选择': 'Clear selection',
     /* Sharing menu and dialog translations for library actions. */
     '分享给成员': 'Share with members',
     '分享资料': 'Share item',

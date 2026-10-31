@@ -24,6 +24,16 @@ function fixture() {
       { id: 'pi', modelMode: 'managed' }, { id: 'qwen', modelMode: 'managed' },
       { id: 'codex', modelMode: 'account' },
     ] },
+    SoduWorkI18n: {
+      translateText(value) {
+        return {
+          'OpenAI 兼容（通用）': 'OpenAI compatible (general)',
+          'OpenAI 兼容（个人）': 'OpenAI compatible (personal)',
+          '自己的额度': 'Personal quota',
+        }[value] || value;
+      },
+      translateNode() {},
+    },
     addEventListener: (name, listener) => listeners.set(name, listener),
   });
   context.window = context;
@@ -240,4 +250,17 @@ test('Codex honors an available catalog default and retains a valid manual selec
   const removed=f.picker.refresh(true);
   f.requests[2].resolve({ok:true,models:[models[1]],defaultModel:'missing'}); await removed;
   assert.equal(f.picker.value().modelName,'preferred','removed selections fall back to an actual available model');
+});
+
+test('managed model picker translates built-in provider and quota labels', async () => {
+  const f = fixture(); f.start();
+  f.requests[0].resolve({
+    usable: [{ name: 'soduwork-prd-large', label: 'soduwork-prd-large',
+      providerName: 'OpenAI 兼容（通用）', keyFrom: 'mine' }],
+    defaultModels: { pi: 'soduwork-prd-large' },
+  });
+  await f.picker.ready();
+  assert.match(f.nodes.cpModelPop.innerHTML, /OpenAI compatible \(general\) · Personal quota/);
+  assert.doesNotMatch(f.nodes.cpModelPop.innerHTML, /OpenAI 兼容（通用）/);
+  assert.doesNotMatch(f.nodes.cpModelPop.innerHTML, /自己的额度/);
 });

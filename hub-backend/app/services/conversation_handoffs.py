@@ -66,7 +66,9 @@ async def targets(session, client):
     # independent environment.  In particular, never fall back to a legacy
     # NULL-owner/shared runner or a colleague's node.
     allowed = await personal_runner_ids(session, client)
-    result = await _targets(client, clients, orgs, allowed)
+    personal_clients = set((await session.scalars(select(Client.id).where(
+        Client.user_ref == client.user_ref, Client.auth_state == "active"))).all())
+    result = await _targets(client, clients, orgs, allowed, personal_clients)
     names = dict((await session.execute(select(RunnerNode.id, RunnerNode.enroll_name).where(
         RunnerNode.id.in_({target["runnerId"] for target in result})
     ))).all()) if result else {}
@@ -84,8 +86,12 @@ def _named_targets(result, names):
 
 async def personal_runner_ids(session, client):
     user = await owner(session, client)
-    return set((await session.scalars(select(RunnerNode.id).where(
-        RunnerNode.owner_user_id == user.id))).all())
+    own_clients = select(Client.id).where(
+        Client.user_ref == user.id, Client.auth_state == "active")
+    result = await session.scalars(select(RunnerNode.id).where(
+        or_(RunnerNode.owner_user_id == user.id,
+            RunnerNode.client_id.in_(own_clients))))
+    return set(result.all())
 
 
 def _automatic_targets(result, agent_id="", source=None, required_skills=()):
@@ -93,7 +99,10 @@ def _automatic_targets(result, agent_id="", source=None, required_skills=()):
     eligible = []
     for target in result:
         runner = runner_hub.get(target["runnerId"])
-        if (not runner or runner.client_id or not cloud_runner_allowed(runner.id)
+        # The roster is already filtered to the caller's exact personal scope.
+        # That scope may contain another active desktop client belonging to the
+        # same account, which is a valid mobile/Web destination.
+        if (not runner or not cloud_runner_allowed(runner.id, runner.client_id)
                 or not runner_hub.has_capacity(runner)
                 or (agent_id and target["agentId"] != agent_id)):
             continue
@@ -107,10 +116,15 @@ def _automatic_targets(result, agent_id="", source=None, required_skills=()):
     return [item[-1] for item in sorted(eligible, key=lambda item: item[:3])]
 
 
-async def _targets(client, clients, orgs, allowed_runners=None):
+async def _targets(client, clients, orgs, allowed_runners=None, personal_clients=None):
     allowed_runners = None if allowed_runners is None else set(allowed_runners)
+    personal_client_ids = set(personal_clients or [])
     roster = await asyncio.to_thread(ai_remote.list_assignees_sync, {
-        "allowedClients": clients, "allowedOrgs": list(orgs),
+        # ``clients`` intentionally excludes the current device. A mobile or Web
+        # client must still discover another active desktop client owned by the
+        # same account. The checks below still exclude the current device and
+        # re-check exact ownership before a handoff is committed.
+        "allowedClients": sorted(set(clients) | personal_client_ids), "allowedOrgs": list(orgs),
         "personalRunnerOwner": client.user_ref if allowed_runners is not None else "",
         "personalRunnerIds": list(allowed_runners or []),
         "allowedRunners": list(allowed_runners) if allowed_runners is not None else []})
@@ -119,8 +133,10 @@ async def _targets(client, clients, orgs, allowed_runners=None):
         runner = runner_hub.get(candidate["runnerId"])
         agent = AGENTS.get(candidate.get("cli"))
         if (not runner or (allowed_runners is not None and runner.id not in allowed_runners)
-                or (allowed_runners is not None and (runner.client_id or
-                    str(getattr(runner, "owner_user_id", "")) != str(client.user_ref or "")))
+                or (allowed_runners is not None and not runner.client_id and
+                    str(getattr(runner, "owner_user_id", "")) != str(client.user_ref or ""))
+                or (allowed_runners is not None and runner.client_id and
+                    runner.client_id != client.id and runner.client_id not in personal_client_ids)
                 or not cloud_runner_allowed(runner.id, runner.client_id)
                 or not agent or CAPABILITY not in getattr(runner, "caps", [])
                 or not runner.work_root or runner.client_id == client.id
@@ -196,9 +212,11 @@ async def target_catalog(session, client, agent_id=""):
     """
     clients, orgs = await scope(session, client)
     allowed = await personal_runner_ids(session, client)
+    personal_clients = set((await session.scalars(select(Client.id).where(
+        Client.user_ref == client.user_ref, Client.auth_state == "active"))).all())
     if agent_id and agent_id not in AGENTS:
         raise HTTPException(422, "当前服务尚未配置此 Agent 的云端执行支持")
-    result = await _targets(client, clients, orgs, allowed)
+    result = await _targets(client, clients, orgs, allowed, personal_clients)
     automatic = _automatic_targets(result, agent_id)
     if agent_id:
         result = automatic
@@ -273,8 +291,12 @@ async def destination(session, client, options, source=None):
     # Re-check durable ownership at the final dispatch boundary.  This closes
     # the race where a node is deleted/reassigned after target discovery.
     user = await owner(session, client)
+    own_clients = select(Client.id).where(
+        Client.user_ref == user.id, Client.auth_state == "active")
     owned = await session.scalar(select(RunnerNode.id).where(
-        RunnerNode.id == runner.id, RunnerNode.owner_user_id == user.id))
+        RunnerNode.id == runner.id,
+        or_(RunnerNode.owner_user_id == user.id,
+            RunnerNode.client_id.in_(own_clients))))
     if owned is None:
         raise HTTPException(409, "目标执行机不再属于当前账号，请刷新列表")
     needed = options.get("requiredSkills", [])
@@ -296,7 +318,7 @@ async def destination(session, client, options, source=None):
 
 def clean_options(raw):
     if not isinstance(raw, dict) or set(raw) - {
-        "sha256", "assigneeId", "agentId", "model", "instruction", "requiredSkills", "personalPlugins", "agentFallback"
+        "sha256", "assigneeId", "agentId", "model", "instruction", "requiredSkills", "personalPlugins", "agentFallback", "targetRunnerId"
     }:
         raise HTTPException(400, "交接选项不正确；不能指定执行机上的目录或额外执行配置")
     out = {}
@@ -312,6 +334,10 @@ def clean_options(raw):
         if not isinstance(raw["agentId"], str) or raw["agentId"] not in AGENTS:
             raise HTTPException(422, "当前服务尚未配置此 Agent 的云端执行支持")
         out["agentId"] = raw["agentId"]
+    if "targetRunnerId" in raw:
+        if not isinstance(raw["targetRunnerId"], str) or not re.fullmatch(r"[A-Za-z0-9._:-]{1,80}", raw["targetRunnerId"]):
+            raise HTTPException(400, "目标执行机标识不正确")
+        out["targetRunnerId"] = raw["targetRunnerId"]
     if "agentFallback" in raw:
         out["agentFallback"] = handoff_agent_policy.clean_fallback(raw["agentFallback"])
     if not out["instruction"]:

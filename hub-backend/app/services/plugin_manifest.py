@@ -582,7 +582,7 @@ def normalize(manifest: dict, workflow: dict | None = None) -> tuple[dict, dict,
     ui = plugin_ui_contracts.normalize(raw.get("ui"), setup)
     plugin_app_contracts.validate(raw.get('template'), ui)
     entrypoints = plugin_ui_contracts.effective_entrypoints(
-        entrypoints, ui, has_workflow=has_workflow)
+        entrypoints, ui, has_workflow=has_workflow, jiyong=raw.get('jiyong'))
     if not any(entrypoints.values()):
         raise ValueError("带页面的交互插件至少要开放会话或任务入口，不能只用于后台自动化")
     outputs = list(raw.get("outputs") or [])[:50]
@@ -604,6 +604,11 @@ def normalize(manifest: dict, workflow: dict | None = None) -> tuple[dict, dict,
         "evaluations": evaluations,
         "capabilities": manifest_capabilities,
     }
+    if raw.get('appCategory') is not None:
+        normalized['appCategory'] = plugin_app_contracts.category(raw['appCategory'])
+    if raw.get('extensions') is not None:
+        from . import plugin_extensions
+        normalized['extensions'] = plugin_extensions.normalize(raw['extensions'])
     from . import plugin_locales
     locales = plugin_locales.normalize(raw.get('locales'))
     if locales is not None:
@@ -617,6 +622,19 @@ def normalize(manifest: dict, workflow: dict | None = None) -> tuple[dict, dict,
     app_window = plugin_window_contracts.normalize(raw.get('appWindow'))
     if app_window is not None:
         normalized['appWindow'] = app_window
+    if raw.get('jiyong') is not None:
+        from . import jiyong_contract
+        declaration = jiyong_contract.normalize(raw['jiyong'])
+        mcp = declaration.get('mcp') or {}
+        if mcp and mcp['server'] not in manifest_capabilities['mcpServers']:
+            raise ValueError('即用 MCP 必须同时声明在 mcpServers 中')
+        if mcp.get('server') == 'soduwork-jiyong':
+            pages = [r for r in ui.get('contributions', []) if r.get('slot') == 'workspace.navigation'
+                     and r.get('source', {}).get('type') == 'package'
+                     and 'mcp.connect' in r['source'].get('bridge', {}).get('capabilities', [])]
+            if len(pages) != 1 or not {'data.read', 'data.write'} & set(pages[0]['source']['bridge']['capabilities']):
+                raise ValueError('宿主 MCP 需要唯一包内入口及数据能力')
+        normalized['jiyong'] = declaration
     if icon:
         normalized['icon'] = icon
     normalized_wf = {"nodes": nodes}

@@ -12,9 +12,10 @@ for (const initialStatus of [500, 504, 'truncated']) test('real Pi HTTP'+initial
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'soduwork-recovery-wire-'));
   const cwd=path.join(root,'work'),agentDir=path.join(root,'agent');fs.mkdirSync(cwd);fs.mkdirSync(agentDir);
   // Fast but otherwise real SDK retry policy, isolated from user configuration.
-  const retries=initialStatus===500?2:3;
+  const retries=initialStatus===500?2:6;
   fs.writeFileSync(path.join(agentDir,'settings.json'),JSON.stringify({retry:{enabled:true,baseDelayMs:10,
-    ...(initialStatus===500?{maxRetries:2}:{})}})); // HTTP504 uses the shipped default retry limit.
+    delayScheduleMs:[10,20,40,80,160,320],
+    ...(initialStatus===500?{maxRetries:2}:{})}})); // HTTP504 uses the shipped six-retry default.
   const captured=[],receipts=[];let healthy=false,toolOffered=false,failureStatus=initialStatus;
   const gatewayBody='<html><body><h1>504 Gateway Time-out</h1>The server did not respond in time. '+
     'http://192.0.2.40:8181/private?token=fixture-secret</body></html>';
@@ -45,6 +46,7 @@ for (const initialStatus of [500, 504, 'truncated']) test('real Pi HTTP'+initial
   const sdk=await import(pathToFileURL(path.join(__dirname,'../node_modules/@earendil-works/pi-coding-agent/dist/index.js')).href);
   const sessions=require('../main/pi-session/session');
   const model={id:'fixture',label:'Fixture',contextWindow:32000,input:['text'],key:'fixture',baseUrl:'http://127.0.0.1:'+server.address().port+'/v1'};
+  config.noProxyFor(model.baseUrl);
   const modelPath=config.writeModels(agentDir,model),prepare=config.prepare,create=sdk.ModelRuntime.create;
   const env=process.env.SODUWORK_PROXY_KEY;process.env.SODUWORK_PROXY_KEY='fixture';
   config.prepare=async()=>({ok:true,provider:'soduwork',agentDir,model});

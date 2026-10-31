@@ -37,6 +37,14 @@ test('notice center renders the shared store and refreshes receipt status withou
   f.rows.sent[0].sentStatus='read';f.context._renderNoticePanel();assert.match(f.html(),/np-delivery np-read/);
   assert.deepEqual(f.refreshes,['received','sent']);
 });
+test('library attachments expose open, download, and save actions in both folders',async()=>{
+  const attachment={id:'attachment-1',name:'shared.txt',size:12};
+  const f=fixture();f.rows.received=[{...row(),kind:'mate_message',attachments:[attachment]}];f.rows.sent=[{...row(),kind:'mate_message',attachments:[attachment]}];
+  await f.open();
+  assert.equal((f.html().match(/data-notice-action="(?:open|download|save)"/g)||[]).length,3);
+  await f.context._loadMateNoticeFolder('sent');
+  assert.equal((f.html().match(/data-notice-action="(?:open|download|save)"/g)||[]).length,3);
+});
 test('a failed remote read keeps the row unread and reports failure instead of consuming locally',async()=>{
   const f=fixture();f.rows.received=[row()];f.failRead(true);await f.open();
   f.click({'data-nnotice':'mate-client','data-server-message':'server-1'});await settle();

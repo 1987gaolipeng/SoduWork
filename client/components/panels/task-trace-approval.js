@@ -48,25 +48,39 @@
   function canAcceptTask(task, context) {
     const R = global.Requirements;
     if (!task || !R || R.stage(task) !== 'reviewing' || task.reviewedAt || task.canViewExecution === false) return false;
+    const creator = R.canReview(task) ||
+      (Boolean(global.__teamCap?.meId) && String(task.createdBy || '') === String(global.__teamCap.meId));
     const item = R.approval(task, context);
-    if (item) return item.action === 'review' && (!item.status || item.status === 'pending') && !item.myDecision;
-    return task.status === 'done' && Boolean(global.__teamCap?.meId) &&
-      task.createdBy === global.__teamCap.meId && !R.waitingOn(task, context).length;
+    if (item) return item.action === 'review' && creator &&
+      (!item.status || item.status === 'pending') && !item.myDecision;
+    return task.status === 'done' && creator && !R.waitingOn(task, context).length;
   }
   /*
    * Reuse the execution conversation for review only when the server confirms both roles
    * belong to the same user. Otherwise use a separate review conversation.
    */
-  function sameExecutorReviewer(task, assignment, direct) {
+  function sameExecutorReviewer(task, assignment, direct, capability = global.__teamCap) {
     const reviewer = String(assignment?.userId || (direct ? task?.createdBy : '') || '').trim();
     const executor = String(task?.assigneeUserId || task?.executorUserId ||
       task?.executionContext?.assigneeUserId || (direct ? task?.createdBy : '') || '').trim();
-    const me = String(global.__teamCap?.meId || '').trim();
+    const me = String(capability?.meId || '').trim();
     /*
      * The signed-in user must own both roles; matching card IDs alone cannot authorize review
      * context.
      */
     return Boolean(me && reviewer && executor && reviewer === executor && me === reviewer);
+  }
+  function currentTeamCapability() {
+    if (String(global.__teamCap?.meId || '').trim()) return global.__teamCap;
+    const load = global.SoduWorkAPI?.getTeamCapability;
+    if (typeof load !== 'function') return global.__teamCap || {};
+    return Promise.resolve().then(() => load()).then(capability => {
+      if (capability && typeof capability === 'object' && String(capability.meId || '').trim()) {
+        global.__teamCap = capability;
+        return capability;
+      }
+      return global.__teamCap || {};
+    }).catch(() => global.__teamCap || {});
   }
   function openAcceptance(task, opts = {}) {
     const id = String(task?.id || '');
@@ -88,6 +102,13 @@
       assertCurrent();
       if (global.Requirements && (!latest || global.Requirements.stage(latest) !== 'reviewing' || latest.reviewedAt || latest.canViewExecution === false))
         throw new Error('需求状态或验收权限已变化，请刷新后重试');
+      const capabilityResult = currentTeamCapability();
+      const capability = capabilityResult && typeof capabilityResult.then === 'function'
+        ? await capabilityResult : capabilityResult;
+      assertCurrent();
+      if (global.Requirements?.canReview && !global.Requirements.canReview(latest) &&
+          String(latest?.createdBy || '') !== String(capability?.meId || ''))
+        throw new Error('只有需求创建人可以验收交付成果');
       let assignment = null;
       if (approvalId && global.SoduWorkAPI?.approvalDetail) {
         const response = await global.SoduWorkAPI.approvalDetail(approvalId), item = response?.item;
@@ -97,7 +118,7 @@
         assignment = item.assignment;
       }
       const direct = !approvalId;
-      const reuseExecutionSession = sameExecutorReviewer(latest, assignment, direct) &&
+      const reuseExecutionSession = sameExecutorReviewer(latest, assignment, direct, capability) &&
         Boolean(latest?.workRouting?.conversationTurn?.conversationId);
       const opened = await global.openTaskConversation(id, latest?.title || task.title || '', {
         /* acceptanceSession itself creates a clean session on the first open.

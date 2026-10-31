@@ -78,6 +78,27 @@ function assertDisclosure(page, expanded, expectedId) {
 }
 const toggle = (page) => page.act(() => byClass(page, 'model-runtime-services-head').props.onClick())
 
+function descendants(value, predicate) {
+  if (Array.isArray(value)) return value.flatMap(child => descendants(child, predicate))
+  if (!React.isValidElement(value)) return []
+  return [...(predicate(value) ? [value] : []), ...descendants(value.props.children, predicate)]
+}
+function cardValues(page, className) {
+  return page.nodes(node => node.props.className?.split(/\s+/).includes(className)).map(card => {
+    const strong = descendants(card, node => node.type === 'strong')[0]
+    const children = strong.props.children
+    return String(Array.isArray(children) ? children[0] : children)
+  })
+}
+function capacityButton(page) {
+  return page.nodes(node => node.type === 'button' && textOf(node) === '并发与等待')[0]
+}
+function retry(page) {
+  const button = descendants(byClass(page, 'model-runtime-state'), node => node.type === 'button')[0]
+  page.act(() => button.props.onClick())
+}
+
+
 test('runtime details start collapsed and the real click handler toggles aria and hidden together', async (t) => {
   const page = await mountRuntime(t)
   const id = assertDisclosure(page, false)
@@ -108,7 +129,8 @@ test('catalog props and real polling responses preserve the current disclosure s
   await polling
   await page.flush()
   assertDisclosure(page, true, id)
-  assert.ok(textOf(byClass(page, 'model-runtime-facts')).includes('5 / 16'))
+  assert.equal(cardValues(page, 'model-load-card')[0], '5')
+  assert.ok(textOf(byClass(page, 'model-runtime-live')).includes('全站并发上限 16'))
   toggle(page)
   const nextPolling = page.poll()
   page.requests[2].resolve(runtimeData(0, []))
@@ -125,18 +147,103 @@ test('metrics, catalog actions and concurrency settings stay outside the disclos
   for (const expanded of [false, true, false]) {
     assertDisclosure(page, expanded)
     const body = byClass(page, 'model-runtime-services-body')
-    const facts = byClass(page, 'model-runtime-facts')
+    const facts = byClass(page, 'model-runtime-live')
+    const recent = byClass(page, 'model-runtime-recent')
     const actions = byClass(page, 'model-runtime-actions')
     const catalogAction = page.nodes((node) => node.props['data-catalog-action'])[0]
     const capacityButton = page.nodes((node) => node.type === 'button' && textOf(node) === '并发与等待')[0]
-    for (const node of [facts, actions, catalogAction, capacityButton]) {
+    for (const node of [facts, recent, actions, catalogAction, capacityButton]) {
       assert.ok(node)
       assert.equal(contains(body, node), false, 'collapsing details must not hide the summary or actions')
     }
     assert.ok(contains(actions, catalogAction))
     assert.ok(contains(actions, capacityButton))
     assert.equal(capacityButton.props.disabled, false)
-    assert.ok(textOf(facts).includes('2 / 16'))
+    assert.equal(cardValues(page, 'model-load-card')[0], '2')
+    assert.ok(textOf(facts).includes('全站并发上限 16'))
     toggle(page)
   }
+})
+
+
+test('runtime loading and initial errors do not masquerade as measured zeroes; retry is guarded', async (t) => {
+  const page = await mountRuntime(t)
+  assert.deepEqual(cardValues(page, 'model-load-card'), ['—', '—'])
+  assert.deepEqual(cardValues(page, 'model-runtime-stat'), ['—', '—', '—', '—'])
+  assert.equal(capacityButton(page).props.disabled, true)
+  page.requests[0].reject(new Error('fixture unavailable'))
+  await page.flush()
+  const alert = byClass(page, 'model-runtime-state')
+  assert.equal(alert.props.role, 'alert')
+  assert.ok(textOf(alert).includes('运行状态暂不可用'))
+  assert.ok(textOf(alert).includes('fixture unavailable'))
+  assert.deepEqual(cardValues(page, 'model-runtime-stat'), ['—', '—', '—', '—'])
+  retry(page); retry(page)
+  assert.equal(page.requests.length, 2, 'repeat retries share the original in-flight guard')
+  page.requests[1].resolve(runtimeData())
+  await page.flush()
+  assert.equal(byClass(page, 'model-runtime-state'), undefined)
+  assert.equal(capacityButton(page).props.disabled, false)
+})
+
+test('refresh failures keep clearly marked prior values and retry updates them without closing details', async (t) => {
+  const page = await mountRuntime(t)
+  page.requests[0].resolve(runtimeData())
+  await page.flush()
+  toggle(page)
+  const id = assertDisclosure(page, true)
+  const polling = page.poll()
+  page.requests[1].reject(new Error('fixture refresh failed'))
+  await polling; await page.flush()
+  assertDisclosure(page, true, id)
+  assert.deepEqual(cardValues(page, 'model-load-card'), ['2', '1'])
+  const alert = byClass(page, 'model-runtime-state')
+  assert.ok(textOf(alert).includes('刷新失败，以下显示上次成功读取的数据。'))
+  assert.equal(capacityButton(page).props.disabled, true, 'stale policy cannot open for editing')
+  retry(page)
+  await page.poll()
+  assert.equal(page.requests.length, 3, 'polling and retry cannot race')
+  page.requests[2].resolve(runtimeData(7))
+  await page.flush()
+  assert.equal(byClass(page, 'model-runtime-state'), undefined)
+  assert.equal(cardValues(page, 'model-load-card')[0], '7')
+  assertDisclosure(page, true, id)
+})
+
+test('load limits and hourly outcomes have independent numbers; absent wait samples are unavailable', async (t) => {
+  const page = await mountRuntime(t)
+  page.requests[0].resolve({ ...runtimeData(21), policy: { globalConcurrent: 256, queueSize: 128 },
+    lastHour: { started: 5, waitMs: 760, timeout: 17, queueTimeout: 6, rateLimited: 3 } })
+  await page.flush()
+  assert.equal(byClass(page, 'model-runtime-live').props['aria-label'], '实时负载')
+  assert.equal(byClass(page, 'model-runtime-recent').props['aria-label'], '近一小时请求情况')
+  assert.deepEqual(cardValues(page, 'model-load-card'), ['21', '1'])
+  assert.deepEqual(cardValues(page, 'model-runtime-stat'), ['152', '17', '6', '3'])
+  assert.ok(textOf(byClass(page, 'model-runtime-live')).includes('全站并发上限 256'))
+  assert.ok(textOf(byClass(page, 'model-runtime-live')).includes('全站排队上限 128'))
+  const polling = page.poll()
+  page.requests[1].resolve({ ...runtimeData(0, []), queued: 0, policy: { globalConcurrent: 16, queueSize: 0 }, lastHour: { started: 0, waitMs: 0 } })
+  await polling; await page.flush()
+  assert.deepEqual(cardValues(page, 'model-runtime-stat'), ['—', '0', '0', '0'])
+  assert.ok(textOf(byClass(page, 'model-runtime-live')).includes('未启用排队'))
+  assert.equal(page.nodes(node => node.type === 'progress').length, 1, 'disabled queue does not produce a zero-capacity progress meter')
+})
+
+test('runtime polling pauses in hidden documents and late retries cannot update an unmounted view', async (t) => {
+  const page = await mountRuntime(t)
+  page.requests[0].resolve(runtimeData())
+  await page.flush()
+  document.hidden = true
+  await page.poll()
+  assert.equal(page.requests.length, 1)
+  document.hidden = false
+  const polling = page.poll()
+  page.requests[1].reject(new Error('fixture retry'))
+  await polling; await page.flush()
+  retry(page)
+  assert.equal(page.requests.length, 3)
+  page.unmount()
+  page.requests[2].resolve(runtimeData(9))
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(page.timers.size, 0)
 })

@@ -118,6 +118,17 @@ html[data-window-titlebar="overlay"] .pui-layer.wes-plugin-surface .pui-dialog{
 .wes-task-host .cp-loading{
   min-height:180px;display:grid;place-items:center;border:1px solid var(--line);
   border-radius:13px;background:var(--bg-0);color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 11.5px)}
+.wes-task-host .cp-loading-thinking{
+  min-height:64px;display:flex;justify-content:flex-start;gap:10px;padding:14px 16px;box-sizing:border-box;
+  text-align:left;line-height:1.4}
+.wes-task-host .cp-loading-thinking>i{
+  width:16px;height:16px;flex:none;margin-top:2px;border:2px solid color-mix(in srgb,var(--accent) 22%,transparent);
+  border-top-color:var(--accent);border-radius:50%;animation:wes-thinking-spin .8s linear infinite}
+.wes-task-host .cp-loading-thinking>span{display:flex;min-width:0;flex-direction:column;gap:2px}
+.wes-task-host .cp-loading-thinking b{font-size:max(var(--font-min-readable, 14.5px), 13px);font-weight:600;color:var(--ink-2)}
+.wes-task-host .cp-loading-thinking small{font-size:max(var(--font-min-readable, 14.5px), 11.5px);color:var(--ink-4)}
+@keyframes wes-thinking-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.wes-task-host .cp-loading-thinking>i{animation:none}}
 .wes-task-host .cp-card{
   max-width:none;margin:0;padding:13px;border-color:var(--line-2);background:var(--bg-0);box-shadow:none
 }

@@ -11,5 +11,5 @@ from __future__ import annotations
 
 # Leave enough room for reasoning-capable coding models to reach a tool call or
 # final answer.  An administrator supplied maxOutputTokens remains authoritative.
-DEFAULT_OUTPUT = 32768
+DEFAULT_OUTPUT = 65536
 

@@ -135,6 +135,34 @@ test('整理中返回原卡等待同一请求，不显示可重复创建的临�
   assert.equal(f.fields.get('cpTitle').value, '整理完成'); assert.equal(f.calls.parse, 1);
 });
 
+test('对话创建需求先显示用户输入和思考状态，准备完成后再显示带内容的卡片', async () => {
+  const f = fixture(), wait = deferred();
+  f.ctx.SoduWorkAPI.listTeammates = () => wait.promise;
+  const pending = f.draft.openWith({ title: '准备中的标题', note: '准备中的正文', checklist: ['完成验收'] },
+    f.options({ variant: 'sheet', persistent: true }));
+  assert.match(f.box.innerHTML, /cp-loading-thinking/);
+  assert.match(f.box.innerHTML, /正在思考/);
+  assert.equal(f.fields.has('cpTitle'), false);
+  wait.resolve({ mates: [] }); await pending; await tick();
+  assert.equal(f.fields.get('cpTitle').value, '准备中的标题');
+  assert.match(f.box.innerHTML, /准备中的正文/);
+});
+
+test('新建需求卡提供明确的取消入口，取消后可继续普通对话', async () => {
+  const f = fixture();
+  await f.open({ variant: 'sheet', persistent: true, requirement: true });
+  assert.match(f.box.innerHTML, /id="cpCancel">取消<\/button>/);
+  assert.doesNotMatch(f.box.innerHTML, /取消新建需求/);
+});
+
+test('对话内需求卡在快速视图也显示取消入口', async () => {
+  const f = fixture();
+  await f.open({ variant: 'chat', persistent: true, requirement: true });
+  assert.match(f.box.innerHTML, /data-cp-cancel/);
+  assert.match(f.box.innerHTML, /data-cp-cancel>取消<\/button>/);
+  assert.doesNotMatch(f.box.innerHTML, /取消新建需求/);
+});
+
 test('补充解析中离开仍保留手改字段与迟到结果，旧视图不重开', async () => {
   const f = fixture(), wait = deferred(); await f.open();
   f.fields.get('cpTitle').value = '手改标题';

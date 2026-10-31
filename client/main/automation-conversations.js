@@ -32,7 +32,22 @@ function diskJournal(directory) {
       const fd = fs.openSync(temporary, 'w', 0o600);
       try { fs.writeFileSync(fd, JSON.stringify(record)); fs.fsyncSync(fd); }
       finally { fs.closeSync(fd); }
-      fs.renameSync(temporary, target);
+      try {
+        fs.renameSync(temporary, target);
+      } catch (error) {
+        // Some Windows security filters briefly hold a just-written file and
+        // reject the atomic rename with EPERM/EACCES/EBUSY. The receipt is
+        // local recovery state, so preserve it with a bounded direct-copy
+        // fallback instead of turning an already dispatched run red. Do not
+        // mask unrelated I/O errors.
+        if (!['EPERM', 'EACCES', 'EBUSY'].includes(error && error.code)) throw error;
+        try {
+          fs.copyFileSync(temporary, target);
+          fs.unlinkSync(temporary);
+        } catch (_) {
+          throw error;
+        }
+      }
     },
   };
 }
@@ -98,11 +113,29 @@ function createWorker({ identityOf, request, journal, conversation, catalog,
       record = save(key, { ...record, state: 'running' });
       await acknowledge(identity, row.id, record); return;
     }
+    if (record?.phase === 'adopted') {
+      // A foreign client owns the prompt. Keep the receipt leased and visible
+      // as running, but never reopen/send it from this client's journal.
+      await acknowledge(identity, row.id, { ...record, state: 'running' });
+      return;
+    }
     const input = claimed.input || {};
     try {
       if (claimed.conversationId && (!record || record.conversationId !== claimed.conversationId)) {
-        record = { conversationId: claimed.conversationId };
-        throw Error('此触发已在另一客户端创建对话，请打开原对话确认；本次没有重复执行');
+        /*
+         * The durable Hub receipt is the source of truth for a cross-client handoff.
+         * A restarted client can legitimately have no local journal while another
+         * client has already opened the ordinary chat.  Treating that receipt as a
+         * provider failure used to paint a successful dispatch red and overwrite the
+         * schedule's compact last-error field with "另一客户端...".  Adopt the
+         * existing conversation as an active run and clear any stale error; the
+         * client that owns the conversation will publish the terminal acknowledgement.
+         * We deliberately do not send the prompt again.
+         */
+        record = save(key, { ...(record || {}), phase: 'adopted', state: 'running',
+          conversationId: claimed.conversationId, error: '' });
+        await acknowledge(identity, row.id, record);
+        return;
       }
       if (input.runId !== row.id || !String(input.text || '').trim()) throw Error('自动化输入不完整，本次未执行');
       if (input.text.length > 50000) throw Error('自动化内容超过单轮长度限制，请精简材料后重试；内容未被截断');
@@ -112,7 +145,7 @@ function createWorker({ identityOf, request, journal, conversation, catalog,
         // Existing journals without a choice retain their original contract.
         record = save(key, { phase: 'prepared', state: 'running', accessChoice });
       }
-      const plugin = pluginSelection(input.personalPlugin, await catalog());
+      const plugin = pluginSelection(input.personalPlugin, await catalog(input.personalPlugin));
       const modelName = String(input.modelName || '').trim();
       const options = {
         ...(record && record.conversationId ? { chatId: record.conversationId } : {}),
@@ -219,7 +252,7 @@ function install({ app, ipcMain, identityOf, conversation, platformConnections }
     worker = createWorker({ identityOf: () => identityOf(app),
       request: require('./pi-session/task-input').request,
       journal: diskJournal(path.join(app.getPath('userData'), 'automation-conversations')),
-      conversation, catalog: () => require('./personal-plugins').catalog(app),
+      conversation, catalog: spec => require('./jiyong-scheduled-plugins.cjs').catalog(app,identityOf,spec),
       onError: message => console.warn('[automation-conversation]', message),
     });
     timer = setInterval(() => worker.tick(), POLL_INTERVAL_MS); timer.unref(); worker.tick();

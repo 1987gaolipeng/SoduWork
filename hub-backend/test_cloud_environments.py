@@ -56,6 +56,8 @@ class CloudEnvironmentsTests(_Base):
         rid, key = result["environment"]["id"], result["setup"]["key"]
         self.assertTrue(key)
         self.assertEqual(result["setup"]["agentSetup"]["name"], "Pi")
+        self.assertEqual(result["setup"]["agentSetup"]["command"],
+                         "npm install -g @earendil-works/pi-coding-agent@0.84.4")
         async with db.SessionLocal() as session:
             self.assertTrue(await runner_registry.verify_key(session, rid, key))
             row = await session.get(RunnerNode, rid)

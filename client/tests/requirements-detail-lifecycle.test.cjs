@@ -149,6 +149,23 @@ test('locked definitions retain separately authorized review and material operat
   assert.ok(f.calls.some(row=>row[0]==='notice' && /已提交验收/.test(row[1])));
 });
 
+test('no-delivery work exposes a clear mark-complete action even with a stale auto mode', async () => {
+  const f = fixture({getTask: async id => ({...task(id), status: 'doing',
+    canSubmitReview: true, workRouting: {executionSubmissionMode: 'auto'},
+  }), submitTaskReview: async () => ({ok: true})});
+  await f.api.open('manual-no-output');
+  assert.match(f.content().innerHTML, /data-rq-submit-review[^>]*>标记完成/);
+});
+
+test('contract kind without deliverables still exposes manual completion', async () => {
+  const f = fixture({getTask: async id => ({...task(id), status: 'doing',
+    canSubmitReview: true,
+    workRouting: {executionSubmissionMode: 'auto', outputContract: {kind: 'office-artifact'}},
+  }), submitTaskReview: async () => ({ok: true})});
+  await f.api.open('kind-only-contract');
+  assert.match(f.content().innerHTML, /data-rq-submit-review[^>]*>标记完成/);
+});
+
 test('live updates do not replace the optimistic version of an open editing draft', async () => {
   let value = {...task('versioned'),canEditRequirement:true,requirementVersion:3}; const writes = [];
   const f = fixture({getTask:async()=>({...value}),patchTask:async(_id,patch)=>{writes.push(patch); return {};}});
@@ -194,6 +211,13 @@ test('详情验收卡传入任务标识，并向验收人展示独立会话入�
   assert.match(f.content().innerHTML, /data-tfd-acceptance-mode/);
   assert.match(f.content().innerHTML, /data-tfd-acceptance-session/);
   assert.doesNotMatch(f.active().querySelector('.rq-detail-footer').innerHTML, /data-rq-acceptance/);
+});
+
+test('creator-direct acceptance uses the Hub capability when local team state is late', async () => {
+  const f = fixture({getTask: async id => ({...task(id), status: 'done', createdBy: 'me', canReview: true})});
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../components/panels/task-trace-approval.js'), 'utf8'), f.context);
+  await f.api.open('review-capability');
+  assert.match(f.content().innerHTML, /data-tfd-acceptance-mode/);
 });
 
 test('验收动作关闭需求详情后，刷新回调不会把抽屉重新打开', async () => {
@@ -242,6 +266,31 @@ test('rework reference files stay outside the delivery material list', async () 
   assert.match(html, /仅供返修使用，不计入交付产物/);
   assert.match(html, /data-rq-file-id="rework"/);
   assert.match(html, /data-rq-file-id="delivery"/);
+});
+
+test('需求资料、过程证据、交付物和返修资料分组折叠展示，多交付物同时提供自动压缩包', async () => {
+  const f = fixture({listAttachments: async () => [
+    {id: 'input', filename: '需求说明.md', role: 'input', size: 120},
+    {id: 'evidence', filename: '验收截图.png', role: 'verification', size: 240},
+    {id: 'output-a', filename: 'index.html', role: 'output', sourceRef: 'conversation:current', size: 320},
+    {id: 'output-b', filename: 'style.css', role: 'output', sourceRef: 'conversation:current', size: 180},
+    {id: 'output-c', filename: 'app.js', role: 'output', sourceRef: 'conversation:current', size: 460},
+    {id: 'rework', filename: '返修说明.md', role: 'rework_input', size: 90},
+  ]});
+  await f.api.open('material-groups');
+  const html = f.active().querySelector('#rqAttachments').innerHTML;
+  for (const [group, label] of [['input', '需求资料'], ['evidence', '过程证据'], ['output', '交付物'], ['rework', '返修参考资料']]) {
+    const match = html.match(new RegExp('<details[^>]*data-rq-material-group="' + group + '"[^>]*>'));
+    assert.ok(match, group + ' group must be collapsible');
+    assert.doesNotMatch(match[0], /\bopen(?:\s|=|>)/, group + ' group is collapsed by default');
+    assert.match(html, new RegExp(label));
+  }
+  assert.match(html, /data-rq-bundle-download/);
+  assert.match(html, /自动压缩包/);
+  assert.match(html, /自动压缩包\.zip/);
+  assert.match(html, /data-rq-file-id="output-a"/);
+  assert.match(html, /data-rq-file-id="output-b"/);
+  assert.match(html, /data-rq-file-id="output-c"/);
 });
 
 test('history is escaped and read-only; trace opens lazily and unmounts on collapse', async () => {

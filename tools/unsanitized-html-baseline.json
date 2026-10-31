@@ -102,6 +102,7 @@
   "client/components/settings/shortcut-settings.js": 1,
   "client/components/skin-manager/skin-manager.js": 1,
   "client/components/team/team.js": 2,
+  "client/components/workspace/global-search.js": 4,
   "client/components/workspace/window-menu.js": 7,
   "client/components/workspace/workspace-chat-list.js": 7,
   "client/components/workspace/workspace-shell.js": 4,

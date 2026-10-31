@@ -157,7 +157,9 @@
 
 /* Speech bubble. */
 .pet-bubble{
-  position:fixed;z-index:31;
+  /* Feedback must stay readable while plugin/application dialogs are open. Keep this
+     below the system-level account mask (2147483602) but above app overlays (<=10060). */
+  position:fixed;z-index:10070;
   width:max-content;max-width:220px;        /* Size to content to avoid shrink-to-fit compression near the right edge. */
   padding:10px 14px;
   border-radius:var(--r-lg);

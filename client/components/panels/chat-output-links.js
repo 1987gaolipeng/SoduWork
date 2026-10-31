@@ -855,7 +855,11 @@
   }
   function shouldRefresh(event, before) {
     const after=event.snapshot||{}, execution=after.execution||{}, previous=before?.execution||{};
-    if(['settled','task-message','plugin-debug'].includes(event.kind)) return true;
+    // Delivery receipts can arrive after the session's settled publication
+    // (the local writer flushes the artifact index asynchronously). Treat the
+    // receipt as a first-class refresh signal so cards and automatic preview
+    // see the final materialized files without relying on a later snapshot.
+    if(['settled','task-message','plugin-debug','delivery-sync'].includes(event.kind)) return true;
     if(['streaming','running','queued'].includes(before?.status) &&
         !['streaming','running','queued'].includes(after.status))return true;
     if(previous.running && !execution.running)return true;

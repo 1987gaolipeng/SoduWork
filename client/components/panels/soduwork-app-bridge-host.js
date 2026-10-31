@@ -62,6 +62,20 @@
       } }); }
       catch (error) { return { ok: false, reason: String(error?.message || error) }; }
     }
+    if(['user.getCurrent','notifications.list','library.list','library.read'].includes(method)){
+      if(!global.SoduWorkAppHostData)throw Error('宿主数据SDK未加载，请更新客户端');
+      return global.SoduWorkAppHostData.handle(method,params);
+    }
+    if (method === 'directory.list') {
+      const api=global.SoduWorkAPI,scope=api?.taskStorageKey?.('plugins');
+      if(!api?.listTeammates)return {ok:false,reason:'当前客户端尚未支持同事目录'};
+      const result=await api.listTeammates();
+      if(scope!==api.taskStorageKey?.('plugins'))return {ok:false,reason:'SoduWork 账号已变化，请重新读取同事目录'};
+      if(result?.ok===false)return {ok:false,reason:result.reason || '同事目录读取失败'};
+      const members=(result?.mates || []).slice(0,500).map(row=>({id:String(row.id || ''),name:String(row.name || '').slice(0,120),orgId:String(row.orgId || ''),org:String(row.org || '').slice(0,120),canReceive:row.canReceive===true || row.hasBox===true}));
+      const orgUnits=(result?.orgUnits || []).slice(0,500).map(row=>({id:String(row.id || ''),name:String(row.name || '').slice(0,120),parentId:String(row.parentId || '')}));
+      return {ok:true,members,orgUnits,organizationDirectoryAvailable:Array.isArray(result?.orgUnits),truncated:(result?.mates?.length || 0)>500 || (result?.orgUnits?.length || 0)>500,reason:String(result?.reason || '').slice(0,300)};
+    }
     if (method === 'context.get') return safeContext(request);
     if (method === 'conversation.open') {
       const api = sessionApi();

@@ -589,6 +589,26 @@ test('普通消息首次发送沿用工作卡占用的会话，切换会话先�
   assert.ok(panel.indexOf('_workCards?.detach()') < panel.indexOf('_ref = \'\'; _sessionId = \'\'; _snap = null'));
 });
 
+test('需求解析期间保留会话挂载槽位，用户提示和思考状态先显示，完成后再渲染聊天卡片', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../components/panels/chat-work-cards.js'), 'utf8');
+  assert.match(src, /record\.state\?\.phase === 'loading'/);
+  assert.match(src, /!cardHost\(record\)\?\.querySelector\('\.pui-surface'\)/);
+  const sheet = fs.readFileSync(path.join(__dirname, '../components/panels/panels-compose-draft.js'), 'utf8');
+  assert.match(sheet, /cp-loading-thinking/);
+  assert.doesNotMatch(sheet, /_deferInitialCard/);
+  const host = fs.readFileSync(path.join(__dirname, '../components/panels/work-entry-sheet.js'), 'utf8');
+  assert.doesNotMatch(host, /is-preparing/);
+  const actions = fs.readFileSync(path.join(__dirname, '../components/panels/panels-chat-work-actions.js'), 'utf8');
+  assert.match(actions, /showPending/);
+  assert.match(actions, /data-work-action-pending/);
+  assert.match(actions, /cp-loading-chat cp-loading-thinking/);
+  const intent = fs.readFileSync(path.join(__dirname, '../components/panels/chat-work-intent.js'), 'utf8');
+  assert.match(intent, /ChatWorkActions\.showPending/);
+  assert.match(intent, /pending\?\.fail/);
+  const css = fs.readFileSync(path.join(__dirname, '../components/panels/panels-chat.css'), 'utf8');
+  assert.match(css, /:has\(\.nchat-work-action-pending\)/);
+});
+
 test('previously closed successful requirement receipts reopen, without resurrecting dismissed drafts or automation', async () => {
   for (const [actionId, phase, expected] of [
     ['work.requirement.create', 'succeeded', 1],
@@ -658,4 +678,26 @@ test('账号切走再切回不能接受上一登录周期的会话读取或占�
     gate.resolve({ok:true,workOnly:true,cards:[],sessionId:'old'});await pending;
     assert.equal(h.ctx._sessionId,'');
   }
+});
+
+
+test('app schedule saves a visible creation record before network creation and restores its receipt without replay',async()=>{
+ const h=boot();let creates=0;
+ h.g.WorkAutomationDirect={create:async(params,options)=>{
+   await options.onBeforeCreate({title:'test',note:params.text,every:'daily'});
+   const saved=h.calls.saved.at(-1);assert.equal(saved.state.phase,'submitting');
+   await options.authorize();creates++;return {ok:true,schedule:{id:'schedule-1',title:'test'}};
+ }};
+ const receipt=await h.cards.runAutomation({text:'每天9点处理素材'},async()=>{});
+ assert.equal(receipt.ok,true);assert.equal(creates,1);
+ assert.equal(h.cards.timeline([]).length,1,'app automation is in the visible transcript, not the hidden draft area');
+ const saved=h.calls.saved.at(-1);assert.equal(saved.state.phase,'succeeded');assert.equal(saved.state.createdId,'schedule-1');
+ const fresh=boot(h.shared);await fresh.cards.restore('chat-1');
+ assert.equal(fresh.calls.opened.length,0,'a reopened app shows the receipt in its transcript without opening a duplicate form');assert.equal(fresh.cards.timeline([]).length,1);assert.equal(creates,1);
+});
+test('app schedule never submits when its before-create history save fails; errors are retained',async()=>{
+ const h=boot();let creates=0;
+ h.api.saveWorkCard=async()=>({ok:false,reason:'磁盘写入失败'});
+ h.g.WorkAutomationDirect={create:async(params,options)=>{await options.onBeforeCreate({title:'task'});creates++;}};
+ await assert.rejects(h.cards.runAutomation({text:'每天9点处理素材'},async()=>{}),/写入失败/);assert.equal(creates,0);
 });

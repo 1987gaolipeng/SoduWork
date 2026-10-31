@@ -26,7 +26,7 @@
 /* A content-based track minimum would size the row to the ENTIRE catalog.
    Bound the tracks explicitly, then let each list scroll inside its own row. */
 .cap-admin-skill-body{display:grid;grid-template-rows:minmax(400px,1fr);gap:18px}
-.cap-admin-skill-body.has-personal{grid-template-rows:minmax(400px,2fr) minmax(168px,1fr)}
+.cap-admin-skill-body.has-personal{grid-template-rows:minmax(400px,2fr) minmax(240px,1fr)}
 .cap-admin-discovered{display:flex;flex-direction:column;min-width:0;min-height:0}
 .cap-admin-discovered>.cap-admin-section-title{flex:none}
 .cap-admin-mcp-body{overflow:auto;scrollbar-gutter:stable;overscroll-behavior-y:contain}
@@ -74,7 +74,7 @@
 .cap-admin-submit-list:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 42%,transparent);outline-offset:3px}
 .cap-admin-submit-list>div{display:flex;flex:0 0 auto;align-items:center;gap:12px;padding:10px 12px;border-bottom:1px solid var(--line-2)}
 .cap-admin-submit-list>div:last-child{border-bottom:0}
-.cap-admin-submit-list span{display:flex;min-width:0;flex:1;flex-direction:column;gap:2px}
+.cap-admin-submit-list .cap-admin-submit-copy{display:flex;width:0;min-width:0;max-width:100%;flex:1;flex-direction:column;gap:2px}
 .cap-admin-submit-list b{font-size:max(var(--font-min-readable, 14.5px), 12.5px);font-weight:620;color:var(--ink)}
 .cap-admin-submit-list small{font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cap-admin-submit-list em{flex:none;font-style:normal;font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ok);padding:3px 7px;border-radius:20px;background:var(--ok-soft)}
@@ -181,7 +181,7 @@
 }
 @media(max-width:780px){
   .cap-admin-skill-body{grid-template-rows:minmax(430px,1fr)}
-  .cap-admin-skill-body.has-personal{grid-template-rows:minmax(430px,2fr) minmax(168px,1fr)}
+  .cap-admin-skill-body.has-personal{grid-template-rows:minmax(430px,2fr) minmax(240px,1fr)}
   .cap-admin-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.cap-admin-bar{align-items:stretch;flex-wrap:wrap}
   .cap-admin-search{order:3;flex-basis:100%}.cap-admin-grid{grid-template-columns:1fr}
   .cap-admin-body{padding:15px}.cap-admin-section-title>div{align-items:flex-start;flex-direction:column;gap:2px}
@@ -224,3 +224,24 @@
 .skill-sharing-content .skill-sharing-row{gap:12px;padding:10px 0}
 @media(max-width:780px){.skill-sharing-content>header{align-items:flex-start}.skill-sharing-content .skill-sharing-row{flex-wrap:wrap}.skill-sharing-expand{display:none}}
 @media(prefers-reduced-motion:reduce){.skill-sharing-compact>summary>svg{transition:none}}
+
+/* Personal submissions retain their device identity even when names match. */
+.cap-admin-submit-copy b{overflow-wrap:anywhere}
+.cap-admin-submit-list .cap-admin-submit-origin{overflow:visible;white-space:normal;overflow-wrap:anywhere;color:var(--ink-2);line-height:1.5;margin-top:3px}
+.cap-admin-policy-warning{margin:12px 0;padding:12px 14px;border:1px solid color-mix(in srgb,var(--warn) 30%,var(--line));border-radius:10px;background:var(--warn-soft);min-width:0}
+.cap-admin-policy-warning-head{display:flex;align-items:center;gap:16px;justify-content:space-between}
+.cap-admin-policy-warning-head>div{flex:1;min-width:0}
+.cap-admin-policy-warning b{font-size:var(--font-min-readable,14.5px);color:var(--ink)}
+.cap-admin-policy-warning p{margin:4px 0 0;color:var(--ink-2);line-height:1.5}
+.cap-admin-policy-warning-head .btn{flex:none;white-space:normal}
+.cap-admin-unmatched-names{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;max-height:100px;overflow:auto;scrollbar-width:thin}
+.cap-admin-unmatched-names code{max-width:100%;overflow-wrap:anywhere;padding:2px 6px;border-radius:4px;background:var(--surface);font-size:var(--font-min-readable,14.5px)}
+.cap-admin-unmatched-names:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+:lang(ko) .cap-admin-policy-warning,:lang(ko) .cap-admin-section-title{word-break:keep-all;overflow-wrap:break-word}
+@media(max-width:600px){
+  .cap-admin-policy-warning-head{align-items:flex-start;flex-direction:column;gap:10px}
+  .cap-admin-submit-list>div{flex-wrap:wrap;gap:6px}
+  .cap-admin-submit-list .cap-admin-submit-copy{width:100%;flex-basis:100%}
+}
+
+.cap-admin-submissions .cap-admin-section-title>div{flex-wrap:wrap}

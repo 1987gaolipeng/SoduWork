@@ -64,6 +64,10 @@ export default function PluginDetailWorkspace({
         <div className="plugin-title-meta">
           {(version.process || {}).enterprise && <span className="enterprise-flow">{version.process.label || tx("企业流程")}</span>}
           <span>{audienceText(version)}</span>
+          {version.manifest?.template === 'app' && <>
+            <span>{tx('开发者')} · {version.manifest.author || tx('未填写')}</span>
+            <span>{tx('即用分类')} · {APP_CATEGORY[version.manifest.appCategory] || APP_CATEGORY.other}</span>
+          </>}
         </div>
       </div>
       {(plugin.catalogPolicy?.featured || canManage) && <div className={'plugin-title-cover' + (plugin.catalogPolicy?.featured ? ' plugin-featured-cover' : '')}>

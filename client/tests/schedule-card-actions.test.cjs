@@ -246,3 +246,14 @@ test('desktop automation cards use three columns and stretch each row to equal h
   assert.match(layoutCss, /#schPanel \.sch-item\{[\s\S]*height:100%!important/,
     'cards should fill the row height');
 });
+
+
+test('app-created cards show the app icon, name and optional character without source labels; ordinary plans have none',()=>{
+ const c=context();c.esc=s=>String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');c._schmFind=()=>null;vm.runInContext(cards,c);
+ const html=c._schAppIdentity({sourceApp:{name:'灵感扭蛋机',characterName:'阿奇',icon:'data:image/png;base64,aA=='}});
+ assert.match(html,/<img/);assert.match(html,/灵感扭蛋机/);assert.match(html,/阿奇/);assert.doesNotMatch(html,/来源|开源|作者/);
+ assert.equal(c._schAppIdentity({note:'用户创建的日常计划'}),'');
+ const noCharacter=c._schAppIdentity({sourceApp:{name:'自定义即用'}});assert.match(noCharacter,/自定义即用/);assert.doesNotMatch(noCharacter,/undefined|未知|作者/);
+ const historic=c._schAppIdentity({note:'任务\n\n即用任务上下文（数据）：\n'+JSON.stringify({appName:'旧即用'})+'\n\n执行说明'});assert.match(historic,/旧即用/);
+ assert.doesNotMatch(c._schAppIdentity({sourceApp:{name:'<img onerror=evil>',icon:'javascript:evil'}}),/src="javascript|<img onerror/);
+});

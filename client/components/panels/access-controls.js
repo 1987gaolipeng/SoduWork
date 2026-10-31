@@ -32,7 +32,7 @@
       '<button type="button" class="nask-btn ' + className +
       '" data-ui-answer="permission" data-ui-value="' + decision + '" data-permission-request="' + esc(request.requestId) +
       '" data-permission-revision="' + Number(request.policyRevision) + '">' + text(label) + '</button>';
-    return '<section class="access-request" role="dialog" aria-modal="false" aria-label="权限确认" data-permission-ref="' + esc(options.ref || '') + '">' +
+    return '<section class="access-request" role="dialog" aria-modal="true" aria-label="权限确认" data-permission-ref="' + esc(options.ref || '') + '">' +
       '<header class="access-head" aria-live="polite"><span class="access-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 7 3v5c0 4.6-2.7 7.9-7 10-4.3-2.1-7-5.4-7-10V6z"/><path d="m8.8 11.9 2.1 2.2 4.4-4.6"/></svg></span>' +
       '<div><b>' + text(titles[action] || '允许使用此工具？') + '</b><i>' + text('确认后继续当前任务') + '</i></div>' +
       '<span class="access-count" role="status"></span></header><div class="access-body">' +
@@ -73,7 +73,7 @@
         layer.style.bottom = (d.bottom - r.top + 10) + 'px';
         layer.style.maxHeight = Math.max(40, Math.min(440, r.top - top - 10)) + 'px';
       };
-      state = { layer, life, position, key: '', onAnswer };
+      state = { layer, dock, life, position, key: '', onAnswer, inertBefore: new Map(), guard: null };
       layer.addEventListener('click', event => {
         const button = event.target.closest('[data-ui-answer="permission"]');
         if (button && !button.disabled) { event.stopPropagation(); state.onAnswer?.(button); }
@@ -85,9 +85,71 @@
       overlays.set(el, state);
     }
     state.onAnswer = onAnswer;
+    // The approval card is modal for the composer. It is positioned above the
+    // input, so pointer events could otherwise fall through to the permission
+    // picker and send/stop controls underneath it. Keep the approval layer
+    // interactive while every other dock child is inert until the request is
+    // cleared by the authoritative snapshot.
+    const focusables = () => [...state.layer.querySelectorAll(
+      'button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),summary,[tabindex]:not([tabindex="-1"])'
+    )].filter(node => node.checkVisibility?.() !== false && !node.closest('[hidden]'));
+    const focusDialog = () => {
+      const active = document.activeElement;
+      if (state.layer.contains(active)) return;
+      focusables()[0]?.focus({ preventScroll: true });
+    };
+    const blockDock = blocked => {
+      const dock = state.dock;
+      if (!dock) return;
+      if (blocked) {
+        dock.dataset.permissionBlocked = 'true';
+        dock.setAttribute('aria-busy', 'true');
+        const root = el.querySelector('.nchat') || el;
+        for (const node of root.querySelectorAll('button,a[href],input,select,textarea,summary,[tabindex]')) {
+          if (state.layer.contains(node)) continue;
+          if (!state.inertBefore.has(node)) state.inertBefore.set(node, node.inert);
+          node.inert = true;
+        }
+        if (!state.guard) {
+          state.guard = event => {
+            if (state.layer.contains(event.target)) {
+              if (event.type === 'keydown' && event.key === 'Tab') {
+                const items = focusables();
+                if (!items.length) return;
+                const index = items.indexOf(document.activeElement);
+                const next = event.shiftKey
+                  ? items[(index <= 0 ? items.length : index) - 1]
+                  : items[(index + 1) % items.length];
+                if (index < 0 || (event.shiftKey && index === 0) || (!event.shiftKey && index === items.length - 1)) {
+                  event.preventDefault();
+                  next.focus({ preventScroll: true });
+                }
+              }
+              return;
+            }
+            if (event.type === 'focusin') {
+              event.preventDefault(); event.stopImmediatePropagation(); focusDialog(); return;
+            }
+            event.preventDefault(); event.stopImmediatePropagation();
+            if (event.type === 'keydown' || event.type === 'keyup') focusDialog();
+          };
+          for (const type of ['pointerdown', 'mousedown', 'mouseup', 'click', 'touchstart', 'contextmenu', 'keydown', 'keyup', 'focusin']) {
+            el.addEventListener(type, state.guard, { capture: true, signal: state.life.signal });
+          }
+        }
+        queueMicrotask(focusDialog);
+      } else {
+        delete dock.dataset.permissionBlocked;
+        dock.removeAttribute('aria-busy');
+        for (const [node, wasInert] of state.inertBefore) node.inert = wasInert;
+        state.inertBefore.clear();
+      }
+    };
+    state.blockDock = blockDock;
     const key = JSON.stringify([ref, request.requestId, request.policyRevision, request.action, request.tool,
       request.agent, request.target, request.arguments, request.allowSession, request.sessionScope]);
     if (state.key !== key) { state.layer.innerHTML = render(request, escape, { ref }); state.key = key; }
+    blockDock(true);
     const count = state.layer.querySelector('.access-count');
     const extra = requests.length - 1;
     count.hidden = extra <= 0;
@@ -102,6 +164,7 @@
   function destroy(el) {
     const state = el && overlays.get(el);
     if (!state) return;
+    state.blockDock?.(false);
     state.life.abort(); state.observer?.disconnect(); state.layer.remove(); overlays.delete(el);
   }
   async function answer(button, api, ref) {

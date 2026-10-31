@@ -124,7 +124,14 @@
         mention && typeof mention.clearAction === 'function') {
       mention.clearAction();
     }
-    if (accepted && current()) attachments?.consumeInputText?.(submittedFiles, { resetExpanded: unedited() && !input?.value });
+    if (accepted && current()) {
+      const consumed = attachments?.consumeInputText?.(submittedFiles, { resetExpanded: unedited() && !input?.value });
+      // The retired home input emits its empty draft when its submitted input
+      // card is consumed. Re-save the active composer, including text typed
+      // while parsing, instead of letting that older control erase it.
+      if (consumed && chatInput && chatInput !== input && chatInput === global.document?.getElementById('nchatInput'))
+        global.NativeChat?.rememberComposerDraft?.();
+    }
     return { handled: true, accepted, attachmentContext };
   }
 

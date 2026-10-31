@@ -28,7 +28,12 @@ function install({ app, ipcMain, session, identityOf, memories, cloud, publish }
   ipcMain.handle('pi-session-conversation-runtimes', async (event, ref) => {
     try {
       const handle = await current(event, ref);
-      return cloud.guard(handle) ? cloud.executionRuntimes(handle) : { ok: true, runtimes: session.runtimes() };
+      if (cloud.guard(handle)) return cloud.executionRuntimes(handle);
+      if (typeof session.availableRuntimes === 'function') return await session.availableRuntimes(app);
+      const catalog = session.runtimes();
+      return { ok: true, runtimes: catalog,
+        availableRuntimes: catalog.filter(row => row && row.id === 'pi'),
+        missing: catalog.filter(row => row && row.id !== 'pi') };
     } catch (error) { return { ok: false, reason: String(error.message || error) }; }
   });
   ipcMain.handle('pi-session-select-model', async (event, ref, name) => {

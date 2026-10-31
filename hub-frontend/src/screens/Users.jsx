@@ -148,7 +148,7 @@ function UserEditor({ user, orgs, roles, onClose, onDone }) {
         <div className="posgrid" role="group" aria-labelledby={`${formId}-positions-label`}>
           {posCat.length === 0 && <span className="muted" style={{ fontSize: 14.5 }}>{tx("暂无职业画像")}</span>}
           {posCat.map((p) => (
-            <button type="button" key={p.id} className={'poschip' + (posSel.includes(p.id) ? ' on' : '')} aria-pressed={posSel.includes(p.id)} onClick={() => togglePos(p.id)}>{p.name}</button>
+            <button type="button" key={p.id} className={'poschip' + (posSel.includes(p.id) ? ' on' : '')} aria-pressed={posSel.includes(p.id)} onClick={() => togglePos(p.id)}>{tx(p.name)}</button>
           ))}
         </div>
       </div>
@@ -157,7 +157,7 @@ function UserEditor({ user, orgs, roles, onClose, onDone }) {
         <div className="posgrid" role="group" aria-labelledby={`${formId}-domains-label`}>
           {domCat.length === 0 && <span className="muted" style={{ fontSize: 14.5 }}>{tx("暂无领域，点「管理领域」新建")}</span>}
           {domCat.map((d) => (
-            <button type="button" key={d.id} className={'poschip' + (domSel.includes(d.id) ? ' on' : '')} aria-pressed={domSel.includes(d.id)} onClick={() => toggleDom(d.id)}>{d.name}</button>
+            <button type="button" key={d.id} className={'poschip' + (domSel.includes(d.id) ? ' on' : '')} aria-pressed={domSel.includes(d.id)} onClick={() => toggleDom(d.id)}>{tx(d.name)}</button>
           ))}
         </div>
       </div>

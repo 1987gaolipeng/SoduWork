@@ -24,6 +24,26 @@ test('explicit local sharing sends the current filename and exact bytes only to 
   assert.equal(JSON.parse(h.calls[1].request.body).requestId, shareOptions.requestId);
 });
 
+test('local folder sharing reads nested files and forces one ZIP batch request', async () => {
+  const h = harness(); await h.signIn('alice');
+  h.native = async (action, payload) => {
+    if (action === 'list') return payload.folderId === 'local-folder-one'
+      ? { folders: [{ id: 'local-child-folder', name: 'nested' }], items: [] }
+      : payload.folderId === 'local-child-folder'
+        ? { folders: [], items: [{ id: 'local-nested-file', filename: 'detail.md', backend: 'local' }] }
+        : { folders: [], items: [] };
+    if (action === 'readBinary') return { ...binary(), name: 'detail.md', mimeType: 'text/markdown' };
+    return { ok: true };
+  };
+  await h.api.shareLibraryItems([], ['bob'], 'Review', { ...shareOptions, folderIds: ['local-folder-one'] });
+  assert.equal(h.calls.length, 1);
+  assert.match(h.calls[0].url, /\/library\/items\/batch-share$/);
+  const body = JSON.parse(h.calls[0].request.body);
+  assert.equal(body.forcePackage, true);
+  assert.equal(body.localFiles[0].filename, 'nested/detail.md');
+  assert.equal(body.localFiles[0].localItemId, 'local-nested-file');
+});
+
 test('the final owner-check await cannot dispatch old bytes after its internal scope assertion', async () => {
   const context = { Blob, Uint8Array, atob, queueMicrotask };
   vm.createContext(context);
@@ -62,6 +82,7 @@ test('saving a received notification explicitly uses the authenticated snapshot 
   const saved = h.nativeCalls[0]; assert.equal(saved.action, 'upload');
   assert.equal(saved.payload.name, 'renamed.bin'); assert.equal(saved.payload.dataBase64, binary().data);
   assert.equal(saved.payload.owner, 'owner-alice'); assert.equal(saved.payload.storage, 'local');
+  assert.equal(saved.payload.rejectDuplicateName, true);
   h.native = async () => ({ ok: false, code: 'LIBRARY_NAME_CONFLICT', message: '存在同名资料' });
   await assert.rejects(h.api.saveMateMessageFileToLibrary('attachment-one'), error => error.code === 'LIBRARY_NAME_CONFLICT');
   assert(h.nativeCalls.every(row => row.action === 'upload'));

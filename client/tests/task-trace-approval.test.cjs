@@ -96,11 +96,49 @@ test('同一执行人与验收人优先复用原执行会话，原会话缺失�
   f.window.Requirements = require('../core/requirements.js');
   f.window.__teamCap = {meId: 'u-1'};
   f.window.SoduWorkAPI.getTask = async () => ({id: 'task-1', title: '交付结果', status: 'done',
+    createdBy: 'u-1', canReview: true,
     assigneeUserId: 'u-1', workRouting: {conversationTurn: {conversationId: 'execution-chat'}}});
   f.window.SoduWorkAPI.approvalDetail = async () => ({item: {id: 'gate-1', action: 'review', status: 'pending',
     assignment: {userId: 'u-1'}}});
   f.window.openTaskConversation = async (...args) => { calls.push(args); return true; };
   assert.equal(await f.api.openAcceptance({id: 'task-1', title: '交付结果'}, {approvalId: 'gate-1'}), true);
+  assert.equal(calls[0][2].reuseExecutionSession, true);
+  assert.equal(calls[0][2].acceptanceExecutionSession, true);
+  assert.equal(calls[0][2].acceptanceSession, false);
+});
+
+test('创建人与执行人同一人时，创建人直验也复用原执行会话', async () => {
+  const f = fixture({action: 'review'}), calls = [];
+  f.window.Requirements = require('../core/requirements.js');
+  f.window.__teamCap = {meId: 'u-1'};
+  f.window.SoduWorkAPI.getTask = async () => ({id: 'task-1', title: '交付结果', status: 'done',
+    createdBy: 'u-1', assigneeUserId: 'u-1',
+    workRouting: {conversationTurn: {conversationId: 'execution-chat'}}});
+  f.window.openTaskConversation = async (...args) => { calls.push(args); return true; };
+  assert.equal(await f.api.openAcceptance({id: 'task-1', title: '交付结果'}, {approvalId: 'direct:task-1'}), true);
+  assert.equal(calls[0][2].reuseExecutionSession, true);
+  assert.equal(calls[0][2].acceptanceExecutionSession, true);
+  assert.equal(calls[0][2].acceptanceSession, false);
+});
+
+test('快速点击验收时等待团队身份加载，仍复用同一人的原执行会话', async () => {
+  const f = fixture({action: 'review'}), calls = [];
+  let resolveCapability;
+  f.window.Requirements = require('../core/requirements.js');
+  f.window.__teamCap = undefined;
+  f.window.SoduWorkAPI.getTeamCapability = () => new Promise(resolve => { resolveCapability = resolve; });
+  f.window.SoduWorkAPI.getTask = async () => ({id: 'task-1', title: '交付结果', status: 'done',
+    createdBy: 'u-1', assigneeUserId: 'u-1',
+    workRouting: {conversationTurn: {conversationId: 'execution-chat'}}});
+  f.window.openTaskConversation = async (...args) => { calls.push(args); return true; };
+  const opening = f.api.openAcceptance({id: 'task-1', title: '交付结果'}, {
+    acceptanceMode: 'auto', approvalId: 'direct:task-1',
+  });
+  await new Promise(setImmediate);
+  assert.equal(calls.length, 0);
+  resolveCapability({meId: 'u-1'});
+  assert.equal(await opening, true);
+  assert.equal(calls[0][2].acceptanceMode, 'auto');
   assert.equal(calls[0][2].reuseExecutionSession, true);
   assert.equal(calls[0][2].acceptanceExecutionSession, true);
   assert.equal(calls[0][2].acceptanceSession, false);
@@ -143,7 +181,7 @@ test('待验收入口仅向实际验收人开放，不受执行设备归属限�
   assert.equal(f.api.canAcceptTask({...task, reviewedAt: 1}, {}), false);
   assert.equal(f.api.canAcceptTask({...task, status: 'doing'}, {}), false);
   assert.equal(f.api.canAcceptTask(task, {waiting: new Map([['t', ['指定验收人']]])}), false);
-  assert.equal(f.api.canAcceptTask({...task, createdBy: 'other'}, {approvals: new Map([['t', {id:'review', action:'review', status:'pending'}]])}), true);
+  assert.equal(f.api.canAcceptTask({...task, createdBy: 'other'}, {approvals: new Map([['t', {id:'review', action:'review', status:'pending'}]])}), false);
 });
 
 test('验收方式在同一审批刷新后保留，但新版本或无权限切换不会复用', () => {

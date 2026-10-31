@@ -1,6 +1,6 @@
 'use strict';
 // Real Electron input + production HTTP API/services/SQLite/storage. Only the
-// native conversation artifact source and OS preview/download shell are fixtures.
+// native connection configuration, conversation artifact source and OS preview/download shell are fixtures.
 const electron = require('electron');
 if (typeof electron === 'string') {
   const env = { ...process.env };
@@ -19,7 +19,7 @@ if (typeof electron === 'string') {
   const tick = (ms = 100) => new Promise(resolve => setTimeout(resolve, ms));
   const windows = [], downloads = [], requests = [];
   const blocked = new Set();
-  const report = { ok: false, cases: [], errors: [], boundary: 'Isolated real HTTP, database and stored attachment bytes; native conversation artifacts and OS preview/download shell are fixtures. No model or real colleague is contacted.' };
+  const report = { ok: false, cases: [], errors: [], boundary: 'Isolated real HTTP, database and stored attachment bytes; native connection configuration, conversation artifacts and OS preview/download shell are fixtures. No model or real colleague is contacted.' };
   let server, logs = '', url, current;
   const sourceFiles = (artifactDirectory ? ['collaboration-report.md', 'collaboration-report.html'].map((name, index) => ({
     artifactId: 'live-' + index, name, kind: 'document', data: fs.readFileSync(path.join(artifactDirectory, name)),
@@ -85,7 +85,11 @@ if (typeof electron === 'string') {
     await win.loadFile(fixture);
     await js(win, `localStorage.setItem('soduwork_work_hub_environment_v1','development');localStorage.setItem('soduwork_work_development_hub_url_v1',${JSON.stringify(url)});localStorage.setItem('soduwork_work_user_id',${JSON.stringify('e2e-' + identity)});window.notices=[];window.tasks=[];window.errors=[];window.petSay=text=>document.getElementById('status').textContent=text;window.esc=text=>String(text??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));addEventListener('error',e=>errors.push(e.message));addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));void 0;`);
     for (const file of JSON.parse(read('core/locales/manifest.json'))) await js(win, read('core/locales/' + file));
-    for (const file of ['core/i18n-dom.js', 'core/i18n.js', 'core/api-work-plugins.js', 'api.js', 'components/panels/chat-mate-mention.js', 'components/panels/panels-desk.js']) await js(win, read(file) + '\nvoid 0;');
+    for (const file of ['core/i18n-dom.js', 'core/i18n.js', 'core/api-work-plugins.js', 'api.js', 'core/store-lifecycle.js', 'core/store.js', 'core/mate-notice-sync.js', 'components/panels/chat-mate-mention.js', 'components/panels/panels-misc.js', 'components/panels/panels-desk.js']) {
+      await js(win, read(file) + '\nvoid 0;');
+      // Like normal bootstrap, hydrate the native connection before scoped stores capture their identity.
+      if(file==='api.js')assert.ok(Array.isArray((await js(win,'SoduWorkAPI.listTeammates()')).mates));
+    }
     await js(win, `SoduWorkI18n.setLocale('zh-CN',{persist:false,broadcast:false});window.handle=ChatMateMention.create({input:document.getElementById('input'),mates:()=>SoduWorkAPI.listTeammates(),context:()=>({ref:'conversation-isolated',api:soduWorkAPI.conversationSession,hub:SoduWorkAPI,taskIds:[]}),progress:files=>SoduWorkAPI.draftMateMessage({messages:[],outputs:files.map(f=>f.name)}),send:(uid,text,outputs)=>SoduWorkAPI.sendMateMessage(uid,text,outputs),say:petSay});document.getElementById('notices').addEventListener('click',()=>{openNoticePanel();document.getElementById('composer').hidden=true;});void 0;`);
     return win;
   }
@@ -97,7 +101,8 @@ if (typeof electron === 'string') {
   app.whenReady().then(async () => {
     await startServer();
     const preload = path.join(temporary, 'preload.cjs');
-    fs.writeFileSync(preload, `const{contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('soduWorkAPI',{conversationSession:{outputs:ref=>ipcRenderer.invoke('collab-artifacts',ref),artifactAction:(ref,id,action)=>ipcRenderer.invoke('collab-artifact',ref,id,action)},previewAttachment:payload=>ipcRenderer.invoke('collab-file','open',payload),downloadAttachment:payload=>ipcRenderer.invoke('collab-file','download',payload)});`);
+    fs.writeFileSync(preload, `const{contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('soduWorkAPI',{getHubConnection:()=>ipcRenderer.invoke('collab-connection'),conversationSession:{outputs:ref=>ipcRenderer.invoke('collab-artifacts',ref),artifactAction:(ref,id,action)=>ipcRenderer.invoke('collab-artifact',ref,id,action)},previewAttachment:payload=>ipcRenderer.invoke('collab-file','open',payload),downloadAttachment:payload=>ipcRenderer.invoke('collab-file','download',payload)});`);
+    ipcMain.handle('collab-connection',()=>({hub:url,internalTest:true,editable:false}));
     ipcMain.handle('collab-artifacts', (_event, ref) => { assert.equal(ref, 'conversation-isolated'); return { ok: true, artifacts: sourceFiles.map(({ data, ...file }) => file) }; });
     ipcMain.handle('collab-artifact', (_event, ref, id, action) => {
       assert.equal(ref, 'conversation-isolated');
@@ -120,6 +125,23 @@ if (typeof electron === 'string') {
     const fixture = path.join(temporary, 'fixture.html');
     fs.writeFileSync(fixture, '<!doctype html><html data-desk-panel="workspace" data-workspace-view="notices"><meta charset="utf-8">' + styles + '<style>:root{--ws-main-left:10px;--ws-main-bg:var(--bg-0)}*{box-sizing:border-box}body{margin:0;background:var(--bg-0);font:14px var(--font-ui);color:var(--ink)}#composer{position:fixed;bottom:24px;left:24px;right:24px;max-width:920px;margin:auto}#composer>h1{font-size:20px}#composer .nbox{position:relative;border:1px solid var(--line);border-radius:16px;padding:18px}#input{display:block;width:100%;height:70px;resize:none;border:0;background:transparent;font:inherit;outline:none}#notices{padding:8px 16px;margin-bottom:14px;border:1px solid var(--line);border-radius:9px;background:var(--bg-0);color:var(--ink);font:inherit}#status{position:fixed;left:24px;bottom:4px;font:13px var(--font-ui);color:var(--ink-3)}</style><main id="composer"><h1>协同验收</h1><button id="notices">通知</button><div class="nbox work-composer"><textarea id="input" aria-label="输入消息" placeholder="输入 @ 选择同事"></textarea></div></main><div id="status" role="status"></div></html>');
     const sender = await createWindow('sender', fixture, preload);
+    const directory=await js(sender,'SoduWorkAPI.listTeammates()');
+    assert.ok(directory.orgUnits.length);assert.ok(directory.mates.every(row=>row.orgId));
+    const recipientId=directory.mates.find(row=>row.name==='接收验收').id;
+    const beforeDraft=requests.filter(row=>row.route.endsWith('/team/message-draft')).length;
+    await js(sender,`input.value='保留原对话草稿';void 0;`);
+    assert.equal((await js(sender,`handle.open({recipientUserId:${JSON.stringify(recipientId)},text:'即用提供的协作内容'})`)).state,'review');
+    await until(sender,`!document.querySelector('.nmate-card-send').disabled`);
+    assert.equal(await js(sender,'input.value'),'保留原对话草稿');
+    assert.equal(await js(sender,'document.querySelectorAll(".nmate-results input:checked").length'),0);
+    assert.equal(await js(sender,'document.querySelector(".nmate-card-text").value'),'即用提供的协作内容');
+    assert.equal(requests.filter(row=>row.route.endsWith('/team/message-draft')).length,beforeDraft,'prefilled mention must not call AI summarization');
+    assert.equal((await js(sender,`handle.open({recipientUserId:${JSON.stringify(recipientId)},text:'不能覆盖'})`)).ok,false);
+    await js(sender,`dispatchEvent(new Event('soduwork-data-scope-changed'));void 0;`);
+    assert.equal(await js(sender,'document.querySelector(".nmate-card").hidden'),true);
+    assert.equal((await js(sender,`handle.open({query:'@接收验收',text:'按姓名定位'})`)).state,'review');
+    await click(sender,'.nmate-card-close');
+    report.cases.push('Programmatic app mentions use stable colleague IDs or names, preserve drafts, do not attach old outputs or call AI, reject overwriting an open card, and clear on account scope changes.');
     await type(sender, '#input', '@接收验收');
     await until(sender, `document.querySelector('.nmate-menu .nplugin-option b')?.textContent==='接收验收'`);
     await click(sender, '.nmate-menu .nplugin-option');
@@ -198,7 +220,7 @@ if (typeof electron === 'string') {
     report.requests = requests; report.downloads = downloads; report.ok = true;
   }).catch(async error => {
     report.error = String(error.stack);
-    if (current) { report.rendererErrors = await js(current, 'window.errors||[]').catch(() => []); await shot(current, 'failure').catch(() => {}); }
+    if (current) { report.rendererErrors = await js(current, 'window.errors||[]').catch(() => []); report.surface=await js(current,`({sync:!!window.MateNoticeSync,status:document.querySelector('.np-load-status')?.textContent,rows:document.querySelectorAll('.np-row').length})`).catch(()=>null); await shot(current, 'failure').catch(() => {}); }
   }).finally(() => {
     fs.writeFileSync(path.join(out, 'results.json'), JSON.stringify(report, null, 2)); fs.writeFileSync(path.join(out, 'server.log'), logs);
     console.log(JSON.stringify(report)); for (const win of windows) win.destroy(); if (server) server.kill(); app.exit(report.ok ? 0 : 1);

@@ -82,3 +82,67 @@ test('failed topic preparation returns a failed receipt and later submissions re
   await submit({ id: 'retry', text: 'second' });
   assert.equal(receipts[1].ok, true); assert.equal(sends, 1);
 });
+
+
+test('app mentions review in the current composer without starting AI or resetting a busy conversation', async () => {
+  const native = {
+    isBusy() { throw Error('Mention must not inspect or reset model execution'); },
+    send() { throw Error('Mention must not start an AI turn'); },
+    reset() { throw Error('Mention must retain the current draft and conversation'); },
+    openAppMention: async options => {
+      assert.equal(options.recipientUserId, 'member-1');
+      assert.equal(options.text, 'Please review');
+      return { ok: true, state: 'review' };
+    },
+  };
+  const { submit, receipts } = pageComposer(native);
+  await submit({ id: 'mention', kind: 'mention', mention: { recipientUserId: 'member-1', text: 'Please review' } });
+  assert.equal(receipts.length, 1);
+  assert.equal(receipts[0].ok, true);
+  assert.equal(receipts[0].state, 'review');
+  assert.equal(receipts[0].accepted, undefined);
+});
+
+test('mention review failures report the reason and permit later requests', async () => {
+  let available = false;
+  const native = { openAppMention: async () => available ? { ok: true, state: 'select' } : { ok: false, reason: 'Close the current card first' } };
+  const { submit, receipts } = pageComposer(native);
+  await submit({ id: 'blocked', kind: 'mention' });
+  assert.equal(receipts[0].ok, false);
+  assert.equal(receipts[0].reason, 'Close the current card first');
+  available = true;
+  await submit({ id: 'retry', kind: 'mention' });
+  assert.equal(receipts[1].ok, true);
+  assert.equal(receipts[1].state, 'select');
+});
+
+test('only a definite missing-session rejection starts one replacement topic and retains page attachments', async () => {
+  let sends = 0, resets = 0, prepared = false;
+  const attachment = { name: 'page.pdf' };
+  const native = { isBusy: () => false, reset() { resets++; }, async prepare() { await Promise.resolve(); prepared = true; },
+    async send(text, options) {
+      sends++; assert.equal(text, 'page intent'); assert.equal(options.attachments[0], attachment);
+      assert.equal(options.useComposer, false);
+      if (sends === 1) { options.onAdmission({ notSent: true, code: 'SESSION_NOT_FOUND' }); return false; }
+      assert.equal(prepared, true); return true;
+    } };
+  const { submit, receipts } = pageComposer(native);
+  await submit({ id: 'recover', text: 'page intent', attachments: [attachment] });
+  assert.equal(sends, 2); assert.equal(resets, 1); assert.equal(receipts[0].ok, true);
+});
+
+test('a known missing selected archive is replaced before sending, without restoring it again', async () => {
+  let resets = 0, sends = 0;
+  const native = { sessionInfo: () => ({ sessionUnavailable: true }), isBusy: () => false,
+    reset() { resets++; }, prepare() {}, async send() { sends++; return true; } };
+  const { submit } = pageComposer(native); await submit({ id: 'missing', text: 'page intent' });
+  assert.equal(resets, 1); assert.equal(sends, 1);
+});
+
+test('a fresh-topic failure stops after one replacement attempt', async () => {
+  let sends = 0, resets = 0;
+  const native = { isBusy: () => false, reset() { resets++; }, prepare() {},
+    async send(_text, options) { sends++; options.onAdmission?.({ notSent: true, code: 'SESSION_NOT_FOUND' }); return false; } };
+  const { submit, receipts } = pageComposer(native); await submit({ id: 'stop', text: 'intent' });
+  assert.equal(sends, 2); assert.equal(resets, 1); assert.equal(receipts[0].ok, false);
+});

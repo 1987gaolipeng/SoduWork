@@ -14,9 +14,9 @@ const composerCss = fs.readFileSync(path.join(ROOT, 'components/panels/work-comp
 test('recommendation rows render one black open-app pill and no plus glyph', () => {
   assert.match(surface, /cp-recs-open/, 'row must render the open-app pill');
   assert.doesNotMatch(surface, /appsx-card-add/, 'the plus glyph is replaced by the pill action');
-  assert.match(surface, /open\.textContent = _uiText\('打开应用'\)/, 'pill label routes through the locale bridge');
+  assert.match(surface, /open\.textContent = _uiText\('打开即用'\)/, 'pill label routes through the locale bridge');
   assert.match(surface, /headTitle\.textContent = _uiText\('推荐'\)/, 'module head routes through the locale bridge');
-  assert.match(surface, /item\.description \|\| _uiText\('打开应用工作界面'\)/, 'fallback copy routes through the locale bridge');
+  assert.match(surface, /item\.description \|\| _uiText\('打开即用工作界面'\)/, 'fallback copy routes through the locale bridge');
 });
 
 test('row cards keep the light-gray layer visible at rest and deepen it on hover', () => {
@@ -35,11 +35,11 @@ test('open-app pill is an always-visible black ellipse at the row right edge', (
 test('built-in locale packs carry the new recommendation strings', () => {
   const enGap = fs.readFileSync(path.join(ROOT, 'core/locales/en-US-gap-pages.js'), 'utf8');
   const enCore = fs.readFileSync(path.join(ROOT, 'core/locales/en-US.js'), 'utf8');
-  assert.match(enGap, /'打开应用':/, 'en-US must translate the pill label');
+  assert.match(enGap, /'打开即用':/, 'en-US must translate the pill label');
   assert.match(enCore, /'推荐':/, 'en-US must translate the module head');
   for (const pack of ['ja-JP-gap-pages.js', 'ko-KR-gap-pages.js']) {
     const source = fs.readFileSync(path.join(ROOT, 'core/locales', pack), 'utf8');
-    assert.match(source, /'打开应用':/, pack + ' must translate the pill label');
+    assert.match(source, /'打开即用':/, pack + ' must translate the pill label');
     assert.match(source, /'推荐':/, pack + ' must translate the module head');
   }
 });

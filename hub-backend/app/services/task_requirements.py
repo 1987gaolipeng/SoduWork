@@ -284,6 +284,12 @@ async def decorate(session, client, task, api, *, context=None, prepared=None, e
                canDeleteRequirement=maintenance, canArchiveRequirement=maintenance,
                canManageRequirementMaterials=authority, canSubmitReview=authority,
                canManageRequirementAutomation=authority)
+    # Creator-direct acceptance is a capability owned by the Hub.  Do not make
+    # the detail page infer it from a possibly stale local team-capability cache.
+    api["canReview"] = bool(
+        execution and task.status == "done" and not getattr(task, "reviewed_at", None)
+        and client.user_ref and str(getattr(task, "created_by", "") or "") == str(client.user_ref)
+    )
     from . import repository_issue_access, task_execution_claim
     api["canClaimExecution"] = execution and task_execution_claim.available(task, client, api)
     return await repository_issue_access.decorate(session, client, task, api,

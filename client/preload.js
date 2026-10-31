@@ -61,6 +61,9 @@ const conversationSession = {
     try { return webUtils.getPathForFile(file); } catch (error) { return ''; }
   },
   history: () => timedPageInvoke('pi-session-history'),
+  search: query => ipcRenderer.invoke('conversation-search', String(query || '').slice(0, 200)),
+  searchHistory: () => timedPageInvoke('conversation-search-history'),
+  cancelSearch: (clearCache = false) => ipcRenderer.send('conversation-search-cancel', clearCache === true),
   archivedHistory: () => ipcRenderer.invoke('pi-session-history-archived'),
   renameHistory: (id, title) => ipcRenderer.invoke('pi-session-history-rename', id, title),
   archiveHistory: (id) => ipcRenderer.invoke('pi-session-history-archive', String(id || '')),
@@ -134,7 +137,17 @@ const conversationSession = {
   openWorkdir: () => ipcRenderer.invoke('pi-session-open-workdir'),
   openSessionWorkdir: (ref) => ipcRenderer.invoke('pi-session-open-session-workdir', ref),
   setMode: (m) => ipcRenderer.invoke('pi-session-mode', m),
-  cancel: (ref) => ipcRenderer.send('pi-session-cancel', ref),
+  // Return a stop receipt so the renderer can enter a pending state once and
+  // wait for the main process to acknowledge the request.  The main process
+  // still publishes the normal session events; this receipt only closes the
+  // fire-and-forget gap that made repeated clicks look necessary.
+  cancel: (ref) => ipcRenderer.invoke('pi-session-cancel-request', ref).catch(() => {
+    // Older fixture windows and pre-upgrade renderers only expose the
+    // fire-and-forget channel. Keep that path usable while the new channel
+    // is deployed; production handlers return the awaited receipt above.
+    ipcRenderer.send('pi-session-cancel', ref);
+    return { ok: true, accepted: true, stopped: false, legacy: true };
+  }),
   answerUi: (ref, res) => ipcRenderer.invoke('pi-session-answer-ui', ref, res),
   goalAction: (ref, action) => ipcRenderer.invoke('pi-session-goal-action', ref, action),
   release: (ref) => ipcRenderer.invoke('pi-session-release', ref),
@@ -187,6 +200,9 @@ const workPreview = {
   composerState: (payload) => ipcRenderer.invoke('work-preview-composer-state', payload || {}),
   composerTurnSettled: () => ipcRenderer.invoke('work-preview-composer-turn-settled'),
   composerSubmitResult: payload => ipcRenderer.invoke('work-preview-composer-submit-result', payload),
+  authorizeComposerAutomation: id => ipcRenderer.invoke('work-preview-composer-automation-authorize',id),
+  composerAutomationResult: payload => ipcRenderer.invoke('work-preview-composer-automation-result',payload),
+  onComposerAutomation: cb => ipcRenderer.on('app-composer-automation',(_e,payload)=>{try{cb(payload || {});}catch(_) {}}),
   onComposerSubmit: cb => ipcRenderer.on('app-composer-submit', (_e, payload) => { try { cb(payload || {}); } catch (_) {} }),
   /* Report sidebar width changes for synchronized native-view layout. */
   composerSetWidth: (width) => ipcRenderer.invoke('work-preview-composer-width', { width: Number(width) }),
@@ -395,6 +411,14 @@ const soduWorkBridge = {
     acknowledge: () => ipcRenderer.invoke('release-notes-ack'),
     release: () => ipcRenderer.invoke('release-notes-release'),
   },
+  readAloud: {
+    claim: () => ipcRenderer.invoke('read-aloud-claim'),
+    onStop: callback => {
+      const handler = () => callback();
+      ipcRenderer.on('read-aloud-stop', handler);
+      return () => ipcRenderer.removeListener('read-aloud-stop', handler);
+    },
+  },
   installClientUpdate: () => ipcRenderer.invoke('client-update-install'),
   resolveClientUpdate: (action) => ipcRenderer.invoke('client-update-resolve', action || {}),
   onClientUpdateStatus: (cb) => ipcRenderer.on('client-update-status', (_e, status) => {
@@ -423,6 +447,8 @@ const soduWorkBridge = {
       ipcRenderer.invoke('personal-plugin-preflight-archive', name || '', content || ''),
     create: (body) => ipcRenderer.invoke('personal-plugin-create', body || {}),
     configure: (id, checksum, config) => ipcRenderer.invoke('personal-plugin-configure', id, checksum, config),
+    initialize: pluginId => ipcRenderer.invoke('personal-plugin-initialize',pluginId),
+    updateMetadata: (id, options) => ipcRenderer.invoke('personal-plugin-metadata-update', id, options || {}),
     setEnabled: (pluginId, enabled) => ipcRenderer.invoke('personal-plugin-enable', pluginId || '', Boolean(enabled)),
     setVersion: (pluginId, version) => ipcRenderer.invoke(
       'personal-plugin-version', pluginId || '', version || ''),

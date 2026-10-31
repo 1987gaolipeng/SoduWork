@@ -153,6 +153,14 @@ async def claim(session, client, run_id, instance):
     now = datetime.now(timezone.utc).timestamp()
     if receipt.get('worker') != instance and float(receipt.get('leaseUntil') or 0) > now:
         return {'ok': False, 'busy': True}
+    previous_worker = str(receipt.get('worker') or '')
+    if previous_worker and previous_worker != instance:
+        # Preserve the handoff edge so the original worker can publish the
+        # terminal result for the same conversation after a lease takeover.
+        # This is intentionally one hop only; a later takeover replaces it.
+        receipt['previousWorker'] = previous_worker
+    else:
+        receipt.pop('previousWorker', None)
     receipt.update(worker=instance, leaseUntil=now + RESERVATION_LEASE_SECONDS)
     run.receipt = receipt
     await session.commit()
@@ -164,8 +172,6 @@ async def claim(session, client, run_id, instance):
 async def acknowledge(session, client, run_id, body):
     run = await locked_run(session, client, run_id)
     receipt = dict(run.receipt or {})
-    if receipt.get('worker') != str(body.get('instanceId') or ''):
-        raise HTTPException(409, '本次执行已由另一个客户端接管')
     requested_state = str(body.get('state') or '')
     # The conversation surface has four states. Keep accepting legacy worker
     # values while projecting them onto the same contract.
@@ -180,6 +186,43 @@ async def acknowledge(session, client, run_id, body):
     cid = str(body.get('conversationId') or '')[:120]
     if receipt.get('conversationId') and cid != receipt['conversationId']:
         raise HTTPException(409, '同一次自动化不能替换为另一条对话')
+    # A stale worker can legitimately finish after a replacement client adopted
+    # the durable conversation receipt.  The previous implementation rejected
+    # that terminal acknowledgement after the replacement had already painted
+    # the run failed with the cross-client handoff message, leaving a completed
+    # conversation permanently red in execution history.  Permit only this
+    # narrow, monotonic recovery: same owner/run and same conversation, plus
+    # either the recorded previous worker after a lease handoff or the legacy
+    # handoff error that is known to be a false dispatch failure.
+    ack_worker = str(body.get('instanceId') or '')
+    current_worker = str(receipt.get('worker') or '')
+    previous_worker = str(receipt.get('previousWorker') or '')
+    same_conversation = bool(cid and cid == receipt.get('conversationId'))
+    legacy_false_failure = (run.state == 'failed' and
+                            '另一客户端创建对话' in str(run.error or ''))
+    stale_owner_completion = (run.state in ('starting', 'running', 'waiting') and
+                              ack_worker == previous_worker and
+                              ack_worker and ack_worker != current_worker)
+    if (state == 'succeeded' and same_conversation and
+            (stale_owner_completion or
+             (legacy_false_failure and ack_worker and ack_worker != current_worker))):
+        run.state = 'succeeded'
+        run.error = ''
+        run.finished_at = datetime.now(timezone.utc)
+        receipt.pop('previousWorker', None)
+        run.receipt = receipt
+        latest = await session.scalar(select(models.AiScheduleRun.id).where(
+            models.AiScheduleRun.schedule_id == run.schedule_id
+        ).order_by(models.AiScheduleRun.started_at.desc()).limit(1))
+        if latest == run.id:
+            from . import schedule_timing
+            schedule = await schedule_timing.locked_schedule(session, run.schedule_id)
+            if schedule is not None and schedule_timing.matches(schedule, run):
+                schedule.last_error = ''
+        await session.commit()
+        return {'ok': True, 'state': 'succeeded'}
+    if receipt.get('worker') != str(body.get('instanceId') or ''):
+        raise HTTPException(409, '本次执行已由另一个客户端接管')
     if run.state in ('succeeded', 'failed', 'cancelled'):
         return {'ok': True, 'state': run.state}
     if state in ('running', 'succeeded') and not cid:
@@ -187,6 +230,11 @@ async def acknowledge(session, client, run_id, body):
     receipt.update(conversationId=cid, leaseUntil=datetime.now(timezone.utc).timestamp() + 300)
     if state != 'starting':
         receipt.pop('phase', None)
+    if state in ('succeeded', 'failed', 'cancelled'):
+        # A takeover marker is only needed while the run is still live. Once
+        # the current worker settles the run, discard the old owner edge so a
+        # later stale acknowledgement cannot be mistaken for a valid handoff.
+        receipt.pop('previousWorker', None)
     run.receipt = receipt
     run.state = state
     run.error = str(body.get('error') or '')[:1200] if state == 'failed' else ''

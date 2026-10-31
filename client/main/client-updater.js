@@ -91,7 +91,7 @@ function _set(patch) {
 function _trust() {
   const profile = require('./distribution.cjs').current();
   // 云端发行版仅信任自己的签名，不回退到内网或另一云环境的公钥。
-  if (profile.distributionId !== 'internal') return profile.updateTrust;
+  if (profile.distributionId !== 'internal' && profile.distributionId !== 'stage') return profile.updateTrust;
   const candidates = [
     path.join(runtime.app.getAppPath(), 'update-trust.json'),
     path.join(__dirname, '..', 'update-trust.json'),

@@ -3,6 +3,7 @@ import React from 'react'
 import { api } from '../api.js'
 import { AUTO, Icon, useAsync } from '../ui.jsx'
 import './operations-center.css'
+import { operationsText } from './operations-copy.js'
 
 const ACTIVE = ['queued', 'running', 'waiting_human', 'waiting_external']
 const sum = (obj, keys) => keys.reduce((n, key) => n + Number((obj || {})[key] || 0), 0)
@@ -45,11 +46,11 @@ export default function OperationsCenter() {
     </div>
 
     {(data.blockers || []).length > 0 && <div className="ops-alerts">{data.blockers.map((item, i) =>
-      <article key={i} className={item.level}><Icon name="alert" /><div><b>{item.title}</b><span>{item.detail}</span></div></article>)}</div>}
+      <article key={i} className={item.level}><Icon name="alert" /><div><b>{operationsText(item.title)}</b><span>{operationsText(item.detail)}</span></div></article>)}</div>}
 
     <div className="ops-grid">
       <section className="ops-panel ops-topology">
-        <header><div><span>{tx("运行拓扑")}</span><h3>{data.hub.modeLabel}</h3></div><button className="btn btn-ghost xs" onClick={openAutomation}>{tx("管理执行节点")}</button></header>
+        <header><div><span>{tx("运行拓扑")}</span><h3>{operationsText(data.hub.modeLabel)}</h3></div><button className="btn btn-ghost xs" onClick={openAutomation}>{tx("管理执行节点")}</button></header>
         <div className="ops-hub-row">
           <div className="ops-node-icon hub"><Icon name="activity" /></div>
           <div><b>{data.hub.nodeId}</b><span>{data.hub.service} · v{data.hub.version}</span></div>
@@ -66,7 +67,7 @@ export default function OperationsCenter() {
           </article>)}
           {!(runners.items || []).length && <div className="ops-empty">{tx("还没有登记执行节点")}</div>}
         </div>
-        <p className="ops-truth"><Icon name="shield" />{data.hub.clusterNote}</p>
+        <p className="ops-truth"><Icon name="shield" />{operationsText(data.hub.clusterNote)}</p>
       </section>
 
       <section className="ops-panel ops-work">
@@ -78,7 +79,7 @@ export default function OperationsCenter() {
         </div>
         <div className="ops-failures" tabIndex={0} role="region" aria-label={tx("最近失败")}><div className="ops-section-label">{tx("最近失败")}</div>
           {(data.recentFailures || []).map((row) => <article key={row.id}><span className="ops-fail-dot" />
-            <div><b>{row.error}</b><span>{tx("需求 ")}{row.taskId || '—'}</span></div></article>)}
+            <div><b>{row.error || tx("流程执行失败")}</b><span>{tx("需求 ")}{row.taskId || '—'}</span></div></article>)}
           {!(data.recentFailures || []).length && <div className="ops-empty compact">{tx("当前没有失败流程")}</div>}
         </div>
       </section>

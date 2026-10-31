@@ -100,6 +100,29 @@ test('history and live presence retain used runtimes across switches and exclude
   assert.deepEqual(restored.session.historyRow().usedHarnesses, ['pi', 'qwen']);
 });
 
+test('reopening a switched conversation marks missing native archives as resumed', async t => {
+  const f = fixture(t), opened = await f.bridge.open(options(f));
+  assert.equal(opened.ok, true, opened.reason);
+  await send(opened.session, 'Keep historical context');
+  assert.equal((await opened.session.selectAgent('qwen')).ok, true);
+  await send(opened.session, 'Use the switched Agent');
+  assert.equal((await opened.session.selectAgent('pi')).ok, true);
+  await send(opened.session, 'Return to the native Agent');
+  const id = opened.session.sessionId;
+  const record = segments.read(f.app, id);
+  assert.ok(record);
+  assert.equal(record.active.adapterId, 'pi');
+  assert.ok(record.active.path);
+  record.active.modelName = 'dev-coding-large-agent-soduwork';
+  await segments.save(f.app, record);
+  fs.rmSync(record.active.path, { force: true });
+  await f.restart();
+  const restored = await f.bridge.open({ ...options(f), ref: 'missing-active-archive', runtimeConversationId: id });
+  assert.equal(restored.ok, true, restored.reason);
+  assert.equal(f.openings.at(-1).resumePath, '');
+  assert.equal(f.openings.at(-1).resumedConversation, true);
+});
+
 test('switching persists completed statistics and offsets the next native turn without mutating receipts', async t => {
   const f = fixture(t), opened = await f.bridge.open(options(f)), handle = opened.session;
   await send(handle, 'First Pi turn');
@@ -571,6 +594,51 @@ test('打开时凭据已过期仍可查看原会话，但不能以未经验证�
   assert.equal(opened.session.adapterId, 'pi');
   assert.equal(segments.read(f.app, opened.session.sessionId), null);
   assert.equal(f.requests.length, 0);
+});
+
+test('Runner 旧会话凭证失效时在首个恢复探针同步暴露可恢复错误', async () => {
+  const calls = [];
+  const adapter = createRunnerRuntimeAdapter({
+    runtimeSpec: catalog.runtime('opencode'),
+    runnerRuntime: { async rpc(op) {
+      calls.push(op);
+      if (op === 'job.session') return { ok: false, error: 'Internal error: Unauthorized' };
+      return { ok: true, data: { installed: true, state: 'ready' } };
+    } },
+    modelConfig: { fetchModel: async (_identity, name) => ({ ok: true,
+      model: { id: name || 'fixture-model', name: name || 'fixture-model', key: 'fixture-key', baseUrl: 'http://fixture.invalid' } }) },
+  });
+  await assert.rejects(() => adapter.resumeSession({ consumer: 'chat', identity: identity('alice'),
+    native: { runner: { openOptions: { resumePath: 'runner-session-1', modelName: 'fixture-model' } } } }), /Unauthorized/);
+  assert.deepEqual(calls, ['job.session']);
+});
+
+test('Runner 历史会话的失效模型回退到当前默认并同步清理选择', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-runner-model-recovery-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
+  const names = [];
+  const runtime = { async rpc(op) {
+    if (op === 'runtime.detect') return { ok: true, data: {
+      installed: true, state: 'ready', accessControl: { schema: 'soduwork.access-policy/v1', supported: true,
+        modes: ['standard', 'readonly', 'full'], canChangeDuringSession: true },
+    } };
+    if (op === 'job.session') return { ok: true, data: { ref: 'runner-stale', status: 'done', items: [] } };
+    return { ok: true, data: { ok: true } };
+  } };
+  const adapter = createRunnerRuntimeAdapter({
+    app: { getPath: () => root }, runtimeSpec: catalog.runtime('opencode'), runnerRuntime: runtime,
+    modelConfig: { fetchModel: async (_identity, name) => {
+      names.push(name);
+      if (name === 'retired-model') return { ok: false, reason: 'model retired' };
+      return { ok: true, model: { id: 'current-default', name: 'current-default', key: 'fixture-key', baseUrl: 'http://fixture.invalid' } };
+    } },
+  });
+  const session = await adapter.createSession({ consumer: 'chat', identity: identity('alice'), native: {
+    runner: { openOptions: { app: { getPath: () => root }, cwd: root, resumePath: 'runner-stale', modelName: 'retired-model' } },
+  } });
+  assert.deepEqual(names, ['retired-model', '']);
+  assert.equal(session.snapshot().modelSelection.name, '');
+  await session.dispose();
 });
 
 for (const mode of ['standard', 'readonly', 'full']) test('Pi -> Codex -> DSH -> Pi retains ' + mode + ' policy and one conversation', async t => {

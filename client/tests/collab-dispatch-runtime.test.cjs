@@ -268,7 +268,7 @@ test('dossier uses real stages and numeric metrics, with no invented release', (
   const host = { innerHTML: '', querySelectorAll: () => [], querySelector: () => null };
   const view = window.ChatCollaboration.create({ host });
   view.render({ collaboration: true, taskId: 't1', status: 'done', task: { id: 't1', title: 'Smoke test' },
-    execution: { tokens: { input: 100, output: 20, total: 0 },
+    execution: { tokens: { input: 100, output: 20, total: 0 }, retryCount: 2,
       startedAt: '2026-09-06T00:00:00Z', finishedAt: '2026-09-06T00:00:06Z' } });
   view.setPin('dossier');
   assert.doesNotMatch(host.innerHTML, /\[object Object\]|trial|AI Review|自动合并|健康检查/);

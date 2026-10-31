@@ -187,4 +187,11 @@ impact = plugin_compat.between(
 ok(any(item["code"] == "ui.added" for item in impact["changes"]),
    "adding employee UI must require upgrade review")
 
+for capability in ("messages.read", "library.read", "ai.generate"):
+    candidate = {"contributions": [{"id": "readonly", "title": "Read only", "slot": "workspace.navigation",
+        "source": {"type": "external", "url": "https://example.com/", "openMode": "workspace",
+                   "bridge": {"version": 1, "capabilities": [capability]}}}]}
+    checked = plugin_ui_contracts.normalize(candidate, {})
+    ok(capability in checked["contributions"][0]["source"]["bridge"]["capabilities"], "host read capability survives Hub normalization")
+
 print(f"plugin UI contract: {checks} checks passed")

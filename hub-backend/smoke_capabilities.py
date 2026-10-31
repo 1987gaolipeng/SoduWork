@@ -193,9 +193,13 @@ Collect evidence, compare options, and record the decision.
         check(template and template["trust"] == "official", "常用 MCP 应自动进入可信目录")
         check(template["template"]["enabled"] is False, "高风险模板不能自动启用")
         check(len(capability_catalog.MCP_TEMPLATES) >= 5, "应提供一组常用官方模板")
-        check(any(".codex" in root.replace(chr(92), "/")
-                  for root in skills.default_roots()),
-              "默认目录应自动发现 Codex Skill")
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"CODEX_HOME": os.path.join(temp, "configured-codex")}):
+            check(os.path.join(temp, "configured-codex", "skills") in skills.default_roots(),
+                  "应遵循显式 CODEX_HOME 发现 Codex Skill")
+        with patch.dict(os.environ, {"CODEX_HOME": ""}):
+            check(os.path.join(os.path.expanduser("~"), ".codex", "skills") in skills.default_roots(),
+                  "未配置 CODEX_HOME 时应发现默认 Codex Skill")
 
         runner = type("Runner", (), {
             "id": "r1", "host": "设计工作站", "skills_known": True,

@@ -2,6 +2,7 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('node:path');
 const assert = require('node:assert/strict');
+require('./lib/isolated-profile.cjs').isolateProfile(app, 'cloud-environments-personal');
 const output = process.argv[2];
 if (!output || !path.isAbsolute(output)) throw Error('Absolute output directory required');
 let win;

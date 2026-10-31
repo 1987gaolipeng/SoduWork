@@ -95,8 +95,17 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .page-title{min-width:0}.page-route{display:flex;align-items:center;gap:6px;margin-bottom:1px;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 12px);font-weight:650;letter-spacing:.04em}.page-route i{font-style:normal;opacity:.65}
 .page-title h1{font-family:var(--display);font-size:21px;font-weight:720;letter-spacing:-.025em;line-height:1.18}.page-title p{max-width:760px;margin-top:3px;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .top-actions{min-width:0;gap:8px}.env{min-width:0;max-width:min(320px,32vw);gap:9px;min-height:38px;padding:5px 11px;border-color:var(--line);border-radius:11px;background:var(--surface);box-shadow:var(--shadow-sm)}
-.env>span:last-child{display:flex;min-width:0;flex-direction:column}.env b{font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.2;color:var(--ink-2)}.env small{max-width:100%;margin-top:2px;overflow:hidden;font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.15;color:var(--ink-4);text-overflow:ellipsis;white-space:nowrap}
-.env .dot{width:7px;height:7px}.icon-btn{width:38px;height:38px;border-radius:11px;box-shadow:var(--shadow-sm)}
+.env .env-copy{display:flex;min-width:0;flex-direction:column}.env b{font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.2;color:var(--ink-2)}.env small{max-width:100%;margin-top:2px;font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.35;color:var(--ink-4);white-space:normal;overflow-wrap:anywhere}
+.env .dot{width:7px;height:7px}
+details.env{position:relative;display:block;padding:0;max-width:min(360px,40vw)}
+.env>summary{display:flex;align-items:center;gap:9px;padding:7px 11px;cursor:pointer;list-style:none}
+.env>summary::-webkit-details-marker{display:none}
+.env>summary::after{content:'';width:6px;height:6px;margin-inline-start:5px;border-right:1px solid var(--ink-3);border-bottom:1px solid var(--ink-3);transform:rotate(45deg);flex-shrink:0}
+.env[open]>summary::after{transform:rotate(225deg)}
+.env>summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:5px}
+.env .env-details{position:absolute;top:calc(100% + 8px);inset-inline-end:0;z-index:30;width:min(360px,calc(100vw - 32px));margin:0;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--surface);box-shadow:var(--shadow);font-size:14.5px}
+.env-details>div+div{margin-top:9px}.env-details dt{color:var(--ink-3);font-weight:500}.env-details dd{margin:3px 0 0;color:var(--ink);overflow-wrap:anywhere;white-space:normal}
+.icon-btn{width:38px;height:38px;border-radius:11px;box-shadow:var(--shadow-sm)}
 .content{max-width:1640px;padding:22px 28px 46px}
 
 /* Use consistent shapes for shared actions, containers, and states. */

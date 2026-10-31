@@ -6,6 +6,7 @@ import { useViewportHeight } from '../viewport-height.js'
 import { useAsync, Loading, ErrorState, Icon, Modal, toast } from '../ui.jsx'
 import McpServers from './McpServers.jsx'
 import SkillSharing from './SkillSharing.jsx'
+import { buildSubmissionOrigins, summarizeCapabilityPolicy, sameCapabilityPolicy } from './capability-catalog-model.js'
 import './capability-center.css'
 
 export default function Skills() {
@@ -19,7 +20,7 @@ export default function Skills() {
   const picker = useRef(null)
   // Measure the entire active body once. The two Skill sections share this
   // budget; neither list treats its sibling's changing height as page chrome.
-  const workspaceMinimum = tab === 'skills' && data.data?.personalSubmissions?.length ? 680 : 460
+  const workspaceMinimum = tab === 'skills' && data.data?.personalSubmissions?.length ? 760 : 460
   const workspaceRef = useViewportHeight(workspaceMinimum)
 
   useEffect(() => {
@@ -32,8 +33,8 @@ export default function Skills() {
   const config = catalog.cfg || {}
   const rows = catalog.skills || []
   const summary = catalog.summary || {}
-  const dirty = JSON.stringify([...allowed].sort()) !==
-    JSON.stringify([...(config.allowed || [])].sort())
+  const dirty = !sameCapabilityPolicy(allowed, config.allowed || [])
+  const { activeCount, unmatchedNames } = summarizeCapabilityPolicy(rows, allowed)
   const filtered = rows.filter((item) => {
     const needle = query.trim().toLowerCase()
     return !needle || [item.name, item.description, sourceLabel(item, catalog)]
@@ -46,6 +47,10 @@ export default function Skills() {
       next.has(name) ? next.delete(name) : next.add(name)
       return next
     })
+  }
+
+  function removeUnmatched() {
+    setAllowed((current) => new Set([...current].filter((name) => !unmatchedNames.includes(name))))
   }
 
   async function save() {
@@ -108,7 +113,7 @@ export default function Skills() {
     <div className="cap-admin">
       <section className="cap-admin-metrics" aria-label={tx("能力汇总")}>
         <Metric value={summary.skills ?? rows.length} label={tx("已发现 Skill")} />
-        <Metric value={(config.allowed || []).length} label={tx("已开放")} tone="ok" />
+        <Metric value={activeCount} label={dirty ? tx("待保存开放数") : tx("已开放")} tone="ok" />
         <Metric value={summary.personalSubmissions || 0} label={tx("个人提交")} />
         <Metric value={summary.mcpTemplates || 0} label={tx("推荐连接器")} />
       </section>
@@ -129,7 +134,9 @@ export default function Skills() {
               <button className="btn btn-ghost btn-sm" onClick={() => picker.current?.click()}>
                 <Icon name="plus" />{tx("导入公司 Skill")}</button>
             )}
-            {dirty && <span className="cap-admin-dirty">{tx("开放策略有改动")}</span>}
+            {dirty && <><span className="cap-admin-dirty">{tx("开放策略有改动")}</span>
+              <button className="btn btn-ghost btn-sm" disabled={busy}
+                onClick={() => setAllowed(new Set(config.allowed || []))}>{tx("放弃改动")}</button></>}
             <button className="btn btn-primary btn-sm" disabled={busy || !dirty} onClick={save}>
               {busy ? tx("保存中…") : tx("保存开放策略")}
             </button>
@@ -137,6 +144,19 @@ export default function Skills() {
         )}
       </div>
 
+      {tab === 'skills' && unmatchedNames.length > 0 && (
+        <section className="cap-admin-policy-warning" aria-label={tx("未匹配的开放项")}>
+          <div className="cap-admin-policy-warning-head">
+            <div><b>{tx("有 {0} 个开放项未匹配到当前目录", [unmatchedNames.length])}</b>
+              <p>{tx("这些名称不计入已开放数量。可能已删除、改名或暂时不可见；请核对后移除，保存后生效。")}</p></div>
+            <button className="btn btn-ghost btn-sm" disabled={busy} onClick={removeUnmatched}>
+              {tx("移除未匹配项")}</button>
+          </div>
+          <div className="cap-admin-unmatched-names" role="region" tabIndex={0} aria-label={tx("未匹配名称列表，可滚动")}>
+            {unmatchedNames.map((name) => <code key={name}>{name}</code>)}
+          </div>
+        </section>
+      )}
       {tab === 'skills' && can('integration.manage') && <SkillSharing onPublished={data.reload} />}
       <div ref={workspaceRef} className="cap-admin-workspace"
         style={{ '--capability-min-height': `${workspaceMinimum}px` }}>
@@ -163,6 +183,7 @@ function Metric({ value, label, tone = '' }) {
 
 function SkillCatalog({ rows, allowed, legacy, onToggle, submissions }) {
   const uiLocale = useLocale();
+  const origins = buildSubmissionOrigins(submissions)
   return (
     <div className={'cap-admin-body cap-admin-skill-body' + (submissions.length ? ' has-personal' : '')}>
       <section className="cap-admin-discovered">
@@ -202,16 +223,24 @@ function SkillCatalog({ rows, allowed, legacy, onToggle, submissions }) {
       {submissions.length > 0 && (
         <section className="cap-admin-submissions">
           <div className="cap-admin-section-title">
-            <div><b>{tx("员工个人 Skill")}</b><span>{tx("仅本人可用；管理员可据此发现值得沉淀的工作方法")}</span></div>
+            <div><b>{tx("员工个人 Skill")}</b><span>{tx("仅本人可用；同名 Skill 请按提交设备区分。")}</span></div>
             <em>{submissions.length}{tx(" 项")}</em>
           </div>
           <div className="cap-admin-submit-list" role="region" aria-label={tx("员工个人 Skill 列表，可滚动")} tabIndex={0}>
-            {submissions.map((item) => (
-              <div key={item.key + item.ownerClientId}>
-                <span><b>{item.name}</b><small>{item.description}</small></span>
-                <em>{tx("个人作用域")}</em>
-              </div>
-            ))}
+            {submissions.map((item) => {
+              const origin = origins.get(item.ownerClientId)
+              return (
+                <div key={JSON.stringify([item.key, item.ownerClientId])}>
+                  <span className="cap-admin-submit-copy"><b title={item.name}>{item.name}</b>
+                    <small title={item.description}>{item.description}</small>
+                    <small className="cap-admin-submit-origin" title={origin?.title || tx("来源设备未知")}>
+                      {origin ? tx("提交设备：{0}", [origin.label]) : tx("来源设备未知")}
+                    </small>
+                  </span>
+                  <em>{tx("个人作用域")}</em>
+                </div>
+              )
+            })}
           </div>
         </section>
       )}

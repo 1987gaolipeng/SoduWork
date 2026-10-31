@@ -18,7 +18,7 @@
         if (global.WorkspaceHost && typeof global.WorkspaceHost.open === 'function') await global.WorkspaceHost.open('apps');
         if (payload?.pluginId && global.SoduWorkApps?.settingsById) await global.SoduWorkApps.settingsById(payload.pluginId);
       } catch (error) {
-        if (typeof global.petSay === 'function') global.petSay(error.message || '应用设置打开失败');
+        if (typeof global.petSay === 'function') global.petSay(error.message || '即用设置打开失败');
       }
     });
   }

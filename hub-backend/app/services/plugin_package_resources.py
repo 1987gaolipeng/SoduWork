@@ -109,4 +109,9 @@ def ui_for_version(version) -> dict:
     ui = dict(version.manifest or {}).get('ui') or {}
     files = [row for row in parsed.get('resources', []) if row['kind'] in ('ui', 'asset')]
     plugin_app_contracts.validate_resources(ui, files)
-    return {'ui': ui, 'resources': files}
+    result = {'ui': ui, 'resources': files}
+    manifest = dict(version.manifest or {})
+    if manifest.get('jiyong'):
+        result.update(jiyong=manifest['jiyong'], versionId=version.id,
+                      capabilities=dict(version.capability_report or {}))
+    return result

@@ -115,6 +115,17 @@ class ModelDefaultsTests(IsolatedDatabase):
             self.assertEqual((await session.get(Client, "fixture")).agent_models,
                              {"qwen": "removed-model"})
 
+    async def test_ignore_preference_uses_catalog_default_without_mutating_agent_models(self):
+        normal = await self.get("ai-proxy/config", agent="pi")
+        ignored = await self.get("ai-proxy/config", agent="pi", ignore_preference=1)
+        explicit = await self.get("ai-proxy/config", agent="pi", model="second",
+                                  ignore_preference=1)
+        self.assertEqual(normal["model"], "second")
+        self.assertEqual(ignored["model"], "first")
+        self.assertEqual(explicit["model"], "second")
+        async with self.sessions() as session:
+            self.assertEqual((await session.get(Client, "fixture")).agent_models["pi"], "second")
+
     async def test_disabled_model_is_not_advertised_as_the_agent_default(self):
         async with self.sessions() as session, session.begin():
             (await session.get(ModelDef, "fixture:second")).enabled = False

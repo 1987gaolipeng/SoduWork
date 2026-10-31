@@ -153,7 +153,7 @@
     layer.innerHTML = '<aside class="wes-sheet" role="dialog" aria-modal="true" aria-labelledby="wesTitle">' +
       '<header class="wes-head"><div class="wes-head-icon"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M8 9h8M8 13h5"/></svg></div>' +
       '<div><h2 id="wesTitle">新建需求</h2><p>' + (s.saveOnly ? '先记录目标，准备好后再安排执行' : '写清目标与完成标准，保存或交办给负责人') + '</p></div>' +
-      (surface.inline ? '' : '<button type="button" class="wes-close" data-wes-close aria-label="关闭"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>') + '</header>' +
+      '<button type="button" class="wes-close" data-wes-close aria-label="取消" title="取消"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></header>' +
       '<main class="wes-body"><div class="wes-task-host cp-draft show" id="wesTaskDraft"></div>' +
       '<section class="wes-attach-zone"><div class="wes-attach-head"><div><strong>' + (global.RequirementFields?.sectionIcon?.('materials') || '') + '相关材料</strong><small>随需求一起交给执行人</small></div>' +
       '<button type="button" id="wesAttachPick">添加附件</button></div>' +
@@ -197,7 +197,10 @@
         if (current() && host && attachmentZone) host.appendChild(attachmentZone);
       },
       persistent: Boolean(surface.inline),
-      cardId: s.cardId, onCardState: s.onCardState,
+      cardId: s.cardId,
+      onCardState: snapshot => {
+        s.onCardState?.(snapshot);
+      },
       onBeforeSubmit: s.onBeforeSubmit || s.bridge?.onBeforeSubmit,
       saveOnly: s.saveOnly === true, triageStage: s.triageStage || 'ready', projectId: s.projectId || '',
       visibility: s.visibility || 'related', source: s.source || '需求池',

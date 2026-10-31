@@ -62,17 +62,43 @@ class UsageAccountingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(sum(item['costMicrousd'] for item in result[group]), 4)
         self.assertEqual(await self.session.scalar(select(func.count(models.AIUsageDaily.id))), 2)
 
-    async def test_billing_user_changes_do_not_move_the_previous_users_usage(self):
-        await self.report(100)
-        other = models.User(id='another-owner', username='another-owner')
+    async def test_reused_device_source_keeps_account_counters_and_daily_facts_separate(self):
+        at = datetime.now(timezone.utc)
+        first = await self.report(100, at=at)
+        first_id, first_key = first.id, first.idempotency_key
+        other = models.User(id='another-owner', username='another-owner', org_id='org-B')
         self.session.add(other)
         self.client.user_ref = other.id
         await self.session.commit()
-        await self.report(200)
+        second = await self.report(200, at=at)
+        self.assertNotEqual(second.id, first_id)
+        self.assertNotEqual(second.idempotency_key, first_key)
+        repeated = await self.report(200, at=at)
+        self.assertEqual(repeated.id, second.id)
         previous = await analytics.overview(self.session, user_id=self.user.id)
         current = await analytics.overview(self.session, user_id=other.id)
         self.assertEqual(previous['summary']['tokens'], 100)
-        self.assertEqual(current['summary']['tokens'], 100)
+        # Reusing a source ID on another account starts an independent counter,
+        # rather than subtracting usage that belongs to the previous account.
+        self.assertEqual(current['summary']['tokens'], 200)
+        await self.session.refresh(first)
+        self.assertEqual((first.billing_user_id, first.org_id, first.total_tokens),
+                         (self.user.id, 'org-A', 100))
+        self.assertEqual((second.billing_user_id, second.org_id, second.total_tokens),
+                         (other.id, 'org-B', 200))
+
+        self.client.user_ref = self.user.id
+        await self.session.commit()
+        resumed = await self.report(150, at=at)
+        self.assertEqual(resumed.id, first_id)
+        previous = await analytics.overview(self.session, user_id=self.user.id)
+        current = await analytics.overview(self.session, user_id=other.id)
+        self.assertEqual(previous['summary']['tokens'], 150)
+        self.assertEqual(current['summary']['tokens'], 200)
+        self.assertEqual(await self.session.scalar(select(func.count(models.AIUsageEvent.id))), 2)
+        daily = (await self.session.scalars(select(models.AIUsageDaily))).all()
+        self.assertEqual({(row.billing_user_id, row.org_id, row.total_tokens) for row in daily},
+                         {(self.user.id, 'org-A', 150), (other.id, 'org-B', 200)})
 
     async def test_cross_month_quota_counts_increments_instead_of_session_anchor(self):
         zone = timezone(timedelta(hours=8))

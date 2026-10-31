@@ -104,23 +104,26 @@ html[data-desk-panel="workspace"] #libraryPanel{position:fixed!important;left:va
 .library-breadcrumb b{color:var(--ink);}
 .library-list-head{max-width:1660px;margin:0 auto 8px;padding:0 14px;display:grid;grid-template-columns:32px minmax(0,1fr) 112px 82px 56px;gap:10px;align-items:center;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 12px);}
 .library-list-head[hidden]{display:none;}
-.library-batch-toolbar{max-width:1660px;margin:0 auto 10px;padding:8px 12px;display:flex;align-items:center;gap:8px;border:1px solid color-mix(in srgb,var(--accent) 28%,var(--line));border-radius:11px;background:color-mix(in srgb,var(--accent) 5%,var(--bg-0));}
+.library-batch-toolbar{max-width:1660px;margin:0 auto 10px;padding:8px 12px;display:flex;align-items:center;flex-wrap:wrap;gap:8px;border:1px solid color-mix(in srgb,var(--accent) 28%,var(--line));border-radius:11px;background:color-mix(in srgb,var(--accent) 5%,var(--bg-0));box-shadow:0 3px 12px -10px color-mix(in srgb,var(--accent) 55%,transparent);}
 .library-batch-toolbar[hidden]{display:none;}
-.library-batch-count{margin-right:auto;color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), 13px);font-weight:600;}
-.library-batch-toolbar button{height:32px;padding:0 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg-0);color:var(--ink-2);font:500 13px/1 var(--font-ui);cursor:pointer;}
+.library-batch-count{flex:1 1 auto;min-width:96px;margin-right:auto;color:var(--ink-2);font-size:max(var(--font-min-readable, 14.5px), 13px);font-weight:600;}
+.library-batch-toolbar button{flex:0 0 auto;height:32px;padding:0 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg-0);color:var(--ink-2);font:500 13px/1 var(--font-ui);white-space:nowrap;cursor:pointer;}
 .library-batch-toolbar button:hover{background:var(--bg-1);}
 .library-batch-toolbar button:disabled{opacity:.48;cursor:not-allowed;}
+@media(max-width:900px){.library-batch-toolbar{align-items:stretch}.library-batch-count{flex-basis:100%;margin-right:0}.library-batch-toolbar button{flex:1 1 calc(50% - 8px)}}
+@media(max-width:480px){.library-batch-toolbar button{flex-basis:100%}}
 .library-share-files{display:flex;flex-direction:column;gap:6px;list-style:none;margin:18px 24px 8px;padding:0;max-height:180px;overflow:auto;}
 .library-share-files li{display:flex;align-items:center;gap:10px;min-width:0;padding:9px 11px;border:1px solid var(--line-2);border-radius:10px;background:var(--bg-1);}
 .library-share-files li>span:last-child{display:flex;flex-direction:column;min-width:0;gap:2px;}
 .library-share-files b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:550;}
 .library-share-files small{color:var(--ink-4);font-size:12px;}
+.library-share-bundle-hint{margin:0 24px 8px;padding:8px 10px;border-radius:8px;background:color-mix(in srgb,var(--accent) 8%,var(--bg-1));color:var(--ink-2);font-size:12px;line-height:1.4;}
 .library-row-select{display:none;}
 .library-list-select{display:grid;place-items:center;}
 .library-row-select input{width:16px;height:16px;margin:0;accent-color:var(--accent);cursor:pointer;}
-.library-content:not(.is-list) .library-card:not(.library-folder-card) .library-row-select{display:grid;position:absolute;left:10px;top:10px;z-index:3;place-items:center;}
-.library-content:not(.is-list) .library-card:not(.library-folder-card) .library-row-select input{opacity:0;transition:opacity .12s ease;}
-.library-content:not(.is-list) .library-card:not(.library-folder-card):hover .library-row-select input,.library-content:not(.is-list) .library-card:not(.library-folder-card) .library-row-select input:checked{opacity:1;}
+.library-content:not(.is-list) .library-card .library-row-select{display:grid;position:absolute;left:10px;top:10px;z-index:3;place-items:center;}
+.library-content:not(.is-list) .library-card .library-row-select input{opacity:0;transition:opacity .12s ease;}
+.library-content:not(.is-list) .library-card:hover .library-row-select input,.library-content:not(.is-list) .library-card .library-row-select input:checked{opacity:1;}
 .library-content{max-width:1660px;margin:0 auto;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:15px;}
 .library-content.is-list{display:flex;flex-direction:column;gap:0;}
 .library-card{position:relative;min-width:0;border:1px solid var(--line-2);border-radius:15px;background:var(--bg-0);box-shadow:0 5px 18px rgba(30,35,40,.035);overflow:visible;transition:border-color .15s,box-shadow .15s;}
@@ -215,6 +218,17 @@ html[data-desk-panel="workspace"] #libraryPanel{
 }
 .library-toolbar{gap:7px;}
 .library-head .library-toolbar{justify-content:flex-end;}
+/* The selection action bar belongs to the workspace surface, so it must use
+   the full available panel width instead of inheriting the old 1660px cap.
+   This keeps the actions aligned with the list on wide monitors while the
+   existing media rules still wrap them on narrow windows. */
+html[data-desk-panel="workspace"] #libraryPanel .library-batch-toolbar{
+  width:100%;
+  max-width:none;
+  margin-left:0;
+  margin-right:0;
+  box-sizing:border-box;
+}
 .library-icon-button{
   width:32px;
   height:32px;
@@ -428,6 +442,7 @@ html[data-window-menu] .library-image-dialog{
 .library-confirm-close{width:28px;height:28px;padding:0;border:0;border-radius:7px;background:transparent;color:var(--ink-3);font-size:22px;line-height:1;cursor:pointer;}
 .library-confirm-close:hover{background:var(--bg-1);color:var(--ink);}
 .library-confirm-description{margin:0;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 13px);line-height:1.6;word-break:break-word;}
+.library-confirm-description.library-confirm-batch{padding:12px 14px;border:1px solid var(--line-2);border-radius:10px;background:var(--bg-1);color:var(--ink-2);line-height:1.5;}
 .library-confirm-foot{display:flex;justify-content:flex-end;gap:9px;margin-top:2px;}
 .library-confirm-foot button{height:34px;padding:0 16px;border:0;border-radius:8px;font:600 14.5px/1 var(--font-ui);cursor:pointer;}
 .library-confirm-cancel{background:var(--bg-2);color:var(--ink-2);}
@@ -562,7 +577,7 @@ html[data-window-menu] .library-image-dialog{
 .library-list-head{min-height:40px;color:var(--ink-3);}
 .library-content:not(.is-list) .library-card-actions{right:12px;bottom:10px;}
 .library-content:not(.is-list) .library-card-actions>.library-icon-button{width:32px;height:32px;}
-.library-content:not(.is-list) .library-card:not(.library-folder-card) .library-row-select{left:auto;right:15px;top:18px;}
+.library-content:not(.is-list) .library-card .library-row-select{left:auto;right:15px;top:18px;}
 .library-content:not(.is-list) .library-card:focus-within .library-row-select input{opacity:1;}
 @media(max-width:680px){.library-head .library-search{flex:1 1 170px;width:auto;min-width:140px;}}
 @media(max-width:620px){

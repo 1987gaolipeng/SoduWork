@@ -5,6 +5,12 @@
 (function (global) {
   'use strict';
 
+  // The execution-location control is rendered after the locale adapter has
+  // already scanned the page. Translate its markup at creation/update time so
+  // switching between English and Chinese cannot leave a mixed menu behind.
+  const tx = value => (global.SoduWorkI18n && typeof global.SoduWorkI18n.translateText === 'function'
+    ? global.SoduWorkI18n.translateText(value) : value) || value;
+
   const esc = (value) => String(value == null ? '' : value)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/\"/g, '&quot;');
@@ -306,9 +312,9 @@
       '" role="menuitemradio" aria-checked="' + (value === 'local') + '" tabindex="-1">' + icon + '<span>' + label +
       '</span><svg class="wc-execution-check" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg></button>';
     return '<span class="wc-execution-mode"><button type="button" data-execution-menu data-location="local" ' +
-      'aria-haspopup="menu" aria-expanded="false" aria-controls="' + id + '" aria-label="执行位置：本机" title="本机执行，点击选择执行位置">' +
-      local + cloud + '</button><span class="wc-execution-pop" id="' + id + '" role="menu" aria-label="选择执行位置" hidden>' +
-      row('local', '本地', local) + row('cloud', '云端', cloud) + '</span></span>';
+      'aria-haspopup="menu" aria-expanded="false" aria-controls="' + id + '" aria-label="' + esc(tx('执行位置：本机')) + '" title="' + esc(tx('本机执行，点击选择执行位置')) + '">' +
+      local + cloud + '</button><span class="wc-execution-pop" id="' + id + '" role="menu" aria-label="' + esc(tx('选择执行位置')) + '" hidden>' +
+      row('local', tx('本地'), local) + row('cloud', tx('云端'), cloud) + '</span></span>';
   }
 
   function closeExecutionMenu(restoreFocus = false) {
@@ -361,8 +367,8 @@
         (scope !== undefined && host.dataset.executionScope !== scope))) closeExecutionMenu();
       if (scope !== undefined) host.dataset.executionScope = scope;
       button.dataset.location = location; button.disabled = disabled;
-      button.setAttribute('aria-label', '执行位置：' + (location === 'cloud' ? '云端' : '本机'));
-      button.title = (location === 'cloud' ? '云端执行' : '本机执行') + '，点击选择执行位置';
+      button.setAttribute('aria-label', tx(location === 'cloud' ? '执行位置：云端' : '执行位置：本机'));
+      button.title = tx(location === 'cloud' ? '云端执行，点击选择执行位置' : '本机执行，点击选择执行位置');
     });
   }
 
@@ -398,7 +404,7 @@
         label: '能力', value: '基础对话', title: '能力在会话开始时确定', muted: true }) + '</div>';
     const next = replace(node, {
       className: 'nbox', inputId: 'nchatInput', rows: 1, placeholder: '接着说…',
-      beforeInput: '<div class="catt-tray" id="nchatAtts"></div><p class="catt-understanding-hint" id="nchatMaterialHint" role="status" hidden></p>',
+      beforeInput: '<div class="catt-tray" id="nchatAtts"></div>',
       afterInput: syntaxHint() + (global.WorkIntent ? WorkIntent.rail('nchat') : ''),
       tools: '<input type="file" id="nchatFile" multiple hidden>' + more + executionMode('data-chat-execution'),
       sendId: 'nchatSend', sendClass: 'nsend', sendTitle: '发送', context,
@@ -407,6 +413,10 @@
         '<svg class="nmodel-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9zM4.5 7.8l7.5 4.3 7.5-4.3M12 12.1V21"/></svg><span>选择模型</span><i class="nmodel-thinking-dot" aria-hidden="true"></i><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></button>' +
         '<div class="nmodel-pop" role="dialog" aria-label="切换模型" hidden></div></div>' +
         '<button type="button" class="wc-agent-badge" id="nchatRuntime" title="本次会话执行底座"><span id="nchatRuntimeIcon"></span><b id="nchatRuntimeName" data-user-content>Agent</b></button>' +
+        '<span class="wc-runtime-availability" id="nchatRuntimeAvailability" hidden>' +
+          '<span class="wc-runtime-missing" id="nchatRuntimeMissing" role="img" aria-label="' + esc(tx('缺失的执行底座')) + '"></span>' +
+          '<button type="button" class="wc-runtime-more" id="nchatRuntimeMore" data-runtime-more hidden title="' + esc(tx('打开 Agent 管理')) + '">' + esc(tx('更多')) + '</button>' +
+        '</span>' +
         '<button type="button" class="wc-voice" id="nchatMic" title="语音输入" aria-label="语音输入">' +
         ICONS.mic + '</button>',
     });

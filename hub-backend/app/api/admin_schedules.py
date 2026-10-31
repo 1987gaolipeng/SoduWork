@@ -85,6 +85,11 @@ async def create_ai_schedule(body: dict = Body(default_factory=dict),
     s = AiSchedule(created_by=user.id,
                    created_by_name=(user.display_name or user.username or ""),
                    org_id=user.org_id)
+    from ..services.schedule_source_app import clean as clean_source_app
+    try:
+        s.source_app = clean_source_app(body.get("sourceApp"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     _sch_apply(s, body)
     if not s.title:
         raise HTTPException(status_code=400, detail="请填任务标题")

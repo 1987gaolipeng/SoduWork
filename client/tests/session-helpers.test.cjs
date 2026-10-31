@@ -38,6 +38,78 @@ test('attachment transport metadata never leaks into automatic conversation titl
   assert.equal(helpers.title({ firstMessage: literal }), literal.replace(/\s+/g, ' ').trim().slice(0, 40));
 });
 
+test('legacy persisted titles with truncated attachment metadata recover from the archived first request', () => {
+  const contract = require('../main/pi-session/attachment-contract');
+  const firstMessage = contract.augment('整理两份附件并输出结论', [
+    { name: '步骤.md', path: 'inputs/步骤.md' },
+    { name: '资料.docx', path: 'inputs/资料.docx' },
+  ]);
+  const polluted = '整理两份附件并输出结论 ' + contract.START + ' {"files":[{';
+  assert.equal(helpers.repairPersistedTitle(polluted, firstMessage), '整理两份附件并输出结论');
+  assert.equal(helpers.repairPersistedTitle('用户输入 ' + contract.START + ' example', '另一条请求'),
+    '用户输入 ' + contract.START + ' example');
+});
+
+test('live titles hide a truncated attachment envelope when no archive reference is available', () => {
+  const contract = require('../main/pi-session/attachment-contract');
+  const polluted = '把更好的复何汉及 ' + contract.START + ' {"files":[{';
+  assert.equal(helpers.title({ firstMessage: polluted }), '把更好的复何汉及');
+  const literal = '用户示例 ' + contract.START + ' {"fuzzy":true}';
+  assert.equal(helpers.title({ firstMessage: literal }), literal.slice(0, 40));
+});
+
+test('legacy persisted titles with truncated plugin metadata recover from the archived first request', () => {
+  const connector = require('../main/pi-session/connector-context.cjs');
+  const plugins = require('../main/pi-session/plugin-context');
+  const firstMessage = plugins.augment(connector.augment('你好', 'private connector guide'), [
+    { pluginId: 'fixture', name: 'Fixture', context: 'private plugin guide' },
+  ]);
+  const polluted = '你好 ' + plugins.START + ' {"plugins"';
+  assert.equal(helpers.repairPersistedTitle(polluted, firstMessage), '你好');
+  assert.equal(helpers.repairPersistedTitle('用户输入 ' + plugins.START + ' example', '另一条请求'),
+    '用户输入 ' + plugins.START + ' example');
+});
+
+test('legacy persisted titles with truncated connector metadata recover from the archived first request', () => {
+  const connector = require('../main/pi-session/connector-context.cjs');
+  const firstMessage = connector.augment('整理连接器数据', 'private connector guide');
+  const polluted = '整理连接器数据 ' + connector.START + ' {"runtimeGuide"';
+  assert.equal(helpers.repairPersistedTitle(polluted, firstMessage), '整理连接器数据');
+  assert.equal(helpers.repairPersistedTitle('用户输入 ' + connector.START + ' example', '另一条请求'),
+    '用户输入 ' + connector.START + ' example');
+});
+
+test('visible title cleanup removes every valid nested transport envelope without touching literal text', () => {
+  const attachments = require('../main/pi-session/attachment-contract');
+  const connector = require('../main/pi-session/connector-context.cjs');
+  const plugins = require('../main/pi-session/plugin-context');
+  const nested = attachments.augment(
+    connector.augment(plugins.augment('多层材料请求', [
+      { pluginId: 'fixture', name: 'Fixture', context: 'private plugin guide' },
+    ]), 'private connector guide'),
+    [{ name: '步骤.md', path: 'inputs/步骤.md' }],
+  );
+  assert.equal(helpers.title({ firstMessage: nested }), '多层材料请求');
+  const literal = '用户示例 ' + attachments.START + ' example ' + attachments.END;
+  assert.equal(helpers.title({ firstMessage: literal }), literal.slice(0, 40));
+});
+
+test('material context after attachments and connectors cannot pollute the title', () => {
+  const attachments = require('../main/pi-session/attachment-contract');
+  const connector = require('../main/pi-session/connector-context.cjs');
+  const material = require('../main/pi-session/input-context.cjs');
+  const raw = material.augment(
+    connector.augment(
+      attachments.augment('真实用户标题', [{ name: '资料.md', path: 'inputs/资料.md' }]),
+      'private connector guide',
+    ),
+    '<soduwork-conversation-input-understanding>evidence</soduwork-conversation-input-understanding>',
+  );
+  assert.equal(helpers.title({ firstMessage: raw }), '真实用户标题');
+  const polluted = '真实用户标题 ' + material.START + ' {"context":"partial';
+  assert.equal(helpers.repairPersistedTitle(polluted, '真实用户标题'), '真实用户标题');
+});
+
 test('visible title projection returns an empty value for protocol-only text', () => {
   const connector = require('../main/pi-session/connector-context.cjs');
   const plugins = require('../main/pi-session/plugin-context');

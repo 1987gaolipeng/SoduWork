@@ -2,6 +2,7 @@ const { app, BrowserWindow, WebContentsView, ipcMain, screen, Tray, Menu, native
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+require('./main/managed-runtime.cjs').initialize(app);
 const _distribution = require('./main/distribution.cjs');
 /*
  * SODUWORK_USER_DATA isolates development credentials, sessions, and the single-instance lock.
@@ -96,6 +97,8 @@ if (process.platform === 'win32' && app.isPackaged) {
 }
 
 _deviceAuth.install({ app, ipcMain, safeStorage });
+require('./main/read-aloud.cjs').install({ app, ipcMain, BrowserWindow, getRendererRoot: rendererRoot });
+require('./main/conversation/search.cjs').install({ app, ipcMain, BrowserWindow, getRendererRoot: rendererRoot });
 const _releaseNotes = require('./main/release-notes').register({ app, ipcMain, BrowserWindow, root: __dirname, getRendererRoot: rendererRoot,
   identityOf: _deviceAuth.identity, authenticatedIdentityOf: _deviceAuth.authenticatedIdentity });
 /* Per-account cloud computer connection settings stay in the encrypted main
@@ -120,6 +123,13 @@ async function _sessionIdentity(appRef, hub = '', clientId = '') {
     return id;  // staged migration: callers can still report the existing error path
   }
 }
+/* A mobile viewer may request this desktop's screen. The source is read-only,
+   consent-gated, and kept in the main process so renderers cannot silently
+   publish pixels or turn the channel into a control surface. */
+const _remoteScreenSource = require('./main/remote-screen-source.cjs').create({
+  app, dialog, identityOf: _deviceAuth.authenticatedIdentity,
+});
+app.on('will-quit', () => _remoteScreenSource.dispose());
 const _onQuotaExceeded = (detail) => {
     _deviceAuth.clearSession(app, detail || {});
     BrowserWindow.getAllWindows().forEach((win) => {
@@ -141,6 +151,7 @@ _clientUpdater.install({ app, ipcMain, dialog: require('electron').dialog, Brows
   stopLocalWorkload: (ref) => _updateWorkloads.stop(_piSessions, ref),
   setLocalDrain: (value) => _updateWorkloads.setDraining(value) });
 _workPreview.install({ ipcMain, BrowserWindow, WebContentsView, screen, shell, app, appIcon: _appIcon,
+  authorizeAI: _authorizeAI,
   identityOf: _deviceAuth.identity, authenticatedIdentityOf: _deviceAuth.authenticatedIdentity });
 require('./main/app-settings-ipc.cjs').install({ app, ipcMain, safeStorage,
   identityOf: _deviceAuth.authenticatedIdentity,
@@ -804,5 +815,8 @@ ipcMain.handle('screen-get-size', () => {
 
 /* Unregister global shortcuts on exit. */
 app.on('will-quit', () => {
-  globalShortcut.unregisterAll();
+  // Electron can emit will-quit while startup is being aborted (for example
+  // after another instance owns the profile lock). The globalShortcut module
+  // rejects calls before app ready; cleanup must remain safe on that path.
+  if (app.isReady()) globalShortcut.unregisterAll();
 });

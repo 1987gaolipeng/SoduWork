@@ -1,5 +1,5 @@
-import { translateText as tx, localeMap, useLocale } from '../i18n.js'
-import React, { useEffect, useId, useState } from 'react'
+import { getLocale, translateText as tx, localeMap, useLocale } from '../i18n.js'
+import React, { useEffect, useId, useRef, useState } from 'react'
 import { api } from '../api.js'
 import { Icon, Modal, toast, SelectMenu } from '../ui.jsx'
 import './model-runtime.css'
@@ -22,6 +22,8 @@ export default function ModelRuntime({ providers, models, catalogActions, catalo
   const uiLocale = useLocale();
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
+  const [updatedAt, setUpdatedAt] = useState(null)
+  const refreshRef = useRef(null)
   const [edit, setEdit] = useState(null)
   const [servicesOpen, setServicesOpen] = useState(false)
   const servicesId = useId()
@@ -31,52 +33,75 @@ export default function ModelRuntime({ providers, models, catalogActions, catalo
     const refresh = async () => {
       if (pending || document.hidden) return
       pending = true
-      try { const next = await api.modelRuntime(); if (live) { setData(next); setError('') } }
+      try { const next = await api.modelRuntime(); if (live) { setData(next); setUpdatedAt(Date.now()); setError('') } }
       catch (e) { if (live) setError(e.message || tx("运行状态读取失败")) }
       finally { pending = false }
     }
+    refreshRef.current = refresh
     refresh()
     const timer = setInterval(refresh, 5000)
-    return () => { live = false; clearInterval(timer) }
+    return () => { live = false; refreshRef.current = null; clearInterval(timer) }
   }, [])
   const metrics = data?.lastHour || {}
-  const values = [
-    [tx("正在生成"), data ? `${data.running} / ${data.policy.globalConcurrent}` : '—'],
-    [tx("排队等待"), data ? `${data.queued} / ${data.policy.queueSize}` : '—'],
-    [tx("近一小时平均等待"), data ? `${Math.round((metrics.waitMs || 0) / Math.max(1, metrics.started || 0))} ms` : '—'],
-    [tx("超时 / 上游限流"), data ? `${(metrics.timeout || 0) + (metrics.queueTimeout || 0)} / ${metrics.rateLimited || 0}` : '—'],
+  const started = metrics.started || 0
+  const loads = [
+    { key: 'running', label: tx("正在生成"), value: data?.running, limit: data?.policy.globalConcurrent, limitLabel: tx("全站并发上限 {0}", [data?.policy.globalConcurrent ?? '—']) },
+    { key: 'queued', label: tx("排队等待"), value: data?.queued, limit: data?.policy.queueSize, limitLabel: data?.policy.queueSize === 0 ? tx("未启用排队") : tx("全站排队上限 {0}", [data?.policy.queueSize ?? '—']) },
+  ]
+  const recent = [
+    { key: 'wait', label: tx("平均排队等待"), value: data && started > 0 ? Math.round((metrics.waitMs || 0) / started) : null, unit: 'ms', note: !data ? (error ? tx("读取失败") : tx("读取中…")) : started > 0 ? tx("基于 {0} 次已开始请求", [started]) : tx("暂无已开始请求") },
+    { key: 'timeout', label: tx("调用超时"), value: data ? metrics.timeout || 0 : null, unit: tx("次"), note: tx("连接、生成或输出等待超时"), issue: true },
+    { key: 'queueTimeout', label: tx("排队超时"), value: data ? metrics.queueTimeout || 0 : null, unit: tx("次"), note: tx("等待超过排队时限"), issue: true },
+    { key: 'rateLimited', label: tx("上游限流"), value: data ? metrics.rateLimited || 0 : null, unit: tx("次"), note: 'HTTP 429', issue: true },
   ]
   return <section className="model-runtime" aria-label={tx("模型运行情况")}>
     <div className="model-runtime-head"><div><h3>{tx("模型运行情况")}</h3>
-      <p>{tx("经 SoduWork 代理的请求共用容量；等待可取消，生成结束后释放名额。")}</p></div>
+      <p>{tx("查看目录配置，以及经 SoduWork 代理的实时请求与近一小时统计。")}</p></div>
       <div className="model-runtime-actions">{catalogActions}
         <button className="btn btn-ghost xs" disabled={!data || !!error} onClick={() => setEdit(data)}>
           <Icon name="settings" />{tx("并发与等待")}</button></div></div>
+    {error && <div className="model-runtime-state" role="alert"><div><b>{data ? tx("刷新失败，以下显示上次成功读取的数据。") : tx("运行状态暂不可用")}</b><span>{error}</span></div><button className="btn btn-ghost xs" onClick={() => refreshRef.current?.()}>{tx("重试")}</button></div>}
     <div className={'model-runtime-metrics' + (catalogSummary ? ' with-catalog' : '')}>
       {catalogSummary}
-      <div className="model-runtime-facts">
-        {values.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}
-      </div>
+      <section className="model-runtime-live model-runtime-dimension" aria-label={tx("实时负载")}>
+        <header className="model-dimension-head"><Icon name="activity" /><h4>{tx("实时负载")}</h4><small>{tx("每 5 秒刷新")}</small></header>
+        <div className="model-runtime-loads">
+          {loads.map(item => <div key={item.key} className={'model-load-card' + (data && item.limit > 0 && item.value >= item.limit ? ' is-full' : '')}>
+            <div className="model-load-value"><span>{item.label}</span><strong>{data ? item.value : '—'}</strong></div>
+            <small>{item.limitLabel}</small>
+            {data && item.limit > 0 ? <progress max={item.limit} value={Math.min(item.value, item.limit)} aria-label={item.label} /> : <div className="model-load-track" aria-hidden="true" />}
+          </div>)}
+        </div>
+        <p className="model-dimension-note">{tx("服务、密钥、模型和用户的并发上限同时生效。")}</p>
+        <small className="model-runtime-updated">{updatedAt ? tx("上次更新 {0}", [new Date(updatedAt).toLocaleTimeString(getLocale(), { hour12: false })]) : error ? tx("读取失败") : tx("正在读取运行状态…")}</small>
+      </section>
+      <section className="model-runtime-recent model-runtime-dimension" aria-label={tx("近一小时请求情况")}>
+        <header className="model-dimension-head"><Icon name="chart" /><h4>{tx("近一小时请求情况")}</h4></header>
+        <div className="model-runtime-history">
+          {recent.map(item => <div key={item.key} className={'model-runtime-stat' + (item.issue && item.value > 0 ? ' has-issue' : '')}>
+            <span>{item.label}</span><strong>{item.value == null ? '—' : item.value.toLocaleString(getLocale())}{item.value != null && <small>{item.unit}</small>}</strong><p>{item.note}</p>
+          </div>)}
+        </div>
+      </section>
     </div>
     <div className="model-runtime-services">
       <button type="button" className="model-runtime-services-head" aria-expanded={servicesOpen}
         aria-controls={servicesId} onClick={() => setServicesOpen((open) => !open)}>
-        <span className="model-runtime-services-title"><b>{tx("服务与模型")}</b>
+        <span className="model-runtime-services-title"><b>{tx("实时请求分布")}</b>
           <span className="model-runtime-services-count">{data ? tx("{0} 组", [data.groups?.length || 0]) : (error ? tx("读取失败") : tx("读取中…"))}</span></span>
         <span className="model-runtime-services-toggle">{servicesOpen ? tx("收起") : tx("展开")}<Icon name="chevron" aria-hidden="true" /></span>
       </button>
-      {error && <div className="model-runtime-state" role="alert"><span>{error}</span><button className="btn btn-ghost xs" onClick={() => { setError(''); setData(null); api.modelRuntime().then(setData).catch(e => setError(e.message || tx("运行状态读取失败"))) }}>{tx("重试")}</button></div>}
       <div id={servicesId} className="model-runtime-services-body" hidden={!servicesOpen}>
         {!data && !error && <p className="model-runtime-empty">{tx("正在读取运行状态…")}</p>}
-        {!error && data?.groups?.length ? <div className="model-runtime-table" tabIndex={0} role="region" aria-label={tx("服务与模型")}><table><thead><tr><th>{tx("服务 / 模型")}</th><th>{tx("生成中")}</th><th>{tx("等待中")}</th></tr></thead>
+        {!error && data?.groups?.length ? <div className="model-runtime-table" tabIndex={0} role="region" aria-label={tx("实时请求分布")}><table><thead><tr><th>{tx("服务 / 模型")}</th><th>{tx("生成中")}</th><th>{tx("等待中")}</th></tr></thead>
           <tbody>{data.groups.map(g => <tr key={`${g.provider}:${g.model}`}><td>{g.provider} / {g.model}</td>
             <td>{g.running}</td><td>{g.queued}</td></tr>)}</tbody></table></div>
           : null}
-        {!error && data && !data.groups?.length && <p className="model-runtime-empty">{tx("暂无服务与模型运行记录")}</p>}
+        {!error && data && !data.groups?.length && <p className="model-runtime-empty">{tx("当前没有正在生成或排队的请求")}</p>}
       </div>
     </div>
     {edit && <CapacityForm initial={edit} providers={providers} models={models}
-      onClose={() => setEdit(null)} onSaved={() => { setEdit(null); api.modelRuntime().then(setData).catch(e => setError(e.message)) }} />}
+      onClose={() => setEdit(null)} onSaved={() => { setEdit(null); refreshRef.current?.() }} />}
   </section>
 }
 

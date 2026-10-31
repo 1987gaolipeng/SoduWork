@@ -9,21 +9,32 @@ function create() {
     failed = null;
     const snapshot = result && result.snapshot || {};
     const completion = snapshot.completion || {};
+    const modelUnavailable = result?.failureKind === 'model-unavailable' &&
+      result?.retrySafe === true;
     const retryable = typeof completion.retryable === 'boolean'
       ? completion.retryable : errors.describe(completion.error).retryable;
-    if (!item || item.options.controlled || result && (result.cancelled || result.paused || result.recovering) ||
-        completion.reason !== 'error' || !retryable) return;
-    failed = { item, goalMode: Boolean(result.modelRecoveryGoal) };
+    const authExpired = completion.authExpired === true || errors.describe(completion.error).authExpired;
+    if (!item || item.options.controlled || result && (result.cancelled || result.paused || result.recovering)) return;
+    if (!modelUnavailable && (completion.reason !== 'error' || !retryable)) return;
+    failed = { item, goalMode: Boolean(result.modelRecoveryGoal), authExpired, modelUnavailable,
+      failedModelName: String(result.failedModelName || item.options.modelName || '') };
   }
-  function view() { return failed ? { id: failed.item.id, taskId: failed.item.options.taskId || '', available: true } : null; }
+  function view() {
+    return failed ? { id: failed.item.id, taskId: failed.item.options.taskId || '', available: true,
+      requiresModelChange: failed.modelUnavailable, failedModelName: failed.failedModelName } : null;
+  }
   function take(id) {
     if (!failed || id !== failed.item.id) return null;
-    const { item, goalMode } = failed; failed = null;
+    const { item, goalMode, authExpired } = failed; failed = null;
     const originalBeforeTurn = item.options.modelRecovery ? item.options.recoveryBeforeTurn : item.options.beforeTurn;
     return { text: PROMPT, attachments: [], options: { ...item.options,
       retry: true, modelRecovery: true, continuing: true, goalMode,
       recoveryBeforeTurn: originalBeforeTurn,
-      beforeTurn: async function (...args) { await item.options.beforeRetry?.(); await originalBeforeTurn?.apply(this, args); },
+      beforeTurn: async function (...args) {
+        await item.options.beforeRetry?.();
+        await beforeRetry?.({ authExpired });
+        await originalBeforeTurn?.apply(this, args);
+      },
     } };
   }
   return { remember, view, take, clear: () => { failed = null; } };

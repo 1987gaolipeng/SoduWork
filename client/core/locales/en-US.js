@@ -1,5 +1,7 @@
 (function(global) {
   'use strict';
+  // Product localization: 中文「即用」and English「App」are the same concept.
+  // This is intentional, not a literal translation; keep app/jiyong IDs stable.
   const messages = {
     '工作区': 'Workspace', '桌面任务助手': 'Desktop task assistant', '设置': 'Settings', '外观': 'Appearance', '通知': 'Notifications',
     '需求池': "Issues", '团队': 'Team', '收件箱': 'Inbox',
@@ -190,7 +192,7 @@
     '联系方式（回执 TA）': 'Contact (for receipt)',
     '正在加载团队…': 'Loading team…', '刷新团队': 'Refresh team', '暂无成员': 'No members yet',
     '智能体': 'Agents', '工作台': 'Workbench', '能力': 'Capabilities', '连接器': 'Connectors',
-    '插件目录': "Plugin catalog", '技能目录': 'Skill catalog', '应用': 'Apps',
+    '插件目录': "Plugin catalog", '技能目录': 'Skill catalog', '即用': 'App',
     '模型服务': 'Model service', '模型清单': 'Model list', '个人 API Key': 'Personal API key',
     '访问凭据': 'Access credentials', '连接设置': 'Connection settings', '验证': 'Verify',
     '保存并测试': 'Save and test', '不用我的了': 'No longer use mine', '添加模型': 'Add model',
@@ -404,7 +406,7 @@
     '复制内容': 'Copy content', '思考过程': 'Reasoning', '图片生成': 'Image generation', '正在生成图片…': 'Generating image…',
     '看了看有哪些执行机和流程': 'Checking available runners and workflows', '看了看有哪些工具可用': 'Checking available tools',
     '看了看接了哪些外部系统': 'Checking connected external systems', '没有输出': 'No output', '更多历史记录': 'More history',
-    '加载更早记录（': 'Load earlier records (', '恢复这一轮': 'Resume this run', '当前会话没有授权': 'This chat is not authorized for',
+    '加载更早记录（': 'Load earlier records (', '恢复这一轮': 'Resume this run', '重新打开会话': 'Reopen chat', '当前会话没有授权': 'This chat is not authorized for',
     '新建会话并继续': 'Start a new chat and continue', '输入框里已有新内容，请先发送或清空，再恢复上一轮': 'The input contains new content. Send or clear it before restoring the previous turn.',
     '请新建会话并开启对应能力后再使用这个插件': 'Start a new chat and enable the required capability before using this plugin',
     '当前模型不接受图片输入，请切换支持图片的模型或启用视觉适配': 'This model rejected image input. Switch to an image-capable model or enable vision fallback.',

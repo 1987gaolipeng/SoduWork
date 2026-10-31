@@ -208,6 +208,7 @@ function snapshot(state, options, { SCOPES, deriveStatus, statusText }) {
       error: modelErrors.forDisplay(state.lastAssistantError, 200),
       // Recovery must not parse localized display text (network errors have no HTTP code).
       retryable: state.lastStopReason === 'error' && modelErrors.describe(state.lastAssistantError).retryable,
+      authExpired: state.lastStopReason === 'error' && modelErrors.describe(state.lastAssistantError).authExpired,
       protocolIssue: state.protocolIssue ? {
         code: state.protocolIssue.code,
         count: state.protocolIssue.count,

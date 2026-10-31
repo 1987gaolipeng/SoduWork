@@ -116,13 +116,20 @@ async def decisions(session, plugins, user_id):
     user = await session.get(models.User, user_id) if user_id else None
     active = bool(user and user.is_active)
     ancestors = await rbac.ancestor_org_ids(session, user.org_id) if active and user.org_id else set()
+    company_scope = await rbac.company_org_ids(session, user) if active else set()
     role = await session.get(models.Role, user.role_id) if active and user.role_id else None
     manages = bool(active and (user.is_super or role and "plugin.manage" in (role.permissions or [])))
     managed_orgs = await rbac.scope_org_ids(session, user) if manages else set()
     result = {}
     for plugin in values:
         policy = policy_rows.get(plugin.id, public())
-        in_scope = bool(active and (plugin.org_id is None or plugin.org_id in ancestors))
+        # ``organization`` means every member of the company that owns the
+        # plugin.  Keep targeted team/user rules on the plugin subtree, but
+        # do not let the catalog's old department boundary defeat a company-
+        # wide grant for sibling departments.
+        in_scope = bool(active and (plugin.org_id is None
+                                    or company_scope is None
+                                    or plugin.org_id in company_scope))
         manager = bool(manages and (user.is_super or plugin.org_id is not None
                                    and plugin.org_id in managed_orgs))
 
@@ -204,7 +211,7 @@ async def _notify(session, plugin, updated_at):
     query = select(models.Client.id).join(models.User, models.User.id == models.Client.user_ref).where(
         models.Client.id.in_(online), models.User.is_active.is_(True))
     if plugin.org_id:
-        scope = await rbac.subtree_org_ids(session, plugin.org_id)
+        scope = await rbac.company_org_ids_for_org(session, plugin.org_id)
         query = query.where(models.User.org_id.in_(scope))
     devices = (await session.execute(query)).scalars().all()
     event = {"type": "plugins.policy", "pluginId": plugin.id, "updatedAt": updated_at}

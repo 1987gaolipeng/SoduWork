@@ -6,7 +6,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
-const { build, Platform, Arch } = require('./fixtures/isolated-installer-build.cjs');
+const { build, validateFixtureGuid, validateFixtureIdentity, prepareFixtureLauncher, Platform, Arch } = require('./fixtures/isolated-installer-build.cjs');
 function run(file, args, extraEnv = {}) {
   const env = { ...process.env, ...extraEnv };
   delete env.ELECTRON_RUN_AS_NODE;
@@ -20,6 +20,8 @@ async function main() {
   const evidence = path.resolve(process.argv[2]);
   const data = JSON.parse(await fs.readFile(evidence, 'utf8'));
   const { root, installed, id, mode } = data;
+  const guid = validateFixtureGuid(data.guid);
+  const { productName, executableName, shortcutName } = validateFixtureIdentity(data);
   assert.equal(path.dirname(root), os.tmpdir());
   assert.ok(path.basename(root).startsWith('soduwork-update-e2e-'));
   assert.equal(path.dirname(installed), root);
@@ -36,6 +38,7 @@ async function main() {
   let setup;
   if (process.argv.includes('--reuse')) setup = path.join(root, 'corrupt-dist', 'SoduWork-1.0.1-Setup.exe');
   else {
+    await prepareFixtureLauncher(client, data);
     const staging = path.join(client, '.runtime/installer');
     await require('../scripts/native-payload.cjs').writeNativePayload(prepackaged, staging);
     await require('./fixtures/native-payload-fault.cjs').mutateStagedPayload(prepackaged, staging,
@@ -43,12 +46,12 @@ async function main() {
     const outputs = await build({
       targets: Platform.WINDOWS.createTarget(['nsis'], Arch.x64), projectDir: client, prepackaged,
       config: {
-        appId: id, productName: 'SoduWork',
+        appId: id, productName,
         directories: { app: path.join(root, 'fixture'), output: path.join(root, 'corrupt-dist'),
           buildResources: path.join(client, 'build') },
         afterPack: null, afterSign: null, extraResources: [],
-        win: { target: ['nsis'], icon: path.join(client, 'icon.ico'), executableName: 'SoduWork', signAndEditExecutable: false },
-        nsis: { ...base.nsis, include: path.join(client, 'build/installer.nsh'),
+        win: { target: ['nsis'], icon: path.join(client, 'icon.ico'), executableName, signAndEditExecutable: false },
+        nsis: { ...base.nsis, guid, shortcutName, artifactName: productName + '-${version}-Setup.exe', include: path.join(client, 'build/installer.nsh'),
           installerIcon: path.join(client, 'icon.ico'), uninstallerIcon: path.join(client, 'icon.ico'),
           createDesktopShortcut: false, createStartMenuShortcut: false, runAfterFinish: false },
         compression: 'store', npmRebuild: false,

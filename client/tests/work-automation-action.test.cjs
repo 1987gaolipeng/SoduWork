@@ -62,7 +62,7 @@ test('automation sheet translates model selector text on initial render and refr
     '当前底座自行管理模型': 'This runtime manages its model',
     '模型与执行底座独立保存，每次自动化运行使用这里的选择': 'The model is saved independently and each run uses this choice',
   };
-  const context = { Intl, setTimeout, clearTimeout };
+  const context = { Intl, setTimeout, clearTimeout, document: { createElement: tag => ({ tagName: tag }) } };
   context.window = context;
   context.SoduWorkI18n = { translateText: value => translations[value] || value };
   const marker = '  global.WorkAutomationSheet = { open, active, refine, close };';
@@ -81,11 +81,12 @@ test('automation sheet translates model selector text on initial render and refr
   assert.doesNotMatch(initial, /请选择模型|模型与执行底座独立保存/);
   assert.match(modelRows('missing-model', 'local:pi'), /missing-model \(saved; currently unavailable\)/);
 
-  const select = { value: '', innerHTML: '', disabled: false };
+  const select = { value: '', options: [], disabled: false, replaceChildren(...options) { this.options = options; } };
   const form = { elements: { modelName: select, assigneeId: { value: 'local:pi' } } };
   state.layer = { querySelector(selector) { return selector === '#wazForm' ? form : null; } };
   refreshModelField();
-  assert.match(select.innerHTML, /Choose a model/);
+  assert.equal(select.options[0].textContent, 'Choose a model');
+  assert.equal(select.options[0].disabled, true);
   assert.equal(select.disabled, false);
 
   assert.match(modelField('', 'local:codex'), /Managed by this runtime/);

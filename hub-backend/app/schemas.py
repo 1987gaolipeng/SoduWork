@@ -389,7 +389,7 @@ def integration_to_api(i, stats: dict | None = None,
 
 
 def attachment_to_api(a) -> dict[str, Any]:
-    from .services import resource_access
+    from .services import delivery_manifest, resource_access
 
     ct = a.content_type or ""
     uploaded = getattr(a, "uploaded_by", None) or ""
@@ -397,6 +397,10 @@ def attachment_to_api(a) -> dict[str, Any]:
     role = getattr(a, "role", None) or ("output" if by_agent else "input")
     if role == "input" and (by_agent or str(uploaded).lower() in {"soduwork ai", "soduwork"}):
         role = "output"  # Legacy role defaults must not classify AI outputs as human inputs.
+    evidence_meta = getattr(a, "evidence_meta", None) or {}
+    explicit_category = str(evidence_meta.get("category") or "").strip().lower()
+    category = explicit_category if explicit_category in {"primary", "supporting", "evidence", "internal"} else \
+        delivery_manifest.classify_name(a.filename, role=role, meta=evidence_meta)
     return {
         "id": a.id,
         "taskId": a.task_id,
@@ -415,7 +419,8 @@ def attachment_to_api(a) -> dict[str, Any]:
         "sourceRef": getattr(a, "source_ref", None) or "",
         "workflowRunId": getattr(a, "workflow_run_id", None) or "",
         "nodeRunId": getattr(a, "node_run_id", None) or "",
-        "evidenceMeta": getattr(a, "evidence_meta", None) or {},
+        "evidenceMeta": evidence_meta,
+        "category": category,
     }
 
 

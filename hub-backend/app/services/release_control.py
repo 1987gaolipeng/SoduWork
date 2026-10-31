@@ -50,7 +50,7 @@ async def bootstrap(session: AsyncSession) -> None:
             rules=approval_routing.default_rules("baseline"), is_system=True),
         am.ApprovalPolicy(
             id=POLICY_REVIEW, key="artifact-review", name="产出审阅",
-            description="由需求相关人、项目负责人或具备交付审阅职责的人员判断产出是否达到要求",
+            description="由需求创建人判断交付产出是否达到要求",
             rules=approval_routing.default_rules("review"), is_system=True),
         am.ApprovalPolicy(
             id=POLICY_UAT, key="test-acceptance", name="测试验收",
@@ -290,7 +290,8 @@ async def ensure_output_candidate(session: AsyncSession, task: models.Task, mani
                                   source_ref: str = "", who: str = "SoduWork") -> tuple[am.ArtifactVersion, bool]:
     url = (task.artifact_url or "").strip()
     text = str((manifest or {}).get("text") or "").strip()[:20000]
-    kind = ("files" if (manifest or {}).get("files") else
+    kind = ("manual" if (manifest or {}).get("manual") else
+            "files" if (manifest or {}).get("files") else
             "url" if url else "text" if text else "files")
     payload = {**(manifest or {}), "url": url, **({"text": text} if text else {})}
     return await _new_artifact(session, task, kind=kind, payload=payload,
@@ -389,7 +390,34 @@ async def ensure_current_output(session: AsyncSession, task: models.Task, *, sou
         # conversation instead of being disguised as a downloadable artifact.
         manifest = {**manifest, "text": text, "complete": True}
     if not manifest.get("primary") and not manifest.get("url") and not text:
-        raise ValueError("这条需求还没有可审阅的产出")
+        # A manually submitted requirement may intentionally have no file, URL, or
+        # assistant answer.  It still needs an immutable review target so the
+        # responsible person can record an acceptance decision and keep the audit
+        # chain complete.  Only allow this for tasks without a declared output
+        # contract; artifact-producing tasks must continue to fail closed.
+        routing = dict(task.work_routing or {})
+        contract = dict(routing.get("outputContract") or {})
+        has_declared_output = bool(
+            contract.get("kind") or contract.get("deliverables") or
+            contract.get("expectedArtifacts") or contract.get("outputs") or
+            str(getattr(task, "artifact_url", "") or "").strip()
+        )
+        submission_mode = str(routing.get("executionSubmissionMode") or "").strip().lower()
+        if not submission_mode:
+            submission_mode = "auto" if has_declared_output else "manual"
+        if submission_mode == "manual" and not has_declared_output and not manifest.get("problems"):
+            from . import delivery_manifest
+            manifest = {
+                "schemaVersion": delivery_manifest.SCHEMA_VERSION,
+                "complete": True,
+                "manual": True,
+                "summary": "本轮没有文件或链接交付物，由负责人按实际结果确认",
+                "files": [], "primary": [], "supporting": [],
+                "evidence": [], "internal": [], "problems": [],
+                "counts": {"primary": 0, "supporting": 0, "evidence": 0, "internal": 0},
+            }
+        else:
+            raise ValueError("这条需求还没有可审阅的产出")
     if not manifest.get("complete"):
         problems = list(manifest.get("problems") or [])
         reason = str((problems[0] if problems else {}).get("detail") or "成果结构尚未通过校验")

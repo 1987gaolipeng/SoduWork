@@ -47,6 +47,14 @@
     'release.deploy_queued': '排入环境发布', 'plugin.gerrit_merged': '代码已合并',
     'task.evaluated': '完成需求评价', 'evolution.proposed': '形成改进建议',
     'task.execution_started': '更新执行状态',
+    'execution.started': '执行会话已开始',
+    'conversation.turn': '需求执行',
+    'artifact.delivery_deferred': '产出暂存待确认',
+    'artifact.delivery_waiting_manual': '产出等待手动提交',
+    'artifact.submitted_for_review': '产出已提交验收',
+    'artifact.review_cancelled': '验收单已撤回',
+    'artifact.delivery_rejected': '产出未通过交付检查',
+    'ai.session_reconciled': '执行会话状态已校正',
     'evolution.accepted': '采纳改进建议', 'evolution.rejected': '驳回改进建议',
     'evolution.applied': '改进已进入新版本',
   };
@@ -615,20 +623,78 @@
       '</div></details>';
   }
 
+  const TURN_STATE_TEXT = {
+    queued: '已排队，等待执行', running: '已开始执行', waiting: '等待补充或人工处理',
+    completed: '本轮执行完成', failed: '本轮执行失败', cancelled: '本轮执行已取消',
+  };
+
+  function eventTimestamp(value) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      // TaskEvent.to_api returns epoch milliseconds. Accept seconds too so
+      // older integrations do not sort a valid event as year 51382.
+      return value < 100000000000 ? value * 1000 : value;
+    }
+    const text = String(value || '').trim();
+    if (!text) return 0;
+    const numeric = Number(text);
+    if (Number.isFinite(numeric)) return numeric < 100000000000 ? numeric * 1000 : numeric;
+    const parsed = Date.parse(text);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  const TURN_EVENT_TEXT = {
+    queued: '执行已排队', running: '执行已开始', waiting: '执行等待处理',
+    completed: '执行本轮已完成', failed: '执行本轮失败', cancelled: '执行本轮已取消',
+  };
+
+  function timelineEventText(item) {
+    const kind = String((item || {}).kind || '');
+    const detail = (item || {}).detail || {};
+    if (kind === 'conversation.turn') return TURN_EVENT_TEXT[String(detail.state || '')] || '执行状态已更新';
+    if (EVENT_TEXT[kind]) return EVENT_TEXT[kind];
+    /* Keep newly added server events readable until a dedicated translation is added. */
+    return kind ? kind.replace(/[._-]+/g, ' · ') : '需求更新';
+  }
+
   function eventSummary(item) {
     const d = item.detail || {};
-    return [d.toStage, d.to, d.note, d.summary, d.environmentName, d.commit && String(d.commit).slice(0, 12)]
-      .filter(Boolean).join(' · ');
+    const parts = [];
+    if (item.kind === 'conversation.turn' && d.state) parts.push('状态：' + (TURN_STATE_TEXT[d.state] || d.state));
+    if (d.executor) parts.push('执行方式：' + ({ native: '本机对话', workflow: '工作流', dispatch: '执行机' }[d.executor] || d.executor));
+    if (d.fromStage || d.toStage) parts.push([d.fromStage, d.toStage].filter(Boolean).join(' → '));
+    if (d.from || d.to) parts.push([d.from, d.to].filter(Boolean).join(' → '));
+    parts.push(d.note, d.summary, d.reason, d.environmentName, d.commit && String(d.commit).slice(0, 12));
+    if (Array.isArray(d.files) && d.files.length) parts.push('文件 ' + d.files.slice(0, 3).join('、') + (d.files.length > 3 ? ' 等' : ''));
+    return parts.filter(Boolean).join(' · ');
+  }
+
+  function timelineDateText(value) {
+    const timestamp = eventTimestamp(value);
+    if (!timestamp) return '';
+    const d = new Date(timestamp);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleString((globalThis.SoduWorkI18n?.getLocale() || 'zh-CN'), {
+      timeZone: 'Asia/Shanghai',
+      month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+  }
+
+  function timelineRows(list) {
+    return list.map((item, index) => ({ item, index })).sort((a, b) => {
+      const atA = eventTimestamp(a.item.at);
+      const atB = eventTimestamp(b.item.at);
+      return atB - atA || b.index - a.index;
+    }).slice(0, 40).map(({ item }) => item);
   }
 
   function timelineHtml(list) {
     if (!list || !list.length) return '';
-    const rows = list.slice().reverse().slice(0, 40);
+    const rows = timelineRows(list);
     return '<details class="tfd-group tfd-timeline" data-tfd-open="timeline"><summary><span><i class="tfd-group-icon is-time"></i>' +
-      '<b>审计时间线</b><small>' + list.length + ' 条记录</small></span><svg viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg></summary>' +
-      '<ol>' + rows.map((item) => '<li><i></i><div><b>' + esc(EVENT_TEXT[item.kind] || item.kind || '需求更新') + '</b>' +
+      '<b>审计时间线</b><small>' + list.length + ' 条记录 · 按实际发生时间倒序</small></span><svg viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg></summary>' +
+      '<ol>' + rows.map((item) => '<li><i></i><div><b>' + esc(timelineEventText(item)) + '</b>' +
         (eventSummary(item) ? '<span>' + esc(eventSummary(item)) + '</span>' : '') + '</div><small>' +
-        esc([item.actor, dateText(item.at)].filter(Boolean).join(' · ')) + '</small></li>').join('') + '</ol></details>';
+        esc([item.actor, timelineDateText(item.at)].filter(Boolean).join(' · ')) + '</small></li>').join('') + '</ol></details>';
   }
 
   function html(trace, rawOpts) {

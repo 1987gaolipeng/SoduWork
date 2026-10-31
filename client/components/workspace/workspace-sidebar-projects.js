@@ -260,6 +260,17 @@
     global.addEventListener('soduwork-data-scope-changed', refreshAccount);
     global.WorkspaceSidebarDrag.install({ root, find: id => allItems().find(row => String(row.id) === id), move });
     return {
+      searchProjects: () => state().get().projects.map(project => ({ ...project, folders: project.folders.slice(), chatIds: project.chatIds.slice() })),
+      openSearchProject(id) {
+        const data = state().get(), project = data.projects.find(item => item.id === id);
+        if (!project) throw Error('SEARCH_PROJECT_UNAVAILABLE');
+        if (data.collapsed) state().collapse();
+        if (project.collapsed) state().collapse(id);
+        if (global.WorkspaceShell?.mode === 'settings') global.WorkspaceHost.open('create', {});
+        render();
+        const node = [...list.children].find(item => item.dataset.projectId === id);
+        node?.scrollIntoView({ block: 'nearest' }); node?.querySelector('.ws-project-toggle')?.focus();
+      },
       pins: () => new Set(state().get().pins),
       projectForChat(id) {
         const wanted = String(id || '');

@@ -26,10 +26,13 @@ class _Base(unittest.IsolatedAsyncioTestCase):
         session.add(models.Client(id="device-owner", name="本机", user_ref="u-exec"))
         session.add(models.User(id="u-requester", username="requester",
                                 display_name="王振义", is_active=True))
+        session.add(models.User(id="u-exec", username="executor", is_active=True))
+        await session.flush()
         # These regressions exercise automatic review; undeclared tasks default to manual submission.
         session.add(models.Task(
             id="scene-task", title="写一个网页游戏", status="doing",
             owner_client_id="device-owner", requester_user_id="u-requester",
+            created_by="u-requester",
             work_routing={"executionSubmissionMode": "auto",
                           "conversationTurn": {"turnId": "turn-9", "conversationId": "conv-9",
                                                "state": turn_state}}))
@@ -90,7 +93,31 @@ class IncompleteTurnDeliveryTests(_Base):
             requests = await self._requests(session)
             self.assertEqual([r.action for r in requests], ["review"])
             self.assertEqual([r.status for r in requests], ["pending"])
+            assignments = (await session.scalars(select(am.ApprovalAssignment).where(
+                am.ApprovalAssignment.request_id == requests[0].id))).all()
+            self.assertEqual([row.user_id for row in assignments], ["u-requester"])
             self.assertIn("artifact.submitted_for_review", await self._event_kinds(session))
+        finally:
+            await self._dispose(engine, session)
+
+
+    async def test_completed_delivery_without_creator_remains_unassigned(self):
+        engine, session, task = await self._prepared()
+        try:
+            task.created_by = None
+            await session.commit()
+            await conversation_turns.deliver_artifacts(
+                session, task, conversation_id="conv-9", turn_id="turn-9",
+                provider="conversation", outcome="completed",
+                files=[("review.md", b"Complete report", "text/markdown")])
+            requests = await self._requests(session)
+            self.assertEqual([r.status for r in requests], ["pending"])
+            assignments = (await session.scalars(select(am.ApprovalAssignment).where(
+                am.ApprovalAssignment.request_id == requests[0].id))).all()
+            self.assertEqual(assignments, [])
+            kinds = await self._event_kinds(session)
+            self.assertIn("approval.unassigned", kinds)
+            self.assertNotIn("artifact.submitted_for_review", kinds)
         finally:
             await self._dispose(engine, session)
 

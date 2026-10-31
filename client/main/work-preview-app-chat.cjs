@@ -9,10 +9,10 @@ function send(item, params, attachmentOwner = item) {
   const wc = item.composer?.view?.webContents;
   if (!wc || wc.isDestroyed()) return Promise.resolve({ ok: false, reason: '应用对话栏尚未就绪' });
   const receipts = item.chatReceipts ||= new Map();
-  const fingerprint = JSON.stringify([params.text, params.attachmentIds || []]);
+  const fingerprint = JSON.stringify([options.mention === true,params.recipientUserId || '',params.query || '',params.text, params.attachmentIds || []]);
   const previous = receipts.get(params.requestId);
   if (previous) return previous.fingerprint === fingerprint && previous.owner === attachmentOwner ? previous.promise : Promise.resolve({ ok: false, reason: '请求编号已被其他内容使用' });
-  if (receipts.size >= 100) return Promise.resolve({ ok: false, reason: '本窗口发送次数已达上限，请重新打开应用' });
+  if (receipts.size >= 100) return Promise.resolve({ ok: false, reason: '本窗口发送次数已达上限，请重新打开即用' });
   const id = require('node:crypto').randomUUID();
   let resolve;
   const promise = new Promise(done => { resolve = done; });
@@ -36,7 +36,7 @@ function send(item, params, attachmentOwner = item) {
         wc.send('app-composer-submit', { id, text: params.text, attachments: lease.files });
       } catch (error) { finish(wc, { id, ok: false, reason: error.message }); }
     })();
-  } else wc.send('app-composer-submit', { id, text: params.text });
+  } else wc.send('app-composer-submit', { id, text: params.text,...(options.mention ? {kind:'mention',mention:{recipientUserId:params.recipientUserId,query:params.query,text:params.text}} : {}) });
   return promise;
 }
 function finish(sender, payload) {
@@ -48,7 +48,7 @@ function finish(sender, payload) {
   const ok = active && payload.ok === true;
   void row.lease?.release().catch(() => {});
   if (!ok) row.item.chatReceipts.delete(row.params.requestId);
-  row.resolve({ ok, accepted: ok, ...(ok ? {} : { reason: String(payload.reason || '对话发送失败，请查看右侧提示').slice(0, 300) }) });
+  row.resolve({ok,...(row.options.mention ? {opened:ok,...(ok ? {state:payload.state === 'select' ? 'select' : 'review'} : {})} : {accepted:ok}),...(ok ? {} : {reason})});
   return { ok: true };
 }
 function deferClose(item, win, event) {

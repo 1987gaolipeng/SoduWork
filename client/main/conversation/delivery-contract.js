@@ -63,8 +63,13 @@ const PROCESS_WORDS = [
   'test', 'spec', 'fixture', 'mock', 'cache', 'debug', 'trace', 'log',
   'screenshot', 'screen-shot', 'command-output', 'terminal-output',
   'browser-output', 'tool-output', '\u4e34\u65f6', '\u8349\u7a3f',
-  '\u6d4b\u8bd5', '\u622a\u56fe',
+  '\u622a\u56fe',
 ];
+// A deliverable title can legitimately contain words such as “测试方案” or
+// “测试工具”. Treat the Chinese “测试” marker as process evidence only when
+// it names a report/result, matching the server-side delivery classifier.
+const PROCESS_PHRASES = ['\u6d4b\u8bd5\u62a5\u544a', '\u6d4b\u8bd5\u7ed3\u679c',
+  '\u6d4b\u8bd5\u8bc1\u636e', '\u9a8c\u6536\u62a5\u544a', '\u9a8c\u6536\u8bc1\u636e'];
 const FINAL_WORDS = [
   'final', 'result', 'report', 'summary', 'deliverable', 'output',
   'proposal', 'presentation', 'prototype', '\u6210\u679c', '\u7ed3\u679c',
@@ -101,6 +106,20 @@ function inside(root, target) {
 function hasWord(value, words) {
   const text = String(value || '').toLowerCase();
   return words.some((word) => text.includes(word));
+}
+
+function isProcessName(value) {
+  const text = String(value || '').toLowerCase();
+  if (PROCESS_PHRASES.some((phrase) => text.includes(phrase))) return true;
+  return PROCESS_WORDS.some((word) => {
+    // Keep short ASCII markers boundary-aware so names like “latest.md” do
+    // not become process evidence merely because they contain “test”.
+    if (/^[a-z0-9-]+$/.test(word)) {
+      const escaped = word.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&');
+      return new RegExp('(^|[^a-z0-9])' + escaped + '([^a-z0-9]|$)', 'i').test(text);
+    }
+    return text.includes(word);
+  });
 }
 
 function publicFile(file, spec, cwd) {
@@ -220,7 +239,7 @@ function isProcess(file) {
   // A delivery manifest can still explicitly declare a requested screenshot.
   const verificationShot = kindOf(name) === 'image' &&
     /^(?:verify|verification)[-_.](?:shot|frame)(?:[-_.]?\d+)?$/i.test(stem);
-  return inProcessDir || configured || verificationShot || hasWord(stem, PROCESS_WORDS);
+  return inProcessDir || configured || verificationShot || isProcessName(stem);
 }
 
 function websiteRank(file) {

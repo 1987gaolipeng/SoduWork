@@ -51,6 +51,7 @@ function fixture(options = {}) {
   const window = {
     SoduWorkI18n: options.i18n,
     RequirementConfirm: {isOpen: () => Boolean(options.confirmation?.())},
+    SoduWorkGlobalSearch: { open: () => commands.push('global-search'), isOpen: () => false },
     addEventListener(type, handler, capture) {
       if (type === 'keydown') keyListeners.push({ handler, capture }); else windowListeners.set(type, handler);
     },
@@ -178,11 +179,11 @@ test('a migrated settings shortcut never takes another saved action silently', (
   assert.match(f.list.innerHTML, /has-conflict/);
 });
 
-test('all 20 fixed commands reach their actual application owner', async () => {
+test('all 21 fixed commands reach their actual application owner', async () => {
   const expectedRoutes = { 'open-home': 'create', 'open-task-pool': 'history', 'new-requirement': 'history',
     'open-acceptance': 'history', 'open-plugins': 'skills', 'open-schedules': 'schedules', 'open-library': 'library',
     'open-settings': 'settings', 'open-shortcuts': 'shortcuts' };
-  const catalog = fixture().api.DEFAULT_SHORTCUTS; assert.equal(catalog.length, 20);
+  const catalog = fixture().api.DEFAULT_SHORTCUTS; assert.equal(catalog.length, 21);
   for (const row of catalog) {
     const f = fixture({ composer: 'chat' }), event = f.press(row.binding); await settle();
     assert.equal(event.defaultPrevented, true, row.id); assert.equal(event.immediateStopped, true, row.id);
@@ -195,6 +196,7 @@ test('all 20 fixed commands reach their actual application owner', async () => {
     else if (row.id === 'open-about') assert.deepEqual(f.commands, ['about']);
     else if (row.id === 'toggle-sidebar') assert.equal(f.sidebar.length, 1);
     else if (row.id === 'focus-search') assert.equal(f.search.focused, true);
+    else if (row.id === 'open-global-search') assert.deepEqual(f.commands, ['global-search']);
     else if (row.id === 'focus-composer') assert.equal(f.chatInput.focused, true);
     else if (row.id === 'send-message') assert.deepEqual(f.sends, [[]]);
     else if (row.capture) {
@@ -209,7 +211,7 @@ test('grouped list has readable modifier keycaps and no obsolete dashboards or f
   for (const platform of ['Win32', 'MacIntel']) {
     const f = fixture({ platform }); f.api.open();
     assert.equal((f.list.innerHTML.match(/class="shortcut-group"/g) || []).length, 4);
-    assert.equal((f.list.innerHTML.match(/data-shortcut-row=/g) || []).length, 20);
+    assert.equal((f.list.innerHTML.match(/data-shortcut-row=/g) || []).length, 21);
     assert.match(f.list.innerHTML, platform === 'MacIntel' ? /<kbd class="shortcut-keycap">⌘<\/kbd>/ : /<kbd class="shortcut-keycap">Ctrl<\/kbd>/);
     assert.doesNotMatch(f.list.innerHTML, /系统菜单固定|data-shortcut-filter|data-shortcut-category|data-shortcut-export/);
   }

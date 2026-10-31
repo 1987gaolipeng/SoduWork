@@ -16,6 +16,38 @@ const row = (version = '2.0.0', locale = 'en-US') => ({ version, locale, summary
 const response = (releases, nextOffset = null) => ({ ok: true,
   text: async () => JSON.stringify({ currentVersion: '2.0.0', releases, nextOffset }) });
 
+test('four languages select exact server and offline content without sharing locale caches', async t => {
+  const summaries = { 'zh-CN': '版本说明。', 'en-US': 'Release notes.',
+    'ja-JP': '更新内容です。', 'ko-KR': '업데이트 안내입니다.' };
+  let calls = 0;
+  const f = setup(t, { request: async url => {
+    calls++;
+    const locale = new URL(url).searchParams.get('locale');
+    return response([{ ...row('2.0.0', locale), summary: summaries[locale], fallback: false }]);
+  } });
+  const source = createSource(f.options);
+  for (const locale of Object.keys(summaries)) {
+    const release = (await source.list(locale)).releases[0];
+    assert.equal(release.locale, locale);
+    assert.equal(release.summary, summaries[locale]);
+    assert.equal(release.fallback, false);
+  }
+  assert.equal(calls, 4);
+  fs.mkdirSync(path.join(f.options.root, 'main'));
+  fs.writeFileSync(path.join(f.options.root, 'main/release-history.json'), JSON.stringify({ releases: [
+    { version: '2.0.0', locales: Object.fromEntries(Object.entries(summaries).map(([locale, summary]) =>
+      [locale, { summary, sections: [] }])) }
+  ] }));
+  const offline = createSource({ ...f.options, directory: path.join(f.options.root, 'fresh-profile'),
+    request: async () => { throw Error('offline'); } });
+  for (const locale of Object.keys(summaries)) {
+    const release = (await offline.list(locale)).releases[0];
+    assert.equal(release.locale, locale);
+    assert.equal(release.summary, summaries[locale]);
+    assert.equal(release.fallback, false);
+  }
+});
+
 test('loads authenticated pages, filters future versions, coalesces requests and persists cache', async t => {
   let calls = 0;
   const f = setup(t, { request: async (url, options) => {

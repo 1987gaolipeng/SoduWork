@@ -12,6 +12,8 @@
     "check:layout": "node ../tools/check-repository-layout.cjs",
     "check:source-size": "node ../tools/check-source-size.cjs",
     "check:security": "node ../tools/check-unsanitized-html.cjs",
+    "check:runtime": "node scripts/verify-runtime.cjs",
+    "check:runtime:packaged": "node scripts/verify-runtime.cjs --packaged",
     "test:e2e:user": "node e2e/user-journeys.mjs",
     "test:e2e:local": "node e2e/verify-local.cjs",
     "test:e2e:runtime-process": "node e2e/agent-runtime-process.cjs && node e2e/agent-runtime-storage.cjs",
@@ -20,6 +22,7 @@
     "test:e2e:multi-runtime-plugin": "node e2e/multi-runtime-plugin.cjs",
     "test:e2e:memory": "node e2e/session-memory-personal.cjs && node e2e/personal-memory-automatic.cjs && node e2e/session-memory-import.cjs",
     "prepare:pi-cache": "node scripts/patch-pi-extension-cache.cjs",
+    "prepare:pi-retry": "node scripts/patch-pi-retry-schedule.cjs",
     "prepare:shell-runtime": "node scripts/prepare-shell-runtime.cjs",
     "prepare:runner": "node scripts/prepare-runner.cjs",
     "prebuild": "npm run prepare:runner && npm run prepare:pi-cache && npm run prepare:shell-runtime",
@@ -85,6 +88,9 @@
       "!node_modules/**"
     ],
     "extraResources": [
+      { "from": "runtime-manifest.json", "to": "runtime-manifest.json" },
+      { "from": ".runtime/node", "to": "node" },
+      { "from": ".runtime/python", "to": "python", "filter": ["**/*", "!Lib/idlelib/help.html", "!**/__pycache__/**", "!**/*.pyc"] },
       {
         "from": "../LICENSE",
         "to": "LICENSE.txt"
@@ -169,6 +175,7 @@
     ],
     "win": {
       "extraResources": [
+        { "from": ".runtime/node/node_modules", "to": "node/node_modules", "filter": ["**/*", "!npm/docs/output/**"] },
         {
           "from": "runner",
           "to": "runner",

@@ -16,7 +16,7 @@ function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-skill-studio-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const source = path.join(root, 'purchase-check');
-  fs.cpSync(example, source, { recursive: true });
+  await fs.promises.cp(example, source, { recursive: true });
   // Mutation fixtures use LF delimiters regardless of the checkout's line endings.
   const skill = path.join(source, 'SKILL.md');
   fs.writeFileSync(skill, fs.readFileSync(skill, 'utf8').replace(/\r\n/g, '\n'));
@@ -28,8 +28,8 @@ function fixture(t) {
   const edit = fn => write('SKILL.md', fn(fs.readFileSync(path.join(source, 'SKILL.md'), 'utf8')));
   return { root, source, write, edit, out: path.join(root, 'delivery'), app: { getPath: () => root } };
 }
-test('built-in is usable in the existing conversation catalog, without any enterprise install', t => {
-  const f = fixture(t), item = personal.catalog(f.app).find(x => x.pluginId === personal.SKILL_STUDIO_ID);
+test('built-in is usable in the existing conversation catalog, without any enterprise install', async t => {
+  const f = await fixture(t), item = personal.catalog(f.app).find(x => x.pluginId === personal.SKILL_STUDIO_ID);
   assert.equal(item.name, 'Skill 创建与优化');
   assert.equal(item.builtIn, true);
   assert.equal(item.capabilities.hasWorkflow, false);
@@ -46,8 +46,8 @@ test('built-in is usable in the existing conversation catalog, without any enter
   assert.equal(JSON.parse(run.stdout).exports.length, 5);
   assert.equal(fs.existsSync(path.join(f.root, 'personal-plugins.json')), false);
 });
-test('all targets contain real packages and SoduWork draft can install and resolve the same skill', t => {
-  const f = fixture(t);
+test('all targets contain real packages and SoduWork draft can install and resolve the same skill', async t => {
+  const f = await fixture(t);
   f.write('assets/报价.csv', '物料,数量\n灯具,2\n');
   const report = build(f);
   assert.deepEqual(report.exports.map(x => x.target), ['portable', 'codex', 'claude', 'copilot', 'soduwork']);
@@ -67,10 +67,10 @@ test('all targets contain real packages and SoduWork draft can install and resol
   assert.match(personal.resolve(f.app, [installed.plugin.pluginId], { cwd: f.root }).items[0].context, /references\/source\/SKILL.md/);
   assert.equal(personal.create(f.app, draft).created, false);
 });
-test('adjustment preserves all original materials and reports only actual changes', t => {
-  const f = fixture(t), original = path.join(f.root, 'original', 'purchase-check');
+test('adjustment preserves all original materials and reports only actual changes', async t => {
+  const f = await fixture(t), original = path.join(f.root, 'original', 'purchase-check');
   f.write('assets/约束.txt', '保留原业务条款');
-  fs.cpSync(f.source, original, { recursive: true });
+  await fs.promises.cp(f.source, original, { recursive: true });
   const before = fs.readFileSync(path.join(original, 'SKILL.md'));
   f.edit(text => text + '\n新增：交付前复核数量单位。\n');
   const report = build({ ...f, baseline: original, version: '1.0.1' });
@@ -79,24 +79,24 @@ test('adjustment preserves all original materials and reports only actual change
   assert.deepEqual(fs.readFileSync(path.join(original, 'SKILL.md')), before);
   assert.equal(fs.readFileSync(path.join(f.out, 'source/purchase-check/assets/约束.txt'), 'utf8'), '保留原业务条款');
 });
-test('removal is blocked until explicitly acknowledged; original remains intact', t => {
-  const f = fixture(t), baseline = path.join(f.root, 'original', 'purchase-check');
-  fs.cpSync(f.source, baseline, { recursive: true });
+test('removal is blocked until explicitly acknowledged; original remains intact', async t => {
+  const f = await fixture(t), baseline = path.join(f.root, 'original', 'purchase-check');
+  await fs.promises.cp(f.source, baseline, { recursive: true });
   fs.writeFileSync(path.join(baseline, 'LICENSE'), 'An existing license');
   assert.throws(() => build({ ...f, baseline }), /remove files/);
   assert.equal(fs.existsSync(f.out), false);
   assert.ok(build({ ...f, baseline, allowRemovals: true }).changes.some(x => x.status === 'removed'));
   assert.ok(fs.existsSync(path.join(baseline, 'LICENSE')));
 });
-test('building is deterministic and never overwrites previous outputs', t => {
-  const f = fixture(t);
+test('building is deterministic and never overwrites previous outputs', async t => {
+  const f = await fixture(t);
   const a = build(f), b = build({ ...f, out: path.join(f.root, 'second') });
   assert.deepEqual(a.exports, b.exports);
   assert.throws(() => build(f), /already exists/);
   assert.throws(() => build({ ...f, out: path.join(f.source, 'output') }), /inside the source/);
 });
-test('package scripts are not executed during validate, export, install or resolve', t => {
-  const f = fixture(t), sentinel = path.join(f.root, 'must-not-exist');
+test('package scripts are not executed during validate, export, install or resolve', async t => {
+  const f = await fixture(t), sentinel = path.join(f.root, 'must-not-exist');
   f.write('scripts/business.cjs', 'require("node:fs").writeFileSync(' + JSON.stringify(sentinel) + ',"BAD");');
   build(f);
   const draft = JSON.parse(fs.readFileSync(path.join(f.out, 'soduwork-plugin-draft.json')));
@@ -104,16 +104,16 @@ test('package scripts are not executed during validate, export, install or resol
   personal.resolve(f.app, [made.plugin.pluginId], { cwd: f.root });
   assert.equal(fs.existsSync(sentinel), false);
 });
-test('Claude invocation policy is preserved and cannot be silently lost in other formats', t => {
-  const f = fixture(t);
+test('Claude invocation policy is preserved and cannot be silently lost in other formats', async t => {
+  const f = await fixture(t);
   f.edit(text => text.replace('\n---\n\n', '\ndisable-model-invocation: true\n---\n\n'));
   assert.throws(() => build(f), /Claude-only/);
   const report = build({ ...f, targets: 'portable,claude' });
   assert.equal(report.exports.length, 2);
   assert.match(fs.readFileSync(path.join(f.out, 'source/purchase-check/SKILL.md'), 'utf8'), /disable-model-invocation: true/);
 });
-test('existing Codex policy/dependencies are preserved and require deliberate cross-host adaptation', t => {
-  const f = fixture(t), yaml = 'policy:\n  allow_implicit_invocation: false\n';
+test('existing Codex policy/dependencies are preserved and require deliberate cross-host adaptation', async t => {
+  const f = await fixture(t), yaml = 'policy:\n  allow_implicit_invocation: false\n';
   f.write('agents/openai.yaml', yaml);
   assert.throws(() => build(f), /Codex configuration/);
   build({ ...f, targets: 'portable,codex' });
@@ -129,35 +129,35 @@ for (const [label, change, pattern] of [
   ['path escaping link', s => s + '\n[外部](..%2F..%2Foutside.txt)\n', /out-of-package/],
   ['absolute link', s => s + '\n[外部](file:///C:/private.txt)\n', /Non-portable/],
 ]) {
-  test('rejects ' + label + ' without writing output', t => {
-    const f = fixture(t); f.edit(change);
+  test('rejects ' + label + ' without writing output', async t => {
+    const f = await fixture(t); f.edit(change);
     assert.throws(() => build(f), pattern);
     assert.equal(fs.existsSync(f.out), false);
   });
 }
-test('folded descriptions and flat metadata are accepted without rewriting source', t => {
-  const f = fixture(t);
+test('folded descriptions and flat metadata are accepted without rewriting source', async t => {
+  const f = await fixture(t);
   f.edit(s => s.replace(/^description:.*$/m, 'description: >-\n  Check purchasing inputs.\n  Report missing evidence.\nmetadata:\n  version: "1.0"\n  owner: "Operations"'));
   const report = build(f);
   assert.equal(report.exports.length, 5);
   assert.deepEqual(fs.readFileSync(path.join(f.out, 'source/purchase-check/SKILL.md')), fs.readFileSync(path.join(f.source, 'SKILL.md')));
 });
-test('unknown extensions remain portable-only', t => {
-  const f = fixture(t);
+test('unknown extensions remain portable-only', async t => {
+  const f = await fixture(t);
   f.edit(s => s.replace('\n---\n\n', '\ncustom-execution: special\n---\n\n'));
   assert.throws(() => build(f), /Unknown frontmatter/);
   assert.equal(build({ ...f, targets: 'portable' }).exports.length, 1);
 });
-test('secrets are rejected without echoing their contents', t => {
-  const f = fixture(t), secret = 'sk-' + 'abcdefghijklmnopqr';
+test('secrets are rejected without echoing their contents', async t => {
+  const f = await fixture(t), secret = 'sk-' + 'abcdefghijklmnopqr';
   f.write('references/bad.txt', secret);
   const result = spawnSync(process.execPath, [writer, 'validate', '--source', f.source], { encoding: 'utf8' });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /credential/);
   assert.ok(!result.stderr.includes(secret));
 });
-test('package file/byte limits, hidden and installer files are enforced', t => {
-  const f = fixture(t);
+test('package file/byte limits, hidden and installer files are enforced', async t => {
+  const f = await fixture(t);
   f.write('assets/large.bin', Buffer.alloc(8 * 1024 * 1024));
   assert.throws(() => validate(f.source), /8 MiB/);
   fs.unlinkSync(path.join(f.source, 'assets/large.bin'));
@@ -170,14 +170,14 @@ test('package file/byte limits, hidden and installer files are enforced', t => {
   for (let i = 0; i < 64; i++) f.write('assets/f' + i + '.txt', 'x');
   assert.throws(() => validate(f.source), /64 files/);
 });
-test('directory junctions cannot import external files', t => {
-  const f = fixture(t), outside = path.join(f.root, 'outside');
+test('directory junctions cannot import external files', async t => {
+  const f = await fixture(t), outside = path.join(f.root, 'outside');
   fs.mkdirSync(outside);
   fs.symlinkSync(outside, path.join(f.source, 'linked'), process.platform === 'win32' ? 'junction' : 'dir');
   assert.throws(() => validate(f.source), /links/);
 });
-test('invalid CLI flags, targets and SemVer are actionable failures', t => {
-  const f = fixture(t);
+test('invalid CLI flags, targets and SemVer are actionable failures', async t => {
+  const f = await fixture(t);
   assert.throws(() => cli(['build', '--source']), /missing/);
   assert.throws(() => cli(['validate', '--source', f.source, '--version', '1.0.0']), /only/);
   assert.throws(() => build({ ...f, targets: 'unknown' }), /Unsupported target/);
@@ -186,8 +186,8 @@ test('invalid CLI flags, targets and SemVer are actionable failures', t => {
   assert.equal(build({ ...f, targets: 'portable', version: '1.0.0-beta.1+build.2' }).version, '1.0.0-beta.1+build.2');
 });
 
-test('missing optional studio resources do not break the existing builder or ordinary plugin resolution', t => {
-  const f = fixture(t), app = { ...f.app, isPackaged: true };
+test('missing optional studio resources do not break the existing builder or ordinary plugin resolution', async t => {
+  const f = await fixture(t), app = { ...f.app, isPackaged: true };
   const original = console.warn;
   console.warn = () => {};
   try {
@@ -197,8 +197,8 @@ test('missing optional studio resources do not break the existing builder or ord
     assert.throws(() => personal.get(app, personal.SKILL_STUDIO_ID), /资源不完整/);
   } finally { console.warn = original; }
 });
-test('malformed metadata and YAML sequence scalars are not accepted as valid Skills', t => {
-  const f = fixture(t), original = fs.readFileSync(path.join(f.source, 'SKILL.md'), 'utf8');
+test('malformed metadata and YAML sequence scalars are not accepted as valid Skills', async t => {
+  const f = await fixture(t), original = fs.readFileSync(path.join(f.source, 'SKILL.md'), 'utf8');
   f.write('SKILL.md', original.replace('\n---\n\n', '\nmetadata: invalid\n---\n\n'));
   assert.throws(() => validate(f.source), /metadata/);
   f.write('SKILL.md', original.replace(/^description:.*$/m, 'description: - invalid sequence'));

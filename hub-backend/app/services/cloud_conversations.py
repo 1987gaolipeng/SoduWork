@@ -29,7 +29,7 @@ MAX_TOTAL_BYTES = 96 * 1024 * 1024
 
 def clean_options(raw, has_files=False):
     if not isinstance(raw, dict) or set(raw) - {
-        "sessionId", "agentId", "model", "title", "text", "userText", "inputPreparation", "requiredSkills"
+        "sessionId", "agentId", "model", "title", "text", "userText", "inputPreparation", "requiredSkills", "targetRunnerId"
     }:
         raise HTTPException(400, "云端会话选项不正确；不能指定本地目录、执行机或额外执行配置")
     out = {}
@@ -66,6 +66,10 @@ def clean_options(raw, has_files=False):
     if any(item.lower() in {"computer-use", "computer_use", "desktop", "local-desktop"} for item in required):
         raise HTTPException(409, "本机电脑操作技能不能用于云端会话")
     out["requiredSkills"] = sorted(set(required))
+    target_runner_id = raw.get("targetRunnerId", "")
+    if not isinstance(target_runner_id, str) or len(target_runner_id) > 80 or (target_runner_id and not re.fullmatch(r"[A-Za-z0-9._:-]{1,80}", target_runner_id)):
+        raise HTTPException(400, "移动端目标执行机标识不正确")
+    out["targetRunnerId"] = target_runner_id.strip()
     return out
 
 
@@ -130,15 +134,22 @@ async def create(session, client, request_id, raw, uploads):
     code = cloud_code_delivery.context(requested["text"], str(uuid.uuid5(handoffs._NS, row_id + ":task")))
     if code:
         source.update(deliveryMode="git", codeDelivery=code["codeDelivery"])
-    available = handoffs._automatic_targets(await handoffs.targets(session, client),
-        requested["agentId"], source, requested["requiredSkills"])
+    roster = await handoffs.targets(session, client)
+    if requested["targetRunnerId"]:
+        available = [item for item in roster
+                     if item.get("runnerId") == requested["targetRunnerId"]
+                     and item.get("agentId") == requested["agentId"]]
+    else:
+        available = handoffs._automatic_targets(roster, requested["agentId"],
+            source, requested["requiredSkills"])
     if not available:
         raise HTTPException(409, "暂时没有匹配 Agent、技能且可接单的云端环境，请在「我的 → 云端环境」检查连接、底座和负载")
     instruction = requested["text"] or "请根据本轮附件和用户说明理解任务后再处理。"
     options = {"assigneeId": available[0]["id"], "agentId": requested["agentId"],
                "model": requested["model"], "instruction": instruction,
                "userText": requested["userText"], "inputPreparation": requested["inputPreparation"],
-               "requiredSkills": requested["requiredSkills"], "personalPlugins": []}
+               "requiredSkills": requested["requiredSkills"], "personalPlugins": [],
+               **({"targetRunnerId": requested["targetRunnerId"]} if requested["targetRunnerId"] else {})}
     picked = await handoffs.destination(session, client, options, source)
     # Keep the runner's reachable host alongside the friendly display name.
     # Cloud website previews may report localhost:<port>; the desktop must

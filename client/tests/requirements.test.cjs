@@ -183,10 +183,12 @@ test('human attention distinguishes assigned work, running agents, returned resu
   const ctx={approvals:new Map([['work',{id:'review-1',taskId:'work',action:'review'}]])};
   const requester={...task,myRoles:['requester'],ai:{state:'done'}};
   assert.equal(R.actionable(requester),false,'a role alone does not grant review permission');
-  assert.equal(R.actionable(requester,ctx),true);
-  assert.equal(R.nextStep(requester,ctx).text,'核对成果并确认交付');
+  assert.equal(R.actionable(requester,ctx),false,'an executor/requester cannot approve delivery review');
+  assert.equal(R.nextStep(requester,ctx).text,'等待需求创建人确认交付');
+  const creator={...task,myRoles:['creator'],ai:{state:'done'}};
+  assert.equal(R.actionable(creator,ctx),true,'the requirement creator can approve delivery review');
   assert.equal(R.stage(requester),'delivering','agent completion is not business completion');
-  assert.equal(R.actionable({...task,status:'done'},ctx),true,'completed work may have an actual release decision');
+  assert.equal(R.actionable({...task,status:'done',myRoles:['executor','assignee']},ctx),false,'completed work waits for the creator review');
   assert.equal(R.actionable({...task,archivedAt:1},ctx),false);
   assert.equal(R.actionable({...task,canViewExecution:false}),false,'shared source roles do not grant execution access');
 });

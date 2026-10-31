@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SoduWork Client Runtime Contract",
+  "description": "Base client payload declaration. The product bundles a standalone Python interpreter and a frozen Runner; optional agent/tool downloads are separate. Platform claims require package and clean-machine verification.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "product", "supportedPlatforms", "zeroPrerequisitePlatforms", "bundled", "hostPrerequisites", "networkInstall", "optionalDownloads"],
+  "properties": {
+    "schema": { "const": "soduwork.client-runtime/v1" },
+    "product": { "const": "SoduWork" },
+    "supportedPlatforms": { "$ref": "#/$defs/platforms" },
+    "zeroPrerequisitePlatforms": {
+      "$ref": "#/$defs/platforms",
+      "description": "Must be a subset of supportedPlatforms, enforced by the runtime validator."
+    },
+    "bundled": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["electron", "node", "python", "runner"],
+      "properties": {
+        "electron": { "const": true },
+        "node": { "const": true },
+        "python": { "const": true, "description": "Product-owned standalone interpreter for packaged tools, separate from the Python embedded in the frozen Runner." },
+        "runner": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["required", "kind", "relativePaths"],
+          "properties": {
+            "required": { "const": true },
+            "kind": { "const": "frozen-executable" },
+            "relativePaths": {
+              "type": "object",
+              "description": "Exactly one installed Runner path per supported platform; key coverage is enforced by the runtime validator.",
+              "additionalProperties": false,
+              "minProperties": 1,
+              "properties": {
+                "win32": { "const": "resources/runner/soduwork-runner.exe" },
+                "darwin": { "const": "resources/runner/soduwork-runner" },
+                "linux": { "const": "resources/runner/soduwork-runner" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "hostPrerequisites": { "type": "array", "maxItems": 0 },
+    "networkInstall": { "const": false },
+    "optionalDownloads": { "type": "boolean" }
+  },
+  "$defs": {
+    "platforms": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "enum": ["win32", "darwin", "linux"] }
+    }
+  }
+}

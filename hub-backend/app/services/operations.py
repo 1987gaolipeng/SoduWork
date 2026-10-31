@@ -87,7 +87,8 @@ async def overview(session: AsyncSession) -> dict:
         "work": {"workflow": workflow, "executions": executions,
                  "deployments": deployments, "pendingApprovals": pending_approvals},
         "recentFailures": [{"id": row.id, "taskId": row.task_id,
-                            "error": redact_log_text(row.error or "流程执行失败")[:300],
+                            # The zh-CN fallback label moved to the admin UI (operations copy catalog); send data only.
+                            "error": redact_log_text(row.error or "")[:300],
                             "updatedAt": _stamp(row.updated_at)} for row in failed],
         "blockers": blockers,
     }

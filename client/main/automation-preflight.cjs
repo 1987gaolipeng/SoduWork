@@ -21,7 +21,7 @@ function merge(server, dependencies) {
 
 function create({ app, identityOf, platformConnections, catalog, resolvePlugin, authorize,
   connectorProbe, connectionScope = scopeOf, now = Date.now }) {
-  const list = catalog || (() => require('./personal-plugins').catalog(app, true));
+  const list = catalog || (spec => require('./jiyong-scheduled-plugins.cjs').catalog(app,identityOf,spec));
   const resolve = resolvePlugin || (id => require('./personal-plugins').resolve(app, [id]));
   const sourceCheck = authorize || (id => {
     const access = require('./plugin-source-access');
@@ -32,8 +32,8 @@ function create({ app, identityOf, platformConnections, catalog, resolvePlugin, 
   const pending = new Map(), cache = new Map();
   const platformRevision = () => platformConnections?.revision?.() ?? 0;
 
-  function select(spec) {
-    const plugin = list().find(item => item.key === spec.key);
+  async function select(spec) {
+    const plugin = (await list(spec)).find(item => item.key === spec.key);
     if (!plugin || plugin.enabled === false || !plugin.entrypoints?.automation) {
       return { error: outcome('blocked', '个人插件未安装、已停用或不支持自动化，请检查插件设置',
         [check('plugin', 'blocked', '个人插件不可用于自动化')]) };
@@ -56,14 +56,17 @@ function create({ app, identityOf, platformConnections, catalog, resolvePlugin, 
 
   async function inspect(spec, identity, scope, selected) {
     const checks = [check('plugin', 'ready', '个人插件版本与设置已检查')];
-    try { await sourceCheck(selected.plugin.pluginId); }
+    try {
+      if (selected.plugin.personal || selected.plugin.pluginId.startsWith('local:')) await sourceCheck(selected.plugin.pluginId);
+      else await require('./jiyong-scheduled-plugins.cjs').check(app,identityOf,selected.plugin);
+    }
     catch (_) {
       return outcome('waiting', '个人插件使用权限暂时无法验证，请检查后台连接或插件权限',
         [check('plugin', 'waiting', '个人插件使用权限待验证')]);
     }
     try {
       // Without cwd, validate resource integrity and settings without materializing plugin resources.
-      resolve(selected.plugin.pluginId);
+      if (selected.plugin.personal || selected.plugin.pluginId.startsWith('local:')) resolve(selected.plugin.pluginId);
     } catch (_) {
       return outcome('blocked', '个人插件无法通过使用权限或资源检查，请在插件页面检查后重试',
         [check('plugin', 'blocked', '个人插件使用权限或资源无效')]);
@@ -89,9 +92,15 @@ function create({ app, identityOf, platformConnections, catalog, resolvePlugin, 
     }
     if (connectionScope(await identityOf(app)) !== scope) throw Error('账号已变化');
     if (!checks.some(item => item.state === 'blocked')) {
-      checks.push(...await probeConnections(identity, selected.plugin.capabilities?.mcpServers || []));
+      const hosted = selected.plugin.jiyong?.mcp?.server;
+      if (hosted === 'soduwork-jiyong') {
+        const connection = require('./jiyong-hosted-connection.cjs').context(app,selected.plugin.pluginId)?.connection;
+        if (!connection) return outcome('blocked','即用宿主 MCP 声明无效');
+        await connection.authorize();
+      }
+      checks.push(...await probeConnections(identity, (selected.plugin.capabilities?.mcpServers || []).filter(n => !(n === 'soduwork-jiyong' && hosted === n))));
     }
-    const after = select(spec);
+    const after = await select(spec);
     if (connectionScope(await identityOf(app)) !== scope) throw Error('账号已变化');
     if (after.error) return after.error;
     if (after.signature !== selected.signature) {
@@ -112,7 +121,7 @@ function create({ app, identityOf, platformConnections, catalog, resolvePlugin, 
       if (input.hub && new URL(input.hub).origin !== new URL(identity.hub).origin) {
         return merge(server, outcome('waiting', '服务连接已变化，请重新检查执行条件'));
       }
-      const spec = dependency.plugin || {}, selected = select(spec);
+      const spec = dependency.plugin || {}, selected = await select(spec);
       if (selected.error) return merge(server, selected.error);
       const revision = platformRevision();
       const key = scope + ':' + revision + ':' + selected.signature + ':' + JSON.stringify(spec);

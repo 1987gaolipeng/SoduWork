@@ -111,6 +111,11 @@ class ApprovalInboxScopeTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as session:
             request = await session.get(am.ApprovalRequest, request_id)
             request.action = "review"
+            # Delivery review is creator-owned; make the test actor the
+            # requirement creator while keeping the execution device on Alice
+            # so the owner notice path remains covered.
+            task = await session.get(models.Task, task_id)
+            task.created_by = "bob"
             artifact = await session.get(am.ArtifactVersion, request.artifact_version_id)
             artifact.kind = "files"
             artifact.manifest = {"schemaVersion": "2", "complete": True,

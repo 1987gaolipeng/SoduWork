@@ -24,7 +24,7 @@ test('cloud delivery keeps same-named files from different paths', () => {
   assert.deepEqual(Array.from(rows, row => String(row.relative)), ['docs/README.md', 'examples/README.md']);
 });
 
-test('settled local and cloud outputs render a complete delivery card with its continuation action', () => {
+test('settled local and cloud outputs render a delivery card without the unused continuation arrow', () => {
   for (const remote of [false, true]) {
     const child = () => ({ textContent: '', hidden: false, classList: { toggle() {} },
       setAttribute() {}, replaceChildren() {}, querySelector: child });
@@ -41,9 +41,9 @@ test('settled local and cloud outputs render a complete delivery card with its c
       ...(remote ? { cloudHandoff: { taskId } } : {}) });
     assert.deepEqual(appended, [card]);
     assert.equal(card.className, 'ndelivery');
-    assert.ok(card.innerHTML.includes('data-delivery-continue'));
-    assert.ok(card.innerHTML.includes('M5 12h13m-5-5 5 5-5 5'));
-    assert.ok(card.innerHTML.includes(remote ? '在云端继续' : '继续会话'));
+    assert.ok(!card.innerHTML.includes('data-delivery-continue'));
+    assert.ok(!card.innerHTML.includes('M5 12h13m-5-5 5 5-5 5'));
+    assert.ok(!card.innerHTML.includes(remote ? '在云端继续' : '继续会话'));
   }
 });
 

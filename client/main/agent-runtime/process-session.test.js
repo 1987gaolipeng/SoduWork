@@ -37,6 +37,75 @@ function fixture(t) {
   return { runtime, generations };
 }
 
+test('recovery retries a pending cleanup with a bounded attempt count before opening a new host', async t => {
+  const attempts = [];
+  let old;
+  const runtime = createProcessSession({ recoveryMaxAttempts: 4, recoveryRetryDelayMs: 0,
+    recoveryTimeoutMs: 20, hostFactory: () => {
+      const host = {
+        handles: new Map(),
+        isDead: () => host.dead,
+        call: async () => ({ ok: true }),
+        stop: async () => {},
+        maintenanceWorkloads: () => host.dead && !host.cleaned ? [{ status: 'cleaning' }] : [],
+        dead: false,
+        cleaned: false,
+      };
+      if (!old) old = host;
+      return host;
+    } });
+  const profile = app('bounded-recovery');
+  t.after(() => runtime.dispose().catch(() => {}));
+  await runtime.open({ app: profile });
+  old.dead = true;
+  old.retryCleanup = async () => {
+    attempts.push(attempts.length + 1);
+    if (attempts.length < 3) throw Error('cleanup still running');
+    old.cleaned = true;
+  };
+  const opened = await runtime.open({ app: profile });
+  assert.equal(opened.ok, true);
+  assert.deepEqual(attempts, [1, 2, 3]);
+});
+
+test('recovery stops after the configured pending-cleanup attempts and never creates a replacement host', async t => {
+  let generations = 0;
+  let firstHost;
+  const runtime = createProcessSession({ recoveryMaxAttempts: 2, recoveryRetryDelayMs: 0,
+    recoveryTimeoutMs: 20, hostFactory: () => {
+      generations += 1;
+      const host = {
+        handles: new Map(), isDead: () => host.dead, call: async () => ({ ok: true }),
+        stop: async () => {}, maintenanceWorkloads: () => [{ status: 'cleaning' }], dead: false,
+      };
+      if (!firstHost) firstHost = host;
+      return host;
+    } });
+  const profile = app('bounded-recovery-exhausted');
+  t.after(() => runtime.dispose().catch(() => {}));
+  const first = await runtime.open({ app: profile });
+  assert.equal(first.ok, true);
+  firstHost.dead = true;
+  await assert.rejects(runtime.open({ app: profile }), error => {
+    assert.equal(error.code, 'RUNTIME_RECOVERY_PENDING');
+    assert.equal(error.recoveryAttempt, 2);
+    return true;
+  });
+  assert.equal(generations, 1);
+});
+
+test('recovery does not retry ordinary open errors', async t => {
+  let calls = 0;
+  const runtime = createProcessSession({ recoveryMaxAttempts: 4, recoveryRetryDelayMs: 0,
+    hostFactory: () => ({
+      handles: new Map(), isDead: () => false, stop: async () => {},
+      call: async () => { calls += 1; throw Error('ordinary open failure'); },
+    }) });
+  t.after(() => runtime.dispose().catch(() => {}));
+  await assert.rejects(runtime.open({ app: app('ordinary-open-error') }), /ordinary open failure/);
+  assert.equal(calls, 1);
+});
+
 test('lifecycle installation forwards Electron power events to each new runtime host', async t => {
   const f = fixture(t), powerMonitor = {};
   f.runtime.installLifecycle({ on() {} }, powerMonitor);

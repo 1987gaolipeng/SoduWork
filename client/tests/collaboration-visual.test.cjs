@@ -210,7 +210,7 @@ test('done task without hub sessions shows elapsed time from actualStart/actualE
  const {host}=mount({taskId:'t',task:{id:'t',title:'本机需求',status:'done',actualStart:start,actualEnd:end},
   execution:{sessions:[]}});
  assert.match(host.innerHTML,/已用时<\/span><b>2 分 5 秒<\/b>/);
- assert.match(host.innerHTML,/Token<\/span><b>未提供<\/b>/);
+ assert.doesNotMatch(host.innerHTML,/Token<\/span>/);
 });
 
 test('execution metrics aggregate per-session usage and time range, ignoring ctx watermarks',()=>{
@@ -219,7 +219,7 @@ test('execution metrics aggregate per-session usage and time range, ignoring ctx
   {startedAt:'2026-10-20T10:02:00Z',finishedAt:'2026-10-20T10:03:00Z',usage:{totalTokens:500}},
  ]}});
  assert.match(host.innerHTML,/已用时<\/span><b>3 分 0 秒<\/b>/);
- assert.match(host.innerHTML,/Token<\/span><b>800<\/b>/);
+ assert.doesNotMatch(host.innerHTML,/Token<\/span>/);
 });
 
 test('running task without finished time keeps live counting from actualStart',()=>{

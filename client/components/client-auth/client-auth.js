@@ -363,6 +363,15 @@
     mountSettings();
   }
 
+  function clearQuotaNotice() {
+    if (currentQuota && typeof currentQuota === 'object') {
+      currentQuota = { ...currentQuota, exceeded: false, reason: '', model: null, requestedModel: null };
+    }
+    global.SoduWorkQuotaNotice?.update({ user: currentUser, quota: currentQuota });
+    mountSettings();
+    return currentQuota;
+  }
+
   function renderAccountAvatar(node, name) {
     node.textContent = Array.from(name || '我')[0].toLocaleUpperCase();
     var source = text(currentUser && currentUser.avatarUrl);
@@ -884,6 +893,7 @@
     accountCardHtml: accountCardHtml,
     changePassword: openChangePwd,
     updateIdentity: updateIdentity,
+    clearQuotaNotice: clearQuotaNotice,
     snapshot: function () { return { user: currentUser, quota: currentQuota, policy: policy }; }
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

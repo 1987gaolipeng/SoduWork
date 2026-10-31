@@ -16,10 +16,10 @@ from fastapi import FastAPI, Request
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.api import delivery
-from app.automation_models import ArtifactVersion
+from app.automation_models import ArtifactVersion, ApprovalAssignment, ApprovalDecision, ApprovalRequest
 from app.db import Base, get_session
 from app.deps import current_client
-from app.models import Attachment, Client, Task
+from app.models import Attachment, Client, Task, User
 from app.services import delivery_collections, storage
 
 
@@ -39,7 +39,14 @@ class TaskDeliveryDownloadsTests(unittest.IsolatedAsyncioTestCase):
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.engine.begin() as conn:
             await conn.run_sync(lambda connection: Base.metadata.create_all(connection, tables=[
-                Task.__table__, Attachment.__table__, ArtifactVersion.__table__]))
+                Client.__table__, User.__table__, Task.__table__, Attachment.__table__,
+                ArtifactVersion.__table__, ApprovalAssignment.__table__,
+                ApprovalDecision.__table__, ApprovalRequest.__table__]))
+        async with self.sessions() as session:
+            session.add_all([User(id="alice", username="alice", is_active=True),
+                             User(id="bob", username="bob", is_active=True),
+                             Client(id="desktop", user_ref="alice")])
+            await session.commit()
         app = FastAPI()
         app.include_router(delivery.router)
 
@@ -48,7 +55,8 @@ class TaskDeliveryDownloadsTests(unittest.IsolatedAsyncioTestCase):
                 yield session
 
         async def client_override(request: Request):
-            return Client(id=request.headers.get("X-Device", "desktop"))
+            return Client(id=request.headers.get("X-Device", "desktop"),
+                          user_ref=request.headers.get("X-Account", "alice"))
 
         app.dependency_overrides[get_session] = session_override
         app.dependency_overrides[current_client] = client_override
@@ -72,7 +80,8 @@ class TaskDeliveryDownloadsTests(unittest.IsolatedAsyncioTestCase):
         rows = []
         (self.root / "attachments" / tid).mkdir(parents=True, exist_ok=True)
         async with self.sessions() as session:
-            session.add(Task(id=tid, title="Website and report", owner_client_id="desktop"))
+            task = Task(id=tid, title="Website and report", owner_client_id="desktop")
+            session.add(task)
             for index, (name, data, role) in enumerate(files):
                 key = tid + "/" + str(index)
                 backend = storage.put(key, data, "application/octet-stream")
@@ -88,6 +97,7 @@ class TaskDeliveryDownloadsTests(unittest.IsolatedAsyncioTestCase):
                         "primary": selected + [{"id": key} for key in extra_ids],
                         "supporting": [], "problems": []}))
             await session.commit()
+            self.assertEqual(task.owner_user_id, "alice")
         return tid, aid, rows
 
     async def download(self, tid, version="", **kwargs):
@@ -207,6 +217,12 @@ class TaskDeliveryDownloadsTests(unittest.IsolatedAsyncioTestCase):
         self.assert_archive(await self.download(tid, version), {"report.md": b"original"})
         denied = await self.download(tid, version, headers={"X-Device": "other-device"})
         self.assertEqual(denied.status_code, 404, denied.text)
+        async with self.sessions() as session:
+            device = await session.get(Client, "desktop")
+            device.user_ref = "bob"
+            await session.commit()
+        rebound = await self.download(tid, version, headers={"X-Account": "bob"})
+        self.assertEqual(rebound.status_code, 404, rebound.text)
 
     async def test_no_fixed_version_still_downloads_latest_files_and_excludes_inputs(self):
         tid, _, _ = await self.seed([("report.md", b"old", "output"),

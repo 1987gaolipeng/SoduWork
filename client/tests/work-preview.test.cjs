@@ -181,6 +181,13 @@ test('goal sessions stay in the conversation until a real deliverable exists', (
   assert.doesNotMatch(workspace, /WB\.intent\.active/);
 });
 
+test('delivery refreshes replace stale automatic previews instead of opening another tab', () => {
+  const workspace = read('components', 'panels', 'panels-chat-workspace.js');
+  assert.match(workspace, /function samePreviewFile\(tab, candidate\)/);
+  assert.match(workspace, /tab\.autoPreview && samePreviewFile\(tab, candidate\)/);
+  assert.match(workspace, /removeStaleAutoPreviewTabs\(candidate\)/);
+});
+
 test('preview candidates are isolated to the current turn and newest service', () => {
   const oldWindow = global.window;
   const oldIntent = global.WorkIntent;

@@ -5,6 +5,8 @@ const assert = require('node:assert/strict');
 const fs = require('./renderer-source.cjs');
 const path = require('node:path');
 const vm = require('node:vm');
+const os = require('node:os');
+const fsNode = require('node:fs');
 const root = path.join(__dirname, '..');
 const read = (...parts) => fs.readFileSync(path.join(root, ...parts), 'utf8');
 
@@ -63,4 +65,34 @@ test('模型配置保留就地真实探测与组织地址恢复能力', () => {
   assert.match(panel, /连接设置/);
   assert.match(panel, /访问凭据/);
   assert.match(panel, /模型清单/);
+});
+
+test('额度耗尽时历史会话仍可使用本地模型元数据打开', async t => {
+  const modelConfig = require('../main/pi-session/model-config');
+  const rootDir = fsNode.mkdtempSync(path.join(os.tmpdir(), 'soduwork-history-quota-'));
+  t.after(() => fsNode.rmSync(rootDir, { recursive: true, force: true }));
+  const app = { getPath: () => rootDir };
+  modelConfig.writeModels(path.join(rootDir, 'pi-agent'), {
+    baseUrl: 'https://hub.example.test/api/v1/ai-proxy/v1', id: 'saved-model', label: 'Saved model',
+    input: ['text'], contextWindow: 128000, maxOutputTokens: 4096,
+  });
+  const result = await modelConfig.fetchModel(
+    { hub: 'https://hub.example.test', clientId: 'device-1', session: 'device-session' },
+    'saved-model', 8000,
+    async () => new Response(JSON.stringify({ detail: {
+      code: 'TOKEN_QUOTA_EXCEEDED', quota: { enabled: true, exceeded: true },
+    } }), { status: 403, headers: { 'Content-Type': 'application/json' } }),
+    false, 'pi', { app, allowHistorical: true });
+  assert.equal(result.ok, true);
+  assert.equal(result.historical, true);
+  assert.equal(result.model.id, 'saved-model');
+  assert.equal(result.model.key, 'history-only');
+  const denied = await modelConfig.fetchModel(
+    { hub: 'https://hub.example.test', clientId: 'device-1', session: 'device-session' },
+    'saved-model', 8000,
+    async () => new Response(JSON.stringify({ detail: {
+      code: 'TOKEN_QUOTA_EXCEEDED', quota: { enabled: true, exceeded: true },
+    } }), { status: 403, headers: { 'Content-Type': 'application/json' } }));
+  assert.equal(denied.ok, false);
+  assert.equal(denied.code, 'TOKEN_QUOTA_EXCEEDED');
 });

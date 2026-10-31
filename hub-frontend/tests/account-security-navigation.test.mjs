@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createComponentHarness } from './helpers/react-harness.mjs'
+import * as healthVersion from '../src/health-version.js'
 
 async function mount(t, { permissions = ['identity.manage', 'task.view'], active = 'overview', isSuper = false } = {}) {
   const values = new Map([['soduwork-hub-screen', active]])
@@ -23,7 +24,7 @@ async function mount(t, { permissions = ['identity.manage', 'task.view'], active
       getUser: () => user, setUser() {}, setToken() {}, can: permission => permissions.includes(permission) },
     './Login.jsx': 'Login', './LocaleSettings.jsx': 'LocaleSettings', './Landing.jsx': 'Landing',
     './ui.jsx': { Icon: 'Icon', Loading: 'Loading', ThemeToggle: 'ThemeToggle', ToastHost: 'ToastHost' },
-    './health-version.js': { healthVersionLabel: () => '' },
+    './health-version.js': healthVersion,
   } })
   page.render(); await page.flush()
   t.after(() => {

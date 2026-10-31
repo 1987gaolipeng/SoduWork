@@ -30,10 +30,10 @@ function body() {
       '默认生成可以直接在本机运行的个人工作流。只有用户明确要求企业项目研发或部署时，才使用 spec、quality、approval、merge、deploy_chain、validate 企业节点，并说明企业审核和项目绑定要求；quality 使用 commands 中的 argv 数组，部署由企业环境中心管理，不写服务器地址或凭据。',
       '“研发实现”和“最终上线”可以制作成两个独立插件：研发插件交付并合并固定提交；上线插件从同一项目任务的已合并代码版本开始，使用 deploy_chain → validate → publish。两个插件分别安装、审核、绑定和升级，不能把另一个插件的内容复制成伪组合。',
       '插件需要模板、示例、图片或脚本时，必须实际生成这些文件，放在草稿旁的 templates、examples、assets、scripts、references 或 ui 子目录。草稿 resources 数组逐项声明 path 和 kind（template/example/asset/script/reference/ui）；不要只输出一个没有资源的 JSON。安装时 SoduWork 会从当前会话收集这些文件并锁定校验值。',
-      "真实调用模板/脚本并验证交付物后登记草稿；单Agent试用不代表多节点调试。HTML保存为ui资源，external须可用服务。应用优先使用应用开发技能。",
+      "真实调用模板/脚本并验证交付物后登记草稿；单Agent试用不代表多节点调试。HTML保存为ui资源，external须可用服务。应用优先使用即用开发技能。",
       require('./plugin-workflow-authoring.cjs').instructions(),
       'AI 审查节点应声明 decision 文件，JSON 使用企业协议：schemaVersion=1，outcome=proceed 或 blocked，summary、reasonCode、evidence 和 nextAction。未通过审查不能继续后续节点。',
-      "应用窗口默认 1800×1125（16:10）并适配小屏；作者可声明顶层 appWindow 的 width/height/minWidth/minHeight/maxWidth/maxHeight 与响应规则，支持 px/vw/vh；不提供用户尺寸设置。"
+      "即用窗口默认 1800×1125（16:10）并适配小屏；作者可声明顶层 appWindow 的 width/height/minWidth/minHeight/maxWidth/maxHeight 与响应规则，支持 px/vw/vh；不提供用户尺寸设置。"
     ].join('\n'),
   };
 }

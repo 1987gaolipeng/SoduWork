@@ -1,4 +1,4 @@
-"""Admin and desktop cloud management parity with real isolated auth and DB.
+"""Admin fleet governance and desktop personal isolation with real auth and DB.
 
 Runner presence is simulated; these cases do not start commercial models,
 read actual credentials or connect to the user's running services.
@@ -59,8 +59,12 @@ class CloudAdminGovernanceTests(Base):
         admin_list = await self.http.get(endpoint, headers=self.admin_headers)
         self.assertEqual(admin_list.status_code, 200, admin_list.text)
         desktop = await self.http.get("/api/v1/cloud-environments")
-        self.assertEqual({r["id"] for r in desktop.json()["environments"]},
+        self.assertEqual({r["runnerId"] for r in admin_list.json()["items"]},
                          {first["runnerId"], second["runnerId"]})
+        self.assertEqual(desktop.status_code, 200, desktop.text)
+        self.assertEqual(desktop.json()["ownership"], "personal")
+        self.assertEqual(desktop.json()["environments"], [],
+                         "shared fleet nodes must stay out of the personal desktop API")
         for item in created:
             self.assertNotIn(item["key"], admin_list.text)
             self.assertNotIn(item["key"], desktop.text)
@@ -68,16 +72,37 @@ class CloudAdminGovernanceTests(Base):
         runner_hub._RUNNERS.pop(live.id)
         live.id = rid
         runner_hub._RUNNERS[rid] = live
-        for mode, status in (("draining", "paused"), ("accepting", "ready"), ("disabled", "paused")):
+        for mode in ("draining", "accepting", "disabled"):
             changed = await self.http.post(endpoint + "/" + rid + "/mode", headers=self.admin_headers,
                                           json={"mode": mode})
             self.assertEqual(changed.status_code, 200, changed.text)
             self.assertEqual(live.dispatch_mode, mode)
-            listing = await self.http.get("/api/v1/cloud-environments")
-            item = next(r for r in listing.json()["environments"] if r["id"] == rid)
-            self.assertEqual(item["status"], status)
-        await self.http.patch("/api/v1/cloud-environments/" + rid, json={"mode": "accepting"})
+            listing = await self.http.get(endpoint, headers=self.admin_headers)
+            self.assertEqual(listing.status_code, 200, listing.text)
+            item = next(r for r in listing.json()["items"] if r["runnerId"] == rid)
+            self.assertEqual(item["mode"], mode)
+            self.assertEqual(item["accepting"], mode == "accepting")
+            personal_listing = await self.http.get("/api/v1/cloud-environments")
+            self.assertEqual(personal_listing.json()["environments"], [])
+        denied_change = await self.http.patch("/api/v1/cloud-environments/" + rid,
+                                              json={"mode": "accepting"})
+        self.assertEqual(denied_change.status_code, 404, denied_change.text)
+        self.assertEqual(live.dispatch_mode, "disabled")
+        resumed = await self.http.post(endpoint + "/" + rid + "/mode", headers=self.admin_headers,
+                                       json={"mode": "accepting"})
+        self.assertEqual(resumed.status_code, 200, resumed.text)
         self.assertEqual(live.dispatch_mode, "accepting")
+        personal = await self.http.post("/api/v1/cloud-environments",
+            json={"name": "My cloud", "hub": "https://hub.example.test"})
+        self.assertEqual(personal.status_code, 200, personal.text)
+        personal_id = personal.json()["environment"]["id"]
+        configured = await self.http.patch("/api/v1/cloud-environments/" + personal_id,
+                                            json={"name": "My renamed cloud"})
+        self.assertEqual(configured.status_code, 200, configured.text)
+        self.assertEqual(configured.json()["environment"]["name"], "My renamed cloud")
+        personal_listing = await self.http.get("/api/v1/cloud-environments")
+        self.assertEqual([row["id"] for row in personal_listing.json()["environments"]], [personal_id])
+        self.assertNotIn(personal.json()["setup"]["key"], personal_listing.text)
         async with db.SessionLocal() as session:
             audits = list((await session.scalars(select(models.AuditLog).where(
                 models.AuditLog.actor_id == self.user_id))).all())

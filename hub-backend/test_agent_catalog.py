@@ -56,6 +56,7 @@ class CatalogTest(unittest.TestCase):
             lambda row: row['runner']['modelEnv'].update(FIXTURE_KEY='file:/secret'),
             lambda row: row['install'].update(installer='managed'),
             lambda row: row['install'].update(installer='npm', pkg='pkg && command'),
+            lambda row: row['install'].update(installer='npm', pkg='fixture-agent', version='latest'),
         ]
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / 'catalog.json'
@@ -65,6 +66,10 @@ class CatalogTest(unittest.TestCase):
                 target.write_text(json.dumps({'schemaVersion': 1, 'agents': [row]}), encoding='utf-8')
                 with self.subTest(mutate=mutate), self.assertRaises(ValueError):
                     load_catalog(target)
+
+    def test_pi_installation_is_pinned_to_the_audited_runtime(self):
+        from app.agent_catalog import AGENTS
+        self.assertEqual(AGENTS['pi']['install']['version'], '0.84.4')
 
     def test_opencode_detection_never_installs_and_ignores_retired_bundle(self):
         from app.services import agent_setup, managed_agents, local_base

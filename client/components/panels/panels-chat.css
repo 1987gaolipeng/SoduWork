@@ -198,6 +198,19 @@
 .ntext-copy:hover,.nmessage-copy:hover{background:color-mix(in srgb,var(--bg-2) 76%,transparent);border-color:color-mix(in srgb,var(--line) 78%,transparent);color:var(--ink-2);opacity:1}
 .ntext-copy:focus-visible,.nmessage-copy:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 46%,transparent);outline-offset:1px;opacity:1}
 .ntext-copy svg,.nmessage-copy svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.nread-aloud,.nread-aloud [data-speech-controls]{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
+.nread-aloud [hidden]{display:none}
+.nread-menu{position:relative;display:inline-flex}
+.nread-aloud [data-speech-options]{position:absolute;bottom:calc(100% + 6px);right:0;z-index:20;display:flex;flex-direction:column;min-width:110px;padding:4px;background:var(--bg-0);border:1px solid var(--line);border-radius:8px;box-shadow:0 4px 16px #0002}
+.nread-aloud [data-speech-options][hidden]{display:none}
+.nread-aloud [role="menuitemradio"]{border:0;border-radius:5px;padding:6px 10px;background:transparent;color:var(--ink-2);text-align:left;font:inherit;white-space:nowrap;cursor:pointer}
+.nread-aloud [role="menuitemradio"]:hover,.nread-aloud [role="menuitemradio"]:focus-visible{background:var(--bg-2)}
+.nread-aloud [aria-checked="true"]{color:var(--accent);background:var(--bg-2)}
+.nread-status{font-size:12px;color:var(--ink-3);white-space:normal;max-width:360px}
+.nread-status:empty{display:none}
+.nread-status.is-quiet{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.nmessage-footer:has(.nread-aloud[data-active="true"]){opacity:1;flex-wrap:wrap}
+.nmessage-footer:has(.nread-aloud[data-active="true"])>*{pointer-events:auto}
 .ncopy-check{display:none}
 .ntext-copy.is-copied,.nmessage-copy.is-copied{color:var(--accent)}
 .ntext-copy.is-copied .ncopy-default,.nmessage-copy.is-copied .ncopy-default{display:none}
@@ -270,6 +283,9 @@
 .nstatus-metric{display:inline-flex;align-items:baseline;gap:5px;white-space:nowrap}
 .nstatus-metric b,.nstatus-metric em{font:inherit;color:inherit}
 .nstatus-divider{color:var(--ink-4);font-size:inherit}
+/* Token usage remains available to the runtime for reconciliation and diagnostics,
+   but the conversation footer is intentionally limited to elapsed time. */
+.nturn-metrics .nstatus-divider,.nturn-metrics .nstatus-divider + .nstatus-metric{display:none}
 .nturn-metrics [hidden]{display:none}
 @keyframes nchat-pulse{0%,100%{opacity:.35}50%{opacity:1}}
 @media(max-width:620px){
@@ -508,6 +524,7 @@
 /* Task creation is an optional conversation branch; reserve no permanent blank area or automatically expanded form. */
 .nchat-draft{display:none;padding:2px 24px 18px}
 .nchat-draft:has(.nchat-task-suggest.show),.nchat-draft:has(.cp-draft.show),
+.nchat-draft:has(.nchat-work-action-pending),
 .nchat-draft:has(.pui-surface){display:block}
 .nchat-task-suggest{display:none;width:min(760px,100%);margin:0 auto;min-height:54px;
   align-items:center;gap:10px;padding:9px 10px 9px 12px;border:1px solid color-mix(in srgb,var(--line) 78%,transparent);
@@ -548,7 +565,19 @@
 .nchat-draft .cp-loading-chat{width:min(760px,100%);min-height:48px;margin:0 auto;padding:8px 10px 8px 14px;
   border:1px solid color-mix(in srgb,var(--line) 78%,transparent);border-radius:12px;background:var(--bg-0);
   display:flex;align-items:center;gap:10px;text-align:left}
-.nchat-draft .cp-loading-chat span{flex:1;color:var(--ink-4)}
+.nchat-draft .cp-loading-chat>i{width:15px;height:15px;flex:none;border:2px solid color-mix(in srgb,var(--accent) 22%,transparent);
+  border-top-color:var(--accent);border-radius:50%;animation:cp-loading-spin .8s linear infinite}
+.nchat-draft .cp-loading-chat span{display:flex;flex:1;min-width:0;flex-direction:column;gap:2px;color:var(--ink-4)}
+.nchat-draft .cp-loading-chat span b{font-size:max(var(--font-min-readable,14.5px),12.5px);font-weight:600;color:var(--ink-2)}
+.nchat-draft .cp-loading-chat span small{font-size:max(var(--font-min-readable,14.5px),11.5px);color:var(--ink-4)}
+.nchat-draft .nchat-work-action-pending{width:min(920px,100%);margin:0 auto}
+.nchat-draft .nchat-work-action-pending .pui-turn-prompt{margin-top:14px}
+.nchat-draft .nchat-work-action-pending .cp-loading-chat{margin-bottom:12px}
+.nchat-draft .cp-loading-chat.is-error{border-color:color-mix(in srgb,var(--danger,#d14343) 35%,var(--line));background:color-mix(in srgb,var(--danger,#d14343) 6%,var(--bg-0))}
+.nchat-draft .cp-loading-chat.is-error>i{display:grid;place-items:center;border:0;background:var(--danger,#d14343);color:#fff;font-style:normal;font-size:max(var(--font-min-readable,14.5px),12px);font-weight:700}
+.nchat-draft .cp-loading-chat.is-error span b{color:var(--danger,#d14343)}
+@keyframes cp-loading-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.nchat-draft .cp-loading-chat>i{animation:none}}
 .nchat-draft .cp-card-quick .cp-title{font-size:15px;margin:2px 0 6px;padding:7px 9px}
 .cp-quick-note{font-size:max(var(--font-min-readable, 14.5px), 11.5px);line-height:1.55;color:var(--ink-4);display:-webkit-box;
   -webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;padding:0 2px}
@@ -557,6 +586,7 @@
   border:1px solid color-mix(in srgb,var(--line) 72%,transparent);border-radius:999px;
   padding:3px 7px;background:var(--bg-1);color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 10.5px)}
 .nchat-draft .cp-card-quick .cp-acts{margin-top:10px}
+.nchat-draft .cp-acts{flex-wrap:wrap}
 .nchat-draft .cp-card-chat .cp-card-head{padding-right:0}
 @media(max-width:720px){
   .nchat-draft{padding-left:14px;padding-right:14px}
@@ -574,6 +604,11 @@
 .nsend.stop{background:color-mix(in srgb,var(--ink-4) 22%,var(--bg-3))}
 .nsend.stop:not(:disabled):hover{background:color-mix(in srgb,var(--ink-4) 34%,var(--bg-3))}
 .nsend.stop svg{stroke:var(--ink-2)}
+.nsend.stop-pending{background:color-mix(in srgb,var(--ink-4) 18%,var(--bg-3));cursor:wait}
+.nsend.stop-pending .nsend-spinner{width:14px;height:14px;border:2px solid color-mix(in srgb,var(--ink-2) 28%,transparent);
+  border-top-color:var(--ink-2);border-radius:50%;animation:nsend-spin .72s linear infinite}
+@keyframes nsend-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.nsend.stop-pending .nsend-spinner{animation:none}}
 
 /*
  * Tool cards emphasize affected files, changes, and results instead of raw argument JSON.
@@ -850,6 +885,7 @@
 /* Generated plugins stay installable from the conversation that created them. */
 .nplugin-draft{display:grid;grid-template-columns:36px minmax(0,1fr) auto;align-items:center;gap:10px 12px;margin:14px 0 8px;padding:14px 16px;border:1px solid color-mix(in srgb,var(--accent) 20%,var(--line));border-radius:14px;background:var(--bg-0);font:14.5px/1.5 var(--font-ui);color:var(--ink-2)}
 .nplugin-draft-icon{display:grid;place-items:center;width:36px;height:36px;border-radius:11px;background:var(--accent-soft);color:var(--accent)}
+.nplugin-draft-icon img{width:100%;height:100%;object-fit:contain}
 .nplugin-draft-icon svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
 .nplugin-draft-copy{min-width:0}.nplugin-draft-copy b{display:block;color:var(--ink);font-size:max(var(--font-min-readable, 14.5px), 14px);font-weight:600;overflow-wrap:anywhere}.nplugin-draft-copy>span{display:block;margin-top:3px;color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px);overflow-wrap:anywhere}
 .nplugin-draft>button{min-height:34px;white-space:normal}.nplugin-draft>button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}

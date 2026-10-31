@@ -27,7 +27,7 @@ test('new-session continuation preserves the failed draft and adds missing capab
   const payload = recovery.newSessionPayload({
     text: 'Use the steps and create the report.',
     files: [file],
-    plugins: [{ pluginId: 'local:app-developer', name: '应用开发', inputValues: { target: 'report' } }],
+    plugins: [{ pluginId: 'local:app-developer', name: '即用开发', inputValues: { target: 'report' } }],
   }, { missing: ['browser'] }, {
     capabilities: ['office'], cwd: 'C:\\work', workspaceLabel: 'Work', projectId: 'p1',
   });

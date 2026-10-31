@@ -40,6 +40,12 @@ export const share = (value, total) => {
   return percent > 0 && percent < 1 ? '<1%' : Math.round(percent) + '%'
 }
 
+// These labels are system enums. Unknown source names remain business data.
+const SCENE_LABELS = localeMap(() => ({
+  chat: '对话', task: '需求执行', workflow: '自动化工作流', automation: '定时自动化', system: '平台运行',
+}))
+export const sceneLabel = (key, label) => Object.hasOwn(SCENE_LABELS, key) ? SCENE_LABELS[key] : label || key || '—'
+
 export const sceneColor = (key) => ({
   chat: 'var(--accent)', task: 'var(--ok)', workflow: 'var(--warn)',
   automation: 'var(--ugc-secondary)', system: 'var(--ink-3)',

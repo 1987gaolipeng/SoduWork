@@ -1,5 +1,5 @@
 import { translateText as tx, localeMap, useLocale } from '../i18n.js'
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { api } from '../api.js'
 import { Icon, Modal, toast } from '../ui.jsx'
 import ConnectorIcon from '../components/ConnectorIcon.jsx'
@@ -18,6 +18,28 @@ const AUTH_FIELDS = localeMap(() => [
   ['tokenUrl', 'Token 地址'], ['clientId', 'Client ID'], ['clientSecret', 'Client Secret'],
   ['scope', 'Scope'], ['username', '用户名'], ['password', '密码'],
 ])
+
+function AutoGrowTextarea({ value, onChange, minRows = 2, maxRows = 15, className = '', ...props }) {
+  const ref = useRef(null)
+  const resize = () => {
+    const node = ref.current
+    if (!node || typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') return
+    const styles = window.getComputedStyle(node)
+    const lineHeight = Number.parseFloat(styles.lineHeight) || 20
+    const padding = (Number.parseFloat(styles.paddingTop) || 0) + (Number.parseFloat(styles.paddingBottom) || 0)
+    const border = (Number.parseFloat(styles.borderTopWidth) || 0) + (Number.parseFloat(styles.borderBottomWidth) || 0)
+    const minHeight = lineHeight * minRows + padding + border
+    const maxHeight = lineHeight * maxRows + padding + border
+    node.style.height = 'auto'
+    const contentHeight = node.scrollHeight + border
+    node.style.maxHeight = String(maxHeight) + 'px'
+    node.style.height = String(Math.min(maxHeight, Math.max(minHeight, contentHeight))) + 'px'
+    node.style.overflowY = contentHeight > maxHeight ? 'auto' : 'hidden'
+  }
+  useLayoutEffect(() => { resize() }, [value, minRows, maxRows])
+  return <textarea {...props} ref={ref} rows={minRows} value={value} onChange={onChange}
+    className={['f-in', 'connector-autogrow', className].filter(Boolean).join(' ')} />
+}
 
 export function McpForm({ initial, template, onClose, onSave, busy, publishLabel, extraAction }) {
   useLocale()
@@ -109,9 +131,9 @@ export function McpForm({ initial, template, onClose, onSave, busy, publishLabel
                 setV(old => ({ ...old, url: e.target.value, keycloak: {} })); setHdrText('')
               }} placeholder="https://example.com/mcp" /></label>
               <label className="df-field"><span className="f-lbl">{tx('鉴权头')} <em>{tx('选填，每行一项')}</em></span>
-                <textarea className="f-in" rows={2} value={hdrText} onChange={e => setHdrText(e.target.value)} placeholder="Authorization=Bearer …" autoComplete="off" /></label>
+                <textarea className="f-in connector-auth-headers" rows={4} value={hdrText} onChange={e => setHdrText(e.target.value)} placeholder="Authorization=Bearer …" autoComplete="off" /></label>
             </> : <div className="df-grid"><label className="df-field"><span className="f-lbl">{tx('启动命令')}</span><input className="f-in" value={v.command} onChange={set('command')} placeholder="npx / uvx / node" /></label>
-              <label className="df-field"><span className="f-lbl">{tx('参数，每行一个')}</span><textarea className="f-in" rows={2} value={argsText} onChange={e => setArgsText(e.target.value)} /></label></div>}
+              <label className="df-field"><span className="f-lbl">{tx('参数，每行一个')}</span><AutoGrowTextarea value={argsText} onChange={e => setArgsText(e.target.value)} maxRows={15} /></label></div>}
           {template?.officialDocs?.[0] && <a className="connector-form-help" href={template.officialDocs[0]} target="_blank" rel="noopener noreferrer">{tx('如何获取授权')} ↗</a>}
           <details className="connector-advanced"><summary>{tx('高级设置')}<Icon name="chevron" /></summary><div className="connector-advanced-body">
             {typed && <label className="df-field"><span className="f-lbl">{tx('连接名称')}</span><input className="f-in" value={v.name} onChange={set('name')} /></label>}

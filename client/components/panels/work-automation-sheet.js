@@ -241,11 +241,11 @@
     return state.agents.find(item => String(item.id) === String(id || '')) || null;
   }
 
-  function modelRows(current, agentId) {
+  function modelEntries(current, agentId) {
     const agent = agentById(agentId);
     const selected = String(current || '').trim();
     if (agent && agent.modelPick === false && agent.nativeModelPick !== true) {
-      return '<option value="">' + esc(tx('由底座自身管理模型')) + '</option>';
+      return [{ name: '', label: tx('由底座自身管理模型') }];
     }
     const source = agent?.nativeModelPick ? agent.modelOptions : state.modelOptions;
     const rows = Array.isArray(source) ? source.slice() : [];
@@ -255,9 +255,14 @@
     if (selected && !normalized.some(item => item.name === selected)) {
       normalized.unshift({ name: selected, label: selected + tx('（已保存，当前不可用）'), stale: true });
     }
-    if (!normalized.length) return '<option value="">' + esc(tx('当前没有可用模型')) + '</option>';
+    if (!normalized.length) return [{ name: '', label: tx('当前没有可用模型') }];
     if (!selected) normalized.unshift({ name: '', label: tx('请选择模型'), placeholder: true });
-    return normalized.map(item => '<option value="' + esc(item.name) + '"' +
+    return normalized;
+  }
+
+  function modelRows(current, agentId) {
+    const selected = String(current || '').trim();
+    return modelEntries(current, agentId).map(item => '<option value="' + esc(item.name) + '"' +
       (item.name === selected ? ' selected' : '') + (item.stale || item.placeholder ? ' disabled' : '') + '>' +
       esc(item.label || item.name) + '</option>').join('');
   }
@@ -279,7 +284,11 @@
     const agent = form?.elements.assigneeId;
     if (!select || !agent) return;
     const current = preferred !== undefined ? String(preferred || '').trim() : String(select.value || '').trim();
-    select.innerHTML = modelRows(current, agent.value);
+    select.replaceChildren(...modelEntries(current, agent.value).map(item => {
+      const option = document.createElement('option'); option.value = item.name;
+      option.textContent = item.label || item.name; option.selected = item.name === current;
+      option.disabled = Boolean(item.stale || item.placeholder); return option;
+    }));
     const info = agentById(agent.value);
     const options = info?.nativeModelPick ? info.modelOptions : state.modelOptions;
     select.disabled = Boolean(info && info.modelPick === false && info.nativeModelPick !== true) ||

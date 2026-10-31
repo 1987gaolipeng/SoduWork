@@ -448,7 +448,7 @@ async def handoff_my_task(
     """Transfer the caller's own task to a colleague without requiring management permission."""
     r = await team_svc.handoff_my_task(session, client, tid,
                                        str(body.get("assigneeUserId") or ""),
-                                       str(body.get("note") or "")[:300])
+                                       str(body.get("note") or "")[:2000])
     if not r.get("ok"):
         msg = {"not_found": "这不是你持有的需求", "already_done": "需求已完成，不用再转给别人",
                "no_user": "本 SoduWork 还没绑定用户，请让管理员分配归属",

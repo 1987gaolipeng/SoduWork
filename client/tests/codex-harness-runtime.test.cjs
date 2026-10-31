@@ -56,6 +56,42 @@ test('Codex Harness sends complete Skill metadata and rejects malformed Skills',
   }
 });
 
+test('Runner stages byte-only image attachments for non-Pi runtimes', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-runner-byte-attachment-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const alias = 'byte-attachment';
+  const ref = _uuidV5(NAMESPACE, 'chat:' + alias + ':qwen');
+  const calls = [];
+  const runtime = { async rpc(op, payload) {
+    calls.push({ op, payload });
+    if (op === 'job.dispatch') return { ok: true, data: { ref } };
+    if (op === 'job.session') return { ok: true, data: {
+      ok: true, status: 'done', items: [{ seq: 1, kind: 'say', text: '完成' }],
+    } };
+    return { ok: true, data: { ok: true } };
+  } };
+  const adapter = createRunnerRuntimeAdapter({ runtimeSpec: runtimeCatalog.runtime('qwen'),
+    runnerRuntime: runtime,
+    modelConfig: { fetchModel: async () => ({ ok: true, model: {
+      id: 'fixture', baseUrl: 'http://fixture.invalid', key: 'secret', input: ['text', 'image'],
+    } }) } });
+  const session = await adapter.createSession({ runtimeId: 'test', identity: { clientId: 'test' },
+    native: { runner: { openOptions: { ref, cwd: root } } } });
+  t.after(() => session.dispose());
+  const sent = session.send({ text: '分析下', attachments: [{
+    name: '人才盘点封面.png', type: 'image/png', size: 4,
+    data: new Uint8Array([137, 80, 78, 71]),
+  }] });
+  await sent.completion;
+  const dispatch = calls.find(row => row.op === 'job.dispatch');
+  assert.equal(dispatch.payload.localFiles.length, 1);
+  assert.equal(dispatch.payload.localFiles[0].contentType, 'image/png');
+  assert.ok(path.isAbsolute(dispatch.payload.localFiles[0].path));
+  assert.match(dispatch.payload.localFiles[0].path, /\.soduwork-inputs[\\/]/);
+  assert.equal(session.snapshot().messages[0].attachments[0].name, '人才盘点封面.png');
+  assert.match(session.snapshot().messages[0].attachments[0].previewRef, /^att1\./);
+});
+
 test('conversation IPC exposes only safe model metadata and guards optional controls', () => {
   const source = ['ipc.js', 'goal-actions.js', 'open-reply.js'].map(name =>
     fs.readFileSync(path.join(__dirname, '../main/pi-session', name), 'utf8')).join('\n');
@@ -134,7 +170,11 @@ test('Codex Harness queues follow-ups FIFO, keeps transcript order and supports 
       name: '证据.png', mimeType: 'image/png', size: 4, path: screenshot,
     }] });
     await until(() => calls.some((row) => row.op === 'job.session'));
-    const second = session.send({ text: '第二轮' });
+    const followup = path.join(root, '补充.txt');
+    fs.writeFileSync(followup, '补充材料', 'utf8');
+    const second = session.send({ text: '第二轮', attachments: [{
+      name: '补充.txt', mimeType: 'text/plain', size: 4, path: followup,
+    }] });
     const removed = session.send({ text: '取消这一轮' });
     assert.equal(first.queued, false);
     assert.equal(second.queued, true);
@@ -149,6 +189,8 @@ test('Codex Harness queues follow-ups FIFO, keeps transcript order and supports 
     assert.deepEqual(session.snapshot().execution.queue.map((row) => row.text), ['第二轮']);
 
     const dispatched = calls.find((row) => row.op === 'job.dispatch');
+    assert.equal(dispatched.payload.localFiles[0].contentType, 'image/png',
+      'staged desktop attachments must preserve mimeType across the Runner boundary');
     assert.equal(dispatched.payload.ctx.conversationMode, 'adaptive');
     assert.deepEqual(dispatched.payload.cfg.llm.input, ['text', 'image']);
     assert.equal(dispatched.payload.cfg.llm.imageRouting, 'native');
@@ -167,6 +209,8 @@ test('Codex Harness queues follow-ups FIFO, keeps transcript order and supports 
 
     const commented = calls.find((row) => row.op === 'job.comment');
     assert.equal(commented.payload.text, '第二轮');
+    assert.equal(commented.payload.localFiles[0].contentType, 'text/plain',
+      'follow-up attachments must preserve staged mimeType too');
     assert.match(commented.payload.promptText, /不要把每条消息默认当成任务/);
     assert.match(commented.payload.promptText, /【用户原话】\s*第二轮/);
     assert.equal(commented.payload.cfg.local_cli, 'codex-harness');

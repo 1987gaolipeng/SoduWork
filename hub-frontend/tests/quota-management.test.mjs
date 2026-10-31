@@ -1,3 +1,4 @@
+import './helpers/chinese-locale.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -67,7 +68,8 @@ test('usage displays a bounded progress bar without altering ledger totals', () 
   assert.equal(model.usagePercent({ totalLimited: false, limit: 0, used: 300 }), 0)
 })
 
-test('quota copy is fully translated in all four locales and preserves placeholders', () => {
+test('quota copy is fully translated in all four locales and preserves placeholders', (context) => {
+  context.after(() => setLocale('zh-CN'))
   const placeholders = value => [...value.matchAll(/\{\d+\}/g)].map(row => row[0]).sort()
   for (const [locale, messages] of [['en-US', english], ['ja-JP', ja], ['ko-KR', ko]]) {
     setLocale(locale)
@@ -80,6 +82,26 @@ test('quota copy is fully translated in all four locales and preserves placehold
     assert.notEqual(t('nav.quotas'), '额度管理')
   }
   setLocale('zh-CN'); assert.equal(tx('额度管理'), '额度管理')
+})
+
+test('quota validators preserve stable error keys for current-language presentation', (context) => {
+  context.after(() => setLocale('zh-CN'))
+  for (const [locale, messages] of [['zh-CN', null], ['en-US', english], ['ja-JP', ja], ['ko-KR', ko]]) {
+    setLocale(locale)
+    const expected = source => error => {
+      assert.equal(error.message, source)
+      assert.equal(tx(error.message), messages?.[source] || source)
+      return true
+    }
+    assert.throws(() => model.validateAllowance({ ...baseAllowance, totalLimit: -1 }, choices),
+      expected('请输入 0 到 10,000,000,000,000 的整数'))
+    assert.throws(() => model.validateAllowance({ ...baseAllowance, restrictModels: true }, choices),
+      expected('仅允许所列模型时，请至少添加一个模型'))
+    assert.throws(() => model.validatePlan({ ...standard, name: ' ' }, choices),
+      expected('请填写套餐名称，最多 60 字'))
+    assert.throws(() => model.validateAssignment({ assignment: { revision: 1 } }, { mode: 'unknown' }, choices),
+      expected('请选择额度规则'))
+  }
 })
 
 const footerButtons = page => page.nodes(node => node.type === 'Modal')[0].props.foot.props.children

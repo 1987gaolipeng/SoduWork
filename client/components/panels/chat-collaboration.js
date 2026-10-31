@@ -356,7 +356,7 @@
     const target = text(task.description || task.note || value.goal, '添加需求描述，让执行目标更清楚。');
     const criteria = criteriaRows(task);
     const gates = gateRows(value, status, phase);
-    const { duration, tokens } = executionMetrics(execution, task);
+    const { duration } = executionMetrics(execution, task);
     const retries = first([execution.retryCount, value.retryCount], '0');
     const action = currentAction(status, phase);
     const executionOnly = !isCloudConversation(value) && isTerminal(status) && task.status && !['done', 'completed', 'complete'].includes(task.status);
@@ -402,8 +402,7 @@
       panel('execution', section('执行配置', config)) +
       panel('artifacts', section('成果与证据', evidence)) +
       '</div><footer class="ncollab-dossier-foot"><div class="ncollab-metrics"><div><span>已用时</span><b>' + esc(duration) +
-      '</b></div><div><span>重试</span><b>' + esc(retries) + ' 次</b></div><div><span>Token</span><b>' + esc(tokens) +
-      '</b></div></div>' + (action.key === 'retry' || action.key === 'start' || /^waiting/.test(status)
+      '</b></div><div><span>重试</span><b>' + esc(retries) + ' 次</b></div></div>' + (action.key === 'retry' || action.key === 'start' || /^waiting/.test(status)
         ? '<button type="button" class="ncollab-dossier-action" data-collab-action="' + action.key + '">' +
           esc(action.label) + '</button>' : '') + '</footer></aside>';
   }

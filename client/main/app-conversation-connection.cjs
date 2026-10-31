@@ -5,19 +5,22 @@ const personal = require('./personal-plugins');
 function contribution(app, pluginId) {
   if (!String(pluginId || '').startsWith('local:')) return null;
   const installed = personal.get(app, pluginId);
-  if (!installed.enabled) throw Error('应用已停用或卸载');
+  if (!installed.enabled) throw Error('即用已停用或卸载');
   const choices = (installed.ui?.contributions || []).filter(row => row.slot === 'workspace.navigation' &&
     row.source?.type === 'external' && row.source.bridge?.capabilities?.includes('mcp.connect'));
   return choices.length === 1 ? { installed, entry: choices[0] } : null;
 }
 function association(app, ids) {
   if (!app || !Array.isArray(ids) || ids.length !== 1) return '';
+  try { if (require('./jiyong-hosted-connection.cjs').context(app,ids[0])) return ids[0]; } catch (_) { /* Existing H5 path below. */ }
   try { return contribution(app, ids[0]) ? ids[0] : ''; } catch (_) { return ''; }
 }
 function required(installed, detail) {
-  return Error('应用“' + installed.name + '”' + detail + '，请打开应用完成登录或配置 ukey 后重试');
+  return Error('应用“' + installed.name + '”' + detail + '，请打开即用完成登录或配置 ukey 后重试');
 }
 function context(app, pluginId) {
+  const hosted = require('./jiyong-hosted-connection.cjs').context(app,pluginId);
+  if (hosted) return hosted;
   const selected = contribution(app, pluginId);
   if (!selected) return null;
   const { entry } = selected, origin = new URL(entry.source.url).origin;
@@ -43,7 +46,7 @@ function context(app, pluginId) {
   if (!saved) throw required(selected.installed, '尚未配置连接');
   const endpoint = new URL(saved.url);
   if (endpoint.origin !== origin || endpoint.pathname !== '/mcp' || endpoint.search || endpoint.hash || endpoint.username || endpoint.password)
-    throw Error('应用连接来源已变化，请重新打开应用同步连接');
+    throw Error('应用连接来源已变化，请重新打开即用同步连接');
   const readCurrent = () => {
     if (store.scope(binding) !== expectedScope) throw Error('应用账号已变化，请重新发送消息');
     const latest = contribution(app, pluginId);
@@ -57,10 +60,11 @@ function context(app, pluginId) {
     return { token, revision: row.revision };
   };
   const current = readCurrent();
-  return { ...application, connection: { pluginId, server: saved.server, url: endpoint.href,
+  const connection = { pluginId, server: saved.server, url: endpoint.href,
     credentialKey: saved.credentialKey, scope: expectedScope, expiresAt: Number.MAX_SAFE_INTEGER,
     ...current, readCurrent, context: {},
     ...(live?.connection?.scope === expectedScope && live.connection.server === saved.server && live.connection.inspect
-      ? { inspect: live.connection.inspect } : {}) } };
+      ? { inspect: live.connection.inspect } : {}) };
+  return {...application,connection:require('./jiyong-mcp-bindings.cjs').extend(connection,selected.installed,binding)};
 }
 module.exports = { association, context };

@@ -96,6 +96,29 @@ class AgentSetupInstallTests(unittest.TestCase):
         self.assertIs(done.call_args.args[1], True)
         self.assertIn("0.25.0", done.call_args.args[2])
 
+    def test_catalog_version_is_used_for_pi_npm_install(self):
+        calls = []
+        runtime = {"ok": True, "nodePath": "fixture-node", "npmPath": "fixture-npm", "why": ""}
+
+        def stream(_jid, argv, **_kwargs):
+            calls.append(argv)
+            return 0, "fixture npm output"
+
+        with (patch.object(agent_setup, "node_env", return_value=runtime),
+              patch.object(agent_setup.agent_npm_runtime, "environment", return_value={}),
+              patch.object(agent_setup.agent_npm_runtime, "activate_environment"),
+              patch.object(agent_setup, "_stream", side_effect=stream),
+              patch.object(agent_setup, "_pkg_version", return_value="0.84.4"),
+              patch.object(agent_setup, "_runtime_issue", return_value=""),
+              patch.object(agent_setup, "_bin_of", return_value="fixture-agent"),
+              patch.object(agent_setup, "_short", return_value="0.84.4"),
+              patch.object(agent_setup, "_done") as done):
+            agent_setup._run_npm("fixture", "pi", "install")
+
+        self.assertTrue(calls)
+        self.assertIn("@earendil-works/pi-coding-agent@0.84.4", calls[0])
+        self.assertTrue(done.call_args.args[1])
+
     def test_npm_nonzero_and_missing_package_metadata_never_report_install_success(self):
         for code, version, issue in [(1, "0.25.0", ""), (124, "0.25.0", ""),
                                      (0, "", ""), (0, "0.25.0", "runtime incomplete")]:

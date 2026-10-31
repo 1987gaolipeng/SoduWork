@@ -52,7 +52,7 @@
       const id = state.adapterId || '', title = state.displayName || global.AgentBrand?.LABELS[id] || id || 'Agent';
       if (badge) {
         badge.title = '本次会话执行底座：' + title;
-        badge.setAttribute('aria-label', badge.title); badge.setAttribute('role', 'img');
+        badge.setAttribute('aria-label', badge.title); badge.setAttribute('role', 'button');
         if (name && name.textContent !== title) name.textContent = title;
         if (brand && lastAgent !== id) { lastAgent = id; brand.innerHTML = global.AgentBrand?.html(id, { className: 'runtime-brand' }) || ''; }
       }

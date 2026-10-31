@@ -8,6 +8,7 @@ const outputs = require('../pi-session/outputs');
 const journal = require('./task-output-journal');
 const toolArgs = require('../../components/shared/execution-tool-args');
 const preparation = require('../pi-session/tool-preparation');
+const attachmentContract = require('../pi-session/attachment-contract');
 
 function create({ app, ref, record, saved, recordOf = () => record, artifactDirectory: resolvedDirectory }) {
   // Cloud results are always materialized into a private per-conversation
@@ -21,6 +22,21 @@ function create({ app, ref, record, saved, recordOf = () => record, artifactDire
   };
   const base = saved.snapshot;
   const acc = stream.create(), listeners = new Set(), keys = new Set(), tools = new Set();
+  const knownAttachments = new Map();
+  for (const message of [...(base.messages || []), base.pendingUser]) {
+    if (message?.role !== 'user') continue;
+    for (const file of attachmentContract.publicFiles(message.attachments)) {
+      if (file.name && !knownAttachments.has(file.name)) knownAttachments.set(file.name, file);
+    }
+  }
+  function displayAttachments(files) {
+    return attachmentContract.publicFiles(files, { derivePreviewRef: false }).map(file => {
+      const known = knownAttachments.get(file.name);
+      if (!known) return file;
+      return { ...known, ...file, type: file.type || known.type,
+        size: file.size || known.size, previewRef: file.previewRef || known.previewRef };
+    });
+  }
   const runtimeMessages = require('../agent-runtime/runner-messages').create(acc.state);
   const log = journal.create(app, 'cloud:' + record.transferId);
   let closed = false, cachedSnapshot = null, cachedUi = null, cachedState;
@@ -30,7 +46,7 @@ function create({ app, ref, record, saved, recordOf = () => record, artifactDire
       keys.add(row.taskOutputKey);
       if (row.role === 'user') preparation.clear(acc.state);
       if (row.role === 'user') acc.state.messages.push({ role: 'user', text: row.text,
-        attachments: row.files || [], taskId: row.taskId, taskOutputKey: row.taskOutputKey,
+        attachments: displayAttachments(row.files || []), taskId: row.taskId, taskOutputKey: row.taskOutputKey,
         blocks: [], done: true, scope: stream.SCOPES.NORMAL, sentAt: row.at });
       else {
         const message = acc.appendAssistant(row.text, stream.SCOPES.NORMAL, row.at);
@@ -98,7 +114,10 @@ function create({ app, ref, record, saved, recordOf = () => record, artifactDire
       const remote = acc.snapshot(), count = (base.messages || []).length;
       const pending = base.pendingUser && !remote.messages.some(row => row.role === 'user') ? [base.pendingUser] : [];
       return cachedSnapshot = { ...base, ...remote, adapterId: saved.adapterId, displayName: base.displayName,
-        modelSelection: base.modelSelection, messages: [...(base.messages || []), ...pending, ...remote.messages],
+        modelSelection: base.modelSelection, messages: [...(base.messages || []).map(message => message.role === 'user'
+          ? { ...message, attachments: displayAttachments(message.attachments) } : message),
+          ...pending.map(message => message.role === 'user'
+            ? { ...message, attachments: displayAttachments(message.attachments) } : message), ...remote.messages],
         turnMetrics: [...(base.turnMetrics || []), ...(remote.turnMetrics || []).map(row => ({ ...row,
           fromMessage: row.fromMessage + count + pending.length, toMessage: row.toMessage + count + pending.length }))],
         tools: [...(base.tools || []), ...remote.tools.map(row => ({ ...row, after: Number(row.after || 0) + count + pending.length }))],

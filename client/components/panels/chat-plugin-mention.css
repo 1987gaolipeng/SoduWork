@@ -27,11 +27,11 @@
 .nplugin-chip>button:hover{background:color-mix(in srgb,var(--ink) 6%,transparent);color:var(--ink-2)}
 .nplugin-chip.is-action{border-color:color-mix(in srgb,var(--accent) 24%,var(--line));background:color-mix(in srgb,var(--accent) 5%,var(--bg-0))}
 .nplugin-chip.is-action>i{background:color-mix(in srgb,var(--accent) 14%,var(--bg-0));color:var(--accent)}
-.nplugin-menu{position:absolute;z-index:80;left:16px;bottom:calc(100% + 8px);width:min(410px,calc(100% - 32px));
+.nplugin-menu{position:fixed;z-index:1800;left:var(--nplugin-left,16px);top:var(--nplugin-top,auto);bottom:var(--nplugin-bottom,auto);width:min(410px,calc(100vw - 32px));
   max-height:330px;padding:6px;border:1px solid color-mix(in srgb,var(--line) 88%,transparent);border-radius:13px;
   background:color-mix(in srgb,var(--bg-0) 97%,transparent);box-shadow:0 18px 48px rgba(26,39,67,.15),0 2px 8px rgba(26,39,67,.06);
   overflow:auto;overscroll-behavior:contain}
-.compose-panel[data-stage='compose'] .nplugin-menu{top:calc(100% + 8px);bottom:auto}
+.compose-panel[data-stage='compose'] .nplugin-menu{top:var(--nplugin-top,auto);bottom:var(--nplugin-bottom,auto)}
 .nplugin-menu[hidden]{display:none}
 .nplugin-option{appearance:none;display:grid;grid-template-columns:34px minmax(0,1fr) auto;align-items:center;gap:10px;width:100%;
   min-height:54px;padding:7px 9px;border:0;border-radius:9px;background:transparent;color:var(--ink-2);text-align:left}

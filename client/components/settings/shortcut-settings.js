@@ -148,6 +148,7 @@
     if (row.id === 'toggle-sidebar') { menu()?.toggleSidebar(); return; }
     if (row.id === 'open-about') { menu()?.runCommand('about'); return; }
     if (row.id === 'focus-search') { searchInput()?.focus(); return; }
+    if (row.id === 'open-global-search') { host.SoduWorkGlobalSearch?.open(); return; }
     if (row.id === 'focus-composer') { composer()?.focus(); return; }
     if (row.id === 'send-message') {
       const input = composer();
@@ -158,6 +159,7 @@
     if (row.capture) void capture(row.capture);
   }
   function onKeydown(event) {
+    if (host.SoduWorkGlobalSearch?.isOpen()) return;
     if (host.RequirementConfirm?.isOpen?.()) return;
     if (!state || event.isComposing || event.repeat) return;
     if (state.editingId) {
@@ -228,6 +230,8 @@
   host.addEventListener('soduwork-locale-change', () => { render(); status(); });
   host.addEventListener('soduwork-store-hydrated', () => { if (state) { state.rows = configuredRows(); syncMenu(); render(); } });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
-  Object.assign(api, { open, close, capture, getBinding: id => (state?.rows || configuredRows()).find(row => row.id === id)?.binding || '', isRecording: () => !!state?.editingId });
+  Object.assign(api, { open, close, capture, getRows: () => (state?.rows || configuredRows()).map(row => ({ ...row })),
+    execute: id => { const row = (state?.rows || configuredRows()).find(row => row.id === id); if (row) execute(row); },
+    getBinding: id => (state?.rows || configuredRows()).find(row => row.id === id)?.binding || '', isRecording: () => !!state?.editingId });
   return api;
 });

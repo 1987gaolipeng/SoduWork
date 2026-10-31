@@ -136,6 +136,14 @@
             if (!A.createAssignedTask) throw Error('当前版本暂不支持直接交办，请升级 SoduWork 后重试');
             const assigned = await A.createAssignedTask({ ...base, taskId: id, assigneeUserId: w.id });
             if (!assigned?.task?.id) throw Error('服务未确认需求创建');
+            // The task is stored on the assignee's device, but the creator is
+            // still a read-only participant. Merge the decorated server
+            // projection immediately so "我提出" stays correct without
+            // waiting for a websocket event or a later full refresh.
+            if (typeof Store !== 'undefined' && typeof Store.applyServerEvent === 'function') {
+              Store.applyServerEvent({ type: 'task.created', task: assigned.task,
+                arrival: 'self', by: assigned.task.createdByName || '' });
+            }
             return { id: assigned.task.id, title: assigned.task.title || base.title, directlyAssigned: true,
               targetName: assigned.targetName || mate?.name || '同事',
               assigneeName: assigned.task.assigneeName || assigned.targetName || mate?.name,

@@ -320,6 +320,11 @@ def build(body: dict, signature: dict | None = None) -> bytes:
             "expectedOutputs": _expected_outputs(workflow_nodes) if has_workflow else ["execute.result"],
         }] if evaluation_instruction else []),
     }
+    if body.get('appCategory') is not None:
+        manifest['appCategory'] = plugin_app_contracts.category(body['appCategory'])
+    if body.get('extensions') is not None:
+        from . import plugin_extensions
+        manifest['extensions'] = plugin_extensions.normalize(body['extensions'])
     if distribution:
         manifest['distribution'] = distribution
     from . import plugin_locales
@@ -336,6 +341,12 @@ def build(body: dict, signature: dict | None = None) -> bytes:
     app_window = plugin_window_contracts.normalize(body.get('appWindow'))
     if app_window is not None:
         manifest['appWindow'] = app_window
+    if body.get('jiyong') is not None:
+        from . import jiyong_contract
+        manifest['jiyong'] = jiyong_contract.normalize(body['jiyong'])
+        if manifest['jiyong'].get('initialization'):
+            from . import jiyong_initialization
+            jiyong_initialization.parse(manifest['jiyong'],resources)
     if icon:
         manifest['icon'] = icon
     if resources:

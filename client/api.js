@@ -1899,18 +1899,29 @@
       catch (e) { markFromError(e); throw e; }
     },
     async shareLibraryItem(id, recipientUserIds, note) {
+      const requestScope = taskStorageKey('ops');
       try {
         var r = await jfetch('/library/items/' + encodeURIComponent(id) + '/share', {
-          taskScope: taskStorageKey('ops'), method: 'POST',
+          taskScope: requestScope, method: 'POST',
           body: JSON.stringify({ recipientUserIds: Array.isArray(recipientUserIds) ? recipientUserIds : [], note: String(note || '') })
-        }); mark(true); return r;
+        }); mark(true); refreshSentNotices(requestScope); return r;
       } catch (e) { markFromError(e); throw e; }
     },
     async shareLocalLibraryFile(body) {
+      const requestScope = taskStorageKey('ops');
       try {
-        var r = await jfetch('/library/share-local', { taskScope: taskStorageKey('ops'), method: 'POST',
+        var r = await jfetch('/library/share-local', { taskScope: requestScope, method: 'POST',
           signal: _abortSignal(120000), body: JSON.stringify(body) });
-        mark(true); return r;
+        mark(true); refreshSentNotices(requestScope); return r;
+      } catch (e) { markFromError(e); throw e; }
+    },
+    async shareLocalLibraryFiles(files, recipientUserIds, note, options) {
+      const requestScope = taskStorageKey('ops');
+      try {
+        var payload = { files: Array.isArray(files) ? files : [], recipientUserIds: Array.isArray(recipientUserIds) ? recipientUserIds : [], note: String(note || ''), requestId: String(options?.requestId || '') };
+        var r = await jfetch('/library/share-local-batch', { taskScope: requestScope, method: 'POST',
+          signal: _abortSignal(120000), body: JSON.stringify(payload) });
+        mark(true); refreshSentNotices(requestScope); return r;
       } catch (e) { markFromError(e); throw e; }
     },
     async getLibraryStorageStatus() {

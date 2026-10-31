@@ -114,19 +114,23 @@ if (typeof electron === 'string') {
     await publish(complete); await closed([finalText]);
     assert.equal(await js('document.querySelectorAll(".nturn-summary").length'), 1);
     assert.equal(await js('document.querySelectorAll(".nturn-metrics").length'), 0);
-    assert.match(await js('document.querySelector(".nturn-summary").innerText'), /23s[\s\S]*311[\s\S]*tokens/);
+    assert.match(await js('document.querySelector(".nturn-summary").innerText'), /23s/);
+    assert.doesNotMatch(await js('document.querySelector(".nturn-summary").innerText'), /311|tokens/);
     assert.equal(await js('document.querySelectorAll(".nthink").length'), 2); assert.equal(await js('document.querySelectorAll(".ntool").length'), 1);
     await js(`window.processNode=document.querySelector('[data-chat-node="message:1"]');window.finalNode=document.querySelector('[data-chat-node="message:2"]')`);
-    report.results.push('Completion folds process, preserves Harness, and uses authoritative 311 tokens instead of the visible-message subtotal of 40');
+    report.results.push('Completion folds process and preserves the final answer while keeping usage metadata out of the message summary');
     const delayed = structuredClone(complete); delayed.execution.elapsedMs = 323000;
     await publish(delayed);
-    assert.match(await js('document.querySelector(".nturn-summary").innerText'), /23s[\s\S]*311[\s\S]*tokens/);
+    assert.match(await js('document.querySelector(".nturn-summary").innerText'), /23s/);
+    assert.doesNotMatch(await js('document.querySelector(".nturn-summary").innerText'), /311|tokens/);
     await js("ctx._ref='duration-other'"); await publish(snapshot([user('Other request'), answer([text('Other answer')], { completedAt: at + 7000 })]));
     assert.match(await js('document.querySelector(".nturn-summary").innerText'), /7s/);
     await js("ctx._ref='completed-summary'"); await publish(delayed);
-    assert.match(await js('document.querySelector(".nturn-summary").innerText'), /23s[\s\S]*311[\s\S]*tokens/);
+    assert.match(await js('document.querySelector(".nturn-summary").innerText'), /23s/);
+    assert.doesNotMatch(await js('document.querySelector(".nturn-summary").innerText'), /311|tokens/);
     await publish(delayed, true);
-    assert.match(await js('document.querySelector(".nturn-summary").innerText'), /23s[\s\S]*311[\s\S]*tokens/);
+    assert.match(await js('document.querySelector(".nturn-summary").innerText'), /23s/);
+    assert.doesNotMatch(await js('document.querySelector(".nturn-summary").innerText'), /311|tokens/);
     const unknownTiming = snapshot([{ role: 'user', text: 'Legacy request' },
       { role: 'assistant', done: true, blocks: [text('Legacy answer')] }], [], { execution: { running: false, elapsedMs: 0 } });
     await publish(unknownTiming, true);
@@ -213,18 +217,18 @@ if (typeof electron === 'string') {
     await js("ctx._ref='historical-summary-session'");
     await publish(history, true); await closed([finalText, '第二轮结论。'], 2);
     const summaries = await js('Array.from(document.querySelectorAll("[data-turn-toggle]"),e=>({key:e.dataset.turnToggle,text:e.innerText}))');
-    assert.deepEqual(summaries.map(row => row.key), ['reply:49', 'reply:58']); assert.match(summaries[0].text, /111 tokens/); assert.doesNotMatch(summaries[0].text, /222/);
+    assert.deepEqual(summaries.map(row => row.key), ['reply:49', 'reply:58']);
+    assert.doesNotMatch(summaries[0].text, /111|222|tokens/);
     assert.match(summaries[0].text, /23s/); assert.match(summaries[1].text, /4s/);
     assert.doesNotMatch(summaries[1].text, /23s/);
-    assert.match(summaries[1].text, /222[\s\S]*tokens/); await click('[data-turn-toggle="reply:49"]');
+    assert.doesNotMatch(summaries[1].text, /222|tokens/); await click('[data-turn-toggle="reply:49"]');
     const sliding = structuredClone(history); sliding.messages.shift(); sliding.tools[0].after = 0; sliding.history.messageStart = 43; sliding.history.messageIndices.shift();
     await publish(sliding); assert.equal(await js(`document.querySelector('[data-turn-toggle="reply:49"]').getAttribute('aria-expanded')`), 'true');
     assert.equal(await js(`document.querySelector('[data-turn-toggle="reply:58"]').getAttribute('aria-expanded')`), 'false');
-    assert.match(await js(`document.querySelector('[data-turn-toggle="reply:49"]').innerText`), /111 tokens/);
+    assert.doesNotMatch(await js(`document.querySelector('[data-turn-toggle="reply:49"]').innerText`), /111|tokens/);
     await publish(history); await click('[data-turn-toggle="reply:49"]'); await screenshot('two-turns-1100');
     const unknown = structuredClone(history); delete unknown.turnMetrics; await publish(unknown);
-    assert.match(await js(`document.querySelector('[data-turn-toggle="reply:49"]').innerText`), /40 tokens/);
-    assert.doesNotMatch(await js(`document.querySelector('[data-turn-toggle="reply:49"]').innerText`), /222/);
+    assert.doesNotMatch(await js(`document.querySelector('[data-turn-toggle="reply:49"]').innerText`), /40|222|tokens/);
     report.results.push('Raw owner IDs preserve independent expansion and metrics across history remapping; legacy snapshots recover their own per-message output usage without borrowing the latest count');
     const nativeMissing = snapshot([user('First native turn'), answer([thought('先确认'), text('完成')],
       { usage: null, sourceAgent: source('harness2') }), user('Second native turn', at + 60000),
@@ -233,7 +237,7 @@ if (typeof electron === 'string') {
     await publish(nativeMissing, true);
     const nativeValues = () => js('Array.from(document.querySelectorAll(".nturn-summary"),node=>node.innerText)');
     const beforeSwitch = await nativeValues();
-    assert.match(beforeSwitch[0], /≈\s*5 tokens/); assert.match(beforeSwitch[1], /19[\s\S]*tokens/);
+    assert.doesNotMatch(beforeSwitch.join(' '), /5|19|tokens/);
     assert.doesNotMatch(beforeSwitch.join(' '), /—|999999|80000/);
     await js("ctx._ref='another-conversation'"); await publish(doneState(), true);
     await js("ctx._ref='native-missing-reopened'"); await publish(JSON.parse(JSON.stringify(nativeMissing)), true);
@@ -241,7 +245,7 @@ if (typeof electron === 'string') {
     nativeMissing.turnMetrics = [{ fromMessage: 0, toMessage: 1, tokens: 7, elapsedMs: 23000 },
       { fromMessage: 2, toMessage: 3, tokens: 19, elapsedMs: 4000 }];
     await publish(nativeMissing);
-    assert.match((await nativeValues())[0], /7 tokens/); assert.doesNotMatch((await nativeValues())[0], /≈|—/);
+    assert.doesNotMatch((await nativeValues())[0], /7|≈|—|tokens/);
     await screenshot('native-usage-reconciled');
     report.results.push('Google Harness2 missing native usage shows a marked thinking/text estimate per round, remains stable after switching/reopening and reconciles a late authoritative receipt without using context/session totals');
     const merged = snapshot([user('继续并整理最终回复'), answer([thought('先核对上下文。'), text('这是工具前的过程说明。'), call('merged-tool', 2),

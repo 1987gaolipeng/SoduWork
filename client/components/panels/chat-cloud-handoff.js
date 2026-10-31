@@ -107,7 +107,7 @@
     const form = dialog.querySelector('form'), body = dialog.querySelector('[data-cloud-body]');
     const submit = dialog.querySelector('[type=submit]'), abort = dialog.querySelector('[data-cloud-abort]');
     const error = dialog.querySelector('[role=alert]');
-    let busy = false, preview = null, phase = '';
+    let busy = false, preview = null, phase = '', selectedTargetId = '';
     let instructionDraft = '请根据本会话已有记录和工作文件继续完成原任务，验证最终成果并说明尚未解决的问题。';
     const dispose = () => { dialog.close(); dialog.remove(); preview = null; body.replaceChildren?.(); if (active === dialog) { active = null; activeContext = null; } };
     const close = () => { if (!busy) dispose(); };
@@ -146,6 +146,17 @@
       }
       phase = '';
       const targets = value.targets || [], fallback = value.fallback;
+      if (!targets.some(target => target.id === selectedTargetId)) selectedTargetId = '';
+      const targetPicker = targets.length ? '<label class="ncloud-target-picker">' +
+        '\u6267\u884c\u7535\u8111' +
+        '<select data-cloud-target aria-label="\u6267\u884c\u7535\u8111"><option value="">\u81ea\u52a8\u9009\u62e9\uff08\u63a8\u8350\uff09</option>' +
+        targets.map(target => {
+          const id = String(target.id || '');
+          const label = target.runnerName || target.machineLabel || target.name || target.runnerId || id;
+          const agentLabel = target.cliName || target.agentId || '';
+          return '<option value="' + esc(id) + '"' + (id === selectedTargetId ? ' selected' : '') + '>' +
+            esc(agentLabel ? label + ' · ' + agentLabel : label) + '</option>';
+        }).join('') + '</select></label>' : '';
       const agent = global.AgentBrand?.LABELS?.[value.source?.agentId] || ({ pi: 'Pi', opencode: 'OpenCode', qwen: 'Qwen Code', codex: 'Codex' }[value.source?.agentId]) || value.source?.agentId || '当前 Agent';
       body.innerHTML = '<div class="ncloud-auto" data-cloud-auto>' + ICON + '<div><strong>' + (fallback ? '改用 Pi 在云端继续？' : targets.length ? '自动选择云端服务器' : '暂无可用的云端服务器') + '</strong>' +
         '<p class="ncloud-muted">' + (fallback ? esc('云端暂无可用的 ' + agent + '。可改用 Pi 和已授权的云端默认模型，保留工作记录与文件。') : targets.length ? esc('继续使用 ' + agent + '，自动选择可用服务器。') : esc(value.diagnostics?.summary || '请先接入一台支持当前 Agent 的远程服务器。')) + '</p></div></div>' +
@@ -157,6 +168,7 @@
           value.excluded.map(file => '<li>' + esc(file.path) + '</li>').join('') + '</ul></details>' : '') +
         '<p class="ncloud-muted">' + (value.running ? '确认后先停止本轮本地执行，再交接到云端。' : '') +
           '云端会基于工作记录继续执行；运行中的程序、电脑操作和浏览器登录状态不会迁移。请确认清单内不含需要留在本机的私密文件。</p>';
+      if (targetPicker) body.insertAdjacentHTML('afterbegin', targetPicker);
       submit.disabled = !targets.length; submit.textContent = fallback ? '同意改用 Pi 并转到云端' : '转到云端继续'; abort.hidden = true;
       form.querySelector('footer [data-cloud-close]').textContent = '留在本地';
     }
@@ -167,6 +179,7 @@
       const label = submit.textContent; submit.textContent = action === 'confirm' ? '正在交接…' : '正在核对…';
       try {
         const value = action === 'confirm' ? await api.confirm(ref, { previewId: preview.previewId,
+          ...(selectedTargetId ? { assigneeId: selectedTargetId } : {}),
           ...(preview.fallback ? { agentFallback: { ...preview.fallback, accepted: true } } : {}),
           instruction: body.querySelector('[data-cloud-instruction]').value }) : await api[action](ref);
         if (!current()) return;
@@ -200,6 +213,10 @@
       }
     });
     form.addEventListener('submit', event => { event.preventDefault(); void perform(phase ? 'recover' : 'confirm'); });
+    body.addEventListener('change', event => {
+      const target = event.target.closest?.('[data-cloud-target]');
+      if (target) selectedTargetId = target.value || '';
+    });
     abort.addEventListener('click', () => { void perform('abort'); });
     active = dialog; activeContext = { ref, owner, close: dispose }; document.body.append(dialog); dialog.showModal();
     try { const value = await api.preview(ref); if (!value?.ok) throw Error(value?.reason || '无法检查交接条件'); if (current()) display(value); }

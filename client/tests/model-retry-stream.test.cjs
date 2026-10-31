@@ -12,9 +12,11 @@ async function fixture(t, retry = {}) {
   const f = await require('../e2e/fixtures/resumed-pi.cjs').create(root);
   t.after(async () => { await f.close(); fs.rmSync(root, { recursive: true, force: true }); });
   // Shorten backoff while retaining intervals beyond the UI merge window so each retry remains observable.
-  // Keep retry counts and provider policy under production configuration.
+  // Keep this wire fixture bounded and fast; production six-retry defaults are
+  // covered by session-resources and the explicit schedule test below.
   fs.writeFileSync(path.join(f.agentDir, 'settings.json'), JSON.stringify({
-    compaction: { enabled: false }, retry: { enabled: true, baseDelayMs: 100, ...retry },
+    compaction: { enabled: false },
+    retry: { enabled: true, maxRetries: 3, baseDelayMs: 100, ...retry },
   }));
   await f.open();
   const retries = [];
@@ -50,6 +52,18 @@ test('three transient stream failures recover automatically without replaying a 
     assert.equal(body.messages.filter(row => row.role === 'tool').length, 1, 'reuse confirmed tool receipt');
     assert.equal(body.messages.filter(row => row.role === 'user' && JSON.stringify(row).includes('请生成报告')).length, 1);
   }
+});
+
+test('an explicit retry schedule controls each transient retry delay', { timeout: 15000 }, async t => {
+  // This observer reads 50 ms-coalesced UI snapshots. Keep each retry visible
+  // while using a schedule that differs from the default exponential backoff.
+  const f = await fixture(t, { maxRetries: 3, delayScheduleMs: [100, 200, 300] });
+  f.reply((_body, count) => count <= 3 ? streamError() : { text: '按计划重试后完成。' });
+  await f.handle.submit('验证显式重试间隔。').completion;
+  assert.deepEqual(f.retries.map(row => row.attempt), [1, 2, 3]);
+  assert.deepEqual(f.retries.map(row => row.delayMs), [100, 200, 300]);
+  assert.equal(f.requests.length, 4);
+  assert.equal(f.handle.snapshot().status, 'idle');
 });
 
 test('persistent stream failure stops after three retries and a single explicit recovery can continue', { timeout: 15000 }, async t => {

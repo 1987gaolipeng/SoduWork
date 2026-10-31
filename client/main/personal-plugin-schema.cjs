@@ -22,9 +22,10 @@ const UI_BUILTINS = new Set([
    The hosted page receives the bridge only from an installed contribution
    after the main-process origin and capability checks succeed. */
 const UI_BRIDGE_CAPABILITIES = new Set([
-  'context.read', 'conversation.open', 'conversation.send',
+  'ai.generate',
+  'context.read', 'directory.read', 'messages.read', 'library.read', 'conversation.open', 'conversation.send',
   'requirements.propose', 'notifications.send', 'composer.control', 'mcp.connect',
-  'settings.read', 'settings.write', 'automation.create',
+  'settings.read', 'settings.write', 'automation.create', 'data.read', 'data.write',
 ]);
 
 function text(value, limit) { return String(value == null ? '' : value).trim().slice(0, limit); }
@@ -234,8 +235,8 @@ function create({ pluginWorkflow, pluginResources, pluginPlatforms }) {
         if (!UI_BUILTINS.has(actionId)) throw new Error('个人插件引用了未开放的 SoduWork 页面');
         safeSource = { type: 'builtin', actionId };
       } else if (type === 'external' || type === 'package') {
-        if (type === 'package' && slot !== 'workspace.navigation') throw Error('包内页面仅支持应用入口 workspace.navigation');
-        if (type === 'package' && source.openMode != null && source.openMode !== 'workspace') throw Error('包内页面只能由应用壳打开');
+        if (type === 'package' && slot !== 'workspace.navigation') throw Error('包内页面仅支持即用入口 workspace.navigation');
+        if (type === 'package' && source.openMode != null && source.openMode !== 'workspace') throw Error('包内页面只能由即用壳打开');
         const url = type === 'package' ? '' : text(source.url, 1600);
         if (type === 'external' && (!/^https?:\/\//i.test(url.replace(/\{\{\s*(?:task|project|user)\.[\w.-]+\s*\}\}/g, 'sample')) ||
             /(?:[?&])(?:token|secret|password|api[_-]?key)=/i.test(url))) {
@@ -271,7 +272,10 @@ function create({ pluginWorkflow, pluginResources, pluginPlatforms }) {
         throw new Error('插件定义不能包含真实密码或密钥，请在企业发布时绑定 Secret Reference');
       }
     }
-    if (pluginWorkflow.hasSecretField(body)) {
+    // Metadata "secret: true" is a declaration, never a credential. Validate it
+    // separately before excluding that declaration from the legacy field scan.
+    const jiyong = body.jiyong == null ? null : require('../core/jiyong-contract.cjs').normalize(body.jiyong);
+    if (pluginWorkflow.hasSecretField({ ...body, jiyong: undefined })) {
       throw new Error('插件定义不能保存密码、密钥或令牌，请在企业发布后绑定 Secret Reference');
     }
     const template = text(body.template, 20).toLowerCase();
@@ -300,8 +304,14 @@ function create({ pluginWorkflow, pluginResources, pluginPlatforms }) {
     const icon = require('../core/plugin-icon').normalize(body.icon);
     const setup = normalizeInstallSetup(body.setup);
     const ui = normalizeUi(body.ui);
+    if (jiyong?.mcp && !mcpServers.includes(jiyong.mcp.server)) throw Error('即用 MCP 必须同时声明在 mcpServers 中');
+    if (jiyong?.mcp?.server === 'soduwork-jiyong') {
+      const pages = ui.contributions.filter(r => r.slot === 'workspace.navigation' && r.source.type === 'package' && r.source.bridge?.capabilities?.includes('mcp.connect'));
+      if (pages.length !== 1 || !pages[0].source.bridge.capabilities.some(c => c === 'data.read' || c === 'data.write')) throw Error('宿主 MCP 需要唯一包内入口及数据能力');
+    }
     require('../core/plugin-app-contract.cjs').validate(template, ui);
     const resources = pluginResources.normalize(body.resources);
+    if(jiyong?.initialization)require('../core/jiyong-initialization.cjs').parse(jiyong,resources);
     require('../core/plugin-package-page.cjs').validate(ui, resources);
     const entrypoints = body.entrypoints == null ? null : body.entrypoints;
     if (entrypoints !== null && (typeof entrypoints !== 'object' || Array.isArray(entrypoints) ||
@@ -335,6 +345,9 @@ function create({ pluginWorkflow, pluginResources, pluginPlatforms }) {
     }
     return {
       template, key, name, version, description, instructions, skills, mcpServers, runtime,
+      ...(jiyong ? { jiyong } : {}),
+      ...(body.appCategory != null ? {appCategory:require('../core/plugin-app-contract.cjs').category(body.appCategory)} : {}),
+      ...(body.extensions != null ? {extensions:require('../core/plugin-extensions.cjs').normalize(body.extensions)} : {}),
       ...(body.locales != null ? { locales: require('../core/plugin-locales').normalize(body.locales) } : {}),
       ...(text(body.sourcePluginId, 64) ? { sourcePluginId: text(body.sourcePluginId, 64) } : {}),
       ...(distribution ? { distribution } : {}),

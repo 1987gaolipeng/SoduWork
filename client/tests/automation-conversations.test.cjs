@@ -62,6 +62,25 @@ test('automation publishes the conversation as soon as the ordinary chat is crea
   assert.deepEqual(f.calls.map(item => item[0]), ['open', 'send']);
 });
 
+test('a restarted client adopts a cross-client conversation without reporting a dispatch failure', async () => {
+  const f = fixture();
+  f.deps.request = async (_identity, route, body) => {
+    if (route.endsWith('/inbox')) return { items: [{ id: f.input.runId }] };
+    if (route.endsWith('/claim')) return { ok: true, input: f.input, conversationId: 'chat-from-another-client' };
+    f.acks.push(body); return { ok: true, state: body.state };
+  };
+  await createWorker(f.deps).tick();
+  assert.equal(f.calls.length, 0, 'adopting an existing receipt must never open or send another prompt');
+  assert.equal(f.record.phase, 'adopted');
+  assert.equal(f.record.state, 'running');
+  assert.equal(f.record.conversationId, 'chat-from-another-client');
+  assert.equal(f.record.error, '');
+  assert.equal(f.acks.at(-1).state, 'running');
+  assert.equal(f.acks.at(-1).conversationId, 'chat-from-another-client');
+  await createWorker(f.deps).tick();
+  assert.equal(f.calls.length, 0, 'an adopted receipt must stay read-only on subsequent polling');
+});
+
 test('manual runs freeze the device access choice before opening the ordinary conversation', async () => {
   for (const mode of ['standard', 'readonly']) {
     const f = fixture();

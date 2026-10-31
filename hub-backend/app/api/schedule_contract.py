@@ -48,6 +48,7 @@ def schedule_payload(s, *, timestamp, administrative=False) -> dict:
             "nextRunAt": timestamp(next_at),
             "nextRunLocal": next_local.strftime("%Y-%m-%d %H:%M") if next_local else ""}
 
+    payload["sourceApp"] = dict(getattr(s,"source_app",None) or {})
     if administrative:
         payload.update(ownerClientId=s.owner_client_id, createdByName=s.created_by_name)
     return payload

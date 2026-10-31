@@ -81,6 +81,8 @@ export default async function(pi) {
   signal?.throwIfAborted();
   const model = { id: 'fixture-model', label: 'Local regression model', contextWindow: options.contextWindow || 200000,
     baseUrl: 'http://127.0.0.1:' + server.address().port + '/v1', proxyExpiresAt: Date.now() + 3600000 };
+  // Keep local fault-injection traffic off any machine-wide HTTP proxy.
+  config.noProxyFor(model.baseUrl);
   const modelsPath = config.writeModels(agentDir, model);
   const previousPrepare = config.prepare, previousCreate = sdk.ModelRuntime.create, previousKey = process.env.SODUWORK_PROXY_KEY;
   const prepareFixture = async () => ({ ok: true, provider: 'soduwork', agentDir, model });

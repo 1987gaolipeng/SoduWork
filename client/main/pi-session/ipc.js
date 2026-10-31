@@ -43,6 +43,7 @@ const { entryContextPrompts: _entryContextPrompts, awaitOpen: _awaitBounded,
 let _app = null;
 let _usage = null;
 let _cloudHandoff = null;
+let _accountSync = null;
 let _deliverySync = null;
 let _sessionOwners = null;
 const { _conf, _saveConf, workDir, _defaultCwd, _newSessionCwd } = createConfiguration(() => _app);
@@ -167,6 +168,7 @@ function _discardRenderer(handle) {
 function _bindUsage(handle, identity, adapterId) {
   if (!handle || !identity) return;
   _deliverySync?.bind(handle, identity);
+  _accountSync?.bind(handle, identity);
   handle.usageIdentity = {
     hub: String(identity.hub || ''),
     clientId: String(identity.clientId || ''),
@@ -246,6 +248,33 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     identityOf: sendIdentityOf || identityOf,
     assertOwner: (identity, handle) => memories.assertOwner(identity, handle.sessionId),
     notify: (handle, touched) => _push(BrowserWindow, handle, touched, handle.snapshot()) });
+  const accountSyncStore = require('../conversation/account-sync-store').create(
+    path.join(app.getPath('userData'), 'account-conversations-sync', 'outbox.json'));
+  _accountSync = require('../conversation/account-sync').create({
+    app, store: accountSyncStore, identityOf: sendIdentityOf || identityOf,
+    localIdentityOf: async () => (sendIdentityOf || identityOf)(app),
+    realtime: true,
+  });
+  // The bridge historically accepted one external history provider. Keep the
+  // cloud handoff provider and add the account projection without changing the
+  // cloud authority or exposing account sync as a Runner.
+  session.setExternalHistory?.({
+    async history() {
+      const [cloud, account] = await Promise.allSettled([_cloudHandoff.history(), _accountSync.history()]);
+      const rows = [];
+      if (cloud.status === 'fulfilled') rows.push(...(cloud.value.chats || []));
+      if (account.status === 'fulfilled') rows.push(...(account.value.chats || []));
+      const seen = new Set();
+      return { ok: true, chats: rows.filter(row => row && row.id && !seen.has(row.id) && seen.add(row.id)) };
+    },
+    isRemote(id) { return typeof _cloudHandoff.isRemote === 'function' && _cloudHandoff.isRemote(id); },
+    forget(id) {
+      if (typeof _accountSync.isAccountConversation === 'function' && _accountSync.isAccountConversation(id)) {
+        return Promise.resolve({ ok: false, reason: '跨设备会话请在来源设备归档' });
+      }
+      return _cloudHandoff.forget(id);
+    },
+  });
   require('../access-control/preferences').install({ app, ipcMain, BrowserWindow, confirmFullAccess });
   require('../workspace/recent-workspace').install({ app, ipcMain });
   const newChatAccess = require('../access-control/new-chat-consent').create({ BrowserWindow, confirmFullAccess });
@@ -396,6 +425,22 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
           }
         }
       }
+      // Keep the archived/cloud reopen path usable while the optional account
+      // projection is still being installed (and for isolated IPC harnesses
+      // that do not provide that optional service).
+      if (opts.chatId && typeof _accountSync !== 'undefined' &&
+          typeof _accountSync?.openProjection === 'function') {
+        const projection = await _accountSync.openProjection(opts.chatId).catch(() => null);
+        if (projection) {
+          await assertHistoryCurrent();
+          const handle = session.attachView(projection);
+          _sessionOwners?.bind(handle, identity, { connection: true });
+          if (event) _attach(handle, require('../conversation/app-surfaces.cjs').forSender(BrowserWindow, event.sender));
+          else _detach(handle);
+          _wire(BrowserWindow, handle);
+          return _openReply(handle, { resumed: true, attached: true, accountConversation: true });
+        }
+      }
       if (opts.chatId && typeof _cloudHandoff.reopen === 'function') {
         const remote = await _cloudHandoff.reopen(opts.chatId,
           'cloud-' + require('node:crypto').randomUUID());
@@ -512,6 +557,9 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
       if (event && !preferences.isTrusted(event)) return { ok: false, reason: '请在 SoduWork 工作区中打开对话' };
       accessConsent?.assertValid();
       let automationPluginLock = expectedIdentity ? opts.pluginLock : null;
+      const editSource = opts.pluginEditId && !opts.chatId ? await require('../jiyong-edit-source.cjs').prepare({
+        app,identityOf,pluginId:opts.pluginEditId,cwd:spec.cwd,readOnly:spec.readOnly,
+      }) : null;
       let openingTimedOut = false;
       const openingPromise = Promise.resolve().then(async () => {
         await assertHistoryCurrent();
@@ -526,7 +574,6 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         workConversationId: work.first ? resume.id : undefined,
         validateWorkConversation: work.first ? () => work.validate({ event, identityOf: sendIdentityOf || identityOf,
           request: route => taskInput.request(identity, route) }) : undefined,
-        rememberAccessDefault: mode => preferences.rememberFromSession(app, mode, BrowserWindow),
         adapterId: String(opts.adapterId || 'pi'),
         readOnly: spec.readOnly,
         accessPolicy: spec.accessPolicy,
@@ -551,7 +598,9 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         capabilityIds: spec.capabilityIds,
         resolvePlugins: async (pluginIds, projectId, turnContext) => {
           if (automationPluginLock && pluginIds.includes(automationPluginLock.pluginId)) {
-            const installed = require('../personal-plugins').get(app, automationPluginLock.pluginId);
+            const installed = automationPluginLock.pluginId.startsWith('local:')
+              ? require('../personal-plugins').get(app, automationPluginLock.pluginId)
+              : await require('../app-installed-remote.cjs').get({app,identityOf},automationPluginLock.pluginId);
             if (!installed.enabled || installed.version !== automationPluginLock.version || installed.checksum !== automationPluginLock.checksum) {
               throw new Error('自动化所选插件已变化，请重新确认插件版本后执行');
             }
@@ -576,6 +625,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
             '。若任务匹配，请优先遵循这些 Skill；仍须以已加载的 SKILL.md 为准。',
           ] : []),
           ..._entryContextPrompts(opts.contextPrompts),
+          ...(editSource ? [editSource.guide] : []),
           ...(memoryContext.prompt ? [memoryContext.prompt] : []),
           ...(staged.files.length ? [attachments.prompt(staged.files)] : []),
         ],
@@ -692,7 +742,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     const maintenance = updateWorkloads.guard();
     if (!maintenance.ok) return maintenance;
     const s = session.get(ref);
-    if (!s) return { ok: false, reason: '这条对话已经不在了（可能已关闭）' };
+    if (!s) return { ok: false, code: 'SESSION_NOT_FOUND', notSent: true, reason: '这条对话已经不在了（可能已关闭）' };
     let selectedSkills;
     try { selectedSkills = skillTurn.names(rawOptions?.skills); }
     catch (error) { return skillTurn.failure(error); }
@@ -902,6 +952,23 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     const snapshot = _contextSnapshot(s, raw);
     return { ok: true, snapshot: _cloudHandoff ? _cloudHandoff.view(s, snapshot) : snapshot };
   });
+  const cancelSession = async (ref) => {
+    const s = session.get(ref);
+    if (!s) return { ok: false, accepted: false, reason: '这条对话已经不在了（可能已关闭）' };
+    if (_cloudHandoff.guard(s)) return { ok: false, accepted: false, reason: '请先处理云端交接，再操作本地队列' };
+    try {
+      const result = await Promise.resolve(s.cancel());
+      const snapshot = typeof s.uiSnapshot === 'function' ? s.uiSnapshot() : s.snapshot();
+      return { ...(result || { ok: true, accepted: true }),
+        snapshot: _contextSnapshot(s, snapshot) };
+    } catch (error) {
+      return { ok: false, accepted: false, reason: String(error && error.message || error) };
+    }
+  };
+  // New renderer path: await a receipt so the UI can lock the stop control
+  // after the first click. Keep the legacy one-way channel for older windows
+  // and test fixtures that still use ipcRenderer.send().
+  ipcMain.handle('pi-session-cancel-request', (_event, ref) => cancelSession(ref));
   ipcMain.on('pi-session-cancel', (event, ref) => { const s = session.get(ref); if (s) s.cancel(); });
   require('./artifact-ipc').install({ app, ipcMain, BrowserWindow, session, workDir,
     resolveSession: handle => _cloudHandoff.artifactSession(handle) });

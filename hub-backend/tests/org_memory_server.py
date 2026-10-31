@@ -22,9 +22,17 @@ async def serve(root: Path) -> None:
     os.environ["CLUSTER_REDIS_URL"] = ""
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+    from datetime import datetime, timezone
     from fastapi import Depends, FastAPI, HTTPException
     import uvicorn
     from app import models, automation_models as am
+    # Import every model module so create_all registers the full schema; shared
+    # task flows keep gaining tables (task_event, resource leases, notification
+    # outbox) and a hand-picked list silently rots behind the real services.
+    from app import (account_models, account_privacy_models, conversation_handoff_models,
+                     im_models, library_models, mail_models, memory_record_models,
+                     project_context_models, release_note_models, repository_issue_models,
+                     session_memory_models, task_notification_models)
     from app.api.memory_records import admin_router, router
     from app.auth import sign_token
     from app.db import Base, SessionLocal, engine, get_session
@@ -35,14 +43,7 @@ async def serve(root: Path) -> None:
     from app.services.rbac import user_to_api
 
     async with engine.begin() as connection:
-        tables = [model.__table__ for model in (
-            models.OrgUnit, models.User, models.Role, models.Client, models.AppSetting,
-            models.Task, models.Milestone, models.Project, models.Repo, models.Attachment,
-            models.AiSchedule, MemoryRecord, ProjectMemoryCapsule,
-            am.WorkflowRun, am.ExecutionSession, am.ArtifactVersion, am.ApprovalRequest,
-            am.TaskCodeTarget,
-        )]
-        await connection.run_sync(lambda c: Base.metadata.create_all(c, tables=tables))
+        await connection.run_sync(lambda c: Base.metadata.create_all(c))
     async with SessionLocal() as session:
         session.add(models.OrgUnit(id="fixture-org", name="Isolated organization"))
         session.add(models.User(id="fixture-admin", username="fixture-admin", org_id="fixture-org",
@@ -107,6 +108,7 @@ async def serve(root: Path) -> None:
                 await session.flush()
                 if not await task_status.mark(session, task, "done", why="isolated fixture completion"):
                     raise HTTPException(500, "Fixture completion did not pass its actual lifecycle gate")
+                task.updated_at = datetime.now(timezone.utc)
             await session.commit()
         elif action == "withdraw":
             item = await session.get(models.Task, "fixture-work-one")
@@ -128,7 +130,11 @@ async def serve(root: Path) -> None:
 
     @app.get("/api/v1/admin/orgs")
     async def orgs(user=Depends(current_user)):
-        return {"ok": True, "items": [{"id": user.org_id, "name": "Isolated organization", "parentId": None}]}
+        # Same shape as the real rbac.list_orgs response: a bare list.
+        return [
+            {"id": "fixture-org", "name": "Isolated organization", "parentId": None},
+            {"id": "fixture-other-org", "name": "Other isolated organization", "parentId": None},
+        ]
 
     try:
         await uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")).serve(sockets=[sock])

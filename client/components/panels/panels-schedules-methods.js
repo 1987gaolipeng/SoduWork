@@ -10,6 +10,7 @@ let _schPluginCache = Object.create(null);
 let _schPluginLoading = Object.create(null);
 
 function _schHasInteractiveUi(item) {
+  if (item?.jiyong && item.entrypoints?.automation) return false;
   return Boolean(item && item.ui && Array.isArray(item.ui.contributions) &&
     item.ui.contributions.length);
 }
@@ -131,11 +132,16 @@ async function _schmLoad() {
     window.soduWorkAPI.personalPlugins) || null;
   if (!bridge || typeof bridge.list !== 'function') { _schmItems = []; return _schmItems; }
   _schmLoading = Promise.resolve(bridge.list())
-    .then(result => {
+    .then(async result => {
       if (scope !== _schmGeneration) return [];
       _schmItems = (((result || {}).items) || []).filter(item =>
         item && item.enabled !== false && item.entrypoints && item.entrypoints.automation &&
         !_schHasInteractiveUi(item));
+      if (window.SoduWorkJiyongSchedules && SoduWorkAPI.pluginCatalog) {
+        const catalog = await SoduWorkAPI.pluginCatalog();
+        if (scope !== _schmGeneration) return [];
+        _schmItems.push(...(catalog.items || []).map(window.SoduWorkJiyongSchedules.remote).filter(Boolean));
+      }
       return _schmItems;
     })
     .catch(() => scope === _schmGeneration ? (_schmItems = _schmItems || []) : [])

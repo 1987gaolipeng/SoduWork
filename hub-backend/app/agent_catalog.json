@@ -27,6 +27,7 @@
       "install": {
         "installer": "npm",
         "pkg": "@earendil-works/pi-coding-agent",
+        "version": "0.84.4",
         "blurb": "轻快，原生支持技能（Agent Skills，和 Claude Code 同一套标准）。",
         "warn": "npm 上的 pi 是个圆周率玩具、@oh-my-pi 那个是第三方 fork —— 认准上面这个全名。",
         "config_how": "SoduWork 替它写 ~/.pi/agent/models.json（它只认这个文件）。里面的密钥只写成变量名，明文不落盘。",

@@ -36,3 +36,37 @@ for (const agentId of ['qwen', 'codex']) test(agentId + ' sends provider model I
   } else assert.equal(changed.cfg.llm.model, changed.executionSelection.modelName);
   await send('Same new model'); assert.equal(calls.filter(x => x.op === 'job.comment').at(-1).input.executionSelection, undefined);
 });
+
+test('resumed Runner history without saved model selection bypasses a stale Agent preference', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-model-recovery-'));
+  const fetches = [];
+  const runtime = { async rpc(op, input) {
+    if (op === 'job.session') return { ok: true, data: { status: 'done', round: 0, items: [] } };
+    if (op === 'runtime.detect') return { ok: true, data: { accessControl: {
+      schema: 'soduwork.access-policy/v1', supported: true, modes: ['standard', 'readonly', 'full'] } } };
+    if (op === 'job.stop') return { ok: true, data: { ok: true } };
+    throw Error(op);
+  } };
+  const adapter = createRunnerRuntimeAdapter({ runtimeSpec: catalog.runtime('qwen'), runnerRuntime: runtime,
+    modelConfig: { fetchModel: async (_identity, name, _timeout, _fetch, _force, agentId, options) => {
+      fetches.push({ name, agentId, options: options || {} });
+      if (!name && options?.ignoreAgentPreference === true) {
+        return { ok: true, model: { id: 'current-model', name: 'Current model', key: 'test', baseUrl: 'http://example.invalid/v1' } };
+      }
+      return { ok: false, reason: '你选择的模型「dev-coding-large-agent-soduwork」现在不可用，请重新选择' };
+    } },
+  });
+  const session = await adapter.resumeSession({ runtimeId: 'test', identity: { clientId: 'test', hub: 'http://fixture.invalid' },
+    native: { runner: { openOptions: { ref: 'legacy', resumePath: 'runner-old', resumedConversation: true, cwd: root, modelName: '' } } } });
+  t.after(async () => { await session.dispose(); fs.rmSync(root, { recursive: true, force: true, maxRetries: 4 }); });
+  assert.equal(session.snapshot().modelSelection.model.id, 'current-model');
+  assert.deepEqual(fetches.map(row => row.name), ['', '']);
+  assert.equal(fetches.at(-1).options.ignoreAgentPreference, true);
+  await session.dispose();
+  await assert.rejects(
+    () => adapter.createSession({ runtimeId: 'test', identity: { clientId: 'test', hub: 'http://fixture.invalid' },
+      native: { runner: { openOptions: { ref: 'new-chat', cwd: root, modelName: 'stale-model' } } } }),
+    /dev-coding-large-agent-soduwork/,
+    'a new chat must keep an explicit unavailable model error instead of silently falling back',
+  );
+});

@@ -252,7 +252,9 @@ function _schRefreshModelField(preferred) {
     String(select.value || '').trim();
   const agent = document.getElementById('schWho');
   if (!_schAgentAllowsModel(agent && agent.value)) {
-    select.innerHTML = '<option value="">' + esc(_schEditorTx('由底座自身管理模型')) + '</option>';
+    const option = document.createElement('option'); option.value = '';
+    option.textContent = _schEditorTx('由底座自身管理模型');
+    select.replaceChildren(option);
     select.value = '';
     select.disabled = true;
     return;
@@ -291,7 +293,7 @@ function _schRenderEditorDrawer(focusDrawer) {
       String((_schEditing || {}).id || '') === sid));
   });
   if (!isOpen) {
-    layer.classList.remove('show'); layer.setAttribute('aria-hidden', 'true'); content.innerHTML = '';
+    layer.classList.remove('show'); layer.setAttribute('aria-hidden', 'true'); content.replaceChildren();
     return;
   }
   content.innerHTML = _schEditorDrawerHtml();

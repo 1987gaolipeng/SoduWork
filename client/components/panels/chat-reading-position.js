@@ -74,7 +74,22 @@
         paint(apply);
       });
     }
-    return { capture, restore };
+    async function revealSearchMatch(query, isCurrent = () => true) {
+      const words = String(query || '').toLocaleLowerCase().split(/\s+/u).filter(Boolean);
+      if (!words.length || !isCurrent()) return false;
+      const ref = ctx._ref, epoch = ctx._viewEpoch, scope = ctx._draftScopeEpoch;
+      const current = () => isCurrent() && ref === ctx._ref && epoch === ctx._viewEpoch && scope === ctx._draftScopeEpoch;
+      if (!await restore({ top: 0, follow: false, messageStart: 0, messageLimit: 2000 }, current) || !current()) return false;
+      const title = String(ctx._snap?.title || '').toLocaleLowerCase();
+      const index = (ctx._snap?.messages || []).findIndex(message => {
+        const text = [title, message.text, ...(message.blocks || []).filter(block => block.kind === 'text').map(block => block.text)].join(' ').toLocaleLowerCase();
+        return words.every(word => text.includes(word));
+      });
+      if (index < 0) return false;
+      const absolute = ctx._snap?.history?.messageIndices?.[index] ?? (Number(ctx._snap?.history?.messageStart) || 0) + index;
+      return restore({ follow: false, messageStart: absolute, anchor: { index: absolute, offset: 24 } }, current);
+    }
+    return { capture, restore, revealSearchMatch };
   }
   global.ChatReadingPosition = { create };
 })(window);

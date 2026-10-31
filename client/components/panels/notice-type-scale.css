@@ -11,6 +11,7 @@
 .notice-panel .np-copy>.np-txt{display:block;white-space:pre-line}
 .notice-panel .np-files{display:grid;gap:5px;margin-top:9px}
 .notice-panel .np-attachment{display:flex;align-items:stretch;gap:0;min-width:0;border:1px solid var(--line);border-radius:10px;background:var(--bg-1);overflow:hidden}
+.notice-panel .np-attachment>.np-file-download:first-child{margin-left:auto}
 .notice-panel .np-file{display:flex;align-items:center;gap:9px;text-align:left;min-width:0;flex:1;padding:9px 10px;border:0;background:transparent;color:var(--ink-2);cursor:pointer}
 .notice-panel .np-file>svg{width:20px;height:22px;flex:none;fill:none;stroke:var(--ink-3);stroke-width:1.5;stroke-linejoin:round}
 .notice-panel .np-file>span{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:max(var(--font-min-readable, 14.5px), 13px);font-weight:500}

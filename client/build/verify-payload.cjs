@@ -8,15 +8,28 @@ const { performance } = require('node:perf_hooks');
 const { gunzipSync } = require('node:zlib');
 const NOTICE_BUNDLE = '.soduwork-notices.bin';
 const NOTICE_LIMIT = 64 * 1024 * 1024;
+// Reviewed documents from the bundled Python distribution. Do not grant these
+// uncommon extensions notice status for arbitrary application files.
+const RUNTIME_NOTICE_PATHS = new Set([
+  'resources/python/lib/site-packages/et_xmlfile-2.0.0.dist-info/licence.python',
+  'resources/python/tcl/tk8.6/demos/license.terms',
+  'resources/python/tcl/tk8.6/license.terms',
+]);
 // Only redistribution documents, at any depth. Unknown notice-like names fail
 // during packaging so new dependencies cannot silently fall outside this policy.
 function noticeCandidate(relative) {
-  const name = relative.replaceAll('\\', '/').split('/').pop();
+  const normalized = relative.replaceAll('\\', '/');
+  // npm's Arborist CLI is executable JavaScript, not a license document. Keep
+  // its bytes under strict payload hashing on both Windows and Unix layouts.
+  if (/^resources\/node\/(?:lib\/)?node_modules\/npm\/node_modules\/@npmcli\/arborist\/bin\/license\.js$/i.test(normalized)) return false;
+  const name = normalized.split('/').pop();
   return /^(?:licen[cs]es?|copying\d*|notice|copyright(?:notice)?|authors)(?:[._-]|$)/i.test(name) ||
     /\/share\/licenses\//i.test('/' + relative.replaceAll('\\', '/'));
 }
 function isNoticePath(relative) {
-  const name = relative.replaceAll('\\', '/').split('/').pop().toLowerCase();
+  const normalized = relative.replaceAll('\\', '/').toLowerCase();
+  if (RUNTIME_NOTICE_PATHS.has(normalized)) return true;
+  const name = normalized.split('/').pop();
   if (/\/share\/licenses\//i.test('/' + relative.replaceAll('\\', '/')) &&
       /^(?:readme(?:\.(?:txt|md))?|runtime\.library\.exception)$/.test(name)) return true;
   return /^(?:licen[cs]es?|copying\d*|notice|copyright(?:notice)?|authors)(?:[._-](?:txt|md|rst|html?|electron|chromium|mit|apache|bsd|lib|runtime|lesserv2|0bsd|gplv?[23]|lgplv?2\.1|bundling|gpl|oxygen|putty))*$/.test(name);

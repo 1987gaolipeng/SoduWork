@@ -17,10 +17,7 @@ _DEFAULT_SELECTORS = {
         {"type": "project_owner", "label": "项目负责人"},
     ],
     "review": [
-        {"type": "requester", "label": "需求提出人"},
         {"type": "task_creator", "label": "需求创建人"},
-        {"type": "project_owner", "label": "项目负责人"},
-        {"type": "permission", "key": "delivery.review", "label": "交付审阅人"},
     ],
     "merge": [
         {"type": "project_owner", "label": "项目负责人"},
@@ -181,6 +178,23 @@ async def _implementer_ids(session: AsyncSession, task: models.Task,
 async def _candidate_map(session: AsyncSession, task: models.Task, action: str,
                          rules: dict, artifact: am.ArtifactVersion | None = None
                          ) -> tuple[dict[str, dict], set[str]]:
+    # Requirement-pool delivery review is a business acceptance owned by the
+    # person who created the requirement.  Do not let a custom policy, a legacy
+    # snapshot, or a delivery.review permission turn the executor into an
+    # approver.  Other gates (baseline/merge/uat/deploy) retain their routed
+    # responsibilities.
+    if action == "review":
+        creator_id = str(getattr(task, "created_by", None) or "").strip()
+        if not creator_id:
+            return {}, set()
+        users = await _active_users(session, {creator_id})
+        if not users:
+            return {}, set()
+        user = users[0]
+        return {creator_id: {
+            "user": user,
+            "sources": [{"type": "task_creator", "label": "需求创建人"}],
+        }}, set()
     task_org_id = await _task_org_id(session, task)
     excluded: set[str] = set()
     if rules.get("separationOfDuties"):
@@ -222,6 +236,37 @@ async def ensure_assignments(session: AsyncSession, task: models.Task,
     existing = list((await session.execute(select(am.ApprovalAssignment).where(
         am.ApprovalAssignment.request_id == request.id
     ).order_by(am.ApprovalAssignment.created_at))).scalars().all())
+    if request.action == "review" and request.status == "pending":
+        # Review has exactly one eligible person (the creator). Reconcile old
+        # pending requests that were materialized with executor/permission
+        # assignments before this rule existed, so inbox and detail reads do
+        # not keep exposing the old approver.
+        rules = dict(request.policy_snapshot or {})
+        candidates, excluded = await _candidate_map(
+            session, task, request.action, rules,
+            await session.get(am.ArtifactVersion, request.artifact_version_id))
+        desired = set(candidates)
+        if {str(row.user_id) for row in existing} != desired:
+            if existing:
+                await session.execute(delete(am.ApprovalAssignment).where(
+                    am.ApprovalAssignment.request_id == request.id))
+            existing = []
+        if existing:
+            return existing
+        rows = []
+        for uid, item in candidates.items():
+            user = item["user"]
+            rows.append(am.ApprovalAssignment(
+                request_id=request.id, user_id=uid,
+                user_name=user.display_name or user.username,
+                sources=item["sources"],
+            ))
+        for row in rows:
+            session.add(row)
+        await session.flush()
+        if not rows:
+            await _record_unassigned(session, task, request, excluded)
+        return rows
     if existing:
         if not dict(request.policy_snapshot or {}).get("separationOfDuties"):
             return existing
@@ -244,28 +289,30 @@ async def ensure_assignments(session: AsyncSession, task: models.Task,
         rows.append(row)
     await session.flush()
     if not rows:
-        # An empty approver set blocks the approval and requires visible remediation.
-        # Invalid ownership and separation-of-duties exclusions can leave nobody eligible.
-        # Never silently approve; record an event and notify the task owner.
-        # Explain how to correct project responsibilities or the approval policy.
-        from . import task_events
-        task_events.record(session, task.id, "approval.unassigned", {
-            "requestId": request.id, "action": request.action,
-            "excluded": sorted(excluded)[:8],
-        }, actor="SoduWork")
-        if task.owner_client_id:
-            try:
-                from . import task_access
-                await task_access.publish_owner(session, task, {
-                    "type": "notice",
-                    "text": "⚠️「%s」的「%s」审批派不出去：按当前规则算不出可用的审批人"
-                            "（可能是负责人没配、或职责分离把唯一人选排除了）。"
-                            "请调整项目负责人或审批策略。" % (
-                                (task.title or "需求")[:40], request.action),
-                })
-            except Exception:  # noqa: BLE001 - Notification failure must not interrupt approval processing.
-                pass
+        await _record_unassigned(session, task, request, excluded)
     return rows
+
+
+async def _record_unassigned(session: AsyncSession, task: models.Task,
+                             request: am.ApprovalRequest, excluded: set[str]) -> None:
+    """Record an unassignable gate without turning routing failures into approvals."""
+    from . import task_events
+    task_events.record(session, task.id, "approval.unassigned", {
+        "requestId": request.id, "action": request.action,
+        "excluded": sorted(excluded)[:8],
+    }, actor="SoduWork")
+    if task.owner_client_id:
+        try:
+            from . import task_access
+            await task_access.publish_owner(session, task, {
+                "type": "notice",
+                "text": "⚠️「%s」的「%s」审批派不出去：按当前规则算不出可用的审批人"
+                        "（可能是负责人没配、或职责分离把唯一人选排除了）。"
+                        "请调整项目负责人或审批策略。" % (
+                            (task.title or "需求")[:40], request.action),
+            })
+        except Exception:  # noqa: BLE001 - Notification failure must not interrupt approval processing.
+            pass
 
 
 async def assignment_for_user(session: AsyncSession, request_id: str,
@@ -302,13 +349,25 @@ def assignment_api(row: am.ApprovalAssignment | None) -> dict | None:
 async def can_decide(session: AsyncSession, task: models.Task, request: am.ApprovalRequest,
                      actor) -> tuple[bool, str]:
     uid = actor_id(actor)
+    assignments = None
+    if request.action == "review":
+        # Reconcile a legacy pending assignment before checking the actor. This
+        # lets the first post-deploy inbox read move the ticket to the creator
+        # even when the service has not restarted through materialize_pending.
+        assignments = await ensure_assignments(session, task, request)
+        creator_id = str(getattr(task, "created_by", None) or "").strip()
+        if not creator_id:
+            return False, "这条需求没有记录创建人，无法判定审核权"
+        if uid != creator_id:
+            return False, "只有需求创建人可以审批交付成果"
     rules = dict(request.policy_snapshot or {})
-    if rules.get("separationOfDuties"):
+    if request.action != "review" and rules.get("separationOfDuties"):
         artifact = await session.get(am.ArtifactVersion, request.artifact_version_id)
         implementers = await _implementer_ids(session, task, artifact)
         if uid in implementers:
             return False, "这项交付要求职责分离，需求执行负责人不能审阅或批准自己的产出"
-    assignments = await ensure_assignments(session, task, request)
+    if assignments is None:
+        assignments = await ensure_assignments(session, task, request)
     assigned = next((x for x in assignments if x.user_id == uid), None)
     if assigned is None:
         return False, "这项审批没有分配给你；请由流程指定的负责人处理"
@@ -322,6 +381,9 @@ async def preview_can_decide(session: AsyncSession, task: models.Task,
     opening a review panel.
     """
     uid = actor_id(actor)
+    if request.action == "review":
+        creator_id = str(getattr(task, "created_by", None) or "").strip()
+        return bool(creator_id and uid == creator_id)
     rules = dict(request.policy_snapshot or {})
     if rules.get("separationOfDuties"):
         if uid in await _implementer_ids(session, task, artifact):

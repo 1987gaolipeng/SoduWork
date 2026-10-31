@@ -31,7 +31,9 @@ from ..models import ClientRelease, ClientUpdateAttempt
 from ..config import get_settings
 
 
-VERSION_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+# Stable releases stay canonical X.Y.Z; staging candidates append -beta.N
+# and always order before the same stable version (1.13.7-beta.2 < 1.13.7).
+VERSION_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-beta\.(1|[1-9]\d*))?$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 KEY_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$")
 TERMINAL_STATES = {"installed"}
@@ -59,9 +61,15 @@ class UpdateContractError(ValueError):
 _ARTIFACT_VERIFIED: dict[str, tuple[int, int, int, int, str]] = {}
 
 
-def parse_version(value: str) -> tuple[int, int, int] | None:
+def parse_version(value: str) -> tuple[int, int, int, int, int] | None:
     match = VERSION_RE.fullmatch(str(value or "").strip())
-    return tuple(map(int, match.groups())) if match else None
+    if not match:
+        return None
+    # A prerelease sorts before the same stable version; beta indexes compare
+    # numerically (beta.10 > beta.9).
+    stable = 0 if match.group(4) else 1
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)),
+            stable, int(match.group(4) or 0))
 
 
 def newer(latest: str, current: str) -> bool:

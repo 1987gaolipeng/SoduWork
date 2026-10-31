@@ -30,7 +30,10 @@ test('SoduWork defaults avoid multiplying one model turn into provider replays',
     getProjectSettings: () => ({}),
     applyOverrides: value => applied.push(value),
   });
-  assert.deepEqual(applied, [{ retry: { maxRetries: 3, provider: { maxRetries: 0, maxRetryDelayMs: 0 } } }]);
+  assert.deepEqual(applied, [{ retry: {
+    maxRetries: 6, delayScheduleMs: [5000, 15000, 30000, 60000, 120000, 240000],
+    provider: { maxRetries: 0, maxRetryDelayMs: 0 },
+  } }]);
 });
 
 test('explicit retry settings remain authoritative', () => {
@@ -43,10 +46,22 @@ test('explicit retry settings remain authoritative', () => {
   assert.deepEqual(applied, []);
 });
 
+test('an explicit retry count keeps its base-delay strategy when no schedule is supplied', () => {
+  const applied = [];
+  configureSoduWorkRetryPolicy({
+    getGlobalSettings: () => ({ retry: { maxRetries: 2, baseDelayMs: 750 } }),
+    getProjectSettings: () => ({}),
+    applyOverrides: value => applied.push(value),
+  });
+  assert.deepEqual(applied, [{ retry: { provider: { maxRetries: 0, maxRetryDelayMs: 0 } } }]);
+});
+
 test('real session resources expose the bounded SoduWork retry defaults', async t => {
   const f = fixture(t);
   const resources = await f.load([]);
-  assert.equal(resources.settingsManager.getRetrySettings().maxRetries, 3);
+  assert.equal(resources.settingsManager.getRetrySettings().maxRetries, 6);
+  assert.deepEqual(resources.settingsManager.getRetrySettings().delayScheduleMs,
+    [5000, 15000, 30000, 60000, 120000, 240000]);
   assert.equal(resources.settingsManager.getProviderRetrySettings().maxRetries, 0);
   assert.equal(resources.settingsManager.getProviderRetrySettings().maxRetryDelayMs, 0);
 });

@@ -99,8 +99,15 @@ function configureSoduWorkRetryPolicy(settingsManager) {
   const projectProvider = projectRetry.provider && typeof projectRetry.provider === 'object'
     ? projectRetry.provider : {};
   const overrides = { retry: {} };
-  if (!Number.isInteger(globalRetry.maxRetries) && !Number.isInteger(projectRetry.maxRetries)) {
-    overrides.retry.maxRetries = 3;
+  const hasExplicitMaxRetries = Number.isInteger(globalRetry.maxRetries)
+    || Number.isInteger(projectRetry.maxRetries);
+  if (!hasExplicitMaxRetries) {
+    overrides.retry.maxRetries = 6;
+  }
+  if (!hasExplicitMaxRetries
+    && !Array.isArray(globalRetry.delayScheduleMs)
+    && !Array.isArray(projectRetry.delayScheduleMs)) {
+    overrides.retry.delayScheduleMs = [5000, 15000, 30000, 60000, 120000, 240000];
   }
   if (!Number.isInteger(provider.maxRetries) && !Number.isInteger(projectProvider.maxRetries)) {
     overrides.retry.provider = { maxRetries: 0, maxRetryDelayMs: 0 };

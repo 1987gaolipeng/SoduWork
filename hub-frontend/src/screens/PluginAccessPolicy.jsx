@@ -101,14 +101,14 @@ function AccessRule({ kind, value, candidates, error, disabled, onChange }) {
     <SelectMenu id={id + '-mode'} aria-labelledby={id + '-label'} value={value.mode} disabled={disabled}
       onChange={event => { setQuery(''); onChange({ ...value, mode: event.target.value }) }}>
       <option value="inherit">{tx('沿用现有范围')}</option>
-      <option value="organization">{tx('全组织成员')}</option>
+      <option value="organization">{tx('全公司成员')}</option>
       <option value="users">{tx('指定人员')}</option>
       <option value="org_units">{tx('指定团队 / 部门')}</option>
       <option value="none">{tx('禁止成员使用此权限')}</option>
     </SelectMenu>
     <p className="plugin-access-rule-help">{value.mode === 'inherit'
       ? kind === 'use' ? tx('沿用插件版本的发布范围。') : tx('仅原作者及插件管理员可以编辑改进。')
-      : value.mode === 'organization' ? tx('对当前插件所属组织内的所有成员开放。')
+      : value.mode === 'organization' ? tx('对当前插件所属企业的所有成员开放。')
         : value.mode === 'none' ? tx('成员无法执行此操作，管理员仍可管理插件。')
           : people ? tx('只有所选成员获得这项权限。') : tx('所选团队及其下级部门成员获得这项权限。')}</p>
     {targeted && <div className="plugin-access-picker">

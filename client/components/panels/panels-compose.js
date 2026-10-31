@@ -86,7 +86,8 @@
   let _chatOpenSeq = 0;
   let _pluginSelectTask = Promise.resolve();
   let _pluginSelectError = '';
-  let _entryContextPrompts = []; // Entry-point materials go to the Agent without filling the user's composer.
+  let _entryPluginEditId = "";
+  let _entryContextPrompts = []; _entryPluginEditId = ""; // Entry-point materials go to the Agent without filling the user's composer.
   const esc = (s) => String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   function _setupApi() {
@@ -420,11 +421,11 @@
             skills: selectedSkills.slice(),
             plugins: _pluginMention?.selected() || [], intent: intentOptions?.intent,
             inputPreparation: intentOptions?.inputPreparation,
-            contextPrompts: _entryContextPrompts.slice() };
+            pluginEditId: _entryPluginEditId, contextPrompts: _entryContextPrompts.slice() };
         } });
       if (cloudViewSeq !== _composeViewSeq) return false;
       if (accepted) {
-        p.dataset.stage = 'chat'; _attachments?.clear(); _entryContextPrompts = [];
+        p.dataset.stage = 'chat'; _attachments?.clear(); _entryContextPrompts = []; _entryPluginEditId = "";
         _pluginMention?.clear?.();
         _skillPicker?.consume(selectedSkills);
         _accessConsent?.reset(); global.SessionMemoryEntry?.clear();
@@ -511,7 +512,7 @@
       attachments: attachmentRefs,
       libraryItemIds,
       initialPlugins,
-      contextPrompts: _entryContextPrompts.slice(),
+      pluginEditId: _entryPluginEditId, contextPrompts: _entryContextPrompts.slice(),
       sidebarProjectId: _workspace.sidebarProjectId || '',
       sidebarProjectName: _workspace.sidebarProjectName || '',
       projectId: _workspace.projectId || '',
@@ -524,7 +525,7 @@
     // turn does not silently inherit the previous Skill chip.
     if (_skillPicker) _skillPicker.consume(selectedSkills);
     _accessConsent?.reset();
-    _entryContextPrompts = [];
+    _entryContextPrompts = []; _entryPluginEditId = "";
     if (global.SessionMemoryEntry) SessionMemoryEntry.clear();
     _usedAtts = _attachments ? _attachments.files() : [];
     if (_attachments) _attachments.clear();
@@ -564,7 +565,7 @@
           cwd: _workspace.direct ? _workspace.dir : '', workspaceLabel: _workspace.name,
           projectId: _workspace.projectId || '', repoId: _workspace.repoId || '',
           sidebarProjectId: _workspace.sidebarProjectId || '', sidebarProjectName: _workspace.sidebarProjectName || '',
-          capabilities: [..._pickedCapabilities], contextPrompts: _entryContextPrompts.slice(),
+          capabilities: [..._pickedCapabilities], pluginEditId: _entryPluginEditId, contextPrompts: _entryContextPrompts.slice(),
           mode: accessSupported ? (_mode === 'readonly' ? 'readonly' : 'full') : _legacyMode,
           accessMode: accessSupported ? _mode : '',
           ...(accessSupported && _mode === 'full' ? _accessConsent?.options() : {}),
@@ -734,6 +735,7 @@
       _pluginSelectTask = Promise.resolve();
       _requestedCapabilities = Array.isArray(q.capabilities) ? q.capabilities.slice(0, 20) : null;
       if (_requestedCapabilities) void _loadCapabilities(true);
+      _entryPluginEditId = typeof q.pluginEditId === "string" ? q.pluginEditId : "";
       _entryContextPrompts = Array.isArray(q.contextPrompts)
         ? q.contextPrompts.map((item) => String(item || '').trim().slice(0, 16000))
           .filter(Boolean).slice(0, 4)
@@ -906,7 +908,7 @@
     _pluginsRequest++; _plugins = [];
     _composeViewSeq += 1; _pluginResolveSeq += 1; _pluginSelectSeq += 1;
     _pluginResolveBusy = false; _pluginSelectError = ''; _pluginSelectTask = Promise.resolve();
-    _entryContextPrompts = [];
+    _entryContextPrompts = []; _entryPluginEditId = "";
     _restoreComposeDraft();
     _intent?.reset();
   });

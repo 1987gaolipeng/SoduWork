@@ -21,7 +21,11 @@
     { id: 'harness2', displayName: 'Google Harness²', summary: '通过 OpenCode 直接执行；Google Research 推演核心用于显式诊断',
       modelMode: 'managed', goalMode: 'native', group: 'more', order: 80 },
   ]);
-  let catalog = FALLBACK.slice();
+  // Until the main process returns a health-checked projection, Pi is the only
+  // safe local choice. Rendering the full declaration catalog here would let a
+  // stale or offline Runner appear selectable during the probe window.
+  let catalog = FALLBACK.filter((row) => row.id === 'pi');
+  let missingCatalog = [];
   let current = 'pi';
   let location = 'local';
   // Keep the last choice for each execution location. A local account Agent
@@ -97,6 +101,10 @@
     }).filter(Boolean).sort((a, b) => a.order - b.order);
   }
 
+  function fallbackMissing() {
+    return normalize(FALLBACK.filter((row) => row.id !== 'pi'));
+  }
+
   function item(id) {
     return catalog.find((row) => row.id === String(id || '')) || catalog[0] || FALLBACK[0];
   }
@@ -110,7 +118,7 @@
   }
 
   function rowHtml(runtime) {
-    const mode = runtime.modelMode === 'account' ? '个人账号' : '企业模型';
+    const mode = _rtText(runtime.modelMode === 'account' ? '个人账号' : '企业模型');
     return "<button type='button' class='wc-pop-row cp-runtime-row' data-runtime='" + runtime.id +
       "' aria-selected='false'>" + brandIcon(runtime.id) +
       "<span class='cp-runtime-copy'><span class='cp-runtime-head'><b data-user-content>" +
@@ -118,7 +126,7 @@
       "</small></span><i" + (runtime.id.startsWith('custom-') ? ' data-user-content' : '') + ">" + escapeText(runtime.summary) + "</i></span>" +
       "<span class='cp-runtime-meta'><em class='cp-runtime-state' data-state='unknown' " +
       "data-runtime-state='" + runtime.id + "'>待检测</em>" +
-      "<b class='wc-check' aria-label='当前底座' hidden>" +
+      "<b class='wc-check' aria-label='" + _rtText('当前底座') + "' hidden>" +
       "<svg viewBox='0 0 16 16' aria-hidden='true'><path d='m4 8.2 2.4 2.4L12 5.3'/>" +
       "</svg></b></span></button>";
   }
@@ -127,13 +135,13 @@
     const recommended = catalog.filter((row) => row.group !== 'more');
     const more = catalog.filter((row) => row.group === 'more');
     let html = recommended.length
-      ? "<div class='cp-runtime-group is-first'>推荐</div>" + recommended.map(rowHtml).join('')
+      ? "<div class='cp-runtime-group is-first'>" + _rtText('推荐') + "</div>" + recommended.map(rowHtml).join('')
       : '';
     if (more.length) {
-      html += "<div class='cp-runtime-group'>更多底座</div>" +
+      html += "<div class='cp-runtime-group'>" + _rtText('更多底座') + "</div>" +
         more.map(rowHtml).join('');
     }
-    return html || "<div class='cp-runtime-empty'>暂时没有可用执行底座</div>";
+    return html || "<div class='cp-runtime-empty'>" + _rtText('暂时没有可用执行底座') + "</div>";
   }
 
   function renderRows(root) {
@@ -147,8 +155,8 @@
         : 0;
       const checking = location === 'cloud' && catalog.some((row) => pendingProbes.has(probeKey(row.id)));
       count.textContent = location === 'cloud'
-        ? (checking ? '检查中' : available + ' 个可用')
-        : catalog.length + ' 个';
+        ? (checking ? _rtText('检查中') : available + ' ' + _rtText('个可用'))
+        : catalog.length + ' ' + _rtText('个底座');
     }
   }
 
@@ -156,14 +164,18 @@
     runtimeIcon = String(abilityIcon || '');
     return WorkComposer.contextButton({
       id: 'cpRuntime', valueId: 'cpRuntimeName', iconHtml: brandIcon(current, 'cpRuntimeIcon'),
-      label: '执行底座', value: 'Pi',
-      title: '选择本次会话的 Agent 底座', popup: true, chevron: false,
+      label: _rtText('执行底座'), value: 'Pi',
+      title: _rtText('选择本次会话的 Agent 底座'), popup: true, chevron: false,
     }) +
       "<div class='wc-popover cp-runtime-pop' id='cpRuntimePop'>" +
-      "<div class='cp-runtime-heading'><span><b>选择执行底座</b>" +
-      "<small>选择一个底座完成本次会话</small></span>" +
-      "<em id='cpRuntimeCount'>" + catalog.length + " 个</em></div>" +
-      "<div class='cp-runtime-rows' id='cpRuntimeRows'>" + rowsHtml() + '</div></div>';
+      "<div class='cp-runtime-heading'><span><b>" + _rtText('选择执行底座') + "</b>" +
+      "<small>" + _rtText('选择一个底座完成本次会话') + "</small></span>" +
+      "<em id='cpRuntimeCount'>" + catalog.length + " " + _rtText('个底座') + "</em></div>" +
+      "<div class='cp-runtime-rows' id='cpRuntimeRows'>" + rowsHtml() + '</div>' +
+      "<span class='wc-runtime-availability cp-runtime-availability-footer' id='cpRuntimeAvailability' hidden>" +
+        "<span class='wc-runtime-missing' id='cpRuntimeMissing' role='img' aria-label='" + escapeText(_rtText('缺失的执行底座')) + "'></span>" +
+        "<button type='button' class='wc-runtime-more' id='cpRuntimeMore' data-runtime-more hidden>" + escapeText(_rtText('更多')) + "</button>" +
+      "</span></div>";
   }
 
   function paint(root) {
@@ -173,10 +185,38 @@
     const name = scope.querySelector('#cpRuntimeName');
     const icon = scope.querySelector('#cpRuntimeIcon');
     const goalButton = scope.querySelector('#cpIntentMenu');
+    const missingHost = scope.querySelector('#cpRuntimeMissing');
+    const missingMore = scope.querySelector('#cpRuntimeMore');
+    const missingWrap = scope.querySelector('#cpRuntimeAvailability');
+    if (missingHost && missingMore && missingWrap && typeof missingHost.replaceChildren === 'function') {
+      const rows = missingCatalog.filter((row) => row.id !== 'pi').slice(0, 6);
+      missingHost.replaceChildren(...rows.map(row => {
+        const item = document.createElement('span');
+        item.className = 'wc-runtime-missing-icon'; item.dataset.runtimeMissing = row.id;
+        item.title = _rtText(row.displayName);
+        item.setAttribute('aria-hidden', 'true');
+        const src = global.AgentBrand?.ICONS?.[row.id];
+        if (src) {
+          const image = document.createElement('img'); image.src = src; image.alt = ''; image.draggable = false;
+          image.className = 'agent-brand'; item.append(image);
+        } else item.textContent = '•';
+        return item;
+      }));
+      missingWrap.hidden = rows.length === 0; missingHost.hidden = rows.length === 0; missingMore.hidden = rows.length === 0;
+      const runtimeWrap = missingWrap.closest('.cp-runtimewrap');
+      // The management entry now lives in the picker footer. Only the legacy
+      // toolbar slot should widen the compact runtime trigger.
+      runtimeWrap?.classList.toggle('has-missing-runtime', rows.length > 0 &&
+        missingWrap.parentElement === runtimeWrap);
+      const names = rows.map(row => _rtText(row.displayName)).join('、');
+      missingHost.setAttribute('aria-label', _rtText('缺失的执行底座') + (names ? '：' + names : ''));
+      missingMore.textContent = _rtText('更多'); missingMore.title = _rtText('打开 Agent 管理，安装或修复执行底座');
+      missingMore.setAttribute('aria-label', _rtText('打开 Agent 管理'));
+    }
     if (goalButton) {
       goalButton.disabled = !goalSupported();
       goalButton.setAttribute('aria-disabled', String(goalButton.disabled));
-      goalButton.title = goalButton.disabled ? '当前 Agent 暂不支持目标模式' : '设定持续目标';
+      goalButton.title = goalButton.disabled ? _rtText('当前 Agent 暂不支持目标模式') : _rtText('设定持续目标');
     }
     if (name) { name.setAttribute('data-user-content', ''); name.textContent = selected.displayName; }
     if (icon) {
@@ -185,23 +225,23 @@
     }
     if (button) {
       button.title = (location === 'cloud' ? _rtText('云端 Harness：') : _rtText('执行底座：')) + selected.displayName + ' · ' + _rtText(selected.summary);
-      button.setAttribute('aria-label', (location === 'cloud' ? '本次会话云端 Harness：' : '本次会话执行底座：') + selected.displayName);
+      button.setAttribute('aria-label', (location === 'cloud' ? _rtText('本次会话云端 Harness：') : _rtText('本次会话执行底座：')) + selected.displayName);
     }
     const label = scope.querySelector('#cpRuntime .wc-context-copy > i');
-    if (label) label.textContent = location === 'cloud' ? '云端底座' : '执行底座';
+    if (label) label.textContent = location === 'cloud' ? _rtText('云端底座') : _rtText('执行底座');
     const heading = scope.querySelector('#cpRuntimePop .cp-runtime-heading b');
     const popup = scope.querySelector('#cpRuntimePop');
     if (popup) popup.classList.toggle('is-cloud', location === 'cloud');
-    if (heading) heading.textContent = location === 'cloud' ? '选择云端 Harness' : '选择执行底座';
+    if (heading) heading.textContent = location === 'cloud' ? _rtText('选择云端 Harness') : _rtText('选择执行底座');
     const subheading = scope.querySelector('#cpRuntimePop .cp-runtime-heading small');
     if (subheading) subheading.textContent = location === 'cloud'
-      ? '显示当前云端电脑的安装状态，可切换可用底座'
-      : '选择一个底座完成本次会话';
+      ? _rtText('显示当前云端电脑的安装状态，可切换可用底座')
+      : _rtText('选择一个底座完成本次会话');
     const count = scope.querySelector('#cpRuntimeCount');
     if (count && location === 'cloud') {
       const available = catalog.filter((row) => probes[probeKey(row.id)]?.ok).length;
       const checking = catalog.some((row) => pendingProbes.has(probeKey(row.id)));
-      count.textContent = checking ? '检查中' : available + ' 个可用';
+      count.textContent = checking ? _rtText('检查中') : available + ' ' + _rtText('个可用');
     }
     scope.querySelectorAll('#cpRuntimePop [data-runtime]').forEach((row) => {
       const adapterId = row.dataset.runtime || '';
@@ -224,11 +264,11 @@
         status.dataset.state = checking ? 'checking'
           : result == null ? 'unknown' : result.ok ? 'ready'
             : ['auth', 'unauthed', 'nollm'].includes(result.state) ? 'warning' : 'error';
-        status.textContent = checking ? '检测中'
-          : result == null ? '待检测'
-            : result.ok ? (result.version ? 'v' + result.version : '可用')
-              : (['auth', 'unauthed'].includes(result.state) ? '需登录'
-                : result.state === 'nollm' ? '缺少模型' : '不可用');
+        status.textContent = checking ? _rtText('检测中')
+          : result == null ? _rtText('待检测')
+            : result.ok ? (result.version ? 'v' + result.version : _rtText('可用'))
+              : (['auth', 'unauthed'].includes(result.state) ? _rtText('需登录')
+                : result.state === 'nollm' ? _rtText('缺少模型') : _rtText('不可用'));
       }
     });
   }
@@ -248,9 +288,29 @@
     const generation = catalogGeneration;
     const job = Promise.resolve().then(() => bounded(api.runtimes())).then((reply) => {
       if (generation !== catalogGeneration) return catalog;
-      const loaded = normalize(reply && reply.runtimes);
-      if (!reply?.ok || !loaded.length) throw Error('执行底座目录暂时不可用');
-      catalog = loaded; catalogLoaded = true;
+      const declared = normalize(reply && reply.runtimes);
+      let loaded = normalize(reply && Array.isArray(reply.availableRuntimes)
+        ? reply.availableRuntimes
+        : declared.filter((row) => row.id === 'pi'));
+      const pi = declared.find((row) => row.id === 'pi') || (declared.length || loaded.length ? FALLBACK[0] : null);
+      if (pi && !loaded.some((row) => row.id === 'pi')) loaded = [pi, ...loaded];
+      if (!reply?.ok || !loaded.length) {
+        // Keep Pi as the only safe choice when the health projection is
+        // unavailable. The other declared bases stay visible as a repairable
+        // stack so the user can reach Agent management without selecting an
+        // unverified runtime.
+        catalog = FALLBACK.filter((row) => row.id === 'pi');
+        missingCatalog = normalize((reply && reply.missing) || declared.filter((row) => row.id !== 'pi'));
+        if (!missingCatalog.length) missingCatalog = fallbackMissing();
+        catalogLoaded = false;
+        renderRows(options.root);
+        paint(options.root);
+        return catalog;
+      }
+      const declaredMissing = Array.isArray(reply && reply.missing)
+        ? reply.missing
+        : declared.filter((row) => row.id !== 'pi');
+      catalog = loaded; missingCatalog = normalize(declaredMissing.filter((row) => row.id !== 'pi')); catalogLoaded = true;
       const preferred = selectedByLocation[location];
       const fallback = catalog.find((row) => row.id === 'pi') || catalog[0];
       if (!selectCurrent(preferred)) {
@@ -259,9 +319,34 @@
       renderRows(options.root);
       paint(options.root);
       return catalog;
-    }).catch(() => catalog).finally(() => { if (loadPromise === job) loadPromise = null; });
+    }).catch(() => {
+      if (generation === catalogGeneration) {
+        catalog = FALLBACK.filter((row) => row.id === 'pi');
+        missingCatalog = fallbackMissing();
+        catalogLoaded = false;
+        renderRows(options.root);
+        paint(options.root);
+      }
+      return catalog;
+    }).finally(() => { if (loadPromise === job) loadPromise = null; });
     loadPromise = job;
     return job;
+  }
+
+  function demoteUnavailableLocal(adapterId, result, root) {
+    if (location !== 'local' || adapterId === 'pi') return;
+    const failed = catalog.find((row) => row.id === adapterId);
+    if (!failed) return;
+    catalog = catalog.filter((row) => row.id !== adapterId);
+    if (!missingCatalog.some((row) => row.id === adapterId)) {
+      missingCatalog = normalize([...missingCatalog, { ...failed, availability: result || { ok: false } }]);
+    }
+    if (current === adapterId) {
+      const fallback = catalog.find((row) => row.id === 'pi') || catalog[0];
+      if (fallback) selectCurrent(fallback.id);
+    }
+    renderRows(root);
+    paint(root);
   }
 
   function probe(adapterId, options, announce) {
@@ -358,6 +443,7 @@
       probes[key] = result || { ok: false };
       paint(options.root);
       if (!result || !result.ok) {
+        demoteUnavailableLocal(adapterId, result, options.root);
         if (announce) options.say((result && result.reason) ||
           '这个执行底座暂时不可用');
         return false;
@@ -385,6 +471,13 @@
     const button = root.querySelector('#cpRuntime');
     const popup = root.querySelector('#cpRuntimePop');
     if (!button || !popup) return;
+    const more = root.querySelector('#cpRuntimeMore');
+    if (more) more.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (typeof global.openAgentsEntry === 'function') global.openAgentsEntry();
+      else if (typeof global.openAgentsPanel === 'function') global.openAgentsPanel({ tab: 'runners' });
+      else if (global.WorkspaceHost && typeof global.WorkspaceHost.open === 'function') global.WorkspaceHost.open('agents', { tab: 'runners' });
+    });
     button.addEventListener('click', () => { loadCatalog(opts); });
     popup.addEventListener('click', async (event) => {
       const row = event.target.closest('[data-runtime]');

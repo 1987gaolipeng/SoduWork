@@ -86,8 +86,16 @@
     return current.length > 0 && JSON.stringify(current.slice().sort()) !==
       JSON.stringify(_skillDraftNames(draft.skills).sort());
   }
+  function draftKey(value) {
+    const key = String(value || 'new').trim() || 'new';
+    if (key !== 'new' || global.__deskPanel !== 'chatbar') return key;
+    // Only the uncreated draft is app-local. Existing conversation IDs stay
+    // shared so opening the same conversation elsewhere preserves its draft.
+    const appId = new URLSearchParams(global.location?.search || '').get('appDraft');
+    return 'app-new:' + (appId && appId.length <= 160 ? appId : 'unbound');
+  }
   function _draftKeyForCurrentSession() {
-    return String(ctx._draftKey || ctx._sessionId || ctx._ref || 'new').trim() || 'new';
+    return draftKey(ctx._draftKey || ctx._sessionId || ctx._ref);
   }
   function _draftOwnerScope() {
     try { return String(global.SoduWorkAPI?.taskStorageKey?.('ops') || ''); } catch (_) { return ''; }
@@ -154,7 +162,7 @@
   function _rememberConversationText(key, value, selections) {
     if (restoringDraft) return;
     _loadConversationDrafts();
-    const resolvedKey = String(key || _draftKeyForCurrentSession()).trim() || 'new';
+    const resolvedKey = draftKey(key || _draftKeyForCurrentSession());
     const text = String(value || '');
     const skills = _skillDraftNames(selections === undefined ? ctx._conversationDrafts.get(resolvedKey)?.skills : selections);
     if (text.trim() || skills.length) ctx._conversationDrafts.set(resolvedKey, { text, skills, updatedAt: Date.now() });
@@ -170,7 +178,7 @@
   function _rememberConversationDraft(key, composer) {
     if (restoringDraft) return;
     const controls = composer || _draftComposer(), input = controls.input;
-    const resolvedKey = String(key || _draftKeyForCurrentSession()).trim() || 'new';
+    const resolvedKey = draftKey(key || _draftKeyForCurrentSession());
     if (!input) return;
     // Persist the complete logical body once. Input-card Files are a view of
     // that body and must not be restored alongside the same saved text.
@@ -197,17 +205,17 @@
   }
   function _conversationDraftText(key) {
     _loadConversationDrafts();
-    const resolvedKey = String(key || _draftKeyForCurrentSession()).trim() || 'new';
+    const resolvedKey = draftKey(key || _draftKeyForCurrentSession());
     const row = ctx._conversationDrafts.get(resolvedKey);
     return row && row.text ? row.text : '';
   }
   function _conversationDraftSkills(key) {
     _loadConversationDrafts();
-    return _skillDraftNames(ctx._conversationDrafts.get(String(key || _draftKeyForCurrentSession()).trim() || 'new')?.skills);
+    return _skillDraftNames(ctx._conversationDrafts.get(draftKey(key || _draftKeyForCurrentSession()))?.skills);
   }
   function _clearConversationDraft(key, options) {
     _loadConversationDrafts();
-    const resolvedKey = String(key || _draftKeyForCurrentSession()).trim() || 'new';
+    const resolvedKey = draftKey(key || _draftKeyForCurrentSession());
     ctx._conversationDrafts.delete(resolvedKey);
     attachmentDrafts.delete(resolvedKey);
     pluginDrafts.delete(resolvedKey);
@@ -219,7 +227,7 @@
   function _restoreConversationDraft(key, composer) {
     _loadConversationDrafts();
     const controls = composer || _draftComposer(), input = controls.input;
-    const resolvedKey = String(key || _draftKeyForCurrentSession()).trim() || 'new';
+    const resolvedKey = draftKey(key || _draftKeyForCurrentSession());
     const row = ctx._conversationDrafts.get(resolvedKey);
     if (!input) return;
     const files = attachmentDrafts.get(resolvedKey)?.slice() || [];

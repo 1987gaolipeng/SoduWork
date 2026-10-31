@@ -446,7 +446,7 @@ export function DomainSelect({ value, onChange, label = tx("负责领域 / 模�
     <div><label className="f-lbl">{label}</label>
       <SelectMenu className="f-in" value={value || ''} onChange={(e) => onChange(e.target.value)}>
         <option value="">{tx("— 不指定领域 —")}</option>
-        {(doms || []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+        {(doms || []).map((d) => <option key={d.id} value={d.id}>{tx(d.name)}</option>)}
       </SelectMenu>
     </div>
   )

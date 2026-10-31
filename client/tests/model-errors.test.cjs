@@ -48,6 +48,22 @@ test('permanent gateway errors remain non-retryable and both proxy envelope gene
   assert.equal(errors.describe('429: insufficient_quota').retryable, false);
 });
 
+test('expired model proxy tickets can refresh while generic 401 credentials stay permanent', () => {
+  for (const value of [
+    '401 AI proxy ticket expired',
+    '401 session expired',
+    '401 密钥不对或已过期',
+    { error: { type: 'soduwork_proxy_error', status: 401, message: 'AI proxy ticket is required' } },
+  ]) {
+    const info = errors.describe(value);
+    assert.equal(info.authExpired, true);
+    assert.equal(info.retryable, true);
+  }
+  const generic = errors.describe({ status: 401, message: 'invalid credentials' });
+  assert.equal(generic.authExpired, false);
+  assert.equal(generic.retryable, false);
+});
+
 test('image rejection errors explain the safe recovery path without offering a blind retry', () => {
   const value = { error: { code: 'image_input_rejected', message: 'Image input rejected.', status: 400 } };
   const info = errors.describe(value);

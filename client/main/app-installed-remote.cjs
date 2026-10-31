@@ -1,7 +1,7 @@
 'use strict';
 // Resolve Hub installations through the current account's authorized catalog.
 // A market app ID is not a personal/local plugin ID.
-async function get(deps, pluginId, assertCurrent = () => {}) {
+async function catalog(deps, assertCurrent = () => {}) {
   // Remote Hub production disables the legacy device-secret compatibility path.
   // Keep synchronous identity lookups for view ownership; renew a device session
   // specifically for the authorized catalog request.
@@ -18,7 +18,9 @@ async function get(deps, pluginId, assertCurrent = () => {}) {
   }
   const catalog = await response.json();
   assertCurrent();
-  const plugin = catalog.items?.find(item => item.pluginId === pluginId);
+  return catalog.items || [];
+}
+function accepted(plugin) {
   if (!plugin?.installed || plugin.enabled === false || plugin.permissions?.canUse !== true || plugin.installedVersionAvailable === false) {
     throw Error('请先安装并启用该应用');
   }
@@ -26,7 +28,14 @@ async function get(deps, pluginId, assertCurrent = () => {}) {
   // catalog release which the employee has not installed yet.
   return plugin.conversationVersionId ? { ...plugin,
     versionId: plugin.conversationVersionId, version: plugin.conversationVersion,
+    checksum:plugin.conversationChecksum || plugin.checksum,
+    entrypoints:plugin.conversationEntrypoints || plugin.entrypoints,
     capabilities: plugin.conversationCapabilities, ui: plugin.conversationUi,
+    jiyong: plugin.conversationJiyong, extensions:plugin.conversationExtensions,
+    appCategory:plugin.conversationAppCategory || 'other', authorName:plugin.conversationAuthorName || plugin.authorName,
   } : plugin;
 }
-module.exports = { get };
+async function get(deps,pluginId,assertCurrent = () => {}) {
+  return accepted((await catalog(deps,assertCurrent)).find(item => item.pluginId === pluginId));
+}
+module.exports = { get, catalog };

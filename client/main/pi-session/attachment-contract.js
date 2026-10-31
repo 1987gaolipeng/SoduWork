@@ -21,12 +21,13 @@ function previewPath(value) {
   catch (_) { return ''; }
 }
 
-function publicFiles(files) {
+function publicFiles(files, options = {}) {
+  const derivePreviewRef = !options || options.derivePreviewRef !== false;
   return (Array.isArray(files) ? files : []).map((item) => ({
-    name: String((item && (item.name || item.filename)) || '附件'),
+    name: String((typeof item === 'string' ? item : (item && (item.name || item.filename))) || '附件'),
     type: String((item && (item.type || item.mimeType || item.contentType)) || ''),
     size: Number((item && item.size) || 0),
-    previewRef: String((item && item.previewRef) || previewRef(item && item.path)),
+    previewRef: String((item && item.previewRef) || (derivePreviewRef ? previewRef(item && item.path) : '')),
   }));
 }
 

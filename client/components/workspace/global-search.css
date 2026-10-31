@@ -1,0 +1,61 @@
+.ws-brand>span{display:flex;min-width:0;flex-direction:column;gap:2px}
+.ws-brand{padding-right:6px}
+.ws-brand .ws-global-search{display:flex;align-items:center;justify-content:center;flex:0 0 26px;width:26px;height:26px;margin-left:auto;padding:5px;border:0;background:transparent;box-shadow:none;color:var(--ink-3)}
+.ws-brand .ws-global-search:hover{background:transparent;color:var(--ink-2)}
+.ws-brand .ws-global-search:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:5px}
+.ws-global-search svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round}
+.global-search-dialog{position:fixed;inset:0;box-sizing:border-box;width:min(760px,calc(100vw - 40px));height:min(560px,calc(100dvh - 56px));max-width:none;max-height:none;margin:auto;padding:0;border:1px solid var(--line);border-radius:20px;background:var(--bg-0);color:var(--ink);box-shadow:0 24px 80px rgba(0,0,0,.2);font-family:var(--font-ui);overflow:hidden}
+.global-search-dialog[open]{display:flex;flex-direction:column}
+.global-search-dialog::backdrop{background:rgba(0,0,0,.22)}
+.global-search-dialog button{font:inherit;color:inherit;cursor:pointer}
+.global-search-dialog svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.global-search-head{display:flex;align-items:center;gap:10px;padding:14px 16px 6px;flex:none}
+.global-search-tabs{display:flex;gap:3px;align-items:center;overflow-x:auto;scrollbar-width:none;flex:1;min-width:0}
+.global-search-tabs::-webkit-scrollbar{display:none}
+.global-search-tabs button{flex:none;padding:7px 10px;border:0;border-radius:18px;background:transparent;font-size:14px;line-height:20px;color:var(--ink-3)}
+.global-search-tabs button[aria-selected="true"]{background:var(--bg-2);color:var(--ink);font-weight:600}
+.global-search-close,.global-search-input button{display:grid;place-items:center;flex:none;width:30px;height:30px;padding:5px;border:0;border-radius:7px;background:transparent;color:var(--ink-3)}
+.global-search-close:hover,.global-search-input button:hover{background:var(--bg-2)}
+.global-search-input [data-search-clear]{width:26px;height:26px;padding:5px;border-radius:50%;background:var(--bg-2)}
+.global-search-input [data-search-clear]:hover{background:var(--bg-3)}
+.global-search-input [data-search-clear] svg{width:16px;height:16px}
+.global-search-input [data-search-clear][hidden]{display:none}
+.global-search-input{display:flex;align-items:center;gap:12px;padding:12px 22px 14px;border-bottom:1px solid var(--line);flex:none;color:var(--ink-3)}
+.global-search-input input{flex:1;min-width:0;padding:0;border:0;outline:0;background:transparent;color:var(--ink);font:inherit;font-size:18px;line-height:28px}
+.global-search-input input::placeholder{color:var(--ink-4)}
+.global-search-input input::-webkit-search-cancel-button{display:none}
+.global-search-results{flex:1;min-height:0;overflow:auto;padding:8px 14px 10px;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:transparent transparent}
+.global-search-dialog:hover .global-search-results,.global-search-results:focus-within{scrollbar-color:var(--ink-4) transparent}
+.global-search-results::-webkit-scrollbar{width:6px}
+.global-search-results::-webkit-scrollbar-thumb{border-radius:4px;background:transparent}
+.global-search-dialog:hover .global-search-results::-webkit-scrollbar-thumb{background:var(--ink-4)}
+.global-search-group{margin:0 0 8px}
+.global-search-group h3{margin:6px 10px 3px;font-size:12px;line-height:20px;font-weight:500;color:var(--ink-3)}
+.global-search-group h3 span{margin-left:5px;color:var(--ink-4);font-size:12px}
+.global-search-row{display:flex;align-items:center;gap:10px;min-height:38px;box-sizing:border-box;padding:6px 10px;border-radius:8px;cursor:pointer}
+.global-search-row:hover{background:var(--bg-1)}
+.global-search-row[aria-selected="true"]{background:var(--bg-2)}
+.global-search-glyph{display:grid;place-items:center;width:22px;flex:none;color:var(--ink-3)}
+.global-search-copy{display:flex;align-items:center;gap:8px;min-width:0;flex:1;overflow:hidden}
+.global-search-copy b{min-width:0;flex:0 1 auto;font-size:14px;font-weight:500;line-height:21px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.global-search-copy:has(small) b{max-width:55%}
+.global-search-copy small{min-width:0;flex:1;font-size:12px;line-height:18px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.global-search-copy mark{background:var(--accent-soft);color:var(--accent);border-radius:2px}
+.global-search-meta{display:flex;align-items:center;gap:8px;max-width:190px;text-align:right;color:var(--ink-4);font-size:12px;line-height:18px;white-space:nowrap;overflow:hidden}
+.global-search-source{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.global-search-meta time{flex:none;font-size:12px}
+.global-search-dialog kbd{padding:1px 5px;border-radius:5px;background:var(--bg-2);font:inherit;font-size:12px;white-space:nowrap}
+.global-search-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:230px;color:var(--ink-3)}
+.global-search-empty svg{width:32px;height:32px;color:var(--ink-4)}
+.global-search-empty b{font-size:15px;font-weight:500}
+.global-search-empty span{font-size:13px}
+.global-search-notice{margin:10px 12px;font-size:12px;line-height:1.6;color:var(--ink-3)}
+.global-search-notice button,.global-search-more{border:0;border-radius:7px;padding:5px 10px;background:var(--bg-2)}
+.global-search-more{display:block;margin:12px auto;font-size:12px!important}
+.global-search-status:empty{display:none}
+.global-search-status{flex:none;margin:0;padding:8px 26px;color:var(--ink-3);font-size:12px}
+.global-search-dialog footer{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;padding:10px 20px;border-top:1px solid var(--line);color:var(--ink-4);font-size:12px;line-height:20px;flex:none}
+.global-search-dialog footer kbd{margin-left:8px}
+.global-search-dialog :is(button,input):focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+#globalSearchDialog .global-search-input input:is(:focus,:focus-visible){border:0;outline:none;box-shadow:none}
+@media(max-width:650px){.global-search-dialog{width:calc(100vw - 20px);height:min(560px,calc(100dvh - 24px));border-radius:18px}.global-search-head{padding:12px 10px 4px;gap:6px}.global-search-tabs button{padding:7px 10px}.global-search-input{padding:14px 20px}.global-search-input input{font-size:16px}.global-search-meta{max-width:35%}}

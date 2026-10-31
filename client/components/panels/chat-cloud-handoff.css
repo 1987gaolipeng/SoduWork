@@ -8,6 +8,8 @@
 .ncloud-auto{display:flex;align-items:flex-start;gap:12px;padding:14px;border:1px solid var(--line);border-radius:12px;background:color-mix(in srgb,var(--accent) 4%,var(--bg-0))}
 .ncloud-auto>svg{width:24px;height:24px;flex:none;fill:none;stroke:var(--accent);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 .ncloud-auto p{margin:5px 0 0}.ncloud-setup-actions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.ncloud-target-picker{display:grid;gap:6px;margin:14px 0 0;color:var(--ink-2);font-size:13px}
+.ncloud-target-picker select{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit;background:var(--bg-0);color:var(--ink-1)}
 .ncloud-setup-actions button{border:1px solid var(--line);border-radius:8px;padding:7px 11px;font:inherit;background:var(--bg-0);color:var(--ink-2);cursor:pointer}
 .ncloud-files{margin-top:12px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;color:var(--ink-2)}
 .ncloud-files summary{cursor:pointer}

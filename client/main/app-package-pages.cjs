@@ -38,16 +38,19 @@ async function prepare(deps, raw) {
   if (!pluginId || !contributionId) throw Error('包内应用缺少安装与入口标识');
   const origin = contract.origin(pluginId), scope = ownerScope(deps.app, pluginId, origin);
   const read = async () => {
-    if (ownerScope(deps.app, pluginId, origin) !== scope) throw Error('应用账号已变化，请重新打开应用');
+    if (ownerScope(deps.app, pluginId, origin) !== scope) throw Error('应用账号已变化，请重新打开即用');
     const value = await definition(deps, pluginId);
-    if (ownerScope(deps.app, pluginId, origin) !== scope) throw Error('应用账号已变化，请重新打开应用');
+    if (ownerScope(deps.app, pluginId, origin) !== scope) throw Error('应用账号已变化，请重新打开即用');
     const row = value.ui?.contributions?.find(row => row.id === contributionId && row.slot === 'workspace.navigation' && row.source?.type === 'package');
     if (!row) throw Error('已安装应用未声明该包内入口');
     const files = resources.normalize(value.resources, { allowLegacyContent: true });
     contract.validate({ contributions: [row] }, files);
-    return { row, files };
+    return { row, files, definition:value };
   };
   const initial = await read();
+  if(initial.definition.jiyong?.initialization || (pluginId.startsWith('local:') && require('./personal-plugins').get(deps.app,pluginId).jiyong?.initialization))await require('./jiyong-initialization.cjs').initialize(deps,pluginId);
+  if (!pluginId.startsWith('local:') && initial.definition.jiyong)
+    require('./app-settings-store.cjs').saveHosted({pluginId,origin},initial.definition);
   // Keep Windows IndexedDB backing-store paths below legacy path limits.
   const partition = 'persist:sw-app-' + scope.slice(0, 32);
   const session = (deps.session || require('electron').session).fromPartition(partition);
@@ -82,4 +85,4 @@ async function prepare(deps, raw) {
     bridge: { appId: 'plugin:' + pluginId, contributionId, origin, version: 1,
       capabilities: initial.row.source.bridge?.capabilities || [] } };
 }
-module.exports = { prepare };
+module.exports = { prepare, definition };

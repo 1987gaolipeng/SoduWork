@@ -132,14 +132,15 @@ test('Runner desktop scopes match only the local session and its current or just
   let polls = 0;
   const adapter = createRunnerRuntimeAdapter({
     modelConfig: { fetchModel: async () => ({ ok: true, model: { id: 'fixture', key: 'fixture' } }) },
-    runnerRuntime: { rpc: async op => op === 'job.session'
+    runnerRuntime: { rpc: async (op, payload) => op === 'job.session' && payload.limit !== 1
       ? (++polls, { ok: true, data: { round: 3, status: 'running', items: [] } })
       : { ok: true, data: { ok: true } } }
   });
   const session = await adapter.resumeSession({ native: { runner: { openOptions: { cwd: os.tmpdir(), resumePath: 'desktop-owner' } } } });
   t.after(() => session.dispose());
   const handle = getRunnerSessionDetails(session).handle;
-  for (let i = 0; i < 100 && !polls; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  for (let i = 0; i < 100 && handle.desktopControlScope !== 'runner:desktop-owner:3'; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.ok(polls > 0, 'the full session poll publishes the current round after the resume credential probe');
   assert.equal(handle.desktopControlScope, 'runner:desktop-owner:3');
   assert.equal(handle.ownsDesktopControlScope('runner:desktop-owner:3'), true);
   assert.equal(handle.ownsDesktopControlScope('runner:desktop-owner:4'), true, 'new child can beat the next UI poll');

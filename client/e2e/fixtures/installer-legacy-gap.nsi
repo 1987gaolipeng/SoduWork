@@ -8,7 +8,18 @@ Section
   StrCpy $INSTDIR "${SODUWORK_E2E_ROOT}"
   IfFileExists "$INSTDIR\.soduwork-e2e-owned" +2
     Quit
-  Delete "$INSTDIR\SoduWork.exe"
+  ClearErrors
+  Delete "$INSTDIR\${SODUWORK_E2E_EXECUTABLE_NAME}.exe"
+  IfErrors 0 +3
+    SetErrorLevel 3
+    Quit
   Sleep 1500
-  CopyFiles /SILENT "$INSTDIR\SoduWork.pre-test.exe" "$INSTDIR\SoduWork.exe"
+  ClearErrors
+  CopyFiles /SILENT "$INSTDIR\${SODUWORK_E2E_EXECUTABLE_NAME}.pre-test.exe" "$INSTDIR\${SODUWORK_E2E_EXECUTABLE_NAME}.exe"
+  IfErrors 0 +3
+    SetErrorLevel 4
+    Quit
+  IfFileExists "$INSTDIR\${SODUWORK_E2E_EXECUTABLE_NAME}.exe" +3
+    SetErrorLevel 5
+    Quit
 SectionEnd

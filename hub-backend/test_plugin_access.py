@@ -30,7 +30,7 @@ from app.deps import current_client, current_user
 from app.api import plugin_client_catalog, plugin_client_runs, plugin_permissions, plugins
 from app.services import (plugin_access, plugin_audience, plugin_catalog,
                           plugin_drafts, plugin_installed, plugin_mcp_gateway,
-                          plugin_packages, plugin_service)
+                          plugin_packages, plugin_service, rbac)
 from tests.sqlite_schema import create_fresh_sqlite_schema
 
 
@@ -151,6 +151,69 @@ class PluginAccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.visible())
         self.version.visibility = "users"
         self.assertTrue(await self.visible())
+
+    async def test_organization_policy_reaches_catalog_installation_and_employee_api(self):
+        """The live plugin policy must override a restricted version everywhere."""
+        self.version.visibility = "users"
+        await self.session.commit()
+        await self.save(use={"mode": "organization"}, edit={"mode": "organization"})
+
+        catalog = await plugin_catalog.client_catalog(
+            self.session, "subteam", "employee", "employee",
+            visible_org_ids={"company", "team", "subteam"})
+        item = next(row for row in catalog["items"]
+                    if row["pluginId"] == self.plugin.id)
+        self.assertEqual(item["permissions"], {"canUse": True, "canEdit": True})
+        self.assertTrue(item["conversationUse"]["available"])
+        self.assertEqual((await self.http.get(
+            "/api/v1/plugins/permission-plugin/permissions")).json(), {
+                "pluginId": self.plugin.id, "canUse": True, "canEdit": True})
+        resolved = await plugin_installed.resolve(
+            self.session, "subteam", "employee", [self.plugin.id])
+        self.assertEqual(resolved[0][1].id, self.version.id)
+
+        await self.save(use={"mode": "none"})
+        denied = await plugin_catalog.client_catalog(
+            self.session, "subteam", "employee", "employee",
+            visible_org_ids={"company", "team", "subteam"})
+        item = next(row for row in denied["items"]
+                    if row["pluginId"] == self.plugin.id)
+        self.assertFalse(item["permissions"]["canUse"])
+        with self.assertRaises(ValueError):
+            await plugin_installed.resolve(
+                self.session, "subteam", "employee", [self.plugin.id])
+
+    async def test_organization_policy_reaches_same_company_sibling_department(self):
+        """Company-wide access must not stop at the plugin owner's department."""
+        peer_org = models.OrgUnit(id="peer-team", name="市场团队", parent_id="company")
+        peer = models.User(id="peer", username="fixture-peer", display_name="同公司员工",
+                           org_id="peer-team")
+        peer_client = models.Client(id="device-peer", user_ref="peer", auth_state="active")
+        peer_installation = am.PluginInstallation(
+            plugin_id=self.plugin.id, version_id=self.version.id,
+            user_id="peer", enabled=True)
+        self.session.add_all([peer_org, peer, peer_client, peer_installation])
+        self.version.visibility = "users"
+        await self.session.commit()
+        await self.save(use={"mode": "organization"}, edit={"mode": "organization"})
+
+        decision = (await plugin_access.decisions(
+            self.session, [self.plugin], "peer"))[self.plugin.id]
+        self.assertEqual(decision, {"useOverride": True, "canEdit": True})
+        scope = await rbac.company_org_ids(self.session, peer)
+        catalog = await plugin_catalog.client_catalog(
+            self.session, "peer-team", "peer", "peer", visible_org_ids=scope)
+        item = next(row for row in catalog["items"]
+                    if row["pluginId"] == self.plugin.id)
+        self.assertEqual(item["permissions"], {"canUse": True, "canEdit": True})
+        self.assertEqual((await self.http.get(
+            "/api/v1/plugins/permission-plugin/permissions",
+            headers={"x-test-user": "peer"})).json(), {
+                "pluginId": self.plugin.id, "canUse": True, "canEdit": True})
+        resolved = await plugin_installed.resolve(
+            self.session, "peer-team", "peer", [self.plugin.id],
+            provision_defaults=False)
+        self.assertEqual(resolved[0][1].id, self.version.id)
 
     async def test_granted_team_includes_descendants_but_never_foreign_orgs(self):
         await self.save(use={"mode": "org_units", "orgUnitIds": ["team"]},

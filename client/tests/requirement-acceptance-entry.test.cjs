@@ -13,7 +13,7 @@ function fixture() {
   return {view:window.RequirementsView,state};
 }
 test('待验收卡片只保留详情验收入口，其他状态保留原操作', () => {
-  const f=fixture(), pending={id:'t',title:'作文',status:'done',createdBy:'me'};
+  const f=fixture(), pending={id:'t',title:'作文',status:'done',createdBy:'me',canReview:true};
   const reviewContext = {approvals:new Map([['t',{id:'r',action:'review',status:'pending'}]])};
   const board = f.view.board([pending],f.state,reviewContext);
   assert.match(board,/data-rq-open="t"/);

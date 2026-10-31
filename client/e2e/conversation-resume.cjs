@@ -34,6 +34,10 @@ async function send(text) {
   await js(`(()=>{const i=document.querySelector('#nchatInput');i.value=${JSON.stringify(text)};i.dispatchEvent(new Event('input',{bubbles:true}));})()`);
   await click('#nchatSend');
 }
+async function sendQueued(text) {
+  await until(() => js("document.querySelector('#nchatSend')?.title === '停止生成' && !document.querySelector('#nchatSend')?.disabled"), 'composer ready to queue');
+  await js(`(()=>{const i=document.querySelector('#nchatInput');i.value=${JSON.stringify(text)};i.dispatchEvent(new Event('input',{bubbles:true}));i.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true,cancelable:true}));})()`);
+}
 function installSend() {
   const source = read('main/pi-session/ipc.js');
   const code = source.slice(source.indexOf('  async function sendConversation('), source.indexOf("  ipcMain.handle('pi-session-send',"));
@@ -65,7 +69,10 @@ app.whenReady().then(async () => {
     cwd: fixture.cwd, model: { label: 'Local regression model' }, snapshot: handle.uiSnapshot() }));
   ipcMain.handle('pi-session-snapshot', () => ({ ok: true, snapshot: handle.uiSnapshot() }));
   ipcMain.handle('pi-session-queue-update', (_event, ref, id, action, value) => handle.updateQueue(id, action, value));
-  ipcMain.on('pi-session-cancel', () => { cancellations++; handle.cancel(); });
+  ipcMain.handle('pi-session-cancel-request', async () => {
+    cancellations++;
+    return await handle.cancel() || { ok: true, accepted: true, stopped: true };
+  });
   for (const [channel, value] of Object.entries({ 'pi-session-history': { ok: true, chats: [] }, 'pi-session-outputs': { ok: true, items: [] },
     'pi-session-runtimes': {ok:true,runtimes:[]}, 'access-preferences-get': {ok:true,mode:'default'},
     'work-preview-reset-embedded': {ok:true},
@@ -129,10 +136,19 @@ app.whenReady().then(async () => {
   const oldCount = fixture.requests.length; await send('继续完成并检索。');
   await until(() => fixture.requests.length > oldCount, 'active request');
   await until(() => js("document.querySelector('#nchatInput').value === ''"), 'sent input cleared');
-  await click('#nchatSend'); await until(() => cancellations === 1, 'stop IPC');
+  await js("(()=>{const input=document.querySelector('#nchatInput');input.value='保留这段草稿';input.dispatchEvent(new Event('input',{bubbles:true}));})()");
+  await until(() => js("document.querySelector('#nchatSend')?.title === '停止生成'"), 'single stop action');
+  await click('#nchatSend');
+  await until(() => js("document.querySelector('#nchatSend')?.disabled === true && document.querySelector('#nchatSend')?.title === '停止中…'"), 'stop pending');
+  // A repeated pointer event while the first stop is awaiting its receipt must
+  // be ignored by the renderer and never issue a second IPC request.
+  await js("document.querySelector('#nchatSend')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))");
+  await delay(30);
+  assert.equal(cancellations, 1, 'stop is single-flight while waiting for confirmation');
   release(); await until(() => results.length === 4, 'stop');
   assert.equal(results[3].cancelled, true); assert.equal(fixture.requests.length, oldCount + 1);
   assert.equal(handle.snapshot().execution.running, false);
+  assert.equal(await js("document.querySelector('#nchatInput')?.value"), '保留这段草稿', 'stopping keeps the next draft');
   report.cases.push('Actual stop button cancels the active turn and never triggers an automatic continuation.');
   const reasoningStart = fixture.requests.length;
   fixture.reply((_body, count) => count === reasoningStart + 1 ? { respond: async response => {
@@ -154,7 +170,7 @@ app.whenReady().then(async () => {
   });
   await send('检查这个隔离样本并给出结论。');
   await until(() => fixture.requests.length === protocolStart + 2, 'protocol recovery started');
-  await send('解释一下后续结果。');
+  await sendQueued('解释一下后续结果。');
   await until(() => handle.snapshot().execution.queue.length === 1, 'queued follow-up');
   assert.equal(results.length, 5, 'original UI submission must stay pending through automatic recovery');
   releaseProtocol(); await until(() => results.length === 7, 'recovery and queue completion');
@@ -184,7 +200,7 @@ app.whenReady().then(async () => {
   });
   await send('继续完善报告，请实际检索。');
   await until(() => fixture.requests.length === queuedStart + 1, 'gated incomplete turn');
-  await send('解释一下现有结果。');
+  await sendQueued('解释一下现有结果。');
   await until(() => handle.snapshot().execution.queue.length === 1, 'follow-up queued before failure');
   releaseQueued(); await until(() => results.length === queueResultsStart + 1, 'incomplete turn settled with queued work');
   assert.equal(results.at(-1).failureKind, 'output-incomplete');

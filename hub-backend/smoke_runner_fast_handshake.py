@@ -139,5 +139,13 @@ async def main() -> None:
     print("RUNNER_FAST_HANDSHAKE_OK: 13 assertions")
 
 
+def main():
+    from unittest.mock import patch
+    # Keep startup recovery and all later asynchronous work isolated too.
+    # asyncio.run shuts down workers before the temporary directory is removed.
+    with tempfile.TemporaryDirectory(prefix="soduwork-fast-handshake-") as root:
+        with patch.dict(os.environ, {"SODUWORK_DATA_ROOT": root}):
+            asyncio.run(_checks())
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

@@ -187,6 +187,12 @@
     const info = global.NativeChat?.sessionInfo?.() || {};
     let history = payload.acceptanceSession && !payload.reuseExecutionSession ? [] : null; // null = archive not consulted (explicit chatId/turnId wins).
     const hubTurnId = text(task?.workRouting?.conversationTurn?.conversationId);
+    /*
+     * The active execution archive can be absent from the history projection while the
+     * native conversation is still open. Keep that authoritative active session instead of
+     * treating a missing history row as deletion and creating a second review conversation.
+     */
+    const activeExecutionSession = Boolean(hubTurnId && text(info.sessionId) === hubTurnId);
     const probeExecution = payload.reuseExecutionSession === true;
     if ((!payload.acceptanceSession || probeExecution) && !payload.chatId && !task?.workRouting?.conversationTurn?.conversationId) {
       const sessions = global.soduWorkAPI?.conversationSession || global.soduWorkAPI?.piSession;
@@ -206,7 +212,7 @@
           const result = await sessions.history();
           if (result && result.ok !== false) {
             history = result.chats || [];
-            if (!(history || []).some(row => row.id === hubTurnId)) {
+            if (!(history || []).some(row => row.id === hubTurnId) && !activeExecutionSession) {
               payload.chatId = '';
               /*
                * For ordinary review fallback, remove both chatId and the Hub turn receipt so resolve

@@ -9,22 +9,22 @@ let deps;
 function configure(value) { deps = value; }
 function object(value) { return value && typeof value === 'object' && !Array.isArray(value); }
 function key(value) {
-  if (typeof value !== 'string' || !KEY.test(value) || forbidden.has(value)) throw Error('应用设置参数名无效');
+  if (typeof value !== 'string' || !KEY.test(value) || forbidden.has(value)) throw Error('即用设置参数名无效');
   return value;
 }
 function clean(value, depth = 0) {
-  if (depth > 8) throw Error('应用设置嵌套过深');
+  if (depth > 8) throw Error('即用设置嵌套过深');
   if (value === null || typeof value === 'boolean') return value;
   if (typeof value === 'string' && value.length <= 16384) return value;
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (Array.isArray(value) && value.length <= 100) return value.map(v => clean(v, depth + 1));
   if (object(value) && Object.keys(value).length <= 100) return Object.fromEntries(Object.entries(value).map(([k,v]) => [key(k), clean(v, depth + 1)]));
-  throw Error('应用设置只接受有限大小的 JSON 值');
+  throw Error('即用设置只接受有限大小的 JSON 值');
 }
 function normalize(input = {}) {
-  if (!object(input)) throw Error('应用设置请求必须是对象');
+  if (!object(input)) throw Error('即用设置请求必须是对象');
   const values = input.values == null ? {} : clean(input.values);
-  if (!object(values) || Buffer.byteLength(JSON.stringify(values)) > 65536) throw Error('应用设置超过大小限制');
+  if (!object(values) || Buffer.byteLength(JSON.stringify(values)) > 65536) throw Error('即用设置超过大小限制');
   const list = value => { if (value == null) return []; if (!Array.isArray(value) || value.length > 100) throw Error('设置字段列表无效'); return [...new Set(value.map(key))]; };
   const out = { values, remove: list(input.remove), secretKeys: list(input.secretKeys), keys: input.keys == null ? null : list(input.keys), includeSecrets: input.includeSecrets === true };
   if (input.expectedRevision != null) {
@@ -35,13 +35,13 @@ function normalize(input = {}) {
 }
 function scope(binding) {
   const owner = deps?.ownerOf?.(), origin = new URL(binding.origin).origin;
-  if (!owner || !/^https?:/.test(origin) || !String(binding.pluginId || '').trim()) throw Error('请先登录 SoduWork 再使用应用设置');
+  if (!owner || !/^https?:/.test(origin) || !String(binding.pluginId || '').trim()) throw Error('请先登录 SoduWork 再使用即用设置');
   return crypto.createHash('sha256').update(String(owner) + '\0' + binding.pluginId + '\0' + origin).digest('hex');
 }
 function file() { return path.join(deps.app.getPath('userData'), 'app-settings.secure.json'); }
 function doc() {
   try { const value = JSON.parse(fs.readFileSync(file(), 'utf8')); if (value.schema !== 1 || !object(value.records)) throw Error(); return value; }
-  catch (error) { if (error.code === 'ENOENT') return { schema: 1, records: {} }; throw Error('应用设置存储无法读取'); }
+  catch (error) { if (error.code === 'ENOENT') return { schema: 1, records: {} }; throw Error('即用设置存储无法读取'); }
 }
 function secure() {
   if (!deps?.safeStorage?.isEncryptionAvailable() || (process.platform === 'linux' && deps.safeStorage.getSelectedStorageBackend?.() === 'basic_text')) throw Error('系统安全存储不可用，无法读写应用凭据');
@@ -51,7 +51,7 @@ function read(binding) {
   if (!raw) return { values: {}, secretKeys: [], revision: 0 };
   secure();
   try { return JSON.parse(deps.safeStorage.decryptString(Buffer.from(raw, 'base64'))); }
-  catch (_) { throw Error('应用设置无法解密，请在当前系统账户下重试'); }
+  catch (_) { throw Error('即用设置无法解密，请在当前系统账户下重试'); }
 }
 function sensitive(value) {
   return object(value) ? Object.entries(value).some(([k,v]) => SECRET.test(k) || sensitive(v)) : Array.isArray(value) && value.some(sensitive);
@@ -93,14 +93,20 @@ function saveConnection(binding, contributionId, connection) {
 }
 function update(binding, input) {
   const options = normalize(input), row = read(binding);
-  if (options.expectedRevision != null && options.expectedRevision !== row.revision) throw Error('应用设置已变化，请重新读取后重试');
+  if (options.expectedRevision != null && options.expectedRevision !== row.revision) throw Error('即用设置已变化，请重新读取后重试');
   const values = { ...row.values, ...options.values };
   options.remove.forEach(k => delete values[k]);
-  if (Object.keys(values).length > 100 || Buffer.byteLength(JSON.stringify(values)) > 65536) throw Error('应用设置超过大小限制');
+  if (Object.keys(values).length > 100 || Buffer.byteLength(JSON.stringify(values)) > 65536) throw Error('即用设置超过大小限制');
   const secretKeys = [...new Set([...(row.secretKeys || []), ...options.secretKeys, ...Object.keys(values).filter(k => SECRET.test(k) || sensitive(values[k]))])].filter(k => Object.hasOwn(values, k));
   if (JSON.stringify(values) === JSON.stringify(row.values) && JSON.stringify(secretKeys) === JSON.stringify(row.secretKeys)) return publicRecord(row);
   const next = { ...row, values, secretKeys, revision: row.revision + 1, updatedAt: new Date().toISOString() };
   write(binding, next);
   return publicRecord(next);
 }
-module.exports = { configure, normalize, read, get, update, scope, publicRecord, saveConnection };
+function saveHosted(binding, installed) {
+  if (!installed.jiyong || !installed.versionId) return;
+  const row = read(binding), hosted = {versionId:installed.versionId,jiyong:installed.jiyong,ui:installed.ui,capabilities:installed.capabilities};
+  if (JSON.stringify(row.hosted) === JSON.stringify(hosted)) return;
+  write(binding,{...row,hosted});
+}
+module.exports = { configure, normalize, read, get, update, scope, publicRecord, saveConnection, saveHosted };

@@ -1,6 +1,8 @@
 import { getLocale, translateText as tx, localeMap, useLocale } from '../i18n.js'
 import React, { useEffect, useId, useRef, useState } from 'react'
-import { api } from '../api.js'
+import { api, getUser } from '../api.js'
+import { orgOptions } from '../org-options.js'
+import { FilterSelect } from '../FilterControls.jsx'
 import { useViewportHeight } from '../viewport-height.js'
 import { Confirm, Icon, Loading, Modal, toast } from '../ui.jsx'
 import './org-memory.css'
@@ -51,10 +53,24 @@ export default function OrgMemory() {
   const mounted = useRef(false)
   const request = useRef(0)
   const mutating = useRef(false)
+  // Cross-organization browsing stays a superadministrator capability: scoped
+  // org.manage accounts are rejected by the server for other organizations.
+  const me = getUser()
+  const canBrowseOrgs = !!(me && me.isSuper)
+  const [orgs, setOrgs] = useState([])
+  const [orgId, setOrgId] = useState((me && me.orgId) || '')
+  function switchOrg(next) {
+    if (mutating.current || next === orgId) return
+    setEditing(null)
+    setPendingDelete(null)
+    setCurrent(undefined)
+    setError('')
+    setOrgId(next)
+  }
   async function load() {
     const version = ++request.current
     try {
-      const data = await api.orgMemories()
+      const data = await api.orgMemories({ orgId: orgId || undefined })
       const records = (data.items || []).filter((item) => !item.archived)
       // An old server must not silently choose a record for the user to overwrite.
       if (records.length > 1) throw new Error(tx("组织记忆数据需要合并，请更新服务后重新加载。"))
@@ -68,6 +84,15 @@ export default function OrgMemory() {
     mounted.current = true
     load()
     return () => { mounted.current = false; ++request.current }
+  }, [orgId])
+  useEffect(() => {
+    if (!canBrowseOrgs) return
+    api.orgs().then((rows) => {
+      const list = rows || []
+      if (!mounted.current) return
+      setOrgs(list)
+      if (!orgId && list[0]) setOrgId(list[0].id)
+    }).catch(() => { if (mounted.current) setOrgs([]) })
   }, [])
   async function save() {
     if (!editing || mutating.current) return
@@ -75,6 +100,7 @@ export default function OrgMemory() {
     try {
       const body = { title: editing.title, fields: editing.fields, confirmed: true }
       if (editing.id) body.revision = editing.revision
+      else if (orgId) body.orgId = orgId
       const result = editing.id ? await api.updateOrgMemory(editing.id, body) : await api.createOrgMemory(body)
       if (!mounted.current) return
       setCurrent(result.item); setError(''); setEditing(null); toast(tx("组织记忆已保存"))
@@ -105,6 +131,11 @@ export default function OrgMemory() {
   return <section className="om-page">
     <header className="om-head om-head-actions-only">
       <p className="om-description">{tx("从团队已交付的共享工作中自动积累，持续汇成一份组织记忆。")}</p>
+      {canBrowseOrgs && orgs.length > 1 && <FilterSelect className="f-sel om-org-select" value={orgId}
+        resetValue={(me && me.orgId) || ''} aria-label={tx("选择组织")}
+        onChange={(event) => switchOrg(event.target.value)} disabled={busy || !!editing}>
+        {orgOptions(orgs).map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+      </FilterSelect>}
       <button className="btn btn-ghost" disabled={busy || !!editing} onClick={load}>{tx("重新加载")}</button>
       <button className="btn btn-primary" disabled={busy || !!error} onClick={editCurrent}><Icon name={current ? 'pencil' : 'plus'} />{tx("补充与修正")}</button>
     </header>

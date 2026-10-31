@@ -110,6 +110,7 @@ function readPersonalArchive(input) {
   const draft = {
     template, key: String(manifest.key || ''), name: String(manifest.name || ''),
     version: String(manifest.version || ''), author: String(manifest.author || ''),
+    ...(manifest.appCategory != null ? {appCategory:require('../core/plugin-app-contract.cjs').category(manifest.appCategory)} : {}),
     description: String(manifest.description || ''), instructions: String(manifest.instructions || ''),
     inputs: Array.isArray(manifest.inputs) ? manifest.inputs : [],
     setup: manifest.setup && typeof manifest.setup === 'object' ? manifest.setup : {},
@@ -129,12 +130,14 @@ function readPersonalArchive(input) {
       ? manifest.unsupportedComponents : [],
     resources: resourceDraft(entries, manifest),
   };
+  if (manifest.extensions != null) draft.extensions = require('../core/plugin-extensions.cjs').normalize(manifest.extensions);
   if (manifest.distribution) draft.distribution = String(manifest.distribution);
   if (manifest.locales != null) draft.locales = require('../core/plugin-locales').normalize(manifest.locales);
   if (manifest.sourcePluginId) draft.sourcePluginId = String(manifest.sourcePluginId);
   if (manifest.icon) draft.icon = manifest.icon;
   if (manifest.coverUrl) draft.coverUrl = require('../core/plugin-cover.cjs').normalize(manifest.coverUrl);
   if (manifest.appWindow != null) draft.appWindow = require('../core/app-window-sizing').normalize(manifest.appWindow);
+  if (manifest.jiyong != null) draft.jiyong = require('../core/jiyong-contract.cjs').normalize(manifest.jiyong);
   if (hasWorkflow) draft.workflow = workflow;
   return draft;
 }

@@ -202,8 +202,7 @@ async def _remote_grants(session, client: models.Client, claims: dict) -> dict[s
     owner = await session.get(models.User, client.user_ref)
     if owner is None or not owner.is_active:
         raise ValueError("设备所属员工已经停用")
-    visible_orgs = (await rbac.ancestor_org_ids(session, owner.org_id)
-                    if owner.org_id else set())
+    visible_orgs = await rbac.company_org_ids(session, owner)
     bindings = list((await session.execute(select(am.PluginBinding).where(
         am.PluginBinding.id.in_(binding_ids)
     ))).scalars().all())
@@ -227,9 +226,11 @@ async def _remote_grants(session, client: models.Client, claims: dict) -> dict[s
                 or not version.enabled or version.trust_state != "approved"
                 or not plugin.enabled):
             raise ValueError("本轮插件版本已停用或撤销，请重新选择插件")
-        if binding.org_id is not None and binding.org_id not in visible_orgs:
+        if (visible_orgs is not None and binding.org_id is not None
+                and binding.org_id not in visible_orgs):
             raise ValueError("本轮插件绑定不属于当前企业")
-        if plugin.org_id is not None and plugin.org_id not in visible_orgs:
+        if (visible_orgs is not None and plugin.org_id is not None
+                and plugin.org_id not in visible_orgs):
             raise ValueError("本轮插件不属于当前企业")
         if not plugin_audience.visible(version, allowed):
             raise ValueError("本轮插件已经不再授权给当前员工")

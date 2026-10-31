@@ -38,6 +38,22 @@ test('recovery uses structured retryability, not localized text, and respects pe
  r.remember(a,{snapshot:{completion:{reason:'error',error:'模型服务暂时不可用',retryable:true}}});assert.ok(r.view());
  r.remember(a,{snapshot:{completion:{reason:'error',error:'500: Connection error',retryable:false}}});assert.equal(r.view(),null);
 });
+test('model recovery refreshes credentials before running the safe continuation', async()=>{
+ const q=createTurnQueue(), order=[];
+ const r=recovery.create({beforeRetry:async({authExpired})=>{if(authExpired)order.push('refresh')}});
+ const a=q.add({text:'original',options:{beforeTurn:async()=>order.push('turn')}});q.take();r.remember(a,{...failure(),snapshot:{status:'unreachable',completion:{reason:'error',error:'401 AI proxy ticket expired',retryable:true,authExpired:true}}});
+ const retry=r.take(r.view().id);q.add(retry);await q.run(q.take(),async()=>({ok:true}));
+ assert.deepEqual(order,['refresh','turn']);
+});
+
+test('a model 404 exposes an explicit recovery token without making 404 generally retryable', () => {
+ const q=createTurnQueue(),r=recovery.create(),a=q.add({text:'original',options:{modelName:'missing-model'}});
+ assert.equal(errors.describe('404: missing').retryable,false);
+ r.remember(a,{failureKind:'model-unavailable',retrySafe:true,failedModelName:'missing-model',
+   snapshot:{completion:{reason:'error',error:'模型服务地址或模型不存在（HTTP 404）'}}});
+ assert.deepEqual(r.view(),{id:a.id,taskId:'',available:true,requiresModelChange:true,failedModelName:'missing-model'});
+ const retry=r.take(a.id); assert.equal(retry.options.modelRecovery,true);
+});
 test('SDK retry progress is truthful and exhaustion keeps transcript/tool results',()=>{
  const acc=stream.create();acc.push({type:'agent_start'});
  acc.push({type:'tool_execution_start',toolCallId:'save-once',toolName:'write'});

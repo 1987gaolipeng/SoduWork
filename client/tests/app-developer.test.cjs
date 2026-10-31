@@ -91,7 +91,8 @@ test('bundled authoring check uses installer rules, rejects root scripts and mis
 test('built-in app developer inherits the current plugin contract and exact public SDK, without installation side effects', t => {
   const f = fixture(t), detail = personal.get(f.app, personal.APP_DEVELOPER_ID);
   assert.equal(detail.builtIn, true);
-  assert.equal(detail.name, '应用开发');
+  assert.equal(detail.name, '即用开发');
+  assert.equal(detail.localDraft.locales['en-us'].name, 'App Developer');
   assert.equal(detail.entrypoints.automation, false);
   assert.deepEqual(detail.capabilities.runtime, ['files', 'terminal', 'browser']);
   assert.ok(personal.catalog(f.app).some(x => x.pluginId === personal.APP_DEVELOPER_ID));
@@ -99,11 +100,23 @@ test('built-in app developer inherits the current plugin contract and exact publ
   const folder = path.join(bundle.directory, 'references/developer');
   assert.equal(fs.readFileSync(path.join(folder, 'plugin-development.md'), 'utf8'), require('../main/plugin-builder-plugin.cjs').body().instructions);
   assert.deepEqual(fs.readFileSync(path.join(folder, 'sdk/soduwork-app.js')), fs.readFileSync(path.resolve(__dirname, '../sdk/soduwork-app.js')));
-  const developerGuide = fs.readFileSync(path.join(folder, 'SKILL.md'), 'utf8');
+  const entryGuide = fs.readFileSync(path.join(folder, 'SKILL.md'), 'utf8');
+  assert.ok(entryGuide.replace(/\r\n/g, '\n').length < 1600,
+    'entrypoint stays concise with either checkout line ending');
+  assert.match(entryGuide,/references\/host-sdk\.md/);
+  const workflow = fs.readFileSync(path.join(folder, 'references/development-workflow.md'), 'utf8');
+  const design = fs.readFileSync(path.join(folder, 'references/design-quality.md'), 'utf8');
+  assert.match(workflow, /一句必填意图[\s\S]*标题＋内容[\s\S]*派生字段由AI/);
+  assert.match(workflow, /禁止分类下拉、标签输入等管理表单/);
+  assert.match(workflow, /复制、搜索、分页、校验、游戏实时交互直接执行/);
+  assert.match(design, /避免模板化渐变、大圆角卡片堆叠/);
+  assert.match(design, /视觉网站查询可选[\s\S]*最新[\s\S]*未查询不虚构出处/);
+  assert.match(design, /性能、可访问性与维护成本/);
+  const developerGuide = fs.readFileSync(path.join(folder, 'references/bridge-and-delivery.md'), 'utf8');
   const sdkGuide = fs.readFileSync(path.join(folder, 'sdk/README.md'), 'utf8');
   assert.match(detail.localDraft.instructions, /机器人[\s\S]*soduWorkApp\.automation\.create/);
   for (const guide of [developerGuide, sdkGuide]) {
-    assert.match(guide, /应用页面严禁出现“自动化”按钮/);
+    assert.match(guide, /即用页面严禁出现“自动化”按钮/);
     assert.match(guide, /订阅简报/);
     assert.doesNotMatch(guide, /偷菜/);
     assert.match(guide, /automation\.create/);
@@ -201,7 +214,7 @@ test('app entry selects the built-in developer in a new conversation while retai
   context.window.PluginBuilderEntry.open('周报');
   assert.equal(calls[0].route, 'create');
   assert.equal(calls[0].payload.pluginId, 'local:app-developer');
-  assert.equal(calls[0].payload.prefill, '开发应用：开发便签');
+  assert.equal(calls[0].payload.prefill, '开发即用：开发便签');
   assert.equal(calls[0].payload.newSession, true);
   assert.equal(calls[0].payload.autoSend, undefined);
   assert.equal(calls[1].payload.pluginId, 'local:plugin-builder');
@@ -209,4 +222,38 @@ test('app entry selects the built-in developer in a new conversation while retai
   assert.ok(build.files.includes('sdk/**/*'));
   assert.ok(build.files.includes('app-window-chrome.html'));
   assert.ok(build.extraResources.some(x => x.from === '../skills'));
+});
+
+
+test('authoring validator compiles packaged scripts and modules without executing either', t => {
+  const f = fixture(t); scaffold({out:f.out,key:'syntax-demo',name:'语法检查'});
+  const draft = path.join(f.out,drafts.DRAFT_NAME), body = JSON.parse(fs.readFileSync(draft,'utf8'));
+  body.icon = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jxqkAAAAASUVORK5CYII=';
+  const validator = require('../../skills/app-developer/scripts/validate.cjs');
+  const write=()=>fs.writeFileSync(draft,JSON.stringify(body)); write();
+  const file=path.join(f.out,'ui/app.js');
+  fs.writeFileSync(file,'const pendingCopy = 1; const pendingCopy = 2;');
+  assert.throws(()=>validator.validate(draft,f.root),/语法检查失败：ui\/app\.js/);
+  fs.writeFileSync(file,'throw Error("must not execute app code");');
+  fs.writeFileSync(path.join(f.out,'ui/module.mjs'),'export const value=1; throw Error("must not execute module code");');
+  body.resources.push({path:'ui/module.mjs',kind:'ui'}); write();
+  const result=validator.validate(draft,f.root);
+  assert.equal(result.syntaxChecked,3); assert.equal(result.runtimeTested,false);
+  fs.writeFileSync(path.join(f.out,'ui/module.mjs'),'export const value = ;');
+  assert.throws(()=>validator.validate(draft,f.root),/语法检查失败：ui\/module\.mjs/);
+});
+
+test('Chinese 即用 and English App intentionally share a product concept across loaded catalogs', () => {
+  const context=vm.createContext({});
+  for(const file of ['en-US.js','en-US-gap-pages.js']) {
+    vm.runInContext(fs.readFileSync(path.resolve(__dirname,'../core/locales',file),'utf8'),context);
+  }
+  const catalogs=context.SoduWorkLocaleMessages;
+  assert.equal(catalogs['en-US']['即用'],'App');
+  assert.equal(catalogs['en-US']['创建即用'],'Create app');
+  assert.equal(catalogs['en-US']['打开即用'],'Open app');
+  assert.equal(catalogs['en-US']['搜索即用'],'Search apps');
+  assert.match(catalogs['en-US']['首屏发现脚本、资源或SDK运行错误：{value1}'],/error detected/);
+  assert.match(catalogs['en-US']['原生启动检查失败：{value1}'],/failed/);
+  for(const [key,value] of Object.entries(catalogs['en-US'])) if(key.includes('即用')) assert.doesNotMatch(value,/Instant/);
 });

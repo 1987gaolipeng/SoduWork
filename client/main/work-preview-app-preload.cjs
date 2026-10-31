@@ -21,12 +21,17 @@ const bridge = Object.freeze({
   request,
   settings: Object.freeze({ get: params => request('settings.get', params || {}), update: params => request('settings.update', params || {}) }),
   mcp: Object.freeze({ connect: params => request('mcp.connect', params || {}) }),
-  events: Object.freeze({ onTurnSettled(callback) {
+  events: Object.freeze({ onDataChanged(callback) {
+    if(typeof callback!=='function')return ()=>{};
+    const listener=(_event,value)=>{if(['identity','notifications','conversations','library'].includes(value?.topic))callback({topic:value.topic});};
+    ipcRenderer.on('app-data-changed',listener);return ()=>ipcRenderer.removeListener('app-data-changed',listener);
+  }, onTurnSettled(callback) {
     if (typeof callback !== 'function') return () => {};
     const listener = () => { try { callback({ state: 'settled' }); } catch (_) {} };
     ipcRenderer.on('app-turn-settled', listener);
     return () => ipcRenderer.removeListener('app-turn-settled', listener);
   } }),
+  directory: Object.freeze({list:() => request('directory.list',{})}),
   context: Object.freeze({ get: () => request('context.get', {}) }),
   conversation: Object.freeze({
     open: (params) => request('conversation.open', params || {}),
@@ -44,6 +49,7 @@ const bridge = Object.freeze({
     collapse: () => request('composer.collapse', {}),
     insertText: (params) => request('composer.insertText', params || {}),
     send: params => request('composer.send', params || {}),
+    mention:params => request('composer.mention',params || {}),
     insertAttachment: (params) => request('composer.insertAttachment', params || {}),
     setTheme: (params) => request('composer.theme', params || {}),
   }),

@@ -86,8 +86,16 @@
 .cr-upload-hint { margin: 0; color: var(--ink-4); font-size: max(var(--font-min-readable, 14.5px), 13px); line-height: 1.5; }
 .cr-file-field { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px;
   border: 1px solid var(--line); border-radius: 11px; background: var(--surface-1); }
-.cr-file-field span { font-weight: 600; font-size: max(var(--font-min-readable, 14.5px), 13.5px); }
-.cr-file-field input[type="file"] { font-size: max(var(--font-min-readable, 14.5px), 13px); }
+.cr-file-field > span { font-weight: 600; font-size: max(var(--font-min-readable, 14.5px), 13.5px); }
+/* The native control speaks the host-browser language; keep it functional but invisible
+   and let the translated chip plus file name carry the visible state. */
+.cr-file-native { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.cr-file-field:focus-within { border-color: var(--ink-4); }
+.cr-file-field .cr-file-row { display: flex; align-items: center; gap: 10px; min-width: 0; font-weight: 400; }
+.cr-file-row .btn { flex: none; }
+.cr-file-name { font-weight: 400; font-size: max(var(--font-min-readable, 14.5px), 13px);
+  color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cr-file-field small { color: var(--ink-4); font-size: max(var(--font-min-readable, 14.5px), 12px); }
 .cr-upload-error { padding: 10px 12px; border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--crit) 40%, var(--line));

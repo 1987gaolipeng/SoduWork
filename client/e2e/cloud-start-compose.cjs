@@ -2,6 +2,7 @@
 const { app, BrowserWindow } = require('electron');
 const path = require('node:path'), fs = require('node:fs/promises');
 const assert = require('node:assert/strict');
+require('./lib/isolated-profile.cjs').isolateProfile(app, 'cloud-start-compose');
 
 const output = process.argv[2];
 if (!output || !path.isAbsolute(output)) throw Error('Absolute output directory required');

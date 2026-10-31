@@ -1,9 +1,15 @@
 'use strict';
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { prepareRunner } = require('./prepare-runner.cjs');
 const { macosBuildEnvironment } = require('./macos-build-environment.cjs');
+const { notarizeArtifact, notarizeEnabled, signingIdentity } = require('./notarize-macos.cjs');
+
+function signingKeychain(env = process.env) {
+  return env.SODUWORK_MAC_KEYCHAIN || (env.HOME ? path.join(env.HOME, 'Library/Keychains/login.keychain-db') : '');
+}
 
 function build({ root = path.resolve(__dirname, '../..'), platform = process.platform,
   env = process.env, run = execFileSync, prepare = prepareRunner, hostArch = process.arch } = {}) {
@@ -32,6 +38,15 @@ function buildTargets({ root, platform, env, run, prepare, architectures, hostAr
       'if probe.returncode: sys.exit(probe.stderr or probe.stdout)\n' +
       'print(platform.machine())'], { env, encoding: 'utf8' }).trim();
     assert.equal(actual, arch === 'x64' ? 'x86_64' : 'arm64', 'Build Python architecture differs from ' + arch);
+  }
+  // Real Developer ID signing stays opt-in so GitLab CI keeps its ad-hoc contract.
+  const identity = signingIdentity(env);
+  if (identity) {
+    const keychain = signingKeychain(env);
+    const args = ['find-identity', '-v', '-p', 'codesigning'];
+    if (keychain) args.push(keychain);
+    const listed = run('security', args, { env, encoding: 'utf8' });
+    assert.ok(listed.includes(identity), 'Developer ID identity is missing from the keychain: ' + identity);
   }
   for (const { arch, python } of targets) {
     const runner = prepare({ root, platform, python, env });

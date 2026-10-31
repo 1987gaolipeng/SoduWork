@@ -173,7 +173,8 @@ export const api = {
   deleteDomain: (id) => call('DELETE', '/admin/domains/' + id),
   audit: (p) => call('GET', '/admin/audit' + (p && Object.keys(p).length ? '?' + new URLSearchParams(p).toString() : '')),
   // Organization memory is restricted to administrators with org.manage.
-  orgMemories: ({ archived = false, offset = 0 } = {}) => call('GET', '/admin/org-memory?' + new URLSearchParams({ archived: String(Boolean(archived)), offset: String(offset) }).toString()),
+  // Superadministrators may pass orgId to inspect another organization's memory.
+  orgMemories: ({ archived = false, offset = 0, orgId = '' } = {}) => call('GET', '/admin/org-memory?' + new URLSearchParams({ archived: String(Boolean(archived)), offset: String(offset), ...(orgId ? { orgId } : {}) }).toString()),
   createOrgMemory: (body) => call('POST', '/admin/org-memory', body),
   updateOrgMemory: (id, body) => call('PUT', '/admin/org-memory/' + encodeURIComponent(id), body),
   deleteOrgMemory: (id) => call('DELETE', '/admin/org-memory/' + encodeURIComponent(id)),
@@ -334,7 +335,6 @@ export const api = {
   pluginRun: (id) => call('GET', '/admin/plugin-runs/' + id),
   startPluginRun: (taskId, b) => call('POST', '/admin/tasks/' + taskId + '/plugin-runs', b),
   // Delivery overview uses shared task-state semantics for attention, active work, and completion.
-  deliveryBoard: () => call('GET', '/admin/delivery/board'),
   // Workflow retries retain server approval and permission checks.
   retryRunGate: (runId, nodeKey = '', options = {}) => call(
     'POST', '/admin/plugin-runs/' + encodeURIComponent(runId) + '/retry-gate',

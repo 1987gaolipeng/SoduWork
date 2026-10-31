@@ -70,9 +70,16 @@
       .slice().sort((a, b) => Number(b.at || 0) - Number(a.at || 0));
   }
   function repaint() {
+    if(typeof global.dispatchEvent==='function'&&typeof global.CustomEvent==='function')global.dispatchEvent(new global.CustomEvent('soduwork-host-data-changed',{detail:{topic:'notifications'}}));
     if (typeof updateNoticeBadge === 'function') updateNoticeBadge();
     const panel = global.document?.getElementById('noticePanel');
     if (panel?.classList?.contains('show') && typeof _renderNoticePanel === 'function') _renderNoticePanel();
+  }
+  function refreshQuotaNotice() {
+    try {
+      const pending = global.SoduWorkQuotaNotice?.refreshIfBlocked?.();
+      if (pending && typeof pending.catch === 'function') pending.catch(() => {});
+    } catch (_) {}
   }
   function commit(next, token) {
     if (!current(token)) return false;
@@ -200,7 +207,9 @@
         if (cursor && seen.has(cursor)) throw new Error('通知分页没有继续前进，请重试');
         seen.add(cursor);
       } while (cursor && current(token));
-      return { ok: current(token) };
+      const result = { ok: current(token) };
+      if (result.ok) refreshQuotaNotice();
+      return result;
     })();
     requests.set(key, work);
     work.finally(() => { if (requests.get(key) === work) requests.delete(key); }).catch(() => {});

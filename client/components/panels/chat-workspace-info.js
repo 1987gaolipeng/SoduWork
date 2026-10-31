@@ -3,6 +3,7 @@
   'use strict';
   const tools = global.ChatTools || (typeof require === 'function' ? require('./panels-chat-tools') : null);
   if (!tools) return;
+  const outputLinks = global.ChatOutputLinks || (typeof require === 'function' ? require('./chat-output-links') : null);
   const pick = (args, names) => {
     for (const name of names) {
       const value = args && args[name];
@@ -45,7 +46,9 @@
   // broader than “current work”, especially when two chats share a project.
   // Select current evidence without pruning those addressable historical files.
   function currentWorkSelection(snapshot, files, cwd) {
-    const links = global.ChatOutputLinks || (typeof require === 'function' ? require('./chat-output-links') : null);
+    // Keep the late-loaded browser path compatible with both desktop script
+    // orders: the shared registry may be attached after this module runs.
+    const links = global.ChatOutputLinks || outputLinks;
     if (!links) return { files: [], images: [] };
     const messages = snapshot?.messages || [];
     let first = -1;
@@ -122,6 +125,43 @@
   }
   function currentWorkFiles(snapshot, files, cwd) {
     return currentWorkSelection(snapshot, files, cwd).files;
+  }
+
+  /*
+   * Delivery rows are a second, narrower source of truth for automatic
+   * previews.  The workbench summary intentionally only contains files the
+   * current answer references or tools wrote explicitly, so historical and
+   * shared-workspace files cannot leak into the active conversation.  A
+   * completed delivery has stronger provenance: changedInTurn is stamped by
+   * the output scanner, while deliverySync.artifactVersions is the persisted
+   * receipt fallback used after a refresh.  Keep this list separate from
+   * currentWorkFiles; it is only for choosing the one primary result to open.
+   */
+  function currentDeliveryFiles(snapshot, files) {
+    const receipt = snapshot?.deliverySync;
+    if (receipt?.currentTurn !== true && !snapshot?.fileChanges && !snapshot?.execution?.fileChanges) return [];
+    if (receipt?.currentTurn === false) return [];
+    const versions = Array.isArray(receipt?.artifactVersions) ? receipt.artifactVersions : [];
+    const journal = currentWorkJournal(snapshot);
+    const journalOwns = file => Array.isArray(journal?.files) && journal.files.some(row =>
+      row && ['created', 'modified', 'renamed'].includes(row.action) && row.after?.exists !== false &&
+      (global.ChatOutputLinks || outputLinks)?.workspaceFileTarget(row.path, [file], journal.cwd) === file);
+    // A changedInTurn flag alone is not ownership proof in a shared workspace:
+    // another conversation may have written the same directory.  Prefer the
+    // local delivery receipt, with the conversation's file journal as the
+    // legacy/local fallback when a delivery sync has not been bound yet.
+    if (!versions.length && !journalOwnsAny(files || [], journalOwns)) return [];
+    const captured = file => (receipt?.artifactVersions || []).some(version =>
+      version && version.id === (file.artifactId || file.attachmentId || file.path || file.relative || file.name) &&
+      String(version.at || 0) === String(file.at || 0) &&
+      Number(version.size || 0) === Number(file.size || 0));
+    return (files || []).filter(file => file && !file.deleted &&
+      file.primary !== false && !file.processEvidence &&
+      (captured(file) || journalOwns(file)));
+  }
+
+  function journalOwnsAny(files, owns) {
+    return (files || []).some(file => owns(file));
   }
 
   /* Use friendly wording that describes actual ongoing work. */
@@ -405,7 +445,7 @@
       '<button type="button" data-wb-copy-location title="复制页面地址" aria-label="复制页面地址">' + ICONS.copy + '</button></div>';
   }
 
-  const api = { toolMeta, status, services, serviceCandidates, changes, currentTurnTools, currentWorkFiles, currentWorkSelection, currentWorkJournal, baseName, normalizeUrl, stripAnsi, isServerCommand, ICONS, documentToolbar, browserToolbar, mediaToolbar, displayAddress, buttonStatus, copied };
+  const api = { toolMeta, status, services, serviceCandidates, changes, currentTurnTools, currentWorkFiles, currentWorkSelection, currentDeliveryFiles, currentWorkJournal, baseName, normalizeUrl, stripAnsi, isServerCommand, ICONS, documentToolbar, browserToolbar, mediaToolbar, displayAddress, buttonStatus, copied };
   Object.assign(tools, { status, _toolMeta: toolMeta, _services: services, _serviceCandidates: serviceCandidates, _changes: changes, _currentTurnTools: currentTurnTools });
   global.ChatWorkspaceInfo = api;
   global.ChatWorkbenchIcons = ICONS;

@@ -327,6 +327,25 @@ async def _move_task_to_user(session: AsyncSession, t, target_uid: str, members_
         await session.rollback()
         return {"ok": False, "reason": "not_found"}
     await session.refresh(t)
+    # The transfer note is part of the requirement context, not only an audit
+    # event.  Persist it on the task before publishing the updated projection
+    # so the new owner can see it in the detail panel and the execution prompt
+    # (task-turn renders Task.note for both native and Runner dispatch).
+    transfer_note = str(note or "").strip()
+    if transfer_note:
+        label = actor_name or "转交人"
+        addition = "转交补充说明（" + label + "）：\n" + transfer_note
+        existing_note = str(t.note or "").rstrip()
+        t.note = (existing_note + "\n\n" + addition).strip() if existing_note else addition
+        # Migrated or shared requirements expose a frozen public projection from
+        # requirement_content rather than Task.note. Keep that projection in sync
+        # without dropping the original note, so the recipient sees the same
+        # supplement in the detail drawer.
+        frozen = dict(getattr(t, "requirement_content", None) or {})
+        if frozen:
+            frozen_note = str(frozen.get("note") or "").rstrip()
+            frozen["note"] = (frozen_note + "\n\n" + addition).strip() if frozen_note else addition
+            t.requirement_content = frozen
     assignment_notice = await task_assignment_notifications.transition(
         session, t, actor_user_id, "reassign",
         {"from": from_name, "to": to_name, "note": note}, actor_name)
@@ -484,9 +503,13 @@ async def my_teammates(session: AsyncSession, client: models.Client) -> dict:
     if me is None or not me.is_active:
         return {"mates": [], "reason": "本 SoduWork 还没绑定用户，请让管理员分配归属"}
     members_u = await _company_members(session, me)
+    unit_ids = {u.org_id for u in members_u if u.org_id}
+    units = (await session.execute(select(models.OrgUnit).where(models.OrgUnit.id.in_(unit_ids)))).scalars().all() if unit_ids else []
+    org_units = [{"id": row.id, "name": row.name, "parentId": row.parent_id or ""} for row in units]
+    org_units.sort(key=lambda row: (row['name'], row['id']))
     ids = {u.id for u in members_u if u.id != me.id}
     if not ids:
-        return {"mates": [], "reason": "当前企业还没有其他已启用同事"}
+        return {"mates": [], "orgUnits": org_units, "reason": "当前企业还没有其他已启用同事"}
     boxes = (await session.execute(
         select(models.Client).where(
             models.Client.user_ref.in_(ids),
@@ -503,12 +526,12 @@ async def my_teammates(session: AsyncSession, client: models.Client) -> dict:
             o = await session.get(models.OrgUnit, u.org_id)
             orgs[u.org_id] = o.name if o else ""
     mates = [{"id": u.id, "name": u.display_name or u.username,
-              "org": orgs.get(u.org_id, ""), "hasBox": u.id in has_box,
+              "orgId": u.org_id or "", "org": orgs.get(u.org_id, ""), "hasBox": u.id in has_box,
               "canReceive": u.id in has_box, "deviceCount": boxes_by_user.get(u.id, 0)}
              for u in members_u if u.id != me.id]
     mates.sort(key=lambda m: (not m["canReceive"], m["org"] or "未分组",
                               m["name"] or "", m["id"]))
-    return {"mates": mates, "reason": "" if any(m["hasBox"] for m in mates) else "其他同事尚无可接收需求的 SoduWork"}
+    return {"mates": mates, "orgUnits": org_units, "reason": "" if any(m["hasBox"] for m in mates) else "其他同事尚无可接收需求的 SoduWork"}
 
 
 async def message_mate(session: AsyncSession, client: models.Client,

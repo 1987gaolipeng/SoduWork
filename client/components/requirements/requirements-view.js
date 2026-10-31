@@ -90,7 +90,7 @@
     // hub while other approvers finish. It must not keep advertising the
     // decision card in the requirement pool; the detail view already treats
     // it as a waiting state.
-    const actionable = pending && (!pending.status || pending.status === 'pending') && !pending.myDecision
+    const actionable = pending && (!pending.status || pending.status === 'pending') && !pending.myDecision && R.approvalActionable(task, ctx)
       ? pending : null;
     const acceptance = actionable || global.TaskTraceApproval?.canAcceptTask(task, ctx), id = esc(task.id);
     const moving = state.movingId === String(task.id);

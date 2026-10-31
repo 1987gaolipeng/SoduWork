@@ -413,6 +413,9 @@ function _noticePresentation(n) {
   const icon = mate ? '<svg class="np-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a8 8 0 0 1-8 8H4l1.6-4A8 8 0 1 1 20 11.5Z"/><path d="M8 10h8M8 14h5"/></svg>' : report ? '<svg class="np-svg" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="3"/><path d="M9 7h6M9 11h6M9 15h3"/></svg>' : _nkIcon(n.kind);
   return { text: report ? report[2] : text, title, icon, mate, report: !!report };
 }
+function _noticeFileIsZip(file) {
+  return /\.zip$/i.test(String(file?.name || file?.filename || ''));
+}
 function _renderNoticePanel() {
   _syncNoticeScope();
   _noticeVisibleRows.clear();
@@ -462,7 +465,14 @@ function _renderNoticePanel() {
         (n.sentStatus && _noticeFolder === 'sent' ? '<span class="np-delivery np-' + esc(n.sentStatus) + '">' + (n.sentStatus === 'read' ? '已读' : n.sentStatus === 'delivered' ? '已送达' : '已发送') + '</span>' : '') + '</div></div>' +
         '<div class="np-txt' + (long ? ' is-long' : '') + '"' + (view.mate ? ' data-user-content' : '') + '>' + esc(view.text) + '</div>' +
         (long ? '<button type="button" class="np-expand" data-notice-expand="' + esc(key) + '" aria-expanded="' + expanded + '">' + (expanded ? '收起全文' : '展开全文') + '</button>' : '') +
-        (files.length ? '<div class="np-files" data-notice-file-scope="' + esc(_syncNoticeScope()) + '">' + files.map(file => '<div class="np-attachment"><button type="button" class="np-file" data-notice-action="open" data-notice-file="' + esc(file.id) + '" title="打开附件：' + esc(file.name) + '"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M8 14h8M8 17h5"/></svg><span><span data-user-content>' + esc(file.name) + '</span><em>' + Math.max(1, Math.ceil(Number(file.size || 0) / 1024)) + ' KB</em></span><small>打开</small></button><button type="button" class="np-file-download" data-notice-action="download" data-notice-file="' + esc(file.id) + '" aria-label="下载附件：' + esc(file.name) + '">下载</button>' + (_noticeFolder === 'received' ? '<button type="button" class="np-file-download" data-notice-action="save" data-notice-file="' + esc(file.id) + '" title="保存到本机资料库">保存到资料库</button>' : '') + '</div>').join('') + '</div>' : '') +
+        (files.length ? '<div class="np-files" data-notice-file-scope="' + esc(_syncNoticeScope()) + '">' + files.map(file => {
+          const name = String(file.name || file.filename || '附件'), zip = _noticeFileIsZip(file);
+          const size = Math.max(1, Math.ceil(Number(file.size || 0) / 1024)) + ' KB';
+          const fileCard = zip
+            ? '<div class="np-file np-file-static" aria-label="' + esc(name) + '"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M8 14h8M8 17h5"/></svg><span><span data-user-content>' + esc(name) + '</span><em>' + size + '</em></span></div>'
+            : '<button type="button" class="np-file" data-notice-action="open" data-notice-file="' + esc(file.id) + '" title="打开附件：' + esc(name) + '"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M8 14h8M8 17h5"/></svg><span><span data-user-content>' + esc(name) + '</span><em>' + size + '</em></span><small>打开</small></button>';
+          return '<div class="np-attachment">' + fileCard + '<button type="button" class="np-file-download" data-notice-action="download" data-notice-file="' + esc(file.id) + '" aria-label="下载附件：' + esc(name) + '">下载</button><button type="button" class="np-file-download" data-notice-action="save" data-notice-file="' + esc(file.id) + '" title="保存到本机资料库">保存到资料库</button></div>';
+        }).join('') + '</div>' : '') +
         (n.website && n.website.previewUrl ? '<button type="button" class="np-preview" data-notice-preview="' + esc(n.website.previewUrl) + '"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M10 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5"/></svg><span>查看网页预览</span></button>' : '') + '</div>' +
         (n.taskId ? '<span class="np-task-link" aria-label="查看任务" title="查看任务"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></span>' : '') + '</article>';
     });
@@ -505,6 +515,9 @@ async function _downloadNoticeFile(button) {
     }
     const file = await SoduWorkAPI.mateMessageFile(button.getAttribute('data-notice-file'));
     if (!current()) return;
+    if (action === 'open' && /\.zip$/i.test(String(file.filename || file.name || ''))) {
+      throw Error('ZIP 附件只支持下载或保存到资料库');
+    }
     const url = SoduWorkAPI.attachmentUrl(file);
     const preview = action === 'open';
     const method = preview ? 'previewAttachment' : 'downloadAttachment';

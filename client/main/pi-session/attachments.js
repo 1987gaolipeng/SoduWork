@@ -21,6 +21,45 @@ function safeName(value) {
   return (raw || '附件').slice(0, 180);
 }
 
+/*
+ * Electron's structured-clone transport normally preserves Uint8Array, but
+ * older preload bridges and a few test/upgrade paths serialise it as either a
+ * Buffer JSON envelope or a plain numeric object.  Treat those representations
+ * as the same byte payload so non-Pi runtimes receive the attachment too.
+ * Keep the conversion strict: arbitrary objects and oversized sparse payloads
+ * must never become files silently.
+ */
+function bytesFromTransport(value) {
+  if (Buffer.isBuffer(value)) return value;
+  if (value instanceof Uint8Array) return Buffer.from(value);
+  if (value instanceof ArrayBuffer) return Buffer.from(new Uint8Array(value));
+  if (ArrayBuffer.isView(value)) return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  if (!value || typeof value !== 'object') return null;
+  const array = value.type === 'Buffer' && Array.isArray(value.data) ? value.data :
+    Array.isArray(value) ? value : null;
+  if (array) {
+    if (array.length > MAX_BYTES) return null;
+    for (const byte of array) if (!Number.isInteger(byte) || byte < 0 || byte > 255) return null;
+    return Buffer.from(array);
+  }
+  // JSON.stringify(new Uint8Array(...)) produces numeric keys rather than an
+  // explicit data array.  Require a contiguous, bounded index set to avoid
+  // accepting an accidental metadata object as file bytes.
+  const keys = Object.keys(value);
+  const numericKeys = keys.length && keys.every(key => /^\d+$/.test(key));
+  const declaredLength = Number(value.length);
+  const length = Number.isSafeInteger(declaredLength) && declaredLength >= 0
+    ? declaredLength : (numericKeys ? keys.length : NaN);
+  if (!Number.isSafeInteger(length) || length < 0 || length > MAX_BYTES || keys.length !== length) return null;
+  for (let index = 0; index < length; index++) {
+    const key = String(index);
+    if (!Object.prototype.hasOwnProperty.call(value, key)) return null;
+    const byte = value[key];
+    if (!Number.isInteger(byte) || byte < 0 || byte > 255) return null;
+  }
+  return Buffer.from(Array.from({ length }, (_, index) => value[index]));
+}
+
 function inside(root, target) {
   const rel = path.relative(path.resolve(root), path.resolve(target));
   return rel === '' || (!rel.startsWith('..' + path.sep) && rel !== '..' && !path.isAbsolute(rel));
@@ -60,9 +99,7 @@ async function stageFiles(cwd, rawItems, options) {
   for (const item of items) {
     const source = String((item && item.path) || '').trim();
     const rawData = item && item.data;
-    const data = Buffer.isBuffer(rawData) ? rawData
-      : rawData instanceof Uint8Array ? Buffer.from(rawData)
-      : rawData instanceof ArrayBuffer ? Buffer.from(new Uint8Array(rawData)) : null;
+    const data = bytesFromTransport(rawData);
     if (!source && !data) { warnings.push('有一个附件没有可用内容'); continue; }
     try {
       if (data) {
@@ -74,7 +111,7 @@ async function stageFiles(cwd, rawItems, options) {
         await fs.writeFile(target, data);
         files.push({ name: safeName(item.name || target), path: target,
           relative: inside(cwd, target) ? path.relative(cwd, target).replace(/\\/g, '/') : target,
-          size: data.byteLength, mimeType: String(item.type || item.mimeType || ''),
+          size: data.byteLength, mimeType: String(item.type || item.mimeType || item.contentType || ''),
           ...(item.attachmentId ? {attachmentId: String(item.attachmentId)} : {}),
           ...(item.role ? {role: String(item.role)} : {}),
           ...(item.sourceRef ? {sourceRef: String(item.sourceRef)} : {}),
@@ -104,7 +141,7 @@ async function stageFiles(cwd, rawItems, options) {
         name: safeName(item.name || target), path: target,
         relative: inside(cwd, target) ? path.relative(cwd, target).replace(/\\/g, '/') : target,
         size: stat.size,
-        mimeType: String((item && (item.type || item.mimeType)) || ''),
+        mimeType: String((item && (item.type || item.mimeType || item.contentType)) || ''),
         ...(item.attachmentId ? {attachmentId: String(item.attachmentId)} : {}),
         ...(item.role ? {role: String(item.role)} : {}),
         ...(item.sourceRef ? {sourceRef: String(item.sourceRef)} : {}),
@@ -158,4 +195,5 @@ async function readImage(target) {
   return { file, mimeType, size: stat.size, data: await fs.readFile(file) };
 }
 
-module.exports = { stage, prompt, images, readImage, safeName, inside, MAX_FILES, MAX_BYTES, IMAGE_BYTES };
+module.exports = { stage, prompt, images, readImage, safeName, inside, bytesFromTransport,
+  MAX_FILES, MAX_BYTES, IMAGE_BYTES };

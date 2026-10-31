@@ -302,7 +302,11 @@ try:
                     display_name="无关人员", is_active=True)
                 outsider_client = models.Client(
                     id=outsider_cid, name="无关设备", secret="x", user_ref=outsider_uid)
-                task = models.Task(id=tid, title="同会话返修", owner_client_id=cid, status="doing")
+                # Delivery review is creator-owned; keep the execution device
+                # separate so the evidence download still exercises a remote
+                # creator approving the fixed version.
+                task = models.Task(id=tid, title="同会话返修", owner_client_id=cid,
+                                   created_by=reviewer_uid, status="doing")
                 session.add_all([client, reviewer, reviewer_client, outsider, outsider_client,
                                  task, models.TaskEvent(
                     task_id=tid, kind="ai.dispatched",

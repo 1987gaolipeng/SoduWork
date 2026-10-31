@@ -16,7 +16,7 @@ test('packaged client has one semantic version across all release manifests', ()
   const lock = json('package-lock.json');
   const renderer = json('version.json');
 
-  assert.match(pkg.version, /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/);
+  assert.match(pkg.version, /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-beta\.(0|[1-9]\d*))?$/);
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages[''].version, pkg.version);
   assert.equal(renderer.version, pkg.version);

@@ -23,6 +23,8 @@ test('thinking status keeps metrics subtle and promo copy integrated', () => {
   assert.match(thinkingSource, /function displayText/);
   assert.match(thinkingSource, /const promos =/);
   assert.match(chatCss, /\.nturn-metrics/);
+  assert.match(chatCss, /\.nturn-metrics \.nstatus-divider,\.nturn-metrics \.nstatus-divider \+ \.nstatus-metric\{display:none\}/,
+    'conversation footer keeps only elapsed time visible');
   assert.doesNotMatch(chatCss, /\.nstatus-metric i/);
   assert.doesNotMatch(chatJs, /data-thinking-promo/);
   assert.doesNotMatch(chatCss, /\.nstatus-promo/);

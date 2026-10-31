@@ -24,8 +24,14 @@ from .runner_access_policy import require_personal_mutation
 
 
 def agent_setup():
+    install = AGENTS.get("pi", {}).get("install") or {}
+    package = str(install.get("pkg") or "@earendil-works/pi-coding-agent")
+    # Keep the fallback deterministic if an older catalog omits the version.
+    version = str(install.get("version") or "0.84.4").strip()
+    if version:
+        package += "@" + version
     return {"name": "Pi", "prerequisites": "Node.js 22.19 或更新版本",
-            "command": "npm install -g @earendil-works/pi-coding-agent",
+            "command": "npm install -g " + package,
             "note": "使用与执行服务相同的账号安装；确保 Node/npm/pi 在服务 PATH；重启执行机后检查连接"}
 
 

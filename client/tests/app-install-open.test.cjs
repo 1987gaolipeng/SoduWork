@@ -32,7 +32,7 @@ test(JSON.stringify(lineEnding) + ': installation never chooses an external brow
     { slot: 'workspace.navigation', source: { type: 'unknown' } },
     { slot: 'task.detail.tab', source: { type: 'package' } },
   ];
-  await assert.rejects(open({ pluginId: 'local:example', template: 'app', ui: { contributions: pages } }), /应用页面暂时不可用/);
+  await assert.rejects(open({ pluginId: 'local:example', template: 'app', ui: { contributions: pages } }), /即用页面暂时不可用/);
   assert.equal(calls.length, 0);
 });
 }

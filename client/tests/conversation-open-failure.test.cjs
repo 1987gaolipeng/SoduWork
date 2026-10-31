@@ -55,3 +55,31 @@ test('a stale rejected open does not overwrite the conversation opened after nav
   assert.deepEqual(failures, []);
 });
 
+test('retrying a failed historical attach clears stale task context before continuing the chat', async () => {
+  const body = require('./renderer-source.cjs')
+    .factoryFunction('chat-session-controller.js', 'ChatSessionController', '_retryOpenChat');
+  const opened = [];
+  const ctx = {
+    _sessionId: 'history-a', _ref: '', _openingTask: null,
+    _sessionOptions: { taskRef: 'task-a', taskTitle: '旧需求', taskSession: true, requireTaskBinding: true },
+    _activeCollabTaskId: 'task-a', _collaborationTaskId: 'task-a',
+    _collaborationTask: { id: 'task-a' }, _taskSession: { id: 'task-a' },
+    _snap: { status: 'unreachable', sessionOpenCode: 'TASK_ACCESS_DENIED' },
+    _render: () => {}, _taskOpenError: '',
+  };
+  const sandbox = {
+    ctx, Promise, Boolean, String,
+    _ensure: async (chatId) => { opened.push({ chatId, options: { ...ctx._sessionOptions } }); return true; },
+  };
+  const vm = require('node:vm');
+  vm.createContext(sandbox);
+  vm.runInContext(body, sandbox);
+
+  assert.equal(await sandbox._retryOpenChat(), true);
+  assert.deepEqual(opened, [{ chatId: 'history-a', options: { resumeAsOrdinary: true } }]);
+  assert.equal(ctx._activeCollabTaskId, '');
+  assert.equal(ctx._collaborationTaskId, '');
+  assert.equal(ctx._collaborationTask, null);
+  assert.equal(ctx._taskSession, null);
+});
+

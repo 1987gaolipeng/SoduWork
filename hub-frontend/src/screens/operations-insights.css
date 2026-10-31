@@ -217,6 +217,8 @@
 .oi-table td.num small { display: block; color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); }
 .oi-table tr.is-off .oi-plugin-name { opacity: .6; }
 .oi-dim { color: var(--ink-3); }
+.oi-metric-help { cursor: help; text-decoration: underline dotted; text-underline-offset: 4px; }
+.oi-metric-help:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 2px; }
 .oi-rate { padding: 3px 7px; border-radius: 5px; font-size: max(var(--font-min-readable, 14.5px), 12px); font-style: normal; font-weight: 600; }
 .oi-rate.ok { background: var(--ok-soft); color: var(--ok); }
 .oi-rate.mid { background: var(--warn-soft); color: var(--warn); }
@@ -430,3 +432,6 @@
   .oi-automation .oi-body { min-height: 0; }
   .oi-automation .oi-bars { min-height: 156px; }
 }
+
+/* Keep Korean words intact while still wrapping long identifiers. */
+:lang(ko) .oi-page { word-break: keep-all; overflow-wrap: break-word; }

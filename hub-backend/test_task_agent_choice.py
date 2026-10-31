@@ -24,7 +24,7 @@ class AgentChoiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(next(row for row in selected if row["key"] == "another")["recommended"])
 
     async def test_all_entry_points_keep_available_agent_types(self):
-        client = SimpleNamespace(id="owner-device")
+        client = SimpleNamespace(id="owner-device", user_ref="owner-account")
         repo = {"id": "repo", "projectId": "project", "name": "General"}
         agents = [{"id": "local:"+cli, "cli": cli, "machineKey": "same-pc",
                    "capabilities": {"available": ["files", "repository", "terminal"]}}
@@ -35,7 +35,8 @@ class AgentChoiceTests(unittest.IsolatedAsyncioTestCase):
                     with self.subTest(existing=existing, workflow=workflow, contract=contract), ExitStack() as s:
                         routing = {"scenarioKey": "office", "defaultPluginKey": "custom-flow",
                                    "requiredAgentCapabilities": ["files"], "outputContract": {"kind": contract}}
-                        task = SimpleNamespace(id="task", owner_client_id=client.id, project_id="project",
+                        task = SimpleNamespace(id="task", owner_client_id=client.id, owner_user_id=client.user_ref,
+                            project_id="project",
                             repo_id="repo", title="Requirement task", note="All material", tags=[],
                             work_routing=routing, work_scenario_key="office", work_scenario_name="Office")
                         s.enter_context(patch.object(opts, "_visible_repos", new=AsyncMock(return_value=(None, [repo]))))
@@ -46,6 +47,8 @@ class AgentChoiceTests(unittest.IsolatedAsyncioTestCase):
                             {"bindingId": "flow", "pluginId": "plugin", "sourceKind": "builtin",
                              "key": "custom-flow", "projectSpecific": True, "isDefault": True, "runnable": True}
                         ] if workflow else [])))
+                        s.enter_context(patch.object(opts.plugin_installations, "by_plugin",
+                            new=AsyncMock(return_value={})))
                         s.enter_context(patch.object(opts.ai_exec, "load", new=AsyncMock(return_value={})))
                         s.enter_context(patch.object(opts.ai_exec, "with_client_runner_scope", side_effect=lambda c, _: c))
                         s.enter_context(patch.object(opts.ai_exec, "list_assignees_sync", return_value={"agents": agents}))
@@ -57,6 +60,17 @@ class AgentChoiceTests(unittest.IsolatedAsyncioTestCase):
                         self.assertFalse(out["recommendation"]["workflowRequired"])
                         self.assertEqual({a["cli"] for a in out["substrates"] if a["available"]}, {a["cli"] for a in agents})
                         self.assertEqual(out["recommendation"]["strategy"], "workflow" if workflow else "direct")
+
+    async def test_existing_task_rejects_rebound_device_before_listing_agents(self):
+        client = SimpleNamespace(id="owner-device", user_ref="another-account")
+        task = SimpleNamespace(id="task", owner_client_id=client.id, owner_user_id="owner-account")
+        with patch.object(opts.task_access, "view_task", new=AsyncMock(return_value=task)), \
+                patch.object(opts, "_visible_repos", new=AsyncMock()) as visible, \
+                patch.object(opts.ai_exec, "load", new=AsyncMock()) as load:
+            with self.assertRaisesRegex(ValueError, "当前承办设备"):
+                await opts.build(None, client, {"taskId": "task"})
+            visible.assert_not_awaited()
+            load.assert_not_awaited()
 
     def test_node_routes_remain_independent(self):
         context = {"execution": {"agentKind": "local:qwen", "model": "ordinary-model"}}

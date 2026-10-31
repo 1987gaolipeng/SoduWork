@@ -438,7 +438,12 @@
       openMarket: function () {
         viewRevision++; tab = 'market'; query = ''; render();
       },
-      createWithAgent: async function (existingDraft) {
+      createWithAgent: async function (existingDraft, pluginId) {
+        if (existingDraft?.template === "app" && pluginId) {
+          try { await window.PluginBuilderEntry.editApp(pluginId); closeModal(); }
+          catch (error) { say(errorText(error, "没有打开即用改进会话")); }
+          return;
+        }
         try { await SoduWorkPluginAccess.assertEditable(existingDraft); }
         catch (error) { say(errorText(error, '当前没有编辑改进权限，请联系管理员')); return; }
         closeModal();
@@ -487,7 +492,7 @@
         }
         if (item.template === 'app') {
           const page = (item.ui?.contributions || []).find(row => row.slot === 'workspace.navigation' && ['external', 'package'].includes(row.source?.type || row.source?.kind) && row.source.openMode !== 'external');
-          if (!page || !window.PluginUIHost?.openContribution) throw Error('应用页面暂时不可用，请刷新应用目录后重试');
+          if (!page || !window.PluginUIHost?.openContribution) throw Error('即用页面暂时不可用，请刷新即用目录后重试');
           closeModal();
           return PluginUIHost.openContribution(page, { item, detached: true });
         }
@@ -784,6 +789,17 @@
     return capabilityEditors().openMcpEditor(initial, template, options);
   }
   window.openSkillPanel = openCapabilityPanel;
+  window.openCapabilitySearchResult = async function (kind, id, title) {
+    const scope = SoduWorkAPI.taskStorageKey('ops');
+    await openCapabilityPanel();
+    if (scope !== SoduWorkAPI.taskStorageKey('ops') || !panel()?.classList.contains('show')) return;
+    if (kind === 'skill') {
+      if (!(data?.skills || []).some(item => item.name === id)) throw Error('SEARCH_SKILL_UNAVAILABLE');
+      return capabilityEditors().openSkillDetails(id);
+    }
+    if (kind !== 'connector' || ![...(mcp?.company || []), ...(mcp?.personal || [])].some(item => String(item.id || item.name) === id)) throw Error('SEARCH_CONNECTOR_UNAVAILABLE');
+    viewRevision++; tab = 'connections'; query = String(title || ''); render();
+  };
   window.openCapabilityPlugin = async function (pluginId) {
     if (!window.SoduWorkCapabilityPlugins) throw Error('插件详情组件未加载');
     const snapshot = await SoduWorkCapabilityPlugins.load();

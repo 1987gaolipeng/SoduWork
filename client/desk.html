@@ -47,12 +47,10 @@
 <link rel="stylesheet" href="components/panels/im-remote.css">
 <link rel="stylesheet" href="components/panels/panels-session-memory.css">
 <link rel="stylesheet" href="components/panels/agent-brand.css">
-<link rel="stylesheet" href="components/panels/chat-crew.css">
 <link rel="stylesheet" href="components/requirements/requirements-board.css">
 <link rel="stylesheet" href="components/requirements/requirement-confirm.css">
 <link rel="stylesheet" href="components/panels/plugin-ui-host.css">
 <link rel="stylesheet" href="components/panels/plugin-debug-card.css">
-<link rel="stylesheet" href="components/panels/plugin-input-sheet.css">
 <link rel="stylesheet" href="components/panels/work-entry-sheet.css">
 <link rel="stylesheet" href="components/panels/work-automation-sheet.css">
 <link rel="stylesheet" href="components/panels/chat-work-cards.css">
@@ -102,6 +100,7 @@
 <link rel="stylesheet" href="components/panels/console.css">
 <link rel="stylesheet" href="components/panels/console-multi.css">
 <link rel="stylesheet" href="components/workspace/workspace-shell.css">
+<link rel="stylesheet" href="components/workspace/global-search.css">
 <link rel="stylesheet" href="components/workspace/workspace-sidebar-projects.css">
 <link rel="stylesheet" href="components/workspace/workspace-page-layout.css">
 <link rel="stylesheet" href="components/skin-manager/skin-manager.css">
@@ -116,6 +115,7 @@
 <!-- Shared workspace typography, headings, controls, and empty states; each page retains its layout. -->
 <link rel="stylesheet" href="theme/workspace-experience.css">
 <link rel='stylesheet' href='components/panels/work-composer.css'>
+<link rel='stylesheet' href='components/panels/chat-session-controls.css'>
 <link rel='stylesheet' href='components/panels/panels-compose-model-picker.css'>
 <link rel='stylesheet' href='components/panels/conversation-attachments.css'>
 <link rel='stylesheet' href='components/panels/panels-compose-skills.css'>
@@ -147,7 +147,8 @@
     stroke-linecap:round;stroke-linejoin:round;opacity:.5}
   /* This window uses a bottom-right toast for transient messages. */
   .desk-toast{
-    position:fixed;right:18px;bottom:16px;z-index:200;max-width:460px;
+    /* Match the pet bubble feedback layer so dialog backdrops do not hide status/error text. */
+    position:fixed;right:18px;bottom:16px;z-index:10070;max-width:460px;
     background:var(--ink);color:#fff;border-radius:var(--r-md);padding:9px 14px;
     line-height:1.6;font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)));
     box-shadow:var(--shadow-xl);opacity:0;transition:opacity .18s ease;pointer-events:none;
@@ -437,6 +438,7 @@
 <script src="core/locales/ko-KR.js"></script>
 <script src="core/locales/ko-KR-gap-pages.js"></script>
 <script src="core/i18n-dom.js"></script>
+<script src="core/locales/global-search.js"></script>
 <script src="core/i18n.js"></script>
 <script src="core/localized-text.js"></script>
 <script src="core/user.js"></script>
@@ -480,6 +482,7 @@
 <script src="components/panels/panels-misc.js"></script>
 <script src="components/panels/message-follow-up.js"></script>
 <script src="components/panels/panels-desk.js"></script>
+<script src="core/jiyong-schedules.js"></script>
 <script src="components/panels/panels-schedules-methods.js"></script>
 <script src="components/panels/panels-schedules-cards.js"></script>
 <script src="components/panels/schedule-timing.js"></script>
@@ -633,6 +636,8 @@
 <script src="components/panels/chat-acceptance-results.js"></script>
 <script src="components/panels/chat-crew.js"></script>
 <script src="components/panels/chat-turn-summary.js"></script>
+<script src="components/panels/chat-read-aloud-core.js"></script>
+<script src="components/panels/chat-read-aloud.js"></script>
 <script src="components/panels/chat-message-renderer.js"></script>
 <script src="components/panels/chat-send-queue.js"></script>
 <script src="components/panels/chat-work-intent.js"></script>
@@ -647,7 +652,6 @@
 <script src="components/panels/app-conversation-history.js"></script>
 <script src="components/panels/app-composer-bridge.js"></script>
 <script src="components/panels/chatbar-resize.js"></script>
-<script src="components/panels/app-conversation-history.js"></script>
 <script src="components/panels/chatbar-embed.js"></script>
 <script src="components/panels/compose-surface.js"></script>
 <script src="components/settings/access-preferences.js"></script>

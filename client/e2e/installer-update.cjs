@@ -7,11 +7,17 @@ const fsp = fs.promises;
 const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
-const { build, Platform, Arch } = require('./fixtures/isolated-installer-build.cjs');
+const { createHash } = require('node:crypto');
+const { build, createFixtureGuid, fixtureNames, readFixtureReuse, Platform, Arch } = require('./fixtures/isolated-installer-build.cjs');
 const { getMakeNsisPath } = require('app-builder-lib/out/toolsets/windows');
 
 const client = path.resolve(__dirname, '..');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function fileHash(file) {
+  const hash = createHash('sha256');
+  for await (const bytes of fs.createReadStream(file)) hash.update(bytes);
+  return hash.digest('hex');
+}
 async function until(fn, ms = 30000) {
   const start = Date.now();
   while (Date.now() - start < ms) { if (await fn()) return; await delay(30); }
@@ -30,11 +36,17 @@ async function main() {
   assert.ok(path.basename(root).startsWith('soduwork-update-e2e-'));
   const output = process.argv[2] ? path.resolve(process.argv[2]) : root;
   await fsp.mkdir(output, { recursive: true });
+  const reused = process.env.SODUWORK_E2E_REUSE
+    ? await readFixtureReuse(root, process.env.SODUWORK_E2E_SETUP, process.env.SODUWORK_E2E_GUID) : null;
+  const id = reused?.id || 'com.soduwork.update.e2e.' + Date.now();
+  const guid = reused?.guid || createFixtureGuid(process.env.SODUWORK_E2E_GUID);
+  const { productName, executableName, shortcutName } = fixtureNames(guid);
+  const executable = executableName + '.exe';
   // Preserve ownership evidence even if fixture construction or installation fails.
-  await fsp.writeFile(path.join(output, 'report.json'), JSON.stringify({ root, ok: false }));
+  await fsp.writeFile(path.join(output, 'report.json'), JSON.stringify({ root, id, guid, productName, executableName, shortcutName, ok: false }));
   const appDir = path.join(root, 'fixture');
   const dist = path.join(root, 'dist');
-  const installed = path.join(root, '中文 SoduWork ' + Date.now());
+  const installed = path.join(root, '中文 ' + productName + ' ' + Date.now());
   await fsp.mkdir(appDir, { recursive: true });
   const id = 'com.soduwork.update.e2e.' + Date.now();
   await fsp.writeFile(path.join(appDir, 'package.json'), JSON.stringify({
@@ -55,7 +67,7 @@ async function main() {
     projectDir: client,
     ...(process.env.SODUWORK_E2E_REUSE ? { prepackaged: path.join(dist, 'win-unpacked') } : {}),
     config: {
-      appId: id, productName: 'SoduWork', copyright: 'Isolated regression only',
+      appId: id, productName, copyright: 'Isolated regression only',
       directories: { app: appDir, output: dist, buildResources: path.join(client, 'build') },
       electronDist: path.dirname(require('electron')), electronVersion: require('electron/package.json').version,
       files: ['index.js', 'package.json', '!node_modules/**'], extraResources: [],
@@ -78,7 +90,7 @@ async function main() {
   await fsp.mkdir(env.SODUWORK_UPDATE_E2E_PROFILE, { recursive: true });
   await fsp.writeFile(path.join(env.SODUWORK_UPDATE_E2E_PROFILE, 'sentinel.txt'), 'keep user data');
   const tests = [];
-  const fresh = path.join(root, '首次安装 SoduWork ' + Date.now());
+  const fresh = path.join(root, '首次安装 ' + productName + ' ' + Date.now());
   const freshStarted = Date.now();
   assert.equal(await run(setup, ['/S', '/currentuser', '/D=' + fresh], env).done, 0);
   const freshDetails = JSON.parse(await fsp.readFile(path.join(fresh, '.soduwork-update-details.json'), 'utf8'));
@@ -114,15 +126,19 @@ async function main() {
     path.join(client, 'e2e/fixtures/installer-legacy-gap.nsi')],
     { windowsHide: true, env: { ...process.env, ...compiler.env }, encoding: 'utf8' });
   assert.equal(compiled.status, 0, compiled.stdout + compiled.stderr);
+  const baselineHash = await fileHash(entry);
   let legacyMissing = 0;
   const legacyWatch = setInterval(() => { if (!fs.existsSync(entry)) legacyMissing++; }, 5);
   try { assert.equal(await run(baseline, [], env).done, 0); } finally { clearInterval(legacyWatch); }
   assert.ok(legacyMissing > 0, 'old delete-first sequence must reproduce a broken target');
-  tests.push({ name: 'old delete-first sequence reproduces missing shortcut target', missingSamples: legacyMissing });
+  assert.ok(fs.existsSync(entry), 'legacy baseline fixture failed to restore the entry before upgrade');
+  assert.equal(await fileHash(entry), baselineHash, 'legacy baseline fixture restored different or incomplete entry bytes');
+  tests.push({ name: 'old delete-first sequence reproduces missing shortcut target', missingSamples: legacyMissing, restoredSha256: baselineHash });
   async function upgrade(name, options = {}) {
     const previous = fs.existsSync(path.join(installed, '.soduwork-active'))
       ? fs.readFileSync(path.join(installed, '.soduwork-active'), 'utf8') : '';
     let missing = 0, samples = 0;
+    const missingDetails = []; let lastMissing;
     const start = Date.now();
     const versions = path.join(installed, '.soduwork-versions');
     const knownDirs = new Set(await fsp.readdir(versions).catch(() => []));
@@ -175,7 +191,10 @@ async function main() {
         assert.equal(clicked.exe, path.join(installed, '.soduwork-versions', active, 'SoduWork.exe'),
           'queued click must open the newly committed payload');
       }
-      assert.equal(missing, 0, 'stable shortcut target disappeared');
+      if (missing) await fsp.writeFile(path.join(output, 'missing-entry.json'), JSON.stringify({
+        name, entry, code, previous, baselineHash, samples, missing, firstMissing: missingDetails, lastMissing,
+      }, null, 2));
+      assert.equal(missing, 0, 'stable shortcut target disappeared; see missing-entry.json');
       assert.ok(fs.existsSync(shortcut), 'shortcut was removed');
       if (options.fail || options.interrupt) {
         assert.ok(progress.every(item => item.percent < 100), 'failed/interrupted install claimed completion');
@@ -273,7 +292,8 @@ async function main() {
     fs.readFileSync(path.join(installed, '.soduwork-active'), 'utf8'), 'SoduWork.exe'));
   tests.push({ name: 'real WSH handoff, install and automatic relaunch', ...reopened });
 
-  await fsp.writeFile(path.join(output, 'report.json'), JSON.stringify({ root, fresh, installed, setup, id, mode, tests }, null, 2));
+  await fsp.writeFile(path.join(output, 'report.json'), JSON.stringify({ root, fresh, installed, setup, id, guid,
+    productName, executableName, shortcutName, mode, tests }, null, 2));
   console.log(JSON.stringify({ root, tests }, null, 2));
 }
 main().catch(error => { console.error(error); process.exit(1); });

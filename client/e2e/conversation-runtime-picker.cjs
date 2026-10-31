@@ -22,22 +22,26 @@ if (typeof electron === 'string') {
     await win.loadFile(path.join(__dirname,'fixtures/conversation-runtime-picker.html'));await until('window.fixtureReady');
     await js('document.querySelector("#nchatInput").value="Keep my draft";document.querySelector("#nchatInput").dispatchEvent(new Event("input"));void 0');
     for(const agent of ['opencode','qwen','harness2','pi']) {
-      await click('#nchatRuntime'); await until('document.querySelector("[data-session-agent=qwen]")');
-      await click('[data-session-agent='+agent+']'); await until('state.adapterId==='+JSON.stringify(agent));
+      await click('#nchatRuntime'); await until('document.querySelector("[data-runtime=qwen]")');
+      await click('[data-runtime='+agent+']'); await until('state.adapterId==='+JSON.stringify(agent));
       assert.equal(await js('state.ref'),'same-conversation');assert.equal(await js('document.querySelector("#nchatInput").value'),'Keep my draft');
     }
     await click('#nchatModel>button');await until('document.querySelector("[data-model-name=b]")');await click('[data-model-name=b]');
     await until('state.selection.name==="b"');
     await js('state.busy=true;controls.render();void 0');await click('#nchatRuntime');
     assert.match(await js('notices.at(-1)'),/等待/);await js('state.busy=false;fail=true;controls.render();void 0');
-    await click('#nchatRuntime');await click('[data-session-agent=qwen]');await until('document.querySelector(".nchat-runtime-pop [role=status]")?.textContent.includes("暂不可用")');
+    await click('#nchatRuntime');await click('[data-runtime=qwen]');await until('document.querySelector(".nchat-runtime-pop [role=status]")?.textContent.includes("暂不可用")');
     assert.equal(await js('state.adapterId'),'pi');
     await js('fail=false;controls.reset();window.modelGate=new Promise(r=>window.releaseModels=r);void 0');
-    await click('#nchatModel>button');await click('#nchatRuntime');await click('[data-session-agent=opencode]');await until('state.adapterId==="opencode"');
+    await click('#nchatModel>button');await click('#nchatRuntime');await click('[data-runtime=opencode]');await until('state.adapterId==="opencode"');
     await js('releaseModels();modelGate=null;void 0');await sleep(80);assert.equal(await js('document.querySelector(".nmodel-pop").hidden'),true);
-    await js('window.switchGate=new Promise(r=>window.releaseSwitch=r);void 0');await click('#nchatRuntime');await click('[data-session-agent=qwen]');
+    await js('window.switchGate=new Promise(r=>window.releaseSwitch=r);void 0');await click('#nchatRuntime');await click('[data-runtime=qwen]');
     assert.equal(await js('document.querySelector("#nchatRuntime").disabled'),true);
     await js('releaseSwitch();switchGate=null;void 0');await until('state.adapterId==="qwen"');
+    await until('!document.querySelector("#nchatRuntimeMore").hidden');
+    assert.equal(await js('document.querySelectorAll("#nchatRuntimeMissing [data-runtime-missing]").length'),1);
+    await click('#nchatRuntimeMore');
+    assert.equal(await js('agentManagementOpened'),1);
     for(const width of [390,1000]) {
       win.setSize(width,760);await sleep(80);await click('#nchatRuntime');
       const bounds=await js('(()=>{const r=document.querySelector(".nchat-runtime-pop").getBoundingClientRect();return{left:r.left,right:r.right,top:r.top,width:innerWidth}})()');

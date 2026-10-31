@@ -7,6 +7,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const durableFiles = require('../verified-file-replace.cjs');
 const { connectionScope: scope } = require('../platform-connections/runtime.cjs');
+const attachmentContract = require('../pi-session/attachment-contract');
 const digest = data => crypto.createHash('sha256').update(data).digest('hex');
 const MAX_BYTES = 96 * 1024 * 1024;
 
@@ -100,7 +101,8 @@ function create({ app, root, read, save, identity, request, publicRecord }) {
       for (const [index, file] of attached.entries()) {
         const target = path.join(cache, 'input-' + index);
         await fs.writeFile(target, file.bytes, { mode: 0o600 });
-        stored.push({ name: file.name, path: target, sha256: file.sha256, type: file.type });
+        stored.push({ name: file.name, path: target, sha256: file.sha256, type: file.type,
+          size: file.bytes.length });
       }
       const cwd = path.join(cache, 'results');
       await fs.mkdir(cwd, { recursive: true });
@@ -110,7 +112,12 @@ function create({ app, root, read, save, identity, request, publicRecord }) {
       await fs.mkdir(root, { recursive: true, mode: 0o700 });
       await durableFiles.writeFile(path.join(root, record.transferId + '.view.json'), JSON.stringify({ cwd,
         adapterId: config.agentId, model: config.model,
-        snapshot: { messages: [], tools: [], pendingUser: { role: 'user', text: config.text, attachments: stored.map(file => ({ name: file.name })), sentAt: Date.now(), done: true },
+        snapshot: { messages: [], tools: [], pendingUser: { role: 'user', text: config.text,
+          // The cloud cache is not a conversation workspace. Keep the public
+          // metadata needed by the shared message renderer, but never expose
+          // its local path as a preview reference.
+          attachments: attachmentContract.publicFiles(stored.map(file => ({ name: file.name,
+            type: file.type, size: file.size }))), sentAt: Date.now(), done: true },
           adapterId: config.agentId, displayName: config.agentId,
           modelSelection: { name: config.model }, execution: { cloud: true }, status: 'idle' } }), { mode: 0o600 });
       await save(record);

@@ -89,6 +89,7 @@ async function prepare(context) {
   const distribution = distributionReview(ROOT, process.env.SODUWORK_INTERNAL_BUILD === '1');
   const result = check();
   if (!result.ok) throw new Error(result.errors.join('\n'));
+  await require('./prepare-client-runtime.cjs')(context);
   const manifest = JSON.parse(read(path.join(ROOT, 'third-party/manifest.json')));
   const client = path.join(ROOT, 'client');
   const installed = JSON.parse(read(path.join(client, 'node_modules/@earendil-works/pi-coding-agent/package.json')));

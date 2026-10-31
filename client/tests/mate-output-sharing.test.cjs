@@ -84,6 +84,30 @@ test('notification save is explicit, blocks double clicks, and uses the library 
  release();await pending;assert.equal(button.disabled,false);assert.deepEqual(messages,['已保存到本机资料库']);
 });
 
+test('notice attachment rows expose save in both received and sent folders',()=>{
+ const source=fs.readFileSync(path.join(__dirname,'../components/panels/panels-desk.js'),'utf8');
+ const row=source.slice(source.indexOf('(files.length ?'),source.indexOf("(n.website && n.website.previewUrl"));
+ assert.match(row,/data-notice-action=\"save\"/);
+ assert.doesNotMatch(row,/_noticeFolder === 'received'/);
+});
+test('ZIP notification attachments use the ordinary file card without open',()=>{
+ const source=fs.readFileSync(path.join(__dirname,'../components/panels/panels-desk.js'),'utf8');
+ const start=source.indexOf('function _noticeFileIsZip('),end=source.indexOf('function _renderNoticePanel',start);
+ const ctx={};vm.createContext(ctx);vm.runInContext(source.slice(start,end),ctx);
+ assert.equal(ctx._noticeFileIsZip({name:'bundle.zip'}),true);assert.equal(ctx._noticeFileIsZip({name:'notes.md'}),false);
+ const row=source.slice(source.indexOf('(files.length ?'),source.indexOf("(n.website && n.website.previewUrl"));
+ const zipBranch=row.slice(row.indexOf('const fileCard = zip'),row.indexOf("\n            : '<button"));
+ assert.match(row,/const name = String\(file\.name/);assert.match(row,/const fileCard = zip/);
+ assert.match(row,/np-file np-file-static/);
+ assert.doesNotMatch(zipBranch,/data-notice-action="open"/);
+ assert.match(row,/: '<button type="button" class="np-file" data-notice-action="open"/);
+ assert.match(row,/data-notice-action="download"/);assert.match(row,/data-notice-action="save"/);
+});
+test('ZIP notification actions align with ordinary attachment actions',()=>{
+ const css=fs.readFileSync(path.join(__dirname,'../components/panels/notice-type-scale.css'),'utf8');
+ assert.match(css,/\.notice-panel \.np-attachment\s*>\s*\.np-file-download:first-child\s*\{[^}]*margin-left\s*:\s*auto\s*;?\s*\}/);
+});
+
 test('a late notification save cannot announce success in the next account',async()=>{
  const source=fs.readFileSync(path.join(__dirname,'../components/panels/panels-desk.js'),'utf8');
  const start=source.indexOf('async function _downloadNoticeFile('),end=source.indexOf('window.openNoticePanel',start);
@@ -113,11 +137,11 @@ test('large progress context is bounded while preserving the original request an
 test('attachment open uses fresh authorization and the native preview action',async()=>{
  const source=fs.readFileSync(path.join(__dirname,'../components/panels/panels-desk.js'),'utf8');
  const start=source.indexOf('async function _downloadNoticeFile('),end=source.indexOf('window.openNoticePanel',start);
- const calls=[],ctx={SoduWorkAPI:{mateMessageFile:async id=>{calls.push(id);return{filename:'report.pdf'}},attachmentUrl:()=>'/fresh-ticket'},
+  const calls=[],ctx={SoduWorkAPI:{mateMessageFile:async id=>{calls.push(id);return{filename:'report.md'}},attachmentUrl:()=>'/fresh-ticket'},
   window:{soduWorkAPI:{previewAttachment:async p=>{calls.push(p);return{ok:true}},downloadAttachment:()=>{throw Error('wrong action')}}}};
  vm.createContext(ctx);vm.runInContext(source.slice(start,end),ctx);
  const button={disabled:false,getAttribute:key=>key==='data-notice-action'?'open':'file'};
- await ctx._downloadNoticeFile(button);assert.equal(calls[0],'file');assert.equal(calls[1].url,'/fresh-ticket');assert.equal(button.disabled,false);
+  await ctx._downloadNoticeFile(button);assert.equal(calls[0],'file');assert.equal(calls[1].url,'/fresh-ticket');assert.equal(calls[1].filename,'report.md');assert.equal(button.disabled,false);
 });
 test('system attachment opening rejects programs and scripts while supporting office files',()=>{
  const {canOpenWithSystem}=require('../main/attachment-files');

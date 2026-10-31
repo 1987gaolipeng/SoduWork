@@ -187,15 +187,38 @@
       return _openPluginDebug({ text: command.text || '' });
     }
     if (!global.ChatWorkActions) return false;
-    // Bind forms to a stable conversation before recording requirements; do not warm up or invoke the Agent.
-    if (ctx._workCards) {
-      options = await ctx._workCards.prepare(command, options || {});
-      if (!options) return false;
-    }
-    return ChatWorkActions.open(command, options, {
+    const context = {
       mount: ctx._mount, dismissProposal: _dismissProposal, bridge: _chatDraftBridge,
       model: _workModel, mention: ctx._pluginMention,
-    });
+    };
+    const openingRef = ctx._ref, openingEpoch = ctx._viewEpoch;
+    // Keep the user's request and a normal chat-like thinking state visible
+    // while Hub reserves the stable conversation used by the work card.
+    const pending = !global.WorkEntrySheet?.active?.()
+      ? ChatWorkActions.showPending?.(command, context) : null;
+    try {
+      if (ctx._workCards) {
+        options = await ctx._workCards.prepare(command, options || {});
+        if (!options) {
+          if (ctx._ref !== openingRef || ctx._viewEpoch !== openingEpoch) pending?.remove?.();
+          else {
+            const message = global.SoduWorkI18n?.translateText?.('没有建立会话，内容已保留') || '没有建立会话，内容已保留';
+            pending?.fail(new Error(message));
+          }
+          return false;
+        }
+      }
+      const accepted = await ChatWorkActions.open(command, { ...(options || {}), pending }, context);
+      if (!accepted) {
+        const message = global.SoduWorkI18n?.translateText?.('工作表单没有打开') || '工作表单没有打开';
+        pending?.fail(new Error(message));
+      }
+      return accepted;
+    } catch (error) {
+      if (ctx._ref !== openingRef || ctx._viewEpoch !== openingEpoch) pending?.remove?.();
+      else pending?.fail(error);
+      throw error;
+    }
   }
 
   function _pickProposal(snap) {

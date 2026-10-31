@@ -60,6 +60,9 @@ def classify_name(name: object, *, role: str = "output", meta: dict | None = Non
     if role == "verification" or kind in {
             "screenshot", "preview", "proof", "evidence", "test", "qa", "code_review"}:
         return "evidence"
+    explicit = str(meta.get("category") or "").strip().lower()
+    if explicit in _CATEGORIES:
+        return explicit
     if role in {"input", "process"}:
         return "internal"
     if not path:

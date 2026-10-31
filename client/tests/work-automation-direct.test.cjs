@@ -17,6 +17,14 @@ function fixture(overrides = {}) {
   return {direct:window.WorkAutomationDirect, window,api,writes,parses,events,scope};
 }
 const params = text => ({text,context:{spaceId:'space-a',spaceName:'研发空间',page:'https://ops.example/资料/index.html',appName:'运营云端版'}});
+
+test('a hosted character creates a pinned schedule without inventing an external business space',async()=>{
+  const f=fixture(),method={pluginId:'local:idea',key:'jiyong-bot-idea',name:'灵感扭蛋机',version:'1.0.0',checksum:'a'.repeat(64),enabled:true,personal:true,entrypoints:{automation:true},inputs:[],capabilities:{mcpServers:['soduwork-jiyong']}};
+  f.window._schmLoad=async()=>[method];
+  const value={text:'每天9点运行灵感扭蛋机',context:{pluginId:method.pluginId,pluginKey:method.key,pluginVersion:method.version,pluginChecksum:method.checksum,page:'https://example.soduwork-app.invalid/ui/index.html',appName:method.name}};
+  const r=await f.direct.create(value);assert.equal(r.ok,true);assert.equal(f.writes[0].personalPluginKey,method.key);assert.equal(f.writes[0].personalPluginChecksum,method.checksum);assert.equal(f.writes[0].personalPluginVersionPolicy,'pinned');assert.doesNotMatch(f.writes[0].note,/上述空间/);
+  await assert.rejects(f.direct.create({...value,context:{...value.context,pluginVersion:'old'}}),/后台执行/);
+});
 test('direct entry parses /自动化 and creates once without opening a form; full text and space are retained', async () => {
   const f=fixture(), text='每天早上9点采集 AI 资料，保留来源。\n'+ '原始要求'.repeat(600);
   const result=await f.direct.create(params(text));
@@ -68,7 +76,16 @@ test('explicit no-retry automation keeps the next schedule but disables run retr
   for(const policy of ['本次失败不自动重试。','禁止自动重试','No automatic retries.','Do not retry.']){
     const f=fixture();await f.direct.create(params('每天9点采集运营数据。'+policy));
     assert.equal(f.writes[0].retryLimit,0);assert.equal(f.writes[0].enabled,true);
-    assert.match(f.writes[0].note,/应用任务上下文/);assert.doesNotMatch(f.writes[0].note,/内容素材知识库任务上下文/);
+    assert.match(f.writes[0].note,/即用任务上下文/);assert.doesNotMatch(f.writes[0].note,/内容素材知识库任务上下文/);
   }
   const f=fixture();await f.direct.create(params('每天9点采集资料'));assert.equal(f.writes[0].retryLimit,2);
+});
+
+
+test('app attribution is portable display metadata and a role name remains optional; icon never enters the prompt',async()=>{
+ const f=fixture(),sourceApp={pluginId:'local:idea',name:'灵感扭蛋机',icon:'data:image/png;base64,example',characterName:'阿奇'};
+ await f.direct.create({...params('每天9点处理素材'),context:{...params('').context,sourceApp}});
+ assert.deepEqual(JSON.parse(JSON.stringify(f.writes[0].sourceApp)),sourceApp);
+ assert.doesNotMatch(f.writes[0].note,/data:image|base64/);assert.match(f.writes[0].note,/阿奇/);
+ const ordinary=fixture();await ordinary.direct.create(params('每天9点处理素材'));assert.equal(ordinary.writes[0].sourceApp,undefined);
 });

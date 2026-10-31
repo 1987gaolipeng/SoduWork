@@ -4,6 +4,7 @@ import { api } from '../api.js'
 import { AUTO, Icon, Modal, useAsync } from '../ui.jsx'
 import { FilterInput, FilterSelect } from '../FilterControls.jsx'
 import { UsageTrend } from './operations-insights-charts.jsx'
+import { summarizeTrend } from './insights-metrics.js'
 import ListPager from '../ListPager.jsx'
 import './operations-center.css'
 import './operations-insights.css'
@@ -79,13 +80,13 @@ function Delta({ now, prev }) {
     {pct > 0 ? '↑' : '↓'} {Math.abs(pct)}%<i>{tx("vs 上周")}</i></em>
 }
 
-function Stat({ label, value, sub, delta, spark, tone = 'accent', icon, unit }) {
+function Stat({ label, value, sub, description, delta, spark, tone = 'accent', icon, unit }) {
   const uiLocale = useLocale();
   /* Metric cards align labels, values, same-baseline deltas, descriptions, and full-width trends. */
   return <article className={`oi-stat tone-${tone}`}>
     <div className="oi-stat-head"><span className="oi-stat-label">{label}</span><span className="oi-stat-icon"><Icon name={icon} /></span></div>
-    <div className="oi-stat-line"><b>{Number(value).toLocaleString(getLocale())}</b><span className="oi-stat-unit">{unit}</span>{delta}</div>
-    <small className="oi-stat-sub" title={typeof sub === 'string' ? sub : undefined}>{sub}</small>
+    <div className="oi-stat-line"><b>{value == null ? '—' : Number(value).toLocaleString(getLocale())}</b><span className="oi-stat-unit">{unit}</span>{delta}</div>
+    <small className="oi-stat-sub" title={description || (typeof sub === 'string' ? sub : undefined)} tabIndex={description ? 0 : undefined} aria-label={description ? `${sub} · ${description}` : undefined}>{sub}</small>
     {spark && <Spark points={spark} tone={tone} />}
   </article>
 }
@@ -182,10 +183,11 @@ export default function OperationsInsights() {
   const data = query.data
 
   const trend = data ? data.trend || [] : []
+  const sessions = summarizeTrend(trend, 'aiSessions')
   const spark = useMemo(() => ({
     clients: trend.map((d) => d.activeClients || 0),
     tasks: trend.map((d) => d.tasksCreated),
-    sessions: trend.map((d) => d.aiSessions),
+    sessions: sessions.values,
     automation: trend.map((d) => d.automationRuns),
   }), [trend, uiLocale])
 
@@ -234,8 +236,9 @@ export default function OperationsInsights() {
       <Stat label={tx("近 30 天新建需求")} value={output.tasksCreated30d || 0} icon="box" unit={tx("项")}
         sub={tx("完成 {0}（{1}%） · 上线 {2} 次", [output.tasksDone30d || 0, donePct, output.deployments30d || 0])}
         spark={spark.tasks} tone="ok" />
-      <Stat label={tx("近 30 天 AI 会话")} value={output.aiSessions30d || 0} icon="webhook" unit={tx("场")}
-        sub={tx("日均 {0} 场", [Math.round((output.aiSessions30d || 0) / 30 * 10) / 10])}
+      <Stat label={tx("近 30 个自然日 AI 会话")} value={sessions.total} icon="webhook" unit={tx("场")}
+        sub={sessions.average == null ? tx("暂无趋势数据") : tx("日均 {0} 场", [sessions.average.toLocaleString(getLocale())])}
+        description={trend.length ? tx("{0} 至 {1} · 北京时间 UTC+8（含今天），日均按 {2} 个自然日计算。", [trend[0].date, trend[trend.length - 1].date, trend.length]) : undefined}
         spark={spark.sessions} tone="accent" />
       <Stat label={tx("近 30 天自动化触发")} value={runsTotal} icon="activity" unit={tx("次")}
         sub={runsTotal > 0
@@ -350,14 +353,14 @@ export default function OperationsInsights() {
         <div className="oi-table-wrap" tabIndex="0" role="region" aria-label={tx("插件使用明细，可横向滚动")}><table className="oi-table">
           <thead><tr><th>{tx("插件")}</th><th>{tx("分类")}</th><th className="num">{tx("安装")}</th>
             <th className="num">{tx("流程运行（30 天）")}</th><th className="num">{tx("对话调用")}</th>
-            <th className="num">{tx("成功率")}</th><th className="when">{tx("最近使用")}</th></tr></thead>
+            <th className="num"><span className="oi-metric-help" tabIndex={0} title={tx("仅统计已结束的流程运行，不包含对话调用。")} aria-label={tx("成功率") + '：' + tx("仅统计已结束的流程运行，不包含对话调用。")}>{tx("成功率")}</span></th><th className="when">{tx("最近使用")}</th></tr></thead>
           <tbody>{rows.map((p) => <tr key={p.pluginId} className={p.enabled ? '' : 'is-off'}>
             <td className="name"><div className="oi-plugin-name"><span className={`oi-plugin-icon cat-${p.category || 'other'}`}><Icon name={p.category === 'dev' ? 'box' : p.category === 'office' ? 'file' : p.category === 'research' ? 'search' : 'plug'} /></span><div><b title={p.name}>{p.name}</b><small>{p.version ? `v${p.version}` : ''}{p.enabled ? '' : (p.version ? ' · ' : '') + tx("已停用")}</small></div></div></td>
             <td className="cat"><span className="oi-category">{CATEGORY[p.category] || (p.category ? p.category : '—')}</span></td>
             <td className="num">{p.installs > 0 ? p.installs : <span className="oi-dim">0</span>}</td>
             <td className="num">{p.runs30d > 0 ? <><b>{p.runs30d}</b><small>{tx("成 ")}{p.succeeded30d}{tx(" · 败 ")}{p.failed30d}</small></> : <span className="oi-dim">0</span>}</td>
             <td className="num">{p.conversationUses30d > 0 ? p.conversationUses30d : <span className="oi-dim">0</span>}</td>
-            <td className="num">{p.successRate == null ? <span className="oi-dim">—</span>
+            <td className="num">{p.successRate == null ? <span className="oi-dim oi-metric-help" tabIndex={0} title={tx("暂无已结束的流程运行；成功率仅统计流程运行，不包含对话调用。")} aria-label={tx("暂无已结束的流程运行；成功率仅统计流程运行，不包含对话调用。")}>—</span>
               : <em className={'oi-rate' + (p.successRate >= 80 ? ' ok' : p.successRate >= 50 ? ' mid' : ' bad')}>{p.successRate}%</em>}</td>
             <td className="when">{dayLabel(p.lastUsedAt)}</td>
           </tr>)}</tbody>

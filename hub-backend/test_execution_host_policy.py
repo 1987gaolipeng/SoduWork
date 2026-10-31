@@ -30,6 +30,7 @@ class HostPolicyTests(unittest.IsolatedAsyncioTestCase):
     asyncTearDown = fixture.TargetDiagnosticsTests.asyncTearDown
     live = fixture.TargetDiagnosticsTests.live
     catalog = fixture.TargetDiagnosticsTests.catalog
+    enroll_personal = fixture.TargetDiagnosticsTests.enroll_personal
 
     def restrict(self, *runner_ids, local=False):
         gate = patch.multiple(get_settings(), cloud_execution_runner_ids=','.join(runner_ids),
@@ -55,8 +56,9 @@ class HostPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.app.include_router(environments_api.router)
         allowed, infra = self.live('fixture'), self.live('trial-infra')
         self.restrict(allowed.id)
+        await self.enroll_personal(allowed)
         async with db.SessionLocal() as session:
-            session.add_all([RunnerNode(id=n.id, host=n.host, org_id=self.org) for n in (allowed, infra)])
+            session.add(RunnerNode(id=infra.id, host=infra.host, org_id=self.org))
             await session.commit()
         for suffix in ('', '?agentId=codex'):
             reply = await self.http.get('/api/v1/conversation-handoffs/targets' + suffix)
@@ -68,6 +70,17 @@ class HostPolicyTests(unittest.IsolatedAsyncioTestCase):
         listing = await self.http.get('/api/v1/cloud-environments')
         self.assertEqual(listing.status_code, 200, listing.text)
         self.assertEqual([n['id'] for n in listing.json()['environments']], [allowed.id])
+        # Management keeps the owned environment visible even when deployment
+        # policy pauses its use; diagnostics explain the restriction without
+        # exposing shared infrastructure.
+        with patch.object(get_settings(), 'cloud_execution_runner_ids', infra.id):
+            restricted = await self.catalog()
+            self.assertEqual(restricted['targets'], [])
+            self.assertEqual([(n['runnerId'], n['code']) for n in restricted['diagnostics']['nodes']],
+                             [(allowed.id, 'deployment_restricted')])
+            inventory = await self.http.get('/api/v1/cloud-environments')
+            self.assertEqual([n['id'] for n in inventory.json()['environments']], [allowed.id])
+            self.assertNotIn(infra.id, inventory.text)
         runner_hub._RUNNERS.pop(allowed.id)
         self.assertEqual((await self.catalog())['targets'], [])
         offline = await self.http.get('/api/v1/cloud-environments')
@@ -120,10 +133,13 @@ class HostPolicyTests(unittest.IsolatedAsyncioTestCase):
         own = self.live('owned-desktop', client_id=self.other_id)
         foreign = self.live('foreign', org_id=self.foreign_org)
         self.restrict(foreign.id)
+        async with db.SessionLocal() as session:
+            session.add(RunnerNode(id=own.id, org_id=self.org, client_id=self.other_id))
+            await session.commit()
         data = await self.catalog()
         self.assertEqual([n['runnerId'] for n in data['targets']], [own.id])
         auto = await self.http.get('/api/v1/conversation-handoffs/targets?agentId=codex')
-        self.assertEqual(auto.json()['targets'], [])
+        self.assertEqual([n['runnerId'] for n in auto.json()['targets']], [own.id])
         self.assertNotIn(foreign.id, auto.text)
 
     async def test_hub_disabled_blocks_fallback_explicit_and_default_dispatch(self):
@@ -182,10 +198,18 @@ class HostPolicyTests(unittest.IsolatedAsyncioTestCase):
             artifact.assert_called_once()
             comment.assert_not_called()
 
-    async def test_default_settings_keep_legacy_hub_execution_and_cloud_nodes(self):
+    async def test_default_settings_keep_hub_execution_but_require_personal_cloud_ownership(self):
         self.restrict(local=True)
-        node = self.live('legacy-cloud')
-        self.assertEqual([n['runnerId'] for n in (await self.catalog())['targets']], [node.id])
+        legacy = self.live('legacy-cloud')
+        async with db.SessionLocal() as session:
+            session.add(RunnerNode(id=legacy.id, org_id=self.org))
+            await session.commit()
+        self.assertEqual((await self.catalog())['targets'], [])
+        node = self.live('personal-cloud')
+        await self.enroll_personal(node)
+        data = await self.catalog()
+        self.assertEqual([n['runnerId'] for n in data['targets']], [node.id])
+        self.assertNotIn(legacy.id, str(data))
         runner_hub._RUNNERS.clear()
         ctx = {'name': 'local', 'cfg': {}}
         with patch.object(ai_local, 'resolve_assignee_sync', return_value={'id': 'local:codex'}), \

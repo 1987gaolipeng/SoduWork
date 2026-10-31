@@ -10,7 +10,7 @@ const flow = { bindingId: 'bug-binding', key: 'bug-trial', name: 'Bug修复·上
 const options = { substrates: [{ key: 'local:codex', name: 'Codex', available: true }], workflows: [flow], repos: [] };
 const explicit = name => ({ assignee: name, assigneeExplicit: true, assigneeSource: 'instruction' });
 function fixture({ parsed = {}, mates = { mates: [mate] }, execution = options } = {}) {
-  const fields = new Map(), handlers = {}, calls = [], alerts = [], checks = []; let html = '';
+  const fields = new Map(), handlers = {}, calls = [], alerts = [], checks = [], serverEvents = []; let html = '';
   const decode = s => String(s || '').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
   const node = value => ({ value, disabled: false, addEventListener() {} });
   const box = { classList: { add() {}, remove() {} }, addEventListener: (type, fn) => { handlers[type] = fn; },
@@ -35,7 +35,8 @@ function fixture({ parsed = {}, mates = { mates: [mate] }, execution = options }
     getElementById: id => id === 'cpDraft' ? box : fields.get(id), querySelectorAll: s => s === '.cp-ck-t' ? checks : [], addEventListener() {} },
     addEventListener() {}, ComposeSelectionPosition: { position() {} }, petSay: value => alerts.push(value),
     Requirements: { dateTimestamp: () => null }, tasks: [],
-    Store: { persistTask: async () => { calls.push(['persist']); return true; }, pauseUnconfirmedTask: () => calls.push(['pause']) },
+    Store: { persistTask: async () => { calls.push(['persist']); return true; }, pauseUnconfirmedTask: () => calls.push(['pause']),
+      applyServerEvent: event => serverEvents.push(event) },
     SoduWorkAPI: { parseTaskText: async (...args) => { calls.push(['parse', ...args]); return typeof parsed === 'function' ? parsed(...args) : parsed; },
       taskExecutionOptions: async body => { calls.push(['options', body]); return typeof execution === 'function' ? execution(body) : execution; },
       listTeammates: async () => typeof mates === 'function' ? mates() : mates,
@@ -54,6 +55,16 @@ function fixture({ parsed = {}, mates = { mates: [mate] }, execution = options }
     async open(text = '修复缺陷，转给示例成员', opts = {}) { ctx.ComposeDraft.open(text, opts); await flush(); },
     async refine(text, opts = {}) { return ctx.ComposeDraft.refine(text, opts); } };
 }
+
+test('直接交办后立即合并服务端任务投影，创建人仍可在我提出查看', async () => {
+  const f = fixture({ parsed: { title: '转交后的需求', ...explicit('礼朋') } });
+  await f.open('转交给礼朋');
+  await f.ctx.audit.create();
+  const event = f.serverEvents.find(row => row.type === 'task.created');
+  assert.ok(event, '应把转交回执并入本地任务镜像');
+  assert.equal(event.arrival, 'self');
+  assert.equal(event.task.id, 'created');
+});
 
 test('创建需求只保存内容和负责人，明确提及插件也留给执行者决定', async () => {
   const f = fixture({ parsed: { title: '修复缺陷', assignee: 'ai', flow: flow.key, flowExplicit: true } });

@@ -51,7 +51,7 @@ def _entrypoints(row) -> dict[str, bool]:
     raw = dict(manifest.get("entrypoints") or capabilities.get("entrypoints") or {})
     has_workflow = bool(capabilities.get("hasWorkflow", True))
     return plugin_ui_contracts.effective_entrypoints(
-        raw, manifest.get("ui"), has_workflow=has_workflow)
+        raw, manifest.get("ui"), has_workflow=has_workflow, jiyong=manifest.get('jiyong'))
 
 
 def _ui(row) -> dict[str, dict]:

@@ -135,7 +135,7 @@
     let loading = false;
     let reason = '';
     let active = 0;
-    let cardEpoch = 0;
+    let cardEpoch = 0, directoryEpoch = 0, loadPromise = null;
 
     function say(message) { if (typeof o.say === 'function') o.say(message); }
 
@@ -215,29 +215,25 @@
       });
     }
 
-    async function load(force) {
-      if ((loaded && !force) || loading) return;
-      loading = true;
-      renderMenu();
-      try {
-        const payload = typeof o.mates === 'function' ? await o.mates() : { mates: [] };
-        mates = (payload && payload.mates || []).map((m) => ({
-          id: String(m.id || ''), name: String(m.name || ''),
-          org: String(m.org || ''), hasBox: Boolean(m.hasBox),
-        })).sort((a, b) => (a.org || '').localeCompare(b.org || '') ||
-          Number(!a.hasBox) - Number(!b.hasBox));
-        reason = String(payload && payload.reason || '');
-        loaded = true;
-      } catch (error) {
-        reason = '拿不到同事清单（后台没连上）';
-      } finally {
-        loading = false;
-        renderMenu();
-      }
+    function load(force) {
+      if (loading) return loadPromise;
+      if (loaded && !force) return Promise.resolve();
+      const epoch=directoryEpoch;loading=true;renderMenu();
+      loadPromise=(async()=>{
+        try {
+          const payload=typeof o.mates==='function' ? await o.mates() : {mates:[]};
+          if(epoch!==directoryEpoch)return;
+          mates=(payload?.mates || []).map(m=>({id:String(m.id || ''),name:String(m.name || ''),org:String(m.org || ''),hasBox:Boolean(m.hasBox)}))
+            .sort((a,b)=>(a.org || '').localeCompare(b.org || '') || Number(!a.hasBox)-Number(!b.hasBox));
+          reason=String(payload?.reason || '');loaded=true;
+        } catch(error) {if(epoch===directoryEpoch)reason='拿不到同事清单（后台没连上）';}
+        finally {if(epoch===directoryEpoch){loading=false;renderMenu();}}
+      })();
+      return loadPromise;
     }
 
     function eraseTrigger() {
-      if (!query) return;
+      if (!query || query.programmatic) return;
       const value = input.value;
       input.value = value.slice(0, query.start) + value.slice(query.end).replace(/^\s+/, '');
       input.selectionStart = input.selectionEnd = query.start;
@@ -246,12 +242,13 @@
 
     function choose(mate) {
       if (!mate || !mate.hasBox) return;
+      const prefill=query?.prefill;
       eraseTrigger();
       close();
-      openCard(mate);
+      openCard(mate,prefill);
     }
 
-    function openCard(mate) {
+    function openCard(mate, prefill) {
       const epoch = ++cardEpoch;
       card.setAttribute('aria-label', '发给 ' + mate.name + ' 的工作进展');
       const context = typeof o.context === 'function' ? o.context() : null;
@@ -279,7 +276,7 @@
       box.rows = 6;
       box.maxLength = 500;
       box.placeholder = '想同步什么？内容发出前都可以改…';
-      box.value = '';
+      box.value = prefill?.text || '';
 
       const tools = document.createElement('div');
       tools.className = 'nmate-card-tools';
@@ -349,7 +346,8 @@
       const summaryStatus = document.createElement('div');
       summaryStatus.className = 'nmate-summary-status';
       summaryStatus.setAttribute('role', 'status');
-      let summaryRequest = 0, summaryStarted = false, summarizing = false;
+      let summaryRequest = 0, summaryStarted = prefill?.fromApp === true, summarizing = false;
+      if(summaryStarted)summaryStatus.textContent='即用提供的内容，核对后发送';
       async function fillProgress() {
         summaryStarted = true;
         const request = ++summaryRequest;
@@ -427,8 +425,9 @@
           const loaded = await conversationOutputs(context);
           if (epoch !== cardEpoch) return;
           files = loaded;
+          if(prefill?.fromApp)files.forEach(file=>excluded.add(file.key));
           if (loaded.truncated || files.length > 20) {
-            outputWarning = loaded.truncated
+            outputWarning = prefill?.fromApp ? '请选择要发送的成果（最多20份）' : loaded.truncated
               ? '\u6210\u679c\u8f83\u591a\uff0c\u5df2\u5c55\u793a\u6700\u8fd1 60 \u9879\uff1b\u9ed8\u8ba4\u52fe\u9009\u6700\u8fd1 20 \u9879\uff0c\u53ef\u6309\u9700\u8c03\u6574\u3002'
               : '\u672c\u6b21\u6700\u591a\u53d1\u9001 20 \u4efd\u6210\u679c\uff0c\u5df2\u9ed8\u8ba4\u52fe\u9009\u524d 20 \u9879\uff0c\u53ef\u6309\u9700\u8c03\u6574\u3002';
             // Avoid opening a card that can only fail on the first click.
@@ -457,6 +456,7 @@
         send.textContent = '正在发送…';
         try {
           const outputs = await outputPayload(context, files.filter(file => !excluded.has(file.key)), messageId);
+          if(epoch!==cardEpoch)throw Error('发送卡片或账号已变化，请重新选择同事');
           const result = typeof o.send === 'function' ? await o.send(mate.id, text, outputs) : null;
           if (result && result.ok === false) throw Error(result.reason || '消息没有发出去');
           if (epoch === cardEpoch) closeCard();
@@ -479,6 +479,27 @@
       setTimeout(() => box.focus(), 0);
     }
 
+    async function open(options = {}) {
+      if(!card.hidden || (query && !menu.hidden))return {ok:false,reason:'请先完成或关闭当前同事发送卡片'};
+      if(typeof options.text!=='string' && options.text!=null || String(options.text || '').length>500)return {ok:false,reason:'通知内容最多500字'};
+      const epoch=directoryEpoch;await load(true);
+      if(epoch!==directoryEpoch)return {ok:false,reason:'SoduWork 账号已变化，请重新选择同事'};
+      if(!card.hidden || (query && !menu.hidden))return {ok:false,reason:'请先完成或关闭当前同事发送卡片'};
+      const id=String(options.recipientUserId || ''),name=String(options.query || '').replace(/^@/,'').trim().toLocaleLowerCase();
+      if(reason && !mates.length)return {ok:false,reason};
+      const mate=id ? mates.find(m=>m.id===id) : name ? mates.find(m=>m.name.toLocaleLowerCase()===name) : null;
+      if(id || mate) {
+        if(!mate || !mate.hasBox)return {ok:false,reason:'这位同事不在可联系目录中或尚未启用 SoduWork'};
+        openCard(mate,{fromApp:true,text:String(options.text || '')});return {ok:true,state:'review'};
+      }
+      query={query:name,programmatic:true,prefill:{fromApp:true,text:String(options.text || '')}};active=0;renderMenu();input.focus();
+      return {ok:true,state:'select'};
+    }
+    function clearScope() {
+      directoryEpoch++;mates=[];loaded=false;loading=false;loadPromise=null;reason='';close();closeCard();
+    }
+    const scopeTarget=typeof window!=='undefined' ? window : document.defaultView;
+    scopeTarget?.addEventListener?.('soduwork-data-scope-changed',clearScope);
     function update() {
       query = mateQuery(input.value, input.selectionStart);
       active = 0;
@@ -530,7 +551,9 @@
     document.addEventListener('mousedown', onDocumentMouseDown);
 
     return {
+      open,
       destroy() {
+        directoryEpoch++;scopeTarget?.removeEventListener?.('soduwork-data-scope-changed',clearScope);
         input.removeEventListener('input', update);
         input.removeEventListener('click', update);
         input.removeEventListener('keydown', onKeydown, true);

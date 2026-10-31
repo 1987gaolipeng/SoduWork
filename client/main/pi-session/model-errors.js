@@ -15,6 +15,7 @@ const LEGACY_CAPACITY_STATUS = new Map([
 ]);
 const TRANSIENT_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 const TRANSIENT_RE = /time[ -]?out|timed\s*out|upstream\s+connect|disconnect\s*\/\s*reset|connection\s+reset|connection\s+refused|(?:network|connection)\s+error|fetch\s+failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|socket\s+hang\s+up|temporarily\s+unavailable|(?:bad\s+gateway|gateway\s+error)|didn'?t\s+respond\s+in\s+time/i;
+const AUTH_EXPIRED_RE = /(?:ai\s+)?proxy\s+ticket(?:\s+is)?\s+(?:expired|required|invalid)|(?:session|credential|token|key|密钥|凭据|会话).{0,30}(?:expired|expiry|expiration|过期|失效)|(?:expired|过期|失效).{0,30}(?:session|credential|token|ticket|key|密钥|凭据|会话)/i;
 // These are the native SDK's premature-stream/transport errors, including
 // HTTP 200 responses that end before a terminal event. Exhausting the SDK's
 // retry budget must still expose the existing explicit continuation action.
@@ -66,8 +67,10 @@ function describe(value) {
   const proxy = /soduwork(?:_work)?_proxy_error/i.test(type + ' ' + raw);
   const transient = TRANSIENT_STATUS.has(status) || TRANSIENT_RE.test(combined) ||
     STREAM_INTERRUPTION_RE.test(raw) || STREAM_INTERRUPTION_RE.test(String(error && error.message || ''));
-  const permanent = /insufficient_quota|quota exceeded|billing|out of budget|available balance|usage limit reached/i.test(combined) || [400,401,403,404,413,422].includes(status);
-  const retryable = !permanent && (transient || proxy && status === 0);
+  const authExpired = status === 401 && AUTH_EXPIRED_RE.test(combined);
+  const permanent = /insufficient_quota|quota exceeded|billing|out of budget|available balance|usage limit reached/i.test(combined) ||
+    [400,403,404,413,422].includes(status) || (status === 401 && !authExpired);
+  const retryable = authExpired || (!permanent && (transient || proxy && status === 0));
 
   let publicText = '';
   const privateResponse = PRIVATE_RESPONSE_RE.test(raw) || Boolean(payload && !(payload instanceof Error));
@@ -89,7 +92,7 @@ function describe(value) {
     }
     if (status) publicText += '（HTTP ' + status + '）';
   }
-  return { raw, payload, type, status, proxy, transient, retryable, publicText };
+  return { raw, payload, type, status, proxy, transient, authExpired, retryable, publicText };
 }
 
 function forDisplay(value, limit = 200) {

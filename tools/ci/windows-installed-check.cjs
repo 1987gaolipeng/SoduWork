@@ -19,10 +19,14 @@ const installed = path.join(root, 'SoduWork acceptance');
 const profile = path.join(root, 'soduwork-acceptance-profile-main');
 const report = { ok: false, root, installed, version: require('../../client/package.json').version, sha256: expectedHash, checks: [],
   limitations: ['Runs in Windows Runner SYSTEM session 0; no interactive user/UAC assertion.', 'Same-version repair is not an old-version upgrade.'] };
+// NSIS writes the registry DisplayVersion without the semver prerelease suffix
+// (1.13.11-beta.1 → 1.13.11 or the numeric 1.13.11.1 form); accept either.
+const displayVersion = expected => [expected, expected.replace(/-beta\.\d+$/, ''),
+  expected.replace(/-beta\.(\d+)$/, (_, n) => '.' + n)];
 if (oldInstaller) {
   const baselineHash = process.env.SODUWORK_ACCEPT_BASELINE_SHA256;
   assert.match(baselineHash || '', /^[a-f0-9]{64}$/);
-  assert.match(oldVersion, /^\d+\.\d+\.\d+$/);
+  assert.match(oldVersion, /^\d+\.\d+\.\d+(?:-beta\.\d+)?$/);
   assert.notEqual(oldVersion, report.version);
   assert.equal(crypto.createHash('sha256').update(fs.readFileSync(oldInstaller)).digest('hex'), baselineHash);
   report.oldVersion = oldVersion;

@@ -37,6 +37,20 @@ test('live task output is ordinary messages and collapsed tool events before com
   assert.equal(acc.snapshot().messages.length, 3);
 });
 
+test('live non-Pi user turns preserve attachment display metadata', () => {
+  const calls = [];
+  const output = live.create({ appendTaskMessage: (...args) => calls.push(args) }, 'cloud-task', { includeUser: true });
+  output.consume('remote', [{ seq: 1, kind: 'user', text: '请查看附件', attachments: [
+    { name: 'screen.png', type: 'image/png', size: 2048, previewRef: 'att1.preview' },
+    { name: 'notes.md', type: 'text/markdown', size: 128 },
+  ] }]);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0][2], [
+    { name: 'screen.png', type: 'image/png', size: 2048, previewRef: 'att1.preview' },
+    { name: 'notes.md', type: 'text/markdown', size: 128 },
+  ]);
+});
+
 test('concurrent same-name tools are matched by call ID and failures stay failures', () => {
   const { acc, handle } = target(), output = live.create(handle, 't');
   output.consume('r', [

@@ -4,6 +4,9 @@ const agentSource = require('../conversation/agent-source.cjs');
 // State remains owned by the session; accessors keep async transitions live.
 function create(ctx) {
   const recoveredTasks = new Map();
+  // A stop request can wait for a remote controlled task to acknowledge. Keep
+  // the promise at the session boundary so repeated UI clicks are idempotent.
+  let stopPromise = null;
   const {
     _appendTaskBinding, _messageTitle, _presenceState, _sessions, attachmentContract,
     goalContract, goalQuality, messageTime, runControl, skillTurn,
@@ -310,6 +313,7 @@ disableGoal() {
       return { ok: true, snapshot: ctx._snapshot() };
     },
 cancel() {
+      if (stopPromise) return stopPromise;
       ctx.resourceActivation.cancel();
       ctx.immediate.cancel();
       ctx.liveAccess.cancel();
@@ -321,14 +325,17 @@ cancel() {
         ctx.turnQueue.stopActive();
         ctx.turnQueue.clear({ ok: true, cancelled: true, queued: true, manualStop: true });
         ctx.turnQueue.pause('正在停止当前工作');
-        Promise.resolve(active.options.controlled.cancel()).then(() => {
+        stopPromise = Promise.resolve().then(() => active.options.controlled.cancel()).then(() => {
           ctx.turnQueue.resume();
           ctx._emit({ kind: 'queue-changed' });
-        }).catch(() => {
+          return { ok: true, accepted: true, stopping: false, stopped: true, controlled: true };
+        }).catch((error) => {
           ctx.turnQueue.pause('停止尚未确认，请重试');
           ctx.handle.taskExecutionChanged({ taskId: active.options.taskId, status: 'waiting', reason: '停止尚未确认，请重试' });
-        });
-        return;
+          return { ok: false, accepted: false, stopping: false, stopped: false,
+            reason: '停止尚未确认，请重试', error: String(error && error.message || error) };
+        }).finally(() => { stopPromise = null; });
+        return stopPromise;
       }
       ctx.turnQueue.stopActive();
       ctx.turnQueue.clear({ ok: true, cancelled: true, queued: true, manualStop: true });
@@ -339,7 +346,20 @@ cancel() {
         // Handle abort() rejection so it cannot escape into the hosting process.
         if (typeof ctx.piSession.abort === 'function') Promise.resolve(require('./interrupt').interrupt(ctx.piSession, active?.completion)).catch(() => {});
       } catch (e) { /* Ignore an already-stopped session. */ }
-      ctx._emit({ kind: 'aborted' });
+      const receipt = { ok: true, accepted: true, stopping: false, stopped: true };
+      // Do not resolve the IPC request while the active turn is still settling.
+      // The renderer uses this receipt to leave the spinner state, so resolving
+      // here made a slow abort look complete and invited another click.
+      const completion = active && active.completion;
+      if (!completion || typeof completion.then !== 'function') {
+        ctx._emit({ kind: 'aborted' });
+        return Promise.resolve(receipt);
+      }
+      stopPromise = Promise.resolve(completion).catch(() => null).then(() => {
+        ctx._emit({ kind: 'aborted' });
+        return receipt;
+      }).finally(() => { stopPromise = null; });
+      return stopPromise;
     },
 cancelQueued(id) {
       if (ctx.immediate.locked(id)) return { ok: false, reason: '这条消息正在引导，请稍候' };
@@ -357,6 +377,10 @@ updateQueue(id, action, value) {
         return { ok: false, reason: '这条消息正在引导，请稍候' };
       if (action === 'retry-model') {
         if (ctx.closed || ctx.inFlight || ctx.turnQueue.active() || ctx.acc.state.pendingUi) return { ok: false, reason: '当前执行尚未结束，请稍后重试' };
+        const recovery = ctx.modelRecovery.view();
+        if (recovery?.requiresModelChange && recovery.failedModelName === ctx.modelSelection.capture()) {
+          return { ok: false, reason: '当前模型仍不可用，请先切换到可用模型后再恢复这一轮' };
+        }
         const payload = ctx.modelRecovery.take(id);
         if (!payload) return { ok: false, reason: '这轮状态已变化，请刷新后确认' };
         payload.options.modelName = ctx.modelSelection.capture();

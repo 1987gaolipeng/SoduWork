@@ -20,8 +20,8 @@ admin_router = APIRouter(prefix="/api/v1/admin/client-release-notes", tags=["cli
 def validate_locales(locales):
     def text(value, limit):
         return isinstance(value, str) and bool(value.strip()) and len(value) <= limit
-    if not isinstance(locales, dict) or set(locales) != {"zh-CN", "en-US"}:
-        raise ValueError("Both zh-CN and en-US are required")
+    if not isinstance(locales, dict) or set(locales) not in ({"zh-CN", "en-US"}, {"zh-CN", "en-US", "ja-JP", "ko-KR"}):
+        raise ValueError("Provide all four languages or a legacy zh-CN/en-US pair")
     if len(json.dumps(locales, ensure_ascii=False)) > 100000:
         raise ValueError("Release notes are too large")
     structures = []
@@ -52,7 +52,7 @@ def validate_locales(locales):
                 item_ids.append(iid)
             structure.append((sid, item_ids))
         structures.append(structure)
-    if structures[0] != structures[1]:
+    if any(structure != structures[0] for structure in structures[1:]):
         raise ValueError("Translations must have matching section and item IDs/order")
     return locales
 
@@ -100,7 +100,8 @@ async def put_note(version: str, body: dict = Body(...), channel: str = "stable"
     if row and row.locales == locales and row.status == status:
         return {"ok": True, "revision": row.revision}  # idempotent multi-platform publishing
     values = dict(locales=locales, status=status, revision=expected + 1,
-                  published_at=datetime.now(timezone.utc) if status == "published" else None)
+                  published_at=(row.published_at if row and row.published_at else datetime.now(timezone.utc))
+                  if status == "published" else None)
     if row:
         result = await session.execute(update(ClientReleaseNote).where(
             ClientReleaseNote.version == version, ClientReleaseNote.channel == channel,
@@ -151,6 +152,7 @@ async def list_notes(response: Response, current: str, locale: str = "en-US", ch
         if note and note.status == "published":
             language = locale if locale in note.locales else "en-US"
             output.append({"version": number, "channel": channel, "locale": language,
+                "publishedAt": note.published_at.replace(tzinfo=timezone.utc).isoformat() if note.published_at else None,
                 "fallback": language != locale, "revision": note.revision, **note.locales[language]})
         elif not note and by_version[number].enabled and by_version[number].notes.strip():
             # Legacy signed prose may mix languages. Never label it as a translation.

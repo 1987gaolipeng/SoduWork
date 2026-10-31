@@ -38,7 +38,17 @@ function isDirOnlyBuild(context) {
 
 // Use installed upstream template: do not fork UAC/multi-user/uninstall behavior.
 async function prepare(context = {}) {
-  if (context.electronPlatformName && context.electronPlatformName !== 'win32') return;
+  if (context.electronPlatformName && context.electronPlatformName !== 'win32') {
+    if (context.appOutDir) {
+      const resourcesPath = context.electronPlatformName === 'darwin'
+        ? path.join(context.appOutDir, context.packager.appInfo.productFilename + '.app', 'Contents', 'Resources')
+        : path.join(context.appOutDir, 'resources');
+      require('./verify-runtime.cjs').verify(context.appOutDir, context.electronPlatformName, { packaged: true, resourcesPath });
+      require('./verify-runtime.cjs').verifyExecutables(resourcesPath, context.electronPlatformName,
+        typeof context.arch === 'string' ? context.arch : ({ 1: 'x64', 3: 'arm64' })[context.arch]);
+    }
+    return;
+  }
   const root = context.packager?.projectDir || path.resolve(__dirname, '..');
   const output = path.join(root, '.runtime', 'installer');
   const appOutDir = context.appOutDir ? path.resolve(context.appOutDir) : null;
@@ -86,6 +96,14 @@ async function prepare(context = {}) {
       // transparent encryption changes stat metadata asynchronously right
       // after a fresh copy, which would re-trigger the overwrite slow path.
       await copyShellRuntime(root, context.appOutDir);
+      // Miniature installer fixtures carry no product runtime manifest.
+      if (await fs.stat(path.join(context.appOutDir, 'resources/runtime-manifest.json')).then(() => true, () => false)) {
+        require('./verify-runtime.cjs').verify(context.appOutDir, 'win32', { packaged: true });
+        require('./verify-runtime.cjs').verifyExecutables(path.join(context.appOutDir, 'resources'), 'win32',
+          typeof context.arch === 'string' ? context.arch : ({ 1: 'x64', 3: 'arm64' })[context.arch]);
+      } else if (await fs.stat(path.join(root, 'runtime-manifest.json')).then(() => true, () => false)) {
+        throw Error('Packaged client runtime manifest is missing');
+      }
       // Process bundled HTML documents before the payload inventories them;
       // loose HTML inside the install tree must not survive installation.
       await require('./prepare-html-resources.cjs').prepareHtmlResources(context.appOutDir);

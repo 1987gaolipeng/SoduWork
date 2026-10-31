@@ -64,7 +64,7 @@
     const composer = WorkComposer.replace(old, {
       className: 'cp-box', inputId: 'cpInput', rows: 3,
       placeholder: '告诉 SoduWork 你想完成什么…',
-      beforeInput: '<div class="cp-atts catt-tray" id="cpAtts"></div><p class="catt-understanding-hint" id="cpMaterialHint" role="status" hidden></p>',
+      beforeInput: '<div class="cp-atts catt-tray" id="cpAtts"></div>',
       afterInput: WorkComposer.syntaxHint() + intentSurface + '<div class="wc-execution-notice" role="status" hidden><span></span><button type="button" data-execution-configure>配置云端电脑</button></div>',
       tools: '<input type="file" id="cpFile" multiple hidden>' + intentTools,
       sendId: 'cpGo', sendClass: 'cp-go', sendTitle: '开始',
@@ -93,6 +93,12 @@
       actions.insertBefore(runtimeWrap, voice || null);
       runtimeWrap.appendChild(runtime);
       const runtimePop = composer.querySelector('#cpRuntimePop');
+      const runtimeAvailability = composer.querySelector('#cpRuntimeAvailability');
+      // The missing-runtime management entry lives in the picker footer. Keep
+      // it there instead of pulling it back into the compact composer toolbar.
+      if (runtimeAvailability && !runtimePop?.contains(runtimeAvailability)) {
+        runtimeWrap.appendChild(runtimeAvailability);
+      }
       if (runtimePop) runtimeWrap.appendChild(runtimePop);
     }
     if (toolbarContext && workspace) {
@@ -140,7 +146,6 @@
             '<div class="cp-box">' +
               '<textarea id="cpInput" rows="3" placeholder="告诉 SoduWork 你想完成什么…"></textarea>' +
               '<div class="cp-atts" id="cpAtts"></div>' +
-              '<p class="catt-understanding-hint" id="cpMaterialHint" role="status" hidden></p>' +
               '<div class="cp-bar">' +
                 '<div class="cp-tools">' +
                   '<input type="file" id="cpFile" multiple hidden>' +
@@ -241,7 +246,6 @@
     if (global.ConversationAttachments) ctx._attachments = ConversationAttachments.create({
       host: p.querySelector('.cp-box'), input, fileInput: p.querySelector('#cpFile'),
       button: null, tray: p.querySelector('#cpAtts'),
-      materialHint: true, hint: p.querySelector('#cpMaterialHint'),
       say: (message) => { if (typeof petSay === 'function') petSay(message); },
       onChange: () => { ctx._pluginMention?.refresh?.(); ctx._rememberComposeDraft(); },
     });
@@ -445,7 +449,7 @@ function _renderMorePlugins() {
       const title = document.createElement('b');
       title.textContent = item.name || '';
       const sub = document.createElement('small');
-      sub.textContent = item.description || _uiText('打开应用工作界面');
+      sub.textContent = item.description || _uiText('打开即用工作界面');
       copy.appendChild(title); copy.appendChild(sub);
       card.appendChild(iconWrap); card.appendChild(copy);
       /* Single visible action per row: a black pill that floats in on hover/focus and
@@ -453,7 +457,7 @@ function _renderMorePlugins() {
       const open = document.createElement('span');
       open.className = 'cp-recs-open';
       open.setAttribute('aria-hidden', 'true');
-      open.textContent = _uiText('打开应用');
+      open.textContent = _uiText('打开即用');
       card.appendChild(open);
       card.addEventListener('click', () => {
         card.classList.add('is-opening');
@@ -661,7 +665,7 @@ function _paintSetup() {
       modelButton.setAttribute('aria-label', '本次会话模型：' + currentLabel);
     }
     const rows = _models.map((m) => ({ name: m.name, label: m.label || m.name,
-      sub: [m.providerName, m.keyFrom === 'mine' ? '自己的额度' : ''].filter(Boolean).join(' · ') }));
+      sub: [m.providerName ? _uiText(m.providerName) : '', m.keyFrom === 'mine' ? _uiText('自己的额度') : ''].filter(Boolean).join(' · ') }));
     pop.innerHTML = rows.map((r) =>
       '<button class="cp-mrow' + (r.name === _pickedModel ? ' on' : '') + '" data-m="' + esc(r.name) + '">' +
         '<span class="cp-mtick"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>' +

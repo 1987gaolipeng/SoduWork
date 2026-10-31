@@ -59,6 +59,7 @@
     });
   }
   function reset() {
+    global.SoduWorkReadAloud?.stop();
     global.ChatToolDetails?.reset(ctx);
     global.ChatCrew?.close?.();
     pluginBadges?.reset();
@@ -84,7 +85,7 @@
   }
 
   // Use persisted event times only; opening an older transcript must not create a new time.
-  function _messageFooter(message, text, afterBlock = -1) {
+  function _messageFooter(message, text, afterBlock = -1, messageIndex = '') {
     const user = message.role === 'user';
     const value = user ? message.sentAt : (message.done !== false ? message.completedAt : null);
     const epoch = typeof value === 'number' ? value : (value ? Date.parse(value) : NaN);
@@ -99,7 +100,9 @@
         '<time data-user-content datetime="' + date.toISOString() + '" title="' + full + '">' + clock + '</time></span>';
     }
     const copy = String(text || '').trim() ? _copyButton(text, user ? 'nmessage-copy' : 'ntext-copy', afterBlock) : '';
-    return time || copy ? '<div class="nmessage-footer">' + time + copy + '</div>' : '';
+    const speech = !user && message.done !== false && String(text || '').trim()
+      ? global.SoduWorkReadAloud?.button(text, ctx._ref, messageIndex, ctx.esc) || '' : '';
+    return time || copy || speech ? '<div class="nmessage-footer">' + time + speech + copy + '</div>' : '';
   }
 
   // A provider message can end before a tool runs. Only the last substantive
@@ -668,7 +671,7 @@
         const lastTool = summaryTurns.get(mi)?.lastToolBlock ?? -1;
         const reply = (m.blocks || []).filter((block, index) => block.kind === 'text' &&
           (!finalReplies.has(mi) || index > lastTool)).map(block => block.text || '').join('\n\n');
-        const footer = finalReplies.has(mi) && reply.trim() ? _messageFooter(m, reply, lastTool) : '';
+        const footer = finalReplies.has(mi) && reply.trim() ? _messageFooter(m, reply, lastTool, _messageOwner(mi)) : '';
         if (inner) agents?.before(parts, m.sourceAgent, 'message:' + mi, true);
         if (inner) parts.push('<div class="nmsg ai" data-streaming="' + (st === 'streaming' && ctx._liveTextKey.startsWith(mi + ':')) + '" data-delivery-final="' + finalReplies.has(mi) + '" data-delivery-current="' + (mi > latestUser && !ctx._pending) + '" data-output-task="' + ctx.esc(m.taskId || '') + '" data-message-owner="' + _messageOwner(mi) + '" data-chat-node="message:' + mi + '">' + inner + footer + _workflowSlot(m) + '</div>');
       }
@@ -783,10 +786,14 @@
       ? uiText('当前会话没有授权') + colon + ctx._pluginAuthorization.missing
         .map(id => uiText(missingCapabilityLabels[id] || id)).join(joiner) + period +
         uiText('请新建会话并开启对应能力后再使用这个插件') : '';
+    const sessionOpenFailure = !ctx._ref && Boolean(ctx._sessionId) &&
+      Boolean(ctx._snap?.openBlocked || ctx._snap?.sessionOpenCode || ctx._snap?.sessionNotFound);
     parts.push('<div data-chat-node="runtime-error" class="nbad' +
       (!quotaBlocked && (st === 'unreachable' || st === 'no-output' || outputIncomplete || budgetStopped) ? ' show' : '') + '">' +
       '<span class="nbad-copy">' + ctx.esc(budgetStopped ? execution.reason : (pluginStatus || ctx._snap.statusText || '')) + '</span>' +
-      (execution.modelRecovery && execution.modelRecovery.available ?
+      (sessionOpenFailure ?
+        '<button type="button" data-session-retry>' + uiText('重新打开会话') + '</button>' :
+       execution.modelRecovery && execution.modelRecovery.available && ctx._ref ?
         '<button type="button" data-model-retry="' + ctx.esc(execution.modelRecovery.id) + '">' + uiText('恢复这一轮') + '</button>' :
         ctx._retryDraft && ctx._pluginAuthorization?.missing?.length
           ? '<button type="button" data-plugin-new-session>' + uiText('新建会话并继续') + '</button>'
@@ -886,7 +893,8 @@
     if (stick && scrollState) _followLatest(scrollState, false);
     else _updateScrollButton(scrollState);
 
-    ChatTools.paintSendButton(el, busy, ctx._messageAttachments);
+    ChatTools.paintSendButton(el, busy, ctx._messageAttachments, ctx._stopState,
+      st === 'streaming' || execution.running === true || qualityBusy, ctx._sendState);
 
     if (ctx._snap.modelSelection) ctx._model = ctx._snap.modelSelection.activeModel;
     if (ctx._composerControls) ctx._composerControls.render();
