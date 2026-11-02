@@ -8,17 +8,20 @@ class LibraryNameTests(LibraryHttpTestCase):
         return await self.request("POST", "/items/upload",
             files={"file": (filename, b"original", "text/plain")}, **kwargs)
 
-    async def test_upload_conflict_preserves_original_and_scopes(self):
+    async def test_upload_duplicate_gets_suffix_and_scopes(self):
         first = await self.upload_named("Report.txt")
         self.assertEqual(first.status_code, 200, first.text)
-        conflict = await self.upload_named("report.TXT")
-        self.assertEqual(conflict.status_code, 409, conflict.text)
-        self.assertEqual(conflict.json()["detail"]["code"], "LIBRARY_NAME_CONFLICT")
+        duplicate = await self.upload_named("report.TXT")
+        self.assertEqual(duplicate.status_code, 200, duplicate.text)
+        self.assertEqual(duplicate.json()["item"]["filename"], "report（1）.TXT")
+        third = await self.upload_named("report.TXT")
+        self.assertEqual(third.status_code, 200, third.text)
+        self.assertEqual(third.json()["item"]["filename"], "report（2）.TXT")
         folder = await self.create_folder()
         for kwargs in [dict(owner="bob"), dict(data={"folderId": folder["id"]})]:
             reply = await self.upload_named("Report.txt", **kwargs)
             self.assertEqual(reply.status_code, 200, reply.text)
-        self.assertEqual(len(self.store.objects), 3)
+        self.assertEqual(len(self.store.objects), 5)
 
     async def test_create_and_renamed_display_names_collide(self):
         item = await self.create_item("before")
@@ -26,14 +29,16 @@ class LibraryNameTests(LibraryHttpTestCase):
         self.assertEqual(renamed.status_code, 200, renamed.text)
         reply = await self.upload_named("renamed.md")
         # Notes use Markdown; compare the name visible to the user, not stale storage keys.
-        self.assertEqual(reply.status_code, 409, reply.text)
+        self.assertEqual(reply.status_code, 200, reply.text)
+        self.assertEqual(reply.json()["item"]["filename"], "renamed（1）.md")
         same = await self.request("POST", "/items", json={"kind": "note", "title": "renamed"})
         self.assertEqual(same.status_code, 409, same.text)
 
     async def test_parallel_uploads_admit_one_and_trash_does_not_conflict(self):
         replies = await asyncio.gather(self.upload_named("same.txt"), self.upload_named("same.txt"))
-        self.assertEqual(sorted(r.status_code for r in replies), [200, 409])
-        row = next(r for r in replies if r.status_code == 200).json()["item"]
+        self.assertEqual(sorted(r.status_code for r in replies), [200, 200])
+        row = next(r for r in replies if r.json()["item"]["filename"] == "same.txt").json()["item"]
+        self.assertIn("same（1）.txt", {r.json()["item"]["filename"] for r in replies})
         await self.request("DELETE", f'/items/{row["id"]}')
         self.assertEqual((await self.upload_named("same.txt")).status_code, 200)
 
@@ -41,7 +46,8 @@ class LibraryNameTests(LibraryHttpTestCase):
         form = {"sourceType": "conversation", "sessionId": "session-name-test"}
         self.assertEqual((await self.upload_named("report.txt", data=form)).status_code, 200)
         reply = await self.upload_named("report.txt", data={**form, "rejectDuplicateName": "true"})
-        self.assertEqual(reply.status_code, 409, reply.text)
+        self.assertEqual(reply.status_code, 200, reply.text)
+        self.assertEqual(reply.json()["item"]["filename"], "report（1）.txt")
 
     async def test_rename_move_and_restore_preserve_existing_items(self):
         original = await self.create_item("occupied")
@@ -76,7 +82,8 @@ class LibraryNameTests(LibraryHttpTestCase):
     async def test_file_folder_names_share_the_destination_namespace(self):
         await self.create_folder("Report.txt")
         reply = await self.upload_named("report.TXT")
-        self.assertEqual(reply.status_code, 409, reply.text)
+        self.assertEqual(reply.status_code, 200, reply.text)
+        self.assertEqual(reply.json()["item"]["filename"], "report（1）.TXT")
         await self.upload_named("other.txt")
         reply = await self.request("POST", "/folders", json={"name": "OTHER.txt"})
         self.assertEqual(reply.status_code, 409, reply.text)
@@ -84,10 +91,14 @@ class LibraryNameTests(LibraryHttpTestCase):
     async def test_dotfile_renamed_display_name_collides(self):
         first = await self.upload_named(".env")
         self.assertEqual(first.status_code, 200, first.text)
+        duplicate = await self.upload_named(".env")
+        self.assertEqual(duplicate.status_code, 200, duplicate.text)
+        self.assertEqual(duplicate.json()["item"]["filename"], ".env（1）")
         reply = await self.request("PATCH", '/items/' + first.json()["item"]["id"], json={"title": "config"})
         self.assertEqual(reply.status_code, 200, reply.text)
         reply = await self.upload_named("config.env")
-        self.assertEqual(reply.status_code, 409, reply.text)
+        self.assertEqual(reply.status_code, 200, reply.text)
+        self.assertEqual(reply.json()["item"]["filename"], "config（1）.env")
 
     async def test_conversation_versions_remain_restorable_with_same_name(self):
         form = {"sourceType": "conversation", "sessionId": "version-restore"}

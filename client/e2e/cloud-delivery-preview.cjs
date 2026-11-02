@@ -17,8 +17,8 @@ if (typeof electron === 'string') {
   const { create } = require('../main/conversation/cloud-handoff');
   const runtime = require('../main/conversation/artifact-runtime');
   const contents = { page: '<!doctype html><title>Private cloud page</title><link rel="stylesheet" href="assets/style.css"><h1>Cloud result</h1><script src="assets/app.js"></script>',
-    css: 'h1{color:rgb(19,84,73)}', js: 'document.body.dataset.cloudReady="yes";' };
-  const names = { page: 'index.html', css: 'assets/style.css', js: 'assets/app.js' };
+    css: 'h1{color:rgb(19,84,73)}', js: 'document.body.dataset.cloudReady="yes";', sheet: 'fixture spreadsheet' };
+  const names = { page: 'index.html', css: 'assets/style.css', js: 'assets/app.js', sheet: 'table.xlsx' };
   const rows = Object.entries(contents).map(([id, text]) => ({ id, taskId: 'task', filename: names[id], role: 'output',
     evidenceMeta: { round: 1, category: id === 'page' ? 'primary' : 'supporting' }, size: Buffer.byteLength(text),
     sha256: crypto.createHash('sha256').update(text).digest('hex'), url: '/attachments/' + id + '?ticket=fixture' }));
@@ -55,11 +55,11 @@ if (typeof electron === 'string') {
     await until(() => polls > 0, 'settled poll');
     assert.deepEqual(handle.outputSnapshot().files, []);
     emptyPoll = false;
-    const result = await cloud.materialize(handle, { taskId: 'task', attachmentId: 'page' });
+    const result = await cloud.materialize(handle, { taskId: 'task', attachmentId: 'page', previewOnly: true });
     assert.equal(result.ok, true); assert.equal(result.artifacts.length, 3); assert.equal(downloads, 3);
     assert.ok(result.artifacts.every(file => file.cloudTaskId === 'task' && file.remoteAttachmentId && file.artifactId));
     assert.match(result.artifact.path, /cloud-results/);
-    report.cases.push('An unmaterialized cloud selection downloads the complete verified batch over authenticated local HTTP');
+    report.cases.push('Automatic cloud preview downloads HTML and its dependencies, leaving the spreadsheet remote');
     require('../main/agent-runtime/pi-session-bridge').get = ref => ref === 'fixture' ? handle : ref === 'local-fork' ? fork : null;
     require('../main/work-preview').install({ ipcMain, BrowserWindow,
       WebContentsView: function(options) { const view = new WebContentsView(options); views.push(view); return view; },
@@ -98,7 +98,9 @@ if (typeof electron === 'string') {
     fs.writeFileSync(copied.file.path,'<h1>Local edited copy</h1>');
     assert.equal(fs.readFileSync(result.artifact.path,'utf8'),contents.page);
     report.cases.push('Actual continuation IPC copies all assets; native local HTML executes JS and local edits never modify the cloud cache');
-    handle.close(); cloud = controller(); handle = await cloud.reopen(started.sessionId, 'fixture');
+    handle.close(); cloud = controller(); const previousPolls = polls; handle = await cloud.reopen(started.sessionId, 'fixture');
+    await until(() => polls > previousPolls && !handle.snapshot().deliveryPending, 'automatic completion cache');
+    assert.equal(downloads, 3, 'settled background polling must not fetch the spreadsheet');
     assert.equal((await cloud.artifactSession(handle)).outputSnapshot().files.length, 3);
     assert.equal((await show('reopened')).ok, true);
     report.cases.push('A fresh cloud coordinator reopens the persisted verified cache for native preview');
@@ -108,6 +110,11 @@ if (typeof electron === 'string') {
     await assert.rejects(cloud.materialize(handle, { taskId: 'task', attachmentId: 'page' }), /其他账号/);
     assert.equal(downloads, 3);
     report.cases.push('Foreign task and account cannot materialize or open a private cloud preview');
+    current = account(current.hub, 'alice');
+    const manual = await cloud.materialize(handle, { taskId: 'task', attachmentId: 'sheet' });
+    assert.equal(manual.artifacts.length, 4); assert.equal(downloads, 4);
+    assert.equal(fs.readFileSync(manual.artifact.path, 'utf8'), contents.sheet);
+    report.cases.push('Explicit spreadsheet action downloads the original file only after preview and polling left it remote');
     report.ok = true;
   }).catch(error => { report.error = String(error.stack || error); }).finally(async () => {
     handle?.close(); win?.destroy(); runtime.dispose?.(); server?.close();

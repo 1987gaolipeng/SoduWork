@@ -29,7 +29,8 @@ class ReleaseFeedTests(unittest.IsolatedAsyncioTestCase):
                 conn, tables=[ClientRelease.__table__]))
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
+        # Match release_root's canonical-path contract, including Windows 8.3 aliases.
+        self.root = Path(self.tmp.name).resolve()
         key = Ed25519PrivateKey.generate()
         self.private = base64.b64encode(key.private_bytes_raw()).decode()
         public = base64.b64encode(key.public_key().public_bytes_raw()).decode()

@@ -115,7 +115,7 @@ class BridgeAccess:
         return automatic_path(workspace, value, write=write)
 
     def observe_tool(self, update: dict):
-        if self.agent_name in {"codex-harness", "codex", "opencode", "dsh"}:
+        if self.agent_name in {"codex-harness", "codex", "opencode", "dsh", "kimi", "claude"}:
             self._observe_native(update)
         if self.agent_name in {"codex-harness", "codex"}:
             return
@@ -170,9 +170,9 @@ class BridgeAccess:
 
     def _restore_native_inputs(self, call: dict):
         cached = self.native_calls.get(str(call.get("toolCallId") or ""), ({}, 0))[0]
-        # DSH sends only the call ID. OpenCode sends the permission kind, whose
+        # DSH and Kimi omit the kind. OpenCode sends the permission kind, whose
         # external_directory pre-gate must not inherit a read/edit operation.
-        if self.agent_name == "dsh" and not call.get("kind") and cached:
+        if self.agent_name in {"dsh", "kimi", "claude"} and not call.get("kind") and cached:
             call["kind"] = cached.get("kind")
         if not cached or cached.get("kind") != call.get("kind"):
             return
@@ -252,15 +252,20 @@ class BridgeAccess:
 
     def native_permission(self, params: dict) -> bool:
         call = dict(params.get("toolCall") or {})
-        if self.agent_name in {"opencode", "dsh"}:
+        if self.agent_name in {"opencode", "dsh", "kimi", "claude"}:
             self._restore_native_inputs(call)
         arguments = call.get("rawInput")
         arguments = (arguments if isinstance(arguments, dict) else
                      {"inputUnavailable": True} if arguments is None else {"input": arguments})
+        if arguments.get("inputUnavailable") and call.get("content"):
+            # Some CLIs request approval before publishing canonical inputs.
+            # Show their explanation for one-time review, but never treat display
+            # text as executable arguments or as evidence for a reusable grant.
+            arguments["display"] = call["content"]
         action, tool, allow_session = "native.tool", "", call.get("rawInput") is not None
         if self.agent_name in {"codex-harness", "codex"}:
             action, tool, arguments, allow_session = self._codex_operation(params, call)
-        elif self.agent_name in {"opencode", "dsh"} and (not arguments or arguments.get("inputIncomplete")):
+        elif self.agent_name in {"opencode", "dsh", "kimi", "claude"} and (not arguments or arguments.get("inputIncomplete")):
             arguments = arguments or {"inputUnavailable": True}
             allow_session = False
         if (call.get("kind") == "execute" and isinstance(arguments.get("command"), str)
@@ -382,6 +387,9 @@ class BridgeAccess:
                 "codex": {"standard": ("agent",), "readonly": ("read-only",),
                           "full": ("agent-full-access",)},
                 "qwen": {"standard": ("default",), "readonly": ("plan",), "full": ("yolo",)},
+                "kimi": {"standard": ("default",), "readonly": ("plan",), "full": ("yolo",)},
+                "claude": {"standard": ("default",), "readonly": ("plan",),
+                           "full": ("bypassPermissions",)},
                 "dsh": {"standard": ("workspace-write",), "readonly": ("read-only",),
                         "full": ("danger-full-access",)},
             }

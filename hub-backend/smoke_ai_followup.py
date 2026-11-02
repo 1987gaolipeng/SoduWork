@@ -18,28 +18,44 @@ async def verify_followup_access() -> None:
     from app.api import tasks
     from app.services import conversation_handoffs
 
-    client = SimpleNamespace(id="collaborator")
-    session = object()
-    # An ordinary shared task keeps the established organization visibility rule.
-    visible = AsyncMock(return_value=SimpleNamespace(owner_client_id="task-owner"))
+    client = SimpleNamespace(id="collaborator", user_ref="collaborator-user", auth_state="active")
+    from app.models import Task, User
+    task = Task(id="task", owner_client_id="task-owner", owner_user_id="owner-user",
+                origin="local", archived_at=None, work_routing={})
+    async def get(model, _key):
+        return SimpleNamespace(id="collaborator-user", is_active=True) if model is User else task
+    session = SimpleNamespace(get=get, scalar=AsyncMock(return_value=None))
+    # Visibility does not grant execution rights or access to the owner's model.
+    visible = AsyncMock(return_value=task)
     dispatch = SimpleNamespace(detail={"ref": "runner:shared:pi"})
     with patch.object(tasks, "_view_task", visible), \
          patch.object(ai_exec, "last_dispatch_event", AsyncMock(return_value=dispatch)), \
          patch.object(ai_exec, "load", AsyncMock(return_value={})), \
          patch.object(conversation_handoffs, "dispatch_record", AsyncMock(return_value=None)) as handoff, \
          patch.object(ai_exec, "say_sync", return_value={"ok": True}) as send:
+        try:
+            await tasks.ai_say_task("task", {"text": "Follow up"}, client, session)
+        except HTTPException as exc:
+            assert exc.status_code == 403
+        else:
+            raise AssertionError("A shared viewer must not continue the owner's execution")
+        visible.assert_awaited_once_with(session, client, "task")
+        send.assert_not_called()
+        client.id, client.user_ref = "task-owner", "owner-user"
         result = await tasks.ai_say_task("task", {"text": "Follow up"}, client, session)
         assert result["ok"] is True
-        visible.assert_awaited_once_with(session, client, "task")
         send.assert_called_once()
         send.reset_mock()
         # Transferred personal conversations require the transferring identity,
         # in addition to task visibility, before using its model credentials.
-        handoff.return_value = SimpleNamespace(phase="committed", owner_client_id="task-owner")
+        handoff.return_value = SimpleNamespace(phase="committed", task_id="task",
+            owner_client_id="task-owner", owner_user_id="owner-user")
+        client.id, client.user_ref = "collaborator", "collaborator-user"
         try:
             await tasks.ai_say_task("task", {"text": "Follow up"}, client, session)
         except HTTPException as exc:
-            assert exc.status_code == 409
+            # Account-scoped cloud authorization conceals foreign handoffs.
+            assert exc.status_code == 404
         else:
             raise AssertionError("A collaborator must not continue another user's cloud conversation")
         send.assert_not_called()

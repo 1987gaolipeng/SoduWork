@@ -36,6 +36,28 @@ test('all automation openings share stable substrate choices and coalesce pendin
   assert.match(run(ctx, '_schAgentOptionsHtml("local:codex")'), /value="local:codex" selected/);
 });
 
+test('automation editor expands a substrate into stable remote target choices', async () => {
+  const ctx = context({ taskExecutionOptions: async () => ({
+    substrates: [{
+      key: 'local:pi', cli: 'pi', name: 'Pi', available: true, modelPick: true,
+      locations: [
+        { assigneeId: 'local:pi', mode: 'local', label: '本机' },
+        { assigneeId: 'runner:desk-1:pi', mode: 'remote', runnerId: 'desk-1',
+          clientId: 'desktop-2', label: '工作电脑 · 北京' },
+        { assigneeId: 'runner:cloud-1:pi', mode: 'remote', runnerId: 'cloud-1',
+          runnerKind: 'cloud', label: '云端 Runner' },
+      ],
+    }],
+  }) });
+  const agents = await run(ctx, '_schLoadExecutionAgents({})');
+  assert.deepEqual(Array.from(agents, item => item.id), [
+    'local:pi', 'runner:desk-1:pi', 'runner:cloud-1:pi',
+  ]);
+  assert.equal(run(ctx, '_schDefaultAgentId()'), 'local:pi');
+  assert.match(run(ctx, '_schAgentOptionsHtml("runner:desk-1:pi")'), /runner:desk-1:pi/);
+  assert.match(run(ctx, '_schAgentOptionsHtml("runner:cloud-1:pi")'), /云端 Runner/);
+});
+
 test('empty unified result is authoritative and explains offline status', async () => {
   let legacy = 0;
   const ctx = context({ taskExecutionOptions: async () => ({

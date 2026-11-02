@@ -36,7 +36,7 @@ function value(field, v) {
   return v;
 }
 function normalize(raw) {
-  only(raw, ['version', 'parameters', 'collections', 'mcp', 'initialization']);
+  only(raw, ['version', 'parameters', 'collections', 'mcp', 'initialization', 'storage']);
   if (raw.version !== 1) throw Error('即用声明版本不受支持');
   function list(v, max) { if (v == null) return []; if (!Array.isArray(v) || v.length > max) throw Error('即用声明数量超限'); return v; }
   function unique(rows) { if (new Set(rows.map(r => r.key)).size !== rows.length) throw Error('即用标识重复'); return rows; }
@@ -75,7 +75,14 @@ function normalize(raw) {
   }
   let initialization;
   if(raw.initialization!=null){only(raw.initialization,['script']);const script=raw.initialization.script;if(typeof script!=='string'||!/^assets\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.json$/.test(script))throw Error('初始化脚本须为 assets 下的 JSON 文件');initialization={script};}
-  return {version:1,parameters,collections,...(mcp ? {mcp} : {}),...(initialization ? {initialization}: {})};
+  let storage;
+  if (raw.storage != null) {
+    only(raw.storage, ['location']);
+    if (!['local','cloud'].includes(raw.storage.location)) throw Error('数据位置必须为 local 或 cloud');
+    storage = {location:raw.storage.location};
+    if (storage.location === 'cloud' && !initialization) throw Error('云端数据必须声明版本化初始化 JSON');
+  }
+  return {version:1,parameters,collections,...(mcp ? {mcp} : {}),...(initialization ? {initialization}: {}),...(storage ? {storage} : {})};
 }
 function dataRequest(method, raw, declaration) {
   const options = json(raw);
@@ -122,7 +129,7 @@ function assetRequest(method,p) {
   only(p,['name','type','data','appId']);
   if (!(p.data instanceof Uint8Array) || p.data.byteLength > 8*1024*1024 || !p.data.byteLength ||
       typeof p.name !== 'string' || p.name.length > 160 || /[\\/\x00-\x1f]/.test(p.name) ||
-      typeof p.type !== 'string' || !/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/i.test(p.type)) throw Error('即用素材格式无效，单文件最多8MiB');
+      typeof p.type !== 'string' || p.type.length > 160 || !/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/i.test(p.type)) throw Error('即用素材格式无效，单文件最多8MiB');
   return {name:p.name,type:p.type,data:p.data,...(p.appId != null ? {appId:String(p.appId)} : {})};
 }
 module.exports = {normalize,key,json,value,dataRequest,assetRequest};

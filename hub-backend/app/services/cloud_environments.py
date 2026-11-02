@@ -150,7 +150,7 @@ def _available_agents(live_agents):
             "ready": ready,
             "version": str(current.get("version") or "")[:80],
             "reason": "请在云端电脑上完成此底座的登录" if current and not ready else "",
-            "installable": (install.get("installer") in {"npm", "managed"}
+            "installable": (install.get("installer") in {"npm", "managed", "native"}
                             or key == "harness2" and install.get("installer") == "bundled"),
             "installer": install.get("installer") or "",
             "adapter": runner.get("adapter") or "",

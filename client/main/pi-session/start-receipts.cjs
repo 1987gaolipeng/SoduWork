@@ -1,6 +1,6 @@
 'use strict';
-// Ordered start/terminal receipts contain identifiers and state only, never
-// auth tokens, model output or artifacts. Transport failure is not task failure.
+// Ordered transport receipts never store auth tokens. Frozen delivery bytes
+// precede completion so network failure cannot silently lose task artifacts.
 const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
 const { connectionScope } = require('../platform-connections/runtime.cjs');
 const { assertNoLinks } = require('../plugin-resources');
@@ -39,7 +39,7 @@ function create({ app, identityOf, request, intervalMs = 15000 }) {
     // Upgrade receipts saved before terminal delivery was made durable.
     if (!Array.isArray(row.steps)) row.steps = [{action: 'started'}];
     if (!row.steps.length || row.steps.length > 8 || row.steps.some(step =>
-      !['started', 'complete', 'fail', 'wait', 'cancel'].includes(step?.action))) throw Error('Invalid task receipt steps');
+      !['started', 'deliver', 'complete', 'fail', 'wait', 'cancel'].includes(step?.action))) throw Error('Invalid task receipt steps');
     return row;
   }
   function send(id) {
@@ -52,7 +52,9 @@ function create({ app, identityOf, request, intervalMs = 15000 }) {
         if (destination(current) !== row.destination) throw Error('连接或账号已切换，执行收据保留待同步');
         const step = row.steps[0];
         try {
-          await request(current, '/tasks/' + encodeURIComponent(row.taskId) + '/conversation-turn', {
+          if (step.action === 'deliver') await require('./task-delivery.cjs').send(current,
+            '/tasks/' + encodeURIComponent(row.taskId), {conversationId: row.conversationId, turnId: row.turnId}, step.payload);
+          else await request(current, '/tasks/' + encodeURIComponent(row.taskId) + '/conversation-turn', {
             action: step.action, executor: 'native', conversationId: row.conversationId, turnId: row.turnId,
             ...(['auto', 'manual'].includes(step.submissionMode) ? {submissionMode: step.submissionMode} : {}),
           });
@@ -73,12 +75,16 @@ function create({ app, identityOf, request, intervalMs = 15000 }) {
     })().finally(() => inflight.delete(id));
     inflight.set(id, pending); return pending;
   }
-  async function enqueue(target, taskId, scope, terminal, started = true) {
+  async function enqueue(target, taskId, scope, terminal, started = true, delivery) {
     const base = {destination: target, taskId: String(taskId),
       conversationId: String(scope.conversationId), turnId: String(scope.turnId)};
     const id = crypto.createHash('sha256').update(JSON.stringify(base)).digest('hex');
     const row = read(id) || {...base, steps: []};
     if (started && !row.steps.some(step => step.action === 'started')) row.steps.unshift({action: 'started'});
+    if (delivery && !row.steps.some(step => step.action === 'deliver')) {
+      const terminalIndex = row.steps.findIndex(step => ['complete', 'fail', 'wait', 'cancel'].includes(step.action));
+      row.steps.splice(terminalIndex < 0 ? row.steps.length : terminalIndex, 0, {action: 'deliver', payload: delivery});
+    }
     if (terminal && !row.steps.some(step => ['complete', 'fail', 'cancel'].includes(step.action)) &&
         !row.steps.some(step => step.action === terminal.action)) row.steps.push(terminal);
     save(id, row);
@@ -112,11 +118,11 @@ function create({ app, identityOf, request, intervalMs = 15000 }) {
       // queued work may start after expiry or after another account logs in.
       const target = destination(identity);
       const record = scope => enqueue(target, taskId, scope);
-      record.finish = (scope, body, {started = false} = {}) => {
+      record.finish = (scope, body, {started = false, delivery} = {}) => {
         if (!['complete', 'fail', 'wait', 'cancel'].includes(body?.action)) throw Error('Invalid terminal receipt');
         const terminal = {action: body.action,
           ...(['auto', 'manual'].includes(body.submissionMode) ? {submissionMode: body.submissionMode} : {})};
-        return enqueue(target, taskId, scope, terminal, started);
+        return enqueue(target, taskId, scope, terminal, started, delivery);
       };
       return record;
     },

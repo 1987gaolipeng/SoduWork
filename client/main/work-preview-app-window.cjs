@@ -122,7 +122,7 @@ function create({ owners: OWNERS, getDeps, ownerFor, ownerSession, safeWebUrl,
       let sameAccount = true;
       try { if (existing?.appBridge) appOwner.assertCurrent(existing); } catch (_) { sameAccount = false; }
       if (sameAccount && existing?.detachedWin && !existing.detachedWin.isDestroyed() && liveContents(owner, existing) &&
-          existing.requested === target && JSON.stringify(existing.appBridge) === JSON.stringify(requestedBridge)) {
+          existing.requested === target && existing.appVersion === appVersion && JSON.stringify(existing.appBridge) === JSON.stringify(requestedBridge)) {
         if (existing.detachedWin.isMinimized()) existing.detachedWin.restore();
         existing.detachedWin.show(); existing.detachedWin.focus();
         return { ok: true, tabId: id, reused: true };

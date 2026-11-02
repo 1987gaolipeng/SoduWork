@@ -17,6 +17,27 @@ function fixture(t, send) {
     files: () => fs.readdirSync(path.join(root, 'task-start-receipts')).filter(x => x.endsWith('.json'))};
 }
 const scope = {conversationId: 'chat', turnId: 'turn'};
+
+test('frozen delivery survives offline upload and restart before terminal acknowledgement', async t => {
+  let online = false; const order = [], bytes = [];
+  const f = fixture(t, async (_identity, _route, body) => {order.push(body.action);});
+  t.mock.method(require('../main/pi-session/task-delivery.cjs'), 'send', async (id, route, receivedScope, payload) => {
+    assert.equal(route, '/tasks/issue'); assert.deepEqual(receivedScope, scope);
+    if (!online) throw Error('offline');
+    order.push('deliver'); bytes.push(Buffer.from(payload.files[0].data, 'base64').toString());
+  });
+  const payload = {outcome:'completed',model:'',files:[{name:'result.txt',category:'primary',contentType:'text/plain',data:Buffer.from('frozen v1').toString('base64')}]};
+  const result = await f.service.forTask(identity(), 'issue').finish(scope, {action:'complete'}, {started:true,delivery:payload});
+  assert.equal(result.pending, true); assert.deepEqual(order, ['started']);
+  payload.files[0].data = Buffer.from('changed later').toString('base64');
+  f.switch(identity('other')); online = true; await f.service.flush();
+  assert.deepEqual(order, ['started']);
+  f.switch(identity());
+  const restarted = create(f.options); t.after(()=>restarted.dispose());
+  await restarted.flush();
+  assert.deepEqual(order, ['started','deliver','complete']);
+  assert.deepEqual(bytes, ['frozen v1']); assert.equal(f.files().length, 0);
+});
 test('an offline actual-start receipt survives recreation and retries without storing credentials', async t => {
   let online = false, calls = 0;
   const f = fixture(t, async (id, route, body) => {

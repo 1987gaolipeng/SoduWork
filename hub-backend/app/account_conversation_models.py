@@ -1,8 +1,9 @@
 """Durable account-owned conversation projections.
 
 The source device remains the only device allowed to append to a conversation.
-Other devices receive a read projection through the Hub and can never turn
-that read access into execution or write access.
+Other devices receive a read projection through the Hub. Native execution
+requires a separate authenticated admission claimed by the source device;
+the projection itself never grants transcript write access.
 """
 import uuid
 from datetime import datetime, timezone
@@ -15,6 +16,31 @@ from .db import Base
 
 def _uuid() -> str:
     return str(uuid.uuid4())
+
+
+class PersonalConversationRelay(Base):
+    """Admission receipt only; native execution remains in the source session.
+
+    A claimed command is never automatically replayed. The source PC must
+    acknowledge its durable local receipt; transcript sync owns result state.
+    """
+    __tablename__ = "personal_conversation_relay"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    owner_user_id: Mapped[str] = mapped_column(String(64), index=True)
+    requester_client_id: Mapped[str] = mapped_column(String(64))
+    source_client_id: Mapped[str] = mapped_column(String(64), index=True)
+    conversation_id: Mapped[str] = mapped_column(String(180))
+    active_conversation_id: Mapped[str | None] = mapped_column(String(180), unique=True)
+    request_id: Mapped[str] = mapped_column(String(80))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    source_epoch: Mapped[str] = mapped_column(String(180))
+    source_revision: Mapped[int] = mapped_column(Integer)
+    instruction: Mapped[str] = mapped_column(Text)
+    phase: Mapped[str] = mapped_column(String(16), default="prepared")
+    reason: Mapped[str] = mapped_column(String(500), default="")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (UniqueConstraint("requester_client_id", "request_id"),)
 
 
 class AccountConversationCursor(Base):
@@ -43,6 +69,7 @@ class AccountConversation(Base):
     owner_user_id: Mapped[str] = mapped_column(String(36), index=True)
     source_client_id: Mapped[str] = mapped_column(String(64), index=True)
     source_session_id: Mapped[str] = mapped_column(String(180))
+    task_projection_id: Mapped[str] = mapped_column(String(120), default="", server_default="")
     source_device_name: Mapped[str] = mapped_column(String(120), default="")
     source_epoch: Mapped[str] = mapped_column(String(180), default="")
     source_revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
@@ -83,3 +110,16 @@ class AccountConversationMessage(Base):
     done: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+
+
+class ConversationProject(Base):
+    """Account sidebar organization, independent of execution permissions."""
+    __tablename__ = "account_conversation_project"
+    owner_user_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    id: Mapped[str] = mapped_column(String(120), primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Store only conversation identities, never local folders or credentials.
+    members: Mapped[str] = mapped_column(Text, default="[]")

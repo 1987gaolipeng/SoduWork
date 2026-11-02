@@ -175,7 +175,7 @@
     for (const key of themeKeys) popup.style.setProperty(key, style.getPropertyValue(key));
     popup.style.fontSize = style.fontSize; popup.style.fontFamily = style.fontFamily;
     search.type = 'search'; search.className = 'fwd-select-search'; search.placeholder = record.select.dataset.searchPlaceholder || '搜索选项…'; search.autocomplete = 'off';
-    search.setAttribute('role', 'combobox'); search.setAttribute('aria-label', '搜索' + labelOf(record.select));
+    search.setAttribute('role', 'combobox'); search.setAttribute('aria-label', record.select.dataset.searchPlaceholder || '搜索' + labelOf(record.select));
     search.setAttribute('aria-autocomplete', 'list'); search.setAttribute('aria-expanded', 'true');
     list.className = 'fwd-select-options'; list.id = id + '-list'; list.setAttribute('role', 'listbox');
     list.setAttribute('aria-label', labelOf(record.select)); search.setAttribute('aria-controls', list.id);

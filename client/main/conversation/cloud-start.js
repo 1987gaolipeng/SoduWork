@@ -72,6 +72,8 @@ function create({ app, root, read, save, identity, request, publicRecord }) {
     if (reply.source?.sessionId !== record.sessionId || reply.source?.adapterId !== record.adapterId ||
         reply.source?.entryKind !== 'cloud' || reply.phase === 'committed' && (!reply.taskId || !reply.ref)) throw Error('云端会话回执不完整，请重试核对原请求');
     const next = { ...record, phase: reply.phase, taskId: reply.taskId || '', ref: reply.ref || '',
+      accepted: reply.accepted === true || record.accepted === true, acceptedAt: reply.acceptedAt || record.acceptedAt || '',
+      canAbort: reply.canAbort === true,
       ...(reply.deliveryMode === 'git' ? { deliveryPresentation: 'summary', codeDelivery: reply.codeDelivery || { kind: 'git' } } : {}),
       target: reply.target || null, error: reply.error || '', at: Date.now(),
       remoteState: ['running', 'queued', 'done', 'completed', 'failed', 'stopped'].includes(reply.status) ? reply.status : 'queued' };
@@ -119,28 +121,31 @@ function create({ app, root, read, save, identity, request, publicRecord }) {
           attachments: attachmentContract.publicFiles(stored.map(file => ({ name: file.name,
             type: file.type, size: file.size }))), sentAt: Date.now(), done: true },
           adapterId: config.agentId, displayName: config.agentId,
-          modelSelection: { name: config.model }, execution: { cloud: true }, status: 'idle' } }), { mode: 0o600 });
+          modelSelection: { name: config.model }, execution: { cloud: true }, status: 'idle' } }), { mode: 0o600, flush: true });
       await save(record);
       return submit(record);
     })().finally(() => pending.delete(key));
     pending.set(key, job); return job;
   }
   async function history() {
-    const owner = scope(await identity());
+    const current = await identity(), owner = scope(current);
+    const syncOwner = require('./cloud-execution-sync').scope(current);
     const entries = await fs.readdir(root).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
     const rows = [];
     for (const name of entries.filter(name => /^[a-f0-9]{64}\.json$/.test(name))) {
       let record;
       try { record = JSON.parse(await fs.readFile(path.join(root, name), 'utf8')); }
       catch (error) { console.warn('[cloud-start] Unreadable history receipt:', name, error.code || 'invalid JSON'); continue; }
-      if (record.entryKind !== 'cloud' || record.owner !== owner || record.hidden) continue;
+      if (record.entryKind !== 'cloud' || (record.owner !== owner && (!record.syncOwner || record.syncOwner !== syncOwner)) || record.hidden) continue;
       // The receipt's `cwd` is a private cache on this computer.  It is only
       // used to replay remote artifacts and must never be exposed as a local
       // working directory or inherited by the next local conversation.
       rows.push({ id: record.sessionId, title: record.title, at: record.at, cwd: '',
         workspaceName: '云端环境', workspaceLabel: '云端环境', locationMode: 'remote',
-        location: 'cloud', adapterId: record.activeExecutionSelection?.agentId || record.adapterId, taskId: record.taskId || '', state: record.remoteState || (record.phase === 'committed' ? 'idle' : 'waiting'),
-        cloud: true });
+        location: 'cloud', adapterId: record.activeExecutionSelection?.agentId || record.adapterId, taskId: record.taskId || '', state: record.cloudApprovals?.length || record.syncSnapshot?.historyGap || record.syncArtifactsPending ? 'waiting' : record.remoteState || (record.phase === 'committed' ? 'idle' : 'waiting'),
+        cloud: true, needsAttention: Boolean(record.cloudApprovals?.length || record.syncSnapshot?.historyGap || record.syncArtifactsPending),
+        outputPending: Boolean(record.syncArtifactsPending), outputError: record.syncArtifactError || '',
+        historyGap: record.syncSnapshot?.historyGap || null, cloudApprovals: record.cloudApprovals || [] });
     }
     return { ok: true, chats: rows };
   }

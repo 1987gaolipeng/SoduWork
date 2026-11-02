@@ -368,7 +368,34 @@ function create({ app, identityOf, session, newCwd, loadStorageSdk: load, replac
       });
     });
   }
-  return { reserve, read, save, saveDraftSelection };
+  async function findTaskCreation(rawTaskId) {
+    return attempt(async () => {
+      const taskId = sessionId(rawTaskId), captured = await auth();
+      let files;
+      try { files = await fsp.readdir(directory(app), { withFileTypes: true }); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; files = []; }
+      for (const file of files) {
+        if (!file.isFile() || !/^[a-f0-9]{64}\.json$/.test(file.name)) continue;
+        const target = path.join(directory(app), file.name), stat = await fsp.lstat(target);
+        if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_STORE_BYTES) continue;
+        const row = JSON.parse(await fsp.readFile(target, 'utf8'));
+        if (row.version !== 1 || typeof row.sessionId !== 'string' ||
+            location(app, row.sessionId) !== target || !Array.isArray(row.cards) ||
+            !scopeMatches(row.owner, captured.identity, accountCandidates(app))) continue;
+        if (!row.cards.some(card => card.actionId === 'work.requirement.create' &&
+            card.state?.phase === 'succeeded' && card.state.receipt?.id === taskId && !card.state.receipt.gone)) continue;
+        // A saved creation receipt is provenance, not proof that its archive still exists.
+        const live = session.findBySessionId?.(row.sessionId);
+        const archive = live || await session.archivedConversation(app, row.sessionId);
+        if (!archive) continue;
+        await resolve(row.sessionId, captured);
+        return { ok: true, sessionId: row.sessionId };
+      }
+      await guard(captured);
+      return { ok: true, sessionId: '' };
+    });
+  }
+  return { reserve, read, save, saveDraftSelection, findTaskCreation };
 }
 function install({ ipcMain, BrowserWindow, ...options }) {
   const controller = create({ ...options, notify: event => {
@@ -377,7 +404,8 @@ function install({ ipcMain, BrowserWindow, ...options }) {
     }
   } });
   for (const [channel, method] of [['pi-session-reserve-work', 'reserve'], ['pi-session-work-cards', 'read'],
-    ['pi-session-save-work-card', 'save'], ['pi-session-save-work-draft-selection', 'saveDraftSelection']]) {
+    ['pi-session-save-work-card', 'save'], ['pi-session-save-work-draft-selection', 'saveDraftSelection'],
+    ['pi-session-find-task-creation', 'findTaskCreation']]) {
     ipcMain.handle(channel, (event, ...args) => require('../access-control/preferences').isTrusted(event)
       ? controller[method](...args) : { ok: false, reason: '请在 SoduWork 工作区中操作工作表单' });
   }

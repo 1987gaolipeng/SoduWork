@@ -242,10 +242,10 @@ async send(text, turnAttachments, sendOptions) {
           attachmentContract.augment(promptText, files), turnPlugins,
           [resolvedPlugins.applicationGuide, pluginGrant?.guide].filter(Boolean).join('\n\n'));
         const visualFiles = files.filter((file) => /^image\//i.test(String(file.mimeType || '')) ||
-          /\.(?:png|jpe?g|webp|gif|svg|bmp|tiff?|heic)$/i.test(String(file.path || file.name || '')));
+          /\.(?:png|jpe?g|webp|gif|avif|bmp|svg|tiff?|heic|heif|ico|jxl|jp2|j2k|raw|cr2|nef|arw|dng|psd)$/i.test(String(file.path || file.name || '')));
         const visualInputs = await attachments.images(files);
         if (visualFiles.length !== visualInputs.length) {
-          throw new Error('有图片因格式不支持或超过 20 MB 无法识别，请改用 PNG、JPG、WebP 或 GIF');
+          throw new Error('有图片无法读取或超过 20 MB，原图已保留，请检查文件后重试');
         }
         // Read the active model after the queued turn's model switch, not the
         // model captured when the conversation was originally opened.

@@ -19,7 +19,7 @@ if (typeof electron === 'string') {
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
   async function until(code) { for (let i = 0; i < 100; i++) { if (await js(code)) return; await delay(25); } throw Error('Timed out: ' + code); }
   const click = selector => js(`document.querySelector(${JSON.stringify(selector)}).click();void 0;`);
-  const available = backend => ({ backend, configured: true, available: true, connected: true });
+  const available = backend => ({ backend, configured: true, available: true, connected: true, ...(backend === 'nfs' || backend === 'minio' ? { quotaBytes: 1073741824, usedBytes: 123, remainingBytes: 1073741701 } : {}) });
   async function status(value) {
     await js(`window.fixtureStatus=${JSON.stringify(value)};openLibraryPanel();void 0;`);
     await until('!document.querySelector("[data-library-menu-toggle=create]").disabled || document.querySelector("[data-library-state]").textContent.includes("加载失败")');
@@ -31,7 +31,7 @@ if (typeof electron === 'string') {
   app.whenReady().then(async () => {
     win = new BrowserWindow({ show: false, width: 1280, height: 840, webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
     await win.loadFile(path.join(__dirname, 'fixtures/library.html'));
-    await js(`window.calls=[];window.notices=[];window.batchFixture=false;window.batchCopyFail=false;window.fixtureStatus={storage:{local:{available:true},remote:{backend:'nfs',configured:true,available:true,connected:true},nfs:{configured:true,available:true},minio:{configured:false,available:false}}};
+    await js(`window.calls=[];window.notices=[];window.batchFixture=false;window.batchCopyFail=false;window.fixtureStatus={storage:{local:{available:true},remote:{backend:'nfs',configured:true,available:true,connected:true,quotaBytes:1073741824,usedBytes:123,remainingBytes:1073741701},nfs:{configured:true,available:true},minio:{configured:false,available:false}}};
       window.petSay=m=>notices.push(m);window.waitList=false;window.releaseList=null;window.waitUpload=false;window.releaseUpload=null;
       window.SoduWorkAPI={taskStorageKey:()=> 'storage-fixture',getLibraryStorageStatus:async()=>fixtureStatus,
         listLibrary:async filters=>{calls.push({op:'list',...filters});const batchItems=window.batchFixture&&filters.storage==='local'?[{id:'local-batch-a',title:'batch-a.txt',filename:'batch-a.txt',kind:'document',backend:'local',size:3},{id:'local-batch-b',title:'batch-b.txt',filename:'batch-b.txt',kind:'document',backend:'local',size:4}]:[{id:filters.storage==='local'?'local-fixture':'file-'+filters.storage,title:'fixture.txt',filename:'fixture.txt',kind:'document',backend:filters.storage,size:7}];const result={items:filters.folderId?[]:batchItems,folders:filters.folderId?[]:[{id:'folder-'+filters.storage,name:'目录',backend:filters.storage}],folder:filters.folderId?{id:filters.folderId,name:'目录',backend:filters.storage}:null,trashCount:1};if(waitList){waitList=false;await new Promise(r=>releaseList=r);}return result;},
@@ -48,6 +48,8 @@ if (typeof electron === 'string') {
     await js('openLibraryPanel();void 0;'); await until('document.querySelector("[data-library-storage=remote]")&&!document.querySelector("[data-library-storage=remote]").disabled');
     assert.equal(await js('document.querySelectorAll("[data-library-storage]").length'), 2);
     assert.match(await js('document.querySelector("[data-library-storage=remote]").title'), /NFS/);
+    assert.equal(await js('document.querySelector("[data-library-storage-quota=remote]").hidden'), false);
+    assert.match(await js('document.querySelector("[data-library-storage-quota=remote]").textContent'), /123 B/);
     await click('[data-library-migrate=local-fixture]'); await until('document.querySelector(".library-confirm-dialog")');
     await click('[data-library-confirm-cancel]'); await delay(30);
     assert.equal(await js('calls.some(c=>c.op==="copy")'), false);
@@ -131,6 +133,7 @@ if (typeof electron === 'string') {
     assert.equal(await js('document.querySelector("[data-library-storage=remote]").getAttribute("aria-selected")'), 'true');
     assert.equal(await js('document.querySelector("[data-library-menu-toggle=create]").disabled'), true);
     assert.match(await js('document.querySelector("[data-library-state]").textContent'), /NFS mount unavailable/);
+    assert.equal(await js('document.querySelector("[data-library-storage-quota=remote]").hidden'), true);
     // The 2026-10-22 cache contract preserves the last successful view during
     // outages. An outage must still block writes and cannot pick another backend.
     assert.deepEqual(await js('[...document.querySelectorAll("[data-library-file-preview]")].map(node=>node.dataset.libraryFilePreview)'), ['file-nfs']);

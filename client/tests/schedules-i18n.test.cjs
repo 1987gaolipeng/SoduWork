@@ -127,3 +127,12 @@ test('device dependency statuses translate without exposing implementation place
     }
   }
 });
+
+
+test('scroll time selection labels and validation are localized', () => {
+  for (const locale of ['en-US','ja-JP','ko-KR']) {
+    const context=boot(locale), tt=source=>context.SoduWorkI18n.translateText(source);
+    for (const source of ['滚动选择时间','请选择小时（00–23）','请选择分钟（00–59）'])
+      assert.notEqual(tt(source),source,locale+': '+source);
+  }
+});

@@ -2,6 +2,7 @@
 // Real queue/picker/controller UI with durable Chromium storage in its own profile.
 // Fixture APIs only: no Hub connection, real task execution or user's client restart.
 const {app,BrowserWindow}=require('electron');
+app.disableHardwareAcceleration();
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const root=process.argv[2],phase=process.argv[3]||'exercise';
 if(!root||!path.isAbsolute(root))throw Error('Absolute isolated evidence directory required');
@@ -18,20 +19,23 @@ async function waitFor(source){
  throw Error('Timed out: '+source);
 }
 async function click(selector){
- await delay(180); // Let the product's picker entrance animation settle.
- const point=await evaluate('(()=>{const e=document.querySelector('+JSON.stringify(selector)+');if(!e)throw Error("Missing button");e.scrollIntoView({block:"nearest"});const r=e.getBoundingClientRect();return{x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()');
+ await delay(400); // Let the product's picker entrance animation settle.
+ const point=await evaluate('(()=>{const e=document.querySelector('+JSON.stringify(selector)+');if(!e)throw Error("Missing button: "+'+JSON.stringify(selector)+');e.scrollIntoView({block:"nearest"});const r=e.getBoundingClientRect();const x=Math.round(r.x+r.width/2),y=Math.round(r.y+r.height/2);const hit=document.elementFromPoint(x,y);return{x,y,matched:e.contains(hit),hit:hit?.outerHTML.slice(0,400)}})()');
+ assert.ok(point.matched,selector+' is obstructed: '+JSON.stringify(point));
+ delete point.matched;delete point.hit;
  win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...point});
  win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...point});
  await delay(60);
 }
-const row=id=>'[data-queue-row="task:'+id+'"]';
+const row=id=>'[data-queue-row="queued:'+id+'"]';
 async function visible(id,wanted=true){await waitFor('!!document.querySelector('+JSON.stringify(row(id))+')==='+wanted)}
 async function add(id){
  await click('[data-queue-action="add"]');
- await waitFor('!!document.querySelector(\'[data-collab-task-select="'+id+'"]\')');
- await click('[data-collab-task-select="'+id+'"]');
- await click('[data-collab-picker-submit]');
- await waitFor('!!document.querySelector("[data-task-start-dispatch]")');
+  await waitFor('!!document.querySelector(\'.ncollab-picker-row[data-collab-task-select="'+id+'"]:not([hidden])\')');
+  await click('.ncollab-picker-row[data-collab-task-select="'+id+'"]');
+  await waitFor('!!document.querySelector("[data-collab-picker-submit]") || !!document.querySelector('+JSON.stringify(row(id))+')');
+  if(await evaluate('!!document.querySelector("[data-collab-picker-submit]")')) await click('[data-collab-picker-submit]');
+  await visible(id);
 }
 async function shot(name){
  await delay(80);
@@ -50,10 +54,10 @@ app.whenReady().then(async()=>{
    report.checks.push('new Electron process with the same isolated profile keeps both removed tasks hidden');
    await shot('05-process-restart');
   }else{
-   await add('one');await click('[data-task-start-cancel]');await visible('one');
-   await add('two');await click('[data-task-start-cancel]');await visible('two');
-   assert.equal(await evaluate('sent.length'),0);
-   report.checks.push('real picker adds two tasks; dismissing execution selection sends neither');
+   await add('one');await add('two');
+   assert.equal(await evaluate('sent.length'),2);
+   assert.equal(await evaluate('sent.every(item=>item.options.taskExecution.reuseConversation===true)'),true);
+   report.checks.push('explicit picker confirmation queues each task once in the current conversation');
    await shot('01-added-unsent');
    await click(row('one')+' [data-queue-action="remove"]');
    await visible('one',false);await visible('two');
@@ -68,14 +72,14 @@ app.whenReady().then(async()=>{
    report.checks.push('document reload preserves removal despite old session bindings');
    await shot('03-reloaded');
    await add('one');
-   await click('[data-task-start-dispatch]');
+   // Reload resets the submission log while the simulated runtime keeps its pending queue.
    await waitFor('sent.length===1');
    assert.equal(await evaluate('sent[0].text'),'保留任务完整说明和材料');
    assert.equal(await evaluate('sent[0].options.taskId'),'one');
    assert.equal(await evaluate('fixtureContext._collabTasks.get("one").task.attachments[0].name'),'需求材料.txt');
    await visible('one');
    assert.equal(await evaluate('ChatCollaborationStore.isQueueRemoved("chat-a","one")'),false);
-   report.checks.push('explicit re-add and confirmation clears dismissal, sends once and retains materials');
+   report.checks.push('explicit re-add clears dismissal, queues once and retains materials');
    await click(row('one')+' [data-queue-action="remove"]');
    await click(row('two')+' [data-queue-action="remove"]');
    await visible('one',false);await visible('two',false);

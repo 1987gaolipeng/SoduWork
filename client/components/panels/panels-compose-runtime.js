@@ -57,6 +57,7 @@
     const owner = ownerScope();
     if (owner === activeOwner) return false;
     activeOwner = owner; probeGeneration++; selectionGeneration++;
+    catalogGeneration++; catalogLoaded = false; loadPromise = null;
     for (const key of Object.keys(probes)) delete probes[key];
     pendingProbes.clear(); accessProbePromise = null; cloudSelectionPromise = null;
     changed();
@@ -93,6 +94,7 @@
         displayName: String(item.displayName || id).slice(0, 48),
         accessControl: item.accessControl && typeof item.accessControl === 'object' ? item.accessControl : null,
         summary: String(item.summary || '').slice(0, 120),
+        availability: item.availability && typeof item.availability === 'object' ? item.availability : null,
         modelMode: item.modelMode === 'account' ? 'account' : 'managed',
         goalMode: item.goalMode === 'native' ? 'native' : 'none',
         group: item.group === 'more' ? 'more' : 'recommended',
@@ -203,6 +205,7 @@
         return item;
       }));
       missingWrap.hidden = rows.length === 0; missingHost.hidden = rows.length === 0; missingMore.hidden = rows.length === 0;
+      missingWrap.setAttribute('aria-hidden', String(rows.length === 0));
       const runtimeWrap = missingWrap.closest('.cp-runtimewrap');
       // The management entry now lives in the picker footer. Only the legacy
       // toolbar slot should widen the compact runtime trigger.
@@ -210,8 +213,9 @@
         missingWrap.parentElement === runtimeWrap);
       const names = rows.map(row => _rtText(row.displayName)).join('、');
       missingHost.setAttribute('aria-label', _rtText('缺失的执行底座') + (names ? '：' + names : ''));
-      missingMore.textContent = _rtText('更多'); missingMore.title = _rtText('打开 Agent 管理，安装或修复执行底座');
-      missingMore.setAttribute('aria-label', _rtText('打开 Agent 管理'));
+      missingMore.textContent = _rtText('更多'); missingMore.title = _rtText(location === 'cloud'
+        ? '打开云端电脑，安装或修复云端底座' : '打开 Agent 管理，安装或修复执行底座');
+      missingMore.setAttribute('aria-label', _rtText(location === 'cloud' ? '打开云端电脑' : '打开 Agent 管理'));
     }
     if (goalButton) {
       goalButton.disabled = !goalSupported();
@@ -280,13 +284,16 @@
     })]).finally(() => clearTimeout(timer));
   }
 
-  async function loadCatalog(options) {
+  async function loadCatalog(options, force = false) {
+    syncOwner();
     if (loadPromise) return loadPromise;
+    if (force) { catalogGeneration++; catalogLoaded = false; }
     if (catalogLoaded) return catalog;
     const api = options.api();
     if (!api || typeof api.runtimes !== 'function') return catalog;
     const generation = catalogGeneration;
-    const job = Promise.resolve().then(() => bounded(api.runtimes())).then((reply) => {
+    const job = Promise.resolve().then(() => bounded(api.runtimes(force ? { force: true } : undefined))).then((reply) => {
+      syncOwner();
       if (generation !== catalogGeneration) return catalog;
       const declared = normalize(reply && reply.runtimes);
       let loaded = normalize(reply && Array.isArray(reply.availableRuntimes)
@@ -296,9 +303,8 @@
       if (pi && !loaded.some((row) => row.id === 'pi')) loaded = [pi, ...loaded];
       if (!reply?.ok || !loaded.length) {
         // Keep Pi as the only safe choice when the health projection is
-        // unavailable. The other declared bases stay visible as a repairable
-        // stack so the user can reach Agent management without selecting an
-        // unverified runtime.
+        // unavailable. The other declared bases remain management data and are
+        // summarized by the footer icons, but never become conversation choices.
         catalog = FALLBACK.filter((row) => row.id === 'pi');
         missingCatalog = normalize((reply && reply.missing) || declared.filter((row) => row.id !== 'pi'));
         if (!missingCatalog.length) missingCatalog = fallbackMissing();
@@ -311,6 +317,9 @@
         ? reply.missing
         : declared.filter((row) => row.id !== 'pi');
       catalog = loaded; missingCatalog = normalize(declaredMissing.filter((row) => row.id !== 'pi')); catalogLoaded = true;
+      if (location === 'local') for (const row of loaded) {
+        if (row.availability) probes[probeKey(row.id)] = row.availability;
+      }
       const preferred = selectedByLocation[location];
       const fallback = catalog.find((row) => row.id === 'pi') || catalog[0];
       if (!selectCurrent(preferred)) {
@@ -466,7 +475,10 @@
     if (unbindCatalog) unbindCatalog();
     unbindCatalog = opts.api()?.onRuntimesChanged?.(() => {
       catalogGeneration++; catalogLoaded = false; loadPromise = null;
-      void loadCatalog(opts).then(() => opts.refresh());
+      probeGeneration++; locationGeneration++; pendingProbes.clear(); cloudSelectionPromise = null;
+      for (const key of Object.keys(probes)) delete probes[key];
+      changed();
+      accessProbePromise = loadCatalog(opts).then(() => refreshAccess()).then(() => opts.refresh());
     }) || null;
     const button = root.querySelector('#cpRuntime');
     const popup = root.querySelector('#cpRuntimePop');
@@ -474,11 +486,16 @@
     const more = root.querySelector('#cpRuntimeMore');
     if (more) more.addEventListener('click', (event) => {
       event.stopPropagation();
+      if (location === 'cloud') {
+        if (global.WorkspaceHost?.open) global.WorkspaceHost.open('cloud');
+        else global.openCloudEnvironmentsPanel?.();
+        return;
+      }
       if (typeof global.openAgentsEntry === 'function') global.openAgentsEntry();
-      else if (typeof global.openAgentsPanel === 'function') global.openAgentsPanel({ tab: 'runners' });
-      else if (global.WorkspaceHost && typeof global.WorkspaceHost.open === 'function') global.WorkspaceHost.open('agents', { tab: 'runners' });
+      else if (typeof global.openAgentsPanel === 'function') global.openAgentsPanel();
+      else if (global.WorkspaceHost && typeof global.WorkspaceHost.open === 'function') global.WorkspaceHost.open('agents');
     });
-    button.addEventListener('click', () => { loadCatalog(opts); });
+    button.addEventListener('click', () => { void loadCatalog(opts, true).then(() => refreshAccess()); });
     popup.addEventListener('click', async (event) => {
       const row = event.target.closest('[data-runtime]');
       if (!row || row.classList.contains('checking')) return;
@@ -568,7 +585,7 @@
     catalog: () => catalog.map((row) => ({ ...row })),
   };
   const ownerChanged = () => {
-    if (syncOwner() && boundOptions) { void refreshAccess(); boundOptions.refresh(); }
+    if (syncOwner() && boundOptions) { void loadCatalog(boundOptions, true).then(() => refreshAccess()); boundOptions.refresh(); }
   };
   global.addEventListener?.('soduwork-data-scope-changed', ownerChanged);
   global.addEventListener?.('soduwork-device-auth', ownerChanged);

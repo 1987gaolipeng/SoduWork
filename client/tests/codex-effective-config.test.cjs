@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const { createInterface } = require('node:readline');
 const { pathToFileURL } = require('node:url');
 const { createRunnerRuntimeAdapter, getRunnerSessionDetails } = require('../main/agent-runtime/runner-adapter');
@@ -134,6 +134,7 @@ async function fixture(t, transport) {
   fs.writeFileSync(peer, peerSource); fs.writeFileSync(controller, runnerSource);
   const child = spawn(python, ['-u', controller, backend, root, peer], { windowsHide: true,
     env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' } });
+  const closed = new Promise(resolve => child.once('close', resolve));
   const pending = new Map(), calls = [], replies = [];
   let serial = 0, ready = false, errors = '';
   child.stderr.on('data', data => { errors += data; });
@@ -157,9 +158,18 @@ async function fixture(t, transport) {
     fs.writeFileSync(path.join(root, 'release'), 'release');
     for (const session of sessions) await session.dispose();
     child.stdin.end();
-    await Promise.race([new Promise(r => child.once('exit', r)), new Promise(r => setTimeout(r, 2000))]);
-    if (child.exitCode === null) child.kill();
-    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    await Promise.race([closed, new Promise(r => setTimeout(r, 2000))]);
+    if (child.exitCode === null) {
+      // Windows venv Python is a launcher: terminate the fixture's complete tree.
+      if (process.platform === 'win32') spawnSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'],
+        { windowsHide: true, stdio: 'ignore', timeout: 10000 });
+      else child.kill();
+    }
+    await Promise.race([closed, new Promise((_, reject) => {
+      const timer = setTimeout(() => reject(Error('Fixture Runner did not close')), 10000);
+      timer.unref();
+    })]);
+    await fs.promises.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
   try { await until(() => ready); } catch (error) { throw Error(error.message + ': ' + errors); }
   const app = { getPath: () => path.join(root, 'profile') };

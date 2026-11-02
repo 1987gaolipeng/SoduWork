@@ -24,5 +24,9 @@
   "ja-JP.js",
   "ja-JP-gap-pages.js",
   "ko-KR.js",
-  "ko-KR-gap-pages.js"
+  "ko-KR-gap-pages.js",
+  "zh-CN-runtime-surfaces.js",
+  "en-US-runtime-surfaces.js",
+  "ja-JP-runtime-surfaces.js",
+  "ko-KR-runtime-surfaces.js"
 ]

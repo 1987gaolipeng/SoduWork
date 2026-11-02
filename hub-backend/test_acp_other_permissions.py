@@ -148,7 +148,7 @@ class OtherPermissionTests(unittest.TestCase):
         bridge.observe_tool({"sessionUpdate": "tool_call_update", "toolCallId": "test-call", "status": "failed"})
         bridge.native_permission({"toolCall": {"toolCallId": "test-call"}})
         self.assertFalse(self.requests[-1]["allowSession"])
-        for agent in ("claude",):
+        for agent in ("unknown-runtime",):
             self.assertFalse(access_policy.capability(agent)["supported"])
             with self.assertRaises(access_policy.UnsupportedPolicyError):
                 access_policy.prepare(agent, self.policy, str(self.work))

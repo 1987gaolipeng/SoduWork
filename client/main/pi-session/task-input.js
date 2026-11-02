@@ -1,60 +1,7 @@
 'use strict';
-const fs = require('fs');
 const { taskPrompt } = require('./task-turn');
 const { MAX_BYTES, MAX_FILES } = require('./attachments');
 const { fetchWithDeviceAuthRetry } = require('../device-auth-request');
-
-function mimeTypeOf(name) {
-  const map = { '.html': 'text/html', '.htm': 'text/html', '.css': 'text/css', '.js': 'text/javascript',
-    '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.pdf': 'application/pdf',
-    '.mp4': 'video/mp4', '.webm': 'video/webm', '.txt': 'text/plain', '.md': 'text/markdown',
-    '.zip': 'application/zip' };
-  const ext = String(name || '').toLowerCase().match(/(\.[a-z0-9]+)$/);
-  return (ext && map[ext[1]]) || 'application/octet-stream';
-}
-
-/*
- * Collect classified workspace deliverables through the existing artifact pipeline before
- * completing task receipts. Only completed turns may create candidate versions and review
- * requests; incomplete turns retain evidence without requesting review.
- */
-async function deliverConversationArtifacts(runtime, identity, route, scope, model, outcome) {
-  if (!runtime?.handle) return { skipped: true };
-  const snapshot = require('../conversation/artifact-runtime').snapshot(runtime.handle);
-  const items = ((snapshot && snapshot.items) || [])
-    .filter(item => item && item.path && !item.processEvidence && !item.pluginDraft)
-    .slice(0, 60);
-  if (!items.length) return { skipped: true };
-  const maxBytes = 50 * 1024 * 1024;
-  const form = new FormData();
-  form.append('conversationId', scope.conversationId);
-  form.append('turnId', scope.turnId);
-  form.append('model', String(model || '').slice(0, 80));
-  form.append('outcome', outcome === 'completed' ? 'completed' : 'incomplete');
-  let count = 0;
-  for (const item of items) {
-    let data;
-    try { data = fs.readFileSync(item.path); } catch (_) { continue; }
-    if (!data.length || data.length > maxBytes) continue;
-    form.append('paths', String(item.relative || item.name || 'file'));
-    form.append('files', new Blob([data], { type: mimeTypeOf(item.name || item.relative) }),
-      String(item.name || 'artifact'));
-    count++;
-  }
-  if (!count) return { ok: false, reason: '产出文件不可读' };
-  const response = await fetchWithDeviceAuthRetry(identity, String(identity.hub).replace(/\/+$/, '') + '/api/v1' + route + '/conversation-delivery', {
-    method: 'POST', redirect: 'error',
-    body: form, signal: AbortSignal.timeout(120000),
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok || data.ok === false) {
-    const error = new Error(typeof data.detail === 'string' ? data.detail : '产出交付失败，任务可能缺少可验收成果');
-    error.status = response.status;
-    throw error;
-  }
-  return { ok: true, ...(data.files ? { files: data.files } : {}) };
-}
 
 async function request(identity, route, body) {
   const response = await fetchWithDeviceAuthRetry(identity, String(identity.hub).replace(/\/+$/, '') + '/api/v1' + route, {
@@ -185,7 +132,13 @@ async function prepare(identity, taskId, conversationId, turnId, instruction, re
   if (requested.acceptanceOnly === true) {
     const acceptance = await require('./acceptance-turn').prepare({ identity, taskId, instruction,
       requested, runtime, request });
-    return { ...acceptance, attachments: await loadTaskAttachments(identity, route, acceptance.attachmentIds) };
+    const bundle = acceptance.deliveryBundle;
+    const attachments = bundle
+      ? [await require('./acceptance-bundle').load(identity, route, bundle)]
+      : await loadTaskAttachments(identity, route, acceptance.attachmentIds);
+    if (bundle && acceptance.optionalAttachmentIds.length)
+      attachments.push(...await loadTaskAttachments(identity, route, acceptance.optionalAttachmentIds));
+    return { ...acceptance, attachments };
   }
   const controlled = require('./controlled-task-turn');
   if (requested.followUp === true && ['done', 'cancel'].includes(task.status)) {
@@ -265,21 +218,28 @@ async function prepare(identity, taskId, conversationId, turnId, instruction, re
       ...(submissionMode ? { submissionMode } : {}),
       ...(explicitNative && action === 'prepare' ? { executionChoice: 'native',
         agentId: spec.agentId, model: spec.model } : {}) }));
-  /*
-   * Collect outputs before completing the receipt because terminal receipts reject later
-   * delivery. Log delivery failures while allowing conversation completion so missing task
-   * outputs remain diagnosable.
-   */
-  const deliverThen = async (fallback, outcome) => {
-    try {
-      const result = await deliverConversationArtifacts(
-        runtime, await freshIdentity(), route, scope,
-        typeof runtime?.handle?.model === 'string' ? runtime.handle.model : '', outcome);
-      if (result && result.ok === false) console.warn('[task-input] 会话产出交付失败：' + (result.reason || ''));
-    } catch (error) {
-      console.warn('[task-input] 会话产出交付失败：' + String((error && error.message) || error));
+  // Freeze bytes before the terminal receipt. The existing durable transport
+  // queue retries uploads without re-executing the model or rereading files.
+  let settlementFailed = false;
+  const deliverThen = async (action, outcome) => {
+    if (settlementFailed) {
+      // The queue reports a capture failure separately from model completion.
+      // Release the execution receipt so a repair is possible; never mark it complete.
+      if (action !== 'fail') return;
+      return startReceipt ? startReceipt.finish(scope, {action:'fail'},
+        {started:executionStarted && !startAcknowledged}) : transition('fail');
     }
-    return fallback();
+    try {
+      const delivery = await require('./task-delivery.cjs').capture(runtime?.handle, outcome);
+      return startReceipt
+        ? await startReceipt.finish(scope, {action, ...(submissionMode ? {submissionMode} : {})},
+          {started: executionStarted && !startAcknowledged, delivery})
+        : (delivery && await require('./task-delivery.cjs').send(await freshIdentity(), route, scope, delivery),
+          await transition(action));
+    } catch (error) {
+      settlementFailed = true;
+      throw error;
+    }
   };
   const previous = task.workRouting?.conversationTurn;
   // A resumed rework may retain its first-send flag if the client lost the acknowledgement.
@@ -337,15 +297,13 @@ async function prepare(identity, taskId, conversationId, turnId, instruction, re
         { action: 'prepare', ...next, executor: spec.mode, ...(submissionMode ? { submissionMode } : {}) });
       if (receipt.turn.state !== 'queued') throw new Error('需求状态已变化，请刷新后查看结果');
       scope.turnId = next.turnId;
+      settlementFailed = false;
       executionStarted = false;
       startAcknowledged = false;
     },
     afterTurn: status => {
       const action = { completed: 'complete', failed: 'fail', waiting: 'wait', stopped: 'cancel' }[status] || 'fail';
-      return deliverThen(() => startReceipt
-        ? startReceipt.finish(scope, { action, ...(submissionMode ? { submissionMode } : {}) },
-          { started: executionStarted && !startAcknowledged })
-        : transition(action), status === 'completed' ? 'completed' : 'incomplete');
+      return deliverThen(action, status === 'completed' ? 'completed' : 'incomplete');
     },
   };
 }

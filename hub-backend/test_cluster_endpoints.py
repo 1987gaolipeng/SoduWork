@@ -29,10 +29,14 @@ class EndpointTests(unittest.IsolatedAsyncioTestCase):
                 agents.runner_hub, "for_client", return_value=None):
             self.assertIsNone(agents._pick_runner(self.client, ""))
 
-    async def test_existing_runner_is_used(self):
+    async def test_existing_runner_requires_explicit_target_and_preserves_that_identity(self):
         runner = SimpleNamespace(id="online", client_id="fixture")
-        with patch.object(agents.runner_hub, "for_client", return_value=runner):
-            self.assertIs(agents._pick_runner(self.client, ""), runner)
+        with patch.object(agents.runner_hub, "for_client", return_value=runner), \
+                patch.object(agents.runner_hub, "get", return_value=runner):
+            with self.assertRaises(HTTPException) as error:
+                agents._pick_runner(self.client, "")
+            self.assertEqual(error.exception.status_code, 409)
+            self.assertIs(agents._pick_runner(self.client, "online"), runner)
 
     async def test_cluster_does_not_advertise_hub_local_agents(self):
         from app.services import execution_aliases

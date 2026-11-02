@@ -39,23 +39,6 @@ function originalMessageTitle(entries, messages) {
   return '';
 }
 
-function originalMessageTitle(entries, messages) {
-  // A restored UI contains only the bounded tail. Resolve the name once from
-  // the original archive, stopping at its first visible user request instead
-  // of replaying or projecting old assistant/tool receipts.
-  const stored = Array.isArray(entries) ? entries : [];
-  const archive = stored.some(entry => entry?.type === 'message' && entry.message);
-  const acc = require('./event-stream').create();
-  for (const entry of archive ? stored : messages || []) {
-    const message = archive ? entry?.type === 'message' && entry.message : entry;
-    if (message?.role !== 'user') continue;
-    acc.push({ type: 'message_end', message, replay: true });
-    const text = acc.state.messages.at(-1)?.text;
-    if (typeof text === 'string' && text.trim()) return require('./session-helpers').title({ firstMessage: text });
-  }
-  return '';
-}
-
 function mergeHistory(diskRows, handles, limit) {
   const live = new Map((handles || []).map(handle => {
     const row = handle && typeof handle.historyRow === 'function' ? handle.historyRow() : null;

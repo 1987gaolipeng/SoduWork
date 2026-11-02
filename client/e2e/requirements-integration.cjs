@@ -25,7 +25,7 @@ ipcMain.handle('requirements-fixture-library',async(event,action,payload={})=>{
  if(action!=='context')assert.equal(payload.owner,owner);
  };
  guard();if(action==='context')return{owner,workRoot:payload.workRoot||libraryWorkRoot};
- assert.ok(['upload','list','readContent','readBinary','associateSource'].includes(action));
+ assert.ok(['upload','list','readContent','readBinary','associateSource','outputStatus'].includes(action));
  const store=libraryStore.create(app,owner,guard,payload.workRoot||libraryWorkRoot);
  return store.run(index=>libraryActions.execute(store,index,action,payload));
 });
@@ -76,7 +76,12 @@ app.whenReady().then(async()=>{
   await sender.fill('#cpTitle','统一需求完整交付验证');await sender.fill('#cpNote','保留背景材料，交付可打开的 Markdown 文档。');
   if(!await sender.js('!!document.querySelector(".cp-ck-t")'))await sender.click('#cpCkAdd');
   await sender.fill('.cp-ck-t','交付 Markdown 文档并完成验收');
-  assert.equal(await sender.js('document.querySelector("#cpVisibility").value'),'organization');
+  assert.equal(await sender.js('document.querySelector("#cpVisibility").value'),'related');
+  // This scenario explicitly verifies organization-visible delivery; new tasks stay private by default.
+  await sender.click('#cpVisibility');
+  for(const keyCode of ['End','Return'])for(const type of ['keyDown','keyUp'])
+    sender.win.webContents.sendInputEvent({type,keyCode});
+  await sender.until('document.querySelector("#cpVisibility").value==="organization"');
   const input=path.join(output,'requirement-input.txt');fs.writeFileSync(input,'原始需求材料，不可丢失。');
   sender.win.webContents.debugger.attach('1.3');
   const {root}=await sender.win.webContents.debugger.sendCommand('DOM.getDocument');
@@ -94,6 +99,9 @@ app.whenReady().then(async()=>{
   assert.equal((await recipient.js('SoduWorkAPI.getTasks()')).length,1);
   const attachments=await recipient.js(`SoduWorkAPI.listAttachments(${JSON.stringify(id)})`);assert.equal(attachments.length,1);
   await recipient.click(`[data-rq-open="${id}"]`);await recipient.until('!!document.querySelector(".rq-detail-overview")');
+  await recipient.until('!!document.querySelector("[data-rq-file]")');
+  if(await recipient.js('!!document.querySelector("[data-rq-material-group=input]:not([open])")'))
+    await recipient.click('[data-rq-material-group="input"]>summary');
   await recipient.click('[data-rq-file]');await recipient.until('fixturePreviews.length===1');assert.equal(await recipient.js('fixturePreviews.length'),1);
   const dispatch=await recipient.js(`SoduWorkAPI.dispatchToAI(${JSON.stringify(id)},{id:'local:pi',type:'agent'},'按完成标准交付',null,'',{strategy:'direct'})`);
   assert.equal(dispatch.ok,true);assert.equal((await recipient.js(`SoduWorkAPI.getTask(${JSON.stringify(id)})`)).status,'doing');
@@ -101,17 +109,13 @@ app.whenReady().then(async()=>{
   assert.deepEqual(observations.dispatches[0].files,['requirement-input.txt']);assert.equal(observations.dispatches[0].criteria.length,1);
   report.checks.push('production dispatch API sends original materials and completion criteria to provider, same Task enters delivering');
   await recipient.js(`RequirementsDetail.open(${JSON.stringify(id)})`);
-  assert.equal(await recipient.js('!!document.querySelector("[data-rq-edit]")'),true);
-  await recipient.click('[data-rq-edit]');
-  assert.equal(await recipient.js('document.querySelector("#rqEditForm [name=kind]").disabled'),true);
-  assert.equal(await recipient.js('document.querySelector("#rqEditForm [name=acceptance]").readOnly'),true);
+  assert.equal(await recipient.js('!!document.querySelector("[data-rq-edit],#rqEditForm")'),false);
   const rejectedDefinition=await recipient.js(`SoduWorkAPI.patchTask(${JSON.stringify(id)},{acceptanceCriteria:['Changed after execution']}).then(()=>({status:200}),error=>({status:error.status}))`);
   assert.equal(rejectedDefinition.status,409,'active execution cannot change the completion definition');
   assert.deepEqual((await recipient.js(`SoduWorkAPI.getTask(${JSON.stringify(id)})`)).acceptanceCriteria,['交付 Markdown 文档并完成验收']);
-  await recipient.click('[data-rq-edit-cancel]');
   await recipient.js(`SoduWorkAPI.addTaskComment(${JSON.stringify(id)},'@发送验收 请确认交付标准',[{type:'user',id:'sender',name:'发送验收'}])`);
   const notices=await call('/e2e/observations');assert.ok(notices.events.some(row=>row.client==='e2e-sender'&&row.event.type==='notice'&&JSON.stringify(row.event).includes('确认交付标准')));
-  report.checks.push('active execution locks type and completion criteria in the form and HTTP API; real comment emits targeted mention notification');
+  report.checks.push('active execution removes definition editing and the HTTP API rejects changed criteria; real comment emits targeted mention notification');
   await call('/e2e/finish/'+encodeURIComponent(id),'POST');
   await sender.js(`SoduWorkAPI.reviewTask(${JSON.stringify(id)},'完成标准与文件内容已核对')`);
   assert.equal((await sender.js(`SoduWorkAPI.getTask(${JSON.stringify(id)})`)).status,'done');
@@ -119,6 +123,7 @@ app.whenReady().then(async()=>{
   await sender.click('[data-rq-scope="all"]');
   assert.equal(await sender.js('document.querySelector("#rqLane-delivered").hidden'),false);
   await sender.click(`[data-rq-open="${id}"]`);await sender.until('document.querySelectorAll("[data-rq-file]").length===2');
+  await sender.click('[data-rq-material-group="output"]>summary');
   await sender.click(`[data-rq-file="output-${id}"]`);await sender.until('fixturePreviews.at(-1)?.name==="delivery.md"');assert.equal(await sender.js('fixturePreviews.at(-1).name'),'delivery.md');
   await sender.click(`[data-rq-library="${id}:output-${id}"]`);
   await sender.until('!!document.querySelector(".library-save-action.is-saved")');
@@ -187,14 +192,18 @@ app.whenReady().then(async()=>{
   await call('/e2e/finish/'+encodeURIComponent(directId),'POST');
   await reopened.js(`SoduWorkAPI.reviewTask(${JSON.stringify(directId)},'Fixture delivery verified')`);
   await reopened.js(`RequirementsDetail.open(${JSON.stringify(directId)})`);
-  const staleVersion=(await reopened.js(`SoduWorkAPI.getTask(${JSON.stringify(directId)})`)).requirementVersion;
+  assert.equal(await reopened.js('!!document.querySelector("[data-rq-edit],#rqEditForm")'),false);
+  const editId=directId+'-draft';
+  await reopened.js(`SoduWorkAPI.putTask(${JSON.stringify(editId)},{title:'Editable draft',note:'Original draft',status:'todo',triageStage:'ready',kind:'requirement'})`);
+  await reopened.js(`RequirementsDetail.open(${JSON.stringify(editId)})`);
+  const staleVersion=(await reopened.js(`SoduWorkAPI.getTask(${JSON.stringify(editId)})`)).requirementVersion;
   await reopened.click('[data-rq-edit]');
   await reopened.fill('#rqEditForm [name="note"]','尚未提交的本地编辑');
-  await reopened.js(`SoduWorkAPI.patchTask(${JSON.stringify(directId)},{title:'另一窗口已更新',requirementVersion:${staleVersion}})`);
+  await reopened.js(`SoduWorkAPI.patchTask(${JSON.stringify(editId)},{title:'另一窗口已更新',requirementVersion:${staleVersion}})`);
   await reopened.click('.rq-detail-footer [type="submit"]');await reopened.until('document.querySelector("[data-rq-error]")?.textContent.includes("已被同事更新")');
   assert.equal(await reopened.js('document.querySelector("#rqEditForm [name=note]").value'),'尚未提交的本地编辑');
-  assert.equal((await reopened.js(`SoduWorkAPI.getTask(${JSON.stringify(directId)})`)).title,'另一窗口已更新');
-  assert.notEqual((await reopened.js(`SoduWorkAPI.getTask(${JSON.stringify(directId)})`)).note,'尚未提交的本地编辑');
+  assert.equal((await reopened.js(`SoduWorkAPI.getTask(${JSON.stringify(editId)})`)).title,'另一窗口已更新');
+  assert.notEqual((await reopened.js(`SoduWorkAPI.getTask(${JSON.stringify(editId)})`)).note,'尚未提交的本地编辑');
   report.checks.push('concurrent edit is rejected without overwriting server state or losing local form input');
   for(const page of [sender,recipient,other,reopened])assert.deepEqual(await page.js('fixtureErrors'),[]);
   report.ok=true;

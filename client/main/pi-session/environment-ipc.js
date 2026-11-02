@@ -176,9 +176,9 @@ function install({ app, ipcMain, session, identityOf, capabilityGrantsOf, _skill
     catch (e) { return { ok: false, reason: String((e && e.message) || e) }; }
   });
 
-  ipcMain.handle('pi-session-runtimes', async () => {
+  ipcMain.handle('pi-session-runtimes', async (_event, options) => {
     try {
-      if (typeof session.availableRuntimes === 'function') return await session.availableRuntimes(app);
+      if (typeof session.availableRuntimes === 'function') return await session.availableRuntimes(app, options || {});
       const catalog = session.runtimes();
       return { ok: true, runtimes: catalog,
         availableRuntimes: catalog.filter(row => row && row.id === 'pi'),

@@ -32,6 +32,7 @@ app.whenReady().then(async()=>{
      'Content-Type':'application/json','X-Device-Key':'isolated-requirements-fixture-key-never-production'
     },body:JSON.stringify({device:options.clientId,name:options.name,platform:options.platform,version:options.version})});
     const data=await response.json();if(!response.ok)throw Error(JSON.stringify(data));
+    window.fixtureDeviceSession=data.session;
     return {...data,ok:!data.activationRequired,stored:true};
    }};
    window.fixtureErrors=[];
@@ -54,6 +55,7 @@ app.whenReady().then(async()=>{
   const load=()=>win.loadFile(path.join(__dirname,'../desk.html'),{query:{panel:'workspace',view:'history'}});
   stage('load-complete-workspace');
   await load();stage('wait-for-store');await until('!!document.querySelector("[data-view=history]")&&typeof Store!=="undefined"&&Store.taskState==="ready"&&!document.documentElement.classList.contains("soduwork-auth-pending")');
+  await js("SoduWorkI18n.setLocale('zh-CN')");
   await click('button[data-rail-view="history"]');await until('!!document.querySelector("#historyBoard.show")');
   assert.equal(await js('document.querySelectorAll("[data-view=workitems]").length'),0);
   assert.equal(await js('document.querySelector("#hbTitleText").textContent'),'需求池');
@@ -97,6 +99,27 @@ app.whenReady().then(async()=>{
   await click('[data-rq-edit-cancel]');assert.equal(await js('!!document.querySelector("#rqEditForm")'),false);
   const original=await js(`SoduWorkAPI.getTask(${JSON.stringify(taskId)})`);
   assert.equal(original.assigneeUserId,'sender');
+  // Replay assignment events with the production Store and complete workspace mounted.
+  const arrivalState=await js(`(async()=>{
+    const open=window.openTaskConversation, opened=[];
+    const before=[...document.querySelectorAll('[data-chat-id]')].map(n=>n.dataset.chatId);
+    window.openTaskConversation=(...args)=>{opened.push(args);return open(...args)};
+    try {
+      const task=await SoduWorkAPI.getTask(${JSON.stringify(taskId)});
+      for(const event of [
+        {type:'task.created',arrival:'assign',autoOpen:true},
+        {type:'task.updated',arrival:'assign',autoOpen:true,__fromWindow:true},
+        {type:'task.updated',arrival:'assign',autoOpen:true}
+      ]) Store.applyServerEvent({...event,task});
+      await new Promise(resolve=>setTimeout(resolve,150));
+      return {opened,before,after:[...document.querySelectorAll('[data-chat-id]')].map(n=>n.dataset.chatId),
+        drawer:!!document.querySelector('.rq-detail-overview'),state:Store.tasks.find(t=>t.id===task.id)?.status};
+    } finally {window.openTaskConversation=open}
+  })()`);
+  assert.deepEqual(arrivalState.opened,[]);
+  assert.deepEqual(arrivalState.after,arrivalState.before);
+  assert.equal(arrivalState.drawer,true);assert.equal(arrivalState.state,'todo');
+  report.checks.push('assignment arrival and replay preserve the active workspace and recent chats without opening a conversation');
   await click('[data-rq-edit]');await until('!!document.querySelector("#rqEditForm")');
   assert.equal(await js('document.querySelector("#rqEditForm [name=assigneeUserId]").value'),original.assigneeUserId);
   await click('#rqEditForm [name=note]');
@@ -156,7 +179,8 @@ app.whenReady().then(async()=>{
       method:'POST',headers:{'Content-Type':'application/json','X-Soduwork-Device':'e2e-sender'},
       body:JSON.stringify({assigneeId:options.agentId,assigneeType:options.assigneeType,brief:options.brief,
         model:options.model,repo:options.repo,executionContext:options.executionContext})});
-    const result=await response.json();if(!response.ok)throw Error(result.detail||'dispatch failed');return result;
+    const result=await response.json();if(!response.ok)throw Error(result.detail||'dispatch failed');
+    return {...result,conversationId:'fixture-runtime-'+id};
   };true`);
   await click('.rq-detail [data-rq-assign]');await until(`!!document.querySelector('#fwdAgentSelect option[value="local:pi"]')&&!_fwdLoading.ai`);
   await click('[data-fwd-select="fwdAgentSelect"]');
@@ -167,6 +191,7 @@ app.whenReady().then(async()=>{
   await click('#fwdConfirm');await until('window.navigationCalls.length===1');
   const target=(await js('navigationCalls'))[0];
   assert.equal(target.view,'create');assert.equal(target.payload.taskId,taskId);assert.equal(target.payload.navigation,true);
+  assert.equal(target.payload.chatId,'fixture-runtime-'+taskId);
   observed=await(await fetch(hub+'/e2e/observations')).json();
   assert.equal(observed.dispatches.filter(row=>row.id===taskId).length,1);
   assert.equal(await js('nativeQueueCalls.length'),1);
@@ -181,8 +206,10 @@ app.whenReady().then(async()=>{
    soduWorkAPI.conversationSession={history:async()=>({ok:true,chats:[{id:'long-chat',title:'项目长期会话',adapterId:'pi',cwd:'D:/isolated/project',requirementContext:{projectId:'e2e-project',repoId:''},status:'done'}]}),pickCwd:async()=>({ok:true,dir:'D:/isolated/project',name:'项目目录'})};
    NativeChat.sessionInfo=()=>({});
    NativeChat.enqueueTask=async(id,options)=>{
+    if(!window.fixtureDeviceSession)throw Error('Isolated enrollment did not return a device session');
     existingCalls.push({id,options});const res=await fetch(${JSON.stringify(hub)}+'/api/v1/tasks/'+encodeURIComponent(id)+'/conversation-turn',{
-     method:'POST',headers:{'Content-Type':'application/json','X-Soduwork-Device':'e2e-sender'},body:JSON.stringify({action:'prepare',conversationId:options.chatId,turnId:'turn-'+id,executor:'native'})});
+     method:'POST',headers:{'Content-Type':'application/json','X-Soduwork-Device':'e2e-sender',
+      Authorization:'Device '+window.fixtureDeviceSession},body:JSON.stringify({action:'prepare',conversationId:options.chatId,turnId:'turn-'+id,executor:'native'})});
     const receipt=await res.json();if(!res.ok)throw Error(receipt.detail||'receipt failed');return {ok:true,conversationId:options.chatId};};true`);
   await js('RequirementsBoard.refresh()');await click(`[data-rq-open="${nextId}"]`);await click('.rq-detail [data-rq-assign]');
   await until('!!document.querySelector(".rq-session-choice select option[value=long-chat]")');
@@ -280,7 +307,9 @@ app.whenReady().then(async()=>{
   assert.equal(await js('document.querySelectorAll("#detailPanel,#progInput").length'),0);
    await click('.rq-detail-more summary');
    await click('[data-rq-comments-open]');
-   await until('!!document.querySelector("[data-rq-evidence-modal]:not([hidden])")&&document.querySelector("[data-rq-comment-list]").textContent!=="正在加载协作记录…"');
+   await until('!!document.querySelector("[data-rq-evidence-modal]:not([hidden])")&&document.querySelector("[data-rq-comment-list]").textContent!=="正在加载活动记录…"');
+   assert.ok(await js('document.querySelectorAll("[data-rq-comment-list] .tfd-timeline li").length>0'), 'activity includes the real Hub task events');
+   assert.doesNotMatch(await js('document.querySelector("[data-rq-comment-list]").textContent'), /部分记录未能加载|agent:conversation|release[. ·]+candidate/);
    await click('[data-rq-evidence-close]');
    await until('!!document.querySelector(".rq-detail")&&!document.querySelector("[data-rq-evidence-modal]:not([hidden])")');
   await click('[data-rq-dismiss]');

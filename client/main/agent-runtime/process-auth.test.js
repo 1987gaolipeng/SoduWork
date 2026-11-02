@@ -223,3 +223,13 @@ test('worker authentication delegates to the host capability without local fetch
   assert.equal(calls[0][0], identity);
   assert.equal(calls[0][2], init);
 });
+
+test('artifact ZIP capability allows bounded binary responses without widening ordinary API limits',async()=>{
+  const body=new Uint8Array(MAX_RESPONSE_BYTES+1);body[0]=80;body[1]=75;
+  const f=fixture({fetch:async()=>new Response(body,{headers:{'X-Artifact-Version':'v1'}})});
+  const result=await f.host.request(hub+'/api/v1/tasks/task-a/artifacts.zip?artifactVersionId=v1');
+  assert.equal(result.body.byteLength,body.byteLength);assert.equal(result.body[0],80);
+  await assert.rejects(f.host.request(hub+'/api/v1/tasks/task-a'),{code:'RUNTIME_AUTH_RESPONSE_TOO_LARGE'});
+  await assert.rejects(f.host.request(hub+'/api/v1/tasks/task-a/artifacts.zip?path=private'),{code:'RUNTIME_AUTH_ROUTE_DENIED'});
+  f.host.close();
+});

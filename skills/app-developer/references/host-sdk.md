@@ -2,6 +2,8 @@
 
 本文接口对应 client/sdk/soduwork-app.js。先读取本轮同源 SDK，不假设旧客户端支持新接口。
 
+涉及添加本机文件、粘贴/拖入、持久素材或上传时，先读 [local-files.md](local-files.md)：原生选择器由 `attachments.pick` 触发，文件经会话管线交给技能；不能将选择成功当作业务上传完成。
+
 ## 启动与连接
 
 SDK 文件加载≠已连接；没有 `soduWorkApp.connect()`。原生桥由宿主注入，不能由页面申请 capabilities（权限在包声明）。正式包从“即用→我的”打开，不能以 file:// 或开发预览代替。
@@ -13,7 +15,7 @@ const page = await soduWorkApp.data.list({collection:'notes',limit:50});
 if (!page?.ok) throw Error(page?.reason || '数据读取失败');
 ```
 
-连接失败、权限不足、参数错误、SQLite 失败分别呈现原始 reason；不能一律显示“未连接壳”。禁用依赖项并允许重试；不得 catch 后切换 localStorage/IndexedDB 写业务数据。外部浏览器仅允许明确的演示模式，样例只放内存、注明不保存；2.5秒无响应不是“无宿主”的证明，超时也不证明写操作未执行。完整顺序见 development-workflow.md。
+连接失败、权限不足、参数错误、本地或云端数据失败分别呈现原始 reason；不能一律显示“未连接壳”。禁用依赖项并允许重试；不得 catch 后切换 localStorage/IndexedDB 或另一存储位置写业务数据。外部浏览器仅允许明确的演示模式，样例只放内存、注明不保存；2.5秒无响应不是“无宿主”的证明，超时也不证明写操作未执行。完整顺序见 development-workflow.md。
 
 ## 前端和后端选择
 
@@ -59,7 +61,9 @@ if (!updated.ok) throw Error(updated.reason);
 
 get：{keys?,includeSecrets?}；默认秘密仅返回 configuredKeys/secretMasks，不返回值。显式读自己的秘密须指定 keys。update：{values?,remove?,secretKeys?,expectedRevision?}；类型/声明校验，CAS 冲突后重读。命名任意合法 key；示例 serviceKey 无固定业务含义。密钥进系统安全存储，不能进入 URL、提示词、交付包或普通日志。
 
-## SQLite 持久化
+## 本地与云端持久化
+
+新即用显式声明 `jiyong.storage:{location:"local"}` 或 `{location:"cloud"}`，必须与用户创建时选择一致。云端沿用下面的 `data.*`、权限、分页、CAS 与初始化格式；Hub 自动开通，不需要自行配置后端或数据库连接。完整规范和 JSON Schema 见 [cloud-data.md](cloud-data.md)。旧包未声明位置仍是本地，不自动上传。以下 SQLite、磁盘目录与备份描述仅适用于 local。
 
 权限 data.read→apps/get/list；data.write→batch。每个即用独立数据库，存于宿主用户目录；SoduWork 账号隔离，同账号即用业务数据互通，无跨即用 ACL 或逐次确认；后台 Worker 执行，WAL/索引/分页/原子事务，不整表写 JSON。关闭窗口和升级保留数据；不依赖页面缓存或当前工作目录。不自动跨机器同步。JSON 记录不放大文件或秘密参数。
 
@@ -97,6 +101,8 @@ bindings 声明 {tool,argument,parameter}，例如把 data_list 的 collection �
 ## AI 与持续执行
 
 chat.send/insertText/expand/collapse 见 sdk/README.md；业务技能使用本轮授权工具，结果写上述存储，页面 onRefresh/加载/聚焦重新读取。发送成功只代表接收，真实数据回执才代表完成。
+
+智能联动、能力选择、画布回填及 Shell 确认/追踪见 [intelligent-interaction.md](intelligent-interaction.md)。`onRefresh/onTurnSettled` 只提示补读，不携带业务消息；`onDataChanged` 不覆盖即用自有集合。当前无通用业务 `onMessage` 或页面 Shell 执行接口。
 
 automation.create 复用现有 Hub/Runner 调度。页面用“订阅简报”“每天整理”等业务操作名，提交时间/频率/范围后创建，保留 requestId 防重。根级显式声明 entrypoints:{automation:true}；本机即用和已安装市场宿主即用的计划固定身份/版本/校验值，不把密钥写入计划。市场即用使用宿主生成的目录标识定位；缺少执行条件必须报阻塞；不能靠页面 setInterval，也不能在页面关闭时删除计划。执行设备/SoduWork 需要在线，页面窗口可关闭；不宣称关机继续本地执行。当前 SDK 没有计划列表/暂停/删除方法，不能编造。
 

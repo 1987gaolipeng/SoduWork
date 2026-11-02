@@ -50,13 +50,13 @@ function create(app, ref) {
   }
   let replayed = 0;
   function append(after, data) { appendMany([{ after, ...data }]); }
-  function appendMany(batch) {
+  function appendMany(batch, { flush = false } = {}) {
     if (!batch.length) return;
     if (file) {
       fs.mkdirSync(path.dirname(file), { recursive: true });
       // A failed prior append can leave a partial final line. Start a new
       // record boundary so a retry cannot glue valid JSON to that fragment.
-      fs.appendFileSync(file, '\n' + batch.map(row => JSON.stringify(row) + '\n').join(''), { mode: 0o600 });
+      fs.appendFileSync(file, '\n' + batch.map(row => JSON.stringify(row) + '\n').join(''), { mode: 0o600, flush });
     }
     rows.push(...batch);
     replayed = rows.length;

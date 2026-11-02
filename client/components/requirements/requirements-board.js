@@ -201,7 +201,7 @@
   function moveAction(task, next) {
     const current = R.stage(task);
     if (current === 'delivering' && next === 'reviewing' && R.canSubmitReview(task)) return 'submit-review';
-    if (current === 'reviewing' && next === 'delivered' && R.canSubmitReview(task)) return 'review';
+    if (current === 'reviewing' && next === 'delivered' && task.canReview === true) return 'review';
     if (next === 'delivering' && V.assignable(task)) return 'assign';
     return R.stagePatch(task, next) ? 'triage' : '';
   }
@@ -465,8 +465,13 @@
       Object.assign(state, { scope: 'actionable', archive: 'active', limits: {} });
       persist();
     }
-    root.inert = false; root.classList.add('show'); render(true); void loadProjects(); global.TaskApprovalInbox?.refresh().catch(() => {});
-    if (!showing) global.expandForOverlay?.();
+    root.inert = false; root.classList.add('show'); render(true);
+    if (!showing) {
+      // Reconcile missed task updates when returning from another view or device.
+      void refresh(); global.expandForOverlay?.();
+    } else {
+      void loadProjects(); global.TaskApprovalInbox?.refresh().catch(() => {});
+    }
   }
   function close() {
     const root = panel(); if (!root) return; hideMenu(); closeCreateMenu(false);

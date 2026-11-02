@@ -5,7 +5,7 @@ const fs = require('node:fs/promises'), path = require('node:path'), os = requir
 const assert = require('node:assert/strict');
 const builder = require('electron-builder');
 const { createHash, randomUUID } = require('node:crypto');
-const productionGuids = new Set(Object.values(require('../../distributions.json')).map(value => value.nsisGuid.toLowerCase()));
+const productionGuids = new Set([require('../../main/distribution.cjs').current().nsisGuid.toLowerCase()]);
 function validateFixtureGuid(value) {
   assert.equal(typeof value, 'string', 'Fixture receipt must provide an isolated NSIS GUID');
   assert.match(value, /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i, 'Invalid fixture NSIS GUID');
@@ -73,6 +73,8 @@ async function build(options) {
   assert.equal(path.dirname(root), os.tmpdir());
   assert.ok(path.basename(root).startsWith('soduwork-update-e2e-'));
   assert.match(options.config.appId, /^com\.soduwork\.update\.e2e\.[A-Za-z0-9_.-]+$/, 'Installer fixtures must use an isolated appId');
+  // Explicit fixture identities must never overlap the distributor's installation.
+  if (options.config.nsis?.guid !== undefined) validateFixtureGuid(options.config.nsis.guid);
   const include = options.config.nsis?.include;
   assert.ok(typeof include === 'string' && path.isAbsolute(include), 'Fixture installer include must be explicit');
   assert.doesNotMatch(include, /["\r\n\0]/, 'Unsafe NSIS include path');

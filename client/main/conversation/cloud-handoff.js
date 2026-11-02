@@ -91,14 +91,18 @@ function assertPortable(handle) {
 }
 
 function create({ app, identityOf, request = http, workspace = portable, notify = () => {}, validateHandle = () => {},
-  wait = sleep, stopTimeout = 45000, interval = 1800 }) {
+  wait = sleep, stopTimeout = 45000, interval = 1800, remoteDirectory = false }) {
   const root = path.join(app.getPath('userData'), 'conversation-handoffs');
-  const previews = new Map(), records = new Map(), watches = new WeakMap(), operations = new Map(), writes = new Map();
+  const previews = new Map(), records = new Map(), remoteRecords = new Map(), watches = new WeakMap(), operations = new Map(), writes = new Map();
+  let remoteDirectoryPromise = null, remoteDirectoryAt = 0, remoteDirectoryScope = '';
+  const remoteDirectoryTtl = 5000, remoteDirectoryPageSize = 100, remoteDirectoryMaxPages = 20;
   const previewRevisions = new Map();
+  const pendingViews = new Set();
   const protectedHandles = new WeakSet();
   const file = id => path.join(root, digest(String(id)) + '.json');
   function read(id) {
     if (records.has(id)) return records.get(id);
+    if (remoteRecords.has(id)) return remoteRecords.get(id);
     let record;
     try { record = JSON.parse(syncFs.readFileSync(file(id), 'utf8')); }
     catch (error) { if (error.code === 'ENOENT') return null; throw Error('云端交接记录无法读取，已阻止在本地重复执行'); }
@@ -107,12 +111,18 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
   }
   function save(record) {
     const id = record.sessionId, previous = records.get(id);
+    // A cross-device row is a cache of Hub metadata, never a second durable
+    // execution receipt. Its transcript is recovered through ai-session.
+    if (record.remoteProjection) {
+      remoteRecords.set(id, record);
+      return Promise.resolve(record);
+    }
     // Publish the current revision before another async poll/send reads it,
     // then serialize disk writes. Polling must never erase a pending send ID.
     records.set(id, record);
     const job = (writes.get(id) || Promise.resolve()).catch(() => {}).then(async () => {
       await fs.mkdir(root, { recursive: true, mode: 0o700 });
-      await durableFiles.writeFile(file(id), JSON.stringify(record), { mode: 0o600 });
+      await durableFiles.writeFile(file(id), JSON.stringify(record), { mode: 0o600, flush: true });
     }).catch(error => {
       if (records.get(id) === record) { if (previous) records.set(id, previous); else records.delete(id); }
       throw error;
@@ -121,7 +131,7 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
   }
   const cache = outputCache.create({ app });
   const materializations = new Map();
-  async function materializeOutputs(record, current, taskRows) {
+  async function materializeOutputs(record, current, taskRows, options) {
     const id = record.sessionId;
     const job = (materializations.get(id) || Promise.resolve()).catch(() => {}).then(async () => {
       const assertCurrent = async () => {
@@ -132,7 +142,7 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
       };
       await assertCurrent();
       const latest = read(id);
-      const result = await cache.materialize(latest, current, taskRows, assertCurrent);
+      const result = await cache.materialize(latest, current, taskRows, assertCurrent, options);
       // Polls, sends and materialization share one durable receipt. Never save
       // an earlier copy over a concurrently acknowledged cloud message.
       const next = read(id);
@@ -166,7 +176,7 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
     if (!outputAttachmentRows(attachments, record.taskId).some(row => String(row.id) === String(input.attachmentId))) {
       throw Error('这份成果已更新或暂时不可用，请刷新后重试');
     }
-    await materializeOutputs(record, current, attachments);
+    await materializeOutputs(record, current, attachments, { previewOnly: input.previewOnly === true });
     const projected = await artifactSession(handle);
     const files = projected.outputSnapshot().files;
     const file = files.find(row => row.remoteAttachmentId === String(input.attachmentId));
@@ -177,7 +187,9 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
   async function identity(record, handle) {
     const value = await identityOf(app);
     if (!value) throw Error('请先连接 SoduWork 服务并登录');
-    if (record && record.owner !== scope(value)) throw Error('这条云端会话属于其他账号或服务，请切回原连接');
+    if (record && record.owner !== scope(value) &&
+        (!record.syncOwner || record.syncOwner !== require('./cloud-execution-sync').scope(value)))
+      throw Error('这条云端会话属于其他账号或服务，请切回原连接');
     if (handle) await validateHandle(handle, value);
     return value;
   }
@@ -185,6 +197,11 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
     if (!record) return null;
     return { transferId: record.transferId, phase: record.phase, entryKind: record.entryKind || 'handoff', taskId: record.taskId || '',
       ref: record.ref || '', target: record.target || null, error: record.error || '',
+      accepted: Boolean(record.accepted), acceptedAt: record.acceptedAt || '',
+      canAbort: record.canAbort === undefined ? !record.accepted && ['preparing', 'uploading', 'prepared'].includes(record.phase) : record.canAbort === true,
+      pendingApprovals: (record.cloudApprovals || []).length, pendingMessages: (record.cloudMessages || []).length,
+      historyGap: record.syncSnapshot?.historyGap || null,
+      outputPending: Boolean(record.syncArtifactsPending), outputError: record.syncArtifactError || '',
       // A cloud runner can produce a reachable URL without uploading a file
       // (for example a preview server, PR, or deployment). Keep it on the
       // durable handoff so reopened conversations can render the same result.
@@ -192,6 +209,95 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
   }
   const route = record => '/conversation-handoffs/' + encodeURIComponent(record.transferId);
   const cloudStart = require('./cloud-start').create({ app, root, read, save, identity, request, publicRecord });
+
+  function remoteSaved(row, adapterId, model) {
+    const displayName = String(row.displayName || row.target?.runnerName || adapterId || 'Cloud').slice(0, 120);
+    return { cwd: '', adapterId, model,
+      snapshot: { messages: [], tools: [], pendingUser: null, adapterId, displayName,
+        modelSelection: { name: model, model: { id: model, name: model, label: model || 'default' } },
+        execution: { cloud: true }, status: 'idle' } };
+  }
+  function remoteRecord(row, current) {
+    const taskId = String(row.taskId || '').trim();
+    if (!taskId) return null;
+    const sessionId = String(row.sessionId || row.id || ('cloud-task:' + taskId)).trim();
+    const adapterId = String(row.adapterId || row.target?.agentId || 'pi').trim();
+    const model = String(row.model || row.target?.model || '').trim();
+    const rawState = String(row.remoteState || row.state || 'queued').trim();
+    const remoteState = ['running', 'queued', 'dispatching', 'done', 'completed', 'failed', 'stopped'].includes(rawState)
+      ? rawState : 'queued';
+    const numericAt = Number(row.at);
+    return { sessionId, transferId: 'remote:' + taskId, owner: scope(current), entryKind: 'cloud',
+      remoteProjection: true, phase: 'committed', title: String(row.title || 'Cloud conversation').slice(0, 200),
+      at: Number.isFinite(numericAt) ? numericAt : Date.parse(row.at) || 0,
+      taskId, ref: String(row.ref || '').trim(), adapterId, remoteState,
+      target: row.target || null, options: { model }, activeExecutionSelection: row.activeExecutionSelection || null,
+      workflowKnown: row.workflow === false || row.workflow === true,
+      workflow: row.workflow === true,
+      canContinue: row.canContinue === true, canSend: row.canSend === true,
+      saved: remoteSaved(row, adapterId, model) };
+  }
+  async function refreshRemoteDirectory({ force = false } = {}) {
+    if (!remoteDirectory) return [];
+    if (remoteDirectoryPromise) return remoteDirectoryPromise;
+    const current = await identity();
+    const currentScope = scope(current);
+    if (!force && currentScope === remoteDirectoryScope && Date.now() - remoteDirectoryAt < remoteDirectoryTtl) {
+      return [...remoteRecords.values()];
+    }
+    const load = (async () => {
+      const rows = [];
+      let cursor = '';
+      for (let page = 0; page < remoteDirectoryMaxPages; page += 1) {
+        const query = '?limit=' + remoteDirectoryPageSize + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
+        const reply = await request(current, '/cloud-conversations' + query);
+        if (Array.isArray(reply?.chats)) rows.push(...reply.chats);
+        const next = String(reply?.nextCursor || '');
+        if (!reply?.hasMore || !next || next === cursor) break;
+        cursor = next;
+      }
+      const nextRecords = new Map();
+      for (const row of rows) {
+        const record = remoteRecord(row, current);
+        if (record && record.owner === scope(current)) nextRecords.set(record.sessionId, record);
+      }
+      remoteRecords.clear();
+      for (const [id, record] of nextRecords) remoteRecords.set(id, record);
+      remoteDirectoryAt = Date.now();
+      remoteDirectoryScope = currentScope;
+      return [...nextRecords.values()];
+    })();
+    remoteDirectoryPromise = load;
+    try { return await load; }
+    finally { if (remoteDirectoryPromise === load) remoteDirectoryPromise = null; }
+  }
+  function remoteHistoryRow(record) {
+    return { id: record.sessionId, title: record.title, at: record.at, cwd: '',
+      workspaceName: record.target?.runnerKind === 'work-computer' ? 'work computer' : 'cloud',
+      workspaceLabel: record.target?.runnerName || record.target?.host || 'cloud',
+      locationMode: 'remote', location: record.target?.runnerKind || 'cloud',
+      adapterId: record.adapterId, taskId: record.taskId, state: record.remoteState,
+      ref: record.ref, owner: record.owner, workflowKnown: record.workflowKnown,
+      workflow: record.workflow,
+      cloud: true, remoteProjection: true, canSend: record.canSend === true,
+      readOnly: record.canSend !== true };
+  }
+  async function history({ includeAliases = false } = {}) {
+    const local = await cloudStart.history();
+    if (!remoteDirectory) return local;
+    let remote;
+    try { remote = await refreshRemoteDirectory(); }
+    catch (_) { return local; }
+    const seen = new Set((local.chats || []).map(row => row.id));
+    // A persisted sync receipt has a device-local ID but represents the same
+    // Hub task as the directory entry. Keep its replayable history entry.
+    const tasks = new Set((local.chats || []).map(row => row.taskId).filter(Boolean));
+    const cached = (local.chats || []).map(row => ({ ...row,
+      historyAliasIds: remote.filter(alias => alias.taskId && alias.taskId === row.taskId &&
+        alias.sessionId !== row.id).map(alias => alias.sessionId) }));
+    return { ok: true, chats: [...cached, ...remote.filter(row =>
+      !seen.has(row.sessionId) && (includeAliases || !tasks.has(row.taskId))).map(remoteHistoryRow)] };
+  }
   const json = body => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   async function cleanSnapshot(record) {
     const suffixes = record.phase === 'aborted' ? ['.zip', '.view.json'] : ['.zip'];
@@ -222,7 +328,9 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
   function protect(handle) {
     if (protectedHandles.has(handle)) return;
     protectedHandles.add(handle);
-    for (const method of ['submit', 'send', 'continueGoal', 'disableGoal', 'selectAgent', 'selectModel', 'setThinkingMode', 'setAccessPolicy', 'updateQueue']) {
+    const methods = ['submit', 'continueGoal', 'disableGoal', 'selectAgent', 'selectModel', 'setThinkingMode', 'setAccessPolicy', 'updateQueue'];
+    if (!handle.remoteContinuation) methods.push('send');
+    for (const method of methods) {
       if (typeof handle[method] !== 'function') continue;
       const original = handle[method];
       handle[method] = function (...args) {
@@ -245,6 +353,8 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
     }
     if (!['prepared', 'committing', 'committed', 'aborted'].includes(receipt.phase)) throw Error('云端交接状态无效');
     const next = { ...record, phase: receipt.phase, taskId: receipt.taskId || record.taskId,
+      accepted: receipt.accepted === true || record.accepted === true, acceptedAt: receipt.acceptedAt || record.acceptedAt || '',
+      canAbort: receipt.canAbort === true,
       ...(receipt.deliveryMode === 'git' ? { deliveryPresentation: 'summary', codeDelivery: receipt.codeDelivery || { kind: 'git' } } : {}),
       ref: receipt.ref || record.ref, target: { ...record.target, ...receipt.target }, error: receipt.error || '' };
     await save(next);
@@ -354,7 +464,7 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
         await durableFiles.writeFile(path.join(root, record.transferId + '.view.json'), JSON.stringify({
           cwd: handle.cwd, adapterId: handle.adapterId, snapshot: handle.snapshot(),
           model: { id: snapshot.manifest.source.modelName },
-        }), { flag: 'wx', mode: 0o600 });
+        }), { flag: 'wx', mode: 0o600, flush: true });
         await fs.writeFile(path.join(root, record.transferId + '.zip'), snapshot.bytes, { flag: 'wx', mode: 0o600 });
         await save(record);
         const form = new FormData(); form.set('file', new Blob([snapshot.bytes], { type: 'application/zip' }), 'workspace.zip');
@@ -378,6 +488,10 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
     return busy(handle, async () => {
       const record = guard(handle); if (!record) return { ok: true, handoff: null };
       const current = await identity(record);
+      if (record.syncId) {
+        await synchronization.tick();
+        return { ok: true, handoff: publicRecord(read(handle.sessionId)) };
+      }
       if (record.entryKind === 'cloud' && record.phase !== 'committed') {
         const result = await cloudStart.retry(record);
         if (result.ok) observe(handle);
@@ -408,7 +522,7 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
 
   function view(handle, snapshot) {
     const record = guard(handle); if (!record) return snapshot;
-    const watch = watches.get(handle), remote = watch?.state;
+    const watch = watches.get(handle), remote = watch?.state || record.syncSnapshot;
     const handoff = publicRecord(record);
     // Older handoff records predate the reachable-host field. The session API
     // still carries the runner host, so enrich the live view without rewriting
@@ -421,20 +535,27 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
     const selected = executionSelection.active(record);
     const model = selected.modelName || '';
     const artifactUrl = String(record.artifactUrl || watch?.artifactUrl || snapshot?.execution?.artifactUrl || snapshot?.artifactUrl || '').trim();
+    const cachedDelivery = record.syncState?.ref === record.ref && Number.isSafeInteger(remote?.persistedThrough) &&
+      record.syncState.cursor >= remote.persistedThrough && record.syncArtifactsPending === false;
     return { ...snapshot, ...(artifactUrl ? { artifactUrl } : {}),
       ...(record.codeDelivery ? { codeDelivery: record.codeDelivery, deliveryMode: 'git' } : {}), cloudHandoff: handoff,
       ...(record.phase === 'committed' ? {
         // A remote final message precedes attachment collection and local
         // materialization. Only the completed, fully collected turn can add
         // a new desktop delivery card; historical cards remain visible.
-        deliveryPending: !remote || !['done', 'completed'].includes(remote.status) || Boolean(watch.more) ||
-          watch.artifactsKey !== record.ref + ':' + remote.status + ':' + watch.cursor,
+        deliveryPending: !remote || !['done', 'completed'].includes(remote.status) || Boolean(watch?.more || remote.historyGap) ||
+          (!cachedDelivery && (!watch || watch.artifactsKey !== record.ref + ':' + remote.status + ':' + watch.cursor)),
         adapterId, displayName: target?.displayName || adapterId,
         executionSelectionPending: Boolean(record.pendingExecutionSelection),
         modelSelection: { name: model, model: { id: model, name: model, label: model || '执行机默认模型' } },
         status: ['running', 'queued', 'dispatching'].includes(remote?.status) ? 'streaming'
           : remote?.status === 'failed' ? 'error' : 'idle',
-        statusText: watch?.error || '', queue: [], queued: 0, pendingUi: null, pendingPermissions: [],
+        statusText: watch?.error || (record.syncArtifactError ? require('./cloud-execution-sync').ARTIFACT_RETRY_MESSAGE : '') ||
+          (remote?.historyGap ? require('./cloud-execution-sync').HISTORY_GAP_MESSAGE : '') ||
+          ((record.cloudMessages || []).length ? '消息已保存，正在等待执行机确认，请勿重复发送。' : ''),
+        queue: [], queued: 0, pendingUi: null, pendingPermissions: [],
+        cloudApprovals: record.cloudApprovals || [],
+        cloudMessages: record.cloudMessages || [],
         accessControl: { ...snapshot.accessControl, supported: false, canChangeDuringSession: false },
         execution: { ...require('./cloud-timing').project(remote), ...(artifactUrl ? { artifactUrl } : {}), running: ['running', 'queued', 'dispatching'].includes(remote?.status), stopped: remote?.status === 'stopped', queue: [],
           configured: false, visible: false, quality: null, harness: null,
@@ -442,9 +563,30 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
       } : {}) };
   }
   async function reopen(sessionId, ref) {
-    const record = read(sessionId);
+    let record = read(sessionId);
+    if (!record && remoteDirectory) {
+      // Directory discovery is optional for an unknown local archive. Its
+      // caller still verifies persisted ownership before resuming locally.
+      // Known transfers never take this fallback and remain fail-closed.
+      try { await refreshRemoteDirectory({ force: true }); }
+      catch (_) { return null; }
+      record = remoteRecords.get(String(sessionId || ''));
+    }
     if (!record || record.phase === 'aborted') return null;
     await identity(record);
+    if (record.remoteProjection) {
+      const saved = record.saved || remoteSaved(record, record.adapterId, record.options?.model || '');
+      let handle;
+      handle = require('./cloud-conversation-view').create({ app, ref, record, saved,
+        recordOf: () => read(record.sessionId), artifactDirectory: () => outputCache.directory(app, read(record.sessionId)),
+        // The projection never executes locally. These callbacks append a
+        // turn to the existing Hub task, so a desktop can continue a cloud
+        // conversation started by mobile/Web while the Runner stays pinned.
+        sendRemote: record.canSend === true
+          ? (view, text, attachments, options) => send(view, text, attachments, options) : undefined,
+        stopRemote: record.canSend === true ? view => stop(view) : undefined });
+      observe(handle); return handle;
+    }
     // No upload can be issued before this durable phase advances. A crashed
     // preparation therefore has no remote owner and may safely reopen locally.
     if (record.phase === 'preparing') {
@@ -462,6 +604,12 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
     }
     const handle = require('./cloud-conversation-view').create({ app, ref, record, saved,
       recordOf: () => read(record.sessionId), artifactDirectory: () => outputCache.directory(app, read(record.sessionId)) });
+    if (record.phase !== 'committed') {
+      const snapshot = handle.snapshot, close = handle.close;
+      handle.snapshot = () => view(handle, snapshot());
+      handle.close = (...args) => { pendingViews.delete(handle); return close(...args); };
+      pendingViews.add(handle);
+    }
     observe(handle); return handle;
   }
   function observe(handle) {
@@ -484,7 +632,8 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
     handle.outputs = () => outputCache.index(app, read(handle.sessionId)).files;
     handle.outputSnapshot = () => outputCache.index(app, read(handle.sessionId));
     handle.outputSnapshotAsync = async () => handle.outputSnapshot();
-    handle.cancel = () => stop(handle);
+    handle.cancel = record.remoteProjection && record.canSend !== true
+      ? original.cancel : () => stop(handle);
     handle.close = function () { watch.closed = true; clearTimeout(watch.timer); watches.delete(handle);
       handle.cancel = original.cancel; handle.outputs = original.outputs; handle.outputSnapshot = original.outputSnapshot;
       handle.outputSnapshotAsync = original.outputSnapshotAsync;
@@ -497,26 +646,37 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
       let collected = false;
       try {
         const live = guard(handle), current = await identity(live);
-        const page = await request(current, '/tasks/' + encodeURIComponent(live.taskId) + '/ai-session?ref=' +
+        const details = live.syncId ? await request(current, '/cloud-execution-sync/' + encodeURIComponent(live.syncId) +
+          '?ref=' + encodeURIComponent(live.ref) + '&since=' + watch.cursor + '&limit=400') : null;
+        const page = details ? details.page : await request(current, '/tasks/' + encodeURIComponent(live.taskId) + '/ai-session?ref=' +
           encodeURIComponent(live.ref) + '&since=' + watch.cursor + '&limit=400');
+        await identity(live);
+        if (!page) throw Error('云端执行记录尚未就绪，请稍后同步');
         if (page.ref && page.ref !== live.ref) throw Error('云端执行标识不一致，请核对任务');
+        if (page.persistedThrough !== undefined && (!Number.isSafeInteger(page.last) || page.last > page.persistedThrough))
+          throw Error('云端执行连续水位无效，请重新同步');
         if (watch.closed) return;
         watch.state = page; watch.error = '';
-        if (live.entryKind === 'cloud' && live.remoteState !== page.status || page.activeExecutionSelection && JSON.stringify(live.activeExecutionSelection) !== JSON.stringify(page.activeExecutionSelection)) {
-          await save({ ...read(handle.sessionId), remoteState: page.status, at: Date.now(),
+        if (details || (live.entryKind === 'cloud' && live.remoteState !== page.status) ||
+            (page.activeExecutionSelection && JSON.stringify(live.activeExecutionSelection) !== JSON.stringify(page.activeExecutionSelection))) {
+          // Reading execution state is not new conversation activity.
+          await save({ ...read(handle.sessionId), remoteState: page.status,
+            ...(details ? { cloudApprovals: details.approvals || [], cloudMessages: details.messages || [] } : {}),
             ...(page.activeExecutionSelection ? { activeExecutionSelection: page.activeExecutionSelection } : {}) });
         }
         const serviceUrl = serviceUrlFromPage(page.items);
         if (serviceUrl) watch.artifactUrl = serviceUrl;
         await output.consume(live.ref, page.items);
-        watch.more = page.items?.length >= 400 && Number(page.last) > watch.cursor;
-        watch.cursor = Math.max(watch.cursor, Number(page.last || 0), ...(page.items || []).map(x => Number(x.seq) || 0));
+        watch.more = typeof page.hasMore === 'boolean' ? page.hasMore : page.items?.length >= 400 && Number(page.last) > watch.cursor;
+        watch.cursor = Math.max(watch.cursor, Number(page.last || 0));
         const artifactsKey = live.ref + ':' + page.status + ':' + watch.cursor;
         if (['done', 'completed', 'failed', 'stopped'].includes(page.status) && !watch.more &&
             watch.artifactsKey !== artifactsKey) {
           // The existing status endpoint collects Runner files into authorized
           // task attachments. Reading the transcript alone never does that.
-          const settled = await request(current, '/tasks/' + encodeURIComponent(live.taskId) + '/ai-status');
+          const settled = details ? { artifactUrl: details.conversation?.artifactUrl } :
+            await request(current, '/tasks/' + encodeURIComponent(live.taskId) + '/ai-status');
+          await identity(live);
           if (settled?.deliveryKind === 'code' || read(handle.sessionId)?.codeDelivery) {
             await save({ ...read(handle.sessionId), deliveryPresentation: 'summary', codeDelivery: {
               ...read(handle.sessionId)?.codeDelivery, kind: 'git',
@@ -531,13 +691,10 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
             // here also covers URL-only deliveries with no attachments/events.
             notify(handle, { kind: 'settled' });
           }
-          // Fetch the authorized output list once the Runner has settled and
-          // materialize it into this conversation's private result directory.
-          // This makes cloud output use the same local artifact index as a
-          // native session and avoids opening Content-Disposition: attachment
-          // URLs in a system Save As dialog.
-          const attachmentRows = await request(current, '/tasks/' + encodeURIComponent(live.taskId) + '/attachments');
-          await materializeOutputs(read(handle.sessionId), current, attachmentRows);
+          // Cache only browser-readable results and preview assets on completion.
+          // Other outputs remain remote file cards until explicitly opened or saved.
+          const attachmentRows = details ? details.attachments : await request(current, '/tasks/' + encodeURIComponent(live.taskId) + '/attachments');
+          await materializeOutputs(read(handle.sessionId), current, attachmentRows, { previewOnly: true });
           watch.artifactsKey = artifactsKey; collected = true;
         }
       } catch (error) { watch.error = String(error.message || error); }
@@ -608,7 +765,27 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
     catch (_) { return false; }
   }
   const executionSelection = require('./cloud-execution-selection').create({ app, read, save, guard, identity, request, view, notify, busy });
-  return { reopen, start: cloudStart.start, history: cloudStart.history, forget: cloudStart.forget, isRemote,
+  const projection = require('./cloud-execution-projection').create({ app, root, read, save,
+    materialize: materializeOutputs, directory: outputCache.directory });
+  const synchronization = require('./cloud-execution-sync').create({ app, identityOf, request, open: projection.open,
+    changed: presence => {
+      for (const handle of pendingViews) {
+        if (handle.sessionId !== presence.id) continue;
+        if (read(handle.sessionId)?.phase === 'committed') { observe(handle); pendingViews.delete(handle); }
+        notify(handle, { kind: 'cloud-handoff' });
+      }
+      syncListeners.forEach(listener => { try { listener(presence); } catch (_) {} });
+    } });
+  const syncListeners = new Set();
+  async function forget(id) {
+    const record = read(String(id || ''));
+    if (record?.remoteProjection) {
+      return { ok: false, reason: 'remote conversation must be managed by its source task' };
+    }
+    return cloudStart.forget(id);
+  }
+  return { reopen, start: cloudStart.start, history, forget, isRemote,
+    synchronization, onSynchronized(listener) { syncListeners.add(listener); return () => syncListeners.delete(listener); },
     targets: async agentId => request(await identity(), '/conversation-handoffs/targets?agentId=' + encodeURIComponent(agentId || 'pi')),
     ...Object.fromEntries(Object.entries({ selectExecution: executionSelection.selectExecution, executionRuntimes: executionSelection.executionRuntimes, preview, confirm, recover, abort, guard, view, observe, send, stop, materialize, artifactSession,
     current: handle => publicRecord(guard(handle)) }).map(([key, fn]) =>

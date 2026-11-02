@@ -33,7 +33,8 @@ async def publish(session, row):
     sender = await session.get(models.User, row.sender_id)
     recipient = await session.get(models.User, row.recipient_id)
     value = mate_messages.public(row, sender, recipient)
-    event = {"type": "notice", "text": value["text"], "kind": "task_assignment",
+    event = {"type": "notice", "text": value["text"], "textMessage": value.get("textMessage"),
+             "kind": "task_assignment",
              "taskId": value["taskId"], "messageId": row.client_message_id,
              "serverMessageId": row.id, "senderId": row.sender_id,
              "senderName": value["senderName"], "recipientId": row.recipient_id,

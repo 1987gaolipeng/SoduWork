@@ -32,6 +32,8 @@ function openSettings() {
 }
 function closeSettings() {
   const panel = document.getElementById('settingsPanel');
+  // Dispose the body-level menu before this page is hidden; reopening creates one fresh control.
+  if (panel) globalThis.ForwardSelect?.destroy?.(panel);
   if (panel) panel.classList.remove('show');
   if (typeof shrinkFromOverlay === 'function') shrinkFromOverlay();
 }
@@ -50,7 +52,13 @@ function _applyLocaleUI() {
 }
 function _syncLocaleSelect(value) {
   const select = document.getElementById('localeSelect');
-  if (select) select.value = value;
+  if (!select) return;
+  select.value = value;
+  if (select.dataset) select.dataset.searchPlaceholder = globalThis.SoduWorkI18n?.translateText?.('搜索') || '搜索';
+  // Use the existing in-page picker instead of an OS popup with a separate focus lifecycle.
+  // Keep the select as the value owner so persistence and cross-window locale changes agree.
+  const root = select.closest?.('#settingsPanel');
+  if (root) globalThis.ForwardSelect?.enhance?.(root);
 }
 
 /* Window scale (--ui-scale) and font scale (--font-scale) are independent preferences.
@@ -324,8 +332,7 @@ function _bindSkinEntry() {
     if (!(window.soduWorkAPI && soduWorkAPI.openDeskWindow)) {
       const sp = document.getElementById('settingsPanel');
       if (sp && sp.classList.contains('show')) {
-        sp.classList.remove('show');
-        if (typeof shrinkFromOverlay === 'function') shrinkFromOverlay();
+        closeSettings();
       }
     }
     if (typeof openSkinEntry === 'function') openSkinEntry();

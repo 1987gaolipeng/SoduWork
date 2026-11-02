@@ -492,6 +492,27 @@ const Store={
     }
     if(ev.type==='config.patch'){this._applyConfigPatch(ev.patch);return;}
     if(ev.type==='notice'){
+      // An administrator may restore the account allowance through a system
+      // notification while this conversation is still open. Clear the stale
+      // card immediately and reconcile the authoritative quota in background.
+      try {
+        const body = [ev.text, ev.bodyText, ev.message, ev.title].filter(Boolean).join(' ');
+        const userId = String(window.SoduWorkAPI?.clientAuthSnapshot?.().user?.id || '');
+        const recipientId = String(ev.recipientId || '');
+        // A private notice for another member must never change this account's
+        // composer state. System notices without a recipient remain eligible.
+        if (!recipientId || !userId || recipientId === userId) {
+          const restored = /(?:额度|配额|quota|allowance).*(?:恢复|已恢复|restor(?:e|ed|ation)|renew|replenish)|(?:恢复|restor(?:e|ed|ation)|renew|replenish).*(?:额度|配额|quota|allowance)/i.test(body);
+          const notice = window.SoduWorkQuotaNotice;
+          let refresh = restored ? notice?.markRestored?.() : notice?.refreshIfBlocked?.();
+          if (restored && refresh === false) refresh = notice?.refreshIfBlocked?.();
+          if (refresh && typeof refresh.catch === 'function') refresh.catch(() => {});
+        }
+      } catch (_) {}
+      // Automation runs are ordinary conversations.  Ignore delayed notices
+      // emitted by the retired task/workflow route so AI execution cannot be
+      // presented as the automation's execution state.
+      if(ev.automation===true)return;
       // Use the same identity boundary for inbox validation and presentation; identity-free legacy events only trigger authenticated inbox synchronization.
       const personal=ev.serverMessageId||ev.senderId||ev.recipientId||['mate_message','task_assignment'].includes(ev.kind);
       if(personal&&!window.MateNoticeSync?.canPresent(ev)){
@@ -613,10 +634,9 @@ const Store={
         const last=Number(this._incomingSeen[key]||0);
         if(now-last>60000){
           this._incomingSeen[key]=now;
+          // Assignment updates the requirement and its notification; only an explicit user action opens a conversation.
           incomingDetail={type:ev.type,taskId:eventTaskId,task:Object.assign({},visible),
-            arrival:eventArrival,by:eventBy,actionable:true,autoOpen:ev.autoOpen!==false};
-          this._incomingQueue.push(incomingDetail);
-          if(this._incomingQueue.length>20)this._incomingQueue.splice(0,this._incomingQueue.length-20);
+            arrival:eventArrival,by:eventBy,actionable:true,autoOpen:false};
         }
       }
     }else if(ev.type==='task.deleted'){
@@ -632,7 +652,7 @@ const Store={
     this._mirrorTasks();
     /* Cross-renderer relay: preserve arrival semantics without echoing the event back. */
     if(relayTaskEvent&&window.WinSync&&typeof WinSync.pushTaskEvent==='function')
-      WinSync.pushTaskEvent({type:ev.type,task:ev.task,arrival:ev.arrival||'',by:ev.by||'',autoOpen:ev.autoOpen!==false,notificationId:ev.notificationId||''});
+      WinSync.pushTaskEvent({type:ev.type,task:ev.task,arrival:ev.arrival||'',by:ev.by||'',autoOpen:false,notificationId:ev.notificationId||''});
     try{window.dispatchEvent(new CustomEvent('soduwork-work-task-change',{detail:{
       type:ev.type,taskId:eventTaskId,task:incomingDetail&&incomingDetail.task||null,
       incoming:Boolean(incomingDetail),actionable:Boolean(incomingDetail),
@@ -643,7 +663,7 @@ const Store={
     else if(typeof render==='function')render();
     if(typeof updatePet==='function')updatePet();
     if(typeof _syncSidebar==='function')_syncSidebar();
-    // When a persistent message exists, task events update state and navigation only; the message owns the notification to avoid duplicate alerts.
+    // When a persistent message exists, task events update requirement state only; the message owns the notification to avoid duplicate alerts.
     if(incomingDetail&&!ev.__fromWindow&&!ev.notificationId){
       this._alertIncoming();
       if(typeof petSay==='function'){
@@ -673,10 +693,13 @@ const Store={
 };
 SoduWorkStoreLifecycle.install(Store,{
   shadowKey:LS_TASK_SHADOW,
-  configEffects:patch=>{
-    if(typeof applyTheme==='function')applyTheme();if(typeof applyRemind==='function')applyRemind();
+  configEffects:(patch,previous)=>{
+    const skinChanged=['character','theme','tube','_lastSkinId'].some(key=>key in patch)&&typeof refreshSkinAppearance==='function';
+    if(skinChanged)refreshSkinAppearance(previous?._lastSkinId);
+    else if(typeof applyTheme==='function')applyTheme();
+    if(typeof applyRemind==='function')applyRemind();
     if(patch.uiScale&&typeof applyScale==='function')applyScale(patch.uiScale);
-    if(typeof render==='function')render();if(typeof updatePet==='function')updatePet();
+    if(!skinChanged){if(typeof render==='function')render();if(typeof updatePet==='function')updatePet();}
   },
   syncBindings:()=>{tasks=Store.tasks;cfg=Store.cfg;},
   scopeChanged:()=>{

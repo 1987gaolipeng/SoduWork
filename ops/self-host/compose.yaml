@@ -26,6 +26,8 @@ services:
       - "127.0.0.1:${SODUWORK_HTTP_PORT:?Run python ops/self-host/deploy.py up}:8989"
     environment:
       DATABASE_URL: "postgresql+asyncpg://soduwork:${SODUWORK_DB_PASSWORD:?Run python ops/self-host/deploy.py up}@db:5432/soduwork"
+      JIYONG_DATABASE_URL: ${JIYONG_DATABASE_URL:-}
+      JIYONG_ASSET_DIR: /srv/runtime/jiyong-assets
       ADMIN_USER: admin
       ADMIN_PASS: ${SODUWORK_ADMIN_PASSWORD:?Run python ops/self-host/deploy.py up}
       AUTH_SECRET: ${SODUWORK_AUTH_SECRET:?Run python ops/self-host/deploy.py up}

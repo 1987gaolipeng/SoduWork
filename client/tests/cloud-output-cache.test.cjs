@@ -163,3 +163,24 @@ test('EXDEV output copying rechecks account ownership before publishing and rest
   assert.equal(await fs.readFile(path.join(first.cwd, 'index.html'), 'utf8'), 'old');
   assert.deepEqual(await fs.readdir(first.cwd), ['index.html']);
 });
+
+
+test('automatic cache downloads only preview content; external results remain available for manual download', async t => {
+  const calls = [], body = 'fixture';
+  const f = await fixture(t, { fetch: async (_current, url) => { calls.push(url); return new Response(body); } });
+  const current = { hub: 'http://fixture.invalid' };
+  const rows = ['index.html', 'assets/style.css', 'assets/app.js', 'assets/font.woff2', 'notes.md',
+    'image.png', 'movie.mp4', 'report.pdf', 'table.xlsx', 'slides.pptx', 'report.docx', 'bundle.zip', 'data.bin']
+    .map((name, i) => attachment(String(i), name, body));
+  const first = await f.cache.materialize(f.record, current, rows, undefined, { previewOnly: true });
+  assert.equal(calls.length, 8, 'Office, archives and unknown files are not automatically downloaded');
+  f.record.materializedOutputs = first.materializedOutputs;
+  assert.deepEqual(cacheModule.index(f.app, f.record).files.map(x => x.relative).sort(), rows.slice(0, 8).map(x => x.filename).sort());
+  const manual = await f.cache.materialize(f.record, current, rows);
+  assert.equal(calls.length, rows.length, 'explicit collection download still retrieves every result');
+  f.record.materializedOutputs = manual.materializedOutputs;
+  const refreshed = await f.cache.materialize(f.record, current, rows, undefined, { previewOnly: true });
+  f.record.materializedOutputs = refreshed.materializedOutputs;
+  assert.equal(cacheModule.index(f.app, f.record).files.length, rows.length, 'automatic refresh retains previously downloaded files');
+  assert.equal(calls.length, rows.length);
+});

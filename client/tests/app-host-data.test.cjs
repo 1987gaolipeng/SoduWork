@@ -35,7 +35,7 @@ test('SDK exposes actual readonly bridge calls and bilingual single-theme author
  const calls=[],window={crypto:require('node:crypto').webcrypto,addEventListener(){},soduWorkAppBridge:{request:async(m,p)=>{calls.push(m);return {ok:true};},events:{onTurnSettled(){}}}};window.parent=window;
  vm.runInNewContext(fs.readFileSync(path.resolve(__dirname,'../sdk/soduwork-app.js'),'utf8'),{window,location:{origin:'https://test.invalid'},document:{referrer:'',querySelectorAll:()=>[]},URL,Set,Map,Promise});
  await window.soduWorkApp.user.getCurrent();await window.soduWorkApp.notifications.list();await window.soduWorkApp.conversations.list();await window.soduWorkApp.conversations.messages({id:'s'});await window.soduWorkApp.library.list();await window.soduWorkApp.library.read({id:'f'});assert.equal(calls.length,6);
- const app={isPackaged:false},body=require('../main/app-developer-plugin.cjs').body(app);assert.equal(body.version,'1.5.0');assert.ok(body.resources.some(x=>x.path.endsWith('host-data-sdk.md')));assert.match(body.instructions,/不强制亮暗双模式/);
+ const app={isPackaged:false},body=require('../main/app-developer-plugin.cjs').body(app);assert.equal(body.version,'1.6.1');assert.ok(body.resources.some(x=>x.path.endsWith('host-data-sdk.md')));assert.match(body.instructions,/不强制亮暗双模式/);
 });
 
 test('Runner and cloud history use readonly event pages, cursor continuity and owned receipts',async t=>{
@@ -50,6 +50,25 @@ test('Runner and cloud history use readonly event pages, cursor continuity and o
  const cloud=require('../main/app-readonly-history.cjs').create({app:{getPath:()=>root},session,access,runner:{rpc:()=>assert.fail('cloud must not read local runner')},readCloud:async()=>({ref:'remote',last:8,items:[{seq:8,kind:'user',text:'Cloud text'}]})});
  assert.equal((await cloud('conversations.messages',{id:'s'})).items[0].text,'Cloud text');
  fs.writeFileSync(file,JSON.stringify({sessionId:'s',owner:'foreign'}));await assert.rejects(cloud('conversations.messages',{id:'s'}),/归属/);
+});
+
+test('remote directory projections read Hub transcripts without a local receipt', async () => {
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'app-remote-projection-'));
+ const identity={hub:'https://fixture.invalid',clientId:'desktop',session:'session'};
+ const access={actor:()=>({identity,owner:'me'}),assertCurrent(){},
+   assertOwner:(_app,_id,captured,row)=>{
+     if(row.remoteProjection!==true||row.cloud!==true||row.owner!==captured.owner||!row.taskId||!row.ref) throw Error('归属');
+   }};
+ const session={archivedConversation:async()=>({id:'remote-chat',remoteProjection:true,cloud:true,owner:'me',
+   taskId:'task-remote',ref:'ref-remote',adapterId:'pi'})};
+ let received;
+ const run=require('../main/app-readonly-history.cjs').create({app:{getPath:()=>root},session,access,
+   readCloud:async(_identity,record,params)=>{received={record,params};return {ok:true,ref:'ref-remote',seq:2,
+     items:[{seq:1,kind:'user',text:'跨设备请求'},{seq:2,kind:'say',text:'跨设备回复'}]};}});
+ const page=await run('conversations.messages',{id:'remote-chat',after:0,limit:20});
+ assert.deepEqual(page.items.map(item=>item.text),['跨设备请求','跨设备回复']);
+ assert.equal(received.record.taskId,'task-remote');assert.equal(received.record.ref,'ref-remote');
+ fs.rmSync(root,{recursive:true,force:true});
 });
 
 test('change hints contain no payload, enforce parent and capability/origin, and release SDK subscriptions',async()=>{

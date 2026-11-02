@@ -8,7 +8,7 @@ from unittest.mock import patch
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 _data = tempfile.TemporaryDirectory(prefix="soduwork-test-truncated-")
 os.environ["SODUWORK_DATA_ROOT"] = _data.name
-from app.services import local_stream, local_turn_outcome
+from app.services import ai_local, local_stream, local_turn_outcome, model_errors
 from app.services.local_base import _RUNS
 
 
@@ -63,6 +63,44 @@ class TurnOutcomeTests(unittest.TestCase):
         resume = self.finish(self.event("error"))
         resume.assert_not_called()
         self.assertEqual(self.run["state"], "failed")
+
+    def test_pi_model_404_survives_stream_settlement_and_session_projection(self):
+        terminal = {}
+        message = {"role": "assistant", "content": [], "stopReason": "error",
+                   "errorMessage": "404 status code (no body)"}
+        for event in ({"type": "message_end", "message": message},
+                      {"type": "turn_end", "message": message},
+                      {"type": "agent_end", "messages": [message]}):
+            local_stream._on_line(self.ref, json.dumps(event), terminal)
+        self.finish(terminal).assert_not_called()
+        page = ai_local.session_sync({}, self.ref)
+        self.assertTrue(page["ok"])
+        self.assertEqual(page["status"], "failed")
+        self.assertIn("HTTP 404", page["error"])
+        self.assertIn("切换可用模型", page["error"])
+
+    def test_model_diagnostics_classify_without_publishing_provider_body(self):
+        for value, expected in (
+            ('401 {"secret":"private-key"}', "HTTP 401"),
+            ({"error": {"status": 403, "message": "Bearer private-key"}}, "HTTP 403"),
+            ('404 status code (no body)', "HTTP 404"),
+            ('429 {"error":{"code":"limited","message":"private-key"}}', "HTTP 429"),
+            ('502 <html>private-key https://internal.test</html>', "HTTP 502"),
+            ('Error status_code: 422 private-key', "HTTP 422"),
+            ('fetch failed private-key', "暂时不可用"),
+            ('unrecognized private-key', "模型调用失败"),
+        ):
+            with self.subTest(value=value):
+                public = model_errors.public_failure(value)
+                self.assertIn(expected, public)
+                self.assertNotIn("private-key", public)
+                self.assertNotIn("internal.test", public)
+
+    def test_pi_error_never_overwrites_an_unrelated_terminal_failure(self):
+        terminal = {"isError": True, "result": "execution policy rejected"}
+        local_turn_outcome.observe("pi", {"type": "message_end", "message": {
+            "role": "assistant", "stopReason": "error", "errorMessage": "404"}}, terminal)
+        self.assertEqual(terminal, {"isError": True, "result": "execution policy rejected"})
 
     def test_latest_success_replaces_earlier_length_inside_one_process(self):
         terminal = {"outputTruncated": True}

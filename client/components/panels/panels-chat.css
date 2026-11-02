@@ -187,8 +187,8 @@
      during streaming layout updates, which also changed the system cursor. */
   opacity:0;pointer-events:auto;transition:opacity .14s ease}
 .nmessage-footer>*{pointer-events:none}
-.nmsg:hover>.nmessage-footer,.nmessage-footer:has(:focus-visible){opacity:1}
-.nmsg:hover>.nmessage-footer>*,.nmessage-footer:has(:focus-visible)>*{pointer-events:auto}
+.nmsg:hover>.nmessage-footer,.nmessage-footer:focus-within{opacity:1}
+.nmsg:hover>.nmessage-footer>*,.nmessage-footer:focus-within>*{pointer-events:auto}
 .nmsg>.nmessage-footer{margin-top:0}
 .nmsg.user{row-gap:4px}
 .nmessage-time{font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1.4;font-variant-numeric:tabular-nums;color:var(--ink-3);white-space:nowrap}
@@ -860,6 +860,8 @@
 .nchat-task-confirmation .tfd-inline-actions { display:flex; flex-wrap:wrap; gap:8px; }
 .nchat .nchat-task-confirmation .tfd-inline-approval-title > span { font-size:max(var(--font-min-readable, 14.5px), 12px); }
 .nacceptance-result{width:min(760px,100%);margin:16px 0;border:1px solid var(--line);border-radius:15px;overflow:hidden;background:var(--bg-0);box-shadow:0 7px 22px color-mix(in srgb,var(--ink) 6%,transparent);}
+.nacceptance-result>summary{padding:13px 15px;color:var(--ink-2);font-size:14px;font-weight:600;cursor:pointer;background:color-mix(in srgb,var(--accent) 5%,var(--bg-0));}
+.nacceptance-result[open]>summary{border-bottom:1px solid var(--line)}
 .nacceptance-result>header{display:flex;align-items:center;gap:10px;padding:13px 15px;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--accent) 5%,var(--bg-0));}
 .nacceptance-result.is-analysis>header{background:color-mix(in srgb,var(--accent) 8%,var(--bg-0));}
 .nacceptance-result.is-rejected>header{background:color-mix(in srgb,var(--s-urgent,#c34f58) 6%,var(--bg-0));}

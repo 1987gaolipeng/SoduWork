@@ -3,7 +3,7 @@
    manifest order; same {valueN} placeholder names as en-US (i18n.js looks up
    the target-language catalog by the same key after template matching). */
 (function (global) {
-  // Product localization: 中文「即用」and English「App」are the same concept.
+  // Product localization uses the same app concept in Chinese and English.
   // This is intentional, not a literal translation; keep app/jiyong IDs stable.
   const messages = {
     '安装即用':'Install app',
@@ -88,6 +88,13 @@
     '桌面客户端': 'Desktop app',
     "创建即用": "Create app",
     "轻量": "Lightweight",
+    '数据存储（必选）': 'Data storage (required)',
+    '数据云端化': 'Cloud data',
+    '数据本地化': 'Local storage',
+    '请选择数据存储方式后开始创建': 'Choose a storage location to start creating',
+    '数据保存到云端，同一账号可跨设备使用；需要联网': 'Saved in the cloud, available across devices on the same account; internet required',
+    '数据保存在本机，可离线读写；不自动上传或同步': 'Saved on this device, available offline; no automatic upload or sync',
+    '检查已完成 · 应用安装到本机 · 业务数据保存到云端': 'Checks completed · App installed on this device · Business data saved in the cloud',
     "WEB/H5接入": "WEB/H5 integration",
     "工具办公": "Office tools",
     "小游戏": "Mini games",

@@ -61,7 +61,7 @@ class ExecutionSwitchTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(current.json()["activeExecutionSelection"]["agentId"], agent)
                 self.assertEqual(current.json()["activeExecutionSelection"]["modelName"], model)
                 self.assertEqual(Path((await self.rpc("job.info", ref=ref))["data"]["workDir"]), workspace)
-                history = [json.loads(line) for line in (workspace / "prompts.jsonl").read_text(encoding="utf-8").splitlines()]
+                history = [json.loads(line) for line in (workspace / ".cache/prompts.jsonl").read_text(encoding="utf-8").splitlines()]
                 self.assertEqual(len(history), index + 2)
                 self.assertNotEqual(history[-1]["sid"], history[-2]["sid"])
                 self.assertFalse(history[-1]["resumed"])

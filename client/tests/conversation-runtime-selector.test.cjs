@@ -20,7 +20,7 @@ assert.ok(descriptor.capabilities.some((item) => item.id === CAPABILITIES.TURN_Q
 assert.ok(descriptor.capabilities.some((item) => item.id === CAPABILITIES.MODEL_SELECT));
 assert.ok(descriptor.capabilities.some((item) => item.id === CAPABILITIES.GOAL_CONTROL));
 assert.deepEqual(RUNTIMES.map((item) => item.id), [
-  'pi', 'codex-harness', 'opencode', 'codex', 'qwen', 'dsh', 'harness2',
+  'pi', 'codex-harness', 'opencode', 'codex', 'qwen', 'dsh', 'harness2', 'kimi', 'claude',
 ]);
 RUNTIMES.filter((item) => item.transport === 'runner').forEach((runtimeSpec) => {
   const runner = validateAdapter(createRunnerRuntimeAdapter({ runtimeSpec }));

@@ -85,13 +85,16 @@ async def preflight_my_schedule(body: dict = Body(default_factory=dict),
     from ..services import schedules as sch
 
     candidate = AiSchedule()
+    owner_client_id, owner_user_id = client.id, client.user_ref
     schedule_id = str(body.get("scheduleId") or body.get("id") or "")
     if schedule_id:
         saved = await _my_sch(session, schedule_id, client)
         candidate = AiSchedule(**{column.key: getattr(saved, column.key) for column in AiSchedule.__table__.columns})
+        owner_client_id, owner_user_id = saved.owner_client_id, saved.owner_user_id
     try:
         _sch_apply(candidate, dict(body or {}))
-        candidate.owner_client_id = client.id
+        # Preview the same execution identity that the saved plan will use.
+        candidate.owner_client_id, candidate.owner_user_id = owner_client_id, owner_user_id
         return await sch.preflight_execution(session, candidate)
     except (ValueError, HTTPException) as exc:
         if isinstance(exc, HTTPException) and exc.status_code != 400:
@@ -187,8 +190,9 @@ async def my_schedule_runs(sid: str, limit: int = 20,
     from .tasks import _my_sch
 
     from ..services import schedules as sch
+    from ..services import schedule_conversations as conversations
     await _my_sch(session, sid, client)
-    items = await sch.list_runs(session, sid, owner_client_id=client.id,
+    items = await sch.list_runs(session, sid,
                                owner_user_id=str(client.user_ref or ""), limit=limit)
     await session.commit()
     return {"items": items}
@@ -202,9 +206,17 @@ async def run_my_schedule(sid: str, body: dict = Body(default_factory=dict),
     from .tasks import _my_sch
 
     from ..services import schedules as sch
+    from ..services import schedule_conversations as conversations
     s = await _my_sch(session, sid, client)
     instance_id = str(body.get("instanceId") or "").strip()[:80]
-    out = await sch.execute_one(session, s, trigger="manual", execution_instance=instance_id)
+    # A same-account device may trigger a schedule, but a local conversation
+    # remains pinned to the schedule's original desktop. Only that desktop
+    # may reserve/claim the local inbox occurrence. Cloud runs are returned
+    # directly and never pass through the local conversation claim endpoint.
+    local_owner = str(s.owner_client_id or "") == str(client.id or "")
+    out = await sch.execute_one(
+        session, s, trigger="manual",
+        execution_instance=(instance_id if local_owner else ""))
     if not out.get("ok"):
         await session.commit()
         raise HTTPException(status_code=502, detail="没派出去：" + str(out.get("error"))[:200])
@@ -215,11 +227,13 @@ async def run_my_schedule(sid: str, body: dict = Body(default_factory=dict),
     from .. import models
     run = await session.get(models.AiScheduleRun, str(out.get("scheduleRunId") or ""))
     receipt = dict(run.receipt or {}) if run is not None else {}
-    if instance_id and run is not None:
+    is_local_conversation = bool(
+        run is not None and
+        dict(run.receipt or {}).get("executionMode") == conversations.PROTOCOL)
+    if instance_id and local_owner and is_local_conversation and run is not None:
         # The immediate button owns the run before the background worker polls
         # the inbox. This makes the UI open the chat directly and prevents a
         # second client from consuming the same occurrence first.
-        from ..services import schedule_conversations as conversations
         claimed = await conversations.claim(session, client, run.id, instance_id)
         if claimed.get("ok"):
             receipt = dict(run.receipt or {})

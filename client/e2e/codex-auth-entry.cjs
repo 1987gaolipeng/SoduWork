@@ -47,7 +47,10 @@ if (typeof electron === 'string') {
       // Settle the offline account gate, then provide the fixture identity through its public event.
       await until(`!!document.querySelector('.soduwork-auth-status.is-error')`);
       await js(`dispatchEvent(new CustomEvent('soduwork-device-auth',{detail:{state:'active',user:{id:'fixture-user',username:'fixture',displayName:'Fixture account'},quota:{enabled:false}}}));void 0;`);
-      await js(`window.fixtureCalls=[];window.fixtureSetup={modelCount:0,models:[],machines:[{runnerId:'fixture-runner',label:'Fixture computer',env:{ok:true},agents:[{key:'codex',name:'Codex',state:'unauthed',auth:'unauthed',setupState:'unauthed',installed:true,present:true,version:'0.164.0',loginAvailable:true,loginFlowVersion:1}]}]};SoduWorkAPI.agentSetup=async()=>fixtureSetup;SoduWorkAPI.agentInstall=async()=>{fixtureCalls.push('unexpected authorization');throw Error('No CLI authorization is allowed in this fixture')};SoduWorkAPI.agentProbe=async()=>{fixtureCalls.push('unexpected paid probe');throw Error('No paid probe is allowed in this fixture')};openAgentsPanel();void 0;`);
+      // The local management surface requires current-instance identity;
+      // the dialog separately reads the exact selected Runner.
+      const unknown = query.panel === 'agents';
+      await js(`window.fixtureCalls=[];window.fixtureSetupCalls=[];window.fixtureSetup={modelCount:0,models:[],machines:[{runnerId:'fixture-runner',scope:'current-instance',isCurrentDevice:true,label:'Fixture computer',env:{ok:true},agents:[{key:'codex',name:'Codex',state:'unauthed',auth:'unauthed',authStatus:${JSON.stringify(unknown ? 'unknown' : 'unauthed')},setupState:${JSON.stringify(unknown ? 'unknown' : 'unauthed')},installed:true,present:true,version:'0.164.0',loginAvailable:true,loginFlowVersion:1}]}]};SoduWorkAPI.localAgentSetup=async()=>{fixtureSetupCalls.push('local');return fixtureSetup};SoduWorkAPI.agentSetup=async runnerId=>{fixtureSetupCalls.push(runnerId);if(runnerId!=='fixture-runner')throw Error('Unexpected Runner');return fixtureSetup};SoduWorkAPI.agentInstall=async()=>{fixtureCalls.push('unexpected authorization');throw Error('No CLI authorization is allowed in this fixture')};SoduWorkAPI.agentProbe=async()=>{fixtureCalls.push('unexpected paid probe');throw Error('No paid probe is allowed in this fixture')};openAgentsPanel();void 0;`);
       await until(`!!document.querySelector('[data-alogin="fixture-runner~codex"]')`);
       await click('[data-alogin="fixture-runner~codex"]');
       await pause(150);
@@ -59,6 +62,10 @@ if (typeof electron === 'string') {
       assert.equal(style.position, 'fixed');
       assert.ok(style.width > 400 && style.width <= 440);
       assert.deepEqual(await js('fixtureCalls'), [], 'Opening checks status without starting authorization or a model probe');
+      assert.ok(await js("fixtureSetupCalls.includes('local') && fixtureSetupCalls.includes('fixture-runner')"),
+        'Management uses local inventory and authorization keeps the selected Runner');
+      if (unknown) assert.equal(await js("document.querySelector('.codex-auth-primary').textContent"),
+        await js("SoduWorkI18n.translateText('继续检查')"));
       await win.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true });
       await pause(90);
       fs.writeFileSync(path.join(out, query.panel + '-ready.png'),

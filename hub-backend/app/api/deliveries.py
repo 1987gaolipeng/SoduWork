@@ -48,10 +48,11 @@ async def upload(manifest: str = Form(...), file: UploadFile = File(...),
 @router.get("")
 async def list_deliveries(session_id: str = Query("", alias="sessionId", max_length=160),
                           source: str = Query("", pattern="^(local|cloud)?$"),
+                          revision: str = Query("", max_length=160, pattern="^[A-Za-z0-9._:-]*$"),
                           limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0),
                           client=Depends(current_client), session=Depends(get_session)):
     rows = await collections.list_items(session, collections.owner_key(client),
-        session_id=session_id, source=source, limit=limit, offset=offset)
+        session_id=session_id, source=source, revision=revision, limit=limit, offset=offset)
     return {"ok": True, "items": [collections.public(row) for row in rows],
             "limit": limit, "offset": offset}
 

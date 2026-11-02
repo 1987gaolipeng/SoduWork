@@ -52,7 +52,10 @@ function install({ app, ipcMain, session, identityOf, skillDirs, deviceGrants, m
   }
   async function captureContext(handle, record) {
     if (record.contextFrozen || !Object.hasOwn(record, 'contextBase')) return;
-    const snapshot = context.conversation(record.includeContext ? handle.snapshot().messages || [] : []);
+    const live = record.includeContext ? (handle.snapshot() || {}) : {};
+    const snapshot = context.conversation({
+      messages: live.messages || [], tools: live.tools || [],
+    });
     record.prompt = context.prompt(record.contextBase, snapshot);
     const contract = require('./pi-session/attachment-contract');
     const historyFiles = snapshot.messages.filter(message => message.role === 'user')

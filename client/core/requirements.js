@@ -135,6 +135,7 @@
   }
   function actionable(task, context) {
     if (stage(task) === 'closed') return false;
+    if (stage(task) === 'reviewing' && task.canReview === true) return true;
     if (approvalActionable(task, context)) return true;
     if (task.canClaim === true) return true;
     if (stage(task) === 'delivered' || task.canViewExecution === false) return false;
@@ -220,7 +221,12 @@
     return Boolean(task && (typeof task[field] === 'boolean' ? task[field] : task.canEditRequirement === true));
   }
   function canManageMaterials(task) { return capability(task, 'canManageRequirementMaterials'); }
-  function canSubmitReview(task) { return capability(task, 'canSubmitReview'); }
+  function canSubmitReview(task) {
+    return Boolean(task && task.canSubmitReview === true && task.status === 'doing' &&
+      stage(task) === 'delivering' && !task.archivedAt && !task.maintenanceBlocked &&
+      !['running', 'dispatching'].includes(task.ai?.state) &&
+      !['queued', 'starting', 'running', 'waiting'].includes(task.workRouting?.conversationTurn?.state));
+  }
   function canManageAutomation(task) { return capability(task, 'canManageRequirementAutomation'); }
   // Definition editing, delivery operations and maintenance have separate capabilities.
   function executing(task) { return ['doing', 'paused', 'reviewing'].includes(task && task.status); }

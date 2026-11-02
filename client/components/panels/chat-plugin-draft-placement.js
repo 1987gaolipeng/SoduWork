@@ -21,7 +21,7 @@
     return owner == null || owner === '' || owner === ownerIndex(message, snapshot);
   }
   function target(file, snapshot, messages) {
-    const at = epoch(file.at), history = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
+    const at = epoch(file.pluginRevisionAt || file.at), history = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
     const starts = history.flatMap((message, index) => message?.role === 'user' ? [index] : []);
     if (!starts.length) return history.length ? null : undefined; // Pre-snapshot callers retain the legacy fallback.
     const clocks = history.map(message => userTime(message) || completion(message));

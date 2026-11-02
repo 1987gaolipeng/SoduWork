@@ -45,8 +45,26 @@
   let root, uploadInput, uploadTarget, searchTimer, requestId = 0, storageStatusRequest = 0, previewPane, imageEpoch = 0;
   let lifecycleEpoch = 0, batchBusy = false;
   let loadedFilterKey = '', contentMarkup = '';
+  let libraryRefreshAt = 0;
   function filterKey() { return JSON.stringify([state.scope, storedBackend(state.folder), state.query, state.folderId]); }
   function hasCurrentSnapshot() { return loadedFilterKey === filterKey(); }
+  function invalidateSnapshot(clear = false) {
+    loadedFilterKey = '';
+    contentMarkup = '';
+    if (clear) {
+      state.items = [];
+      state.folders = [];
+      state.trashCount = 0;
+    }
+  }
+  function refreshLibrarySnapshot() {
+    if (!root?.matches('.show,.workspace-hosted')) return;
+    const now = Date.now();
+    if (now - libraryRefreshAt < 50) return;
+    libraryRefreshAt = now;
+    invalidateSnapshot();
+    load();
+  }
   const imageUrls = new Map();
   const imageLoads = new Map();
   const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
@@ -118,7 +136,7 @@
     state.showHidden = preference('soduwork_work_library_show_hidden') === '1';
     root.innerHTML = '<div class="library-page"><header class="library-head ws-page-head"><h1 data-library-title>资料库</h1>' +
       '<div class="library-toolbar">' +
-      '<nav class="library-storage-tabs" role="tablist" aria-label="存储位置">' + STORAGE_TABS.map(([key, label]) => '<button role="tab" data-library-storage="' + key + '"><span>' + label + '</span>' + (key === 'remote' ? '<i class="library-storage-status-dot" data-library-storage-status="remote" aria-label="远程存储连接状态"></i>' : '') + '</button>').join('') + '</nav>' +
+      '<nav class="library-storage-tabs" role="tablist" aria-label="存储位置">' + STORAGE_TABS.map(([key, label]) => '<button role="tab" data-library-storage="' + key + '"><span>' + label + '</span>' + (key === 'remote' ? '<i class="library-storage-status-dot" data-library-storage-status="remote" aria-label="远程存储连接状态"></i>' : '') + '</button>').join('') + '</nav><span class="library-storage-quota" data-library-storage-quota="remote" aria-live="polite" hidden></span>' +
       '<div class="library-menu-wrap"><button class="library-icon-button" data-library-menu-toggle="filter" aria-label="筛选类型" aria-expanded="false">' + icon('filter') + '</button>' +
       '<div class="library-menu library-filter-menu" data-library-menu="filter" hidden><div class="library-menu-label">文件类型</div>' + [['all', '全部类型'], ...CREATE_ITEMS.slice(0, 5)].map(([kind, label]) => '<button data-library-filter-kind="' + kind + '">' + esc(label) + '</button>').join('') + '</div></div>' +
       '<div class="library-view-toggle" role="group" aria-label="资料视图"><button class="library-icon-button" data-library-view="grid" aria-label="网格视图">' + icon('grid') + '</button><button class="library-icon-button" data-library-view="list" aria-label="列表视图">' + icon('list') + '</button></div>' +
@@ -874,6 +892,28 @@
       remoteDot.classList.toggle('is-unavailable', !capability.available);
       remoteDot.title = root.querySelector('[data-library-storage="remote"]').title;
     }
+    const quotaLabel = root.querySelector('[data-library-storage-quota="remote"]');
+    if (quotaLabel) {
+      const capability = state.storageStatus.remote || {};
+      const quota = capability.quota || capability;
+      const quotaBytes = Number(quota.quotaBytes ?? quota.limitBytes);
+      const usedBytes = Number(quota.usedBytes);
+      const remainingBytes = Number(quota.remainingBytes);
+      const quotaReady = !!capability.available && !!capability.connected
+        && Number.isFinite(quotaBytes) && quotaBytes > 0
+        && Number.isFinite(usedBytes) && usedBytes >= 0
+        && Number.isFinite(remainingBytes) && remainingBytes >= 0;
+      quotaLabel.hidden = !quotaReady;
+      if (quotaReady) {
+        quotaLabel.textContent = tx('已用') + ' ' + formatSize(usedBytes) + ' · ' + tx('剩余') + ' ' + formatSize(remainingBytes);
+        quotaLabel.title = tx('远程存储') + ' · ' + formatSize(quotaBytes);
+        quotaLabel.setAttribute('aria-label', quotaLabel.textContent);
+      } else {
+        quotaLabel.textContent = '';
+        quotaLabel.removeAttribute('title');
+        quotaLabel.removeAttribute('aria-label');
+      }
+    }
     root.querySelectorAll('[data-library-view]').forEach(button => { const selected = button.dataset.libraryView === state.view; button.classList.toggle('active', selected); button.setAttribute('aria-pressed', String(selected)); });
     root.querySelectorAll('[data-library-filter-kind]').forEach(button => button.classList.toggle('active', button.dataset.libraryFilterKind === state.filterKind));
     root.querySelector('[data-library-menu-toggle="filter"]').classList.toggle('active', state.filterKind !== 'all');
@@ -1017,20 +1057,52 @@
       }
     } finally { if (request === requestId) { state.busy = false; render(); } }
   }
+  let receiptNavigation = false;
   async function openLibraryPanel(options) {
     ensureRoot().classList.add('show');
-    if (!options?.itemId) { loadStorageStatus(); return load(); }
+    if (!options?.itemId) {
+      // A saved-file shortcut applies a temporary location/search. Opening the
+      // library normally must not leave newer saves hidden by that shortcut.
+      if (receiptNavigation) {
+        receiptNavigation = false; lifecycleEpoch++;
+        state.scope = 'recommended'; state.storage = 'local';
+        state.query = ''; state.folderId = ''; state.folder = null;
+        state.filterKind = 'all'; state.showHidden = false;
+        state.selected.clear(); state.selectedFolders.clear(); previewPane?.close();
+        root.querySelector('[data-library-search]').value = '';
+      }
+      // A library save can complete while this panel is hidden. Do not reuse
+      // the previous recommended snapshot when the user opens the library;
+      // fetch the current recommendation set immediately.
+      invalidateSnapshot(true);
+      loadStorageStatus(); return load();
+    }
+    receiptNavigation = true;
     const epoch = ++lifecycleEpoch;
-    state.scope = 'recommended'; state.folderId = ''; state.folder = null;
-    state.storage = ['minio', 'nfs'].includes(options.storage) ? options.storage : 'local';
+    state.scope = options.revealOnly ? 'all' : 'recommended'; state.folderId = ''; state.folder = null;
+    state.filterKind = 'all'; state.showHidden = Boolean(options.revealOnly); previewPane?.close();
+    const history = options.storageOrigin === 'server-history';
+    const targetStorage = ['minio', 'nfs'].includes(options.storage) ? options.storage : 'local';
+    // Resolve current storage availability before selecting the receipt's provider.
+    // A configuration refresh must not redirect a saved-item link to another store.
+    state.storage = 'local';
     state.query = String(options.query || '');
+    invalidateSnapshot(true);
     root.querySelector('[data-library-search]').value = state.query;
     await loadStorageStatus();
     if (epoch !== lifecycleEpoch || !root.matches('.show,.workspace-hosted')) return;
+    state.storage = history ? (state.storageStatus.remote.backend || 'remote') : targetStorage;
+    if (history) state.folderId = 'server-history-root';
     await load();
     if (epoch !== lifecycleEpoch || !root.matches('.show,.workspace-hosted')) return;
     const item = state.items.find(row => row.id === options.itemId && !row.deletedAt);
-    if (!item) throw Error('SEARCH_LIBRARY_UNAVAILABLE');
+    if (!item) throw Error(state.error || 'SEARCH_LIBRARY_UNAVAILABLE');
+    if (options.revealOnly) {
+      const control = [...root.querySelectorAll('[data-library-select]')].find(node => node.dataset.librarySelect === item.id);
+      const card = control?.closest('.library-card');
+      if (card) { card.tabIndex = -1; card.focus({ preventScroll: true }); card.scrollIntoView({ block: 'nearest' }); }
+      return true;
+    }
     previewPane ||= global.SoduWorkLibraryPreview.create({ root, openSource: openSourceConversation });
     return previewPane.open(item);
   }
@@ -1042,7 +1114,23 @@
     imageEpoch += 1; imageLoads.clear(); imageUrls.forEach(url => { try { URL.revokeObjectURL(url); } catch (_) {} }); imageUrls.clear();
     if (root) { closeMenus(); root.classList.remove('show'); }
   }
-  global.addEventListener('soduwork-library-changed', () => { if (root?.matches('.show,.workspace-hosted')) load(); });
+  global.addEventListener('soduwork-library-changed', refreshLibrarySnapshot);
+  try {
+    global.soduWorkAPI?.onBroadcast?.((kind) => {
+      if (kind === 'library') refreshLibrarySnapshot();
+    });
+  } catch (_) { /* The renderer bridge is optional in fixture/browser contexts. */ }
+  try {
+    if (typeof global.BroadcastChannel === 'function') {
+      const channel = new global.BroadcastChannel('soduwork-library-changes');
+      channel.addEventListener('message', event => {
+        if (event.data?.type === 'changed') refreshLibrarySnapshot();
+      });
+    }
+  } catch (_) { /* BroadcastChannel is optional on older Electron profiles. */ }
+  global.addEventListener('storage', event => {
+    if (event.key === 'soduwork-library-change' && event.newValue) refreshLibrarySnapshot();
+  });
   global.addEventListener('soduwork-locale-change', () => { if (root) render(); });
   global.addEventListener('soduwork-data-scope-changed', () => {
     const visible = root?.matches('.show,.workspace-hosted');

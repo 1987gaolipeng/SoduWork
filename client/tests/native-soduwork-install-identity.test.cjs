@@ -5,7 +5,7 @@ const { randomUUID } = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const { getMakeNsisPath } = require('app-builder-lib/out/toolsets/windows');
 
-test('native install separates old brands and upgrades only the owned SoduWork identity',
+test('native install upgrades only the owned SoduWork identity',
   { skip: process.platform !== 'win32' }, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'soduwork-install-identity-'));
   const guid = randomUUID(), previousGuid = randomUUID();
@@ -59,7 +59,7 @@ test('native install separates old brands and upgrades only the owned SoduWork i
     '!define APP_EXECUTABLE_FILENAME "SoduWork.exe"', '!define UNINSTALL_FILENAME "Uninstall SoduWork.exe"',
     `!define SODUWORK_PREVIOUS_INSTALL_GUID "${previousGuid}"`,
     `!define INSTALL_REGISTRY_KEY "${installKey}"`, `!define UNINSTALL_REGISTRY_KEY "${uninstallKey}"`,
-    `!include "${quote(path.resolve(__dirname, '../build/brand-migration.nsh'))}"`,
+    `!include "${quote(path.resolve(__dirname, '../build/soduwork-install-identity.nsh'))}"`,
     ...['soduWorkRoot', 'installMode', 'fixtureMode', 'fixtureResult'].map(name => 'Var ' + name),
     'Section', 'SetShellVarContext current', `SetRegView ${registryView}`,
     'ReadEnvStr $INSTDIR SODUWORK_FIXTURE_ROOT', 'ReadEnvStr $fixtureMode SODUWORK_FIXTURE_MODE',
@@ -114,7 +114,7 @@ test('native install separates old brands and upgrades only the owned SoduWork i
     const result = spawnSync(exe, [], { encoding: 'utf8', windowsHide: true, timeout: 30000,
       env: { ...process.env, SODUWORK_FIXTURE_ROOT: directory, SODUWORK_FIXTURE_MODE: mode, SODUWORK_FIXTURE_RESULT: resultFile } });
     assert.equal(result.status, 0, mode + ': ' + result.stdout + result.stderr);
-    const matched = !oldBrand && !['foreign-root', 'foreign-scope', 'foreign-uninstaller', 'missing-launcher'].includes(mode);
+    const matched = !['foreign-root', 'foreign-scope', 'foreign-uninstaller', 'missing-launcher'].includes(mode);
     const diagnostics = await fs.readFile(resultFile + '.diagnostics', 'utf8')
       .catch(error => 'NSIS diagnostics unavailable: ' + error.code);
     assert.equal((await fs.readFile(resultFile, 'utf8')).toLowerCase(), `${target}|${matched ? 1 : 0}`.toLowerCase(),
@@ -126,7 +126,6 @@ test('native install separates old brands and upgrades only the owned SoduWork i
       assert.equal(await fs.stat(path.join(directory, brand + '.exe')).then(() => true, () => false), false);
     } else assert.equal(await fs.readFile(path.join(directory, brand + '.exe'), 'utf8'), 'existing-launcher');
     assert.equal(await fs.readFile(path.join(directory, 'profile-fixture.txt'), 'utf8'), 'existing-data');
-    if (oldBrand) assert.equal(await fs.stat(path.join(target, 'profile-fixture.txt')).then(() => true, () => false), false);
     if (mode !== 'missing-new-uninstaller') {
       assert.equal(await fs.readFile(path.join(target, 'Uninstall SoduWork.exe'), 'utf8'), 'current-uninstaller');
     }

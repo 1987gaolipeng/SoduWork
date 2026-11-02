@@ -218,6 +218,20 @@ html .wes-layer #wesTaskDraft .cp-note{min-height:110px;padding:10px 12px}
 .wes-layer .wes-attach-head strong{font-size:16px;font-weight:650;color:var(--ink)}
 .wes-layer .wes-attach-head small{font-size:13px;color:var(--ink-3);white-space:normal;line-height:1.5}
 .wes-layer .wes-attach-head button{font-size:14px;color:var(--accent);min-height:36px;white-space:nowrap}
+/* Inline requirement cards use a denser rhythm without changing their content. */
+.wes-layer.is-inline .wes-head{padding:14px 16px 12px;gap:10px}
+.wes-layer.is-inline .wes-head h2{font-size:18px;line-height:1.3}
+.wes-layer.is-inline .wes-head p{line-height:1.4;margin-top:2px}
+.wes-layer.is-inline .wes-body{padding:12px 16px}
+.wes-layer.is-inline .cp-sec{margin-top:16px;padding-top:12px}
+.wes-layer.is-inline .cp-sec-h{font-size:14.5px;line-height:1.35;margin-bottom:8px}
+.wes-layer.is-inline .cp-row{font-size:14px;padding:4px 0}
+.wes-layer.is-inline .cp-selbtn{min-height:36px}
+.wes-layer.is-inline .cp-acts{padding:14px 0 0}
+.wes-layer.is-inline .wes-attach-zone{margin:14px 0 0;padding:10px 0}
+.wes-layer.is-inline .wes-attach-head strong{font-size:14.5px}
+.wes-layer.is-inline .wes-attach-head small{line-height:1.4}
+
 @media(max-width:680px){.wes-layer .wes-head h2{font-size:20px}}
 @media(max-width:520px){
   .wes-layer .wes-head{padding:16px;grid-template-columns:34px minmax(0,1fr) 32px;gap:10px}

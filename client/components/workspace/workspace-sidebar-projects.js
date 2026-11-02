@@ -34,7 +34,8 @@
     root.appendChild(status);
     root.querySelector('#wsPinnedBox').dataset.sidebarSection = 'pinned';
     root.querySelector('#wsChatsBox').dataset.sidebarSection = 'recent';
-    let store = null, scope = '', dialog = null;
+    let store = null, scope = '', dialog = null, sync = null;
+    let lastSync = 0;
     const notify = error => {
       const message = error.message || String(error);
       if (status.textContent === message) return;
@@ -43,8 +44,17 @@
     function state() {
       const options = global.WorkspaceSidebarState.accountOptions({ storage: localStorage, api: global.SoduWorkAPI });
       if (options.key !== scope) {
-        store = global.WorkspaceSidebarState.create(options);
+        store = global.WorkspaceSidebarState.create({...options, onChange: () => { void sync?.run(); }});
         scope = options.key;
+        const ownScope = scope;
+        sync = global.WorkspaceSidebarState.projectSync({store, api: global.SoduWorkAPI,
+          storage: localStorage, key: scope, current: () => ownScope === scope &&
+            global.WorkspaceSidebarState.storageKey(global.SoduWorkAPI) === ownScope,
+          changed: () => render(), error: e => { console.warn('Project sync:', e.message); }});
+        lastSync = 0;
+      }
+      if (Date.now() - lastSync > 10000) {
+        lastSync = Date.now(); Promise.resolve().then(() => sync?.run());
       }
       return store;
     }

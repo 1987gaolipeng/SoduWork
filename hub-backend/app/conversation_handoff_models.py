@@ -1,7 +1,7 @@
 """Durable transfer fences. Execution remains owned by Task/ExecutionSession."""
 from datetime import datetime
 
-from sqlalchemy import DateTime, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, Index, Integer, JSON, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
@@ -24,8 +24,13 @@ class ConversationHandoff(Base):
     receipt: Mapped[dict] = mapped_column(JSON, default=dict)
     error: Mapped[str] = mapped_column(Text, default="")
     commit_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Preparation is not authorization. Legacy drafts deliberately remain NULL.
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retry_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    recovery_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    __table_args__ = (UniqueConstraint("owner_client_id", "transfer_id"),)
+    __table_args__ = (UniqueConstraint("owner_client_id", "transfer_id"),
+                      Index("ix_handoff_owner_id", "owner_user_id", "id"))
 
 
 class ConversationMessageReceipt(Base):
@@ -38,5 +43,10 @@ class ConversationMessageReceipt(Base):
     content_hash: Mapped[str] = mapped_column(String(64))
     phase: Mapped[str] = mapped_column(String(16), default="sending")
     receipt: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Only new authorized durable sends have a payload; legacy uncertain sends
+    # remain fenced. Renewable credentials are never stored in this envelope.
+    payload: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
+    retry_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    recovery_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

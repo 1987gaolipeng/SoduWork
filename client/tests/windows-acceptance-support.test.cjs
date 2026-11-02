@@ -90,14 +90,14 @@ test('acceptance receipt is written only after every owned cleanup succeeds', as
   const vm = require('node:vm');
   const source = require('node:fs').readFileSync(path.join(__dirname, '../../tools/ci/accept-windows.cjs'), 'utf8');
   const root = path.join(os.tmpdir(), 'soduwork-install-acceptance-fixture');
+  const version = '9.9.1';
   for (const failCleanup of [false, true]) {
+    let completedChecks;
     const calls = [], errors = [], state = { platform: 'win32', execPath: process.execPath, env: {} };
     const contract = {
       root: 'fixture', dist: 'fixture-dist', evidence: 'fixture-evidence',
-      distribution,
       verify: async () => ({ version, artifacts: [{ name: 'fixture.exe', sha256: 'new-sha' }] }),
-      read: async () => ({ ok: true, version, sha256: 'new-sha', root, distributionId, configSha256: distribution.configSha256,
-        distributionIsolation: { registration: true, shortcuts: true, executable: true, immutableProfile: true },
+      read: async () => ({ ok: true, version, sha256: 'new-sha', root,
         oldVersion: '1.12.80', oldBrand: 'SoduWork', oldSha256: 'old-sha' }),
       acceptance: async (_platform, checks) => { completedChecks = checks; calls.push('receipt'); },
     };
@@ -113,10 +113,8 @@ test('acceptance receipt is written only after every owned cleanup succeeds', as
       'node:fs/promises': fakeFs, 'node:path': path, 'node:os': os, 'node:assert/strict': assert,
       'node:child_process': { spawnSync: () => { throw Error('Unexpected native call'); } },
       './release-artifacts.cjs': contract,
-      './acceptance-common.cjs': { run: async () => {}, distributionBaseline: async () => first ? null : ({ productName: 'SoduWork',
+      './acceptance-common.cjs': { run: async () => {}, soduworkBaseline: async () => ({ productName: 'SoduWork',
         path: 'old.exe', version: '1.12.80', sha256: 'old-sha' }) },
-      './distribution-baselines.cjs': { plan: (profile, version) =>
-        require('../../tools/ci/distribution-baselines.cjs').plan(profile, version, { file }) },
       './windows-acceptance-support.cjs': { ...support, stopOwnedProcesses: () => {} },
     };
     await vm.runInNewContext(source, { __dirname: path.join(__dirname, '../../tools/ci'), process: state,
@@ -130,10 +128,8 @@ test('acceptance receipt is written only after every owned cleanup succeeds', as
       assert.equal(state.exitCode, undefined);
       assert.equal(calls.at(-1), 'receipt');
       assert.equal(errors.length, 0);
-      assert.deepEqual(Array.from(completedChecks, row => row.name), first
-        ? ['fresh-repair', 'first-release-isolation', 'compatibility'] : ['fresh-repair', 'soduwork-upgrade', 'compatibility']);
-      assert.ok(completedChecks.every(row => row.mode === (first ? 'first-release' : 'upgrade')));
-      if (first) assert.ok(completedChecks.every(row => !Object.hasOwn(row, 'oldVersion')));
+      assert.deepEqual(Array.from(completedChecks, row => row.name), ['fresh-repair', 'soduwork-upgrade', 'compatibility']);
+      assert.equal(completedChecks.find(row => row.name === 'soduwork-upgrade').oldVersion, '1.12.80');
     }
   }
 });

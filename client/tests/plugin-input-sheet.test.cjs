@@ -134,6 +134,54 @@ test('compound goal fields and attachment-only requests do not open a redundant 
   assert.equal(dateStillMissing.ready, false);
 });
 
+test('explicit follow-up references use the bounded prior result as the plugin input', () => {
+  const prior = 'Report result:\n- revenue grew 18%\n- follow-up: notify the owner';
+  const plan = mention.prepareConversationInputs(
+    [{ key: 'content', type: 'textarea', label: 'Content', required: true }],
+    'Send the previous result to the delivery plugin',
+    {}, { priorConversationText: prior },
+  );
+  assert.equal(plan.ready, true);
+  assert.equal(plan.values.content, prior);
+  assert.deepEqual(plan.inferredKeys, ['content']);
+  const pronoun = mention.prepareConversationInputs(
+    [{ key: 'content', type: 'textarea', label: 'Content', required: true }],
+    'Send it to the delivery plugin', {}, { priorConversationText: prior },
+  );
+  assert.equal(pronoun.values.content, prior);
+
+  const ordinary = mention.prepareConversationInputs(
+    [{ key: 'content', type: 'textarea', label: 'Content', required: true }],
+    'Send a new status update', {}, { priorConversationText: prior },
+  );
+  assert.equal(ordinary.values.content, 'Send a new status update');
+  const ordinaryThis = mention.prepareConversationInputs(
+    [{ key: 'content', type: 'textarea', label: 'Content', required: true }],
+    'This status update is new', {}, { priorConversationText: prior },
+  );
+  assert.equal(ordinaryThis.values.content, 'This status update is new');
+  const ordinaryResult = mention.prepareConversationInputs(
+    [{ key: 'content', type: 'textarea', label: 'Content', required: true }],
+    'Create a new result summary', {}, { priorConversationText: prior },
+  );
+  assert.equal(ordinaryResult.values.content, 'Create a new result summary');
+  const ordinaryAbove = mention.prepareConversationInputs(
+    [{ key: 'content', type: 'textarea', label: 'Content', required: true }],
+    'Create an above average summary', {}, { priorConversationText: prior },
+  );
+  assert.equal(ordinaryAbove.values.content, 'Create an above average summary');
+  const chineseFollowUp = mention.prepareConversationInputs(
+    [{ key: 'content', type: 'textarea', label: 'Content', required: true }],
+    '把上一轮结果交给发布插件', {}, { priorConversationText: prior },
+  );
+  assert.equal(chineseFollowUp.values.content, prior);
+  const chineseOrdinary = mention.prepareConversationInputs(
+    [{ key: 'content', type: 'textarea', label: 'Content', required: true }],
+    '创建内容用于官网', {}, { priorConversationText: prior },
+  );
+  assert.equal(chineseOrdinary.values.content, '创建内容用于官网');
+});
+
 test('conversation stays concise unless the user configured extra plugin parameters', () => {
   const plugin = { pluginId: 'requirements', name: '\u9700\u6c42\u6574\u7406', inputs };
   assert.equal(mention.preparedConversationText('\u4f18\u5316\u767b\u5f55', [plugin], new Map()), '\u4f18\u5316\u767b\u5f55');
@@ -203,6 +251,8 @@ test('structured plugin inputs live on conversation and task work surfaces, not 
   assert.match(chat, /formHost:\s*\(\)\s*=>\s*el\.querySelector\('\.nchat-draft'\)/);
   assert.match(compose, /formHost:\s*\(\)\s*=>\s*p\.querySelector\('\.cp-mid'\)/);
   assert.match(chat + compose, /inputContext:[\s\S]*attachmentNames/);
+  assert.match(chat, /priorConversationText/);
+  assert.match(chat, /Previous (?:assistant|tool) result/);
   assert.match(chat + compose, /onChange:[\s\S]*_pluginMention(?:\?\.|\.)refresh/);
   assert.doesNotMatch(forward, /data-fwp-input|function _fwpField/);
   assert.match(options, /window\.TaskPluginInput/);

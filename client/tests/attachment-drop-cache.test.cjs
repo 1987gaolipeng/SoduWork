@@ -234,8 +234,10 @@ test('refs skip an attachment that dies mid-flight and say which one and why', a
   assert.match(warnings[0], /企业微信临时缓存/);
 });
 
-/* Document-protection software can return ciphertext through the clipboard. Verify it is rejected
-   with a user-facing message and is never sent or stored as an image or file. */
+/*
+ * Reject encrypted clipboard bytes immediately with actionable feedback instead of
+ * treating ciphertext as a valid image or library file.
+ */
 const esafenetBytes = () => {
   const bytes = new Uint8Array(4096);
   bytes.set([0xe0, 0xa8, 0x91, 0xe7, 0xd8, 0xf2, 0x05, 0xac], 0);
@@ -277,7 +279,7 @@ test('a plain text file that merely mentions Esafenet is not treated as encrypte
   const api = loadComponent();
   const warnings = [];
   const picker = createPicker(api, { say: (m) => warnings.push(m) });
-  const text = 'Esafenet 是一种文档保护软件。\n' + '正文'.repeat(80);
+  const text = '我们公司用 Esafenet 做文档透明加密。\n' + '正文'.repeat(80);
   const source = new File([text], '说明.md', { type: 'text/markdown' });
 
   picker.add([source], 'drop');
@@ -309,9 +311,7 @@ test('conversation hydration keeps validated attachments conversation-scoped, an
 
   assert.equal(picker.has(), true); // Retain valid files while rejecting ciphertext.
   assert.equal(picker.names()[0], '8f67b781-3f86-49ab-9c2e-000000000000.png');
-  assert.equal(tracked.length, 1); // Register only valid files in the library.
-  assert.notEqual(tracked[0].file, good); // Register the memory copy rather than the original clipboard file.
-  assert.equal(tracked[0].options.name, '8f67b781-3f86-49ab-9c2e-000000000000.png');
+  assert.equal(tracked.length, 0); // Explicit save is required before a library item is created.
   assert.equal(warnings.length, 1);
 });
 

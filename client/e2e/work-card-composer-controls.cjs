@@ -26,8 +26,8 @@ if (typeof electron === 'string') {
     await js(`window.calls=[];window.messages=[];window.support={supported:true,schema:'soduwork.access-policy/v1',modes:['standard','readonly','full'],canChangeDuringSession:true};
       window.runtimes=[{id:'pi',displayName:'Pi',modelMode:'managed',accessControl:support},{id:'qwen',displayName:'Qwen',modelMode:'managed',accessControl:support}];
       window.petSay=x=>messages.push(x);window.soduWorkAPI={accessPreferences:{get:async()=>({ok:true,mode:'readonly'}),onChange:()=>()=>{}},conversationSession:{
-        runtimes:async()=>({ok:true,runtimes}),confirmNewChatAccess:async()=>{calls.push('confirm');return {ok:true,consentId:'native-grant'};},revokeNewChatAccess:async()=>({ok:true}),
-        conversationRuntimes:async()=>{calls.push('live-list');return {ok:true,runtimes};},
+        runtimes:async()=>({ok:true,runtimes,availableRuntimes:runtimes,missing:[]}),confirmNewChatAccess:async()=>{calls.push('confirm');return {ok:true,consentId:'native-grant'};},revokeNewChatAccess:async()=>({ok:true}),
+        conversationRuntimes:async()=>{calls.push('live-list');return {ok:true,runtimes,availableRuntimes:runtimes,missing:[]};},
         selectAgent:async(ref,id)=>{calls.push('live-agent:'+ref);return {ok:true,adapterId:id,snapshot:{adapterId:id,accessPolicy:{mode:'readonly'},accessControl:support}};},
         selectModel:async(ref,name)=>{calls.push('live-model:'+ref);return {ok:true,selection:{name,model:{id:name}}};},
         setAccessMode:async(ref,mode)=>{calls.push('live-access:'+ref);return {ok:true,accessPolicy:{mode},accessControl:support};}}};

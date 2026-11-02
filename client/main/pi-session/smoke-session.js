@@ -37,7 +37,7 @@ const fakeApp = { isPackaged: false, getPath: () => USERDATA };
 function identityFile() {
   const roaming = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
   /* Check the current user-data directory and legacy installations when locating smoke-test identity. */
-  for (const name of ['SoduWork']) {
+  for (const name of ['SoduWork', 'soduwork']) {
     const file = path.join(roaming, name, 'runner', 'config.json');
     try { if (fs.existsSync(file)) return file; } catch (e) { /* Try the next candidate. */ }
   }

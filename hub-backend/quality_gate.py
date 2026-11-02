@@ -32,6 +32,14 @@ for _stream in (sys.stdout, sys.stderr):
 LIVE_ACK = "SODUWORK_ALLOW_LIVE_GATE"
 LIVE_ENV_KEYS = ("SMOKE_ALLOW_LIVE_DB", "SODUWORK_SMOKE_LIVE_AI", "SMOKE_BASE")
 
+# The isolated admin dispatch suite takes over five minutes on Windows. Keep a
+# finite per-module deadline without changing the default for other checks.
+CHECK_TIMEOUTS = {
+    "smoke_plugins.py": 1800,
+    "smoke_schema_migrations.py": 1800,
+    "test_admin_requirement_dispatch.py": 600,
+}
+
 
 def _npm() -> str:
     executable = shutil.which("npm.cmd" if os.name == "nt" else "npm") or shutil.which("npm")
@@ -182,7 +190,7 @@ def main() -> int:
         ]
         checks.extend(
             (script.removesuffix(".py"), _python_check_command(script), BACKEND,
-             1800 if script in {"smoke_plugins.py", "smoke_schema_migrations.py"} else 300)
+             CHECK_TIMEOUTS.get(script, 300))
             for script in smoke_scripts
         )
 

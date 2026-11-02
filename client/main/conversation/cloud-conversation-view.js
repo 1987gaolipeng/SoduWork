@@ -10,7 +10,8 @@ const toolArgs = require('../../components/shared/execution-tool-args');
 const preparation = require('../pi-session/tool-preparation');
 const attachmentContract = require('../pi-session/attachment-contract');
 
-function create({ app, ref, record, saved, recordOf = () => record, artifactDirectory: resolvedDirectory }) {
+function create({ app, ref, record, saved, recordOf = () => record,
+  artifactDirectory: resolvedDirectory, sendRemote, stopRemote }) {
   // Cloud results are always materialized into a private per-conversation
   // cache. Direct cloud sessions use the cache recorded in the view; a local
   // session handed off to the cloud gets `resultCwd` so its original local
@@ -82,7 +83,7 @@ function create({ app, ref, record, saved, recordOf = () => record, artifactDire
     if (closed || !rows.length) return;
     // Persist the entire delivered page before advancing the view/cursor. A
     // failed write stays retryable; no timer can lose the final tool receipt.
-    log.appendMany(rows.map(row => ({ after: 0, ...row })));
+    log.appendMany(rows.map(row => ({ after: 0, ...row })), { flush: true });
     for (const row of rows) apply(row);
     cachedSnapshot = cachedUi = null;
     emit('task-message');
@@ -100,6 +101,7 @@ function create({ app, ref, record, saved, recordOf = () => record, artifactDire
   const taskId = () => recordOf()?.taskId || '';
   const handle = {
     ref, get cwd() { return artifactDirectory(); }, sessionId: record.sessionId, adapterId: saved.adapterId, passiveCloudView: true,
+    remoteContinuation: typeof sendRemote === 'function',
     displayName: base.displayName || saved.adapterId, model: saved.model, ui: {}, intent: '',
     get taskRef() { return taskId(); }, taskTitle: record.title,
     get taskIds() { return taskId() ? [taskId()] : []; },
@@ -148,9 +150,13 @@ function create({ app, ref, record, saved, recordOf = () => record, artifactDire
     status: () => recordOf()?.remoteState || 'idle',
     inFlight: () => ['running', 'queued'].includes(recordOf()?.remoteState), goalView: () => null,
     on(fn) { listeners.add(fn); return () => listeners.delete(fn); },
-    historyRow() { return { id: record.sessionId, ref, title: record.title, cwd: '',
+    historyRow() {
+      const current = recordOf() || record;
+      return { id: record.sessionId, ref, title: current.title, cwd: '',
       workspaceName: '云端环境', workspaceLabel: '云端环境', location: 'cloud', locationMode: 'remote', cloud: true,
-      adapterId: saved.adapterId, at: Date.now(), taskId: taskId(), taskIds: handle.taskIds }; },
+      adapterId: saved.adapterId, at: current.at || 0, state: current.remoteState || 'idle',
+      taskId: taskId(), taskIds: handle.taskIds, remoteProjection: current.remoteProjection === true,
+      canSend: handle.remoteContinuation, readOnly: !handle.remoteContinuation }; },
     appendTaskMessage(role, text, files, taskId, taskOutputKey) {
       if (keys.has(taskOutputKey)) return;
       append({ kind: 'message', role, text, files, taskId, taskOutputKey, at: Date.now() });
@@ -165,7 +171,9 @@ function create({ app, ref, record, saved, recordOf = () => record, artifactDire
     },
     outputs: () => outputs.list(artifactDirectory(), 0), outputSnapshot: () => outputs.scan(artifactDirectory(), 0),
     outputSnapshotAsync: () => outputs.scanAsync(artifactDirectory(), 0),
-    submit: () => ({ accepted: false, result: locked() }), send: locked, cancel: locked,
+    submit: () => ({ accepted: false, result: locked() }),
+    send: typeof sendRemote === 'function' ? (...args) => sendRemote(handle, ...args) : locked,
+    cancel: typeof stopRemote === 'function' ? (...args) => stopRemote(handle, ...args) : locked,
     selectModel: locked, setAccessPolicy: locked, setThinkingMode: locked,
     continueGoal: locked, disableGoal: locked, updateQueue: locked,
     close() { closed = true; listeners.clear(); },

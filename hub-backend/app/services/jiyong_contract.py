@@ -1,4 +1,4 @@
-"""Immutable declarations for the desktop hosted 即用 SDK (no business data)."""
+"""Immutable declarations for the desktop hosted app SDK (no business data)."""
 import json
 import math
 import re
@@ -57,7 +57,7 @@ def json_value(value):
 
 
 def normalize(raw):
-    only(raw, ['version', 'parameters', 'collections', 'mcp', 'initialization'])
+    only(raw, ['version', 'parameters', 'collections', 'mcp', 'initialization', 'storage'])
     if type(raw.get('version')) is not int or raw['version'] != 1:
         raise ValueError('即用声明版本不受支持')
     parameters = []
@@ -115,4 +115,12 @@ def normalize(raw):
         if len({(b['tool'], b['argument']) for b in bindings}) != len(bindings):
             raise ValueError('MCP 参数绑定重复')
         result['mcp'] = {'server': mcp['server'], 'bindings': bindings}
+    if raw.get('storage') is not None:
+        only(raw['storage'], ['location'])
+        location = raw['storage'].get('location')
+        if location not in ('local', 'cloud'):
+            raise ValueError('数据位置必须为 local 或 cloud')
+        if location == 'cloud' and 'initialization' not in result:
+            raise ValueError('云端数据必须声明版本化初始化 JSON')
+        result['storage'] = {'location': location}
     return result

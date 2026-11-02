@@ -172,6 +172,23 @@
 }
 #settingsPanel .settings-select:hover { border-color: color-mix(in srgb, var(--settings-accent) 40%, var(--settings-line)); background: color-mix(in srgb, var(--settings-accent) 3%, var(--settings-paper)); }
 #settingsPanel .settings-select:focus { border-color: var(--settings-accent); outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--settings-accent) 12%, transparent); }
+/* Keep language choices in the renderer; the shared picker positions its menu outside this scroll panel. */
+#settingsPanel .set-language select.fwd-select-native { display: none !important; }
+#settingsPanel .set-language .fwd-select-native ~ .settings-select-chevron { display: none; }
+#settingsPanel .set-language .fwd-select-trigger {
+  min-height: 42px;
+  height: auto;
+  padding: 9px 42px 9px 12px;
+  border-color: var(--settings-line);
+  border-radius: 10px;
+  background: var(--settings-paper);
+  color: var(--ink-2, #24324a);
+  font: 400 var(--settings-text)/1.5 var(--font-ui, sans-serif);
+}
+#settingsPanel .set-language .fwd-select-trigger::after { top: 50%; margin-top: -4px; }
+#settingsPanel .set-language .fwd-select-trigger:is(:hover, :focus-visible, [aria-expanded=true]) {
+  border-color: var(--settings-accent);
+}
 #settingsPanel .settings-select-chevron { position: absolute; top: 50%; right: 13px; width: 16px; height: 16px; transform: translateY(-50%); pointer-events: none; fill: none; stroke: var(--settings-muted); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 #settingsPanel .hub-env-picker { gap: 12px; }
 #settingsPanel .hub-env-option { min-height: 72px; padding: 14px; border-radius: 12px; border-color: var(--settings-line); background: var(--settings-paper); color: var(--ink-2); }

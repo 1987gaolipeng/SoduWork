@@ -87,6 +87,19 @@ class RunnerHandshakeTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(wire.sent[0]["inventoryReady"])
         self.assertEqual(wire.sent[0]["clientId"], "fixture-device")
 
+    async def test_selection_capability_survives_real_hello_and_cluster_refresh(self):
+        from app.services.runner_hub import _Runner
+        from app.services.cluster_runtime import RemoteRunner
+        wire = Wire(['{"op":"welcome","caps":["bin1"]}'])
+        await self.machine(wire)._hello()
+        registered = _Runner(None, wire.sent[0])
+        self.assertIn("executionSelection1", registered.caps)
+        report = {**registered.api(), "clusterToken": "fixture-token"}
+        proxy = RemoteRunner("fixture-node", report)
+        proxy.update(report)
+        self.assertEqual(proxy.caps, registered.caps)
+        self.assertIn("executionSelection1", proxy.caps)
+
     async def test_explicit_rejection_stays_an_error(self):
         machine = self.machine(Wire(['{"op":"bye","error":"fixture revoked"}']))
         with self.assertRaisesRegex(ConnectionError, "fixture revoked"):

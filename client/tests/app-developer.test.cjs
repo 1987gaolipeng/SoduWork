@@ -100,12 +100,23 @@ test('built-in app developer inherits the current plugin contract and exact publ
   const folder = path.join(bundle.directory, 'references/developer');
   assert.equal(fs.readFileSync(path.join(folder, 'plugin-development.md'), 'utf8'), require('../main/plugin-builder-plugin.cjs').body().instructions);
   assert.deepEqual(fs.readFileSync(path.join(folder, 'sdk/soduwork-app.js')), fs.readFileSync(path.resolve(__dirname, '../sdk/soduwork-app.js')));
-  const entryGuide = fs.readFileSync(path.join(folder, 'SKILL.md'), 'utf8');
-  assert.ok(entryGuide.replace(/\r\n/g, '\n').length < 1600,
-    'entrypoint stays concise with either checkout line ending');
+  const entryGuide = fs.readFileSync(path.join(folder, 'SKILL.md'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(entryGuide.length < 1600, 'entrypoint stays concise');
   assert.match(entryGuide,/references\/host-sdk\.md/);
   const workflow = fs.readFileSync(path.join(folder, 'references/development-workflow.md'), 'utf8');
   const design = fs.readFileSync(path.join(folder, 'references/design-quality.md'), 'utf8');
+  const structure = fs.readFileSync(path.join(folder, 'references/local-app-structure.md'), 'utf8');
+  assert.deepEqual(fs.readFileSync(path.join(folder, 'references/local-files.md')),
+    fs.readFileSync(path.resolve(__dirname, '../../skills/app-developer/references/local-files.md')),
+    'file guidance must be physically distributed with the developer plugin');
+  assert.equal(detail.localDraft.version, require('../main/app-developer-plugin.cjs').body(f.app).version);
+  assert.match(entryGuide, /references\/local-app-structure\.md/);
+  assert.match(workflow, /local-app-structure\.md/);
+  assert.match(detail.localDraft.instructions, /简单本地即用[\s\S]*直接挂载 div[\s\S]*Web服务\/H5技术栈不限/);
+  assert.match(structure, /mount\(container, context\)/);
+  assert.match(structure, /300～500[\s\S]*800行是评审提醒/);
+  assert.match(structure, /Web 服务与 H5[\s\S]*Vue、React/);
+  assert.match(structure, /解除事件、订阅、定时器[\s\S]*丢弃旧响应/);
   assert.match(workflow, /一句必填意图[\s\S]*标题＋内容[\s\S]*派生字段由AI/);
   assert.match(workflow, /禁止分类下拉、标签输入等管理表单/);
   assert.match(workflow, /复制、搜索、分页、校验、游戏实时交互直接执行/);
@@ -128,6 +139,39 @@ test('built-in app developer inherits the current plugin contract and exact publ
   const resolved = personal.resolve(f.app, [personal.APP_DEVELOPER_ID], { cwd: f.root });
   assert.match(resolved.items[0].context, /references\/developer\/SKILL.md/);
   assert.equal(fs.existsSync(path.join(f.root, 'personal-plugins.json')), false);
+});
+
+test('bundled file handoff example preserves retry identity and separates accepted sends from cleanup failures', async t => {
+  const f = fixture(t), detail = personal.get(f.app, personal.APP_DEVELOPER_ID);
+  const bundle = resources.materialize(detail.localDraft.resources, f.root, detail.key);
+  const guide = fs.readFileSync(path.join(bundle.directory, 'references/developer/references/local-files.md'), 'utf8');
+  const code = guide.match(/```js\r?\n([\s\S]*?)\r?\n```/)[1];
+  const calls = [], picked = [{ id: 'opaque-file', name: 'material.txt', size: 12 }];
+  let sendFails = true, cleanupFails = false;
+  const context = vm.createContext({ soduWorkApp: {
+    createRequestId: () => 'stable-submission',
+    attachments: {
+      pick: async () => ({ ok: true, items: picked }),
+      check: async ids => { calls.push(['check', [...ids]]); return { ok: true }; },
+      release: async ids => { calls.push(['release', [...ids]]); if (cleanupFails) throw Error('cleanup blocked'); return { ok: true }; },
+    },
+    chat: { send: async request => { calls.push(['send', JSON.parse(JSON.stringify(request))]);
+      return sendFails ? { ok: false, reason: 'not accepted' } : { ok: true }; } },
+  } });
+  vm.runInContext(code, context);
+  const submission = context.makeSubmission('Process the selected file', await context.pickFiles());
+  await assert.rejects(context.sendSubmission(submission), /not accepted/);
+  assert.equal(calls.some(row => row[0] === 'release'), false, 'failure retains file references');
+  sendFails = false; cleanupFails = true;
+  const result = await context.sendSubmission(submission);
+  assert.equal(result.accepted, true, 'release failure cannot turn an accepted send into a retry');
+  assert.equal(result.cleanupWarning, 'cleanup blocked');
+  const sent = calls.filter(row => row[0] === 'send').map(row => row[1]);
+  assert.deepEqual(sent[0], sent[1], 'retry retains the original request and attachment IDs');
+  assert.equal(sent[0].requestId, 'stable-submission');
+  assert.deepEqual(sent[0].attachmentIds, ['opaque-file']);
+  picked.length = 0;
+  assert.equal((await context.pickFiles()).length, 0, 'native cancellation supplies no files');
 });
 
 test('generated app installs from its own conversation artifact, exports and reimports with type and resources intact', async t => {
@@ -256,4 +300,18 @@ test('Chinese 即用 and English App intentionally share a product concept acros
   assert.match(catalogs['en-US']['首屏发现脚本、资源或SDK运行错误：{value1}'],/error detected/);
   assert.match(catalogs['en-US']['原生启动检查失败：{value1}'],/failed/);
   for(const [key,value] of Object.entries(catalogs['en-US'])) if(key.includes('即用')) assert.doesNotMatch(value,/Instant/);
+});
+
+test('new authored data declarations require explicit storage while legacy package import stays local-compatible',t=>{
+  const f=fixture(t);scaffold({out:f.out,key:'storage-contract',name:'数据声明',storage:'cloud'});
+  const file=path.join(f.out,drafts.DRAFT_NAME),body=JSON.parse(fs.readFileSync(file,'utf8'));
+  body.icon='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jxqkAAAAASUVORK5CYII=';
+  const validator=require('../../skills/app-developer/scripts/validate.cjs');
+  const write=()=>fs.writeFileSync(file,JSON.stringify(body));write();
+  assert.equal(validator.validate(file,f.out).storageLocation,'cloud');
+  delete body.jiyong.storage;write();
+  assert.throws(()=>validator.validate(file,f.out),/必须显式声明 jiyong.storage.location/);
+  assert.equal(personal.preflight(collected(f).body).ok,true,'runtime import preserves existing standalone packages');
+  body.jiyong.storage={location:'local'};write();
+  assert.equal(validator.validate(file,f.out).storageLocation,'local');
 });

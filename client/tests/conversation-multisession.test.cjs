@@ -71,7 +71,7 @@ test('failed personal-plugin turns keep the draft, plugin selection, and attachm
   assert.match(chat, /const files = _ordinaryDraftFiles\(draft\.files\)/);
   assert.match(chat, /(?:ctx\.)?_messageAttachments\?\.add\?\.\(files, 'draft'\)/);
   assert.match(chat, /(?:ctx\.)?_pluginMention\?\.restore\?\.\(draft\.plugins\)/);
-  assert.match(chat, /(?:ctx\.)?_fail\('这一轮没发出去', r && r\.reason, failedDraft\)/);
+  assert.match(chat, /(?:ctx\.)?_fail\('这一轮没发出去', r && r\.reason, failedDraft, r\)/);
   // Parameter-bearing retry drafts and conflicting newer selections are checked
   // behaviorally in chat-send-boundary / chat-plugin-draft-recovery. Folded body
   // cards must not duplicate their persisted text (long-text-draft), rather than

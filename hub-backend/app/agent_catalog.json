@@ -237,7 +237,105 @@
       "accessControl": {
         "schema": "soduwork.access-policy/v1",
         "supported": true,
-        "modes": ["standard", "readonly", "full"],
+        "modes": [
+          "standard",
+          "readonly",
+          "full"
+        ],
+        "approval": "native-acp",
+        "sandbox": false
+      },
+      "id": "kimi",
+      "displayName": "Kimi Code",
+      "transport": "runner",
+      "modelMode": "managed",
+      "goalMode": "native",
+      "group": "more",
+      "order": 90,
+      "summary": "Kimi 官方编码助手，通过 ACP 使用企业模型和插件工具。",
+      "runner": {
+        "adapter": "acp",
+        "bins": [
+          "kimi",
+          "kimi.cmd",
+          "kimi.exe"
+        ],
+        "args": [
+          "acp"
+        ],
+        "home": {
+          "env": "KIMI_CODE_HOME",
+          "folder": ".kimi-code"
+        },
+        "modelEnv": {
+          "KIMI_MODEL_BASE_URL": "base",
+          "KIMI_MODEL_API_KEY": "key",
+          "KIMI_MODEL_NAME": "model"
+        },
+        "launch": "node"
+      },
+      "install": {
+        "installer": "npm",
+        "pkg": "@moonshot-ai/kimi-code",
+        "source": "https://github.com/MoonshotAI/kimi-code",
+        "blurb": "Kimi 官方编码助手，通过 ACP 接入，使用已授权的企业模型。",
+        "warn": "",
+        "config_how": "模型配置仅注入当前执行进程；账号和会话数据按执行环境隔离。",
+        "config_path": ""
+      }
+    },
+    {
+      "accessControl": {
+        "schema": "soduwork.access-policy/v1",
+        "supported": true,
+        "modes": [
+          "standard",
+          "readonly",
+          "full"
+        ],
+        "approval": "native-acp",
+        "sandbox": false
+      },
+      "id": "claude",
+      "displayName": "Claude Code",
+      "transport": "runner",
+      "modelMode": "account",
+      "goalMode": "native",
+      "group": "more",
+      "order": 100,
+      "summary": "通过统一 ACP 通道使用 Claude Code，支持权限确认、插件工具和会话续接。",
+      "runner": {
+        "adapter": "acp",
+        "bins": [
+          "claude-agent-acp",
+          "claude-agent-acp.cmd"
+        ],
+        "args": [],
+        "home": {
+          "env": "CLAUDE_CONFIG_DIR",
+          "folder": ".claude"
+        },
+        "pkg": "@agentclientprotocol/claude-agent-acp",
+        "launch": "node"
+      },
+      "install": {
+        "installer": "native",
+        "source": "https://claude.ai/install",
+        "blurb": "Anthropic 官方 Claude Code，通过 ACP 适配器接入；使用自己的 Anthropic 账号。",
+        "warn": "执行程序与权限适配器由 SoduWork 自动准备，登录和会话数据按执行环境隔离。",
+        "config_how": "使用当前执行环境的 Claude Code 账号；企业默认模型不会覆盖个人账号。",
+        "config_path": ""
+      }
+    },
+    {
+      "accessControl": {
+        "schema": "soduwork.access-policy/v1",
+        "supported": true,
+        "modes": [
+          "standard",
+          "readonly",
+          "full"
+        ],
         "approval": "native-acp",
         "sandbox": false
       },

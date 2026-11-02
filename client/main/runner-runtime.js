@@ -46,6 +46,13 @@ const RUNNER_ENV_DENY = Object.freeze([
   'OPENCODE_CONFIG_CONTENT', 'SODUWORK_BUNDLED_OPENCODE', 'SODUWORK_BUNDLED_SHELL',
   'NODE_OPTIONS', 'ELECTRON_RUN_AS_NODE',
 ]);
+// Desktop startup is authorized by its private config pipe and device identity.
+// Standalone Runner environment options must not override another app instance.
+const RUNNER_INSTANCE_ENV_DENY = Object.freeze([
+  'SODUWORK_HUB', 'SODUWORK_CLIENT_ID', 'SODUWORK_DATA_ROOT', 'SODUWORK_WORK_ROOT',
+  'SODUWORK_RUNNER_ID', 'SODUWORK_RUNNER_KEY', 'SODUWORK_RUNNER_TOKEN', 'SODUWORK_DEVICE_SECRET',
+  'SODUWORK_RUNNER_TAGS', 'SODUWORK_RUNNER_MAX_CONCURRENT', 'SODUWORK_HUB_HTTP_BASE',
+]);
 
 function _bundledPi(app, resourceRoot = process.resourcesPath) {
   if (!app) return null;
@@ -65,8 +72,10 @@ function _bundledPi(app, resourceRoot = process.resourcesPath) {
  * machines without Git. Existing machine Bash installations retain precedence.
  */
 function _bundledShell(app, resourceRoot = process.resourcesPath) {
-  if (!app || !app.isPackaged || !resourceRoot) return null;
-  const root = path.join(resourceRoot, 'shell');
+  if (!app) return null;
+  const base = app.isPackaged ? resourceRoot : app.getAppPath?.();
+  if (!base) return null;
+  const root = app.isPackaged ? path.join(base, 'shell') : path.join(base, '.runtime', 'git');
   return fs.existsSync(path.join(root, 'bin', 'bash.exe')) ? root : null;
 }
 
@@ -83,7 +92,8 @@ function _skillRoots(app, resourceRoot = process.resourcesPath) {
 
 function _runnerEnv(base, deviceSecret, app, resourceRoot) {
   const env = { ...(base || {}) };
-  RUNNER_ENV_DENY.forEach((key) => { delete env[key]; });
+  const denied = new Set([...RUNNER_ENV_DENY, ...RUNNER_INSTANCE_ENV_DENY]);
+  Object.keys(env).forEach(key => { if (denied.has(key.toUpperCase())) delete env[key]; });
   env.SODUWORK_DEVICE_SECRET = String(deviceSecret || '');
   /*
    * Expose the local personal-plugin store for read-only current-version resolution by
@@ -100,7 +110,9 @@ function _runnerEnv(base, deviceSecret, app, resourceRoot) {
   const shellRoot = _bundledShell(app, resourceRoot);
   if (shellRoot) env.SODUWORK_BUNDLED_SHELL = shellRoot;
   env.SODUWORK_SKILL_ROOTS = _skillRoots(app, resourceRoot).join(path.delimiter);
-  return env;
+  const managed = require('./managed-runtime.cjs');
+  const root = managed.runtimeRoot(app, resourceRoot || process.resourcesPath);
+  return root ? managed.environment(env, { resourcesPath: root }) : env;
 }
 const INSTALLABLE_COMPONENTS = Object.freeze({
   office: {
@@ -281,7 +293,10 @@ function _rejectRpc(message = 'Runner stopped') {
   _rpcPending.clear();
 }
 
-function _consumeRunnerOutput(chunk, logPath) {
+let _mobileCapabilities = null;
+function setMobileCapabilities(handler) { _mobileCapabilities = handler; }
+
+function _consumeRunnerOutput(chunk, logPath, child = _proc) {
   _stdoutRest += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '');
   const lines = _stdoutRest.split(/\r?\n/);
   _stdoutRest = lines.pop() || '';
@@ -304,6 +319,18 @@ function _consumeRunnerOutput(chunk, logPath) {
     }
     try {
       const packet = JSON.parse(line.slice(LOCAL_RPC_PREFIX.length));
+      if (packet.kind === 'desktop-capability') {
+        const reply = result => {
+          if (child !== _proc || child.killed || !child.stdin?.writable) return;
+          child.stdin.write(LOCAL_RPC_PREFIX + JSON.stringify({ id: 'desktop-' + packet.id,
+            message: { op: 'desktop.capability.reply', requestId: packet.id, result } }) + '\n');
+        };
+        Promise.resolve().then(() => {
+          if (child !== _proc || !_mobileCapabilities) throw Error('电脑能力尚未准备好，请稍后刷新');
+          return _mobileCapabilities(packet.body);
+        }).then(data => reply({ ok: true, data }), error => reply({ ok: false, error: String(error.message || error) }));
+        return;
+      }
       const pending = _rpcPending.get(String(packet.id || ''));
       if (!pending) return;
       _rpcPending.delete(String(packet.id || ''));
@@ -575,7 +602,7 @@ function install({ app, ipcMain, identityOf }) {
 }
 
 module.exports = {
-  install, identity, pauseForHubChange, capabilityGrants, rpc,
+  install, identity, pauseForHubChange, capabilityGrants, rpc, setMobileCapabilities,
   _clean, _stored, _grants, _migrateRaw, _mergeRaw, _prepareWorkRoot, _runnerEnv, _bundledPi,
   _bundledShell, _skillRoots,
   CAPABILITY_KEYS, CAPABILITY_GRANT_VERSION, DEFAULT_CAPABILITY_GRANTS, RUNNER_ENV_DENY,

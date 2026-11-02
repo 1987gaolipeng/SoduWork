@@ -27,25 +27,13 @@
     "name": "代码修复 · 自动研发闭环",
     "description": "面向已有代码工程的纯研发闭环：AI 只读确认修复边界，在隔离工作区实现并按项目 SCM 协议提交，Runner 对固定提交执行权威工程自测，独立 AI 审查后自动合并到目标分支，最后形成可追溯的仓库回执；各节点边界由运行时策略强制约束，不触发任何环境发布。"
   },
-  "gerrit-autopilot": {
-    "name": "Gerrit 全自动交付",
-    "description": "scm=gerrit 的工程专用：AI 修改 → 本地门禁 → SoduWork 自动评审并投 Code-Review+2 → 合并进目标分支 → CICD 建版本并部署 → 核对制品 SHA。全程无人工门禁，改用逐环节留证（报告/steps/时间线/Gerrit 评论），需要人时主动出声。"
-  },
   "goal-delivery-harness": {
     "name": "目标交付 Harness",
     "description": "SoduWork built-in durable goal and delivery harness."
   },
-  "img2threejs": {
-    "name": "图片转程序化 3D · img2threejs",
-    "description": "把单张物体或角色参考图重建为可读、可修改、可动画的程序化 Three.js 代码。按阶段完成图像准入、结构与材质规格、逐步建模、渲染对照和质量门校验，交付 TypeScript 模型工厂、规格与验证证据，而不是不可编辑的黑盒网格。"
-  },
   "knowledge-synthesis": {
     "name": "材料研读与知识综述",
     "description": "从多份企业材料中抽取事实、统一术语、识别冲突并形成带来源定位的知识综述，适合制度、项目和方案资料汇总。"
-  },
-  "mattpocock-engineering": {
-    "name": "Matt Pocock 工程方法精选",
-    "description": "从 mattpocock/skills 精选的 10 个工程技能：两轴代码评审、深模块设计、疑难 bug 诊断循环、领域建模、TDD、合并冲突化解、一次性原型、架构改进扫描、拷问式设计（顺手沉淀 ADR）、人工步骤向导。装上后在对话里用 # 按需选用。"
   },
   "mcp-studio": {
     "name": "MCP 快速配置",
@@ -95,10 +83,6 @@
     "name": "表格与数据分析师",
     "description": "把原始数据整理成口径明确、公式可复核、图表可解释的 Excel 工作簿，并保留数据质量与分析说明。"
   },
-  "superpowers": {
-    "name": "Superpowers 工作方法",
-    "description": "obra/superpowers 整套 14 个工作方法技能：头脑风暴、写计划、按计划执行、系统化调试、测试驱动开发、请求/接受代码评审、子代理驱动开发、并行派发代理、git worktree、收尾开发分支、完成前验证、写技能。装上后在对话里用 # 按需选用，using-superpowers 是总入口。"
-  },
   "viral-video-studio": {
     "name": "疯传视频成片工坊",
     "description": "从一个主题或产品卖点生成短视频脚本、分镜、字幕和可直接发布到抖音、小红书、视频号、B站、YouTube 或 TikTok 的视频文件。"
@@ -106,17 +90,5 @@
   "web-collect": {
     "name": "网页采集 · 定向信息收集",
     "description": "面向明确目标的网页信息采集：按给定站点或主题逐页浏览、抽取关键信息，整理成结构化的采集报告并逐条留下来源链接，经独立审查与人工验收后交付。适合行情比价、公开资料汇总、页面内容核对这类定向采集活。"
-  },
-  "wecom": {
-    "name": "企业微信",
-    "description": "复用官方企业微信 CLI 与完整技能套件，处理文档、表格、日程、待办、邮件和授权机器人会话；首次使用需扫码授权。"
-  },
-  "dingtalk": {
-    "name": "钉钉",
-    "description": "复用官方 DWS CLI 与完整产品技能，处理钉钉文档、日程、待办、消息、通讯录等；首次使用需钉钉授权。"
-  },
-  "feishu": {
-    "name": "飞书",
-    "description": "通过官方 MCP 访问本人授权的飞书文档、知识库、多维表格和群组信息。个人首次连接扫码创建应用，再扫码授权账号。"
   }
 }

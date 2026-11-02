@@ -452,7 +452,8 @@ def test_contract():
         "data-rn-task" in js and "data-rn-console" in js and "openConsoleEntry" in js)
     chk("界面·明确展示首选节点与自动绕行策略",
         'class="rn-preferred">首选</span>' in js and "自动调度" in js
-        and "当前优先使用「" in js and "新任务会自动绕行" in js
+        and "当前优先使用「" in js
+        and "使用其他环境时，请明确选择云端或指定执行机。" in js
         and "当前没有可接单节点，任务会保留等待。" in js)
     chk("界面·Runner 会话事件节流刷新且不反复闪加载态",
         "soduwork-work-execution" in agents and "_agRunnerTick" in agents and "if (!loaded)" in agents)

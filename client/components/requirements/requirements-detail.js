@@ -7,6 +7,11 @@
   let root = null, task = null, seq = 0, returnFocus = null, busy = false, editing = false, files = [], pendingUploads = [];
   let pendingConfirmation = null, evidenceReturnFocus = null, evidenceRequest = 0, editBaseline = null, saving = false;
   let refreshRequest = 0, refreshFlight = null, editVersion = null, mountedTrace = null, refreshPending = false;
+  let approvalState = '';
+  function approvalSignature() {
+    const context = global.RequirementsBoard?.context?.(), item = task && R.approval(task, context);
+    return JSON.stringify([task?.id, item?.id, item?.status, item?.myDecision, task && R.waitingOn(task, context)]);
+  }
   const esc = value => String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   const options = (entries, value) => entries.map(([key, label]) => '<option value="' + esc(key) + '"' +
@@ -115,9 +120,9 @@
     const isComments = kind === 'comments';
     const title = dialog.querySelector('[data-rq-evidence-title]');
     const subtitle = dialog.querySelector('[data-rq-evidence-subtitle]');
-    if (title) title.textContent = isComments ? '协作记录' : '插件扩展';
-    if (subtitle) subtitle.textContent = isComments ? '查看需求相关的讨论与反馈' : '查看由插件提供的相关信息';
-    if (comments) { comments.hidden = !isComments; if (isComments) comments.textContent = '正在加载协作记录…'; }
+    if (title) title.textContent = isComments ? '活动记录' : '插件扩展';
+    if (subtitle) subtitle.textContent = isComments ? '操作历史与讨论留言，按时间倒序显示' : '由已安装插件提供的需求专属操作与信息；普通需求无需配置。';
+    if (comments) { comments.hidden = !isComments; if (isComments) comments.textContent = '正在加载活动记录…'; }
     if (extensions) { extensions.hidden = isComments; if (!isComments) extensions.textContent = '正在加载插件扩展…'; }
     /* Return focus to the overflow trigger after closing its dialog. */
     const focusTarget = trigger || document.activeElement;
@@ -163,7 +168,7 @@
       '<button type="button" data-rq-dismiss aria-label="关闭需求详情">×</button></header>' +
       '<div class="rq-detail-content"></div><footer class="rq-detail-footer" hidden></footer></aside>' +
       '<div class="rq-detail-modal-layer rq-evidence-modal" data-rq-evidence-modal hidden role="dialog" aria-modal="true" aria-labelledby="rqEvidenceTitle" aria-describedby="rqEvidenceSubtitle">' +
-      '<div class="rq-detail-modal-card"><header class="rq-detail-modal-header"><div><h3 id="rqEvidenceTitle" data-rq-evidence-title>协作记录</h3><p id="rqEvidenceSubtitle" data-rq-evidence-subtitle>查看需求相关的讨论与反馈</p></div><button type="button" data-rq-evidence-close aria-label="关闭弹窗">×</button></header>' +
+      '<div class="rq-detail-modal-card"><header class="rq-detail-modal-header"><div><h3 id="rqEvidenceTitle" data-rq-evidence-title>活动记录</h3><p id="rqEvidenceSubtitle" data-rq-evidence-subtitle>操作历史与讨论留言，按时间倒序显示</p></div><button type="button" data-rq-evidence-close aria-label="关闭弹窗">×</button></header>' +
       '<div class="rq-detail-modal-body"><div data-rq-comment-list role="status" aria-live="polite"></div><div data-rq-extension-list hidden role="status" aria-live="polite"></div></div></div></div>' +
       '<div class="rq-detail-modal-layer rq-confirm-modal" data-rq-confirm hidden role="alertdialog" aria-modal="true" aria-labelledby="rqConfirmTitle" aria-describedby="rqConfirmDescription">' +
       '<div class="rq-detail-modal-card rq-confirm-card"><div class="rq-confirm-icon" aria-hidden="true">!</div><div class="rq-confirm-copy"><h3 id="rqConfirmTitle">放弃未保存的修改？</h3><p id="rqConfirmDescription">已保存的需求内容会保留。</p></div><div class="rq-confirm-actions"><button type="button" data-rq-confirm-cancel>继续编辑</button><button type="button" class="rq-primary" data-rq-confirm-discard>放弃修改</button></div></div></div>';
@@ -181,6 +186,7 @@
       const evidenceDialog = node.querySelector('[data-rq-evidence-modal]');
       if (event.target.closest('[data-rq-evidence-close]') || event.target === evidenceDialog) { closeEvidencePanel(); return; }
       if (event.target.closest('[data-rq-comments-open]')) { openEvidencePanel('comments', evidenceFocus); return; }
+      if (event.target.closest('[data-rq-activity-retry]')) { void loadComments(); return; }
       if (event.target.closest('[data-rq-extensions-open]')) { openEvidencePanel('extensions', evidenceFocus); return; }
       if (event.target === node || event.target.closest('[data-rq-dismiss]')) { if (!busy) void close(); return; }
       if (event.target.closest('[data-rq-edit]') && task && R.canEdit(task)) { void setEditing(true); return; }
@@ -200,8 +206,6 @@
           .finally(() => { if (request === seq) busy = false; });
         return;
       }
-      const manual = event.target.closest('[data-rq-status]');
-      if (manual && task && !task.readOnly) { void save({status: manual.dataset.rqStatus}); return; }
       if (event.target.closest('[data-rq-ready]') && task && R.canTriage(task) &&
           ['intake', 'clarifying'].includes(R.stage(task))) {
         void save({triageStage: 'ready'}); return;
@@ -255,7 +259,10 @@
       if (file) void openAttachment(file.dataset.rqFile);
       const download = event.target.closest('[data-rq-download]');
       if (download) void downloadAttachment(download.dataset.rqDownload);
-      if (event.target.closest('[data-rq-bundle-download],[data-rq-download-bundle]')) void downloadBundle();
+      const bundle = event.target.closest('[data-rq-bundle-download],[data-rq-download-bundle]');
+      if (bundle) void downloadBundle(bundle);
+      const bundleLibrary = event.target.closest('[data-rq-bundle-library]');
+      if (bundleLibrary) void downloadBundle(bundleLibrary, true);
       const remove = event.target.closest('[data-rq-remove-file]');
       if (remove) void removeAttachment(remove.dataset.rqRemoveFile);
       if (event.target.closest('[data-rq-artifact]')) global.soduWorkAPI?.openExternal?.(task.artifactUrl);
@@ -280,7 +287,7 @@
         if (mountedTrace === journey) return;
         mountedTrace = journey;
         global.TaskExecutionJourney?.mount(journey, {taskId: task.id, compact: true,
-          suppressInlineApproval: true, force: true});
+          suppressInlineApproval: true, suppressTimeline: true, force: true});
       } else {
         global.TaskExecutionJourney?.unmount(journey);
         if (mountedTrace === journey) mountedTrace = null;
@@ -436,6 +443,11 @@
   }
   function render() {
     global.ForwardSelect?.destroy(root);
+    if (task.canViewExecution === false) {
+      closeEvidencePanel();
+      root?.querySelector('[data-rq-comment-list]')?.replaceChildren();
+      root?.querySelector('[data-rq-extension-list]')?.replaceChildren();
+    }
     const evidenceOpen = root?.querySelector('[data-rq-execution]')?.open === true;
     const previousTrace = root?.querySelector('[data-rq-trace]');
     const preserveTrace = evidenceOpen && !editing && task.canViewExecution !== false;
@@ -449,6 +461,7 @@
     const criteria = task.acceptanceCriteria || [];
     const ctx = global.RequirementsBoard?.context?.(), step = R.nextStep(task, ctx);
     const approvalItem = R.approval(task, ctx);
+    approvalState = approvalSignature();
     const created = R.timeInfo({createdAt: task.createdAt, created: task.created}), changed = R.timeInfo(task);
     const timeProperty = info => info.datetime
       ? '<time datetime="' + esc(info.datetime) + '" title="' + esc(info.title) + '">' + esc(info.text) + '</time>'
@@ -495,9 +508,9 @@
     const locked = permission => permission.disabled ? ' disabled data-rq-locked aria-disabled="true" title="' + esc(permission.reason) + '"' : '';
     const maintenanceReason = [archive, removal].find(item => item.visible && item.disabled)?.reason;
     const more =
-      (task.canViewExecution !== false ? '<button type="button" data-rq-comments-open aria-haspopup="dialog">协作记录</button>' +
+      (task.canViewExecution !== false ? '<button type="button" data-rq-comments-open aria-haspopup="dialog">活动记录</button>' +
         '<button type="button" data-rq-extensions-open aria-haspopup="dialog">插件扩展</button>' : '') +
-      (canArrange && canEdit && !task.readOnly ? '<button type="button" data-rq-status="doing">我来处理</button>' : '') +
+      (R.canSubmitReview(task) ? '<button type="button" data-rq-submit-review>提交验收</button>' : '') +
       (R.canManageAutomation(task) ? '<button type="button" data-rq-automation>' + (task.automationScheduleId ? '查看自动化' :
         pendingSchedules.has(task.id) ? '重试关联自动化' : '设为自动化') + '</button>' : '') +
       (archive.visible ? '<button type="button" data-rq-archive' + locked(archive) + '>' + (phase === 'closed' ? '恢复需求' : '归档需求') + '</button>' : '') +
@@ -540,7 +553,7 @@
       if (journey) {
         mountedTrace = journey;
         global.TaskExecutionJourney?.mount(journey, {taskId: task.id, compact: true,
-          suppressInlineApproval: true, force: true});
+          suppressInlineApproval: true, suppressTimeline: true, force: true});
       }
     }
   }
@@ -564,7 +577,7 @@
     if (!item) {
       /* Use the same directItem predicate for rendering and submission. */
       const waitingNames = R.waitingOn ? R.waitingOn(task, ctx) : [];
-      const direct = canReviewDirect(task) && !waitingNames.length;
+      const direct = task.status === 'done' && canReviewDirect(task) && !waitingNames.length;
       if (!direct) return;
       bindState([{ id: 'direct:' + task.id, action: 'review', status: 'pending',
         confirmation: { title: '交付验收' } }], {
@@ -596,24 +609,6 @@
     const reviewed = task.reviewedAt;
     const canReview = canReviewDirect(task);
     const routing = task.workRouting || {};
-    const outputContract = routing.outputContract || {};
-    const hasDeclaredItems = value => Array.isArray(value) ? value.length > 0 :
-      (typeof value === 'string' ? Boolean(value.trim()) : Boolean(value));
-    // A contract kind describes the route, not an actual file to deliver. Older
-    // tasks may retain `kind` while having no declared deliverables at all.
-    const noDeclaredOutput = !hasDeclaredItems(outputContract.expectedArtifacts) &&
-      !hasDeclaredItems(outputContract.deliverables) && !hasDeclaredItems(outputContract.outputs) &&
-      !String(task.artifactUrl || '').trim();
-    // A stale auto mode must not hide the manual completion route when this
-    // requirement has no declared deliverable at all. The user still needs a
-    // way to move the work from doing to the review gate.
-    const submissionMode = noDeclaredOutput ? 'manual' : String(routing.executionSubmissionMode ||
-      (outputContract.kind || outputContract.expectedArtifacts ? 'auto' : 'manual'));
-    const canSubmitReview = ['doing', 'paused'].includes(String(task.status || '')) &&
-      submissionMode === 'manual' && task.canViewExecution !== false && R.canSubmitReview(task);
-    const canMarkComplete = ['doing', 'paused'].includes(String(task.status || '')) &&
-      submissionMode === 'manual' && noDeclaredOutput && task.canViewExecution !== false &&
-      R.canSubmitReview(task);
     const artifact = /^https?:\/\//i.test(task.artifactUrl || '') ? task.artifactUrl : '';
     // For project tasks, waiting at merge or release after review is a valid intermediate state.
     // For non-project tasks, the corresponding unresolved state is blocked.
@@ -649,7 +644,7 @@
     const approvalItem = R.approval(task, ctx);
     const normalized = approvalItem ? { ...approvalItem, status: approvalItem.status || 'pending' } : null;
     const waitingNames = R.waitingOn ? R.waitingOn(task, ctx) : [];
-    const directItem = canReview && !normalized && !waitingNames.length ? {
+    const directItem = task.status === 'done' && canReview && !normalized && !waitingNames.length ? {
       id: 'direct:' + task.id, action: 'review', status: 'pending',
       confirmation: { title: '交付验收' },
     } : null;
@@ -677,8 +672,6 @@
       : '';
     return '<section class="rq-delivery"><div class="rq-delivery-head"><div class="rq-delivery-title"><span class="rq-delivery-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 4-4 7-8 9-4-2-8-5-8-9V6zM12 8v5m0 3h.01"/></svg></span><div><h4>验收与交付</h4>' +
       '<p>验收决策、交付链接与执行证据</p></div></div><div class="rq-delivery-head-actions">' +
-      (canSubmitReview ? '<button type="button" class="rq-secondary" data-rq-submit-review>' +
-        (canMarkComplete ? '标记完成' : '提交验收') + '</button>' : '') +
       '<span class="rq-delivery-state ' + deliveryStateClass + '">' + deliveryState + '</span></div></div>' +
       reworkCard +
       (approvalCard ? '<div data-rq-approval-card>' + approvalCard + '</div>' : waitingOthers) +
@@ -707,7 +700,7 @@
       return Number.isFinite(parsed) ? parsed : index;
     };
     const batchRows = new Map();
-    deliveryFiles.forEach((file, index) => {
+    deliveryFiles.filter(file => String(file.role || '') === 'output').forEach((file, index) => {
       const key = batchOf(file), old = batchRows.get(key) || {stamp: -1, index: -1};
       old.stamp = Math.max(old.stamp, stampOf(file, index)); old.index = Math.max(old.index, index); batchRows.set(key, old);
     });
@@ -730,16 +723,20 @@
       const validation = String(file.evidenceMeta?.verification?.state || file.validation?.state || '').toLowerCase();
       const validationLabel = validation === 'failed' ? '校验未通过' : validation && validation !== 'passed' ? '待校验' : '';
       const autoBundle = file.autoBundle === true;
+      const bundleIds = autoBundle ? ' data-rq-bundle-ids="' + esc(JSON.stringify(file.attachmentIds || [])) + '"' : '';
       const meta = [autoBundle ? '自动打包' : extension, file.size ? formatBytes(file.size) : '', round > 0 ? 'v' + round : '', version ? version.slice(0, 12) : '', validationLabel].filter(Boolean).join(' · ');
       const open = autoBundle
-        ? '<button type="button" class="rq-attachment" data-rq-bundle-download>' + esc(name) + '</button>'
+        ? '<button type="button" class="rq-attachment" data-rq-bundle-download' + bundleIds + '>' + esc(name) + '</button>'
         : '<button type="button" class="rq-attachment" data-rq-file="' + esc(file.id) + '">' + esc(name) + '</button>';
       const download = autoBundle
-        ? '<button type="button" class="rq-material-icon rq-material-download" title="下载自动压缩包" aria-label="下载自动压缩包" data-rq-bundle-download>↓</button>'
+        ? '<button type="button" class="rq-material-icon rq-material-download" title="下载" aria-label="下载" data-rq-bundle-download' + bundleIds + '>↓</button>'
         : '<button type="button" class="rq-material-icon rq-material-download" title="下载" aria-label="下载" data-rq-download="' + esc(file.id) + '">↓</button>';
       return '<div class="rq-material" role="listitem" data-rq-file-id="' + esc(file.id || '') + '"><div class="rq-material-info"><span class="rq-material-type" aria-hidden="true">' + esc(autoBundle ? 'ZIP' : extension.slice(0, 4)) + '</span><div>' +
         open + (meta ? '<span class="rq-material-meta">' + esc(meta) + '</span>' : '') + '</div></div><div class="rq-material-actions">' +
-        download + (!autoBundle && global.LibraryTransfer?.button ? LibraryTransfer.button(libraryFile(file), '', 'data-rq-library') : '') + '</div></div>';
+        download + (global.LibraryTransfer?.button ? (autoBundle
+          ? LibraryTransfer.button({deliveryBundle: true, taskId: task.id, attachmentIds: file.attachmentIds, name}, '', 'data-rq-bundle-library')
+            .replace('data-rq-bundle-library=', bundleIds + ' data-rq-bundle-library=')
+          : LibraryTransfer.button(libraryFile(file), '', 'data-rq-library')) : '') + '</div></div>';
     };
     const section = (className, key, title, items, hint) => items.length
       ? '<details class="rq-material-group ' + className + '" data-rq-material-group="' + esc(key) + '"><summary>' + esc(title) + ' · ' + items.length + ' 份<small>' + esc(hint) + '</small></summary>' + items.map(materialRow).join('') + '</details>'
@@ -750,13 +747,13 @@
     const other = current.filter(file => !['input', 'evidence', 'verification', 'process', 'output'].includes(String(file.role || '')));
     const storedBundles = outputs.filter(isBundle);
     const deliverables = outputs.filter(file => !isBundle(file));
-    const autoBundle = deliverables.length > 2 && !storedBundles.length
-      ? [{autoBundle: true, id: '', name: '自动压缩包.zip', size: 0}]
+    const autoBundle = outputs.length >= 2
+      ? [{autoBundle: true, id: '', name: '自动压缩包.zip', size: 0, attachmentIds: outputs.map(file => file.id)}]
       : [];
     const archive = archived.length ? '<details class="rq-material-group rq-material-archive"><summary>历史轮次 · ' + archived.length + ' 份<small>历史交付与未通过校验的文件，仅供追溯</small></summary>' + archived.map(materialRow).join('') + '</details>' : '';
     node.innerHTML = section('rq-material-input', 'input', '需求资料', [...input, ...other], '创建需求时提供的原始资料') +
       section('rq-material-evidence', 'evidence', '过程证据', evidence, '截图、验证记录和执行过程材料') +
-      section('rq-material-output', 'output', '交付物', [...deliverables, ...storedBundles, ...autoBundle], '本轮文件与自动压缩包') +
+      section('rq-material-output', 'output', '交付物', autoBundle.length ? autoBundle : [...deliverables, ...storedBundles], '仅包含本轮交付文件') +
       archive +
       (rework.length ? '<details class="rq-material-group rq-material-rework" data-rq-material-group="rework"><summary>返修参考资料 · ' + rework.length + ' 个<small>仅供返修使用，不计入交付产物</small></summary>' +
         rework.map(materialRow).join('') + '</details>' : '') || '<p>暂无材料</p>';
@@ -778,35 +775,52 @@
   async function loadComments() {
     const id = task?.id, request = seq, panelRequest = ++evidenceRequest, node = root?.querySelector('[data-rq-comment-list]');
     if (!id || !node || task.canViewExecution === false) return;
-    node.textContent = '正在加载协作记录…';
+    if (!node.querySelector('.tfd-timeline')) node.textContent = '正在加载活动记录…';
     try {
-      const rows = await global.SoduWorkAPI.getTaskComments(id);
+      // Load independent sources without letting a discussion failure hide task history.
+      const [comments, history] = await Promise.allSettled([
+        global.SoduWorkAPI.getTaskComments(id), global.SoduWorkAPI.getTaskEvents(id),
+      ]);
       if (request !== seq || panelRequest !== evidenceRequest || !node.isConnected) return;
-      node.innerHTML = rows.length ? '<ol class="rq-history">' + rows.map(row => '<li><b>' +
-        esc(row.authorName || '成员') + '</b><div data-user-content>' + esc(row.body) + '</div><time>' +
-        esc(row.createdAt ? new Date(row.createdAt).toLocaleString() : '') + '</time></li>').join('') + '</ol>' : '<p>暂无协作记录</p>';
+      // The existing event API returns null on failure; it is not an empty history.
+      const failed = comments.status === 'rejected' || history.status === 'rejected' || !Array.isArray(history.value);
+      const rows = comments.status === 'fulfilled' ? comments.value : [];
+      const events = history.status === 'fulfilled' && Array.isArray(history.value) ? history.value : [];
+      const expanded = new Set([...node.querySelectorAll('details[data-tfd-open][open]')].map(item => item.dataset.tfdOpen));
+      const focusKey = node.contains?.(document.activeElement) ? document.activeElement.closest?.('[data-tfd-open]')?.dataset.tfdOpen : null;
+      const scroll = node.parentElement?.scrollTop;
+      node.innerHTML = (failed ? '<p role="alert">部分记录未能加载，请重试</p><button type="button" data-rq-activity-retry>重新加载</button>' : '') +
+        (failed && !rows.length && !events.length ? '' : global.TaskTraceView.timelineHtml(events, {embedded: true, comments: rows}));
+      node.querySelectorAll('details[data-tfd-open]').forEach(item => {
+        item.open = expanded.has(item.dataset.tfdOpen);
+        if (item.dataset.tfdOpen === focusKey) item.querySelector('summary')?.focus({preventScroll: true});
+      });
+      if (node.parentElement && scroll !== undefined) node.parentElement.scrollTop = scroll;
     } catch (error) { if (request === seq && panelRequest === evidenceRequest) node.textContent = errorText(error); }
   }
   async function loadExtensions() {
     const item = task, request = seq, panelRequest = ++evidenceRequest, node = root?.querySelector('[data-rq-extension-list]');
     if (!item || !node || item.canViewExecution === false) return;
-    if (!global.PluginUIHost) { node.textContent = '当前客户端没有可用的插件扩展'; return; }
+    if (!global.PluginUIHost) { node.textContent = '暂无可用的需求插件扩展，不影响执行与验收。'; return; }
     node.textContent = '正在加载插件扩展…';
     try {
       // Preserve the public plugin slot; its host is now this requirement drawer.
       const rows = await global.PluginUIHost.contributions('task.detail.tab', {task: item});
       if (request !== seq || panelRequest !== evidenceRequest || !node.isConnected) return;
       node.replaceChildren();
-      if (!rows.length) node.textContent = '当前需求没有可用的插件扩展';
+      if (!rows.length) node.textContent = '暂无可用的需求插件扩展，不影响执行与验收。';
       rows.forEach(row => {
         const button = document.createElement('button'); button.type = 'button'; button.textContent = row.title;
-        button.onclick = () => global.PluginUIHost.openContribution(row, {task: item}).catch(error => {
-          if (request !== seq || panelRequest !== evidenceRequest || node.hidden) return;
-          /* Show errors inside the active plugin dialog, which overlays task details. */
-          let notice = node.querySelector('[data-rq-extension-error]');
-          if (!notice) { notice = document.createElement('p'); notice.dataset.rqExtensionError = ''; notice.setAttribute('role', 'alert'); node.prepend(notice); }
-          notice.textContent = '打开插件扩展失败：' + errorText(error);
-        });
+        button.onclick = () => {
+          if (request !== seq || panelRequest !== evidenceRequest || task?.canViewExecution === false || node.hidden) return;
+          return global.PluginUIHost.openContribution(row, {task: item}).catch(error => {
+            if (request !== seq || panelRequest !== evidenceRequest || node.hidden) return;
+            /* Show errors inside the active plugin dialog, which overlays task details. */
+            let notice = node.querySelector('[data-rq-extension-error]');
+            if (!notice) { notice = document.createElement('p'); notice.dataset.rqExtensionError = ''; notice.setAttribute('role', 'alert'); node.prepend(notice); }
+            notice.textContent = '打开插件扩展失败：' + errorText(error);
+          });
+        };
         node.append(button);
       });
     } catch (error) { if (request === seq && panelRequest === evidenceRequest) node.textContent = errorText(error); }
@@ -817,15 +831,36 @@
     try {
       if (!global.soduWorkAPI?.downloadAttachment) throw new Error('当前客户端不支持附件下载');
       const result = await global.soduWorkAPI.downloadAttachment({...file, url: global.SoduWorkAPI.attachmentUrl(file)});
-      if (result?.ok === false && !result.cancelled) throw new Error(result.reason || '下载未完成');
+      if (result?.ok === false && !result.cancelled && !result.canceled) throw new Error(result.reason || '下载未完成');
     } catch (error) { if (request === seq) feedback(errorText(error)); }
   }
-  async function downloadBundle() {
+  async function downloadBundle(button, saveToLibrary = false) {
+    if (!button || button.disabled) return;
     const request = seq;
+    button.disabled = true;
+    button.setAttribute?.('aria-busy', 'true');
     try {
       if (!task || typeof global.SoduWorkAPI?.downloadArtifactsZip !== 'function') throw new Error('当前客户端不支持自动压缩包下载');
-      await global.SoduWorkAPI.downloadArtifactsZip(task.id, R.content(task).title || task.title || '交付物');
+      const id = task.id, title = R.content(task).title || task.title || '交付物';
+      const ids = JSON.parse(button?.dataset?.rqBundleIds || '[]');
+      const trace = await global.SoduWorkAPI.taskTrace(id);
+      if (request !== seq) return;
+      const delivery = trace?.delivery || trace?.card?.delivery;
+      const artifact = delivery?.artifact;
+      const files = (delivery?.manifest || artifact?.manifest)?.files || [];
+      if (artifact && ids.length && (ids.length !== files.length || ids.some(value => !files.some(file => String(file.id || file.attachmentId) === String(value)))))
+        throw Error('交付版本已变化，请刷新需求后下载');
+      if (!trace) throw Error('交付信息暂时不可用，请刷新后重试');
+      if (saveToLibrary) {
+        if (!artifact?.id || !global.LibraryTransfer?.saveOutput) throw Error('交付信息暂时不可用，请刷新后重试');
+        await global.LibraryTransfer.saveOutput('', { deliveryBundle: true, taskId: id,
+          attachmentIds: ids, artifactVersionId: artifact.id, name: title + '.zip' }, button);
+      } else {
+        const result = await global.SoduWorkAPI.downloadArtifactsZip(id, title, artifact?.id || '');
+        if (result?.ok === false && !result.canceled && !result.cancelled) throw Error(result.reason || '下载未完成');
+      }
     } catch (error) { if (request === seq) feedback(errorText(error)); }
+    finally { button.disabled = false; button.setAttribute?.('aria-busy', 'false'); }
   }
   async function removeAttachment(id) {
     if (busy || !task || !R.canManageMaterials(task)) return;
@@ -1012,9 +1047,23 @@
     }
   }
   global.RequirementsDetail = { open, close, refresh };
+  global.addEventListener('soduwork-approvals-changed', () => {
+    if (!root || !task || editing) return;
+    const latest = approvalSignature();
+    if (latest === approvalState) return;
+    approvalState = latest;
+    // Inbox and task responses can arrive in either order. Refresh only when
+    // this task's approval changes, preserving notes during unrelated updates.
+    if (busy) { refreshPending = true; return; }
+    void refresh(task.id);
+  });
   global.addEventListener('soduwork-requirement-comment', event => {
     const dialog = root?.querySelector('[data-rq-evidence-modal]');
     if (String(event.detail?.taskId) === String(task?.id) && dialog && !dialog.hidden && dialog.dataset.panel === 'comments') void loadComments();
+  });
+  global.addEventListener('soduwork-locale-change', () => {
+    const dialog = root?.querySelector('[data-rq-evidence-modal]');
+    if (task && dialog && !dialog.hidden && dialog.dataset.panel === 'comments') void loadComments();
   });
   global.addEventListener('soduwork-data-scope-changed', () => {
     identityEpoch++; pendingSchedules.clear(); close(true);

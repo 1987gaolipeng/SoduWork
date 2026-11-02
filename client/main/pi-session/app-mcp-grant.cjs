@@ -4,63 +4,78 @@ const fs = require('node:fs'), path = require('node:path'), crypto = require('no
 const processGrants = require('../agent-runtime/process-grants');
 const sources = new WeakMap();
 const turnBindings = new WeakMap();
-function bind(session, sender, pluginId, app, assertActive) {
+function bind(session, sender, pluginId, app, deps = {}) {
   const pageOwner = require('../work-preview-app-owner.cjs');
+  let assertActive = deps.assertActive;
   if (pageOwner.assertSender(sender)) assertActive ||= () => pageOwner.assertSender(sender);
   assertActive?.();
   session.appPluginId = pluginId || session.appPluginId || (sender && app
     ? require('../app-conversation-connection.cjs').association(app, session.snapshot?.().activePlugins) : '') || '';
-  sources.set(session, { sender, app, nativePluginId: pluginId || '', assertActive });
+  sources.set(session, { sender, app, deps, nativePluginId: pluginId || '', assertActive });
 }
 function nativePluginId(session) { return sources.get(session)?.nativePluginId || ''; }
+function unbind(session) { sources.delete(session); }
 function forSession(session) {
   if (!session) return null;
   const accepted = turnBindings.get(session);
-  const { sender, app, assertActive } = accepted || sources.get(session) || {};
+  const { sender, app, deps, assertActive } = accepted || sources.get(session) || {};
   assertActive?.();
   const pluginId = accepted ? accepted.pluginId : session.appPluginId;
   if (!pluginId) return null;
-  return context(sender, pluginId, accepted?.expected, app);
+  return mapResult(context(sender, pluginId, accepted?.expected, app, deps), value => { assertActive?.(); return value; });
 }
-function context(sender, expectedPluginId, expectedSettings, app) {
+// Local/native ownership stays synchronous; remote history additionally awaits
+// the current account's accepted Hub installation. Callers may await either.
+function mapResult(value, fn) { return value?.then ? value.then(fn) : fn(value); }
+function context(sender, expectedPluginId, expectedSettings, app, deps) {
   if (!expectedPluginId) return null;
   const preview = require('../work-preview');
-  // A retained native sender must not fall back to another account's global app.
   require('../work-preview-app-owner.cjs').assertSender(sender);
   let current = preview.appContextFor(sender);
   // A native standalone app has a valid identity without any business connection.
   if (app && (!current || current.pluginId !== expectedPluginId || (current.requiresMcp && !current.connection)))
-    current = require('../app-conversation-connection.cjs').context(app, expectedPluginId);
-  if (!current || current.pluginId !== expectedPluginId) throw Error('应用连接不可用，请重新打开即用同步连接');
-  if (expectedSettings && stamp(current) !== expectedSettings) throw Error('应用账号或设置已变化，请重新发送消息');
-  return current;
+    current = require('../app-conversation-connection.cjs').context(app, expectedPluginId, deps);
+  return mapResult(current, value => {
+    require('../work-preview-app-owner.cjs').assertSender(sender);
+    if (!value || value.pluginId !== expectedPluginId) throw Error('应用连接不可用，请重新打开即用同步连接');
+    if (expectedSettings && stamp(value) !== expectedSettings) throw Error('应用账号或设置已变化，请重新发送消息');
+    return value;
+  });
 }
-function stamp(value) { return value?.connection?.credentialKey ? value.connection.scope + ':' + value.connection.revision : ''; }
+function stamp(value) { return value?.connection?.credentialKey ? value.connection.scope + ':' + value.connection.revision + (value.connection.versionId ? ':' + value.connection.versionId : '') : ''; }
 function guardSend(session, options) {
-  const source = sources.get(session) || {}, { sender, app } = source;
+  const source = sources.get(session) || {}, { sender, app, deps } = source;
   source.assertActive?.();
-  const selected = options.clearPluginSelection ? [] : options.pluginIds?.length
-    ? options.pluginIds : session.snapshot?.().activePlugins || [];
-  const selectedApp = app ? require('../app-conversation-connection.cjs').association(app, selected) : '';
-  const pluginId = selectedApp || source.nativePluginId || '';
-  // Capture each accepted turn independently. Selecting another application or
-  // moving this conversation cannot change an already-queued turn's authority.
-  if (!source.nativePluginId && app) {
-    options.pluginIds = selected.slice();
-    if (!selected.length) options.clearPluginSelection = true;
-  }
-  const expected = stamp(context(sender, pluginId, undefined, app)), prior = options.beforeTurn;
-  options.beforeTurn = async (...args) => {
+  const selected = (options.clearPluginSelection ? [] : options.pluginIds?.length
+    ? options.pluginIds : session.snapshot?.().activePlugins || []).slice();
+  const selectedApp = app ? require('../app-conversation-connection.cjs').association(app, selected, deps) : '';
+  return mapResult(selectedApp, selectedApp => {
     source.assertActive?.();
-    context(sender, pluginId, expected, app);
-    const result = await prior?.(...args);
-    source.assertActive?.();
-    context(sender, pluginId, expected, app);
-    session.appPluginId = pluginId;
-    session.appMcpExpected = expected;
-    turnBindings.set(session, { sender, pluginId, app, expected, assertActive: source.assertActive });
-    return result;
-  };
+    const pluginId = selectedApp || source.nativePluginId || '';
+    // Capture each accepted turn independently. Selecting another application or
+    // moving this conversation cannot change an already-queued turn's authority.
+    if (!source.nativePluginId && app) {
+      options.pluginIds = selected.slice();
+      if (!selected.length) options.clearPluginSelection = true;
+    }
+    return mapResult(context(sender, pluginId, undefined, app, deps), current => {
+      source.assertActive?.();
+      const expected = stamp(current), prior = options.beforeTurn;
+      options.beforeTurn = async (...args) => {
+        source.assertActive?.();
+        await context(sender, pluginId, expected, app, deps);
+        source.assertActive?.();
+        const result = await prior?.(...args);
+        source.assertActive?.();
+        await context(sender, pluginId, expected, app, deps);
+        source.assertActive?.();
+        session.appPluginId = pluginId;
+        session.appMcpExpected = expected;
+        turnBindings.set(session, { sender, pluginId, app, deps, expected, assertActive: source.assertActive });
+        return result;
+      };
+    });
+  });
 }
 async function extend({ app, ref, connection, base }) {
   const grants = require('./plugin-grant');
@@ -111,4 +126,4 @@ async function extend({ app, ref, connection, base }) {
       .map(value => ({ value, replacement: '[已隐藏凭据]' }))]);
   } catch (error) { proxy?.cleanup(); if (base?.cleanup) base.cleanup(); else grants.removeConfig(app, file); throw error; }
 }
-module.exports = { context, forSession, extend, guardSend, bind, nativePluginId };
+module.exports = { context, forSession, extend, guardSend, bind, unbind, nativePluginId };

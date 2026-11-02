@@ -20,3 +20,10 @@
 .at-card-actions { flex-shrink: 0; flex-wrap: wrap; }
 .at-card-actions > button { flex-shrink: 0; }
 @media(max-width:620px){.at-topbar{grid-template-columns:minmax(0,1fr)}.at-topbar .at-summary{padding:11px 13px}.at-topbar .at-create{margin-left:0}}
+
+.at-visibility-hint { margin: 0 0 14px; color: var(--ink-3); font-size: var(--font-min-readable, 14.5px); line-height: 1.5; }
+
+.at-field-hint, .at-field-error { font-size: var(--font-min-readable, 14.5px); line-height: 1.5; }
+.at-field-hint { color: var(--ink-3); }
+.at-field-error { color: var(--crit); }
+.at-editor input[aria-invalid="true"] { border-color: var(--crit); }

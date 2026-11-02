@@ -107,6 +107,7 @@ def _delivery_hint(reason: str, files: list[str]) -> str:
 
 async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str,
                             provider: str = "", files: list,
+                            categories: dict | None = None,
                             outcome: str = "completed") -> dict:
     """Ingest conversation-turn outputs through shared classification, validation, versioning, and
     review. Only completed turns create candidates; incomplete turns retain evidence without
@@ -172,7 +173,8 @@ async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str
             truncated = await delivery_manifest.code_truncation(fn, data)
             if truncated:
                 verification = {"state": "failed", "reason": truncated}
-        category = delivery_manifest.classify_name(fn, role="output")
+        declared = (categories or {}).get(name)
+        category = delivery_manifest.classify_name(fn, role="output", meta={"category": declared})
         if verification.get("state") != "passed":
             # Retain invalid files as downloadable evidence without blocking valid outputs.
             # Exclude invalid files from output and verification roles.

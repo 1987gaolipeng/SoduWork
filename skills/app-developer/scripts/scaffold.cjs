@@ -2,6 +2,7 @@
 // Creates inert authoring files. Does not install, launch servers or send chat.
 const fs = require('node:fs'), path = require('node:path');
 function scaffold({ out, key, name, nameEn, url, storage = false, category = 'other', entry = 'ui/index.html' }) {
+  if (![false,true,'false','true','local','cloud'].includes(storage)) throw Error('storage 必须为 local 或 cloud（兼容 true/false）');
   if (!['office','game','robot','other'].includes(category)) throw Error('请选择有效的即用分类');
   if (!out || !/^[a-z][a-z0-9-]{1,62}$/.test(key || '') || !String(name || '').trim()) throw Error('需要 out、合法 key 和即用名称');
   const page = url ? new URL(url) : null;
@@ -55,8 +56,15 @@ soduWorkApp.events.onRefresh(() => {
     resources: [htmlFile, 'ui/soduwork-app.js', 'ui/app.js'].map(file => ({ path: file, kind: 'ui' })),
   };
   fs.mkdirSync(path.join(target, 'ui'), { recursive: true });
+  if(storage===true || ['true','local','cloud'].includes(storage)){
+    body.jiyong={version:1,storage:{location:storage==='cloud'?'cloud':'local'},parameters:[],collections:[{key:'notes',indexes:['status']}],...(!page?{mcp:{server:'soduwork-jiyong',bindings:[]}}:{}),initialization:{script:'assets/data-init.json'}};
+    body.mcpServers=page?[]:['soduwork-jiyong'];
+    body.ui.contributions[0].source.bridge.capabilities.push('data.read','data.write',...(!page?['mcp.connect']:[]));
+    body.resources.push({path:'assets/data-init.json',kind:'asset'});
+  }
   fs.mkdirSync(path.join(target, '.soduwork'));
   for (const [file, content] of Object.entries({ [htmlFile]: html, 'ui/app.js': script, 'ui/soduwork-app.js': sdk,
+    ...(body.jiyong ? { 'assets/data-init.json': JSON.stringify({ schemaVersion: 1, migrations: [] }, null, 2) } : {}),
     'soduwork-plugin-draft.json': JSON.stringify(body, null, 2),
     '.soduwork/delivery.json': JSON.stringify({ schemaVersion: 1, deliverables: [{ path: 'soduwork-plugin-draft.json', kind: 'file', title: String(name).trim() + '应用草稿', primary: true }] }, null, 2) })) {
     fs.mkdirSync(path.dirname(path.join(target, file)), { recursive: true });

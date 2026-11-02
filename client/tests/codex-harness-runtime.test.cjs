@@ -216,7 +216,7 @@ test('Codex Harness queues follow-ups FIFO, keeps transcript order and supports 
     assert.equal(commented.payload.cfg.local_cli, 'codex-harness');
     assert.deepEqual(commented.payload.cfg.llm, {
       base: 'http://model.invalid', key: 'secret', model: 'fixture-coding-large-model',
-      maxOutputTokens: 32768,
+      maxOutputTokens: 65536,
       input: ['text', 'image'], imageRouting: 'native',
       contextWindow: 128000, contextWindowKnown: true,
       contextWindowEstimated: true, contextWindowSource: 'safe-default',
@@ -694,7 +694,7 @@ test('Codex Harness restores its in-memory model grant after Runner restart', as
       requiredCapabilities: ['terminal', 'files'],
       llm: {
         base: 'http://model.invalid', key: 'secret', model: 'dev-think-large-agent-soduwork',
-        maxOutputTokens: 32768,
+        maxOutputTokens: 65536,
         contextWindow: 128000, contextWindowKnown: true,
         contextWindowEstimated: true, contextWindowSource: 'safe-default',
       },
@@ -738,7 +738,7 @@ for (const runtimeSpec of runtimeCatalog.runnerRuntimes()) {
         modelFetches += 1;
         return { ok: true, model: {
           id: 'enterprise-model', baseUrl: 'http://model.invalid', key: 'secret',
-          maxOutputTokens: 32768, runtimeRevision: 'fixture-runtime-v2',
+          maxOutputTokens: 65536, runtimeRevision: 'fixture-runtime-v2',
           capabilityProfile: { imageInput: { state: 'supported', source: 'verified' } },
         } };
       } },
@@ -760,7 +760,7 @@ for (const runtimeSpec of runtimeCatalog.runnerRuntimes()) {
         assert.equal(modelFetches, 1);
         assert.deepEqual(dispatched.cfg.llm, {
           base: 'http://model.invalid', key: 'secret', model: 'enterprise-model',
-          maxOutputTokens: 32768, runtimeRevision: 'fixture-runtime-v2',
+          maxOutputTokens: 65536, runtimeRevision: 'fixture-runtime-v2',
           capabilityProfile: { imageInput: { state: 'supported', source: 'verified' } },
           contextWindow: 128000, contextWindowKnown: true,
           contextWindowEstimated: true, contextWindowSource: 'safe-default',

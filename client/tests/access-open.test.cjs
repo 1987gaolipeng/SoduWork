@@ -6,7 +6,10 @@ const source = fs.readFileSync(path.join(__dirname, '../main/pi-session/ipc.js')
 const handler = source.slice(source.indexOf('  async function openConversation('), source.indexOf("  ipcMain.handle('pi-session-open',"));
 
 function fixture(options = {}) {
-  const calls = [], dialogs = [], cwd = os.tmpdir();
+  const calls = [], dialogs = [], ownerActions = [], cwd = os.tmpdir();
+  let viewAttachments = 0, viewDetachments = 0, rendererGrants = 0;
+  const defaultIdentity = automationIdentity();
+  const cachedIdentity = options.cachedIdentity || (() => options.identity || defaultIdentity);
   const emptyStorage = path.join(cwd, 'soduwork-access-open-' + require('node:crypto').randomUUID());
   const sender = { mainFrame: {}, isDestroyed: () => false,
     getURL: () => require('node:url').pathToFileURL(path.join(__dirname, '../desk.html')).href };
@@ -15,12 +18,15 @@ function fixture(options = {}) {
     _cloudHandoff: options.cloudHandoff || { observe() {} },
     skillTurn: require('../main/pi-session/skill-turn'), sendIdentityOf: null,
     taskInput: { request: async (_identity, route) => options.request(route) },
-    app: options.app || { getPath: () => emptyStorage }, path, identityOf: options.identityOf || (async () => ({ hub: 'fixture', clientId: 'fixture' })),
-    memories: { context: async () => ({}), attach: async () => {}, assertOwner() {} },
+    app: options.app || { getPath: () => emptyStorage }, path,
+    identityOf: options.identityOf || (async () => defaultIdentity),
+    memories: { context: async () => ({}),
+      attach: options.memoryAttach || (async () => {}), assertOwner() {} },
     pluginGrant: require('../main/pi-session/plugin-grant'),
     updateWorkloads: { guard: () => ({ ok: true }) },
     session: { findBySessionId: id => options.live?.sessionId === id ? options.live : null,
       get: () => options.live,
+      attachView: remote => options.attachView ? options.attachView(remote) : remote,
       archivedConversation: async () => options.archive || null,
       historyEntry: async () => ({ entry: options.archive }),
       open: async value => { if (options.validateWork) await value.validateWorkConversation?.();
@@ -58,7 +64,13 @@ function fixture(options = {}) {
       if (['../work-preview', '../conversation/app-surfaces.cjs'].includes(name)) {
         return require(path.join(__dirname, '../main/pi-session', name));
       }
-      if (!['../native-locale.cjs', '../agent-runtime/runtime-catalog', '../access-control/policy', '../access-control/preferences', '../access-control/automation-access', '../conversation/requirement-context', '../conversation/acceptance-session', '../conversation/work-conversation-opening', '../conversation/history-access', '../conversation-connectors.cjs', './resume-cwd', './task-access'].includes(name)) throw Error('Unexpected dependency ' + name);
+      if (name === '../conversation/history-access') {
+        const actual = require(path.join(__dirname, '../main/pi-session', name));
+        return { ...actual,
+          actor(app, identity) { return actual.actor(app, identity === undefined ? cachedIdentity() : identity); } };
+      }
+      if (name === '../conversation/acceptance-session' && options.acceptance) return options.acceptance;
+      if (!['../native-locale.cjs', '../agent-runtime/runtime-catalog', '../access-control/policy', '../access-control/preferences', '../access-control/automation-access', '../platform-connections/runtime.cjs', '../conversation/history-access', '../conversation/requirement-context', '../conversation/acceptance-session', '../conversation/work-conversation-opening', '../conversation-connectors.cjs', './resume-cwd', './task-access'].includes(name)) throw Error('Unexpected dependency ' + name);
       return require(path.join(__dirname, '../main/pi-session', name));
     },
   });
@@ -75,6 +87,299 @@ function automationIdentity(uid = 'owner') {
   const claims = Buffer.from(JSON.stringify({ typ: 'device', uid, cid: 'fixture', iat: now - 60, exp: now + 3600 })).toString('base64url');
   return { hub: 'http://fixture.invalid', clientId: 'fixture', session: claims + '.' + 'a'.repeat(64) };
 }
+
+test('an account switch while the initial identity is resolving rejects before runtime work', async () => {
+  const owner = automationIdentity(); let current = owner, releaseIdentity, identityStarted = false;
+  const delayed = new Promise(resolve => { releaseIdentity = resolve; });
+  const f = fixture({ cachedIdentity: () => current, identityOf: async () => {
+    identityStarted = true; await delayed; return current;
+  } });
+  const opening = f.open({});
+  while (!identityStarted) await new Promise(resolve => setImmediate(resolve));
+  current = automationIdentity('other-account');
+  releaseIdentity();
+  const result = await opening;
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /账号已切换/);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.rendererGrants(), 0);
+  assert.equal(f.viewAttachments(), 0);
+});
+
+test('direct expected identity rejects a different uid on the same Hub and client but tolerates token refresh', async () => {
+  const expected = automationIdentity('expected-account');
+  const other = automationIdentity('other-account');
+  const blocked = fixture({ cachedIdentity: () => other, identityOf: async () => other });
+  const rejected = await blocked.openExpected({}, expected);
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.reason, /连接环境已切换/);
+  assert.equal(blocked.calls.length, 0, 'the mismatched account must be rejected before runtime creation');
+
+  const refreshed = { ...expected, session: expected.session.split('.')[0] + '.' + 'b'.repeat(64) };
+  const allowed = fixture({ cachedIdentity: () => refreshed, identityOf: async () => refreshed });
+  const opened = await allowed.openExpected({}, expected);
+  assert.equal(opened.ok, true, opened.reason);
+  assert.equal(allowed.calls.length, 1, 'a token refresh for the same account and connection stays valid');
+});
+
+test('direct expected identity rejects a same-account connection switch during preparation', async () => {
+  const owner = automationIdentity(); let current = owner;
+  const f = fixture({ identityOf: async () => current, resolve: async () => {
+    current = { ...owner, hub: 'http://other-fixture.invalid' };
+    return { catalog: {}, selectedSkills: [], capabilityIds: [] };
+  } });
+  const result = await f.openExpected({}, owner);
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /连接环境已切换/);
+  assert.equal(f.calls.length, 0, 'an expected connection remains fixed through preparation');
+  assert.equal(f.rendererGrants(), 0);
+});
+
+test('direct expected identity closes a runtime if the same account changes connection during finalization', async () => {
+  const owner = automationIdentity(); let current = owner, closes = 0;
+  const handle = { ref: 'expected-ref', sessionId: 'expected-session', cwd: os.tmpdir(),
+    close: async () => { closes++; return true; } };
+  const f = fixture({ identityOf: async () => current, openResult: { ok: true, session: handle },
+    memoryAttach: async () => { current = { ...owner, hub: 'http://other-fixture.invalid' }; } });
+  const result = await f.openExpected({}, owner);
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /连接环境已切换/);
+  assert.equal(closes, 1);
+  assert.equal(f.rendererGrants(), 0);
+  assert.equal(f.viewAttachments(), 0);
+});
+
+test('cloud finalization failure detaches and closes the registered passive view', async () => {
+  let closes = 0;
+  const remote = { ref: 'cloud-ref', sessionId: 'cloud-session', close: async () => { closes++; return true; } };
+  const f = fixture({
+    cloudHandoff: { reopen: async () => remote, observe() {} },
+    attachView: value => value,
+    wire: () => { throw Error('cloud wire failed'); },
+  });
+  const result = await f.open({ chatId: remote.sessionId });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /cloud wire failed/);
+  assert.equal(f.viewAttachments(), 1);
+  assert.equal(f.viewDetachments(), 1);
+  assert.equal(closes, 1);
+});
+
+test('opened runtime finalization failure detaches and closes an already attached handle', async () => {
+  let closes = 0;
+  const handle = { ref: 'opened-ref', sessionId: 'opened-session', cwd: os.tmpdir(),
+    close: async () => { closes++; return true; } };
+  const f = fixture({ openResult: { ok: true, session: handle },
+    openReply: () => { throw Error('reply failed'); } });
+  const result = await f.open({});
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /reply failed/);
+  assert.equal(f.viewAttachments(), 1);
+  assert.equal(f.viewDetachments(), 1);
+  assert.equal(closes, 1);
+});
+
+test('a live finalization failure discards renderer ownership without closing the existing runtime', async () => {
+  let closes = 0;
+  const live = { ref: 'live-ref', sessionId: 'live-session', cwd: os.tmpdir(),
+    close: async () => { closes++; return true; } };
+  const f = fixture({ live, openReply: () => { throw Error('live reply failed'); } });
+  const result = await f.open({ chatId: live.sessionId });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /live reply failed/);
+  assert.equal(f.viewAttachments(), 1);
+  assert.equal(f.viewDetachments(), 1);
+  assert.equal(closes, 0, 'failed reattachment cannot destroy a pre-existing runtime');
+  assert.equal(f.ownerActions.some(action => action[0] === 'quarantine'), false);
+});
+
+test('an unconfirmed close leaves the failed open quarantined', async () => {
+  let closes = 0;
+  const handle = { ref: 'unclosed-ref', sessionId: 'unclosed-session', cwd: os.tmpdir(),
+    close: async () => { closes++; return false; } };
+  const f = fixture({ openResult: { ok: true, session: handle },
+    openReply: () => { throw Error('reply failed'); } });
+  const result = await f.open({});
+  assert.equal(result.ok, false);
+  assert.equal(closes, 1);
+  assert.deepEqual(f.ownerActions.map(action => [action[0], action[2]]),
+    [['quarantine', undefined], ['closed', false]]);
+});
+
+test('consent finalization and immediate rollback share one failed-open close', async () => {
+  let closes = 0, tracked, finish;
+  const handle = { ref: 'consent-ref', sessionId: 'consent-session', cwd: os.tmpdir(),
+    close: async () => { closes++; return true; } };
+  const consent = { assertValid() {}, track(promise) { tracked = promise; }, commit() {},
+    finish() { finish = tracked.then(result => result.session.close()); } };
+  const f = fixture({ openResult: { ok: true, session: handle },
+    newChatAccess: { reserve: () => consent },
+    openReply: () => { throw Error('consent reply failed'); } });
+  const result = await f.open({ accessMode: 'full', accessDraftId: 'draft', accessConsentId: 'consent' });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /consent reply failed/);
+  await finish;
+  assert.equal(closes, 1, 'the reservation must await the same cleanup as immediate rollback');
+  assert.equal(f.viewDetachments(), 1);
+  assert.deepEqual(f.ownerActions.map(action => [action[0], action[2]]),
+    [['quarantine', undefined], ['closed', true]]);
+});
+
+test('memory finalization failure closes an opened handle before renderer attachment', async () => {
+  let closes = 0;
+  const handle = { ref: 'memory-ref', sessionId: 'memory-session', cwd: os.tmpdir(),
+    close: async () => { closes++; return true; } };
+  const f = fixture({ openResult: { ok: true, session: handle },
+    memoryAttach: async () => { throw Error('memory failed'); } });
+  const result = await f.open({});
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /memory failed/);
+  assert.equal(f.viewAttachments(), 0);
+  assert.equal(f.viewDetachments(), 1);
+  assert.equal(closes, 1);
+});
+
+test('an account switch while an archived runtime is opening closes it before any attachment', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-history-open-switch-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const owner = automationIdentity(), archive = { id: 'history', path: path.join(root, 'history.jsonl'),
+    cwd: root, adapterId: 'pi', workOwner: require('../main/platform-connections/runtime.cjs').scope(owner) };
+  fs.writeFileSync(archive.path, JSON.stringify({ type: 'session', id: archive.id }) + '\n');
+  let resolveOpen, current = owner, closes = 0;
+  const delayed = new Promise(resolve => { resolveOpen = resolve; });
+  const handle = { sessionId: archive.id, cwd: root, close: async () => { closes++; } };
+  const f = fixture({ app: { getPath: () => root }, archive, identityOf: async () => current,
+    openResult: delayed });
+  const opening = f.open({ chatId: archive.id });
+  while (f.calls.length === 0) await new Promise(resolve => setImmediate(resolve));
+  current = automationIdentity('other-account');
+  resolveOpen({ ok: true, session: handle });
+  const result = await opening;
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /账号已切换/);
+  assert.equal(closes, 1, 'the old-account runtime must be closed before it can be attached');
+});
+
+test('an ownerless native archive binds on the first direct open', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-history-legacy-open-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const archive = { id: 'legacy-open', path: path.join(root, 'legacy-open.jsonl'), cwd: root,
+    adapterId: 'pi', count: 1 };
+  fs.writeFileSync(archive.path, JSON.stringify({ type: 'session', id: archive.id }) + '\n');
+  const f = fixture({ app: { getPath: () => root }, archive });
+  const result = await f.open({ chatId: archive.id });
+  assert.equal(result.ok, true, result.reason);
+  assert.equal(f.calls.length, 1);
+});
+
+test('an account switch during archived setup closes the runtime before renderer grants or attachment', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-history-setup-switch-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const owner = automationIdentity(), archive = { id: 'history-setup',
+    path: path.join(root, 'history-setup.jsonl'), cwd: root, adapterId: 'pi',
+    workOwner: require('../main/platform-connections/runtime.cjs').scope(owner) };
+  fs.writeFileSync(archive.path, JSON.stringify({ type: 'session', id: archive.id }) + '\n');
+  let releaseMemory, memoryStarted = false, current = owner, closes = 0;
+  const memory = new Promise(resolve => { releaseMemory = resolve; });
+  const handle = { sessionId: archive.id, cwd: root, close: async () => { closes++; } };
+  const f = fixture({ app: { getPath: () => root }, archive, identityOf: async () => current,
+    openResult: { ok: true, session: handle },
+    memoryAttach: async () => { memoryStarted = true; await memory; } });
+  const opening = f.open({ chatId: archive.id });
+  while (!memoryStarted) await new Promise(resolve => setImmediate(resolve));
+  current = automationIdentity('other-account');
+  releaseMemory();
+  const result = await opening;
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /账号已切换/);
+  assert.equal(closes, 1);
+  assert.equal(f.rendererGrants(), 0, 'the old-account archive must not grant its renderer application');
+  assert.equal(f.viewAttachments(), 0, 'the old-account archive must not reach renderer attachment');
+});
+
+test('an account switch during new-session setup closes the runtime before renderer attachment', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-new-setup-switch-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const owner = automationIdentity(); let current = owner, releaseMemory, memoryStarted = false, closes = 0;
+  const memory = new Promise(resolve => { releaseMemory = resolve; });
+  const handle = { sessionId: 'new-session', cwd: root, close: async () => { closes++; } };
+  const f = fixture({ app: { getPath: () => root }, identityOf: async () => current,
+    openResult: { ok: true, session: handle },
+    memoryAttach: async () => { memoryStarted = true; await memory; } });
+  const opening = f.open({});
+  while (!memoryStarted) await new Promise(resolve => setImmediate(resolve));
+  current = automationIdentity('other-account');
+  releaseMemory();
+  const result = await opening;
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /账号已切换/);
+  assert.equal(closes, 1);
+  assert.equal(f.rendererGrants(), 0, 'the old-account runtime must not grant its renderer application');
+  assert.equal(f.viewAttachments(), 0);
+});
+
+test('an account switch while a live runtime is reattaching never binds it to the new renderer', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-live-reattach-switch-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const owner = automationIdentity(), live = { sessionId: 'live-history', cwd: root };
+  let releaseAttach, attachStarted = false, current = owner;
+  const attach = new Promise(resolve => { releaseAttach = resolve; });
+  const f = fixture({ app: { getPath: () => root }, live, identityOf: async () => current,
+    acceptance: { attach: async () => { attachStarted = true; await attach; }, assertTask() {} } });
+  const opening = f.open({ chatId: live.sessionId });
+  while (!attachStarted) await new Promise(resolve => setImmediate(resolve));
+  current = automationIdentity('other-account');
+  releaseAttach();
+  const result = await opening;
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /账号已切换/);
+  assert.equal(f.viewAttachments(), 0, 'the old-account live runtime must remain detached');
+});
+
+test('an account switch while a cloud conversation is reopening closes it before attachView', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-cloud-reopen-switch-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const owner = automationIdentity(); let current = owner, resolveRemote, closes = 0, attachedViews = 0;
+  const delayed = new Promise(resolve => { resolveRemote = resolve; });
+  const remote = { close: async () => { closes++; } };
+  const f = fixture({ app: { getPath: () => root }, identityOf: async () => current,
+    cloudHandoff: { reopen: async () => delayed, observe() {} },
+    attachView: value => { attachedViews++; return value; } });
+  const opening = f.open({ chatId: 'cloud-history' });
+  await new Promise(resolve => setImmediate(resolve));
+  current = automationIdentity('other-account');
+  resolveRemote(remote);
+  const result = await opening;
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /账号已切换/);
+  assert.equal(closes, 1);
+  assert.equal(attachedViews, 0, 'the old-account cloud view must not attach');
+  assert.equal(f.viewAttachments(), 0);
+});
+
+test('a same-account connection switch while cloud reopen is pending closes it before attachView', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-cloud-connection-switch-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const owner = automationIdentity(); let current = owner, resolveRemote, closes = 0, attachedViews = 0;
+  const delayed = new Promise(resolve => { resolveRemote = resolve; });
+  const remote = { close: async () => { closes++; } };
+  const f = fixture({ app: { getPath: () => root }, identityOf: async () => current,
+    cloudHandoff: { reopen: async () => delayed, observe() {} },
+    attachView: value => { attachedViews++; return value; } });
+  const opening = f.open({ chatId: 'cloud-history' });
+  await new Promise(resolve => setImmediate(resolve));
+  const now = Math.floor(Date.now() / 1000), clientId = 'other-device';
+  const claims = Buffer.from(JSON.stringify({ typ: 'device', uid: 'owner', cid: clientId,
+    iat: now - 60, exp: now + 3600 })).toString('base64url');
+  current = { hub: owner.hub, clientId, session: claims + '.' + 'b'.repeat(64) };
+  resolveRemote(remote);
+  const result = await opening;
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /账号或服务已切换/);
+  assert.equal(closes, 1);
+  assert.equal(attachedViews, 0, 'an old-connection cloud view must not attach');
+  assert.equal(f.viewAttachments(), 0);
+});
 
 test('a live chat moved from the main window into its application resolves the current native app connection', async () => {
   const preview = require('../main/work-preview'), grants = require('../main/pi-session/plugin-grant');
@@ -281,7 +586,7 @@ test('main process compiles policy and ignores renderer-supplied full access on 
   assert.equal(standard.calls[0].accessPolicy.revision, 1);
   assert.equal(raw.accessPolicy, forged);
   const legacy = fixture();
-  assert.equal((await legacy.open({ adapterId: 'claude', mode: 'full', accessPolicy: forged })).ok, true);
+  assert.equal((await legacy.open({ adapterId: 'unknown-runtime', mode: 'full', accessPolicy: forged })).ok, true);
   assert.equal(legacy.calls[0].accessPolicy, null);
   assert.equal(legacy.calls[0].readOnly, false);
   const newChat = fixture();

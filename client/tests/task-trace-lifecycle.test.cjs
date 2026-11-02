@@ -42,6 +42,7 @@ function fixture() {
   const container = () => ({ isConnected: true, firstElementChild: {}, innerHTML: '',
     querySelectorAll: () => [], querySelector: () => null });
   return { api: context.TaskExecutionJourney, rail: context.TaskTraceRailView, container,
+    context, listeners,
     calls: () => calls, set: value => { current = value; },
     hold() { let release; held = new Promise(resolve => { release = resolve; }); return release; },
     change: () => listeners.get('soduwork-work-task-change')({ detail: { taskId: 'task-1' } }),
@@ -122,4 +123,17 @@ test('forced remount after a task change cannot reuse the pre-change in-flight r
   assert.equal(f.calls(), 2);
   assert.match(root.innerHTML, /<h3>等待开始<\/h3>/);
   f.api.unmount(root);
+});
+
+test('mounted activity updates its locale and removes the listener on unmount', async () => {
+  const f = fixture(), root = f.container();
+  let locale = 'zh-CN';
+  f.context.SoduWorkI18n = {getLocale: () => locale, t: (key, fallback) => locale === 'en-US' && key === '活动记录' ? 'Activity' : fallback};
+  await f.api.mount(root, {taskId: 'task-1', trace: {...snapshot(1, 'running', '执行工作'), timeline: [{kind: 'created'}]}});
+  assert.match(root.innerHTML, /活动记录/);
+  locale = 'en-US'; await f.listeners.get('soduwork-locale-change')();
+  assert.match(root.innerHTML, /Activity/);
+  assert.equal(f.calls(), 0, 'a provided trace needs no network read to change locale');
+  f.api.unmount(root);
+  assert.equal(f.listeners.has('soduwork-locale-change'), false);
 });

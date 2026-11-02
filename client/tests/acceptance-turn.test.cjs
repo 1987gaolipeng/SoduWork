@@ -49,7 +49,10 @@ test('自动验收仅在本轮成功并提供完整报告后提交当前固定�
   assert.equal(post.body.artifactVersionId, 'v1');
   assert.equal(post.body.requirementVersion, 2);
   assert.equal(post.body.execution.conversationId, 'chat');
+  assert.equal(post.body.report.checks[0].criterion, 'c1');
   assert.match(f.notices[0][1], /验收通过/);
+  assert.match(f.notices[0][1], /字数400字/);
+  assert.doesNotMatch(f.notices[0][1], /c1:/);
 });
 
 test('停止、失败、缺报告和标准不足都不自动批准', async t => {

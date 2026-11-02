@@ -115,9 +115,9 @@ test('Harness² management provides lifecycle actions while explaining the bundl
   const bundledPi = { ...agent, key: 'pi', name: 'Pi' };
   assert.equal(versionText(context._agRowHtml(bundledPi)), '0.1.0 · 内置');
   context.fixtureAgents = [agent, bundledPi];
-  vm.runInContext("_agData = { machines: [{ runnerId: '', agents: fixtureAgents }] }; _agOpen = 'harness2'", context);
+  vm.runInContext("_agData = { machines: [{ runnerId: 'local', scope: 'current-instance', agents: fixtureAgents }] }; _agOpen = 'local~harness2'", context);
   assert.equal(versionText(context._agDrawer()), '0.1.0');
-  vm.runInContext("_agOpen = 'pi'", context);
+  vm.runInContext("_agOpen = 'local~pi'", context);
   assert.equal(versionText(context._agDrawer()), '0.1.0 · 内置');
   assert.match(context._agRowHtml(agent), /data-ainstall="harness2"/);
   const details = context._agBodyHtml(agent, 'missing');

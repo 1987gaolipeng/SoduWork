@@ -44,6 +44,26 @@ function body(html) {
   return html.slice(0, html.indexOf('<button'));
 }
 
+test('timestamps use the local calendar, retain historical dates and reveal the complete event time', () => {
+  const { renderer, sandbox } = setup();
+  const today = new Date(); today.setHours(13, 7, 9, 0);
+  const render = date => renderer._messageFooter({ role: 'user', sentAt: date.getTime() }, 'Question');
+  assert.match(render(today), />13:07<\/time>/);
+  const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+  const past = render(yesterday);
+  assert.match(past, /tabindex="0"/);
+  assert.match(past, /title="\d{4}-\d{2}-\d{2} 13:07:09"/);
+  assert.doesNotMatch(past, />13:07<\/time>/);
+  const older = new Date(today); older.setFullYear(older.getFullYear() - 1);
+  assert.ok(render(older).includes(older.getFullYear() + '年'));
+  sandbox.SoduWorkI18n = { getLocale: () => 'en-US' };
+  const label = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric',
+    ...(yesterday.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}) }).format(yesterday);
+  assert.ok(render(yesterday).includes(label + ' 13:07'));
+  assert.doesNotMatch(renderer._messageFooter({ role: 'assistant', done: false, completedAt: today.getTime() }, ''), /<time/);
+  assert.doesNotMatch(renderer._messageFooter({ role: 'assistant', done: true }, ''), /<time/);
+});
+
 test('read-aloud controls belong only to completed assistant footers', () => {
   const { sandbox, renderer } = setup();
   sandbox.SoduWorkReadAloud = { button: () => '<button data-speech-play>Read aloud</button>' };
@@ -85,6 +105,7 @@ test('manual acceptance analysis is shown as a pending human review result', () 
 
 test('manual analysis result exposes only the final reject and confirm actions', () => {
   const { renderer, ctx } = setup();
+  ctx._collaborationTrace = {approvals:[{id:'review-1',action:'review',status:'pending'}]};
   ctx._sessionOptions = { taskRef: 'task-1', approvalId: 'review-1', acceptanceSession: true };
   const html = renderer._blockHtml(0, {
     kind: 'text', text: '【验收分析结果】\n需求：写荷花作文\n建议结果：通过',
@@ -113,6 +134,7 @@ test('manual analysis result keeps actions when the model adds a preface and the
 
 test('manual analysis result provides a separate supplemental-analysis handoff', () => {
   const { renderer, ctx } = setup();
+  ctx._collaborationTrace = {approvals:[{id:'review-1',action:'review',status:'pending'}]};
   ctx._sessionOptions = { taskRef: 'task-1', approvalId: 'review-1', acceptanceSession: true };
   const html = renderer._blockHtml(0, {
     kind: 'text', text: '【验收分析结果】\n建议结果：通过',
@@ -127,6 +149,7 @@ test('manual analysis result provides a separate supplemental-analysis handoff',
 
 test('manual analysis result keeps the human review entry when the active task is known outside session options', () => {
   const { renderer, ctx } = setup();
+  ctx._collaborationTrace = {approvals:[{id:'review-1',action:'review',status:'pending'}]};
   // Re-opening the execution conversation can restore the native task binding
   // before the transient acceptance flags.  The result must still expose the
   // reviewer note and approve/reject controls instead of falling back to plain
@@ -180,6 +203,57 @@ test('opening an acceptance session suppresses the stale pending card on the sou
   onAcceptanceOpened('approval-1');
   renderer._render();
   assert.doesNotMatch(list.innerHTML, /data-acceptance-marker/);
+});
+
+test('operation receipts remain between their delivery and the next conversation turn', () => {
+  const { renderer, ctx, list, sandbox } = setupRender();
+  sandbox.TaskTraceApproval = { html: () => '', bind() {} };
+  ctx._pending = '';
+  ctx._sessionOptions = {};
+  const entry = { taskId: 'task', task: { title: 'Delivery' }, nativeTurn: true,
+    trace: { approvals: [{ id: 'r1', action: 'review', status: 'rejected', createdAt: 25 }] } };
+  ctx._collabEntries = () => [entry];
+  ctx._snap = { status: 'idle', tools: [], messages: [
+    { role: 'user', text: 'Execute', sentAt: 10 },
+    { role: 'assistant', sentAt: 20, done: true, blocks: [{ kind: 'text', text: 'First delivery', done: true }] },
+  ] };
+  renderer._render();
+  ctx._snap.messages.push({ role: 'user', text: 'Rework', sentAt: 30 },
+    { role: 'assistant', sentAt: 40, done: true, blocks: [{ kind: 'text', text: 'Revised delivery', done: true }] });
+  entry.trace.approvals.push({ id: 'r2', action: 'review', status: 'approved', createdAt: 45 });
+  renderer._render();
+  ctx._snap.messages.push({ role: 'user', text: 'Continue', sentAt: 50 });
+  for (const reopen of [false, true]) {
+    if (reopen) renderer.reset();
+    renderer._render();
+    const tokens = ['data-chat-node="message:1"', 'data-acceptance-operation="r1"',
+      'data-chat-node="message:2"', 'data-chat-node="message:3"', 'data-acceptance-operation="r2"', 'data-chat-node="message:4"'];
+    const positions = tokens.map(token => list.innerHTML.indexOf(token));
+    assert.ok(positions.every((position, index) => position >= 0 && (!index || position > positions[index - 1])), positions.join(','));
+    assert.equal((list.innerHTML.match(/data-acceptance-operation=/g) || []).length, 2);
+  }
+});
+
+test('legacy projected delivery precedes its receipt and a pending follow-up', () => {
+  const { renderer, ctx, list, sandbox } = setupRender();
+  sandbox.TaskTraceApproval = { html: () => '', bind() {} };
+  sandbox.TaskExecutionStream = { rowsHtml: () => '<p>Legacy delivery</p>' };
+  const entry = { taskId: 'legacy', task: {},
+    trace: { approvals: [{ id: 'legacy-review', action: 'review', status: 'approved' }] },
+    controller: { snapshot: () => ({ status: 'completed', events: [{ kind: 'text' }] }) } };
+  ctx._collabEntries = () => [entry];
+  renderer._render();
+  const delivery = list.innerHTML.indexOf('Legacy delivery');
+  const receipt = list.innerHTML.indexOf('data-acceptance-operation="legacy-review"');
+  const followUp = list.innerHTML.indexOf('data-chat-node="message:pending"');
+  assert.ok(delivery >= 0 && receipt > delivery && followUp > receipt);
+  ctx._pending = '';
+  ctx._snap.messages = [{ role: 'user', text: 'Follow-up', sentAt: 50 }];
+  renderer._render();
+  const persisted = list.innerHTML.indexOf('data-chat-node="message:0"');
+  assert.ok(list.innerHTML.indexOf('Legacy delivery') < list.innerHTML.indexOf('data-acceptance-operation="legacy-review"'));
+  assert.ok(list.innerHTML.indexOf('data-acceptance-operation="legacy-review"') < persisted);
+  assert.equal((list.innerHTML.match(/Legacy delivery/g) || []).length, 1);
 });
 
 test('acceptance session transcript never renders the original pending decision card', () => {
@@ -349,6 +423,31 @@ function setupPickerRender(getTasksSnapshot) {
   ctx._collabState = controller._collabState;
   return { ...harness, controller, views, transcriptWrites: () => transcriptWrites };
 }
+
+test('new waiting, thinking and tool turns never stream a completed acceptance card', () => {
+  for (const kind of ['验收分析结果','验收退回卡','验收确认卡']) {
+    const {renderer,ctx,list}=setupRender();
+    ctx._pending=''; ctx._sessionOptions={};
+    const completed={role:'assistant',done:true,blocks:[{kind:'text',done:true,text:`【${kind}】\nSettled review`} ]};
+    ctx._snap.messages=[{role:'user',text:'Review'},completed]; ctx._snap.status='idle';
+    renderer._render(); assert.match(list.innerHTML,/nacceptance-result/);
+    ctx._snap.status='streaming';
+    for (const pending of ['', 'Next request']) {
+      ctx._pending=pending; renderer._render();
+      assert.equal(ctx._liveTextKey,''); assert.match(list.innerHTML,/nacceptance-result/);
+    }
+    ctx._pending=''; ctx._snap.messages.push({role:'user',text:'Next request',blocks:[{kind:'text',text:'Next request'}]});
+    renderer._render(); assert.equal(ctx._liveTextKey,'');
+    const next={role:'assistant',done:false,blocks:[]}; ctx._snap.messages.push(next);
+    for (const block of [{kind:'thinking',text:'Thinking'}, {kind:'toolcall',id:'tool'},
+      {kind:'text',text:'Finished pre-tool text',done:true}]) {
+      next.blocks.push(block); renderer._render(); assert.equal(ctx._liveTextKey,'');
+      assert.match(list.innerHTML,/nacceptance-result/); assert.doesNotMatch(list.innerHTML,/<details class="nacceptance-result/);
+    }
+    next.blocks.push({kind:'text',text:'New answer'}); renderer._render();
+    assert.equal(ctx._liveTextKey,'3:3','legacy live text without a done flag still streams');
+  }
+});
 
 test('expanding streaming history renders the requested window before resuming incremental patches', () => {
   const { renderer, ctx, list, sandbox } = setupRender();

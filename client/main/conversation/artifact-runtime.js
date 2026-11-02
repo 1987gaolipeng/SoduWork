@@ -13,6 +13,7 @@ const shareArchive = require('./zip-archive');
 const pluginDrafts = require('../pi-session/plugin-draft-candidates');
 const screenshotEvidence = require('./screenshot-evidence');
 const artifactTitle = require('./artifact-title');
+const selection = require('./delivery-selection');
 
 const RECORDS = new Map();
 const PENDING = new Map();
@@ -85,11 +86,25 @@ function sessionSnapshot(session, scanned, recovered) {
   if (!recovered) recovered = recoveredFiles(session);
   if (!scanned) scanned = typeof session.outputSnapshot === 'function'
     ? session.outputSnapshot() : { files: typeof session.outputs === 'function' ? session.outputs() : [] };
-  const metadata = file => artifactTitle.decorate(session.cwd, file);
+  const state = session.snapshot?.() || {};
+  const captures = screenshotEvidence.toolPaths(session.cwd, state.tools || []);
+  const declared = deliveryContract.readManifest(session.cwd);
+  const processFiles = new Set((Array.isArray(declared?.processFiles) ? declared.processFiles : [])
+    .filter(value => typeof value === 'string').map(value => path.resolve(session.cwd, value)));
+  const captureKey = file => process.platform === 'win32' ? path.resolve(file.path || '').toLowerCase() : path.resolve(file.path || '');
+  const metadata = file => artifactTitle.decorate(session.cwd, captures.has(captureKey(file)) ||
+    processFiles.has(path.resolve(file.path || '')) || selection.processRoles.has(file.role) ||
+    deliveryContract._kindOf(file.path) === 'image' && deliveryContract._isProcess(file)
+    ? { ...file, processEvidence: true, evidenceSource: captures.has(captureKey(file)) ? 'capture' : 'manifest', primary: false } : file);
   const got = { ...scanned, files: savedReports.currentFiles(session.cwd, scanned?.files, recovered).map(metadata) };
   const originalDelivery = got.delivery || { source: 'legacy', items: got.files };
-  const delivery = { ...originalDelivery,
-    items: originalDelivery.presentation === 'summary' ? [] : savedReports.currentFiles(session.cwd, originalDelivery.items, recovered).map(metadata) };
+  const request = selection.turn(state).request;
+  const allowCaptures = selection.requestsCaptures(request) || !request && originalDelivery.source === 'manifest';
+  const delivery = selection.select(session.cwd, { ...originalDelivery,
+    items: originalDelivery.presentation === 'summary' ? [] : savedReports.currentFiles(session.cwd, originalDelivery.items, recovered)
+      .map(file => allowCaptures && !processFiles.has(path.resolve(file.path || '')) && !selection.processRoles.has(file.role)
+        ? artifactTitle.decorate(session.cwd, file) : metadata(file))
+      .filter(file => !file.processEvidence) }, state);
   if (got.delivery) got.delivery = delivery;
   // A primary delivery list is a shortlist, not the set of files a user may
   // revisit. Keep scanned documents/websites/media addressable across turns,
@@ -105,7 +120,7 @@ function sessionSnapshot(session, scanned, recovered) {
     if (!file.path || !kind || indexed.has(path.resolve(file.path))) continue;
     const relative = path.relative(session.cwd, file.path).split(path.sep).join('/');
     const item = { ...file, relative, artifactId: deliveryContract._artifactId(kind, relative),
-      kind, primary: false, processEvidence: deliveryContract._isProcess(file),
+      kind, primary: false, processEvidence: file.processEvidence === true || deliveryContract._isProcess(file),
       preview: ['website', 'video', 'image', 'pdf'].includes(kind),
       actions: ['website', 'video'].includes(kind) ? ['preview', 'open', 'reveal'] : ['open', 'reveal'] };
     const legacy = items.findIndex(row => row.path === file.path && !row.artifactId);
@@ -120,6 +135,7 @@ function sessionSnapshot(session, scanned, recovered) {
       // Identity/superseded come from this scan's merge, never from the row the
       // earlier snapshot cached here — a rename must move the identity forward.
       pluginIdentity: file.pluginIdentity || '', pluginSuperseded: file.pluginSuperseded === true,
+      pluginRevision: file.pluginRevision, pluginRevisionAt: file.pluginRevisionAt,
       artifactId: previous && previous.artifactId || deliveryContract._artifactId('file', file.relative),
       kind: 'file', primary: previous ? previous.primary !== false : false,
       preview: false, actions: ['open', 'reveal'] };
@@ -183,7 +199,8 @@ function publicArtifact(ref, item) {
     changedInTurn: Boolean(item && item.changedInTurn),
     ...(item && item.pluginDraft ? { pluginDraft: true, pluginPackage: Boolean(item.pluginPackage),
       pluginName: safeText(item.pluginName, 120), pluginVersion: safeText(item.pluginVersion, 40),
-      pluginIdentity: safeText(item.pluginIdentity, 160), pluginSuperseded: item.pluginSuperseded === true } : {}),
+      pluginIdentity: safeText(item.pluginIdentity, 160), pluginSuperseded: item.pluginSuperseded === true,
+      pluginRevision: safeText(item.pluginRevision, 64), pluginRevisionAt: Number(item.pluginRevisionAt || item.at || 0) } : {}),
     actions: Array.isArray(item && item.actions) ? item.actions.slice(0, 6) : ['open', 'reveal'],
     runtime: item && item.kind === 'website' ? {
       type: 'static',
@@ -493,6 +510,7 @@ module.exports = {
   snapshotAsync,
   decorate,
   resolve,
+  resolveSnapshot,
   resolveAsync,
   preview,
   previewInput,

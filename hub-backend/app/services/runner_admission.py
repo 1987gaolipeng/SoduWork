@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 import ctypes
 from ctypes import wintypes
+import hashlib
+import json
 import os
 import platform
 import threading
@@ -236,6 +238,22 @@ class AdmissionItem:
     cancel_requested: bool = False
     result: dict = field(default_factory=dict)
     launched: bool = False
+    request_digest: str = ""
+    accepted_selection: dict | None = None
+
+
+def comment_digest(ref: str, payload: dict) -> str:
+    """Keep immutable intent, without retaining prompts or renewable credentials."""
+    value = {"ref": str(ref), "text": str(payload.get("text") or ""),
+             "executionSelection": payload.get("executionSelection")}
+    packet = payload.get("files") or {}
+    if packet.get("items"):
+        # Transfers can be re-uploaded after a proven negative receipt. Bind
+        # the business ID to content, not a temporary transfer directory.
+        value["files"] = [{key: item.get(key) for key in ("filename", "size", "sha256", "contentType")}
+                          for item in packet["items"]]
+    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
+                                    separators=(",", ":")).encode()).hexdigest()
 
 
 class AdmissionQueue:
@@ -250,6 +268,7 @@ class AdmissionQueue:
         self._sequence = 0
         self._journal = journal
         if journal is not None:
+            self._sequence = journal.last_sequence()
             for data in journal.read():
                 item = AdmissionItem(**data)
                 if item.state not in ACTIVE_STATES | TERMINAL_STATES or item.category not in PRIORITY:
@@ -287,7 +306,7 @@ class AdmissionQueue:
                payload: dict) -> tuple[bool, str, AdmissionItem | None]:
         self.prune()
         key, ref = str(key or ""), str(ref or "")
-        current = self._items.get(key)
+        current = self.get(key)
         # A business key represents one operation for its whole lifetime. Replayed
         # transport messages must return the original receipt after completion too.
         if current:
@@ -298,7 +317,9 @@ class AdmissionQueue:
         self._sequence += 1
         item = AdmissionItem(
             key=key, ref=ref, category=category, operation=str(operation or "dispatch"),
-            payload=dict(payload or {}), sequence=self._sequence, accepted_at=time.time())
+            payload=dict(payload or {}), sequence=self._sequence, accepted_at=time.time(),
+            request_digest=comment_digest(ref, payload or {}) if operation == "comment" else "",
+            accepted_selection=(payload or {}).get("_acceptedSelection"))
         if self._journal is not None:
             self._journal.write(item)
         self._items[key] = item
@@ -315,7 +336,13 @@ class AdmissionQueue:
         return 0
 
     def get(self, key: str) -> AdmissionItem | None:
-        return self._items.get(str(key or ""))
+        key = str(key or "")
+        item = self._items.get(key)
+        if item is None and key and self._journal is not None:
+            row = self._journal.read_receipt(key)
+            if row is not None:
+                item = AdmissionItem(**row)
+        return item
 
     def active_items(self) -> list[AdmissionItem]:
         return [item for item in self._items.values() if item.state in ACTIVE_STATES]
@@ -414,6 +441,9 @@ class AdmissionQueue:
         }
         if item.error:
             out["error"] = item.error
+        if item.accepted_selection is not None:
+            out.update(acceptedSelection=item.accepted_selection,
+                       acceptedSelectionRevision=item.sequence)
         return out
 
     def prune(self) -> None:
@@ -426,7 +456,7 @@ class AdmissionQueue:
         for key, item in list(self._items.items()):
             if item.state in TERMINAL_STATES and key not in keep:
                 if self._journal is not None:
-                    self._journal.remove(key)
+                    self._journal.archive(item)
                 self._items.pop(key, None)
 
 

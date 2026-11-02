@@ -58,11 +58,11 @@ async def seed() -> None:
                     username="update-supersession", display_name="Update tester")
         client = Client(
             id=DEVICE, secret_hash=device_auth.hash_secret(SECRET), auth_state="active",
-            user_ref=user.id, app_version="1.2.10",
+            user_ref=user.id, app_version="1.13.10",
             last_seen_at=datetime.now(timezone.utc),
         )
         session.add_all([user, client])
-        for version, release_id in (("1.2.11", OLD_RELEASE), ("1.2.12", NEW_RELEASE)):
+        for version, release_id in (("1.13.11", OLD_RELEASE), ("1.13.12", NEW_RELEASE)):
             relative = f"stable/win32/x64/{version}/SoduWork-{version}-Setup.exe"
             artifact = ARTIFACT_ROOT / relative
             artifact.parent.mkdir(parents=True, exist_ok=True)
@@ -81,8 +81,8 @@ async def seed() -> None:
                 updates.manifest_payload(release), PRIVATE_KEY)
         session.add(ClientUpdateAttempt(
             id=OLD_ATTEMPT, client_id=DEVICE, release_id=OLD_RELEASE,
-            requested_by="auto", current_version="1.2.10",
-            target_version="1.2.11", state="downloaded", progress=100,
+            requested_by="auto", current_version="1.13.10",
+            target_version="1.13.11", state="downloaded", progress=100,
         ))
         await session.commit()
 
@@ -100,13 +100,13 @@ def main() -> None:
     try:
         with TestClient(app) as client:
             response = client.get(
-                "/api/v1/client-updates/check?current=1.2.10&platform=win32&arch=x64",
+                "/api/v1/client-updates/check?current=1.13.10&platform=win32&arch=x64",
                 headers=auth_headers(client),
             )
             assert response.status_code == 200, response.text
             body = response.json()
             assert body["hasUpdate"] is True
-            assert body["manifest"]["version"] == "1.2.12"
+            assert body["manifest"]["version"] == "1.13.12"
             assert body["manifest"]["releaseId"] == NEW_RELEASE
 
         async def verify() -> None:
@@ -114,7 +114,7 @@ def main() -> None:
                 old = await session.get(ClientUpdateAttempt, OLD_ATTEMPT)
                 assert old.state == "failed"
                 assert old.progress == 0
-                assert "1.2.12" in old.error
+                assert "1.13.12" in old.error
                 assert old.completed_at is not None
                 rows = list((await session.execute(
                     select(ClientUpdateAttempt).order_by(
@@ -123,7 +123,7 @@ def main() -> None:
                 assert len(rows) == 2
                 latest = next(row for row in rows if row.id != OLD_ATTEMPT)
                 assert latest.release_id == NEW_RELEASE
-                assert latest.target_version == "1.2.12"
+                assert latest.target_version == "1.13.12"
                 assert latest.state == "available"
         asyncio.run(verify())
         print("client update supersession: 12 assertions green")

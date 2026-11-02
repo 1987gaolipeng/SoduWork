@@ -49,9 +49,13 @@ vendor = (Path(SMOKE_DATA) / "node_modules" / "@openai" / "codex" / "node_module
           / "bin" / "codex.exe")
 vendor.parent.mkdir(parents=True)
 vendor.write_bytes(b"offline codex fixture; never executed")
+# The personal package owns this platform dependency, including a hoisted copy.
+(Path(SMOKE_DATA) / "node_modules/@openai/codex/package.json").write_text(
+    '{"name":"@openai/codex","version":"0.166.0"}', encoding="utf-8")
 with (
     patch.object(local_base, "_WIN", True),
     patch.object(local_base, "_npm_root", return_value=str(Path(SMOKE_DATA) / "node_modules")),
+    patch.object(agent_setup.agent_npm_runtime, "runtime_target", return_value=("win32", "x64")),
     patch.object(agent_setup.agent_npm_runtime, "private_bin", return_value=None),
     patch.object(local_base.shutil, "which", return_value=None) as which,
 ):

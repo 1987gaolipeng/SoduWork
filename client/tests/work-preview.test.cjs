@@ -17,6 +17,15 @@ test('Hub PDF files use the native PDF preview even with a generic attachment ki
   }
   assert.equal(tools.previewKind({name:'local.pdf'}), 'pdf');
   assert.equal(tools.previewKind({taskId:'task', attachmentId:'zip', name:'archive.zip', kind:'task-file'}), 'external');
+  assert.equal(tools.previewKind({name:'report.docx', kind:'document'}), 'external');
+  assert.equal(tools.previewKind({name:'sheet.xlsx', contentType:'application/octet-stream'}), 'external');
+  assert.equal(tools.previewKind({name:'document', kind:'document', contentType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}), 'external');
+  assert.equal(tools.previewKind({name:'data.json', taskId:'task', attachmentId:'json', contentType:'application/json'}), 'text');
+  assert.equal(tools.previewKind({name:'notes', kind:'document', contentType:'text/plain'}), 'text');
+  assert.equal(tools.previewKind({name:'data.txt', kind:'spreadsheet', contentType:'text/plain'}), 'external');
+  for (const contentType of ['application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.oasis.opendocument.presentation']) {
+    assert.equal(tools.previewKind({name:'download.txt', kind:'text', contentType}), 'external');
+  }
 });
 
 test('work preview only accepts safe browser addresses', () => {

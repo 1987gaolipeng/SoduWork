@@ -49,3 +49,23 @@ test('availableRuntimes coalesces concurrent probes and reuses the short cache',
   assert.equal(count, 1);
   await bridge.dispose();
 });
+
+
+test('installation invalidation bypasses cached absence and late probes cannot restore stale versions', async () => {
+  const pending = [];
+  const bridge = createPiSessionBridge({adapter:adapter('pi',{ok:true}),
+    runnerAdapters:[adapter('opencode',()=>new Promise(resolve=>pending.push(resolve)))],
+    sessionModule:{open:async()=>{},probe:async()=>({ok:true})}});
+  const old = bridge.availableRuntimes(null);
+  bridge.invalidateRuntimes();
+  const latest = bridge.availableRuntimes(null);
+  pending[1]({ok:true,version:'2.0'});
+  const current = await latest;
+  pending[0]({ok:false,state:'missing'}); await old;
+  assert.strictEqual(await bridge.availableRuntimes(null),current);
+  assert.equal(current.availableRuntimes.find(row=>row.id==='opencode').availability.version,'2.0');
+  bridge.invalidateRuntimes();
+  const removed = bridge.availableRuntimes(null); pending[2]({ok:false,state:'missing'});
+  assert.deepEqual((await removed).availableRuntimes.map(row=>row.id),['pi']);
+  await bridge.dispose();
+});

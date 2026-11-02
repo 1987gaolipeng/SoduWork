@@ -662,6 +662,32 @@ test('an accepted task send releases the optimistic bubble even when the echo te
   assert.equal(f.ctx._pendingAttachmentNames.length, 0);
 });
 
+test('an ordinary send records its submission identity beside the optimistic baseline', async () => {
+  const gate = deferred();
+  const f = fixture({ send: () => gate.promise });
+  f.input.value = 'stable echo identity';
+  const pending = f.ctx._sendCore();
+  await flush();
+  assert.match(String(f.ctx._pendingBaseline?.submissionId || ''), /^ui-/);
+  gate.resolve({ ok: true });
+  assert.equal(await pending, true);
+});
+
+test('a cloud ACK retains the submitted bubble while its transcript echo is delayed', async () => {
+  const gate = deferred(), f = fixture({ send: () => gate.promise });
+  f.ctx._activeCollabTaskId = 'cloud-task';
+  f.ctx._snap = { status: 'idle', messages: [], tools: [], cloudHandoff: { phase: 'committed' } };
+  f.input.value = 'Cloud continuation awaiting echo';
+  const pending = f.ctx._sendCore();
+  await flush();
+  assert.equal(f.requests[0][3].taskId, 'cloud-task');
+  gate.resolve({ ok: true, snapshot: f.ctx._snap });
+  assert.equal(await pending, true);
+  assert.equal(f.ctx._pending, 'Cloud continuation awaiting echo');
+  assert.ok(f.ctx._pendingBaseline.submissionId);
+  assert.equal(f.input.value, '', 'the acknowledged message is not restored as an unsent draft');
+});
+
 test('an app turn forwards its explicit attachment references without consuming the native composer draft', async () => {
   const f = fixture(), refs = [{name:'app-reference.pdf',path:'fixture-app.pdf',size:12,sourceRef:'fixture-app-input'}];
   f.input.value = 'Keep native composer text';

@@ -1,11 +1,7 @@
-
-
-
-
-
-
-
-
+/*
+ * Personal schedules are scoped by the backend to this client. Every occurrence creates a
+ * new ordinary conversation whose prompt, model output, and result stay together in chat.
+ */
 
 const SCH_EVERY = [['daily', '每天'], ['hourly', '每小时'], ['weekly', '每周'], ['once', '仅一次']];
 const SCH_WD = [[1, '周一'], [2, '周二'], [3, '周三'], [4, '周四'], [5, '周五'], [6, '周六'], [7, '周日']];
@@ -420,25 +416,10 @@ async function _schAct(act, sid, btn) {
       void _loadSch();
     } catch (e) {
       if (scope !== _schScope) return;
-      _schRunOpen = sid;
-      _schRunLoading[sid] = true; delete _schRunErrors[sid];
-      _schRunReturnFocus = btn; _schRenderRunDrawer(true);
-      historyPromise = SoduWorkAPI.listScheduleRuns(sid, 20);
-      if (typeof petSay === 'function') petSay('没派出去：' + (typeof _humanErr === 'function' ? _humanErr(e, '派活失败') : e.message));
-    }
-    _schSetRunBusy(btn, false);
-    _schRows = null; await _loadSch();
-    if (historyPromise) {
-      try {
-        const rows = await historyPromise;
-        if (scope === _schScope) _schRunRows[sid] = rows;
-      }
-      catch (error) { if (scope === _schScope) _schRunErrors[sid] = _schErrorText(error); }
-      finally {
-        if (scope !== _schScope) return;
-        delete _schRunLoading[sid]; _schRenderRunDrawer(false);
-        if (_schRunOpen === sid && (_schRunRows[sid] || []).some(run =>
-          (run.receipt || {}).executionMode === 'soduwork.automation-conversation/v1')) _schToggleRuns(sid, true);
+      _schSetRunBusy(runButton, false);
+      if (typeof petSay === 'function') {
+        const detail = String(typeof _humanErr === 'function' ? _humanErr(e, '派活失败') : e.message || '派活失败');
+        petSay(detail.startsWith('没派出去：') ? detail : '没派出去：' + detail);
       }
       return;
     }
@@ -516,9 +497,12 @@ function _schFormHtml(s) {
     '<select class="sch-in sch-w-every" id="schEvery">' + opt(SCH_EVERY, s.every) + '</select>' +
     '<select class="sch-in sch-w-wd" id="schWd">' + opt(SCH_WD, s.weekday) + '</select>' +
     '<span class="sch-clock" id="schHWrap">' +
-    '<input class="sch-in" id="schH" type="number" min="0" max="23" value="' + Number(s.atHour) + '">' +
-    '<em>:</em><input class="sch-in" id="schM" type="number" min="0" max="59" value="' + Number(s.atMinute) + '"></span>' +
-    _schOnceFieldsHtml(s) + '<span class="sch-when-pv" id="schPv"></span></div>' +
+    '<select class="sch-in" id="schH" aria-label="小时" aria-describedby="schClockHint">' +
+    window.ScheduleTiming.clockOptions(24, s.atHour) + '</select><em id="schClockSep" aria-hidden="true">:</em>' +
+    '<select class="sch-in" id="schM" aria-label="分钟" aria-describedby="schClockHint">' +
+    window.ScheduleTiming.clockOptions(60, s.atMinute) + '</select>' +
+    '<small id="schClockHint">滚动选择时间</small></span>' +
+    _schOnceFieldsHtml(s) + '<span class="sch-when-pv" id="schPv" role="status" aria-live="polite"></span></div>' +
 
     sec('在哪儿运行', '不依赖工程的办公自动化可以留空') +
     '<label class="sch-f-lbl">工程</label><select class="sch-in" id="schRepo">' +
@@ -544,8 +528,11 @@ function _schFormHtml(s) {
       checksum: s.personalPluginChecksum || '',
     }) +
     '</div>' +
-
-
+    /*
+     * Hide manual Browser/Computer/Office capability checkboxes and leave them unselected by
+     * default. applyMethodCaps still applies declared personal-plugin capabilities to the
+     * execution contract.
+     */
     '<label class="sch-f-lbl" hidden style="display:none">这项工作需要什么能力<em>只派给真实具备且已授权的执行机</em></label>' +
     '<div class="sch-cap-grid" id="schCaps" hidden style="display:none">' + capChips + '</div>' +
     '<div class="sch-ready checking" id="schReady"><span></span><b>正在检查执行条件…</b><small></small></div>' +
@@ -611,8 +598,8 @@ function _wireSchForm() {
       title: (document.getElementById('schTitle').value || '').trim(),
       note: (document.getElementById('schNote').value || '').trim(),
       ..._schReadTiming(),
-      atHour: Number(document.getElementById('schH').value || 0),
-      atMinute: Number(document.getElementById('schM').value || 0),
+      atHour: window.ScheduleTiming.clockNumber(document.getElementById('schH').value),
+      atMinute: window.ScheduleTiming.clockNumber(document.getElementById('schM').value),
       weekday: Number(document.getElementById('schWd').value || 1),
       assigneeId: document.getElementById('schWho').value,
       assigneeType: 'agent',
@@ -645,6 +632,11 @@ function _wireSchForm() {
     if (!line || !SoduWorkAPI.preflightSchedule) return;
     clearTimeout(probeTimer);
     const seq = ++probeSeq;
+    const timingError = _schTimingError(readBody());
+    if (timingError) {
+      _schRenderPreflight(line, {state:'blocked', message:timingError});
+      return;
+    }
     line.className = 'sch-ready checking';
     line.querySelector('b').textContent = '正在检查执行条件…';
     line.querySelector('small').textContent = '';
@@ -724,7 +716,12 @@ function _wireSchForm() {
   const sync = () => {
     const v = ev.value;
     document.getElementById('schWd').style.display = v === 'weekly' ? '' : 'none';
-    document.getElementById('schHWrap').style.display = v === 'hourly' || v === 'once' ? 'none' : '';
+    document.getElementById('schHWrap').style.display = v === 'once' ? 'none' : '';
+    document.getElementById('schH').hidden = v === 'hourly';
+    const clockSep = document.getElementById('schClockSep');
+    if (clockSep) clockSep.hidden = v === 'hourly';
+    const clockHint = document.getElementById('schClockHint');
+    if (clockHint) clockHint.textContent = _schTx(v === 'hourly' ? '每小时第几分' : '滚动选择时间');
     _schSyncTiming(v);
     document.getElementById('schDirectBlock').style.display = mode === 'direct' ? '' : 'none';
     document.getElementById('schPluginBlock').style.display = mode === 'plugin' ? '' : 'none';
@@ -770,7 +767,7 @@ function _wireSchForm() {
     event.currentTarget.removeAttribute('aria-invalid');
     sync();
   });
-  document.getElementById('schWd').addEventListener('change', sync);
+  ['schH', 'schM', 'schWd'].forEach(id => document.getElementById(id).addEventListener('change', sync));
   document.getElementById('schWho').addEventListener('change', () => {
     // A different substrate may have a different model namespace. Never carry
     // the previous substrate's explicit model into the new selection.

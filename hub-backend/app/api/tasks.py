@@ -590,6 +590,7 @@ async def conversation_task_delivery(
     conversation_id: str = Form(default="", alias="conversationId"),
     turn_id: str = Form(default="", alias="turnId"),
     paths: list[str] = Form(default_factory=list),
+    categories: list[str] = Form(default_factory=list),
     model: str = Form(default=""),
     outcome: str = Form(default="completed"),
     client: Client = Depends(authenticated_client),
@@ -611,9 +612,15 @@ async def conversation_task_delivery(
         raise HTTPException(404, "需求不存在或不属于当前设备")
     if len(paths) != len(files):
         raise HTTPException(422, "产出文件名与文件数量不一致")
+    if not isinstance(categories, list):
+        categories = []
+    if categories and (len(categories) != len(files) or
+                       any(value not in {"primary", "supporting", "evidence", "internal"} for value in categories)):
+        raise HTTPException(422, "产出分类与文件数量不一致")
     prepared = []
+    prepared_categories = {}
     from ..services import delivery_manifest
-    for path, file in zip(paths, files):
+    for index, (path, file) in enumerate(zip(paths, files)):
         data = await file.read()
         max_bytes = get_settings().attach_max_mb * 1024 * 1024
         if len(data) > max_bytes:
@@ -621,12 +628,15 @@ async def conversation_task_delivery(
         if not data:
             continue
         relative = str(path or file.filename or "").replace("\\", "/").strip("/")[:600]
-        prepared.append((relative or delivery_manifest.normalize_name(file.filename),
-                         data, file.content_type or "application/octet-stream"))
+        name = relative or delivery_manifest.normalize_name(file.filename)
+        prepared.append((name, data, file.content_type or "application/octet-stream"))
+        if categories:
+            prepared_categories[name] = categories[index]
     try:
         result = await conversation_turns.deliver_artifacts(
             session, task, conversation_id=conversation_id[:180],
             turn_id=turn_id[:120], provider=model[:80], files=prepared,
+            categories=prepared_categories,
             outcome=normalized_outcome)
     except HTTPException:
         raise
@@ -1282,7 +1292,10 @@ async def ai_stop_task(
 
     from ..services import ai_exec
     from ..services import task_events as ev
-    t = await _my_task(session, client, tid)
+    from ..services.cloud_execution_sync import require_account_cloud_task
+    t = await require_account_cloud_task(session, client, tid, optional=True)
+    if t is None:
+        t = await _my_task(session, client, tid)
     ref = await _dispatch_ref(session, tid)
     if not ref:
         raise HTTPException(status_code=409, detail="这条需求还没交给 AI")
@@ -1399,6 +1412,23 @@ async def ai_session_task(
 
     from ..services import ai_exec, execution_sessions
     t = await _view_task(session, client, tid)
+    from ..services import task_access
+
+    from ..services import cloud_acceptance
+    acceptance = await cloud_acceptance.status(session, tid)
+
+    def with_conversation_access(page):
+        result = dict(page or {})
+        if acceptance:
+            result.update(mobileAcceptance=acceptance, canSend=False,
+                          readOnlyReason="自动验收会话保留本轮报告；请回到原需求查看结果或重新发起验收")
+            return result
+        # Cloud execution is still pinned to its original Runner.  `canSend`
+        # only means this account device may append a turn through Hub.
+        result["canSend"] = task_access.can_continue_execution(t, client)
+        if not result["canSend"]:
+            result["readOnlyReason"] = "当前设备只能查看此会话"
+        return result
     if ref:
         # Workflow nodes have their own execution refs. Authorize the exact
         # task/ref pair BEFORE asking any Runner for its transcript.
@@ -1423,13 +1453,13 @@ async def ai_session_task(
         await execution_sessions.ingest_live_snapshot(session, t, ref, live, d)
         await session.commit()
         cached = await execution_sessions.read_task(session, tid, ref, int(since or 0))
-        return cached or live
+        return with_conversation_access(cached or live)
     cached = await execution_sessions.read_task(session, tid, ref, int(since or 0))
     if cached is not None:
         cached["liveError"] = live.get("error") or "执行机当前不在线"
         cached["canStop"] = False
-        return cached
-    return live
+        return with_conversation_access(cached)
+    return with_conversation_access(live)
 
 
 @router.post("/tasks/{tid}/ai-say")
@@ -1451,7 +1481,12 @@ async def ai_say_task(
         raise HTTPException(413, "消息超过 200000 字符，请拆分后发送")
     if not text:
         raise HTTPException(status_code=400, detail="说点什么再发")
-    t = await _view_task(session, client, tid)
+    from ..services.cloud_execution_sync import require_account_cloud_task
+    t = await require_account_cloud_task(session, client, tid, optional=True)
+    if t is None:
+        t = await _view_task(session, client, tid)
+    if not _task_access.can_continue_execution(t, client):
+        raise HTTPException(403, "当前账号只能查看此执行会话")
     ev_row = await ai_exec.last_dispatch_event(session, tid)
     if ev_row is None:
         raise HTTPException(status_code=400, detail="这条需求还没交给 AI")
@@ -1462,10 +1497,27 @@ async def ai_say_task(
     raw_selection = body.get("executionSelection")
     ctx = await cloud_turn_selection.prepare(session, client, ctx, handoff, raw_selection)
     ref = d.get("ref") or d.get("issueId", "")
+    if not handoff:
+        from ..services import task_continuation
+        try:
+            ctx = await task_continuation.prepare(session, t, ctx, ref)
+        except task_continuation.ContinuationError as exc:
+            raise HTTPException(409, str(exc)) from exc
+    from ..services import conversation_turn_files
+    turn_files, file_manifest = conversation_turn_files.decode(body.get("files", []))
+    if turn_files:
+        if not handoff or body.get("messageId") is None:
+            raise HTTPException(409, "追加文件需要支持回执的远程会话；需求材料请从需求入口提交")
+        from ..services import ai_remote
+        runner = ai_remote._runner_of_ref(ref)
+        if not runner or "turnFiles1" not in getattr(runner, "caps", []):
+            raise HTTPException(409, "原执行机离线或尚未支持追加文件，请更新并连接执行机后重试")
+        ctx = {**ctx, "_turnFiles": turn_files}
     if body.get("messageId") is not None:
         from ..services import conversation_message_receipts
         r = await conversation_message_receipts.send(
-            session, client, tid, ref, text, body["messageId"], ctx, execution_selection=raw_selection)
+            session, client, tid, ref, text, body["messageId"], ctx, execution_selection=raw_selection,
+            file_manifest=file_manifest)
         if r.get("pending") or r.get("delivery") == "rejected":
             return r
     else:
@@ -1775,15 +1827,6 @@ async def prepare_task_execution(
     return await task_execution_claim.prepare(session, client, tid)
 
 
-@router.post("/tasks/{tid}/prepare-execution")
-async def prepare_task_execution(
-    tid: str,
-    client: Client = Depends(current_client),
-    session: AsyncSession = Depends(get_session),
-):
-    """Let the current assignee explicitly claim idle execution on this device."""
-    from ..services import task_execution_claim
-    return await task_execution_claim.prepare(session, client, tid)
 
 
 @router.post("/tasks/{tid}/submit-review")
@@ -1806,23 +1849,32 @@ async def submit_task_for_review(
     from ..services import task_access
     from ..services import task_events as ev
 
+    # Serialize manual submission with execution starts and approval decisions.
+    await session.get(Task, tid, with_for_update=True, populate_existing=True)
     task = await _view_task(session, client, tid)
-    if not await task_requirements.can_manage(session, client, task):
-        raise HTTPException(status_code=403, detail="你只能查看这条需求")
-    current = task_requirements.stage(task)
+    if not task_requirements.is_review_submitter(task, client):
+        raise HTTPException(status_code=403, detail="只有执行者可以提交验收")
+    api = await svc.task_to_api_live(session, task)
+    current = api.get("requirementStage")
     if current == "reviewing":
         # Idempotent retry: a delayed response must not manufacture another
         # artifact or review ticket for the same board drop.
-        api = await svc.task_to_api_live(session, task)
         return {"ok": True, "already": True, "task": api}
-    if current != "delivering" or task.status not in {"doing", "paused"}:
+    if current != "delivering" or task.status != "doing":
         raise HTTPException(status_code=409, detail="只有进行中的需求可以提交验证")
+
+    from ..services import task_maintenance
+    await task_maintenance.ensure_allowed(session, [task])
 
     actor = await _actor_user(session, client)
     who = _actor_label(actor, client)
     note = str(body.get("note") or "").strip()[:1000]
     try:
-        artifact, _ = await release_control.ensure_current_output(session, task, who=who)
+        turn = dict((task.work_routing or {}).get("conversationTurn") or {})
+        artifact, _ = await release_control.ensure_current_output(
+            session, task, who=who,
+            source_ref=("conversation:" + str(turn["conversationId"])) if turn.get("conversationId") else "",
+            allow_empty=True)
         request = await release_control.ensure_request(session, task, artifact, "review")
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error

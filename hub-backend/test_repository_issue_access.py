@@ -1,5 +1,8 @@
 """Repository membership grants requirement reading/claiming, never execution."""
 import os
+from pathlib import Path
+import shutil
+import tempfile
 import unittest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
@@ -8,7 +11,7 @@ from types import SimpleNamespace
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 os.environ.setdefault("AUTH_SECRET", "repository-issue-isolated-test-secret")
 os.environ.setdefault("ADMIN_PASS", "repository-issue-isolated-test-password")
-from sqlalchemy import delete, select, text
+from sqlalchemy import create_engine, delete, event, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app import models, automation_models
 from app.db import Base
@@ -18,18 +21,28 @@ from app.schemas import task_to_api
 
 
 class RepositoryIssueAccessTests(unittest.IsolatedAsyncioTestCase):
+    @classmethod
+    def setUpClass(cls):
+        # Build the complete schema once without per-statement async DDL hops.
+        # Each test receives a private copy and retains real async transactions.
+        cls.template_folder = tempfile.TemporaryDirectory(prefix="soduwork-repository-access-schema-")
+        cls.template_path = Path(cls.template_folder.name) / "template.db"
+        engine = create_engine("sqlite:///" + cls.template_path.as_posix())
+        try:
+            Base.metadata.create_all(engine)
+        finally:
+            engine.dispose()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.template_folder.cleanup()
+
     async def asyncSetUp(self):
-        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        self.folder = tempfile.TemporaryDirectory(prefix="soduwork-repository-access-db-")
+        self.db_path = Path(self.folder.name) / "fixture.db"
+        shutil.copyfile(self.template_path, self.db_path)
+        self.engine = create_async_engine("sqlite+aiosqlite:///" + self.db_path.as_posix())
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
-        async with self.engine.begin() as conn:
-            tables = [model.__table__ for model in (models.OrgUnit, models.User, models.Client,
-                models.Task, models.TaskEvent, models.TaskRequirementAccess, models.TaskNotificationOutbox,
-                automation_models.ScmRepository,
-                automation_models.ExecutionSession, automation_models.ExecutionEvent,
-                automation_models.ResourceLease, automation_models.WorkflowRun,
-                automation_models.ArtifactVersion, automation_models.ApprovalRequest,
-                RepositoryIssueLink, RepositoryIssueMember, RepositoryIssueSync)]
-            await conn.run_sync(lambda connection: Base.metadata.create_all(connection, tables=tables))
         self.clients = {}
         async with self.sessions() as session:
             session.add(models.OrgUnit(id="org", name="Same department"))
@@ -57,6 +70,7 @@ class RepositoryIssueAccessTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         self.publish.stop()
         await self.engine.dispose()
+        self.folder.cleanup()
 
     async def test_members_can_read_and_claim_but_not_execution_and_names_are_not_identity(self):
         async with self.sessions() as session:
@@ -470,7 +484,6 @@ class RepositoryIssueAccessTests(unittest.IsolatedAsyncioTestCase):
     async def test_fk_enabled_delete_and_clear_done_keep_issue_identity_tombstones(self):
         from app.services import tasks
         async with self.engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
             await conn.execute(text("PRAGMA foreign_keys=ON"))
         async with self.sessions() as session:
             self.assertEqual(await session.scalar(text("PRAGMA foreign_keys")), 1)

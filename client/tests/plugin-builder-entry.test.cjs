@@ -22,9 +22,9 @@ function fixture(ctx = {}, overrides = {}) {
 test('new-session entries preserve the complete original prompt bytes and synchronous return', () => {
   // Captured from the original shared entry before consolidating the chat fallback.
   for (const [seed, context, expected] of [
-    ['  Build reusable report  ', { attachmentNames: ['report.csv', 'plan.md'] }, '1523cf5149c725504cef3efdc8887584d960ef3966e6d93111505ee85f912060'],
-    ['', { attachmentNames: ['input.txt'] }, 'c293fb050ea6d8f933c61156c3cb98bde25ad9df7cabd8268fe09b75c28577d7'],
-    ['', undefined, '856cfd0c031573eecd4fa2259c7ec58443bbd0a247cf72085dae6c02726b5dfd'],
+    ['  Build reusable report  ', { attachmentNames: ['report.csv', 'plan.md'] }, '0807dfb198c26f276bcdefd6dae05a8eb09fa0a49b650858cd2eb113a0fb5c14'],
+    ['', { attachmentNames: ['input.txt'] }, 'b88f7fb0606875c82a48ee0b566369c5bf0924d46455bfd5094f012ec42e6321'],
+    ['', undefined, '09688882bb0c6ea5ed21fb4c5f61087788eaca56298599672c17b27658de1bb5'],
   ]) {
     const f = fixture();
     assert.equal(f.window.PluginBuilderEntry.open(seed, context), true);

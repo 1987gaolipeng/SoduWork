@@ -12,6 +12,10 @@ const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const FILE_LIMIT = 64 * 1024 * 1024, TOTAL_LIMIT = 128 * 1024 * 1024;
 const URL_PATTERN = /^\/(?:api\/v1\/)?attachments\/([^/?#]+)\?[^#]+$/i;
 const EVIDENCE = new Set(['evidence', 'deploy_screenshot', 'screenshot', 'screen_shot', 'screen_capture', 'verification', 'test_evidence', 'internal']);
+// Browser-readable results and their assets may be cached for inline preview.
+// Office documents, archives and unknown binaries require an explicit action.
+const PREVIEW_EXTENSIONS = /\.(?:html?|md|markdown|txt|pdf|png|jpe?g|gif|webp|svg|bmp|avif|ico|mp4|m4v|webm|mov|ogv|css|js|mjs|json|woff2?|ttf|otf)$/i;
+const canPreview = row => PREVIEW_EXTENSIONS.test(row.filename || row.name || row.path || '');
 const VERSION_KEYS = ['size', 'mtimeMs', 'ctimeMs', 'ino', 'birthtimeMs'];
 const projections = new WeakMap();
 const native = handle => handle?.[Symbol.for('soduwork.agent-runtime.native-handle')] || handle;
@@ -145,9 +149,17 @@ async function checksum(target, limit) {
 const version = stat => Object.fromEntries(VERSION_KEYS.map(key => [key, stat[key]]));
 
 function create({ app, fetch = fetchWithDeviceAuthRetry, fileLimit = FILE_LIMIT, totalLimit = TOTAL_LIMIT }) {
-  async function materialize(record, current, value, assertCurrent = async () => {}) {
-    const attachments = rows(value, record.taskId), cwd = directory(app, record);
+  async function materialize(record, current, value, assertCurrent = async () => {}, { previewOnly = false } = {}) {
+    const all = rows(value, record.taskId), cwd = directory(app, record);
+    const attachments = previewOnly ? all.filter(canPreview) : all;
     const previous = record.materializedOutputs || {}, materialized = {};
+    if (previewOnly) for (const row of all) {
+      // Keep current manual-download receipts without fetching those bytes again.
+      // The index still checks the on-disk version before exposing any file.
+      const known = previous[String(row.id)], digest = row.sha256 || row.evidenceMeta?.sha256;
+      if (known?.path === row.filename && known.size === Number(row.size) &&
+          (!digest || String(digest).toLowerCase() === known.sha256)) materialized[String(row.id)] = known;
+    }
     let total = 0;
     for (const row of attachments) {
       const expected = Number(row.size);
@@ -218,4 +230,4 @@ function create({ app, fetch = fetchWithDeviceAuthRetry, fileLimit = FILE_LIMIT,
   return { materialize };
 }
 
-module.exports = { create, directory, index, rows, safeName, bind, project };
+module.exports = { create, directory, index, rows, safeName, bind, project, canPreview };

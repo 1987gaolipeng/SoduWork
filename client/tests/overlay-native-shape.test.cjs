@@ -90,18 +90,23 @@ test('dynamic input guard accepts the cursor inside any component and ignores el
     '等待当前 revision 确认时，即使光标在组件内也必须穿透');
 });
 
-test('native platforms keep accepting full input for multi-component shapes', () => {
+test('native platforms guard transparent gaps without disabling visible components', () => {
   const decisions = [];
-  const scope = { _overlayShape:shape, _emergencyMode:false, _overlayAwaitingShape:false, _overlayShapeEnabled:true,
+  let cursor = { x: 10, y: 10 };
+  const scope = { _overlayShape:shape, _emergencyMode:false, _overlayShapeEnabled:true,
+    _overlayAwaitingShape:false,
     _overlayInputRects:[{x:1800,y:900,width:72,height:132},{x:1880,y:300,width:36,height:500}],
     NATIVE_SHAPE:true,
-    screen:{ getCursorScreenPoint:()=>({x:10,y:10}) },
+    screen:{ getCursorScreenPoint:()=>cursor },
     mainWindow:{ isDestroyed:()=>false, isVisible:()=>true, getContentBounds:()=>({x:0,y:0,width:1920,height:1080}) },
     _setOverlayInputIgnored(ignore){ decisions.push(ignore); } };
   vm.createContext(scope); vm.runInContext(sync, scope);
   scope._syncOverlayInputNow();
-  assert.deepEqual(decisions, [false], 'win/linux 多组件形状交给 setShape，不再用单矩形守卫拦人');
+  assert.deepEqual(decisions, [true], 'native clipping must not leave multi-widget transparent gaps active');
+  cursor = { x: 1805, y: 905 };
+  scope._syncOverlayInputNow();
+  assert.deepEqual(decisions, [true, false], 'visible pet remains interactive');
   scope._overlayAwaitingShape = true;
   scope._syncOverlayInputNow();
-  assert.deepEqual(decisions, [false, true], 'blur blocks all input even when old geometry remains visible');
+  assert.deepEqual(decisions, [true, false, true], '等待当前 revision 确认时必须保持原生穿透');
 });

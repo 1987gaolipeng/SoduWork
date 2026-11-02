@@ -92,7 +92,7 @@ class PersonalRunnerAccessTests(unittest.IsolatedAsyncioTestCase):
         node.ws.send_json.assert_not_called()
         with self.assertRaises(RunnerAccessDenied):
             await node.send({"op": "term.in", "data": "unwanted command"})
-        for op in ("job.status", "job.session", "job.file", "job.stop", "runner.probe"):
+        for op in ("session.ack", "session.nack", "job.status", "job.session", "job.file", "job.stop", "runner.probe"):
             self.assertTrue((await node.call(op, {}, timeout=.1))["ok"], op)
 
     async def test_retired_socket_cannot_read_or_receive_any_operation(self):

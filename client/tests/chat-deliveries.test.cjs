@@ -26,10 +26,10 @@ test('cloud delivery keeps same-named files from different paths', () => {
 
 test('settled local and cloud outputs render a delivery card without the unused continuation arrow', () => {
   for (const remote of [false, true]) {
-    const child = () => ({ textContent: '', hidden: false, classList: { toggle() {} },
-      setAttribute() {}, replaceChildren() {}, querySelector: child });
+    const child = () => ({ textContent: '', hidden: false, dataset: {}, classList: { toggle() {} },
+      setAttribute() {}, appendChild() {}, replaceWith() {}, replaceChildren() {}, querySelector: child });
     const card = { ...child(), dataset: {}, querySelector: child }, appended = [];
-    const document = { createElement: () => card, createTextNode: text => ({ textContent: text }) };
+    const document = { createElement: tag => tag === 'section' ? card : child(), createTextNode: text => ({ textContent: text }) };
     const message = { dataset: { deliveryCurrent: 'true' }, ownerDocument: document,
       querySelector: () => null, querySelectorAll: () => [], appendChild: value => appended.push(value) };
     const root = { ownerDocument: document, querySelectorAll: selector => selector === '[data-delivery]' ? [] : [message] };
@@ -41,6 +41,9 @@ test('settled local and cloud outputs render a delivery card without the unused 
       ...(remote ? { cloudHandoff: { taskId } } : {}) });
     assert.deepEqual(appended, [card]);
     assert.equal(card.className, 'ndelivery');
+    assert.match(card.innerHTML, /data-delivery-retry/);
+    assert.match(card.innerHTML, /保存到资料库/);
+    assert.match(card.innerHTML, /<details class="ndelivery-files" open>/);
     assert.ok(!card.innerHTML.includes('data-delivery-continue'));
     assert.ok(!card.innerHTML.includes('M5 12h13m-5-5 5 5-5 5'));
     assert.ok(!card.innerHTML.includes(remote ? '在云端继续' : '继续会话'));

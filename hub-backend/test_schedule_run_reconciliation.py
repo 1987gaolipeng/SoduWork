@@ -14,14 +14,11 @@ class ScheduleRunReconciliationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
         async with self.engine.begin() as connection:
-            for table in [models.Client.__table__, models.Task.__table__, models.TaskEvent.__table__,
-                          models.AiSchedule.__table__, models.AiScheduleRun.__table__,
-                          am.WorkflowRun.__table__, am.NodeRun.__table__,
-                          am.ExecutionSession.__table__]:
+            for table in (models.Client.__table__, models.Task.__table__, models.AiSchedule.__table__,
+                          models.AiScheduleRun.__table__):
                 await connection.run_sync(table.create)
         self.session = async_sessionmaker(self.engine, expire_on_commit=False)()
-        self.session.add(models.Client(id="device"))
-        await self.session.flush()
+        self.client = models.Client(id="device")
         self.started = datetime.now(timezone.utc) - timedelta(hours=2)
         self.finished = self.started + timedelta(seconds=5)
         self.plan = models.AiSchedule(id="schedule", owner_client_id="device", title="Morning briefing",
@@ -82,61 +79,7 @@ class ScheduleRunReconciliationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("请重新执行", self.run.error)
         self.assertIsNotNone(self.run.finished_at)
 
-    async def test_preparing_receipt_with_its_own_error_preserves_that_evidence(self):
-        self.run.state, self.run.finished_at = "starting", None
-        self.run.started_at = datetime.now(timezone.utc)
-        await self.reconcile()
-        self.assertEqual(self.run.state, "failed")
-        self.assertEqual(self.run.error, "插件尚未获得运行许可")
-
-    async def test_new_preparing_task_remains_preparing(self):
-        self.run.state, self.run.error, self.run.finished_at = "starting", "", None
-        self.run.started_at = datetime.now(timezone.utc)
-        await self.reconcile()
-        self.assertEqual(self.run.state, "starting")
-        self.assertIsNone(self.run.finished_at)
-
-    async def test_real_dispatch_retry_recovers_and_returned_artifacts_wait_for_acceptance(self):
-        self.session.add(models.TaskEvent(id="dispatch", task_id="task", kind=ai_exec.EV_DISPATCHED,
-                                         detail={"ref": "exec-ref"}, at=datetime.now(timezone.utc)))
-        await self.reconcile()
-        self.assertEqual(self.run.state, "running")
-        self.assertEqual(self.run.error, "")
-        self.assertIsNone(self.run.finished_at)
-        self.session.add(models.TaskEvent(id="artifacts", task_id="task", kind=ai_exec.EV_ARTIFACTS,
-                                         detail={}, at=datetime.now(timezone.utc)))
-        await self.reconcile()
-        self.assertEqual(self.run.state, "waiting")
-        self.assertEqual(self.run.receipt["phase"], "acceptance")
-
-    async def test_workflow_retry_human_approval_and_completion_reconcile(self):
-        workflow = am.WorkflowRun(id="workflow", task_id="task", plugin_id="plugin",
-                                 plugin_version_id="version", state="running")
-        self.session.add(workflow)
-        self.run.workflow_run_id = "workflow"
-        await self.reconcile()
-        self.assertEqual(self.run.state, "running")
-        self.assertEqual(self.run.error, "")
-        node = am.NodeRun(id="approval", run_id="workflow", node_key="approval", node_type="approval",
-                          state="waiting_human", idempotency_key="workflow:approval")
-        self.session.add(node)
-        await self.reconcile()
-        self.assertEqual(self.run.state, "waiting")
-        self.assertEqual(self.run.receipt["phase"], "human_gate")
-        node.state, workflow.state, workflow.finished_at = "succeeded", "succeeded", datetime.now(timezone.utc)
-        await self.reconcile()
-        self.assertEqual(self.run.state, "succeeded")
-        self.assertEqual(self.run.finished_at, workflow.finished_at)
-
-    async def test_task_completion_is_conclusive_even_after_failed_start(self):
-        self.task.status, self.task.actual_end_at = "done", datetime.now(timezone.utc)
-        await self.reconcile()
-        self.assertEqual(self.run.state, "succeeded")
-        self.assertEqual(self.run.error, "")
-
-    async def test_native_conversation_receipts_still_belong_to_device_ack(self):
-        self.run.state, self.run.error, self.run.finished_at = "starting", "", None
-        self.run.receipt = {"executionMode": "soduwork.automation-conversation/v1", "phase": "device"}
+    async def test_native_starting_receipt_waits_for_actual_device_ack(self):
         await self.reconcile()
         self.assertEqual(self.run.state, "starting")
         self.assertEqual(self.run.receipt["phase"], "device")

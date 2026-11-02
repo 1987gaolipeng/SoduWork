@@ -23,7 +23,7 @@ import httpx
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from fastapi import FastAPI
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import create_engine, delete, func, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app import automation_models as am, im_models as im, models
@@ -40,11 +40,17 @@ class IMFixture:
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="soduwork-im-test-")
         self.addCleanup(self.temp.cleanup)
-        self.engine = create_async_engine("sqlite+aiosqlite:///" + str(Path(self.temp.name) / "test.db"))
+        database = (Path(self.temp.name) / "test.db").as_posix()
+        # Keep the complete private schema while avoiding hundreds of async
+        # DDL thread handoffs under unittest's debug event loop on Windows.
+        schema_engine = create_engine("sqlite:///" + database)
+        try:
+            Base.metadata.create_all(schema_engine)
+        finally:
+            schema_engine.dispose()
+        self.engine = create_async_engine("sqlite+aiosqlite:///" + database)
         self.addAsyncCleanup(self.engine.dispose)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
-        async with self.engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
         settings = get_settings()
         for name, value in (("im_enabled", True), ("connector_oauth_key", base64.urlsafe_b64encode(b"f" * 32).decode()),
                             ("hub_public_url", "https://hub.example.test")):
@@ -66,7 +72,8 @@ class IMFixture:
                 models.TaskEvent(task_id=self.task.id, kind=ai_exec.EV_DISPATCHED,
                     detail={"ref": "runner:im-ref", "runnerId": self.node.id}),
                 am.ExecutionSession(id="im-session", task_id=self.task.id, ref="runner:im-ref", runner_id=self.node.id,
-                    runner_client_id=self.client.id, state="done", seq=1, metadata_={"round": 1})])
+                    runner_client_id=self.client.id, engine="pi", model="im-fixture-model",
+                    state="done", seq=1, metadata_={"round": 1})])
             await session.commit()
         self.live = SimpleNamespace(id=self.node.id, client_id=self.client.id, org_id="im-org", owner_user_id="", host="fixture-desktop")
         guard = patch.object(runner_hub, "get", side_effect=lambda key: self.live if key == self.node.id else None)
@@ -120,6 +127,11 @@ class IMFixture:
             self.submitted.append((ref, text, kwargs))
             return {"ok": True, "queued": True, "admissionKey": "comment:" + kwargs["message_id"]}
         guard = patch.object(ai_exec, "say_sync", side_effect=say)
+        guard.start(); self.addCleanup(guard.stop)
+        # Continuation now restores the model pinned at dispatch. Keep this
+        # isolated fixture complete; never bypass the continuation/owner checks.
+        guard = patch("app.services.model_catalog.resolve", AsyncMock(return_value={
+            "base": "https://fixture.invalid", "key": "isolated-im-fixture", "model": "im-fixture-model"}))
         guard.start(); self.addCleanup(guard.stop)
 
     async def request(self, method, path, **kwargs):

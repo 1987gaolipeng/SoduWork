@@ -5,6 +5,7 @@ Runner process, model endpoint or real workspace is touched.
 """
 import importlib
 import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 import unittest
@@ -13,7 +14,7 @@ from unittest.mock import AsyncMock, patch
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 import httpx
 from fastapi import FastAPI, Request
-from sqlalchemy import select
+from sqlalchemy import create_engine, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app import models, automation_models as am
 from app.api import admin, tasks
@@ -28,10 +29,19 @@ for model_file in (Path(__file__).parent / "app").glob("*models.py"):
 
 class AdminRequirementDispatchTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        self.tmp = tempfile.TemporaryDirectory(prefix="soduwork-admin-dispatch-")
+        self.addCleanup(self.tmp.cleanup)
+        database = (Path(self.tmp.name).resolve() / "fixture.db").as_posix()
+        # Build the complete fresh schema synchronously before opening async
+        # sessions; hundreds of DDL thread handoffs can exhaust Windows CI's
+        # module deadline. Each test still owns an independent database.
+        schema_engine = create_engine("sqlite:///" + database)
+        try:
+            Base.metadata.create_all(schema_engine)
+        finally:
+            schema_engine.dispose()
+        self.engine = create_async_engine("sqlite+aiosqlite:///" + database)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
-        async with self.engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
         async with self.sessions() as session:
             session.add_all([models.OrgUnit(id="team", name="Team"), models.OrgUnit(id="outside", name="Outside"),
                 models.Role(id="operator", name="Operator", permissions=["task.view", "task.dispatch", "plugin.run"]),

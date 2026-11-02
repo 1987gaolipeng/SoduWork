@@ -133,6 +133,8 @@ app.whenReady().then(async () => {
       SoduWorkAPI.uploadLibraryOutput=()=>new Promise(resolve=>window.finishLibrarySave=resolve);
       RequirementsDetail.open('ui-0');void 0;`);
     await wait(100);
+    // Material groups start collapsed; open the listed output before saving it.
+    await click('[data-rq-material-group]>summary');
     assert.equal(await js(`document.querySelector('[data-rq-library]').textContent`),'');
     assert.equal(await js(`document.querySelector('[data-rq-library]').getBoundingClientRect().width`),30);
     assert.match(await js(`document.querySelector('[data-rq-library]').getAttribute('aria-label')`),/保存到本机资料库/);

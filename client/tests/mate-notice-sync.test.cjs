@@ -44,6 +44,62 @@ const message = (changes = {}) => ({ id: 'server-1', messageId: 'client-1', send
   senderName: '发件人', recipientName: '接收人', text: '完整需求说明', kind: 'task_assignment', taskId: 'task-1',
   createdAt: 100, status: 'accepted', deliveredAt: null, readAt: null, attachments: [], ...changes });
 
+function mountChatList(f) {
+  const opened = [];
+  f.ctx.openTaskConversation = (...args) => { opened.push(args); return true; };
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../components/workspace/workspace-chat-list.js'), 'utf8'), f.ctx);
+  const context = {chatItems: [{id: 'ongoing-chat'}], activeChatId: 'ongoing-chat', incomingOpened: new Map()};
+  const list = f.ctx.WorkspaceChatList.create(context);
+  // Exercise an arrival listener if the workspace registers one, including queued arrivals.
+  list.subscribeTaskChanges?.();
+  return {opened, context};
+}
+
+for (const beforeMount of [true, false]) {
+  for (const type of ['task.created', 'task.updated']) {
+    test(`${type} assignment ${beforeMount ? 'before' : 'after'} workspace mount notifies without opening a conversation`, () => {
+      const f = fixture(), relayed = [];
+      f.ctx.WinSync = {pushTasks() {}, pushNotices() {}, pushTaskEvent: event => relayed.push(event)};
+      let workspace;
+      if (!beforeMount) workspace = mountChatList(f);
+      const event = {type, arrival: 'assign', by: 'Sender', autoOpen: true,
+        task: {id: 'task-1', title: 'Assigned requirement', status: 'todo', triageStage: 'ready',
+          ownerClientId: 'device-a', myRoles: ['assignee'], readOnly: false}};
+      f.event(event);
+      if (beforeMount) workspace = mountChatList(f);
+      f.event({...event, __fromWindow: true});
+      f.event(event);
+      assert.deepEqual(workspace.opened, []);
+      assert.deepEqual(workspace.context.chatItems, [{id: 'ongoing-chat'}]);
+      assert.equal(workspace.context.activeChatId, 'ongoing-chat');
+      assert.equal(f.bubbles.length, 1); assert.equal(f.alerts.length, 1); assert.equal(f.unread(), 1);
+      assert.equal(vm.runInContext('Store.tasks[0].triageStage', f.ctx), 'ready');
+      assert.ok(relayed.length > 0);
+      assert.ok(relayed.every(row => row.autoOpen === false));
+    });
+  }
+}
+
+for (const scenario of [
+  {name: 'intake moves to ready', previous: {triageStage: 'intake'}, arrival: '', alerts: 0},
+  {name: 'ownership moves from a colleague', previous: {readOnly: true, ownerClientId: 'device-b', myRoles: ['creator']}, arrival: 'assign', alerts: 1},
+  {name: 'creator assigns the requirement to self', previous: null, arrival: 'self', alerts: 0},
+]) {
+  test(`${scenario.name} updates the pool without creating a conversation`, () => {
+    const f = fixture();
+    const task = {id: 'task-1', title: 'Requirement', status: 'todo', triageStage: 'ready',
+      readOnly: false, ownerClientId: 'device-a', myRoles: ['assignee']};
+    if (scenario.previous) f.event({type: 'task.created', task: {...task, ...scenario.previous}});
+    const workspace = mountChatList(f);
+    f.event({type: scenario.previous ? 'task.updated' : 'task.created', arrival: scenario.arrival, task});
+    assert.deepEqual(workspace.opened, []);
+    assert.equal(workspace.context.activeChatId, 'ongoing-chat');
+    assert.equal(f.alerts.length, scenario.alerts);
+    assert.equal(vm.runInContext('Store.tasks[0].triageStage', f.ctx), 'ready');
+    assert.equal(vm.runInContext('Store.tasks[0].ownerClientId', f.ctx), 'device-a');
+  });
+}
+
 test('通知缓存中明确属于其他账号的私信不展示或计数，定向协作消息保留', async () => {
   const values = new Map([['user-a:notices', JSON.stringify([
     { ...message({ recipientId: 'user-c' }), id: 'foreign', at: 1, read: false },
@@ -509,7 +565,7 @@ for (const noticeFirst of [false, true]) {
     await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(f.bubbles, [message().text]); assert.equal(f.alerts.length, 1);
     assert.equal(f.sync.rows('received').length, 1);
-    assert.equal(changes.length, 1); assert.equal(changes[0].incoming, true); assert.equal(changes[0].autoOpen, true);
+    assert.equal(changes.length, 1); assert.equal(changes[0].incoming, true); assert.equal(changes[0].autoOpen, false);
     assert.equal(vm.runInContext('Store.tasks[0].id', f.ctx), 'task-1');
   });
 }
@@ -520,7 +576,7 @@ test('没有持久通知 ID 的旧版交办仍保留通知和自动导航', () =
   f.event({ type: 'task.created', arrival: 'assign', by: '发件人',
     task: { id: 'task-1', title: '待修复缺陷', status: 'todo', myRoles: ['assignee'], readOnly: false } });
   assert.equal(f.bubbles.length, 1); assert.equal(f.alerts.length, 1); assert.equal(f.unread(), 1);
-  assert.equal(changes[0].incoming, true); assert.equal(changes[0].autoOpen, true);
+  assert.equal(changes[0].incoming, true); assert.equal(changes[0].autoOpen, false);
 });
 
 test('已读消息重放和持久化失败均不弹窗或响铃', async () => {

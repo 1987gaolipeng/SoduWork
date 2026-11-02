@@ -68,7 +68,11 @@ def _default_criteria(action: str, environment_name: str) -> list[str]:
     }.get(action, "当前固定版本符合任务目标与验收边界")]
 
 
-def _requirements(action: str, context: dict) -> list[dict]:
+def requires_manual_confirmation(artifact: am.ArtifactVersion) -> bool:
+    return artifact.kind == "manual" and dict(artifact.manifest or {}).get("manual") is True
+
+
+def _requirements(action: str, context: dict, artifact=None) -> list[dict]:
     configured = context.get("requiredEvidence")
     if isinstance(configured, list) and configured:
         out = []
@@ -84,6 +88,10 @@ def _requirements(action: str, context: dict) -> list[dict]:
                             "oneOf": kinds[:8]})
         if out:
             return out
+    # An explicit empty submission is decided by a person, without inventing
+    # verified delivery evidence. Configured evidence requirements still apply.
+    if action == "review" and artifact is not None and requires_manual_confirmation(artifact):
+        return []
     # Text responses are first-class deliverables frozen into immutable versions.
     # Review gates must accept verified text evidence.
     # Otherwise valid text-only outputs could never be accepted.
@@ -121,6 +129,23 @@ def _declared_attachment_ids(context: dict) -> set[str]:
     return out
 
 
+def belongs_to_artifact(row, artifact: am.ArtifactVersion) -> bool:
+    """A reused execution source cannot widen a frozen file delivery to older rounds."""
+    if artifact.kind not in {"files", "manual", "output", "text", "url"}:
+        return True
+    manifest = dict(artifact.manifest or {})
+    refs = _manifest_attachment_ids(artifact)
+    if str(row.id) in refs:
+        return True
+    if attachment_to_api(row)["role"] == "output":
+        return False
+    source = str(getattr(row, "source_ref", "") or "")
+    rounds = {str(item.get("round")) for key in ("files", "evidence")
+              for item in manifest.get(key) or [] if isinstance(item, dict)
+              and item.get("round") and str(item.get("sourceRef") or "") == source}
+    return not rounds or str(dict(row.evidence_meta or {}).get("round") or "") in rounds
+
+
 async def prepare_context(session: AsyncSession, task: models.Task,
                           artifact: am.ArtifactVersion, action: str,
                           environment_id: str, context: dict | None) -> dict:
@@ -138,7 +163,7 @@ async def prepare_context(session: AsyncSession, task: models.Task,
     for row in rows:
         role = str(getattr(row, "role", "") or "")
         source = str(getattr(row, "source_ref", "") or "")
-        if artifact.source_ref and source == artifact.source_ref and role != "input":
+        if artifact.source_ref and source == artifact.source_ref and role != "input" and belongs_to_artifact(row, artifact):
             refs.add(str(row.id))
     criteria = _criterion_lines(base, artifact, {}) or _default_criteria(
         action, env.name if env else "")
@@ -147,7 +172,7 @@ async def prepare_context(session: AsyncSession, task: models.Task,
         "title": _TITLES.get(action, "确认当前关口"),
         "criteria": [{"id": f"criterion-{index + 1}", "label": value}
                      for index, value in enumerate(criteria)],
-        "requirements": _requirements(action, base),
+        "requirements": _requirements(action, base, artifact),
         "evidenceRefs": sorted(refs)[:200],
         "frozenAt": _ms(getattr(artifact, "created_at", None)),
     }
@@ -230,7 +255,7 @@ async def packet(session: AsyncSession, task: models.Task,
         linked = (str(row.id) in refs or str(row.id) in manifest_refs or
                   str(meta.get("gateRequestId") or "") == request.id or
                   bool(artifact.source_ref and source == artifact.source_ref and role != "input"))
-        if linked:
+        if linked and belongs_to_artifact(row, artifact):
             evidence.append(task_execution_contract.attachment_evidence(attachment_to_api(row)))
 
     if request.action == "uat" and request.environment_id:
@@ -296,7 +321,12 @@ async def packet(session: AsyncSession, task: models.Task,
         if key and key not in seen:
             seen.add(key)
             unique.append(item)
-    requirements = [dict(item) for item in (gate.get("requirements") or _requirements(request.action, context))]
+    requirements = [dict(item) for item in (gate.get("requirements") or _requirements(request.action, context, artifact))]
+    manual = request.action == "review" and requires_manual_confirmation(artifact)
+    # Older empty submissions froze the default file requirement and could never
+    # be confirmed. Preserve explicit requirements and immutable stored context.
+    if manual and not context.get("requiredEvidence") and requirements == _requirements("review", {}):
+        requirements = []
     blockers = []
     verified = [item for item in unique if _verified(item)]
     present = {str(item.get("kind") or "").lower() for item in verified}
@@ -330,6 +360,7 @@ async def packet(session: AsyncSession, task: models.Task,
         "criteria": criteria, "requirements": requirements, "evidence": unique,
         "readiness": {"state": "ready" if can_approve else "blocked",
                       "canApprove": can_approve, "blockers": blockers,
+                      "requiresHumanConfirmation": manual,
                       "evidenceCount": len(unique),
                       "verifiedEvidenceCount": len(verified),
                       "failedEvidenceCount": len(failed),

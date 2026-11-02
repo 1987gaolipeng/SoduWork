@@ -86,17 +86,95 @@ function _schDefaultAgentId() {
 }
 
 function _schNormalizeExecutionAgents(result) {
-  return ((result && result.substrates) || []).filter(item => item && item.key).map(item => ({
-    id: String(item.key),
-    name: String(item.name || item.cli || item.key),
-    cli: String(item.cli || ''),
-    available: item.available !== false,
-    note: String(item.note || ''),
-    modelPick: item.modelPick !== false,
-    nativeModelPick: item.nativeModelPick === true,
-    modelSource: String(item.modelSource || ''),
-    locationLabel: String(item.locationLabel || ''),
-    onlineSeats: Math.max(0, Number(item.onlineSeats) || 0),
+  const rows = [];
+  for (const item of ((result && result.substrates) || [])) {
+    if (!item || !item.key) continue;
+    const locations = Array.isArray(item.locations) && item.locations.length
+      ? item.locations : [null];
+    for (const location of locations) {
+      const remote = location && location.mode === 'remote';
+      const locationId = String((location && (location.assigneeId || location.id)) || item.key);
+      const locationLabel = String((location && location.label) || item.locationLabel || '');
+      rows.push({
+        // A group such as local:pi can contain several concrete seats. Keep
+        // the selected assignee stable so an automation cannot silently move
+        // from the chosen work computer to another device on the next run.
+        id: locationId,
+        name: String(item.name || item.cli || item.key) +
+          (locations.length > 1 && locationLabel ? ' · ' + locationLabel : ''),
+        cli: String(item.cli || ''),
+        available: item.available !== false,
+        note: String(item.note || ''),
+        modelPick: item.modelPick !== false,
+        // Native model catalogs are device-local. Remote native targets keep
+        // their own account selection and must not query this desktop.
+        nativeModelPick: item.nativeModelPick === true && !remote,
+        modelSource: String(item.modelSource || ''),
+        locationLabel,
+        onlineSeats: locations.length > 1 ? 1 : Math.max(0, Number(item.onlineSeats) || 0),
+        mode: String((location && location.mode) || 'local'),
+        runnerId: String((location && location.runnerId) || ''),
+        clientId: String((location && location.clientId) || ''),
+        runnerKind: String((location && location.runnerKind) || ''),
+        host: String((location && location.host) || ''),
+      });
+    }
+  }
+  return rows;
+}
+
+function _schNormalizeModelOptions(result) {
+  const rows = Array.isArray(result?.modelOptions) ? result.modelOptions : [];
+  const names = Array.isArray(result?.models) ? result.models : [];
+  const out = [];
+  const seen = new Set();
+  const add = raw => {
+    const name = typeof raw === 'string' ? raw : (raw && (raw.name || raw.id));
+    const value = String(name || '').trim();
+    if (!value || seen.has(value)) return;
+    seen.add(value);
+    out.push({ name: value, label: String((raw && raw.label) || value) });
+  };
+  rows.forEach(add); names.forEach(add);
+  return out;
+}
+
+function _schNormalizeNativeModelOptions(result) {
+  const rows = Array.isArray(result?.models) ? result.models : [];
+  const out = [];
+  const seen = new Set();
+  rows.forEach(raw => {
+    const name = String((raw && (raw.id || raw.name)) || raw || '').trim();
+    if (!name || seen.has(name)) return;
+    seen.add(name);
+    out.push({ name, label: String((raw && (raw.label || raw.displayName)) || name) });
+  });
+  return out;
+}
+
+function _schNativeOptionsFor(agentId) {
+  return (_schNativeModelOptions && _schNativeModelOptions[String(agentId || '')]) || [];
+}
+
+function _schModelOptionsFor(agentId) {
+  const agent = _schAgents.find(item => String(item.id) === String(agentId || ''));
+  return agent && agent.nativeModelPick ? _schNativeOptionsFor(agent.id) : _schModelOptions;
+}
+
+async function _schLoadNativeModelOptions(agents) {
+  const nativeAgents = (agents || []).filter(item => item && item.nativeModelPick);
+  if (!nativeAgents.length) return;
+  const bridge = window.soduWorkAPI && (window.soduWorkAPI.conversationSession || window.soduWorkAPI.piSession);
+  if (!bridge || typeof bridge.runtimeModels !== 'function') return;
+  await Promise.all(nativeAgents.map(async agent => {
+    const adapterId = String(agent.cli || agent.id || '').replace(/^local:/, '');
+    if (!adapterId) return;
+    try {
+      const result = await bridge.runtimeModels(adapterId);
+      if (_schNativeModelOptions) _schNativeModelOptions[agent.id] = _schNormalizeNativeModelOptions(result);
+    } catch (_) {
+      if (_schNativeModelOptions) _schNativeModelOptions[agent.id] = [];
+    }
   }));
 }
 
@@ -131,6 +209,7 @@ async function _schLoadExecutionAgents(context) {
         return agents;
       } catch (_) {
         if (scope !== _schScope) return [];
+        _schModelOptions = []; _schDefaultModel = '';
         /* Fall back to legacy agent lists only when the unified-contract API fails. */
       }
     }
@@ -517,12 +596,12 @@ function _schReadTiming() {
 }
 
 function _schTimingError(value, focus) {
-  if (value.every !== 'once') return '';
   const existing = _schEditing && _schEditing !== 'new' ? _schEditing : undefined;
   const error = window.ScheduleTiming?.validate(value, existing) ||
     (!window.ScheduleTiming ? '时间设置尚未就绪，请重新打开自动化' : '');
   if (error && focus) {
-    const input = document.getElementById('schRunAt');
+    const input = document.getElementById(value.every === 'once' ? 'schRunAt' :
+      value.every !== 'hourly' && (!Number.isInteger(value.atHour) || value.atHour < 0 || value.atHour > 23) ? 'schH' : 'schM');
     input.classList.add('invalid'); input.setAttribute('aria-invalid', 'true');
     input.focus({ preventScroll: true });
     if (typeof petSay === 'function') petSay(_schTx(error));
@@ -556,8 +635,14 @@ function _schNextPreview() {
     if (Date.parse(timing.runAt) <= Date.now()) return _schTx('等待补跑一次');
     return '下一次：' + _schTx(window.ScheduleTiming.summary(timing));
   }
-  const hh = Math.max(0, Math.min(23, Number(document.getElementById('schH').value || 0)));
-  const mm = Math.max(0, Math.min(59, Number(document.getElementById('schM').value || 0)));
+  const hh = window.ScheduleTiming.clockNumber(document.getElementById('schH').value);
+  const mm = window.ScheduleTiming.clockNumber(document.getElementById('schM').value);
+  const error = _schTimingError({every, atHour:hh, atMinute:mm});
+  for (const id of ['schH', 'schM']) {
+    const control = document.getElementById(id);
+    control.classList.remove('invalid'); control.removeAttribute('aria-invalid');
+  }
+  if (error) return _schTx(error);
   const wd = Number(document.getElementById('schWd').value || 1);
   const now = new Date();
   const n = new Date(now);

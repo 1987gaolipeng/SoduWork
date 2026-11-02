@@ -12,6 +12,17 @@ function fixture(t) {
 }
 const fail = code => Object.assign(Error('private profile path ' + code), { code });
 
+test('restoring an unchanged choice performs no write while changed model or reasoning still requires persistence', t => {
+  const f = fixture(t); f.store.write('original', 'medium');
+  t.mock.method(fs, 'renameSync', () => { throw fail('EBUSY'); });
+  assert.doesNotThrow(() => f.store.write('original', 'medium'));
+  assert.doesNotThrow(() => f.store.write('original'));
+  assert.throws(() => f.store.write('changed', 'medium'), {code:'EBUSY'});
+  assert.throws(() => f.store.write('original', 'high'), {code:'EBUSY'});
+  assert.deepEqual(f.store.readSelection(), {name:'original', reasoningEffort:'medium'});
+  assert.equal(fs.readdirSync(f.directory).length, 1);
+});
+
 test('model preferences survive first save, replacement and reopening when same-directory rename returns EXDEV', t => {
   const f = fixture(t), staged = [];
   t.mock.method(fs, 'renameSync', (source, target) => {

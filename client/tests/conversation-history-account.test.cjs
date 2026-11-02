@@ -46,6 +46,67 @@ test('damaged or conflicting ownership cannot claim a foreign archive; cloud fla
   f.switch(identity('two'));
   assert.deepEqual(access.visible(f.app, [{ id: 'remote', cloud: true }]), []);
 });
+
+test('account projections require the exact authenticated connection and source identity', t => {
+  const f = fixture(t);
+  const row = { id: 'acct-review', accountProjection: true, accountConversation: true,
+    adapterId: 'account-sync', sourceSessionId: 'native-review', sourceClientId: 'other-device',
+    owner: connectionScope(identity()) };
+  assert.equal(access.visible(f.app, [row]).length, 1);
+  for (const patch of [{ owner: '' }, { accountProjection: false }, { sourceSessionId: '' },
+    { sourceClientId: '' }, { adapterId: 'pi' }, { accountConversation: false }]) {
+    assert.equal(access.visible(f.app, [{ ...row, ...patch }]).length, 0);
+  }
+  f.switch(identity('two'));
+  assert.equal(access.visible(f.app, [row]).length, 0);
+  f.switch({ ...identity(), hub: 'https://different.test' });
+  assert.equal(access.visible(f.app, [row]).length, 0);
+  f.switch(identity());
+  assert.equal(access.visible(f.app, [row]).length, 1);
+});
+test('a legacy archive is bound to the first authenticated account that opens it', t => {
+  const f = fixture(t), captured = access.actor(f.app);
+  const archive = path.join(f.root, 'pi-agent', 'sessions', 'project', 'legacy.jsonl');
+  fs.mkdirSync(path.dirname(archive), { recursive: true });
+  fs.writeFileSync(archive, '{"type":"session","id":"legacy"}\n{"type":"message"}\n');
+  assert.doesNotThrow(() => access.assertOwner(f.app, 'legacy', captured,
+    { id: 'legacy', path: archive, count: 1 }, { allowLegacy: true }));
+  assert.throws(() => {
+    f.switch(identity('two'));
+    access.assertOwner(f.app, 'legacy', access.actor(f.app), { id: 'legacy' });
+  }, /当前账号/);
+  f.switch(identity());
+  assert.doesNotThrow(() => access.assertOwner(f.app, 'legacy', access.actor(f.app), { id: 'legacy' }));
+});
+test('legacy migration never claims an ownerless runner row', t => {
+  const f = fixture(t);
+  assert.throws(() => access.assertOwner(f.app, 'runner-only', access.actor(f.app),
+    { id: 'runner-only', adapterId: 'runner' }, { allowLegacy: true }), /当前账号/);
+  assert.equal(fs.existsSync(path.join(f.root, 'conversation-history-owners')), false);
+});
+test('an ownerless native archive is listed and bound during the first authenticated history projection', t => {
+  const f = fixture(t), archive = path.join(f.root, 'pi-agent', 'sessions', 'project', 'legacy.jsonl');
+  fs.mkdirSync(path.dirname(archive), { recursive: true });
+  fs.writeFileSync(archive, '{"type":"session","id":"legacy-list"}\n');
+  const rows = [{ id: 'legacy-list', path: archive, count: 1, cwd: f.root }];
+  assert.deepEqual(access.visible(f.app, rows).map(row => row.id), ['legacy-list']);
+  assert.doesNotThrow(() => access.assertOwner(f.app, 'legacy-list', access.actor(f.app), rows[0]));
+  f.switch(identity('two'));
+  assert.deepEqual(access.visible(f.app, rows), [], 'the migrated archive stays hidden after an account switch');
+});
+test('a legacy owner sidecar never follows a symbolic link', t => {
+  const f = fixture(t), directory = path.join(f.root, 'conversation-history-owners');
+  fs.mkdirSync(directory, { recursive: true });
+  const target = path.join(directory, 'target.json');
+  fs.writeFileSync(target, JSON.stringify({ version: 1, sessionId: 'linked', owner: scope(identity()) }));
+  const link = path.join(directory, crypto.createHash('sha256').update('linked').digest('hex') + '.json');
+  try { fs.symlinkSync(target, link, 'file'); }
+  catch (error) {
+    if (['EPERM', 'EACCES', 'UNKNOWN'].includes(error.code)) return t.skip('symbolic links are unavailable in this environment');
+    throw error;
+  }
+  assert.throws(() => access.assertOwner(f.app, 'linked', access.actor(f.app)), /无法读取会话归属记录/);
+});
 test('history IPC rejects foreign rename/archive/restore/delete before touching the runtime', async t => {
   const f = fixture(t), handlers = new Map(), calls = [];
   require('../main/pi-session/history-ipc').install({ app: f.app,

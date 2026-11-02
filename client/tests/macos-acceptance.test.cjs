@@ -6,14 +6,8 @@ const repo = path.resolve(__dirname, '../..');
 test('Mac fresh, old and upgrade installs use separate cleaned DMG mounts', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'soduwork-mac-acceptance-test-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const pinsDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'soduwork-mac-first-release-'));
-  t.after(() => fs.rm(pinsDirectory, { recursive: true, force: true }));
-  const pins = path.join(pinsDirectory, 'baselines.json');
-  await fs.writeFile(pins, JSON.stringify({ cn: { firstReleaseVersion: '1.13.3', baselines: {} } }));
-  const version = distributionId === 'internal' ? '9.9.1' : '1.13.3';
-  const distribution = { distributionId, productName: distributionId === 'internal' ? 'SoduWork' : 'SoduWork CN',
-    appId: distributionId === 'internal' ? 'com.soduwork.app' : 'com.soduwork.cn',
-    userDataName: distributionId === 'internal' ? 'SoduWork' : 'SoduWork CN' };
+  const version = '9.9.1';
+  const distribution = { productName: 'SoduWork', appId: 'com.soduwork.app' };
   const record = { version, artifacts: ['arm64', 'x64'].map(arch =>
     ({ name: `SoduWork-9.9.1-mac-${arch}.dmg`, arch, format: 'dmg' })) };
   const mounts = [], smoke = [], errors = [];
@@ -58,10 +52,8 @@ test('Mac fresh, old and upgrade installs use separate cleaned DMG mounts', asyn
         distribution, verify: async () => record,
         acceptance: async (platform, result) => { assert.equal(platform, 'macos'); checks = result; } };
       if (name === './acceptance-common.cjs') return { run,
-        distributionBaseline: async (_profile, _version, _key, current) => distributionId === 'cn' ? null
-          : ({ version: '9.9.0', productName: 'SoduWork', path: path.join(current, 'baseline.dmg') }) };
-      if (name === './distribution-baselines.cjs') return { plan: (profile, candidate) =>
-        require('../../tools/ci/distribution-baselines.cjs').plan(profile, candidate, { file: pins }) };
+        soduworkBaseline: async (_key, current) =>
+          ({ version: '9.9.0', productName: 'SoduWork', path: path.join(current, 'baseline.dmg') }) };
       if (name === './macos-signature.cjs') return require('../../tools/ci/macos-signature.cjs');
       return require(name);
     },
@@ -69,16 +61,12 @@ test('Mac fresh, old and upgrade installs use separate cleaned DMG mounts', asyn
   sandbox.require.main = sandbox.module;
   await vm.runInNewContext(await fs.readFile(path.join(repo, 'tools/ci/accept-macos.cjs'), 'utf8'), sandbox);
   assert.deepEqual(errors, []); assert.equal(state.exitCode, undefined);
-  const mountCount = distributionId === 'internal' ? 6 : 4;
-  assert.equal(mounts.length, mountCount); assert.equal(new Set(mounts).size, mountCount);
+  assert.equal(mounts.length, 6); assert.equal(new Set(mounts).size, 6);
   assert.deepEqual(smoke, ['arm64', 'x64'].flatMap(arch => [
     [`${arch}-dmg-fresh.json`, version, 'write'], [`${arch}-dmg-restart.json`, version, 'read'],
-    ...(distributionId === 'internal' ? [[`${arch}-dmg-old.json`, '9.9.0', 'write'], [`${arch}-dmg-upgrade.json`, version, 'read']]
-      : [[`${arch}-dmg-reinstall.json`, version, 'read']]),
+    [`${arch}-dmg-old.json`, '9.9.0', 'write'], [`${arch}-dmg-upgrade.json`, version, 'read'],
   ]));
   assert.deepEqual(JSON.parse(JSON.stringify(checks)), ['arm64', 'x64'].map(arch =>
-    ({ name: arch + '-dmg', ok: true, ...(distributionId === 'internal'
-      ? { mode: 'upgrade', oldVersion: '9.9.0', oldSignature: { verified: true, policy: 'strict' } }
-      : { mode: 'first-release', reinstalled: true, distributionIsolation: true }) })));
+    ({ name: arch + '-dmg', ok: true, oldVersion: '9.9.0', oldSignature: { verified: true, policy: 'strict' } })));
   assert.deepEqual(await fs.readdir(root), ['release-evidence']);
 });

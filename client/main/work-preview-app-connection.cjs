@@ -77,10 +77,12 @@ async function connectRemote(item, params, deps) {
     server: params.server, url: target.href, credentialKey: params.credentialKey,
   });
   item.appConnection = { pluginId: bound.pluginId, server: params.server, url: target.href,
+    versionId: installed.versionId, contributionId: item.appBridge.contributionId, origin: bound.origin, jiyong: installed.jiyong,
     credentialKey: params.credentialKey, scope: store.scope(bound), context: params.context || {},
     expiresAt: Number.MAX_SAFE_INTEGER,
     authorize: async () => {
       const current = await settingsBinding(item, deps, 'mcp.connect');
+      if (current.installed.versionId !== installed.versionId) throw Error('应用安装版本已变化，请重新打开即用');
       if (!current.installed.capabilities?.mcpServers?.includes(params.server)) throw Error('应用连接器授权已变化');
     } };
   return { ok: true, connected: true, server: params.server };
@@ -90,7 +92,7 @@ function resolve(item, deps, assertActive = () => {}) {
   const connection = item.appConnection;
   if (!connection || connection.expiresAt <= Date.now()) return null;
   if (!connection.credentialKey) return { ...connection,
-    authorize: async () => { assertActive(); appOwner.assertCurrent(item); } };
+    authorize: async () => { assertActive(); appOwner.assertCurrent(item); await connection.authorize?.(); } };
   const remote = !connection.pluginId.startsWith('local:');
   const bound = remote ? { pluginId: connection.pluginId, origin: item.appBridge.origin } : binding(item, deps, 'mcp.connect');
   const expectedScope = connection.scope;

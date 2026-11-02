@@ -19,14 +19,14 @@ const specs = [
   ['access-controls', electron, ['e2e/access-controls.cjs']],
   ['memory-http', process.execPath, ['e2e/session-memory-http.cjs', path.join(output, 'memory-http')]],
   ['memory-panel', electron, ['e2e/session-memory-import.cjs']],
-  ['brand-bridge', electron, ['e2e/soduwork-brand-compat.cjs']],
+  ['brand-bridge', electron, ['e2e/soduwork-brand-clean.cjs']],
   ['long-conversation', electron, ['e2e/long-conversation.cjs']],
   ['chat-stream-scroll', process.execPath, ['e2e/chat-stream-scroll.cjs']],
   ['chat-stream-stability', process.execPath, ['e2e/chat-stream-stability.cjs']],
   ['platform-connections', electron, ['e2e/platform-connections.cjs', path.join(output, 'platform-connections')]],
   ['plugin-authoring', process.execPath, ['e2e/plugin-authoring.mjs', path.join(output, 'plugin-authoring')]],
   ['plugin-resources', process.execPath, ['e2e/plugin-resources.mjs', path.join(output, 'plugin-resources')]],
-  ['plugin-roundtrip', process.execPath, ['--test', 'e2e/plugin-export-roundtrip.cjs', 'tests/soduwork-brand-compat.test.cjs']],
+  ['plugin-roundtrip', process.execPath, ['--test', 'e2e/plugin-export-roundtrip.cjs', 'tests/soduwork-brand-clean.test.cjs']],
 ];
 const results = [];
 for (const [name, executable, args] of specs) {

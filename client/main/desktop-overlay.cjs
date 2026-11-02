@@ -160,10 +160,8 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
       _setOverlayInputIgnored(true);
       return;
     }
-    if (NATIVE_SHAPE && _overlayInputRects.length !== 1) {
-      _setOverlayInputIgnored(false);
-      return;
-    }
+    // Native clipping limits painting, but multi-widget layered windows can still
+    // retain keyboard focus or intercept transparent gaps. Guard every shape.
     try {
       const point = screen.getCursorScreenPoint();
       const bounds = mainWindow.getContentBounds();
@@ -179,7 +177,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
   function _startOverlayInputGuard() {
     if (_overlayInputGuardTimer) return;
     _overlayInputGuardTimer = setInterval(() => {
-      if (!NATIVE_SHAPE || _overlayInputRects.length === 1) _syncOverlayInputNow();
+      _syncOverlayInputNow();
     }, 40);
     if (typeof _overlayInputGuardTimer.unref === 'function') _overlayInputGuardTimer.unref();
   }
@@ -224,8 +222,9 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
     }
   }
 
-  function parkOverlayShape() {
-    _overlayAwaitingShape = true;
+  function parkOverlayShape(invalidate = false) {
+    if (invalidate) _overlayShapeRevision++;
+    _overlayAwaitingShape = false;
     _lastOverlayRects = [];
     _overlayShapeReported = false;
     applyOverlayShape([], false);

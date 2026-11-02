@@ -33,9 +33,21 @@ class ContractNormalizationTests(unittest.IsolatedAsyncioTestCase):
         contract = task.work_routing["outputContract"]
         self.assertEqual(contract["kind"], "office-artifact")
         self.assertEqual(contract["normalizedFrom"], "repository-change")
-        self.assertEqual(contract["deliverables"], ["代码提交" if False else "代码提交"] or ["代码提交"])
-        # Preserve the original deliverables list.
-        self.assertEqual(contract["deliverables"], ["代码提交"])
+        self.assertNotIn("代码提交", contract["deliverables"])
+        self.assertEqual(contract["sourceContract"]["deliverables"], ["代码提交"])
+        self.assertEqual(contract["normalizationVersion"], 2)
+        self.assertFalse(task_service.normalize_output_contract(task))
+
+    def test_old_normalization_uses_real_criteria_without_modifying_them(self):
+        criteria = ["User confirms the design", "Works offline"]
+        task = SimpleNamespace(project_id=None, repo_id="", acceptance_criteria=criteria,
+                               work_routing={"outputContract": {"kind": "office-artifact",
+                                             "normalizedFrom": "repository-change",
+                                             "deliverables": ["Code commit"], "acceptance": ["Merged"]}})
+        self.assertTrue(task_service.normalize_output_contract(task))
+        self.assertEqual(task.work_routing["outputContract"]["acceptance"], criteria)
+        self.assertEqual(task.acceptance_criteria, criteria)
+        self.assertFalse(task_service.normalize_output_contract(task))
 
     def test_task_with_repo_keeps_contract(self):
         task = SimpleNamespace(project_id=None, repo_id="repo-1", work_routing={

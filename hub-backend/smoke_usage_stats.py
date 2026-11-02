@@ -4,18 +4,17 @@ separate from the overwritten context watermark, capture Claude result usage, co
 and turns, retain the original session start across follow-ups and compaction, and report the
 model for cost attribution.
 """
+import asyncio
 import os
 import sys
+import tempfile
 
-DB = os.path.abspath(".smoke-usage.db")
-for sfx in ("", "-shm", "-wal"):
-    try:
-        os.remove(DB + sfx)
-    except FileNotFoundError:
-        pass
+_DB_DIR = tempfile.TemporaryDirectory(prefix="soduwork-usage-stats-")
+DB = os.path.join(_DB_DIR.name, "usage.db")
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///" + DB.replace("\\", "/")
 sys.path.insert(0, ".")
 
+from app.db import engine  # noqa: E402
 from app.services.local_stream import _accumulate_usage  # noqa: E402
 
 ok = fail = 0
@@ -135,4 +134,9 @@ def main():
     return 1 if fail else 0
 
 
-sys.exit(main())
+try:
+    result = main()
+finally:
+    asyncio.run(engine.dispose())
+    _DB_DIR.cleanup()
+sys.exit(result)

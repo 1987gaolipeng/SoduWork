@@ -203,7 +203,7 @@
   function openFolderDialog() {
     return openNameDialog({ title: '新建文件夹', description: '创建文件夹来整理资料库中的项目。', label: '文件夹名称', placeholder: '输入文件夹名称', confirm: '创建', maxLength: 120, create: true });
   }
-  function openShareDialog({ item, members, filename, size, localCopy, onSubmit }) {
+  function openShareDialog({ item, items, folders, bundled: bundledOption, members, filename, size, localCopy, onSubmit }) {
     if (shareDialog) return Promise.resolve(false);
     return new Promise(resolve => {
       const dialog = document.createElement('dialog'); shareDialog = dialog;
@@ -222,8 +222,9 @@
           ? '直接发送文件通知，本机原件保留。分享双方可在通知中打开、下载或保存到资料库。'
           : '可选择所有成员，他们会在通知中心收到文件。');
       dialog.className = 'library-share-dialog'; dialog.setAttribute('aria-labelledby', 'libraryShareTitle');
-      dialog.innerHTML = '<form class="library-share-card" method="dialog"><header class="library-share-head"><div><b id="libraryShareTitle">' + esc(tx('分享资料')) + '</b><span>' + esc(tx(localCopy ? '直接发送文件通知，本机原件保留。是否存入资料库由对方决定。' : '可选择多位组织成员，他们会在通知中心收到文件。')) + '</span></div><button type="button" class="library-share-close" data-library-share-cancel aria-label="' + esc(tx('关闭')) + '">×</button></header>' +
-        '<div class="library-share-file"><span class="library-share-file-icon">' + icon('document') + '</span><span><b data-user-content>' + esc(filename || item.filename || item.title) + '</b><small>' + esc(size || '') + '</small></span></div>' +
+      dialog.innerHTML = '<form class="library-share-card" method="dialog"><header class="library-share-head"><div><b id="libraryShareTitle">' + esc(tx(bundled ? '打包分享资料' : '分享资料')) + '</b><span>' + esc(tx(shareHint)) + '</span></div><button type="button" class="library-share-close" data-library-share-cancel aria-label="' + esc(tx('关闭')) + '">×</button></header>' +
+        '<ul class="library-share-files">' + fileRows + '</ul>' +
+        (bundled ? '<p class="library-share-bundle-hint" role="status">' + esc(tx('将自动打包为一个压缩包，仅发送一条通知')) + '</p>' : '') +
         '<label class="library-share-search"><span>' + esc(tx('分享给')) + '</span><input type="search" data-library-share-search placeholder="' + esc(tx('搜索姓名或账号')) + '" aria-label="' + esc(tx('搜索成员')) + '"></label>' +
         '<div class="library-share-members">' + options + '<p data-library-share-empty hidden>' + esc(tx('没有匹配的成员')) + '</p></div>' +
         '<label class="library-share-note"><span>' + esc(tx('附言（可选）')) + '</span><textarea maxlength="500" data-library-share-note placeholder="' + esc(tx('告诉对方为什么分享这份文件')) + '"></textarea></label>' +

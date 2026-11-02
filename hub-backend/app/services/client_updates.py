@@ -199,15 +199,18 @@ def format_rank(artifact_name: str) -> int:
 def installer_brand_rank(artifact_name: str) -> int:
     """Rank public filenames; only the current SoduWork- prefix exists."""
     name = str(artifact_name or "").lower()
-    if name.startswith("soduwork-"):
-        return 0
+    for rank, prefix in enumerate(("soduwork-",)):
+        if name.startswith(prefix):
+            return rank
     return 1
 
 
 def installer_supported_by_client(artifact_name: str, current: str) -> bool:
     """Older signed-manifest parsers reject an unrecognized installer before downloading."""
     version = parse_version(current)
-    minimum = ((1, 12, 81), None)[installer_brand_rank(artifact_name)]
+    if installer_brand_rank(artifact_name) > 0:
+        return False
+    minimum = (1, 12, 81)
     return version is not None and minimum is not None and version >= minimum
 
 
@@ -287,19 +290,18 @@ RELEASE_PLATFORM_SUFFIXES: dict[str, frozenset[str]] = {
 }
 
 
-# Accept only the current SoduWork- package names.
-_INSTALLER_STEM = r"(?:SoduWork)"
+# Accept only current SoduWork packages.
+_INSTALLER_STEM = r"SoduWork"
 
 
 def _expected_installer_names(platform: str, arch: str, version: str) -> set[str]:
     base = "mac" if platform == "darwin" else platform
     if platform == "win32":
-        return {f"{stem}-{version}-Setup.exe" for stem in ("SoduWork",)}
+        return {f"SoduWork-{version}-Setup.exe"}
     names = set()
-    for stem in ("SoduWork",):
-        for inner in (f"{stem}-{version}-{base}-{arch}", f"{stem}-{version}-{base}"):
-            for suffix in RELEASE_PLATFORM_SUFFIXES[platform]:
-                names.add(f"{inner}{suffix}")
+    for inner in (f"SoduWork-{version}-{base}-{arch}", f"SoduWork-{version}-{base}"):
+        for suffix in RELEASE_PLATFORM_SUFFIXES[platform]:
+            names.add(f"{inner}{suffix}")
     return names
 
 

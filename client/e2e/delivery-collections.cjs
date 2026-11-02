@@ -1,5 +1,6 @@
 'use strict';
-// Isolated desktop UI -> real workspace packaging -> HTTP -> SQLite/object store.
+// Explicit cross-device delivery publishing: real packaging -> HTTP -> SQLite/object store.
+// Default PC-library saving is covered by generated-output-library-roundtrip.cjs.
 // No production account, business workspace, runner or model is used here.
 const electron = require('electron');
 if (typeof electron === 'string') {
@@ -53,7 +54,7 @@ if (typeof electron === 'string') {
     const now = Math.floor(Date.now() / 1000), identity = { hub: url, clientId: 'e2e-alice', session: Buffer.from(JSON.stringify({typ:'device',uid:'e2e-alice',cid:'e2e-alice',iat:now,exp:now+3600})).toString('base64url') + '.' + 'a'.repeat(64) };
     Object.values(sessions).forEach(handle => { handle.deliveryOwner = require('../main/platform-connections/runtime.cjs').scope(identity); });
     const preload = path.join(root, 'preload.cjs');
-    fs.writeFileSync(preload, `const {contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('soduWorkAPI',{hubGetUrl:async()=>({ok:true,url:${JSON.stringify(url)}}),hubGetConnection:async()=>({ok:true,environment:'production',hub:${JSON.stringify(url)}}),fileTypeIcon:type=>ipcRenderer.invoke('fixture-icon',type),conversationSession:{inspectDelivery:(ref,ids)=>ipcRenderer.invoke('fixture-inspect',ref,ids),openLocalDelivery:(ref,ids)=>ipcRenderer.invoke('conversation-delivery-open-local',ref,ids),prepareDelivery:(ref,ids)=>ipcRenderer.invoke('fixture-prepare',ref,ids),saveDelivery:(ref,ids,revision)=>ipcRenderer.invoke('fixture-save',ref,ids,revision)}});`);
+    fs.writeFileSync(preload, `const {contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('soduWorkAPI',{hubGetUrl:async()=>({ok:true,url:${JSON.stringify(url)}}),hubGetConnection:async()=>({ok:true,environment:'production',hub:${JSON.stringify(url)}}),fileTypeIcon:type=>ipcRenderer.invoke('fixture-icon',type),conversationSession:{inspectDelivery:(ref,ids)=>ipcRenderer.invoke('fixture-inspect',ref,ids),openLocalDelivery:(ref,ids,options)=>ipcRenderer.invoke('conversation-delivery-open-local',ref,ids,options),openDeliveryArchive:(ref,ids,options)=>ipcRenderer.invoke('conversation-delivery-open-archive',ref,ids,options),prepareDelivery:(ref,ids)=>ipcRenderer.invoke('fixture-prepare',ref,ids),saveDelivery:(ref,ids,revision)=>ipcRenderer.invoke('fixture-save',ref,ids,revision)}});`);
     require('../main/conversation/local-delivery-action').install({ app,
       ipcMain: { handle(name, handler) { ipcMain.handle(name, async (event, ...args) => {
         const frame = event.sender.mainFrame;
@@ -95,7 +96,12 @@ if (typeof electron === 'string') {
     // Match the production asset order: the API must install the real local/Hub
     // router before exposing downloads, including immutable Hub delivery IDs.
     for (const file of ['core/api-work-plugins.js', 'api-library-local.js', 'api.js', 'vendor/markdown/marked.umd.js', 'vendor/markdown/purify.min.js', 'components/panels/library-file-icons.js', 'components/panels/chat-output-links.js', 'components/panels/chat-deliveries.js', 'components/panels/library-transfer.js', 'components/panels/library-delivery.js']) await js(read(file) + '\nvoid 0;');
-    await js(`messages.addEventListener('click',e=>{const b=e.target.closest('[data-delivery-download],[data-delivery-reveal],[data-delivery-retry],[data-delivery-open]');if(b)window.pendingDelivery=ChatDeliveries.handle(b,soduWorkAPI.conversationSession);});window.showLibrary=async()=>{const response=await SoduWorkAPI.listDeliveries();library.innerHTML=response.items.map(d=>'<button data-open-delivery="'+d.id+'">'+d.title+'</button>').join('');};library.onclick=e=>{const b=e.target.closest('[data-open-delivery]');if(b)void LibraryDelivery.open(b.dataset.openDelivery)};void 0;`);
+    // This suite exercises the retained server delivery contract (including old
+    // receipts), not the default PC save destination. Pin that explicit publisher
+    // while keeping its real HTTP transport, manifest verification and storage.
+    await js(`SoduWorkAPI.saveLibraryDelivery=payload=>SoduWorkAPI.publishDelivery(payload);
+      SoduWorkAPI.getLibraryDeliveryStatus=async manifest=>{const result=await SoduWorkAPI.listDeliveries({sessionId:manifest.sessionId,source:'local',revision:manifest.revision,limit:1});return{ok:true,delivery:result.items[0]||null};};void 0;`);
+    await js(`messages.addEventListener('click',e=>{const b=e.target.closest('[data-delivery-download],[data-delivery-reveal],[data-delivery-archive],[data-delivery-retry],[data-delivery-open]');if(b)window.pendingDelivery=ChatDeliveries.handle(b,soduWorkAPI.conversationSession);});window.showLibrary=async()=>{const response=await SoduWorkAPI.listDeliveries();library.innerHTML=response.items.map(d=>'<button data-open-delivery="'+d.id+'">'+d.title+'</button>').join('');};library.onclick=e=>{const b=e.target.closest('[data-open-delivery]');if(b)void LibraryDelivery.open(b.dataset.openDelivery)};void 0;`);
     await render('single-session');
     assert.equal(uploadRequests, 0);
     assert.equal(await js('document.querySelectorAll(".ndelivery").length'), 1);
@@ -109,7 +115,8 @@ if (typeof electron === 'string') {
     await click('[data-delivery-reveal]'); assert.equal(locations.at(-1).file, path.join(sessions['single-session'].cwd, '报告.md'));
     assert.equal(downloads.length, 0);
     await click('[data-delivery-retry]'); await until(`document.querySelector('[data-delivery-status]').textContent.includes('已保存')`);
-    assert.equal(await js('document.querySelector("[data-delivery-retry]").hidden'), true);
+    assert.equal(await js('document.querySelector("[data-delivery-retry]").hidden'), false);
+    assert.equal(await js('document.querySelector("[data-delivery-retry] .ndelivery-action-label").textContent'), "已保存到资料库");
     assert.equal(await js('document.querySelector("[data-delivery-open]").hidden'), false);
     assert.equal(await js('document.querySelector("[data-delivery-open]").getAttribute("aria-label")'), '预览已保存版本');
     assert.equal(await js('Boolean(document.querySelector("[data-delivery-open] svg circle[cx=\\"12\\"][cy=\\"12\\"][r=\\"3\\"]"))'), true);
@@ -153,7 +160,13 @@ if (typeof electron === 'string') {
     assert.equal(await js(`document.querySelector('[data-delivery-retry]').hidden`), false);
     const beforeWebsite = downloads.length;
     await click('[data-delivery-reveal]'); assert.equal(downloads.length, beforeWebsite);
-    assert.equal(locations.at(-1).file, path.join(sessions['website-session'].cwd, 'site/index.html'));
+    // Bundle-level reveal now selects the actual ZIP instead of the entry HTML.
+    const websiteArchive = locations.at(-1).file;
+    assert.match(websiteArchive, /delivery-archives.*\.zip$/);
+    assert.equal(fs.readFileSync(websiteArchive).readUInt32LE(0), 0x04034b50);
+    assert.equal(await js(`document.querySelector('.ndelivery-actions [data-delivery-archive]').hidden`), false);
+    await click('.ndelivery-actions [data-delivery-archive]');
+    assert.equal(locations.at(-1).folder, websiteArchive, 'open and reveal must use the same immutable bytes');
     blockUpload = false; await click('[data-delivery-retry]'); await until(`document.querySelector('[data-delivery-status]').textContent.includes('已保存')`);
     await click('.ndelivery-files summary'); assert.equal(await js('document.querySelectorAll(".ndelivery-files li").length'), 4);
     assert.equal(await js(`document.querySelectorAll('[data-delivery-download]').length`), 0);
@@ -161,23 +174,32 @@ if (typeof electron === 'string') {
     assert.equal(Buffer.from(preparedWebsite.data,'base64').readUInt32LE(0),0x04034b50);
     assert.equal(preparedWebsite.manifest.files.length,4);
     report.cases.push('Website: upload retry preserves local actions and stores a ZIP with transitive assets; no PC download'); await shot('website-package');
-    // Keep another conversation visible while the main process publishes.
+    // Detached completion indexes outputs without writing to the library.
     // This fixture replaces auth only; HTTP, bytes, database and object storage are real.
-    const background = require('../main/conversation/local-delivery-sync').create({ app, identityOf: async () => identity });
+    const background = require('../main/conversation/local-delivery-sync').create();
     const detached = sessions['multi-session']; detached.detached = true; detached.deliveryCaptureAtTurnBoundary = true;
     background.bind(detached, identity);
     const queue = require('../main/pi-session/turn-queue').createTurnQueue(undefined, () => detached.captureDelivery());
     const item = queue.add({text:'形成成果'}); queue.take(); await queue.run(item, async () => ({ok:true,snapshot:detached.snapshot()}));
-    for (let i=0;i<180 && !['synced','failed'].includes(detached.deliverySync.state);i++) await tick();
-    assert.equal(detached.deliverySync.state, 'synced', detached.deliverySync.error);
-    await render('multi-session'); await until(`document.querySelector('[data-delivery-status]').textContent.includes('已保存')`);
+    assert.equal(detached.deliverySync.state, 'local');
+    assert.equal((await js('SoduWorkAPI.listDeliveries()')).items.length, 2);
+    await render('multi-session');
+    assert.equal(await js(`document.querySelector('[data-delivery-retry]').classList.contains('is-saved')`), false);
+    assert.equal((await js('SoduWorkAPI.listDeliveries()')).items.length, 2);
+    await click('[data-delivery-retry]');
+    await until(`document.querySelector('[data-delivery-status]').textContent.includes('已保存')`);
     assert.equal(await js('document.querySelectorAll(".ndelivery").length'), 1);
     const all = await js('SoduWorkAPI.listDeliveries()'); assert.equal(all.items.length, 3);
     const multi = all.items.find(d => d.sessionId === 'multi-session'); assert.deepEqual(multi.files.map(f => f.path), ['east/report.md', 'west/report.md']);
-    report.cases.push('Detached main-process completion -> real HTTP storage while another conversation is visible; returning shows saved result');
+    report.cases.push('Detached completion and opening the chat leave the library unchanged; explicit click stores through real HTTP and shows the saved icon');
     report.cases.push('Multiple independent results in one card; identical basenames retain directories');
-    await click('[data-delivery-reveal]'); assert.equal(locations.at(-1).folder, sessions['multi-session'].cwd);
-    report.cases.push('Multiple local results open their validated common directory, not only the first file folder');
+    await click('[data-delivery-reveal]');
+    const multiArchive = locations.at(-1).file;
+    assert.match(multiArchive, /delivery-archives.*\.zip$/);
+    assert.equal(fs.readFileSync(multiArchive).readUInt32LE(0), 0x04034b50);
+    await click('.ndelivery-actions [data-delivery-archive]');
+    assert.equal(locations.at(-1).folder, multiArchive);
+    report.cases.push('Website and multi-file actions reveal and open the same verified ZIP; single-file reveal still locates its source');
     await js('showLibrary()'); const single = all.items.find(d => d.sessionId === 'single-session');
     await click('[data-open-delivery="' + single.id + '"]'); await until(`document.querySelector('.ldelivery-preview h1')?.textContent==='调研报告'`);
     assert.equal(await js('Boolean(window.evil)'), false); assert.equal(await js('document.querySelectorAll(".ldelivery-preview script").length'), 0);
@@ -195,6 +217,16 @@ if (typeof electron === 'string') {
     await shot('narrow-preview'); report.cases.push('390px width: file navigation and preview/download controls stay within viewport');
     await js(`dispatchEvent(new Event('soduwork-data-scope-changed'));void 0;`); assert.equal(await js('document.querySelectorAll("dialog").length'), 0);
     report.cases.push('Account scope change closes preview and clears delivery state');
+    const savedCount = (await js('SoduWorkAPI.listDeliveries()')).items.length;
+    await render('multi-session');
+    await until(`document.querySelector('[data-delivery-retry]').classList.contains('is-saved')`);
+    assert.equal((await js('SoduWorkAPI.listDeliveries()')).items.length, savedCount);
+    await js(`ChatDeliveries.hydrate(messages,{ref:currentRef,api:soduWorkAPI.conversationSession,snapshot:currentSnapshot});void 0;`);
+    assert.equal(await js(`document.querySelector('[data-delivery-retry]').classList.contains('is-saved')`), true);
+    await render('multi-session');
+    assert.equal(await js(`document.querySelector('[data-delivery-retry]').classList.contains('is-saved')`), true);
+    report.cases.push('Reopening restores only the matching persisted receipt with no new upload');
+
     // A supporting-only edit must archive the new bytes even though the entry
     // artifact id, size and timestamp have not changed.
     const website = sessions['website-session']; background.bind(website, identity);
@@ -204,14 +236,16 @@ if (typeof electron === 'string') {
     const beforeEntry = runtime.snapshot(website).items.find(f => f.relative==='site/index.html');
     assert.equal(beforeEntry.changedInTurn,false);
     await website.captureDelivery();
-    for(let i=0;i<180 && !['synced','failed'].includes(website.deliverySync.state);i++) await tick();
-    assert.equal(website.deliverySync.state,'synced',website.deliverySync.error);
+    assert.equal(website.deliverySync.state,'local');
     win.setContentSize(1120,820);
     const revisedFiles=runtime.snapshot(website).items;
     await js(`currentRef='website-session';currentSnapshot=${JSON.stringify({status:'idle',deliverySync:website.deliverySync})};currentFiles=${JSON.stringify(revisedFiles)};render();void 0;`);
+    assert.equal(await js(`document.querySelector('[data-delivery-retry]').classList.contains('is-saved')`),false);
+    await click('[data-delivery-retry]');
     assert.equal(await js(`document.querySelector('[data-delivery-status]').textContent.includes('已保存')`),true);
     assert.equal(await js(`document.querySelector('[data-delivery-count]').textContent`),'4 个文件 · 保留目录结构');
-    const storedCss=await fetch(url+'/api/v1/deliveries/'+website.deliverySync.delivery.id+'/files/site/assets/style.css');
+    const revisedDelivery=(await js('SoduWorkAPI.listDeliveries()')).items.find(d=>d.sessionId==='website-session');
+    const storedCss=await fetch(url+'/api/v1/deliveries/'+revisedDelivery.id+'/files/site/assets/style.css');
     assert.equal(await storedCss.text(),'body{color:#512f80;font-size:18px}');
     report.cases.push('Supporting-only edit creates a new immutable package and correct saved card with unchanged entry id/time/size');
     // A plain-text follow-up neither duplicates the prior result nor loses its
@@ -244,6 +278,8 @@ if (typeof electron === 'string') {
       await js(`currentRef=${JSON.stringify(taskId)};currentFiles=${JSON.stringify(files)};currentSnapshot={status:'idle',cloudHandoff:{taskId:currentRef}};SoduWorkAPI.syncTaskDelivery=async()=>({ok:true,delivery:${JSON.stringify(delivery)}});messages.innerHTML='<article class="nmsg ai" data-output-task="'+currentRef+'"><p>远程执行完成。</p></article>';ChatDeliveries.decorate(messages,currentFiles,currentRef,currentSnapshot);void 0;`);
       assert.equal(await js(`document.querySelectorAll('[data-delivery-reveal]').length`),1);
       await js(`ChatDeliveries.hydrate(messages,{api:soduWorkAPI.conversationSession,ref:currentRef,snapshot:currentSnapshot});void 0;`);
+      assert.equal(await js(`document.querySelector('[data-delivery-retry]').classList.contains('is-saved')`),false);
+      await click('[data-delivery-retry]');
       await until(`document.querySelector('[data-delivery-status]').textContent.includes('已同步')`);
       assert.equal(await js(`document.querySelectorAll('[data-delivery-download]').length`),0);
       assert.equal(await js(`document.querySelector('[data-delivery-status]').textContent.includes('本机')`),false);

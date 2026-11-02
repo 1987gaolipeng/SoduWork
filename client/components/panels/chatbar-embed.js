@@ -224,8 +224,9 @@
       else setTimeout(finishArrival, 1700);
     }
     applyState(composerState);
-    /* Keep the sidebar toggle at the left-edge midpoint, independent of header rendering and message scrolling. */
-    if (!document.getElementById('chatbarPin')) {
+    /* Both edge handles share the same collapse action, independent of message scrolling. */
+    for (const id of ['chatbarPin', 'chatbarPinRight']) {
+      if (document.getElementById(id)) continue;
       const pin = document.createElement('button');
       pin.type = 'button';
       pin.id = id;

@@ -28,7 +28,7 @@ async def acquire_runner_policy_lock(session, runner_id):
 
 
 _DISABLED_ALLOWED = frozenset({
-    "welcome", "ping", "runner.probe", "job.has", "job.status", "job.info",
+    "welcome", "ping", "session.ack", "session.nack", "runner.probe", "job.has", "job.status", "job.info",
     "job.session", "job.file", "job.stop", "input.drop",
     "agent.setup", "agent.job", "component.list", "component.job",
     "deploy.status", "quality.status", "term.close", "term.detach",

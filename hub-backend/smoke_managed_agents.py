@@ -101,6 +101,7 @@ def main() -> None:
     ):
         problem = managed_agents._cpu_compatibility_issue()
         assert "SSSE3" in problem
+        assert "SSE4.2" in problem
         assert managed_agents.install("check", lambda _: None) == (False, problem)
         try:
             managed_agents.install("install", lambda _: None)
@@ -111,6 +112,8 @@ def main() -> None:
         version.assert_not_called()
         download.assert_not_called()
         cpuinfo.return_value = "flags : sse sse2 ssse3\n"
+        assert "SSE4.2" in managed_agents._cpu_compatibility_issue()
+        cpuinfo.return_value = "flags : sse sse2 ssse3 sse4_2\n"
         assert managed_agents._cpu_compatibility_issue() == ""
 
     source = Path(managed_agents.__file__).read_text(encoding="utf-8")

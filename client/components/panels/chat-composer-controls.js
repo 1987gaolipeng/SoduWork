@@ -13,6 +13,12 @@
     let nativeModels = [], nativeView = 'effort', effortEpoch = 0, pendingEffort = null, effortPreview = null, effortRequest = null, modelRequest = null;
     const effortView = () => global.ComposeModelPicker?.nativeEffort;
     const nativeMode = state => state.adapterId === 'codex' && !state.cloudHandoff && Boolean(effortView());
+    let catalogScope = '', catalogLoads = 0;
+    const modelScope = () => {
+      const state = options.state();
+      return JSON.stringify([global.SoduWorkAPI?.taskStorageKey?.('ops') || '',
+        state.ref || 'draft:' + state.draftId, state.adapterId || 'pi', state.cloudHandoff?.phase || '']);
+    };
     const meta = el.querySelector('#nchatMeta');
     let contextPinned = false;
     const sessionControls = global.ChatSessionControls?.create(el, options);
@@ -101,7 +107,9 @@
       }
       lastIdentity = identity;
       lastAdapter = state.adapterId;
-      const label = selection.model && selection.model.label || state.model && (state.model.label || state.model.id) || '选择模型';
+      const selectedName = selection.name || selection.model?.id || state.model?.id || '';
+      const updated = catalogScope === modelScope() && rows.find(row => row.name === selectedName);
+      const label = updated?.label || selection.model && selection.model.label || state.model && (state.model.label || state.model.id) || '选择模型';
       button.querySelector('span').textContent = label;
       button.title = '模型：' + label + ' · 用于之后发送的消息';
       button.setAttribute('aria-label', button.title);
@@ -191,7 +199,7 @@
     }
     on(button, 'click', async () => {
       if (!pop.hidden) { close(); return; }
-      const current = options.state(), ref = current.ref, token = ++generation;
+      const current = options.state();
       nativeView = 'effort'; pop.classList.remove('cp-modelpop', 'show'); delete pop.dataset.modelView;
       pop.hidden = false; button.setAttribute('aria-expanded', 'true');
       pop.innerHTML = '<header class="nmodel-header"><div class="nmodel-heading"><b>选择模型</b><span title="只对后续发送的消息生效，不会中断当前轮次">用于本次会话</span></div><button type="button" data-model-close aria-label="关闭模型选择">×</button></header>' +
@@ -201,16 +209,23 @@
       pop.showPopover?.();
       renderThinking(current); positionModels();
       pop.querySelector('input').focus({ preventScroll: true });
+      await loadModels();
+    });
+    async function loadModels() {
+      if (lifecycle.signal.aborted) return;
+      catalogLoads++;
+      const current = options.state(), scope = modelScope(), token = ++generation;
+      const valid = () => !lifecycle.signal.aborted && token === generation && scope === modelScope();
       try {
         const adapter = current.adapterId || 'pi';
         const catalog = await global.soduWorkAPI.conversationSession.runtimes();
-        if (token !== generation || ref !== options.state().ref) return;
+        if (!valid()) return;
         const runtime = catalog?.ok && catalog.runtimes?.find(item => item.id === adapter);
         if (!runtime) throw new Error('Agent catalog unavailable');
         const native = runtime.modelMode === 'account';
         const response = native ? (current.cloudHandoff ? { models: [] } : await global.soduWorkAPI.conversationSession.runtimeModels(adapter)) :
           await global.SoduWorkAPI.myModels();
-        if (token !== generation || ref !== options.state().ref) return;
+        if (!valid()) return;
         if (native) {
           nativeModels = response.models || [];
           rows = nativeModels.map(row => ({ name: row.id, label: row.label || row.id }));
@@ -222,17 +237,36 @@
             name: SoduWorkModelChoice.imageKey(row), label: '生成图片 · ' + (row.label || row.name), subtitle: subtitle(row),
           })));
         }
-        if (nativeMode(options.state())) { renderNativeEffort(); pop.querySelector('[data-native-list]')?.focus({ preventScroll: true }); return; }
+        catalogScope = scope;
+        // Refresh metadata only; never select a model or rewrite a conversation snapshot.
+        render();
+        if (pop.hidden) return;
+        if (nativeMode(options.state()) && nativeView === 'effort') {
+          if (pop.querySelector('.cp-effort-card')) paintNativeEffort();
+          else { renderNativeEffort(); pop.querySelector('[data-native-list]')?.focus({ preventScroll: true }); }
+          return;
+        }
         if (!rows.length) {
           pop.querySelector('.nmodel-options').innerHTML = '<p class="nmodel-message">' +
             (native ? (current.cloudHandoff ? '云端 Agent 暂未提供模型列表。' : '该 Agent 暂未提供可切换的模型。') : '暂无可用模型，请检查模型服务授权。') + '</p>'; return;
         }
-        list(pop.querySelector('input').value); renderThinking(options.state()); positionModels();
+        const listNode = pop.querySelector('.nmodel-options'), scroll = listNode?.scrollTop || 0;
+        const focusedName = pop.contains(document.activeElement) ? document.activeElement?.dataset?.modelName : '';
+        list(pop.querySelector('input')?.value || '');
+        if (focusedName) Array.from(pop.querySelectorAll('[data-model-name]')).find(row => row.dataset.modelName === focusedName)?.focus({ preventScroll: true });
+        if (listNode) listNode.scrollTop = scroll;
+        renderThinking(options.state()); positionModels();
       } catch (_) {
-        if (token === generation) pop.querySelector('.nmodel-options').innerHTML =
+        if (valid() && !pop.hidden && pop.querySelector('.nmodel-options')) pop.querySelector('.nmodel-options').innerHTML =
           '<p class="nmodel-message">模型列表暂不可用，请关闭后重试。</p>';
-      }
-    });
+      } finally { catalogLoads--; }
+    }
+    const offModels = global.soduWorkAPI?.conversationSession?.onModelsChanged?.(() => { void loadModels(); });
+    const refreshVisibleModels = () => {
+      if (!catalogLoads && el.isConnected && el.getClientRects().length && document.visibilityState !== 'hidden') void loadModels();
+    };
+    on(global, 'focus', refreshVisibleModels);
+    const modelTimer = global.setInterval?.(refreshVisibleModels, 60000);
 
     on(pop, 'input', event => {
       if (event.target.matches('[data-effort-slider]')) {
@@ -401,7 +435,7 @@
         (await (model || true)) && (await (modelRequest || true)) && (await (effort || true)) && (await (effortRequest || true)) &&
         (await (options.draft?.ready() || true));
     }
-    return { render, positionContext, waitForAccess, destroy() { effortEpoch++; pendingEffort = null; options.draft?.destroy(); runtimePicker?.destroy(); sessionControls?.destroy(); close(); closeContext(); lifecycle.abort(); drag = null; }, isDragging: () => Boolean(drag), reset() { runtimePicker?.reset(); sessionControls?.reset(); close(); closeContext(); drag = null; render(); } };
+    return { render, positionContext, waitForAccess, destroy() { offModels?.(); global.clearInterval?.(modelTimer); effortEpoch++; pendingEffort = null; options.draft?.destroy(); runtimePicker?.destroy(); sessionControls?.destroy(); close(); closeContext(); lifecycle.abort(); drag = null; }, isDragging: () => Boolean(drag), reset() { runtimePicker?.reset(); sessionControls?.reset(); close(); closeContext(); drag = null; render(); } };
   }
   global.ChatComposerControls = { create };
 })(window);

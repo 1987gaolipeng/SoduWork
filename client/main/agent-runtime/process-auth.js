@@ -13,6 +13,7 @@ const RULES = [
   ['POST', new RegExp('^/api/v1/attachments/' + ID + '/access$'), []],
   ['GET', new RegExp('^/api/v1/tasks/' + ID + '$'), []],
   ['GET', new RegExp('^/api/v1/tasks/' + ID + '/(?:attachments|acceptance-context)$'), []],
+  ['GET', new RegExp('^/api/v1/tasks/' + ID + '/artifacts\\.zip$'), ['artifactVersionId']],
   ['POST', new RegExp('^/api/v1/tasks/' + ID + '/(?:conversation-turn|conversation-delivery|auto-review|ai-dispatch|plugin-runs)$'), []],
   ['GET', new RegExp('^/api/v1/tasks/' + ID + '/ai-session$'), ['ref', 'since']],
   ['GET', new RegExp('^/api/v1/plugin-runs/' + ID + '$'), []],
@@ -77,15 +78,15 @@ function redactBody(value, secret) {
   parts.push(body.subarray(from));
   return new Uint8Array(Buffer.concat(parts));
 }
-async function responseBody(response) {
+async function responseBody(response, limit = MAX_RESPONSE_BYTES) {
   const length = Number(response.headers?.get?.('content-length') || 0);
-  if (length > MAX_RESPONSE_BYTES) {
+  if (length > limit) {
     await response.body?.cancel?.().catch(() => {});
     throw failure('RUNTIME_AUTH_RESPONSE_TOO_LARGE', '执行接口响应超过大小限制');
   }
   if (!response.body?.getReader) {
     const body = new Uint8Array(await response.arrayBuffer());
-    if (body.byteLength > MAX_RESPONSE_BYTES)
+    if (body.byteLength > limit)
       throw failure('RUNTIME_AUTH_RESPONSE_TOO_LARGE', '执行接口响应超过大小限制');
     return body;
   }
@@ -96,7 +97,7 @@ async function responseBody(response) {
       const part = await reader.read();
       if (part.done) break;
       total += part.value.byteLength;
-      if (total > MAX_RESPONSE_BYTES)
+      if (total > limit)
         throw failure('RUNTIME_AUTH_RESPONSE_TOO_LARGE', '执行接口响应超过大小限制');
       chunks.push(part.value);
     }
@@ -183,7 +184,8 @@ function createHostAuth({ app, identity, identityOf, deviceAuth, fetchImpl = glo
         await response.body?.cancel?.().catch(() => {});
         throw failure('RUNTIME_AUTH_REDIRECT_DENIED', '执行接口重定向已拒绝');
       }
-      const body = redactBody(await responseBody(response), trusted.secret);
+      const archive = method === 'GET' && url.pathname.endsWith('/artifacts.zip');
+      const body = redactBody(await responseBody(response, archive ? 256 * 1024 * 1024 : MAX_RESPONSE_BYTES), trusted.secret);
       await current();
       const headers = [...new Headers(response.headers).entries()].filter(([key]) =>
         !/^(?:set-cookie|set-cookie2|authorization|x-soduwork-secret|x-device-key)$/i.test(key));

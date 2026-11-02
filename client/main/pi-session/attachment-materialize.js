@@ -185,11 +185,12 @@ function create({ app, identityOf, sessionOf, fetch = fetchWithDeviceAuthRetry,
     }
   }
 
-  async function materialize({ ref, taskId } = {}) {
+  async function materialize({ ref, taskId, previewOnly = false } = {}) {
     if (!ref || !taskId) throw Error('这份成果缺少任务归属，请刷新会话后重试');
     if (!/^[A-Za-z0-9-]{1,64}$/.test(String(taskId))) throw Error('任务标识无效，请刷新会话后重试');
     const { cwd, identity, assertCurrent } = await resolveScope(ref);
-    const attachments = currentGroup(await listAttachments(identity, taskId), taskId);
+    const batch = currentGroup(await listAttachments(identity, taskId), taskId);
+    const attachments = previewOnly ? batch.filter(outputCache.canPreview) : batch;
     await assertCurrent();
     if (!attachments.length) throw Error('这份成果暂无可保存的文件');
     let total = 0;

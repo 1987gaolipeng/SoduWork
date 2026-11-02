@@ -14,7 +14,7 @@ Before distributing installers, set your own `homepage` and Linux `maintainer` i
 
 ## Plugins and updates
 
-New plugin exports use `.soduwork-plugin`. Clients and the management UI retain compatibility with older import formats, stable identifiers, and storage protocols.
+Plugins use `.soduwork-plugin`. Clients and the management UI accept the current branded package and draft identifiers; retired brand formats have no alias entry points.
 
 Automatic updates require your own release trust. Neither `client/update-trust.json` nor `hub-backend/client-update-trust.json` trusts any signing public key by default. Before distributing installers, configure matching Ed25519 public keys in both files and explicitly set `SODUWORK_CLIENT_SIGNING_KEY_ID`. Keep signing private keys outside source and installers. Without configured trust, the client refuses automatic update downloads and installation.
 

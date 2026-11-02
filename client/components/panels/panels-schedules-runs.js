@@ -1,12 +1,24 @@
 /*
- * Show real automation history in a page-level drawer so long logs do not expand grid
- * cards. Load after panels-schedules.js and reuse its state/cache.
+ * Show real automation conversation history in a page-level drawer so long logs do not
+ * expand grid cards. Load after panels-schedules.js and reuse its state/cache.
  */
 
 function _schConversationRunState(run) {
-  const receipt = run.receipt || {};
-  if (receipt.executionMode === 'soduwork.automation-conversation/v1' && run.state === 'waiting') {
-    return [receipt.phase === 'device' ? '等待客户端' : '等待输入', 'waiting'];
+  return SCH_RUN_STATE[run.state] || ['待执行', 'starting'];
+}
+
+function _schRunChatId(run) {
+  const receipt = run && run.receipt || {};
+  return String((run && run.conversationId) || receipt.conversationId || '');
+}
+
+async function _schResolvePersonalPlugin(input) {
+  const spec = input && input.personalPlugin || {};
+  const key = String(spec.key || '').trim();
+  if (!key) return null;
+  const bridge = globalThis.soduWorkAPI && globalThis.soduWorkAPI.personalPlugins;
+  if (!bridge || typeof bridge.list !== 'function') {
+    throw new Error('当前客户端不支持自动化插件，请升级后重试');
   }
   const result = await bridge.list();
   const plugin = ((result && result.items) || []).find(item =>
@@ -167,11 +179,8 @@ function _schRunRowsHtml(sid) {
   return errorHtml + '<div class="sch-run-list" aria-label="最近执行记录">' + rows.map(run => {
     const state = _schConversationRunState(run);
     const duration = _schRunDuration(run.durationSeconds);
-    const receipt = run.receipt || {};
-    const chatId = run.conversationId || receipt.conversationId || '';
-    const ordinary = receipt.executionMode === 'soduwork.automation-conversation/v1';
-    const title = run.conversationTitle || run.taskTitle || (ordinary ? '正在准备对话' : run.taskId ? '关联任务' : '等待启动');
-    const proof = _schmRunProofHtml(run);
+    const chatId = _schRunChatId(run);
+    const title = run.conversationTitle || '自动化执行';
     return '<article class="sch-run ' + state[1] + '">' +
       '<span class="sch-run-rail" aria-hidden="true"><i></i></span>' +
       '<span class="sch-run-main"><span class="sch-run-title"><b>' + esc(title) + '</b></span><i>' +

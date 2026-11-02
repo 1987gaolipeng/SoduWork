@@ -12,7 +12,9 @@ from ..db import get_session
 from ..deps import current_client
 from ..models import Client
 from ..services import agent_setup, model_catalog, runner_hub
+from ..services.agent_messages import decorate_many as _decorate_agents, runtime_descriptor as _runtime_descriptor
 from ..services.cluster_bus import bus
+from ..services.runner_inventory_scope import scope_for
 
 router = APIRouter(prefix="/api/v1", tags=["agents"])
 
@@ -37,17 +39,19 @@ async def _runner_call(r, op: str, data: dict, timeout: int = 60) -> dict:
 async def get_agent_setup(
     client: Client = Depends(current_client),
     session: AsyncSession = Depends(get_session),
+    runnerId: str | None = None,
 ):
     """Return agent installation status and model availability for this client's effective
     credentials, including personal keys.
     """
     usable = await model_catalog.usable(session, client)
-    # List installed runtimes separately for every machine owned by the current user.
-    # runner_hub.for_client() selects only one Runner by availability and connection time.
-    # A user may own several Runners, so a single selection cannot represent all machines.
-
-    # Installation and removal are machine-scoped operations and must target the selected device.
-    machines = await _machines(session, client, bool(usable))
+    # Report installations on every machine belonging to this user.
+    # runner_hub.for_client() selects one Runner by load and connection age.
+    # A user may own multiple execution machines, so that single selection is insufficient here.
+    # Listing only one Runner can hide agents installed on the user's desktop.
+    # Installation and removal must target the selected machine to avoid modifying another computer.
+    machines = (await _machines(session, client, bool(usable)) if runnerId is None else
+                await _machines(session, client, bool(usable), runner_id=runnerId))
     data = {
         "machines": machines,
         "modelCount": len(usable),
@@ -77,7 +81,8 @@ async def get_agent_setup(
     return data
 
 
-async def _machines(session: AsyncSession, client: Client, has_model: bool) -> list[dict]:
+async def _machines(session: AsyncSession, client: Client, has_model: bool,
+                    *, runner_id: str | None = None) -> list[dict]:
     """List agent installations on every execution machine, using the shared display-name
     precedence: custom name, host and OS, then shortened ID.
     """
@@ -86,10 +91,11 @@ async def _machines(session: AsyncSession, client: Client, has_model: bool) -> l
     # Personal cloud Runners authenticate without a desktop client id. They
     # still belong to the current account and must be visible for Harness
     # installation and probing.
-    runners = [r for r in runner_hub.online()
-               if r.client_id == client.id or
-               (not r.client_id and str(getattr(r, "owner_user_id", "")) == str(client.user_ref or ""))]
-    runners.sort(key=lambda r: r.connected_at)
+    runners = [r for r in runner_hub.online() if scope_for(client, r)]
+    if runner_id is not None:
+        selected = _pick_runner(client, runner_id)
+        runners = [selected] if selected is not None else []
+    runners.sort(key=lambda r: (not (r.client_id == client.id and runner_hub.is_client_runtime(r)), r.connected_at))
 
     labels = agent_naming.unique_machine_labels([{
         "key": agent_naming.machine_key(host=r.host, runner_id=r.id),
@@ -105,44 +111,54 @@ async def _machines(session: AsyncSession, client: Client, has_model: bool) -> l
         try:
             data = await _runner_call(r, "agent.setup", {"hasModel": has_model})
         except Exception as e:  # noqa: BLE001  A failed probe must not hide other machines.
+            reason = "这台执行机没有应答（%s）" % type(e).__name__
             out.append({"runnerId": r.id, "machineKey": mkey,
+                        "scope": scope_for(client, r),
                         "label": labels.get(mkey) or r.host or r.id[:12],
                         "host": r.host, "os": getattr(r, "os", ""), "execution": "runner",
-                        "env": {"ok": False, "why": "这台执行机没有应答（%s）" % type(e).__name__},
+                        "isCurrentDevice": r.client_id == client.id and runner_hub.is_client_runtime(r),
+                        "env": {"ok": False, "why": reason,
+                                "whyMessage": _runtime_descriptor(reason)},
                         "agents": []})
             continue
+        agents = _decorate_agents(data.get("agents") or [])
         out.append({"runnerId": r.id, "machineKey": mkey,
+                    "scope": scope_for(client, r),
                     "label": labels.get(mkey) or r.host or r.id[:12],
                     "host": r.host, "os": getattr(r, "os", ""), "execution": "runner",
-                    "env": data.get("env") or {}, "agents": data.get("agents") or []})
+                    "isCurrentDevice": r.client_id == client.id and runner_hub.is_client_runtime(r),
+                    "env": data.get("env") or {}, "agents": agents})
     if not out and not bus.enabled:
         # Without connected Runners, use the backend machine's local executors for compatibility.
         from ..services import ai_local
         host = ai_local.local_host()
         mkey = agent_naming.machine_key(host=host)
+        env = agent_setup.node_env()
+        if not env.get("ok") and env.get("why"):
+            env = {**env, "whyMessage": _runtime_descriptor(env["why"])}
         out.append({"runnerId": "", "machineKey": mkey,
+                    "scope": "backend", "isCurrentDevice": False,
                     "label": execution_aliases.machine_name(aliases, mkey)
                     or agent_naming.auto_machine_label(host=host, fallback="服务端"),
                     "host": host, "os": "", "execution": "backend",
-                    "env": agent_setup.node_env(),
+                    "env": env,
                     "agents": agent_setup.detect_all(has_model=has_model)})
     return out
 
 
 def _pick_runner(client: Client, runner_id: str):
-    """Target installation, removal, and probes at the explicitly selected machine; use legacy
-    selection only when no machine is specified.
-    """
+    """Bind mutations to an explicit Runner; an empty target only means backend."""
     want = str(runner_id or "").strip()
     if not want:
         runner = runner_hub.for_client(client.id)
-        if runner is None and bus.enabled:
+        if runner is not None or any(scope_for(client, r) for r in runner_hub.online()):
+            raise HTTPException(status_code=409, detail="请选择执行机后重试，不能自动切换安装目标")
+        if bus.enabled:
             raise HTTPException(status_code=409,
                                 detail="当前没有在线执行机，请先连接本机或远程 Runner")
         return runner
     r = runner_hub.get(want)
-    if r is None or not (r.client_id == client.id or
-                         (not r.client_id and str(getattr(r, "owner_user_id", "")) == str(client.user_ref or ""))):
+    if r is None or not scope_for(client, r):
         raise HTTPException(status_code=404, detail="这台执行机不在线，或者不是你的")
     return r
 
@@ -188,6 +204,8 @@ async def post_agent_install(
         raise HTTPException(status_code=404, detail="没有这个 AI 助手")
     if action not in ("install", "update", "uninstall", "check", "login", "login-isolated", "login-cancel") or (action.startswith("login") and key != "codex"):
         raise HTTPException(status_code=400, detail="不认识的操作")
+    if action == "uninstall" and key == "pi":
+        raise HTTPException(status_code=409, detail="Pi 是 SoduWork 必需组件，不能单独卸载。")
     runner = _pick_runner(client, body.get("runnerId"))
     if action == "login-cancel":
         jid = str(body.get("jobId") or "").strip()
@@ -224,15 +242,15 @@ async def post_agent_probe(
     client: Client = Depends(current_client),
     session: AsyncSession = Depends(get_session),
 ):
-    """Run a minimal real probe with model_catalog.resolve and the same effective personal or
-    company credentials as dispatch; return jobId.
+    """Probe with the runtime's own account or its selected managed model; return jobId.
     """
     key = str(body.get("key") or "").strip()
     if key not in agent_setup._SPECS:
         raise HTTPException(status_code=404, detail="没有这个 AI 助手")
-    # Probe the exact model selected for this agent.
-    # A successful probe must exercise the same configuration as subsequent dispatch.
-    llm = await model_catalog.resolve_for_agent(session, client, key, str(body.get("model") or ""))
+    # Native account runtimes choose their own model. Do not send managed keys
+    # or claim that an unused company model was exercised by their probe.
+    llm = (await model_catalog.resolve_for_agent(session, client, key, str(body.get("model") or ""))
+           if (agent_setup._PROFILES.get(key) or {}).get("needs_llm") else {})
     runner = _pick_runner(client, body.get("runnerId"))
     jid = (str((await _runner_call(runner, "agent.probe", {"key": key, "llm": llm}, timeout=60)).get("jobId") or "")
            if runner is not None else agent_setup.start_probe(key, llm))

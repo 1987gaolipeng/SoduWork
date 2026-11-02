@@ -12,9 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import models
 from ..agent_catalog import AGENTS
-from . import (agent_execution_options, agent_naming, ai_exec, execution_capabilities, inbox,
-               model_catalog, plugin_installations, plugin_service, task_access,
-               task_assignment, work_catalog)
+from . import (agent_execution_options, agent_naming, ai_exec, conversation_handoffs,
+               execution_capabilities, inbox, model_catalog, plugin_installations,
+               plugin_service, task_access, task_assignment, work_catalog)
 
 _CLI_ORDER = {key: row.get("order", 999) for key, row in AGENTS.items()}
 _CLI_LABELS = {key: row["displayName"] for key, row in AGENTS.items()}
@@ -166,11 +166,15 @@ def substrate_options(agents: list[dict], required: list[str], current_client_id
         route_label = (("远程 Runner" if remote else "本机") +
                        ((" · " + machine) if machine else ""))
         location = {
+            "id": str(agent.get("id") or ("runner:" + str(agent.get("runnerId") or "") + ":" + cli)),
+            "assigneeId": str(agent.get("id") or ""),
             "mode": "remote" if remote else "local",
             "label": route_label,
             "machineKey": str(agent.get("machineKey") or ""),
             "runnerId": str(agent.get("runnerId") or ""),
             "clientId": str(agent.get("clientId") or ""),
+            "runnerKind": str(agent.get("runnerKind") or
+                               ("work-computer" if agent.get("clientId") else "cloud")),
             "host": str(agent.get("host") or ""),
             "busy": bool(agent.get("busy")),
             "version": version,
@@ -180,6 +184,7 @@ def substrate_options(agents: list[dict], required: list[str], current_client_id
                    item["runnerId"] == location["runnerId"]
                    for item in group["_locations"]):
             group["_locations"].append(location)
+        group.setdefault("_assigneeIds", []).append(location["assigneeId"])
         report = execution_capabilities.clean_report(agent.get("capabilities"))
         available = set(report.get("available") or [])
         group["_capabilitySets"].append(sorted(available))
@@ -192,6 +197,9 @@ def substrate_options(agents: list[dict], required: list[str], current_client_id
         group["capabilitySets"] = group.pop("_capabilitySets")
         locations = group.pop("_locations")
         group["locations"] = locations
+        group["assigneeIds"] = [item for item in group.pop("_assigneeIds", []) if item]
+        group["defaultAssigneeId"] = next(
+            (item["assigneeId"] for item in locations if item.get("assigneeId")), "")
         modes = {item["mode"] for item in locations}
         group["locationMode"] = "mixed" if len(modes) > 1 else (
             next(iter(modes)) if modes else "local")
@@ -326,11 +334,49 @@ async def build(
     # Stale process caches would hide newly configured executors during creation or retry.
     ctx = ai_exec.with_client_runner_scope(await ai_exec.load(session, force=True), client.id)
     roster = await asyncio.to_thread(ai_exec.list_assignees_sync, ctx)
+    # The normal employee scope intentionally exposes only the current
+    # device.  For a task created on mobile/Web, add the same-account remote
+    # targets authorized by the handoff directory.  This is a display-only
+    # merge; dispatch still revalidates the concrete assignee and runner at the
+    # final boundary, so a stale target cannot silently fall back locally.
+    remote_targets = []
+    try:
+        remote_targets = await conversation_handoffs.targets(session, client)
+    except Exception:
+        # A transient directory problem must not hide healthy local choices.
+        remote_targets = []
+    remote_agents = []
+    for target in remote_targets:
+        agent_id = str(target.get("agentId") or "").strip()
+        runner_id = str(target.get("runnerId") or "").strip()
+        if not agent_id or not runner_id:
+            continue
+        remote_agents.append({
+            "id": str(target.get("id") or ("runner:" + runner_id + ":" + agent_id)),
+            "type": "agent", "cli": agent_id,
+            "cliName": target.get("cliName") or agent_id,
+            "name": target.get("name") or target.get("runnerName") or runner_id,
+            "online": True, "remote": True, "local": False,
+            "runnerId": runner_id, "clientId": target.get("clientId") or "",
+            "runnerKind": target.get("runnerKind") or "cloud",
+            "runnerName": target.get("runnerName") or target.get("machineLabel") or runner_id,
+            "machineLabel": target.get("machineLabel") or target.get("runnerName") or runner_id,
+            "machineKey": target.get("machineKey") or runner_id,
+            "host": target.get("host") or "",
+            "modelMode": target.get("modelMode") or "managed",
+            "modelPick": "local:" + agent_id in agent_execution_options.GATEWAY_MODEL_KINDS,
+            "capabilities": target.get("capabilities") or {},
+            "note": "在 %s 上执行，目标不可用时不会自动改派本机" % (
+                target.get("runnerName") or target.get("host") or runner_id),
+        })
+    current_ids = {str(item.get("id") or "") for item in roster.get("agents") or []}
+    merged_agents = list(roster.get("agents") or []) + [
+        item for item in remote_agents if item["id"] not in current_ids]
     legacy_models = ai_exec.model_choices(ctx)
     model_choices = await model_catalog.choices(
         session, client, str(legacy_models.get("default") or ""))
     required = list(routing.get("requiredAgentCapabilities") or [])
-    substrates = substrate_options(list(roster.get("agents") or []), required, client.id)
+    substrates = substrate_options(merged_agents, required, client.id)
 
     flow = _recommended_flow(runnable_workflows, default_key)
     project_defaults = await task_assignment.project_route(session, project_id)
@@ -357,6 +403,7 @@ async def build(
         "schemaVersion": 2,
         "availability": {
             "agentReason": str(roster.get("reason") or ""),
+            "remoteTargetCount": len(remote_agents),
         },
         "repos": repos,
         "selection": {
@@ -382,6 +429,10 @@ async def build(
         "workflows": runnable_workflows,
         "blockedWorkflows": blocked_workflows,
         "substrates": substrates,
+        "executionTargets": [{key: target.get(key) for key in (
+            "id", "agentId", "cliName", "name", "runnerId", "runnerKind",
+            "runnerName", "machineLabel", "host", "clientId", "modelMode")}
+            for target in remote_targets],
         "models": list(model_choices.get("list") or []),
         "modelOptions": list(model_choices.get("items") or []),
         "defaultModel": str(model_choices.get("default") or ""),

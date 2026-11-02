@@ -21,7 +21,7 @@ const APPS_ICONS = {
 };
 const APPS_FAV_KEY = 'soduwork-apps-favorites';
 let _appsRenderSeq = 0;
-let _appsCache = null; /* Cache all local and remote applications; tabs and search filter the cache. */
+let _appsCache = null; /* Cache all local and remote applications; search filters every section. */
 let _appsSettingsSeq = 0;
 const _appsUi = { query: '' };
 
@@ -47,10 +47,18 @@ function removeFavoriteApp(key) {
   try { localStorage.setItem(APPS_FAV_KEY, JSON.stringify(ids)); } catch (_e) { /* Continue if local preference storage fails. */ }
 }
 
-/* App creation still starts with type selection; catalog cards label only local installation sources. */
-const APP_KIND_LABELS = { web: '网页应用', desktop: '桌面客户端', lite: '轻应用' };
+/* Creation still selects an app type; catalog cards identify only the local installation source. */
+const APP_KIND_LABELS = { web: '网页即用', desktop: '桌面客户端', lite: '轻即用' };
 function appSourceTagHtml(app) {
   return app.item.personal ? '<span class="appsx-source-tag">本机</span>' : '';
+}
+function appVersionTagHtml(app) {
+  const item = app.item;
+  const installed = Boolean(item.personal || item.installed);
+  const version = String((installed && item.installedVersion) || item.version || '').trim();
+  if (!version) return '';
+  return '<span class="appsx-version-tag" title="' + (installed ? '当前版本：' : '市场版本：') +
+    escapeAppsHtml(version) + '">v' + escapeAppsHtml(version) + '</span>';
 }
 async function appSettingsOf(key) {
   const api = window.soduWorkAPI?.appSettings;
@@ -71,7 +79,7 @@ async function appSettingsOf(key) {
 }
 async function saveAppSettings(key, options) {
   const result = await window.soduWorkAPI.appSettings.update(key, options);
-  if (!result?.ok) throw Error(result?.reason || '应用设置保存失败');
+  if (!result?.ok) throw Error(result?.reason || '即用设置保存失败');
   window.dispatchEvent(new CustomEvent('soduwork:app-settings-changed', { detail: { appKey: key } }));
 }
 
@@ -150,8 +158,7 @@ function bindAppsPage(p) {
 
 /*
  * Use the shared plugin catalog, including authorized uninstalled remote applications.
- * Filter installed entries for the personal tab; the sidebar's three-item limit does not
- * apply here.
+ * Group installed and market entries together; the sidebar's three-item limit does not apply here.
  */
 async function loadAppsCatalog() {
   const plugins = await Promise.allSettled([(window.SoduWorkAPI && typeof window.SoduWorkAPI.pluginCatalog === 'function')
@@ -313,16 +320,16 @@ function appsCardHtml(app, index, recommended, conversation) {
   if (recommended) return '<div class="appsx-card appsx-cover-card" data-app-index="' + index + '" role="button" tabindex="0" aria-label="' + escapeAppsHtml(app.title) + '">' +
     '<div class="appsx-cover">' + (cover ? '<img src="' + escapeAppsHtml(cover) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : '<span>' + APPS_GLYPH + '</span>') +
     '</div><div class="appsx-cover-info"><div class="appsx-cover-copy"><div class="appsx-cover-meta"><span class="appsx-app-ico' + (customIcon ? ' has-img' : '') + '">' + (customIcon || APPS_GLYPH) + '</span>' +
-    '<span class="appsx-card-txt"><b data-user-content>' + escapeAppsHtml(app.title) + '</b></span></div>' +
-    '<p class="appsx-cover-desc" data-user-content>' + escapeAppsHtml(app.desc || '打开应用工作界面') + '</p></div>' +
+    '<span class="appsx-card-txt"><span class="appsx-card-headline"><b data-user-content>' + escapeAppsHtml(app.title) + '</b>' + appVersionTagHtml(app) + '</span></span></div>' +
+    '<p class="appsx-cover-desc" data-user-content>' + escapeAppsHtml(app.desc || '打开即用工作界面') + '</p></div>' +
     '<div class="appsx-cover-actions"><div class="appsx-cover-tools">' + favorite +
     (!needsSync ? '<button class="appsx-act appsx-set" type="button" title="即用设置" aria-label="即用设置">' + APPS_ICONS.gear + '</button>' : '') + '</div>' +
     '<button class="appsx-card-open" type="button" aria-label="打开即用">打开即用</button></div></div></div>';
   return '<div class="appsx-card' + (conversation ? ' nmessage-app-card' : '') + '" ' +
     (conversation ? 'data-chat-app="' + escapeAppsHtml(key) + '"' : 'data-app-index="' + index + '"') + ' role="button" tabindex="0" title="' + (needsSync ? (app.item.updateAvailable ? '升级并打开即用' : '添加并打开即用') : '打开即用') + '">' +
     '<span class="appsx-app-ico' + (customIcon ? ' has-img' : '') + '">' + (customIcon || APPS_GLYPH) + '</span>' +
-    '<span class="appsx-card-txt"><span class="appsx-card-headline"><b data-user-content>' + escapeAppsHtml(app.title) + '</b>' + appSourceTagHtml(app) + '</span>' +
-    '<small data-user-content>' + (app.desc ? escapeAppsHtml(app.desc) : '打开应用工作界面') + '</small></span>' +
+    '<span class="appsx-card-txt"><span class="appsx-card-headline"><b data-user-content>' + escapeAppsHtml(app.title) + '</b>' + appVersionTagHtml(app) + '</span>' +
+    '<small class="appsx-card-description">' + appSourceTagHtml(app) + '<span class="appsx-description-text" data-user-content>' + (app.desc ? escapeAppsHtml(app.desc) : '打开即用工作界面') + '</span></small></span>' +
     (needsSync ? '<span class="appsx-card-add" aria-hidden="true">' + APPS_ICONS.plus + '</span>' : '') +
     '<span class="appsx-card-acts">' +
     (!needsSync ? '<button class="appsx-act appsx-set" type="button" title="即用设置" aria-label="即用设置">' + APPS_ICONS.gear + '</button>' : '') +
@@ -415,7 +422,7 @@ async function openAppSettings(app) {
   const icon = window.SoduWorkPluginIcon?.imageFor(app.item) || APPS_GLYPH;
   const version = String(app.item.installedVersion || app.item.version || '').trim();
   modal.innerHTML =
-    '<header class="appsx-modal-head"><b data-user-content>' + escapeAppsHtml(app.title) + ' · 应用设置</b>' +
+    '<header class="appsx-modal-head"><b>即用设置</b>' +
     '<button class="appsx-icon-btn" id="appsSetClose" type="button">' + APPS_ICONS.close + '</button></header>' +
     '<div class="appsx-modal-body">' +
     '<section class="appsx-settings-info" aria-label="即用信息"><span class="appsx-settings-icon" role="img" aria-label="即用图标">' + icon + '</span>' +
@@ -635,74 +642,112 @@ async function installAppPackage() {
   });
 }
 
-/* ---- Create-app dialog: select a web app, desktop client, or lightweight app first.
-   Create then opens the existing app-development conversation with a type-specific input prefix. ---- */
-const APPS_CREATE_KINDS = [
-  { kind: 'lite', icon: 'bolt', desc: '轻应用是在 SoduWork 内自建的轻量应用' },
-  { kind: 'web', icon: 'globe', desc: '连接外部网页服务，在应用壳的独立窗口中打开' },
-  { kind: 'desktop', icon: 'monitor', desc: '接入本机安装注册的桌面客户端应用' },
+/* Creation choices only prepare a draft in the existing application development conversation. */
+const APPS_CREATE_CATEGORIES = [
+  { id: 'office', title: '工具办公', examples: '待办清单 · 番茄时钟 · 本地记账' },
+  { id: 'game', title: '小游戏', examples: '摸鱼弹球 · 反应力挑战 · 每日脑洞谜题' },
+  { id: 'robot', title: '机器人', examples: '灵感扭蛋机 · 脑洞辩论员 · 下班收尾官 · 会议行动员 · 项目哨兵' },
+  { id: 'other', title: '其他', examples: '灵感便签 · 习惯打卡 · 个人收藏夹' },
 ];
+/* Filled, multicolor artwork follows the catalog gift icon rather than action glyphs. */
+const APPS_CREATE_ICONS = {
+  office: '<svg viewBox="0 0 40 40" aria-hidden="true"><rect x="5" y="11" width="23" height="25" rx="5" fill="#7c5cf0"/><rect x="12" y="4" width="23" height="27" rx="5" fill="#4f8df7"/><rect x="17" y="11" width="13" height="3" rx="1.5" fill="#fff"/><rect x="17" y="17" width="9" height="3" rx="1.5" fill="#fff" opacity=".8"/><rect x="23" y="25" width="13" height="11" rx="3" fill="#fbbf24"/><path d="m27 30 2 2 4-4" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  game: '<svg viewBox="0 0 40 40" aria-hidden="true"><path d="M12 10h16c5 0 7 5 8 12l1 6c1 6-4 9-8 5l-5-5h-8l-5 5c-4 4-9 1-8-5l1-6c1-7 3-12 8-12Z" fill="#8b5cf6"/><rect x="8" y="18" width="12" height="4" rx="2" fill="#fff"/><rect x="12" y="14" width="4" height="12" rx="2" fill="#fff"/><circle cx="28" cy="17" r="3" fill="#fbbf24"/><circle cx="32" cy="24" r="3" fill="#fb7185"/><path d="m17 7 3-4 3 4" fill="none" stroke="#22d3ee" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  robot: '<svg viewBox="0 0 40 40" aria-hidden="true"><rect x="18" y="6" width="4" height="8" rx="2" fill="#8b5cf6"/><circle cx="20" cy="5" r="4" fill="#fbbf24"/><rect x="2" y="19" width="7" height="12" rx="3.5" fill="#2dd4bf"/><rect x="31" y="19" width="7" height="12" rx="3.5" fill="#2dd4bf"/><rect x="7" y="12" width="26" height="25" rx="9" fill="#4f8df7"/><rect x="11" y="17" width="18" height="11" rx="5.5" fill="#eef2ff"/><circle cx="16" cy="22" r="2" fill="#7c5cf0"/><circle cx="24" cy="22" r="2" fill="#7c5cf0"/><rect x="16" y="31" width="8" height="2.5" rx="1.25" fill="#fff"/></svg>',
+  other: '<svg viewBox="0 0 40 40" aria-hidden="true"><rect x="4" y="9" width="23" height="27" rx="5" fill="#fb7185" transform="rotate(-8 15 22)"/><rect x="13" y="4" width="23" height="28" rx="5" fill="#fbbf24" transform="rotate(8 24 18)"/><rect x="9" y="12" width="23" height="25" rx="5" fill="#4f8df7"/><path d="m21 16 2.3 5 5.5.6-4.1 3.7 1.1 5.4-4.8-2.8-4.8 2.8 1.1-5.4-4.1-3.7 5.5-.6Z" fill="#fff"/></svg>',
+  web: '<svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="17" fill="#4f8df7"/><path d="M5 14h9l4 5-3 5H8l-4-5ZM23 5l9 5-2 7-6-1-4-5ZM24 23l10 2-5 9-6 2-3-7Z" fill="#2dd4bf"/><ellipse cx="20" cy="20" rx="8" ry="17" fill="none" stroke="#fff" stroke-width="1.5" opacity=".55"/><path d="M4 20h32" stroke="#fff" stroke-width="1.5" opacity=".55"/><circle cx="32" cy="8" r="6" fill="#fbbf24"/><path d="m29.5 8 1.7 1.7 3-3.4" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+};
+function selectAppsCreateKind(mask, kind) {
+  mask.classList.toggle('is-web', kind === 'web');
+  mask.querySelectorAll('.appsx-create-opt').forEach(function (row) {
+    const selected = row.dataset.kind === kind;
+    row.classList.toggle('selected', selected);
+    row.setAttribute('aria-selected', String(selected));
+    row.tabIndex = selected ? 0 : -1;
+  });
+  mask.querySelectorAll('[data-create-panel]').forEach(function (panel) {
+    panel.hidden = panel.dataset.createPanel !== kind;
+  });
+}
 function appsCreateDialog() {
   let mask = document.getElementById('appsCreateMask');
   if (mask) return mask;
   mask = document.createElement('div');
   mask.id = 'appsCreateMask';
   mask.className = 'appsx-mask';
-  mask.innerHTML = '<div class="appsx-modal appsx-create" role="dialog" aria-modal="true" aria-label="创建应用">' +
-    '<header class="appsx-modal-head"><b>创建应用</b>' +
-    '<button class="appsx-icon-btn" id="appsCreateClose" type="button" title="关闭">' + APPS_ICONS.close + '</button></header>' +
+  mask.innerHTML = '<div class="appsx-create" role="dialog" aria-modal="true" aria-label="创建即用">' +
     '<div class="appsx-modal-body appsx-create-body">' +
-    '<p class="appsx-modal-note">选择要创建的应用类型，点击「立即创建」后在对话中继续描述你的应用。</p>' +
-    '<div class="appsx-create-options" role="radiogroup" aria-label="应用类型">' +
-    APPS_CREATE_KINDS.map(function (row) {
-      return '<button class="appsx-create-opt" type="button" role="radio" aria-checked="false" data-kind="' + row.kind + '">' +
-        (row.kind === 'lite' ? '<span class="appsx-create-easy">简易</span>' : '') +
-        '<span class="appsx-create-ico" aria-hidden="true">' + APPS_ICONS[row.icon] + '</span>' +
-        '<span class="appsx-create-txt"><b>' + APP_KIND_LABELS[row.kind] + '</b><small>' + row.desc + '</small></span>' +
-        '<span class="appsx-create-mark" aria-hidden="true">' + APPS_ICONS.check + '</span></button>';
-    }).join('') +
-    '</div></div>' +
-    '<footer class="appsx-modal-foot appsx-create-foot">' +
-    '<button class="appsx-pill small" id="appsCreateInstall" type="button">导入应用包</button>' +
-    '<span class="push"></span>' +
-    '<button class="btn-mini" id="appsCreateCancel" type="button">取消</button>' +
-    '<button class="appsx-pill small" id="appsCreateGo" type="button" disabled>立即创建</button>' +
-    '</footer></div>';
+    '<div class="appsx-create-options" role="tablist" aria-label="即用类型">' +
+    '<svg class="appsx-create-tab-shape" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true"><path d="M0 0H440C510 0 480 100 560 100H1000V101H0Z"/></svg>' +
+    '<button class="appsx-create-opt" id="appsCreateLiteTab" type="button" role="tab" aria-controls="appsCreateLitePanel" data-kind="lite"><b>创建即用</b><span class="appsx-create-badge">轻量</span></button>' +
+    '<button class="appsx-create-opt" id="appsCreateWebTab" type="button" role="tab" aria-controls="appsCreateWebPanel" data-kind="web"><b>WEB/H5接入</b></button></div>' +
+    '<section class="appsx-create-content" id="appsCreateLitePanel" role="tabpanel" aria-labelledby="appsCreateLiteTab" data-create-panel="lite">' +
+    '<div class="appsx-create-storage-row"><fieldset class="appsx-create-storage" aria-label="数据存储（必选）">' +
+    '<label><input type="radio" name="appsCreateStorage" value="cloud" required><span>数据云端化</span></label>' +
+    '<label><input type="radio" name="appsCreateStorage" value="local" required><span>数据本地化</span></label></fieldset>' +
+    '<p class="appsx-create-storage-hint" id="appsCreateStorageHint" role="status">请选择数据存储方式后开始创建</p></div><div class="appsx-create-categories">' +
+    APPS_CREATE_CATEGORIES.map(function (row) {
+      return '<button class="appsx-create-category" type="button" disabled data-create-category="' + row.id + '">' +
+        '<span class="appsx-create-ico" aria-hidden="true">' + APPS_CREATE_ICONS[row.id] + '</span><b>' + row.title + '</b>' +
+        '<small>' + row.examples + '</small><span class="appsx-create-start">开始创建</span></button>';
+    }).join('') + '</div></section>' +
+    '<section class="appsx-create-content appsx-create-web" id="appsCreateWebPanel" role="tabpanel" aria-labelledby="appsCreateWebTab" data-create-panel="web" hidden>' +
+    '<span class="appsx-create-web-icon" aria-hidden="true">' + APPS_CREATE_ICONS.web + '</span><h3>连接你的 H5 或服务</h3>' +
+    '<p class="appsx-create-intro">将已有网页、H5 页面或在线服务接入 SoduWork，在即用中继续使用。</p>' +
+    '<div class="appsx-create-recommendations"><div><b>已有网站 / H5</b><small>企业门户 · 在线表单 · 数据看板</small></div>' +
+    '<div><b>云端服务</b><small>团队协作 · 业务系统 · 在线客服</small></div></div>' +
+    '<button class="appsx-pill" id="appsCreateGo" type="button">开始创建</button><p class="appsx-create-fit">适合云端，数据上云</p></section></div>' +
+    '<footer class="appsx-modal-foot appsx-create-foot"><button class="appsx-create-install" id="appsCreateInstall" type="button">导入即用包</button>' +
+    '<span class="push"></span><button class="btn-mini" id="appsCreateCancel" type="button">取消并关闭</button></footer></div>';
   document.body.appendChild(mask);
+  mask.addEventListener('change', function (event) {
+    if (event.target.name !== 'appsCreateStorage') return;
+    const cloud = event.target.value === 'cloud';
+    mask.querySelectorAll('[data-create-category]').forEach(button => { button.disabled = false; });
+    mask.querySelector('#appsCreateStorageHint').textContent = cloud
+      ? '数据保存到云端，同一账号可跨设备使用；需要联网'
+      : '数据保存在本机，可离线读写；不自动上传或同步';
+  });
   mask.addEventListener('pointerdown', function (event) { if (event.target === mask) closeAppsCreateDialog(); });
-  document.addEventListener('keydown', function (event) {
-    if (event.key === 'Escape' && mask.classList.contains('show')) { closeAppsCreateDialog(); event.stopPropagation(); }
+  mask.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') { closeAppsCreateDialog(); event.stopPropagation(); }
+    if (event.target.matches('.appsx-create-opt') && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+      event.preventDefault();
+      const kind = event.key === 'Home' ? 'lite' : event.key === 'End' ? 'web' : event.target.dataset.kind === 'lite' ? 'web' : 'lite';
+      selectAppsCreateKind(mask, kind);
+      mask.querySelector('.appsx-create-opt.selected').focus();
+    }
   });
   mask.addEventListener('click', function (event) {
     const opt = event.target.closest('.appsx-create-opt');
-    if (opt) {
-      mask.querySelectorAll('.appsx-create-opt').forEach(function (row) {
-        const selected = row === opt;
-        row.classList.toggle('selected', selected);
-        row.setAttribute('aria-checked', String(selected));
-      });
-      mask.querySelector('#appsCreateGo').disabled = false;
-      return;
-    }
+    if (opt) { selectAppsCreateKind(mask, opt.dataset.kind); return; }
     if (event.target.closest('#appsCreateClose') || event.target.closest('#appsCreateCancel')) closeAppsCreateDialog();
     else if (event.target.closest('#appsCreateInstall')) { closeAppsCreateDialog(); installAppPackage(); }
-    else if (event.target.closest('#appsCreateGo')) {
-      const kind = mask.querySelector('.appsx-create-opt.selected')?.dataset.kind || '';
+    else {
+      const categoryButton = event.target.closest('[data-create-category]');
+      const category = APPS_CREATE_CATEGORIES.find(row => row.id === categoryButton?.dataset.createCategory);
+      const kind = mask.querySelector('.appsx-create-opt.selected')?.dataset.kind;
+      if (!(kind === 'lite' && category) && !(kind === 'web' && event.target.closest('#appsCreateGo'))) return;
+      const storageLocation = mask.querySelector('input[name="appsCreateStorage"]:checked')?.value;
+      if (kind === 'lite' && !['local','cloud'].includes(storageLocation)) {
+        mask.querySelector('input[name="appsCreateStorage"]').focus();
+        return;
+      }
       closeAppsCreateDialog();
-      try { window.PluginBuilderEntry.openApp('', undefined, kind); }
-      catch (error) { sayAppsMessage('应用开发助手暂时不可用：' + String(error && error.message || error)); }
+      try { window.PluginBuilderEntry.openApp(category ? category.title + '：' : '', category ? {appCategory:category.id,storageLocation} : undefined, kind); }
+      catch (error) { sayAppsMessage('即用开发助手暂时不可用：' + String(error && error.message || error)); }
     }
   });
   return mask;
 }
 function openAppsCreateDialog() {
   const mask = appsCreateDialog();
-  mask.querySelectorAll('.appsx-create-opt').forEach(function (row) {
-    row.classList.remove('selected');
-    row.setAttribute('aria-checked', 'false');
-  });
-  mask.querySelector('#appsCreateGo').disabled = true;
+  selectAppsCreateKind(mask, 'lite');
+  mask.querySelectorAll('input[name="appsCreateStorage"]').forEach(input => { input.checked = false; });
+  mask.querySelectorAll('[data-create-category]').forEach(button => { button.disabled = true; });
+  mask.querySelector('#appsCreateStorageHint').textContent = '请选择数据存储方式后开始创建';
   mask.classList.add('show');
+  mask.querySelector('.appsx-create-opt.selected').focus();
 }
 function closeAppsCreateDialog() {
   const mask = document.getElementById('appsCreateMask');
@@ -729,7 +774,9 @@ function confirmAppInstall(body, preview, blockedReason) {
   }
   layer.hidden = false;
   layer.querySelector('#appsModalTitle').textContent = '安装即用';
-  layer.querySelector('#appsModalSub').textContent = '检查已完成 · 仅保存到本机 · 免审核免提交';
+  layer.querySelector('#appsModalSub').textContent = rawManifest.jiyong?.storage?.location === 'cloud'
+    ? '检查已完成 · 应用安装到本机 · 业务数据保存到云端'
+    : '检查已完成 · 仅保存到本机 · 免审核免提交';
   layer.querySelector('#appsModalBody').innerHTML =
     '<div class="apps-install-head"><span class="appsx-app-ico big">' + APPS_GLYPH + '</span>' +
     '<div><b data-user-content>' + escapeAppsHtml(name) + '</b><p data-user-content>' + escapeAppsHtml(description || '没有说明') + '</p>' +

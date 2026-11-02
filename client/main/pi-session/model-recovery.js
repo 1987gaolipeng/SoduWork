@@ -3,7 +3,7 @@ const errors = require('./model-errors');
 // This is an explicit continuation, not another dispatch or an automatic retry
 // loop. The original messages, attachment context and tool results stay intact.
 const PROMPT = '<soduwork-internal-output-continue>\n上一轮因模型服务临时故障中断。请从当前会话中最后一个已确认的工具结果继续完成原请求，不要从头重新执行任务，不要重复已有正文。已成功的写入、发送、提交和发布不得重复；结果不确定的操作先只读核验，无法核验时请向用户确认。\n</soduwork-internal-output-continue>';
-function create() {
+function create({ beforeRetry } = {}) {
   let failed = null;
   function remember(item, result) {
     failed = null;

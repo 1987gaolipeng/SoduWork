@@ -92,6 +92,18 @@ test('unsupported deliverables open through the explicit save dialog, never the 
     [{ id: 'a', role: 'output', url: 'javascript:alert(1)' }] }, bridge), /地址无效/);
 });
 
+test('office and packaged task outputs use the native system-app handoff when available', async () => {
+  const requests = [], opened = [];
+  const file = { taskId: 't', attachmentId: 'a', name: '\u9884\u7b97.xlsx' };
+  const hub = { listAttachments: async id => { requests.push(id);
+      return [{ id: 'a', role: 'output', filename: '\u9884\u7b97.xlsx', url: '/api/v1/attachments/a?ticket=fresh' }]; },
+    attachmentUrl: row => 'https://hub.test' + row.url };
+  const bridge = { previewAttachment: async payload => { opened.push(payload); return { ok: true, external: true }; } };
+  assert.equal(await links.openTaskFile(file, hub, bridge), true);
+  assert.deepEqual(requests, ['t']);
+  assert.deepEqual(opened, [{ url: 'https://hub.test/api/v1/attachments/a?ticket=fresh', filename: '\u9884\u7b97.xlsx' }]);
+});
+
 test('materializeTask swaps a hub attachment row for the verified local copy', async () => {
   const globalKeys = Object.keys(global);
   global.soduWorkAPI = { attachmentMaterialize: async payload => {

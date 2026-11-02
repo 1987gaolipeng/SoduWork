@@ -106,6 +106,6 @@ test('SoduWork prefix (1.12.69 rename) is accepted alongside legacy SoduWork-', 
   // Retain transitional legacy prefixes for installed-client upgrade compatibility.
   assert.match(contract.safeInstallerPath('/tmp/u', 'SoduWork-1.2.11-Setup.exe', 'win32'), /SoduWork-1\.2\.11-Setup\.exe$/);
   // Reject mixed prefixes.
-  assert.throws(() => contract.safeInstallerPath('/tmp/u', 'SoduworkX-1.2.11-Setup.exe', 'win32'), /名称无效/);
+  assert.throws(() => contract.safeInstallerPath('/tmp/u', 'SoduWorkworkX-1.2.11-Setup.exe', 'win32'), /名称无效/);
   assert.throws(() => contract.safeInstallerPath('/tmp/u', 'SoduWork 1.2.11-Setup.exe', 'win32'), /名称无效/);
 });

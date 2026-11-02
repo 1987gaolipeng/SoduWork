@@ -55,6 +55,10 @@ test('Runner retains the bundled shell for a clean machine without Git or Bash',
       path.join(root, 'shell'));
     assert.equal(Object.hasOwn(runtime._runnerEnv(base, '', { isPackaged: false }, root),
       'SODUWORK_BUNDLED_SHELL'), false);
+    fs.mkdirSync(path.join(root, '.runtime', 'git', 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.runtime', 'git', 'bin', 'bash.exe'), 'fixture');
+    assert.equal(runtime._runnerEnv(base, '', { isPackaged: false, getAppPath: () => root }, root).SODUWORK_BUNDLED_SHELL,
+      path.join(root, '.runtime', 'git'));
     fs.unlinkSync(shell);
     assert.equal(Object.hasOwn(runtime._runnerEnv(base, '', { isPackaged: true }, root),
       'SODUWORK_BUNDLED_SHELL'), false);

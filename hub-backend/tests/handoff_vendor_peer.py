@@ -1,6 +1,7 @@
 """Synthetic Codex subprocess: verify restored bytes, then make a real artifact."""
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import time
@@ -16,14 +17,26 @@ def emit(value):
 def work(prompt):
     # The initial prompt selects the isolated test's entry route. Later turns
     # (including resumed subprocesses) must work without a magic marker.
-    history = Path("prompts.jsonl")
+    # Keep fixture audit records outside the deliverable file set.
+    history = Path(".cache/prompts.jsonl")
+    history.parent.mkdir(exist_ok=True)
     first_prompt = json.loads(history.read_text(encoding="utf-8").splitlines()[0])["prompt"] if history.exists() else prompt
+    if 'CLOUD_ACCEPTANCE_TEST' in first_prompt:
+        # Synthetic reviewer: exercise real report discovery and transport, not model quality.
+        material = json.loads(prompt.split('固定版本材料：\n', 1)[1].split('\n验收人补充说明：', 1)[0])
+        name = re.search(r'acceptance-report-[a-f0-9]{24}\.json', prompt).group()
+        assert material['artifact']['manifest']['text'] == 'Isolated review output'
+        report = {'verdict': 'approve', 'summary': 'Synthetic reviewer read the fixed text',
+                  'checks': [{'criterion': c['id'], 'result': 'pass',
+                              'evidence': 'Fixed text: Isolated review output'} for c in material['criteria']]}
+        Path(name).write_text(json.dumps(report), encoding='utf-8')
+        return 'Synthetic review complete.'
     if "CLOUD_NEW_TEST" in first_prompt:
         assert not Path("input.txt").exists(), "Direct cloud entry must not restore a workspace"
         assert not Path("soduwork-workspace-handoff.zip").exists()
     else:
         assert Path("input.txt").read_text(encoding="utf-8") == "portable input", os.getcwd()
-    with Path("prompts.jsonl").open("a", encoding="utf-8") as output:
+    with Path(".cache/prompts.jsonl").open("a", encoding="utf-8") as output:
         output.write(json.dumps({"prompt": prompt, "pid": os.getpid(), "agent": agent,
                                  "sid": sid, "resumed": resumed}, ensure_ascii=False) + "\n")
     while Path("hold-process").exists():
@@ -65,9 +78,22 @@ if agent in {"codex-harness", "qwen", "opencode", "dsh"}:
         emit({"jsonrpc": "2.0", "id": message["id"], "result": result})
 else:
     if agent != "codex":
-        flag = "--resume" if "--resume" in sys.argv else "--session-id"
-        sid = sys.argv[sys.argv.index(flag) + 1]
-        resumed = flag == "--resume"
+        if "--resume" in sys.argv:
+            flag = "--resume"
+            sid = sys.argv[sys.argv.index(flag) + 1]
+            resumed = True
+        elif "--session-id" in sys.argv:
+            flag = "--session-id"
+            sid = sys.argv[sys.argv.index(flag) + 1]
+        elif "--soduwork-session" in sys.argv:
+            # Generic ACP profiles keep the provider session behind the bridge.
+            # The fixture bypasses that bridge, so use its opaque session marker
+            # to exercise initial and resumed turns without an installed Agent.
+            marker = sys.argv[sys.argv.index("--soduwork-session") + 1]
+            sid = marker or sid
+            resumed = bool(marker)
+        else:
+            sid = sid
     elif "resume" in sys.argv:
         sid, resumed = sys.argv[sys.argv.index("resume") + 1], True
     text = work(sys.stdin.read())

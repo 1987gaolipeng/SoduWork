@@ -178,6 +178,35 @@ class LibraryHttpTests(LibraryHttpTestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json(), expected)
 
+    async def test_storage_status_reports_owner_remote_quota(self):
+        async with self.sessions() as session:
+            session.add_all([
+                LibraryItem(id="alice-nfs-live", owner_key="alice", backend="nfs", size=100),
+                LibraryItem(id="alice-nfs-trash", owner_key="alice", backend="nfs", size=200,
+                            deleted_at=datetime.now(timezone.utc)),
+                LibraryItem(id="alice-local", owner_key="alice", backend="local", size=400),
+                LibraryItem(id="bob-nfs", owner_key="bob", backend="nfs", size=800),
+            ])
+            await session.commit()
+        capability = {
+            "backend": "nfs", "state": "available", "configured": True,
+            "available": True, "enabled": True, "connected": True,
+        }
+        expected = {
+            "ok": True, "default": "local", "storage": {
+                "local": {"backend": "local", "state": "available", "enabled": True},
+                "remote": capability,
+            }, "remote": capability, "remoteBackend": "nfs",
+        }
+        with patch.object(library_storage, "status", return_value=expected):
+            response = await self.request("GET", "/storage/status")
+        self.assertEqual(response.status_code, 200, response.text)
+        quota = response.json()["storage"]["remote"]
+        self.assertEqual(quota["quotaBytes"], 1024 * 1024 * 1024)
+        self.assertEqual(quota["usedBytes"], 300)
+        self.assertEqual(quota["remainingBytes"], 1024 * 1024 * 1024 - 300)
+        self.assertEqual(response.json()["remote"]["usedBytes"], 300)
+
     async def test_note_content_can_be_saved_and_replaced(self):
         item = await self.create_item("draft", content="before")
         old_key = next(iter(self.store.objects))

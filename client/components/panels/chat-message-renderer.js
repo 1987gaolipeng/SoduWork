@@ -23,6 +23,7 @@
   let lastList = null, lastMessageCount = 0;
   let outputScope = '';
   let liveStreamShape = null;
+  let approvalMarkup = '';
   let streamMarkup = new WeakMap();
   let thinkingRef = null;
   const liveThinkingKeys = new Set();
@@ -71,6 +72,7 @@
     streamMarkup = new WeakMap();
     liveThinkingKeys.clear();
     acceptance.reset();
+    approvalMarkup = '';
     turnSummary?.reset();
   }
 
@@ -96,8 +98,15 @@
       const clock = pad(date.getHours()) + ':' + pad(date.getMinutes());
       const full = date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) +
         ' ' + clock + ':' + pad(date.getSeconds());
+      const now = new Date();
+      const today = date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+      const locale = global.SoduWorkI18n?.getLocale?.() || 'zh-CN';
+      const day = today ? '' : new Intl.DateTimeFormat(locale, {
+        ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}), month: 'short', day: 'numeric',
+      }).format(date) + ' ';
       time = '<span class="nmessage-time" title="' + (user ? '发送时间' : '输出完成时间') + '">' +
-        '<time data-user-content datetime="' + date.toISOString() + '" title="' + full + '">' + clock + '</time></span>';
+        '<time data-user-content tabindex="0" datetime="' + date.toISOString() + '" title="' + full + '">' +
+        ctx.esc(day + clock) + '</time></span>';
     }
     const copy = String(text || '').trim() ? _copyButton(text, user ? 'nmessage-copy' : 'ntext-copy', afterBlock) : '';
     const speech = !user && message.done !== false && String(text || '').trim()
@@ -209,6 +218,7 @@
     return {
       ref: ctx._ref,
       status: snap.status || '',
+      liveTextKey: ctx._liveTextKey,
       messages: messages.length,
       windowSize: Math.max(80, Number(ctx._messageWindowSize) || 80),
       tools: tools.length,
@@ -230,6 +240,7 @@
     if (!list || !snap || snap.status !== 'streaming' || !liveStreamShape) return false;
     const shape = _streamStructure(snap, messages, tools);
     if (shape.ref !== liveStreamShape.ref || shape.status !== liveStreamShape.status ||
+        shape.liveTextKey !== liveStreamShape.liveTextKey ||
         shape.messages !== liveStreamShape.messages || shape.windowSize !== liveStreamShape.windowSize ||
         shape.tools !== liveStreamShape.tools ||
         !_sameArray(shape.messageShape, liveStreamShape.messageShape) ||
@@ -241,11 +252,10 @@
         shape.pendingUi !== liveStreamShape.pendingUi || shape.notice !== liveStreamShape.notice) return false;
 
     let valid = true;
-    // Only the newest text block is still growing. Older assistant messages are
-    // already settled Markdown and must keep their rich DOM; rewriting every
-    // block as escaped text both loses headings/tables and makes long chats
-    // progressively more expensive to paint.
-    const liveTextBlocks = shape.textBlocks.length ? [shape.textBlocks[shape.textBlocks.length - 1]] : [];
+    // Use the same live-block identity as the full renderer. Waiting, thinking,
+    // and tool-only turns must never rewrite a previous result as streaming text.
+    const liveTextBlocks = shape.textBlocks.filter(block =>
+      block.index + ':' + block.blockIndex === ctx._liveTextKey);
     liveTextBlocks.forEach((block) => {
       const node = _findDataNode(list, 'data-chat-node', 'message:' + block.index);
       const text = node && node.querySelectorAll('.ntext')[block.textIndex];
@@ -318,7 +328,8 @@
       // settled blocks use the ordinary sanitized Markdown cache.
       const streaming = ctx._snap && ctx._snap.status === 'streaming' &&
         ctx._liveTextKey === mi + ':' + blockIndex;
-      const content = streaming ? _streamText(b.text) : (acceptance.html(b.text, mi + ':' + blockIndex) || rich(b.text));
+      const content = streaming ? _streamText(b.text) :
+        (acceptance.html(b.text, _messageOwner(mi, ctx._snap) + ':' + blockIndex, mi) || rich(b.text));
       return '<div class="ntext" data-block="' + blockIndex + '">' + content + '</div>';
     }
     return '';        // Tool cards already represent toolcall blocks; do not render them twice.
@@ -448,23 +459,39 @@
       message, index: messageStart + offset,
     }));
     const workCards = ctx._workCards?.timeline?.(allMessages, messageStart) || [];
+    const approvalCards = acceptance.timeline(ctx._collabEntries(), allMessages, messageStart);
+    const nextApprovalMarkup = JSON.stringify(approvalCards);
+    if (nextApprovalMarkup !== approvalMarkup) liveStreamShape = null;
+    approvalMarkup = nextApprovalMarkup;
+    const appendApprovals = index => {
+      for (const card of approvalCards) if (card.index === index) {
+        if (taskStreams.has(card.taskId) && !taskAnchors.has(card.taskId)) {
+          parts.push(taskStreams.get(card.taskId)); taskStreams.delete(card.taskId);
+        }
+        if (legacyStreams.has(card.taskId)) {
+          parts.push(legacyStreams.get(card.taskId)); legacyStreams.delete(card.taskId);
+        }
+        parts.push(card.html);
+      }
+    };
     const appendWorkCards = index => {
       for (const card of workCards) if (card.index === index) parts.push(
         '<section data-chat-node="work-card:' + ctx.esc(card.id) + '" data-work-card-slot="' + ctx.esc(card.id) + '"></section>');
+      if (index < allMessages.length) appendApprovals(index);
     };
     if (ctx._pending && _pendingIsConfirmed(allMessages)) {
       ctx._pending = ''; ctx._pendingPlugins = []; ctx._pendingBaseline = null;
     }
     const allTools = global.ChatTools?.displayTools?.(ctx._snap) || ctx._snap.tools || [];
     ctx._liveTextKey = '';
-    if (ctx._snap.status === 'streaming') {
-      outer: for (let index = allMessages.length - 1; index >= 0; index -= 1) {
-        const blocks = Array.isArray(allMessages[index]?.blocks) ? allMessages[index].blocks : [];
-        for (let blockIndex = blocks.length - 1; blockIndex >= 0; blockIndex -= 1) {
-          if (blocks[blockIndex]?.kind === 'text') {
-            ctx._liveTextKey = index + ':' + blockIndex; break outer;
-          }
-        }
+    if (ctx._snap.status === 'streaming' && !ctx._pending) {
+      const index = allMessages.length - 1;
+      const message = allMessages[index];
+      const blocks = Array.isArray(message?.blocks) ? message.blocks : [];
+      const blockIndex = blocks.length - 1;
+      if (message?.role === 'assistant' && message.done !== true &&
+          blocks[blockIndex]?.kind === 'text' && blocks[blockIndex].done !== true) {
+        ctx._liveTextKey = index + ':' + blockIndex;
       }
     }
     const toolStart = Math.max(0, allTools.length - windowSize * 2);
@@ -568,7 +595,7 @@
       return keyed(html, key, index);
     };
 
-    const taskAnchors = new Map(), taskStreams = new Map();
+    const taskAnchors = new Map(), taskStreams = new Map(), legacyStreams = new Map();
     allMessages.forEach((m, mi) => {
       if (m.role !== 'user') return;
       if (m.taskId) taskAnchors.set(m.taskId, mi);
@@ -589,6 +616,16 @@
       taskStreams.set(entry.taskId, sessions.filter(run => run.items && run.items.length).map(run =>
         '<div data-chat-node="task-stream:' + ctx.esc(entry.taskId + ':' + (run.ref || run.id)) +
         '" data-task-stream="' + ctx.esc(entry.taskId) + '" data-task-run="' + ctx.esc(run.ref || run.id || '') + '" data-delivery-final="' + ['completed', 'done', 'idle'].includes(run.status || run.state) + '">' + TaskExecutionStream.rowsHtml(run.items, run.status) + '</div>').join(''));
+    });
+    // Legacy archives without native message anchors follow their first approval slot.
+    if (global.TaskExecutionStream) ctx._collabEntries().forEach(entry => {
+      if (entry.executionElsewhere || entry.controlledTurn || entry.nativeTurn ||
+          allMessages.some(message => message.taskId === entry.taskId && message.taskOutputKey)) return;
+      const state = entry.controller?.snapshot();
+      if (!state?.events?.length) return;
+      legacyStreams.set(entry.taskId, '<div data-chat-node="task-stream:' + ctx.esc(entry.taskId) +
+        '" data-task-stream="' + ctx.esc(entry.taskId) + '" data-delivery-final="' + ['completed', 'done', 'idle'].includes(state.status) + '">' +
+        TaskExecutionStream.rowsHtml(state.events, state.status) + '</div>');
     });
     // Keep contiguous commands grouped without losing their source Agent.
     const renderTools = ChatTools.groupConsecutiveCommands
@@ -613,7 +650,7 @@
       pendingRendered = true;
     };
     if (!allMessages.length) appendWorkCards(0);
-    if (ctx._pending && allMessages.length === 0) appendPending();
+    if (ctx._pending && allMessages.length === 0 && !approvalCards.length) appendPending();
     // One identity stack per user turn, including tool-only participants.
     const crewOf = global.ChatCrew || null;
     const turnCrews = crewOf?.turnsOf(allMessages, allTools, st === 'streaming');
@@ -699,35 +736,28 @@
     // Task runs use the existing task/chat renderer and the same message list.
     // Commands retain only their status; each task has its own stable transcript key.
     if (global.TaskExecutionStream) ctx._collabEntries().forEach(entry => {
+      if (entry.executionElsewhere) return;
       if (entry.controlledTurn) {
         if (taskAnchors.has(entry.taskId) && taskAnchors.get(entry.taskId) < messageStart) return;
-        if (taskStreams.has(entry.taskId)) parts.push(taskStreams.get(entry.taskId)); // Legacy unanchored history.
+        if (taskStreams.has(entry.taskId)) {
+          parts.push(taskStreams.get(entry.taskId)); taskStreams.delete(entry.taskId);
+        }
         return;
       }
-      if (entry.nativeTurn) return; // Native task turns are already in the ordinary message stream.
-      // Cloud replay is also projected into ordinary messages, even though its
-      // task binding is not a locally controlled turn. Do not append its raw
-      // Runner archive a second time underneath the same conversation.
-      if (allMessages.some(message => message.taskId === entry.taskId && message.taskOutputKey)) return;
-      const state = entry.controller && entry.controller.snapshot();
-      if (!state || !state.events || !state.events.length) return;
-      parts.push('<div data-chat-node="task-stream:' + ctx.esc(entry.taskId) +
-        '" data-task-stream="' + ctx.esc(entry.taskId) + '" data-delivery-final="' + ['completed', 'done', 'idle'].includes(state.status) + '">' +
-        TaskExecutionStream.rowsHtml(state.events, state.status) + '</div>');
+      if (legacyStreams.has(entry.taskId)) {
+        parts.push(legacyStreams.get(entry.taskId)); legacyStreams.delete(entry.taskId);
+      }
     });
 
+    // The final slot follows tools and legacy execution projections as well as ordinary replies.
+    appendApprovals(allMessages.length);
     ctx._collabEntries().forEach(entry => {
-      if (!global.TaskTraceApproval || !entry.trace) return;
-      const approvals = acceptance.pendingApprovals(entry);
+      if (entry.executionElsewhere || !global.TaskTraceApproval || !entry.trace) return;
       const run = (entry.controlledExecution || {}).run || {};
       const failed = entry.controlledTurn && run.state === 'failed';
-      if (!approvals.length && !failed) return;
+      if (!failed) return;
       parts.push('<div class="nchat-task-confirmation" data-chat-node="task-confirmation:' + ctx.esc(entry.taskId) +
         '" data-task-confirmation="' + ctx.esc(entry.taskId) + '">' +
-        approvals.map(a => TaskTraceApproval.html(entry.trace.approvals, {
-          variant: 'task', taskId: entry.taskId, taskTitle: entry.task.title,
-          blocksExecution: a.action !== 'review' || ctx._collabEntryStatus(entry) !== 'completed',
-        }, a.id)).join('') +
         (failed ? '<section class="tfd-inline-approval is-bad"><header><b>这一步没有完成</b></header>' +
           '<p>后续需求继续等待。检查失败原因后，可以重试当前步骤。</p><div class="tfd-inline-actions">' +
           '<button type="button" data-chat-workflow-retry="' + ctx.esc(entry.taskId) + '">重试本步骤</button>' +

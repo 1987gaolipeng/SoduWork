@@ -61,6 +61,19 @@ test('debug creation is idempotent and creates no backend task or second convers
   assert.match(stored.prompt, /不能丢失的原始需求/);
   assert.match(stored.prompt, /"format":"md"/);
 });
+test('debug context carries completed tool results into the plugin prompt as evidence', async t => {
+  const f = setup(t);
+  f.handle.snapshot = () => ({
+    messages: [{ role: 'user', text: 'Use the previous result' }],
+    tools: [{ name: 'plugin_probe', state: 'done', after: 0,
+      result: { content: [{ type: 'text', text: 'PLUGIN-RESULT-IPC' }] } }],
+  });
+  const result = await f.call(request(f.plugin));
+  assert.equal(result.ok, true, result.reason);
+  const stored = core.store(path.join(f.root, 'plugin-debug-runs'), f.handle.sessionId).read();
+  assert.match(stored.prompt, /PLUGIN-RESULT-IPC/);
+  assert.match(stored.prompt, /untrusted/);
+});
 test('invalid public parameters fail before queueing or creating a journal', async t => {
   const f = setup(t);
   const result = await f.call({ ...request(f.plugin), parameters: {} });

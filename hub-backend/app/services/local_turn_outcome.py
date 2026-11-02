@@ -1,7 +1,7 @@
 """Pi semantic completion: a zero process exit must not hide a truncated turn."""
 from __future__ import annotations
 
-from . import declared_outputs
+from . import declared_outputs, model_errors
 
 TRUNCATED = "模型达到单轮输出上限，本轮尚未完成；已有文件与进度已保留，请缩小当前步骤后继续。"
 RECOVERY_NOTE = "（SoduWork 自动恢复）模型输出被截断，正从同一会话保留进度续跑当前节点；最多自动恢复一次，不跳过审批或验收。"
@@ -32,11 +32,14 @@ def observe(cli: str, event: dict, terminal: dict) -> None:
         if event.get("type") == "message_end":
             terminal["piFinalResponse"] = True
     elif reason in {"error", "aborted"}:
+        if terminal.get("isError") and not terminal.get("piSemanticError"):
+            return
         if not terminal.get("isError"):
             terminal["piSemanticError"] = True
         terminal["isError"] = True
-        # Raw diagnostics may contain credentials; keep the public error stable.
-        terminal["result"] = "模型调用失败或已中断，请查看会话记录后重试。"
+        # Extract a safe model diagnosis before the SDK error envelope is discarded.
+        terminal["result"] = (model_errors.public_failure(message.get("errorMessage"))
+                              if reason == "error" else "模型调用已中断，已有进度已保留。")
 
 
 def recovery(run: dict, terminal: dict) -> dict:

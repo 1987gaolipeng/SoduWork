@@ -123,16 +123,48 @@ test('同执行人与验收人时验收入口复用原执行会话并标记为�
  assert.equal(out.acceptanceExecutionSession, true);
 });
 
-test('同人验收的原执行会话已删除时回退到独立验收会话', () => {
+test('a missing history row cannot prove the original review archive was deleted', () => {
  const f = fixture();
  const out = f.api.resolve({taskId:'a', source:'acceptance', acceptanceSession:true,
    reuseExecutionSession:true, approvalId:'gate-1'},
    {id:'a', status:'done', workRouting:{conversationTurn:{conversationId:'deleted'}}},
    {sessionId:'other'}, [], null);
- assert.equal(out.chatId, '');
- assert.equal(out.forceNew, true);
- assert.equal(out.acceptanceSession, true);
- assert.equal(out.acceptanceExecutionSession, false);
+ assert.equal(out.chatId, 'deleted');
+ assert.equal(out.forceNew, false);
+ assert.equal(out.acceptanceSession, false);
+ assert.equal(out.acceptanceExecutionSession, true);
+});
+
+for (const acceptanceMode of ['manual', 'auto']) test(`a confirmed missing original reuses its ${acceptanceMode} review replacement`, async () => {
+ const calls=[];
+ let info={}, original='deleted-original';
+ const f=fixture({
+  SoduWorkAPI:{getTask:async id=>({id,status:'done',workRouting:{conversationTurn:{conversationId:original}}})},
+  NativeChat:{sessionInfo:()=>info},
+  WorkspaceHost:{open:async(_view,payload)=>{
+   calls.push(payload);
+   info={sessionId:'replacement',acceptanceSession:true,acceptanceExecutionSession:false,
+    acceptanceTaskId:'a',acceptanceApprovalId:'gate-1',acceptanceFallbackFrom:original};
+   return true;
+  }},
+ });
+ const options=()=>({source:'acceptance',chatId:original,reuseExecutionSession:true,
+  acceptanceExecutionSession:true,acceptanceSession:false,approvalId:'gate-1',acceptanceMode});
+ await f.api.open('a','Delivery',options());
+ info={};
+ await f.api.open('a','Delivery',options());
+ assert.equal(calls[0].chatId,'deleted-original');
+ assert.equal(calls[1].chatId,'replacement');
+ assert.equal(calls[1].acceptanceSession,true);
+ assert.equal(calls[1].acceptanceExecutionSession,false);
+ assert.equal(calls[1].forceNew,false);
+ assert.equal(calls[1].acceptanceMode,acceptanceMode);
+ original='new-execution'; info={};
+ await f.api.open('a','Delivery',options());
+ assert.equal(calls[2].chatId,'new-execution','new execution authority supersedes a missing-archive fallback');
+  f.listeners['soduwork-data-scope-changed']();info={};
+ await f.api.open('a','Delivery',options());
+ assert.equal(calls[3].chatId,'new-execution','fallback identity cannot cross account scope');
 });
 
 test('执行人与验收人相同且原会话仍在存档时，验收上下文复用原执行会话', async () => {
@@ -149,7 +181,7 @@ test('执行人与验收人相同且原会话仍在存档时，验收上下文�
  assert.equal(f.calls[0].payload.acceptanceSession,false);
 });
 
-test('执行人与验收人相同但原会话已删除时，回退到新的独立验收会话', async () => {
+test('review navigation preserves the exact archive identity until the controller confirms absence', async () => {
  const f=fixture({
   SoduWorkAPI:{getTask:async id=>({id,status:'done',workRouting:{conversationTurn:{conversationId:'deleted'}}})},
   soduWorkAPI:{conversationSession:{history:async()=>({chats:[]})}},
@@ -157,10 +189,31 @@ test('执行人与验收人相同但原会话已删除时，回退到新的独�
  await f.api.open('a','交付结果',{source:'acceptance',acceptanceSession:false,
    acceptanceExecutionSession:true,reuseExecutionSession:true,approvalId:'gate-1'});
  assert.equal(f.calls.length,1);
- assert.equal(f.calls[0].payload.chatId,'');
- assert.equal(f.calls[0].payload.forceNew,true);
- assert.equal(f.calls[0].payload.acceptanceSession,true);
- assert.equal(f.calls[0].payload.acceptanceExecutionSession,false);
+ assert.equal(f.calls[0].payload.chatId,'deleted');
+ assert.equal(f.calls[0].payload.forceNew,false);
+ assert.equal(f.calls[0].payload.acceptanceSession,false);
+ assert.equal(f.calls[0].payload.acceptanceExecutionSession,true);
+});
+
+test('same-owner navigation resolves creation provenance and prefers an existing execution receipt', async () => {
+ let reads=0;
+ const f=fixture({__teamCap:{meId:'me'},soduWorkAPI:{conversationSession:{findTaskCreation:async()=>{reads++;return {ok:true,sessionId:'origin'};}}}});
+ const task={id:'task',createdBy:'me',assigneeUserId:'me'};
+ assert.equal(await f.api.preferredConversation(task),'origin');
+ assert.equal(await f.api.preferredConversation({...task,workRouting:{conversationTurn:{conversationId:'execution'}}}),'execution');
+ assert.equal(await f.api.preferredConversation({...task,assigneeUserId:'colleague'}),'');
+ assert.equal(await f.api.preferredConversation({...task,createdBy:'colleague'}),'');
+ assert.equal(reads,1);
+});
+
+test('provenance lookup failure or an account switch must not authorize a replacement chat', async () => {
+ const f=fixture({__teamCap:{meId:'me'},soduWorkAPI:{conversationSession:{findTaskCreation:async()=>({ok:false,reason:'unavailable'})}}});
+ await assert.rejects(f.api.preferredConversation({id:'task',createdBy:'me',assigneeUserId:'me'}),/unavailable/);
+ let resolve;
+ const late=fixture({__teamCap:{meId:'me'},soduWorkAPI:{conversationSession:{findTaskCreation:()=>new Promise(done=>{resolve=done;})}}});
+ const pending=late.api.preferredConversation({id:'task',createdBy:'me',assigneeUserId:'me'});
+  await new Promise(setImmediate);late.listeners['soduwork-data-scope-changed']();resolve({ok:true,sessionId:'origin'});
+ await assert.rejects(pending);
 });
 
 test('验收会话语义变化时不复用旧的本地去重缓存', async () => {

@@ -3,6 +3,7 @@ import { dictionary } from './locales/shell.js'
 import { messages } from './locales/messages.js'
 import { messagesByLocale } from './locales/extra-languages.js'
 import quotaMessages from './locales/quota-management.js'
+import { serverMessages } from './locales/server-messages.js'
 
 export const LOCALES = Object.freeze({ 'zh-CN': '简体中文', 'en-US': 'English', 'ja-JP': '日本語', 'ko-KR': '한국어' })
 const STORAGE_KEY = 'soduwork.locale'
@@ -53,6 +54,17 @@ export function t(key, fallback = key, value = getLocale()) {
 // Mark an authored key that must remain stable until the UI presents it.
 // The source audit checks this exact key in every supported translated locale.
 export function deferredMessageKey(source) { return source }
+
+export function serverMessage(message, fallback = '', value = getLocale()) {
+  if (!message || typeof message !== 'object') return String(message ?? fallback)
+  const key = String(message.key || '')
+  const row = Object.hasOwn(serverMessages, key) ? serverMessages[key] : null
+  if (!row) return String(message.fallback || fallback)
+  const index = ['zh-CN', 'en-US', 'ja-JP', 'ko-KR'].indexOf(normalizeLocale(value))
+  const params = message.params && typeof message.params === 'object' ? message.params : {}
+  return (row[index] || row[1]).replace(/\{([a-zA-Z0-9_]+)\}/g,
+    (token, name) => Object.hasOwn(params, name) ? String(params[name] ?? '') : token)
+}
 
 // Only authored UI sources are passed here. Never translate a server value,
 // user-entered title, prompt, URL, log or code, even if it equals a UI label.

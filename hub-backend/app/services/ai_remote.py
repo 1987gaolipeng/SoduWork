@@ -50,6 +50,7 @@ def _agent_usable(agent: dict) -> bool:
 # _runner_of_ref rediscovers through the full Runner list on a miss.
 _WHERE_MAX = 10_000
 _WHERE: OrderedDict[str, str] = OrderedDict()
+_WHERE_LOCK = threading.Lock()
 
 
 def remember(ref: str, runner_id: str) -> None:
@@ -58,10 +59,11 @@ def remember(ref: str, runner_id: str) -> None:
     """
     ref, runner_id = str(ref or ""), str(runner_id or "")
     if ref and runner_id:
-        _WHERE[ref] = runner_id
-        _WHERE.move_to_end(ref)
-        while len(_WHERE) > _WHERE_MAX:
-            _WHERE.popitem(last=False)
+        with _WHERE_LOCK:
+            _WHERE[ref] = runner_id
+            _WHERE.move_to_end(ref)
+            while len(_WHERE) > _WHERE_MAX:
+                _WHERE.popitem(last=False)
 
 
 def _cached_runner(ref: str):
@@ -135,6 +137,7 @@ def list_assignees_sync(cfg: dict) -> dict:
     for r in nodes:
         mkey = agent_naming.machine_key(host=r.host, runner_id=r.id)
         label = labels.get(mkey) or r.host or r.id[:12]
+        runner_kind = "work-computer" if runner_hub.is_client_runtime(r) else "cloud"
         for a in (r.agents or []):
             key = a.get("key") or ""
             if not key or not _active_agent(key) or not _agent_usable(a):
@@ -151,6 +154,8 @@ def list_assignees_sync(cfg: dict) -> dict:
                 "runnerBusy": max(0, int(getattr(r, "busy", 0) or 0)),
                 "local": False, "remote": True,
                 "runnerId": r.id, "host": r.host, "clientId": r.client_id,
+                "runnerKind": runner_kind,
+                "isWorkComputer": runner_kind == "work-computer",
                 "runnerBootId": str(getattr(r, "boot_id", "") or ""),
                 "orgId": r.org_id,
                 "capabilities": execution_capabilities.clean_report(r.capabilities),
@@ -667,27 +672,45 @@ def stop_sync(cfg: dict, ref: str) -> dict:
 
 
 def comment_sync(cfg: dict, ref: str, text: str) -> dict:
-    r = _runner_of_ref(ref)
+    clean_cfg = dict(cfg or {})
+    pinned = str(clean_cfg.pop("_continuationRunnerId", ""))
+    identity = clean_cfg.pop("_continuationRunnerIdentity", None)
+    r = runner_hub.get(pinned) if pinned else _runner_of_ref(ref)
     if r is None:
         # RUNNER_OFFLINE indicates a transient delivery failure eligible for automatic retry.
         # task_rework retries it with backoff; other delivery errors require manual intervention.
         return {"ok": False, "code": "RUNNER_OFFLINE",
                 "error": "\u8fd9\u6761\u6d3b\u6240\u5728\u7684\u6267\u884c\u673a\u4e0d\u5728\u7ebf"}
-    clean_cfg = dict(cfg or {})
+    if pinned and identity is not None and any(
+            str(getattr(r, key, "") or "") != value for key, value in identity.items()):
+        return {"ok": False, "code": "RUNNER_IDENTITY_CHANGED",
+                "error": "原执行机身份已变化，请刷新状态后重试"}
     record_user = bool(clean_cfg.pop("_recordUser", False))
     message_id = str(clean_cfg.pop("_messageId", ""))
     selection = clean_cfg.pop("_executionSelection", None)
+    files = clean_cfg.pop("_turnFiles", [])
+    packet = {}
+    if files:
+        if "turnFiles1" not in getattr(r, "caps", []):
+            return {"ok": False, "error": "原执行机尚未支持追加文件，请先更新"}
+        packet, error = _upload_inputs(r, files)
+        if error:
+            return {"ok": False, "error": error}
     res = runner_hub.call_sync(r, "job.comment", {
         "ref": ref, "text": text, "cfg": clean_cfg,
-        "recordUser": record_user, "turnId": message_id,
+        "recordUser": record_user, "turnId": message_id, "files": packet,
         **({"executionSelection": selection} if selection is not None else {})}, timeout=60)
     if not res.get("ok"):
+        if not res.get("uncertain"):
+            _drop_packet(r, packet)
         return {"ok": False, "error": res.get("error"), "code": res.get("code", ""),
                 "uncertain": bool(res.get("uncertain"))}
     data = dict(res.get("data") or {})
     # Admission ACKs describe the accepted turn but do not carry a second `ok`.
     # Older Runners return the nested local_stream receipt, including its `ok`.
     accepted = data.get("ok", str(data.get("state") or "") not in {"failed", "cancelled"})
+    if not accepted and not data.get("uncertain"):
+        _drop_packet(r, packet)
     return {**data, "ok": bool(accepted)}
 
 

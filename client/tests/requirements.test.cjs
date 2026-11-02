@@ -50,7 +50,7 @@ test('execution facts lock definition editing without disabling delivery capabil
     assert.equal(R.canEdit(item), false, JSON.stringify(fields));
     assert.deepEqual(R.editPatch(item,{title:'Changed',tags:['changed'],visibility:'organization'}), {});
     assert.equal(R.canManageMaterials(item), true);
-    assert.equal(R.canSubmitReview(item), true);
+    assert.equal(R.canSubmitReview(item), fields.status === 'doing');
   }
   assert.equal(R.canEdit({...task,ai:{state:'failed'},hasExecutionHistory:false}), true, 'failed preflight alone is not execution');
   assert.equal(R.canEdit({...task,canEditRequirement:false}), false);
@@ -69,22 +69,18 @@ test('unstarted work submits changed metadata and active definitions remain immu
   assert.deepEqual(R.editPatch({...task,readOnly:true,status:'todo'}, {title:'After'}), {title:'After'});
 });
 
-test('execution facts lock definition editing without disabling delivery capabilities', () => {
-  const task = {status:'todo',canEditRequirement:true,canSubmitReview:true,canManageRequirementMaterials:true};
-  for (const fields of [{status:'doing'}, {status:'paused'}, {status:'done'}, {status:'cancel'},
-    {requirementStage:'reviewing'}, {archivedAt:1}, {actualStart:1}, {reviewedAt:1},
-    {hasExecutionHistory:true}, {requirementEditBlocked:true}, {maintenanceBlocked:true},
-    {ai:{state:'running'}}, {ai:{state:'done'}}, {workRouting:{conversationTurn:{state:'done'}}}]) {
-    const item = {...task,...fields};
-    assert.equal(R.canEdit(item), false, JSON.stringify(fields));
-    assert.deepEqual(R.editPatch(item,{title:'Changed',tags:['changed'],visibility:'organization'}), {});
-    assert.equal(R.canManageMaterials(item), true);
-    assert.equal(R.canSubmitReview(item), true);
+test('manual review submission requires an idle executor in the delivering stage', () => {
+  const task = {status:'doing',requirementStage:'delivering',canSubmitReview:true};
+  assert.equal(R.canSubmitReview(task),true);
+  for (const fields of [{canSubmitReview:false},{canSubmitReview:undefined},{status:'todo'},
+    {status:'paused'},{status:'done'},{requirementStage:'reviewing'},{archivedAt:1},
+    {maintenanceBlocked:true},{ai:{state:'running'}},{ai:{state:'dispatching'}},
+    ...['queued','starting','running','waiting'].map(state=>({workRouting:{conversationTurn:{state}}}))]) {
+    assert.equal(R.canSubmitReview({...task,...fields}),false,JSON.stringify(fields));
   }
-  assert.equal(R.canEdit({...task,ai:{state:'failed'},hasExecutionHistory:false}), true, 'failed preflight alone is not execution');
-  assert.equal(R.canEdit({...task,canEditRequirement:false}), false);
-  assert.equal(R.canOpenConversation({...task,status:'done',myRoles:['assignee']},'local'), false);
-  assert.equal(R.canOpenConversation({...task,status:'doing',requirementStage:'reviewing'},'local'), false);
+  for (const state of ['completed','failed','stopped']) {
+    assert.equal(R.canSubmitReview({...task,workRouting:{conversationTurn:{state}}}),true);
+  }
 });
 
 test('requirements support human assignment and exact tag filtering', () => {
@@ -191,6 +187,16 @@ test('human attention distinguishes assigned work, running agents, returned resu
   assert.equal(R.actionable({...task,status:'done',myRoles:['executor','assignee']},ctx),false,'completed work waits for the creator review');
   assert.equal(R.actionable({...task,archivedAt:1},ctx),false);
   assert.equal(R.actionable({...task,canViewExecution:false}),false,'shared source roles do not grant execution access');
+});
+
+test('personal review capability keeps a pending delivery actionable before the inbox refreshes', () => {
+  const task = {id:'reviewing',status:'doing',requirementStage:'reviewing',
+    myRoles:['creator'],canReview:true,ai:{state:'done'},canViewExecution:true};
+  assert.equal(R.actionable(task),true);
+  assert.equal(R.actionable({...task,canReview:false}),false);
+  assert.equal(R.actionable({...task,canReview:undefined}),false);
+  assert.equal(R.actionable({...task,status:'done',reviewedAt:1,canReview:false}),false);
+  assert.equal(R.actionable({...task,archivedAt:1}),false);
 });
 
 test('cards identify the actual assignee and provide permission-aware next steps', () => {

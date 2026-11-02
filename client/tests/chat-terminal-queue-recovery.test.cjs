@@ -133,6 +133,29 @@ test('the Agent picker explains unknown execution instead of asking users to wai
   assert.doesNotMatch(notices[0], /等待本轮/);
 });
 
+test('chat runtime maintenance opens cloud computers only for the cloud conversation', () => {
+  const handlers = new Map(), calls = [], state = {ref:'chat-a'};
+  const retries = [];
+  const pop = {hidden:true,style:{},setAttribute() {},addEventListener() {},remove() {}};
+  const button = {setAttribute() {},addEventListener() {},after() {}};
+  const more = {addEventListener:(name,fn) => handlers.set(name,fn)};
+  const globals = {AbortController,setTimeout: fn => retries.push(fn),document:{createElement:() => pop,addEventListener() {}},addEventListener() {},
+    openAgentsEntry:() => calls.push('agents'),WorkspaceHost:{open:page => calls.push(page)}};
+  globals.window = globals;
+  vm.runInNewContext(fs.readFileSync(require.resolve('../components/panels/chat-runtime-picker.js'),'utf8'),globals);
+  globals.ChatRuntimePicker.create({querySelector:selector => selector === '#nchatRuntime' ? button
+    : selector === '#nchatRuntimeMore' ? more : null}, {state:() => state});
+  const click = () => handlers.get('click')({stopPropagation() {}});
+  click(); state.cloudHandoff = {phase:'committed'}; click();
+  delete globals.WorkspaceHost;
+  globals.openCloudEnvironmentsPanel = () => calls.push('cloud-fallback'); click();
+  delete globals.openCloudEnvironmentsPanel; click();
+  state.cloudHandoff = null; click();
+  assert.equal(retries.length, 2);
+  retries.forEach(retry => retry());
+  assert.deepEqual(calls,['agents','cloud','cloud-fallback','agents']);
+});
+
 test('the production NativeChat send button submits the retained first message after a confirmed failure', async t => {
   const {makeGlobals, stubGlobals} = require('./fixture/chat-draft-harness.cjs');
   const f = makeGlobals(), sent = []; let onEvent;

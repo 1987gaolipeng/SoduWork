@@ -5,8 +5,8 @@
 (function (global) {
   'use strict';
   if (global.soduWorkApp) return;
-  const channel = 'soduwork.app/v1', native = global.soduWorkAppBridge || global.soduWorkAppBridge;
-  const methods = new Set(['context.get', 'composer.send', 'composer.insertText', 'composer.expand', 'composer.collapse', 'settings.get', 'settings.update', 'automation.create',
+  const channel = 'soduwork.app/v1', native = global.soduWorkAppBridge;
+  const methods = new Set(['ai.generate', 'context.get', 'user.getCurrent', 'notifications.list', 'library.list', 'library.read', 'conversations.list', 'conversations.messages', 'directory.list', 'composer.mention', 'composer.send', 'composer.insertText', 'composer.expand', 'composer.collapse', 'settings.get', 'settings.update', 'automation.create', 'data.apps', 'data.get', 'data.list', 'data.batch', 'data.assetPut', 'data.assetGet', 'mcp.connect',
     'attachments.pick','attachments.begin','attachments.append','attachments.finish','attachments.release','attachments.check']);
   const origins = new Set([location.origin]), pending = new Map();
   const listeners = new Set(), dataListeners = new Set();

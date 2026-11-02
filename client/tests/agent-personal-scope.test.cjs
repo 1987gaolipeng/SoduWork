@@ -62,6 +62,7 @@ for (const outcome of ['accepted', 'rejected']) {
   test(`a previous account's ${outcome} installation cannot replace a new account job`, async () => {
     const f = fixture();
     let resolve, reject;
+    f.read('_agData = { machines: [{ runnerId: "machine", scope: "current-instance", agents: [{ key: "pi" }] }] }');
     f.context.SoduWorkAPI.agentInstall = () => new Promise((yes, no) => { resolve = yes; reject = no; });
     const pending = f.context._agRun('machine~pi', 'repair');
     f.setScope('account-b');

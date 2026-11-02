@@ -52,7 +52,7 @@ test('catalog exposes versioned access support and never claims a universal sand
     const exported = catalog.publicRuntime(row);
     assert.equal(exported.accessControl.schema, policy.SCHEMA);
     assert.equal(exported.accessControl.sandbox, false);
-    assert.equal(exported.accessControl.supported, ['pi', 'codex-harness', 'opencode', 'qwen', 'codex', 'dsh', 'harness2'].includes(row.id));
+    assert.equal(exported.accessControl.supported, ['pi', 'codex-harness', 'opencode', 'qwen', 'codex', 'dsh', 'kimi', 'claude', 'harness2'].includes(row.id));
     assert.deepEqual(exported.accessControl.modes, exported.accessControl.supported ? ['standard', 'readonly', 'full'] : []);
   }
 });

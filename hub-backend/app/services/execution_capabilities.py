@@ -34,7 +34,7 @@ _ALIASES = {
     "computer-use": "computer", "computer_use": "computer", "desktop": "computer",
 }
 _KEY = re.compile(r"^[a-z][a-z0-9._-]{0,63}$")
-_DECLARED_ENV = ("SODUWORK_RUNNER_CAPABILITIES", "SODUWORK_RUNNER_CAPABILITIES")
+_DECLARED_ENV = ("SODUWORK_RUNNER_CAPABILITIES",)
 _MANAGED = ("browser", "computer")
 _DEFAULT_GRANTS = ("browser",)
 _SKILL_CAPABILITIES = {
@@ -112,7 +112,7 @@ def _git_candidates(env: dict | None = None) -> list[str]:
            or r"C:\Program Files (x86)")
     local = values.get("LOCALAPPDATA") or ""
     profile = values.get("USERPROFILE") or ""
-    explicit = values.get("SODUWORK_GIT") or values.get("SODUWORK_GIT") or ""
+    explicit = values.get("SODUWORK_GIT") or ""
     return [
         explicit,
         os.path.join(pf, "Git", "cmd", "git.exe"),
@@ -142,7 +142,7 @@ def _office_candidates(env: dict | None = None) -> list[str]:
     values = os.environ if env is None else env
     return [
         values.get("SODUWORK_MANAGED_OFFICECLI") or "",
-        values.get("SODUWORK_OFFICECLI") or values.get("SODUWORK_OFFICECLI") or "",
+        values.get("SODUWORK_OFFICECLI") or "",
     ]
 
 
@@ -234,7 +234,7 @@ def _browser_path() -> str:
     pfx = env.get("ProgramFiles(x86)") or env.get("PROGRAMFILES(X86)") or r"C:\Program Files (x86)"
     local = env.get("LOCALAPPDATA") or ""
     candidates = [
-        env.get("SODUWORK_BROWSER") or env.get("SODUWORK_BROWSER") or "",
+        env.get("SODUWORK_BROWSER") or "",
         os.path.join(pf, "Google", "Chrome", "Application", "chrome.exe"),
         os.path.join(pfx, "Google", "Chrome", "Application", "chrome.exe"),
         os.path.join(pf, "Microsoft", "Edge", "Application", "msedge.exe"),

@@ -1,5 +1,5 @@
 'use strict';
-// Business data is shared by installed 即用 inside one SoduWork account.
+// Business data is shared by installed apps within one SoduWork account.
 // There is no per-app sharing ACL. Credential storage is a different API.
 const store = require('./app-settings-store.cjs');
 const pages = require('../core/plugin-package-page.cjs');
@@ -48,7 +48,9 @@ async function request(deps,sourceBound,sourceInstalled,method,input,assertCurre
     if (targetId.startsWith('local:') && require('./personal-plugins').get(deps.app,targetId).checksum !== revision) throw Error('目标即用版本已变化');
   };
   const initialization=await require('./jiyong-initialization.cjs').script(deps,installed,current);
-  const result = await require('./jiyong-data.cjs').execute(deps.app,target,schema,method,params,current,initialization);
+  const result = schema.storage?.location === 'cloud'
+    ? await require('./jiyong-cloud-data.cjs').execute(deps,target,installed,method,params,current,initialization)
+    : await require('./jiyong-data.cjs').execute(deps.app,target,schema,method,params,current,initialization);
   check();
   return result;
 }

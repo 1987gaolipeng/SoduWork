@@ -488,6 +488,18 @@ class OnceLedgerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run.error, "OLD_OCCURRENCE_FAILED")
         self.assertEqual(self.plan.last_error, "")
 
+    async def test_same_account_peer_cannot_claim_local_conversation_pinned_to_desktop(self):
+        from app.services import schedule_conversations as chats
+        run, _ = await schedules.claim_run(self.session, self.plan, "timer",
+                                           schedules.trigger_identity(self.plan))
+        await chats.prepare(self.session, self.plan, self.client, None, run.id, "pi", {})
+        peer = models.Client(id="peer-device", config={"automationConversationV1": 1})
+        self.session.add(peer)
+        await self.session.commit()
+        with self.assertRaises(HTTPException) as error:
+            await chats.claim(self.session, peer, run.id, "peer-worker")
+        self.assertEqual(error.exception.status_code, 404)
+
     async def test_stale_worker_can_promote_legacy_cross_client_false_failure(self):
         from app.services import schedule_conversations as chats
         run, _ = await schedules.claim_run(self.session, self.plan, "timer",
@@ -599,7 +611,8 @@ class OnceLedgerTests(unittest.IsolatedAsyncioTestCase):
                                                   self.client, self.session)
             self.assertEqual(new["state"], "blocked")
             with self.assertRaises(HTTPException) as error:
-                await api.preflight_my_schedule({"scheduleId": "schedule"}, SimpleNamespace(id="other"), self.session)
+                await api.preflight_my_schedule(
+                    {"scheduleId": "schedule"}, SimpleNamespace(id="other", user_ref="other-user"), self.session)
             self.assertEqual(error.exception.status_code, 404)
 
     async def test_model_server_default_is_a_real_false_boolean(self):

@@ -8,7 +8,6 @@ const MAX_BATCH_IMAGES = 4;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 const MAX_ALL_BYTES = 100 * 1024 * 1024;
-const SUPPORTED = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 const { fetchWithDeviceAuthRetry } = require('../device-auth-request');
 
 function compact(images) {
@@ -20,8 +19,9 @@ function compact(images) {
   const output = [];
   for (let index = 0; index < source.length; index++) {
     const item = source[index] || {};
-    const mimeType = String(item.mimeType || item.type || '').toLowerCase();
-    if (!SUPPORTED.has(mimeType)) {
+    const mimeType = String(item.mimeType || item.type || '').toLowerCase().split(';')[0].trim()
+      .replace(/^image\/(?:jpg|pjpeg)$/, 'image/jpeg');
+    if (!/^image\/[a-z0-9][a-z0-9.+-]*$/i.test(mimeType)) {
       return { ok: false, reason: '第 ' + (index + 1) + ' 张图片格式暂不支持' };
     }
     const data = String(item.data || '');

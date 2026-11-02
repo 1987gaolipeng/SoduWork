@@ -40,11 +40,21 @@ function environment(base, { resourcesPath, platform = process.platform, exists 
   return env;
 }
 
+function runtimeRoot(app, resourcesPath = process.resourcesPath) {
+  if (app?.isPackaged) return resourcesPath;
+  const source = app?.getAppPath?.();
+  if (!source) return '';
+  const root = path.join(source, '.runtime');
+  const node = path.join(root, 'node', process.platform === 'win32' ? 'node.exe' : 'bin/node');
+  return fs.existsSync(node) ? root : '';
+}
+
 function initialize(app, env = process.env, resourcesPath = process.resourcesPath) {
-  if (!app.isPackaged) return;
-  const prepared = environment(env, { resourcesPath });
+  const root = runtimeRoot(app, resourcesPath);
+  if (!root) return;
+  const prepared = environment(env, { resourcesPath: root });
   for (const key of Object.keys(env)) if (!(key in prepared)) delete env[key];
   Object.assign(env, prepared);
 }
 
-module.exports = { environment, initialize };
+module.exports = { environment, initialize, runtimeRoot };

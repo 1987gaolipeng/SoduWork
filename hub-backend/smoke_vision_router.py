@@ -62,8 +62,8 @@ async def main():
         chk("返回结构化观察", result.get("ok") and result["observation"]["summary"] == "设置页截图", result)
         chk("接口结果不回显密钥", "server-only-key" not in json.dumps(result, ensure_ascii=False), result)
 
-        bad = await vr.analyze(None, None, [{"mimeType": "image/svg+xml", "data": "eA=="}], "")
-        chk("不支持的图片明确失败", not bad.get("ok") and bad.get("status") == 422, bad)
+        arbitrary = await vr.analyze(None, None, [{"mimeType": "image/svg+xml", "data": "eA=="}], "")
+        chk("arbitrary image mime enters vision analysis", arbitrary.get("ok") and arbitrary.get("imageCount") == 1, arbitrary)
         vr.get_settings = lambda: SimpleNamespace(
             vl_model="qwen-vision-fixture", vl_base_url="https://vision.example/v1",
             vl_api_key="", vl_timeout_seconds=30)

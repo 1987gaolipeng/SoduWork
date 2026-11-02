@@ -1,4 +1,4 @@
-const { app, BrowserWindow, WebContentsView, ipcMain, screen, Tray, Menu, nativeImage, globalShortcut, Notification, shell, safeStorage, dialog, net, powerMonitor } = require('electron');
+const { app, BrowserWindow, WebContentsView, webContents, ipcMain, screen, Tray, Menu, nativeImage, globalShortcut, Notification, shell, safeStorage, dialog, net, powerMonitor } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -30,6 +30,13 @@ const _piSessionIpc = require('./main/pi-session/ipc');
 require('./main/native-theme.cjs').install({ BrowserWindow, ipcMain });
 require('./main/screenshot-service.cjs').install({ getRendererRoot: rendererRoot });
 const _piSessions = require('./main/agent-runtime/pi-session-bridge');
+const _catalogChanges = require('./main/agent-runtime/catalog-changes.cjs').create({
+  session: _piSessions, contents: () => webContents.getAllWebContents(),
+  invalidateModels: () => {
+    require('./main/pi-session/model-config').invalidate();
+    require('./main/agent-runtime/process-session').invalidateModels();
+  },
+});
 require('./main/agent-runtime/process-session').installLifecycle(app, powerMonitor);
 require('./main/computer-use/index.cjs').install({ app, BrowserWindow, screen, ipcMain, globalShortcut, powerMonitor, sessions: _piSessions, runner: _runnerRuntime });
 const _workPreview = require('./main/work-preview');
@@ -112,7 +119,7 @@ const _workspaceTitlebar = require('./main/workspace-titlebar.cjs').create({ app
   getWorkspace: () => { openDeskWindow({ panel: 'workspace' }, null); return _workWindows.get('workspace'); } });
 _runnerRuntime.install({ app, ipcMain, identityOf: _deviceAuth.identity });
 require('./main/agent-runtime/custom-runtimes.cjs').install({ app, ipcMain, session: _piSessions,
-  runner: _runnerRuntime, BrowserWindow, dialog });
+  runner: _runnerRuntime, BrowserWindow, dialog, changed: _catalogChanges.changed });
 async function _sessionIdentity(appRef, hub = '', clientId = '') {
   const id = _deviceAuth.identity(appRef, hub, clientId);
   if (!id) return null;
@@ -163,6 +170,8 @@ require('./main/pi-session/attachment-materialize').install({ app, ipcMain,
   identityOf: _deviceAuth.authenticatedIdentity, sessionOf: ref => _piSessions.get(String(ref || '')) });
 require('./main/file-type-icons.cjs').install({ app, ipcMain });
 _personalPlugins.install({ app, ipcMain, dialog: require('electron').dialog, safeStorage, identityOf: _sessionIdentity });
+_runnerRuntime.setMobileCapabilities(require('./main/mobile-capabilities.cjs').create({
+  app, identityOf: _deviceAuth.authenticatedIdentity, conversation: _ordinaryConversations }));
 const _platformConnections = require('./main/platform-connections/index.cjs').install({ app, ipcMain, identityOf: _sessionIdentity, safeStorage, shell });
 require('./main/automation-conversations').install({ app, ipcMain, identityOf: _sessionIdentity, conversation: _ordinaryConversations, platformConnections: _platformConnections });
 
@@ -776,9 +785,9 @@ ipcMain.on('close-desk-window', (event) => {
  * without writing it back, preventing feedback loops.
  */
 ipcMain.on('soduwork-work-broadcast', (event, kind, payload) => {
-  if (kind === 'models') {
-    require('./main/pi-session/model-config').invalidate();
-    require('./main/agent-runtime/process-session').invalidateModels();
+  if (kind === 'models' || kind === 'agent-runtimes-changed') {
+    if (!_catalogChanges.receive(event, kind)) return;
+    if (kind === 'agent-runtimes-changed') return;
   }
   for (const w of BrowserWindow.getAllWindows()) {
     if (w.isDestroyed() || w.webContents === event.sender) continue;

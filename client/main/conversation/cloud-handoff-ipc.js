@@ -1,7 +1,15 @@
 'use strict';
 
 function install({ app, ipcMain, session, identityOf, notify, assertOwner = () => {} }) {
-  const controller = require('./cloud-handoff').create({ app, identityOf, notify,
+  const nativeHandle = Symbol.for('soduwork.agent-runtime.native-handle');
+  const controller = require('./cloud-handoff').create({ app, identityOf, remoteDirectory: true,
+    notify(handle, touched) {
+      // Ownership and UI subscriptions belong to the registered facade. Early
+      // polls before attachment and callbacks from disposed views cannot publish.
+      const current = session.get(handle.ref);
+      if (!current || (current[nativeHandle] || current) !== handle) return;
+      notify(current, touched);
+    },
     validateHandle(handle, identity) {
       const current = session.get(handle.ref);
       if ((current?.[Symbol.for('soduwork.agent-runtime.native-handle')] || current) !== handle) throw Error('会话已关闭，请重新打开');

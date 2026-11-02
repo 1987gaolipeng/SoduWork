@@ -226,6 +226,8 @@
       onReceiptRendered: (id, title, outcome) => {
         if (!current()) return;
         layer.classList.add('is-complete');
+        // A completed inline receipt is history, not a cancellable creation form.
+        if (surface.inline) layer.querySelector('[data-wes-close]')?.remove();
         layer.querySelector('#wesTitle').textContent = '需求已创建';
         if (attachmentZone) layer.querySelector('.wes-body').appendChild(attachmentZone);
         showSavedMaterials(id, outcome?.attachments);

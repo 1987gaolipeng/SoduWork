@@ -19,8 +19,18 @@
   function findAgent(options,selection){
     var s=selection||{}, wanted=key(s.agentId||s.substrateKey||s.agentKey);
     if(!wanted) return null;
-    return agentRows(options).find(function(a){return a&&(
+    var direct=agentRows(options).find(function(a){return a&&(
       key(a.key)===wanted||key(a.id)===wanted||key(a.cli)===wanted);})||null;
+    if(direct) return direct;
+    for(var i=0;i<agentRows(options).length;i++){
+      var group=agentRows(options)[i], locations=list(group&&group.locations);
+      for(var j=0;j<locations.length;j++){
+        var location=locations[j]||{}, id=key(location.assigneeId||location.id);
+        if(id===wanted) return Object.assign({},group,location,{key:location.assigneeId||location.id,id:location.assigneeId||location.id,
+          locationMode:location.mode||group.locationMode,locationLabel:location.label||group.locationLabel});
+      }
+    }
+    return null;
   }
   function repoOf(options,selection){
     var s=selection||{}, wanted=key(s.repoId), rows=list((options||{}).repos);

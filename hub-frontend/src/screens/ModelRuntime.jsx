@@ -4,14 +4,21 @@ import { api } from '../api.js'
 import { Icon, Modal, toast, SelectMenu } from '../ui.jsx'
 import './model-runtime.css'
 
+// Keep the browser form in sync with the Hub's high-side policy guards.
+// These values replace the first runtime build's 256 request cap without
+// making an accidental typo an unbounded admission policy.
+const MAX_POLICY_CONCURRENCY = 4096
+const MAX_POLICY_QUEUE = 4096
+const MAX_POLICY_USER_QUEUE = 1024
+
 const FIELDS = localeMap(() => ([
-  ['globalConcurrent', '全站同时运行', 1, 256],
-  ['providerConcurrent', '每个服务同时运行', 1, 256],
-  ['keyConcurrent', '每把密钥同时运行', 1, 256],
-  ['modelConcurrent', '每个模型同时运行', 1, 256],
-  ['userConcurrent', '每人同时运行', 1, 256],
-  ['queueSize', '全站等待名额', 0, 256],
-  ['userQueueSize', '每人等待名额', 0, 32],
+  ['globalConcurrent', '全站同时运行', 1, MAX_POLICY_CONCURRENCY],
+  ['providerConcurrent', '每个服务同时运行', 1, MAX_POLICY_CONCURRENCY],
+  ['keyConcurrent', '每把密钥同时运行', 1, MAX_POLICY_CONCURRENCY],
+  ['modelConcurrent', '每个模型同时运行', 1, MAX_POLICY_CONCURRENCY],
+  ['userConcurrent', '每人同时运行', 1, MAX_POLICY_CONCURRENCY],
+  ['queueSize', '全站等待名额', 0, MAX_POLICY_QUEUE],
+  ['userQueueSize', '每人等待名额', 0, MAX_POLICY_USER_QUEUE],
   ['queueTimeout', '最长排队（秒）', 1, 120],
   ['requestTimeout', '最长生成（秒）', 30, 3600],
   ['readTimeout', '最长无输出（秒）', 5, 600],
@@ -141,11 +148,11 @@ function CapacityForm({ initial, providers, models, onClose, onSaved }) {
     <details><summary>{tx("为指定服务或模型设置不同上限")}</summary>
       <label className="f-lbl">{tx("服务")}<SelectMenu className="f-in" value={provider} onChange={e => setProvider(e.target.value)}>
         {providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</SelectMenu></label>
-      <input aria-label={tx("服务并发上限")} className="f-in" type="number" min="1" max="256" placeholder={tx("留空使用默认值")}
+      <input aria-label={tx("服务并发上限")} className="f-in" type="number" min="1" max={MAX_POLICY_CONCURRENCY} placeholder={tx("留空使用默认值")}
         disabled={!provider} value={policy.providers[provider] ?? ''} onChange={e => override('providers', provider, e.target.value)} />
       <label className="f-lbl">{tx("模型")}<SelectMenu className="f-in" value={model} onChange={e => setModel(e.target.value)}>
         {models.map(m => <option key={m.id} value={m.id}>{m.providerId} / {m.label || m.name}</option>)}</SelectMenu></label>
-      <input aria-label={tx("模型并发上限")} className="f-in" type="number" min="1" max="256" placeholder={tx("留空使用默认值")}
+      <input aria-label={tx("模型并发上限")} className="f-in" type="number" min="1" max={MAX_POLICY_CONCURRENCY} placeholder={tx("留空使用默认值")}
         disabled={!model} value={policy.models[model] ?? ''} onChange={e => override('models', model, e.target.value)} />
     </details>
     {error && <p className="model-runtime-error" role="alert">{error}</p>}

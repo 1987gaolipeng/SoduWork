@@ -77,5 +77,7 @@ test('real Pi history distinguishes omitted model from default and task turns re
   }
   assert.deepEqual(selections,['saved-model','','']);
   const entries=sdk.SessionManager.open(archive.getSessionFile()).getEntries();
+  assert.deepEqual(entries.filter(row => row.type === 'message' && row.message.role === 'assistant')
+    .map(row => row.message.usageProvider), [undefined,'provider-default','provider-saved']);
   assert.equal(entries.filter(row=>row.customType==='soduwork.model.selection').at(-1).data.name,'');
 });

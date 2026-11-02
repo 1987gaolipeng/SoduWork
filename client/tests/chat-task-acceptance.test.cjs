@@ -92,3 +92,92 @@ test('跨会话终态事件会释放临时验收发送上下文', () => {
   assert.equal(ctx._sessionOptions.approvalId, '');
   assert.equal(ctx._sessionOptions.acceptanceAttachmentIds.length, 0);
 });
+
+function executionReviewFixture(bind) {
+  const task = { id: 'review-task', title: 'Review delivery', status: 'reviewing',
+    ownerClientId: 'device', workRouting: { conversationTurn: { conversationId: 'execution-chat' } } };
+  const input = { value: '', dispatchEvent() {} }, calls = [];
+  const handle = { sessionId: 'execution-chat', taskIds: [] };
+  const window = { SoduWorkAPI: { getTask: async () => task, taskStorageKey: () => 'current-owner' } };
+  vm.runInNewContext(source, { window, SoduWorkAPI: window.SoduWorkAPI, setTimeout: () => 1,
+    Event: class Event { constructor(type) { this.type = type; } } });
+  const ctx = { _collabTasks: new Map([[task.id, { taskId: task.id, task }]]), _collabStarts: new Set(),
+    _sessionId: handle.sessionId, _ref: 'native-ref', _viewEpoch: 1, _taskOpenSeq: 0, _collabPollTimer: 1,
+    _collaborationTaskId: task.id, _collaborationTask: task, _boundFromServer: true,
+    _snap: { status: 'idle', messages: [] }, _sessionOptions: { adapterId: 'pi' },
+    _render() {}, _mount: () => ({ querySelector: () => input }),
+    _api: () => ({ bindTask: async (ref, id, title) => {
+      calls.push({ ref, id, title });
+      const result = bind ? await bind() : { ok: true };
+      if (result?.ok) handle.taskIds = [id];
+      return result;
+    } }) };
+  const controller = window.ChatTaskController.create(ctx);
+  return { ctx, input, handle, task, calls, window,
+    open: (mode = 'manual') => controller._openTask(task.id, task.title, { task, source: 'acceptance',
+      acceptanceExecutionSession: true, acceptanceMode: mode, approvalId: 'pending-review' }) };
+}
+
+test('reused review confirms the native task binding even when the renderer already shows the requirement', async () => {
+  for (const mode of ['manual', 'auto']) {
+    const f = executionReviewFixture();
+    assert.equal(await f.open(mode), true);
+    const turn = await require('../main/pi-session/acceptance-turn').prepare({
+      identity: { clientId: 'device' }, taskId: f.task.id, runtime: { handle: { ...f.handle, cwd: __dirname } },
+      requested: { acceptanceExecutionSession: true, acceptanceMode: mode },
+      request: async () => ({ task: f.task, canDecide: true, approvalId: 'pending-review',
+        artifactVersionId: 'artifact-1', requirementVersion: 1, criteria: [{ id: 'c1', label: 'Delivery works' }] }),
+    });
+    await turn.beforeTurn();
+    assert.equal(turn.acceptanceOnly, true);
+    assert.deepEqual(f.calls, [{ ref: 'native-ref', id: f.task.id, title: f.task.title }]);
+    assert.equal(f.ctx._sessionOptions.acceptanceMode, mode);
+    assert.match(f.input.value, mode === 'auto' ? /自动验收/ : /验收分析/);
+  }
+});
+
+test('reviewing another requirement in the same open conversation cannot reuse a stale binding flag', async () => {
+  const f = executionReviewFixture();
+  f.ctx._collaborationTaskId = 'another-task';
+  f.ctx._ensure = async () => true;
+  assert.equal(await f.open(), true);
+  assert.deepEqual(f.handle.taskIds, [f.task.id]);
+  assert.equal(f.ctx._sessionOptions.acceptanceExecutionSession, true);
+  assert.match(f.input.value, /验收分析/);
+});
+
+test('reused review waits for binding and preserves a failed draft until binding can be retried', async () => {
+  let resolve;
+  const f = executionReviewFixture(() => new Promise(done => { resolve = done; }));
+  f.input.value = 'Reviewer draft';
+  const pending = f.open();
+  await new Promise(setImmediate);
+  assert.equal(f.ctx._taskOpenPending, true);
+  assert.equal(f.ctx._sessionOptions.acceptanceExecutionSession, undefined);
+  assert.equal(f.input.value, 'Reviewer draft');
+  resolve({ ok: false, reason: 'Binding storage unavailable' });
+  assert.equal(await pending, false);
+  assert.match(f.ctx._taskOpenError, /Binding storage unavailable/);
+  assert.equal(f.ctx._sessionOptions.acceptanceExecutionSession, undefined);
+  const retry = f.open();
+  await new Promise(setImmediate);
+  resolve({ ok: true });
+  assert.equal(await retry, true);
+  assert.equal(f.input.value, 'Reviewer draft');
+});
+
+test('late binding cannot activate review after navigation, account changes or a newer open', async () => {
+  for (const change of ['navigation', 'account', 'newer-open']) {
+    let resolve;
+    const f = executionReviewFixture(() => new Promise(done => { resolve = done; }));
+    const pending = f.open();
+    await new Promise(setImmediate);
+    if (change === 'navigation') { f.ctx._viewEpoch++; f.ctx._sessionId = 'another-chat'; }
+    if (change === 'account') f.window.SoduWorkAPI.taskStorageKey = () => 'another-owner';
+    if (change === 'newer-open') f.ctx._taskOpenSeq++;
+    resolve({ ok: true });
+    assert.equal(await pending, false, change);
+    assert.equal(f.ctx._sessionOptions.acceptanceExecutionSession, undefined, change);
+    assert.equal(f.input.value, '', change);
+  }
+});

@@ -43,13 +43,13 @@ function create({ app, session, runner, store = createStore(app), changed = () =
     }),
   };
 }
-function install({ app, ipcMain, session, runner, BrowserWindow, dialog }) {
+function install({ app, ipcMain, session, runner, BrowserWindow, dialog, changed }) {
   const trusted = require('../access-control/preferences').isTrusted;
-  const controller = create({ app, session, runner, changed: () => {
+  const controller = create({ app, session, runner, changed: changed || (() => {
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.send('agent-runtimes-changed');
     }
-  } });
+  }) });
   try { controller.restore(); } catch (error) { console.warn('[custom-agents] configuration unavailable:', error.message); }
   const wrap = action => async (event, input) => {
     if (!trusted(event)) return { ok: false, reason: '请在 SoduWork 的 Agent 管理中接入底座' };

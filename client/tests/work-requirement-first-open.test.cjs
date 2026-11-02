@@ -47,7 +47,12 @@ function ipcFixture({ app, bridge, owner, cwd, task, legacy = false }) {
     _entryContextPrompts: () => [], _awaitBounded: value => value, OPEN_TIMEOUT_MS: 45000,
     _bindUsage() {}, _attach() {}, _detach() {}, _wire() {}, _cloudHandoff: { observe() {} },
     _openReply: (handle, extra) => openReply(app, handle, extra),
-    require: name => require(path.join(__dirname, '../main/pi-session', name)),
+    require: name => {
+      const actual = require(path.join(__dirname, '../main/pi-session', name));
+      if (name !== '../conversation/history-access') return actual;
+      return { ...actual, actor: (app, identity = owner) => actual.actor(app, identity),
+        assertCurrent: (app, captured, identity = owner) => actual.assertCurrent(app, captured, identity) };
+    },
   });
   const code = legacy ? handler.replace('Boolean(opts.requireTaskBinding) && !work.bindCreatedTask',
     'Boolean(opts.requireTaskBinding)') : handler;
@@ -172,7 +177,9 @@ test('real Pi first requirement opens the same work archive, persists its bindin
   const ordinaryOptions = { ...options, chatId: ordinary.getSessionId() };
   const unowned = await current.open(ordinaryOptions);
   assert.equal(unowned.ok, false);
-  assert.match(unowned.reason, /无法确认这条会话属于当前账号/);
+  // Main migrates a native ownerless archive to its first authenticated reader,
+  // but migration must not turn an unrelated conversation into this task.
+  assert.match(unowned.reason, /这条会话不是该需求的协作会话/);
   assert.deepEqual(fs.readFileSync(ordinary.getSessionFile()), ordinaryBefore);
 
   // Native SDK archives do not persist the application's account ownership.

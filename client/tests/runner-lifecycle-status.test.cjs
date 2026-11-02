@@ -43,8 +43,34 @@ async function fixture(t, options = {}) {
   const configure = () => handlers.get('runner-configure')(null, { hub: 'https://fixture.invalid', clientId: 'fixture-device' });
   await configure();
   return { configure, children, timers, status: () => handlers.get('runner-status')(), rpc: context.module.exports.rpc,
+    mobile: context.module.exports.setMobileCapabilities,
     report: data => children.at(-1).stdout.emit('data', '@@SODUWORK_RUNNER_STATUS@@' + JSON.stringify(data) + '\n') };
 }
+
+test('mobile capability replies use the initiating private Runner pipe', async t => {
+  const f = await fixture(t), child = f.children.at(-1), writes = [];
+  child.stdin.write = value => writes.push(value);
+  f.mobile(async body => ({ operation: body.operation }));
+  child.stdout.emit('data', '@@SODUWORK_LOCAL_RPC@@' + JSON.stringify({ kind: 'desktop-capability', id: 'request', body: { operation: 'catalog' } }) + '\n');
+  await new Promise(resolve => setImmediate(resolve));
+  const packet = JSON.parse(writes[0].slice('@@SODUWORK_LOCAL_RPC@@'.length));
+  assert.equal(packet.message.op, 'desktop.capability.reply');
+  assert.equal(packet.message.requestId, 'request');
+  assert.equal(packet.message.result.data.operation, 'catalog');
+});
+
+test('mobile capability result never goes to a replaced Runner process', async t => {
+  const f = await fixture(t), child = f.children.at(-1), writes = [];
+  let finish;
+  child.stdin.write = value => writes.push(value);
+  f.mobile(() => new Promise(resolve => { finish = resolve; }));
+  child.stdout.emit('data', '@@SODUWORK_LOCAL_RPC@@' + JSON.stringify({ kind: 'desktop-capability', id: 'request', body: {} }) + '\n');
+  await new Promise(resolve => setImmediate(resolve));
+  child.emit('exit', 0);
+  finish({ plugins: ['private'] });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(writes.length, 0);
+});
 
 test('Runner process existence is distinct from authenticated Hub readiness', async t => {
   const f = await fixture(t);

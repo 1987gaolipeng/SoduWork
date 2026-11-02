@@ -22,6 +22,12 @@ CATALOG: dict[str, dict] = acp_specs()
 def find_bin(key: str) -> str | None:
     """Find an installed ACP agent without mistaking SoduWork itself for one."""
     spec = CATALOG.get(key) or {}
+    if key == "claude":
+        from .agent_native_install import active_binary
+        from .local_base import _data_root
+        if not active_binary(_data_root()):
+            return None
+        return agent_npm_runtime.private_bin(spec.get("bins") or ()) or None
     override = os.environ.get("SODUWORK_AGENT_%s_BIN" % key.upper().replace("-", "_"))
     if override:
         path = os.path.abspath(os.path.expanduser(override))
@@ -29,6 +35,8 @@ def find_bin(key: str) -> str | None:
     private = agent_npm_runtime.private_bin(spec.get("bins") or ())
     if private:
         return private
+    if spec.get("launch") == "node":
+        return None
     for name in spec.get("bins") or ():
         found = shutil.which(name)
         if found:
@@ -92,11 +100,24 @@ def command_argv(key: str, exe: str, args: list[str], ws: str,
         bridge.append("--terminal")
     if session:
         bridge += ["--session", session]
-    return [*bridge, "--", exe, *_agent_args(key, cfg or {})]
+    command = [exe]
+    spec = CATALOG.get(key) or {}
+    if spec.get("launch") == "node":
+        command_name = str((spec.get("bins") or [""])[0]).removesuffix(".cmd")
+        entry = agent_npm_runtime.package_entry(spec.get("pkg", ""), command_name)
+        node = agent_npm_runtime.node_env(key)
+        if not entry or not node.get("ok"):
+            raise RuntimeError(node.get("why") or "Agent adapter entry is unavailable; reinstall this Agent")
+        command = [node["nodePath"], entry]
+    return [*bridge, "--", *command, *_agent_args(key, cfg or {})]
 
 
 def runtime_issue(key: str, *, probe: bool = False) -> str:
     """Return a human-readable runtime defect before a task is created."""
+    if key == "claude":
+        from .claude_runtime import runtime_issue as claude_issue
+        from .local_base import _data_root
+        return claude_issue(_data_root())
     if key != "dsh":
         return ""
     exe = find_bin(key) or ""
@@ -115,6 +136,12 @@ def home_env(key: str, env: dict, work_root: str) -> None:
     merely relocating its home does not fix same-volume staging failures.
     """
     declaration = (CATALOG.get(key) or {}).get("home") or {}
+    if key == "claude":
+        from .claude_runtime import environment
+        env.update(environment(work_root, env))
+        for name in ("NODE_OPTIONS", "ELECTRON_RUN_AS_NODE", "CLAUDECODE"):
+            env.pop(name, None)
+        return
     if not declaration or not work_root:
         return
     folder = declaration["folder"]
@@ -126,6 +153,8 @@ def home_env(key: str, env: dict, work_root: str) -> None:
     # Only reviewed env names and a relative one-segment folder are accepted by
     # the catalog loader; no source-controlled declaration can escape this root.
     env[declaration["env"]] = home
+    from . import agent_shell
+    agent_shell.apply(env, key)
     if key == "dsh":
         dsh_runtime.apply_env(env, work_root)
 
@@ -137,6 +166,15 @@ def inject_llm_env(key: str, env: dict, llm: dict, *, mode: str = "work") -> Non
     model = str((llm or {}).get("model") or "")
     if not (base and secret and model):
         return
+    if key == "kimi":
+        # Kimi's plain KIMI_API_KEY is a config-file key, not a shell override.
+        # Its temporary provider contract is the KIMI_MODEL_* environment family.
+        for name in list(env):
+            if name.startswith("KIMI_MODEL_"):
+                env.pop(name, None)
+        env["KIMI_MODEL_PROVIDER_TYPE"] = "anthropic" if llm.get("kind") == "anthropic" else "openai"
+        env["KIMI_CODE_NO_AUTO_UPDATE"] = "1"
+        env["KIMI_DISABLE_TELEMETRY"] = "1"
     # Generic ACP Agents can describe standard environment-based model routing.
     # Custom authentication/bootstrap protocols remain explicit adapters below.
     fields = {"base": base, "key": secret, "model": model}

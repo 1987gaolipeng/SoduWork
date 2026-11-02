@@ -25,19 +25,30 @@
   function harnessView(row, a, readOnly = false) {
     const job = agentJobs[row.id + ':' + a.id];
     const installing = job?.state === 'running' || job?.state === 'starting';
-    const failed = job?.state === 'done' && job.ok === false;
     const installed = Boolean(readOnly || a.installed || (job?.state === 'done' && job.ok && ['install', 'update'].includes(job.action)));
-    const available = row.online && row.eligible !== false && !row.deploymentRestricted;
-    const ready = available && a.ready === true;
-    const busyLabel = job?.action === 'check' ? '检查中…' : '安装中…';
-    const state = installing ? busyLabel : failed ? '安装失败，请重试' : ready ? '已就绪' : !available ? '等待连接' : installed ? (a.reason ? '需要配置' : '已安装，等待云端确认') : '未安装';
-    const action = installed ? (failed ? 'update' : 'check') : 'install';
+    const available = row.online && row.eligible !== false && !row.deploymentRestricted && row.canManage !== false;
+    const ready = available && installed && a.ready === true;
+    const probing = job?.action === 'probe';
+    const authorizing = job?.action === 'login';
+    // A completed probe describes one runtime version. Current connection,
+    // installation and readiness facts take precedence over that history.
+    const currentProbe = probing && installed && ready && job.version === String(a.version || '');
+    const failed = available && job?.state === 'done' && job.ok === false && (!probing || currentProbe);
+    const working = available && installing && (!probing || currentProbe);
+    const busyLabel = job?.action === 'login' ? '正在检查登录状态' : probing ? '检测中…' : job?.action === 'check' ? '检查中…' : '安装中…';
+    const state = !available ? '等待连接' : working ? busyLabel :
+      failed ? (authorizing ? '连接未完成' : probing ? '测了没通' : '安装失败，请重试') :
+      !installed ? '未安装' : !ready ? (a.reason ? '需要配置' : '已安装，等待云端确认') :
+      currentProbe && job.ok ? '测通了' : '已就绪';
+    const action = a.id === 'codex' && a.installed ? 'login' :
+      failed && probing ? 'probe' : installed ? (failed ? 'update' : ready ? 'probe' : 'check') : 'install';
+    const actionLabel = action === 'login' ? '连接 Codex' : action === 'probe' ? '测一下' : failed ? '重试' : installed ? '检查' : '安装';
     const detail = failed ? job.detail : a.reason || '';
-    return '<div class="ce-harness" data-ce-harness="' + esc(a.id) + '" data-state="' + (failed ? 'error' : ready ? 'ready' : installing ? 'working' : 'pending') + '">' +
-      '<div class="ce-harness-identity">' + (global.AgentBrand?.html(a.id || a.name, { className: 'ce-agent-brand' }) || '<span class="ce-agent-fallback" aria-hidden="true">' + icon + '</span>') + '<div class="ce-harness-name"><strong translate="no">' + esc(a.name || a.id) + '</strong><span translate="no">' + esc(a.version || '') + '</span></div></div>' +
-      '<span class="ce-harness-status' + (ready ? ' is-ready' : '') + '">' + esc(state) + '</span>' +
-      (ready || readOnly ? '<span class="ce-ready-action" aria-hidden="true"></span>' : '<button type="button" data-ce-install-agent="' + esc(row.id) + '" data-ce-agent-key="' + esc(a.id) + '" data-ce-agent-action="' + action + '"' + (installing || !available ? ' disabled' : '') + '>' + (installing ? busyLabel : failed ? '重试' : installed ? '检查' : '安装') + '</button>') +
-      (detail ? '<details class="ce-harness-error" data-ce-disclosure="agent-' + esc(a.id) + '"><summary>' + esc(failed ? '查看安装记录' : '查看原因') + '</summary><pre>' + esc(tr(detail)) + '</pre></details>' : '') + '</div>';
+    return '<div class="ce-harness" data-ce-harness="' + esc(a.id) + '" data-state="' + (failed ? 'error' : working ? 'working' : ready ? 'ready' : 'pending') + '">' +
+      '<div class="ce-harness-identity">' + (global.AgentBrand?.html(a.id || a.name, { className: 'ce-agent-brand' }) || '<span class="ce-agent-fallback" aria-hidden="true">' + icon + '</span>') + '<div class="ce-harness-name"><strong translate="no">' + esc(['kimi', 'claude'].includes(a.id) ? (global.AgentBrand?.LABELS?.[a.id] || String(a.name || a.id).replace(/\s+CLI$/i, '')) : (a.name || a.id)) + '</strong><span translate="no">' + esc(a.version || '') + '</span></div></div>' +
+      '<span class="ce-harness-status' + (ready && !failed && !working ? ' is-ready' : '') + '">' + esc(state) + '</span>' +
+      (readOnly ? '<span class="ce-ready-action" aria-hidden="true"></span>' : '<button type="button" data-ce-install-agent="' + esc(row.id) + '" data-ce-agent-key="' + esc(a.id) + '" data-ce-agent-action="' + action + '"' + (installing || !available ? ' disabled' : '') + '>' + (installing ? busyLabel : actionLabel) + '</button>') +
+      (detail ? '<details class="ce-harness-error" data-ce-disclosure="agent-' + esc(a.id) + '"><summary>' + esc(failed && !probing && !authorizing ? '查看安装记录' : '查看原因') + '</summary><pre>' + esc(tr(detail)) + '</pre></details>' : '') + '</div>';
   }
   function systemLabel(row) {
     const os = String(row.os || '').trim();
@@ -52,6 +63,8 @@
     const busy = Math.max(0, Number(row.busy) || 0), capacity = Math.max(1, Number(row.maxConcurrent) || 1);
     const localCredential = row.localCredential || {};
     const restricted = row.eligible === false || row.deploymentRestricted;
+    const preparePi = row.status === 'missing_agent' && row.action === 'install_agent' && row.online &&
+      !restricted && row.canManage !== false && availableAgents.some(a => a.id === 'pi' && !a.installed);
     const shownAgents = availableAgents.length ? availableAgents : agents;
     const readyCount = row.online && !restricted ? shownAgents.filter(a => a.ready === true).length : 0;
     return '<article class="ce-server' + (restricted ? ' is-restricted' : '') + '" data-ce-server="' + esc(row.id) + '">' +
@@ -61,7 +74,7 @@
       '<div class="ce-server-status"><span class="ce-state" data-state="' + esc(row.online ? row.status || 'ready' : 'offline') + '">' + esc(status(row)) + '</span>' +
       (restricted || (row.statusReason && row.status !== 'ready') ? '<p class="ce-server-description">' + esc(row.statusReason || '此执行机尚未加入当前环境的可用执行名单，请联系管理员。') + '</p>' : '') + '</div>' +
       '<dl class="ce-server-summary"><div><dt>执行容量</dt><dd>' + (row.online ? busy + ' / ' + capacity : '—') + '</dd></div><div><dt>可用 Agent</dt><dd>' + readyCount + '</dd></div><div><dt>连接信息</dt><dd>' + (localCredential.configured ? '已保存' : '未保存') + '</dd></div></dl>' +
-      '<div class="ce-server-actions">' + (row.action === 'install_agent' ? '<button type="button" data-ce-agent="' + esc(row.id) + '">准备 Agent</button>' : '') +
+      '<div class="ce-server-actions">' + (preparePi ? '<button type="button" data-ce-install-agent="' + esc(row.id) + '" data-ce-agent-key="pi" data-ce-agent-action="install">准备 Agent</button>' : '') +
       (row.canManage ? '<button type="button" data-ce-connection="' + esc(row.id) + '">连接设置</button><button type="button" data-ce-edit="' + esc(row.id) + '">设置</button><details class="ce-more" data-ce-disclosure="more"><summary aria-label="更多操作"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></summary><div>' + (row.credential?.canRotate !== false ? '<button type="button" data-ce-credential="' + esc(row.id) + '">更新 Runner 密钥</button>' : '') + '<button type="button" class="ce-remove" data-ce-remove="' + esc(row.id) + '">移除</button></div></details>' : '') + '</div>' +
       '<details class="ce-server-details" data-ce-disclosure="connection"><summary>查看连接详情</summary><dl>' + (row.os ? '<div><dt>系统</dt><dd translate="no">' + esc(row.os) + '</dd></div>' : '') + (row.host && row.host !== row.name ? '<div><dt>主机</dt><dd translate="no">' + esc(row.host) + '</dd></div>' : '') + '<div><dt>工作目录</dt><dd translate="no">' + esc(row.workRoot || tr('使用执行机默认目录')) + '</dd></div>' + (row.version ? '<div><dt>Runner</dt><dd translate="no">' + esc(row.version) + '</dd></div>' : '') + '</dl></details></div>' +
       '<div class="ce-server-content"><section class="ce-harnesses"><div class="ce-harnesses-head"><h3>云端底座</h3><span>在这台云电脑上一键准备</span></div>' +
@@ -84,6 +97,7 @@
     if (opened) Array.from(server.querySelectorAll('[data-ce-harness]')).find(item => item.dataset.ceHarness === key)?.querySelector('details')?.setAttribute('open', '');
   }
   function environmentRemoved(id) {
+    Object.keys(agentJobs).filter(key => key.startsWith(id + ':')).forEach(key => delete agentJobs[key]);
     if (data && Array.isArray(data.environments)) {
       data = { ...data, environments: data.environments.filter(row => row.id !== id) };
       forceRender();
@@ -91,34 +105,69 @@
     void load();
   }
   async function installAgent(environmentId, key, action = 'install') {
+    const row = data?.environments?.find(item => item.id === environmentId);
+    const agent = row?.availableAgents?.find(item => item.id === key);
+    // Cloud operations always use the selected enrolled Runner, never an empty
+    // target that an older Hub could interpret as its own local runtime.
+    if (!environmentId || !row || !agent || !row.online || row.eligible === false ||
+        row.deploymentRestricted || row.canManage === false ||
+        !['install', 'update', 'check', 'probe', 'login'].includes(action)) return;
+    if (action === 'login' && (key !== 'codex' || !agent.installed)) return;
     const jobKey = environmentId + ':' + key;
     const scope = ownerScope();
-    const current = () => ownerScope() === scope;
     if (agentJobs[jobKey]?.state === 'running' || agentJobs[jobKey]?.state === 'starting') return;
-    agentJobs[jobKey] = { state: 'starting', action, ok: false, detail: '' }; updateHarness(environmentId, key);
+    const job = { state: 'starting', action, ok: false, detail: '', version: String(agent.version || '') };
+    agentJobs[jobKey] = job;
+    const current = () => ownerScope() === scope && agentJobs[jobKey] === job;
+    updateHarness(environmentId, key);
+    if (action === 'login') {
+      try {
+        if (!global.CodexAuthDialog) throw Error('登录窗口未加载，请更新 SoduWork 后重试。');
+        await global.CodexAuthDialog.open({
+          runnerId: environmentId,
+          machine: [row.name || row.host || environmentId, row.host, row.os].filter((value, index, values) => value && values.indexOf(value) === index).join(' · '),
+          onStart: jobId => { if (current()) Object.assign(job, { jobId, state: 'running' }); },
+          onDone: () => { if (current()) { global.soduWorkAPI?.broadcast?.('agent-runtimes-changed'); void load(); } },
+          onProbe: () => {
+            if (!current()) return;
+            delete agentJobs[jobKey];
+            return installAgent(environmentId, key, 'probe');
+          },
+        });
+      } catch (error) {
+        if (current()) { Object.assign(job, { state: 'done', ok: false, detail: error.message }); updateHarness(environmentId, key); }
+      } finally {
+        if (current() && job.state !== 'done') { delete agentJobs[jobKey]; updateHarness(environmentId, key); }
+      }
+      return;
+    }
     try {
-      const started = await global.SoduWorkAPI.agentInstall(key, action, environmentId);
+      const started = action === 'probe'
+        ? await global.SoduWorkAPI.agentProbe(key, '', environmentId)
+        : await global.SoduWorkAPI.agentInstall(key, action, environmentId);
       if (!current()) return;
       if (!started?.jobId) throw new Error('服务没有返回安装任务');
-      agentJobs[jobKey] = { state: 'running', action, jobId: started.jobId, ok: false, detail: '' }; updateHarness(environmentId, key);
+      Object.assign(job, { state: 'running', jobId: started.jobId }); updateHarness(environmentId, key);
       // npm and an optional platform binary each have a 15-minute server
       // timeout. Do not call a slow but live install failed after 162 seconds.
       const deadline = Date.now() + 45 * 60 * 1000;
       while (Date.now() < deadline) {
         await new Promise(resolve => setTimeout(resolve, 900));
         if (!current()) return;
-        const job = await global.SoduWorkAPI.agentJob(started.jobId);
+        const result = await global.SoduWorkAPI.agentJob(started.jobId);
         if (!current()) return;
-        if (!job || job.state !== 'done') continue;
-        agentJobs[jobKey] = { state: 'done', action, ok: job.ok === true, detail: job.detail || (job.ok ? '' : '安装没有完成，请重试') };
+        if (!result || result.state !== 'done') continue;
+        Object.assign(job, { state: 'done', ok: result.ok === true,
+          detail: result.detail || (result.ok ? '' : action === 'probe' ? '测了没通' : '安装没有完成，请重试') });
         updateHarness(environmentId, key);
-        if (job.ok) { await load(); };
+        global.soduWorkAPI?.broadcast?.('agent-runtimes-changed');
+        if (result.ok) { await load(); };
         return;
       }
       throw new Error('安装时间较长，请稍后刷新查看结果');
     } catch (error) {
       if (!current()) return;
-      agentJobs[jobKey] = { state: 'done', ok: false, detail: error?.message || '安装失败，请重试' };
+      Object.assign(job, { state: 'done', ok: false, detail: error?.message || (action === 'probe' ? '测了没通' : '安装失败，请重试') });
       updateHarness(environmentId, key);
     }
   }
@@ -188,7 +237,6 @@
         else if (button.hasAttribute('data-ce-credential')) global.CloudEnvironmentSetup?.rotate(data?.environments?.find(row => row.id === button.dataset.ceCredential), () => load(), data?.service);
         else if (button.hasAttribute('data-ce-remove')) global.CloudEnvironmentSetup?.remove(data?.environments?.find(row => row.id === button.dataset.ceRemove), () => environmentRemoved(button.dataset.ceRemove));
         else if (button.hasAttribute('data-ce-install-agent')) void installAgent(button.dataset.ceInstallAgent, button.dataset.ceAgentKey, button.dataset.ceAgentAction || 'install');
-        else if (button.hasAttribute('data-ce-agent') && data) global.CloudEnvironmentSetup?.agent(data.agentSetup);
       });
       if (typeof global.makeDraggable === 'function') global.makeDraggable(panel, panel.querySelector('header'));
     }

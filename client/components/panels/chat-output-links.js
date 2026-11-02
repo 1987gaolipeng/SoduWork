@@ -324,6 +324,24 @@
       if (!snapshot.cloudHandoff?.taskId) global.LibraryTransfer?.decorateOutputs(root, files.filter(file => file.taskId), ref, snapshot);
     }
     else global.LibraryTransfer?.decorateOutputs(root,files,ref,snapshot);
+    // Media belongs to its review result, including carried nodes from earlier renders.
+    // Folding a handled result must also fold its evidence, without hiding ordinary deliveries.
+    root.querySelectorAll('.nmsg.ai,[data-task-stream]').forEach(message => {
+      const card = message.querySelector('.nacceptance-result');
+      const body = card?.querySelector('.nacceptance-result-body');
+      if (!body) return;
+      const media = [...message.querySelectorAll('.noutput-image,.noutput-video,.noutput-library')]
+        .filter(node => node.closest('.nmsg.ai,[data-task-stream]') === message && !node.closest('.nacceptance-result'));
+      if (!media.length) return;
+      let evidence = body.querySelector('[data-acceptance-evidence]');
+      if (!evidence) {
+        evidence = document.createElement('details'); evidence.dataset.acceptanceEvidence = '';
+        evidence.className = 'nacceptance-evidence';
+        const summary = document.createElement('summary'); summary.textContent = '查看相关证据';
+        evidence.appendChild(summary); body.appendChild(evidence);
+      }
+      media.forEach(node => evidence.appendChild(node));
+    });
     const decorated = root.innerHTML;
     if (!LEGACY) decorateMemo = { ref: String(ref || ''), html, filesSig, stateSig, carrySig, decorated };
     return decorated;
@@ -351,8 +369,10 @@
       const identity = pluginIdentityOf(file); if (seen.has(identity)) continue; seen.add(identity);
       const owned = draftPlacement?.target(file, snapshot, messages);
       const old = root.querySelector('[data-plugin-draft-identity="' + escapeSelector(identity) + '"]');
+      const revision = String(file.pluginRevision || file.at || 0);
+      const sameRevision = old && (old.dataset.pluginDraftRevision || old.dataset.pluginDraftAt) === revision;
       if (owned === false) continue;
-      if (owned === null && old) {
+      if (owned === null && old && (sameRevision || !file.pluginRevision)) {
         const previousMessage = old.closest('.nmsg.ai');
         if (previousMessage && draftPlacement?.matchesOwner(old, previousMessage, snapshot) === false) {
           root.appendChild(old); old.dataset.pluginDraftHistorical = 'true';
@@ -364,7 +384,7 @@
         [...message.querySelectorAll('[data-open-app]')].some(node => node.dataset.openApp === key(file))) ||
         messages.at(-1) || root;
       if (!target) continue;
-      if (old && (owned === undefined || (old.dataset.pluginDraftHistorical !== 'true' && old.dataset.pluginDraftAt === String(file.at || 0)))) {
+      if (old && sameRevision && (owned === undefined || old.dataset.pluginDraftHistorical !== 'true')) {
         if (owned) {
           target.appendChild(old);
           old.dataset.pluginDraftOwner = draftPlacement.ownerIndex(target, snapshot);
@@ -375,6 +395,7 @@
       const card = root.ownerDocument.createElement('div'); card.className = 'nplugin-draft';
       card.dataset.chatNode = 'plugin-draft:' + key(file);
       card.dataset.pluginDraftIdentity = identity; card.dataset.pluginDraftAt = String(file.at || 0);
+      card.dataset.pluginDraftRevision = revision;
       card.dataset.pluginDraftHistorical = String(owned === null);
       if (owned) card.dataset.pluginDraftOwner = draftPlacement.ownerIndex(target, snapshot);
       const mark = root.ownerDocument.createElement('span'); mark.className = 'nplugin-draft-icon'; mark.setAttribute('aria-hidden', 'true');
@@ -515,7 +536,7 @@
     return {...row,url:hub.attachmentUrl(row)};
   }
   async function readPreview(file, api, ref, mode='read') {
-    if (file.cloudPending && !file.processEvidence) file = await materialize(file, api, ref);
+    if (file.cloudPending && !file.processEvidence) file = await materialize(file, api, ref, { previewOnly: true });
     if (file.taskId && file.attachmentId) {
       const row = await taskAttachment(file,global.SoduWorkAPI);
       if (mode === 'preview' && isVideo(file)) {
@@ -798,13 +819,13 @@
     return [...files, ...remote];
   }
   const materializePending = new Map();
-  async function materialize(file, api, ref) {
+  async function materialize(file, api, ref, { previewOnly = false } = {}) {
     if (!file?.cloudPending) return file;
     if (!api?.cloud?.materialize || !ref) throw Error('云端成果暂时无法保存，请重新打开会话后再试');
-    const id = JSON.stringify([ref, file.taskId, file.attachmentId]);
+    const id = JSON.stringify([ref, file.taskId, file.attachmentId, previewOnly]);
     if (materializePending.has(id)) return materializePending.get(id);
     const pending = (async () => {
-      const result = await api.cloud.materialize(ref, { taskId: file.taskId, attachmentId: file.attachmentId });
+      const result = await api.cloud.materialize(ref, { taskId: file.taskId, attachmentId: file.attachmentId, ...(previewOnly ? { previewOnly: true } : {}) });
       if (!result?.ok || !result.artifact?.artifactId) throw Error(result?.reason || '云端成果保存失败，请重试');
       const local = { ...file, ...result.artifact, remoteMaterialized: true,
         cloudTaskId: file.taskId, remoteAttachmentId: file.attachmentId,
@@ -825,22 +846,31 @@
     if(!/^\/(?:api\/v1\/)?attachments\/[^/?#]+\?/.test(row.url||''))throw Error('成果地址无效');
     const url=hub.attachmentUrl(row);
     if(!/^https?:\/\//i.test(url))throw Error('成果地址无效');
-    // Do not open ticket-bearing Hub archive/application URLs in the system browser.
-    // Use an explicit save dialog and main-process authorized download to avoid passive downloads and credentials in browser history.
-    if(!bridge || typeof bridge.downloadAttachment !== 'function') throw Error('请升级客户端后重试');
-    const result=await bridge.downloadAttachment({url,filename:row.filename||file.name||'成果'});
-    if(result && result.ok===false && !result.canceled)throw Error(result.reason||'无法保存成果');
+    const filename = row.filename || file.name || '\u6210\u679c';
+    // The main process owns the authorized download and system-app handoff.
+    // This keeps office/archive outputs out of the right-side renderer while
+    // still opening them with Excel/PowerPoint/Word or the user's configured app.
+    if (bridge && typeof bridge.previewAttachment === 'function') {
+      const result = await bridge.previewAttachment({ url, filename });
+      if (result && result.ok === false && !result.canceled) throw Error(result.reason || '\u65e0\u6cd5\u6253\u5f00\u6210\u679c');
+      return result?.canceled ? false : true;
+    }
+    // Older clients do not expose the handoff bridge. Keep the explicit save
+    // dialog as a compatibility fallback so the file remains recoverable.
+    if(!bridge || typeof bridge.downloadAttachment !== 'function') throw Error('\u8bf7\u5347\u7ea7\u5ba2\u6237\u7aef\u540e\u91cd\u8bd5');
+    const result=await bridge.downloadAttachment({url,filename});
+    if(result && result.ok===false && !result.canceled)throw Error(result.reason||'\u65e0\u6cd5\u4fdd\u5b58\u6210\u679c');
     return true;
   }
   const materializeTaskPending = new Map();
-  async function materializeTask(file, api, ref) {
+  async function materializeTask(file, api, ref, { previewOnly = false } = {}) {
     if (!file?.taskId || !file.attachmentId) throw Error('这份成果无法保存到本地');
     const bridge = global.soduWorkAPI;
     if (!bridge || typeof bridge.attachmentMaterialize !== 'function') throw Error('请升级客户端后重试');
-    const id = JSON.stringify([ref, file.taskId, file.attachmentId]);
+    const id = JSON.stringify([ref, file.taskId, file.attachmentId, previewOnly]);
     if (materializeTaskPending.has(id)) return materializeTaskPending.get(id);
     const pending = (async () => {
-      const result = await bridge.attachmentMaterialize({ ref, taskId: file.taskId, attachmentId: file.attachmentId });
+      const result = await bridge.attachmentMaterialize({ ref, taskId: file.taskId, attachmentId: file.attachmentId, ...(previewOnly ? { previewOnly: true } : {}) });
       if (!result?.ok) throw Error(result?.reason || '成果保存失败，请重试');
       const mine = (result.artifacts || []).find(item => String(item.attachmentId || '') === String(file.attachmentId));
       if (!mine) throw Error('成果未完整保存，请重试');

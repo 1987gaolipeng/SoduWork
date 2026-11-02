@@ -30,6 +30,31 @@ function checkItemName(index, row) {
     throw error('LIBRARY_NAME_CONFLICT', '当前文件夹下已有同名资料，请重命名后重试');
   }
 }
+function splitFilename(value) {
+  const name = String(value || '');
+  const index = name.lastIndexOf('.');
+  return index > 0 ? { stem: name.slice(0, index), extension: name.slice(index) } : { stem: name, extension: '' };
+}
+function nextItemName(index, row) {
+  const desired = visibleFilename(row), parts = splitFilename(desired);
+  const occupied = candidate => {
+    const key = nameKey(candidate);
+    return index.items.some(other => other.id !== row.id && !other.deletedAt && other.folderId === row.folderId && nameKey(visibleFilename(other)) === key) ||
+      index.folders.some(other => other.parentId === row.folderId && nameKey(other.name) === key);
+  };
+  if (!occupied(desired)) return desired;
+  for (let number = 1; number < 100000; number += 1) {
+    const candidate = parts.stem + '（' + number + '）' + parts.extension;
+    if (!occupied(candidate)) return candidate;
+  }
+  throw error('LIBRARY_NAME_CONFLICT', '当前文件夹下可用文件名已耗尽，请整理后重试');
+}
+function applyNextItemName(index, row) {
+  const candidate = nextItemName(index, row);
+  if (candidate === visibleFilename(row)) return;
+  row.filename = candidate;
+  row.title = splitFilename(candidate).stem;
+}
 function favorite(body, row) {
   if (has(body, 'favorite')) {
     if (typeof body.favorite !== 'boolean') throw error('LOCAL_LIBRARY_INVALID', '收藏状态必须为布尔值');
@@ -144,7 +169,12 @@ async function execute(store, index, action, payload) {
       if (outputKey.length > 4096) throw error('LOCAL_LIBRARY_INVALID', '成果标识过长');
       // Compare actual bytes: this also recognizes pre-upgrade saves without
       // output metadata, while preserving independently changed versions.
-      for (const existing of index.items.filter(x => !x.deletedAt && x.filename === filename && x.size === bytes.length)) {
+      // A prior save may have received a duplicate-name suffix. Keep output
+      // receipts idempotent by checking their key independently of the
+      // requested display name, while still recognizing pre-receipt files by
+      // their original name and byte length.
+      for (const existing of index.items.filter(x => !x.deletedAt &&
+        (outputKeys(x).includes(outputKey) || (x.filename === filename && x.size === bytes.length)))) {
         let saved;
         try { saved = await store.read(existing); } catch (e) { if (e.code === 'ENOENT') continue; throw e; }
         if (!saved.equals(bytes)) continue;
@@ -155,9 +185,12 @@ async function execute(store, index, action, payload) {
       }
       row.extra.outputKeys = [outputKey];
     }
-    // An existing output receipt is idempotent; only new files need name validation.
-    if (row.sourceType !== 'conversation' || body.rejectDuplicateName === true) checkItemName(index, row);
-    row._object = await store.write(bytes, filename, index); index.items.push(row);
+    // Existing output receipts are idempotent. New uploads and explicit conversation saves
+    // receive a deterministic suffix instead of surfacing a duplicate-name failure.
+    if ((action === 'upload' && body.rejectDuplicateName !== true) ||
+        row.sourceType === 'conversation' || body.autoRenameDuplicate === true) applyNextItemName(index, row);
+    else checkItemName(index, row);
+    row._object = await store.write(bytes, row.filename, index); index.items.push(row);
     await store.save(index); return { ok: true, item: publicRow(row) };
   }
   if (action === 'emptyTrash' || action === 'purgeItem') {

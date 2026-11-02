@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -288,6 +288,7 @@ def session_api(row: am.ExecutionSession, *, items: list | None = None) -> dict:
         "activeExecutionSelection": {"agentId": row.engine or "", "modelName": row.model or "",
             "reasoningEffort": str(meta.get("reasoningEffort") or "")},
         "status": state, "seq": int(row.seq or 0), "last": int(row.seq or 0),
+        "persistedThrough": int(row.persisted_seq or 0),
         "workDir": row.work_dir, "startedAt": row.started_at.isoformat() if row.started_at else "",
         "finishedAt": row.finished_at.isoformat() if row.finished_at else "",
         "createdAt": _loaded_iso(row, "created_at"),
@@ -370,8 +371,38 @@ async def console_rows(session: AsyncSession, client_id: str,
     return out[:limit]
 
 
-async def _allowed(session: AsyncSession, runner, task: models.Task) -> bool:
+async def _allowed(session: AsyncSession, runner, task: models.Task, *, ref: str = "") -> bool:
     from . import environment_service, runner_hub
+    personal_owner = str(getattr(runner, "owner_user_id", "") or "")
+    if personal_owner:
+        # Personal nodes are intentionally excluded from organization sharing.
+        # Returning facts uses the same durable, exact-owner cloud grant as
+        # dispatch, including its pinned Runner and execution ref.
+        from . import conversation_handoffs, dispatch_identity
+        node = await session.get(am.RunnerNode, runner.id)
+        handoff = await conversation_handoffs.dispatch_record(session, task.id)
+        if (node is None or node.owner_user_id != personal_owner or node.auth_state == "revoked"
+                or node.management_state in {"retired", "pending_setup"}
+                or handoff is None or handoff.owner_user_id != personal_owner
+                or handoff.owner_client_id != task.owner_client_id
+                or handoff.phase not in {"committing", "committed"}):
+            return False
+        if task.owner_user_id and task.owner_user_id != personal_owner:
+            return False
+        if not task.owner_user_id:
+            original = await session.get(models.Client, task.owner_client_id)
+            if (original is None or original.user_ref != personal_owner
+                    or task.created_by not in (None, "", personal_owner)):
+                return False
+        receipt, options = dict(handoff.receipt or {}), dict(handoff.options or {})
+        expected_runner = str((options.get("targetSnapshot") or {}).get("runnerId")
+                              or receipt.get("runnerId") or "")
+        if not expected_runner:
+            target = str(options.get("assigneeId") or "").rsplit(":", 1)[0]
+            expected_runner = target[len("runner:"):] if target.startswith("runner:") else ""
+        expected_ref = str(receipt.get("ref") or receipt.get("issueId") or
+                           dispatch_identity.execution_ref(conversation_handoffs.dispatch_id(handoff)))
+        return expected_runner == runner.id and bool(ref) and expected_ref == ref
     allowed_clients = await environment_service.task_runner_clients(session, task)
     allowed_orgs = await environment_service.task_runner_orgs(session, task)
     return runner_hub.in_scope(runner, allowed_clients, allowed_orgs)
@@ -687,7 +718,33 @@ async def ingest_event_page(session: AsyncSession, row, items: list, round_no=No
         have.add(seq)
         if row.last_event_at is None or _dt(row.last_event_at) < at:
             row.last_event_at = at
+    await advance_persisted_sequence(session, row)
     return seqs
+
+
+async def advance_persisted_sequence(session: AsyncSession, row, *, persist: bool = True) -> int:
+    """Advance only over committed-candidate events with no missing sequence.
+
+    A snapshot's high-water mark and a transport packet ACK are not evidence
+    that all preceding events exist. Scan bounded query pages so a read-only
+    transaction can recover old rows without stalling permanently at page 4096.
+    """
+    through = int(row.persisted_seq or 0)
+    while True:
+        sequences = (await session.scalars(select(am.ExecutionEvent.seq).where(
+            am.ExecutionEvent.session_id == row.id,
+            am.ExecutionEvent.seq > through).order_by(am.ExecutionEvent.seq).limit(4096))).all()
+        gap = False
+        for sequence in sequences:
+            if sequence != through + 1:
+                gap = True
+                break
+            through = sequence
+        if gap or len(sequences) < 4096:
+            break
+    if persist:
+        row.persisted_seq = through
+    return through
 
 
 async def ingest_runner_snapshots(session: AsyncSession, runner, snapshots: list) -> list[dict]:
@@ -716,20 +773,36 @@ async def ingest_runner_snapshots(session: AsyncSession, runner, snapshots: list
         )).scalars().all()}
     refs = {str(x["ref"])[:180] for x in clean}
     existing = {x.ref: x for x in list((await session.execute(
-        select(am.ExecutionSession).where(am.ExecutionSession.ref.in_(refs)))).scalars().all())}
+        select(am.ExecutionSession).where(am.ExecutionSession.ref.in_(refs))
+        .with_for_update())).scalars().all())}
     changed: list[dict] = []
     for snap in clean:
         task = tasks.get(str(snap.get("taskId") or ""))
-        if task is None or not await _allowed(session, runner, task):
+        if task is None or not await _allowed(session, runner, task, ref=str(snap.get("ref") or "")):
             continue
         ref = str(snap.get("ref") or "")[:180]
         row = existing.get(ref)
         if row is None:
             row = await _get_or_create_session(session, task.id, ref)
             existing[ref] = row
+        runner_id = str(getattr(runner, "id", "") or "")[:80]
+        if row.task_id != task.id or (row.runner_id and row.runner_id != runner_id):
+            continue
         old_state = canonical_state(row.state)
         previous_meta = dict(row.metadata_ or {})
         previous_round = int(previous_meta.get("round") or 1)
+        incoming_round = int(snap.get("round") or previous_round)
+        incoming_state = canonical_state(snap.get("status") or snap.get("state"))
+        if (incoming_round < previous_round or
+                (incoming_round == previous_round and (
+                    int(snap.get("seq") or 0) < int(row.seq or 0) or
+                    (old_state in _TERMINAL and incoming_state not in _TERMINAL)))):
+            # Delayed transport may repair historical gaps but cannot rewind a
+            # newer round, its billing identity, approvals or terminal settlement.
+            await ingest_event_page(session, row, snap.get("items") or [], snap.get("round"))
+            changed.append({"taskId": task.id, "clientId": task.owner_client_id or "",
+                            "session": session_api(row)})
+            continue
         row.task_id = task.id
         row.runner_id = str(getattr(runner, "id", "") or "")[:80]
         row.runner_client_id = str(getattr(runner, "client_id", "") or "")[:64]
@@ -888,7 +961,7 @@ async def ingest_live_snapshot(session: AsyncSession, task: models.Task, ref: st
 
 
 async def read_task(session: AsyncSession, task_id: str, ref: str = "", since: int = 0,
-                    limit: int = 400) -> dict | None:
+                    limit: int = 400, *, contiguous: bool = False) -> dict | None:
     query = select(am.ExecutionSession).where(am.ExecutionSession.task_id == task_id)
     if ref:
         query = query.where(am.ExecutionSession.ref == ref)
@@ -896,14 +969,29 @@ async def read_task(session: AsyncSession, task_id: str, ref: str = "", since: i
         am.ExecutionSession.updated_at.desc(), am.ExecutionSession.created_at.desc()))).scalars().first()
     if row is None:
         return None
-    events = list((await session.execute(select(am.ExecutionEvent).where(
+    through = await advance_persisted_sequence(session, row, persist=False)
+    event_query = select(am.ExecutionEvent).where(
         am.ExecutionEvent.session_id == row.id,
-        am.ExecutionEvent.seq > max(0, int(since or 0))).order_by(am.ExecutionEvent.seq).limit(
+        am.ExecutionEvent.seq > max(0, int(since or 0)))
+    if contiguous:
+        event_query = event_query.where(am.ExecutionEvent.seq <= through)
+    events = list((await session.execute(event_query.order_by(am.ExecutionEvent.seq).limit(
             min(1000, max(1, int(limit or 400)))))).scalars().all())
     visible = execution_event_policy.visible_items(
         [_event_api(x) for x in events])
     out = session_api(row, items=visible)
+    out["persistedThrough"] = through
     out["last"] = int(events[-1].seq) if events else int(since or 0)
+    # Old best-effort histories can contain a permanent gap. Ordinary history
+    # readers retain their visible suffix; sync readers must stop before it.
+    next_available, stored_last = (await session.execute(select(
+        func.min(am.ExecutionEvent.seq), func.max(am.ExecutionEvent.seq)).where(
+            am.ExecutionEvent.session_id == row.id, am.ExecutionEvent.seq > through))).one()
+    observed = max(int(row.seq or 0), int(stored_last or 0), through)
+    out["historyGap"] = ({"expectedSeq": through + 1,
+        "nextAvailableSeq": int(next_available) if next_available is not None else None,
+        "observedThrough": observed} if observed > through else None)
+    out["hasMore"] = out["last"] < (through if contiguous else max(through, int(stored_last or 0)))
     return out
 
 

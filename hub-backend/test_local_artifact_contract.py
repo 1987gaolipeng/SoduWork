@@ -69,15 +69,15 @@ class LocalArtifactContractTests(unittest.TestCase):
         self.assertEqual(status["artifactsHidden"], 0)
         return status, bundles, bundled_bytes, expected
 
-    def test_up_to_twenty_flat_outputs_remain_individually_downloadable_without_bundle(self):
-        for count in (3, 20):
+    def test_two_or_more_flat_outputs_keep_loose_files_and_add_a_complete_bundle(self):
+        for count in (2, 3, 20):
             with self.subTest(files=count):
-                status, bundles, bundled_bytes, _expected = self.flat_output_status(count)
-                self.assertEqual(len(status["attachments"]), count)
-                self.assertEqual(bundles, [])
-                self.assertEqual(bundled_bytes, [])
-                self.assertEqual(status["artifactsBundled"], 0)
-                self.assertFalse((self.root / "archive").exists())
+                status, bundles, bundled_bytes, expected = self.flat_output_status(count)
+                self.assertEqual(len(status["attachments"]), count + 1)
+                self.assertEqual(len(bundles), 1)
+                self.assertEqual(status["artifactsBundled"], count)
+                with zipfile.ZipFile(io.BytesIO(bundled_bytes[0])) as zipped:
+                    self.assertEqual({name: zipped.read(name) for name in zipped.namelist()}, expected)
 
     def test_twenty_one_flat_outputs_expose_individual_files_and_complete_bundle(self):
         status, bundles, bundled_bytes, expected = self.flat_output_status(21)
@@ -121,6 +121,17 @@ class LocalArtifactContractTests(unittest.TestCase):
                     self.run, [("outputs/linked.txt", 1001), ("outputs/report.md", 1000)]))
             store.assert_not_called()
         self.assertFalse((self.root / "archive").exists())
+
+
+    def test_single_file_has_no_bundle_and_verification_is_not_added_to_a_bundle(self):
+        self.write('result.md', b'result', 1000)
+        self.write('screenshot.png', b'proof', 1001)
+        with patch.object(ai_local, '_store_dir', return_value=str(self.root / 'archive')):
+            self.assertIsNone(ai_local._bundle_artifact(self.run, ai_local._fresh_entries(self.run)))
+            self.write('appendix.md', b'appendix', 1002)
+            bundle = ai_local._bundle_artifact(self.run, ai_local._fresh_entries(self.run))
+        with zipfile.ZipFile(self.root / 'archive' / 'bundles' / bundle['filename']) as archive:
+            self.assertEqual(set(archive.namelist()), {'result.md','appendix.md'})
 
 
 if __name__ == "__main__":

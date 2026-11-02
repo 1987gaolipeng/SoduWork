@@ -69,20 +69,6 @@ def _capture_started(ref: str, spool: dict, owner=None) -> None:
         _save_meta(ref)
 
 
-def _capture_started(ref: str, spool: dict, owner=None) -> None:
-    at = local_spool.started_at(_store_dir(ref), spool)
-    if not at:
-        return
-    changed = False
-    with _LOCK:
-        run = _RUNS.get(ref)
-        if (run is not None and not run.get('executionStartedAt')
-                and (owner is None or run.get('_workerIdentity') is owner)
-                and (run.get('stream') or {}).get('id') == spool.get('id')):
-            run['executionStartedAt'] = at
-            changed = True
-    if changed:
-        _save_meta(ref)
 
 
 def _durable_drain_state(

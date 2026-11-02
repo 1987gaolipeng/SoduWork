@@ -7,15 +7,12 @@ Runners.
 import asyncio
 import os
 import sys
+import tempfile
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
-DB = os.path.abspath(".smoke-usage.db")
-for sfx in ("", "-shm", "-wal"):
-    try:
-        os.remove(DB + sfx)
-    except FileNotFoundError:
-        pass
+_DB_DIR = tempfile.TemporaryDirectory(prefix="soduwork-usage-rollup-")
+DB = os.path.join(_DB_DIR.name, "usage.db")
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///" + DB.replace("\\", "/")
 sys.path.insert(0, ".")
 
@@ -141,6 +138,7 @@ async def run():
         return await main()
     finally:
         await engine.dispose()
+        _DB_DIR.cleanup()
 
 
 sys.exit(asyncio.run(run()))

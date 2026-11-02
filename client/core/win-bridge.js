@@ -194,7 +194,7 @@
   }
   const HANDLERS = { cfg: pullCfg, notices: pullNotices, teamcap: pullTeamCap,
                      tasks: pullTasks, 'task-event': pullTaskEvent, models: pullModels, hubenv: pullHubEnvironment,
-                     'ag-drawer': agDrawerAvoid };
+                     'ag-drawer': agDrawerAvoid, 'agent-runtimes-changed': () => { try { global.dispatchEvent(new Event('agent-runtimes-changed')); } catch (_) {} } };
 
   try {
     if (global.soduWorkAPI && soduWorkAPI.onBroadcast) {
@@ -281,7 +281,9 @@
   };
   /* Manage installed CLI runtimes, configuration, and connection tests. */
   global.openAgentsEntry = function () {
-    if (!routeToWorkWindow('agents') && typeof openAgentsPanel === 'function') openAgentsPanel();
+    if (routeToWorkWindow('agents', { tab: 'runners' })) return true;
+    if (typeof openAgentsPanel === 'function') { openAgentsPanel({ tab: 'runners' }); return true; }
+    return false;
   };
   /* Manage commit identity and push credentials. */
   global.openCodeAcctEntry = function () {

@@ -87,6 +87,9 @@ class Harness2PlatformTest(unittest.TestCase):
         import PyInstaller.utils.hooks as hooks
         backend = Path(__file__).resolve().parent
         project = backend.parent
+        import json
+        reviewed_versions = {row["name"]: row["version"] for row in json.loads(
+            (project / "third-party/manifest.json").read_text(encoding="utf-8"))["pythonNoticeOverrides"]}
         required = {
             "app/services/harness2_runtime.py", "app/services/harness2_bridge.py",
             "app/services/harness2_engine.py", "app/services/harness2_vendor/core/recursion.py",
@@ -103,6 +106,7 @@ class Harness2PlatformTest(unittest.TestCase):
                         self.pure = self.scripts = self.binaries = self.datas = []
                 with (patch.object(runner_sources.sys, "platform", platform),
                       patch.dict(os.environ, {"SODUWORK_INTERNAL_BUILD": "1"}),
+                      patch("importlib.metadata.version", side_effect=reviewed_versions.__getitem__),
                       patch.object(hooks, "copy_metadata", return_value=[]),
                       patch.object(hooks, "collect_data_files", return_value=[]),
                       patch.object(hooks, "collect_dynamic_libs", return_value=[])):

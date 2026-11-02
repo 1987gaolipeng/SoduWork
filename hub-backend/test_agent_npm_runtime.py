@@ -87,6 +87,7 @@ class NodeResolutionTests(unittest.TestCase):
         entry.write_text('// old Pi', encoding='utf8')
         (package / 'package.json').write_text(json.dumps({'bin': {'pi': 'dist/cli.js'}}), encoding='utf8')
         with patch.object(N, 'private_prefix', return_value=str(prefix)), \
+                patch.object(N.sys, 'platform', 'linux'), \
                 patch.object(N, 'resolve', return_value={}), patch.dict(os.environ, {'PATH': '/legacy/bin'}), \
                 patch.object(L, '_npm_root', return_value=str(legacy)), \
                 patch.object(L, '_bundled_pi_cli_js', return_value=None):
@@ -113,6 +114,7 @@ class NodeResolutionTests(unittest.TestCase):
 
     def test_private_codex_launcher_wins_over_an_older_global_native_binary(self):
         with patch.object(N, 'private_bin', return_value='/private/bin/codex'), \
+                patch.object(L, '_WIN', False), \
                 patch.object(L, '_real_bin') as legacy:
             self.assertEqual(L._codex_bin(), '/private/bin/codex')
         legacy.assert_not_called()
@@ -139,6 +141,8 @@ class NodeResolutionTests(unittest.TestCase):
         executable = root / '@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe'
         executable.parent.mkdir(parents=True)
         executable.write_bytes(b'fixture')
+        # The personal package owns this native dependency; a shared native alone does not.
+        (root / '@openai/codex/package.json').write_text('{"name":"@openai/codex"}', encoding='utf8')
         with patch.object(L, '_WIN', True), patch.dict(os.environ, {}, clear=True), \
                 patch.object(N, 'configured_global_root', return_value=str(root)), \
                 patch.object(N, 'private_bin', return_value=''):

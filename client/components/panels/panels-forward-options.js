@@ -214,7 +214,13 @@ async function _loadAIPickList(tid, repoId) {
   }
   if (seq !== _fwdLoadSeq || document.getElementById('fwdList') !== box || _fwdTab !== 'ai') return;
   // Repository selection belongs to the executor; show the catalog immediately without awaiting local Agent probes.
-  _fwdOptions = result || {};
+  const normalizedResult = result || {};
+  _fwdOptions = {
+    ...normalizedResult,
+    substrates: window.TaskExecutionClient?.targets
+      ? TaskExecutionClient.targets(normalizedResult)
+      : (normalizedResult.substrates || []),
+  };
   _fillRepoPicker(_fwdOptions);
   _fwdLoading.ai = false;
   _fwdOptions.pluginInstallationUnknown = ['workflows', 'blockedWorkflows'].some(key =>

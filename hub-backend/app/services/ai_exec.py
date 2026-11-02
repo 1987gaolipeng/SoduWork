@@ -795,12 +795,20 @@ def say_sync(ctx: dict, ref: str, text: str, *, record_user: bool = True, messag
     running work receives it after the current turn. This does not interrupt execution or attach
     a terminal.
     """
-    p = _by_ref(ref) or _p(ctx)
+    if ctx.get("_continuationRunnerId"):
+        from . import ai_remote
+        p = ai_remote
+    else:
+        p = _by_ref(ref) or _p(ctx)
     if p is _ai_local and not execution_host_policy.hub_local_allowed():
         return execution_host_policy.local_disabled_result()
     if not hasattr(p, "comment_sync"):
         return {"ok": False, "error": "\u5f53\u524d\u6267\u884c\u5e95\u5ea7\u4e0d\u652f\u6301\u7ed9 AI \u7559\u8a00"}
     cfg = dict(_cfg_of(ctx, p) or {})
+    if ctx.get("_turnFiles"):
+        if getattr(p, "PREFIX", "") != REMOTE_PREFIX:
+            return {"ok": False, "error": "追加文件只能发送到原远程执行机"}
+        cfg["_turnFiles"] = ctx["_turnFiles"]
     if message_id:
         cfg["_messageId"] = message_id
     if record_user and p is _ai_local:

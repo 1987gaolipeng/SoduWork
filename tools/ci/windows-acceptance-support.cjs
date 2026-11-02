@@ -22,7 +22,7 @@ function processScript() {
   return "$root=[IO.Path]::GetFullPath($env:SODUWORK_ACCEPT_OWNED_ROOT).TrimEnd('\\')+'\\';" +
     "$rows=@(Get-CimInstance Win32_Process | ForEach-Object {" +
     "$owned=$_.ExecutablePath -and $_.ExecutablePath.StartsWith($root,[StringComparison]::OrdinalIgnoreCase);" +
-    "if($owned -or $_.Name -match '^(SoduWork|SoduWork|SoduWork)\\.exe$'){" +
+    "if($owned -or $_.Name -match '^SoduWork[^.]*\\.exe$'){" +
     "@{pid=$_.ProcessId;name=$_.Name;exe=$_.ExecutablePath;owned=[bool]$owned;" +
     "maintenance=[bool]($owned -and $_.CommandLine -match '\\.soduwork-prune\\.cjs')}}});" +
     "ConvertTo-Json -InputObject $rows -Compress";

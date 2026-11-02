@@ -53,6 +53,13 @@
     return hit ? hit[1] : '';
   }
 
+  function understandingHint(count, userText) {
+    // Attachment chips already provide the necessary context. Keep the
+    // compatibility helper empty so legacy callers cannot reintroduce a
+    // second instructional line below the composer.
+    return '';
+  }
+
   /*
    * Detect common formats by file signature when extensions or MIME types are missing.
    * Preserve unknown types without guessing.
@@ -400,14 +407,6 @@
     const fileInput = o.fileInput;
     const button = o.button;
     const tray = o.tray;
-    /*
-     * Capture the host's current conversation for library attribution. Without a session ID,
-     * register a manual upload and associate it after session creation.
-     */
-    const librarySource = () => {
-      if (typeof o.librarySource !== 'function') return null;
-      try { return o.librarySource() || null; } catch (_) { return null; }
-    };
     let rows = [], composing = false, expandedText = false, destroyed = false;
 
     const notify = (message) => {
@@ -491,18 +490,8 @@
         // Folding a typed prompt is only a display change. Do not upload it to
         // the library or replace its trusted in-memory File during hydration.
         if (inputTexts.has(file)) { total += fileSize; continue; }
-        const currentLibrarySource = librarySource();
-        const capturedLibrarySource = currentLibrarySource ? { ...currentLibrarySource } : null;
         hydrateRow(row).then(() => {
-          /*
-           * Register library files after hydration so uploads use validated memory copies. Never
-           * upload expired source files or rejected encrypted payloads.
-           */
           if (!rows.includes(row)) return;
-          // Restoring a requirement card rebuilds only its view; do not upload attachments already registered by the original conversation.
-          row.library = source === 'card-restore' ? null : global.LibraryTransfer?.trackFile(row.file, { name: row.name, source, kind: row.kind, librarySource: capturedLibrarySource }, () => {
-            if (rows.includes(row)) paint();
-          });
           paint();
         });
         total += fileSize;
@@ -771,6 +760,7 @@
     input?.addEventListener('input', event => {
       if (!input.value) expandedText = false;
       if (!event.isComposing) foldInput();
+      syncHint();
     });
     if (host) {
       ['dragenter', 'dragover'].forEach((name) => host.addEventListener(name, (event) => {
@@ -784,8 +774,6 @@
     }
     if (tray) tray.addEventListener('click', (event) => {
       if (event.target.closest('[data-catt-restore]')) { event.preventDefault(); event.stopPropagation(); restoreText(); return; }
-      const retry = event.target.closest('[data-catt-library-retry]');
-      if (retry) { event.stopPropagation(); global.LibraryTransfer?.retry(rows[Number(retry.dataset.cattLibraryRetry)]?.library); return; }
       const hit = event.target.closest('[data-catt-remove]');
       if (hit) { remove(Number(hit.dataset.cattRemove)); return; }
       const open = event.target.closest('.catt-openable[data-catt-open]');
@@ -803,16 +791,15 @@
       add, addReferences, clear, destroy, refs, analysis, submissionText, foldInput, restoreText, consumeInputText,
       files: () => rows.map((row) => row.file),
       names: () => rows.map((row) => row.name),
-      /* IDs of successfully registered library items for association after conversation creation. */
-      libraryItems: () => rows.map((row) => row.library)
-        .filter(job => job && job.status === 'saved' && job.result && job.result.item && job.result.item.id)
-        .map(job => String(job.result.item.id)),
+      /* User-uploaded conversation attachments stay conversation-scoped until explicitly saved. */
+      libraryItems: () => [],
       has: () => rows.length > 0,
     };
   }
 
   global.ConversationAttachments = {
     create, size, messageHtml, hydrateMessageImages, openMessageImage, openTaskAttachment, taskAttachmentError, copyOutputImage, MAX_FILES, MAX_BYTES,
-    ANALYSIS_MAX_FILES, ANALYSIS_MAX_BYTES, sniffMime, fileIdentity, inputText: file => inputTexts.get(file),
+    ANALYSIS_MAX_FILES, ANALYSIS_MAX_BYTES, sniffMime, fileIdentity, understandingHint,
+    inputText: file => inputTexts.get(file),
   };
 })(window);

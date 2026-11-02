@@ -16,6 +16,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models import AppSetting, Client, ModelDef, ModelProvider
+from app.model_runtime_models import ModelRuntimeLease, ModelRuntimeMetric
 from app.services import model_runtime as runtime, model_transport as transport
 
 CONF = dict(base="https://fixture.invalid/v1", key="test-key", model="model", provider="provider", user="alice")
@@ -28,7 +29,8 @@ class IsolatedDatabase(unittest.IsolatedAsyncioTestCase):
         self.engine = create_async_engine(self.url, connect_args={"timeout": 2})
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.engine.begin() as conn:
-            for table in (AppSetting, Client, ModelProvider, ModelDef):
+            for table in (AppSetting, Client, ModelProvider, ModelDef,
+                          ModelRuntimeLease, ModelRuntimeMetric):
                 await conn.run_sync(table.__table__.create)
         self.patch = patch.object(runtime, "SessionLocal", self.sessions)
         self.patch.start()
@@ -76,6 +78,60 @@ class RuntimeTests(IsolatedDatabase):
             row.value = json.dumps(runtime.LEGACY_DEFAULTS)
         async with self.sessions() as session:
             self.assertEqual(await runtime.policy(session), runtime.DEFAULTS)
+
+    async def test_policy_accepts_capacity_above_legacy_256_cap(self):
+        raw = {
+            **runtime.DEFAULTS,
+            "globalConcurrent": 1024,
+            "providerConcurrent": 512,
+            "modelConcurrent": 768,
+            "queueSize": 2048,
+            "userQueueSize": 512,
+            "providers": {"provider": 1536},
+            "models": {"provider:model": 2048},
+        }
+        cleaned = runtime.clean_policy(raw)
+        self.assertEqual(cleaned, raw)
+
+        with self.assertRaises(ValueError):
+            runtime.clean_policy({**runtime.DEFAULTS,
+                                  "globalConcurrent": runtime.MAX_POLICY_CONCURRENCY + 1})
+        with self.assertRaises(ValueError):
+            runtime.clean_policy({**runtime.DEFAULTS,
+                                  "providers": {"provider": runtime.MAX_POLICY_CONCURRENCY + 1}})
+
+    async def test_legacy_json_state_is_adopted_into_indexed_runtime_tables(self):
+        bucket = int(time.time() // 60)
+        legacy = {
+            "leases": [{
+                "id": "legacy-lease",
+                "created": 10.0,
+                "expires": 9999999999.0,
+                "state": "running",
+                "provider": "provider",
+                "model": "model",
+                "scopes": {"global_": "all", "provider": "p", "key": "k",
+                            "model": "m", "user": "u"},
+                "limits": {"global_": 4, "provider": 4, "key": 4,
+                            "model": 4, "user": 4},
+            }],
+            "metrics": {str(bucket): {"started": 1}},
+        }
+        async with self.sessions() as session, session.begin():
+            row = await runtime.lock_setting(session, runtime.STATE_KEY)
+            row.value = json.dumps(legacy)
+            # Simulate a crash after part of the normalized state was written.
+            session.add(ModelRuntimeMetric(bucket=bucket - 1, name="stale", value=2))
+
+        status = await runtime.snapshot()
+        self.assertEqual(status["running"], 1)
+        self.assertEqual(status["lastHour"].get("started"), 1)
+        self.assertNotIn("stale", status["lastHour"])
+        async with self.sessions() as session:
+            self.assertIsNotNone(await session.get(ModelRuntimeLease, "legacy-lease"))
+            self.assertIsNotNone(await session.get(ModelRuntimeMetric, (bucket, "started")))
+            self.assertEqual((await session.get(AppSetting, runtime.STATE_KEY)).value, "")
+        await runtime._remove("legacy-lease", "completed")
 
     async def test_each_capacity_dimension_and_credential_alias(self):
         variants = {

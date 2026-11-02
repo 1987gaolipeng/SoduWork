@@ -44,10 +44,6 @@
 
 (function (global) {
   'use strict';
-  // Support a renderer reload against an older main process still exposing only
-  // a legacy bridge name.
-  if (!global.soduWorkAPI && global.soduworkAPI) global.soduWorkAPI = global.soduworkAPI;
-
   var TASK_STORAGE_BASE = {
     tasks: 'soduwork_work_tasks_v5', ops: 'soduwork_work_task_ops_v1', shadow: 'soduwork_work_task_shadow_v1',
     notices: 'soduwork_work_notices_v1'
@@ -759,6 +755,8 @@
 
   var SoduWorkAPI = {
     get online() { return _online; },
+    conversationProjects: () => jfetch('/conversation-projects'),
+    saveConversationProject: (id, body) => jfetch('/conversation-projects/' + encodeURIComponent(id), {method: 'PUT', body: JSON.stringify(body)}),
     hubBase: base,
     hubEnvironment: hubEnvironment,
     hubConfig: hubConfig,
@@ -1162,13 +1160,61 @@
      * CLI installation and real execution checks are asynchronous jobs. Start a job and poll
      * jobId rather than holding an HTTP request open.
      */
-    async agentSetup() {
-      var r = await jfetch('/agent-setup') || { env: {}, agents: [], modelCount: 0 };
+    async agentSetup(runnerId) {
+      var requestScope = taskStorageKey('ops');
+      var target = typeof runnerId === 'string' ? '?runnerId=' + encodeURIComponent(runnerId) : '';
+      var r = await jfetch('/agent-setup' + target, { taskScope: requestScope }) || { env: {}, agents: [], modelCount: 0 };
       if (!(r.machines || []).length && !(r.agents || []).length) {
         var reason = await localRunnerReason();
         if (reason) r.env = Object.assign({}, r.env, { why: reason });
       }
+      if (requestScope !== taskStorageKey('ops')) throw staleTaskScope();
       mark(true); return r;
+    },
+    async localAgentSetup() {
+      var requestScope = taskStorageKey('ops'), requestHub = base(), epoch = _registrationEpoch;
+      function currentRequest() {
+        if (requestScope !== taskStorageKey('ops') || requestHub !== base() || epoch !== _registrationEpoch) {
+          throw staleTaskScope();
+        }
+      }
+      function runnerId(row) {
+        return row && typeof row.runnerId === 'string' ? row.runnerId.trim() : '';
+      }
+      function currentInstance(row) {
+        if (!row || row.execution === 'backend') return false;
+        return row.scope != null && row.scope !== '' ? row.scope === 'current-instance' : row.isCurrentDevice === true;
+      }
+      var inventory = await jfetch('/runners', { taskScope: requestScope }) || {};
+      currentRequest();
+      async function unavailable() {
+        var reason = inventory.localRunnerReason || await localRunnerReason();
+        currentRequest();
+        return { machines: [], agents: [], models: [], modelCount: null, execution: 'runner',
+          env: { ok: false, why: reason || '当前客户端的 Runner 尚未连接，连接后会显示本机底座。' } };
+      }
+      var runners = (Array.isArray(inventory.runners) ? inventory.runners : []).filter(function (row) {
+        return currentInstance(row) && row.online === true && runnerId(row);
+      });
+      var selected = runners.find(function (row) { return row.scope === 'current-instance'; }) || runners[0];
+      if (!selected) return unavailable();
+      var selectedId = runnerId(selected);
+      // Keep the captured identity through both requests; an older Hub may ignore runnerId.
+      var data = await jfetch('/agent-setup?runnerId=' + encodeURIComponent(selectedId), { taskScope: requestScope }) || {};
+      currentRequest();
+      var machine = (Array.isArray(data.machines) ? data.machines : []).find(function (row) {
+        if (runnerId(row) !== selectedId || row.execution === 'backend' || row.online === false) return false;
+        if (row.scope != null && row.scope !== '') return row.scope === 'current-instance';
+        // /runners proved this exact identity; only absent metadata may be supplemented.
+        return row.isCurrentDevice == null || row.isCurrentDevice === true;
+      });
+      if (!machine) return unavailable();
+      machine = Object.assign({}, machine, { runnerId: selectedId, scope: 'current-instance', isCurrentDevice: true });
+      var agents = Array.isArray(machine.agents) ? machine.agents : [];
+      // Never reuse first-machine compatibility fields returned by an older Hub.
+      return { machines: [machine], agents: agents, env: machine.env || {}, execution: 'runner',
+        models: Array.isArray(data.models) ? data.models : [],
+        modelCount: typeof data.modelCount === 'number' ? data.modelCount : null };
     },
     async myUsage(days) {
       var span = Math.max(1, Math.min(365, Number(days || 30)));
@@ -1182,41 +1228,41 @@
      * wrong host.
      */
     async agentInstall(key, action, runnerId, options) {
-      var r = await jfetch('/agent-setup/install', { method: 'POST',
+      var r = await jfetch('/agent-setup/install', { method: 'POST', taskScope: taskStorageKey('ops'),
         body: JSON.stringify({ key: key, action: action || 'install', runnerId: runnerId || '',
           ...(action === 'login-cancel' && options?.jobId ? { jobId: String(options.jobId) } : {}) }) });
       mark(true); return r;
     },
     /* Run a minimal real task using the same effective-key resolution as normal dispatch. */
     async agentProbe(key, model, runnerId) {
-      var r = await jfetch('/agent-setup/probe', { method: 'POST',
+      var r = await jfetch('/agent-setup/probe', { method: 'POST', taskScope: taskStorageKey('ops'),
         body: JSON.stringify({ key: key, model: model || '', runnerId: runnerId || '' }) });
       mark(true); return r;
     },
     async agentJob(jid) {
-      var r = await jfetch('/agent-setup/job/' + encodeURIComponent(jid));
+      var r = await jfetch('/agent-setup/job/' + encodeURIComponent(jid), { taskScope: taskStorageKey('ops') });
       mark(true); return r;
     },
 
     async setAgentModel(key, model) {
       var r = await jfetch('/agent-setup/model', {
-        method: 'PUT', body: JSON.stringify({ key: key, model: model || '' })
+        method: 'PUT', taskScope: taskStorageKey('ops'), body: JSON.stringify({ key: key, model: model || '' })
       });
       mark(true); return r;
     },
     /* A Runner hosts task execution. Pausing blocks new tasks without interrupting existing sessions. */
-    async cloudEnvironments() { return jfetch('/cloud-environments'); },
+    async cloudEnvironments() { return jfetch('/cloud-environments', { taskScope: taskStorageKey('ops') }); },
     async addCloudEnvironment(body) {
       return cloudSetup('/cloud-environments', body);
     },
     async updateCloudEnvironment(id, body) {
-      return jfetch('/cloud-environments/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify(body || {}) });
+      return jfetch('/cloud-environments/' + encodeURIComponent(id), { method: 'PATCH', taskScope: taskStorageKey('ops'), body: JSON.stringify(body || {}) });
     },
     async rotateCloudEnvironmentCredential(id, body) {
       return cloudSetup('/cloud-environments/' + encodeURIComponent(id) + '/credentials', body);
     },
     async removeCloudEnvironment(id) {
-      return jfetch('/cloud-environments/' + encodeURIComponent(id), { method: 'DELETE' });
+      return jfetch('/cloud-environments/' + encodeURIComponent(id), { method: 'DELETE', taskScope: taskStorageKey('ops') });
     },
     async runners() {
       var r = await jfetch('/runners') || { runners: [] };
@@ -1535,6 +1581,12 @@
       });
       mark(true); return r;
     },
+    async acknowledgeScheduleRun(runId, body) {
+      var r = await jfetch('/automation-conversations/' + encodeURIComponent(runId) + '/state', {
+        method: 'POST', body: JSON.stringify(body || {})
+      });
+      mark(true); return r;
+    },
     /* Preview the same backend-generated title, description, and carried materials used by dispatch. */
     async aiPreview(tid, brief, repo) {
       try {
@@ -1728,6 +1780,15 @@
      * Opening the URL in a browser omits the device header and returns 401.
      */
     async downloadArtifactsZip(tid, title, artifactVersionId) {
+      var filename = ((title || '产出').replace(/[\\/:*?"<>|]/g, '').slice(0, 40) || '产出') + '.zip';
+      // Desktop downloads use the same native save dialog and account checks as individual files.
+      if (global.soduWorkAPI?.downloadAttachment) {
+        var saved = await global.soduWorkAPI.downloadAttachment({ taskId: String(tid),
+          artifactVersionId: String(artifactVersionId || ''), filename: filename });
+        if (!saved || (saved.ok === false && !saved.canceled && !saved.cancelled))
+          throw new Error(saved?.reason || '下载未完成');
+        return saved;
+      }
       var res = await _fetch('/tasks/' + encodeURIComponent(tid) + '/artifacts.zip' + (artifactVersionId ? '?artifactVersionId=' + encodeURIComponent(artifactVersionId) : ''),
         { method: 'GET' }, 60000);
       if (!res.ok) {
@@ -1740,7 +1801,7 @@
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
       a.href = url;
-      a.download = ((title || '产出').replace(/[\\/:*?"<>|]/g, '').slice(0, 40) || '产出') + '.zip';
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -1907,6 +1968,21 @@
         }); mark(true); refreshSentNotices(requestScope); return r;
       } catch (e) { markFromError(e); throw e; }
     },
+    async shareLibraryItems(ids, recipientUserIds, note, options) {
+      const requestScope = taskStorageKey('ops');
+      try {
+        var itemIds = [...new Set((Array.isArray(ids) ? ids : []).map(function (id) { return String(id || '').trim(); }).filter(Boolean))];
+        var payload = { itemIds: itemIds, recipientUserIds: Array.isArray(recipientUserIds) ? recipientUserIds : [], note: String(note || '') };
+        if (Array.isArray(options?.folderIds) && options.folderIds.length) payload.folderIds = [...new Set(options.folderIds.map(function (id) { return String(id || '').trim(); }).filter(Boolean))];
+        if (options?.forcePackage === true) payload.forcePackage = true;
+        if (options?.requestId) payload.requestId = String(options.requestId);
+        if (Array.isArray(options?.localFiles) && options.localFiles.length) payload.localFiles = options.localFiles;
+        var r = await jfetch('/library/items/batch-share', {
+          taskScope: requestScope, method: 'POST',
+          signal: _abortSignal(120000), body: JSON.stringify(payload)
+        }); mark(true); refreshSentNotices(requestScope); return r;
+      } catch (e) { markFromError(e); throw e; }
+    },
     async shareLocalLibraryFile(body) {
       const requestScope = taskStorageKey('ops');
       try {
@@ -2054,6 +2130,9 @@
       } catch (error) { markFromError(error); throw error; }
     },
     libraryOutputKey(ref, file) {
+      if (file?.deliveryBundle && file.taskId && (file.artifactVersionId || file.attachmentIds?.length))
+        return JSON.stringify(['delivery-bundle', file.taskId,
+          file.attachmentIds?.length ? [...file.attachmentIds].sort() : file.artifactVersionId]);
       var task = file?.taskId || file?.cloudTaskId, attachment = file?.attachmentId || file?.remoteAttachmentId;
       return task && attachment ? JSON.stringify(['attachment', task, attachment]) :
         JSON.stringify(['output', ref || '', file?.artifactId || file?.path || file?.relative || '', file?.at || file?.updatedAt || 0, file?.size || 0]);
@@ -2064,12 +2143,16 @@
       if (this.getLibraryOutputStatus) {
         var saved = await this.getLibraryOutputStatus(outputKey, file);
         assertLibraryScope(requestScope);
-        if (saved?.item) return { ok: true, item: saved.item, duplicate: true };
+        if (saved?.item?.id) return { ok: true, item: saved.item, duplicate: true };
       }
       var bridge = global.soduWorkAPI && (global.soduWorkAPI.conversationSession || global.soduWorkAPI.piSession);
       var target = file && (file.path || file.relative || '');
       var got;
-      if (bridge && typeof bridge.readOutputBinary === 'function' && (target || file?.artifactId) && !(file?.taskId && file?.attachmentId)) {
+      if (file?.deliveryBundle && file.taskId && file.artifactVersionId && global.soduWorkAPI?.readAttachmentBinary) {
+        got = await global.soduWorkAPI.readAttachmentBinary({ taskId: file.taskId,
+          artifactVersionId: file.artifactVersionId, filename: file.name || '交付物.zip' });
+        assertLibraryScope(requestScope);
+      } else if (bridge && typeof bridge.readOutputBinary === 'function' && (target || file?.artifactId) && !(file?.taskId && file?.attachmentId)) {
         got = await bridge.readOutputBinary(String(ref || ''), file.artifactId ? { artifactId: file.artifactId } : target);
         assertLibraryScope(requestScope);
       } else if (file && file.taskId && file.attachmentId && global.soduWorkAPI &&
@@ -2094,6 +2177,7 @@
       assertLibraryScope(requestScope);
       var result = await this.uploadLibraryFile(new File([blob], name, { type: got.mimeType || 'application/octet-stream' }), folderId, '', Object.assign({}, source, { outputKey: outputKey }));
       assertLibraryScope(requestScope);
+      if (result?.ok !== true || !result.item?.id) throw new Error('保存到资料库失败，请重试');
       return result;
     },
     async associateLibrarySource(id, source) {
@@ -2547,10 +2631,6 @@
     });
   }
 
-  /*
-   * SoduWorkAPI is canonical; legacy aliases reference the same object and state for
-   * compatibility with released renderers.
-   */
   if (global.soduWorkAPI?.onAccountSessionChanged) global.soduWorkAPI.onAccountSessionChanged(function (changed) {
     if (!changed || changed.hub !== base() || changed.clientId !== device()) return;
     invalidateRegistrations(); _clientUser = null; _clientQuota = null;

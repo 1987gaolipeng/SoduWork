@@ -23,7 +23,7 @@ SVC = os.path.join(BASE, "app", "services")
 # Keep the excluded dependency list aligned with runner.spec.
 BANNED = ("sqlalchemy", "fastapi", "uvicorn", "pydantic", "pydantic_settings",
           "dotenv", "app.db", "app.models", "app.services.llm",
-          "app.services.runner_access_policy")
+          "app.services.runner_access_policy", "app.services.model_runtime")
 
 # Import the entry point and hidden-import modules in behavioral verification.
 RUNNER_MODULES = [
@@ -91,6 +91,14 @@ def _imports(path: str) -> tuple[set[str], list[str]]:
 
 
 def static_audit() -> None:
+    spec = ast.parse(open(os.path.join(BASE, "runner.spec"), encoding="utf-8").read())
+    analysis = next(node for node in ast.walk(spec) if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name) and node.func.id == "Analysis")
+    excluded = next(item.value for item in analysis.keywords if item.arg == "excludes")
+    excluded_names = {node.value for node in ast.walk(excluded)
+                      if isinstance(node, ast.Constant) and isinstance(node.value, str)}
+    ok(set(BANNED).issubset(excluded_names), "打包排除项与 Runner 依赖边界一致",
+       str(sorted(set(BANNED) - excluded_names)))
     info: dict[str, tuple[set[str], list[str]]] = {}
     for f in os.listdir(SVC):
         if f.endswith(".py"):
@@ -135,7 +143,7 @@ class _Block:
     def find_spec(self, name, path=None, target=None):
         root = name.split(".")[0]
         if root in BANNED_ROOTS or name in ("app.db", "app.models", "app.services.llm",
-                                           "app.services.runner_access_policy"):
+                                           "app.services.runner_access_policy", "app.services.model_runtime"):
             raise ModuleNotFoundError("No module named " + repr(name) + " (blocked: runner bundle)")
         return None
 

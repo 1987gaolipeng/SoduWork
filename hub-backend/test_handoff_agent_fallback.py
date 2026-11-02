@@ -31,6 +31,14 @@ class FallbackPolicyTests(unittest.TestCase):
         with self.assertRaises(HTTPException):
             policy.validate({"adapterId": "codex", "entryKind": "cloud"}, options, "pi")
 
+    def test_runner_kind_rejects_non_string_values(self):
+        raw = {"sha256": "a" * 64, "assigneeId": "runner:cloud:codex", "instruction": "Continue"}
+        for value in (None, 1, [], {}, "unknown"):
+            with self.subTest(value=value), self.assertRaises(HTTPException):
+                svc.clean_options({**raw, "targetRunnerKind": value})
+        clean = svc.clean_options({**raw, "targetRunnerKind": "work-computer"})
+        self.assertEqual(clean["targetRunnerKind"], "work-computer")
+
     def test_legacy_pinned_receipts_remain_usable_but_new_callers_cannot_forge_them(self):
         source = {"adapterId": "pi"}
         with self.assertRaises(HTTPException):

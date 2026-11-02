@@ -87,3 +87,23 @@ test('cloud environments strings translate in en-US, ja-JP and ko-KR', () => {
     '2 台在线 · 会话将自动选择，无需手动指定',
   );
 });
+
+test('instance isolation and durable cloud attention labels are translated in every supported locale', () => {
+  const i18n = client();
+  for (const [locale, current] of [['en-US', 'This client instance'], ['ja-JP', 'このクライアント'], ['ko-KR', '현재 클라이언트']]) {
+    i18n.setLocale(locale);
+    assert.equal(i18n.translateText('当前客户端'), current);
+    for (const text of ['个人云端', '关联执行机', '服务端环境', '远程执行环境', '云端待审批',
+      '云端记录待核对', '部分历史记录尚未同步，已有记录已保留；可在原执行机核对。',
+      '云端成果待同步', '云端成果尚未完成同步，将自动重试；已收到的过程记录已保留。',
+      '安装、登录与测试仅作用于此环境。', '现有记录仍保留，等待此执行环境恢复',
+      '管理本机的 Agent、模型与可用状态', '正在查看本机底座…', '本机底座暂不可用',
+      '当前客户端的 Runner 尚未连接，连接后会显示本机底座。', '云端底座请在「云端电脑」中管理。',
+      '本机 AI 助手', '打开云端电脑，安装或修复云端底座', '打开云端电脑',
+      '当前客户端的执行机尚未就绪。使用其他环境时，请明确选择云端或指定执行机。',
+      '现有 2 个会话不会中断；使用其他环境执行新任务时，请明确选择云端或指定执行机。',
+      '查看待处理审批（2）', '有 2 条消息已受理，正在等待执行机确认。']) {
+      assert.notEqual(i18n.translateText(text), text, locale + ': ' + text);
+    }
+  }
+});

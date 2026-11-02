@@ -30,7 +30,11 @@ function patchSource(file) {
   }
   let next = source;
   if (isSettingsManager) {
-    const token = '            baseDelayMs: this.settings.retry?.baseDelayMs ?? 2000,';
+    const token = [
+      '            baseDelayMs: this.settings.retry?.baseDelayMs ?? 2000,',
+      '            baseDelayMs: this.settings.retry?.baseDelayMs ?? SETTINGS_DEFAULTS.retry.baseDelayMs,',
+    ].find(value => source.includes(value));
+    if (!token) return { ok: false, file, reason: 'unsupported settings manager retry layout' };
     const replacement = `${token}
             // ${MARKER}: allow the host to provide an explicit bounded schedule.
             delayScheduleMs: Array.isArray(this.settings.retry?.delayScheduleMs)
@@ -39,12 +43,14 @@ function patchSource(file) {
     if (!source.includes(token)) return { ok: false, file, reason: 'unsupported settings manager retry layout' };
     next = source.replace(token, replacement);
   } else if (isAgentSession) {
-    const token = '        const delayMs = settings.baseDelayMs * 2 ** (this._retryAttempt - 1);';
+    const fallback = source.includes('        const delayMs = retryDelayMs(settings, this._retryAttempt);')
+      ? 'retryDelayMs(settings, this._retryAttempt)' : 'settings.baseDelayMs * 2 ** (this._retryAttempt - 1)';
+    const token = `        const delayMs = ${fallback};`;
     const replacement = `        // ${MARKER}: prefer SoduWork's explicit schedule, retaining SDK fallback.
         const scheduledDelay = settings.delayScheduleMs?.[this._retryAttempt - 1];
         const delayMs = Number.isFinite(scheduledDelay)
-            ? scheduledDelay
-            : settings.baseDelayMs * 2 ** (this._retryAttempt - 1);`;
+            ? Math.min(scheduledDelay, settings.maxAgentDelayMs ?? Number.MAX_SAFE_INTEGER)
+            : ${fallback};`;
     if (!source.includes(token)) return { ok: false, file, reason: 'unsupported agent retry layout' };
     next = source.replace(token, replacement);
   } else {

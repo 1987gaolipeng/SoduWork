@@ -80,6 +80,49 @@ function openedNative(options) {
     taskBindings: options.taskRef ? [{taskId: options.taskRef}] : []};
 }
 
+test('same-person dispatch prefers the original conversation and preserves controlled execution choices', async () => {
+  const task = {id:'same-owner', title:'Delivery', status:'todo', createdBy:'u', assigneeUserId:'u',
+    workRouting:{selectedStrategy:'direct', selectedAgentId:'pi', executionContext:{strategy:'direct', agent:{id:'pi'}, runner:{mode:'local'}}}};
+  const f = fixture(task);
+  f.window.TaskConversationNavigation = {preferredConversation: async () => 'creation-chat'};
+  assert.equal((await f.api.enqueueTask(task.id, {source:'task-dispatch'})).ok, true);
+  assert.equal(f.opened[0].id, 'creation-chat');
+  assert.equal(f.sent.length, 1);
+  assert.notEqual(f.sent[0].options.reuseConversation, true);
+});
+
+test('a preferred original archive opens as an ordinary chat and binds before dispatch when it has no prior execution', async () => {
+  const task = {id:'created-here',title:'Existing conversation',status:'todo'};
+  const f = nativeOpeningFixture(task, {open: options => ({...openedNative(options), sessionId:options.chatId})});
+  assert.equal(await f.api._openTask(task.id, task.title, {task,source:'task-dispatch',
+    chatId:'original-with-messages',preferredConversation:true}), true);
+  assert.equal(f.nativeOpens.length, 1);
+  assert.equal(f.nativeOpens[0].chatId, 'original-with-messages');
+  assert.equal(f.nativeOpens[0].requireTaskBinding, false);
+  assert.equal(f.bound.length, 1);
+  assert.equal(f.bound[0][1], task.id);
+  assert.equal(f.ctx._sessionId, 'original-with-messages');
+});
+
+for (const mode of ['manual', 'auto']) for (const missing of [true, false]) {
+  test(`review ${mode} creates a replacement only after authoritative absence (${missing})`, async () => {
+    const task = {id:'review', status:'reviewing', workRouting:{conversationTurn:{conversationId:'original'}}};
+    const f = fixture(task, {missing});
+    f.ctx._mount = () => null;
+    const ok = await f.api._openTask(task.id, 'Review', {task, chatId:'original', source:'acceptance',
+      acceptanceExecutionSession:true, acceptanceMode:mode, approvalId:'approval'});
+    assert.equal(ok, missing);
+    assert.equal(f.opened.length, missing ? 2 : 1);
+    if (missing) {
+      assert.equal(f.opened[1].id, '');
+      assert.equal(f.opened[1].options.acceptanceSession, true);
+      assert.equal(f.ctx._sessionOptions.acceptanceExecutionSession, false);
+      assert.equal(f.ctx._sessionOptions.approvalId, 'approval');
+    }
+    assert.equal(f.sent.length, 0);
+  });
+}
+
 test('adding an existing task opens the work-only archive normally then validates its binding', async () => {
   for (const bindOk of [true, false]) {
     const task = {id: 'existing', title: 'Existing task', status: 'todo', triageStage: 'ready'};

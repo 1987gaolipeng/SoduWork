@@ -2,6 +2,7 @@
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -12,16 +13,17 @@ from unittest.mock import Mock, patch
 
 
 INSTALLER = Path(__file__).parent / 'installers/runner-install.sh'
-BOOTSTRAP = INSTALLER.read_text().split("<<'BOOTSTRAP_PY'\n", 1)[1].split('\nBOOTSTRAP_PY', 1)[0]
+BOOTSTRAP = INSTALLER.read_text(encoding='utf-8').split("<<'BOOTSTRAP_PY'\n", 1)[1].split('\nBOOTSTRAP_PY', 1)[0]
 
 
 class AgentBootstrapTests(unittest.TestCase):
     def run_stage(self, root, *, existing=False, corrupt=False, fail_install=False,
-                  collision=False):
+                  collision=False, fail_ready=False, fail_publish=False, execute_denied=False):
         calls = []
         runtime = types.SimpleNamespace(node_env=Mock(side_effect=(
             [{'ok': True, 'node': 'v22.23.3', 'npm': '10.9.9'}] if existing else
-            [{'ok': False}, {'ok': True, 'node': 'v22.23.3', 'npm': '10.9.9'}])))
+            [{'ok': False}, {'ok': not fail_ready, 'node': 'v22.23.3', 'npm': '10.9.9'}])))
+        runtime.clean_env = Mock(return_value={'FIXTURE_CLEAN': '1'})
         before = {'installed': existing, 'version': 'fixture', 'warnNow': ''}
         after = {'installed': True, 'version': 'fixture', 'warnNow': ''}
         setup = types.SimpleNamespace(
@@ -55,17 +57,51 @@ class AgentBootstrapTests(unittest.TestCase):
                 binaries.mkdir(parents=True)
                 for command in ('node', 'npm', 'npx'):
                     (binaries / command).write_text('fixture')
+                    (binaries / command).chmod(0o755)
+                npm = binaries.parent / 'lib/node_modules/npm/bin/npm-cli.js'
+                npm.parent.mkdir(parents=True)
+                npm.write_text('fixture')
+            else:
+                executable = Path(argv[0])
+                if executable.name == 'node':
+                    self.assertEqual(kwargs.get('env'), {'FIXTURE_CLEAN': '1'})
+                    if not executable.is_file() or executable.read_text() == 'broken':
+                        raise subprocess.CalledProcessError(1, argv)
+                    if argv[1] == '-p':
+                        marker = executable.read_text()
+                        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({
+                            'node': '18.20.0' if marker == 'incompatible' else '22.23.3',
+                            'electron': marker == 'electron'}))
+                    if not Path(argv[1]).is_file() or Path(argv[1]).read_text() == 'broken':
+                        raise subprocess.CalledProcessError(1, argv)
+                    npm_cli = executable.parent.parent / 'lib/node_modules/npm/bin/npm-cli.js'
+                    if not npm_cli.is_file() or npm_cli.read_text() == 'broken':
+                        raise subprocess.CalledProcessError(1, argv)
+                    return subprocess.CompletedProcess(argv, 0, stdout='10.9.9\n')
             return subprocess.CompletedProcess(argv, 0)
+
+        rename = Path.rename
+        def publish(path, target):
+            if fail_publish and path.name == name and path.parent.name.startswith('node-bootstrap-'):
+                raise OSError('fixture publish failure')
+            return rename(path, target)
+        access = os.access
+        def executable(path, mode):
+            if execute_denied and Path(path).resolve() == (root / 'agent-runtimes' / name / 'bin/npx').resolve():
+                return Path(path).read_text() == 'fixture'
+            return access(path, mode)
 
         with patch.dict(sys.modules, {'app': app, 'app.services': services}), \
                 patch.object(sys, 'argv', ['installer-stage', str(root)]), \
                 patch('platform.machine', return_value='x86_64'), \
                 patch('urllib.request.urlopen', return_value=io.BytesIO(manifest)), \
                 patch('subprocess.run', side_effect=run), \
+                patch.object(Path, 'rename', publish), \
+                patch('os.access', side_effect=executable), \
                 patch('time.sleep'), patch('sys.stdout', new=io.StringIO()):
             try:
                 exec(compile(BOOTSTRAP, str(INSTALLER), 'exec'), {})
-            except SystemExit as error:
+            except (SystemExit, OSError, subprocess.SubprocessError) as error:
                 return error, calls, setup
         return None, calls, setup
 
@@ -108,6 +144,102 @@ class AgentBootstrapTests(unittest.TestCase):
             self.assertIn('未覆盖', str(error))
             self.assertEqual((root / 'agent-runtimes/npm/bin/node').read_text(), 'user file')
             setup.start_install.assert_not_called()
+
+    def existing_runtime(self, root, *, node='original', npm='original'):
+        target = root / 'agent-runtimes/node-v22.23.3-linux-x64'
+        (target / 'bin').mkdir(parents=True)
+        for command in ('node', 'npm', 'npx'):
+            (target / 'bin' / command).write_text(node if command == 'node' else 'original')
+            (target / 'bin' / command).chmod(0o755)
+        cli = target / 'lib/node_modules/npm/bin/npm-cli.js'
+        cli.parent.mkdir(parents=True)
+        cli.write_text(npm)
+        return target
+
+    def test_corrupt_managed_node_or_npm_is_replaced_by_verified_stage(self):
+        for broken in ('node', 'npm'):
+            with self.subTest(broken=broken), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                target = self.existing_runtime(root, **{broken: 'broken'})
+                error, _, _ = self.run_stage(root)
+                self.assertIsNone(error)
+                self.assertEqual((target / 'bin/node').read_text(), 'fixture')
+                self.assertEqual((root / 'agent-runtimes/npm/bin/node').resolve(), (target / 'bin/node').resolve())
+                self.assertFalse(list(target.parent.glob('*.rollback-*')))
+
+    def test_healthy_fixed_runtime_is_retained_when_repairing_command_links(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            target = self.existing_runtime(root)
+            error, _, _ = self.run_stage(root)
+            self.assertIsNone(error)
+            self.assertEqual((target / 'bin/node').read_text(), 'original')
+            self.assertEqual((root / 'agent-runtimes/npm/bin/node').resolve(), (target / 'bin/node').resolve())
+
+    def test_incompatible_identity_and_missing_launchers_are_repaired(self):
+        for defect in ('incompatible', 'electron', 'npm', 'npx'):
+            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                target = self.existing_runtime(root, node=defect if defect in ('incompatible', 'electron') else 'original')
+                if defect in ('npm', 'npx'):
+                    (target / 'bin' / defect).unlink()
+                error, _, _ = self.run_stage(root)
+                self.assertIsNone(error)
+                self.assertEqual((target / 'bin/node').read_text(), 'fixture')
+                self.assertTrue((target / 'bin/npm').is_file())
+                self.assertTrue((target / 'bin/npx').is_file())
+
+    def test_non_executable_managed_launcher_is_repaired(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            target = self.existing_runtime(root)
+            error, _, _ = self.run_stage(root, execute_denied=True)
+            self.assertIsNone(error)
+            self.assertEqual((target / 'bin/npx').read_text(), 'fixture')
+
+    def test_failed_publish_or_discovery_restores_runtime_and_existing_links(self):
+        for failure in ('fail_publish', 'fail_ready'):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                target = self.existing_runtime(root, node='broken')
+                links = root / 'agent-runtimes/npm/bin'
+                links.mkdir(parents=True)
+                previous = '../previous-node'
+                (links / 'node').symlink_to(previous)
+                error, _, setup = self.run_stage(root, **{failure: True})
+                self.assertIsNotNone(error)
+                self.assertEqual((target / 'bin/node').read_text(), 'broken')
+                self.assertEqual(os.readlink(links / 'node'), previous)
+                self.assertFalse((links / 'npm').is_symlink())
+                self.assertFalse((links / 'npx').is_symlink())
+                self.assertFalse(list(target.parent.glob('*.rollback-*')))
+                setup.start_install.assert_not_called()
+
+    def test_failed_first_activation_leaves_no_partial_runtime_or_links(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            error, _, setup = self.run_stage(root, fail_ready=True)
+            self.assertIsNotNone(error)
+            self.assertFalse((root / 'agent-runtimes/node-v22.23.3-linux-x64').exists())
+            self.assertFalse(any((root / 'agent-runtimes/npm/bin').iterdir()))
+            setup.start_install.assert_not_called()
+
+    def test_managed_directory_symlinks_never_modify_their_targets(self):
+        for child in ('node-v22.23.3-linux-x64', 'npm', 'npm/bin'):
+            with self.subTest(child=child), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                outside = root / 'outside'
+                outside.mkdir()
+                (outside / 'untouched').write_text('user data')
+                link = root / 'agent-runtimes' / child
+                link.parent.mkdir(parents=True)
+                link.symlink_to(outside, target_is_directory=True)
+                error, calls, setup = self.run_stage(root)
+                self.assertIsNotNone(error)
+                self.assertTrue(link.is_symlink())
+                self.assertEqual([p.name for p in outside.iterdir()], ['untouched'])
+                self.assertEqual(calls, [])
+                setup.start_install.assert_not_called()
 
     def test_config_rerun_preserves_existing_identity_options_and_custom_paths(self):
         source = INSTALLER.read_text()

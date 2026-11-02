@@ -110,6 +110,8 @@ test('native mention opens only its own composer, has an honest review receipt, 
  const chat=require('../main/work-preview-app-chat.cjs'),wc=new EventEmitter();let payload,calls=0,current=true;
  wc.isDestroyed=()=>false;wc.send=(channel,value)=>{assert.equal(channel,'app-composer-submit');payload=value;calls++;};
  const item={composer:{view:{webContents:wc}}},params={recipientUserId:'user-1',text:'请核对',requestId:'mention-once'},options={mention:true,assertCurrent:()=>{if(!current)throw Error('账号已变化');}};
+ item.appBridge = { appId: 'plugin:local:mention', origin: 'https://fixture.invalid' };
+ require('../main/work-preview-app-owner.cjs').capture(item, { app: { getPath: () => os.tmpdir() } });
  const promise=chat.send(item,params,item,options);assert.equal(payload.kind,'mention');assert.equal(payload.mention.recipientUserId,'user-1');
  assert.equal(chat.send(item,params,item,options),promise);assert.equal(chat.finish({}, {id:payload.id,ok:true}).ok,false);
  chat.finish(wc,{id:payload.id,ok:true,state:'review'});const result=await promise;assert.equal(result.state,'review');assert.equal(result.opened,true);assert.equal(result.accepted,undefined);assert.equal(calls,1);

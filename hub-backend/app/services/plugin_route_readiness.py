@@ -54,7 +54,8 @@ async def check(session, version, *, binding_config: dict | None = None,
             "ok": not blockers, "blockers": _unique(blockers), "warnings": [],
             "routes": [], "agent": None,
             "check": {"key": "agent", "label": "逐节点 Agent 与模型", "ok": not blockers,
-                      "detail": "这条流程不需要 AI 执行机"},
+                      "detail": "这条流程不需要 AI 执行机",
+                      "detailMessage": {"key": "plugin.routes.unneeded", "params": {}, "fallback": "这条流程不需要 AI 执行机"}},
         }
 
     routes: list[dict] = []
@@ -132,7 +133,9 @@ async def check(session, version, *, binding_config: dict | None = None,
         "ok": not blockers, "blockers": _unique(blockers),
         "warnings": _unique(warnings), "routes": routes, "agent": first_agent,
         "check": {"key": "agent", "label": "逐节点 Agent 与模型",
-                  "ok": route_ok, "detail": detail},
+                  "ok": route_ok, "detail": detail,
+                  "detailMessage": {"key": "plugin.routes.ready" if route_ok else "plugin.routes.pending",
+                                    "params": {"count": len(routes)}, "fallback": detail}},
     }
 
 

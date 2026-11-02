@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am
 from . import optional_internal_features, plugin_route_readiness, plugin_runtime, scm_support, workflow_contracts
+from .agent_messages import descriptor
 
 
 def repository_nodes(workflow: dict, node_keys: set[str] | None = None) -> list[str]:
@@ -83,6 +84,8 @@ async def binding_readiness(session: AsyncSession, version: am.PluginVersion,
         dependency_checks.append({
             "key": "mcp", "label": "MCP 连接可用",
             "ok": bool(mcp_status["ok"]), "detail": detail,
+            "detailMessage": descriptor("plugin.mcp.ready" if mcp_status["ok"] else "plugin.mcp.missing",
+                detail, params={"count": len(mcp_status["available"]), "names": "、".join(mcp_status["missing"])}),
         })
         if not mcp_status["ok"]:
             blockers.append("插件需要但企业尚未启用的 MCP：" +
@@ -101,6 +104,8 @@ async def binding_readiness(session: AsyncSession, version: am.PluginVersion,
             dependency_checks.append({
                 "key": "mcp-tools", "label": "MCP 工具最小授权",
                 "ok": not missing_tools, "detail": detail,
+                "detailMessage": descriptor("plugin.tools.ready" if not missing_tools else "plugin.tools.missing",
+                    detail, params={"count": sum(len(x) for x in tool_grants.values()), "names": "、".join(missing_tools)}),
             })
             if missing_tools:
                 blockers.append("请为这些 MCP 只批准插件实际需要的工具：" +
@@ -253,6 +258,8 @@ async def simulate(session: AsyncSession, version: am.PluginVersion, project,
         "detail": ("可以进入项目绑定" if version.trust_state == "approved" and version.enabled
                    else "版本仍在隔离区；完成能力审查后才能启用"),
     }]
+    checks[-1]["detailMessage"] = descriptor(
+        "plugin.trust.ready" if checks[-1]["ok"] else "plugin.trust.pending", checks[-1]["detail"])
     if not checks[-1]["ok"]:
         blockers.append(checks[-1]["detail"])
     checks.extend(list(readiness.get("checks") or []))
@@ -264,6 +271,7 @@ async def simulate(session: AsyncSession, version: am.PluginVersion, project,
         checks.append({
             "key": "skills", "label": "技能可用", "ok": True,
             "detail": f"{len(resolved)} 项技能已就绪，其中 {bundled_count} 项随插件锁定",
+            "detailMessage": descriptor("plugin.skills.ready", params={"count": len(resolved), "bundled": bundled_count}),
         })
     except ValueError as exc:
         checks.append({"key": "skills", "label": "技能可用", "ok": False,
@@ -282,7 +290,10 @@ async def simulate(session: AsyncSession, version: am.PluginVersion, project,
     checks.append({
         "key": "project", "label": "项目与环境配置", "ok": project_ok,
         "detail": ("当前项目满足这条流程" if project_ok else "请先处理下面的阻断项"),
+        "detailMessage": descriptor("plugin.project.ready" if project_ok else "plugin.project.pending"),
     })
+    for row in checks:
+        row["labelMessage"] = descriptor("plugin.check." + row["key"], row["label"])
     route_by_node = {row["nodeKey"]: row["requested"] for row in routes}
     return {
         "dryRun": True, "ok": not blockers, "checks": checks,

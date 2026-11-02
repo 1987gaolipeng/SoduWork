@@ -9,6 +9,10 @@
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const key = file => file && (file.artifactId || file.attachmentId || file.path || file.relative || file.name) || '';
   const scope = () => global.SoduWorkAPI?.taskStorageKey?.('ops') || '';
+  const announceLibraryChange = detail => {
+    global.dispatchEvent?.(new CustomEvent('soduwork-library-changed', { detail: detail || {} }));
+    try { global.soduWorkAPI?.broadcast?.('library', detail || {}); } catch (_) { /* Optional outside the desktop bridge. */ }
+  };
   const size = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n ? Math.max(1, Math.round(n / 1024)) + ' KB' : '';
   const totalSize = files => files.reduce((sum, file) => sum + (Number(file.size) || 0), 0);
   const jobKey = (ref, files) => JSON.stringify([scope(), ref, files.map(f => [key(f), f.at || 0, f.size || 0])]);
@@ -27,6 +31,8 @@
   const localIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>';
   const archiveIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M10 4v3h3v3h-3v3h3v4h-3v-4"/></svg>';
   const saveIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 18.25h9a4.25 4.25 0 0 0 .56-8.46A5.75 5.75 0 0 0 6.2 8.5a4.9 4.9 0 0 0 1.3 9.75Z"/><path d="M12 16V9.5m-2.5 2.5L12 9.5l2.5 2.5"/></svg>';
+  const savedIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4L19 6"/></svg>';
+  const tx = source => global.SoduWorkI18n?.t(source, source) || source;
   const previewIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
   const action = (attr, label, glyph, hidden = false) => '<button type="button" class="ndelivery-action" ' + attr +
     (hidden ? ' hidden' : '') + ' aria-label="' + esc(label) + '" title="' + esc(label) + '">' + glyph + '<span class="ndelivery-action-label">' + label + '</span></button>';
@@ -93,8 +99,41 @@
     // Evidence remains visible above the delivery without entering its saved files.
     if (!card) return;
     [...message.querySelectorAll('.noutput-image')]
-      .filter(node => node.closest('.nmsg.ai,[data-task-stream]') === message)
+      .filter(node => node.closest('.nmsg.ai,[data-task-stream]') === message && !node.closest('.nacceptance-result'))
       .forEach(node => message.insertBefore(node, card));
+  }
+  function fileList(doc, rows, originalOf) {
+    // Packages stay ahead of their members, including asynchronously inspected manifests.
+    const isArchive = file => file.kind === 'archive' || /\.zip$/i.test(String(file.path || file.relative || file.name || ''));
+    rows = rows.slice().sort((left, right) => Number(isArchive(right)) - Number(isArchive(left)));
+    const container = doc.createElement('div');
+    container.setAttribute('data-delivery-file-list', '');
+    const list = items => {
+      const ul = doc.createElement('ul');
+      for (const row of items) {
+        const original = originalOf(row), li = doc.createElement('li');
+        const link = doc.createElement(original ? 'button' : 'span');
+        if (original) { link.type = 'button'; link.dataset.openApp = key(original); }
+        else link.className = 'ndelivery-supporting';
+        const name = doc.createElement('span'), amount = doc.createElement('small');
+        name.setAttribute('data-user-content', '');
+        name.textContent = row.relative || row.name || row.path || '';
+        amount.textContent = size(row.size);
+        link.appendChild(name); link.appendChild(amount); li.appendChild(link); ul.appendChild(li);
+      }
+      return ul;
+    };
+    container.appendChild(list(rows.slice(0, 3)));
+    if (rows.length > 3) {
+      const more = doc.createElement('details'), summary = doc.createElement('summary');
+      more.className = 'ndelivery-more';
+      for (const [className, label] of [['nfiles-expand-label', '更多'], ['nfiles-collapse-label', '收起']]) {
+        const span = doc.createElement('span'); span.className = className; span.textContent = tx(label);
+        summary.appendChild(span);
+      }
+      more.appendChild(summary); more.appendChild(list(rows.slice(3))); container.appendChild(more);
+    }
+    return container;
   }
   function decorate(root, files, ref, snapshot = {}) {
     if (!root || !ref || !isSettled(snapshot)) return;
@@ -121,6 +160,7 @@
     };
     const messages = [...root.querySelectorAll('.nmsg.ai,[data-task-stream]')].filter(n => n.dataset.deliveryFinal !== 'false').reverse();
     for (const message of messages) {
+      if (message.querySelector('.nacceptance-result')) continue;
       const existing = message.querySelector('.ndelivery');
       if (existing && !existing.classList.contains('ndelivery-preview-only')) {
         joinPreviews(message, existing, groups.get(existing.dataset.delivery)); continue;
@@ -144,7 +184,7 @@
       }
       available.forEach(f => used.add(key(f)));
       const matchesReceipt = (message === messages[0] || snapshot.deliverySync?.currentTurn === false) && available.every(captured);
-      const id = jobKey(ref, available) + (matchesReceipt ? ':' + (snapshot.deliverySync?.revision || '') : '');
+      const id = jobKey(ref, available) + (matchesReceipt && snapshot.deliverySync?.revision ? ':' + snapshot.deliverySync.revision : '');
       const old = groups.get(id);
       const group = { id, ref, files: available, scope: scope(), taskId, snapshot, remote: Boolean(cloudTaskId), current: message === messages[0], ...(old?.delivery ? { delivery: old.delivery } : {}) };
       groups.set(id, group);
@@ -153,18 +193,18 @@
       const card = root.ownerDocument.createElement('section');
       card.className = 'ndelivery'; card.dataset.delivery = id; card.dataset.chatNode = 'delivery:' + id;
       card.setAttribute('aria-label', text.title);
-      card.innerHTML = '<header><span class="ndelivery-icon">' + icon(first) + '</span>' +
+      card.innerHTML = '<header><span class="ndelivery-icon">' + icon(count > 1 ? { name: '成果包.zip' } : first) + '</span>' +
         '<div class="ndelivery-heading"><small>' + text.title + '</small>' +
-        '<button type="button" data-open-app="' + esc(key(first)) + '" title="' + text.preview + '"><b data-delivery-title data-user-content>' + esc(first.title || first.name || text.file) + '</b></button>' +
+        '<button type="button" ' + (count > 1 || /\.zip$/i.test(first.name || '') ? 'data-delivery-archive' : 'data-open-app="' + esc(key(first)) + '"') + ' title="' + text.preview + '"><b data-delivery-title data-user-content>' + esc(first.title || first.name || text.file) + '</b></button>' +
         '<div class="ndelivery-meta"><span data-delivery-format>' + (count > 1 ? 'ZIP 成果包' : esc(first.name || text.file)) + '</span><span data-delivery-files-count>' + count + ' ' + text.files + '</span>' + (amount ? '<span>' + esc(size(amount)) + '</span>' : '') + '</div></div>' +
         '<div class="ndelivery-actions">' + action('data-delivery-reveal', '打开所在位置', folderIcon) +
-        action('data-delivery-archive', '打开压缩包', archiveIcon, count < 2) +
+        action('data-delivery-archive', '打开压缩包', archiveIcon, count < 2 && !/\.zip$/i.test(first.name || '')) +
         action('data-delivery-retry', text.save, saveIcon) + action('data-delivery-open', text.openSaved, previewIcon, true) +
         action('data-delivery-local', '在本地继续', localIcon, !group.remote) +
         '</div></header>' +
-        '<details class="ndelivery-files"' + (count === 1 ? ' hidden' : '') + '><summary data-delivery-count>' + count + ' ' + text.files + '</summary><ul>' + available.map(f =>
-          '<li><button type="button" data-open-app="' + esc(key(f)) + '"><span data-user-content>' + esc(f.relative || f.name) + '</span><small>' + size(f.size) + '</small></button></li>').join('') + '</ul></details>' +
+        '<details class="ndelivery-files" open><summary data-delivery-count>' + count + ' ' + text.files + '</summary><div data-delivery-file-list></div></details>' +
         '<footer><span data-delivery-status role="status">' + text.preparing + '</span></footer>';
+      card.querySelector('[data-delivery-file-list]').replaceWith(fileList(root.ownerDocument, available, file => file));
       paint(card, group);
       message.appendChild(card);
       joinPreviews(message, card, group);
@@ -186,17 +226,18 @@
     card.classList.toggle('is-busy', Boolean(job?.busy));
     if (open) { open.hidden = !result; open.classList.toggle('is-saved', Boolean(result)); }
     if (retry) {
-      retry.hidden = Boolean(result);
+      retry.hidden = false;
       retry.disabled = Boolean(job?.busy);
-      const label = job?.busy ? text.preparing : job?.error ? text.retry : text.save;
-      retry.querySelector('.ndelivery-action-label').textContent = label;
-      retry.title = label; retry.setAttribute('aria-label', label);
+      retry.classList.toggle('is-saved', Boolean(result));
+      const label = result ? '已保存到资料库' : job?.busy ? '正在保存到资料库…' : job?.error ? '重试保存' : text.save;
+      retry.innerHTML = (result ? savedIcon : saveIcon) + '<span class="ndelivery-action-label">' + esc(tx(label)) + '</span>';
+      retry.title = tx(result ? '已保存到资料库，点击查看' : label); retry.setAttribute('aria-label', retry.title);
       retry.setAttribute('aria-busy', String(Boolean(job?.busy)));
     }
     const rows = result?.files || job?.manifest?.files;
     const count = rows?.length || group.files.length;
-    const archive = card.querySelector('[data-delivery-archive]');
-    if (archive) archive.hidden = count < 2;
+    const archive = card.querySelector('.ndelivery-actions [data-delivery-archive]');
+    if (archive) archive.hidden = count < 2 && !/\.zip$/i.test(group.files[0]?.name || '');
     const format = card.querySelector('[data-delivery-format]');
     if (format) format.textContent = count > 1 ? 'ZIP 成果包' : (group.files[0]?.name || text.file);
     const title = card.querySelector('[data-delivery-title]');
@@ -204,17 +245,34 @@
     const websiteTitle = primary.length === 1 && primary[0].kind === 'website'
       ? String(primary[0].title || '').trim() : '';
     // CSS/JS dependencies enlarge the package, not the number of website results.
-    if (title && count > 1) title.textContent = websiteTitle || result?.title || job?.manifest?.title || '成果包';
+    if (title && count > 1) {
+      title.textContent = (websiteTitle || result?.title || job?.manifest?.title || '成果包').replace(/\.zip$/i, '') + '.zip';
+      title.parentElement?.removeAttribute('data-open-app');
+      title.parentElement?.setAttribute('data-delivery-archive', '');
+      title.parentElement?.setAttribute('title', '打开压缩包');
+      const mark = card.querySelector('.ndelivery-icon');
+      const nativeIcon = mark?.querySelector('[data-native-file-icon]');
+      if (nativeIcon && nativeIcon.dataset.nativeFileIcon !== 'zip') {
+        nativeIcon.dataset.nativeFileIcon = 'zip';
+        const image = nativeIcon.querySelector('img'), label = nativeIcon.querySelector('.library-file-extension');
+        if (image) { image.hidden = true; image.removeAttribute('src'); }
+        if (label) { label.hidden = false; label.textContent = 'ZIP'; }
+        global.SoduWorkLibraryFileIcons?.hydrate?.(mark);
+      } else if (!nativeIcon) {
+        const label = mark?.querySelector('.ndelivery-extension');
+        if (label) label.textContent = 'ZIP';
+      }
+    }
     card.querySelector('[data-delivery-files-count]')?.replaceChildren(document.createTextNode(count + ' ' + text.files));
     if (rows?.length === 1) card.querySelector('.ndelivery-files').hidden = true;
     if (rows?.length > 1) {
       const details = card.querySelector('.ndelivery-files'); details.hidden = false;
       card.querySelector('[data-delivery-count]').textContent = rows.length + ' ' + text.files + ' · ' + text.structure;
-      details.querySelector('ul').innerHTML = rows.map(row => {
-        const original = group.files.find(f => (f.relative || f.name) === row.path);
-        return '<li>' + (original ? '<button type="button" data-open-app="' + esc(key(original)) + '">' : '<span class="ndelivery-supporting">') +
-          '<span data-user-content>' + esc(row.path) + '</span><small>' + size(row.size) + '</small>' + (original ? '</button>' : '</span>') + '</li>';
-      }).join('');
+      const expanded = details.querySelector('.ndelivery-more')?.open;
+      details.querySelector('[data-delivery-file-list]').replaceWith(fileList(card.ownerDocument, rows,
+        row => group.files.find(f => (f.relative || f.name) === row.path)));
+      const more = details.querySelector('.ndelivery-more');
+      if (expanded && more) more.open = true;
     }
   }
   function repaint(group) {
@@ -233,12 +291,13 @@
         if (!payload?.ok) throw Error(payload?.reason || '\u6210\u679c\u6587\u4ef6\u5c1a\u672a\u51c6\u5907\u597d');
         if (group.scope !== scope()) return;
         job.manifest = payload.manifest; repaint(group);
-        result = await global.SoduWorkAPI.publishDelivery(payload);
+        if (!global.SoduWorkAPI?.saveLibraryDelivery) throw Error('请更新客户端后重试保存');
+        result = await global.SoduWorkAPI.saveLibraryDelivery(payload);
       }
       if (group.scope !== scope()) return;
-      if (!result?.ok || !result.delivery) throw Error(result?.error || result?.reason || '\u6210\u679c\u96c6\u540c\u6b65\u5931\u8d25');
+      if (!result?.ok || !result.delivery?.id) throw Error(result?.error || result?.reason || '\u6210\u679c\u96c6\u540c\u6b65\u5931\u8d25');
       job.delivery = group.delivery = result.delivery;
-      global.dispatchEvent?.(new CustomEvent('soduwork-library-changed', { detail: { itemId: result.delivery.id } }));
+      announceLibraryChange({ itemId: result.delivery.id });
     } catch (error) {
       job.error = /Failed to fetch|NetworkError|fetch failed/i.test(error.message || '') ? '\u7f51\u7edc\u6682\u65f6\u4e0d\u53ef\u7528' : error.message || '\u6210\u679c\u96c6\u540c\u6b65\u5931\u8d25';
     } finally { job.busy = false; repaint(group); }
@@ -249,9 +308,25 @@
     Promise.resolve(global.SoduWorkAPI.getTaskDelivery(group.taskId)).then(result => {
       if (group.scope !== scope() || !result?.delivery) return;
       group.delivery = result.delivery;
-      global.dispatchEvent?.(new CustomEvent('soduwork-library-changed', { detail: { itemId: result.delivery.id } }));
+      announceLibraryChange({ itemId: result.delivery.id });
       repaint(group);
     }).catch(() => { /* A legacy task may not have a delivery yet; the normal sync path handles it. */ });
+  }
+  async function hydrateLocalStatus(group, manifest) {
+    // A read-only receipt lookup must not hold up metadata inspection for other
+    // cards, or restore stale account data after the scope was cleared.
+    if (jobs.get(group.id)?.manual || !manifest?.sessionId || !manifest?.revision ||
+        typeof global.SoduWorkAPI?.getLibraryDeliveryStatus !== 'function') return;
+    try {
+      const response = await global.SoduWorkAPI.getLibraryDeliveryStatus(manifest);
+      if (group.scope !== scope() || groups.get(group.id) !== group || jobs.get(group.id)?.manual) return;
+      const saved = response?.delivery;
+      if (saved && (saved.sessionId !== manifest.sessionId || saved.revision !== manifest.revision)) return;
+      if (saved) {
+        const job = jobs.get(group.id) || {}; jobs.set(group.id, job);
+        job.delivery = group.delivery = saved; repaint(group);
+      }
+    } catch { /* Offline lookup leaves the explicit save action available. */ }
   }
   function inspect(group, api) {
     if (!api?.inspectDelivery || group.inspectRequested || group.delivery || jobs.get(group.id)?.manifest ||
@@ -263,6 +338,7 @@
       if (group.scope !== scope() || !metadata?.ok) return;
       const job = jobs.get(group.id) || {}; jobs.set(group.id, job);
       job.manifest = metadata.manifest; job.filename = metadata.filename; repaint(group);
+      void hydrateLocalStatus(group, metadata.manifest);
     }).catch(() => { /* Current files remain available through the local actions. */ });
   }
   function hydrate(root, { api, ref, snapshot }) {
@@ -274,14 +350,21 @@
       const receiptRevision = group.receiptRevision || group.snapshot?.deliverySync?.revision;
       if (!group.taskId && (!receiptRevision || receiptRevision === saved?.revision) && (group.current || saved?.currentTurn === false) && saved?.artifactVersions?.length && group.files.every(f => saved.artifactVersions.some(v => v.id === key(f) && String(v.at || 0) === String(f.at || 0) && Number(v.size || 0) === Number(f.size || 0)))) {
         const current = jobs.get(group.id);
-        if (!current?.manual) jobs.set(group.id, { ...current, busy: saved.state === 'saving', delivery: saved.delivery, error: saved.state === 'failed' ? saved.error : '', managed: true, manifest: saved.manifest || current?.manifest, filename: saved.filename || current?.filename });
-        group.delivery = saved.delivery;
+        if (!current?.manual) {
+          // A local index contains no save receipt. It must not erase a real
+          // receipt obtained by the read-only library lookup on the next render.
+          const delivery = saved.delivery || current?.delivery || group.delivery;
+          jobs.set(group.id, { ...current, busy: !delivery && saved.state === 'saving', delivery,
+            error: !delivery && saved.state === 'failed' ? saved.error : '', managed: true,
+            manifest: saved.manifest || current?.manifest, filename: saved.filename || current?.filename });
+          group.delivery = delivery;
+        }
         if (saved.revision) group.receiptRevision = saved.revision;
       }
       hydrateRemoteStatus(group);
       if (isSettled(snapshot)) inspect(group, api);
       paint(card, group);
-      if (!jobs.has(group.id) && group.taskId && !['streaming', 'running', 'queued'].includes(snapshot?.status) && global.SoduWorkAPI?.publishDelivery && api?.prepareDelivery) void sync(group, api);
+      // Hydration is read-only. Save only through the explicit icon action.
     });
   }
   function localContinuation(ref) {
@@ -365,6 +448,11 @@
     }
     if (node.closest('[data-delivery-open]')) {
       const delivery = jobs.get(group.id)?.delivery || group.delivery;
+      if (delivery?.id?.startsWith('local-')) {
+        try { await global.LibraryTransfer.openSavedItem(delivery, { preview: true }); }
+        catch (error) { if (group.scope === scope()) global.petSay?.(error.message); }
+        return true;
+      }
       if (delivery && !(global.ChatWorkbench?.openSavedDelivery || global.LibraryDelivery?.open)?.(delivery.id, { title: delivery.title || group.files[0]?.title || '已保存版本', openLocal: async () => {
         await materialize(group, api);
         if (group.scope !== scope()) throw Error('账号已变化，请重新打开成果');
@@ -373,7 +461,16 @@
       } })) global.petSay?.('请在对话预览区域中打开已保存版本');
       return true;
     }
-    if (node.closest('[data-delivery-retry]')) { await sync(group, api); return true; }
+    if (node.closest('[data-delivery-retry]')) {
+      const delivery = jobs.get(group.id)?.delivery || group.delivery;
+      if (delivery) {
+        try {
+          if (!global.LibraryTransfer?.openSavedItem) throw Error(tx('暂时无法打开资料库，请稍后重试'));
+          await global.LibraryTransfer.openSavedItem(delivery, { remote: true });
+        } catch (error) { if (group.scope === scope()) global.petSay?.(error.message); }
+      } else await sync(group, api);
+      return true;
+    }
     if (node.closest('[data-delivery-reveal],[data-delivery-archive]')) {
       const job = jobs.get(group.id) || {}; jobs.set(group.id, job);
       if (job.opening) return true;
@@ -382,9 +479,22 @@
         if (!api?.openLocalDelivery) throw Error('\u65e0\u6cd5\u5728 SoduWork \u4e2d\u6253\u5f00\u672c\u673a\u6210\u679c');
         await materialize(group, api);
         if (group.scope !== scope()) return true;
+        // Cloud receipts identify the server collection. Inspect its verified
+        // local projection before applying a local package revision guard.
+        if (!job.manifest && (!group.delivery || group.remote) && api.inspectDelivery) {
+          const metadata = await api.inspectDelivery(group.ref, group.files.map(key));
+          if (group.scope !== scope()) return true;
+          if (!metadata?.ok) throw Error(metadata?.reason || '成果文件尚未准备好');
+          job.manifest = metadata.manifest; job.filename = metadata.filename;
+        }
         const action = node.closest('[data-delivery-archive]') ? api.openDeliveryArchive : api.openLocalDelivery;
         if (!action) throw Error('请重新打开客户端后操作成果');
-        const result = await action(group.ref, group.files.map(f => f.artifactId).filter(Boolean));
+        const manifest = job.manifest || group.delivery;
+        const revision = job.manifest?.revision || (!group.remote ? group.delivery?.revision : undefined);
+        const result = await action(group.ref, group.files.map(f => f.artifactId).filter(Boolean), {
+          bundle: (manifest?.files?.length || group.files.length) > 1 || /\.zip$/i.test(group.files[0]?.name || ''),
+          ...(revision ? { revision } : {}),
+        });
         if (group.scope !== scope()) return true;
         if (result?.ok !== true && !result?.canceled) { job.localUnavailable = result?.code === 'DELIVERY_LOCAL_UNAVAILABLE'; throw Error(result?.reason || '\u65e0\u6cd5\u6253\u5f00\u672c\u673a\u6210\u679c'); }
       } catch (error) { if (group.scope === scope()) job.localError = error.message || '\u65e0\u6cd5\u6253\u5f00\u672c\u673a\u6210\u679c'; }

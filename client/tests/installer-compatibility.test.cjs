@@ -67,14 +67,11 @@ test('real uploader refuses missing or mismatched compatibility evidence before 
   valid.buildInputs = readBuildInputs(path.resolve(__dirname, '..'));
   fs.writeFileSync(receipt, JSON.stringify(valid));
   assert.match(run().stderr, /SIGNING_KEY_FILE is required/);
-  // The transition name carries exactly the tested installer bytes. A rename
-  // can reuse that evidence, but a different payload must still be rejected.
-  const alias = path.join(root, 'SoduWork-1.12.37-Setup.exe');
-  fs.copyFileSync(installer, alias);
-  assert.match(run(alias).stderr, /SIGNING_KEY_FILE is required/);
-  fs.writeFileSync(alias, Buffer.alloc(2000000, 1));
-  assert.match(run(alias).stderr, /does not match installer: sha256/);
-  // A passing old receipt cannot authorize a different HTML packing policy,
+  // Only the canonical installer filename is accepted.
+  const otherName = path.join(root, 'OtherBrand-1.12.37-Setup.exe');
+  fs.copyFileSync(installer, otherName);
+  assert.match(run(otherName).stderr, /installer filename does not match/);
+  // A passing receipt cannot authorize a different HTML packing policy,
   // even when the installer file and every other build input still match.
   const htmlInput = 'scripts/prepare-html-resources.cjs';
   const htmlDigest = valid.buildInputs[htmlInput];

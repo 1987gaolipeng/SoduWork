@@ -172,9 +172,12 @@ class HandoffTests(unittest.IsolatedAsyncioTestCase):
             row.client_id = "u-desktop"
             await session.commit()
         self.runner.client_id = "u-desktop"
+        self.runner.tags = [runner_hub.CLIENT_TAG]
         personal = await self.http.get("/api/v1/conversation-handoffs/targets?agentId=codex")
         self.assertEqual(personal.status_code, 200, personal.text)
         self.assertEqual([x["id"] for x in personal.json()["targets"]], ["runner:cloud:codex"])
+        self.assertEqual(personal.json()["targets"][0]["runnerKind"], "work-computer")
+        self.runner.tags = []
         with self.subTest("same device and unauthorized devices never qualify"):
             self.runner.client_id = self.client.id
             self.assertEqual((await self.http.get("/api/v1/conversation-handoffs/targets")).json()["targets"], [])
@@ -247,7 +250,7 @@ class HandoffTests(unittest.IsolatedAsyncioTestCase):
         await self.complete(cloud["ref"])
         restored = WORK / "workspace" / ("handoff-" + svc.identity(self.client.id, "transfer-1"))
         self.assertTrue((restored / "delivery.md").is_file())
-        rows = [json.loads(x) for x in (restored / "prompts.jsonl").read_text(encoding="utf-8").splitlines()]
+        rows = [json.loads(x) for x in (restored / ".cache/prompts.jsonl").read_text(encoding="utf-8").splitlines()]
         self.assertEqual(len(rows), 1)
         self.assertIn("Keep the report title unchanged.", rows[0]["prompt"])
         self.assertIn("WAIT_FOR_DISCONNECT", rows[0]["prompt"])
@@ -276,7 +279,7 @@ class HandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(conflict.status_code, 409)
         too_long = await self.http.post(f"/api/v1/tasks/{task_id}/ai-say", json={"text": "x" * 200001})
         self.assertEqual(too_long.status_code, 413)
-        rows = [json.loads(x) for x in (restored / "prompts.jsonl").read_text(encoding="utf-8").splitlines()]
+        rows = [json.loads(x) for x in (restored / ".cache/prompts.jsonl").read_text(encoding="utf-8").splitlines()]
         self.assertEqual(len(rows), 2)
         self.assertIn(long_text, rows[-1]["prompt"])
         # Explicit refusal is distinct from unknown acknowledgement: the desktop
@@ -358,7 +361,7 @@ class HandoffTests(unittest.IsolatedAsyncioTestCase):
                 await self.complete(launch.json()["ref"])
                 destination = WORK / "workspace" / ("handoff-" + svc.identity(self.client.id, "agent-" + agent))
                 self.assertTrue((destination / "delivery.md").is_file(), agent)
-                history = (destination / "prompts.jsonl").read_text(encoding="utf-8")
+                history = (destination / ".cache/prompts.jsonl").read_text(encoding="utf-8")
                 self.assertIn("Keep the report title unchanged.", history, agent)
         long_history = "HISTORY_START:" + "h" * 1900000 + ":HISTORY_END"
         for agent in ("codex", "qwen"):
@@ -377,7 +380,7 @@ class HandoffTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result["phase"], "committed", result)
                 await self.complete(result["ref"])
                 dest = WORK / "workspace" / ("handoff-" + svc.identity(self.client.id, "large-" + agent))
-                prompts = [json.loads(x)["prompt"] for x in (dest / "prompts.jsonl").read_text(encoding="utf-8").splitlines()]
+                prompts = [json.loads(x)["prompt"] for x in (dest / ".cache/prompts.jsonl").read_text(encoding="utf-8").splitlines()]
                 self.assertEqual(len(prompts), 1)
                 self.assertIn(long_history, prompts[0], "Accepted history must never be silently truncated")
         with self.subTest("ACKed queue survives Runner kill, including inputs and followups"):
@@ -395,7 +398,7 @@ class HandoffTests(unittest.IsolatedAsyncioTestCase):
             (WORK / "hold-queue").unlink()
             await self.complete(queued_ref)
             destination = WORK / "workspace" / ("handoff-" + svc.identity(self.client.id, "queued-crash"))
-            self.assertEqual(len((destination / "prompts.jsonl").read_text(encoding="utf-8").splitlines()), 1)
+            self.assertEqual(len((destination / ".cache/prompts.jsonl").read_text(encoding="utf-8").splitlines()), 1)
             (WORK / "hold-queue").touch()
             url = f"/api/v1/tasks/{waiting['taskId']}/ai-say"
             follow = {"text": "Durable queued followup", "messageId": "queued-crash-followup"}
@@ -406,7 +409,7 @@ class HandoffTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue((await self.http.post(url, json=follow)).json()["duplicate"])
             (WORK / "hold-queue").unlink()
             await self.complete(queued_ref)
-            prompts = [json.loads(x)["prompt"] for x in (destination / "prompts.jsonl").read_text(encoding="utf-8").splitlines()]
+            prompts = [json.loads(x)["prompt"] for x in (destination / ".cache/prompts.jsonl").read_text(encoding="utf-8").splitlines()]
             self.assertEqual(len(prompts), 2)
             self.assertIn(follow["text"], prompts[1])
         with self.subTest("started native process is reclaimed without a second launch"):
@@ -414,15 +417,15 @@ class HandoffTests(unittest.IsolatedAsyncioTestCase):
             live = {"text": "Keep running across Runner crash", "messageId": "live-crash-followup"}
             self.assertEqual((await self.http.post(url, json=live)).status_code, 200)
             for _ in range(200):
-                if len((destination / "prompts.jsonl").read_text(encoding="utf-8").splitlines()) == 3:
+                if len((destination / ".cache/prompts.jsonl").read_text(encoding="utf-8").splitlines()) == 3:
                     break
                 await asyncio.sleep(.05)
-            self.assertEqual(len((destination / "prompts.jsonl").read_text(encoding="utf-8").splitlines()), 3)
+            self.assertEqual(len((destination / ".cache/prompts.jsonl").read_text(encoding="utf-8").splitlines()), 3)
             await asyncio.to_thread(self.peer.crash)
             await asyncio.to_thread(self.peer.start)
             (destination / "hold-process").unlink()
             await self.complete(queued_ref)
-            self.assertEqual(len((destination / "prompts.jsonl").read_text(encoding="utf-8").splitlines()), 3)
+            self.assertEqual(len((destination / ".cache/prompts.jsonl").read_text(encoding="utf-8").splitlines()), 3)
         with self.subTest("ambiguous start is surfaced and never automatically repeated"):
             (WORK / "hold-start").touch()
             uncertain_turn = {"text": "Unconfirmed launch", "messageId": "starting-crash-followup"}
@@ -439,7 +442,7 @@ class HandoffTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(status["data"]["status"], "failed", status)
             self.assertIn("无法确认", status["data"]["error"])
             self.assertTrue((await self.http.post(url, json=uncertain_turn)).json()["duplicate"])
-            self.assertEqual(len((destination / "prompts.jsonl").read_text(encoding="utf-8").splitlines()), 3)
+            self.assertEqual(len((destination / ".cache/prompts.jsonl").read_text(encoding="utf-8").splitlines()), 3)
         print(json.dumps({"ok": True, "workspace": str(WORK), "oneDispatch": True,
                           "survivesDeviceDisconnect": True, "runnerRestart": True, "longFollowup": len(long_text),
                           "uncertainDispatchRecovered": True, "uncertainMessageNotReplayed": True,

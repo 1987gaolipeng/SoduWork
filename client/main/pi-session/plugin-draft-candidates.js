@@ -4,13 +4,13 @@
 // names or a structurally identifiable SoduWork manifest become install actions.
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const resources = require('../plugin-resources');
 const { epoch } = require('../conversation/message-time');
 
 const DRAFT_NAME = 'soduwork-plugin-draft.json';
-const DRAFT_NAMES = [DRAFT_NAME, 'soduwork-plugin-draft.json'];
+const DRAFT_NAMES = [DRAFT_NAME];
 const MAX_BYTES = 24 * 1024 * 1024;
-const METADATA_BYTES = 256 * 1024;
 const ARCHIVE = /\.soduwork-plugin$/i;
 const metadataCache = new Map();
 
@@ -23,13 +23,42 @@ function metadata(file, stat) {
   const key = file + ':' + stat.mtimeMs + ':' + stat.ctimeMs + ':' + stat.size;
   if (metadataCache.has(key)) return metadataCache.get(key);
   let body = null;
-  if (stat.size <= METADATA_BYTES) {
-    try { body = parseJson(fs.readFileSync(file, 'utf8')); } catch (_) { /* validate on click */ }
+  if (stat.size <= MAX_BYTES) {
+    try {
+      const parsed = parseJson(fs.readFileSync(file, 'utf8'));
+      if (parsed && !Array.isArray(parsed) && typeof parsed === 'object') {
+        // Cache discovery metadata only, never the potentially large embedded resources.
+        body = Object.fromEntries(['name', 'key', 'version', 'template', 'description', 'instructions']
+          .map(key => [key, typeof parsed[key] === 'string' ? parsed[key].slice(0, 256) : '']));
+        body.resourcePaths = Array.isArray(parsed.resources) && parsed.resources.length <= resources.MAX_FILES
+          ? parsed.resources.map(item => item?.path).filter(value => typeof value === 'string' && value.length <= 240) : [];
+      }
+    } catch (_) { /* Validate malformed drafts on click. */ }
   }
   if (metadataCache.size >= 64) metadataCache.delete(metadataCache.keys().next().value);
   const result = body && !Array.isArray(body) && typeof body === 'object' ? body : null;
   metadataCache.set(key, result);
   return result;
+}
+
+function revision(cwd, target, stat, body, at) {
+  let updatedAt = Number(at) || 0;
+  const signatures = [[stat.mtimeMs, stat.ctimeMs, stat.size]];
+  // Resource-only repairs belong to their own completed turn. Keep the manifest's
+  // ownership boundary unchanged so a new chat cannot inherit another chat's draft.
+  for (const value of body?.resourcePaths || []) {
+    try {
+      const relative = resources.resourcePath(value);
+      const file = path.resolve(path.dirname(target), relative);
+      resources.assertNoLinks(path.resolve(cwd), file);
+      const current = fs.statSync(file);
+      if (!current.isFile()) continue;
+      signatures.push([relative, current.mtimeMs, current.ctimeMs, current.size]);
+      updatedAt = Math.max(updatedAt, Math.round(current.mtimeMs), Math.round(current.ctimeMs));
+    } catch (_) { signatures.push([value, 'unavailable']); }
+  }
+  return { pluginRevision: crypto.createHash('sha256').update(JSON.stringify(signatures)).digest('hex'),
+    pluginRevisionAt: updatedAt };
 }
 
 function describe(cwd, file) {
@@ -50,6 +79,7 @@ function describe(cwd, file) {
   return { ...file, path: target, name,
     relative: path.relative(cwd, target).split(path.sep).join('/'),
     size: stat.size, at: file.at == null ? Math.round(stat.mtimeMs) : file.at,
+    ...revision(cwd, target, stat, body, file.at == null ? Math.round(stat.mtimeMs) : file.at),
     pluginDraft: true, pluginPackage: archive,
     pluginName: body && typeof body.name === 'string' ? body.name.trim().slice(0, 120) : '',
     pluginKey: body && typeof body.key === 'string' ? body.key.trim().slice(0, 64) : '',

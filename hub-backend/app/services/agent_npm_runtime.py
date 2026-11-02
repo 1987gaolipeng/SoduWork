@@ -1,4 +1,4 @@
-"""Native Node/npm pairs and writable, Runner-owned Linux Agent installations.
+"""Native Node/npm pairs and writable, Runner-owned Agent installations.
 
 Discovery is read-only. Installation never changes the system npm configuration,
 Node executable or permissions; its prefix/cache live beside the Runner data.
@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import functools
 import os
+import platform
 from pathlib import Path
 import re
 import shutil
@@ -24,8 +25,23 @@ NODE_MINIMUMS = {
     "codex-harness": (20, 0, 0),
     "dsh": (22, 15, 0),
     "codex": (20, 0, 0),
+    "kimi": (22, 19, 0),
+    "claude": (22, 0, 0),
 }
 _INSTALL_LOCK = threading.Lock()
+_NODE_IDENTITY = """(() => {
+  const identity = {node:process.versions.node, electron:!!process.versions.electron,
+                    platform:process.platform, arch:process.arch, libc:''};
+  if (process.platform === 'linux') {
+    try {
+      process.report.excludeNetwork = true;
+      const report = process.report.getReport();
+      identity.libc = report.header.glibcVersionRuntime ? 'glibc' :
+        (report.sharedObjects || []).some(p => /(?:libc\\.musl-|ld-musl-)/.test(p)) ? 'musl' : '';
+    } catch (_) {}
+  }
+  return JSON.stringify(identity);
+})()"""
 
 
 def serial_install(fn):
@@ -44,8 +60,6 @@ def version_tuple(value: str) -> tuple[int, int, int]:
 
 
 def private_prefix(data_root: str = "") -> str:
-    if not sys.platform.startswith("linux"):
-        return ""
     if not data_root:
         from .local_base import _data_root
         data_root = _data_root()
@@ -54,7 +68,14 @@ def private_prefix(data_root: str = "") -> str:
 
 def private_root() -> str:
     prefix = private_prefix()
-    return os.path.join(prefix, "lib", "node_modules") if prefix else ""
+    if not prefix:
+        return ""
+    return os.path.join(prefix, *(('node_modules',) if sys.platform == 'win32' else ('lib', 'node_modules')))
+
+
+def private_bin_dir(prefix: str = "") -> str:
+    prefix = prefix or private_prefix()
+    return (prefix if sys.platform == "win32" else os.path.join(prefix, "bin")) if prefix else ""
 
 
 def package_roots(legacy_root: str = "") -> list[str]:
@@ -87,18 +108,23 @@ def package_engine(package: str, legacy_root: str = "") -> str:
 
 
 def private_bin(names) -> str:
-    prefix = private_prefix()
-    if prefix:
+    directory = private_bin_dir()
+    if directory:
         for name in names:
-            candidate = os.path.join(prefix, "bin", name)
-            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-                return candidate
+            # npm's Windows shim without an extension is a POSIX shell script.
+            # Only select a Windows executable or npm's Windows launcher here.
+            suffixes = (".exe", ".cmd") if sys.platform == "win32" and not os.path.splitext(name)[1] else ("",)
+            for suffix in suffixes:
+                candidate = os.path.join(directory, name + suffix)
+                if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                    return candidate
     return ""
 
 
 def clean_env() -> dict:
     env = dict(os.environ)
     env.pop("NODE_OPTIONS", None)
+    env.pop("NODE_PATH", None)
     env.pop("ELECTRON_RUN_AS_NODE", None)
     return env
 
@@ -168,7 +194,7 @@ def resolve() -> dict:
                     continue
         except OSError:
             continue
-        raw = _probe((node, "-p", "JSON.stringify({node:process.versions.node,electron:!!process.versions.electron})"),
+        raw = _probe((node, "-p", _NODE_IDENTITY),
                      (_stamp(node),))
         try:
             info = json.loads(raw)
@@ -179,13 +205,26 @@ def resolve() -> dict:
         npm = _npm_cli(node, path_value)
         npm_version = _probe((node, npm, "--version"), (_stamp(node), _stamp(npm))) if npm else ""
         pair = {"nodePath": node, "node": "v" + str(info["node"]),
-                "npmPath": npm, "npm": npm_version}
+                "npmPath": npm, "npm": npm_version,
+                "platform": str(info.get("platform") or ""), "arch": str(info.get("arch") or ""),
+                "libc": str(info.get("libc") or "")}
         candidates.append(pair)
         if npm_version and version_tuple(pair["node"]) >= (22, 19, 0):
             return pair
     # Preserve PATH precedence among suitable native pairs; a later modern
     # installation can rescue an obsolete Node at the front of PATH.
     return next(iter([p for p in candidates if p["npm"]] or candidates), {})
+
+
+def runtime_target(pair: dict | None = None) -> tuple[str, str]:
+    """Native npm dependencies must match Node, including Rosetta installations."""
+    pair = resolve() if pair is None else pair
+    system, arch = str(pair.get("platform") or ""), str(pair.get("arch") or "")
+    if system == sys.platform and arch in {"x64", "arm64"}:
+        return system, arch
+    machine = platform.machine().lower()
+    arch = "x64" if machine in {"amd64", "x86_64", "x64"} else "arm64" if machine in {"arm64", "aarch64"} else ""
+    return sys.platform, arch
 
 
 def configured_global_root() -> str:
@@ -214,7 +253,7 @@ def environment(pair: dict, *, install: bool = False) -> dict:
     prefix = private_prefix()
     paths = ([os.path.dirname(node)] if node else [])
     if prefix:
-        paths.append(os.path.join(prefix, "bin"))
+        paths.append(private_bin_dir(prefix))
     elif os.name == "nt":
         from .local_base import _npm_root
         # npm installs .cmd launchers beside node_modules. A custom prefix (or
@@ -222,12 +261,29 @@ def environment(pair: dict, *, install: bool = False) -> dict:
         paths.append(os.path.dirname(_npm_root()))
     env["PATH"] = os.pathsep.join(dict.fromkeys(paths + env.get("PATH", "").split(os.pathsep)))
     if install and prefix:
+        # A developer's cross-compilation settings must not select a foreign
+        # native package for an installation on this execution machine.
+        for key in list(env):
+            if key.lower() in {"npm_config_arch", "npm_config_cpu", "npm_config_platform",
+                               "npm_config_os", "npm_config_libc", "npm_config_target_arch",
+                               "npm_config_target_platform"}:
+                env.pop(key)
         # Explicit per-command config overrides inherited read-only/global
         # prefixes without persisting a user npmrc or touching system packages.
         env["NPM_CONFIG_PREFIX"] = prefix
         env["npm_config_prefix"] = prefix
         env["NPM_CONFIG_CACHE"] = os.path.join(prefix, "cache")
         env["npm_config_cache"] = env["NPM_CONFIG_CACHE"]
+        system, arch = runtime_target(pair)
+        if system in {"win32", "darwin", "linux"} and arch:
+            # Environment precedence also overrides foreign targets in npmrc.
+            for name, value in (("OS", system), ("CPU", arch)):
+                env["NPM_CONFIG_" + name] = value
+                env["npm_config_" + name.lower()] = value
+            # A user npmrc can also request a foreign Linux libc. Prefer the
+            # selected Node's observed loader without guessing unknown hosts.
+            if system == pair.get("platform") == "linux" and pair.get("libc") in {"glibc", "musl"}:
+                env["NPM_CONFIG_LIBC"] = env["npm_config_libc"] = pair["libc"]
     if install:
         from . import managed_agent_network
         proxies = managed_agent_network._proxies()
@@ -248,7 +304,7 @@ def activate_environment(data_root: str = "") -> None:
     """Restore installed CLI visibility on Runner startup; no IO mutations."""
     prefix = private_prefix(data_root)
     if prefix:
-        path = os.path.join(prefix, "bin")
+        path = private_bin_dir(prefix)
         if os.path.isdir(path):
             os.environ["PATH"] = os.pathsep.join(dict.fromkeys([path, *os.environ.get("PATH", "").split(os.pathsep)]))
     pair = resolve()

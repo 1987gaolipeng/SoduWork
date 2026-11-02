@@ -1800,7 +1800,7 @@ async def _poll_node(session: AsyncSession, run: am.WorkflowRun, nr: am.NodeRun)
                         "failed",
                         "AI 已完成，但没有交付节点约定的产出：" +
                         "、".join(contract["missing"][:8]),
-                        workflow_contracts.failure_output(exc.failure_kind, outputReceipt=contract))
+                        workflow_contracts.failure_output("contract", outputReceipt=contract))
                 elif nr.state == "failed":
                     pass
                 elif decision.get("outcome") == "blocked":

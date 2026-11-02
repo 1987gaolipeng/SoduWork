@@ -82,6 +82,10 @@ if (typeof electron === 'string') {
       await until('Boolean(document.querySelector(".nmsg.ai .ntext"))');
       assert.equal(await js('document.querySelectorAll(".nmsg.ai time").length'), 0);
       assert.equal(await js('document.querySelector(".nmsg.user time").dateTime'), new Date(sentAt).toISOString());
+      assert.equal(await js('document.querySelector(".nmsg.user time").textContent.includes("月")'), true);
+      assert.match(await js('document.querySelector(".nmsg.user time").title'), /^2026-09-30 \d{2}:18:00$/);
+      assert.equal(await js('document.querySelector(".nmsg.user time").tabIndex'), 0);
+      results.push('Historical timestamps include the calendar date with a complete hover timestamp and keyboard focus');
       // The production Markdown renderer batches token updates for 120 ms.
       // Let the initial empty frame settle before this isolated single delta.
       await delay(160);
@@ -312,6 +316,17 @@ if (typeof electron === 'string') {
       await expectFooters(['恢复前的已完成部分。\n\n续接后的最终结果。']);
       assert.equal(await js('document.querySelector(".nmsg.ai time").dateTime'), new Date(completedAt + 10000).toISOString());
       results.push('A real Pi accumulator continuation projection retains its final footer when an earlier completed tool maps to the same visible assistant index');
+
+      snapshot.messages = [{ role: 'user', text: 'Today dated prompt', sentAt: Date.now() }, { role: 'assistant', done: true,
+        completedAt: Date.now(), blocks: [{ kind: 'text', text: 'Today dated answer' }] }];
+      snapshot.status = 'idle'; snapshot.tools = []; snapshot.execution = { running: false };
+      await publish();
+      await until('document.querySelector(".nmessage-copy").dataset.copyMessage==="Today dated prompt"');
+      assert.match(await js('document.querySelector(".nmsg.user time").textContent'), /^\d{2}:\d{2}$/);
+      await js('document.querySelector(".nmsg.user time").focus()');
+      await delay(180);
+      assert.equal(await js('getComputedStyle(document.querySelector(".nmsg.user .nmessage-footer")).opacity'), '1');
+      results.push('Today uses hours and minutes; keyboard focus reveals the quiet timestamp row');
 
       snapshot.messages = [{ role: 'user', text: 'Older undated prompt' }, { role: 'assistant', done: true, blocks: [{ kind: 'text', text: 'Older undated answer' }] }];
       snapshot.status = 'idle'; snapshot.tools = []; snapshot.execution = { running: false };

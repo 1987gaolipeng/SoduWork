@@ -13,7 +13,8 @@ const KEY_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$/;
  * suffixes, including compound tar.gz and legacy Windows Setup names, with the
  * single SoduWork- prefix.
  */
-const INSTALLER_STEM = '(?:SoduWork)';
+const INSTALLER_STEM = 'SoduWork';
+const VERSION_STEM = '\\d+\\.\\d+\\.\\d+(?:-beta\\.(?:1|[1-9]\\d*))?';
 const INSTALLER_NAMES = {
   win32: new RegExp(`^${INSTALLER_STEM}-${VERSION_STEM}-Setup\\.exe$`),
   darwin: new RegExp(`^${INSTALLER_STEM}-${VERSION_STEM}-mac(?:-(?:x64|arm64))?\\.(?:dmg|zip)$`, 'i'),

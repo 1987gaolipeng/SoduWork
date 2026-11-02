@@ -26,6 +26,7 @@ function release(id,reason) {
 async function execute(app,binding,declaration,method,params,assertCurrent = () => {},initialization = {schemaVersion:1,migrations:[]}) {
   assertCurrent();
   const scope = store.scope(binding), schema = contract.normalize(declaration);
+  if (schema.storage?.location === 'cloud') throw Error('云端数据必须通过已授权的 Hub 数据通路访问，不能写入本机 SQLite');
   if (method.startsWith('data.asset')) contract.assetRequest(method,params);
   else if (!['backup','initialize'].includes(method)) contract.dataRequest(method,params,schema);
   const digest = crypto.createHash('sha256').update(JSON.stringify({collections:schema.collections,initialization})).digest('hex');

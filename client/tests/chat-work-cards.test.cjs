@@ -207,7 +207,7 @@ test('创建回执尚在防抖队列时首次需求打开必须等它写入会�
   assert.equal(opened[0].options.chatId, sessionId);
   assert.equal(opened[0].options.taskRef, 'created-task');
   assert.equal(opened[0].options.requireTaskBinding, true);
-  assert.deepEqual(failures, [['开不了对话', boundaryReason]]);
+  assert.deepEqual(failures, [['开不了对话', boundaryReason, null, {ok:false,reason:boundaryReason}]]);
 });
 
 test('首次需求打开在回执保存失败时显示实际错误，重试成功后才进入 native open', async () => {
@@ -233,7 +233,7 @@ test('首次需求打开在回执保存失败时显示实际错误，重试成�
   assert.equal(await controller._ensure(), false, 'stop at the isolated native boundary');
   assert.equal(opened.length, 1);
   assert.equal(opened[0].receipt.id, 'created-task');
-  assert.deepEqual(failures.at(-1), ['开不了对话', 'isolated native boundary']);
+  assert.deepEqual(failures.at(-1), ['开不了对话', 'isolated native boundary', null, {ok:false,reason:'isolated native boundary'}]);
 });
 
 test('定向回执保存不等待其他卡片，普通全量保存仍报告它们的失败', async () => {
@@ -425,6 +425,17 @@ test('创建时切走只保存来源回执，回来恢复待办且不重复覆�
   await h.cards.restore('chat-1'); await h.cards.restoreRequirements();
   assert.equal(bound.length,1,'已有执行/移除状态不因回执恢复而重绑');
   assert.equal(h.ctx._ref,'');
+});
+
+test('a creation receipt stays a reference when execution belongs to another chat', async () => {
+  const h=boot(),bound=[];h.ctx._collabTasks=new Map();h.ctx._bindCollaborationTask=(...args)=>bound.push(args);
+  const seed=await h.cards.prepare(command);
+  seed.onCardState({phase:'succeeded',receipt:{id:'task',title:'Task'}});
+  await h.cards.flush();
+  h.g.SoduWorkAPI.getTask=async()=>({id:'task',status:'doing',workRouting:{conversationTurn:{conversationId:'execution-chat'}}});
+  await h.cards.restoreRequirements();
+  assert.equal(bound.length,0);
+  assert.equal(h.cards.hasCreatedTask('task',h.ctx._sessionId),true);
 });
 
 test('需求回执不能重新加入已移除待办或越过原卡片账号边界', async () => {

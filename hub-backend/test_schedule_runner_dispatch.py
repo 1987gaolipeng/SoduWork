@@ -6,6 +6,7 @@ The RPC boundary never starts an Agent or contacts a model service.
 import importlib
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -25,6 +26,8 @@ from app.services import (
     ai_exec, ai_local, ai_remote, client_access, dispatch_identity,
     model_catalog, runner_hub, schedule_conversations, schedules,
 )
+from app.services import conversation_handoffs, task_dispatch, tasks as task_service
+from app.conversation_handoff_models import ConversationHandoff
 from tests.sqlite_schema import create_fresh_sqlite_schema
 
 for model_file in (Path(__file__).parent / "app").glob("*models.py"):
@@ -83,6 +86,207 @@ class ScheduleRunnerDispatchTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await self.session.close()
         await self.engine.dispose()
+
+    async def cloud_target(self):
+        self.runner = runner_hub._Runner(None, {
+            "runnerId": "cloud", "host": "Cloud fixture", "version": "999.0.0", "inventoryReady": True,
+            "workRoot": "X:/isolated-cloud", "agents": [{"key": "codex", "auth": "authed"}],
+            "caps": ["handoff1"], "skills": [],
+            "capabilities": {"schemaVersion": 3, "available": ["files", "terminal"]},
+        })
+        self.runner.owner_user_id = "owner"
+        self.runner.org_id = "team"
+        self.runner.ready = True
+        self.runner.dispatch_mode = "accepting"
+        runner_hub._RUNNERS.clear()
+        runner_hub._RUNNERS["cloud"] = self.runner
+        self.session.add(models.OrgUnit(id="team", name="Team"))
+        self.owner.org_id = "team"
+        self.session.add(am.RunnerNode(id="cloud", owner_user_id="owner", org_id="team"))
+        self.schedule.assignee_id = "runner:cloud:codex"
+        await self.session.commit()
+
+    async def preflight(self, client=None):
+        return await personal_schedules.preflight_my_schedule(
+            {"scheduleId": "schedule"}, client or self.client, self.session)
+
+    async def test_cloud_preflight_uses_authorized_target_without_launching(self):
+        await self.cloud_target()
+        result = await self.preflight()
+        self.assertEqual(result["state"], "ready", result)
+        self.assertEqual(result["executionMode"], schedules.CLOUD_PROTOCOL)
+        self.assertEqual(result["machine"]["id"], "cloud")
+        self.assertEqual(self.calls, [])
+        self.assertIsNone(await self.session.scalar(select(models.AiScheduleRun)))
+
+    async def test_cloud_occurrence_creates_valid_handoff_and_retries_without_dispatching_twice(self):
+        await self.cloud_target()
+        dispatched = []
+
+        async def dispatch(task_id, body, client, session):
+            dispatched.append(task_id)
+            return {"ok": True, "ref": "fixture-ref"}
+
+        # Keep cloud creation, validation and persistence real; isolate execution.
+        with patch.object(task_dispatch, "dispatch", side_effect=dispatch):
+            result = await personal_schedules.run_my_schedule(
+                "schedule", body={}, client=self.client, session=self.session)
+            self.assertTrue(result["ok"], result)
+            run = await self.session.get(models.AiScheduleRun, result["scheduleRunId"])
+            request_id = run.receipt["conversationId"]
+            row_id = conversation_handoffs.identity(self.client.id, request_id)
+            handoff = await self.session.get(ConversationHandoff, row_id)
+            self.assertIsNotNone(handoff)
+            self.assertEqual(handoff.options["targetRunnerId"], "cloud")
+            self.assertEqual(run.receipt["executionMode"], schedules.CLOUD_PROTOCOL)
+            self.assertFalse(self.schedule.enabled)
+            self.assertEqual(dispatched, [handoff.task_id])
+            original_hash = handoff.request_hash
+            retried = await schedules.run_one(self.session, self.schedule,
+                schedule_run_id=run.id, conversation_title=run.receipt["conversationTitle"])
+            self.assertTrue(retried["ok"], retried)
+            self.assertEqual(retried["taskId"], handoff.task_id)
+            self.assertEqual(handoff.request_hash, original_hash)
+            self.assertEqual(dispatched, [handoff.task_id])
+            with patch.object(task_service, "ai_states", return_value={
+                    handoff.task_id: {"executionState": "running"}}):
+                await schedules.reconcile_runs(self.session, schedule_id="schedule")
+                self.assertEqual(run.task_id, handoff.task_id)
+                self.assertEqual(run.state, "running")
+                self.assertNotIn("migratedFrom", run.receipt)
+            # Reproduce the damaged receipt left by the previous implementation.
+            run.task_id, run.state, run.error = "", "failed", "Legacy migration error"
+            run.receipt = {**run.receipt, "migratedFrom": "legacy-task-workflow"}
+            await self.session.commit()
+            original_owner = run.owner_user_id
+            run.owner_user_id = "another-account"
+            with patch.object(task_service, "ai_states", return_value={
+                    handoff.task_id: {"executionState": "done"}}):
+                await schedules.reconcile_runs(self.session, schedule_id="schedule")
+                self.assertEqual(run.task_id, "", "Recovery must validate the original account")
+                run.owner_user_id = original_owner
+                await schedules.reconcile_runs(self.session)
+                self.assertEqual(run.task_id, handoff.task_id)
+                self.assertEqual(run.state, "succeeded")
+                self.assertEqual(run.error, "")
+                self.assertNotIn("migratedFrom", run.receipt)
+                await schedules.reconcile_runs(self.session, schedule_id="schedule")
+                self.assertEqual(run.state, "succeeded")
+            self.assertEqual(dispatched, [handoff.task_id])
+
+    async def test_unavailable_or_reassigned_cloud_target_cannot_pass_preflight(self):
+        await self.cloud_target()
+        for change in ("offline", "owner", "skills"):
+            with self.subTest(change=change):
+                self.runner.dispatch_mode = "draining" if change == "offline" else "accepting"
+                row = await self.session.get(am.RunnerNode, "cloud")
+                row.owner_user_id = "another" if change == "owner" else "owner"
+                if change == "owner":
+                    self.session.add(models.User(id="another", username="another"))
+                self.schedule.required_capabilities = ["computer"] if change == "skills" else []
+                await self.session.commit()
+                result = await self.preflight()
+                self.assertNotEqual(result["state"], "ready", result)
+                self.assertNotIn("executionMode", result)
+                self.assertEqual(self.calls, [])
+
+    async def test_remote_personal_plugin_is_blocked_before_local_consumer(self):
+        await self.cloud_target()
+        self.schedule.personal_plugin_key = "private-method"
+        await self.session.commit()
+        result = await self.preflight()
+        self.assertEqual(result["state"], "blocked", result)
+        self.assertNotIn("executionMode", result)
+
+    async def test_offline_explicit_target_never_queues_on_the_creator_device(self):
+        await self.cloud_target()
+        runner_hub._RUNNERS.clear()
+        result = await self.preflight()
+        self.assertEqual(result['state'], 'waiting')
+        self.assertIn('不在线', result['message'])
+        result = await schedules.run_one(self.session, self.schedule)
+        self.assertEqual(result['code'], 'AUTOMATION_TARGET_OFFLINE')
+        self.assertEqual(self.calls, [])
+        self.assertIsNone(await self.session.scalar(select(models.AiScheduleRun)))
+
+    async def test_phone_schedule_pins_own_online_pc_through_the_same_handoff(self):
+        await self.cloud_target()
+        pc = models.Client(id='own-pc', user_ref='owner', auth_state='active')
+        self.session.add(pc)
+        node = await self.session.get(am.RunnerNode, 'cloud')
+        node.client_id = 'own-pc'
+        self.runner.client_id = 'own-pc'
+        self.runner.tags = [runner_hub.CLIENT_TAG]
+        await self.session.commit()
+        result = await self.preflight()
+        self.assertEqual(result['state'], 'ready', result)
+        async def dispatch(task_id, body, client, session):
+            return {'ok': True, 'ref': 'fixture-own-pc'}
+        with patch.object(task_dispatch, 'dispatch', dispatch):
+            result = await personal_schedules.run_my_schedule('schedule', body={}, client=self.client, session=self.session)
+        self.assertTrue(result['ok'], result)
+        handoff = await self.session.scalar(select(ConversationHandoff))
+        self.assertEqual(handoff.options['targetRunnerId'], 'cloud')
+        self.assertEqual(handoff.options['targetRunnerKind'], 'work-computer')
+
+    async def test_due_phone_timer_keeps_offline_pc_target_even_with_available_cloud(self):
+        await self.cloud_target()
+        cloud = self.runner
+        cloud.owner_user_id = ''
+        (await self.session.get(am.RunnerNode, 'cloud')).owner_user_id = None
+        await self.session.flush()
+        pc = models.Client(id='own-pc', user_ref='owner', auth_state='active')
+        self.session.add_all([pc, am.RunnerNode(
+            id='offline-pc', client_id=pc.id, owner_user_id='owner', org_id='team')])
+        self.schedule.assignee_id = 'runner:offline-pc:codex'
+        self.schedule.every = 'once'
+        self.schedule.run_at = datetime.now(timezone.utc) - timedelta(seconds=10)
+        self.schedule.enabled = True
+        self.schedule.once_fired = False
+        self.schedule.retry_limit = 1
+        self.schedule.retry_delay_minutes = 1
+        await self.session.commit()
+        self.assertTrue(cloud.ready)
+        self.assertTrue(schedules.due(self.schedule))
+        key = schedules.trigger_identity(self.schedule, 'timer')
+        first = await schedules.execute_one(self.session, self.schedule, trigger='timer', idempotency_key=key)
+        await self.session.commit()
+        self.assertFalse(first['ok'])
+        self.assertEqual(first['code'], 'AUTOMATION_TARGET_OFFLINE')
+        self.assertTrue(self.schedule.once_fired)
+        self.assertIsNotNone(self.schedule.next_retry_at)
+        duplicate = await schedules.execute_one(self.session, self.schedule, trigger='timer', idempotency_key=key)
+        self.assertTrue(duplicate['deduplicated'])
+        self.schedule.next_retry_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        await self.session.commit()
+        retry = await schedules.execute_one(self.session, self.schedule, trigger='retry',
+                                            idempotency_key=schedules.trigger_identity(self.schedule, 'retry'))
+        await self.session.commit()
+        self.assertFalse(retry['ok'])
+        self.assertEqual(retry['code'], 'AUTOMATION_TARGET_OFFLINE')
+        self.assertFalse(self.schedule.enabled)
+        self.assertIsNone(self.schedule.next_retry_at)
+        self.assertEqual(self.schedule.assignee_id, 'runner:offline-pc:codex')
+        self.assertEqual(self.calls, [], 'The available cloud Runner must never receive the PC timer')
+        self.assertIsNone(await self.session.scalar(select(ConversationHandoff)))
+        self.assertIsNone(await self.session.scalar(select(models.Task)))
+        runs = list((await self.session.scalars(select(models.AiScheduleRun))).all())
+        self.assertEqual(len(runs), 2)
+        self.assertEqual([run.state for run in runs], ['failed', 'failed'])
+
+    async def test_peer_device_preflight_retains_the_original_execution_identity(self):
+        self.schedule.assignee_id = "runner:desktop:codex"
+        peer = models.Client(id="peer", user_ref="owner", auth_state="active")
+        self.session.add(peer)
+        await self.session.commit()
+        result = await self.preflight(peer)
+        self.assertEqual(result["state"], "ready", result)
+        self.assertNotIn("executionMode", result, "the original desktop still consumes this plan")
+        self.assertEqual(self.schedule.owner_client_id, "device")
+        self.client.user_ref = "changed-account"
+        await self.session.commit()
+        result = await self.preflight(peer)
+        self.assertEqual(result["state"], "blocked", result)
 
     async def run_schedule(self):
         result = await personal_schedules.run_my_schedule(

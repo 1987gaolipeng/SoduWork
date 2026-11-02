@@ -22,20 +22,38 @@ function fixture(first, options = {}) {
     return elements.get(selector);
   };
   const root = { querySelector: element, querySelectorAll: () => [] };
-  const api = { runtimes: async () => ++calls === 1 ? first() : { ok: true, runtimes: fullCatalog },
+  const api = { runtimes: async () => {
+    const reply = await (++calls === 1 ? first() : { ok: true, runtimes: fullCatalog });
+    return options.project === false ? reply : healthProject(reply);
+  },
     probe: async () => ({ ok: true, accessControl: { supported: true, schema: 'soduwork.access-policy/v1' } }) };
   const ctx = { window: null, document: root, WorkComposer: { contextButton: () => '' },
     SoduWorkAPI: { taskStorageKey: () => owner }, addEventListener: (event, listener) => listeners.set(event, listener),
     setTimeout(fn) { const id = {}; timers.set(id, fn); return id; }, clearTimeout(id) { timers.delete(id); } }; ctx.window = ctx;
   vm.runInNewContext(source, ctx);
   const bind = () => ctx.ComposeRuntime.bind(root, { api: () => api }); bind();
-  return { api, runtime: ctx.ComposeRuntime, calls: () => calls, bind, click: () => handlers.get('#cpRuntime:click')(),
+  return { api, context: ctx, runtime: ctx.ComposeRuntime, calls: () => calls, bind, click: () => handlers.get('#cpRuntime:click')(),
+    more: () => handlers.get('#cpRuntimeMore:click')({stopPropagation() {}}),
     owner(value, event = true) { owner = value; if (event) listeners.get('soduwork-data-scope-changed')?.(); },
     goalButton: () => element('#cpIntentMenu'),
     select: id => { const row = element(id); row.dataset.runtime = id;
       return handlers.get('#cpRuntimePop:click')({ target: { closest: () => row } }); },
     expire: () => { for (const fn of [...timers.values()]) fn(); } };
 }
+
+test('runtime maintenance follows the selected location and never falls back from cloud to local', () => {
+  const f = fixture(() => ({ok:true,runtimes:fullCatalog})), calls = [];
+  f.context.openAgentsEntry = () => calls.push('agents');
+  f.context.WorkspaceHost = {open: page => calls.push(page)};
+  f.more();
+  f.runtime.setLocation('cloud'); f.more();
+  delete f.context.WorkspaceHost;
+  f.context.openCloudEnvironmentsPanel = () => calls.push('cloud-fallback');
+  f.more();
+  delete f.context.openCloudEnvironmentsPanel; f.more();
+  f.runtime.setLocation('local'); f.more();
+  assert.deepEqual(calls, ['agents','cloud','cloud-fallback','agents']);
+});
 
 test('a legacy declaration-only response never exposes unverified non-Pi runtimes', async () => {
   const f = fixture(() => ({ ok: true, runtimes: fullCatalog }), { project: false });
@@ -54,13 +72,13 @@ test('an incomplete health projection cannot remove the resident Pi entry', asyn
 });
 
 for (const failed of ['rejection', 'invalid', 'empty']) {
-  test(`failed ${failed} catalog is retried on reopen and then cached only after a valid response`, async () => {
+  test(`failed ${failed} catalog is retried on reopen, coalesces concurrent loads and rediscovers on later opens`, async () => {
     const f = fixture(() => { if (failed === 'rejection') throw Error('startup IPC failed');
       return failed === 'invalid' ? { ok: false, runtimes: fullCatalog } : { ok: true, runtimes: [] }; });
     await f.runtime.ready(); assert.equal(f.runtime.catalog().length, 1);
     f.click(); f.click(); f.bind(); await f.runtime.ready(); await flush();
     assert.equal(f.calls(), 2); assert.equal(f.runtime.catalog().length, 6);
-    f.click(); f.bind(); await f.runtime.ready(); assert.equal(f.calls(), 2);
+    f.click(); f.bind(); await f.runtime.ready(); assert.equal(f.calls(), 3, 'reopening discovers external installations');
   });
 }
 

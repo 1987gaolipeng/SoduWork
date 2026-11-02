@@ -184,9 +184,13 @@ async def open_response(conf, path, body, *, stream=False, timeout=None):
             from . import client_access
             async with model_runtime.SessionLocal() as quota_session:
                 try:
-                    await client_access.assert_quota(quota_session, conf["quotaUserId"])
+                    await client_access.assert_quota(quota_session, conf["quotaUserId"],
+                                                     provider=conf.get("provider", ""),
+                                                     model=conf.get("model", ""))
                 except client_access.ClientAccessError as exc:
-                    raise UpstreamError(exc.status, "", str(exc)) from exc
+                    error = UpstreamError(exc.status, "", str(exc))
+                    error.quota_detail = exc.detail()
+                    raise error from exc
         if timeout is not None:
             lease.deadline = min(lease.deadline, time.monotonic() + timeout)
         settings = lease.policy

@@ -91,6 +91,10 @@ app.whenReady().then(async()=>{
  await js(`document.querySelectorAll('.noutput-library').forEach(n=>n.remove());renderMessages();void 0;`);
  await until(`document.querySelector('[data-library-output="html"]')?.classList.contains('is-saved')`);
  await click('[data-library-output="html"]');
+ await until(`document.activeElement?.classList.contains('library-file-card')`);
+ assert.equal(await js(`document.activeElement.querySelector('.library-card-copy b').textContent`),'报告.html');
+ assert.equal(await js(`document.querySelector('.library-preview-pane:modal')`),null);
+ await js('closeLibraryPanel();void 0;');
  assert.equal(outputReads,readsBeforeRestore);
  assert.equal(await js(`SoduWorkAPI.listLibrary({scope:'all'}).then(r=>r.items.length)`),4);
  report.cases.push('A fresh transfer controller restores persisted save receipts without rereading or uploading the saved output');
@@ -102,7 +106,7 @@ app.whenReady().then(async()=>{
  win.setContentSize(1280,850);
  // Model the workspace host's surface switch using the actual panel/shell
  // styles, including the hosted state that intentionally replaces .show.
- await js(`document.querySelector('#chat').style.display='none';document.querySelector('#attachment-area').style.display='none';document.documentElement.dataset.deskPanel='workspace';document.documentElement.dataset.workspaceView='library';document.documentElement.style.setProperty('--ws-main-left','10px');openLibraryPanel();const panel=document.querySelector('#libraryPanel');panel.classList.remove('show');panel.classList.add('workspace-hosted');panel.scrollTop=0;window.scrollTo(0,0);void 0;`);
+ await js(`document.querySelector('#chat').style.display='none';document.querySelector('#attachment-area').style.display='none';document.documentElement.dataset.deskPanel='workspace';document.documentElement.dataset.workspaceView='library';document.documentElement.style.setProperty('--ws-main-left','10px');openLibraryPanel();const panel=document.querySelector('#libraryPanel');panel.classList.remove('show');panel.classList.add('workspace-hosted');panel.scrollTop=0;window.scrollTo(0,0);const search=panel.querySelector('[data-library-search]');search.value='';search.dispatchEvent(new Event('input',{bubbles:true}));void 0;`);
  await until(`document.querySelectorAll('.library-file-card').length===3`);
  const libraryVisible=await js(`(()=>{const panel=document.querySelector('#libraryPanel'),title=panel.querySelector('[data-library-title]'),card=panel.querySelector('.library-file-card'),r=card.getBoundingClientRect(),s=getComputedStyle(panel);return{visible:panel.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}),opacity:s.opacity,pointerEvents:s.pointerEvents,title:title.textContent,view:document.documentElement.dataset.workspaceView,hosted:panel.classList.contains('workspace-hosted'),hit:panel.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)),width:panel.getBoundingClientRect().width,overflow:panel.scrollWidth>panel.clientWidth+1,filenames:[...panel.querySelectorAll('.library-card-copy b')].map(e=>e.textContent)}})()`);
  report.libraryVisible=libraryVisible;assert.equal(libraryVisible.visible,true);assert.equal(libraryVisible.opacity,'1');assert.equal(libraryVisible.pointerEvents,'auto');assert.equal(libraryVisible.title,'资料库');assert.equal(libraryVisible.view,'library');assert.equal(libraryVisible.hosted,true);assert.equal(libraryVisible.hit,true);assert(libraryVisible.width>1100);assert.equal(libraryVisible.overflow,false);

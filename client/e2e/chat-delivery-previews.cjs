@@ -34,18 +34,18 @@ if (typeof electron === 'string') {
     await js('window.soduWorkAPI={fileTypeIcon:async()=>({ok:true,dataUrl:' + JSON.stringify(nativeIcon.toDataURL()) + '})};void 0;');
     await js(`window.currentScope='owner-a';window.currentRef='delivery-chat';window.events=[];window.notices=[];
       window.NativeChat={sessionInfo:()=>({ref:currentRef})};window.petSay=text=>notices.push(text);
-      window.SoduWorkAPI={taskStorageKey:()=>currentScope,publishDelivery:async payload=>({ok:true,delivery:{id:'saved',files:[{path:'index.html',size:1}]}})};
+      window.SoduWorkAPI={taskStorageKey:()=>currentScope,saveLibraryDelivery:async payload=>({ok:true,delivery:{id:'saved',files:[{path:'index.html',size:1}]}})};
       addEventListener('soduwork-cloud-delivery-continue',event=>events.push(event.detail));
       window.site={artifactId:'site',name:'index.html',relative:'index.html',primary:true,changedInTurn:true,at:1};
       window.shot={artifactId:'shot',name:'screenshot.png',relative:'screens/screenshot.png',primary:false,processEvidence:true,at:2};
       window.base='<article class="nmsg user" data-chat-node="message:0">Build</article>'+ '<article class="nmsg ai" data-chat-node="message:1" data-delivery-final="false"><span data-output-image-ref="screens/screenshot.png">Screenshot</span></article>'+ '<article class="nmsg ai" data-chat-node="message:2" data-delivery-final="true"><div class="ntext"><a href="index.html">Website</a></div></article>';
       window.calls=[];window.api={inspectDelivery:async(ref,ids)=>{calls.push(['inspect',ids]);return{ok:true,manifest:{files:[{path:'index.html',size:1}]}}},prepareDelivery:async(ref,ids)=>{calls.push(['prepare',ids]);return{ok:true,manifest:{files:[{path:'index.html',size:1}]}}}};
-      messages.addEventListener('click',event=>{if(event.target.closest('[data-delivery-continue]'))void ChatDeliveries.handle(event.target,api)});
+      messages.addEventListener('click',event=>{if(event.target.closest('[data-delivery-retry],[data-delivery-open],[data-delivery-local]'))void ChatDeliveries.handle(event.target,api)});
       window.render=(html,files,snapshot={},previous=null)=>messages.innerHTML=ChatOutputLinks.decorate(html,files,currentRef,{status:'idle',...snapshot},previous);void 0;`);
     for (const name of ['library-file-icons.js', 'chat-deliveries.js', 'chat-output-links.js']) await js(fs.readFileSync(path.resolve(__dirname, '../components/panels', name), 'utf8'));
     await js('render(base,[site,shot]);');
-    await js('ChatDeliveries.handle(messages.querySelector("[data-delivery-continue]"),api);');
-    assert.equal(await js('document.activeElement===nchatInput'), true, 'continue must focus the chat input, not the preceding hidden home input');
+    assert.equal(await js('messages.querySelector("[data-delivery-continue]")'), null, 'file actions replace the retired continue shortcut');
+    assert.equal(await js('messages.querySelector("[data-delivery-retry]").hidden'),false);
     assert.equal(await js('messages.querySelectorAll(".noutput-image").length'), 1);
     assert.equal(await js('messages.querySelectorAll(".ndelivery").length'), 1);
     assert.equal(await js('messages.querySelectorAll("[data-output-image=shot]").length'), 1);
@@ -60,12 +60,12 @@ if (typeof electron === 'string') {
     await js(`window.titledSite={...site,artifactId:'titled-site',kind:'website',title:'四季花园'};
       window.websiteManifest={title:'成果包',files:[{path:'index.html',size:1},{path:'style.css',size:2}]};
       window.titleCalls=[];window.titleApi={inspectDelivery:async(ref,ids)=>{titleCalls.push(['inspect',ids]);return{ok:true,manifest:websiteManifest}},prepareDelivery:async(ref,ids)=>{titleCalls.push(['prepare',ids]);return{ok:true,manifest:websiteManifest}}};
-      window.SoduWorkAPI.publishDelivery=async()=>({ok:true,delivery:{id:'saved-website',...websiteManifest}});
+      window.SoduWorkAPI.saveLibraryDelivery=async()=>({ok:true,delivery:{id:'saved-website',...websiteManifest}});
       render(base,[titledSite,shot]);ChatDeliveries.hydrate(messages,{api:titleApi,ref:currentRef,snapshot:{status:'idle'}});void 0;`);
     await js('new Promise(resolve=>setTimeout(resolve,0))');
-    assert.equal(await js('messages.querySelector("[data-delivery-title]").textContent'), '四季花园', 'a website title survives dependency inspection');
+    assert.equal(await js('messages.querySelector("[data-delivery-title]").textContent'), '四季花园.zip', 'a website package retains its title and archive suffix after dependency inspection');
     await js('ChatDeliveries.handle(messages.querySelector("[data-delivery-retry]"),titleApi)');
-    assert.equal(await js('messages.querySelector("[data-delivery-title]").textContent'), '四季花园', 'a website title survives saving its dependency package');
+    assert.equal(await js('messages.querySelector("[data-delivery-title]").textContent'), '四季花园.zip', 'a website package retains its title and archive suffix after saving');
     assert.equal(await js('titleCalls.every(row=>row[1].length===1&&row[1][0]==="titled-site")'), true);
     assert.equal(await js('messages.querySelectorAll("[data-output-image=shot]").length'), 1);
     for (const variant of ['multiple', 'archive']) {
@@ -73,7 +73,7 @@ if (typeof electron === 'string') {
         render('<article class="nmsg ai">Done</article>',titleVariant==='multiple'?[{...titledSite,artifactId:'multi-site'}, {...site,artifactId:'other-result',name:'notes.md',relative:'notes.md',kind:'document'}]:[{...site,artifactId:'archive',name:'site.zip',relative:'site.zip',kind:'archive',title:'Website export'}]);
         ChatDeliveries.hydrate(messages,{api:titleApi,ref:currentRef,snapshot:{status:'idle'}});void 0;`);
       await js('new Promise(resolve=>setTimeout(resolve,0))');
-      assert.equal(await js('messages.querySelector("[data-delivery-title]").textContent'), '成果包', variant + ' retains the package title');
+      assert.equal(await js('messages.querySelector("[data-delivery-title]").textContent'), '成果包.zip', variant + ' retains the package title and archive suffix');
     }
     report.cases.push('A single website keeps its explicit title through multi-file inspection/save; multiple primary outputs and archives keep package naming, evidence stays out of selections');
 
@@ -110,31 +110,55 @@ if (typeof electron === 'string') {
     assert.equal(await js('messages.querySelectorAll(".ndelivery-preview").length'), 0);
     report.cases.push('Summary-only evidence remains previewable; a primary image has one ordinary delivery group');
 
-    await js('render(base,[site,shot]);nchatInput.setSelectionRange(2,6);nchatInput.blur();');
-    await click('[data-delivery-continue]');
-    assert.equal(await js('document.activeElement===nchatInput'), true);
-    assert.deepEqual(await js('[nchatInput.value,nchatInput.selectionStart,nchatInput.selectionEnd,events.length]'), ['keep this draft', 2, 6, 0]);
-    await js('window.chatInput=nchatInput;window.hiddenShell=document.createElement("div");chatInput.replaceWith(hiddenShell);hiddenShell.append(chatInput);hiddenShell.style.display="none";window.beforeHiddenNotice=notices.length;');
-    await click('[data-delivery-continue]');
-    assert.equal(await js('notices.length>beforeHiddenNotice&&document.activeElement!==nchatInput'), true, 'a hidden composer ancestor must report an unavailable input');
-    await js('hiddenShell.replaceWith(nchatInput);');
-    await js('window.oldContinue=messages.querySelector("[data-delivery-continue]");currentRef="different-chat";nchatInput.blur();ChatDeliveries.handle(oldContinue,api);');
-    assert.equal(await js('document.activeElement===nchatInput'), false);
-    assert.equal(await js('notices.length>0'), true);
-    await js('currentRef="delivery-chat";currentScope="owner-b";ChatDeliveries.handle(oldContinue,api);');
-    assert.equal(await js('document.activeElement===nchatInput'), false);
-    report.cases.push('Local continue focuses the actual chat input despite earlier hidden home input, preserving draft/selection and rejecting changed chat/account');
+    // File actions preserve the draft; saved-file previews replace the retired continue shortcut.
+    await js(`render(base,[site,shot]);nchatInput.setSelectionRange(2,6);nchatInput.blur();
+      window.savedOpens=[];window.ChatWorkbench={openSavedDelivery:(id,options)=>{savedOpens.push({id,title:options.title});return true}};void 0;`);
+    await click('[data-delivery-open]');
+    assert.equal(await js('savedOpens.at(-1).id'),'saved');
+    assert.deepEqual(await js('[nchatInput.value,nchatInput.selectionStart,nchatInput.selectionEnd]'),['keep this draft',2,6]);
+    await js('window.oldOpen=messages.querySelector("[data-delivery-open]");currentScope="owner-b";ChatDeliveries.handle(oldOpen,api);');
+    assert.equal(await js('savedOpens.length'),1,'a retained card cannot open another account\'s saved delivery');
+    report.cases.push('Saved-file preview preserves the draft and selection; account changes reject retained cards');
 
-    await js('currentScope="owner-a";render(base.replace(\'data-delivery-final="true"\',\'data-delivery-final="true" data-delivery-current="false"\'),[{...site,changedInTurn:false},shot]);nchatInput.blur();');
-    await click('[data-delivery-continue]');
-    assert.equal(await js('document.activeElement===nchatInput&&nchatInput.value==="keep this draft"'), true);
-    report.cases.push('A historical delivery continues the current owning conversation without replacing its saved draft');
+    await js(`currentScope='owner-a';render(base.replace('data-delivery-final="true"','data-delivery-final="true" data-delivery-current="false"'),[{...site,changedInTurn:false},shot]);`);
+    await click('[data-delivery-open]');
+    assert.equal(await js('savedOpens.length'),2);
+    assert.equal(await js('nchatInput.value'),'keep this draft');
+    report.cases.push('Historical saved deliveries open without replacing the current conversation draft');
 
-    await js(`currentScope='owner-a';render('<article class="nmsg ai" data-output-task="cloud-task">Done</article>',[{...site,taskId:'cloud-task',role:'output'}],{cloudHandoff:{taskId:'cloud-task'}});`);
-    await click('[data-delivery-continue]');
-    assert.deepEqual(await js('events.at(-1)'), { taskId: 'cloud-task', ref: 'delivery-chat' });
-    assert.equal(await js('document.activeElement===nchatInput'), true);
-    report.cases.push('Cloud continue retains the original event and focuses its conversation');
+    await js(`window.localCalls=[];window.localOpens=[];
+      window.WorkspaceHost={open:async(name,options)=>{localOpens.push({name,options});return true}};
+      api.continueLocalDelivery=async(ref,ids)=>{localCalls.push({ref,ids});return{ok:true,files:[{path:'index.html'}]}};
+      render('<article class="nmsg ai" data-output-task="cloud-task">Done</article>',[{...site,cloudTaskId:'cloud-task',remoteMaterialized:true,role:'output'}],{cloudHandoff:{taskId:'cloud-task'}});`);
+    await click('[data-delivery-local]');
+    assert.deepEqual(await js('localCalls.at(-1)'),{ref:'delivery-chat',ids:['site']});
+    assert.equal(await js('localOpens.at(-1).name'),'create');
+    assert.equal(await js('localOpens.at(-1).options.newSession'),true);
+    assert.equal(await js('nchatInput.value'),'keep this draft');
+    await js('window.oldLocal=messages.querySelector("[data-delivery-local]");currentRef="different-chat";ChatDeliveries.handle(oldLocal,api);');
+    assert.equal(await js('localCalls.length'),1,'a changed conversation cannot continue a retained cloud delivery');
+    assert.ok(await js('notices.length>0'));
+    await js('currentRef="delivery-chat";currentScope="owner-b";ChatDeliveries.handle(oldLocal,api);');
+    assert.equal(await js('localCalls.length'),1);
+    await js('currentScope="owner-a";');
+    report.cases.push('Cloud delivery continues in a new local conversation, preserves the draft and rejects changed chat/account');
+    await js(`currentRef='cloud-revision';window.archiveCalls=[];
+      window.localManifest={revision:'b'.repeat(64),files:[{path:'index.html',size:1},{path:'style.css',size:2}]};
+      SoduWorkAPI.getTaskDelivery=async()=>({delivery:{id:'remote-receipt',revision:'a'.repeat(64),files:localManifest.files}});
+      window.archiveApi={cloud:{materialize:async()=>({ok:true,artifacts:[{artifactId:'cached-site',remoteAttachmentId:'remote-page',cloudTaskId:'revision-task',relative:'index.html',name:'index.html'}]})},
+        inspectDelivery:async()=>({ok:true,manifest:localManifest}),
+        openLocalDelivery:async(ref,ids,options)=>{archiveCalls.push({ref,ids,options});return{ok:true}},
+        openDeliveryArchive:async(ref,ids,options)=>{archiveCalls.push({ref,ids,options});return{ok:true}}};
+      render('<article class="nmsg ai" data-output-task="revision-task">Done</article>',[{...site,taskId:'revision-task',attachmentId:'remote-page',cloudPending:true,role:'output'}],{cloudHandoff:{taskId:'revision-task'}});
+      ChatDeliveries.hydrate(messages,{api:archiveApi,ref:currentRef,snapshot:{status:'idle'}});void 0;`);
+    await js('new Promise(resolve=>setTimeout(resolve,0))');
+    await js('ChatDeliveries.handle(messages.querySelector("[data-delivery-reveal]"),archiveApi)');
+    await js('ChatDeliveries.handle(messages.querySelector(".ndelivery-actions [data-delivery-archive]"),archiveApi)');
+    assert.deepEqual(await js('archiveCalls.map(call=>call.options)'), [
+      {bundle:true,revision:'b'.repeat(64)}, {bundle:true,revision:'b'.repeat(64)},
+    ], 'a remote receipt revision must not be used to validate a newly materialized local package');
+    await js('delete SoduWorkAPI.getTaskDelivery;currentRef="delivery-chat";');
+    report.cases.push('Cloud ZIP actions inspect the materialized local revision and reuse it for both open and reveal');
     await js(`render('<article class="nmsg user">Request</article><article class="nmsg ai" data-output-task="task-a" data-delivery-final="false"><span data-output-image-ref="a.png">A</span></article><article class="nmsg ai" data-output-task="task-a" data-delivery-final="true">A done</article><article class="nmsg ai" data-output-task="task-b" data-delivery-final="true"><span data-output-image-ref="b.png">B</span></article>',[{...shot,artifactId:'image-a',relative:'a.png',name:'a.png',taskId:'task-a'},{...shot,artifactId:'image-b',relative:'b.png',name:'b.png',taskId:'task-b'}]);`);
     assert.deepEqual(await js('Array.from(messages.querySelectorAll("[data-output-image]")).map(node=>[node.dataset.outputImage,node.closest("article").dataset.outputTask])'), [['image-a', 'task-a'], ['image-b', 'task-b']]);
     report.cases.push('Simultaneous task screenshots remain attached to their own final message and group');

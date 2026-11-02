@@ -1,11 +1,49 @@
 """Shared dispatch context, workspace planning and task receipt publication."""
 import logging
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from ..models import Client, Task
 from ..realtime import hub
-from .task_access import publish_owner
+from .task_access import publish_task
 
 log = logging.getLogger("uvicorn.error")
+
+
+async def _remote_execution_context(session, client, ctx, body, aid, task,
+                                    personal_plugin=None):
+    """Honor an explicit remote choice without broadening default device scope."""
+    from . import ai_exec, ai_exec_route, conversation_handoffs, runner_hub
+    raw = body.get("executionContext")
+    selection = raw if isinstance(raw, dict) else {}
+    location = selection.get("location")
+    location = location if isinstance(location, dict) else {}
+    runner = selection.get("runner")
+    runner = runner if isinstance(runner, dict) else {}
+    modes = {str(item.get("mode") or "") for item in (location, runner)} - {""}
+    if "remote" not in modes:
+        return ctx, aid
+    if modes != {"remote"} or personal_plugin:
+        raise HTTPException(409, "执行位置与所选工作方法不一致，请刷新后重新选择")
+    rid = str(runner.get("runnerId") or runner.get("id") or "").strip()
+    cli = ai_exec_route.cli_of(aid)
+    if not rid or not cli:
+        raise HTTPException(409, "请选择明确的远程执行机和执行底座")
+    target_id = "runner:" + rid + ":" + cli
+    if aid.startswith("runner:") and aid != target_id:
+        raise HTTPException(409, "执行底座与所选执行机不一致，请刷新后重新选择")
+    picked = await conversation_handoffs.destination(session, client, {
+        "assigneeId": target_id, "agentId": cli,
+        "model": str(body.get("model") or ""),
+        "targetRunnerKind": str(runner.get("runnerKind") or ""),
+        "requiredSkills": list((task.work_routing or {}).get("requiredSkills") or []),
+    })
+    selected_client = str(runner.get("clientId") or "")
+    if selected_client and selected_client != str(picked.get("clientId") or ""):
+        raise HTTPException(409, "目标执行机归属已变化，请刷新后重新选择")
+    live = runner_hub.get(rid)
+    if not live or not runner_hub.supports_capabilities(live, ai_exec.required_capabilities(task)):
+        raise HTTPException(409, "所选执行机尚未具备这项工作需要的全部能力")
+    return conversation_handoffs.scope_for_destination(ctx, client, picked), target_id
 
 
 async def _ext_project_id(session, t) -> str:
@@ -204,17 +242,13 @@ async def _stale_runner_hint(session: AsyncSession, stage: str, message, picked)
 
 
 async def _push_task(session: AsyncSession, t: Task, created: bool) -> dict | None:
-    """Push task creation or changes to the owning client without affecting committed business
-    operations.
-    """
+    """Push authorized task projections without affecting committed operations."""
     if not t.owner_client_id:
         return None
     from ..services.tasks import task_to_api_live
     task_api = await task_to_api_live(session, t)
     try:
-        await publish_owner(session, t,
-                          {"type": "task." + ("created" if created else "updated"),
-                           "task": task_api})
+        await publish_task(session, t, "task." + ("created" if created else "updated"), task_api)
     except Exception as e:  # noqa: BLE001
         log.warning("推送任务变更失败：%s", type(e).__name__)
     return task_api

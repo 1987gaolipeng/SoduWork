@@ -31,7 +31,7 @@ async function fixture(t, names = ['report.md']) {
       session: { get: ref => ref === 'valid' ? handle : null }, ownerOf: () => scope(auth),
       shell: { showItemInFolder: file => calls.push(['reveal', file]), openPath: async folder => { calls.push(['folder', folder]); return ''; } },
       snapshotFiles: () => ({ items }), ...options });
-    return (ids = context.ids, supplied = event, ref = 'valid') => handler(supplied, ref, ids);
+    return (ids = context.ids, supplied = event, ref = 'valid', settings) => handler(supplied, ref, ids, settings);
   };
   return context;
 }
@@ -79,9 +79,48 @@ test('multiple PC files produce a verified local ZIP without any save dialog or 
   const action=f.install({app:{getPath:()=>f.cwd},snapshotFiles:()=>({items:indexed})},'open-archive');
   assert.equal((await action(indexed.map(item=>item.artifactId))).ok,true);
   const archive=f.calls.at(-1)[1];assert.match(archive,/delivery-archives/);
+  assert.equal(f.calls.at(-1)[0], 'folder', 'opening an archive must launch the ZIP, not reveal it');
   assert.equal((await fs.readFile(archive)).readUInt32LE(0),0x04034b50);
   assert.equal((await action(indexed.map(item=>item.artifactId))).ok,true);
   assert.equal(f.calls.at(-1)[1],archive,'same content reuses the immutable archive');
+  const reveal = f.install({app:{getPath:()=>f.cwd},snapshotFiles:()=>({items:indexed})});
+  assert.equal((await reveal(indexed.map(item=>item.artifactId), f.event, 'valid', {bundle:true})).ok, true);
+  assert.deepEqual(f.calls.at(-1), ['reveal', archive], 'both actions target the same existing ZIP');
+});
+
+test('an existing ZIP is opened unchanged and a single website root reveals its dependency bundle', async t => {
+  for (const sourceZip of [true, false]) {
+    const f = await fixture(t, sourceZip ? ['result.zip'] : ['site/index.html', 'site/app.css']);
+    const zip = require('../main/conversation/zip-archive');
+    const bytes = await zip.createEntries([{name:'report.md', bytes:Buffer.from('# result')}]);
+    if (sourceZip) await fs.writeFile(f.items[0].path, bytes);
+    else await fs.writeFile(f.items[0].path, '<link rel="stylesheet" href="app.css"><h1>Site</h1>');
+    f.handle.outputSnapshot = () => require('../main/pi-session/outputs').scan(f.cwd, 0, 1);
+    const indexed = require('../main/conversation/artifact-runtime').snapshot(f.handle);
+    const ids = indexed.delivery.items.map(item => item.artifactId);
+    const options = {app:{getPath:()=>f.cwd}, snapshotFiles:()=>indexed};
+    const metadata = await require('../main/conversation/delivery-package').prepare(f.handle, ids);
+    const settings = {bundle:true, revision:metadata.manifest.revision};
+    assert.equal((await f.install(options, 'open-archive')(ids, f.event, 'valid', settings)).ok, true);
+    const archive = f.calls.at(-1)[1];
+    assert.deepEqual(await fs.readFile(archive), sourceZip ? bytes : metadata.bytes);
+    assert.equal((await f.install(options)(ids, f.event, 'valid', settings)).ok, true);
+    assert.deepEqual(f.calls.at(-1), ['reveal', archive]);
+    await fs.appendFile(f.items[0].path, 'changed');
+    const before = f.calls.length;
+    assert.equal((await f.install(options, 'open-archive')(ids, f.event, 'valid', settings)).code, 'DELIVERY_REVISION_CHANGED');
+    assert.equal(f.calls.length, before, 'an older card cannot silently open new bytes');
+  }
+});
+
+test('archive shell failures and invalid revision arguments remain actionable without launching arbitrary files', async t => {
+  const f = await fixture(t, ['one.md', 'two.md']);
+  f.handle.outputSnapshot = () => require('../main/pi-session/outputs').scan(f.cwd, 0, 1);
+  const indexed = require('../main/conversation/artifact-runtime').snapshot(f.handle);
+  const ids = indexed.delivery.items.map(item => item.artifactId);
+  const action = f.install({app:{getPath:()=>f.cwd},snapshotFiles:()=>indexed,shell:{openPath:async()=> 'OS failure'}}, 'open-archive');
+  assert.equal((await action(ids)).code, 'DELIVERY_OPEN_FAILED');
+  assert.equal((await action(ids, f.event, 'valid', {revision:'../invalid'})).code, 'DELIVERY_INVALID_SELECTION');
 });
 test('the ordinary artifact index works for reopened sessions without supplied file paths', async t => {
   const f = await fixture(t, ['report.md']);

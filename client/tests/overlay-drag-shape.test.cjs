@@ -176,3 +176,23 @@ test('late startup revision query resends unchanged geometry for the current nav
   assert.equal(shapeCalls.length, count + 1, 'geometry dedup must not suppress the new revision acknowledgement');
   assert.deepEqual(shapeCalls.at(-1), initial, 'a new revision must not enlarge visible native regions');
 });
+
+test('closed pet ring cannot intercept the chat editor beneath its invisible buttons', () => {
+  const { sandbox, frame, shapeCalls, pet } = boot();
+  const ring = makeEl('ring-action', 600, 600, 36, 36);
+  let opened = false;
+  pet.classList.contains = name => name === 'ring-open' && opened;
+  const query = sandbox.document.querySelectorAll;
+  sandbox.document.querySelectorAll = selector => selector === '.ring-btn' ? [ring]
+    : selector === '.pet.ring-open .ring-btn' ? (opened ? [ring] : []) : query(selector);
+  const refresh = () => { sandbox.requestOverlayShapeSync(0, true); frame(); };
+  refresh();
+  assert.equal(contains(shapeCalls.at(-1), ring), false, 'closed ring geometry must be excluded from native hit regions');
+  assert.equal(sandbox.isPointInteractive(615, 615), false);
+  opened = true; refresh();
+  assert.equal(contains(shapeCalls.at(-1), ring), true, 'open ring actions remain usable');
+  assert.equal(sandbox.isPointInteractive(615, 615), true);
+  opened = false; refresh();
+  assert.equal(contains(shapeCalls.at(-1), ring), false, 'closing restores passthrough without moving the pet');
+  assert.equal(sandbox.isPointInteractive(615, 615), false);
+});

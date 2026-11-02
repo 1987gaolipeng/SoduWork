@@ -10,11 +10,15 @@
   const SAVED_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true">' + CHECK_PATH + '</svg>';
   const PREVIEW_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.2 12s3.5-6.5 9.8-6.5S21.8 12 21.8 12s-3.5 6.5-9.8 6.5S2.2 12 2.2 12Z"/><circle cx="12" cy="12" r="2.8"/></svg>';
   const OUTPUT_KINDS = new Set(['website', 'document', 'presentation', 'spreadsheet', 'pdf', 'image', 'video', 'archive']);
+  const LIBRARY_CHANGE_CHANNEL = 'soduwork-library-changes';
+  const LIBRARY_CHANGE_STORAGE_KEY = 'soduwork-library-change';
+  let libraryChangeChannel = null;
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const scope = () => global.SoduWorkAPI?.taskStorageKey?.('ops') || '';
   const tx = text => global.SoduWorkI18n?.t(text, text) || text;
-  const key = file => String(file?.artifactId || file?.path || (file?.taskId && file?.attachmentId ? file.taskId + ':' + file.attachmentId : '') || '');
-  const canSave = file => Boolean(file && (file.artifactId || file.path || (file.taskId && file.attachmentId)));
+  const key = file => String(file?.artifactId || file?.path || (file?.deliveryBundle && file.taskId && (file.artifactVersionId || file.attachmentIds?.length)
+    ? 'bundle:' + file.taskId + ':' + (file.attachmentIds?.length ? JSON.stringify([...file.attachmentIds].sort()) : file.artifactVersionId) : '') || (file?.taskId && file?.attachmentId ? file.taskId + ':' + file.attachmentId : '') || '');
+  const canSave = file => Boolean(key(file));
   const say = text => { if (typeof global.petSay === 'function') global.petSay(tx(text)); };
   /*
    * Resolve conversation attribution from the currently displayed host at save time. Return
@@ -30,6 +34,18 @@
     return { type: 'conversation', sessionId,
       conversationTitle: String(got && got.conversationTitle || '').trim().slice(0, 240) };
   }
+  function announceLibraryChange(detail) {
+    const payload = { type: 'changed', detail: detail || {}, at: Date.now(), nonce: Math.random().toString(36).slice(2) };
+    global.dispatchEvent?.(new CustomEvent('soduwork-library-changed', { detail: payload.detail }));
+    try {
+      if (!libraryChangeChannel && typeof global.BroadcastChannel === 'function') {
+        libraryChangeChannel = new global.BroadcastChannel(LIBRARY_CHANGE_CHANNEL);
+      }
+      libraryChangeChannel?.postMessage(payload);
+    } catch (_) { /* BroadcastChannel is optional on older Electron profiles. */ }
+    try { global.soduWorkAPI?.broadcast?.('library', payload); } catch (_) { /* Native window relay is best effort. */ }
+    try { global.localStorage?.setItem(LIBRARY_CHANGE_STORAGE_KEY, JSON.stringify(payload)); } catch (_) { /* storage fallback is best effort */ }
+  }
   function signal(job) { revision++; job.listeners.forEach(fn => { try { fn(job); } catch (_) {} }); }
   function start() {
     while (active < 2 && queue.length) {
@@ -41,7 +57,7 @@
         if (job.scope !== scope()) throw Error('账号或服务已切换，请重新保存');
         if (!result || result.ok === false) throw Error(result?.reason || '保存到资料库失败');
         job.status = 'saved'; job.result = result;
-        global.dispatchEvent?.(new CustomEvent('soduwork-library-changed', { detail: { itemId: result.item?.id || '' } }));
+        announceLibraryChange({ itemId: result.item?.id || '' });
       }).catch(error => {
         job.status = 'error'; job.error = error;
         if (job.automatic && job.scope === scope()) say('文件未能自动保存到资料库，可重新添加后重试');
@@ -124,6 +140,23 @@
     if (target && typeof target.click === 'function') { target.click(); return true; }
     return false;
   }
+  async function openSavedItem(item, options = {}) {
+    if (!item?.id) throw Error(tx('暂时无法定位已保存的资料，请打开资料库查看'));
+    const storage = item.backend || item.storage || 'local';
+    const serverHistory = item.storageOrigin === 'server-history' ||
+      (options.remote && storage === 'local' && !String(item.id).startsWith('local-'));
+    const payload = { itemId: item.id, storage, query: item.filename || item.title || '', revealOnly: options.preview !== true,
+      ...(serverHistory ? { storageOrigin: 'server-history' } : {}) };
+    try {
+      const result = global.WorkspaceHost?.open ? await global.WorkspaceHost.open('library', payload)
+        : global.openLibraryPanel ? await global.openLibraryPanel(payload) : false;
+      if (result === false) throw Error(tx('暂时无法打开资料库，请稍后重试'));
+      return true;
+    } catch (error) {
+      if (error?.message === 'SEARCH_LIBRARY_UNAVAILABLE') throw Error(tx('未找到已保存的资料，可能已移动或删除'));
+      throw error;
+    }
+  }
   function requirementLabel(job) {
     return job?.status === 'saved' ? '已保存' : job?.status === 'saving' ? '正在保存…' : job?.status === 'error'
       ? (/源文件已丢失/.test(outputError(job)) ? '文件丢失' : '重试') : '';
@@ -131,26 +164,29 @@
   function button(file, ref, attr = 'data-library-output') {
     if (!canSave(file)) return '';
     const job = lookup(ref, file);
-    const requirement = attr === 'data-rq-library';
-    const preview = !requirement && job?.status === 'saved';
+    const requirement = attr === 'data-rq-library' || attr === 'data-rq-bundle-library';
+    const chat = attr === 'data-library-output';
+    const preview = !requirement && !chat && job?.status === 'saved';
     const label = preview ? tx('预览') : job?.status === 'saved' ? (requirement ? '已保存到本机资料库' : '已保存到资料库') : job?.status === 'saving' ? '正在保存到资料库…' : job?.status === 'error' ? '重试保存' : (requirement ? '保存到本机资料库' : '保存到资料库');
-    const title = requirement && job?.status === 'error' ? outputError(job) + '；点击重试' : label;
-    const markup = '<button type="button" class="library-save-action' + (job?.status === 'saved' ? ' is-saved is-preview' : job?.status === 'error' && requirement ? ' is-error' : '') + '" data-library-save-key="' + esc(outputKey(ref, file)) + '" data-library-version="' + esc(version(file)) + '" ' + attr + '="' + esc(key(file)) + '" data-library-ref="' + esc(ref || '') +
-      '"' + (job?.status === 'saving' ? ' disabled aria-busy="true"' : '') + ' title="' + esc(preview ? label : title) + '" aria-label="' + esc(preview ? label : title) + '">' + (preview ? PREVIEW_ICON : job?.status === 'saved' ? SAVED_ICON : ICON) + '<span class="library-save-label">' + (requirement ? requirementLabel(job) : label) + '</span></button>';
+    const title = chat && job?.status === 'saved' ? '已保存到资料库，点击查看' :
+      job?.status === 'error' ? outputError(job) + '；点击重试' : label;
+    const markup = '<button type="button" class="library-save-action' + (job?.status === 'saved' ? ' is-saved' + (preview ? ' is-preview' : '') : job?.status === 'error' ? ' is-error' : '') + '" data-library-save-key="' + esc(outputKey(ref, file)) + '" data-library-version="' + esc(version(file)) + '" ' + attr + '="' + esc(key(file)) + '" data-library-ref="' + esc(ref || '') +
+      '"' + (job?.status === 'saving' ? ' disabled aria-busy="true"' : '') + ' title="' + esc(tx(preview ? label : title)) + '" aria-label="' + esc(tx(preview ? label : title)) + '">' + (preview ? PREVIEW_ICON : job?.status === 'saved' ? SAVED_ICON : ICON) + '<span class="library-save-label">' + esc(tx(requirement ? requirementLabel(job) : label)) + '</span></button>';
     return requirement ? '<span class="rq-library-save">' + markup + '<span class="rq-library-error" role="status"' +
       (job?.status === 'error' ? '' : ' hidden') + '>' + (job?.status === 'error' ? esc(outputError(job)) : '') + '</span></span>' : markup;
   }
   function buttonState(node, job) {
     if (!node) return;
-    const requirement = node.dataset?.rqLibrary != null;
-    const preview = !requirement && job.status === 'saved';
+    const requirement = node.dataset?.rqLibrary != null || node.dataset?.rqBundleLibrary != null;
+    const chat = node.dataset?.libraryOutput != null;
+    const preview = !requirement && !chat && job.status === 'saved';
     const label = preview ? tx('预览') : job.status === 'saved' ? '已保存到资料库' : job.status === 'saving' ? '正在保存到资料库…' : job.status === 'error' ? '重试保存' : '保存到资料库';
     node.disabled = job.status === 'saving'; node.setAttribute('aria-busy', String(job.status === 'saving'));
     node.classList.toggle('is-saved', job.status === 'saved');
     node.classList.toggle('is-preview', preview);
     node.innerHTML = (preview ? PREVIEW_ICON : job.status === 'saved' ? SAVED_ICON : ICON) + '<span class="library-save-label">' + esc(tx(requirement ? requirementLabel(job) : label)) + '</span>';
-    node.classList.toggle('is-error', requirement && job.status === 'error');
-    const title = preview ? label : requirement && job.status === 'error' ? outputError(job) + '；点击重试' : requirement && job.status === 'saved' ? '已保存到本机资料库' : label;
+    node.classList.toggle('is-error', job.status === 'error');
+    const title = preview ? label : chat && job.status === 'saved' ? '已保存到资料库，点击查看' : job.status === 'error' ? outputError(job) + '；点击重试' : requirement && job.status === 'saved' ? '已保存到本机资料库' : label;
     node.title = tx(title); node.setAttribute('aria-label', tx(title));
     const error = requirement && node.parentElement?.querySelector('.rq-library-error');
     if (error) { error.hidden = job.status !== 'error'; error.textContent = job.status === 'error' ? outputError(job) : ''; }
@@ -175,6 +211,7 @@
     // deliverable and the files stay in the workspace/package.
     const hasWebsiteOutput = Boolean(latest && (files || []).some(file =>
       file.changedInTurn && isWebsiteFile(file)));
+    const isArchive = file => file.kind === 'archive' || /\.zip$/i.test(String(file.name || file.relative || file.path || ''));
     return (files || []).filter(file => {
       const explicit = linked.has(key(file));
       const currentPrimary = Boolean(latest && file.changedInTurn &&
@@ -187,7 +224,7 @@
       return file.primary !== false && (explicit || currentPrimary) && canSave(file) &&
         !file.processEvidence && (!currentPrimary || !file.pluginDraft) &&
         !rendered.has(key(file));
-    });
+    }).sort((left, right) => Number(isArchive(right)) - Number(isArchive(left)));
   }
   async function saveOutput(ref, file, node) {
     if (!canSave(file) || !global.SoduWorkAPI?.uploadLibraryOutput) return false;
@@ -198,12 +235,14 @@
     job = outputs.get(id);
     if (job?.status === 'saved') {
       buttonState(node, job);
-      if (node && node.dataset?.rqLibrary == null) previewSaved(node, capturedFile, capturedRef);
+      if (node?.dataset?.libraryOutput != null) {
+        try { await openSavedItem(job.result?.item); } catch (error) { say(error.message); }
+      } else if (node && node.dataset?.rqLibrary == null && node.dataset?.rqBundleLibrary == null) previewSaved(node, capturedFile, capturedRef);
       return true;
     }
     if (!job || job.status === 'error' || job.status === 'new') {
       // Requirement attachments must not inherit an unrelated open chat.
-      const capturedSource = capturedFile.taskId && capturedFile.attachmentId ? null : conversationSource();
+      const capturedSource = capturedFile.taskId && (capturedFile.attachmentId || capturedFile.deliveryBundle) ? null : conversationSource();
       job = { scope: scope(), status: 'new', listeners: new Set(), ref: capturedRef, file: capturedFile,
         operation: () => global.SoduWorkAPI.uploadLibraryOutput(capturedRef, capturedFile, '', capturedSource) };
       outputs.set(id, job);
@@ -296,12 +335,24 @@
         indexed.set(JSON.stringify([ref, key(file), version(file)]), { scope: scope(), file: { ...file } });
       });
       const signature = JSON.stringify([ref, available.map(file => [identity(file), file.name || file.relative || '', file.contentType || ''])]);
-      if (group.dataset.libraryFiles !== signature) group.innerHTML = available.map(file => {
+      if (group.dataset.libraryFiles !== signature) {
+        const expanded = group.querySelector('.noutput-library-more')?.open;
+        const rows = available.map(file => {
         const fileKey = key(file);
         const fileName = file.name || file.relative || '';
         const fileIcon = global.SoduWorkLibraryFileIcons?.markup?.({ filename: fileName, contentType: file.contentType }) || '<span class="noutput-library-extension" aria-hidden="true">' + esc(fileName.split('.').pop().toUpperCase().slice(0, 5)) + '</span>';
         return '<div class="noutput-library-row"><span class="noutput-library-file-icon" aria-hidden="true">' + fileIcon + '</span><button type="button" class="noutput-library-name" data-open-app="' + esc(fileKey) + '" data-user-content title="打开 ' + esc(fileName) + '">' + esc(fileName) + '</button>' + button(file, ref) + '</div>';
-      }).join('');
+        });
+        const taskIds = new Set(available.map(file => file.taskId).filter(Boolean));
+        const bundle = available.length >= 2 && taskIds.size === 1 && available.every(file => file.taskId)
+          ? '<button type="button" class="noutput-library-bundle" data-library-bundle="' + esc([...taskIds][0]) +
+            '" data-library-bundle-ids="' + esc(JSON.stringify(available.map(file => file.attachmentId))) + '">交付物.zip</button>' : '';
+        group.innerHTML = bundle + rows.slice(0, 3).join('') + (rows.length > 3
+          ? '<details class="noutput-library-more"><summary><span class="nfiles-expand-label">' + esc(tx('更多')) +
+            '</span><span class="nfiles-collapse-label">' + esc(tx('收起')) + '</span></summary>' + rows.slice(3).join('') + '</details>' : '');
+        const more = group.querySelector('.noutput-library-more');
+        if (expanded && more) more.open = true;
+      }
       group.dataset.libraryFiles = signature;
       if (group.parentElement !== message) message.appendChild(group);
     }
@@ -311,8 +362,28 @@
     const ref = node.dataset.libraryRef || '', item = indexed.get(JSON.stringify([ref, node.dataset.libraryOutput, node.dataset.libraryVersion]));
     if (!item || item.scope !== scope()) { say('当前成果暂时无法上传到资料库'); return Promise.resolve(false); }
     const job = outputs.get(outputKey(ref, item.file));
-    if (job?.status === 'saved') { buttonState(node, job); previewSaved(node, item.file, ref); return Promise.resolve(true); }
+    if (job?.status === 'saved') {
+      buttonState(node, job);
+      return openSavedItem(job.result?.item).catch(error => { say(error.message); return false; });
+    }
     return saveOutput(ref, item.file, node);
+  }
+  async function downloadBundle(node) {
+    if (!node || node.disabled) return;
+    const owner = scope(), taskId = node.dataset.libraryBundle;
+    node.disabled = true;
+    try {
+      const ids = JSON.parse(node.dataset.libraryBundleIds || '[]');
+      const trace = await global.SoduWorkAPI.taskTrace(taskId);
+      if (owner !== scope() || !node.isConnected) return;
+      const delivery = trace?.delivery || trace?.card?.delivery;
+      const artifact = delivery?.artifact;
+      const files = (delivery?.manifest || artifact?.manifest)?.files || [];
+      if (!artifact?.id || !ids.length || ids.length !== files.length || ids.some(id => !files.some(file => file.id === id)))
+        throw Error('交付版本已变化，请刷新需求后下载');
+      await global.SoduWorkAPI.downloadArtifactsZip(taskId, trace.task?.title || '交付物', artifact.id);
+    } catch (error) { if (owner === scope()) say(error.message || '交付压缩包下载失败'); }
+    finally { node.disabled = false; }
   }
   global.addEventListener?.('soduwork-data-scope-changed', () => { revision++; inputs = new WeakMap(); outputs.clear(); indexed.clear(); });
   global.addEventListener?.('soduwork-library-changed', () => {
@@ -330,6 +401,6 @@
     }
     return [...ids];
   }
-  global.LibraryTransfer = { trackFile, fileStatus, retry, canSave, button, saveOutput, decorateOutputs, saveDecorated, bindSession, savedItemIds,
+  global.LibraryTransfer = { trackFile, fileStatus, retry, canSave, button, saveOutput, decorateOutputs, saveDecorated, downloadBundle, bindSession, savedItemIds, openSavedItem,
     revision: () => revision, _selectOutputFiles: selectOutputFiles };
 })(typeof window !== 'undefined' ? window : globalThis);

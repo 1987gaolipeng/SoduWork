@@ -7,6 +7,21 @@ import { messages } from '../src/locales/messages.js'
 import { dictionary } from '../src/locales/shell.js'
 import { getLocale, setLocale, normalizeLocale, translateText as tx, localeMap, localeOptions, subscribeLocale, useLocale } from '../src/i18n.js'
 import { count, duration, when, calendarTrend } from '../src/screens/usage-center-format.js'
+import { serverMessage } from '../src/i18n.js'
+
+test('server descriptors localize templates while preserving business names and legacy diagnostics', () => {
+  const names = '保存 {count} / 日本語 <script>'
+  for (const locale of ['zh-CN', 'en-US', 'ja-JP', 'ko-KR']) {
+    const text = serverMessage({key: 'plugin.mcp.missing', params: { names }}, '', locale)
+    assert.ok(text.endsWith(names))
+    assert.equal(serverMessage('保存', '', locale), '保存')
+    assert.equal(serverMessage({key: 'future.unknown', fallback: '原始诊断'}, '', locale), '原始诊断')
+    assert.equal(serverMessage({key: 'constructor'}, 'raw', locale), 'raw')
+    assert.equal(serverMessage(null, 'legacy detail', locale), 'legacy detail')
+  }
+  assert.equal(serverMessage({key: 'plugin.skills.ready', params: {count: 3, bundled: 2}}, '', 'en-US'),
+    '3 skills ready; 2 pinned with the plugin.')
+})
 
 test('normalizes supported languages and safely falls back', () => {
   assert.equal(getLocale(), 'en-US')

@@ -146,6 +146,18 @@ test('desktop authorization stays in the trusted main process and local machine 
   assert.match(panelSource, /安装并测通/);
 });
 
+test('desktop Runner ignores inherited identities, Hub and profile overrides from other installations', () => {
+  const source = { PATH: 'fixture-path', SODUWORK_HUB: 'https://other.invalid', SODUWORK_CLIENT_ID: 'installed-client',
+    SODUWORK_DATA_ROOT: 'C:/installed-private-profile', SODUWORK_WORK_ROOT: 'C:/other-work',
+    SODUWORK_RUNNER_ID: 'installed-runner', SODUWORK_RUNNER_KEY: 'other-control-key', SODUWORK_RUNNER_TOKEN: 'other-token',
+    SODUWORK_DEVICE_SECRET: 'old-device-secret', soduwork_device_secret: 'case-alias-secret',
+    SODUWORK_RUNNER_TAGS: 'other-environment', SODUWORK_RUNNER_MAX_CONCURRENT: '1',
+    SODUWORK_HUB_HTTP_BASE: 'https://other-download.invalid' };
+  const original = { ...source }, env = runtime._runnerEnv(source, 'current-instance-secret');
+  assert.deepEqual(env, { PATH: 'fixture-path', SODUWORK_DEVICE_SECRET: 'current-instance-secret', SODUWORK_SKILL_ROOTS: '' });
+  assert.deepEqual(source, original);
+});
+
 test('all Runner-backed agents quarantine private tool protocol before rendering it', () => {
   const source = fs.readFileSync(
     path.join(__dirname, '..', 'main', 'agent-runtime', 'runner-adapter.js'), 'utf8');

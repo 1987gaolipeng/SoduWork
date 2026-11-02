@@ -26,6 +26,7 @@
   let nativeLoaded = '';
   let loadSeq = 0;
   let options = {};
+  let offModels = null;
   let searchQuery = '';
   let nativeView = 'effort';
 
@@ -581,6 +582,8 @@
     // Reuse that request; a newly mounted draft with no pending load still
     // refreshes the directory to pick up settings changed elsewhere.
     // Native discovery needs the bridge first supplied by bind.
+    offModels?.();
+    offModels = api()?.onModelsChanged?.(() => { void refresh(true); }) || null;
     const needsNativeBridge = runtime().id === 'codex' && !hadModelBridge;
     refresh(needsNativeBridge || loading?.scope !== loadContext().key);
   }
@@ -653,6 +656,13 @@
   };
   global.addEventListener?.('soduwork-data-scope-changed', scopeChanged);
   global.addEventListener?.('soduwork-device-auth', scopeChanged);
+  // Hubs without model-change push still converge while the composer is visible.
+  const refreshVisibleModels = () => {
+    const button = document.getElementById('cpModelBtn');
+    if (button?.isConnected && button.getClientRects().length && document.visibilityState !== 'hidden' && !loading) void refresh(true);
+  };
+  global.addEventListener?.('focus', refreshVisibleModels);
+  global.setInterval?.(refreshVisibleModels, 60000);
   global.addEventListener?.('resize', position);
   if (typeof module !== 'undefined' && module.exports) module.exports = global.ComposeModelPicker;
 })(typeof window !== 'undefined' ? window : globalThis);

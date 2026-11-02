@@ -184,7 +184,8 @@ class AcceptanceReviewTests(unittest.IsolatedAsyncioTestCase):
         self.artifact.manifest = {**self.artifact.manifest, "primary": [{"id": "current"}]}
         await self.session.commit()
         value = await self.context()
-        self.assertEqual(set(value["attachmentIds"]), {"input", "current"})
+        self.assertEqual(set(value["attachmentIds"]), {"current"})
+        self.assertIn("input", {row["id"] for row in value["optionalAttachments"]})
         self.assertTrue(all("ticket=" in row["url"] for row in value["attachments"]))
 
     async def test_team_visibility_does_not_grant_acceptance_evidence(self):
@@ -224,3 +225,88 @@ class AcceptanceReviewTests(unittest.IsolatedAsyncioTestCase):
             await api.auto_review_task_artifact(self.task.id, self.body(), self.client, self.session)
         self.assertEqual(caught.exception.status_code, 422)
 
+    async def test_review_bundle_uses_only_fixed_deliverables_and_keeps_context_read_only(self):
+        import hashlib
+        import io
+        import zipfile
+        from app.api.delivery import artifacts_zip
+        contents = {'html': b'<html><body>Final</body></html>', 'css': b'body{color:red}'}
+        rows = [models.Attachment(id=key, task_id=self.task.id,
+                    filename='index.html' if key == 'html' else 'assets/style.css',
+                    content_type='text/html' if key == 'html' else 'text/css',
+                    size=len(data), role='output', storage_key=key, uploaded_by='agent:pi',
+                    evidence_meta={'sha256': hashlib.sha256(data).hexdigest(), 'verification': {'state':'passed'}})
+                for key, data in contents.items()]
+        rows += [models.Attachment(id=key, task_id=self.task.id, filename=key+'.png',
+                    content_type='image/png', size=4, role=role, storage_key=key)
+                 for key, role in [('capture','verification'),('process','process'),('input','input')]]
+        self.session.add_all(rows)
+        manifest = {**self.artifact.manifest, 'primary':[{'id':'html'}], 'supporting':[{'id':'css'}]}
+        self.artifact.manifest = manifest
+        await self.session.commit()
+        before = len((await self.session.execute(select(models.Attachment))).scalars().all())
+        value = await self.context()
+        self.assertEqual(set(value['attachmentIds']), {'html','css'})
+        self.assertEqual({row['id'] for row in value['optionalAttachments']}, {'capture','process','input'})
+        self.assertEqual(value['deliveryBundle']['artifactVersionId'],self.artifact.id)
+        self.assertEqual(value['deliveryBundle']['fileCount'],2)
+        with patch('app.services.storage.get',side_effect=lambda key, backend: contents[key]):
+            response = await artifacts_zip(self.task.id,self.artifact.id,self.client,self.session)
+            data = b''.join([chunk async for chunk in response.body_iterator])
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            self.assertEqual(set(archive.namelist()), {'index.html','assets/style.css'})
+            self.assertEqual(archive.read('index.html'), contents['html'])
+        self.assertEqual(response.headers['X-Artifact-SHA256'],hashlib.sha256(data).hexdigest())
+        self.assertEqual(before,len((await self.session.execute(select(models.Attachment))).scalars().all()))
+        self.assertEqual(self.artifact.manifest,manifest)
+
+    async def test_missing_frozen_file_never_silently_reduces_review_input(self):
+        self.artifact.manifest = {**self.artifact.manifest,'primary':[{'id':'deleted'}]}
+        await self.session.commit()
+        with self.assertRaises(HTTPException) as caught:
+            await self.context()
+        self.assertEqual(caught.exception.status_code,502)
+    async def test_frozen_legacy_role_default_remains_a_deliverable(self):
+        self.session.add(models.Attachment(id='legacy-fixed',task_id=self.task.id,
+            filename='screenshot.png',role='input',uploaded_by='agent:legacy',size=4,storage_key='old'))
+        self.artifact.manifest={**self.artifact.manifest,'primary':[{'id':'legacy-fixed'}]}
+        await self.session.commit()
+        self.assertEqual((await self.context())['attachmentIds'],['legacy-fixed'])
+
+
+class DeliveryCategoryApiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_windows_paths_keep_explicit_delivery_categories(self):
+        import io
+        from fastapi import UploadFile
+        from unittest.mock import MagicMock
+
+        session = MagicMock()
+        session.execute = AsyncMock(return_value=MagicMock())
+        task = models.Task(id='category-task', owner_client_id='category-client')
+        session.execute.return_value.scalar_one_or_none.return_value = task
+        with patch('app.services.conversation_turns.deliver_artifacts', new_callable=AsyncMock) as ingest:
+            await api.conversation_task_delivery(
+                task.id, files=[UploadFile(io.BytesIO(b'final report'), filename='test-report.txt')],
+                conversation_id='conversation', turn_id='turn', paths=['assets\\test-report.txt'],
+                categories=['primary'], model='test', outcome='completed',
+                client=models.Client(id='category-client'), session=session)
+        self.assertEqual(ingest.await_args.kwargs['categories'], {'assets/test-report.txt': 'primary'})
+        self.assertEqual(ingest.await_args.kwargs['files'][0][0], 'assets/test-report.txt')
+
+    async def test_invalid_category_cannot_reach_ingestion(self):
+        import io
+        from fastapi import UploadFile
+        from unittest.mock import MagicMock
+
+        session = MagicMock()
+        session.execute = AsyncMock(return_value=MagicMock())
+        session.execute.return_value.scalar_one_or_none.return_value = models.Task(id='category-task')
+        with patch('app.services.conversation_turns.deliver_artifacts', new_callable=AsyncMock) as ingest:
+            with self.assertRaises(HTTPException) as caught:
+                await api.conversation_task_delivery(
+                    'category-task', files=[UploadFile(io.BytesIO(b'final'), filename='result.txt')],
+                    conversation_id='conversation', turn_id='turn', paths=['result.txt'],
+                    categories=['unknown'], model='test', outcome='completed',
+                    client=models.Client(id='category-client'), session=session)
+        self.assertEqual(caught.exception.status_code, 422)
+        ingest.assert_not_awaited()

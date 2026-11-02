@@ -1,4 +1,4 @@
-"""Signed upgrade manifests remain consumable across installer brand changes."""
+"""Signed SoduWork upgrade manifests remain consumable by supported clients."""
 import base64
 from datetime import datetime, timezone
 import hashlib
@@ -9,7 +9,8 @@ import unittest
 from unittest.mock import patch
 import uuid
 
-os.environ['DATABASE_URL'] = 'sqlite+aiosqlite:///:memory:'
+_TEST_DB = Path(tempfile.gettempdir()) / f'soduwork-brand-suite-{os.getpid()}.db'
+os.environ['DATABASE_URL'] = 'sqlite+aiosqlite:///' + _TEST_DB.as_posix()
 os.environ.setdefault('AUTH_SECRET', 'isolated-brand-test-secret')
 os.environ.setdefault('ADMIN_PASS', 'isolated-brand-test-password')
 
@@ -25,7 +26,7 @@ from app.models import Client, ClientRelease, ClientUpdateAttempt, User
 from app.services import client_updates as contract
 
 
-class BrandCompatibilityTests(unittest.IsolatedAsyncioTestCase):
+class ClientUpdateTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.device_id = 'device'
         self.engine = create_async_engine('sqlite+aiosqlite:///:memory:')
@@ -50,19 +51,19 @@ class BrandCompatibilityTests(unittest.IsolatedAsyncioTestCase):
             session.add(Client(id='device', name='fixture', platform='win32', app_version='1.12.79'))
             for platform, formats in [('win32', ['exe']), ('linux', ['deb', 'rpm', 'tar.gz'])]:
                 for fmt in formats:
-                    for prefix in ['SoduWork']:
-                        suffix = 'Setup.exe' if platform == 'win32' else 'linux.' + fmt
-                        name = f'{prefix}-1.12.82-{suffix}'
-                        row = ClientRelease(id=str(uuid.uuid5(uuid.NAMESPACE_URL, name)),
-                            version='1.12.82', channel='stable', platform=platform, arch='x64',
-                            artifact_name=name, artifact_path=name, artifact_size=len(payload),
-                            sha256=hashlib.sha256(payload).hexdigest(), signature='', key_id='brand-fixture',
-                            enabled=True, mandatory=False, min_version='', notes='',
-                            created_at=datetime(2026, 10, 15, tzinfo=timezone.utc))
-                        row.signature = contract.sign(contract.manifest_payload(row), private)
-                        (root / name).write_bytes(payload)
-                        self.rows[platform, fmt, prefix] = row
-                        session.add(row)
+                    prefix = 'SoduWork'
+                    suffix = 'Setup.exe' if platform == 'win32' else 'linux.' + fmt
+                    name = f'{prefix}-1.12.82-{suffix}'
+                    row = ClientRelease(id=str(uuid.uuid5(uuid.NAMESPACE_URL, name)),
+                        version='1.12.82', channel='stable', platform=platform, arch='x64',
+                        artifact_name=name, artifact_path=name, artifact_size=len(payload),
+                        sha256=hashlib.sha256(payload).hexdigest(), signature='', key_id='brand-fixture',
+                        enabled=True, mandatory=False, min_version='', notes='',
+                        created_at=datetime(2026, 10, 15, tzinfo=timezone.utc))
+                    row.signature = contract.sign(contract.manifest_payload(row), private)
+                    (root / name).write_bytes(payload)
+                    self.rows[platform, fmt, prefix] = row
+                    session.add(row)
             await session.commit()
         app = FastAPI()
         for router in [api.router, api.admin_router, download.router]:
@@ -95,20 +96,19 @@ class BrandCompatibilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
 
-    async def test_each_client_generation_gets_a_supported_signed_name(self):
-        for version in ['1.12.81']:
-            prefix = 'SoduWork'
-            self.device_id = 'device-' + version
-            async with self.sessions() as session:
-                session.add(Client(id=self.device_id, name='fixture', app_version=version))
-                await session.commit()
-            result = await self.check(version)
-            self.assertTrue(result['hasUpdate'])
-            self.assertEqual(result['manifest']['artifact']['name'], f'{prefix}-1.12.82-Setup.exe')
+    async def test_current_client_gets_a_supported_signed_name(self):
+        result = await self.check('1.12.81')
+        self.assertTrue(result['hasUpdate'])
+        self.assertEqual(result['manifest']['artifact']['name'], 'SoduWork-1.12.82-Setup.exe')
+
+    async def test_pre_soduwork_client_does_not_receive_a_current_installer(self):
+        result = await self.check('1.12.80')
+        self.assertFalse(result['hasUpdate'])
 
     async def test_unsupported_pending_manifest_is_not_returned(self):
-        result = await self.check('1.12.81')
-        self.assertEqual(result['manifest']['artifact']['name'], 'SoduWork-1.12.82-Setup.exe')
+        await self.check('1.12.81')
+        result = await self.check('1.12.79')
+        self.assertFalse(result['hasUpdate'])
 
     async def test_linux_keeps_format_and_brand_constraints_together(self):
         for fmt in ['deb', 'rpm', 'tar.gz']:
@@ -117,9 +117,8 @@ class BrandCompatibilityTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_no_supported_copy_means_no_invalid_update(self):
         async with self.sessions() as session:
-            for prefix in ['SoduWork']:
-                row = await session.get(ClientRelease, self.rows['win32', 'exe', prefix].id)
-                row.enabled = False
+            row = await session.get(ClientRelease, self.rows['win32', 'exe', 'SoduWork'].id)
+            row.enabled = False
             await session.commit()
         self.assertFalse((await self.check('1.12.81'))['hasUpdate'])
 

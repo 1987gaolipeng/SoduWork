@@ -110,5 +110,77 @@ class AttachmentOriginTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.collect(local=True), b"local plaintext")
 
 
+class RequirementReviewTests(AttachmentOriginTests):
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.session.add(models.User(id="reviewer", username="reviewer", is_active=True))
+        self.task = await self.session.get(models.Task, "task")
+        self.task.created_by = "reviewer"
+        self.task.work_routing = {"executionSubmissionMode": "auto",
+                                  "outputContract": {"kind": "office-artifact"}}
+        await self.session.commit()
+
+    async def pull(self, *, name="output/result.txt", settle=True, done=True, **status):
+        remote = SimpleNamespace(PREFIX=artifact_ingest.REMOTE_PREFIX,
+                                 fetch_attachment_for_sync=Mock(return_value=b"verified result"))
+        with patch.object(artifact_ingest, "last_dispatch_event", AsyncMock(return_value=None)), \
+             patch.object(artifact_ingest, "_by_ref_async", AsyncMock(return_value=remote)), \
+             patch.object(artifact_ingest, "_cfg_of", return_value={}), \
+             patch.object(storage, "put", return_value="local"), \
+             patch("app.services.code_delivery.notify_reviewer", new_callable=AsyncMock), \
+             patch("app.services.task_access.publish_task", new_callable=AsyncMock), \
+             patch("app.services.tasks.task_to_api_live", new_callable=AsyncMock, return_value={}):
+            return await artifact_ingest.pull_artifacts(self.session, "task", {}, {
+                "done": done, "attachments": [{"id": name, "filename": name}],
+                "identifier": "execution", "round": 1, **status,
+            }, ref="execution", settle=settle)
+
+    async def reviews(self):
+        return list((await self.session.scalars(select(automation_models.ApprovalRequest))).all())
+
+    async def test_completed_nested_document_opens_one_review_and_keeps_human_acceptance(self):
+        await self.pull()
+        await self.pull()
+        reviews = await self.reviews()
+        self.assertEqual(len(reviews), 1)
+        self.assertEqual(reviews[0].status, "pending")
+        self.assertEqual(reviews[0].action, "review")
+        self.assertEqual(self.task.status, "doing")
+        self.assertIsNone(self.task.reviewed_at)
+        from app.services import task_requirement_projection
+        api = (await task_requirement_projection.decorate_many(
+            self.session, [self.task], [{}]))[0]
+        self.assertEqual(api["requirementStage"], "reviewing")
+        versions = list((await self.session.scalars(select(automation_models.ArtifactVersion))).all())
+        self.assertEqual(len(versions), 1)
+        self.assertEqual(versions[0].manifest["primary"][0]["name"], "output/result.txt")
+
+    async def test_existing_receipt_is_reconciled_without_uploading_again(self):
+        await self.pull(settle=False)
+        self.assertEqual(await self.reviews(), [])
+        result = await self.pull()
+        self.assertEqual(result["files"], 0)
+        self.assertEqual(len(await self.reviews()), 1)
+        self.assertEqual(len(list((await self.session.scalars(select(models.Attachment))).all())), 1)
+
+    async def test_manual_submission_keeps_outputs_without_review(self):
+        self.task.work_routing = {**self.task.work_routing, "executionSubmissionMode": "manual"}
+        await self.session.commit()
+        await self.pull()
+        self.assertEqual(await self.reviews(), [])
+
+    async def test_partial_or_missing_output_does_not_open_review(self):
+        await self.pull(done=False)
+        self.assertEqual(await self.reviews(), [])
+        await self.pull(artifactsDropped=1)
+        self.assertEqual(await self.reviews(), [])
+
+    async def test_assets_and_evidence_alone_are_not_primary_deliverables(self):
+        for name in ("assets/theme.css", "assets/photo.png", "proof/result.txt", ".cache/result.txt"):
+            with self.subTest(name=name):
+                await self.pull(name=name)
+                self.assertEqual(await self.reviews(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

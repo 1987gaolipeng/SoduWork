@@ -110,7 +110,7 @@ for (const platform of ['windows', 'linux', 'macos']) {
     for (const item of record.artifacts) {
       assert.match(item.name, /^SoduWork-/);
       assert.deepEqual(fs.readFileSync(path.join(f.dist, item.name)), f.bytes);
-      assert.equal(fs.existsSync(path.join(f.dist, item.name.replace(/^SoduWork-/, 'SoduWork-'))), false);
+      assert.equal(fs.existsSync(path.join(f.dist, item.name)), true);
     }
     assert.equal(JSON.parse(fs.readFileSync(path.join(f.root, 'client/package.json'))).productName, 'SoduWork');
     f.run('inventory', platform); // Exact retries keep immutable bytes.
@@ -119,13 +119,13 @@ for (const platform of ['windows', 'linux', 'macos']) {
       const manifest = path.join(f.dist, 'macos-build.json');
       record.artifacts.push({ ...record.artifacts[0], name: 'SoduWork-9.9.1-mac-arm64.zip', format: 'zip' });
       fs.writeFileSync(manifest, JSON.stringify(record));
-      f.run('verify', platform, 'SoduWork', false);
+      f.run('verify', platform, 'OtherBrand', false);
       f.run('inventory', platform);
     }
-    f.run('inventory', platform, 'SoduWork', false);
-    f.run('verify', platform, 'SoduWork', false);
+    f.run('inventory', platform, 'OtherBrand', false);
+    f.run('verify', platform, 'OtherBrand', false);
     fs.appendFileSync(path.join(f.dist, record.artifacts[0].name), 'tampered');
-    f.run('verify', platform, 'SoduWork', false);
+    f.run('verify', platform, 'OtherBrand', false);
   });
 }
 
@@ -134,7 +134,7 @@ test('default release preserves the new brand and rejects arbitrary artifact pre
   f.run('inventory', 'windows');
   const record = JSON.parse(fs.readFileSync(path.join(f.dist, 'windows-build.json')));
   assert.equal(record.artifacts[0].name, 'SoduWork-9.9.1-Setup.exe');
-  assert.equal(fs.existsSync(path.join(f.dist, 'SoduWork-9.9.1-Setup.exe')), false);
+  assert.equal(fs.existsSync(path.join(f.dist, 'SoduWork-9.9.1-Setup.exe')), true);
   f.run('inventory', 'windows', '../outside', false);
 });
 

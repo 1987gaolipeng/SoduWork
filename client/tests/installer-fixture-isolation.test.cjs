@@ -7,7 +7,7 @@ const os = require('node:os');
 const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
 const { createRequire } = require('node:module');
-const productionGuids = Object.values(require('../distributions.json')).map(value => value.nsisGuid);
+const productionGuids = [require('../main/distribution.cjs').current().nsisGuid];
 
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'soduwork-update-e2e-registry-'));
@@ -19,7 +19,7 @@ async function fixture(t) {
   const source = await fs.readFile(entry, 'utf8'), fixtureRequire = createRequire(entry);
   const module = { exports: {} }; let invoked;
   vm.runInNewContext(source, { module, require: name => name === 'electron-builder'
-    ? { build: async options => { invoked = options; return []; } } : require(name) });
+    ? { build: async options => { invoked = options; return []; } } : fixtureRequire(name), process });
   const options = { config: { appId: 'com.soduwork.update.e2e.12345',
     directories: { output: path.join(root, 'dist') },
     nsis: { include: path.resolve(__dirname, '../build/installer.nsh') } } };
@@ -57,7 +57,7 @@ test('a copied production NSIS GUID is rejected before any fixture builder side 
   assert.equal(config.nsis.guid, f.options.config.nsis.guid);
 });
 
-test('fixtures without explicit GUID retain electron-builder appId derivation for brand migration', async t => {
+test('fixtures without explicit GUID retain electron-builder appId derivation', async t => {
   const f = await fixture(t);
   await f.build(f.options);
   const config = JSON.parse(await fs.readFile(f.invoked().config, 'utf8'));

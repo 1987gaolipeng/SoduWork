@@ -1,3 +1,4 @@
+import { ja as automationTemplatesJa, ko as automationTemplatesKo } from './automation-templates.js'
 import { ja as capabilityCatalogJa, ko as capabilityCatalogKo } from './capability-catalog.js'
 import { dictionary } from './shell.js'
 // High-value admin-shell translations for the additional locales. The complete
@@ -90,6 +91,6 @@ const ko = {
 const shellMessages = locale => Object.fromEntries(Object.entries(dictionary['zh-CN']).map(([key, source]) => [source, dictionary[locale][key]]))
 
 export const messagesByLocale = Object.freeze({
-  'ja-JP': Object.freeze({ ...shellMessages('ja-JP'), ...ja, ...connectorJa, ...cloudRunnerJa, ...modelJa, ...quotaJa, ...accessCatalogJa, ...operationsJa, ...governanceJa, ...insightsMetricsJa, ...usageCenterJa, ...modelRuntimeOverviewJa, ...capabilityCatalogJa }),
-  'ko-KR': Object.freeze({ ...shellMessages('ko-KR'), ...ko, ...connectorKo, ...cloudRunnerKo, ...modelKo, ...quotaKo, ...accessCatalogKo, ...operationsKo, ...governanceKo, ...insightsMetricsKo, ...usageCenterKo, ...modelRuntimeOverviewKo, ...capabilityCatalogKo }),
+  'ja-JP': Object.freeze({ ...shellMessages('ja-JP'), ...automationTemplatesJa, ...ja, ...connectorJa, ...cloudRunnerJa, ...modelJa, ...quotaJa, ...accessCatalogJa, ...operationsJa, ...governanceJa, ...insightsMetricsJa, ...usageCenterJa, ...modelRuntimeOverviewJa, ...capabilityCatalogJa }),
+  'ko-KR': Object.freeze({ ...shellMessages('ko-KR'), ...automationTemplatesKo, ...ko, ...connectorKo, ...cloudRunnerKo, ...modelKo, ...quotaKo, ...accessCatalogKo, ...operationsKo, ...governanceKo, ...insightsMetricsKo, ...usageCenterKo, ...modelRuntimeOverviewKo, ...capabilityCatalogKo }),
 });

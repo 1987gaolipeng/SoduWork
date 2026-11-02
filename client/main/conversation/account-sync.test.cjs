@@ -1,0 +1,356 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+test('unchanged local transcripts retain their revision across polling and reopen', async t => {
+  const session = Buffer.from(JSON.stringify({ typ: 'device', uid: 'alice', cid: 'desktop',
+    exp: 9999999999 })).toString('base64url') + '.' + 'a'.repeat(64);
+  const identity = { hub: 'http://hub.test', clientId: 'desktop', session };
+  const saved = new Map(), queued = new Map(), sent = [];
+  let clock = 1793440000000;
+  const view = { status: 'idle', messages: [
+    { id: 'legacy', role: 'user', text: 'Read this existing conversation' },
+    { id: 'reply', role: 'assistant', text: 'Original reply', done: true,
+      createdAt: '2026-10-31T07:00:00Z' },
+  ] };
+  const store = {
+    session: key => saved.get(key),
+    setSession: (key, value) => saved.set(key, JSON.parse(JSON.stringify(value))),
+    enqueue: job => queued.set(job.id, job), jobs: () => [...queued.values()],
+    ack: id => queued.delete(id), fail() {},
+  };
+  const options = { app: {}, store, now: () => clock, identityOf: async () => identity,
+    fetch: async (_identity, _url, request) => {
+      const body = JSON.parse(request.body);
+      sent.push(body);
+      return response({ ok: true, conversationId: 'account-1', sourceRevision: body.sourceRevision });
+    } };
+  const handle = { sessionId: 'native-1', snapshot: () => view,
+    historyRow: () => ({ title: 'Local conversation' }) };
+  const sync = require('./account-sync').create(options);
+  t.after(() => sync.close());
+  sync.bind(handle, identity);
+  await sync.flush();
+  clock += 30000;
+  await sync.flush();
+  assert.equal(sent.length, 1, 'polling must not invalidate a mobile continuation snapshot');
+  assert.equal(sent[0].messages[1].createdAt, '2026-10-31T07:00:00.000Z');
+  await sync.close();
+  const reopened = require('./account-sync').create(options);
+  t.after(() => reopened.close());
+  reopened.bind(handle, identity);
+  await reopened.flush();
+  assert.equal(sent.length, 1, 'reopening an unchanged local session must not change its revision');
+  view.messages[1].text = 'Updated reply';
+  await reopened.flush();
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].sourceRevision, sent[0].sourceRevision + 1);
+  assert.equal(sent[1].messages[0].createdAt, sent[0].messages[0].createdAt);
+  view.messages[1].deleted = true;
+  await reopened.flush();
+  assert.equal(sent[2].messages[1].deleted, true);
+  assert.equal(sent[2].sourceRevision, sent[1].sourceRevision + 1);
+  view.status = 'running';
+  await reopened.flush();
+  assert.equal(sent[3].state, 'responding');
+});
+
+test('a failed sync retries the same source revision and payload', async t => {
+  const session = Buffer.from(JSON.stringify({ typ: 'device', uid: 'alice', cid: 'desktop',
+    exp: 9999999999 })).toString('base64url') + '.' + 'a'.repeat(64);
+  const identity = { hub: 'http://hub.test', clientId: 'desktop', session };
+  const queued = new Map(), sent = [];
+  const sync = require('./account-sync').create({ app: {}, identityOf: async () => identity,
+    store: { session: () => null, setSession() {}, enqueue: job => queued.set(job.id, job),
+      jobs: () => [...queued.values()], ack: id => queued.delete(id), fail() {} },
+    fetch: async (_identity, _url, request) => {
+      sent.push(JSON.parse(request.body));
+      if (sent.length === 1) throw Error('offline');
+      return response({ ok: true, conversationId: 'account-1', sourceRevision: sent[1].sourceRevision });
+    } });
+  t.after(() => sync.close());
+  sync.bind({ sessionId: 'native-1', snapshot: () => ({ messages: [
+    { role: 'user', text: 'Stable request', sentAt: 1793440000000 },
+  ] }) }, identity);
+  assert.equal((await sync.flush()).pending, 1);
+  assert.equal((await sync.flush()).pending, 0);
+  assert.deepEqual(sent[1], sent[0]);
+});
+
+test('native Pi text blocks sync as visible replies without leaking reasoning or tool inputs', async t => {
+  const identity = { hub: 'http://hub.test', clientId: 'desktop', session: 'fixture' };
+  const queued = new Map(), sent = [];
+  const sync = require('./account-sync').create({ app: {}, identityOf: async () => identity,
+    store: { session: () => null, setSession() {}, enqueue: job => queued.set(job.id, job),
+      jobs: () => [...queued.values()], ack: id => queued.delete(id), fail() {} },
+    fetch: async (_identity, _url, request) => {
+      const body = JSON.parse(request.body); sent.push(body);
+      return response({ ok: true, conversationId: 'account-1', sourceRevision: body.sourceRevision });
+    } });
+  t.after(() => sync.close());
+  sync.bind({ sessionId: 'native-1', snapshot: () => ({ messages: [
+    { role: 'assistant', text: '', blocks: [
+      { kind: 'thinking', text: 'private reasoning' }, { kind: 'text', text: 'First paragraph' },
+      { kind: 'toolcall', text: 'private tool input' }, { kind: 'text', text: 'Second paragraph' },
+    ], done: true },
+  ] }) }, identity);
+  await sync.flush();
+  assert.equal(sent[0].messages[0].text, 'First paragraph\n\nSecond paragraph');
+  assert.equal(sent[0].messages[0].done, true);
+});
+
+function response(body, status = 200) {
+  return { ok: status >= 200 && status < 300, status,
+    async json() { return body; } };
+}
+
+test('only a dedicated task transcript publishes its task projection identity', async t => {
+  const identity = { hub: 'http://hub.test', clientId: 'desktop', session: 'fixture' };
+  const saved = new Map(), queued = new Map(), sent = [];
+  const view = { messages: [] };
+  const history = { title: 'Same title', taskId: 'task-one', taskIds: ['task-one'] };
+  const handle = { sessionId: 'native-task', snapshot: () => view, historyRow: () => history };
+  const sync = require('./account-sync').create({ app: {}, identityOf: async () => identity,
+    store: { session: key => saved.get(key), setSession: (key, value) => saved.set(key, value),
+      enqueue: job => queued.set(job.id, job), jobs: () => [...queued.values()],
+      ack: id => queued.delete(id), fail() {} },
+    fetch: async (_identity, _url, request) => {
+      const body = JSON.parse(request.body); sent.push(body);
+      return response({ ok: true, conversationId: 'account-task', sourceRevision: body.sourceRevision });
+    } });
+  t.after(() => sync.close());
+  sync.bind(handle, identity);
+  await sync.flush();
+  assert.equal(sent.at(-1).taskProjectionId, 'task-one');
+  view.messages = [{ role: 'user', text: 'task request', taskId: 'task-one' }];
+  await sync.flush();
+  assert.equal(sent.at(-1).taskProjectionId, 'task-one');
+  view.messages.push({ role: 'user', text: 'independent conversation' });
+  await sync.flush();
+  assert.equal(sent.at(-1).taskProjectionId, '');
+  view.messages = [];
+  history.taskIds.push('task-two');
+  await sync.flush();
+  assert.equal(sent.at(-1).taskProjectionId, '');
+  history.taskIds = ['task-one'];
+  await sync.flush();
+  assert.equal(sent.at(-1).taskProjectionId, 'task-one');
+  handle.acceptanceSession = { taskId: 'task-one' };
+  await sync.flush();
+  assert.equal(sent.at(-1).taskProjectionId, '');
+});
+
+function fixture() {
+  let version = 1;
+  const calls = [];
+  const store = {
+    session() { return {}; },
+    setSession() {},
+    enqueue() {},
+    jobs() { return []; },
+    ack() {},
+    fail() {},
+  };
+  const fetch = async (_identity, url) => {
+    calls.push(String(url));
+    const conversation = {
+      id: 'acct-1', sourceClientId: 'desktop', sourceSessionId: 'native-1',
+      title: version === 1 ? '第一版' : '已更新', state: 'idle',
+      updatedAt: `2026-10-31T00:0${version}:00Z`, canSend: false,
+    };
+    const messages = version === 1
+      ? [{ id: 'm1', position: 0, role: 'user', text: '第一条', createdAt: conversation.updatedAt, done: true }]
+      : [{ id: 'm1', position: 0, role: 'user', text: '第一条', createdAt: conversation.updatedAt, done: true },
+        { id: 'm2', position: 1, role: 'assistant', text: '第二条', createdAt: conversation.updatedAt, done: true }];
+    if (String(url).includes('/source')) return response({ conversation });
+    return response({ conversation, items: messages, cursor: messages.length,
+      hasMore: false });
+  };
+  const sync = require('./account-sync').create({ app: {}, store,
+    identityOf: async () => require('../../tests/helpers/platform-session-fixture.cjs').identity(),
+    localIdentityOf: async () => require('../../tests/helpers/platform-session-fixture.cjs').identity(),
+    fetch, realtime: false,
+  });
+  return { sync, calls, advance() { version = 2; } };
+}
+
+test('an open account projection refreshes its transcript after a realtime invalidation', async () => {
+  const f = fixture();
+  const view = await f.sync.openProjection('acct-1');
+  assert.deepEqual(view.snapshot().messages.map(item => item.id), ['m1']);
+  f.advance();
+  await view.refresh();
+  assert.deepEqual(view.snapshot().messages.map(item => item.id), ['m1', 'm2']);
+  assert.equal(view.historyRow().title, '已更新');
+});
+
+test('a cache miss can resolve a directory row without downloading its transcript', async () => {
+  const f = fixture();
+  const row = await f.sync.row('acct-1');
+  assert.equal(row.id, 'acct-1');
+  assert.equal(f.calls.length, 1);
+  assert.match(f.calls[0], /\/source$/);
+});
+
+test('fresh and cached account history retain authenticated ownership through account changes', async t => {
+  const { identity } = require('../../tests/helpers/platform-session-fixture.cjs');
+  const { connectionScope } = require('../platform-connections/runtime.cjs');
+  let current = identity(), requests = 0;
+  const sync = require('./account-sync').create({ app: {}, store: { jobs: () => [] }, identityOf: async () => current,
+    fetch: async () => { requests++; return response({ items: [{ id: 'acct-1', sourceSessionId: 'native-1',
+      sourceClientId: 'other-device', title: 'Review' }], hasMore: false }); } });
+  t.after(() => sync.close());
+  for (let i = 0; i < 2; i++) {
+    const row = (await sync.history()).chats[0];
+    assert.equal(row.accountProjection, true);
+    assert.equal(row.owner, connectionScope(current));
+  }
+  assert.equal(requests, 1);
+  current = identity('two');
+  assert.equal((await sync.history()).chats[0].owner, connectionScope(current));
+  assert.equal(requests, 2);
+});
+
+test('late socket refreshes cannot publish another account or survive shutdown', async t => {
+  const { identity } = require('../../tests/helpers/platform-session-fixture.cjs');
+  const previous = global.WebSocket, sockets = [], events = [];
+  global.WebSocket = class { constructor() { sockets.push(this); } close() {} };
+  t.after(() => { global.WebSocket = previous; });
+  let current = identity(), release;
+  const sync = require('./account-sync').create({ app: {}, store: { jobs: () => [] }, realtime: true,
+    identityOf: async () => current, fetch: async () => {
+      if (release === null) await new Promise(resolve => { release = resolve; });
+      return response({ items: [{ id: 'acct-1', sourceSessionId: 'native-1', sourceClientId: 'other' }], hasMore: false });
+    } });
+  t.after(() => sync.close());
+  sync.onChange((id, row, projection) => events.push({ id, row, projection }));
+  await sync.history();
+  release = null;
+  sockets[0].onmessage({ data: JSON.stringify({ type: 'account-conversation', conversationId: 'acct-1' }) });
+  await new Promise(resolve => setImmediate(resolve));
+  current = identity('two');
+  release();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(events.length, 0);
+  await sync.history({ force: true });
+  release = null;
+  sockets.at(-1).onmessage({ data: JSON.stringify({ type: 'account-conversation', conversationId: 'acct-1' }) });
+  await new Promise(resolve => setImmediate(resolve));
+  await sync.close(); release();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(events.length, 0);
+});
+
+test('cloud and account projections never become new local sync sources on reopen', async t => {
+  const jobs = [];
+  const session = Buffer.from(JSON.stringify({ typ: 'device', uid: 'alice', cid: 'desktop',
+    exp: 9999999999 })).toString('base64url') + '.' + 'a'.repeat(64);
+  const identity = { hub: 'http://hub.test', clientId: 'desktop', session };
+  const sync = require('./account-sync').create({ app: {}, identityOf: async () => identity,
+    store: { session: () => null, setSession() {}, enqueue: job => jobs.push(job), jobs: () => [] } });
+  t.after(() => sync.close());
+  let snapshot = { messages: [{ role: 'user', text: 'Original local input' }], status: 'idle' };
+  let change;
+  const handle = { sessionId: 'native-1', snapshot: () => snapshot,
+    historyRow: () => ({ title: 'Same title' }), on(fn) { change = fn; return () => {}; } };
+  assert.ok(sync.bind(handle, identity));
+  assert.equal(jobs.length, 1, 'ordinary local conversations still synchronize');
+  snapshot = { ...snapshot, cloudHandoff: { phase: 'committed' } };
+  change();
+  await sync.flush();
+  assert.equal(jobs.length, 1, 'handoff stops copying Hub-owned output into local sync');
+  for (const projection of [
+    { ...handle, passiveCloudView: true },
+    handle,
+    { ...handle, snapshot: () => ({ execution: { accountConversation: true } }) },
+  ]) assert.equal(sync.bind(projection, identity), null);
+  assert.equal(jobs.length, 1);
+});
+
+function sourceFixture(messages = [{ id: 'm1', role: 'user', text: 'hello', done: true }], status = 'idle') {
+  let current = messages;
+  let listener = null;
+  const jobs = [];
+  let saved = {};
+  const store = {
+    session() { return { ...saved }; },
+    setSession(_key, value) { saved = { ...value }; },
+    enqueue(job) { jobs.push(job); return job; },
+    jobs() { return jobs.slice(); },
+    ack(id) { const index = jobs.findIndex(item => item.id === id); if (index >= 0) jobs.splice(index, 1); },
+    fail() {},
+  };
+  const handle = {
+    sessionId: 'native-source-1',
+    accountSync: null,
+    snapshot() { return { title: 'source', status, messages: current }; },
+    historyRow() { return { title: 'source', state: status }; },
+    on(fn) { listener = fn; return () => { listener = null; }; },
+  };
+  const sync = require('./account-sync').create({ app: {}, store,
+    identityOf: async () => ({ hub: 'http://hub.test', clientId: 'desktop', session: 'session' }),
+    localIdentityOf: async () => ({ hub: 'http://hub.test', clientId: 'desktop', session: 'session' }),
+    realtime: false,
+  });
+  return {
+    sync, handle, jobs,
+    setMessages(value) { current = value; },
+    emit() { listener?.(); },
+  };
+}
+
+test('unchanged streaming notifications do not enqueue duplicate checkpoints', async () => {
+  const f = sourceFixture();
+  f.sync.bind(f.handle, { hub: 'http://hub.test', clientId: 'desktop', session: 'session' });
+  assert.equal(f.jobs.length, 1);
+  const first = f.jobs[0];
+  f.emit(); f.emit();
+  await new Promise(resolve => setTimeout(resolve, 240));
+  assert.equal(f.jobs.length, 1);
+  assert.equal(f.jobs[0].body.sourceRevision, 1);
+  assert.equal(f.jobs[0].body.snapshotComplete, true);
+  assert.notEqual(first.body.sourceRevision, undefined);
+  await f.sync.close();
+});
+
+test('a changed checkpoint supersedes content without using revision in its digest', async () => {
+  const f = sourceFixture();
+  f.sync.bind(f.handle, { hub: 'http://hub.test', clientId: 'desktop', session: 'session' });
+  f.setMessages([{ id: 'm1', role: 'user', text: 'changed', done: true }]);
+  f.emit();
+  await new Promise(resolve => setTimeout(resolve, 240));
+  assert.equal(f.jobs.length, 2);
+  assert.equal(f.jobs[1].body.sourceRevision, 2);
+  assert.notEqual(f.jobs[0].body.sourceRevision, f.jobs[1].body.sourceRevision);
+  await f.sync.close();
+});
+
+test('oversized source snapshots fail visibly instead of being silently truncated', async () => {
+  const f = sourceFixture(Array.from({ length: 1001 }, (_, index) => ({
+    id: 'm' + index, role: index % 2 ? 'assistant' : 'user', text: 'x', done: true,
+  })));
+  f.sync.bind(f.handle, { hub: 'http://hub.test', clientId: 'desktop', session: 'session' });
+  assert.equal(f.jobs.length, 0);
+  assert.equal(f.handle.accountSync.state, 'error');
+  assert.match(f.handle.accountSync.reason, /message limit/);
+  await f.sync.close();
+});
+
+test('source checkpoints serialize assistant blocks instead of dropping their text', async () => {
+  const f = sourceFixture([
+    { id: 'm1', role: 'user', text: 'question', sentAt: 10, done: true },
+    { id: 'm2', role: 'assistant', blocks: [{ kind: 'text', text: 'answer' }], completedAt: 20, done: true },
+  ]);
+  f.sync.bind(f.handle, { hub: 'http://hub.test', clientId: 'desktop', session: 'session' });
+  assert.deepEqual(f.jobs[0].body.messages.map(item => item.text), ['question', 'answer']);
+  assert.equal(f.jobs[0].body.messages[1].createdAt, '1970-01-01T00:00:00.020Z');
+  await f.sync.close();
+});
+
+test('runner streaming states use the Hub account-sync state contract', async () => {
+  const f = sourceFixture(undefined, 'streaming');
+  f.sync.bind(f.handle, { hub: 'http://hub.test', clientId: 'desktop', session: 'session' });
+  assert.equal(f.jobs[0].body.state, 'responding');
+  await f.sync.close();
+});

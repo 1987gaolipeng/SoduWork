@@ -1,0 +1,22 @@
+// Only reviewed server message keys are translated; parameters remain business data.
+export const serverMessages = {
+  'plugin.routes.unneeded': ['这条流程不需要 AI 执行机', 'This workflow does not need an AI Runner.', 'このワークフローには AI Runner は不要です。', '이 워크플로에는 AI Runner가 필요하지 않습니다.'],
+  'plugin.check.trust': ['版本已审批', 'Version approved', 'バージョン承認', '버전 승인'],
+  'plugin.check.skills': ['技能可用', 'Skills available', 'スキルの利用可否', '스킬 사용 가능 여부'],
+  'plugin.check.project': ['项目与环境配置', 'Project and environment', 'プロジェクトと環境', '프로젝트 및 환경'],
+  'plugin.check.agent': ['逐节点 Agent 与模型', 'Agent and model per step', '各ステップの Agent とモデル', '단계별 Agent 및 모델'],
+  'plugin.check.mcp': ['MCP 连接可用', 'MCP connections', 'MCP 接続', 'MCP 연결'],
+  'plugin.check.mcp-tools': ['MCP 工具最小授权', 'MCP tool permissions', 'MCP ツールの最小権限', 'MCP 도구 최소 권한'],
+  'plugin.check.runtime': ['执行能力可用', 'Execution capabilities', '実行機能', '실행 기능'],
+  'plugin.trust.ready': ['可以进入项目绑定', 'Ready to bind to a project', 'プロジェクトに紐付けできます', '프로젝트에 연결할 수 있습니다'],
+  'plugin.trust.pending': ['版本仍在隔离区；完成能力审查后才能启用', 'Review capabilities before enabling this version.', 'このバージョンを有効にする前に機能を審査してください。', '이 버전을 활성화하기 전에 기능을 검토하세요.'],
+  'plugin.skills.ready': ['{count} 项技能已就绪，其中 {bundled} 项随插件锁定', '{count} skills ready; {bundled} pinned with the plugin.', '{count} 件のスキルが利用可能、うち {bundled} 件はプラグインに固定されています。', '스킬 {count}개 준비됨, 플러그인에 고정된 스킬 {bundled}개.'],
+  'plugin.project.ready': ['当前项目满足这条流程', 'This project is ready for the workflow.', 'このプロジェクトでワークフローを実行できます。', '이 프로젝트는 워크플로를 실행할 준비가 되었습니다.'],
+  'plugin.project.pending': ['请先处理下面的阻断项', 'Resolve the blockers below first.', '以下の問題を先に解決してください。', '아래 차단 항목을 먼저 해결하세요.'],
+  'plugin.routes.ready': ['{count} 个 AI 节点的 Agent、模型与能力路由均可解析', 'Agent, model and capabilities resolved for {count} AI steps.', '{count} 個の AI ステップで Agent、モデル、機能を確認できました。', 'AI 단계 {count}개의 Agent, 모델 및 기능을 확인했습니다.'],
+  'plugin.routes.pending': ['部分 AI 节点找不到可用的 Agent、模型或 Runner 能力', 'Some AI steps lack an available Agent, model or Runner capability.', '一部の AI ステップで利用可能な Agent、モデル、Runner 機能がありません。', '일부 AI 단계에 사용 가능한 Agent, 모델 또는 Runner 기능이 없습니다.'],
+  'plugin.mcp.ready': ['{count} 个 MCP 连接已启用', '{count} MCP connections enabled.', '{count} 件の MCP 接続が有効です。', 'MCP 연결 {count}개 활성화됨.'],
+  'plugin.mcp.missing': ['尚未启用：{names}', 'Not enabled: {names}', '未有効：{names}', '활성화되지 않음: {names}'],
+  'plugin.tools.ready': ['已批准 {count} 个具体工具', '{count} specific tools approved.', '{count} 個のツールを承認済みです。', '도구 {count}개 승인됨.'],
+  'plugin.tools.missing': ['尚未选择：{names}', 'Not selected: {names}', '未選択：{names}', '선택되지 않음: {names}'],
+}

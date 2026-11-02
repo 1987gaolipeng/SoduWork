@@ -89,9 +89,8 @@ function _set(patch) {
   return _publicState();
 }
 function _trust() {
-  const profile = require('./distribution.cjs').current();
-  // 云端发行版仅信任自己的签名，不回退到内网或另一云环境的公钥。
-  if (profile.distributionId !== 'internal' && profile.distributionId !== 'stage') return profile.updateTrust;
+  // Self-hosted builds use the distributor's bundled trust file. Never load
+  // signing keys from user data or the selected Hub's network response.
   const candidates = [
     path.join(runtime.app.getAppPath(), 'update-trust.json'),
     path.join(__dirname, '..', 'update-trust.json'),

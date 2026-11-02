@@ -33,6 +33,38 @@ function publicDraft(session) {
   return runtime.decorate(session.sessionId, { items: snapshot.items }).find(item => item.pluginDraft);
 }
 
+test('resource repairs refresh the public revision without changing draft identity or bypassing checksums', t => {
+  const { cwd } = fixture(t), file = path.join(cwd, drafts.DRAFT_NAME);
+  const expected = require('node:crypto').createHash('sha256').update('corrected resource').digest('hex');
+  fs.writeFileSync(file, JSON.stringify({ ...body, resources: [{ ...body.resources[0], sha256: expected }] }));
+  const session = handle(cwd), before = publicDraft(session), manifestTime = fs.statSync(file).mtimeMs;
+  assert.equal(drafts.readSession(session, before.artifactId).ok, false);
+  fs.writeFileSync(path.join(cwd, 'templates/report.md'), 'corrected resource');
+  const after = publicDraft(session);
+  assert.equal(fs.statSync(file).mtimeMs, manifestTime);
+  assert.equal(after.artifactId, before.artifactId);
+  assert.notEqual(after.pluginRevision, before.pluginRevision);
+  assert.ok(after.pluginRevisionAt >= before.pluginRevisionAt);
+  assert.equal(drafts.readSession(session, after.artifactId).ok, true);
+  fs.writeFileSync(path.join(cwd, 'unrelated.md'), 'unrelated output');
+  assert.equal(publicDraft(session).pluginRevision, after.pluginRevision);
+  fs.writeFileSync(path.join(cwd, 'templates/report.md'), 'still invalid');
+  assert.equal(drafts.readSession(session, after.artifactId).ok, false);
+  assert.equal(publicDraft(handle(cwd, Date.now() + 1000)), undefined, 'resource repair cannot claim an older draft in a new chat');
+});
+
+test('large embedded drafts retain bounded metadata and declared resource repair tracking', t => {
+  const { cwd } = fixture(t);
+  fs.writeFileSync(path.join(cwd, drafts.DRAFT_NAME), JSON.stringify({ ...body,
+    resources: [{ ...body.resources[0], content: 'a'.repeat(300_000), encoding: 'utf8' }] }));
+  const before = publicDraft(handle(cwd));
+  assert.equal(before.pluginName, body.name);
+  fs.writeFileSync(path.join(cwd, 'templates/report.md'), 'changed external resource');
+  const after = publicDraft(handle(cwd));
+  assert.notEqual(after.pluginRevision, before.pluginRevision);
+  assert.ok(JSON.stringify(after).length < 2000, 'resource bytes never enter renderer metadata');
+});
+
 for (const manifest of ['missing', 'invalid', 'unrelated']) {
   test('real filesystem draft remains installable with ' + manifest + ' delivery manifest', t => {
     const { cwd, app } = fixture(t);

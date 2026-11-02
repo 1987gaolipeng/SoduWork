@@ -128,8 +128,13 @@ class RequirementEditPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(started.status_code, 200, started.text)
         detail = (await self.call("GET", "tasks/shared", "peer")).json()
         self.assertFalse(detail["canEditRequirement"])
-        for key in ("canManageRequirementMaterials", "canSubmitReview", "canManageRequirementAutomation"):
+        for key in ("canManageRequirementMaterials", "canManageRequirementAutomation"):
             self.assertTrue(detail[key])
+        self.assertFalse(detail["canSubmitReview"])
+        executor = (await self.call("GET", "tasks/shared")).json()
+        self.assertTrue(executor["canSubmitReview"])
+        denied = await self.call("POST", "tasks/shared/submit-review", "peer", json={})
+        self.assertEqual(denied.status_code, 403, denied.text)
         progress = await self.call("PATCH", "tasks/shared", json={"progress": [{"text": "Working"}]})
         self.assertEqual(progress.status_code, 200, progress.text)
         ready = await self.call("PATCH", "tasks/shared", json={"status": "todo", "triageStage": "ready"})

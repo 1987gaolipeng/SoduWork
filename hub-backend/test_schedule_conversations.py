@@ -167,6 +167,13 @@ class ConversationProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.schedule.assignee_id = 'runner:remote:pi'
         with patch('app.services.runner_hub.get', return_value=SimpleNamespace(client_id='other')):
             self.assertEqual(chats.adapter_for(self.schedule, self.client), '')
+        self.client.user_ref = 'account-owner'
+        with patch('app.services.runner_hub.get', return_value=SimpleNamespace(
+                client_id='other', owner_user_id='different-account')):
+            self.assertEqual(chats.adapter_for(self.schedule, self.client), '')
+        with patch('app.services.runner_hub.get', return_value=SimpleNamespace(
+                client_id='other', owner_user_id='account-owner')):
+            self.assertEqual(chats.adapter_for(self.schedule, self.client), 'pi')
 
     async def test_every_catalog_runner_is_a_supported_ordinary_conversation_adapter(self):
         """The editor exposes every catalog Agent, so dispatch must accept each same id."""

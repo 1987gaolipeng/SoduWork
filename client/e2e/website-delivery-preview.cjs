@@ -82,8 +82,9 @@ if (typeof electron === 'string') {
     assert.equal(await js('document.querySelectorAll(".ndelivery").length'), 1);
     assert.equal(await js(`document.querySelectorAll('[data-output-image="${shot.artifactId}"]').length`), 1);
     await until(() => js('document.querySelector("[data-delivery-files-count]")?.textContent.startsWith("2 ")'), 'website dependency inspection');
-    assert.equal(await js('document.querySelector("[data-delivery-title]")?.textContent'), 'Screenshot regression garden');
-    report.cases.push('Production dependency inspection includes the CSS asset and preserves the website title without counting screenshot evidence');
+    assert.equal(await js('document.querySelector("[data-delivery-title]")?.textContent'), 'Screenshot regression garden.zip');
+    assert.equal(await js('document.querySelector("[data-delivery-title]").parentElement.hasAttribute("data-delivery-archive")'), true);
+    report.cases.push('The multi-file delivery exposes its ZIP, retaining the website title and CSS dependency while excluding screenshot evidence');
     assert.equal((await js('document.querySelector("[data-wb-file-location]")?.textContent'))?.replaceAll('\\','/'), path.join(evidence,'homepage.png').replaceAll('\\','/'));
     const bytes = await runtime.action(handle, 'preview-fixture', shot.artifactId, 'image-full', {});
     assert.deepEqual(Buffer.from(bytes.data, 'base64'), png);
@@ -136,10 +137,11 @@ if (typeof electron === 'string') {
     await configure(); await until(() => js(`document.querySelector('.ncw-image img')?.naturalWidth===${dims.width}`), 'screenshot after reload');
     assert.equal(await js('document.querySelectorAll("#list .nmsg img:not(.library-native-file-icon img)").length'), 1);
     await screenshot('reopened-screenshot'); report.cases.push('Reopening restores the trusted screenshot preview without persisting image bytes in conversation markup');
-    await click('[data-delivery-continue]');
+    // Result cards expose file actions; follow-up text stays in the composer.
+    await click('#nchatInput');
     assert.equal(await js('document.activeElement.id'), 'nchatInput');
     assert.equal(await js('document.querySelector("#nchatInput").value'), '保留待发送草稿');
-    report.cases.push('Continue focuses the visible conversation input and preserves its existing draft');
+    report.cases.push('Returning from preview to the visible composer preserves the existing follow-up draft');
     applicationServer = require('node:http').createServer((_req,res)=>{
       res.setHeader('Content-Type','text/html; charset=utf-8');
       res.end('<!doctype html><title>Garden application</title><main>Running application route</main>');

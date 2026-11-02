@@ -75,6 +75,23 @@ app.whenReady().then(async () => {
     const moved = ChatOutputLinks.decorate(html, files, 'memo-case', { ...snapshot, history: shifted.history });
     check(first.includes('data-plugin-draft-owner="2"') && moved.includes('data-plugin-draft-owner="12"'), 'memo observes history index changes');
     cases.push('settled memo invalidation');
+
+    const repair = create();
+    ChatOutputLinks.pluginDrafts(repair, [{ ...files[0], pluginRevision: 'original', pluginRevisionAt: 130 }], 'repair', snapshot);
+    const failed = repair.querySelector('.nplugin-draft');
+    failed.querySelector('.nplugin-draft-error').hidden = false;
+    failed.querySelector('.nplugin-draft-error').textContent = 'Resource checksum mismatch';
+    const repairedFiles = [{ ...files[0], pluginRevision: 'resource-repaired', pluginRevisionAt: 230 }];
+    ChatOutputLinks.pluginDrafts(repair, repairedFiles, 'repair', snapshot);
+    const renewed = repair.querySelector('.nplugin-draft');
+    check(renewed !== failed && renewed.dataset.pluginDraftOwner === '4', 'resource-only repair renews the card in its own turn');
+    check(renewed.querySelector('.nplugin-draft-error').hidden, 'the previous revision error is cleared');
+    check(renewed.querySelector('button').dataset.installPluginDraft === 'art_draft', 'repair retains the validated artifact action');
+    check(repair.querySelectorAll('.nplugin-draft').length === 1, 'repair never duplicates the install action');
+    const rerendered = document.createElement('div');
+    rerendered.innerHTML = ChatOutputLinks.decorate(html, repairedFiles, 'repair', snapshot, repair);
+    check(rerendered.querySelector('.nplugin-draft').dataset.pluginDraftOwner === '4', 'subsequent rendering preserves the repaired turn');
+    cases.push('resource-only repair, error reset and stable placement');
     return cases;
   })()`);
   console.log(JSON.stringify({ ok: true, electron: process.versions.electron, cases }));

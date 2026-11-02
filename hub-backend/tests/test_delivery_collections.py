@@ -21,12 +21,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.api import deliveries, library
-from app.automation_models import ExecutionSession
+from app.automation_models import (ExecutionSession, ArtifactVersion, ApprovalRequest,
+    ApprovalDecision, ApprovalAssignment, DeploymentRun, WorkflowRun)
 from app.conversation_handoff_models import ConversationHandoff
 from app.db import Base, get_session
 from app.deps import current_client
 from app.library_models import LibraryFolder, LibraryItem
-from app.models import Attachment, Client, Task
+from app.models import Attachment, Client, Task, TaskEvent
 from app.services import cloud_deliveries, delivery_collections as svc, delivery_manifest, library_storage, storage
 
 
@@ -44,6 +45,13 @@ def archive_bytes(files, *, compression=zipfile.ZIP_STORED):
 
 
 class DeliveryStructureTests(unittest.TestCase):
+    def test_delivery_display_title_normalizes_controls_without_changing_manifest_data(self):
+        self.assertEqual(svc.display_title("  周报\r\n\t\x00版本  "), "周报 版本")
+        self.assertEqual(svc.display_title("\x1f\x7f"), "本轮成果")
+        long_title = "报告" * 200
+        self.assertEqual(len(svc.display_title(long_title)), 240)
+        self.assertEqual(svc.display_title("你好🙂"), "你好🙂")
+
     def test_utf16_probe_boundary_does_not_reject_a_split_surrogate_pair(self):
         text = "<html>" + "x" * 32760 + "\U0001f600" + "</html>"
         for encoding, marker in (("utf-16-le", codecs.BOM_UTF16_LE),
@@ -72,7 +80,9 @@ class DeliveryCollectionsTestCase(unittest.IsolatedAsyncioTestCase):
         async with self.engine.begin() as conn:
             await conn.run_sync(lambda connection: Base.metadata.create_all(connection, tables=[
                 LibraryFolder.__table__, LibraryItem.__table__, Client.__table__, Task.__table__,
-                Attachment.__table__, ConversationHandoff.__table__, ExecutionSession.__table__]))
+                Attachment.__table__, ConversationHandoff.__table__, ExecutionSession.__table__,
+                ArtifactVersion.__table__, ApprovalRequest.__table__, ApprovalDecision.__table__,
+                ApprovalAssignment.__table__, DeploymentRun.__table__, WorkflowRun.__table__, TaskEvent.__table__]))
         self.app = FastAPI()
         self.app.include_router(deliveries.router)
         self.app.include_router(library.router)
@@ -100,7 +110,14 @@ class DeliveryCollectionsTestCase(unittest.IsolatedAsyncioTestCase):
         await self.engine.dispose()
         for item in reversed(self.patches):
             item.stop()
-        self.temp.cleanup()
+        for attempt in range(20):
+            try:
+                self.temp.cleanup()
+                break
+            except PermissionError:
+                if attempt == 19:
+                    raise
+                await asyncio.sleep(.1)
 
     def manifest(self, files=None, **changes):
         return {"source": "local", "sessionId": "session-one", "revision": "rev-one",
@@ -198,6 +215,13 @@ class DeliveryCollectionsTests(DeliveryCollectionsTestCase):
         self.assertNotEqual(first.json()["delivery"]["id"], next_version.json()["delivery"]["id"])
         self.assertEqual(len((await self.http.get("/api/v1/deliveries?sessionId=session-one")).json()["items"]), 2)
         self.assertEqual((await self.http.get("/api/v1/deliveries?source=cloud")).json()["items"], [])
+        query = "/api/v1/deliveries?sessionId=session-one&source=local&revision=rev-one&limit=1"
+        restored = (await self.http.get(query)).json()["items"]
+        self.assertEqual([row["id"] for row in restored], [first.json()["delivery"]["id"]])
+        self.assertEqual((await self.http.get(query.replace("rev-one", "missing"))).json()["items"], [])
+        self.assertEqual((await self.http.get(query, headers={"X-User": "bob"})).json()["items"], [])
+        self.assertEqual(len((await self.http.get("/api/v1/deliveries")).json()["items"]), 2)
+
 
     async def test_concurrent_publish_creates_one_object_and_commit_ack_loss_is_recoverable(self):
         replies = await asyncio.gather(self.upload(), self.upload(headers={"X-Device": "phone"}))
@@ -317,11 +341,16 @@ class DeliveryCollectionsTests(DeliveryCollectionsTestCase):
             await session.commit()
             self.assertEqual(task.owner_user_id, "alice")
 
-    async def test_cloud_automatic_snapshot_and_mobile_retry_without_original_device(self):
+    async def test_cloud_explicit_save_and_mobile_retry_without_original_device(self):
         await self.seed_cloud([("report.md", b"# Cloud result", "output"),
                                ("input.txt", b"private input", "input"), ("test-report.txt", b"evidence", "verification")])
+        from app.services import execution_settlement
         async with self.sessions() as session:
-            result = await cloud_deliveries.archive_if_cloud(session, "cloud-task")
+            await execution_settlement.settle_terminal(session, "cloud-task", "runner-ref", include_task=False)
+        status = await self.http.get("/api/v1/deliveries/from-task/cloud-task")
+        self.assertIsNone(status.json()["delivery"])
+        self.assertEqual((await self.http.get("/api/v1/deliveries")).json()["items"], [])
+        result = (await self.http.post("/api/v1/deliveries/from-task/cloud-task")).json()
         self.assertEqual(result["state"], "synced", result)
         info = result["delivery"]
         self.assertEqual([row["path"] for row in info["files"]], ["report.md"])
@@ -343,12 +372,38 @@ class DeliveryCollectionsTests(DeliveryCollectionsTestCase):
             row = await session.get(Attachment, "a0")
             self.assertEqual(storage.get(row.storage_key, row.backend), b"# Cloud result")
 
+    async def test_personal_requirement_collects_existing_files_without_cloud_handoff(self):
+        await self.seed_cloud([("result.txt", b"PERSONAL_PC_REQUIREMENT_OK", "output")])
+        async with self.sessions() as session:
+            await session.delete(await session.get(ConversationHandoff, "handoff"))
+            task = await session.get(Task, "cloud-task")
+            task.origin = "local"
+            task.kind = "requirement"
+            task.work_routing = {"executionContext": {"runner": {
+                "mode": "remote", "runnerId": "own-pc", "clientId": "desktop"}}}
+            await session.commit()
+        phone = {"X-Device": "phone"}
+        made = await self.http.post("/api/v1/deliveries/from-task/cloud-task", headers=phone)
+        self.assertEqual(made.status_code, 200, made.text)
+        self.assertEqual(made.json()["state"], "synced", made.text)
+        info = made.json()["delivery"]
+        self.assertEqual(info["source"], "local")
+        repeated = await self.http.post("/api/v1/deliveries/from-task/cloud-task", headers=phone)
+        self.assertEqual(repeated.json()["delivery"]["id"], info["id"])
+        download = await self.http.get(f'/api/v1/deliveries/{info["id"]}/download', headers=phone)
+        self.assertEqual(download.content, b"PERSONAL_PC_REQUIREMENT_OK")
+        denied = await self.http.get("/api/v1/deliveries/from-task/cloud-task", headers={"X-User": "bob"})
+        self.assertEqual(denied.status_code, 404)
+        async with self.sessions() as session:
+            self.assertEqual((await session.get(ExecutionSession, "execution")).state, "done")
+            self.assertIsNone(await session.get(ConversationHandoff, "handoff"))
+
     async def test_cloud_failure_retries_and_no_partial_success(self):
         await self.seed_cloud([("index.html", b"<html>result</html>", "output"),
                                ("assets/style.css", b"body{}", "output")])
         with patch.object(library_storage, "put_bytes", side_effect=library_storage.LibraryStorageError()):
             async with self.sessions() as session:
-                result = await cloud_deliveries.archive_if_cloud(session, "cloud-task")
+                result = await cloud_deliveries.archive_task(session, "cloud-task")
                 self.assertEqual(result["state"], "failed")
                 self.assertEqual((await session.get(ExecutionSession, "execution")).state, "done")
         failed = await self.http.get("/api/v1/deliveries/from-task/cloud-task")
@@ -513,14 +568,14 @@ class DeliveryCollectionsTests(DeliveryCollectionsTestCase):
             manifest = self.manifest(files=[entry(n, data, "primary" if n == "index.html" else "supporting") for n, data in files],
                                      kind="bundle", entryPath="index.html")
             with patch.object(client_access, "_policy_cache", None):
-                async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as desktop_http:
+                async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}", trust_env=False) as desktop_http:
                     upload = await desktop_http.post("/api/v1/deliveries",
                         headers={"Authorization": tokens["desktop"]}, data={"manifest": json.dumps(manifest)},
                         files={"file": ("delivery.zip", package, "application/zip")})
                     self.assertEqual(upload.status_code, 200, upload.text)
                     delivery_id = upload.json()["delivery"]["id"]
                 await self.engine.dispose()
-                async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}") as phone_http:
+                async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}", trust_env=False) as phone_http:
                     listed = await phone_http.get("/api/v1/deliveries", headers={"Authorization": tokens["phone"]})
                     self.assertEqual(listed.status_code, 200, listed.text)
                     self.assertEqual(listed.json()["items"][0]["id"], delivery_id)

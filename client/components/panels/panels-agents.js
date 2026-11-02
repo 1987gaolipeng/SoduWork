@@ -18,7 +18,7 @@
 let _agData = null;                 /* {env, agents, modelCount} */
 let _agOpen = '';                   /* Currently expanded agent; only one opens at a time. */
 let _agJobs = {};                   /* key -> {jobId, action, state, lines, ok, detail} */
-let _agTimer = null;                /* Job polling timer; clear it when closing the panel. */
+let _agTimer = null;                /* Follow active jobs to completion even after leaving this panel. */
 let _agConfirm = '';                /* Agent awaiting uninstall confirmation. */
 let _agView = 'agents';             /* Separate agent capabilities from Runner node management. */
 const _agLoaded = { agents: false, runners: false };
@@ -38,6 +38,13 @@ const _agProbeResults = new Map();
 function _agTranslate(root) {
   try { window.SoduWorkI18n?.translateNode?.(root || document.getElementById('agPanel')); } catch (_) {}
 }
+
+window.addEventListener?.('soduwork-locale-change', () => {
+  if (document.getElementById('agPanel')?.classList.contains('show')) {
+    _agSyncHeader();
+    _agRender();
+  }
+});
 
 const _AG_ICON = '<svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="12" rx="3"/>' +
   '<path d="M12 3v4M9 13h.01M15 13h.01"/></svg>';
@@ -74,7 +81,7 @@ function openAgentsPanel(options) {
       '<span class="sch-h-ico">' + _AG_ICON + '</span>' +
       '<div class="sch-h-txt"><span class="sch-h-kicker" id="agKicker" data-i18n="eyebrow.agent_runtime">AGENT RUNTIME</span>' +
       '<b class="sch-h-title" id="agTitle">Agent 管理</b>' +
-      '<i class="sch-h-sub" id="agSubtitle">管理可干活的 Agent、模型与可用状态</i></div>' +
+      '<i class="sch-h-sub" id="agSubtitle">管理本机的 Agent、模型与可用状态</i></div>' +
       '<nav class="ag-tabs" role="tablist" aria-label="Agent 管理视图">' +
         '<button role="tab" data-agtab="agents">Agent</button>' +
         '<button role="tab" data-agtab="runners">Runner</button></nav>' +
@@ -175,7 +182,7 @@ function _agSyncHeader() {
   if (title) title.textContent = runners ? 'Runner 管理' : 'Agent 管理';
   if (subtitle) subtitle.textContent = runners
     ? '查看任务在哪台机器执行，并管理节点健康与接单状态'
-    : '管理可干活的 Agent、模型与可用状态';
+    : '管理本机的 Agent、模型与可用状态';
   if (refresh) {
     refresh.hidden = !runners;
     refresh.textContent = runners ? '刷新节点' : '重新探测';
@@ -193,10 +200,7 @@ function closeAgentsPanel() {
   if (p) p.classList.remove('show');
   _agOpen = ''; _agConfirm = '';
   _agDrawerSync();     /* Use one close path to remove the drawer and notify the pet overlay. */
-  /*
-   * Stop polling on close to prevent wasted requests and duplicate timers after reopening.
-   */
-  if (_agTimer) { clearInterval(_agTimer); _agTimer = null; }
+  // Installation continues off-screen; the active-job poll publishes completion.
   if (_agRunnerPoll) { clearInterval(_agRunnerPoll); _agRunnerPoll = null; }
   if (_agRunnerTick) { clearTimeout(_agRunnerTick); _agRunnerTick = null; }
   if (typeof shrinkFromOverlay === 'function') shrinkFromOverlay();
@@ -215,7 +219,7 @@ async function _agLoad(force) {
   const ownerScope = _agScope;
   if (!loaded) {
     box.innerHTML = '<div class="ag-load"><i></i><i></i><i></i>' +
-      '<span>' + (runners ? '正在读取运行节点…' : '正在看执行机上装了哪些…') + '</span></div>';
+      '<span>' + (runners ? '正在读取运行节点…' : '正在查看本机底座…') + '</span></div>';
     _agTranslate(box);
   }
   let r = null, nodes = null;
@@ -223,7 +227,7 @@ async function _agLoad(force) {
     if (runners) {
       nodes = await SoduWorkAPI.runners();
     }
-    else r = await SoduWorkAPI.agentSetup();
+    else r = await SoduWorkAPI.localAgentSetup();
   } catch (e) { /* Render a retryable empty state below. */ }
   if (scope !== _agScopeEpoch || ownerScope !== _agOwnerScope() || seq !== _agLoadSeq || document.getElementById('agBody') !== box) return;
   if (!r && !nodes) {
@@ -240,7 +244,11 @@ async function _agLoad(force) {
   }
   if (!_agData) _agData = { env: {}, agents: [], modelCount: 0, runners: [] };
   if (r) {
+    const before = JSON.stringify(_agData.agents || []);
     _agData = Object.assign(_agData, r);
+    if (before !== JSON.stringify(_agData.agents || [])) {
+      try { window.soduWorkAPI?.broadcast?.('agent-runtimes-changed'); } catch (_) {}
+    }
     _agLoaded.agents = true;
   }
   if (nodes) {
@@ -256,12 +264,32 @@ function _agProbeContext(a) {
     a.modelGone === true, a.configRevision || '', a.runtimeRevision || '']);
 }
 
+/* Resolve server-provided localized descriptors while preserving diagnostic params.
+ * The fallback is passed through the phrase catalog for older servers that do not
+ * know descriptor keys yet. */
+function _agMessage(value, fallback = '') {
+  if (value == null || value === '') return fallback ? (window.SoduWorkI18n?.translateText?.(fallback) || fallback) : '';
+  if (typeof value === 'string') return window.SoduWorkI18n?.translateText?.(value) || value;
+  const source = String(value.fallback || value.text || fallback || '');
+  const key = String(value.key || '');
+  const params = value.params && typeof value.params === 'object' ? value.params : {};
+  if (key && window.SoduWorkI18n?.t) return window.SoduWorkI18n.t(key, source || key, params);
+  return window.SoduWorkI18n?.translateText?.(source) || source;
+}
+
+function _agCopy(a, field, fallback = '') {
+  if (field === 'name' && ['kimi', 'claude'].includes(a?.key)) {
+    return String(a.name || fallback || a.key).replace(/\s+CLI$/i, '');
+  }
+  return _agMessage(a?.copy?.[field], fallback || a?.[field] || '');
+}
+
 function _agPresentation(a, ak) {
   const aliases = { needmodel: 'nollm', auth: 'unauthed', probeFailed: 'bad' };
   const declared = a.setupState || a.displayState || a.state;
   let state = aliases[declared] || declared || (a.installed ? 'ready' : 'missing');
   if (!_AG_ST[state]) state = 'unknown';
-  const issue = String(a.runtimeIssue || a.warnNow || '');
+  const issue = _agMessage(a.warnMessage || a.runtimeIssue || a.warnNow, '');
   // Older Runners collapsed incomplete installations and bundled setup into
   // missing. Recover only facts supported by their executable/core metadata.
   if (state === 'missing' && typeof a.present !== 'boolean') {
@@ -273,8 +301,9 @@ function _agPresentation(a, ak) {
   if (['ready', 'ok', 'bad'].includes(state) && a.installed === false) {
     state = (a.present || a.bin) && issue ? 'broken' : 'missing';
   }
-  const installed = !['missing', 'setup', 'disabled', 'broken', 'unknown'].includes(state)
-    && a.installed !== false;
+  const unknownAccount = state === 'unknown' && a.key === 'codex' && a.authStatus === 'unknown';
+  const installed = (!['missing', 'setup', 'disabled', 'broken', 'unknown'].includes(state)
+    || (unknownAccount && a.installed === true)) && a.installed !== false;
   const canProbe = installed && ['ready', 'ok', 'bad'].includes(state);
   let probe = a.probe || {};
   const activeJob = _agJobs[ak || a.key];
@@ -309,14 +338,15 @@ function _agPresentation(a, ak) {
     && typeof probe.ok === 'boolean';
   if (state === 'ready' && probeCurrent) state = probe.ok ? 'ok' : 'bad';
   const info = _AG_ST[state];
-  const login = state === 'unauthed' && a.key === 'codex' && a.loginAvailable === true;
+  const login = (state === 'unauthed' || (state === 'unknown' && a.authStatus === 'unknown'))
+    && a.key === 'codex' && a.loginAvailable === true;
   const primaryAction = login ? 'login' : ['missing', 'setup', 'disabled', 'broken'].includes(state) ? 'install'
     : canProbe ? 'probe' : state === 'unknown' ? 'refresh' : 'details';
   const primaryLabel = { missing: '装上', setup: '准备组件', disabled: '启用', broken: '修复安装',
     nollm: '选择模型', unauthed: login ? '连接 Codex' : '查看登录说明', unknown: '重新探测' }[state] || '测一下';
-  const reason = state === 'bad' ? '已安装，实际测试未通过。请查看下方测试结果并处理后重试。'
-    : state === 'broken' ? issue || a.why || '安装组件无法正常启动，请修复后重试。'
-    : state === 'unknown' ? '状态暂时无法识别，请重新探测。' : a.why || issue || '';
+  const reason = state === 'bad' ? _agMessage(null, '已安装，实际测试未通过。请查看下方测试结果并处理后重试。')
+    : state === 'broken' ? issue || _agMessage(a.whyMessage || a.why, '安装组件无法正常启动，请修复后重试。')
+    : state === 'unknown' ? _agMessage(null, '状态暂时无法识别，请重新探测。') : _agMessage(a.whyMessage || a.why, issue || '');
   return { state, label: info.t, tone: info.tone || state, reason, issue, installed, canProbe,
     primaryAction, primaryLabel, probe, probeCurrent };
 }
@@ -324,9 +354,9 @@ function _agPresentation(a, ak) {
 function _agState(a, ak) { return _agPresentation(a, ak).state; }
 
 function _agMachines() {
-  return (_agData?.machines || []).length ? _agData.machines
-    : [{ runnerId: '', label: (_agData?.env || {}).host || '本机',
-      env: _agData?.env || {}, agents: _agData?.agents || [] }];
+  // Never promote a legacy top-level payload or a cloud alias into this client.
+  return (_agData?.machines || []).filter(m => m.runnerId &&
+    (m.scope ? m.scope === 'current-instance' : m.isCurrentDevice === true));
 }
 
 function _agRender() {
@@ -340,21 +370,41 @@ function _agRender() {
     _agTranslate(box);
     return;
   }
-  /* Render each machine separately. Every install, uninstall and probe must retain its runnerId. */
+  /* Keep the current instance identity on every action, even when only one card group is visible. */
   const machines = _agMachines();
   box.innerHTML = '<div id="agCustomAgents"></div>' +
-    (_agData.modelCount === 0
+    (machines.length && _agData.modelCount === 0
       /* This is HTML; Markdown emphasis would render literally. */
       ? '<div class="ag-warn">你这台 SoduWork 现在一个模型都用不了，所以要模型的助手装了也派不了活。' +
         '先去「我的模型」配一把 key，再回来测。</div>'
       : '') +
-    machines.map(_agMachineHtml).join('');
+    (machines.length ? machines.map(_agMachineHtml).join('')
+      : '<div class="ag-blank">' + _AG_ICON + '<b>本机底座暂不可用</b><span>' +
+        esc(_agData.env?.why || '当前客户端的 Runner 尚未连接，连接后会显示本机底座。') +
+        '</span><span>云端底座请在「云端电脑」中管理。</span>' +
+        '<button class="btn-mini" data-arefresh>重新探测</button></div>');
   _agDrawerSync();
   const wrap = document.getElementById('agDrawerWrap');
   if (wrap) _agBind(wrap);
   _agBind(box);
   window.CustomAgents?.mount(document.getElementById('agCustomAgents'));
   _agTranslate(box);
+}
+
+function _agMachineIdentity(m) {
+  const facts = [m?.host, m?.os].filter(Boolean).join(' · ');
+  return [_agEnvironmentLabel(m), m?.label || '本机', facts].filter(Boolean).join(' · ');
+}
+
+function _agEnvironmentLabel(m) {
+  const label = m?.scope === 'current-instance' || m?.isCurrentDevice === true ? '当前客户端'
+    : m?.scope === 'personal-cloud' ? '个人云端' : m?.scope === 'bound-runner' ? '关联执行机'
+      : m?.execution === 'backend' ? '服务端环境' : '远程执行环境';
+  return window.SoduWorkI18n?.translateText?.(label) || label;
+}
+
+function _agCanUninstall(a) {
+  return !!a && a.key !== 'pi' && a.canUninstall !== false && (!a.bundled || a.key === 'harness2');
 }
 
 function _agMachineHtml(m) {
@@ -367,14 +417,14 @@ function _agMachineHtml(m) {
   const upN = list.filter(a => presentation(a).installed).length;
   const testN = list.filter(a => presentation(a).canProbe).length;
   const envCopy = env.ok
-    ? 'Node ' + esc(env.node || '?') + ' · npm ' + esc(env.npm || '?') +
-      '。每个助手可以单独指定模型，派活时按这里的选择执行。'
-    : 'SoduWork 内置和托管的助手不依赖 Node/npm；只有额外的 npm 助手需要安装 Node.js。';
+    ? '<span translate="no">Node ' + esc(env.node || '?') + ' · npm ' + esc(env.npm || '?') +
+      '</span> · <span>每个助手可以单独指定模型，派活时按这里的选择执行。</span>'
+    : '<span>运行环境会由 SoduWork 自动准备；无需手动安装 Node/npm。</span>';
   return '<section class="rn-section ag-section">' +
     '<div class="rn-section-head"><div><span class="cfg-eyebrow" data-i18n="eyebrow.my_agents">MY AGENTS</span>' +
-      '<h3>' + esc(m.label || '本机') + ' 上的 AI 助手</h3><p>' +
+      '<h3>本机 AI 助手</h3><p>' +
       envCopy +
-      '</p></div>' +
+      ' <span>安装、登录与测试仅作用于此环境。</span></p></div>' +
       '<div class="rn-overview"><span><b>' + upN + '</b> 已装</span>' +
       '<span><b>' + okN + '</b> 测通</span><span><b>' + list.length + '</b> 可管理</span></div>' +
     '</div>' +
@@ -393,17 +443,19 @@ function _agRowHtml(a, m) {
   const rid = (m && m.runnerId) || '';
   const ak = (rid ? rid + '~' : '') + a.key;   /* Drawer identity includes the machine because runtimes can exist on several machines. */
   const status = _agPresentation(a, ak), s = status.state, p = status.probe;
+  const displayName = _agCopy(a, 'name', a.name || a.key);
+  const blurb = _agCopy(a, 'blurb', a.blurb || '');
   const busy = _agJobs[ak]?.state === 'running';
   const bundled = !!a.bundled;
   const bot = window.AgentBrand
-    ? AgentBrand.html(a, { className: 'ag-agent-brand', title: (a.name || a.key || 'Agent') + ' 底座' })
+    ? AgentBrand.html(a, { className: 'ag-agent-brand', title: displayName + ' 底座' })
     : '<span class="ag-ico">' + _AG_ICON + '</span>';
   return '<article class="ag-row st-' + status.tone + '" data-agstate="' + s + '" data-ak="' + esc(ak) + '">' +
     '<button class="ag-row-h" data-atoggle="' + esc(ak) + '">' +
       bot +
       '<span class="ag-main">' +
         '<span class="ag-l1">' +
-          "<b class=\"ag-row-nm\"" + (a.name ? ' data-user-content' : '') + '>' + esc(a.name || a.key) + '</b>' +
+          "<b class=\"ag-row-nm\"" + (a.name ? ' data-user-content' : '') + '>' + esc(displayName) + '</b>' +
           (a.version
             ? '<span class="ag-ver' + (a.verFrom === 'cli' ? ' is-guess' : '') + '" ' +
               'title="' + (a.verFrom === 'cli' ? '版本由程序自检得出' : '') + '">' +
@@ -414,8 +466,8 @@ function _agRowHtml(a, m) {
           '<span class="ag-caret">▾</span>' +
         '</span>' +
         /* Allow two description lines instead of truncating them beside the status badge. */
-        '<span class="ag-l2"><span class="ag-row-x" title="' + esc(a.blurb || '') + '">' +
-          esc(a.blurb || '') + '</span></span>' +
+        '<span class="ag-l2"><span class="ag-row-x" title="' + esc(blurb) + '">' +
+          esc(blurb) + '</span></span>' +
       '</span>' +
     '</button>' +
 
@@ -440,19 +492,20 @@ function _agDrawer() {
   const a = m && (m.agents || []).find(x => x.key === key);
   if (!a) return '';
   const status = _agPresentation(a, _agOpen), s = status.state;
+  const displayName = _agCopy(a, 'name', a.name || a.key);
   const bot = window.AgentBrand
-    ? AgentBrand.html(a, { className: 'ag-agent-brand', title: (a.name || a.key || 'Agent') + ' 底座' })
+    ? AgentBrand.html(a, { className: 'ag-agent-brand', title: displayName + ' 底座' })
     : '<span class="ag-ico">' + _AG_ICON + '</span>';
   return '<div class="ag-drawer-mask" data-adrawer-x="1"></div>' +
-    '<aside class="ag-drawer" role="dialog" aria-modal="true" aria-label="' + esc(a.name || a.key) + ' 详情">' +
+    '<aside class="ag-drawer" role="dialog" aria-modal="true" aria-label="' + esc(displayName) + ' 详情">' +
       '<header class="ag-drawer-head">' + bot +
         '<div class="ag-drawer-tt"><b' + (a.name ? ' data-user-content' : '') + '>' +
-          esc(a.name || a.key) + '</b>' +
+          esc(displayName) + '</b>' +
           (a.version ? '<span class="ag-ver">' + esc(a.version) + (a.bundled && a.key !== 'harness2' ? ' · 内置' : '') + '</span>' : '') +
           '<span class="cfg-state is-' + status.tone + '">' + status.label + '</span></div>' +
         '<button class="btn-mini ag-drawer-x" data-adrawer-x="1" aria-label="关闭详情">✕</button>' +
       '</header>' +
-      '<div class="ag-drawer-sub">装在 ' + esc((m && m.label) || '本机') + '</div>' +
+      '<div class="ag-drawer-sub">装在 <span data-user-content>' + esc(_agMachineIdentity(m)) + '</span></div>' +
       '<div class="ag-drawer-body">' + _agBodyHtml(a, s, _agOpen) + '</div>' +
     '</aside>';
 }
@@ -531,11 +584,12 @@ function _agBodyHtml(a, s, ak) {
   const bundled = !!a.bundled;
   const dis = busy ? ' disabled' : '';
   const why = status.reason;
+  const warn = _agMessage(a.warnMessage || a.warn, '');
   return '<div class="ag-row-b" id="ag-body-' + esc(ak) + '" role="region">' +
     '<div class="cfg-result is-' + status.tone + '"><span class="cfg-result-dot"></span>' +
       '<div><b>' + status.label + '</b><span>' + esc(why) + '</span></div></div>' +
     (status.issue && status.issue !== why ? '<div class="ag-note">' + esc(status.issue) + '</div>' : '') +
-    (a.warn && !status.installed ? '<div class="ag-note">' + esc(a.warn) + '</div>' : '') +
+    (warn && !status.installed ? '<div class="ag-note">' + esc(warn) + '</div>' : '') +
     /* Group model settings with configuration instructions in the drawer. */
     _agModelHtml(a) +
     /* Keep installation facts separate from the latest real execution result. */
@@ -552,6 +606,9 @@ function _agBodyHtml(a, s, ak) {
         : '')
       : '') +
     '<div class="ag-cfg"><b>配置方式</b><span>' + esc(a.configHow || '') + '</span></div>' +
+    (a.accountSetup?.command && a.auth !== 'authed'
+      ? '<div class="ag-cfg"><b>官方账号授权</b><span>在此执行机的终端运行以下命令，按官方页面完成登录，再刷新状态。</span>' +
+        '<small translate="no">' + esc(a.accountSetup.shell) + '</small><pre class="ag-log" translate="no">' + esc(a.accountSetup.command) + '</pre></div>' : '') +
     (a.key === 'codex' && a.loginAvailable === true
       ? '<div class="ag-cfg"><b>Codex 账号</b><span>优先使用这台机器已有的 Codex 登录；未登录时再由官方页面完成授权。</span>' +
         '<button class="btn-mini" data-alogin="' + esc(ak) + '"' + dis + '>连接 Codex</button></div>' : '') +
@@ -569,15 +626,15 @@ function _agBodyHtml(a, s, ak) {
         ? '<button class="btn-mini" data-acheck="' + esc(ak) + '"' + dis + '>看看有没有新版</button>' +
           '<button class="btn-mini" data-ainstall="' + esc(ak) + '"' + dis + '>' +
             (status.installed ? '重装 / 升到最新' : status.primaryLabel) + '</button>' +
-          '<span class="ag-spacer"></span>' +
-          '<button class="btn-mini danger" data-aunin="' + esc(ak) + '"' + dis + '>卸载</button>'
+          (_agCanUninstall(a) ? '<span class="ag-spacer"></span>' +
+          '<button class="btn-mini danger" data-aunin="' + esc(ak) + '"' + dis + '>卸载</button>' : '')
         : '<button class="btn-mini primary" data-ainstall="' + esc(ak) + '"' + dis + '>' + status.primaryLabel + '</button>' +
           '<button class="btn-mini" data-acheck="' + esc(ak) + '"' + dis + '>看看是哪一版</button>') +
       '</div>') +
     /*
      * Confirm uninstallation inline with its consequences rather than window.confirm.
      */
-    (_agConfirm === ak
+    (_agConfirm === ak && _agCanUninstall(a)
       ? '<div class="sch-confirm"><div>真的把 ' + esc(a.name) + ' 从执行机上卸掉？' +
         '<i>' + (a.key === 'harness2'
           ? '停用这台机器上的 Harness²，新任务不能再派给它；保留内置核心、共享 OpenCode 和任务记录。点「启用」可重新启用。'
@@ -664,6 +721,7 @@ function _agBind(box) {
     try {
       await SoduWorkAPI.setAgentModel(key, val);
       if (scope !== _agScopeEpoch) return;
+      try { window.soduWorkAPI?.broadcast?.('models'); } catch (_) {}
       const hit = (_agData?.agents || []).find(x => x.key === key);
       for (const ak of _agProbeResults.keys()) {
         if (_agParse(ak).key === key) _agProbeResults.delete(ak);
@@ -734,13 +792,15 @@ async function _agRun(ak, action) {
   const scope = _agScopeEpoch;
   const ownerScope = _agScope;
   const agent = (_agMachines().find(m => (m.runnerId || '') === rid)?.agents || []).find(a => a.key === key);
+  if (!agent) return;
+  if (action === 'uninstall' && !_agCanUninstall(agent)) return;
   const previousJob = _agJobs[ak];
   if (previousJob?.state === 'running') return;
   if (action === 'login' || (action === 'probe' && key === 'codex' && agent?.auth === 'unauthed')) {
     if (key !== 'codex' || agent?.loginAvailable !== true) return;
     if (!window.CodexAuthDialog) { if (typeof petSay === 'function') petSay('登录窗口未加载，请更新 SoduWork 后重试。'); return; }
     const machine = _agMachines().find(m => (m.runnerId || '') === rid);
-    return window.CodexAuthDialog.open({ runnerId: rid, machine: machine?.label || '',
+    return window.CodexAuthDialog.open({ runnerId: rid, machine: _agMachineIdentity(machine),
       onDone: () => { if (scope === _agScopeEpoch) void _agLoad(true); },
       onProbe: async () => {
         if (scope !== _agScopeEpoch) return;
@@ -784,7 +844,6 @@ async function _agRun(ak, action) {
 /* Use one timer to poll all active jobs. */
 function _agPoll() {
   if (_agTimer) return;
-  if (document.getElementById('agPanel')?.classList.contains?.('show') === false) return;
   let polling = false;
   const timer = _agTimer = setInterval(async () => {
     if (polling) return;
@@ -817,8 +876,9 @@ function _agPoll() {
     }
     if (finished) {
       /* Re-probe after installation or testing to replace stale availability results. */
-      await _agLoad(true);
-    } else if (changed) {
+      try { window.soduWorkAPI?.broadcast?.('agent-runtimes-changed'); } catch (_) {}
+      if (document.getElementById('agPanel')?.classList.contains('show')) await _agLoad(true);
+    } else if (changed && document.getElementById('agPanel')?.classList.contains('show')) {
       _agRender();
     }
     } finally { polling = false; }

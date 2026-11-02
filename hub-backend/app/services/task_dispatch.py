@@ -13,6 +13,7 @@ from . import audit, task_access, task_requirements, tasks as svc
 from .task_dispatch_context import (
     _ext_project_id, _repo_ctx, _resolve_repo, _attach_dev_flow, _attach_skills,
     _settle_work_dir, _link_task_repo, _stale_runner_hint, _push_task,
+    _remote_execution_context,
 )
 
 log = logging.getLogger("uvicorn.error")
@@ -255,6 +256,9 @@ async def dispatch(tid, body, client, session, *, actor=None):
     # Honor explicit selection first, then project defaults, resolving a real agent on the responsible user's device.
     # Do not pass an empty assignee and silently fall back to the server.
     try:
+        if not handoff:
+            ctx, aid = await _remote_execution_context(
+                session, client, ctx, body, aid, t, personal_plugin)
         if aid:
             picked = await _aio.to_thread(
                 ai_exec.resolve_requested_sync, ctx, aid, atype, client.id, "",
@@ -266,6 +270,8 @@ async def dispatch(tid, body, client, session, *, actor=None):
                 ai_exec.resolve_default_sync, ctx, client.id,
                 project_defaults.get("agentKind") or "",
                 ai_exec.required_capabilities(t))
+    except HTTPException as error:
+        await _fail("routing", error.detail, error.status_code)
     except Exception as error:  # noqa: BLE001
         await _fail("routing", "选择执行机失败：" + str(error), 502)
     if picked is None:

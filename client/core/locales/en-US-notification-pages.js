@@ -1,5 +1,13 @@
 (function (global) {
   const messages = {
+    "继续检查": "Continue checking",
+    "暂时无法确认登录状态。继续后会先检查，确认未登录时才请求授权。": "Sign-in status is unknown. Continue to check it; authorization is requested only if you are signed out.",
+    "暂时无法确认登录状态。可以重试，或使用独立授权连接 SoduWork。": "Unable to confirm sign-in status. Retry or connect SoduWork using a separate authorization.",
+    "OpenAI 授权未完成，请确认账号允许设备码登录并完成官方页面授权。": "OpenAI authorization is incomplete. Check that your account allows device-code sign-in and complete authorization on the official page.",
+    "授权流程已结束，但尚未确认有效登录，请重新检查。": "Authorization ended, but a valid sign-in could not be confirmed. Check again.",
+    "无法访问所选执行机的 Codex 程序或登录目录，请检查该机器的访问权限。": "Cannot access Codex or its sign-in directory on the selected machine. Check access permissions there.",
+    "这台机器已有 Codex 授权正在进行，请先完成或取消。": "Codex authorization is already in progress on this machine. Complete or cancel it first.",
+    "连接未完成，请重试；可在 Agent 管理中检查所选执行机的安装状态。": "Connection is incomplete. Retry or check the selected machine's installation in Agent Management.",
     "请选择要发送的成果（最多20份）": "Select up to 20 outputs to share.",
     "通知内容最多500字": "Keep your notification within 500 characters.",
     "当前客户端尚未支持同事提及": "Update SoduWork to mention colleagues.",

@@ -73,57 +73,24 @@ test('worker validates running state, resource errors and cancellation without l
   await fs.rm(f.cwd,{recursive:true,force:true});
   await assert.rejects(prepare(f.session,f.ids),error=>error.code==='ENOENT');
 });
-test('background packing finishes under the original account before authorization is rechecked', async () => {
-  const { create }=require('../main/conversation/local-delivery-sync');
-  const now=Math.floor(Date.now()/1000),identity=user=>({hub:'http://localhost:9999',clientId:'desktop',session:Buffer.from(JSON.stringify({typ:'device',cid:'desktop',uid:user,iat:now,exp:now+3600})).toString('base64url')+'.'+'a'.repeat(64)});
-  let account=identity('alice'),finish,uploads=0,checks=0;
-  const payload=new Promise(resolve=>finish=resolve),handle={snapshot:()=>({status:'idle'})};
-  const manager=create({app:{},identityOf:async()=>{checks++;return account},snapshotFiles:()=>({items:[{artifactId:'report',primary:true,changedInTurn:true}]}),
-    prepare:async()=>({manifest:{revision:'v1'},byteLength:1,payload}),upload:async()=>{uploads++;return{id:'saved'}}});
-  manager.bind(handle,account);await handle.captureDelivery();
-  for(let i=0;i<50&&!checks;i++)await new Promise(resolve=>setImmediate(resolve));
-  account=identity('bob');finish({manifest:{revision:'v1'},bytes:Buffer.from('a')});
-  for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve));
-  assert.equal(uploads,0);assert.equal(checks,2);
-});
-
-test('unchanged follow-ups skip recapture while changed support files and missing resources are detected', async t => {
-  const f=await fixture(t,true),now=Math.floor(Date.now()/1000);
-  const identity={hub:'http://localhost:9999',clientId:'desktop',session:Buffer.from(JSON.stringify({typ:'device',cid:'desktop',uid:'alice',iat:now,exp:now+3600})).toString('base64url')+'.'+'a'.repeat(64)};
-  let captures=0,uploads=0;
-  const manager=require('../main/conversation/local-delivery-sync').create({app:{},identityOf:async()=>identity,
-    prepare:async(...args)=>{captures++;return capture(...args)},upload:async()=>({id:'stored-'+(++uploads)})});
-  manager.bind(f.session,identity);
-  f.session.deliveryCaptureAtTurnBoundary=true;
-  const nextTurn=()=>{
-    manager.observe(f.session,{kind:'update'},{status:'streaming'});
-    manager.observe(f.session,{kind:'turn-finished'},{status:'idle'});
-  };
-  const synced=async()=>{for(let i=0;i<300&&f.session.deliverySync.state!=='synced';i++)await new Promise(resolve=>setTimeout(resolve,10));assert.equal(f.session.deliverySync.state,'synced',f.session.deliverySync.error)};
-  await f.session.captureDelivery();await synced();
-  nextTurn();await f.session.captureDelivery();assert.equal(captures,1);assert.equal(uploads,1);
-  assert.equal(f.session.deliverySync.state,'synced');assert.equal(f.session.deliverySync.delivery.id,'stored-1');
-  assert.equal(f.session.deliverySync.currentTurn,false);
-  await fs.writeFile(path.join(f.cwd,'data.bin'),'changed supporting data');
-  await f.session.captureDelivery();await synced();assert.equal(captures,2);assert.equal(uploads,2);
-  await fs.unlink(path.join(f.cwd,'data.bin'));
-  await f.session.captureDelivery();assert.equal(captures,3);assert.equal(f.session.deliverySync.state,'failed');assert.equal(uploads,2);
-});
-
-test('unchanged follow-up keeps an in-flight receipt and receives its eventual completion', async t => {
-  const f=await fixture(t),now=Math.floor(Date.now()/1000);
-  const identity={hub:'http://localhost:9999',clientId:'desktop',session:Buffer.from(JSON.stringify({typ:'device',cid:'desktop',uid:'alice',iat:now,exp:now+3600})).toString('base64url')+'.'+'a'.repeat(64)};
-  let finish,uploads=0;
-  const manager=require('../main/conversation/local-delivery-sync').create({app:{},identityOf:async()=>identity,
-    upload:async()=>{uploads++;await new Promise(resolve=>finish=resolve);return{id:'saved-original'}}});
-  manager.bind(f.session,identity);f.session.deliveryCaptureAtTurnBoundary=true;
+test('turn completion leaves real files local; explicit preparation still packages supporting resources', async t => {
+  const f = await fixture(t, true), now = Math.floor(Date.now() / 1000);
+  const identity = { hub: 'http://localhost:9999', clientId: 'desktop', session: Buffer.from(JSON.stringify({ typ: 'device', cid: 'desktop', uid: 'alice', iat: now, exp: now + 3600 })).toString('base64url') + '.' + 'a'.repeat(64) };
+  let packages = 0;
+  const manager = require('../main/conversation/local-delivery-sync').create({ prepare: () => packages++ });
+  manager.bind(f.session, identity); await f.session.captureDelivery();
+  assert.equal(packages, 0); assert.equal(f.session.deliverySync.state, 'local');
+  assert.equal(await fs.readFile(path.join(f.cwd, 'report.md'), 'utf8'), '# Original');
+  const revision = f.session.deliverySync.revision, file = path.join(f.cwd, 'report.md'), before = await fs.stat(file);
+  await fs.writeFile(file, '# Modified'); await fs.utimes(file, before.atime, before.mtime);
   await f.session.captureDelivery();
-  for(let i=0;i<100&&!finish;i++)await new Promise(resolve=>setTimeout(resolve,10));
-  assert.equal(uploads,1);
-  manager.observe(f.session,{}, {status:'streaming'});manager.observe(f.session,{}, {status:'idle'});
-  await f.session.captureDelivery();assert.equal(f.session.deliverySync.state,'saving');
-  finish();
-  for(let i=0;i<100&&f.session.deliverySync.state!=='synced';i++)await new Promise(resolve=>setTimeout(resolve,10));
-  assert.equal(uploads,1);assert.equal(f.session.deliverySync.delivery.id,'saved-original');
-  assert.equal(f.session.deliverySync.currentTurn,false);
+  assert.notEqual(f.session.deliverySync.revision, revision, 'same-size edits with preserved mtime must invalidate saved state');
+  await fs.writeFile(file, '# Original');
+  const original = await prepare(f.session, f.ids);
+  await fs.writeFile(path.join(f.cwd, 'data.bin'), 'changed supporting data');
+  const revised = await prepare(f.session, f.ids);
+  assert.notEqual(revised.manifest.revision, original.manifest.revision);
+  assert.equal(entries(revised.bytes).get('data.bin').toString(), 'changed supporting data');
+  await fs.unlink(path.join(f.cwd, 'data.bin'));
+  await assert.rejects(prepare(f.session, f.ids), /data.bin/);
 });

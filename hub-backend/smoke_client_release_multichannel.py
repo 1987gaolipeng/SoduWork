@@ -119,7 +119,7 @@ async def seed() -> None:
                  password_hash=auth.hash_password("multi-pw-2026")),
             Client(id=DEVICE, secret_hash=device_auth.hash_secret(SECRET),
                    auth_state="active", user_ref="98765432-1234-4234-8234-123456789001",
-                   app_version="1.12.0",
+                   app_version="1.12.81",
                    last_seen_at=datetime.now(timezone.utc)),
         ])
         await session.commit()
@@ -201,7 +201,7 @@ def main() -> None:
 
         for platform, arch, version, name in TARGETS:
             res = client.get(
-                f"/api/v1/client-updates/check?current=1.12.0&platform={platform}&arch={arch}&channel=beta",
+                f"/api/v1/client-updates/check?current=1.12.81&platform={platform}&arch={arch}&channel=beta",
                 headers=device,
             )
             assert res.status_code == 200, res.text
@@ -245,7 +245,7 @@ def main() -> None:
 
         # no update when only a different arch is staged for the platform
         res = client.get(
-            "/api/v1/client-updates/check?current=1.12.0&platform=win32&arch=arm64&channel=beta",
+            "/api/v1/client-updates/check?current=1.12.81&platform=win32&arch=arm64&channel=beta",
             headers=device,
         )
         assert res.status_code == 200 and res.json()["hasUpdate"] is False

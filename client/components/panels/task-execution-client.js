@@ -28,8 +28,43 @@
     return (await api.taskExecutionOptions(body || {})) || {};
   }
 
+  function targets(options) {
+    const rows = [];
+    for (const item of ((options || {}).substrates || [])) {
+      if (!item || !item.key) continue;
+      const locations = Array.isArray(item.locations) && item.locations.length
+        ? item.locations : [null];
+      for (const location of locations) {
+        const mode = clean(location && location.mode) ||
+          (clean(item.locationMode) === 'remote' ? 'remote' : 'local');
+        const label = clean((location && location.label) || item.locationLabel);
+        const id = clean((location && (location.assigneeId || location.id)) || item.key);
+        rows.push({
+          ...item,
+          key: id,
+          id,
+          name: clean(item.name || item.cli || item.key) +
+            (locations.length > 1 && label ? ' · ' + label : ''),
+          remote: mode === 'remote',
+          local: mode !== 'remote',
+          locationMode: mode,
+          locationLabel: label,
+          runnerId: clean((location && location.runnerId) || item.runnerId),
+          clientId: clean((location && location.clientId) || item.clientId),
+          runnerKind: clean((location && location.runnerKind) || item.runnerKind),
+          host: clean((location && location.host) || item.host),
+          busy: location && location.busy !== undefined
+            ? Boolean(location.busy) : Boolean(item.busy),
+          onlineSeats: locations.length > 1 ? 1 : Number(item.onlineSeats || 0),
+          locations: location ? [location] : locations,
+        });
+      }
+    }
+    return rows;
+  }
+
   function substrates(options, includeBlocked) {
-    return ((options || {}).substrates || []).filter((item) =>
+    return targets(options).filter((item) =>
       item && item.key && (includeBlocked || isAvailable(item))).map((item) => ({
         id: clean(item.key),
         type: 'agent',
@@ -186,7 +221,7 @@
   }
 
   global.TaskExecutionClient = {
-    load, substrates, workflows, blockedWorkflows, repos, pickAgent,
+    load, targets, substrates, workflows, blockedWorkflows, repos, pickAgent,
     runnableWorkflow, workflowProblem,
     agentSub, agentKind, execution, repoPayload, context, contextPayload, isAvailable,
     firstAINode, nodeAgentLabel,

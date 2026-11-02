@@ -38,6 +38,19 @@ function create({app,session=require('./agent-runtime/pi-session-bridge'),access
    const end=(p.offset||0)+(p.limit||50);return {ok:true,items:rows.slice(p.offset||0,end).map(publicRow),nextOffset:end<rows.length?end:null};
   }
   const row=await session.archivedConversation(app,p.id);guard();if(!row)throw Error('会话不存在');access.assertOwner(app,p.id,captured,row);
+  if(row.remoteProjection===true&&row.cloud===true){
+   const taskId=String(row.taskId||''),ref=String(row.ref||'');
+   if(!taskId||!ref)throw Error('云端会话执行标识不完整，暂无正文');
+   let data;
+   if(readCloud)data=await readCloud(captured.identity,{sessionId:p.id,taskId,ref,owner:row.owner,phase:'committed'},p);
+   else{
+    const route='/api/v1/tasks/'+encodeURIComponent(taskId)+'/ai-session?ref='+encodeURIComponent(ref)+'&since='+(p.after||0)+'&limit='+(p.limit||50);
+    const response=await require('./device-auth-request').fetchWithDeviceAuthRetry(captured.identity,String(captured.identity?.hub||'').replace(/\/+$/,'')+route,{redirect:'error',signal:AbortSignal.timeout(15000)});
+    data=await response.json();if(!response.ok||data.ok===false)throw Error(data.detail||data.reason||'云端会话读取失败');
+   }
+   guard();if(data.ref&&data.ref!==ref)throw Error('云端会话执行标识不匹配');
+   return eventsPage(data,p,[]);
+  }
   const cloudFile=path.join(app.getPath('userData'),'conversation-handoffs',require('node:crypto').createHash('sha256').update(p.id).digest('hex')+'.json');
   if(fs.existsSync(cloudFile)){
    require('./plugin-resources').assertNoLinks(app.getPath('userData'),cloudFile);

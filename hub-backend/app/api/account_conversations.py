@@ -115,6 +115,7 @@ def _conversation_json(row: AccountConversation, client_id: str) -> dict:
     return {
         "id": row.id,
         "sourceSessionId": row.source_session_id,
+        "taskProjectionId": row.task_projection_id or "",
         "sourceClientId": row.source_client_id,
         "sourceDeviceName": row.source_device_name or "",
         "title": row.title or "",
@@ -204,8 +205,15 @@ async def list_account_conversations(
     has_more = len(rows) > limit
     rows = rows[:limit]
     cursor = rows[-1].revision if rows else after
+    counts = dict((await session.execute(
+        select(AccountConversationMessage.conversation_id, func.count())
+        .where(AccountConversationMessage.conversation_id.in_([row.id for row in rows]),
+               AccountConversationMessage.deleted.is_(False))
+        .group_by(AccountConversationMessage.conversation_id)
+    )).all()) if rows else {}
     return {
-        "items": [_conversation_json(row, client.id) for row in rows],
+        "items": [{**_conversation_json(row, client.id), "messageCount": counts.get(row.id, 0)}
+                  for row in rows],
         "cursor": int(cursor),
         "hasMore": has_more,
     }
@@ -327,8 +335,17 @@ async def sync_account_conversation(
         raise HTTPException(status_code=422, detail="会话状态不受支持")
     archived = body.get("archived") is True
     deleted = body.get("deleted") is True
+    # New source clients send a complete bounded snapshot. Older clients omit
+    # this field and keep the legacy append/update semantics for compatibility.
+    snapshot_complete = body.get("snapshotComplete") is True
     messages = _validate_messages(body.get("messages"))
     digest = _sync_digest(body)
+    task_projection_id = _text(body.get("taskProjectionId"), "关联需求", 120)
+    if task_projection_id:
+        # This is a navigation alias, never an authorization grant. All task
+        # reads and decisions still pass through their own access checks.
+        from ..services.task_access import view_task
+        await view_task(session, client, task_projection_id)
 
     row = await session.scalar(select(AccountConversation).where(
         AccountConversation.owner_user_id == owner,
@@ -363,6 +380,8 @@ async def sync_account_conversation(
         session.add(row)
         await session.flush()
     row.source_device_name = _text(client.name, "设备名称", 120)
+    if "taskProjectionId" in body:
+        row.task_projection_id = task_projection_id
     row.source_epoch = source_epoch
     row.source_revision = source_revision
     row.source_digest = digest
@@ -375,7 +394,17 @@ async def sync_account_conversation(
 
     incoming_ids = [item["id"] for item in messages]
     existing = {}
-    if incoming_ids:
+    if snapshot_complete:
+        # A complete source checkpoint is allowed to express deletion by
+        # omission. Lock the whole transcript so a concurrent checkpoint
+        # cannot resurrect a message after the missing-row sweep below.
+        existing_rows = (await session.scalars(
+            select(AccountConversationMessage).where(
+                AccountConversationMessage.conversation_id == row.id
+            ).with_for_update()
+        )).all()
+        existing = {item.id: item for item in existing_rows}
+    elif incoming_ids:
         existing_rows = (await session.scalars(
             select(AccountConversationMessage).where(AccountConversationMessage.id.in_(incoming_ids)).with_for_update()
         )).all()
@@ -384,6 +413,13 @@ async def sync_account_conversation(
         if foreign:
             raise HTTPException(status_code=409, detail="消息已属于另一条会话")
     next_message_revision = await _next_message_revision(row.id, session)
+    incoming_id_set = set(incoming_ids)
+    if snapshot_complete:
+        for stored in existing.values():
+            if stored.id not in incoming_id_set and not stored.deleted:
+                stored.deleted = True
+                stored.revision = next_message_revision
+                next_message_revision += 1
     for item in messages:
         stored = existing.get(item["id"])
         if stored is not None and (
@@ -456,6 +492,7 @@ async def branch_account_conversation(
     target_runner_id = _text(body.get("targetRunnerId"), "target runner", 80)
     if target_runner_id and not re.fullmatch(r"[A-Za-z0-9._:-]{1,80}", target_runner_id):
         raise HTTPException(status_code=422, detail="invalid target runner id")
+    target_runner_kind = _text(body.get("targetRunnerKind"), "target runner kind", 40)
 
     message_query = select(AccountConversationMessage).where(
         AccountConversationMessage.conversation_id == row.id,
@@ -502,6 +539,7 @@ async def branch_account_conversation(
         "userText": instruction,
         "requiredSkills": [],
         **({"targetRunnerId": target_runner_id} if target_runner_id else {}),
+        **({"targetRunnerKind": target_runner_kind} if target_runner_kind else {}),
     }
     receipt = await cloud_conversations.create(session, client, request_id, options, [])
     if not isinstance(receipt, dict) or receipt.get("ok") is False:
@@ -513,5 +551,6 @@ async def branch_account_conversation(
         "branch": {
             "accountConversationId": row.id,
             "expectedRevision": expected_revision,
+            **({"targetRunnerKind": target_runner_kind} if target_runner_kind else {}),
         },
     }

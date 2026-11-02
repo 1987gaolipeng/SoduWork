@@ -57,5 +57,5 @@ test('currentLocale without i18n defaults to English', () => {
   const c = { window: {} };
   vm.createContext(c);
   vm.runInContext(source, c);
-  assert.equal(c.window.SoduworkLocalizedText.currentLocale(), 'zh-CN');
+  assert.equal(c.window.SoduworkLocalizedText.currentLocale(), 'en-US');
 });

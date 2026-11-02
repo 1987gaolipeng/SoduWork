@@ -34,6 +34,8 @@ COPY hub-backend/requirements.txt ./
 RUN python -m pip install --no-cache-dir -r requirements.txt
 COPY hub-backend/app ./app
 COPY hub-backend/migrations ./migrations
+COPY hub-backend/jiyong-alembic.ini ./jiyong-alembic.ini
+COPY hub-backend/jiyong-migrations ./jiyong-migrations
 COPY hub-backend/installers ./installers
 COPY hub-backend/plugins ./plugins
 COPY hub-backend/alembic.ini hub-backend/db_admin.py hub-backend/full_backup.py ./

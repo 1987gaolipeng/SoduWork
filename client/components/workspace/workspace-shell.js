@@ -12,8 +12,6 @@
     get activeChatId() { return activeChatId; }, set activeChatId(value) { activeChatId = value; },
     get _reconcileChats() { return _reconcileChats; },
     get _upsertChatItems() { return _upsertChatItems; },
-    get incomingOpened() { return incomingOpened; },
-    get taskOff() { return taskOff; }, set taskOff(value) { taskOff = value; },
     get sessionOff() { return sessionOff; }, set sessionOff(value) { sessionOff = value; },
     get updateChatState() { return updateChatState; },
     get historyLoad() { return historyLoad; }, set historyLoad(value) { historyLoad = value; },
@@ -39,7 +37,7 @@
     get _empty() { return _empty; },
     get chatsLoading() { return chatsLoading; }, set chatsLoading(value) { chatsLoading = value; },
   };
-  const { setChats, upsertChat, removeChat, setActiveChat, pinStorageKey, legacyPinnedIds, pinnedIds, togglePinned, forgetPinned, deleteHistoryChat, archiveHistoryChat, rememberChatName, updateChatState, renameChat, closeChatMenu, openChatRename, chatMenuItem, _newChatRow, _paintChatLocale, _paintChatRow, _syncChatList, renderChats, _incomingTaskKey, _pruneIncomingOpened, _openIncomingTask, _handleTaskChange, subscribeTaskChanges, subscribeConversationPresence, refreshConversationHistory } = global.WorkspaceChatList.create(chatContext);
+  const { setChats, upsertChat, removeChat, setActiveChat, pinStorageKey, legacyPinnedIds, pinnedIds, togglePinned, forgetPinned, deleteHistoryChat, archiveHistoryChat, rememberChatName, updateChatState, renameChat, closeChatMenu, openChatRename, chatMenuItem, _newChatRow, _paintChatLocale, _paintChatRow, _syncChatList, renderChats, subscribeConversationPresence, refreshConversationHistory } = global.WorkspaceChatList.create(chatContext);
 
   /* One 24-unit optical grid for the rail and its menus. Both states reuse
      the same outlines: selection adds ink without shrinking or changing the
@@ -217,8 +215,6 @@
   let activeChatId = '';
   let sidebarProjects = null;
   let sessionOff = null;
-  let taskOff = null;
-  const incomingOpened = new Map();
   let chatsLoading = true;
   let historyLoad = null;
   const chatNames = new Map();
@@ -471,7 +467,7 @@
       root._pluginCatalogBound = true;
       root._onPluginCatalogChange = () => {
         global.PluginUIHost?.invalidateCatalog?.();
-        renderApps();
+        refreshNav();
       };
       window.addEventListener('soduwork:plugins-changed', root._onPluginCatalogChange);
     }
@@ -526,7 +522,6 @@
     });
     subscribeConversationPresence();
     refreshConversationHistory();
-    subscribeTaskChanges();
 
 
 

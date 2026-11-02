@@ -1,7 +1,7 @@
 'use strict';
 
-// Locate current files without exporting them, launching their contents, or
-// confusing a cloud session's local cache with the computer that did the work.
+// Resolve local actions against the authenticated workspace. Bundle actions
+// share one verified archive; individual file actions only reveal their source.
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const artifacts = require('./artifact-runtime');
@@ -18,9 +18,13 @@ function install({ app, ipcMain, session, shell,
   isRemote = handle => Boolean(handle.passiveCloudView),
   resolveSession = async handle => handle,
   snapshotFiles = artifacts.snapshotAsync, fileSystem = fs }) {
-  for (const action of ['open-local', 'continue-local', 'open-archive']) ipcMain.handle('conversation-delivery-' + action, async (event, ref, ids) => {
+  for (const action of ['open-local', 'continue-local', 'open-archive']) ipcMain.handle('conversation-delivery-' + action, async (event, ref, ids, options = {}) => {
     try {
       if (!isTrusted(event)) throw fail('DELIVERY_FORBIDDEN', '请在 SoduWork 会话中打开成果位置');
+      if (!options || typeof options !== 'object' || Array.isArray(options) ||
+          options.revision !== undefined && !/^[a-f0-9]{64}$/.test(options.revision)) {
+        throw fail('DELIVERY_INVALID_SELECTION', '成果版本无效，请重新打开成果');
+      }
       if (!Array.isArray(ids) || !ids.length || ids.length > 500 || new Set(ids).size !== ids.length ||
           ids.some(id => typeof id !== 'string' || !id || id.length > 200)) {
         throw fail('DELIVERY_INVALID_SELECTION', '请选择有效的本机成果');
@@ -96,10 +100,19 @@ function install({ app, ipcMain, session, shell,
         if (!cloudCache) throw fail('DELIVERY_INVALID_SELECTION', '请在当前本地会话继续操作');
         return await require('./cloud-result-local').create({ app, directory, owner, items: indexed, ids, guard });
       }
-      if (action === 'open-archive') {
+      if (action === 'open-archive' || options.bundle === true) {
         const result = await require('./delivery-package-worker').prepare(handle, ids);
+        if (options.revision && options.revision !== result.manifest.revision) {
+          throw fail('DELIVERY_REVISION_CHANGED', '本地成果已更新，请查看当前成果或此前保存的版本');
+        }
+        if (result.contentType !== 'application/zip' || !/\.zip$/i.test(result.filename)) {
+          throw fail('DELIVERY_INVALID_SELECTION', '这份成果不是 ZIP 压缩包');
+        }
         const archive = await require('./local-delivery-archive').create({ app, owner, result, guard });
-        shell.showItemInFolder(archive);
+        if (action === 'open-archive') {
+          const error = await shell.openPath(archive);
+          if (error) throw fail('DELIVERY_OPEN_FAILED', '无法打开压缩包，请使用打开所在位置查看文件');
+        } else shell.showItemInFolder(archive);
         return { ok: true };
       }
       if (targets.length === 1) shell.showItemInFolder(targets[0]);

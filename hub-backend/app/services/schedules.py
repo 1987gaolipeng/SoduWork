@@ -1,7 +1,10 @@
-"""Server-managed schedules retain independent run records and deduplicate with leases and unique
-runs. Current ordinary automation opens a new conversation; enterprise workflows and older
-executors retain task and approval contracts. Offline conversation requests wait for delivery,
-and the independent schedule loop checks due work at its configured interval.
+"""自动化节奏由服务端负责，每次触发保留独立运行记录。
+
+每次自动化触发都发送到一条新建的普通对话，不额外创建任务或需求记录。
+设备离线时新会话请求等待设备接收，不伪装成已经执行。
+
+触发精度：`schedule_loop` 独立巡检（默认 120 秒一轮），不等待代码或产出巡检。
+到点后的两分钟内检查计划；实际派发仍使用数据库租约与唯一运行记录去重。
 """
 from __future__ import annotations
 
@@ -24,7 +27,7 @@ from .schedule_execution import (
 from .schedule_repo_scope import resolve_repo
 from .schedule_run_contracts import (
     DIRECT_CAPABILITIES, PERSONAL_PLUGIN_VERSION_POLICIES,
-    RUN_ACTIVE, RUN_TRIGGERS,
+    RUN_ACTIVE, RUN_TRIGGERS, derive_run_state,
     _run_iso, _run_time, apply_attempt_outcome, apply_outcome,
     automation_conversation_title, begin_run, claim_run,
     clean_personal_plugin_checksum, clean_personal_plugin_key,
@@ -36,6 +39,7 @@ from .schedule_run_contracts import (
 log = logging.getLogger("uvicorn.error")
 _SCHEDULE_OWNER = resource_leases.default_owner("schedule")
 _SCHEDULE_LEASE_SECONDS = 10 * 60
+CLOUD_PROTOCOL = 'soduwork.cloud-automation/v1'
 
 
 EVERY = schedule_timing.EVERY
@@ -127,9 +131,7 @@ def next_run_instant(s, after: datetime | None = None) -> datetime | None:
 
 
 def next_run_after(s, after: datetime | None = None) -> datetime | None:
-    """Compatibility contract: naive datetimes represent schedule-local wall time; aware inputs
-    remain aware.
-    """
+    """兼容界面与测试：naive 输入/输出表示计划当地墙上时间；aware 输入保持 aware。"""
     naive = after is not None and after.tzinfo is None
     if naive:
         after_utc = after.replace(tzinfo=schedule_zone(s)).astimezone(timezone.utc)
@@ -179,73 +181,14 @@ def trigger_identity(s, trigger: str = "timer") -> str:
              if getattr(s, "every", "") == "once" else "")
     return f"{trigger}:{str(getattr(s, 'id', '') or '')}:{owner}{stamp}"[:180]
 
-def task_actor(s, client, fallback_name: str = "") -> tuple[str, str]:
-    """Return the stable person who created this automation and its tasks."""
-    user_id = str(getattr(s, "created_by", "") or getattr(client, "user_ref", "") or "")
-    name = str(getattr(s, "created_by_name", "") or fallback_name or "")
-    return user_id, name
-
-
-async def _persisted_workflow(session: AsyncSession, task_id: str, binding_id: str):
-    """Find a run committed before immediate scheduling failed.
-
-    Workflow startup commits the run before dispatching its first node, so the global workflow
-    ticker can resume it safely. Reporting that state as failure invites duplicate retries.
-    """
-    from .. import automation_models as am
-
-    return await session.scalar(select(am.WorkflowRun).where(
-        am.WorkflowRun.task_id == task_id,
-        am.WorkflowRun.binding_id == binding_id,
-    ).order_by(am.WorkflowRun.created_at.desc()).limit(1))
-
-
-async def _persisted_dispatch(session: AsyncSession, task_id: str) -> dict | None:
-    """Recover a hand-off committed before its schedule receipt was finalized."""
-    from .. import automation_models as am
-    from . import ai_exec
-
-    row = await session.scalar(select(am.ExecutionSession).where(
-        am.ExecutionSession.task_id == task_id
-    ).order_by(am.ExecutionSession.started_at.desc().nullslast(),
-               am.ExecutionSession.created_at.desc()).limit(1))
-    if row is not None and row.ref:
-        identity = dict(dict(row.metadata_ or {}).get("executionIdentity") or {})
-        runner_id = str(row.runner_id or "")
-        provider = "local" if runner_id == "backend-local" else "runner"
-        return {
-            "ok": True, "recovered": True, "taskId": task_id,
-            "identifier": row.ref, "provider": provider,
-            "runnerId": "" if runner_id == "backend-local" else runner_id,
-            "host": row.host or "", "agentCli": row.engine or "",
-            "assigneeCli": row.engine or "", "model": row.model or "",
-            "assigneeId": str(identity.get("assigneeId") or ""),
-            "assigneeName": str(identity.get("agentName") or row.engine or ""),
-        }
-    event = await ai_exec.last_dispatch_event(session, task_id)
-    if event is None:
-        return None
-    detail = dict(event.detail or {})
-    ref = str(detail.get("ref") or detail.get("issueId") or "")
-    if not ref:
-        return None
-    return {
-        "ok": True, "recovered": True, "taskId": task_id, "identifier": ref,
-        **{key: detail.get(key) for key in (
-            "provider", "runnerId", "host", "agentCli", "assigneeCli",
-            "model", "assigneeId", "assigneeName") if detail.get(key) not in (None, "")},
-    }
-
-
-
-
-# Notify at most once per half-day for the same schedule and error type, including hourly schedules.
+# 自动化启动失败要当场告诉人，避免用户只看到没有会话而不知道原因。
+# 同一计划同一类错误半天只推一次——hourly 的计划失败一天最多也就吵两回。
 _FAIL_NOTIFIED: dict[str, tuple[int, float]] = {}
 _FAIL_REPEAT_S = 12 * 3600
 
 
 def _failure_hint(error: str) -> str:
-    """Add actionable remediation for known failure categories."""
+    """按已知失败类别补一句「怎么办」，让人对着通知就能动手，不用猜。"""
     if "尚未获得本机授权" in error:
         return ("到 Agent 管理 → Runner → 管理本机能力里授权后，"
                 "在自动化里点「立即执行」即可补跑。")
@@ -285,10 +228,8 @@ async def _notify_failure(session: AsyncSession, s, out: dict) -> None:
     try:
         from ..realtime import hub
         message = {"type": "notice", "text": text, "kind": "flow_failed"}
-        if out.get("taskId"):
-            message["taskId"] = str(out.get("taskId"))
         await hub.publish(s.owner_client_id, message, user_id=client.user_ref or "")
-    except Exception as exc:  # noqa: BLE001 - Notification failure must not affect settlement.
+    except Exception as exc:  # noqa: BLE001 - 推送失败不影响结算
         log.warning("推送自动化失败通知失败：%s", type(exc).__name__)
 
 
@@ -368,13 +309,9 @@ async def execute_one(session: AsyncSession, s, trigger: str = "timer",
     except Exception as exc:  # noqa: BLE001 - the receipt must survive adapter failures
         log.exception("自动化启动异常：schedule=%s run=%s", schedule_id, run_id)
         out = {"ok": False, "error": str(exc)[:300]}
-    # run_one calls task_dispatch.dispatch, which commits and expires all session ORM objects.
-    # apply_outcome only assigns values on success, but its failure path reads schedule attributes
-    # such as plugin_binding_id and retry_limit. Reading expired attributes triggers synchronous
-    # lazy loading and a greenlet_spawn error under asyncpg, preventing the tick from committing
-    # its changes, including last_run_at. due() would then remain true on each subsequent tick
-    # and repeatedly run the same failing schedule.
-    # Refresh both objects first so later attribute access uses values already in memory.
+    out.setdefault('conversationTitle', conversation_title)
+    # The conversation handoff may commit while preparing the local receipt.
+    # Refresh both rows before settling so async ORM never lazy-loads expired state.
     try:
         if once_attempt:
             fresh = await schedule_timing.locked_schedule(session, schedule_id)
@@ -384,15 +321,15 @@ async def execute_one(session: AsyncSession, s, trigger: str = "timer",
                 plan_exists = False
         else:
             await session.refresh(s)
-    except Exception:  # noqa: BLE001 - The schedule may have been deleted; settle best-effort.
+    except Exception:  # noqa: BLE001 - 计划行可能刚被删除；结算尽力而为
         if once_attempt:
             plan_exists = False
     try:
         await session.refresh(run)
     except Exception:  # noqa: BLE001
-        # An inner rollback may remove the uncommitted run receipt created by begin_run.
-        # Reinsert it using the retained ID and start time.
-        # Failed executions must remain in the run history.
+        # begin_run 只 flush 未 commit：内层 rollback 会把回执行整个吞掉，
+        # 这次失败就从执行记录里凭空消失。把对象加回去重插（id/started_at 还在），
+        # 失败也必须留痕。
         session.add(run)
     retry = schedule_timing.settle(s, run, out, outcome_of=apply_outcome) if plan_exists else {"retrying": False}
     apply_attempt_outcome(run, out)
@@ -404,8 +341,11 @@ async def execute_one(session: AsyncSession, s, trigger: str = "timer",
 async def reconcile_runs(session: AsyncSession, *, schedule_id: str = "",
                          owner_client_id: str = "", owner_user_id: str | None = None,
                          limit: int = 200) -> list:
-    """Reconcile active receipts from task/workflow truth without substrate coupling."""
-    state_filter = models.AiScheduleRun.state.in_(RUN_ACTIVE)
+    """Reconcile active ordinary-conversation receipts without task truth."""
+    cloud_mode = models.AiScheduleRun.receipt["executionMode"].as_string() == CLOUD_PROTOCOL
+    damaged_cloud = cloud_mode & (
+        models.AiScheduleRun.receipt["migratedFrom"].as_string() == "legacy-task-workflow")
+    state_filter = or_(models.AiScheduleRun.state.in_(RUN_ACTIVE), damaged_cloud)
     # Include every old task/workflow-linked row when a schedule's history is
     # opened. It is migrated below in one place, so the UI never exposes a
     # retired task status or attempts to recover the old workflow.
@@ -427,8 +367,84 @@ async def reconcile_runs(session: AsyncSession, *, schedule_id: str = "",
     if not active:
         return active
     now = datetime.now(timezone.utc)
+    # Repair only cloud links accidentally cleared by the legacy migration.
+    # The immutable handoff must confirm both the run identity and its owner.
+    from ..conversation_handoff_models import ConversationHandoff
     for item in active:
         receipt = dict(item.receipt or {})
+        if (receipt.get("executionMode") != CLOUD_PROTOCOL or item.task_id or
+                receipt.get("migratedFrom") != "legacy-task-workflow"):
+            continue
+        occurrence = str(item.schedule_id) + ':' + str(item.id)
+        request_id = 'schedule-' + hashlib.sha256(occurrence.encode('utf-8')).hexdigest()
+        if receipt.get("conversationId") != request_id:
+            continue
+        handoff = await session.scalar(select(ConversationHandoff).where(
+            ConversationHandoff.transfer_id == request_id,
+            ConversationHandoff.owner_client_id == item.owner_client_id,
+            ConversationHandoff.owner_user_id == item.owner_user_id,
+            ConversationHandoff.task_id == str(receipt.get("taskId") or "")))
+        if handoff is None:
+            continue
+        item.task_id = handoff.task_id
+        item.error, item.finished_at = "", None
+        receipt.pop("migratedFrom", None)
+        item.receipt = receipt
+    # Cloud automation runs are owned by the Hub task/AI session after the
+    # handoff is accepted. Project that authoritative state into the compact
+    # automation receipt so history does not remain permanently "running" and
+    # failure notifications retain the real remote reason.
+    cloud_runs = [item for item in active
+                  if dict(item.receipt or {}).get("executionMode") == CLOUD_PROTOCOL
+                  and str(item.task_id or "")]
+    if cloud_runs:
+        from . import tasks as task_service
+        task_ids = list({str(item.task_id) for item in cloud_runs})
+        task_rows = list((await session.execute(
+            select(models.Task).where(models.Task.id.in_(task_ids))
+        )).scalars().all())
+        task_by_id = {str(item.id): item for item in task_rows}
+        ai_by_task = await task_service.ai_states(session, task_ids)
+        for item in cloud_runs:
+            task = task_by_id.get(str(item.task_id))
+            report = dict(ai_by_task.get(str(item.task_id)) or {})
+            if task is None:
+                continue
+            task_status = str(getattr(task, "status", "") or "").lower()
+            if task_status in {"cancelled", "canceled"}:
+                task_status = "cancel"
+            remote_state = derive_run_state(
+                task_status=task_status,
+                ai_state=str(report.get("executionState") or report.get("state") or ""),
+                has_task=True,
+            )
+            # A cloud automation is a conversation, with no requirement acceptance gate.
+            if (str(report.get("executionState") or report.get("state") or "") == "done"
+                    and task_status != "cancel"):
+                remote_state = "succeeded"
+            # A newly-created cloud Task can briefly be todo before its first
+            # dispatch event. Preserve accepted/running instead of regressing
+            # the receipt to starting during that short interval.
+            if remote_state == "starting" and item.state in {"running", "waiting"}:
+                remote_state = item.state
+            receipt = dict(item.receipt or {})
+            receipt["remoteState"] = remote_state
+            receipt["taskStatus"] = task_status
+            if report.get("executionState"):
+                receipt["executionState"] = str(report["executionState"])
+            item.receipt = receipt
+            if remote_state in {"succeeded", "failed", "cancelled"}:
+                item.state = remote_state
+                item.error = (str(report.get("error") or "")[:1200]
+                              if remote_state == "failed" else "")
+                item.finished_at = item.finished_at or now
+            elif remote_state in {"running", "waiting"}:
+                item.state = remote_state
+                item.finished_at = None
+    for item in active:
+        receipt = dict(item.receipt or {})
+        if receipt.get("executionMode") == CLOUD_PROTOCOL:
+            continue  # Cloud state was projected above; never retire its task link.
         if item.task_id or item.workflow_run_id:
             # A legacy run cannot be turned into an ordinary chat after the
             # fact. Remove its task/workflow ownership and leave a truthful
@@ -445,50 +461,12 @@ async def reconcile_runs(session: AsyncSession, *, schedule_id: str = "",
             continue
         if await schedule_timing.reconcile_pending(session, item, now):
             continue
-        if dict(item.receipt or {}).get('executionMode') == 'soduwork.automation-conversation/v1':
-            continue  # The ordinary conversation reports its own state; no task/acceptance is implied.
-        task = tasks.get(item.task_id)
-        workflow = workflows.get(item.workflow_run_id)
-        ai_info = ai.get(item.task_id, {})
-        state = derive_run_state(
-            getattr(task, "status", ""), getattr(workflow, "state", ""),
-            ai_info.get("state", ""), item.workflow_run_id in waiting_human,
-            task is not None)
-        # A task row is created before plugin validation and dispatch. Its todo/
-        # doing status alone cannot undo a recorded failure; retries need real
-        # execution evidence or an explicit terminal task decision.
-        no_execution = workflow is None and not ai_info
-        if (no_execution and state not in RUN_TERMINAL and
-                (item.state == "failed" or state == "starting" and item.error)):
-            state = "failed"
-        started = _run_time(item.started_at)
-        startup_error = ""
-        if state == "starting" and no_execution and started and (now - started).total_seconds() > 600:
-            state = "failed"
-            startup_error = ("调度启动中断，未形成可执行任务" if task is None else
-                             "调度启动中断，任务尚未交付执行，请检查执行条件后重试")
-        receipt = dict(item.receipt or {})
-        receipt.update({
-            "taskStatus": str(getattr(task, "status", "") or ""),
-            "workflowState": str(getattr(workflow, "state", "") or ""),
-        })
-        if state == "waiting":
-            receipt["phase"] = "human_gate" if item.workflow_run_id in waiting_human else "acceptance"
-        else:
-            receipt.pop("phase", None)
-        item.receipt = receipt
-        if state == "failed":
-            item.error = str(getattr(workflow, "error", "") or
-                             ai_info.get("error") or item.error or startup_error or "执行失败")[:1200]
-        elif state != "failed":
-            item.error = ""
-        if state in RUN_TERMINAL:
-            item.finished_at = (getattr(workflow, "finished_at", None) or
-                                getattr(task, "actual_end_at", None) or
-                                (item.finished_at if item.state == state else None) or now)
-        else:
-            item.finished_at = None
-        item.state = state
+        if receipt.get('executionMode') in {
+                'soduwork.automation-conversation/v1', CLOUD_PROTOCOL}:
+            continue  # The ordinary conversation reports its own state.
+        # Ordinary conversation workers own their own state transitions. A
+        # starting row without a receipt remains visible until the worker
+        # claims it; no task/workflow lookup is performed here.
     return active
 
 
@@ -526,21 +504,17 @@ async def list_runs(session: AsyncSession, schedule_id: str, *,
 
 
 async def run_one(session: AsyncSession, s, who: str = "SoduWork（定时）",
-                  schedule_run_id: str = "") -> dict:
-    """Send ordinary local automation into conversations while retaining legacy and explicit
-    workflow contracts. Enterprise execution continues through engine routing, evidence, and
-    approval gates.
-    """
-    from . import task_dispatch
-    from . import ai_exec
-
+                  schedule_run_id: str = "", conversation_title: str = "") -> dict:
+    """Run one automation occurrence as an ordinary conversation."""
     if not s.owner_client_id:
-        return {"ok": False, "error": "没配任务落在哪台 SoduWork 上"}
+        return {"ok": False, "error": "没配自动化落在哪台 SoduWork 上"}
     client = await session.get(models.Client, s.owner_client_id, populate_existing=True)
     if client is None:
         return {"ok": False, "error": "配的那台 SoduWork 不在了"}
     if not await _account_can_run(session, s, client):
-        return {"ok": False, "code": "SCHEDULE_OWNER_CHANGED", "error": "执行设备的登录账号已变更，请原账号登录后再执行"}
+        return {"ok": False, "code": "SCHEDULE_OWNER_CHANGED",
+                "error": "执行设备的登录账号已变更，请原账号登录后再执行"}
+    normalize_conversation_schedule(s)
     try:
         repo = await resolve_repo(session, s, client=client)
         await validate_execution(session, s)
@@ -549,172 +523,79 @@ async def run_one(session: AsyncSession, s, who: str = "SoduWork（定时）",
         return {"ok": False, "error": str(exc)[:300]}
 
     from . import schedule_conversations
+    # Mobile/Web schedules may target another personal desktop or an
+    # independent cloud Runner. Use the account-scoped cloud conversation path
+    # directly so the target does not depend on the creator device's inbox.
+    # The request id is deterministic per occurrence, so retrying resumes one
+    # handoff instead of dispatching twice.
+    aid = str(s.assignee_id or '')
+    if aid.startswith('runner:'):
+        from . import cloud_conversations, runner_hub
+        parts = aid.split(':', 2)
+        runner = runner_hub.get(parts[1]) if len(parts) == 3 else None
+        if runner is None:
+            return {'ok': False, 'code': 'AUTOMATION_TARGET_OFFLINE',
+                    'error': '所选执行机不在线，本次未执行；恢复连接后重试，不会改派其他电脑或云端'}
+        cross_device = bool(runner and (
+            str(getattr(runner, 'client_id', '') or '') != str(client.id or '') or
+            not str(getattr(runner, 'client_id', '') or '')))
+        if cross_device:
+            if not schedule_run_id:
+                return {'ok': False, 'code': 'AUTOMATION_RUN_REQUIRED',
+                        'error': '自动化运行记录尚未建立，请从自动化入口重新执行'}
+            run = await session.get(models.AiScheduleRun, schedule_run_id,
+                                    populate_existing=True)
+            if run is None:
+                return {'ok': False, 'code': 'AUTOMATION_RUN_REQUIRED',
+                        'error': '自动化运行记录尚未建立，请从自动化入口重新执行'}
+            if personal or str(getattr(s, 'plugin_binding_id', '') or ''):
+                return {'ok': False, 'code': 'CLOUD_AUTOMATION_UNSUPPORTED_BINDING',
+                        'error': '云端自动化当前只支持普通会话；个人插件和企业工作流请选择已授权的执行端'}
+            cli = parts[2]
+            # Cloud handoff identifiers allow only letters, digits and hyphens.
+            occurrence = str(s.id) + ':' + str(schedule_run_id)
+            request_id = 'schedule-' + hashlib.sha256(occurrence.encode('utf-8')).hexdigest()
+            title = str(s.title or '自动化')
+            instruction = title + '\n\n' + str(s.note or '')
+            if repo:
+                instruction += '\n\n工程：' + str(repo.name or '')
+            # Retrying an occurrence must keep the cloud request digest stable.
+            triggered_at = _utc(run.started_at).astimezone(schedule_zone(s))
+            instruction += '\n\n自动化触发时间：' + triggered_at.isoformat()
+            required = clean_required_capabilities(s.required_capabilities)
+            runner_kind = 'work-computer' if runner.client_id else 'cloud'
+            result = await cloud_conversations.create(session, client, request_id, {
+                'sessionId': request_id, 'agentId': cli,
+                'model': str(getattr(s, 'model_name', '') or ''),
+                'title': title, 'text': instruction, 'userText': instruction,
+                'requiredSkills': required_skill_names(required),
+                'targetRunnerId': runner.id, 'targetRunnerKind': runner_kind,
+            }, [])
+            await session.refresh(run)
+            receipt = dict(run.receipt or {})
+            receipt.update({
+                'executionMode': CLOUD_PROTOCOL, 'conversationId': request_id,
+                'conversationTitle': conversation_title,
+                'taskId': result.get('taskId', ''), 'ref': result.get('ref', ''),
+                'targetRunnerId': runner.id, 'targetRunnerKind': runner_kind,
+                'phase': 'cloud',
+            })
+            run.receipt = receipt
+            await session.flush()
+            return {'ok': True, 'executionMode': CLOUD_PROTOCOL,
+                    'conversationId': request_id, 'taskId': result.get('taskId', ''),
+                    'conversationTitle': conversation_title,
+                    'runnerId': runner.id, 'host': runner.host}
     # Normalize legacy rows before selecting the execution adapter.  This is
     # deliberately repeated at the dispatch boundary so an old database row
     # cannot route one more run through the task/workflow engine.
     normalize_conversation_schedule(s)
     adapter = schedule_conversations.adapter_for(s, client)
-    if adapter and schedule_run_id:
-        return await schedule_conversations.prepare(session, s, client, repo, schedule_run_id, adapter, personal)
-
-    # A transient offline Runner must not create a trail of duplicate tasks.
-    # Retries keep the original task, its timeline and its evidence identity.
-    retrying = bool(getattr(s, "next_retry_at", None) and
-                    str(getattr(s, "last_task_id", "") or ""))
-    stable_task_id = str(schedule_run_id or "")[:36]
-    if retrying:
-        t = await session.get(models.Task, s.last_task_id)
-    else:
-        t = await session.get(models.Task, stable_task_id) if stable_task_id else None
-    new_task = t is None
-    if new_task:
-        task_values = {
-            "title": ("%s · %s" % (s.title or "定时任务", stamp))[:200],
-            "note": s.note or "", "status": "todo",
-            "owner_client_id": s.owner_client_id,
-            # This Task is an execution identity for the automation run, not a
-            # user requirement.  Keep it addressable for artifacts and traces,
-            # while the normal task projection excludes its origin.
-            "origin": "automation",
-            "automation_schedule_id": str(getattr(s, "id", "") or "")[:36] or None,
-            "source": "定时派活", "created_by": actor_id or None,
-            "created_by_name": actor_name,
-            "requester_user_id": actor_id or None, "requester_name": actor_name,
-        }
-        if stable_task_id:
-            task_values["id"] = stable_task_id
-        t = models.Task(**task_values)
-        if repo is not None:
-            t.project_id = repo.project_id
-            t.repo_id = repo.id
-        session.add(t)
-
-    # Retries can find a Task created before the origin marker was added.  The
-    # schedule owns that stable identity, so normalize it before any receipt or
-    # execution update is emitted.
-    t.origin = "automation"
-    t.automation_schedule_id = str(getattr(s, "id", "") or "")[:36] or None
-
-    if not plugin_mode:
-        routing = dict(getattr(t, "work_routing", None) or {})
-        capabilities = clean_required_capabilities(
-            getattr(s, "required_capabilities", None))
-        routing.update({
-            "automationScheduleId": str(getattr(s, "id", "") or ""),
-            "automationScheduleRunId": str(schedule_run_id or ""),
-            "requiredAgentCapabilities": capabilities,
-            "requiredSkills": required_skill_names(capabilities),
-        })
-        if personal:
-            routing["personalPlugin"] = dict(personal)
-        t.work_routing = routing
-    await session.flush()
-
-    if new_task:
-        await _push_new(session, t)
-    if plugin_mode:
-        if stable_task_id:
-            persisted = await _persisted_workflow(
-                session, t.id, str(getattr(s, "plugin_binding_id", "") or ""))
-            if persisted is not None:
-                return {
-                    "ok": True, "recovered": True, "taskId": t.id,
-                    "workflowRunId": persisted.id, "identifier": persisted.id,
-                }
-        binding = None
-        plugin_snapshot = {}
-        try:
-            binding = await validate_execution(session, s)
-            from .. import automation_models as am
-            version = await session.get(am.PluginVersion, binding.version_id)
-            plugin = await session.get(am.Plugin, binding.plugin_id)
-            plugin_snapshot = {
-                "scope": "enterprise", "bindingId": binding.id,
-                "pluginId": binding.plugin_id, "versionId": binding.version_id,
-                "key": str(getattr(plugin, "key", "") or ""),
-                "name": str(getattr(plugin, "name", "") or ""),
-                "version": str(getattr(version, "version", "") or ""),
-                "checksum": str(getattr(version, "checksum", "") or ""),
-            }
-            from . import workflow_engine
-            run = await workflow_engine.start(
-                session, t, binding, dict(s.plugin_inputs or {}),
-                actor_id=actor_id, instruction=s.note or "",
-                repo_id=(repo.id if repo else ""), entrypoint="automation")
-        except Exception as e:  # noqa: BLE001 - Retain the task and readable failure for later configuration repair.
-            # start first commits the run, then schedules its first node. The persisted run is
-            # recoverable by workflow_engine.tick and must not look like "nothing started".
-            persisted = None
-            if binding is not None:
-                try:
-                    persisted = await _persisted_workflow(session, t.id, binding.id)
-                except Exception:  # a broken transaction remains a real startup failure
-                    persisted = None
-            if persisted is not None:
-                warning = "流程已创建，首次调度暂未完成，后台会自动恢复"
-                log.warning("定时插件首次调度延后恢复：task=%s run=%s", t.id, persisted.id)
-                return {"ok": True, "taskId": t.id, "workflowRunId": persisted.id,
-                        "identifier": persisted.id, "deferredSchedule": True,
-                        "warning": warning, "pluginSnapshot": plugin_snapshot}
-            return {"ok": False, "error": str(getattr(e, "detail", e))[:300],
-                    "taskId": t.id}
-        return {"ok": True, "taskId": t.id, "workflowRunId": run.id,
-                "identifier": run.id, "pluginSnapshot": plugin_snapshot}
-
-    if stable_task_id:
-        persisted_dispatch = await _persisted_dispatch(session, t.id)
-        if persisted_dispatch is not None:
-            return persisted_dispatch
-    ctx = await ai_exec.load(session, force=True)
-    if not ai_exec.configured(ctx):
-        return {"ok": False, "error": "AI 执行还没配好", "taskId": t.id}
-    body = {"assigneeId": s.assignee_id, "assigneeType": s.assignee_type or "agent", "brief": ""}
-    if personal:
-        # Send only personal-plugin identity, verifiable version metadata, and public parameters.
-        # Resolve content on the owner's device, where the personal plugin library exists.
-        body["personalPlugin"] = {**personal, "inputs": dict(s.plugin_inputs or {})}
-    if repo is not None:
-        # Unattended schedules resolve paths from the client's persisted work root,
-        # falling back to the repository ai_work_dir only when needed; see workdirs.auto_dir.
-        from . import workdirs
-        wd, _why = workdirs.auto_dir(client, repo)
-        if not wd:
-            return {"ok": False,
-                    "error": "没有可用的干活目录（这台 SoduWork 没设工作目录，工程也没配 AI 干活目录）"}
-        body["repo"] = {"id": repo.id, "path": wd, "name": repo.name, "kind": repo.kind,
-                        "gitUrl": repo.git_url, "branch": repo.default_branch,
-                        "note": repo.note, "flow": bool(s.flow)}
-    # Push server-created tasks to their owning client immediately.
-    # Otherwise clients remain unaware until their next full refresh.
-    # The server owns task truth; client absence from a local snapshot is not a deletion command.
-    try:
-        r = await task_dispatch.dispatch(tid=t.id, body=body, client=client, session=session)
-    except Exception as e:                       # noqa: BLE001 - Record dispatch failure without disabling the schedule loop.
-        return {"ok": False, "error": str(getattr(e, "detail", e))[:300], "taskId": t.id}
-    result = {"ok": True, "taskId": t.id,
-              "identifier": (r or {}).get("identifier", "")}
-    for key in (
-            "provider", "assigneeId", "assigneeName", "assigneeCli", "agentCli",
-            "model", "runnerId", "host", "pluginSnapshot"):
-        value = (r or {}).get(key)
-        if value not in (None, ""):
-            result[key] = value
-    return result
-
-
-async def _push_new(session: AsyncSession, t: models.Task) -> None:
-    """Push a newly created task to its owner without allowing notification failure to affect
-    dispatch.
-    """
-    # Automation execution identities are intentionally absent from the
-    # requirement pool.  Their run ledger is the user-facing status surface.
-    if not t.owner_client_id or getattr(t, "origin", "") == "automation":
-        return
-    try:
-        from . import task_access
-        await task_access.publish_task(session, t, "task.created")
-    except Exception as e:  # noqa: BLE001
-        log.warning("定时派活推送新任务失败：%s", type(e).__name__)
+    if not adapter:
+        return {"ok": False, "code": "AUTOMATION_CONVERSATION_UNAVAILABLE",
+                "error": "当前执行设备没有可用的普通会话执行端，请升级客户端后重试"}
+    return await schedule_conversations.prepare(
+        session, s, client, repo, schedule_run_id, adapter, personal)
 
 
 async def tick(session: AsyncSession) -> dict:

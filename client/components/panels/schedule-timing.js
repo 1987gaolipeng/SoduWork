@@ -40,9 +40,25 @@
     }
     return matches.size === 1 ? [...matches][0] : '';
   }
+  function clockNumber(value) {
+    return value == null || String(value).trim() === '' ? NaN : Number(value);
+  }
+  function clockOptions(limit, value) {
+    const selected = clockNumber(value);
+    const valid = Number.isInteger(selected) && selected >= 0 && selected < limit;
+    return (valid ? '' : '<option value="" selected disabled>--</option>') +
+      Array.from({length:limit}, (_, number) => '<option value="' + number + '"' +
+        (number === selected ? ' selected' : '') + '>' + pad(number) + '</option>').join('');
+  }
   function validate(value, existing, now = Date.now()) {
     if (!every.some(item => item[0] === value.every)) return '请选择支持的执行方式';
-    if (value.every !== 'once') return '';
+    if (value.every !== 'once') {
+      const hour = clockNumber(value.atHour), minute = clockNumber(value.atMinute);
+      if (value.every !== 'hourly' && (!Number.isInteger(hour) || hour < 0 || hour > 23))
+        return '请选择小时（00–23）';
+      if (!Number.isInteger(minute) || minute < 0 || minute > 59) return '请选择分钟（00–59）';
+      return '';
+    }
     if (!instant(value.runAt)) return '请选择有效的执行日期和时间；夏令时跳过或重复的时刻请调整后重试';
     const unchanged = existing?.id && existing.every === 'once' && value.runAt === existing.runAt;
     if (!unchanged && Date.parse(value.runAt) <= now) return '执行时间已过去，请选择将来的日期和时间';
@@ -120,5 +136,5 @@
     next.runAt = date && when && !time?.invalid ? fromLocalInput(date+'T'+when,zone) : '';
     return next;
   }
-  global.ScheduleTiming = {every,localInput,fromLocalInput,validate,summary,infer,clock};
+  global.ScheduleTiming = {every,localInput,fromLocalInput,validate,summary,infer,clock,clockNumber,clockOptions};
 })(window);

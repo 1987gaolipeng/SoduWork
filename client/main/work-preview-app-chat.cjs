@@ -3,8 +3,8 @@
 // the existing app item so an H5 retry cannot duplicate a successfully sent turn.
 const pending = new Map();
 const appOwner = require('./work-preview-app-owner.cjs');
-function send(item, params, attachmentOwner = item) {
-  try { appOwner.assertCurrent(item); appOwner.assertCurrent(attachmentOwner); }
+function send(item, params, attachmentOwner = item, options = {}) {
+  try { appOwner.assertCurrent(item); appOwner.assertCurrent(attachmentOwner); options.assertCurrent?.(); }
   catch (error) { return Promise.resolve({ ok: false, code: error.code, reason: error.message }); }
   const wc = item.composer?.view?.webContents;
   if (!wc || wc.isDestroyed()) return Promise.resolve({ ok: false, reason: '应用对话栏尚未就绪' });
@@ -23,7 +23,7 @@ function send(item, params, attachmentOwner = item) {
   }, 60000);
   receipts.set(params.requestId, { fingerprint, owner: attachmentOwner, promise });
   const onDestroyed = () => finish(wc, { id, ok: false, reason: '应用对话栏已关闭' });
-  pending.set(id, { wc, item, params, resolve, timer, onDestroyed, attachmentOwner });
+  pending.set(id, { wc, item, params, resolve, timer, onDestroyed, attachmentOwner, options });
   wc.once('destroyed', onDestroyed);
   if (params.attachmentIds?.length) {
     void (async () => {
@@ -32,7 +32,7 @@ function send(item, params, attachmentOwner = item) {
         const row = pending.get(id);
         if (!row || wc.isDestroyed()) { await lease.release(); return; }
         row.lease = lease;
-        appOwner.assertCurrent(item); appOwner.assertCurrent(attachmentOwner);
+        appOwner.assertCurrent(item); appOwner.assertCurrent(attachmentOwner); options.assertCurrent?.();
         wc.send('app-composer-submit', { id, text: params.text, attachments: lease.files });
       } catch (error) { finish(wc, { id, ok: false, reason: error.message }); }
     })();
@@ -43,9 +43,9 @@ function finish(sender, payload) {
   const row = pending.get(payload?.id);
   if (!row || row.wc !== sender) return { ok: false };
   pending.delete(payload.id); clearTimeout(row.timer); row.wc.removeListener('destroyed', row.onDestroyed);
-  let active = true;
-  try { appOwner.assertCurrent(row.item); appOwner.assertCurrent(row.attachmentOwner); } catch (_) { active = false; }
-  const ok = active && payload.ok === true;
+  let ok = payload.ok === true, reason = String(payload.reason || '对话发送失败，请查看右侧提示').slice(0, 300);
+  try { appOwner.assertCurrent(row.item); appOwner.assertCurrent(row.attachmentOwner); row.options.assertCurrent?.(); }
+  catch (error) { ok = false; reason = error.message; }
   void row.lease?.release().catch(() => {});
   if (!ok) row.item.chatReceipts.delete(row.params.requestId);
   row.resolve({ok,...(row.options.mention ? {opened:ok,...(ok ? {state:payload.state === 'select' ? 'select' : 'review'} : {})} : {accepted:ok}),...(ok ? {} : {reason})});

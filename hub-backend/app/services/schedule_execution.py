@@ -222,6 +222,9 @@ async def _preflight_execution(session: AsyncSession, s,
                 "message": "请先选择任务归属的 SoduWork",
                 "checks": [{"key": "runner", "state": "blocked",
                             "label": "尚未选择执行设备"}]}
+    if getattr(s, "owner_user_id", None) and s.owner_user_id != client.user_ref:
+        return {"state": "blocked", "mode": mode,
+                "message": "执行设备的登录账号已变更，请原账号登录后再执行"}
     if not aid:
         return {"state": "blocked", "mode": mode,
                 "message": "请先选择执行 Agent",
@@ -242,11 +245,37 @@ async def _preflight_execution(session: AsyncSession, s,
         return {"state": "blocked", "mode": mode, "message": detail,
                 "checks": [{"key": "model", "state": "blocked", "label": detail[:180]}]}
     import asyncio
+    from fastapi import HTTPException
+    from . import conversation_handoffs, runner_hub
+    parts = aid.split(":", 2)
+    target = runner_hub.get(parts[1]) if len(parts) == 3 and parts[0] == "runner" else None
+    if aid.startswith("runner:") and target is None:
+        return {"state": "waiting", "mode": mode,
+                "message": "所选执行机不在线，请保持本人电脑或云端执行机在线；不会自动改派"}
+    remote = bool(target and str(target.client_id or "") != str(client.id))
+    if remote and personal_key:
+        return {"state": "blocked", "mode": mode,
+                "message": "云端自动化当前只支持普通会话；个人插件请选择原执行设备"}
     try:
-        picked = await asyncio.to_thread(
-            ai_exec.resolve_requested_sync, ctx, aid,
-            str(getattr(s, "assignee_type", "") or "agent"),
-            client.id, "", required)
+        if remote:
+            # Use the same target authorization as the cloud run, without dispatching.
+            picked = await conversation_handoffs.destination(session, client, {
+                "assigneeId": aid, "agentId": parts[2], "model": model_name,
+                "requiredSkills": required_skill_names(required),
+            })
+            verdict = runner_hub.capability_verdict(target, required)
+            if not verdict.get("ok"):
+                remedy, message = _capability_remediation(target, verdict)
+                return {"state": "waiting", "mode": mode, "message": message,
+                        "requiredCapabilities": required, "remedy": remedy}
+        else:
+            picked = await asyncio.to_thread(
+                ai_exec.resolve_requested_sync, ctx, aid,
+                str(getattr(s, "assignee_type", "") or "agent"),
+                client.id, "", required)
+    except HTTPException as exc:
+        return {"state": "waiting", "mode": mode, "message": str(exc.detail)[:240],
+                "requiredCapabilities": required}
     except Exception as exc:  # noqa: BLE001
         return {"state": "waiting", "mode": mode,
                 "message": ("暂时无法探测执行机：" + str(exc))[:240],
@@ -280,6 +309,7 @@ async def _preflight_execution(session: AsyncSession, s,
                       if policy == "pinned" else "跟随本机当前版本")
     return {
         "state": "ready", "mode": mode,
+        **({"executionMode": "soduwork.cloud-automation/v1"} if remote else {}),
         "message": (("执行条件已就绪；个人插件" + plugin_message)
                     if personal_key else "执行条件已就绪"),
         "requiredCapabilities": required,

@@ -47,7 +47,7 @@ class Sch:                       # Use a lightweight schedule with only timing f
         self.created_by_name = kw.get("created_by_name", "")
 
 
-
+# The fixture date is a Friday with ISO weekday 5.
 BASE = datetime(2026, 7, 31, 10, 30)
 
 # Daily schedules.
@@ -178,73 +178,16 @@ S.apply_outcome(retrying, {"ok": True, "taskId": "task-1"},
 chk("执行成功会清空错误和重试状态",
     retrying.last_error == "" and retrying.retry_count == 0)
 
-# Dispatch success is not execution completion in the immutable run ledger.
-accepted = SimpleNamespace(
-    task_id="", workflow_run_id="", receipt={}, state="starting", error="", finished_at=None)
-S.apply_attempt_outcome(
-    accepted, {"ok": True, "taskId": "task-accepted", "identifier": "exec-1"}, attempt_at)
-chk("派发成功只进入执行中，不伪装成完成",
-    accepted.state == "running" and accepted.finished_at is None)
-chk("执行记录保留任务和底座标识",
-    accepted.task_id == "task-accepted" and accepted.receipt.get("identifier") == "exec-1")
-failed_attempt = SimpleNamespace(
-    task_id="", workflow_run_id="", receipt={}, state="starting", error="", finished_at=None)
-S.apply_attempt_outcome(
-    failed_attempt, {"ok": False, "taskId": "task-failed", "error": "执行机离线"}, attempt_at)
-chk("启动失败立即形成终态回执",
-    failed_attempt.state == "failed" and failed_attempt.finished_at == attempt_at)
-chk("任务完成才把自动化记录对账为完成",
-    S.derive_run_state(task_status="done") == "succeeded")
-chk("AI 交回结果但任务未验收时进入待确认",
-    S.derive_run_state(task_status="doing", ai_state="done") == "waiting")
-chk("工作流人工门禁映射为待确认",
-    S.derive_run_state(workflow_state="running", waiting_human=True) == "waiting")
-chk("AI 执行失败不会被任务进行中覆盖",
-    S.derive_run_state(task_status="doing", ai_state="failed") == "failed")
-
-
-async def _execute_ledger_contract(outcome):
-    original_run_one = S.run_one
-
-    async def fake_run_one(session, schedule, who="", schedule_run_id=""):
-        session.observed_run_id = schedule_run_id
-        return dict(outcome)
-
-    class FakeSession:
-        def __init__(self):
-            self.run = None
-            self.observed_run_id = ""
-
-        def add(self, value):
-            self.run = value
-
-        async def flush(self):
-            if self.run is not None and not self.run.id:
-                self.run.id = "schedule-run-1"
-
-    schedule = SimpleNamespace(
-        id="schedule-1", org_id="org-1", owner_client_id="client-1",
-        plugin_binding_id="", next_retry_at=None, retry_count=0,
-        retry_limit=0, retry_delay_minutes=5, last_run_at=None,
-        last_task_id="", last_error="")
-    session = FakeSession()
-    S.run_one = fake_run_one
-    try:
-        result = await S.execute_one(session, schedule, trigger="manual")
-        return result, session.run, session.observed_run_id
-    finally:
-        S.run_one = original_run_one
-
-
-ledger_result, ledger_run, observed_run_id = asyncio.run(
-    _execute_ledger_contract({"ok": True, "taskId": "task-ledger"}))
-chk("执行前先生成稳定记录标识",
-    ledger_result.get("scheduleRunId") == observed_run_id == "schedule-run-1")
-chk("手动触发类型进入不可变回执",
-    ledger_run.trigger == "manual" and ledger_run.task_id == "task-ledger")
-chk("统一执行入口仍把已接单状态记为执行中", ledger_run.state == "running")
-
-
+# A successful handoff waits for the real ordinary conversation, never a task.
+from app.services.schedule_conversations import PROTOCOL
+accepted = SimpleNamespace(task_id="", workflow_run_id="", receipt={}, state="starting", error="", finished_at=None)
+S.apply_attempt_outcome(accepted, {"ok": True, "executionMode": PROTOCOL, "waitingForDevice": True}, attempt_at)
+chk("交付只代表等待设备而非完成", accepted.state == "waiting" and accepted.finished_at is None)
+chk("普通会话交付没有任务或工作流链接", not accepted.task_id and not accepted.workflow_run_id)
+failed_attempt = SimpleNamespace(task_id="", workflow_run_id="", receipt={}, state="starting", error="", finished_at=None)
+S.apply_attempt_outcome(failed_attempt, {"ok": False, "error": "执行机离线"}, attempt_at)
+chk("启动失败立即形成终态回执", failed_attempt.state == "failed" and failed_attempt.finished_at == attempt_at
+    and failed_attempt.error == "执行机离线")
 
 # Plugin schedules store public inputs only and use the automation entry point.
 dirty_inputs = {
@@ -268,99 +211,16 @@ for input_size in (8001, 9000):
             and len(oversized_inputs["x"]) == input_size)
 
 
-async def _plugin_validation_contract():
-    from app import automation_models as am, models
-    from app.services import plugin_service
-
-    original_resolve, original_inputs = plugin_service.resolve_binding, plugin_service.public_inputs
-    calls = []
-
-    async def fake_resolve(session, task, **kwargs):
-        calls.append(kwargs)
-        return SimpleNamespace(version_id="version-1", id="binding-1")
-
-    plugin_service.resolve_binding = fake_resolve
-    plugin_service.public_inputs = lambda manifest: [
-        {"key": "topic", "label": "主题", "type": "text", "required": True},
-        {"key": "confirmed", "label": "确认", "type": "boolean", "required": False},
-    ]
-
-    class FakeSession:
-        async def get(self, model, key, **kwargs):
-            if model is models.Client:
-                return SimpleNamespace(id=key)
-            if model is am.PluginVersion:
-                return SimpleNamespace(manifest={})
-            return None
-
-    schedule = SimpleNamespace(
-        plugin_binding_id="binding-1", plugin_inputs={
-            "topic": "团队周报", "confirmed": True, "undeclared": "drop"},
-        owner_client_id="client-1", repo_id="")
-    try:
-        binding = await S.validate_execution(FakeSession(), schedule)
-        return binding, schedule, calls
-    finally:
-        plugin_service.resolve_binding, plugin_service.public_inputs = original_resolve, original_inputs
-
-
-binding, validated, validation_calls = asyncio.run(_plugin_validation_contract())
-chk("自动化计划固定使用明确绑定", binding.id == "binding-1")
-chk("绑定解析明确要求 automation 入口",
-    validation_calls and validation_calls[0].get("entrypoint") == "automation")
-chk("未声明输入不会进入工作流", "undeclared" not in validated.plugin_inputs)
-
-
-async def _direct_run_contract():
+async def _conversation_dispatch_contract():
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from unittest.mock import AsyncMock, patch
     from app import models
-    from app.services import ai_exec, task_dispatch
-
-    original_validate, original_push = S.validate_execution, S._push_new
-    original_load, original_configured = ai_exec.load, ai_exec.configured
-    original_dispatch = task_dispatch.dispatch
-    observed = {"pushes": 0, "routes": []}
-
-    async def fake_validate(session, schedule, org_ids=None):
-        return None
-
-    async def fake_push(session, task):
-        observed["pushes"] += 1
-
-    async def fake_load(session, force=False):
-        return {"configured": True}
-
-    async def fake_dispatch_task(tid, body, client, session):
-        observed["routes"].append(dict(session.task.work_routing or {}))
-        return {"identifier": "run-" + str(len(observed["routes"]))}
-
-    class FakeSession:
-        def __init__(self):
-            self.task = None
-
-        def add(self, task):
-            self.task = task
-
-        async def flush(self):
-            if not self.task.id:
-                self.task.id = "task-direct"
-
-        async def get(self, model, key, **kwargs):
-            if model is models.Client:
-                return SimpleNamespace(id=key, user_ref="user-1")
-            if model is models.Task and self.task is not None and self.task.id == key:
-                return self.task
-            return None
-
-    session = FakeSession()
-    schedule = SimpleNamespace(
-        id="schedule-1", owner_client_id="client-1", repo_id="",
-        plugin_binding_id="", plugin_inputs={}, title="填报工时", note="完成系统填报",
-          owner_user_id="user-1", created_by="user-1", created_by_name="测试用户", assignee_id="local:pi",
-        assignee_type="agent", required_capabilities=["browser-use", "computer"],
-        next_retry_at=None, last_task_id="")
-    S.validate_execution, S._push_new = fake_validate, fake_push
-    ai_exec.load, ai_exec.configured = fake_load, lambda ctx: True
-    task_dispatch.dispatch = fake_dispatch_task
+    from app.services import task_dispatch, workflow_engine, schedule_conversations as chats
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        for table in (models.Client.__table__, models.AiSchedule.__table__, models.AiScheduleRun.__table__, models.Task.__table__):
+            await connection.run_sync(table.create)
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
             client = models.Client(id="client-smoke", user_ref="owner")
@@ -407,138 +267,7 @@ async def _direct_run_contract():
         await engine.dispose()
 
 
-direct_first, direct_second, direct_observed = asyncio.run(_direct_run_contract())
-chk("直接自动化把能力合同冻结到任务",
-    direct_observed["routes"][0].get("requiredAgentCapabilities") ==
-    ["browser", "computer"])
-chk("直接自动化把对应 Skill 冻结到任务",
-    direct_observed["routes"][0].get("requiredSkills") ==
-    ["browser-use", "computer-use"])
-chk("重试复用同一任务而不是制造重复任务",
-    direct_first.get("taskId") == direct_second.get("taskId") and
-    direct_observed["pushes"] == 1)
-
-
-async def _plugin_run_contract():
-    from app import automation_models as am, models
-    from app.services import workflow_engine
-
-    original_validate, original_push, original_start = (
-        S.validate_execution, S._push_new, workflow_engine.start)
-    observed = {}
-    binding = SimpleNamespace(
-        id="binding-1", plugin_id="plugin-1", version_id="version-1")
-
-    async def fake_validate(session, schedule, org_ids=None):
-        return binding
-
-    async def fake_push(session, task):
-        observed["pushed"] = task.id
-
-    async def fake_start(session, task, selected, inputs, **kwargs):
-        observed.update({
-            "status": task.status, "binding": selected.id, "inputs": inputs,
-            "entrypoint": kwargs.get("entrypoint"), "instruction": kwargs.get("instruction"),
-        })
-        return SimpleNamespace(id="run-1")
-
-    class FakeSession:
-        def add(self, task):
-            self.task = task
-
-        async def flush(self):
-            self.task.id = "task-1"
-
-        async def get(self, model, key, **kwargs):
-            if model is am.PluginVersion:
-                return SimpleNamespace(id=key, version="1.2.0", checksum="a" * 64)
-            if model is am.Plugin:
-                return SimpleNamespace(id=key, key="weekly-report", name="Team weekly report")
-            if model is models.Client:
-                return SimpleNamespace(id=key, user_ref="user-1")
-            return None
-
-    schedule = SimpleNamespace(
-        owner_client_id="client-1", repo_id="", plugin_binding_id="binding-1",
-        plugin_inputs={"topic": "团队周报"}, title="汇总周报", note="形成可审阅简报",
-          owner_user_id="user-1", created_by="user-1", created_by_name="测试用户")
-    S.validate_execution, S._push_new, workflow_engine.start = (
-        fake_validate, fake_push, fake_start)
-    try:
-        result = await S.run_one(FakeSession(), schedule)
-        return result, observed
-    finally:
-        S.validate_execution, S._push_new, workflow_engine.start = (
-            original_validate, original_push, original_start)
-
-
-run_result, run_observed = asyncio.run(_plugin_run_contract())
-chk("插件计划创建任务后启动工作流", run_result.get("workflowRunId") == "run-1")
-chk("插件任务由工作流统一推进进行中状态", run_observed.get("status") == "todo")
-chk("计划启动不会退回普通任务入口", run_observed.get("entrypoint") == "automation")
-
-
-chk("enterprise plugin run pins exact version snapshot",
-    run_result.get("pluginSnapshot", {}).get("version") == "1.2.0")
-
-
-async def _plugin_deferred_schedule_contract():
-    from app import automation_models as am, models
-    from app.services import workflow_engine
-
-    original_validate, original_push, original_start, original_persisted = (
-        S.validate_execution, S._push_new, workflow_engine.start, S._persisted_workflow)
-    binding = SimpleNamespace(
-        id="binding-1", plugin_id="plugin-1", version_id="version-1")
-
-    async def fake_validate(session, schedule, org_ids=None):
-        return binding
-
-    async def fake_push(session, task):
-        return None
-
-    async def fake_start(*args, **kwargs):
-        raise RuntimeError("first dispatch unavailable")
-
-    async def fake_persisted(session, task_id, binding_id):
-        return SimpleNamespace(id="run-recoverable")
-
-    class FakeSession:
-        def add(self, task):
-            self.task = task
-
-        async def flush(self):
-            self.task.id = "task-recoverable"
-
-        async def get(self, model, key, **kwargs):
-            if model is am.PluginVersion:
-                return SimpleNamespace(id=key, version="1.2.0", checksum="a" * 64)
-            if model is am.Plugin:
-                return SimpleNamespace(id=key, key="weekly-report", name="Team weekly report")
-            if model is models.Client:
-                return SimpleNamespace(id=key, user_ref="user-1")
-            return None
-
-    schedule = SimpleNamespace(
-        owner_client_id="client-1", repo_id="", plugin_binding_id="binding-1",
-          plugin_inputs={}, title="恢复测试", note="", owner_user_id="user-1", created_by="user-1",
-        created_by_name="测试用户")
-    S.validate_execution, S._push_new, workflow_engine.start, S._persisted_workflow = (
-        fake_validate, fake_push, fake_start, fake_persisted)
-    try:
-        return await S.run_one(FakeSession(), schedule)
-    finally:
-        S.validate_execution, S._push_new, workflow_engine.start, S._persisted_workflow = (
-            original_validate, original_push, original_start, original_persisted)
-
-
-deferred_result = asyncio.run(_plugin_deferred_schedule_contract())
-chk("已落盘流程首次调度失败时交给后台恢复", deferred_result.get("ok") is True)
-chk("延后恢复不会丢失工作流标识",
-    deferred_result.get("workflowRunId") == "run-recoverable")
-chk("延后恢复向界面提供明确状态", deferred_result.get("deferredSchedule") is True)
-chk("deferred enterprise plugin keeps exact version snapshot",
-    deferred_result.get("pluginSnapshot", {}).get("version") == "1.2.0")
+asyncio.run(_conversation_dispatch_contract())
 
 log.append("")
 log.append("PASS=%d FAIL=%d" % (ok, fail))

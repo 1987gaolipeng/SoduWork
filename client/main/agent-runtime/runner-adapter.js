@@ -502,7 +502,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
       ...(initialThinking ? { reasoningEffort: initialThinking.level } : {}) }),
     thinking: initialThinking,
     lastExecutionReasoningEffort: initialThinking?.level || '',
-    title: '', intent: String(opts.intent || ''), goal: String(opts.goal || ''),
+    title: require('../conversation/automatic-title').resolve(opts.sessionTitle), intent: String(opts.intent || ''), goal: String(opts.goal || ''),
     acceptance: String(opts.acceptance || ''), maxSteps: Number(opts.maxSteps || 0),
     budgetMinutes: Number(opts.budgetMinutes || 0),
     goalVisible: String(opts.intent || '') === 'goal', goalPaused: false, goalLimit: null,
@@ -706,6 +706,8 @@ async function createRunnerHandle(request, defaults, initialSession) {
     }
     if (kind === 'user') {
       if (!rawText) return;
+      // Restore the first user title before publishing the resumed history.
+      state.title = state.title || require('../pi-session/history-state').messageTitle({ messages: [{ role: 'user', text: rawText }] });
       messageStream.finish();
       state.startedAt = Math.max(state.startedAt || 0, eventAt);
       state.turnEndedAt = 0;
@@ -1121,7 +1123,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
     return { ok: false, recovering: true, reason: '原会话执行状态尚未确认，正在核实执行状态…', snapshot: _snapshot(state) };
   }
 
-  function appendUser(text, attachments, plugins, sentAt) {
+  function appendUser(text, attachments, plugins, sentAt, submissionId) {
     const badges = publicPluginBadges(plugins);
     if (badges.length) state.activePluginIds = _pluginIds(badges);
     const id = String(submissionId || '').trim().slice(0, 128);
@@ -1590,7 +1592,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
     },
     historyRow() {
       return { ...taskBindings.view(), id: runnerRef, adapterId, title: state.title ||
-        _title(state.goal, displayName + ' 工作会话'),
+        (state.goal ? _title(state.goal) : ''),
         usedHarnesses: require('../conversation/used-harnesses').fromSnapshot(state, adapterId),
         cwd, at: state.updatedAt, count: state.messages.length, state: state.status };
     },
@@ -1908,7 +1910,10 @@ function createRunnerRuntimeAdapter(options) {
           new Promise(resolve => setTimeout(() => resolve({ settled: false }), 0)),
         ]);
         if (result.settled) {
-          if (result.value?.ok) initialSession = result.value;
+          // A credential probe can return only status/authorization metadata.
+          // Reuse it as a history page only when it actually contains items;
+          // otherwise the normal full poll must still restore the conversation.
+          if (result.value?.ok && Array.isArray(result.value?.data?.items)) initialSession = result.value;
           const failure = result.error || result.value?.error || result.value?.data?.error ||
             (!result.value?.ok ? result.value : null);
           if (_resumeCredentialError(failure)) {

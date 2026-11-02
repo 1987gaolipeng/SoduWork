@@ -331,8 +331,8 @@ function createPiSessionBridge(options) {
   /* Runner adapters share an inventory request. Query concurrently so an
      unavailable runner cannot incur one timeout per adapter. */
   let externalHistory = null;
-  async function externalRows() {
-    try { return externalHistory ? await externalHistory.history() : { ok: false, chats: [] }; }
+  async function externalRows(options) {
+    try { return externalHistory ? await externalHistory.history(options) : { ok: false, chats: [] }; }
     catch (error) { return { ok: false, chats: [], reason: _reason(error) }; }
   }
   function normalizeHistoryRow(row) {
@@ -353,7 +353,9 @@ function createPiSessionBridge(options) {
   async function findRunnerRow(id) {
     const wanted = String(id || '').trim();
     if (!wanted) return null;
-    const cloud = (await externalRows()).chats.find(row => row.id === wanted);
+    // A sidebar row may be replaced by its synchronized replay receipt while
+    // navigation is in flight. Resolve its authenticated alias by exact ID.
+    const cloud = (await externalRows({ includeAliases: true })).chats.find(row => row.id === wanted);
     if (cloud) return cloud;
     const results = await Promise.all(runnerAdapters.map(async (adapter) => {
       try { return await adapter.history(Number.MAX_SAFE_INTEGER); }
@@ -585,7 +587,10 @@ function createPiSessionBridge(options) {
   // The catalog is only a declaration of what this build knows about. UI
   // pickers must use a health-checked projection so an installed-but-offline
   // Runner cannot be selected and leave the conversation on a dead path.
-  const availabilityCache = { app: null, at: 0, value: null, flight: null };
+  const availabilityCache = { app: null, at: 0, value: null, flight: null, generation: 0 };
+  function invalidateRuntimes() {
+    availabilityCache.generation++; availabilityCache.value = null; availabilityCache.at = 0; availabilityCache.flight = null;
+  }
   const AVAILABILITY_TTL_MS = 30000;
   async function availableRuntimes(app, options = {}) {
     const owner = app || opts.app || null;
@@ -597,6 +602,7 @@ function createPiSessionBridge(options) {
     if (!force && availabilityCache.flight && availabilityCache.app === owner) {
       return availabilityCache.flight;
     }
+    const generation = ++availabilityCache.generation;
     const catalogRows = runtimes();
     const job = Promise.all(catalogRows.map(async (row) => {
       let health;
@@ -619,7 +625,9 @@ function createPiSessionBridge(options) {
       }));
       const value = { ok: true, runtimes: catalogRows, availableRuntimes: ready, missing,
         checkedAt: Date.now() };
-      availabilityCache.app = owner; availabilityCache.at = Date.now(); availabilityCache.value = value;
+      if (generation === availabilityCache.generation) {
+        availabilityCache.app = owner; availabilityCache.at = Date.now(); availabilityCache.value = value;
+      }
       return value;
     }).catch(error => ({ ok: false, reason: _reason(error), runtimes: [], availableRuntimes: [], missing: catalogRows }));
     availabilityCache.app = owner; availabilityCache.flight = job;
@@ -640,7 +648,7 @@ function createPiSessionBridge(options) {
     try { runtimeCatalog.addRuntime(spec); }
     catch (error) { unregister(); throw error; }
     runnerAdapters.push(adapter);
-    availabilityCache.value = null; availabilityCache.at = 0;
+    invalidateRuntimes();
     return spec;
   }
 
@@ -726,6 +734,7 @@ function createPiSessionBridge(options) {
     probe,
     runtimes,
     availableRuntimes,
+    invalidateRuntimes,
     addRuntime,
     history,
     archivedHistory,

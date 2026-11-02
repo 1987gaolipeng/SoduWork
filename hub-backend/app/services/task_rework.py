@@ -242,7 +242,14 @@ async def resume_after_rejection(
             request_id=request_id, actor=actor,
             error="原执行在你的客户端会话里，可在原会话按意见继续，或重新发起执行（意见会自动带上）",
             retryable=False)
-    ctx = await ai_exec.load(session)
+    from . import task_continuation
+    try:
+        ctx = await task_continuation.prepare(session, task, await ai_exec.load(session), ref)
+    except task_continuation.ContinuationError as exc:
+        return await _record_pending(
+            session, task, ref, feedback, version_id=artifact_version_id,
+            request_id=request_id, actor=actor, error=str(exc),
+            retryable=exc.code in _RETRYABLE_CODES)
     result = await asyncio.to_thread(
         ai_exec.say_sync, ctx, ref, _instruction(feedback),
         message_id=_message_id(request_id))

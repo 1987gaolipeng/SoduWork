@@ -1,121 +1,30 @@
 ---
 name: app-developer
-description: 开发、修改、检查 SoduWork 即用；AI 产品、页面、业务技能、宿主存储与持续任务闭环。
+description: Build SoduWork apps and skills.
 ---
 
 # 即用开发
 
-目标：美观、精致、操作简洁、打开即用。中文「即用」与英文「App」是同一产品概念，按国际偏好命名，不直译、不改稳定 ID。
+目标：精致简洁、打开即用。英文 App，ID稳定。
 
 边界：宿主提供通用能力；群组、成员关系、归组等业务由具体即用实现。
 
-界面：只要求中英文；选一个契合业务的精致主题，不强制亮暗双模式。
+界面：中英文、一个契合业务的主题，不强制明暗双模式。
 
-产品：一句意图→AI处理→可用结果；新增只收必要意图，修改只留必要内容；起草、归类、标签交给AI，复制/搜索/游戏循环直接执行。禁止用大量表单＋“AI帮写”充当AI产品。
+产品：意图→AI→成果；只收必要输入，AI起草/归类/标签，复制/搜索/游戏直接执行。不以大量表单＋“AI帮写”冒充AI产品。
 
-严格流程：[development-workflow.md](references/development-workflow.md)。需求→调研/设计→UI＋技能＋声明→静态检查→开发预览→宿主安装/打开→真实操作/写回→关闭重开→升版交付。缺少证据不得宣布通过。
+执行 [development-workflow.md](references/development-workflow.md)：设计→实现→检查→安装打开→写回→重开/升版；缺证据不报通过。
 
-```json
-{
-  "template": "app", "key": "example-app", "name": "示例应用", "version": "0.1.0",
-  "description": "管理当前业务并通过 SoduWork 完成工作",
-  "locales": {
-    "zh-CN": {"name":"示例应用","description":"管理当前业务并通过 SoduWork 完成工作","ui":{"main":{"title":"示例应用"}}},
-    "en-US": {"name":"Example App","description":"Manage work through SoduWork","ui":{"main":{"title":"Example App"}}}
-  },
-  "instructions": "根据用户要求完成当前应用的业务工作，读取真实记录、验证后写回并报告结果。",
-  "inputs": [], "setup": {"preferences": []},
-  "mcpServers": [], "runtimeCapabilities": [],
-  "ui": {"contributions": [{
-    "id": "main", "title": "示例应用", "slot": "workspace.navigation",
-    "source": {"type": "package", "openMode": "workspace", "entry": "ui/index.html",
-      "bridge": {"version": 1, "capabilities": ["conversation.send", "composer.control"]}}
-  }]}
-}
-```
-
-包内入口必须是 `ui/` 下实际存在的 HTML 相对路径，并在 `resources` 中以 kind `ui` 声明。全部运行依赖放在 `ui/`（kind `ui`）或 `assets/`（kind `asset`），使用相对路径，禁止 CDN 依赖，验证离线运行。壳通过内部资源协议读取安装包内容，各应用和账号的浏览器存储隔离，关闭重开及升级保留同一账号/应用的 localStorage/IndexedDB。页面无 Node.js、文件系统和任意 IPC 权限；使用随包 SDK 调用已声明的壳能力。安装只保存资源，点击应用才加载页面，不执行资源里的后端脚本。
-
-已有在线业务服务继续使用 `source: {type:"external",url:"实际HTTP(S)地址",openMode:"workspace"}`。示例域名不能原样交付；该模式仍要求服务实际可用，不把作者电脑的127.0.0.1地址当作可分发服务。不能使用 file/data/javascript URL，不能把账号、密码、凭据放进 URL、草稿、提示词或导出包。
-
-窗口默认 1280×800 逻辑像素、居中、小屏自动适配；不要求用户配置尺寸。只有明确指定时才在根级声明 `appWindow`，详见基础规范。应用由独立窗口承载，主窗口切菜单保留它；多个应用各有独立页面与对话。页面中不要再实现壳的全屏、设置或对话面板。
-
-## 页面、技能和对话
-
-读取随本轮资源提供的 `sdk/README.md`，复制同目录 `sdk/soduwork-app.js` 到业务站点，使用公共函数，不能直接访问 Electron、原生 IPC 或设备身份。资源路径由开发助手运行时装配，SDK 始终来自客户端同一份源码。
-
-- 自然语言自动匹配业务技能，不展示“选择技能”按钮。业务页面可以用“新增系列”“创建话题”等操作打开简单描述表单。
-- 表单提交先用 `soduWorkApp.chat.expand()` 展开右侧对话，再用 `soduWorkApp.chat.send({text, requestId})`。正文包含用户描述、真实业务 ID 和操作范围，由应用壳发送到当前应用的原生对话。
-- 用 `soduWorkApp.createRequestId()`；同一次操作重试沿用同一个 ID，提交期间禁用重复操作。发送失败保留输入和已创建业务记录，允许单独补发；超时先核对对话，避免自动重复业务动作。
-- 回执只证明会话已接收；真实业务完成需要模型执行、业务接口写回和读回证据。使用现有会话运行时与 MCP，不增加平行会话状态。
-- 用 `soduWorkApp.events.onRefresh(callback)` 重新读取当前授权业务数据。壳负责刷新应用；刷新页面保留右侧对话及用户草稿。失败或取消后的刷新也不能被写成成功。
-- 跨域 iframe 双方加载 SDK；顶层 `configure({allowedFrameOrigins:[精确来源]})`，直接子页面 `configure({parentOrigin:精确壳来源})`。走带来源和窗口校验的 postMessage，不能用通配符，不需要注册 URL 协议。任意深层 iframe 转发不在当前支持范围。
-- 业务写回使用真实已配置连接器，或经用户认证的应用自有 MCP。沿用 SDK 和现有连接授权流程，不编造 MCP 名称、绕过 RBAC 或把凭据发送给模型。安装不能隐式执行资源脚本。
-
-## 按需业务完成通知
-
-应用自身的登录、ukey 和业务鉴权都是可选能力，不是安装、打开应用或使用对话桥的统一前提。允许纯本地、完全单机、无账号轻应用；不需要业务认证时，不生成登录页，不索取 ukey，不声明虚构 MCP 或凭据。示例中 `mcpServers: []` 与仅有对话桥权限的应用可以直接运行。SoduWork 自身的会话身份与应用业务账号分别处理，不能因为使用原生应用窗口就要求业务服务登录。
-
-以下仅适用于用户明确需要业务登录或服务实际要求认证的应用。根据业务真实认证方式集成，ukey 只是字段示例，不是固定必填字段；不需要自动登录时也不必申请设置读写权限。
-
-应用自身的登录、ukey 和业务鉴权都是可选能力，不是安装、打开应用或使用对话桥的统一前提。允许纯本地、完全单机、无账号轻应用；不需要业务认证时，不生成登录页，不索取 ukey，不声明虚构 MCP 或凭据。示例中 `mcpServers: []` 与仅有对话桥权限的应用可以直接运行。SoduWork 自身的会话身份与应用业务账号分别处理，不能因为使用原生应用窗口就要求业务服务登录。
-
-以下仅适用于用户明确需要业务登录或服务实际要求认证的应用。根据业务真实认证方式集成，ukey 只是字段示例，不是固定必填字段；不需要自动登录时也不必申请设置读写权限。
-
-需要页面自动同步配置时声明 `settings.read`、`settings.write`，用 `soduWorkApp.settings.update({values,secretKeys,expectedRevision})` 写当前应用的参数；任意业务 JSON 参数都沿用此通路，不让用户复制到配置中心。ukey/令牌是敏感参数，系统安全存储保存，禁止放入应用包、提示词或会话正文。
-
-需要自动登录时，页面登录成功后获取自身服务签发的凭据，再一次更新凭据和业务账号标识；退出只结束页面会话并暂停当前窗口自动登录，保留壳内凭据。例如使用 ukey 的服务，重开时通过 `settings.get({keys:['ukey'],includeSecrets:true})` 读取并向业务服务验证，再恢复登录。换号替换凭据，旧异步响应需核对当前账号和设置版本，不覆盖新账号。服务端撤销/禁用必须继续生效，不做两套用户体系的隐式合并。
-
-消息正文的业务 type 和 JSON 内容由应用技能与前端共同定义；宿主不规定选题、视频等业务字段。消息按需关联结果记录，通知已读不代替审批或业务完成；用户点击后由前端的已支持处理器打开页面／弹窗，不执行消息中的任意 HTML/JS。换号、切空间和迟到响应必须隔离；需要离线恢复时消息及接收状态由业务服务持久保存。不需要业务通知的单机或无账号应用不强制建设后端或消息表。
-
-当前公共 SDK 没有技能向业务页投递任意消息的 send_app_message/onMessage 通道，不得编造或假定支持。宿主通用投递属于后续方案，当前实现继续使用应用服务和现有轮次事件。验证重复回执、未知业务类型、失败／取消、缺失回执、刷新恢复及用户主动查看，不只验证成功提示。
-
-## 机器人与应用内持续执行
-
-“创建即用”中的机器人是以应用业务为中心、主要接入 SoduWork 自动化能力的应用，例如“晨间简报”“下班前整理桌面”“每周灵感速递”。它不是仅能对话的聊天机器人，也不是用定时器假装运行的静态页面。工具办公、小游戏和其他品类如有持续执行需求，也沿用同一条链路；无此需求不强加计划。
-
-- **应用页面严禁出现“自动化”按钮。** 页面入口、表单、操作和状态全部使用适合当前业务的词语，例如简报里的“订阅简报”“发送时间”，桌面整理里的“定时整理”“整理范围”“下次整理”。不要只是把通用自动化面板改标题后塞进应用；内部接口、权限名和开发文档保留真实技术名称。
-- 读取同源 `sdk/README.md`，在页面清单按需声明 `automation.create`，用 `soduWorkApp.automation.create({text, requestId, context})` 复用现有解析、能力绑定、时间校验、执行预检与 schedules API。不要自行实现后台轮询、页面 `setInterval`、系统计划任务或独立调度状态，也不要用聊天发送成功假装已建计划。不能编造 SDK 尚未提供的列表、暂停、删除接口；业务需要这些操作时先核对已有正式链路及授权，不用本地开关假装生效。
-- 业务表单明确执行时间、时区、频率、业务目标及操作范围，用户确认提交后才创建，不能点品类、进入页面或加载时直接保存。“下班前整理桌面”必须绑定真实目录、整理规则和具体时间，由已授权的真实技能执行；不能杜撰账号、目标或执行回执。不写时间时遵循 SDK 当前默认值并在提交前明示，不能暗藏默认安排。
-- 使用稳定的真实业务空间上下文和同一次提交的 `requestId`，重试沿用编号；应用上下文不扩大授权，不复制应用凭据给计划。能力未声明、执行底座不可用或预检受阻时展示业务化失败信息，不退回自建调度器。`uncertain` 时先核对现有正式计划记录，不能换编号盲目重建。
-- 保存成功仅显示“整理已安排”“每日汇报已安排”等真实状态；`schedule.id` 是已保存计划的关联编号，不是执行结果。每次触发在新建普通对话中执行，执行、失败和产出从现有对话/计划事实及业务回执读取，不另造任务或需求，不造倒计时、进度或成功记录。单机应用不因接入调度就自动变为云端应用，应说明当前执行端实际所需在线条件。
-
-## 应用自定义参数与按需认证
-
-新应用不要求、不推荐引入 ukey 或固定的凭据字段。是否登录以及采用何种认证由应用业务与实际服务决定，不是安装、打开或使用对话桥的统一前提。允许纯本地、完全单机、无账号轻应用；不需要业务认证时不生成登录页，不声明虚构 MCP 或凭据。维护旧应用时保留其原有认证，不因宿主隐藏字段而清除或替换已有凭据。SoduWork 身份与应用业务账号分别处理。
-
-参数名称、类型和业务含义由应用定义，例如模型 ID、页面偏好及业务选项。需要持久化时才声明 `settings.read`、`settings.write`，使用 `soduWorkApp.settings.get()` 与 `settings.update({values,secretKeys,expectedRevision})`。任意符合 SDK 限制的 JSON 参数沿用同一通路，无需登录或 MCP；这只保存值，不会自动生成应用自定义表单或将参数发送到业务服务。
-
-需要在宿主的应用设置弹窗展示普通参数时，沿用插件规范的 `setup.preferences` 字段声明及安装配置链路（`setupConfig`），宿主复用同一字段渲染和校验。未声明则仅显示应用信息，不显示通用 JSON 编辑框、默认模型或凭据输入。安装偏好与页面自动同步的安全参数各沿现有用途保存，不互相复制或从“未显示”推断删除；`setup.preferences` 不接受敏感凭据，不能用它收集模型 Key。应用已有凭据继续由设置桥管理，隐藏不影响原登录或 MCP 引用。
-
-普通参数按需读取；用户填写的 API Key 等敏感字段显式加入 `secretKeys`，由系统安全存储保存。明确读取秘密须指定 `keys` 与 `includeSecrets:true`，仅交给获授权的应用服务；不放入应用包、提示词、会话正文、公开 MCP context 或导出包。
-
-仅在真实服务要求认证时接入其现有授权方式；需要自动登录时获取该服务签发的凭据，并与业务账号标识原子保存。退出结束页面会话并暂停当前窗口自动登录，保留已有凭据；恢复时交回原服务验证。换号后旧异步响应须核对账号和设置版本，服务端撤销/禁用必须继续生效，不做两套用户体系的隐式合并。
-
-自有 MCP 声明 `mcp.connect` 后用 `credentialKey` 引用实际凭据字段，宿主添加 Bearer 认证，不把密钥交给模型。它只绑定一个认证字段，不自动透传其他设置，也不能用模型供应商 Key 冒充应用服务凭据。额外业务参数须走服务已支持的显式接口；不得编造尚未实现的设置绑定、请求头或 MCP 参数注入协议。跨域直接 iframe 按 SDK 精确来源授权后可同样读写本应用设置，边界及大小限制见 SDK README。按实际能力验收参数读写、敏感字段隐藏、身份切换、凭据失效和未授权来源；无登录应用不要求登录验收。
-
-`mcp.connect` 是页面桥权限，不能代替连接器名称声明。页面 `mcp.connect({server: ...})` 的名称必须与草稿 `mcpServers` 一致。导出 `plugin.json` 推荐使用 `capabilities.mcpServers`；兼容桌面个人应用包的顶层 `mcpServers`，两处同时存在时必须一致，不能在导入或发布时静默丢弃。验收同时覆盖桌面安装与 Hub 导入后的能力报告，确认连接器名称仍在报告内，再检查已安装版本的实际声明。
-
-`mcp.connect` 是页面桥权限，不能代替连接器名称声明。页面 `mcp.connect({server: ...})` 的名称必须与草稿 `mcpServers` 一致。导出 `plugin.json` 推荐使用 `capabilities.mcpServers`；兼容桌面个人应用包的顶层 `mcpServers`，两处同时存在时必须一致，不能在导入或发布时静默丢弃。验收同时覆盖桌面安装与 Hub 导入后的能力报告，确认连接器名称仍在报告内，再检查已安装版本的实际声明。
-
-## 生成、安装和交付
-
-新应用可先运行无第三方依赖的 Node.js 18+ 脚手架，再完善实际业务：
-
-```sh
-node scripts/scaffold.cjs --out /work/new-candidate --key example-app --name "示例应用" --name-en "Example App" --entry ui/index.html
-```
-
-路径使用真实绝对路径，含空格时引用。out 必须是不存在的新目录；不填 `--url` 默认生成包内应用，脚手架生成草稿、可运行页面、同源 SDK 及成果清单。需要在线服务时再显式使用 `--url`；`serve.cjs` 仅供外部 URL 模式开发预览，包内静态应用不需要运行它。
-
-在生成目录完善业务 instructions、页面表单和实际所需的业务技能/资源；资源逐项声明 path/kind。不需要的执行能力不添加。已有业务技能按现有 skills/MCP 契约复用，不复制成假接口。
-
-读取实际 JSON、检查全部文件，合并当前工作目录 `.soduwork/delivery.json` 的已有成果，唯一 primary 指向真实 `soduwork-plugin-draft.json`。清单必须使用 `{"schemaVersion":1,"deliverables":[{"path":"soduwork-plugin-draft.json","kind":"file","title":"应用草稿","primary":true}]}`，字段是 deliverables，不能写成 items。脚手架生成在子目录时，应把子目录内交付路径合并到当前会话的成果清单，不覆盖其他成果。不能声称安装会自动启动本地服务；只有真实服务已运行时页面才能打开。
-
-使用本次回复旁的“检查并安装”：现有链路收集当前会话资源、预检并安装个人应用；不让用户去隐藏目录复制 JSON。需要分发时用原有导出入口生成 `.soduwork-plugin`，升版不覆盖旧版本。个人安装与企业审核/远端上架分别报告。
-
-## 验证
-
-至少验证：草稿预检与资源完整；安装后出现在“应用→我的”；独立窗口打开真实页面；业务操作发送到该应用右侧会话；真实技能执行与业务读回；壳刷新后页面反映记录且对话保留；切主菜单窗口保留、多个应用不串会话；缺连接、重复点击、跨域未授权和发送失败处理；小屏与亮暗主题。
-
-按证据分别记录代码检查、隔离 Chromium/原生桥夹具、真实模型/真实业务实测和部署状态。测试夹具不能证明生产闭环，程序注入点击不能证明原生鼠标穿透。涉及图片/视频收费操作时遵循用户实际授权；没有条件的项目写明未实测，不能用静态成功替代。
+- 设计：[design-quality.md](references/design-quality.md)；GitHub调研/许可；视觉调研可选，查最新同类。
+- 单个彩色图标：[icon-design.md](references/icon-design.md)；配色自由、方形饱满、小尺寸清楚；顶层 icon=PNG≤256px/96KB；查明暗背景，不强制整套/灰色版。
+- 五类：[instant-types.md](references/instant-types.md)；持续角色：[robot-persona.md](references/robot-persona.md)。入口用业务词语，真实执行后拟人表达；关窗计划仍运行。
+- 账号/组织/对话/通知/本机及云资料：[host-data-sdk.md](references/host-data-sdk.md)；先声明能力，再调用真实SDK，分页读全，不编造接口。
+- SDK/参数/鉴权/数据/MCP：[host-sdk.md](references/host-sdk.md)；复制同源SDK，读sdk/README.md；无顶层connect；宿主错误不伪装预览。
+- 本地文件/导入/上传：[local-files.md](references/local-files.md)；原生桥选文件→会话；临时引用、持久素材、业务上传分开。
+- 包/双语/交付：[bridge-and-delivery.md](references/bridge-and-delivery.md)；普通规范：plugin-development.md。
+- package优先，复用宿主；本地结构：[local-app-structure.md](references/local-app-structure.md)；Web/H5不限栈。
+- 技能与页面联动：[intelligent-interaction.md](references/intelligent-interaction.md)；写回/应用/追踪并验收。小任务ai.generate，复杂工作chat.send；见[fast-ai.md](references/fast-ai.md)。
+- author真实；appCategory=office/game/robot/other；WEB/H5为接入方式。extensions保留未知字段、不放秘密。
+- 数据遵从必选模式；[契约与JSON](references/cloud-data.md)。初始化版本化，不覆盖用户记录。
+- 修改先读源码与 baseline.json；保留 key，提升 SemVer；资源完整收集，禁止省略未改文件。
+- 最终磁盘运行 scripts/validate.cjs；失败修复重检。登记 .soduwork/delivery.json；走当前会话检查安装。静态检查不等于运行验收，不能虚构通过。

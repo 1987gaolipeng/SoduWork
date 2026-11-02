@@ -73,6 +73,8 @@ SDK 使用 `postMessage`，双方指定精确来源，顶层同时检查消息�
 
 ## 本地参考附件（SDK 1.3）
 
+完整选择/取消/移除、同次重试、清理与业务上传说明见开发插件随包 `references/developer/references/local-files.md`。`attachments.pick` 通过原生桥触发壳文件选择器，返回引用元数据；它不返回字节或原始路径，不表示文件已上传到业务系统。页面要直接保存持久素材，应通过标准 File 获取字节后调用 `data.assetPut`，不能混用临时附件 ID 与持久素材 ID。
+
 清单声明 `composer.control` 以选择、暂存、检查和释放附件，发送仍需 `conversation.send`。原生壳只将 ID、名称、MIME 和大小交给页面，原始路径留在主进程，ID 按即用页面实例隔离。
 
 ```js
@@ -172,6 +174,10 @@ const review = await soduWorkApp.chat.mention({
 ```
 
 也可用 `query:'@姓名'`；按目录中首个精确姓名匹配打开卡片，无精确匹配时显示同事选择。稳定用户ID优先。text≤500字；保留原对话草稿，默认不勾选旧会话附件、不自动请求AI小结。返回 `{ok,opened,state:'review'|'select'}` 仅表示右侧卡片/选人已打开；需用户核对并点击“发送通知”，后续通知保存、送达、已读复用既有链路。失败返回reason；不得报告“已发送”。不解析普通 chat.send 文本中的 @，也不自动群发。每次新操作用新requestId；同ID同内容防重，不能用于新一次发送。
+
+## 本地／云端数据声明
+
+数据接口保持不变。新即用在顶层 `jiyong.storage` 显式声明 `{"location":"local"}` 或 `{"location":"cloud"}`，遵从创建时必选项；旧包省略仍用本地。云端需要包内版本化 `initialization.script` JSON，由 Hub 按稳定包身份和当前账号自动开通独立空间；页面与技能共用 `data.*`，不持有数据库密码、不执行随包服务脚本。预检只读检查云端就绪；安装／首次访问才初始化。未联网、未配置或撤权须报错，不能回退本地写库；写超时先读取核对。格式、迁移与证据要求见即用开发随包 `references/developer/references/cloud-data.md` 及同目录两个 JSON Schema。
 
 ## In-app one-shot AI
 

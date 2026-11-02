@@ -50,17 +50,23 @@ function currentSkinId() {
 function applySkin(skinId) {
   const s = SkinRegistry ? SkinRegistry.getSkin(skinId) : _getSkins().find(x => x.id === skinId);
   if (!s) return;
-  /* Remove CSS variables from the previous skin first. */
-  if (typeof SkinRegistry !== 'undefined' && cfg._lastSkinId) {
-    const prev = SkinRegistry.getSkin(cfg._lastSkinId);
-    if (prev) SkinRegistry.clearSkinCSSVars(prev);
-  }
+  const previousSkinId = cfg._lastSkinId;
   cfg.character = s.character;
   cfg.theme = s.palette;
   cfg.tube = s.tube;
   cfg._lastSkinId = s.id;
   cfg._defaultLogoVersion = 1;
   saveCfg();
+  refreshSkinAppearance(previousSkinId);
+  /* Translate the name before inserting it into the localized bubble template. */
+  const shownName = (typeof SoduWorkI18n !== 'undefined' && SoduWorkI18n.translateText) ? SoduWorkI18n.translateText(s.name) : s.name;
+  if (typeof petSay === 'function') petSay('换上「' + shownName + '」~');
+}
+
+// Local choices and remote config patches share the same visual effects without saving twice.
+function refreshSkinAppearance(previousSkinId) {
+  const s = SkinRegistry.getSkin(cfg._lastSkinId);
+  if (previousSkinId) SkinRegistry.clearSkinCSSVars(SkinRegistry.getSkin(previousSkinId));
   /* Apply the remote skin's CSS variables. */
   if (typeof SkinRegistry !== 'undefined') SkinRegistry.applySkinCSSVars(s);
   if (typeof applyTheme === 'function') applyTheme();
@@ -70,10 +76,4 @@ function applySkin(skinId) {
   /* Refresh the grid only when the workspace UI is present. */
   if (typeof renderSkinGrid === 'function') renderSkinGrid();
   if (typeof refreshSkinCurName === 'function') refreshSkinCurName();   /* Synchronize the active skin name in settings. */
-  /*
-   * Translate the skin display name before inserting it into the localized bubble template;
-   * parameters are not translated again.
-   */
-  const shownName = (typeof SoduWorkI18n !== 'undefined' && SoduWorkI18n.translateText) ? SoduWorkI18n.translateText(s.name) : s.name;
-  if (typeof petSay === 'function') petSay('换上「' + shownName + '」~');
 }

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SoduWork jiyong declaration version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "storage"],
+  "properties": {
+    "version": {"const": 1},
+    "storage": {
+      "type": "object", "additionalProperties": false, "required": ["location"],
+      "properties": {"location": {"enum": ["local", "cloud"]}}
+    },
+    "collections": {
+      "type": "array", "maxItems": 20,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["key"],
+        "properties": {
+          "key": {"$ref": "#/$defs/key"},
+          "indexes": {"type": "array", "maxItems": 8, "items": {"$ref": "#/$defs/key"}}
+        }
+      }
+    },
+    "initialization": {
+      "type": "object", "additionalProperties": false, "required": ["script"],
+      "properties": {"script": {"type": "string", "pattern": "^assets/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\\.json$"}}
+    },
+    "parameters": {
+      "type": "array", "maxItems": 40,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["key", "type", "display"],
+        "properties": {
+          "key": {"$ref": "#/$defs/key"},
+          "type": {"enum": ["string", "number", "boolean", "array", "object"]},
+          "display": {"enum": ["text", "textarea", "number", "switch", "select", "multiselect", "password", "hidden"]},
+          "label": {"type": "string"},
+          "secret": {"type": "boolean"},
+          "default": {},
+          "options": {"type": "array", "maxItems": 50, "items": {"type": "string", "maxLength": 200}}
+        }
+      }
+    },
+    "mcp": {
+      "type": "object", "additionalProperties": false, "required": ["server"],
+      "properties": {
+        "server": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,59}$"},
+        "bindings": {
+          "type": "array", "maxItems": 40,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["tool", "argument", "parameter"],
+            "properties": {"tool": {"$ref": "#/$defs/key"}, "argument": {"$ref": "#/$defs/key"}, "parameter": {"$ref": "#/$defs/key"}}
+          }
+        }
+      }
+    }
+  },
+  "allOf": [{
+    "if": {"required": ["storage"], "properties": {"storage": {"required": ["location"], "properties": {"location": {"const": "cloud"}}}}},
+    "then": {"required": ["initialization"]}
+  }],
+  "$defs": {
+    "key": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$", "not": {"enum": ["__proto__", "prototype", "constructor"]}}
+  }
+}

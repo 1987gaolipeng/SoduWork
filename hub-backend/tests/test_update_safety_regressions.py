@@ -95,6 +95,8 @@ class AssignmentDeliveryRegressionTests(unittest.IsolatedAsyncioTestCase):
              patch.object(task_access, "_device_name_map", new=AsyncMock(return_value={})), \
              patch("app.services.task_requirement_projection.decorate_many",
                    new=AsyncMock()), \
+             patch("app.services.requirement_edit_policy.decorate_many",
+                   new=AsyncMock()), \
              patch("app.services.task_requirements.prepare_notifications",
                    new=AsyncMock(return_value={old.id: None, new.id: None})), \
              patch("app.services.task_requirements.decorate",

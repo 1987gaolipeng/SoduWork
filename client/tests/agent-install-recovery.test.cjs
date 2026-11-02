@@ -6,6 +6,8 @@ function fixture() {
   context.window = context;
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,
     '../components/panels/panels-agents.js'), 'utf8'), context);
+  context.fixtureAgent = broken;
+  vm.runInContext("_agData={machines:[{runnerId:'office',scope:'current-instance',agents:[fixtureAgent]}]}", context);
   return context;
 }
 const broken = { key: 'dsh', name: 'DeepSeek Harness', state: 'missing', installed: false,
@@ -75,7 +77,7 @@ test('reopening Agent management resumes the existing installation job without s
   f.openAgentsPanel();
   assert.equal(active, 1);
   f.closeAgentsPanel();
-  assert.equal(active, 0);
+  assert.equal(active, 1, 'Active installation must keep notifying conversations after panel close');
   f.openAgentsPanel();
   f.openAgentsPanel();
   assert.equal(active, 1, 'Reopening must keep one polling timer');

@@ -204,7 +204,13 @@ async function _loadAddGo(config) {
     throw error;
   }
   if (seq !== _addGoLoadSeq || document.getElementById('addGoWho') !== who) return;
-  _addGoOptions = result || {};
+  const normalizedResult = result || {};
+  _addGoOptions = {
+    ...normalizedResult,
+    substrates: window.TaskExecutionClient?.targets
+      ? TaskExecutionClient.targets(normalizedResult)
+      : (normalizedResult.substrates || []),
+  };
   _addGoQueryKey = JSON.stringify(request);
   _addGoPluginRenderKey = '';
   const model = document.getElementById('addGoModel');
@@ -217,7 +223,7 @@ async function _loadAddGo(config) {
   }
   _addGoRepos = Array.isArray(result.repos) ? result.repos : [];
   const workflows = (result.workflows || []).filter(x => x && x.bindingId);
-  const substrates = (result.substrates || []).filter(x => x && x.key);
+  const substrates = (_addGoOptions.substrates || []).filter(x => x && x.key);
   const recommendation = result.recommendation || {};
 
   repo.innerHTML = '<option value="">不关联工程 · 通用办公</option>' + _addGoRepos.map((r) =>
@@ -529,7 +535,13 @@ async function _verifyAddPlugin(go) {
       ? TaskExecutionClient.workflowProblem(verified || {}, go.plugin.bindingId)
       : '\u9009\u62e9\u7684\u5de5\u4f5c\u65b9\u6cd5\u5df2\u4e0d\u53ef\u7528');
   }
-  _addGoOptions = verified || {};
+  const normalized = verified || {};
+  _addGoOptions = {
+    ...normalized,
+    substrates: window.TaskExecutionClient?.targets
+      ? TaskExecutionClient.targets(normalized)
+      : (normalized.substrates || []),
+  };
   go.plugin.definition = definition;
 }
 

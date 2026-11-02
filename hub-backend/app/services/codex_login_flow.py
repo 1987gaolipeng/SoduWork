@@ -109,16 +109,23 @@ def run(jid: str, executable: str, data_root: str, *, publish, execute=None, iso
             return was_cancelled()
         publish({"state": "checking"})
         if not executable:
-            return finish("failed", "未找到 Codex，请先安装后重新检查", 1)
+            return finish("failed", "未找到 Codex，请先安装后重新检查", 1, reason="runtime_missing")
         env = account.environment(data_root, create=True) if isolated else environment(data_root)
+        if cancelled.is_set():
+            return was_cancelled()
+        # Explicit connection may prepare an empty home. Native status rejects
+        # a missing directory before it can distinguish an unauthenticated user.
+        os.makedirs(env["CODEX_HOME"], mode=0o700, exist_ok=True)
+        if cancelled.is_set():
+            return was_cancelled()
         state, _ = account.status(executable, env)
         if cancelled.is_set():
             return was_cancelled()
         if state == "authed":
             return succeeded(reused=True)
         if state != "unauthed":
-            return finish("failed", "暂时无法确认 Codex 登录状态，请重新检查程序和本机访问权限", 1)
-        os.makedirs(env["CODEX_HOME"], exist_ok=True)
+            return finish("failed", "暂时无法确认 Codex 登录状态，请重新检查程序和本机访问权限", 1,
+                          reason="status_unavailable")
         expires_at = time.time() + 300
         progress = {"state": "waiting", "expiresAt": expires_at}
 
@@ -137,16 +144,21 @@ def run(jid: str, executable: str, data_root: str, *, publish, execute=None, iso
         if code == 124:
             return finish("expired", "授权等待已超时，请重试获取新的设备码", code)
         if code:
-            return finish("failed", "官方授权未完成，请确认网络和授权结果后重试", code)
+            return finish("failed", "官方授权未完成，请确认网络和授权结果后重试", code,
+                          reason="authorization_failed")
         state, _ = account.status(executable, env)
         if cancelled.is_set():
             return was_cancelled()
         if state != "authed":
-            return finish("failed", "尚未检测到有效登录，请重新检查", 1)
+            return finish("failed", "尚未检测到有效登录，请重新检查", 1, reason="auth_not_verified")
         return succeeded(reused=False)
+    except PermissionError:
+        return finish("failed", "无法访问所选执行机的 Codex 登录目录或程序", 1, reason="access_denied")
+    except FileNotFoundError:
+        return finish("failed", "未找到 Codex，请先安装后重新检查", 1, reason="runtime_missing")
     except Exception:
         # Credentials and arbitrary native stderr never cross the job boundary.
-        return finish("failed", "连接未完成，请检查本机访问权限与网络后重试", 1)
+        return finish("failed", "连接未完成，请检查本机访问权限与网络后重试", 1, reason="connection_failed")
     finally:
         with _LOCK:
             if _PENDING.get(jid) is current:

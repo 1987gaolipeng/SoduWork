@@ -204,6 +204,30 @@ function loadHarness(api) {
   return { context, entry, controller };
 }
 
+test('a creation conversation never polls execution owned by another conversation', async () => {
+  let reads=0;
+  const h=loadHarness({aiSession:async()=>{reads++;return {ok:true,ref:'run',status:'done',items:[]};}});
+  h.entry.task.workRouting={conversationTurn:{conversationId:'execution-chat'}};
+  await h.context._loadCollabRun('t1');
+  assert.equal(reads,0);assert.equal(h.controller.snapshot().events.length,0);
+});
+
+test('execution projection preserves event ownership and rejects a late reassignment', async () => {
+  const h=loadHarness({aiSession:async()=>({ok:true,ref:'run',status:'done',items:[
+    {seq:1,conversationId:'other',text:'Foreign output'},
+    {seq:2,conversationId:'c1',text:'Owned output'}]})});
+  h.entry.task.workRouting={conversationTurn:{conversationId:'c1'}};
+  await h.context._loadCollabRun('t1');
+  assert.deepEqual(Array.from(h.controller.snapshot().events,e=>e.text),['Owned output']);
+  let resolve;
+  const late=loadHarness({aiSession:()=>new Promise(done=>{resolve=done;})});
+  late.entry.task.workRouting={conversationTurn:{conversationId:'c1'}};
+  const pending=late.context._loadCollabRun('t1');
+  late.entry.task.workRouting.conversationTurn.conversationId='other';
+  resolve({ok:true,ref:'run',status:'done',items:[{seq:1,text:'Late output'}]});
+  await pending;assert.equal(late.controller.snapshot().events.length,0);
+});
+
 test('workflow node completion remains waiting until the entire workflow settles', async () => {
   const { context, entry } = loadHarness({
     aiSession: async () => ({ ok: true, id: 'r1', workflowRunId: 'flow1', status: 'done', items: [{ seq: 1, kind: 'say', text: 'node output' }] }),
@@ -271,9 +295,11 @@ test('dossier uses real stages and numeric metrics, with no invented release', (
     execution: { tokens: { input: 100, output: 20, total: 0 }, retryCount: 2,
       startedAt: '2026-09-06T00:00:00Z', finishedAt: '2026-09-06T00:00:06Z' } });
   view.setPin('dossier');
-  assert.doesNotMatch(host.innerHTML, /\[object Object\]|trial|AI Review|自动合并|健康检查/);
-  assert.match(host.innerHTML, /120/);
-  assert.match(host.innerHTML, /6 秒/);
+  assert.doesNotMatch(host.innerHTML, /\[object Object\]|149|AI Review|自动合并|健康检查/);
+  assert.match(host.innerHTML, /重试<\/span><b>2 次<\/b>/);
+  assert.match(host.innerHTML, /已用时<\/span><b>6 秒<\/b>/);
+  assert.doesNotMatch(host.innerHTML, /Token<\/span>/,
+    'the dossier shows execution duration/retries; usage remains in the conversation receipt');
 });
 
 

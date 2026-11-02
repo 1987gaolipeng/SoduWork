@@ -17,16 +17,6 @@ if (typeof electron === 'string') {
   const report = { ok: false, cases: [], boundary: 'Actual Chromium with production app list/CSS, isolated profile and fixture catalog. DOM actions verify layout and handlers, not native mouse input or real remote installation.' };
   let win, coverServer;
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-  async function capture() {
-    for (let attempt = 0; ; attempt++) {
-      try { return await win.webContents.capturePage(); }
-      catch (error) {
-        if (attempt >= 2 || !String(error.message).includes('UnknownVizError')) throw error;
-        win.webContents.invalidate();
-        await delay(100);
-      }
-    }
-  }
   const until = async (fn, label) => { for (let i = 0; i < 100; i++) { if (await fn()) return; await delay(20); } throw Error('Timeout: ' + label); };
   app.whenReady().then(async () => {
     coverServer=require('node:http').createServer((_req,res)=>{res.setHeader('Content-Type','image/svg+xml');res.end('<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="400"><rect width="1000" height="400" fill="#c7d2fe"/><circle cx="850" cy="100" r="190" fill="#a5b4fc"/><text x="55" y="230" font-size="70" font-family="sans-serif" fill="#312e81">APPLICATION</text></svg>')});
@@ -52,11 +42,8 @@ if (typeof electron === 'string') {
       '<script src="' + asset('components/panels/panels-apps.js') + '"></script></html>');
     win = new BrowserWindow({ show: false, width: 1180, height: 900, webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
     await win.loadFile(path.join(temp, 'index.html'));
-    const js = async source => {
-      try { return await win.webContents.executeJavaScript(source); }
-      catch (error) { throw Error(String(error.message) + '\nFixture expression: ' + source, { cause: error }); }
-    };
-    await js(`(async()=>{window.catalogCalls=0;window.opened=[];window.installs=[];window.removed=[];window.catalogError='';window.failCatalog=false;
+    const js = source => win.webContents.executeJavaScript(source);
+    await js(`(async()=>{window.catalogCalls=0;window.opened=[];window.installs=[];window.removed=[];window.configured=[];window.catalogError='';window.failCatalog=false;
       window.makeApp=(id,name,extra={})=>({pluginId:id,name,description:'用于验证应用目录与卡片操作',enabled:true,ui:{contributions:[{id:'main',slot:'workspace.navigation'}]},...extra});
       window.fixtureSubmissions=[];
       window.fixtureItems=[makeApp('local:flow','流程画布',{personal:true,version:'0.4.31'}),makeApp('local:ops','运营云端版',{personal:true,key:'ops',version:'0.4.54',checksum:'ops-v1',setup:{preferences:[{key:'modelId',label:'模型 ID',type:'text',required:true},{key:'pageSize',label:'每页数量',type:'number',minimum:1,maximum:100}]},setupConfig:{modelId:'fixture-current',pageSize:20}}),
@@ -72,8 +59,8 @@ if (typeof electron === 'string') {
       localStorage.setItem('soduwork-apps-favorites',JSON.stringify(['local:flow','remote:installed','remote:new']));
       SoduWorkApps.open();await SoduWorkApps.render(true);})()`);
     const sections = () => js('[...document.querySelectorAll(".appsx-section")].filter(s=>s.dataset.appsSection!=="recommended").map(s=>({key:s.dataset.appsSection,title:s.querySelector("h2").textContent,names:[...s.querySelectorAll(".appsx-card-txt b")].map(b=>b.textContent)}))');
-    assert.deepEqual(await js('[...document.querySelectorAll("[role=tab]")].map(t=>t.textContent)'), ['我的', '市场']);
-    assert.deepEqual(await js('[...document.querySelector(".appsx-tools").children].map(node=>node.className)'), ['appsx-search', 'appsx-tabs', 'appsx-icon-btn', 'appsx-pill', 'appsx-icon-btn']);
+    assert.equal(await js('document.querySelectorAll(".appsx-tools [role=tab],.appsx-tabs").length'), 0);
+    assert.deepEqual(await js('[...document.querySelector(".appsx-tools").children].map(node=>node.className)'), ['appsx-search', 'appsx-icon-btn', 'appsx-pill', 'appsx-icon-btn']);
     assert.equal(await js('document.querySelector(".appsx-banner")'), null);
     assert.deepEqual(await js(`[...document.querySelectorAll('[data-apps-section=mine] .appsx-version-tag,[data-apps-section=favorites] .appsx-version-tag')].map(n=>n.textContent).sort()`), ['v0.4.31', 'v0.4.54', 'v1.9.0']);
     assert.equal(await js(`appVersionTagHtml({item:{version:'<img src=x onerror=alert(1)>'}}).includes('<img')`), false);
@@ -246,7 +233,7 @@ if (typeof electron === 'string') {
     for (const size of [[1180, 900], [680, 850]]) {
       win.setContentSize(...size); await delay(50);
       assert.equal(await js('document.querySelector("#appsPanel").scrollWidth>innerWidth'), false);
-      fs.writeFileSync(path.join(out, 'mine-' + size[0] + '.png'), (await capture()).toPNG());
+      fs.writeFileSync(path.join(out, 'mine-' + size[0] + '.png'), (await win.webContents.capturePage()).toPNG());
     }
     groups = await sections(); assert.deepEqual(groups.map(x => x.title), ['常用', '我的', '市场']);
     assert.deepEqual(new Set(groups.find(group=>group.key==='market').names), new Set(['团队应用', '远端新应用']));
@@ -256,7 +243,7 @@ if (typeof electron === 'string') {
     await until(()=>js('opened.at(-1)==="remote:new"'),'market app opened after add');
     assert.equal(await js('opened.length'), 2);
     assert.equal(await js('catalogCalls'), calls + 1);
-    fs.writeFileSync(path.join(out, 'market.png'), (await capture()).toPNG());
+    fs.writeFileSync(path.join(out, 'market.png'), (await win.webContents.capturePage()).toPNG());
     report.cases.push('Market contains remote listed apps including uninstalled ones; plus adds, synchronizes and opens an app in one flow.');
     await js(`fixtureItems.find(x=>x.pluginId==='remote:new').installed=true;window.dispatchEvent(new Event('soduwork:plugins-changed'))`);
     await until(() => js('!document.querySelector(".appsx-card-add")'), 'installation refresh');
@@ -267,7 +254,7 @@ if (typeof electron === 'string') {
     groups = await sections(); assert.equal(groups.some(group=>group.key==='favorites'), false); assert.deepEqual(groups.find(group=>group.key==='mine').names, ['运营云端版']);
     await js(`appsSearch.value='';appsSearch.dispatchEvent(new Event('input'));localStorage.setItem('soduwork-apps-favorites',JSON.stringify(fixtureItems.map(x=>x.pluginId)));SoduWorkApps.render(false)`);
     groups = await sections(); assert.equal(groups[1].names.length, 0);
-    assert.equal(await js(`document.querySelector('[data-apps-section="mine"]').textContent.includes('已安装的应用可在上方分组中打开')`), true);
+    assert.equal(await js(`document.querySelector('[data-apps-section="mine"]').textContent.includes('已安装的即用可在上方分组中打开')`), true);
     await js(`appsSearch.value='';appsSearch.dispatchEvent(new Event('input'));fixtureItems=[];window.dispatchEvent(new Event('soduwork-data-scope-changed'))`);
     await until(() => js('document.querySelectorAll(".appsx-card").length===0'), 'scope invalidation');
     assert.deepEqual((await sections()).map(x => x.title), ['我的', '市场']);
@@ -283,8 +270,8 @@ if (typeof electron === 'string') {
     report.cases.push('Remote errors remain distinguishable from an empty market; failed catalog shows a working retry action.');
     await js(`(async()=>{
       fixtureItems=[makeApp('recommended:new','推荐未安装应用',{key:'rec-new',description:'应用描述超过两行时应当截断并保持卡片整齐。'.repeat(12),marketPolicy:{featured:true},coverUrl:${JSON.stringify(coverUrl)}}),
-        makeApp('local:ops','示例运营应用',{key:'fixture-operations-app',personal:true,sourcePluginId:'recommended:ops'}),
-        makeApp('recommended:ops','示例运营应用',{key:'fixture-operations-app',marketPolicy:{featured:true},coverUrl:${JSON.stringify(coverUrl)}}),
+        makeApp('local:ops','疯狂运营',{key:'ops-cloud-console',personal:true,sourcePluginId:'recommended:ops',setup:{preferences:[{key:'modelId',label:'模型 ID',type:'text',required:true},{key:'pageSize',label:'每页数量',type:'number',minimum:1,maximum:100}]},setupConfig:{modelId:'fixture-current',pageSize:20}}),
+        makeApp('recommended:ops','疯狂运营',{key:'ops-cloud-console',marketPolicy:{featured:true},coverUrl:${JSON.stringify(coverUrl)}}),
         makeApp('recommended:third','团队知识库',{marketPolicy:{featured:true},coverUrl:${JSON.stringify(coverUrl)}}),
         makeApp('recommended:hidden','下架推荐',{listed:false,marketPolicy:{featured:true}}),
         makeApp('recommended:denied','无权限推荐',{permissions:{canUse:false},marketPolicy:{featured:true}})];
@@ -294,9 +281,18 @@ if (typeof electron === 'string') {
     assert.equal(await js('document.querySelectorAll(".appsx-cover-card").length'),3);
     assert.equal(await js('getComputedStyle(document.querySelector(".appsx-cover-card .appsx-app-ico")).borderRadius'),'50%');
     const recommendationGroups = await js(`Object.fromEntries([...document.querySelectorAll('.appsx-section')].map(section=>[section.dataset.appsSection,[...section.querySelectorAll('.appsx-card-txt b')].map(node=>node.textContent)]))`);
-    assert.ok(recommendationGroups.recommended.includes('示例运营应用'));
-    assert.ok(recommendationGroups.favorites.includes('示例运营应用'));
-    assert.ok(!recommendationGroups.mine.includes('示例运营应用'));
+    assert.ok(recommendationGroups.recommended.includes('疯狂运营'));
+    assert.ok(recommendationGroups.favorites.includes('疯狂运营'));
+    assert.ok(!recommendationGroups.mine.includes('疯狂运营'));
+    for(const width of [320,680,800,1180,1600,2400]) {
+      win.setContentSize(width,900);await until(()=>js('innerWidth==='+width),'shared grid resize');await delay(70);
+      const geometry=await js(`(()=>{const grids=['recommended','favorites'].map(key=>document.querySelector('[data-apps-section="'+key+'"] .appsx-grid'));return grids.map(grid=>({columns:getComputedStyle(grid).gridTemplateColumns,width:grid.querySelector('.appsx-card').getBoundingClientRect().width,available:grid.clientWidth,gap:parseFloat(getComputedStyle(grid).columnGap)}))})()`);
+      assert.equal(geometry[0].columns.split(' ').length,geometry[1].columns.split(' ').length,'recommended and ordinary cards share column count at '+width);
+      assert.ok(Math.abs(geometry[0].width-geometry[1].width)<1,'same card width at '+width);
+      const columns=geometry[0].columns.split(' ').length;
+      assert.ok(Math.abs(geometry[0].width-Math.min(680,(geometry[0].available-(columns-1)*geometry[0].gap)/columns))<1,'fill available width until cap at '+width);
+    }
+    win.setContentSize(1180,900);await delay(70);
     const beforeStarActions=await js('({opened:opened.length,installs:installs.length})');
     const beforeStarPressed=await js("document.querySelector('.appsx-cover-card .appsx-fav').getAttribute('aria-pressed')");
     await js(`document.querySelector('.appsx-cover-card .appsx-fav').click()`);
@@ -306,15 +302,15 @@ if (typeof electron === 'string') {
     assert.equal(await js("document.querySelector('.appsx-cover-card .appsx-fav').getAttribute('aria-pressed')"),beforeStarPressed);
     await until(()=>js('[...document.querySelectorAll(".appsx-cover img")].every(img=>img.complete&&img.naturalWidth>0)'),'cover images loaded');
     assert.equal(await js('[...document.querySelectorAll(".appsx-cover-desc")].every(p=>p.clientHeight<=38)'),true);
-    assert.equal(await js('[...document.querySelectorAll(".appsx-card-txt b")].filter(e=>e.textContent==="示例运营应用").length'),2);
-    const rec=await js(`(()=>{const card=[...document.querySelectorAll('.appsx-cover-card')].find(c=>c.textContent.includes('示例运营应用')),info=card.querySelector('.appsx-cover-info').getBoundingClientRect(),button=card.querySelector('.appsx-set').getBoundingClientRect(),star=card.querySelector('.appsx-fav').getBoundingClientRect(),open=card.querySelector('.appsx-card-open').getBoundingClientRect(),copy=card.querySelector('.appsx-cover-copy').getBoundingClientRect();return {inside:button.left>=info.left&&button.right<=info.right&&button.top>=info.top&&button.bottom<=info.bottom,twoRows:Math.abs(star.top-button.top)<1&&star.right<=button.left&&open.top>=button.bottom&&open.left>=copy.right,action:card.querySelector('.appsx-card-open').textContent}})()`);
-    assert.equal(rec.inside,true);assert.equal(rec.twoRows,true);assert.equal(rec.action,'打开应用');
+    assert.equal(await js('[...document.querySelectorAll("[data-apps-section=recommended] .appsx-card-txt b,[data-apps-section=favorites] .appsx-card-txt b")].filter(e=>e.textContent==="疯狂运营").length'),2);
+    const rec=await js(`(()=>{const card=[...document.querySelectorAll('.appsx-cover-card')].find(c=>c.textContent.includes('疯狂运营')),info=card.querySelector('.appsx-cover-info').getBoundingClientRect(),button=card.querySelector('.appsx-set').getBoundingClientRect(),star=card.querySelector('.appsx-fav').getBoundingClientRect(),open=card.querySelector('.appsx-card-open').getBoundingClientRect(),copy=card.querySelector('.appsx-cover-copy').getBoundingClientRect();return {inside:button.left>=info.left&&button.right<=info.right&&button.top>=info.top&&button.bottom<=info.bottom,twoRows:Math.abs(star.top-button.top)<1&&star.right<=button.left&&open.top>=button.bottom&&open.left>=copy.right,action:card.querySelector('.appsx-card-open').textContent}})()`);
+    assert.equal(rec.inside,true);assert.equal(rec.twoRows,true);assert.equal(rec.action,'打开即用');
     const recommendedActions=await js(`(()=>{const buttons=[...document.querySelectorAll('.appsx-cover-card .appsx-card-open')];return buttons.map(button=>{const style=getComputedStyle(button);return {label:button.textContent,accessibleLabel:button.getAttribute('aria-label'),icon:!!button.querySelector('svg'),background:style.backgroundColor,color:style.color,borderRadius:style.borderRadius,height:button.getBoundingClientRect().height}})})()`);
     assert.ok(recommendedActions.length>=2);
     assert.ok(recommendedActions.every(action=>action.label==='打开即用'&&action.accessibleLabel==='打开即用'&&!action.icon),'all recommendation installation states use the Open App text button');
     assert.ok(recommendedActions.every(action=>JSON.stringify(action)===JSON.stringify(recommendedActions[0])),'uninstalled recommendations use the same button appearance as installed apps');
     const installedOpenBefore=await js('({opened:opened.length,installs:installs.length})');
-    await js(`window.originalOpen=PluginUIHost.openContribution;window.testOpenCard=[...document.querySelectorAll('.appsx-cover-card')].find(card=>card.textContent.includes('示例运营应用'));
+    await js(`window.originalOpen=PluginUIHost.openContribution;window.testOpenCard=[...document.querySelectorAll('.appsx-cover-card')].find(card=>card.textContent.includes('疯狂运营'));
       PluginUIHost.openContribution=async(row,context)=>{opened.push(context.item.pluginId);await new Promise((resolve,reject)=>{window.finishOpen=resolve;window.failOpen=reject})};
       testOpenCard.querySelector('.appsx-card-open').click()`);
     assert.equal(await js(`testOpenCard.querySelector('.appsx-card-open').textContent`),'打开即用','an installed app does not display installation loading while its window opens');
@@ -382,7 +378,7 @@ if (typeof electron === 'string') {
     assert.equal(await js('getComputedStyle(document.querySelector("[data-apps-section=recommended] .appsx-grid")).gridTemplateColumns.split(" ").length'),3);
     assert.equal(await js('getComputedStyle(document.querySelector(".appsx-cover-card")).maxWidth'),'680px');
     assert.equal(await js('getComputedStyle(document.querySelector(".appsx-cover-card")).maxHeight'),'340px');
-    fs.writeFileSync(path.join(out,'recommended.png'),(await capture()).toPNG());
+    fs.writeFileSync(path.join(out,'recommended.png'),(await win.webContents.capturePage()).toPNG());
     win.setContentSize(1600,900);await delay(50);
     assert.equal(await js('getComputedStyle(document.querySelector("[data-apps-section=recommended] .appsx-grid")).gridTemplateColumns.split(" ").length'),3);
     assert.equal(await js(`(()=>{const grid=document.querySelector('[data-apps-section=recommended] .appsx-grid'),card=grid?.querySelector('.appsx-cover-card');return Boolean(grid&&card)&&Math.abs(card.getBoundingClientRect().left-grid.getBoundingClientRect().left)<1})()`),true,'multiple recommendations stay left aligned on wide screens');
@@ -390,11 +386,11 @@ if (typeof electron === 'string') {
     assert.equal(coverLayout.coverFills,true);assert.equal(coverLayout.bottomOverlay,true);
     assert.equal(coverLayout.titleSize,'24px');assert.ok(coverLayout.blur.includes('blur(18px)'));
     report.coverLayout=coverLayout;
-    fs.writeFileSync(path.join(out,'recommended-wide.png'),(await capture()).toPNG());
+    fs.writeFileSync(path.join(out,'recommended-wide.png'),(await win.webContents.capturePage()).toPNG());
     await js(`document.querySelector('[data-apps-section=recommended]').style.width='900px'`);await delay(50);
     assert.equal(await js('getComputedStyle(document.querySelector("[data-apps-section=recommended] .appsx-grid")).gridTemplateColumns.split(" ").length'),2,'columns follow container width even in a wide window');
     await js(`document.querySelector('[data-apps-section=recommended]').style.width=''`);
-    await js(`(async()=>{fixtureItems=[fixtureItems.find(x=>x.pluginId==='recommended:new')].filter(Boolean);await SoduWorkApps.render(true);document.querySelector('[data-tab="mine"]').click()})()`);
+    await js(`(async()=>{fixtureItems=[fixtureItems.find(x=>x.pluginId==='recommended:new')].filter(Boolean);await SoduWorkApps.render(true)})()`);
     win.setContentSize(1600,900);await delay(50);
     assert.equal(await js(`(()=>{const grid=document.querySelector('[data-apps-section=recommended] .appsx-grid'),card=grid?.querySelector('.appsx-cover-card');return Boolean(grid&&card)&&Math.abs(card.getBoundingClientRect().left-grid.getBoundingClientRect().left)<1})()`),true,'single recommendation stays left aligned on wide screens');
     report.cases.push('A single recommendation and multiple recommendations remain left aligned on wide screens.');
@@ -404,11 +400,11 @@ if (typeof electron === 'string') {
     report.narrowLayout=await js(`[appsBody,...document.querySelectorAll('[data-apps-section=recommended],.appsx-cover-card,.appsx-cover-info,.appsx-cover-meta')].map(e=>({class:e.className,width:e.getBoundingClientRect().width,scroll:e.scrollWidth,client:e.clientWidth,style:e.getAttribute('style')}))`);
     assert.equal(await js('appsBody.scrollWidth>appsBody.clientWidth'),false,'narrow recommendation content has no horizontal overflow');
     win.webContents.invalidate();await delay(160);
-    fs.writeFileSync(path.join(out,'recommended-narrow.png'),(await capture()).toPNG());
-    report.cases.push('Recommendation covers fill the card, 24px titles and two-line descriptions float in a translucent blurred bottom panel; wide and medium containers use two columns, narrow containers use one.');
+    fs.writeFileSync(path.join(out,'recommended-narrow.png'),(await win.webContents.capturePage()).toPNG());
+    report.cases.push('Recommendation covers fill the card, 24px titles and two-line descriptions float in a translucent blurred bottom panel; wide containers use three columns, medium containers use two, narrow containers use one.');
     const refreshCalls=await js('catalogCalls');await js('SoduWorkApps.close();SoduWorkApps.open()');
     await until(()=>js('catalogCalls>'+refreshCalls),'reopen fetches current recommendations');
-    report.cases.push('Recommendations include authorized uninstalled apps, retain overlap with Common for starred installed apps while My excludes starred apps, exclude unlisted/denied entries; star and settings share the upper right row above matching Open App text buttons for installed and uninstalled apps; Open App adds, synchronizes and opens when needed; masked ukey replacement validates and clears; reopening refetches.');
+    report.cases.push('Recommendations include authorized uninstalled apps, retain overlap with Common for starred installed apps while My excludes starred apps, exclude unlisted/denied entries; star and settings share the upper right row above matching Open App text buttons; Open App adds, synchronizes and opens when needed; declared settings validate required fields and numeric bounds while preserving hidden credentials; reopening refetches.');
     await js(fs.readFileSync(path.resolve(__dirname, '../components/panels/panels-capabilities.js'), 'utf8') + '\n;void 0;');
     await js(`window.detailOpened=[];window.detailSnapshot={items:[{pluginId:'remote:new'}]};
       window.SoduWorkCapabilityPlugins={load:async()=>detailSnapshot,open:(id,ctx)=>{detailOpened.push({id,modal:typeof ctx.openModal,api:ctx.api===SoduWorkAPI})}};void 0`);
@@ -418,14 +414,14 @@ if (typeof electron === 'string') {
     assert.equal(await js('(async()=>{detailSnapshot={items:[{pluginId:"remote:new"}],remoteError:"fixture offline"};try{await openCapabilityPlugin("remote:new");return false}catch(e){return true}})()'), true);
     assert.equal(await js('detailOpened.length'), 1);
     report.cases.push('Production detail entry supplies the existing installation modal context and rejects missing or unavailable remote catalog entries.');
-    /* Local apps show a gray source label; market apps, including installed ones, have no source label. */
+    /* 本机应用显示灰色来源标签；市场来源（包括已安装）不显示标签。 */
     await js(`(async()=>{
       fixtureItems=[makeApp('local:lite','轻量画板',{personal:true}),
         makeApp('local:web','网页服务',{personal:true,template:'app',ui:{contributions:[{id:'main',slot:'workspace.navigation',source:{type:'external',url:'https://app.example.com',openMode:'workspace'}}]}}),
         makeApp('remote:mweb','市场网页应用',{installed:false,listed:true,template:'app',ui:{contributions:[{id:'main',slot:'workspace.navigation',source:{type:'external',url:'https://market.example.com',openMode:'workspace'}}]}}),
         makeApp('remote:installed-source','市场已安装应用',{installed:true,listed:true}),
         makeApp('remote:feat','精选网页应用',{listed:true,template:'app',marketPolicy:{featured:true},coverUrl:${JSON.stringify(coverUrl)},ui:{contributions:[{id:'main',slot:'workspace.navigation',source:{type:'external',url:'https://feat.example.com',openMode:'workspace'}}]}})];
-      catalogError='';localStorage.setItem('soduwork-apps-favorites','[]');await SoduWorkApps.render(true);document.querySelector('[data-tab="mine"]').click();
+      catalogError='';localStorage.setItem('soduwork-apps-favorites','[]');await SoduWorkApps.render(true);
     })()`);
     await until(()=>js('document.querySelectorAll(".appsx-source-tag").length===2'),'local source tags rendered');
     assert.equal(await js('document.querySelectorAll(".appsx-card-headline .appsx-source-tag").length'),0,'source labels no longer compete with names and hover versions');
@@ -444,76 +440,108 @@ if (typeof electron === 'string') {
     win.setContentSize(1180,900);await delay(50);
     fs.writeFileSync(path.join(out,'source-tags.png'),(await win.webContents.capturePage()).toPNG());
     await js(`localStorage.setItem('soduwork-apps-favorites',JSON.stringify(['local:web','remote:installed-source']));SoduWorkApps.render(false)`);
-    assert.deepEqual(await js(`Object.fromEntries([...document.querySelectorAll('[data-apps-section="favorites"] .appsx-card-headline')].map(row=>[row.querySelector('b').textContent,row.querySelector('.appsx-source-tag')?.textContent||null]))`),
-      {'网页服务':'本机安装','市场已安装应用':null},'favorites retain the same source distinction');
-    await js(`document.querySelector('[data-tab="market"]').click()`);
-    assert.equal(await js(`document.querySelectorAll('.appsx-source-tag,.appsx-kind').length`),0,'market rows have no tags whether installed or not');
-    await js(`document.querySelector('[data-tab="mine"]').click()`);
+    assert.deepEqual(await js(`Object.fromEntries([...document.querySelectorAll('[data-apps-section="favorites"] .appsx-card-txt')].map(row=>[row.querySelector('b').textContent,row.querySelector('.appsx-source-tag')?.textContent||null]))`),
+      {'网页服务':'本机','市场已安装应用':null},'favorites retain the same source distinction');
+    assert.equal(await js(`document.querySelectorAll('[data-apps-section=market] .appsx-source-tag,[data-apps-section=market] .appsx-kind').length`),0,'market rows have no tags whether installed or not');
     assert.equal(await js(`document.querySelectorAll('.appsx-cover-card .appsx-source-tag,.appsx-kind').length`),0,'recommendations have no source or colored type tags');
     win.setContentSize(390,900);await delay(50);
     assert.equal(await js('appsBody.scrollWidth>appsBody.clientWidth'),false,'source labels fit narrow app rows');
     fs.writeFileSync(path.join(out,'source-tags-narrow.png'),(await win.webContents.capturePage()).toPNG());
-    report.cases.push('Mine and Favorites mark only local apps as 本机安装 using neutral gray text/fill/borders without glow; market and recommendation cards have no tags, including installed market apps; narrow rows do not overflow.');
-    /* ---- Create-app dialog: select the type before entering the existing conversation flow. ---- */
-    await js(`window.developerCalls=[];window.WorkspaceHost={open:(route,payload)=>developerCalls.push({route,payload})};document.querySelector("#appsAdd").click()`);
-    assert.equal(await js('document.getElementById("appsCreateMask").classList.contains("show")'),true,'Add opens the create-app dialog first');
-    assert.deepEqual(await js('[...document.querySelectorAll(".appsx-create-opt")].map(o=>o.querySelector("b").textContent)'), ['轻应用','网页应用','桌面客户端']);
-    assert.equal(await js('document.querySelector("#appsCreateGo").disabled'),true,'Create stays disabled until a type is picked');
-    assert.equal(await js('developerCalls.length'),0);
-    await js(`document.querySelector('.appsx-create-opt[data-kind="web"]').click()`);
-    await until(()=>js("getComputedStyle(document.querySelector('.appsx-create-opt.selected .appsx-create-mark')).backgroundColor==='rgb(61, 139, 255)'"),'create selection transition completes');
+    report.cases.push('Mine and Favorites mark only local apps as 本机 using neutral gray text/fill/borders without glow; market and recommendation cards have no tags, including installed market apps; narrow rows do not overflow.');
+    // The creation dialog now offers local categories and web integration instead of desktop cards.
+    win.setContentSize(1180,900);
+    await js(`window.developerCalls=[];window.WorkspaceHost={open:(route,payload)=>developerCalls.push({route,payload})};appsAdd.click()`);
+    assert.equal(await js('appsCreateMask.classList.contains("show")'),true);
+    assert.deepEqual(await js('[...document.querySelectorAll(".appsx-create-opt b")].map(o=>o.textContent)'), ['创建即用','WEB/H5接入']);
+    assert.equal(await js('document.querySelector(".appsx-create-badge").textContent'),'轻量');
+    assert.equal(await js(`!!document.querySelector('.appsx-create-opt[data-kind="desktop"]')`),false);
+    assert.equal(await js('document.querySelector(".appsx-create-opt.selected").dataset.kind'),'lite');
+    assert.equal(await js('appsCreateLiteTab.getAttribute("aria-selected")'),'true');
+    assert.equal(await js('appsCreateWebPanel.hidden'),true);
+    assert.deepEqual(await js('[...document.querySelectorAll(".appsx-create-category b")].map(o=>o.textContent)'),['工具办公','小游戏','机器人','其他']);
+    assert.equal(await js('[...document.querySelectorAll(".appsx-create-category")].every(o=>getComputedStyle(o).borderStyle==="none"&&o.querySelector("small").textContent.split(" · ").length===(o.dataset.createCategory==="robot"?5:3))'),true);
+    assert.equal(await js('developerCalls.length'),0,'choosing a tab does not start development');
+    assert.equal(await js('!!document.querySelector(".appsx-create > header,.appsx-create.appsx-modal")'),false,'creation surface has no outer modal frame or title bar');
+    assert.equal(await js('[...document.querySelectorAll(".appsx-create-ico svg")].every(svg=>new Set([...svg.querySelectorAll("[fill]")].map(el=>el.getAttribute("fill")).filter(c=>c!=="none")).size>=3)'),true,'each category has a multicolor filled illustration');
+    assert.equal(await js('document.querySelector(\'[data-create-category="robot"] small\').textContent'),'灵感扭蛋机 · 脑洞辩论员 · 下班收尾官 · 会议行动员 · 项目哨兵');
+    assert.equal(await js(`[...document.querySelectorAll('.appsx-create-category')].every(card=>{const i=card.querySelector('.appsx-create-ico').getBoundingClientRect(),t=card.querySelector('b').getBoundingClientRect(),b=card.querySelector('.appsx-create-start').getBoundingClientRect(),r=card.getBoundingClientRect();return Math.abs(i.y+i.height/2-t.y-t.height/2)<1&&Math.abs(b.x+b.width/2-r.x-r.width/2)<1})`),true,'icons and titles share a row and create actions are centered');
+    assert.equal(await js(`[...document.querySelectorAll('.appsx-create-start')].every(button=>{const range=document.createRange();range.selectNodeContents(button);const text=range.getBoundingClientRect(),r=button.getBoundingClientRect();return Math.abs(text.x+text.width/2-r.x-r.width/2)<1})`),true,'Start creating text is centered inside each pill');
+    assert.equal(await js(`appsCreateCancel.textContent==='取消并关闭'&&appsCreateCancel.getBoundingClientRect().width>=120`),true,'cancel-and-close has the wider hit area');
+    await js('appsCreateCancel.focus()');
+    win.webContents.sendInputEvent({type:'mouseMove',x:0,y:0}); await delay(180);
+    assert.equal(await js('getComputedStyle(document.querySelector(".appsx-create-start")).opacity'),'0');
+    const categoryRect=await js('(()=>{const r=document.querySelector(".appsx-create-category").getBoundingClientRect();return {x:Math.round(r.x+20),y:Math.round(r.y+20),width:r.width,height:r.height}})()');
+    win.webContents.sendInputEvent({type:'mouseMove',x:categoryRect.x,y:categoryRect.y});
+    await until(()=>js('getComputedStyle(document.querySelector(".appsx-create-start")).opacity==="1"'),'hover reveals start');
+    assert.deepEqual(await js('(()=>{const r=document.querySelector(".appsx-create-category").getBoundingClientRect();return {width:r.width,height:r.height}})()'),{width:categoryRect.width,height:categoryRect.height},'hover keeps geometry stable');
+    fs.writeFileSync(path.join(out,'create-dialog-options.png'),(await win.webContents.capturePage()).toPNG());
+    await js('document.querySelector(".appsx-create-category").focus()');
+    assert.equal(await js('getComputedStyle(document.querySelector(".appsx-create-start")).opacity'),'1','keyboard focus exposes create action');
+    await js('appsCreateLiteTab.focus()');
+    win.webContents.sendInputEvent({type:'keyDown',keyCode:'Right'});win.webContents.sendInputEvent({type:'keyUp',keyCode:'Right'});
+    await until(()=>js('!appsCreateWebPanel.hidden'),'keyboard switches tabs');
+    assert.equal(await js('appsCreateLitePanel.hidden'),true);
+    assert.equal(await js('document.querySelectorAll(".appsx-create-recommendations > div").length'),2);
+    assert.equal(await js('appsCreateWebPanel.querySelector(".appsx-create-fit").textContent'),'适合云端，数据上云');
     fs.writeFileSync(path.join(out,'create-dialog.png'),(await win.webContents.capturePage()).toPNG());
-    assert.equal(await js(`document.querySelector('.appsx-create-opt[data-kind="web"]').getAttribute("aria-checked")`),'true');
-    const selStyle = await js(`(()=>{const opt=document.querySelector('.appsx-create-opt[data-kind="web"]');const mark=opt.querySelector('.appsx-create-mark');const s=getComputedStyle(opt),m=getComputedStyle(mark);return {optBorder:s.borderColor,markBorder:m.borderColor,markBg:m.backgroundColor,markColor:m.color,markSvg:!!mark.querySelector('svg')}})()`);
-    const optBorders = await js(`[...document.querySelectorAll('.appsx-create-opt')].map(o=>getComputedStyle(o).borderColor)`);
-    assert.notEqual(optBorders[0], optBorders[1], 'selected option gets an accent border');
-    assert.equal(selStyle.markSvg,true,'selected mark contains the check icon');
-    assert.equal(selStyle.markBg,'rgb(61, 139, 255)','selected mark fills with accent');
-    assert.equal(await js('document.querySelector("#appsCreateGo").disabled'),false);
-    await js('document.querySelector("#appsCreateGo").click()');
-    assert.equal(await js('document.getElementById("appsCreateMask").classList.contains("show")'),false,'dialog closes on create');
+    await js('appsCreateGo.click()');
+    assert.equal(await js('appsCreateMask.classList.contains("show")'),false);
     assert.equal(await js('developerCalls[0].route'),'create');
     assert.equal(await js('developerCalls[0].payload.pluginId'),'local:app-developer');
     assert.equal(await js('developerCalls[0].payload.newSession'),true);
-    assert.equal(await js('developerCalls[0].payload.prefill'),'创建网页类应用：');
-    await js(`document.querySelector("#appsAdd").click();document.querySelector('.appsx-create-opt[data-kind="desktop"]').click();document.querySelector("#appsCreateGo").click()`);
-    assert.equal(await js('developerCalls[1].payload.prefill'),'创建桌面客户端：');
-    await js(`document.querySelector("#appsAdd").click();document.querySelector('.appsx-create-opt[data-kind="lite"]').click();document.querySelector("#appsCreateGo").click()`);
-    assert.equal(await js('developerCalls[2].payload.prefill'),'创建轻应用：');
-    await js(`document.querySelector("#appsAdd").click()`);
-    assert.equal(await js(`document.querySelector("#appsCreateGo").disabled`),true,'reopening clears the previous selection');
-    await js(`document.querySelector("#appsCreateCancel").click()`);
-    assert.equal(await js('document.getElementById("appsCreateMask").classList.contains("show")'),false);
-    assert.equal(await js('developerCalls.length'),3,'cancel does not create');
-    assert.equal(await js(`!!document.getElementById("appsCreateInstall")`),true,'package install stays reachable in the dialog');
-    report.cases.push('Add opens a create-app dialog with Web/Desktop/Light types; picking one enables 立即创建 which routes to the shared new-conversation entry with a type prefill like 创建网页类应用：; cancel and reopen reset the selection and package install remains reachable.');
-    await js(`document.querySelector('#appsAdd').click()`);
-    assert.equal(await js('appsCreateInstall.textContent'), '导入应用包');
-    const localeScripts = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../core/locales/manifest.json'), 'utf8'))
-      .map(file => asset('core/locales/' + file)).concat([asset('core/i18n-dom.js'), asset('core/i18n.js')]);
-    await js(`(async()=>{for(const src of ${JSON.stringify(localeScripts)})await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src=src;s.onload=resolve;s.onerror=reject;document.head.appendChild(s)})})()`);
-    for (const locale of ['zh-CN', 'en-US']) {
-      await js(`SoduWorkI18n.setLocale(${JSON.stringify(locale)},{persist:false,broadcast:false})`);
-      await until(() => js(`appsCreateInstall.textContent===${JSON.stringify(locale === 'zh-CN' ? '导入应用包' : 'Import app package')}`), 'import package translation');
-      assert.equal(await js('appsCreateGo.textContent'), locale === 'zh-CN' ? '立即创建' : 'Create now');
-      assert.deepEqual(await js(`Array.from(document.querySelectorAll('.appsx-create-opt'),row=>row.dataset.kind)`), ['lite', 'web', 'desktop']);
-      assert.equal(await js(`document.querySelector('.appsx-create-easy').textContent`), locale === 'zh-CN' ? '简易' : 'Easy');
-      assert.equal(await js(`document.querySelectorAll('.appsx-create-easy').length`), 1);
-      for (const width of [320, 700]) {
-        win.setContentSize(width, 900); await delay(80);
-        const layout = await js(`(()=>{const a=appsCreateInstall,b=appsCreateGo,r=a.getBoundingClientRect(),s=getComputedStyle(a);return {bg:s.backgroundColor,primary:getComputedStyle(b).backgroundColor,radius:parseFloat(s.borderRadius),fits:r.left>=0&&r.right<=innerWidth,overflow:document.querySelector('.appsx-create').scrollWidth>document.querySelector('.appsx-create').clientWidth+1}})()`);
-        assert.equal(layout.bg, layout.primary); assert.notEqual(layout.bg, 'rgba(0, 0, 0, 0)');
-        assert.ok(layout.radius >= 16); assert.equal(layout.fits, true); assert.equal(layout.overflow, false);
-        const badge = await js(`(()=>{const e=document.querySelector('.appsx-create-easy'),r=e.getBoundingClientRect(),p=e.closest('button').getBoundingClientRect(),m=e.closest('button').querySelector('.appsx-create-mark').getBoundingClientRect(),s=getComputedStyle(e);return {bg:s.backgroundColor,color:s.color,fits:r.right<=p.right+1&&r.left>=p.left&&r.top>=p.top-1,clear:r.bottom<=m.top}})()`);
-        assert.equal(badge.bg, 'rgb(24, 24, 27)'); assert.equal(badge.color, 'rgb(255, 255, 255)');
-        assert.equal(badge.fits, true); assert.equal(badge.clear, true, 'badge does not cover the selection control');
-        fs.writeFileSync(path.join(out, 'create-dialog-'+locale+'-'+width+'.png'), (await win.webContents.capturePage()).toPNG());
-      }
+    assert.equal(await js('developerCalls[0].payload.prefill'),'创建网页类即用：');
+    for (const [index,title] of ['工具办公','小游戏','机器人','其他'].entries()) {
+      await js('appsAdd.click()');
+      assert.equal(await js('document.querySelector(".appsx-create-opt.selected").dataset.kind'),'lite','every opening resets to local');
+      assert.equal(await js('document.querySelectorAll("input[name=appsCreateStorage]:checked").length'),0,'every opening requires an explicit storage choice');
+      await js('document.querySelector("input[name=appsCreateStorage][value=local]").click()');
+      await js('document.querySelectorAll(".appsx-create-category")['+index+'].click()');
+      assert.equal(await js('developerCalls.at(-1).payload.prefill'),'创建即用：'+title+'：');
     }
-    await js(`SoduWorkI18n.setLocale('zh-CN',{persist:false,broadcast:false})`);
-    await until(() => js('appsCreateInstall.textContent==="导入应用包"'), 'Chinese label restores');
-    report.cases.push('Import app package uses the same solid rounded button as Create now; real Chinese/English catalogs switch the full creation dialog and fit 320/700px widths.');
-    report.cases.push('Light app comes first with one black Easy/简易 corner badge; both locales fit narrow and wide dialogs without covering the selection control.');
+    assert.equal(await js('developerCalls.length'),5);
+    await js('appsAdd.click();appsCreateCancel.click()');
+    assert.equal(await js('developerCalls.length'),5,'cancel does not create');
+    await js('appsAdd.click()');
+    for (const size of [[680,650],[380,650]]) {
+      win.setContentSize(...size);await delay(80);
+      const panelGeometry=[];
+      for (const kind of ['lite','web']) {
+        await js(`document.querySelector('.appsx-create-opt[data-kind="${kind}"]').click()`);
+        panelGeometry.push(await js('(()=>{const r=document.querySelector(".appsx-create").getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height}})()'));
+        assert.equal(await js('(()=>{const d=document.querySelector(".appsx-create"),b=d.querySelector(".appsx-modal-body"),f=d.querySelector("footer").getBoundingClientRect();return d.scrollWidth<=d.clientWidth&&b.scrollWidth<=b.clientWidth&&f.bottom<=innerHeight&&f.top>=0})()'),true,'dialog fits '+kind+' at '+size[0]);
+        fs.writeFileSync(path.join(out,'create-'+kind+'-'+size[0]+'.png'),(await win.webContents.capturePage()).toPNG());
+      }
+      assert.deepEqual(panelGeometry[0],panelGeometry[1],'tab switching preserves surface size and position at '+size[0]);
+    }
+    await js('appsCreateCancel.click()');
+    report.cases.push('Creation has two joined tabs with local selected by default and no desktop option; four borderless categories each show three examples, reveal Start on hover/focus without moving, and prefill the original developer conversation. Keyboard tab switching, web introduction/recommendations, cancellation and narrow scrolling retain reachable footer actions.');
+    for (const file of [...JSON.parse(fs.readFileSync(path.resolve(__dirname,'../core/locales/manifest.json'),'utf8')).map(file=>'locales/'+file),'i18n-dom.js','i18n.js']) {
+      await js(fs.readFileSync(path.resolve(__dirname,'../core',file),'utf8'));
+    }
+    await js('SoduWorkI18n.setLocale("en-US");appsAdd.click()');
+    await until(()=>js('appsCreateInstall.textContent === "Import package"'),'English import button');
+    assert.deepEqual(await js('[...document.querySelectorAll(".appsx-create-category small")].map(node=>node.textContent)'), [
+      'Meeting notes · Time-zone planner · Expense tracker', 'Word ladder · Mini golf · Memory match',
+      'Idea Mixer · Devil’s Advocate · Daily Wrap-up · Meeting Actions · Project Watch', 'Reading list · Travel wish list · Habit journal',
+    ], 'English uses audience-specific examples rather than literal Chinese translations');
+    assert.equal(await js('appsCreateCancel.textContent'), 'Cancel and close');
+    assert.equal(await js('/[\\u3400-\\u9fff]/.test(appsCreateMask.innerText)'), false, 'English dialog contains no Chinese UI copy');
+    assert.equal(await js('appsCreateGo.textContent'),'Start creating');
+    assert.equal(await js('document.querySelector(".appsx-create-badge").textContent'),'Lightweight');
+    assert.equal(await js('document.querySelector(".appsx-create-opt.selected").dataset.kind'),'lite');
+    const importStyles = await js('({importFill:getComputedStyle(appsCreateInstall).backgroundColor,cancelFill:getComputedStyle(appsCreateCancel).backgroundColor,importBorder:getComputedStyle(appsCreateInstall).borderStyle,cancelBorder:getComputedStyle(appsCreateCancel).borderStyle})');
+    const luminance = color => color.match(/[\d.]+/g).slice(0,3).map(Number).reduce((sum,n,i)=>sum+n*[.2126,.7152,.0722][i],0);
+    assert.equal(importStyles.importBorder,'none');
+    assert.equal(importStyles.cancelBorder,'none');
+    assert.ok(luminance(importStyles.importFill)<luminance(importStyles.cancelFill),'Import button has a deeper fill than Cancel');
+    assert.equal(await js('(()=>{const m=document.querySelector(".appsx-create").getBoundingClientRect();return [...document.querySelectorAll(".appsx-create-foot button")].every(b=>{const r=b.getBoundingClientRect();return r.left>=m.left&&r.right<=m.right})})()'),true,'English footer buttons fit the narrow dialog');
+    win.webContents.invalidate(); await delay(180);
+    fs.writeFileSync(path.join(out,'create-dialog-en.png'),(await win.webContents.capturePage()).toPNG());
+    await js('SoduWorkI18n.setLocale("zh-CN")');
+    await until(()=>js('appsCreateInstall.textContent === "导入即用包"'),'Chinese import button');
+    await js('window.packageImports=0;window.SoduWorkPluginMakerUtils={choosePackage:async()=>{packageImports++}};appsCreateInstall.click()');
+    await until(()=>js('packageImports===1&&!appsCreateMask.classList.contains("show")'),'original package import route');
+    report.cases.push('Import package/导入即用包 switch with the production locale catalogs and adapter; the filled import button is darker than Cancel, English footer fits narrow screens, and import reuses the existing package picker.');
     report.ok = true;
   }).catch(error => { report.error = String(error.stack || error); }).finally(() => {
     fs.writeFileSync(path.join(out, 'report.json'), JSON.stringify(report, null, 2));

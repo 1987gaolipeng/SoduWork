@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Regression checks for public module contracts."""
+"""Offline schedule-settlement regression reproducing dispatch rollback and expired ORM objects.
+Refresh before outcome processing and isolate each tick so failed settlement cannot leave a
+schedule perpetually due and bypass retry limits.
+"""
 import asyncio
 import os
 import sys
@@ -59,7 +62,7 @@ async def main():
 
     sch.apply_outcome = spying_apply
 
-    async def failing_run_one(session, srow, who="", schedule_run_id=""):
+    async def failing_run_one(session, srow, who="", schedule_run_id="", conversation_title=""):
         # Reproduce rollback during failed dispatch.
         # Rollback expires objects even with expire_on_commit=False.
         # Refresh them before reading schedule attributes.

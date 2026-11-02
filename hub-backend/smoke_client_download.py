@@ -26,7 +26,7 @@ def main() -> None:
             touch(root / "SoduWork-1.9.99-Setup.exe", 300)
             touch(root / "SoduWork-invalid-Setup.exe", 500)
             touch(root / "SoduWork-Setup.exe", 600)
-            touch(root / "hezi.exe", 700)
+            touch(root / "soduwork.exe", 700)
             assert download._pkg().name == "SoduWork-1.10.0-Setup.exe"
             assert download._package_version(download._pkg()) == "1.10.0"
             from app.db import Base, engine, get_session as open_session
@@ -52,7 +52,7 @@ def main() -> None:
             assert download._package_version(download._pkg()) == ""
 
             (root / "SoduWork-Setup.exe").unlink()
-            assert download._pkg().name == "hezi.exe"
+            assert download._pkg().name == "soduwork.exe"
         finally:
             download._DIR = original
     print("desktop download selection: 7 assertions green")

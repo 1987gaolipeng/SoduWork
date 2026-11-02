@@ -194,7 +194,11 @@ export default function ClientReleases() {
                 <i>·</i>{fmtTime(times.length ? times[times.length - 1] : '')}
               </span>
             </div>
-            {[...new Set(group.rows.map(row => row.notes).filter(Boolean))].map(notes =>
+            {[...new Set(group.rows.map(row => {
+              const content = row.localizedNotes?.[uiLocale] || row.localizedNotes?.['en-US'];
+              return content ? [content.summary, ...content.sections.flatMap(s =>
+                [s.title, ...s.items.map(i => '• ' + i.text)])].join('\n') : row.notes;
+            }).filter(Boolean))].map(notes =>
               <details className="cr-notes" key={notes}>
                 <summary>{tx("更新内容")}</summary><div data-user-content>{notes}</div>
               </details>)}

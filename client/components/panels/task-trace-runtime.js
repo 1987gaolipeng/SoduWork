@@ -61,6 +61,7 @@
     old.disposed = true;
     if (old.onEvent) window.removeEventListener('soduwork-work-execution', old.onEvent);
     if (old.onTaskEvent) window.removeEventListener('soduwork-work-task-change', old.onTaskEvent);
+    if (old.onLocale) window.removeEventListener('soduwork-locale-change', old.onLocale);
     if (old.onVisibility) document.removeEventListener('visibilitychange', old.onVisibility);
     mounts.delete(container);
   }
@@ -196,6 +197,7 @@
     };
     state.onEvent = (event) => queueEvent(event, false);
     state.onTaskEvent = (event) => queueEvent(event, true);
+    state.onLocale = () => state.refresh(false);
     state.onVisibility = () => {
       clearTimeout(state.timer);
       if (document.visibilityState === 'visible') {
@@ -207,6 +209,7 @@
     };
     window.addEventListener('soduwork-work-execution', state.onEvent);
     window.addEventListener('soduwork-work-task-change', state.onTaskEvent);
+    window.addEventListener('soduwork-locale-change', state.onLocale);
     document.addEventListener('visibilitychange', state.onVisibility);
     return state.refresh(!!opts.force);
   }

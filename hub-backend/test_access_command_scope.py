@@ -15,7 +15,8 @@ from app.services.skill_read_scope import ReadScope
 class PreviewScopeTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='soduwork-preview-permission-')
-        self.base = Path(self.temp.name)
+        # Production permission scopes canonicalize Windows short-name paths.
+        self.base = Path(self.temp.name).resolve()
         self.root = self.base / 'workspace'
         self.root.mkdir()
         self.page = self.root / 'index.html'

@@ -74,6 +74,7 @@ async def artifacts_zip(
 ):
     """Behavior and constraints for this operation."""
     import io
+    import hashlib
 
     from fastapi.responses import StreamingResponse
     from sqlalchemy import select as _sel
@@ -87,24 +88,15 @@ async def artifacts_zip(
         .order_by(Attachment.created_at, Attachment.id))).scalars().all()
     if artifact is not None and artifact.kind == "code":
         raise HTTPException(status_code=400, detail="代码成果以仓库提交为准，不提供附件压缩包")
-    by_id = {str(row.id): row for row in rows}
     selected = []
     if artifact is not None:
-        manifest = delivery_truth.artifact_manifest(artifact)
-        current = list(manifest.get("primary") or []) + list(manifest.get("supporting") or [])
-        expected_ids = list(dict.fromkeys(
-            str(item.get("id") or "") for item in current if str(item.get("id") or "")))
-        missing_ids = [item_id for item_id in expected_ids if item_id not in by_id]
-        if missing_ids:
-            raise HTTPException(status_code=502,
-                                detail="当前固定版本缺少成果文件，拒绝返回不完整压缩包")
-        selected = [by_id[item_id] for item_id in expected_ids]
+        selected = delivery_bundle.select_artifact(rows, artifact)
     else:
         # No immutable version yet: keep the newest deliverable for every relative path.
         # This fallback is only for pre-review tasks; it must never put input/history in the zip.
         candidates = [row for row in rows
                       if str(getattr(row, "uploaded_by", "") or "").startswith("agent:")
-                      and str(getattr(row, "role", "") or "") not in ("input", "process")]
+                      and delivery_manifest.item_from_attachment(row)["category"] in {"primary", "supporting"}]
         latest = {}
         for row in candidates:
             name = delivery_manifest.normalize_name(row.filename)
@@ -136,6 +128,7 @@ async def artifacts_zip(
         headers={"Content-Disposition":
                  f"attachment; filename*=UTF-8''{quote(safe + '.zip')}",
                  "X-Artifact-Count": str(len(used)),
+                 "X-Artifact-SHA256": hashlib.sha256(payload["bytes"]).hexdigest(),
                  "X-Artifact-Version": str(artifact.id if artifact else "")})
 
 

@@ -160,11 +160,11 @@ async function createServer() {
         if (mode === 'normal' && latest.role !== 'tool') {
           assert.ok(body.tools.some(tool => tool.function.name === 'write'), 'real SDK write tool must be available');
           frame(response, { role: 'assistant', tool_calls: [{ index: 0, id: 'runtime_write_once', type: 'function',
-            function: { name: 'write', arguments: JSON.stringify({ path: 'runtime-proof.txt', content: 'written by the isolated Pi runtime\n' }) } }] });
+            function: { name: 'write', arguments: JSON.stringify({ path: 'final-report.txt', content: 'written by the isolated Pi runtime\n' }) } }] });
           frame(response, {}, 'tool_calls', { prompt_tokens: 20, completion_tokens: 12, total_tokens: 32 });
         } else {
           frame(response, { role: 'assistant', content: mode === 'approval'
-            ? 'The requested write was denied; no file was created. ' : 'Created runtime-proof.txt ' });
+            ? 'The requested write was denied; no file was created. ' : 'Created final-report.txt ' });
           await delay(80);
           if (response.destroyed) return;
           frame(response, { content: mode === 'approval' ? 'The existing workspace is preserved.' : 'with the requested content.' });
@@ -267,21 +267,29 @@ app.whenReady().then(async () => {
     assert.equal(completionObserved, false, 'delivery capture must finish before completion');
     assert.ok(initialHandle.snapshot().tools.some(tool => tool.name === 'write' || tool.tool === 'write'));
     const outputs = await initialHandle.outputSnapshotAsync();
-    assert.ok(outputs.files.some(file => file.name === 'runtime-proof.txt' || file.relative === 'runtime-proof.txt'));
-    assert.equal(fs.readFileSync(path.join(cwd, 'runtime-proof.txt'), 'utf8'), 'written by the isolated Pi runtime\n');
+    assert.ok(outputs.files.some(file => file.name === 'final-report.txt' || file.relative === 'final-report.txt'));
+    assert.equal(fs.readFileSync(path.join(cwd, 'final-report.txt'), 'utf8'), 'written by the isolated Pi runtime\n');
     finishedCaptures++;
   };
-  const submitted = await handle.submit('Create runtime-proof.txt in this isolated workspace.', [], { submissionId: 'process-e2e-write' });
+  const submitted = await handle.submit('Create final-report.txt in this isolated workspace.', [], { submissionId: 'process-e2e-write',
+    afterTurn: async status => {
+      assert.equal(status, 'completed');
+      const payload = await require('../main/pi-session/task-delivery.cjs').capture(handle, status);
+      assert.deepEqual(payload.files.map(file => file.name), ['final-report.txt']);
+      assert.equal(Buffer.from(payload.files[0].data, 'base64').toString(), 'written by the isolated Pi runtime\n');
+      report.taskDeliveryCaptured = true;
+    } });
   assert.equal(submitted.accepted, true);
   submitted.completion.then(() => { completionObserved = true; });
   assert.equal(completionObserved, false, 'admission must not wait for model completion');
   const completed = await bounded(submitted.completion, 'real write turn');
   assert.equal(completed.ok, true, completed.reason);
+  assert.equal(report.taskDeliveryCaptured, true, 'task settlement captures files through the real worker boundary');
   await until(() => !handle.inFlight(), 'write turn settles');
   assert.equal(handle.status(), 'idle');
-  assert.equal(fs.readFileSync(path.join(cwd, 'runtime-proof.txt'), 'utf8'), 'written by the isolated Pi runtime\n');
+  assert.equal(fs.readFileSync(path.join(cwd, 'final-report.txt'), 'utf8'), 'written by the isolated Pi runtime\n');
   assert.equal(requests.length, 2, 'one tool call and one completion, without replay');
-  assert.ok(updates.some(row => row.text.includes('Created runtime-proof.txt ')), 'stream updates reach the main-process projection');
+  assert.ok(updates.some(row => row.text.includes('Created final-report.txt ')), 'stream updates reach the main-process projection');
   const snapshot = handle.snapshot();
   assert.match(text(snapshot), /with the requested content/);
   const writeTool = snapshot.tools.find(tool => tool.tool === 'write' || tool.name === 'write' || tool.toolName === 'write');
@@ -289,7 +297,7 @@ app.whenReady().then(async () => {
   const detail = await handle.toolDetail(writeTool.id || writeTool.toolCallId);
   assert.ok(detail, 'lazy tool details come from the runtime');
   const outputs = await handle.outputSnapshotAsync();
-  assert.ok(outputs.files.some(file => file.name === 'runtime-proof.txt' || file.relative === 'runtime-proof.txt'));
+  assert.ok(outputs.files.some(file => file.name === 'final-report.txt' || file.relative === 'final-report.txt'));
   const archive = handle.resumeLocation(), sessionId = handle.sessionId;
   assert.ok(path.isAbsolute(archive) && fs.existsSync(archive));
   assert.equal(JSON.stringify(snapshot).includes(identity.secret), false);
@@ -351,7 +359,7 @@ app.whenReady().then(async () => {
         assert.equal(instruction, 'Controlled workflow in the existing queue.'); assert.deepEqual(files, []);
         await nativeHandle.appendTaskMessage('user', instruction, [], 'isolated-controlled-task');
         await nativeHandle.appendTaskTool({ type: 'tool_execution_start', toolCallId: 'controlled-read',
-          toolName: 'read', args: { path: 'runtime-proof.txt' } }, 'isolated-controlled-task');
+          toolName: 'read', args: { path: 'final-report.txt' } }, 'isolated-controlled-task');
         await nativeHandle.appendTaskTool({ type: 'tool_execution_end', toolCallId: 'controlled-read',
           toolName: 'read', result: { content: [{ type: 'text', text: 'CONTROLLED_RECEIPT' }] } }, 'isolated-controlled-task');
         await nativeHandle.appendTaskMessage('assistant', 'CONTROLLED_RESULT_VISIBLE', [], 'isolated-controlled-task', 'controlled-result');
@@ -400,11 +408,11 @@ app.whenReady().then(async () => {
   const personal = require('../main/personal-plugins');
   const seed = personal.create(app, { template: 'workflow', key: 'isolated-relay', name: 'Isolated Pi relay',
     description: 'Only the temporary model and workspace are used.', version: '1.0.0',
-    instructions: 'Write runtime-proof.txt in the current node workspace, then report the actual result.' }).plugin;
+    instructions: 'Write final-report.txt in the current node workspace, then report the actual result.' }).plugin;
   const workflow = seed.localDraft.workflow;
   for (const node of workflow.nodes) if (['ai', 'ai_review'].includes(node.type)) {
     node.config.agentKind = 'local:pi';
-    node.outputs = [{ key: node.outputs[0].key, kind: 'file', path: 'runtime-proof.txt',
+    node.outputs = [{ key: node.outputs[0].key, kind: 'file', path: 'final-report.txt',
       label: 'Isolated proof', required: true }];
   }
   const workflowPlugin = personal.create(app, { ...seed.localDraft, version: '1.0.1', workflow }).plugin;
@@ -559,7 +567,7 @@ app.whenReady().then(async () => {
   assert.equal(await win.webContents.executeJavaScript('++window.runtimeProbe'), 1, 'renderer survives runtime exit');
   await delay(700);
   assert.equal(requests.length, beforeCrash + 1, 'crashed submission must not run again automatically');
-  assert.equal(fs.readFileSync(path.join(cwd, 'runtime-proof.txt'), 'utf8'), 'written by the isolated Pi runtime\n');
+  assert.equal(fs.readFileSync(path.join(cwd, 'final-report.txt'), 'utf8'), 'written by the isolated Pi runtime\n');
   assertMainHasNoSdk();
   report.cases.push('Killing the isolated runtime rejects its pending completion while Electron main and renderer remain responsive; no submission or completed write is replayed.');
 
@@ -586,7 +594,7 @@ app.whenReady().then(async () => {
   assert.equal(freshResult.ok, true, freshResult.reason);
   await until(() => !handle.inFlight(), 'recovered turn settles');
   assert.equal(requests.length, beforeCrash + 2, 'only the fresh user instruction executes');
-  assert.equal(fs.readFileSync(path.join(cwd, 'runtime-proof.txt'), 'utf8'), 'written by the isolated Pi runtime\n');
+  assert.equal(fs.readFileSync(path.join(cwd, 'final-report.txt'), 'utf8'), 'written by the isolated Pi runtime\n');
   assertMainHasNoSdk();
   report.recoveredProcess = nextProcess;
   report.cases.push('An explicit reopen starts a fresh process generation and restores history; only the subsequent fresh user instruction executes.');

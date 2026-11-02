@@ -46,6 +46,19 @@ function fields(event, full, snapshot) {
 }
 
 const STREAM_FLUSH_MS = 16;
+
+/* Only bounded capability names cross IPC; grants and connector credentials never do. */
+function pluginAuthorization(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  const result = {};
+  for (const key of ['missing', 'missingMcp', 'readOnlyConflicts', 'unsupported', 'required']) {
+    const items = [...new Set((Array.isArray(source[key]) ? source[key] : [])
+      .map(item => String(item || '').trim().slice(0, 80)).filter(Boolean))].slice(0, 20);
+    if (items.length) result[key] = items;
+  }
+  return Object.keys(result).length ? result : undefined;
+}
+
 function createStreamScheduler(publish, { delay = STREAM_FLUSH_MS, setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
   const pending = new Map();
   function deliver(context, event, snapshot) { try { publish(context, event, snapshot); } catch (_) {} }
@@ -70,4 +83,4 @@ function createStreamScheduler(publish, { delay = STREAM_FLUSH_MS, setTimer = se
     clear() { for (const key of pending.keys()) cancel(key); },
   };
 }
-module.exports = { create, fields, createStreamScheduler, STREAM_FLUSH_MS };
+module.exports = { create, fields, pluginAuthorization, createStreamScheduler, STREAM_FLUSH_MS };

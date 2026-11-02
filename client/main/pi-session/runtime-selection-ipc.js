@@ -25,11 +25,11 @@ function install({ app, ipcMain, session, identityOf, memories, cloud, publish }
       return result;
     } catch (error) { return { ok: false, reason: String(error.message || error) }; }
   });
-  ipcMain.handle('pi-session-conversation-runtimes', async (event, ref) => {
+  ipcMain.handle('pi-session-conversation-runtimes', async (event, ref, options) => {
     try {
       const handle = await current(event, ref);
       if (cloud.guard(handle)) return cloud.executionRuntimes(handle);
-      if (typeof session.availableRuntimes === 'function') return await session.availableRuntimes(app);
+      if (typeof session.availableRuntimes === 'function') return await session.availableRuntimes(app, options || {});
       const catalog = session.runtimes();
       return { ok: true, runtimes: catalog,
         availableRuntimes: catalog.filter(row => row && row.id === 'pi'),

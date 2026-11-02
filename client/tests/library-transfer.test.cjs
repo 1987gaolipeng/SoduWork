@@ -3,12 +3,41 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const code=fs.readFileSync(path.join(__dirname,'../components/panels/library-transfer.js'),'utf8');
 const tick=()=>new Promise(r=>setImmediate(r));
 function harness(){
- let scope='alice';const events=[],calls=[],messages=[],sources=[];const h={upload:async()=>({ok:true,item:{id:'item'}})};
- const global={SoduWorkAPI:{taskStorageKey:()=>scope,uploadLibraryFile:async(file,folderId,storage,source)=>{calls.push(file);sources.push(source??null);return h.upload(file);},uploadLibraryOutput:async(ref,file,folderId,source)=>{calls.push({ref,file});sources.push(source??null);return h.upload(file);}},
+ let scope='alice';const events=[],calls=[],messages=[],sources=[],broadcasts=[];const h={upload:async()=>({ok:true,item:{id:'item'}})};
+ const global={SoduWorkAPI:{taskStorageKey:()=>scope,uploadLibraryFile:async(file,folderId,storage,source)=>{calls.push(file);sources.push(source??null);return h.upload(file);},uploadLibraryOutput:async(ref,file,folderId,source)=>{calls.push({ref,file});sources.push(source??null);return h.upload(file);}},soduWorkAPI:{broadcast:(kind,payload)=>broadcasts.push({kind,payload})},
  dispatchEvent:e=>events.push(e),addEventListener(){},petSay:s=>messages.push(s)};
  vm.runInNewContext(code,{window:global,File,CustomEvent:class{constructor(type,options){this.type=type;this.detail=options?.detail;}}});
- return Object.assign(h,{global,api:global.LibraryTransfer,events,calls,messages,sources,switchScope:()=>{scope='bob';}});
+ return Object.assign(h,{global,api:global.LibraryTransfer,events,calls,messages,sources,broadcasts,switchScope:()=>{scope='bob';}});
 }
+
+test('task archive actions use the shared delivery manifest and reject stale or switched scopes',async()=>{
+ const h=harness(),downloads=[];
+ const node={dataset:{libraryBundle:'task',libraryBundleIds:'["html","css"]'},disabled:false,isConnected:true};
+ let ids=['html','css'];
+ h.global.SoduWorkAPI.taskTrace=async()=>({task:{title:'Website'},delivery:{artifact:{id:'version-2'},manifest:{files:ids.map(id=>({id}))}}});
+ h.global.SoduWorkAPI.downloadArtifactsZip=async(...args)=>downloads.push(args);
+ await h.api.downloadBundle(node);
+ assert.deepEqual(downloads,[['task','Website','version-2']]);
+ ids.push('new-file');
+ await h.api.downloadBundle(node);
+ assert.equal(downloads.length,1);
+ assert.match(h.messages.at(-1),/交付版本已变化/);
+ h.global.SoduWorkAPI.taskTrace=async()=>{h.switchScope();return{delivery:{artifact:{id:'another-user'}}};};
+ await h.api.downloadBundle(node);
+ assert.equal(downloads.length,1);
+ assert.equal(node.disabled,false);
+});
+
+test('requirement bundles share compact library controls and never inherit another chat source',async()=>{
+ const h=harness();h.api.bindSession(()=>({sessionId:'unrelated',conversationTitle:'Other chat'}));
+ const file={deliveryBundle:true,taskId:'task',attachmentIds:['a','b'],artifactVersionId:'v2',name:'交付物.zip'};
+ const html=h.api.button(file,'','data-rq-bundle-library');
+ assert.match(html,/rq-library-save/);assert.match(html,/保存到本机资料库/);
+ assert.equal(await h.api.saveOutput('',file),true);
+ assert.equal(h.sources[0],null);
+ assert.equal(await h.api.saveOutput('',{...file,attachmentIds:['b','a']}),true);
+ assert.equal(h.calls.length,1);
+});
 test('automatic inputs retain bytes and the clipboard display name, deduplicate retries, and skip library imports/directories',async()=>{
  const h=harness(),file=new File([new Uint8Array([0,255,42])],'image.png',{type:'image/png'});
  const job=h.api.trackFile(file,{name:'粘贴图片-123.png',source:'paste'});
@@ -18,6 +47,7 @@ test('automatic inputs retain bytes and the clipboard display name, deduplicate 
  assert.equal(h.api.trackFile(new File(['existing'],'exists.txt'),{source:'library'}),null);
  assert.equal(h.api.trackFile(new File(['folder'],'folder'),{kind:'dir'}),null);
  assert.equal(h.events[0].type,'soduwork-library-changed');
+ assert.equal(h.broadcasts[0].kind,'library');
 });
 test('automatic transfer failure is recoverable without rejecting or losing the selected File',async()=>{
  const h=harness();h.upload=async()=>{throw Error('offline');};
@@ -40,23 +70,25 @@ test('preview and chat saves share in-flight work, capture the session/file, and
  finish({ok:true});assert.equal(await first,true);assert.equal(await second,true);
  h.upload=async()=>({ok:true});await h.api.saveOutput('session-one',{...file,at:2});assert.equal(h.calls.length,2);
 });
-test('saved output buttons become preview actions and reuse the saved receipt', async () => {
+test('saved chat output keeps a visible library label and locates the receipt without reuploading', async () => {
  const h=harness(), opened=[];
- h.global.ChatWorkbench={openOutput:id=>{opened.push(id);return true;}};
+ h.global.WorkspaceHost={open:(view,payload)=>{opened.push({view,...payload});return true;}};
  const file={artifactId:'preview-output',name:'report.html',at:1,size:12};
  const node={dataset:{libraryOutput:'preview-output',libraryRef:'chat',libraryVersion:'1:12'},classList:{toggle(){}},setAttribute(){},innerHTML:''};
  assert.equal(await h.api.saveOutput('chat',file,node),true);
  assert.match(node.innerHTML,/library-save-label/);
- assert.match(h.api.button(file,'chat'),/预览|Preview/);
+ assert.match(h.api.button(file,'chat'),/已保存到资料库/);
+ assert.doesNotMatch(h.api.button(file,'chat'),/is-preview/);
  assert.equal(await h.api.saveOutput('chat',file,node),true);
- assert.deepEqual(opened,['preview-output']);
+ assert.equal(opened.length,1);assert.equal(opened[0].view,'library');assert.equal(opened[0].itemId,'item');
+ assert.equal(opened[0].revealOnly,true);assert.equal(h.calls.length,1);
 });
 test('saved output preview keeps the workbench action and falls back to the library item', async () => {
  const h=harness(), library=[], workspace=[];
  h.global.LibraryDelivery={openItem:item=>{library.push(item.id);return true;}};
  h.global.ChatWorkbench={openOutput:id=>{workspace.push(id);return false;}};
  const file={artifactId:'library-preview',name:'report.html',at:1,size:12};
- const node={dataset:{libraryOutput:'library-preview',libraryRef:'chat',libraryVersion:'1:12'},classList:{toggle(){}},setAttribute(){},innerHTML:''};
+ const node={dataset:{wbLibraryUpload:'library-preview',libraryRef:'chat',libraryVersion:'1:12'},classList:{toggle(){}},setAttribute(){},innerHTML:''};
  assert.equal(await h.api.saveOutput('chat',file,node),true);
  assert.equal(await h.api.saveOutput('chat',file,node),true);
  assert.deepEqual(library,['item']);
@@ -124,6 +156,16 @@ test('result card includes every current-turn primary output, even when the answ
  assert.deepEqual(h.api._selectOutputFiles(files,new Set(['validation-shot']),false,new Set()).map(file=>file.artifactId),[]);
  assert.deepEqual(h.api._selectOutputFiles(files,new Set(),false,new Set()).map(file=>file.artifactId),[]);
 });
+
+test('delivery archives lead loose files regardless of index order without changing the source index', () => {
+ const h = harness();
+ const files = ['index.html', 'style.css', 'script.js', 'result.ZIP', 'readme.md'].map(name =>
+  ({ artifactId: name, name, changedInTurn: true, primary: true }));
+ const original = files.map(file => file.name);
+ assert.deepEqual(h.api._selectOutputFiles(files, new Set(), true).map(file => file.name),
+  ['result.ZIP', 'index.html', 'style.css', 'script.js', 'readme.md']);
+ assert.deepEqual(files.map(file => file.name), original);
+});
 test('website result cards keep companion images out unless the answer explicitly links one',()=>{
  const h=harness();
  const files=[
@@ -186,4 +228,29 @@ test('an explicit draft source stays unassociated instead of inheriting the prev
  h.api.bindSession(()=>({ref:'previous',sessionId:'previous-chat',conversationTitle:'之前的会话'}));
  const job=h.api.trackFile(new File(['draft'],'draft.txt'),{librarySource:null});
  await job.promise; assert.equal(h.sources[0],null);
+});
+
+// Persisted Hub deliveries and PC copies use different library routes.
+test('saved item navigation retains the actual storage and resets preview-only navigation',async()=>{
+ const h=harness(), routes=[];
+ h.global.WorkspaceHost={open:async(view,payload)=>{routes.push({view,...payload});return true;}};
+ for (const storage of ['nfs','minio']) await h.api.openSavedItem({id:'hub-'+storage,storage,filename:'课表.xlsx'},{remote:true});
+ await h.api.openSavedItem({id:'local-copy',backend:'local',filename:'课表.xlsx'});
+ await h.api.openSavedItem({id:'old-hub',storage:'local',filename:'课表.xlsx'},{remote:true});
+ assert.deepEqual(routes.map(r=>r.storage),['nfs','minio','local','local']);
+ assert.ok(routes.every(r=>r.revealOnly && r.query==='课表.xlsx'));
+ assert.equal(routes[2].storageOrigin,undefined);
+ assert.equal(routes[3].storageOrigin,'server-history');
+ await h.api.openSavedItem({id:'local-copy',backend:'local',filename:'课表.xlsx'},{preview:true});
+ assert.equal(routes[4].revealOnly,false);assert.equal(routes[4].storage,'local');
+});
+test('navigation failure keeps the saved receipt and does not upload another copy',async()=>{
+ const h=harness();h.global.WorkspaceHost={open:async()=>{throw Error('SEARCH_LIBRARY_UNAVAILABLE');}};
+ const file={artifactId:'saved',name:'课表.xlsx',at:1};
+ await h.api.saveOutput('chat',file);
+ await assert.rejects(()=>h.api.openSavedItem({id:'item'}),/可能已移动或删除/);
+ const node={dataset:{libraryOutput:'saved'},classList:{toggle(){}},setAttribute(){}};
+ await h.api.saveOutput('chat',file,node);
+ assert.equal(h.calls.length,1);assert.match(h.api.button(file,'chat'),/已保存到资料库/);
+ assert.match(h.messages.at(-1),/可能已移动或删除/);
 });

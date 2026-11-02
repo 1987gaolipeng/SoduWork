@@ -1,10 +1,8 @@
 'use strict';
-
-
-
-
-
-
+/*
+ * Use real settings rendering and locale catalogs to verify update-card titles refresh
+ * from cached state after language changes, including dynamic version fragments.
+ */
 const test = require('node:test'), assert = require('node:assert/strict');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -100,7 +98,8 @@ const EXPECT_TITLE = {
 
 test('client update card title repaints on locale change in all four languages', async () => {
   const sandbox = bootClientUpdateCard();
-  await sandbox._refreshClientUpdateStatus();   // Render the initial settings update card in Chinese.
+  sandbox.SoduWorkI18n.setLocale('zh-CN', { persist: false, broadcast: false });
+  await sandbox._refreshClientUpdateStatus();   // Render the explicit Chinese settings update card.
   await sleep(20);
   const title = sandbox.document.getElementById('clientUpdateTitle');
   assert.equal(title.textContent, EXPECT_TITLE['zh-CN']);

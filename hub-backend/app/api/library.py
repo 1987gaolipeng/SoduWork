@@ -29,6 +29,7 @@ _KINDS = {"note", "image", "document", "spreadsheet", "presentation", "file"}
 _SCOPES = {"recommended", "favorites", "folders", "images", "all", "trash"}
 _SOURCE_TYPES = {"conversation", "upload", "library"}
 _SOURCE_SESSION_ID = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
+_REMOTE_QUOTA_BYTES = 1024 * 1024 * 1024
 
 
 def _storage_http_error(exc):
@@ -327,13 +328,47 @@ def _document_text_format(body: dict) -> str:
 
 
 @router.get("/storage/status")
-async def library_storage_status(client: Client = Depends(current_client)):
-    """Return local/MinIO capability without loading any library records."""
-    del client  # Authentication is still required; status is not tenant data.
+async def library_storage_status(
+    client: Client = Depends(current_client),
+    session: AsyncSession = Depends(get_session),
+):
+    """Return storage capability and the current user's remote space usage."""
     try:
-        return await asyncio.to_thread(library_storage.status)
+        payload = await asyncio.to_thread(library_storage.status)
     except Exception as exc:  # noqa: BLE001 - keep a machine-readable boundary
         raise _storage_http_error(exc) from exc
+
+    # The selected provider is the only remote storage the library can use for
+    # new writes. Trashed rows still own remote objects until the recycle bin
+    # is emptied, so they remain part of the physical space total.
+    storage = payload.get("storage") if isinstance(payload, dict) else None
+    storage = dict(storage) if isinstance(storage, dict) else {}
+    remote = storage.get("remote") or (payload.get("remote") if isinstance(payload, dict) else None)
+    if isinstance(remote, dict) and remote.get("available") and remote.get("connected"):
+        backend = str(remote.get("backend") or "").strip().lower()
+        if backend in {"minio", "nfs"}:
+            try:
+                used = await session.scalar(
+                    select(func.coalesce(func.sum(LibraryItem.size), 0)).where(
+                        LibraryItem.owner_key == _owner_key(client),
+                        LibraryItem.backend == backend,
+                    )
+                )
+            except Exception:  # noqa: BLE001 - storage health remains usable if quota read is temporarily unavailable
+                used = None
+            if used is None:
+                return payload
+            used_bytes = max(0, int(used or 0))
+            remaining_bytes = max(0, _REMOTE_QUOTA_BYTES - used_bytes)
+            remote = {
+                **remote,
+                "quotaBytes": _REMOTE_QUOTA_BYTES,
+                "usedBytes": used_bytes,
+                "remainingBytes": remaining_bytes,
+            }
+            storage["remote"] = remote
+            payload = {**payload, "storage": storage, "remote": remote}
+    return payload
 
 
 @router.get("/share-members")
@@ -374,6 +409,162 @@ async def share_local_library_file(
     """Send a local file snapshot without creating a remote library entry."""
     from ..services import library_sharing
     return await library_sharing.share_local(session, client, body)
+
+
+@router.post("/share-local-batch")
+async def share_local_library_files(
+    body: dict = Body(default_factory=dict),
+    client: Client = Depends(current_client),
+    session: AsyncSession = Depends(get_session),
+):
+    from ..services import library_sharing
+    return await library_sharing.share_local_batch(session, client, body)
+
+
+def _batch_ids(body: dict, limit: int = 100) -> list[str]:
+    values = body.get("itemIds") if isinstance(body, dict) else None
+    if not isinstance(values, list) or not values:
+        raise HTTPException(400, "itemIds must be a non-empty list")
+    ids = list(dict.fromkeys(str(value or "").strip() for value in values if str(value or "").strip()))
+    if not ids or len(ids) > limit:
+        raise HTTPException(400, f"一次最多处理 {limit} 个资料")
+    return ids
+
+
+@router.post("/items/batch-delete")
+async def batch_delete_library_items(
+    body: dict = Body(default_factory=dict),
+    client: Client = Depends(current_client),
+    session: AsyncSession = Depends(get_session),
+):
+    """Move several owned library items to the recycle bin in one transaction."""
+    owner = _owner_key(client)
+    ids = _batch_ids(body)
+    rows = (await session.execute(select(LibraryItem).where(
+        LibraryItem.owner_key == owner, LibraryItem.id.in_(ids)))).scalars().all()
+    by_id = {str(row.id): row for row in rows}
+    succeeded, failed = [], []
+    stamp = datetime.now(timezone.utc)
+    for item_id in ids:
+        row = by_id.get(item_id)
+        if row is None:
+            failed.append({"id": item_id, "code": "LIBRARY_NOT_FOUND", "message": "资料不存在"})
+        elif row.deleted_at is not None:
+            failed.append({"id": item_id, "code": "LIBRARY_ALREADY_DELETED", "message": "资料已在回收站"})
+        else:
+            row.deleted_at = stamp
+            row.favorite = False
+            succeeded.append(item_id)
+    await session.commit()
+    return {"ok": True, "succeeded": succeeded, "failed": failed,
+            "trashed": len(succeeded)}
+
+
+@router.post("/items/batch-share")
+async def batch_share_library_items(
+    body: dict = Body(default_factory=dict),
+    client: Client = Depends(current_client),
+    session: AsyncSession = Depends(get_session),
+):
+    """Share selected remote and client-local items as one package per recipient."""
+    from ..services import library_sharing
+    raw_ids = body.get("itemIds") if isinstance(body, dict) else None
+    if raw_ids is None: raw_ids = []
+    if not isinstance(raw_ids, list): raise HTTPException(400, "itemIds must be a list")
+    ids = list(dict.fromkeys(str(value or "").strip() for value in raw_ids if str(value or "").strip()))
+    raw_folder_ids = body.get("folderIds") if isinstance(body, dict) else None
+    if raw_folder_ids is None:
+        raw_folder_ids = []
+    if not isinstance(raw_folder_ids, list):
+        raise HTTPException(400, "folderIds must be a list")
+    folder_ids = list(dict.fromkeys(str(value or "").strip() for value in raw_folder_ids if str(value or "").strip()))
+    if len(folder_ids) > library_sharing.MAX_ITEMS:
+        raise HTTPException(400, f"一次最多选择 {library_sharing.MAX_ITEMS} 个文件夹")
+    if folder_ids:
+        folder_rows = await library_sharing.folder_items(session, client, folder_ids)
+        ids.extend(str(row.id) for row in folder_rows)
+    raw_local = body.get("localFiles") if isinstance(body, dict) else None
+    snapshots, local_ids = (library_sharing.parse_local_snapshots(raw_local) if raw_local is not None else ([], []))
+    all_ids = list(dict.fromkeys(ids + local_ids))
+    if not all_ids: raise HTTPException(400, "itemIds must be a non-empty list")
+    if len(all_ids) > library_sharing.MAX_ITEMS: raise HTTPException(400, f"一次最多分享 {library_sharing.MAX_ITEMS} 份资料")
+    recipients = body.get("recipientUserIds")
+    if recipients is None:
+        recipients = body.get("recipientIds")
+    if not isinstance(recipients, list):
+        raise HTTPException(400, "recipientUserIds must be a list")
+    note = str(body.get("note") or "")
+    request_id = str(body.get("requestId") or "").strip(); request_key = ""
+    if request_id:
+        try: request_key = "library-batch-share:" + str(uuid.UUID(request_id))
+        except ValueError as exc: raise HTTPException(400, "分享请求标识无效，请重新打开分享窗口") from exc
+    # A local folder is expanded by the desktop client into ``localFiles``.
+    # Keep the folder intent in the request so a one-file folder is still sent
+    # as a ZIP instead of silently degrading to a normal file attachment.
+    force_package = bool(folder_ids) or body.get("forcePackage") is True
+    result = await library_sharing.share_items(session, client, all_ids, recipients, note,
+        request_key=request_key, package=True, snapshots=snapshots or None,
+        force_package=force_package)
+    return {**result, "folderIds": folder_ids, "succeeded": [{"ids": all_ids, "folderIds": folder_ids, "result": result}], "failed": [],
+            "shared": len(all_ids), "notifications": result.get("shared", 0)}
+
+
+@router.post("/folders/{folder_id}/share")
+async def share_library_folder(
+    folder_id: str,
+    body: dict = Body(default_factory=dict),
+    client: Client = Depends(current_client),
+    session: AsyncSession = Depends(get_session),
+):
+    """Snapshot a folder (including nested files) as a ZIP notification."""
+    recipients = body.get("recipientUserIds")
+    if recipients is None:
+        recipients = body.get("recipientIds")
+    if not isinstance(recipients, list):
+        raise HTTPException(400, "recipientUserIds must be a list")
+    from ..services import library_sharing
+    request_id = str(body.get("requestId") or "").strip()
+    request_key = ""
+    if request_id:
+        try:
+            request_key = "library-folder-share:" + str(uuid.UUID(request_id))
+        except ValueError as exc:
+            raise HTTPException(400, "分享请求标识无效，请重新打开分享窗口") from exc
+    return await library_sharing.share_folders(
+        session, client, [folder_id], recipients, str(body.get("note") or ""), request_key=request_key,
+    )
+
+
+@router.post("/folders/batch-share")
+async def batch_share_library_folders(
+    body: dict = Body(default_factory=dict),
+    client: Client = Depends(current_client),
+    session: AsyncSession = Depends(get_session),
+):
+    """Share several folders as one ZIP notification per recipient."""
+    from ..services import library_sharing
+    raw_ids = body.get("folderIds") if isinstance(body, dict) else None
+    if not isinstance(raw_ids, list) or not raw_ids:
+        raise HTTPException(400, "folderIds must be a non-empty list")
+    folder_ids = list(dict.fromkeys(str(value or "").strip() for value in raw_ids if str(value or "").strip()))
+    if not folder_ids or len(folder_ids) > library_sharing.MAX_ITEMS:
+        raise HTTPException(400, f"一次最多选择 {library_sharing.MAX_ITEMS} 个文件夹")
+    recipients = body.get("recipientUserIds")
+    if recipients is None:
+        recipients = body.get("recipientIds")
+    if not isinstance(recipients, list):
+        raise HTTPException(400, "recipientUserIds must be a list")
+    request_id = str(body.get("requestId") or "").strip()
+    request_key = ""
+    if request_id:
+        try:
+            request_key = "library-folder-batch-share:" + str(uuid.UUID(request_id))
+        except ValueError as exc:
+            raise HTTPException(400, "分享请求标识无效，请重新打开分享窗口") from exc
+    result = await library_sharing.share_folders(
+        session, client, folder_ids, recipients, str(body.get("note") or ""), request_key=request_key,
+    )
+    return {**result, "folderIds": folder_ids}
 
 
 @router.get("")
@@ -544,6 +735,8 @@ async def _persist_item(session, owner, folder_id, kind, title, filename, conten
     async with library_conversation_save.save_lock(session, owner, library_names.LOCK_KEY):
         if reject_duplicate:
             await library_names.ensure_available(session, owner, backend, folder_id, title, filename)
+        else:
+            title, filename = await library_names.next_available(session, owner, backend, folder_id, title, filename)
         return await _write_item(session, owner, folder_id, kind, title, filename, content_type, data, extra, backend)
 
 
@@ -600,7 +793,7 @@ async def _persist_upload(session, owner, folder_id, kind, title, filename, cont
             return await _write_upload(session, owner, folder_id, kind, title, filename,
                                        content_type, handle, size, backend, extra)
     async with library_conversation_save.save_lock(session, owner, library_names.LOCK_KEY):
-        await library_names.ensure_available(session, owner, backend, folder_id, title, filename)
+        title, filename = await library_names.next_available(session, owner, backend, folder_id, title, filename)
         return await _write_upload(session, owner, folder_id, kind, title, filename,
                                    content_type, handle, size, backend, extra)
 
@@ -663,7 +856,11 @@ async def create_library_item(body: dict = Body(default_factory=dict), client: C
     extra.update(_source_extra(source))
     try:
         row = await _persist_item(session, owner, folder_id, kind, title, filename, content_type, data, extra, selected_backend,
-                                  reject_duplicate=source[0] != "conversation" or body.get("rejectDuplicateName") is True)
+                                  # Conversation saves are explicit version
+                                  # saves; the duplicate-name option used by
+                                  # older remote-copy clients must not turn a
+                                  # same-name save into a user-visible 409.
+                                  reject_duplicate=source[0] != "conversation")
     except library_storage.LibraryStorageError as exc:
         raise _storage_http_error(exc) from exc
     return {"ok": True, "item": _item_api(row)}

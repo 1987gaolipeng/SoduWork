@@ -39,7 +39,11 @@ async function prepare(options, turn, cancelled = () => false, turnContext = {})
       capabilityIds: opts.capabilityIds, readOnly: opts.readOnly,
       mcpServers: grant && grant.servers,
     });
-    if (!authorization.ok) throw new Error(authorization.reason);
+    if (!authorization.ok) {
+      const error = new Error(authorization.reason);
+      error.pluginAuthorization = authorization;
+      throw error;
+    }
     connectors = await connectorTurn.prepare(resolved.applicationUnavailable
       ? { ...opts, resolveConnectors: undefined } : opts, cancelled, grant?.servers || []);
     return { ok: true, plugins, resourceBundles: resolved.resourceBundles || [],

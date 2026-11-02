@@ -248,3 +248,18 @@ test('cloud and closed sessions refuse to guess a workspace', async t => {
   const noTask = await fixture(t);
   await assert.rejects(noTask.controller.materialize({ ref: 'r' }), /缺少任务归属/);
 });
+
+
+test('automatic website materialization does not download Office or archive siblings', async t => {
+  const f = await fixture(t);
+  for (const [id, filename] of [['sheet', 'table.xlsx'], ['word', 'report.docx'], ['zip', 'bundle.zip']]) {
+    f.bytes.set(id, 'fixture');
+    f.rows.push(attachment(id, filename, 'fixture', { evidenceMeta: { identifier: 'ui-new-3' }, createdAt: '2026-10-14T03:42:01Z' }));
+  }
+  const result = await f.controller.materialize({ ref: 'session', taskId: 'task', previewOnly: true });
+  assert.equal(result.artifacts.length, 3);
+  assert.equal(f.calls.filter(url => /\/(sheet|word|zip)\?/.test(url)).length, 0);
+  const manual = await f.controller.materialize({ ref: 'session', taskId: 'task' });
+  assert.equal(manual.artifacts.length, 6);
+  assert.equal(f.calls.filter(url => /\/(sheet|word|zip)\?/.test(url)).length, 3);
+});

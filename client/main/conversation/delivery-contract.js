@@ -7,8 +7,8 @@ const crypto = require('crypto');
 const artifactTitle = require('./artifact-title');
 
 const SCHEMA_VERSION = 1;
+const MAX_ITEMS = 500;
 const MANIFEST_RELATIVE = '.soduwork/delivery.json';
-const MAX_ITEMS = 12;
 const KINDS = Object.freeze({
   '.docx': 'document',
   '.doc': 'document',
@@ -65,8 +65,8 @@ const PROCESS_WORDS = [
   'browser-output', 'tool-output', '\u4e34\u65f6', '\u8349\u7a3f',
   '\u622a\u56fe',
 ];
-// A deliverable title can legitimately contain words such as “测试方案” or
-// “测试工具”. Treat the Chinese “测试” marker as process evidence only when
+// A deliverable title can legitimately name a test plan or a testing tool.
+// Treat Chinese testing terms as process evidence only when
 // it names a report/result, matching the server-side delivery classifier.
 const PROCESS_PHRASES = ['\u6d4b\u8bd5\u62a5\u544a', '\u6d4b\u8bd5\u7ed3\u679c',
   '\u6d4b\u8bd5\u8bc1\u636e', '\u9a8c\u6536\u62a5\u544a', '\u9a8c\u6536\u8bc1\u636e'];
@@ -143,6 +143,8 @@ function publicFile(file, spec, cwd) {
       ? spec.preview
       : previewOf(kind),
     primary: !spec || spec.primary !== false,
+    ...(spec?.role ? { role: spec.role } : {}),
+    ...(Array.isArray(spec?.replaces) ? { replaces: spec.replaces.filter(value => typeof value === 'string') } : {}),
     actions: actionsOf(kind),
     runtime: kind === 'website'
       ? { type: 'static', autoStart: true }
@@ -180,7 +182,9 @@ function fromManifest(cwd, files, manifest) {
   );
   const items = [];
   const warnings = [];
-  const declared = manifest.presentation === 'summary' ? [] : (manifest.deliverables || []).slice(0, MAX_ITEMS * 2);
+  // Keep one overflow entry so packaging rejects an oversized manifest instead
+  // of silently publishing a truncated delivery.
+  const declared = manifest.presentation === 'summary' ? [] : (manifest.deliverables || []).slice(0, MAX_ITEMS + 1);
   declared.forEach((spec) => {
     const rel = relative(spec && (spec.path || spec.entry));
     const full = path.resolve(cwd, rel);
@@ -216,7 +220,7 @@ function fromManifest(cwd, files, manifest) {
     source: 'manifest',
     presentation: manifest.presentation === 'summary' ? 'summary' : 'artifacts',
     summary: clean(manifest.summary, 800),
-    items: items.slice(0, MAX_ITEMS),
+    items: items.slice(0, MAX_ITEMS + 1),
     warnings,
   };
 }
@@ -238,7 +242,7 @@ function isProcess(file) {
   // once, so the artifact index and every runtime's UI receive the same flag.
   // A delivery manifest can still explicitly declare a requested screenshot.
   const verificationShot = kindOf(name) === 'image' &&
-    /^(?:verify|verification)[-_.](?:shot|frame)(?:[-_.]?\d+)?$/i.test(stem);
+    /^(?:verify|verification)[-_.](?:(?:shot|frame)(?:[-_.]?\d+)?|top|bottom|desktop|mobile|after[-_]click)$/i.test(stem);
   return inProcessDir || configured || verificationShot || isProcessName(stem);
 }
 
@@ -281,8 +285,11 @@ function infer(files, cwd) {
     const kind = kindOf(file.name);
     const stem = String(file.name || '').replace(/\.[^.]+$/, '');
     const namedResult = hasWord(stem, FINAL_WORDS);
+    // A final-named image next to a website is ambiguous: it may be a browser
+    // capture or a page asset. Only a manifest or the media index declares it
+    // as a separate deliverable; dependency collection still includes site assets.
     if (DIRECT.has(kind) ||
-        ((kind === 'document' || kind === 'image') && namedResult)) {
+        ((kind === 'document' || (kind === 'image' && !sites.length)) && namedResult)) {
       items.push(publicFile(file));
     }
   });
@@ -331,9 +338,12 @@ function classify(cwd, files) {
 function instructions() {
   return [
     '[SoduWork \u4ea4\u4ed8\u6e05\u5355\u534f\u8bae]',
+    '先依据本次需求判断是否需要交付文件：说明、问答或代码变更不强制生成文件；明确要求网页、文档等成品时必须交付可实际使用的成果。最终交付、必需依赖和过程验证材料分开登记，不能用截图或测试报告代替用户要求的成品。',
     '工程开发、修复或代码审查以变更总结、验证结果和已有提交链接收尾，不要把源码、README 或专门生成的总结文档做成成果卡。此类任务将清单写为 {"schemaVersion":1,"presentation":"summary","summary":"变更摘要","deliverables":[]}；用户明确要求可下载文件或网页成品时才登记成果。',
     '单个文件直接交付原文件；多个文件组成一个保留结构的 ZIP。单 HTML 使用本地 HTTP 预览；需要服务的网页必须启动并验证实际运行 URL，右侧优先打开该 URL，不要用静态入口代替运行中的应用。',
     '同一成果的附属文件可在该 deliverable 的 files 数组中列出工作区相对文件路径，保留目录结构。只列最终运行所需文件，不包含输入材料、密钥、缓存、依赖目录和中间过程文件。多文件成果以一个交付包呈现。',
+    '清单描述当前完整交付版本，不能不断追加会话中所有生成文件。修改或转换格式时更新对应条目，并用 replaces 数组记录被替代的旧相对路径；旧文件保留作历史，不再列为当前交付。用户明确要求保留两种格式时才同时列出。最终回复链接到当前成品。',
+    '浏览器验证截图、测试报告、生成脚本放在 .soduwork/evidence 等过程目录，不列入 deliverables 或 files；已有过程文件可在 processFiles 数组中登记相对路径。网页只列入口与实际使用的资源。只有用户明确要求交付截图时才把截图作为独立成果，不能自行把验证图当成最终成品。',
     '网站如果依赖后端同源接口，在 runtime 中设置 networkPolicy:"online"，并用 externalDependencies 明确列出接口路径（如 ["/api/v1"]）。必须实际启动服务并验证接口；不要把接口伪造成静态文件。CSS、JS、图片和 Worker 仍须完整打包。',
     [
       '\u6e90\u7801\u3001\u4f9d\u8d56\u3001\u914d\u7f6e\u3001\u65e5\u5fd7\u3001\u6d4b\u8bd5\u3001',
@@ -354,7 +364,7 @@ function instructions() {
       '\u6587\u6863\u3001PPT\u3001\u8868\u683c\u548c PDF \u767b\u8bb0\u6700\u7ec8\u6587\u4ef6\uff1b',
       '\u7f51\u7ad9\u53ea\u767b\u8bb0\u53ef\u6253\u5f00\u7684\u5165\u53e3 HTML\uff0c',
       '\u4f18\u5148\u6784\u5efa\u4ea7\u7269 index.html\uff0c',
-      '\u4e0d\u767b\u8bb0 CSS\u3001JS \u7b49\u6e90\u7801\u3002',
+      'CSS、JS、图片等运行依赖放入该入口的 files 清单，不登记为独立成果，也不能因其是源码而从交付包中遗漏。',
     ].join(''),
     [
       '\u666e\u901a\u95ee\u7b54\u6ca1\u6709\u6700\u7ec8\u6587\u4ef6\u65f6',

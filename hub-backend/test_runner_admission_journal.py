@@ -157,6 +157,56 @@ class JournalTests(unittest.TestCase):
         replacement = Journal(self.tmp.name, "leased", exclusive=True)
         replacement.close()
 
+    def test_pruned_terminal_receipt_still_fences_replay_after_restart(self):
+        queue = self.queue()
+        item = self.submit(queue)
+        queue.mark_running(item.key, {"ref": item.ref})
+        queue.finish(item.key, "completed")
+        with patch("app.services.runner_admission.time.time", return_value=item.finished_at + 7200):
+            queue.prune()
+        self.assertNotIn(item.key, queue._items)
+        self.assertFalse(self.store.path(item.key).exists())
+        self.assertTrue(self.store.receipt_path(item.key).exists())
+        restored = self.queue()
+        self.assertEqual(restored.get(item.key).state, "completed")
+        self.assertEqual(restored.submit(item.key, item.ref, INTERACTIVE, "comment", {})[1], "duplicate")
+        self.assertIsNone(restored.claim_next(0, 2, True))
+        fresh = self.submit(restored, "next-turn", "session-next")
+        self.assertGreater(fresh.sequence, item.sequence)
+
+    def test_failed_receipt_archive_keeps_hot_durable_fence(self):
+        queue = self.queue()
+        item = self.submit(queue)
+        queue.finish(item.key, "cancelled")
+        with patch.object(self.store, "archive", side_effect=OSError("disk full")), \
+                patch("app.services.runner_admission.time.time", return_value=item.finished_at + 7200):
+            with self.assertRaises(OSError):
+                queue.prune()
+        self.assertIn(item.key, queue._items)
+        self.assertEqual(self.queue().get(item.key).state, "cancelled")
+
+    def test_legacy_terminal_pruning_preserves_sequence_before_last_queue_disappears(self):
+        queue = self.queue()
+        item = self.submit(queue)
+        queue.finish(item.key, "completed")
+        # Legacy installations persisted queue records but no sequence file.
+        (self.store.root / "sequence").unlink()
+        with patch("app.services.runner_admission.time.time", return_value=item.finished_at + 7200):
+            self.queue().prune()
+        self.assertFalse(self.store.path(item.key).exists())
+        next_item = self.submit(self.queue(), "next", "other-session")
+        self.assertGreater(next_item.sequence, item.sequence)
+
+    def test_corrupt_archived_receipt_cannot_be_treated_as_new_work(self):
+        queue = self.queue()
+        item = self.submit(queue)
+        queue.finish(item.key, "completed")
+        with patch("app.services.runner_admission.time.time", return_value=item.finished_at + 7200):
+            queue.prune()
+        self.store.receipt_path(item.key).write_bytes(b"corrupted")
+        with self.assertRaises((OSError, ValueError)):
+            self.queue().submit(item.key, item.ref, INTERACTIVE, "comment", {})
+
     def test_deep_data_root_stays_under_windows_max_path(self):
         """LongPathsEnabled=0 machines reject paths beyond 260 characters.
 
@@ -183,6 +233,34 @@ class JournalTests(unittest.TestCase):
         restored = AdmissionQueue(journal=Journal(root=Path(root), identity="deep-root-runner")).get("turn-one")
         self.assertIsNotNone(restored)
         self.assertEqual(restored.ref, item.ref)
+
+
+class ConcurrentCommentTests(unittest.IsolatedAsyncioTestCase):
+    async def test_same_id_different_input_cannot_both_pass_async_validation(self):
+        from app.services import local_base, runner_comments, runner_turn_selection
+        import threading
+        barrier = threading.Barrier(2, timeout=5)
+        chosen = {"agentId": "codex", "modelName": "", "reasoningEffort": ""}
+        machine = SimpleNamespace(_admission=AdmissionQueue(), _reap_admission=lambda: None)
+
+        async def admit(message, **kwargs):
+            _, _, item = machine._admission.submit(payload=message, **kwargs)
+            return {"ok": True, "data": machine._admission.receipt(item)}
+
+        def validate(*args):
+            barrier.wait()
+            return chosen
+
+        machine._admit = admit
+        message = {"ref": "race", "turnId": "same-stable-id", "text": "first", "executionSelection": chosen}
+        with patch.object(runner_turn_selection, "validate", validate), \
+                patch.dict(local_base._RUNS, {"race": {"cli": "codex"}}):
+            results = await asyncio.gather(
+                runner_comments.comment(machine, message, None),
+                runner_comments.comment(machine, {**message, "text": "different"}, None))
+        self.assertEqual(sum(bool(result.get("ok")) for result in results), 1, results)
+        self.assertEqual([r.get("code") for r in results if not r.get("ok")], ["MESSAGE_ID_CONFLICT"])
+        self.assertEqual(len(machine._admission.active_items()), 1)
 
 
 class RunnerStopReceiptTests(unittest.IsolatedAsyncioTestCase):

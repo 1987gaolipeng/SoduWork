@@ -102,6 +102,52 @@ test('any main-window conversation may select an application and queued turns ke
     assert.throws(() => lease.readCurrent(), /不存在/);
   } finally { f.cleanup(); }
 });
+test('market history turns restore owned MCP without a window and retain installation, queue and account boundaries', async () => {
+  const f = fixture(), guard = require('../main/pi-session/app-mcp-grant.cjs');
+  const origin = f.binding.origin, pluginId = 'market-history';
+  const entry = { id: 'main', slot: 'workspace.navigation', source: { type: 'external', url: origin + '/app',
+    bridge: { capabilities: ['mcp.connect'] } } };
+  const plugin = { pluginId, installed: true, permissions: { canUse: true }, versionId: 'catalog-v2',
+    conversationVersionId: 'installed-v1', conversationCapabilities: { mcpServers: ['cloud'] },
+    conversationUi: { contributions: [entry] } };
+  let afterFetch = () => {};
+  const deps = { identityOf: async () => ({ hub: 'https://hub.example', session: 'fixture-session' }),
+    fetchImpl: async () => { afterFetch(); return { ok: true, json: async () => ({ items: [structuredClone(plugin)] }) }; } };
+  const handle = { snapshot: () => ({ activePlugins: [pluginId] }) };
+  const binding = { pluginId, origin };
+  try {
+    store.update(binding, { values: { ukey: 'fixture-market-history-key' } });
+    guard.bind(handle, null, '', f.app, deps);
+    const turn = {}; await guard.guardSend(handle, turn); await turn.beforeTurn();
+    const current = await guard.forSession(handle);
+    assert.equal(current.connection.token, 'fixture-market-history-key');
+    assert.equal(current.connection.versionId, 'installed-v1', 'accepted installation overrides newer catalog version');
+    assert.equal(current.connection.server, 'cloud');
+    assert.equal(current.connection.url, origin + '/mcp');
+    await current.connection.authorize();
+    const queued = {}; await guard.guardSend(handle, queued);
+    plugin.conversationVersionId = 'installed-v2';
+    await assert.rejects(queued.beforeTurn(), /账号或设置已变化/);
+    await assert.rejects(current.connection.authorize(), /安装版本或连接授权已变化/);
+    plugin.conversationVersionId = 'installed-v1';
+    plugin.permissions.canUse = false;
+    await assert.rejects(current.connection.authorize(), /安装并启用/);
+    await assert.rejects(guard.guardSend(handle, {}), /安装并启用/);
+    plugin.permissions.canUse = true;
+    entry.source.url = 'https://other.example/app';
+    await assert.rejects(current.connection.authorize(), /安装版本或连接授权已变化/);
+    entry.source.url = origin + '/app';
+    store.update(binding, { values: { ukey: 'rotated-market-key' } });
+    await assert.rejects(guard.forSession(handle), /账号或设置已变化/);
+    f.setOwner('hub/other-account');
+    assert.throws(() => current.connection.readCurrent(), /账号已变化/);
+    await assert.rejects(guard.guardSend(handle, {}), /尚未配置连接/);
+    f.setOwner('hub/account-a');
+    afterFetch = () => f.setOwner('hub/other-account');
+    await assert.rejects(guard.guardSend(handle, {}), /账号已变化/);
+  } finally { f.cleanup(); }
+});
+
 test('per-turn MCP proxy uses stored ukey; account switch invalidates old grant and new grant uses new account, cleanup closes proxy', async () => {
   const f = fixture(), received = [];
   const server = http.createServer((req,res) => { received.push(req.headers.authorization); res.setHeader('Content-Type','application/json'); res.end('{"ok":true}'); });
@@ -254,12 +300,19 @@ test('authorized market app connects to its own local MCP; every proxy call rech
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = 'http://127.0.0.1:' + server.address().port, pluginId = 'market-mcp';
   const source = { type: 'external', url: origin, bridge: { capabilities: ['mcp.connect'] } };
-  const plugin = { pluginId, installed: true, permissions: { canUse: true },
+  const plugin = { pluginId, versionId: 'market-installed-version', installed: true, permissions: { canUse: true },
     capabilities: { mcpServers: ['cloud'] }, ui: { contributions: [{ id: 'main', slot: 'workspace.navigation', source }] } };
   const deps = { app: f.app, identityOf: () => ({ hub: 'https://hub.example', clientId: 'device', session: 'session' }),
-    fetchImpl: async url => ({ ok: true, json: async () => url.endsWith('/conversation-grant')
-      ? { ok: true, items: [{ ...plugin, name: 'Market MCP', version: '1.0.0', context: 'Use current application' }],
-        mcpGrant: { ticket: 'fixture-hub-ticket', servers: ['cloud'] } } : { items: [plugin] } }) };
+    fetchImpl: async (url, options) => {
+      if (url.endsWith('/conversation-grant')) {
+        assert.deepEqual(JSON.parse(options.body).applicationConnection, { pluginId,
+          versionId: plugin.versionId, contributionId: 'main', origin, server: 'cloud' });
+        return { ok: true, json: async () => ({ ok: true,
+          items: [{ ...plugin, name: 'Market MCP', version: '1.0.0', context: 'Use current application' }],
+          mcpGrant: null }) };
+      }
+      return { ok: true, json: async () => ({ items: [plugin] }) };
+    } };
   const item = { appBridge: { appId: 'plugin:' + pluginId, contributionId: 'main', origin },
     view: { webContents: { isDestroyed: () => false, getURL: () => origin + '/home.html' } } };
   require('../main/work-preview-app-owner.cjs').capture(item, deps);

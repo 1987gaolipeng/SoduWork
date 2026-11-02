@@ -49,6 +49,17 @@ async def _client_actor(session: AsyncSession, client: Client):
     )
 
 
+async def _cloud_data_ready(item):
+    """Read-only storage admission for the exact catalog version being installed."""
+    if (item.get('jiyong') or {}).get('storage', {}).get('location') != 'cloud':
+        return
+    from ..services import jiyong_cloud_database
+    try:
+        await jiyong_cloud_database.check()
+    except jiyong_cloud_database.CloudError as exc:
+        raise HTTPException(exc.status, {'code': exc.code, 'message': str(exc)}) from exc
+
+
 async def _client_plugin_bytes(file: UploadFile) -> bytes:
     data = await file.read(10 * 1024 * 1024 + 1)
     if len(data) > 10 * 1024 * 1024:
@@ -144,6 +155,7 @@ async def set_client_plugin_installation(
                             "、".join(missing_mcp))
 
     if enabled:
+        await _cloud_data_ready(item)
         candidate = (
             body.get("config") if "config" in body else
             dict(getattr(before, "config", None) or {}))
@@ -211,6 +223,7 @@ async def probe_client_plugin_installation(
         raise HTTPException(
             status_code=409,
             detail="插件目录已经变化，请刷新后重新测试")
+    await _cloud_data_ready(item)
     try:
         config = plugin_setup_contracts.validate(
             item.get("setup"), body.get("config") or {},

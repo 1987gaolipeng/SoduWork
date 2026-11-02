@@ -137,7 +137,7 @@ class ModelConfigTests(IsolatedDatabase):
             with self.assertRaises(HTTPException) as error:
                 await runtime_api.put_runtime({"policy": snapshot["policy"], "expectedRevision": snapshot["revision"]})
             self.assertEqual(error.exception.status_code, 409)
-            for invalid in (0, 999, "8", True):
+            for invalid in (0, model_runtime.MAX_POLICY_CONCURRENCY + 1, "8", True):
                 with self.assertRaises(HTTPException) as error:
                     await runtime_api.put_runtime({"policy": {**policy, "globalConcurrent": invalid}, "expectedRevision": saved["revision"]})
                 self.assertEqual(error.exception.status_code, 400)

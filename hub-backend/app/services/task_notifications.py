@@ -86,6 +86,14 @@ async def deliver(job, sessions=SessionLocal):
         elif task is None:
             return  # A later delete job owns removal of the cached card.
         else:
+            # Automation runs are ordinary conversations and must never fan
+            # out task notifications, even for outbox rows created by the
+            # pre-conversation implementation.
+            # A normal requirement may link a follow-up schedule without being
+            # a scheduler-generated run. Match the task-list origin boundary.
+            if (str(getattr(task, "origin", "") or "") == "automation" or
+                    str(getattr(task, "source", "") or "") == "定时派活"):
+                return
             arrival = metadata.get("arrival", "")
             if metadata.get("assignee") != task.assignee_user_id:
                 arrival = ""

@@ -437,6 +437,12 @@ async def proxy_config(
     if not conf:
         return {"ok": False, "path": PROXY_PATH,
                 "reason": "还没有可用的模型：去「我的模型」配一把自己的密钥，或让管理员配好共享模型服务"}
+    from ..services import client_access
+    try:
+        await client_access.assert_quota(session, str(getattr(client, "user_ref", "") or ""),
+                                        provider=conf.get("provider", ""), model=conf["model"])
+    except client_access.ClientAccessError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.detail()) from exc
     if conf.get("kind") != "openai-compat":
         return {"ok": False, "path": PROXY_PATH,
                 "reason": f"默认模型「{conf['model']}」不是 OpenAI 兼容接口，AI 对话暂时用不了它"}

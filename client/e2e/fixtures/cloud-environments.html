@@ -24,6 +24,7 @@
 <link rel="stylesheet" href="../../components/panels/plugin-presentation.css">
 <link rel="stylesheet" href="../../components/panels/panels-agents.css">
 <link rel="stylesheet" href="../../components/panels/cloud-environments.css">
+<link rel="stylesheet" href="../../components/panels/codex-auth-dialog.css">
 <link rel="stylesheet" href="../../components/panels/custom-agents.css">
 <link rel="stylesheet" href="../../components/panels/panels-usage.css">
 <link rel="stylesheet" href="../../components/panels/panels-connections.css">
@@ -77,7 +78,7 @@
 <link rel="stylesheet" href="../../components/panels/access-controls.css">
 <link rel="stylesheet" href="../../components/workspace/window-menu.css">
 <style>html,body{margin:0;height:100%;overflow:hidden;font-family:var(--font-ui);color:var(--ink);background:var(--bg-1)}:root{--ws-side-w:240px;--ws-main-bg:var(--bg-0)}.fixture-side{position:fixed;top:34px;bottom:0;left:0;width:220px;padding:24px 20px;box-sizing:border-box;font-size:14px}.fixture-side p{margin:0 0 22px}.fixture-side button{font:inherit;display:block;border:0;background:transparent;color:var(--ink-3);padding:10px;width:100%;text-align:left}.fixture-side button[aria-current]{background:var(--accent-soft);color:var(--accent);border-radius:8px}html[data-desk-panel=cloud] .fixture-side{display:none}@media(max-width:700px){:root{--ws-side-w:10px}.fixture-side{display:none}}</style></head>
-<body><header class="window-menu"><span class="wm-title-brand">SoduWork</span><nav><button>文件</button><button>视图</button><button>帮助</button></nav></header><aside class="fixture-side"><p>AI 与账�?/p><button>我的用量</button><button>Agent 管理</button><button>我的模型</button><button aria-current="page">云端环境</button></aside><script>
+<body><header class="window-menu"><span class="wm-title-brand">SoduWork</span><nav><button>文件</button><button>视图</button><button>帮助</button></nav></header><aside class="fixture-side"><p>AI 与账号</p><button>我的用量</button><button>Agent 管理</button><button>我的模型</button><button aria-current="page">云端环境</button></aside><script>
 if(new URLSearchParams(location.search).has('standalone'))document.documentElement.dataset.deskPanel='cloud';
 window.fixture={owner:'account-a',canCreate:true,requests:[],cloudCalls:[],fail:false,nodes:[
  {id:'a',name:'我的云端电脑',ownerUserId:'account-a',host:'research-linux',os:'Linux',workRoot:'/srv/my-work',online:true,status:'ready',statusText:'ready',busy:1,maxConcurrent:4,mode:'accepting',canManage:true,credential:{configured:true,canRotate:true},agents:[{id:'pi',name:'Pi',ready:true},{id:'opencode',name:'OpenCode',ready:true}]}
@@ -86,7 +87,7 @@ window.soduWorkAPI={cloudComputer:{
  async status(){return fixture.nodes.length?{ok:true,configured:true,host:'192.0.2.8',port:22,username:'runner',authMethod:'password',platform:'linux'}:{ok:true,configured:false}},
  async test(input){fixture.cloudCalls.push(['test',input]);return {ok:true,code:'SSH_READY',hostFingerprint:'sha256:fixture'}},
  async save(input){fixture.cloudCalls.push(['save',input]);return {ok:true,persisted:true}},
- async install(input){fixture.cloudCalls.push(['install',input]);return {ok:true,installed:true,message:'fixture 已完�?Runner 安装'}}
+ async install(input){fixture.cloudCalls.push(['install',input]);return {ok:true,installed:true,message:'fixture 已完成 Runner 安装'}}
 }};
 window.SoduWorkAPI={
  hubConfig(){return {hub:'http://127.0.0.1:9080',developmentHub:'http://127.0.0.1:9080'}},
@@ -101,4 +102,4 @@ if(new URLSearchParams(location.search).has('live')) {
   const request=async(route,method='GET',body)=>{const res=await fetch('/api/hub/cloud-environments'+route,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const data=await res.json();if(!res.ok||data.ok===false)throw Error(data.reason||'Request failed');return data};
   window.SoduWorkAPI={cloudEnvironments:()=>request(''),addCloudEnvironment:input=>request('','POST',input),rotateCloudEnvironmentCredential:(id,input)=>request('/'+encodeURIComponent(id)+'/credentials','POST',input),updateCloudEnvironment:(id,input)=>request('/'+encodeURIComponent(id),'PATCH',input),removeCloudEnvironment:id=>request('/'+encodeURIComponent(id),'DELETE')};
 }
-</script><script src="../../components/panels/cloud-environments.js"></script><script src="../../components/panels/cloud-environment-setup.js"></script><script>openCloudEnvironmentsPanel()</script></body></html>
+</script><script src="../../components/panels/codex-auth-dialog.js"></script><script src="../../components/panels/cloud-environments.js"></script><script src="../../components/panels/cloud-environment-setup.js"></script><script>openCloudEnvironmentsPanel()</script></body></html>

@@ -27,8 +27,10 @@ test('conversation attachments are staged inside the real session workspace', as
 });
 
 test('folders are accepted by reference instead of being rejected', async () => {
-
-
+  /*
+   * Accept folders as explicit path references without copying their trees or rejecting the
+   * entire message.
+   */
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-att-dir-'));
   const cwd = path.join(root, 'work');
   const dir = path.join(root, 'build-ui');
@@ -51,15 +53,18 @@ test('folders are accepted by reference instead of being rejected', async () => 
   }
 });
 
-test('files already inside the chosen workspace are not copied or renamed', async () => {
+test('files already inside the chosen workspace are copied before model access', async () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-workspace-'));
   const source = path.join(cwd, '现有资料.txt');
   fs.writeFileSync(source, 'source', 'utf8');
   try {
     const result = await attachments.stage(cwd, [{ name: '现有资料.txt', path: source }]);
-    assert.equal(result.files[0].path, source);
-    assert.equal(result.files[0].relative, '现有资料.txt');
-    assert.equal(fs.existsSync(path.join(cwd, '.soduwork-inputs')), false);
+    assert.notEqual(result.files[0].path, source);
+    assert.equal(attachments.inside(cwd, result.files[0].path), true);
+    assert.match(result.files[0].relative, /^\.soduwork-inputs\//);
+    assert.equal(fs.readFileSync(result.files[0].path, 'utf8'), 'source');
+    fs.writeFileSync(result.files[0].path, 'model changed', 'utf8');
+    assert.equal(fs.readFileSync(source, 'utf8'), 'source');
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }
@@ -103,6 +108,26 @@ test('pasted binary images are staged and forwarded to the model without exposin
     const preview = await attachments.readImage(result.files[0].path);
     assert.equal(preview.mimeType, 'image/png');
     assert.equal(preview.data.equals(bytes), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+test('arbitrary image MIME types reach visual analysis while previews stay safe', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-arbitrary-image-'));
+  const cwd = path.join(root, 'work');
+  fs.mkdirSync(cwd);
+  const bytes = Buffer.from('image bytes');
+  try {
+    const result = await attachments.stage(cwd, [{
+      name: 'diagram.svg', type: 'image/svg+xml', data: new Uint8Array(bytes),
+    }]);
+    const images = await attachments.images(result.files);
+    assert.equal(images.length, 1);
+    assert.equal(images[0].mimeType, 'image/svg+xml');
+    assert.equal(Buffer.from(images[0].data, 'base64').equals(bytes), true);
+    await assert.rejects(() => attachments.readImage(result.files[0].path));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

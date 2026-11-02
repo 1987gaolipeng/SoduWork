@@ -35,8 +35,27 @@ class IMPrimitiveTests(unittest.TestCase):
         merged = importlib.import_module("migrations.versions.0066_merge_im_transport")
         integrated = importlib.import_module("migrations.versions.0068_merge_notification_account")
         public_merge = importlib.import_module("migrations.versions.0069_merge_public_main")
+        release_merge = importlib.import_module("migrations.versions.0070_merge_release_notes_schedule_model")
         script = ScriptDirectory.from_config(Config(str(Path(__file__).with_name("alembic.ini"))))
-        self.assertEqual(script.get_heads(), [public_merge.revision])
+        source_app = importlib.import_module("migrations.versions.0071_schedule_source_app")
+        heads = script.get_heads()
+        self.assertEqual(len(heads), 1, "Migration branches must be merged before release")
+        # Later migrations may advance the head, but must retain this complete
+        # IM/account/notification/release merge lineage.
+        ancestors = {item.revision for item in script.walk_revisions(base="base", head=heads[0])}
+        self.assertTrue({public_merge.revision, source_app.revision, release_merge.revision, integrated.revision,
+                         merged.revision, migration.revision}.issubset(ancestors))
+        for revision, parent in {
+                "0074_cloud_execution_durability": "0073_remote_screen_grants",
+                "0073_remote_screen_grants": "0072_account_conversations",
+                "0072_account_conversations": source_app.revision}.items():
+            with self.subTest(revision=revision):
+                self.assertEqual(script.get_revision(revision).down_revision, parent)
+        self.assertEqual(source_app.down_revision, release_merge.revision)
+        self.assertEqual(set(release_merge.down_revision),
+                         {"0069_client_release_notes", "0069_schedule_model_selection"})
+        for parent in release_merge.down_revision:
+            self.assertEqual(script.get_revision(parent).down_revision, integrated.revision)
         self.assertEqual(set(public_merge.down_revision),
                          {"0065_merge_feature_branches", integrated.revision})
         self.assertEqual(set(integrated.down_revision),

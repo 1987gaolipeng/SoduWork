@@ -118,6 +118,30 @@ app.whenReady().then(async () => {
     report.checks.push('late save ' + (fail ? 'failure' : 'success') + ' cannot close or notify a reopened draft');
   }
   await click('#schCancel');
+  await edit('pending'); await field('schEvery','daily');
+  assert.deepEqual(await js('[schH.tagName,schM.tagName,schH.options.length,schM.options.length]'),['SELECT','SELECT',24,60]);
+  const savedCount=await js('calls.updated.length');
+  await field('schM','888');
+  assert.match(await js('schPv.textContent'),/请选择分钟/);
+  await click('#schSave'); assert.equal(await js('calls.updated.length'),savedCount);
+  for (const id of ['schH','schM']) {
+    await js('document.getElementById('+JSON.stringify(id)+').focus()');
+    for (const type of ['keyDown','keyUp']) win.webContents.sendInputEvent({type,keyCode:'End'});
+    await wait(70);
+  }
+  assert.deepEqual(await js('[schH.value,schM.value]'),['23','59']);
+  assert.match(await js('schPv.textContent'),/23:59/);
+  await shot('recurring-time-select-wide');
+  win.setSize(390,900); await wait(120);
+  assert.equal(await js('schEditorContent.scrollWidth<=schEditorContent.clientWidth'),true);
+  await shot('recurring-time-select-390'); win.setSize(1280,950);
+  await click('#schSave'); await until('calls.updated.length==='+String(savedCount+1));
+  assert.deepEqual(await js('[calls.updated.at(-1).body.atHour,calls.updated.at(-1).body.atMinute]'),[23,59]);
+  await edit('pending'); await field('schEvery','hourly');
+  assert.equal(await js('schH.hidden && getComputedStyle(schHWrap).display!=="none" && schM.checkVisibility()'),true);
+  await field('schM','30'); await click('#schSave'); await until('calls.updated.length==='+String(savedCount+2));
+  assert.equal(await js('calls.updated.at(-1).body.atMinute'),30);
+  report.checks.push('Native bounded time selects update the preview immediately, reject 888 without saving, preserve 23:59 and hourly minutes, and fit 390px');
   await js('SoduWorkAPI.deleteSchedule=async()=>{throw Error("fixture offline")}; void 0');
   await click('.sch-item[data-sid="pending"] [data-act="del"]');
   await click('.sch-item[data-sid="pending"] [data-c="yes"]');

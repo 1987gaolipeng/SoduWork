@@ -12,15 +12,90 @@ function fixture() {
   vm.createContext(context); vm.runInContext(source, context);
   return { context, listeners, body, run: code => vm.runInContext(code, context) };
 }
-const machine = agents => ({ runnerId: 'computer', label: 'Fixture', env: {}, agents });
+const machine = agents => ({ runnerId: 'computer', scope: 'current-instance', label: 'Fixture', env: {}, agents });
 const base = { key: 'opencode', name: 'OpenCode', installed: true, present: true,
   state: 'ready', version: '1.18.18', bin: 'opencode.exe', model: 'selected-model' };
+
+test('Agent management renders only this client even when cloud and other instances share its label', () => {
+  const f = fixture();
+  f.context.machines = [machine([base]),
+    { ...machine([base]), runnerId: 'cloud', scope: 'personal-cloud', isCurrentDevice: true },
+    { ...machine([base]), runnerId: 'other', scope: 'bound-runner' },
+    { ...machine([base]), runnerId: 'unknown', scope: undefined }].map(m => ({...m,label:'我的电脑'}));
+  f.run('_agData={machines,modelCount:1}');
+  f.context._agRender();
+  assert.equal(f.run('_agMachines().length'), 1);
+  assert.match(f.body.innerHTML, /本机 AI 助手/);
+  assert.match(f.body.innerHTML, /data-ak="computer~opencode"/);
+  assert.doesNotMatch(f.body.innerHTML, /data-ak="(?:cloud|other|unknown)~/);
+});
+
+test('cloud-only and legacy backend inventories cannot become a local fallback', () => {
+  const f = fixture(); f.context.agent = base;
+  for (const payload of [
+    "{machines:[{runnerId:'cloud',scope:'personal-cloud',agents:[agent]}],agents:[agent],modelCount:0}",
+    "{machines:[],agents:[agent],execution:'backend',modelCount:0}",
+    "{agents:[agent],env:{host:'My computer'},modelCount:0}",
+  ]) {
+    f.run('_agData=' + payload);
+    f.context._agRender();
+    assert.equal(f.run('_agMachines().length'), 0);
+    assert.match(f.body.innerHTML, /本机底座暂不可用/);
+    assert.match(f.body.innerHTML, /云端底座请在「云端电脑」中管理/);
+    assert.doesNotMatch(f.body.innerHTML, /data-ak=|一个模型都用不了/);
+  }
+});
+
+test('local discovery uses its dedicated API and preserves the actual Runner diagnostic', async () => {
+  const f = fixture();
+  f.context.SoduWorkAPI.agentSetup = () => { throw Error('Unscoped discovery is forbidden'); };
+  f.context.SoduWorkAPI.localAgentSetup = async () => ({machines:[],env:{why:'Local Runner reconnecting'},modelCount:null});
+  await f.context._agLoad(true);
+  assert.match(f.body.innerHTML, /Local Runner reconnecting/);
+});
+
+test('Pi cannot be uninstalled when old runners omit bundled metadata or its payload is broken', async () => {
+  const f = fixture(); let calls = 0;
+  f.context.SoduWorkAPI.agentInstall = async () => { calls++; return { jobId: 'unexpected' }; };
+  for (const state of ['ready', 'broken', 'missing']) {
+    const pi = { ...base, key: 'pi', name: 'Pi', bundled: false, state, setupState: state,
+      installed: state === 'ready', canUninstall: true };
+    f.context.pi = pi;
+    f.run("_agData={machines:[{runnerId:'computer',scope:'current-instance',agents:[pi]}]};_agConfirm='computer~pi'");
+    const html = f.context._agBodyHtml(pi, state, 'computer~pi');
+    assert.doesNotMatch(html, /data-aunin=|data-adoun=/);
+    await f.context._agRun('computer~pi', 'uninstall');
+  }
+  assert.equal(calls, 0);
+});
+
+test('local details and authorization retain host facts without repeating them in the section title', () => {
+  const f = fixture();
+  const m = { runnerId: 'cloud', label: '我的电脑', host: 'linux-cloud', os: 'linux', agents: [base] };
+  assert.equal(f.context._agMachineIdentity(m), '远程执行环境 · 我的电脑 · linux-cloud · linux');
+  assert.equal(f.context._agMachineIdentity({...m,isCurrentDevice:false,scope:'personal-cloud'}), '个人云端 · 我的电脑 · linux-cloud · linux');
+  assert.equal(f.context._agMachineIdentity({...m,isCurrentDevice:true}), '当前客户端 · 我的电脑 · linux-cloud · linux');
+  assert.match(f.context._agMachineHtml(m), /本机 AI 助手/);
+  f.context.machine = {...m,scope:'current-instance'};
+  f.run("_agData={machines:[machine]};_agOpen='cloud~opencode'");
+  assert.match(f.context._agDrawer(), /装在.*linux-cloud · linux/);
+});
+
+test('unknown Codex login keeps installation facts but offers connection instead of dispatch', () => {
+  const f = fixture();
+  const a = { ...base, key:'codex', auth:'unauthed', authStatus:'unknown', setupState:'unknown', loginAvailable:true };
+  const status = f.context._agPresentation(a);
+  assert.equal(status.installed, true);
+  assert.equal(status.canProbe, false);
+  assert.equal(status.primaryAction, 'login');
+  assert.equal(status.state, 'unknown');
+});
 
 test('native login requires advertised support and remains scoped to its machine', async () => {
   const f = fixture(), calls = [];
   const codex = {...base,key:'codex',name:'Codex',loginAvailable:true};
   f.context.codex = codex; f.context._agRender = () => {}; f.context._agPoll = () => {};
-  f.run(`_agData={machines:[{runnerId:'native',agents:[codex]},{runnerId:'old',agents:[{...codex,loginAvailable:false}]}]}`);
+  f.run(`_agData={machines:[{runnerId:'native',scope:'current-instance',agents:[codex]},{runnerId:'old',scope:'current-instance',agents:[{...codex,loginAvailable:false}]}]}`);
   f.context.SoduWorkAPI.agentInstall = async () => {throw Error('Opening a dialog must not start authorization')};
   f.context.CodexAuthDialog = {open: async options => calls.push(options.runnerId)};
   assert.match(f.context._agBodyHtml(codex,'ready','native~codex'),/data-alogin="native~codex"/);
@@ -38,10 +113,10 @@ test('authorization completion tests only the original machine after a fresh det
   const f = fixture(), calls = [];
   f.context._agRender = () => {}; f.context._agPoll = () => {};
   f.context.codex = {...base,key:'codex',name:'Codex',auth:'unauthed',state:'unauthed',loginAvailable:true};
-  f.run(`_agData={machines:[{runnerId:'native',agents:[codex]}]}`);
+  f.run(`_agData={machines:[{runnerId:'native',scope:'current-instance',agents:[codex]}]}`);
   let options;
   f.context.CodexAuthDialog = {open: async value => {options=value}};
-  f.context.SoduWorkAPI.agentSetup = async () => {calls.push('detect');return{machines:[{runnerId:'native',agents:[{...f.context.codex,auth:'authed',state:'ready'}]}]}};
+  f.context.SoduWorkAPI.localAgentSetup = async () => {calls.push('detect');return{machines:[{runnerId:'native',scope:'current-instance',agents:[{...f.context.codex,auth:'authed',state:'ready'}]}]}};
   f.context.SoduWorkAPI.agentProbe = async (key,model,runnerId) => {calls.push({key,runnerId});return{jobId:'probe'}};
   await f.context._agRun('native~codex','probe');
   assert.deepEqual(calls,[]);
@@ -55,7 +130,7 @@ test('authorization completion tests only the original machine after a fresh det
 test('authorization does not interrupt another operation on the same machine', async () => {
   const f = fixture();let opened=0;
   f.context.codex = {...base,key:'codex',loginAvailable:true};
-  f.run(`_agData={machines:[{runnerId:'native',agents:[codex]}]};_agJobs['native~codex']={state:'running',action:'install'}`);
+  f.run(`_agData={machines:[{runnerId:'native',scope:'current-instance',agents:[codex]}]};_agJobs['native~codex']={state:'running',action:'install'}`);
   f.context.CodexAuthDialog = {open: async () => {opened++}};
   await f.context._agRun('native~codex','login');
   assert.equal(opened,0);
@@ -138,9 +213,9 @@ test('unknown states are renderable and overview counts only complete installati
 
 test('an older successful response cannot replace a newer detector result', async () => {
   const f = fixture(); let resolveOld;
-  f.context.SoduWorkAPI.agentSetup = () => new Promise(resolve => { resolveOld = resolve; });
+  f.context.SoduWorkAPI.localAgentSetup = () => new Promise(resolve => { resolveOld = resolve; });
   const old = f.context._agLoad(true);
-  f.context.SoduWorkAPI.agentSetup = async () => ({ agents: [{ ...base, state: 'broken' }], marker: 'new' });
+  f.context.SoduWorkAPI.localAgentSetup = async () => ({ agents: [{ ...base, state: 'broken' }], marker: 'new' });
   f.context._agRender = () => {};
   await f.context._agLoad(true); resolveOld({ agents: [base], marker: 'old' }); await old;
   assert.equal(f.run('_agData.marker'), 'new');
@@ -149,8 +224,9 @@ test('an older successful response cannot replace a newer detector result', asyn
 test('scope changes clear cached agents and jobs and reject late reads and job receipts', async () => {
   const f = fixture(); let resolveRead, resolveJob;
   f.context._agRender = () => {};
-  f.run(`_agData={machines:[]};_agLoaded.agents=true;_agJobs.old={state:'done'};`);
-  f.context.SoduWorkAPI.agentSetup = () => new Promise(resolve => { resolveRead = resolve; });
+  f.context.local = machine([base]);
+  f.run(`_agData={machines:[local]};_agLoaded.agents=true;_agJobs.old={state:'done'};`);
+  f.context.SoduWorkAPI.localAgentSetup = () => new Promise(resolve => { resolveRead = resolve; });
   const read = f.context._agLoad(true);
   f.context.SoduWorkAPI.agentInstall = () => new Promise(resolve => { resolveJob = resolve; });
   const job = f.context._agRun('computer~opencode', 'install');
@@ -176,14 +252,20 @@ for (const change of ['scope', 'replacement']) test(`poll results cannot escape 
   assert.equal(f.run(`_agJobs['computer~opencode']?.state`), change === 'scope' ? undefined : 'running');
 });
 
-test('identical agent keys on different runners keep their requests and jobs separate', async () => {
+test('stale cloud actions cannot start jobs from the local Agent surface', async () => {
   const f = fixture(), calls = [];
+  f.context.local = machine([base]);
+  f.context.remote = {...machine([base]),runnerId:'cloud',scope:'personal-cloud'};
+  f.run("_agData={machines:[local,remote]};_agJobs['cloud~opencode']={state:'done',jobId:'previous-cloud-job'}");
   f.context._agRender = () => {}; f.context._agPoll = () => {};
   f.context.SoduWorkAPI.agentProbe = async (key, model, runner) => { calls.push([key, model, runner]); return { jobId: runner }; };
-  await Promise.all([f.context._agRun('first~opencode', 'probe'), f.context._agRun('second~opencode', 'probe')]);
-  assert.deepEqual(calls, [['opencode', '', 'first'], ['opencode', '', 'second']]);
-  assert.equal(f.run(`_agJobs['first~opencode'].jobId`), 'first');
-  assert.equal(f.run(`_agJobs['second~opencode'].jobId`), 'second');
+  f.context.SoduWorkAPI.agentInstall = async () => { throw Error('Hidden targets cannot be mutated'); };
+  for (const action of ['probe','install','update','check','uninstall','login']) await f.context._agRun('cloud~opencode', action);
+  await f.context._agRun('unknown~opencode','probe');
+  await f.context._agRun('computer~opencode','probe');
+  assert.deepEqual(calls, [['opencode', '', 'computer']]);
+  assert.equal(f.run(`_agJobs['computer~opencode'].jobId`), 'computer');
+  assert.equal(f.run(`_agJobs['cloud~opencode'].jobId`), 'previous-cloud-job');
 });
 
 test('changing a model invalidates completed probe evidence while preserving every running job', async () => {
@@ -204,7 +286,7 @@ test('changing a model invalidates completed probe evidence while preserving eve
   assert.equal(f.run(`_agJobs['fourth~opencode'].context`), 'retained');
 });
 
-test('closing and reopening resumes one poller and refreshes current machine facts', async () => {
+test('installation completes and notifies conversations after leaving Agent management', async () => {
   const f = fixture(), timers = new Map(); let id = 0, refreshes = 0;
   const classes = new Set(['show']);
   const panel = { classList: { contains: key => classes.has(key), add: key => classes.add(key), remove: key => classes.delete(key) },
@@ -215,12 +297,17 @@ test('closing and reopening resumes one poller and refreshes current machine fac
   f.context._agLoad = async force => { assert.equal(force, true); refreshes++; };
   f.run(`_agJobs['computer~opencode']={key:'computer~opencode',jobId:'live',action:'install',state:'running',lines:[]};_agPoll()`);
   assert.equal(timers.size, 1);
-  f.context.closeAgentsPanel(); assert.equal(timers.size, 0);
-  f.context.openAgentsPanel(); f.context.openAgentsPanel(); assert.equal(timers.size, 1);
+  const events = []; f.context.soduWorkAPI = { broadcast: kind => events.push(kind) };
+  f.context.closeAgentsPanel(); assert.equal(timers.size, 1);
+  f.context._agPoll(); assert.equal(timers.size, 1, 'closing does not duplicate the completion observer');
   f.context.SoduWorkAPI.agentJob = async () => ({state:'done',ok:true,lines:[]});
   await [...timers.values()][0]();
   assert.equal(f.run(`_agJobs['computer~opencode'].state`), 'done');
-  assert.equal(refreshes, 3);
+  assert.deepEqual(events, ['agent-runtimes-changed']);
+  assert.equal(refreshes, 0, 'do not render a hidden panel');
+  await [...timers.values()][0](); assert.equal(timers.size, 0, 'stop once jobs finish');
+  f.context.openAgentsPanel(); f.context.openAgentsPanel(); assert.equal(timers.size, 0);
+  assert.equal(refreshes, 2);
 });
 
 test('dismissing completed probe logs does not discard its verified result', async () => {

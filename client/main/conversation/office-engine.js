@@ -13,6 +13,7 @@ const PYTHON_CHECK = [
 ].join(';');
 
 function pythonCandidates(env = process.env, platform = process.platform) {
+  if (env.SODUWORK_RUNTIME_MANAGED === '1') return env.SODUWORK_MANAGED_PYTHON ? [env.SODUWORK_MANAGED_PYTHON] : [];
   const explicit = String(env.SODUWORK_OFFICE_PYTHON || '').trim();
   const names = platform === 'win32' ? [explicit, 'python.exe', 'python', 'py.exe', 'py'] :
     [explicit, 'python3', 'python'];
@@ -88,7 +89,7 @@ function probe(options = {}) {
   }
 
   // Discover Office CLI only through explicit machine-owner configuration, not its command name.
-  const explicitCli = String(env.SODUWORK_OFFICECLI || env.SODUWORK_OFFICECLI || '').trim();
+  const explicitCli = String(env.SODUWORK_OFFICECLI || '').trim();
   if (explicitCli) {
     const result = officeCli.probe({
       ...options, env, platform, run, explicitOnly: true,
@@ -134,7 +135,7 @@ async function probeAsync(options = {}) {
     }
   }
 
-  const explicitCli = String(env.SODUWORK_OFFICECLI || env.SODUWORK_OFFICECLI || '').trim();
+  const explicitCli = String(env.SODUWORK_OFFICECLI || '').trim();
   if (explicitCli) {
     const command = officeCli.locate({ ...options, env, platform, explicitOnly: true });
     if (command) {
@@ -165,12 +166,11 @@ async function probeAsync(options = {}) {
 
 /*
  * Adopt the Runner-managed office installation into client startup and child-process PATH
- * when no owner-configured SODUWORK_OFFICECLI or SODUWORK_OFFICECLI takes precedence.
+ * when no owner-configured SODUWORK_OFFICECLI takes precedence.
  */
 function syncManagedOfficeCliEnv(env = process.env,
                                  options = {}) {
-  if (String(env.SODUWORK_OFFICECLI || '').trim() ||
-      String(env.SODUWORK_OFFICECLI || '').trim()) return '';
+  if (String(env.SODUWORK_OFFICECLI || '').trim()) return '';
   const platform = options.platform || process.platform;
   const paths = platform === 'win32' ? path.win32 : path.posix;
   const managed = officeCli.managed(env, platform, options.managed || {});

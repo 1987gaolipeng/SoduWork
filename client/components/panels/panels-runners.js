@@ -159,9 +159,9 @@ function _rnState(r) {
 }
 
 function _rnHealth(r) {
-  if (!r.online) return { key: 'bad', title: '节点离线', detail: '现有记录仍保留，新任务会自动绕行' };
+  if (!r.online) return { key: 'bad', title: '节点离线', detail: '现有记录仍保留，等待此执行环境恢复' };
   if (r.mode === 'disabled') return { key: 'bad', title: '调度已禁用', detail: '不会接收新任务' };
-  if (r.mode === 'draining') return { key: 'warn', title: '正在排空', detail: '现有会话继续，新任务会自动绕行' };
+  if (r.mode === 'draining') return { key: 'warn', title: '正在排空', detail: '现有会话继续，暂不接收新任务' };
   if (!(r.agents || []).length) return { key: 'bad', title: '没有可用 Agent', detail: '先安装并测通至少一个 Agent' };
   if (!r.workRoot) return { key: 'warn', title: '工作目录未设置', detail: '依赖工程的任务无法准备工作区' };
   if (!_rnCapabilities(r.capabilities).reported) {
@@ -493,8 +493,11 @@ function _rnCompactCard(r, preferred) {
     _rnCapabilityOpen === id;
   const modeAction = r.mode === 'draining' ? 'accepting' : 'draining';
   const modeText = r.mode === 'draining' ? '恢复接单' : '停止接新任务';
+  const environmentLabel = r.scope === 'current-instance' || r.isCurrentDevice === true ? '当前客户端'
+    : r.scope === 'personal-cloud' ? '个人云端' : r.scope === 'bound-runner' ? '关联执行机' : '远程执行环境';
+  const environment = window.SoduWorkI18n?.translateText?.(environmentLabel) || environmentLabel;
   const sub = [
-    r.shared ? '企业公共' : (r.owner ? r.owner + ' · 个人设备' : '待确认归属'),
+    r.shared ? '企业公共' : [environment, r.owner || ''].filter(Boolean).join(' · '),
     r.host && String(r.label || '').indexOf(r.host) < 0 ? r.host : '',
     'Runner ' + (r.version || '未知版本'),
     r.online ? ('在线' + (r.lastSeen ? ' · ' + _rnAgo(r.lastSeen) : '')) :
@@ -552,7 +555,7 @@ function _rnCompactCard(r, preferred) {
       '<span class="rn-os" title="' + esc(r.os || '') + '">' + esc(r.os || '系统未知') +
       '</span></div>' +
     (confirm ? '<div class="rn-confirm"><div><b>暂停接收新任务？</b><span>现有 ' +
-      sessions.length + ' 个会话不会中断，新任务会自动选择其他节点。</span></div><div>' +
+      sessions.length + ' 个会话不会中断；使用其他环境执行新任务时，请明确选择云端或指定执行机。</span></div><div>' +
       '<button class="btn-mini" data-rn-cancel="1">取消</button>' +
       '<button class="btn-mini primary" data-rn-do="' + esc(id) +
         '" data-mode="draining">确认暂停</button></div></div>' : '') +
@@ -594,13 +597,16 @@ function _rnWorkspaceRender(nodes) {
   const accepting = nodes.filter(canTake).length;
   const busy = nodes.reduce((n, x) => n + Number(x.busy || 0), 0);
   const waiting = nodes.reduce((n, x) => n + _rnWaiting(x), 0);
-  const preferred = nodes.find((x) => canTake(x) && x.embedded) || nodes.find(canTake) || null;
+  // Scope comes from the authenticated Hub identity. A matching hostname or
+  // embedded flag does not authorize another installation as this instance.
+  const preferred = nodes.find((x) => canTake(x) && (x.scope === 'current-instance' || x.isCurrentDevice === true)) || null;
   const active = nodes.reduce((n, x) => n + (x.sessions || []).length, 0);
   const routeText = online + ' 个节点在线，' + accepting + ' 个可接单' +
     (active ? '，' + active + ' 条活跃会话' : '') +
     (waiting ? '，' + waiting + ' 项等待中。' : '。') +
     (preferred ? '当前优先使用「' + esc(preferred.label || preferred.host || '在线节点') + '」。' :
-      '当前没有可接单节点，任务会保留等待。');
+      accepting ? '当前客户端的执行机尚未就绪。使用其他环境时，请明确选择云端或指定执行机。' :
+        '当前没有可接单节点，任务会保留等待。');
   const content = nodes.length ? '<div class="rn-grid rn-grid-compact">' +
     nodes.map((x) => _rnCompactCard(x, x === preferred)).join('') + '</div>' :
     '<div class="rn-none">' + _RN_ICON + '<div><b>还没有 Runner 上线</b>' +

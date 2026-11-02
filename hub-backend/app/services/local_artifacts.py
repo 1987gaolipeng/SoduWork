@@ -102,13 +102,12 @@ def _safe_work_file(run: dict, rel: str) -> str:
 
 def _bundle_artifact(run: dict, entries: list[tuple[str, float]], *,
                      store_dir, max_bytes: int = _BUNDLE_MAX_BYTES) -> dict | None:
-    """Package directory-based or numerous outputs into a complete ZIP to avoid per-file
-    truncation.
-    """
+    """Package two or more deliverables, retaining loose files for individual preview."""
+    from . import declared_outputs, delivery_manifest
+    declared = {rel.replace("\\", "/") for rel, _stamp in declared_outputs.changed_entries(run)}
+    entries = [(rel, stamp) for rel, stamp in entries
+               if rel.replace("\\", "/") in declared or delivery_manifest.classify_name(rel) != "evidence"]
     if len(entries) < 2:
-        return None
-    rels = [rel for rel, _m in entries]
-    if len(rels) <= 20 and not any(("/" in r or "\\" in r) for r in rels):
         return None
     safe = []
     total = 0

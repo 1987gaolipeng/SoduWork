@@ -60,10 +60,13 @@ function references(text, extension, includeExternal = false) {
     }
   }
   if (/^\.(?:html?|css|svg)$/.test(extension)) {
-    // Match the CSS function, never the suffix of URL.createObjectURL(blob)
-    // or URL.revokeObjectURL(link.href) inside an HTML script.
-    collect(/(?<![\w$.-])url\(\s*["']?([^"')\s]+)["']?\s*\)/gi);
-    collect(/@import\s+["']([^"']+)["']/gi);
+    // Tokenize strings/comments before URL functions. A quoted data URI can
+    // contain SVG url(#filter), which is not another stylesheet dependency.
+    const css = extension === '.css' ? [text] : [
+      ...Array.from(text.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi), m => m[1]),
+      ...Array.from(text.matchAll(/\bstyle\s*=\s*(["'])([\s\S]*?)\1/gi), m => m[2]),
+    ];
+    for (const value of css) result.push(...require('./stylesheet-references').references(value));
   }
   if (/^\.(?:html?|m?js)$/.test(extension)) {
     collect(/\b(?:import|export)\s+(?:[^;\n]*?\s+from\s*)?["']([^"']+)["']/g);
@@ -76,19 +79,27 @@ async function prepare(session, ids, options = {}) {
   if (!session?.cwd || !session.sessionId) throw Error('请重新打开会话后下载成果');
   if (!Array.isArray(ids) || !ids.length || ids.length > MAX_FILES || new Set(ids).size !== ids.length) throw Error('请选择有效的交付文件');
   const state = session.snapshot?.();
-  if (!options.completedTurn && session.inFlight?.() || ['running', 'streaming', 'queued'].includes(state?.status)) throw Error('文件仍在生成，请等本轮完成后下载');
+  if (!options.completedTurn && (session.inFlight?.() || ['running', 'streaming', 'queued'].includes(state?.status))) throw Error('文件仍在生成，请等本轮完成后下载');
   const root = await fs.realpath(session.cwd), entries = new Map(), caseNames = new Set();
   const manifestPath = path.join(root, '.soduwork/delivery.json');
   const statManifest = () => fs.stat(manifestPath).catch(error => { if (error.code !== 'ENOENT') throw error; return null; });
   const manifestBefore = await statManifest();
   const declared = contract.readManifest(root);
   if (declared?.invalid) throw Error(declared.reason);
+  const indexed = options.snapshot || runtime.snapshot(session);
+  // Evidence can live in a reserved directory. Index its identity without
+  // applying the stricter export-path policy to files that will not be exported.
+  const evidencePath = value => String(value || '').replace(/\\/g, '/').normalize('NFC');
+  const evidence = new Set((indexed?.items || []).filter(item => item.evidenceSource ||
+    require('./delivery-selection').processRoles.has(item.role)).map(item => evidencePath(item.relative || path.relative(root, item.path))));
+  for (const name of Array.isArray(declared?.processFiles) ? declared.processFiles : []) evidence.add(evidencePath(name));
   const external = declared?.runtime?.networkPolicy === 'online' ? declared.runtime.externalDependencies || [] : [];
   if (!Array.isArray(external) || external.length > 50 || external.some(v => typeof v !== 'string' || !v.trim() || v.length > 500)) throw Error('在线依赖清单格式不正确');
   const dependencies = new Set(external);
   let total = 0;
   async function add(raw, role, webRoot = '.') {
     const name = safeRelative(raw), lower = name.toLowerCase();
+    if (evidence.has(name)) throw Error('交付物引用了过程或验证文件：' + name + '，请将实际资源与验证材料分开');
     if (entries.has(name)) { if (role === 'primary') entries.get(name).role = role; return; }
     if (caseNames.has(lower)) throw Error('成果中有大小写冲突的文件名，请先重命名');
     if (entries.size >= MAX_FILES) throw Error('一份交付最多包含 500 个文件，请精简交付目录');
@@ -124,7 +135,8 @@ async function prepare(session, ids, options = {}) {
       }
     }
   }
-  const selected = ids.map(id => { const found = runtime.resolve(session, id); if (!found.ok) throw Error(found.reason); return found; });
+  const selected = ids.map(id => { const found = runtime.resolveSnapshot(session, id, indexed);
+    if (!found.ok) throw Error(found.reason); return found; });
   for (const found of selected) {
     const relative = path.relative(root, found.path).split(path.sep).join('/');
     await add(relative, 'primary', path.posix.dirname(relative));
@@ -132,7 +144,14 @@ async function prepare(session, ids, options = {}) {
   for (const spec of declared?.deliverables || []) {
     if (!entries.has(spec.path || spec.entry)) continue;
     if (spec.files != null && !Array.isArray(spec.files)) throw Error('交付文件清单必须是文件路径列表');
-    for (const rel of spec.files || []) await add(rel, 'supporting');
+    for (const rel of spec.files || []) {
+      if (evidence.has(evidencePath(rel))) continue;
+      const name = safeRelative(rel);
+      // Explicit lists often contain globbed test output. Required references
+      // were already traversed above, so dropping optional evidence is safe.
+      if (evidence.has(name) || contract._isProcess({ relative: name, name: path.posix.basename(name) })) continue;
+      await add(name, 'supporting');
+    }
   }
   const rows = [...entries.values()].sort((a, b) => a.name < b.name ? -1 : 1);
   for (const row of rows) {
@@ -154,8 +173,13 @@ async function prepare(session, ids, options = {}) {
   // immutable file revision (or create another library entry).
   const conversationTitle = String(session.sessionTitle || '').replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 240);
   if (conversationTitle) manifest.conversationTitle = conversationTitle;
-  const changedInTurn = !options.turnSince || rows.some(row => Math.round(row.st.mtimeMs) >= options.turnSince) || Boolean(manifestStat && Math.round(manifestStat.mtimeMs) >= options.turnSince);
+  const journal = options.snapshot?.got?.fileChanges;
+  const changedInTurn = !options.turnSince || rows.some(row => Math.round(row.st.mtimeMs) >= options.turnSince ||
+    journal?.files?.some(change => change.path === row.name && ['created', 'modified', 'renamed'].includes(change.action) &&
+      change.after?.exists && change.after.size === row.bytes.length && Math.round(change.after.mtimeMs) === Math.round(row.st.mtimeMs))) ||
+    Boolean(manifestStat && Math.round(manifestStat.mtimeMs) >= options.turnSince);
   if (options.completedTurn && !changedInTurn) return { manifest, changedInTurn: false };
+  if (options.metadataOnly) return { manifest, changedInTurn };
   const filename = rows.length === 1 ? path.basename(entryPath) : zipName(title);
   const contentType = rows.length === 1 ? rows[0].contentType : 'application/zip';
   // The immutable bytes are now captured. Background ZIP encoding must not
@@ -166,6 +190,7 @@ async function prepare(session, ids, options = {}) {
       fileVersions: [...rows.map(row => version(row.name, row.st)), version('.soduwork/delivery.json', manifestStat)] });
   }
   const bytes = rows.length === 1 ? rows[0].bytes : await zip.createEntries(rows);
-  return { manifest, bytes, changedInTurn, filename, contentType };
+  return { manifest, bytes, changedInTurn, filename, contentType,
+    ...(options.includeEntries ? { entries: rows.map(row => ({ name: row.name, bytes: row.bytes, contentType: row.contentType, role: row.role })) } : {}) };
 }
 module.exports = { prepare, references, safeRelative, deliveryTitle, zipName, MAX_BYTES, MAX_FILES };

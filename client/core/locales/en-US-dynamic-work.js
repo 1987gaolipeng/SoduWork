@@ -134,7 +134,7 @@
     "它上面所有智能体会跟着改名。留空＝回到自动生成的名字（{value1}）。": "All agents on this machine are renamed too. Leave empty to restore the automatic name ({value1}).",
     "正在运行的 {value1} 个会话不会中断；恢复接单前，调度器会自动选择其他节点。": "{value1} running sessions continue. The scheduler selects other nodes until this one resumes accepting work.",
     "{value1} 条运行中": "{value1} running",
-    "现有 {value1} 个会话不会中断，新任务会自动选择其他节点。": "{value1} existing sessions continue. New tasks select other nodes automatically.",
+    "现有 {value1} 个会话不会中断；使用其他环境执行新任务时，请明确选择云端或指定执行机。": "{value1} existing sessions continue. To run new tasks elsewhere, explicitly select the cloud or a Runner.",
     "{value1} 台机器": "{value1} machines",
     "{value1} 人 · {value2} 台": "{value1} people · {value2} machines",
     "{value1} 项等待": "{value1} queued",

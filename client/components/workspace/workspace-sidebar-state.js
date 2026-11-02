@@ -11,8 +11,7 @@
     try {
       const url = new URL(String(value || ''));
       if (!/^https?:$/.test(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== '/') return '';
-      // The two official HTTPS origins serve the same accounts. No other host,
-      // port, scheme or path is interchangeable (see the product release contract).
+      // Accounts are scoped to the exact service origin; do not alias deployments.
       return url.origin;
     } catch (_) { return ''; }
   }
@@ -136,7 +135,7 @@
     if (Array.isArray(row.usedHarnesses)) out.usedHarnesses = unique(row.usedHarnesses);
     return out;
   }
-  function create({ storage, key, legacyPins = [], writable = true, migrate }) {
+  function create({ storage, key, legacyPins = [], writable = true, migrate, onChange }) {
     let raw = null, state = normalized({ pins: legacyPins }), initialized = false, readError = null;
     function refresh() {
       try {
@@ -177,6 +176,7 @@
       const value = JSON.stringify(normalizedNext);
       if (value !== raw) storage.setItem(key, value); // Failure leaves the previous state intact.
       state = normalizedNext; raw = value;
+      onChange?.();
     }
     function remember(next, items) {
       const rows = new Map(next.rows.map(row => [row.id, row]));
@@ -208,6 +208,14 @@
         recent: recentItems, collapsed: state.collapsed };
     }
     return {
+      applyRemoteProject(project) {
+        const callback = onChange; onChange = null;
+        try { commit(next => {
+          const old = next.projects.find(p => p.id === project.id);
+          next.projects = next.projects.filter(p => p.id !== project.id);
+          if (!project.deleted) next.projects.push({...old, ...project});
+        }); } finally { onChange = callback; }
+      },
       view, get: () => { refresh(); return copy(state); },
       remember: items => { if (writable) commit(next => remember(next, items)); },
       recordAppChat(appId, name, row, appIcon) {
@@ -356,5 +364,46 @@
       }); },
     };
   }
-  global.WorkspaceSidebarState = { create, normalized, storageKey, accountOptions };
+
+  function projectSync({store, api, storage, key, current = () => true, changed = () => {}, error = () => {}}) {
+    const checkpointKey = key + ':sync';
+    let busy = false;
+    const shape = row => row ? {name: row.name, chatIds: row.chatIds, deleted: false} : null;
+    const digest = row => JSON.stringify(shape(row));
+    async function run() {
+      if (busy || !current() || !api.conversationProjects) return;
+      busy = true;
+      try {
+        const checkpoints = JSON.parse(storage.getItem(checkpointKey) || '{}');
+        const reply = await api.conversationProjects();
+        if (!current()) return;
+        const remote = new Map(reply.items.map(row => [row.id, row]));
+        const local = new Map(store.get().projects.filter(row => !row.appId).map(row => [row.id, row]));
+        for (const id of new Set([...local.keys(), ...remote.keys(), ...Object.keys(checkpoints)])) {
+          if (!current()) return;
+          const here = local.get(id), there = remote.get(id), saved = checkpoints[id];
+          const hash = digest(here);
+          const dirty = saved ? hash !== saved.hash : !!here && !there;
+          if (dirty) {
+            const body = here ? shape(here) : {name: saved.name, deleted: true};
+            const updated = await api.saveConversationProject(id, {...body, revision: saved?.revision || 0});
+            if (!current()) return;
+            // Re-read: edits made while the request was in flight remain dirty.
+            checkpoints[id] = {revision: updated.revision, hash, name: updated.name};
+          } else if (there) {
+            if (!saved && here && digest(here) !== digest(there)) {
+              throw Error('项目在另一台设备也有改动，原分组已保留，请在项目中确认后重试');
+            }
+            store.applyRemoteProject({...there, chatIds: shape(there).chatIds});
+            checkpoints[id] = {revision: there.revision, hash: digest(there.deleted ? null : there), name: there.name};
+            changed();
+          }
+          storage.setItem(checkpointKey, JSON.stringify(checkpoints));
+        }
+      } catch (e) { if (current()) error(e); }
+      finally { busy = false; }
+    }
+    return {run};
+  }
+  global.WorkspaceSidebarState = { create, normalized, storageKey, accountOptions, projectSync };
 })(window);

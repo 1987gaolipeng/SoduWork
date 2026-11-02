@@ -13,7 +13,7 @@ function context(app,pluginId) {
   if (local) {
     try { installed = require('./personal-plugins').get(app,pluginId); } catch (_) { return null; }
   } else {
-    try { installed = store.read(bound).hosted; } catch (_) { return null; }
+    try { const hosted=store.read(bound).hosted;installed=hosted ? {...hosted,pluginId} : null; } catch (_) { return null; }
   }
   const raw = installed?.jiyong || installed?.localDraft?.jiyong;
   if (!raw || raw.mcp?.server !== 'soduwork-jiyong') return null;

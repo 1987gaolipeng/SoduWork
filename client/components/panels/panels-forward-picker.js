@@ -182,7 +182,9 @@ function _fwdRepoLoadState(failed) {
 let _fwdDefaultPending = true, _fwdNoPlugin = true, _fwdPlainChoice = null;
 const _fwdWorkflowChoices = new Map();
 function _fwdDirectAgents() {
-  const rows = (_fwdOptions?.substrates || []).slice();
+  const rows = (window.TaskExecutionClient?.targets
+    ? TaskExecutionClient.targets(_fwdOptions || {})
+    : (_fwdOptions?.substrates || [])).slice();
   for (const agent of _fwdLocalAgents) {
     if (!rows.some(row => _fwdSameId(row.key, agent.key))) rows.push(agent);
   }

@@ -133,10 +133,9 @@ def _real_bin(cands: list[str], names: list[str]) -> str | None:
 
 
 def _claude_bin() -> str | None:
-    root = _npm_root()
-    exe = "claude.exe" if _WIN else "claude"
-    cands = [os.path.join(root, "@anthropic-ai", "claude-code", "bin", exe)] if root else []
-    return _real_bin(cands, [exe, "claude"])
+    # Native install, account probing and ACP execution resolve the same file.
+    from .agent_native_install import active_binary
+    return active_binary(_data_root()) or None
 
 
 def _opencode_bin() -> str | None:
@@ -215,21 +214,31 @@ def _pi_bin() -> str | None:
 
 
 def _codex_bin() -> str | None:
-    """Find Codex's native executable in its platform package vendor directory, using discovery
-    rather than hard-coded platform triples. Fall back to PATH while excluding Windows shims.
-    """
-    import glob as _glob
-    from .agent_npm_runtime import private_bin
-    private = private_bin(["codex"])
+    """Prefer owned packages and only execute a native Windows platform binary."""
+    from .agent_npm_runtime import package_roots, private_bin, runtime_target
+    private = private_bin(["codex"]) if not _WIN else ""
     if private:
         return private
-    root = _npm_root()
     exe = "codex.exe" if _WIN else "codex"
     cands: list[str] = []
-    if root:
-        cands = sorted(_glob.glob(os.path.join(
-            root, "@openai", "codex", "node_modules", "@openai", "codex-*",
-            "vendor", "*", "bin", exe)))
+    system, arch = runtime_target()
+    suffix = {"win32": "-pc-windows-msvc", "linux": "-unknown-linux-musl", "darwin": "-apple-darwin"}.get(system)
+    if arch and suffix:
+        triple = ("x86_64" if arch == "x64" else "aarch64") + suffix
+        for root in package_roots(_npm_root()):
+            package = os.path.join(root, "@openai", "codex")
+            try:
+                with open(os.path.join(package, "package.json"), encoding="utf-8") as stream:
+                    manifest = json.load(stream)
+            except (OSError, ValueError, TypeError):
+                continue
+            # A hoisted native package can belong only to Codex Harness. The
+            # personal package must exist before its dependency is discoverable.
+            if not isinstance(manifest, dict) or manifest.get("name") != "@openai/codex":
+                continue
+            native = os.path.join("@openai", f"codex-{system}-{arch}")
+            cands.extend(os.path.join(base, "vendor", triple, "bin", exe) for base in (
+                os.path.join(package, "node_modules", native), os.path.join(root, native), package))
     found = _real_bin(cands, [exe, "codex"])
     # Codex desktop may add an internal WindowsApps resource directory to PATH.
     # Ordinary backend processes may lack permission to execute that bundled binary.
@@ -958,6 +967,8 @@ def _env_for(prof: dict, cfg: dict, runtime_ref: str = "") -> dict:
     # Set this before the needs_llm early return so agents using native accounts also inherit it.
     _git_host_no_proxy(env, str((cfg or {}).get("repoGitUrl") or ""))
     if not prof.get("needs_llm"):
+        if prof.get("acp_key"):
+            _acp_agents.home_env(prof["acp_key"], env, _data_root())
         if prof is _PROFILES.get("codex"):
             env["CODEX_HOME"] = codex_home
             _account_acp.prepare_env(env, cfg, _codex_bin() or "")

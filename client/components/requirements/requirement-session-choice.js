@@ -75,7 +75,7 @@
   async function executeNative(taskId, brief, options = {}) {
     if (!global.NativeChat?.enqueueTask) throw Error('当前客户端未加载会话执行能力');
     const result = await global.NativeChat.enqueueTask(taskId, {
-      source:'task-dispatch', agentId:'local:pi', executionChoice:'native', forceNew:true, brief,
+      source:'task-dispatch', agentId:'local:pi', executionChoice:'native', brief,
       ...(options.submissionMode ? { submissionMode: options.submissionMode } : {}),
     });
     if (!result?.ok) throw Error(result?.reason || '需求未能进入会话');

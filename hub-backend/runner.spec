@@ -112,6 +112,9 @@ a = Analysis(
         # Hub transport authorization uses its database; the standalone Runner
         # never sends Hub-side RPCs or authenticates other Runner identities.
         "app.services.runner_access_policy",
+        # Model admission belongs to Hub workers. Cluster notifications may
+        # reference it lazily, but a standalone Runner has no admission DB.
+        "app.services.model_runtime",
     ] + ([] if sys.platform == "win32" else ["winpty", "pywinpty"])),
     noarchive=False,
     optimize=1,

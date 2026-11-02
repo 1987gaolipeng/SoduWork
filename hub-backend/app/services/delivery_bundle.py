@@ -18,6 +18,29 @@ from fastapi import HTTPException
 from . import delivery_collections as collections, delivery_manifest, storage
 
 
+def select_artifact(rows, artifact):
+    """Resolve only the immutable version's deliverables, shared by review and download."""
+    from . import delivery_truth
+    manifest = delivery_truth.artifact_manifest(artifact)
+    entries = list(manifest.get("primary") or []) + list(manifest.get("supporting") or [])
+    ids = list(dict.fromkeys(str(item.get("id") or "") for item in entries if item.get("id")))
+    by_id = {str(row.id): row for row in rows}
+    if any(value not in by_id for value in ids):
+        raise HTTPException(502, "当前固定版本缺少成果文件，拒绝返回不完整压缩包")
+    chosen = []
+    for value in ids:
+        row = by_id[value]
+        if str(getattr(row, "role", "") or "") in {"process", "verification", "evidence", "rework_input"}:
+            continue
+        meta = dict(getattr(row, "evidence_meta", None) or {})
+        # The fixed manifest establishes delivery intent, including old agent rows
+        # whose role defaulted to input. Explicit verification provenance still wins.
+        meta.setdefault("category", "primary")
+        if delivery_manifest.classify_name(row.filename, role="output", meta=meta) in {"primary", "supporting"}:
+            chosen.append(row)
+    return chosen
+
+
 def task_download_limits():
     """Keep the existing task ZIP policy, independent of library upload limits."""
     return collections.ValidationLimits(
@@ -115,6 +138,9 @@ async def collect(rows, *, primary_ids=(), force_bundle=False, validate_standalo
         data = await asyncio.to_thread(storage.get, row.storage_key, row.backend)
         if len(data) != row.size:
             raise HTTPException(422, "成果文件不完整，拒绝返回不完整成果")
+        digest = str(dict(getattr(row, "evidence_meta", None) or {}).get("sha256") or "")
+        if digest and hashlib.sha256(data).hexdigest() != digest.lower():
+            raise HTTPException(422, "成果文件完整性校验失败")
         if validate_standalone:
             checked = await asyncio.to_thread(
                 delivery_manifest.validate_bytes, row.filename, data, row.content_type)

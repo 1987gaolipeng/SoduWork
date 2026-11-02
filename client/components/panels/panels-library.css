@@ -93,6 +93,8 @@ html[data-desk-panel="workspace"] #libraryPanel{position:fixed!important;left:va
 .library-tabs button{appearance:none;border:0;border-radius:19px;background:transparent;color:var(--ink-3);padding:10px 20px;font:400 14.5px/1 var(--font-ui);cursor:pointer;}
 .library-tabs button:hover{color:var(--ink);}
 .library-tabs button.active{background:var(--bg-1);color:var(--ink);font-weight:700;}
+.library-storage-quota{display:inline-flex;align-items:center;min-height:26px;max-width:240px;padding:0 9px;border:1px solid var(--line-2);border-radius:7px;background:var(--bg-1);color:var(--ink-3);font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.library-storage-quota[hidden]{display:none;}
 .library-trash-nav{max-width:1660px;margin:-7px auto 24px;display:flex;align-items:center;justify-content:space-between;gap:12px;}
 .library-trash-nav[hidden]{display:none;}
 .library-trash-nav button{display:inline-flex;align-items:center;gap:6px;appearance:none;border:0;background:transparent;color:var(--ink-3);font:500 14.5px/1 var(--font-ui);cursor:pointer;}
@@ -872,3 +874,5 @@ html[data-workspace-view=library] .desk-toast{font-size:max(var(--font-min-reada
 .library-panel:not(.is-trash) .library-content.is-list .library-card-actions{grid-column:4}
 .library-panel:not(.is-trash) .library-content.is-list .library-card-date,.library-panel:not(.is-trash) .library-content.is-list .library-card-size,.library-panel:not(.is-trash) .library-list-head>span:nth-of-type(3),.library-panel:not(.is-trash) .library-list-head>span:nth-of-type(4){display:none}
 }
+
+.library-card[tabindex="-1"]:focus{outline:2px solid var(--accent);outline-offset:-2px;border-radius:8px}

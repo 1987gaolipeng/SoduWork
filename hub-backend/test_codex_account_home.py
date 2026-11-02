@@ -139,7 +139,7 @@ class AccountHomeTests(unittest.TestCase):
              patch.object(agent_setup, "_account_auth_probe", side_effect=probe), \
              patch.dict(os.environ, {"OPENAI_API_KEY": "unrelated-personal-key"}):
             result = agent_setup._auth_probe("codex")
-        self.assertEqual(result[0], "unauthed")
+        self.assertEqual(result[0], "", "An unavailable status is unknown, never proof of logout or login")
         self.assertEqual(seen, [account.account_home(self.root)])
 
     def test_login_action_is_codex_only_and_never_runs_npm(self):

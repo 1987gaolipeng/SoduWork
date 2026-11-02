@@ -241,3 +241,19 @@ test('settings exposes language choices through one native select', () => {
   assert.match(settings, /_syncLocaleSelect/);
   assert.match(settings, /localeSelect\.addEventListener\('change'/);
 });
+
+test('server message descriptors switch locale without translating interpolated business data', () => {
+  const { api } = client();
+  const params = { sender: '保存', title: 'New chat {sender} 日本語' };
+  const expected = {
+    'en-US': '保存 assigned the issue “New chat {sender} 日本語” to you',
+    'ja-JP': '保存 が課題「New chat {sender} 日本語」をあなたに割り当てました',
+    'ko-KR': '保存님이 요구 사항 “New chat {sender} 日本語”을(를) 배정했습니다',
+    'zh-CN': '保存 将需求「New chat {sender} 日本語」交给你',
+  };
+  for (const locale of ['en-US', 'ja-JP', 'ko-KR', 'zh-CN', 'en-US']) {
+    api.setLocale(locale);
+    assert.equal(api.t('notification.task_assignment', 'legacy fallback', params), expected[locale]);
+    assert.notEqual(api.t('agent.auth.required', 'untranslated'), 'untranslated');
+  }
+});

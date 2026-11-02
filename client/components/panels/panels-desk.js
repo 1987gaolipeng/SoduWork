@@ -397,7 +397,13 @@ function closeNoticePanel() {
 }
 function _noticePresentation(n) {
   const mate = n.kind === 'mate_message' || n.kind === 'task_assignment';
-  let text = String(n.bodyText ?? n.text ?? '').replace(/^[\s\u23f0\u21bb\u2705\ud83d\udce5]+/u, '').trim();
+  const descriptor = n.textMessage;
+  const fallback = String(n.bodyText ?? n.text ?? '');
+  const translated = descriptor && typeof descriptor === 'object'
+    ? (globalThis.SoduWorkI18n?.t?.(String(descriptor.key || ''),
+        String(descriptor.fallback || fallback), descriptor.params || {}) || fallback)
+    : fallback;
+  let text = String(translated).replace(/^[\s\u23f0\u21bb\u2705\ud83d\udce5]+/u, '').trim();
   if (mate && n.bodyText == null && n.senderName && text.startsWith(n.senderName + '：')) text = text.slice(n.senderName.length + 1).trim();
   const report = !mate && text.match(/^(日报已生成|周报已生成)[：:]\s*([\s\S]*)$/);
   const labels = { task: '任务动态', remind: '提醒', recur: '循环任务', system: '系统通知', notice: '工作通知', mate_receipt: '消息回执' };
@@ -413,6 +419,10 @@ function _noticePresentation(n) {
   const icon = mate ? '<svg class="np-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a8 8 0 0 1-8 8H4l1.6-4A8 8 0 1 1 20 11.5Z"/><path d="M8 10h8M8 14h5"/></svg>' : report ? '<svg class="np-svg" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="3"/><path d="M9 7h6M9 11h6M9 15h3"/></svg>' : _nkIcon(n.kind);
   return { text: report ? report[2] : text, title, icon, mate, report: !!report };
 }
+
+globalThis.addEventListener?.('soduwork-locale-change', () => {
+  if (document.getElementById('noticePanel')?.classList.contains('show')) _renderNoticePanel();
+});
 function _noticeFileIsZip(file) {
   return /\.zip$/i.test(String(file?.name || file?.filename || ''));
 }
@@ -510,6 +520,11 @@ async function _downloadNoticeFile(button) {
     if (action === 'save') {
       if (typeof SoduWorkAPI.saveMateMessageFileToLibrary !== 'function') throw Error('请更新客户端后保存附件');
       await SoduWorkAPI.saveMateMessageFileToLibrary(button.getAttribute('data-notice-file'));
+      try {
+        const detail = { itemId: '' };
+        window.dispatchEvent(new CustomEvent('soduwork-library-changed', { detail }));
+        window.soduWorkAPI?.broadcast?.('library', { type: 'changed', detail, at: Date.now() });
+      } catch (_) { /* Library refresh is best effort after a successful save. */ }
       if (current() && typeof petSay === 'function') petSay('已保存到本机资料库');
       return;
     }

@@ -117,13 +117,13 @@
   background:var(--bg-0);
   color:var(--ink-3);
   display:flex;align-items:center;justify-content:center;
-  pointer-events:auto;
+  pointer-events:none;
   transform:translate(var(--rx),var(--ry)) scale(.6);
   transition:transform .2s var(--spring),background-color .15s ease,box-shadow .15s ease;
   padding:0;
   box-shadow:var(--shadow-sm);
 }
-.pet.ring-open .ring-btn{transform:translate(var(--rx),var(--ry)) scale(1)}
+.pet.ring-open .ring-btn{pointer-events:auto;transform:translate(var(--rx),var(--ry)) scale(1)}
 .ring-btn:hover{
   background:var(--accent-soft-2);
   color:var(--accent);

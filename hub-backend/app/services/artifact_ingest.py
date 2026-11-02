@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import hashlib
+import json
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +28,20 @@ runner_info_sync = _exec.runner_info_sync
 
 async def pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, ref: str = "",
                          settle: bool = True) -> dict:
+    """Fetch before ingestion writes; stable attachment keys arbitrate the commit.
+
+    Remote callers must enter without unrelated database write locks: this
+    service never commits an enclosing business intent before slow retrieval.
+    """
+    try:
+        return await _pull_artifacts(session, tid, ctx, s, ref, settle)
+    except BaseException:
+        await session.rollback()
+        raise
+
+
+async def _pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, ref: str = "",
+                          settle: bool = True) -> dict:
     """Idempotently import AI files and URLs into the task, record ai.artifacts, and notify the
     creator for review. Adapters only provide artifact bytes.
     """
@@ -77,43 +92,33 @@ async def pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, re
         round_no = max(0, int(s.get("round") or 0))
     except (TypeError, ValueError):
         round_no = 0
-    received: set[str] = set()
-    valid: set[str] = set()
-    deliverables: set[str] = set()
-    evidence: set[str] = set()
-    ignored: set[str] = set()
-    invalid: list[dict] = []
-    known_urls: set[str] = set()
-    receipts = (await session.execute(select(TaskEvent).where(
-        TaskEvent.task_id == tid, TaskEvent.kind.in_(KINDS_ARTIFACTS)
-    ))).scalars().all()
-    for event in receipts:
-        detail = dict(event.detail or {})
-        same_source = ((ref and detail.get("ref") == ref)
-                       or (marker and detail.get("identifier") == marker))
-        if not same_source:
-            continue
-        try:
-            old_round = max(0, int(detail.get("round") or 0))
-        except (TypeError, ValueError):
-            old_round = 0
-        # Legacy receipts without a round belong to the initial round only.
-        if round_no and old_round != round_no and not (round_no == 1 and old_round == 0):
-            continue
-        received.update(delivery_manifest.normalize_name(x)
-                        for x in (detail.get("files") or []) if x)
-        valid.update(delivery_manifest.normalize_name(x)
-                     for x in (detail.get("valid") or []) if x)
-        deliverables.update(delivery_manifest.normalize_name(x)
-                            for x in (detail.get("deliverables") or []) if x)
-        evidence.update(delivery_manifest.normalize_name(x)
-                        for x in (detail.get("evidence") or []) if x)
-        ignored.update(delivery_manifest.normalize_name(x)
-                       for x in (detail.get("ignored") or []) if x)
-        invalid.extend(dict(x) for x in (detail.get("invalid") or []) if isinstance(x, dict))
-        if detail.get("artifactUrl"):
-            known_urls.add(str(detail["artifactUrl"]).strip())
+    async def receipts_now():
+        groups = {name: set() for name in ("files", "valid", "deliverables", "evidence", "ignored")}
+        invalid, urls = [], set()
+        receipts = (await session.execute(select(TaskEvent).where(
+            TaskEvent.task_id == tid, TaskEvent.kind.in_(KINDS_ARTIFACTS)
+        ))).scalars().all()
+        for event in receipts:
+            detail = dict(event.detail or {})
+            if not ((ref and detail.get("ref") == ref) or (marker and detail.get("identifier") == marker)):
+                continue
+            try:
+                old_round = max(0, int(detail.get("round") or 0))
+            except (TypeError, ValueError):
+                old_round = 0
+            # Unversioned historical receipts belong to the first turn only.
+            if round_no and old_round != round_no and not (round_no == 1 and old_round == 0):
+                continue
+            for name, values in groups.items():
+                values.update(delivery_manifest.normalize_name(x) for x in (detail.get(name) or []) if x)
+            invalid.extend(dict(x) for x in (detail.get("invalid") or []) if isinstance(x, dict))
+            if detail.get("artifactUrl"):
+                urls.add(str(detail["artifactUrl"]).strip())
+        return (*groups.values(), invalid, urls)
+
+    received, valid, deliverables, evidence, ignored, invalid, known_urls = await receipts_now()
     got: list[str] = []
+    staged = []
     # For local execution, prefer reading the original workspace file.
     # Process-specific transparent encryption can make another uploader read encrypted bytes.
     # The authorized backend process may read the plaintext from the same path.
@@ -191,8 +196,13 @@ async def pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, re
             ignored.add(fn)
             valid.add(fn)  # Explicit file contracts may accept types that generic evidence classification does not.
         key = f"ai/{tid}/{_uuid.uuid4().hex[:8]}-{fn}"
-        backend = storage.put(key, data, ctype)
-        session.add(Attachment(task_id=tid, filename=fn, content_type=ctype, size=len(data),
+        backend = await _aio.to_thread(storage.put, key, data, ctype)
+        # The existing receipt is the primary idempotency record. A stable
+        # primary key also fences an insert racing a stale transaction snapshot.
+        identity = ({"id": str(_uuid.uuid5(_uuid.NAMESPACE_URL, "soduwork:artifact:" + json.dumps(
+            [tid, ref or marker, round_no, fn], ensure_ascii=False, separators=(",", ":"))))}
+            if ref or marker else {})
+        staged.append(dict(**identity, task_id=tid, filename=fn, content_type=ctype, size=len(data),
                                storage_key=key, backend=backend, uploaded_by=who,
                                role=role, source_ref=ref,
                                workflow_run_id=_source_run, node_run_id=_source_node,
@@ -205,14 +215,64 @@ async def pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, re
                                created_at=datetime.now(timezone.utc)))
         got.append(fn)
         received.add(fn)
+    # Downloads and object uploads finish before the first ingestion write.
+    # Re-read committed facts, then let the primary key arbitrate any final race.
+    received, valid, deliverables, evidence, ignored, invalid, known_urls = await receipts_now()
+    got, inserted, discarded = [], [], []
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+    factory = pg_insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
+    for values in staged:
+        if values["filename"] in received:
+            discarded.append((values["storage_key"], values["backend"]))
+            continue
+        statement = factory(Attachment).values(**values).on_conflict_do_nothing(index_elements=["id"])
+        result = await session.execute(statement)
+        if result.rowcount:
+            inserted.append(values)
+        else:
+            existing = await session.get(Attachment, values.get("id"), populate_existing=True)
+            old_meta = dict(existing.evidence_meta or {}) if existing is not None else {}
+            if (existing is None or existing.task_id != tid or existing.source_ref != ref
+                    or existing.filename != values["filename"]
+                    or int(old_meta.get("round") or 0) != round_no
+                    or old_meta.get("sha256") != values["evidence_meta"]["sha256"]):
+                raise ValueError("Conflicting artifact identity or bytes for the same execution turn")
+            discarded.append((values["storage_key"], values["backend"]))
+    # A conflicting inserter committed its attachment and receipt together.
+    received, valid, deliverables, evidence, ignored, invalid, known_urls = await receipts_now()
+    for values in inserted:
+        fn, meta = values["filename"], values["evidence_meta"]
+        got.append(fn)
+        received.add(fn)
+        if meta["verification"].get("state") != "passed":
+            invalid.append({"name": fn, "reason": meta["verification"].get("reason") or "文件校验失败"})
+        else:
+            valid.add(fn)
+            if meta["category"] == "evidence":
+                evidence.add(fn)
+            elif meta["category"] in ("primary", "supporting"):
+                deliverables.add(fn)
+            else:
+                ignored.add(fn)
     url = (s.get("artifactUrl") or "").strip()
-    new_url = bool(url) and url != (getattr(t, "artifact_url", "") or "")
+    current_url = await session.scalar(select(Task.artifact_url).where(Task.id == tid))
+    new_url = bool(url) and url != (current_url or "")
     new_url_receipt = bool(url) and url not in known_urls
     if new_url:
         t.artifact_url = url
     missing = sorted({delivery_manifest.normalize_name(a.get("filename") or "") for a in _atts
                       if a.get("filename")} - received)
     _dropped = int(s.get("artifactsDropped") or 0) + max(0, len(_atts) - _ATT_CAP)
+
+    async def cleanup_discarded():
+        for key, backend in discarded:
+            try:
+                await _aio.to_thread(storage.delete, key, backend)
+            except Exception:
+                log.warning("Unreferenced duplicate output cleanup deferred for task %s", tid)
+        discarded.clear()
+
     if got or new_url or new_url_receipt:
         # Record excluded artifact counts in the timeline so incomplete delivery remains visible.
 
@@ -228,46 +288,52 @@ async def pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, re
                                                "（都在执行机的工作目录里）" % (len(got), _dropped)}
                                if _dropped else {})}, actor=who)
         await session.commit()
-        # The plugin engine needs file receipts only; later declared nodes own versions, review requests, and task completion.
-        # Do not invoke the ordinary-dispatch completion path from an intermediate plugin node.
-        # That could create approvals before the declared quality gates.
+        await cleanup_discarded()
+        # Plugin nodes retain their own review gates; only a settled ordinary
+        # execution may enter the shared submission path.
         if not settle:
             return {"files": len(got), "url": url, "received": sorted(received),
                     "valid": sorted(valid), "deliverables": sorted(deliverables),
                     "evidence": sorted(evidence), "ignored": sorted(ignored),
-                    "invalid": invalid[-100:],
-                    "missing": missing}
+                    "invalid": invalid[-100:], "missing": missing}
 
-
-
-
+    # Retry settlement even when all files were already ingested. A prior
+    # classification/configuration failure must not strand a completed execution.
+    from .conversation_turns import default_submission_mode, normalize_submission_mode
+    mode = normalize_submission_mode((t.work_routing or {}).get("executionSubmissionMode"),
+                                     fallback=default_submission_mode(t))
+    if (settle and s.get("done") and (received or url) and not _source_run
+            and t.status not in {"done", "cancel"} and mode == "auto"):
         code = {}
         try:
             from . import code_delivery
             code = await code_delivery.check(session, t, who="SoduWork", force=True)
-        except Exception as e:  # noqa: BLE001 - Delivery-check failures must not prevent artifact ingestion.
-            log.warning("代码交付判定失败: %s", type(e).__name__)
+        except Exception as e:  # noqa: BLE001 - Preserve ingested outputs.
+            log.warning("Code delivery check failed: %s", type(e).__name__)
         if not code.get("applies"):
-            # Freeze file and URL candidates before review.
-            # Content changes alter the checksum and invalidate earlier approvals.
-            candidate_ready = False
             missing_outputs = [name for name in missing
                                if delivery_manifest.is_deliverable_name(name)]
             if not _dropped and not invalid and not missing_outputs:
+                candidate_ready = False
                 try:
                     from . import release_control as _release
-                    await _release.ensure_current_output(session, t, source_ref=ref, who="SoduWork")
+                    _, created = await _release.ensure_current_output(
+                        session, t, source_ref=ref, who="SoduWork")
                     await session.commit()
                     candidate_ready = True
-                except ValueError:
-                    pass
-            # Execution completion does not complete the task; human approval and the shared completion gate remain required.
-            if candidate_ready:
-                from . import code_delivery as _cd
-                await _cd.notify_reviewer(session, t, url or ("、".join(got) if got else "产出"))
-    if settle and s.get("done") and not missing and not invalid and not _dropped:
-        from . import cloud_deliveries
-        await cloud_deliveries.archive_if_cloud(session, tid)
+                    if created:
+                        from . import task_access, tasks as tasks_svc
+                        await task_access.publish_task(session, t, "task.updated",
+                                                       await tasks_svc.task_to_api_live(session, t))
+                except ValueError as error:
+                    log.warning("Output review unavailable for %s: %s", tid, error)
+                if candidate_ready:
+                    await code_delivery.notify_reviewer(
+                        session, t, url or "?".join(sorted(deliverables)) or "??")
+    elif staged:
+        # Release a successful no-op conflict transaction before any library RPC.
+        await session.commit()
+    await cleanup_discarded()
     return {"files": len(got), "url": url, "received": sorted(received),
             "valid": sorted(valid), "deliverables": sorted(deliverables),
             "evidence": sorted(evidence), "ignored": sorted(ignored),

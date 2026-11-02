@@ -19,10 +19,11 @@ async function initialize(deps,pluginId,provided){
  if(!(installed.jiyong || installed.localDraft?.jiyong)?.initialization)return {ok:true,state:'not_needed'};
  if(installed.enabled===false)throw Error('即用已停用，无法初始化');
  let owner;
- try{owner=store.scope(bound);}catch(error){if(error.message.includes('请先登录'))return {ok:true,state:'pending_account'};throw error;}
+ try{owner=store.scope(bound);}catch(error){if(error.message.includes('请先登录') && (installed.jiyong || installed.localDraft?.jiyong)?.storage?.location!=='cloud')return {ok:true,state:'pending_account'};throw error;}
  const checksum=installed.checksum;
  const check=()=>{if(owner!==store.scope(bound) || (pluginId.startsWith('local:') && require('./personal-plugins').get(deps.app,pluginId).checksum!==checksum))throw Error('即用账号或版本已变化');};
  const initialization=await script(deps,installed,check);check();
+ if((installed.jiyong || installed.localDraft?.jiyong)?.storage?.location==='cloud')return require('./jiyong-cloud-data.cjs').execute(deps,bound,installed,'initialize',{},check,initialization);
  return require('./jiyong-data.cjs').execute(deps.app,bound,installed.jiyong || installed.localDraft.jiyong,'initialize',{},check,initialization);
 }
 module.exports={script,initialize};

@@ -89,6 +89,10 @@ function preference(app, ref) {
     readSelection,
     write(name, reasoningEffort = readSelection().reasoningEffort) {
       if (!file) return;
+      // Reopening a conversation must not rewrite an unchanged saved choice.
+      // A transient destination lock may block new choices, but not restoration.
+      const current = readSelection();
+      if (current.name === name && current.reasoningEffort === reasoningEffort) return;
       fs.mkdirSync(path.dirname(file), { recursive: true });
       const tmp = file + '.' + crypto.randomUUID() + '.tmp';
       try {

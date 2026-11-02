@@ -10,6 +10,7 @@
     claude: 'CL',
     codex: 'CX',
     qwen: 'QW',
+    kimi: 'KM',
     dsh: 'DS',
     harness2: 'H2',
   });
@@ -21,6 +22,7 @@
     claude: 'Claude Code',
     codex: 'Codex',
     qwen: 'Qwen Code',
+    kimi: 'Kimi Code',
     dsh: 'DeepSeek Harness',
     harness2: 'Google Harness²',
     custom: '自定义 Agent',
@@ -47,6 +49,7 @@
     if (/open[-:./]*code/.test(text)) return 'opencode';
     if (/claude/.test(text)) return 'claude';
     if (/qwen/.test(text)) return 'qwen';
+    if (/kimi|moonshot/.test(text)) return 'kimi';
     if (/(^|[-:./])codex($|[-:./])|chatgpt/.test(text)) return 'codex';
     if (/(^|[-:./])pi($|[-:./])|pi[-:./]*coding[-:./]*agent/.test(text)) return 'pi';
     return 'custom';

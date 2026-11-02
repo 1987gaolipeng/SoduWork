@@ -162,7 +162,7 @@
   const { reset: _resetMessageRenderer, rich, _richPlain, CARET, _ensureHlCss, _inject, _blockHtml, _MCP_SAY, _friendlyTool, _toolHtml, _render, _ctxText, _tokenText, _ctxHtml, _uiHtml } = global.ChatMessageRenderer.create(context);
   const { _queueRows, _renderQueue, _queueAction, _updateQueueOrder, _cancelQueued } = global.ChatSendQueue.create(context);
   const { _chatDraftBridge, _workModel, _workConversationContext, _openPluginDebug, _openWorkAction, _pickProposal, _maybeProposal, _renderProposal, _dismissProposal, _proposalAction } = global.ChatWorkIntent.create(context);
-  const { _withConversationDraftRestore, _draftKeyForCurrentSession, _draftOwnerScope, _clearConversationDraftScope, _flushConversationDrafts, _rememberConversationText, _rememberConversationDraft, _conversationDraftText, _conversationDraftSkills, _clearConversationDraft, _restoreConversationDraft, _retainFailedConversationDraft, _restoreRetainedConversationFailure, _restoreRetryDraft, _restoreFailedDraft } = global.ChatDraftRecovery.create(context);
+  const { _withConversationDraftRestore, _draftKeyForCurrentSession, _draftOwnerScope, _clearConversationDraftScope, _flushConversationDrafts, _rememberConversationText, _rememberConversationDraft, _conversationDraftText, _conversationDraftSkills, _clearConversationDraft, _restoreConversationDraft, _retainFailedConversationDraft, _restoreRetainedConversationFailure, _restoreRetryDraft, _openPluginAuthRecovery, _restoreFailedDraft } = global.ChatDraftRecovery.create(context);
   let _ref = '';            // Current conversation reference.
   let _sessionId = '';      // Persistent Pi session ID for resuming the same live session.
   let _off = null;          // Event unsubscribe function.
@@ -186,6 +186,7 @@
   let _sessionOptions = {};  // Session capabilities are fixed; model and permission changes apply only to later turns.
   let _pending = '';
   let _pendingSentAt = 0;
+  let _pendingBaseline = null;
   let _lastStatus = '';     // Previous frame state used to detect run completion.
   let _stopState = 'idle';  // idle | requested | timeout; scoped to the active turn.
   let _sendState = 'idle';  // idle | sending; scoped to the current submission.
@@ -428,7 +429,7 @@
     // A confirmed failed turn can leave an automatic pause without any work.
     // Preserve that pause; only a fresh submission may release it in the runtime.
     const settledFailure = execution.recoveryRequired === false && queue.failure &&
-      ['idle', 'unreachable', 'no-output', 'incomplete', 'aborted'].includes(_snap?.status) &&
+      ['idle', 'unreachable', 'no-output', 'incomplete', 'aborted', 'quota'].includes(_snap?.status) &&
       !queued && !queue.activeQueueId && !queue.activeTaskId;
     return Boolean((_snap && ['streaming', 'queued'].includes(_snap.status)) ||
       execution.running || queue.activeQueueId || queue.activeTaskId || queued ||
@@ -777,7 +778,7 @@
       _sessionId = failedSessionId;
       _sessionOptions = failedSessionOptions;
       _mount(); _restoreConversationDraft(_draftKey);
-      _snap = {openBlocked: true, sessionOpenCode: 'WORK_CARDS_BLOCKED', messages: [], tools: []};
+      _snap = {openBlocked: true, sessionOpenCode: 'WORK_CARDS_BLOCKED', sessionNotFound: _snap?.sessionNotFound === true, messages: [], tools: []};
       _taskOpenError = workCards.reason || '工作卡片暂时无法读取，请重新打开这条会话';
       _fail('打不开对话', _taskOpenError);
       return false;
@@ -914,6 +915,7 @@
       status: active.queueState || context.status || task.status || '',
       acceptanceSession: _sessionOptions.acceptanceSession === true || _sessionOptions.acceptanceExecutionSession === true,
       acceptanceExecutionSession: _sessionOptions.acceptanceExecutionSession === true,
+      acceptanceFallbackFrom: _sessionOptions.acceptanceFallbackFrom || '',
       acceptanceTaskId: String(_sessionOptions.taskRef || _activeCollabTaskId || '').trim(),
       acceptanceMode: _sessionOptions.acceptanceMode || _sessionOptions.mode || '',
       acceptanceApprovalId: String(_sessionOptions.approvalId || '').trim(),

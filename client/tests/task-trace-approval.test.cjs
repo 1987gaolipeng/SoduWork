@@ -64,6 +64,19 @@ test('approval card disappears after this user submits a decision', () => {
   assert.equal(f.api.html([f.item], {variant: 'task', taskId: 'task-1'}), '');
 });
 
+test('chat can replace a successful approval with a read-only receipt before refresh', async () => {
+  const f=fixture({action:'review'}); const outcomes=[];
+  f.state.opts={onAcceptanceClosed(block,outcome){assert.equal(block,f.block);outcomes.push(outcome);return true;}};
+  f.state.refresh=async()=>{throw Error('refresh unavailable');};
+  f.note.value='Verified delivery';
+  f.click(f.approve); await settle();
+  assert.equal(outcomes.length,1);
+  assert.equal(outcomes[0].decision,'approve'); assert.equal(outcomes[0].note,'Verified delivery');
+  assert.equal(outcomes[0].status,'approved'); assert.equal(f.block.removed,false);
+  assert.equal(f.block.dataset.approvalSubmitted,'true');
+  f.click(f.approve); await settle(); assert.equal(f.calls.length,1);
+});
+
 test('creator direct acceptance card keeps its actions enabled without a hub approval', () => {
   const f = fixture({action: 'review'});
   f.block.getAttribute = name => name === 'data-tfd-approval-id' ? 'direct:task-1' : '';
@@ -497,6 +510,7 @@ test('image gates keep the in-place upload remedy', () => {
            requirements: [{id: 'screenshot', oneOf: ['image'], satisfied: false}]}};
   const html = f.api.html([item], {variant: 'task'});
   assert.match(html, /data-tfd-approval-file/);
+  assert.doesNotMatch(html, /accept="image\/(?:png|jpeg|webp|gif)/);
   assert.match(html, /上传截图/);
 });
 

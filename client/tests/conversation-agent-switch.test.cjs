@@ -55,8 +55,9 @@ function fixture(t) {
         accessControl: { ...catalog.runtime(input.key).accessControl, canChangeDuringSession: true } } }; }
     if (op === 'job.dispatch') {
       const ref = _uuidV5('9af442c8-cd1d-4b91-a668-22da2b2635bf', 'chat:' + input.task.id + ':' + input.cli);
-      runs.set(ref, { ref, cli: input.cli, taskId: input.task.id, workDir: input.ctx.workDir, state: 'done', title: 'Runner reply',
-        items: [{ seq: 1, kind: 'say', text: 'Reply ' + input.cli }] });
+      runs.set(ref, { ref, cli: input.cli, taskId: input.task.id, workDir: input.ctx.workDir, state: 'done', title: input.task.title,
+        items: [{ seq: 1, kind: 'user', text: input.ctx.conversationUserText },
+          { seq: 2, kind: 'say', text: 'Reply ' + input.cli }] });
       return { ok: true, data: { ref } };
     }
     if (op === 'job.comment') { const run = runs.get(input.ref); run.items.push({ seq: run.items.length+1, kind: 'say', text: 'Followup' }); return { ok: true, data: { ok: true } }; }
@@ -664,4 +665,86 @@ for (const mode of ['standard', 'readonly', 'full']) test('Pi -> Codex -> DSH ->
   const restored = await f.bridge.open({ ...options(f), ref: 'reopen-two-agents', runtimeConversationId: id });
   assert.equal(restored.ok, true, restored.reason);
   assert.deepEqual(restored.session.snapshot().messages.filter(m => m.role === 'assistant').map(m => m.sourceAgent.agentId), ['pi', 'codex', 'dsh', 'pi']);
+});
+
+async function settled(handle) {
+  for (let attempt = 0; attempt < 200 && handle.snapshot().status !== 'idle'; attempt++)
+    await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(handle.snapshot().status, 'idle');
+}
+
+test('OpenCode title survives cold resume, Pi switch, follow-up and another cold reopen', async t => {
+  const f = fixture(t), original = '写一篇关于雨的短文';
+  const first = (await f.bridge.open({ ...options(f), adapterId: 'opencode' })).session;
+  assert.equal(first.historyRow().title, '', 'an empty runtime cannot rename the composer');
+  await send(first, original);
+  const id = first.sessionId;
+  await f.restart();
+  const resumed = await f.bridge.open({ ...options(f), adapterId: 'opencode', resumePath: id });
+  assert.equal(resumed.ok, true, resumed.reason);
+  const h = resumed.session;
+  await settled(h);
+  assert.equal(h.historyRow().title, original, 'the first archived user message restores the title');
+  assert.equal((await h.selectAgent('pi')).ok, true);
+  assert.equal(h.sessionId, id);
+  assert.equal(h.historyRow().title, original);
+  assert.equal(f.openings.at(-1).sessionTitle, original);
+  await send(h, '继续完善排版');
+  assert.equal(h.historyRow().title, original);
+  await f.restart();
+  const restored = (await f.bridge.open({ ...options(f), runtimeConversationId: id })).session;
+  assert.equal(restored.historyRow().title, original);
+  assert.equal(require('../main/pi-session/open-reply').openReply(f.app, restored).title, original);
+  assert.equal((await f.bridge.history(f.app)).chats.find(row => row.id === id).title, original);
+});
+
+test('legacy default runtime titles recover from the original prefix without overriding manual names', async t => {
+  const f = fixture(t), h = (await f.bridge.open({ ...options(f), adapterId: 'opencode' })).session;
+  const original = '输出一篇短文';
+  await send(h, original);
+  assert.equal((await h.selectAgent('pi')).ok, true);
+  const id = h.sessionId, saved = segments.read(f.app, id);
+  await segments.save(f.app, { ...saved, title: 'OpenCode 工作会话' });
+  const prefixBefore = JSON.stringify(saved.prefix);
+  await f.restart();
+  assert.equal((await f.bridge.history(f.app)).chats.find(row => row.id === id).title, original);
+  const restored = (await f.bridge.open({ ...options(f), runtimeConversationId: id })).session;
+  const openReply = require('../main/pi-session/open-reply').openReply;
+  assert.equal(openReply(f.app, restored).title, original);
+  const custom = 'OpenCode 工作会话';
+  require('../main/conversation/titles').save(f.app, id, custom);
+  assert.equal(openReply(f.app, restored).title, custom, 'even a manually chosen default-like name is authoritative');
+  assert.equal((await restored.selectAgent('qwen')).ok, true);
+  assert.equal(openReply(f.app, restored).title, custom);
+  assert.deepEqual(segments.read(f.app, id).prefix.messages.slice(0, saved.prefix.messages.length), saved.prefix.messages);
+  assert.equal(JSON.stringify(saved.prefix), prefixBefore, 'repair never edits the archived transcript');
+});
+
+test('switching an empty runtime takes its first real title after sending and persists it', async t => {
+  const f = fixture(t), h = (await f.bridge.open({ ...options(f), adapterId: 'opencode' })).session;
+  assert.equal((await h.selectAgent('qwen')).ok, true);
+  const id = h.sessionId;
+  await send(h, '第一条真实请求');
+  await segments.flush(f.app, id);
+  assert.equal(h.historyRow().title, '第一条真实请求');
+  assert.equal(segments.read(f.app, id).title, '第一条真实请求');
+  assert.equal((await h.selectAgent('pi')).ok, true);
+  await send(h, '第二条请求');
+  assert.equal(h.historyRow().title, '第一条真实请求');
+});
+
+
+test('cold Runner open carries the saved title before history polling finishes', async t => {
+  const f = fixture(t), first = (await f.bridge.open({ ...options(f), adapterId:'opencode' })).session;
+  await send(first, 'Original saved request');
+  const id = first.sessionId;
+  await f.restart();
+  const resumed = await f.bridge.open({ ...options(f), adapterId:'opencode', resumePath:id,
+    sessionTitle:'Original saved request' });
+  assert.equal(resumed.ok, true, resumed.reason);
+  const h = resumed.session;
+  assert.equal(require('../main/pi-session/open-reply').openReply(f.app, h).title, 'Original saved request');
+  await settled(h);
+  await send(h, 'Follow-up cannot rename history');
+  assert.equal(h.historyRow().title, 'Original saved request');
 });

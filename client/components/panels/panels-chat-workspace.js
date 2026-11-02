@@ -144,7 +144,13 @@
     const kind = previewKind(file);
     return kind === 'web' || kind === 'pdf';
   }
-  function openPendingCloud(file, activate = true) {
+  function canAutoPreview(file) {
+    const kind = previewKind(file);
+    // Automatic output handling stays inside the right pane. Other results
+    // remain conversation cards until the user chooses an explicit file action.
+    return kind !== 'external' && (kind !== 'pdf' || Boolean(file?.path));
+  }
+  function openPendingCloud(file, activate = true, automatic = false) {
     if (!file?.cloudPending || !links?.materialize) return false;
     const ref = context().ref, current = previewOwner();
     const id = fileKey(file), activeId = WB.active, request = {};
@@ -153,11 +159,11 @@
     if (opening.has(id)) return true;
     opening.add(id);
     if (activate) { WB.cloudOpenRequest = request; WB.manualClosed = false; }
-    links.materialize(file, sessionApi(), ref).then(local => {
+    links.materialize(file, sessionApi(), ref, { previewOnly: automatic }).then(local => {
       if (!current()) return;
       WB.files = WB.files.map(item => fileKey(item) === id ? local : item);
       const shouldActivate = activate && WB.cloudOpenRequest === request && WB.active === activeId && !WB.manualClosed;
-      const tab = openFile(local, shouldActivate);
+      const tab = openFile(local, shouldActivate, automatic);
       if (tab) tab.autoPreview = false;
       paint();
     }).catch(error => { if (current()) global.petSay?.(error.message || '云端成果暂时无法打开'); })
@@ -178,7 +184,7 @@
     }).catch(error => { if (current() && typeof global.petSay === 'function') global.petSay(error.message || '无法预览这份成果'); });
     return true;
   }
-  function openTaskPreview(file, activate = true) {
+  function openTaskPreview(file, activate = true, automatic = false) {
     // Materialize web deliverables in the conversation workspace through authorized main-process downloads
     // with SHA-256 verification, then open local files rather than navigating to Hub attachment URLs.
     if (!file || !file.taskId || !file.attachmentId || file.path) return false;
@@ -191,20 +197,21 @@
     opening.add(id);
     if (activate) { WB.cloudOpenRequest = request; WB.manualClosed = false; }
     const ref = context().ref, current = previewOwner();
-    links.materializeTask(file, sessionApi(), ref).then(local => {
+    links.materializeTask(file, sessionApi(), ref, { previewOnly: automatic }).then(local => {
       if (!current()) return;
       WB.files = WB.files.map(item => fileKey(item) === id ? local : item);
       const shouldActivate = activate && WB.cloudOpenRequest === request && WB.active === activeId && !WB.manualClosed;
-      const tab = openFile(local, shouldActivate);
+      const tab = openFile(local, shouldActivate, automatic);
       if (tab) tab.autoPreview = false;
       paint();
     }).catch(error => { if (current() && typeof global.petSay === 'function') global.petSay(error.message || '成果暂无法保存到本地'); })
       .finally(() => opening.delete(id));
     return true;
   }
-  function openFile(file, activate) {
-    if (openPendingCloud(file, activate)) return null;
-    if (isTaskPreview(file)) { openTaskPreview(file, activate); return null; }
+  function openFile(file, activate, automatic = false) {
+    if (automatic && !canAutoPreview(file)) return null;
+    if (openPendingCloud(file, activate, automatic)) return null;
+    if (isTaskPreview(file)) { openTaskPreview(file, activate, automatic); return null; }
     if (openTaskOutput(file)) return null;
     const inputTab = WB.tabs.find(tab => tab.inputFile && matchesInput(file, tab.inputFile));
     if (inputTab) {
@@ -756,16 +763,17 @@
         if (next && next.url !== tab.url) { tab.service = next; tab.url = next.url; tab.nativeReady = false; }
       }
     });
-    const firstWeb = latestTurnWebFile(WB.summaryFiles, WB.changes);
-    const firstVideo = WB.summaryFiles.filter((item) => previewKind(item) === 'video' && item.changedInTurn && item.primary !== false && !item.processEvidence)
+    const previewFiles = WB.summaryFiles.filter(canAutoPreview);
+    const firstWeb = latestTurnWebFile(previewFiles, WB.changes);
+    const firstVideo = previewFiles.filter((item) => previewKind(item) === 'video' && item.changedInTurn && item.primary !== false && !item.processEvidence)
       .sort((left, right) => Number(right.at || 0) - Number(left.at || 0))[0];
-    const firstDocument = WB.summaryFiles.filter((item) => previewKind(item) === 'markdown' &&
+    const firstDocument = previewFiles.filter((item) => previewKind(item) === 'markdown' &&
       item.changedInTurn && item.primary !== false && !item.processEvidence)
       .sort((left, right) => Number(right.at || 0) - Number(left.at || 0))[0];
-    const firstImage = WB.summaryFiles.filter((item) => previewKind(item) === 'image' &&
+    const firstImage = previewFiles.filter((item) => previewKind(item) === 'image' &&
       item.changedInTurn && item.primary !== false && !item.processEvidence)
       .sort((left, right) => Number(right.at || 0) - Number(left.at || 0))[0];
-    const explicitImage = selection.images.filter(item => item.changedInTurn)
+    const explicitImage = selection.images.filter(item => canAutoPreview(item) && item.changedInTurn)
       .sort((left, right) => Number(right.at || 0) - Number(left.at || 0))[0];
     const firstPreview = firstWeb || firstVideo || firstDocument || firstImage;
     /*
@@ -787,11 +795,10 @@
       if (kind === 'markdown') return 2;
       if (kind === 'image') return 3;
       if (kind === 'pdf') return 4;
-      if (['document', 'presentation', 'spreadsheet', 'archive'].includes(String(file?.kind || ''))) return 5;
       return 99;
     };
     const firstDelivery = deliveryFiles
-      .filter(file => deliveryRank(file) < 99)
+      .filter(file => canAutoPreview(file) && deliveryRank(file) < 99)
       .sort((left, right) => deliveryRank(left) - deliveryRank(right) ||
         Number(right.at || 0) - Number(left.at || 0))[0];
     const live = WB.services.find((item) => item.url && !/失败|停止|failed|stopped/i.test(item.stateSource || item.state || ''));
@@ -814,7 +821,7 @@
       const active = tabById(WB.active);
       const activate = !active || active.autoPreview === true;
       WB.autoPreviewed = true; WB.autoPreviewKey = candidate.key;
-      const tab = candidate.kind === 'service' ? openService(candidate.item, activate) : openFile(candidate.item, activate);
+      const tab = candidate.kind === 'service' ? openService(candidate.item, activate) : openFile(candidate.item, activate, true);
       if (tab && activate) tab.autoPreview = true;
     }
     paint();

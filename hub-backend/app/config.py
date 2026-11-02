@@ -20,6 +20,13 @@ class Settings(BaseSettings):
 
     # Default to SQLite for local development; configure an async PostgreSQL URL for shared environments.
     database_url: str = "sqlite+aiosqlite:///./soduwork_hub.db"
+    # Independently provisioned PostgreSQL database, never the Hub business DB.
+    # Empty disables cloud app storage without affecting standalone apps.
+    jiyong_database_url: str = ""
+    jiyong_asset_dir: str = ""
+    jiyong_max_spaces_per_user: int = Field(default=100, ge=1, le=10000)
+    jiyong_max_records_per_space: int = Field(default=100000, ge=1)
+    jiyong_max_asset_bytes_per_space: int = Field(default=268435456, ge=8388608)
     # SQLite is reserved for local development. Customer environments opt into
     # explicit production guardrails with SODUWORK_ENV=production.
     soduwork_env: str = "development"

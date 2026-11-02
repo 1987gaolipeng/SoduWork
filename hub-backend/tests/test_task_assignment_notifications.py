@@ -59,6 +59,8 @@ class TaskAssignmentNotificationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0]["taskId"], result["task"]["id"])
         self.assertEqual(rows[0]["status"], "accepted")
         self.assertIsNone(rows[0]["deliveredAt"])
+        self.assertEqual(rows[0]["textMessage"]["key"], "notification.task_assignment")
+        self.assertEqual(rows[0]["textMessage"]["params"]["taskId"], result["task"]["id"])
         self.assertTrue(retried["reused"])
         self.assertFalse([call for call in self.publish.await_args_list
                           if call.args[1]["type"] == "notice"], "save must not wait for delivery")
@@ -69,6 +71,8 @@ class TaskAssignmentNotificationTests(unittest.IsolatedAsyncioTestCase):
         notices = [(call.args[0], call.args[1]) for call in self.publish.await_args_list if call.args[1]["type"] == "notice"]
         self.assertEqual({cid for cid, event in notices}, {"r1", "r2"})
         self.assertTrue(all(event["serverMessageId"] == rows[0]["id"] for cid, event in notices))
+        self.assertTrue(all(event["textMessage"]["key"] == "notification.task_assignment"
+                            for _cid, event in notices))
 
     async def test_online_socket_does_not_claim_recipient_has_persisted_message(self):
         with patch.object(realtime.hub, "is_online", return_value=True):

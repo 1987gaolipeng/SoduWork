@@ -5,7 +5,8 @@ from . import agent_execution_options, ai_exec, ai_exec_route, model_catalog
 
 
 async def prepare(session, client, ctx: dict, assignee: dict,
-                  model: str = "", reasoning_effort: str = "") -> tuple[dict, dict]:
+                  model: str = "", reasoning_effort: str = "",
+                  credential_client=None) -> tuple[dict, dict]:
     cli = ai_exec_route.cli_of(str((assignee or {}).get("id") or ""))
     cli = cli or str((assignee or {}).get("cli") or "").strip().lower()
     if not cli:
@@ -14,10 +15,15 @@ async def prepare(session, client, ctx: dict, assignee: dict,
     requested = str(model or "").strip()
     native = agent_execution_options.runtime_options(kind, requested, reasoning_effort)
     if kind in agent_execution_options.GATEWAY_MODEL_KINDS:
-        wanted = requested or model_catalog.agent_model(client, cli)
+        # A conversation may be reopened from another device.  The durable
+        # handoff owns the original account/device credential scope; resolve
+        # it afresh for this dispatch instead of relying on the current
+        # device's in-memory or already-scrubbed configuration.
+        credential_owner = credential_client or client
+        wanted = requested or model_catalog.agent_model(credential_owner, cli)
         # Explicit and saved Agent choices must not silently become another model
         # when their provider/key is removed. resolve() already enforces that rule.
-        llm = await model_catalog.resolve(session, client, wanted)
+        llm = await model_catalog.resolve(session, credential_owner, wanted)
         if not llm:
             if wanted:
                 raise ValueError("模型「%s」当前不可用，请重新选择可用模型" % wanted)

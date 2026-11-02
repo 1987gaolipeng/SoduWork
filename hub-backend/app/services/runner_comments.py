@@ -6,7 +6,18 @@ import uuid
 from . import ai_local, runner_admission
 
 
-async def comment(machine, m, read_local_files):
+def _duplicate(machine, ref, turn_id, message):
+    previous = machine._admission.get("comment:" + turn_id)
+    if previous is None:
+        return None
+    expected = previous.request_digest or (runner_admission.comment_digest(previous.ref, previous.payload)
+                                           if previous.payload is not None else "")
+    if previous.ref != ref or (expected and expected != runner_admission.comment_digest(ref, message)):
+        return {"ok": False, "code": "MESSAGE_ID_CONFLICT", "error": "消息编号已用于其他内容或执行选择"}
+    return {"ok": True, "data": machine._admission.receipt(previous, duplicate=True)}
+
+
+async def comment(machine, m, read_local_files, read_packet=None, drop_transfer=None):
     from app.services import local_stream
     ref = str(m.get("ref") or "")
     if not ref:
@@ -19,17 +30,19 @@ async def comment(machine, m, read_local_files):
         m["turnId"] = turn_id
     selected = None
     if m.get("executionSelection") is not None:
+        from . import execution_selection
+        try:
+            m = {**m, "executionSelection": execution_selection.normalize(m["executionSelection"])}
+        except execution_selection.SelectionError as exc:
+            return {"ok": False, "code": getattr(exc, "code", "EXECUTION_SELECTION_INVALID"), "error": str(exc)}
+    if not m.get("_admitted"):
+        previous = _duplicate(machine, ref, turn_id, m)
+        if previous is not None:
+            return previous
+    if m.get("executionSelection") is not None:
         from . import execution_selection, runner_turn_selection
         try:
             raw = execution_selection.normalize(m["executionSelection"])
-            previous = machine._admission.get("comment:" + turn_id)
-            if previous and not m.get("_admitted"):
-                original = (previous.payload or {}).get("executionSelection")
-                if raw != original or str((previous.payload or {}).get("text") or "") != str(m.get("text") or ""):
-                    raise execution_selection.SelectionError("消息编号已用于其他内容或执行选择")
-                return {"ok": True, "data": {**machine._admission.receipt(previous, duplicate=True),
-                    "acceptedSelection": (previous.payload or {}).get("_acceptedSelection") or raw,
-                    "acceptedSelectionRevision": previous.sequence}}
             selected = await asyncio.to_thread(runner_turn_selection.validate, ref, raw, m.get("cfg"))
             from . import local_base
             with local_base._LOCK:
@@ -41,6 +54,11 @@ async def comment(machine, m, read_local_files):
         except (execution_selection.SelectionError, ValueError) as exc:
             return {"ok": False, "code": getattr(exc, "code", "EXECUTION_SELECTION_INVALID"), "error": str(exc)}
     if not m.get("_admitted"):
+        # Selection validation awaits native state. Another request may have
+        # admitted this business ID during that await, including different text.
+        previous = _duplicate(machine, ref, turn_id, m)
+        if previous is not None:
+            return previous
         result = await machine._admit(m, key="comment:" + turn_id, ref=ref,
             category=runner_admission.INTERACTIVE, operation="comment")
         if selected and result.get("ok"):
@@ -51,6 +69,22 @@ async def comment(machine, m, read_local_files):
     user_text = str(m.get("text") or "")
     text = str(m.get("promptText") or user_text)
     staged = []
+    packet = m.get("files") or {}
+    if packet.get("items"):
+        if read_packet is None:
+            return {"ok": False, "error": "执行机不支持本轮材料"}
+        try:
+            files = await asyncio.to_thread(read_packet, packet, "本轮补充文件")
+            inputs = [(meta["filename"], data, meta.get("contentType") or "application/octet-stream") for meta, data in files]
+            staged = await asyncio.to_thread(ai_local._stage_inputs, ref, inputs)
+            if len(staged) != len(inputs):
+                return {"ok": False, "error": "本轮文件未完整保存，没有继续执行"}
+            text += "\n\n【本轮补充文件】\n" + "\n".join("- %s：%s" % (item["name"], item["path"]) for item in staged)
+        except (ValueError, OSError) as exc:
+            return {"ok": False, "error": str(exc)}
+        finally:
+            if drop_transfer:
+                await drop_transfer(str(packet.get("transfer") or ""))
     if m.get("_localParent") and m.get("localFiles"):
         files = read_local_files(m.get("localFiles") or [], "\u8865\u5145\u9644\u4ef6")
         inputs = [(str(meta.get("filename") or "\u9644\u4ef6"), data,

@@ -21,6 +21,36 @@ def name_key(value):
     return unicodedata.normalize("NFC", str(value or "")).strip().lower()
 
 
+def _parts(value):
+    value = str(value or "")
+    match = re.search(r"(\.[^./\\]+)$", value)
+    # Treat a leading dot as part of a dotfile name, matching the client
+    # naming rule (`.env` -> `.env（1）`) instead of inventing `（1）.env`.
+    return (value[:-len(match.group(1))], match.group(1)) if match and match.start() > 0 else (value, "")
+
+
+async def next_available(session, owner, backend, folder_id, title, filename):
+    """Return a collision-free (title, filename) pair for a newly saved file."""
+    rows = await session.execute(select(LibraryItem.title, LibraryItem.filename).where(
+        LibraryItem.owner_key == owner, LibraryItem.backend == backend,
+        LibraryItem.folder_id == folder_id, LibraryItem.deleted_at.is_(None)))
+    folders = await session.execute(select(LibraryFolder.name).where(
+        LibraryFolder.owner_key == owner, LibraryFolder.backend == backend,
+        LibraryFolder.parent_id == folder_id))
+    occupied = {name_key(display_name(row.title, row.filename)) for row in rows}
+    occupied.update(name_key(row.name) for row in folders)
+    candidate = display_name(title, filename)
+    if name_key(candidate) not in occupied:
+        return title, filename
+    stem, extension = _parts(candidate)
+    for number in range(1, 100000):
+        candidate = f"{stem}（{number}）{extension}"
+        if name_key(candidate) not in occupied:
+            return candidate[:-len(extension)] if extension else candidate, candidate
+    raise HTTPException(409, {"code": "LIBRARY_NAME_CONFLICT",
+                              "message": "当前文件夹下可用文件名已耗尽，请整理后重试"})
+
+
 async def ensure_available(session, owner, backend, folder_id, title, filename, exclude_id=None):
     # Updates already hold a conversation/item lock. PostgreSQL must also use
     # the upload namespace lock; SQLite callers already hold its writer lock.

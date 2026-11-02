@@ -45,6 +45,13 @@ function observe(wc){
 }
 app.whenReady().then(async()=>{
   const body=JSON.parse(fs.readFileSync(path.join(folder,'candidate.json'),'utf8'));
+  const cloud=body.jiyong?.storage?.location==='cloud';
+  if(cloud){
+    // Explicit isolated transport substitute, never a production cloud test.
+    body.jiyong.storage={location:'local'};
+    report.cloudBusinessTested=false;
+    check('cloud-contract','云端声明与初始化已校验；首屏数据使用隔离本地替身，真实云端读写尚未验收',true,{evidence:'isolated-local-substitute'});
+  }
   const personal=require('./personal-plugins');
   require('./app-settings-store.cjs').configure({app,safeStorage:electron.safeStorage,ownerOf:()=>'isolated/app-preflight'});
   report.stage='install';

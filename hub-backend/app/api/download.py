@@ -24,7 +24,7 @@ router = APIRouter(prefix="/api/v1/download", tags=["download"])
 # hub-backend/downloads/
 _DIR = Path(__file__).resolve().parent.parent.parent / "downloads"
 _DISPLAY_NAME = "SoduWork-Setup.exe"
-_LEGACY_FILENAME = "hezi.exe"
+_LEGACY_FILENAME = "soduwork.exe"
 _VERSIONED_PACKAGE = re.compile(r"^SoduWork-(\d+)\.(\d+)\.(\d+)-Setup\.exe$")
 
 # Public Linux downloads from the release channel.

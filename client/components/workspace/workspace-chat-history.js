@@ -26,7 +26,35 @@
     return CHAT_STATE[normalized] ? normalized : 'completed';
   }
 
-  function _chatAt(item) { return Number(item && (item.at || item.updatedAt || item.createdAt) || 0); }
+  function _chatAt(item) {
+    const value = item && (item.at || item.updatedAt || item.createdAt);
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : Date.parse(value) || 0;
+  }
+  function _syncedCopy(row, canonical) {
+    // Opening a linked task can publish a partial row before runtime presence.
+    // Use aliases resolved by the authenticated history source even when that
+    // partial row does not yet carry its cloud/projection flags.
+    if (row?.id && row.id !== canonical?.id && !row.archived && !canonical?.archived &&
+        canonical?.cloud === true && canonical.historyAliasIds?.includes(row.id)) return true;
+    // Directory presence may arrive before or after the replayable local
+    // receipt. Collapse only exact Hub task aliases, never matching titles.
+    if (row?.cloud === true && row.remoteProjection === true && !row.archived &&
+        canonical?.cloud === true && canonical.remoteProjection !== true &&
+        !canonical.archived && canonical.taskId && row.taskId === canonical.taskId) return true;
+    if (!row?.accountConversation || row.archived || !row.sourceSessionId) return false;
+    if (!canonical?.id || canonical.accountConversation || canonical.archived || canonical.pending) return false;
+    // An explicitly foreign source must remain independently reachable even
+    // when its local session ID happens to match a native session here.
+    if (!canonical.cloud && row.accountCanSend === false) return false;
+    // Exact source identity joins a sync projection to its native or cloud session.
+    // Titles and task IDs alone cannot identify a conversation.
+    return row.sourceSessionId === canonical.id || (canonical.cloud === true && canonical.taskId &&
+      row.sourceSessionId === 'cloud-task:' + canonical.taskId);
+  }
+  function _withoutSyncedCopies(rows, available = rows) {
+    return rows.filter(row => !available.some(canonical => _syncedCopy(row, canonical)));
+  }
   function _chatUiKey(item, previous) {
     const kept = String(previous && previous._uiKey || item && item._uiKey || '');
     if (kept) return kept;
@@ -55,7 +83,17 @@
   }
   function _reconcileChats(current, items, now) {
     const clock = Number(now || Date.now());
-    const incoming = (items || []).filter((item) => item && item.id);
+    const available = [...(current || []), ...(items || [])];
+    const retained = new Set((current || []).filter(row =>
+      !available.some(canonical => _syncedCopy(row, canonical))).map(row => row.id));
+    current = (current || []).flatMap(row => {
+      const canonical = available.find(candidate => _syncedCopy(row, candidate));
+      if (!canonical) return [row];
+      if (retained.has(canonical.id)) return [];
+      retained.add(canonical.id);
+      return [_withChatUiKey(canonical, row)];
+    });
+    const incoming = _withoutSyncedCopies((items || []).filter((item) => item && item.id), available);
     const used = new Set();
     const stable = [];
     (current || []).forEach((row) => {
@@ -102,7 +140,9 @@
   }
   function _upsertChatItems(current, item) {
     if (!item) return (current || []).slice(0, MAX_CHAT_ITEMS);
-    const rows = (current || []).slice();
+    const previous = current || [];
+    if (previous.some(row => _syncedCopy(item, row))) return _withoutSyncedCopies(previous);
+    const rows = _withoutSyncedCopies(previous, [...previous, item]);
     let index = rows.findIndex((row) => {
       const direct = String(item.id || '') && String(row && row.id || '') === String(item.id);
       const local = String(item.localId || '') &&
@@ -110,7 +150,13 @@
       return direct || local;
     });
     if (index < 0 && item.id) index = rows.findIndex((row) => _sameDraft(row, item));
-    if (index < 0) return [_withChatUiKey(item), ...rows].slice(0, MAX_CHAT_ITEMS);
+    if (index < 0) {
+      // Replace an already-visible sync alias in place when its source entry
+      // arrives; receiving metadata must not look like a newly created chat.
+      const alias = previous.findIndex(row => _syncedCopy(row, item));
+      rows.splice(alias < 0 ? 0 : Math.min(alias, rows.length), 0, _withChatUiKey(item, previous[alias]));
+      return rows.slice(0, MAX_CHAT_ITEMS);
+    }
     rows[index] = rows[index] && rows[index].pending && item.id
       ? _settleDraft(rows[index], item)
       : _withChatUiKey({ ...rows[index], ...item }, rows[index]);

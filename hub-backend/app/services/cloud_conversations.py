@@ -12,6 +12,7 @@ import json
 import re
 import unicodedata
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
@@ -29,7 +30,7 @@ MAX_TOTAL_BYTES = 96 * 1024 * 1024
 
 def clean_options(raw, has_files=False):
     if not isinstance(raw, dict) or set(raw) - {
-        "sessionId", "agentId", "model", "title", "text", "userText", "inputPreparation", "requiredSkills", "targetRunnerId"
+        "sessionId", "agentId", "model", "title", "text", "userText", "inputPreparation", "requiredSkills", "targetRunnerId", "targetRunnerKind", "acceptance"
     }:
         raise HTTPException(400, "云端会话选项不正确；不能指定本地目录、执行机或额外执行配置")
     out = {}
@@ -70,6 +71,13 @@ def clean_options(raw, has_files=False):
     if not isinstance(target_runner_id, str) or len(target_runner_id) > 80 or (target_runner_id and not re.fullmatch(r"[A-Za-z0-9._:-]{1,80}", target_runner_id)):
         raise HTTPException(400, "移动端目标执行机标识不正确")
     out["targetRunnerId"] = target_runner_id.strip()
+    target_runner_kind = raw.get("targetRunnerKind", "")
+    if not isinstance(target_runner_kind, str) or target_runner_kind not in handoffs.RUNNER_KINDS | {""}:
+        raise HTTPException(400, "目标执行机类型不正确")
+    out["targetRunnerKind"] = target_runner_kind.strip()
+    if raw.get("acceptance") is not None:
+        from . import cloud_acceptance
+        out["acceptance"] = cloud_acceptance.clean(raw["acceptance"])
     return out
 
 
@@ -128,6 +136,11 @@ async def create(session, client, request_id, raw, uploads):
     old = await session.get(Handoff, row_id)
     if old:
         return await _resume(session, client, old, digest)
+    if requested.get("acceptance"):
+        from . import cloud_acceptance
+        await cloud_acceptance.validate(session, client, requested["acceptance"])
+        if uploads:
+            raise HTTPException(400, "自动验收只读取固定交付材料，请在验收前补充所需证据")
     source = {"entryKind": "cloud", "sessionId": requested["sessionId"],
               "adapterId": requested["agentId"], "modelName": requested["model"],
               "title": requested["title"] or requested["text"][:80], "goal": ""}
@@ -138,10 +151,15 @@ async def create(session, client, request_id, raw, uploads):
     if requested["targetRunnerId"]:
         available = [item for item in roster
                      if item.get("runnerId") == requested["targetRunnerId"]
-                     and item.get("agentId") == requested["agentId"]]
+                     and item.get("agentId") == requested["agentId"]
+                     and (not requested["targetRunnerKind"] or
+                          item.get("runnerKind") == requested["targetRunnerKind"])]
     else:
         available = handoffs._automatic_targets(roster, requested["agentId"],
             source, requested["requiredSkills"])
+        if requested["targetRunnerKind"]:
+            available = [item for item in available
+                         if item.get("runnerKind") == requested["targetRunnerKind"]]
     if not available:
         raise HTTPException(409, "暂时没有匹配 Agent、技能且可接单的云端环境，请在「我的 → 云端环境」检查连接、底座和负载")
     instruction = requested["text"] or "请根据本轮附件和用户说明理解任务后再处理。"
@@ -149,13 +167,17 @@ async def create(session, client, request_id, raw, uploads):
                "model": requested["model"], "instruction": instruction,
                "userText": requested["userText"], "inputPreparation": requested["inputPreparation"],
                "requiredSkills": requested["requiredSkills"], "personalPlugins": [],
-               **({"targetRunnerId": requested["targetRunnerId"]} if requested["targetRunnerId"] else {})}
+               **({"targetRunnerId": requested["targetRunnerId"]} if requested["targetRunnerId"] else {}),
+               **({"targetRunnerKind": requested["targetRunnerKind"]}
+                  if requested["targetRunnerKind"] else {})}
     picked = await handoffs.destination(session, client, options, source)
     # Keep the runner's reachable host alongside the friendly display name.
     # Cloud website previews may report localhost:<port>; the desktop must
     # rewrite that loopback to the selected Runner host before opening it.
     options["targetSnapshot"] = {key: str(picked.get(key) or "") for key in
-                                 ("name", "runnerName", "agentId", "modelMode", "runnerId", "host")}
+                                 ("name", "runnerName", "agentId", "modelMode", "runnerId", "host", "runnerKind")}
+    if requested.get("acceptance"):
+        options["acceptance"] = requested["acceptance"]
     tid = str(uuid.uuid5(handoffs._NS, row_id + ":task"))
     objects, attachments, manifest = [], [], []
     committing = False
@@ -174,8 +196,10 @@ async def create(session, client, request_id, raw, uploads):
         options["inputs"] = manifest
         row = Handoff(id=row_id, owner_client_id=client.id, owner_user_id=user.id,
             transfer_id=request_id, task_id=tid, sha256="", request_hash=digest,
-            storage_key="", backend="", options=options, source=source)
-        task = Task(id=tid, owner_client_id=client.id, title=source["title"], note=instruction,
+            storage_key="", backend="", options=options, source=source,
+            submitted_at=datetime.now(timezone.utc))
+        task = Task(id=tid, owner_client_id=client.id, owner_user_id=user.id,
+            title=source["title"], note=instruction,
             kind="task", status="todo", origin="cloud-conversation", created_by=user.id,
             created_by_name=user.display_name or user.username,
             work_routing={"selectedStrategy": "direct", "requiredSkills": requested["requiredSkills"],
@@ -225,6 +249,9 @@ async def dispatch_inputs(session, row, extra):
     user_text = row.options.get("userText", row.options["instruction"])
     prep = row.options.get("inputPreparation")
     brief = row.options["instruction"]
+    if row.options.get("acceptance"):
+        from . import cloud_acceptance
+        files, brief = await cloud_acceptance.inputs(session, row)
     if prep:
         brief = brief + "\n\n【附件理解约束】先区分步骤、处理对象、模板和参考；用户原始文字为空时，不得把这段兜底说明当成用户目标。"
     return files, {"dispatchId": handoffs.dispatch_id(row), "brief": brief,

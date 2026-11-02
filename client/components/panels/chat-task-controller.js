@@ -372,6 +372,13 @@
         entry.repoId = String(task.repoId || (task.repo && task.repo.id) || entry.repoId || '').trim();
         entry.queueMode = _collabQueueMode(entry, task);
         const receipt = (task.workRouting || {}).conversationTurn;
+        entry.executionElsewhere = Boolean(receipt?.conversationId && receipt.conversationId !== ctx._sessionId);
+        if (entry.executionElsewhere) {
+          entry.nativeTurn = false;
+          entry.controlledTurn = false;
+          entry.controlledExecution = null;
+          entry.controller?.clearExecution?.();
+        }
         if (receipt && receipt.conversationId === ctx._sessionId) {
           entry.nativeTurn = true;
           entry.controlledTurn = receipt.executor && receipt.executor !== 'native';
@@ -412,7 +419,7 @@
             ctx._render();
           }).catch(() => {});
         }
-        if (!entry.nativeTurn) _loadCollabRun(id);
+        if (!entry.nativeTurn && !entry.executionElsewhere) _loadCollabRun(id);
       }
     } catch (error) {
       // An explicit single-task response can stop polling; a missing list row cannot.
@@ -427,10 +434,13 @@
     const api = global.SoduWorkAPI;
     if (!entry || entry.unavailable || !api || typeof api.aiSession !== 'function' || !entry.controller) return;
     const conversationId = ctx._sessionId;
+    const ownsExecution = () => !entry.task?.workRouting?.conversationTurn?.conversationId ||
+      entry.task.workRouting.conversationTurn.conversationId === conversationId;
+    if (!ownsExecution()) return;
     try {
       const current = entry.controller.snapshot ? entry.controller.snapshot() : {};
       let run = await api.aiSession(id, current.eventCursor || 0);
-      if (conversationId !== ctx._sessionId || ctx._collabTasks.get(id) !== entry) return;
+      if (conversationId !== ctx._sessionId || ctx._collabTasks.get(id) !== entry || !ownsExecution()) return;
       if (!run || run.ok === false) {
         if ([403, 404, 410].includes(Number(run?.httpStatus))) entry.unavailable = true;
         return;
@@ -438,10 +448,13 @@
       const runId = run.id || run.ref || run.workflowRunId;
       if (current.runId && runId && current.runId !== runId && current.eventCursor) {
         run = await api.aiSession(id, 0);
-        if (!run || run.ok === false || conversationId !== ctx._sessionId || ctx._collabTasks.get(id) !== entry) return;
+        if (!run || run.ok === false || conversationId !== ctx._sessionId || ctx._collabTasks.get(id) !== entry || !ownsExecution()) return;
       }
+      if (run.conversationId && run.conversationId !== conversationId) return;
       entry.controller.setExecution(run, run.id || run.ref || run.workflowRunId);
       if (Array.isArray(run.items)) run.items.slice().sort((a,b) => Number(a.seq || 0)-Number(b.seq || 0)).forEach((item) => {
+        const owner = item.conversationId || item.conversation_id || item.scope?.conversationId || item.eventScope?.conversationId;
+        if (owner && owner !== conversationId) return;
         entry.controller.applyEvent(Object.assign({}, item, {
           conversationId: ctx._sessionId, taskId: id, runId: run.id || run.ref,
         }));
@@ -485,7 +498,7 @@
     ctx._collabPollTimer = setTimeout(async () => {
       try {
         const entries = _collabEntries().filter(entry => !entry.unavailable && !_collabTerminal.has(_collabEntryStatus(entry)));
-        await Promise.all(entries.map(entry => entry.nativeTurn ? _loadCollabTask(entry.taskId) : _loadCollabRun(entry.taskId)));
+        await Promise.all(entries.map(entry => entry.nativeTurn || entry.executionElsewhere ? _loadCollabTask(entry.taskId) : _loadCollabRun(entry.taskId)));
       } finally {
         if (epoch === ctx._viewEpoch) { ctx._collabPollTimer = null; _scheduleCollabPoll(); }
       }
@@ -686,7 +699,7 @@
   async function _openTask(taskId, title, options) {
     const id = String(taskId || '').trim();
     if (!id) return false;
-    const opts = options || {};
+    let opts = options || {};
     const seq = ++ctx._taskOpenSeq;
     let current = _viewGuard();
     let taskSnapshot = opts.task && typeof opts.task === 'object' ? opts.task : null;
@@ -729,6 +742,13 @@
       (mapped && mapped.conversationId) || '');
     if (!opts.forceNew && ctx._ref && ctx._collaborationTaskId === id && ctx._snap && !_taskSnapshotIsStale() &&
         (!exactChatId || exactChatId === ctx._sessionId)) {
+      // Restored collaboration cards are UI metadata. Confirm the native binding
+      // before enabling a review turn, even when this requirement is already visible.
+      if (opts.acceptanceExecutionSession === true || opts.preferredConversation === true) {
+        const bound = await _persistTaskBinding(id, label);
+        if (seq !== ctx._taskOpenSeq || !current()) return false;
+        if (!bound) { ctx._taskOpenPending = false; ctx._render(); return false; }
+      }
       _bindCollaborationTask(id, label, { persist: false, taskMeta: taskSnapshot || {},
         projectId: taskProjectId, repoId: taskRepoId, queueMode });
       _activateAcceptanceContext(opts, taskSnapshot, label);
@@ -781,7 +801,11 @@
     // as adding it to an ordinary chat: open that archive, then use bindTask.
     // A task created here must retain the saved-receipt/native validation path.
     const draftId = String(ctx._sessionId || '');
-    let bindAfterDraftOpen = false;
+    // A verified creation archive may contain ordinary messages without a task
+    // binding. Open it normally, then use the existing authoritative bindTask
+    // operation; do not replace that conversation on a binding mismatch.
+    let bindAfterDraftOpen = Boolean(mappedChatId && !taskSnapshot?.workRouting?.conversationTurn?.conversationId &&
+      (opts.preferredConversation === true || opts.acceptanceExecutionSession === true));
     if ((opts.source === 'task-add' || opts.reuseCurrent === true) && !opts.navigation && !opts.forceNew &&
         !opts.acceptanceSession && !opts.acceptanceExecutionSession && !opts.reworkSession &&
         !ctx._ref && ctx._snap?.workOnly === true && draftId && (!mappedChatId || mappedChatId === draftId) &&
@@ -844,8 +868,12 @@
       !opts.acceptanceSession && !opts.acceptanceExecutionSession && !opts.reworkSession &&
       taskSnapshot?.status && taskSnapshot.status !== 'todo' &&
       ctx._snap?.sessionNotFound === true;
+    const recoverMissingPreferred = !opened && opts.preferredConversation === true &&
+      ctx._snap?.sessionNotFound === true;
+    const recoverMissingReview = !opened && opts.acceptanceExecutionSession === true &&
+      ctx._snap?.sessionNotFound === true;
     if (!opened && seq === ctx._taskOpenSeq && (recoverDeletedRework || recoverMissingDraft ||
-        recoverWeakBinding || recoverMissingExecution)) {
+        recoverWeakBinding || recoverMissingExecution || recoverMissingPreferred || recoverMissingReview)) {
       if (recoverWeakBinding && global.ChatCollaborationStore) {
         ChatCollaborationStore.removeTask(mappedChatId, id);
       }
@@ -857,6 +885,12 @@
       // task context, so its old workspace/model cannot leak into the new chat.
       ctx.reset();
       current = _viewGuard(true);
+      if (recoverMissingReview) {
+        openingOptions.acceptanceSession = true;
+        openingOptions.acceptanceExecutionSession = false;
+        openingOptions.acceptanceFallbackFrom = mappedChatId;
+        opts = {...opts, acceptanceSession:true, acceptanceExecutionSession:false};
+      }
       ctx._sessionOptions = { ...openingOptions, ...(recoverDeletedRework ? {reworkSession: true} : {}) };
       ctx._taskOpenPending = true;
       opened = await ctx._ensure();
@@ -882,7 +916,7 @@
     }
     _bindCollaborationTask(id, label, { persist: false, taskMeta: taskSnapshot || {},
       projectId: taskProjectId, repoId: taskRepoId, queueMode });
-    if (!bindAfterDraftOpen && !ctx._boundFromServer) {
+    if (!bindAfterDraftOpen && (!ctx._boundFromServer || opts.acceptanceExecutionSession === true)) {
       const bound = await _persistTaskBinding(id, label);
       if (seq !== ctx._taskOpenSeq || !current()) return false;
       if (!bound) { ctx._taskOpenPending = false; ctx._render(); return false; }

@@ -118,8 +118,12 @@
         assignment = item.assignment;
       }
       const direct = !approvalId;
-      const reuseExecutionSession = sameExecutorReviewer(latest, assignment, direct, capability) &&
-        Boolean(latest?.workRouting?.conversationTurn?.conversationId);
+      const samePerson = sameExecutorReviewer(latest, assignment, direct, capability);
+      const preferred = samePerson && global.TaskConversationNavigation?.preferredConversation
+        ? await global.TaskConversationNavigation.preferredConversation(latest) : '';
+      assertCurrent();
+      const originalId = preferred || (samePerson ? latest?.workRouting?.conversationTurn?.conversationId : '');
+      const reuseExecutionSession = Boolean(originalId);
       const opened = await global.openTaskConversation(id, latest?.title || task.title || '', {
         /* acceptanceSession itself creates a clean session on the first open.
            Keeping forceNew false is essential afterwards: navigation can reuse
@@ -131,7 +135,7 @@
          * creates a separate review conversation if the original is unavailable.
          */
         acceptanceSession: !reuseExecutionSession,
-        ...(reuseExecutionSession ? {reuseExecutionSession: true, acceptanceExecutionSession: true} : {}),
+        ...(reuseExecutionSession ? {chatId: originalId, reuseExecutionSession: true, acceptanceExecutionSession: true} : {}),
         acceptanceMode: mode, approvalId,
         ...(Array.isArray(opts.acceptanceAttachmentIds) && opts.acceptanceAttachmentIds.length
           ? {acceptanceAttachmentIds: [...new Set(opts.acceptanceAttachmentIds.map(String))].slice(0, 60)} : {}),
@@ -228,7 +232,7 @@
     return '<div class="tfd-inline-approval-gate is-blocked"><span>还需补充证据</span>' +
       (blockers.length ? '<small>' + esc(blockers.join('；')) + '</small>' : '') +
       (needsImage
-        ? '<label class="tfd-inline-upload"><input type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-tfd-approval-file hidden><span>上传截图</span></label>'
+        ? '<label class="tfd-inline-upload"><input type="file" data-tfd-approval-file hidden><span>上传截图</span></label>'
         /*
          * Explain evidence gaps that only the executor can resolve instead of showing unusable
          * review buttons.
@@ -349,13 +353,14 @@
       element.setAttribute?.('aria-hidden', String(!visible));
     });
   }
-  // Every acceptance choice is a one-shot handoff. Close the local card as
-  // soon as the handoff is accepted; the following refresh will render the
-  // authoritative task state. This prevents a stale card from inviting a
-  // second decision while the network refresh is still in flight.
-  function dismissAcceptanceCard(block, state) {
+  // The chat surface replaces successful choices with read-only receipts.
+  // Other surfaces dismiss them and refresh from the authoritative task state.
+  function dismissAcceptanceCard(block, state, outcome) {
     if (!block) return;
     block.dataset.acceptanceClosed = 'true';
+    try {
+      if (state?.opts?.onAcceptanceClosed?.(block, outcome) === true) return;
+    } catch (_) { /* A presentation failure must not undo a submitted choice. */ }
     block.hidden = true;
     const host = block.closest?.('[data-task-confirmation], [data-rq-approval-card]');
     if (typeof block.remove === 'function') block.remove(); else block.hidden = true;
@@ -365,7 +370,6 @@
         if (typeof host.remove === 'function') host.remove(); else host.hidden = true;
       }
     }
-    try { state?.opts?.onAcceptanceClosed?.(block); } catch (_) { /* UI close must not undo a submitted choice */ }
   }
   function syncActions(block, state) {
     const id = block.getAttribute('data-tfd-approval-id');
@@ -482,7 +486,7 @@
         : await global.SoduWorkAPI.decideApproval(id, decision, text, undefined, reworkAttachmentIds);
       if (!result || result.ok === false) throw new Error('审批未被接受');
       block.dataset.approvalSubmitted = 'true';
-      dismissAcceptanceCard(block, state);
+      dismissAcceptanceCard(block, state, { decision, note: text, status: result.request?.status || '' });
       const request = result.request || {};
       const blocking = block.getAttribute('data-tfd-blocking') !== 'false';
       const rework = (result || {}).rework || {};
@@ -525,7 +529,9 @@
         acceptanceMode: button.getAttribute('data-tfd-acceptance-session') === 'auto' ? 'auto' : 'manual',
         approvalId: id, onOpened: state?.opts?.onAcceptanceOpened,
       });
-      dismissAcceptanceCard(block, state);
+      dismissAcceptanceCard(block, state, {
+        decision: button.getAttribute('data-tfd-acceptance-session') === 'auto' ? 'auto' : 'manual',
+      });
     } catch (error) {
       showError(block, String(error?.message || '验收会话未能打开，请重试'));
     } finally {
@@ -632,6 +638,9 @@
       if (hint) hint.textContent = '暂时无法核对权限与证据，可重试';
       const body = block.querySelector('[data-tfd-proof-body]');
       if (body) body.innerHTML = '<p>证据暂时不可用</p><button type="button" class="tfd-inline-evidence" data-tfd-proof-retry>重新加载</button>';
+      // Keep the recovery control visible after a transient evidence failure.
+      const proof = block.querySelector('.tfd-inline-proof');
+      if (proof) proof.open = true;
     } finally { if (epoch === acceptanceEpoch) syncActions(block, state); }
   }
   function renderProof(block, item) {

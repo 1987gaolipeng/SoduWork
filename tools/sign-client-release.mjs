@@ -96,8 +96,9 @@ async function main() {
   const name = basename(installer);
   const platform = env("SODUWORK_CLIENT_PLATFORM", "win32");
   if (!["win32", "darwin", "linux"].includes(platform)) fail("SODUWORK_CLIENT_PLATFORM must be win32, darwin or linux");
-  /* Accept the SoduWork- prefix and existing SoduWork-/SoduWork- artifact names for compatibility. */
-  const stem = '(?:SoduWork|SoduWork|SoduWork)';
+  /* Accept only the current SoduWork installer prefix. */
+  const stem = 'SoduWork';
+  const stemVersion = '\\d+\\.\\d+\\.\\d+(?:-beta\\.(?:1|[1-9]\\d*))?';
   const patterns = {
     win32: new RegExp(`^${stem}-(${stemVersion})-Setup\\.exe$`),
     darwin: new RegExp(`^${stem}-(${stemVersion})-mac(?:-(x64|arm64))?\\.(dmg|zip)$`),

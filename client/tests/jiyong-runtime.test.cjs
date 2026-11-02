@@ -228,13 +228,14 @@ test('native app automation goes to its own composer, pins host identity, reject
  const composer={id:202,isDestroyed:()=>false,send:(channel,value)=>{assert.equal(channel,'app-composer-automation');envelope=value;}};
  const owner={sender:{id:101,isDestroyed:()=>false,send:()=>assert.fail('must use own composer')}};
  const item={id:'app',appBridge:{appId:'plugin:'+f.installed.pluginId,contributionId:'main',origin:f.binding.origin},composer:{view:{webContents:composer}}};
+ require('../main/work-preview-app-owner.cjs').capture(item, { app: f.app });
  const request={params:{text:'每天9点运行',requestId:'once',context:{characterName:'阿奇',appName:'forged',page:f.binding.origin+'/ui/index.html'}}};
  const response=automate.submit({owner,item,request,deps:{app:f.app,expandComposer:()=>expanded++}});
  while(!envelope)await new Promise(r=>setImmediate(r));
  assert.equal(expanded,1);assert.equal(envelope.params.context.sourceApp.name,f.installed.name);assert.equal(envelope.params.context.sourceApp.characterName,'阿奇');
  assert.equal(automate.finish({id:202},{id:envelope.id,result:{ok:true}}).ok,false);
  assert.equal((await automate.authorize(composer,envelope.id)).ok,true);
- f.setOwner('test/account-b');await assert.rejects(automate.authorize(composer,envelope.id),/变化/);
+ f.setOwner('test/account-b');await assert.rejects(automate.authorize(composer,envelope.id),{code:'APP_ACCOUNT_CHANGED'});
  automate.finish(composer,{id:envelope.id,result:{ok:true,schedule:{id:'created'}}});
  assert.equal((await response).uncertain,true);
 });

@@ -32,7 +32,7 @@ function resumeOptions(options) {
     // native archive was removed or moved. Mark it as resumed so session-open can
     // recover an unavailable saved model from the current default instead of
     // treating the stale selection as a new-chat explicit choice.
-    resumedConversation: true,
+    resumedConversation: true, sessionTitle: segments.title(row),
     modelName: row.active.modelName,
     reasoningEffort: row.active.reasoningEffort ?? options.reasoningEffort,
     accessPolicy: row.accessPolicy, readOnly: row.readOnly, activePluginIds: row.activePluginIds,
@@ -80,7 +80,7 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
       if (record && event.kind !== 'block') {
         const snap = value || raw.snapshot();
         const current = raw.historyRow?.();
-        const next = { ...record, accessPolicy: snap.nextAccessPolicy || snap.accessPolicy || record.accessPolicy,
+        const next = { ...record, title: segments.title(record) || current?.title || '', accessPolicy: snap.nextAccessPolicy || snap.accessPolicy || record.accessPolicy,
           activePluginIds: snap.activePlugins || record.activePluginIds,
           active: { ...record.active, ...descriptor(raw),
             modelName: snap.modelSelection?.name ?? record.active.modelName,
@@ -88,7 +88,7 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
             usedHarnesses: harnesses.merge(record.active.usedHarnesses,
               current?.usedHarnesses || harnesses.fromSnapshot(snap, raw.adapterId)),
             started: record.active.started || Number(current?.count || 0) > 0 } };
-        if (JSON.stringify(next.active) !== JSON.stringify(record.active) ||
+        if (next.title !== record.title || JSON.stringify(next.active) !== JSON.stringify(record.active) ||
             JSON.stringify(next.accessPolicy) !== JSON.stringify(record.accessPolicy) ||
             JSON.stringify(next.activePluginIds) !== JSON.stringify(record.activePluginIds)) {
           record = next;
@@ -133,6 +133,7 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
       if (agentId === 'codex' && !modelName)
         modelName = require('./native-model-catalog').list('codex').models?.[0]?.id || '';
       const nextOptions = { ...options, ref: 'chat-' + crypto.randomUUID(), cwd: raw.cwd, adapterId: agentId,
+        sessionTitle: segments.title(record) || raw.historyRow?.()?.title || '',
         modelName, reasoningEffort: '', resumePath: '', resumeCwd: '', runtimeConversationId: '',
         intent: '', mode: '', goal: '', acceptance: '', accessPolicy: policy,
         activePluginIds: before.activePlugins || [],
@@ -156,7 +157,7 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
       for (const message of historical.messages.slice(prefix.messages.length)) for (const block of message.blocks || [])
         if (block.toolCall?.id && ids.has(block.toolCall.id)) block.toolCall.id = ids.get(block.toolCall.id);
       const nextRecord = { version: 1, id: publicId, owner,
-        title: record?.title || old.historyRow?.()?.title || '', cwd: old.cwd, originAdapter,
+        title: segments.title(record) || old.historyRow?.()?.title || '', cwd: old.cwd, originAdapter,
         at: Date.now(), prefix: historical,
         accessPolicy: policy, readOnly: options.readOnly,
         activePluginIds: before.activePlugins || [],
@@ -209,7 +210,7 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
       return { ...current, id: publicId, ref: publicRef,
         usedHarnesses: harnesses.merge(harnesses.fromRecord(record),
           current?.usedHarnesses || harnesses.fromSnapshot(raw.snapshot(), raw.adapterId)),
-        ...(record?.title ? { title: record.title } : {}), adapterId: raw.adapterId };
+        ...(record ? { title: segments.title(record) || current?.title || '' } : {}), adapterId: raw.adapterId };
     },
     async close() { closed = true; unsub?.(); listeners.clear(); overlays.ui?.memorySubscription?.();
       await switchingCompletion;

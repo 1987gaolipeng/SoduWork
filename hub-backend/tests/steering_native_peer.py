@@ -157,4 +157,4 @@ if __name__ == "__main__":
     for stream in (sys.stdin, sys.stdout, sys.stderr):
         stream.reconfigure(encoding="utf-8", errors="replace")
     agent = sys.argv[1]
-    acp(agent) if agent not in {"pi", "claude", "codex"} else native(agent, sys.argv[2:])
+    acp(agent) if "--acp-fixture" in sys.argv or agent not in {"pi", "claude", "codex"} else native(agent, sys.argv[2:])

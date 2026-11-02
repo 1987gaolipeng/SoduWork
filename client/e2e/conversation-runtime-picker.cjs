@@ -38,8 +38,13 @@ if (typeof electron === 'string') {
     await js('window.switchGate=new Promise(r=>window.releaseSwitch=r);void 0');await click('#nchatRuntime');await click('[data-runtime=qwen]');
     assert.equal(await js('document.querySelector("#nchatRuntime").disabled'),true);
     await js('releaseSwitch();switchGate=null;void 0');await until('state.adapterId==="qwen"');
-    await until('!document.querySelector("#nchatRuntimeMore").hidden');
+    assert.equal(await js('document.querySelector("#nchatRuntimeAvailability").checkVisibility()'),false, 'missing runtimes stay out of the composer toolbar');
+    await click('#nchatRuntime');
+    await until('!document.querySelector("#nchatRuntimeAvailability").hidden');
+    assert.equal(await js('document.querySelector(".nchat-runtime-pop").contains(document.querySelector("#nchatRuntimeAvailability"))'),true);
+    assert.equal(await js('document.querySelector("#nchatRuntimeAvailability").checkVisibility()'),true);
     assert.equal(await js('document.querySelectorAll("#nchatRuntimeMissing [data-runtime-missing]").length'),1);
+    assert.equal(await js('document.querySelector("#nchatRuntimeMore").hidden'),false);
     await click('#nchatRuntimeMore');
     assert.equal(await js('agentManagementOpened'),1);
     for(const width of [390,1000]) {

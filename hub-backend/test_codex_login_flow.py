@@ -38,6 +38,117 @@ class CodexLoginFlowTests(unittest.TestCase):
         self.assertFalse(result[0])
         self.assertEqual(updates[-1]["state"], "failed")
         self.assertNotIn("userCode", str(updates))
+        self.assertEqual(updates[-1]["reason"], "status_unavailable")
+
+    def test_first_connection_prepares_empty_home_before_native_status(self):
+        home = Path(self.root) / "new-native-account"
+        self.environment = {"CODEX_HOME": str(home)}
+        checked, launched, updates = [], [], []
+
+        def status(executable, env):
+            self.assertEqual(executable, "native")
+            checked.append(Path(env["CODEX_HOME"]).is_dir())
+            if not checked[-1]:
+                return "", "Native configuration cannot load a missing home"
+            return ("authed" if launched else "unauthed"), ""
+
+        def execute(argv, env, emit, timeout, **options):
+            self.assertEqual(checked, [True])
+            self.assertEqual(list(home.iterdir()), [], "Preparing a home must not create or copy credentials")
+            self.assertEqual(argv, ["native", "login", "--device-auth"])
+            launched.append(True)
+            return 0
+
+        self.assertFalse(home.exists())
+        self.assertTrue(flow.reserve("fresh-home", self.root))
+        with patch.object(flow, "environment", return_value=self.environment), \
+                patch.object(flow.account, "status", side_effect=status):
+            result = flow.run("fresh-home", "native", self.root, publish=updates.append, execute=execute)
+        self.assertTrue(result[0], result)
+        self.assertEqual(checked, [True, True])
+        self.assertEqual(updates[-1], {"state": "succeeded", "reused": False})
+        self.assertEqual(list(home.iterdir()), [])
+
+    def test_preparing_home_does_not_turn_unknown_status_into_missing_auth(self):
+        home = Path(self.root) / "unknown-native-account"
+        self.environment = {"CODEX_HOME": str(home)}
+        result, updates = self.run_flow([""], lambda *args, **kwargs: self.fail("Unknown cannot start authorization"))
+        self.assertFalse(result[0])
+        self.assertEqual(updates[-1], {"state": "failed", "reason": "status_unavailable"})
+        self.assertTrue(home.is_dir())
+        self.assertEqual(list(home.iterdir()), [])
+
+    def test_home_creation_permission_error_has_stable_reason_without_native_launch(self):
+        self.environment = {"CODEX_HOME": str(Path(self.root) / "blocked-native-account")}
+        self.assertTrue(flow.reserve("blocked-home", self.root))
+        updates = []
+        with patch.object(flow, "environment", return_value=self.environment), \
+                patch.object(flow.os, "makedirs", side_effect=PermissionError("secret path")), \
+                patch.object(flow.account, "status") as status, \
+                patch.object(flow.account, "_execute") as execute:
+            result = flow.run("blocked-home", "native", self.root, publish=updates.append)
+        self.assertFalse(result[0])
+        self.assertEqual(updates[-1], {"state": "failed", "reason": "access_denied"})
+        self.assertNotIn("secret", str(result) + str(updates))
+        status.assert_not_called()
+        execute.assert_not_called()
+        self.assertNotIn("blocked-home", flow._PENDING)
+
+    def test_cancel_during_environment_resolution_prevents_home_creation(self):
+        home = Path(self.root) / "cancelled-before-home"
+        def environment(data_root):
+            self.assertTrue(flow.cancel("cancel-before-home", data_root))
+            return {"CODEX_HOME": str(home)}
+        self.assertTrue(flow.reserve("cancel-before-home", self.root))
+        with patch.object(flow, "environment", side_effect=environment), \
+                patch.object(flow.account, "status") as status, \
+                patch.object(flow.account, "_execute") as execute:
+            result = flow.run("cancel-before-home", "native", self.root, publish=lambda _: None)
+        self.assertEqual(result[2], 130)
+        self.assertFalse(home.exists())
+        status.assert_not_called()
+        execute.assert_not_called()
+
+    def test_cancel_during_home_creation_prevents_native_status_and_authorization(self):
+        home = Path(self.root) / "cancelled-after-home"
+        create = os.makedirs
+        def makedirs(path, **kwargs):
+            create(path, **kwargs)
+            self.assertTrue(flow.cancel("cancel-after-home", self.root))
+        self.assertTrue(flow.reserve("cancel-after-home", self.root))
+        with patch.object(flow, "environment", return_value={"CODEX_HOME": str(home)}), \
+                patch.object(flow.os, "makedirs", side_effect=makedirs), \
+                patch.object(flow.account, "status") as status, \
+                patch.object(flow.account, "_execute") as execute:
+            result = flow.run("cancel-after-home", "native", self.root, publish=lambda _: None)
+        self.assertEqual(result[2], 130)
+        self.assertTrue(home.is_dir())
+        self.assertEqual(list(home.iterdir()), [])
+        status.assert_not_called()
+        execute.assert_not_called()
+
+    def test_failure_reasons_never_expose_native_stderr(self):
+        for error, reason in ((PermissionError("secret path"), "access_denied"),
+                              (FileNotFoundError("secret path"), "runtime_missing"),
+                              (ValueError("secret token"), "connection_failed")):
+            def execute(*args, **kwargs):
+                raise error
+            with self.subTest(reason=reason):
+                result, updates = self.run_flow(["unauthed"], execute)
+                self.assertFalse(result[0])
+                self.assertEqual(updates[-1], {"state": "failed", "reason": reason})
+                self.assertNotIn("secret", str(result) + str(updates))
+
+    def test_discovery_does_not_treat_unknown_native_status_as_authenticated(self):
+        from app.services import agent_setup
+        with patch.object(flow.account, "selected_home", return_value=""), \
+                patch.object(agent_setup, "_bin_of", return_value="fixture"), \
+                patch.object(agent_setup, "_account_auth_probe", return_value=("", "")), \
+                patch.dict(os.environ, {"OPENAI_API_KEY": "not-proof-of-native-login"}), \
+                patch.object(flow.os, "makedirs") as makedirs, \
+                patch.object(agent_setup.os.path, "isfile", side_effect=AssertionError("Do not inspect credentials")):
+            self.assertEqual(agent_setup._auth_probe("codex"), ("", ""))
+        makedirs.assert_not_called()
 
     def test_device_progress_is_structured_and_never_contains_arbitrary_output(self):
         def execute(argv, env, emit, timeout, **options):

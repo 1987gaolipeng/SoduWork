@@ -1,7 +1,8 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { create, fields } = require('../main/pi-session/event-publication');
+const vm = require('node:vm');
+const { create, fields, pluginAuthorization } = require('../main/pi-session/event-publication');
 const { createStreamScheduler, STREAM_FLUSH_MS } = require('../main/pi-session/event-publication');
 
 test('stream transport coalesces the latest state within one frame and cancels stale deltas on settlement', () => {

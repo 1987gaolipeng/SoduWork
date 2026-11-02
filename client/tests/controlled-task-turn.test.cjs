@@ -63,6 +63,59 @@ test('controlled Runner compares execution ref, not the database record id', asy
   assert.equal(result.ok,true);assert.equal(messages.length,2);
 });
 
+test('assigned task model failures retain safe actionable diagnostics without rerouting', async () => {
+  for (const error of ['404 status code (no body)',
+    '模型服务地址或模型不存在（HTTP 404）；请切换可用模型。',
+    '404 {"error":{"message":"Bearer private-key https://internal.test"}}']) {
+    const messages = [], calls = [];
+    const adapter = create({ task: { id: 'assigned-task', createdBy: 'creator', assigneeUserId: 'executor' },
+      spec: { mode: 'dispatch', context: {}, agentId: 'runner:executor:pi', model: 'unavailable-model' }, scope: {},
+      request: async (url, body) => {
+        calls.push({ url, body });
+        return body ? { ref: 'assigned-run' } : { ref: 'assigned-run', status: 'failed', error, items: [] };
+      } });
+    const result = await adapter.execute({ appendTaskMessage: (...a) => messages.push(a), taskExecutionChanged: () => {} }, 'task', []);
+    assert.equal(result.ok, false);
+    assert.match(result.reason, /HTTP 404/);
+    assert.match(result.reason, /切换可用模型/);
+    assert.doesNotMatch(result.reason, /private-key|internal\.test|需求执行失败，请检查当前步骤/);
+    assert.equal(messages.at(-1)[1], result.reason);
+    assert.equal(calls.filter(c => c.body).length, 1);
+    assert.equal(calls[0].body.assigneeId, 'runner:executor:pi');
+    assert.equal(calls[0].body.model, 'unavailable-model');
+  }
+});
+
+test('failed task drains all output and retains its actual answer before surfacing the error', async () => {
+  const messages = [];
+  let reads = 0;
+  const adapter = create({ task: { id: 't' }, spec: { mode: 'dispatch', context: {} }, scope: {}, wait: async () => {},
+    request: async (url, body) => body ? { ref: 'r' } : {
+      ref: 'r', status: 'failed', error: '429 status code (no body)', seq: 2, last: ++reads,
+      items: reads === 1 ? [{ seq: 1, kind: 'say', text: 'Existing partial work.' }]
+        : [{ seq: 2, kind: 'say', text: 'Preserved final diagnostic.' }],
+    } });
+  const result = await adapter.execute({ appendTaskMessage: (...a) => messages.push(a), taskExecutionChanged: () => {} }, 'task', []);
+  assert.equal(reads, 2);
+  assert.match(result.reason, /HTTP 429/);
+  assert.match(result.reason, /稍后重试/);
+  assert.deepEqual(messages.slice(1).map(m => m[1]), ['Existing partial work.', 'Preserved final diagnostic.']);
+});
+
+test('legacy failed receipts keep the fallback and stopped receipts ignore stale errors', async () => {
+  for (const status of ['failed', 'stopped', 'done']) {
+    const messages = [];
+    const adapter = create({ task: { id: 't' }, spec: { mode: 'dispatch', context: {} }, scope: {},
+      request: async (url, body) => body ? { ref: 'r' } : { ref: 'r', status, error: status === 'failed' ? '' : '404', items: [] } });
+    const result = await adapter.execute({ appendTaskMessage: (...a) => messages.push(a), taskExecutionChanged: () => {} }, 'task', []);
+    assert.equal(result.ok, status !== 'failed');
+    assert.equal(result.cancelled, status === 'stopped');
+    assert.doesNotMatch(messages.at(-1)[1], /HTTP 404/);
+    if (status === 'failed') assert.equal(result.reason, '需求执行失败，请检查当前步骤');
+    else assert.equal(result.reason, undefined);
+  }
+});
+
 test('authentication failure pauses a controlled turn instead of polling forever', async () => {
   const states = [], waits = [];
   const adapter = create({ task: { id: 't', title: 'Auth' }, spec: { mode: 'dispatch', context: {}, agentId: 'local:pi' }, scope: {},

@@ -112,6 +112,7 @@
       taskId: item.taskId || old.taskId || null, kind: item.kind || old.kind || 'mate_message',
       at: stamp(item.createdAt) || Number(old.at) || Date.now(),
       text: String(item.text ?? old.text ?? ''), bodyText: String(item.text ?? old.bodyText ?? old.text ?? ''),
+      textMessage: item.textMessage || old.textMessage || null,
       attachments: Array.isArray(item.attachments) ? item.attachments : old.attachments || [],
       website: item.website || old.website || null, status, sentStatus: status,
       deliveredAt: Math.max(stamp(item.deliveredAt), stamp(old.deliveredAt)) || null,
@@ -136,6 +137,8 @@
     const receipt = { id, folder: 'received', kind: 'mate_receipt', receiptStatus: state, ownerId: row.senderId,
       serverMessageId: row.serverMessageId, messageId: row.messageId, taskId: row.taskId,
       senderName: who, recipientName: row.recipientName, at, text, bodyText: text,
+      textMessage: { key: 'notification.receipt.' + state, fallback: text,
+        params: { recipient: who, subject: summary ? '\n' + summary.slice(0, 90) + (summary.length > 90 ? '…' : '') : '' } },
       read: Boolean(old.some(item => item.receiptStatus === state && item.read) ||
         hasReceiptMarker({ serverMessageId: row.serverMessageId, receiptStatus: state }, meta.readIds)), attachments: [] };
     for (let index = list.length - 1; index >= 0; index--) if (old.includes(list[index])) list.splice(index, 1);

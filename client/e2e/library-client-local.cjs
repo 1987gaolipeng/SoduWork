@@ -175,8 +175,10 @@ if (typeof electron === 'string') {
   app.whenReady().then(async () => {
     await startReceiver();
     ipcMain.on('runtime-form', event => { event.returnValue = 'local-code'; });
+    ipcMain.on('client-distribution-info', event => { event.returnValue = { hubOrigin: origin }; });
     for (const [channel, handler] of Object.entries({
       'hub-connection-info': () => ({ hub: origin, internalTest: true, editable: false }),
+      'work-root-default': () => libraryWorkRoot,
       'app-version': () => 'isolated-library-test', 'sys-info': () => ({ platform: process.platform, arch: process.arch }),
       'file-type-icon': () => ({ ok: false }),
       'runner-configure': () => ({ ok: true }), 'device-auth-bootstrap': identity,
@@ -222,11 +224,15 @@ if (typeof electron === 'string') {
 
     await call('updateLibraryItem', item.id, { title: 'client-renamed' });
     assert.equal((await call('readLibraryBinary', item.id)).name, 'client-renamed.bin');
+    // Rename now moves the native file as well as its metadata. Capture the
+    // current source path before copying and prove that exact path survives.
+    const renamedPayloads = filesBelow(storageRoot).filter(file => sha(fs.readFileSync(file)) === sha(bytes));
+    assert.equal(renamedPayloads.length, 1);
     const copied = await call('copyLocalLibraryItemToRemote', item.id, { storage: 'nfs', folderId: '' });
     assert.equal(copied.ok, true); assert.equal(uploads.length, 1);
     assert.equal(uploads[0].item.backend, 'nfs'); assert.equal(uploads[0].digest, sha(bytes));
     assert.equal(uploads[0].item.filename, 'client-renamed.bin');
-    assert.equal(fs.existsSync(payloadPaths[0]), true); assert.equal(sha(await readBytes(item.id)), sha(bytes));
+    assert.equal(fs.existsSync(renamedPayloads[0]), true); assert.equal(sha(await readBytes(item.id)), sha(bytes));
     assert.equal(requests.some(request => request.method === 'PATCH'), false);
     report.cases.push('Copy reads actual local bytes and POSTs multipart to an isolated HTTP receiver; hash matches and local source remains');
     assert.deepEqual(uploads[0].source, sourceMetadata);
@@ -258,7 +264,7 @@ if (typeof electron === 'string') {
     const beforeStaleCopy = uploads.length;
     fsp.readFile = async function (filename, ...args) {
       const result = await originalRead.call(this, filename, ...args);
-      if (path.resolve(String(filename)) === payloadPaths[0]) { enterRead(); await released; }
+      if (path.resolve(String(filename)) === renamedPayloads[0]) { enterRead(); await released; }
       return result;
     };
     try {
@@ -299,16 +305,18 @@ if (typeof electron === 'string') {
     const dupe = (await call('createLibraryItem', { kind: 'document', title: 'duplicate', filename: 'duplicate.txt', content: 'original', storage: 'local' })).item;
     await loadPanel();
     await js(`(()=>{const dt=new DataTransfer();dt.items.add(new File(['replacement'],'DUPLICATE.txt',{type:'text/plain'}));dt.items.add(new File(['new'],'batch-next.txt',{type:'text/plain'}));const input=document.querySelector('[data-library-upload]');input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}));})()`);
-    await until('document.querySelector(".library-confirm-dialog")?.textContent.includes("名称重复")');
+    await until('document.body.textContent.includes("DUPLICATE（1）.txt") && document.body.textContent.includes("batch-next.txt")');
     assert.equal((await call('readLibraryContent', dupe.id)).content, 'original');
-    await click('.library-confirm-submit'); await until('document.body.textContent.includes("batch-next.txt")');
+    const renamedUpload = (await listLocal()).items.find(row => row.filename === 'DUPLICATE（1）.txt');
+    assert.ok(renamedUpload); assert.notEqual(renamedUpload.id, dupe.id);
+    assert.equal((await call('readLibraryContent', renamedUpload.id)).content, 'replacement');
     await click('[data-library-create-kind=document]'); await until('document.querySelector(".library-document-dialog")');
     await js(`document.querySelector('[data-library-editor-title]').value='duplicate';document.querySelector('[data-library-editor-content]').value='keep this draft';document.querySelector('.library-note-editor').requestSubmit();void 0;`);
     await until('document.querySelector(".library-confirm-dialog")?.textContent.includes("名称重复")');
     await click('.library-confirm-submit');
     assert.equal(await js('document.querySelector("[data-library-editor-content]").value'), 'keep this draft');
     await click('[data-library-editor-cancel]');
-    report.cases.push('Actual native upload rejects duplicate names, retains original bytes, continues the remaining batch, and duplicate new-document alerts preserve the draft');
+    report.cases.push('Actual native upload renames duplicate files, preserves both versions and completes the batch; duplicate new-document alerts preserve the draft');
     report.cases.push('Historical Hub-local fixture rows never appear in the client-local tab');
     await click('[data-library-storage=remote]');
     await click('[data-library-scope=all]');

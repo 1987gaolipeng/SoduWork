@@ -41,6 +41,22 @@ test('execution context keeps remote runner identity separate from portable exec
   assert.equal(payload.executionContext.runner.id, 'r-1');
 });
 
+test('target expansion preserves each authorized location as a distinct assignee', () => {
+  const options = { substrates: [{
+    key: 'local:pi', cli: 'pi', name: 'Pi', available: true, modelPick: true,
+    locations: [
+      { assigneeId: 'local:pi', mode: 'local', label: '本机' },
+      { assigneeId: 'runner:desk-1:pi', mode: 'remote', runnerId: 'desk-1',
+        clientId: 'desktop-2', label: '工作电脑' },
+    ],
+  }] };
+  const rows = Client.targets(options);
+  assert.deepEqual(Array.from(rows, row => row.key), ['local:pi', 'runner:desk-1:pi']);
+  assert.equal(rows[1].locationMode, 'remote');
+  assert.equal(rows[1].runnerId, 'desk-1');
+  assert.equal(Client.substrates(options, true)[1].id, 'runner:desk-1:pi');
+});
+
 test('mixed location is explicit and no location defaults to local', () => {
   assert.equal(Context.locationMode({ locationMode: 'mixed' }), 'mixed');
   assert.match(Context.locationLabel({ locationMode: 'mixed' }), /远程 Runner/);

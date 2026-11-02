@@ -12,6 +12,33 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
 const stale = error => error.code === 'STALE_TASK_SCOPE';
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
+test('desktop ZIP downloads use the native attachment path and preserve cancellation or failure', async () => {
+  const h = harness(); await h.signIn('alice');
+  let received, result = {ok:true};
+  h.bridge.downloadAttachment = async payload => { received = payload; return result; };
+  assert.equal((await h.api.downloadArtifactsZip('task','Website','v2')).ok,true);
+  assert.deepEqual(JSON.parse(JSON.stringify(received)),{taskId:'task',artifactVersionId:'v2',filename:'Website.zip'});
+  assert.equal(h.calls.length,0); assert.equal(h.objectUrls.length,0);
+  result = {ok:false,canceled:true};
+  assert.equal((await h.api.downloadArtifactsZip('task','Website','v2')).canceled,true);
+  result = {ok:false,reason:'disk full'};
+  await assert.rejects(h.api.downloadArtifactsZip('task','Website','v2'),/disk full/);
+});
+
+test('a pinned bundle uses existing library upload with stable file identity and unchanged bytes', async () => {
+  const h = harness(); await h.signIn('alice');
+  let received;
+  h.bridge.readAttachmentBinary = async payload => { received = payload; return binary(); };
+  const file = {deliveryBundle:true,taskId:'task',artifactVersionId:'v2',attachmentIds:['b','a'],name:'交付物.zip'};
+  assert.equal((await h.api.uploadLibraryOutput('',file)).ok,true);
+  assert.equal(received.artifactVersionId,'v2'); assert.equal(received.taskId,'task');
+  assert.deepEqual(Buffer.from(h.nativeCalls[0].payload.dataBase64,'base64'),bytes);
+  assert.equal(h.api.libraryOutputKey('',file),h.api.libraryOutputKey('',{...file,attachmentIds:['a','b']}));
+  h.bridge.readAttachmentBinary = async () => { await h.signIn('bob'); return binary(); };
+  await assert.rejects(h.api.uploadLibraryOutput('',{...file,artifactVersionId:'v3',attachmentIds:['c']}),stale);
+  assert.equal(h.nativeCalls.length,1);
+});
+
 function harness() {
   let user = 'alice';
   const values = new Map([['soduwork_work_hub_url', 'http://hub-a:8989']]);
@@ -25,7 +52,7 @@ function harness() {
     } },
   };
   const window = { __SODUWORK_TEST_HUB_CONFIG__: { allowSwitch: true }, soduWorkAPI: bridge, dispatchEvent() {} };
-  const h = { bridge, calls, downloads, objectUrls, nativeCalls,
+  const h = { bridge, calls, downloads, objectUrls, nativeCalls, window,
     fetch: async () => new Response(JSON.stringify({ ok: true })),
   };
   class TestURL extends URL {

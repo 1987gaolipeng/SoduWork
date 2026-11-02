@@ -326,7 +326,7 @@
     if (action === 'servers') sub = '查看可用连接';
     else if (action === 'list' && server === 'soduwork-plugin') sub = '读取本轮连接器工具';
     // Preserve historical protocol service IDs; update only first-party display branding, never commands, paths, or third-party names.
-    else if (action === 'list') sub = '查看 ' + (/^(?:soduwork|soduwork|soduwork)$/i.test(server) ? 'SoduWork' : server || '连接') + ' 的工具';
+    else if (action === 'list') sub = '查看 ' + (/^soduwork$/i.test(server) ? 'SoduWork' : server || '连接') + ' 的工具';
     else if (action === 'call' && server === 'soduwork-plugin') {
       const connector = jsonField(command, 'server');
       const target = jsonField(command, 'tool');
@@ -705,18 +705,28 @@
     }
     return null;
   }
+  const OFFICE_EXTENSIONS = /^(?:doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp|rtf|pages|numbers|key)$/;
+  const OFFICE_MIME = /^(?:application\/(?:msword|rtf|vnd\.ms-[\w.+-]+|vnd\.openxmlformats-officedocument\.[\w.+-]+|vnd\.oasis\.opendocument\.[\w.+-]+)|text\/rtf)$/;
+  const TEXT_MIME = /^(?:text\/.+|application\/(?:json|xml|yaml|x-yaml|javascript|typescript|sql))$/;
   function previewKind(file) {
-    if (file && file.taskId && file.attachmentId && !/\.(?:html?|pdf|md|markdown|txt|png|jpe?g|gif|webp|ico|mp4|m4v|webm|mov|ogv)$/i.test(file.name||'')) return 'external';
-    const declared = String(file && file.kind || '');
+    const item = file || {};
+    const declared = String(item.kind || '').trim().toLowerCase();
+    const mime = String(item.contentType || item.mimeType || item.type || '').split(';', 1)[0].trim().toLowerCase();
+    const suffix = ext(item.name || item.relative || item.path);
+    // Office and other explicitly packaged outputs stay out of the workbench.
+    // They are handed to the OS so Excel/PowerPoint/Word (or the user's
+    // configured equivalent) can render the original bytes faithfully.
+    if (OFFICE_EXTENSIONS.test(suffix) || OFFICE_MIME.test(mime) ||
+        ['presentation', 'spreadsheet', 'archive', 'binary'].includes(declared)) return 'external';
     const mapped = { website: 'web', pdf: 'pdf', image: 'image', video: 'video' }[declared];
     if (mapped) return mapped;
-    if (declared === 'document' && /\.md$/i.test(String(file && file.name || ''))) return 'markdown';
-    const suffix = ext((file && file.name) || (file && file.path));
-    if (/^html?$/.test(suffix)) return 'web';
-    if (suffix === 'pdf') return 'pdf';
-    if (/^(png|jpe?g|gif|webp|svg)$/.test(suffix)) return 'image';
-    if (/^(mp4|m4v|webm|mov|ogv)$/.test(suffix)) return 'video';
-    if (/^(md|markdown)$/.test(suffix)) return 'markdown';
+    if (declared === 'markdown' || /^(md|markdown)$/.test(suffix)) return 'markdown';
+    if (declared === 'document' && !suffix && !mime) return 'external';
+    if (/^html?$/.test(suffix) || mime === 'text/html' || mime === 'application/xhtml+xml') return 'web';
+    if (declared === 'text' || TEXT_MIME.test(mime)) return 'text';
+    if (suffix === 'pdf' || mime === 'application/pdf') return 'pdf';
+    if (/^(png|jpe?g|gif|webp|svg|bmp|avif|ico)$/.test(suffix) || mime.startsWith('image/')) return 'image';
+    if (/^(mp4|m4v|webm|mov|ogv)$/.test(suffix) || mime.startsWith('video/')) return 'video';
     if (/^(txt|csv|json|ya?ml|xml|js|jsx|ts|tsx|css|scss|py|java|go|rs|sql|sh|ps1)$/.test(suffix)) return 'text';
     return 'external';
   }

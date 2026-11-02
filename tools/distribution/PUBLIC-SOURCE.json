@@ -38,13 +38,20 @@
     "docs/design/",
     "docs/architecture/",
     "docs/testing/",
+    "docs/context/",
+    "docs/qa/",
+    "docs/adr/",
+    "skin-server/",
     "tools/mediaops-sync/",
     "hub-backend/plugins/platforms/",
     "mobile/",
-    "mobile-web-dist/"
+    "mobile-web-dist/",
+    "docs/development/"
   ],
   "excludedFiles": [
     "PROJECT_CONTEXT.md",
+    "AGENTS.md",
+    "client/distributions.json",
     ".gitlab-ci.yml",
     "tools/seed_local_demo_data.py",
     "tools/cross-release-check.sh",

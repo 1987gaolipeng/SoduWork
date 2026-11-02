@@ -215,8 +215,10 @@ class VideoRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_real_http_provider_through_model_transport_generates_file(self):
         from app.services import model_runtime, model_transport
+        from app.model_runtime_models import ModelRuntimeLease, ModelRuntimeMetric
         async with self.engine.begin() as connection:
-            for model in (models.AppSetting, models.ModelDef, models.ModelProvider):
+            for model in (models.AppSetting, models.ModelDef, models.ModelProvider,
+                          ModelRuntimeLease, ModelRuntimeMetric):
                 await connection.run_sync(model.__table__.create)
         seen, peers = [], []
         async def serve(reader, writer):
@@ -247,6 +249,8 @@ class VideoRuntimeTests(unittest.IsolatedAsyncioTestCase):
                     patch.object(model_runtime, "SessionLocal", self.factory):
                 result = await self.generate()
                 self.assertEqual((await model_runtime.snapshot())["running"], 0)
+                async with self.factory() as session:
+                    self.assertEqual((await session.scalars(select(ModelRuntimeLease))).all(), [])
             self.assertEqual([method for method, _, _ in seen], ["POST", "GET", "GET"])
             self.assertEqual(json.loads(seen[0][2])["prompt"], "product demo")
             row = (await self.rows())[0]

@@ -29,6 +29,22 @@ function response(status, body) {
   return { ok: status >= 200 && status < 300, status, text: async () => body || '' };
 }
 
+test('activity reads the dedicated authenticated events endpoint and accepts an empty history', async () => {
+  const calls = [];
+  const api = load(async (url, options) => {calls.push({url, options}); return response(200, '{"events":[]}');});
+  assert.equal((await api.getTaskEvents('task/slash')).length, 0);
+  assert.match(calls[0].url, /\/tasks\/task%2Fslash\/events$/);
+  assert.ok(calls[0].options.headers['X-Soduwork-Device']);
+});
+
+test('the existing activity API distinguishes read failure from an empty history', async () => {
+  for (const status of [403, 404, 500]) {
+    const api = load(async () => response(status, '{"detail":"Unavailable"}'));
+    assert.equal(await api.getTaskEvents('task'), null);
+  }
+  assert.equal(await load(async () => {throw Error('Network unavailable');}).getTaskEvents('task'), null);
+});
+
 test('execution claim uses the authenticated task endpoint and returns fresh ownership', async () => {
   const requests = [];
   const api = load(async (url, options) => {

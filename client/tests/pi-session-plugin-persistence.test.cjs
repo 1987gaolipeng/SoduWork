@@ -14,13 +14,13 @@ async function until(predicate) {
   throw Error('Fixture did not reach the expected boundary');
 }
 
-test('Pi executes inherited plugins with fresh grants, restores selections, clears and isolates conversations',
+test('Pi executes inherited plugins with fresh grants, restores selections, consumes prior tool results, clears and isolates conversations',
   { timeout: 30000 }, async t => {
     const sdk = await import('../node_modules/@earendil-works/pi-coding-agent/dist/index.js');
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-pi-plugins-'));
     const cwd = path.join(root, 'workspace'), agentDir = path.join(root, 'agent');
     fs.mkdirSync(cwd); fs.mkdirSync(agentDir);
-    const resolutions = [], cleanups = [], executions = [], requests = [], sessions = [];
+    const resolutions = [], cleanups = [], executions = [], priorResults = [], requests = [], sessions = [];
     const grants = new Set(), archives = new Map();
     let held = null, holdNext = false, revoked = false;
     const server = http.createServer((request, response) => {
@@ -31,9 +31,17 @@ test('Pi executes inherited plugins with fresh grants, restores selections, clea
         const user = body.messages.findLast(message => message.role === 'user');
         const prompt = JSON.stringify(user?.content || '');
         const grant = /PLUGIN-GRANT-(\d+)/.exec(prompt)?.[1];
-        const call = grant && body.messages.at(-1).role !== 'tool';
+        const textOf = message => typeof message?.content === 'string' ? message.content
+          : (Array.isArray(message?.content) ? message.content
+            .filter(block => block?.type === 'text').map(block => block.text || '').join('\n') : '');
+        const historicalResults = body.messages
+          .filter(message => message?.role === 'tool' || message?.role === 'toolResult')
+          .map(textOf).filter(Boolean);
+        const lastRole = body.messages.at(-1)?.role;
+        const call = grant && !['tool', 'toolResult'].includes(lastRole);
         const delta = call ? { role: 'assistant', tool_calls: [{ index: 0, id: 'probe-' + grant,
-          type: 'function', function: { name: 'plugin_probe', arguments: JSON.stringify({ grant }) } }] }
+          type: 'function', function: { name: 'plugin_probe', arguments: JSON.stringify({ grant,
+            ...(historicalResults.length ? { priorResult: historicalResults.at(-1) } : {}) }) } }] }
           : { role: 'assistant', content: 'Fixture completed.' };
         const respond = () => {
           response.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -60,11 +68,15 @@ test('Pi executes inherited plugins with fresh grants, restores selections, clea
       modelsStorePath: path.join(root, 'models.db') });
     runtime.registerProvider('soduwork', piProvider(fixtureModel));
     const probe = { name: 'plugin_probe', label: 'Fixture plugin', description: 'Uses the current plugin grant',
-      parameters: { type: 'object', properties: { grant: { type: 'string' } }, required: ['grant'] },
+      parameters: { type: 'object', properties: { grant: { type: 'string' }, priorResult: { type: 'string' } }, required: ['grant'] },
       async execute(_id, args) {
         assert.ok(grants.has(args.grant), 'the tool must have a live grant belonging to this turn');
+        const expected = executions.length ? 'PLUGIN-RESULT-' + executions.at(-1) : undefined;
+        assert.equal(args.priorResult, expected,
+          'a follow-up plugin call must receive the previous turn tool result from native history');
         executions.push(args.grant);
-        return { content: [{ type: 'text', text: 'Plugin tool completed' }], details: {} };
+        priorResults.push(args.priorResult || '');
+        return { content: [{ type: 'text', text: 'PLUGIN-RESULT-' + args.grant }], details: {} };
       } };
     t.mock.method(modelConfig, 'prepare', async () => ({ ok: true, agentDir, provider: 'soduwork', model: fixtureModel }));
     t.mock.method(require('../main/pi-session/sdk-loader'), 'load', async () => ({ ...sdk,
@@ -171,4 +183,6 @@ test('Pi executes inherited plugins with fresh grants, restores selections, clea
     await send(cleared, 'reopened after clear');
     assert.equal(resolutions.length, 7);
     assert.deepEqual(cleanups, executions, 'each issued grant is cleaned once after its tool finishes');
+    assert.deepEqual(priorResults, ['', ...executions.slice(0, -1).map(grant => 'PLUGIN-RESULT-' + grant)],
+      'each later plugin turn consumes the immediately preceding structured result');
   });

@@ -81,6 +81,8 @@ COPY hub-backend/plugins ./plugins
 # Schema files are runtime dependencies: Hub startup migrates before accepting traffic.
 COPY hub-backend/alembic.ini ./alembic.ini
 COPY hub-backend/migrations ./migrations
+COPY hub-backend/jiyong-alembic.ini ./jiyong-alembic.ini
+COPY hub-backend/jiyong-migrations ./jiyong-migrations
 
 COPY --from=admin-build /build/hub-frontend/dist /srv/app/hub-frontend/dist
 COPY skills /srv/app/skills

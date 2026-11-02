@@ -621,12 +621,14 @@ class AiSchedule(Base):
     # Agent workspace, using the same contract as manual dispatch.
     assignee_id: Mapped[str] = mapped_column(String(64), default="")     # Runtime key, for example local:pi.
     assignee_type: Mapped[str] = mapped_column(String(16), default="agent")
+    model_name: Mapped[str] = mapped_column(String(300), default="")
     repo_id: Mapped[str] = mapped_column(String(36), default="")         # Documentation and research tasks may omit a repository.
     flow: Mapped[bool] = mapped_column(Boolean, default=False)           # Whether to follow the development workflow.
     # Empty selects direct assignment; otherwise start from an immutable plugin binding.
     # Store ordinary declared form inputs here; secrets use SecretReference bindings.
     plugin_binding_id: Mapped[str] = mapped_column(String(36), default="", index=True)
     plugin_inputs: Mapped[dict] = mapped_column(JSON, default=dict)
+    source_app: Mapped[dict] = mapped_column(JSON, default=dict)
     # For personal plugins, Hub stores identity and verifiable version metadata; the owner's Runner resolves the body.
     # Pin a version or explicitly select latest; MCP uses the conversation grant ticket bridge.
     # Mutually exclusive with plugin_binding_id: organization bindings run workflows, personal plugins supply direct-task context.

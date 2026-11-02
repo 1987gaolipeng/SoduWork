@@ -10,6 +10,7 @@ const { pathToFileURL } = require('node:url');
 const OWNER_A = 'a'.repeat(32), OWNER_B = 'b'.repeat(32);
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-library-local-'));
+  const workRoot = path.join(root, 'work-root');
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const handlers = new Map(); let owner = OWNER_A;
   const sender = { mainFrame: {}, isDestroyed: () => false,
@@ -52,16 +53,40 @@ test('output receipts survive restart, deduplicate legacy bytes and respect dele
   assert.notEqual(replacement.item.id, legacy.id);
 });
 
-test('same destination rejects duplicate imports and creates, while folders and trash remain independent', async t => {
+test('same destination suffixes duplicate imports while creates, folders and trash remain independent', async t => {
   const f = fixture(t);
   const original = (await f.call('upload', { name: 'Report.txt', dataBase64: data('first') })).item;
-  await assert.rejects(f.call('upload', { name: 'report.TXT', dataBase64: data('second') }), /同名/);
+  const duplicate = (await f.call('upload', { name: 'report.TXT', dataBase64: data('second') })).item;
+  assert.equal(duplicate.filename, 'report（1）.TXT');
+  const third = (await f.call('upload', { name: 'report.TXT', dataBase64: data('third') })).item;
+  assert.equal(third.filename, 'report（2）.TXT');
   await assert.rejects(create(f, { filename: 'Report.txt' }), /同名/);
   const folder = (await f.call('createFolder', { name: 'other' })).folder;
   await create(f, { filename: 'Report.txt', folderId: folder.id });
   await f.call('deleteItem', { id: original.id });
   await create(f, { filename: 'Report.txt' });
-  assert.equal((await f.call('list', { scope: 'all' })).items.length, 1);
+  assert.equal((await f.call('list', { scope: 'all' })).items.length, 3);
+});
+
+test('batch delete moves local items to trash and preserves per-item failures', async t => {
+  const f = fixture(t);
+  const first = (await create(f, { filename: 'first.txt' })).item;
+  const second = (await create(f, { filename: 'second.txt' })).item;
+  const result = await f.call('deleteItems', { ids: [first.id, second.id, 'local-missing'] });
+  assert.deepEqual(result.succeeded.map(row => row.id), [first.id, second.id]);
+  assert.equal(result.failed[0].id, 'local-missing');
+  assert.deepEqual((await f.call('list', { scope: 'all' })).items, []);
+  assert.equal((await f.call('list', { scope: 'trash' })).items.length, 2);
+});
+
+test('output receipts remain idempotent after their display name receives a suffix', async t => {
+  const f = fixture(t), outputKey = 'output-with-collision';
+  await f.call('upload', { name: 'result.txt', dataBase64: data('unrelated') });
+  const first = (await f.call('upload', { name: 'result.txt', dataBase64: data('saved'), source: { outputKey } })).item;
+  assert.equal(first.filename, 'result（1）.txt');
+  const retry = await f.call('upload', { name: 'result.txt', dataBase64: data('saved'), source: { outputKey } });
+  assert.equal(retry.item.id, first.id);
+  assert.equal(retry.duplicate, true);
 });
 
 test('renamed file exports its new basename and rejects collisions without modifying bytes', async t => {
@@ -105,7 +130,10 @@ test('legacy renamed metadata exports the visible name and blocks its duplicates
   const bytes = await f.call('readBinary', { id: row.id });
   assert.equal(bytes.name, 'after.txt');
   assert.equal(Buffer.from(bytes.data, 'base64').toString(), '原始内容');
-  await assert.rejects(f.call('upload', { name: 'AFTER.txt', dataBase64: data('replacement') }), /同名/);
+  await f.call('reveal', { id: row.id });
+  assert.equal(path.basename(f.revealed.at(-1)), 'after.txt');
+  const duplicate = (await f.call('upload', { name: 'AFTER.txt', dataBase64: data('replacement') })).item;
+  assert.equal(duplicate.filename, 'AFTER（1）.txt');
   assert.equal(fs.existsSync(originalPath), true);
   assert.equal(JSON.parse(fs.readFileSync(indexPath, 'utf8')).items[0]._object, index.items[0]._object);
 });
@@ -115,7 +143,8 @@ test('file and folder names share a destination namespace in both creation direc
   const file = (await create(f, { filename: 'report.txt' })).item;
   await assert.rejects(f.call('createFolder', { name: 'REPORT.txt' }), /同名/);
   const folder = (await f.call('createFolder', { name: 'archive.txt' })).folder;
-  await assert.rejects(f.call('upload', { name: 'ARCHIVE.txt', dataBase64: data('replacement') }), /同名/);
+  const duplicate = (await f.call('upload', { name: 'ARCHIVE.txt', dataBase64: data('replacement') })).item;
+  assert.equal(duplicate.filename, 'ARCHIVE（1）.txt');
   await assert.rejects(create(f, { filename: 'archive.txt' }), /同名/);
   await assert.rejects(f.call('updateFolder', { id: folder.id, body: { name: 'report.txt' } }), /同名/);
   await assert.rejects(f.call('updateItem', { id: file.id, body: { title: 'archive' } }), /同名/);
@@ -132,7 +161,8 @@ test('restoring a conversation revision preserves its same-name versions', async
   assert.equal((await f.call('list', { scope: 'all' })).items.length, 2);
   assert.equal((await f.call('readContent', { id: original.id })).content, 'first version');
   assert.equal((await f.call('readContent', { id: next.id })).content, 'second version');
-  await assert.rejects(f.call('upload', { name: 'version.txt', dataBase64: data('manual') }), /同名/);
+  const manual = (await f.call('upload', { name: 'version.txt', dataBase64: data('manual') })).item;
+  assert.equal(manual.filename, 'version（1）.txt');
 });
 
 test('favoriting a legacy colliding folder does not reinterpret the operation as a new name', async t => {

@@ -10,7 +10,10 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from app import (automation_models, models, session_memory_models, project_context_models,  # noqa: F401
                  memory_record_models, library_models, conversation_handoff_models,
                  account_models, account_privacy_models, mail_models,
-                 repository_issue_models, im_models)  # register metadata
+                 account_conversation_models,
+                 remote_screen_models,
+                 repository_issue_models, release_note_models,
+                 task_notification_models, im_models, model_runtime_models)  # register metadata
 from app.config import get_settings
 from app.db import Base
 from app.schema_migrations import normalize_sqlite_merge_revision

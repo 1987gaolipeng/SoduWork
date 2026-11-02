@@ -84,11 +84,11 @@ class ConversationSaveTests(DeliveryCollectionsTestCase):
             new_id = response.json()["item"]["id"]
             self.assertNotIn(new_id, ids, values)
             ids.add(new_id)
-        # Ordinary uploads now reject destination-name collisions; only
-        # conversation revisions retain the independent-version contract.
+        # Ordinary uploads receive a collision-free suffix as well; only exact
+        # conversation/session/bytes matches are reused.
         plain_again = await self.save(sourceType="upload", sessionId="")
-        self.assertEqual(plain_again.status_code, 409, plain_again.text)
-        self.assertEqual(plain_again.json()["detail"]["code"], "LIBRARY_NAME_CONFLICT")
+        self.assertEqual(plain_again.status_code, 200, plain_again.text)
+        self.assertTrue(plain_again.json()["item"]["filename"].startswith("report（"))
 
     async def test_delivery_title_is_optional_sanitized_and_not_part_of_content_identity(self):
         initial = await self.upload(self.manifest(conversationTitle="\nDesign report\t"))

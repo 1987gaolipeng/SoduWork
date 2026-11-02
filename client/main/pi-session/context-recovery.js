@@ -1,6 +1,7 @@
 /* Native Pi compaction is primary. If its summarizer also overflows, keep a
  * durable, bounded extractive checkpoint in the SAME session archive. */
 'use strict';
+const { DEFAULT_OUTPUT_TOKENS } = require('../conversation/model-selection');
 const TYPE = 'soduwork-context-recovery';
 const learnedWindows = new WeakMap();
 const OVERFLOW = /context[_ ]?overflow|context_length_exceeded|context[_ ]window[_ ]exceeded|(?:maximum |exceeded |exceeds? .*|out of )context (?:length|window)|context (?:length|window).*(?:exceed|full|limit|too)|prompt (?:is )?too long|too many tokens|range of input length should be|input token count.{0,80}exceeds.{0,50}(?:maximum|limit)|input (?:is too long|length.*(?:exceed|limit))|longer than the model|上下文.{0,12}(?:超限|已满|超过)/i;

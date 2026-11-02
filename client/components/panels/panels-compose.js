@@ -42,6 +42,7 @@
   let _pickedModel = '';      // Selected conversation model; empty until the catalog loads.
   let _capabilities = [];     // Base session capabilities detected by the main process.
   let _pickedCapabilities = new Set();
+  let _requestedCapabilities = null;
   let _skills = [];           // Discoverable enterprise Skills with actual local installation state.
   let _skillPicker = null;    // Explicit session selection; the main process still loads personal defaults.
   let _capLoading = false;
@@ -613,6 +614,10 @@
     if (!typed.trim() && !hasAttachments) return;
     _menuSelectionSeq++;
     const text = typed.trim() ? typed : '请查看并处理我附上的文件。';
+    const inputPreparation = {
+      userText: typed,
+      ...( !typed.trim() && submittedFiles.length ? { fallback: true } : {}),
+    };
     if (global.ComposeExecution?.value() === 'cloud') {
       const mode = _intent?.current(text);
       const accepted = await _enterChat(text, '', { ...(mode?.mode === 'goal' ? { intent: 'goal' } : {}), inputPreparation });
@@ -656,8 +661,13 @@
        * before the asynchronous agent catalog request starts. */
       const scheduleSelection = global.ComposeModelPicker?.value?.() || { modelName: _pickedModel };
       const scheduleInput = input?.value;
-      accepted = await _createAutomation(text, intent, { isCurrent: () => submitViewSeq === _composeViewSeq &&
+      accepted = await _createAutomation(text, intent, {
+        adapterId: submitAdapter,
+        modelName: scheduleSelection.modelName || '',
+        repoId: _workspace.repoId || '',
+        isCurrent: () => submitViewSeq === _composeViewSeq &&
         submitOwner === (global.SoduWorkAPI?.taskStorageKey?.('ops') || '') && input?.value === scheduleInput &&
+        submitAdapter === (global.ComposeRuntime?.value?.() || 'pi') &&
         (!_attachments?.files || (() => { const current = _attachments.files();
           return current.length === submittedIdentities.length && current.every((file, index) => fileIdentity(file) === submittedIdentities[index]); })()) });
       if (accepted && _intent) _intent.reset();

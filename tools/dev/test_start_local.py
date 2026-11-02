@@ -60,12 +60,11 @@ class LocalStartupTests(unittest.TestCase):
                 return  # Native macOS path is covered by its platform startup job.
             fresh = start.default_state()
             self.assertIn("soduwork", fresh.as_posix().lower())
-            old = base / ("SoduWork/source-service" if os.name == "nt" else "soduwork/source-service")
-            old.mkdir(parents=True)
-            (old / "local-service.json").write_text("{}", encoding="utf-8")
-            self.assertEqual(start.default_state(), old)
             fresh.mkdir(parents=True)
+            marker = fresh / "local-service.json"
+            marker.write_text("{}", encoding="utf-8")
             self.assertEqual(start.default_state(), fresh)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "{}")
 
     def test_refuses_existing_unrelated_data_without_changes(self):
         self.state.mkdir()

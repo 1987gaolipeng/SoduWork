@@ -579,3 +579,32 @@ test('emergency passthrough keeps overlay ownership over workspace sync', (t) =>
   h.controller.recoverFromEmergency();
   assert.equal(win.visible, true);
 });
+
+// Pet + shortcut dock must be as passive as a single widget over the chat editor.
+test('multiple widgets release mouse and keyboard focus in every gap, including after a blur acknowledgement', t => {
+  const h = harness(t), win = h.controller.createWindow();
+  const rects = [{ x: 100, y: 100, width: 60, height: 180 }, { x: 400, y: 400, width: 72, height: 72 }];
+  h.ready(win);
+  const report = () => h.send('window-set-overlay-shape', win, rects, h.query('window-get-overlay-shape', win).revision);
+  report();
+  assert.equal(win.ignored, true, 'empty desktop must not become active just because pet and dock coexist');
+  assert.equal(win.focusable, false);
+  for (const point of [{ x: 110, y: 110 }, { x: 420, y: 420 }]) {
+    h.screen.cursor = point; h.timers.tick(40);
+    assert.equal(win.ignored, false, 'each visible widget remains clickable');
+    assert.equal(win.focusable, true);
+    h.screen.cursor = { x: 300, y: 300 }; h.timers.tick(40);
+    assert.equal(win.ignored, true, 'the gap between widgets belongs to the underlying chat');
+    assert.equal(win.focusable, false);
+    win.emit('blur'); report();
+    assert.equal(win.ignored, true, 'fresh geometry must not reactivate the transparent area');
+    h.send('window-set-ignore-mouse-events', win, false);
+    assert.equal(win.ignored, true, 'renderer mouse requests cannot bypass the guard');
+  }
+  const shapeCalls = win.calls.filter(call => call[0] === 'shape').length;
+  h.timers.tick(400);
+  assert.equal(win.calls.filter(call => call[0] === 'shape').length, shapeCalls, 'input polling never repaints unchanged regions');
+  h.screen.getCursorScreenPoint = () => { throw Error('display unavailable'); };
+  report();
+  assert.equal(win.ignored, true, 'missing cursor information fails open for underlying windows');
+});

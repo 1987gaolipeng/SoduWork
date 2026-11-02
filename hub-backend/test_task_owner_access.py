@@ -10,13 +10,24 @@ from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app import models
+from app import conversation_handoff_models, models
 from app.api import delivery, evolution, tasks, trace
 from app.db import Base
 from app.services import ai_exec, task_access, task_events
 
 
 class TaskOwnerAccessTests(unittest.IsolatedAsyncioTestCase):
+    async def test_requirement_execution_is_same_account_only_and_remains_pinned(self):
+        task = models.Task(id="requirement", kind="requirement", origin="local", owner_client_id="phone",
+                           owner_user_id="alice", created_by="alice", work_routing={"executionContext": {
+                               "runner": {"mode": "remote", "runnerId": "own-pc", "clientId": "pc"}}})
+        own_pc = models.Client(id="pc", user_ref="alice")
+        foreign = models.Client(id="other", user_ref="bob")
+        self.assertTrue(task_access.can_continue_execution(task, own_pc))
+        self.assertFalse(task_access.is_owner(task, own_pc), "execution does not grant owner-only mutations")
+        self.assertFalse(task_access.can_continue_execution(task, foreign))
+        task.work_routing = {}
+        self.assertFalse(task_access.can_continue_execution(task, own_pc), "never choose a fallback runner")
     async def asyncSetUp(self):
         self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
         self.session = async_sessionmaker(self.engine, expire_on_commit=False)()

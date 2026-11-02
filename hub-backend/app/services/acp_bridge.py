@@ -616,6 +616,12 @@ class AcpBridge:
         self.transition.resumable = bool(capabilities.get("loadSession") or
             (capabilities.get("sessionCapabilities") or {}).get("resume") is not None)
         session_params = {"cwd": self.cwd, "mcpServers": []}
+        if self.agent_name == "claude":
+            # The dispatch already supplies approved skills and MCP credentials.
+            # Personal/project hooks and permissive settings cannot override it.
+            session_params["_meta"] = {"claudeCode": {"options": {
+                "settingSources": [], "strictMcpConfig": True,
+            }}}
         session_config = {}
         if self.session_id:
             session_caps = capabilities.get("sessionCapabilities") or {}

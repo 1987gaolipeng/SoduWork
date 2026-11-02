@@ -35,6 +35,19 @@ async function fixture(t, options = {}) {
     changeIdentity: value => { current = value; }, imported: () => imported };
 }
 
+test('creation lookup uses owned durable receipts and ignores deleted or unrelated archives', async t => {
+  const f=await fixture(t), made=await f.store.reserve({title:'Origin'});
+  await f.store.save(made.sessionId,card({state:{phase:'succeeded',receipt:{id:'task',title:'Task'}},files:[]}));
+  assert.deepEqual(await f.store.findTaskCreation('task'),{ok:true,sessionId:made.sessionId});
+  assert.deepEqual(await f.store.findTaskCreation('other'),{ok:true,sessionId:''});
+  f.changeIdentity(identity('account-b'));
+  assert.deepEqual(await f.store.findTaskCreation('task'),{ok:true,sessionId:''});
+  f.changeIdentity(identity());
+  const archive=(await sessions.historyEntry(f.app,made.sessionId)).entry;
+  await fsp.unlink(archive.path);
+  assert.deepEqual(await f.store.findTaskCreation('task'),{ok:true,sessionId:''});
+});
+
 test('仅表单会话写入真实 Pi 存档、列入历史并可由 SDK 恢复，无模型消息', async t => {
   const f = await fixture(t);
   const created = await f.store.reserve({ title: '【需求】修复导出' });

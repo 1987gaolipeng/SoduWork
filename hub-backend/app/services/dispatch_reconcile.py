@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from .. import models
-from .task_access import publish_owner
+from .task_access import publish_task
 from ..db import SessionLocal
 from . import (ai_exec, ai_remote, execution_sessions, notify, runner_hub,
                task_events, task_status)
@@ -126,7 +126,8 @@ async def probe(candidate: Candidate) -> dict:
     current_boot = str(getattr(runner, "boot_id", "") or "")
     try:
         reply = await runner.call(
-            "job.has", {"ref": candidate.expected_ref}, timeout=15)
+            "job.has", {"ref": candidate.expected_ref,
+                        "admissionKey": "dispatch:" + candidate.expected_ref}, timeout=15)
     except Exception as error:  # noqa: BLE001 - a probe must never stop the sweep
         return {"state": "ambiguous", "reason": "probe-error",
                 "runnerOnline": True, "error": type(error).__name__,
@@ -150,6 +151,9 @@ async def probe(candidate: Candidate) -> dict:
     if (candidate.runner_boot_id and observed_boot
             and candidate.runner_boot_id == observed_boot):
         return {"state": "not-started", "runnerOnline": True,
+                "admissionDurable": ("admit1" in getattr(runner, "caps", [])
+                    and data.get("admissionDurable") is True
+                    and data.get("admissionKey") == "dispatch:" + candidate.expected_ref),
                 "observedBootId": observed_boot}
     return {"state": "ambiguous", "reason": "runner-restarted",
             "runnerOnline": True, "observedBootId": observed_boot}
@@ -286,8 +290,7 @@ async def _publish(session: AsyncSession, task: models.Task, action: str) -> Non
 
     if task.owner_client_id:
         try:
-            await publish_owner(session, task, {
-                "type": "task.updated", "task": await task_to_api_live(session, task)})
+            await publish_task(session, task, "task.updated", await task_to_api_live(session, task))
         except Exception as error:  # noqa: BLE001
             log.warning("派活对账状态推送失败 task=%s error=%s", task.id[:8], type(error).__name__)
     if action == "released":

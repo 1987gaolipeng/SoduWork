@@ -37,6 +37,7 @@ office = read(CLIENT / "components/panels/panels-aidesk-office.js")
 approvals = read(CLIENT / "components/panels/task-trace-approval.js")
 approval_inbox = read(CLIENT / "components/panels/task-approval-inbox.js")
 chat = read(CLIENT / "components/panels/panels-chat.js") + read(CLIENT / "components/panels/chat-message-renderer.js")
+acceptance_results = read(CLIENT / "components/panels/chat-acceptance-results.js")
 index = read(CLIENT / "index.html")
 desk_html = read(CLIENT / "desk.html")
 api = read(CLIENT / "api.js")
@@ -52,10 +53,10 @@ aidesk_service = read(ROOT / "hub-backend/app/services/aidesk_view.py")
 chk("统一组件暴露任务执行链路接口，并保留旧名兼容",
     "window.TaskExecutionJourney = api" in trace and "window.TaskFlowDetail = api" in trace
     and "window.TaskTraceView = api" in trace)
-chk("需求详情按执行权限展开共享证据，折叠时释放订阅；决策唯一面不再双卡",
+chk("需求详情按执行权限展开共享证据，折叠时释放订阅；决策与活动记录不重复展示",
     "task.canViewExecution === false" in requirement
-    # Reopening evidence must fetch fresh lifecycle facts while suppressing duplicate decisions.
-    and "TaskExecutionJourney?.mount(journey,{taskId:task.id,compact:true,suppressInlineApproval:true,force:true})"
+    # Activity records have their own panel; reopening evidence refreshes lifecycle facts without duplicating decisions or history.
+    and "TaskExecutionJourney?.mount(journey,{taskId:task.id,compact:true,suppressInlineApproval:true,suppressTimeline:true,force:true})"
     in re.sub(r"\s+", "", requirement)
     and "TaskExecutionJourney?.unmount(journey)" in requirement)
 chk("AI 办公区进入统一任务会话，不再另造半屏详情",
@@ -72,7 +73,11 @@ chk("AI 办公区摘要直接消费服务端阶段，完整进度由统一链路
     and "def _flow_phase(" not in aidesk_service
     and "def _direct_phase(" not in aidesk_service)
 chk("审批在原对话内呈现，复用统一审批和证据组件",
-    "TaskTraceApproval.html(entry.trace.approvals" in chat and "variant: 'task'" in chat
+    "ChatAcceptanceResults.create(ctx" in chat
+    and "TaskTraceApproval.html(entry.trace.approvals" in acceptance_results
+    and "variant: 'task'" in acceptance_results
+    and desk_html.index('src="components/panels/chat-acceptance-results.js"')
+        < desk_html.index('src="components/panels/chat-message-renderer.js"')
     and "TaskTraceView?.gateHtml?.(gate" in approvals)
 chk("人工通用审阅使用成果验收语义，不把日常办公任务误写成代码审查",
     all(text in approvals for text in ("验收交付结果", "确认验收", "交付结果已确认"))

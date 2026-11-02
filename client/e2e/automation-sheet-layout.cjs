@@ -107,7 +107,7 @@ if (typeof electron === 'string') {
       assert.ok(error.y >= 34 && error.bottom <= 800, '校验反馈必须可见');
       assert.match(await js('document.querySelector("#wazError").textContent'), /名字/);
       assert.equal(await js('saves.length'), 0);
-      assert.equal(await js('document.querySelector("[name=note]").value'), '任务原文\n'.repeat(100).trim());
+      assert.equal(await js('document.querySelector("[name=note]").value'), '任务原文\n'.repeat(100));
     });
     await run('切换工作方法重绘后保持滚动位置和键盘焦点', async () => {
       await open();
@@ -135,15 +135,43 @@ if (typeof electron === 'string') {
     });
     await run('长失败说明可完整查看，提交按钮保持可见并能重试', async () => {
       await open();
-      await js(`window.originalCreate=SoduWorkAPI.createSchedule;
-        SoduWorkAPI.createSchedule=async()=>{throw Error('隔离失败原因与处理建议。'.repeat(120))};
+      await js(`window.originalPreflight=SoduWorkAPI.preflightSchedule;
+        SoduWorkAPI.preflightSchedule=async()=>{throw Error('隔离失败原因与处理建议。'.repeat(120))};
         document.querySelector('[data-waz-save]').click();void 0;`);
       await delay(100);
       const save = await rect('[data-waz-save]');
       assert.ok(save.bottom <= 800 && save.y >= 34, '长错误不能把提交按钮推出视口');
       assert.equal(await js('document.querySelector("[data-waz-save]").disabled'), false);
       assert.ok(await js('document.querySelector("#wazError").textContent.length > 1000'));
+      await js('SoduWorkAPI.preflightSchedule=originalPreflight;document.querySelector("[data-waz-save]").click();void 0;');
+      await delay(100);
+      assert.equal(await js('!!document.querySelector(".waz-saved")'), true, '预检失败后可以重试并成功创建');
+    });
+    await run('创建结果未确认时禁止重复提交，提供管理页查询入口', async () => {
+      await open();
+      await js(`window.originalCreate=SoduWorkAPI.createSchedule;
+        SoduWorkAPI.createSchedule=async()=>{throw Error('创建请求连接中断')};
+        document.querySelector('[data-waz-save]').click();void 0;`);
+      await delay(100);
+      assert.equal(await js('document.querySelector("[data-waz-save]").disabled'), true);
+      assert.match(await js('document.querySelector("#wazError").textContent'), /创建结果尚未确认/);
+      assert.equal(await js('!!document.querySelector("[data-waz-open]")'), true);
       await js('SoduWorkAPI.createSchedule=originalCreate;void 0;');
+    });
+    await run('创建表单通过有限选项选择时间，并保存所选时分', async () => {
+      await open();
+      assert.deepEqual(await js(`['clockHour','clockMinute','minute'].map(name=>{
+        const field=document.querySelector('[name='+name+']');return [field.tagName,field.options.length];})`),
+        [['SELECT',24],['SELECT',60],['SELECT',60]]);
+      await js(`document.querySelector('[name=clockHour]').focus();void 0;`);
+      await key('End');
+      await js(`document.querySelector('[name=clockMinute]').focus();void 0;`);
+      await key('End');
+      assert.equal(await js('document.querySelector("[name=clockHour]").value'), '23');
+      assert.equal(await js('document.querySelector("[name=clockMinute]").value'), '59');
+      await js(`document.querySelector('[data-waz-save]').click();void 0;`);
+      await delay(100);
+      assert.deepEqual(await js('({hour:saves.at(-1).atHour,minute:saves.at(-1).atMinute})'), {hour:23,minute:59});
     });
     await run('聊天内嵌表单保持自然高度，不增加弹窗内滚动与焦点锁', async () => {
       await open(true);

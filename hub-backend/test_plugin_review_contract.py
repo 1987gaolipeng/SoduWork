@@ -8,6 +8,39 @@ from unittest.mock import AsyncMock, Mock, patch
 from app.services import workflow_contracts as contract, workflow_inputs
 
 
+class MissingDeliveryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_finished_agent_with_missing_delivery_records_contract_failure(self):
+        from contextlib import ExitStack
+        from app.services import workflow_engine as workflow
+        task = SimpleNamespace(id="task")
+        session = SimpleNamespace(get=AsyncMock(return_value=task))
+        run = SimpleNamespace(id="run", task_id=task.id, context={})
+        node = SimpleNamespace(id="node", node_key="write", node_type="ai", state="running",
+                               executor={}, output={}, error="", started_at=None, finished_at=None)
+        version = SimpleNamespace(workflow={"nodes": [{"key": "write", "type": "ai",
+            "outputs": [{"kind": "file", "path": "report.pdf", "required": True}]}]})
+        with ExitStack() as stack:
+            for name in ("_forget_ai_unreachable", "_forget_output_settle", "_event"):
+                stack.enter_context(patch.object(workflow, name))
+            stack.enter_context(patch.object(workflow, "_restore_ai_route", return_value=("ref", "runner")))
+            stack.enter_context(patch.object(workflow, "_node_timed_out", return_value=(False, 0)))
+            stack.enter_context(patch.object(workflow, "_wait_for_output_settle", return_value=False))
+            stack.enter_context(patch.object(workflow, "_node_config", AsyncMock(return_value={})))
+            stack.enter_context(patch.object(workflow, "_version", AsyncMock(return_value=version)))
+            stack.enter_context(patch.object(workflow, "_begin_rework", AsyncMock(return_value=False)))
+            stack.enter_context(patch.object(workflow, "_rework_evidence", return_value="missing delivery"))
+            stack.enter_context(patch.object(workflow.ai_exec, "load", AsyncMock(return_value={})))
+            stack.enter_context(patch.object(workflow.ai_exec, "status_sync", return_value={
+                "ok": True, "done": True, "running": False, "text": "Agent claims completion"}))
+            decision = stack.enter_context(patch.object(workflow, "_completion_decision", AsyncMock()))
+            await workflow._poll_node(session, run, node)
+        self.assertEqual(node.state, "failed")
+        self.assertEqual(node.output["failureKind"], "contract")
+        self.assertTrue(node.output["outputReceipt"]["missing"])
+        self.assertIsNotNone(node.finished_at)
+        decision.assert_not_awaited()
+
+
 class ReviewModeTests(unittest.TestCase):
     def test_all_bundled_office_reviews_are_file_reviews(self):
         keys = ['deep-research', 'diagram-studio', 'document-studio', 'knowledge-synthesis',

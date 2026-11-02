@@ -34,7 +34,7 @@
       taskState: { get() { return this._taskState; } }, taskError: { get() { return this._taskError; } },
     });
     Object.assign(store, {
-      _initializing: false, _incomingQueue: [], _incomingSeen: Object.create(null),
+      _initializing: false, _incomingSeen: Object.create(null),
       _localReady: false, _remoteReady: false, _hasTaskSnapshot: false,
       _taskState: 'loading', _taskError: '', _taskEpoch: 0, _cfgRevision: 0,
       _hydratePromise: null, _configPromise: null, _startupPromise: null,
@@ -45,8 +45,7 @@
         if (typeof global.petSay === 'function') global.petSay(message, 6000);
         else try { global.console.error('[task sync]', id, error); } catch (_) {}
       },
-      takeIncomingTasks() { const rows = this._incomingQueue.slice(); this._incomingQueue.length = 0; return rows; },
-      _clearIncomingTasks() { this._incomingQueue.length = 0; this._incomingSeen = Object.create(null); },
+      _clearIncomingTasks() { this._incomingSeen = Object.create(null); },
       _emitTaskSource(detail) {
         emit('soduwork-task-source', Object.assign({ state: this._taskState,
           online: this._taskState === 'ready', count: this._tasks.length,
@@ -121,10 +120,13 @@
       },
       _applyConfigPatch(patch) {
         if (!patch || typeof patch !== 'object') return;
+        const previous = { ...this._cfg };
+        // An earlier config GET must not overwrite a newer administrator action.
+        ++this._cfgRevision;
         stripServerOwned(patch); Object.assign(this._cfg, patch);
         if (patch.locale) global.SoduWorkI18n?.setLocale(patch.locale, { persist: false });
         global.localStorage.setItem(LS_CFG, JSON.stringify(this._cfg)); global.WinSync?.pushCfg();
-        hooks.configEffects(patch); global.petSay?.('管理员更新了设置～');
+        hooks.configEffects(patch, previous); global.petSay?.('管理员更新了设置～');
       },
       initLocal() {
         if (!this._localReady) {

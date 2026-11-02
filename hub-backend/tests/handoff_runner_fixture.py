@@ -27,8 +27,10 @@ def command(exe, args, ws, cfg, profile):
     if agent == "opencode":
         sid = args[args.index("--session") + 1] if "--session" in args else ""
         actual = acp_agents.command_argv(agent, exe, acp_agents.run_args(sid, "work", ws, cfg), ws, cfg)
-    else:
+    elif agent in {"codex-harness", "qwen", "dsh", "harness2"}:
         actual = original_argv(exe, args, ws, cfg, profile)
+    else:
+        actual = None
     if agent == "harness2":
         entry = str(Path(__file__).with_name("handoff_harness2_entry.py"))
         return [actual[0], entry, *actual[2:]]

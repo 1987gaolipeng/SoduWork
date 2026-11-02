@@ -70,6 +70,27 @@ new = runner_hub._Runner(_WS(), {"runnerId": "r-new", "host": "新机器", "caps
 chk("旧 runner（hello 无 caps）不启用二进制", old.bin is False and old.caps == [])
 chk("新 runner（hello 带 bin1）启用二进制", new.bin is True)
 
+# Capability names are protocol identifiers, not display labels. Truncating
+# executionSelection1 prevents durable continuation from reaching the Runner.
+advertised = ["bin1", "handoff1", "executionSelection1", "sessionAck1", "admit1"]
+current = runner_hub._Runner(_WS(), {"runnerId": "r-current", "caps": advertised})
+chk("完整保留续聊与执行切换能力", current.caps == advertised, current.caps)
+
+from app.services.cluster_runtime import RemoteRunner  # noqa: E402
+
+remote = RemoteRunner("other-hub", {**current.api(), "clusterToken": "fixture-only"})
+chk("集群转发保留同一组协议能力", remote.caps == advertised, remote.caps)
+remote.update({"caps": ["executionSelection1", "admit1"]})
+chk("集群心跳更新不截断能力名", remote.caps == ["executionSelection1", "admit1"], remote.caps)
+
+malformed = runner_hub._Runner(_WS(), {"runnerId": "r-malformed", "caps": "bin1"})
+chk("能力列表不接受字符串冒充数组", malformed.caps == [] and not malformed.bin)
+bounded = runner_hub._Runner(_WS(), {"runnerId": "r-bounded", "caps": [
+    "bin1" + "x" * 64, None, {}, "", "admit1", "admit1"]})
+chk("无效或超长能力不截断成其他标识", bounded.caps == ["admit1"], bounded.caps)
+limited = runner_hub._Runner(_WS(), {"runnerId": "r-limit", "caps": [f"cap{i}" for i in range(20)]})
+chk("能力数量仍限制为八项", limited.caps == [f"cap{i}" for i in range(8)])
+
 # Hub must accept both legacy and binary output chunks.
 from app.services import ai_remote  # noqa: E402
 

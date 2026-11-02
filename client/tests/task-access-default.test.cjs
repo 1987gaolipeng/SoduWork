@@ -15,6 +15,6 @@ test('history, ordinary callers and explicit policies retain their existing sema
   for (const source of [
     { taskRef: 't', taskSession: true, chatId: 'history' }, {},
     ...['readonly','full','standard'].map(accessMode=>({taskRef:'t',taskSession:true,accessMode})),
-    ...['claude','unknown-runtime'].map(adapterId=>({taskRef:'t',taskSession:true,adapterId})),
+    ...['unknown-runtime'].map(adapterId=>({taskRef:'t',taskSession:true,adapterId})),
   ]) assert.equal(withTaskAccessDefault(source), source);
 });

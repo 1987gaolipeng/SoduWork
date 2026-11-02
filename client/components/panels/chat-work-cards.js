@@ -213,6 +213,8 @@
       try { task = await global.SoduWorkAPI.getTask(receipt.id); } catch (_) { return; }
       if (!eligible() || String(task?.id || '') !== String(receipt.id) ||
           task.readOnly || task.canViewExecution === false || task.archivedAt) return;
+      const executionChat = String(task.workRouting?.conversationTurn?.conversationId || '');
+      if (executionChat && executionChat !== String(ctx._sessionId)) return;
       // Once the runtime fixes its requirement scope, even empty/nonempty
       // changes are incompatible (the native binding API enforces the same).
       const established = ctx._snap?.requirementContext;
@@ -265,7 +267,7 @@
           if (!owned(record)) return;
           // Closing an inline requirement also clears the action picker. This
           // prevents the next ordinary chat turn from inheriting a stale
-          // /新建需求 selection after the card is cancelled.
+          // requirement-creation selection after the card is cancelled.
           ctx._pluginMention?.clearAction?.();
           record.closed = true; record.version++; queue(record);
           if (active === record) active = null;

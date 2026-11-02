@@ -11,6 +11,9 @@
 !hub-backend/requirements.txt
 !hub-backend/requirements-runner.txt
 !hub-backend/alembic.ini
+!hub-backend/jiyong-alembic.ini
+!hub-backend/jiyong-migrations/
+!hub-backend/jiyong-migrations/**
 !hub-backend/db_admin.py
 !hub-backend/full_backup.py
 !hub-backend/runner_main.py

@@ -31,7 +31,7 @@ test('覆盖窗失焦保留显示区域，先穿透再通知渲染层确认新�
   assert.match(sync, /_overlayAwaitingShape/, '轮询不得在当前 revision 确认前恢复输入');
 });
 
-test('关闭小球只剩竖条时，主进程按真实组件区域持续守住鼠标穿透', () => {
+test('桌宠和竖条单独或同时显示时，主进程按真实组件区域持续守住鼠标穿透', () => {
   const apply = block(main, 'function applyOverlayShape(', 'function parkOverlayShape(');
   assert.match(apply, /_overlayShape\.resolve\(normalized, bounds\)/);
   assert.match(apply, /_overlayInputRects = normalized/);
@@ -40,7 +40,8 @@ test('关闭小球只剩竖条时，主进程按真实组件区域持续守住�
   assert.match(sync, /_overlayShape\.containsPoint/);
   assert.match(sync, /_setOverlayInputIgnored\(!inside\)/);
   const guard = block(main, 'function _startOverlayInputGuard()', 'function applyOverlayShape(');
-  assert.match(guard, /_overlayInputRects\.length === 1/);
+  assert.match(guard, /_syncOverlayInputNow\(\)/);
+  assert.doesNotMatch(sync + guard, /_overlayInputRects\.length [!=]==? 1/);
   assert.match(guard, /40/);
 });
 

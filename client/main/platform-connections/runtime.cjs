@@ -32,7 +32,17 @@ function entry(app,key){
 async function adapter(key){provider(key);return import(pathToFileURL(path.join(__dirname,'providers',key,'scripts/runtime.mjs')).href);}
 function node(){return nodeRuntime.resolve().node;}
 function env(selected=nodeRuntime.resolve()){const next={...selected.env};for(const k of ['NODE_OPTIONS','SODUWORK_PROXY_KEY','SODUWORK_MCP_KEY','SODUWORK_MCP_SERVERS','SODUWORK_MCP_SERVERS_JSON','APP_ID','APP_SECRET','USER_ACCESS_TOKEN'])delete next[k];return next;}
-function stop(child){if(!child||!child.pid||child.exitCode!==null)return true;if(process.platform==='win32'){const result=spawnSync('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore',timeout:5000});return result.status===0||child.exitCode!==null;}return child.kill('SIGTERM');}
+function stop(child){
+ if(!child||!child.pid||child.exitCode!==null||stoppedChildren.has(child))return true;
+ if(process.platform==='win32'){
+  const result=spawnSync('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore',timeout:5000});
+  // taskkill completes before Node can deliver the child's exit event. Remember
+  // only a confirmed successful tree termination so repeated cleanup is safe.
+  if(result.status===0){stoppedChildren.add(child);return true;}
+  return child.exitCode!==null;
+ }
+ return child.kill('SIGTERM');
+}
 function execute(command,args,options={}){let child;const completion=new Promise((resolve,reject)=>{let output='',error='',settled=false;child=spawn(command,args,{cwd:options.cwd,env:options.env||env(),shell:false,windowsHide:true,stdio:['ignore','pipe','pipe']});const timer=options.timeout===0?null:setTimeout(()=>{stop(child);finish(Error('平台程序响应超时，请重试'));},options.timeout||30000);const finish=(failure,value)=>{if(settled)return;settled=true;clearTimeout(timer);failure?reject(failure):resolve(value);};child.stdout.on('data',part=>{output=(output+part.toString()).slice(-1024*1024);if(options.onOutput)options.onOutput(output);});child.stderr.on('data',part=>{error=(error+part.toString()).slice(-64000);if(options.onOutput)options.onOutput(output+'\n'+error);});child.once('error',()=>finish(Error('无法启动平台程序，请重新准备运行环境')));child.once('exit',code=>finish(null,{code,output,error}));});return{completion,cancel:()=>stop(child),get child(){return child}};}
 async function inspect(app,key){const p=paths(app,key),a=await adapter(key);const found=a.inspect(p.provider,p.prefix);const sdk=p.provider.registrationSdk;
  if(found.status==='installed'&&sdk){try{const file=path.join(p.prefix,'node_modules',sdk.package,'package.json');assertNoLinks(p.root,file);const installed=JSON.parse(fs.readFileSync(file,'utf8'));const lock=JSON.parse(fs.readFileSync(path.join(p.prefix,'package-lock.json'),'utf8'));if(installed.version!==sdk.version||lock.packages?.['node_modules/'+sdk.package]?.integrity!==sdk.npmIntegrity)found.status='needs_update';}catch(_){found.status='needs_update';}}

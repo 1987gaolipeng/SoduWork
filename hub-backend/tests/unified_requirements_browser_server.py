@@ -59,9 +59,9 @@ calls = {"dispatches": [], "events": []}
 original_publish = hub.publish
 
 
-async def publish(client_id, event):
+async def publish(client_id, event, **kwargs):
     calls["events"].append({"client": client_id, "event": event})
-    await original_publish(client_id, event)
+    await original_publish(client_id, event, **kwargs)
 
 
 hub.publish = publish

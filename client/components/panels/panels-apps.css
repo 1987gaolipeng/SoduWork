@@ -69,16 +69,6 @@
   color: var(--ink-3); background: var(--bg-2); border: 1px solid var(--line);
 }
 .appsx-card-headline { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.appsx-card-headline b { min-width: 0; }
-
-/* Personal and marketplace tabs. */
-.appsx-tabs { display: flex; align-items: center; gap: 4px; padding: 0; }
-.appsx-tab {
-  padding: 7px 16px; border: 0; border-radius: var(--r-full); background: transparent;
-  color: var(--ink-3); font: inherit; font-size: 14px; font-weight: 500; cursor: pointer;
-  transition: background .15s var(--ease), color .15s var(--ease);
-}
-.appsx-card-headline { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .appsx-version-tag {
   flex: none; max-width: 100px; overflow: hidden; text-overflow: ellipsis;
   font-size: 12px; line-height: 18px; white-space: nowrap; color: var(--ink-3);
@@ -92,8 +82,9 @@
 .appsx-scroll { flex: 1; min-height: 0; overflow: auto; padding: 18px 36px 30px; }
 .appsx-scroll > * { width: 100%; max-width: 1440px; margin-inline: auto; box-sizing: border-box; }
 
-/* Sections and two-column grid. */
-.appsx-section { margin-top: 26px; min-width: 0; overflow: hidden; }
+/* List columns follow available section width and keep individual cards compact. */
+.appsx-section { --appsx-card-max: 680px; margin-top: 44px; min-width: 0; overflow: hidden; container: apps-list / inline-size; }
+.appsx-section:first-child { margin-top: 26px; }
 .appsx-sec-head { display: flex; align-items: center; gap: 5px; }
 .appsx-sec-head h2 { margin: 0; font-size: 17px; font-weight: 700; color: var(--ink); }
 .appsx-section-empty { margin: 12px 0 0; color: var(--ink-3); font-size: 13px; line-height: 1.6; }
@@ -222,44 +213,72 @@
 .appsx-settings-error { color: var(--s-critical, #c64151); font-size: 12px; line-height: 1.5; }
 .appsx-settings-error[hidden] { display: none; }
 
-/* Application creation dialog with three application types. */
-.appsx-create { width: min(460px, calc(100vw - 32px)); }
-.appsx-create-body { gap: 12px; }
-.appsx-create-options { display: grid; gap: 10px; }
+/* Joined creation tabs with local categories and a separate web connection panel. */
+.appsx-create { display: flex; flex-direction: column; width: min(720px, calc(100vw - 32px)); max-height: 88vh; border: 0; border-radius: 28px; overflow: hidden; }
+.appsx-create-body { padding: 0; gap: 0; background: transparent; grid-template-rows: auto auto; }
+.appsx-create-options { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); background: var(--bg-2); min-height: 92px; }
+.appsx-create-tab-shape { position: absolute; inset: 0; width: 100%; height: 100%; fill: var(--bg-0); pointer-events: none; }
+.is-web .appsx-create-tab-shape { transform: scaleX(-1); }
 .appsx-create-opt {
-  position: relative;
-  display: flex; align-items: center; gap: 12px; width: 100%;
-  padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px;
-  background: var(--bg-0); color: var(--ink); font: inherit; text-align: left; cursor: pointer;
-  transition: border-color .15s var(--ease), background .15s var(--ease), box-shadow .15s var(--ease);
+  position: relative; min-width: 0; padding: 30px 24px; border: 0; border-radius: 0; outline: none;
+  background: transparent; color: var(--ink-3); font: inherit; cursor: pointer; box-shadow: none;
 }
-.appsx-create-opt:hover { background: var(--bg-1); }
-.appsx-create-easy {
-  position: absolute; top: -1px; right: -1px; padding: 2px 10px;
-  border-radius: 0 12px 0 8px; background: #18181b; color: #fff;
-  font-size: 12px; font-weight: 600; line-height: 18px; white-space: nowrap;
+.appsx-create-opt b { font-size: 19px; font-weight: 650; }
+.appsx-create-opt.selected { color: var(--ink); }
+.appsx-create-opt:focus-visible b { text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 7px; }
+.appsx-create-badge { position: absolute; top: 12px; right: 44px; padding: 2px 8px; border-radius: var(--r-full); background: var(--accent-soft); color: var(--accent); font-size: 12px; }
+/* Both panels share one grid cell: hidden content still sizes the surface, preventing jumps. */
+.appsx-create-content { grid-area: 2 / 1; min-width: 0; padding: 22px 28px 14px; background: var(--bg-0); }
+.appsx-create-content[hidden] { display: block; visibility: hidden; pointer-events: none; }
+.appsx-create-intro { margin: 0 0 20px; font-size: 13px; line-height: 1.7; color: var(--ink-3); }
+.appsx-create-storage-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 24px; margin-bottom: 18px; }
+.appsx-create-storage { display: flex; flex: none; flex-wrap: wrap; gap: 10px 28px; min-width: 0; margin: 0; padding: 0; border: 0; color: var(--ink); }
+.appsx-create-storage label { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+.appsx-create-storage input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.appsx-create-storage input[type="radio"] { cursor: pointer !important; }
+.appsx-create-storage input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.appsx-create-storage-hint { flex: 1 1 240px; min-width: 0; margin: 0; font-size: 12px; line-height: 1.7; text-align: right; color: var(--ink-3); }
+.appsx-create-category:disabled { opacity: .55; cursor: default; }
+.appsx-create-category:disabled .appsx-create-start { opacity: 0; }
+.appsx-create-categories { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.appsx-create-category {
+  position: relative; display: grid; grid-template-columns: 36px minmax(0, 1fr); align-items: center; align-content: start; gap: 10px;
+  min-width: 0; padding: 18px 16px 48px; border: 0; border-radius: 12px; background: var(--bg-1);
+  color: var(--ink); font: inherit; text-align: left; cursor: pointer;
 }
-.appsx-create-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.appsx-create-opt.selected {
-  border-color: var(--accent); background: var(--accent-soft);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+.appsx-create-category:hover, .appsx-create-category:focus-visible { background: var(--bg-2); }
+.appsx-create-category:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.appsx-create-ico { display: inline-flex; color: var(--accent); }
+.appsx-create-ico svg { width: 36px; height: 36px; }
+.appsx-create-category b { font-size: 15px; }
+.appsx-create-category small { grid-column: 1 / -1; color: var(--ink-3); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.appsx-create-start { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); display: inline-flex; align-items: center; justify-content: center; width: max-content; min-width: 110px; box-sizing: border-box; text-align: center; white-space: nowrap; padding: 5px 16px; border-radius: var(--r-full); background: var(--ink); color: var(--bg-0); font-size: 12px; opacity: 0; transition: opacity .14s var(--ease); }
+.appsx-create-category:hover .appsx-create-start, .appsx-create-category:focus-visible .appsx-create-start { opacity: 1; }
+.appsx-create-fit { margin: 20px 0 0; color: var(--ink-3); text-align: center; font-size: 12px; line-height: 1.7; }
+.appsx-create-web { text-align: center; }
+.appsx-create-web-icon { display: inline-flex; margin: 10px 0; color: var(--accent); }
+.appsx-create-web-icon svg { width: 40px; height: 40px; }
+.appsx-create-web h3 { margin: 6px 0 12px; font-size: 20px; color: var(--ink); }
+.appsx-create-recommendations { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 24px 0; text-align: left; }
+.appsx-create-recommendations > div { display: grid; gap: 8px; padding: 18px 16px; border-radius: 12px; background: var(--bg-1); }
+.appsx-create-recommendations b { font-size: 14px; color: var(--ink); }
+.appsx-create-recommendations small { color: var(--ink-3); font-size: 12px; line-height: 1.7; }
+.appsx-create-web > .appsx-pill { justify-content: center; min-width: 160px; }
+@media (hover: none) { .appsx-create-start { opacity: 1; } }
+@media (max-width: 480px) {
+  .appsx-create-content { padding: 18px 16px 12px; }
+  .appsx-create-storage-hint { text-align: left; }
+  .appsx-create-opt b { font-size: 16px; }
+  .appsx-create-categories, .appsx-create-recommendations { grid-template-columns: minmax(0, 1fr); }
 }
-.appsx-create-ico {
-  flex: none; width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 11px; background: var(--bg-2); color: var(--accent);
+.appsx-create-foot { gap: 8px; background: var(--bg-0); }
+.appsx-create-install {
+  border: 0; border-radius: 9px; padding: 7px 11px; background: var(--bg-2); color: var(--ink-2);
+  font: inherit; font-size: 12.5px; cursor: pointer;
 }
-.appsx-create-ico svg { width: 20px; height: 20px; }
-.appsx-create-txt { flex: 1; min-width: 0; display: grid; gap: 3px; }
-.appsx-create-txt b { font-size: 13.5px; font-weight: 600; color: var(--ink); }
-.appsx-create-txt small { font-size: 12px; line-height: 1.5; color: var(--ink-3); }
-.appsx-create-mark {
-  flex: none; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 50%; border: 1.5px solid var(--line-3); color: transparent;
-  transition: border-color .15s var(--ease), background .15s var(--ease), color .15s var(--ease);
-}
-.appsx-create-mark svg { width: 12px; height: 12px; }
-.appsx-create-opt.selected .appsx-create-mark { border-color: var(--accent); background: var(--accent); color: #fff; }
-.appsx-create-foot { gap: 8px; flex-wrap: wrap; }
+.appsx-create-install:hover { background: color-mix(in srgb, var(--bg-2) 92%, var(--ink)); color: var(--ink); }
+.appsx-create-install:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#appsCreateCancel { min-width: 120px; min-height: 34px; padding: 7px 18px; border: 0; background: var(--bg-1); text-align: center; }
 
 /* Empty, loading, and inline feedback states. */
 .appsx-empty {
@@ -281,7 +300,7 @@
   background: var(--bg-2); font-size: 12.5px; color: var(--ink-2);
 }
 
-/* Use one column and a narrower search field in small windows. */
+/* Wrap toolbar actions and narrow the search field in small windows. */
 @media (max-width: 920px) {
   .appsx-top { flex-wrap: wrap; gap: 14px; }
   .appsx-tools { flex: 1 1 100%; min-width: 0; flex-wrap: wrap; }
@@ -289,7 +308,7 @@
 }
 
 /* In full-page workspace mode, align with page gutters and let sidebar navigation handle closing. */
-html[data-desk-panel="workspace"] #appsPanel :is(.appsx-top,.appsx-tabs,.appsx-scroll) {
+html[data-desk-panel="workspace"] #appsPanel :is(.appsx-top,.appsx-scroll) {
   padding-left: clamp(18px, 2vw, 34px);
   padding-right: clamp(18px, 2vw, 34px);
 }

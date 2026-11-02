@@ -32,6 +32,13 @@
     };
     if (application) contextPrompts[0] = '【SoduWork 即用开发上下文】基于插件开发规范制作 template=app 的即用，贯通真实页面、技能、当前即用对话和壳刷新，并走当前会话的草稿预检安装链路。';
     if (application && ['office','game','robot','other'].includes(context?.appCategory)) contextPrompts.push('即用固定分类：appCategory='+context.appCategory+'；写入草稿顶层，随包提交。');
+    if (application && ['local','cloud'].includes(context?.storageLocation)) {
+      const location = context.storageLocation;
+      // The conversation bridge accepts four entry prompts. Keep the required
+      // choice in the first prompt so optional attachment/category hints cannot truncate it.
+      contextPrompts[0] += '\n用户已选择'+(location==='cloud'?'数据云存储':'数据本地化')+'：必须在草稿顶层 jiyong.storage 声明 '+JSON.stringify({location})+'。按 references/cloud-data.md 使用统一 data.* 接口，提供版本化初始化 JSON；不得自行改变存储位置或创建替代数据库。'+
+        (location==='cloud'?'由 Hub 按包名和当前账号自动开通云端空间；预检只读检查服务就绪，安装/首次访问初始化，不内置连接串或凭据。':'使用宿主本机 SQLite；不申请云端数据库，不自动上传业务数据。');
+    }
     return payload;
   }
 

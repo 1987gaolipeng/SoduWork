@@ -14,7 +14,7 @@ from typing import Any, Awaitable, Callable
 
 
 _DATA_IMAGE = re.compile(
-    r"^data:(image/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=\r\n]+)$",
+    r"^data:(image/[a-z0-9][a-z0-9.+-]*);base64,([A-Za-z0-9+/=\r\n]+)$",
     re.IGNORECASE,
 )
 _IMAGE_TYPES = frozenset(("input_image", "image", "image_url"))

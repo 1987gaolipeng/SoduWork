@@ -21,6 +21,48 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class CloudConversationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_mobile_automatic_review_real_report_transport_and_settlement(self):
+        from app import automation_models as am
+        from app.services import cloud_acceptance
+        task_id = 'mobile-acceptance-source'
+        async with db.SessionLocal() as session:
+            session.add_all([
+                models.Task(id=task_id, title='Synthetic review', status='done',
+                    created_by=self.fixture.owner.id, owner_client_id=self.fixture.client.id,
+                    acceptance_criteria=['Read the fixed text']),
+                am.ArtifactVersion(id='mobile-acceptance-artifact', task_id=task_id, seq=1,
+                    kind='output', checksum='isolated', state='candidate',
+                    manifest={'schemaVersion': 'soduwork.delivery/1', 'complete': True,
+                              'primary': [], 'problems': [], 'text': 'Isolated review output'}),
+                am.ApprovalRequest(id='mobile-acceptance-approval', task_id=task_id,
+                    artifact_version_id='mobile-acceptance-artifact', action='review', status='pending',
+                    required_count=1, policy_snapshot={'separationOfDuties': False},
+                    context={'acceptanceCriteria': ['Read the fixed text']}),
+                am.ApprovalAssignment(request_id='mobile-acceptance-approval', user_id=self.fixture.owner.id),
+            ])
+            await session.commit()
+        binding = {'taskId': task_id, 'approvalId': 'mobile-acceptance-approval',
+                   'artifactVersionId': 'mobile-acceptance-artifact', 'requirementVersion': 1}
+        response = await self.create('mobile-automatic-review', text='CLOUD_ACCEPTANCE_TEST', acceptance=binding)
+        self.assertEqual(response.status_code, 200, response.text)
+        receipt = response.json()
+        self.assertEqual(receipt['phase'], 'committed', receipt)
+        await self.fixture.complete(receipt['ref'])
+        read = await self.http.get('/api/v1/tasks/' + receipt['taskId'] + '/ai-session')
+        self.assertEqual(read.status_code, 200, read.text)
+        self.assertFalse(read.json()['canSend'])
+        async with db.SessionLocal() as session:
+            settled = await execution_settlement.settle_terminal(session, receipt['taskId'], receipt['ref'])
+            self.assertTrue(settled['ok'], settled)
+            state = await cloud_acceptance.status(session, receipt['taskId'])
+            self.assertEqual(state['result']['verdict'], 'approved', state)
+            source = await session.get(models.Task, task_id)
+            self.assertIsNotNone(source.reviewed_at)
+        replay = await self.create('mobile-automatic-review', text='CLOUD_ACCEPTANCE_TEST', acceptance=binding)
+        self.assertEqual(replay.status_code, 200, replay.text)
+        self.assertEqual(replay.json()['ref'], receipt['ref'])
+        self.assertEqual(self.fixture.peer.calls.count('job.dispatch'), 1)
+
     async def asyncSetUp(self):
         self.fixture = fixture.HandoffTests("test_security_two_phase_real_execution_and_restart")
         await self.fixture.asyncSetUp()
@@ -35,6 +77,10 @@ class CloudConversationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         self.library_patch.stop()
         await self.fixture.asyncTearDown()
+        # Each test needs fresh seeded identities; the Runner and DB are closed.
+        database = fixture.WORK / "test.db"
+        self.assertEqual(Path(db.engine.url.database).resolve(), database.resolve())
+        database.unlink(missing_ok=True)
 
     async def create(self, request_id, *, files=(), options=None, **changes):
         body = {"sessionId": "cloud-" + request_id, "agentId": "codex", "model": "",
@@ -112,7 +158,16 @@ class CloudConversationTests(unittest.IsolatedAsyncioTestCase):
                 session.add(phone)
                 await session.commit()
             phone_headers = {"Authorization": "Device " + device_auth.issue_session(phone)[0]}
-            synced = await self.http.get("/api/v1/deliveries/from-task/" + receipt["taskId"], headers=phone_headers)
+            delivery_url = "/api/v1/deliveries/from-task/" + receipt["taskId"]
+            pending = await self.http.get(delivery_url, headers=phone_headers)
+            self.assertEqual(pending.status_code, 200, pending.text)
+            self.assertEqual(pending.json()["state"], "pending", pending.text)
+            self.assertIsNone(pending.json()["delivery"])
+            # Completion preserves outputs; saving them requires an explicit user action.
+            saved = await self.http.post(delivery_url, headers=phone_headers)
+            self.assertEqual(saved.status_code, 200, saved.text)
+            self.assertEqual(saved.json()["state"], "synced", saved.text)
+            synced = await self.http.get(delivery_url, headers=phone_headers)
             self.assertEqual(synced.status_code, 200, synced.text)
             self.assertEqual(synced.json()["state"], "synced", synced.text)
             delivery = synced.json()["delivery"]
@@ -263,7 +318,6 @@ class CloudConversationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(again.json()["phase"], "committed", again.text)
             self.assertEqual(peer.calls.count("job.dispatch"), before + 1)
             await self.fixture.complete(again.json()["ref"])
-
 
 if __name__ == "__main__":
     unittest.main()

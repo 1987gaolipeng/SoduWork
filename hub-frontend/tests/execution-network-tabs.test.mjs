@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createComponentHarness } from './helpers/react-harness.mjs'
+import * as appearance from '../src/client-appearance.js'
 
 test('execution network opens employee devices on every visit, regardless of the previous tab', async (t) => {
   const previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage')
@@ -15,6 +16,7 @@ test('execution network opens employee devices on every visit, regardless of the
   })
   const mount = () => createComponentHarness(new URL('../src/screens/Clients.jsx', import.meta.url), {
     dependencies: {
+      '../client-appearance.js': appearance,
       '../api.js': { api: {}, can: () => true },
       '../FilterControls.jsx': { FilterInput: 'FilterInput', FilterSelect: 'FilterSelect' },
       '../ListPager.jsx': 'ListPager',

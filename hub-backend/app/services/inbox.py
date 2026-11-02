@@ -53,9 +53,11 @@ def _pool_clauses(org_ids: set[str], client=None):
             models.Task.pool_org_id.in_(org_ids),
             models.Task.status.in_(("todo", "doing")),
             ~repository_issue_access.linked_clause(),
-        ).order_by(models.Task.created_at.desc())
-    )
-    return list(res.scalars().all())
+        ))
+    if client is not None and getattr(client, "user_ref", None):
+        clauses.append(and_(repository_issue_access.visible_clause(client),
+                            repository_issue_access.claimable_clause()))
+    return clauses
 
 
 def _inbox_clause(scope: set[str], client):
@@ -79,7 +81,7 @@ async def inbox_count(session: AsyncSession, client: models.Client) -> int:
     )) or 0)
 
 
-async def _enrich(session: AsyncSession, rows) -> list[dict]:
+async def _enrich(session: AsyncSession, rows, client=None) -> list[dict]:
     """Serialize inbox tasks with domain, organization, priority, creator, and waiting duration."""
     # Resolve domain and organization display names.
     dom_ids = {t.domain_id for t in rows if t.domain_id}
@@ -119,24 +121,19 @@ async def _enrich(session: AsyncSession, rows) -> list[dict]:
             "teamId": t.pool_org_id, "teamName": org_names.get(t.pool_org_id, ""),
             "createdByName": getattr(t, "created_by_name", None) or "",
             "source": t.source,
-            "waiting": _humanize(t.created_at, now),   # Calculate time spent waiting in the inbox.
+            "waiting": _humanize(t.created_at, now),
         })
         items.append(item)
     return items
 
 
-async def list_for_user(session: AsyncSession, me: models.User | None) -> dict:
+async def list_for_user(session: AsyncSession, me: models.User | None, client=None) -> dict:
     """List a user's inbox tasks using shared desktop and administration rules."""
     scope = await scope_for_user(session, me)
-    client = SimpleNamespace(user_ref=me.id) if me and me.is_active else None
-    rows = list(await session.scalars(select(models.Task).where(
-        _inbox_clause(scope, client)).order_by(models.Task.created_at.desc()))) if client else []
-    items = await _enrich(session, rows)
-    prepared = await repository_issue_access.projection(session, client, rows)
-    for task, item in zip(rows, items):
-        if task.id in prepared:
-            item.update(triageStage=task.triage_stage, canViewExecution=False)
-            await repository_issue_access.decorate(session, client, task, item, prepared=prepared)
+    actor = client or (SimpleNamespace(id="", user_ref=me.id, auth_state="active", revoked_at=None)
+                       if me and me.is_active else None)
+    rows = await _pool_query(session, scope, actor)
+    items = await _enrich(session, rows, actor)
     org_name = ""
     if me and me.org_id:
         og = await session.get(models.OrgUnit, me.org_id)
@@ -288,9 +285,6 @@ async def assign_to_user(session: AsyncSession, tid: str, target: models.User,
     t = await session.get(models.Task, tid)
     if t is None:
         return {"ok": False, "reason": "not_found"}
-    from . import repository_issue_access
-    if await repository_issue_access.linked(session, tid):
-        return {"ok": False, "reason": "out_of_scope"}
     if t.owner_client_id is not None:
         return {"ok": False, "reason": "already_claimed"}
     if not t.pool_org_id:
@@ -316,35 +310,47 @@ async def release(session: AsyncSession, client: models.Client, tid: str, note: 
     return-to-previous-step semantics.
     """
     me, _scope = await _me_scope(session, client)
-    t = await session.scalar(select(models.Task).where(models.Task.id == tid)
-                             .with_for_update().execution_options(populate_existing=True))
+    from . import repository_issue_access, task_access
+    await task_access.reserve_task_write(session, tid, client.id)
+    t = await session.get(models.Task, tid, with_for_update=True, populate_existing=True)
     if t is None:
         return {"ok": False, "reason": "not_found"}
-    from . import task_access
+    repository_issue = await repository_issue_access.linked(session, tid)
     if not task_access.is_owner(t, client):
         return {"ok": False, "reason": "not_owner"}
     if t.status == "done":
         return {"ok": False, "reason": "already_done"}   # Completed tasks cannot be returned to the claim pool.
-    repository = await repository_issue_access.linked(session, tid)
-    target_org = None if repository else me.org_id if (me and me.org_id) else None
-    if not repository and not target_org:
+    target_org = None if repository_issue else (me.org_id if (me and me.org_id) else None)
+    if not repository_issue and not target_org:
         return {"ok": False, "reason": "unassigned"}   # A device without organizational ownership has no team inbox destination.
+    from fastapi import HTTPException
+    from . import task_maintenance, task_status
+    if await task_maintenance.blocked_reasons(session, [t]):
+        raise HTTPException(409, "需求仍在执行、准备或等待中，请先停止执行，再退回需求池")
+    # A rejected state transition must leave the execution owner intact.
+    if not await task_status.mark(session, t, "todo", why="退回需求池", refresh_memory=False):
+        raise HTTPException(409, "需求状态暂不允许退回需求池，请刷新后重试")
     t.owner_client_id = None
     t.owner_user_id = None
     t.pool_org_id = target_org
     t.assignee_user_id = None
-    from . import task_status
-    await task_status.mark(session, t, "todo", why="退回收件箱")
+    if repository_issue:
+        who = (me.display_name or me.username) if me else ""
+        task_events.record(session, t.id, "release", {"note": note or "", "source": "repository_issue"}, who)
+        await session.commit()
+        await session.refresh(t)
+        await hub.publish(client.id, {"type": "task.deleted", "id": tid},
+                          user_id=client.user_ref or "")
+        await task_access.publish_task(session, t, "task.updated")
+        return {"ok": True, "id": tid, "teamId": None}
+    from . import task_requirements
+    await task_requirements.refresh_memory(session, t)
     # Record the return as a timeline event, not human progress used in work reports.
     who = (me.display_name or me.username) if me else ""
     task_events.record(session, t.id, "release", {"note": note or ""}, who)
     await session.commit()
-    if repository:
-        await task_access.publish_task(session, t, "task.updated")
-        if not await repository_issue_access.is_member(session, client, t):
-            await task_access.publish_deleted([client], tid)
-    else:
-        await task_access.publish_deleted([client], tid)
+    await hub.publish(client.id, {"type": "task.deleted", "id": tid},
+                      user_id=client.user_ref or "")   # Remove the task from the current client and restore it to the team pool.
     # Notify the assigning person so they can clarify or reassign returned work.
     if t.created_by and me and t.created_by != me.id:
         await _notify_user(session, t.created_by,
@@ -388,3 +394,13 @@ async def create_pool_task(session: AsyncSession, org_id: str, data: dict, creat
     await session.commit()
     await session.refresh(t)
     return {"ok": True, "task": task_to_api(t)}
+
+
+async def _pool_query(session: AsyncSession, org_ids: set[str], client=None):
+    clauses = _pool_clauses(org_ids, client)
+    if not clauses:
+        return []
+    res = await session.execute(
+        select(models.Task).where(or_(*clauses)).order_by(models.Task.created_at.desc())
+    )
+    return list(res.scalars().all())

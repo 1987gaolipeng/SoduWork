@@ -84,9 +84,10 @@ async def facts_many(session, tasks):
     return result
 
 
-async def decorate_many(session, tasks, apis):
+async def decorate_many(session, tasks, apis, *, facts=None):
     pairs = list(zip(tasks, apis))
-    facts = await facts_many(session, [task for task, _ in pairs])
+    if facts is None:
+        facts = await facts_many(session, [task for task, _ in pairs])
     for task, api in pairs:
         history, reason = facts.get(task.id, (False, ""))
         api.update(hasExecutionHistory=history, requirementEditBlocked=bool(reason),
@@ -96,9 +97,11 @@ async def decorate_many(session, tasks, apis):
 
 async def ensure_allowed(session, task):
     """The caller retains its Task write reservation until the edit commits."""
-    _, reason = (await facts_many(session, [task])).get(task.id, (False, ""))
+    facts = await facts_many(session, [task])
+    _, reason = facts.get(task.id, (False, ""))
     if reason:
         raise HTTPException(409, reason)
+    return facts
 
 
 def preserve_manual_history(session, task, previous_status, next_status):

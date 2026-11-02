@@ -12,7 +12,7 @@ const { validate } = require('../../skills/skill-studio/scripts/skill-validate.c
 const example = path.resolve(__dirname, '../../skills/skill-studio/assets/purchase-check');
 const writer = path.resolve(__dirname, '../../skills/skill-studio/scripts/skill-package.cjs');
 
-function fixture(t) {
+async function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-skill-studio-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const source = path.join(root, 'purchase-check');
@@ -206,11 +206,11 @@ test('malformed metadata and YAML sequence scalars are not accepted as valid Ski
 });
 
 
-test('legacy skill-studio target remains accepted and emits only the current branded package', t => {
-  const f = fixture(t), report = build({ ...f, targets: 'soduwork,soduwork' });
+test('duplicate current skill-studio targets are collapsed', async t => {
+  const f = await fixture(t), report = build({ ...f, targets: 'soduwork,soduwork' });
   assert.equal(report.exports.length, 1);
   assert.equal(report.exports[0].target, 'soduwork');
   assert.match(report.exports[0].file, /-soduwork\.soduwork-plugin$/);
   assert.ok(fs.existsSync(path.join(f.out, 'soduwork-plugin-draft.json')));
-  assert.equal(fs.existsSync(path.join(f.out, 'soduwork-plugin-draft.json')), false);
+  assert.equal(fs.existsSync(path.join(f.out, 'soduwork-plugin-draft.json')), true);
 });

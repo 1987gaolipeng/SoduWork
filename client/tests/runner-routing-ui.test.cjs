@@ -16,8 +16,10 @@ function fixture() {
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'components', 'panels',
     'panels-runners.js'), 'utf8'), context);
   const desktop = { runnerId: 'desktop', label: '本机', owned: true, online: true, embedded: true,
+    scope: 'current-instance', isCurrentDevice: true,
     mode: 'accepting', accepting: true, agents: [], sessions: [], busy: 4 };
   const server = { runnerId: 'server', label: '远程节点', owned: true, online: true,
+    scope: 'personal-cloud',
     mode: 'accepting', accepting: true, agents: [], sessions: [], busy: 0 };
   return { context, desktop, server, render: nodes => context.window.RunnerManager.render(nodes) };
 }
@@ -61,17 +63,18 @@ test('Runner management renders one preferred embedded node despite a lower remo
   assert.equal((html.match(/class="rn-preferred">首选/g) || []).length, 1);
 });
 
-test('Runner management reflects unavailable desktop nodes and selects the available remote node', () => {
+test('an unavailable current instance never silently selects a different environment', () => {
   for (const unavailable of [{ mode: 'draining' }, { mode: 'disabled' },
     { online: false }, { accepting: false }]) {
     const f = fixture();
     Object.assign(f.desktop, unavailable);
     const html = f.render([f.desktop, f.server]);
-    assert.deepEqual(preferredId(html), ['server'], JSON.stringify(unavailable));
-    assert.match(html, /当前优先使用「远程节点」/);
-    if (unavailable.mode === 'draining' || unavailable.online === false) {
-      assert.match(html, /新任务会自动绕行/);
-    }
+    assert.deepEqual(preferredId(html), [], JSON.stringify(unavailable));
+    assert.match(html, /使用其他环境时，请明确选择云端或指定执行机/);
+    assert.match(html, /个人云端/);
+    assert.doesNotMatch(html, /新任务会自动绕行/);
+    if (unavailable.online === false) assert.match(html, /等待此执行环境恢复/);
+    if (unavailable.mode === 'draining') assert.match(html, /暂不接收新任务/);
   }
 });
 
@@ -85,4 +88,24 @@ test('Runner management preserves offline records and explains waiting when no n
   assert.match(html, /id="rn-card-desktop"/);
   assert.match(html, /id="rn-card-server"/);
   assert.match(html, /现有记录仍保留/);
+});
+
+test('same-host or older-client embedded flags never identify the current instance or default Runner', () => {
+  const f = fixture();
+  const other = { ...f.desktop, runnerId: 'other-instance', scope: 'bound-runner', isCurrentDevice: false };
+  const unknown = { ...f.desktop, runnerId: 'old-inventory', scope: undefined, isCurrentDevice: undefined };
+  const html = f.render([other, unknown]);
+  assert.deepEqual(preferredId(html), []);
+  assert.match(html, /关联执行机/); assert.match(html, /远程执行环境/);
+  assert.match(html, /id="rn-card-other-instance"/); assert.match(html, /id="rn-card-old-inventory"/);
+});
+
+test('pause confirmation preserves sessions and requires an explicit environment choice', () => {
+  const f = fixture();
+  vm.runInContext("_rnConfirm = 'desktop';", f.context);
+  const html = f.render([f.desktop, f.server]);
+  assert.match(html, /暂停接收新任务？/);
+  assert.match(html, /现有 0 个会话不会中断/);
+  assert.match(html, /使用其他环境执行新任务时，请明确选择云端或指定执行机/);
+  assert.doesNotMatch(html, /新任务会自动选择其他节点/);
 });

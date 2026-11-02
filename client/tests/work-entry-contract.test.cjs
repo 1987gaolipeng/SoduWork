@@ -66,3 +66,12 @@ test('slash work refinement preserves typed request and material context without
   assert.match(sheet, /request !== scope/);
   assert.doesNotMatch(actions + sheet, /WorkDeliverySheet|createWorkItemDelivery/);
 });
+
+
+test('inline work entry card uses a compact visual rhythm without changing content', () => {
+  const css = read('components/panels/work-entry-sheet.css');
+  assert.match(css, /\.wes-layer\.is-inline \.wes-head h2\{font-size:18px;line-height:1\.3\}/);
+  assert.match(css, /\.wes-layer\.is-inline \.wes-body\{padding:12px 16px\}/);
+  assert.match(css, /\.wes-layer\.is-inline \.wes-attach-zone\{margin:14px 0 0;padding:10px 0\}/);
+  assert.match(read('components/panels/work-entry-sheet.js'), /wesTitle/);
+});

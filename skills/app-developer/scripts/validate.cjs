@@ -50,9 +50,13 @@ function validate(draft, workRoot = path.dirname(path.resolve(draft))) {
   if (body?.template !== 'app') throw Error('应用草稿必须使用 template: "app"');
   const collected = resources.collect(body, file, root);
   const normalized = schema.normalizeBody(collected);
+  if (normalized.jiyong && !normalized.jiyong.storage) {
+    throw Error('新开发即用必须显式声明 jiyong.storage.location=local/cloud，与用户必选模式一致；旧包导入仍兼容本地默认值');
+  }
   if (!normalized.icon) throw Error('应用缺少专属彩色图标：请生成 PNG 并写入草稿顶层 icon 后重新校验');
   const syntaxChecked = checkSyntax(normalized.resources || []);
   return { ok: true, syntaxChecked, key: normalized.key, version: normalized.version,
+    storageLocation: normalized.jiyong?.storage?.location || 'local', cloudRuntimeTested: false,
     resources: resources.summary(normalized.resources || []),
     installed: false, runtimeTested: false };
 }

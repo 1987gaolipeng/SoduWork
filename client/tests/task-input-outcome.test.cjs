@@ -18,8 +18,8 @@ test('afterTurn forwards the turn outcome to the delivery endpoint', async t => 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-outcome-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   fs.writeFileSync(path.join(dir, 'scene.js'), 'const ok = 1;\n');
-  t.mock.method(artifactRuntime, 'snapshot', () => ({
-    items: [{ path: path.join(dir, 'scene.js'), name: 'scene.js', relative: 'scene.js' }],
+  t.mock.method(artifactRuntime, 'snapshotAsync', () => ({
+    items: [{ path: path.join(dir, 'scene.js'), name: 'scene.js', relative: 'scene.js', changedInTurn:true }],
   }));
   const deliveries = [];
   t.mock.method(global, 'fetch', async (url, options) => {
@@ -62,7 +62,7 @@ test('restored native receipt uploads completed files before completing the orig
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'soduwork-resumed-delivery-'));
  t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
  const file=path.join(dir,'game.html');fs.writeFileSync(file,'<html>game</html>');
- t.mock.method(artifactRuntime,'snapshot',()=>({items:[{path:file,name:'game.html',relative:'game.html'}]}));
+ t.mock.method(artifactRuntime,'snapshotAsync',()=>({items:[{path:file,name:'game.html',relative:'game.html',changedInTurn:true}]}));
  const turn={state:'running',executor:'native',conversationId:'chat',turnId:'old-turn'}, events=[];
  t.mock.method(global,'fetch',async(url,options)=>{
   if(String(url).includes('/conversation-delivery')){

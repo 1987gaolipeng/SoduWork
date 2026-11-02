@@ -1,26 +1,5 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
-// Listen before DOMContentLoaded so a blur cannot disappear before the renderer
-// binds its dismissal callback. Shape reports always acknowledge the latest revision.
-let overlayShapeRevision = 0;
-let lastOverlayBlurRevision = -1;
-let pendingOverlayBlur = false;
-const overlayBlurCallbacks = new Set();
-function acceptOverlayRevision(revision) {
-  if (!Number.isSafeInteger(revision) || revision < overlayShapeRevision) return false;
-  overlayShapeRevision = revision;
-  return true;
-}
-function callOverlayBlur(callback) {
-  try { callback(); } catch (_e) { /* Keep input passive if dismissal fails. */ }
-}
-ipcRenderer.on('overlay-window-blur', (_event, revision) => {
-  if (revision <= lastOverlayBlurRevision || !acceptOverlayRevision(revision)) return;
-  lastOverlayBlurRevision = revision;
-  pendingOverlayBlur = overlayBlurCallbacks.size === 0;
-  for (const callback of overlayBlurCallbacks) callOverlayBlur(callback);
-});
-
 const pageIpcEvents = [];
 let pageIpcEpoch = 0;
 const pageIpcClock = () => typeof performance === 'undefined' ? Date.now() : performance.now();
@@ -47,13 +26,18 @@ function timedPageInvoke(channel, ...args) {
  */
 const conversationSession = {
   probe: (adapterId) => ipcRenderer.invoke('pi-session-probe', adapterId || 'pi'),
-  runtimes: () => timedPageInvoke('pi-session-runtimes'),
+  runtimes: options => timedPageInvoke('pi-session-runtimes', options || {}),
   customAgents: Object.fromEntries(['list', 'add', 'activate', 'pick'].map(action =>
     [action, input => ipcRenderer.invoke('custom-agents-' + action, input)])),
   onRuntimesChanged: fn => {
     const handler = () => { try { fn(); } catch (_) {} };
     ipcRenderer.on('agent-runtimes-changed', handler);
     return () => ipcRenderer.removeListener('agent-runtimes-changed', handler);
+  },
+  onModelsChanged: fn => {
+    const handler = () => { try { fn(); } catch {} };
+    ipcRenderer.on('models-changed', handler);
+    return () => ipcRenderer.removeListener('models-changed', handler);
   },
   runtimeModels: (adapterId) => ipcRenderer.invoke('pi-session-runtime-models', String(adapterId || '')),
   capabilities: (options) => timedPageInvoke('conversation-capabilities', options || {}),
@@ -84,6 +68,7 @@ const conversationSession = {
   openAutomation: (opts) => ipcRenderer.invoke('pi-session-automation-open', opts || {}),
   reserveWorkConversation: options => ipcRenderer.invoke('pi-session-reserve-work', options || {}),
   workCards: sessionId => ipcRenderer.invoke('pi-session-work-cards', sessionId),
+  findTaskCreation: taskId => ipcRenderer.invoke('pi-session-find-task-creation', taskId),
   saveWorkCard: (sessionId, card) => ipcRenderer.invoke('pi-session-save-work-card', sessionId, card),
   saveWorkDraftSelection: (sessionId, value) => ipcRenderer.invoke('pi-session-save-work-draft-selection', sessionId, value),
   cloud: { ...Object.fromEntries(['preview', 'confirm', 'recover', 'abort', 'materialize'].map(action =>
@@ -97,7 +82,7 @@ const conversationSession = {
   cancelQueued: (ref, id) => ipcRenderer.invoke('pi-session-queue-cancel', ref, id),
   updateQueue: (ref, id, action, value) => ipcRenderer.invoke('pi-session-queue-update', ref, id, action, value),
   selectAgent: (ref, agentId) => ipcRenderer.invoke('pi-session-select-agent', ref, agentId),
-  conversationRuntimes: ref => ipcRenderer.invoke('pi-session-conversation-runtimes', ref),
+  conversationRuntimes: (ref, options) => ipcRenderer.invoke('pi-session-conversation-runtimes', ref, options || {}),
   selectModel: (ref, name) => ipcRenderer.invoke('pi-session-select-model', ref, name),
   setThinking: (ref, value) => ipcRenderer.invoke('pi-session-set-thinking', ref,
     typeof value === 'string' ? value : Boolean(value)),
@@ -121,10 +106,10 @@ const conversationSession = {
   readOutputBinary: (ref, p) => ipcRenderer.invoke('pi-session-read-output-binary', ref, p),
   inspectDelivery: (ref, ids) => ipcRenderer.invoke('conversation-delivery-inspect', ref, ids),
   prepareDelivery: (ref, ids) => ipcRenderer.invoke('conversation-delivery-prepare', ref, ids),
-  openDeliveryArchive: (ref, ids) => ipcRenderer.invoke('conversation-delivery-open-archive', ref, ids)
+  openDeliveryArchive: (ref, ids, options) => ipcRenderer.invoke('conversation-delivery-open-archive', ref, ids, options)
     .catch(() => ({ ok: false, reason: '无法打开本地压缩包，请重新打开客户端后重试' })),
   saveDelivery: (ref, ids, expectedRevision) => ipcRenderer.invoke('conversation-delivery-save', ref, ids, expectedRevision),
-  openLocalDelivery: (ref, ids) => ipcRenderer.invoke('conversation-delivery-open-local', ref, ids)
+  openLocalDelivery: (ref, ids, options) => ipcRenderer.invoke('conversation-delivery-open-local', ref, ids, options)
     .catch(error => ({ ok: false, code: 'DELIVERY_OPEN_FAILED', reason: /No handler registered/i.test(error?.message || '')
       ? '请重启 SoduWork 后打开成果位置，文件仍保留在本机' : '无法打开成果位置，请重试' })),
   continueLocalDelivery: (ref, ids) => ipcRenderer.invoke('conversation-delivery-continue-local', ref, ids)
@@ -243,6 +228,7 @@ const workPreview = {
    the full SoduWork preload surface. */
 const workPreviewAppHost = {
   authorize: id => ipcRenderer.invoke('work-preview-app-authorize', String(id || '')),
+  notifyDataChanged: topic => ipcRenderer.invoke('work-preview-app-data-changed',String(topic||'')),
   onRequest: (fn) => {
     const handler = (_event, payload) => { try { fn(payload || {}); } catch (_) {} };
     ipcRenderer.on('work-preview-app-request', handler);
@@ -325,11 +311,8 @@ const soduWorkBridge = {
   setAlwaysOnTop: (flag) => ipcRenderer.send('window-set-always-on-top', flag),
   moveWindow: (x, y) => ipcRenderer.send('window-move', x, y),
   setIgnoreMouseEvents: (ignore, opts) => ipcRenderer.send('window-set-ignore-mouse-events', ignore, opts),
-  setOverlayShape: (rects) => ipcRenderer.send('window-set-overlay-shape', rects, overlayShapeRevision),
-  getOverlayShape: () => ipcRenderer.invoke('window-get-overlay-shape').then(info => {
-    if (info) acceptOverlayRevision(info.revision);
-    return info;
-  }),
+  setOverlayShape: sendOverlayShape,
+  getOverlayShape: () => Promise.resolve(ipcRenderer.invoke('window-get-overlay-shape')).then(observeOverlayShapeState),
   getWindowBounds: () => ipcRenderer.invoke('window-get-bounds'),
   getScreenSize: () => ipcRenderer.invoke('screen-get-size'),
 
@@ -488,10 +471,14 @@ const soduWorkBridge = {
 
   /* Capture window content with DIP coordinates and return a PNG data URL. */
   capturePage: (rect) => ipcRenderer.invoke('window-capture', rect),
+  /* Forward capture options so the main-process service can hide only this
+     requesting workspace window before acquiring display pixels. */
   startScreenshot: options => ipcRenderer.invoke('screenshot-start', { hideOwner: options?.hideOwner === true }),
 
-  /* Workspace IPC for independent, non-topmost windows.
-   The overlay requests openDeskWindow; the workspace receives parameters through onDeskOpen. */
+  /*
+   * Open or update native workspace and tool windows through openDeskWindow and onDeskOpen;
+   * desktop overlay stacking remains separate.
+   */
   openDeskWindow: (payload) => ipcRenderer.send('open-desk-window', payload || {}),
   reportWorkspaceView: (view) => ipcRenderer.send('workspace-view', view || ''),
   workspaceContext: () => ipcRenderer.invoke('workspace-state-context'),
@@ -546,12 +533,13 @@ const soduWorkBridge = {
   }),
   /* Expose overlay-blur dismissal as an event without exposing ipcRenderer. */
   onOverlayWindowBlur: (cb) => {
-    if (typeof cb !== 'function') return;
-    overlayBlurCallbacks.add(cb);
+    if (typeof cb !== 'function') return () => {};
+    overlayBlurConsumers.add(cb);
     if (pendingOverlayBlur) {
       pendingOverlayBlur = false;
-      callOverlayBlur(cb);
+      invokeOverlayBlurConsumer(cb);
     }
+    return () => overlayBlurConsumers.delete(cb);
   },
 
   /*
@@ -565,7 +553,5 @@ const soduWorkBridge = {
   })
 };
 
-/*
- * Expose soduWorkAPI as the canonical renderer bridge.
- */
+// Expose the single canonical SoduWork bridge.
 contextBridge.exposeInMainWorld('soduWorkAPI', soduWorkBridge);

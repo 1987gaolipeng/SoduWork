@@ -91,11 +91,64 @@ class Journal:
     def path(self, key):
         return self.root / (hashlib.sha256(key.encode()).hexdigest() + ".queue")
 
-    def write(self, item):
+    def receipt_path(self, key):
+        return self.root / (hashlib.sha256(key.encode()).hexdigest() + ".receipt")
+
+    def last_sequence(self):
+        try:
+            value = json.loads(durable_file.read_bytes(self.root / "sequence"))
+        except FileNotFoundError:
+            return 0
+        if type(value) is not int or value < 0:
+            raise ValueError("Invalid Runner admission sequence")
+        return value
+
+    def _encode(self, item):
         data = json.dumps({"schema": 1, "item": asdict(item)}, ensure_ascii=False,
                           separators=(",", ":")).encode()
-        data = b"DPAPI\n" + _protect(data) if os.name == "nt" else b"JSON\n" + data
+        return b"DPAPI\n" + _protect(data) if os.name == "nt" else b"JSON\n" + data
+
+    def _decode(self, blob):
+        if blob.startswith(b"DPAPI\n") and os.name == "nt":
+            raw = _protect(blob[6:], decrypt=True)
+        elif blob.startswith(b"JSON\n") and os.name != "nt":
+            raw = blob[5:]
+        else:
+            raise OSError("Runner queue protection is not available for this account")
+        value = json.loads(raw)
+        if value.get("schema") != 1 or not isinstance(value.get("item"), dict):
+            raise ValueError("Unsupported Runner queue journal")
+        return value["item"]
+
+    def write(self, item):
+        data = self._encode(item)
+        if item.sequence > self.last_sequence():
+            durable_file.write_bytes(self.root / "sequence", str(item.sequence).encode())
         durable_file.write_bytes(self.path(item.key), data)
+
+    def archive(self, item):
+        """Prune hot storage only after a permanent, payload-free fence is durable."""
+        if item.payload is not None or item.state not in {"completed", "failed", "cancelled"}:
+            raise ValueError("Only terminal admission receipts can be archived")
+        # Old installations have queue records but no sequence watermark yet.
+        # Preserve their maximum before the last hot record can disappear.
+        if item.sequence > self.last_sequence():
+            durable_file.write_bytes(self.root / "sequence", str(item.sequence).encode())
+        durable_file.write_bytes(self.receipt_path(item.key), self._encode(item))
+        self.remove(item.key)
+
+    def read_receipt(self, key):
+        path = self.receipt_path(key)
+        if path.is_symlink():
+            raise OSError("Runner receipt must not be a symlink")
+        try:
+            row = self._decode(durable_file.read_bytes(path))
+        except FileNotFoundError:
+            return None
+        if row.get("key") != key or row.get("payload") is not None or row.get("state") not in {
+                "completed", "failed", "cancelled"}:
+            raise ValueError("Invalid Runner admission receipt")
+        return row
 
     def read(self):
         rows = []
@@ -108,16 +161,7 @@ class Journal:
                 blob = durable_file.read_bytes(path)
             except FileNotFoundError:  # uncommitted first append or durable tombstone
                 continue
-            if blob.startswith(b"DPAPI\n") and os.name == "nt":
-                raw = _protect(blob[6:], decrypt=True)
-            elif blob.startswith(b"JSON\n") and os.name != "nt":
-                raw = blob[5:]
-            else:
-                raise OSError("Runner queue protection is not available for this account")
-            value = json.loads(raw)
-            if value.get("schema") != 1 or not isinstance(value.get("item"), dict):
-                raise ValueError("Unsupported Runner queue journal")
-            row = value["item"]
+            row = self._decode(blob)
             if self.path(row["key"]) != path:
                 raise ValueError("Runner queue record identity mismatch")
             rows.append(row)

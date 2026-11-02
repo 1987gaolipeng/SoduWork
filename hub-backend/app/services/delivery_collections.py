@@ -87,6 +87,19 @@ def _text(value, name, limit=160, required=False):
     return value
 
 
+def display_title(value, fallback="本轮成果", limit=240):
+    """Derive a safe library title without changing the task or file data.
+
+    Task titles are user-facing text and may contain newlines, tabs or other
+    control characters.  The manifest validator stays strict for identifiers
+    and paths; only this display field is normalized at the delivery boundary.
+    """
+    if not isinstance(value, str):
+        return fallback
+    title = re.sub(r"[\x00-\x1f\x7f]+", " ", value).strip()[:limit]
+    return title or fallback
+
+
 def clean_manifest(raw, *, limits=None):
     limits = limits or validation_limits()
     if not isinstance(raw, dict) or set(raw) - {
@@ -101,7 +114,7 @@ def clean_manifest(raw, *, limits=None):
     revision = _text(raw.get("revision", ""), "revision", required=True)
     if not re.fullmatch(r"[A-Za-z0-9._:-]+", session_id) or not re.fullmatch(r"[A-Za-z0-9._:-]+", revision):
         raise HTTPException(400, "成果来源标识不能包含本地路径")
-    title = _text(raw.get("title", ""), "title", 240) or "本轮成果"
+    title = display_title(raw.get("title", ""))
     conversation_title = raw.get("conversationTitle", "")
     if not isinstance(conversation_title, str):
         raise HTTPException(400, "会话标题格式不正确")
@@ -381,7 +394,7 @@ async def read_file(row, name):
     return entry, data
 
 
-async def list_items(session, owner, *, session_id="", source="", limit=50, offset=0):
+async def list_items(session, owner, *, session_id="", source="", revision="", limit=50, offset=0):
     query = select(LibraryItem).where(LibraryItem.owner_key == owner,
                                     LibraryItem.deleted_at.is_(None),
                                     LibraryItem.extra[META_KEY]["schemaVersion"].as_integer() == 1)
@@ -389,5 +402,7 @@ async def list_items(session, owner, *, session_id="", source="", limit=50, offs
         query = query.where(LibraryItem.extra[META_KEY]["sessionId"].as_string() == session_id)
     if source:
         query = query.where(LibraryItem.extra[META_KEY]["source"].as_string() == source)
+    if revision:
+        query = query.where(LibraryItem.extra[META_KEY]["revision"].as_string() == revision)
     return list((await session.scalars(query.order_by(LibraryItem.created_at.desc(), LibraryItem.id)
                                       .offset(offset).limit(limit))).all())

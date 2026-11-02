@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 from .. import automation_models as am, models
 from ..schemas import attachment_to_api
-from . import approval_routing, gate_contract, release_control, task_access
+from . import approval_routing, delivery_bundle, gate_contract, release_control, task_access
 
 _locks = weakref.WeakValueDictionary()
 
@@ -94,19 +94,18 @@ async def context(session, client, tid):
     if task.status == "cancel" or task.archived_at:
         raise HTTPException(409, "已取消或归档的需求不能启动验收")
     gate = await _packet(session, task, artifact, request)
-    # Include only this fixed version's outputs and evidence plus input materials, excluding older same-named outputs.
-    ids = set(gate_contract._manifest_attachment_ids(artifact))
-    if request:
-        ids.update(str(x) for x in dict(dict(request.context or {}).get("gate") or {}).get("evidenceRefs") or [])
     rows = list((await session.execute(select(models.Attachment).where(
         models.Attachment.task_id == task.id))).scalars().all())
-    selected = [row for row in rows if attachment_to_api(row)["role"] == "input" or row.id in ids or
-                (request is not None and str(dict(row.evidence_meta or {}).get("gateRequestId") or "") == request.id)]
-    # Process evidence is optional context; include fixed deliverables and required gate evidence by default.
-    # Let reviewers explicitly select historical process files instead of sending all execution history.
+    # Gate evidence remains auditable, but only fixed deliverables are mandatory model inputs.
+    selected = delivery_bundle.select_artifact(rows, artifact) if artifact.kind != "code" else []
     selected_ids = {row.id for row in selected}
     optional = [row for row in rows if row.id not in selected_ids and
-                attachment_to_api(row)["role"] in {"process", "verification", "output"}]
+                attachment_to_api(row)["role"] in {"input", "process", "verification", "output"}]
+    bundle = None
+    if len(selected) >= 2:
+        safe = "".join(c for c in (task.title or "交付物") if c not in '\\/:*?"<>|').strip()[:40] or "交付物"
+        bundle = {"filename": safe + ".zip", "artifactVersionId": artifact.id,
+                  "attachmentIds": [row.id for row in selected], "fileCount": len(selected)}
     return {"task": await tasks.task_to_api_live(session, task),
             "approvalId": request.id if request else "direct:" + task.id,
             "artifactVersionId": artifact.id, "requirementVersion": task.requirement_version,
@@ -116,6 +115,7 @@ async def context(session, client, tid):
             "attachments": [attachment_to_api(row) for row in selected],
             "optionalAttachments": [attachment_to_api(row) for row in optional],
             "attachmentIds": [row.id for row in selected],
+            "deliveryBundle": bundle,
             "canDecide": allowed and (request is None or request.status == "pending"),
             "acceptanceOnly": True}
 
@@ -182,6 +182,8 @@ async def _apply(session, client, tid, body):
             (body.get("approvalId") != expected and not direct_retry)):
         raise HTTPException(409, "需求、交付版本或验收票已经变化，请重新发起验收")
     report = validate_report(body, _criteria(task, request))
+    if report["verdict"] == "approve" and gate_contract.requires_manual_confirmation(artifact):
+        raise HTTPException(422, "本轮没有可自动核验的交付物，请使用手动验收确认实际结果")
     if direct_retry and saved.get("report") != report:
         raise HTTPException(409, "本次直验已有其他结论，请刷新后查看")
     if request is not None:

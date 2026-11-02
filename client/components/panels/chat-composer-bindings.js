@@ -4,7 +4,7 @@
   const nextMessageWindowSize = current => Math.min(2000, Math.max(80, Number(current) || 80) + 80);
   // Empty and form-only conversations use new-session options; selecting an option does not initialize an Agent.
   function createDraftControls(ctx) {
-    let destroyed = false, loaded = false, loading = null, catalog = [], missing = [], defaultMode = 'standard', error = '';
+    let destroyed = false, loaded = false, loading = null, loadGeneration = 0, catalog = [], missing = [], defaultMode = 'standard', error = '';
     let choiceScope = null, preferenceVersion = 0;
     const active = () => !destroyed && !ctx._ref && (!ctx._sessionId || ctx._snap?.workOnly === true);
     const scope = () => ({epoch:ctx._viewEpoch, sessionId:ctx._sessionId});
@@ -17,28 +17,32 @@
     const off = global.soduWorkAPI?.accessPreferences?.onChange?.(value => {
       if (['standard', 'readonly', 'full'].includes(value?.mode)) { preferenceVersion++; defaultMode = value.mode; paint(); }
     });
-    async function load() {
-      if (loading) return loading;
+    async function load(force = false) {
+      if (loading && !force) return loading;
+      if (force) { loaded = false; error = ''; loadGeneration++; }
+      const generation = loadGeneration;
       const requested = scope(), preferenceAt = preferenceVersion;
-      loading = Promise.all([api()?.runtimes?.(), global.soduWorkAPI?.accessPreferences?.get?.()]).then(([runtimes, preference]) => {
-        if (!matches(requested)) return;
+      const job = Promise.all([api()?.runtimes?.(force ? { force: true } : undefined), global.soduWorkAPI?.accessPreferences?.get?.()]).then(([runtimes, preference]) => {
+        if (generation !== loadGeneration || !matches(requested)) return;
         if (!runtimes?.ok) throw Error(runtimes?.reason || 'Agent 列表暂不可用，请重新打开选择器');
         const declared = Array.isArray(runtimes.runtimes) ? runtimes.runtimes : [];
-        // New bridges expose an explicit availableRuntimes list.  Older
-        // bridges only returned runtimes; keep that legacy response usable
-        // instead of silently dropping every non-Pi draft option.
+        // New bridges expose an explicit availableRuntimes list. Older
+        // declaration-only responses cannot prove that a Runner is installed,
+        // so keep only the resident Pi fallback in the conversation picker.
         catalog = Array.isArray(runtimes.availableRuntimes)
           ? runtimes.availableRuntimes
-          : declared;
+          : declared.filter(item => item && item.id === 'pi');
         const declaredPi = declared.find(item => item && item.id === 'pi');
         if (declaredPi && !catalog.some(item => item && item.id === 'pi')) catalog = [declaredPi, ...catalog];
         missing = Array.isArray(runtimes.missing) ? runtimes.missing : [];
         loaded = true; error = '';
         if (preferenceAt === preferenceVersion && ['standard', 'readonly', 'full'].includes(preference?.mode)) defaultMode = preference.mode;
-      }).catch(reason => { if (matches(requested)) { error = String(reason.message || reason); loaded = true; } })
-        .finally(() => { loading = null; paint(); });
-      return loading;
+      }).catch(reason => { if (generation === loadGeneration && matches(requested)) { error = String(reason.message || reason); loaded = true; } })
+        .finally(() => { if (loading === job) loading = null; paint(); });
+      loading = job;
+      return job;
     }
+    const offRuntimes = api()?.onRuntimesChanged?.(() => { void load(true); });
     function state() {
       discardStaleChoice();
       if (!active()) return {};
@@ -54,7 +58,7 @@
             label:ctx._sessionOptions.modelLabel || ctx._sessionOptions.modelName} : null},
         ...(adapterId === 'codex' ? {thinking:{level:ctx._sessionOptions.reasoningEffort || ''}} : {})};
     }
-    return {active, state, async runtimes() { await load(); return {ok:!error, reason:error, runtimes:catalog,
+    return {active, state, async runtimes(force = false) { await load(force === true); return {ok:!error, reason:error, runtimes:catalog,
         availableRuntimes:catalog, missing}; },
       selectRuntime(id) {
         const runtime = catalog.find(item => item.id === id);
@@ -87,7 +91,7 @@
         const saved = await (ctx._workCards?.ensureDraftSelectionSaved?.() ?? true);
         return saved && matches(requested);
       },
-      destroy() { destroyed = true; consent?.reset(); off?.(); },
+      destroy() { destroyed = true; consent?.reset(); off?.(); offRuntimes?.(); },
     };
   }
   function create(ctx) {
@@ -258,6 +262,52 @@ function _canStop() {
       ['executing', 'implementing', 'reviewing', 'repairing'].includes(phase);
   }
 
+/* Build a bounded, output-only context for explicit plugin follow-up references. */
+function _pluginConversationContext(ctx) {
+  const snapshot = ctx && ctx._snap;
+  const messages = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
+  const rows = [];
+  const clean = value => String(value || '')
+    .replace(/<soduwork-internal-[^>]+>[\s\S]*?<\/soduwork-internal-[^>]+>/gi, '')
+    .replace(/<soduwork-internal-[^>]+>[\s\S]*/gi, '')
+    .replace(/(["']?\b(?:api[ _-]?key|access[ _-]?token|refresh[ _-]?token|client[ _-]?secret|password|passwd|authorization|private[ _-]?key|token|session(?:[_-]?id)?|cookie(?:s)?|jwt|signing[_-]?key)\b["']?\s*[:=]\s*["']?)([^"'`\s,;}\]]+)/gi, (_match, prefix) => prefix + '[REDACTED]')
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, 'Bearer [REDACTED]')
+    .trim();
+  const redact = value => clean(value);
+  const textOf = value => {
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value)) return value.map(textOf).filter(Boolean).join('\n');
+    if (!value || typeof value !== 'object') return '';
+    if ((value.kind && value.kind !== 'text') ||
+        (value.type && !['text', 'input_text', 'output_text'].includes(value.type))) return '';
+    if (typeof value.text === 'string') return value.text;
+    if (typeof value.output === 'string') return value.output;
+    if (typeof value.result === 'string') return value.result;
+    if (Array.isArray(value.content)) return textOf(value.content);
+    if (Array.isArray(value.blocks)) return textOf(value.blocks);
+    return '';
+  };
+  const seen = new Set();
+  const append = (label, value) => {
+    const text = redact(value);
+    if (!text || seen.has(text)) return;
+    seen.add(text);
+    rows.push(label + text);
+  };
+  messages.forEach(message => {
+    if (!message || message.hidden || !['assistant', 'toolResult'].includes(String(message.role || ''))) return;
+    append(message.role === 'toolResult' ? 'Previous tool result:\n' : 'Previous assistant result:\n',
+      textOf(message.text || message.content || message.blocks));
+  });
+  (Array.isArray(snapshot?.tools) ? snapshot.tools : []).forEach(tool => {
+    if (!tool || !['done', 'error', 'cancelled'].includes(String(tool.state || ''))) return;
+    append('Previous tool result:\n', textOf(tool.result || tool.output || tool.content));
+  });
+  const selected = rows.slice(-6).map(row => row.slice(-2400));
+  const priorConversationText = selected.join('\n\n').slice(-12000).trim();
+  return priorConversationText ? { priorConversationText } : {};
+}
+
 function _bind(el) {
     const input = el.querySelector('#nchatInput');
     if (global.ComposeSkills) {
@@ -280,6 +330,7 @@ function _bind(el) {
         inputText: () => ctx._messageAttachments?.submissionText?.(input.value) ?? input.value,
         inputContext: () => ({
           attachmentNames: ctx._messageAttachments ? ctx._messageAttachments.names() : [],
+          ..._pluginConversationContext(ctx),
         }),
         catalog: async () => {
           if (!global.SoduWorkAPI || typeof SoduWorkAPI.pluginCatalog !== 'function') throw new Error('Plugin service unavailable');
@@ -638,6 +689,8 @@ function _bind(el) {
       const deliveryAction = e.target.closest('[data-delivery-reveal],[data-delivery-archive],[data-delivery-retry],[data-delivery-open],[data-delivery-local],[data-cloud-artifact-url]');
       if (deliveryAction) { void global.ChatDeliveries?.handle(deliveryAction, ctx._api()); return; }
       const librarySave = e.target.closest('[data-library-output]');
+      const libraryBundle = e.target.closest('[data-library-bundle]');
+      if (libraryBundle) { void global.LibraryTransfer?.downloadBundle(libraryBundle); return; }
       if (librarySave) { if (!librarySave.disabled) void global.LibraryTransfer?.saveDecorated(librarySave); return; }
       const preview = e.target.closest('[data-open-app]');
       const pluginDraft = e.target.closest('[data-install-plugin-draft]');

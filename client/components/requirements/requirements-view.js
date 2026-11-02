@@ -190,6 +190,7 @@
       (R.canTriage(task) ? ['intake', 'clarifying', 'ready'].filter(key => key !== R.stage(task)).map(key =>
         '<button type="button" role="menuitem" data-rq-move="' + id + '" data-rq-target="' + key + '">' +
         ({intake:'放回收集箱', clarifying:'标记待补充', ready:'准备好，移到待开始'})[key] + '</button>').join('') : '') +
+      (R.canSubmitReview(task) ? '<button type="button" role="menuitem" data-rq-move="' + id + '" data-rq-target="reviewing">提交验收</button>' : '') +
       (R.canOpenConversation(task, global.SoduWorkAPI?.clientId) && !task.archivedAt ? '<button type="button" role="menuitem" data-rq-chat="' + id + '">打开执行会话（仅本机）</button>' : '') +
       actionButton(R.stage(task) === 'closed' ? 'restore' : 'archive', R.stage(task) === 'closed' ? '恢复需求' : '归档需求') +
       actionButton('delete', '删除需求');

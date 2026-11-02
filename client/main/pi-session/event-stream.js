@@ -398,7 +398,7 @@ function apply(state, ev) {
       msg.completedAt = require('../conversation/message-time').epoch(m.completedAt);
       msg.usageAt = msg.completedAt || require('../conversation/message-time').epoch(m.timestamp);
       msg.usageModel = String(m.model || '');
-      msg.usageProvider = String(m.usageProvider || '');
+      msg.usageProvider = String(m.usageProvider || m.provider || '');
       msg.stopReason = String(m.stopReason || '');
       msg.rawStopReason = String(m.rawStopReason || '');
       msg.errorMessage = String(m.errorMessage || '');

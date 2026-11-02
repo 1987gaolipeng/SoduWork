@@ -1,6 +1,11 @@
 /* Existing first-message composer surface; state is owned by NativeChat, never copied. */
 (function (global) {
   'use strict';
+  function _uiText(value) {
+    return (typeof window !== 'undefined' && window.SoduWorkI18n &&
+      typeof window.SoduWorkI18n.translateText === 'function')
+      ? window.SoduWorkI18n.translateText(value) : value;
+  }
   function create(ctx) {
   function _composeDraftControls() {
     return { input: document.getElementById('cpInput'), attachments: ctx._attachments,
@@ -25,10 +30,19 @@
   function _clearComposeDraft() { global.NativeChat?.clearDraft?.('new'); }
   /* UI strings go through the shared translate-text bridge; Chinese source text is the
      catalog key and falls back verbatim when the bridge or locale pack is missing. */
-  function _uiText(value) {
-    return (typeof window !== 'undefined' && window.SoduWorkI18n &&
-      typeof window.SoduWorkI18n.translateText === 'function')
-      ? window.SoduWorkI18n.translateText(value) : value;
+
+  function _refreshDisclaimer(root) {
+    const node = root?.querySelector?.('.ai-disclaimer [data-i18n]');
+    if (!node) return;
+    const source = node.getAttribute('data-i18n') || '内容由 AI 生成，请核实重要信息';
+    node.textContent = _uiText(source);
+  }
+  function _bindDisclaimerLocale(root) {
+    if (!root || root.dataset.disclaimerLocaleBound === 'true') return;
+    const refresh = () => _refreshDisclaimer(root);
+    root.dataset.disclaimerLocaleBound = 'true';
+    global.addEventListener('soduwork-locale-change', refresh);
+    refresh();
   }
   function _upgradeStartComposer(p) {
     const old = p.querySelector('.cp-box');
@@ -184,6 +198,7 @@
       '</div>';
     _upgradeStartComposer(p);
     document.body.appendChild(p);
+    _bindDisclaimerLocale(p);
     // Fresh empty controls must not overwrite a pending new-conversation draft.
     if (global.NativeChat?.withDraftRestore) NativeChat.withDraftRestore(() => ctx._bind(p));
     else ctx._bind(p);

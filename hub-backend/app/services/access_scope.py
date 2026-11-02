@@ -4,7 +4,7 @@ import os
 import re
 
 # Reading work instructions is normal; changing them changes future execution.
-_PROTECTED = re.compile(r"(?:^|[\\/])(?:\.git|\.ssh|\.aws|\.azure|\.kube|\.codex|\.claude|\.qwen|\.pi|\.soduwork|\.agents|\.opencode|\.env(?:\.[^\\/]*)?|\.npmrc|\.pypirc|\.netrc)(?:[\\/]|$)", re.I)
+_PROTECTED = re.compile(r"(?:^|[\\/])(?:\.git|\.ssh|\.aws|\.azure|\.kube|\.codex|\.claude|\.kimi-code|\.qwen|\.pi|\.soduwork|\.agents|\.opencode|\.env(?:\.[^\\/]*)?|\.npmrc|\.pypirc|\.netrc)(?:[\\/]|$)", re.I)
 _INSTRUCTIONS = re.compile(r"(?:^|[\\/])(?:AGENTS\.md|SKILL\.md|CLAUDE\.md|GEMINI\.md)(?:[\\/]|$)", re.I)
 
 def protected(value: str, write=False) -> bool:
@@ -92,7 +92,7 @@ def query_targets(argv):
     return result if result and (name not in ("rg", "grep") or list_files or pattern_seen) else None
 
 
-_SEARCH_EXCLUDES = (".git", ".ssh", ".aws", ".azure", ".kube", ".codex", ".claude", ".qwen", ".pi", ".soduwork", ".agents", ".opencode",
+_SEARCH_EXCLUDES = (".git", ".ssh", ".aws", ".azure", ".kube", ".codex", ".claude", ".kimi-code", ".qwen", ".pi", ".soduwork", ".agents", ".opencode",
                     ".env", ".env.*", ".npmrc", ".pypirc", ".netrc", "credential", "credential.*", "credentials", "credentials.*", "auth.json", "token.json", "tokens.json",
                     "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "*.pem", "*.key", "*.p12", "*.pfx")
 

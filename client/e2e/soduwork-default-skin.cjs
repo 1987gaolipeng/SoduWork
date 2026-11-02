@@ -67,11 +67,12 @@ async function until(window, code, label) {
     if (value) return value;
     await delay(25);
   }
-  throw Error('Timed out: ' + label);
+  throw Error('Timed out: ' + label + ' ' + JSON.stringify({ viewport: await run(window, '[innerWidth, innerHeight, devicePixelRatio]'),
+    content: window.getContentSize(), zoom: window.webContents.getZoomFactor() }));
 }
 
 async function open(pet, saved) {
-  const window = new BrowserWindow({ show:false, width:680, height:760,
+  const window = new BrowserWindow({ show:false, width:680, height:760, useContentSize:true,
     webPreferences:{ preload, contextIsolation:true, nodeIntegration:false, backgroundThrottling:false, offscreen:true } });
   windows.add(window);
   window.webContents.on('paint', (_event, _rect, image) => frames.set(window, image));
@@ -79,7 +80,11 @@ async function open(pet, saved) {
   await window.loadURL(base + '/seed');
   if (saved !== undefined) await run(window, `localStorage.clear();${saved ? 'localStorage.setItem(' + JSON.stringify(cfgKey) + ',' + JSON.stringify(JSON.stringify(saved)) + ')' : ''}`);
   await window.loadURL(base + (pet ? '/pet' : '/skins'));
-  window.setSize(680, 760);
+  window.setContentSize(680, 760);
+  // Windows fractional display scaling can round the hidden native surface by one pixel.
+  // Fix the Chromium viewport explicitly so layout assertions use identical CSS dimensions.
+  window.webContents.enableDeviceEmulation({ screenPosition:'desktop', screenSize:{width:680,height:760},
+    viewSize:{width:680,height:760}, deviceScaleFactor:1, scale:1 });
   await until(window, 'innerWidth === 680 && innerHeight === 760', 'headless viewport size');
   await until(window, 'window.fixtureReady', 'fixture scripts initialized');
   return window;
@@ -195,6 +200,13 @@ app.whenReady().then(async () => {
   assert.equal(broadcasts - before, 2, 'one broadcast per selection, no feedback loop');
   await screenshot(desk, 'appearance.png');
   report.cases.push('Native appearance-card clicks update the other renderer via IPC, clear old sprite, and do not echo');
+  const remoteBefore = broadcasts;
+  await run(desk, `Store.applyServerEvent({type:'config.patch',patch:{character:'diamond',theme:'vivid',tube:'glass',_lastSkinId:'diamond-ice',_defaultLogoVersion:1}})`);
+  await until(desk, `currentSkinId() === 'diamond-ice' && document.querySelector('.skin-card[data-id="diamond-ice"]').classList.contains('active')`, 'remote skin is selected in the receiving window');
+  await until(pet, `currentSkinId() === 'diamond-ice' && document.documentElement.dataset.character === 'diamond'`, 'remote skin is rendered in the peer window');
+  await delay(100);
+  assert.equal(broadcasts - remoteBefore, 1, 'remote settings broadcast without a writeback loop');
+  report.cases.push('Persisted remote config patch renders in both windows and selects the correct appearance card');
   await click(desk, 'box-biz');
   await until(pet, `currentSkinId() === 'box-biz'`, 'old box synchronized');
   await close(pet); await close(desk);

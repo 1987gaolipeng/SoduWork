@@ -15,6 +15,23 @@ const IMAGE_TYPES = Object.freeze({
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.webp': 'image/webp', '.gif': 'image/gif',
 });
+const IMAGE_ANALYSIS_TYPES = Object.freeze({
+  ...IMAGE_TYPES,
+  '.avif': 'image/avif', '.bmp': 'image/bmp', '.svg': 'image/svg+xml',
+  '.tif': 'image/tiff', '.tiff': 'image/tiff', '.heic': 'image/heic',
+  '.heif': 'image/heif', '.ico': 'image/x-icon', '.jxl': 'image/jxl',
+  '.jp2': 'image/jp2', '.j2k': 'image/jp2', '.raw': 'image/x-raw',
+  '.cr2': 'image/x-canon-cr2', '.nef': 'image/x-nikon-nef',
+  '.arw': 'image/x-sony-arw', '.dng': 'image/x-adobe-dng',
+  '.psd': 'image/vnd.adobe.photoshop',
+});
+
+function analysisImageMime(file) {
+  const declared = String(file?.mimeType || '').toLowerCase().split(';')[0].trim()
+    .replace(/^image\/(?:jpg|pjpeg)$/, 'image/jpeg');
+  if (/^image\/[a-z0-9][a-z0-9.+-]*$/i.test(declared)) return declared;
+  return IMAGE_ANALYSIS_TYPES[path.extname(file?.path || '').toLowerCase()] || '';
+}
 
 function safeName(value) {
   const raw = path.basename(String(value || '附件')).replace(/[\x00-\x1f<>:"/\\|?*]/g, '_').trim();
@@ -120,8 +137,10 @@ async function stageFiles(cwd, rawItems, options) {
       }
       const stat = await fs.stat(source);
       if (stat.isDirectory()) {
-
-
+        /*
+         * Reference folders by path instead of copying potentially large trees; runtime file
+         * access remains subject to session permissions.
+         */
         files.push({ name: safeName(item.name || source), path: path.resolve(source),
           relative: inside(cwd, source) ? path.relative(cwd, source).replace(/\\/g, '/') : path.resolve(source),
           size: 0, kind: 'dir', mimeType: '' });
@@ -130,13 +149,18 @@ async function stageFiles(cwd, rawItems, options) {
       if (!stat.isFile()) { warnings.push(`${safeName(item.name || source)} 不是文件`); continue; }
       if (bytes + stat.size > MAX_BYTES) { warnings.push('附件总大小超过 256 MB，超出的文件已忽略'); break; }
       bytes += stat.size;
-      let target = path.resolve(source);
-      if (!inside(cwd, target) || (item.appTemporary === true && String(item.sourceRef || '').startsWith('app-input:'))) {
-        inputDir = inputDir || stagingDir || path.join(cwd, '.soduwork-inputs');
-        await fs.mkdir(inputDir, { recursive: true });
-        target = await available(inputDir, safeName(item.name || source));
-        await fs.copyFile(source, target);
-      }
+      /*
+       * Every uploaded file gets a session-owned copy, even when the picker
+       * happened to select a file that already lives under cwd. The runtime
+       * and its tools are allowed to edit their working inputs; pointing them
+       * at the user's original path would let an ordinary conversation mutate
+       * that file. Directories remain references because copying an entire tree
+       * is unbounded and is handled by the explicit folder-input contract.
+       */
+      inputDir = inputDir || stagingDir || path.join(cwd, '.soduwork-inputs');
+      await fs.mkdir(inputDir, { recursive: true });
+      const target = await available(inputDir, safeName(item.name || source));
+      await fs.copyFile(source, target);
       files.push({
         name: safeName(item.name || target), path: target,
         relative: inside(cwd, target) ? path.relative(cwd, target).replace(/\\/g, '/') : target,
@@ -171,11 +195,8 @@ async function images(files) {
   const out = [];
   for (const file of (files || []).slice(0, MAX_FILES)) {
     if (file.kind === 'dir') continue;
-    const declared = String(file.mimeType || '').toLowerCase().split(';')[0].trim()
-      .replace(/^image\/(?:jpg|pjpeg)$/, 'image/jpeg');
-    const mimeType = /^image\/(?:png|jpeg|webp|gif)$/.test(declared) ? declared
-      : IMAGE_TYPES[path.extname(file.path).toLowerCase()] || '';
-    if (!/^image\/(?:png|jpeg|webp|gif)$/i.test(mimeType) || Number(file.size || 0) > IMAGE_BYTES) continue;
+    const mimeType = analysisImageMime(file);
+    if (!/^image\/[a-z0-9][a-z0-9.+-]*$/i.test(mimeType) || Number(file.size || 0) > IMAGE_BYTES) continue;
     const stat = await fs.stat(file.path);
     if (!stat.isFile() || stat.size > IMAGE_BYTES) continue;
     const data = await fs.readFile(file.path);

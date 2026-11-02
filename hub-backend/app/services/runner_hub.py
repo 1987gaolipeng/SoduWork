@@ -22,6 +22,16 @@ CLIENT_TAG = "soduwork-client"   # Reserved tag identifying desktop-embedded Run
 _MAX_CONCURRENT_LIMIT = 20
 
 
+def clean_protocol_caps(value) -> list[str]:
+    """Preserve bounded protocol identifiers exactly across Hub transports."""
+    if not isinstance(value, list):
+        return []
+    # executionSelection1 exceeds the old 16-character display-style limit.
+    # Drop malformed/oversized identifiers instead of creating truncated aliases.
+    return list(dict.fromkeys(item for item in value[:8]
+                              if isinstance(item, str) and 0 < len(item) <= 64))
+
+
 def clean_max_concurrent(value, default: int = 1) -> int:
     """Normalize a Runner capacity advertised across the trust boundary."""
     try:
@@ -170,7 +180,7 @@ class _Runner:
         # Set by the authenticated Hub handshake, never trusted from Runner hello payload.
         self.org_id = ""
         # Use binary frames only when both peers negotiate bin1.
-        self.caps = [str(x)[:16] for x in (info.get("caps") or [])][:8]
+        self.caps = clean_protocol_caps(info.get("caps"))
         self.bin = "bin1" in self.caps
         # Installed CLI inventory reported by the Runner's local discovery.
         raw_agents = info.get("agents")

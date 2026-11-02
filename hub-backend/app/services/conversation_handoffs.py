@@ -26,6 +26,7 @@ from . import handoff_agent_policy
 
 CAPABILITY = "handoff1"
 ARCHIVE_NAME = "soduwork-workspace-handoff.zip"
+RUNNER_KINDS = {"work-computer", "cloud"}
 _ID = re.compile(r"[A-Za-z0-9-]{1,80}")
 _NS = uuid.UUID("a48e2601-e8bc-4836-9098-ec16a67ae5fa")
 
@@ -277,6 +278,9 @@ async def destination(session, client, options, source=None):
     picked = next((x for x in roster if x["id"] == options["assigneeId"]), None)
     if not picked:
         raise HTTPException(409, "目标必须是有权使用、支持会话交接的另一台在线执行机，请刷新列表")
+    requested_runner_kind = str(options.get("targetRunnerKind") or "").strip()
+    if requested_runner_kind and picked.get("runnerKind") != requested_runner_kind:
+        raise HTTPException(409, "目标执行机类型已变化，请刷新工作电脑列表后重试")
     if options.get("agentId") and picked["agentId"] != options["agentId"]:
         raise HTTPException(409, "目标执行机的 Agent 与当前会话不匹配")
     fallback = handoff_agent_policy.validate(source, options, picked["agentId"])
@@ -316,9 +320,58 @@ async def destination(session, client, options, source=None):
     return picked
 
 
+async def committed_destination(session, client, options, source=None):
+    """Revalidate an already committed target without excluding its own client.
+
+    ``targets()`` deliberately hides the caller's current desktop so a new
+    handoff cannot select itself.  A cross-device continuation is different:
+    it must keep the immutable Runner/ref that was already authorized, even
+    when the desktop that owns that Runner is now the caller.
+    """
+    snapshot = dict(options.get("targetSnapshot") or {})
+    agent_id = str(options.get("agentId") or snapshot.get("agentId") or "").strip()
+    assignee_id = str(options.get("assigneeId") or "").strip()
+    parts = assignee_id.split(":", 2)
+    runner_id = str(snapshot.get("runnerId") or (parts[1] if len(parts) == 3 else "")).strip()
+    if not runner_id or agent_id not in AGENTS:
+        raise HTTPException(409, "云端会话的原执行目标不完整，请重新选择执行机")
+    runner = runner_hub.get(runner_id)
+    if (not runner or not cloud_runner_allowed(runner.id, runner.client_id)
+            or not runner.ready or getattr(runner, "dispatch_mode", "") != "accepting"
+            or not runner.work_root or not runner_hub.supports_capabilities(runner, ["files", "terminal"])):
+        raise HTTPException(409, "原云端执行机当前不可用，请稍后重试或重新选择执行机")
+    user = await owner(session, client)
+    own_clients = select(Client.id).where(
+        Client.user_ref == user.id, Client.auth_state == "active")
+    owned = await session.scalar(select(RunnerNode.id).where(
+        RunnerNode.id == runner.id,
+        or_(RunnerNode.owner_user_id == user.id,
+            RunnerNode.client_id.in_(own_clients))))
+    if owned is None:
+        raise HTTPException(409, "原云端执行机不再属于当前账号")
+    installed = next((item for item in runner.agents
+                      if isinstance(item, dict) and item.get("key") == agent_id), None)
+    if not installed or str(installed.get("auth") or "").strip().lower() == "unauthed":
+        raise HTTPException(409, "原执行机上的 Agent 尚未登录，请先完成登录")
+    required = options.get("requiredSkills", [])
+    if required and (not runner.skills_known or not set(required).issubset(set(runner.skills or []))):
+        raise HTTPException(409, "原执行机缺少会话所需技能")
+    spec = AGENTS[agent_id]
+    return {
+        "id": "runner:" + runner.id + ":" + agent_id,
+        "agentId": agent_id, "cli": agent_id,
+        "modelMode": spec.get("modelMode", "managed"),
+        "clientId": str(runner.client_id or ""), "orgId": str(runner.org_id or ""),
+        "runnerId": runner.id, "host": runner.host,
+        "runnerName": snapshot.get("runnerName") or snapshot.get("name") or runner.host or runner.id,
+        "runnerKind": snapshot.get("runnerKind") or ("work-computer" if runner.client_id else "cloud"),
+        "machineLabel": snapshot.get("runnerName") or snapshot.get("name") or runner.host or runner.id,
+    }
+
+
 def clean_options(raw):
     if not isinstance(raw, dict) or set(raw) - {
-        "sha256", "assigneeId", "agentId", "model", "instruction", "requiredSkills", "personalPlugins", "agentFallback", "targetRunnerId"
+        "sha256", "assigneeId", "agentId", "model", "instruction", "requiredSkills", "personalPlugins", "agentFallback", "targetRunnerId", "targetRunnerKind"
     }:
         raise HTTPException(400, "交接选项不正确；不能指定执行机上的目录或额外执行配置")
     out = {}
@@ -338,6 +391,11 @@ def clean_options(raw):
         if not isinstance(raw["targetRunnerId"], str) or not re.fullmatch(r"[A-Za-z0-9._:-]{1,80}", raw["targetRunnerId"]):
             raise HTTPException(400, "目标执行机标识不正确")
         out["targetRunnerId"] = raw["targetRunnerId"]
+    if "targetRunnerKind" in raw:
+        runner_kind = raw["targetRunnerKind"]
+        if not isinstance(runner_kind, str) or runner_kind not in RUNNER_KINDS:
+            raise HTTPException(400, "目标执行机类型不正确")
+        out["targetRunnerKind"] = runner_kind
     if "agentFallback" in raw:
         out["agentFallback"] = handoff_agent_policy.clean_fallback(raw["agentFallback"])
     if not out["instruction"]:
@@ -371,7 +429,7 @@ def public(row):
     receipt = row.receipt or {}
     snapshot = (row.options or {}).get("targetSnapshot") or {}
     target = {key: str(snapshot.get(key) or "") for key in
-              ("name", "runnerName", "agentId", "modelMode", "runnerId", "host")}
+              ("name", "runnerName", "agentId", "modelMode", "runnerId", "host", "runnerKind")}
     target.update(id=(row.options or {}).get("assigneeId", ""),
                   model=(row.options or {}).get("model", ""))
     active = receipt.get("activeExecutionSelection") or {}
@@ -384,6 +442,8 @@ def public(row):
                       " · " + agent.get("displayName", active["agentId"]))
 
     return {"ok": True, "transferId": row.transfer_id, "taskId": row.task_id,
+            "accepted": bool(row.submitted_at),
+            "acceptedAt": row.submitted_at.isoformat() if row.submitted_at else "",
             "phase": row.phase, "status": receipt.get("state") or row.phase,
             "sha256": row.sha256, "ref": receipt.get("ref") or receipt.get("issueId") or "",
             "target": target,
@@ -391,7 +451,7 @@ def public(row):
             "codeDelivery": (row.source or {}).get("codeDelivery"),
             "source": {k: (row.source or {}).get(k, "") for k in ("sessionId", "adapterId", "title", "entryKind")},
             **({"agentFallback": row.options["agentFallback"]} if (row.options or {}).get("agentFallback") else {}),
-            "error": row.error or "", "canAbort": row.phase == "prepared"}
+            "error": row.error or "", "canAbort": row.phase == "prepared" and not row.submitted_at}
 
 
 async def refresh(session, row):
@@ -490,7 +550,8 @@ async def prepare(session, client, transfer_id, data, raw_options):
     row = Handoff(id=row_id, owner_client_id=client.id, owner_user_id=user.id,
         transfer_id=transfer_id, task_id=tid, sha256=options["sha256"], request_hash=digest,
         storage_key=key, backend=backend, options=options, source=source_summary)
-    task = Task(id=tid, owner_client_id=client.id, title=(source["title"] or "云端继续会话")[:200],
+    task = Task(id=tid, owner_client_id=client.id, owner_user_id=user.id,
+        title=(source["title"] or "云端继续会话")[:200],
         note=options["instruction"], kind="task", status="todo", origin="conversation-handoff",
         created_by=user.id, created_by_name=user.display_name or user.username,
         work_routing={"selectedStrategy": "direct", "requiredSkills": options["requiredSkills"],
@@ -533,7 +594,8 @@ async def abort(session, client, transfer_id):
     if row.phase == "aborted":
         return public(row)
     changed = await session.execute(update(Handoff).where(
-        Handoff.id == row.id, Handoff.phase == "prepared").values(phase="aborted"))
+        Handoff.id == row.id, Handoff.phase == "prepared",
+        Handoff.submitted_at.is_(None)).values(phase="aborted"))
     await session.commit()
     if not changed.rowcount:
         raise HTTPException(409, "云端已开始接管或尚在核对回执，不能恢复本地执行")
@@ -562,6 +624,11 @@ async def dispatch_body(session, client, task, body):
 
 async def dispatch_scope(session, client, ctx, row):
     picked = await destination(session, client, row.options, row.source)
+    return scope_for_destination(ctx, client, picked)
+
+
+def scope_for_destination(ctx, client, picked):
+    """Pin execution to one destination already authorized by the directory."""
     out = dict(ctx)
     out.pop("_clientRunnerOnly", None)
     out.pop("_dispatchClientId", None)
@@ -606,6 +673,16 @@ async def commit(session, client, transfer_id, sha256):
     row = await refresh(session, row)
     if row.phase in {"committed", "aborted"}:
         return public(row)
+    if row.phase == "committing":
+        from ..models import TaskEvent
+        latest = await session.scalar(select(TaskEvent).where(
+            TaskEvent.task_id == row.task_id,
+            TaskEvent.kind.in_(ai_exec.KINDS_DISPATCH_STATE),
+        ).order_by(TaskEvent.at.desc(), TaskEvent.id.desc()).limit(1))
+        # A stale request timeout is not evidence that Runner did not accept it.
+        # Recovery may release this fence only after an exact admission probe.
+        if latest and latest.kind in {ai_exec.EV_DISPATCH_STARTED, ai_exec.EV_DISPATCH_UNCERTAIN}:
+            return public(row)
     # Configuration/readiness failure is unambiguously before any dispatch.
     picked = await destination(session, client, row.options, row.source)
     now = datetime.now(timezone.utc)
@@ -616,6 +693,7 @@ async def commit(session, client, transfer_id, sha256):
     from sqlalchemy import or_
     changed = await session.execute(update(Handoff).where(
         Handoff.id == row.id, or_(*conditions)).values(phase="committing", commit_started_at=now, error="",
+        submitted_at=row.submitted_at or now,
         receipt={"runnerBootId": picked.get("runnerBootId", ""), "runnerId": picked["runnerId"]}))
     await session.commit()
     if not changed.rowcount:

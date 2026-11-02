@@ -24,11 +24,14 @@ const venv = path.resolve(__dirname, '../../hub-backend/.venv/Scripts/python.exe
 const python = process.env.SODUWORK_TEST_PYTHON || (fs.existsSync(venv) ? venv : 'python');
 const report = { ok: false, isolated: true, realNativeWindows: true, nativeMouseVerified: false,
   electron: process.versions.electron, rounds: [],
-  note: 'Renderer busy time is deliberately injected fixture load, not production latency.' };
+  note: 'Cursor coordinates, keyboard events and renderer busy time are injected fixture inputs, not physical mouse/IME or production latency.' };
 app.setPath('userData', path.join(root, 'profile'));
 app.on('window-all-closed', () => {});
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 let controller, overlay, target, timeout;
+let cursor = { x: -1000, y: -1000 };
+const fixtureScreen = { getPrimaryDisplay: () => screen.getPrimaryDisplay(),
+  getCursorScreenPoint: () => cursor, on: (...args) => screen.on(...args), removeListener: (...args) => screen.removeListener(...args) };
 const probes = new Set();
 async function until(check, description) {
   const deadline = Date.now() + 5000;
@@ -66,7 +69,7 @@ function rendererHTML() {
     <link rel="stylesheet" href="${file('components/pet/pet.css')}">
     <style>html,body{margin:0;background:transparent}#pet{left:200px;top:100px;right:auto;bottom:auto;
     width:20px;height:20px;opacity:1;transform:none;transition:none;background:#69a}</style></head><body>
-    <div id="pet" class="pet"></div><div id="edgeDock" class="edge-dock"></div>
+    <div id="pet" class="pet"><div class="pet-ring"><button class="ring-btn" style="--rx:150px;--ry:0px">Ring</button></div></div><div id="edgeDock" class="edge-dock"></div>
     <script>
     window.errors=[];addEventListener('error',e=>errors.push(e.message));
     window.cfg={dockVisible:true,tasksOn:true,dockX:100,dockY:100};window.saveCfg=()=>{};
@@ -99,7 +102,7 @@ app.whenReady().then(async () => {
   timeout = setTimeout(() => finish(Error('Native overlay verification exceeded 30 seconds')), 30000);
   fs.copyFileSync(path.resolve(__dirname, '../preload.js'), path.join(root, 'preload.js'));
   fs.writeFileSync(path.join(root, 'index.html'), rendererHTML());
-  controller = require('../main/desktop-overlay.cjs').create({ app, BrowserWindow, ipcMain, screen,
+  controller = require('../main/desktop-overlay.cjs').create({ app, BrowserWindow, ipcMain, screen: fixtureScreen,
     globalShortcut, Notification, powerMonitor, getRendererRoot: () => root,
     getIcon: () => nativeImage.createEmpty(), translate: value => value });
   overlay = controller.createWindow();
@@ -108,15 +111,49 @@ app.whenReady().then(async () => {
   await until(() => js(`soduWorkAPI.getOverlayShape().then(info=>info.reported &&
     window.__ptState().shapeRects.length === 2)`), 'initial regions');
   await js('soduWorkAPI.notifyReady()');
-  target = new BrowserWindow({ x: 400, y: 100, width: 250, height: 120, show: false,
-    skipTaskbar: true, title: 'Isolated overlay focus target', webPreferences: { sandbox: true } });
-  await target.loadURL('data:text/html,<body>Isolated overlay focus target</body>');
+  target = new BrowserWindow({ x: 400, y: 100, width: 800, height: 450, show: false,
+    skipTaskbar: true, title: 'SoduWork isolated composer focus regression', webPreferences: { sandbox: true } });
+  const asset = relative => pathToFileURL(path.resolve(__dirname, '..', relative)).href;
+  const targetFile = path.join(root, 'composer.html');
+  fs.writeFileSync(targetFile, `<!doctype html><meta charset="utf-8">
+    <link rel="stylesheet" href="${asset('theme/variables.css')}">
+    <link rel="stylesheet" href="${asset('components/panels/work-composer.css')}">
+    <style>body{margin:30px;background:white;font:16px sans-serif} .work-composer{margin-top:40px}</style>
+    <h2>输入焦点回归 · 隔离测试</h2><p>桌宠及任务栏切换后保留草稿、附件和选择。</p><main id="host"></main>
+    <script src="${asset('components/panels/work-composer.js')}"></script><script>
+    host.innerHTML=WorkComposer.html({inputId:'nchatInput',sendId:'nchatSend',placeholder:'接着说…',
+      beforeInput:'<div id="attachment">参考.md</div>',afterInput:WorkComposer.syntaxHint(),
+      context:'<span id="selection">Pi · fixture-model · fixture-conversation</span>'});
+    WorkComposer.bindPlaceholder(document.querySelector('.work-composer'));
+    window.input=document.getElementById('nchatInput');input.value='保留草稿';
+    input.dispatchEvent(new Event('input',{bubbles:true}));window.inputEvents=0;
+    input.addEventListener('input',()=>inputEvents++);
+    </script>`);
+  await target.loadFile(targetFile);
   // Settle the production startup redraw and display-bound correction before measuring blur.
   await delay(3300);
   const point = await js(`(()=>{const r=document.getElementById('edgeDock').getBoundingClientRect();
     return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+  const ringPoint = await js(`(()=>{const r=document.querySelector('.ring-btn').getBoundingClientRect();
+    return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+  assert.equal(await js('isPointInteractive(' + ringPoint.x + ',' + ringPoint.y + ')'), false,
+    'closed ring geometry cannot block an underlying editor');
+  assert.equal(await js('getComputedStyle(document.querySelector(".ring-btn")).pointerEvents'), 'none');
+  await js('document.getElementById("pet").classList.add("ring-open");requestOverlayShapeSync(0,true)');
+  await until(() => js('window.__ptState().shapeRects.length===3'), 'open ring region');
+  assert.equal(await js('getComputedStyle(document.querySelector(".ring-btn")).pointerEvents'), 'auto');
+  await js('document.getElementById("pet").classList.remove("ring-open");requestOverlayShapeSync(0,true)');
+  await until(() => js('window.__ptState().shapeRects.length===2'), 'closed ring releases region');
+  assert.equal(await js('isPointInteractive(' + ringPoint.x + ',' + ringPoint.y + ')'), false);
+  // Let the production transition envelope settle before counting blur repaints.
+  await delay(800);
+  report.closedRingVerified = true;
+  let expectedDraft = '保留草稿';
   for (const busyMs of [0, 150, 150]) {
     await js('window.fixtureBusyMs=' + busyMs);
+    const bounds = overlay.getContentBounds();
+    cursor = { x: bounds.x + point.x, y: bounds.y + point.y };
+    await until(() => overlay.isFocusable(), 'widget input enabled');
     overlay.focus();
     await until(() => overlay.isFocused(), 'fixture overlay focus');
     const probe = monitor(overlay, point);
@@ -126,6 +163,7 @@ app.whenReady().then(async () => {
     overlay.setShape = rects => { calls.push(rects); return original(rects); };
     const onBlur = () => blurStates.push({ focusable: overlay.isFocusable(), visible: overlay.isVisible() });
     overlay.on('blur', onBlur);
+    cursor = { x: bounds.x + 600, y: bounds.y + 300 };
     target.show(); target.focus();
     const native = await probe.done;
     overlay.setShape = original;
@@ -139,6 +177,17 @@ app.whenReady().then(async () => {
       'dock center remains inside the actual Windows region across blur');
     const state = await js('soduWorkAPI.getOverlayShape()');
     assert.equal(state.awaitingShape, false, 'fresh shape acknowledgement resumes input guard');
+    assert.equal(overlay.isFocusable(), false, 'fresh acknowledgement keeps transparent gaps outside the focus chain');
+    await target.webContents.executeJavaScript('input.focus();input.setSelectionRange(input.value.length,input.value.length)');
+    assert.equal(target.isFocused(), true, 'underlying work window retains native focus after overlay acknowledgement');
+    target.webContents.sendInputEvent({ type: 'char', keyCode: 'x' }); expectedDraft += 'x';
+    await until(async () => await target.webContents.executeJavaScript('input.value') === expectedDraft, 'composer accepts keyboard event');
+    const composer = await target.webContents.executeJavaScript(`({draft:input.value,caret:input.selectionStart,
+      focused:document.activeElement===input,disabled:input.disabled,attachment:attachment.textContent,selection:selection.textContent})`);
+    assert.equal(composer.focused, true); assert.equal(composer.disabled, false);
+    assert.equal(composer.caret, expectedDraft.length);
+    assert.equal(composer.attachment, '参考.md'); assert.equal(composer.selection, 'Pi · fixture-model · fixture-conversation');
+    report.rounds.at(-1).composer = composer;
     target.hide();
   }
   assert.deepEqual(await js('window.errors'), [], 'production renderer scripts must load without errors');

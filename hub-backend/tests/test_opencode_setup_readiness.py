@@ -5,7 +5,7 @@ import sys
 import unittest
 from unittest.mock import patch
 
-from app.services import agent_setup, harness2_lifecycle, harness2_runtime, local_base, managed_agents
+from app.services import agent_setup, claude_runtime, harness2_lifecycle, harness2_runtime, local_base, managed_agents
 
 
 MISSING = "受管 OpenCode 运行依赖不完整，请点「重装 / 升到最新」补齐。"
@@ -84,11 +84,18 @@ class OpenCodeSetupReadinessTests(unittest.TestCase):
             check.assert_not_called()
 
     def test_other_cli_readiness_does_not_consume_opencode_dependency_state(self):
-        with patch.object(managed_agents, "runtime_issue", side_effect=AssertionError("Unrelated CLI check"),
-                          create=True):
+        with (patch.object(managed_agents, "runtime_issue", side_effect=AssertionError("Unrelated CLI check"),
+                           create=True),
+              patch.object(claude_runtime, "runtime_issue", return_value="") as claude_check):
             for key in ("pi", "qwen", "claude", "custom"):
                 with self.subTest(key=key):
                     self.assertEqual(agent_setup._runtime_issue(key), "")
+            claude_check.assert_called_once()
+
+    def test_claude_reports_its_own_runtime_issue_without_opencode_state(self):
+        with (patch.object(managed_agents, "runtime_issue", side_effect=AssertionError("Unrelated CLI check")),
+              patch.object(claude_runtime, "runtime_issue", return_value="Claude adapter missing")):
+            self.assertEqual(agent_setup._runtime_issue("claude"), "Claude adapter missing")
 
 
 if __name__ == "__main__":

@@ -85,6 +85,23 @@ function render(files) {
 const copyLabel = card =>
   card.children.find(c => c.className === 'nplugin-draft-copy').children[0].textContent;
 
+test('resource-only repair renews the install card at the repaired reply and clears its stale error', () => {
+  const { root, snapshot } = conversation();
+  const original = manifest('name:sales-qa', { at: 130, pluginRevisionAt: 130, pluginRevision: 'before' });
+  links.pluginDrafts(root, [original], 'ref-1', snapshot);
+  const old = cardsOf(root).find(node => node.className === 'nplugin-draft');
+  old.querySelector('.nplugin-draft-error').textContent = 'checksum mismatch';
+  old.querySelector('.nplugin-draft-error').hidden = false;
+  links.pluginDrafts(root, [{ ...original, pluginRevisionAt: 230, pluginRevision: 'repaired' }], 'ref-1', snapshot);
+  const card = root.querySelector('.nplugin-draft');
+  assert.notEqual(card, old);
+  assert.equal(root.querySelectorAll('.nplugin-draft').length, 1);
+  assert.equal(card.closest('.nmsg.ai').dataset.chatNode, 'message:4');
+  assert.equal(card.querySelector('.nplugin-draft-error').hidden, true);
+  links.pluginDrafts(root, [{ ...original, pluginRevisionAt: 230, pluginRevision: 'repaired' }], 'ref-1', snapshot);
+  assert.equal(root.querySelector('.nplugin-draft'), card, 'unchanged retries retain their state');
+});
+
 test('cards: two file entries of one plugin identity render exactly one install card', () => {
   const root = render([manifest('name:sales-qa'), archive('name:sales-qa')]);
   assert.equal(cardsOf(root).length, 1, 'identity dedup folds manifest+archive into a single card');

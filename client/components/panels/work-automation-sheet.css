@@ -225,3 +225,6 @@ html[data-window-titlebar="overlay"] .pui-layer.waz-plugin-surface{
 @media(forced-colors:active){
   .waz-field select{appearance:auto;-webkit-appearance:auto;background-image:none;background-color:Canvas;color:CanvasText}
 }
+
+.waz-clock-selects{display:flex;align-items:center;gap:6px;min-width:0}
+.waz-clock-selects select{flex:1;min-width:0;font-variant-numeric:tabular-nums}

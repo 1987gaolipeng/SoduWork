@@ -135,10 +135,18 @@ async function _ensureOnce(chatId, epoch) {
             }
           }
         }
-        ctx._fail('\u5f00\u4e0d\u4e86\u5bf9\u8bdd', reason);
-        if (ctx._snap) {
-          ctx._snap.sessionNotFound = Boolean(chatId && got && got.notFound === true);
-          ctx._snap.sessionOpenCode = typeof got?.code === 'string' ? got.code : '';
+        /* A failed archive open is a navigation failure, not a model-turn
+         * failure.  Older snapshots may still contain modelRecovery from the
+         * last live turn; leaving it in place renders a misleading
+         * "恢复这一轮" button which has no runtime ref to act on.  Mark the
+         * open failure before _fail() paints so the renderer can expose the
+         * explicit session-reopen action instead. */
+        if (chatId) {
+          const previousSnapshot = ctx._snap || {};
+          ctx._snap = { ...previousSnapshot,
+            sessionNotFound: Boolean(got && got.notFound === true),
+            sessionOpenCode: typeof got?.code === 'string' ? got.code : '',
+            execution: previousSnapshot.execution ? { ...previousSnapshot.execution, modelRecovery: null } : previousSnapshot.execution };
         }
         ctx._fail('\u5f00\u4e0d\u4e86\u5bf9\u8bdd', reason, null, got);
         return false;
@@ -298,7 +306,7 @@ async function _ensureOnce(chatId, epoch) {
             ctx._rememberConversationSnapshot(ctx._sessionId, ctx._snap);
           }
           if (eventEntry) ctx._setCollabEntryStatus(eventEntry, 'failed', 'failed');
-          const canRestore = p.retrySafe === true || global.ChatPluginMention &&
+          const canRestore = p.retrySafe === true || Boolean(global.SoduWorkQuota?.detail(p)) || global.ChatPluginMention &&
             ChatPluginMention.retryableGrantFailure(p);
           const submittedDraft = ctx._submissionDrafts.get(p.submissionId);
           const permanentPluginAuthorization = Boolean(p.pluginAuthorization &&
@@ -546,7 +554,7 @@ async function _sendCore(textOverride, sendOptions) {
         if (!ready && ctx._snap?.sessionNotFound === true) sendOptions?.onAdmission?.({ notSent: true, code: 'SESSION_NOT_FOUND' });
         if (!ready) { retainFailure('会话尚未打开，这一轮未发送'); if (currentSendView()) ctx._restoreFailedDraft(failedDraft);
           // Remove the optimistic bubble when no send occurred.
-          ctx._pending = ''; ctx._pendingAttachmentNames = []; ctx._pendingPlugins = [];
+          ctx._pending = ''; ctx._pendingAttachmentNames = []; ctx._pendingPlugins = []; ctx._pendingBaseline = null;
         }
         if (currentSendView() && localQueue && localQueue.cancelled && fromComposer && sentFiles.length) ctx._messageAttachments?.add(sentFiles, 'retry');
         return false;
@@ -621,7 +629,11 @@ async function _sendCore(textOverride, sendOptions) {
        * transcript text cannot reliably match optimistic text. Remove the optimistic bubble once
        * send is accepted and let server queue/transcript rows take over.
        */
-      if ((sendTaskId || r?.workflowRun) && r && r.ok) {
+      // Cloud ACKs can precede the transcript poll. Keep the submitted text
+      // visible until its authoritative echo arrives; cloud sends do not
+      // rewrite the user's text like requirement/workflow submissions do.
+      const cloudEchoPending = submissionSnapshot?.cloudHandoff?.phase === 'committed' && !r?.workflowRun;
+      if ((sendTaskId || r?.workflowRun) && r && r.ok && !cloudEchoPending) {
         ctx._pending = ''; ctx._pendingAttachmentNames = []; ctx._pendingPlugins = []; ctx._pendingBaseline = null;
         if (reworkSession && ctx._sessionOptions?.reworkSession) {
           /*

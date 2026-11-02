@@ -18,7 +18,7 @@ const extension = () => ({
 test('one new catalog row is discoverable without a new desktop ID list or adapter', () => {
   const catalog = createRuntimeCatalog({ ...source, agents: [...source.agents, extension()] });
   assert.equal(catalog.runtimes().length, source.agents.length + 1);
-  assert.equal(catalog.runnerRuntimes().at(-1).id, 'sample-acp');
+  assert.equal(catalog.runtime('sample-acp').id, 'sample-acp');
   const publicRow = catalog.publicRuntime('sample-acp', [{ id: 'session.resume' }]);
   assert.deepEqual(publicRow.capabilities, ['session.resume']);
   assert.equal(Object.hasOwn(publicRow, 'install'), false);

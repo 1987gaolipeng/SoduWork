@@ -23,6 +23,8 @@ const directCatalogs = { 'en-US': messages, 'ja-JP': messagesByLocale['ja-JP'], 
 test('runtime overview and concurrency controls have direct English, Japanese and Korean copy', t => {
   assert.ok(summaryStart >= 0 && summaryEnd > summaryStart, 'extract the real catalog summary and its actions')
   assert.ok(fieldStart >= 0 && fieldEnd > fieldStart && fields.length > 0, 'extract the real concurrency field labels')
+  assert.match(runtime, /const MAX_POLICY_CONCURRENCY = 4096/)
+  assert.doesNotMatch(runtime, /max="256"/)
   for (const key of ['目录配置', '实时负载', '近一小时请求情况', '每人同时运行', '未启用排队', '暂无已开始请求']) {
     assert.ok(required.has(key), 'extraction covers ' + key)
   }

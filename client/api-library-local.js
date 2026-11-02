@@ -116,7 +116,7 @@
       assertScope(requestScope);
       if (action === 'exportFile' && result?.cancelled === true) return result;
       if (result?.ok === false) throw failure(result.code || 'LOCAL_LIBRARY_ERROR', result.message || result.reason || '本机资料库操作失败');
-      if (['deleteItem', 'restoreItem', 'purgeItem', 'emptyTrash'].includes(action)) {
+      if (['deleteItem', 'deleteItems', 'restoreItem', 'purgeItem', 'emptyTrash'].includes(action)) {
         global.dispatchEvent?.(new CustomEvent('soduwork-library-changed'));
       }
       return result;
@@ -141,6 +141,34 @@
         remoteCopy: got.item?.extra?.lastRemoteCopy };
     }
 
+    function deliveryKey(manifest) {
+      if (manifest?.source !== 'local' || !manifest.sessionId || !manifest.revision || !manifest.files?.length) {
+        throw failure('LIBRARY_DELIVERY_INVALID', '成果清单不完整，请重新打开会话后重试');
+      }
+      return JSON.stringify(['delivery', manifest.sessionId, manifest.revision]);
+    }
+    function deliveryReceipt(item, manifest) {
+      return Object.assign({}, manifest, item, { storage: 'local', source: 'local', revision: manifest.revision,
+        sessionId: manifest.sessionId, files: manifest.files });
+    }
+    // Generated files use the same PC library as ordinary uploads. Publishing a
+    // cross-device delivery on Hub does not save it into the local library.
+    api.saveLibraryDelivery = async function (payload) {
+      var requestScope = scope(), manifest = payload?.manifest, outputKey = deliveryKey(manifest);
+      var context = await localContext(requestScope);
+      if (!payload.filename || typeof payload.data !== 'string') throw failure('LIBRARY_DELIVERY_INVALID', '成果文件尚未准备好');
+      var result = await invoke('upload', { dataBase64: payload.data, name: payload.filename,
+        contentType: payload.contentType || 'application/octet-stream', storage: 'local',
+        source: { type: 'conversation', sessionId: manifest.sessionId,
+          conversationTitle: manifest.conversationTitle || manifest.title || '', outputKey: outputKey }
+      }, requestScope, context);
+      if (result?.ok !== true || !result.item?.id) throw failure('LIBRARY_SAVE_FAILED', '保存到资料库失败，请重试');
+      return Object.assign({}, result, { delivery: deliveryReceipt(result.item, manifest) });
+    };
+    api.getLibraryDeliveryStatus = async function (manifest) {
+      var result = await invoke('outputStatus', { outputKey: deliveryKey(manifest) });
+      return { ok: true, delivery: result?.item?.id ? deliveryReceipt(result.item, manifest) : null };
+    };
     api.getLibraryOutputStatus = function (outputKey, file) {
       return invoke('outputStatus', { outputKey: outputKey, name: file?.name || file?.filename, size: file?.size, sha256: file?.sha256 });
     };
@@ -272,6 +300,68 @@
         recipientUserIds: recipients || [], note: String(note || '') });
       assertScope(requestScope);
       return result;
+    };
+    async function collectLocalFolderFiles(folderIds, requestScope, capturedContext) {
+      var queue = (Array.isArray(folderIds) ? folderIds : []).map(function (id) { return { id: String(id || '').trim(), path: [] }; }).filter(function (entry) { return entry.id; });
+      var seenFolders = new Set(), seenItems = new Set(), files = [];
+      while (queue.length) {
+        assertScope(requestScope);
+        var current = queue.shift();
+        if (seenFolders.has(current.id)) continue;
+        seenFolders.add(current.id);
+        var listing = await api.listLibrary({ scope: 'all', storage: 'local', folderId: current.id });
+        assertScope(requestScope);
+        (Array.isArray(listing?.folders) ? listing.folders : []).forEach(function (folder) {
+          var childId = String(folder?.id || '').trim();
+          if (childId && !seenFolders.has(childId)) queue.push({ id: childId, path: current.path.concat(String(folder.name || '')) });
+        });
+        for (var i = 0; i < (Array.isArray(listing?.items) ? listing.items : []).length; i += 1) {
+          var item = listing.items[i], itemId = String(item?.id || '').trim();
+          if (!itemId || seenItems.has(itemId)) continue;
+          seenItems.add(itemId);
+          if (files.length >= 20) throw failure('LIBRARY_SHARE_LIMIT', '一次最多分享 20 个资料');
+          var got = await localBinary(itemId, requestScope, capturedContext);
+          if (!got.size || got.size > 24 * 1024 * 1024) throw failure('LIBRARY_SHARE_SIZE', '请选择非空且不超过 24 MB 的文件');
+          var data = await dependencies.blobToBase64(got.blob);
+          assertScope(requestScope);
+          files.push({ localItemId: itemId, filename: current.path.concat(got.name).filter(Boolean).join('/'), contentType: got.type, data: data });
+        }
+      }
+      if (!files.length) throw failure('LIBRARY_FOLDER_EMPTY', '文件夹内没有可分享的资料');
+      return files;
+    }
+    api.shareLibraryItems = async function (ids, recipients, note, options) {
+      var values = [...new Set((Array.isArray(ids) ? ids : []).map(function (id) { return String(id || '').trim(); }).filter(Boolean))];
+      var folderIds = [...new Set((Array.isArray(options?.folderIds) ? options.folderIds : []).map(function (id) { return String(id || '').trim(); }).filter(Boolean))];
+      var localFolderIds = folderIds.filter(isLocal), remoteFolderIds = folderIds.filter(function (id) { return !isLocal(id); });
+      var localIds = values.filter(isLocal), remoteIds = values.filter(function (id) { return !isLocal(id); });
+      if (!values.length && !folderIds.length) return { ok: true, succeeded: [], failed: [] };
+      var requestScope = scope(), context, localFiles = [], requestIdValue = options?.requestId || requestId();
+      if (localIds.length) {
+        context = await localContext(requestScope);
+        for (var i = 0; i < localIds.length; i += 1) {
+          var got = await localBinary(localIds[i], requestScope, context);
+          if (!got.size || got.size > 24 * 1024 * 1024) throw failure('LIBRARY_SHARE_SIZE', '请选择非空且不超过 24 MB 的文件');
+          var data = await dependencies.blobToBase64(got.blob);
+          assertScope(requestScope);
+          localFiles.push({ localItemId: localIds[i], filename: got.name, contentType: got.type, data: data });
+        }
+        assertScope(requestScope);
+      }
+      if (localFolderIds.length) {
+        context ||= await localContext(requestScope);
+        localFiles.push(...await collectLocalFolderFiles(localFolderIds, requestScope, context));
+        assertScope(requestScope);
+      }
+      var hasFolder = folderIds.length > 0;
+      if (remoteIds.length || remoteFolderIds.length || hasFolder) return remote.shareLibraryItems(remoteIds, recipients, note, {
+        requestId: requestIdValue, folderIds: remoteFolderIds.length ? remoteFolderIds : undefined,
+        forcePackage: hasFolder, localFiles: localFiles.length ? localFiles : undefined,
+      });
+      if (localFiles.length === 1) return remote.shareLocalLibraryFile(Object.assign({}, localFiles[0], {
+        requestId: requestIdValue, recipientUserIds: recipients || [], note: String(note || ''),
+      }));
+      return remote.shareLocalLibraryFiles(localFiles, recipients, note, { requestId: requestIdValue });
     };
     api.saveMateMessageFileToLibrary = async function (id) {
       var requestScope = scope(), context = await localContext(requestScope);

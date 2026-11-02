@@ -143,3 +143,10 @@ test('single standalone HTML and ordinary documents do not require a manifest', 
     assert.deepEqual(result.items.map(f=>f.kind).sort(),['document','website']);
   } finally { fs.rmSync(root,{recursive:true,force:true}); }
 });
+
+test('website images require delivery intent; standalone image results remain deliverables',()=>{
+  const root=path.join(os.tmpdir(),'delivery-images');
+  const page=file(root,'index.html'),image=file(root,'final-hero.png');
+  assert.deepEqual(delivery.infer([page,image]).items.map(row=>row.name),['index.html']);
+  assert.deepEqual(delivery.infer([image]).items.map(row=>row.name),['final-hero.png']);
+});

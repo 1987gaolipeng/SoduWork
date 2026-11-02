@@ -169,7 +169,7 @@ class RepositoryIssueSyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(configured.status_code, 200, configured.text)
             self.clock += timedelta(seconds=10)
             self.issues = [upstream()]
-            github_issues.append(upstream(web_url="https://github.com/example/hezi/issues/1"))
+            github_issues.append(upstream(web_url="https://github.com/example/soduwork/issues/1"))
             await self.run_once()
             response = await self.http.post(path + "/run", headers=self.headers)
             self.assertEqual(response.status_code, 200, response.text)
@@ -239,8 +239,8 @@ class RepositoryIssueSyncTests(unittest.IsolatedAsyncioTestCase):
             connector = get_connector("github")
             self.assertIsNotNone(connector)
             with patch.object(connector, "list_repositories", return_value=[{
-                    "externalId": "149", "fullName": "example/hezi", "displayName": "hezi",
-                    "cloneUrl": "https://github.com/example/hezi.git", "webUrl": "https://github.com/example/hezi",
+                    "externalId": "149", "fullName": "example/soduwork", "displayName": "soduwork",
+                    "cloneUrl": "https://github.com/example/soduwork.git", "webUrl": "https://github.com/example/soduwork",
                     "defaultBranch": "main", "visibility": "private"}]) as listing:
                 result = await repository_catalog.sync_integration(session, row.id)
                 self.assertEqual(result["created"], 1)

@@ -17,8 +17,15 @@ const INLINE_PREVIEW_TYPES = new Set([
   'text/plain', 'text/markdown', 'text/csv',
 ]);
 // Opening received files is not permission to execute programs or shell scripts.
-const SYSTEM_OPEN_EXTENSIONS = new Set(['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
-  '.odt', '.ods', '.odp', '.html', '.htm', '.rtf']);
+const SYSTEM_OPEN_EXTENSIONS = new Set([
+  // Office and rich-document formats are intentionally handed to the OS.
+  '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.odt', '.ods', '.odp', '.rtf',
+  '.pages', '.numbers', '.key',
+  // Packaged/complex deliverables are also opened by the user's archive app;
+  // they are never rendered as untrusted web content in the workbench.
+  '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz', '.tgz', '.iso',
+  '.html', '.htm',
+]);
 function canOpenWithSystem(filename) { return SYSTEM_OPEN_EXTENSIONS.has(path.extname(String(filename || '')).toLowerCase()); }
 const MAX_ATTACHMENT_BYTES = 64 * 1024 * 1024;
 const MAX_MARKDOWN_PREVIEW_BYTES = 2 * 1024 * 1024;
@@ -134,8 +141,11 @@ function statusError(status) {
   return '\u9644\u4ef6\u6682\u65f6\u6ca1\u6709\u52a0\u8f7d\u6210\u529f\uff08HTTP ' + status + '\uff09';
 }
 
-async function fetchAttachment(url) {
-  const response = await DEPS.net.fetch(url, { redirect: 'manual' });
+async function fetchAttachmentResponse(url, identity) {
+  const options = { redirect: 'manual', signal: AbortSignal.timeout(60000) };
+  const response = identity
+    ? await (DEPS.fetchAuthenticated || require('./device-auth-request').fetchWithDeviceAuthRetry)(identity, url, options)
+    : await DEPS.net.fetch(url, options);
   if (response.status >= 300 && response.status < 400) {
     throw new Error('\u9644\u4ef6\u670d\u52a1\u8fd4\u56de\u4e86\u4e0d\u5b89\u5168\u7684\u8df3\u8f6c');
   }
@@ -153,10 +163,67 @@ async function fetchAttachment(url) {
       ? '源文件已丢失，请从原执行电脑或服务器备份恢复附件后重试'
       : statusError(response.status));
   }
+  return response;
+}
+
+async function fetchAttachment(url, identity) {
+  const response = await fetchAttachmentResponse(url, identity);
   const data = await require('./library-binary.cjs').readResponse(response, MAX_ATTACHMENT_BYTES);
   const rawType = response.headers.get('content-type') || '';
   const charset = /;\s*charset\s*=\s*"?([a-z0-9_-]{1,40})(?:"|\s|;|$)/i.exec(rawType);
   return { data, contentType: normalizedType(rawType), charset: charset ? charset[1] : 'utf-8' };
+}
+
+async function saveArchive(response, target, assertActive) {
+  // ZIP downloads can exceed IPC's binary limit. Stream to a sibling temporary
+  // file and replace the destination only after the complete response is verified.
+  const temporary = target + '.' + require('node:crypto').randomUUID() + '.tmp';
+  let fd, reader;
+  try {
+    const limit = 2 * 1024 * 1024 * 1024;
+    if (Number(response.headers.get('content-length')) > limit) throw Error('交付压缩包超过下载上限');
+    reader = response.body?.getReader();
+    if (!reader) throw Error('交付压缩包内容为空');
+    fd = fs.openSync(temporary, 'wx', 0o600);
+    let size = 0;
+    const hash = require('node:crypto').createHash('sha256');
+    for (;;) {
+      const {done, value} = await reader.read();
+      assertActive();
+      if (done) break;
+      size += value.byteLength;
+      if (size > limit) throw Error('交付压缩包超过下载上限');
+      hash.update(value);
+      for (let at = 0; at < value.byteLength;) {
+        const written = fs.writeSync(fd, value, at, value.byteLength - at);
+        if (!written) throw Error('交付压缩包写入失败，请检查保存位置');
+        at += written;
+      }
+    }
+    const expected = response.headers.get('x-artifact-sha256');
+    if (!size || (expected && hash.digest('hex') !== expected)) throw Error('交付压缩包校验失败，请重新下载');
+    fs.closeSync(fd); fd = undefined;
+    assertActive();
+    require('./verified-file-replace.cjs').replaceFileSync(temporary, target);
+  } finally {
+    try { await reader?.cancel(); } catch (_) { /* The completed stream may already be closed. */ }
+    reader?.releaseLock();
+    if (fd !== undefined) fs.closeSync(fd);
+    try { fs.unlinkSync(temporary); } catch (_) { /* A successful replacement consumes the temporary file. */ }
+  }
+}
+
+function downloadSource(payload, found) {
+  if (payload.taskId === undefined) return parseAttachmentUrl(payload.url, found.identity.hub);
+  // Build the sole supported archive route from identifiers; never authenticate a renderer URL.
+  const valid = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value);
+  if (!valid(payload.taskId) || (payload.artifactVersionId && !valid(payload.artifactVersionId)))
+    throw Error('交付版本无效，请刷新需求后重试');
+  if (payload.url) throw Error('交付压缩包地址无效');
+  return { id: payload.taskId + '.zip', identity: found.identity,
+    url: String(found.identity.hub).replace(/\/+$/, '') + '/api/v1/tasks/' +
+      encodeURIComponent(payload.taskId) + '/artifacts.zip' + (payload.artifactVersionId
+        ? '?artifactVersionId=' + encodeURIComponent(payload.artifactVersionId) : '') };
 }
 
 function previewKey(event) {
@@ -290,7 +357,7 @@ async function preview(event, raw) {
 async function download(event, raw) {
   const payload = raw || {};
   const found = identityFor(event);
-  const parsed = parseAttachmentUrl(payload.url, found.identity.hub);
+  const parsed = downloadSource(payload, found);
   const filename = safeFilename(payload.filename, parsed.id);
   const picked = await DEPS.dialog.showSaveDialog(found.parent, require("./native-locale.cjs").dialogOptions({
     title: '\u4e0b\u8f7d\u9644\u4ef6',
@@ -300,7 +367,12 @@ async function download(event, raw) {
   }));
   if (picked.canceled || !picked.filePath) return { ok: false, canceled: true };
   assertCurrent(event, found);
-  const result = await fetchAttachment(parsed.url);
+  if (parsed.identity) {
+    const response = await fetchAttachmentResponse(parsed.url, parsed.identity);
+    await saveArchive(response, picked.filePath, () => assertCurrent(event, found));
+    return { ok: true };
+  }
+  const result = await fetchAttachment(parsed.url, parsed.identity);
   assertCurrent(event, found);
   fs.writeFileSync(picked.filePath, result.data);
   return { ok: true };
@@ -309,9 +381,9 @@ async function download(event, raw) {
 async function readBinary(event, raw) {
   const payload = raw || {};
   const found = identityFor(event);
-  const parsed = parseAttachmentUrl(payload.url, found.identity.hub);
+  const parsed = downloadSource(payload, found);
   const filename = safeFilename(payload.filename, parsed.id);
-  const result = await fetchAttachment(parsed.url);
+  const result = await fetchAttachment(parsed.url, parsed.identity);
   assertCurrent(event, found);
   return { ok: true, name: filename, size: result.data.length,
     mimeType: result.contentType || 'application/octet-stream', data: result.data.toString('base64') };

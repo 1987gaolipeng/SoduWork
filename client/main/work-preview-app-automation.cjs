@@ -3,8 +3,23 @@
 // renderer host/API; retain uncertain receipts so a retry cannot create twice.
 const crypto = require('node:crypto');
 const stores = new WeakMap();
+const pendingComposers = new Map();
+async function authorize(sender, id) {
+  const row = pendingComposers.get(id);
+  if (!row || row.sender !== sender) throw Error('创建请求已失效');
+  await row.authorize();
+  return { ok: true };
+}
+function finish(sender, payload) {
+  const row = pendingComposers.get(payload?.id);
+  if (!row || row.sender !== sender) return { ok: false };
+  pendingComposers.delete(payload.id);
+  row.resolve(payload.result && typeof payload.result === 'object' ? payload.result :
+    { ok: false, uncertain: true, reason: '创建回执无效，请到自动化页面核对' });
+  return { ok: true };
+}
 const appOwner = require('./work-preview-app-owner.cjs');
-function submit({ owner, item, request, deps }) {
+async function submit({ owner, item, request, deps }) {
   appOwner.assertCurrent(item);
   const pluginId = String(item.appBridge.appId || '').replace(/^plugin:/, '');
   const authorized = await require('./work-preview-app-connection.cjs').authorize(item,deps,'automation.create');

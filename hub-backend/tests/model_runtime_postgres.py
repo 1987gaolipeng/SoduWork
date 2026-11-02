@@ -43,6 +43,7 @@ def checked_url(raw):
 async def exercise(url):
     from app import db
     from app.models import AppSetting
+    from app.model_runtime_models import ModelRuntimeLease, ModelRuntimeMetric
     from app.services import model_runtime as runtime
 
     checks, leases, work, retained_errors = [], [], [], []
@@ -81,7 +82,7 @@ async def exercise(url):
 
     async def raw_state():
         async with sessions() as session:
-            return (await session.get(AppSetting, runtime.STATE_KEY)).value
+            return (await session.get(AppSetting, runtime.STATE_KEY)).value or "{}"
 
     async def cancel(task):
         task.cancel()
@@ -104,7 +105,8 @@ async def exercise(url):
         async with engine.begin() as conn:
             expect(await conn.scalar(sa.text('select current_schema()')) == schema,
                    'every fixture table is isolated in the random schema')
-            await conn.run_sync(AppSetting.__table__.create)
+            for table in (AppSetting, ModelRuntimeLease, ModelRuntimeMetric):
+                await conn.run_sync(table.__table__.create)
 
         with patch.object(runtime, 'SessionLocal', sessions):
             try:

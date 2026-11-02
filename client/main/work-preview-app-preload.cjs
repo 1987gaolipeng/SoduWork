@@ -56,7 +56,3 @@ const bridge = Object.freeze({
 });
 
 contextBridge.exposeInMainWorld('soduWorkAppBridge', bridge);
-contextBridge.exposeInMainWorld('soduWorkAppBridge', bridge); // Existing installed web apps.
-// Public plugin API names remain stable across a product-name change. Both
-// facades use the same restricted request channel and its current authorization.
-contextBridge.exposeInMainWorld('soduworkAppBridge', bridge);

@@ -524,6 +524,12 @@ class Runner:
             limit=self.concurrency_ceiling, cpu_count=max(1, os.cpu_count() or 1))
         from app.services.local_base import _data_root
         from app.services.runner_admission_journal import Journal
+        from app.services.runner_event_outbox import Outbox
+        self._event_outbox = Outbox(os.path.join(_data_root(), "runner-events"),
+                                   self.url + "|" + self.id + "|" + self.client_id)
+        self._session_ack = None
+        self._delivery_attempts = {}
+        self._outbox_blocked = self._event_outbox.at_capacity()
         self._admission = runner_admission.AdmissionQueue(
             task_capacity=runner_admission.DEFAULT_TASK_CAPACITY,
             journal=Journal(os.path.join(_data_root(), "runner-queue"),
@@ -550,9 +556,9 @@ class Runner:
         self._rpc_tasks: set[asyncio.Task] = set()
         self._send_target = contextvars.ContextVar(
             "soduwork_runner_send_target_%s" % self.id, default=None)
-        # Retain last reported sequence and state across reconnects.
-        # After process restart, replay from zero; server session/sequence uniqueness deduplicates events.
-        self._session_marks: dict[str, tuple[int, str]] = {}
+        # Collection cursors move only with the disk outbox transaction. They
+        # are distinct from the Hub's durable delivery/event ACK watermarks.
+        self._session_marks: dict[str, tuple[int, str]] = self._event_outbox.marks()
         self._deployment_marks: dict[str, int] = {}
         # Refs accepted by this process but not durable in ai_local._RUNS yet.
         # This protects slow workspace/skill preflight from a false "not started" result.
@@ -583,6 +589,10 @@ class Runner:
         # whitelist. New conversation therefore reuses the exact task runtime
         # without an avoidable Hub round trip.
         self._local_rpc_task = asyncio.create_task(self._local_rpc_loop())
+        if hasattr(self, "_event_outbox"):
+            # Continue collecting while disconnected; terminal packets remain
+            # independently replayable even after native archive cleanup.
+            self._telemetry_task = asyncio.create_task(self._capture_loop())
         # Admission reclaims native archives before launching any durable queue
         # item, so a surviving child process cannot race a replacement launch.
         while not self._shutdown_event.is_set():
@@ -680,6 +690,9 @@ class Runner:
 
     async def _local_rpc_dispatch(self, message: dict) -> dict:
         op = str(message.get("op") or "")
+        if op == "desktop.capability.reply":
+            bridge = getattr(self, "_desktop_capabilities", None)
+            return bridge.reply(message) if bridge else {"ok": False}
         if op == "runtime.catalog.apply":
             from app.services import custom_agent_catalog
             try:
@@ -838,7 +851,8 @@ class Runner:
                                     if run.get("state") == "running"}
                 active = _busy_count() + self._admission.starting_count()
                 item = self._admission.claim_next(
-                    active, resource.limit, resource.can_start,
+                    active, resource.limit,
+                    resource.can_start and not getattr(self, "_outbox_blocked", False),
                     blocked_refs=running_refs)
                 if item is None:
                     break
@@ -927,11 +941,21 @@ class Runner:
             **admission,
             "skills": self._skill_inventory,
             "skillCatalog": _skill_report(self._skill_catalog),
-            "tags": self.tags, "caps": [ws_frames.CAP_BIN1, "handoff1", "executionSelection1"],
+            "tags": self.tags, "caps": [ws_frames.CAP_BIN1, "handoff1", "executionSelection1", "sessionAck1", "turnFiles1"],
         }
+        if getattr(self, "desktop_owned", False):
+            payload["caps"].append("desktopCapabilities1")
+        if getattr(getattr(self, "_admission", None), "_journal", None) is not None:
+            payload["caps"].append("admit1")
         message, prefetched = await _negotiate_hello(
             self.ws, self._send_raw, payload, timeout=HELLO_TIMEOUT_S)
         self.bin = ws_frames.CAP_BIN1 in (message.get("caps") or [])
+        self._session_ack = "sessionAck1" in (message.get("caps") or [])
+        self._delivery_attempts = {}
+        self._legacy_delivery_cursor = 0
+        if self._session_ack and hasattr(self, "_event_outbox"):
+            async with self._snap_lock:
+                self._session_marks = await asyncio.to_thread(self._event_outbox.marks)
         runner_connection_status.report(self, "online")
         log.info("已上线：%s%s", json.dumps(message, ensure_ascii=False)[:160],
                  "（二进制帧）" if self.bin else "")
@@ -997,7 +1021,10 @@ class Runner:
             _capabilities, self.work_root, self.capability_grants)
         admission = self._admission_report()
         async with self._snap_lock:
-            sessions, advances = await asyncio.to_thread(self._session_snapshots)
+            if getattr(self, "_session_ack", False):
+                sessions, advances = [], []
+            else:
+                sessions, advances = await asyncio.to_thread(self._session_snapshots)
             await self._send_strict({"op": "beat", **admission,
                               "agents": self._agent_inventory,
                               "skills": self._skill_inventory,
@@ -1007,16 +1034,71 @@ class Runner:
                               "sessions": sessions})
             self._apply_marks(advances)
 
+    async def _capture_loop(self) -> None:
+        """Retain transport facts without depending on a live control channel."""
+        while not self._shutdown_event.is_set():
+            try:
+                if self._session_ack is not False:
+                    await self._capture_sessions()
+            except Exception as exc:  # storage failure must not acknowledge or launch new work
+                self._outbox_blocked = True
+                log.warning("Runner event retention paused: %s", type(exc).__name__)
+            await asyncio.sleep(0.5 if not self._outbox_blocked else 5)
+
+    async def _capture_sessions(self) -> None:
+        async with self._snap_lock:
+            sessions, advances = await asyncio.to_thread(self._session_snapshots)
+            stored = False
+            for snapshot, mark in zip(sessions, advances):
+                if not snapshot.get("taskId"):
+                    continue
+                await asyncio.to_thread(self._event_outbox.append, snapshot, mark)
+                self._apply_marks([mark])
+                stored = True
+            if stored:
+                self._outbox_blocked = await asyncio.to_thread(self._event_outbox.at_capacity)
+
+    async def _deliver_sessions(self) -> None:
+        """Retain packets until ACK; replay every packet on legacy connections."""
+        if self._session_ack:
+            packets = [(None, packet) for packet in await asyncio.to_thread(
+                self._event_outbox.pending, 12, getattr(self, "_delivery_after_ref", ""))]
+        else:
+            packets = await asyncio.to_thread(self._event_outbox.replay_pending, 12,
+                                               getattr(self, "_legacy_delivery_cursor", 0))
+        now = time.monotonic()
+        for replay_cursor, packet in packets:
+            # A rejected or temporarily forbidden historical ref cannot starve
+            # later sessions behind the first bounded transmission window.
+            if self._session_ack:
+                self._delivery_after_ref = packet["ref"]
+            else:
+                self._legacy_delivery_cursor = replay_cursor
+            key = (packet["streamId"], packet["deliverySeq"])
+            attempt, retry_at = self._delivery_attempts.get(key, (0, 0))
+            if now < retry_at:
+                continue
+            self._delivery_attempts[key] = (attempt + 1, now + min(30, 2 ** min(attempt + 1, 5)))
+            if self._session_ack:
+                await self._send_strict({"op": "session.deliver", "version": 1,
+                                        "runnerId": self.id, "bootId": self.boot_id, **packet})
+            else:
+                # Legacy Hubs can display retained facts but cannot authorize
+                # their deletion from the durable outbox.
+                await self._send_strict({"op": "session.event", "sessions": [packet["snapshot"]]})
+
     async def _push_loop(self) -> None:
-        """Push normalized structured activity promptly rather than waiting for heartbeats. Do not
-        forward character deltas; idle iterations compare memory only. Older Hubs can ignore
-        unknown session.event messages.
-        """
+        """Deliver durable session packets and retain the legacy deployment path."""
         while True:
             await asyncio.sleep(0.5)
             try:
+                if hasattr(self, "_event_outbox"):
+                    await self._deliver_sessions()
                 async with self._snap_lock:
-                    sessions, advances = await asyncio.to_thread(self._session_snapshots)
+                    if getattr(self, "_session_ack", False):
+                        sessions, advances = [], []
+                    else:
+                        sessions, advances = await asyncio.to_thread(self._session_snapshots)
                     from app.services import runner_deploy
                     deployments, deployment_advances = await asyncio.to_thread(
                         runner_deploy.snapshots, self._deployment_marks)
@@ -1031,29 +1113,36 @@ class Runner:
                 pass
 
     async def _send_strict(self, msg: dict) -> None:
-        """Propagate send failure so callers advance delivery marks only after success."""
+        """Propagate transport failure; sending alone never acknowledges durable packets."""
         await self._send_raw(json.dumps(msg, ensure_ascii=False))
 
     def _apply_marks(self, advances: list) -> None:
-        """Advance reported sequence marks only after successful transmission. Retain them on
-        failure and rely on server session/sequence deduplication during replay.
-        """
+        """Advance collection cursors after disk append, or legacy send on old Hubs."""
         for ref, seq, state in advances:
             self._session_marks[ref] = (seq, state)
+            if not hasattr(self, "_session_collected_at"):
+                self._session_collected_at = {}
+            self._session_collected_at[ref] = time.monotonic()
 
     def _session_snapshots(self) -> tuple[list[dict], list[tuple]]:
         """Collect bounded archived-session deltas for heartbeat or live push, prioritizing active
-        sessions. Return sessions and proposed mark advances; the caller commits marks only
-        after sending successfully.
+        sessions fairly. Return proposed cursors without advancing them; reliable
+        delivery commits each cursor atomically with its disk packet.
         """
         from app.services import ai_local
 
         runs = list((ai_local.console_list_sync({}, None) or {}).get("runs") or [])
         agents = {str(item.get("key") or ""): item for item in self._agent_inventory}
-        runs.sort(key=lambda x: (x.get("state") != "running", -(x.get("started") or 0)))
+        collected = getattr(self, "_session_collected_at", {})
+        runs.sort(key=lambda x: (collected.get(str(x.get("ref") or ""), 0),
+                                 x.get("state") != "running", -(x.get("started") or 0)))
         out: list[dict] = []
         advances: list[tuple] = []
         for run in runs:
+            # Native-only conversations have no Hub execution to authorize.
+            # They must not consume the bounded collection window forever.
+            if not run.get("taskId"):
+                continue
             if len(out) >= 12:
                 break
             ref = str(run.get("ref") or "")
@@ -1062,7 +1151,8 @@ class Runner:
             state, seq = str(run.get("state") or ""), int(run.get("seq") or 0)
             # A silent Agent launch changes neither output sequence nor state
             # (preflight may already say running). Report its marker once too.
-            state_mark = state + ":" + str(run.get("executionStartedAt") or 0)
+            state_mark = ":".join((state, str(run.get("executionStartedAt") or 0),
+                                   str(run.get("round") or 1), str(run.get("admissionKey") or "")))
             cli = str(run.get("cli") or "")
             agent = agents.get(cli) or {}
             last_seq, last_state = self._session_marks.get(ref, (0, ""))
@@ -1072,6 +1162,7 @@ class Runner:
             state = str(live.get("status") or live.get("state") or state)
             seq = int(live.get("seq") or seq)
             items = []
+            item_bytes = 0
             for item in (live.get("items") or []):
                 if not isinstance(item, dict):
                     continue
@@ -1101,7 +1192,12 @@ class Runner:
                         pass
                 from app.services.runtime_messages import public_fields
                 clean.update(public_fields(item))
+                from app.services.runner_event_outbox import snapshot_bytes
+                size = len(snapshot_bytes(clean))
+                if item_bytes + size > 384 * 1024:
+                    break
                 items.append(clean)
+                item_bytes += size
             sent_seq = int(items[-1]["seq"]) if items else last_seq
             out.append({
                 "ref": ref, "taskId": run.get("taskId") or "", "title": run.get("title") or "",
@@ -1152,6 +1248,20 @@ class Runner:
 
     async def _queue_message(self, message: dict, connection) -> None:
         op = str(message.get("op") or "")
+        if op in {"session.ack", "session.nack"}:
+            if (not getattr(self, "_session_ack", False) or connection is not self.ws
+                    or message.get("version") != 1
+                    or type(message.get("deliverySeq")) is not int
+                    or message.get("runnerId") != self.id or message.get("bootId") != self.boot_id):
+                return
+            if op == "session.ack":
+                if await asyncio.to_thread(self._event_outbox.acknowledge, message):
+                    self._delivery_attempts.pop((message.get("streamId"), message.get("deliverySeq")), None)
+                    self._outbox_blocked = await asyncio.to_thread(self._event_outbox.at_capacity)
+                    self._admission_wake.set()
+            else:
+                log.warning("Runner event delivery awaits reconciliation: %s", str(message.get("code") or "")[:80])
+            return
         if op in {"runner.probe", "job.dispatch"}:
             log.info("收到后台指令：%s", op)
         if not message.get("id"):
@@ -1420,18 +1530,25 @@ class Runner:
                                          "contextReport": dict(r.get("contextReport") or {})}}
         if op == "job.has":
             ref = str(m.get("ref") or "")
-            queued_item = self._admission.latest_for_ref(ref, include_terminal=True)
-            inflight = ref in self._dispatching_refs or bool(
+            admission_key = str(m.get("admissionKey") or "")
+            queued_item = (self._admission.get(admission_key) if admission_key
+                           else self._admission.latest_for_ref(ref, include_terminal=True))
+            if queued_item is not None and queued_item.ref != ref:
+                return {"ok": False, "code": "ADMISSION_REF_MISMATCH",
+                        "error": "Admission key does not belong to this execution"}
+            inflight = (not admission_key and ref in self._dispatching_refs) or bool(
                 queued_item and queued_item.state in runner_admission.ACTIVE_STATES)
-            if not inflight and ref not in ai_local._RUNS:
+            if not admission_key and not inflight and ref not in ai_local._RUNS:
                 # Recover historical execution refs from local archives even when only Hub restarted.
                 await asyncio.to_thread(ai_local.reclaim)
-            persisted = ref in ai_local._RUNS or queued_item is not None
+            persisted = queued_item is not None or (not admission_key and ref in ai_local._RUNS)
             data = {
                 "has": inflight or persisted,
                 "inflight": inflight,
                 "persisted": persisted,
                 "bootId": self.boot_id,
+                "admissionDurable": getattr(self._admission, "_journal", None) is not None,
+                "admissionKey": admission_key,
             }
             if queued_item is not None:
                 data.update(self._admission.receipt(queued_item))
@@ -1580,7 +1697,7 @@ class Runner:
             return {"ok": True, "data": stopped}
         if op == "job.comment":
             from app.services.runner_comments import comment
-            return await comment(self, m, _read_local_files)
+            return await comment(self, m, _read_local_files, _read_packet, _drop_input_transfer)
         return {"ok": False, "error": "不认识的 job 操作: " + op}
 
     async def _mcp(self, m: dict) -> dict:
@@ -1760,6 +1877,19 @@ class Runner:
         m = dict(m)
         m.pop("_localParent", None)
         op = str(m.get("op") or "")
+        if op.startswith("desktop.capability"):
+            try:
+                if op != "desktop.capability" or not getattr(self, "desktop_owned", False):
+                    raise ValueError("此操作仅支持由桌面客户端启动的本人电脑")
+                from app.services.runner_desktop_capabilities import DesktopCapabilities
+                if not hasattr(self, "_desktop_capabilities"):
+                    self._desktop_capabilities = DesktopCapabilities(self._write_local_rpc)
+                result = await self._desktop_capabilities.call({
+                    key: m.get(key) for key in ("requestId", "operation", "args", "targetClientId", "ownerUserId", "authorization")})
+            except Exception as exc:
+                result = {"ok": False, "error": str(exc) or "电脑未及时响应，请核对原操作结果"}
+            await self._send({**result, "op": "reply", "id": m.get("id")})
+            return
         if op == "runtime.catalog.apply":
             await self._send({"op": "reply", "id": m.get("id"), "ok": False,
                               "code": "LOCAL_PARENT_REQUIRED",

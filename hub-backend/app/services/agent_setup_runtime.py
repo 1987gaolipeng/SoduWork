@@ -4,10 +4,8 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import platform
 import signal
 import subprocess
-import sys
 
 from .local_base import _WIN, _bundled_pi_node, _npm_root
 from . import agent_npm_runtime
@@ -63,21 +61,24 @@ def _short(exe: str | None, args: list[str], timeout: int = 12) -> str:
             options["start_new_session"] = True
         proc = subprocess.Popen(
             [exe, *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+            stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
             env=env, **options)
         try:
-            out, _ = proc.communicate(timeout=max(1, int(timeout)))
+            out, err = proc.communicate(timeout=max(1, int(timeout)))
         except subprocess.TimeoutExpired:
             _kill_probe_tree(proc)
             try:
                 proc.communicate(timeout=2)
             except Exception:  # noqa: BLE001
-                if proc.stdout is not None:
-                    proc.stdout.close()
+                for pipe in (proc.stdout, proc.stderr):
+                    if pipe is not None:
+                        pipe.close()
             return ""
         if proc.returncode != 0:
             return ""
-        text = (out or "").strip()
+        # Native CLIs may warn on stderr before printing a valid stdout version.
+        # Prefer the result stream, retaining stderr-only version compatibility.
+        text = (out or "").strip() or (err or "").strip()
         return text.splitlines()[0].strip()[:80] if text else ""
     except Exception:  # noqa: BLE001
         if proc is not None:
@@ -87,11 +88,8 @@ def _short(exe: str | None, args: list[str], timeout: int = 12) -> str:
 
 def _codex_native_name() -> str:
     """Official platform package used by the Codex App Server binary."""
-    system = {"win32": "win32", "linux": "linux", "darwin": "darwin"}.get(
-        sys.platform, "")
-    machine = platform.machine().lower()
-    arch = ("x64" if machine in ("amd64", "x86_64", "x64") else
-            "arm64" if machine in ("arm64", "aarch64") else "")
+    system, arch = agent_npm_runtime.runtime_target()
+    system = system if system in {"win32", "linux", "darwin"} else ""
     return f"@openai/codex-{system}-{arch}" if system and arch else ""
 
 

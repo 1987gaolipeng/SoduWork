@@ -35,6 +35,38 @@ def is_owner(task: models.Task, client: models.Client | None) -> bool:
                 str(getattr(task, "owner_user_id", None) or "") == str(client.user_ref or ""))
 
 
+def can_continue_cloud(task: models.Task, client: models.Client | None) -> bool:
+    """A cloud conversation can be continued by any device in its account.
+
+    The Runner remains pinned to the handoff record; this capability only
+    authorizes another account device to append a turn through Hub.  Local
+    tasks keep their existing owner-device execution boundary.
+    """
+    return bool(
+        client and task.origin == "cloud-conversation"
+        and client.user_ref
+        and str(task.owner_user_id or "") == str(client.user_ref)
+        and task.archived_at is None
+    )
+
+
+def can_continue_execution(task: models.Task, client: models.Client | None) -> bool:
+    """Continue the existing execution without granting task mutation rights.
+
+    Shared viewers do not acquire execution authority. An account-owned
+    requirement may be continued from that account's devices only when its
+    execution context pins a remote Runner; it never selects a fallback host.
+    """
+    if not client or task.archived_at is not None:
+        return False
+    if is_owner(task, client) or can_continue_cloud(task, client):
+        return True
+    context = (getattr(task, "work_routing", None) or {}).get("executionContext") or {}
+    runner = context.get("runner") or {}
+    return bool(client.user_ref and str(task.owner_user_id or "") == str(client.user_ref)
+                and runner.get("mode") == "remote" and runner.get("runnerId"))
+
+
 def owner_clause(client: models.Client | None):
     if client is None:
         return False
@@ -165,6 +197,7 @@ def decorate(task: models.Task, api: dict, client: models.Client,
                           names.get(creator_id, "")),
         "executionDeviceName": (devices or {}).get(str(task.owner_client_id or ""), ""),
         "readOnly": not is_owner(task, client),
+        "canSend": can_continue_execution(task, client),
         "canViewExecution": bool(my_roles(task, client)),
         "canComment": bool(my_roles(task, client)),
         "myRoles": my_roles(task, client),

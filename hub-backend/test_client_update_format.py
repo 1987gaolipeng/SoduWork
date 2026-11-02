@@ -33,12 +33,12 @@ class FormatSelectionTests(unittest.IsolatedAsyncioTestCase):
             await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=[
                 Client.__table__, ClientRelease.__table__, ClientUpdateAttempt.__table__]))
         async with self.sessions() as session:
-            session.add(Client(id="test-device", name="isolated", app_version="1.12.81"))
+            session.add(Client(id="test-device", name="isolated", app_version="1.13.1"))
             for fmt in ("deb", "rpm", "tar.gz"):
                 (root / fmt).write_bytes(artifact)
-                session.add(ClientRelease(id=fmt, version="1.12.82", channel="stable",
+                session.add(ClientRelease(id=fmt, version="1.13.2", channel="stable",
                     platform="linux", arch="x64", enabled=True,
-                    artifact_name=f"SoduWork-1.12.82-linux.{fmt}", artifact_size=len(artifact),
+                    artifact_name=f"SoduWork-1.13.2-linux.{fmt}", artifact_size=len(artifact),
                     artifact_path=fmt, sha256=hashlib.sha256(artifact).hexdigest(), signature="fixture", key_id="test-key"))
             await session.commit()
         app = FastAPI()
@@ -49,7 +49,7 @@ class FormatSelectionTests(unittest.IsolatedAsyncioTestCase):
                 yield session
 
         async def client_override():
-            return Client(id="test-device", name="isolated", app_version="1.12.81")
+            return Client(id="test-device", name="isolated", app_version="1.13.1")
 
         app.dependency_overrides[get_session] = session_override
         app.dependency_overrides[current_client] = client_override
@@ -64,7 +64,7 @@ class FormatSelectionTests(unittest.IsolatedAsyncioTestCase):
         await self.engine.dispose()
 
     async def check(self, fmt=None, **params):
-        values = dict(current="1.12.81", platform="linux", arch="x64", **params)
+        values = dict(current="1.13.1", platform="linux", arch="x64", **params)
         if fmt is not None:
             values["format"] = fmt
         return await self.http.get("/api/v1/client-updates/check", params=values)
@@ -80,7 +80,7 @@ class FormatSelectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertFalse(response.json()["hasUpdate"])
 
-    async def test_old_clients_keep_previous_preference(self):
+    async def test_supported_client_without_format_keeps_previous_preference(self):
         response = await self.check()
         self.assertEqual(response.json()["manifest"]["releaseId"], "deb")
 
@@ -88,13 +88,13 @@ class FormatSelectionTests(unittest.IsolatedAsyncioTestCase):
         for fmt in ("exe", "../rpm", "zip"):
             self.assertEqual((await self.check(fmt)).status_code, 400)
         response = await self.http.get("/api/v1/client-updates/check",
-            params=dict(current="1.12.81", platform="win32", format="rpm"))
+            params=dict(current="1.13.1", platform="win32", format="rpm"))
         self.assertEqual(response.status_code, 400)
 
     async def test_wrong_target_attempt_is_not_marked_installed(self):
         await self.check("deb")
         response = await self.http.get("/api/v1/client-updates/check",
-            params=dict(current="1.12.82", platform="linux", format="rpm"))
+            params=dict(current="1.13.2", platform="linux", format="rpm"))
         self.assertFalse(response.json()["hasUpdate"])
         from sqlalchemy import select
         async with self.sessions() as session:

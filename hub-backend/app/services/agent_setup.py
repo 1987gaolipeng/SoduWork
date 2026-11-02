@@ -22,6 +22,7 @@ from .local_base import (
 from .acp_agents import runtime_issue as _acp_runtime_issue
 from ..agent_catalog import install_specs
 from . import dsh_runtime, managed_agents, agent_npm_runtime, agent_npm_network, harness2_runtime
+from . import agent_native_install
 from . import harness2_probe
 from .agent_npm_runtime import node_env
 from .agent_setup_runtime import (
@@ -33,6 +34,8 @@ from .agent_version_probe import probe as _cached_version_probe
 from .agent_setup_probe import (
     _clean as _probe_console_text, _why_failed, probe_succeeded as _probe_succeeded,
 )
+from .agent_messages import decorate as _decorate_agent
+from .claude_runtime import account_setup as _claude_account_setup
 
 log = logging.getLogger("uvicorn.error")
 
@@ -97,6 +100,8 @@ def _runtime_issue(key: str) -> str:
         return runtime_issue()
     if key == "dsh":
         return _acp_runtime_issue("dsh")
+    if key == "claude":
+        return _acp_runtime_issue(key)
     if key != "codex-harness":
         return ""
     native = _codex_native_name()
@@ -159,7 +164,14 @@ def _version_of(key: str) -> tuple[str, str, str]:
         return (harness2_runtime.version(), "bundled", "") if is_bundled(key) else ("", "", "")
     binp = _bin_of(key)
     spec = _SPECS.get(key) or {}
+    if key == "claude":
+        from .local_base import _claude_bin
+        native = _claude_bin()
+        ver = _cached_version_probe(native, ["--version"], run=_short) if native else ""
+        return ver, "cli" if ver else "", ""
     if spec.get("installer") == "managed":
+        if key == "opencode" and (issue := managed_agents._cpu_compatibility_issue()):
+            return managed_agents._read_active(), "managed-record", issue
         ver = (_cached_version_probe(binp, ["--version"], run=_short,
                                      files=_package_files(spec.get("pkg", ""))) if binp else "")
         if ver:
@@ -193,9 +205,7 @@ def _version_of(key: str) -> tuple[str, str, str]:
 
 
 def _auth_probe(key: str) -> tuple[str, str]:
-    """Check Codex and Claude credential files without network requests. Return authentication
-    state and reason; other runtimes manage their own accounts.
-    """
+    """Probe native account status in the same scope used by execution."""
     if key == "codex":
         from . import codex_account_home
         try:
@@ -204,38 +214,14 @@ def _auth_probe(key: str) -> tuple[str, str]:
                     env=codex_account_home.environment(_data_root()))
                 if state == "authed":
                     return "authed", "SoduWork 独立 Codex 账号已登录；新对话使用此账号"
-                return "unauthed", "独立 Codex 账号未通过本机验证，请点击「登录 Codex」后新建对话"
+                return state, "独立 Codex 账号未通过本机验证，请点击「登录 Codex」后新建对话"
         except Exception:
-            return "unauthed", "Codex 独立登录设置无法读取，请检查 Runner 数据目录后重新登录"
-    live = _account_auth_probe(key, _bin_of(key))
-    if live[0]:
-        return live
-    home = os.path.expanduser("~")
-    if key == "codex":
-        if str(os.environ.get("OPENAI_API_KEY") or "").strip():
-            return "authed", "已配置自己的 OpenAI API Key"
-        base = os.environ.get("CODEX_HOME") or os.path.join(home, ".codex")
-        path = os.path.join(base, "auth.json")
-        try:
-            if os.path.isfile(path) and os.path.getsize(path) > 2:
-                return "authed", "已用自己的 OpenAI/ChatGPT 账号登录"
-        except OSError:
-            pass
-        return "unauthed", "还没登录：在这台机器上跑一次 codex login（或设 OPENAI_API_KEY）"
+            return "", "Codex 独立登录设置无法读取，请检查 Runner 数据目录后重新登录"
     if key == "claude":
-        cred = os.path.join(home, ".claude", ".credentials.json")
-        try:
-            if os.path.isfile(cred) and os.path.getsize(cred) > 2:
-                return "authed", "已用自己的 Anthropic 账号登录"
-            cfg = os.path.join(home, ".claude.json")
-            if os.path.isfile(cfg):
-                with open(cfg, encoding="utf-8", errors="ignore") as f:
-                    if '"oauthAccount"' in f.read(400_000):
-                        return "authed", "已用自己的 Anthropic 账号登录"
-        except OSError:
-            pass
-        return "unauthed", "还没登录：在这台机器上跑一次 claude 按提示登录"
-    return "", ""
+        from .local_base import _claude_bin
+        from .claude_runtime import environment
+        return _account_auth_probe(key, _claude_bin() or "", env=environment(_data_root()))
+    return _account_auth_probe(key, _bin_of(key))
 
 
 def detect(key: str, *, has_model: bool = True, probes: dict | None = None) -> dict:
@@ -251,7 +237,8 @@ def detect(key: str, *, has_model: bool = True, probes: dict | None = None) -> d
     # Harness uses the host Python executable, which is not proof that its
     # bundled core exists. Other runtimes can also leave metadata behind.
     present = bundled if key == "harness2" else bool(binp or ver or bundled)
-    runtime_issue = _runtime_issue(key) if binp else ""
+    platform_issue = managed_agents._cpu_compatibility_issue() if key in {"opencode", "harness2"} else ""
+    runtime_issue = platform_issue or (_runtime_issue(key) if binp else "")
     # npm accepts unsupported engine versions with a warning. Treat an
     # installed CLI on an incompatible Node runtime as unavailable so the
     # Runner never advertises a seat that immediately crashes on dispatch.
@@ -265,7 +252,7 @@ def detect(key: str, *, has_model: bool = True, probes: dict | None = None) -> d
             if not _cached_version_probe(binp, [*argv, "--version"], run=_short,
                                          files=_package_files(pkg)):
                 runtime_issue = "Agent 启动自检失败，请检查 Node 版本、系统架构和原生依赖。"
-    if binp and not runtime_issue and spec.get("installer") == "managed":
+    if binp and not runtime_issue and spec.get("installer") in {"managed", "native"}:
         if ver_from not in {"managed", "cli", "bundled"}:
             runtime_issue = "Agent 启动自检失败，请检查系统运行库、目录权限或重新安装。"
     if key == "harness2" and binp and not runtime_issue:
@@ -273,7 +260,7 @@ def detect(key: str, *, has_model: bool = True, probes: dict | None = None) -> d
         _, executor_source, _ = _version_of("opencode")
         if executor_source not in {"managed", "cli", "bundled"}:
             runtime_issue = "OpenCode 执行组件启动自检失败，请检查系统运行库、目录权限或重新安装。"
-    if not binp and present:
+    if not binp and present and not platform_issue:
         runtime_issue = "保留了安装记录，但找不到执行程序。请点「重装」补齐。"
     installed = bool(binp) and not runtime_issue
     if runtime_issue:
@@ -301,8 +288,15 @@ def detect(key: str, *, has_model: bool = True, probes: dict | None = None) -> d
                                if needs_llm else
                                "装好了。它用自己的账号，没登录过的话第一次跑会让你登录。")
     auth, auth_detail = ("", "")
+    auth_status = ""
     if installed and not needs_llm and not bundled:
         auth, auth_detail = _auth_probe(key)
+        auth_status = auth
+        if key == "codex" and not auth:
+            # Older Hubs only understand authed/unauthed. Fail closed for
+            # dispatch while preserving uncertainty for current clients.
+            auth, auth_status = "unauthed", "unknown"
+            auth_detail = "暂时无法确认 Codex 登录状态，请重新检查或使用独立授权。"
         if auth == "authed" and state == "ready":
             why = auth_detail + "，可以直接派活。它用自己的模型，不占共享模型。"
         elif auth == "unauthed":
@@ -310,6 +304,9 @@ def detect(key: str, *, has_model: bool = True, probes: dict | None = None) -> d
     # Keep the legacy state vocabulary for older desktop clients, which index
     # it directly. New clients use setupState without changing dispatch gates.
     setup_state = state
+    if auth_status == "unknown":
+        setup_state = "unknown"
+        why = auth_detail
     if not installed:
         setup_state = "broken" if present or runtime_issue else "missing"
         if key == "harness2":
@@ -317,7 +314,7 @@ def detect(key: str, *, has_model: bool = True, probes: dict | None = None) -> d
             from .local_base import _opencode_bin
             if disabled_issue():
                 setup_state = "disabled"
-            elif bundled and not _opencode_bin():
+            elif bundled and not _opencode_bin() and not platform_issue:
                 setup_state = "setup"
         if setup_state in {"setup", "disabled"}:
             warn_now = ""
@@ -328,7 +325,7 @@ def detect(key: str, *, has_model: bool = True, probes: dict | None = None) -> d
     # Return history explicitly without mutating the stored record.
     if p:
         p = {**p, "historical": True}
-    return {
+    return _decorate_agent({
         "key": key,
         "name": prof.get("name") or key,
         "pkg": pkg,
@@ -340,15 +337,18 @@ def detect(key: str, *, has_model: bool = True, probes: dict | None = None) -> d
         "setupState": setup_state,
         "runtimeIssue": runtime_issue,
         "bundled": bundled,
+        "canUninstall": can_uninstall(key),
         "bin": binp,
         # Display Pi's actual Node and cli.js entry point.
         # Showing node.exe alone would hide which CLI is installed.
         "entry": (_pi_cli_js() or "") if key == "pi" else "",
         "auth": auth,
+        "authStatus": auth_status,
         "authDetail": auth_detail,
         "loginAvailable": key == "codex" and bool(binp),
         "loginFlowVersion": 1 if key == "codex" and binp else 0,
         "isolatedLoginAvailable": key == "codex" and bool(binp),
+        "accountSetup": _claude_account_setup(_data_root()) if key == "claude" and installed else {},
         "version": ver,
         "verFrom": ver_from,        # Distinguish package metadata from CLI fallback version detection.
         "warnNow": warn_now,        # Separate this machine's issue from general runtime requirements.
@@ -359,7 +359,7 @@ def detect(key: str, *, has_model: bool = True, probes: dict | None = None) -> d
         "state": state,
         "why": why,
         "probe": p,                 # {ok, detail, at, steps:[...]}
-    }
+    })
 
 
 def _config_ready(key: str) -> bool:
@@ -510,6 +510,11 @@ def _stream(jid: str, argv: list[str], *, cwd: str | None = None, env: dict | No
 
 
 # ---- Install / uninstall / update ----
+def can_uninstall(key: str) -> bool:
+    """Pi is required even when its bundled payload is absent or being repaired."""
+    return key in _SPECS and key != "pi" and (key == "harness2" or not is_bundled(key))
+
+
 def start_install(key: str, action: str, *, owner_id: str = "") -> str:
     """Start an explicit lifecycle or account-login job and return its polling ID."""
     if key not in _SPECS:
@@ -519,13 +524,16 @@ def start_install(key: str, action: str, *, owner_id: str = "") -> str:
     if action.startswith("login") and key != "codex":
         raise ValueError("Account login is supported only for Codex")
     jid = _new_job(key, action)
+    if action == "uninstall" and not can_uninstall(key):
+        _done(jid, False, "该底座是 SoduWork 必需组件，不能单独卸载。")
+        return jid
     if action.startswith("login"):
         from . import codex_login_flow
         with _JOB_LOCK:
             _JOBS[jid].update(_owner=owner_id, auth={"state": "checking"})
         if not codex_login_flow.reserve(jid, _data_root()):
             with _JOB_LOCK:
-                _JOBS[jid]["auth"] = {"state": "failed"}
+                _JOBS[jid]["auth"] = {"state": "failed", "reason": "login_busy"}
             _done(jid, False, "这台电脑已有 Codex 授权正在进行，请先完成或取消", 409)
             return jid
         _spawn(jid, _run_codex_login)
@@ -548,6 +556,10 @@ def start_install(key: str, action: str, *, owner_id: str = "") -> str:
     if spec.get("installer") == "manual":
         _done(jid, False, str(spec.get("install_how") or
                               "Install this Agent in an isolated Runner environment, then retry detection."))
+        return jid
+
+    if spec.get("installer") == "native":
+        _spawn(jid, _run_native, key, action)
         return jid
 
     if spec.get("installer") == "managed":
@@ -593,7 +605,34 @@ def _run_managed(jid: str, key: str, action: str) -> None:
 
 
 @agent_npm_runtime.serial_install
+def _run_native(jid: str, key: str, action: str) -> None:
+    """Run a Runner-isolated vendor binary installer without Node or shell scripts."""
+    try:
+        ok, detail = agent_native_install.install(
+            _data_root(), action, emit=lambda line: _say(jid, line))
+    except (OSError, RuntimeError, ValueError) as exc:
+        _done(jid, False, "Claude Code native installation failed: " + str(exc)[:300], 2)
+        return
+    if not ok:
+        _done(jid, False, detail or "Claude Code native installation failed", 2)
+        return
+    if action in {"install", "update"}:
+        from .claude_runtime import install_adapter
+        issue = install_adapter(
+            execute=lambda argv, **opts: _stream(jid, argv, **opts),
+            say=lambda line: _say(jid, line))
+        if issue:
+            _done(jid, False, issue, 2)
+            return
+        agent_npm_runtime.activate_environment()
+    _done(jid, True, detail or "Claude Code native installation complete", 0)
+
+
+@agent_npm_runtime.serial_install
 def _run_npm(jid: str, key: str, action: str) -> None:
+    if action == "uninstall" and not can_uninstall(key):
+        _done(jid, False, "该底座是 SoduWork 必需组件，不能单独卸载。")
+        return
     spec = _SPECS.get(key) or {}
     pkg = spec.get("pkg") or ""
     version = str(spec.get("version") or "").strip()
@@ -635,9 +674,8 @@ def _run_npm(jid: str, key: str, action: str) -> None:
         return
     if action == "uninstall":
         packages = [pkg]
-        native = _codex_native_name() if key == "codex-harness" else ""
-        if native:
-            packages.append(native)
+        # Codex's native package is shared with personal-account execution.
+        # Removing an adapter must not remove another runtime's dependency.
         code, _ = run(["uninstall", "-g", *packages], timeout=300)
         if code == 0 and key == "dsh":
             try:

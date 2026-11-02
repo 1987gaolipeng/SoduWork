@@ -53,7 +53,7 @@ function managed(env = process.env, platform = process.platform, options = {}) {
 }
 
 function candidates(env = process.env, platform = process.platform, explicitOnly = false) {
-  const explicit = [env.SODUWORK_OFFICECLI, env.SODUWORK_OFFICECLI].filter(Boolean);
+  const explicit = [env.SODUWORK_OFFICECLI].filter(Boolean);
   const managed = explicitOnly ? [] : managedCandidates(env, platform);
   if (explicitOnly) return explicit;
   if (platform !== 'win32') {

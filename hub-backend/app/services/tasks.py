@@ -80,16 +80,22 @@ def normalize_output_contract(t: "models.Task") -> bool:
     """
     routing = dict(t.work_routing or {})
     contract = dict(routing.get("outputContract") or {})
-    if contract.get("kind") != "repository-change":
+    legacy_normalized = (contract.get("kind") == "office-artifact"
+                         and contract.get("normalizedFrom") == "repository-change"
+                         and contract.get("normalizationVersion") != 2)
+    if contract.get("kind") != "repository-change" and not legacy_normalized:
         return False
     if getattr(t, "project_id", None) or str(getattr(t, "repo_id", "") or "").strip():
         return False
     routing["outputContract"] = {
         "kind": "office-artifact",
-        "summary": "未关联代码工程，按本地文件交付验收（原仓库变更合同已自动降级）。",
-        "deliverables": list(contract.get("deliverables") or []),
-        "acceptance": list(contract.get("acceptance") or []),
+        "summary": "按本次需求约定的最终成果与完成标准验收。",
+        "deliverables": ["按需求约定交付最终成果"],
+        "acceptance": list(getattr(t, "acceptance_criteria", None) or
+                           ["满足需求的完成标准，由验收人确认"]),
         "normalizedFrom": "repository-change",
+        "normalizationVersion": 2,
+        "sourceContract": contract.get("sourceContract") or contract,
     }
     t.work_routing = routing
     return True

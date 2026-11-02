@@ -37,7 +37,7 @@ test('a retained prior-account page cannot read secrets, write, connect, automat
     { method: 'settings.update', params: { values: { token: 'wrong-owner-write' } } },
   ]) assert.throws(() => connection.settings({ item: f.item }, request, f.deps), { code: 'APP_ACCOUNT_CHANGED' });
   assert.throws(() => connection.connect({ item: f.item }, { server: 'fixture', url: f.binding.origin + '/mcp', credentialKey: 'token' }, f.deps), { code: 'APP_ACCOUNT_CHANGED' });
-  assert.throws(() => require('../main/work-preview-app-automation.cjs').submit({ owner: {}, item: f.item, request: {}, deps: f.deps }), { code: 'APP_ACCOUNT_CHANGED' });
+  await assert.rejects(require('../main/work-preview-app-automation.cjs').submit({ owner: {}, item: f.item, request: {}, deps: f.deps }), { code: 'APP_ACCOUNT_CHANGED' });
   let dialogs = 0;
   assert.equal((await attachments.handle(f.item, 'attachments.pick', {}, { dialog: { showOpenDialog: async () => { dialogs++; return {}; } } })).ok, false);
   assert.equal((await attachments.handle(f.item, 'attachments.begin', { name: 'file.txt', size: 0 })).ok, false);

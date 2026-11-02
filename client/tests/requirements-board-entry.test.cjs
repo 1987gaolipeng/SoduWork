@@ -61,6 +61,37 @@ test('ordinary entry defaults to actionable while preserving other saved filters
   assert.equal(f.rendered.at(-1).state.scope, 'actionable');
 });
 
+test('entering the pool reconciles a stale failure without rerunning the requirement', async () => {
+  const f = fixture({}), row = f.context.tasks.find(task => task.id === 'running');
+  row.ai = {state: 'failed', error: 'Old routing failure'};
+  let refreshes = 0;
+  f.context.Store.refreshTasks = async () => {
+    refreshes++;
+    await Promise.resolve();
+    row.ai = {state: 'done', executionState: 'done'};
+  };
+  assert.equal(Requirements.blocked(row), true);
+  f.api.open();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(refreshes, 1);
+  assert.equal(Requirements.blocked(row), false);
+  f.api.open(); f.api.render();
+  assert.equal(refreshes, 1, 'rendering an already open pool does not poll');
+  f.api.close(); f.api.open();
+  assert.equal(refreshes, 2, 'a new navigation reconciles missed updates');
+});
+
+test('a failed pool refresh preserves the last known execution state and view', async () => {
+  const f = fixture({phase: 'delivering'}), row = f.context.tasks.find(task => task.id === 'running');
+  row.ai = {state: 'failed', error: 'Current failure'};
+  f.context.Store.refreshTasks = async () => { throw Error('offline'); };
+  f.api.open();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(Requirements.blocked(row), true);
+  assert.equal(f.rendered.at(-1).state.phase, 'delivering');
+  assert.deepEqual(f.rendered.at(-1).ids, ['running']);
+});
+
 test('every pool entry restores current actionable work instead of archived or saved scope', () => {
   for (const scope of ['created', 'actionable', 'related', 'all']) {
     const f = fixture({scope, archive: 'archived', v: 2});

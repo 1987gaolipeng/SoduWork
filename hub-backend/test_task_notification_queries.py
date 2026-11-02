@@ -41,8 +41,17 @@ class TaskNotificationQueryTests(unittest.IsolatedAsyncioTestCase):
         engine = create_async_engine(pg_url or "sqlite+aiosqlite:///" + directory.name + "/test.db")
         sessions = async_sessionmaker(engine, expire_on_commit=False)
         try:
-            async with engine.begin() as connection:
-                await connection.run_sync(Base.metadata.create_all)
+            if pg_url:
+                async with engine.begin() as connection:
+                    await connection.run_sync(Base.metadata.create_all)
+            else:
+                # Keep the complete private schema without async DDL handoffs
+                # under unittest's debug loop; all business queries stay async.
+                schema_engine = create_engine("sqlite:///" + directory.name + "/test.db")
+                try:
+                    Base.metadata.create_all(schema_engine)
+                finally:
+                    schema_engine.dispose()
             async with sessions() as session:
                 session.add_all([
                     models.OrgUnit(id="company", name="Company"),

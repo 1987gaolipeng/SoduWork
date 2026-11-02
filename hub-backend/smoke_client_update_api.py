@@ -56,16 +56,16 @@ async def seed() -> tuple[str, str]:
                     username="update-smoke", display_name="升级测试")
         client = Client(
             id=DEVICE, secret_hash=device_auth.hash_secret(SECRET), auth_state="active",
-            user_ref=user.id, app_version="1.2.10", last_seen_at=datetime.now(timezone.utc),
+            user_ref=user.id, app_version="1.13.10", last_seen_at=datetime.now(timezone.utc),
         )
-        artifact = ARTIFACT_ROOT / "stable/win32/x64/1.2.11/SoduWork-1.2.11-Setup.exe"
+        artifact = ARTIFACT_ROOT / "stable/win32/x64/1.13.11/SoduWork-1.13.11-Setup.exe"
         artifact.parent.mkdir(parents=True, exist_ok=True)
         artifact.write_bytes((b"SODUWORK-UPDATE-SMOKE\n" * 120000)[:2 * 1024 * 1024])
         release = ClientRelease(
             id="12345678-1234-4234-8234-123456789abc",
-            version="1.2.11", channel="stable", platform="win32", arch="x64",
-            artifact_name="SoduWork-1.2.11-Setup.exe",
-            artifact_path="stable/win32/x64/1.2.11/SoduWork-1.2.11-Setup.exe",
+            version="1.13.11", channel="stable", platform="win32", arch="x64",
+            artifact_name="SoduWork-1.13.11-Setup.exe",
+            artifact_path="stable/win32/x64/1.13.11/SoduWork-1.13.11-Setup.exe",
             artifact_size=artifact.stat().st_size, sha256=updates.sha256_file(artifact),
             signature="", key_id="smoke-key", notes="安全升级", enabled=True,
         )
@@ -103,13 +103,13 @@ def main() -> None:
         bad = client.get("/api/v1/client-updates/check?current=bad", headers=headers)
         assert bad.status_code == 400
         res = client.get(
-            "/api/v1/client-updates/check?current=1.2.10&platform=win32&arch=x64",
+            "/api/v1/client-updates/check?current=1.13.10&platform=win32&arch=x64",
             headers=headers,
         )
         assert res.status_code == 200, res.text
         body = res.json()
         assert body["hasUpdate"] is True
-        assert body["manifest"]["version"] == "1.2.11"
+        assert body["manifest"]["version"] == "1.13.11"
         artifact = client.get(
             "/api/v1/client-updates/artifacts/12345678-1234-4234-8234-123456789abc",
             headers=headers,
@@ -128,7 +128,7 @@ def main() -> None:
                 f"/api/v1/client-updates/attempts/{attempt}/events",
                 headers=headers,
                 json={"state": state, "progress": progress,
-                      "currentVersion": "1.2.11" if state == "installed" else "1.2.10"},
+                      "currentVersion": "1.13.11" if state == "installed" else "1.13.10"},
             )
             assert event.status_code == 200, event.text
         waiting = client.post(
@@ -173,10 +173,10 @@ def main() -> None:
                 f"/api/v1/client-updates/attempts/{attempt}/events",
                 headers=headers,
                 json={"state": state, "progress": 100,
-                      "currentVersion": "1.2.11" if state == "installed" else "1.2.10"},
+                      "currentVersion": "1.13.11" if state == "installed" else "1.13.10"},
             )
             assert event.status_code == 200, event.text
-        current = client.get("/api/v1/client-updates/check?current=1.2.11", headers=headers)
+        current = client.get("/api/v1/client-updates/check?current=1.13.11", headers=headers)
         assert current.status_code == 200 and current.json()["hasUpdate"] is False
         old = client.get("/api/v1/updates/check?current=1.2.8")
         assert old.status_code == 200 and old.json().get("retired") is True
@@ -186,7 +186,7 @@ def main() -> None:
             assert row.state == "installed" and row.progress == 100
             assert update_safety.DETAIL_KEY not in (row.detail or {})
             device = await session.get(Client, DEVICE)
-            assert device.app_version == "1.2.11"
+            assert device.app_version == "1.13.11"
             runner = await session.get(am.RunnerNode, "runner-update-smoke")
             assert runner.dispatch_mode == "accepting"
     asyncio.run(verify())

@@ -8,7 +8,10 @@ const VERSION_NAME = /^ns[a-z0-9]+\.tmp$/i;
 const RETIRED_NAME = /^ns[a-z0-9]+\.tmp-[a-f0-9-]{36}$/i;
 
 async function inUse() {
-  const script = "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);$ErrorActionPreference='Stop';Get-CimInstance Win32_Process | Where-Object {$_.Name -match '^(SoduWork|soduwork-runner|node|python|pythonw|opencode|OpenConsole|winpty-agent)\\.exe$'} | Select-Object ExecutablePath,CommandLine | ConvertTo-Json -Compress";
+  // This helper runs with the installed Electron binary. Include its actual
+  // name so another live instance of this distribution protects its payload.
+  const executable = path.basename(process.execPath, '.exe').replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replaceAll("'", "''");
+  const script = "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);$ErrorActionPreference='Stop';Get-CimInstance Win32_Process | Where-Object {$_.Name -match '^(" + executable + "|SoduWork|soduwork-runner|node|python|pythonw|opencode|OpenConsole|winpty-agent)\\.exe$'} | Select-Object ExecutablePath,CommandLine | ConvertTo-Json -Compress";
   const result = childProcess.spawnSync(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe'),
     ['-NoProfile', '-NonInteractive', '-Command', script],
     { encoding: 'utf8', windowsHide: true, timeout: 10000, maxBuffer: 2 * 1024 * 1024 });

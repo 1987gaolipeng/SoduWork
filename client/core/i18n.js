@@ -271,7 +271,11 @@
     const selected = localeDict[read()] || DICT[read()] || {};
     const inherited = localeDict[fallbackLocale(read())] || DICT[fallbackLocale(read())] || {};
     const english = DICT['en-US'] || {};
-    const template = Object.hasOwn(selected, key) ? selected[key] : Object.hasOwn(inherited, key) ? inherited[key]
+    const selectedMessages = catalog(read());
+    const inheritedMessages = catalog(fallbackLocale(read()));
+    const template = Object.hasOwn(selectedMessages, key) ? selectedMessages[key]
+      : Object.hasOwn(selected, key) ? selected[key]
+      : Object.hasOwn(inheritedMessages, key) ? inheritedMessages[key] : Object.hasOwn(inherited, key) ? inherited[key]
       : Object.hasOwn(english, key) ? english[key] : Object.hasOwn(DICT[SOURCE_LOCALE], key) ? DICT[SOURCE_LOCALE][key] : translateText(fallback ?? key);
     return String(template).replace(/\{(\w+)\}/g, (match, name) => params && Object.hasOwn(params, name) ? String(params[name]) : match);
   }

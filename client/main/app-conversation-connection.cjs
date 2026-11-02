@@ -2,27 +2,41 @@
 // Continue an installed application conversation independently of its visible window.
 const store = require('./app-settings-store.cjs');
 const personal = require('./personal-plugins');
-function contribution(app, pluginId) {
-  if (!String(pluginId || '').startsWith('local:')) return null;
-  const installed = personal.get(app, pluginId);
-  if (!installed.enabled) throw Error('即用已停用或卸载');
+function choose(installed) {
+  if (installed.enabled === false) throw Error('即用已停用或卸载');
   const choices = (installed.ui?.contributions || []).filter(row => row.slot === 'workspace.navigation' &&
     row.source?.type === 'external' && row.source.bridge?.capabilities?.includes('mcp.connect'));
   return choices.length === 1 ? { installed, entry: choices[0] } : null;
 }
-function association(app, ids) {
+function contribution(app, pluginId) {
+  if (!String(pluginId || '').startsWith('local:')) return null;
+  return choose(personal.get(app, pluginId));
+}
+function mapResult(value, fn) { return value?.then ? value.then(fn) : fn(value); }
+function selection(app, pluginId, deps) {
+  if (String(pluginId || '').startsWith('local:') || !deps) return contribution(app, pluginId);
+  // Scope the pending catalog request before its application origin is known.
+  const pending = { pluginId, origin: 'https://account-scope.invalid' }, scope = store.scope(pending);
+  const assertCurrent = () => { if (store.scope(pending) !== scope) throw Error('应用账号已变化，请重新发送消息'); };
+  return require('./app-installed-remote.cjs').get({ ...deps, app }, pluginId, assertCurrent).then(choose);
+}
+function association(app, ids, deps) {
   if (!app || !Array.isArray(ids) || ids.length !== 1) return '';
   try { if (require('./jiyong-hosted-connection.cjs').context(app,ids[0])) return ids[0]; } catch (_) { /* Existing H5 path below. */ }
+  if (deps && !String(ids[0]).startsWith('local:')) return mapResult(selection(app, ids[0], deps), selected => selected ? ids[0] : '');
   try { return contribution(app, ids[0]) ? ids[0] : ''; } catch (_) { return ''; }
 }
 function required(installed, detail) {
   return Error('应用“' + installed.name + '”' + detail + '，请打开即用完成登录或配置 ukey 后重试');
 }
-function context(app, pluginId) {
+function context(app, pluginId, deps) {
   const hosted = require('./jiyong-hosted-connection.cjs').context(app,pluginId);
   if (hosted) return hosted;
-  const selected = contribution(app, pluginId);
+  return mapResult(selection(app, pluginId, deps), selected => restore(app, pluginId, selected, deps));
+}
+function restore(app, pluginId, selected, deps) {
   if (!selected) return null;
+  const remote = !pluginId.startsWith('local:');
   const { entry } = selected, origin = new URL(entry.source.url).origin;
   const binding = { pluginId, origin }, expectedScope = store.scope(binding);
   let live = null;
@@ -49,7 +63,7 @@ function context(app, pluginId) {
     throw Error('应用连接来源已变化，请重新打开即用同步连接');
   const readCurrent = () => {
     if (store.scope(binding) !== expectedScope) throw Error('应用账号已变化，请重新发送消息');
-    const latest = contribution(app, pluginId);
+    const latest = remote ? selected : contribution(app, pluginId);
     if (!latest || latest.entry.id !== entry.id || new URL(latest.entry.source.url).origin !== origin ||
         !latest.installed.capabilities?.mcpServers?.includes(saved.server)) throw Error('应用连接器或安装来源已变化');
     const row = store.read(binding), current = row.connections?.[entry.id];
@@ -65,6 +79,18 @@ function context(app, pluginId) {
     ...current, readCurrent, context: {},
     ...(live?.connection?.scope === expectedScope && live.connection.server === saved.server && live.connection.inspect
       ? { inspect: live.connection.inspect } : {}) };
+  if (remote) {
+    Object.assign(connection, { versionId: selected.installed.versionId, contributionId: entry.id, origin,
+      authorize: async () => {
+        readCurrent();
+        const latest = await selection(app, pluginId, deps);
+        readCurrent();
+        if (!latest || latest.installed.versionId !== selected.installed.versionId ||
+            JSON.stringify(latest.entry) !== JSON.stringify(entry) ||
+            !latest.installed.capabilities?.mcpServers?.includes(saved.server))
+          throw Error('应用安装版本或连接授权已变化，请重新打开即用');
+      } });
+  }
   return {...application,connection:require('./jiyong-mcp-bindings.cjs').extend(connection,selected.installed,binding)};
 }
 module.exports = { association, context };

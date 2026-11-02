@@ -8,6 +8,21 @@ const TaskSync = require('../core/task-sync.js');
 const source = fs.readFileSync(path.join(__dirname, '../core/store-lifecycle.js'), 'utf8') + '\n' +
   fs.readFileSync(path.join(__dirname, '..', 'core', 'store.js'), 'utf8');
 
+test('a remote skin patch wins over an older config fetch and refreshes the originating window', async () => {
+  const config = deferred(), calls = [];
+  const f = fixture({ online: true, getConfig: () => config.promise,
+    getTasksSnapshot: async () => ({ online: true, items: [] }) });
+  f.context.refreshSkinAppearance = previous => calls.push(previous);
+  const previous = f.Store.cfg._lastSkinId;
+  await f.Store.init();
+  f.Store.applyServerEvent({ type: 'config.patch', patch: { character: 'diamond', theme: 'vivid',
+    tube: 'glass', _lastSkinId: 'diamond-ice', _defaultLogoVersion: 1 } });
+  config.resolve({ character: 'box', _lastSkinId: 'box-biz' }); await settle();
+  assert.equal(f.Store.cfg.character, 'diamond');
+  assert.deepEqual(calls, [previous]);
+  assert.equal(JSON.parse(f.values.get('soduwork_work_cfg_v5'))._lastSkinId, 'diamond-ice');
+});
+
 function fixture(api, seed, options) {
   const values = new Map(Object.entries(seed || {}));
   const events = [];

@@ -1,5 +1,5 @@
 /* Viewing a task is navigation, never dispatch. Use the same native conversation
-   as the recent-chat list; project affinity is only for a new incoming task. */
+   as the recent-chat list; project affinity is only for explicitly attaching a task. */
 (function (global) {
   'use strict';
   const pending = new Map();
@@ -9,11 +9,28 @@
   function taskIds(row) {
     return [row.taskId, ...(row.taskIds || []), ...(row.taskBindings || []).map(x => x.taskId)].map(text);
   }
+  async function preferredConversation(task) {
+    const epoch = generation, owner = global.SoduWorkAPI?.taskStorageKey?.('ops');
+    const capability = global.__teamCap?.meId ? global.__teamCap : await global.SoduWorkAPI?.getTeamCapability?.();
+    const me = text(capability?.meId);
+    if (epoch !== generation || owner !== global.SoduWorkAPI?.taskStorageKey?.('ops'))
+      throw Error('账号或会话已变化，请重新打开需求');
+    if (!me || text(task?.createdBy) !== me || text(task?.assigneeUserId || task?.executorUserId) !== me) return '';
+    const execution = text(task?.workRouting?.conversationTurn?.conversationId);
+    if (execution) return execution;
+    const sessions = global.soduWorkAPI?.conversationSession || global.soduWorkAPI?.piSession;
+    if (!sessions?.findTaskCreation) return '';
+    const result = await sessions.findTaskCreation(task.id);
+    if (epoch !== generation || owner !== global.SoduWorkAPI?.taskStorageKey?.('ops'))
+      throw Error('账号或会话已变化，请重新打开需求');
+    if (!result?.ok) throw Error(result?.reason || '原会话暂时无法读取，请重试');
+    return text(result.sessionId);
+  }
   function resolve(payload, task, info, history, store) {
     const out = Object.assign({}, payload), source = task || {};
     const id = text(out.taskId);
     const viewing = out.navigation !== false && !out.reuseCurrent &&
-      !['task-add', 'task-create', 'task-dispatch', 'incoming-task'].includes(out.source);
+      !['task-add', 'task-create', 'task-dispatch'].includes(out.source);
     out.navigation = viewing;
     out.projectId = text(out.projectId || source.projectId || source.project?.id);
     out.repoId = text(out.repoId || source.repoId || source.repo?.id);
@@ -44,9 +61,8 @@
     }
     if (acceptance && out.reuseExecutionSession) {
       const executionId = text(out.chatId || source.workRouting?.conversationTurn?.conversationId);
-      const currentExecution = executionId && text(info.sessionId) === executionId;
-      const archivedExecution = executionId && (history == null || (history || []).some(row => text(row.id) === executionId));
-      if (executionId && (currentExecution || archivedExecution)) {
+      // History is paginated. Only an exact archive open can establish absence.
+      if (executionId) {
         out.chatId = executionId;
         out.forceNew = false;
         out.navigation = false;
@@ -144,7 +160,7 @@
     const acceptanceKey = (payload.acceptanceSession || payload.source === 'acceptance')
       ? id + ':' + text(payload.approvalId)
       : '';
-    if (acceptanceKey && !text(payload.chatId) && !payload.forceNew) {
+    if (acceptanceKey && !payload.forceNew) {
       const cached = acceptanceSessions.get(acceptanceKey);
       if (cached) {
         /* A cached fresh acceptance session must never be mistaken for the
@@ -156,13 +172,15 @@
         const cachedStandalone = typeof cached === 'object' && cached.acceptanceSession === true;
         const requestedExecution = payload.reuseExecutionSession === true || payload.acceptanceExecutionSession === true;
         const requestedStandalone = payload.acceptanceSession === true && !requestedExecution;
+        const fallbackMatches = requestedExecution && text(payload.chatId) &&
+          text(cached.acceptanceFallbackFrom) === text(payload.chatId);
         /*
          * Reuse cached resolution only within the same conversation mode; ownership and reviewer
          * assignments may change between opens.
          */
-        const incompatible = (requestedExecution && cachedStandalone) ||
+        const incompatible = (requestedExecution && cachedStandalone && !fallbackMatches) ||
           (requestedStandalone && cachedExecution);
-        if (cachedId && !incompatible) {
+        if (cachedId && !incompatible && (!text(payload.chatId) || fallbackMatches)) {
           payload.chatId = cachedId;
           if (typeof cached === 'object' && cached.acceptanceSession === true) {
             payload.acceptanceSession = true;
@@ -219,7 +237,7 @@
                * cannot restore an unavailable conversation ID. Preserve rework receipts for
                * controller-managed recovery.
                */
-              if (payload.source !== 'rework') {
+              if (payload.source !== 'rework' && !probeExecution) {
                 task = { ...task, workRouting: { ...(task.workRouting || {}), conversationTurn: null } };
               }
             }
@@ -250,11 +268,14 @@
     result = await Promise.resolve(result);
     if (acceptanceKey && result) {
       const infoAfter = global.NativeChat?.sessionInfo?.() || {};
-      const sessionId = text(infoAfter.sessionId || resolved.chatId);
+      const confirmedReview = text(infoAfter.acceptanceTaskId) === id &&
+        text(infoAfter.acceptanceApprovalId) === text(resolved.approvalId) && infoAfter.acceptanceSession === true;
+      const sessionId = text(confirmedReview ? infoAfter.sessionId : resolved.chatId);
       if (sessionId) acceptanceSessions.set(acceptanceKey, {
         sessionId,
-        acceptanceSession: resolved.acceptanceSession === true,
-        acceptanceExecutionSession: resolved.acceptanceExecutionSession === true,
+        acceptanceSession: confirmedReview ? infoAfter.acceptanceExecutionSession !== true : resolved.acceptanceSession === true,
+        acceptanceExecutionSession: confirmedReview ? infoAfter.acceptanceExecutionSession === true : resolved.acceptanceExecutionSession === true,
+        acceptanceFallbackFrom: confirmedReview ? text(infoAfter.acceptanceFallbackFrom) : '',
       });
     } else if (acceptanceKey && payload.chatId) {
       /* The cached native archive may have been deleted. Drop it once and let
@@ -280,7 +301,7 @@
     pending.set(id, work);
     return work;
   }
-  global.TaskConversationNavigation = {resolve, open, forgetAcceptance(taskId, approvalId) {
+  global.TaskConversationNavigation = {resolve, open, preferredConversation, forgetAcceptance(taskId, approvalId) {
     acceptanceSessions.delete(text(taskId) + ':' + text(approvalId));
   }};
   global.openTaskConversation = open;

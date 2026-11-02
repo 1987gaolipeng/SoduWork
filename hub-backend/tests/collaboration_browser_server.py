@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.api import clients, attachments, library
 from app import models
 from app.db import Base, get_session
-from app.deps import current_client
+from app.deps import authenticated_client, current_client
 from app.services import storage
 
 storage._LOCAL_DIR = str(root / 'attachments')
@@ -49,6 +49,11 @@ async def session_override():
         yield session
 
 async def identity(request: Request):
+    authorization = request.headers.get('Authorization', '')
+    if authorization.startswith('Device '):
+        async with sessions() as session:
+            return await authenticated_client(authorization=authorization,
+                x_box_device=None, x_box_secret=None, session=session)
     key = request.headers.get('X-Soduwork-Device', '')
     if key not in ('e2e-sender', 'e2e-recipient', 'e2e-other'):
         raise HTTPException(401, 'Unknown isolated identity')

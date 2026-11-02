@@ -6,9 +6,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import select
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app import automation_models as am, models
+# Completion touches project memories even when the task has no project.
+from app import project_context_models as _project_context_models
 from app.db import Base
 from app.services import delivery_manifest, release_control, task_rework
 
@@ -69,6 +72,116 @@ class ManualReviewSource(unittest.IsolatedAsyncioTestCase):
             pending = task.work_routing["reworkPending"]
             self.assertEqual(pending["ref"], "conversation:original")
             self.assertEqual(pending["feedback"], "补充修订说明")
+
+    async def test_empty_delivery_can_be_explicitly_submitted_but_not_automatically(self):
+        from app.api import approvals, tasks
+        from app.realtime import hub
+        from app.services import gate_contract, task_acceptance_review, task_requirements, tasks as task_service
+        async with self.sessions() as session:
+            task = await self.fixture(session)
+            await session.delete(await session.get(models.Attachment, "output-1"))
+            task.work_routing = {**task.work_routing, "executionSubmissionMode": "auto",
+                                 "outputContract": {"expectedArtifacts": ["report.html"]}}
+            await session.commit()
+            with self.assertRaises(ValueError):
+                await release_control.ensure_current_output(session, task)
+            worker = await session.get(models.Client, "worker-device")
+            creator = await session.get(models.Client, "review-device")
+            api = await task_requirements.decorate(session, worker, task,
+                await task_service.task_to_api_live(session, task))
+            self.assertTrue(api["canSubmitReview"])
+            with self.assertRaises(HTTPException) as denied:
+                await tasks.submit_task_for_review(task.id, {}, creator, session)
+            self.assertEqual(denied.exception.status_code, 403)
+            with patch.object(hub, "publish", new=AsyncMock()):
+                submitted = await tasks.submit_task_for_review(task.id, {}, worker, session)
+                retry = await tasks.submit_task_for_review(task.id, {}, worker, session)
+            self.assertEqual(submitted["task"]["requirementStage"], "reviewing")
+            self.assertTrue(retry["already"])
+            versions = list(await session.scalars(select(am.ArtifactVersion)))
+            self.assertEqual(len(versions), 1)
+            self.assertTrue(versions[0].manifest["manual"])
+            for client, review in [(creator, True), (worker, False)]:
+                api = await task_requirements.decorate(session, client, task,
+                    await task_service.task_to_api_live(session, task))
+                self.assertEqual(api["canReview"], review)
+                self.assertFalse(api["canSubmitReview"])
+            task.acceptance_criteria = ["结果符合需求"]
+            await session.commit()
+            packet = await task_acceptance_review.context(session, creator, task.id)
+            self.assertTrue(packet["readiness"]["canApprove"])
+            self.assertTrue(packet["readiness"]["requiresHumanConfirmation"])
+            self.assertEqual(packet["evidence"], [])
+            with self.assertRaises(HTTPException) as automatic:
+                await task_acceptance_review.apply(session, creator, task.id, {
+                    "approvalId": packet["approvalId"], "artifactVersionId": packet["artifactVersionId"],
+                    "requirementVersion": packet["requirementVersion"], "report": {
+                        "verdict": "approve", "summary": "No files to check", "checks": [
+                            {"criterion": "criterion-1", "result": "pass", "evidence": "Only the submission receipt exists"}]}})
+            self.assertEqual(automatic.exception.status_code, 422)
+            request = await session.get(am.ApprovalRequest, submitted["request"]["id"])
+            request.context = {**request.context, "requiredEvidence": ["image"]}
+            required = await gate_contract.packet(session, task, request, versions[0])
+            self.assertFalse(required["readiness"]["canApprove"])
+            request.context = {key: value for key, value in request.context.items() if key != "requiredEvidence"}
+            with patch.object(hub, "publish", new=AsyncMock()):
+                approved = await approvals.decide(request.id, {"decision": "approve", "note": "已人工核实实际结果"}, creator, session)
+            self.assertTrue(approved["ok"])
+            self.assertTrue(task.reviewed_at)
+            self.assertEqual(task.status, "done")
+
+    async def test_submission_rejects_live_or_unknown_execution_and_non_doing_tasks(self):
+        from app.api import tasks
+        async with self.sessions() as session:
+            task = await self.fixture(session)
+            worker = await session.get(models.Client, "worker-device")
+            for state in ["queued", "running", "waiting", "paused", "unknown"]:
+                task.work_routing = {"conversationTurn": {"conversationId": "original", "state": state}}
+                await session.commit()
+                with self.subTest(state=state), self.assertRaises(HTTPException) as denied:
+                    await tasks.submit_task_for_review(task.id, {}, worker, session)
+                self.assertEqual(denied.exception.status_code, 409)
+            task.work_routing = {"conversationTurn": {"state": "completed"}}
+            for status in ["todo", "paused", "done", "cancel"]:
+                task.status = status
+                await session.commit()
+                with self.subTest(status=status), self.assertRaises(HTTPException) as denied:
+                    await tasks.submit_task_for_review(task.id, {}, worker, session)
+                self.assertEqual(denied.exception.status_code, 409)
+            self.assertIsNone(await session.scalar(select(am.ApprovalRequest)))
+
+    async def test_revised_html_is_the_only_current_output_in_manual_acceptance(self):
+        from app.api import tasks
+        from app.realtime import hub
+        from app.services import task_acceptance_review
+        async with self.sessions() as session:
+            task = await self.fixture(session)
+            session.add(models.Attachment(id="output-html", task_id=task.id,
+                filename="report.html", content_type="text/html", size=20,
+                storage_key="test/report.html", backend="local", role="output",
+                source_ref="conversation:original", uploaded_by="agent:conversation",
+                evidence_meta={"sha256": "b" * 64, "round": 2,
+                               "category": "primary", "verification": {"state": "passed"}}))
+            await session.commit()
+            with patch.object(hub, "publish", new=AsyncMock()):
+                await tasks.submit_task_for_review(task.id, {},
+                    await session.get(models.Client, "worker-device"), session)
+            packet = await task_acceptance_review.context(session,
+                await session.get(models.Client, "review-device"), task.id)
+            self.assertEqual(packet["attachmentIds"], ["output-html"])
+            self.assertEqual([row["name"] for row in packet["artifact"]["manifest"]["files"]], ["report.html"])
+            self.assertTrue(packet["canDecide"])
+            self.assertNotIn("report.md", str(packet["evidence"]))
+            # Legacy requests may have frozen every file from the conversation.
+            # Read-time scoping must preserve the version without replaying old outputs.
+            request = await session.scalar(select(am.ApprovalRequest))
+            request.context = {**request.context, "gate": {**request.context["gate"],
+                "evidenceRefs": ["output-1", "output-html"]}}
+            await session.commit()
+            packet = await task_acceptance_review.context(session,
+                await session.get(models.Client, "review-device"), task.id)
+            self.assertEqual(packet["attachmentIds"], ["output-html"])
+            self.assertNotIn("report.md", str(packet["evidence"]))
 
     async def test_legacy_locked_manifest_recovers_without_mutating_version(self):
         from app.services import ai_exec

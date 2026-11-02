@@ -16,7 +16,7 @@ function fixture() {
     const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
     requests.push({ kind, owner, agent, location, resolve, reject }); return promise;
   }
-  const bridge = { runtimeModels: () => request('native') };
+  const bridge = { runtimeModels: () => request('native'), onModelsChanged: fn => { listeners.set('models-changed', fn); return () => listeners.delete('models-changed'); } };
   const context = vm.createContext({
     document: { getElementById: id => nodes[id] || null, querySelector: () => nodes.wrap },
     SoduWorkAPI: { taskStorageKey: () => owner, myModels: () => request('managed') },
@@ -39,7 +39,7 @@ function fixture() {
   context.window = context;
   vm.runInContext(source, context);
   const picker = context.ComposeModelPicker;
-  return { picker, requests, nodes, notices,
+  return { picker, requests, nodes, notices, changed: () => listeners.get('models-changed')?.(),
     start() { picker.bind({ api: () => bridge, onChange: value => notices.push(value) }); },
     remount() { for (const id of Object.keys(nodes)) nodes[id] = element(); },
     agent(value) { agent = value; }, location(value) { location = value; },
@@ -263,4 +263,17 @@ test('managed model picker translates built-in provider and quota labels', async
   assert.match(f.nodes.cpModelPop.innerHTML, /OpenAI compatible \(general\) · Personal quota/);
   assert.doesNotMatch(f.nodes.cpModelPop.innerHTML, /OpenAI 兼容（通用）/);
   assert.doesNotMatch(f.nodes.cpModelPop.innerHTML, /自己的额度/);
+});
+
+
+test('model changes refresh an already-mounted composer, preserve its explicit choice and reject older replies', async () => {
+  const f = fixture(); f.start(); f.reply(0, 'chosen'); await f.picker.ready(); f.choose('chosen');
+  f.changed(); assert.equal(f.requests.length, 2);
+  f.changed(); assert.equal(f.requests.length, 3);
+  f.requests[2].resolve({ usable: [{name:'chosen',label:'Renamed choice'},{name:'new',label:'New model'}],defaultModels:{pi:'new'} });
+  await f.picker.ready();
+  assert.equal(f.picker.value().modelName, 'chosen'); assert.equal(f.picker.label(), 'Renamed choice');
+  assert.match(f.nodes.cpModelPop.innerHTML, /New model/);
+  f.reply(1, 'obsolete'); await tick();
+  assert.equal(f.picker.value().modelName, 'chosen'); assert.equal(f.picker.label(), 'Renamed choice');
 });

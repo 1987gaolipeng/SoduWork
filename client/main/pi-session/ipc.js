@@ -239,15 +239,40 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
   onQuotaExceeded, authorizeAI, confirmFullAccess = require('../access-control/full-access-consent').confirm }) {
   /* Check runtime availability before presenting a usable composer. */
   _app = app;
-  const startReceipts = require('./start-receipts.cjs').create({
-    app, identityOf: sendIdentityOf || identityOf, request: taskInput.request,
+  _sessionOwners = require('./session-owner.cjs').create({ app });
+  const session = new Proxy({ ...runtimeSession }, {
+    get(target, property) {
+      if (property === 'get' || property === 'findBySessionId') return (...args) => {
+        const handle = target[property](...args);
+        if (!handle || _sessionOwners.canAccess(handle)) return handle;
+        _discardRenderer(handle);
+        return null;
+      };
+      if (property === 'list') return () => target.list().filter(handle => _sessionOwners.canAccess(handle));
+      if (property === 'open') return async options => {
+        const captured = _sessionOwners.assertOpen(options);
+        const opened = await target.open(options);
+        if (opened?.ok && opened.session) _sessionOwners.bind(opened.session, options.identity, { captured });
+        return opened;
+      };
+      return Reflect.get(target, property);
+    },
   });
-  _deliverySync = require('../conversation/local-delivery-sync').create({ app, identityOf: sendIdentityOf || identityOf,
+  _deliverySync = require('../conversation/local-delivery-sync').create({
     notify: handle => _push(BrowserWindow, handle, { kind: 'delivery-sync' }, handle.snapshot()) });
   _cloudHandoff = require('../conversation/cloud-handoff-ipc').install({ app, ipcMain, session,
     identityOf: sendIdentityOf || identityOf,
     assertOwner: (identity, handle) => memories.assertOwner(identity, handle.sessionId),
     notify: (handle, touched) => _push(BrowserWindow, handle, touched, handle.snapshot()) });
+  _cloudHandoff.onSynchronized(presence => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      try { if (!win.isDestroyed()) win.webContents.send('pi-session-event', {
+        kind: 'settled', sessionId: presence.id, ref: '', presence, cloudSynchronized: true,
+      }); } catch (_) { /* A closing renderer does not own cloud execution. */ }
+    }
+  });
+  if (app.isReady?.()) _cloudHandoff.synchronization.start();
+  else app.on('ready', () => _cloudHandoff.synchronization.start());
   const accountSyncStore = require('../conversation/account-sync-store').create(
     path.join(app.getPath('userData'), 'account-conversations-sync', 'outbox.json'));
   _accountSync = require('../conversation/account-sync').create({
@@ -255,12 +280,40 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     localIdentityOf: async () => (sendIdentityOf || identityOf)(app),
     realtime: true,
   });
+  // Account-conversation WebSocket messages are invalidation hints, but they
+  // still need to reach the renderer.  Without this bridge the sync service
+  // refreshed its private cache while an already-open desktop projection and
+  // the sidebar stayed stale until the user navigated away and back.
+  _accountSync.onChange?.(async (conversationId, raw, projection) => {
+    try {
+      const id = String(conversationId || '');
+      const runtime = require('../platform-connections/runtime.cjs');
+      const currentOwner = async () => runtime.connectionScope(await (sendIdentityOf || identityOf)(app));
+      if (!id || !projection?.owner || projection.owner !== await currentOwner()) return;
+      const handle = session.findBySessionId(id);
+      if (handle?.refresh) {
+        const current = await handle.refresh();
+        if (projection.owner !== await currentOwner()) return;
+        if (current) _publish(BrowserWindow, handle, { kind: 'account-conversation-sync' }, handle.snapshot());
+      }
+      const presence = conversationTitles.decorate(_app, projection);
+      require('../conversation/app-surfaces.cjs').all(BrowserWindow.getAllWindows()).forEach(win => {
+        if (win.isDestroyed()) return;
+        win.webContents.send('pi-session-event', {
+          kind: 'account-conversation-sync', ref: handle?.ref || '', sessionId: id, presence,
+        });
+      });
+    } catch (_) {
+      // The next normal history read remains authoritative if a window closes
+      // while the best-effort realtime repaint is in flight.
+    }
+  });
   // The bridge historically accepted one external history provider. Keep the
   // cloud handoff provider and add the account projection without changing the
   // cloud authority or exposing account sync as a Runner.
   session.setExternalHistory?.({
-    async history() {
-      const [cloud, account] = await Promise.allSettled([_cloudHandoff.history(), _accountSync.history()]);
+    async history(options) {
+      const [cloud, account] = await Promise.allSettled([_cloudHandoff.history(options), _accountSync.history()]);
       const rows = [];
       if (cloud.status === 'fulfilled') rows.push(...(cloud.value.chats || []));
       if (account.status === 'fulfilled') rows.push(...(account.value.chats || []));
@@ -312,6 +365,9 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     if (event && !preferences.isTrusted(event)) return { ok: false, reason: '请在 SoduWork 工作区中打开对话' };
     const opts = automationAccess.apply(require('./task-access').withTaskAccessDefault(
       preferences.forNewChat(app, { ...(raw || {}) }, preferences.isTrusted(event))), automationContext);
+    // Automation model selection is explicit in the schedule envelope. An
+    // empty value deliberately follows the selected runtime's normal model
+    // resolution; never inherit the last model from the ordinary composer.
     delete opts.appRequestId;
     let accessConsent = null;
     try {
@@ -410,7 +466,9 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
             String(live.taskRef || ''),
           ].map((item) => String(item || '').trim()).filter(Boolean));
           if (!opts.requireTaskBinding || !requestedTaskId || boundTaskIds.has(requestedTaskId)) {
-            require('./app-mcp-grant.cjs').bind(live, event?.sender, appPluginId, app, appRequest?.assertActive);
+            await assertHistoryCurrent();
+            appRequest?.assertActive();
+            require('./app-mcp-grant.cjs').bind(live, event?.sender, appPluginId, app, { identityOf: sendIdentityOf || identityOf, assertActive: appRequest?.assertActive });
             _bindUsage(live, identity, live.usageAgentKey || opts.adapterId || 'pi');
             if (event) _attach(live, require('../conversation/app-surfaces.cjs').forSender(BrowserWindow, event.sender));
             else _detach(live);
@@ -502,11 +560,8 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
           await capabilityPromise.catch(() => {});
           return { ok: false, notFound: true, reason: '这条对话找不到了（存档可能已被清理）' };
         }
-        // A verified archive path proves its identity, not its account owner.
-        // Use the same persisted ownership checks as history listing and
-        // mutations, including trusted local ownership during token renewal.
-        const historyAccess = require('../conversation/history-access');
-        historyAccess.assertOwner(app, opts.chatId, historyAccess.actor(app, identity), resume);
+        const ownerOptions = historyAccess.isOwnerlessNativeArchive(resume) ? { allowLegacy: true } : {};
+        historyAccess.assertOwner(app, opts.chatId, historyAccess.actor(app, identity), resume, ownerOptions);
       }
       const workOpening = require('../conversation/work-conversation-opening');
       const work = workOpening.prepare(app, opts, resume, identity, preferences.isTrusted(event), session);
@@ -522,6 +577,13 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         Promise.resolve(session.prewarm(app, identity, String(opts.modelName || ''))).catch(() => {});
       }
       const ref = 'chat-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+      // Remote continuation must not silently move a native session into the
+      // default workspace when its original directory is unavailable.
+      if (opts.nativeRelay === true && resume) {
+        require('./resume-cwd')(app, resume, () => {
+          throw Error('原会话工作目录不可用，请在来源电脑恢复目录后重试');
+        });
+      }
       const cwd = resume ? require('./resume-cwd')(app, resume, _defaultCwd) : _newSessionCwd(app, ref, opts);
       const permitted = await workOpening.applyPolicy({ app, event, options: opts, resume, work, cwd,
         automationContext, accessConsent, BrowserWindow, confirmFullAccess });
@@ -583,6 +645,9 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         resolveConnectors: require('../conversation-connectors.cjs').resolver({ app, identity, identityOf: sendIdentityOf || identityOf,
           ref, allowed: (resolved.skills || []).some(row => row.name === 'mcp-tools'), explicitlySelected: spec.selectedSkills.includes('mcp-tools') }),
         taskRef: spec.taskRef, taskTitle: spec.taskTitle,
+        ...(resume?.title || opts.sessionTitle ? { sessionTitle: String(resume?.title || opts.sessionTitle).replace(/\s+/g, ' ').trim().slice(0, 240) } : {}),
+        ...(opts.projectId ? { projectId: String(opts.projectId).trim().slice(0, 36) } : {}),
+        ...(opts.repoId ? { repoId: String(opts.repoId).trim().slice(0, 36) } : {}),
         // A never-bound Pi draft can create its first binding only after its
         // saved creation receipt and current Hub ownership/state are verified.
         // Established archives still require their persisted task binding.
@@ -605,7 +670,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
               throw new Error('自动化所选插件已变化，请重新确认插件版本后执行');
             }
           }
-          const appContext = require('./app-mcp-grant.cjs').forSession(session.get(ref));
+          const appContext = await require('./app-mcp-grant.cjs').forSession(session.get(ref));
           const grants = await pluginGrant.resolve({ app, identityOf, appContext,
             allowUnavailableApp: turnContext?.allowUnavailableApp === true && !automationPluginLock,
             ref: session.get(ref)?.sessionId || ref, pluginIds, projectId, cwd: spec.cwd });
@@ -666,8 +731,6 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         throw error;
       }
       if (!opened.ok) return opened;
-      try { appRequest?.assertActive(); } catch (error) { await opened.session.close(); throw error; }
-      require('./app-mcp-grant.cjs').bind(opened.session, event?.sender, appPluginId, app, appRequest?.assertActive);
       try {
         await assertHistoryCurrent();
         if (opts.chatId) {
@@ -676,29 +739,34 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         }
         await require('../conversation/acceptance-session').attach(app, opened.session,
           resume ? { resumed: true } : { ...opts, resumed: false }, identity);
-      } catch (error) { await opened.session.close(); throw error; }
-      accessConsent?.assertValid();
-      opened.session.ui = {
-        mode: spec.readOnly ? 'readonly' : 'full',
-        capabilities: resolved.capabilities,
-        skills: (resolved.skills || []).filter(item => !Array.isArray(opened.session.skills) || opened.session.skills.includes(item.name)),
-        selectedSkills: resolved.selectedSkills,
-        inputAttachments: staged.files,
-        attachmentWarnings: staged.warnings,
-      };
-      await memories.attach(opened.session, identity, memoryContext, [...spec.warnings, ...(opened.session.skillWarnings || [])], memoryOptions);
-      try { require('../conversation/requirement-context').assertOwner(app, opened.session, identity); }
-      catch (error) { await opened.session.close(); throw error; }
-      accessConsent?.assertValid();
-      _bindUsage(opened.session, identity, opts.adapterId || 'pi');
-      if (event) _attach(opened.session, require('../conversation/app-surfaces.cjs').forSender(BrowserWindow, event.sender));
-      else _detach(opened.session);
-      _wire(BrowserWindow, opened.session);
-      _cloudHandoff.observe(opened.session);
-      try { appRequest?.assertActive(); } catch (error) { await opened.session.close(); throw error; }
-      const reply = _openReply(opened.session, { resumed: !!resume, seeded: opened.seeded || 0 });
-      accessConsent?.commit();
-      return reply;
+        accessConsent?.assertValid();
+        opened.session.ui = {
+          mode: spec.readOnly ? 'readonly' : 'full',
+          capabilities: resolved.capabilities,
+          skills: (resolved.skills || []).filter(item => !Array.isArray(opened.session.skills) || opened.session.skills.includes(item.name)),
+          selectedSkills: resolved.selectedSkills,
+          inputAttachments: staged.files,
+          attachmentWarnings: staged.warnings,
+        };
+        await memories.attach(opened.session, identity, memoryContext, [...spec.warnings, ...(opened.session.skillWarnings || [])], memoryOptions);
+        require('../conversation/requirement-context').assertOwner(app, opened.session, identity);
+        accessConsent?.assertValid();
+        await assertHistoryCurrent();
+        appRequest?.assertActive();
+        require('./app-mcp-grant.cjs').bind(opened.session, event?.sender, appPluginId, app, { identityOf: sendIdentityOf || identityOf, assertActive: appRequest?.assertActive });
+        _bindUsage(opened.session, identity, opts.adapterId || 'pi');
+        if (event) _attach(opened.session, require('../conversation/app-surfaces.cjs').forSender(BrowserWindow, event.sender));
+        else _detach(opened.session);
+        _wire(BrowserWindow, opened.session);
+        _cloudHandoff.observe(opened.session);
+        appRequest?.assertActive();
+        const reply = _openReply(opened.session, { resumed: !!resume, seeded: opened.seeded || 0 });
+        accessConsent?.commit();
+        return reply;
+      } catch (error) {
+        await closeFailedOpen(opened.session);
+        throw error;
+      }
     } catch (e) {
       return { ok: false, reason: '起会话失败：' + String((e && e.message) || e) };
     } finally {
@@ -706,6 +774,20 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     }
   }
   ipcMain.handle('pi-session-open', (event, raw) => openConversation(event, raw));
+  /*
+   * Immediate automation runs are opened by the schedule renderer after the Hub
+   * has durably claimed the occurrence.  Keep the renderer's trusted event (so
+   * access consent can still be shown), but bind the opening request to the
+   * current device identity.  The identity is what makes a personal-plugin
+   * lock authoritative in `openConversation`; a plain pi-session-open call has
+   * no expected identity and consequently drops pluginLock before the first
+   * turn.
+   */
+  ipcMain.handle('pi-session-automation-open', async (event, raw) => {
+    const identity = await identityOf(app);
+    if (!identity) return { ok: false, reason: '请先连接 SoduWork 服务并登录' };
+    return openConversation(event, raw, identity);
+  });
   /*
    * Acknowledge prompt acceptance immediately; publish long-running progress and results
    * through pi-session-event.
@@ -787,7 +869,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     // Scheduled automation is an ordinary one-turn conversation even when the
     // selected personal plugin happens to be a workflow package.  The debug
     // bridge owns an interactive plugin-debug run and would otherwise hijack
-    // the automation prompt into the "AI 干活"/workflow path.  Keep that
+    // the automation prompt into the AI execution/workflow path.  Keep that
     // bridge for user initiated plugin conversations only.
     const automationTurn = rawOptions?.source === 'automation';
     const debugBlocked = automationTurn ? '' : pluginDebug.guard(s);
@@ -799,7 +881,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
       try {
         taskTurn = await taskInput.prepare(currentIdentity, taskId, s.sessionId,
           String(rawOptions.submissionId || '').slice(0, 120), text, rawOptions.taskExecution,
-          { app, handle: s, startReceipts, workRoot: workDir(app), identityOf: async () => {
+          { app, handle: s, workRoot: workDir(app), startReceipts, identityOf: async () => {
             const fresh = await (sendIdentityOf || identityOf)(app);
             await require('../conversation/acceptance-session').attach(app, s, { resumed: true }, fresh);
             return fresh;
@@ -837,7 +919,11 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     const ownAppId = require('./app-mcp-grant.cjs').nativePluginId(s);
     const selectedPluginIds = (rawPluginObjects.length ? rawPluginObjects : rawPluginIds)
       .map(item => String(item?.pluginId || item || '').trim()).filter(Boolean);
-    const selectedAppId = require('../app-conversation-connection.cjs').association(app, selectedPluginIds);
+    let selectedAppId;
+    try {
+      selectedAppId = ownAppId ? await require('../app-conversation-connection.cjs').association(app, selectedPluginIds, { identityOf: sendIdentityOf || identityOf }) : '';
+      if (session.get(ref) !== s) throw Error('账号已切换，请重新打开会话');
+    } catch (error) { return { ok: false, reason: error.message }; }
     const rawPluginSource = [...(ownAppId && !selectedAppId ? [ownAppId] : []), ...(rawPluginObjects.length ? rawPluginObjects : rawPluginIds)];
     const pluginIds = [...new Set(rawPluginSource.map((item) => {
       if (item && typeof item === 'object') return String(item.pluginId || '').trim();
@@ -848,8 +934,8 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     const sendOptions = {
       ...(taskTurn?.acceptanceOnly ? { beforeTurn: taskTurn.beforeTurn, afterTurn: taskTurn.afterTurn } : {}),
       ...(taskLifecycle ? { taskId, taskTitle: taskTurn.task.title || '',
-        beforeTurn: taskTurn.beforeTurn, afterTurn: taskTurn.afterTurn, beforeRetry: taskTurn.beforeRetry, retry: rawOptions.retry === true,
-        onStarted: taskTurn.onStarted,
+        beforeTurn: taskTurn.beforeTurn, afterTurn: taskTurn.afterTurn, beforeRetry: taskTurn.beforeRetry,
+        ...(taskTurn.onStarted ? { onStarted: taskTurn.onStarted } : {}), retry: rawOptions.retry === true,
         executor: taskTurn.executor, controlled: taskTurn.controlled,
         ...(typeof taskTurn.modelName === 'string' ? { modelName: taskTurn.modelName } : {}) } : {}),
       pluginIds,
@@ -862,17 +948,19 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         .replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64),
     };
     if (typeof authorizeAI === 'function') {
-      // The queue invokes this at execution time, including cached personal models.
+      // Admission runs when the queued turn executes, including personal models.
       sendOptions.beforeTurn = require('../conversation/quota-admission.cjs').beforeTurn(
         authorizeAI, currentIdentity, sendOptions.beforeTurn);
     }
     let workflowTurn;
     try {
       if (session.get(ref) !== s) throw Error('账号已切换，请重新打开会话');
-      require('./app-mcp-grant.cjs').guardSend(s, sendOptions);
+      await require('./app-mcp-grant.cjs').guardSend(s, sendOptions);
+      if (session.get(ref) !== s) throw Error('账号已切换，请重新打开会话');
     }
     catch (error) { return { ok: false, reason: error.message }; }
     try {
+      if (typeof rawOptions?.nativeRelayGuard === 'function') await rawOptions.nativeRelayGuard();
       workflowTurn = automationTurn ? null :
         await pluginDebug.submitConversation?.(s, text, staged.files, sendOptions, rawPluginObjects);
     }
@@ -883,6 +971,10 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     if (session.get(ref) !== s) {
       if (taskTurn?.afterTurn) await taskTurn.afterTurn('stopped').catch(() => {});
       return { ok: false, reason: '账号已切换，请重新打开会话' };
+    }
+    if (!workflowTurn && typeof rawOptions?.nativeRelayGuard === 'function') {
+      try { await rawOptions.nativeRelayGuard(); }
+      catch (error) { return { ok: false, accepted: false, reason: String(error.message || error) }; }
     }
     const submitted = workflowTurn || (typeof s.submit === 'function'
       ? await s.submit(text, staged.files, sendOptions)
@@ -994,7 +1086,6 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     _publicationQueue.cancel(ref);
     _clearRelease(ref);
     _streamTransport.cancel(ref);
-    const s = session.get(ref);
     artifactRuntime.closeRef(ref);
     if (s) { _unwatchOwner(s); s.close(); }
   });
@@ -1011,15 +1102,24 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
   });
 
   /* Close in-process sessions on application shutdown so they cannot keep the process alive. */
+  const personalRelay = require('../conversation/personal-relay').create({
+    app, identityOf: () => (sendIdentityOf || identityOf)(app),
+    find: id => session.findBySessionId(id),
+    open: (options, identity) => openConversation(null, options, identity),
+    send: sendConversation,
+    sync: () => _accountSync.flush(),
+  });
   let accountingQuitReady = false;
   app.on('before-quit', event => {
-    startReceipts.dispose();
+    void _cloudHandoff?.synchronization.close();
+    personalRelay.close();
     _publicationQueue.clear();
     _streamTransport.clear();
     _releaseTimers.forEach((t) => clearTimeout(t));
     _releaseTimers.clear();
     session.list().forEach(_unwatchOwner);
     artifactRuntime.closeAll();
+    startReceipts.dispose();
     try { session.closeAll(); } catch (e) { /* Do not throw during shutdown cleanup. */ }
     // Disk writes run asynchronously during conversations. Complete their
     // durability boundary before Electron tears down the main process.
@@ -1039,6 +1139,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
       return { ...result, completion };
     },
     find: id => session.findBySessionId(id),
+    sync: () => _accountSync.flush(),
   };
 }
 module.exports = { install, _skillDirs, _defaultCwd };

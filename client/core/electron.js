@@ -88,7 +88,9 @@ const interactiveEls=()=>{
     document.querySelector('.img-viewer.show'),   /* The image overlay needs a full-screen interactive region for close and open actions. */
     /* Register the overflow menu separately because it extends outside the dock. */
     document.querySelector('.dock-more.show'),
-    ...document.querySelectorAll('.ring-btn'),
+    // Closed ring buttons keep non-zero bounds while their parent is transparent.
+    // They must not reserve native hit regions over another window's editor.
+    ...document.querySelectorAll('.pet.ring-open .ring-btn'),
     document.querySelector('.panel.show'),
     document.querySelector('.ctx-menu.show'),
     document.querySelector('.pet-bubble.show'),

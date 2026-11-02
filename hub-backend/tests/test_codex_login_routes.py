@@ -12,6 +12,66 @@ import runner_main
 
 
 class CodexLoginRouteTests(unittest.IsolatedAsyncioTestCase):
+    async def test_pi_removal_is_rejected_before_contacting_an_old_runner(self):
+        with patch.object(agents, "_pick_runner") as pick, patch.object(agents, "_runner_call") as rpc:
+            with self.assertRaises(HTTPException) as raised:
+                await agents.post_agent_install({"key": "pi", "action": "uninstall", "runnerId": "old"},
+                                                SimpleNamespace(id="owner"))
+            self.assertEqual(raised.exception.status_code, 409)
+            pick.assert_not_called()
+            rpc.assert_not_called()
+
+    async def test_empty_target_cannot_silently_switch_to_a_connected_desktop(self):
+        with patch.object(agents.runner_hub, "for_client", return_value=SimpleNamespace(id="desktop")):
+            with self.assertRaises(HTTPException) as raised:
+                agents._pick_runner(SimpleNamespace(id="owner"), "")
+        self.assertEqual(raised.exception.status_code, 409)
+
+    async def test_machine_alias_cannot_override_host_platform_or_desktop_identity(self):
+        from app.services import execution_aliases
+        cloud = SimpleNamespace(id="cloud", client_id="", owner_user_id="person", tags=[],
+                                connected_at=1, host="linux-cloud", os="linux")
+        desktop = SimpleNamespace(id="desktop", client_id="device", tags=[agents.runner_hub.CLIENT_TAG],
+                                  connected_at=2, host="mac-local", os="darwin")
+        with patch.object(agents.runner_hub, "online", return_value=[cloud, desktop]), \
+                patch.object(execution_aliases, "load", new=AsyncMock(return_value={})), \
+                patch.object(execution_aliases, "machine_name", return_value="我的电脑"), \
+                patch.object(agents, "_runner_call", new=AsyncMock(return_value={"agents": []})):
+            machines = await agents._machines(None, SimpleNamespace(id="device", user_ref="person"), True)
+        self.assertEqual([m["runnerId"] for m in machines], ["desktop", "cloud"])
+        self.assertTrue(machines[0]["isCurrentDevice"])
+        self.assertFalse(machines[1]["isCurrentDevice"])
+        self.assertEqual(machines[0]["os"], "darwin")
+        self.assertEqual(machines[1]["host"], "linux-cloud")
+        with patch.object(agents.runner_hub, "online", return_value=[cloud, desktop]), \
+                patch.object(agents, "_pick_runner", return_value=desktop) as pick, \
+                patch.object(execution_aliases, "load", new=AsyncMock(return_value={})), \
+                patch.object(agents, "_runner_call", new=AsyncMock(return_value={"agents": []})) as rpc:
+            targeted = await agents._machines(None, SimpleNamespace(id="device", user_ref="person"), True,
+                                             runner_id="desktop")
+        self.assertEqual([m["runnerId"] for m in targeted], ["desktop"])
+        pick.assert_called_once()
+        rpc.assert_awaited_once_with(desktop, "agent.setup", {"hasModel": True})
+
+    async def test_explicit_target_obeys_the_same_instance_and_owner_scope_as_inventory(self):
+        cases = (
+            (SimpleNamespace(id="device", user_ref="person"),
+             SimpleNamespace(client_id="other-version", owner_user_id="person")),
+            (SimpleNamespace(id="device", user_ref="person"),
+             SimpleNamespace(client_id="device", owner_user_id="previous-owner")),
+            (SimpleNamespace(id="device", user_ref=None),
+             SimpleNamespace(client_id="", owner_user_id="")),
+        )
+        for client, runner in cases:
+            with self.subTest(client=client, runner=runner), \
+                    patch.object(agents.runner_hub, "get", return_value=runner), \
+                    patch.object(agents, "_runner_call", new=AsyncMock()) as rpc:
+                with self.assertRaises(HTTPException) as raised:
+                    await agents.post_agent_install({"key": "opencode", "action": "install",
+                                                     "runnerId": "stale-target"}, client)
+                self.assertEqual(raised.exception.status_code, 404)
+                rpc.assert_not_awaited()
+
     async def test_cancel_routes_only_the_exact_owned_machine_and_job(self):
         runner = SimpleNamespace(id="selected")
         owner = SimpleNamespace(id="owner")

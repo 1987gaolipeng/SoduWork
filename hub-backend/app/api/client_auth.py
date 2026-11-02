@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import hash_password, verify_password
 from ..db import get_session
-from ..deps import authenticated_client, current_ai_client, require_perm
+from ..deps import authenticated_client, current_ai_client, has_perm, require_perm
 from ..models import AuditLog, Client, User
 from ..schemas import client_to_api
 from ..services import (

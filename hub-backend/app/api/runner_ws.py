@@ -17,9 +17,10 @@ from ..db import SessionLocal, get_session
 from ..deps import current_client, require_perm
 from ..models import AppSetting, Client, User
 from ..realtime import hub as realtime_hub
-from ..services import (audit, environment_service, execution_capabilities,
+from ..services import (audit, execution_capabilities,
                         execution_sessions, device_auth, runner_enroll,
                         runner_hub, runner_registry, runner_release, ws_frames)
+from ..services.runner_inventory_scope import scope_for
 
 from ..services.runner_admin_scope import (admin_allowed as _admin_allowed,
     admin_orgs as _admin_orgs, org_options as _org_options, row_in_scope as _row_in_scope,
@@ -35,21 +36,40 @@ _INSTALLABLE_COMPONENTS = {"office"}
 _SETTLEMENT_KEYS: set[tuple[str, str]] = set()
 _SETTLEMENT_JOBS: set[asyncio.Task] = set()
 _TELEMETRY_JOBS: set[asyncio.Task] = set()
-# Bound the telemetry queue; warn and drop excess entries rather than allowing unbounded memory growth.
-# Session facts are idempotent by session and sequence; heartbeats and reconnects reconcile missing entries.
-_TELEMETRY_QUEUE_MAX = 512
-_HELLO_TIMEOUT_S = 10                    # Post-auth handshake budget; silent peers must not pin sockets.
+# Legacy telemetry remains best effort. Reliable frames receive an explicit
+# retry response under pressure and stay in the Runner's durable outbox.
+_TELEMETRY_QUEUE_MAX = 64
+# Current Runners send hello before local capability probes. Released Runners do
+# the probes first, with several serial 2.5-second command budgets. Keep a bounded
+# rolling-upgrade window that covers that legacy path as well as slow machines.
+_HELLO_TIMEOUT_S = 30
 
 
-def _enqueue_telemetry(queue: "asyncio.Queue", item) -> None:
-    """Enqueue telemetry without blocking the connection loop; warn and drop when the queue is
-    full.
+async def _receive_hello(websocket: WebSocket, peer: str,
+                         timeout: float = _HELLO_TIMEOUT_S) -> dict | None:
+    """Receive the first protocol frame within a bounded post-auth window.
+
+    Current Runners send identity and cached inventory immediately; released
+    Runners may still perform their bounded local capability scan first. The
+    compatibility timeout covers both while reclaiming silent peers.
     """
     try:
+        return await asyncio.wait_for(websocket.receive_json(), timeout=timeout)
+    except asyncio.TimeoutError:
+        await websocket.close(code=4408)
+        log.warning("执行机握手超时未发送 hello: %s", peer)
+        return None
+
+
+def _enqueue_telemetry(queue: "asyncio.Queue", item) -> bool:
+    """Keep the control loop responsive; reliable callers retain rejected frames."""
+    try:
         queue.put_nowait(item)
+        return True
     except asyncio.QueueFull:
-        log.warning("执行机遥测队列已满（%d），丢弃一批遥测；会话事实可由后续心跳补齐",
-                    _TELEMETRY_QUEUE_MAX)
+        log.warning("Runner telemetry queue full: capacity=%d reliable=%s",
+                    queue.maxsize, isinstance(item, dict))
+        return False
 
 
 def _stop_telemetry(queue: "asyncio.Queue") -> None:
@@ -142,42 +162,26 @@ async def list_runners(client: Client = Depends(current_client),
     items = await runner_registry.list_nodes(
         session, {client.id}, set(),
         {str(client.user_ref)} if client.user_ref else set())
-    # A device identity can have old server-side registrations from a previous
-    # deployment. Keep only the current embedded client runtime and the user's
-    # personal cloud node, then collapse offline duplicate registrations for the
-    # same physical machine. This prevents a retired trial/shared registration
-    # from reappearing beside the local PC and cloud computer.
-    user_id = str(client.user_ref or "")
-    visible = [item for item in items if
-               (bool(user_id) and item.get("ownerUserId") == user_id) or
-               (not item.get("ownerUserId") and item.get("clientId") == client.id
-                and bool(item.get("embedded")))]
-    by_machine = {}
-    for item in visible:
-        if item.get("ownerUserId"):
-            by_machine[("personal", item.get("runnerId"))] = item
-            continue
-        key = item.get("machineKey") or item.get("runnerId")
-        previous = by_machine.get(key)
-        rank = (not bool(item.get("online")), -int(item.get("lastSeen") or 0))
-        old_rank = ((not bool(previous.get("online")),
-                     -int(previous.get("lastSeen") or 0)) if previous else None)
-        if previous is None or rank < old_rank:
-            by_machine[key] = item
-    items = list(by_machine.values())
+    # Versions and environments can share a physical hostname. Their actual
+    # client/Runner identities must remain distinct, including while online.
+    items = [{**item, "scope": scope_for(client, item)} for item in items
+             if scope_for(client, item)]
     for item in items:
         item["owned"] = True
         item["manageable"] = True
+        item["isCurrentDevice"] = item["scope"] == "current-instance"
     return {"runners": items}
 
 
 async def _client_runner(session: AsyncSession, client: Client, runner_id: str):
     row = await session.get(am.RunnerNode, runner_id)
-    if row is None:
+    if row is None or not scope_for(client, row):
         raise HTTPException(status_code=404, detail="执行节点不存在")
-    owner = await session.get(User, client.user_ref) if client.user_ref else None
-    if row.client_id != client.id and not bool(owner and owner.is_super):
-        raise HTTPException(status_code=403, detail="只能管理自己的执行节点")
+    # Cached IDs and elevated account roles cannot expand the desktop inventory.
+    # Check both records before changing policy or sending an RPC to a live node.
+    live = runner_hub.get(runner_id)
+    if live is not None and not scope_for(client, live):
+        raise HTTPException(status_code=404, detail="执行节点不存在")
     return row
 
 
@@ -185,7 +189,13 @@ async def _client_runner(session: AsyncSession, client: Client, runner_id: str):
 async def runner_mode(runner_id: str, body: dict = Body(default_factory=dict),
                       client: Client = Depends(current_client),
                       session: AsyncSession = Depends(get_session)):
-    await _client_runner(session, client, runner_id)
+    current = await _client_runner(session, client, runner_id)
+    if scope_for(client, current) == "personal-cloud":
+        # Retain the existing owner lock, administrative-state gate and audit.
+        from ..services import cloud_environments
+        result = await cloud_environments.update(session, client, runner_id,
+                                                {"mode": str(body.get("mode") or "").strip().lower()})
+        return {"ok": True, "runnerId": runner_id, "mode": result["environment"]["mode"]}
     try:
         row = await runner_registry.set_mode(session, runner_id, str(body.get("mode") or ""))
     except ValueError as exc:
@@ -197,13 +207,7 @@ async def runner_mode(runner_id: str, body: dict = Body(default_factory=dict),
 @router.post("/api/v1/runners/{runner_id}/probe")
 async def runner_probe(runner_id: str, client: Client = Depends(current_client),
                        session: AsyncSession = Depends(get_session)):
-    allowed = await environment_service.client_runner_clients(session, client)
-    allowed_orgs = await environment_service.client_runner_orgs(session, client)
-    row = await session.get(am.RunnerNode, runner_id)
-    if row and row.owner_user_id and row.owner_user_id != client.user_ref:
-        raise HTTPException(status_code=404, detail="执行节点不存在")
-    if row is None or not _row_in_scope(row, allowed, allowed_orgs, client.user_ref or ""):
-        raise HTTPException(status_code=404, detail="执行节点不存在")
+    await _client_runner(session, client, runner_id)
     runner = runner_hub.get(runner_id)
     if runner is None:
         return {"ok": False, "runnerId": runner_id, "error": "执行节点当前离线"}
@@ -217,13 +221,11 @@ async def _owned_embedded_runner(session: AsyncSession, client: Client, runner_i
     """Employees may manage only their embedded Runner; administrators govern server and shared
     nodes.
     """
-    row = await session.get(am.RunnerNode, runner_id)
-    if row is None or row.client_id != client.id:
-        raise HTTPException(status_code=404, detail="执行节点不存在")
+    await _client_runner(session, client, runner_id)
     live = runner_hub.get(runner_id)
     if live is None:
         raise HTTPException(status_code=409, detail="本机 Runner 当前不在线")
-    if not runner_hub.is_client_runtime(live):
+    if scope_for(client, live) != "current-instance":
         raise HTTPException(status_code=403, detail="独立和共享执行机请由管理员统一维护")
     return live
 
@@ -479,14 +481,32 @@ async def admin_runner_component_job(
 
 
 async def _publish_task_owner(task_id: str, event: dict) -> None:
-    # Runner results can arrive after a device changed accounts. Resolve the
-    # task's frozen owner, rather than broadcasting to that device's new login.
+    # Task cards follow the authorized audience and its per-client projection.
+    # Raw execution updates remain restricted to the frozen execution owner.
     from ..models import Task
-    from ..services.task_access import publish_owner
+    from ..services.task_access import publish_owner, publish_task
     async with SessionLocal() as session:
         task = await session.get(Task, task_id)
         if task is not None:
-            await publish_owner(session, task, event)
+            if event.get("type") == "task.updated":
+                await publish_task(session, task, "task.updated", event.get("task"))
+            else:
+                await publish_owner(session, task, event)
+
+
+async def _publish_session_updates(updates: list) -> None:
+    for item in updates:
+        if item.get("clientId"):
+            await _publish_task_owner(item["taskId"], {
+                "type": "execution.updated", "taskId": item["taskId"],
+                "session": item["session"],
+            })
+            if item.get("task"):
+                await _publish_task_owner(item["taskId"], {
+                    "type": "task.updated", "task": item["task"],
+                })
+        if item.get("settleTerminal"):
+            _schedule_terminal_settlement(item["taskId"], item["session"].get("ref") or "")
 
 
 async def _ingest_sessions(r, sessions: list) -> None:
@@ -497,25 +517,29 @@ async def _ingest_sessions(r, sessions: list) -> None:
         async with SessionLocal() as s:
             updates = await execution_sessions.ingest_runner_snapshots(s, r, sessions)
             await s.commit()
-        for item in updates:
-            if item.get("clientId"):
-                await _publish_task_owner(item["taskId"], {
-                    "type": "execution.updated",
-                    "taskId": item["taskId"],
-                    "session": item["session"],
-                })
-                # Push the complete task when session evidence recovers a lost dispatch receipt or changes execution status.
-                # For frequent text updates, send execution.updated only to avoid full task redraws.
-                if item.get("task"):
-                    await _publish_task_owner(item["taskId"], {
-                        "type": "task.updated",
-                        "task": item["task"],
-                    })
-            if item.get("settleTerminal"):
-                _schedule_terminal_settlement(
-                    item["taskId"], item["session"].get("ref") or "")
+        await _publish_session_updates(updates)
     except Exception as e:  # noqa: BLE001  Persistence failures must not disconnect an active Runner.
         log.warning("执行会话留存失败 %s: %s", r.id, type(e).__name__)
+
+
+async def _ingest_delivery(r, message: dict) -> None:
+    from ..services import runner_event_delivery
+    try:
+        async with SessionLocal() as session:
+            ack, updates = await runner_event_delivery.ingest(session, r, message)
+            await session.commit()
+        # A failed send after commit is safe: the Runner retransmits and the
+        # next transaction recognizes the already durable receipt.
+        await r.send(ack)
+        await _publish_session_updates(updates)
+    except runner_event_delivery.DeliveryRejected as exc:
+        await r.send({"op": "session.nack", "version": 1, "runnerId": r.id,
+                      "bootId": r.boot_id, "ref": message.get("ref"),
+                      "streamId": message.get("streamId"),
+                      "deliverySeq": message.get("deliverySeq"), "code": exc.code,
+                      "expectedDeliverySeq": exc.expected})
+    except Exception as exc:  # no ACK before commit; disk replay is the retry path
+        log.warning("Runner durable event delivery pending runner=%s error=%s", r.id, type(exc).__name__)
 
 
 async def _reconcile_runner_restart(r) -> None:
@@ -619,6 +643,9 @@ async def _telemetry_worker(r, queue: asyncio.Queue) -> None:
         try:
             if item is None:
                 return
+            if isinstance(item, dict):
+                await _ingest_delivery(r, item)
+                continue
             sessions, deployments = item
             if sessions:
                 await _ingest_sessions(r, sessions)
@@ -721,7 +748,7 @@ async def runner_ws(websocket: WebSocket, token: str = ""):
         await cluster_runtime.register(r)
         await r.send({"op": "welcome", "runnerId": r.id,
                       "serverTime": int(time.time()),
-                      "caps": [ws_frames.CAP_BIN1]})
+                      "caps": [ws_frames.CAP_BIN1, "sessionAck1"]})
         r.ready = True
         await _reconcile_runner_restart(r)
         log.info("执行机上线: %s @ %s（%d 个 agent%s）", r.id, r.host, len(r.agents),
@@ -827,6 +854,16 @@ async def runner_ws(websocket: WebSocket, token: str = ""):
                 # Notify after persistence; clients refresh by taskId instead of receiving full logs through task WebSockets.
                 if isinstance(msg.get("sessions"), list) and msg["sessions"]:
                     _enqueue_telemetry(telemetry_queue, (msg["sessions"], []))
+            elif op == "session.deliver":
+                if "sessionAck1" not in r.caps:
+                    continue
+                oversized = len(packet["text"].encode("utf-8")) > 1024 * 1024
+                if oversized or not _enqueue_telemetry(telemetry_queue, msg):
+                    await r.send({"op": "session.nack", "version": 1,
+                                  "runnerId": r.id, "bootId": r.boot_id,
+                                  "ref": msg.get("ref"), "streamId": msg.get("streamId"),
+                                  "deliverySeq": msg.get("deliverySeq"),
+                                  "code": "DELIVERY_TOO_LARGE" if oversized else "DELIVERY_BACKPRESSURE"})
             elif op == "session.event":
                 # Push normalized Runner events immediately rather than waiting for the next heartbeat.
                 # Live updates and heartbeat sessions share persistence and notification logic, deduplicated by session and sequence.

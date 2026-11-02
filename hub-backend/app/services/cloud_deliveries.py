@@ -6,8 +6,8 @@ immutable delivery snapshot, never a second task or execution queue.
 from __future__ import annotations
 
 import json
-import logging
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from fastapi import HTTPException
 from sqlalchemy import func, literal, select, update
@@ -15,14 +15,23 @@ from sqlalchemy import func, literal, select, update
 from ..automation_models import ExecutionSession
 from ..conversation_handoff_models import ConversationHandoff
 from ..models import Attachment, Task
-from . import delivery_bundle, delivery_collections as collections, delivery_manifest
+from . import delivery_bundle, delivery_collections as collections, delivery_manifest, task_requirements
 
 
 async def _context(session, task_id):
     task = await session.get(Task, task_id)
     handoff = await session.scalar(select(ConversationHandoff).where(ConversationHandoff.task_id == task_id))
-    if task is None or handoff is None or (handoff.source or {}).get("entryKind") != "cloud":
-        raise HTTPException(404, "找不到这条云端会话")
+    if task is None:
+        raise HTTPException(404, "找不到这条执行会话")
+    if handoff is None:
+        # Requirements already own their execution and attachments. Reuse the
+        # same verified collection pipeline without inventing a cloud handoff.
+        if task.kind not in task_requirements.KINDS or not task.owner_user_id:
+            raise HTTPException(404, "找不到这条执行会话")
+        handoff = SimpleNamespace(owner_user_id=task.owner_user_id,
+            source={"sessionId": "requirement-" + task.id, "entryKind": "requirement"})
+    elif (handoff.source or {}).get("entryKind") != "cloud":
+        raise HTTPException(404, "找不到这条执行会话")
     execution = await session.scalar(select(ExecutionSession).where(ExecutionSession.task_id == task_id)
         .order_by(ExecutionSession.started_at.desc().nullslast(), ExecutionSession.created_at.desc()).limit(1))
     return task, handoff, execution
@@ -31,7 +40,7 @@ async def _context(session, task_id):
 async def _authorized(session, client, task_id):
     context = await _context(session, task_id)
     if not client.user_ref or client.user_ref != context[1].owner_user_id:
-        raise HTTPException(404, "找不到这条云端会话")
+        raise HTTPException(404, "找不到这条执行会话")
     return context
 
 
@@ -118,8 +127,10 @@ async def _collect(session, task, handoff, execution):
         primary_ids=[item["id"] for item in manifest.get("primary", [])])
     files, raw, kind = payload["files"], payload["bytes"], payload["kind"]
     primary = next((item for item in files if item["role"] == "primary"), files[0])
-    manifest = {"schemaVersion": 1, "source": "cloud", "sessionId": handoff.source["sessionId"],
-        "revision": "pending", "title": task.title, "entryPath": primary["path"],
+    context = (task.work_routing or {}).get("executionContext") or {}
+    local = handoff.source.get("entryKind") == "requirement" and bool((context.get("runner") or {}).get("clientId"))
+    manifest = {"schemaVersion": 1, "source": "local" if local else "cloud", "sessionId": handoff.source["sessionId"],
+        "revision": "pending", "title": collections.display_title(task.title), "entryPath": primary["path"],
         "kind": kind, "files": files,
         "externalDependencies": payload["externalDependencies"]}
     manifest = collections.clean_manifest(manifest)
@@ -128,7 +139,7 @@ async def _collect(session, task, handoff, execution):
 
 
 async def archive_task(session, task_id, *, propagate=False):
-    """Best effort hook; failure is durable and never turns task success into failure."""
+    """Save on user request; failure never turns task success into failure."""
     task, handoff, execution = await _context(session, task_id)
     artifact_url = getattr(task, "artifact_url", "") or ""
     if execution is None or execution.state not in {"done", "failed", "cancelled", "canceled", "error", "stopped"}:
@@ -170,6 +181,9 @@ async def archive_task(session, task_id, *, propagate=False):
 
 async def retry(session, client, task_id):
     _task, _handoff, execution = await _authorized(session, client, task_id)
+    from . import artifact_version_guard
+    await artifact_version_guard.reconcile_identical_pending(session, task_id)
+    await session.commit()
     # A Hub restart can leave a completed Runner row with its durable
     # attachments intact but without the derived terminalSettlement marker.
     # Reconcile that marker before applying the user-requested retry; otherwise
@@ -194,25 +208,3 @@ async def retry(session, client, task_id):
                 # Keep the normal pending response instead of failing the retry.
                 await session.rollback()
     return await archive_task(session, task_id)
-
-
-async def archive_if_cloud(session, task_id):
-    """Never let a secondary library/storage failure break the execution lifecycle."""
-    from sqlalchemy.ext.asyncio import AsyncSession
-    try:
-        task = await session.get(Task, task_id)
-    except Exception:
-        return None
-    if task is None or task.origin != "cloud-conversation":
-        return None
-    # The caller has already committed authoritative task/output state. Own
-    # our transaction so a storage rollback cannot expire its ORM instances.
-    async with AsyncSession(bind=session.bind, expire_on_commit=False) as archive_session:
-        try:
-            task = await archive_session.get(Task, task_id)
-            if task is not None and task.origin == "cloud-conversation":
-                return await archive_task(archive_session, task_id)
-        except Exception as exc:
-            await archive_session.rollback()
-            logging.getLogger(__name__).warning("云端成果同步暂不可用 %s: %s", task_id, type(exc).__name__)
-    return None

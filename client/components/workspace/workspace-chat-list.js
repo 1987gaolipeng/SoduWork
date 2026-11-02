@@ -3,7 +3,7 @@
   'use strict';
   const FALLBACK_HARNESS_NAMES = {
     pi:'Pi', codex:'Codex', 'codex-harness':'Codex Harness', opencode:'OpenCode',
-    claude:'Claude Code', qwen:'Qwen Code', dsh:'DeepSeek Harness', harness2:'Google Harness²',
+    claude:'Claude Code', kimi:'Kimi Code', qwen:'Qwen Code', dsh:'DeepSeek Harness', harness2:'Google Harness²',
   };
   function harnessNames() { return global.AgentBrand?.LABELS || FALLBACK_HARNESS_NAMES; }
   function historyHarnesses(row) {
@@ -43,7 +43,7 @@
     if (!hadOwner) { hadOwner = Boolean(next); return false; }
     historyEpoch++;
     ctx.historyLoad = null;
-    ctx.chatItems = []; ctx.chatNames?.clear(); ctx.incomingOpened?.clear();
+    ctx.chatItems = []; ctx.chatNames?.clear();
     ctx.activeChatId = ''; ctx.chatsLoading = Boolean(next);
     closeChatMenu();
     try { ctx.sessionOff?.(); } finally { ctx.sessionOff = null; }
@@ -190,6 +190,10 @@ function updateChatState(event) {
     const merged = { ...before, ...row };
     if (ctx.chatState(before) === nextState && before.title === row.title && before.live === row.live &&
       JSON.stringify(historyHarnesses(before)) === JSON.stringify(historyHarnesses(merged))) return;
+    if (row.accountConversation || row.cloud) {
+      ctx.upsertChat({ ...row, id, pending: false });
+      return;
+    }
     ctx.chatItems[index] = { ...before, ...row, id, pending: false };
     renderChats();
   }
@@ -554,77 +558,6 @@ function renderChats() {
     if (ctx.openChatMenu && !ctx.openChatMenu.row?.isConnected) closeChatMenu();
     scroller.scrollTop = scrollTop;
   }
-  function _incomingTaskKey(detail) {
-    const task=detail&&detail.task||{};
-    return String(detail&&detail.taskId||task.id||'')+'|'+
-      String(detail&&detail.arrival||'')+'|'+String(task.ownerClientId||'');
-  }
-
-function _pruneIncomingOpened() {
-    const cutoff=Date.now()-10*60*1000;
-    ctx.incomingOpened.forEach((at,key)=>{if(Number(at)<cutoff)ctx.incomingOpened.delete(key);});
-  }
-
-function _openIncomingTask(detail) {
-    if(!detail||detail.actionable===false||detail.autoOpen===false)return;
-    const task=detail.task||{};
-    const id=String(detail.taskId||task.id||'').trim();
-    if(!id)return;
-    const key=_incomingTaskKey(detail);
-    _pruneIncomingOpened();
-    if(ctx.incomingOpened.has(key))return;
-    const title=String(task.title||"未命名需求").trim();
-    const opener=global.openTaskConversation;
-    if(typeof opener!=='function'){
-      if(typeof global.petSay==='function')global.petSay("收到新需求《"+title+"》，需求会话入口还在加载，请稍后重试");
-      return;
-    }
-    ctx.incomingOpened.set(key,Date.now());
-    try{
-      const result=opener(id,title,{source:'incoming-task',arrival:detail.arrival||'',projectId:task.projectId||'',repoId:task.repoId||'',queueMode:task.queueMode||''});
-      if(result&&typeof result.then==='function'){
-        result.then((ok)=>{
-          if(ok===false){
-            ctx.incomingOpened.delete(key);
-                        if(typeof global.petSay==='function')global.petSay("需求《"+title+"》没有打开协作会话，请从需求池重试");
-          }
-        }).catch(()=>{
-          ctx.incomingOpened.delete(key);
-                    if(typeof global.petSay==='function')global.petSay("需求《"+title+"》没有打开协作会话，请从需求池重试");
-        });
-      }else if(result===false){
-        ctx.incomingOpened.delete(key);
-                if(typeof global.petSay==='function')global.petSay("需求《"+title+"》没有打开协作会话，请从需求池重试");
-      }
-    }catch(error){
-      ctx.incomingOpened.delete(key);
-            if(typeof global.petSay==='function')global.petSay("需求《"+title+"》没有打开协作会话，请从需求池重试");
-    }
-  }
-
-function _handleTaskChange(event) {
-    const detail=event&&event.detail||{};
-    const queued=typeof Store!=='undefined'&&Store&&typeof Store.takeIncomingTasks==='function'
-      ? Store.takeIncomingTasks() : [];
-    const rows=queued.slice();
-    if(detail.incoming)rows.push(detail);
-    const seen=new Set();
-    rows.forEach((item)=>{
-      const key=_incomingTaskKey(item);
-      if(key&&!seen.has(key)){seen.add(key);_openIncomingTask(item);}
-    });
-  }
-
-function subscribeTaskChanges() {
-    if(ctx.taskOff)return;
-    const handler=(event)=>_handleTaskChange(event);
-    window.addEventListener('soduwork-work-task-change',handler);
-    ctx.taskOff=()=>window.removeEventListener('soduwork-work-task-change',handler);
-    if(typeof Store!=='undefined'&&Store&&typeof Store.takeIncomingTasks==='function'){
-      Store.takeIncomingTasks().forEach(_openIncomingTask);
-    }
-  }
-
 function subscribeConversationPresence() {
     syncHistoryOwner();
     if (hadOwner && !historyOwner) return;
@@ -692,7 +625,7 @@ function refreshConversationHistory() {
     if (ctx.root) { renderChats(); }
   }
 
-  return { setChats, upsertChat, removeChat, setActiveChat, pinStorageKey, legacyPinnedIds, pinnedIds, togglePinned, forgetPinned, deleteHistoryChat, archiveHistoryChat, rememberChatName, updateChatState, renameChat, closeChatMenu, openChatRename, chatMenuItem, _newChatRow, _paintChatLocale, _paintChatRow, _syncChatList, renderChats , _incomingTaskKey, _pruneIncomingOpened, _openIncomingTask, _handleTaskChange, subscribeTaskChanges, subscribeConversationPresence, refreshConversationHistory };
+  return { setChats, upsertChat, removeChat, setActiveChat, pinStorageKey, legacyPinnedIds, pinnedIds, togglePinned, forgetPinned, deleteHistoryChat, archiveHistoryChat, rememberChatName, updateChatState, renameChat, closeChatMenu, openChatRename, chatMenuItem, _newChatRow, _paintChatLocale, _paintChatRow, _syncChatList, renderChats, subscribeConversationPresence, refreshConversationHistory };
   }
   global.WorkspaceChatList = { create };
 })(window);

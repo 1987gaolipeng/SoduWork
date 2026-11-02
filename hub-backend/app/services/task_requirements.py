@@ -20,6 +20,13 @@ BUSINESS_KEYS = {"title", "note", "source", "priority", "tags", "requesterUserId
 EXECUTION_REFERENCE_KEYS = {"requesterUserId", "projectId", "repoId"}
 
 
+def is_review_submitter(task, client):
+    """Only the assigned executor account, or an unassigned execution owner, submits work."""
+    from . import task_access
+    assignee = str(task.assignee_user_id or "")
+    return bool(client.user_ref and assignee == str(client.user_ref)) if assignee else task_access.is_owner(task, client)
+
+
 def ensure_executable(task):
     if getattr(task, "archived_at", None):
         raise ValueError("请先恢复已归档的需求，再安排执行")
@@ -79,6 +86,7 @@ class _ListRead:
     company_scope: set[str] | None
     grants: dict[str, list]
     repository_issues: dict
+    reviewable: set[str] | None = None
 
 
 async def source_access(session, client, task, *, prepared=None):
@@ -245,7 +253,7 @@ async def decorate(session, client, task, api, *, context=None, prepared=None, e
     authority = await can_manage(session, client, task, context, prepared=prepared)
     if "requirementEditBlocked" not in api:
         from . import requirement_edit_policy
-        await requirement_edit_policy.decorate_many(session, [task], [api])
+        await requirement_edit_policy.decorate_many(session, [task], [api], facts=edit_facts)
     editable = authority and not api.get("requirementEditBlocked", False)
     content = public_content(task)
     if not execution:
@@ -282,13 +290,27 @@ async def decorate(session, client, task, api, *, context=None, prepared=None, e
         api["myRoles"] = list(dict.fromkeys(list(api.get("myRoles") or []) + ["creator"]))
     api.update(canEditRequirement=editable, canViewExecution=execution, canComment=execution,
                canDeleteRequirement=maintenance, canArchiveRequirement=maintenance,
-               canManageRequirementMaterials=authority, canSubmitReview=authority,
+               canManageRequirementMaterials=authority,
+               canSubmitReview=bool(execution and is_review_submitter(task, client)
+                                    and task.status == "doing" and not task.archived_at
+                                    and api.get("requirementStage") == "delivering"
+                                    and not api.get("maintenanceBlocked", True)),
                canManageRequirementAutomation=authority)
-    # Creator-direct acceptance is a capability owned by the Hub.  Do not make
-    # the detail page infer it from a possibly stale local team-capability cache.
+    # Formal reviews may wait while the execution Task still has status=doing.
+    # Carry the personal decision capability in the same snapshot as its stage.
+    pending_review = False
+    if execution and api.get("requirementStage") == "reviewing":
+        from . import requirement_review_access
+        reviewable = prepared.reviewable if prepared is not None else None
+        if reviewable is None:
+            reviewable = await requirement_review_access.pending_task_ids(session, client.user_ref, [task.id])
+        pending_review = task.id in reviewable
     api["canReview"] = bool(
-        execution and task.status == "done" and not getattr(task, "reviewed_at", None)
+        pending_review or (execution and task.status == "done" and api.get("requirementStage") != "reviewing"
+        and not getattr(task, "reviewed_at", None)
+        and not getattr(task, "archived_at", None)
         and client.user_ref and str(getattr(task, "created_by", "") or "") == str(client.user_ref)
+        )
     )
     from . import repository_issue_access, task_execution_claim
     api["canClaimExecution"] = execution and task_execution_claim.available(task, client, api)
@@ -299,10 +321,11 @@ async def decorate(session, client, task, api, *, context=None, prepared=None, e
 async def apply(session, client, task, data, *, creating=False):
     """Consume preparation fields. Keep execution updates in task_status.mark."""
     from . import task_access
+    edit_facts = None
     if not creating:
         from . import requirement_edit_policy
         if requirement_edit_policy.DEFINITION_KEYS.intersection(data):
-            await requirement_edit_policy.ensure_allowed(session, task)
+            edit_facts = await requirement_edit_policy.ensure_allowed(session, task)
         if {"actualStart", "actualEnd"}.intersection(data):
             requirement_edit_policy.preserve_manual_history(session, task, task.status, task.status)
     if "priority" in data and data["priority"] not in {"low", "normal", "high", "critical"}:
@@ -440,7 +463,7 @@ async def update_shared(session, client, task, data):
     api = task_access.decorate(task, api, client, {}, {})
     api.pop("assigneeName", None)
     api.pop("executionDeviceName", None)
-    return await decorate(session, client, task, api)
+    return await decorate(session, client, task, api, edit_facts=edit_facts)
 
 
 async def decorate_many(session, client, rows, apis):
@@ -466,7 +489,10 @@ async def decorate_many(session, client, rows, apis):
             grants.setdefault(row.task_id, []).append(row)
     from . import repository_issue_access
     repository_issues = await repository_issue_access.projection(session, client, [task for task, _ in pairs])
-    prepared = _ListRead(context[0], scope, grants, repository_issues)
+    from . import requirement_review_access
+    reviewable = await requirement_review_access.pending_task_ids(session, client.user_ref,
+        [task.id for task, api in pairs if api.get("requirementStage") == "reviewing"])
+    prepared = _ListRead(context[0], scope, grants, repository_issues, reviewable)
     return [await decorate(session, client, task, api, context=context, prepared=prepared)
             for task, api in pairs]
 
@@ -490,9 +516,17 @@ async def prepare_notifications(session, task, clients):
         models.TaskRequirementAccess.task_id == task.id))
     for grant in rows:
         grants.setdefault((grant.principal_kind, grant.principal_id), []).append(grant)
-    # Source and active membership lists are common; derive each recipient's
-    # membership from that exact list instead of repeating its SQL per device.
-    issues = await repository_issue_access.projection(session, clients[0], [task])
+    # Repository projection already resolves the complete active membership of
+    # each source. Reuse those facts across recipient devices; querying the same
+    # source again for every account would make notification preparation O(N).
+    repository_facts = await repository_issue_access.projection(session, None, [task])
+    repository_members = {
+        tid: {row["id"] for row in data["source"]["relatedUsers"]}
+        for tid, data in repository_facts.items()
+    }
+    from . import requirement_review_access
+    creator = str(getattr(task, "created_by", "") or "")
+    reviewable = await requirement_review_access.pending_task_ids(session, creator, [task.id])
     scopes, prepared = {}, {}
     for client in clients:
         user = users.get(client.user_ref)
@@ -500,9 +534,11 @@ async def prepare_notifications(session, task, clients):
         if key not in scopes:
             scopes[key] = await rbac.company_org_ids(session, user, parents=parents)
         principal = ("user", client.user_ref) if client.user_ref else ("client", client.id)
-        device_grants = grants.get(principal, [])
-        repository = {tid: {**row, "member": bool(client.user_ref and any(
-            member["id"] == client.user_ref for member in row["source"]["relatedUsers"]))}
-            for tid, row in issues.items()}
-        prepared[client.id] = _ListRead(user, scopes[key], {task.id: device_grants}, repository)
+        repository_issues = {
+            tid: {**data, "member": client.user_ref in repository_members[tid]}
+            for tid, data in repository_facts.items()
+        }
+        prepared[client.id] = _ListRead(
+            user, scopes[key], {task.id: list(grants.get(principal, []))}, repository_issues,
+            reviewable if client.user_ref == creator else set())
     return prepared

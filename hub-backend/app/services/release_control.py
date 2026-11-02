@@ -220,6 +220,8 @@ async def _new_artifact(session: AsyncSession, task: models.Task, *, kind: str,
                         payload: dict, source_ref: str = "", commit: str = "",
                         branch: str = "", target: str = "", url: str = "",
                         who: str = "SoduWork") -> tuple[am.ArtifactVersion, bool]:
+    from . import artifact_version_guard
+    await artifact_version_guard.lock_task(session, task.id)
     digest = _checksum({"kind": kind, **payload})
     existing = (await session.execute(select(am.ArtifactVersion).where(
         am.ArtifactVersion.task_id == task.id,
@@ -378,7 +380,7 @@ async def output_manifest(session: AsyncSession, task: models.Task, *,
 async def ensure_current_output(session: AsyncSession, task: models.Task, *, source_ref: str = "",
                                 workflow_run_id: str = "",
                                 source_refs: list[str] | None = None,
-                                text: str = "", who: str = "SoduWork"
+                                text: str = "", who: str = "SoduWork", allow_empty: bool = False
                                 ) -> tuple[am.ArtifactVersion, bool]:
     manifest = await output_manifest(
         session, task, source_ref=source_ref,
@@ -393,8 +395,8 @@ async def ensure_current_output(session: AsyncSession, task: models.Task, *, sou
         # A manually submitted requirement may intentionally have no file, URL, or
         # assistant answer.  It still needs an immutable review target so the
         # responsible person can record an acceptance decision and keep the audit
-        # chain complete.  Only allow this for tasks without a declared output
-        # contract; artifact-producing tasks must continue to fail closed.
+        # chain complete. An explicit executor submission can request this even
+        # with a declared contract; automatic submissions still fail closed.
         routing = dict(task.work_routing or {})
         contract = dict(routing.get("outputContract") or {})
         has_declared_output = bool(
@@ -405,7 +407,7 @@ async def ensure_current_output(session: AsyncSession, task: models.Task, *, sou
         submission_mode = str(routing.get("executionSubmissionMode") or "").strip().lower()
         if not submission_mode:
             submission_mode = "auto" if has_declared_output else "manual"
-        if submission_mode == "manual" and not has_declared_output and not manifest.get("problems"):
+        if (allow_empty or (submission_mode == "manual" and not has_declared_output)) and not manifest.get("problems"):
             from . import delivery_manifest
             manifest = {
                 "schemaVersion": delivery_manifest.SCHEMA_VERSION,
@@ -528,6 +530,8 @@ async def decide(session: AsyncSession, task: models.Task, actor, *, action: str
     note = str(note or "").strip()
     if decision == "reject" and not note:
         return {"ok": False, "reason": "note"}
+    from . import artifact_version_guard
+    await artifact_version_guard.lock_task(session, task.id)
     artifact = await session.get(am.ArtifactVersion, artifact_version_id) \
         if artifact_version_id else await latest_artifact(
             session, task.id, stream="spec" if action == "baseline" else "delivery")

@@ -95,7 +95,7 @@ async function enable() {
   for (const { item, build } of entries) {
     const row = before.releases.find(row => row.id === item.releaseId);
     assert.ok(matches(row, item, build, channel), 'All accepted artifacts must be staged before enabling');
-    const suffix = name => String(name).replace(/^(?:SoduWork|SoduWork|SoduWork)-/, '');
+    const suffix = name => String(name).replace(/^SoduWork-/, '');
     assert.ok(!before.releases.some(other => other.enabled && !acceptedIds.has(other.id) &&
       other.channel === channel && other.platform === item.platform && other.arch === item.arch &&
       other.version === build.version && suffix(other.artifactName) === suffix(item.name)),

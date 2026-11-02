@@ -43,6 +43,18 @@ function create(file) {
       const next = { ...job, id: String(job.id || crypto.randomUUID()), body: { ...job.body },
         createdAt: Number(job.createdAt || Date.now()), attempts: Number(job.attempts || 0) };
       if (value.jobs.some(item => item.id === next.id)) return next;
+      // A source session checkpoint is a complete snapshot. Once a newer
+      // snapshot is durable, older unsent snapshots cannot add information
+      // and only amplify disk/network traffic. Keep the in-flight request if
+      // it is already being awaited; its ACK is harmless when it was removed
+      // and the newer job remains available for delivery.
+      const revision = Number(next.body?.sourceRevision || 0);
+      if (revision > 0 && next.body?.sourceSessionId) {
+        value.jobs = value.jobs.filter(item =>
+          item.ownerKey !== next.ownerKey || item.clientId !== next.clientId ||
+          item.body?.sourceSessionId !== next.body.sourceSessionId ||
+          Number(item.body?.sourceRevision || 0) >= revision);
+      }
       value.jobs.push(next);
       if (value.jobs.length > 100) value.jobs.splice(0, value.jobs.length - 100);
       write();

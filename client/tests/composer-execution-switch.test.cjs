@@ -58,6 +58,42 @@ test('snapshot painting disables local continuation during streaming and runtime
  f.window.ChatCloudHandoff.sync(root,{status:'idle',cloudHandoff:{phase:'committed'},runtimeSwitching:true},{ref:'one'});assert.equal(local.disabled,true);assert.equal(cloud.disabled,true);
  f.window.ChatCloudHandoff.sync(root,{status:'idle',cloudHandoff:{phase:'committed'}},{ref:'one'});assert.equal(local.disabled,false);
 });
+
+test('personal PC receipts retain the existing presentation and never create a local copy',async()=>{
+ const f=cloudFixture(),root=element(),local=element(),cloud=element(),trigger=element();
+ local.dataset.chatExecution='local';cloud.dataset.chatExecution='cloud';
+ root.querySelectorAll=s=>s==='[data-chat-execution]'?[local,cloud]:s==='[data-execution-menu]'?[trigger]:[];
+ let location;
+ f.window.WorkComposer={syncExecutionMenu:(_root,value)=>{location=value}};
+ f.snapshot.cloudHandoff.target={runnerKind:'work-computer',runnerName:'My test PC'};
+ f.window.ChatCloudHandoff.sync(root,f.snapshot,{ref:'one'});
+ assert.equal(location,'cloud');assert.equal(cloud.getAttribute('aria-pressed'),'true');
+ assert.equal(local.querySelector('span').textContent,'');
+ f.cloud.preview=async()=>({ok:true,handoff:f.snapshot.cloudHandoff});
+ await f.select();
+ assert.equal(f.dialog.querySelector('#ncloudTitle').textContent,'云端会话');
+ assert.match(f.dialog.querySelector('[data-cloud-body]').innerHTML,/权限由云端/);
+ assert.equal(f.opened.length,0);assert.equal(f.continued.length,0);
+});
+
+test('permission presentation remains unchanged and personal PC cannot enable local permission changes',()=>{
+ const root=element(),doc=element(),window=element();
+ doc.createElement=()=>{const e=element();e.appendChild=()=>{};e.insertAdjacentHTML=()=>{};return e};
+ root.querySelector('#nchatMode').before=()=>{};
+ root.querySelector('#nchatMode').appendChild=()=>{};
+ window.WorkComposer={permissionLabel:()=> '默认权限',permissionAppearance(){}};
+ let state={ref:'same-session',accessControl:{},cloudHandoff:{phase:'committed',target:{runnerKind:'work-computer'}}};
+ vm.runInNewContext(read('chat-session-controls.js'),{window,document:doc,AbortController});
+ const controls=window.ChatSessionControls.create(root,{state:()=>state});
+ const label=root.querySelector('#nchatModeName'),button=root.querySelector('#nchatMode');
+ assert.equal(label.textContent,'云端权限');assert.equal(button.disabled,true);
+ assert.equal(button.title,'权限由云端执行环境管理');
+ state={...state,cloudHandoff:{phase:'committed',target:{runnerKind:'cloud'}}};controls.render();
+ assert.equal(label.textContent,'云端权限');assert.equal(button.disabled,true);
+ state={...state,cloudHandoff:null};controls.render();
+ assert.equal(label.textContent,'默认权限');assert.equal(button.disabled,false);
+ controls.destroy();
+});
 function composeFixture(){
  let owner='alice',place='local',current=true;const panel=element(),local=element(),cloud=element(),notices=[],starts=[],enters=[];
  local.dataset.execution='local';cloud.dataset.execution='cloud';panel.querySelectorAll=()=>[local,cloud];

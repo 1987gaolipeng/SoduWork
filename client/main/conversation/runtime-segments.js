@@ -53,8 +53,20 @@ function save(app, row) {
 async function flush(app, id) { await writes.get(location(app, id)); }
 function assertOwner(app, row, identity) {
   if (!row) return;
-  scope(identity); // Preserve login/expiry diagnostics before the boolean ownership comparison.
-  if (!scopeMatches(row.owner, identity, require('../device-auth').profiles(app)))
+  const auth = require('../device-auth');
+  let owner = '';
+  try {
+    owner = scope(identity); // Preserve login/expiry diagnostics for live operations.
+  } catch (error) {
+    // A saved transcript is an offline view. If the short-lived device token
+    // expired, use the main-process cached owner established by the last valid
+    // Hub session, while still requiring the same enrolled environment.
+    const enrolled = auth.identity(app);
+    if (!enrolled || enrolled.hub !== identity?.hub || enrolled.clientId !== identity?.clientId) throw error;
+    owner = auth.localOwner(app);
+    if (!owner) throw error;
+  }
+  if (row.owner !== owner && !scopeMatches(row.owner, identity, auth.profiles(app)))
     throw Error('这条会话属于另一个账号或服务，请切回原账号');
 }
 function list(app) {
@@ -68,8 +80,11 @@ function list(app) {
     }).filter(Boolean);
   } catch (error) { if (error.code === 'ENOENT') return []; throw error; }
 }
+function title(record) {
+  return require('./automatic-title').resolve(record?.title, record?.prefix);
+}
 function row(record) {
-  return { id: record.id, title: record.title, cwd: record.cwd, adapterId: record.active.adapterId,
+  return { id: record.id, title: title(record), cwd: record.cwd, adapterId: record.active.adapterId,
     usedHarnesses: harnesses.fromRecord(record),
     path: record.active.path, at: record.at, runtimeConversationId: record.id, state: 'idle' };
 }
@@ -81,7 +96,7 @@ function mergeHistory(app, rows) {
     const current = matches.find(r => r.id === record.active.sessionId) || {};
     const remote = matches.find(r => r.id === record.id && r.cloud);
     rows = rows.filter(r => !ids.has(r.id));
-    const merged = remote || { ...row(record), ...current, id: record.id, title: record.title || current.title,
+    const merged = remote || { ...row(record), ...current, id: record.id, title: title(record) || require('./automatic-title').resolve(current.title, record.prefix),
       adapterId: record.active.adapterId, runtimeConversationId: record.id };
     rows.push({ ...merged, usedHarnesses: harnesses.merge(harnesses.fromRecord(record),
       ...matches.map(match => match.usedHarnesses)) });
@@ -105,4 +120,4 @@ function brief(snapshot) {
     'Verify current files when needed; this bounded transcript may omit older details.\n' +
     lines.join('\n\n').slice(-28000) + '\nRecent operations:\n' + tools.join('\n').slice(-6000) + '\n[End handover]';
 }
-module.exports = { read, save, flush, assertOwner, list, row, mergeHistory, remove, brief, scope };
+module.exports = { read, save, flush, assertOwner, list, row, title, mergeHistory, remove, brief, scope };

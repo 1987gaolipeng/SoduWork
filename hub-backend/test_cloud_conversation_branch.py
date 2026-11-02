@@ -2,7 +2,7 @@ import types
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from app.api.cloud_conversations import branch
+from app.api.cloud_conversations import branch, directory
 from app.api.account_conversations import branch_account_conversation
 
 
@@ -15,6 +15,55 @@ class Session:
 
 
 class CloudBranchTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cloud_directory_exposes_same_account_remote_projection_only(self):
+        tasks = [
+            {"id": "task-mobile", "origin": "cloud-conversation", "title": "from mobile",
+             "created": 10, "updatedAt": 20, "createdBy": "user-1",
+             "workRouting": {"cloudConversation": {"sessionId": "cloud-mobile"}},
+             "ai": {"state": "running"}},
+            {"id": "task-foreign", "origin": "cloud-conversation", "title": "foreign",
+             "created": 11, "createdBy": "user-2", "workRouting": {}, "ai": {"state": "running"}},
+        ]
+        rows = {
+            "task-mobile": types.SimpleNamespace(
+                task_id="task-mobile", owner_user_id="user-1", owner_client_id="mobile-1", transfer_id="request-1",
+                phase="committed", receipt={"ref": "run-mobile"},
+                source={"sessionId": "cloud-mobile", "adapterId": "pi", "title": "from mobile"},
+                options={"assigneeId": "runner:office:pi", "model": "m1", "targetSnapshot": {
+                    "runnerId": "runner:office", "runnerName": "Office PC", "runnerKind": "work-computer",
+                    "agentId": "pi", "model": "m1"}},
+            ),
+            "task-foreign": types.SimpleNamespace(
+                task_id="task-foreign", owner_user_id="user-2", owner_client_id="other", transfer_id="request-2",
+                phase="committed", receipt={"ref": "run-foreign"}, source={}, options={},
+            ),
+        }
+        task_rows = [types.SimpleNamespace(
+            id=row["id"], origin=row["origin"], owner_user_id="user-1",
+            updated_at=None, created_at=None, archived_at=None,
+        ) for row in tasks[:1]]
+        class Result:
+            def __init__(self, values): self.values = values
+            def scalars(self): return self
+            def all(self): return self.values
+        class DirectorySession:
+            def __init__(self): self.calls = 0
+            async def execute(self, _query):
+                self.calls += 1
+                return Result(task_rows if self.calls == 1 else list(rows.values()))
+        async def decorate_many(_session, _tasks, apis, _client):
+            return apis
+        with patch("app.api.cloud_conversations.task_svc.task_to_api", side_effect=lambda task: next(row for row in tasks if row["id"] == task.id)), \
+             patch("app.api.cloud_conversations.task_svc.ai_states", new=AsyncMock(return_value={})), \
+             patch("app.api.cloud_conversations.task_access.decorate_many", new=AsyncMock(side_effect=decorate_many)):
+            result = await directory(types.SimpleNamespace(id="desktop-1", user_ref="user-1"), DirectorySession())
+        self.assertEqual([row["id"] for row in result["chats"]], ["cloud-mobile"])
+        self.assertEqual(result["chats"][0]["taskId"], "task-mobile")
+        self.assertEqual(result["chats"][0]["ref"], "run-mobile")
+        self.assertEqual(result["chats"][0]["location"], "work-computer")
+        self.assertFalse(result["chats"][0]["readOnly"])
+        self.assertTrue(result["chats"][0]["canSend"])
+
     async def test_branch_rechecks_owner_and_carries_bounded_context_to_new_runner(self):
         handoff = types.SimpleNamespace(
             phase='committed', owner_client_id='desktop-1', owner_user_id='user-1',

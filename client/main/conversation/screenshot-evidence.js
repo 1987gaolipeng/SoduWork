@@ -78,4 +78,28 @@ function collect(cwd, options = {}) {
   return images.sort((left, right) => right.at - left.at || left.relative.localeCompare(right.relative)).slice(0, MAX_IMAGES);
 }
 
-module.exports = { collect };
+function toolPaths(cwd, tools = []) {
+  const paths = new Set();
+  const add = value => {
+    if (typeof value !== 'string' || !/\.(?:png|jpe?g|webp)$/i.test(value)) return;
+    const target = path.resolve(cwd, value), rel = path.relative(path.resolve(cwd), target);
+    if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) paths.add(process.platform === 'win32' ? target.toLowerCase() : target);
+  };
+  for (const tool of tools) {
+    if (tool?.state !== 'done' || tool.isError) continue;
+    const args = tool.args || {};
+    if (/screenshot|screen_capture/i.test(tool.name || ''))
+      [args.path, args.filename, args.filePath, args.file_path].forEach(add);
+    // Recognize literal browser capture destinations, never arbitrary image mentions.
+    const command = String(args.command || args.cmd || args.code || '');
+    for (const match of command.matchAll(/\.screenshot\s*\(\s*\{?\s*[\s\S]{0,120}?['"]?\bpath['"]?\s*[:=]\s*(['"])([^'"\r\n]+)\1/g)) add(match[2]);
+    // CDP returns base64 bytes rather than writing a file itself. Recognize
+    // literal writes of that response, not every image mentioned by a script.
+    if (/Page\.captureScreenshot/.test(command)) {
+      for (const match of command.matchAll(/(?:writeFile(?:Sync)?|write_bytes)\s*\(\s*(['"])([^'"\r\n]+)\1\s*,\s*(?:Buffer\.from\([^\n]{0,160}?\.data|base64\.b64decode\()/g)) add(match[2]);
+    }
+  }
+  return paths;
+}
+
+module.exports = { collect, toolPaths };

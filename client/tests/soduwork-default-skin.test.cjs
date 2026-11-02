@@ -53,6 +53,18 @@ test('fresh installs show the new default without queuing a config write', () =>
   assert.equal(f.broadcasts(), 0);
 });
 
+test('remote skin configuration refreshes this window, clears old CSS and survives reopening', () => {
+  const f = fixture();
+  f.select('soduwork-signature');
+  assert.ok(f.styles.has('--soduwork-pet-blue'));
+  f.run("Store.applyServerEvent({type:'config.patch',patch:{character:'box',theme:'vivid',tube:'glass',_lastSkinId:'box-biz',_defaultLogoVersion:1}})");
+  assert.equal(f.run('currentSkinId()'), 'box-biz');
+  assert.equal(f.attributes['data-character'], 'box');
+  assert.equal(f.styles.has('--soduwork-pet-blue'), false);
+  const reopened = fixture(f.saved()); reopened.apply();
+  assert.equal(reopened.run('currentSkinId()'), 'box-biz');
+});
+
 for (const [name, saved] of [
   ['previous box default', { character:'box', theme:'vivid', _lastSkinId:'box-biz' }],
   ['previous branded companion', { character:'soduwork', theme:'signature', _lastSkinId:'soduwork-signature' }],

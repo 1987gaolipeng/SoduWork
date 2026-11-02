@@ -147,5 +147,5 @@
   function reset() { current = null; refreshFlight = null; owner = scope(); revision++; paint(); }
   global.addEventListener('soduwork-data-scope-changed', reset);
   global.addEventListener('soduwork-locale-change', paint);
-  global.SoduWorkQuotaNotice = { mount, update, show, reset, refresh, refreshIfBlocked, modelChanged };
+  global.SoduWorkQuotaNotice = { mount, update, show, reset, refresh, refreshIfBlocked, markRestored, modelChanged };
 })(window);

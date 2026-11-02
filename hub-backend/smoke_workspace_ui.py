@@ -209,7 +209,10 @@ chk("task form keeps description and attachments as one input group",
 chk("task form defaults both dates to today and loads execution choices together",
     "['inStart', 'inDue'].forEach" in add_panel
     and "SoduWorkAPI.taskExecutionOptions(request)" in add_panel
-    and "result.workflows" in add_panel and "result.substrates" in add_panel
+    and "result.workflows" in add_panel
+    # Execution choices now pass through the shared cloud/desktop normalizer.
+    and "TaskExecutionClient.targets(normalizedResult)" in add_panel
+    and "normalizedResult.substrates" in add_panel
     and "result.repos" in add_panel
     and "field.style.display = ''" in add_panel and "is-unavailable" in add_panel)
 chk("split task form module is loaded by both renderer entries",

@@ -331,3 +331,49 @@ test('closing the editor during preflight prevents a late save or notification',
   finish({ state: 'ready' }); await pending;
   assert.equal(f.saves.length, 0); assert.deepEqual(f.notices, []);
 });
+
+
+test('recurring times are bounded selects with an immediately updated preview', async () => {
+  const f = fixture(null, 'daily'); f.wire();
+  const html = f.c._schFormHtml({every:'daily', atHour:16, atMinute:59, title:'', note:''});
+  assert.match(html, /<select[^>]+id="schH"/);
+  assert.match(html, /<select[^>]+id="schM"/);
+  assert.doesNotMatch(html, /id="sch[HM]"[^>]*type="number"/);
+  f.controls.schH.value = '23'; f.controls.schM.value = '59';
+  f.controls.schM.listeners.change();
+  assert.match(f.controls.schPv.textContent, /23:59/);
+  await f.save();
+  assert.equal(f.saves[0].body.atHour, 23); assert.equal(f.saves[0].body.atMinute, 59);
+});
+
+test('invalid recurring times are explained immediately and never corrected on save', async () => {
+  for (const [field,value] of [['schM','888'],['schM',''],['schM','-1'],['schM','1.5'],['schH','24']]) {
+    const f = fixture(null, 'daily'); f.wire(); f.controls[field].value = value;
+    f.controls[field].listeners.change();
+    assert.match(f.controls.schPv.textContent, /请选择/);
+    await f.save(); assert.equal(f.saves.length, 0);
+    assert.equal(f.controls[field].value, value);
+    assert.equal(f.controls[field].attrs['aria-invalid'], 'true');
+  }
+});
+
+test('hourly schedules expose their minute selection and retain it unchanged', async () => {
+  const f = fixture(null, 'hourly'); f.wire();
+  assert.equal(f.controls.schHWrap.style.display, '');
+  assert.equal(f.controls.schH.hidden, true);
+  f.controls.schM.value = '30'; f.controls.schM.listeners.change();
+  await f.save(); assert.equal(f.saves[0].body.atMinute, 30);
+});
+
+test('clock options include every boundary without coercing invalid stored values', () => {
+  const {c} = fixture();
+  for (const [limit,value] of [[24,23],[60,59]]) {
+    const options = c.ScheduleTiming.clockOptions(limit,value);
+    assert.equal((options.match(/<option /g)||[]).length,limit);
+    assert.ok(options.includes('value="0">00</option>'));
+    assert.ok(options.includes('value="'+value+'" selected>'+value+'</option>'));
+  }
+  assert.match(c.ScheduleTiming.clockOptions(60,888), /value="" selected disabled/);
+  assert.ok(c.ScheduleTiming.validate({every:'daily',atHour:0,atMinute:0}) === '');
+  assert.ok(c.ScheduleTiming.validate({every:'hourly',atMinute:59}) === '');
+});

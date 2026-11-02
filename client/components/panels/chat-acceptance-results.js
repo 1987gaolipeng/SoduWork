@@ -1,13 +1,118 @@
 /* Acceptance results and approvals share the original conversation state without duplicating task facts. */
 (function (global) {
   'use strict';
-  function create(ctx, { rich, render, invalidate }) {
-    const acceptanceHandoffs = new Set();
+  function readableResult(text) {
+    // Only presentation prose is normalized. Links, code and persisted evidence stay intact.
+    return String(text || '').split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]+`|!?\[[^\]\n]*\]\([^\n]*?\)|https?:\/\/[^\s<>]+)/g)
+      .map((part, index) => {
+        if (index % 2) return part;
+        return part.replace(/[（(]([^()（）\n]*)[）)]/g, (whole, content) => {
+          const cleaned = content.replace(/(?:附件|文件|交付版本|审批单|会话|attachment|artifact version|approval|session)\s*ID\s*[:：]\s*[a-z0-9][a-z0-9_.:-]*(?:\s*[,，;；]\s*)?/gi, '')
+            .replace(/^[\s,，;；]+|[\s,，;；]+$/g, '');
+          return cleaned === content ? whole : cleaned ? '（' + cleaned + '）' : '';
+        }).replace(/(^|\n)([ \t]*(?:[-*+]\s+|\d+[.)]\s+)?)criterion-(\d+)(?=\s*[:：])/gi,
+          '$1$2验收标准 $3');
+      }).join('');
+  }
+  function create(ctx, { rich, invalidate }) {
+    const acceptanceHandoffs = new Map();
     const acceptanceResultActions = new Set();
+    const resultApprovals = new Map();
+    // These receipts acknowledge successful UI operations, never replace Hub task facts.
+    const approvalResults = new Map();
+    const resultOutcomes = new Map();
+    const pendingActions = new Set();
+    const approvalAnchors = new Map();
+    let epoch = 0;
     const acceptanceKey = (taskId, approvalId) => String(taskId || '') + ':' + String(approvalId || '');
-    function reset() { acceptanceHandoffs.clear(); acceptanceResultActions.clear(); }
+    function reset() {
+      epoch++;
+      acceptanceHandoffs.clear(); acceptanceResultActions.clear(); resultApprovals.clear();
+      approvalResults.clear(); resultOutcomes.clear(); pendingActions.clear();
+      approvalAnchors.clear();
+    }
+    function outcomeLabel(outcome) {
+      if (outcome.decision === 'analyze') return '已填入对话框，请按需选择插件后发送。';
+      if (outcome.decision === 'auto') return '已打开自动验收会话';
+      if (outcome.decision === 'manual') return '已转入会话分析';
+      if (outcome.decision === 'reject') return '已退回修改';
+      if (outcome.status === 'approved') return '已确认验收';
+      return outcome.status === 'pending' ? '确认意见已提交，等待其他审批人' : '确认验收意见已提交';
+    }
+    function outcomeHtml(outcome) {
+      return '<p class="nacceptance-result-followup">' + ctx.esc(outcomeLabel(outcome)) + '</p>' +
+        (outcome.note ? '<p class="nacceptance-result-outcome-note" data-user-content>' + ctx.esc(outcome.note) + '</p>' : '');
+    }
+    function operationResults(entry) {
+      const results = new Map();
+      for (const approval of entry.trace?.approvals || []) {
+        const decision = approval.myDecision?.decision || approval.myDecision ||
+          ({ approved: 'approve', rejected: 'reject' })[approval.status];
+        if (approval.action === 'review' && ['approve', 'reject'].includes(decision)) {
+          const receipt = approvalResults.get(acceptanceKey(entry.taskId, approval.id));
+          results.set(approval.id, { decision, status: approval.status, note: approval.myDecision?.note || receipt?.note || '' });
+        }
+      }
+      for (const result of approvalResults.values()) {
+        if (result.taskId === entry.taskId && !results.has(result.approvalId)) results.set(result.approvalId, result);
+      }
+      return results;
+    }
+    function operationHtml(entry, id, result) {
+      return '<section class="nacceptance-result ' + (result.decision === 'reject' ? 'is-rejected' : 'is-confirmed') +
+        '" data-acceptance-operation="' + ctx.esc(id) + '" aria-label="操作结果">' +
+        '<header><span class="nacceptance-result-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 12.5 4.2 4.2L19 7"/></svg></span>' +
+        '<span><b>操作结果</b><small data-user-content>' + ctx.esc(entry.task?.title || '') + '</small></span><em>只读</em></header>' +
+        '<div class="nacceptance-result-body">' + outcomeHtml(result) + '</div></section>';
+    }
+    function resultsHtml(entry) {
+      return [...operationResults(entry)].map(([id, result]) => operationHtml(entry, id, result)).join('');
+    }
 
-    function _acceptanceResultHtml(text, resultKey) {
+    function timeline(entries, messages = [], start = 0) {
+      const owner = index => ctx._snap?.history?.messageIndices?.[index] ??
+        ((Number(ctx._snap?.history?.messageStart) || 0) + index);
+      const timestamp = value => Number(value) || Date.parse(value || '') || 0;
+      const positions = [];
+      for (const entry of entries) {
+        if (entry.executionElsewhere || !entry.trace || !global.TaskTraceApproval) continue;
+        const pending = new Map(pendingApprovals(entry).map(row => [row.id, row]));
+        const results = operationResults(entry);
+        const ids = new Set([...pending.keys(), ...results.keys()]);
+        for (const id of ids) {
+          const key = JSON.stringify([entry.taskId, id]);
+          let anchor = approvalAnchors.get(key);
+          if (!anchor) {
+            const approval = entry.trace.approvals?.find(row => row.id === id);
+            // Approval creation is immutable; resolution and task updates must not move its slot.
+            const at = timestamp(approval?.createdAt) || timestamp(approval?.gate?.createdAt) ||
+              timestamp(approval?.myDecision?.at) || timestamp(approval?.resolvedAt);
+            let index = at ? messages.findIndex(message => timestamp(message.sentAt || message.completedAt) > at) : -1;
+            if (index < 0) index = messages.length;
+            // A partially loaded archive cannot locate a preceding card until older history arrives.
+            if (index === 0 && owner(0) > 0) continue;
+            anchor = { after: index ? owner(index - 1) : -1, at, order: approvalAnchors.size,
+              messageKey: index ? String(messages[index - 1]?.taskOutputKey || '') : '' };
+            if (messages.length || !at) approvalAnchors.set(key, anchor);
+          }
+          const matched = anchor.messageKey ? messages.findIndex(message => message.taskOutputKey === anchor.messageKey) : -1;
+          let index = matched >= 0 ? matched + 1 : messages.findIndex((_, at) => owner(at) > anchor.after);
+          if (index < 0) index = messages.length;
+          if (index < start || (matched < 0 && index === 0 && owner(0) > anchor.after + 1)) continue;
+          const body = results.has(id) ? operationHtml(entry, id, results.get(id)) : global.TaskTraceApproval.html(entry.trace.approvals, {
+            variant: 'task', taskId: entry.taskId, taskTitle: entry.task?.title,
+            blocksExecution: pending.get(id)?.action !== 'review' || ctx._collabEntryStatus(entry) !== 'completed',
+          }, id);
+          if (body) positions.push({ index, key, taskId: entry.taskId, at: anchor.at, order: anchor.order,
+            html: '<div class="nchat-task-confirmation" data-chat-node="task-confirmation:approval:' +
+            ctx.esc(key) + '" data-task-confirmation="' + ctx.esc(entry.taskId) + '">' + body + '</div>' });
+        }
+      }
+      return positions.sort((left, right) => left.index - right.index ||
+        (left.at && right.at ? left.at - right.at : 0) || left.order - right.order);
+    }
+
+    function _acceptanceResultHtml(text, resultKey, sourceIndex) {
       const value = String(text || '').trim();
       // Models occasionally add a short preface or Markdown heading before the
       // protocol marker. Keep the whole reply in the result card instead of
@@ -17,7 +122,6 @@
       const kind = marker[2];
       const analysis = kind === '验收分析结果';
       const rejected = kind === '验收退回卡';
-      const confirmed = kind === '验收确认卡';
       const body = (value.slice(0, marker.index) + value.slice(marker.index + marker[0].length)).trim();
       const title = analysis ? '验收分析结果' : '自动验收审核结果';
       const state = analysis ? 'is-analysis' : (rejected ? 'is-rejected' : 'is-confirmed');
@@ -38,8 +142,24 @@
         : null;
       const approvalId = String(ctx._sessionOptions?.approvalId || review?.id || '').trim() || (taskId ? 'direct:' + taskId : '');
       const actionKey = taskId + ':' + approvalId + ':analysis:' + String(resultKey || 'latest');
-      const actions = analysis && taskId && !acceptanceResultActions.has(actionKey)
-        ? '<div class="nacceptance-result-actions" data-acceptance-result-key="' + ctx.esc(actionKey) + '" data-acceptance-result-task="' + ctx.esc(taskId) + '" data-acceptance-result-approval="' + ctx.esc(approvalId) + '">' +
+      const outcome = resultOutcomes.get(resultKey);
+      const messages = ctx._snap?.messages || [];
+      const messageIndex = sourceIndex ?? Number(String(resultKey).split(':')[0]);
+      const latestUser = messages.findLastIndex(message => message?.role === 'user');
+      const task = taskEntry?.task || ctx._collaborationTask || {};
+      const subject = approvalId + ':' + String(review?.artifactVersionId || '');
+      if ((review || task.status === 'done') && !resultApprovals.has(resultKey)) resultApprovals.set(resultKey, subject);
+      const messageAt = Number(messages[messageIndex]?.sentAt || messages[messageIndex]?.completedAt || 0);
+      const reviewAt = Number(review?.createdAt || 0);
+      // Historical analysis must never acquire a later round's approval controls.
+      const actionable = analysis && taskId && !task.reviewedAt && task.canReview !== false &&
+        (review ? review.status === 'pending' && !review.myDecision && approvalId === review.id : task.status === 'done') &&
+        !(messageAt && reviewAt && messageAt < reviewAt) &&
+        resultApprovals.get(resultKey) === subject && Number.isInteger(messageIndex) && messageIndex > latestUser &&
+        !outcome && !acceptanceResultActions.has(actionKey) &&
+        !['approve', 'reject'].includes(acceptanceHandoffs.get(acceptanceKey(taskId, approvalId)));
+      const actions = actionable
+        ? '<div class="nacceptance-result-actions" data-acceptance-message-key="' + ctx.esc(resultKey) + '" data-acceptance-result-key="' + ctx.esc(actionKey) + '" data-acceptance-result-task="' + ctx.esc(taskId) + '" data-acceptance-result-approval="' + ctx.esc(approvalId) + '">' +
           '<label class="nacceptance-result-note"><span>验收意见 <small>退回时必填</small></span><textarea rows="2" maxlength="2000" data-acceptance-result-note placeholder="确认结果，或写明需要修改的内容"></textarea></label>' +
           '<label class="nacceptance-result-files"><input type="file" multiple data-acceptance-result-file hidden><span>添加返修资料（可选）</span><small data-acceptance-result-file-list></small></label>' +
           '<label class="nacceptance-result-analysis"><span>补充分析项 <small>可选</small></span><textarea rows="2" maxlength="2000" data-acceptance-result-analysis placeholder="还需要核对什么？填写后可继续分析"></textarea></label>' +
@@ -47,9 +167,10 @@
         : '';
       return '<section class="nacceptance-result ' + state + '" aria-label="' + title + '">' +
         '<header><span class="nacceptance-result-icon" aria-hidden="true"><svg viewBox="0 0 24 24">' + icon + '</svg></span>' +
-        '<span><b>' + title + '</b><small>' + subtitle + '</small></span>' +
-        '<em>' + status + '</em></header>' +
-        '<div class="nacceptance-result-body">' + rich(body) + actions + '</div></section>';
+        '<span><b>' + title + '</b><small>' + (actionable ? subtitle : '结果已保留，仅供查阅') + '</small></span>' +
+        '<em>' + (outcome ? '操作结果' : !actionable && analysis ? '历史记录' : status) + '</em></header>' +
+        '<div class="nacceptance-result-body">' + rich(readableResult(body)) +
+        (outcome ? outcomeHtml(outcome) : actions) + '</div></section>';
     }
 
     async function _acceptanceResultAction(button) {
@@ -58,7 +179,11 @@
       const taskId = String(card.getAttribute('data-acceptance-result-task') || '').trim();
       const approvalId = String(card.getAttribute('data-acceptance-result-approval') || '').trim();
       const key = String(card.getAttribute('data-acceptance-result-key') || '');
+      const messageKey = String(card.getAttribute('data-acceptance-message-key') || '');
+      if (acceptanceResultActions.has(key) || pendingActions.has(key)) return;
+      const currentEpoch = epoch;
       const decision = button.getAttribute('data-acceptance-result-action');
+      if (!['analyze', 'approve', 'reject'].includes(decision)) return;
       if (decision === 'analyze') {
         const analysisInput = card.querySelector('[data-acceptance-result-analysis]');
         const prompt = String(analysisInput?.value || '').trim();
@@ -81,10 +206,12 @@
         composer.dispatchEvent(new Event('input', { bubbles: true }));
         composer.focus();
         acceptanceResultActions.add(key);
+        resultOutcomes.set(messageKey, { decision });
         const notice = document.createElement('p');
         notice.className = 'nacceptance-result-followup';
         notice.textContent = '已填入对话框，请按需选择插件后发送。';
         card.replaceChildren(notice);
+        invalidate();
         return;
       }
       const note = String(card.querySelector('[data-acceptance-result-note]')?.value || '').trim();
@@ -98,6 +225,7 @@
       }
       const files = [...(card.querySelector('[data-acceptance-result-file]')?.files || [])];
       if (files.length > 20) return;
+      pendingActions.add(key);
       card.setAttribute('aria-busy', 'true');
       card.querySelectorAll('button,input,textarea').forEach(node => { node.disabled = true; });
       try {
@@ -123,8 +251,15 @@
           result = await api.decideApproval(approvalId, decision, note, undefined, attachmentIds);
         }
         if (!result || result.ok === false) throw Error('验收意见没有提交成功，请刷新后重试');
+        if (currentEpoch !== epoch) return;
         acceptanceResultActions.add(key);
-        card.remove();
+        const outcome = { decision, note, status: result.request?.status || '' };
+        resultOutcomes.set(messageKey, outcome);
+        acceptanceHandoffs.set(acceptanceKey(taskId, approvalId), decision);
+        const notice = document.createElement('p');
+        notice.className = 'nacceptance-result-followup';
+        notice.textContent = outcomeLabel(outcome);
+        card.replaceChildren(notice);
         /*
          * Same-person acceptance temporarily reuses the execution session. Clear its acceptance
          * marker after submitting the decision so ordinary follow-up and rework can continue;
@@ -134,14 +269,19 @@
           ctx._sessionOptions = { ...ctx._sessionOptions, acceptanceExecutionSession: false,
             acceptanceSession: false, acceptanceMode: 'manual', approvalId: '', acceptanceAttachmentIds: [] };
         }
-        await ctx._loadCollabTask?.(taskId);
-        render();
+        invalidate();
+        // A failed refresh cannot turn an accepted decision into a retryable form.
+        try { await ctx._loadCollabTask?.(taskId); } catch (_) { /* Hub accepted the decision. */ }
+        if (currentEpoch === epoch) invalidate();
       } catch (error) {
+        if (currentEpoch !== epoch || acceptanceResultActions.has(key)) return;
         card.removeAttribute('aria-busy');
         card.querySelectorAll('button,input,textarea').forEach(node => { node.disabled = false; });
         let output = card.querySelector('[data-acceptance-result-error]');
         if (!output) { output = document.createElement('p'); output.dataset.acceptanceResultError = ''; card.append(output); }
         output.textContent = String(error?.message || '验收意见没有提交成功，请刷新后重试');
+      } finally {
+        if (currentEpoch === epoch) pendingActions.delete(key);
       }
     }
 
@@ -190,13 +330,30 @@
     }
 
     function bindApproval(root, id, entry) {
+      const boundEpoch = epoch;
       TaskTraceApproval.bind(root, { trace: entry.trace, opts: {
         taskId: id,
-        onAcceptanceOpened: (approvalId) => { acceptanceHandoffs.add(acceptanceKey(id, approvalId)); invalidate(); },
+        onAcceptanceOpened: (approvalId, mode) => {
+          if (boundEpoch !== epoch) return;
+          const key = acceptanceKey(id, approvalId);
+          acceptanceHandoffs.set(key, mode || 'manual');
+          approvalResults.set(key, { decision: mode || 'manual', taskId: id, approvalId });
+          invalidate();
+        },
+        onAcceptanceClosed: (block, outcome) => {
+          if (boundEpoch !== epoch || !outcome) return false;
+          const approvalId = block.getAttribute('data-tfd-approval-id');
+          if (!entry.trace?.approvals?.some(approval => approval.id === approvalId && approval.action === 'review')) return false;
+          const key = acceptanceKey(id, approvalId);
+          acceptanceHandoffs.set(key, outcome.decision);
+          approvalResults.set(key, { ...outcome, taskId: id, approvalId });
+          invalidate();
+          return true;
+        },
       }, refresh: () => ctx._loadCollabTask(id) });
     }
 
-    return { reset, html: _acceptanceResultHtml, pendingApprovals, bind, bindApproval };
+    return { reset, html: _acceptanceResultHtml, pendingApprovals, resultsHtml, timeline, bind, bindApproval };
   }
   global.ChatAcceptanceResults = { create };
 })(window);

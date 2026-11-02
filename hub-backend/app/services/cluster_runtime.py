@@ -43,7 +43,7 @@ class RemoteRunner(runner_hub._Runner):
         self.management_state = info.get("managementState", "")
         self.client_id = info.get("clientId", "")
         self.agents = list(info.get("agents", []))
-        self.caps = [str(x)[:16] for x in info.get("caps", [])][:8]
+        self.caps = runner_hub.clean_protocol_caps(info.get("caps"))
         self.skills = list(info.get("skills", []))
         self.skills_known = info.get("skillsKnown", False)
         self.skill_catalog = list(info.get("skillCatalog", []))
@@ -355,7 +355,10 @@ async def on_request(method, payload, source):
 async def on_event(event):
     from ..realtime import hub
     kind = event.get("kind")
-    if kind == "publish":
+    if kind == "model-runtime-capacity":
+        from . import model_runtime
+        model_runtime.wake_capacity_waiters(broadcast=False)
+    elif kind == "publish":
         await hub.publish(event["device"], event["event"], _local=True, user_id=event.get("userId"))
     elif kind == "revoke":
         from .device_connections import disconnect

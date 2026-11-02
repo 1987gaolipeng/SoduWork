@@ -519,3 +519,56 @@ for (const scope of ['user', 'hub']) {
     assert.equal(h.calls[0].request.headers.Authorization, 'Device session-alice');
   });
 }
+
+
+test('generated files persist in the default PC library with durable owner-scoped receipts', async t => {
+  const os = require('node:os'), crypto = require('node:crypto');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-output-library-'));
+  t.after(() => { assert.equal(path.dirname(path.resolve(root)), path.resolve(os.tmpdir())); fs.rmSync(root, { recursive: true, force: true }); });
+  const storage = require('../main/library-local-store.cjs'), { execute } = require('../main/library-local-actions.cjs');
+  const h = harness(); await h.signIn('alice');
+  h.native = (action, payload) => {
+    const owner = crypto.createHash('sha256').update(payload.owner).digest('hex').slice(0, 32);
+    const store = storage.create({ getPath: () => root }, owner, () => {}, root);
+    return store.run(index => execute(store, index, action, payload));
+  };
+  h.fetch = async () => { throw Error('Hub is offline'); };
+  for (const ext of ['md', 'html', 'png', 'pdf', 'xlsx', 'docx', 'pptx', 'zip']) {
+    const bytes = Buffer.from('exact fixture bytes: ' + ext);
+    const manifest = { source: 'local', sessionId: 'session-' + ext, revision: 'v1', title: '课程表.' + ext,
+      conversationTitle: '生成课程表', files: [{ path: '课程表.' + ext, size: bytes.length }] };
+    const payload = { manifest, filename: '课程表.' + ext, data: bytes.toString('base64') };
+    assert.equal((await h.api.getLibraryDeliveryStatus(manifest)).delivery, null);
+    const saved = await h.api.saveLibraryDelivery(payload);
+    assert.match(saved.item.id, /^local-/); assert.equal(saved.item.sourceType, 'conversation');
+    assert.equal(saved.item.sessionId, manifest.sessionId);
+    assert.equal((await h.api.getLibraryDeliveryStatus(manifest)).delivery.id, saved.item.id);
+    assert.equal((await h.api.saveLibraryDelivery(payload)).item.id, saved.item.id);
+    for (const scope of ['recommended', 'all']) assert.ok((await h.api.listLibrary({ scope })).items.some(item => item.id === saved.item.id));
+    assert.deepEqual(Buffer.from(await (await h.api.readLibraryBinary(saved.item.id)).blob.arrayBuffer()), bytes);
+    await h.api.deleteLibraryItem(saved.item.id);
+    assert.equal((await h.api.getLibraryDeliveryStatus(manifest)).delivery, null);
+    assert.notEqual((await h.api.saveLibraryDelivery(payload)).item.id, saved.item.id);
+  }
+  assert.equal((await h.api.listLibrary()).items.length, 8);
+  await h.signIn('bob'); assert.equal((await h.api.listLibrary()).items.length, 0);
+});
+
+test('generated-file save rejects absent persistence receipts and supports retry', async () => {
+  const h = harness(); await h.signIn('alice');
+  const payload = { manifest: { source: 'local', sessionId: 's', revision: 'v', files: [{ path: 'a.md' }] }, filename: 'a.md', data: 'YQ==' };
+  h.native = async () => ({ ok: true });
+  await assert.rejects(h.api.saveLibraryDelivery(payload), /保存到资料库失败/);
+  h.native = async () => { throw Error('磁盘空间不足'); };
+  await assert.rejects(h.api.saveLibraryDelivery(payload), /磁盘空间不足/);
+  h.native = async () => ({ ok: true, item: { id: 'local-saved' } });
+  assert.equal((await h.api.saveLibraryDelivery(payload)).delivery.id, 'local-saved');
+  assert.equal(h.calls.filter(call => call.request?.method === 'POST').length, 0);
+});
+
+test('generated-file save rejects account switch during native context lookup', async () => {
+  const h = harness(); await h.signIn('alice');
+  h.bridge.localLibrary.context = async () => { await h.signIn('bob'); return { owner: 'owner-alice' }; };
+  await assert.rejects(h.api.saveLibraryDelivery({ manifest: { source: 'local', sessionId: 's', revision: 'v', files: [{}] }, filename: 'a.md', data: 'YQ==' }), /切换|变化/);
+  assert.equal(h.nativeCalls.length, 0);
+});

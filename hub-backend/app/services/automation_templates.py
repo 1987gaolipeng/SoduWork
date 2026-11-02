@@ -39,12 +39,30 @@ def _int(value, default: int, low: int, high: int) -> int:
 def normalize(raw: dict, *, require_name: bool = True) -> dict:
     if not isinstance(raw, dict):
         raise ValueError("自动化模板必须是对象")
-    template_id = _text(raw.get("id") or raw.get("key"), 64).lower()
+    raw_id = raw.get("id") or raw.get("key")
+    raw_name = raw.get("name")
+    if require_name:
+        # Validate writes before normalization: never silently truncate an identity
+        # or turn invalid user input into a different template identifier.
+        if not isinstance(raw_id, str) or not raw_id:
+            raise ValueError("请填写模板标识")
+        if not 2 <= len(raw_id) <= 64:
+            raise ValueError("模板标识需为 2–64 个字符")
+        if not _ID_RE.fullmatch(raw_id):
+            raise ValueError("模板标识须以小写字母或数字开头，仅支持小写字母、数字、点（.）、短横线（-）和下划线（_），不能包含空格")
+        if not isinstance(raw_name, str) or not raw_name.strip():
+            raise ValueError("请填写模板名称，不能全为空白")
+        if len(raw_name.strip()) > 80:
+            raise ValueError("模板名称最多 80 个字符")
+        if re.search(r"[\x00-\x1f\x7f-\x9f]", raw_name):
+            raise ValueError("模板名称不能包含换行或控制字符")
+        template_id, name = raw_id, raw_name.strip()
+    else:
+        # Keep historical catalogs readable; strict validation applies to writes.
+        template_id = _text(raw_id, 64).lower()
+        name = _text(raw_name, 80)
     if not _ID_RE.fullmatch(template_id):
         raise ValueError("模板标识只能包含小写字母、数字、点、短横线和下划线")
-    name = _text(raw.get("name"), 80)
-    if require_name and not name:
-        raise ValueError("请填写模板名称")
     every = _text(raw.get("every") or "daily", 16).lower()
     if every not in _EVERY:
         raise ValueError("模板节奏只能是每小时、每天或每周")

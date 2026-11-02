@@ -22,7 +22,7 @@ MAX_TOTAL_BYTES = 20 * 1024 * 1024
 MAX_REQUEST_BYTES = 28 * 1024 * 1024
 MAX_CONTEXT_CHARS = 6000
 MAX_OBSERVATION_CHARS = 16000
-SUPPORTED_MIME = frozenset(("image/png", "image/jpeg", "image/webp", "image/gif"))
+_IMAGE_MIME = re.compile(r"^image/[a-z0-9][a-z0-9.+-]*$", re.IGNORECASE)
 
 _SYSTEM_PROMPT = """你是 SoduWork 的视觉观察器，只负责看图，不负责完成用户任务。
 请忠实描述图片中与用户请求有关的可见事实，包括界面结构、文字、数据、状态、对象、异常和不确定项。
@@ -52,8 +52,9 @@ def _validated_images(raw: Any) -> list[dict[str, str]]:
     for index, item in enumerate(raw, start=1):
         if not isinstance(item, dict):
             raise VisionInputError(f"第 {index} 张图片格式不正确")
-        mime = str(item.get("mimeType") or item.get("type") or "").lower().strip()
-        if mime not in SUPPORTED_MIME:
+        mime = str(item.get("mimeType") or item.get("type") or "").lower().split(";", 1)[0].strip()
+        mime = {"image/jpg": "image/jpeg", "image/pjpeg": "image/jpeg"}.get(mime, mime)
+        if not _IMAGE_MIME.fullmatch(mime):
             raise VisionInputError(f"第 {index} 张图片格式暂不支持（{mime or '未知格式'}）")
         data = str(item.get("data") or "").strip()
         try:

@@ -27,7 +27,7 @@ test('internal loopback override requires unpackaged execution and a separate pr
   }
   assert.throws(() => endpoint.initialize(app, { SODUWORK_TEST_HUB_URL: 'http://localhost:54321' }));
   assert.throws(() => endpoint.initialize(app, { SODUWORK_TEST_HUB_URL: 'http://localhost:54321', SODUWORK_USER_DATA: root }));
-  for (const name of ['SoduWork', 'OtherApp']) {
+  for (const name of ['SoduWork', 'soduwork']) {
     const installed = path.join(root, name);
     assert.throws(() => endpoint.initialize(appAt(installed, false, root), { SODUWORK_TEST_HUB_URL: 'http://localhost:54321', SODUWORK_USER_DATA: installed }));
   }

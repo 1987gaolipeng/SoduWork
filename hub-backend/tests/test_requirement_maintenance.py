@@ -308,8 +308,10 @@ class RequirementMaintenanceTests(unittest.IsolatedAsyncioTestCase):
         import httpx
         from sqlalchemy import select
         from app.api import plugin_client_runs
+        from app.deps import current_ai_client
         from app.services import device_auth, plugin_service, resource_leases
 
+        self.app.dependency_overrides.pop(current_ai_client, None)
         self.app.include_router(plugin_client_runs.router)
         async with self.sessions() as session:
             task = await session.get(models.Task, "shared")

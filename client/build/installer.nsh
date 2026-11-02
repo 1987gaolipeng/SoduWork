@@ -1,7 +1,10 @@
 ; Preserve upstream wizard/UAC and signed uninstaller. Override only its install
 ; section through NSIS's documented compiler include search, including UAC inner instances.
 !ifdef BUILD_RESOURCES_DIR
-  !include "${BUILD_RESOURCES_DIR}\install-directory.nsh"
+  !ifdef BUILD_UNINSTALLER
+    !include "${BUILD_RESOURCES_DIR}\uninstall-resources.nsh"
+  !endif
+  !include "${BUILD_RESOURCES_DIR}\soduwork-install-identity.nsh"
   !include "${BUILD_RESOURCES_DIR}\file-open.nsh"
 !endif
 !macro customHeader

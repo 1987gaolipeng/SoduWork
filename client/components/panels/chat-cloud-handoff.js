@@ -36,7 +36,7 @@
       button.hidden = !value && !ready;
       button.disabled = !ready || Boolean(snapshot?.runtimeSwitching);
       const name = value ? (value.entryKind === 'cloud' ? '云端会话' : '查看云端交接') : '转到云端';
-      button.querySelector('span').textContent = value ? labels[value.phase] || name : name;
+      button.querySelector('span').textContent = value?.pendingApprovals ? '云端待审批' : value?.outputError ? '云端成果待同步' : value?.historyGap ? '云端记录待核对' : value ? labels[value.phase] || name : name;
       button.title = value
         ? (value.target?.name ? `当前会话在云端执行，执行机：${value.target.name}` : '当前会话在云端执行，执行机由系统自动选择')
         : '将当前任务、工作记录与文件交给云端继续执行';
@@ -62,6 +62,11 @@
   async function select(target, context) {
     if (!context?.ref || !['local', 'cloud'].includes(target) || active) return;
     const handoff = context.snapshot?.cloudHandoff;
+    // A personal-PC receipt remains bound to that execution. Reuse the
+    // existing status dialog rather than creating a new local continuation.
+    if (handoff?.phase === 'committed' && handoff.target?.runnerKind === 'work-computer') {
+      return open(context.ref);
+    }
     if (target === 'cloud' || handoff && !['committed', 'aborted'].includes(handoff.phase)) return open(context.ref);
     if (handoff?.phase !== 'committed') return;
     if (['streaming', 'running', 'queued'].includes(context.snapshot?.status)) {
@@ -137,9 +142,15 @@
           '<p class="ncloud-muted">' + (phase === 'committed'
             ? '继续在当前对话中发送消息和查看成果。执行位置保持在云端，权限由云端环境管理。'
             : phase === 'aborted' ? '交接已撤销，可以继续本地对话。'
-              : '本地执行已暂停。若网络中断，可核对原交接回执；未确认前不会在两台机器上同时执行。') + '</p></section>';
+              : record.accepted ? '云端已受理，会自动继续处理。可关闭客户端，之后重新打开查看进度。'
+                : '本地执行已暂停。若网络中断，可核对原交接回执；未确认前不会在两台机器上同时执行。') + '</p>' +
+          (record.pendingMessages ? '<p class="ncloud-muted">有 ' + Number(record.pendingMessages) + ' 条消息已受理，正在等待执行机确认。</p>' : '') +
+          (record.historyGap ? '<p class="ncloud-muted">部分历史记录尚未同步，已有记录已保留；可在原执行机核对。</p>' : '') +
+          (record.outputError ? '<p class="ncloud-muted">云端成果尚未完成同步，将自动重试；已收到的过程记录已保留。</p>' : '') +
+          (record.pendingApprovals ? '<button type="button" data-cloud-review>查看待处理审批（' + Number(record.pendingApprovals) + '）</button>' : '') + '</section>';
         if (record.error) fail(record.error);
-        abort.hidden = ['committed', 'aborted', 'committing'].includes(phase);
+        abort.hidden = record.accepted === true || (record.canAbort !== undefined
+          ? record.canAbort !== true : ['committed', 'aborted', 'committing'].includes(phase));
         submit.textContent = phase === 'committed' ? '刷新状态' : '核对并继续交接';
         submit.hidden = phase === 'aborted'; submit.disabled = false;
         return;
@@ -205,6 +216,10 @@
     dialog.querySelectorAll('[data-cloud-close]').forEach(button => button.addEventListener('click', close));
     dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
     body.addEventListener('click', event => {
+      if (event.target.closest('[data-cloud-review]') && !busy && current()) {
+        const taskId = preview?.handoff?.taskId;
+        if (taskId) { close(); void global.WorkspaceHost?.open('detail', { taskId }); }
+      }
       if (event.target.closest('[data-cloud-refresh]')) void perform('preview');
       if (event.target.closest('[data-cloud-configure]') && !busy) {
         close();

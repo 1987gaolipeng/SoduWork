@@ -22,6 +22,7 @@ function harness(t) {
   const handlers = {};
   const modulePath=require.resolve('../main/attachment-files');delete require.cache[modulePath];
   require(modulePath).install({app,BrowserWindow:Window,identityOf:()=>state.identity,ownerOf:()=>state.owner,ipcMain:{handle:(name,fn)=>handlers[name]=fn},
+    fetchAuthenticated:async(identity,target,options)=>{state.fetched.push({target,options,identity});await state.waitFetch?.();return state.response?.() || new Response(state.data,{status:state.status,headers:{'Content-Type':state.type}})},
     net:{fetch:async(target,options)=>{state.fetched.push({target,options});await state.waitFetch?.();return new Response(state.data,{status:state.status,headers:{'Content-Type':state.type}})}},
     shell:{openPath:async target=>{state.opened.push(target);return state.openError||''}},
     dialog:{showSaveDialog:async()=>{await state.waitDialog?.();return{canceled:state.cancel,filePath:state.savePath||path.join(root,'saved.bin')}}}});
@@ -100,6 +101,69 @@ test('permission and disk failures have actionable messages without exposing loc
   for(const code of ['EPERM','EACCES','EBUSY'])assert.match(ui.taskAttachmentError(new Error(code+': open C:/private/file'),'fallback'),/目录权限|其他位置/);
   assert.match(ui.taskAttachmentError(new Error('ENOSPC: C:/private/file'),'fallback'),/磁盘空间/);
   assert.equal(ui.taskAttachmentError(new Error('private stack and path'),'fallback'),'fallback');
+});
+
+test('delivery bundles share native save and binary reads with exact Hub version routing', async t => {
+  const h = harness(t), payload = {taskId:'task-one', artifactVersionId:'version-two', filename:'交付物.zip'};
+  h.state.data = Buffer.from([80,75,3,4,0,255,42]); h.state.type = 'application/zip';
+  assert.equal((await h.api.downloadAttachment(payload)).ok, true);
+  assert.deepEqual(fs.readFileSync(path.join(h.root,'saved.bin')), h.state.data);
+  assert.equal(h.state.fetched[0].target,'http://127.0.0.1:9999/api/v1/tasks/task-one/artifacts.zip?artifactVersionId=version-two');
+  assert.equal(h.state.fetched[0].identity.clientId,'device');
+  const binary = await h.api.readAttachmentBinary(payload);
+  assert.deepEqual(Buffer.from(binary.data,'base64'),h.state.data);
+  assert.equal(binary.name,'交付物.zip');
+  const count = h.state.fetched.length;
+  for (const forged of [{...payload,taskId:'../other'}, {...payload,artifactVersionId:'v?redirect=1'}, {...payload,url:'https://other.test'}])
+    await assert.rejects(h.api.downloadAttachment(forged),/交付/);
+  h.state.cancel = true;
+  assert.equal((await h.api.downloadAttachment(payload)).canceled,true);
+  assert.equal(h.state.fetched.length,count);
+});
+
+test('bundle writes reject account changes during the authenticated download', async t => {
+  const h = harness(t);
+  h.state.waitFetch = async () => { h.state.owner = 'bob'; };
+  await assert.rejects(h.api.downloadAttachment({taskId:'task',artifactVersionId:'v1',filename:'file.zip'}),/已取消/);
+  assert.equal(fs.existsSync(path.join(h.root,'saved.bin')),false);
+});
+
+test('native bundle downloads stream beyond the IPC binary limit and verify all bytes', async t => {
+  const h = harness(t), crypto = require('node:crypto');
+  const chunk = Buffer.alloc(1024 * 1024, 42), hash = crypto.createHash('sha256');
+  for (let i = 0; i < 65; i++) hash.update(chunk);
+  const expected = hash.digest('hex');
+  let count = 0;
+  h.state.response = () => new Response(new ReadableStream({pull(controller) {
+    if (count++ < 65) controller.enqueue(chunk); else controller.close();
+  }}), {headers:{'X-Artifact-SHA256':expected}});
+  assert.equal((await h.api.downloadAttachment({taskId:'task',artifactVersionId:'v2',filename:'large.zip'})).ok,true);
+  const saved = path.join(h.root,'saved.bin');
+  assert.equal(fs.statSync(saved).size,65 * chunk.length);
+  const actual = crypto.createHash('sha256');
+  for await (const bytes of fs.createReadStream(saved)) actual.update(bytes);
+  assert.equal(actual.digest('hex'),expected);
+  assert.deepEqual(fs.readdirSync(h.root),['saved.bin']);
+});
+
+test('failed or invalid bundle streams preserve the destination and remove partial files', async t => {
+  for (const failure of ['digest','empty','network','account','size']) {
+    const h = harness(t), saved = path.join(h.root,'saved.bin');
+    fs.writeFileSync(saved,'existing delivery');
+    let reads = 0;
+    h.state.response = () => new Response(new ReadableStream({pull(controller) {
+      if (failure === 'empty') return controller.close();
+      if (reads++ === 0) return controller.enqueue(Buffer.from('partial ZIP'));
+      if (failure === 'network') return controller.error(new Error('connection interrupted'));
+      if (failure === 'account') h.state.owner = 'bob';
+      controller.close();
+    }}), {headers: failure === 'size' ? {'Content-Length':String(2 ** 31 + 1)} :
+      failure === 'digest' ? {'X-Artifact-SHA256':'0'.repeat(64)} : {}});
+    await assert.rejects(h.api.downloadAttachment({taskId:'task',artifactVersionId:'v2',filename:'file.zip'}),
+      /校验失败|connection interrupted|已取消|下载上限/,failure);
+    assert.equal(fs.readFileSync(saved,'utf8'),'existing delivery',failure);
+    assert.deepEqual(fs.readdirSync(h.root),['saved.bin'],failure);
+  }
 });
 
 test('missing stored objects explain recovery while other 404 bodies stay private', async t=>{

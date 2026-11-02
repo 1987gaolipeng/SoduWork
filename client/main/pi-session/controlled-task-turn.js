@@ -1,5 +1,6 @@
 'use strict';
 const liveOutput = require('../conversation/task-live-output');
+const modelErrors = require('./model-errors');
 
 // Executor adapter for the EXISTING conversation queue. It owns no queue and
 // never starts a model turn alongside a workflow/remote execution.
@@ -161,12 +162,18 @@ function create({ request, task, spec, scope, interval = 1500, wait = ms => new 
         status: status || (waiting ? 'waiting' : 'running'),
         run: latest });
       if (drained && status && !(spec.mode === 'workflow' && status === 'failed')) {
+        // Preserve the authoritative failure without copying raw provider envelopes into chat.
+        const error = status === 'failed' ? modelErrors.describe(latest.error) : null;
+        let reason = error ? modelErrors.forDisplay(latest.error) || '需求执行失败，请检查当前步骤' : '';
+        if (error?.status === 404) reason += '；请切换可用模型，或联系管理员核对服务地址与模型名称。';
+        else if (error?.status === 401 || error?.status === 403) reason += '；请检查模型授权或切换有权限的模型。';
+        else if (error?.status === 429) reason += '；请稍后重试或检查模型额度。';
         // A result receipt must never replace the executor's actual answer.
         if (!output.answers()) handle.appendTaskMessage('assistant', status === 'completed'
           ? '需求执行已结束，但执行器没有返回正文。请核对成果后再继续。'
-          : '本次需求已停止或未完成，已有过程保留在当前对话中。', [], task.id);
+          : reason || '本次需求已停止或未完成，已有过程保留在当前对话中。', [], task.id);
         return { ok: status !== 'failed', cancelled: status === 'stopped',
-          ...(status === 'failed' ? { reason: '需求执行失败，请检查当前步骤' } : {}) };
+          ...(status === 'failed' ? { reason } : {}) };
       }
       await wait(interval);
     }

@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -149,6 +150,8 @@ def opencode_binary() -> str:
 
 def runtime_issue() -> str:
     """Read-only readiness for managed installs; global CLIs keep their contract."""
+    if issue := _cpu_compatibility_issue():
+        return issue
     binary = managed_binary()
     if not binary:
         return ""
@@ -174,6 +177,26 @@ def _atomic_json(path: Path, value: dict) -> None:
             pass
 
 
+def _linux_cpu_flags() -> list[set[str]]:
+    """Read exact per-processor flags; empty records preserve unknown CPUs."""
+    try:
+        cpuinfo = Path("/proc/cpuinfo").read_text(encoding="utf-8", errors="ignore").lower()
+    except OSError:
+        return []
+    processors = 0
+    capabilities: list[set[str]] = []
+    for line in cpuinfo.splitlines():
+        if re.fullmatch(r"[ \t]*processor[ \t]*:[ \t]*\d+[ \t]*", line):
+            processors += 1
+        # Parse one line at a time: whitespace after an empty flags field must
+        # never consume a model name or another processor's field.
+        match = re.fullmatch(r"[ \t]*flags[ \t]*:[ \t]*(.*)", line)
+        if match is not None:
+            capabilities.append(set(match.group(1).split()))
+    capabilities.extend(set() for _ in range(max(0, processors - len(capabilities))))
+    return capabilities
+
+
 def _has_avx2() -> bool:
     if platform.machine().lower() not in {"amd64", "x86_64", "x64"}:
         return True
@@ -187,8 +210,8 @@ def _has_avx2() -> bool:
                 text=True, timeout=5, check=False,
             )
             return result.stdout.strip() == "1"
-        return "avx2" in Path("/proc/cpuinfo").read_text(
-            encoding="utf-8", errors="ignore").lower()
+        capabilities = _linux_cpu_flags()
+        return bool(capabilities) and all({"avx", "avx2"}.issubset(flags) for flags in capabilities)
     except Exception:  # noqa: BLE001 - baseline is the safe fallback
         return False
 
@@ -230,21 +253,21 @@ def platform_key() -> str:
 def _cpu_compatibility_issue() -> str:
     """Return a clear reason before starting an incompatible native binary.
 
-    The x86-64 baseline OpenCode artifact still uses SSSE3 instructions in
-    current releases.  Older virtual CPUs used by some Runners expose
-    only SSE2; launching the binary there raises SIGILL and leaves repeated
-    core dumps behind.  Fail during the install/check job instead of probing
-    it in the heartbeat or presenting a false ready state.
+    OpenCode 1.18.18 uses Bun 1.3.14, whose x64 baseline requires SSE4.2.
+    https://github.com/oven-sh/bun/blob/bun-v1.3.14/docs/installation.mdx#cpu-requirements
+    Reject known missing instructions before probing, avoiding SIGILL and
+    repeated core dumps on older or restricted virtual CPUs.
     """
     if sys.platform != "linux" or platform.machine().lower() not in {"amd64", "x86_64", "x64"}:
         return ""
-    try:
-        flags = Path("/proc/cpuinfo").read_text(
-            encoding="utf-8", errors="ignore").lower()
-    except OSError:
-        return ""
-    if "ssse3" not in flags:
-        return "当前 Runner 的 CPU 缺少 SSSE3 指令集，OpenCode 官方 Linux 构建无法运行。请升级云端执行机后再安装。"
+    capabilities = _linux_cpu_flags()
+    # Unknown records select the baseline artifact but are not proof of a
+    # missing instruction. Every known processor must satisfy the baseline.
+    missing = [label for flag, label in (("ssse3", "SSSE3"), ("sse4_2", "SSE4.2"))
+               if any(flags and flag not in flags for flags in capabilities)]
+    if missing:
+        return ("所选 Linux 执行机的 CPU 缺少 " + "、".join(missing)
+                + " 指令集，无法运行 OpenCode 及依赖它的 Harness²。请选择兼容的执行机，或由管理员调整该虚拟机的 CPU 配置。")
     return ""
 
 
@@ -344,7 +367,7 @@ def _extract_binary(archive: Path, target: Path) -> None:
 
 
 def binary_version(path: str, timeout: int = 20) -> str:
-    if not path or not os.path.isfile(path):
+    if not path or not os.path.isfile(path) or _cpu_compatibility_issue():
         return ""
     try:
         done = subprocess.run(
@@ -388,6 +411,9 @@ def install(action: str, say: Callable[[str], None]) -> tuple[bool, str]:
 def _install(action: str, say: Callable[[str], None]) -> tuple[bool, str]:
     if action not in {"install", "update", "uninstall", "check"}:
         raise ValueError("Unsupported OpenCode installation action")
+    # Removing an incompatible runtime must never attempt to execute it first.
+    if action == "uninstall":
+        return _remove_managed()
     cpu_issue = _cpu_compatibility_issue()
     if cpu_issue:
         if action == "check":
@@ -402,9 +428,6 @@ def _install(action: str, say: Callable[[str], None]) -> tuple[bool, str]:
         if current:
             return True, "\u5f53\u524d\u662f %s\uff1bSoduWork \u56fa\u5b9a\u7248\u672c\u4e3a %s" % (current, OPENCODE_VERSION)
         return True, "SoduWork 将安装固定版本 %s，并自动准备执行依赖。" % OPENCODE_VERSION
-    if action == "uninstall":
-        return _remove_managed()
-
     key = platform_key()
     filename, expected = OPENCODE_ARTIFACTS[key]
     target = _root() / OPENCODE_VERSION

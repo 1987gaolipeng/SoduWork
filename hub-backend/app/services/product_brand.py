@@ -4,7 +4,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-CATALOG = json.loads(Path(__file__).with_name("brand_catalog_v1.json").read_text(encoding="utf-8"))
+NAME = "SoduWork"
+CATALOG = json.loads(Path(__file__).with_name("builtin-plugin-catalog.json").read_text(encoding="utf-8"))
+
+
+def display(value: str) -> str:
+    """Return stored display text exactly; current data needs no rewrite pass."""
+    return str(value or "")
 
 
 def builtin_plugin(plugin) -> bool:

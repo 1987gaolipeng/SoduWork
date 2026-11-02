@@ -17,6 +17,65 @@ const a = { id: 'a', title: '需求沟通', adapterId: 'codex', taskIds: ['task-
 const b = { id: 'b', title: '项目进展', state: 'completed' };
 const appIcon = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jxqkAAAAASUVORK5CYII=';
 
+test('account project sync imports groups, preserves PC folders and applies only explicit removals', async () => {
+  const f = fixture(), store = f.create();
+  const id = store.saveProject({name: '本地项目', folders: ['C:/work']});
+  store.fileChat('native-chat', id, {id: 'native-chat', title: '会话'});
+  const remote = new Map(), writes = [], errors = [];
+  const sync = f.api.projectSync({store, storage: f.storage, key: 'one', error: e => errors.push(e), api: {
+    conversationProjects: async () => ({items: [...remote.values()]}),
+    saveConversationProject: async (key, body) => {
+      writes.push(key); assert.equal(body.revision, remote.get(key)?.revision || 0);
+      const value = {...body, id: key, revision: body.revision + 1}; remote.set(key, value); return value;
+    },
+  }});
+  await sync.run(); assert.equal(writes.length, 1);
+  remote.set(id, {...remote.get(id), name: '手机改名', revision: 2});
+  remote.set('project-phone', {id: 'project-phone', name: '手机项目', chatIds: [], revision: 1});
+  await sync.run();
+  const project = store.get().projects.find(p => p.id === id);
+  assert.equal(project.name, '手机改名'); assert.deepEqual(Array.from(project.folders), ['C:/work']);
+  remote.delete('project-phone'); await sync.run();
+  assert.ok(store.get().projects.some(p => p.id === 'project-phone'), 'missing records do not imply deletion');
+  remote.set('project-phone', {id: 'project-phone', name: '手机项目', chatIds: [], revision: 2, deleted: true});
+  await sync.run(); assert.ok(!store.get().projects.some(p => p.id === 'project-phone'));
+  assert.equal(errors.length, 0);
+});
+
+test('project sync preserves edits made in flight and does not publish application groups', async () => {
+  const f = fixture(), store = f.create(), remote = new Map();
+  const id = store.saveProject({name: '初始'});
+  store.recordAppChat('app-local', '应用专用', a);
+  let release, pause = true;
+  const sync = f.api.projectSync({store, storage: f.storage, key: 'one', api: {
+    conversationProjects: async () => ({items: [...remote.values()]}),
+    saveConversationProject: async (key, body) => {
+      assert.equal(key, id);
+      if (pause) await new Promise(resolve => { release = resolve; });
+      const value = {...body, id: key, revision: body.revision + 1}; remote.set(key, value); return value;
+    },
+  }});
+  const job = sync.run(); await new Promise(resolve => setImmediate(resolve));
+  store.saveProject({id, name: '发送期间的改名'}); pause = false; release(); await job;
+  await sync.run(); assert.equal(remote.get(id).name, '发送期间的改名'); assert.equal(remote.size, 1);
+});
+
+test('project revision conflict and account changes cannot overwrite local groups', async () => {
+  const f = fixture(), store = f.create(), errors = [];
+  const id = store.saveProject({name: '保留本地'});
+  const sync = f.api.projectSync({store, storage: f.storage, key: 'one', error: e => errors.push(e), api: {
+    conversationProjects: async () => ({items: []}),
+    saveConversationProject: async () => {throw Error('409 conflict');},
+  }});
+  await sync.run(); assert.equal(errors.length, 1); assert.equal(store.get().projects[0].name, '保留本地');
+  let current = true;
+  const switched = f.api.projectSync({store, storage: f.storage, key: 'one', current: () => current, api: {
+    conversationProjects: async () => {current = false; return {items: [{id, name:'别的账号', revision: 1, chatIds: []}]};},
+    saveConversationProject: async () => assert.fail('must not write after account switch'),
+  }});
+  await switched.run(); assert.equal(store.get().projects[0].name, '保留本地');
+});
+
 test('application project artwork reuses only validated app PNGs and survives archive/restore', () => {
   const f=fixture(), s=f.create();
   s.recordAppChat('local:art', '应用', a, appIcon);

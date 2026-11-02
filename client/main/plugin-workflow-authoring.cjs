@@ -40,7 +40,9 @@ function instructions() {
       deliverables: [{ path: 'soduwork-plugin-draft.json', kind: 'file', title: '可安装插件草稿', primary: true }],
     }),
     '安装个人工作流后，在普通对话中选择该插件并发送，会真实逐节点调度所选底座，人工节点等待用户确认；也可使用 /调试插件 或“逐节点调试”检查。不要把整段工作流交给一个 Agent 模拟，或把本机协作办结说成已通过企业审批、上架。',
-  ].join('\n');
+  ].map(line => line.startsWith('安装个人工作流')
+    ? '安装后在对话中选择插件，逐节点执行并等待人工确认；可用 /调试插件 检查。'
+    : line).join('\n');
 }
 
 module.exports = { instructions };

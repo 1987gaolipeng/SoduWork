@@ -2,13 +2,14 @@
 import json
 import os
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.services import agent_npm_runtime as npm, agent_npm_network, agent_setup as setup, agent_codex_install
-from app.services import agent_setup_runtime as runtime, managed_agent_network as network
+from app.services import agent_setup_runtime as runtime, local_base, managed_agent_network as network
 
 
 class CodexIntegrityTests(unittest.TestCase):
@@ -18,8 +19,7 @@ class CodexIntegrityTests(unittest.TestCase):
         self.root = Path(self.temp.name) / "node_modules"
         self.patches = [patch.object(runtime, "_npm_root", return_value=str(self.root)),
                         patch.object(npm, "private_root", return_value=""),
-                        patch.object(runtime.sys, "platform", "win32"),
-                        patch.object(runtime.platform, "machine", return_value="AMD64")]
+                        patch.object(npm, "runtime_target", return_value=("win32", "x64"))]
         for item in self.patches:
             item.start()
             self.addCleanup(item.stop)
@@ -58,6 +58,79 @@ class CodexIntegrityTests(unittest.TestCase):
         self.assertEqual(runtime._codex_native_version(), "")
 
 
+class CodexPackageOwnershipTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="codex package ownership ")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve() / "node_modules"
+        self.personal = self.root / "@openai/codex/package.json"
+        self.native = self.root / "@openai/codex-win32-x64"
+        self.binary = self.native / "vendor/x86_64-pc-windows-msvc/bin/codex.exe"
+        self.binary.parent.mkdir(parents=True)
+        self.binary.write_bytes(b"shared native fixture")
+        (self.native / "package.json").write_text(
+            '{"name":"@openai/codex-win32-x64","version":"0.166.0-win32-x64"}', encoding="utf-8")
+        adapter_codex = self.root / "@agentclientprotocol/codex-acp/node_modules/@openai/codex"
+        adapter_codex.mkdir(parents=True)
+        (adapter_codex / "package.json").write_text(
+            '{"name":"@openai/codex","version":"0.166.0"}', encoding="utf-8")
+        for item in (
+            patch.object(npm, "private_root", return_value=str(self.root)),
+            patch.object(npm, "runtime_target", return_value=("win32", "x64")),
+            patch.object(local_base, "_npm_root", return_value=""),
+            patch.object(runtime, "_npm_root", return_value=""),
+            patch.object(local_base, "_WIN", True),
+            patch.object(local_base.shutil, "which", return_value=None),
+        ):
+            item.start()
+            self.addCleanup(item.stop)
+
+    def test_harness_native_does_not_imply_a_personal_installation(self):
+        self.assertIsNone(local_base._codex_bin())
+        self.assertEqual(runtime._codex_native_details(), ("0.166.0-win32-x64", str(self.binary)))
+        with patch.object(setup, "_cached_version_probe", return_value="codex-cli 0.166.0") as probe:
+            self.assertEqual(setup._runtime_issue("codex-harness"), "")
+        self.assertEqual(probe.call_args.args[0], str(self.binary))
+
+    def test_personal_discovery_requires_its_own_valid_package_manifest(self):
+        self.personal.parent.mkdir(parents=True)
+        for manifest in ("broken json", "[]", "{}", '{"name":"@agentclientprotocol/codex-acp"}'):
+            with self.subTest(manifest=manifest):
+                self.personal.write_text(manifest, encoding="utf-8")
+                self.assertIsNone(local_base._codex_bin())
+        self.personal.write_text('{"name":"@openai/codex","version":"0.166.0"}', encoding="utf-8")
+        self.assertEqual(local_base._codex_bin(), str(self.binary))
+
+    def test_personal_uninstall_preserves_harness_and_does_not_report_a_shared_residual(self):
+        self.personal.parent.mkdir(parents=True)
+        self.personal.write_text('{"name":"@openai/codex","version":"0.166.0"}', encoding="utf-8")
+        self.assertEqual(local_base._codex_bin(), str(self.binary))
+        commands = []
+
+        def uninstall(_jid, argv, **kwargs):
+            commands.append(argv)
+            self.personal.unlink()
+            return 0, "personal wrapper removed"
+
+        with patch.object(setup, "node_env", return_value={"ok": True, "nodePath": "node", "npmPath": "npm"}), \
+                patch.object(npm, "environment", return_value={}), \
+                patch.object(setup, "_stream", side_effect=uninstall):
+            jid = setup._new_job("codex", "uninstall")
+            setup._run_npm(jid, "codex", "uninstall")
+        self.assertTrue(setup.job(jid)["ok"], setup.job(jid))
+        self.assertEqual(commands, [["node", "npm", "uninstall", "-g", "@openai/codex"]])
+        self.assertEqual(self.binary.read_bytes(), b"shared native fixture")
+        self.assertIsNone(local_base._codex_bin())
+        self.assertEqual(runtime._codex_native_details(), ("0.166.0-win32-x64", str(self.binary)))
+
+    def test_independent_native_path_installation_stays_discoverable(self):
+        standalone = Path(self.temp.name) / "standalone/codex.exe"
+        standalone.parent.mkdir()
+        standalone.write_bytes(b"standalone native fixture")
+        with patch.object(local_base.shutil, "which", return_value=str(standalone)):
+            self.assertEqual(local_base._codex_bin(), str(standalone))
+
+
 class NpmNetworkEnvironmentTests(unittest.TestCase):
     def test_system_proxy_is_available_to_npm_without_persisting_npm_config(self):
         with patch.dict(os.environ, {"PATH": "fixture"}, clear=True), \
@@ -76,6 +149,22 @@ class NpmNetworkEnvironmentTests(unittest.TestCase):
 
 
 class CodexExecutableReadinessTests(unittest.TestCase):
+    def test_native_warning_cannot_hide_a_successful_matching_version(self):
+        for version, exit_code, ready in (("0.165.0", 0, True), ("0.164.0", 0, False), ("0.165.0", 3, False)):
+            source = ("import sys; "
+                      "print('WARNING: isolated CODEX_HOME does not exist', file=sys.stderr, flush=True); "
+                      "print('codex-cli " + version + "'); sys.exit(" + str(exit_code) + ")")
+            def real_probe(executable, args, *, run, timeout):
+                self.assertEqual(args, ["--version"])
+                return run(executable, ["-c", source], timeout=timeout)
+            with self.subTest(version=version, exit_code=exit_code), \
+                    patch.object(setup, "_codex_native_name", return_value="@openai/codex-win32-x64"), \
+                    patch.object(setup, "_codex_dependency_version", return_value="0.165.0"), \
+                    patch.object(setup, "_codex_native_version", return_value="0.165.0-win32-x64"), \
+                    patch.object(setup, "_codex_native_binary", return_value=sys.executable), \
+                    patch.object(setup, "_cached_version_probe", side_effect=real_probe):
+                self.assertEqual(not setup._runtime_issue("codex-harness"), ready)
+
     def test_matching_metadata_cannot_hide_a_broken_native_executable(self):
         with patch.object(setup, "_codex_native_name", return_value="@openai/codex-win32-x64"), \
              patch.object(setup, "_codex_dependency_version", return_value="0.160.1"), \
@@ -96,8 +185,7 @@ class CodexExecutableReadinessTests(unittest.TestCase):
 
 class CodexInstallJobTests(unittest.TestCase):
     def setUp(self):
-        for item in (patch.object(runtime.sys, "platform", "win32"),
-                     patch.object(runtime.platform, "machine", return_value="AMD64")):
+        for item in (patch.object(npm, "runtime_target", return_value=("win32", "x64")),):
             item.start()
             self.addCleanup(item.stop)
 

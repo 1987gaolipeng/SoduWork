@@ -74,11 +74,29 @@ class IntegratedMigrationHistoryTests(unittest.TestCase):
 
     def test_release_and_account_lines_have_one_head_and_expected_parents(self):
         script = ScriptDirectory.from_config(_config())
-        self.assertEqual(script.get_heads(), ["0069_merge_public_main"])
+        self.assertEqual(script.get_heads(), ["0079_merge_public_projects"])
         expected = {
+            "0079_merge_public_projects": ("0077_merge_public_runtime", "0078_account_task_projection"),
+            "0078_account_task_projection": "0077_conversation_projects",
+            "0077_conversation_projects": "0076_merge_model_runtime",
+            "0077_merge_public_runtime": (
+                "0068_merge_notify_accounts", "0069_merge_public_main", "0076_merge_model_runtime"),
             "0063_plugin_recommendations": "0062_plugin_recommendation_cover",
             "0063_plugin_recommendation": "0063_plugin_recommendations",
             "0065_merge_feature_branches": ("0063_plugin_recommendations", "0064_usage_attribution"),
+            "0076_merge_model_runtime": (
+                "0074_model_runtime_leases", "0075_merge_cloud_relay"),
+            "0075_merge_cloud_relay": (
+                "0074_cloud_execution_durability", "0074_personal_conversation_relay"),
+            "0074_personal_conversation_relay": "0073_remote_screen_grants",
+            "0074_cloud_execution_durability": "0073_remote_screen_grants",
+            "0073_remote_screen_grants": "0072_account_conversations",
+            "0072_account_conversations": "0071_schedule_source_app",
+            "0071_schedule_source_app": "0070_merge_notes_schedule",
+            "0069_client_release_notes": "0068_merge_notification_account",
+            "0069_schedule_model_selection": "0068_merge_notification_account",
+            "0070_merge_notes_schedule": (
+                "0069_client_release_notes", "0069_schedule_model_selection"),
             "0063_task_notification_outbox": "0062_plugin_recommendation_cover",
             "0064_usage_attribution": "0063_task_notification_outbox",
             "0065_merge_recommendation_usage": (
@@ -106,14 +124,14 @@ class IntegratedMigrationHistoryTests(unittest.TestCase):
         for baseline in ("0065_merge_recommendation_usage", "0066_schedule_account_ownership",
                          "0065_merge_usage_notifications", "0067_merge_release_account_ownership",
                          "0065_im_transport", "0066_merge_im_transport", "0065_merge_feature_branches",
-                         "0068_merge_notification_account"):
-            path = list(script.iterate_revisions("0069_merge_public_main", baseline))
+                         "0068_merge_notification_account", "0077_merge_public_runtime", "0078_account_task_projection"):
+            path = list(script.iterate_revisions("0079_merge_public_projects", baseline))
             self.assertTrue(path, baseline)
 
     def test_existing_branch_databases_preserve_personal_configuration(self):
         for baseline in ("0065_merge_usage_notifications", "0066_merge_im_transport",
                          "0067_merge_release_account_ownership", "0065_merge_feature_branches",
-                         "0068_merge_notification_account"):
+                         "0068_merge_notification_account", "0077_merge_public_runtime", "0078_account_task_projection"):
             with self.subTest(baseline=baseline), tempfile.TemporaryDirectory(prefix="smoke-history-") as temp:
                 database = Path(temp) / "test.db"
                 with patch.dict(os.environ, {"DATABASE_URL": "sqlite+aiosqlite:///" + database.as_posix()}):
@@ -133,13 +151,20 @@ class IntegratedMigrationHistoryTests(unittest.TestCase):
                         with closing(sqlite3.connect(database)) as connection:
                             self.assertEqual(connection.execute(
                                 "SELECT version_num FROM alembic_version").fetchall(),
-                                [("0069_merge_public_main",)])
+                                [("0079_merge_public_projects",)])
                             name, raw = connection.execute(
                                 "SELECT name, git_creds FROM client WHERE id='fixture-history-device'").fetchone()
                             self.assertEqual(name, "Preserved device")
                             self.assertEqual(json.loads(raw), {"token": "fixture-history-token"})
                             self.assertIsNotNone(connection.execute(
                                 "SELECT name FROM sqlite_master WHERE type='table' AND name='im_connection'").fetchone())
+                            self.assertIsNotNone(connection.execute(
+                                "SELECT name FROM sqlite_master WHERE type='table' AND name='personal_conversation_relay'").fetchone())
+                            self.assertIsNotNone(connection.execute(
+                                "SELECT name FROM sqlite_master WHERE type='table' AND name='account_conversation_project'").fetchone())
+                            columns = {row[1] for row in connection.execute(
+                                "PRAGMA table_info(automation_execution_session)")}
+                            self.assertTrue({"delivery_stream_id", "delivery_seq", "delivery_digest", "persisted_seq"} <= columns)
                     finally:
                         get_settings.cache_clear()
 

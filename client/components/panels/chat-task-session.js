@@ -172,6 +172,14 @@
       return snapshot();
     }
 
+    function clearExecution() {
+      events.clear();
+      current.execution = {};
+      current.runId = '';
+      current.eventCursor = 0;
+      emit();
+    }
+
     function update(value) {
       const patch = value && typeof value === 'object' ? value : {};
       if (patch.task) attach(patch.task, patch);
@@ -184,7 +192,7 @@
     }
 
     return {
-      snapshot, attach, applySnapshot, applyEvent, setExecution, update,
+      snapshot, attach, applySnapshot, applyEvent, setExecution, clearExecution, update,
       on: (listener) => { if (typeof listener !== 'function') return () => {}; listeners.add(listener); return () => listeners.delete(listener); },
       get conversationId() { return current.conversationId; },
       get taskId() { return current.taskId; },

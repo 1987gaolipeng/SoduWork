@@ -33,8 +33,8 @@ function fixture(overrides = {}) {
   }
   const context = {Requirements, TaskSync, document: {activeElement: null, querySelectorAll: () => [],
     createElement: () => new Node(), body: {appendChild: node => roots.push(node)}},
-    addEventListener: (name, fn) => {events[name] = fn;},
-    SoduWorkAPI: {getTask: async id => task(id), listAttachments: async () => [],
+    addEventListener: (name, fn) => {const previous = events[name]; events[name] = event => {previous?.(event); fn(event);};},
+    SoduWorkAPI: {getTask: async id => task(id), listAttachments: async () => [], getTaskEvents: async () => [], getTaskComments: async () => [],
       attachmentUrl: file => '/authorized/' + file.id, ...overrides},
     RequirementsBoard: {context: () => ({}), refresh: async () => {}},
     TaskExecutionJourney: {mount: (node, options) => calls.push(['mount', options]),
@@ -44,6 +44,8 @@ function fixture(overrides = {}) {
     petSay: message => calls.push(['notice', message]), detailId: null,
   };
   context.window = context;
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../components/panels/task-trace-view.js'), 'utf8'), context);
+  Object.assign(context.TaskExecutionJourney, {mount: (node, options) => calls.push(['mount', options]), unmount: () => calls.push(['unmount'])});
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../components/requirements/requirement-fields.js'), 'utf8'), context);
   vm.runInNewContext(source, context);
   const active = () => roots.filter(node => node.isConnected).at(-1);
@@ -142,19 +144,20 @@ test('locked definitions retain separately authorized review and material operat
   const f = fixture({getTask:async id=>({...task(id),status:'doing',canEditRequirement:false,
     canSubmitReview:true,canManageRequirementMaterials:true}),submitTaskReview:async()=>({ok:true})});
   await f.api.open('manual');
-  assert.match(f.content().innerHTML,/data-rq-submit-review/);
+  assert.match(f.active().querySelector('.rq-detail-footer').innerHTML,/data-rq-submit-review>提交验收/);
+  assert.doesNotMatch(f.content().innerHTML,/data-rq-submit-review/);
   assert.match(f.content().innerHTML,/data-rq-add-files/);
   assert.doesNotMatch(f.active().querySelector('.rq-detail-footer').innerHTML,/data-rq-edit/);
   f.click('[data-rq-submit-review]'); await new Promise(setImmediate);
   assert.ok(f.calls.some(row=>row[0]==='notice' && /已提交验收/.test(row[1])));
 });
 
-test('no-delivery work exposes a clear mark-complete action even with a stale auto mode', async () => {
+test('no-delivery work exposes manual submission in More even with a stale auto mode', async () => {
   const f = fixture({getTask: async id => ({...task(id), status: 'doing',
     canSubmitReview: true, workRouting: {executionSubmissionMode: 'auto'},
   }), submitTaskReview: async () => ({ok: true})});
   await f.api.open('manual-no-output');
-  assert.match(f.content().innerHTML, /data-rq-submit-review[^>]*>标记完成/);
+  assert.match(f.active().querySelector('.rq-detail-footer').innerHTML, /data-rq-submit-review>提交验收/);
 });
 
 test('contract kind without deliverables still exposes manual completion', async () => {
@@ -163,7 +166,7 @@ test('contract kind without deliverables still exposes manual completion', async
     workRouting: {executionSubmissionMode: 'auto', outputContract: {kind: 'office-artifact'}},
   }), submitTaskReview: async () => ({ok: true})});
   await f.api.open('kind-only-contract');
-  assert.match(f.content().innerHTML, /data-rq-submit-review[^>]*>标记完成/);
+  assert.match(f.active().querySelector('.rq-detail-footer').innerHTML, /data-rq-submit-review>提交验收/);
 });
 
 test('live updates do not replace the optimistic version of an open editing draft', async () => {
@@ -218,6 +221,47 @@ test('creator-direct acceptance uses the Hub capability when local team state is
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../components/panels/task-trace-approval.js'), 'utf8'), f.context);
   await f.api.open('review-capability');
   assert.match(f.content().innerHTML, /data-tfd-acceptance-mode/);
+});
+
+test('a pending review on a doing task restores both acceptance modes only for its reviewer', async () => {
+  for (const canReview of [true,false]) {
+    const f = fixture({getTask:async id=>({...task(id),status:'doing',requirementStage:'reviewing',canReview})});
+    f.context.RequirementsBoard.context = ()=>({approvals:new Map([['pending-review',{
+      id:'review-ticket',taskId:'pending-review',action:'review',status:'pending',
+    }]])});
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../components/panels/task-trace-approval.js'),'utf8'),f.context);
+    await f.api.open('pending-review');
+    const html = f.content().innerHTML;
+    if (canReview) {
+      for (const label of ['手动验收','自动验收','在会话中分析','退回修改','确认验收','开始自动验收']) assert.ok(html.includes(label),label);
+    } else assert.doesNotMatch(html,/data-tfd-acceptance-mode|data-tfd-acceptance-session/);
+  }
+});
+
+test('ready tasks have no incomplete take-over shortcut and busy tasks cannot submit review', async () => {
+  for (const fields of [{status:'todo'}, {status:'doing',maintenanceBlocked:true},
+    {status:'doing',canSubmitReview:false},{status:'doing',workRouting:{conversationTurn:{state:'running'}}}]) {
+    const f = fixture({getTask:async id=>({...task(id),canSubmitReview:true,...fields})});
+    await f.api.open('permission-check');
+    const html = f.active().querySelector('.rq-detail-footer').innerHTML;
+    assert.doesNotMatch(html,/我来处理|data-rq-submit-review/);
+  }
+});
+
+test('an approval arriving after task details restores its card without repeated draft resets', async () => {
+  let reads = 0;
+  const approvals = new Map();
+  const f = fixture({getTask:async id=>{reads++;return {...task(id),status:'doing',requirementStage:'reviewing',canReview:true};}});
+  f.context.RequirementsBoard.context = ()=>({approvals});
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../components/panels/task-trace-approval.js'),'utf8'),f.context);
+  await f.api.open('late-ticket');
+  assert.doesNotMatch(f.content().innerHTML,/data-tfd-approval-action/,'A pending ticket must not fall back to direct acceptance');
+  approvals.set('late-ticket',{id:'new-review',taskId:'late-ticket',action:'review',status:'pending'});
+   f.events['soduwork-approvals-changed']();await new Promise(setImmediate);
+  assert.match(f.content().innerHTML,/data-tfd-acceptance-mode/);
+  const after = reads;
+   f.events['soduwork-approvals-changed']();await new Promise(setImmediate);
+  assert.equal(reads,after,'Unchanged inbox updates must preserve the approval draft');
 });
 
 test('验收动作关闭需求详情后，刷新回调不会把抽屉重新打开', async () => {
@@ -288,9 +332,8 @@ test('需求资料、过程证据、交付物和返修资料分组折叠展示�
   assert.match(html, /data-rq-bundle-download/);
   assert.match(html, /自动压缩包/);
   assert.match(html, /自动压缩包\.zip/);
-  assert.match(html, /data-rq-file-id="output-a"/);
-  assert.match(html, /data-rq-file-id="output-b"/);
-  assert.match(html, /data-rq-file-id="output-c"/);
+  assert.doesNotMatch(html, /data-rq-file-id="output-[abc]"/);
+  assert.match(html, /交付物 · 1 份/);
 });
 
 test('history is escaped and read-only; trace opens lazily and unmounts on collapse', async () => {
@@ -299,11 +342,16 @@ test('history is escaped and read-only; trace opens lazily and unmounts on colla
   assert.match(f.content().innerHTML, /&lt;img onerror=alert\(1\)&gt;/);
   assert.doesNotMatch(f.content().innerHTML, /contenteditable|dthread|replyInput|<img onerror/);
   assert.equal(f.calls.filter(row => row[0] === 'mount').length, 0);
-  const target = {open: true, matches: query => query === '[data-rq-execution]', querySelector: () => ({})};
+  const journey = {};
+  const target = {open: true, matches: query => query === '[data-rq-execution]', querySelector: () => journey};
   f.active().listeners.toggle({target});
   assert.equal(f.calls.at(-1)[1].taskId, 'a'); assert.equal(f.calls.at(-1)[1].compact, true);
+  for (const key of ['suppressInlineApproval', 'suppressTimeline', 'force']) assert.equal(f.calls.at(-1)[1][key], true, key);
   target.open = false; f.active().listeners.toggle({target});
   assert.equal(f.calls.at(-1)[0], 'unmount');
+  target.open = true; f.active().listeners.toggle({target});
+  assert.equal(f.calls.filter(row => row[0] === 'mount').length, 2);
+  for (const key of ['suppressInlineApproval', 'suppressTimeline', 'force']) assert.equal(f.calls.at(-1)[1][key], true, 'reopen: ' + key);
 });
 
 test('execution-restricted viewers cannot mount evidence even from a forged toggle', async () => {
@@ -380,6 +428,59 @@ test('low-frequency collaboration and plugin evidence opens from the More menu',
   assert.equal(extensionList.appended.length, 1);
   await extensionList.appended.find(item => item.onclick)?.onclick();
   assert.match(extensionList.appended.find(item => Object.hasOwn(item.dataset, 'rqExtensionError'))?.textContent, /打开插件扩展失败/);
+});
+
+test('activity combines discussion and task history and retries only failed reads', async () => {
+  let broken = true;
+  const f = fixture({getTaskEvents: async () => [{kind: 'release.candidate', at: 10}],
+    getTaskComments: async () => {if (broken) throw Error('Offline'); return [{body: 'Newest discussion', createdAt: 20}];}});
+  await f.api.open('activity'); f.click('[data-rq-comments-open]'); await new Promise(setImmediate);
+  const node = f.active().querySelector('[data-rq-comment-list]');
+  assert.match(node.innerHTML, /交付版本已生成/); assert.match(node.innerHTML, /部分记录未能加载/);
+  assert.doesNotMatch(node.innerHTML, /暂无活动记录/);
+  broken = false; f.click('[data-rq-activity-retry]'); await new Promise(setImmediate);
+  assert.match(node.innerHTML, /Newest discussion/); assert.doesNotMatch(node.innerHTML, /部分记录未能加载/);
+  assert.ok(node.innerHTML.indexOf('Newest discussion') < node.innerHTML.indexOf('交付版本已生成'));
+});
+
+test('empty activity and missing plugin contributions have explicit explanations', async () => {
+  const f = fixture(); await f.api.open('empty'); f.click('[data-rq-comments-open]'); await new Promise(setImmediate);
+  assert.match(f.active().querySelector('[data-rq-comment-list]').innerHTML, /暂无活动记录/);
+  f.click('[data-rq-extensions-open]');
+  assert.match(f.active().querySelector('[data-rq-extension-list]').textContent, /不影响执行与验收/);
+  f.context.PluginUIHost = {contributions: async () => []}; f.click('[data-rq-extensions-open]'); await new Promise(setImmediate);
+  assert.match(f.active().querySelector('[data-rq-extension-list]').textContent, /不影响执行与验收/);
+});
+
+test('an unavailable history is not presented as no activity when discussion is empty', async () => {
+  const f = fixture({getTaskEvents: async () => null});
+  await f.api.open('unavailable'); f.click('[data-rq-comments-open]'); await new Promise(setImmediate);
+  const html = f.active().querySelector('[data-rq-comment-list]').innerHTML;
+  assert.match(html, /部分记录未能加载/); assert.match(html, /data-rq-activity-retry/);
+  assert.doesNotMatch(html, /暂无活动记录/);
+});
+
+test('late activity cannot populate another task, closed dialog or account', async () => {
+  for (const change of ['task', 'close', 'account']) {
+    const pending = deferred(); const f = fixture({getTaskEvents: () => pending.promise});
+    await f.api.open('old'); f.click('[data-rq-comments-open]');
+    const node = f.active().querySelector('[data-rq-comment-list]');
+    if (change === 'task') await f.api.open('new');
+    if (change === 'close') f.click('[data-rq-evidence-close]');
+    if (change === 'account') f.events['soduwork-data-scope-changed']();
+    pending.resolve([{kind: 'created', detail: {note: 'Late secret'}}]); await new Promise(setImmediate);
+    assert.doesNotMatch(node.innerHTML, /Late secret/);
+  }
+});
+
+test('revoking execution visibility closes evidence and invalidates pending activity', async () => {
+  const pending = deferred(); let visible = true;
+  const f = fixture({getTask: async id => ({...task(id), canViewExecution: visible}), getTaskEvents: () => pending.promise});
+  await f.api.open('restricted'); f.click('[data-rq-comments-open]');
+  visible = false; await f.api.refresh('restricted');
+  assert.equal(f.active().querySelector('[data-rq-evidence-modal]').hidden, true);
+  pending.resolve([{kind: 'created', detail: {note: 'Revoked detail'}}]); await new Promise(setImmediate);
+  assert.doesNotMatch(f.active().querySelector('[data-rq-comment-list]').innerHTML, /Revoked detail/);
 });
 
 test('automation uses fresh authorized requirements and opens the exact existing schedule', async () => {
@@ -878,4 +979,51 @@ test('background refresh arriving after editing starts cannot replace the form',
   assert.equal(form.elements.note.value,'Keep draft');
   assert.match(f.content().innerHTML,/id="rqEditForm"/);
   assert.notEqual(f.active().querySelector('[data-rq-confirm]').hidden,false);
+});
+
+for (const count of [1,2]) test('requirement delivery shows one file or one archive at threshold '+count,async()=>{
+  const f=fixture({listAttachments:async()=>[
+    ...Array.from({length:count},(_,i)=>({id:'final-'+i,filename:'final-'+i+'.md',role:'output',sourceRef:'conversation:done',createdAt:10,evidenceMeta:{round:2}})),
+    {id:'proof',filename:'proof.png',role:'verification',sourceRef:'verification:later',createdAt:20}
+  ]});
+  await f.api.open('threshold');const html=f.active().querySelector('#rqAttachments').innerHTML;
+  assert.equal(html.includes('data-rq-bundle-download'),count===2);
+  assert.equal(html.includes('data-rq-file-id="final-0"'),count===1);
+  assert.ok(html.includes('data-rq-file-id="proof"'));
+  assert.ok(!html.includes('历史轮次'));
+});
+
+test('archive downloads pin the displayed immutable delivery and reject a changed file set',async()=>{
+  const downloads=[];
+  let ids=['final-0','final-1'];
+  const f=fixture({
+    taskTrace:async()=>({delivery:{artifact:{id:'version-2'},manifest:{files:ids.map(id=>({id}))}}}),
+    downloadArtifactsZip:async(...args)=>downloads.push(args)
+  });
+  await f.api.open('pinned');
+  f.click('[data-rq-bundle-download]',{rqBundleIds:'["final-0","final-1"]'});
+  await new Promise(setImmediate);
+  assert.deepEqual(downloads,[['pinned','Requirement pinned','version-2']]);
+  ids=['final-0','final-1','new-file'];
+  f.click('[data-rq-bundle-download]',{rqBundleIds:'["final-0","final-1"]'});
+  await new Promise(setImmediate);
+  assert.equal(downloads.length,1);
+  assert.match(f.active().querySelector('[data-rq-error]').textContent,/交付版本已变化/);
+  assert.equal(f.active().querySelector('[data-rq-error]').hidden,false);
+});
+
+test('automatic bundle library actions use the same pinned files without deleting source attachments',async()=>{
+  const saved=[];
+  const f=fixture({taskTrace:async()=>({delivery:{artifact:{id:'v2'},manifest:{files:[{id:'a'},{id:'b'}]}}}),
+    downloadArtifactsZip:async()=>({ok:true})});
+  f.context.LibraryTransfer={saveOutput:async(ref,file)=>{saved.push(file);return true;}};
+  await f.api.open('bundle');
+  f.click('[data-rq-bundle-library]',{rqBundleIds:'["a","b"]'});
+  await new Promise(setImmediate);
+  assert.equal(saved.length,1); assert.equal(saved[0].artifactVersionId,'v2');
+  assert.equal(saved[0].taskId,'bundle'); assert.equal(saved[0].deliveryBundle,true);
+  assert.deepEqual(Array.from(saved[0].attachmentIds),['a','b']);
+  f.click('[data-rq-bundle-library]',{rqBundleIds:'["old"]'});
+  await new Promise(setImmediate);
+  assert.equal(saved.length,1);
 });

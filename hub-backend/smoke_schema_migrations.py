@@ -158,6 +158,8 @@ with tempfile.TemporaryDirectory(prefix="soduwork-schema-") as directory:
     names = table_names(clean)
     ok({"identity_provider", "identity_link", "alembic_version"}.issubset(names),
        "clean database is missing enterprise identity tables")
+    ok({"model_runtime_lease", "model_runtime_metric"}.issubset(names),
+       "clean database is missing indexed model runtime state tables")
     ok("ai_schedule_run" in names,
        "clean database is missing the immutable automation run ledger")
     ok("ai_usage_daily" in names,

@@ -107,7 +107,7 @@ test('cancelled, forged, incomplete and non-full credentials never reopen a conf
   assert.equal(f.dialogs.length, 1); assert.equal(f.calls.length, 0);
   const allowed = fixture(), opts = await allowed.confirm();
   assert.equal((await allowed.open({ ...opts, accessMode: 'standard' })).ok, false);
-  assert.equal((await allowed.open({ ...opts, adapterId: 'claude' })).ok, false);
+  assert.equal((await allowed.open({ ...opts, adapterId: 'unknown-runtime' })).ok, false);
   assert.equal(allowed.dialogs.length, 1);
 });
 

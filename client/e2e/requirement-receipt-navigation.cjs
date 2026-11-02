@@ -67,8 +67,10 @@ if (typeof electron === 'string') {
       await js(`fixtureSetup(${JSON.stringify(mode)})`);
       await until("Boolean(document.querySelector('#cpCreate:not([disabled])'))");
       const inline = mode.startsWith('inline') || mode === 'restored';
-      assert.equal(await js('document.querySelectorAll("[data-wes-close]").length'), inline ? 0 : 1);
-      assert.equal(await js('document.querySelector("#cpCancel")?.textContent'), '再想想', 'unsubmitted drafts retain an explicit cancel action');
+      // Both surfaces now expose the same explicit cancellation contract.
+      assert.equal(await js('document.querySelectorAll("[data-wes-close]").length'), 1);
+      assert.equal(await js('document.querySelector("#cpCancel")?.textContent'), '取消', 'unsubmitted drafts retain an explicit cancel action');
+      assert.equal(await js('document.querySelector("#workEntryLayer").classList.contains("is-inline")'), inline);
       if (inline) {
         win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
         win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });

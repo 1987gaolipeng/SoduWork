@@ -14,7 +14,7 @@
 
 ## 插件与升级
 
-新插件使用 `.soduwork-plugin` 后缀。客户端和管理端继续支持旧格式导入，稳定标识与存储协议保持兼容。
+插件使用 `.soduwork-plugin` 后缀。客户端和管理端只接受当前品牌的插件包与草稿标识，不提供已废弃品牌格式的别名入口。
 
 自动升级需要自行建立发布信任。`client/update-trust.json` 与 `hub-backend/client-update-trust.json` 默认不信任任何签名公钥。发布安装包前，在两处配置一致的 Ed25519 公钥，并显式设置 `SODUWORK_CLIENT_SIGNING_KEY_ID`。私钥仅用于发布签名，不放入源码或安装包。未配置信任时，客户端拒绝自动下载和安装升级。
 

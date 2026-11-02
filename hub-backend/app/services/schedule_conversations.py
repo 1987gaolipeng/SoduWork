@@ -7,11 +7,37 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from fastapi import HTTPException
 from .. import models
+from ..agent_catalog import AGENTS
 from . import schedule_access
+from .schedule_execution import required_skill_names
+from .schedule_run_contracts import (
+    automation_conversation_title,
+    clean_required_capabilities,
+    personal_plugin_spec,
+)
 
 PROTOCOL = 'soduwork.automation-conversation/v1'
-ADAPTERS = {'pi': 'pi', 'codex': 'codex-harness', 'codex-harness': 'codex-harness',
-            'opencode': 'opencode', 'claude': 'claude'}
+RESERVATION_LEASE_SECONDS = 300
+# Keep the Hub's ordinary-conversation contract in lockstep with the reviewed
+# Agent catalog used by the client and Runner.  The editor persists a portable
+# ``local:<agent>`` kind, while the desktop opens the matching runtime id.  A
+# hand-maintained allowlist here silently made newly catalogued bases (Qwen,
+# DSH, Harness²) look selectable but impossible to dispatch.
+ADAPTERS = {
+    key: key for key, spec in AGENTS.items()
+    if spec.get('transport') in {'direct', 'runner'}
+}
+
+
+def _adapter_id(cli: str) -> str:
+    """Resolve a selected Agent against the live catalog, including custom ACP Agents."""
+    key = str(cli or '').strip().lower()
+    spec = AGENTS.get(key)
+    if spec and spec.get('transport') in {'direct', 'runner'}:
+        return key
+    # Keep the exported mapping useful for callers that inspect the built-in
+    # contract, while custom Agent registrations remain visible immediately.
+    return ADAPTERS.get(key, '')
 
 
 def adapter_for(schedule, client):
@@ -26,7 +52,10 @@ def adapter_for(schedule, client):
             return ''
         _, runner_id, cli = parts
         runner = runner_hub.get(runner_id)
-        if runner is None or runner.client_id != client.id:
+        owner = str(getattr(client, "user_ref", "") or "")
+        if (runner is None or
+                (runner.client_id != client.id and
+                 (not owner or str(getattr(runner, "owner_user_id", "") or "") != owner))):
             return ''
     elif aid.startswith('local:'):
         cli = aid.split(':', 1)[1]
@@ -125,6 +154,10 @@ async def inbox(session, client):
         client.config = {**config, 'automationConversationV1': 1}
     rows = (await session.execute(select(models.AiScheduleRun).where(
         schedule_access.owner_clause(client, models.AiScheduleRun),
+        # Account scope permits managing the plan from another device, while
+        # the ordinary conversation itself remains pinned to its original
+        # desktop. Cloud runs use CLOUD_PROTOCOL and never enter this inbox.
+        models.AiScheduleRun.owner_client_id == str(client.id or ""),
         models.AiScheduleRun.receipt['executionMode'].as_string() == PROTOCOL,
         models.AiScheduleRun.state.in_(['starting', 'running', 'waiting'])
     ).order_by(models.AiScheduleRun.started_at).limit(200))).scalars().all()
@@ -136,7 +169,9 @@ async def inbox(session, client):
 
 async def locked_run(session, client, run_id):
     run = (await session.execute(select(models.AiScheduleRun).where(
-        models.AiScheduleRun.id == run_id, schedule_access.owner_clause(client, models.AiScheduleRun)
+        models.AiScheduleRun.id == run_id,
+        schedule_access.owner_clause(client, models.AiScheduleRun),
+        models.AiScheduleRun.owner_client_id == str(client.id or "")
     ).with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
     if run is None or dict(run.receipt or {}).get('executionMode') != PROTOCOL:
         raise HTTPException(404, '这条自动化会话不属于当前设备')

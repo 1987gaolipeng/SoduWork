@@ -208,13 +208,17 @@ export PYTHONPATH="$ROOT/src/hub-backend${PYTHONPATH:+:$PYTHONPATH}"
 export PATH="$DATA_ROOT/agent-runtimes/npm/bin:$PATH"
 "$RUN_PY" - "$DATA_ROOT" <<'BOOTSTRAP_PY'
 import hashlib
+import json
 import os
 from pathlib import Path
 import platform
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
+import uuid
 
 from app.services import agent_npm_runtime, agent_setup
 
@@ -227,13 +231,49 @@ if not pair.get("ok"):
     if not arch:
         raise SystemExit("请先为当前架构安装 Node.js 22.19+ 和 npm")
     name = f"node-{version}-linux-{arch}"
+    # Never follow managed-child symlinks or overwrite unrelated private files.
+    base.mkdir(parents=True, exist_ok=True)
+    if base.is_symlink():
+        raise SystemExit("Runner 运行时目录不能是符号链接")
+    base = base.resolve()
+    target = base / name
+    private_bin = base / "npm" / "bin"
+    for directory in (target, private_bin.parent, private_bin):
+        if directory.is_symlink() or directory.exists() and not directory.is_dir():
+            raise SystemExit(f"Runner 私有目录路径不安全，未覆盖：{directory}")
+    previous_links = {}
+    for command in ("node", "npm", "npx"):
+        link = private_bin / command
+        if link.exists() and not link.is_symlink():
+            raise SystemExit(f"Runner 私有目录存在同名文件，未覆盖：{link}")
+        previous_links[link] = os.readlink(link) if link.is_symlink() else None
+
+    def check_node(directory):
+        node = str(directory / "bin" / "node")
+        probe_env = agent_npm_runtime.clean_env()
+        for command in ("node", "npm", "npx"):
+            entry = directory / "bin" / command
+            if (not entry.is_file() or not os.access(entry, os.X_OK)
+                    or not entry.resolve().is_relative_to(directory.resolve())):
+                raise RuntimeError(f"Node.js 运行入口不完整：{command}")
+        identity = subprocess.run([node, "-p",
+            "JSON.stringify({node:process.versions.node,electron:!!process.versions.electron})"],
+            check=True, timeout=30, capture_output=True, text=True, env=probe_env)
+        details = json.loads(identity.stdout)
+        if not isinstance(details, dict) or details.get("electron") or details.get("node") != version[1:]:
+            raise RuntimeError("Node.js 版本或运行环境不符合受管版本要求")
+        for command in ("npm", "npx"):
+            done = subprocess.run([node, str(directory / "bin" / command), "--version"],
+                                  check=True, timeout=30, capture_output=True, text=True, env=probe_env)
+            if not re.fullmatch(r"\d+\.\d+\.\d+", done.stdout.strip()):
+                raise RuntimeError(f"Node.js 运行入口自检失败：{command}")
+
     archive = name + ".tar.gz"
     url = f"https://npmmirror.com/mirrors/node/{version}/"
     sums = subprocess.run(["curl", "-fsSL", "--connect-timeout", "15", "--max-time", "60",
                            url + "SHASUMS256.txt"], check=True, capture_output=True, text=True).stdout
     expected = next(line.split()[0] for line in sums.splitlines()
                     if line.split()[-1] == archive)
-    base.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="node-bootstrap-", dir=base) as temp:
         package = Path(temp) / archive
         subprocess.run(["curl", "-fsSL", "--connect-timeout", "15", "--max-time", "600",
@@ -246,26 +286,52 @@ if not pair.get("ok"):
             raise SystemExit("Node.js 下载校验失败，安装已中止")
         subprocess.run(["tar", "-xzf", str(package), "-C", temp], check=True)
         staged = Path(temp) / name
-        subprocess.run([str(staged / "bin" / "node"), "--version"], check=True)
-        target = base / name
+        check_node(staged)
+        healthy = False
         if target.exists():
-            # An existing fixed-version runtime must already be runnable.
-            subprocess.run([str(target / "bin" / "node"), "--version"], check=True)
-        else:
-            staged.rename(target)
-    private_bin = base / "npm" / "bin"
-    private_bin.mkdir(parents=True, exist_ok=True)
-    for command in ("node", "npm", "npx"):
-        link = private_bin / command
-        if link.is_symlink():
-            link.unlink()
-        elif link.exists():
-            raise SystemExit(f"Runner 私有目录存在同名文件，未覆盖：{link}")
-        link.symlink_to(target / "bin" / command)
-    # Probes cache by executable timestamp; the newly selected pair is rechecked.
-    pair = agent_npm_runtime.node_env("pi")
-    if not pair.get("ok"):
-        raise SystemExit(pair.get("why") or "Node.js/npm 自检失败")
+            try:
+                check_node(target)
+                healthy = True
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+                pass
+        # Keep the previous runtime outside the temporary directory until both
+        # the replacement and its command links pass the normal discovery probe.
+        backup = base / ("." + name + ".rollback-" + uuid.uuid4().hex)
+        moved_old = published = False
+        changed_links = []
+        try:
+            if not healthy:
+                if target.exists():
+                    target.rename(backup)
+                    moved_old = True
+                staged.rename(target)
+                published = True
+            private_bin.mkdir(parents=True, exist_ok=True)
+            for link in previous_links:
+                changed_links.append(link)
+                if link.is_symlink():
+                    link.unlink()
+                link.symlink_to(target / "bin" / link.name)
+            # Probes cache by executable timestamp, so replacement is rechecked.
+            pair = agent_npm_runtime.node_env("pi")
+            if not pair.get("ok"):
+                raise SystemExit(pair.get("why") or "Node.js/npm 自检失败")
+        except BaseException:
+            if published:
+                target.rename(staged)
+            if moved_old:
+                backup.rename(target)
+            for link in reversed(changed_links):
+                if link.is_symlink():
+                    link.unlink()
+                if previous_links[link] is not None:
+                    link.symlink_to(previous_links[link])
+            raise
+        if moved_old:
+            # Only the previously validated direct child was moved here.
+            if backup.is_symlink() or backup.resolve().parent != base:
+                raise SystemExit("Runner 运行时备份路径校验失败，已保留备份")
+            shutil.rmtree(backup)
 print(f"Node {pair['node']} / npm {pair['npm']}", flush=True)
 pi = agent_setup.detect("pi", has_model=True)
 if not pi.get("installed"):

@@ -1,7 +1,7 @@
 'use strict';
 const fs = require('node:fs'), path = require('node:path');
 const base = require('./plugin-builder-plugin.cjs');
-const FILES = ['SKILL.md', 'references/bridge-and-delivery.md', 'references/host-sdk.md', 'references/host-data-sdk.md', 'references/fast-ai.md', 'references/development-workflow.md', 'references/design-quality.md', 'references/icon-design.md', 'references/instant-types.md', 'references/robot-persona.md', 'scripts/scaffold.cjs', 'scripts/serve.cjs', 'scripts/validate.cjs'];
+const FILES = ['SKILL.md', 'references/bridge-and-delivery.md', 'references/host-sdk.md', 'references/local-files.md', 'references/cloud-data.md', 'references/jiyong-data.schema.json', 'references/data-initialization.schema.json', 'references/host-data-sdk.md', 'references/fast-ai.md', 'references/intelligent-interaction.md', 'references/development-workflow.md', 'references/local-app-structure.md', 'references/design-quality.md', 'references/icon-design.md', 'references/instant-types.md', 'references/robot-persona.md', 'scripts/scaffold.cjs', 'scripts/serve.cjs', 'scripts/validate.cjs'];
 const VALIDATION_FILES = ['main/plugin-resources.js', 'main/personal-plugin-schema.cjs',
   'main/personal-plugin-workflow.js', 'main/personal-plugin-agent-route.cjs',
   'main/plugin-capability-names.cjs', 'core/plugin-platforms.js', 'core/plugin-icon.js',
@@ -11,7 +11,7 @@ function body(app) {
   const root = app.isPackaged ? path.join(process.resourcesPath, 'skills/app-developer') : path.resolve(__dirname, '../../skills/app-developer');
   const resource = (name, bytes, kind = 'reference') => ({ path: 'references/developer/' + name, kind, encoding: 'base64', content: Buffer.from(bytes).toString('base64') });
   return {
-    template: 'method', key: 'app-developer', name: '应用开发', version: '1.2.0',
+    template: 'method', key: 'app-developer', name: '即用开发', version: '1.6.1',
     locales: {
       'zh-CN': { name: '即用开发', description: '基于插件开发规范，制作带独立窗口、页面与 SoduWork 对话桥的即用，完成预检、安装和交互验证。' },
       'en-US': { name: 'App Developer', description: 'Build apps with dedicated windows, pages and the SoduWork conversation bridge; verify, install and test interactions.' },
@@ -19,13 +19,22 @@ function body(app) {
     description: '基于插件开发规范，制作带独立窗口、页面与 SoduWork 对话桥的即用，完成预检、安装和交互验证。',
     instructions: [
       require('./plugin-locale-authoring.cjs'),
-      '你是 SoduWork 应用开发助手，复用插件开发助手的规范及现有工具、会话授权、草稿安装与导出链路。',
-      '先读取本轮资源中的 references/developer/plugin-development.md，再读取 references/developer/SKILL.md，并按实际需求完成开发与验证。',
-      '应用的插件 JSON 基础信息必须使用 template: "app" 及 ui.contributions。纯静态H5轻应用优先声明 source: {type:"package",entry:"ui/index.html"}，将HTML、CSS、JS、图片等依赖完整放入resources，导入后由壳直接打开，不启动HTTP服务、不要求ukey；有在线业务服务的应用仍可使用真实HTTP(S)地址。脚手架不填--url时生成包内应用，--entry可指定入口。不要把仅生成HTML称为已完成安装包。',
-      '应用自身的登录、ukey 和业务鉴权均按实际需求选用，不是应用安装、打开或接入对话桥的前置条件。允许纯本地、单机、无账号轻应用；此类应用不添加登录页、ukey、虚构 MCP 或凭据配置。仅当业务确实需要受保护服务时才声明对应连接与认证，沿用该服务的真实授权要求。',
-      '公共 SDK 在 references/developer/sdk/soduwork-app.js，示例生成器和本地静态服务在 references/developer/scripts；安装不执行脚本。',
-      '直接生成真实文件、验证报告、soduwork-plugin-draft.json 与 .soduwork/delivery.json；复用当前会话的“检查并安装”，保留其他成果。',
-      '验证页面操作、技能驱动的真实会话、结果回写与刷新；分开记录静态检查、隔离夹具和真实模型业务实测，不把发送回执当作业务完成。',
+      '你是 SoduWork 即用开发助手。先读 references/developer/SKILL.md；按需读取引用文档和同源 SDK。',
+      '应用内添加本地文件/导入/上传先读 references/local-files.md：attachments.pick 通过原生桥触发壳文件选择器，File 使用 importFile，再以 attachmentIds 随 chat.send 交给技能；不得索取磁盘路径或编造上传接口。实现取消、移除、失败保留与受理后释放，区分会话附件、持久素材和真实业务上传，并写入应用技能与验收。',
+      '数据位置必须服从用户在创建入口选择的数据云存储/数据本地化；新即用显式声明 jiyong.storage.location=cloud/local。完整契约、初始化和迁移 JSON 见 references/cloud-data.md 及同目录两个 JSON Schema。云端由 Hub 按稳定包名与当前账号自动开通 PostgreSQL 空间，本地沿用 SQLite；页面/技能统一 data.*，不能生成连接串、数据库密码或另起 CRUD 后端。',
+      '云端必须随包提供版本化初始化 JSON；预检校验声明、资源、迁移与只读服务就绪，隔离首屏不代表真实云端读写。安装/首次访问自动开通并事务初始化，迁移追加版本、不改历史、不覆盖用户数据。未联网/未配置须显示真实阻塞，不回退到本地写库。',
+      '目标：美观、精致、操作简洁、打开即用。创意、设计、技术匹配业务；设计前调研 GitHub 优秀开源项目与许可，视觉网站调研可选、选择最新同类。',
+      '页面只要求中英文适配；默认设计一个完整主题，不强制亮暗双模式。宿主数据接入按 references/host-data-sdk.md 读取当前用户、对话、通知、本机与云端资料；仅用随包真实SDK方法。',
+      '简单本地即用采用 HTML/CSS/原生 JS，按 local-app-structure.md 拆分页面、公共组件和数据访问；页面直接挂载 div，不以多层 iframe 拼内部页面。HTML/JS 按职责保持短小，目标300～500行，800行评审提醒；不压缩排版或机械切片。Web服务/H5技术栈不限，可用Vue/React等。',
+      '小任务：ai.generate按references/fast-ai.md单次调用，界面内直接回显；只传本次输入＋随包技能，无历史/规划/会话；工具执行用chat.send。',
+      '开发要求：凡涉及AI处理结果回到页面的即用，必须同步开发应用内业务技能与页面联动，不能仅在开发插件里描述能力。将同一联动契约写入所开发即用的instructions/随包业务技能，并在页面实现对应接收、校验、展示、应用和结果追踪；技能须明确结构化结果、真实写回/读回、请求关联及失败回执。按 references/intelligent-interaction.md 验收双端闭环，缺任一端不得作为联动功能完成交付。简单单次AI的随包提示词也须与页面结果处理配套。',
+      '联动体验：页面提出意图，技能处理后回填业务成果；按需求通知后应用或直接更新。流程画布回填节点/连线；Shell回填命令、环境与风险，用户确认当前版本后才执行并追踪真实结果。当前无通用onMessage或页面Shell执行接口；复用存储/MCP及现有会话/Runner/业务执行器，不编造接口。',
+      '产品：一句意图完成核心动作；AI负责起草、归类、标签；修改保留必要的标题与内容；复制/搜索等直接执行。业务技能随包，真实写回读回。',
+      '交付：UI＋业务技能＋声明＋真实资源；template:app；宿主窗口、参数、按声明选择的本地/云端数据、AI/MCP、automation.create；不另建平行会话或调度。云端存储不改变包内页面来源，不要求另建Web后端。',
+      '默认只设计当前即用的单个彩色图标；配色自由，圆润实体、方形饱满、小尺寸清楚；顶层 icon 内嵌 PNG≤256px/96KB；按 icon-design.md 检查，不强制整套或灰色版。',
+      '机器人通过 soduWorkApp.automation.create 复用真实计划；入口用业务词语。读取实际 SDK，不编造接口。',
+      '严格执行 development-workflow.md：读真实 SDK；context.get 确认宿主；无顶层 connect；宿主错误不得降级浏览器存储；安装后实际打开验收。',
+      '最终磁盘草稿运行 scripts/validate.cjs；登记 .soduwork/delivery.json，走当前会话检查并安装；修复后重检；区分静态通过与实际业务验收。',
     ].join('\n'),
     runtimeCapabilities: ['files', 'terminal', 'browser'],
     resources: [

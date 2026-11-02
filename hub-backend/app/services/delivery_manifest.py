@@ -343,6 +343,18 @@ def build(rows: list, *, source_ref: str = "", url: str = "") -> dict:
     groups = {key: [] for key in _CATEGORIES}
     for item in latest.values():
         groups[item["category"]].append(item)
+    # A standalone document remains reviewable inside an output directory.
+    # Recover legacy receipts classified as supporting without changing stored
+    # provenance. Assets, source files, evidence, and inputs cannot fill this role.
+    if not groups["primary"]:
+        documents = {".txt", ".md", ".pdf", ".doc", ".docx", ".xls", ".xlsx",
+                     ".ppt", ".pptx", ".csv"}
+        for item in list(groups["supporting"]):
+            if (item["role"] == "output" and
+                    os.path.splitext(item["name"])[1].lower() in documents):
+                groups["supporting"].remove(item)
+                item["category"] = "primary"
+                groups["primary"].append(item)
     for values in groups.values():
         values.sort(key=lambda x: x["name"])
     output_items = groups["primary"] + groups["supporting"]

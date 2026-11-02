@@ -334,15 +334,24 @@ async def quota_status(
     session: AsyncSession,
     user_id: str,
     current_policy: dict | None = None,
-    *, policy_rows: dict | None = None,
+    *, policy_rows: dict | None = None, provider: str = "", model: str = "",
 ) -> dict:
     # Read scalar values rather than cached ORM rows or process-local policy TTLs.
     # A change committed by any Hub worker applies to the next admission.
-    keys = [USER_QUOTA_PREFIX + str(user_id or "")]
+    from . import quota_plans
+    keys = [USER_QUOTA_PREFIX + str(user_id or ""),
+            quota_plans.GRANT_PREFIX + str(user_id or "")]
     if current_policy is None:
         keys.append(POLICY_KEY)
     rows = policy_rows if policy_rows is not None else dict((await session.execute(
         select(AppSetting.key, AppSetting.value).where(AppSetting.key.in_(keys)))).all())
+    try:
+        assigned = await quota_plans.status(session, user_id, rows, provider=provider, model=model)
+    except (ValueError, KeyError, TypeError) as exc:
+        raise ClientAccessError("额度配置暂时不可用，请联系管理员检查套餐",
+                                code="TOKEN_QUOTA_UNAVAILABLE", status=503) from exc
+    if assigned is not None:
+        return assigned
     current_policy = current_policy if current_policy is not None else {
         **DEFAULT_POLICY, **_stored_json(rows.get(POLICY_KEY, ""))}
     override = user_quota(_stored_json(rows.get(keys[0], "")))
@@ -372,8 +381,9 @@ async def quota_status(
     }
 
 
-async def assert_quota(session: AsyncSession, user_id: str, *, policy_rows=None) -> dict:
-    status = await quota_status(session, user_id, policy_rows=policy_rows)
+async def assert_quota(session: AsyncSession, user_id: str, *, policy_rows=None,
+                       provider: str = "", model: str = "") -> dict:
+    status = await quota_status(session, user_id, policy_rows=policy_rows, provider=provider, model=model)
     if status["exceeded"]:
         messages = {
             "trial_expired": "试用已结束，联系管理员分配套餐后即可继续",

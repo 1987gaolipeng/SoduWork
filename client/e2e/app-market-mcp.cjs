@@ -65,6 +65,7 @@ if (typeof electron === 'string') {
     const item = { appBridge: { appId: 'plugin:' + metadata.pluginId, contributionId: 'main', origin },
       view: { webContents: { isDestroyed: () => false, getURL: () => origin + '/' } } };
     const deps = { app, identityOf };
+    require('../main/work-preview-app-owner.cjs').capture(item, deps);
     assert.equal((await connection.connect({ item }, { server: 'fixture-business', url: origin + '/mcp', credentialKey: 'ukey' }, deps)).connected, true);
     resolved = await require('../main/pi-session/plugin-grant').resolve({ ...deps, cwd: root,
       pluginIds: [metadata.pluginId], appContext: { pluginId: metadata.pluginId,
@@ -76,10 +77,30 @@ if (typeof electron === 'string') {
     assert.equal((await call()).status, 200);
     assert.equal(businessCalls, 1);
     report.cases.push('Real approved market package installs with on_install policy and no company MCP; production native bridge and turn resolver reach owned MCP.');
+    resolved.grant.cleanup();
+    await assert.rejects(require('../main/pi-session/plugin-grant').resolve({ ...deps, cwd: root,
+      pluginIds: [metadata.pluginId] }), /插件需要但企业尚未启用的 MCP.*fixture-business/,
+    'missing application context reproduces the reported enterprise-MCP error');
+    const ownership = require('../main/pi-session/app-mcp-grant.cjs');
+    const handle = { snapshot: () => ({ activePlugins: [metadata.pluginId] }) };
+    // No native app window or live connection object: only the accepted
+    // installation and the existing account-scoped encrypted settings remain.
+    ownership.bind(handle, null, '', app, deps);
+    const historyTurn = {};
+    await ownership.guardSend(handle, historyTurn);
+    await historyTurn.beforeTurn();
+    resolved = await require('../main/pi-session/plugin-grant').resolve({ ...deps, cwd: root,
+      pluginIds: [metadata.pluginId], appContext: await ownership.forSession(handle) });
+    const restored = JSON.parse(fs.readFileSync(resolved.grant.configFile)).servers['fixture-business'];
+    assert.equal(restored.appLease, true);
+    const callRestored = () => fetch(restored.url, { method: 'POST', headers: restored.headers, body: '{}' });
+    assert.equal((await callRestored()).status, 200);
+    assert.equal(businessCalls, 2);
+    report.cases.push('A market history turn restores its accepted version and owned MCP from encrypted settings without a window or company connector.');
     const uninstalled = await fetch(hub + '/fixture/uninstall', { method: 'POST', headers });
     assert.equal(uninstalled.status, 200);
-    assert.equal((await call()).status, 401);
-    assert.equal(businessCalls, 1);
+    assert.equal((await callRestored()).status, 401);
+    assert.equal(businessCalls, 2);
     report.cases.push('Uninstall revokes an existing application lease before another business call.');
     report.ok = true;
   }).catch(error => { report.error = String(error.stack || error); }).finally(async () => {

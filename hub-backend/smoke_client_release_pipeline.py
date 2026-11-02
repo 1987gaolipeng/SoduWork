@@ -107,28 +107,16 @@ def main():
             checkout = root / "checkout"
             for name in ["tools/sign-client-release.mjs", "client/scripts/installer-compatibility-report.cjs",
                          "client/main/client-update-contract.js", "tools/ci/verify-client-publication.cjs",
-                         "tools/ci/release-artifacts.cjs", "tools/ci/publish-client.cjs",
-                         "tools/ci/client-release-notes.cjs", "tools/ci/localized-release-notes.cjs",
-                         "tools/ci/release-notes-ai.cjs",
-                         "tools/ci/release-context.cjs",
-                         "client/main/distribution.cjs", "client/distributions.json",
-                         "tools/ci/client-distribution.cjs", "tools/ci/client-target.cjs",
-                         "tools/ci/distribution-baselines.cjs", "tools/ci/distribution-acceptance-baselines.json",
-                         "tools/ci/soduwork-acceptance-baselines.json",
-                         "tools/ci/release-branches.cjs"]:
+                         "tools/ci/release-artifacts.cjs", "tools/ci/publish-client.cjs"]:
                 target = checkout / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(repo / name, target)
             (checkout / "client/package.json").write_text(json.dumps({"version": "9.9.1"}))
             (checkout / "client/update-trust.json").write_text(json.dumps(trust))
-            profiles_file = checkout / "client/distributions.json"
-            profiles = json.loads(profiles_file.read_text())
-            profiles["internal"]["hubOrigin"] = origin
-            profiles_file.write_text(json.dumps(profiles))
             key_file = root / "test.key"
             key_file.write_text(seed)
             key_file.chmod(0o600)
-            dist = checkout / "client/dist/internal"
+            dist = checkout / "client/dist"
             dist.mkdir(parents=True)
             for fmt in ("deb", "rpm", "tar.gz"):
                 (dist / f"SoduWork-9.9.1-linux.{fmt}").write_bytes(b"fixture-installer-only\n" * 60000)
@@ -146,8 +134,8 @@ def main():
                 assert (result.returncode == 0) == success, result.stdout + result.stderr
                 return result
 
-            evidence = checkout / "release-evidence/client/internal/linux"
-            evidence.mkdir(parents=True)
+            evidence = checkout / "release-evidence/linux"
+            evidence.mkdir(parents=True, exist_ok=True)
             locales = {
                 "zh-CN": {"summary": "版本更新说明。", "sections": [{
                     "id": "features", "title": "功能更新",
@@ -169,16 +157,12 @@ def main():
                 locales[locale] = {"summary": summary, "sections": [{"id": "features", "title": title,
                     "items": [{"id": "notes", "text": summary}]}]}
                 notes += "\n\n" + "\n".join([locale, summary, title, "• " + summary])
-            notes_file = checkout / "release-evidence/client-release-notes.json"
-            notes_record = dict(schema=1, version="9.9.1", sourceCommit="a" * 40, pipelineId="1",
-                tag=environment.get("CI_COMMIT_TAG", ""), previousTag="client-v9.9.0", previousCommit="b" * 40,
-                date="2026-10-15", commits=[], notes=notes, locales=locales,
-                notesSha256=hashlib.sha256(notes.encode()).hexdigest())
-            notes_file.write_text(json.dumps(notes_record), encoding="utf-8")
+            environment["SODUWORK_CLIENT_RELEASE_NOTES"] = notes
+            environment["NODE_EXTRA_CA_CERTS"] = str(certificate_file)
             node("tools/ci/release-artifacts.cjs", "inventory", "linux")
             build = json.loads((dist / "linux-build.json").read_text())
             evidence = checkout / "release-evidence/linux"
-            evidence.mkdir(parents=True)
+            evidence.mkdir(parents=True, exist_ok=True)
             receipt = dict(schema=1, kind="soduwork-native-install-acceptance", ok=True,
                 sourceCommit=build["sourceCommit"], pipelineId=build["pipelineId"], artifacts=build["artifacts"],
                 checks=[dict(name=name, ok=True) for name in
@@ -187,37 +171,9 @@ def main():
             receipt_file = evidence / "acceptance.json"
             receipt_file.write_text(json.dumps(receipt))
             command = "tools/ci/publish-client.cjs"
-            rejected = node(command, "stage", "linux", success=False)
-            assert "manual release gate" in rejected.stderr
-            authorization_file = checkout / "release-evidence/release-authorization.json"
-            authorization = dict(schema=1, ok=True, component="client", version="9.9.1",
-                branch="release/client-9.9.1", tag="client-v9.9.1", sourceCommit="a" * 40,
-                pipelineId="1", platforms=["linux"], distributions=[build["distribution"]])
-            # Synthetic authorization exercises API orchestration only, not a real Git tag or native installer.
-            authorization_file.write_text(json.dumps(authorization))
-            target_authorization_file = evidence.parent / "target-authorization.json"
-            target_authorization_file.write_text(json.dumps(dict(schema=1, ok=True,
-                sourceCommit="a" * 40, pipelineId="1", distribution=build["distribution"])))
-            changed_locales = {
-                "zh-CN": {"summary": "打包后生成了不同说明。", "sections": [{
-                    "id": "features", "title": "功能更新",
-                    "items": [{"id": "notes", "text": "打包后生成了不同说明。"}],
-                }]},
-                "en-US": {"summary": "Different notes were generated after packaging.", "sections": [{
-                    "id": "features", "title": "Feature updates",
-                    "items": [{"id": "notes", "text": "Different notes were generated after packaging."}],
-                }]},
-            }
-            changed_notes = "\n".join([
-                "zh-CN", changed_locales["zh-CN"]["summary"], "功能更新", "• 打包后生成了不同说明。",
-                "", "en-US", changed_locales["en-US"]["summary"], "Feature updates",
-                "• Different notes were generated after packaging.",
-            ])
-            notes_file.write_text(json.dumps({**notes_record, "notes": changed_notes, "locales": changed_locales,
-                "notesSha256": hashlib.sha256(changed_notes.encode()).hexdigest()}), encoding="utf-8")
-            rejected = node(command, "stage", "linux", success=False)
-            assert "Build used different release notes" in rejected.stderr
-            notes_file.write_text(json.dumps(notes_record), encoding="utf-8")
+            # Public distributors use protected refs and exact-byte acceptance receipts.
+            # Company release tags, distribution baselines and private note-generation
+            # pipelines are intentionally not part of the source distribution.
             node(command, "stage", "linux", success=False, extra={"CI_COMMIT_REF_PROTECTED": "false"})
             receipt["ok"] = False
             receipt_file.write_text(json.dumps(receipt))
@@ -246,8 +202,8 @@ def main():
             node(command, "stage", "linux")
             assert signed == {file.name: file.read_bytes() for file in (evidence / "staged").glob("*.release.json")}
 
-            def api(route, token=None, body=None):
-                request = urllib.request.Request(origin + route,
+            def api(route, token=None, body=None, method=None):
+                request = urllib.request.Request(origin + route, method=method,
                     data=json.dumps(body).encode() if body else None,
                     headers={"Content-Type": "application/json", **({"Authorization": "Bearer " + token} if token else {})})
                 with urllib.request.urlopen(request, timeout=10, context=tls_context) as response:
@@ -283,6 +239,8 @@ def main():
             node(command, "stage", "linux")
             rows = api("/api/v1/admin/client-releases", token)["releases"]
             assert len(rows) == 3 and all(row["enabled"] for row in rows)
+            api("/api/v1/admin/client-release-notes/9.9.1?channel=stable", token,
+                {"status": "published", "expectedRevision": 0, "locales": locales}, method="PUT")
             published_notes = api("/api/v1/admin/client-release-notes/9.9.1?channel=stable", token)
             assert published_notes["status"] == "published"
             assert published_notes["locales"] == locales

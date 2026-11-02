@@ -303,7 +303,6 @@
     const p = state.proposal || proposalOf({}, '');
     const method = methodByKey(p.personalPluginKey);
     const activeCaps = new Set((p.requiredCapabilities || []).concat(methodCaps(method)));
-    const time = String(p.atHour).padStart(2, '0') + ':' + String(p.atMinute).padStart(2, '0');
     body.innerHTML =
       '<form class="waz-form" id="wazForm"><div class="waz-fields">' +
         '<section class="waz-section"><div class="waz-section-title"><span>01</span><div>' +
@@ -333,10 +332,12 @@
             '<label class="waz-field" data-waz-once><span>执行日期时间 <b>*</b></span>' +
               '<input name="runAt" type="datetime-local" step="any" value="' +
               esc(global.ScheduleTiming.localInput(p.runAt,p.timeZone || timeZone())) + '"></label>' +
-            '<label class="waz-field" data-waz-clock><span>执行时刻</span>' +
-              '<input name="clock" type="time" value="' + esc(time) + '"></label>' +
+            '<div class="waz-field" data-waz-clock><span>执行时刻</span><div class="waz-clock-selects">' +
+              '<select name="clockHour" aria-label="小时">' + global.ScheduleTiming.clockOptions(24, p.atHour) + '</select>' +
+              '<span aria-hidden="true">:</span><select name="clockMinute" aria-label="分钟">' +
+              global.ScheduleTiming.clockOptions(60, p.atMinute) + '</select></div><small>滚动选择时间</small></div>' +
             '<label class="waz-field" data-waz-minute><span>每小时第几分</span>' +
-              '<input name="minute" type="number" min="0" max="59" value="' + Number(p.atMinute) + '"></label>' +
+              '<select name="minute">' + global.ScheduleTiming.clockOptions(60, p.atMinute) + '</select></label>' +
           '</div><div class="waz-timezone"><i></i><span>' + esc(p.timeZone || timeZone()) +
           '</span><small id="wazNextRun">保存后由服务端计算下一次执行时间</small></div>' +
         '</section>' +
@@ -412,7 +413,8 @@
     const form = state.layer && state.layer.querySelector('#wazForm');
     if (!form) return state.proposal || proposalOf({}, '');
     const data = new FormData(form);
-    const clock = String(data.get('clock') || '18:00').split(':');
+    const clock = data.get('clockHour') != null
+      ? [data.get('clockHour'), data.get('clockMinute')] : String(data.get('clock') || '').split(':');
     const every = String(data.get('every') || '');
     const zone = (state.proposal && state.proposal.timeZone) || timeZone();
     const dateInput = String(data.get('runAt') || '');
@@ -435,10 +437,8 @@
       every,
       runAt: every !== 'once' ? null : dateInput === global.ScheduleTiming.localInput(priorDate,zone)
         ? priorDate : global.ScheduleTiming.fromLocalInput(dateInput,zone),
-      atHour: every === 'hourly' ? 0 : Math.max(0, Math.min(23, Number(clock[0]) || 0)),
-      atMinute: every === 'hourly'
-        ? Math.max(0, Math.min(59, Number(data.get('minute')) || 0))
-        : Math.max(0, Math.min(59, Number(clock[1]) || 0)),
+      atHour: every === 'hourly' ? 0 : global.ScheduleTiming.clockNumber(clock[0]),
+      atMinute: global.ScheduleTiming.clockNumber(every === 'hourly' ? data.get('minute') : clock[1]),
       weekday: Math.max(1, Math.min(7, Number(data.get('weekday')) || 1)),
       timeZone: (state.proposal && state.proposal.timeZone) || timeZone(),
       assigneeId: cut(data.get('assigneeId'), 160),
@@ -504,7 +504,8 @@
     if (minute) minute.hidden = every !== 'hourly';
     if (once) once.hidden = every !== 'once';
     const hint = form.querySelector('#wazNextRun');
-    if (hint) hint.textContent = every === 'once'
+    const timingError = global.ScheduleTiming.validate(valueFromForm());
+    if (hint) hint.textContent = timingError ? tx(timingError) : every === 'once'
       ? '在指定时间触发一次，失败按下方设置重试'
       : '保存后由服务端计算下一次执行时间';
     const flow = form.elements.flow;

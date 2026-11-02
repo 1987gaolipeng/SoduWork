@@ -50,7 +50,9 @@ test('vision limits fail explicitly instead of silently dropping images', () => 
     mimeType: 'image/png', data: Buffer.from('x').toString('base64'),
   }));
   assert.equal(vision.compact(many).ok, false);
-  assert.match(vision.compact([{ mimeType: 'image/svg+xml', data: 'eA==' }]).reason, /格式/);
+  const arbitrary = vision.compact([{ mimeType: 'image/svg+xml', data: 'eA==' }]);
+  assert.equal(arbitrary.ok, true);
+  assert.equal(arbitrary.images[0].mimeType, 'image/svg+xml');
 });
 
 test('vision sends more than four images in bounded batches and preserves every observation', async () => {

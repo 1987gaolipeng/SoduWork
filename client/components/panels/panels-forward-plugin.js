@@ -42,7 +42,9 @@ function _fwpUsesRuntime(plugin) {
 
 function _fwpSubstrates(options, plugin) {
   const requirements = _fwpRuntimeRequirements(plugin);
-  const rows = (options.substrates || []).filter(item =>
+  const substrates = window.TaskExecutionClient?.targets
+    ? TaskExecutionClient.targets(options || {}) : (options.substrates || []);
+  const rows = substrates.filter(item =>
     item && item.key && _fwpSeatCanRun(item, requirements)).map(item => ({
       value: item.key,
       label: item.name || item.key,
@@ -52,7 +54,7 @@ function _fwpSubstrates(options, plugin) {
     }));
   // Automatic routing may use different Agents for different runtime nodes.
   // Only a user-selected global default must cover every such node itself.
-  const available = (options.substrates || []).filter(_fwpAvailable);
+  const available = substrates.filter(_fwpAvailable);
   const autoReady = available.length && requirements.every(required =>
     available.some(item => _fwpSeatCanRun(item, [required])));
   if (plugin.runnable !== false && autoReady) {

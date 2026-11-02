@@ -140,11 +140,30 @@
 
   function inferenceText(seed, context) {
     const message = String(seed || '');
-    if (message.trim()) return message;
+    if (message.trim()) {
+      /* A follow-up may explicitly delegate the previous result to the plugin.
+         Preserve the current instruction while using the bounded transcript as
+         the structured input value; the model still receives both in the prompt. */
+      const prior = String(context && (context.priorConversationText || context.conversationText) || '').trim();
+      if (prior && referencesPriorConversation(message)) return prior.slice(-12000);
+      return message;
+    }
     const names = attachmentNames(context);
     return names.length
       ? '\u8bf7\u6839\u636e\u672c\u8f6e\u63d0\u4f9b\u7684\u9644\u4ef6\u5b8c\u6210\u3002\u9644\u4ef6\uff1a' + names.join('\u3001')
       : '';
+  }
+
+  function referencesPriorConversation(value) {
+    const text = String(value || '');
+    if (/\b(?:the\s+)?(?:above|previous|earlier|prior|last)\s+(?:result|output|transcript|response|reply|answer|content|message|turn|one)\b/i.test(text)) return true;
+    if (/\b(?:the|this|that|my|your|same|previous|last)\s+(?:result|output|transcript|response|reply|answer|content)\b/i.test(text)) return true;
+    if (/\b(?:send|use|apply|forward|pass|publish|process|summarize|deliver|continue|share|attach|include|based\s+on)\s+(?:(?:the|this|that|my|your|same|previous|last)\s+)?(?:result|output|transcript|response|reply|answer|content|it|this|that|same)\b/i.test(text)) return true;
+    if (/\b(?:send|use|apply|forward|pass|publish|process|summarize|deliver|continue|share|attach|include|based\s+on)\s+(?:the\s+)?above\b/i.test(text)) return true;
+    if (/\b(?:send|use|apply|forward|pass|publish|process|summarize|deliver|continue|based\s+on)\s+(?:it|this|that|same)\b/i.test(text)) return true;
+    if (/(?:\u4e0a\u9762|\u4e0a\u8ff0|\u524d\u9762|\u4e4b\u524d|\u521a\u624d|\u4e0a\u4e00\u8f6e|\u4e0a\u4e00\u6b21).{0,8}(?:\u7ed3\u679c|\u8f93\u51fa|\u56de\u590d|\u56de\u7b54|\u5185\u5bb9)/.test(text)) return true;
+    if (/(?:\u7ed3\u679c|\u8f93\u51fa|\u56de\u590d|\u56de\u7b54).{0,8}(?:\u4ea4\u7ed9|\u53d1\u9001\u7ed9|\u4f20\u7ed9|\u7528\u4e8e|\u7ee7\u7eed|\u5904\u7406)/.test(text)) return true;
+    return /(?:\u628a|\u5c06).{0,8}(?:\u5185\u5bb9).{0,8}(?:\u4ea4\u7ed9|\u53d1\u9001\u7ed9|\u4f20\u7ed9|\u7528\u4e8e|\u7ee7\u7eed|\u5904\u7406)/.test(text);
   }
 
   /* Conversation-first input policy: the user's sentence already is the goal.

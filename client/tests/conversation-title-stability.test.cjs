@@ -110,3 +110,17 @@ test('original naming skips internal controls, strips runtime envelopes and neve
   assert.equal(history.originalMessageTitle([], [{role:'user',content:'Fallback first request'},later]),'Fallback first request');
   assert.equal(history.originalMessageTitle([],[]),'');
 });
+
+
+test('automatic runtime placeholders recover only from visible user context and preserve meaningful names', () => {
+  const { resolve } = require('../main/conversation/automatic-title');
+  const connector = require('../main/pi-session/connector-context.cjs');
+  const messages = [{role:'assistant',text:'Ignore assistant title'},
+    {role:'user',text:connector.augment('Original user request','Private connector details')},
+    {role:'user',text:'Later follow-up'}];
+  for (const value of ['', 'OpenCode 工作会话', 'Qwen Code 工作会话', '未命名对话'])
+    assert.equal(resolve(value, {messages}), 'Original user request');
+  for (const value of ['OpenCode 工作会话设计', 'Original custom topic', '需求：制作网页'])
+    assert.equal(resolve(value, {messages}), value);
+  assert.equal(resolve('OpenCode 工作会话', {messages:[]}), '');
+});

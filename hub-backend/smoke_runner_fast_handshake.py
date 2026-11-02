@@ -25,14 +25,14 @@ class _Socket:
         return json.dumps({"op": "welcome", "caps": []})
 
 
-async def main() -> None:
+async def _checks() -> None:
     runner = runner_main.Runner("http://127.0.0.1:9080", "", "", "smoke")
-    # The synthetic dispatch checks handshake latency independently of host load.
-    runner._resource_budget.sampler = lambda: {
-        "cpuPercent": 0, "cpuCount": 2,
-        "memoryAvailableBytes": 4 * 1024 ** 3,
-        "memoryTotalBytes": 8 * 1024 ** 3,
-    }
+    runner._admission._journal.close()
+    runner._admission._journal = None
+    # This fixture tests fast acknowledgement, not current workstation pressure.
+    # Resource-policy behavior has its own admission regression coverage.
+    from app.services.runner_admission import ResourceSnapshot
+    runner._resource_budget.snapshot = lambda *args, **kwargs: ResourceSnapshot(limit=32)
     socket = _Socket()
     runner.ws = socket
 

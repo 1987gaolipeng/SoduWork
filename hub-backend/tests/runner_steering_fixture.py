@@ -35,6 +35,13 @@ async def run():
     original_argv = local_base._command_argv
     peer = str(Path(__file__).with_name("steering_native_peer.py"))
     commands = []
+    if acp_agents.CATALOG.get(agent, {}).get("launch") == "node":
+        # The vendor boundary is synthetic; retain production bridge construction
+        # without reading an installed adapter or the developer's account files.
+        acp_agents.agent_npm_runtime.package_entry = lambda *_args: peer
+        acp_agents.agent_npm_runtime.node_env = lambda *_args: {
+            "ok": True, "nodePath": sys.executable,
+        }
 
     def argv(exe, args, ws, cfg, prof):
         # Preserve production profile/session arguments and the complete real
@@ -48,9 +55,9 @@ async def run():
         if agent == "harness2":
             entry = str(Path(__file__).with_name("steering_harness2_entry.py"))
             return [actual[0], entry, *actual[2:]]
-        if agent in {"codex-harness", "opencode", "qwen", "dsh"}:
+        if agent == "opencode" or agent in acp_agents.CATALOG:
             split = actual.index("--")
-            return [*actual[:split + 1], sys.executable, peer, agent]
+            return [*actual[:split + 1], sys.executable, peer, agent, "--acp-fixture"]
         return [sys.executable, peer, agent, *args]
 
     local_process._command_argv = argv

@@ -8,6 +8,7 @@ import { Icon, Modal, toast, Confirm, SelectMenu } from '../ui.jsx'
 import RunnerBoard from './RunnerBoard.jsx'
 import ClientAccessPolicy from './ClientAccessPolicy.jsx'
 import MailSettings from './MailSettings.jsx'
+import { skinConfig, selectedSkin } from '../client-appearance.js'
 import './client-updates.css'
 import './execution-network.css'
 
@@ -182,14 +183,21 @@ function ClientDetail({ client, onClose, onChanged }) {
   const [users, setUsers] = useState([])
   const [updates, setUpdates] = useState([])
   const [confirm, setConfirm] = useState(null)   // Confirmation state for destructive remote actions.
+  const detailScope = useRef(null)
+  const pushLock = useRef(false)
 
   useEffect(() => {
     let alive = true
+    const scope = { revision: 0 }
+    detailScope.current = scope
+    pushLock.current = false
+    setD(null)
+    setBusy('')
     api.clientDetail(client.id)
-      .then((next) => { if (alive) { setD(next); setOwner(next.ownerUserId || '') } })
-      .catch(() => { if (alive) setD({ ...client, config: {} }) })
+      .then((next) => { if (alive && !scope.revision) { setD(next); setOwner(next.ownerUserId || '') } })
+      .catch(() => { if (alive && !scope.revision) setD({ ...client, config: {} }) })
     if (can('client.assign')) api.users().then((list) => { if (alive) setUsers(list || []) }).catch(() => {})
-    return () => { alive = false }
+    return () => { alive = false; if (detailScope.current === scope) detailScope.current = null }
   }, [client.id])
 
   useEffect(() => {
@@ -207,18 +215,31 @@ function ClientDetail({ client, onClose, onChanged }) {
   }, [client.id])
 
   async function reloadDetail() {
+    const scope = detailScope.current
+    const revision = scope ? ++scope.revision : 0
     const next = await api.clientDetail(client.id)
+    if (!scope || detailScope.current !== scope || scope.revision !== revision) return next
     setD(next)
     setOwner(next.ownerUserId || '')
     if (can('client.view')) api.clientUpdates(client.id)
-      .then((history) => setUpdates(history.attempts || [])).catch(() => {})
+      .then((history) => { if (detailScope.current === scope) setUpdates(history.attempts || []) }).catch(() => {})
     return next
   }
 
   async function push(body, label) {
+    if (pushLock.current || busy) return false
+    const scope = detailScope.current
+    if (!scope) return false
+    pushLock.current = true
+    ++scope.revision
     setBusy(label)
     try {
       const r = await api.pushClient(client.id, body)
+      if (detailScope.current !== scope) return false
+      ++scope.revision
+      // The successful response confirms persistence, not that the device rendered it.
+      if (body?.type === 'config.patch') setD(previous => ({ ...(previous || client),
+        config: { ...(previous?.config || {}), ...body.patch } }))
       const delivered = Boolean(r?.delivered)
       if (delivered) {
         toast(tx("已下发（在线，已送达）"))
@@ -234,9 +255,11 @@ function ClientDetail({ client, onClose, onChanged }) {
       onChanged && onChanged()
       return body?.type === "notice" ? delivered : true
     } catch (e) {
-      toast(tx("失败：") + e.message)
+      if (detailScope.current === scope) toast(tx("失败：") + e.message)
       return false
-    } finally { setBusy('') }
+    } finally {
+      if (detailScope.current === scope) { pushLock.current = false; setBusy('') }
+    }
   }
   async function saveOwner() {
     setBusy('owner')
@@ -361,7 +384,7 @@ function ClientDetail({ client, onClose, onChanged }) {
           {can('client.control') && (
             <div><label className="f-lbl">{tx("远程设提醒强度")}</label>
               <div className="seg">{[['off', tx("关闭")], ['light', tx("轻柔")], ['strong', tx("明显")]].map(([v, l]) => (
-                <span key={v} className={'s' + (cfg.remind === v ? ' on' : '')} onClick={() => push({ type: 'config.patch', patch: { remind: v } }, 'remind')}>{l}</span>
+                <button type="button" key={v} disabled={!!busy || !d} aria-pressed={cfg.remind === v} className={'s' + (cfg.remind === v ? ' on' : '')} onClick={() => push({ type: 'config.patch', patch: { remind: v } }, 'remind')}>{l}</button>
               ))}</div>
             </div>
           )}
@@ -369,7 +392,7 @@ function ClientDetail({ client, onClose, onChanged }) {
           {can('client.control') && (
             <div><label className="f-lbl">{tx("远程换皮肤")}</label>
               <div className="seg">{[['bear-vivid', tx("玻璃")], ['box-biz', tx("五彩盒子")], ['diamond-ice', tx("钻石")]].map(([v, l]) => (
-                <span key={v} className={'s' + (cfg.character === v.split('-')[0] ? ' on' : '')} onClick={() => push({ type: 'command', action: 'set-skin', payload: { skinId: v } }, 'skin')}>{l}</span>
+                <button type="button" key={v} disabled={!!busy || !d} aria-pressed={selectedSkin(cfg) === v} className={'s' + (selectedSkin(cfg) === v ? ' on' : '')} onClick={() => push({ type: 'config.patch', patch: skinConfig(v) }, 'skin')}>{l}</button>
               ))}</div>
             </div>
           )}

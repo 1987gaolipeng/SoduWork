@@ -35,7 +35,7 @@ async function main() {
   const inspectorPort = inspectorServer.address().port;
   await new Promise(resolve => inspectorServer.close(resolve));
   const log = fs.openSync(output + '.app.log', 'w');
-  const env = { ...process.env, SODUWORK_USER_DATA: profile, SODUWORK_USER_DATA: profile,
+  const env = { ...process.env, SODUWORK_USER_DATA: profile,
     HTTP_PROXY: 'http://127.0.0.1:9', HTTPS_PROXY: 'http://127.0.0.1:9',
     http_proxy: 'http://127.0.0.1:9', https_proxy: 'http://127.0.0.1:9',
     NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' };

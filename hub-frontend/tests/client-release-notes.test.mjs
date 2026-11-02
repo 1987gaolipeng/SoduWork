@@ -10,10 +10,12 @@ test('six packages share one escaped release note and legacy empty releases stay
   releases.push({ id: 'old', version: '1.0.0', channel: 'stable', platform: 'linux', notes: '' })
   const page = await createComponentHarness(new URL('../src/screens/ClientReleases.jsx', import.meta.url), {
     dependencies: { '../api.js': { can: () => false, api: {
-      clientReleases: async () => ({ releases }), clientUpdateAttempts: async () => ({ attempts: [], counts: {} }),
+      clientReleases: async () => ({ releases }), clientReleaseNotes: async () => ({ notes: [] }),
+      clientUpdateAttempts: async () => ({ attempts: [], counts: {} }),
     } }, '../ui.jsx': { Icon: 'Icon', Loading: 'Loading' }, './client-releases.css': {} },
   })
   t.after(() => { page.unmount(); setLocale('zh-CN') })
+  page.render()
   await page.flush()
   const details = page.nodes(node => node.type === 'details' && node.props.className === 'cr-notes')
   assert.equal(details.length, 1)

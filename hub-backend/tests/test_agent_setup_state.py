@@ -48,6 +48,17 @@ class AgentSetupStateTests(unittest.TestCase):
         self.assertEqual(item["warnNow"], "")
         self.version.assert_not_called()
 
+    def test_unknown_codex_auth_cannot_dispatch_through_an_old_hub(self):
+        from app.services import ai_remote
+        with patch.object(agent_setup, "_auth_probe", return_value=("", "")), \
+                patch.object(agent_setup, "_runtime_issue", return_value=""):
+            item = self.detect("codex")
+        self.assertTrue(item["installed"])
+        self.assertEqual(item["auth"], "unauthed")
+        self.assertEqual(item["authStatus"], "unknown")
+        self.assertEqual(item["setupState"], "unknown")
+        self.assertFalse(ai_remote._agent_usable(item))
+
     def test_missing_managed_executable_preserves_record_and_reports_broken(self):
         self.bin.return_value = ""
         self.active.return_value = "1.18.18"
@@ -140,7 +151,11 @@ class AgentSetupStateTests(unittest.TestCase):
         self.assertTrue(item["installed"])
         self.assertEqual(item["setupState"], "nollm")
         self.stub(agent_setup, "_auth_probe", ("unauthed", "Please sign in"))
-        item = self.detect("claude")
+        # The native executable has its own version probe; the ACP entry is a
+        # separate installation component and cannot stand in for that file.
+        with (patch.object(agent_setup, "_version_of", return_value=("2.1.316", "cli", "")),
+              patch.object(agent_setup, "_runtime_issue", return_value="")):
+            item = self.detect("claude")
         self.assertTrue(item["installed"])
         self.assertEqual(item["setupState"], "unauthed")
 

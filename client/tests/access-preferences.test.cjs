@@ -24,10 +24,10 @@ test('default modes persist locally and are applied only to new supported intera
   assert.deepEqual(f.get(), { ok: true, mode: 'standard', revision: 0 });
   assert.equal((await f.set('readonly', 0)).ok, true);
   assert.equal(preferences.snapshot(f.app).mode, 'readonly');
-  for (const adapterId of ['pi', 'codex-harness', 'opencode', 'qwen', 'codex', 'dsh']) assert.equal(f.apply({ adapterId }).accessMode, 'readonly');
+  for (const adapterId of ['pi', 'codex-harness', 'opencode', 'qwen', 'codex', 'dsh', 'kimi', 'claude']) assert.equal(f.apply({ adapterId }).accessMode, 'readonly');
   for (const options of [{ taskSession: true }, { taskRef: 'task' }]) assert.equal(f.apply(options).accessMode, 'readonly');
   for (const options of [{ chatId: 'existing' }, { automationId: 'schedule' },
-    ...['claude', 'unknown-runtime'].map(adapterId => ({ adapterId })), { accessMode: 'standard' }]) assert.equal(f.apply(options), options);
+    ...['unknown-runtime'].map(adapterId => ({ adapterId })), { accessMode: 'standard' }]) assert.equal(f.apply(options), options);
   assert.equal(f.apply({}, false).accessMode, undefined);
   assert.equal((await f.set('standard', 1)).ok, true);
   assert.equal(f.apply({ mode: 'readonly' }).accessMode, 'readonly');

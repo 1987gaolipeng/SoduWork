@@ -149,6 +149,24 @@ class VersionProbeTests(unittest.TestCase):
         self.assertEqual(agent_setup_runtime._short(sys.executable,
             ["-c", "import sys; print('fatal startup error'); sys.exit(3)"]), "")
 
+    def test_real_version_stdout_wins_over_an_earlier_stderr_warning(self):
+        source = ("import sys; "
+                  "print('WARNING: the isolated account directory does not exist', file=sys.stderr, flush=True); "
+                  "print('codex-cli 0.165.0', flush=True)")
+        self.assertEqual(agent_setup_runtime._short(sys.executable, ["-c", source]), "codex-cli 0.165.0")
+
+    def test_real_stderr_only_version_stays_supported_without_accepting_failed_exit(self):
+        for code in (0, 3):
+            with self.subTest(code=code):
+                source = "import sys; print('Agent 1.2.3', file=sys.stderr); sys.exit(" + str(code) + ")"
+                self.assertEqual(agent_setup_runtime._short(sys.executable, ["-c", source]),
+                                 "Agent 1.2.3" if code == 0 else "")
+
+    def test_real_version_probe_drains_both_output_pipes(self):
+        # More than a pipe buffer of diagnostics must not block stdout or timeout.
+        source = "import sys; sys.stderr.write('warning\\n' * 16384); print('Agent 1.2.3')"
+        self.assertEqual(agent_setup_runtime._short(sys.executable, ["-c", source]), "Agent 1.2.3")
+
 
 if __name__ == "__main__":
     unittest.main()

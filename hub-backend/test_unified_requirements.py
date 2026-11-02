@@ -12,13 +12,13 @@ from unittest.mock import AsyncMock, patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from sqlalchemy import create_engine, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app import models
 from app.api import tasks, attachments, retired_endpoints
 from app.db import Base, get_session
-from app.deps import current_client
+from app.deps import current_ai_client, current_client
 from app.services import device_auth, org_memory, task_access, task_requirements, task_status, task_notifications
 from app.memory_record_models import MemoryRecord
 from app import automation_models, library_models, session_memory_models, conversation_handoff_models
@@ -28,7 +28,11 @@ from tests.sqlite_schema import create_fresh_sqlite_schema
 class UnifiedRequirementTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="soduwork-requirements-test-")
+        self.addCleanup(self.temp.cleanup)
         self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async def close_engine():
+            await self.engine.dispose()
+        self.addAsyncCleanup(close_engine)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.engine.begin() as connection:
             await create_fresh_sqlite_schema(connection, Base.metadata)
@@ -53,7 +57,7 @@ class UnifiedRequirementTests(unittest.IsolatedAsyncioTestCase):
         self.app = app = FastAPI()
         for router in (tasks.router, attachments.router, retired_endpoints.router):
             app.include_router(router)
-        async def identity(request: __import__('fastapi').Request):
+        async def identity(request: Request):
             who = request.headers.get("X-Test-Identity")
             if not who:
                 raise HTTPException(status_code=401, detail="需要有效的 SoduWork 设备会话")
@@ -74,7 +78,7 @@ class UnifiedRequirementTests(unittest.IsolatedAsyncioTestCase):
         """Registered cleanups also release resources when asyncSetUp fails."""
 
     async def call(self, method, path, who="owner", **kwargs):
-        headers = {"X-Test-Identity": who}
+        headers = {"X-Test-Identity": who, **dict(kwargs.pop("headers", {}) or {})}
         # Anonymous policy fixtures override current_client and must not receive fabricated user sessions.
         if self.clients[who].user_ref:
             headers["Authorization"] = "Device " + device_auth.issue_session(self.clients[who])[0]
@@ -301,7 +305,8 @@ class UnifiedRequirementTests(unittest.IsolatedAsyncioTestCase):
                    new_callable=AsyncMock, return_value=request) as ensure_request, \
              patch("app.services.release_control.request_api", return_value={"id": request.id}), \
              patch("app.services.tasks.task_to_api_live", new_callable=AsyncMock,
-                   return_value={"id": "shared", "status": "doing", "requirementStage": "reviewing"}), \
+                   side_effect=[{"id": "shared", "status": "doing", "requirementStage": "delivering"},
+                                {"id": "shared", "status": "doing", "requirementStage": "reviewing"}]), \
              patch("app.services.task_access.publish_task", new_callable=AsyncMock):
             response = await self.call("POST", "tasks/shared/submit-review", json={"note": "已完成自检"})
         self.assertEqual(response.status_code, 200, response.text)
@@ -352,21 +357,23 @@ class UnifiedRequirementTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(artifact.source_ref, "conversation:review-source")
             self.assertEqual((await session.get(models.Task, "shared")).status, "doing")
 
-    async def test_submit_review_still_rejects_missing_deliverable(self):
+    async def test_explicit_submit_review_allows_missing_promised_deliverable(self):
         async with self.sessions() as session:
             task = await session.get(models.Task, "shared")
             task.status = "doing"
             task.result = ""
-            # Manual confirmation is allowed only when no output was promised.
+            # Explicit submission requests human review even when promised files are absent.
             task.work_routing = {**task.work_routing, "executionSubmissionMode": "manual",
                                  "outputContract": {"kind": "file", "deliverables": ["review.md"]}}
             await session.delete(await session.get(models.Attachment, "output"))
             await session.commit()
         response = await self.call("POST", "tasks/shared/submit-review", json={})
-        self.assertEqual(response.status_code, 409, response.text)
-        self.assertIn("没有可审阅的产出", response.json()["detail"])
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["task"]["requirementStage"], "reviewing")
         async with self.sessions() as session:
-            self.assertIsNone(await session.scalar(select(automation_models.ApprovalRequest.id)))
+            self.assertIsNotNone(await session.scalar(select(automation_models.ApprovalRequest.id)))
+            artifact = await session.scalar(select(automation_models.ArtifactVersion))
+            self.assertTrue(artifact.manifest["manual"])
 
     async def test_submit_review_accepts_manual_confirmation_without_declared_output(self):
         async with self.sessions() as session:
@@ -386,6 +393,9 @@ class UnifiedRequirementTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(artifact.kind, "manual")
             self.assertTrue(artifact.manifest["manual"])
             self.assertEqual(artifact.manifest["primary"], [])
+            self.assertEqual(artifact.manifest["files"], [])
+            self.assertNotIn("text", artifact.manifest)
+            self.assertEqual(request.task_id, "shared")
             self.assertEqual((await session.get(models.Task, "shared")).status, "doing")
 
     async def test_archive_preserves_completed_delivery_and_can_restore(self):

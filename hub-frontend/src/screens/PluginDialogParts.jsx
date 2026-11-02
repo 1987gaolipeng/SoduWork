@@ -1,5 +1,5 @@
 import React from 'react'
-import { useLocale } from '../i18n.js'
+import { useLocale, serverMessage } from '../i18n.js'
 import { Icon } from '../ui.jsx'
 
 export function Field({ label, children }) {
@@ -12,6 +12,6 @@ export function NoticeList({ tone = '', title, items }) {
   if (!items || !items.length) return null
   return <div className={'plugin-notice ' + tone}>
     <Icon name={tone === 'bad' ? 'alert' : 'shield'} />
-    <div><b>{title}</b>{items.map((item, index) => <span key={index}>{item}</span>)}</div>
+    <div><b>{title}</b>{items.map((item, index) => <span key={index}>{serverMessage(item)}</span>)}</div>
   </div>
 }

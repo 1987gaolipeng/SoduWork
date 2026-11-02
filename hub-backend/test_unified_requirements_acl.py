@@ -28,12 +28,18 @@ class MigratedRequirementACLTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix="soduwork-requirements-acl-")
         self.addCleanup(self.directory.cleanup)
-        self.engine = create_async_engine("sqlite+aiosqlite:///" + (Path(self.directory.name)/"fixture.db").as_posix())
+        database = (Path(self.directory.name)/"fixture.db").as_posix()
+        # Build the complete empty schema without async DDL handoffs. Legacy
+        # migration, HTTP, realtime and business transactions remain unchanged.
+        schema_engine = sa.create_engine("sqlite:///" + database)
+        try:
+            Base.metadata.create_all(schema_engine)
+        finally:
+            schema_engine.dispose()
+        self.engine = create_async_engine("sqlite+aiosqlite:///" + database)
         self.addAsyncCleanup(self.engine.dispose)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         self.clients = {}
-        async with self.engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
         async with self.sessions() as session:
             session.add_all([models.OrgUnit(id="team", name="Team"), models.OrgUnit(id="foreign", name="Foreign")])
             for uid, oid in (("executor", "team"), ("a", "team"), ("b", "team"), ("peer", "team"), ("stranger", "foreign"),

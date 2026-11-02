@@ -7,7 +7,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import (JSON, Boolean, DateTime, Index, Integer, String, Text,
+from sqlalchemy import (JSON, BigInteger, Boolean, DateTime, Index, Integer, String, Text,
                         UniqueConstraint, func, text)
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -806,6 +806,11 @@ class ExecutionSession(Base):
     model: Mapped[str] = mapped_column(String(160), default="")
     state: Mapped[str] = mapped_column(String(32), default="queued", index=True)
     seq: Mapped[int] = mapped_column(Integer, default=0)
+    # Transport receipts and replay watermarks are independent from observed seq.
+    delivery_stream_id: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    delivery_seq: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    delivery_digest: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    persisted_seq: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     work_dir: Mapped[str] = mapped_column(String(700), default="")
     metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

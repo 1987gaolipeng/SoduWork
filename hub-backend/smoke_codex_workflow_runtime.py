@@ -82,19 +82,19 @@ def auth_contracts() -> None:
     check("authenticated agent is dispatchable",
           ai_remote._agent_usable({"key": "codex", "auth": "authed"}))
     check("legacy runner remains compatible", ai_remote._agent_usable({"key": "pi"}))
-    # The local CLI status is authoritative. Only older/unavailable status
-    # commands use API-key/file fallback; do not consult the host installation.
+    # The local CLI status is authoritative. Unavailable status remains
+    # unknown; key presence and cached files cannot prove native login.
     with (
         tempfile.TemporaryDirectory(prefix="soduwork-codex-auth-") as home,
         patch.dict(os.environ, {"CODEX_HOME": home, "OPENAI_API_KEY": ""}),
         patch.object(agent_setup, "_bin_of", return_value="fixture-codex"),
         patch.object(cli_account_auth, "_run", return_value=None) as status,
     ):
-        check("no CLI status or credentials remains logged out",
-              agent_setup._auth_probe("codex")[0] == "unauthed")
+        check("unavailable CLI status remains explicitly unknown",
+              agent_setup._auth_probe("codex")[0] == "")
         with patch.dict(os.environ, {"OPENAI_API_KEY": "smoke-key"}):
-            check("legacy CLI status falls back to API-key authentication",
-                  agent_setup._auth_probe("codex")[0] == "authed")
+            check("a static API key cannot replace unavailable CLI status",
+                  agent_setup._auth_probe("codex")[0] == "")
             status.return_value = (1, "Not logged in")
             check("explicit CLI logout takes precedence over static API key",
                   agent_setup._auth_probe("codex")[0] == "unauthed")

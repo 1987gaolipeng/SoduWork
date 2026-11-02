@@ -127,3 +127,6 @@ mobile/
 
 # Some CJK input methods can create a literal '%SystemDrive%' directory under client/ at runtime; never commit it.
 /client/%SystemDrive%/
+
+# Agent session local artifacts: browser validation benches, isolated user data, backups.
+/.local/

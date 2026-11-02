@@ -42,8 +42,10 @@
     release: '退回需求池', advance: '推进需求', reject: '退回上一步', closed: '办结需求',
     receipt: '收到交付回执', 'ai.dispatch_started': '正在派给 AI', 'ai.dispatch_failed': 'AI 派活失败',
     'ai.dispatch_uncertain': '正在确认执行机回执',
-    'ai.dispatched': '派给 AI', 'ai.rework': 'AI 按意见继续返修', 'ai.rework_failed': '自动返修未启动', 'release.approved': '人工通过',
-    'release.rejected': '人工退回', 'release.ai_reviewed': 'AI 代码审查通过',
+    'ai.dispatched': '派给 AI', 'ai.rework': 'AI 按意见继续返修', 'ai.rework_failed': '自动返修未启动', 'release.approved': '审批通过',
+    'release.rejected': '审批退回', 'release.ai_reviewed': 'AI 代码审查通过',
+    'release.candidate': '交付版本已生成', 'release.approval_requested': '已发起审批',
+    'ai.artifacts': '交付文件已关联', 'artifact.auto_reviewed': '自动验收报告已生成',
     'release.deploy_queued': '排入环境发布', 'plugin.gerrit_merged': '代码已合并',
     'task.evaluated': '完成需求评价', 'evolution.proposed': '形成改进建议',
     'task.execution_started': '更新执行状态',
@@ -647,25 +649,50 @@
     completed: '执行本轮已完成', failed: '执行本轮失败', cancelled: '执行本轮已取消',
   };
 
-  function timelineEventText(item) {
+  function timelineText(value, params) {
+    return window.SoduWorkI18n?.t ? window.SoduWorkI18n.t(value, value, params || {}) :
+      String(value).replace(/\{(\w+)\}/g, (match, key) => params?.[key] ?? match);
+  }
+
+  function timelineEventText(item, list) {
     const kind = String((item || {}).kind || '');
     const detail = (item || {}).detail || {};
     if (kind === 'conversation.turn') return TURN_EVENT_TEXT[String(detail.state || '')] || '执行状态已更新';
+    if (kind === 'comment') return '讨论留言';
+    if (kind === 'release.approved' || kind === 'release.rejected') {
+      // A generic approval can be submitted by a person or an automatic review.
+      // Match the recorded operation, never infer its origin from free-form notes.
+      const automatic = list.some(row => row.kind === 'artifact.auto_reviewed' && detail.requestId &&
+        row.detail?.requestId === detail.requestId && row.detail?.versionId === detail.versionId &&
+        row.actor === item.actor && row.detail?.verdict === (kind === 'release.approved' ? 'approved' : 'rejected'));
+      if (automatic) return kind === 'release.approved' ? '自动验收通过' : '自动验收未通过';
+      if (detail.action === 'review') return kind === 'release.approved' ? '验收通过' : '退回修改';
+    }
     if (EVENT_TEXT[kind]) return EVENT_TEXT[kind];
-    /* Keep newly added server events readable until a dedicated translation is added. */
-    return kind ? kind.replace(/[._-]+/g, ' · ') : '需求更新';
+    return '需求更新';
   }
 
   function eventSummary(item) {
     const d = item.detail || {};
     const parts = [];
-    if (item.kind === 'conversation.turn' && d.state) parts.push('状态：' + (TURN_STATE_TEXT[d.state] || d.state));
-    if (d.executor) parts.push('执行方式：' + ({ native: '本机对话', workflow: '工作流', dispatch: '执行机' }[d.executor] || d.executor));
-    if (d.fromStage || d.toStage) parts.push([d.fromStage, d.toStage].filter(Boolean).join(' → '));
-    if (d.from || d.to) parts.push([d.from, d.to].filter(Boolean).join(' → '));
-    parts.push(d.note, d.summary, d.reason, d.environmentName, d.commit && String(d.commit).slice(0, 12));
-    if (Array.isArray(d.files) && d.files.length) parts.push('文件 ' + d.files.slice(0, 3).join('、') + (d.files.length > 3 ? ' 等' : ''));
+    const status = value => timelineText(({todo: '待开始', doing: '进行中', reviewing: '待验收',
+      intake: '收集箱', clarifying: '待补充', ready: '待开始', delivering: '进行中', delivered: '已完成',
+      closed: '已归档', archived: '已归档', paused: '已暂停'})[value] || STATE_TEXT[value] || '状态已更新');
+    if (item.kind === 'conversation.turn' && d.state) parts.push(timelineText(TURN_STATE_TEXT[d.state] || '执行状态已更新'));
+    if (d.executor) parts.push(timelineText(({ native: '本机对话', workflow: '工作流', dispatch: '执行机' })[d.executor] || '执行方式已更新'));
+    if (d.fromStage || d.toStage) parts.push([d.fromStage, d.toStage].filter(Boolean).map(status).join(' → '));
+    if (d.from || d.to) parts.push([d.from, d.to].filter(Boolean).map(status).join(' → '));
+    parts.push(d.note, d.summary || d.report?.summary, d.reason, d.environmentName, d.commit && String(d.commit).slice(0, 12));
+    if (Array.isArray(d.files) && d.files.length) parts.push(timelineText('涉及 {count} 个文件', {count: d.files.length}) + ': ' +
+      d.files.map(file => typeof file === 'string' ? file : file?.filename || file?.name || file?.path || '').filter(Boolean).join('、'));
     return parts.filter(Boolean).join(' · ');
+  }
+
+  function timelineActor(value) {
+    const actor = String(value || '');
+    if (/^agent(?::|$)/i.test(actor)) return timelineText('AI 助手');
+    if (!actor || /^(system|SoduWork)$/i.test(actor)) return timelineText('系统');
+    return actor;
   }
 
   function timelineDateText(value) {
@@ -674,7 +701,6 @@
     const d = new Date(timestamp);
     if (Number.isNaN(d.getTime())) return '';
     return d.toLocaleString((globalThis.SoduWorkI18n?.getLocale() || 'zh-CN'), {
-      timeZone: 'Asia/Shanghai',
       month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
     });
   }
@@ -684,17 +710,30 @@
       const atA = eventTimestamp(a.item.at);
       const atB = eventTimestamp(b.item.at);
       return atB - atA || b.index - a.index;
-    }).slice(0, 40).map(({ item }) => item);
+    }).map(({ item }) => item);
   }
 
-  function timelineHtml(list) {
-    if (!list || !list.length) return '';
+  function timelineHtml(events, options = {}) {
+    const list = [...(events || []), ...(options.comments || []).map(row => ({
+      id: row.id ? 'comment:' + row.id : '', kind: 'comment', actor: row.authorName || timelineText('成员'), at: row.createdAt, detail: {note: row.body},
+    }))];
+    if (!list.length) return options.embedded ? '<p>' + esc(timelineText('暂无活动记录')) + '</p>' : '';
     const rows = timelineRows(list);
+    const body = '<ol>' + rows.map(item => {
+      const summary = eventSummary(item);
+      const date = timelineDateText(item.at);
+      const key = 'note:' + (item.id || [item.kind, item.actor, item.at].join(':'));
+      const description = summary.length > 120
+        ? '<details class="tfd-event-note" data-tfd-open="' + esc(key) + '"><summary><span data-user-content>' + esc(summary.slice(0, 120)) + '…</span><b>' +
+          esc(timelineText('查看完整说明')) + '</b></summary><p data-user-content>' + esc(summary) + '</p></details>'
+        : summary ? '<span data-user-content>' + esc(summary) + '</span>' : '';
+      return '<li><i aria-hidden="true"></i><div><b>' + esc(timelineText(timelineEventText(item, list))) + '</b>' + description +
+        '</div><small><span data-user-content>' + esc(timelineActor(item.actor)) + '</span>' + (date ? ' · ' + esc(date) : '') + '</small></li>';
+    }).join('') + '</ol>';
+    if (options.embedded) return '<div class="tfd-timeline is-activity">' + body + '</div>';
     return '<details class="tfd-group tfd-timeline" data-tfd-open="timeline"><summary><span><i class="tfd-group-icon is-time"></i>' +
-      '<b>审计时间线</b><small>' + list.length + ' 条记录 · 按实际发生时间倒序</small></span><svg viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg></summary>' +
-      '<ol>' + rows.map((item) => '<li><i></i><div><b>' + esc(timelineEventText(item)) + '</b>' +
-        (eventSummary(item) ? '<span>' + esc(eventSummary(item)) + '</span>' : '') + '</div><small>' +
-        esc([item.actor, timelineDateText(item.at)].filter(Boolean).join(' · ')) + '</small></li>').join('') + '</ol></details>';
+      '<b>' + esc(timelineText('活动记录')) + '</b><small>' + esc(timelineText('{count} 条记录 · 按实际发生时间倒序', {count: list.length})) +
+      '</small></span><svg viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg></summary>' + body + '</details>';
   }
 
   function html(trace, rawOpts) {
@@ -723,7 +762,7 @@
       (automated ? runsHtml(trace, run, node, opts) : '') + '<section class="tfd-groups">' +
       approvalGroup + deploymentsHtml(trace.deployments, opts) +
       aiHtml((((trace.execution || {}).sessions) || trace.ai), opts) +
-      artifactsHtml(trace) + timelineHtml(trace.timeline) + '</section></div>';
+      artifactsHtml(trace) + (opts.suppressTimeline ? '' : timelineHtml(trace.timeline)) + '</section></div>';
   }
 
   function isAutomated(trace) {
@@ -864,7 +903,7 @@
     });
   }
 
-  const api = { html, bind, stateText, tone, esc,
+  const api = { html, bind, stateText, tone, esc, timelineHtml,
     gateHtml: gatePacketHtml, openEvidence: openExternal,
     isLive: (value) => LIVE.has(String(value || '')),
   };

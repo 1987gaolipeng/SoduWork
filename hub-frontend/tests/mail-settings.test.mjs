@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createComponentHarness } from './helpers/react-harness.mjs'
+import { setLocale } from '../src/i18n.js'
 
 async function fixture(overrides = {}) {
+  setLocale('zh-CN')
   const calls = [], notices = []
   const settings = { enabled: true, host: 'smtp.126.com', port: 465, security: 'ssl', username: 'sender@126.com', senderAddress: '', senderName: 'SoduWork', ready: true, passwordConfigured: true }
   const page = await createComponentHarness(new URL('../src/screens/MailSettings.jsx', import.meta.url), { dependencies: {

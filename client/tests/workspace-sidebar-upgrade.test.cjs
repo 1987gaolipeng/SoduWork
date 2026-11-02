@@ -26,7 +26,7 @@ function fixture() {
 const pins = store => Array.from(store.get().pins);
 
 test('upgrade recovers the historical scoped prefix and task stem within the same profile and account', () => {
-  const f = fixture(), key = oldKey({ prefix: 'soduwork_sidebar_projects_v1:', stem: 'older_tasks_v5' });
+  const f = fixture(), key = oldKey({ prefix: 'soduwork_sidebar_projects_v1:', stem: 'soduwork_work_tasks_v5' });
   const before = JSON.stringify(saved()); f.values.set(key, before);
   const s = f.open();
   assert.deepEqual(pins(s), ['saved']);
@@ -55,7 +55,7 @@ test('unpin and project edits remain authoritative across restart, device replac
 
 test('an existing empty current legacy scope wins over older pinned snapshots', () => {
   const f = fixture(); f.values.set(oldKey(), JSON.stringify({ version: 1, pins: [] }));
-  f.values.set(oldKey({ prefix: 'soduwork_sidebar_projects_v1:', stem: 'older_tasks_v5' }), JSON.stringify(saved()));
+  f.values.set(oldKey({ prefix: 'soduwork_sidebar_projects_v1:', stem: 'soduwork_work_tasks_v5' }), JSON.stringify(saved()));
   f.values.set(oldKey({ device: 'previous' }), JSON.stringify(saved()));
   assert.deepEqual(pins(f.open()), []);
 });

@@ -1,4 +1,4 @@
-"""Current package names, accepted old bundles and offline signing compatibility."""
+"""Current SoduWork package names and offline signing behavior."""
 import base64
 import contextlib
 import errno
@@ -11,7 +11,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+_TEST_DB = Path(tempfile.gettempdir()) / f"soduwork-brand-suite-{os.getpid()}.db"
+os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///" + _TEST_DB.as_posix()
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 import build_platform_plugins as builder
@@ -63,11 +64,10 @@ class PackageBrandTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "version bump"):
                     builder.build(root)
             self.assertEqual(old.read_bytes(), b"accepted")
-            self.assertFalse(old.with_suffix(".soduwork-plugin").exists())
 
 
-class OfflineSigningBrandTests(unittest.IsolatedAsyncioTestCase):
-    async def test_new_and_legacy_names_sign_and_verify_without_renaming_signed_bytes(self):
+class OfflineSigningTests(unittest.IsolatedAsyncioTestCase):
+    async def test_current_name_signs_and_verifies_without_renaming_signed_bytes(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             key = Ed25519PrivateKey.generate()
@@ -75,29 +75,28 @@ class OfflineSigningBrandTests(unittest.IsolatedAsyncioTestCase):
             keyfile.write_text(base64.b64encode(key.private_bytes_raw()).decode(), encoding="ascii")
             keyfile.chmod(0o600)
             public = base64.b64encode(key.public_key().public_bytes_raw()).decode()
-            for stem in ("SoduWork",):
-                with self.subTest(stem=stem):
-                    source = root / (stem + "-1.2.3-Setup.exe")
-                    source.write_bytes(b"installer-fixture" * 70000)
-                    bundle_path = root / (stem + ".json")
-                    args = SimpleNamespace(installer=str(source), output=str(bundle_path), key_file=str(keyfile),
-                        version="1.2.3", minimum="", channel="stable", platform="win32", arch="x64",
-                        key_id="isolated-brand", notes="", mandatory=False)
-                    with patch.object(signer, "arguments", return_value=args), contextlib.redirect_stdout(io.StringIO()):
-                        signer.main()
-                    bundle = json.loads(bundle_path.read_text(encoding="utf8"))
-                    self.assertEqual(bundle["artifact"]["name"], source.name)
-                    with patch.object(client_updates, "trusted_public_keys", return_value={"isolated-brand":public}):
-                        checked = client_updates.release_from_bundle(bundle, source)
-                        self.assertEqual(checked.artifact_name, source.name)
-                        # Complete all importer validation, stop immediately before storage/DB writes.
-                        with patch.object(client_updates, "safe_artifact_path", side_effect=RuntimeError("validated fixture")):
-                            with self.assertRaisesRegex(RuntimeError, "validated fixture"):
-                                await importer.import_release(SimpleNamespace(installer=str(source), bundle=str(bundle_path)))
-                        bundle["artifact"]["name"] = "unexpected-1.2.3-Setup.exe"
-                        bundle_path.write_text(json.dumps(bundle), encoding="utf8")
-                        with self.assertRaisesRegex(SystemExit, "installer name"):
-                            await importer.import_release(SimpleNamespace(installer=str(source), bundle=str(bundle_path)))
+            stem = "SoduWork"
+            source = root / (stem + "-1.2.3-Setup.exe")
+            source.write_bytes(b"installer-fixture" * 70000)
+            bundle_path = root / (stem + ".json")
+            args = SimpleNamespace(installer=str(source), output=str(bundle_path), key_file=str(keyfile),
+                version="1.2.3", minimum="", channel="stable", platform="win32", arch="x64",
+                key_id="isolated-brand", notes="", mandatory=False)
+            with patch.object(signer, "arguments", return_value=args), contextlib.redirect_stdout(io.StringIO()):
+                signer.main()
+            bundle = json.loads(bundle_path.read_text(encoding="utf8"))
+            self.assertEqual(bundle["artifact"]["name"], source.name)
+            with patch.object(client_updates, "trusted_public_keys", return_value={"isolated-brand":public}):
+                checked = client_updates.release_from_bundle(bundle, source)
+                self.assertEqual(checked.artifact_name, source.name)
+                # Complete all importer validation, stop immediately before storage/DB writes.
+                with patch.object(client_updates, "safe_artifact_path", side_effect=RuntimeError("validated fixture")):
+                    with self.assertRaisesRegex(RuntimeError, "validated fixture"):
+                        await importer.import_release(SimpleNamespace(installer=str(source), bundle=str(bundle_path)))
+                bundle["artifact"]["name"] = "unexpected-1.2.3-Setup.exe"
+                bundle_path.write_text(json.dumps(bundle), encoding="utf8")
+                with self.assertRaisesRegex(SystemExit, "installer name"):
+                    await importer.import_release(SimpleNamespace(installer=str(source), bundle=str(bundle_path)))
 
 
 if __name__ == "__main__":
