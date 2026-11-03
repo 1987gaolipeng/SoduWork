@@ -92,6 +92,7 @@
       return {
         id,
         displayName: String(item.displayName || id).slice(0, 48),
+        version: String(item.version || ''),
         accessControl: item.accessControl && typeof item.accessControl === 'object' ? item.accessControl : null,
         summary: String(item.summary || '').slice(0, 120),
         availability: item.availability && typeof item.availability === 'object' ? item.availability : null,
@@ -123,8 +124,8 @@
     const mode = _rtText(runtime.modelMode === 'account' ? '个人账号' : '企业模型');
     return "<button type='button' class='wc-pop-row cp-runtime-row' data-runtime='" + runtime.id +
       "' aria-selected='false'>" + brandIcon(runtime.id) +
-      "<span class='cp-runtime-copy'><span class='cp-runtime-head'><b data-user-content>" +
-      escapeText(runtime.displayName) + "</b><small class='cp-runtime-mode'>" + mode +
+      "<span class='cp-runtime-copy'><span class='cp-runtime-head'><b data-user-content title=\"" + escapeText(runtime.displayName) + "\">" +
+      escapeText(runtime.displayName) + "</b><small class='cp-runtime-version' translate='no' hidden></small><small class='cp-runtime-mode' title=\"" + escapeText(mode) + "\">" + mode +
       "</small></span><i" + (runtime.id.startsWith('custom-') ? ' data-user-content' : '') + ">" + escapeText(runtime.summary) + "</i></span>" +
       "<span class='cp-runtime-meta'><em class='cp-runtime-state' data-state='unknown' " +
       "data-runtime-state='" + runtime.id + "'>待检测</em>" +
@@ -254,6 +255,15 @@
       row.setAttribute('aria-selected', String(on));
       const check = row.querySelector('.wc-check');
       const result = probes[probeKey(adapterId)];
+      const versionBadge = row.querySelector('.cp-runtime-version');
+      if (versionBadge) {
+        const runtime = item(adapterId);
+        const rawVersion = result?.version || result?.detectedVersion || (location === 'local' ? runtime.version : '') || '';
+        const version = global.AgentBrand?.version({ key: adapterId, version: rawVersion }) || rawVersion;
+        versionBadge.textContent = version ? 'v' + version : '';
+        versionBadge.title = versionBadge.textContent;
+        versionBadge.hidden = !version;
+      }
       const checking = row.classList.contains('checking');
       row.classList.toggle('unavailable', Boolean(result && !result.ok));
       if (result && result.reason) row.title = String(result.reason);
@@ -270,11 +280,19 @@
             : ['auth', 'unauthed', 'nollm'].includes(result.state) ? 'warning' : 'error';
         status.textContent = checking ? _rtText('检测中')
           : result == null ? _rtText('待检测')
-            : result.ok ? (result.version ? 'v' + result.version : _rtText('可用'))
+            : result.ok ? _rtText('可用')
               : (['auth', 'unauthed'].includes(result.state) ? _rtText('需登录')
                 : result.state === 'nollm' ? _rtText('缺少模型') : _rtText('不可用'));
+        status.title = status.textContent;
       }
     });
+    if (popup?.classList.contains('show')) {
+      global.WorkComposer.placeRuntime(button, popup);
+      // Model/access labels can change the centered toolbar after this paint.
+      global.requestAnimationFrame?.(() => {
+        if (popup.isConnected && popup.classList.contains('show')) global.WorkComposer.placeRuntime(button, popup);
+      });
+    }
   }
 
   function bounded(promise) {

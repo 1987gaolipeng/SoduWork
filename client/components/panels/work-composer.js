@@ -244,6 +244,34 @@
     popup.style.left = Math.max(bounds.left - rect.left, Math.min(0, bounds.right - rect.right)) + 'px';
   }
 
+  // Both composer surfaces keep the picker attached to the selected Agent.
+  // Measure the local origin so fixed and positioned containers share the same
+  // viewport clamping without assuming where their containing block starts.
+  function placeRuntime(button, popup) {
+    if (!button || !popup || popup.hidden || !popup.getClientRects().length) return;
+    const gap = 10, edge = 16, anchor = button.getBoundingClientRect();
+    const parent = popup.offsetParent;
+    const origin = parent ? parent.getBoundingClientRect() : { left: 0, top: 0 };
+    const originLeft = origin.left + (parent?.clientLeft || 0) - (parent?.scrollLeft || 0);
+    const originTop = origin.top + (parent?.clientTop || 0) - (parent?.scrollTop || 0);
+    const width = Math.min(320, global.innerWidth - edge * 2);
+    const above = Math.max(0, anchor.top - edge - gap);
+    const below = Math.max(0, global.innerHeight - anchor.bottom - edge - gap);
+    const upward = above >= 240 || above >= below;
+    popup.style.width = width + 'px';
+    popup.style.maxHeight = Math.min(400, upward ? above : below) + 'px';
+    const rect = popup.getBoundingClientRect();
+    const left = Math.max(edge, Math.min(anchor.left, global.innerWidth - edge - rect.width));
+    const top = upward ? anchor.top - gap - rect.height : anchor.bottom + gap;
+    // Do not move the popup to (0, 0) to measure: that transient position can
+    // create scrollbars and move a centered composer underneath the anchor.
+    popup.style.left = (left - originLeft) + 'px';
+    popup.style.top = (top - originTop) + 'px'; popup.style.bottom = 'auto';
+    popup.dataset.placement = upward ? 'above' : 'below';
+    popup.style.setProperty('--runtime-anchor-x', Math.max(16, Math.min(rect.width - 16,
+      anchor.left + anchor.width / 2 - left)) + 'px');
+  }
+
   function bindMoreKeyboard(button, popup, close) {
     if (!button || !popup) return;
     button.setAttribute('aria-haspopup', 'dialog');button.setAttribute('aria-controls', popup.id);
@@ -501,8 +529,10 @@
 
   global.WorkComposer = { html, replace, upgradeChat, contextButton, permissionLabel, permissionAppearance, syntaxHint, executionMode, syncExecutionMenu, closeExecutionMenu,
     openPlugins, pluginSection, pluginRows, loadMenuPlugins, peekMenuPlugins, menuPluginRevision,
-    bindMoreKeyboard, screenshotRow, bindScreenshot, placeMore, bindPlaceholder, icons: ICONS };
+    bindMoreKeyboard, screenshotRow, bindScreenshot, placeMore, placeRuntime, bindPlaceholder, icons: ICONS };
   global.addEventListener('resize', () => {
+    document.querySelectorAll('.cp-runtime-pop.show').forEach(popup =>
+      placeRuntime(popup.parentElement.querySelector('#cpRuntime'), popup));
     if (activeExecutionMenu) placeMore(activeExecutionMenu.button, activeExecutionMenu.popup);
     document.querySelectorAll('.cp-more-button[aria-expanded="true"]').forEach(button =>
       placeMore(button, button.parentElement.querySelector('.cp-more-pop')));

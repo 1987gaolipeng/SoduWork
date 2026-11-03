@@ -1,4 +1,8 @@
 export default {
+  "参数（英文逗号分隔）": "Arguments (comma-separated)",
+  "用英文逗号 , 分隔参数；含逗号的参数请用双引号包裹，例如 \"a,b\"。换行不会拆分参数。": "Separate arguments with English commas (,). Enclose arguments containing commas in double quotes, for example \"a,b\". Line breaks do not separate arguments.",
+  "参数的双引号后只能填写英文逗号或空白": "Only a comma or whitespace can follow a closing quote.",
+  "参数的双引号未闭合": "Close the double quote in the arguments.",
   '请填写连接名称': 'Enter a connection name',
   '请填写连接地址': 'Enter a connection URL',
   '请填写启动命令': 'Enter a launch command',
@@ -43,6 +47,10 @@ export default {
 }
 
 export const ja = {
+  "参数（英文逗号分隔）": "引数（半角カンマ区切り）",
+  "用英文逗号 , 分隔参数；含逗号的参数请用双引号包裹，例如 \"a,b\"。换行不会拆分参数。": "引数は半角カンマ（,）で区切ります。カンマを含む引数は \"a,b\" のように二重引用符で囲んでください。改行では分割されません。",
+  "参数的双引号后只能填写英文逗号或空白": "閉じ引用符の後には半角カンマまたは空白のみ入力できます。",
+  "参数的双引号未闭合": "引数の二重引用符を閉じてください。",
   '请填写连接名称': '接続名を入力してください',
   '请填写连接地址': '接続先 URL を入力してください',
   '请填写启动命令': '起動コマンドを入力してください',
@@ -89,6 +97,10 @@ export const ja = {
 }
 
 export const ko = {
+  "参数（英文逗号分隔）": "인수 (쉼표로 구분)",
+  "用英文逗号 , 分隔参数；含逗号的参数请用双引号包裹，例如 \"a,b\"。换行不会拆分参数。": "인수는 영문 쉼표(,)로 구분하세요. 쉼표가 포함된 인수는 \"a,b\"처럼 큰따옴표로 감싸세요. 줄바꿈으로는 인수를 나누지 않습니다.",
+  "参数的双引号后只能填写英文逗号或空白": "닫는 큰따옴표 뒤에는 영문 쉼표나 공백만 입력할 수 있습니다.",
+  "参数的双引号未闭合": "인수의 큰따옴표를 닫아 주세요.",
   '请填写连接名称': '연결 이름을 입력하세요',
   '请填写连接地址': '연결 URL을 입력하세요',
   '请填写启动命令': '실행 명령을 입력하세요',

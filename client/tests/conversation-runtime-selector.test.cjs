@@ -91,8 +91,8 @@ assert.match(runtime, /class='wc-pop-row cp-runtime-row'/,
   'runtime rows must keep explicit icon, copy and status columns');
 assert.match(runtime, /data-state='unknown'/,
   'runtime availability must use a stable state contract');
-assert.match(composerCss, /\.cp-runtime-row\{[^}]*grid-template-columns:32px minmax\(0,1fr\) 52px/,
-  'runtime picker must keep one stable three-column rhythm');
+assert.match(composerCss, /\.cp-runtime-row\{[^}]*grid-template-columns:28px minmax\(0,1fr\) auto/,
+  'compact runtime picker must reserve the intrinsic width of its status column');
 assert.doesNotMatch(composerCss, /\.cp-runtime-pop \.wc-pop-row>span\{flex:1 1 auto\}/,
   'the generic text column must never stretch the brand icon container');
 const enterChat = compose.slice(compose.indexOf('async function _enterChat('), compose.indexOf('async function makeDraft('));

@@ -1,0 +1,65 @@
+{
+  "valid": [
+    {
+      "text": "-y, package, C:\\Team Work",
+      "args": [
+        "-y",
+        "package",
+        "C:\\Team Work"
+      ]
+    },
+    {
+      "text": " a ,, b, ",
+      "args": [
+        "a",
+        "b"
+      ]
+    },
+    {
+      "text": "--x, --x",
+      "args": [
+        "--x",
+        "--x"
+      ]
+    },
+    {
+      "text": "\"a,b\", \"a\"\"b\", \"\", \" padded \"",
+      "args": [
+        "a,b",
+        "a\"b",
+        "",
+        " padded "
+      ]
+    },
+    {
+      "text": "first\nsecond, third",
+      "args": [
+        "first\nsecond",
+        "third"
+      ]
+    },
+    {
+      "text": "甲，乙, 丙",
+      "args": [
+        "甲，乙",
+        "丙"
+      ]
+    },
+    {
+      "text": "--json={\"x\":1}, \"{\"\"x\"\":1,\"\"y\"\":2}\"",
+      "args": [
+        "--json={\"x\":1}",
+        "{\"x\":1,\"y\":2}"
+      ]
+    },
+    {
+      "text": "",
+      "args": []
+    }
+  ],
+  "invalid": [
+    "\"unfinished",
+    "\"closed\"junk",
+    "one,\"bad\" quote"
+  ]
+}

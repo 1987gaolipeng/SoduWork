@@ -120,7 +120,8 @@
         if (pop && show) {
           pop.classList.add('show');
           button.setAttribute('aria-expanded', 'true');
-          if (popId === 'cpPermissionPop' || popId === 'cpRuntimePop') WorkComposer.placeMore(button, pop);
+          if (popId === 'cpPermissionPop') WorkComposer.placeMore(button, pop);
+          if (popId === 'cpRuntimePop') WorkComposer.placeRuntime(button, pop);
         }
       });
     };

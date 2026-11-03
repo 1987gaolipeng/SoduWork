@@ -1,9 +1,10 @@
 import { translateText as tx, localeMap, useLocale } from '../i18n.js'
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { api } from '../api.js'
-import { Icon, Modal, toast } from '../ui.jsx'
+import { Icon, Modal, SelectMenu, toast } from '../ui.jsx'
 import ConnectorIcon from '../components/ConnectorIcon.jsx'
 import './McpConnectionForm.css'
+import { parseArguments, formatArguments } from './mcp-arguments.js'
 import '../../../client/components/panels/connector-config.js'
 
 const blank = () => ({ id: '', name: '', type: 'http', command: 'npx', args: [], env: {},
@@ -45,7 +46,7 @@ export function McpForm({ initial, template, onClose, onSave, busy, publishLabel
   useLocale()
   template = window.SoduWorkConnectorConfig.apiTemplate(initial) || template
   const [v, setV] = useState(() => ({ ...blank(), ...initial }))
-  const [argsText, setArgsText] = useState((initial?.args || []).join('\n'))
+  const [argsText, setArgsText] = useState(() => formatArguments(initial?.args))
   const [envText, setEnvText] = useState(toPairs(initial?.env))
   const [hdrText, setHdrText] = useState(toPairs(initial?.headers))
   const [allowed, setAllowed] = useState((initial?.enabledTools || []).join('\n'))
@@ -61,11 +62,13 @@ export function McpForm({ initial, template, onClose, onSave, busy, publishLabel
   const set = key => e => setV(old => ({ ...old, [key]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }))
   const setKc = key => e => setV(old => ({ ...old, keycloak: { ...old.keycloak, [key]: e.target.value } }))
   const setEnv = (key, value) => setEnvText(toPairs({ ...env, [key]: value }))
-  const spec = { ...v, name: v.name.trim(), args: argsText.split('\n').map(x => x.trim()).filter(Boolean),
+  let args = [], argsError = ''
+  try { args = parseArguments(argsText) } catch (error) { argsError = tx(error.message) }
+  const spec = { ...v, name: v.name.trim(), args,
     env, headers: isHttp ? parsePairs(hdrText) : {}, keycloak: isHttp ? v.keycloak : {},
     startupTimeoutSeconds: Number(v.startupTimeoutSeconds || 10), toolTimeoutSeconds: Number(v.toolTimeoutSeconds || 60),
     enabledTools: names(allowed), disabledTools: names(denied) }
-  const fingerprint = JSON.stringify(spec)
+  const fingerprint = JSON.stringify({ spec, argsText })
   const current = useRef(fingerprint); current.current = fingerprint
   useEffect(() => {
     const g = guard.current; g.id++; g.pending = false; g.verified = ''; g.result = null
@@ -73,6 +76,7 @@ export function McpForm({ initial, template, onClose, onSave, busy, publishLabel
   }, [fingerprint])
   useEffect(() => { guard.current.alive = true; return () => { guard.current.alive = false; guard.current.id++ } }, [])
   const validate = () => {
+    if (!isHttp && argsError) throw Error(argsError)
     if (!spec.name) throw Error(tx('请填写连接名称'))
     if (isHttp ? !spec.url.trim() : !spec.command.trim()) throw Error(tx(isHttp ? '请填写连接地址' : '请填写启动命令'))
     const missing = fields.find(f => f.required && !String(env[f.key] || '').trim())
@@ -121,9 +125,9 @@ export function McpForm({ initial, template, onClose, onSave, busy, publishLabel
         <fieldset disabled={busy || connecting}>
           {!typed && <div className="df-grid">
             <label className="df-field"><span className="f-lbl">{tx('连接名称')}</span><input className="f-in" value={v.name} onChange={set('name')} autoFocus placeholder={tx('例如：团队知识库')} /></label>
-            <label className="df-field"><span className="f-lbl">{tx('连接方式')}</span><select className="f-in" value={v.type} onChange={e => {
+            <label className="df-field"><span className="f-lbl">{tx('连接方式')}</span><SelectMenu className="f-in connector-transport" aria-label={tx('连接方式')} value={v.type} onChange={e => {
               setV(old => ({ ...old, type: e.target.value }))
-            }}><option value="http">{tx('远程连接')}</option><option value="stdio">{tx('设备上的工具')}</option></select></label>
+            }}><option value="http">{tx('远程连接')}</option><option value="stdio">{tx('设备上的工具')}</option></SelectMenu></label>
           </div>}
           {typed ? <div className="connector-fields">{fields.filter(f => f.required && f.type !== 'boolean').map(field)}</div>
             : isHttp ? <>
@@ -132,8 +136,14 @@ export function McpForm({ initial, template, onClose, onSave, busy, publishLabel
               }} placeholder="https://example.com/mcp" /></label>
               <label className="df-field"><span className="f-lbl">{tx('鉴权头')} <em>{tx('选填，每行一项')}</em></span>
                 <textarea className="f-in connector-auth-headers" rows={4} value={hdrText} onChange={e => setHdrText(e.target.value)} placeholder="Authorization=Bearer …" autoComplete="off" /></label>
-            </> : <div className="df-grid"><label className="df-field"><span className="f-lbl">{tx('启动命令')}</span><input className="f-in" value={v.command} onChange={set('command')} placeholder="npx / uvx / node" /></label>
-              <label className="df-field"><span className="f-lbl">{tx('参数，每行一个')}</span><AutoGrowTextarea value={argsText} onChange={e => setArgsText(e.target.value)} maxRows={15} /></label></div>}
+            </> : <>
+              <label className="df-field"><span className="f-lbl">{tx('启动命令')}</span><input className="f-in" value={v.command} onChange={set('command')} placeholder="npx / uvx / node" /></label>
+              <label className="df-field connector-arguments"><span className="f-lbl">{tx('参数（英文逗号分隔）')}</span>
+                <AutoGrowTextarea value={argsText} onChange={e => setArgsText(e.target.value)} minRows={5} maxRows={12}
+                  aria-invalid={!!argsError} placeholder="-y, @modelcontextprotocol/server-filesystem, C:\Work" spellCheck={false} />
+                <small className="connector-argument-hint">{tx('用英文逗号 , 分隔参数；含逗号的参数请用双引号包裹，例如 "a,b"。换行不会拆分参数。')}</small>
+                {argsError && <small className="connector-argument-error" role="alert">{argsError}</small>}
+              </label></>}
           {template?.officialDocs?.[0] && <a className="connector-form-help" href={template.officialDocs[0]} target="_blank" rel="noopener noreferrer">{tx('如何获取授权')} ↗</a>}
           <details className="connector-advanced"><summary>{tx('高级设置')}<Icon name="chevron" /></summary><div className="connector-advanced-body">
             {typed && <label className="df-field"><span className="f-lbl">{tx('连接名称')}</span><input className="f-in" value={v.name} onChange={set('name')} /></label>}

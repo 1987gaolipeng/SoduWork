@@ -16,6 +16,7 @@ import ipaddress
 from urllib.parse import urlsplit, parse_qsl
 
 from .local_base import _data_root
+from .mcp_arguments import parse_arguments
 
 log = logging.getLogger("uvicorn.error")
 
@@ -92,7 +93,7 @@ def validate_size(raw: dict) -> None:
         if len(str(raw.get(field) or "")) > limit:
             raise ValueError(field + " 超出长度上限")
     for field, count, size in (("args", 30, 400), ("env", 20, 16384), ("headers", 10, 16384)):
-        value = raw.get(field)
+        value = parse_arguments(raw.get(field)) if field == "args" else raw.get(field)
         expected = list if field == "args" else dict
         if value is not None and not isinstance(value, expected):
             raise ValueError(field + " 格式不正确")
@@ -127,7 +128,7 @@ def _clean_one(d: dict) -> dict:
         # with static authentication headers and optional dynamic Keycloak bearer authentication.
         "type": type_ if type_ in ("stdio", "http") else "stdio",
         "command": str(d.get("command") or "").strip()[:200],
-        "args": [str(x)[:400] for x in (d.get("args") or [])][:30],
+        "args": [str(x)[:400] for x in parse_arguments(d.get("args"))][:30],
         "env": {str(k)[:64]: str(v)[:16384] for k, v in list(env.items())[:20]},
         "url": str(d.get("url") or "").strip()[:400],
         "headers": {str(k)[:64]: str(v)[:16384] for k, v in list(headers.items())[:10]},

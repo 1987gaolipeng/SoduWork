@@ -11,6 +11,7 @@ def probe_sync(spec: dict, timeout: int = 25) -> dict:
     """
     from . import mcp_servers as mcp
     mcp.validate_controls(spec)
+    mcp.validate_size(spec)
     one = mcp._clean_one(spec)
     startup_timeout = min(
         max(3, int(timeout or 25)), one["startupTimeoutSeconds"])
@@ -74,7 +75,12 @@ async def probe_managed(spec: dict, timeout: int = 25,
     the server host.
     """
     from . import connector_health, mcp_servers as mcp
-    one = mcp._clean_one(spec)
+    try:
+        mcp.validate_controls(spec)
+        mcp.validate_size(spec)
+        one = mcp._clean_one(spec)
+    except ValueError as exc:
+        return {**connector_health.result("error"), "ok": False, "error": str(exc)}
     timeout = min(
         max(3, min(120, int(timeout or 25))),
         one["startupTimeoutSeconds"])

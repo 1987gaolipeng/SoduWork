@@ -29,3 +29,10 @@
 @media(max-width:520px){.connector-form .df-grid{grid-template-columns:1fr}}
 
 .modal.connector-form-modal{width:min(560px,calc(100vw - 32px))}.connector-form-modal .modal-title{font-weight:500}.connector-form-modal .modal-body{padding:22px 24px}.connector-form-modal .modal-foot{padding:16px 24px}
+
+.connector-form .connector-transport{overflow:visible;min-height:42px;padding:0}
+.connector-form .connector-transport .select-menu-trigger{height:auto;min-height:40px;padding:9px 12px;line-height:1.5}
+.connector-form .connector-transport .select-menu-trigger>span{white-space:normal;overflow:visible;text-overflow:clip}
+.connector-form .connector-arguments .connector-autogrow{min-height:132px;line-height:1.5}
+.connector-argument-hint,.connector-argument-error{display:block;margin-top:7px;font-size:12px;line-height:1.6;overflow-wrap:anywhere;color:var(--ink-3)}
+.connector-argument-error{color:var(--crit)}

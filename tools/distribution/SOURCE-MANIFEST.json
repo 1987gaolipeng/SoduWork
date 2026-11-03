@@ -921,8 +921,8 @@
     },
     {
       "path": "client/components/panels/chat-runtime-picker.js",
-      "bytes": 16616,
-      "sha256": "fb73785afd210f14d065f815265d57f712ebfe36eb9bac302b55bfc4980eac9c"
+      "bytes": 16303,
+      "sha256": "2dba413728a4d344ba85725427dc1bba307049b81cb717f282e13920c4feef09"
     },
     {
       "path": "client/components/panels/chat-scroll-follow.js",
@@ -1411,8 +1411,8 @@
     },
     {
       "path": "client/components/panels/panels-compose-runtime.js",
-      "bytes": 29750,
-      "sha256": "bec585f48fe8a66ce40a4e20d14bff6ef20abeb15721467d80c80634f885c560"
+      "bytes": 30838,
+      "sha256": "086a9d1f9884b165cdb6c2566100ef89b62ed45e5ccc828332cec6bfb0dfaede"
     },
     {
       "path": "client/components/panels/panels-compose-skills.css",
@@ -1441,8 +1441,8 @@
     },
     {
       "path": "client/components/panels/panels-compose.js",
-      "bytes": 49774,
-      "sha256": "0b46c537577146de190426464894920c0c2859dbb1ef45d8b1d81e3890033f58"
+      "bytes": 49826,
+      "sha256": "3b441e121c3cb8c0614cb2d57b9c5370d85f52592b3846385e59d04fffaf71ee"
     },
     {
       "path": "client/components/panels/panels-connections.css",
@@ -1906,13 +1906,13 @@
     },
     {
       "path": "client/components/panels/work-composer.css",
-      "bytes": 48358,
-      "sha256": "b5f59f23e4525c01a4e50b386dd3c04f5fdad780be2fab31a0ba72040bd6d75b"
+      "bytes": 48955,
+      "sha256": "b33ae73eb70ffb0a0aaef1b8c77dfdd2581a51e7780e8d70b62c18a4bef2b4b4"
     },
     {
       "path": "client/components/panels/work-composer.js",
-      "bytes": 30194,
-      "sha256": "fa519b9827e931579e2263262d4ecf8a114e802ce70617e30fbdcb24c522d39e"
+      "bytes": 32163,
+      "sha256": "2ac938a2074e58eab781b8776a76e4bb0e762a606617361153655d63b252922b"
     },
     {
       "path": "client/components/panels/work-entry-sheet.css",
@@ -4593,6 +4593,11 @@
       "path": "client/e2e/runner-plugin-conversation.mjs",
       "bytes": 9461,
       "sha256": "f19954fe0efbe0dc39659f5313b277077c4b8e85d5f67227b7d081236591add3"
+    },
+    {
+      "path": "client/e2e/runtime-picker-layout.cjs",
+      "bytes": 8403,
+      "sha256": "dc81f4787b0e067846063c66e5ea990f910ef1d56b9e4d4ff0f4bec81ca753bb"
     },
     {
       "path": "client/e2e/runtime-surface-locales.cjs",
@@ -8236,8 +8241,8 @@
     },
     {
       "path": "client/tests/compose-runtime-retry.test.cjs",
-      "bytes": 14134,
-      "sha256": "48b4b9dd7f9c002a6cb7363a3305b97b8080379ea4571b05cb352de2ae1367b5"
+      "bytes": 14467,
+      "sha256": "3c861953086ef889f64d9e14e79bb1e21078480629bb4761468509367ca64147"
     },
     {
       "path": "client/tests/composer-enter-shortcuts.test.cjs",
@@ -8466,8 +8471,8 @@
     },
     {
       "path": "client/tests/conversation-runtime-selector.test.cjs",
-      "bytes": 8914,
-      "sha256": "fb27f3f3d1ba5e5696e5a53fd6da1e894c24b038ef895404080ffdfad562d890"
+      "bytes": 8935,
+      "sha256": "2601af21ecfff5f0d229f5609c6f0f163c8c85baf8a768e1fe3123819e5e3041"
     },
     {
       "path": "client/tests/conversation-send-auth.test.cjs",
@@ -12341,8 +12346,8 @@
     },
     {
       "path": "hub-backend/app/services/connector_probes.py",
-      "bytes": 5361,
-      "sha256": "7d17138b22ce06de8e7132dc597dc3d6af4638843295dc76094f7a43275c9194"
+      "bytes": 5584,
+      "sha256": "bbe2a07de9f9973d968e0416013dc20a1fcb80b4ee6e076edff63b53c38abc5f"
     },
     {
       "path": "hub-backend/app/services/context_window.py",
@@ -12980,6 +12985,11 @@
       "sha256": "7b68de61d149f6de29183bca87cecd251ab2329aed44edf3f32ded6965df9bf2"
     },
     {
+      "path": "hub-backend/app/services/mcp_arguments.py",
+      "bytes": 1372,
+      "sha256": "00b2b72e5894c9c110ff8ff5d77050a5437734ebce34f3514b62cc9102d0bc82"
+    },
+    {
       "path": "hub-backend/app/services/mcp_company_write.py",
       "bytes": 4296,
       "sha256": "357539a9321808fab27ec52d42998b63103f5dc41a34634b171a0de065e07a38"
@@ -13006,8 +13016,8 @@
     },
     {
       "path": "hub-backend/app/services/mcp_servers.py",
-      "bytes": 35316,
-      "sha256": "38532c62957fed6ee95cd4f7511fbcbc2587d0c5f098acd485e20d1612827bdd"
+      "bytes": 35424,
+      "sha256": "e6af40f19541c198cacf1cf8e001bfbfc999663b4fd5efbf94cee2f519550cf2"
     },
     {
       "path": "hub-backend/app/services/memory_records.py",
@@ -16765,6 +16775,11 @@
       "sha256": "16102288ca3143161d2e4606832cea19a3c7d9bb4033bd9b1fab2cffe6c8dee8"
     },
     {
+      "path": "hub-backend/test_mcp_arguments.py",
+      "bytes": 1681,
+      "sha256": "ed918749d9e0801f2a6b794d40cfd1a287582ef92ed747a3e847291f03f1c96d"
+    },
+    {
       "path": "hub-backend/test_mcp_export.py",
       "bytes": 15587,
       "sha256": "b561f4d0ecd4343b8bbce373cfe2095746de7f44eb4bf57cc04bb6a8f3507ee7"
@@ -16776,8 +16791,8 @@
     },
     {
       "path": "hub-backend/test_mcp_management.py",
-      "bytes": 11936,
-      "sha256": "ce0dc1f4a769bf40fbf75b73ade491f83fc09a246ef0716f9663fe8ed40f54ad"
+      "bytes": 14147,
+      "sha256": "57462451d48b8da991a1fc09a2105662c2910a04aaf69d40d931e2c59208caac"
     },
     {
       "path": "hub-backend/test_mcp_personal_write.py",
@@ -18326,8 +18341,8 @@
     },
     {
       "path": "hub-frontend/src/locales/connector-management.js",
-      "bytes": 8885,
-      "sha256": "78040921e9d61bddf2c40f671fcda5dfd9ec0bab537c3e43efc64517fdf405ca"
+      "bytes": 10647,
+      "sha256": "384e67b5b7f983d41eda7a3b6e0ba2aa7af15082f028f2e2e111b6d2bccb5ef7"
     },
     {
       "path": "hub-frontend/src/locales/extra-languages.js",
@@ -18576,13 +18591,13 @@
     },
     {
       "path": "hub-frontend/src/screens/McpConnectionForm.css",
-      "bytes": 3162,
-      "sha256": "9f059533920122212305cb48f92ebbab8f81c45bd031b914b43462fc13fdb765"
+      "bytes": 3773,
+      "sha256": "3b3004efc12ce150312d27edc14b49c33fa678901fdef5669f929d025a92588b"
     },
     {
       "path": "hub-frontend/src/screens/McpConnectionForm.jsx",
-      "bytes": 13903,
-      "sha256": "5deca219808555e9efb76a3274e1d43a9d8ab766a986abe84912b7c480df6b90"
+      "bytes": 14674,
+      "sha256": "5c03bd5887eacac42204a93d766b56618213b0656705f435f784f4f2f3ff9bd2"
     },
     {
       "path": "hub-frontend/src/screens/McpServers.jsx",
@@ -18903,6 +18918,11 @@
       "path": "hub-frontend/src/screens/mail-settings.css",
       "bytes": 2761,
       "sha256": "09fcf152c9ae65a3262f62f7488cf349186268a17e5b19193685d0f560c02ab4"
+    },
+    {
+      "path": "hub-frontend/src/screens/mcp-arguments.js",
+      "bytes": 1252,
+      "sha256": "bdc35e6d468f82a19e8e83f1ab55130b967f491e26346f37a3a21ee52abf170d"
     },
     {
       "path": "hub-frontend/src/screens/model-capabilities.css",
@@ -19270,9 +19290,14 @@
       "sha256": "7c387189d17d2623b4a420bbdef1a4d4195e5d1043b5e69b69eb8686f01d8d20"
     },
     {
+      "path": "hub-frontend/tests/connector-arguments.test.mjs",
+      "bytes": 708,
+      "sha256": "7a1232bc2fa34a1cb2d398e3b4d6df60f8c7e8f6be493231f2eed615aa53b520"
+    },
+    {
       "path": "hub-frontend/tests/connector-form-browser.cjs",
-      "bytes": 3405,
-      "sha256": "2069d1fc02869ca080c242fce93c9fbe60ca61533c7bd6d7fe6019091a24d141"
+      "bytes": 6674,
+      "sha256": "f2cf5815b545527ac432d46994377034113c8b2b8b2ff2bdb9b266d4406160ae"
     },
     {
       "path": "hub-frontend/tests/connector-form-browser.html",
@@ -19281,13 +19306,13 @@
     },
     {
       "path": "hub-frontend/tests/connector-form-browser.jsx",
-      "bytes": 1124,
-      "sha256": "c706c53eb1a350f9216cc65c794e56103a0338c5d03cbbea982a3cfeb23d5e3e"
+      "bytes": 1551,
+      "sha256": "ea0b9348e022747ea49872900e0f089402d3e3a5f72732f7cd78ccc2aa8f0c29"
     },
     {
       "path": "hub-frontend/tests/connector-management.test.mjs",
-      "bytes": 8894,
-      "sha256": "b897bfef2883d11534c6363ce89d6ef651f5b23756e5158a5a59ec9b2ee01b07"
+      "bytes": 10503,
+      "sha256": "bc4dcc3cb36d79ed0b1d26cbd4f03bf3e58860507309001c275b525319604cde"
     },
     {
       "path": "hub-frontend/tests/dev-health-proxy.test.mjs",
@@ -19313,6 +19338,11 @@
       "path": "hub-frontend/tests/filter-controls.test.mjs",
       "bytes": 3444,
       "sha256": "3920c2215faced2c8266f3daf3646a63572fb38e2364cf3a7ac6d59842961888"
+    },
+    {
+      "path": "hub-frontend/tests/fixtures/connector-arguments.json",
+      "bytes": 1006,
+      "sha256": "98b5f7cbe79b64420e304f091fac915bafd380a401942dc88403a348122dd31f"
     },
     {
       "path": "hub-frontend/tests/form-labels.test.mjs",

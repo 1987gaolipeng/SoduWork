@@ -232,6 +232,12 @@ test('new declared runtimes render without a built-in name or icon and keep labe
   assert.doesNotMatch(html, /<Sample ACP>/);
 });
 
+test('runtime hover labels preserve quotes without creating HTML attributes', async () => {
+  const f = fixture(() => ({ ok: true, runtimes: [{ id: 'custom-quotes', displayName: `Team's "Agent" <Local>` }] }));
+  await f.runtime.ready();
+  assert.match(f.runtime.controls(''), /title="Team's &quot;Agent&quot; &lt;Local&gt;"/);
+});
+
 test('runtime-added events refresh the catalog once, preserve the selected Agent and discard stale requests', async () => {
   const old = deferred(), f = fixture(() => old.promise), listeners = new Set();
   f.api.onRuntimesChanged = listener => { listeners.add(listener); return () => listeners.delete(listener); };

@@ -177,5 +177,36 @@ class McpManagementTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 await mcp_servers.save(b, second + [{"id":"other","name":"other","command":"node"}])
 
+    async def test_admin_argument_text_probe_save_reload_and_array_edit(self):
+        from unittest.mock import AsyncMock, patch
+        from types import SimpleNamespace
+        spec = {"id": "comma-arguments", "name": "Comma arguments", "type": "stdio",
+                "command": "node", "args": 'fixture.js, "a,b", "", --flag, --flag', "enabled": False}
+        expected = ["fixture.js", "a,b", "", "--flag", "--flag"]
+        runner = SimpleNamespace(id="isolated", host="fixture", call=AsyncMock(
+            return_value={"ok": True, "data": {"ok": True, "tools": []}}))
+        with patch("app.services.runner_hub.pick_for", return_value=runner):
+            probe = await self.req("POST", "/admin/mcp-servers/probe", who="admin", json=spec)
+        self.assertEqual(probe.status_code, 200, probe.text)
+        self.assertTrue(probe.json()["ok"], probe.text)
+        self.assertEqual(runner.call.call_args.args[1]["spec"]["args"], expected)
+        saved = await self.req("POST", "/admin/mcp-servers/upsert", who="admin", json={"server": spec})
+        self.assertEqual(saved.status_code, 200, saved.text)
+        view = await self.req("GET", "/admin/mcp-servers", who="admin")
+        original = next(row for row in view.json()["servers"] if row["id"] == spec["id"])
+        self.assertEqual(original["args"], expected)
+        updated = await self.req("POST", "/admin/mcp-servers/upsert", who="admin",
+            json={"server": {**original, "name": "Edited"}, "original": original})
+        self.assertEqual(updated.status_code, 200, updated.text)
+        for bad in ['"unfinished', ','.join(['arg'] * 31)]:
+            with patch("app.services.runner_hub.pick_for") as pick:
+                probe = await self.req("POST", "/admin/mcp-servers/probe", who="admin", json={**spec, "args": bad})
+                self.assertEqual(probe.status_code, 200, probe.text)
+                self.assertFalse(probe.json()["ok"])
+                pick.assert_not_called()
+            saved = await self.req("POST", "/admin/mcp-servers/upsert", who="admin",
+                json={"server": {**spec, "id": "invalid", "name": "Invalid", "args": bad}})
+            self.assertEqual(saved.status_code, 409, saved.text)
+
 if __name__ == "__main__":
     unittest.main()

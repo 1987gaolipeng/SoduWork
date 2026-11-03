@@ -163,10 +163,7 @@
       });
     }
     function position() {
-      const r = button.getBoundingClientRect(), width = Math.min(340, global.innerWidth - 24);
-      pop.style.width = width + 'px'; pop.style.left = Math.max(12, Math.min(r.right - width, global.innerWidth - width - 12)) + 'px';
-      pop.style.bottom = (global.innerHeight - r.top + 8) + 'px'; pop.style.top = 'auto';
-      pop.style.maxHeight = Math.max(160, r.top - 24) + 'px';
+      global.WorkComposer.placeRuntime(button, pop);
     }
     function render() {
       const s = options.state();
@@ -184,7 +181,7 @@
     if (more) on(more, 'click', event => { event.stopPropagation(); close(); openAgents(); });
     on(global, 'soduwork-locale-change', () => {
       pop.setAttribute('aria-label', tx('切换 Agent')); button.title = tx('切换 Agent · 保留当前对话和工作目录');
-      if (availability) { paintMissing(availability); if (!pop.hidden) renderPicker(availability); }
+      if (availability) { paintMissing(availability); if (!pop.hidden) { renderPicker(availability); position(); } }
     });
     on(button, 'click', async event => {
       event.stopPropagation(); if (!pop.hidden) { close(); return; }

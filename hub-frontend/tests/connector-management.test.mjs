@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import connectorConfig from '../../client/components/panels/connector-config.js'
 import { createComponentHarness } from './helpers/react-harness.mjs'
+import * as argumentText from '../src/screens/mcp-arguments.js'
 import { setLocale } from '../src/i18n.js'
 const text=n=>Array.isArray(n)?n.map(text).join(''):n?.props?text(n.props.children):typeof n==='string'?n:''
 const formCss=fs.readFileSync(new URL('../src/screens/McpConnectionForm.css',import.meta.url),'utf8')
@@ -10,7 +11,7 @@ const wait=()=>{let resolve;const promise=new Promise(r=>resolve=r);return{promi
 async function form(t, probe, overrides = {}) {
  const previous=globalThis.window;globalThis.window={SoduWorkConnectorConfig:connectorConfig,dispatchEvent(){}};t.after(()=>{if(previous===undefined)delete globalThis.window;else globalThis.window=previous});
  const calls=[],pending=[];const page=await createComponentHarness(new URL('../src/screens/McpConnectionForm.jsx',import.meta.url),{exportName:'McpForm',props:{initial:{id:'a',name:'A',type:'http',url:'https://example.com/mcp'},onClose(){},onSave:async s=>calls.push(s),...overrides},dependencies:{
- '../api.js':{api:{probeMcpServer:async s=>{pending.push(s);return probe?probe(s):{ok:true,authenticationTested:true}}}},'../ui.jsx':{Modal:'Modal',Icon:'Icon',toast(){}},'../components/ConnectorIcon.jsx':'ConnectorIcon','./McpConnectionForm.css':{},'../../../client/components/panels/connector-config.js':connectorConfig}});
+ '../api.js':{api:{probeMcpServer:async s=>{pending.push(s);return probe?probe(s):{ok:true,authenticationTested:true}}}},'./mcp-arguments.js':argumentText,'../ui.jsx':{Modal:'Modal',Icon:'Icon',SelectMenu:'SelectMenu',toast(){}},'../components/ConnectorIcon.jsx':'ConnectorIcon','./McpConnectionForm.css':{},'../../../client/components/panels/connector-config.js':connectorConfig}});
  t.after(()=>page.unmount());page.render();return {page,calls,pending,button:s=>page.nodes(n=>n.type==='button'&&text(n)===s)[0],footer:()=>page.nodes(n=>n.type==='Modal')[0].props.foot.props.children.at(-1),url:()=>page.nodes(n=>n.type==='input'&&n.props.value?.startsWith?.('https://'))[0]}
 }
 test('connect checks once and enables; duplicate clicks cannot create duplicate writes',async t=>{
@@ -62,7 +63,7 @@ test('company management writes one row with its original server revision',async
 });
 
 test('typed private-key field accepts complete PEM paste without exposing or stripping lines',async t=>{
- const previous=globalThis.window;globalThis.window={SoduWorkConnectorConfig:connectorConfig};t.after(()=>{if(previous===undefined)delete globalThis.window;else globalThis.window=previous});
+ const previous=globalThis.window;globalThis.window={SoduWorkConnectorConfig:connectorConfig,dispatchEvent(){}};t.after(()=>{if(previous===undefined)delete globalThis.window;else globalThis.window=previous});
  const f=await form(t,null,{initial:{id:'fixture',name:'GCP fixture',type:'stdio',command:'soduwork-connector',args:['google-cloud']},
  template:{configurable:true,connectionFields:[{key:'GCP_PRIVATE_KEY',label:'Private key',secret:true,required:true}]}});
  const input=f.page.nodes(n=>n.type==='input'&&n.props.type==='password')[0];let prevented=false;
@@ -81,4 +82,28 @@ test('imported API uses declared auth fields and retains its source and restrict
  f.page.act(()=>input.props.onChange({target:{value:'fixture-key'}}));
  await f.footer().props.onClick();assert.equal(f.calls.length,1);assert.equal(f.calls[0].apiDefinition.id,definition.id);
  assert.equal(f.calls[0].env.AUTH_AUTH_KEY,'fixture-key');assert.deepEqual(f.calls[0].enabledTools,['list_projects']);
+});
+
+test('device arguments use commas in probe and save and preserve imported argument boundaries', async t => {
+ const expected=['-y','package','C:\\Team Work','a,b','', '--flag','--flag'];
+ const f=await form(t,null,{initial:{name:'Device',type:'stdio',command:'npx',args:expected}});
+ const input=()=>f.page.nodes(n=>n.type?.name==='AutoGrowTextarea')[0];
+ assert.equal(input().props.value,argumentText.formatArguments(expected));
+ assert.equal(input().props.minRows,5);
+ await f.footer().props.onClick();
+ assert.deepEqual(f.pending[0].args,expected);assert.deepEqual(f.calls[0].args,expected);
+ const next=' -y, package, "a,b", --path=C:\\Team Work, , --flag, --flag ';
+ f.page.act(()=>input().props.onChange({target:{value:next}}));
+ await f.footer().props.onClick();
+ assert.deepEqual(f.calls[1].args,['-y','package','a,b','--path=C:\\Team Work','--flag','--flag']);
+});
+
+test('invalid argument quotes show a localized error and never probe or save', async t => {
+ t.after(()=>setLocale('zh-CN'));setLocale('en-US');
+ const f=await form(t,null,{initial:{name:'Device',type:'stdio',command:'npx'}});
+ const input=()=>f.page.nodes(n=>n.type?.name==='AutoGrowTextarea')[0];
+ f.page.act(()=>input().props.onChange({target:{value:'-y, "unfinished'}}));
+ assert.equal(input().props['aria-invalid'],true);
+ assert.match(text(f.page.render()),/Close the double quote/);
+ await f.footer().props.onClick();assert.equal(f.calls.length,0);assert.equal(f.pending.length,0);
 });
