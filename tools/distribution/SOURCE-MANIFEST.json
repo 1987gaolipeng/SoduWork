@@ -2506,8 +2506,8 @@
     },
     {
       "path": "client/core/locales/en-US-plugin-pages.js",
-      "bytes": 34985,
-      "sha256": "895739e0aeeea4f70a514bc55a7449d80fceb94d9c6c57b49918cd62c33abca8"
+      "bytes": 35987,
+      "sha256": "b04b1a890b6ce791b3ee62769affd4a5e04d5586852276e61eef4d703f891de5"
     },
     {
       "path": "client/core/locales/en-US-runtime-pages.js",
@@ -2561,8 +2561,8 @@
     },
     {
       "path": "client/core/locales/ja-JP-gap-pages.js",
-      "bytes": 756099,
-      "sha256": "4cc4112611282b40f607f5dc2d521828a79cb3fe66f30d9c42826b6e62006ee7"
+      "bytes": 757262,
+      "sha256": "0d49cf157c97df5e701966b5eb8fdf8c524451bf27abb9b4220585299e995d74"
     },
     {
       "path": "client/core/locales/ja-JP-runtime-surfaces.js",
@@ -2581,8 +2581,8 @@
     },
     {
       "path": "client/core/locales/ko-KR-gap-pages.js",
-      "bytes": 707099,
-      "sha256": "38e454ba8ce3ff832292b05ca7f643ec2c46ddc99eb5316964b649a5084c83f9"
+      "bytes": 708226,
+      "sha256": "f4b15b2db520eb12cc5d2c0d43011207e17d1357b7711446894a79574133b1bd"
     },
     {
       "path": "client/core/locales/ko-KR-runtime-surfaces.js",
@@ -4306,8 +4306,8 @@
     },
     {
       "path": "client/e2e/plugin-debug-card-ownership.cjs",
-      "bytes": 23287,
-      "sha256": "c6ed45e8043b24e7ea051854d0a48738b287362a7edf39e41c16ff727fd97892"
+      "bytes": 26124,
+      "sha256": "8a9a4a94d630129defb92353c36230804af765f473636221818e25788c55c947"
     },
     {
       "path": "client/e2e/plugin-draft-window.cjs",

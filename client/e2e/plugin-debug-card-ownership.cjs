@@ -110,6 +110,13 @@ async function setup(options = {}) {
       reason: '节点未正常完成（failed）', outputs: [{ key: 'design', label: '设计说明', path: 'design.md' }] }] };
   if (options.status) { current.status = options.status; current.nodes[0].status = options.status; }
   await win.loadFile(page);
+  if (options.locale) {
+    for (const name of JSON.parse(fs.readFileSync(path.join(client, 'core/locales/manifest.json'), 'utf8'))) {
+      await js(fs.readFileSync(path.join(client, 'core/locales', name), 'utf8'));
+    }
+    for (const name of ['core/i18n-dom.js', 'core/i18n.js']) await js(fs.readFileSync(path.join(client, name), 'utf8'));
+    await js(`SoduWorkI18n.setLocale(${JSON.stringify(options.locale)})`);
+  }
   await js("NativeChat.enter('', 'fixture-session', {adapterId:'pi'}).then(()=>true)");
   await until(() => js("Boolean(document.querySelector('.pdebug:not([hidden])')) && document.querySelector('#nchatList')?.textContent.includes('第一轮协作')"), 'failed workflow card');
   // enter() schedules the initial composer focus after opening the transcript.
@@ -322,6 +329,30 @@ app.whenReady().then(async () => {
       await until(() => current.status === 'running', 'new conversation recovery action');
     });
   }
+  await runCase('collaboration card localizes on first render, language changes and permission refresh', async () => {
+    await setup({ status: 'waiting', locale: 'en-US' });
+    await until(() => js(`[...document.querySelectorAll('.pdebug button')].some(b=>b.textContent==='Stop collaboration')`), 'English-first collaboration controls');
+    assert.equal(await js(`document.querySelector('.pdebug-actions .is-primary').textContent`), 'Approve and continue');
+    assert.equal(await js(`document.querySelector('.pdebug-evidence summary').textContent`), 'Verified outputs · 1');
+    await js(`window.localeCard=document.querySelector('.pdebug');window.localeStop=[...localeCard.querySelectorAll('button')].find(b=>b.textContent==='Stop collaboration');localeStop.focus();void 0;`);
+    for (const [locale,label] of [['zh-CN','停止协作'],['ja-JP','共同作業を停止'],['ko-KR','공동 작업 중지'],['en-US','Stop collaboration']]) {
+      await js(`SoduWorkI18n.setLocale(${JSON.stringify(locale)})`);
+      await until(() => js(`localeStop.textContent===${JSON.stringify(label)}`), 'translated stop action');
+      assert.equal(await js('localeStop===document.activeElement && localeCard===document.querySelector(".pdebug")'), true);
+      assert.equal(current.status, 'waiting');assert.equal(current.revision, 4);
+      assert.equal(await js(`document.querySelector('.pdebug-file-copy strong').textContent`), '设计说明');
+      assert.equal(await js(`document.querySelector('.pdebug-file-copy span').textContent`), 'design.md');
+    }
+    current.revision++;
+    current.nodes[0].pendingPermissions=[{requestId:'permission-one',summary:'Read selected file',detail:'design.md',reviewable:true}];
+    await js("PluginDebugCard.open({ref:'fixture-chat',mode:'conversation'}).then(()=>true)");
+    await until(() => js(`[...document.querySelectorAll('.pdebug button')].some(b=>b.textContent==='Allow once')`), 'English permission controls after poll');
+    assert.equal(await js(`[...document.querySelectorAll('.pdebug button')].some(b=>b.textContent==='Deny')`), true);
+    assert.equal(await js(`document.querySelector('.pdebug-confirm strong').textContent`), 'Your permission is required');
+    await image('english-collaboration-actions');
+    await clickAction('Stop collaboration');
+    await until(() => current.status==='cancelled', 'localized stop action still cancels the same run');
+  });
   assert.deepEqual(report.network, []);
   report.ok = report.cases.every(item => item.ok);
 }).catch(error => { report.error = error.stack || String(error); }).finally(() => {
