@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "key": "goal-delivery-harness",
   "name": "\u76ee\u6807\u4ea4\u4ed8 Harness",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "category": "dev",
   "description": "SoduWork built-in durable goal and delivery harness.",
   "author": "SoduWork",

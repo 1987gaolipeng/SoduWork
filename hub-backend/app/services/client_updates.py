@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import ClientRelease, ClientUpdateAttempt
 from ..config import get_settings
+from . import client_release_files
 
 
 # Stable releases stay canonical X.Y.Z; staging candidates append -beta.N
@@ -178,6 +179,19 @@ def assert_artifact_integrity(release: Any, path: Path) -> None:
     if len(_ARTIFACT_VERIFIED) >= 128:
         _ARTIFACT_VERIFIED.clear()
     _ARTIFACT_VERIFIED[cache_key] = marker
+
+
+async def assert_artifact_integrity_async(release: Any) -> None:
+    # Snapshot loaded attributes here: a worker must never access ORM/session state.
+    snapshot = SimpleNamespace(artifact_size=release.artifact_size, sha256=release.sha256)
+    relative = str(release.artifact_path)
+
+    def verify():
+        path = safe_artifact_path(relative)
+        with client_release_files.artifact_lock(path):
+            assert_artifact_integrity(snapshot, path)
+
+    await client_release_files.disk_call(verify)
 
 
 # Allow multiple package formats for the same channel, platform, architecture, and version.
@@ -409,6 +423,43 @@ async def _find_release(session: AsyncSession, candidate) -> ClientRelease | Non
 
 
 
+def _store_release_artifact(candidate: SimpleNamespace, source: Path) -> str:
+    relative = (
+        f"{candidate.channel}/{candidate.platform}/{candidate.arch}/"
+        f"{candidate.version}/{candidate.artifact_name}"
+    )
+    target = safe_artifact_path(relative)
+    with client_release_files.artifact_lock(target):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            if target.stat().st_size != candidate.artifact_size or sha256_file(target) != candidate.sha256:
+                raise UpdateContractError("immutable client artifact path already contains other bytes")
+        else:
+            temp = target.with_name(uuid.uuid4().hex + ".incoming")
+            try:
+                shutil.copyfile(source, temp)
+                # os.replace / os.link would be cleaner, but filesystem filter
+                # drivers (e.g. Esafenet on Windows) reject MoveFileExW and
+                # hard-link onto *.tar.gz targets. A plain exclusive write is the
+                # only portable primitive; the DB row is only committed after the
+                # integrity check below, so a partial file stays unreachable.
+                if not target.exists():
+                    with open(target, "xb") as out, open(temp, "rb") as stream:
+                        shutil.copyfileobj(stream, out)
+                        out.flush()
+                        os.fsync(out.fileno())
+            except FileExistsError:
+                # Another exact retry won the artifact race.
+                pass
+            finally:
+                temp.unlink(missing_ok=True)
+            if (target.stat().st_size != candidate.artifact_size
+                    or sha256_file(target) != candidate.sha256):
+                raise UpdateContractError(
+                    "immutable client artifact path already contains other bytes")
+    return relative
+
+
 async def import_signed_release(
     session: AsyncSession,
     bundle: dict,
@@ -418,50 +469,16 @@ async def import_signed_release(
     created_by: str = "deployment",
 ) -> tuple[ClientRelease, bool]:
     """Import a verified installer once; exact retries are idempotent."""
-    source = Path(installer).resolve()
-    candidate = release_from_bundle(bundle, source)
+    source = await client_release_files.disk_call(Path(installer).resolve)
+    candidate = await client_release_files.disk_call(release_from_bundle, bundle, source)
     existing = await _find_release(session, candidate)
     if existing is not None:
         if not _same_release(existing, bundle):
             raise UpdateContractError("immutable client release artifact already exists")
-        assert_artifact_integrity(existing, safe_artifact_path(existing.artifact_path))
+        await assert_artifact_integrity_async(existing)
         return existing, False
 
-    relative = (
-        f"{candidate.channel}/{candidate.platform}/{candidate.arch}/"
-        f"{candidate.version}/{candidate.artifact_name}"
-    )
-    target = safe_artifact_path(relative)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    artifact_created = False
-    if target.exists():
-        if target.stat().st_size != candidate.artifact_size or sha256_file(target) != candidate.sha256:
-            raise UpdateContractError("immutable client artifact path already contains other bytes")
-    else:
-        temp = target.with_name(uuid.uuid4().hex + ".incoming")
-        try:
-            shutil.copyfile(source, temp)
-            # os.replace / os.link would be cleaner, but filesystem filter
-            # drivers (e.g. Esafenet on Windows) reject MoveFileExW and
-            # hard-link onto *.tar.gz targets. A plain exclusive write is the
-            # only portable primitive; the DB row is only committed after the
-            # integrity check below, so a partial file stays unreachable.
-            if not target.exists():
-                with open(target, "xb") as out, open(temp, "rb") as stream:
-                    shutil.copyfileobj(stream, out)
-                    out.flush()
-                    os.fsync(out.fileno())
-                artifact_created = True
-        except FileExistsError:
-            # Another exact retry won the artifact race.
-            pass
-        finally:
-            temp.unlink(missing_ok=True)
-        if (target.stat().st_size != candidate.artifact_size
-                or sha256_file(target) != candidate.sha256):
-            raise UpdateContractError(
-                "immutable client artifact path already contains other bytes")
-
+    relative = await client_release_files.disk_call(_store_release_artifact, candidate, source)
 
     row = ClientRelease(
         id=candidate.id,
@@ -492,15 +509,11 @@ async def import_signed_release(
         try:
             collision = await _find_release(session, candidate)
             if collision is not None and _same_release(collision, bundle):
-                assert_artifact_integrity(
-                    collision, safe_artifact_path(collision.artifact_path))
+                await assert_artifact_integrity_async(collision)
                 return collision, False
-            references = int((await session.execute(
-                select(func.count(ClientRelease.id)).where(
-                    ClientRelease.artifact_path == relative)
-            )).scalar_one() or 0)
-            if artifact_created and not references:
-                target.unlink(missing_ok=True)
+            # A completed immutable file can be reused on retry. Do not unlink
+            # after a DB failure: another request/replica may have committed a
+            # reference while this transaction was rolling back.
         except Exception:
             # Prefer a harmless orphan over deleting an artifact a concurrent
             # committed release may already reference.

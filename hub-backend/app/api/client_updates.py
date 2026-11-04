@@ -27,6 +27,7 @@ from ..models import Client, ClientRelease, ClientUpdateAttempt, User
 from ..realtime import hub
 from ..services import audit
 from ..services import client_updates as contract
+from ..services import client_release_files
 from ..services import rbac
 from ..services import update_safety
 
@@ -186,36 +187,28 @@ async def upload_deployment_client_release(
     if not filename or filename != str(installer.filename or ""):
         raise HTTPException(status_code=400, detail="安装包文件名无效")
 
-    incoming_dir = contract.release_root() / ".incoming" / (run.id + "-" + uuid.uuid4().hex)
-    incoming_dir.mkdir(parents=True, exist_ok=False)
+    incoming_dir = (await client_release_files.disk_call(contract.release_root)) / ".incoming" / (run.id + "-" + uuid.uuid4().hex)
     incoming = incoming_dir / filename
-    total = 0
     limit = max(64, min(4096, int(settings.client_update_upload_max_mb or 1024))) * 1024 * 1024
     try:
-        with open(incoming, "xb") as stream:
-            while True:
-                block = await installer.read(1024 * 1024)
-                if not block:
-                    break
-                total += len(block)
-                if total > limit:
-                    raise HTTPException(status_code=413, detail="客户端安装包超过上传上限")
-                stream.write(block)
-            stream.flush()
-            os.fsync(stream.fileno())
+        try:
+            await client_release_files.disk_call(
+                client_release_files.copy_upload, installer.file, incoming, limit)
+        except client_release_files.UploadTooLarge as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
         if terminal_release is not None:
             # A Runner may finish before an exact uploader retry arrives.
             # Verify it, but never mutate an active release back to staged.
             try:
-                candidate = contract.release_from_bundle(bundle, incoming)
+                candidate = await client_release_files.disk_call(
+                    contract.release_from_bundle, bundle, incoming)
                 release = await session.get(
                     ClientRelease, str(terminal_release.get("id") or ""))
                 if (release is None or release.id != candidate.id
                         or contract.signed_manifest(release) != bundle):
                     raise contract.UpdateContractError(
                         "terminal upload retry does not match the staged release")
-                contract.assert_artifact_integrity(
-                    release, contract.safe_artifact_path(release.artifact_path))
+                await contract.assert_artifact_integrity_async(release)
             except contract.UpdateContractError as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
             return {"ok": True, "created": False,
@@ -249,11 +242,7 @@ async def upload_deployment_client_release(
         await session.commit()
         return {"ok": True, "created": created, "release": result["clientRelease"]}
     finally:
-        incoming.unlink(missing_ok=True)
-        try:
-            incoming_dir.rmdir()
-        except OSError:
-            pass
+        await client_release_files.disk_call(client_release_files.remove_incoming, incoming)
 
 
 
@@ -572,23 +561,15 @@ async def upload_manual_client_release(
     filename = Path(str(installer.filename or "")).name
     if not filename or filename != str(installer.filename or ""):
         raise HTTPException(status_code=400, detail="安装包文件名无效")
-    incoming_dir = contract.release_root() / ".incoming" / uuid.uuid4().hex
-    incoming_dir.mkdir(parents=True, exist_ok=False)
+    incoming_dir = (await client_release_files.disk_call(contract.release_root)) / ".incoming" / uuid.uuid4().hex
     incoming = incoming_dir / filename
-    total = 0
     limit = max(64, min(4096, int(settings.client_update_upload_max_mb or 1024))) * 1024 * 1024
     try:
-        with open(incoming, "xb") as stream:
-            while True:
-                block = await installer.read(1024 * 1024)
-                if not block:
-                    break
-                total += len(block)
-                if total > limit:
-                    raise HTTPException(status_code=413, detail="客户端安装包超过上传上限")
-                stream.write(block)
-            stream.flush()
-            os.fsync(stream.fileno())
+        try:
+            await client_release_files.disk_call(
+                client_release_files.copy_upload, installer.file, incoming, limit)
+        except client_release_files.UploadTooLarge as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
         try:
             release, created = await contract.import_signed_release(
                 session, bundle, incoming, enabled=False, created_by=user.id)
@@ -602,11 +583,7 @@ async def upload_manual_client_release(
         await session.commit()
         return {"ok": True, "created": created, "release": _release_api(release)}
     finally:
-        incoming.unlink(missing_ok=True)
-        try:
-            incoming_dir.rmdir()
-        except OSError:
-            pass
+        await client_release_files.disk_call(client_release_files.remove_incoming, incoming)
 
 
 @admin_router.patch("/client-releases/{release_id}")
@@ -623,8 +600,7 @@ async def set_client_release_enabled(
     if enabled and not release.enabled:
         try:
             contract.assert_trusted_release(release)
-            contract.assert_artifact_integrity(
-                release, contract.safe_artifact_path(release.artifact_path))
+            await contract.assert_artifact_integrity_async(release)
         except contract.UpdateContractError as exc:
             raise HTTPException(status_code=409, detail=f"安装包校验失败：{exc}") from exc
     release.enabled = enabled

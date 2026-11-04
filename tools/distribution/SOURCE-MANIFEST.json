@@ -9821,8 +9821,8 @@
     },
     {
       "path": "client/tests/product-incubator.test.cjs",
-      "bytes": 8855,
-      "sha256": "88055b172c0823f18a809adbf8ed5ee609d09d57897731df1fee364984cf3ac9"
+      "bytes": 9191,
+      "sha256": "5ee35c3b12c86a4adef3e35c192a05e40cbd440ada70c293fa5ecf09280ce011"
     },
     {
       "path": "client/tests/protocol-narration.test.cjs",
@@ -11436,8 +11436,8 @@
     },
     {
       "path": "hub-backend/app/api/client_updates.py",
-      "bytes": 33855,
-      "sha256": "b2c9c21d4347adf5a9e0ce740233411d568e92b9e277c78f7f8afe38d15cacde"
+      "bytes": 33356,
+      "sha256": "ee2f6242e907aac364ae22ce7e7135aa22ec578de0287e8bb4c8fa6087d4d331"
     },
     {
       "path": "hub-backend/app/api/clients.py",
@@ -11826,8 +11826,8 @@
     },
     {
       "path": "hub-backend/app/main.py",
-      "bytes": 18280,
-      "sha256": "7694a06d921dc4ac4179da35c13577c4b8b9a4600c73c553e2b5cca19a4f9a60"
+      "bytes": 18257,
+      "sha256": "a07d12486a4e90d773d6109dd7d9d2fe192c828bad2230aec8a54f90bf6248c4"
     },
     {
       "path": "hub-backend/app/memory_record_models.py",
@@ -12170,9 +12170,14 @@
       "sha256": "421dbdac60c66c2c996d23fb6600b6f157af6a7f927993a3748af8562a2f0805"
     },
     {
+      "path": "hub-backend/app/services/client_release_files.py",
+      "bytes": 1326,
+      "sha256": "e919594f4f1e8095ad1cc8a60441fcc428935c4389c2ae8ca32d0094d7a63738"
+    },
+    {
       "path": "hub-backend/app/services/client_updates.py",
-      "bytes": 21941,
-      "sha256": "2e130f43f22c14980e6a1b567d7021d1c8d79a7c1de9cdf22153fc20eb3a0508"
+      "bytes": 22674,
+      "sha256": "4cd32f53b95c29a5932e7476c12392aca0d76d5d30594be4173c027acf413a59"
     },
     {
       "path": "hub-backend/app/services/cloud_acceptance.py",
@@ -12538,6 +12543,11 @@
       "path": "hub-backend/app/services/execution_settlement.py",
       "bytes": 13014,
       "sha256": "6eab5ea8900de02e3a260cf59e4d615479020777f6f1cbae87d81908f4e31bbe"
+    },
+    {
+      "path": "hub-backend/app/services/file_io.py",
+      "bytes": 1329,
+      "sha256": "0b80cf40cf0b27827df637f7e074491dbb61635c83d2fe100dd64af360f805cb"
     },
     {
       "path": "hub-backend/app/services/gate_contract.py",
@@ -13001,8 +13011,8 @@
     },
     {
       "path": "hub-backend/app/services/model_catalog.py",
-      "bytes": 34939,
-      "sha256": "76ec5e34271acf8aac2833ecded37434759cfff8d61c37dd7d3d2382e9095e98"
+      "bytes": 32986,
+      "sha256": "0bc20ed1e4b860763283c27fe7c311815d872d7aa40ae7c7cd0940f29e473db2"
     },
     {
       "path": "hub-backend/app/services/model_config_guard.py",
@@ -14797,7 +14807,7 @@
     {
       "path": "hub-backend/plugins/goal-delivery-harness.json",
       "bytes": 1465,
-      "sha256": "98219bdd8cf916487f8937b92d54f6a4c93a283529c977e15bbce87c0d8d55b0"
+      "sha256": "faa6f7350c6cd5779961da445aa36b15971abdad9d3a1527e02ca5c050ff91f4"
     },
     {
       "path": "hub-backend/plugins/knowledge-synthesis.json",
@@ -14827,7 +14837,7 @@
     {
       "path": "hub-backend/plugins/product-incubator.json",
       "bytes": 18399,
-      "sha256": "32ebece7c42ce7f3ffe91d4b639fa4fe8581ff20e5caa987fc80a4b4b73a94bd"
+      "sha256": "12106b3abde30d35cacb2522f0ecd4447efd25afc1348137ca3016bbcd0c5fb3"
     },
     {
       "path": "hub-backend/plugins/product-prototype.json",
@@ -14867,7 +14877,7 @@
     {
       "path": "hub-backend/plugins/viral-video-studio.json",
       "bytes": 4968,
-      "sha256": "2e527a3c4fbcc1fc300a38f53d7d2b2f6c2952327b62661074ba3bf8b80338ef"
+      "sha256": "e365cabdb76e456941f76a8b381231e11be737a76af2b9d8d06e62c795f44c2e"
     },
     {
       "path": "hub-backend/plugins/web-collect.json",
@@ -16280,6 +16290,11 @@
       "sha256": "5bf90a6d4ef3dbc50a04acfa89b3fa0190a1441901a23956aa7ae23988003dbf"
     },
     {
+      "path": "hub-backend/test_client_release_upload_io.py",
+      "bytes": 15125,
+      "sha256": "dabdf81927e33e18ad0680def255d1dddd4f3577995bbb4359f6874d2490d0d0"
+    },
+    {
       "path": "hub-backend/test_client_test_payload.py",
       "bytes": 2862,
       "sha256": "99a9cae38418740c3da3f74fe854f8b179c264d8199a6bd82e5ccf6a1fb902cb"
@@ -16776,13 +16791,13 @@
     },
     {
       "path": "hub-backend/test_model_defaults.py",
-      "bytes": 8688,
-      "sha256": "97ffa2c36a69c1743e1b8e6feb3ad1f3d09a70329ff5b0a25104bf4d2d55e29a"
+      "bytes": 10155,
+      "sha256": "1c7d831a4c7db1fb8366227afd4e7c4eb4d6c0b06527556a358199b8dd30c470"
     },
     {
       "path": "hub-backend/test_model_definition_contracts.py",
-      "bytes": 7019,
-      "sha256": "46c9bf838008f8a5ac2f9f01ba108dcd40b3553cea6dbea1ccd11616db1ad9a7"
+      "bytes": 12369,
+      "sha256": "4d2c9ac2a849996a25120abd09aed3c07bfb149f7ec65e3c265a63233648a2a4"
     },
     {
       "path": "hub-backend/test_model_provider_cache.py",
@@ -16961,8 +16976,8 @@
     },
     {
       "path": "hub-backend/test_product_incubator.py",
-      "bytes": 2375,
-      "sha256": "11e22568b14cf1346f86e173f68420f9b0aa93aaa6e8899d1944234337f9cd53"
+      "bytes": 3512,
+      "sha256": "ceca2604d44f74b960f3fd085afcd5ba205c343ea2edbac793b7afef7133c2ef"
     },
     {
       "path": "hub-backend/test_public_source.py",

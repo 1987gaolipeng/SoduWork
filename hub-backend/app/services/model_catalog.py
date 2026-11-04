@@ -1,4 +1,9 @@
-"""Public module behavior and service contracts."""
+"""Administrator-owned models, provider settings, and personal overrides.
+
+Startup only adds missing credential-free provider templates. Historical presets and explicit
+migration helpers below never run automatically. Resolve credentials only when preparing
+execution and expose masked state to catalog readers.
+"""
 from __future__ import annotations
 
 import json
@@ -27,9 +32,6 @@ from .model_definition_contracts import (
 
 log = logging.getLogger("uvicorn.error")
 
-# Migrate legacy global LLM settings into the company provider on initial setup.
-# Use this catalog as the read authority after migration.
-LEGACY_KEYS = ("llm_base_url", "llm_api_key", "llm_model")
 COMPANY = "company"
 
 MEDIA_MODEL_ALIASES = {
@@ -45,9 +47,9 @@ def canonical_model_name(value: str) -> str:
     name = str(value or "").strip()
     return MEDIA_MODEL_ALIASES.get(name, name)
 
-# Built-in provider and model definitions.
+# Provider templates are the only catalog rows startup may add.
 # Never include API keys in built-in provider definitions.
-# Leave the company endpoint unset until configured or migrated.
+# Leave the company endpoint unset until an administrator configures it.
 BUILTIN_PROVIDERS: list[dict] = [
     {"id": COMPANY, "name": "共享模型服务", "kind": "openai-compat", "base_url": "",
      "note": "自建的 OpenAI 兼容模型服务。地址与密钥由管理员配置，按授权共享。"},
@@ -72,9 +74,8 @@ BUILTIN_PROVIDERS: list[dict] = [
      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "note": "Gemini 的 OpenAI 兼容端点。"},
 ]
 
-# Built-in models declare names, owners, and display labels; omit prices and parameters that require ongoing updates.
-# Set ctx_window only when known; zero means unknown and is omitted from the UI.
-# Add only presets compatible with current execution paths. Bootstrap adds entries; administrators maintain existing configuration.
+# Historical presets support explicit migration helpers and their protocol regressions.
+# They are not an initialization list; startup never creates or repairs model rows.
 def _always_thinking_config(format: str) -> dict:
     return {"thinkingMode": "always", "thinkingFormat": format,
             "supportsReasoningEffort": True,
@@ -282,55 +283,21 @@ async def _repair_builtin_flash_thinking_config(session: AsyncSession) -> int:
 
 
 async def bootstrap(session: AsyncSession) -> None:
-    """Idempotently add missing built-in providers and models and migrate legacy company settings.
-    Preserve existing endpoints and enabled states.
+    """Add missing credential-free provider templates; preserve all administrator-owned data.
+
+    Models start empty and are maintained through the admin API. Legacy defaults must not
+    recreate a deleted model, restore provider credentials, or re-enable disabled providers.
+    Historical model migrations/repairs are deliberately excluded from ordinary startup.
     """
     have_p = {p.id for p in (await session.execute(select(models.ModelProvider))).scalars().all()}
+    changed = False
     for p in BUILTIN_PROVIDERS:
         if p["id"] in have_p:
             continue
         # Built-in services are enabled by default. Permission to use a service is separate from endpoint and credential readiness.
         # Users may supply personal credentials for allowed services even when shared credentials are not configured.
         session.add(models.ModelProvider(builtin=True, enabled=True, **p))
-    have_m = {m.id for m in (await session.execute(select(models.ModelDef))).scalars().all()}
-    for m in BUILTIN_MODELS:
-        mid = m["provider_id"] + ":" + m["name"]
-        if mid in have_m:
-            continue
-        session.add(models.ModelDef(id=mid, builtin=True, enabled=True, **m))
-    await session.flush()
-    await _migrate_model_renames(
-        session,
-        [("volcengine", old_name, new_name)
-         for old_name, new_name in MEDIA_MODEL_ALIASES.items()],
-        MEDIA_MODEL_RENAME_FLAG,
-    )
-    await _repair_builtin_media_model_config(session)
-    await _repair_builtin_flash_thinking_config(session)
-    # Apply the one-time correction for initially disabled built-in providers.
-    # Record migration completion so later deliberate administrator disabling remains respected.
-    flag = await session.get(models.AppSetting, "model_builtin_enabled_fix")
-    if flag is None:
-        for p in (await session.execute(select(models.ModelProvider).where(
-                models.ModelProvider.builtin.is_(True)))).scalars().all():
-            p.enabled = True
-        session.add(models.AppSetting(key="model_builtin_enabled_fix", value="1"))
-        await session.flush()
-    # Migrate the legacy endpoint, key, and model into company provider definitions.
-    rows = (await session.execute(select(models.AppSetting).where(
-        models.AppSetting.key.in_(LEGACY_KEYS)))).scalars().all()
-    old = {r.key: (r.value or "").strip() for r in rows}
-    comp = await session.get(models.ModelProvider, COMPANY)
-    if comp is not None and old.get("llm_base_url") and not comp.base_url:
-        comp.base_url = old["llm_base_url"]
-        comp.api_key = old.get("llm_api_key", "")
-        comp.enabled = True
-    if old.get("llm_model"):
-        mid = COMPANY + ":" + old["llm_model"]
-        if await session.get(models.ModelDef, mid) is None:
-            session.add(models.ModelDef(id=mid, provider_id=COMPANY, name=old["llm_model"],
-                                        label=old["llm_model"], builtin=False, enabled=True,
-                                        note="从旧的「模型服务」配置迁过来的"))
+        changed = True
     await session.commit()
 
 

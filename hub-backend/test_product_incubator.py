@@ -11,6 +11,8 @@ class ProductIncubatorTests(unittest.TestCase):
     def test_enterprise_workflow_has_portable_handoffs_and_blocking_acceptance(self):
         raw = json.loads((ROOT / "hub-backend/plugins/product-incubator.json").read_text(encoding="utf-8"))
         manifest, workflow, report = plugin_packages.normalize(raw)
+        self.assertEqual(manifest["version"], raw["version"])
+        self.assertIn(".soduwork/product-incubation.json", manifest["instructions"])
         self.assertEqual(manifest["entrypoints"], dict(conversation=True, task=True, automation=True))
         self.assertEqual(len(workflow["nodes"]), 11)
         by_key = {node["key"]: node for node in workflow["nodes"]}
@@ -18,6 +20,7 @@ class ProductIncubatorTests(unittest.TestCase):
         self.assertEqual(by_key["accept_release"]["type"], "human_review")
         self.assertEqual(by_key["accept_delivery"]["type"], "human_review")
         self.assertIn("accept_release", by_key["deliver"]["dependsOn"])
+        self.assertIn(".soduwork/delivery.json", by_key["deliver"]["config"]["prompt"])
         self.assertEqual(by_key["complete"]["dependsOn"], ["accept_delivery"])
         for node in workflow["nodes"]:
             for item in node["inputs"]:
@@ -32,11 +35,23 @@ class ProductIncubatorTests(unittest.TestCase):
             "console.log(JSON.stringify(require('./client/main/product-incubator-plugin').body({})))"],
             cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True)
         draft = json.loads(result.stdout)
+        canonical = json.loads((ROOT / "hub-backend/plugins/product-incubator.json").read_text(encoding="utf-8"))
+        self.assertEqual(draft["version"], canonical["version"])
+        self.assertEqual(draft["workflow"], canonical["workflow"])
         package = plugin_drafts.build(draft)
         parsed = plugin_packages.parse(package)
         self.assertEqual(parsed["manifest"]["key"], "product-incubator")
+        self.assertEqual(parsed["manifest"]["version"], canonical["version"])
+        expected_manifest, expected_workflow, _report = plugin_packages.normalize(canonical)
+        # Export makes inherited AI capabilities explicit; node handoffs and
+        # delivery prompts must otherwise survive the package round trip intact.
+        for node in expected_workflow["nodes"]:
+            if node["type"] in {"ai", "ai_review"}:
+                node["capabilities"] = {**expected_manifest["capabilities"], "explicit": True}
+        self.assertEqual(parsed["workflow"], expected_workflow)
         self.assertEqual(len(parsed["workflow"]["nodes"]), 11)
         restored = plugin_packages.personal_draft(parsed)
+        self.assertEqual(restored["version"], canonical["version"])
         self.assertEqual(len(restored["resources"]), 3)
         self.assertEqual(restored["workflow"]["nodes"][-1]["key"], "complete")
 

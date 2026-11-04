@@ -68,12 +68,12 @@ async def lifespan(app: FastAPI):
             await rbac.bootstrap(session)
             await rbac.seed_positions(session)   # Seed default professional roles idempotently.
             await work_catalog_service.bootstrap(session)  # Seed professional profiles and work scenarios idempotently.
-            await rbac.seed_domains(session)     # Seed editable example responsibility domains only when the catalog is empty.
-        async with SessionLocal() as session:  # Seed built-in models and adopt legacy company LLM settings without overwriting configured values.
+            await rbac.seed_domains(session)     # Seed editable example domains only when the domain table is empty.
+        async with SessionLocal() as session:  # Add credential-free provider templates; administrators own all model entries.
             from .services import model_catalog
             try:
                 await model_catalog.bootstrap(session)
-            except Exception as e:  # noqa: BLE001  Optional catalog seeding must not prevent service startup.
+            except Exception as e:  # noqa: BLE001  Provider initialization failure must not prevent service startup.
                 log.warning("模型目录初始化失败: %s", e)
         async with SessionLocal() as session:  # Initialize approval policies and declarative legacy environment configuration idempotently.
             from .services import release_control

@@ -16,7 +16,8 @@ from app.services.model_defaults import public_defaults
 from test_model_runtime import IsolatedDatabase
 
 
-AGENTS = {"pi", "opencode", "qwen", "codex-harness", "dsh", "harness2"}
+# All shipped managed runtimes, including Kimi, must satisfy the same gateway contract.
+AGENTS = {"pi", "opencode", "qwen", "codex-harness", "dsh", "harness2", "kimi"}
 
 
 class MetadataTests(unittest.TestCase):
@@ -114,6 +115,29 @@ class ModelDefaultsTests(IsolatedDatabase):
         async with self.sessions() as session:
             self.assertEqual((await session.get(Client, "fixture")).agent_models,
                              {"qwen": "removed-model"})
+
+    async def test_kimi_preference_and_disabled_model_match_execution_without_fallback(self):
+        async with self.sessions() as session, session.begin():
+            (await session.get(Client, "fixture")).agent_models = {"kimi": "third"}
+        metadata = await self.get("my-models")
+        self.assertEqual(metadata["defaultModels"]["kimi"], "third")
+        execution = await self.get("ai-proxy/config", agent="kimi")
+        self.assertTrue(execution["ok"], execution)
+        self.assertEqual(execution["model"], "third")
+
+        async with self.sessions() as session, session.begin():
+            (await session.get(ModelDef, "fixture:third")).enabled = False
+        metadata = await self.get("my-models")
+        self.assertEqual(metadata["defaultModels"]["kimi"], "")
+        self.assertIn("kimi", metadata["defaultModelErrors"])
+        self.assertNotIn("third", [row["name"] for row in metadata["usable"]])
+        self.assertFalse((await self.get("ai-proxy/config", agent="kimi"))["ok"])
+        explicit = await self.get("ai-proxy/config", agent="kimi", model="second")
+        self.assertTrue(explicit["ok"], explicit)
+        self.assertEqual(explicit["model"], "second")
+        async with self.sessions() as session:
+            self.assertEqual((await session.get(Client, "fixture")).agent_models,
+                             {"kimi": "third"})
 
     async def test_ignore_preference_uses_catalog_default_without_mutating_agent_models(self):
         normal = await self.get("ai-proxy/config", agent="pi")

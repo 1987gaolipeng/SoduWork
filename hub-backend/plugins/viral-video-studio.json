@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "key": "viral-video-studio",
   "name": "疯传视频成片工坊",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "distribution": "standalone",
   "category": "office",
   "description": "从一个主题或产品卖点生成短视频脚本、分镜、字幕和可直接发布到抖音、小红书、视频号、B站、YouTube 或 TikTok 的视频文件。",

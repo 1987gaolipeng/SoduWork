@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "key": "product-incubator",
   "name": "产品孵化",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "category": "dev",
   "description": "从产品想法持续推进到可运行、可验收、可发布的完整产品；包含真实开发、测试修复、商业运营准备和断点续作。",
   "instructions": "作为产品孵化负责人，先读取 product-incubator/SKILL.md，逐阶段完成真实产品，不只写方案。工作流节点只做当前阶段；普通会话按技能阶段推进并保留进度、工具输出和成果。每次恢复先核对 .soduwork/product-incubation.json 与真实文件。未经明确授权不得生产发布、付费或外发消息，不能伪造市场验证。",

@@ -21,6 +21,7 @@ function fixture(t) {
 test('catalog is offline, portable, complete and does not persist a second personal plugin', t=>{
   const f=fixture(t), item=personal.get(f.app,personal.PRODUCT_INCUBATOR_ID);
   assert.equal(item.name,'产品孵化');assert.equal(item.builtIn,true);
+  assert.equal(item.version,require('../../hub-backend/plugins/product-incubator.json').version);
   assert.equal(item.entrypoints.conversation,true);
   // Formal tasks use the reviewed enterprise version, not device-local definitions.
   assert.equal(item.entrypoints.task,false);assert.equal(item.entrypoints.automation,false);
@@ -39,6 +40,9 @@ test('catalog is offline, portable, complete and does not persist a second perso
 test('canonical manifest is packaged verbatim and cached body cannot leak mutations', ()=>{
   const canonical=require('../../hub-backend/plugins/product-incubator.json');
   const first=incubator.body({});assert.deepEqual(first.workflow,canonical.workflow);
+  assert.equal(first.version,canonical.version);
+  assert.match(first.instructions,/\.soduwork\/product-incubation\.json/);
+  assert.match(first.workflow.nodes.find(node=>node.key==='deliver').config.prompt,/\.soduwork\/delivery\.json/);
   first.workflow.nodes[0].name='mutated';
   assert.notEqual(incubator.body({}).workflow.nodes[0].name,'mutated');
   assert.ok(require('../package.json').build.extraResources.some(x=>x.from==='../hub-backend/plugins/product-incubator.json'&&x.to==='product-incubator-plugin.json'));
