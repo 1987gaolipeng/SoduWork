@@ -60,7 +60,7 @@ async function trashWithRecovery(shell, filePath) {
   }
 }
 
-function install({ app, ipcMain, session, BrowserWindow, dialog, shell, trash = trashWithRecovery }) {
+function install({ app, ipcMain, session, BrowserWindow, dialog, shell, cloudHistory, trash = trashWithRecovery }) {
   function authorize(id) {
     const captured = historyAccess.actor(app);
     historyAccess.assertOwner(app, id, captured);
@@ -90,16 +90,18 @@ function install({ app, ipcMain, session, BrowserWindow, dialog, shell, trash = 
     }
   });
   ipcMain.handle('pi-session-history-delete', async (event, rawId, rawOptions) => {
-    const id = String(rawId || '').trim();
-    if (!id) return { ok: false, reason: '没有指定要删除的会话' };
+    const requestedId = String(rawId || '').trim();
+    if (!requestedId) return { ok: false, reason: '没有指定要删除的会话' };
     try {
+      const canonicalId = await cloudHistory?.resolveDeleteAlias(requestedId);
+      const id = canonicalId || requestedId;
       const guard = authorize(id);
       let active = session.findBySessionId(id);
       if (active && typeof active.inFlight === 'function' && active.inFlight()) {
         return { ok: false, reason: '这条会话还在执行，完成或停止后再删除' };
       }
-      const switched = require('../conversation/runtime-segments').read(app, id);
-      const found = switched ? null : await session.historyEntry(app, id);
+      const switched = canonicalId ? null : require('../conversation/runtime-segments').read(app, id);
+      const found = switched || canonicalId ? null : await session.historyEntry(app, id);
       const piEntry = found && found.ok && found.entry && found.entry.path ? found.entry : null;
       /* Search runtime records when the conversation is absent from Pi archives. */
       const runnerRow = switched || piEntry ? null : await session.findRunnerRow(id);
@@ -156,6 +158,7 @@ function install({ app, ipcMain, session, BrowserWindow, dialog, shell, trash = 
         return { ...deleted, ok: true, id };
       }
       guard();
+      if (canonicalId) return cloudHistory.forget(canonicalId);
       if (piEntry) await trash(shell, piEntry.path);
       else {
         const forgot = await session.forgetRunner(app, id);

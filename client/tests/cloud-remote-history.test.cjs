@@ -108,15 +108,25 @@ test('remote directory and persisted sync receipt expose one history row per tas
   await fs.mkdir(receiptRoot);
   const filename = require('node:crypto').createHash('sha256').update(cachedId).digest('hex') + '.json';
   await fs.writeFile(path.join(receiptRoot, filename), JSON.stringify({
-    sessionId: cachedId, taskId: 'task-p3', entryKind: 'cloud', title: 'P3',
+    sessionId: cachedId, taskId: 'task-p3', syncId: 'sync-p3', transferId: 'p3-transfer', entryKind: 'cloud', title: 'P3',
     owner: require('../main/platform-connections/runtime.cjs').connectionScope(actor),
     phase: 'committed', adapterId: 'pi', at: 100,
   }));
-  const controller = create({ app: { getPath: () => root }, identityOf: async () => actor,
-    remoteDirectory: true, request: async () => ({ok: true, chats: [
+  let latest, messages = [];
+  const openController = () => create({ app: { getPath: () => root }, identityOf: async () => actor,
+    remoteDirectory: true, request: async (_, route) => {
+      if (route.startsWith('/cloud-execution-sync/')) {
+        const url = new URL(route, 'http://test.invalid');
+        assert.equal(url.pathname, '/cloud-execution-sync/sync-p3');
+        assert.equal(url.searchParams.has('ref'), false);
+        return { ok: true, conversation: { id: 'sync-p3', receipt: { taskId: 'task-p3' } }, page: latest, messages };
+      }
+      return {ok: true, chats: [
       {sessionId: 'mobile-p3', taskId: 'task-p3', ref: 'run-p3', title: 'P3', canSend: true},
       {sessionId: 'mobile-other', taskId: 'task-other', ref: 'run-other', title: 'P3', canSend: true},
-    ]}) });
+      ]};
+    } });
+  const controller = openController();
   const result = await controller.history();
   assert.deepEqual(result.chats.map(row => row.id), [cachedId, 'mobile-other']);
   assert.deepEqual(result.chats[0].historyAliasIds, ['mobile-p3']);
@@ -153,4 +163,22 @@ test('remote directory and persisted sync receipt expose one history row per tas
   assert.throws(() => access.assertOwner(app, 'mobile-p3', access.actor(app,
     { ...actor, hub: 'http://127.0.0.1:18990' }), resolved));
   assert.deepEqual((await controller.history()).chats.map(row => row.id), [cachedId, 'mobile-other']);
+  for (const status of ['queued', 'dispatching', 'running']) {
+    latest = { ok: true, ref: 'newer-round', status, done: true };
+    await assert.rejects(controller.forget(cachedId), /仍在执行/);
+  }
+  for (const fields of [{ status: 'unknown' }, { status: 'done', liveError: 'offline' },
+    { status: 'done', taskId: 'wrong-task' }, { ok: false }]) {
+    latest = { ok: true, ref: 'newer-round', ...fields };
+    await assert.rejects(controller.forget(cachedId), /无法确认/);
+  }
+  assert.deepEqual((await controller.history()).chats.map(row => row.id), [cachedId, 'mobile-other']);
+  latest = { ok: true, ref: 'newer-round', status: 'done', liveError: 'offline',
+    persisted: true, taskId: 'task-p3', finishedAt: '2026-11-03T07:46:00Z' };
+  messages = [{ phase: 'sending' }];
+  await assert.rejects(controller.forget(cachedId), /待处理/);
+  messages = [];
+  assert.deepEqual(await controller.forget(cachedId), { ok: true, id: cachedId });
+  assert.deepEqual((await controller.history({ includeAliases: true })).chats.map(row => row.id), ['mobile-other']);
+  assert.deepEqual((await openController().history()).chats.map(row => row.id), ['mobile-other']);
 });

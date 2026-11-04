@@ -6531,8 +6531,8 @@
     },
     {
       "path": "client/main/pi-session/history-ipc.js",
-      "bytes": 11639,
-      "sha256": "07bfdd050602fca531108c01d6f9ec6ca117fe2387eaab52118022a0ad928683"
+      "bytes": 11895,
+      "sha256": "b752b4eb64d3b874891e50ed223c54c0e02b0dd3ea9b8a8d76c41cd53f960f22"
     },
     {
       "path": "client/main/pi-session/history-seed.js",
@@ -6571,8 +6571,8 @@
     },
     {
       "path": "client/main/pi-session/ipc.js",
-      "bytes": 66683,
-      "sha256": "5809b84cb0cd98488cc6a4454e4180c2eb0487cdfa32dcd6dd59408b7f3b6da2"
+      "bytes": 66712,
+      "sha256": "76deb09b0254813986a4ab2d5e3d023e2c4931ea327daa1871ee493c2cafd902"
     },
     {
       "path": "client/main/pi-session/mate-message-ipc.js",
@@ -8231,8 +8231,8 @@
     },
     {
       "path": "client/tests/cloud-execution-sync.test.cjs",
-      "bytes": 22429,
-      "sha256": "0c8ec74825bdc061fc82202170b69aa1ee4b1840a2b19173f1ccd9a1bdf3272e"
+      "bytes": 43918,
+      "sha256": "e63adf085b21fcf8c96bd80244e1823ad70c2a6141d8773ee2792bd9312b8e0f"
     },
     {
       "path": "client/tests/cloud-handoff-fallback.test.cjs",
@@ -8261,8 +8261,8 @@
     },
     {
       "path": "client/tests/cloud-remote-history.test.cjs",
-      "bytes": 9190,
-      "sha256": "62f5d5f1809ce813b5adcc8831a41c9e5dc8a7311d90c396b76046208092aa7a"
+      "bytes": 10884,
+      "sha256": "1cbf91b7e7af0edc5be7223c0d085d68e7198e69dfd4cbd3b6caddc32c56d470"
     },
     {
       "path": "client/tests/cloud-result-delivery.test.cjs",

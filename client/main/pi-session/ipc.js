@@ -348,7 +348,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
   require('./environment-ipc').install({
     app, ipcMain, session, identityOf, capabilityGrantsOf, _skillDirs, workDir, _saveConf, _conf,
   });
-  require('./history-ipc').install({ app, ipcMain, session, BrowserWindow, dialog, shell });
+  require('./history-ipc').install({ app, ipcMain, session, BrowserWindow, dialog, shell, cloudHistory: _cloudHandoff });
   require('../conversation/work-conversation-cards').install({ app, ipcMain, session, BrowserWindow,
     identityOf: sendIdentityOf || identityOf,
     newCwd: options => _newSessionCwd(app, 'chat-' + require('node:crypto').randomUUID(), options) });
