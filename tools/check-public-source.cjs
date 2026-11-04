@@ -11,7 +11,18 @@ function check(root = ROOT) {
   }
   const files = sourceFiles(root).filter(name => fs.existsSync(path.join(root, name)));
   const errors = [];
+  const identifiers = profile.excludedIdentifiers || [];
+  if (!Array.isArray(identifiers) || identifiers.some(value => typeof value !== 'string' || !value.trim())) {
+    throw Error('Invalid excluded identifiers');
+  }
   for (const name of files) {
+    // Only the exclusion policy may name restricted products. Renaming a file
+    // must not let its private implementation or references enter the archive.
+    const content = name === 'tools/distribution/PUBLIC-SOURCE.json' ? '' : fs.readFileSync(path.join(root, name)).toString('utf8').toLowerCase();
+    for (const identifier of identifiers) {
+      const needle = identifier.toLowerCase();
+      if (name.toLowerCase().includes(needle) || content.includes(needle)) errors.push('Excluded business identifier: ' + name + ': ' + identifier);
+    }
     if (profile.excludedPrefixes.some(prefix => name.startsWith(prefix)) || profile.excludedFiles.includes(name)) {
       errors.push('Excluded first-release material: ' + name);
     }

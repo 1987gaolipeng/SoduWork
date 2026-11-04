@@ -144,7 +144,7 @@
     '连接状态已更新': 'Connection status updated',
     '云端电脑登录信息': 'Cloud computer login',
     'IP 地址或主机名': 'IP address or hostname',
-    '例如 10.70.0.142 或 dev.example.com': 'For example, 10.70.0.142 or dev.example.com',
+    '例如 192.0.2.20 或 dev.example.com': 'For example, 192.0.2.20 or dev.example.com',
     'SSH 端口': 'SSH port',
     '登录账号': 'Login account',
     '例如 root 或 ubuntu': 'For example, root or ubuntu',

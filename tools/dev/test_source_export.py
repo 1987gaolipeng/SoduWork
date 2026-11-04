@@ -72,6 +72,30 @@ class SourceExportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'integrity mismatch'):
             export_source.verify(self.archive)
 
+    def test_private_content_is_rejected_even_after_renaming_and_manifest_regeneration(self):
+        policy = json.loads((export_source.ROOT / 'tools/distribution/PUBLIC-SOURCE.json').read_text(encoding='utf-8'))
+        self.profile['excludedIdentifiers'] = policy['excludedIdentifiers']
+        self.bundle()
+        self.assertEqual(export_source.verify(self.archive), 4)
+        for identifier in policy['excludedIdentifiers']:
+            with self.subTest(identifier=identifier):
+                self.bundle(additions={'client/renamed.cjs': identifier.upper().encode('utf-8')})
+                with self.assertRaisesRegex(ValueError, 'Excluded business identifier'):
+                    export_source.verify(self.archive)
+        self.bundle(additions={'assets/fixture.bin': b'\0' + policy['excludedIdentifiers'][0].encode('utf-8')})
+        with self.assertRaisesRegex(ValueError, 'Excluded business identifier'):
+            export_source.verify(self.archive)
+
+    def test_private_paths_and_invalid_identifier_policy_are_rejected(self):
+        self.profile['excludedIdentifiers'] = ['closed-example']
+        self.bundle(additions={'fixtures/CLOSED-EXAMPLE.txt': b'neutral'})
+        with self.assertRaisesRegex(ValueError, 'Excluded business identifier'):
+            export_source.verify(self.archive)
+        self.profile['excludedIdentifiers'] = ['']
+        self.bundle()
+        with self.assertRaisesRegex(ValueError, 'Invalid excluded identifiers'):
+            export_source.verify(self.archive)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -14,6 +14,7 @@ import signal
 import subprocess
 import sys
 import platform
+import time
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -57,32 +58,39 @@ def spawn_options() -> dict:
             else {"start_new_session": True})
 
 
-def wait_child(child: subprocess.Popen) -> int:
+def wait_child(child: subprocess.Popen, *, progress_label: str | None = None) -> int:
     # Windows' infinite WaitForSingleObject defers Python signal handlers.
     # Bounded waits keep Ctrl+C responsive during both installs and serving.
+    started = last_progress = time.monotonic()
     while True:
         try:
             return child.wait(timeout=.5)
         except subprocess.TimeoutExpired:
-            pass
+            now = time.monotonic()
+            if progress_label and now - last_progress >= 15:
+                print(f"  正在进行 / Still running: {progress_label} ({int(now - started)}s). "
+                      "请保持窗口打开 / Keep this window open.", flush=True)
+                last_progress = now
 
 
 def run(command: list[str], *, cwd: Path, log: Path, label: str,
         env: dict | None = None) -> None:
     print(label, flush=True)
+    started = time.monotonic()
     with log.open("ab") as output:
         output.write(("\n--- " + label + " ---\n").encode("utf-8"))
         output.flush()
         with subprocess.Popen(command, cwd=cwd, env=env, stdout=output,
                               stderr=subprocess.STDOUT, **spawn_options()) as child:
             try:
-                code = wait_child(child)
+                code = wait_child(child, progress_label=label)
             except BaseException:
                 stop_child(child)
                 raise
     if code:
         raise StartupError(f"{label} failed (exit {code}). See {log}. "
                            "Check the network/proxy and retry; completed steps are reused.")
+    print(f"  完成 / Done ({time.monotonic() - started:.1f}s)", flush=True)
 
 
 def check_dependencies() -> tuple[str, str]:
@@ -90,7 +98,8 @@ def check_dependencies() -> tuple[str, str]:
         raise StartupError("Python 3.12 or newer is required: https://www.python.org/downloads/")
     node, npm = shutil.which("node"), shutil.which("npm.cmd" if os.name == "nt" else "npm")
     if not node or not npm:
-        raise StartupError("Install Node.js 22.19 LTS or newer: https://nodejs.org/; then reopen this terminal.")
+        raise StartupError("请先安装 Node.js 22.19+，安装后关闭并重新打开启动窗口。\n"
+                           "Install Node.js 22.19 or newer: https://nodejs.org/; then reopen this terminal.")
     try:
         version = subprocess.check_output([node, "--version"], text=True,
                                           timeout=15, **spawn_options()).strip()
@@ -203,14 +212,14 @@ def prepare(state: Path, log: Path) -> tuple[Path, Path]:
     python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     if not python.is_file():
         run([sys.executable, "-m", "venv", str(venv)], cwd=state, log=log,
-            label="[1/4] Creating a private Python environment")
+            label="[1/4] 创建独立环境 / Creating a private Python environment")
     requirements = ROOT / "hub-backend/requirements.txt"
     py_stamp = state / "python-dependencies.sha256"
     wanted = hashlib.sha256(requirements.read_bytes()).hexdigest()
     if read_stamp(py_stamp) != wanted:
         run([str(python), "-m", "pip", "install", "--disable-pip-version-check",
              "-r", str(requirements)], cwd=state, log=log,
-            label="[2/4] Installing server dependencies (first run needs internet)")
+            label="[2/4] 安装服务依赖 / Installing server dependencies (first run needs internet)")
         py_stamp.write_text(wanted, encoding="utf-8")
 
     source = ROOT / "hub-frontend"
@@ -225,7 +234,7 @@ def prepare(state: Path, log: Path) -> tuple[Path, Path]:
     wanted = hashlib.sha256((source / "package-lock.json").read_bytes()).hexdigest()
     if read_stamp(npm_stamp) != wanted or not (frontend / "node_modules/vite").is_dir():
         run([npm, "ci", "--no-audit", "--no-fund"], cwd=frontend, log=log,
-            label="[3/4] Installing management UI dependencies")
+            label="[3/4] 安装页面依赖 / Installing management UI dependencies")
         npm_stamp.write_text(wanted, encoding="utf-8")
     build_stamp = state / "frontend.sha256"
     files = [source / name for name in ("package.json", "package-lock.json", "index.html", "vite.config.js")]
@@ -237,7 +246,7 @@ def prepare(state: Path, log: Path) -> tuple[Path, Path]:
     wanted = digest_files(files, ROOT)
     if read_stamp(build_stamp) != wanted or not (frontend / "dist/index.html").is_file():
         run([npm, "run", "build"], cwd=frontend, log=log,
-            label="[4/4] Building the management UI")
+            label="[4/4] 构建管理页面 / Building the management UI")
         build_stamp.write_text(wanted, encoding="utf-8")
     return python, backend
 
@@ -258,12 +267,12 @@ def prepare_desktop(state: Path, log: Path) -> Path:
     wanted = hashlib.sha256((client / 'package-lock.json').read_bytes()).hexdigest()
     if read_stamp(stamp) != wanted or not electron_binary(client).is_file():
         run([npm, 'ci', '--no-audit', '--no-fund', '--ignore-scripts'], cwd=client, log=log,
-            label='[Desktop] Installing the desktop application (first run needs internet)')
+            label='[Desktop] 安装桌面端 / Installing the desktop application (first run needs internet)')
         # npm versions differ in install-script policy. Download the locked Electron
         # runtime explicitly without enabling unrelated dependencies' lifecycle scripts.
         if not electron_binary(client).is_file():
             run([node, str(client / 'node_modules/electron/install.js')], cwd=client, log=log,
-                label='[Desktop] Downloading the Electron runtime')
+                label='[Desktop] 下载桌面运行环境 / Downloading the Electron runtime')
         if not electron_binary(client).is_file():
             raise StartupError(f"Electron was not downloaded. Check npm install-script policy and {log}; then retry.")
         stamp.write_text(wanted, encoding='utf-8')

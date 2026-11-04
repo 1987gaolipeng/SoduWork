@@ -134,7 +134,7 @@
 
 ```json
 {
-  "name": "运营云端版",
+  "name": "示例云端资料库",
   "version": "1.0.0",
   "appWindow": {
     "width": 1280,

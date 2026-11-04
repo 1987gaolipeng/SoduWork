@@ -56,8 +56,8 @@
     },
     {
       "path": ".gitignore",
-      "bytes": 3942,
-      "sha256": "7b159649155b976c389dd923eb1c274e16f9c3c7df82d819325de47baf23ab4b"
+      "bytes": 3757,
+      "sha256": "ec66d6efe26b94f98da3cd9df1e4da98b6f1f6e5f24f576974c73235a6b88176"
     },
     {
       "path": "CONTRIBUTING.md",
@@ -76,8 +76,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 4975,
-      "sha256": "c41bdd8984099df7aba147772f4f16145c1ff43ecd7546a0c851937f45c47a8d"
+      "bytes": 6762,
+      "sha256": "2f99cabc4750acf7e8891906fafc3fb45f1a136c6be2e643655f8216c1379a9b"
     },
     {
       "path": "SECURITY.md",
@@ -2431,8 +2431,8 @@
     },
     {
       "path": "client/core/locales/en-US-cloud-pages.js",
-      "bytes": 26528,
-      "sha256": "c32a41c65ddc845ae6c17fbb9067119a7ce6344801af97f225557224d750f78f"
+      "bytes": 26526,
+      "sha256": "3c5575cf16d43fb47849dbcaa896e1a203fda5279a8159fec8068e6f1898634f"
     },
     {
       "path": "client/core/locales/en-US-dynamic-pages.js",
@@ -2791,8 +2791,8 @@
     },
     {
       "path": "client/e2e/app-conversation-connection.cjs",
-      "bytes": 19193,
-      "sha256": "558ee1599b391db66600f16e07290782c9bfd81b8a9a847f29c75312aaacf7b5"
+      "bytes": 19205,
+      "sha256": "ecee19a3c7808a5ea60bf53fb4d631869ad64b0fd1b13f8caad66aa0880a3faa"
     },
     {
       "path": "client/e2e/app-conversation-history.cjs",
@@ -2815,11 +2815,6 @@
       "sha256": "097d1d594055d0ffcb5ab474805dd56958f71a699d977269b9141e4e489ba497"
     },
     {
-      "path": "client/e2e/app-knowledge-automation.cjs",
-      "bytes": 12080,
-      "sha256": "4d6e6b09c9dd95558eb35053e08836ae0f9018e66f8b79ecd64cd0f99a622c42"
-    },
-    {
       "path": "client/e2e/app-market-mcp.cjs",
       "bytes": 7454,
       "sha256": "0564f1ba3b3cf6ffe976bdedf96b939b1337347bfa3562c4a39fa66f84472be8"
@@ -2835,16 +2830,6 @@
       "sha256": "336305818ea56481dead59b6714dcbb89d056f57892f5eed83c7d2f896a0ea1f"
     },
     {
-      "path": "client/e2e/app-series-live.cjs",
-      "bytes": 19968,
-      "sha256": "8914b3e9898e59c3ddb1f12e1cf3d09a113fc1333bca290d4b93737162a35d41"
-    },
-    {
-      "path": "client/e2e/app-settings-cloud.cjs",
-      "bytes": 19085,
-      "sha256": "5d65e5fdb603a08c31773ddc68ae4556fc071c75f20016b48d5ffc4a0914151e"
-    },
-    {
       "path": "client/e2e/app-window-input.cjs",
       "bytes": 15791,
       "sha256": "4639fec49a97a2a8d31c7efb53f1372afe410bdf030745de3ea0f97abae7a80c"
@@ -2856,8 +2841,8 @@
     },
     {
       "path": "client/e2e/app-window-sizing.cjs",
-      "bytes": 10659,
-      "sha256": "f311270e45eadd888cb513b9a3d322bdef01477bcd09e5b7162159921fb658be"
+      "bytes": 10863,
+      "sha256": "6ae704ccbb1d06c75d69d04635880056e126b2abbac3eee0f06fca435d00d9cb"
     },
     {
       "path": "client/e2e/app-window-tabs.cjs",
@@ -2866,8 +2851,8 @@
     },
     {
       "path": "client/e2e/apps-library-market.cjs",
-      "bytes": 66236,
-      "sha256": "83278bc598088fc80c4f1313bd150c7fc6c3fb2d8d093b204bba2015eeeeed1c"
+      "bytes": 66576,
+      "sha256": "4aaa992aa009b5d1a9bdeb6c4c6bf63a068dc64b807aa40102b2122daf9ac06a"
     },
     {
       "path": "client/e2e/archive-history.cjs",
@@ -4073,11 +4058,6 @@
       "path": "client/e2e/mcp-management.mjs",
       "bytes": 13962,
       "sha256": "9e6cb2053a53dcdabbeaee1c35d40650e233f2b5267989af04b7c8729e2d7c2e"
-    },
-    {
-      "path": "client/e2e/media-ops-cloud-live.py",
-      "bytes": 18013,
-      "sha256": "16c8aff1b22a432d205e09838b0b266356b79ed57da9c1075d0b6b91bd518a66"
     },
     {
       "path": "client/e2e/message-follow-up.cjs",
@@ -5416,8 +5396,8 @@
     },
     {
       "path": "client/main/application-turn-context.cjs",
-      "bytes": 3246,
-      "sha256": "d5592fb605acb59bbeb55d0aec8b381fc194feb50337a0f193edb1cb811459df"
+      "bytes": 3211,
+      "sha256": "2c3456b25924829c704541e56dff5b7b41d1c926d353b13be1b19fa91ada5714"
     },
     {
       "path": "client/main/attachment-files.js",
@@ -6231,8 +6211,8 @@
     },
     {
       "path": "client/main/pi-session/app-mcp-grant.cjs",
-      "bytes": 9835,
-      "sha256": "aa360cda04ac2e5ea85eb06b91836cacddf555028a1d6f5b71196a65ee928abb"
+      "bytes": 9484,
+      "sha256": "f0da7663b91af5809628d15b2240886de40e6c4e5c75323dfa907075372ac818"
     },
     {
       "path": "client/main/pi-session/app-mcp-proxy.cjs",
@@ -6881,13 +6861,13 @@
     },
     {
       "path": "client/main/soduwork-app-bridge-contract.cjs",
-      "bytes": 13755,
-      "sha256": "bb4fb51b6fd919d0be1376ded051a40e817697d68a2def4a888f551552d50b50"
+      "bytes": 13730,
+      "sha256": "eaca7d57dbb5a1fed8be9143365cd46700f0280e74a83672c13450170915aa84"
     },
     {
       "path": "client/main/soduwork-app-bridge-contract.test.cjs",
-      "bytes": 1909,
-      "sha256": "6b1a03aef2b097dc7a342e5359d967f97df6b046285020c95449dab9af995208"
+      "bytes": 2489,
+      "sha256": "72b493e8b4c8e2cdab75f168b11aff41a84a93eb3c6b0c3c00bacbfb157a14ac"
     },
     {
       "path": "client/main/tray-icon.cjs",
@@ -7216,8 +7196,8 @@
     },
     {
       "path": "client/sdk/README.md",
-      "bytes": 19281,
-      "sha256": "f465b7e5906683b153a31485d35a49b154cd0b0caf514ad4c53e884085366e7f"
+      "bytes": 19509,
+      "sha256": "70a12f746f5068ae07c4617ac407b36eed8ceb4ebd8ac8ff9f89ffe71a43685a"
     },
     {
       "path": "client/sdk/soduwork-app.js",
@@ -7486,8 +7466,8 @@
     },
     {
       "path": "client/tests/app-cloud-bridge.test.cjs",
-      "bytes": 11127,
-      "sha256": "8776561825b9599bf14dfc448b56999f78e63226a7dc2f91fbf1e814ec1cceff"
+      "bytes": 11139,
+      "sha256": "bdc00e90057bfabf0049d1ce545156e8c2ab5cc8a6a21b6c465d189d97509cf2"
     },
     {
       "path": "client/tests/app-composer-independence.test.cjs",
@@ -7526,8 +7506,8 @@
     },
     {
       "path": "client/tests/app-mcp-transport.test.cjs",
-      "bytes": 5785,
-      "sha256": "50f40c7c8a99e68b6dbfeec9202eb90d5d34f2449024e365723880eae6c55e08"
+      "bytes": 6046,
+      "sha256": "ca71dd558ca0acad6e7646be89354e1803358c9ae96c926454a764ed8826ed1f"
     },
     {
       "path": "client/tests/app-menu-info.test.cjs",
@@ -7538,11 +7518,6 @@
       "path": "client/tests/app-package-pages.test.cjs",
       "bytes": 7273,
       "sha256": "4b2a89a653a9d358db09230d4a61462c90db7328c3c255271ea3dc703f631a2d"
-    },
-    {
-      "path": "client/tests/app-settings-text.test.cjs",
-      "bytes": 2940,
-      "sha256": "786a4a3395e32d487f865bc56d5543a2519a8989b1962b17da0f6fa571d0bc4c"
     },
     {
       "path": "client/tests/app-settings.test.cjs",
@@ -7566,8 +7541,8 @@
     },
     {
       "path": "client/tests/application-turn-context.test.cjs",
-      "bytes": 3640,
-      "sha256": "b13292b16a9ee7114b384cfa162faa9b766da50cdd7ba050d489e7537382c587"
+      "bytes": 3616,
+      "sha256": "36c73498459e7edf371bd99250cb37998c60692d2406715484879f7f829cbb50"
     },
     {
       "path": "client/tests/approval-evidence-links.test.cjs",
@@ -9551,8 +9526,8 @@
     },
     {
       "path": "client/tests/plugin-grant.test.cjs",
-      "bytes": 11676,
-      "sha256": "ae9881704e7b66721f4d30a9ea33b12ec0f4ce03a119376b28a658a569516c67"
+      "bytes": 11684,
+      "sha256": "b1b4ed8c9cb1e9aac80fcbe1b80686b0ce78da872493de5cc164d16078edf238"
     },
     {
       "path": "client/tests/plugin-icon.test.cjs",
@@ -10781,8 +10756,8 @@
     },
     {
       "path": "client/tests/work-automation-direct.test.cjs",
-      "bytes": 7453,
-      "sha256": "432e3e1e4b468ea9ffc33811b19d6fc0ac0bd1e930de1740ad1c7dfc685713cb"
+      "bytes": 7459,
+      "sha256": "1265fe5004609ecb798ac5f7376e1ce2584d798438fdf105d52e4d23a8bb5b42"
     },
     {
       "path": "client/tests/work-automation-lifecycle.test.cjs",
@@ -11106,8 +11081,8 @@
     },
     {
       "path": "docs/README.en.md",
-      "bytes": 5890,
-      "sha256": "8f8395ca4dbb7c5832a312397f1fce01c2ac7f370f314c7c90fa5abd4d5dff93"
+      "bytes": 7361,
+      "sha256": "16152caf0f571a7c1e504575005cb7037e6a69b0cb25d86d1d121d86e3bbdf32"
     },
     {
       "path": "docs/README.md",
@@ -11131,13 +11106,13 @@
     },
     {
       "path": "docs/getting-started.en.md",
-      "bytes": 5886,
-      "sha256": "f5a4dbd2e7affc1df3a1eda58c193a5d6d5cc9042c0e1c73a20a28e55c96993e"
+      "bytes": 12087,
+      "sha256": "ba9f56d4c89814d6a763f431a47391b278548792c38b12ac9dc753db1c9ce204"
     },
     {
       "path": "docs/getting-started.md",
-      "bytes": 11046,
-      "sha256": "ccee964515ac1c2dbddd942a0fb9a7724f30b26cee1c0d720f1af2bafc99893f"
+      "bytes": 11702,
+      "sha256": "fc20a3be16d5b2bf3bd2f5e61b4850c70c44dcd722c2e19f0c0bbbcb1c6d3bcb"
     },
     {
       "path": "docs/index.en.md",
@@ -11161,18 +11136,18 @@
     },
     {
       "path": "docs/plugin-authoring.md",
-      "bytes": 33553,
-      "sha256": "bda1349e6ccb1a0a5f2ccfca32916a4fe7a38c9a2fc1503a9e24eb7308ffe9ed"
+      "bytes": 33559,
+      "sha256": "64349c236564ff5ec6d548c1b3ef78191fc7b47d8be9254b6c1e3124b4d16f02"
     },
     {
       "path": "docs/release-scope.en.md",
-      "bytes": 2860,
-      "sha256": "000cb74bfdfcab84e656d798eebc5ab257109928b41a1546a4cc287a3d683689"
+      "bytes": 2977,
+      "sha256": "f3face2b5c8bf5b9f731eaf5e0ce390a587bc9246a34feaa4239d1e030b43b4c"
     },
     {
       "path": "docs/release-scope.md",
-      "bytes": 2389,
-      "sha256": "ae64374d01641a0028123547f7a80ccbdfc4214810e955a82d675eb5ef3fa08a"
+      "bytes": 2482,
+      "sha256": "d555c4194e1feef8b133d938e098163caada103540e5f9e40c2c4c4e3693f5d6"
     },
     {
       "path": "docs/security.en.md",
@@ -16781,8 +16756,8 @@
     },
     {
       "path": "hub-backend/test_plugin_manifest_contract.py",
-      "bytes": 5195,
-      "sha256": "18e9546f5c859fb0abc4e212cf164b9c928af3c941fbbf4d003bf71829ae12aa"
+      "bytes": 5231,
+      "sha256": "79cc2ebf9c1c84365d87d6ca3c554f4488c2cc7d17e4c75c06043e139d07c42a"
     },
     {
       "path": "hub-backend/test_plugin_mcp_limits_cluster.py",
@@ -18531,8 +18506,8 @@
     },
     {
       "path": "hub-frontend/src/screens/PluginDetailWorkspace.jsx",
-      "bytes": 26728,
-      "sha256": "d913c0ed9364117bee3b620c826e58e3553640344aeb2303a28ac2771e645e50"
+      "bytes": 26851,
+      "sha256": "30c4b06dc47c7ae1c6b39799fd74fb6a4027294a28eca77da26331e014ea03b5"
     },
     {
       "path": "hub-frontend/src/screens/PluginDialogParts.jsx",
@@ -19366,8 +19341,8 @@
     },
     {
       "path": "hub-frontend/tests/plugin-center-render.jsx",
-      "bytes": 42043,
-      "sha256": "7b57427ee1e2c5b3fada782b0094fc011758f9245300c98019327ac07de2525a"
+      "bytes": 42144,
+      "sha256": "57f61e59dedfcb5f1f72b5b356cac145001866900c1f8a34e21d9082d5310309"
     },
     {
       "path": "hub-frontend/tests/plugin-dialog-parts.test.mjs",
@@ -19661,28 +19636,8 @@
     },
     {
       "path": "skills/browser-use/SKILL.md",
-      "bytes": 4064,
-      "sha256": "ea3dbc9f2a6c6049bec0f7475a769da8a80bf3077447229ebed7f830a70b33da"
-    },
-    {
-      "path": "skills/browser-use/assets-tab",
-      "bytes": 108753,
-      "sha256": "a116e6cd08ae97606b329e54869fe4067064cb091c2ac4fa4f2d34dbe2c50c1a"
-    },
-    {
-      "path": "skills/browser-use/en-assets-final",
-      "bytes": 367499,
-      "sha256": "d717fa6e2bd4cd672cde299f3fd94b32feae9e9892440442347d4c300acdb011"
-    },
-    {
-      "path": "skills/browser-use/en-real-filters",
-      "bytes": 272629,
-      "sha256": "f60ae0d8e32cb17c18ccbe87550dd95c8b92bea9ddb3343a0a2420d6616165f3"
-    },
-    {
-      "path": "skills/browser-use/real-tab",
-      "bytes": 272629,
-      "sha256": "f60ae0d8e32cb17c18ccbe87550dd95c8b92bea9ddb3343a0a2420d6616165f3"
+      "bytes": 4087,
+      "sha256": "45bede46eba857039ff53db2c3747fccc9de5a0042f735a528875f9cd37b2b0f"
     },
     {
       "path": "skills/browser-use/scripts/browser-session.mjs",
@@ -19703,11 +19658,6 @@
       "path": "skills/browser-use/tests/persistent-browser.test.mjs",
       "bytes": 4547,
       "sha256": "ee9b7175ef4d4cc2921fe6d7541625809e331fd89ecedd9de8914686c0af0c7f"
-    },
-    {
-      "path": "skills/browser-use/voice-tab",
-      "bytes": 272629,
-      "sha256": "f60ae0d8e32cb17c18ccbe87550dd95c8b92bea9ddb3343a0a2420d6616165f3"
     },
     {
       "path": "skills/computer-use/SKILL.md",
@@ -19756,8 +19706,8 @@
     },
     {
       "path": "skills/mcp-tools/SKILL.md",
-      "bytes": 3535,
-      "sha256": "8743af3ffc99adb0228701a34046a9e50406fb06ece26d6336bb809f6c12543b"
+      "bytes": 3503,
+      "sha256": "68492e8ea4b8bc643760f5a79a3a38d8b2f79a19310c3c0d0f61ed64b357c884"
     },
     {
       "path": "skills/mcp-tools/connectors/api-definition.cjs",
@@ -20125,11 +20075,6 @@
       "sha256": "57457c90363af09b443e39f299d2e30bda74955ddbcb6104964457640e8b600a"
     },
     {
-      "path": "skills/mcp-tools/scripts/app-settings-text.mjs",
-      "bytes": 2133,
-      "sha256": "33638d355385ebde9fb790b63ed18ea6bfe5915ddeb0b9fd2cd008fed6221933"
-    },
-    {
       "path": "skills/mcp-tools/scripts/app-view.mjs",
       "bytes": 2299,
       "sha256": "19c32c324b52244d606365637e77a7efadf26f30bf5995ca0be23a6ea3e74d08"
@@ -20361,8 +20306,13 @@
     },
     {
       "path": "tools/check-public-source.cjs",
-      "bytes": 2495,
-      "sha256": "9647f5331bdfafe5ed74cd513f8b961c975e9696508bc7019c520e6accdd0ba0"
+      "bytes": 3267,
+      "sha256": "bec78dd320b1cf049b9f0000b9f2c57fbc8d25d6f1bfe13af8ddf440320da935"
+    },
+    {
+      "path": "tools/check-public-source.test.cjs",
+      "bytes": 2425,
+      "sha256": "321714a34da195588f07a5a0ef7b7fd54be247eeb10257fcba5a83d5e0593cd2"
     },
     {
       "path": "tools/check-repository-layout.cjs",
@@ -20486,8 +20436,8 @@
     },
     {
       "path": "tools/dev/local_environment.py",
-      "bytes": 12944,
-      "sha256": "23df5e3f1bb2da63b0978d8315e5c913280b8c4644bee344ad95765dc4072cd2"
+      "bytes": 13703,
+      "sha256": "b0e2f8eaa32a3e80023e80846070e1f8676ba70c11dac90b6eb421f55526dac3"
     },
     {
       "path": "tools/dev/local_server.py",
@@ -20496,8 +20446,8 @@
     },
     {
       "path": "tools/dev/start_local.py",
-      "bytes": 17755,
-      "sha256": "a6847aaa799b5ed6cee9552e3c8f7b2068a28cf969714a45880eb91d7df2eafa"
+      "bytes": 19910,
+      "sha256": "6dfb0490a80a7e0add690c2ce6f16ecfd8946beaf24a8df41bb0ff078d5a0383"
     },
     {
       "path": "tools/dev/test_deploy.py",
@@ -20511,13 +20461,13 @@
     },
     {
       "path": "tools/dev/test_source_export.py",
-      "bytes": 3657,
-      "sha256": "c9047deb2a6dd0af7ddc0fe7a19215a896cbf63eb242ecd00db037133895ac37"
+      "bytes": 5174,
+      "sha256": "2b369d39266427066fdfc141db6eb1fb117d275c52e5829c4480a68c0081c26c"
     },
     {
       "path": "tools/dev/test_start_local.py",
-      "bytes": 17916,
-      "sha256": "f5ce5542896dac1c8054616940f701bc6440f9edbd90c147aeeea31b81236ea4"
+      "bytes": 20166,
+      "sha256": "0139a2c0cb71637a4899d1f32661930f874049be7c5ad5e81b3e11a37f9c579a"
     },
     {
       "path": "tools/dev/verify_local_start.py",
@@ -20526,13 +20476,13 @@
     },
     {
       "path": "tools/distribution/PUBLIC-SOURCE.json",
-      "bytes": 1491,
-      "sha256": "4caf26456a138f89b3a0bb00d8fb97c038925622a8639c984cf30b78797d2008"
+      "bytes": 2192,
+      "sha256": "226e6a6289588064083d33caf8ea4f5d8aaaa7f8fb1c9321a192d8c176f443ff"
     },
     {
       "path": "tools/export_source.py",
-      "bytes": 4092,
-      "sha256": "3b38dfe5950e3d897e07e8e9efa2575ceee07d1da9ede311b276f899fbb2ee05"
+      "bytes": 4647,
+      "sha256": "629c3dd1e5389d5e5be59a190f6232ee48b05198a1bb1d6279af8bc4cb157d57"
     },
     {
       "path": "tools/security/README.md",

@@ -6,23 +6,43 @@ An AI workspace for teams. Use the desktop client for conversations, collaborati
 
 [Quick start](getting-started.en.md) · [Developer guide](development.en.md) · [All documentation](index.en.md) · [Contributing](contributing.en.md)
 
-## Run it locally
+## First time? Follow these four steps
 
-1. Install [Python 3.12+](https://www.python.org/downloads/) and [Node.js 22.19+](https://nodejs.org/), then download and extract the source.
-2. Choose a launcher from the source root. On first run, choose an administrator password of at least 12 characters:
+**The desktop app is for conversations and tasks; the browser management UI is for models and members.** One launcher prepares the local service and opens both interfaces.
 
-   | Platform | Start the local service and desktop client |
-   | --- | --- |
-   | Windows | Double-click `start-desktop.cmd` |
-   | macOS | Double-click `start-desktop.command`; if needed, run `chmod +x start*.command start.sh` first |
-   | Linux desktop | Run `sh start.sh --desktop` |
-   | Terminal | Run `python start.py --desktop`; macOS/Linux usually use `python3` |
+### 1. Install two prerequisites once
 
-3. Wait for dependency installation and the UI build. Sign in with `admin` and your chosen password. Configure your own model provider and required agents at **http://127.0.0.1:18989**.
+Install [Python 3.12+](https://www.python.org/downloads/) and [Node.js 22.19+](https://nodejs.org/). On Windows, enable **Add Python to PATH**. Keep Node's default options, including npm, and close any old terminal windows after installation.
 
-First-time setup needs internet access. No database installation or `.env` file is required. Model credentials and credits are not included. Private data stays outside the source directory, and the service listens only on loopback. Keep the startup terminal open; press Ctrl+C or quit the desktop application to end the session.
+You do not need a database installation, Docker, Git, Android Studio, an `.env` file, or a root-level `npm install`.
 
-For the management UI alone, run `python start.py`. To check prerequisites first, run `python start.py --check --desktop`. See the [full startup guide](getting-started.en.md) for storage, preparation mode, and troubleshooting, or [Docker self-hosting](../ops/self-host/README.en.md) for a team deployment.
+### 2. Extract the source and start
+
+Download the project's source ZIP and **extract all files** into a writable folder. Open the folder containing `README.md`, `start.py`, and `client`. Do not launch from inside the ZIP.
+
+| Your computer | Start here |
+| --- | --- |
+| **Windows** | Double-click **`start-desktop.cmd`** |
+| **macOS** | Double-click **`start-desktop.command`**; see [permission help](getting-started.en.md#macos-launcher-permissions) if needed |
+| **Linux desktop** | Open a terminal in that folder and run `sh start.sh --desktop` |
+
+### 3. Choose a password and wait
+
+On first run, set and confirm a **12–128 character** password for **`admin`**. **Typing is hidden: no characters or asterisks appear.** Remember your password; there is no shared default.
+
+The launcher downloads dependencies, builds the UI, and starts the service. First setup can take several minutes depending on your network and computer. Long steps report that they are still running about every 15 seconds. Keep the terminal open and do not launch a second copy. If a step fails, fix the reported issue and run the same launcher again; completed steps are reused.
+
+### 4. Sign in
+
+When you see **`SoduWork is ready`**, the browser and desktop app will open in turn.
+
+- **Management:** open [the local page](http://127.0.0.1:18989), click **Enter admin console** on the introduction page, and sign in with `admin` and your password. You do not need to download another desktop client there.
+- **Desktop:** sign in with the same credentials. Its local service address is configured by the launcher.
+- **AI conversations:** add your own model service in **Model catalog**, then choose a model in the desktop app. Follow [your first AI message](getting-started.en.md#send-your-first-ai-message). You can explore the UI before configuring a model; API keys and model credits are not included.
+
+**Next time, use the same launcher and password.** Press **Ctrl+C** in its terminal to stop. Closing the desktop window can leave it running in the tray. Your data is retained, separately from any installed client's accounts or history.
+
+For troubleshooting, alternative ports, browser-only mode, and data locations, see the [full startup guide](getting-started.en.md). For a team deployment, see [Docker self-hosting](../ops/self-host/README.en.md).
 
 ## Understand the project
 

@@ -32,3 +32,13 @@ test('origin checks reject credentials and path/query confusion', () => {
   assert.equal(contract.validateOrigin('https://ops.example.com/', 'https://ops.example.com'), true);
   assert.equal(contract.validateOrigin('https://evil.example.com', 'https://ops.example.com'), false);
 });
+
+test('MCP context exposes only bounded generic record identifiers and names', () => {
+  const context = contract.normalizeRequest({ id: 'mcp-context', method: 'mcp.connect', params: {
+    server: 'fixture-library', url: 'https://example.test/mcp', context: {
+      spaceId: 'team', spaceName: 'Docs', recordId: 'x'.repeat(200), recordName: 'y'.repeat(250),
+      token: 'never-expose', arbitrary: { nested: 'ignored' },
+    },
+  } }).params.context;
+  assert.deepEqual(context, { spaceId: 'team', spaceName: 'Docs', recordId: 'x'.repeat(160), recordName: 'y'.repeat(200) });
+});

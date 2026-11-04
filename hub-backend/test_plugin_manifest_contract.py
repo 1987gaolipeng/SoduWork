@@ -62,18 +62,18 @@ EXPECTED = {
 class PluginManifestContractTests(unittest.TestCase):
     def test_personal_package_top_level_mcp_declaration_survives_hub_import(self):
         manifest = fixture()
-        manifest["mcpServers"] = ["media-ops-cloud"]
+        manifest["mcpServers"] = ["fixture-app-service"]
         parsed = plugin_packages.parse(archive(manifest))
-        self.assertEqual(parsed["manifest"]["capabilities"]["mcpServers"], ["media-ops-cloud"])
-        self.assertEqual(parsed["capabilities"]["mcpServers"], ["media-ops-cloud"])
-        self.assertEqual(plugin_packages.personal_draft(parsed)["mcpServers"], ["media-ops-cloud"])
+        self.assertEqual(parsed["manifest"]["capabilities"]["mcpServers"], ["fixture-app-service"])
+        self.assertEqual(parsed["capabilities"]["mcpServers"], ["fixture-app-service"])
+        self.assertEqual(plugin_packages.personal_draft(parsed)["mcpServers"], ["fixture-app-service"])
 
     def test_dual_mcp_declarations_must_agree_and_keep_name_validation(self):
         manifest = fixture()
-        manifest["mcpServers"] = ["media-ops-cloud", "media-ops-cloud"]
-        manifest["capabilities"]["mcpServers"] = ["media-ops-cloud"]
-        self.assertEqual(plugin_packages.normalize(manifest)[2]["mcpServers"], ["media-ops-cloud"])
-        for value in (["other-server"], [], "media-ops-cloud", ["bad/name"]):
+        manifest["mcpServers"] = ["fixture-app-service", "fixture-app-service"]
+        manifest["capabilities"]["mcpServers"] = ["fixture-app-service"]
+        self.assertEqual(plugin_packages.normalize(manifest)[2]["mcpServers"], ["fixture-app-service"])
+        for value in (["other-server"], [], "fixture-app-service", ["bad/name"]):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 plugin_packages.normalize({**manifest, "mcpServers": value})
 

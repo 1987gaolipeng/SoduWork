@@ -38,7 +38,7 @@ app.whenReady().then(async () => {
   const caps = ['settings.read', 'settings.write', 'mcp.connect'];
   const plugin = require('../main/personal-plugins').create(app, {
     key: 'app-rebind', template: 'app', name: 'Application connection fixture', version: '0.1.0',
-    description: 'Fixture only', instructions: 'Fixture only', mcpServers: 'media-ops-cloud',
+    description: 'Fixture only', instructions: 'Fixture only', mcpServers: 'fixture-app-service',
     ui: { contributions: [{ id: 'main', title: 'Fixture', slot: 'workspace.navigation',
       source: { type: 'external', url: origin, bridge: { version: 1, capabilities: caps } } }] },
   }).plugin;
@@ -62,7 +62,7 @@ app.whenReady().then(async () => {
   await until(() => !application.webContents.isLoading() && !composer.webContents.isLoading(), 'native views loaded');
   const bridgeCall = (method, params) => js(application.webContents, 'soduWorkAppBridge.request(' + JSON.stringify(method) + ',' + JSON.stringify(params) + ')');
   assert.equal((await bridgeCall('settings.update', { values: { ukey: 'fixture-account-a' } })).ok, true);
-  assert.equal((await bridgeCall('mcp.connect', { server: 'media-ops-cloud', url: origin + '/mcp', credentialKey: 'ukey' })).ok, true);
+  assert.equal((await bridgeCall('mcp.connect', { server: 'fixture-app-service', url: origin + '/mcp', credentialKey: 'ukey' })).ok, true);
   const ownership = require('../main/pi-session/app-mcp-grant.cjs'), grants = require('../main/pi-session/plugin-grant');
   let handle = { snapshot: () => ({ activePlugins: [] }) };
   ownership.bind(handle, host.webContents, '', app);
@@ -71,7 +71,7 @@ app.whenReady().then(async () => {
   const resolve = async () => {
     const result = await grants.resolve({ app, pluginIds: [plugin.pluginId], cwd: root,
       appContext: ownership.forSession(handle), identityOf: async () => { throw Error('Application connection must not request a Hub connector'); } });
-    leases.push(result.grant); return JSON.parse(fs.readFileSync(result.grant.configFile)).servers['media-ops-cloud'];
+    leases.push(result.grant); return JSON.parse(fs.readFileSync(result.grant.configFile)).servers['fixture-app-service'];
   };
   ownership.bind(handle, composer.webContents, plugin.pluginId, app);
   const firstTurn = {}; ownership.guardSend(handle, firstTurn); await firstTurn.beforeTurn();

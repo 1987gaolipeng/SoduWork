@@ -21,6 +21,7 @@ import '../src/console-theme.css'
 import './plugin-center-render.css'
 
 const params = new URLSearchParams(location.search)
+setLocale('zh-CN') // Deterministic starting language; scenarios explicitly exercise other locales.
 document.documentElement.dataset.theme = params.get('theme') || 'light'
 setUser({ id: 'isolated-test-admin', isSuper: true })
 const failures = [], checks = [], calls = []
@@ -69,7 +70,7 @@ if (params.get('view') === 'catalog-tabs') {
   appFixture.catalogPolicy.featured = true
   plugins.find(item => item.id === 'prototype').catalogPolicy.featured = true
 }
-appFixture.latestVersion.capabilities.mcpServers = ['media-ops-business']
+appFixture.latestVersion.capabilities.mcpServers = ['fixture-app-service']
 appFixture.versions.push({ ...structuredClone(appFixture.latestVersion), id: 'contracts-old', version: '1.1.0',
   manifest: {}, trustState: 'approved', enabled: true })
 if (params.get('view') === 'locale-review') {

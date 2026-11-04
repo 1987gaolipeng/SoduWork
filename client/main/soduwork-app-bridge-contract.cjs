@@ -201,8 +201,8 @@ function normalizeRequest(raw) {
     out.params.token = text(params.token, 4096);
     out.params.credentialKey = text(params.credentialKey, 80);
     if (out.params.credentialKey && !/^[A-Za-z][A-Za-z0-9_.-]{0,79}$/.test(out.params.credentialKey)) throw Error('应用凭据字段无效');
-    out.params.context = Object.fromEntries(['spaceId', 'seriesId', 'topicId'].map(key => [key, text(params.context?.[key], 160)]));
-    for (const key of ['spaceName', 'seriesName', 'topicTitle']) {
+    out.params.context = Object.fromEntries(['spaceId', 'recordId'].map(key => [key, text(params.context?.[key], 160)]));
+    for (const key of ['spaceName', 'recordName']) {
       if (params.context?.[key]) out.params.context[key] = text(params.context[key], 200);
     }
     if (!/^[a-z][a-z0-9-]{0,59}$/.test(out.params.server) || /[\r\n]/.test(out.params.token)) throw Error('应用连接参数无效');

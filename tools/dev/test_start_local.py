@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import io
-from contextlib import closing
+from contextlib import closing, redirect_stdout
 import os
 from pathlib import Path
 import socket
@@ -143,7 +143,7 @@ class LocalStartupTests(unittest.TestCase):
     def test_cancelled_dependency_command_reaps_its_child(self):
         seen = []
 
-        def interrupt(child):
+        def interrupt(child, **_kwargs):
             seen.append(child)
             try:
                 child.wait(timeout=.1)
@@ -314,8 +314,40 @@ class LocalStartupTests(unittest.TestCase):
             calls.clear()
             put("client/assets/connector-brands/fixture.svg", "updated artwork")
             build.prepare(self.state, self.state / "startup.log")
-            self.assertEqual(calls, ["[4/4] Building the management UI"])
+            self.assertEqual(calls, ["[4/4] 构建管理页面 / Building the management UI"])
             self.assertEqual((self.state / "application/client/assets/connector-brands/fixture.svg").read_text(), "updated artwork")
+
+    def test_interactive_password_recovers_without_restarting_or_printing_secrets(self):
+        config = start.initialize(self.state, 'admin')
+        output = io.StringIO()
+        with patch.object(start.sys.stdin, 'isatty', return_value=True), \
+                patch.object(start.getpass, 'getpass', side_effect=['short', 'fixture-password-one', 'fixture-password-two',
+                                                                  'fixture-password-final', 'fixture-password-final']), \
+                redirect_stdout(output):
+            self.assertEqual(start.password_for_start(self.state, config, False), 'fixture-password-final')
+        self.assertIn('please try again', output.getvalue())
+        self.assertIn('Passwords did not match', output.getvalue())
+        self.assertNotIn('fixture-password', output.getvalue())
+        self.assertNotIn('fixture-password', (self.state / 'local-service.json').read_text())
+
+    def test_slow_install_prints_liveness_without_exposing_subprocess_output(self):
+        from unittest.mock import Mock
+        child = Mock()
+        child.wait.side_effect = [subprocess.TimeoutExpired('private command', .5),
+                                  subprocess.TimeoutExpired('private command', .5), 0]
+        output = io.StringIO()
+        with patch.object(build.time, 'monotonic', side_effect=[0, 15, 30]), redirect_stdout(output):
+            self.assertEqual(build.wait_child(child, progress_label='Installing dependencies'), 0)
+        self.assertEqual(output.getvalue().count('Still running'), 2)
+        self.assertNotIn('private command', output.getvalue())
+
+    def test_browser_failure_leaves_manual_local_address_available(self):
+        for failure in [False, OSError('no desktop browser'), start.webbrowser.Error('no browser')]:
+            output = io.StringIO()
+            with patch.object(start.webbrowser, 'open', **({'side_effect': failure} if isinstance(failure, Exception)
+                                                        else {'return_value': failure})), redirect_stdout(output):
+                start.open_management_page('http://127.0.0.1:18990')
+            self.assertIn('http://127.0.0.1:18990', output.getvalue())
 
 
 if __name__ == "__main__":

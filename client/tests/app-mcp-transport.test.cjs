@@ -36,14 +36,14 @@ test('source grant discovers the current bridge and executes app list/call witho
       if (rpc.id === undefined) { res.writeHead(202); return res.end(); }
       const result = rpc.method === 'initialize' ? { protocolVersion: rpc.params.protocolVersion, capabilities: {} }
         : rpc.method === 'tools/list' ? { tools: [{ name: 'whoami', inputSchema: { type: 'object' } }] }
-          : { content: [{ type: 'text', text: '运营团队' }], structuredContent: { space_id: rpc.params.arguments.space_id } };
+          : { content: [{ type: 'text', text: '示例资料库' }], structuredContent: { record_id: rpc.params.arguments.record_id } };
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result }));
     });
   });
   await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
   let current = { token: 'stored-fixture-credential', revision: 1 };
-  const connection = { ...current, server: 'media-ops-cloud',
+  const connection = { ...current, server: 'fixture-app-service',
     url: 'http://127.0.0.1:' + upstream.address().port + '/mcp', readCurrent: () => current };
   const grant = await appGrants.extend({ app, connection });
   t.after(() => { grant.cleanup(); upstream.closeAllConnections(); upstream.close(); fs.rmSync(root, { recursive: true, force: true }); });
@@ -51,18 +51,22 @@ test('source grant discovers the current bridge and executes app list/call witho
   const listed = await run([...args, 'list', connection.server], { SODUWORK_HUB_ORIGIN: 'https://hub.invalid' });
   assert.equal(listed.code, 0, listed.stderr);
   assert.equal(JSON.parse(listed.stdout).tools[0].name, 'whoami');
-  const called = await run([...args, 'call', connection.server, 'whoami', JSON.stringify({ space_id: 'team-media', text: '新闻 日报' })]);
+  const called = await run([...args, 'call', connection.server, 'whoami', JSON.stringify({ record_id: 'document-fixture', text: '项目文档' })]);
   assert.equal(called.code, 0, called.stderr);
-  assert.equal(JSON.parse(called.stdout).structuredContent.space_id, 'team-media');
-  assert.equal(seen.at(-1).params.arguments.text, '新闻 日报');
-  const text = '新闻日报\n引号 "正式"；$HOME `literal`；民生🙂';
+  assert.equal(JSON.parse(called.stdout).structuredContent.record_id, 'document-fixture');
+  assert.equal(seen.at(-1).params.arguments.text, '项目文档');
+  const text = '项目文档\n引号 "正式"；$HOME `literal`；民生🙂';
   const stdin = await run([...args, 'call', connection.server, 'whoami'],
-    { SODUWORK_MCP_ARGS_STDIN: '1' }, JSON.stringify({ space_id: 'team-media', text }));
+    { SODUWORK_MCP_ARGS_STDIN: '1' }, JSON.stringify({ record_id: 'document-fixture', text }));
   assert.equal(stdin.code, 0, stdin.stderr);
   assert.equal(seen.at(-1).params.arguments.text, text);
   assert.ok(seen.every(r => r.authorization === 'Bearer ' + current.token));
   assert.ok(!grant.guide.includes(current.token));
   assert.match(grant.guide, /不要改用技能缓存/);
+  assert.match(grant.guide, /工具 schema/);
+  for (const identifier of require('../../tools/distribution/PUBLIC-SOURCE.json').excludedIdentifiers) {
+    assert.ok(!grant.guide.toLowerCase().includes(identifier.toLowerCase()));
+  }
   const legacy = JSON.parse(fs.readFileSync(grant.configFile));
   delete legacy.servers[connection.server].appLease;
   fs.writeFileSync(grant.configFile, JSON.stringify(legacy));

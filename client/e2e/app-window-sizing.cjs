@@ -37,7 +37,7 @@ if (typeof electron === 'string') {
     settings.configure({ app, safeStorage, ownerOf: () => 'sizing-fixture' });
     for (const action of ['get','update']) ipcMain.handle('app-settings-' + action,
       (_event, pluginId, input) => settings[action]({ pluginId, origin:base }, input));
-    require('../main/work-preview').install({ ipcMain, screen,
+    require('../main/work-preview').install({ app, ipcMain, screen,
       BrowserWindow: Object.assign(function (opts) { options.push(opts); const win = new BrowserWindow(opts); windows.push(win); return win; },
         { fromWebContents: wc => BrowserWindow.fromWebContents(wc) }),
       WebContentsView: function (opts) {
@@ -50,14 +50,15 @@ if (typeof electron === 'string') {
       preload: path.resolve(__dirname, '../preload.js'), contextIsolation: true, nodeIntegration: false } });
     await host.loadFile(path.join(temp, 'host.html'));
     const js = source => host.webContents.executeJavaScript(source);
-    await js(`window.fixture={item:{pluginId:'local:sizing',personal:true,name:'运营云端版',installed:true,enabled:true},title:'运营云端版',row:{id:'main',slot:'workspace.navigation',source:{type:'external',url:${JSON.stringify(base)}}}};
+    await js(`window.fixture={item:{pluginId:'local:sizing',personal:true,name:'示例云端资料库',installed:true,enabled:true},title:'示例云端资料库',row:{id:'main',slot:'workspace.navigation',source:{type:'external',url:${JSON.stringify(base)}}}};
       window.SoduWorkAPI={pluginCatalog:async()=>({items:[fixture.item]})};
       localStorage.setItem('soduwork-app-settings:local:sizing',JSON.stringify({model:'fixture-model',params:{temperature:0.7},custom:'preserve'}));
       localStorage.setItem('soduwork-app-settings:local:other','{"model":"other"}');
       openAppSettings(fixture);`);
     assert.equal(await js('document.querySelectorAll("[data-window-field]").length'), 0);
-    assert.equal(await js('appsSetModel.value'), 'fixture-model');
-    await js('closeAppSettings();saveAppSettings("local:sizing",{window:{width:"100vw",height:"100vh"},model:"fixture-model"})');
+    assert.equal(await js('(async()=> (await appSettingsOf("local:sizing")).values.model)()'), 'fixture-model');
+    assert.equal(await js('document.querySelectorAll("#appsSetModel").length'), 0, 'Only declared application preferences render');
+    await js('closeAppSettings();saveAppSettings("local:sizing",{values:{window:{width:"100vw",height:"100vh"},model:"fixture-model"}})');
     report.cases.push('App settings contain no size configuration; old per-user fullscreen overrides are ignored.');
     const display = await js('soduWorkAPI.workPreview.windowDisplay()');
     const expected = require('../core/app-window-sizing').opening(undefined, display.workArea);

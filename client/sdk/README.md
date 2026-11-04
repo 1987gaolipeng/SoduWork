@@ -152,6 +152,8 @@ await soduWorkAppBridge.mcp.connect({
 });
 ```
 
+`context` 仅接受公开目标标识 `spaceId`、`recordId` 和名称 `spaceName`、`recordName`；不要传入凭据或业务专用对象。页面 URL 的查询参数只保留 `lang`，记录目标使用这些显式字段。
+
 `mcp.connect` 仍需单独声明；只允许该应用来源下的 `/mcp` 和已声明的连接器名称。宿主读取 `credentialKey` 对应的字符串，以 `Authorization: Bearer <应用服务凭据>` 认证，每轮生成可撤销的本机代理租约；真实凭据不写入 Agent 配置。账号或设置版本改变后旧租约拒绝后续调用，下一轮读取新设置。旧账号已被服务端接收的操作不能撤回；排队消息绑定提交时的设置版本，换号后须重新发送。远端 Hub 任务不代读本机安全存储。
 
 当前 `credentialKey` 只映射 MCP 认证字段，不映射任意请求头或工具参数。模型 ID、供应商 Key 等额外配置不会自动随 MCP 调用发送；应用应通过其服务已实现的显式配置接口处理，不能把秘密塞进 `context` 或工具提示词。应用服务凭据与模型供应商 Key 用途不同，不应混用。

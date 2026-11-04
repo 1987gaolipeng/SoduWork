@@ -8,7 +8,7 @@ function pageUrl(value) {
     const url = new URL(value);
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return '';
     const query = new URLSearchParams();
-    for (const key of ['space', 'series', 't', 'lang']) {
+    for (const key of ['lang']) {
       if (url.searchParams.has(key)) query.set(key, text(url.searchParams.get(key)));
     }
     return url.origin + url.pathname + (query.size ? '?' + query.toString() : '');
@@ -28,7 +28,7 @@ function describe(context, items, servers, options = {}) {
     connection: { status: available.length ? 'ready' : declared.length ? 'unavailable' : 'not_declared',
       servers: available, declaredServers: declared,
       transport: direct ? 'application' : 'hub', serviceUrl: pageUrl(direct?.url) },
-    target: Object.fromEntries(['spaceId','seriesId','topicId','seriesName','topicTitle'].filter(key => text(target[key]))
+    target: Object.fromEntries(['spaceId','recordId','spaceName','recordName'].filter(key => text(target[key]))
       .map(key => [key,text(target[key])])),
   };
   if ((context.requiresMcp || declared.length) && (!declared.length ||

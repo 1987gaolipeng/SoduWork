@@ -6,23 +6,44 @@
 
 [快速上手](docs/getting-started.md) · [开发指南](docs/development.md) · [全部文档](docs/README.md) · [参与贡献](CONTRIBUTING.md)
 
-## 先运行起来
+## 第一次使用：照着这 4 步做
 
-1. 安装 [Python 3.12+](https://www.python.org/downloads/) 和 [Node.js 22.19+](https://nodejs.org/)，下载并解压源码。
-2. 在源码根目录选择对应入口，首次按提示设置至少 12 个字符的管理员密码：
+**你会得到两个界面：桌面端用来对话和做任务，浏览器管理端用来配置模型和成员。** 同一个启动文件会把本地服务和两个界面一起准备好。
 
-   | 系统 | 启动本地服务和桌面客户端 |
-   | --- | --- |
-   | Windows | 双击 `start-desktop.cmd` |
-   | macOS | 双击 `start-desktop.command`；必要时先执行 `chmod +x start*.command start.sh` |
-   | Linux 桌面 | 执行 `sh start.sh --desktop` |
-   | 终端 | 执行 `python start.py --desktop`；macOS / Linux 通常使用 `python3` |
+### 1. 安装两个软件（只做一次）
 
-3. 等待依赖安装和页面构建完成，用 `admin` 和刚设置的密码登录。在 **http://127.0.0.1:18989** 配置自己的模型服务及所需 Agent。
+- [Python 3.12 或更新版本](https://www.python.org/downloads/)：Windows 安装时勾选 **Add Python to PATH**。
+- [Node.js 22.19 或更新版本](https://nodejs.org/)：安装时保留默认选项，包括 npm。
 
-首次需要联网，无需预先安装数据库或编写 `.env`。源码不含模型密钥或额度。数据保存在源码外的私有目录，服务默认仅本机可访问。保持启动终端打开；按 Ctrl+C 或退出桌面应用结束本次会话。
+安装后关闭旧终端。无需安装数据库、Docker、Git、Android Studio，也不用创建 `.env` 或在根目录运行 `npm install`。
 
-只使用管理页面：`python start.py`。先检查环境：`python start.py --check --desktop`。数据位置、准备模式和故障处理见[完整启动指南](docs/getting-started.md)；团队部署见 [Docker 自托管](ops/self-host/README.md)。
+### 2. 解压源码，打开启动文件
+
+下载本项目的源码 ZIP，**先全部解压**到自己有写入权限的普通文件夹。打开能同时看到 `README.md`、`start.py`、`client` 的这一层目录，不要在压缩包里直接双击。
+
+| 你的电脑 | 只做这一项 |
+| --- | --- |
+| **Windows** | 双击 **`start-desktop.cmd`** |
+| **macOS** | 双击 **`start-desktop.command`**；若提示没有执行权限，见[macOS 启动说明](docs/getting-started.md#macos-打不开启动文件) |
+| **Linux 桌面** | 在该目录打开终端，执行 `sh start.sh --desktop` |
+
+### 3. 设置密码，等它完成
+
+首次按提示为账号 **`admin`** 设置一个 **12–128 个字符**的密码，再输入一次。**输入时不显示字符或星号，这是正常的。** 请记住自己的密码；没有统一默认密码。
+
+随后自动下载依赖、构建页面并启动服务。首次可能需要数分钟，取决于网络和电脑性能；长步骤每隔约 15 秒会提示仍在进行。保持窗口打开，不要重复双击。失败后按提示修正，再运行同一个文件即可，已经完成的步骤会复用。
+
+### 4. 登录，开始使用
+
+看到 **`SoduWork is ready` / `启动成功`**，浏览器和桌面端会陆续打开。
+
+- **管理端**：[打开本机管理页面](http://127.0.0.1:18989)。首页点击 **「进入管理后台」**，用 `admin` 和刚才的密码登录。无需在首页再下载客户端。
+- **桌面端**：用同一账号密码登录。启动器已经替它设置好本地服务地址。
+- **想开始 AI 对话**：先在管理端 **「能力配置 → 模型目录」**接入自己的模型服务，再回桌面端选择模型。[按字段配置并发出第一条消息](docs/getting-started.md#发出第一条-ai-消息)。不接模型也能先登录查看界面；源码不附带模型密钥或额度。
+
+**下次使用：还是双击同一个启动文件，用原账号密码登录。** 停止时在启动终端按 **Ctrl+C**；关闭桌面窗口可能只是最小化到托盘。数据会保留，也不会覆盖已安装正式客户端的账号和历史。
+
+遇到问题先看[常见问题与可复制命令](docs/getting-started.md#常见问题)。只需要浏览器管理端、想换端口、查看数据位置或开发调试，也都在[完整启动指南](docs/getting-started.md)里。团队部署另见 [Docker 自托管](ops/self-host/README.md)。
 
 ## 理解项目结构
 

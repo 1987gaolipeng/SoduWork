@@ -18,9 +18,9 @@ test('application preflight rejects missing declarations and unsigned connector 
       appContext: { pluginId: 'market-app', requiresMcp: true, pageUrl: 'http://127.0.0.1:8901/home.html' },
       identityOf: async () => ({ hub: 'https://hub.example', clientId: 'device', session: 'session' }),
       fetchImpl: async () => ({ ok: true, json: async () => ({ ok: true, items: [item],
-        mcpGrant: { servers: ['media-ops-cloud'] } }) }) };
+        mcpGrant: { servers: ['fixture-app-service'] } }) }) };
     await assert.rejects(grant.resolve(opts), /v0.4.8.*未声明 MCP/);
-    item.capabilities.mcpServers = ['media-ops-cloud'];
+    item.capabilities.mcpServers = ['fixture-app-service'];
     await assert.rejects(grant.resolve(opts), /所需 MCP 未授权/);
     assert.equal(fs.existsSync(grant._grantRoot(f.app)), false);
   } finally { f.close(); }

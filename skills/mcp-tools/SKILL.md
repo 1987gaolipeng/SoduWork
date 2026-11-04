@@ -18,7 +18,7 @@ node <技能目录>/scripts/mcp.mjs servers
 node <技能目录>/scripts/mcp.mjs list <server名>
 
 # 3. 调一个工具（参数是 JSON）
-node <技能目录>/scripts/mcp.mjs call <server名> <工具名> '{"参数":"值"}'
+node <技能目录>/scripts/mcp.mjs call "<server名>" "<工具名>" '{"参数":"值"}'
 ```
 
 **先 `list` 再 `call`**。入参是什么、必填哪几个，`list` 都会打出来，别自己猜字段名。
@@ -28,8 +28,8 @@ node <技能目录>/scripts/mcp.mjs call <server名> <工具名> '{"参数":"值
 较长正文直接从标准输入传入，不经临时文件或 `$(cat ...)`。Bash 示例（替换为本轮路径和实际业务参数）：
 
 ```bash
-SODUWORK_MCP_ARGS_STDIN=1 node "<本轮桥路径>" --config "<本轮授权路径>" call media-ops-cloud put_settings <<'MCP_ARGS'
-{"space_id":"<空间>","series_id":"<系列>","settings":{"doc":"设定正文，换行用\\n"}}
+SODUWORK_MCP_ARGS_STDIN=1 node "<本轮桥路径>" --config "<本轮授权路径>" call "<server名>" "<工具名>" <<'MCP_ARGS'
+{"document_id":"<记录>","content":"正文，换行用\\n"}
 MCP_ARGS
 ```
 

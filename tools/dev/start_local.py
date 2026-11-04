@@ -135,13 +135,20 @@ def password_for_start(state: Path, config: dict, stdin: bool) -> str:
     if initialized(state):
         # Existing users are authoritative; bootstrap never changes their passwords.
         return secrets.token_urlsafe(32)
-    print(f"Create the administrator account: {config['adminUser']}", flush=True)
+    print(f"首次创建管理员 / Create the administrator account: {config['adminUser']}", flush=True)
     if stdin:
         password = sys.stdin.readline().rstrip("\r\n")
     elif sys.stdin.isatty():
-        password = getpass.getpass("Choose a password (at least 12 characters): ")
-        if password != getpass.getpass("Confirm password: "):
-            raise StartupError("Passwords did not match. Run the launcher again.")
+        print("请设置并记住自己的密码；输入时不显示字符或星号，输入后按回车。\n"
+              "Choose and remember your own password. Typing is hidden; press Enter when done.", flush=True)
+        while True:
+            password = getpass.getpass("设置密码 / Password (12-128 characters): ")
+            if not 12 <= len(password) <= 128 or password.isspace():
+                print("密码须为 12-128 个字符，请重试 / Use 12-128 characters; please try again.", flush=True)
+                continue
+            if password == getpass.getpass("再输一次 / Confirm password: "):
+                break
+            print("两次密码不一致，请重试 / Passwords did not match; please try again.", flush=True)
     else:
         raise StartupError("Run from an interactive terminal to choose the administrator password. "
                            "Automation may explicitly pass --password-stdin.")
@@ -198,6 +205,7 @@ def runtime_environment(state: Path, config: dict, password: str, host: str, por
 
 def wait_ready(child: subprocess.Popen, base: str, log: Path, timeout: float = 90) -> None:
     deadline = time.monotonic() + timeout
+    last_progress = time.monotonic()
     while time.monotonic() < deadline:
         if child.poll() is not None:
             raise StartupError(f"The server stopped during initialization. See {log}; retry after fixing the reported error.")
@@ -210,9 +218,21 @@ def wait_ready(child: subprocess.Popen, base: str, log: Path, timeout: float = 9
                             return
         except (OSError, URLError, ValueError):
             pass
+        if time.monotonic() - last_progress >= 15:
+            print("正在等待服务就绪，首次数据库初始化可能较慢 / Waiting for the local service and database...", flush=True)
+            last_progress = time.monotonic()
         time.sleep(.3)
     raise StartupError(f"The server did not become ready within {timeout:g}s. See {log}. "
                        "The failed server will be stopped; your data is retained.")
+
+
+def open_management_page(base: str) -> None:
+    try:
+        if webbrowser.open(base):
+            return
+    except (webbrowser.Error, OSError):
+        pass
+    print(f"浏览器未自动打开，请手动访问 / Open this address in your browser: {base}", flush=True)
 
 
 def serve(state: Path, config: dict, args) -> None:
@@ -224,7 +244,7 @@ def serve(state: Path, config: dict, args) -> None:
     client = prepare_desktop(state, log) if args.desktop else None
     env = runtime_environment(state, config, password, args.host, args.port)
     base = f"http://{args.host}:{args.port}"
-    print("Starting SoduWork and applying database migrations...", flush=True)
+    print("正在启动服务并准备数据库 / Starting SoduWork and applying database migrations...", flush=True)
     desktop = None
     desktop_output = None
     with log.open("ab") as output:
@@ -238,13 +258,17 @@ def serve(state: Path, config: dict, args) -> None:
             wait_ready(child, base, log, timeout=600 if initializing else 90)
             print(f"\nSoduWork is ready: {base}\nAdministrator: {config['adminUser']}"
                   f"\nData and logs: {state}\nKeep this window open. Press Ctrl+C to stop."
-                  "\nConfigure your model provider in the management UI before using AI.\n", flush=True)
+                  f"\n启动成功！管理页面：{base}\n登录账号：{config['adminUser']}；密码为刚才自己设置的密码。"
+                  "\n请保持此窗口打开；下次仍运行同一个启动文件。"
+                  "\n下一步：管理页面 → 能力配置 → 模型目录，添加自己的模型服务。"
+                  "\nNext: management UI → Capabilities → Model catalog. Add your own model service before using AI.\n", flush=True)
             if not args.no_browser:
-                webbrowser.open(base)
+                open_management_page(base)
             if client is not None:
                 desktop_output = (state / 'desktop.log').open('ab')
                 desktop = launch_desktop(state, client, env, base, desktop_output)
-                print("Desktop opened. Sign in with the administrator account you created.\n"
+                print("正在打开桌面端，使用上面的同一账号密码登录。\n"
+                      "Opening desktop. Sign in with the administrator account you created.\n"
                       "Quit the desktop application or press Ctrl+C here to stop this local session.", flush=True)
                 wait_session(child, desktop, state)
             else:
@@ -339,7 +363,9 @@ def main(argv=None) -> int:
             raise StartupError("Use a dedicated data directory outside the source checkout, not your home or repository root.")
         config = initialize(state, args.admin_user.strip())
         with exclusive(state):
-            print(f"Data directory: {state}\nDetailed log: {state / 'startup.log'}", flush=True)
+            print(f"数据目录 / Data directory: {state}\n详细日志 / Detailed log: {state / 'startup.log'}\n"
+                  "首次启动需要联网下载依赖，可能需要数分钟。已完成的步骤会复用，请勿重复启动。\n"
+                  "First setup downloads dependencies and can take several minutes. Completed steps are reused.", flush=True)
             if args.prepare_only:
                 prepare(state, state / 'startup.log')
                 if args.desktop:
@@ -352,7 +378,9 @@ def main(argv=None) -> int:
         print("\nSoduWork stopped. Your data is retained.")
         return 0
     except (StartupError, OSError, subprocess.SubprocessError) as exc:
-        print(f"\nSoduWork could not start: {exc}", file=sys.stderr)
+        print(f"\nSoduWork 启动未完成 / SoduWork could not start: {exc}\n"
+              "修正上方问题后，重新运行同一个启动文件；无需删除数据或重装整个工程。\n"
+              "Fix the reported issue and run the same launcher again. See docs/getting-started.md.", file=sys.stderr)
         return 1
 
 

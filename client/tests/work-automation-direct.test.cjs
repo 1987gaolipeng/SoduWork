@@ -16,7 +16,7 @@ function fixture(overrides = {}) {
   }
   return {direct:window.WorkAutomationDirect, window,api,writes,parses,events,scope};
 }
-const params = text => ({text,context:{spaceId:'space-a',spaceName:'研发空间',page:'https://ops.example/资料/index.html',appName:'运营云端版'}});
+const params = text => ({text,context:{spaceId:'space-a',spaceName:'研发空间',page:'https://ops.example/资料/index.html',appName:'示例云端资料库'}});
 
 test('a hosted character creates a pinned schedule without inventing an external business space',async()=>{
   const f=fixture(),method={pluginId:'local:idea',key:'jiyong-bot-idea',name:'灵感扭蛋机',version:'1.0.0',checksum:'a'.repeat(64),enabled:true,personal:true,entrypoints:{automation:true},inputs:[],capabilities:{mcpServers:['soduwork-jiyong']}};

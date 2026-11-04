@@ -38,6 +38,9 @@ def verify(archive: Path) -> int:
                 or profile.get('id') != 'opensource-v1' or profile.get('sourceOnly') is not True):
             raise ValueError('Missing reviewed source profile or inventory')
         expected = {entry['path']: entry for entry in manifest['files']}
+        identifiers = profile.get('excludedIdentifiers', [])
+        if not isinstance(identifiers, list) or any(not isinstance(value, str) or not value.strip() for value in identifiers):
+            raise ValueError('Invalid excluded identifiers')
         if len(expected) != len(manifest['files']) or set(expected) | {'tools/distribution/SOURCE-MANIFEST.json'} != names:
             raise ValueError('Archive inventory does not match the committed manifest')
         for name, entry in expected.items():
@@ -50,6 +53,9 @@ def verify(archive: Path) -> int:
                     or name.endswith('/agents/openai.yaml')):
                 raise ValueError('Excluded first-release material: ' + name)
             data = canonical(bundle.read(name))
+            content = '' if name == 'tools/distribution/PUBLIC-SOURCE.json' else data.decode('utf-8', errors='replace').lower()
+            if any(value.lower() in name.lower() or value.lower() in content for value in identifiers):
+                raise ValueError('Excluded business identifier: ' + name)
             if len(data) != entry['bytes'] or hashlib.sha256(data).hexdigest() != entry['sha256']:
                 raise ValueError('Source integrity mismatch: ' + name)
         return len(entries)

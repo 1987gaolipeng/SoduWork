@@ -58,6 +58,29 @@
     "hub-backend/plugins/img2threejs.json",
     "hub-backend/plugins/mattpocock-engineering.json",
     "hub-backend/plugins/superpowers.json",
-    "client/.snyk"
+    "client/.snyk",
+    "client/e2e/app-settings-cloud.cjs",
+    "client/e2e/app-series-live.cjs",
+    "client/e2e/app-knowledge-automation.cjs",
+    "client/e2e/media-ops-cloud-live.py",
+    "client/tests/app-settings-text.test.cjs",
+    "skills/mcp-tools/scripts/app-settings-text.mjs",
+    "skills/browser-use/assets-tab",
+    "skills/browser-use/en-assets-final",
+    "skills/browser-use/en-real-filters",
+    "skills/browser-use/real-tab",
+    "skills/browser-use/voice-tab"
+  ],
+  "excludedIdentifiers": [
+    "疯狂运营",
+    "mediaops",
+    "media-ops",
+    "media_ops",
+    "ops-cloud-console",
+    "app-settings-text.mjs",
+    "workbench_info",
+    "verify_space",
+    "put_settings",
+    "运营云端版"
   ]
 }

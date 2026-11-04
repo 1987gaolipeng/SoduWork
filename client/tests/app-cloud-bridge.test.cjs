@@ -10,11 +10,11 @@ test('own app MCP stays local, grants one turn, redacts and cleans credentials; 
   const app = { isPackaged: false, getPath: () => root };
   try {
     const plugin = personal.create(app, { key: 'cloud-test', name: 'Cloud fixture', version: '0.1.0', template: 'connector',
-      description: 'A cloud test connector', instructions: 'Only use the current test space.', mcpServers: ['media-ops-cloud'] }).plugin;
+      description: 'A cloud test connector', instructions: 'Only use the current test space.', mcpServers: ['fixture-app-service'] }).plugin;
     const item = { appBridge: { appId: 'plugin:' + plugin.pluginId, origin: 'http://127.0.0.1:19001' } };
     require('../main/work-preview-app-owner.cjs').capture(item, { app });
     const connect = params => require('../main/work-preview-app-connection.cjs').connect({ item }, params, { app });
-    const params = { server: 'media-ops-cloud', url: item.appBridge.origin + '/mcp', token: 'fixture-opaque-credential' };
+    const params = { server: 'fixture-app-service', url: item.appBridge.origin + '/mcp', token: 'fixture-opaque-credential' };
     for (const url of ['http://other.invalid/mcp', params.url + '?x=1', item.appBridge.origin + '/other', 'http://user:pass@127.0.0.1:19001/mcp']) {
       assert.throws(() => connect({ ...params, url }), /来源/);
     }
@@ -24,7 +24,7 @@ test('own app MCP stays local, grants one turn, redacts and cleans credentials; 
       identityOf: async () => { throw Error('Own app must not request remote Hub credentials'); },
       fetchImpl: async () => { throw Error('Own app must not fetch remote Hub'); } };
     const resolved = await grant.resolve(options), file = resolved.grant.configFile;
-    const spec = JSON.parse(fs.readFileSync(file)).servers['media-ops-cloud'];
+    const spec = JSON.parse(fs.readFileSync(file)).servers['fixture-app-service'];
     assert.equal(spec.appLease, true);
     assert.match(spec.url, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
     assert.notEqual(spec.headers.Authorization, 'Bearer ' + params.token);

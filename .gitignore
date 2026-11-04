@@ -46,12 +46,6 @@ scratchpad/
 /.runtime/
 # Local Electron profiles, debugging scratch files, and media-sync runtime data.
 /_tmp/
-/tools/mediaops-sync/.venv/
-/tools/mediaops-sync/.sync/
-/tools/mediaops-sync/runtime/
-/tools/mediaops-sync/runs/
-/tools/mediaops-sync/config.local.json
-/tools/mediaops-sync/report.json
 # Native CI acceptance receipts, fixtures, and extracted installer payloads.
 /release-evidence/
 

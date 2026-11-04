@@ -93,7 +93,6 @@ async function extend({ app, ref, connection, base }) {
     try { fs.chmodSync(file, 0o600); } catch (_) {}
     const bridge = grants._bridgePath(app), q = value => JSON.stringify(String(value).replace(/\\/g, '/'));
     const viewer = path.join(path.dirname(bridge), 'app-view.mjs');
-    const textWriter=path.join(path.dirname(bridge),'app-settings-text.mjs');
     const viewGuide = connection.inspect && fs.existsSync(viewer) ? [
       '界面：本轮当前即用，复用登录态，不开隔离浏览器。摘要：node ' + q(viewer) + ' --config ' + q(file) + ' ' + q(connection.server) + ' inspect',
       '截图：node ' + q(viewer) + ' --config ' + q(file) + ' ' + q(connection.server) + ' shot；用图片工具读取输出 screenshot 路径。仅绑定页面，只读；不读存储/凭据，不执行任意JS。',
@@ -109,13 +108,13 @@ async function extend({ app, ref, connection, base }) {
       '调用：SODUWORK_MCP_ARGS_STDIN=1 node ' + q(bridge) + ' --config ' + q(file) + ' call ' + q(connection.server) + ' TOOL；参数 JSON 仅走标准输入。',
       '按真实工具 schema 和业务技能操作；先读最新，写入后读取确认；失败如实报告，不猜工具或返回值。', ...viewGuide,
     ].join('\n') : ['本轮应用 MCP 已授权：' + connection.server + '。密钥由宿主管理；无需用户复制ukey；禁止读取/展示/复制授权配置。',
-      '目标：' + JSON.stringify(connection.context || {}) + '；仅此空间/系列，服务端校验权限；既有记录缺目标先确认，明确新建按技能执行。',
+      '目标：' + JSON.stringify(connection.context || {}) + '；仅在当前应用授权范围内操作，服务端校验权限；记录目标缺失时先确认。',
       '先列出工具：node ' + q(bridge) + ' --config ' + q(file) + ' list ' + q(connection.server),
-      '调用（参数仅走标准输入）：SODUWORK_MCP_ARGS_STDIN=1 node ' + q(bridge) + ' --config ' + q(file) + ' call ' + q(connection.server) + " TOOL <<'MCP_ARGS'\n{\"space_id\":\"目标空间\"}\nMCP_ARGS",
+      '调用（参数仅走标准输入）：SODUWORK_MCP_ARGS_STDIN=1 node ' + q(bridge) + ' --config ' + q(file) + ' call ' + q(connection.server) + ' TOOL；参数名称、类型和必填项以工具 schema 为准。',
       '桥：保留路径引号和同一--config；不要改用技能缓存旧桥/默认配置/自写HTTP。失败报告，不读授权文件或绕过。',
       'JSON：SODUWORK_MCP_ARGS_STDIN=1+标准输入；Node/Python子进程用shell=false传input；heredoc结束标记单独一行。禁止命令行拼JSON/临时JSON+cat/命令替换。',
-      '步骤：workbench_info→whoami→verify_space；业务显式space_id；读最新→合并写→check_data→get_record；交付上下文链接。',
-      ...(fs.existsSync(textWriter)?['系列长正文免手写JSON：node '+q(textWriter)+' --config '+q(file)+' --server '+q(connection.server)+' --space SPACE --series SERIES；Markdown从stdin传入。可选--style/--ratio/--channel/--channel-name/--cover；仅传本轮需改字段。']:[]), ...viewGuide].join('\n');
+      '按已声明工具和应用技能操作，不预设业务工具名称；写入须符合用户要求，先读最新状态，写入后读取确认并交付实际结果。',
+      ...viewGuide].join('\n');
     return processGrants.attach({ ...base, configFile: file,
       servers: [...new Set([...(base?.servers || []), connection.server])],
       guide: [base?.guide, guide].filter(Boolean).join('\n\n'),

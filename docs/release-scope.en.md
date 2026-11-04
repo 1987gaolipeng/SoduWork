@@ -10,6 +10,7 @@ Excluded from this distribution:
 
 - Third-party skill bundles and their display metadata, and upstream platform-plugin reference snapshots.
 - Mobile applications, internal product and architecture records, original brand design files, and validation process material.
+- Non-public business plugins, applications, and their dedicated adapters, integration scripts, prompts, and assets.
 - Business-content synchronization and demo-data seeding tools.
 - Company cluster configuration, deployment pipelines, signing uploads, scheduled backups, and server rollback operations.
 

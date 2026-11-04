@@ -2,8 +2,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const application = require('../main/application-turn-context.cjs');
-const item = { pluginId: 'app-1', name: 'Operations', version: '0.4.31',
-  capabilities: { mcpServers: ['media-ops-cloud'] } };
+const item = { pluginId: 'app-1', name: 'Example library', version: '0.4.31',
+  capabilities: { mcpServers: ['fixture-app-service'] } };
 
 test('ordinary conversation adds no application context', () => {
   assert.equal(application.describe(null, [], []), null);
@@ -12,18 +12,18 @@ test('ordinary conversation adds no application context', () => {
 
 test('current authorized application exposes service and target without credentials', () => {
   const value = application.describe({ pluginId: 'app-1', requiresMcp: true,
-    pageUrl: 'http://localhost:8901/home.html?space=team&series=series-1&token=page-secret#key',
+    pageUrl: 'http://localhost:8901/home.html?record=private-id&lang=en&token=page-secret#key',
     connection: { url: 'http://localhost:8901/mcp', token: 'connection-secret',
-      context: { spaceId: 'team', seriesId: 'series-1', seriesName: 'Product Stories',
-        topicId: 'topic-2', topicTitle: 'Launch', arbitrary: 'ignored' } } }, [item], ['media-ops-cloud']);
-  assert.equal(value.pageUrl, 'http://localhost:8901/home.html?space=team&series=series-1');
+      context: { spaceId: 'team', recordId: 'document-1', recordName: 'Project guide',
+        spaceName: 'Documentation', arbitrary: 'ignored' } } }, [item], ['fixture-app-service']);
+  assert.equal(value.pageUrl, 'http://localhost:8901/home.html?lang=en');
   assert.equal(value.connection.serviceUrl, 'http://localhost:8901/mcp');
   assert.equal(value.connection.status, 'ready');
   assert.equal(value.version, '0.4.31');
-  assert.deepEqual(value.target, { spaceId: 'team', seriesId: 'series-1', topicId: 'topic-2',
-    seriesName: 'Product Stories', topicTitle: 'Launch' });
+  assert.deepEqual(value.target, { spaceId: 'team', recordId: 'document-1',
+    recordName: 'Project guide', spaceName: 'Documentation' });
   const guide = application.guide(value);
-  assert.doesNotMatch(guide, /page-secret|connection-secret|arbitrary/);
+  assert.doesNotMatch(guide, /page-secret|connection-secret|arbitrary|private-id/);
   assert.match(guide, /不自动截图/);
 });
 
@@ -35,7 +35,7 @@ test('missing declaration or authorization fails before producing model guidance
 });
 
 test('Hub connection and conversation-only applications retain their existing authorization', () => {
-  const ready = application.describe({ pluginId: 'app-1' }, [item], ['media-ops-cloud']);
+  const ready = application.describe({ pluginId: 'app-1' }, [item], ['fixture-app-service']);
   assert.equal(ready.connection.transport, 'hub');
   assert.equal(ready.connection.status, 'ready');
   const ordinary = application.describe({ pluginId: 'app-1' }, [{ ...item,
@@ -45,7 +45,7 @@ test('Hub connection and conversation-only applications retain their existing au
 
 test('page URLs omit sensitive queries, fragments and embedded credentials', () => {
   assert.equal(application.pageUrl('https://example.test/view?t=topic&lang=en&ukey=secret#secret'),
-    'https://example.test/view?t=topic&lang=en');
+    'https://example.test/view?lang=en');
   for (const url of ['file:///secret', 'https://name:password@example.test', 'invalid'])
     assert.equal(application.pageUrl(url), '');
 });
@@ -54,7 +54,7 @@ test('unavailable application context permits conversation guidance without clai
   const value = application.describe({pluginId:'app-1',requiresMcp:true}, [item], [], {allowUnavailable:true});
   assert.equal(value.connection.status,'unavailable');
   assert.deepEqual(value.connection.servers,[]);
-  assert.deepEqual(value.connection.declaredServers,['media-ops-cloud']);
+  assert.deepEqual(value.connection.declaredServers,['fixture-app-service']);
   assert.match(application.guide(value), /仅作文字沟通.*正常回应用户/);
   assert.match(application.guide(value), /不得搜索历史授权文件/);
   assert.throws(() => application.describe({pluginId:'app-1',requiresMcp:true},
