@@ -9,8 +9,10 @@
     desktop: '创建桌面客户端：',
     lite: '创建即用：',
   };
-  function appKindPrompt(kind) {
-    return APP_KIND_PROMPTS[String(kind || '')] || '开发即用：';
+  function appKindPrompt(kind, storageLocation) {
+    const prompt = APP_KIND_PROMPTS[String(kind || '')] || '开发即用：';
+    const storageLabel = storageLocation === 'local' ? '数据本地化' : storageLocation === 'cloud' ? '数据云端化' : '';
+    return storageLabel ? prompt.replace(/：$/, '（' + storageLabel + '）：') : prompt;
   }
 
   function buildPayload(seed, context, application, appKind) {
@@ -27,7 +29,7 @@
       '\u3002\u5236\u4f5c\u65f6\u4f18\u5148\u5f15\u7528\u8fd9\u4e9b\u6750\u6599\uff1b\u9644\u4ef6\u4e8c\u8fdb\u5236\u4ecd\u4fdd\u7559\u5728\u539f\u5bf9\u8bdd\uff0c\u9700\u8981\u65f6\u8bf7\u7528\u6237\u91cd\u65b0\u9009\u62e9\u3002');
     const payload = {
       newSession: true, pluginId: application ? 'local:app-developer' : 'local:plugin-builder',
-      prefill: (application ? appKindPrompt(appKind) : '\u5236\u4f5c\u63d2\u4ef6\uff1a') + source,
+      prefill: (application ? appKindPrompt(appKind, context?.storageLocation) : '\u5236\u4f5c\u63d2\u4ef6\uff1a') + source,
       contextPrompts,
     };
     if (application) contextPrompts[0] = '【SoduWork 即用开发上下文】基于插件开发规范制作 template=app 的即用，贯通真实页面、技能、当前即用对话和壳刷新，并走当前会话的草稿预检安装链路。';

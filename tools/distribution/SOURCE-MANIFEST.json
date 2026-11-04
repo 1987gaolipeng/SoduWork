@@ -1541,8 +1541,8 @@
     },
     {
       "path": "client/components/panels/panels-plugin-builder-entry.js",
-      "bytes": 5221,
-      "sha256": "2a888f9720bb9b694290a2b7050d076134d993a835a037da4d9282cbeadc4d81"
+      "bytes": 5493,
+      "sha256": "09009da73dfb0c8e1ef9473322e9539e1c4fd95d9745b782b7305307c8df8a8e"
     },
     {
       "path": "client/components/panels/panels-plugin-maker-fields.js",
@@ -2825,6 +2825,11 @@
       "sha256": "295d2227e8fb3d85f3bc60cf9c2ba5ed9c0eaf696fcc70955fc762efbb1e31af"
     },
     {
+      "path": "client/e2e/app-create-storage-flow.cjs",
+      "bytes": 5027,
+      "sha256": "67d19951104c6c63d1e531b644dcac6c64f18f847e528d6fb795450cbda2b92d"
+    },
+    {
       "path": "client/e2e/app-developer.cjs",
       "bytes": 8768,
       "sha256": "4880ac210324d1e1fbab827d0dc0306738b0be018485e2dc7bf54ee87805c25f"
@@ -2855,6 +2860,11 @@
       "sha256": "336305818ea56481dead59b6714dcbb89d056f57892f5eed83c7d2f896a0ea1f"
     },
     {
+      "path": "client/e2e/app-preflight-packaged.cjs",
+      "bytes": 5018,
+      "sha256": "1c62f34a65499635028ed3a5518849a1e3a42fc06862aa553462776f1b5d6030"
+    },
+    {
       "path": "client/e2e/app-window-input.cjs",
       "bytes": 15791,
       "sha256": "4639fec49a97a2a8d31c7efb53f1372afe410bdf030745de3ea0f97abae7a80c"
@@ -2876,8 +2886,8 @@
     },
     {
       "path": "client/e2e/apps-library-market.cjs",
-      "bytes": 66576,
-      "sha256": "4aaa992aa009b5d1a9bdeb6c4c6bf63a068dc64b807aa40102b2122daf9ac06a"
+      "bytes": 66821,
+      "sha256": "167197195494230a9022bf3534b37a0840723a44bd92f622b61a923662ccfd54"
     },
     {
       "path": "client/e2e/archive-history.cjs",
@@ -4981,8 +4991,8 @@
     },
     {
       "path": "client/main.js",
-      "bytes": 37124,
-      "sha256": "338a76e1880bbd7fd798c9bf6d491a50c1c35341c5610bbe7f9e1443eb01bff2"
+      "bytes": 37191,
+      "sha256": "85b13d129c0d5c0240e4f1a29ac314d414f65c549bc3f20bf9bf782886bde0cf"
     },
     {
       "path": "client/main/access-control/automation-access.js",
@@ -5366,8 +5376,8 @@
     },
     {
       "path": "client/main/app-candidate-preflight.cjs",
-      "bytes": 4930,
-      "sha256": "d67577ab6024c96589884a95c5c19a61d2d3f3761939fb349008cd10a62b1ee1"
+      "bytes": 4853,
+      "sha256": "4b07ed7f6852c860333d7c61605146e764cff8d864e1690ad88f93829c08a57e"
     },
     {
       "path": "client/main/app-chrome-preload.cjs",
@@ -5403,6 +5413,11 @@
       "path": "client/main/app-package-pages.cjs",
       "bytes": 5935,
       "sha256": "5f5f40cc8026d351e6310f565889a5c3a7f8115ba37c3d4e002c05a4b81e34eb"
+    },
+    {
+      "path": "client/main/app-preflight-entry.cjs",
+      "bytes": 635,
+      "sha256": "d84bf6ce2eed0df2c6971e38950bb3c1c8894ad767a890b023d63dde7d51357c"
     },
     {
       "path": "client/main/app-readonly-history.cjs",
@@ -7550,6 +7565,11 @@
       "sha256": "4b2a89a653a9d358db09230d4a61462c90db7328c3c255271ea3dc703f631a2d"
     },
     {
+      "path": "client/tests/app-preflight-entry.test.cjs",
+      "bytes": 1768,
+      "sha256": "9daf176468b8ff2d80aaf2021cc2ecd3a7cae21ecf7fbb2b930b9c528ab8206f"
+    },
+    {
       "path": "client/tests/app-settings.test.cjs",
       "bytes": 26861,
       "sha256": "06b0ac2f613054414d2a9805d76de3aec7b5c9e1d580522e01c7fcc6596afa85"
@@ -9516,8 +9536,8 @@
     },
     {
       "path": "client/tests/plugin-builder-entry.test.cjs",
-      "bytes": 6091,
-      "sha256": "3443545afb897b06ec37d58141be9fa97f60bb338c1cef634a2c6b77668b1c2b"
+      "bytes": 7661,
+      "sha256": "13dbd536fa0732309538fdc20e6843fd16a821fb471ef59ab5269d0b4e955863"
     },
     {
       "path": "client/tests/plugin-builder-multi-runtime.test.cjs",

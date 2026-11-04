@@ -467,7 +467,8 @@ if (typeof electron === 'string') {
     assert.equal(await js(`[...document.querySelectorAll('.appsx-create-category')].every(card=>{const i=card.querySelector('.appsx-create-ico').getBoundingClientRect(),t=card.querySelector('b').getBoundingClientRect(),b=card.querySelector('.appsx-create-start').getBoundingClientRect(),r=card.getBoundingClientRect();return Math.abs(i.y+i.height/2-t.y-t.height/2)<1&&Math.abs(b.x+b.width/2-r.x-r.width/2)<1})`),true,'icons and titles share a row and create actions are centered');
     assert.equal(await js(`[...document.querySelectorAll('.appsx-create-start')].every(button=>{const range=document.createRange();range.selectNodeContents(button);const text=range.getBoundingClientRect(),r=button.getBoundingClientRect();return Math.abs(text.x+text.width/2-r.x-r.width/2)<1})`),true,'Start creating text is centered inside each pill');
     assert.equal(await js(`appsCreateCancel.textContent==='取消并关闭'&&appsCreateCancel.getBoundingClientRect().width>=120`),true,'cancel-and-close has the wider hit area');
-    await js('appsCreateCancel.focus()');
+    assert.equal(await js('document.querySelectorAll("[data-create-category]:disabled").length'),4,'storage is required before category actions');
+    await js('document.querySelector("input[name=appsCreateStorage][value=local]").click();appsCreateCancel.focus()');
     win.webContents.sendInputEvent({type:'mouseMove',x:0,y:0}); await delay(180);
     assert.equal(await js('getComputedStyle(document.querySelector(".appsx-create-start")).opacity'),'0');
     const categoryRect=await js('(()=>{const r=document.querySelector(".appsx-create-category").getBoundingClientRect();return {x:Math.round(r.x+20),y:Math.round(r.y+20),width:r.width,height:r.height}})()');
@@ -496,7 +497,7 @@ if (typeof electron === 'string') {
       assert.equal(await js('document.querySelectorAll("input[name=appsCreateStorage]:checked").length'),0,'every opening requires an explicit storage choice');
       await js('document.querySelector("input[name=appsCreateStorage][value=local]").click()');
       await js('document.querySelectorAll(".appsx-create-category")['+index+'].click()');
-      assert.equal(await js('developerCalls.at(-1).payload.prefill'),'创建即用：'+title+'：');
+      assert.equal(await js('developerCalls.at(-1).payload.prefill'),'创建即用（数据本地化）：'+title+'：');
     }
     assert.equal(await js('developerCalls.length'),5);
     await js('appsAdd.click();appsCreateCancel.click()');

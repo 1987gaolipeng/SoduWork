@@ -47,6 +47,28 @@ test('attachment names retain normalization and the twelve-name limit in both en
   assert.equal(names.length, 23);
 });
 
+test('app creation displays the chosen storage and retains matching model guidance for every category', () => {
+  const f = fixture();
+  for (const [location, label] of [['local', '数据本地化'], ['cloud', '数据云端化']]) {
+    for (const [appCategory, title] of [['office', '工具办公'], ['game', '小游戏'], ['robot', '机器人'], ['other', '其他']]) {
+      f.window.PluginBuilderEntry.openApp(title + '：', { appCategory, storageLocation: location, attachmentNames: ['参考图.png'] }, 'lite');
+      const { payload } = f.opened.at(-1);
+      assert.equal(payload.prefill, '创建即用（' + label + '）：' + title + '：');
+      const prompts = require('../main/pi-session/environment-ipc').entryContextPrompts(payload.contextPrompts).join('\n');
+      assert.ok(prompts.includes('"location":"' + location + '"'));
+      assert.ok(prompts.includes('appCategory=' + appCategory));
+      if (location === 'local') assert.match(prompts, /不申请云端数据库，不自动上传业务数据/);
+      assert.equal(payload.newSession, true);
+      assert.equal(payload.pluginId, 'local:app-developer');
+      assert.equal(payload.autoSend, undefined, 'creation remains an editable draft');
+    }
+  }
+  for (const storageLocation of [undefined, '', 'invalid', '__proto__']) {
+    assert.equal(f.window.PluginBuilderEntry.buildPayload('描述', { storageLocation }, true, 'lite').prefill, '创建即用：描述');
+  }
+  assert.equal(f.window.PluginBuilderEntry.buildPayload('', undefined, true, 'web').prefill, '创建网页类即用：');
+});
+
 test('new-session fallback uses the compose entry or throws synchronously when unavailable', () => {
   const calls = [], f = fixture({}, { WorkspaceHost: null, openComposePanel: payload => calls.push(payload) });
   assert.equal(f.entry._openPluginBuilder('seed'), true);

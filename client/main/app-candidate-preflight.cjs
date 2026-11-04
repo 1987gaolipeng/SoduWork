@@ -31,7 +31,6 @@ async function execute(app,body,checksum) {
   const base=path.resolve(os.tmpdir()),folder=fs.mkdtempSync(path.join(base,'soduwork-app-preflight-'));
   const input=path.join(folder,'candidate.json'),output=path.join(folder,'result.json');
   fs.writeFileSync(input,JSON.stringify(body),{mode:0o600});
-    try{fs.mkdirSync("/tmp/pf2",{recursive:true});fs.copyFileSync(input,"/tmp/pf2/candidate.json");}catch(_){}
   let result;
   try {
     const binary=process.versions.electron ? process.execPath : require('electron');
@@ -42,7 +41,7 @@ async function execute(app,body,checksum) {
     // refuses to start there unless sandboxing is explicitly disabled. Chromium
     // does not consume every switch from process.argv, so the folder travels in
     // the environment instead of trusting argv positions.
-    const args=[path.join(__dirname,'app-candidate-preflight-worker.cjs')];
+    const args=require('./app-preflight-entry.cjs').launchArgs(app.isPackaged, path.resolve(__dirname,'..'));
     if(typeof process.getuid==='function'&&process.getuid()===0)args.unshift('--no-sandbox');
     env.APP_CANDIDATE_PREFLIGHT_FOLDER=folder;
     result=await new Promise(resolve=>{
