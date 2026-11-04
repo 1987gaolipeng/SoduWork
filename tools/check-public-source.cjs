@@ -6,7 +6,7 @@ const ROOT = path.resolve(__dirname, '..');
 
 function check(root = ROOT) {
   const profile = JSON.parse(fs.readFileSync(path.join(root, 'tools/distribution/PUBLIC-SOURCE.json'), 'utf8'));
-  if (profile.schema !== 1 || profile.id !== 'opensource-v1' || profile.sourceOnly !== true) {
+  if (profile.schema !== 1 || profile.id !== 'opensource-v1' || typeof profile.sourceOnly !== 'boolean') {
     throw Error('Invalid public source profile');
   }
   const files = sourceFiles(root).filter(name => fs.existsSync(path.join(root, name)));

@@ -16,8 +16,8 @@
     },
     {
       "path": ".github/ISSUE_TEMPLATE/bug_report.yml",
-      "bytes": 1179,
-      "sha256": "dce4e01a5571449357c6ef842a511b037a1f53334beff0ae8d91154e8cb37eaa"
+      "bytes": 959,
+      "sha256": "7ecc4f575d300047018367512494ea33d0700760db3d0914330c55a36f430fac"
     },
     {
       "path": ".github/ISSUE_TEMPLATE/config.yml",
@@ -26,18 +26,23 @@
     },
     {
       "path": ".github/ISSUE_TEMPLATE/feature_request.yml",
-      "bytes": 600,
-      "sha256": "38f55cc3737f15bd823d94a1b0d8cfb0df166a643fdf7c3a56228b7e3da89be9"
+      "bytes": 495,
+      "sha256": "c516e851547e7cba20416cb0165a7798b7120a3ff0484a1aa232dff1a76da728"
     },
     {
       "path": ".github/PULL_REQUEST_TEMPLATE.md",
-      "bytes": 779,
-      "sha256": "3c9359a0a3f0af39e9650f7bcba9ce232d72516f0737c40df56753267e080ee3"
+      "bytes": 467,
+      "sha256": "d1afbdd7b13570d27a16fe00d4cb125802dee74fbf4b308115f2e2f198dfb75f"
     },
     {
       "path": ".github/README.md",
-      "bytes": 1631,
-      "sha256": "5f5080aa04bb2c29657392df509ffa53d2cf3517a08608c89ee8bfacba0d6205"
+      "bytes": 2091,
+      "sha256": "307438672059add0da9e35e66d2001fc87243038238a6c04ec70580834be7d7b"
+    },
+    {
+      "path": ".github/RELEASE.md",
+      "bytes": 7649,
+      "sha256": "3298670212018bc91782d4d43fbad93a9ec022a9df5a59d5e7d845d77214f433"
     },
     {
       "path": ".github/dependabot.yml",
@@ -46,18 +51,23 @@
     },
     {
       "path": ".github/workflows/ci.yml",
-      "bytes": 3718,
-      "sha256": "af5cb0a26abd4c2efa6ea48b7c1dead5ec38c44d04919e4b16c3aa8bc3c2375b"
+      "bytes": 6338,
+      "sha256": "824c37c0eede05bda90b67b29f8d1756fb4d04227ea083edadca7411bd188872"
+    },
+    {
+      "path": ".github/workflows/release.yml",
+      "bytes": 7185,
+      "sha256": "8bfb7f69061802d1b0ecf85fedad3b815875895ed838a1d56443f5882990d0e9"
     },
     {
       "path": ".github/workflows/security.yml",
-      "bytes": 966,
-      "sha256": "51b4c7dd31f24d3465763afa1b42b101f624bd1111720c057864c7f15e625aec"
+      "bytes": 1043,
+      "sha256": "e4e272838463d5d76955d29c65fc0e08ea904d8317b091a9ef9f9b820b7622fb"
     },
     {
       "path": ".gitignore",
-      "bytes": 3757,
-      "sha256": "ec66d6efe26b94f98da3cd9df1e4da98b6f1f6e5f24f576974c73235a6b88176"
+      "bytes": 3866,
+      "sha256": "28f8f957c6f319f70543edc484354f5df5a2fb6fe2d97b28ec07e5a29ba4b00f"
     },
     {
       "path": "CONTRIBUTING.md",
@@ -6716,8 +6726,8 @@
     },
     {
       "path": "client/main/platform-connections/runtime.cjs",
-      "bytes": 12305,
-      "sha256": "53c57bbe2d694273342bf82d6a8053c1989f5eaf2714427c5d08cdd5f69ae1cf"
+      "bytes": 12329,
+      "sha256": "9502dcc42fdb9e448268013f1570180a6b763401867c0a082636a55f1d0ff71c"
     },
     {
       "path": "client/main/platform-connections/service.cjs",
@@ -11141,13 +11151,13 @@
     },
     {
       "path": "docs/release-scope.en.md",
-      "bytes": 2977,
-      "sha256": "f3face2b5c8bf5b9f731eaf5e0ce390a587bc9246a34feaa4239d1e030b43b4c"
+      "bytes": 3298,
+      "sha256": "43c69653bde49657f9b7851f7c516ff0da100cb4bef82910a9a2035c288f8475"
     },
     {
       "path": "docs/release-scope.md",
-      "bytes": 2482,
-      "sha256": "d555c4194e1feef8b133d938e098163caada103540e5f9e40c2c4c4e3693f5d6"
+      "bytes": 3318,
+      "sha256": "9a56a583a70de4969d4f5202b11b4415d415f5654aa4a9759c188161b2bd0291"
     },
     {
       "path": "docs/security.en.md",
@@ -16086,8 +16096,8 @@
     },
     {
       "path": "hub-backend/test_agent_platform_installation.py",
-      "bytes": 12506,
-      "sha256": "4331bd9c0f9b8833c920bcbda77a5e928cdf5b2f3c158dfa1479400b51b90f10"
+      "bytes": 12718,
+      "sha256": "4d5ed96e29b7cd93321d5db8ed7d3e47df2efd97f07cc9826f1d23246220a239"
     },
     {
       "path": "hub-backend/test_ai_proxy_open_keepalive.py",
@@ -16476,8 +16486,8 @@
     },
     {
       "path": "hub-backend/test_harness2_platforms.py",
-      "bytes": 8362,
-      "sha256": "c841cf90a3ce5b167a74d844c276c1e96283687477369d38b00d5e165a727452"
+      "bytes": 9406,
+      "sha256": "c3c88d3a3943dcf1824e793da5cb6e3bb9df45f68317e6a2c2cce6e8940ae5a2"
     },
     {
       "path": "hub-backend/test_harness2_regressions.py",
@@ -16966,8 +16976,8 @@
     },
     {
       "path": "hub-backend/test_runner_licenses.py",
-      "bytes": 2384,
-      "sha256": "61724d91ea27b980d24113564a162a59905c9895e1965e79bfc11ff4d9138c2f"
+      "bytes": 2692,
+      "sha256": "109c1fe5b87374eea0b49e2fb4b7b46329268613093945a758dd8bdb61286799"
     },
     {
       "path": "hub-backend/test_runner_linux_entry.py",
@@ -20306,8 +20316,8 @@
     },
     {
       "path": "tools/check-public-source.cjs",
-      "bytes": 3267,
-      "sha256": "bec78dd320b1cf049b9f0000b9f2c57fbc8d25d6f1bfe13af8ddf440320da935"
+      "bytes": 3279,
+      "sha256": "d8e1184293d2e749cb43b7c8757347d8a623a0457d6939ef74188b0fbb229282"
     },
     {
       "path": "tools/check-public-source.test.cjs",
@@ -20316,8 +20326,8 @@
     },
     {
       "path": "tools/check-repository-layout.cjs",
-      "bytes": 6321,
-      "sha256": "b9fc6d16d4cd263cbdac1c518866fa556edc591d14580cf0b28c4265c2916a2b"
+      "bytes": 6378,
+      "sha256": "58ae9484547795a682806bd57364ce71d9fedc4fb81f2c74cf0ed0c385c0fafc"
     },
     {
       "path": "tools/check-source-manifest.cjs",
@@ -20481,8 +20491,53 @@
     },
     {
       "path": "tools/export_source.py",
-      "bytes": 4647,
-      "sha256": "629c3dd1e5389d5e5be59a190f6232ee48b05198a1bb1d6279af8bc4cb157d57"
+      "bytes": 4653,
+      "sha256": "4b3a476ff5510f412b7e8c3b234f2fc7007e40507cc50bc7c7317462b372f7ce"
+    },
+    {
+      "path": "tools/github/accept-linux.cjs",
+      "bytes": 3092,
+      "sha256": "04ea91c08481c8d10ad5a4548fd6b96f604af3ac8d7254c938d0fd69b66a9fbe"
+    },
+    {
+      "path": "tools/github/build.py",
+      "bytes": 5916,
+      "sha256": "d678171db82add9e5faddc17ed4a4574771d74ddc5799822c2c5bf8bf08531e0"
+    },
+    {
+      "path": "tools/github/check_public_ci.py",
+      "bytes": 1938,
+      "sha256": "481477670d92f8d2e50f6f6f735f260719e41c38a95bf6fd06deec1585462400"
+    },
+    {
+      "path": "tools/github/hub.py",
+      "bytes": 5265,
+      "sha256": "6d0ddff0da4fcd5614a2cfa63a86f7bb58f9ccda58d5ffab32b4b737cc29ae2f"
+    },
+    {
+      "path": "tools/github/linux-installed-check.sh",
+      "bytes": 4864,
+      "sha256": "d2a46ae4d57115ccdb5b60214eb745545dd550ab7c9e09e5509625c46d80c275"
+    },
+    {
+      "path": "tools/github/postgres.py",
+      "bytes": 2145,
+      "sha256": "d6337999e5e6c50594f3385495faddc58888551d035c643cf9474875af41e41f"
+    },
+    {
+      "path": "tools/github/release.py",
+      "bytes": 12384,
+      "sha256": "7caa3a02a9572dc068a88b417abc8b05c8ba1bafa42942a716f05912cf5f4ee1"
+    },
+    {
+      "path": "tools/github/test_build.py",
+      "bytes": 4053,
+      "sha256": "b93738f6c4b08a7a3e01030e9d888bea2f415be36342a8cbf690f400ee70e171"
+    },
+    {
+      "path": "tools/github/test_release.py",
+      "bytes": 10829,
+      "sha256": "30ee6a9afdf11257bcf6197988c6a6074b9de37e21640d9bc8ee48ffcdeddc23"
     },
     {
       "path": "tools/security/README.md",

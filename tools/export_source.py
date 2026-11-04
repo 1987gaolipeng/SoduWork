@@ -35,7 +35,7 @@ def verify(archive: Path) -> int:
         profile = json.loads(bundle.read('tools/distribution/PUBLIC-SOURCE.json'))
         if (manifest.get('schema') != 1 or manifest.get('ok') is not True
                 or manifest.get('distribution') != 'public-source'
-                or profile.get('id') != 'opensource-v1' or profile.get('sourceOnly') is not True):
+                or profile.get('id') != 'opensource-v1' or type(profile.get('sourceOnly')) is not bool):
             raise ValueError('Missing reviewed source profile or inventory')
         expected = {entry['path']: entry for entry in manifest['files']}
         identifiers = profile.get('excludedIdentifiers', [])

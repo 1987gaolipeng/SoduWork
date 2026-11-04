@@ -24,7 +24,12 @@ class RunnerLicenseTest(unittest.TestCase):
             "SPECPATH": str(ROOT / "hub-backend"), "Analysis": AnalysisStub,
             "PYZ": lambda *a, **k: None, "EXE": lambda *a, **k: None,
         }
-        with patch.dict("os.environ", {"SODUWORK_INTERNAL_BUILD": "0"}):
+        original_read = Path.read_text
+        def read_fixture(path, *args, **kwargs):
+            if path == ROOT / "tools/distribution/PUBLIC-SOURCE.json":
+                return '{"sourceOnly": true}'
+            return original_read(path, *args, **kwargs)
+        with patch.dict("os.environ", {"SODUWORK_INTERNAL_BUILD": "0"}), patch.object(Path, "read_text", read_fixture):
             with self.assertRaisesRegex(RuntimeError, "Public Runner distribution is blocked"):
                 runpy.run_path(str(ROOT / "hub-backend/runner.spec"), init_globals=namespace)
         self.assertFalse(captured)

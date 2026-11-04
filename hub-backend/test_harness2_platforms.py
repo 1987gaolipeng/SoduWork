@@ -76,7 +76,14 @@ class Harness2PlatformTest(unittest.TestCase):
 
     def test_public_runner_build_is_blocked_by_source_only_distribution_scope(self):
         backend = Path(__file__).resolve().parent
-        with patch.dict(os.environ, {"SODUWORK_INTERNAL_BUILD": ""}):
+        original_read = Path.read_text
+        profile = backend.parent / "tools/distribution/PUBLIC-SOURCE.json"
+        def read_fixture(path, *args, **kwargs):
+            if path == profile:
+                return '{"sourceOnly": true}'
+            return original_read(path, *args, **kwargs)
+        # Exercise the negative gate even after a future reviewed binary release.
+        with patch.dict(os.environ, {"SODUWORK_INTERNAL_BUILD": ""}), patch.object(Path, "read_text", read_fixture):
             with self.assertRaisesRegex(RuntimeError, "Public Runner distribution is blocked"):
                 runpy.run_path(str(backend / "runner.spec"), init_globals={"SPECPATH": str(backend)})
 
@@ -85,6 +92,10 @@ class Harness2PlatformTest(unittest.TestCase):
         # Replace installed-distribution metadata discovery only; execute the
         # production recipe and inspect its resulting PyInstaller arguments.
         import PyInstaller.utils.hooks as hooks
+        from packaging.markers import default_environment
+        # packaging caches the host environment. Supply each fixture target
+        # explicitly, without poisoning later checks with the first mocked OS.
+        marker_environment = default_environment()
         backend = Path(__file__).resolve().parent
         project = backend.parent
         import json
@@ -105,6 +116,10 @@ class Harness2PlatformTest(unittest.TestCase):
                         captured.update(kwargs)
                         self.pure = self.scripts = self.binaries = self.datas = []
                 with (patch.object(runner_sources.sys, "platform", platform),
+                      patch("packaging.markers.default_environment", return_value={
+                          **marker_environment, "sys_platform": platform,
+                          "os_name": "nt" if platform == "win32" else "posix",
+                          "platform_system": {"win32": "Windows", "darwin": "Darwin", "linux": "Linux"}[platform]}),
                       patch.dict(os.environ, {"SODUWORK_INTERNAL_BUILD": "1"}),
                       patch("importlib.metadata.version", side_effect=reviewed_versions.__getitem__),
                       patch.object(hooks, "copy_metadata", return_value=[]),

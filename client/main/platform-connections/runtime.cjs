@@ -33,7 +33,7 @@ async function adapter(key){provider(key);return import(pathToFileURL(path.join(
 function node(){return nodeRuntime.resolve().node;}
 function env(selected=nodeRuntime.resolve()){const next={...selected.env};for(const k of ['NODE_OPTIONS','SODUWORK_PROXY_KEY','SODUWORK_MCP_KEY','SODUWORK_MCP_SERVERS','SODUWORK_MCP_SERVERS_JSON','APP_ID','APP_SECRET','USER_ACCESS_TOKEN'])delete next[k];return next;}
 function stop(child){
- if(!child||!child.pid||child.exitCode!==null||stoppedChildren.has(child))return true;
+ if(!child||!child.pid||child.exitCode!==null||child.signalCode!=null||stoppedChildren.has(child))return true;
  if(process.platform==='win32'){
   const result=spawnSync('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore',timeout:5000});
   // taskkill completes before Node can deliver the child's exit event. Remember

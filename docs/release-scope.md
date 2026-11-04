@@ -1,33 +1,35 @@
-# 首版公开范围
+# First release scope
 
-**简体中文** · [English](release-scope.en.md) · [文档导航](README.md)
+**Release scope (English)** · [Companion copy](release-scope.en.md) · [Documentation](index.en.md)
 
-项目版权署名为 **MDiRi**，许可证见根目录 LICENSE。
+Project copyright is attributed to **MDiRi**. See the root [LICENSE](../LICENSE).
 
-首版提供桌面客户端、Hub、管理页面、Runner 源码、多平台一键启动和通用 Docker 自部署。保留本项目的基础办公、任务、MCP、能力创建指南，以及通用工作流、安全隔离和迁移测试。
+The first release includes the desktop client, Hub, management UI, Runner source, multi-platform source launchers, and generic Docker self-hosting. It retains project-owned office, task, MCP, and capability-authoring guides, generic workflows, isolation checks, and migration tests.
 
-本分发不包含：
+Excluded from this distribution:
 
-- 第三方技能套件及其展示元数据、平台插件的官方资料快照；
-- 移动端、内部产品与架构设计记录、品牌源设计稿和验证过程材料；
-- 非公开业务插件、应用及其专用适配器、联调脚本、提示词与资源；
-- 业务内容同步、演示数据灌入工具；
-- 公司集群、发布、签名上传、备份定时器和服务器回滚运维流水线。
+- Third-party skill bundles and their display metadata, and upstream platform-plugin reference snapshots.
+- Mobile applications, internal product and architecture records, original brand design files, and validation process material.
+- Non-public business plugins, applications, and their dedicated adapters, integration scripts, prompts, and assets.
+- Business-content synchronization and demo-data seeding tools.
+- Company cluster configuration, deployment pipelines, signing uploads, scheduled backups, and server rollback operations.
 
-客户端更新保留通用签名与兼容性校验工具，不附带私钥、上传凭据或公司部署配置。
+Generic update-signing and compatibility tools remain. Private keys, upload credentials, and company deployment configuration are excluded.
 
-具体文件边界由 tools/distribution/PUBLIC-SOURCE.json 与源码检查约束。通用模型 API、Codex 等执行器兼容代码不等于内置商业技能；它们使用用户自行配置的服务和权限。所保留的界面、终端和模型运行依赖仍携带原始许可证。
+[PUBLIC-SOURCE.json](../tools/distribution/PUBLIC-SOURCE.json) and source checks define the file boundary. Generic model APIs and executor compatibility such as Codex do not imply bundled commercial skills; users supply their own services and permissions. Retained UI, terminal, and model runtime dependencies carry their original licenses.
 
-## 运行与数据
+## Runtime and data
 
-本机体验使用独立 SQLite 和专用桌面配置，默认只监听回环地址。不读取源码目录里的 `.env`、业务数据库或用户原有模型密钥。模型服务和可选执行底座需单独配置。
+Local source mode uses isolated SQLite storage and a dedicated desktop profile, listening on loopback by default. It does not load the checkout's `.env`, business databases, or existing model credentials. Model providers and optional execution agents need separate configuration.
 
-更新前停止服务并备份完整数据目录；回退源码时同时恢复匹配的数据备份。Docker 团队部署需要自行配置 HTTPS、数据库备份和权限，不能把本机体验直接当作生产环境。
+Stop the service and back up the complete data directory before updates. Restore matching source and data backups together when rolling back. Docker team deployments need their own HTTPS, database backups, and access controls; local source mode is not a production deployment.
 
-## 源码与安装包
+## Source and installers
 
-首版只发布源码。桌面安装包、原生运行时、第三方模型、用户导入插件和容器镜像需要各自的来源、许可与运行验证。源码清单通过不代表这些发行物已经获准分发。
+The first release distributes source only. Desktop installers, native runtimes, third-party models, imported plugins, and container images each need their own provenance, licensing, and runtime validation. Passing the source manifest check does not authorize distribution of those artifacts.
 
-维护者应从校验后的源码 ZIP 初始化全新的公开 Git 仓库。私有开发历史、旧标签和旧发行物不属于公开范围；不要将原开发仓库整体转换成公开项目。`tools/export_source.py` 只导出已提交的文件树，并逐文件核对源码清单，不导出 Git 历史、未跟踪文件或依赖缓存。
+See the [GitHub workflow guide](../.github/RELEASE.md) for source, Client and Hub pipelines. Binary paths remain blocked by distribution scope, third-party evidence and upgrade baselines. Workflow source does not establish publication clearance or a successful hosted run.
 
-验证只报告实际运行的平台：Windows 验证不能替代 macOS/Linux 原生验证，合成数据检查也不能替代真实模型或生产业务验收。
+Initialize a public repository from a verified source ZIP, or squash the reviewed source into the public branch. Private development history, old tags, and previous artifacts are outside scope; do not turn the original development repository public. `tools/export_source.py` exports only the committed tree, checking every file against the manifest. It omits Git history, untracked files, and dependency caches.
+
+Report only the platforms actually tested. Windows checks do not replace native macOS/Linux validation, and synthetic-data checks do not establish real-model or production acceptance.

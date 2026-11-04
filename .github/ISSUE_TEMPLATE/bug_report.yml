@@ -1,33 +1,32 @@
-name: Bug report / 问题反馈
-description: Report a reproducible problem without private data / 请勿提交私密数据
+name: Bug report
+description: Report a reproducible problem without private data
 body:
   - type: markdown
     attributes:
       value: |
         For security vulnerabilities, follow SECURITY.md and establish a private channel first.
-        安全漏洞请先按 SECURITY.md 确认私密报告渠道，不在此公开利用细节。
   - type: input
     id: version
     attributes:
-      label: Source version and platform / 源码版本与系统
+      label: Source version and platform
       placeholder: Commit or release, OS, Python and Node versions
     validations:
       required: true
   - type: textarea
     id: reproduction
     attributes:
-      label: Steps to reproduce / 复现步骤
+      label: Steps to reproduce
       description: Use isolated accounts and synthetic data; remove credentials and private addresses.
     validations:
       required: true
   - type: textarea
     id: behavior
     attributes:
-      label: Expected and actual behavior / 预期与实际行为
+      label: Expected and actual behavior
     validations:
       required: true
   - type: textarea
     id: logs
     attributes:
-      label: Sanitized logs / 脱敏日志
+      label: Sanitized logs
       description: Do not attach databases, session profiles, tokens, or internal screenshots.

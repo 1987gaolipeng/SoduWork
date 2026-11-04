@@ -124,3 +124,7 @@ mobile/
 
 # Agent session local artifacts: browser validation benches, isolated user data, backups.
 /.local/
+
+# GitHub workflow build products and acceptance evidence are never source.
+/release-out/
+/release-evidence/
