@@ -212,6 +212,53 @@ test('fresh and cached account history retain authenticated ownership through ac
   assert.equal(requests, 2);
 });
 
+test('archived account rows stay out of fresh and cached history and retain live archive state', async t => {
+  const { identity } = require('../../tests/helpers/platform-session-fixture.cjs');
+  const previous = global.WebSocket, sockets = [], events = [];
+  global.WebSocket = class { constructor() { sockets.push(this); } close() {} };
+  t.after(() => { global.WebSocket = previous; });
+  let archived = true, requests = 0, nativeLookups = 0;
+  const sync = require('./account-sync').create({ app: {}, store: { jobs: () => [] }, realtime: true,
+    identityOf: async () => identity(),
+    resolveNativeSource: async () => { nativeLookups++; return null; },
+    fetch: async () => {
+      requests++;
+      return response({ items: [{ id: 'acct-archived', title: 'Archived fixture', archived,
+        sourceSessionId: 'fixture', sourceClientId: 'other-device' }], hasMore: false });
+    } });
+  t.after(() => sync.close());
+  sync.onChange((id, row, projection) => events.push({ id, row, projection }));
+  assert.deepEqual((await sync.history()).chats, []);
+  assert.deepEqual((await sync.history()).chats, []);
+  assert.equal(requests, 1);
+  sockets[0].onmessage({ data: JSON.stringify({ type: 'account-conversation', conversationId: 'acct-archived' }) });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].projection.archived, true);
+  assert.equal(nativeLookups, 0, 'archived projections cannot be replaced by live native aliases');
+  archived = false;
+  const restored = await sync.history({ force: true });
+  assert.equal(restored.chats[0].id, 'acct-archived');
+  assert.equal(restored.chats[0].archived, false);
+  assert.equal(nativeLookups, 1);
+});
+
+test('failed directory refresh hides archived rows loaded from disk', async t => {
+  const { identity } = require('../../tests/helpers/platform-session-fixture.cjs');
+  const sync = require('./account-sync').create({ app: {}, realtime: false,
+    identityOf: async () => identity(),
+    store: { jobs: () => [], directory: async () => ({ cursor: 4, items: [
+      { id: 'acct-archived', title: 'Archived fixture', archived: true },
+      { id: 'acct-visible', title: 'Visible conversation', archived: false },
+    ] }) },
+    fetch: async () => { throw new Error('Offline'); },
+  });
+  t.after(() => sync.close());
+  const result = await sync.history();
+  assert.equal(result.stale, true);
+  assert.deepEqual(result.chats.map(item => item.id), ['acct-visible']);
+});
+
 test('late socket refreshes cannot publish another account or survive shutdown', async t => {
   const { identity } = require('../../tests/helpers/platform-session-fixture.cjs');
   const previous = global.WebSocket, sockets = [], events = [];
@@ -240,6 +287,58 @@ test('late socket refreshes cannot publish another account or survive shutdown',
   await sync.close(); release();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(events.length, 0);
+});
+
+test('native discovery reuses authenticated account socket without reloading history', async t => {
+  const { identity } = require('../../tests/helpers/platform-session-fixture.cjs');
+  const previous = global.WebSocket, sockets = [];
+  global.WebSocket = class {
+    constructor(url) { this.url = url; this.readyState = 1; this.sent = []; sockets.push(this); }
+    send(value) { this.sent.push(JSON.parse(value)); }
+    close() { this.readyState = 3; }
+  };
+  t.after(() => { global.WebSocket = previous; });
+  const discovery = require('../native-discovery.cjs').create();
+  let current = identity(), requests = 0, wakes = 0;
+  const remove = discovery.register('personal-relay', () => wakes++);
+  t.after(remove);
+  const sync = require('./account-sync').create({ app: {}, store: { jobs: () => [] }, realtime: true, discovery,
+    identityOf: async () => current, fetch: async () => { requests++; return response({ items: [], hasMore: false }); } });
+  t.after(() => sync.close());
+  await sync.history();
+  const socket = sockets[0]; socket.onopen();
+  assert.equal(socket.sent[0].t, 'auth');
+  socket.onmessage({ data: JSON.stringify({ type: 'ready' }) });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(socket.sent[1].t, 'native-discovery');
+  // Authentication now closes the HTTP-to-socket delivery gap with one
+  // incremental reconcile. Native discovery hints must not add directory I/O.
+  assert.equal(requests, 2);
+  const reconciled = requests;
+  socket.onmessage({ data: JSON.stringify({ type: 'native-discovery', topic: 'personal-relay' }) });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(wakes, 1); assert.equal(requests, reconciled); assert.equal(sockets.length, 1);
+  current = { ...current, hub: 'http://other-hub.test' };
+  await sync.history({ force: true });
+  assert.equal(sockets.length, 2); assert.equal(socket.readyState, 3);
+});
+
+test('history refreshes cannot bypass a failed socket reconnect backoff', async t => {
+  const { identity } = require('../../tests/helpers/platform-session-fixture.cjs');
+  const previous = global.WebSocket, sockets = [];
+  global.WebSocket = class {
+    constructor() { this.readyState = 1; sockets.push(this); }
+    close() { this.readyState = 3; }
+    send() {}
+  };
+  t.after(() => { global.WebSocket = previous; });
+  const sync = require('./account-sync').create({ app: {}, store: { jobs: () => [] }, realtime: true,
+    identityOf: async () => identity(), fetch: async () => response({ items: [], hasMore: false }) });
+  t.after(() => sync.close());
+  await sync.history();
+  sockets[0].onopen(); sockets[0].onclose();
+  for (let i = 0; i < 10; i++) await sync.history({ force: true });
+  assert.equal(sockets.length, 1);
 });
 
 test('cloud and account projections never become new local sync sources on reopen', async t => {

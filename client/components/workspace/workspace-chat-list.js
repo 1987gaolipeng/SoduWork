@@ -179,6 +179,10 @@ function updateChatState(event) {
     const row = rememberChatName(event && event.presence);
     const id = String(event && event.sessionId || row && row.id || '');
     if (!id || !row) return;
+    if (row.archived || row.deleted) {
+      removeChat(id);
+      return;
+    }
     if (event.kind === 'renamed' && global.ChatChrome?.rename) global.ChatChrome.rename(id, row.title);
     const index = ctx.chatItems.findIndex((item) => String(item.id || '') === id);
     if (index < 0) {
@@ -335,8 +339,6 @@ function _newChatRow() {
       e.stopPropagation();
       const id = b.dataset.chatId || '';
       if (id && global.WorkspaceHost) {
-        /* Open first: setActiveChat synchronously repaints this list and can replace
-           the clicked node before the host receives the navigation request. */
         const project = ctx.sidebarProjects?.projectForChat(id);
         global.WorkspaceHost.open('create', {
           tab: 'chat', chatId: id, chatTitle: title.textContent || '', taskSession: b.dataset.taskSession === '1',
@@ -439,7 +441,8 @@ function _paintChatLocale(button) {
     const separator = global.SoduWorkI18n?.getLocale() === 'en-US' ? ', ' : '，';
     button.setAttribute('aria-label', label + separator + status + (copy.harnesses ? separator + copy.harnesses : ''));
     button.title = label + ' · ' + status + (copy.harnesses ? ' · ' + copy.harnesses : '');
-    button.querySelector('.ws-chat-title').textContent = label;
+    const title = button.querySelector('.ws-chat-title');
+    if (title.textContent !== label) title.textContent = label;
   }
 
 function _paintChatRow(row, c, isPinned) {
@@ -473,7 +476,11 @@ function _paintChatRow(row, c, isPinned) {
       c.collaboration || c.mode === 'goal');
     b.dataset.taskSession = linked ? '1' : '0';
     runtime.hidden = !harnesses.length;
-    runtime.innerHTML = harnesses.map(harnessIcon).join('');
+    const markup = harnesses.map(harnessIcon).join('');
+    if (runtime._harnessMarkup !== markup) {
+      runtime.innerHTML = markup;
+      runtime._harnessMarkup = markup;
+    }
     runtime.title = runtimeName;
     runtime.setAttribute('aria-hidden', 'true');
     runtime.setAttribute('data-user-attributes', 'title');
@@ -604,7 +611,12 @@ function refreshConversationHistory() {
 
   function upsertChat(item) {
     if (!item) return;
-    ctx.chatItems = ctx._upsertChatItems(ctx.chatItems, rememberChatName(item));
+    const next = ctx._upsertChatItems(ctx.chatItems, rememberChatName(item), { deferUnconfirmedCloudTasks: true });
+    if (next === null) {
+      void refreshConversationHistory();
+      return;
+    }
+    ctx.chatItems = next;
     renderChats();
   }
 
@@ -622,7 +634,12 @@ function refreshConversationHistory() {
     if (ctx.activeChatId === next) return;
     ctx.activeChatId = next;
     global.WorkspaceNavigation?.chatChanged(next);
-    if (ctx.root) { renderChats(); }
+    for (const button of ctx.root?.querySelectorAll('.ws-chat') || []) {
+      const selected = ctx.active === 'create' && Boolean(next) && button.dataset.chatId === next;
+      if (button.classList.contains('is-active') === selected) continue;
+      button.classList.toggle('is-active', selected);
+      button.setAttribute('aria-current', selected ? 'page' : 'false');
+    }
   }
 
   return { setChats, upsertChat, removeChat, setActiveChat, pinStorageKey, legacyPinnedIds, pinnedIds, togglePinned, forgetPinned, deleteHistoryChat, archiveHistoryChat, rememberChatName, updateChatState, renameChat, closeChatMenu, openChatRename, chatMenuItem, _newChatRow, _paintChatLocale, _paintChatRow, _syncChatList, renderChats, subscribeConversationPresence, refreshConversationHistory };

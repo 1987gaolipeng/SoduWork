@@ -6,17 +6,18 @@ const fs = require('./renderer-source.cjs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function fixture({ status = 'idle', pending = false, live = false } = {}) {
+function fixture({ status = 'idle', pending = false, live = false, initialRows } = {}) {
   const globals = { document: { getElementById: () => null }, setTimeout: () => 1 };
   globals.window = globals;
   vm.createContext(globals);
-  for (const file of ['workspace/workspace-chat-history.js', 'workspace/workspace-chat-list.js',
+  for (const file of ['workspace/workspace-chat-history.js', 'workspace/workspace-chat-list.js', 'workspace/workspace-sidebar-state.js',
     'panels/chat-task-controller.js']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../components', file), 'utf8'), globals,
       { filename: file });
   }
   const history = globals.WorkspaceChatHistory;
-  let rows = [{ id: 'work-draft', title: 'Requirement discussion', workOnly: !live, state: 'idle' }];
+  let rows = initialRows ?? [{ id: 'work-draft', title: 'Requirement discussion', workOnly: !live, state: 'idle' }];
+  const sidebar = globals.WorkspaceSidebarState.create({ storage: { getItem: () => null }, key: 'test' });
   globals.WorkspaceShell = { upsertChat: row => { rows = history._upsertChatItems(rows, row); } };
   const ctx = { _sessionId: 'work-draft', _ref: live ? 'runtime-ref' : '', _viewEpoch: 1,
     _sessionOptions: { adapterId: 'pi' }, _snap: { status, workOnly: !live }, _pending: pending,
@@ -37,13 +38,29 @@ function fixture({ status = 'idle', pending = false, live = false } = {}) {
   const bind = taskStatus => controller._bindCollaborationTask('requirement', 'Requirement', {
     persist: false, taskMeta: { id: 'requirement', status: taskStatus },
   });
-  return { ctx, history, bind, paint, row: () => rows[0], refresh() {
+  return { ctx, history, bind, paint, row: () => rows[0], recent: () => Array.from(sidebar.view(rows).recent, row => row.id), refresh() {
     // Work-only archive history has no runtime state; it must not retain an
     // optimistic task status that falsely claims the Agent is executing.
     rows = history._reconcileChats(rows, [{ id: 'work-draft', title: 'Requirement discussion',
       workOnly: !live, at: Date.now() }]);
   } };
 }
+
+test('reopening an old cloud conversation preserves its visible rank before the next history refresh', () => {
+  const f = fixture({ initialRows: [
+    { id: 'work-draft', cloud: true, at: 100 },
+    { id: 'newer', at: 200 },
+  ] });
+  assert.deepEqual(f.recent(), ['newer', 'work-draft']);
+  f.bind('completed');
+  assert.deepEqual(f.recent(), ['newer', 'work-draft']);
+});
+
+test('a newly bound conversation receives a timestamp on first insertion', () => {
+  const f = fixture({ initialRows: [] });
+  f.bind('todo');
+  assert.ok(f.row().at > 0);
+});
 
 for (const status of ['todo', 'completed', 'cancelled']) {
   test('binding an idle ' + status + ' requirement keeps its conversation deletable after history refresh', () => {

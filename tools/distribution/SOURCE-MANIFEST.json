@@ -951,8 +951,8 @@
     },
     {
       "path": "client/components/panels/chat-task-controller.js",
-      "bytes": 59168,
-      "sha256": "f805860e88e1047a28c58add465f2e4111a36f66cf78f6e4360b560009776eb8"
+      "bytes": 59152,
+      "sha256": "0866bd13861ff3f4ac1ac08469c8ca876de40641449249c4da0bcdf685ae85e1"
     },
     {
       "path": "client/components/panels/chat-task-session.js",
@@ -2311,13 +2311,13 @@
     },
     {
       "path": "client/components/workspace/workspace-chat-history.js",
-      "bytes": 8629,
-      "sha256": "360bbd72eb861e7a88a2231efb3609c0a30080be707341bebea4292aba51c5bf"
+      "bytes": 9440,
+      "sha256": "de8afb9980b93280e88ace2b750018dfb9b4dddb28dae90742752a9a96787df7"
     },
     {
       "path": "client/components/workspace/workspace-chat-list.js",
-      "bytes": 31087,
-      "sha256": "bcf7090da9efdebdd7a8d2a3e8a50120f14b3f6aa168903fd197074f7a76633e"
+      "bytes": 31666,
+      "sha256": "6781ffdefb92851a8e0428afafd6af88e6e8c0db2cb3dcf8f576caef796ea6d9"
     },
     {
       "path": "client/components/workspace/workspace-navigation.css",
@@ -4996,8 +4996,8 @@
     },
     {
       "path": "client/e2e/workspace-runtime-label.cjs",
-      "bytes": 8957,
-      "sha256": "90a58e4f3e60ff1dafae3d155a3fc78faf1974339876c32691ade4103bb77bbd"
+      "bytes": 10671,
+      "sha256": "d45e5b04caa521a4b295820c929bee2ca57a21838fed613c6cf47af0f07b1309"
     },
     {
       "path": "client/e2e/workspace-sidebar-upgrade.cjs",
@@ -5616,13 +5616,13 @@
     },
     {
       "path": "client/main/conversation/account-sync.js",
-      "bytes": 24418,
-      "sha256": "5d418b5934265a4d3fff7fb1d695f311d1c6290d499e75046c99a4ab9cc1610f"
+      "bytes": 36965,
+      "sha256": "4fdcc312005a14999e1e707e6562aa7e4373692e99c1136c001d5cbc12ffdeb8"
     },
     {
       "path": "client/main/conversation/account-sync.test.cjs",
-      "bytes": 17115,
-      "sha256": "3b4831120596ab21ce99c08e42301f02d0572fdfe2f5c2904bd9ca2201ea3d0f"
+      "bytes": 22346,
+      "sha256": "d8acdf564a9a842c6f1ab904521981c79662621001c507bf5b0b3a34f5b064b1"
     },
     {
       "path": "client/main/conversation/agent-contract.js",
@@ -6091,8 +6091,8 @@
     },
     {
       "path": "client/main/device-auth.js",
-      "bytes": 30416,
-      "sha256": "bf3b9b076c6f4031b2b080e4d91ec1e8665e2f598f7496d8f34dc51367a2b2db"
+      "bytes": 30884,
+      "sha256": "f78c0b74c07c81ca87cca860cfa572725e395927c8a876d8aa23d85bebf3d8b7"
     },
     {
       "path": "client/main/device-credential-store.cjs",
@@ -6231,8 +6231,13 @@
     },
     {
       "path": "client/main/mobile-capabilities.cjs",
-      "bytes": 9773,
-      "sha256": "ca347350eb7e9efade7f6d5e44b43ffa794b7789d5c81b0f24f66d0f00ae5152"
+      "bytes": 10024,
+      "sha256": "3723680b93ff51cfa6de0acf3ad879957b2ee7c24954900bfa3ab2cd898aedfd"
+    },
+    {
+      "path": "client/main/mobile-library.cjs",
+      "bytes": 12362,
+      "sha256": "327fa71890ce69232bc3b1f20c49978f41cb1bdb84c66104cb49f15ca4f1ca80"
     },
     {
       "path": "client/main/native-app-icon.cjs",
@@ -8191,8 +8196,8 @@
     },
     {
       "path": "client/tests/cloud-sidebar-stability.test.cjs",
-      "bytes": 8612,
-      "sha256": "9ce598b233810f44cb583f671521acacff0f7968d26a9ac7ebb0c1c60f5c6017"
+      "bytes": 11430,
+      "sha256": "a26f00f896cb242e049d3440da4bf85d635f1dd8d5e403ac72ba8920ea8256d7"
     },
     {
       "path": "client/tests/cloud-start.test.cjs",
@@ -8551,8 +8556,8 @@
     },
     {
       "path": "client/tests/conversation-sidebar-lifecycle.test.cjs",
-      "bytes": 3921,
-      "sha256": "601476e31f6060950bc308ae90c197bb476104b5f031eeb7ac3424201a4e310a"
+      "bytes": 4717,
+      "sha256": "500d21df9c860404c9ddfc128f48aef4b8bb3da5d3d51331eb2623f802ca713d"
     },
     {
       "path": "client/tests/conversation-sidebar-order.test.cjs",
@@ -9233,6 +9238,11 @@
       "path": "client/tests/mobile-capabilities.test.cjs",
       "bytes": 8300,
       "sha256": "5900f9f12485a8deabdd7e9b43ff22d942d730818aa20119841ceb297982297f"
+    },
+    {
+      "path": "client/tests/mobile-library.test.cjs",
+      "bytes": 9618,
+      "sha256": "a6839c7551a9281b21fd005ff41e6711b90f0879a78a27815ba3861dda0d2fe9"
     },
     {
       "path": "client/tests/model-capabilities-runtime.test.cjs",
@@ -11611,8 +11621,8 @@
     },
     {
       "path": "hub-backend/app/api/desktop_capabilities.py",
-      "bytes": 8009,
-      "sha256": "010eed8e051b563baee006730392e971da6e8747cb740fb291ca4245c05dff71"
+      "bytes": 8328,
+      "sha256": "61143850bf2695c6b44e3fc18e3eed7e7a869a93d71c531010e57fb45b09c1d2"
     },
     {
       "path": "hub-backend/app/api/download.py",
@@ -15111,8 +15121,8 @@
     },
     {
       "path": "hub-backend/runner_main.py",
-      "bytes": 118689,
-      "sha256": "d2929dc5d0c757f67ea849a909897ebafb43bda50c6923cb8fa22ddca3965ff5"
+      "bytes": 118743,
+      "sha256": "b9ebf57c5598f3ad7f3621f7f0c6c892b7b5c7875d32c6427b08ef56c74e4d40"
     },
     {
       "path": "hub-backend/scripts/check_packaged_runner.py",
@@ -16681,8 +16691,8 @@
     },
     {
       "path": "hub-backend/test_desktop_capabilities.py",
-      "bytes": 10981,
-      "sha256": "a59cac1b4bc46c6289bfd7f1b15b27e310341738e357dc2fb7f49507a29cd7a1"
+      "bytes": 11945,
+      "sha256": "fe08cfe24201b660095702f5dd089879ae9f399e93f9045a6b7878c56656cb84"
     },
     {
       "path": "hub-backend/test_device_connections.py",

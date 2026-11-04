@@ -36,7 +36,7 @@
     // Use aliases resolved by the authenticated history source even when that
     // partial row does not yet carry its cloud/projection flags.
     if (row?.id && row.id !== canonical?.id && !row.archived && !canonical?.archived &&
-        canonical?.cloud === true && canonical.historyAliasIds?.includes(row.id)) return true;
+        !canonical?.accountConversation && canonical?.historyAliasIds?.includes(row.id)) return true;
     // Directory presence may arrive before or after the replayable local
     // receipt. Collapse only exact Hub task aliases, never matching titles.
     if (row?.cloud === true && row.remoteProjection === true && !row.archived &&
@@ -138,7 +138,7 @@
     }
     return next.slice(0, MAX_CHAT_ITEMS);
   }
-  function _upsertChatItems(current, item) {
+  function _upsertChatItems(current, item, { deferUnconfirmedCloudTasks = false } = {}) {
     if (!item) return (current || []).slice(0, MAX_CHAT_ITEMS);
     const previous = current || [];
     if (previous.some(row => _syncedCopy(item, row))) return _withoutSyncedCopies(previous);
@@ -154,7 +154,18 @@
       // Replace an already-visible sync alias in place when its source entry
       // arrives; receiving metadata must not look like a newly created chat.
       const alias = previous.findIndex(row => _syncedCopy(row, item));
-      rows.splice(alias < 0 ? 0 : Math.min(alias, rows.length), 0, _withChatUiKey(item, previous[alias]));
+      // A task can span multiple conversations. Let account history resolve an
+      // unknown live session before inserting it alongside the visible cloud row.
+      if (deferUnconfirmedCloudTasks && alias < 0 && item.id && item.taskId &&
+          (item.cloud || item.collaboration) && !item.pending && !item.localId &&
+          !item.archived && !item.accountConversation &&
+          rows.some(row => row.cloud && !row.archived && row.taskId === item.taskId)) return null;
+      const entry = _withChatUiKey(item, previous[alias]);
+      // Restoring a task binding is not new activity. Only date a new, undated entry.
+      if (entry.collaboration && !entry.at && !entry.createdAt && !entry.updatedAt) {
+        entry.at = alias >= 0 ? _chatAt(previous[alias]) : Date.now();
+      }
+      rows.splice(alias < 0 ? 0 : Math.min(alias, rows.length), 0, entry);
       return rows.slice(0, MAX_CHAT_ITEMS);
     }
     rows[index] = rows[index] && rows[index].pending && item.id

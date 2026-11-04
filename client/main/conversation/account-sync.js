@@ -94,18 +94,39 @@ function historyRow(item, identity) {
   return {
     id: item.id, title: item.title || '账号会话', at: item.updatedAt || '',
     state: item.state || 'idle', adapterId: 'account-sync', accountConversation: true,
-    accountProjection: true, owner: runtime.connectionScope(identity),
+    accountProjection: true, archived: item.archived === true, owner: runtime.connectionScope(identity),
     accountCanSend: item.canSend === true, sourceClientId: item.sourceClientId,
     sourceSessionId: item.sourceSessionId, locationMode: 'account', location: 'account', cloud: false,
   };
 }
 
-function create({ app, identityOf, localIdentityOf, store, retryMs = 5000,
-  fetch = fetchWithDeviceAuthRetry, now = () => Date.now(), realtime = false }) {
+function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, retryMs = 5000,
+  fetch = fetchWithDeviceAuthRetry, now = () => Date.now(), realtime = false,
+  discovery = require('../native-discovery.cjs'), refreshOptions = {} }) {
   const bound = new Map();
   let closed = false;
   let timer = null;
   let flushing = null;
+  let closing = null;
+  const lifetime = new AbortController();
+  const recordQueue = [];
+  let recordingScheduled = false;
+  function deferRecord(action) {
+    return new Promise((resolve, reject) => {
+      recordQueue.push({ action, resolve, reject });
+      if (recordingScheduled) return;
+      recordingScheduled = true;
+      const next = () => {
+        const job = recordQueue.shift();
+        if (!job) { recordingScheduled = false; return; }
+        // Bound both serialization bursts and payloads waiting for the worker.
+        // Start the next snapshot only after this durability operation settles.
+        Promise.resolve().then(job.action).then(job.resolve, job.reject)
+          .finally(() => setImmediate(next));
+      };
+      setImmediate(next);
+    });
+  }
   const accountIds = new Set();
   const accountRows = new Map();
   const listeners = new Set();
@@ -114,16 +135,29 @@ function create({ app, identityOf, localIdentityOf, store, retryMs = 5000,
   let socketTimer = null;
   let socketAttempt = 0;
   let socketGeneration = 0;
+  let nativeDiscovery = null;
+  let socketReady = false, socketRefresh = null;
+  let socketHandshakeTimer = null;
   let reconcileTimer = null;
   let historyPromise = null;
   let historyAt = 0;
   let historyScope = '';
+  let historyCursor = 0, historyHasMore = false;
+  let historyEpoch = 0, loadedEpoch = -1, historyInitialized = false;
+  let historyFailures = 0, historyRetryAt = 0;
+  const directoryChanges = new Set();
+  const deletedIds = new Set();
   const historyTtl = 3000;
   const historyPageSize = 100;
-  const historyMaxPages = 20;
 
   function identityKey(identity) {
     try { return accountScopeKey(identity); } catch (_) { return ''; }
+  }
+
+  function directoryScope(identity) {
+    // Directory permissions such as canSend depend on the current device.
+    return identity ? JSON.stringify([String(identity.hub || '').replace(/\/+$/, ''),
+      identityKey(identity), identity.clientId]) : '';
   }
 
   function endpoint(identity, route) {
@@ -138,21 +172,34 @@ function create({ app, identityOf, localIdentityOf, store, retryMs = 5000,
     if (timer.unref) timer.unref();
   }
 
-  function emitChanged(id, row, identity) {
-    const presence = row ? historyRow(row, identity) : {
+  async function projectedRow(item, identity) {
+    const native = !item.archived && resolveNativeSource && await resolveNativeSource(item, identity).catch(() => null);
+    return native ? { ...native, owner: runtime.connectionScope(identity) } : historyRow(item, identity);
+  }
+
+  async function emitChanged(id, row, identity, projected) {
+    const presence = projected || (row ? await projectedRow(row, identity) : {
       id, deleted: true, accountConversation: true, owner: runtime.connectionScope(identity),
-    };
+    });
     for (const listener of listeners) {
-      try { listener(String(id || ''), row, presence); } catch (_) {}
+      try {
+        const current = await (localIdentityOf || identityOf)(app);
+        if (closed || directoryScope(current) !== directoryScope(identity)) return;
+        await listener(String(presence.id || id || ''), row, presence);
+      } catch (_) {}
     }
   }
 
   function stopRealtime() {
     ++socketGeneration;
+    socketReady = false;
+    socketRefresh?.stop(); socketRefresh = null;
+    nativeDiscovery?.close();
+    nativeDiscovery = null;
+    if (socketHandshakeTimer) clearTimeout(socketHandshakeTimer);
+    socketHandshakeTimer = null;
     if (socketTimer) clearTimeout(socketTimer);
     socketTimer = null;
-    if (reconcileTimer) clearTimeout(reconcileTimer);
-    reconcileTimer = null;
     socketScope = '';
     const current = socket;
     socket = null;
@@ -163,10 +210,20 @@ function create({ app, identityOf, localIdentityOf, store, retryMs = 5000,
     if (!realtime || closed || reconcileTimer) return;
     reconcileTimer = setTimeout(async () => {
       reconcileTimer = null;
-      try { await history(); } catch (_) {}
+      try { await refreshDirectory(); } catch (_) {}
       scheduleReconcile();
     }, 30000);
     reconcileTimer.unref?.();
+  }
+
+  async function refreshDirectory(hintedIds = [], current = () => !closed) {
+    // The running request may have taken its server snapshot before the hint.
+    // Wait for it, then start a new incremental read. history() publishes its
+    // single-flight promise before resolving identity, so concurrent UI reads
+    // cannot interleave a second, older load here.
+    while (historyPromise && current()) await historyPromise;
+    if (!current()) return { ok: true };
+    return history({ force: true, notify: true, hintedIds });
   }
 
   function scheduleRealtime(identity, generation) {
@@ -175,17 +232,22 @@ function create({ app, identityOf, localIdentityOf, store, retryMs = 5000,
     socketAttempt = Math.min(socketAttempt + 1, 8);
     socketTimer = setTimeout(() => {
       socketTimer = null;
-      connectRealtime(identity).catch(() => {});
-    }, seconds * 1000);
+      Promise.resolve((localIdentityOf || identityOf)(app)).then(current => {
+        if (closed || generation !== socketGeneration) return;
+        if (current?.session && current?.hub && current?.clientId) return connectRealtime(current);
+      }).catch(() => {});
+    }, seconds * 1000 * (0.8 + 0.2 * Math.random()));
     socketTimer.unref?.();
   }
 
   async function connectRealtime(identity) {
     if (!realtime || closed || typeof WebSocket !== 'function') return;
-    const scope = identityKey(identity) + ':' + String(identity?.clientId || '');
-    if (!scope || (socket && socketScope === scope)) return;
+    const scope = require('../native-discovery.cjs').scopeOf(identity);
+    if (!scope || ((socket || socketTimer) && socketScope === scope)) return;
+    if (socketScope && socketScope !== scope) socketAttempt = 0;
     stopRealtime();
     const generation = socketGeneration;
+    socketScope = scope;
     let url;
     try {
       url = new URL('/api/v1/ws', String(identity.hub));
@@ -196,9 +258,21 @@ function create({ app, identityOf, localIdentityOf, store, retryMs = 5000,
     try { current = new WebSocket(url); } catch (_) { scheduleRealtime(identity, generation); return; }
     socket = current;
     socketScope = scope;
+    const isCurrent = () => !closed && generation === socketGeneration && socket === current;
+    const refresh = require('./directory-refresh.cjs').create({ ...refreshOptions, now,
+      refresh: ids => refreshDirectory(ids, isCurrent) });
+    socketRefresh = refresh;
+    const discoveryConnection = discovery.attach(current, identity, () => (localIdentityOf || identityOf)(app));
+    nativeDiscovery = discoveryConnection;
+    // A transport that opens but never authenticates is not a healthy socket.
+    socketHandshakeTimer = setTimeout(() => {
+      if (socket === current && generation === socketGeneration) {
+        try { current.close(); } catch (_) {}
+      }
+    }, 12000);
+    socketHandshakeTimer.unref?.();
     current.onopen = () => {
       if (closed || generation !== socketGeneration || socket !== current) return;
-      socketAttempt = 0;
       scheduleReconcile();
       current.send(JSON.stringify({ t: 'auth', device: identity.clientId, session: identity.session }));
     };
@@ -206,90 +280,134 @@ function create({ app, identityOf, localIdentityOf, store, retryMs = 5000,
       if (closed || generation !== socketGeneration || socket !== current) return;
       let value;
       try { value = JSON.parse(String(event.data || '')); } catch (_) { return; }
+      if (value?.type === 'ready') {
+        socketAttempt = 0;
+        if (socketHandshakeTimer) clearTimeout(socketHandshakeTimer);
+        socketHandshakeTimer = null;
+        if (!socketReady) {
+          socketReady = true;
+          historyEpoch++;
+          refresh.wake(); // Close the initial handshake/reconnect delivery gap.
+        }
+      }
+      discoveryConnection.message(value);
       if (value?.type !== 'account-conversation') return;
-      history({ force: true }).then(result => {
-        // A completed refresh must still belong to the socket that requested it.
-        if (!result.ok || closed || generation !== socketGeneration || socket !== current) return;
-        emitChanged(value.conversationId, accountRows.get(String(value.conversationId || '')) || null, identity);
-      }).catch(() => {});
+      // Replayed hints already covered by the durable directory cursor need
+      // neither HTTP nor another repaint. Older Hubs may omit the revision.
+      if (historyInitialized && Number.isSafeInteger(value.revision) &&
+          value.revision > 0 && value.revision <= historyCursor) return;
+      historyEpoch++;
+      refresh.wake(safeText(value.conversationId, 180));
     };
     current.onerror = () => { try { current.close(); } catch (_) {} };
     current.onclose = () => {
+      discoveryConnection.close();
+      refresh.stop();
+      if (generation === socketGeneration) socketReady = false;
+      if (generation === socketGeneration && socketHandshakeTimer) clearTimeout(socketHandshakeTimer);
+      if (generation === socketGeneration) socketHandshakeTimer = null;
       if (socket === current) socket = null;
       if (!closed && generation === socketGeneration) scheduleRealtime(identity, generation);
     };
   }
 
   function bind(handle, identity, options = {}) {
-    if (!handle || !identity || closed) return null;
-    // Hub-owned transcripts already have an authoritative directory entry.
-    // Observing one on a PC must not publish a second local conversation.
-    if (isProjection(handle)) return null;
-    const sourceSessionId = safeText(handle.sessionId, 180);
+    if (!handle || !identity || closed || isProjection(handle)) return null;
+    const sourceSessionId = safeText(handle.sessionId, 180), ownerKey = identityKey(identity);
     if (!sourceSessionId) throw Error('本地会话标识无效');
-    const ownerKey = identityKey(identity);
     if (!ownerKey) throw Error('当前账号身份无效');
-    const key = ownerKey + ':' + sourceSessionId;
-    const previous = store.session(key) || {};
-    const state = { handle, identity: { ...identity }, key, ownerKey,
-      sourceEpoch: safeText(previous.sourceEpoch || sourceSessionId + ':desktop', 180),
-      messageTimes: Object.assign(Object.create(null), previous.messageTimes || {}),
-      sourceRevision: Number(previous.sourceRevision || 0),
-      // `digest` includes the revision for the request fence. The content
-      // digest must stay independent of that fence, otherwise every event
-      // appears to be a new snapshot even when the transcript is unchanged.
-      contentDigest: previous.contentDigest || '', digest: previous.digest || '',
-      recordTimer: null, dispose: null };
+    const hub = String(identity.hub || '').replace(/\/+$/, '');
+    const key = JSON.stringify([hub, ownerKey, identity.clientId, sourceSessionId]);
+    const existing = bound.get(key);
+    if (existing?.handle === handle) { existing.identity = { ...identity }; return existing; }
+    existing?.dispose?.();
+    if (existing?.recordTimer) clearTimeout(existing.recordTimer);
+    const state = { handle, identity: { ...identity }, key, ownerKey, sourceSessionId,
+      sourceEpoch: safeText(sourceSessionId + ':desktop', 180), sourceRevision: 0, contentDigest: '', digest: '',
+      messageTimes: Object.create(null), recordTimer: null, dispose: null, pending: null };
     bound.set(key, state);
-    connectRealtime(state.identity).catch(() => {});
-    scheduleReconcile();
     handle.accountSync = { state: 'pending', sourceSessionId, ownerKey };
-    const record = () => {
-      try { enqueue(state); } catch (error) { handle.accountSync = { ...handle.accountSync, state: 'error', reason: error.message }; }
-    };
-    if (typeof handle.on === 'function') {
+    const record = (final = false) => {
+      if (closed && !final || bound.get(key) !== state) return;
       try {
-        state.dispose = handle.on(() => {
-          // Runner output can emit once per token/block. Coalesce those
-          // notifications before serializing and persisting a full snapshot.
-          if (state.recordTimer) clearTimeout(state.recordTimer);
-          state.recordTimer = setTimeout(() => {
-            state.recordTimer = null;
-            record(); schedule();
-          }, 200);
-          state.recordTimer.unref?.();
-        });
-      } catch (_) {}
-    }
-    record();
-    // Initial binding may discover an already populated local session. Ensure
-    // that its first checkpoint is delivered even when no new UI event follows.
-    schedule();
+        if (state.pending) return state.pending;
+        const result = store.asynchronous ? deferRecord(() => {
+          if (bound.get(key) === state) return enqueue(state);
+        }) : enqueue(state);
+        if (result?.then) {
+          state.pending = result.catch(error => { state.error = error.message;
+            handle.accountSync = { ...handle.accountSync, state: 'error', reason: error.message };
+          }).finally(() => { state.pending = null; });
+          return state.pending;
+        }
+      } catch (error) {
+        state.error = error.message;
+        handle.accountSync = { ...handle.accountSync, state: 'error', reason: error.message };
+      }
+    };
+    state.record = record;
+    const initialize = previous => {
+      if (bound.get(key) !== state) return;
+      previous ||= {};
+      if (previous.hub && String(previous.hub).replace(/\/+$/, '') !== hub ||
+          previous.clientId && previous.clientId !== identity.clientId) previous = {};
+      Object.assign(state, { sourceEpoch: previous.sourceEpoch || state.sourceEpoch,
+        sourceRevision: Number(previous.sourceRevision || 0), contentDigest: previous.contentDigest || '',
+        digest: previous.digest || '', ackedRevision: Number(previous.ackedRevision || 0),
+        legacy: previous.legacy === true, messageTimes: Object.assign(Object.create(null), previous.messageTimes || {}) });
+      if (!closed && typeof handle.on === 'function') state.dispose = handle.on(() => {
+        if (state.recordTimer) clearTimeout(state.recordTimer);
+        state.recordTimer = setTimeout(() => { state.recordTimer = null; record(); schedule(); }, 200);
+        state.recordTimer.unref?.();
+      });
+      return record();
+    };
+    const previous = existing ? Promise.resolve(existing.ready).then(() => existing.pending)
+      .then(() => store.session(key)) : store.session(key);
+    if (previous?.then) {
+      state.ready = previous.then(async value => value || await store.session(ownerKey + ':' + sourceSessionId))
+        .then(initialize).catch(error => { state.error = error.message;
+          handle.accountSync = { ...handle.accountSync, state: 'error', reason: error.message }; });
+    } else state.ready = Promise.resolve(initialize(previous || store.session(ownerKey + ':' + sourceSessionId)));
+    connectRealtime(state.identity).catch(() => {}); scheduleReconcile(); schedule();
     return state;
   }
 
   function enqueue(state) {
-    // A locally bound session can be handed off after the initial bind.
     if (isProjection(state.handle)) return;
-    const view = snapshot(state.handle, state.messageTimes, now);
+    const times = { ...state.messageTimes };
+    const view = snapshot(state.handle, times, now);
     const content = { sourceClientId: state.identity.clientId, sourceSessionId: view.sessionId,
       sourceEpoch: state.sourceEpoch, title: view.title, state: view.state,
       archived: false, deleted: false, snapshotComplete: true, messages: view.messages,
       taskProjectionId: view.taskProjectionId };
     const contentDigest = digest(content);
-    if (contentDigest === state.contentDigest) return;
-    const body = { ...content, sourceRevision: state.sourceRevision + 1 };
+    if (contentDigest === state.contentDigest && !state.legacy) return;
+    // An orphaned legacy checkpoint has no ACK proof. Replay its original
+    // revision; Hub's existing digest/epoch fences reject conflicting history.
+    const revision = state.legacy && contentDigest === state.contentDigest
+      ? state.sourceRevision : state.sourceRevision + 1;
+    const body = { ...content, sourceRevision: Math.max(1, revision) };
+    if (Buffer.byteLength(JSON.stringify(body)) > 2 * 1024 * 1024)
+      throw Error('source conversation exceeds the sync message limit');
     const requestDigest = digest(body);
-    state.sourceRevision = body.sourceRevision;
-    state.contentDigest = contentDigest;
-    state.digest = requestDigest;
-    store.setSession(state.key, { sourceEpoch: state.sourceEpoch, sourceRevision: state.sourceRevision,
-      contentDigest, digest: requestDigest,
-      messageTimes: state.messageTimes,
-      hub: state.identity.hub, clientId: state.identity.clientId, ownerKey: state.ownerKey });
-    store.enqueue({ id: state.key + ':' + body.sourceRevision + ':' + requestDigest.slice(0, 12), ownerKey: state.ownerKey,
-      hub: state.identity.hub, clientId: state.identity.clientId, body, createdAt: now() });
-    if (state.handle.accountSync) state.handle.accountSync = { ...state.handle.accountSync, state: 'queued', sourceRevision: body.sourceRevision };
+    const checkpoint = { sourceEpoch: state.sourceEpoch, sourceRevision: body.sourceRevision,
+      contentDigest, digest: requestDigest, messageTimes: times, sourceSessionId: state.sourceSessionId,
+      ackedRevision: state.ackedRevision || 0, hub: state.identity.hub,
+      clientId: state.identity.clientId, ownerKey: state.ownerKey };
+    const job = { id: state.key + ':' + body.sourceRevision + ':' + requestDigest.slice(0, 12),
+      ownerKey: state.ownerKey, hub: state.identity.hub, clientId: state.identity.clientId, body, createdAt: now() };
+    const commit = () => {
+      const ackedRevision = Math.max(state.ackedRevision || 0, checkpoint.ackedRevision);
+      Object.assign(state, checkpoint, { ackedRevision, legacy: false, error: '' });
+      state.handle.accountSync = { ...state.handle.accountSync, state: 'queued', sourceRevision: body.sourceRevision };
+    };
+    // The fallback supports external in-memory adapters; production always
+    // persists the checkpoint and outbox in one SQLite transaction.
+    const result = store.checkpointAndEnqueue ? store.checkpointAndEnqueue(state.key, checkpoint, job)
+      : (store.enqueue(job), store.setSession(state.key, checkpoint));
+    if (result?.then) return result.then(commit);
+    commit();
   }
 
   async function send(job, identity) {
@@ -297,7 +415,7 @@ function create({ app, identityOf, localIdentityOf, store, retryMs = 5000,
     // on every retry, preserving the source revision, epoch and message IDs.
     const body = { ...job.body, state: syncState(job.body.state) };
     const response = await fetch(identity, endpoint(identity, '/account-conversations/sync'), {
-      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30000),
+      method: 'POST', redirect: 'error', signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(30000)]),
       headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.ok !== true || data.sourceRevision !== job.body.sourceRevision || !data.conversationId) {
@@ -311,123 +429,205 @@ function create({ app, identityOf, localIdentityOf, store, retryMs = 5000,
     if (closed) return { ok: false, closed: true };
     if (flushing) return flushing;
     flushing = (async () => {
+      let inspected = 0;
       for (const state of bound.values()) {
-        try { enqueue(state); } catch (_) {}
+        await state.ready;
+        if (state.pending) await state.pending;
+        await state.record();
+        if (++inspected % 8 === 0) await new Promise(resolve => setImmediate(resolve));
       }
-      const jobs = store.jobs();
+      let activeIdentity;
+      try { activeIdentity = await identityOf?.(app); } catch (_) {}
+      const jobs = store.batch && typeof identityOf === 'function'
+        ? activeIdentity ? await store.batch({ ...activeIdentity, ownerKey: identityKey(activeIdentity) }) : []
+        : await store.jobs(100);
       for (const job of jobs) {
-        const state = [...bound.values()].find(item => item.ownerKey === job.ownerKey && item.identity.clientId === job.clientId);
+        if (closed) break;
+        const state = [...bound.values()].find(item => item.ownerKey === job.ownerKey &&
+          item.identity.clientId === job.clientId && item.sourceSessionId === job.body.sourceSessionId &&
+          String(item.identity.hub).replace(/\/+$/, '') === String(job.hub).replace(/\/+$/, ''));
         let identity = state && state.identity;
-        if (!identity && typeof identityOf === 'function') {
+        if (typeof identityOf === 'function') {
           try { identity = await identityOf(app); } catch (_) { identity = null; }
-          if (!identity || identityKey(identity) !== job.ownerKey || identity.clientId !== job.clientId) continue;
+          if (!identity || identityKey(identity) !== job.ownerKey || identity.clientId !== job.clientId ||
+              String(identity.hub).replace(/\/+$/, '') !== String(job.hub).replace(/\/+$/, '')) continue;
         }
         if (!identity) continue;
+        if (job.blocked) continue;
         try {
-          await send(job, identity);
-          store.ack(job.id);
-          if (state && state.handle.accountSync) state.handle.accountSync = { ...state.handle.accountSync, state: 'synced', sourceRevision: job.body.sourceRevision };
-        } catch (_) {
-          store.fail(job.id);
-          if (state && state.handle.accountSync) state.handle.accountSync = { ...state.handle.accountSync, state: 'queued' };
+          const receipt = await send(job, identity);
+          await store.ack(job.id, receipt);
+          if (state && state.sourceEpoch === job.body.sourceEpoch) {
+            state.ackedRevision = Math.max(state.ackedRevision || 0, job.body.sourceRevision);
+            if (!state.pending && state.sourceRevision === job.body.sourceRevision)
+              state.handle.accountSync = { ...state.handle.accountSync, state: 'synced', sourceRevision: job.body.sourceRevision };
+          }
+        } catch (error) {
+          const blocked = [409, 413, 422].includes(error.status);
+          await store.fail(job.id, blocked);
+          if (state) state.handle.accountSync = { ...state.handle.accountSync,
+            state: blocked ? 'error' : 'queued', reason: error.message };
+          if (blocked) continue;
           schedule();
           break;
         }
       }
-      const remaining = store.jobs();
+      const remaining = await (store.pending ? store.pending() : store.jobs());
       // Login can become available after startup. Keep pending jobs durable
       // and retry without requiring another native conversation event.
-      if (remaining.length) schedule();
+      if (remaining.some(job => !job.blocked) || [...bound.values()].some(state => state.error)) schedule();
       for (const state of bound.values()) {
         const waiting = remaining.some(job => job.ownerKey === state.ownerKey &&
-          job.clientId === state.identity.clientId);
-        if (!waiting && state.sourceRevision > 0 && state.handle.accountSync) {
+          job.clientId === state.identity.clientId && job.body.sourceSessionId === state.sourceSessionId &&
+          String(job.hub).replace(/\/+$/, '') === String(state.identity.hub).replace(/\/+$/, ''));
+        if (!waiting && !state.pending && !state.error && state.ackedRevision === state.sourceRevision && state.sourceRevision > 0) {
           state.handle.accountSync = { ...state.handle.accountSync, state: 'synced',
             sourceRevision: state.sourceRevision };
         }
       }
-      return { ok: remaining.length === 0, pending: remaining.length };
-    })().finally(() => { flushing = null; });
+      return { ok: remaining.length === 0 && ![...bound.values()].some(state => state.error), pending: remaining.length };
+    })().catch(error => { schedule(); throw error; }).finally(() => { flushing = null; });
     return flushing;
   }
 
-  async function history({ force = false } = {}) {
+  async function history(options = {}) {
     if (closed) return { ok: false, chats: [] };
     if (historyPromise) return historyPromise;
-    const currentIdentity = () => typeof localIdentityOf === 'function'
-      ? localIdentityOf(app) : typeof identityOf === 'function' ? identityOf(app) : null;
-    const identity = await currentIdentity();
-    if (!identity) return { ok: false, chats: [] };
-    const scope = value => value ? String(value.hub || '').replace(/\/+$/, '') + '\0' + identityKey(value) : '';
-    const currentScope = scope(identity);
-    if (currentScope && currentScope !== historyScope) {
-      accountRows.clear();
-      accountIds.clear();
-      historyAt = 0;
-    }
-    if (!force && currentScope === historyScope && now() - historyAt < historyTtl) {
-      return { ok: true, chats: [...accountRows.values()].filter(item => item && !item.deleted)
-        .map(item => historyRow(item, identity)) };
-    }
-    const captured = currentScope;
-    const load = (async () => {
-      connectRealtime(identity).catch(() => {});
-      const items = [];
-      let after = 0;
-      for (let page = 0; page < historyMaxPages; page += 1) {
-        const response = await fetch(identity,
-          endpoint(identity, '/account-conversations?after=' + after + '&limit=' + historyPageSize), {
-            method: 'GET', redirect: 'error', signal: AbortSignal.timeout(15000) });
-        const data = await response.json().catch(() => ({}));
-        if (closed || captured !== scope(await currentIdentity())) {
-          return { ok: false, chats: [], reason: '账号或服务已切换' };
-        }
-        if (!response.ok || !Array.isArray(data.items)) return { ok: false, chats: [] };
-        items.push(...data.items);
-        if (data.hasMore !== true) break;
-        const next = Number(data.cursor);
-        if (!Number.isSafeInteger(next) || next <= after) {
-          return { ok: false, chats: [], reason: '账号会话分页无效' };
-        }
-        after = next;
-        await new Promise(resolve => setTimeout(resolve, 0));
-      }
-      const latest = new Map(items.filter(item => item?.id).map(item => [String(item.id), item]));
-      for (const [id, item] of latest) {
-        if (item.deleted) {
-          accountRows.delete(id);
-          accountIds.delete(id);
-        } else {
-          accountRows.set(id, item);
-          accountIds.add(id);
-        }
-      }
-      const chats = [...latest.values()].filter(item => !item.deleted).map(item => historyRow(item, identity));
-      historyAt = now();
-      historyScope = currentScope;
-      scheduleReconcile();
-      return { ok: true, chats };
-    })();
+    const load = readHistory(options);
     historyPromise = load;
     try { return await load; }
     finally { if (historyPromise === load) historyPromise = null; }
   }
 
+  async function readHistory({ force = false, notify = false, hintedIds = [] } = {}) {
+    const currentIdentity = () => typeof localIdentityOf === 'function'
+      ? localIdentityOf(app) : typeof identityOf === 'function' ? identityOf(app) : null;
+    const identity = await currentIdentity();
+    if (closed || !identity) return { ok: false, chats: [] };
+    const scope = directoryScope;
+    const currentScope = scope(identity);
+    if (currentScope && currentScope !== historyScope) {
+      accountRows.clear();
+      accountIds.clear();
+      deletedIds.clear();
+      historyCursor = 0;
+      historyHasMore = false;
+      historyAt = 0;
+      historyInitialized = false;
+      directoryChanges.clear();
+      loadedEpoch = -1;
+      historyFailures = 0; historyRetryAt = 0;
+    }
+    const captured = currentScope;
+    const capturedEpoch = historyEpoch;
+    const publishChanges = notify || historyInitialized;
+    const cachedResult = async () => {
+      const chats = await Promise.all([...accountRows.values()].filter(item => !item.deleted && !item.archived)
+        .map(item => projectedRow(item, identity)));
+      return closed || captured !== scope(await currentIdentity())
+        ? { ok: false, chats: [] }
+        : { ok: false, chats, stale: true, partial: historyHasMore, cursor: historyCursor };
+    };
+    async function failedResult(reason) {
+      if (closed || captured !== scope(await currentIdentity())) return { ok: false, chats: [] };
+      historyFailures++;
+      historyRetryAt = now() + Math.min(60000, 5000 * 2 ** Math.min(historyFailures - 1, 4));
+      return { ...await cachedResult(), ...(reason ? { reason } : {}) };
+    }
+    // Every network entry point shares the failure deadline: UI reads and
+    // periodic reconciliation cannot bypass the socket queue's retry backoff.
+    if (historyRetryAt > now()) return cachedResult();
+    const cacheTtl = socketReady ? 30000 : historyTtl;
+    if (!force && !historyHasMore && loadedEpoch === historyEpoch && currentScope === historyScope && now() - historyAt < cacheTtl) {
+      const chats = await Promise.all([...accountRows.values()].filter(item => item && !item.deleted && !item.archived)
+        .map(item => projectedRow(item, identity)));
+      return closed || currentScope !== scope(await currentIdentity())
+        ? { ok: false, chats: [] } : { ok: true, chats };
+    }
+    return (async () => {
+      connectRealtime(identity).catch(() => {});
+      scheduleReconcile(); // Also repairs changes while no socket can connect.
+      if (captured !== historyScope && store.directory) {
+        const saved = await store.directory(captured);
+        if (closed || captured !== scope(await currentIdentity())) return { ok: false, chats: [] };
+        for (const item of saved.items) { accountRows.set(String(item.id), item); accountIds.add(String(item.id)); }
+        historyCursor = saved.cursor;
+      }
+      historyScope = captured;
+      let after = historyCursor;
+      // Each page commits independently and yields to the event loop. Never
+      // report a fixed prefix as a complete directory to the sidebar.
+      while (!closed) {
+        const response = await fetch(identity,
+          endpoint(identity, '/account-conversations?after=' + after + '&limit=' + historyPageSize), {
+            method: 'GET', redirect: 'error', signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(15000)]) });
+        const data = await response.json().catch(() => ({}));
+        if (closed || captured !== scope(await currentIdentity())) {
+          return { ok: false, chats: [], reason: '账号或服务已切换' };
+        }
+        if (!response.ok || !Array.isArray(data.items)) return failedResult();
+        const next = data.cursor == null ? after : Number(data.cursor);
+        if (!Number.isSafeInteger(next) || next < after || data.hasMore === true && next <= after) {
+          return failedResult('账号会话分页无效');
+        }
+        if (store.saveDirectory) await store.saveDirectory(captured, data.items, next);
+        if (closed || captured !== scope(await currentIdentity())) return { ok: false, chats: [] };
+        for (const item of data.items) {
+          if (!item?.id) continue;
+          const id = String(item.id);
+          if (publishChanges && (item.deleted ? !deletedIds.has(id) :
+              JSON.stringify(accountRows.get(id)) !== JSON.stringify(item))) directoryChanges.add(id);
+          if (item.deleted) { accountRows.delete(id); accountIds.delete(id); deletedIds.add(id); }
+          else { accountRows.set(id, item); accountIds.add(id); deletedIds.delete(id); }
+        }
+        after = next;
+        historyCursor = next;
+        historyHasMore = data.hasMore === true;
+        if (!historyHasMore) break;
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+      const projections = new Map();
+      const chats = await Promise.all([...accountRows.values()].filter(item => !item.deleted && !item.archived)
+        .map(async item => {
+          const row = await projectedRow(item, identity);
+          projections.set(String(item.id), row);
+          return row;
+        }));
+      if (closed || captured !== scope(await currentIdentity())) return { ok: false, chats: [] };
+      historyAt = now();
+      historyScope = currentScope;
+      historyFailures = 0; historyRetryAt = 0;
+      loadedEpoch = capturedEpoch;
+      historyInitialized = true;
+      for (const id of hintedIds) if (accountRows.has(id) || deletedIds.has(id)) directoryChanges.add(id);
+      for (const id of [...directoryChanges]) {
+        if (closed || captured !== scope(await currentIdentity())) return { ok: false, chats: [] };
+        directoryChanges.delete(id);
+        await emitChanged(id, accountRows.get(id) || null, identity, projections.get(id));
+      }
+      scheduleReconcile();
+      return { ok: true, chats, partial: historyHasMore, cursor: historyCursor };
+    })().catch(() => failedResult());
+  }
+
   async function row(id) {
     const wanted = safeText(id, 180);
     if (!wanted) return null;
-    const cached = accountRows.get(wanted);
-    if (cached) return cached;
     const identity = typeof localIdentityOf === 'function'
       ? await localIdentityOf(app)
       : typeof identityOf === 'function' ? await identityOf(app) : null;
     if (!identity) return null;
+    const cached = accountRows.get(wanted);
+    const currentScope = directoryScope(identity);
+    if (cached && currentScope === historyScope) return cached;
     const response = await fetch(identity,
       endpoint(identity, '/account-conversations/' + encodeURIComponent(wanted) + '/source'), {
         method: 'GET', redirect: 'error', signal: AbortSignal.timeout(15000) });
     const data = await response.json().catch(() => ({}));
     if (response.status === 404) return null;
     if (!response.ok || !data.conversation) return null;
+    const current = await (localIdentityOf || identityOf)(app);
+    if (closed || currentScope !== directoryScope(current)) return null;
     accountRows.set(wanted, data.conversation);
     return data.conversation;
   }
@@ -504,15 +704,32 @@ function create({ app, identityOf, localIdentityOf, store, retryMs = 5000,
     };
   }
 
-  async function close() {
+  function close() {
+    if (closing) return closing;
     closed = true;
+    lifetime.abort();
     stopRealtime();
+    if (reconcileTimer) clearTimeout(reconcileTimer);
+    reconcileTimer = null;
     if (timer) clearTimeout(timer);
-    for (const state of bound.values()) { try { state.dispose && state.dispose(); } catch (_) {} }
-    bound.clear();
+    closing = (async () => {
+      let inspected = 0;
+      for (const state of bound.values()) {
+        if (state.recordTimer) clearTimeout(state.recordTimer);
+        try { state.dispose && state.dispose(); } catch (_) {}
+        await state.ready;
+        if (state.pending) await state.pending;
+        await state.record(true);
+        if (++inspected % 8 === 0) await new Promise(resolve => setImmediate(resolve));
+      }
+      if (flushing) await flushing.catch(() => {});
+      bound.clear();
+      await store.close?.();
+    })();
+    return closing;
   }
 
-  if (store.jobs().length) schedule();
+  Promise.resolve(store.jobs(1)).then(jobs => { if (jobs.length) schedule(); }).catch(() => {});
   return { bind, flush, close, history, row, openProjection, onChange(listener) {
       if (typeof listener !== 'function') return () => {};
       listeners.add(listener); return () => listeners.delete(listener);

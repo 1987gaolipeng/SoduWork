@@ -945,6 +945,7 @@ class Runner:
         }
         if getattr(self, "desktop_owned", False):
             payload["caps"].append("desktopCapabilities1")
+            payload["caps"].append("desktopLibrary1")
         if getattr(getattr(self, "_admission", None), "_journal", None) is not None:
             payload["caps"].append("admit1")
         message, prefetched = await _negotiate_hello(

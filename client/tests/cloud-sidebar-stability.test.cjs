@@ -6,8 +6,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function fixture() {
-  const window = {};
+function fixture(loadHistory) {
+  const window = { soduWorkAPI: { conversationSession: { history: loadHistory } } };
   for (const name of ['workspace-chat-history', 'workspace-chat-list']) {
     let source = fs.readFileSync(path.join(__dirname, '../components/workspace', name + '.js'), 'utf8');
     if (name === 'workspace-chat-list') {
@@ -23,6 +23,8 @@ function fixture() {
   const ctx = { ...history, root: null, chatItems: [], chatNames: new Map(), activeChatId: '', mount() {} };
   const api = window.WorkspaceChatList.create(ctx);
   ctx.upsertChat = api.upsertChat;
+  ctx.setChats = api.setChats;
+  ctx.renderChats = api.renderChats;
   return { history, ctx, api, ids: () => Array.from(ctx.chatItems, row => row.id) };
 }
 
@@ -30,6 +32,64 @@ const cloud = { id: 'mobile:n1', taskId: 'task-n1', title: 'N1', cloud: true, ad
 const copy = { id: 'acct-n1', sourceSessionId: 'mobile:n1', title: 'N1', accountConversation: true,
   at: '2026-10-31T06:57:33Z' };
 const other = { id: 'other', title: 'Other', at: 200 };
+
+test('archived and deleted account presence remove rows without resurrecting them', () => {
+  const f = fixture();
+  for (const flag of ['archived', 'deleted']) {
+    f.api.setChats([other, copy]);
+    const event = { sessionId: copy.id, presence: { ...copy, [flag]: true } };
+    f.api.updateChatState(event);
+    assert.deepEqual(f.ids(), [other.id]);
+    f.api.updateChatState(event);
+    assert.deepEqual(f.ids(), [other.id]);
+  }
+  f.api.updateChatState({ sessionId: copy.id, presence: { ...copy, archived: false } });
+  assert.ok(f.ids().includes(copy.id));
+});
+
+test('opening a cloud task before its alias is known does not insert a temporary first row', async () => {
+  const partial = { id: 'runtime-segment', taskId: cloud.taskId, title: cloud.title, collaboration: true, at: 300 };
+  let reads = 0;
+  const f = fixture(() => {
+    reads++;
+    return { ok: true, chats: [{ ...cloud, historyAliasIds: [partial.id] }, other] };
+  });
+  f.api.setChats([other, cloud]);
+  f.api.setActiveChat(cloud.id);
+  const key = f.ctx.chatItems[1]._uiKey;
+  f.api.upsertChat(partial);
+  f.api.updateChatState({ sessionId: partial.id, presence: { ...partial, cloud: true } });
+  assert.deepEqual(f.ids(), [other.id, cloud.id]);
+  await f.ctx.historyLoad;
+  assert.equal(reads, 1);
+  assert.deepEqual(f.ids(), [other.id, cloud.id]);
+  assert.equal(f.ctx.chatItems[1]._uiKey, key);
+  assert.equal(f.ctx.activeChatId, cloud.id);
+});
+
+test('history can confirm a distinct new conversation sharing a cloud task', async () => {
+  const independent = { ...cloud, id: 'independent', at: 300 };
+  const f = fixture(() => ({ ok: true, chats: [independent, other, cloud] }));
+  f.api.setChats([other, cloud]);
+  f.api.updateChatState({ sessionId: independent.id, presence: independent });
+  assert.deepEqual(f.ids(), [other.id, cloud.id]);
+  await f.ctx.historyLoad;
+  assert.deepEqual(f.ids(), [independent.id, other.id, cloud.id]);
+});
+
+test('authenticated native aliases replace stale account rows during live rework without waiting for a list refresh', () => {
+  const f = fixture();
+  const alias = { ...copy, id: 'account-rework', sourceSessionId: 'runtime-segment', accountCanSend: true, at: 150 };
+  const native = { id: 'public-conversation', title: 'N1', adapterId: 'pi', historyAliasIds: [alias.id], at: 100 };
+  f.api.setChats([other, alias]);
+  const key = f.ctx.chatItems[1]._uiKey;
+  for (let i = 0; i < 4; i++) {
+    f.api.updateChatState({ kind: 'account-conversation-sync', sessionId: native.id, presence: native });
+    f.api.setChats([alias, native, other]);
+    assert.deepEqual(f.ids(), [other.id, native.id]);
+    assert.equal(f.ctx.chatItems[1]._uiKey, key);
+  }
+});
 
 test('native PC presence and its owned account projection remain one stable entry', () => {
   const f = fixture();

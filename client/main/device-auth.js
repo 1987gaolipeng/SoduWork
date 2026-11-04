@@ -330,6 +330,15 @@ function localOwner(app) {
   return row && row.authState === 'active' && !row.activationRequired ? row.localOwner || '' : '';
 }
 
+// Registered by this desktop's trusted bootstrap, never supplied by a mobile request.
+function libraryWorkRoot(app) {
+  const id = identity(app);
+  if (!id || !localOwner(app)) throw new Error('请先登录这台电脑');
+  const profile = _readDoc(app).profiles[_slot(id.hub)];
+  return String(profile?.workRoot || '').trim() || require('node:path').join(
+    require('node:os').homedir(), require('./distribution.cjs').current().workspaceName);
+}
+
 function _sessionResult(id, row) {
   return {
     ok: true, stored: true, hub: id.hub, clientId: id.clientId,
@@ -662,5 +671,5 @@ function install({ app, ipcMain, safeStorage }) {
   });
 }
 
-module.exports = { install, identity, session, localOwner, profiles, enroll, login, logout, clearSession,
+module.exports = { install, identity, session, localOwner, libraryWorkRoot, profiles, enroll, login, logout, clearSession,
   ensureSession, authenticatedIdentity, selectHub, accountAction, refreshProfile };

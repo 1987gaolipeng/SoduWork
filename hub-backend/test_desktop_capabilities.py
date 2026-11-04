@@ -34,6 +34,22 @@ class AccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["ownerUserId"], "owner")
         self.assertEqual(payload["targetClientId"], "pc")
 
+    async def test_library_requires_updated_selected_desktop_and_keeps_signed_owner(self):
+        body = {**self.body, "operation": "library.call", "args": {"action": "list", "body": {}}}
+        with self.assertRaises(HTTPException):
+            await api.request("pc", body, self.client, self.session)
+        self.runner.call.assert_not_awaited()
+        self.runner.caps.append("desktopLibrary1")
+        self.runner.call.return_value = {"ok": True, "data": {"ok": True, "items": []}}
+        self.assertEqual((await api.request("pc", body, self.client, self.session))["items"], [])
+        packet = self.runner.call.call_args.args[1]
+        self.assertEqual(packet["ownerUserId"], "owner")
+        self.assertEqual(packet["targetClientId"], "pc")
+        self.assertIn("authorization", packet)
+        self.target.user_ref = "someone-else"
+        with self.assertRaises(HTTPException):
+            await api.request("pc", body, self.client, self.session)
+
     async def test_embedded_runner_null_owner_matches_handshake_empty_string(self):
         # Desktop ownership is bound to the authenticated Client. Unlike an
         # independently enrolled cloud Runner, RunnerNode.owner_user_id is NULL;

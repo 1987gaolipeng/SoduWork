@@ -81,6 +81,31 @@ if (typeof electron === 'string') {
     assert.equal(await js(`openedChats[0]?.options.chatId`), 'native');
     assert.deepEqual((await labels()).find(row=>row.id==='native').icons, ['codex']);
     report.cases.push('Keyboard navigation still opens the same conversation while preserving its harness identity');
+    const stable = await js(`(async () => {
+      list.setChats([...ctx.chatItems, {id:'cloud-history', cloud:true, title:'Cloud history', usedHarnesses:['pi'], at:500}]);
+      const scroller = document.querySelector('#wsSideScroll');
+      scroller.style.cssText = 'height:100px;overflow-y:auto;flex:none';
+      scroller.scrollTop = 24;
+      const offset = scroller.scrollTop;
+      const snapshot = [...ctx.chats.children].map(row => ({
+        row, y:row.getBoundingClientRect().top, title:row.querySelector('.ws-chat-title').firstChild,
+        icon:row.querySelector('.ws-chat-runtime').firstElementChild,
+      }));
+      const unchanged = () => offset > 0 && scroller.scrollTop === offset && snapshot.every(({row,y,title,icon}, i) =>
+        row === ctx.chats.children[i] && row.getBoundingClientRect().top === y &&
+        row.querySelector('.ws-chat-title').firstChild === title && row.querySelector('.ws-chat-runtime').firstElementChild === icon);
+      for (const id of ['cloud-history','native','cloud-history']) {
+        document.querySelector('[data-chat-id="' + id + '"]').click();
+        if (!unchanged()) return 'selection';
+        await new Promise(requestAnimationFrame);
+        list.setChats(ctx.chatItems.slice());
+        if (!unchanged()) return 'history refresh';
+        if (ctx.chats.querySelector('[aria-current="page"]')?.dataset.chatId !== id) return 'selection lost';
+      }
+      return 'stable';
+    })()`);
+    assert.equal(stable, 'stable', 'Switching chats and refreshing history must preserve the sidebar rows, labels, icons and scroll position');
+    report.cases.push('Cloud chat selection and unchanged history refresh preserve row positions and rendered contents');
     report.ok = true;
   }).catch(error => { report.error = error.stack || String(error); }).finally(() => {
     fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report, null, 2));

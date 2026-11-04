@@ -17,6 +17,7 @@ const rows = value => Array.isArray(value) ? value : [];
 const hash = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
 function create({ app, identityOf, conversation, pluginStore = plugins, fetchCatalog = request,
+  library = require('./mobile-library.cjs').create({ app }),
   inspectSkills = identity => capabilities.inspect({ app, identity,
     skillDirs: skillRoots.discoverAsync(app), forcePolicy: true }),
   verifyRequest = (identity, body) => request(identity, '/desktop-capabilities/verify', body),
@@ -24,7 +25,7 @@ function create({ app, identityOf, conversation, pluginStore = plugins, fetchCat
   let queue = Promise.resolve();
   const scope = identity => [identity?.hub, identity?.clientId, accountId(identity)];
   async function run(body) {
-    if (!body || !['catalog', 'skill.set', 'plugin.get', 'plugin.preflight', 'plugin.install', 'plugin.use'].includes(body.operation)
+    if (!body || !['catalog', 'library.call', 'skill.set', 'plugin.get', 'plugin.preflight', 'plugin.install', 'plugin.use'].includes(body.operation)
         || !/^[A-Za-z0-9_-]{8,80}$/.test(body.requestId || '') || !body.args || Array.isArray(body.args)
         || typeof body.args !== 'object' || Buffer.byteLength(JSON.stringify(body)) > 512000) throw Error('操作内容不正确');
     const identity = await identityOf(app);
@@ -43,6 +44,11 @@ function create({ app, identityOf, conversation, pluginStore = plugins, fetchCat
     }
     await guard(true);
     const args = body.args;
+    if (body.operation === 'library.call') {
+      const result = await library(args, body.requestId, () => guard(true));
+      await guard(true);
+      return result;
+    }
     async function skillCatalog() {
       const [data, runtime] = await Promise.all([fetchCatalog(identity, '/capabilities'), inspectSkills(identity)]);
       await guard();

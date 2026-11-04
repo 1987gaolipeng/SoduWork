@@ -674,7 +674,7 @@
       WorkspaceShell.upsertChat({ id: ctx._sessionId, title: conversationTitle,
         adapterId: ctx._sessionOptions.adapterId || 'pi', taskId: ctx._activeCollabTaskId || id,
         taskIds: Array.from(ctx._collabTasks.keys()), collaboration: true,
-        state: ctx._pending ? 'starting' : status, status, live: Boolean(ctx._ref), at: Date.now() });
+        state: ctx._pending ? 'starting' : status, status, live: Boolean(ctx._ref) });
     }
     ctx._render(); _loadCollabTask(id); _scheduleCollabPoll(); if(opts.persist!==false&&ctx._ref)void _persistTaskBinding(id,label); return true;
   }
