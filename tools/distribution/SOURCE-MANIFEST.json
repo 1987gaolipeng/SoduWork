@@ -2286,13 +2286,13 @@
     },
     {
       "path": "client/components/workspace/global-search.css",
-      "bytes": 6548,
-      "sha256": "dbb06bedd701997b65588df9c3333af192e9db7b390552eaa31b43a005dfb7a2"
+      "bytes": 6344,
+      "sha256": "efb893927ade464aaf8228cf69f3c69eaf2083a9e0a344028af57bca6ee9d98e"
     },
     {
       "path": "client/components/workspace/global-search.js",
-      "bytes": 16329,
-      "sha256": "e174f076acdbf1ea1a1e4be9a34d56358a910f82d5f332065a720e910269ab02"
+      "bytes": 16045,
+      "sha256": "592222686337f426bd847fe3e3ff1aa0879684596b9054bd1a66ba4991e51025"
     },
     {
       "path": "client/components/workspace/native-preview-overlays.js",
@@ -3791,8 +3791,8 @@
     },
     {
       "path": "client/e2e/global-search.cjs",
-      "bytes": 17114,
-      "sha256": "621825d4e5f1424a2d4e81af51f2b917663fafa3a2fa53108a0df5e8c1865c89"
+      "bytes": 18387,
+      "sha256": "265880031fb0b982fcebad3dfc53d6fd4295494e7e3eeb15a827eb5eb5625c4a"
     },
     {
       "path": "client/e2e/goal-blocking.cjs",

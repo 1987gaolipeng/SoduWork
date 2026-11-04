@@ -136,9 +136,8 @@
     if (dialog) return;
     dialog = document.createElement('dialog'); dialog.className = 'global-search-dialog'; dialog.id = 'globalSearchDialog';
     dialog.setAttribute('aria-label', t('全局搜索')); dialog.setAttribute('data-user-content', '');
-    dialog.innerHTML = '<div class="global-search-head"><div class="global-search-tabs" role="tablist" aria-label="' + esc(t('切换分类')) + '"></div><button type="button" class="global-search-close" data-search-close aria-label="' + esc(t('关闭搜索')) + '">' + icon('close') + '</button></div>' +
-      '<div class="global-search-input">' + icon('search') + '<input type="search" role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls="globalSearchResults" autocomplete="off" maxlength="200" spellcheck="false"><button type="button" data-search-clear hidden aria-label="' + esc(t('清除搜索')) + '">' + icon('close') + '</button></div>' +
-      '<div class="global-search-results" id="globalSearchResults" role="listbox" aria-label="' + esc(t('全局搜索')) + '"></div><p class="global-search-status" role="status" aria-live="polite"></p><footer></footer>';
+    dialog.innerHTML = '<div class="global-search-input">' + icon('search') + '<input type="search" role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls="globalSearchResults" autocomplete="off" maxlength="200" spellcheck="false"><button type="button" data-search-clear hidden aria-label="' + esc(t('清除搜索')) + '">' + icon('close') + '</button><button type="button" class="global-search-close" data-search-close aria-label="' + esc(t('关闭搜索')) + '">' + icon('close') + '</button></div>' +
+      '<div class="global-search-results" id="globalSearchResults" role="listbox" aria-label="' + esc(t('全局搜索')) + '"></div><p class="global-search-status" role="status" aria-live="polite"></p><footer><div class="global-search-tabs" role="tablist" aria-label="' + esc(t('切换分类')) + '"></div></footer>';
     document.body.appendChild(dialog);
     input = dialog.querySelector('input'); resultBox = dialog.querySelector('.global-search-results'); tabBox = dialog.querySelector('.global-search-tabs'); status = dialog.querySelector('.global-search-status');
     dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
@@ -186,7 +185,6 @@
     dialog.querySelector('[data-search-close]').setAttribute('aria-label', t('关闭搜索'));
     dialog.querySelector('[data-search-clear]').setAttribute('aria-label', t('清除搜索'));
     tabBox.setAttribute('aria-label', t('切换分类')); resultBox.setAttribute('aria-label', t('全局搜索'));
-    dialog.querySelector('footer').innerHTML = '<span><kbd>↑ ↓</kbd> ' + esc(t('选择')) + ' <kbd>Enter</kbd> ' + esc(t('打开')) + ' <kbd>Tab</kbd> ' + esc(t('切换分类')) + ' <kbd>Esc</kbd> ' + esc(t('关闭')) + '</span>';
   }
   function open() {
     if (dialog?.open) { input.focus(); return; }

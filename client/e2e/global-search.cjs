@@ -64,6 +64,11 @@ if (!process.versions.electron) {
       assert.deepEqual(await run(`Array.from(document.querySelectorAll('[data-search-category]'),node=>node.dataset.searchCategory)`), ['all', 'chats', 'projects', 'tasks', 'library', 'apps', 'plugins', 'schedules', 'actions']);
       const geometry = await run(`(()=>{const r=document.querySelector('dialog').getBoundingClientRect(),s=getComputedStyle(document.getElementById('wsGlobalSearch'));return{width:r.width,height:r.height,center:Math.abs(r.x+r.width/2-innerWidth/2)<2&&Math.abs(r.y+r.height/2-innerHeight/2)<2,border:s.borderTopWidth,bg:s.backgroundColor,focus:document.activeElement.tagName};})()`);
       assert.equal(geometry.width, 760); assert.equal(geometry.height, 560); assert.equal(geometry.center, true);
+      const bottomTabs = () => run(`(()=>{const d=document.querySelector('dialog'),input=d.querySelector('.global-search-input').getBoundingClientRect(),results=d.querySelector('.global-search-results').getBoundingClientRect(),tabs=d.querySelector('.global-search-tabs').getBoundingClientRect(),close=d.querySelector('[data-search-close]').getBoundingClientRect();return{belowResults:tabs.top>=results.bottom,inside:d.querySelector('footer').contains(d.querySelector('[role="tablist"]')),closeInInput:close.top>=input.top&&close.bottom<=input.bottom,noOverflow:d.scrollWidth<=d.clientWidth,top:tabs.top};})()`);
+      const tabLayout = await bottomTabs();
+      assert.equal(tabLayout.belowResults, true); assert.equal(tabLayout.inside, true);
+      assert.equal(tabLayout.closeInInput, true); assert.equal(tabLayout.noOverflow, true);
+      assert.equal(await run(`document.querySelector('dialog footer kbd')`), null);
       assert.equal(geometry.border, '0px'); assert.equal(geometry.bg, 'rgba(0, 0, 0, 0)'); assert.equal(geometry.focus, 'INPUT');
       assert.equal(await run(`Array.from(document.querySelectorAll('.global-search-row')).every(row=>row.getBoundingClientRect().height<=40)`), true);
       assert.equal(await run(`(()=>{const row=document.querySelector('.global-search-row:has(time)'),title=row.querySelector('b').getBoundingClientRect(),date=row.querySelector('time').getBoundingClientRect();return Math.abs(title.top+title.height/2-date.top-date.height/2)<1;})()`), true);
@@ -98,6 +103,8 @@ if (!process.versions.electron) {
       assert.equal(await run(`document.querySelectorAll('#globalSearchResults mark').length>0`), true);
       assert.equal(await run(`Array.from(document.querySelectorAll('.global-search-row')).every(row=>row.getBoundingClientRect().height<=40)`), true);
       fs.writeFileSync(path.join(output, 'results-zh.png'), (await win.webContents.capturePage()).toPNG());
+      await run(`document.querySelector('.global-search-results').scrollTop=10000; void 0;`);
+      assert.equal((await bottomTabs()).top, tabLayout.top);
       await run(`searchInput.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));`);
       assert.equal(await run(`searchInput.getAttribute('aria-activedescendant')`), 'search-result-1');
       await run(`searchInput.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true}));`);
@@ -113,6 +120,7 @@ if (!process.versions.electron) {
       assert.equal(await run(`document.activeElement.id`), 'wsGlobalSearch');
       await run(`SoduWorkGlobalSearch.open(); fixtureLocale='en-US'; dispatchEvent(new Event('soduwork-locale-change'));`); await settle();
       assert.equal(await run(`document.querySelector('[data-search-category="chats"]').textContent`), 'Conversations');
+      assert.equal(await run(`document.querySelector('dialog footer kbd')`), null);
       fs.writeFileSync(path.join(output, 'default-en.png'), (await win.webContents.capturePage()).toPNG());
       for (const [locale, label] of [['ja-JP', '会話'], ['ko-KR', '대화']]) {
         await run(`fixtureLocale=${JSON.stringify(locale)}; dispatchEvent(new Event('soduwork-locale-change'));`); await settle();
@@ -128,6 +136,7 @@ if (!process.versions.electron) {
       win.setSize(520, 660); await run(`SoduWorkGlobalSearch.open()`); await settle();
       assert.equal(await run(`document.querySelector('dialog').getBoundingClientRect().width<innerWidth`), true);
       assert.equal(await run(`document.querySelector('dialog').getBoundingClientRect().height<innerHeight`), true);
+      assert.equal((await bottomTabs()).belowResults, true); assert.equal((await bottomTabs()).noOverflow, true);
       assert.equal(await run(`Array.from(document.querySelectorAll('.global-search-row')).every(row=>row.getBoundingClientRect().height<=40&&row.scrollWidth<=row.clientWidth+1)`), true);
       fs.writeFileSync(path.join(output, 'narrow-zh.png'), (await win.webContents.capturePage()).toPNG());
       await run(`SoduWorkGlobalSearch.close(); SoduWorkI18n.t=(key,fallback)=>SoduWorkI18n.translateText(fallback||key); void 0;`);

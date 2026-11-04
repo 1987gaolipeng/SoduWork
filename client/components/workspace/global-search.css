@@ -9,8 +9,7 @@
 .global-search-dialog::backdrop{background:rgba(0,0,0,.22)}
 .global-search-dialog button{font:inherit;color:inherit;cursor:pointer}
 .global-search-dialog svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
-.global-search-head{display:flex;align-items:center;gap:10px;padding:14px 16px 6px;flex:none}
-.global-search-tabs{display:flex;gap:3px;align-items:center;overflow-x:auto;scrollbar-width:none;flex:1;min-width:0}
+.global-search-tabs{display:flex;gap:3px;align-items:center;overflow-x:auto;scrollbar-width:none;flex:none;min-width:0;width:100%}
 .global-search-tabs::-webkit-scrollbar{display:none}
 .global-search-tabs button{flex:none;padding:7px 10px;border:0;border-radius:18px;background:transparent;font-size:14px;line-height:20px;color:var(--ink-3)}
 .global-search-tabs button[aria-selected="true"]{background:var(--bg-2);color:var(--ink);font-weight:600}
@@ -20,7 +19,7 @@
 .global-search-input [data-search-clear]:hover{background:var(--bg-3)}
 .global-search-input [data-search-clear] svg{width:16px;height:16px}
 .global-search-input [data-search-clear][hidden]{display:none}
-.global-search-input{display:flex;align-items:center;gap:12px;padding:12px 22px 14px;border-bottom:1px solid var(--line);flex:none;color:var(--ink-3)}
+.global-search-input{display:flex;align-items:center;gap:12px;padding:16px 18px 16px 22px;border-bottom:1px solid var(--line);flex:none;color:var(--ink-3)}
 .global-search-input input{flex:1;min-width:0;padding:0;border:0;outline:0;background:transparent;color:var(--ink);font:inherit;font-size:18px;line-height:28px}
 .global-search-input input::placeholder{color:var(--ink-4)}
 .global-search-input input::-webkit-search-cancel-button{display:none}
@@ -54,8 +53,7 @@
 .global-search-more{display:block;margin:12px auto;font-size:12px!important}
 .global-search-status:empty{display:none}
 .global-search-status{flex:none;margin:0;padding:8px 26px;color:var(--ink-3);font-size:12px}
-.global-search-dialog footer{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;padding:10px 20px;border-top:1px solid var(--line);color:var(--ink-4);font-size:12px;line-height:20px;flex:none}
-.global-search-dialog footer kbd{margin-left:8px}
+.global-search-dialog footer{display:flex;padding:8px 14px;border-top:1px solid var(--line);color:var(--ink-4);font-size:12px;line-height:20px;flex:none;min-width:0}
 .global-search-dialog :is(button,input):focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 #globalSearchDialog .global-search-input input:is(:focus,:focus-visible){border:0;outline:none;box-shadow:none}
-@media(max-width:650px){.global-search-dialog{width:calc(100vw - 20px);height:min(560px,calc(100dvh - 24px));border-radius:18px}.global-search-head{padding:12px 10px 4px;gap:6px}.global-search-tabs button{padding:7px 10px}.global-search-input{padding:14px 20px}.global-search-input input{font-size:16px}.global-search-meta{max-width:35%}}
+@media(max-width:650px){.global-search-dialog{width:calc(100vw - 20px);height:min(560px,calc(100dvh - 24px));border-radius:18px}.global-search-tabs button{padding:7px 10px}.global-search-input{padding:14px 16px;gap:8px}.global-search-input input{font-size:16px}.global-search-meta{max-width:35%}}
