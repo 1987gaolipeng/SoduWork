@@ -393,21 +393,22 @@ window.refreshPersonalAccountBinding = function () {
   return _refreshBindNote();
 };
 
-/* Store the local work root in localStorage and use it to resolve repository-relative task paths. */
+/* Share the selected local folder with the library, project dispatch and new
+   conversations. Keep the existing local and native preference stores aligned. */
 const _WORK_ROOT_KEY = 'soduwork_work_root';
 
-/* Initialize an unset work root through the main process under the user's SoduWork directory.
-   Both windows share localStorage; repeated initialization is idempotent and preserves an explicit choice. */
+/* Supply a default only when no folder has been saved. Recheck after IPC so a
+   concurrent selection in either window cannot be replaced by the default. */
 async function _ensureDefaultWorkRoot() {
   try {
     if (localStorage.getItem(_WORK_ROOT_KEY)) return;
     if (typeof soduWorkAPI === 'undefined' || !soduWorkAPI.getDefaultWorkRoot) return;
-    const root = String(await soduWorkAPI.getDefaultWorkRoot() || '').trim().replace(/[\\/]+$/, '');
+    const root = String(await soduWorkAPI.getDefaultWorkRoot() || '').trim();
     if (!root || localStorage.getItem(_WORK_ROOT_KEY)) return;
     localStorage.setItem(_WORK_ROOT_KEY, root);
     const input = document.getElementById('workRootInput');
     if (input && !input.value) input.value = root;
-  } catch (e) { /* Preserve the current value when no default is available; manual entry remains available. */ }
+  } catch (e) { /* The user can retry with the native folder picker. */ }
 }
 _ensureDefaultWorkRoot();
 
@@ -420,24 +421,39 @@ function _bindWorkRoot() {
   const get = () => { try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; } };
   input.value = get();
   if (!input.value) _ensureDefaultWorkRoot().then(() => { if (!input.value) input.value = get(); });
-  btn.addEventListener('click', () => {
-    /* Accept both separator styles and trim trailing separators before joining subdirectories. */
-    const v = String(input.value || '').trim().replace(/[\\/]+$/, '');
-    try { v ? localStorage.setItem(KEY, v) : localStorage.removeItem(KEY); } catch (e) {}
-    if (!v) {
-      /* Reset empty input to the default instead of retaining an unusable blank path. */
-      _ensureDefaultWorkRoot().then(() => {
-        input.value = get();
-        if (note) note.textContent = input.value
-          ? ('已恢复默认 ' + input.value + ' · 想用别的目录直接改这里')
-          : '还没设。不设的话派活给 AI 时不会带工程路径。';
-      });
-      if (typeof petSay === 'function') petSay('工作目录已恢复默认~');
+  btn.addEventListener('click', async () => {
+    if (btn.disabled) return;
+    const bridge = typeof soduWorkAPI !== 'undefined' &&
+      (soduWorkAPI.conversationSession || soduWorkAPI.piSession);
+    if (!bridge?.pickWorkdir || !bridge?.saveWorkdir) {
+      if (note) note.textContent = _clientUpdateText('请在桌面客户端选择文件夹');
       return;
     }
-    input.value = v;
-    if (note) note.textContent = '已设为 ' + v + ' · 派活时会拼上工程子目录告诉 AI';
-    if (typeof petSay === 'function') petSay('工作目录记下了~');
+    btn.disabled = true;
+    try {
+      const result = await bridge.pickWorkdir({ defaultPath: get(), persist: false });
+      if (result?.canceled) return;
+      const dir = String(result?.dir || '').trim();
+      if (!result?.ok || !dir) {
+        if (note) note.textContent = _clientUpdateText(result?.reason || '未能选择文件夹，请重试');
+        return;
+      }
+      const previous = get();
+      localStorage.setItem(KEY, dir);
+      try {
+        const saved = await bridge.saveWorkdir(dir);
+        if (!saved?.ok) throw new Error('Work directory was not saved');
+      } catch (e) {
+        previous ? localStorage.setItem(KEY, previous) : localStorage.removeItem(KEY);
+        throw e;
+      }
+      input.value = dir;
+      if (note) note.textContent = _clientUpdateText('工作目录已保存');
+    } catch (e) {
+      if (note) note.textContent = _clientUpdateText('无法保存工作目录，请重试');
+    } finally {
+      btn.disabled = false;
+    }
   });
 }
 /* Expose the current workspace root in both renderer windows for execution-path construction. */

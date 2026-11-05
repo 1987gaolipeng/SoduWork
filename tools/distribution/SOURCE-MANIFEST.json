@@ -116,8 +116,8 @@
     },
     {
       "path": "client/api.js",
-      "bytes": 138618,
-      "sha256": "8f7a4083c04cce9753a44120863e71abc7be22c933e8ca82d1bb5f82a0bf56c8"
+      "bytes": 138662,
+      "sha256": "51f635e1dd1cc08d3fc5c9539b5baf0677149c4281617352a57a0d58a6142410"
     },
     {
       "path": "client/app-window-chrome.html",
@@ -596,8 +596,8 @@
     },
     {
       "path": "client/build/launcher-progress.nsh",
-      "bytes": 8825,
-      "sha256": "1827f5e148a48516d74ab328fc2168101a36d48c7c0d08827afe207bad535a32"
+      "bytes": 8733,
+      "sha256": "f82e5cb248e183b04ddf1f1bd6bb673f9dd0544ab803285b389a49b3a85ffc2e"
     },
     {
       "path": "client/build/launcher.nsi",
@@ -2076,8 +2076,8 @@
     },
     {
       "path": "client/components/settings/settings.js",
-      "bytes": 24264,
-      "sha256": "b56b1fa2d24de14e6fa83a28ed3616aacecec9140a2eff25440b7deafd58106f"
+      "bytes": 24564,
+      "sha256": "bf8fd1886e697e351c970cbb0c9eece2248fc0ea79c0c0e5d600e7a89904c1c3"
     },
     {
       "path": "client/components/settings/shortcut-settings.css",
@@ -2541,8 +2541,8 @@
     },
     {
       "path": "client/core/locales/en-US-workspace.js",
-      "bytes": 31740,
-      "sha256": "532283bc6ab1f9a413d5e1a11b9a16447995c1c4af9670d22c9da32cc5e48b13"
+      "bytes": 32222,
+      "sha256": "3de327cdb141adb46ba20361bbee7d5b8c125f92f11f4d8a7a5c37b7fd8c488b"
     },
     {
       "path": "client/core/locales/en-US.js",
@@ -2561,8 +2561,8 @@
     },
     {
       "path": "client/core/locales/ja-JP-gap-pages.js",
-      "bytes": 757262,
-      "sha256": "0d49cf157c97df5e701966b5eb8fdf8c524451bf27abb9b4220585299e995d74"
+      "bytes": 757670,
+      "sha256": "7e602e31657bdd996db37463ffb1306f99f85f6ee9f2fe281b4a90b0ad144c80"
     },
     {
       "path": "client/core/locales/ja-JP-runtime-surfaces.js",
@@ -2581,8 +2581,8 @@
     },
     {
       "path": "client/core/locales/ko-KR-gap-pages.js",
-      "bytes": 708226,
-      "sha256": "f4b15b2db520eb12cc5d2c0d43011207e17d1357b7711446894a79574133b1bd"
+      "bytes": 708616,
+      "sha256": "cb88e0dd58385a8763c78a2323870e94a7d25b73a1c15f2039a99ef3c9143c80"
     },
     {
       "path": "client/core/locales/ko-KR-runtime-surfaces.js",
@@ -2731,8 +2731,8 @@
     },
     {
       "path": "client/desk.html",
-      "bytes": 51821,
-      "sha256": "23b8822d6eb8c5e5e5bc82cc116fd31c1c0bfcf102d4ab5345145d6d4ba9224b"
+      "bytes": 51654,
+      "sha256": "53eb7a07433b005c6e15df6bd4a0c2ab4c61cbcc011cce89c7392603bcd57c8a"
     },
     {
       "path": "client/e2e/acceptance-card-stability.cjs",
@@ -3636,8 +3636,8 @@
     },
     {
       "path": "client/e2e/fixtures/page-audit-api.js",
-      "bytes": 5361,
-      "sha256": "cf3a11dbaebde9947c2d32a1486e565ffcc53b570f343afff67562c3e2f9cf93"
+      "bytes": 5482,
+      "sha256": "fc99a508c333ec127696d94f682fcbdcd9f07c4309efad2daa3b2f96e618b89c"
     },
     {
       "path": "client/e2e/fixtures/platform-connections.html",
@@ -4241,8 +4241,8 @@
     },
     {
       "path": "client/e2e/page-audit-actions.cjs",
-      "bytes": 11946,
-      "sha256": "15572a092fe9967aafef6aa824a7926bfbffb90e290df62589e361977d678ddc"
+      "bytes": 12390,
+      "sha256": "ef47e8966d6caee0eeacaf34229b956dda2528fed08d705c123268eba8fc1958"
     },
     {
       "path": "client/e2e/page-audit-existing.cjs",
@@ -4928,6 +4928,11 @@
       "path": "client/e2e/work-preview-session-isolation.cjs",
       "bytes": 10800,
       "sha256": "2b08e5162e912a76a0e0e870e6a876342685eca4307cbab3c19c546dd072585c"
+    },
+    {
+      "path": "client/e2e/work-root-settings.cjs",
+      "bytes": 11066,
+      "sha256": "588e2d4d091e1dc652d8783ca4384839a2ea2b141f730cad44baf5bd8ba60812"
     },
     {
       "path": "client/e2e/workbench-annotations.cjs",
@@ -6381,8 +6386,8 @@
     },
     {
       "path": "client/main/pi-session/environment-ipc.js",
-      "bytes": 9990,
-      "sha256": "e8a9902c907c26b0f32e3b9082326c9f22b305ec2b561cbfcc5022ab7b843411"
+      "bytes": 10752,
+      "sha256": "768e887c1b007436abae170050abc33c03a8fa87e30fdc7d636cc7a20a7d8131"
     },
     {
       "path": "client/main/pi-session/event-publication.js",
@@ -7121,8 +7126,8 @@
     },
     {
       "path": "client/preload.js",
-      "bytes": 33845,
-      "sha256": "d5b701e895aca2cf900fc639170235df92b0977bdf6ccb5026feb36b8785deaa"
+      "bytes": 33943,
+      "sha256": "277e35e591fd9ec61af54fb07d989f101ce0b55b3153f91995108188b9364f4d"
     },
     {
       "path": "client/runner/README.md",
@@ -10401,8 +10406,8 @@
     },
     {
       "path": "client/tests/soduwork-brand-clean.test.cjs",
-      "bytes": 5146,
-      "sha256": "aa5e89039d4a24762bd80930add7a32e23d6bd2095c5cb76fd58233997d9f9f6"
+      "bytes": 6141,
+      "sha256": "68315cb5cb6e77d29b0ddf9782be9a9968a6506edf6365978ca46e2e9d135751"
     },
     {
       "path": "client/tests/soduwork-default-skin.test.cjs",
@@ -10971,8 +10976,13 @@
     },
     {
       "path": "client/tests/work-root-default.test.cjs",
-      "bytes": 2106,
-      "sha256": "36bbfc21adc6667d7b7cbfac53ca4450d246791d2be1ef2de38e64583ee33297"
+      "bytes": 10859,
+      "sha256": "73697f8a126d3d0e1892a3d89e8d50ad847781a35fdc6b3b2a931bb6466cdc94"
+    },
+    {
+      "path": "client/tests/work-root-picker.test.cjs",
+      "bytes": 5246,
+      "sha256": "16d812e43a8879ae25b2f152f8f5c91aed80515254dd9e322d8b23417859220d"
     },
     {
       "path": "client/tests/workbench-address.test.cjs",

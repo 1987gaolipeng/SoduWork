@@ -33,6 +33,7 @@
   };
   try {
     for (var oldKey in MAP) {
+      if (oldKey === MAP[oldKey]) continue;
       if (!Object.prototype.hasOwnProperty.call(localStorage, oldKey)) continue;
       if (!Object.prototype.hasOwnProperty.call(localStorage, MAP[oldKey])) {
         localStorage.setItem(MAP[oldKey], localStorage.getItem(oldKey));

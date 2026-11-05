@@ -66,6 +66,8 @@
     conversationSession: {history: empty, archivedHistory: empty, runtimes: empty, probe: empty,
       capabilities: empty, onEvent: () => noop, onPresence: () => noop, onProgress: () => noop,
       outputs: empty, pickCwd: async () => ({ok: true, dir: 'D:/isolated/page-audit', name: 'Fixture'}),
+      pickWorkdir: options => fixtureApiCall('pickWorkdir', options),
+      saveWorkdir: async dir => ({ok: true, dir}),
       open: async () => ({ok: false, reason: 'Execution excluded from page audit'}), release: empty},
     sessionMemory: new Proxy({}, {get: () => empty}),
     memoryDimensions: new Proxy({}, {get: key => key === 'get' ? async () => ({ok: true, item: null}) : empty}),

@@ -247,9 +247,6 @@ Function ReadUpdateProgress
         StrCpy $0 "正在整理旧版本"
       ${EndIf}
     ${EndIf}
-    ${If} $updateTotal > 0
-      StrCpy $0 "$0 · $updateFiles / $updateTotal"
-    ${EndIf}
     ${NSD_SetText} $updateStatus "$0"
     ${NSD_SetText} $updatePercent "$updateValue%"
     SendMessage $updateBar 0x0402 $updateValue 0

@@ -1,5 +1,12 @@
 (function (global) {
   const messages = {
+    '全局搜索': 'Global search',
+    '全局搜索 · Ctrl+Shift+F': 'Global search · Ctrl+Shift+F',
+    '打开个人信息': 'Open personal info',
+    '选择文件夹': 'Choose folder',
+    '选择后自动保存，重启后继续使用所选目录。': 'Your selection is saved automatically and used again after restarting.',
+    '工作目录已保存': 'Work directory saved',
+    '无法保存工作目录，请重试': 'Could not save the work directory. Try again.',
     '展开最近需求': 'Expand recent issues',
     '收起最近需求': 'Collapse recent issues',
     '无法切换服务': 'Could not switch services',

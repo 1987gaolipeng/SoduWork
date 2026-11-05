@@ -128,8 +128,14 @@ module.exports = async function ({js, click, type, navigate, until, report, win,
       assert.equal(await js(`document.getElementById('${id}').checked`), !before);
     }
     await click('#remindSeg [data-remind=off]'); await click('#fontSeg [data-font=large]');
-    await type('#workRootInput', 'D:/isolated/page-audit/custom/'); await click('#workRootSave');
+    assert.equal(await js('document.querySelector("#workRootInput").readOnly'), true);
+    await js('fixtureOverrides.pickWorkdir=async()=>({ok:true,dir:"D:/isolated/page-audit/custom"});void 0;');
+    await click('#workRootSave');
     assert.equal(await js('workRoot()'), 'D:/isolated/page-audit/custom');
+    await js('fixtureOverrides.pickWorkdir=async()=>({ok:false,canceled:true});void 0;');
+    await click('#workRootSave');
+    assert.equal(await js('workRoot()'), 'D:/isolated/page-audit/custom');
+    assert.equal(await js('document.querySelector("#workRootInput").value'), 'D:/isolated/page-audit/custom');
     await js('SoduWorkI18n.setLocale("en-US");void 0;'); await delay(50);
     await js('SoduWorkI18n.setLocale("zh-CN");void 0;');
   });

@@ -210,8 +210,8 @@
   <div class="set-group set-third"><div class="k">字体大小</div><div class="seg" id="fontSeg"><button data-font="small">小</button><button class="active" data-font="medium">中</button><button data-font="large">大</button></div><div class="set-note">只调字，不动窗口大小（用户定：两者分开设）。近视眼或高分屏可把字调大。</div></div>
   <div class="set-group set-language"><div class="k" id="settingsLanguageLabel" data-i18n="language">语言</div><div class="settings-select-wrap"><select id="localeSelect" class="settings-select" aria-labelledby="settingsLanguageLabel"><option value="zh-CN" data-i18n="languageZh">简体中文</option><option value="en-US" data-i18n="languageEn">English</option><option value="ja-JP" data-i18n="languageJa">日本語</option><option value="ko-KR" data-i18n="languageKo">한국어</option></select><svg class="settings-select-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 9 5 5 5-5"></path></svg></div><div class="set-note" data-i18n="languageNote">选择后立即应用，后续可扩展更多语言。</div></div>
   <div class="set-group"><div class="k">工作目录</div>
-    <div class="hub-row"><input id="workRootInput" class="hub-input" type="text" spellcheck="false" placeholder="如 C:\Program Files\code"><button id="workRootSave" class="hub-save">保存</button></div>
-    <div class="set-note" id="workRootNote">本机存放代码的根目录，默认已设为「用户目录\SoduWork」，想换直接改；清空保存即恢复默认。派活给 AI 时，SoduWork 会组合根目录与工程子目录，让执行器在正确位置工作。该设置只保存在本机。</div></div>
+    <div class="hub-row"><input id="workRootInput" class="hub-input" type="text" readonly spellcheck="false" aria-label="工作目录"><button id="workRootSave" class="hub-save" type="button">选择文件夹</button></div>
+    <div class="set-note" id="workRootNote" role="status">选择后自动保存，重启后继续使用所选目录。</div></div>
   <div class="set-group set-access-default"><div class="k">默认授权模式</div>
     <div id="defaultAccessModes" class="set-access-options" role="radiogroup" aria-label="默认授权模式" aria-busy="true">
       <button type="button" data-default-access="standard" role="radio" aria-checked="true" disabled><b>默认权限</b><small>工作区内处理文件，其他操作按需确认</small></button>

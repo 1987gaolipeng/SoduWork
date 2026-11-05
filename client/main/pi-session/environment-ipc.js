@@ -127,18 +127,28 @@ function install({ app, ipcMain, session, identityOf, capabilityGrantsOf, _skill
     const dir = workDir(app);
     return { ok: true, dir, name: path.basename(dir) };
   });
-  ipcMain.handle('pi-session-pick-workdir', async (event) => {
+  function saveWorkdir(dir) {
+    if (typeof dir !== 'string' || !path.isAbsolute(dir) || !fs.statSync(dir).isDirectory()) {
+      return { ok: false, reason: '所选工作位置不是文件夹' };
+    }
+    _saveConf({ workDir: dir });
+    if (_conf().workDir !== dir) return { ok: false, reason: '无法保存工作目录，请重试' };
+    return { ok: true, dir, name: path.basename(dir) };
+  }
+  ipcMain.handle('pi-session-save-workdir', async (_event, dir) => saveWorkdir(dir));
+  ipcMain.handle('pi-session-pick-workdir', async (event, options = {}) => {
     const { dialog, BrowserWindow } = require('electron');
     const win = BrowserWindow.fromWebContents(event.sender);
+    const requested = typeof options?.defaultPath === 'string' ? options.defaultPath.trim() : '';
     const r = await dialog.showOpenDialog(win, require("../native-locale.cjs").dialogOptions({
       title: '选一个文件夹，AI 就在这儿干活',
-      defaultPath: workDir(app),
+      defaultPath: path.isAbsolute(requested) ? requested : workDir(app),
       properties: ['openDirectory', 'createDirectory'],
     }));
     if (r.canceled || !r.filePaths.length) return { ok: false, canceled: true };
     const dir = r.filePaths[0];
-    _saveConf({ workDir: dir });
-    return { ok: true, dir, name: path.basename(dir) };
+    if (!fs.statSync(dir).isDirectory()) return { ok: false, reason: '所选工作位置不是文件夹' };
+    return options?.persist === false ? { ok: true, dir, name: path.basename(dir) } : saveWorkdir(dir);
   });
   ipcMain.handle('pi-session-pick-cwd', async (event) => {
     const { dialog, BrowserWindow } = require('electron');

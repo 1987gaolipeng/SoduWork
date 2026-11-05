@@ -23,21 +23,33 @@ function apiFixture() {
       preflight: async (body) => ({ ok: true, body }),
     },
   };
-  const window = { soduWorkAPI: bridge };
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../api.js'), 'utf8'), {
-    window,
-    localStorage: {
-      getItem: (key) => values.get(key) ?? null,
-      setItem: (key, value) => values.set(key, String(value)),
-      removeItem: (key) => values.delete(key),
+  // Browser Storage exposes saved keys as own properties as well as getItem().
+  // A Map-only mock would skip the migration's hasOwnProperty checks entirely.
+  const localStorage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem(key, value) {
+      values.set(key, String(value));
+      localStorage[key] = String(value);
     },
-    console: { log() {} },
-    setTimeout: () => 0,
-    clearTimeout() {},
-    URL,
-    fetch: () => { throw Error('No network in branding tests'); },
-  });
-  return { window, values, bridge };
+    removeItem(key) {
+      values.delete(key);
+      delete localStorage[key];
+    },
+  };
+  for (const [key, value] of values) localStorage[key] = value;
+  function reload() {
+    const window = { soduWorkAPI: bridge };
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../api.js'), 'utf8'), {
+      window, localStorage,
+      console: { log() {} },
+      setTimeout: () => 0,
+      clearTimeout() {},
+      URL,
+      fetch: () => { throw Error('No network in branding tests'); },
+    });
+    return window;
+  }
+  return { window: reload(), values, bridge, localStorage, reload };
 }
 
 test('the repository passes the zero-retired-brand gate', () => {
@@ -63,6 +75,18 @@ test('the canonical renderer API uses one bridge and preserves current storage',
   assert.match(window.SoduWorkAPI.taskStorageKey('tasks'), /^soduwork_work_tasks_v5@.*@existing-device@unbound$/);
   assert.equal(window.SoduWorkAPI.hubBase(), 'http://127.0.0.1:18989');
   assert.equal(values.get('soduwork_work_cfg_v5'), '{"theme":"dark"}');
+  assert.equal(values.get('soduwork_work_root'), 'C:/existing-work');
+});
+
+test('saved workspace survives repeated renderer loads using browser Storage keys', () => {
+  const fixture = apiFixture();
+  const chosen = 'D:\\Team Work\\采购资料';
+  fixture.localStorage.setItem('soduwork_work_root', chosen);
+  assert.equal(Object.hasOwn(fixture.localStorage, 'soduwork_work_root'), true);
+  fixture.reload();
+  fixture.reload();
+  assert.equal(fixture.values.get('soduwork_work_root'), chosen);
+  assert.equal(fixture.localStorage.getItem('soduwork_work_root'), chosen);
 });
 
 test('installed web plugins receive only the canonical restricted bridge', async () => {
