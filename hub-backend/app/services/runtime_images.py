@@ -9,9 +9,9 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import mimetypes
 import os
-import struct
-import zlib
+import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -20,7 +20,14 @@ CFG_KEY = "_inputImages"
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_TOTAL_BYTES = 20 * 1024 * 1024
 MAX_IMAGES = 20
-_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".heic", ".avif", ".tif", ".tiff"}
+# Hints for formats missing from some hosts' MIME databases, not an allowlist.
+# Any declared image/* type can travel through the same handoff.
+_IMAGE_TYPES = {
+    ".heic": "image/heic", ".heif": "image/heif", ".avif": "image/avif",
+    ".jxl": "image/jxl", ".jp2": "image/jp2", ".j2k": "image/jp2",
+    ".raw": "image/x-raw", ".cr2": "image/x-canon-cr2", ".nef": "image/x-nikon-nef",
+    ".arw": "image/x-sony-arw", ".dng": "image/x-adobe-dng", ".psd": "image/vnd.adobe.photoshop",
+}
 
 
 class ImageInputError(ValueError):
@@ -59,36 +66,41 @@ def model_fields(llm: dict | None) -> dict:
     return out
 
 
-def _mime(data: bytes) -> str:
+def _image_type(filename: str, content_type: str = "") -> str:
+    declared = str(content_type or "").split(";", 1)[0].strip().lower()
+    if re.fullmatch(r"image/[a-z0-9][a-z0-9.+-]*", declared):
+        return {"image/jpg": "image/jpeg", "image/pjpeg": "image/jpeg",
+                "image/x-png": "image/png"}.get(declared, declared)
+    hint = _IMAGE_TYPES.get(Path(filename).suffix.lower())
+    if hint:
+        return hint
+    guessed, _ = mimetypes.guess_type(filename, strict=False)
+    return guessed if guessed and guessed.startswith("image/") else ""
+
+
+def _mime(data: bytes, filename: str = "", content_type: str = "") -> str:
+    """Describe uploaded bytes without imposing a decoder/format allowlist.
+
+    The selected Agent/model owns decoding. Keep familiar signature hints to
+    correct mislabeled uploads, but do not reject ancillary chunks, trailing
+    metadata or a new image format just because this transport cannot decode it.
+    """
+    if not data:
+        raise ImageInputError("图片附件为空，请重新选择图片后发送")
+    if data[:4] == b"\xe0\xa8\x91\xe7" and data[88:96] == b"Esafenet":
+        raise ImageInputError("图片附件受加密保护，当前执行底座无法读取，请使用已获授权的可读图片")
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
-        offset, width, height, ended, pixels = 8, 0, 0, False, False
-        while offset + 12 <= len(data):
-            size = struct.unpack(">I", data[offset:offset + 4])[0]
-            end = offset + size + 12
-            if end > len(data):
-                break
-            kind, content = data[offset + 4:offset + 8], data[offset + 8:offset + 8 + size]
-            if zlib.crc32(kind + content) & 0xffffffff != struct.unpack(">I", data[end - 4:end])[0]:
-                break
-            if offset == 8 and kind == b"IHDR" and size == 13:
-                width, height = struct.unpack(">II", content[:8])
-            pixels = pixels or kind == b"IDAT"
-            offset = end
-            if kind == b"IEND" and size == 0:
-                ended = offset == len(data)
-                break
-        if ended and pixels and width and height and width * height <= 100_000_000:
-            return "image/png"
-    elif len(data) >= 12 and data[:3] == b"\xff\xd8\xff" and data[-2:] == b"\xff\xd9":
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
         return "image/jpeg"
-    elif len(data) >= 14 and data[:6] in (b"GIF87a", b"GIF89a") and data[-1:] == b";":
-        width, height = struct.unpack("<HH", data[6:10])
-        if width and height and width * height <= 100_000_000:
-            return "image/gif"
-    elif len(data) >= 20 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        if struct.unpack("<I", data[4:8])[0] + 8 == len(data) and data[12:16] in (b"VP8 ", b"VP8L", b"VP8X"):
-            return "image/webp"
-    raise ImageInputError("图片格式无效或不受支持，请使用完整的 PNG、JPEG、GIF 或 WebP 图片")
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    hint = _image_type(filename, content_type)
+    if hint:
+        return hint
+    raise ImageInputError("无法确定附件的图片类型，请重新选择图片后发送")
 
 
 def _read(path: str, root: str) -> bytes:
@@ -116,15 +128,13 @@ def prepare(cfg: dict | None, staged: list[dict], root: str) -> dict:
     images, total = [], 0
     for item in staged:
         filename = str(item.get("name") or item.get("path") or "")
-        content_type = str(item.get("contentType") or "").split(";", 1)[0].lower()
-        if not content_type.startswith("image/") and Path(filename).suffix.lower() not in _EXTENSIONS:
+        content_type = _image_type(filename, item.get("contentType") or "")
+        if not content_type:
             continue
         path = os.path.abspath(str(item.get("path") or ""))
         data = _read(path, root)
         path = os.path.realpath(path)
-        mime = _mime(data)
-        if content_type.startswith("image/") and content_type != mime and not (mime == "image/jpeg" and content_type == "image/jpg"):
-            raise ImageInputError("图片内容与文件类型不一致，请重新上传原始图片")
+        mime = _mime(data, filename, content_type)
         total += len(data)
         if total > MAX_TOTAL_BYTES or len(images) >= MAX_IMAGES:
             raise ImageInputError("本轮图片合计不能超过 20 MB 或 20 张，请分次发送")
@@ -155,7 +165,7 @@ def _blocks(value: dict, *, encode: bool = True) -> list[dict]:
         if not isinstance(item, dict):
             raise ImageInputError("图片附件清单无效，请重新上传")
         data = _read(str(item.get("path") or ""), root)
-        mime = _mime(data)
+        mime = _mime(data, str(item.get("path") or ""), str(item.get("mimeType") or ""))
         total += len(data)
         if total > MAX_TOTAL_BYTES:
             raise ImageInputError("本轮图片合计不能超过 20 MB，请分次发送")

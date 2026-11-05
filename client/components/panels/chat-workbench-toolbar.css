@@ -3,6 +3,9 @@
 /* Subtract toolbar and truncation-notice height from the scrollable body so the final line remains visible. */
 .ncw-body>.ncw-code-modebar,.ncw-body>.ncw-truncated{flex:none}
 .ncw-body>:is(.ncw-markdown,.ncw-code,.ncw-code-surface,.ncw-diff-surface,.ncw-image,.ncw-video,.ncw-loading){flex:1 1 0;min-height:0;height:auto}
+.ncw-read-images{display:flex;flex-direction:column;align-items:center;gap:16px}
+.ncw-read-image{display:grid;place-items:center;flex:0 0 100%;min-height:0;width:100%}
+.ncw-read-image [hidden]{display:none}
 .ncw-browserbar,.ncw-dochead{box-sizing:border-box;height:var(--ncw-toolbar-height);display:flex;align-items:center;gap:7px;padding:4px 12px;border-bottom:1px solid var(--line);background:var(--bg-0);flex:none;color:var(--ink-3)}
 .ncw-browserbar button,.ncw-dochead button{appearance:none;display:inline-flex;align-items:center;justify-content:center;flex:none;gap:6px;height:28px;padding:0;width:28px;border:0;border-radius:50%;background:transparent;color:var(--ink-3);font:inherit;font-size:max(var(--font-min-readable, 14.5px), 12px);cursor:pointer;transition:background-color .14s ease,color .14s ease}
 .ncw-browserbar button:hover:not(:disabled),.ncw-dochead button:hover:not(:disabled){color:var(--ink-1);background:var(--bg-2)}

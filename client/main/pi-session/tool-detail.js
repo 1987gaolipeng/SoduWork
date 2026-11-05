@@ -47,15 +47,18 @@ function editDiffSummary(args) {
 const cache = new WeakMap();
 let revision = 0;
 function project(tool) {
-  if (!tool || typeof tool !== 'object' || tool.detailsDeferred) return tool;
+  if (!tool || typeof tool !== 'object') return tool;
+  const { readImages, ...publicTool } = tool;
+  if (tool.detailsDeferred && !Array.isArray(readImages)) return tool;
   const args = tool.args;
   const key = args && typeof args === 'object' ? args : tool;
   const signature = [tool.id, tool.name, tool.state, tool.updatedAt, tool.endedAt,
-    tool.result, tool.partial, tool.isError, args?.edits?.length, ...(args && typeof args === 'object' ? Object.entries(args).flat() : [args])];
+    tool.result, tool.partial, tool.isError, readImages, readImages?.length, tool.readImagesTruncated,
+    args?.edits?.length, ...(args && typeof args === 'object' ? Object.entries(args).flat() : [args])];
   const previous = cache.get(key);
   if (previous && signature.length === previous.signature.length &&
       signature.every((value, index) => value === previous.signature[index])) {
-    return { ...tool, ...previous.fields };
+    return { ...publicTool, ...previous.fields };
   }
   let deferred = false, remaining = LIMIT;
   function compact(value, depth = 0) {
@@ -82,6 +85,10 @@ function project(tool) {
     return result;
   }
   const fields = { args: compact(args) };
+  if (Array.isArray(readImages) && readImages.length) {
+    fields.readImageCount = readImages.length;
+    deferred = true;
+  }
   for (const field of ['result', 'partial']) {
     remaining = LIMIT;
     const value = tool[field];
@@ -96,7 +103,7 @@ function project(tool) {
   else if (deferred && Array.isArray(args?.edits)) fields.detailSummary = { editCount: args.edits.length };
   if (deferred) Object.assign(fields, { detailsDeferred: true, detailVersion: String(++revision) });
   cache.set(key, { signature, fields });
-  return { ...tool, ...fields };
+  return { ...publicTool, ...fields };
 }
 function find(tools, id) {
   return (tools || []).find(tool => tool && String(tool.id) === String(id)) || null;

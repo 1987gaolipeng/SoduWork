@@ -1006,13 +1006,13 @@
     },
     {
       "path": "client/components/panels/chat-workbench-toolbar.css",
-      "bytes": 7494,
-      "sha256": "12bca34a72edebdda4f128e848c6762bebcf07feb720efd6d606ce7b5f57c47a"
+      "bytes": 7701,
+      "sha256": "8b71af0c1c9dc600f7bdb657b9f72a23fe0c34d5c33ca908e7f2f771709cf698"
     },
     {
       "path": "client/components/panels/chat-workspace-controls.js",
-      "bytes": 39514,
-      "sha256": "69ad8c1f80b9bab931b23fd57aed621462cc34138834a4cfc6545a6866714c9d"
+      "bytes": 41485,
+      "sha256": "eec80eb0acb1c5122aff2048725b69109e0703c99d92dc572c43b5bc47ef54ed"
     },
     {
       "path": "client/components/panels/chat-workspace-info.js",
@@ -1356,8 +1356,8 @@
     },
     {
       "path": "client/components/panels/panels-chat-tools.js",
-      "bytes": 45768,
-      "sha256": "f6cbb7968a9abb89ce08395908bc0e7c5af77768fbe83a433157accb67ce0f52"
+      "bytes": 45965,
+      "sha256": "fbc42550fd2b0610894449e2028805b89e96dad8382855e489bece5bf082e049"
     },
     {
       "path": "client/components/panels/panels-chat-tools.test.js",
@@ -1371,8 +1371,8 @@
     },
     {
       "path": "client/components/panels/panels-chat-workspace.js",
-      "bytes": 51517,
-      "sha256": "fdf134551ea25f500ebc534d4050a4544f215319405bd108efa2fab481856012"
+      "bytes": 55161,
+      "sha256": "d056a4bd6dc20431a6f580d8f28070e61bfb5bb0fd51cecee50470ffe479b87a"
     },
     {
       "path": "client/components/panels/panels-chat.css",
@@ -2511,8 +2511,8 @@
     },
     {
       "path": "client/core/locales/en-US-runtime-pages.js",
-      "bytes": 51623,
-      "sha256": "1abbba3218f5f51691e7f2ced831be783ecb58c67be36110b17248063c55eeb7"
+      "bytes": 52159,
+      "sha256": "c4bc0b7a650fb568fc1d82929fab0a6cd8c6f4af2f50b04d5d7d1ab297e1a657"
     },
     {
       "path": "client/core/locales/en-US-runtime-surfaces.js",
@@ -2561,8 +2561,8 @@
     },
     {
       "path": "client/core/locales/ja-JP-gap-pages.js",
-      "bytes": 757670,
-      "sha256": "7e602e31657bdd996db37463ffb1306f99f85f6ee9f2fe281b4a90b0ad144c80"
+      "bytes": 758270,
+      "sha256": "7db8d01dbd062b0b42580df6e35e4a9d43cea20229e426c5b2c3fbf392bd038f"
     },
     {
       "path": "client/core/locales/ja-JP-runtime-surfaces.js",
@@ -2581,8 +2581,8 @@
     },
     {
       "path": "client/core/locales/ko-KR-gap-pages.js",
-      "bytes": 708616,
-      "sha256": "cb88e0dd58385a8763c78a2323870e94a7d25b73a1c15f2039a99ef3c9143c80"
+      "bytes": 709235,
+      "sha256": "ef391284c260b4de062ed92ef07be29e31adfd5fd53a4b8d0f4859e79196a977"
     },
     {
       "path": "client/core/locales/ko-KR-runtime-surfaces.js",
@@ -4836,13 +4836,18 @@
     },
     {
       "path": "client/e2e/tool-details-lazy.cjs",
-      "bytes": 12429,
-      "sha256": "b33a95ed8600037bd4470e840e683f4d94eb00b16c41023727602bc620f54fc1"
+      "bytes": 13955,
+      "sha256": "8f446d9da9f737a6a4020c7e152dc7710c248982563d62900d0831b50fce3b37"
     },
     {
       "path": "client/e2e/tool-preparation.cjs",
       "bytes": 3554,
       "sha256": "b90748f8b3027a075152eae17f3d9b52480326807a42f02f2bc9bdcc8021cd36"
+    },
+    {
+      "path": "client/e2e/tool-read-images.cjs",
+      "bytes": 12555,
+      "sha256": "0368d7c86a8e23d7342a1cf4ff431a7ecd00a6fe5424011c3e00a0ac11e21198"
     },
     {
       "path": "client/e2e/update-maintenance-elevated.cjs",
@@ -6416,8 +6421,8 @@
     },
     {
       "path": "client/main/pi-session/event-stream.js",
-      "bytes": 31504,
-      "sha256": "e4ccd6d8b6942d1ed02528be9f7226cc47836d493ac17f5eda59104a4adcacd1"
+      "bytes": 34338,
+      "sha256": "223526fbeaf4d45e5c48df1bca6023acbc4dddf3a5a10cb3b8e2f3223631a2ad"
     },
     {
       "path": "client/main/pi-session/event-stream.test.js",
@@ -6721,8 +6726,8 @@
     },
     {
       "path": "client/main/pi-session/tool-detail.js",
-      "bytes": 5537,
-      "sha256": "50294d7a4a355ad31d1842ea721120c4899609fe3ba00c6c4215dc2c603a9247"
+      "bytes": 5832,
+      "sha256": "32dd0fbb993b36e8d72be39259e759375a82d37ea1ee04c4a96e20b9dd3c47f3"
     },
     {
       "path": "client/main/pi-session/tool-guard.js",
@@ -7991,8 +7996,8 @@
     },
     {
       "path": "client/tests/chat-tool-details.test.cjs",
-      "bytes": 11303,
-      "sha256": "ff9eee028e3627401d82f151c3c84fe95b0c10c34429e16686577cbe8dfba884"
+      "bytes": 14321,
+      "sha256": "4e1c1c84b9b44a653e16324c99b79bafb0f23c2fa36aa4b9482e8c2debf6cac5"
     },
     {
       "path": "client/tests/chat-turn-summary.test.cjs",
@@ -9921,8 +9926,8 @@
     },
     {
       "path": "client/tests/read-tool-workbench.test.cjs",
-      "bytes": 5393,
-      "sha256": "d7e7f1abe28ecd410c2b71a95a6df515f666b62c88ef80cf9966c3b12e77ed75"
+      "bytes": 18407,
+      "sha256": "074f8fca6df1092253b3198a1e76d9fe22cdff5abefee567b68e94bff10befb4"
     },
     {
       "path": "client/tests/recent-plugin-draft.test.cjs",
@@ -10716,8 +10721,8 @@
     },
     {
       "path": "client/tests/tool-detail.test.cjs",
-      "bytes": 9660,
-      "sha256": "21f9013b2e9940b4d1f6243543c339d07ee29861c250b426a71a68302553f98e"
+      "bytes": 15427,
+      "sha256": "a36f10d6d46348c86a5d87c12dbbc4e8b7b0dc51460adfbbd70f2ece19ea62aa"
     },
     {
       "path": "client/tests/tool-file-location.test.cjs",
@@ -13656,8 +13661,8 @@
     },
     {
       "path": "hub-backend/app/services/runtime_images.py",
-      "bytes": 8449,
-      "sha256": "77eff9452d59fae7cde269ef771ad0765d694a7f40fa5f062cb59bbeaa22293b"
+      "bytes": 8655,
+      "sha256": "7ac2a4ba14abecc588eec9041ac55ff3afefd8e1850a5a28cd0f8cca492c8bdb"
     },
     {
       "path": "hub-backend/app/services/runtime_messages.py",
@@ -15861,8 +15866,8 @@
     },
     {
       "path": "hub-backend/smoke_runner_images.py",
-      "bytes": 17219,
-      "sha256": "3549c210a3ac9c1de1e348b7c33b8f988586169a959909c7302194d37101fedd"
+      "bytes": 19700,
+      "sha256": "8236b040b26492df8a42ac1cdf99fc28464c79f5dad555e060dada6d0650157e"
     },
     {
       "path": "hub-backend/smoke_runner_imports.py",

@@ -25,6 +25,20 @@ function harness() {
 function generic(id = 'generic', version = 'v1') {
   return { id, name: 'inspect_data', args: {}, state: 'done', detailsDeferred: true, detailVersion: version };
 }
+function imageReadHarness() {
+  const f = harness(), opened = [], nodes = new Map();
+  f.sandbox.document = { createElement: () => ({ dataset: {}, innerHTML: '' }) };
+  f.sandbox.ChatDomPatch.findDataNode = (_root, _attribute, id) => nodes.get(id) || null;
+  f.sandbox.ChatWorkbench = { openPath: (file, hint) => { opened.push({ file, hint }); return true; } };
+  function add(tool) {
+    let status = null;
+    const node = { isConnected: true, attrs: {}, querySelector: () => status,
+      setAttribute(name, value) { this.attrs[name] = value; }, removeAttribute(name) { delete this.attrs[name]; },
+      appendChild(child) { status = child; child.remove = () => { status = null; }; } };
+    nodes.set(tool.id, node); f.ctx._snap.tools.push(tool); return node;
+  }
+  return { ...f, add, opened };
+}
 test('closed and title-only file cards never highlight or diff, including hot and running tools', () => {
   const { tools, renderer, ctx, count } = harness();
   for (const name of ['write', 'edit']) for (const state of ['running', 'done', 'error']) {
@@ -156,4 +170,40 @@ test('legacy task write/edit cards route to the workbench and generic errors hyd
   const button = { closest: selector => selector === '.ntool' ? { querySelector: () => body } : stream, getAttribute: () => 'tool-1' };
   sandbox.TaskExecutionStream.hydrateTool(button, [{ taskId: 'task', controller: { snapshot: () => ({ events, status: 'done' }) } }]);
   assert.match(body.innerHTML, /specific failure detail/);
+});
+
+test('image read summaries load captured bytes only on click and reuse the current receipt', async () => {
+  const { ctx, count, full, details, renderer, add, opened } = imageReadHarness();
+  const summary = { id: 'image-read', name: 'read', state: 'done', args: { path: 'deleted.png' },
+    detailsDeferred: true, detailVersion: 'image-v1', readImageCount: 1 };
+  const images = [{ mimeType: 'image/png', data: 'iVBORw0KGgo=' }];
+  const node = add(summary);
+  full.set(summary.id, { ...summary, detailsDeferred: undefined, result: 'Read image file [image/png]', readImages: images });
+  const before = JSON.stringify(ctx._snap);
+  assert.match(renderer._toolHtml(summary), /data-tool-side="1"/);
+  assert.equal(count.requests, 0); assert.equal(opened.length, 0);
+  details.activate(ctx, summary.id); details.activate(ctx, summary.id); await tick();
+  assert.equal(count.requests, 1, 'repeated clicks share one detail request');
+  assert.equal(opened.length, 1, 'only the current click opens a workbench tab');
+  assert.equal(opened[0].file, 'deleted.png');
+  assert.deepEqual(JSON.parse(JSON.stringify(opened[0].hint.readSnapshot.images)), images);
+  assert.equal(JSON.stringify(ctx._snap), before, 'image bytes do not enter the transcript summary');
+  assert.equal(node.querySelector('[data-tool-detail-status]'), null);
+  details.activate(ctx, summary.id); await tick();
+  assert.equal(count.requests, 1);
+  assert.equal(opened.length, 2);
+});
+
+test('late image receipts cannot reopen the workbench after a conversation switch', async () => {
+  const { ctx, details, add, opened } = imageReadHarness();
+  const summary = { id: 'old-image', name: 'read', state: 'done', args: { path: 'private.png' },
+    detailsDeferred: true, detailVersion: 'old-v1', readImageCount: 1 };
+  add(summary);
+  let finish;
+  ctx._api = () => ({ toolDetail: () => new Promise(resolve => { finish = resolve; }) });
+  details.activate(ctx, summary.id); await tick();
+  ctx._ref = 'another-conversation'; ctx._viewEpoch++; ctx._snap = { tools: [] }; details.reset(ctx);
+  finish({ ok: true, tool: { ...summary, readImages: [{ mimeType: 'image/png', data: 'PRIVATE_OLD_IMAGE' }] } });
+  await tick();
+  assert.deepEqual(opened, []);
 });

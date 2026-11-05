@@ -43,6 +43,7 @@
     get artifactRequest() { return artifactRequest; },
     get addressFor() { return addressFor; },
     get normalizeAddress() { return normalizeAddress; },
+    get restoreReadImageSnapshot() { return restoreReadImageSnapshot; },
   };
   const controls = global.ChatWorkspaceControls || (typeof require === 'function' ? require('./chat-workspace-controls') : null);
   const { loadText, normalizedPath, inputPath, matchesInput, fileChangeFor, fileKey, fileLocation, promoteFileTab, restoreFileView, canEditFile, isCodeFile, isEditorFile, codeMode, destroyEditor, editorSource, mountEditor, diffTexts, mergeFileChanges, codeModeToolbar, codeEditorBody, diffBody, tabBody, copyText, closeTab, cycleTab, focusAddress, bindWorkbench, hydrateRemoteMedia } = controls.create(controlsContext);
@@ -68,6 +69,8 @@
     fileChanges: null, editor: null, editorDrafts: Object.create(null), editorDirty: false,
     observer: null, visibilityObserver: null, unlisten: null, unlistenElement: null, nativeShown: '', nativePending: false, frame: 0, nativeRequest: 0,
   };
+  const READ_IMAGE_CACHE_BYTES = 64 * 1024 * 1024, READ_IMAGE_CACHE_TABS = 4;
+  let readImageRevision = 0, readImageUse = 0;
   function sessionApi() {
     return global.soduWorkAPI && (global.soduWorkAPI.conversationSession || global.soduWorkAPI.piSession);
   }
@@ -106,6 +109,54 @@
   }
   function tabById(id) { return WB.tabs.find((item) => item.id === id) || null; }
   function activeTab() { return tabById(WB.active); }
+  function readImagePayload(images) {
+    const imageUrls = (Array.isArray(images) ? images : [])
+      .map(image => links.imageUrl({ ...image, ok: true })).filter(Boolean);
+    // Count UTF-16 string storage conservatively. Only the active tab has
+    // image DOM, and off-screen images use browser lazy loading.
+    return { imageUrls, imageBytes: imageUrls.reduce((total, url) => total + url.length * 2, 0) };
+  }
+  function trimReadImageSnapshots() {
+    let count = 0, bytes = 0;
+    const inactive = WB.tabs.filter(tab => tab.id !== WB.active && tab.file?.readSnapshot?.imageUrls?.length)
+      .sort((a, b) => (b.file.readSnapshot.usedAt || 0) - (a.file.readSnapshot.usedAt || 0));
+    for (const tab of inactive) {
+      const snapshot = tab.file.readSnapshot;
+      if (count < READ_IMAGE_CACHE_TABS && bytes + snapshot.imageBytes <= READ_IMAGE_CACHE_BYTES) {
+        count++; bytes += snapshot.imageBytes; continue;
+      }
+      snapshot.imageUrls = []; snapshot.imageBytes = 0; snapshot.evicted = true;
+      snapshot.revision = ++readImageRevision;
+      delete snapshot.failedImages;
+    }
+  }
+  function restoreReadImageSnapshot(tab, retry = false) {
+    const snapshot = tab?.file?.readSnapshot;
+    if (tab?.kind !== 'image' || !snapshot?.evicted || snapshot.loading || (snapshot.error && !retry)) return false;
+    const owner = previewOwner(), api = sessionApi(), ref = context().ref, request = {};
+    const current = () => owner() && WB.tabs.includes(tab) && tab.file?.readSnapshot === snapshot && snapshot.request === request;
+    snapshot.request = request; snapshot.loading = true; snapshot.error = '';
+    snapshot.revision = ++readImageRevision;
+    Promise.resolve().then(() => {
+      if (!api?.toolDetail) throw Error('detail unavailable');
+      return api.toolDetail(ref, String(snapshot.id));
+    }).then(response => {
+      if (!current()) return;
+      if (!response?.ok || String(response.tool?.id) !== String(snapshot.id)) throw Error('detail unavailable');
+      const payload = readImagePayload(response.tool.readImages);
+      if (!payload.imageUrls.length) throw Error('image unavailable');
+      Object.assign(snapshot, payload, { evicted: false, imagesTruncated: Boolean(response.tool.readImagesTruncated) });
+      delete snapshot.failedImages;
+    }).catch(() => {
+      if (current()) snapshot.error = '图片暂时无法预览';
+    }).finally(() => {
+      if (!current()) return;
+      snapshot.request = null; snapshot.loading = false; snapshot.revision = ++readImageRevision;
+      trimReadImageSnapshots();
+      if (WB.active === tab.id && WB.open) paint();
+    });
+    return true;
+  }
   function hasVisibleTabs(tabs) { return Boolean(tabs && tabs.length); }
   function stateFor(tab) { return tab ? (WB.states[tab.id] || {}) : {}; }
   // Tab titles and service states are produced as Chinese display strings;
@@ -387,11 +438,16 @@
     if (!p) return false;
     if (hint?.readSnapshot) {
       const readSnapshot = { ...hint.readSnapshot };
+      const hasImages = Boolean(readSnapshot.imageCount || readSnapshot.images?.length || readSnapshot.imagesTruncated);
+      // Validate once when opening, not on every transcript repaint. Only the
+      // recorded image bytes are previewed; a tool path never grants file access.
+      Object.assign(readSnapshot, readImagePayload(readSnapshot.images), { revision: ++readImageRevision });
+      delete readSnapshot.images;
       const file = { name: p.split('/').pop() || p, relative: p, readSnapshot };
       WB.manualClosed = false;
       if (!WB.open) { resetSplit(WB.root); WB.open = true; }
-      addTab({ key: 'tool-read:' + workScope() + ':' + fileKey(file), kind: 'text',
-        label: file.name, file, view: 'code', autoPreview: false }, true);
+      addTab({ key: 'tool-read:' + workScope() + ':' + fileKey(file), kind: hasImages ? 'image' : 'text',
+        label: file.name, file, view: hasImages ? 'preview' : 'code', autoPreview: false }, true);
       paint();
       return true;
     }
@@ -693,8 +749,15 @@
     if (!WB.root) return;
     WB.root.querySelector('.ncw-tabs').innerHTML = tabsHtml();
     const tab = activeTab();
+    if (tab?.kind === 'image' && tab.file?.readSnapshot) {
+      tab.file.readSnapshot.usedAt = ++readImageUse;
+      if (WB.open) restoreReadImageSnapshot(tab);
+    }
+    trimReadImageSnapshots();
     const body = WB.root.querySelector('.ncw-body');
-    const mediaKey = tab?.mediaType ? JSON.stringify([tab.id, tab.mediaType, tab.url]) : '';
+    const mediaKey = tab?.kind === 'image' && tab.file?.readSnapshot
+      ? JSON.stringify([tab.id, 'read-image', tab.file.readSnapshot.revision])
+      : tab?.mediaType ? JSON.stringify([tab.id, tab.mediaType, tab.url]) : '';
     if (tab?.content) { body.replaceChildren(tab.content); body.dataset.wbMediaKey = ""; }
     else if (!mediaKey || body.dataset.wbMediaKey !== mediaKey) {
       body.querySelector?.('video')?.pause();

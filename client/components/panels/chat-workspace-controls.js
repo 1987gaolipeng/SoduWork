@@ -261,7 +261,7 @@ function mergeFileChanges(files, changeSet) {
 function codeModeToolbar(tab, libraryButton) {
     if (tab.file?.readSnapshot) return '<div class="ncw-code-modebar" data-read-snapshot>' +
       '<span data-user-content>' + ctx.esc(tab.label) + '</span><span>读取时快照</span>' +
-      '<button type="button" data-wb-code-copy title="复制读取时快照">复制</button></div>';
+      (tab.kind === 'image' ? '' : '<button type="button" data-wb-code-copy title="复制读取时快照">复制</button>') + '</div>';
     const change = fileChangeFor(tab.file);
     const diff = change ? '<button type="button" data-wb-code-view="diff" aria-pressed="' + (tab.view === 'diff') + '">' +
       '<span aria-hidden="true">↔</span><span>Diff</span></button>' : '';
@@ -309,6 +309,18 @@ function tabBody(tab) {
     }
     if (tab.kind === 'service' || tab.kind === 'browser' || tab.kind === 'web' || tab.kind === 'pdf') return ctx.browserHtml(tab);
     if (tab.kind === 'image') {
+      if (tab.file?.readSnapshot) {
+        const snapshot = tab.file.readSnapshot, images = snapshot.imageUrls || [];
+        const notice = snapshot.imagesTruncated ? '<div class="ncw-truncated" role="status">仅显示本次工具返回的部分内容。</div>' : '';
+        if (snapshot.loading || snapshot.evicted) return codeModeToolbar(tab) +
+          (snapshot.error ? '<div class="ncw-image-error"><span>图片暂时无法预览</span><button type="button" data-wb-read-image-retry>重新加载</button></div>' :
+            '<div class="ncw-loading" role="status"><span></span>正在读取图片…</div>');
+        return codeModeToolbar(tab) + notice + '<div class="ncw-image ncw-read-images" data-read-image-snapshot>' +
+          (images.length ? images.map((src, index) => '<div class="ncw-read-image" data-read-image-index="' + index + '">' +
+            (snapshot.failedImages?.has(index) ? '' : '<img loading="lazy" data-user-attributes="alt" src="' + ctx.esc(src) + '" alt="' + ctx.esc(tab.file.name) + '">') +
+            '<span class="ncw-image-error" data-read-image-error' + (snapshot.failedImages?.has(index) ? '' : ' hidden') + '>图片暂时无法预览</span></div>').join('') :
+            '<span class="ncw-image-error">图片暂时无法预览</span>') + '</div>';
+      }
       loadText(tab);
       return ctx.info.documentToolbar(tab, ctx.libraryUploadButton(tab.file), ctx.WB.previewLoading || ctx.WB.previewError, fileLocation(tab)) + '<div class="ncw-image">' +
         (ctx.WB.previewLoading ? '正在读取图片…' : ctx.WB.previewError ? '<div class="ncw-image-error"><span>' + ctx.esc(ctx.WB.previewError) +
@@ -434,7 +446,7 @@ function bindWorkbench(root, getContext) {
       const hit = event.target.closest('[data-wb-open],[data-wb-close],[data-wb-maximize],[data-wb-tab],[data-wb-tab-close],[data-wb-new],' +
         '[data-wb-file],[data-wb-service],[data-wb-tool],[data-wb-copy],[data-wb-file-open],[data-wb-nav],' +
         '[data-wb-code-view],[data-wb-code-copy],[data-wb-code-save],' +
-        '[data-output-image],[data-output-video],[data-wb-image-copy],[data-wb-image-retry],[data-wb-video-retry],[data-wb-media-retry],' +
+        '[data-output-image],[data-output-video],[data-wb-image-copy],[data-wb-image-retry],[data-wb-video-retry],[data-wb-media-retry],[data-wb-read-image-retry],' +
         '[data-wb-files],[data-wb-reference],[data-wb-inspect],[data-wb-send-annotations],[data-wb-copy-location],[data-wb-reference-file],[data-wb-copy-file],[data-wb-library-upload]');
       if (!hit) return;
       if (hit.hasAttribute('data-wb-maximize')) { ctx.maximizeWorkbench(); return; }
@@ -452,6 +464,10 @@ function bindWorkbench(root, getContext) {
           delete hit.dataset.imageState;
           ctx.links.hydrateImages(root, ctx.WB.files, { ref: ctx.context().ref, api: ctx.sessionApi() });
         }
+        return;
+      }
+      if (hit.hasAttribute('data-wb-read-image-retry')) {
+        if (ctx.restoreReadImageSnapshot(ctx.activeTab(), true)) ctx.paint();
         return;
       }
       if (hit.hasAttribute('data-wb-image-retry') || hit.hasAttribute('data-wb-video-retry')) { ctx.WB.previewKey = ''; ctx.paint(); return; }
@@ -593,6 +609,15 @@ function bindWorkbench(root, getContext) {
     });
     root.addEventListener('error', event => {
       if (event.target.closest?.('[data-wb-remote-media]')) return;
+      const readImage = event.target.closest?.('[data-read-image-index]');
+      if (readImage && root.contains(event.target)) {
+        const snapshot = ctx.activeTab()?.file?.readSnapshot;
+        if (!snapshot) return;
+        (snapshot.failedImages ||= new Set()).add(Number(readImage.dataset.readImageIndex));
+        event.target.remove();
+        readImage.querySelector('[data-read-image-error]').hidden = false;
+        return;
+      }
       if (event.target.matches?.('.ncw-image img') && root.contains(event.target)) {
         ctx.WB.previewError = '图片内容无法识别，请重新加载或在原生应用中查看';
         ctx.paint();

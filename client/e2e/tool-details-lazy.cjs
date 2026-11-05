@@ -46,9 +46,34 @@ if (typeof electron === 'string') {
     const js = code => win.webContents.executeJavaScript(code);
     async function until(code) { for (let i = 0; i < 100; i++) { if (await js(code)) return; await pause(40); } throw Error('Timed out: ' + code); }
     async function click(selector) {
-      await js('document.querySelector(' + JSON.stringify(selector) + ')?.scrollIntoView({block:"center"})');
+      // Browsing an older row must express real user scroll intent. A plain
+      // scrollIntoView does not pause follow-latest, so an asynchronous
+      // workbench resize can legitimately move that row out of the viewport.
+      const browse = await js('(()=>{const el=document.querySelector(' + JSON.stringify(selector) + '),box=el?.closest("#nchatScroll");' +
+        'if(!box)return null;const r=el.getBoundingClientRect(),b=box.getBoundingClientRect();' +
+        'return r.top<b.top?{x:Math.round(b.left+Math.min(60,b.width/4)),y:Math.round(b.top+Math.min(120,b.height/4))}:null;})()');
+      if (browse) {
+        win.webContents.focus();
+        if (!win.webContents.debugger.isAttached()) win.webContents.debugger.attach('1.3');
+        await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {
+          type: 'mouseWheel', ...browse, deltaY: -120, deltaX: 0,
+        });
+        await until('document.querySelector("#nchatScroll").getAttribute("data-scroll-follow")==="paused"');
+      }
+      await js('document.querySelector(' + JSON.stringify(selector) + ')?.scrollIntoView({block:"center",behavior:"instant"})');
+      // Native mouse input uses the composed frame, which can lag DOM geometry in a hidden window.
       await pause(100);
-      const point = await js('(()=>{const el=document.querySelector(' + JSON.stringify(selector) + ');if(!el)throw Error("missing click target");el.scrollIntoView({block:"center"});const r=el.getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};})()');
+      let point;
+      for (let attempt = 0; attempt < 100; attempt++) {
+        point = await js('(()=>{const el=document.querySelector(' + JSON.stringify(selector) + ');if(!el)throw Error("missing click target");' +
+          'const r=el.getBoundingClientRect();' +
+          'const p={x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};' +
+          'return r.width>0&&r.height>0&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight&&' +
+          'el.contains(document.elementFromPoint(p.x,p.y))?p:null;})()');
+        if (point) break;
+        await pause(20);
+      }
+      assert.ok(point, 'Click target must be visible and hit-testable: ' + selector);
       win.webContents.focus();
       win.webContents.sendInputEvent({ type: 'mouseMove', ...point });
       win.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, ...point });

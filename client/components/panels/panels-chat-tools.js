@@ -801,6 +801,9 @@
       const text = String((t.state === 'running' ? t.partial : t.result) || '');
       return ChatWorkbench.openPath(sidePath, { readSnapshot: {
         id: String(t.id || sidePath), text: bounded(text), truncated: text.length > 240000,
+        images: Array.isArray(t.readImages) ? t.readImages : [],
+        imageCount: Number(t.readImageCount) || t.readImages?.length || 0,
+        imagesTruncated: Boolean(t.readImagesTruncated),
       } });
     }
     const edits = Array.isArray(args.edits) ? args.edits : [];

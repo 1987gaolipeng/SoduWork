@@ -26,6 +26,7 @@ const protocolGuard = require('../agent-runtime/protocol-guard');
 const stallRecovery = require('./stall-recovery');
 const preparation = require('./tool-preparation');
 const agentSource = require('../conversation/agent-source.cjs');
+const { IMAGE_BYTES, MAX_FILES } = require('./attachments');
 const SCOPES = Object.freeze({
   NORMAL: 'normal',
   GOAL_PROGRESS: 'goal-progress',
@@ -142,8 +143,56 @@ function _textOf(result) {
   return arr.filter((c) => c && c.type === 'text').map((c) => c.text || '').join('\n');
 }
 
+// Keep the pixels returned by a read, not a later filesystem version. Only the
+// on-demand tool receipt exposes them; ordinary UI snapshots omit these bytes.
+function _readImages(tool, result) {
+  delete tool.readImages;
+  delete tool.readImagesTruncated;
+  if (String(tool.toolKind || '').toLowerCase() !== 'read' &&
+      !/^(?:read|read_file|open_file)$/i.test(tool.name)) return;
+  const images = [];
+  let bytes = 0, truncated = false;
+  for (const block of Array.isArray(result?.content) ? result.content : []) {
+    if (block?.type !== 'image') continue;
+    const mimeType = typeof block.mimeType === 'string' ? block.mimeType.toLowerCase() : '';
+    const data = block.data;
+    if (!/^image\/[a-z0-9][a-z0-9.+-]*$/.test(mimeType) ||
+        typeof data !== 'string' || !data.length || data.length % 4 !== 0) continue;
+    // Check the transport size before scanning/decoding any untrusted payload.
+    const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0;
+    const size = data.length / 4 * 3 - padding;
+    if (images.length >= MAX_FILES || size > IMAGE_BYTES - bytes) { truncated = true; continue; }
+    if (/[^A-Za-z0-9+/=]/.test(data) || (data.indexOf('=') !== -1 &&
+        data.indexOf('=') !== data.length - padding)) continue;
+    images.push({ mimeType, data });
+    bytes += size;
+  }
+  if (images.length) tool.readImages = images;
+  if (truncated) tool.readImagesTruncated = true;
+}
+
 function _usageObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+}
+
+// Pi initializes every counter to zero before receiving provider usage. Keep
+// that placeholder in the message receipt, but not in the context meter.
+function reportedContextUsage(message) {
+  const usage = _usageObject(message.usage);
+  if (!usage || message.taskOutputKey || message.model === 'task-executor') return null;
+  const inputs = [usage.input, usage.inputTokens, usage.input_tokens, usage.promptTokens,
+    usage.prompt_tokens, usage.contextTokens, usage.context_tokens, usage.context];
+  const cache = [usage.cacheRead, usage.cache_read_tokens, usage.cache_read_input_tokens,
+    usage.cached_input_tokens, usage.cacheWrite, usage.cache_write_tokens, usage.cacheCreation,
+    usage.cache_creation_input_tokens, usage.cache_write_input_tokens, usage.cache?.read, usage.cache?.write];
+  const positive = value => Number.isFinite(value) && value > 0;
+  if (inputs.some(positive) || cache.some(positive)) return usage;
+  if (!inputs.includes(0)) return null;
+  const otherCounts = [usage.output, usage.outputTokens, usage.output_tokens, usage.completion_tokens,
+    usage.total, usage.totalTokens, usage.total_tokens];
+  if (otherCounts.some(positive)) return usage;
+  if (message.stopReason === 'aborted' || message.stopReason === 'error') return null;
+  return otherCounts.includes(0) ? null : usage;
 }
 
 function _eventUsage(event, assistantMessageEvent) {
@@ -442,6 +491,7 @@ function apply(state, ev) {
       t.name = ev.toolName || t.name;
       _toolMetadata(t, ev);
       t.result = _textOf(ev.result);
+      _readImages(t, ev.result);
       const accessCancelled = !ev.isError && ev.state === 'cancelled' && ev.cancelReason === 'access-change';
       t.isError = !!ev.isError;
       t.state = ev.isError ? 'error' : accessCancelled ? 'cancelled' : 'done';

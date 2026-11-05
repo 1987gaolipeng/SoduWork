@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import asyncio
+import itertools
 import json
 import os
 from pathlib import Path
@@ -30,6 +31,7 @@ def fake_agent():
             content = message["params"]["prompt"]
             report = {"types": [row["type"] for row in content],
                       "pixels": [row["data"] for row in content if row["type"] == "image"],
+                      "mimes": [row["mimeType"] for row in content if row["type"] == "image"],
                       "privateEnvRemoved": "SODUWORK_RUNNER_INPUT_IMAGES" not in os.environ}
             print(json.dumps({"jsonrpc": "2.0", "method": "session/update", "params": {
                 "sessionId": "fixture-image-session", "update": {"sessionUpdate": "agent_message_chunk",
@@ -93,13 +95,45 @@ class ImageHandoffTests(unittest.TestCase):
         self.assertEqual(cfg[images.CFG_KEY], [])
         self.assertEqual(images.environment(cfg, root), "")
 
-    def test_invalid_truncated_and_mislabeled_images_fail(self):
+    def test_decoding_is_delegated_and_signature_corrects_mislabeled_images(self):
+        # The transport no longer decodes or rejects images on a format allowlist.
         for data, name, mime in ((b"\x89PNG", "a.png", "image/png"),
                                  (png()[:-4], "b.png", "image/png"),
                                  (png(), "c.png", "image/jpeg"),
-                                 (b"<svg/>", "d.svg", "image/svg+xml")):
-            with self.subTest(name=name), self.assertRaises(images.ImageInputError):
-                self.stage(data, name, mime)
+                                 (png() + b"extra metadata", "d.png", "image/png"),
+                                 (png()[:-1] + b"\0", "e.png", "image/png")):
+            with self.subTest(name=name):
+                cfg, root = self.stage(data, name, mime)
+                content = images.prompt("describe", {"promptCapabilities": {"image": True}}, images.environment(cfg, root))
+                self.assertEqual(content[1]["mimeType"], "image/png")
+                self.assertEqual(base64.b64decode(content[1]["data"]), data)
+
+    def test_other_image_types_and_unknown_image_subtypes_are_forwarded(self):
+        for name, declared, expected in (
+            ("vector.svg", "image/svg+xml", "image/svg+xml"),
+            ("scan.tiff", "application/octet-stream", "image/tiff"),
+            ("bitmap.bmp", "", "image/bmp"),
+            ("photo.avif", "", "image/avif"),
+            ("photo.heic", "", "image/heic"),
+            ("photo.heif", "", "image/heif"),
+            ("photo.jxl", "", "image/jxl"),
+            ("photo.nef", "", "image/x-nikon-nef"),
+            ("photo.psd", "", "image/vnd.adobe.photoshop"),
+            ("no-extension", " IMAGE/X-FUTURE; version=2 ", "image/x-future"),
+        ):
+            with self.subTest(name=name):
+                data = b'<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>' if name.endswith('.svg') else b"format-specific bytes owned by the selected decoder"
+                cfg, root = self.stage(data, name, declared)
+                content = images.prompt("describe", {"promptCapabilities": {"image": True}}, images.environment(cfg, root))
+                self.assertEqual(content[1]["mimeType"], expected)
+                self.assertEqual(base64.b64decode(content[1]["data"]), data)
+                self.assertEqual(Path(cfg["images"][0]).read_bytes(), data)
+
+    def test_empty_and_encrypted_attachments_have_specific_errors(self):
+        encrypted = b"\xe0\xa8\x91\xe7" + bytes(84) + b"Esafenet" + bytes(4000)
+        for data, error in ((b"", "图片附件为空"), (encrypted, "图片附件受加密保护")):
+            with self.subTest(error=error), self.assertRaisesRegex(images.ImageInputError, error):
+                self.stage(data)
 
     def test_oversize_and_changed_image_fail_without_truncation(self):
         with patch.object(images, "MAX_IMAGE_BYTES", 32), self.assertRaises(images.ImageInputError):
@@ -133,23 +167,26 @@ class ImageHandoffTests(unittest.TestCase):
         self.assertTrue(images.transport_supported({**fallback, "visionFallbackAvailable": True}))
 
     def test_three_acp_agents_receive_real_image_blocks_on_new_and_loaded_sessions(self):
-        for agent in ("opencode", "codex-harness", "qwen"):
-            for resume in (False, True):
-                with self.subTest(agent=agent, resume=resume):
-                    cfg, root = self.stage()
-                    env = {**os.environ, images.ENV_KEY: images.environment(cfg, root), "PYTHONUTF8": "1"}
-                    args = [sys.executable, "-B", str(ROOT / "app/services/acp_bridge.py"), "--cwd", str(self.root),
-                            "--agent-name", agent, "--permission", "readonly"]
-                    if resume:
-                        args += ["--session", "fixture-image-session"]
-                    args += ["--", sys.executable, "-B", str(Path(__file__).resolve()), "--fake-agent"]
-                    result = subprocess.run(args, input="describe uploaded image", text=True, encoding="utf-8", capture_output=True, env=env, timeout=15)
-                    self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-                    events = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
-                    content = json.loads(next(row["part"]["text"] for row in events if row.get("type") == "text"))
-                    self.assertEqual(content["types"], ["text", "image"])
-                    self.assertEqual(base64.b64decode(content["pixels"][0]), png())
-                    self.assertTrue(content["privateEnvRemoved"])
+        formats = [("pixel.png", png(), "image/png"),
+                   ("vector.svg", b'<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>', "image/svg+xml")]
+        for agent, resume, (name, pixels, mime) in itertools.product(
+                ("opencode", "codex-harness", "qwen"), (False, True), formats):
+            with self.subTest(agent=agent, resume=resume, mime=mime):
+                cfg, root = self.stage(pixels, name, mime)
+                env = {**os.environ, images.ENV_KEY: images.environment(cfg, root), "PYTHONUTF8": "1"}
+                args = [sys.executable, "-B", str(ROOT / "app/services/acp_bridge.py"), "--cwd", str(self.root),
+                        "--agent-name", agent, "--permission", "readonly"]
+                if resume:
+                    args += ["--session", "fixture-image-session"]
+                args += ["--", sys.executable, "-B", str(Path(__file__).resolve()), "--fake-agent"]
+                result = subprocess.run(args, input="describe uploaded image", text=True, encoding="utf-8", capture_output=True, env=env, timeout=15)
+                self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                events = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+                content = json.loads(next(row["part"]["text"] for row in events if row.get("type") == "text"))
+                self.assertEqual(content["types"], ["text", "image"])
+                self.assertEqual(base64.b64decode(content["pixels"][0]), pixels)
+                self.assertEqual(content["mimes"], [mime])
+                self.assertTrue(content["privateEnvRemoved"])
 
     def test_agent_without_image_capability_fails_before_prompt(self):
         cfg, root = self.stage()
@@ -229,16 +266,16 @@ class ImageHandoffTests(unittest.TestCase):
             model = json.loads(env["OPENCODE_CONFIG_CONTENT"])["provider"]["company"]["models"]["fixture"]
             self.assertEqual(model["modalities"]["input"], expected)
 
-    def test_invalid_dispatch_and_preflight_errors_are_visible_without_child_processes(self):
+    def test_empty_dispatch_and_preflight_errors_are_visible_without_child_processes(self):
         from app.services import local_process
         profile = {**local_base._PROFILES["qwen"], "bin": lambda: sys.executable}
         before = set(local_base._RUNS)
         with patch.dict(local_base._PROFILES, {"qwen": profile}), patch.object(ai_local, "_spawn") as spawn:
             reply = ai_local.dispatch_sync({"local_cli": "qwen"}, SimpleNamespace(id="fixture", title="input", note=""),
-                [("broken.png", b"broken", "image/png")], {"id": "local:qwen"},
+                [("empty.png", b"", "image/png")], {"id": "local:qwen"},
                 {"workDir": str(self.root), "deliveryMode": "files", "requiredAgentCapabilities": ["files"]}, capability_grants=["files"])
             self.assertFalse(reply["ok"])
-            self.assertIn("图片格式", reply["error"])
+            self.assertIn("图片附件为空", reply["error"])
             spawn.assert_not_called()
             self.assertEqual(set(local_base._RUNS), before)
 
