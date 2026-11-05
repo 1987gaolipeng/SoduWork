@@ -580,11 +580,22 @@ async def probe_requirements(session, names: list[str] | None,
     }
 
 
-async def readiness(session, names: list[str] | None = None) -> dict:
+async def _dispatch_rows(session, client=None) -> list[dict]:
+    """Share connector selection between catalog readiness and actual grants."""
+    rows = await load(session)
+    if client is not None:
+        selected = {str(name) for name in (getattr(client, "mcp_enabled", None) or [])}
+        rows = [item for item in rows if item.get("name") in selected]
+        company_keys = {row["name"].casefold() for row in rows}
+        rows += [row for row in personal_load(client) if row["name"].casefold() not in company_keys]
+    return rows
+
+
+async def readiness(session, names: list[str] | None = None, *, client=None) -> dict:
     """Read-only dependency check for plugin preflight; never writes runtime files."""
     wanted = {str(name).strip() for name in (names or []) if str(name).strip()}
     from .plugin_builtin import is_virtual_mcp
-    rows = await load(session)
+    rows = await _dispatch_rows(session, client)
     enabled = {str(item.get("name") or "") for item in rows
                if item.get("enabled") and _usable(item)}
     # SoduWork-owned capabilities are available through the signed plugin gateway
@@ -606,14 +617,7 @@ async def runtime_for_dispatch(session, names: list[str] | None = None,
     """Return only MCP servers declared by the plugin's names allowlist in both local files and
     remote payloads. Organization configuration does not grant every plugin every credential.
     """
-    rows = await load(session)
-    if client is not None:
-        selected_names = {str(name) for name in (getattr(client, "mcp_enabled", None) or [])}
-        rows = [item for item in rows if item.get("name") in selected_names]
-        # An opted-in company integration must never be shadowed by a private
-        # connector with the same name on another device.
-        company_keys = {r["name"].casefold() for r in rows}
-        rows = rows + [r for r in personal_load(client) if r["name"].casefold() not in company_keys]
+    rows = await _dispatch_rows(session, client)
     rows = expand_rows(rows, variables)
     enabled = {x["name"]: x for x in rows if x.get("enabled") and _usable(x)}
     if names is None:

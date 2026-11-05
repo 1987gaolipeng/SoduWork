@@ -11941,8 +11941,8 @@
     },
     {
       "path": "hub-backend/app/services/acp_agents.py",
-      "bytes": 11177,
-      "sha256": "c38dc11647988450197b7247a46645823e7281d52d96b9a2132a8ead71d1d5c7"
+      "bytes": 11733,
+      "sha256": "cf3b7e0c2520fdef0541b44a5b1150e8c3bc0b5038f5afdc9c9266624d66774d"
     },
     {
       "path": "hub-backend/app/services/acp_bridge.py",
@@ -11981,8 +11981,8 @@
     },
     {
       "path": "hub-backend/app/services/agent_native_install.py",
-      "bytes": 9307,
-      "sha256": "bfd364fcb2cb3690ef1d6d6ae76adef530f8e5773ff7d15a98b82f2345c47655"
+      "bytes": 10442,
+      "sha256": "d1319aea8d02f993c387ed5dac246db2f7d24138fdd1e90c098357e716706ff1"
     },
     {
       "path": "hub-backend/app/services/agent_npm_network.py",
@@ -12981,8 +12981,8 @@
     },
     {
       "path": "hub-backend/app/services/mcp_servers.py",
-      "bytes": 35216,
-      "sha256": "82063a1b2b237bdc8372cd63b0e0e43d09eeb27566ddb6b3b7fb6bddd3c90fe4"
+      "bytes": 35316,
+      "sha256": "38532c62957fed6ee95cd4f7511fbcbc2587d0c5f098acd485e20d1612827bdd"
     },
     {
       "path": "hub-backend/app/services/memory_records.py",
@@ -13658,6 +13658,11 @@
       "path": "hub-backend/app/services/session_memory.py",
       "bytes": 15026,
       "sha256": "1ed15406e1d087ba8b94519cfac61c71b56db5ebc02863cf5bfe20b54a2e1a69"
+    },
+    {
+      "path": "hub-backend/app/services/shutdown.py",
+      "bytes": 1946,
+      "sha256": "cb53143a9c3ecd16ebf294da8d873816319e9b496530018b6a3100043647fea8"
     },
     {
       "path": "hub-backend/app/services/skill_content.py",
@@ -17511,8 +17516,8 @@
     },
     {
       "path": "hub-backend/tests/test_agent_native_install.py",
-      "bytes": 5847,
-      "sha256": "19b14bf7f9bff508cca3b7e194e862e407c0ce7dfcc45d6f321ca05c74b5cc95"
+      "bytes": 8728,
+      "sha256": "0cb211ac5597318ed5e0e0e39703387e0ae853268705e433b81ac204995b55cb"
     },
     {
       "path": "hub-backend/tests/test_agent_probe_routes.py",

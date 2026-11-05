@@ -9,17 +9,22 @@ multiple Runner instances on one computer never replace each other's binary.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import os
 import platform
 import re
 import shutil
 import stat
+import ssl
 import subprocess
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+from . import managed_agent_network
 
 
 CLAUDE_RELEASES = "https://downloads.claude.ai/claude-code-releases"
@@ -61,20 +66,35 @@ def _platform() -> str:
 
 
 def _read_url(url: str, *, limit: int, timeout: int = 60) -> bytes:
-    request = urllib.request.Request(url, headers={"User-Agent": "SoduWork-Agent-Installer/1"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        length = response.headers.get("Content-Length")
-        if length and int(length) > limit:
-            raise RuntimeError("The vendor download is larger than the safety limit")
-        data = bytearray()
-        while True:
-            chunk = response.read(min(1024 * 1024, limit - len(data) + 1))
-            if not chunk:
-                break
-            data.extend(chunk)
-            if len(data) > limit:
-                raise RuntimeError("The vendor download is larger than the safety limit")
-        return bytes(data)
+    for attempt in range(3):
+        request = urllib.request.Request(url, headers={"User-Agent": "SoduWork-Agent-Installer/1"})
+        try:
+            # Share live Windows proxy discovery with the other managed Agents.
+            # A retry starts a fresh response; partial binaries are never activated.
+            with managed_agent_network.open_download(request, timeout=timeout) as response:
+                length = response.headers.get("Content-Length")
+                if length and int(length) > limit:
+                    raise RuntimeError("The vendor download is larger than the safety limit")
+                data = bytearray()
+                while True:
+                    chunk = response.read(min(1024 * 1024, limit - len(data) + 1))
+                    if not chunk:
+                        break
+                    data.extend(chunk)
+                    if len(data) > limit:
+                        raise RuntimeError("The vendor download is larger than the safety limit")
+                if length and len(data) != int(length):
+                    raise http.client.IncompleteRead(bytes(data), int(length) - len(data))
+                return bytes(data)
+        except (OSError, urllib.error.URLError, http.client.IncompleteRead) as exc:
+            reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+            retryable = not isinstance(reason, ssl.SSLError)
+            if isinstance(exc, urllib.error.HTTPError):
+                retryable = exc.code in {408, 429, 500, 502, 503, 504}
+                exc.close()
+            if not retryable or attempt == 2:
+                raise RuntimeError("Claude Code 下载失败：" + managed_agent_network.error_label(exc)) from exc
+            time.sleep(attempt + 1)
 
 
 def _latest() -> str:

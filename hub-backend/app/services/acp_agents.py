@@ -201,6 +201,14 @@ def inject_llm_env(key: str, env: dict, llm: dict, *, mode: str = "work") -> Non
         from . import dsh_gateway
         dsh_gateway.inject_env(env, llm)
     elif key == "codex-harness":
+        # The managed adapter resolves its own compatible native dependency.
+        # Host overrides and debug logging must not route it to a personal CLI
+        # or persist the per-turn enterprise gateway credential.
+        env.pop("CODEX_PATH", None)
+        env.pop("APP_SERVER_LOGS", None)
+        startup = Path(__file__).with_name("codex_gateway_startup.mjs")
+        if not startup.is_file():
+            raise RuntimeError("Codex Harness gateway startup component is missing")
         # codex-acp gateway auth keeps credentials out of argv/config files.
         # The adapter maps this gateway to Codex's Responses wire protocol.
         gateway = {
@@ -212,6 +220,7 @@ def inject_llm_env(key: str, env: dict, llm: dict, *, mode: str = "work") -> Non
             }},
         }
         env.update(
+            NODE_OPTIONS="--import=" + startup.resolve().as_uri(),
             NO_BROWSER="1",
             MODEL_PROVIDER="custom-gateway",
             INITIAL_AGENT_MODE=("read-only" if mode == "plan" else "agent"),

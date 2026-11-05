@@ -1,8 +1,11 @@
 """Native Claude installer tests without network access or real Agent binaries."""
 import hashlib
+import io
 import json
+import ssl
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 from types import SimpleNamespace
@@ -12,6 +15,47 @@ from app.services import agent_native_install, agent_setup
 
 
 class AgentNativeInstallTests(unittest.TestCase):
+    def test_download_uses_shared_proxy_discovery_and_retries_transient_failures(self):
+        response = io.BytesIO(b"2.1.317")
+        response.headers = {"Content-Length": "7"}
+        with patch.object(agent_native_install.managed_agent_network, "open_download",
+                          side_effect=[urllib.error.URLError(TimeoutError()), response]) as download, \
+             patch.object(agent_native_install.time, "sleep") as sleep:
+            self.assertEqual(agent_native_install._read_url("https://downloads.claude.ai/latest", limit=128), b"2.1.317")
+        self.assertEqual(download.call_count, 2)
+        sleep.assert_called_once_with(1)
+
+    def test_download_restarts_after_truncation_without_joining_partial_bytes(self):
+        responses = [io.BytesIO(b"part"), io.BytesIO(b"complete")]
+        for response in responses:
+            response.headers = {"Content-Length": "8"}
+        with patch.object(agent_native_install.managed_agent_network, "open_download", side_effect=responses), \
+             patch.object(agent_native_install.time, "sleep"):
+            self.assertEqual(agent_native_install._read_url("https://downloads.claude.ai/binary", limit=128), b"complete")
+
+    def test_download_never_retries_certificate_errors_missing_releases_or_oversized_bodies(self):
+        oversized = io.BytesIO(b"too large")
+        oversized.headers = {"Content-Length": "9"}
+        for result in [urllib.error.URLError(ssl.SSLCertVerificationError()),
+                       urllib.error.HTTPError("https://downloads.claude.ai/binary", 404, "missing", {}, None), oversized]:
+            with self.subTest(result=type(result).__name__), \
+                 patch.object(agent_native_install.managed_agent_network, "open_download",
+                              side_effect=result if isinstance(result, Exception) else None,
+                              return_value=result) as download, patch.object(agent_native_install.time, "sleep") as sleep:
+                with self.assertRaises(RuntimeError):
+                    agent_native_install._read_url("https://downloads.claude.ai/binary", limit=8)
+                self.assertEqual(download.call_count, 1)
+                sleep.assert_not_called()
+
+    def test_exhausted_retries_keep_proxy_credentials_out_of_diagnostics(self):
+        with patch.object(agent_native_install.managed_agent_network, "open_download",
+                          side_effect=urllib.error.URLError("https://name:private@proxy.invalid/?token=private")) as download, \
+             patch.object(agent_native_install.time, "sleep"):
+            with self.assertRaises(RuntimeError) as error:
+                agent_native_install._read_url("https://downloads.claude.ai/binary", limit=128)
+        self.assertEqual(download.call_count, 3)
+        self.assertNotIn("private", str(error.exception))
+
     def test_all_supported_native_platforms_and_libcs(self):
         for system, machine, libc, expected in [
             ('win32', 'AMD64', '', 'win32-x64'), ('win32', 'ARM64', '', 'win32-arm64'),
