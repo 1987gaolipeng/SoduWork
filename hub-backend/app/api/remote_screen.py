@@ -19,7 +19,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import SessionLocal, get_session
-from ..deps import current_client
+from ..deps import current_client, identity_only
 from ..models import Client
 from ..services import device_auth, native_discovery
 from ..remote_screen_models import RemoteScreenGrant
@@ -432,6 +432,7 @@ async def create_screen_request(
 
 
 @router.get("/requests")
+@identity_only
 async def source_screen_requests(
     client: Client = Depends(current_client), session: AsyncSession = Depends(get_session)
 ):

@@ -730,7 +730,7 @@
 
   /* HTTP 4xx/5xx prove backend reachability; mark offline only when fetch fails due to network errors or timeout. */
   function markFromError(e) {
-    if (e && e.code === 'STALE_TASK_SCOPE') return;
+    if (e && (e.code === 'STALE_TASK_SCOPE' || e.connectivityHandled)) return;
     var msg = String(e && e.message || e);
     if ((e && Number(e.status)) || /^HTTP \d+$/.test(msg)) { mark(true); }  /* An HTTP status proves backend reachability. */
     else { mark(false); }                         /* TypeError/AbortError indicate a failed connection or aborted request. */
@@ -752,7 +752,9 @@
   }
   function refreshSentNotices(requestScope) {
     if (requestScope === taskStorageKey('ops') && global.MateNoticeSync) {
-      void global.MateNoticeSync.refresh('sent', true).catch(() => {});
+      void invalidateDomain('team-messages-sent', domainScope()).then(() => {
+        if (requestScope === taskStorageKey('ops')) return global.MateNoticeSync.refresh('sent', true);
+      }).catch(() => {});
     }
   }
 
@@ -769,10 +771,52 @@
     return path;
   }
 
+  function domainScope() {
+    return { hub: base().replace(/\/+$/, ''), clientId: device(), userId: String(_clientUser?.id || '') };
+  }
+  function sameDomainScope(value) {
+    var current = domainScope();
+    return value && value.hub === current.hub && value.clientId === current.clientId && value.userId === current.userId;
+  }
+  async function domainRead(domain, path) {
+    var bridge = global.soduWorkAPI, scope = domainScope();
+    if (!bridge?.clientDomainRead || !scope.userId) return jfetch(path);
+    var result = await bridge.clientDomainRead(domain, scope);
+    if (!sameDomainScope(scope)) throw staleTaskScope();
+    if (result?.code === 'DOMAIN_POLL_FALLBACK') return jfetch(path);
+    // A local snapshot or replayed backoff error does not prove current reachability.
+    if (typeof result?.online === 'boolean') mark(result.online);
+    if (!result?.ok) {
+      if (result?.status) {
+        var error = httpError({status: result.status}, JSON.stringify(result.body || {detail: result.reason}));
+        error.connectivityHandled = true;
+        if (result.status !== 401) handleAuthError(error);
+        throw error;
+      }
+      throw Object.assign(new Error(result?.reason || '同步暂时不可用'), {status: result?.status, code: result?.code, connectivityHandled: true});
+    }
+    return result.value;
+  }
+  async function invalidateDomain(domain, scope) {
+    if (!sameDomainScope(scope)) throw staleTaskScope();
+    try { if (global.soduWorkAPI?.clientDomainInvalidate) await global.soduWorkAPI.clientDomainInvalidate(domain, scope); }
+    catch (_) { /* Cache maintenance cannot turn a committed write into a failure. */ }
+    if (!sameDomainScope(scope)) throw staleTaskScope();
+  }
+  global.soduWorkAPI?.onClientDomainChanged?.(value => {
+    if (!sameDomainScope(value?.scope)) return;
+    try { global.dispatchEvent(new CustomEvent('soduwork-domain-changed', {detail: {domain: value.domain}})); } catch (_) {}
+  });
+
   var SoduWorkAPI = {
     get online() { return _online; },
-    conversationProjects: () => jfetch('/conversation-projects'),
-    saveConversationProject: (id, body) => jfetch('/conversation-projects/' + encodeURIComponent(id), {method: 'PUT', body: JSON.stringify(body)}),
+    conversationProjects: () => domainRead('conversation-projects', '/conversation-projects'),
+    saveConversationProject: async (id, body) => {
+      var scope = domainScope();
+      var result = await jfetch('/conversation-projects/' + encodeURIComponent(id), {method: 'PUT', body: JSON.stringify(body)});
+      await invalidateDomain('conversation-projects', scope);
+      return result;
+    },
     hubBase: base,
     hubEnvironment: hubEnvironment,
     hubConfig: hubConfig,
@@ -852,7 +896,7 @@
       return task;
     },
     async getConfig() {
-      try { var c = await jfetch('/config'); mark(true); return c || {}; }
+      try { var c = await domainRead('config', '/config'); return c || {}; }
       catch (e) { markFromError(e); return lsCfg(); }
     },
 
@@ -1151,15 +1195,17 @@
      */
     /* Personal model configuration returns availability and secret metadata, never plaintext keys. */
     async myModels() {
-      var r = await jfetch('/my-models');
-      mark(true); return r || { providers: [], usable: [], myModels: [] };
+      var r = await domainRead('models', '/my-models');
+      return r || { providers: [], usable: [], myModels: [] };
     },
     /*
      * Accept provider overrides, keys, and models. Omitted keys remain unchanged; null removes
      * the personal key and restores the company fallback.
      */
     async saveMyModels(body) {
+      var scope = domainScope();
       var r = await jfetch('/my-models', { method: 'PUT', body: JSON.stringify(body || {}) });
+      await invalidateDomain('models', scope);
       mark(true); return r;
     },
     /*
@@ -1172,8 +1218,10 @@
       mark(true); return r;
     },
     async checkMyModelCapabilities(body) {
-      return jfetch('/my-models/capabilities/check', { method: 'POST',
+      var scope = domainScope();
+      var result = await jfetch('/my-models/capabilities/check', { method: 'POST',
         body: JSON.stringify(body), signal: _abortSignal(140000) });
+      await invalidateDomain('models', scope); return result;
     },
     /*
      * CLI installation and real execution checks are asynchronous jobs. Start a job and poll
@@ -1264,9 +1312,11 @@
     },
 
     async setAgentModel(key, model) {
+      var scope = domainScope();
       var r = await jfetch('/agent-setup/model', {
         method: 'PUT', taskScope: taskStorageKey('ops'), body: JSON.stringify({ key: key, model: model || '' })
       });
+      await invalidateDomain('models', scope);
       mark(true); return r;
     },
     /* A Runner hosts task execution. Pausing blocks new tasks without interrupting existing sessions. */
@@ -1653,19 +1703,34 @@
     async mateMessageFile(id) {
       return jfetch('/team/message-files/' + encodeURIComponent(id));
     },
-    async mateMessages(folder, limit, before) {
+    async mateMessages(folder, limit, before, ifRevision) {
       try {
         var q = '?folder=' + encodeURIComponent(folder || 'received') + '&limit=' + encodeURIComponent(limit || 100);
         if (before) q += '&before=' + encodeURIComponent(before);
-        var r = await jfetch('/team/messages' + q, { taskScope: taskStorageKey('ops') }); mark(true); return r || { ok: true, items: [] };
+        else if (ifRevision) q += '&ifRevision=' + encodeURIComponent(ifRevision);
+        var shared = !before && Number(limit) === 200 && (!folder || folder === 'sent' || folder === 'received');
+        var r = shared ? await domainRead('team-messages-' + (folder === 'sent' ? 'sent' : 'received'), '/team/messages' + q)
+          : await jfetch('/team/messages' + q, { taskScope: taskStorageKey('ops') });
+        if (shared && ifRevision && r?.revision === ifRevision) r = {ok: true, folder: folder === 'sent' ? 'sent' : 'received',
+          items: [], nextCursor: '', notModified: true, revision: r.revision};
+        return r || { ok: true, items: [] };
       } catch (e) { markFromError(e); return { ok: false, items: [], reason: '通知暂时无法加载，请重试' }; }
     },
+    async invalidateMateMessageCache(folder) {
+      var scope = domainScope();
+      await Promise.all((folder ? [folder] : ['received', 'sent'])
+        .map(side => invalidateDomain('team-messages-' + (side === 'sent' ? 'sent' : 'received'), scope)));
+    },
     async markMateMessageRead(id) {
+      var scope = domainScope();
       var r = await jfetch('/team/messages/' + encodeURIComponent(id) + '/read', { method: 'POST', taskScope: taskStorageKey('ops') });
+      await invalidateDomain('team-messages-received', scope);
       mark(true); return r;
     },
     async markMateMessageDelivered(id) {
+      var scope = domainScope();
       var r = await jfetch('/team/messages/' + encodeURIComponent(id) + '/delivered', { method: 'POST', taskScope: taskStorageKey('ops') });
+      await invalidateDomain('team-messages-received', scope);
       mark(true); return r;
     },
     async handoffTask(tid, assigneeUserId, note) {
@@ -2600,7 +2665,9 @@
     },
     /* Synchronize configuration through saveCfg(). */
     async syncConfig(cfg) {
-      try { await jfetch('/config', { method: 'PUT', body: JSON.stringify(cfg || {}) }); mark(true); return true; }
+      var scope = domainScope();
+      try { await jfetch('/config', { method: 'PUT', body: JSON.stringify(cfg || {}) });
+        await invalidateDomain('config', scope); mark(true); return true; }
       catch (e) { markFromError(e); return false; }
     },
 

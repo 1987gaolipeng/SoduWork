@@ -188,6 +188,10 @@ class HubLoginShutdownTests(unittest.IsolatedAsyncioTestCase):
                      "asynccontextmanager": contextlib.asynccontextmanager,
                      "contextlib": contextlib, "asyncio": asyncio, "bg": [],
                      "cluster_runtime": cluster, "log": Mock()}
+        # The extracted finalizer normally closes these services over from
+        # startup. Supply inert peers because this fixture omits startup.
+        for name in ("automation_inbox_events", "cloud_sync_notifications", "client_domain_events"):
+            namespace[name] = SimpleNamespace(stop=AsyncMock())
         exec(compile(code, str(source), "exec"), namespace)
         from app import services
         self.enterContext(patch.object(services, "model_transport", transport, create=True))
@@ -218,7 +222,7 @@ class HubLoginShutdownTests(unittest.IsolatedAsyncioTestCase):
                 async with finalizer(None):
                     pass
         cleanup.assert_called_once_with()
-        transport.shutdown.assert_not_awaited()
+        transport.shutdown.assert_awaited_once_with()
 
 
 if __name__ == "__main__":

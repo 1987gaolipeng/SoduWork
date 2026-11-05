@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 
 from ..account_conversation_models import AccountConversation, PersonalConversationRelay as Relay
 from ..db import get_session
-from ..deps import current_client
+from ..deps import current_client, identity_only
 from ..models import Client
 from ..services import native_discovery
 
@@ -167,6 +167,7 @@ async def resolve(request_id: str, body: dict = Body(...), client=Depends(curren
 
 
 @router.post("/poll")
+@identity_only
 async def poll(client=Depends(current_client), session=Depends(get_session), body: dict = Body(default_factory=dict)):
     uid = owner(client)
     auth_version = int(client.auth_version or 1)

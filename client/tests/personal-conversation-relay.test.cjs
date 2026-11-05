@@ -6,6 +6,26 @@ const os = require('node:os');
 const path = require('node:path');
 const { create } = require('../main/conversation/personal-relay');
 
+const flush = () => new Promise(resolve => setImmediate(resolve));
+function clock() {
+  let now = 0, sequence = 0;
+  const timers = new Map();
+  const next = () => [...timers.values()].sort((a, b) => a.at - b.at)[0];
+  return {
+    now: () => now, pending: () => timers.size, delay: () => next()?.at - now,
+    setTimeout(fn, ms) { const timer = { id: ++sequence, at: now + ms, fn, unref() {} }; timers.set(timer.id, timer); return timer; },
+    clearTimeout(timer) { timers.delete(timer.id); },
+    async advance(ms) {
+      const end = now + ms;
+      await flush();
+      while (next()?.at <= end) {
+        const timer = next(); now = timer.at; timers.delete(timer.id); timer.fn(); await flush();
+      }
+      now = end; await flush();
+    },
+  };
+}
+
 function fixture(t, options = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'personal-relay-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
@@ -37,6 +57,86 @@ function fixture(t, options = {}) {
   return { service, job, state, handle, calls, acks, dependencies,
     setAvailable: value => { available = value; }, setIdentity: value => { identity = value; }, sends: () => sends };
 }
+
+function pollingFixture(t, { confirmed = true, poll }) {
+  const f = fixture(t), time = clock(), starts = [];
+  f.service.close();
+  let wake, active = 0, maxActive = 0;
+  const service = create({ ...f.dependencies, autoStart: true,
+    pollingOptions: { ...time, random: () => 1 },
+    discovery: { confirmed: () => confirmed, register(topic, callback) {
+      assert.equal(topic, 'personal-relay'); wake = callback; return () => {};
+    } },
+    fetch: async (...args) => {
+      const read = () => f.dependencies.fetch(...args);
+      if (!args[1].endsWith('/poll')) return read();
+      starts.push(time.now()); maxActive = Math.max(maxActive, ++active);
+      try { return await poll({ time, read }); }
+      finally { active--; }
+    },
+  });
+  t.after(() => service.close());
+  return { ...f, service, time, starts, wake: () => wake(), maxActive: () => maxActive };
+}
+
+test('confirmed relay recovers a lost push before the 60-second prepared deadline', async t => {
+  let preparedAt = null, expiresAt = null;
+  const f = pollingFixture(t, { poll: async ({ time, read }) => {
+    if (preparedAt === null) return { ok: true, json: async () => ({ requests: [] }) };
+    // The socket stays confirmed but delivers no hint. HTTP takes another 10s.
+    await new Promise(resolve => time.setTimeout(resolve, 10000));
+    if (time.now() >= expiresAt) return { ok: true, json: async () => ({ requests: [] }) };
+    return read();
+  } });
+  for (let i = 0; i < 5; i++) await f.time.advance(f.time.delay());
+  assert.equal(f.time.delay(), 30000);
+  await f.time.advance(1);
+  preparedAt = f.time.now(); expiresAt = preparedAt + 60000;
+  await f.time.advance(40000);
+  assert.equal(f.sends(), 1);
+  assert.equal(f.job.phase, 'accepted');
+  assert.ok(f.time.now() < expiresAt);
+  assert.equal(f.maxActive(), 1);
+});
+
+for (const confirmed of [false, true]) test(`relay budgets slow HTTP within its ${confirmed ? 30 : 20}-second start gap`, async t => {
+  const f = pollingFixture(t, { confirmed, poll: async ({ time }) => {
+    await new Promise(resolve => time.setTimeout(resolve, 11000));
+    return { ok: true, json: async () => ({ requests: [] }) };
+  } });
+  await f.time.advance(5000);
+  for (let i = 0; i < 100; i++) f.wake();
+  await f.time.advance(10999);
+  assert.equal(f.starts.length, 1);
+  await f.time.advance(1001);
+  assert.equal(f.starts.length, 2);
+  await f.time.advance(180000);
+  const gaps = f.starts.slice(1).map((start, i) => start - f.starts[i]);
+  assert.equal(Math.max(...gaps), confirmed ? 30000 : 20000);
+  assert.equal(f.maxActive(), 1);
+  f.service.close(); await f.time.advance(12000);
+  assert.equal(f.time.pending(), 0);
+});
+
+test('confirmed relay retains completion-based error backoff despite push bursts', async t => {
+  const f = pollingFixture(t, { poll: async ({ time }) => {
+    await new Promise(resolve => time.setTimeout(resolve, 11000));
+    throw Error('offline');
+  } });
+  await f.time.advance(5000);
+  for (const delay of [10000, 20000, 40000, 60000]) {
+    for (let i = 0; i < 100; i++) f.wake();
+    await f.time.advance(11000);
+    assert.equal(f.time.delay(), delay);
+    const calls = f.starts.length;
+    for (let i = 0; i < 100; i++) f.wake();
+    await f.time.advance(delay - 1); assert.equal(f.starts.length, calls);
+    await f.time.advance(1); assert.equal(f.starts.length, calls + 1);
+  }
+  assert.equal(f.maxActive(), 1);
+  f.service.close(); await f.time.advance(11000);
+  assert.equal(f.time.pending(), 0);
+});
 
 test('continues the original native session once and keeps its directory/runtime', async t => {
   const f = fixture(t);
@@ -92,6 +192,20 @@ test('parallel polls share a single admission operation', async t => {
   const f = fixture(t);
   await Promise.all([f.service.tick(), f.service.tick(), f.service.tick()]);
   assert.equal(f.sends(), 1);
+});
+
+test('closing relay aborts discovery and cannot submit a late response', async t => {
+  let signal, resolve;
+  const f = fixture(t, { override: { fetch: async (_identity, _url, options) => {
+    signal = options.signal;
+    assert.deepEqual(JSON.parse(options.body), { discoveryProtocol: 1 });
+    return new Promise(done => { resolve = done; });
+  } } });
+  const pending = f.service.tick(); await new Promise(done => setImmediate(done));
+  f.service.close(); assert.equal(signal.aborted, true);
+  resolve({ ok: true, json: async () => ({ requests: [f.job] }) });
+  await assert.rejects(pending, /切换/);
+  assert.equal(f.sends(), 0);
 });
 
 test('source changes while claiming cannot submit a stale instruction', async t => {

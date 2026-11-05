@@ -87,6 +87,7 @@ function create({ app, root, read, save, materialize, directory }) {
     }
     const transferId = record?.transferId || hash(owner + '\0' + row.id);
     const cwd = record?.cwd || path.join(app.getPath('userData'), 'cloud-conversations', transferId, 'results');
+    const ref = String(row.execution?.ref || receipt.ref || '');
     await check();
     if (!record) {
       await fs.mkdir(root, { recursive: true, mode: 0o700 });
@@ -96,7 +97,7 @@ function create({ app, root, read, save, materialize, directory }) {
           displayName: receipt.source.adapterId || 'pi', execution: { cloud: true }, status: 'idle' } }), { mode: 0o600, flush: true });
       await check();
     }
-    const ref = String(row.execution?.ref || receipt.ref || '');
+    const previous = record;
     record = { ...record, sessionId, transferId, cwd, entryKind: 'cloud',
       owner: record?.owner || connectionScope(identity), syncOwner: owner, syncId: row.id,
       taskId: receipt.taskId, title: row.title, adapterId: receipt.source.adapterId || 'pi',
@@ -106,31 +107,60 @@ function create({ app, root, read, save, materialize, directory }) {
       at: Date.parse(row.execution?.updatedAt || row.createdAt) || record?.at || Date.now(),
       ...(receipt.deliveryMode === 'git' ? { codeDelivery: receipt.codeDelivery, deliveryPresentation: 'summary' } : {}),
       ...(row.artifactUrl ? { artifactUrl: row.artifactUrl } : {}),
+      ...(!record || record.syncState?.ref !== ref ? { syncDetailSaved: false } : {}),
       syncState: record?.syncState?.ref === ref ? record.syncState : { ref, cursor: 0, pages: [] } };
-    await save(record); await check();
-    const pageRoot = path.join(app.getPath('userData'), 'cloud-execution-sync', owner, hash(row.id + '\0' + ref));
+    if (JSON.stringify(previous) !== JSON.stringify(record)) await save(record);
+    await check();
+    const pageBase = path.join(app.getPath('userData'), 'cloud-execution-sync', owner, hash(row.id + '\0' + ref));
+    const pageDirectory = () => {
+      const generation = read(sessionId).syncState.generation;
+      if (generation && !/^[a-f0-9-]{36}$/.test(generation)) throw new CacheRecovery('Invalid cache generation');
+      return generation ? path.join(pageBase, generation) : pageBase;
+    };
+    // Validate before using a watermark or deciding that details are reusable.
+    // Missing pages use the same archival recovery as malformed checkpoints;
+    // recovery generations must never be mistaken for missing legacy pages.
+    try {
+      if (!validCheckpoint(record.syncState)) throw new CacheRecovery('Invalid projection checkpoint');
+      await fs.access(path.join(root, transferId + '.view.json'));
+      for (const name of record.syncState.pages) await fs.access(path.join(pageDirectory(), name));
+    } catch (error) {
+      if (!(error instanceof CacheRecovery) && error.code !== 'ENOENT') throw error;
+      await recoverCache(sessionId, identity, check);
+      record = read(sessionId);
+    }
     let cursor = record.syncState.cursor, handle = null, output = null;
     async function restoreOutput() {
       if (output) return;
-      const saved = JSON.parse(await fs.readFile(path.join(root, transferId + '.view.json'), 'utf8'));
-      handle = require('./cloud-conversation-view').create({ app, ref: 'sync-' + hash(sessionId), record, saved,
+      const saved = await readJson(path.join(root, transferId + '.view.json'));
+      if (!Array.isArray(saved?.snapshot?.messages)) throw new CacheRecovery('Invalid projection view');
+      handle = await require('./cloud-conversation-view').create({ app, ref: 'sync-' + hash(sessionId), record, saved,
         recordOf: () => read(sessionId), artifactDirectory: () => directory(app, read(sessionId)) });
-      output = liveOutput.create(handle, receipt.taskId, { includeUser: true });
+      const restored = liveOutput.create(handle, receipt.taskId, { includeUser: true });
       let replayed = 0;
       // Replay committed raw pages as well as the rendered journal. This restores
       // unfinished streaming fragments without resending any execution command.
       // Unchanged historical executions never load their transcript during a scan.
       for (const name of read(sessionId).syncState.pages || []) {
         await check();
-        if (!/^\d+-\d+\.json$/.test(name)) throw Error('云端缓存分页无效');
-        const page = JSON.parse(await fs.readFile(path.join(pageRoot, name), 'utf8'));
-        if (page.from !== replayed || page.through <= replayed) throw Error('云端缓存分页不连续');
-        await output.consume(ref, page.items); replayed = page.through;
+        if (!/^\d+-\d+\.json$/.test(name)) throw new CacheRecovery('Invalid projection page name');
+        const page = await readJson(path.join(pageDirectory(), name));
+        if (page.from !== replayed || !Number.isSafeInteger(page.through) || page.through <= replayed ||
+            !Array.isArray(page.items)) throw new CacheRecovery('Discontinuous projection pages');
+        await restored.consume(ref, page.items); replayed = page.through;
       }
-      if (replayed !== cursor) throw Error('云端缓存水位不一致');
+      if (replayed !== cursor) throw new CacheRecovery('Projection cursor mismatch');
+      output = restored;
     }
     return {
       ref, get cursor() { return cursor; },
+      async reusable() {
+        const current = read(sessionId);
+        if (!current?.syncDetailSaved || current.syncArtifactsPending || current.syncArtifactError ||
+            current.syncSnapshot?.historyGap || current.syncRecovery?.historyGap ||
+            current.syncState?.ref !== ref) return false;
+        return true;
+      },
       async apply(details) {
         await check();
         if (details?.conversation?.id !== row.id || details.conversation.receipt?.taskId !== receipt.taskId)
@@ -174,11 +204,11 @@ function create({ app, root, read, save, materialize, directory }) {
         await check();
         // Attachment failure is retryable independently of the transcript cursor.
         try {
-          if (Array.isArray(details.attachments) && details.attachments.length) {
+          if (Array.isArray(details.attachments)) {
             await materialize(read(sessionId), identity, details.attachments);
             await check();
           }
-          await save({ ...read(sessionId), syncArtifactsPending: false, syncArtifactError: '' });
+          await save({ ...read(sessionId), syncArtifactsPending: false, syncArtifactError: '', syncDetailSaved: true });
         } catch (error) {
           await check();
           await save({ ...read(sessionId), syncArtifactsPending: true,

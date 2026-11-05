@@ -1,8 +1,8 @@
 """FastAPI authentication dependencies for devices, users and integrations."""
 from datetime import datetime, timezone
 
-from fastapi import Depends, Header, HTTPException
-from sqlalchemy import select
+from fastapi import Depends, Header, HTTPException, Request
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import verify_user_claims
@@ -11,8 +11,39 @@ from .db import get_session
 from .models import Client, Integration, Role, User
 from .permissions import ALL_KEYS
 from .services import client_access, device_auth
+from .services.auth_principals import DevicePrincipal
 
 settings = get_settings()
+
+
+def identity_only(endpoint):
+    """Opt read routes into a small principal; other routes retain full Client.
+
+    Keeping the common dependency preserves request-scoped reuse and existing
+    integration overrides. Business code must explicitly load any extra data.
+    """
+    endpoint.__soduwork_identity_only__ = True
+    return endpoint
+
+
+def _needs_ai_quota(request):
+    """Keep quota prefetch scoped to the server-declared AI dependency graph."""
+    route = request.scope.get("route") if request is not None else None
+    if route is None:
+        return False
+    if not hasattr(route, "_auth_prefetch_quota"):
+        pending = [getattr(route, "dependant", None)]
+        needed = False
+        while pending:
+            dependency = pending.pop()
+            if dependency is None:
+                continue
+            if dependency.call is current_ai_client:
+                needed = True
+                break
+            pending.extend(dependency.dependencies)
+        route._auth_prefetch_quota = needed
+    return route._auth_prefetch_quota
 
 
 async def authenticated_client(
@@ -20,22 +51,39 @@ async def authenticated_client(
     x_soduwork_device: str | None = Header(default=None, alias="X-Soduwork-Device"),
     x_soduwork_secret: str | None = Header(default=None, alias="X-Soduwork-Secret"),
     session: AsyncSession = Depends(get_session),
+    request: Request = None,
 ) -> Client:
     """Authenticate a device session, with a bounded hash-only rollout bridge."""
+    include_quota = _needs_ai_quota(request)
     if authorization and authorization.startswith("Device "):
         try:
-            client = await device_auth.client_from_session(session, authorization[7:].strip())
+            endpoint = request.scope.get("endpoint") if request is not None else None
+            if getattr(endpoint, "__soduwork_identity_only__", False) and not include_quota:
+                from .services.auth_principals import from_token
+                client, _ = await from_token(session, authorization[7:].strip())
+            else:
+                client = await device_auth.client_from_session(session, authorization[7:].strip(),
+                                                               include_quota=include_quota)
         except device_auth.DeviceAuthError as exc:
             raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
     elif settings.device_auth_compat and x_soduwork_device and x_soduwork_secret:
         try:
-            client = await device_auth.client_from_secret(session, x_soduwork_device, x_soduwork_secret)
+            client = await device_auth.client_from_secret(session, x_soduwork_device, x_soduwork_secret,
+                                                          include_quota=include_quota)
         except device_auth.DeviceAuthError as exc:
             raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
     else:
         raise HTTPException(status_code=401, detail="需要有效的 SoduWork 设备会话")
     if device_auth.should_write_last_seen(client.id):
-        client.last_seen_at = datetime.now(timezone.utc)
+        if isinstance(client, DevicePrincipal):
+            result = await session.execute(update(Client).where(
+                Client.id == client.id, Client.user_ref == client.user_ref,
+                Client.auth_state == "active", Client.auth_version == client.auth_version,
+            ).values(last_seen_at=datetime.now(timezone.utc)))
+            if result.rowcount != 1:
+                raise HTTPException(401, "设备授权已变更，请重新连接")
+        else:
+            client.last_seen_at = datetime.now(timezone.utc)
         await session.commit()
     return client
 
@@ -77,7 +125,7 @@ async def current_user(
     claims = verify_user_claims(authorization[7:])
     if not claims:
         raise HTTPException(status_code=401, detail="登录已失效，请重新登录")
-    user = await session.get(User, str(claims.get("uid") or ""))
+    user = await session.get(User, str(claims.get("uid") or ""), populate_existing=True)
     if user is None or not user.is_active or user.account_deleted_at:
         raise HTTPException(status_code=401, detail="账号不存在或已停用")
     if int(claims.get("ver") or 0) != int(user.auth_version or 1):
@@ -86,8 +134,8 @@ async def current_user(
     if user.is_super:
         user._perms = set(ALL_KEYS)
     elif user.role_id:
-        role = await session.get(Role, user.role_id)
-        user._perms = set(role.permissions or []) if role else set()
+        from .services.auth_principals import role_permissions
+        user._perms = await role_permissions(session, user.role_id)
     else:
         user._perms = set()
     return user

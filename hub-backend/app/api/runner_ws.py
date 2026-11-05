@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am
 from ..db import SessionLocal, get_session
-from ..deps import current_client, require_perm
+from ..deps import current_client, require_perm, identity_only
 from ..models import AppSetting, Client, User
 from ..realtime import hub as realtime_hub
 from ..services import (audit, execution_capabilities,
@@ -153,6 +153,7 @@ async def _auth(token: str, peer: str, device: str = "", secret: str = "",
 
 
 @router.get("/api/v1/runners")
+@identity_only
 async def list_runners(client: Client = Depends(current_client),
                        session: AsyncSession = Depends(get_session)):
     """List online execution machines for dispatch visibility and diagnostics."""

@@ -36,7 +36,7 @@ def fingerprint(conf, payload, generation_id=""):
 
 def snapshot(row):
     return {key: getattr(row, key) for key in (
-        "id", "filename", "content_type", "size", "storage_key", "backend",
+        "id", "task_id", "filename", "content_type", "size", "storage_key", "backend",
         "uploaded_by", "source_ref", "evidence_meta")}
 
 
@@ -107,6 +107,9 @@ async def claim(session, client_id, ref, digest, filename, meta, timeout, *, kin
         Attachment.id == aid,
         Attachment.evidence_meta["leaseOwner"].as_string() == previous_owner,
     ).values(evidence_meta=renewed).execution_options(synchronize_session=False))
+    if changed.rowcount:
+        from .cloud_sync_notifications import mark
+        mark(session, saved.get("task_id"))
     await session.commit()
     if changed.rowcount != 1:
         raise ValueError("这个视频已由另一请求接续，请稍后查看成果")
@@ -121,6 +124,9 @@ async def change(session, job, *, meta=None, **values):
         Attachment.id == job["id"],
         Attachment.evidence_meta["leaseOwner"].as_string() == current["leaseOwner"],
     ).values(evidence_meta=updated, **values).execution_options(synchronize_session=False))
+    if result.rowcount:
+        from .cloud_sync_notifications import mark
+        mark(session, job.get("task_id"))
     await session.commit()
     if result.rowcount != 1:
         raise ValueError("视频任务已变化，请重新打开会话查看成果")

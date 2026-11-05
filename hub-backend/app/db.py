@@ -71,7 +71,9 @@ if "postgresql" in settings.database_url.lower():
 
 engine = create_async_engine(settings.database_url, **_engine_kwargs)
 observe_database(engine)
-SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+from .services.auth_cache_transactions import AuthSession
+SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession,
+                                  sync_session_class=AuthSession)
 
 
 async def init_db() -> None:
@@ -461,3 +463,8 @@ def _backfill_data(conn) -> None:
 async def get_session():
     async with SessionLocal() as session:
         yield session
+
+
+from .services import automation_inbox_events  # noqa: E402,F401 - post-commit hints on every writer
+from .services import cloud_sync_notifications  # noqa: E402
+cloud_sync_notifications.install()

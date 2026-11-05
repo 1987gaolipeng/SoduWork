@@ -275,6 +275,10 @@ async def share(session: AsyncSession, client: models.Client, item_id: str,
             )
             shared.append((row, target, attachment))
         await session.commit()
+        from .client_domain_events import account_changed
+        for message, _, _ in shared:
+            await account_changed(session, message.sender_id, "team-messages")
+            await account_changed(session, message.recipient_id, "team-messages")
     except Exception:
         await session.rollback()
         for key, backend in created:
@@ -321,6 +325,10 @@ async def share(session: AsyncSession, client: models.Client, item_id: str,
         results.append({"id": target.id, "name": target.display_name or target.username,
                         "delivered": published, "messageId": row.id})
     await session.commit()
+    from .client_domain_events import account_changed
+    for message, _, _ in shared:
+        await account_changed(session, message.sender_id, "team-messages")
+        await account_changed(session, message.recipient_id, "team-messages")
     return {"ok": True, "itemId": str(item.id), "filename": filename,
             "shared": len(results), "recipients": results}
 
@@ -508,6 +516,10 @@ async def share_items(session: AsyncSession, client: models.Client, item_ids: li
                 text, [mate_message_files.public(attachment)])
             shared.append((message, target, attachment))
         await session.commit()
+        from .client_domain_events import account_changed
+        for message, _, _ in shared:
+            await account_changed(session, message.sender_id, "team-messages")
+            await account_changed(session, message.recipient_id, "team-messages")
     except Exception:
         await session.rollback()
         for key, backend in created:
@@ -531,5 +543,9 @@ async def share_items(session: AsyncSession, client: models.Client, item_ids: li
         if published and message.delivered_at is None: message.delivered_at = datetime.now(timezone.utc); message.status = "delivered"
         results.append({"id": target.id, "name": target.display_name or target.username, "delivered": published, "messageId": message.id})
     await session.commit()
+    from .client_domain_events import account_changed
+    for message, _, _ in shared:
+        await account_changed(session, message.sender_id, "team-messages")
+        await account_changed(session, message.recipient_id, "team-messages")
     return {"ok": True, "itemIds": ids, "filename": filename, "packaged": packaged,
             "files": manifest["files"], "shared": len(results), "recipients": results}

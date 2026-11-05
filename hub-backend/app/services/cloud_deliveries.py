@@ -63,6 +63,9 @@ async def _mark(session, execution, state, *, delivery_id="", error="", revision
         ExecutionSession.id == execution.id,
         func.coalesce(ExecutionSession.metadata_["round"].as_integer(), 1) == round_no
     ).values(metadata_=replacement).execution_options(synchronize_session=False))
+    if result.rowcount:
+        from .cloud_sync_notifications import mark as mark_cloud_sync
+        mark_cloud_sync(session, execution.task_id)
     await session.commit()
     await session.refresh(execution)
     return mark if result.rowcount else {"state": "pending"}

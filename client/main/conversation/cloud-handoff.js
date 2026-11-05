@@ -91,7 +91,8 @@ function assertPortable(handle) {
 }
 
 function create({ app, identityOf, request = http, workspace = portable, notify = () => {}, validateHandle = () => {},
-  wait = sleep, stopTimeout = 45000, interval = 1800, remoteDirectory = false }) {
+  wait = sleep, stopTimeout = 45000, interval = 1800, remoteDirectory = false,
+  discovery = require('../native-discovery.cjs'), syncOptions = {} }) {
   const root = path.join(app.getPath('userData'), 'conversation-handoffs');
   const previews = new Map(), records = new Map(), remoteRecords = new Map(), watches = new WeakMap(), operations = new Map(), writes = new Map();
   let remoteDirectoryPromise = null, remoteDirectoryAt = 0, remoteDirectoryScope = '';
@@ -100,14 +101,16 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
   const pendingViews = new Set();
   const protectedHandles = new WeakSet();
   const file = id => path.join(root, digest(String(id)) + '.json');
-  function read(id) {
+  function readReceipt(id) {
     if (records.has(id)) return records.get(id);
-    if (remoteRecords.has(id)) return remoteRecords.get(id);
     let record;
     try { record = JSON.parse(syncFs.readFileSync(file(id), 'utf8')); }
     catch (error) { if (error.code === 'ENOENT') return null; throw Error('云端交接记录无法读取，已阻止在本地重复执行'); }
     if (record.sessionId !== id || !record.transferId || !record.owner) throw Error('云端交接记录损坏，请检查数据目录');
     records.set(id, record); return record;
+  }
+  function read(id) {
+    return readReceipt(id) || remoteRecords.get(id) || null;
   }
   function save(record) {
     const id = record.sessionId, previous = records.get(id);
@@ -119,6 +122,8 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
     }
     // Publish the current revision before another async poll/send reads it,
     // then serialize disk writes. Polling must never erase a pending send ID.
+    // A snapshot prepared before deletion must not restore a hidden history row.
+    if (previous?.hidden && !record.hidden) record = { ...record, hidden: true };
     records.set(id, record);
     const job = (writes.get(id) || Promise.resolve()).catch(() => {}).then(async () => {
       await fs.mkdir(root, { recursive: true, mode: 0o700 });
@@ -283,7 +288,8 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
       readOnly: record.canSend !== true };
   }
   async function history({ includeAliases = false } = {}) {
-    const local = await cloudStart.history();
+    const hiddenTasks = new Set();
+    const local = await cloudStart.history(hiddenTasks);
     if (!remoteDirectory) return local;
     let remote;
     try { remote = await refreshRemoteDirectory(); }
@@ -296,7 +302,7 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
       historyAliasIds: remote.filter(alias => alias.taskId && alias.taskId === row.taskId &&
         alias.sessionId !== row.id).map(alias => alias.sessionId) }));
     return { ok: true, chats: [...cached, ...remote.filter(row =>
-      !seen.has(row.sessionId) && (includeAliases || !tasks.has(row.taskId))).map(remoteHistoryRow)] };
+      !hiddenTasks.has(row.taskId) && !seen.has(row.sessionId) && (includeAliases || !tasks.has(row.taskId))).map(remoteHistoryRow)] };
   }
   const json = body => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   async function cleanSnapshot(record) {
@@ -632,7 +638,8 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
     // directory. The directory is deliberately separate from a handed-off
     // local workspace and is never returned as the session's working cwd.
     const output = liveOutput.create(handle, record.taskId, { includeUser: true });
-    const watch = { timer: null, closed: false, pending: false, cursor: 0, state: null, error: '', artifactsKey: '', wakeUntil: 0, refreshRequested: false };
+    const watch = { timer: null, timerDue: 0, startedAt: -Infinity, retryAfter: 0,
+      closed: false, pending: false, cursor: 0, state: null, error: '', artifactsKey: '', wakeUntil: 0, refreshRequested: false };
     const original = { close: handle.close, snapshot: handle.snapshot, uiSnapshot: handle.uiSnapshot,
       cancel: handle.cancel, selectModel: handle.selectModel, setAccessPolicy: handle.setAccessPolicy,
       outputs: handle.outputs, outputSnapshot: handle.outputSnapshot, outputSnapshotAsync: handle.outputSnapshotAsync };
@@ -642,21 +649,33 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
     handle.selectModel = locked; handle.setAccessPolicy = locked;
     handle.outputs = () => outputCache.index(app, read(handle.sessionId)).files;
     handle.outputSnapshot = () => outputCache.index(app, read(handle.sessionId));
-    handle.outputSnapshotAsync = async () => handle.outputSnapshot();
+    handle.outputSnapshotAsync = () => outputCache.indexAsync(app, read(handle.sessionId));
     handle.cancel = record.remoteProjection && record.canSend !== true
       ? original.cancel : () => stop(handle);
-    handle.close = function () { watch.closed = true; clearTimeout(watch.timer); watches.delete(handle);
+    handle.close = function () { watch.closed = true; watch.stopPush?.(); clearTimeout(watch.timer); watches.delete(handle);
       handle.cancel = original.cancel; handle.outputs = original.outputs; handle.outputSnapshot = original.outputSnapshot;
       handle.outputSnapshotAsync = original.outputSnapshotAsync;
       return original.close.call(handle); };
+    const pushConfirmed = () => watch.pushCapable && discovery.confirmed(watch.identity, 'cloud-execution-sync');
+    function armPoll(delay, push = false) {
+      if (watch.closed) return;
+      const due = Math.max(Date.now() + delay, watch.retryAfter,
+        push || pushConfirmed() ? watch.startedAt + 1000 : 0);
+      if (watch.timer && watch.timerDue <= due) return;
+      clearTimeout(watch.timer); watch.timerDue = due;
+      watch.timer = setTimeout(poll, Math.max(0, due - Date.now())); watch.timer.unref?.();
+    }
     async function poll() {
-      clearTimeout(watch.timer);
+      clearTimeout(watch.timer); watch.timer = null; watch.timerDue = 0;
       if (watch.closed || watch.pending) return;
-      if (handle.detached) { watch.timer = setTimeout(poll, interval * 3); watch.timer.unref?.(); return; }
+      if (handle.detached) { armPoll(interval * 3); return; }
+      watch.startedAt = Date.now();
       watch.pending = true; watch.more = false;
       let collected = false;
       try {
         const live = guard(handle), current = await identity(live);
+        watch.identity = current;
+        watch.pushCapable = Boolean(live.syncId);
         const details = live.syncId ? await request(current, '/cloud-execution-sync/' + encodeURIComponent(live.syncId) +
           '?ref=' + encodeURIComponent(live.ref) + '&since=' + watch.cursor + '&limit=400') : null;
         const page = details ? details.page : await request(current, '/tasks/' + encodeURIComponent(live.taskId) + '/ai-session?ref=' +
@@ -711,11 +730,13 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
       } catch (error) { watch.error = String(error.message || error); }
       finally {
         watch.pending = false;
+        watch.retryAfter = watch.error ? Date.now() + Math.max(1000, interval) : 0;
         if (!watch.closed) {
           notify(handle, { kind: collected ? 'settled' : 'cloud-handoff' });
           const again = watch.more || watch.refreshRequested; watch.refreshRequested = false;
-          watch.timer = setTimeout(poll, again ? 0 : Date.now() < watch.wakeUntil || ['running', 'queued'].includes(watch.state?.status) ? interval : 30000);
-          watch.timer.unref?.();
+          armPoll(again ? 0 :
+            pushConfirmed() ? 60000 :
+              Date.now() < watch.wakeUntil || ['running', 'queued'].includes(watch.state?.status) ? interval : 30000);
         }
       }
     }
@@ -723,6 +744,12 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
       watch.wakeUntil = Date.now() + 10000;
       if (watch.pending) watch.refreshRequested = true; else void poll();
     };
+    watch.stopPush = discovery.register('cloud-execution-sync', event => {
+      if (!watch.closed && !handle.detached && (!event?.taskId || event.taskId === record.taskId)) {
+        if (watch.pending) watch.refreshRequested = true;
+        else armPoll(100, true);
+      }
+    });
     watches.set(handle, watch); watch.wake();
   }
   function send(handle, text, attachments, options = {}) { return busy(handle, async () => {
@@ -776,18 +803,34 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
     catch (_) { return false; }
   }
   const executionSelection = require('./cloud-execution-selection').create({ app, read, save, guard, identity, request, view, notify, busy });
-  const projection = require('./cloud-execution-projection').create({ app, root, read, save,
+  // Directory aliases can reopen remote views, but only durable receipts can own a sync checkpoint.
+  const projection = require('./cloud-execution-projection').create({ app, root, read: readReceipt, save,
     materialize: materializeOutputs, directory: outputCache.directory });
-  const synchronization = require('./cloud-execution-sync').create({ app, identityOf, request, open: projection.open,
+  const synchronization = require('./cloud-execution-sync').create({ ...syncOptions, app, identityOf, request, open: projection.open, discovery,
     changed: presence => {
       for (const handle of pendingViews) {
         if (handle.sessionId !== presence.id) continue;
         if (read(handle.sessionId)?.phase === 'committed') { observe(handle); pendingViews.delete(handle); }
         notify(handle, { kind: 'cloud-handoff' });
       }
-      syncListeners.forEach(listener => { try { listener(presence); } catch (_) {} });
+      if (!readReceipt(presence.id)?.hidden) {
+        syncListeners.forEach(listener => { try { listener(presence); } catch (_) {} });
+      }
     } });
   const syncListeners = new Set();
+  async function resolveDeleteAlias(id) {
+    const alias = remoteRecords.get(id);
+    if (!alias?.taskId || !alias.ref || readReceipt(id)) return null;
+    await identity(alias);
+    const { chats } = await cloudStart.history();
+    const matches = chats.filter(row => row.taskId === alias.taskId);
+    if (matches.length !== 1) return null;
+    const receipt = readReceipt(matches[0].id);
+    if (!receipt?.syncId || receipt.taskId !== alias.taskId) return null;
+    await identity(alias);
+    await identity(receipt);
+    return receipt.sessionId;
+  }
   async function forget(id) {
     const record = read(String(id || ''));
     if (record?.remoteProjection) {
@@ -795,7 +838,7 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
     }
     return cloudStart.forget(id);
   }
-  return { reopen, start: cloudStart.start, history, forget, isRemote,
+  return { reopen, start: cloudStart.start, history, forget, resolveDeleteAlias, isRemote,
     synchronization, onSynchronized(listener) { syncListeners.add(listener); return () => syncListeners.delete(listener); },
     targets: async agentId => request(await identity(), '/conversation-handoffs/targets?agentId=' + encodeURIComponent(agentId || 'pi')),
     ...Object.fromEntries(Object.entries({ selectExecution: executionSelection.selectExecution, executionRuntimes: executionSelection.executionRuntimes, preview, confirm, recover, abort, guard, view, observe, send, stop, materialize, artifactSession,

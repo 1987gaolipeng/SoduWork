@@ -45,6 +45,15 @@ const message = { id: 'server-1', messageId: 'client-1', senderId: 'user-b', rec
   senderName: '发件人', recipientName: '接收人', text: '需求完整说明', kind: 'task_assignment', taskId: 'task-1', createdAt: 100, status: 'accepted' };
 const localNotice = { id: 'ntc_old', at: 100, text: '旧通知', taskId: 'task-1', kind: 'notice', read: false };
 
+test('conditional notification revision is encoded only on the first page', async () => {
+  const f = await fixture();
+  await f.api.mateMessages('received', 200, '', 'scope/revision');
+  assert.match(f.calls.at(-1).url, /ifRevision=scope%2Frevision/);
+  await f.api.mateMessages('received', 200, 'page-two', 'scope/revision');
+  assert.match(f.calls.at(-1).url, /before=page-two/);
+  assert.doesNotMatch(f.calls.at(-1).url, /ifRevision/);
+});
+
 test('real API gives notices an independent identity-scoped key and never treats task records as notifications', async () => {
   const task = { id: 'task-1', title: '需求', note: '完整原文', kind: 'requirement', status: 'todo' };
   const f = await fixture({ received: [message], seed(values, api) { values.set(api.taskStorageKey('tasks'), JSON.stringify([task])); } });

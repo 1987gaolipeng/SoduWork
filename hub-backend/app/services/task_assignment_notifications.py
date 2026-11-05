@@ -30,6 +30,9 @@ async def transition(session, task, sender_id, kind, detail, actor):
 async def publish(session, row):
     if row is None:
         return
+    from .client_domain_events import account_changed
+    for uid in {row.sender_id, row.recipient_id}:
+        await account_changed(session, uid, "team-messages")
     sender = await session.get(models.User, row.sender_id)
     recipient = await session.get(models.User, row.recipient_id)
     value = mate_messages.public(row, sender, recipient)

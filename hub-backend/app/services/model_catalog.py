@@ -299,6 +299,9 @@ async def bootstrap(session: AsyncSession) -> None:
         session.add(models.ModelProvider(builtin=True, enabled=True, **p))
         changed = True
     await session.commit()
+    if changed:
+        from .client_domain_events import models_changed
+        await models_changed(session)
 
 
 # Catalog reads.

@@ -442,7 +442,7 @@ async def _client_by_bearer(
     if not dev or not sec:
         raise HTTPException(status_code=401, detail="需要有效的 AI 对话凭证")
     try:
-        client = await device_auth.client_from_secret(session, dev, sec)
+        client = await device_auth.client_from_secret(session, dev, sec, include_quota=True)
     except device_auth.DeviceAuthError as exc:
         raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
     await enforce_client_quota(session, client)

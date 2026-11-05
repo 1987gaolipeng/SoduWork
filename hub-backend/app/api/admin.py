@@ -1199,6 +1199,8 @@ async def put_model_provider(
     if new_key:
         p.api_key = new_key[:400]
     await session.commit()
+    from ..services.client_domain_events import models_changed
+    await models_changed(session)
     await audit.log(session, user, "model.provider", "setting", pid, p.name,
                     {"baseUrl": p.base_url, "enabled": p.enabled, "keyChanged": bool(new_key)})
     return {"ok": True, "keyChanged": bool(new_key)}
@@ -1223,6 +1225,8 @@ async def del_model_provider(
     await session.execute(_del(ModelDef).where(ModelDef.provider_id == pid))
     await session.delete(p)
     await session.commit()
+    from ..services.client_domain_events import models_changed
+    await models_changed(session)
     await audit.log(session, user, "model.provider.del", "setting", pid, p.name, {})
     return {"ok": True}
 
@@ -1271,6 +1275,8 @@ async def put_model_def(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await session.commit()
+    from ..services.client_domain_events import models_changed
+    await models_changed(session)
     await audit.log(
         session, user, "model.def", "setting", mid, m.label or name,
         {"enabled": m.enabled, "modality": m.modality},
@@ -1294,6 +1300,8 @@ async def del_model_def(
         raise HTTPException(status_code=400, detail="内置模型不能删——不想开放就停用它")
     await session.delete(m)
     await session.commit()
+    from ..services.client_domain_events import models_changed
+    await models_changed(session)
     await audit.log(session, user, "model.def.del", "setting", mid, m.label or m.name, {})
     return {"ok": True}
 
@@ -2010,6 +2018,10 @@ async def client_push(
         patch = body.get("patch") or {}
         c.config = {**(c.config or {}), **patch}
         await session.commit()
+        from ..services.client_domain_events import device_changed
+        await device_changed(c, "config")
+        if "modelProviders" in patch:
+            await device_changed(c, "models")
         await hub.publish(cid, {"type": "config.patch", "patch": patch})
     elif typ == "notice":
         await hub.publish(cid, {"type": "notice", "text": body.get("text") or ""})

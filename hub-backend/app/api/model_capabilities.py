@@ -34,6 +34,7 @@ async def check_saved(body, session, client=None):
             or any(not isinstance(item, str) or item not in probe.CHECKS for item in checks)):
         raise HTTPException(400, "请选择已保存的模型和有效的检测项目")
     row, conf, slot, revision = await _target(session, client, provider_id, model)
+    global_scope = capabilities.principal_scope(client, row, conf.get("keyFrom")) == "organization"
     client_id = client.id if client is not None else None
     # Release the read transaction before waiting for network work.
     await session.rollback()
@@ -48,6 +49,11 @@ async def check_saved(body, session, client=None):
         raise HTTPException(409, "模型配置在检测期间已变更，请重新检测")
     result.update({"providerId": provider_id, "model": model, "configRevision": revision})
     result = await capabilities.persist(session, slot, result)
+    from ..services import client_domain_events
+    if global_scope:
+        await client_domain_events.models_changed(session)
+    else:
+        await client_domain_events.device_changed(client, "models")
     fields = capabilities.runtime_fields(current.get("config") or {}, result)
     return {"ok": all(item["status"] == "passed" for item in result["checks"].values()),
             **result, **fields, "runtimeRevision": capabilities.runtime_revision(revision, fields)}

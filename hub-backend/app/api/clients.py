@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
 from ..config import get_settings
-from ..deps import current_client
+from ..deps import current_client, identity_only
 from ..models import Client, User
 from ..schemas import ClientRegister, client_to_api
 from ..services import inbox as inbox_svc
@@ -357,6 +357,7 @@ async def message_teammate(
 
 
 @router.get("/team/messages")
+@identity_only
 async def list_mate_messages(folder: str = "received", limit: int = 100, before: str = "",
                              client: Client = Depends(current_client),
                              session: AsyncSession = Depends(get_session), ifRevision: str = ""):

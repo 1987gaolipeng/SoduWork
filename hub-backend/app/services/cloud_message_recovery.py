@@ -81,6 +81,9 @@ async def _save(session, row, attempts, phase, result, *, retry=True, commit=Tru
         Receipt.id == row.id, Receipt.phase.in_(PENDING),
         Receipt.recovery_attempts == attempts,
     ).values(**values).execution_options(synchronize_session=False))
+    if changed.rowcount:
+        from .cloud_sync_notifications import mark
+        mark(session, row.task_id)
     if commit:
         await session.commit()
     return bool(changed.rowcount)
@@ -173,6 +176,9 @@ async def deliver(row_id):
         changed = await session.execute(update(Receipt).where(
             Receipt.id == row.id, Receipt.phase.in_(PENDING), Receipt.recovery_attempts == attempts,
         ).values(phase="sending", payload=payload).execution_options(synchronize_session=False))
+        if changed.rowcount:
+            from .cloud_sync_notifications import mark
+            mark(session, row.task_id)
         await session.commit()
         if not changed.rowcount:
             await asyncio.to_thread(ai_remote._drop_packet, runner, packet)

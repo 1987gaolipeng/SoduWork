@@ -3,7 +3,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
-from ..deps import current_client
+from ..deps import current_client, identity_only
 from ..models import Client
 from ..services import schedule_access
 from .schedule_contract import schedule_payload
@@ -51,6 +51,7 @@ async def my_schedule_templates(client: Client = Depends(current_client),
 
 
 @router.post('/automation-conversations/inbox')
+@identity_only
 async def automation_conversation_inbox(client: Client = Depends(current_client),
                                          session: AsyncSession = Depends(get_session)):
     from ..services import schedule_conversations as conversations

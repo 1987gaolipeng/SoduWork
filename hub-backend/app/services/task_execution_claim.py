@@ -65,6 +65,8 @@ async def prepare(session, client, tid):
           .execution_options(synchronize_session=False))
         if changed.rowcount != 1:
             raise HTTPException(409, "需求已被更新，请刷新后重新接手")
+        from .cloud_sync_notifications import mark
+        mark(session, tid)
         # The successful UPDATE holds SQLite's write lock until commit. Recheck
         # separate execution/review records now so an insert after the first
         # projection cannot let an active dispatch move to another device.

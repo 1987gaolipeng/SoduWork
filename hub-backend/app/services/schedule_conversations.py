@@ -148,12 +148,21 @@ async def prepare(session, schedule, client, repo, run_id, adapter, personal):
 
 
 async def inbox(session, client):
+    from .auth_principals import DevicePrincipal
     # Capability registration is authenticated and confined to this device.
     changed = False
-    config = dict(client.config or {})
-    if config.get('automationConversationV1') != 1:
-        client.config = {**config, 'automationConversationV1': 1}
-        changed = True
+    if not isinstance(client, DevicePrincipal) or not client.automation_conversation_v1:
+        if isinstance(client, DevicePrincipal):
+            from .device_auth import _load_verified_client
+            record = await _load_verified_client(session, client)
+        else:
+            record = client
+        if record is None:
+            raise HTTPException(401, '设备授权已变更，请重新连接')
+        config = dict(record.config or {})
+        if config.get('automationConversationV1') != 1:
+            record.config = {**config, 'automationConversationV1': 1}
+            changed = True
     query = select(models.AiScheduleRun.id, models.AiScheduleRun.state).where(
         schedule_access.owner_clause(client, models.AiScheduleRun),
         # Account scope permits managing the plan from another device, while

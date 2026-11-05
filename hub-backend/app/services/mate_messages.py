@@ -145,7 +145,10 @@ async def _list_revision(session, user_id, side, column):
 
 
 async def list_for(session: AsyncSession, client, folder="received", limit=100, before="", if_revision=""):
-    me = await session.get(models.User, client.user_ref) if client.user_ref else None
+    from .auth_principals import user_snapshot
+    from types import SimpleNamespace
+    identity = await user_snapshot(session, client.user_ref) if client.user_ref else None
+    me = SimpleNamespace(**identity) if identity else None
     if me is None or not me.is_active or me.account_deleted_at:
         return {"ok": False, "items": [], "nextCursor": ""}
     side = str(folder or "received").lower()
@@ -197,6 +200,9 @@ async def publish_event(device_id, event, *, user_id):
 
 
 async def publish_state(session, row, event_type, *, recipients=True):
+    from .client_domain_events import account_changed
+    for uid in {row.sender_id, row.recipient_id}:
+        await account_changed(session, uid, "team-messages")
     sender = await session.get(models.User, row.sender_id)
     recipient = await session.get(models.User, row.recipient_id)
     value = public(row, sender, recipient)
@@ -222,6 +228,10 @@ async def _acknowledge(session: AsyncSession, client, message_id, *, read=False)
     changed = (await session.execute(update(models.MateMessage).where(
         models.MateMessage.id == row.id, condition).values(**values).execution_options(synchronize_session=False))).rowcount
     await session.commit()
+    if changed:
+        from .client_domain_events import account_changed
+        for uid in {row.sender_id, row.recipient_id}:
+            await account_changed(session, uid, "team-messages")
     await session.refresh(row)
     if changed:
         await publish_state(session, row, "mate_message_read" if row.read_at else "mate_message_delivered")

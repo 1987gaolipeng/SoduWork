@@ -326,6 +326,8 @@ async def _move_task_to_user(session: AsyncSession, t, target_uid: str, members_
     if not moved.rowcount:
         await session.rollback()
         return {"ok": False, "reason": "not_found"}
+    from .cloud_sync_notifications import mark
+    mark(session, t.id)
     await session.refresh(t)
     # The transfer note is part of the requirement context, not only an audit
     # event.  Persist it on the task before publishing the updated projection
@@ -557,6 +559,9 @@ async def message_mate(session: AsyncSession, client: models.Client,
     row = await mate_messages.create(session, me, target, payload or {}, body, shared)
     who = me.display_name or me.username
     await session.commit()
+    from .client_domain_events import account_changed
+    for uid in {row.sender_id, row.recipient_id}:
+        await account_changed(session, uid, "team-messages")
     public_website = mate_messages.public(row, me, target).get("website") or {}
     message = "\U0001f4ac %s\uff1a%s" % (who, body)
     for box in boxes:

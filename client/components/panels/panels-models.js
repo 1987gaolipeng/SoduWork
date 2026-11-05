@@ -31,6 +31,7 @@ let _mdNew = null;                  /* New-provider draft. */
 let _mdDeletePending = '';
 let _mdLoadId = 0;
 let _mdLoadState = 'idle';
+let _mdRefreshFlight = null;
 
 const _MD_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="2"/>' +
   '<rect x="14" y="14" width="7" height="7" rx="2"/><path d="M14 6h2a2 2 0 0 1 2 2v2M6 14v2a2 2 0 0 0 2 2h2"/></svg>';
@@ -538,3 +539,42 @@ function _mdMessage(key, fallback, params) {
   if (globalThis.SoduWorkI18n?.html) return SoduWorkI18n.html(key, fallback, params);
   return esc(fallback.replace(/\{(\w+)\}/g, (all, name) => params[name] ?? all));
 }
+
+// A background hint must not replace the editor's loading/error state or drafts.
+function _mdBackgroundRefresh() {
+  if (_mdRefreshFlight) return _mdRefreshFlight;
+  const panel = document.getElementById('mdPanel'), box = document.getElementById('mdBody');
+  const editable = () => panel?.classList.contains('show') && document.getElementById('mdBody') === box &&
+    _mdLoadState === 'ready' && _mdData && !_mdDirty && !Object.keys(_mdKeyEdits).length &&
+    !_mdNew && !_mdDeletePending && !_mdDrafts.size &&
+    !Object.values(_mdTest).some(test => test.state === 'ing') && ![..._mdChecks.values()].some(check => check.pending);
+  if (!box || !editable()) return Promise.resolve(false);
+  const scope = SoduWorkAPI.taskStorageKey?.('ops'), loadId = _mdLoadId;
+  const previous = { data: _mdData, models: _mdMyModels, editor: _mdEditor, open: _mdOpen, query: _mdQuery };
+  const snapshot = JSON.stringify(_mdData);
+  const current = () => editable() && loadId === _mdLoadId && scope === SoduWorkAPI.taskStorageKey?.('ops') &&
+    previous.data === _mdData && snapshot === JSON.stringify(_mdData) && previous.editor === _mdEditor &&
+    previous.open === _mdOpen && previous.query === _mdQuery;
+  let timer, rendering = false;
+  const flight = Promise.race([
+    Promise.resolve().then(() => SoduWorkAPI.myModels()),
+    new Promise((_, reject) => { timer = setTimeout(() => reject(Error('Model catalog refresh timed out')), 20000); })
+  ]).then(result => {
+    if (!current() || !result || !['providers', 'usable', 'myModels'].every(key => Array.isArray(result[key])) ||
+        result.providers.some(provider => !provider || typeof provider.id !== 'string') ||
+        result.myModels.some(model => !model || typeof model.name !== 'string') || snapshot === JSON.stringify(result)) return false;
+    rendering = true;
+    _mdData = result; _mdMyModels = result.myModels.slice();
+    _mdReconcileChecks(result); _mdRender();
+    return true;
+  }).catch(() => {
+    if (rendering) { _mdData = previous.data; _mdMyModels = previous.models; }
+    return false;
+  }).finally(() => { clearTimeout(timer); if (_mdRefreshFlight === flight) _mdRefreshFlight = null; });
+  _mdRefreshFlight = flight;
+  return flight;
+}
+
+window.addEventListener?.('soduwork-domain-changed', event => {
+  if (event.detail?.domain === 'models') void _mdBackgroundRefresh();
+});

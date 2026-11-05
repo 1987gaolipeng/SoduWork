@@ -37,6 +37,9 @@ async def _save_mark(session, row, mark, *, expected_state, error=None):
             func.coalesce(am.ExecutionSession.metadata_["terminalSettlement"]["executionState"].as_string(), "") != mark["executionState"],
             func.coalesce(am.ExecutionSession.metadata_["terminalSettlement"]["state"].as_string(), "").not_in(tuple(_SUCCESS_MARKS))),
     ).values(metadata_=replacement).execution_options(synchronize_session=False))
+    if changed.rowcount:
+        from .cloud_sync_notifications import mark as mark_cloud_sync
+        mark_cloud_sync(session, row.task_id)
     await session.refresh(row)
     return bool(changed.rowcount)
 

@@ -1,6 +1,7 @@
 """Project membership follows account identities without copying chat content."""
 import json
 import unittest
+from unittest.mock import AsyncMock, patch
 
 import httpx
 from fastapi import FastAPI, Request
@@ -11,15 +12,22 @@ from app.api import conversation_projects
 from app.db import Base, get_session
 from app.deps import current_client
 from app.models import Client
+from app.services import client_domain_events
 
 
 class ConversationProjectsTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        await client_domain_events.stop()
         self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.engine.begin() as connection:
             await connection.run_sync(lambda c: Base.metadata.create_all(c, tables=[
-                AccountConversation.__table__, ConversationProject.__table__]))
+                AccountConversation.__table__, ConversationProject.__table__, Client.__table__]))
+        async with self.sessions() as session:
+            session.add_all([Client(id="pc", user_ref="alice", auth_state="active"),
+                             Client(id="phone", user_ref="alice", auth_state="active"),
+                             Client(id="other", user_ref="bob", auth_state="active")])
+            await session.commit()
         app = FastAPI()
         app.include_router(conversation_projects.router)
 
@@ -36,8 +44,36 @@ class ConversationProjectsTests(unittest.IsolatedAsyncioTestCase):
         self.http = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
 
     async def asyncTearDown(self):
+        await client_domain_events.stop()
         await self.http.aclose()
         await self.engine.dispose()
+
+    async def test_committed_edits_wake_only_owner_devices_and_conflicts_do_not_publish(self):
+        with patch("app.services.native_discovery.wake", new_callable=AsyncMock) as wake:
+            response = await self.http.put("/api/v1/conversation-projects/project-one",
+                                           json={"name": "One", "revision": 0, "chatIds": []})
+            self.assertEqual(response.status_code, 200)
+            wake.assert_not_awaited()
+            await client_domain_events.flush_for_test(self.sessions)
+            self.assertEqual(set(response.json()), {"id", "name", "revision", "deleted", "chatIds"})
+            self.assertEqual({tuple(call.args) for call in wake.await_args_list},
+                             {("pc", "alice", "conversation-projects"),
+                              ("phone", "alice", "conversation-projects")})
+            wake.reset_mock()
+            conflict = await self.http.put("/api/v1/conversation-projects/project-one",
+                                           json={"name": "Conflict", "revision": 0})
+            self.assertEqual(conflict.status_code, 409)
+            await client_domain_events.flush_for_test(self.sessions)
+            wake.assert_not_awaited()
+
+    async def test_failed_push_does_not_change_committed_write_response(self):
+        with patch("app.services.native_discovery.wake", new_callable=AsyncMock, side_effect=OSError("offline")):
+            response = await self.http.put("/api/v1/conversation-projects/project-one",
+                                           json={"name": "Saved", "revision": 0, "chatIds": []})
+            await client_domain_events.flush_for_test(self.sessions)
+        self.assertEqual(response.status_code, 200)
+        rows = (await self.http.get("/api/v1/conversation-projects")).json()["items"]
+        self.assertEqual(rows[0]["name"], "Saved")
 
     async def save(self, body, **headers):
         return await self.http.put("/api/v1/conversation-projects/project-one", json=body, headers=headers)

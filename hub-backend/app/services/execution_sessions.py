@@ -63,6 +63,8 @@ async def _get_or_create_session(session: AsyncSession, task_id: str,
 
 async def _insert_event_once(session: AsyncSession, values: dict) -> None:
     """Insert one replay event idempotently across heartbeat/live-read writers."""
+    from .cloud_sync_notifications import mark
+    mark(session, "", execution_id=values.get("session_id"))
     dialect = session.get_bind().dialect.name
     if dialect == "postgresql":
         from sqlalchemy.dialects.postgresql import insert

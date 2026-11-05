@@ -13,10 +13,14 @@ from .. import automation_models as am, models
 from ..conversation_handoff_models import ConversationHandoff, ConversationMessageReceipt
 from ..schemas import attachment_to_api
 from . import conversation_handoffs, execution_sessions
+from .auth_principals import active_user
 
 
-async def _owned_task(session, client, row):
-    user = await conversation_handoffs.owner(session, client)
+async def _owned_task(session, client, row, *, user=None):
+    if user is None:
+        # Write/continuation callers retain the existing owner lookup. Directory
+        # and detail pass their already-validated read identity explicitly.
+        user = await conversation_handoffs.owner(session, client)
     task = await session.get(models.Task, row.task_id)
     if (not task or row.owner_user_id != user.id or
             task.owner_client_id != row.owner_client_id):
@@ -78,7 +82,7 @@ def _public(row, task, execution):
 
 
 async def directory(session, client, *, after="", limit=50):
-    user = await conversation_handoffs.owner(session, client)
+    user = await active_user(session, client)
     count = min(100, max(1, int(limit)))
     rows = (await session.execute(select(ConversationHandoff, models.Task)
         .join(models.Task, models.Task.id == ConversationHandoff.task_id)
@@ -89,7 +93,7 @@ async def directory(session, client, *, after="", limit=50):
     items = []
     for row, task in page:
         try:
-            await _owned_task(session, client, row)
+            await _owned_task(session, client, row, user=user)
             items.append(_public(row, task, await _execution(session, row)))
         except HTTPException as exc:
             if exc.status_code != 404:
@@ -99,13 +103,13 @@ async def directory(session, client, *, after="", limit=50):
 
 
 async def detail(session, client, handoff_id, *, ref="", since=0, limit=400):
-    user = await conversation_handoffs.owner(session, client)
+    user = await active_user(session, client)
     row = await session.scalar(select(ConversationHandoff).where(
         ConversationHandoff.id == handoff_id,
         ConversationHandoff.owner_user_id == user.id))
     if row is None:
         raise HTTPException(404, "云端会话不存在或不属于当前账号")
-    task = await _owned_task(session, client, row)
+    task = await _owned_task(session, client, row, user=user)
     execution = await _execution(session, row)
     # A client must not carry the previous execution's cursor into a new ref.
     current_ref = execution.ref if execution else ""

@@ -127,7 +127,7 @@ function create({ app, root, read, save, identity, request, publicRecord }) {
     })().finally(() => pending.delete(key));
     pending.set(key, job); return job;
   }
-  async function history() {
+  async function history(hiddenTasks) {
     const current = await identity(), owner = scope(current);
     const syncOwner = require('./cloud-execution-sync').scope(current);
     const entries = await fs.readdir(root).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
@@ -136,28 +136,50 @@ function create({ app, root, read, save, identity, request, publicRecord }) {
       let record;
       try { record = JSON.parse(await fs.readFile(path.join(root, name), 'utf8')); }
       catch (error) { console.warn('[cloud-start] Unreadable history receipt:', name, error.code || 'invalid JSON'); continue; }
-      if (record.entryKind !== 'cloud' || (record.owner !== owner && (!record.syncOwner || record.syncOwner !== syncOwner)) || record.hidden) continue;
+      if (record.entryKind !== 'cloud' || (record.owner !== owner && (!record.syncOwner || record.syncOwner !== syncOwner))) continue;
+      if (record.hidden) {
+        if (record.taskId) hiddenTasks?.add(record.taskId);
+        continue;
+      }
       // The receipt's `cwd` is a private cache on this computer.  It is only
       // used to replay remote artifacts and must never be exposed as a local
       // working directory or inherited by the next local conversation.
       rows.push({ id: record.sessionId, title: record.title, at: record.at, cwd: '',
         workspaceName: '云端环境', workspaceLabel: '云端环境', locationMode: 'remote',
-        location: 'cloud', adapterId: record.activeExecutionSelection?.agentId || record.adapterId, taskId: record.taskId || '', state: record.cloudApprovals?.length || record.syncSnapshot?.historyGap || record.syncArtifactsPending ? 'waiting' : record.remoteState || (record.phase === 'committed' ? 'idle' : 'waiting'),
-        cloud: true, needsAttention: Boolean(record.cloudApprovals?.length || record.syncSnapshot?.historyGap || record.syncArtifactsPending),
+        location: 'cloud', adapterId: record.activeExecutionSelection?.agentId || record.adapterId, taskId: record.taskId || '', state: record.cloudApprovals?.length || record.syncSnapshot?.historyGap || record.syncRecovery?.historyGap || record.syncArtifactsPending ? 'waiting' : record.remoteState || (record.phase === 'committed' ? 'idle' : 'waiting'),
+        cloud: true, needsAttention: Boolean(record.cloudApprovals?.length || record.syncSnapshot?.historyGap || record.syncRecovery?.historyGap || record.syncArtifactsPending),
         outputPending: Boolean(record.syncArtifactsPending), outputError: record.syncArtifactError || '',
-        historyGap: record.syncSnapshot?.historyGap || null, cloudApprovals: record.cloudApprovals || [] });
+        historyGap: record.syncSnapshot?.historyGap || (record.syncRecovery?.historyGap ? { reason: 'local-cache-recovery' } : null), cloudApprovals: record.cloudApprovals || [] });
     }
     return { ok: true, chats: rows };
   }
   async function forget(id) {
     const record = read(id);
     if (!record || record.entryKind !== 'cloud') return { ok: false, notFound: true };
+    const current = await identity(record);
+    if (!record.taskId) throw Error('请先核对这条云端请求是否已接收');
+    // Let Hub resolve the current execution. Deletion does not need transcript events.
+    const cursor = '?since=2147483647';
+    let page;
+    if (record.syncId) {
+      const details = await request(current, '/cloud-execution-sync/' + encodeURIComponent(record.syncId) + cursor + '&limit=1');
+      if (!details?.ok || details.conversation?.id !== record.syncId ||
+          details.conversation?.receipt?.taskId !== record.taskId) throw Error('无法核对这条云端会话，请刷新后重试');
+      if (details.messages?.length || details.approvals?.length) throw Error('这条云端会话还有待处理的消息或审批，请先处理后再删除');
+      page = details.page;
+    } else {
+      page = await request(current, '/tasks/' + encodeURIComponent(record.taskId) + '/ai-session' + cursor);
+    }
+    const settledAtHub = page?.persisted && page.taskId === record.taskId && page.finishedAt;
+    if (!page?.ok || !page.ref || (page.taskId && page.taskId !== record.taskId) || (page.liveError && !settledAtHub)) {
+      throw Error('暂时无法确认最近一轮的执行状态，请检查执行机连接后重试');
+    }
+    if (['queued', 'dispatching', 'running'].includes(page.status)) throw Error('云端会话仍在执行，请先停止或等待完成');
+    if (!['done', 'completed', 'failed', 'stopped', 'cancelled', 'interrupted'].includes(page.status)) {
+      throw Error('暂时无法确认最近一轮的执行状态，请稍后重试');
+    }
     await identity(record);
-    if (record.taskId) {
-      const status = await request(await identity(record), '/tasks/' + encodeURIComponent(record.taskId) + '/ai-status');
-      if (!['done', 'completed', 'failed', 'stopped'].includes(status.status || status.state)) throw Error('云端会话仍在执行，请先停止或等待完成');
-    } else throw Error('请先核对这条云端请求是否已接收');
-    await save({ ...record, hidden: true }); // Keep the durable execution fence.
+    await save({ ...read(id), hidden: true }); // Keep the durable execution fence.
     return { ok: true, id };
   }
   return { start, history, forget, retry: submit };

@@ -21,15 +21,17 @@ from app.db import Base, get_session
 from app.deps import current_client
 from app.library_models import LibraryFolder, LibraryItem
 from app.services import library_sharing, library_storage, mate_messages, mate_message_files, storage, task_assignment
+from app.services import client_domain_events
 
 
 class LibrarySharingTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        await client_domain_events.stop()
         self.engine = create_async_engine('sqlite+aiosqlite:///:memory:', poolclass=StaticPool)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.engine.begin() as connection:
             await connection.run_sync(lambda conn: Base.metadata.create_all(conn, tables=[
-                models.User.__table__, models.Attachment.__table__, models.MateMessage.__table__,
+                models.User.__table__, models.Client.__table__, models.Attachment.__table__, models.MateMessage.__table__,
                 LibraryItem.__table__, LibraryFolder.__table__]))
         async with self.sessions() as session:
             for uid, org, active in [('sender', 'org-one', True), ('alice', 'org-one', True),
@@ -41,6 +43,10 @@ class LibrarySharingTests(unittest.IsolatedAsyncioTestCase):
                                     content_type='text/plain', size=12))
             session.add(LibraryItem(id='other-file', owner_key='alice', filename='private.txt',
                                     title='Private file', storage_key='private-object', backend='local', size=7))
+            session.add_all([models.Client(id='sender-device', user_ref='sender', auth_state='active'),
+                             models.Client(id='sender-other-device', user_ref='sender', auth_state='active'),
+                             models.Client(id='alice-device', user_ref='alice', auth_state='active'),
+                             models.Client(id='bob-device', user_ref='bob', auth_state='active')])
             await session.commit()
         self.objects = {}
 
@@ -70,6 +76,7 @@ class LibrarySharingTests(unittest.IsolatedAsyncioTestCase):
         self.http = httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False), base_url='http://fixture')
 
     async def asyncTearDown(self):
+        await client_domain_events.stop()
         for replacement in reversed(self.patches):
             replacement.stop()
         await self.http.aclose()
@@ -77,6 +84,22 @@ class LibrarySharingTests(unittest.IsolatedAsyncioTestCase):
 
     async def post(self, ids, item='fixture-file', note='Please review'):
         return await self.http.post('/api/v1/library/items/' + item + '/share', json={'recipientUserIds': ids, 'note': note})
+
+    async def test_single_and_batch_shares_wake_sender_devices_without_changing_legacy_notice(self):
+        for batch in (False, True):
+            with patch.object(client_domain_events.native_discovery, 'wake', new_callable=AsyncMock) as wake:
+                if batch:
+                    response = await self.http.post('/api/v1/library/items/batch-share',
+                        json={'itemIds': ['fixture-file'], 'recipientUserIds': ['alice'], 'note': 'Batch'})
+                else:
+                    response = await self.post(['alice'])
+                self.assertEqual(response.status_code, 200, response.text)
+                wake.assert_not_awaited()
+                await client_domain_events.flush_for_test(self.sessions)
+                self.assertEqual({call.args for call in wake.await_args_list},
+                                 {('sender-device', 'sender', 'team-messages'),
+                                  ('sender-other-device', 'sender', 'team-messages'),
+                                  ('alice-device', 'alice', 'team-messages')})
 
     async def records(self, model):
         async with self.sessions() as session:

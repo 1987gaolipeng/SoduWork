@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     cluster_lease_seconds: int = Field(default=15, ge=10, le=120)
     cluster_refresh_seconds: float = Field(default=2, ge=.5, le=10)
     cluster_max_inflight: int = Field(default=128, ge=8, le=1024)
+    # Enable only after every SQL writer has the shared-cache invalidation hooks.
+    auth_cache_enabled: bool = False
+    auth_cache_fencing_enabled: bool = False
+    auth_cache_generation: str = "1"
+    # Pin the live Redis incarnation. Restart/restore requires a drained,
+    # deliberate re-enable; restored snapshots must never revive old sessions.
+    auth_cache_redis_run_id: str = ""
 
     # Bootstrap a superuser only when users is empty; later configuration changes do not update existing accounts.
     # Never retain known default passwords in source code or configuration defaults.

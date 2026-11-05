@@ -7,6 +7,7 @@ import hmac
 import json
 import re
 import time
+from types import SimpleNamespace
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -187,31 +188,47 @@ def _assert_active_binding_loaded(client: Client | None, owner: User | None,
         raise DeviceAuthError("设备归属已变更，请重新连接", 401)
 
 
-async def _binding_with_quota(session: AsyncSession, client_id: str):
-    """Read identity and both quota rules in one indexed authentication query."""
-    from . import client_access
-    default = aliased(AppSetting, name="quota_default")
-    personal = aliased(AppSetting, name="quota_personal")
-    row = (await session.execute(
-        select(Client, User, default.value, personal.value)
+async def _binding(session: AsyncSession, client_id: str, *, include_quota=False):
+    """Business callers need Client; authentication needs only owner state.
+
+    Quota policies belong to AI admission, never ordinary reads or polling.
+    """
+    query = (select(Client, User.id, User.is_active, User.account_deleted_at)
         .outerjoin(User, Client.user_ref == User.id)
-        .outerjoin(default, default.key == client_access.POLICY_KEY)
-        .outerjoin(personal, personal.key == client_access.USER_QUOTA_PREFIX + Client.user_ref)
-        .where(Client.id == client_id).execution_options(populate_existing=True)
-    )).one_or_none()
+        .where(Client.id == client_id).execution_options(populate_existing=True))
+    if include_quota:
+        from . import client_access, quota_plans
+        default, personal, grant = (aliased(AppSetting, name="quota_" + name)
+                                    for name in ("default", "personal", "grant"))
+        query = (query.add_columns(default.value, personal.value, grant.value)
+                 .outerjoin(default, default.key == client_access.POLICY_KEY)
+                 .outerjoin(personal, personal.key == client_access.USER_QUOTA_PREFIX + Client.user_ref)
+                 .outerjoin(grant, grant.key == quota_plans.GRANT_PREFIX + Client.user_ref))
+    row = (await session.execute(query)).one_or_none()
     if row:
-        row[0]._quota_policy_rows = {
-            client_access.POLICY_KEY: row[2],
-            client_access.USER_QUOTA_PREFIX + str(row[0].user_ref or ""): row[3],
-        }
+        row[0].__dict__.pop("_quota_policy_rows", None)
+        if include_quota:
+            row[0]._quota_policy_rows = {
+                client_access.POLICY_KEY: row[4],
+                client_access.USER_QUOTA_PREFIX + str(row[0].user_ref or ""): row[5],
+                quota_plans.GRANT_PREFIX + str(row[0].user_ref or ""): row[6],
+            }
+        return row[0], (SimpleNamespace(id=row[1], is_active=row[2],
+                         account_deleted_at=row[3]) if row[1] else None)
     return row
 
 
-async def client_from_session(session: AsyncSession, token: str) -> Client:
+async def client_from_session(session: AsyncSession, token: str, *, include_quota=False) -> Client:
+    from . import auth_principals, shared_auth_cache
+    if shared_auth_cache.reads_enabled():
+        principal, claims = await auth_principals.from_token(session, token)
+        client = await _load_verified_client(session, principal, include_quota=include_quota)
+        client._device_claims = claims
+        return client
     claims = verify_claims(token, token_type="device")
     if not claims:
         raise DeviceAuthError("设备会话已失效，请重新连接", 401)
-    row = await _binding_with_quota(session, str(claims.get("cid") or ""))
+    row = await _binding(session, str(claims.get("cid") or ""), include_quota=include_quota)
     client = row[0] if row else None
     _assert_active_binding_loaded(client, row[1] if row else None, claims)
     assert client is not None
@@ -220,10 +237,15 @@ async def client_from_session(session: AsyncSession, token: str) -> Client:
 
 
 async def client_from_proxy_ticket(session: AsyncSession, token: str) -> Client:
+    from . import auth_principals, shared_auth_cache
+    if shared_auth_cache.reads_enabled():
+        principal, _ = await auth_principals.from_token(session, token, token_type="ai-proxy")
+        client = await _load_verified_client(session, principal, include_quota=True)
+        return client
     claims = verify_claims(token, token_type="ai-proxy")
     if not claims:
         raise DeviceAuthError("AI 对话凭证已失效，请重新打开对话", 401)
-    row = await _binding_with_quota(session, str(claims.get("cid") or ""))
+    row = await _binding(session, str(claims.get("cid") or ""), include_quota=True)
     client = row[0] if row else None
     _assert_active_binding_loaded(client, row[1] if row else None, claims)
     return client
@@ -231,19 +253,44 @@ async def client_from_proxy_ticket(session: AsyncSession, token: str) -> Client:
 
 async def principal_from_mcp_ticket(session: AsyncSession, token: str) -> tuple[Client, dict]:
     """Accept either the ordinary SoduWork-tool ticket or a per-turn plugin ticket."""
-    claims = verify_claims(token, token_type="device-mcp")
+    token_type = "device-mcp"
+    claims = verify_claims(token, token_type=token_type)
     if claims is None:
-        claims = verify_claims(token, token_type="plugin-mcp")
+        token_type = "plugin-mcp"
+        claims = verify_claims(token, token_type=token_type)
     if not claims:
         raise DeviceAuthError("SoduWork 工具凭证已失效，请重新打开对话", 401)
-    client = await session.get(Client, str(claims.get("cid") or ""))
-    await assert_active_binding(session, client, claims)
+    from . import auth_principals, shared_auth_cache
+    if shared_auth_cache.reads_enabled():
+        principal, claims = await auth_principals.from_token(session, token, token_type=token_type)
+        client = await _load_verified_client(session, principal)
+    else:
+        row = await _binding(session, str(claims.get("cid") or ""))
+        client = row[0] if row else None
+        _assert_active_binding_loaded(client, row[1] if row else None, claims)
     assert client is not None
     return client, claims
 
 
-async def client_from_secret(session: AsyncSession, device: str, secret: str) -> Client:
-    row = await _binding_with_quota(session, validate_device_id(device))
+async def _load_verified_client(session, principal, *, include_quota=False):
+    if include_quota:
+        row = await _binding(session, principal.id, include_quota=True)
+        client = row[0] if row else None
+        _assert_active_binding_loaded(client, row[1] if row else None,
+                                      {"uid": principal.user_ref, "ver": principal.auth_version})
+    else:
+        client = await session.get(Client, principal.id, populate_existing=True)
+        if client is not None:
+            client.__dict__.pop("_quota_policy_rows", None)
+    if (client is None or client.auth_state != "active" or
+            client.user_ref != principal.user_ref or
+            int(client.auth_version or 1) != int(principal.auth_version or 1)):
+        raise DeviceAuthError("设备授权已变更，请重新连接", 401)
+    return client
+
+
+async def client_from_secret(session: AsyncSession, device: str, secret: str, *, include_quota=False) -> Client:
+    row = await _binding(session, validate_device_id(device), include_quota=include_quota)
     client = row[0] if row else None
     if client is None or not secret_matches(client, secret):
         raise DeviceAuthError("设备身份或密钥不正确", 401)
@@ -296,8 +343,9 @@ async def assert_active_owner(session: AsyncSession, client: Client | None) -> N
         raise DeviceAuthError("这台 SoduWork 尚未登记", 401)
     if client.auth_state != "active" or not client.user_ref:
         raise DeviceAuthError("这台 SoduWork 尚未激活或已被停用", 403)
-    user = await session.get(User, client.user_ref)
-    if user is None or not user.is_active or user.account_deleted_at:
+    from .auth_principals import user_snapshot
+    user = await user_snapshot(session, client.user_ref)
+    if user is None or not user["is_active"] or user["account_deleted_at"]:
         raise DeviceAuthError("设备所属账号不存在或已停用", 403)
 
 

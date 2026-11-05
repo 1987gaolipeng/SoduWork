@@ -266,6 +266,9 @@
       if (store._remoteReady && !store._waitingHeartbeat) void store.refreshTasks();
       global.MateNoticeSync?.tick(true);
     });
+    global.addEventListener?.('soduwork-domain-changed', event => {
+      if (event.detail?.domain === 'config') store._loadConfig(store._cfgRevision);
+    });
     global.initData = async function initData() {
       store.initLocal(); hooks.syncBindings();
       if (!api()) return;

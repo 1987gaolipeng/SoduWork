@@ -2,13 +2,14 @@
 from fastapi import APIRouter, Depends, Query
 
 from ..db import get_session
-from ..deps import current_client
+from ..deps import current_client, identity_only
 from ..services import cloud_execution_sync as service
 
 router = APIRouter(prefix="/api/v1/cloud-execution-sync", tags=["cloud-conversations"])
 
 
 @router.get("")
+@identity_only
 async def directory(after: str = Query(default="", max_length=80),
                     limit: int = Query(default=50, ge=1, le=100),
                     client=Depends(current_client), session=Depends(get_session)):
@@ -16,6 +17,7 @@ async def directory(after: str = Query(default="", max_length=80),
 
 
 @router.get("/{handoff_id}")
+@identity_only
 async def detail(handoff_id: str, ref: str = Query(default="", max_length=180),
                  since: int = Query(default=0, ge=0),
                  limit: int = Query(default=400, ge=1, le=1000),

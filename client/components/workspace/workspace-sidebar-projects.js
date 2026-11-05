@@ -1,6 +1,12 @@
 /* Local conversation groups may explicitly reference an authorized Hub project. */
 (function (global) {
   'use strict';
+  const invalidations = new WeakMap();
+  global.addEventListener?.('soduwork-domain-changed', event => {
+    if (event.detail?.domain !== 'conversation-projects') return;
+    const box = global.document?.getElementById('wsProjectsBox');
+    if (box) invalidations.get(box)?.();
+  });
   const paths = {
     folder: '<path d="M3.5 7V5.5a2 2 0 0 1 2-2h4l2 3h7a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7ZM3.5 10h17"/>',
     app: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.8"/>',
@@ -36,6 +42,7 @@
     root.querySelector('#wsChatsBox').dataset.sidebarSection = 'recent';
     let store = null, scope = '', dialog = null, sync = null;
     let lastSync = 0;
+    invalidations.set(box, () => { void sync?.run(); });
     const notify = error => {
       const message = error.message || String(error);
       if (status.textContent === message) return;

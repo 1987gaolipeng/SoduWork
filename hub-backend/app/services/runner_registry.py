@@ -316,8 +316,8 @@ async def list_nodes(session: AsyncSession, allowed_client_ids: set[str] | None 
             active.setdefault(item.runner_id, []).append(item)
         task_ids = {x.task_id for x in sessions if x.task_id}
         titles = {x.id: x.title for x in list((await session.execute(
-            select(models.Task).where(models.Task.id.in_(task_ids or {"__none__"}))
-        )).scalars().all())}
+            select(models.Task.id, models.Task.title).where(models.Task.id.in_(task_ids or {"__none__"}))
+        )).all())}
     else:
         titles = {}
 
@@ -325,14 +325,16 @@ async def list_nodes(session: AsyncSession, allowed_client_ids: set[str] | None 
     owner_ids = {row.client_id for row in rows if row.client_id} | {
         (live.get(row.id).client_id if live.get(row.id) else "") for row in rows}
     clients = list((await session.execute(
-        select(models.Client).where(models.Client.id.in_(owner_ids or {"__none__"}))
-    )).scalars().all())
+        select(models.Client.id, models.Client.user_ref, models.Client.name)
+        .where(models.Client.id.in_(owner_ids or {"__none__"}))
+    )).all())
     user_ids = {client.user_ref for client in clients if client.user_ref} | {
         str(row.owner_user_id) for row in rows if row.owner_user_id}
     users = {user.id: (user.display_name or user.username or "")
              for user in list((await session.execute(
-                 select(models.User).where(models.User.id.in_(user_ids or {"__none__"}))
-             )).scalars().all())}
+                 select(models.User.id, models.User.display_name, models.User.username)
+                 .where(models.User.id.in_(user_ids or {"__none__"}))
+             )).all())}
     owners = {
         client.id: users.get(client.user_ref or "", "") or (client.name or "")
         for client in clients

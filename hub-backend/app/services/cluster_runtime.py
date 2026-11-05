@@ -127,9 +127,11 @@ class RemoteRunner(runner_hub._Runner):
 
 def snapshot():
     from ..realtime import hub
+    from .native_discovery import EXTENDED_TOPICS
     # Heartbeats contain small references, not every Skill description on every
     # Runner. Unchanged inventory is kept locally and renewed without retransmit.
     return {"runners": [entry["reference"] for entry in _LOCAL_INVENTORY.values()],
+            "nativeDiscoveryTopics": sorted(EXTENDED_TOPICS),
             "devices": list(hub._conns)}
 
 

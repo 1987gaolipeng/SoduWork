@@ -146,6 +146,8 @@ async def put_my_models(
         client.models = out
     await session.commit()
     await session.refresh(client)
+    from ..services.client_domain_events import device_changed
+    await device_changed(client, "models")
     return {
         "ok": True,
         "usable": await model_catalog.usable(session, client, "chat"),

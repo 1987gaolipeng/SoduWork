@@ -19,7 +19,7 @@ from ..account_conversation_models import (
     AccountConversationMessage,
 )
 from ..db import SessionLocal, get_session
-from ..deps import current_client
+from ..deps import current_client, identity_only
 from ..models import Client
 from ..realtime import hub
 
@@ -189,6 +189,7 @@ async def _next_message_revision(conversation_id: str, session: AsyncSession) ->
 
 
 @router.get("")
+@identity_only
 async def list_account_conversations(
     after: int = Query(default=0, ge=0),
     limit: int = Query(default=_MAX_DIRECTORY, ge=1, le=_MAX_DIRECTORY),
@@ -370,6 +371,7 @@ async def sync_account_conversation(
                 "idempotent": True,
             }
 
+    new_source = row is None
     if row is None:
         row = AccountConversation(
             id="acct-" + uuid.uuid4().hex,
@@ -450,6 +452,10 @@ async def sync_account_conversation(
         await session.rollback()
         raise HTTPException(status_code=409, detail="会话同步发生并发冲突，请重试原批次") from exc
     await _publish_account_update(owner, row)
+    if new_source:
+        # Existing groups may now resolve an opaque member to its account identity.
+        from ..services.client_domain_events import account_changed
+        await account_changed(session, owner, "conversation-projects")
     return {
         "ok": True,
         "conversationId": row.id,

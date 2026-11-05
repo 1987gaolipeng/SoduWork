@@ -596,6 +596,9 @@ async def abort(session, client, transfer_id):
     changed = await session.execute(update(Handoff).where(
         Handoff.id == row.id, Handoff.phase == "prepared",
         Handoff.submitted_at.is_(None)).values(phase="aborted"))
+    if changed.rowcount:
+        from .cloud_sync_notifications import mark
+        mark(session, row.task_id, owner=row.owner_user_id)
     await session.commit()
     if not changed.rowcount:
         raise HTTPException(409, "云端已开始接管或尚在核对回执，不能恢复本地执行")
@@ -695,6 +698,9 @@ async def commit(session, client, transfer_id, sha256):
         Handoff.id == row.id, or_(*conditions)).values(phase="committing", commit_started_at=now, error="",
         submitted_at=row.submitted_at or now,
         receipt={"runnerBootId": picked.get("runnerBootId", ""), "runnerId": picked["runnerId"]}))
+    if changed.rowcount:
+        from .cloud_sync_notifications import mark
+        mark(session, row.task_id, owner=row.owner_user_id)
     await session.commit()
     if not changed.rowcount:
         return public(await get(session, client, transfer_id))

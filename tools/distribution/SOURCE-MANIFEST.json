@@ -116,8 +116,8 @@
     },
     {
       "path": "client/api.js",
-      "bytes": 141813,
-      "sha256": "ea96e35564e38d2908fd3ea7d28556ca54eeb02f2df534ab110a69e2e8ca8b86"
+      "bytes": 145454,
+      "sha256": "4c5e037beab5d8d567f708bc0e35ea263a810f91b9796bb6cdb4a773e1eb67b4"
     },
     {
       "path": "client/app-window-chrome.html",
@@ -1536,8 +1536,8 @@
     },
     {
       "path": "client/components/panels/panels-models.js",
-      "bytes": 29019,
-      "sha256": "29b77c2ec0d9eba183bc54e6a9cc31cf067f6093ce234bb16fd27520484e4bc2"
+      "bytes": 31400,
+      "sha256": "f4f1ebbda34d7d8c99c85d53cf8140fd8c077a18dd7cc21c99f9ffee96979575"
     },
     {
       "path": "client/components/panels/panels-plugin-builder-entry.js",
@@ -2361,13 +2361,13 @@
     },
     {
       "path": "client/components/workspace/workspace-sidebar-projects.js",
-      "bytes": 23675,
-      "sha256": "1ddc94327bd94c7293e14595537080e933e57fab223260f18c83e05575f202ff"
+      "bytes": 24016,
+      "sha256": "aeccc18fbb6cc44430059965180f0623acf5ecf281086630b5708f4b910ab13a"
     },
     {
       "path": "client/components/workspace/workspace-sidebar-state.js",
-      "bytes": 23272,
-      "sha256": "93cab25ceaa019314125e4867fd325bc037bf6cfd18dac96e8c956b3da33d1cf"
+      "bytes": 23512,
+      "sha256": "50ca8b548fccaacdbc046cd364b275118e833faf7f181981175a2ecf08f1771d"
     },
     {
       "path": "client/core/api-work-plugins.js",
@@ -2616,8 +2616,8 @@
     },
     {
       "path": "client/core/mate-notice-sync.js",
-      "bytes": 23810,
-      "sha256": "fd9ac2cc52e1cb8cccae2231580b8c006c493b526b2629797ff09528b8cca5c9"
+      "bytes": 24343,
+      "sha256": "8b9e800e63d0f92580e07f7a83b94827b5cbc1df6b7dee87c13fd30b8aafda55"
     },
     {
       "path": "client/core/model-choice.js",
@@ -2686,8 +2686,8 @@
     },
     {
       "path": "client/core/store-lifecycle.js",
-      "bytes": 15227,
-      "sha256": "109aaed30700ad58d47f86f86e98ef8161d1c6b8a44ed48090b5018aa7316fbd"
+      "bytes": 15387,
+      "sha256": "7cd4ed7b598353e8807c6c140e8f03d94de8f33986a0d67f66b86c4a1fe33316"
     },
     {
       "path": "client/core/store.js",
@@ -4151,8 +4151,8 @@
     },
     {
       "path": "client/e2e/model-page-loading.cjs",
-      "bytes": 8002,
-      "sha256": "f12f23bc01574e79190fa1d5bdda3a6371863603a1dcc9ad5b63cb46a2170c39"
+      "bytes": 8167,
+      "sha256": "7049d52ae3f17979cf878e1980fb24ef9f05b8cfef1933d9e759c3b9474c8c23"
     },
     {
       "path": "client/e2e/model-picker-presentation.cjs",
@@ -5066,8 +5066,8 @@
     },
     {
       "path": "client/main.js",
-      "bytes": 37268,
-      "sha256": "d82eba32df8196998907bfbc3b217924f81bd89b5e29d9e44d92dedd8cf6426b"
+      "bytes": 36903,
+      "sha256": "77576d0f6983e51719a29f223327852cf8f2bbbc802edaa87c0f1abca16b381d"
     },
     {
       "path": "client/main/access-control/automation-access.js",
@@ -5545,6 +5545,11 @@
       "sha256": "0cd2d8054a53fb65261caf51136c7f72fb473774ee15cf7ca14b178ae7810915"
     },
     {
+      "path": "client/main/client-domain-cache.cjs",
+      "bytes": 9967,
+      "sha256": "99e91c0915bf647a1e9facf476b95304396dd4a8a6b6eb62d468e2a1e0f01f08"
+    },
+    {
       "path": "client/main/client-update-contract.js",
       "bytes": 4907,
       "sha256": "3f62ef5386484b1c3a84c4f7aee583d061b154b500d5703fe9291ea1d5fedb28"
@@ -5701,8 +5706,8 @@
     },
     {
       "path": "client/main/conversation/cloud-execution-projection.js",
-      "bytes": 12413,
-      "sha256": "d6934e545ea7bbbbe4b4e1d13b40e87c868335be8786ffb138478998c24382b5"
+      "bytes": 14156,
+      "sha256": "8b12e25528dcc907bdf08f179258222ee4f5484ab8eb25dcf4d05f07d7bfe3ff"
     },
     {
       "path": "client/main/conversation/cloud-execution-selection.js",
@@ -5711,8 +5716,8 @@
     },
     {
       "path": "client/main/conversation/cloud-execution-sync.js",
-      "bytes": 4348,
-      "sha256": "99ff561265156d34bbcd91e68f0ac61a23be99a1dd83f867334bca81f64a5e94"
+      "bytes": 7942,
+      "sha256": "63203302ca54cf08958eed89b149cd97e1ac169b4e3b32c18c68263437e5c3f3"
     },
     {
       "path": "client/main/conversation/cloud-handoff-ipc.js",
@@ -5721,8 +5726,8 @@
     },
     {
       "path": "client/main/conversation/cloud-handoff.js",
-      "bytes": 50308,
-      "sha256": "3e3656ea8d8a94f9beb238d60199c20843141f6105a863cf0c69dd53f5980821"
+      "bytes": 52526,
+      "sha256": "6626d2fc8183bdbf3ba85a4a428363345306e6cac919eab26b5909432a6e2465"
     },
     {
       "path": "client/main/conversation/cloud-output-cache.js",
@@ -5736,8 +5741,8 @@
     },
     {
       "path": "client/main/conversation/cloud-start.js",
-      "bytes": 11441,
-      "sha256": "505a3f63b2e46b8af3605a10b621a91f16b52be3c5b5e9190a0793adfdea5da2"
+      "bytes": 12917,
+      "sha256": "14a08010e105567606e99fc2f58854d5f1df3d68a99b5d6b46cd672ada9a5301"
     },
     {
       "path": "client/main/conversation/cloud-timing.js",
@@ -7221,8 +7226,8 @@
     },
     {
       "path": "client/preload.js",
-      "bytes": 34053,
-      "sha256": "e766d41aa52baedd02aa3a9cdae094786a3be207c7b1584b08506a9758d97e2f"
+      "bytes": 34487,
+      "sha256": "883afb82f42069dae69160c889c671710a34d27d98f2a1d4fbbc9f63abbf3167"
     },
     {
       "path": "client/runner/README.md",
@@ -7588,6 +7593,11 @@
       "path": "client/tests/account-sync-pagination.test.cjs",
       "bytes": 2152,
       "sha256": "aa143903a10f7505030cf52330303575527479b87cc398d4c9e97c41948d0628"
+    },
+    {
+      "path": "client/tests/account-sync-push.test.cjs",
+      "bytes": 9648,
+      "sha256": "ac3a72008f78b7ab046801a9099ae4853e6f71cf5cdaf1404b5a6b6d036d8cd4"
     },
     {
       "path": "client/tests/action-handoff-http.test.cjs",
@@ -8160,6 +8170,16 @@
       "sha256": "7a40045f94cdcec9416931399b52286057dd0b88873fbe3535db0173be2858c0"
     },
     {
+      "path": "client/tests/client-domain-api.test.cjs",
+      "bytes": 7451,
+      "sha256": "675eca94034322327e82499d1bb17d38d7d4b2d3c7f711b8c6da4dccdc75d4b2"
+    },
+    {
+      "path": "client/tests/client-domain-cache.test.cjs",
+      "bytes": 11121,
+      "sha256": "00979bf0872e1a0e471e6fb4860754adfa5ee79e47255c138e17a157392d45b7"
+    },
+    {
       "path": "client/tests/client-email-password.test.cjs",
       "bytes": 12920,
       "sha256": "8b624ad0bdd5deba5fdd23e552dc35e2cf0b3aa0ab1f65ea4ece5818ea4d68f9"
@@ -8256,8 +8276,8 @@
     },
     {
       "path": "client/tests/cloud-start.test.cjs",
-      "bytes": 12092,
-      "sha256": "ca2dceafedfcd1c15377c60cc74540ee32887be039ee746c907f680552ace500"
+      "bytes": 12651,
+      "sha256": "b518a622041b37bfc97cc7520fe2b426f2946cea2b6a771d57100dfefd9fc80c"
     },
     {
       "path": "client/tests/cloud-timing.test.cjs",
@@ -9226,8 +9246,8 @@
     },
     {
       "path": "client/tests/mate-notice-api.test.cjs",
-      "bytes": 9425,
-      "sha256": "802589d894d66b79005ab1f680ae059369e226982b3ecf268baa2859fdaab8c4"
+      "bytes": 9870,
+      "sha256": "7cf786585824f270c9f7e112af7fc113540517dc8f1d786413b8ab5572b78487"
     },
     {
       "path": "client/tests/mate-notice-sync.test.cjs",
@@ -9353,6 +9373,11 @@
       "path": "client/tests/model-warmup.test.cjs",
       "bytes": 5487,
       "sha256": "d0bee094bd1643ecb95e7769b081dfc4f1fc2e75140aa4cc57a9112a4759c2dd"
+    },
+    {
+      "path": "client/tests/models-push-refresh.test.cjs",
+      "bytes": 6599,
+      "sha256": "d1f3290dedd314a64f9325bc9462c8cd90a13550f99995b4ecae7e703afd5b89"
     },
     {
       "path": "client/tests/multimodal-input.test.cjs",
@@ -9541,8 +9566,8 @@
     },
     {
       "path": "client/tests/personal-conversation-relay.test.cjs",
-      "bytes": 7516,
-      "sha256": "40606c23f74c1d068be9168e230d0f407bc32270f4cf35e6ae2d6b85cead1d41"
+      "bytes": 12384,
+      "sha256": "0003cc9dfaadb5d7e7cb6d5236136aae09d32f88000841f0563cc7e9f1f7e918"
     },
     {
       "path": "client/tests/personal-memory-automatic.test.cjs",
@@ -11221,8 +11246,8 @@
     },
     {
       "path": "client/tests/workspace-sidebar-projects.test.cjs",
-      "bytes": 20677,
-      "sha256": "066c1df05f898e742ad41518545b0e6be2a6645403d7380d325eef661215437c"
+      "bytes": 21675,
+      "sha256": "b441e2a8a6a95751f9c37b71caaddb4e4458efa9cb93a2d08504d68bc5723814"
     },
     {
       "path": "client/tests/workspace-sidebar-upgrade.test.cjs",
@@ -11561,8 +11586,8 @@
     },
     {
       "path": "hub-backend/app/api/account_conversations.py",
-      "bytes": 23510,
-      "sha256": "684be2dc7c0d6b2bec3bbc37f67ca148fd26512c6902cdbe4a02632812acceb1"
+      "bytes": 23811,
+      "sha256": "f8d341678f239dc3a5b0d22342c645dfe22dae2da60e4f1c96b8f9361f237cd4"
     },
     {
       "path": "hub-backend/app/api/account_profile.py",
@@ -11571,8 +11596,8 @@
     },
     {
       "path": "hub-backend/app/api/admin.py",
-      "bytes": 89547,
-      "sha256": "ffafb2104a17404f14fcb34297cf7ccdac35b5f61383240101269856f79771a2"
+      "bytes": 90128,
+      "sha256": "840ad423b702c3ce95a8343b334d2045a223c0f6b829a8109adfb86b430413c3"
     },
     {
       "path": "hub-backend/app/api/admin_cloud_runners.py",
@@ -11596,13 +11621,13 @@
     },
     {
       "path": "hub-backend/app/api/agents.py",
-      "bytes": 17262,
-      "sha256": "06c874253ee189182ff1650c6a17c1be19c9bdb2077fb4d6bd9e2c1deb52d817"
+      "bytes": 17368,
+      "sha256": "1e96aa7a577380420c20862ad6f583357ace2f9061b51df17e0183ea9b484f62"
     },
     {
       "path": "hub-backend/app/api/ai_proxy.py",
-      "bytes": 39750,
-      "sha256": "dbe5f88fc29d6241996c510a89bd0d79c81d9bd6f854d27de25a0e06009fe2ab"
+      "bytes": 39770,
+      "sha256": "6090a82639030ebdeec6bf0f9350cf15887488790d94e2cc8201ec7c9ac4b8f1"
     },
     {
       "path": "hub-backend/app/api/aidesk.py",
@@ -11651,8 +11676,8 @@
     },
     {
       "path": "hub-backend/app/api/clients.py",
-      "bytes": 23071,
-      "sha256": "18d10ed60184b8eaf73e2105c49f7b879610110a1de824133806d79ef5c062d5"
+      "bytes": 23101,
+      "sha256": "8e1cabb4370fe477019e033b05e1396d2b14e0927278f473765744b0ffdced36"
     },
     {
       "path": "hub-backend/app/api/cloud_conversations.py",
@@ -11666,13 +11691,13 @@
     },
     {
       "path": "hub-backend/app/api/cloud_execution_sync.py",
-      "bytes": 1045,
-      "sha256": "054a667fc6ea1e9cbd6df478d561fff4150426aee5889af76e9e5eaceebc8d35"
+      "bytes": 1090,
+      "sha256": "672731b9be8e8e2d24a1568d36b9de719b0eb1557ff78fd74632b810b5e92950"
     },
     {
       "path": "hub-backend/app/api/config.py",
-      "bytes": 1410,
-      "sha256": "9b034e9a4a6fcfc5eea1243a7980947b80155d951be3c6ebcf45c65467236117"
+      "bytes": 1516,
+      "sha256": "5873c7a77c20daa1a8443152fca0da312e30a8e4239ea843319215c093f030cd"
     },
     {
       "path": "hub-backend/app/api/connector_oauth.py",
@@ -11686,8 +11711,8 @@
     },
     {
       "path": "hub-backend/app/api/conversation_projects.py",
-      "bytes": 5770,
-      "sha256": "c1aa9c28dce0e69527bb495ccccebdad78c70e245168f8e878aaa4866f1aa778"
+      "bytes": 5931,
+      "sha256": "5f61edd603e31c9a37f15a9a25f0045fc76d6aa21f4317ff8d267fd47eaa6a6b"
     },
     {
       "path": "hub-backend/app/api/deliveries.py",
@@ -11761,8 +11786,8 @@
     },
     {
       "path": "hub-backend/app/api/model_capabilities.py",
-      "bytes": 4268,
-      "sha256": "77ac6e98c39d0cec6888745d01e7155c415d43e11e2db859e29e3a3168cd2cb6"
+      "bytes": 4574,
+      "sha256": "79073d8d4f8780ba15e36440b33a6051f7682a2ee1f4d9367526a85e2cbabfab"
     },
     {
       "path": "hub-backend/app/api/model_runtime.py",
@@ -11776,18 +11801,18 @@
     },
     {
       "path": "hub-backend/app/api/personal_conversation_relay.py",
-      "bytes": 15725,
-      "sha256": "48d8ec3598751c8eb80d3a6b08ba82fcf2b15095b6e7b00f43fdf16245f68c07"
+      "bytes": 15755,
+      "sha256": "c1b53e775f1efc048d6f0e4d3ac0f739113644960742c842edaebe97aef18c46"
     },
     {
       "path": "hub-backend/app/api/personal_models.py",
-      "bytes": 8782,
-      "sha256": "1abc78c65347bdb542ac64d52ff73e1f5ff3813e0d56c8a0025efb1c1bccdaa1"
+      "bytes": 8888,
+      "sha256": "a759e786baa2219effdfd72839bfcdab5001b51f5cbbb95d8fd5ebb8a736bb41"
     },
     {
       "path": "hub-backend/app/api/personal_schedules.py",
-      "bytes": 11604,
-      "sha256": "450c35dd29dce868821bdc5d8a218200aed037f06598d6701310d4c7ac5c2e70"
+      "bytes": 11634,
+      "sha256": "602f7bdd258999fd9b42cb3a1f0968ed82b4056ef35d62a3531cf71d4f521f28"
     },
     {
       "path": "hub-backend/app/api/plugin_activity.py",
@@ -11831,8 +11856,8 @@
     },
     {
       "path": "hub-backend/app/api/remote_screen.py",
-      "bytes": 28649,
-      "sha256": "f85fececf9b27a3ad5053fcbbb75eacfc3f52794f15fc6d096ad9300bfb543ca"
+      "bytes": 28679,
+      "sha256": "11e372471b61ce0f2c3702e543608bbeb6f4bd58a6a56646ab3cef4f5a0bed03"
     },
     {
       "path": "hub-backend/app/api/repomap.py",
@@ -11861,8 +11886,8 @@
     },
     {
       "path": "hub-backend/app/api/runner_ws.py",
-      "bytes": 45606,
-      "sha256": "7c55495254b135d645600ee2a6e422105c6064a2ed8213d19dc5cbb5d86b5acf"
+      "bytes": 45636,
+      "sha256": "73f1171d499fdf7801a9ac831f1c1a54fceffc6b9913f427daf5498d7e620429"
     },
     {
       "path": "hub-backend/app/api/schedule_contract.py",
@@ -11941,8 +11966,8 @@
     },
     {
       "path": "hub-backend/app/config.py",
-      "bytes": 15868,
-      "sha256": "3deaa2adb3b45444f359557c62b100a44de63b5d950a32bbcc253d647459573e"
+      "bytes": 16260,
+      "sha256": "6f25070845ed696595056e3733b34390cf158f57f3a7d1cbbe3a4e570edcab8a"
     },
     {
       "path": "hub-backend/app/connectors/__init__.py",
@@ -12001,13 +12026,13 @@
     },
     {
       "path": "hub-backend/app/db.py",
-      "bytes": 21681,
-      "sha256": "e40a842ec91b4b725e1ebfef6d5caf15481ab7b1fccf2ed20e86720919fe22f5"
+      "bytes": 22004,
+      "sha256": "1c2541e23ba20996eb15e00e2dfa3f67969467ffdc5da71d2c21225a3ae820e0"
     },
     {
       "path": "hub-backend/app/deps.py",
-      "bytes": 5829,
-      "sha256": "dff7c0a298c7199bfe422de8e7a3ed2e54f303b819332e5299b15268289d5e65"
+      "bytes": 8075,
+      "sha256": "cc14542d3fad3363ec03c2579be89daca53a8902409aa23a052be5a670bfeb31"
     },
     {
       "path": "hub-backend/app/full_backup.py",
@@ -12036,8 +12061,8 @@
     },
     {
       "path": "hub-backend/app/main.py",
-      "bytes": 18360,
-      "sha256": "87e00f225eeb8d2bb6f0f5d27ff7bec74e2716de9ec8efee5d20278a8e8c2648"
+      "bytes": 19238,
+      "sha256": "de95e916d85e1ebe7df0cef8ae114ffd8432ca1cf9489dbb587b788499e2393a"
     },
     {
       "path": "hub-backend/app/memory_record_models.py",
@@ -12330,6 +12355,16 @@
       "sha256": "147e12430e7ae8c904a267b179c814f7c3376ebe3cca8b403a19dcff66923845"
     },
     {
+      "path": "hub-backend/app/services/auth_cache_transactions.py",
+      "bytes": 5634,
+      "sha256": "b444b7dbe934dccd28f231555577d4ed19c9fbd3cbb73b96a19742a3e7407017"
+    },
+    {
+      "path": "hub-backend/app/services/auth_principals.py",
+      "bytes": 3399,
+      "sha256": "ace948fae3abb27141ae8f16bcf93ad2f569028df5d0b4675f23836b71c5901b"
+    },
+    {
       "path": "hub-backend/app/services/autobatch.py",
       "bytes": 17766,
       "sha256": "75508d32fdb40bff43127415f13beda64b6823a994032bff0766b288f6fa6fcb"
@@ -12338,6 +12373,11 @@
       "path": "hub-backend/app/services/automation_draft.py",
       "bytes": 8728,
       "sha256": "be0c6533097d5f06161d0a3b41f4114fd84dfee970f3dd14f31ee12ac27c4147"
+    },
+    {
+      "path": "hub-backend/app/services/automation_inbox_events.py",
+      "bytes": 4475,
+      "sha256": "47a8e82cfd088997bc164fcbc01e5445fd84aa778be745b550c263509f524079"
     },
     {
       "path": "hub-backend/app/services/automation_templates.py",
@@ -12380,6 +12420,11 @@
       "sha256": "421dbdac60c66c2c996d23fb6600b6f157af6a7f927993a3748af8562a2f0805"
     },
     {
+      "path": "hub-backend/app/services/client_domain_events.py",
+      "bytes": 4321,
+      "sha256": "ff55eb08dbf179d5083e7085c0dcefeb29d254c6a1d7ec38c7940fe092a60e09"
+    },
+    {
       "path": "hub-backend/app/services/client_release_files.py",
       "bytes": 1326,
       "sha256": "e919594f4f1e8095ad1cc8a60441fcc428935c4389c2ae8ca32d0094d7a63738"
@@ -12406,8 +12451,8 @@
     },
     {
       "path": "hub-backend/app/services/cloud_deliveries.py",
-      "bytes": 11985,
-      "sha256": "f9ca1293aa09095090e44813273971e4a5ef0d56706b200dad1f68cca89d7e01"
+      "bytes": 12131,
+      "sha256": "6146d401cf6a006a055b1cdc6e77b31e08fac826c5676faaa355faa5722a637b"
     },
     {
       "path": "hub-backend/app/services/cloud_environments.py",
@@ -12416,23 +12461,28 @@
     },
     {
       "path": "hub-backend/app/services/cloud_execution_sync.py",
-      "bytes": 7340,
-      "sha256": "1a07aa354e248b3b610358b5fc41a52c0e2b3337d89b896ff190e9d25c25c83d"
+      "bytes": 7567,
+      "sha256": "51a39b0f9f30902009619bebac0c82a93a6d04f0ba913fabde19c8f76d3e22dd"
     },
     {
       "path": "hub-backend/app/services/cloud_message_recovery.py",
-      "bytes": 11271,
-      "sha256": "e71960a59033f522f9eee4076e0eca5742ea71eee2bd5ad257974b814be0d2a3"
+      "bytes": 11505,
+      "sha256": "52e01efd940a165f9fa24f53e78f73ca2544825e0a7f14fb4f8f33bbbe399b02"
     },
     {
       "path": "hub-backend/app/services/cloud_recovery.py",
-      "bytes": 9250,
-      "sha256": "75e542983a2a23b27141d09327bc587c57fcb10eecf681ace837069352aa77d0"
+      "bytes": 9410,
+      "sha256": "2141ce1d970c99c41f02acbc64934e03afc80eadda4aa210db056e2905877c9b"
     },
     {
       "path": "hub-backend/app/services/cloud_runner_admin.py",
       "bytes": 8949,
       "sha256": "6a745701c1c4d5be5e5ef8d92095d95d09deb5edb7fcba693e95d1722790ce3d"
+    },
+    {
+      "path": "hub-backend/app/services/cloud_sync_notifications.py",
+      "bytes": 6924,
+      "sha256": "dce809becc9916370c7dae3999a32c5eede9f413b056da299a6d1956de6c96fc"
     },
     {
       "path": "hub-backend/app/services/cloud_turn_selection.py",
@@ -12451,8 +12501,8 @@
     },
     {
       "path": "hub-backend/app/services/cluster_runtime.py",
-      "bytes": 17418,
-      "sha256": "89a5f2a1a99eab492124c3e5a31ffdf92701007651a80b929c7915c209dad3c7"
+      "bytes": 17530,
+      "sha256": "0511d59fbf8d4a33512fad5732c17de2bb3367dc2c9761ccc369cd5f99f7652a"
     },
     {
       "path": "hub-backend/app/services/code_creds.py",
@@ -12551,8 +12601,8 @@
     },
     {
       "path": "hub-backend/app/services/conversation_handoffs.py",
-      "bytes": 40562,
-      "sha256": "98a907f9c7aeedf0e31dea260f27a1349d648e4809099568a2f821595bc81bca"
+      "bytes": 40834,
+      "sha256": "1239fd52ba623c10dcde46f57ca36c765291d28befdebc46dc16e9b995aee602"
     },
     {
       "path": "hub-backend/app/services/conversation_message_receipts.py",
@@ -12646,8 +12696,8 @@
     },
     {
       "path": "hub-backend/app/services/device_auth.py",
-      "bytes": 13093,
-      "sha256": "06c9c8cc726f0d18ee5b70c83d2703c5ae531a1e3b6727bc43c485bd6d79ba99"
+      "bytes": 15852,
+      "sha256": "4e12740c48db3b739cf3d74ce3c9a383d06a7a94370e490c3512674137aae360"
     },
     {
       "path": "hub-backend/app/services/device_connections.py",
@@ -12756,13 +12806,13 @@
     },
     {
       "path": "hub-backend/app/services/execution_sessions.py",
-      "bytes": 53492,
-      "sha256": "954d7083b3809827aef35ba3d3cbd00b06549ab09b25e231c488c96ca2b53fb7"
+      "bytes": 53600,
+      "sha256": "c2e271bc6d84cdcdfadd4c8f53eb6572dfd122a21289e51c96d7fee2f7ed4e82"
     },
     {
       "path": "hub-backend/app/services/execution_settlement.py",
-      "bytes": 13450,
-      "sha256": "769aeb6e0619ad557d6f7c16100e7b3b302df5bd64a2a7ce566a7324745c5d0c"
+      "bytes": 13591,
+      "sha256": "cd6cee1aaf2ad4f162e48d87470d9820fa3b0eb288e565b75a71759d00fa65d3"
     },
     {
       "path": "hub-backend/app/services/file_io.py",
@@ -13061,8 +13111,8 @@
     },
     {
       "path": "hub-backend/app/services/library_sharing.py",
-      "bytes": 29998,
-      "sha256": "37d54ffbd37ca8f9d0b08bb8ebc526b949ea796a7588f0705e64e977234f276e"
+      "bytes": 30990,
+      "sha256": "a9b8cee0ec459e7aff81b32e899543782c7b971d0bf5aa52202d91b79a508489"
     },
     {
       "path": "hub-backend/app/services/library_storage.py",
@@ -13191,8 +13241,8 @@
     },
     {
       "path": "hub-backend/app/services/mate_messages.py",
-      "bytes": 12171,
-      "sha256": "c5fb7a0e99004af218ac33d4c31c00e1eae01a5a7c5eb953295ee8cdf0ed0fb7"
+      "bytes": 12677,
+      "sha256": "85e212034be47ebcd38a778bd75bfed78387a57bb36ab4ee1a42b9758cbd1fe1"
     },
     {
       "path": "hub-backend/app/services/mcp_arguments.py",
@@ -13246,8 +13296,8 @@
     },
     {
       "path": "hub-backend/app/services/model_catalog.py",
-      "bytes": 32986,
-      "sha256": "0bc20ed1e4b860763283c27fe7c311815d872d7aa40ae7c7cd0940f29e473db2"
+      "bytes": 33097,
+      "sha256": "0e94194b79db6b2d82d1f8aa8b96d946786f0f2e495ac0687bdcdad2af8a020c"
     },
     {
       "path": "hub-backend/app/services/model_config_guard.py",
@@ -13796,8 +13846,8 @@
     },
     {
       "path": "hub-backend/app/services/runner_registry.py",
-      "bytes": 23937,
-      "sha256": "47cd46d0a95b0d26427d65db6ccff216cde547c9487747b51213459b01602ed0"
+      "bytes": 24054,
+      "sha256": "3e93cda96d39115a5ff9c7bf9f82298a4181d5475a9895e21f81e45d7621abef"
     },
     {
       "path": "hub-backend/app/services/runner_release.py",
@@ -13866,8 +13916,8 @@
     },
     {
       "path": "hub-backend/app/services/schedule_conversations.py",
-      "bytes": 16695,
-      "sha256": "5e8b815697759b08ba046a8cfb1af4299e66786623b1cbeb1f3ecda417a2dc77"
+      "bytes": 17171,
+      "sha256": "9b864a220546873309e76997c64d6806231e53c5932217c5362e703ac11b5d8f"
     },
     {
       "path": "hub-backend/app/services/schedule_device_liveness.py",
@@ -13918,6 +13968,11 @@
       "path": "hub-backend/app/services/session_memory.py",
       "bytes": 15026,
       "sha256": "1ed15406e1d087ba8b94519cfac61c71b56db5ebc02863cf5bfe20b54a2e1a69"
+    },
+    {
+      "path": "hub-backend/app/services/shared_auth_cache.py",
+      "bytes": 7592,
+      "sha256": "87bcaea54546a53b3b5e066e45c0837550e2cc31fa73e9471a9ad26ce31483cd"
     },
     {
       "path": "hub-backend/app/services/shutdown.py",
@@ -13986,8 +14041,8 @@
     },
     {
       "path": "hub-backend/app/services/task_assignment_notifications.py",
-      "bytes": 2242,
-      "sha256": "a498f67c815dbce76729f9b5415c624435d4bf7005d0ec65fde41f514b54915e"
+      "bytes": 2407,
+      "sha256": "0167df41c9fdd0d1a9cc34aadee34162ce67113c9f469fe5c17f573e77b867ac"
     },
     {
       "path": "hub-backend/app/services/task_code_targets.py",
@@ -14021,8 +14076,8 @@
     },
     {
       "path": "hub-backend/app/services/task_execution_claim.py",
-      "bytes": 5728,
-      "sha256": "43f3cf67bf7111a5917ac418c5800dd0d9fd996870ea85ff48fa64730a202aee"
+      "bytes": 5806,
+      "sha256": "86dd14b3b922afca6ef335a4b8818cec30445a359a5313a41e00187ac425ea87"
     },
     {
       "path": "hub-backend/app/services/task_execution_contract.py",
@@ -14111,8 +14166,8 @@
     },
     {
       "path": "hub-backend/app/services/team.py",
-      "bytes": 39292,
-      "sha256": "afd421a0f995bc53c7dc6f557ad4d241ab746107ddeca5e2de5eec78968f78fa"
+      "bytes": 39528,
+      "sha256": "57902abf2f4100e796a1bd9b510a1cf9bfc59f6a8e97e0b370bc10e205bb6bd3"
     },
     {
       "path": "hub-backend/app/services/team_daily_report.py",
@@ -14176,8 +14231,8 @@
     },
     {
       "path": "hub-backend/app/services/video_jobs.py",
-      "bytes": 6348,
-      "sha256": "41421811e2b6bfe646a7541447c1c9c2f49f1a5db63b03f52d8d8a18efeeb09e"
+      "bytes": 6596,
+      "sha256": "e8386d53be41bf87b30f91c56cbf1ea58f69c64d4c37a29411795b1b37b5dc04"
     },
     {
       "path": "hub-backend/app/services/vision_policy.py",
@@ -16520,6 +16575,36 @@
       "sha256": "5d09b3b72d4ef8758ff0aefc2c74ef08205f77e9bf9ae7a044fc1b23ed59bc00"
     },
     {
+      "path": "hub-backend/test_auth_cache_connection.py",
+      "bytes": 4416,
+      "sha256": "fad4488f4d98d4953171291d43e98d8fa325a6a1ae54e7b557bb32204b496812"
+    },
+    {
+      "path": "hub-backend/test_auth_cache_polling.py",
+      "bytes": 13695,
+      "sha256": "7e5a30112ac1c8759eac4a63e54af066fffa6e390216771c0327d6147cbb2832"
+    },
+    {
+      "path": "hub-backend/test_auth_cache_push_transactions.py",
+      "bytes": 8191,
+      "sha256": "516cfef346fa9562d21456b15e3dd2b8e6d38af231be2c820d28f18ba046f8fa"
+    },
+    {
+      "path": "hub-backend/test_auth_cache_traffic.py",
+      "bytes": 18566,
+      "sha256": "deabaca3b0463fd3a1a8cbb72ecab78bd77603bc231bb9efdcc79d839ffd2c1c"
+    },
+    {
+      "path": "hub-backend/test_auth_cache_transactions.py",
+      "bytes": 17750,
+      "sha256": "b0f3cde395cee899a972f5a74dea78fef793c7234d0a6dd0b754c2d42fd4cd31"
+    },
+    {
+      "path": "hub-backend/test_automation_inbox_push.py",
+      "bytes": 14387,
+      "sha256": "570f836f0da2947ae81570a1ad84e93dd534caa5cb473b9ec7e405ff23c06c18"
+    },
+    {
       "path": "hub-backend/test_brand_packaging.py",
       "bytes": 5584,
       "sha256": "9f69dbdb296d20c6695573a46cb12d2f35f61e8865ddbafb88405a42acae315c"
@@ -16533,6 +16618,16 @@
       "path": "hub-backend/test_cicd_workflow.py",
       "bytes": 6091,
       "sha256": "ade8d3662a6e4757997457f62a731eea24ea5a65cab246c3b16e0e926bcb3a65"
+    },
+    {
+      "path": "hub-backend/test_client_domain_events.py",
+      "bytes": 8681,
+      "sha256": "7b98854a3c9f180b424f8208ca251cdd2ce3e6f05b2972a02c8e93bb61ebd107"
+    },
+    {
+      "path": "hub-backend/test_client_push_compat.py",
+      "bytes": 13493,
+      "sha256": "c4dcc084879df1c3f83ed54a90fd47bf56cea8b96d38b8c317571aaa13189720"
     },
     {
       "path": "hub-backend/test_client_release_feed.py",
@@ -16630,6 +16725,11 @@
       "sha256": "e34980edd4c32561dad7e03ed5159e1fca096b3cbe34ea3ceb6d58fa2149627c"
     },
     {
+      "path": "hub-backend/test_cloud_sync_notifications.py",
+      "bytes": 7098,
+      "sha256": "92bbe91866b7aa1a42d9f61c75b70cd7d6a6ee6a8e04dd6a693e45da51300ad6"
+    },
+    {
       "path": "hub-backend/test_cluster_bus.py",
       "bytes": 4540,
       "sha256": "1ef43fd76b8a1e16b463cc7c970c79a81bb5a183ba98f48880e1a5a0b289cd78"
@@ -16661,8 +16761,8 @@
     },
     {
       "path": "hub-backend/test_codex_login_shutdown.py",
-      "bytes": 10230,
-      "sha256": "5561416293eacc17b4dc8f86235fbcd4045242874049c7ecd59951903c671180"
+      "bytes": 10550,
+      "sha256": "730e93a9708224589e30aebef08a30bfc860859196a55c626bf5faacedceaf8d"
     },
     {
       "path": "hub-backend/test_codex_runtime_home.py",
@@ -17460,6 +17560,11 @@
       "sha256": "9005ad4d226cc05e92a44cab91310d26942ccc458aa01d0b5835a9b95405687e"
     },
     {
+      "path": "hub-backend/test_schedule_device_liveness.py",
+      "bytes": 20023,
+      "sha256": "cb2184f4649752fb658b00e4a70801e7f9500ab67648d8ff7e976d06ee95eb02"
+    },
+    {
       "path": "hub-backend/test_schedule_loop_isolation.py",
       "bytes": 13314,
       "sha256": "65fc47e76d441bd69ef34f2cba768a39204f4cb32aec76ee36e62a1a10bd7219"
@@ -17483,6 +17588,11 @@
       "path": "hub-backend/test_schedule_source_app.py",
       "bytes": 3011,
       "sha256": "0bf41d4bae71fb0aa0a3dc715cc8bd00739c29617da44882f3b59fa6fe390662"
+    },
+    {
+      "path": "hub-backend/test_shared_auth_cache.py",
+      "bytes": 18681,
+      "sha256": "18fa4e5c4131af118c671ea6a0f9f7122f0a5d57ad37f3ca8b79567c4ae4dc7b"
     },
     {
       "path": "hub-backend/test_skill_policy_concurrency.py",
@@ -17653,6 +17763,11 @@
       "path": "hub-backend/tests/acp_permission_agent.py",
       "bytes": 6368,
       "sha256": "1233924c695b4c66a67e3d67f5def862bbd7ab59d0f4d3413336d4e57af5ffcb"
+    },
+    {
+      "path": "hub-backend/tests/auth_cache_postgres.py",
+      "bytes": 12940,
+      "sha256": "c4e7f98e836c41d6846d9ddd60dfa9fe1078a1dc3191b6351ede0bd7de115868"
     },
     {
       "path": "hub-backend/tests/automation_template_server.py",
@@ -17931,8 +18046,8 @@
     },
     {
       "path": "hub-backend/tests/test_conversation_projects.py",
-      "bytes": 5356,
-      "sha256": "55dff09c359f48f44b0d7caba96a1dc63174d48179cef6617f4651f4a2ac78f5"
+      "bytes": 7755,
+      "sha256": "9a086bf61d06745f397922b626f7c1e6b88a11d87beb4dcd4e8ceb8c7671e9ad"
     },
     {
       "path": "hub-backend/tests/test_conversation_turn_files.py",
@@ -18076,8 +18191,8 @@
     },
     {
       "path": "hub-backend/tests/test_library_sharing.py",
-      "bytes": 19757,
-      "sha256": "033f16283815d0a8e41b59666619fb2da33f283cba27e627c3f6b0f70459e0eb"
+      "bytes": 21392,
+      "sha256": "d1c4633b225e04a95f124aa5879510f308b57cd9bec96fea2aad6baddc2ba974"
     },
     {
       "path": "hub-backend/tests/test_library_storage.py",
@@ -18118,6 +18233,11 @@
       "path": "hub-backend/tests/test_mcp_selection.py",
       "bytes": 6120,
       "sha256": "3112d63b217ba39498fcb99b991af9ee3dfa9ed2121a5bbb79d14229d2338dd1"
+    },
+    {
+      "path": "hub-backend/tests/test_native_discovery_redis.py",
+      "bytes": 4651,
+      "sha256": "897a2627a2a705c174de1b8cdd7f1ab7d14c0697f59486d637ee400696d3f21d"
     },
     {
       "path": "hub-backend/tests/test_notice_audience_regression.py",

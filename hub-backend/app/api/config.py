@@ -36,4 +36,6 @@ async def put_config(
     await model_config_guard.personal(session, client, allow_patch=True)
     client.config = {**(client.config or {}), **(patch or {})}
     await session.commit()
+    from ..services.client_domain_events import device_changed
+    await device_changed(client, "config")
     return _strip_server_owned(dict(client.config or {}))

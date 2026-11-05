@@ -338,6 +338,13 @@ const soduWorkBridge = {
   selectHubEnvironment: (hub) => ipcRenderer.invoke('hub-environment-select', hub || ''),
   runtimeForm: () => { try { return ipcRenderer.sendSync('runtime-form'); } catch (e) { return 'packaged'; } },
   deviceAuthBootstrap: (payload) => timedPageInvoke('device-auth-bootstrap', payload || {}),
+  clientDomainRead: (domain, scope) => timedPageInvoke('client-domain-read', domain, scope),
+  clientDomainInvalidate: (domain, scope) => ipcRenderer.invoke('client-domain-invalidate', domain, scope),
+  onClientDomainChanged: callback => {
+    const handler = (_event, value) => callback(value);
+    ipcRenderer.on('client-domain-changed', handler);
+    return () => ipcRenderer.removeListener('client-domain-changed', handler);
+  },
   deviceAuthLogin: (payload) => ipcRenderer.invoke('device-auth-login', payload || {}),
   deviceAuthLogout: (payload) => ipcRenderer.invoke('device-auth-logout', payload || {}),
   deviceAuthClearSession: (payload) => ipcRenderer.invoke('device-auth-clear-session', payload || {}),

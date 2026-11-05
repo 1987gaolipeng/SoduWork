@@ -7,7 +7,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_session
-from ..deps import current_client
+from ..deps import current_client, identity_only
 from ..models import Client
 from ..account_conversation_models import AccountConversation, ConversationProject
 from .account_conversations import _owner
@@ -58,6 +58,7 @@ def _json(row, client, conversations):
             "deleted": row.deleted, "chatIds": list(dict.fromkeys(ids))}
 
 @router.get("")
+@identity_only
 async def list_projects(client: Client = Depends(current_client), session: AsyncSession = Depends(get_session)):
     owner = _owner(client)
     conversations = await _directory(session, owner)
@@ -110,4 +111,6 @@ async def save_project(project_id: str, data: dict = Body(...), client: Client =
         await session.rollback()
         raise HTTPException(409, "项目已在其他设备更新，请刷新后重试")
     row = await session.get(ConversationProject, (owner, project_id), populate_existing=True)
+    from ..services.client_domain_events import account_changed
+    await account_changed(session, owner, "conversation-projects")
     return _json(row, client, conversations)

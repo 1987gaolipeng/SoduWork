@@ -187,6 +187,8 @@ async def put_agent_model(
         table.pop(key, None)
     client.agent_models = table
     await session.commit()
+    from ..services.client_domain_events import device_changed
+    await device_changed(client, "models")
     return {"ok": True, "key": key, "model": name}
 
 

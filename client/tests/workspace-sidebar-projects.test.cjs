@@ -60,6 +60,23 @@ test('project sync preserves edits made in flight and does not publish applicati
   await sync.run(); assert.equal(remote.get(id).name, '发送期间的改名'); assert.equal(remote.size, 1);
 });
 
+test('project push during a pending read is reconciled once without recursive remote-write loops', async () => {
+  const f = fixture(); let sync, release, calls = 0, remote = {id: 'project-phone', name: 'Old', revision: 1, chatIds: []};
+  const store = f.api.create({storage: f.storage, key: 'one', onChange: () => { void sync?.run(); }});
+  sync = f.api.projectSync({store, storage: f.storage, key: 'one', api: {
+    conversationProjects: async () => {
+      const snapshot = {...remote}; calls++;
+      if (calls === 1) await new Promise(resolve => { release = resolve; });
+      return {items: [snapshot]};
+    }, saveConversationProject: async () => assert.fail('remote updates must not write back'),
+  }});
+  const work = sync.run(); await new Promise(resolve => setImmediate(resolve));
+  remote = {...remote, name: 'New', revision: 2};
+  for (let i = 0; i < 100; i++) void sync.run();
+  release(); await work;
+  assert.equal(calls, 2); assert.equal(store.get().projects[0].name, 'New');
+});
+
 test('project revision conflict and account changes cannot overwrite local groups', async () => {
   const f = fixture(), store = f.create(), errors = [];
   const id = store.saveProject({name: '保留本地'});

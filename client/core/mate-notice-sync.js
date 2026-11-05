@@ -361,6 +361,8 @@
       const token = capture();
       const userId = String(api().clientAuthSnapshot?.().user?.id || '');
       if (userId && event.recipientId && String(event.recipientId) !== userId) return;
+      await api().invalidateMateMessageCache?.('received');
+      if (!current(token)) return;
       // Older events omit the recipient: use the authenticated inbox query
       // to establish ownership before persisting their body or acknowledging.
       if (event.serverMessageId && event.recipientId && userId) {
@@ -374,6 +376,9 @@
     const userId = String(api().clientAuthSnapshot?.().user?.id || '');
     const folder = userId && String(event.senderId) === userId ? 'sent'
       : userId && String(event.recipientId) === userId ? 'received' : '';
+    const token = capture();
+    await api().invalidateMateMessageCache?.(folder);
+    if (!current(token)) return;
     if (!folder) return refresh(null, true);
     // Full server events can be reconciled immediately; older servers are
     // handled by the same durable list refresh below.
@@ -386,5 +391,11 @@
   global.addEventListener?.('soduwork-task-source', repaint);
   global.addEventListener?.('soduwork-device-auth', repaint);
   global.addEventListener?.('soduwork-client-auth-required', repaint);
-  global.addEventListener?.('soduwork-data-scope-changed', () => { epoch++; requests = new Map(); lastAttempt = 0; });
+  global.addEventListener?.('soduwork-domain-changed', event => {
+    const domain = event?.detail?.domain;
+    if (domain === 'team-messages-received' || domain === 'team-messages-sent') {
+      void refresh(domain === 'team-messages-sent' ? 'sent' : 'received', true).catch(() => {});
+    }
+  });
+  global.addEventListener?.('soduwork-data-scope-changed', () => { epoch++; requests = new Map(); revisions = new Map(); lastAttempt = 0; });
 })(window);

@@ -99,17 +99,9 @@ process.on('unhandledRejection', (reason) => {
   console.error('[SoduWork] unhandled rejection (kept alive):', reason && reason.stack || reason);
 });
 
-// Taskbar pins, just like desktop shortcuts, must relaunch the stable entry.
-if (process.platform === 'win32' && app.isPackaged) {
-  app.on('browser-window-created', (_event, win) => {
-    const launcher = _installLayout.launchPath();
-    try { win.setAppDetails({ appId: _distribution.current().appId, appIconPath: launcher,
-      relaunchCommand: '"' + launcher + '"', relaunchDisplayName: _distribution.current().productName }); }
-    catch (error) { console.warn('[update] taskbar entry:', error.message); }
-  });
-}
-
 _deviceAuth.install({ app, ipcMain, safeStorage });
+require('./main/client-domain-cache.cjs').install({ app, ipcMain, webContents, deviceAuth: _deviceAuth,
+  modelsChanged: () => _catalogChanges.changed() });
 require('./main/read-aloud.cjs').install({ app, ipcMain, BrowserWindow, getRendererRoot: rendererRoot });
 require('./main/conversation/search.cjs').install({ app, ipcMain, BrowserWindow, getRendererRoot: rendererRoot });
 const _releaseNotes = require('./main/release-notes').register({ app, ipcMain, BrowserWindow, root: __dirname, getRendererRoot: rendererRoot,

@@ -30,6 +30,8 @@ async function run() {
   // Authentication is isolated too. Let the deliberately blocked startup
   // request settle before announcing the fixture account to the normal UI.
   await until('!!document.querySelector(".soduwork-auth-submit") && !document.querySelector(".soduwork-auth-submit").disabled');
+  // This fixture asserts Chinese error copy; production defaults to English.
+  await js("SoduWorkI18n.setLocale('zh-CN', {persist:false,broadcast:false});void 0");
   await js(`window.loadErrors=[];addEventListener('unhandledrejection',e=>loadErrors.push(String(e.reason)));
     window.modelFixture={providers:[{id:'test',name:'Test service',kind:'openai-compat',baseUrl:'https://fixture.invalid/v1',keySet:true,
       modelNames:['example'],modelDefs:[{name:'example',config:{imageRouting:'native'},capabilityCheck:{checkedAt:'2026-10-01T00:00:00Z',checks:{connection:{status:'passed',code:'verified'}}}}]}],

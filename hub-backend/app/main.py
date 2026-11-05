@@ -32,6 +32,7 @@ from .log_safety import install_log_redaction
 from .models import TaskOwnershipChanged
 from .services import rbac, work_catalog as work_catalog_service
 from .services.database_telemetry import DatabaseTimingMiddleware
+from .services.shared_auth_cache import AuthCacheUnavailable
 from .services.poller import poller_loop
 
 settings = get_settings()
@@ -115,6 +116,10 @@ async def lifespan(app: FastAPI):
     # Event-loop stalls can disrupt Runner heartbeats and desktop connectivity.
     # Runtime stack evidence identifies blocking work that static inspection may miss.
     await cluster_runtime.start()
+    from .services import automation_inbox_events, cloud_sync_notifications, client_domain_events
+    automation_inbox_events.start()
+    cloud_sync_notifications.start()
+    client_domain_events.start()
     from .services import loop_watch
     watch = loop_watch.start()
 
@@ -169,15 +174,17 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         try:
-            for t in bg:
-                t.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await t
-            await cluster_runtime.stop()
             from .services import model_transport
-            await model_transport.shutdown()
             from .services import jiyong_cloud_database
-            await jiyong_cloud_database.close()
+            from .services import shared_auth_cache
+            from .services.shutdown import shutdown
+            await shutdown(bg, [("automation-inbox-hints", automation_inbox_events.stop),
+                                ("cloud-sync-hints", cloud_sync_notifications.stop),
+                                ("client-domain-hints", client_domain_events.stop),
+                                ("cluster", cluster_runtime.stop),
+                                ("models", model_transport.shutdown),
+                                ("cloud-database", jiyong_cloud_database.close),
+                                ("auth-cache", shared_auth_cache.close)])
         finally:
             # Legacy local execution can own login jobs on the Hub. Drain them
             # even when an unrelated shutdown step fails, without stopping chats.
@@ -295,6 +302,11 @@ async def readyz():
 @app.exception_handler(TaskOwnershipChanged)
 async def task_ownership_conflict_handler(request: Request, exc: TaskOwnershipChanged):
     return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
+@app.exception_handler(AuthCacheUnavailable)
+async def auth_cache_unavailable(_request: Request, _exc: AuthCacheUnavailable):
+    return JSONResponse(status_code=503, content={"detail": "权限同步暂时不可用，请稍后重试"})
 
 
 @app.exception_handler(Exception)

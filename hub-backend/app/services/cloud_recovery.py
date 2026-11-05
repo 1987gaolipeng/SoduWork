@@ -144,6 +144,9 @@ async def _submission(row_id):
                 Handoff.id == row.id, Handoff.phase == "committing",
                 Handoff.commit_started_at == row.commit_started_at,
             ).values(phase="prepared"))
+            if changed.rowcount:
+                from .cloud_sync_notifications import mark
+                mark(session, row.task_id, owner=row.owner_user_id)
             await session.commit()
             if not changed.rowcount:
                 return "stale"

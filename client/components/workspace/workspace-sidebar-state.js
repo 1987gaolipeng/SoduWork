@@ -367,13 +367,16 @@
 
   function projectSync({store, api, storage, key, current = () => true, changed = () => {}, error = () => {}}) {
     const checkpointKey = key + ':sync';
-    let busy = false;
+    let busy = false, pending = false, applying = false;
     const shape = row => row ? {name: row.name, chatIds: row.chatIds, deleted: false} : null;
     const digest = row => JSON.stringify(shape(row));
     async function run() {
-      if (busy || !current() || !api.conversationProjects) return;
+      if (applying || !current() || !api.conversationProjects) return;
+      if (busy) { pending = true; return; }
       busy = true;
       try {
+        do {
+        pending = false;
         const checkpoints = JSON.parse(storage.getItem(checkpointKey) || '{}');
         const reply = await api.conversationProjects();
         if (!current()) return;
@@ -394,12 +397,15 @@
             if (!saved && here && digest(here) !== digest(there)) {
               throw Error('项目在另一台设备也有改动，原分组已保留，请在项目中确认后重试');
             }
-            store.applyRemoteProject({...there, chatIds: shape(there).chatIds});
+            applying = true;
+            try { store.applyRemoteProject({...there, chatIds: shape(there).chatIds}); }
+            finally { applying = false; }
             checkpoints[id] = {revision: there.revision, hash: digest(there.deleted ? null : there), name: there.name};
             changed();
           }
           storage.setItem(checkpointKey, JSON.stringify(checkpoints));
         }
+        } while (pending && current());
       } catch (e) { if (current()) error(e); }
       finally { busy = false; }
     }

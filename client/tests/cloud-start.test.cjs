@@ -68,6 +68,16 @@ for (const runtime of catalog.runtimes()) test(runtime.id + ': starts in cloud w
   assert.equal(history.chats[0].locationMode, 'remote');
   assert.equal(history.chats[0].cwd, '', 'remote replay cache must never become a local workspace');
 });
+test('forget checks the latest execution of a locally started cloud chat', async t => {
+  const f = await fixture(t), cloud = f.controller();
+  const { sessionId } = await cloud.start({ requestId: crypto.randomUUID(), agentId: 'pi', text: 'hello' });
+  await assert.rejects(cloud.forget(sessionId), /仍在执行/);
+  f.finish();
+  assert.deepEqual(await cloud.forget(sessionId), { ok: true, id: sessionId });
+  assert.equal((await f.controller().history()).chats.length, 0);
+  assert.ok(f.requests.includes('/tasks/task1/ai-session?since=2147483647'));
+});
+
 test('lost acceptance can recover after restart without a new task or changed prompt', async t => {
   const f = await fixture(t), cloud = f.controller(), input = { requestId: crypto.randomUUID(), agentId: 'pi', text: 'Only once' };
   f.lose(); await assert.rejects(cloud.start(input), /connection lost/);
