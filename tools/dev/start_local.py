@@ -161,6 +161,10 @@ def assert_available(host: str, port: int) -> None:
     with socket.socket() as probe:
         if os.name == "nt":
             probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        else:
+            # Match the server's POSIX bind semantics after a clean shutdown:
+            # TIME_WAIT connections must not be mistaken for a live listener.
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             probe.bind((host, port))
         except OSError as exc:

@@ -248,5 +248,5 @@
   ];
   for (const [label, reason] of checks) messages[label + '。' + reason] = messages[label] + '. ' + messages[reason];
   if (typeof module !== 'undefined' && module.exports) { module.exports = Object.freeze(messages); return; }
-  global.SoduWorkLocaleMessages = Object.freeze({ ...global.SoduWorkLocaleMessages, 'en-US': Object.freeze({ ...global.SoduWorkLocaleMessages['en-US'], ...messages }) });
+  global.SoduWorkLocaleMessages = Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages, { 'en-US': Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages['en-US'], messages)) }));
 })(globalThis);

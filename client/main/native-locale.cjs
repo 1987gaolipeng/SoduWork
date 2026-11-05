@@ -1,11 +1,22 @@
 'use strict';
 const catalogs = require('../core/locales/manifest.json');
 const registry = require('../core/locales/locale-registry.js');
-const localeCatalogs = {};
-for (const file of catalogs.filter(name => /^[a-z]{2}-[A-Z]{2}(?:-|\.)/.test(name))) {
+const localeCatalogs = Object.create(null);
+function mergeCatalog(locale, messages) {
+  // Keep manifest order without repeatedly cloning the growing dictionary.
+  // A null prototype also keeps __proto__ translation keys as ordinary data.
+  Object.assign(localeCatalogs[locale] ||= Object.create(null), messages);
+}
+for (const file of catalogs.filter(name => /^[a-z]{2}-[A-Z]{2}(?:-|\.)/.test(name) || name.startsWith('builtin-'))) {
   const locale = file.slice(0, 5);
   const pack = require('../core/locales/' + file);
-  if (pack && typeof pack === 'object') localeCatalogs[locale] = { ...(localeCatalogs[locale] || {}), ...pack };
+  if (file.startsWith('builtin-')) {
+    for (const [locale, messages] of Object.entries(pack)) {
+      mergeCatalog(locale, messages);
+    }
+    continue;
+  }
+  if (pack && typeof pack === 'object') mergeCatalog(locale, pack);
 }
 const messages = localeCatalogs['en-US'] || {};
 const templates = Object.entries(messages).filter(([s]) => /\{\w+\}/.test(s)).sort(([a], [b]) => b.replace(/\{\w+\}/g, '').length - a.replace(/\{\w+\}/g, '').length).map(([s, target]) => {

@@ -214,5 +214,5 @@
     "{value1} 个附件没传上去，可以到详情里重试": "{value1} attachments failed to upload; retry from issue details"
   };
   if (typeof module !== 'undefined' && module.exports) { module.exports = Object.freeze(messages); return; }
-  global.SoduWorkLocaleMessages = Object.freeze({ ...global.SoduWorkLocaleMessages, 'en-US': Object.freeze({ ...global.SoduWorkLocaleMessages['en-US'], ...messages }) });
+  global.SoduWorkLocaleMessages = Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages, { 'en-US': Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages['en-US'], messages)) }));
 })(globalThis);

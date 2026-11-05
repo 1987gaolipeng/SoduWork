@@ -16,7 +16,11 @@ def _proxies() -> dict[str, str]:
         return urllib.request.getproxies()
     # urllib chooses environment OR registry. NO_PROXY alone makes the first
     # mapping truthy and accidentally disables the user's Windows HTTP(S) proxy.
-    proxies = urllib.request.getproxies_registry()
+    # The registry helper exists only in Python builds with the Windows
+    # implementation loaded. Tests also emulate win32 on Linux, so keep the
+    # environment-only behavior when that platform helper is unavailable.
+    registry = getattr(urllib.request, "getproxies_registry", None)
+    proxies = registry() if registry else {}
     environment = urllib.request.getproxies_environment()
     # Presence matters: an explicitly empty scheme disables its registry proxy.
     # The stdlib resolves lowercase precedence and CGI HTTP_PROXY handling.

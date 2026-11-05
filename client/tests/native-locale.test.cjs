@@ -2,6 +2,40 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const locale = require('../main/native-locale.cjs');
 
+test('catalog composition preserves package order, source dictionaries and prototype-like translation keys', () => {
+  const packs = {
+    'en-US-first.js': Object.freeze({ collision: 'First', retained: 'Retained' }),
+    'builtin-fixture.js': Object.freeze({
+      'en-US': Object.freeze({ collision: 'Builtin', builtinOnly: 'Builtin only' }),
+      'ja-JP': Object.freeze({ collision: 'Builtin Japanese', japaneseOnly: 'Japanese only' }),
+    }),
+    'en-US-last.js': Object.freeze(JSON.parse('{"collision":"Last","__proto__":"Own proto","constructor":"Own constructor"}')),
+    'ja-JP-last.js': Object.freeze({ collision: 'Last Japanese' }),
+  };
+  const before = JSON.stringify(packs), module = { exports: {} };
+  require('node:vm').runInNewContext(require('node:fs').readFileSync(require.resolve('../main/native-locale.cjs'), 'utf8'), {
+    module,
+    require(name) {
+      if (name.endsWith('/manifest.json')) return Object.keys(packs);
+      if (name.endsWith('/locale-registry.js')) return { defaultLocale: 'en-US', locales: { 'en-US': {}, 'ja-JP': {} } };
+      const pack = packs[name.replace('../core/locales/', '')];
+      assert.ok(pack, name); return pack;
+    },
+  });
+  const composed = module.exports;
+  assert.equal(composed.translate('collision'), 'Last');
+  assert.equal(composed.translate('retained'), 'Retained');
+  assert.equal(composed.translate('builtinOnly'), 'Builtin only');
+  assert.equal(composed.translate('__proto__'), 'Own proto');
+  assert.equal(composed.translate('constructor'), 'Own constructor');
+  assert.equal(composed.translate('toString'), 'toString');
+  composed.setLocale('ja-JP');
+  assert.equal(composed.translate('collision'), 'Last Japanese');
+  assert.equal(composed.translate('japaneseOnly'), 'Japanese only');
+  assert.equal(composed.translate('retained'), 'Retained');
+  assert.equal(JSON.stringify(packs), before);
+});
+
 test('native dialog translation preserves file paths, filter extensions and source options', () => {
   const original = { title: '下载附件', defaultPath: 'D:/保存/文件.txt', buttons: ['取消', '保存'],
     filters: [{ name: 'SoduWork 插件', extensions: ['soduwork-plugin', 'zip'] }], properties: ['openFile'] };

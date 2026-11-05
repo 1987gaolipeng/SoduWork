@@ -41,7 +41,9 @@ function stop(child){
   if(result.status===0){stoppedChildren.add(child);return true;}
   return child.exitCode!==null;
  }
- return child.kill('SIGTERM');
+ const killed = child.kill('SIGTERM');
+ if(killed) stoppedChildren.add(child);
+ return killed || child.exitCode!==null;
 }
 function execute(command,args,options={}){let child;const completion=new Promise((resolve,reject)=>{let output='',error='',settled=false;child=spawn(command,args,{cwd:options.cwd,env:options.env||env(),shell:false,windowsHide:true,stdio:['ignore','pipe','pipe']});const timer=options.timeout===0?null:setTimeout(()=>{stop(child);finish(Error('平台程序响应超时，请重试'));},options.timeout||30000);const finish=(failure,value)=>{if(settled)return;settled=true;clearTimeout(timer);failure?reject(failure):resolve(value);};child.stdout.on('data',part=>{output=(output+part.toString()).slice(-1024*1024);if(options.onOutput)options.onOutput(output);});child.stderr.on('data',part=>{error=(error+part.toString()).slice(-64000);if(options.onOutput)options.onOutput(output+'\n'+error);});child.once('error',()=>finish(Error('无法启动平台程序，请重新准备运行环境')));child.once('exit',code=>finish(null,{code,output,error}));});return{completion,cancel:()=>stop(child),get child(){return child}};}
 async function inspect(app,key){const p=paths(app,key),a=await adapter(key);const found=a.inspect(p.provider,p.prefix);const sdk=p.provider.registrationSdk;

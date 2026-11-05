@@ -32,5 +32,5 @@
     '我的设置': 'マイ設定', '界面语言': '表示言語', '应用后立即生效': '変更はすぐに反映されます',
   };
   if (typeof module !== 'undefined' && module.exports) { module.exports = Object.freeze(messages); return; }
-  global.SoduWorkLocaleMessages = Object.freeze({ ...global.SoduWorkLocaleMessages, 'ja-JP': Object.freeze(messages) });
+  global.SoduWorkLocaleMessages = Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages, { 'ja-JP': Object.freeze(messages) }));
 })(globalThis);

@@ -277,5 +277,5 @@
     "模型的单次输出上限已被思考内容用完，尚未生成答复。请在模型管理中提高最大输出量，或关闭深度思考后继续。已有内容和工具结果已保留，不会自动重复执行。": "The model used its single-response output limit on thinking before producing an answer. Increase the maximum output in model settings, or turn off deep thinking, then continue. Existing content and tool results are preserved; completed actions will not be repeated automatically.",
   };
   if (typeof module !== 'undefined' && module.exports) { module.exports = Object.freeze(messages); return; }
-  global.SoduWorkLocaleMessages = Object.freeze({ ...global.SoduWorkLocaleMessages, 'en-US': Object.freeze({ ...global.SoduWorkLocaleMessages['en-US'], ...messages }) });
+  global.SoduWorkLocaleMessages = Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages, { 'en-US': Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages['en-US'], messages)) }));
 })(globalThis);

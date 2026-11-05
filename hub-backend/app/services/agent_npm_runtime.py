@@ -116,7 +116,7 @@ def private_bin(names) -> str:
             suffixes = (".exe", ".cmd") if sys.platform == "win32" and not os.path.splitext(name)[1] else ("",)
             for suffix in suffixes:
                 candidate = os.path.join(directory, name + suffix)
-                if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                if os.path.isfile(candidate) and (sys.platform == "win32" or os.access(candidate, os.X_OK)):
                     return candidate
     return ""
 

@@ -10,7 +10,7 @@ async function fixture(t) {
   for (const [file, data] of [['.soduwork-launcher', '1'], ['.soduwork-active', 'nsABC.tmp']]) await fs.writeFile(path.join(root, file), data);
   await fs.writeFile(path.join(payload, '.soduwork-release'), '1'); await fs.writeFile(executable, 'fixture');
   const outside = path.join(parent, 'profile'); await fs.mkdir(outside); await fs.writeFile(path.join(outside, 'sentinel'), 'keep');
-  const resource = path.join(payload, 'resources', ...Array(12).fill('中文runtimeabcdefghijklmnop'), 'module.py');
+  const resource = path.join(payload, 'resources', ...Array(13).fill('中文runtimeabcdefghijklmnop'), 'module.py');
   await fs.mkdir(path.dirname(resource), { recursive: true }); await fs.writeFile(resource, 'fixture');
   t.after(async () => {
     assert.equal(path.dirname(parent), os.tmpdir()); assert.ok(path.basename(parent).startsWith('soduwork-uninstall-test-'));

@@ -155,5 +155,5 @@
   "agent.probe.failed": "实际测试未通过，请查看测试详情。"
 };
   if (typeof module !== 'undefined' && module.exports) { module.exports = Object.freeze(messages); return; }
-  global.SoduWorkLocaleMessages = Object.freeze({ ...global.SoduWorkLocaleMessages, 'zh-CN': Object.freeze({ ...global.SoduWorkLocaleMessages?.['zh-CN'], ...messages }) });
+  global.SoduWorkLocaleMessages = Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages, { 'zh-CN': Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages?.['zh-CN'], messages)) }));
 })(globalThis);

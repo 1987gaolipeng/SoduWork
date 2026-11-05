@@ -469,5 +469,5 @@
   });
   messages['一行一个，例如： 后台概览页骨架 统计接口'] = 'One per line, for example: Dashboard page structure; Statistics API';
   if (typeof module !== 'undefined' && module.exports) { module.exports = Object.freeze(messages); return; }
-  global.SoduWorkLocaleMessages = Object.freeze({ ...global.SoduWorkLocaleMessages, 'en-US': Object.freeze({ ...global.SoduWorkLocaleMessages['en-US'], ...messages }) });
+  global.SoduWorkLocaleMessages = Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages, { 'en-US': Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages['en-US'], messages)) }));
 })(globalThis);

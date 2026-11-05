@@ -24,7 +24,7 @@ from ..db import SessionLocal
 from ..models import AppSetting
 from ..model_runtime_models import ModelRuntimeLease, ModelRuntimeMetric
 from .model_errors import UpstreamError
-from .model_runtime_transaction import CleanupBudget, finish_cleanup, transaction_boundary
+from .model_runtime_transaction import AbortTransaction, CleanupBudget, finish_cleanup, transaction_boundary
 
 STATE_KEY = "model_runtime_state_v1"
 POLICY_KEY = "model_runtime_policy_v1"
@@ -376,16 +376,21 @@ async def _state(cancel_lease="", cancel_outcome=lambda: "cancelled", cleanup_bu
     async def transaction(control):
         changed = False
         async with lock, session_factory() as session:
+            if control.aborted:
+                raise AbortTransaction()
             async with session.begin():
                 lock_row = await _lock_runtime_state(session)
                 state, lease_rows, metric_rows, legacy_adopted = await _load_state(session, lock_row)
+                capacity_before = {(row['id'], row['state']) for row in state['leases']}
                 now = await _now(session)
                 _sweep(state, now)
                 config = await policy(session) if read_policy else None
                 await control.deliver((state, now, config))
                 changed = await _persist_state(session, lock_row, state, lease_rows, metric_rows,
                                                legacy_adopted)
-        if changed:
+                capacity_changed = capacity_before != {(row['id'], row['state']) for row in state['leases']}
+        # Lease renewal and metric writes cannot make queued capacity available.
+        if changed and capacity_changed:
             wake_capacity_waiters()
 
     async def compensate(cause):
@@ -519,12 +524,18 @@ class Lease:
         self.closed = True
         self.renewal.cancel()
         self.expiry.cancel()
-        with anyio.move_on_after(5, shield=True):
+
+        async def release():
+            # Raw Task.cancel() can interrupt joining the renewal worker. Own
+            # the whole close sequence so it cannot skip lease removal.
             await asyncio.gather(self.renewal, self.expiry, return_exceptions=True)
             try:
                 await _remove(self.id, outcome)
             except Exception:
                 pass  # the finite lease is the fallback after database loss
+
+        if await finish_cleanup(release()):
+            raise asyncio.CancelledError
 
 
 async def acquire(conf):

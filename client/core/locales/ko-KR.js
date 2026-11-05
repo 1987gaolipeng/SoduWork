@@ -32,5 +32,5 @@
     '我的设置': '내 설정', '应用后立即生效': '변경 사항이 즉시 적용됩니다',
   };
   if (typeof module !== 'undefined' && module.exports) { module.exports = Object.freeze(messages); return; }
-  global.SoduWorkLocaleMessages = Object.freeze({ ...global.SoduWorkLocaleMessages, 'ko-KR': Object.freeze(messages) });
+  global.SoduWorkLocaleMessages = Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages, { 'ko-KR': Object.freeze(messages) }));
 })(globalThis);

@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 import logging
 import time
 
+import anyio
+
 log = logging.getLogger(__name__)
 CLEANUP_SECONDS = 5
 _pending = set()
@@ -57,22 +59,28 @@ def _track(coroutine, name):
 
 async def _finish_bounded(task, budget=None):
     budget = budget or CleanupBudget()
-    while not task.done():
-        remaining = budget.remaining()
-        if remaining <= 0:
-            log.warning("Model admission cleanup continues after caller timeout")
-            return
-        try:
-            await asyncio.wait({task}, timeout=remaining)
-        except asyncio.CancelledError:
-            # A second cancellation must neither kill the transaction nor
-            # replace the original cancellation/timeout being propagated.
-            continue
+    cancelled = False
+    # AnyIO cancellation is level-triggered: retrying an await in an expired
+    # scope spins until cleanup finishes. Shield that scope while retaining
+    # our own deadline and handling repeated raw asyncio cancellations.
+    with anyio.CancelScope(shield=True):
+        while not task.done():
+            remaining = budget.remaining()
+            if remaining <= 0:
+                log.warning("Model admission cleanup continues after caller timeout")
+                return cancelled
+            try:
+                await asyncio.wait({task}, timeout=remaining)
+            except asyncio.CancelledError:
+                # Preserve the original cancellation and the shared budget.
+                cancelled = True
+                continue
+    return cancelled
 
 
 async def finish_cleanup(operation, budget=None):
     """Finish lease cleanup without replacing the caller's existing exception."""
-    await _finish_bounded(_track(operation, "lease-cleanup"), budget)
+    return await _finish_bounded(_track(operation, "lease-cleanup"), budget)
 
 
 @asynccontextmanager

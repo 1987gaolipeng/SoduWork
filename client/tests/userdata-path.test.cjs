@@ -70,7 +70,9 @@ test('source startup rejects installed profile overrides before touching their c
       assert.equal(fs.existsSync(directory), false);
     }
   }
-  const isolated = path.join(root, 'explicit-development');
-  app.setPath = (_key, directory) => assert.equal(directory, isolated);
-  assert.equal(initializeUserData(app, { SODUWORK_USER_DATA: isolated }), isolated);
+  for (const name of ['explicit-development', 'SoduWork Development', 'soduwork-other']) {
+    const isolated = path.join(root, name);
+    app.setPath = (_key, directory) => assert.equal(directory, isolated);
+    assert.equal(initializeUserData(app, { SODUWORK_USER_DATA: isolated }), isolated);
+  }
 });

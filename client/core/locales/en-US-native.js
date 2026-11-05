@@ -181,5 +181,5 @@
   "原因：{reason}。点击托盘图标可恢复。": "Reason: {reason}. Click the tray icon to recover."
 };
   if (typeof module !== "undefined" && module.exports) { module.exports = Object.freeze(messages); return; }
-  global.SoduWorkLocaleMessages = Object.freeze({ ...global.SoduWorkLocaleMessages, "en-US": Object.freeze({ ...global.SoduWorkLocaleMessages?.["en-US"], ...messages }) });
+  global.SoduWorkLocaleMessages = Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages, { "en-US": Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages?.["en-US"], messages)) }));
 })(globalThis);

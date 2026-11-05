@@ -11,6 +11,16 @@ from test_model_runtime import CONF, DelayedStream, IsolatedDatabase, runtime, t
 
 
 class RenewalTests(IsolatedDatabase):
+    async def test_renewal_does_not_wake_all_capacity_waiters(self):
+        lease = await self.acquire()
+        with patch.object(runtime, "wake_capacity_waiters") as wake:
+            async with runtime._state() as (state, now, _):
+                row = next(item for item in state["leases"] if item["id"] == lease.id)
+                row["expires"] = now + runtime.LEASE_SECONDS + 1
+            wake.assert_not_called()
+            await lease.close()
+            wake.assert_called_once()
+
     async def test_transient_renewal_failure_keeps_the_same_upstream_stream(self):
         stream = DelayedStream()
         failed, renewed = asyncio.Event(), asyncio.Event()

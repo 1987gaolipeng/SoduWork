@@ -2421,8 +2421,8 @@
     },
     {
       "path": "client/core/locales/en-US-actions.js",
-      "bytes": 12299,
-      "sha256": "127040250079e19aa9f6e4194ab91456fec6c0331795752f91ef40725b918e4a"
+      "bytes": 12358,
+      "sha256": "f6e88e27df12edb8dfb26a6c43f96f3203eabc6ff2ab3fa13f2668a496b012e0"
     },
     {
       "path": "client/core/locales/en-US-agent-pages.js",
@@ -2431,103 +2431,103 @@
     },
     {
       "path": "client/core/locales/en-US-capability-pages.js",
-      "bytes": 40265,
-      "sha256": "41c1447908afec91bddcdd1d2486b905662179072494acafe9dfb83a4f757209"
+      "bytes": 40324,
+      "sha256": "033f1bab21a39a500f10643ff5c3bcdbdf644b37a37602ecb02085bf3ebb09e4"
     },
     {
       "path": "client/core/locales/en-US-chat-pages.js",
-      "bytes": 34024,
-      "sha256": "244e70a9ff7923c068a8bd3bf8b846207eff9b8cf05264e5f3003b84cebe0b7c"
+      "bytes": 34083,
+      "sha256": "f798f0eff968eee717a79faec0db022ba847b9f41f32101315d33b8782e08e8f"
     },
     {
       "path": "client/core/locales/en-US-chat.js",
-      "bytes": 35500,
-      "sha256": "5b5dfe304d3c683f4c97b6b40ca37adeb547014d7ca067596c6a0622ffa3a60b"
+      "bytes": 35559,
+      "sha256": "6771b9f75b27ea58bc0fdf38fb9a3c444b7528c1e2e6db1080ba3956e061c7da"
     },
     {
       "path": "client/core/locales/en-US-cloud-pages.js",
-      "bytes": 26526,
-      "sha256": "3c5575cf16d43fb47849dbcaa896e1a203fda5279a8159fec8068e6f1898634f"
+      "bytes": 26585,
+      "sha256": "7aed06bd9f38c2d1705c6c57d7230d7e346b5ed98820a600f350fa115643d6ce"
     },
     {
       "path": "client/core/locales/en-US-dynamic-pages.js",
-      "bytes": 19039,
-      "sha256": "3b8d4295747c0c2b127987703aebd0b7216845330ddbd41257490cb3ec0b0517"
+      "bytes": 19098,
+      "sha256": "517b34e1d5fb3dd42ef9aa9ca316e91bd78793f657d3ee07d22647cdfcb2c262"
     },
     {
       "path": "client/core/locales/en-US-dynamic-trace.js",
-      "bytes": 13182,
-      "sha256": "45d129e343eddcf4e520ca574eef3a53779eb529a9db64a5bd4b4b6e9c7a8d54"
+      "bytes": 13241,
+      "sha256": "ce0300b0a3a6498cf4071c1a4af871b963fe5d593264a1bbf6445837365cb63f"
     },
     {
       "path": "client/core/locales/en-US-dynamic-work.js",
-      "bytes": 21797,
-      "sha256": "15966d41d43c7bd4a08e3cf7ec6e809d219611c46613a6b24cf1203c31a824de"
+      "bytes": 21856,
+      "sha256": "259686a5cee1970c41ce2a82752eef8a0b2a76be69fc2f36b363264b81589520"
     },
     {
       "path": "client/core/locales/en-US-final-pages.js",
-      "bytes": 45796,
-      "sha256": "6cf07885aaf2a362d2c8c14481fe2b0777675026b03aada0694eef14e4847208"
+      "bytes": 45855,
+      "sha256": "0d5979a33d48a586ec668dfff78cc9b727ebdf79f8750bfa69a6bd9ba420a461"
     },
     {
       "path": "client/core/locales/en-US-gap-pages.js",
-      "bytes": 54661,
-      "sha256": "275953a430feeed6c48890d75c6faffd9dc0116df4a595a84e96c643e443cedc"
+      "bytes": 54720,
+      "sha256": "9d399f5ed6d5fe3f84a05928c09433ff2c6596e05356c3104d93effc7fdf3baf"
     },
     {
       "path": "client/core/locales/en-US-library.js",
-      "bytes": 31940,
-      "sha256": "f4b0e11dba72a2e34a8b8b21867f6d304ce05ed3116760ee4c7834953d1f7ca9"
+      "bytes": 31999,
+      "sha256": "acfc974fe471b08c13f127da1fa733711b0eb07b8f1aa2b7d778ba92b9e2b6a3"
     },
     {
       "path": "client/core/locales/en-US-native.js",
-      "bytes": 16561,
-      "sha256": "fa59c824c517bee09b215a050e0e744f664dd8fc311a6a0e885eedd67e6fc317"
+      "bytes": 16620,
+      "sha256": "a06a3a316a753b9b249ff7b9636f71dfff963ff6e01806da49e6c1c27b0466e2"
     },
     {
       "path": "client/core/locales/en-US-notification-pages.js",
-      "bytes": 36727,
-      "sha256": "46487a8c82a4e4dac72fa5c7d6b783079abe2f3a1eed07fb87039261fe0e5a36"
+      "bytes": 36786,
+      "sha256": "633b0d84b2a4bac31b35c6093aba029d51915f9a8077d5ffbd3d76820def267a"
     },
     {
       "path": "client/core/locales/en-US-plugin-pages.js",
-      "bytes": 34926,
-      "sha256": "5c88048b22c310b0a9cdc7d34f1e3030997c8b355d5098d95a14e112654e8a55"
+      "bytes": 34985,
+      "sha256": "895739e0aeeea4f70a514bc55a7449d80fceb94d9c6c57b49918cd62c33abca8"
     },
     {
       "path": "client/core/locales/en-US-runtime-pages.js",
-      "bytes": 51564,
-      "sha256": "2095e56965176a34dd8d7f45cde7f397fb1a630419756bc07e8dfe7561e2b597"
+      "bytes": 51623,
+      "sha256": "1abbba3218f5f51691e7f2ced831be783ecb58c67be36110b17248063c55eeb7"
     },
     {
       "path": "client/core/locales/en-US-runtime-surfaces.js",
-      "bytes": 12609,
-      "sha256": "a15df54c19e2632dcd49f58f7ab2a3568fca113e707655e26f848adfedb9273f"
+      "bytes": 12668,
+      "sha256": "fe2a6f5807ae973d311cba558184240b1beb20418d4b039f3560f3c7d22fc954"
     },
     {
       "path": "client/core/locales/en-US-shared.js",
-      "bytes": 5859,
-      "sha256": "b64e5c08bae95a2d87fd42acdbf83c959bfcf262cd6aae1cace45413572d50a5"
+      "bytes": 5918,
+      "sha256": "d27e6a31190a09a5bbf99d86c6831f9c18a425f09e7f065b22f532dee19ca790"
     },
     {
       "path": "client/core/locales/en-US-shell.js",
-      "bytes": 12259,
-      "sha256": "42602f2da95ed507b500823b4a57eb442fe3088609619ebd0db747a454091c14"
+      "bytes": 12318,
+      "sha256": "768e302d507cbed22b5261dd510d4c3c9e9990e7d0f6702e8b3f74aaa3bc403d"
     },
     {
       "path": "client/core/locales/en-US-trace-pages.js",
-      "bytes": 32413,
-      "sha256": "462ebeda3da02d6af61b851b5580b8d1ff68657ae05030b354430a12c164d3e4"
+      "bytes": 32472,
+      "sha256": "6508647f9108b45e23ce2f305f15f0793836183400e4eafbd726e69139b1426e"
     },
     {
       "path": "client/core/locales/en-US-work-pages.js",
-      "bytes": 45229,
-      "sha256": "e159093233a86a34bba430dd1a382204fe42e8bb77ecaa0903b6934f62ae9133"
+      "bytes": 45288,
+      "sha256": "35a246dd8021166ce39a77602c87e215e88c22278753fe72f9cd91526d6a59ce"
     },
     {
       "path": "client/core/locales/en-US-workspace.js",
-      "bytes": 31681,
-      "sha256": "4f87c6ca4d2c8df81516ebc46583d376da74acea5788220ded3c6f235e0176e1"
+      "bytes": 31740,
+      "sha256": "532283bc6ab1f9a413d5e1a11b9a16447995c1c4af9670d22c9da32cc5e48b13"
     },
     {
       "path": "client/core/locales/en-US.js",
@@ -2536,8 +2536,8 @@
     },
     {
       "path": "client/core/locales/global-search.js",
-      "bytes": 5072,
-      "sha256": "a42ad910d75407a15716ebcdf691e4605dcc9e904c919415df01a2a1c1d69f3b"
+      "bytes": 5127,
+      "sha256": "fd0cfddbba3b48f654ffd7827f5f6bb2d3b9589de3b097be558a1cbde549573e"
     },
     {
       "path": "client/core/locales/ja-JP-agent-pages.js",
@@ -2546,18 +2546,18 @@
     },
     {
       "path": "client/core/locales/ja-JP-gap-pages.js",
-      "bytes": 756040,
-      "sha256": "1e1c7bab31f329d27c72cbf078cfe37bda49509cbaf6dca5d4664ed29790f919"
+      "bytes": 756099,
+      "sha256": "4cc4112611282b40f607f5dc2d521828a79cb3fe66f30d9c42826b6e62006ee7"
     },
     {
       "path": "client/core/locales/ja-JP-runtime-surfaces.js",
-      "bytes": 15026,
-      "sha256": "ee841d9d88e5273b75be44d3e018846617fda352eeef27148cb08ea197e9bc36"
+      "bytes": 15085,
+      "sha256": "217ac14603598fef95416d52caa618822f20d1b2a043e8381c3b6d842b175acd"
     },
     {
       "path": "client/core/locales/ja-JP.js",
-      "bytes": 4078,
-      "sha256": "48b27a7767f224b465bb4cbd33cb66fc5063353d3b591508a6a93bc468dcc8c8"
+      "bytes": 4111,
+      "sha256": "bbf1740374b98c3b5935fbdfcbc89caedac41b2de6b926506b4dcf492355a46e"
     },
     {
       "path": "client/core/locales/ko-KR-agent-pages.js",
@@ -2566,18 +2566,18 @@
     },
     {
       "path": "client/core/locales/ko-KR-gap-pages.js",
-      "bytes": 707040,
-      "sha256": "c5e95dd41ee7ea3c6a02417e93cfab9cde14f65fb2ec446b3a1c62b4560fdd3e"
+      "bytes": 707099,
+      "sha256": "38e454ba8ce3ff832292b05ca7f643ec2c46ddc99eb5316964b649a5084c83f9"
     },
     {
       "path": "client/core/locales/ko-KR-runtime-surfaces.js",
-      "bytes": 14267,
-      "sha256": "6049cb5ea844ca645eb419b4f5d771a236a3f5d570f4b693e057f69bd887929c"
+      "bytes": 14326,
+      "sha256": "0e0a75166c15b51395c8ada89886e007fa433ae42d55b2484652c3ddfdba2b41"
     },
     {
       "path": "client/core/locales/ko-KR.js",
-      "bytes": 3847,
-      "sha256": "3d6973505e563fa5b89067552ff1ffc2a50c47c3689ffe3caf9192e3cf3f717f"
+      "bytes": 3880,
+      "sha256": "03ea5165c82e008637ff9c5fe262531cd36d83a919a85ff2b5f01e0b8b434089"
     },
     {
       "path": "client/core/locales/locale-registry.js",
@@ -2591,8 +2591,8 @@
     },
     {
       "path": "client/core/locales/zh-CN-runtime-surfaces.js",
-      "bytes": 11358,
-      "sha256": "7b3a68359e606b50b91b29f557618e9147b302f437b852a12c62f729cb2bd9c2"
+      "bytes": 11417,
+      "sha256": "dad6d3dcd38e47f038f73a03830a5bb4d07a5e2ab1dd8e096a25d3430bbcd9c3"
     },
     {
       "path": "client/core/localized-text.js",
@@ -6121,8 +6121,8 @@
     },
     {
       "path": "client/main/native-locale.cjs",
-      "bytes": 3154,
-      "sha256": "031d2e4a72df503c72d0800888855ec26c5e358a884a74c5071d9a9b39d67113"
+      "bytes": 3590,
+      "sha256": "37ba18cff6108786ec249a1130ffa73e4be44fd2a07b3c1bb88fc32ef732b992"
     },
     {
       "path": "client/main/native-theme.cjs",
@@ -6741,8 +6741,8 @@
     },
     {
       "path": "client/main/platform-connections/runtime.cjs",
-      "bytes": 12329,
-      "sha256": "9502dcc42fdb9e448268013f1570180a6b763401867c0a082636a55f1d0ff71c"
+      "bytes": 12418,
+      "sha256": "aacba359f3002a731181b4e6973337717e2a04ed99e65756b4d89a45fd14a8d4"
     },
     {
       "path": "client/main/platform-connections/service.cjs",
@@ -9121,8 +9121,8 @@
     },
     {
       "path": "client/tests/native-locale.test.cjs",
-      "bytes": 2348,
-      "sha256": "302debeec733ab81c32ba087c2dbc66932d31a3f912883a732b32c85853c66f9"
+      "bytes": 4222,
+      "sha256": "8bc7085626a4ae845d2670ffa3ac48b6a5d72dc7312615a288f40f13b674c8bf"
     },
     {
       "path": "client/tests/native-maintenance-wait.test.cjs",
@@ -9476,8 +9476,8 @@
     },
     {
       "path": "client/tests/platform-runtime-stop.test.cjs",
-      "bytes": 2056,
-      "sha256": "76240314ab57d5b6a54c93e94cc809fefa5cebd6138a174f5e8f8086f0a51a92"
+      "bytes": 3057,
+      "sha256": "ffe6febea654b7cfd7bda08bad22a6f4aef75d10a447a092f609d22f6f3f3890"
     },
     {
       "path": "client/tests/platform-session-contract.test.cjs",
@@ -10612,7 +10612,7 @@
     {
       "path": "client/tests/uninstall-resources.test.cjs",
       "bytes": 7121,
-      "sha256": "265eb3f8d6a790e870e776b5bfc08602bac6ac46820a7ddfeadb248f6df84b64"
+      "sha256": "eae9e453b46122f6ef483e9ec9ffb01d7624ae0d96df739ce28787ab9e64bc25"
     },
     {
       "path": "client/tests/update-linux-install.test.cjs",
@@ -10696,8 +10696,8 @@
     },
     {
       "path": "client/tests/userdata-path.test.cjs",
-      "bytes": 4745,
-      "sha256": "3f0e6110088907ca514c06a6deaa345b82387fbed3d049e529e64ef7315823ca"
+      "bytes": 4828,
+      "sha256": "92d7274a4401ad3edd6bc32ae57e4dab693865868a81d58a0cd15338d43aacd2"
     },
     {
       "path": "client/tests/verified-file-replace.test.cjs",
@@ -11851,8 +11851,8 @@
     },
     {
       "path": "hub-backend/app/services/acp_bridge.py",
-      "bytes": 33385,
-      "sha256": "8ea2f1449b72de499248abdad51711788763f799ddb7bbf062361db9dd263663"
+      "bytes": 33804,
+      "sha256": "5eb1bd387d81eae55789b936ce3a73ebc5943cd99e0e4268bde8c09f38e6f640"
     },
     {
       "path": "hub-backend/app/services/acp_process.py",
@@ -11896,8 +11896,8 @@
     },
     {
       "path": "hub-backend/app/services/agent_npm_runtime.py",
-      "bytes": 14492,
-      "sha256": "2d41a84492662d0b2a8eb08499a164f8afc42c4ba40d94e8f94e2b8aebc6762e"
+      "bytes": 14521,
+      "sha256": "8beda3981460c975e8a1f8effee650daed18d795ef7fe4c8fb57b3d7e568f24a"
     },
     {
       "path": "hub-backend/app/services/agent_route_selection.py",
@@ -12826,8 +12826,8 @@
     },
     {
       "path": "hub-backend/app/services/managed_agent_network.py",
-      "bytes": 5061,
-      "sha256": "365f13a1de0877ad6f4eb9e933723c1633fea7098720b9ec431922bd5e28c756"
+      "bytes": 5345,
+      "sha256": "8594f1fab12f372051b46221df8bfc38d3d16524197128c48519d92610b85013"
     },
     {
       "path": "hub-backend/app/services/managed_agents.py",
@@ -12931,13 +12931,13 @@
     },
     {
       "path": "hub-backend/app/services/model_runtime.py",
-      "bytes": 31577,
-      "sha256": "a5106c997928ea40d5e4806a7c81ef63e94cd95042c2a21cdc80df4e1def7642"
+      "bytes": 32184,
+      "sha256": "18e16ff9ba946f882b3016eed1841218f57ce3604a13bed570aa4573e0646fae"
     },
     {
       "path": "hub-backend/app/services/model_runtime_transaction.py",
-      "bytes": 3639,
-      "sha256": "47179249c3623a892fa9151b6a61126a14ae1c113164bb00a23c3edd72254384"
+      "bytes": 3976,
+      "sha256": "a3b59d1382bd45877deb4878608f022009bbde77d289abe24c6382a259520e3b"
     },
     {
       "path": "hub-backend/app/services/model_transport.py",
@@ -16691,13 +16691,13 @@
     },
     {
       "path": "hub-backend/test_model_runtime_cancellation.py",
-      "bytes": 10365,
-      "sha256": "6e325516c0002d7569398c0a26dadf19d9da82af9786a9a0ea8eb120a0802538"
+      "bytes": 13435,
+      "sha256": "f46d079b9c6db4d33b1efd71995652b04cb795ac12be63409be984c3d43b145a"
     },
     {
       "path": "hub-backend/test_model_runtime_renewal.py",
-      "bytes": 14493,
-      "sha256": "a1d1b98a60e1cac672b2f3ec03f762591863ac99a55b93caeac78f77984331b8"
+      "bytes": 14988,
+      "sha256": "45c8d0231f87fb172b0a77654caa12937418780aea934230c8d4ab6862176207"
     },
     {
       "path": "hub-backend/test_multimodal_proxy.py",
@@ -20481,8 +20481,8 @@
     },
     {
       "path": "tools/dev/start_local.py",
-      "bytes": 19910,
-      "sha256": "6dfb0490a80a7e0add690c2ce6f16ecfd8946beaf24a8df41bb0ff078d5a0383"
+      "bytes": 20152,
+      "sha256": "6ffc07bd9ff830d316e74d10165b51ff5175f45b70aa3db9e6713125a69cf113"
     },
     {
       "path": "tools/dev/test_deploy.py",
@@ -20501,8 +20501,8 @@
     },
     {
       "path": "tools/dev/test_start_local.py",
-      "bytes": 20166,
-      "sha256": "0139a2c0cb71637a4899d1f32661930f874049be7c5ad5e81b3e11a37f9c579a"
+      "bytes": 21185,
+      "sha256": "bde90b28e1093eb968db9520c4fe667129fba406b3d22bc62fb888aa2ce9a17c"
     },
     {
       "path": "tools/dev/verify_local_start.py",

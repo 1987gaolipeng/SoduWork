@@ -8216,5 +8216,5 @@
     '准备云端 Agent': 'クラウド Agent を準備',
   });
   if (typeof module !== 'undefined' && module.exports) { module.exports = Object.freeze(messages); return; }
-  global.SoduWorkLocaleMessages = Object.freeze({ ...global.SoduWorkLocaleMessages, 'ja-JP': Object.freeze({ ...global.SoduWorkLocaleMessages['ja-JP'], ...messages }) });
+  global.SoduWorkLocaleMessages = Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages, { 'ja-JP': Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages['ja-JP'], messages)) }));
 })(globalThis);

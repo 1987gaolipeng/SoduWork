@@ -163,5 +163,5 @@
   "agent.probe.failed": "実行テストに失敗しました。詳細を確認してください。"
 };
   if (typeof module !== 'undefined' && module.exports) { module.exports = Object.freeze(messages); return; }
-  global.SoduWorkLocaleMessages = Object.freeze({ ...global.SoduWorkLocaleMessages, 'ja-JP': Object.freeze({ ...global.SoduWorkLocaleMessages?.['ja-JP'], ...messages }) });
+  global.SoduWorkLocaleMessages = Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages, { 'ja-JP': Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages?.['ja-JP'], messages)) }));
 })(globalThis);

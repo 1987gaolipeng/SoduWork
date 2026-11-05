@@ -31,9 +31,9 @@
     ['仅显示当前账号可访问的内容', 'Only content accessible to your account', '現在のアカウントでアクセス可能な内容のみ', '현재 계정에서 접근할 수 있는 내용만 표시'],
     ['打开的内容已删除或当前账号无权访问', 'This content was removed or is no longer accessible', '削除されたか、現在のアカウントではアクセスできません', '삭제되었거나 현재 계정에 접근 권한이 없습니다'],
   ];
-  const messages = { ...global.SoduWorkLocaleMessages };
+  const messages = Object.assign(Object.create(null), global.SoduWorkLocaleMessages);
   ['en-US', 'ja-JP', 'ko-KR'].forEach((locale, index) => {
-    messages[locale] = Object.freeze({ ...Object.fromEntries(entries.map(row => [row[0], row[index + 1]])), ...messages[locale] });
+    messages[locale] = Object.freeze(Object.assign(Object.create(null), Object.fromEntries(entries.map(row => [row[0], row[index + 1]])), messages[locale]));
   });
   global.SoduWorkLocaleMessages = Object.freeze(messages);
 })(globalThis);

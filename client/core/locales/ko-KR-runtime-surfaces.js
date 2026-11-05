@@ -163,5 +163,5 @@
   "agent.probe.failed": "실행 테스트에 실패했습니다. 테스트 상세 정보를 확인하세요."
 };
   if (typeof module !== 'undefined' && module.exports) { module.exports = Object.freeze(messages); return; }
-  global.SoduWorkLocaleMessages = Object.freeze({ ...global.SoduWorkLocaleMessages, 'ko-KR': Object.freeze({ ...global.SoduWorkLocaleMessages?.['ko-KR'], ...messages }) });
+  global.SoduWorkLocaleMessages = Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages, { 'ko-KR': Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages?.['ko-KR'], messages)) }));
 })(globalThis);

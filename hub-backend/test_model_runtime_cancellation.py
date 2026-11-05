@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import aiosqlite
+import anyio
 from sqlalchemy.ext.asyncio import AsyncSessionTransaction
 
 from app.services import model_runtime_transaction as boundary
@@ -13,6 +14,79 @@ from test_model_runtime import IsolatedDatabase, runtime
 
 
 class CancellationTests(IsolatedDatabase):
+    async def test_repeated_cancellation_during_close_still_removes_lease(self):
+        lease = await self.acquire()
+        lease.renewal.cancel()
+        await asyncio.gather(lease.renewal, return_exceptions=True)
+        entered, interrupted, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+        async def renewal():
+            entered.set()
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                interrupted.set()
+                await release.wait()
+
+        lease.renewal = self.spawn(renewal())
+        await entered.wait()
+        closing = self.spawn(lease.close())
+        try:
+            await asyncio.wait_for(interrupted.wait(), 2)
+            closing.cancel("first close cancellation")
+            await asyncio.sleep(.01)
+            closing.cancel("repeated close cancellation")
+            await asyncio.sleep(.01)
+            self.assertFalse(closing.done())
+        finally:
+            release.set()
+        with self.assertRaises(asyncio.CancelledError):
+            await closing
+        self.assertEqual((await runtime.snapshot())["running"], 0)
+        self.assertFalse(boundary._pending)
+
+    async def test_expired_lease_close_scope_does_not_spin_during_transaction_cleanup(self):
+        lease = await self.acquire()
+        original_now = runtime._now
+        original_wait = asyncio.wait
+        interrupted_waits = 0
+
+        async def slow_clock(session):
+            await asyncio.sleep(.1)
+            return await original_now(session)
+
+        async def observed_wait(*args, **kwargs):
+            nonlocal interrupted_waits
+            try:
+                return await original_wait(*args, **kwargs)
+            except asyncio.CancelledError:
+                interrupted_waits += 1
+                raise
+
+        # Exercise the real close -> remove -> transaction cleanup path with
+        # a short close timeout, without spending five seconds per regression.
+        asyncio_proxy = SimpleNamespace(**{**vars(asyncio), "wait": observed_wait})
+        with patch.object(runtime, "_now", slow_clock), \
+                patch.object(boundary, "asyncio", asyncio_proxy):
+            with anyio.move_on_after(.02):
+                await lease.close()
+        self.assertEqual(interrupted_waits, 0, "expired AnyIO scope must not repeatedly cancel cleanup")
+        self.assertEqual((await runtime.snapshot())["running"], 0)
+        self.assertFalse(boundary._pending)
+
+    async def test_cancelled_scope_cleanup_keeps_deadline_and_background_worker(self):
+        release = asyncio.Event()
+        worker = self.spawn(release.wait())
+        try:
+            with patch.object(boundary, "CLEANUP_SECONDS", .03):
+                with anyio.CancelScope() as scope:
+                    scope.cancel()
+                    await boundary._finish_bounded(worker)
+            self.assertFalse(worker.done(), "cleanup budget must not cancel the retained worker")
+        finally:
+            release.set()
+            await asyncio.wait_for(worker, 1)
+
     async def asyncTearDown(self):
         # A failed assertion must still let released fixture barriers drain
         # before changing SessionLocal or removing this fixture's database.

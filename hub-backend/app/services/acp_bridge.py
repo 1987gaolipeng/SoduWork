@@ -259,6 +259,14 @@ class AcpBridge:
                     self.stderr_head.append(line[:500])
                 self.stderr_tail = [*self.stderr_tail[-19:], line[:500]]
 
+    def _exit_detail(self) -> str:
+        # Pipe closure and the stderr reader race with the first request. Drain
+        # pending diagnostics, but do not wait forever for inherited open pipes.
+        for reader in self.readers:
+            if reader.name == "acp-stderr" and reader is not threading.current_thread():
+                reader.join(timeout=.5)
+        return _stderr_detail(self.stderr_head, self.stderr_tail)
+
     def send(self, value: dict) -> None:
         if not self.proc or not self.proc.stdin:
             raise BridgeError("ACP connection is not ready")
@@ -267,7 +275,7 @@ class AcpBridge:
                 value, ensure_ascii=False, separators=(",", ":")) + "\n")
             self.proc.stdin.flush()
         except (BrokenPipeError, OSError) as exc:
-            raise BridgeError("ACP Agent disconnected early") from exc
+            raise BridgeError("ACP Agent disconnected early" + self._exit_detail()) from exc
 
     def request(self, method: str, params: dict) -> dict:
         self.next_id += 1
@@ -296,7 +304,7 @@ class AcpBridge:
                     "message": "Invalid ACP stdout: " + str(value)}})
             elif kind == "eof":
                 code = self.proc.poll() if self.proc else None
-                detail = _stderr_detail(self.stderr_head, self.stderr_tail)
+                detail = self._exit_detail()
                 raise BridgeError("ACP Agent exited early%s%s" % (
                     " (code %s)" % code if code is not None else "", detail))
 
