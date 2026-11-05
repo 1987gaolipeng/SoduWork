@@ -64,9 +64,9 @@ if (typeof electron === 'string') {
           return setTimeout(() => json(loginStatus === 200 ? { token: 'local-synthetic-token', user } : { detail: 'Invalid credentials' }, loginStatus), 100)
         }
         if (url.pathname === '/api/v1/admin/me') return json(user)
-        if (/\/download\/client(?:\/mac|\/linux)?\/info$/.test(url.pathname)) {
+        if (/\/download\/(?:client(?:\/mac|\/linux)?|mobile)\/info$/.test(url.pathname)) {
           if (mode === 'error') return json({ detail: 'Local test unavailable' }, 503)
-          if (mode === 'none' || (mode === 'windows-only' && /\/(mac|linux)\//.test(url.pathname))) return json({ available: false })
+          if (mode === 'none' || (mode === 'windows-only' && /\/(mac|linux|mobile)\//.test(url.pathname))) return json({ available: false })
           const meta = { available: true, version: '1.12.73', sizeText: '128 MB', filename: 'local-fixture', updatedAt: '2026-10-13T00:00:00Z' }
           if (url.pathname.includes('/mac/')) return json({ available: true, arches: { arm64: meta, x64: meta } })
           if (url.pathname.includes('/linux/')) return json({ available: true, formats: { deb: meta, rpm: meta, 'tar.gz': meta } })
@@ -92,8 +92,9 @@ if (typeof electron === 'string') {
     isolated.webRequest.onBeforeRequest((detail, done) => { const cancel = !detail.url.startsWith(origin + '/') && !detail.url.startsWith('data:'); if (cancel) blocked.push(detail.url); done({ cancel }) })
     win = new BrowserWindow({ show: false, width: 1440, height: 1000, webPreferences: { session: isolated, offscreen: true, backgroundThrottling: false, contextIsolation: true, nodeIntegration: false } })
     win.webContents.on('console-message', event => { if (/Uncaught|React error|Each child in a list/.test(event.message)) errors.push(event.message) })
+    win.webContents.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
     await win.loadURL(origin)
-    await until('document.querySelectorAll(".public-platform-packages a").length===6', 'six platform downloads')
+    await until('document.querySelectorAll(".public-platform-packages a").length===6', 'six desktop downloads')
     assert.equal(await js('document.querySelector(".public-hero-actions a").getAttribute("href")'), '/api/v1/download/client')
     for (const [width, height] of [[1440, 1000], [1024, 900], [768, 1024], [390, 844], [320, 740]]) await geometry('landing-zh-' + width, width, height)
     for (const width of [1440, 390]) {
@@ -157,6 +158,30 @@ if (typeof electron === 'string') {
     await until('document.querySelector(".w-meta")?.textContent.includes("尚未发布")', 'unpublished Mac state')
     assert.equal(await js('document.querySelector(".public-hero-actions button").disabled'), true, 'Mac must not receive a Windows installer')
     assert.equal(await js('document.querySelectorAll(".public-platform-packages a").length'), 1)
+    mode = 'available'
+    win.webContents.setUserAgent('Mozilla/5.0 (Linux; Android 14; Pixel) AppleWebKit/537.36 Mobile')
+    await win.loadURL(origin)
+    await until('document.querySelector(".w-meta")?.textContent.includes("尚未发布")', 'Android is not distributed')
+    assert.equal(await js('document.querySelector(".public-hero-actions button").disabled'), true)
+    assert.ok(!requests.some(request => request.path.includes('/download/mobile/')), 'public source never requests private mobile packages')
+    await geometry('landing-android-390', 390, 844)
+    mode = 'none'; await win.loadURL(origin)
+    await until('document.querySelector(".w-meta")?.textContent.includes("尚未发布")', 'Android unpublished')
+    assert.equal(await js('document.querySelector(".public-hero-actions button").disabled'), true)
+    mode = 'available'
+    for (const ua of ['Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)', 'Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X)']) {
+      win.webContents.setUserAgent(ua); await win.loadURL(origin)
+      await until('document.querySelector(".w-meta")?.textContent.includes("尚未发布")', 'iOS unpublished')
+      assert.equal(await js('document.querySelector(".public-hero-actions button").disabled'), true)
+    }
+    win.webContents.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36')
+    win.webContents.debugger.attach('1.3')
+    await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 })
+    await win.loadURL(origin)
+    await until('document.querySelector(".w-meta")?.textContent.includes("尚未发布")', 'iPad desktop UA must not select macOS')
+    assert.equal(await js('document.querySelector(".public-hero-actions button").disabled'), true)
+    await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: false })
+    win.webContents.debugger.detach()
     results.push({ name: 'unpublished platform, retry and OS-specific download safety', ok: true })
     mode = 'available'; await win.loadURL(origin + '/?theme=dark')
     await until('!!document.querySelector(".product-workspace")', 'dark landing')

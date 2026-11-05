@@ -5,6 +5,21 @@ const target = require('../main/update-target.cjs');
 // Linux probes are simulated, but path semantics still belong to the Node host.
 const installed = path.resolve('fixture-installed', 'soduwork');
 const portable = path.resolve('fixture-portable', 'soduwork');
+test('update channel follows the bundled distribution on every platform', async () => {
+  const { getProfile } = require('../main/distribution.cjs');
+  for (const updateChannel of ['stable', 'beta']) {
+    for (const platform of ['win32', 'darwin', 'linux']) {
+      for (const version of ['1.13.11-beta.532', '1.13.11']) {
+        const params = await target.query(version, {
+          profile: { ...getProfile(), updateChannel }, platform, arch: 'x64', realpath: async () => '',
+          env: { SODUWORK_UPDATE_CHANNEL: updateChannel === 'beta' ? 'stable' : 'beta' },
+        });
+        assert.equal(params.get('channel'), updateChannel);
+        assert.equal(params.get('current'), version);
+      }
+    }
+  }
+});
 function deps(owners = {}, extra = {}) {
   return { platform: 'linux', execPath: installed, env: {},
     realpath: async file => file, exec: async (file, args, options) => {

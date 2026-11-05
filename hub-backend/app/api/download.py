@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse
 from sqlalchemy import select
 
+from ..config import get_settings
 from ..deps import get_session
 from ..models import ClientRelease
 from ..services import client_updates as client_contract
@@ -73,12 +74,11 @@ async def _windows_release_rows(session):
 
 
 async def _stable_release_rows(session, platform: str, arch: str | None = None):
-    """List enabled stable artifacts for the platform and optional architecture using the update
-    channel's trust, version, and format ordering.
-    """
+    """List trusted public artifacts, preferring explicit candidates on the beta channel."""
+    channel = _public_channel()
     filters = [
         ClientRelease.enabled.is_(True),
-        ClientRelease.channel == _public_channel(),
+        ClientRelease.channel == channel,
         ClientRelease.platform == platform,
     ]
     if arch:
@@ -93,20 +93,16 @@ async def _stable_release_rows(session, platform: str, arch: str | None = None):
         except client_contract.UpdateContractError:
             continue
         trusted.append(row)
-    return sorted(
-        trusted,
-        key=lambda row: (client_contract.parse_version(row.version) or (0, 0, 0, 0, 0),
-                         -client_contract.format_rank(row.artifact_name),
-                         -client_contract.installer_brand_rank(row.artifact_name)),
-        reverse=True,
-    )
+    def order(row):
+        version = client_contract.parse_version(row.version)
+        # Historical beta-channel uploads can have an unsuffixed version. Keep
+        # them downloadable, but do not let them hide actual beta candidates.
+        candidate = channel == "beta" and version is not None and version[3] == 0
+        return (candidate, version or (0, 0, 0, 0, 0),
+                -client_contract.format_rank(row.artifact_name),
+                -client_contract.installer_brand_rank(row.artifact_name))
 
-
-def _version_text(rows, newest: tuple[int, int, int]) -> str:
-    for row in rows:
-        if client_contract.parse_version(row.version) == newest:
-            return str(row.version)
-    return ""
+    return sorted(trusted, key=order, reverse=True)
 
 
 def _verified_row(row):
@@ -164,9 +160,7 @@ async def client_linux_info(session=Depends(get_session)):
     rows = await _linux_release_rows(session)
     if not rows:
         return {"available": False, "version": "", "formats": {}}
-    newest = max(client_contract.parse_version(row.version) or (0, 0, 0, 0, 0)
-                 for row in rows)
-    version = _version_text(rows, newest)
+    version = str(rows[0].version)
     formats: dict[str, dict] = {}
     for row in rows:  # Rows are sorted by version and format preference; retain the first row per format.
         if row.version != version:
@@ -214,9 +208,7 @@ async def client_mac_info(session=Depends(get_session)):
     rows = await _mac_release_rows(session)
     if not rows:
         return {"available": False, "version": "", "arches": {}}
-    newest = max(client_contract.parse_version(row.version) or (0, 0, 0, 0, 0)
-                 for row in rows)
-    version = _version_text(rows, newest)
+    version = str(rows[0].version)
     arches: dict[str, dict] = {}
     for row in rows:  # Rows are sorted by version and architecture preference; retain the first row per architecture.
         if row.version != version or row.arch not in {"arm64", "x64"}:

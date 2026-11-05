@@ -3,6 +3,7 @@ const path = require('node:path'), fs = require('node:fs/promises'), assert = re
 const { promisify } = require('node:util');
 const execFile = promisify(require('node:child_process').execFile);
 const contract = require('./release-artifacts.cjs');
+const { concurrency, transferAll } = require('./release-transfer.cjs');
 const env = process.env;
 const evidence = path.join(contract.root, 'release-evidence');
 
@@ -37,23 +38,28 @@ function matches(row, item, record, channel) {
     row.platform === item.platform && row.arch === item.arch && row.artifactName === item.name &&
     row.artifactSize === item.size && row.sha256 === item.sha256;
 }
-async function stage(platform) {
+async function stage(platform, { connect = connection, execute = execFile } = {}) {
+  const limit = concurrency();
   assert.ok(targets().includes(platform));
   const record = await contract.verify(platform);
   contract.validateAcceptance(record, await contract.read(path.join(evidence, platform, 'acceptance.json')));
-  const remote = await connection();
+  const remote = await connect();
   assert.ok(env.CI_PIPELINE_CREATED_AT, 'CI timestamp is required for repeatable signatures');
   const directory = path.join(evidence, platform, 'staged');
   await fs.mkdir(directory, { recursive: true });
+  await fs.rm(path.join(directory, 'index.json'), { force: true });
   const channel = env.SODUWORK_CLIENT_CHANNEL || 'beta';
   assert.ok(['stable', 'beta'].includes(channel));
-  const entries = [];
-  for (const item of record.artifacts) {
+  const progress = { schema: 1, ok: false, sourceCommit: record.sourceCommit, pipelineId: record.pipelineId,
+    platform, completed: [] };
+  let entries;
+  try {
+    entries = await transferAll(record.artifacts, async item => {
     const installer = path.join(contract.dist, item.name);
     const receipt = path.join(directory, item.name + '.upload.json');
     const bundle = path.join(directory, item.name + '.' + channel + '.release.json');
-    const result = await execFile(process.execPath,
-      [path.join(contract.root, 'tools/sign-client-release.mjs'), installer],
+    const result = await execute(process.execPath,
+      [path.join(contract.root, 'tools/sign-client-release.mjs'), installer, '--reuse-existing'],
       { cwd: contract.root, windowsHide: true, timeout: 16 * 60 * 1000,
         env: { ...env, SODUWORK_CLIENT_PLATFORM: item.platform, SODUWORK_CLIENT_ARCH: item.arch,
           SODUWORK_CLIENT_CHANNEL: channel, SODUWORK_CLIENT_RELEASE_BUNDLE: bundle,
@@ -64,7 +70,14 @@ async function stage(platform) {
     process.stdout.write(result.stdout);
     const uploaded = await contract.read(receipt);
     assert.ok(matches(uploaded.release, item, record, channel), 'Hub receipt differs from accepted artifact');
-    entries.push({ ...item, releaseId: uploaded.release.id });
+    const entry = { ...item, releaseId: uploaded.release.id };
+    progress.completed.push({ name: item.name, releaseId: entry.releaseId, reused: uploaded.reused === true });
+    return entry;
+    }, { limit, phase: 'upload-' + platform });
+    progress.ok = true;
+  } finally {
+    progress.finishedAt = new Date().toISOString();
+    await contract.write(path.join(directory, 'progress.json'), progress);
   }
   await contract.write(path.join(directory, 'index.json'), { schema: 3, ok: true,
     hub: remote.url, channel, build: record, entries });

@@ -24,6 +24,13 @@ async function withPlatform(value, fn) {
 
 
 async function fixture(deferredTarget = '1.2.13', options = {}) {
+  const packageInfo = require('../package.json');
+  const priorDistribution = packageInfo.soduworkDistribution;
+  const priorChannel = packageInfo.soduworkUpdateChannel;
+  if (options.channel) {
+    packageInfo.soduworkUpdateChannel = options.channel;
+    packageInfo.soduworkDistribution = require('../main/distribution.cjs').getProfile();
+  }
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'soduwork-updater-state-'));
   const appPath = path.join(root, 'app');
   const updateRoot = path.join(root, 'client-updates');
@@ -44,8 +51,8 @@ async function fixture(deferredTarget = '1.2.13', options = {}) {
   const manifest = {
     schema: 1,
     releaseId,
-    version: '1.2.13',
-    channel: 'stable',
+    version: options.version || '1.2.13',
+    channel: options.channel || 'stable',
     platform,
     arch,
     artifact: {
@@ -55,7 +62,7 @@ async function fixture(deferredTarget = '1.2.13', options = {}) {
       url: `/api/v1/client-updates/artifacts/${releaseId}`,
     },
     mandatory: false,
-    minVersion: '',
+    minVersion: options.minVersion || '',
     notes: 'Updater state regression',
     publishedAt: '2026-08-12T12:00:00Z',
     keyId: options.unknownKey ? 'rotated-state-test-key' : 'state-test-key',
@@ -74,15 +81,16 @@ async function fixture(deferredTarget = '1.2.13', options = {}) {
 
   const events = [];
   const states = [], scheduled = [], relaunches = [];
-  const prepareBodies = [], artifactRequests = [];
+  const prepareBodies = [], artifactRequests = [], checkRequests = [];
   let prompts = 0;
   const dialogs = [];
   const drains = [];
-  let currentVersion = '1.2.12';
+  let currentVersion = options.currentVersion || '1.2.12';
   const originalFetch = global.fetch;
   global.fetch = async (url, requestOptions = {}) => {
     const target = String(url);
     if (target.includes('/client-updates/check?')) {
+      checkRequests.push(new URL(target));
       if (options.checkResponse) return options.checkResponse();
       return new Response(JSON.stringify({
         hasUpdate: options.hasUpdate !== false,
@@ -174,13 +182,39 @@ async function fixture(deferredTarget = '1.2.13', options = {}) {
     drains,
     prepareBodies,
     artifactRequests,
+    checkRequests,
     setCurrentVersion: (value) => { currentVersion = value; },
     restore: async () => {
       global.fetch = originalFetch;
+      if (priorChannel === undefined) delete packageInfo.soduworkUpdateChannel;
+      else packageInfo.soduworkUpdateChannel = priorChannel;
+      if (priorDistribution === undefined) delete packageInfo.soduworkDistribution;
+      else packageInfo.soduworkDistribution = priorDistribution;
       await fsp.rm(root, { recursive: true, force: true });
     },
   };
 }
+
+test('Windows self-hosted beta downloads, verifies and hands off a newer beta for installation', async () => {
+  await withPlatform('win32', async () => {
+    let launches = 0;
+    const ctx = await fixture('other', { download: true,
+      currentVersion: '1.13.11-beta.532', version: '1.13.11-beta.533', channel: 'beta',
+      minVersion: '1.13.11-beta.532', artifactName: 'SoduWork-1.13.11-beta.533-Setup.exe',
+      launchHelper: async () => { launches++; },
+    });
+    try {
+      const status = await updater.check({ interactive: true });
+      assert.equal(ctx.checkRequests[0].searchParams.get('channel'), 'beta');
+      assert.equal(ctx.checkRequests[0].searchParams.get('current'), '1.13.11-beta.532');
+      assert.equal(status.targetVersion, '1.13.11-beta.533');
+      assert.equal(ctx.artifactRequests.length, 1);
+      assert.ok(ctx.events.some(event => event.state === 'downloaded'));
+      assert.equal((await updater.installDownloaded()).state, 'installing');
+      assert.equal(launches, 1);
+    } finally { await ctx.restore(); }
+  });
+});
 
 test('only verified manifest notes reach renderer status and the next check clears them', async () => {
   await withPlatform('win32', async () => {

@@ -78,6 +78,12 @@ def newer(latest: str, current: str) -> bool:
     return bool(left and right and left > right)
 
 
+def automatic_update_candidate(release: ClientRelease) -> bool:
+    """Historical unsuffixed beta uploads remain downloadable, never auto-upgrade targets."""
+    version = parse_version(release.version)
+    return bool(version and (release.channel != "beta" or version[3] == 0))
+
+
 def canonical_bytes(payload: dict[str, Any]) -> bytes:
     return json.dumps(
         payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),

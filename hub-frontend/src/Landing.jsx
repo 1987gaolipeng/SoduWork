@@ -31,12 +31,15 @@ function Brand() {
 
 function platform() {
   const ua = String(navigator.userAgent || '')
+  if (/Android/i.test(ua)) return 'android'
+  if (/iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1)) return 'ios'
   if (/Macintosh|Mac OS X/i.test(ua)) return 'mac'
   if (/Linux|X11/i.test(ua) && !/Android|Mobile/i.test(ua)) return 'lin'
   return 'win'
 }
 function primaryTarget(pkgs) {
   const os = platform(), info = pkgs?.[os]
+  if (['android', 'ios'].includes(os)) return { info, meta: null, href: '', label: os }
   if (os === 'mac') {
     const arch = ['arm64', 'x64'].find(key => info?.arches?.[key])
     return { info, meta: info?.arches?.[arch], href: arch ? `/api/v1/download/client/mac/${arch}` : '', label: arch === 'x64' ? 'macOS · Intel' : 'macOS · Apple Silicon' }

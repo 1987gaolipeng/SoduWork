@@ -11,6 +11,7 @@ const BUILD_INPUTS = Object.freeze([
   'build/soduwork-install-identity.nsh', 'build/file-open.nsh',
   'build/launcher.nsi', 'build/launcher-progress.nsh', 'build/verify-payload.cjs', 'build/prune-versions.cjs',
   'scripts/native-payload.cjs', 'scripts/payload-sources.cjs', 'scripts/prepare-installer.cjs',
+  'scripts/client-build-version.cjs',
   'scripts/prepare-html-resources.cjs', 'scripts/prepare-runner.cjs',
   'main/runner-runtime.js', 'package.json', '../hub-backend/runner.spec',
   '../hub-backend/runner_main.py', '../hub-backend/app/services/runner_lifecycle.py',

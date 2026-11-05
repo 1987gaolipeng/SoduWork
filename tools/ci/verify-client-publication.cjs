@@ -1,7 +1,7 @@
 'use strict';
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const crypto = require('node:crypto');
+const { concurrency, transferAll, verifyDownload } = require('./release-transfer.cjs');
 const contract = require('./release-artifacts.cjs');
 const publisher = require('./publish-client.cjs');
 const { validateManifest } = require('../../client/main/client-update-contract.js');
@@ -13,6 +13,7 @@ function publicRoutes(item) {
   return ['/api/v1/download/client/mac/info', '/api/v1/download/client/mac/' + item.arch];
 }
 async function main() {
+  const limit = concurrency();
   const remote = await publisher.connection();
   const { entries, channel } = await publisher.stagedEntries(remote);
   assert.equal(channel, 'stable', 'Public download verification requires the stable channel');
@@ -25,7 +26,7 @@ async function main() {
   const report = { schema: 1, ok: false, hub: remote.url, sourceCommit: process.env.CI_COMMIT_SHA,
     pipelineId: process.env.CI_PIPELINE_ID, artifacts: [] };
   try {
-    for (const { item, build } of entries) {
+    await transferAll(entries, async ({ item, build }) => {
       const row = rows.find(row => row.id === item.releaseId);
       assert.ok(publisher.matches(row, item, build, channel) && row.enabled === true);
       const bundle = await contract.read(path.join(contract.root, 'release-evidence', build.platform,
@@ -52,14 +53,10 @@ async function main() {
         assert.equal(metadata.version, build.version); assert.equal(metadata.sha256, item.sha256);
         assert.equal(metadata.size, item.size);
       }
-      const download = await fetch(downloadUrl, { redirect: 'error', signal: AbortSignal.timeout(15 * 60000) });
-      assert.ok(download.ok && download.body, 'Public installer download failed');
-      let size = 0; const digest = crypto.createHash('sha256');
-      for await (const bytes of download.body) { size += bytes.length; digest.update(bytes); }
-      assert.equal(size, item.size); assert.equal(digest.digest('hex'), item.sha256);
+      const { size } = await verifyDownload(downloadUrl, item);
       report.artifacts.push({ name: item.name, size, sha256: item.sha256, releaseId: item.releaseId,
         version: build.version, url: downloadUrl, signature: 'verified', download: 'verified' });
-    }
+    }, { limit, phase: 'public-download' });
     report.ok = true;
   } finally {
     report.finishedAt = new Date().toISOString();

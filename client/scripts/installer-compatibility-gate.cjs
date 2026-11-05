@@ -8,6 +8,7 @@ const crypto = require('node:crypto');
 const assert = require('node:assert/strict');
 const { spawn, spawnSync } = require('node:child_process');
 const { validateReport, readBuildInputs } = require('./installer-compatibility-report.cjs');
+const { candidateVersion, displayVersions } = require('./client-build-version.cjs');
 const client = path.resolve(__dirname, '..');
 const readJson = async file => JSON.parse(await fs.readFile(file, 'utf8'));
 async function fingerprint(file) {
@@ -22,8 +23,8 @@ async function main() {
   assert.equal(process.arch, 'x64', 'This matrix currently validates Windows x64 only');
   const installer = path.resolve(input), reportFile = path.resolve(destination || installer + '.compatibility.json');
   assert.equal(existsSync(reportFile), false, 'Keep historical evidence; use a new receipt path');
-  const version = (await readJson(path.join(client, 'package.json'))).version;
-  assert.ok(path.basename(installer).startsWith('SoduWork-' + version + '-') || path.basename(installer).startsWith('SoduWork-' + version + '-') || path.basename(installer).startsWith('SoduWork-' + version + '-'), 'Installer and source versions must match');
+  const version = candidateVersion(process.env, path.resolve(client, '..'));
+  assert.ok(displayVersions(version).some(value => path.basename(installer).startsWith('SoduWork-' + value + '-')), 'Installer and source versions must match');
   // Never pass diagnostic switches to an older production installer.
   const semver = require('semver');
   assert.ok(semver.valid(version) && semver.gte(version, '1.12.37'), 'Package check requires SoduWork 1.12.37 or later');
@@ -31,7 +32,7 @@ async function main() {
     '[Console]::Write([Diagnostics.FileVersionInfo]::GetVersionInfo($env:SODUWORK_GATE_INSTALLER).ProductVersion)'],
     { env: { ...process.env, SODUWORK_GATE_INSTALLER: installer }, encoding: 'utf8', windowsHide: true, timeout: 30000 });
   assert.equal(metadata.status, 0, 'Cannot read installer version metadata');
-  assert.equal(metadata.stdout.trim(), version, 'Actual EXE version differs from reviewed source');
+  assert.ok(displayVersions(version).includes(metadata.stdout.trim()), 'Actual EXE version differs from reviewed source');
   const buildInputs = readBuildInputs(client);
   const artifact = { name: path.basename(installer), version, platform: 'win32', arch: 'x64', ...await fingerprint(installer) };
   assert.ok(artifact.size >= 1024 * 1024);
@@ -81,6 +82,7 @@ async function main() {
     }
     await fs.symlink(await fs.realpath(path.join(client, 'node_modules')), path.join(fixture, 'node_modules'), 'junction');
     const fixturePkg = await readJson(path.join(fixture, 'package.json'));
+    fixturePkg.version = version;
     fixturePkg.build = { nsis: fixturePkg.build.nsis };
     await fs.writeFile(path.join(fixture, 'package.json'), JSON.stringify(fixturePkg, null, 2));
     await check('native-boundaries', ['--test', path.join(fixture, 'tests/native-payload.test.cjs')]);

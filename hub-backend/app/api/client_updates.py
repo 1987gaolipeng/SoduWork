@@ -88,6 +88,16 @@ def _release_api(row: ClientRelease, *, include_manifest: bool = False) -> dict:
     return data
 
 
+def _update_channel(channel: str, current: str) -> str:
+    # Older Stage installers hardcoded stable. Scope compatibility to a beta
+    # client on a Hub explicitly configured to publish beta downloads.
+    version = contract.parse_version(current)
+    if (channel == "stable" and os.environ.get("SODUWORK_PUBLIC_DOWNLOAD_CHANNEL") == "beta"
+            and version is not None and version[3] == 0):
+        return "beta"
+    return channel
+
+
 async def _release_rows(session: AsyncSession, channel: str, platform: str, arch: str,
                         package_format: str = "", current_version: str = ""):
     rows = (await session.execute(
@@ -100,6 +110,8 @@ async def _release_rows(session: AsyncSession, channel: str, platform: str, arch
     )).scalars().all()
     trusted = []
     for row in rows:
+        if not contract.automatic_update_candidate(row):
+            continue
         if package_format and not row.artifact_name.lower().endswith("." + package_format):
             continue
         if current_version and not contract.installer_supported_by_client(row.artifact_name, current_version):
@@ -317,6 +329,7 @@ async def check_update(
     platform = _valid_target(platform, {"win32", "darwin", "linux"}, "平台")
     arch = _valid_target(arch, {"x64", "arm64"}, "架构")
     channel = _valid_target(channel, {"stable", "beta"}, "更新通道")
+    channel = _update_channel(channel, current)
     if package_format:
         if platform != "linux":
             raise HTTPException(status_code=400, detail="安装包格式参数仅适用于 Linux")
@@ -331,7 +344,8 @@ async def check_update(
             attempt = release = None
     if release is not None:
         target_v = contract.parse_version(release.version)
-        if (release.channel != channel or release.platform != platform or
+        if (not contract.automatic_update_candidate(release) or
+                release.channel != channel or release.platform != platform or
                 not contract.installer_supported_by_client(release.artifact_name, current) or
                 release.arch != arch or (package_format and not
                 release.artifact_name.lower().endswith("." + package_format))):
@@ -708,12 +722,15 @@ async def request_client_update(
             contract.assert_trusted_release(release)
         except contract.UpdateContractError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if not contract.automatic_update_candidate(release):
+            raise HTTPException(status_code=409, detail="历史无 beta 后缀的测试包不支持在线升级，请选择 beta 版本")
         if release.platform != target_platform or release.arch != target_arch:
             raise HTTPException(status_code=409, detail="目标版本与这台设备的平台或架构不匹配")
         if not contract.installer_supported_by_client(release.artifact_name, current):
             raise HTTPException(status_code=409, detail="旧客户端无法识别此安装包名，请选择兼容安装包")
     else:
-        rows = await _release_rows(session, "stable", target_platform, target_arch, current_version=current)
+        rows = await _release_rows(session, _update_channel("stable", current),
+                                   target_platform, target_arch, current_version=current)
         release = next((row for row in rows if contract.newer(row.version, current)), None)
         if release is None:
             return {"ok": True, "alreadyCurrent": True, "current": current}

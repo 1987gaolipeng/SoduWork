@@ -64,12 +64,13 @@ def _bundle(installer, *, version="1.12.69", artifact_name=None, release_id=None
     }
 
 
-def _release_row(release_id, version, name, *, enabled=True, platform="linux", arch="x64"):
+def _release_row(release_id, version, name, *, enabled=True, platform="linux", arch="x64",
+                 channel="stable"):
     # Use fixed b"00" content and its matching SHA-256 for real integrity checks.
     return ClientRelease(
-        id=release_id, version=version, channel="stable", platform=platform,
+        id=release_id, version=version, channel=channel, platform=platform,
         arch=arch, artifact_name=name,
-        artifact_path=f"stable/{platform}/{arch}/{version}/{name}",
+        artifact_path=f"{channel}/{platform}/{arch}/{version}/{name}",
         artifact_size=2, sha256=hashlib.sha256(b"00").hexdigest(),
         key_id="fixture-release-key", signature="s" * 88,
         notes="", mandatory=False, min_version="", enabled=enabled,
@@ -314,6 +315,99 @@ class PublicDownloadSurfaceTests(unittest.TestCase):
     def test_excluded_mobile_packages_have_no_download_routes(self):
         paths = {route.path for route in download.router.routes}
         self.assertFalse(any('/mobile' in route for route in paths))
+
+
+class PublicBetaDownloadTests(_SqliteIsolated):
+    targets = (
+        ("win32", "x64", "Setup.exe", ""),
+        ("linux", "x64", "linux.deb", "/linux/deb"),
+        ("linux", "x64", "linux.rpm", "/linux/rpm"),
+        ("linux", "x64", "linux.tar.gz", "/linux/tar.gz"),
+        ("darwin", "arm64", "mac-arm64.dmg", "/mac/arm64"),
+        ("darwin", "x64", "mac-x64.dmg", "/mac/x64"),
+    )
+
+    def releases(self, versions, *, channel="beta"):
+        return [
+            _release_row(f"{channel}-{version}-{suffix}", version,
+                         f"SoduWork-{version}-{suffix}", channel=channel,
+                         platform=platform, arch=arch)
+            for version in versions for platform, arch, suffix, _ in self.targets
+        ]
+
+    async def test_beta_homepage_and_six_downloads_choose_latest_candidate(self):
+        versions = ["1.13.11-beta.9", "1.13.11-beta.21", "1.13.11-beta.530", "1.13.11"]
+        rows = self.releases(versions) + self.releases(["1.14.0"], channel="stable")
+        app = await self._app(rows)
+        with patch.object(download, "_public_channel", return_value="beta"), _trust_stub():
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                         base_url="http://test") as client:
+                for route in ("/info", "/linux/info", "/mac/info"):
+                    with self.subTest(info=route):
+                        info = (await client.get("/api/v1/download/client" + route)).json()
+                        self.assertTrue(info["available"])
+                        self.assertEqual(info["version"], "1.13.11-beta.530")
+                        for item in list(info.get("formats", {}).values()) + list(info.get("arches", {}).values()):
+                            self.assertEqual(item["version"], info["version"])
+                for _, _, suffix, route in self.targets:
+                    with self.subTest(download=route):
+                        response = await client.get("/api/v1/download/client" + route)
+                        self.assertEqual(response.status_code, 200)
+                        self.assertEqual(response.content, b"00")
+                        self.assertIn(f"SoduWork-1.13.11-beta.530-{suffix}",
+                                      response.headers["content-disposition"])
+                for version in ("1.13.11", "1.13.11-beta.21"):
+                    response = await client.get(f"/api/v1/download/client/releases/beta-{version}-Setup.exe")
+                    self.assertEqual(response.status_code, 200)
+                response = await client.get("/api/v1/download/client/releases/stable-1.14.0-Setup.exe")
+                self.assertEqual(response.status_code, 404)
+        async with self.sessions() as session:
+            self.assertTrue(all((await session.execute(select(ClientRelease.enabled))).scalars()))
+
+    async def test_numeric_beta_order_excludes_disabled_and_untrusted_candidates(self):
+        rows = self.releases(["1.13.11-beta.9", "1.13.11-beta.10", "1.13.11-beta.11", "1.13.11-beta.12"])
+        for row in rows:
+            if row.version.endswith(".11"):
+                row.enabled = False
+        app = await self._app(rows)
+
+        def trust(row):
+            if row.version.endswith(".12"):
+                raise contract.UpdateContractError("untrusted fixture")
+            return contract.manifest_payload(row)
+
+        with patch.object(download, "_public_channel", return_value="beta"), \
+                patch.object(contract, "assert_trusted_release", side_effect=trust):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                         base_url="http://test") as client:
+                for route in ("/info", "/linux/info", "/mac/info"):
+                    info = (await client.get("/api/v1/download/client" + route)).json()
+                    self.assertEqual(info["version"], "1.13.11-beta.10")
+
+    async def test_legacy_fallback_and_stable_channel_keep_existing_order(self):
+        app = await self._app(self.releases(["1.13.11"]) +
+                              self.releases(["1.13.11-beta.530", "1.13.11"], channel="stable"))
+        with _trust_stub():
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                         base_url="http://test") as client:
+                for channel in ("beta", "stable"):
+                    with patch.object(download, "_public_channel", return_value=channel):
+                        for route in ("/info", "/linux/info", "/mac/info"):
+                            info = (await client.get("/api/v1/download/client" + route)).json()
+                            self.assertEqual(info["version"], "1.13.11")
+
+    async def test_unsupported_beta_format_does_not_hide_legacy_download(self):
+        app = await self._app([
+            _release_row("legacy-deb", "1.13.11", "SoduWork-1.13.11-linux.deb", channel="beta"),
+            _release_row("beta-appimage", "1.13.11-beta.530", "SoduWork-1.13.11-beta.530.AppImage", channel="beta"),
+        ])
+        with patch.object(download, "_public_channel", return_value="beta"), _trust_stub():
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                info = (await client.get("/api/v1/download/client/linux/info")).json()
+                self.assertEqual(info["version"], "1.13.11")
+                self.assertEqual((await client.get("/api/v1/download/client/linux/deb")).status_code, 200)
+
+
 
 
 if __name__ == "__main__":

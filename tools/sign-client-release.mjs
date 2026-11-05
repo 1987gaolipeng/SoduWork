@@ -78,6 +78,7 @@ function parseBundle(path, installer, version, digest, size, key, expected) {
       bundle.keyId !== expected.keyId || bundle.channel !== expected.channel ||
       bundle.platform !== expected.platform || bundle.arch !== expected.arch || bundle.minVersion !== expected.minimum ||
       bundle.mandatory !== expected.mandatory || bundle.notes !== expected.notes ||
+      (expected.publishedAt && bundle.publishedAt !== expected.publishedAt) ||
       !verifyBytes(null, Buffer.from(canonical(payload)), createPublicKey(key),
         Buffer.from(signature, "base64"))) {
     fail("existing signed release bundle does not match this installer");
@@ -88,8 +89,9 @@ function parseBundle(path, installer, version, digest, size, key, expected) {
 async function main() {
   const args = process.argv.slice(2);
   const dryRun = args.includes("--dry-run");
-  const positional = args.filter((value) => value !== "--dry-run");
-  if (positional.length !== 1) fail("usage: sign-client-release.mjs <installer> [--dry-run]");
+  const reuseExisting = args.includes("--reuse-existing");
+  const positional = args.filter((value) => !["--dry-run", "--reuse-existing"].includes(value));
+  if (positional.length !== 1) fail("usage: sign-client-release.mjs <installer> [--dry-run] [--reuse-existing]");
 
   const installer = resolve(positional[0]);
   if (!existsSync(installer)) fail("installer does not exist");
@@ -151,16 +153,18 @@ async function main() {
     `${installer}.${channel}.release.json`,
   ));
 
+  const timestamp = env("SODUWORK_CLIENT_PUBLISHED_AT");
+  if (timestamp && (!/^\d{4}-\d{2}-\d{2}T/.test(timestamp) || !Number.isFinite(Date.parse(timestamp)))) {
+    fail("SODUWORK_CLIENT_PUBLISHED_AT must be an ISO timestamp");
+  }
+  if (reuseExisting && !timestamp) fail("Upload reuse requires a fixed publication timestamp");
+  const publishedAt = timestamp ? new Date(timestamp).toISOString().replace(/\.\d{3}Z$/, "Z") : '';
   let bundle;
   if (existsSync(bundlePath)) {
     bundle = parseBundle(bundlePath, installer, version, digest, size, key, {
-      keyId, channel, arch, minimum, mandatory, notes, platform,
+      keyId, channel, arch, minimum, mandatory, notes, platform, publishedAt,
     });
   } else {
-    const timestamp = env("SODUWORK_CLIENT_PUBLISHED_AT");
-    if (timestamp && (!/^\d{4}-\d{2}-\d{2}T/.test(timestamp) || !Number.isFinite(Date.parse(timestamp)))) {
-      fail("SODUWORK_CLIENT_PUBLISHED_AT must be an ISO timestamp");
-    }
     const payload = {
       schema: 1,
       releaseId: randomUUID(),
@@ -210,6 +214,39 @@ async function main() {
   if (!['https:', 'http:'].includes(destination.protocol) || destination.username || destination.password) {
     fail('upload URL must be HTTP(S) without embedded credentials');
   }
+  // An exact deterministic ID can survive a clean-workspace retry, including
+  // a lost upload response. Metadata reuse is not a download-integrity receipt:
+  // activation and full public download verification remain mandatory.
+  function recordReceipt(release, reused) {
+    const receipt = env('SODUWORK_CLIENT_UPLOAD_RECEIPT');
+    if (receipt) writeFileSync(resolve(receipt), JSON.stringify({ schema: 1, ok: true,
+      uploadUrl: url, release, bundle: bundlePath, sha256: digest, reused,
+      uploadedAt: new Date().toISOString(),
+    }, null, 2) + '\n');
+  }
+  if (reuseExisting) {
+    if (destination.pathname !== '/api/v1/admin/client-releases/upload' || destination.search || destination.hash)
+      fail('Upload reuse requires the standard release upload endpoint');
+    const response = await fetch(new URL('/api/v1/admin/client-releases', destination), {
+      headers: { Authorization: `Bearer ${token}` }, redirect: 'error', signal: AbortSignal.timeout(60000),
+    });
+    if (!response.ok) fail(`client release reconciliation failed (HTTP ${response.status})`);
+    let catalog;
+    try { catalog = await response.json(); } catch { fail('client release reconciliation returned invalid JSON'); }
+    if (!Array.isArray(catalog?.releases)) fail('client release reconciliation returned invalid catalog');
+    const rows = catalog.releases.filter(row => row.id === bundle.releaseId);
+    if (rows.length > 1) fail('Duplicate immutable release ID');
+    if (rows.length) {
+      const row = rows[0];
+      const expected = { version, channel, platform, arch, artifactName: name,
+        artifactSize: size, sha256: digest, keyId, notes, mandatory, minVersion: minimum };
+      if (Object.entries(expected).some(([key, value]) => row[key] !== value))
+        fail('Existing Hub release differs from the signed installer');
+      recordReceipt(row, true);
+      process.stdout.write(`reused staged client ${version} release=${bundle.releaseId}; download verification still required\n`);
+      return;
+    }
+  }
   const form = new FormData();
   form.append("bundle", new Blob([JSON.stringify(bundle)], { type: "application/json" }), "release.json");
   form.append("installer", await openAsBlob(installer, { type: "application/octet-stream" }), name);
@@ -221,16 +258,13 @@ async function main() {
     signal: AbortSignal.timeout(15 * 60 * 1000),
   });
   const text = await response.text();
-  if (!response.ok) fail(`client release upload failed (${response.status}): ${text.slice(0, 800)}`);
-  const result = JSON.parse(text);
+  if (!response.ok) fail(`client release upload failed (HTTP ${response.status})`);
+  let result;
+  try { result = JSON.parse(text); } catch { fail('client release upload returned invalid JSON'); }
   if (!result?.ok || result?.release?.id !== bundle.releaseId || result?.release?.sha256 !== digest) {
     fail("client release upload response does not match the signed installer");
   }
-  const receipt = env('SODUWORK_CLIENT_UPLOAD_RECEIPT');
-  if (receipt) writeFileSync(resolve(receipt), JSON.stringify({ schema: 1, ok: true,
-    uploadUrl: url, release: result.release, bundle: bundlePath,
-    sha256: digest, uploadedAt: new Date().toISOString(),
-  }, null, 2) + '\n');
+  recordReceipt(result.release, false);
   process.stdout.write(`${result.release.enabled ? 'already enabled' : 'staged'} client ${version} on SoduWork Hub\n`);
 }
 

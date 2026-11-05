@@ -25,7 +25,7 @@ TEMP = ROOT / f".smoke-multichannel-{os.getpid()}"
 DB_FILE = TEMP / "multi.db"
 ARTIFACT_ROOT = TEMP / "artifacts"
 KEY_ID = "smoke-multi-key"
-VERSION = "1.13.0"
+VERSION = "1.13.0-beta.1"
 
 shutil.rmtree(TEMP, ignore_errors=True)
 TEMP.mkdir(parents=True)
@@ -57,13 +57,13 @@ from app.services import device_auth  # noqa: E402
 # Migration 0057 permits multiple installer formats for one release target.
 # Each artifact_name remains immutable within that target.
 TARGETS = [
-    ("win32", "x64", "1.13.0", "SoduWork-1.13.0-Setup.exe"),
-    ("darwin", "arm64", "1.13.0", "SoduWork-1.13.0-mac-arm64.dmg"),
-    ("darwin", "x64", "1.13.0", "SoduWork-1.13.0-mac.dmg"),
-    ("linux", "x64", "1.13.0", "SoduWork-1.13.0-linux-x64.deb"),
-    ("linux", "x64", "1.13.0", "SoduWork-1.13.0-linux-x64.rpm"),
-    ("linux", "x64", "1.13.0", "SoduWork-1.13.0-linux-x64.tar.gz"),
-    ("linux", "arm64", "1.13.0", "SoduWork-1.13.0-linux-arm64.AppImage"),
+    ("win32", "x64", "1.13.0-beta.1", "SoduWork-1.13.0-beta.1-Setup.exe"),
+    ("darwin", "arm64", "1.13.0-beta.1", "SoduWork-1.13.0-beta.1-mac-arm64.dmg"),
+    ("darwin", "x64", "1.13.0-beta.1", "SoduWork-1.13.0-beta.1-mac.dmg"),
+    ("linux", "x64", "1.13.0-beta.1", "SoduWork-1.13.0-beta.1-linux-x64.deb"),
+    ("linux", "x64", "1.13.0-beta.1", "SoduWork-1.13.0-beta.1-linux-x64.rpm"),
+    ("linux", "x64", "1.13.0-beta.1", "SoduWork-1.13.0-beta.1-linux-x64.tar.gz"),
+    ("linux", "arm64", "1.13.0-beta.1", "SoduWork-1.13.0-beta.1-linux-arm64.AppImage"),
 ]
 
 DEVICE = "soduwork-multi-smoke"
@@ -177,15 +177,15 @@ def main() -> None:
 
         # same artifact name re-packaged with a fresh bundle is immutable: rejected
         # Different formats may coexist; conflicting manifests under the same artifact name remain rejected.
-        clash = build_installer("SoduWork-1.13.0-linux-x64.deb")
-        clash_bundle = sign_bundle(clash, "linux", "x64", "1.13.0")
+        clash = build_installer("SoduWork-1.13.0-beta.1-linux-x64.deb")
+        clash_bundle = sign_bundle(clash, "linux", "x64", "1.13.0-beta.1")
         upload_release(client, admin, clash, clash_bundle, expect_status=409)
         ok += 1
         print("same-artifact immutable rejection OK")
 
         # wrong-suffix installer is rejected by the real signature chain
-        wrong = build_installer("SoduWork-1.13.0-mac-arm64.exe")
-        bad_bundle = sign_bundle(wrong, "darwin", "arm64", "1.13.0")
+        wrong = build_installer("SoduWork-1.13.0-beta.1-mac-arm64.exe")
+        bad_bundle = sign_bundle(wrong, "darwin", "arm64", "1.13.0-beta.1")
         upload_release(client, admin, wrong, bad_bundle, expect_status=409)
         ok += 1
         print("cross-suffix rejection OK")

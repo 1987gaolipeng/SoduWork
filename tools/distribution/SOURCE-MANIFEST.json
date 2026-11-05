@@ -6986,8 +6986,8 @@
     },
     {
       "path": "client/main/update-target.cjs",
-      "bytes": 2338,
-      "sha256": "db7e783d48c43e9c934c30edab5eb71a60e16630358a2750532e662d74e70d04"
+      "bytes": 2551,
+      "sha256": "f50b6e50b5a396aeb5cb289cd36263a6d94a9be016e09c7f021a58f151ef5e57"
     },
     {
       "path": "client/main/update-workloads.js",
@@ -7191,13 +7191,13 @@
     },
     {
       "path": "client/scripts/installer-compatibility-gate.cjs",
-      "bytes": 9308,
-      "sha256": "186a5afdcf0294bbe78313de7df344088e00ab5a6746aa97fb462d5e90600a04"
+      "bytes": 9350,
+      "sha256": "dd8e3566d00c8d2fd834873d7722d81808228d1f6b9b07f4c4560d398bb0b606"
     },
     {
       "path": "client/scripts/installer-compatibility-report.cjs",
-      "bytes": 3586,
-      "sha256": "6d82f408a810cee8a58d603b00da7e19ca5e86b60889cb195d1b378add2fee50"
+      "bytes": 3624,
+      "sha256": "a33ae828ac403fa0b987cb25051739d892d1988c8fd1aaf6ff2e881073c5e0d9"
     },
     {
       "path": "client/scripts/macos-build-environment.cjs",
@@ -8046,8 +8046,8 @@
     },
     {
       "path": "client/tests/client-updater-state.test.cjs",
-      "bytes": 42057,
-      "sha256": "727c2102c93cfa5f11d8ae3c0bb476b0023c21d75de6dc44bcb1fbd6d074e169"
+      "bytes": 43920,
+      "sha256": "67bac4fedac7f14715804039b887aa56dc3dd929e55b566f4744bdf608423c89"
     },
     {
       "path": "client/tests/cloud-agent-maintenance.test.cjs",
@@ -9920,6 +9920,11 @@
       "sha256": "65cabae7710d3f870f9f30c347bd27b726a6ad2ce44a792fa314d630796d2fc1"
     },
     {
+      "path": "client/tests/release-upload-retry.test.cjs",
+      "bytes": 7179,
+      "sha256": "aad8cda67b35d8f41506c12a64692699eb072258c1e2f4173a2a2362d0be3eea"
+    },
+    {
       "path": "client/tests/render-skip.html",
       "bytes": 13299,
       "sha256": "1fe79d969e021f3da86b414913ba332b5b667bb029ba4c160f27d628fc78e8a9"
@@ -10756,8 +10761,8 @@
     },
     {
       "path": "client/tests/update-target.test.cjs",
-      "bytes": 3336,
-      "sha256": "a143e0196e9d26621f4f79b35236da0bec0984a849ada7ee9072a801c78fe356"
+      "bytes": 4055,
+      "sha256": "f64e6bcc5777dcfb3a714ab57aa83d2fd475ee7edbb61bee00734e1bfa78fece"
     },
     {
       "path": "client/tests/update-workloads.test.cjs",
@@ -11446,8 +11451,8 @@
     },
     {
       "path": "hub-backend/app/api/client_updates.py",
-      "bytes": 33356,
-      "sha256": "ee2f6242e907aac364ae22ce7e7135aa22ec578de0287e8bb4c8fa6087d4d331"
+      "bytes": 34254,
+      "sha256": "b3468c6e25b8848fc5ca211257ae1636de2ecd85341c093bacb22da9b4a9fd0d"
     },
     {
       "path": "hub-backend/app/api/clients.py",
@@ -11506,8 +11511,8 @@
     },
     {
       "path": "hub-backend/app/api/download.py",
-      "bytes": 17164,
-      "sha256": "53cd07393e879f877a747c25ff1c0a1588ae46a2745b7eb7453d875331293c9d"
+      "bytes": 16974,
+      "sha256": "60bc554ede6976e0ddd2d2d2c87a50f8a574e4876d1c49aa1760c74400bd29ce"
     },
     {
       "path": "hub-backend/app/api/environments.py",
@@ -12186,8 +12191,8 @@
     },
     {
       "path": "hub-backend/app/services/client_updates.py",
-      "bytes": 22674,
-      "sha256": "4cd32f53b95c29a5932e7476c12392aca0d76d5d30594be4173c027acf413a59"
+      "bytes": 22955,
+      "sha256": "92e150d2671eda6b0d92362cb7c4d65a38ca09f21d81a54bce6afd4e41273bf5"
     },
     {
       "path": "hub-backend/app/services/cloud_acceptance.py",
@@ -15156,13 +15161,13 @@
     },
     {
       "path": "hub-backend/smoke_client_release_multichannel.py",
-      "bytes": 11048,
-      "sha256": "7716fe1af92fb348c2f47aaf8428a4cd06951eaf51ecd21ed75e64f21a55e5cb"
+      "bytes": 11181,
+      "sha256": "86651fca906503f0b6cc9d502a68a11155d9ebaa4c3cc255be6e8739925efb28"
     },
     {
       "path": "hub-backend/smoke_client_release_pipeline.py",
-      "bytes": 16387,
-      "sha256": "4ef6496eac9111a7f9873a4168f17b425aaad31c2dcc621a87cb95f2b11c1cf2"
+      "bytes": 16420,
+      "sha256": "8cd9ceeded79c9e28ffdef77763ba3524931bdb327437b6350e1fe48fc4cea19"
     },
     {
       "path": "hub-backend/smoke_client_release_uploader.py",
@@ -16308,6 +16313,11 @@
       "path": "hub-backend/test_client_test_payload.py",
       "bytes": 2862,
       "sha256": "99a9cae38418740c3da3f74fe854f8b179c264d8199a6bd82e5ccf6a1fb902cb"
+    },
+    {
+      "path": "hub-backend/test_client_update_beta.py",
+      "bytes": 9133,
+      "sha256": "13b60994598ddb1c11b1b6f584d9853c9b0176cb3881719c57e07fbcfbfcd35c"
     },
     {
       "path": "hub-backend/test_client_update_brand.py",
@@ -17601,8 +17611,8 @@
     },
     {
       "path": "hub-backend/tests/test_client_release_multi_artifact.py",
-      "bytes": 14909,
-      "sha256": "7dbda86e97f4ed8c53ef8765c9ca0c63b6591019815787b988810b2f8582e9a8"
+      "bytes": 20508,
+      "sha256": "bccd2fe4b85b6466726238d3b16eaf638077c3f6a63490c20a4b609d7bad25e9"
     },
     {
       "path": "hub-backend/tests/test_client_release_platforms.py",
@@ -18146,8 +18156,8 @@
     },
     {
       "path": "hub-frontend/src/Landing.jsx",
-      "bytes": 13220,
-      "sha256": "aedf265dd333830715661388daf7fb4baf7a67c8d1aa03135e436ee5c8123ac3"
+      "bytes": 13460,
+      "sha256": "29437733585fe113073186924cb66e790e1b91d238f6ff9e1577cf87d3c657b6"
     },
     {
       "path": "hub-frontend/src/LandingAtmosphere.jsx",
@@ -18271,8 +18281,8 @@
     },
     {
       "path": "hub-frontend/src/landing.css",
-      "bytes": 27011,
-      "sha256": "752e8e9d867767de723454753e02c36d762b834164a05c375530461b10d6391a"
+      "bytes": 27060,
+      "sha256": "3cbe983ace198b4903d5047e6f8a8b725bffe7fb1052aefc744ae5878d13862f"
     },
     {
       "path": "hub-frontend/src/layout-safety.css",
@@ -18396,8 +18406,8 @@
     },
     {
       "path": "hub-frontend/src/locales/public-pages.js",
-      "bytes": 11208,
-      "sha256": "eeeea180893bf0cc5e94bb3dbf65893d411d8d8c0ed9f0f6ab87f1a16b0344ac"
+      "bytes": 11546,
+      "sha256": "45a983d00a0bd96c9aa694233f16b1bf75c2a0fcf69ac2c02617caa6a3f5a012"
     },
     {
       "path": "hub-frontend/src/locales/quota-management.js",
@@ -19546,8 +19556,8 @@
     },
     {
       "path": "hub-frontend/tests/public-pages-browser.cjs",
-      "bytes": 15606,
-      "sha256": "468139d19f2ed7c19fa5e3191553bc80c957fbd475243f8d54da0bfd0f33aad2"
+      "bytes": 17658,
+      "sha256": "5f26a8c71d373f9a50e05a3c94d9d03435e06603358981ca9dd174805f3404f2"
     },
     {
       "path": "hub-frontend/tests/quota-management-browser.cjs",
@@ -20571,8 +20581,8 @@
     },
     {
       "path": "tools/ci/publish-client.cjs",
-      "bytes": 7809,
-      "sha256": "7d9d318d6c75966abdae9d68d5d362e3f6a0847b5cca445513d014ae48dc7c81"
+      "bytes": 8556,
+      "sha256": "40e2cea5ed30688a3c0f705633537ab02f07289436fd40baa612eb4828df1dcd"
     },
     {
       "path": "tools/ci/release-artifacts.cjs",
@@ -20580,14 +20590,24 @@
       "sha256": "89cdf474aa246efb3f5dbec494f88f59934c9f7d7892f291c72a10f002c3bd9d"
     },
     {
+      "path": "tools/ci/release-transfer.cjs",
+      "bytes": 2388,
+      "sha256": "e4c45a6cf779042cac5c5fb310e0e8c567b414d63dde294d401040fa3792d3e7"
+    },
+    {
       "path": "tools/ci/soduwork-acceptance-baselines.json",
       "bytes": 3,
       "sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356"
     },
     {
+      "path": "tools/ci/test-release-transfer.cjs",
+      "bytes": 2585,
+      "sha256": "2566a242d91c4c5c5177cc0129c3d47476476031fd2be75e170501c58133eeea"
+    },
+    {
       "path": "tools/ci/verify-client-publication.cjs",
-      "bytes": 4641,
-      "sha256": "6190b88aea4bd65376d844058132a2f1603205abf5d834887286d4ca8588b218"
+      "bytes": 4398,
+      "sha256": "32248e1f21baf26cc4983c04b05b9645b4fd3da0fff4f88d9bfad32999990b25"
     },
     {
       "path": "tools/ci/verify-runner-skills.py",
@@ -20731,8 +20751,8 @@
     },
     {
       "path": "tools/sign-client-release.mjs",
-      "bytes": 10514,
-      "sha256": "c8586df1092cc0aa731fe8dd40836e223d90b611b6960a3e653fc93f23de9914"
+      "bytes": 12737,
+      "sha256": "d80b06c32ff0a5ba34b2a7484e8250c0dd7cab2cb5a767532d9e6773ed047574"
     },
     {
       "path": "tools/source-files.cjs",

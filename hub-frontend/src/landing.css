@@ -239,7 +239,7 @@
 }
 @media (max-width:540px) {
   .public-wrap {width:calc(100% - 40px)}
-  .public-brand b {font-size:20px}.public-nav-login {font-size:12px!important;padding:9px 11px;gap:6px}.public-nav-login>.public-icon {display:none}
+  .public-brand b {font-size:20px}.public-nav-login {font-size:12px!important;padding:9px 11px;gap:6px;min-width:0;white-space:normal;text-align:center}.public-nav-login>.public-icon {display:none}
   .public-nav {gap:10px;min-height:70px}.public-nav .logo-box {width:25px;height:25px}
   .public-hero {padding-block:40px 36px;gap:36px}.public-hero h1 {font-size:clamp(30px,8.2vw,42px);margin-block:22px}
   .public-eyebrow {font-size:12px}.public-hero-copy>p {font-size:14.5px;line-height:1.9}
