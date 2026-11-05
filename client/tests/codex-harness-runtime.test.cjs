@@ -417,6 +417,16 @@ test('Runner cumulative billing is unavailable as a context watermark', async ()
   assert.equal(snapshot.contextUsage, null);
   assert.equal(snapshot.usage.input, 900000);
 });
+test('stopped Runner sessions distinguish the legacy initial counters from a measured zero', async () => {
+  for (const [tokens, expected] of [
+    [{ input: 0, output: 0, total: 0 }, null],
+    [{}, null],
+    [{ input: 0, inputIncludesCache: true }, { input: 0, inputIncludesCache: true }],
+  ]) {
+    const { snapshot } = await runScriptedHarnessTurn('stopped', { tokens, status: 'stopped' });
+    assert.deepEqual(snapshot.contextUsage, expected);
+  }
+});
 test('Codex Harness turns proxy JSON failures into a product error, not an answer', async () => {
   const raw = JSON.stringify({
     error: {

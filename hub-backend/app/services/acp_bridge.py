@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import queue
 import re
@@ -592,9 +593,17 @@ class AcpBridge:
                        **self.transition.result_fields(update), "result": text[:2000]})
             return
         if kind == "usage_update":
-            used = int(update.get("used") or 0)
-            _emit({"type": "step_finish", "contextOnly": True, "part": {"contextWindow": update.get("size"), "tokens": {
-                "input": used, "output": 0, "total": used}}})
+            used = update.get("used")
+            if isinstance(used, str):
+                try:
+                    used = int(used)
+                except ValueError:
+                    used = None
+            valid = (isinstance(used, int) and not isinstance(used, bool) and used >= 0) or (
+                isinstance(used, float) and math.isfinite(used) and used >= 0)
+            tokens = {"input": int(used), "output": 0, "total": int(used)} if valid else {}
+            _emit({"type": "step_finish", "contextOnly": True, "part": {
+                "contextWindow": update.get("size"), "tokens": tokens}})
 
     def _client_capabilities(self) -> dict:
         return {

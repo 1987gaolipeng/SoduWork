@@ -72,18 +72,40 @@ def update_usage(run: dict, event: dict) -> None:
     """
     from .runtime_messages import input_usage, usage
     kind = event.get("type")
+    if kind == "turn.completed" and run.get("stopping"):
+        # A terminal cumulative bill does not invalidate the last measured
+        # request when the user stops the turn.
+        return
     if kind in ("compaction_start", "compaction_end", "turn.completed"):
         run["tokens"] = {}
         return
     raw = None
+    reason = None
     if kind == "step_finish":
-        raw = (event.get("part") or {}).get("tokens")
+        part = event.get("part") or {}
+        raw = part.get("tokens")
+        reason = part.get("reason")
     elif kind in ("message_end", "assistant"):
         message = event.get("message")
         if isinstance(message, dict) and message.get("role", "assistant") == "assistant":
             raw = message.get("usage")
-    if input_usage(raw) is not None:
-        run["tokens"] = usage(raw) or {"input": 0, "inputIncludesCache": True}
+            reason = message.get("stopReason")
+    occupancy = input_usage(raw)
+    if occupancy is None:
+        return
+    if occupancy["input"] == 0 and input_usage({
+            key: raw[key] for key in ("input", "input_tokens", "prompt_tokens", "inputTokens", "promptTokens")
+            if key in raw}) is None:
+        # Zero cache counters alone do not report input occupancy. Output can
+        # still be present in an incomplete terminal usage payload.
+        return
+    measured = usage(raw)
+    # Interrupted providers can return their initial all-zero counters before
+    # receiving a usage receipt. An explicit native occupancy update is valid.
+    interrupted = run.get("stopping") or reason in ("aborted", "cancelled", "canceled", "error")
+    if measured is None and interrupted and not event.get("contextOnly"):
+        return
+    run["tokens"] = measured or {"input": 0, "inputIncludesCache": True}
 
 
 def error_window(text: str) -> int | None:

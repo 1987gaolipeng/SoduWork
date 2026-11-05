@@ -754,7 +754,7 @@ def _dispatch_sync_once(cfg: dict, t, files: list | None = None,
             "segment": 1, "round": 1, "mode": mode, "detached": False, "queue": [],
             "admissionKey": str((cfg or {}).get("_admissionKey") or ""),
             "admissionStartSeq": 0,
-            "tokens": {"input": 0, "output": 0, "total": 0},
+            "tokens": {},  # Unknown until this run receives its first context measurement.
             "ctxWindow": win, "ctxWindowKnown": win_known,
             # tokens measures current context occupancy; each step's input includes earlier history.
             # Track cumulative usage separately from context occupancy.

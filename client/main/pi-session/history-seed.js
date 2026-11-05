@@ -118,17 +118,26 @@ function _seed(acc, piSession, options) {
   let branch = sequence;
   try { branch = piSession.sessionManager?.getBranch?.() || sequence; } catch (_) {}
   acc.state.contextUsage = null;
+  let modelId = piSession.model?.id;
+  let provider = piSession.model?.provider;
   for (let i = branch.length - 1; i >= 0; i -= 1) {
     const entry = branch[i];
     if (entry?.type === 'compaction') break;
     const message = entry?.type === 'message' ? entry.message : null;
-    if (message?.role !== 'assistant' || message.taskOutputKey || message.model === 'task-executor') continue;
-    const active = piSession.model;
-    if (!active || (!(message.model && message.model !== active.id) &&
-        !(message.provider && active.provider && message.provider !== active.provider))) {
-      acc.state.contextUsage = message.usage || null;
+    const modelChange = entry?.type === 'model_change';
+    if (!modelChange && (message?.role !== 'assistant' || message.taskOutputKey || message.model === 'task-executor')) continue;
+    const id = modelChange ? entry.modelId : message.model;
+    const source = modelChange ? entry.provider : message.provider;
+    if ((modelId && id && id !== modelId) || (provider && source && source !== provider)) break;
+    modelId ||= id;
+    provider ||= source;
+    if (message) {
+      const usage = stream.reportedContextUsage(message);
+      if (usage) {
+        acc.state.contextUsage = usage;
+        break;
+      }
     }
-    break;
   }
   if (acc.state && acc.state.protocolIssue && typeof acc.recoverProtocol === 'function') {
     // Keep the raw archive for audit, but do not reopen an old quarantined frame as a live failure.

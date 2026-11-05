@@ -59,7 +59,8 @@ test('compact tooltip does not expose model metadata', () => {
 test('context usage accepts provider field variants and explains missing usage', () => {
   assert.match(renderUsage({ input_tokens: 56000 }), /已用 56,000 标记/);
   assert.match(renderUsage({ prompt_tokens: 42000 }), /已用 42,000 标记/);
-  assert.match(renderUsage(null), /暂无用量数据/);
+  assert.match(renderUsage(null), /暂未获取用量/);
+  assert.doesNotMatch(renderUsage(null), /0% 已用|已用 0 标记/);
   assert.match(renderUsage(null), /本轮尚未返回用量数据/);
 });
 test('runner context watermark takes precedence over cumulative usage', () => {
@@ -74,5 +75,33 @@ test('runner still shows current tokens when the provider does not report a wind
   assert.doesNotMatch(html, /上限未知/);
   assert.match(html, /估算上限/);
   assert.match(html, /已用 56,000 标记/);
-  assert.doesNotMatch(html, /暂无用量数据/);
+  assert.doesNotMatch(html, /暂未获取用量/);
+});
+
+test('older snapshots preserve the last reported context after an interrupted request', () => {
+  const assistant = (usage, stopReason = 'stop') => ({ role: 'assistant', done: true, usage, stopReason });
+  const renderMessages = (messages, extra) => sandbox.window.ChatContextMeter.create({ esc,
+    _snap: { messages, contextWindow: 100000, ...extra },
+  })._ctxHtml();
+  const previous = assistant({ input: 12000 });
+  for (const latest of [
+    assistant({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, 'aborted'),
+    assistant({ input: 0 }, 'error'),
+    assistant({ output: 500 }, 'aborted'),
+    assistant({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }),
+  ]) {
+    assert.match(renderMessages([previous, latest]), /12% 已用/);
+    assert.match(renderMessages([latest]), /暂未获取用量/);
+  }
+  assert.match(renderMessages([previous, assistant({ input: 0 })]), /0% 已用/);
+  assert.match(renderMessages([previous, assistant({ input: 0, output: 5 }, 'aborted')]), /0% 已用/);
+  assert.match(renderMessages([previous, assistant({ input: 0, cacheRead: 5000 }, 'aborted')]), /5% 已用/);
+  assert.match(renderMessages([previous], { contextUsage: null }), /暂未获取用量/);
+  const current = { ...assistant({ input: 0 }, 'aborted'), model: 'new-model', provider: 'new-provider' };
+  assert.match(renderMessages([{ ...previous, model: 'old-model' }, current]), /暂未获取用量/);
+  assert.match(renderMessages([{ ...previous, provider: 'old-provider' }, current]), /暂未获取用量/);
+  assert.match(renderMessages([{ ...previous, model: current.model, provider: current.provider }, current]), /12% 已用/);
+  assert.match(renderMessages([{ ...previous, model: 'old-model' }], {
+    modelSelection: { activeModel: { id: 'new-model' } },
+  }), /暂未获取用量/);
 });

@@ -791,8 +791,8 @@
     },
     {
       "path": "client/components/panels/chat-context-meter.js",
-      "bytes": 6689,
-      "sha256": "f1b36ed3e340b5bad5cc5ea62e7045d3a6635f47776ef266d68cd3aadf94bf89"
+      "bytes": 7802,
+      "sha256": "a60ad1d300ebb5d2206d04e453eb55c6678e0186b1dd80da4dcaa4041f26455d"
     },
     {
       "path": "client/components/panels/chat-crew.css",
@@ -2436,8 +2436,8 @@
     },
     {
       "path": "client/core/locales/en-US-actions.js",
-      "bytes": 12358,
-      "sha256": "f6e88e27df12edb8dfb26a6c43f96f3203eabc6ff2ab3fa13f2668a496b012e0"
+      "bytes": 12411,
+      "sha256": "1285fd248054a85f201a3da1310ade139d505db93cf644bd4e8e5ff3f3964c2a"
     },
     {
       "path": "client/core/locales/en-US-agent-pages.js",
@@ -4897,7 +4897,7 @@
     {
       "path": "client/e2e/window-render-stability.cjs",
       "bytes": 11725,
-      "sha256": "e4657242dbf39b459efabed414c2100f15f47c665e85437204d131567431479b"
+      "sha256": "d1403642f50c9b8afaba16f3b88251c5936941497b09ac38abe6be9dbcb41145"
     },
     {
       "path": "client/e2e/windows-fs-watch-recovery.cjs",
@@ -5371,8 +5371,8 @@
     },
     {
       "path": "client/main/agent-runtime/runner-adapter.js",
-      "bytes": 102777,
-      "sha256": "71a64123c45a0e5b8793c7167ca40c1ed729956a2e431b2058208ff7f73da3b0"
+      "bytes": 103942,
+      "sha256": "0f2da2b9501cc4e5086c3aa013f8814a53e8de583746b4631a3e075e7b33b15f"
     },
     {
       "path": "client/main/agent-runtime/runner-config.cjs",
@@ -6421,8 +6421,8 @@
     },
     {
       "path": "client/main/pi-session/event-stream.js",
-      "bytes": 34338,
-      "sha256": "223526fbeaf4d45e5c48df1bca6023acbc4dddf3a5a10cb3b8e2f3223631a2ad"
+      "bytes": 34374,
+      "sha256": "406d5dea6af8e23bdb32bcc264a4288d295f2c558789e867d837cc5ab7ca389a"
     },
     {
       "path": "client/main/pi-session/event-stream.test.js",
@@ -6461,8 +6461,8 @@
     },
     {
       "path": "client/main/pi-session/history-seed.js",
-      "bytes": 7014,
-      "sha256": "bba207e61d8cb1caaf297a8d6bacf26ae0974925f5d6b4643cb24ae6c38f226d"
+      "bytes": 7335,
+      "sha256": "a0bb5dd551c90e71a179b93079be5c61c9b2e805e4e3d8db89562141b24d9fb9"
     },
     {
       "path": "client/main/pi-session/history-state.js",
@@ -8176,8 +8176,8 @@
     },
     {
       "path": "client/tests/codex-harness-runtime.test.cjs",
-      "bytes": 37169,
-      "sha256": "321cd129847ba98563dc9e881b472d240f5b4b6d005b501c66cfbe5c678f5281"
+      "bytes": 37629,
+      "sha256": "b13a0f52d4d6ac16580db9f9ab9a333787afe03bca3415d6880c0673bf56c6df"
     },
     {
       "path": "client/tests/codex-native-model-selection.test.cjs",
@@ -8371,13 +8371,13 @@
     },
     {
       "path": "client/tests/context-accounting.test.cjs",
-      "bytes": 6925,
-      "sha256": "91aac8c2cd557870646153383188f54879ed820c44fecd63456efa7b41692852"
+      "bytes": 9074,
+      "sha256": "8d65ec1fa807deeb4cd76404de5ad4028c6f0b76035cef07cbd0e0e0c52e263b"
     },
     {
       "path": "client/tests/context-meter.test.cjs",
-      "bytes": 3912,
-      "sha256": "be342fffc3c3b531316ef505e15541c797d2f73a1fb3feebe56ac6721d954012"
+      "bytes": 5792,
+      "sha256": "dd8a048694680f1bc1f61c6b6487459f7968d31b1c77d738c1be73a82e577bf9"
     },
     {
       "path": "client/tests/context-recovery-http.test.cjs",
@@ -9568,6 +9568,11 @@
       "path": "client/tests/pi-stall-watchdog.test.cjs",
       "bytes": 4107,
       "sha256": "1739527239cf6c6a650f0761b54989b2272bd5f543d9c35f86e01fa181266f22"
+    },
+    {
+      "path": "client/tests/pi-stop-context.test.cjs",
+      "bytes": 2773,
+      "sha256": "0f41460035493f9769798f0d37561a61791fc3888e51a5fba312e955937822ea"
     },
     {
       "path": "client/tests/pi-task-default-model.test.cjs",
@@ -11996,8 +12001,8 @@
     },
     {
       "path": "hub-backend/app/services/acp_bridge.py",
-      "bytes": 34070,
-      "sha256": "1cb0ebb709ce31959bfb7f003a44a7cd95fc27537ffb34d6245edfcf38ce029f"
+      "bytes": 34463,
+      "sha256": "455b06c59c341ae33ed283544108bd40f6b1fee06c3e89e09d702f4c0fef2b6e"
     },
     {
       "path": "hub-backend/app/services/acp_process.py",
@@ -12106,8 +12111,8 @@
     },
     {
       "path": "hub-backend/app/services/ai_local.py",
-      "bytes": 56031,
-      "sha256": "e96dd3f6cffe5d38f5b63d552408a72cf9621c06ea9a5223b892f581e36d5585"
+      "bytes": 56062,
+      "sha256": "ea6c0fe7ce9f94d8919d36676e06b85bc755959c509a371b84dccc86a096d14e"
     },
     {
       "path": "hub-backend/app/services/ai_prompts.py",
@@ -12926,8 +12931,8 @@
     },
     {
       "path": "hub-backend/app/services/local_base.py",
-      "bytes": 53596,
-      "sha256": "0f7f790db15e01e8a1b4ba5de1368f551bd3e2c2afc967522c204bc2b0ec6234"
+      "bytes": 53779,
+      "sha256": "3e017b19fd9967aaff76383632d0861f4b628bbd07aec6cc0daab31deb2a9167"
     },
     {
       "path": "hub-backend/app/services/local_completion.py",
@@ -12936,8 +12941,8 @@
     },
     {
       "path": "hub-backend/app/services/local_context_policy.py",
-      "bytes": 4645,
-      "sha256": "7dd89dd9861d8f1bd8a0f905efce65b283ddaa4b085465172e500cb6a767a971"
+      "bytes": 5717,
+      "sha256": "f2db72643e826e15e0d21f5e08648db03bb899d705b859ce95068f36a97df533"
     },
     {
       "path": "hub-backend/app/services/local_ctx.py",
@@ -15971,8 +15976,8 @@
     },
     {
       "path": "hub-backend/smoke_runtime_messages.py",
-      "bytes": 15586,
-      "sha256": "aed6cb1cc683a9ea3b947ab22dde244a5c31d47e89648eec200be6125c31035e"
+      "bytes": 19745,
+      "sha256": "97c9a723be4f24fe7c5de0b47a555e95a9a456c603fe4d0f2a97836d2a26b78f"
     },
     {
       "path": "hub-backend/smoke_schedule_expiry.py",

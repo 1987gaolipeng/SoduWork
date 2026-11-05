@@ -423,7 +423,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
   let outputSince = resumedRef ? 0 : Date.now();
   let outputSinceRestored = !resumedRef;
   const taskBindings = createBindings(app, runnerRef);
-  const taskJournal = taskOutputJournal.create(app, runnerRef);
+  const taskJournal = await taskOutputJournal.create(app, runnerRef);
   const selectionModule = require('../conversation/model-selection');
   const modelPreference = selectionModule.preference(app, runnerRef);
   const savedSelection = modelPreference.readSelection();
@@ -563,8 +563,8 @@ async function createRunnerHandle(request, defaults, initialSession) {
 
   const taskMessages = require('../conversation/task-message-stream.cjs').create(state,
     row => taskJournal.append(state.seq, row));
-  function restoreTaskOutput(through) {
-    taskJournal.restore(through, row => {
+  async function restoreTaskOutput(through) {
+    await taskJournal.restore(through, row => {
       if (row.kind === 'plugin-selection') state.activePluginIds = _pluginIds(row.pluginIds);
       else if (row.kind === 'tool') chatEvents.apply(state, row.event);
       else if (row.kind === 'message') state.messages.push(row.role === 'user'
@@ -575,7 +575,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
           completedAt: messageTime.epoch(row.completedAt), blocks: [{ kind: row.blockKind === 'thinking' ? 'thinking' : 'text', text: row.text }], done: true });
     });
   }
-  restoreTaskOutput(0);
+  await restoreTaskOutput(0);
 
   function emit(kind, detail) {
     state.updatedAt = Date.now();
@@ -953,17 +953,22 @@ async function createRunnerHandle(request, defaults, initialSession) {
         if (starts.length) outputSince = Math.min(...starts);
       }
       historyItems = []; historySince = null;
-      items.forEach((item) => {
-          if (Number(item.seq || 0) <= state.seq) return;
-          restoreTaskOutput(Number(item.seq) - 1);
-          state.seq = Number(item.seq || state.seq);
-          appendItem(item);
-        });
-      restoreTaskOutput(state.seq);
+      for (const item of items) {
+        if (Number(item.seq || 0) <= state.seq) continue;
+        await restoreTaskOutput(Number(item.seq) - 1);
+        if (state.disposed) return;
+        state.seq = Number(item.seq || state.seq);
+        appendItem(item);
+      }
+      await restoreTaskOutput(state.seq);
       state.round = Number(data.round || state.round || 1);
       state.usage = data.usage && typeof data.usage === 'object' ? { ...data.usage } : state.usage;
       if (data.tokens && typeof data.tokens === 'object') {
-        state.contextUsage = { ...data.tokens };
+        const tokens = data.tokens;
+        const fields = Object.keys(tokens).length;
+        // Older Runners seeded these three zeros before receiving any usage.
+        const unmeasured = fields === 3 && tokens.input === 0 && tokens.output === 0 && tokens.total === 0;
+        if (!unmeasured) state.contextUsage = fields ? { ...tokens } : null;
       }
       if (Number(data.ctxWindow) > 0) {
         state.contextWindow = Number(data.ctxWindow);
@@ -1213,7 +1218,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
       state.lastExecutionReasoningEffort = dispatchedEffort;
       if (turnPolicy) state.accessPolicy = turnPolicy;
       if (state.nextAccessPolicy === turnPolicy) state.nextAccessPolicy = null;
-      if (taskContext) taskJournal.append(state.seq, { kind: 'context-sent' });
+      if (taskContext && !state.disposed) taskJournal.append(state.seq, { kind: 'context-sent' });
       if (state.cancelRequested || state.disposed) {
         requestStop();
         return;
@@ -1506,6 +1511,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
       }
     },
     appendTaskMessage(role, text, files, taskId, taskOutputKey, sourceModel, sourceAgent, plugins) {
+      if (state.disposed) return;
       if (taskOutputKey && state.messages.some(m => m.taskOutputKey === taskOutputKey)) return;
       const at = Date.now();
       const timing = role === 'user' ? { sentAt: messageTime.epoch(turnQueue.active()?.options?.sentAt) || at } : { completedAt: at };
@@ -1524,17 +1530,20 @@ async function createRunnerHandle(request, defaults, initialSession) {
     },
     taskMessageStreaming: true,
     appendTaskRuntimeEvent(item, taskId) {
+      if (state.disposed) return;
       if (item.kind === 'task-stream-end') { taskMessages.finish(item.streamPrefix); emit('task-message'); return; }
       if (taskMessages.apply(item, taskId)) { emit('task-message'); return; }
       if (require('../pi-session/tool-preparation').runtime(state, item)) emit('tool-preparing', { taskId });
     },
     appendTaskTool(event, taskId) {
+      if (state.disposed) return;
       event = { ...event, sourceAgent: agentSource.normalize(event.sourceAgent) || undefined };
       taskJournal.append(state.seq, { kind: 'tool', event, taskId });
       chatEvents.apply(state, event);
       emit('tool', { taskId });
     },
     rememberWorkflowPlugin(id) {
+      if (state.disposed) return;
       const ids = _pluginIds([id]);
       taskJournal.append(state.seq, { kind: 'plugin-selection', pluginIds: ids });
       state.activePluginIds = ids;
@@ -1743,6 +1752,9 @@ async function createRunnerHandle(request, defaults, initialSession) {
       return { ...scanned, fileChanges };
     },
     close() {
+      if (state.disposed) return;
+      state.disposed = true;
+      taskJournal.close();
       observationCancellation++;
       // Release the same optional memory subscription as the direct Pi handle.
       const disposeMemory = handle.ui?.memorySubscription;
@@ -1751,7 +1763,6 @@ async function createRunnerHandle(request, defaults, initialSession) {
         try { Promise.resolve(disposeMemory()).catch(() => {}); } catch (_) {}
       }
       state.queueImmediate.cancel();
-      state.disposed = true;
       if (state.timer) clearTimeout(state.timer);
       state.cancelRequested = true;
       state.timer = null;
@@ -1873,6 +1884,18 @@ function createRunnerRuntimeAdapter(options) {
   const adapterId = String(runtimeSpec.id);
   const displayName = String(runtimeSpec.displayName);
   const defaults = { ...opts, runtimeSpec };
+  const isChat = row => row.cli === adapterId && /^chat-/.test(String(row.taskId || ''));
+  async function historyRow(row) {
+    return {
+      id: row.ref, path: row.ref, adapterId,
+      usedHarnesses: require('../conversation/used-harnesses').merge([adapterId],
+        await taskOutputJournal.usedHarnesses(opts.app, row.ref).catch(() => [])),
+      cwd: row.workDir || '', title: row.title || displayName + ' 工作会话',
+      createdAt: Math.round(Number(row.started || row.ended || 0) * 1000),
+      at: Math.round(Number(row.ended || row.started || 0) * 1000),
+      count: Number(row.seq || 0), state: _status(row.state),
+    };
+  }
   const adapter = {
     id: adapterId,
     displayName,
@@ -1924,19 +1947,22 @@ function createRunnerRuntimeAdapter(options) {
       const handle = await createRunnerHandle(request, defaults, initialSession);
       return wrapRunnerSession(handle, request, { ok: true, resumed: true }, runtimeSpec);
     },
+    async historyEntry(id) {
+      try {
+        const row = (await _runnerInventory(runtime)).find(row => row.ref === id && isChat(row));
+        return { ok: true, chats: row ? [await historyRow(row)] : [] };
+      } catch (error) {
+        return { ok: false, reason: String(error && error.message || error), chats: [] };
+      }
+    },
     async history(limit = 50) {
       try {
         const runs = await _runnerInventory(runtime);
-        const chats = await Promise.all(runs.filter((row) => row.cli === adapterId && /^chat-/.test(String(row.taskId || '')))
-          .slice(0, Math.max(1, Number(limit) || 50)).map(async (row) => ({
-            id: row.ref, path: row.ref, adapterId,
-            usedHarnesses: require('../conversation/used-harnesses').merge([adapterId],
-              await taskOutputJournal.usedHarnesses(opts.app, row.ref).catch(() => [])),
-            cwd: row.workDir || '', title: row.title || displayName + ' 工作会话',
-            createdAt: Math.round(Number(row.started || row.ended || 0) * 1000),
-            at: Math.round(Number(row.ended || row.started || 0) * 1000),
-            count: Number(row.seq || 0), state: _status(row.state),
-          })));
+        const selected = runs.filter(isChat).slice(0, Math.max(1, Number(limit) || 50));
+        const chats = [];
+        // Bound concurrent journal streams when the full sidebar is requested.
+        for (let start = 0; start < selected.length; start += 16)
+          chats.push(...await Promise.all(selected.slice(start, start + 16).map(historyRow)));
         return { ok: true, chats };
       } catch (error) {
         return { ok: false, reason: String(error && error.message || error), chats: [] };

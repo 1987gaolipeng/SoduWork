@@ -130,7 +130,7 @@ app.whenReady().then(async () => {
       ['Pi cache', {input:1000,cacheRead:90000,cacheWrite:5000}, '96,000'],
       ['normalized cache', {input:96000,cacheRead:95000,inputIncludesCache:true}, '96,000'],
       ['OpenAI cache', {input_tokens:96000,cached_input_tokens:95000}, '96,000'],
-      ['compacted', null, '暂无用量数据'],
+      ['compacted', null, '暂未获取用量'],
     ]) {
       ctx._snap.contextUsage=value;ctx._snap.usage={input:900000};draw();
       const popup=document.querySelector('.nctx-pop');

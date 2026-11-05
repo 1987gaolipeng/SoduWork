@@ -64,6 +64,10 @@ class MessageTests(unittest.TestCase):
                     "input_tokens": 1000, "cache_read_input_tokens": 90000,
                     "cache_creation_input_tokens": 5000, "output_tokens": 10}}})
             self.assertEqual(run["tokens"]["input"], 96000)
+            run["stopping"] = True
+            emit({"type": "turn.completed", "usage": {"input_tokens": 300000, "output_tokens": 30}})
+            self.assertEqual(run["tokens"]["input"], 96000)
+            run["stopping"] = False
             emit({"type": "turn.completed", "usage": {"input_tokens": 300000, "output_tokens": 30}})
             self.assertEqual(run["tokens"], {})
 
@@ -88,6 +92,71 @@ class MessageTests(unittest.TestCase):
                     {"input": True}, {"input": float("inf")}, {"input": "bad"}]:
             with self.subTest(raw=raw):
                 self.assertEqual(context_input(raw), 0)
+
+    def test_interrupted_requests_preserve_the_last_report_until_a_new_measurement(self):
+        from app.services.local_context_policy import update_usage
+        run = {"tokens": {}}
+        def finish(reason, usage):
+            update_usage(run, {"type": "message_end", "message": {
+                "role": "assistant", "stopReason": reason, "usage": usage}})
+        zero = {"input": 0, "cacheRead": 0, "cacheWrite": 0, "output": 0}
+        finish("aborted", zero)
+        self.assertEqual(run["tokens"], {})
+        run["stopping"] = True
+        update_usage(run, {"type": "turn.completed", "usage": {"input_tokens": 4000}})
+        self.assertEqual(run["tokens"], {})
+        run["stopping"] = False
+        finish("stop", {"input": 300, "cacheRead": 1700})
+        for usage in (None, {}, zero, {"output": 13}, {"cacheRead": 0, "output": 13},
+                      {"input": None, "cacheWrite": 0, "output": 13},
+                      {"input": True, "cache": {"read": 0, "write": 0}, "output": 13}):
+            for reason in ("aborted", "error"):
+                finish(reason, usage)
+                self.assertEqual(run["tokens"]["input"], 2000)
+        finish("aborted", {"input": 0, "cacheRead": 1250})
+        self.assertEqual(run["tokens"]["input"], 1250)
+        finish("aborted", {"input": 0, "output": 2})
+        self.assertEqual(run["tokens"]["input"], 0)
+        finish("stop", {"input": 70})
+        finish("aborted", {"input_tokens": 0, "output_tokens": 2})
+        self.assertEqual(run["tokens"]["input"], 0)
+        run["stopping"] = True
+        update_usage(run, {"type": "compaction_end"})
+        finish("aborted", zero)
+        self.assertEqual(run["tokens"], {})
+        run["stopping"] = False
+        finish("stop", {"input": 70})
+        self.assertEqual(run["tokens"]["input"], 70)
+
+    def test_acp_distinguishes_missing_usage_from_explicit_zero_while_stopping(self):
+        from app.services.acp_bridge import AcpBridge
+        from app.services.local_context_policy import update_usage
+        run = {"tokens": {"input": 2000}, "stopping": True}
+        with tempfile.TemporaryDirectory() as cwd, patch("app.services.acp_bridge._emit",
+                side_effect=lambda event: update_usage(run, event)):
+            bridge = AcpBridge([], cwd, "fixture", "workspace")
+            for value in ({}, {"used": None}, {"used": True}, {"used": "invalid"},
+                          {"used": -1}, {"used": float("nan")}, {"used": float("inf")}):
+                bridge._update({"sessionUpdate": "usage_update", "size": 128000, **value})
+                self.assertEqual(run["tokens"]["input"], 2000)
+            for value, expected in (("344", 344), (344.0, 344), (0, 0)):
+                bridge._update({"sessionUpdate": "usage_update", "size": 128000, "used": value})
+                self.assertEqual(run["tokens"]["input"], expected)
+
+    def test_reopening_a_runner_archive_distinguishes_unmeasured_from_measured_zero(self):
+        from app.services import local_base, ai_local
+        ref = "archived-context-usage"
+        for saved, expected in [({"input": 0, "output": 0, "total": 0}, {}),
+                                ({"input": 0, "inputIncludesCache": True}, {"input": 0, "inputIncludesCache": True}),
+                                ({"input": 1280}, {"input": 1280})]:
+            with self.subTest(saved=saved), tempfile.TemporaryDirectory() as directory, \
+                    patch.object(ai_local, "_STORE", directory), patch.object(local_base, "_STORE", directory), \
+                    patch.dict(local_base._RUNS, clear=True):
+                archive = Path(directory, ref)
+                archive.mkdir()
+                (archive / "meta.json").write_text(json.dumps({
+                    "state": "stopped", "cli": "qwen", "ws": directory, "tokens": saved}), encoding="utf-8")
+                self.assertEqual(ai_local.session_sync({}, ref)["tokens"], expected)
 
     def test_pi_delta_identity_end_and_message_usage(self):
         run = {"segment": 1, "lines": []}

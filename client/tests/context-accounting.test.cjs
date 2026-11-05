@@ -37,7 +37,7 @@ test('OpenAI input includes cached subsets while native nested cache is separate
 test('output, totals and invalid counters never masquerade as input', () => {
   for (const value of [{ totalTokens: 90000 }, { output: 90000 }, { input: null },
     { input: '' }, { input: false }, { input: -1 }, { input: Infinity }, { input: null, cache: 0 }]) {
-    assert.match(usage(value), /暂无用量数据/);
+    assert.match(usage(value), /暂未获取用量/);
   }
   assert.match(usage({ input: 0, totalTokens: 90000 }), /0% 已用/);
 });
@@ -45,10 +45,10 @@ test('output, totals and invalid counters never masquerade as input', () => {
 test('cumulative snapshot usage cannot override a settled request or missing watermark', () => {
   const messages = [{ role: 'assistant', done: true, usage: { input: 50000 } }];
   assert.match(render({ usage: { input: 300000 }, messages }), /已用 50,000 标记/);
-  assert.match(render({ usage: { input: 300000 } }), /暂无用量数据/);
-  assert.match(render({ contextUsage: null, usage: { input: 300000 }, messages }), /暂无用量数据/);
+  assert.match(render({ usage: { input: 300000 } }), /暂未获取用量/);
+  assert.match(render({ contextUsage: null, usage: { input: 300000 }, messages }), /暂未获取用量/);
   assert.match(render({ messages: [{ role: 'assistant', done: false,
-    usage: { input: 50000 } }] }), /暂无用量数据/);
+    usage: { input: 50000 } }] }), /暂未获取用量/);
 });
 
 test('Pi settled usage survives partial zeros and is invalidated by compaction', () => {
@@ -61,7 +61,7 @@ test('Pi settled usage survives partial zeros and is invalidated by compaction',
   assert.match(render(acc.snapshot()), /已用 96,000 标记/);
   acc.push({ type: 'compaction_start' });
   acc.push({ type: 'compaction_end' });
-  assert.match(render(acc.snapshot()), /暂无用量数据/);
+  assert.match(render(acc.snapshot()), /暂未获取用量/);
   acc.push({ type: 'message_end', message: { role: 'assistant', usage: { input: 12000, output: 20 } } });
   assert.match(render(acc.snapshot()), /已用 12,000 标记/);
 });
@@ -74,16 +74,61 @@ test('reopening Pi history respects compaction boundaries and active model', () 
     seed(acc, { model: { id: 'after', provider: 'fixture' }, state: { messages: [message] },
       sessionManager: { getEntries: () => [{ type: 'message', message },
         ...(compacted ? [{ type: 'compaction', summary: 'summary' }] : [])] } });
-    assert.match(render(acc.snapshot()), /暂无用量数据/);
+    assert.match(render(acc.snapshot()), /暂未获取用量/);
   }
   const acc = stream.create();
   seed(acc, { model: { id: 'before', provider: 'fixture' }, state: { messages: [message] },
     sessionManager: { getEntries: () => [{ type: 'message', message }, { type: 'compaction' }] } });
-  assert.match(render(acc.snapshot()), /暂无用量数据/);
+  assert.match(render(acc.snapshot()), /暂未获取用量/);
   acc.push({ type: 'message_end', message });
   assert.match(render(acc.snapshot()), /已用 90,000 标记/);
   acc.push({ type: 'context_reset' });
-  assert.match(render(acc.snapshot()), /暂无用量数据/);
+  assert.match(render(acc.snapshot()), /暂未获取用量/);
+});
+
+test('Pi retains the last measured request across unreported terminal events in live and reopened sessions', () => {
+  const live = stream.create();
+  const entries = [];
+  const emptyUsage = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0, totalTokens: 0 };
+  const end = (stopReason, usage, expected) => {
+    const message = { role: 'assistant', model: 'model-a', stopReason, usage };
+    live.push({ type: 'message_end', message });
+    entries.push({ type: 'message', message });
+    const reopened = stream.create();
+    seed(reopened, { model: { id: 'model-a' }, state: { messages: [] },
+      sessionManager: { getEntries: () => entries } });
+    for (const acc of [live, reopened]) assert.deepEqual(acc.snapshot().contextUsage, expected);
+  };
+  end('aborted', emptyUsage, null);
+  const cached = { input: 0, cacheRead: 12000, output: 12 };
+  end('toolUse', cached, cached);
+  end('aborted', undefined, cached);
+  end('aborted', emptyUsage, cached);
+  end('error', { output: 10 }, cached);
+  const latest = { input: 3000, cacheRead: 2000 };
+  end('aborted', latest, latest);
+  const realZero = { input: 0, output: 10, totalTokens: 10 };
+  end('aborted', realZero, realZero);
+  end('aborted', emptyUsage, realZero);
+});
+
+test('a stopped request cannot restore usage from before compaction or from a previous model', () => {
+  const message = (stopReason, input) => ({ type: 'message', message: {
+    role: 'assistant', model: 'current', provider: 'fixture', stopReason, usage: { input },
+  } });
+  const first = message('stop', 25000);
+  const aborted = message('aborted', 0);
+  const modelChange = modelId => ({ type: 'model_change', provider: 'fixture', modelId });
+  for (const [boundaries, expected] of [
+    [[{ type: 'compaction' }], null],
+    [[modelChange('other'), modelChange('current')], null],
+    [[modelChange('current')], first.message.usage],
+  ]) {
+    const acc = stream.create();
+    seed(acc, { model: { id: 'current', provider: 'fixture' }, state: { messages: [] },
+      sessionManager: { getEntries: () => [first, ...boundaries, aborted] } });
+    assert.deepEqual(acc.snapshot().contextUsage, expected);
+  }
 });
 
 test('active branch measurement ignores imported task receipts and other branches', () => {

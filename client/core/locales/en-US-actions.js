@@ -6,6 +6,7 @@
     '返回推理设置': 'Back to reasoning settings', '选择 Codex 模型': 'Choose a Codex model',
     '先选择模型': 'Select a model first', '不可调节': 'Not adjustable',
     '最近一次上报的上下文用量，含缓存；不含待发送内容': 'Last reported context usage, including cache; excludes unsent content',
+    '暂未获取用量': 'Usage not available yet',
     '退出后，这台电脑需要重新登录才能使用 SoduWork。确定退出？': 'You will need to sign in again to use SoduWork on this computer. Sign out?',
     '退出失败': 'Could not sign out', '确认当前团队事实和这版结论？来源变化后，确认会自动失效。': 'Confirm the current team information and conclusions? This confirmation expires if the sources change.',
     '删除 personal.md 吗？删除后不会从旧文件复活': 'Delete personal.md? It will not be restored from older files.',

@@ -756,6 +756,9 @@ def _reclaim_missing() -> dict:
         except Exception:  # noqa: BLE001
             continue
         run = {k: meta.get(k) for k in _PERSIST_KEYS}
+        # Older archives seeded this exact placeholder before the first request.
+        if run.get("tokens") == {"input": 0, "output": 0, "total": 0}:
+            run["tokens"] = {}
         run["proc"] = None
         run["queue"] = []
         run["cfg"] = {}

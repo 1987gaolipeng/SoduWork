@@ -462,7 +462,8 @@ function apply(state, ev) {
           ? { ...m.usage, costKnown: false } : m.usage;
         state.usage = msg.usage;
       }
-      if (!m.taskOutputKey && m.model !== 'task-executor') state.contextUsage = m.usage || null;
+      const contextUsage = reportedContextUsage(m);
+      if (contextUsage) state.contextUsage = contextUsage;
       if (m.taskId) msg.taskId = String(m.taskId);
       if (m.taskOutputKey) msg.taskOutputKey = String(m.taskOutputKey);
       if (terminalIssue) return { kind: 'protocol-leak', issue: terminalIssue };
@@ -764,4 +765,4 @@ function create() {
   };
 }
 
-module.exports = { SCOPES, create, apply, snapshot, deriveStatus, statusText, _blank };
+module.exports = { SCOPES, create, apply, snapshot, deriveStatus, statusText, reportedContextUsage, _blank };

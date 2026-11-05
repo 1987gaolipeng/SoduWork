@@ -16,7 +16,7 @@
 
   /* Last request input (or native context watermark), including cache once.
      Output and cumulative consumption are not a context watermark. */
-  function _usageFrom(value) {
+  function _usageFrom(value, message) {
     if (!value || typeof value !== 'object') return null;
     const pick = (row, keys) => {
       for (const key of keys) {
@@ -34,6 +34,15 @@
     const write = pick(value, ['cacheWrite', 'cache_write_tokens', 'cacheCreation',
       'cache_creation_input_tokens', 'cache_write_input_tokens']) ?? pick(value.cache, ['write']);
     if (input === null && read === null && write === null) return null;
+    // Older snapshots may only contain Pi's raw message receipts. An interrupted
+    // request can end with the SDK's initial zero counters before usage arrives.
+    if (message && !input && !read && !write) {
+      if (input !== 0) return null;
+      const otherCounts = [value.output, value.outputTokens, value.output_tokens, value.completion_tokens,
+        value.total, value.totalTokens, value.total_tokens];
+      const interrupted = message.stopReason === 'aborted' || message.stopReason === 'error';
+      if ((interrupted || otherCounts.includes(0)) && !otherCounts.some(n => Number.isFinite(n) && n > 0)) return null;
+    }
     const has = key => Object.prototype.hasOwnProperty.call(value, key);
     const separate = ['cache_read_input_tokens', 'cache_creation_input_tokens'].some(has);
     const includes = value.inputIncludesCache ?? value.input_includes_cache ??
@@ -51,9 +60,17 @@
       return { value: value ?? 0, present: value !== null };
     }
     const messages = Array.isArray(snap.messages) ? snap.messages : [];
+    const activeModel = snap.modelSelection?.activeModel || ctx._model || {};
+    let modelId = activeModel.id;
+    let provider = activeModel.provider;
     for (let i = messages.length - 1; i >= 0; i -= 1) {
-      if (messages[i]?.role !== 'assistant' || messages[i].done !== true) continue;
-      const value = _usageFrom(messages[i].usage);
+      const message = messages[i];
+      if (message?.role !== 'assistant' || message.done !== true || message.taskOutputKey || message.model === 'task-executor') continue;
+      if ((modelId && message.model && message.model !== modelId) ||
+          (provider && message.provider && message.provider !== provider)) break;
+      modelId ||= message.model;
+      provider ||= message.provider;
+      const value = _usageFrom(message.usage, message);
       if (value !== null) return { value, present: true };
     }
     return { value: 0, present: false };
@@ -121,7 +138,7 @@
     const pct = known ? Math.max(0, Math.min(100, used / win * 100)) : 0;
     const visual = used && known ? Math.max(2, pct) : 0;
     const level = pct >= 85 ? ' hot' : (pct >= 60 ? ' warm' : '');
-    const summary = !usage.present ? '暂无用量数据' :
+    const summary = !usage.present ? '暂未获取用量' :
       (!used ? '0%' : pct < 1 ? '不到 1%' : Math.round(pct) + '%');
     return '<span class="nctx-ring' + level + '" aria-hidden="true">' +
       '<svg viewBox="0 0 18 18" fill="none" focusable="false"><circle class="nctx-track" cx="9" cy="9" r="7"/>' +
