@@ -25,12 +25,14 @@ try:
     from .acp_process import close_process, ProcessCleanupError, OwnedProcessGroup
     from . import runtime_images
     from . import opencode_runtime_config
+    from . import qwen_runtime
 except ImportError:  # direct script entry used by source Runner
     from acp_access import BridgeAccess, AccessError
     from acp_transition import Transition
     from acp_process import close_process, ProcessCleanupError, OwnedProcessGroup
     import runtime_images
     import opencode_runtime_config
+    import qwen_runtime
 
 _PROTOCOL = 1
 _MAX_FILE_BYTES = 4 * 1024 * 1024
@@ -652,6 +654,11 @@ class AcpBridge:
             self.session_id = str(created.get("sessionId") or "")
             if not self.session_id:
                 raise BridgeError("ACP Agent did not return a session ID")
+        if self.agent_name == "qwen":
+            try:
+                qwen_runtime.apply_model(self, session_config)
+            except RuntimeError as exc:
+                raise BridgeError(str(exc)) from exc
         self.access.apply(self, session_config)
         _emit({"type": "session", "sessionID": self.session_id})
         _emit({"type": "step_start"})

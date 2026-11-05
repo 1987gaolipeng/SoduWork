@@ -998,6 +998,9 @@ def _env_for(prof: dict, cfg: dict, runtime_ref: str = "") -> dict:
         # Keep agent state directories outside restricted home-directory locations.
         # Some security policies block the rename operations required for session archival.
         _acp_agents.home_env(acp_key, env, _data_root())
+        if acp_key == "qwen":
+            from . import qwen_runtime
+            qwen_runtime.configure(env, llm, _data_root(), runtime_ref)
         return _no_proxy_for(env, base)
 
     if prof.get("name") == "Pi":

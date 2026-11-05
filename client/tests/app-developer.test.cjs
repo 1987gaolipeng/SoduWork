@@ -100,8 +100,9 @@ test('built-in app developer inherits the current plugin contract and exact publ
   const folder = path.join(bundle.directory, 'references/developer');
   assert.equal(fs.readFileSync(path.join(folder, 'plugin-development.md'), 'utf8'), require('../main/plugin-builder-plugin.cjs').body().instructions);
   assert.deepEqual(fs.readFileSync(path.join(folder, 'sdk/soduwork-app.js')), fs.readFileSync(path.resolve(__dirname, '../sdk/soduwork-app.js')));
-  const entryGuide = fs.readFileSync(path.join(folder, 'SKILL.md'), 'utf8').replace(/\r\n/g, '\n');
-  assert.ok(entryGuide.length < 1600, 'entrypoint stays concise');
+  const entryGuide = fs.readFileSync(path.join(folder, 'SKILL.md'), 'utf8');
+  // Apply the same Markdown character budget on LF and CRLF checkouts.
+  assert.ok(entryGuide.replace(/\r\n/g, '\n').length < 1600, 'entrypoint stays concise');
   assert.match(entryGuide,/references\/host-sdk\.md/);
   const workflow = fs.readFileSync(path.join(folder, 'references/development-workflow.md'), 'utf8');
   const design = fs.readFileSync(path.join(folder, 'references/design-quality.md'), 'utf8');

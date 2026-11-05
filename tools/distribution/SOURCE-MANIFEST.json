@@ -5306,8 +5306,8 @@
     },
     {
       "path": "client/main/agent-runtime/runner-config.cjs",
-      "bytes": 1697,
-      "sha256": "f53e997cc1cc354a8595d2f6bfc79d96d1511288e57e7a2d2a4a8489a06acf04"
+      "bytes": 2155,
+      "sha256": "388c65337abb27bb114a401f09ea191fdaa0600897051774c4326d6a6976254c"
     },
     {
       "path": "client/main/agent-runtime/runner-goal-control.js",
@@ -7511,8 +7511,8 @@
     },
     {
       "path": "client/tests/app-developer.test.cjs",
-      "bytes": 21753,
-      "sha256": "bf1c2f4937c66f7a744e5b26aeb548aa04e1065694304df0afff7becdcbbe76c"
+      "bytes": 21825,
+      "sha256": "1caed33d1483739367831c40c97bf21e83a11741ef9605a734b61addd17b3900"
     },
     {
       "path": "client/tests/app-draft-isolation.test.cjs",
@@ -10010,6 +10010,11 @@
       "sha256": "850a2f1c9dd3a8d4cd98c32c78197f222f9a881586f3dcb2d2f45653d333d2db"
     },
     {
+      "path": "client/tests/runner-model-thinking.test.cjs",
+      "bytes": 1708,
+      "sha256": "a693baf19c8108463456af88d80732ef90f2d9add5ad931b5059d7088f17cd79"
+    },
+    {
       "path": "client/tests/runner-offline-ui.test.cjs",
       "bytes": 1568,
       "sha256": "7610a0a392512c706414c15d826d812d2c77f8fe724b9f5edbf091f5095e700e"
@@ -11861,8 +11866,8 @@
     },
     {
       "path": "hub-backend/app/services/acp_bridge.py",
-      "bytes": 33804,
-      "sha256": "5eb1bd387d81eae55789b936ce3a73ebc5943cd99e0e4268bde8c09f38e6f640"
+      "bytes": 34070,
+      "sha256": "1cb0ebb709ce31959bfb7f003a44a7cd95fc27537ffb34d6245edfcf38ce029f"
     },
     {
       "path": "hub-backend/app/services/acp_process.py",
@@ -12771,8 +12776,8 @@
     },
     {
       "path": "hub-backend/app/services/local_base.py",
-      "bytes": 53455,
-      "sha256": "3cb5caacbd9b37df019a2244bbff73dd03473505fec0a76d2e697fdc81a869f5"
+      "bytes": 53596,
+      "sha256": "0f7f790db15e01e8a1b4ba5de1368f551bd3e2c2afc967522c204bc2b0ec6234"
     },
     {
       "path": "hub-backend/app/services/local_completion.py",
@@ -13278,6 +13283,11 @@
       "path": "hub-backend/app/services/quota_usage.py",
       "bytes": 2680,
       "sha256": "64db4f8a0ce4c9c88a46b2f9bdbb172fa5b999758fbd424eb042312f6b92a9d0"
+    },
+    {
+      "path": "hub-backend/app/services/qwen_runtime.py",
+      "bytes": 8507,
+      "sha256": "3771a40b595b570d47b81a5dbb528c5361cafd740d3996399c4b2d13bef3417c"
     },
     {
       "path": "hub-backend/app/services/rbac.py",
@@ -16880,6 +16890,11 @@
       "sha256": "18b2eb61b13dde6a158361f1455549be44dea087ff3a05666c60c9c42302b4a9"
     },
     {
+      "path": "hub-backend/test_qwen_runtime.py",
+      "bytes": 14417,
+      "sha256": "b4a59dba7f52495b3bb7854fad539e71d8a2921393a031b2fd66691a2af8e4b6"
+    },
+    {
       "path": "hub-backend/test_realtime_account_scope.py",
       "bytes": 4264,
       "sha256": "3598cddc2060c058d59a7c1e236244c22df1681361024e376fa321b04cd63637"
@@ -17363,6 +17378,11 @@
       "path": "hub-backend/tests/quota_plans_postgres.py",
       "bytes": 2870,
       "sha256": "e1ed0d28e85ee4631697488f52a37348286bca9a75972d3a7f38ebb664e261eb"
+    },
+    {
+      "path": "hub-backend/tests/qwen_native_vision.py",
+      "bytes": 12143,
+      "sha256": "e99fb267e19e4ef191e5ef4344d7c99e90775fafb7f11793c80f4b8f6ffea8e1"
     },
     {
       "path": "hub-backend/tests/runner_dialogue_checks.py",
