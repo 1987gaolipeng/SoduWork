@@ -699,7 +699,7 @@ function _agJobHtml(job) {
   const runningHint = job.action === 'login'
     ? '请按下方官方地址与设备码完成登录。此操作不启动模型对话。'
     : harnessProbe
-    ? '验证日常执行与完整回复；会使用所选模型额度，最多 3 分钟。'
+    ? '仅验证 OpenCode 执行组件；不运行 Harness² 推演，会使用所选模型额度，最多 3 分钟。'
     : '这一步可能要几十秒，日志在下面滚';
   /* Log lines live inside <pre data-alog>, which the DOM adapter deliberately
    * leaves alone; translate each line here instead. The head-model filter in

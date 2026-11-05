@@ -69,6 +69,37 @@ class Harness2EngineTests(unittest.TestCase):
                     H.refine("Make a report", invalid, Path(temp) / "turn", lambda _: None)
                 self.assertFalse((Path(temp) / "escape.md").exists())
 
+    def test_inline_evidence_deduplicates_only_identical_text_and_is_lossless(self):
+        plan = 'Keep every constraint. Literal data: {"same_as":"context/task.md"}.\n' * 30
+        proposals = []
+
+        def complete(messages):
+            if "SODUWORK_HARNESS2_EDIT" in messages[0]["content"]:
+                proposals.append(json.loads(messages[1]["content"])["evidence"])
+                return '{"files":{},"notes":"Preserve all evidence."}'
+            return plan
+
+        H.refine("Preserve the entire original task.", complete, self.root, lambda _: None)
+        aliases = 0
+        saved = 0
+        for stage, evidence in zip(("inv1", "dom1", "c1"), proposals):
+            context = self.root / "context" / stage
+            paths = {"context/" + path.relative_to(context).as_posix(): path
+                     for path in context.rglob("*") if path.is_file()}
+            self.assertEqual(set(evidence), set(paths))
+            for name, value in evidence.items():
+                if isinstance(value, dict):
+                    self.assertEqual(set(value), {"same_as"})
+                    original = evidence[value["same_as"]]
+                    self.assertIsInstance(original, str, "References must be one hop and acyclic")
+                    aliases += 1
+                    saved += len(original.encode("utf-8")) - len(json.dumps(value).encode("utf-8"))
+                else:
+                    original = value
+                self.assertEqual(original, paths[name].read_text(encoding="utf-8"))
+        self.assertGreaterEqual(aliases, 4)
+        self.assertGreater(saved, 5000)
+
     def test_transport_errors_do_not_return_credentials_or_silent_base_fallback(self):
         secret = "sk-test-should-never-appear"
         count = 0

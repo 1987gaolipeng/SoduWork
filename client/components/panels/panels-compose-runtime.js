@@ -18,7 +18,7 @@
       modelMode: 'managed', goalMode: 'native', group: 'more', order: 60 },
     { id: 'dsh', displayName: 'DeepSeek Harness', summary: '通过 ACP 接入的 DeepSeek 执行底座',
       modelMode: 'managed', goalMode: 'native', group: 'more', order: 70 },
-    { id: 'harness2', displayName: 'Google Harness²', summary: '通过 OpenCode 直接执行；Google Research 推演核心用于显式诊断',
+    { id: 'harness2', displayName: 'Google Harness²', summary: 'Harness² 文本推演后由 OpenCode 执行，增加耗时与模型用量',
       modelMode: 'managed', goalMode: 'native', group: 'more', order: 80 },
   ]);
   // Until the main process returns a health-checked projection, Pi is the only

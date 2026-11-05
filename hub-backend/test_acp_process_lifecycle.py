@@ -25,8 +25,8 @@ class AcpProcessLifecycleTests(unittest.TestCase):
         for bridge in self.bridges:
             bridge.close()
 
-    def bridge(self, program):
-        bridge = AcpBridge([sys.executable, "-u", "-c", program],
+    def bridge(self, program, *, executable=None):
+        bridge = AcpBridge([executable or sys.executable, "-u", "-c", program],
                            self.directory.name, "fixture", "workspace")
         self.bridges.append(bridge)
         bridge.start()
@@ -54,6 +54,29 @@ class AcpProcessLifecycleTests(unittest.TestCase):
         self.assert_closed(bridge)
         self.assertIn("natural stderr", bridge.stderr_tail)
 
+    def test_exit_before_first_request_keeps_redacted_config_diagnostic(self):
+        from app.services.acp_bridge import _friendly_bridge_error
+        bridge = self.bridge(
+            "import sys; print('ConfigJsonError: PRIVATE-FIXTURE apiKey=fixture-secret', "
+            "file=sys.stderr, flush=True)")
+        bridge.proc.wait(timeout=5)
+        with self.assertRaises(BridgeError) as caught:
+            bridge.request("initialize", {})
+        message = _friendly_bridge_error("opencode", str(caught.exception))
+        self.assertIn("配置无法解析", message)
+        self.assertNotIn("PRIVATE-FIXTURE", message)
+        self.assertNotIn("fixture-secret", message)
+
+    def test_stdout_eof_waits_for_pending_stderr_diagnostic(self):
+        # A Windows venv redirector retains the inherited stdout handle until
+        # its child exits. Use the actual interpreter for an early pipe close.
+        bridge = self.bridge(
+            "import os,sys,time; os.close(1); time.sleep(.05); "
+            "print('fixture startup failure', file=sys.stderr, flush=True)",
+            executable=getattr(sys, "_base_executable", sys.executable))
+        with self.assertRaisesRegex(BridgeError, "fixture startup failure"):
+            bridge.request("initialize", {})
+
     def test_running_agent_is_reaped_and_repeated_close_is_safe(self):
         bridge = self.bridge("import json,time; print(json.dumps({'ready': True}), flush=True); time.sleep(60)")
         self.ready(bridge)
@@ -63,6 +86,44 @@ class AcpProcessLifecycleTests(unittest.TestCase):
         bridge.close()
         self.assertEqual(bridge.proc.returncode, result)
         self.assert_closed(bridge)
+
+    def test_stdout_eof_with_open_stderr_has_bounded_diagnostic_wait(self):
+        bridge = self.bridge("import os,time; os.close(1); time.sleep(60)",
+                             executable=getattr(sys, "_base_executable", sys.executable))
+        start = time.monotonic()
+        with self.assertRaisesRegex(BridgeError, "ACP Agent exited early"):
+            bridge.request("initialize", {})
+        self.assertLess(time.monotonic() - start, 2)
+        self.assertIsNone(bridge.proc.poll(), "stderr must remain open during the bounded wait")
+
+    def test_stdin_close_only_tolerates_windows_closed_pipe_einval(self):
+        import errno
+        import io
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from app.services import acp_process
+
+        class ClosedInput:
+            def __init__(self, code):
+                self.code = code
+
+            def close(self):
+                raise OSError(self.code, "fixture close failure")
+
+        for platform, code, allowed in (("nt", errno.EINVAL, True),
+                                         ("posix", errno.EINVAL, False),
+                                         ("nt", errno.EBADF, False)):
+            with self.subTest(platform=platform, code=code):
+                proc = SimpleNamespace(stdin=ClosedInput(code), stdout=io.StringIO(),
+                                       stderr=io.StringIO(), poll=lambda: 0)
+                with patch.object(acp_process, "os", SimpleNamespace(name=platform)):
+                    if allowed:
+                        acp_process.close_process(proc, [])
+                    else:
+                        with self.assertRaises(acp_process.ProcessCleanupError):
+                            acp_process.close_process(proc, [])
+                self.assertTrue(proc.stdout.closed)
+                self.assertTrue(proc.stderr.closed)
 
     def test_ignoring_term_cannot_leave_descendants_holding_reader_pipes(self):
         child = "import signal,time; signal.signal(signal.SIGTERM, lambda *_: None); time.sleep(60)"

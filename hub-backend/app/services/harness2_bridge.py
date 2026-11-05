@@ -1,7 +1,8 @@
-"""Harness² native interactive execution and opt-in text refinement experiments.
+"""Harness² bounded text refinement followed by native OpenCode execution.
 
-Ordinary turns use the same immediate ACP tool loop as OpenCode. Explicit research
-runs can refine instructions, never permissions or executable plugins.
+Selecting Harness² runs its method before each user turn. Refinement changes
+instructions, never permissions or executable plugins. Health probes can test
+the executor alone without spending tokens on the research method.
 """
 from __future__ import annotations
 
@@ -53,8 +54,19 @@ def complete(model: dict, messages: list[dict], on_usage=None, *, timeout: float
     else:
         url = base + "/chat/completions"
         headers["Authorization"] = "Bearer " + str(model["key"])
+        reasoning = model.get("reasoning") is True
+        output_key = ("max_completion_tokens" if reasoning and model.get("thinkingFormat") == "openai"
+                      else "max_tokens")
         body = {"model": model["model"], "messages": messages, "stream": False,
-                "max_tokens": output_limit}
+                output_key: output_limit}
+        # Planning uses the declared low-effort mapping, never a model-name
+        # guess or a disable request. Unknown contracts keep provider defaults.
+        levels = model.get("thinkingLevelMap")
+        effort = levels.get("low") if isinstance(levels, dict) else None
+        if (reasoning and model.get("supportsReasoningEffort") is True
+                and model.get("thinkingFormat") in {"openai", "zai"}
+                and type(effort) is str and effort in {"minimal", "low", "medium", "high", "xhigh", "max"}):
+            body["reasoning_effort"] = effort
     request = urllib.request.Request(url, json.dumps(body, ensure_ascii=False).encode("utf-8"),
                                      headers=headers, method="POST")
     try:
@@ -271,12 +283,12 @@ def main(argv=None) -> int:
             # Usage is a real inference delta, not a synthetic completion marker.
             emit({"type": "step_finish", "part": {"tokens": tokens}})
 
-        # No classifier, planner or synthetic task runs before ordinary execution.
-        # Native session history, selected capabilities and permissions remain the
-        # executor's responsibility, exactly as for the other managed CLIs.
+        # User turns must exercise the selected harness, including resumed chats.
+        # Only executor health probes and trusted in-flight permission recovery
+        # skip refinement; recovery continues the already-refined native turn.
         final_prompt = prompt
         refined_this_turn = False
-        if args.refine and not (continuing and args.session):
+        if (not args.probe or args.refine) and not (continuing and args.session):
             from .harness2_engine import refine
             from .harness2_budget import RefinementBudget
 

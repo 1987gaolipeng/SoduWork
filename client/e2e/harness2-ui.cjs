@@ -28,24 +28,25 @@ if (typeof electron === 'string') {
     ${styles.map(file => `<link rel="stylesheet" href="${file}">`).join('')}
     <style>body{margin:0;background:var(--bg-0);font:15px var(--font-ui);color:var(--ink)}
     main{padding:20px}.fixture-note{font-size:13px;color:var(--ink-4)}</style></head>
-    <body><main class="cfg-panel"><p class="fixture-note">隔离界面验收 · 状态来自测试夹具</p><div id="agBody"></div></main>
+    <body><main id="agPanel" class="cfg-panel show"><p class="fixture-note">隔离界面验收 · 状态来自测试夹具</p><div id="agBody"></div></main>
     <script>window.errors=[];addEventListener('error',e=>errors.push(e.message));
     addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));
     window.esc=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
-    window.calls=[];window.probeCalls=[];window.machine={runnerId:'fixture-device',label:'测试电脑',env:{ok:true,node:'24',npm:'11'},agents:${JSON.stringify(agents)}};
+    window.calls=[];window.probeCalls=[];window.machine={runnerId:'fixture-device',scope:'current-instance',label:'测试电脑',env:{ok:true,node:'24',npm:'11'},agents:${JSON.stringify(agents)}};
     window.SoduWorkAPI={agentInstall:async(...args)=>{calls.push(args);return{jobId:'fixture-job'}},
       agentProbe:async(...args)=>{probeCalls.push(args);return{jobId:'fixture-probe',model:'fixture-model',keyFrom:'mine'}},
       agentJob:async id=>id==='fixture-probe'
-        ? {state:'running',lines:['正在验证 Harness² 日常执行与完整回复；会使用所选模型额度，最多等待 3 分钟。']}
+        ? {state:'running',lines:['仅验证 OpenCode 执行组件；不运行 Harness² 推演，会使用所选模型额度，最多 3 分钟。']}
         : {state:'done',ok:false,detail:'隔离验收没有执行真实安装',lines:[]},
-      agentSetup:async()=>({machines:[machine],models:[{name:'fixture-model',label:'验收模型'}],modelCount:1})};
+      localAgentSetup:async()=>({machines:[machine],models:[{name:'fixture-model',label:'验收模型'}],modelCount:1})};
     </script><script src="components/panels/agent-brand.js"></script>
     <script src="components/panels/panels-agents.js"></script>
-    <script>_agData={machines:[machine],models:[{name:'fixture-model',label:'验收模型'}],modelCount:1};_agRender();
-    window.ready=true;</script></body></html>`, 'utf8');
+    <script>_agLoad(true).then(()=>{window.ready=true;});</script></body></html>`, 'utf8');
   app.disableHardwareAcceleration(); app.setPath('userData', path.join(root, 'profile'));
   let win;
-  const js = text => win.webContents.executeJavaScript(text, true);
+  const js = text => win.webContents.executeJavaScript(text, true).catch(error => {
+    throw Error('Renderer evaluation failed: ' + text.slice(0, 180), { cause: error });
+  });
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   async function until(expression) {
     for (let i = 0; i < 100; i++) { if (await js('Boolean(' + expression + ')')) return; await sleep(30); }
@@ -123,8 +124,8 @@ if (typeof electron === 'string') {
     await js("clearInterval(_agTimer);_agTimer=null;_agJobs={};_agOpen='';_agRender();void 0");
     await click(card + ' [data-aprobe]');
     assert.deepEqual(await js('probeCalls[0]'), ['harness2', '', 'fixture-device']);
-    await until('document.querySelector(".ag-log").textContent.includes("日常执行")');
-    assert.match(await js('document.querySelector(".ag-job-h").textContent'), /日常执行.*模型额度.*最多 3 分钟/);
+    await until('document.querySelector(".ag-log").textContent.includes("执行组件")');
+    assert.match(await js('document.querySelector(".ag-job-h").textContent'), /仅验证 OpenCode 执行组件.*不运行 Harness² 推演.*模型额度.*最多 3 分钟/);
     assert.doesNotMatch(await js('document.querySelector(".ag-job-h").textContent'), /7 轮推演|10 分钟/);
     assert.match(await js('document.querySelector(".ag-log").textContent'), /用的模型：fixture-model/);
     fs.writeFileSync(path.join(output, 'execution-probe-running-390.png'), (await win.webContents.capturePage()).toPNG());
@@ -134,28 +135,28 @@ if (typeof electron === 'string') {
     const dshCard = '[data-ak="fixture-device~dsh"]';
     for (const width of [1180, 390]) {
       win.setSize(width, 900); await sleep(100);
-      assert.match(await js(`document.querySelector(${JSON.stringify(dshCard)}).textContent`), /安装待修复.*修复安装/s);
+      assert.match(await js(`document.querySelector(${JSON.stringify(dshCard)}).textContent`), /需要修复.*修复安装/s);
       await click(dshCard + ' .ag-more');
       await until('document.querySelector(".ag-drawer")');
       await js('Promise.all(document.querySelector(".ag-drawer").getAnimations().map(animation=>animation.finished))');
-      assert.equal(await js('document.querySelector(".ag-drawer [data-arepair]").textContent'), '修复安装');
+      assert.equal(await js('document.querySelector(".ag-drawer [data-ainstall]").textContent'), '修复安装');
       assert.equal(await js('document.documentElement.scrollWidth > innerWidth'), false);
       fs.writeFileSync(path.join(output, 'dsh-repair-' + width + '.png'), (await win.webContents.capturePage()).toPNG());
       await click('.ag-drawer-x');
     }
-    await click(dshCard + ' [data-arepair]');
-    assert.deepEqual(await js('calls.at(-1)'), ['dsh', 'update', 'fixture-device']);
-    assert.equal(await js('document.querySelector(".ag-drawer [data-arepair]").disabled'), true);
-    await until('document.querySelector(".ag-job-h").textContent.includes("修复未完成")');
-    assert.equal(await js('document.querySelector(".ag-drawer [data-arepair]").disabled'), false);
+    await click(dshCard + ' [data-ainstall]');
+    assert.deepEqual(await js('calls.at(-1)'), ['dsh', 'install', 'fixture-device']);
+    assert.equal(await js('document.querySelector(".ag-drawer [data-ainstall]").disabled'), true);
+    await until('document.querySelector(".ag-job-h").textContent.includes("安装未完成")');
+    assert.equal(await js('document.querySelector(".ag-drawer [data-ainstall]").disabled'), false);
     const beforeRetry = await js('calls.length');
     await js(`SoduWorkAPI.agentJob=async()=>{
       Object.assign(machine.agents.find(a=>a.key==='dsh'),{installed:true,state:'ready',warnNow:'',why:'安装就绪'});
       return{state:'done',ok:true,detail:'隔离安装结果',lines:[]}};void 0`);
-    await click('.ag-drawer [data-arepair]');
+    await click('.ag-drawer [data-ainstall]');
     assert.equal(await js('calls.length'), beforeRetry + 1);
     await until(`document.querySelector(${JSON.stringify(dshCard + ' [data-aprobe]')})`);
-    assert.equal(await js('Boolean(document.querySelector(".ag-drawer [data-arepair]"))'), false);
+    assert.equal(await js('document.querySelector(".ag-drawer [data-ainstall]").textContent'), '重装 / 升到最新');
     assert.match(await js('document.querySelector(".ag-job-h").textContent'), /完成/);
     assert.deepEqual(await js('errors'), []);
     console.log('PASS: Harness² grid, lifecycle and probe notices; DeepSeek repair at 1180/390, exact host routing, busy controls, failed repair retry and successful status refresh. All APIs isolated. Screenshots: ' + output);

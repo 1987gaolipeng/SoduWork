@@ -1,4 +1,4 @@
-"""Coverage for Harness²'s ordinary interactive execution setup probe."""
+"""Executor-only health coverage; never proof of Harness² refinement quality."""
 from __future__ import annotations
 
 import json
@@ -7,9 +7,9 @@ from .agent_setup_probe import _clean
 
 COVERAGE = "execute-v2"
 TIMEOUT = 180
-INTRO = "② 验证 Harness² 日常执行与完整回复；会使用所选模型额度，最多 3 分钟。"
-MISSING_PROOF = "收到执行回复，但尚未确认 Harness² 日常执行完整结束，请点「测一下」重试。"
-UNVERIFIED = "上次测试尚未验证当前日常执行路径；请点「测一下」重新验证。"
+INTRO = "② 仅验证 OpenCode 执行组件；不运行 Harness² 推演，会使用所选模型额度，最多 3 分钟。"
+MISSING_PROOF = "收到执行回复，但尚未确认 OpenCode 执行组件完整结束，请点「测一下」重试。"
+UNVERIFIED = "上次测试尚未验证当前执行组件；请点「测一下」重新验证。"
 
 
 def _event(line: str) -> dict:
@@ -37,4 +37,4 @@ def visible_record(record: dict) -> dict:
 
 
 def success_detail(version: str) -> str:
-    return f"通了 —— Google Harness² {version} 日常执行已完整结束，口令对上了。"
+    return f"通了 —— Harness² {version} 的 OpenCode 执行组件已验证；此测试不包含推演。"

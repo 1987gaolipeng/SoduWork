@@ -76,6 +76,34 @@ class Harness2BridgeTests(unittest.TestCase):
         self.assertNotIn("confidential", str(caught.exception))
         self.assertIn("401", str(caught.exception))
 
+    def test_planning_honors_declared_reasoning_protocol_without_model_name_guesses(self):
+        bridge = self.bridge()
+        response = {"choices": [{"message": {"content": "plan"}, "finish_reason": "stop"}]}
+        contracts = (
+            ({"reasoning": True, "thinkingFormat": "zai", "supportsReasoningEffort": True,
+              "thinkingLevelMap": {"off": None, "low": "low"}}, "max_tokens", "low"),
+            ({"reasoning": True, "thinkingFormat": "openai", "supportsReasoningEffort": True,
+              "thinkingLevelMap": {"low": "medium"}}, "max_completion_tokens", "medium"),
+            ({"reasoning": True, "thinkingFormat": "zai", "supportsReasoningEffort": False,
+              "thinkingLevelMap": {"low": "low"}}, "max_tokens", None),
+            ({"reasoning": True, "thinkingFormat": "zai", "supportsReasoningEffort": True,
+              "thinkingLevelMap": {"low": None}}, "max_tokens", None),
+            ({"reasoning": True, "thinkingFormat": "unknown", "supportsReasoningEffort": True,
+              "thinkingLevelMap": {"low": "low"}}, "max_tokens", None),
+            ({}, "max_tokens", None),
+        )
+        for contract, key, effort in contracts:
+            with self.subTest(contract=contract), self.endpoint(response) as (model, requests):
+                bridge.complete({**model, **contract, "maxOutputTokens": 8192},
+                                [{"role": "user", "content": "Task"}])
+                body = requests[0][2]
+                self.assertEqual(body["model"], "fixture")
+                self.assertEqual(body[key], 8192)
+                self.assertNotIn("max_tokens" if key == "max_completion_tokens" else "max_completion_tokens", body)
+                self.assertEqual(body.get("reasoning_effort"), effort)
+                self.assertNotIn("thinking", body)
+                self.assertNotIn("tools", body)
+
     def test_model_output_limits_and_anthropic_cached_usage_are_preserved(self):
         bridge = self.bridge()
         response = {"content": [{"type": "text", "text": "plan"}], "stop_reason": "end_turn",
@@ -282,9 +310,13 @@ class Harness2BridgeTests(unittest.TestCase):
                 content = (json.dumps({"files": {"systemprompt.md": "Verify fixture result precisely."},
                                        "notes": "Check the real result."})
                            if "SODUWORK_HARNESS2_EDIT" in system
-                           else "Inspect the request, produce the output, and verify it.")
+                           else "Inspect the request, produce the output, and verify it.\n" * 20)
+                input_tokens = sum(len(row["content"].encode("utf-8"))
+                                   for row in body["messages"]) // 3
                 payload = json.dumps({"choices": [{"message": {"content": content},
-                                                   "finish_reason": "stop"}]}).encode()
+                                                   "finish_reason": "stop"}],
+                                      "usage": {"prompt_tokens": input_tokens,
+                                                "completion_tokens": 637}}).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
@@ -306,33 +338,53 @@ class Harness2BridgeTests(unittest.TestCase):
                        if key not in {"SODUWORK_APPROVAL_CHANNEL", "SODUWORK_RUNTIME_IMAGES"}}
                 env.update({
                     runtime.MODEL_ENV: json.dumps({"base": f"http://127.0.0.1:{server.server_port}/v1",
-                                                  "key": "fixture-secret", "model": "fixture"}),
+                                                  "key": "fixture-secret", "model": "fixture",
+                                                  "reasoning": True, "thinkingFormat": "zai",
+                                                  "supportsReasoningEffort": True,
+                                                  "thinkingLevelMap": {"low": "low", "high": "max"}}),
                     runtime.ROOT_ENV: str(root / "private"),
                     runtime.EXECUTOR_ENV: sys.executable,
                     "PYTHONUTF8": "1",
                 })
                 command = [sys.executable, str(Path(runtime.__file__).with_name("harness2_bridge.py")),
-                           "--cwd", str(work), "--refine"]
-                first = subprocess.run(command, input="Create the requested fixture result.",
+                           "--cwd", str(work)]
+                # Match a Runner turn's multilingual host context, not just the
+                # short question shown in the conversation bubble.
+                prompt = ("Only operate in the fixture workspace.\n"
+                          + "保留用户约束、会话权限与完整原文。Verify the evidence.\n" * 500
+                          + "Create the requested fixture result.\nKeep this final constraint intact.")
+                self.assertGreater(len(prompt.encode("utf-8")), 33000)
+                first = subprocess.run(command, input=prompt,
                                        env=env, text=True, encoding="utf-8", capture_output=True, timeout=30)
                 self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
                 events = [json.loads(line) for line in first.stdout.splitlines()]
                 self.assertTrue(any(row.get("sessionID") == "harness2-native-fixture" for row in events))
                 self.assertEqual(len(requests), 7)
+                self.assertGreater(max(len(json.dumps(row["messages"], ensure_ascii=False).encode("utf-8"))
+                                       for row in requests), 48000)
+                usage = [row["part"]["tokens"] for row in events if row.get("type") == "step_finish"
+                         and "tokens" in row.get("part", {})]
+                self.assertEqual(len(usage), 7)
+                self.assertGreater(sum(row["input_tokens"] + row["output_tokens"] for row in usage), 12000)
+                self.assertTrue(all(row["max_tokens"] == 32768 for row in requests))
+                self.assertTrue(all(row["model"] == "fixture" and row["reasoning_effort"] == "low"
+                                    for row in requests))
                 self.assertEqual((work / "delivered.txt").read_text(), "actual bridge write")
-                self.assertIn("Verify fixture result precisely.", (work / "received.txt").read_text(encoding="utf-8"))
+                received = (work / "received.txt").read_text(encoding="utf-8")
+                self.assertIn("Verify fixture result precisely.", received)
+                self.assertTrue(received.endswith(prompt))
                 self.assertNotIn("fixture-secret", first.stdout + first.stderr)
                 for path in (root / "private").rglob("*"):
                     if path.is_file():
                         self.assertNotIn("fixture-secret", path.read_text(encoding="utf-8"))
-                second = subprocess.run([*command, "--session", "harness2-native-fixture", "--probe"],
+                second = subprocess.run([*command, "--session", "harness2-native-fixture"],
                                         input="Continue this same session.", env=env, text=True,
                                         encoding="utf-8", capture_output=True, timeout=30)
                 self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
-                self.assertEqual(len(requests), 14, "Explicit experimental readiness covers all seven calls")
+                self.assertEqual(len(requests), 14, "Every user turn exercises the selected harness, including native session reuse")
                 second_events = [json.loads(line) for line in second.stdout.splitlines()]
-                self.assertIn({"type": "harness2_probe_complete", "coverage": "refine-v1", "stages": 7},
-                              second_events)
+                self.assertTrue(any(row.get("sessionID") == "harness2-native-fixture" for row in second_events))
+                self.assertIn("<harness2_instructions>", (work / "received.txt").read_text(encoding="utf-8"))
                 readonly_work = root / "readonly"
                 readonly_work.mkdir()
                 (readonly_work / "acp").write_bytes(Path(__file__).with_name("harness2_acp_peer.py").read_bytes())
@@ -343,6 +395,8 @@ class Harness2BridgeTests(unittest.TestCase):
                 self.assertEqual(readonly.returncode, 0, readonly.stdout + readonly.stderr)
                 self.assertFalse((readonly_work / "delivered.txt").exists())
                 self.assertEqual(len(requests), 21)
+                self.assertTrue(all(row["model"] == "fixture" and row["reasoning_effort"] == "low"
+                                    for row in requests))
         finally:
             server.shutdown()
             server.server_close()

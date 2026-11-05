@@ -1,6 +1,7 @@
 """Bounded cleanup of ACP-owned processes, private POSIX groups and pipe readers."""
 from __future__ import annotations
 
+import errno
 import os
 import signal
 import subprocess
@@ -96,7 +97,10 @@ def close_process(proc: subprocess.Popen, readers: list[threading.Thread],
     except BrokenPipeError:
         pass
     except OSError as exc:
-        errors.append(exc)
+        # Like Popen.communicate(), tolerate Windows flushing a closed peer's
+        # stdin as EINVAL. Other pipe and cleanup failures remain visible.
+        if os.name != "nt" or exc.errno != errno.EINVAL:
+            errors.append(exc)
     try:
         kill_process_tree(proc, process_group)
     except (OSError, ProcessCleanupError) as exc:

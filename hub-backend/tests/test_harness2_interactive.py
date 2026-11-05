@@ -1,4 +1,4 @@
-"""Interactive Harness² must not run paid research before native execution."""
+"""Selected Harness² runs bounded refinement; probes and recovery retain explicit boundaries."""
 from __future__ import annotations
 
 import contextlib
@@ -109,7 +109,7 @@ class Harness2InteractiveTests(unittest.TestCase):
                 self.assertEqual(bridge.execute("Continue.", directory, "native-id", "plan",
                                                 True, sys.executable, output=lambda _event: None), 73)
 
-    def test_all_normal_turns_forward_original_request_without_refinement(self):
+    def test_user_turns_refine_but_health_probes_and_permission_recovery_do_not(self):
         for session, mode, probe, continuing in (
             ("", "work", False, False), ("native-id", "work", False, False),
             ("", "plan", False, False), ("", "work", True, False),
@@ -134,17 +134,26 @@ class Harness2InteractiveTests(unittest.TestCase):
                           patch.object(sys, "stdin", io.StringIO(original)),
                           contextlib.redirect_stdout(output),
                           patch("app.services.harness2_engine.refine",
-                                side_effect=AssertionError("interactive research forbidden")) as refine,
+                                return_value="Verify the requested result.") as refine,
                           patch.object(bridge, "complete",
                                        side_effect=AssertionError("preflight model call forbidden")) as complete,
                           patch.object(bridge, "execute", return_value=0) as execute):
                         result = bridge.main(args)
                     self.assertEqual(result, 0, output.getvalue())
-                    refine.assert_not_called()
+                    should_refine = not probe and not (continuing and session)
+                    self.assertEqual(refine.call_count, int(should_refine))
                     complete.assert_not_called()
-                    execute.assert_called_once_with(
-                        original, directory, session, mode, True, sys.executable)
-                    self.assertFalse((root / "scratch").exists())
+                    execute.assert_called_once()
+                    forwarded = execute.call_args.args
+                    self.assertEqual(forwarded[1:], (directory, session, mode, True, sys.executable))
+                    self.assertTrue(forwarded[0].endswith(original))
+                    if should_refine:
+                        self.assertEqual(refine.call_args.args[0], original)
+                        self.assertIn("<harness2_instructions>", forwarded[0])
+                        self.assertIn("Verify the requested result.", forwarded[0])
+                    else:
+                        self.assertEqual(forwarded[0], original)
+                    self.assertEqual((root / "scratch").exists(), should_refine)
                     events = [json.loads(line) for line in output.getvalue().splitlines()]
                     proof = [event for event in events if event.get("type") == "harness2_probe_complete"]
                     self.assertEqual(proof, ([{
@@ -192,7 +201,7 @@ class Harness2InteractiveTests(unittest.TestCase):
             refine.assert_not_called()
             self.assertNotIn("harness2_probe_complete", output.getvalue())
 
-    def test_real_process_delivers_and_resumes_with_unreachable_planner(self):
+    def test_unreachable_planner_blocks_user_execution_but_executor_health_probe_remains_available(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             workspace = root / "中文 workspace"
@@ -209,6 +218,13 @@ class Harness2InteractiveTests(unittest.TestCase):
                 "PYTHONUTF8": "1",
             })
             command = [sys.executable, str(Path(bridge.__file__)), "--cwd", str(workspace)]
+            failed = subprocess.run(command, input="Do not substitute a different harness.",
+                                    env=env, text=True, encoding="utf-8", capture_output=True, timeout=15)
+            self.assertEqual(failed.returncode, 2, failed.stdout + failed.stderr)
+            self.assertFalse((workspace / "delivered.txt").exists())
+            self.assertFalse((workspace / "received.txt").exists())
+            self.assertNotIn("fixture-secret", failed.stdout + failed.stderr)
+            command.append("--probe")
             for extra, prompt in (
                 ([], "Write the requested deliverable."),
                 (["--session", "harness2-native-fixture", "--probe"], "Continue this same session."),
@@ -231,7 +247,7 @@ class Harness2InteractiveTests(unittest.TestCase):
                         self.assertIn({"type": "harness2_probe_complete", "coverage": "execute-v2",
                                        "stages": 0}, events)
             self.assertEqual((workspace / "delivered.txt").read_text(), "actual bridge write")
-            self.assertFalse((root / "scratch").exists())
+            self.assertTrue((root / "scratch").exists())
 
 
 if __name__ == "__main__":

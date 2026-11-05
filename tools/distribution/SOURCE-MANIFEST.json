@@ -1271,8 +1271,8 @@
     },
     {
       "path": "client/components/panels/panels-agents.js",
-      "bytes": 47036,
-      "sha256": "eb340ba75cb7930ff2ac96691767ad5fcadc542d39abf05f9c25ce2f3786b53d"
+      "bytes": 47063,
+      "sha256": "8ca84f153b1e5bbe1d6cb6e90cd2453bdfb26ecdb11f56a9fee13c8dccbcd8af"
     },
     {
       "path": "client/components/panels/panels-aidesk-control.css",
@@ -1411,8 +1411,8 @@
     },
     {
       "path": "client/components/panels/panels-compose-runtime.js",
-      "bytes": 29753,
-      "sha256": "f4e52f5fd0fe1984414a72898f9d4050c428491e0c0e481b18be07a9549d41a0"
+      "bytes": 29750,
+      "sha256": "bec585f48fe8a66ce40a4e20d14bff6ef20abeb15721467d80c80634f885c560"
     },
     {
       "path": "client/components/panels/panels-compose-skills.css",
@@ -3831,8 +3831,8 @@
     },
     {
       "path": "client/e2e/harness2-ui.cjs",
-      "bytes": 13065,
-      "sha256": "a8a39202875fbd2b4253fa19e064ce743841661a8e4c1120053ee675d80e39cc"
+      "bytes": 13214,
+      "sha256": "b4f22fa74755fb03c3d1200b8fe3bd764765bee5c64d8fa6709b022fb0f454f0"
     },
     {
       "path": "client/e2e/hub-connection.cjs",
@@ -8776,8 +8776,8 @@
     },
     {
       "path": "client/tests/harness2-ui.test.cjs",
-      "bytes": 9619,
-      "sha256": "3d17d1f66b457b0de582ae8871252e071ea56c2a854973324f2087947e8b787d"
+      "bytes": 9789,
+      "sha256": "2a7512456078066320328cd0da652406edf0e947a750dd30de5a3b3804ec2ce9"
     },
     {
       "path": "client/tests/helpers/platform-session-fixture.cjs",
@@ -11336,8 +11336,8 @@
     },
     {
       "path": "hub-backend/app/agent_catalog.json",
-      "bytes": 11458,
-      "sha256": "a653c8c1af7760d0aa7263ef901454f3e6e1259e3e0431c27470924f0344bc0c"
+      "bytes": 11513,
+      "sha256": "f2f448d4f782ecce9351031905adf34a6aa1e5cbf3dc2d9f58727f2185c806f8"
     },
     {
       "path": "hub-backend/app/agent_catalog.py",
@@ -11951,8 +11951,8 @@
     },
     {
       "path": "hub-backend/app/services/acp_process.py",
-      "bytes": 4208,
-      "sha256": "fcf57806faeb043f5018c24656df9ea329fff2e2e860a907015a37d49d6f5403"
+      "bytes": 4435,
+      "sha256": "d30b660afc42cad2e3f92b7062a235ec57982afb4e2bd0f3614669414c78ef4a"
     },
     {
       "path": "hub-backend/app/services/acp_transition.py",
@@ -12566,18 +12566,18 @@
     },
     {
       "path": "hub-backend/app/services/harness2_bridge.py",
-      "bytes": 15200,
-      "sha256": "2637913b705569f0ca93c09bc5a922037d9c5d7a6cd7eac5062a5f7f0571df14"
+      "bytes": 16046,
+      "sha256": "622a6fe19081af2b39b598e976aac7b5d3fa9d39aea4561d038c326aece68ac2"
     },
     {
       "path": "hub-backend/app/services/harness2_budget.py",
-      "bytes": 3060,
-      "sha256": "ed1d146f185f43573eee7fc539eaa3514d253fc9b609b34e4e58f2fd680a0fe4"
+      "bytes": 3846,
+      "sha256": "462b208c777272ee3bd05252fb5583f0860b1af56c9aa553682efafdc96ed017"
     },
     {
       "path": "hub-backend/app/services/harness2_engine.py",
-      "bytes": 15385,
-      "sha256": "9391da6f08a619dc0e821ed2c1ebe76005afeee321e8ed501c04bef74877bab3"
+      "bytes": 16604,
+      "sha256": "9069ce7e6f2ff81346d28accb16bfee246e85064f155bbcd1f4b348af4d559c1"
     },
     {
       "path": "hub-backend/app/services/harness2_errors.py",
@@ -12591,8 +12591,8 @@
     },
     {
       "path": "hub-backend/app/services/harness2_probe.py",
-      "bytes": 1453,
-      "sha256": "7164c145150031b60d4c132b2ce144e85bf6c4a350cce608fc60c4075160da7e"
+      "bytes": 1478,
+      "sha256": "304e92930354431c99700954e245bd253f740b939510a0eddf9ab6a696bddb72"
     },
     {
       "path": "hub-backend/app/services/harness2_runtime.py",
@@ -16186,8 +16186,8 @@
     },
     {
       "path": "hub-backend/test_acp_process_lifecycle.py",
-      "bytes": 8956,
-      "sha256": "4baf900fa948f9ba650984564bb2d53144a3cc34ab93828ae761cfb78be4cd42"
+      "bytes": 12136,
+      "sha256": "64ca78356840fa96aac3f1e94c3ae4c4db4322576e1897113654418639980721"
     },
     {
       "path": "hub-backend/test_admin_projects.py",
@@ -16596,8 +16596,8 @@
     },
     {
       "path": "hub-backend/test_harness2_engine.py",
-      "bytes": 8003,
-      "sha256": "9a4a67631e91f9bb1990bc31c0b1a2e88efb3ffab30b77d20381e1f854ac6971"
+      "bytes": 9610,
+      "sha256": "9072cda117cc74c19b2a30b1eb23aa1cef163a56c121eef64341f85649e1c1e1"
     },
     {
       "path": "hub-backend/test_harness2_lifecycle.py",
@@ -17481,8 +17481,8 @@
     },
     {
       "path": "hub-backend/tests/steering_harness2_entry.py",
-      "bytes": 657,
-      "sha256": "cc1bdac13dd391f6c179eeca79c9f6628fb52d1e97a8d87b11fa520e5b4eefc3"
+      "bytes": 1343,
+      "sha256": "857930b29548eba57a688d1d03af89fb226484898ac89f1205d3d6f685c33dff"
     },
     {
       "path": "hub-backend/tests/steering_native_peer.py",
@@ -17651,13 +17651,13 @@
     },
     {
       "path": "hub-backend/tests/test_harness2_bridge.py",
-      "bytes": 20523,
-      "sha256": "e226433111dc659e739d6a44f79914d877c1e5c6dbf92eedbc2dc1c4f9f1ea5f"
+      "bytes": 24501,
+      "sha256": "cc8b5a20658a34e59f05989e9affef294db44250629fad50841355e19c690a37"
     },
     {
       "path": "hub-backend/tests/test_harness2_budget.py",
-      "bytes": 7366,
-      "sha256": "081ef91b5507b01544a82457dc978fddfde8f0e97a33cf684955ad117480a33d"
+      "bytes": 8997,
+      "sha256": "3d5933094fb9bbebff74dc334cefe37c4157901e974b068fdc54359224f17d01"
     },
     {
       "path": "hub-backend/tests/test_harness2_errors.py",
@@ -17671,8 +17671,8 @@
     },
     {
       "path": "hub-backend/tests/test_harness2_interactive.py",
-      "bytes": 14313,
-      "sha256": "518a0d53d8c908337f7472a4d2e94094a2aeea38370c291a3cc28c83c1fac337"
+      "bytes": 15513,
+      "sha256": "0e6217e78deb5559cd4f3b186238bfd308627614c66ca936e4515a6429d67b21"
     },
     {
       "path": "hub-backend/tests/test_harness2_refinement_errors.py",
@@ -17681,8 +17681,8 @@
     },
     {
       "path": "hub-backend/tests/test_harness2_setup_probe.py",
-      "bytes": 7367,
-      "sha256": "c05f9fac10fc23988bbbbcba9ac106414782d944eac8348c25094b3b1f09fa0f"
+      "bytes": 7373,
+      "sha256": "2dc6a03bb604d57997caf0f3d8fbdccf72f9d642d667c431886bba63bce554be"
     },
     {
       "path": "hub-backend/tests/test_harness2_transport.py",

@@ -1,4 +1,4 @@
-"""Budgeted diagnostic refinement never silently retries or drops real usage."""
+"""Budgeted seven-stage refinement never silently retries or drops real usage."""
 from __future__ import annotations
 
 import importlib
@@ -7,6 +7,10 @@ import json
 import unittest
 
 from app.services.harness2_errors import StructuredFailure, failure_message
+from app.services.harness2_budget import (
+    MAX_PROMPT_BYTES, MAX_REPORTED_TOKENS, MAX_SECONDS, MAX_REQUEST_SECONDS,
+    MAX_OUTPUT_TOKENS,
+)
 
 
 class Clock:
@@ -24,7 +28,7 @@ class Harness2BudgetTests(unittest.TestCase):
         self.clock = Clock()
         self.budget = importlib.import_module(name).RefinementBudget(clock=self.clock)
         self.model = {"base": "https://fixture.invalid/v1", "key": "fixture-secret",
-                      "model": "fixture", "maxOutputTokens": 8192}
+                      "model": "fixture", "maxOutputTokens": 65536}
         self.messages = [{"role": "user", "content": "private-task"}]
         self.requests = []
         self.usage = []
@@ -54,24 +58,48 @@ class Harness2BudgetTests(unittest.TestCase):
         self.assertEqual(len(self.requests), 7)
         self.assertEqual(len(self.usage), 7)
 
+    def test_normal_seven_stage_turn_has_input_output_and_latency_headroom(self):
+        self.assertEqual((MAX_PROMPT_BYTES, MAX_REPORTED_TOKENS, MAX_OUTPUT_TOKENS,
+                          MAX_SECONDS, MAX_REQUEST_SECONDS), (128000, 128000, 32768, 420, 300))
+        messages = [{"role": "user", "content": "Constraint and evidence.\n" * 2500}]
+        delays = iter([25, 70, 80, 25, 25, 140, 25])
+        outputs = iter([2500, 9000, 9000, 2500, 2500, 9000, 2500])
+
+        def charged(model, messages, on_usage, *, timeout):
+            self.assertEqual(model["maxOutputTokens"], 32768)
+            delay = next(delays)
+            self.assertGreaterEqual(timeout, delay)
+            self.requests.append(timeout)
+            self.clock.now += delay
+            on_usage({"input_tokens": 11400, "output_tokens": next(outputs)})
+            return "Complete plan or JSON proposal."
+
+        for _ in range(7):
+            self.run_request(charged, messages=messages)
+        self.assertEqual(self.clock.now, 390)
+        self.assertEqual(self.budget.reported_tokens, 116800)
+        self.assertEqual(len(self.usage), 7)
+        self.assert_budget_failure(self.run_request)
+        self.assertEqual(len(self.requests), 7)
+
     def test_output_cap_preserves_smaller_user_limit_and_does_not_mutate_model(self):
         self.run_request()
-        self.assertEqual(self.requests[-1][0]["maxOutputTokens"], 2048)
-        self.assertEqual(self.model["maxOutputTokens"], 8192)
+        self.assertEqual(self.requests[-1][0]["maxOutputTokens"], MAX_OUTPUT_TOKENS)
+        self.assertEqual(self.model["maxOutputTokens"], 65536)
         self.run_request(model={**self.model, "maxOutputTokens": 512})
         self.assertEqual(self.requests[-1][0]["maxOutputTokens"], 512)
         self.run_request(model={key: value for key, value in self.model.items() if key != "maxOutputTokens"})
-        self.assertEqual(self.requests[-1][0]["maxOutputTokens"], 2048)
+        self.assertEqual(self.requests[-1][0]["maxOutputTokens"], MAX_OUTPUT_TOKENS)
 
-    def test_transport_receives_twenty_seconds_or_remaining_deadline(self):
+    def test_transport_receives_request_limit_or_remaining_deadline(self):
         self.run_request()
-        self.assertEqual(self.requests[-1][2], 20)
-        self.clock.now = 56.25
+        self.assertEqual(self.requests[-1][2], MAX_REQUEST_SECONDS)
+        self.clock.now = MAX_SECONDS - 3.75
         self.run_request()
         self.assertEqual(self.requests[-1][2], 3.75)
 
     def test_expired_deadline_rejects_request_before_transport(self):
-        self.clock.now = 60
+        self.clock.now = MAX_SECONDS
         self.assert_budget_failure(self.run_request)
         self.assertEqual(self.requests, [])
         self.assertEqual(self.usage, [])
@@ -79,17 +107,17 @@ class Harness2BudgetTests(unittest.TestCase):
     def test_response_after_deadline_fails_but_keeps_reported_usage(self):
         def delayed(model, messages, on_usage, *, timeout):
             self.requests.append(timeout)
-            self.clock.now = 60
+            self.clock.now = MAX_SECONDS
             on_usage({"input_tokens": 150, "output_tokens": 40})
             return "late result"
         self.assert_budget_failure(lambda: self.run_request(delayed))
-        self.assertEqual(self.requests, [20])
+        self.assertEqual(self.requests, [MAX_REQUEST_SECONDS])
         self.assertEqual(self.usage, [{"input_tokens": 150, "output_tokens": 40}])
         self.assert_budget_failure(self.run_request)
         self.assertEqual(len(self.requests), 1)
 
     def test_token_threshold_forwards_actual_usage_then_rejects_following_calls(self):
-        amounts = [11000, 1000]
+        amounts = [MAX_REPORTED_TOKENS - 1000, 1000]
 
         def charged(model, messages, on_usage, *, timeout):
             self.requests.append(timeout)
@@ -97,18 +125,18 @@ class Harness2BudgetTests(unittest.TestCase):
             return "result"
         self.assertEqual(self.run_request(charged), "result")
         self.assert_budget_failure(lambda: self.run_request(charged))
-        self.assertEqual([row["input_tokens"] for row in self.usage], [11000, 1000])
-        self.assertEqual(self.budget.reported_tokens, 12000)
+        self.assertEqual([row["input_tokens"] for row in self.usage], [MAX_REPORTED_TOKENS - 1000, 1000])
+        self.assertEqual(self.budget.reported_tokens, MAX_REPORTED_TOKENS)
         self.assert_budget_failure(self.run_request)
         self.assertEqual(len(self.requests), 2)
 
     def test_provider_can_report_more_than_remaining_tokens_and_none_are_hidden(self):
         def overspent(model, messages, on_usage, *, timeout):
-            on_usage({"input": 15000, "output": 6000})
+            on_usage({"input": MAX_REPORTED_TOKENS + 3000, "output": 6000})
             return "result"
         self.assert_budget_failure(lambda: self.run_request(overspent))
-        self.assertEqual(self.usage, [{"input": 15000, "output": 6000}])
-        self.assertEqual(self.budget.reported_tokens, 21000)
+        self.assertEqual(self.usage, [{"input": MAX_REPORTED_TOKENS + 3000, "output": 6000}])
+        self.assertEqual(self.budget.reported_tokens, MAX_REPORTED_TOKENS + 9000)
 
     def test_multiple_usage_deltas_are_counted_without_counting_total_twice(self):
         def charged(model, messages, on_usage, *, timeout):
@@ -122,15 +150,15 @@ class Harness2BudgetTests(unittest.TestCase):
     def test_exact_prompt_byte_limit_is_allowed_and_next_byte_is_rejected(self):
         empty = [{"role": "user", "content": ""}]
         overhead = len(json.dumps(empty, ensure_ascii=False).encode("utf-8"))
-        allowed = [{"role": "user", "content": "x" * (48000 - overhead)}]
+        allowed = [{"role": "user", "content": "x" * (MAX_PROMPT_BYTES - overhead)}]
         self.assertEqual(self.run_request(messages=allowed), "result")
         rejected = [{"role": "user", "content": allowed[0]["content"] + "x"}]
         self.assert_budget_failure(lambda: self.run_request(messages=rejected))
         self.assertEqual(len(self.requests), 1)
 
     def test_prompt_limit_counts_utf8_bytes_not_characters(self):
-        messages = [{"role": "user", "content": "界" * 16000}]
-        self.assertLess(len(json.dumps(messages, ensure_ascii=False)), 48000)
+        messages = [{"role": "user", "content": "界" * (MAX_PROMPT_BYTES // 3)}]
+        self.assertLess(len(json.dumps(messages, ensure_ascii=False)), MAX_PROMPT_BYTES)
         self.assert_budget_failure(lambda: self.run_request(messages=messages))
         self.assertEqual(self.requests, [])
 
@@ -150,7 +178,7 @@ class Harness2BudgetTests(unittest.TestCase):
 
     def test_controller_state_and_budget_error_never_retain_model_or_prompt(self):
         self.run_request()
-        self.clock.now = 60
+        self.clock.now = MAX_SECONDS
         failure = self.assert_budget_failure(self.run_request)
         state = repr(vars(self.budget)) + str(failure)
         for private in ("fixture-secret", "fixture.invalid", "private-task"):

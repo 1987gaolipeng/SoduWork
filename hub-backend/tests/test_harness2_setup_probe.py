@@ -44,7 +44,7 @@ class Harness2SetupProbeTests(unittest.TestCase):
             with self.subTest(evidence=evidence):
                 result, _, _ = self.run_probe(protocol(answer(), *([evidence] if evidence else [])))
                 self.assertFalse(result["ok"])
-                self.assertIn("日常执行", result["detail"])
+                self.assertIn("执行组件", result["detail"])
 
     def test_complete_proof_token_and_zero_exit_are_all_required(self):
         result, logs, options = self.run_probe(protocol(answer(), proof()))
@@ -52,10 +52,10 @@ class Harness2SetupProbeTests(unittest.TestCase):
         self.assertEqual(result["coverage"], "execute-v2")
         self.assertEqual(options["timeout"], 180)
         self.assertNotIn("progress_line", options)
-        self.assertTrue(any("日常执行" in line and "额度" in line and "3 分钟" in line for line in logs))
+        self.assertTrue(any("执行组件" in line and "额度" in line and "3 分钟" in line for line in logs))
         self.assertFalse(any("7 轮" in line or "10 分钟" in line for line in logs))
-        self.assertIn("日常执行", result["detail"])
-        self.assertNotIn("推演", result["detail"])
+        self.assertIn("执行组件", result["detail"])
+        self.assertIn("不包含推演", result["detail"])
         for output, code in [(protocol(proof()), 0), (protocol(answer(), proof()), 124),
                              (protocol(answer(), proof(), {"error": {"message": "execution failed"}}), 0)]:
             with self.subTest(output=output, code=code):
@@ -114,7 +114,7 @@ class Harness2SetupProbeTests(unittest.TestCase):
         self.assertIsNone(result["probe"]["ok"])
         self.assertNotIn("at", result["probe"])
         self.assertEqual(result["probe"]["previous"], old)
-        self.assertIn("日常执行", result["probe"]["detail"])
+        self.assertIn("执行组件", result["probe"]["detail"])
         self.assertEqual(result["setupState"], "ready")
         self.assertNotEqual(result["why"], result["probe"]["detail"])
         self.assertIsNone(refined["probe"]["ok"])

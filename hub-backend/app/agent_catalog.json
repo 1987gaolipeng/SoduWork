@@ -346,7 +346,7 @@
       "goalMode": "native",
       "group": "more",
       "order": 80,
-      "summary": "通过 OpenCode 直接执行；Google Research 推演核心用于显式诊断",
+      "summary": "Harness² 文本推演后由 OpenCode 执行，增加耗时与模型用量",
       "runner": {
         "adapter": "native"
       },
@@ -354,7 +354,7 @@
         "installer": "bundled",
         "pkg": "",
         "source": "https://github.com/google-research/harness2",
-        "blurb": "日常对话通过 OpenCode 直接执行；Google Research Harness² 的实验性推演仅用于显式诊断。",
+        "blurb": "每轮先运行 Google Research Harness² 的七阶段文本推演，再由 OpenCode 执行工具；推演会增加耗时与模型用量，失败时不会切换底座。",
         "warn": "",
         "config_how": "直接使用「我的模型」中选定的企业模型；模型凭据仅注入本次进程，不写入文件。",
         "config_path": "",

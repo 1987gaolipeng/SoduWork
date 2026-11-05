@@ -95,13 +95,13 @@ test('health-projected Harness² still requires a current probe and returns afte
   assert.equal(f.element('#cpRuntimeName').textContent, 'Google Harness²');
   const row = f.runtime.catalog().find(row => row.id === 'harness2');
   assert.equal(row.modelMode, 'managed');
-  assert.match(row.summary, /OpenCode.*直接执行/);
-  assert.match(row.summary, /Google Research.*显式诊断/);
+  assert.match(row.summary, /Harness² 文本推演后由 OpenCode 执行/);
+  assert.match(row.summary, /增加耗时与模型用量/);
   const catalog = JSON.parse(source('../hub-backend/app/agent_catalog.json'));
   const shared = catalog.agents.find(item => item.id === 'harness2');
   assert.equal(shared.summary, row.summary);
-  assert.match(shared.install.blurb, /日常对话.*直接执行/);
-  assert.match(shared.install.blurb, /实验性推演.*显式诊断/);
+  assert.match(shared.install.blurb, /每轮先运行.*七阶段文本推演.*再由 OpenCode 执行工具/);
+  assert.match(shared.install.blurb, /增加耗时与模型用量.*失败时不会切换底座/);
 });
 
 test('Harness² management provides lifecycle actions while explaining the bundled core and shared executor', () => {
@@ -146,7 +146,8 @@ test('Harness² management provides lifecycle actions while explaining the bundl
   assert.doesNotMatch(pi, /data-aunin=/);
   const probeJob = { key: 'fixture-device~harness2', action: 'probe', state: 'running', lines: [] };
   const executionProbe = context._agJobHtml(probeJob);
-  assert.match(executionProbe, /日常执行/);
+  assert.match(executionProbe, /仅验证 OpenCode 执行组件/);
+  assert.match(executionProbe, /不运行 Harness² 推演/);
   assert.match(executionProbe, /模型额度/);
   assert.match(executionProbe, /最多 3 分钟/);
   assert.doesNotMatch(executionProbe, /7 轮推演|10 分钟/);

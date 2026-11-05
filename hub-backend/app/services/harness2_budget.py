@@ -1,4 +1,4 @@
-"""Finite resource budget for explicitly requested Harness² diagnostics."""
+"""Finite resource budget for Harness² user turns and refinement diagnostics."""
 from __future__ import annotations
 
 import json
@@ -8,11 +8,21 @@ from typing import Callable
 from .harness2_errors import StructuredFailure
 
 MAX_CALLS = 7
-MAX_SECONDS = 60.0
-MAX_REQUEST_SECONDS = 20.0
-MAX_OUTPUT_TOKENS = 2048
-MAX_REPORTED_TOKENS = 12000
-MAX_PROMPT_BYTES = 48000
+MAX_SECONDS = 420.0
+MAX_REQUEST_SECONDS = 300.0
+MAX_OUTPUT_TOKENS = 32768
+# A user turn replays the full task in four probes and three proposals. These
+# are whole-turn accounting and per-request wire limits, respectively; the old
+# diagnostic limits could reject the second stage of a normal Runner prompt.
+# Reasoning models may include hidden reasoning in their output allowance, so
+# a short JSON proposal still needs headroom beyond 8192 tokens. The cumulative
+# budget remains independent of this allowance; smaller configured limits win.
+# Seven sequential reasoning calls need a separate planning deadline; a single
+# healthy proposal can exceed 90 seconds even when its visible answer is short.
+# Align the request ceiling with the Hub model transport's read allowance, then
+# clamp every request to the remaining whole-turn deadline below.
+MAX_REPORTED_TOKENS = 128000
+MAX_PROMPT_BYTES = 128000
 
 
 class RefinementBudget:
