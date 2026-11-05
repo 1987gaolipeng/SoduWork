@@ -706,6 +706,8 @@
     return null;
   }
   const OFFICE_EXTENSIONS = /^(?:doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp|rtf|pages|numbers|key)$/;
+  const ARCHIVE_EXTENSIONS = /^(?:zip|rar|7z|tar|gz|tgz|bz2|xz)$/;
+  const ARCHIVE_MIME = /^application\/(?:zip|x-zip-compressed|x-rar-compressed|vnd\.rar|x-7z-compressed|x-tar|gzip|x-gzip|x-bzip2|x-xz)$/;
   const OFFICE_MIME = /^(?:application\/(?:msword|rtf|vnd\.ms-[\w.+-]+|vnd\.openxmlformats-officedocument\.[\w.+-]+|vnd\.oasis\.opendocument\.[\w.+-]+)|text\/rtf)$/;
   const TEXT_MIME = /^(?:text\/.+|application\/(?:json|xml|yaml|x-yaml|javascript|typescript|sql))$/;
   function previewKind(file) {
@@ -717,6 +719,7 @@
     // They are handed to the OS so Excel/PowerPoint/Word (or the user's
     // configured equivalent) can render the original bytes faithfully.
     if (OFFICE_EXTENSIONS.test(suffix) || OFFICE_MIME.test(mime) ||
+        ARCHIVE_EXTENSIONS.test(suffix) || ARCHIVE_MIME.test(mime) ||
         ['presentation', 'spreadsheet', 'archive', 'binary'].includes(declared)) return 'external';
     const mapped = { website: 'web', pdf: 'pdf', image: 'image', video: 'video' }[declared];
     if (mapped) return mapped;

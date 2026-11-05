@@ -62,3 +62,27 @@ test('资料库多选工具栏数量和操作在中英日韩语言下均可显�
     });
   }
 });
+
+
+test('missing local file dialogs provide recovery guidance in every supported locale', () => {
+  const title = '本地文件不存在';
+  const message = '找不到这份资料的本地文件，可能已被删除或移动。请恢复文件后重试，或从原会话重新保存、重新上传到资料库。';
+  for (const locale of ['en-US', 'ja-JP', 'ko-KR']) {
+    const api = loadI18n(locale);
+    assert.notEqual(api.translateText(title), title, locale);
+    assert.notEqual(api.translateText(message), message, locale);
+  }
+});
+
+test('remote storage percentage and connected tooltip follow the selected locale', () => {
+  const expected = {
+    'zh-CN': '远程存储已连接 · 剩余 75%',
+    'en-US': 'Remote storage connected · 75% remaining',
+    'ja-JP': 'リモート保存に接続済み · 残り 75%',
+    'ko-KR': '원격 저장에 연결됨 · 남은 공간 75%',
+  };
+  for (const [locale, tooltip] of Object.entries(expected)) {
+    const api = loadI18n(locale);
+    assert.equal(api.t('library.copy', '远程存储已连接 · 剩余 {percent}%', { percent: 75 }), tooltip);
+  }
+});

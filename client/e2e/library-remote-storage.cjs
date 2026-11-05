@@ -47,9 +47,31 @@ if (typeof electron === 'string') {
     for (const file of ['library-file-icons', 'panels-library-dialogs', 'panels-library']) await js(fs.readFileSync(path.join(client, 'components/panels/' + file + '.js'), 'utf8') + '\nvoid 0;');
     await js('openLibraryPanel();void 0;'); await until('document.querySelector("[data-library-storage=remote]")&&!document.querySelector("[data-library-storage=remote]").disabled');
     assert.equal(await js('document.querySelectorAll("[data-library-storage]").length'), 2);
-    assert.match(await js('document.querySelector("[data-library-storage=remote]").title'), /NFS/);
-    assert.equal(await js('document.querySelector("[data-library-storage-quota=remote]").hidden'), false);
-    assert.match(await js('document.querySelector("[data-library-storage-quota=remote]").textContent'), /123 B/);
+    assert.equal(await js('document.querySelector("[data-library-storage=remote]").title'), '远程存储已连接 · 剩余 100%');
+    assert.equal(await js('document.querySelector("[data-library-storage-quota=remote]")'), null);
+    for (const [remainingBytes, percent] of [[805306368, 75], [0, 0], [1073741824, 100]]) {
+      await status({ storage: { local: available('local'), remote: { ...available('nfs'), remainingBytes }, nfs: available('nfs') } });
+      await until(`document.querySelector('[data-library-storage=remote]').title === '远程存储已连接 · 剩余 ${percent}%'`);
+      assert.equal(await js('document.querySelector("[data-library-storage-quota=remote]")'), null);
+      assert.equal(await js('document.querySelector("[data-library-storage=remote]").title'), `远程存储已连接 · 剩余 ${percent}%`);
+      assert.equal(await js('document.querySelector("[data-library-storage-status=remote]").title'), `远程存储已连接 · 剩余 ${percent}%`);
+    }
+    await status({ storage: { local: available('local'), remote: { ...available('nfs'), remainingBytes: null }, nfs: available('nfs') } });
+    await until('document.querySelector("[data-library-storage=remote]").title === "远程存储已连接"');
+    assert.equal(await js('document.querySelector("[data-library-storage=remote]").title'), '远程存储已连接');
+    await status({ storage: { local: available('local'), remote: available('nfs'), nfs: available('nfs') } });
+    await until('document.querySelector("[data-library-storage=remote]").title === "远程存储已连接 · 剩余 100%"');
+    win.showInactive();
+    await delay(150);
+    fs.writeFileSync(path.join(output, 'quota-percent.png'), (await win.webContents.capturePage()).toPNG());
+    win.hide();
+    report.cases.push('No capacity summary element is rendered; only the remote tooltip updates for partial, full and empty storage, and unknown quota clears the old percentage');
+    const requestsBeforeHover = await js('({status:statusCalls,list:calls.filter(c=>c.op==="list").length})');
+    await js(`(()=>{const tab=document.querySelector('[data-library-storage=remote]');for(let i=0;i<20;i++){tab.dispatchEvent(new MouseEvent('mouseenter'));tab.dispatchEvent(new MouseEvent('mouseleave'));}tab.focus();})();`);
+    await delay(80);
+    assert.deepEqual(await js('({status:statusCalls,list:calls.filter(c=>c.op==="list").length})'), requestsBeforeHover);
+    assert.equal(await js('document.querySelector("[data-library-storage=remote]").title'), '远程存储已连接 · 剩余 100%');
+    report.cases.push('Repeated hover and keyboard focus do not issue status probes or list reads');
     await click('[data-library-migrate=local-fixture]'); await until('document.querySelector(".library-confirm-dialog")');
     await click('[data-library-confirm-cancel]'); await delay(30);
     assert.equal(await js('calls.some(c=>c.op==="copy")'), false);
@@ -96,18 +118,17 @@ if (typeof electron === 'string') {
     await click('[data-library-create-kind=folder]'); await until('document.querySelector("[data-library-folder-name]")');
     await js('document.querySelector("[data-library-folder-name]").value="NFS folder";document.querySelector(".library-folder-editor").requestSubmit();void 0;');
     await until('calls.some(c=>c.op==="folder")'); assert.equal(await js('calls.find(c=>c.op==="folder").storage'), 'nfs');
-    await click('[data-library-create-kind=document]'); await until('document.querySelector("[data-library-editor-content]")');
-    await js('document.querySelector("[data-library-editor-content]").value="NFS document";document.querySelector(".library-note-editor").requestSubmit();void 0;');
-    await until('calls.some(c=>c.op==="document")'); assert.equal(await js('calls.find(c=>c.op==="document").storage'), 'nfs');
-    await until('!document.querySelector(".library-document-dialog")');
+    assert.equal(await js('document.querySelector("[data-library-create-kind=document]")'), null);
+    await click('[data-library-filter-kind=document]');
+    assert.ok(await js('document.querySelector("[data-library-file-preview=file-nfs]") !== null'));
     await click('[data-library-move=file-nfs]'); await until('document.querySelector("[data-library-move-folder=folder-nfs]")');
     await click('[data-library-move-folder=folder-nfs]'); await until('calls.some(c=>c.op==="update")');
     assert.equal(await js('calls.find(c=>c.op==="update").storage'), 'nfs');
-    report.cases.push('New folder, document and move operations retain the selected concrete provider');
+    report.cases.push('New folder, existing-document filtering and move operations retain the selected concrete provider');
 
     await status({ storage: { local: available('local'), remote: available('minio'), minio: available('minio'), nfs: available('nfs') }, remoteOrder: ['minio', 'nfs'] });
     await until('document.querySelector("[data-library-file-preview=file-minio]")');
-    assert.match(await js('document.querySelector("[data-library-storage=remote]").title'), /MinIO/);
+    assert.equal(await js('document.querySelector("[data-library-storage=remote]").title'), '远程存储已连接 · 剩余 100%');
     await status({ storage: { local: available('local'), remote: available('nfs'), minio: available('minio'), nfs: available('nfs') }, remoteOrder: ['nfs', 'minio'] });
     await until('document.querySelector("[data-library-file-preview=file-nfs]")');
     report.cases.push('When both providers exist, server-selected first configured provider controls the remote tab and refresh resets the old provider view');

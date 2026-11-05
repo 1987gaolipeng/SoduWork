@@ -109,12 +109,12 @@ async function execute(store, index, action, payload) {
     const row = key && index.items.find(x => !x.deletedAt && outputKeys(x).includes(key));
     if (row) {
       try { await store.locate(row); return { ok: true, item: publicRow(row) }; }
-      catch (e) { if (e.code !== 'ENOENT') throw e; }
+      catch (e) { if (e.code !== 'LOCAL_LIBRARY_FILE_MISSING') throw e; }
     }
     if (key && /^[a-f0-9]{64}$/i.test(body.sha256 || '')) {
       for (const existing of index.items.filter(x => !x.deletedAt && x.filename === body.name && x.size === body.size)) {
         let bytes;
-        try { bytes = await store.read(existing); } catch (e) { if (e.code === 'ENOENT') continue; throw e; }
+        try { bytes = await store.read(existing); } catch (e) { if (e.code === 'LOCAL_LIBRARY_FILE_MISSING') continue; throw e; }
         if (crypto.createHash('sha256').update(bytes).digest('hex') !== body.sha256.toLowerCase()) continue;
         existing.extra ||= {}; existing.extra.outputKeys = [...new Set([...outputKeys(existing), key])];
         await store.save(index); return { ok: true, item: publicRow(existing) };
@@ -174,9 +174,10 @@ async function execute(store, index, action, payload) {
       // requested display name, while still recognizing pre-receipt files by
       // their original name and byte length.
       for (const existing of index.items.filter(x => !x.deletedAt &&
+        (body.dedupeFolder !== true || x.folderId === row.folderId) &&
         (outputKeys(x).includes(outputKey) || (x.filename === filename && x.size === bytes.length)))) {
         let saved;
-        try { saved = await store.read(existing); } catch (e) { if (e.code === 'ENOENT') continue; throw e; }
+        try { saved = await store.read(existing); } catch (e) { if (e.code === 'LOCAL_LIBRARY_FILE_MISSING') continue; throw e; }
         if (!saved.equals(bytes)) continue;
         existing.extra ||= {};
         existing.extra.outputKeys = [...new Set([...outputKeys(existing), outputKey])];

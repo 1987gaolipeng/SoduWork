@@ -31,7 +31,7 @@ if (typeof electron === 'string') {
   const accounts = { a: crypto.randomBytes(16).toString('hex'), b: crypto.randomBytes(16).toString('hex') };
   let account = 'a', win, receiver, origin, offline = false, fileProtocolInstalled = false;
   let historyDeleted = false, historyPurged = false;
-  const requests = [], uploads = [], emptyCreates = [], blocked = [], trashClears = [];
+  const requests = [], uploads = [], emptyCreates = [], blocked = [], trashClears = [], shares = [], systemOpens = [];
   const nfsTrash = [{ id: 'fixture-nfs-trashed', title: 'Separate NFS trash', filename: 'nfs-trash.bin',
     kind: 'file', backend: 'nfs', size: 0, deletedAt: '2026-10-16T00:00:00Z' }];
   const sha = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -66,7 +66,7 @@ if (typeof electron === 'string') {
     }
     require('../main/library-local.cjs').install({ app, ipcMain, BrowserWindow,
       ownerOf: () => accounts[account],
-      shell: { openPath: async () => '', showItemInFolder() {} },
+      shell: { openPath: async target => { systemOpens.push(target); return ''; }, showItemInFolder() {} },
       dialog: { showSaveDialog: async () => ({ canceled: true }) } });
   }
   async function startReceiver() {
@@ -81,6 +81,13 @@ if (typeof electron === 'string') {
       function json(value, status = 200) { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(value)); }
       if (offline) { json({ detail: 'Isolated receiver is offline' }, 503); return; }
       try {
+        if (url.pathname === '/api/v1/library/share-members') {
+          json({ members: [{ id: 'fixture-recipient', name: 'Test member', username: 'fixture' }] }); return;
+        }
+        if (url.pathname === '/api/v1/library/share-local' && request.method === 'POST') {
+          const chunks = []; for await (const chunk of request) chunks.push(chunk);
+          shares.push(JSON.parse(Buffer.concat(chunks).toString('utf8'))); json({ ok: true }); return;
+        }
         if (url.pathname === '/api/v1/library/storage/status') {
           const available = backend => ({ backend, configured: true, available: true, connected: true });
           json({ storage: { local: available('local'), nfs: available('nfs'), remote: available('nfs') } }); return;
@@ -310,13 +317,9 @@ if (typeof electron === 'string') {
     const renamedUpload = (await listLocal()).items.find(row => row.filename === 'DUPLICATE（1）.txt');
     assert.ok(renamedUpload); assert.notEqual(renamedUpload.id, dupe.id);
     assert.equal((await call('readLibraryContent', renamedUpload.id)).content, 'replacement');
-    await click('[data-library-create-kind=document]'); await until('document.querySelector(".library-document-dialog")');
-    await js(`document.querySelector('[data-library-editor-title]').value='duplicate';document.querySelector('[data-library-editor-content]').value='keep this draft';document.querySelector('.library-note-editor').requestSubmit();void 0;`);
-    await until('document.querySelector(".library-confirm-dialog")?.textContent.includes("名称重复")');
-    await click('.library-confirm-submit');
-    assert.equal(await js('document.querySelector("[data-library-editor-content]").value'), 'keep this draft');
-    await click('[data-library-editor-cancel]');
-    report.cases.push('Actual native upload renames duplicate files, preserves both versions and completes the batch; duplicate new-document alerts preserve the draft');
+    assert.equal(await js('document.querySelector("[data-library-create-kind=document]")'), null);
+    assert.ok(await js('document.querySelector("[data-library-filter-kind=document]") !== null'));
+    report.cases.push('Actual native upload renames duplicate files, preserves both versions and completes the batch; document creation is absent while existing documents remain filterable');
     report.cases.push('Historical Hub-local fixture rows never appear in the client-local tab');
     await click('[data-library-storage=remote]');
     await click('[data-library-scope=all]');
@@ -379,6 +382,65 @@ if (typeof electron === 'string') {
     assert.ok(requests.some(request => request.method === 'GET' && request.path === '/api/v1/library'
       && request.storage === 'nfs' && !request.folderId));
     report.cases.push('Only the historical breadcrumb root exits history and returns to the remote NFS root');
+    // The metadata remains while the real object is removed outside the app.
+    // Exercise production IPC, renderer routing and modal UI against that state.
+    await js(fs.readFileSync(path.join(client, 'components/panels/library-preview-pane.js'), 'utf8') + '\nvoid 0;');
+    const missingRows = [];
+    for (const filename of ['missing.pptx', 'missing.xlsx', 'missing.docx', 'missing.zip', 'missing.txt', 'missing.png']) {
+      const row = (await js(`SoduWorkAPI.uploadLibraryFile(new File(['fixture bytes'],${JSON.stringify(filename)}),'','local')`)).item;
+      const index = JSON.parse(fs.readFileSync(path.join(storageRoot, 'index.json'), 'utf8'));
+      const target = path.join(storageRoot, index.items.find(x => x.id === row.id)._object);
+      fs.unlinkSync(target); missingRows.push({ ...row, target });
+    }
+    await click('[data-library-storage=local]');
+    await until(`document.querySelector('[data-library-file-preview="${missingRows[0].id}"]')`);
+    const beforeOpens = systemOpens.length;
+    const assertMissingDialog = async () => {
+      await until('document.querySelector(".library-confirm-dialog[open]")');
+      const text = await js('document.querySelector(".library-confirm-dialog").textContent');
+      assert.match(text, /本地文件不存在/); assert.match(text, /恢复文件后重试/);
+      assert.doesNotMatch(text, /ENOENT|lstat|objects|[A-Z]:\\/);
+      assert.equal(await js('document.querySelector(".library-confirm-dialog").matches(":modal")'), true);
+    };
+    for (const row of missingRows.slice(0, 4)) {
+      await click(`[data-library-open-system="${row.id}"]`);
+      await assertMissingDialog(); await click('.library-confirm-submit');
+    }
+    assert.equal(systemOpens.length, beforeOpens, 'Missing files must never launch system applications');
+    report.cases.push('Deleted Word, Excel, PowerPoint and ZIP files show a safe modal instead of native errors and never launch a system app');
+    for (const row of missingRows.slice(4)) {
+      await click(`[data-library-file-preview="${row.id}"]`);
+      await until('document.querySelector(".library-preview-message")?.textContent.includes("本地文件不存在")');
+      assert.equal(await js('document.querySelector(".library-preview-dialog").matches(":modal")'), true);
+      assert.equal(await js('[...document.querySelectorAll(".library-preview-actions button")].filter(b=>!b.hidden).every(b=>b.disabled)'), true);
+      assert.doesNotMatch(await js('document.querySelector(".library-preview-dialog").textContent'), /ENOENT|lstat|objects/);
+      await click('[data-preview-close]'); await until('!document.querySelector(".library-preview-dialog")');
+    }
+    report.cases.push('Deleted text/image previews show recovery guidance inside the preview modal and disable unavailable file actions');
+    await click(`[data-library-share="${missingRows[0].id}"]`);
+    await until('document.querySelector(".library-share-dialog[open]")');
+    await click('.library-share-members input');
+    await js('document.querySelector("[data-library-share-note]").value="Keep this note";void 0;');
+    await click('.library-share-submit'); await assertMissingDialog();
+    assert.equal(shares.length, 0, 'Failed read must not send any notification');
+    assert.equal(await js('document.querySelector("[data-library-share-error]").hidden'), true);
+    win.setSize(560, 720);
+    const rect = await js('(()=>{const r=document.querySelector(".library-confirm-dialog").getBoundingClientRect();return {left:r.left,right:r.right,width:innerWidth};})()');
+    assert.ok(rect.left >= 0 && rect.right <= rect.width, 'Error dialog fits a narrow window');
+    fs.writeFileSync(path.join(output, 'missing-file-dialog.png'), (await win.webContents.capturePage()).toPNG());
+    await click('.library-confirm-submit');
+    await until('!document.querySelector(".library-share-submit").disabled');
+    assert.equal(await js('document.querySelector(".library-share-members input").checked'), true);
+    assert.equal(await js('document.querySelector("[data-library-share-note]").value'), 'Keep this note');
+    fs.writeFileSync(missingRows[0].target, 'restored fixture bytes');
+    await click('.library-share-submit'); await until('!document.querySelector(".library-share-dialog")');
+    assert.equal(shares.length, 1); assert.equal(shares[0].note, 'Keep this note');
+    assert.equal(Buffer.from(shares[0].data, 'base64').toString('utf8'), 'restored fixture bytes');
+    await click(`[data-library-open-system="${missingRows[0].id}"]`);
+    await untilMain(() => systemOpens.length === beforeOpens + 1, 'restored system file opens');
+    assert.ok((await listLocal()).items.some(row => row.id === missingRows[0].id));
+    assert.doesNotMatch(await js('notices.join("\\n")'), /ENOENT|lstat|objects/);
+    report.cases.push('Sharing a deleted file shows a narrow-layout modal, preserves recipients/note and metadata, and succeeds with exact bytes only after file restoration');
     assert.deepEqual(blocked, [], 'No request may attempt a production or external endpoint');
     report.counts = { cases: report.cases.length, httpRequests: requests.length, multipartUploads: uploads.length,
       emptyFileCreates: emptyCreates.length, historicalTrashClears: trashClears.length, blockedExternalRequests: blocked.length };

@@ -36,16 +36,16 @@ if(typeof electron==='string'){
   const iconPath=path.join(app.getPath('userData'),'example.xlsx');fs.writeFileSync(iconPath,'isolated icon fixture');
   const fileIcon=(await app.getFileIcon(iconPath)).toDataURL();
   await js('window.soduWorkAPI={fileTypeIcon:async()=>({ok:true,dataUrl:'+JSON.stringify(fileIcon)+'})};void 0;');
-  await js(`document.body.insertAdjacentHTML('beforeend','<main id="messages"></main>');window.fail=false;window.waitSave=false;window.saved=[];window.listCalls=[];window.routes=[];window.uploads=0;window.notices=[];window.previewCalls=0;window.scope='owner-a';window.remoteBackend='nfs';window.errors=[];
+  await js(`document.body.insertAdjacentHTML('beforeend','<main id="messages"></main>');window.fail=false;window.waitSave=false;window.saved=[];window.listCalls=[];window.routes=[];window.uploads=0;window.notices=[];window.previewCalls=0;window.scope='owner-a';window.remoteBackend='nfs';window.deliveryBackend='local';window.errors=[];
    addEventListener('error',e=>errors.push(e.message));addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));window.petSay=s=>notices.push(s);
-   window.SoduWorkLibraryPreview={create:()=>({close(){},open(){previewCalls++;}})};
+   window.SoduWorkLibraryPreview={create:()=>({close(){},selectedId:()=>'',refreshSelection(){},open(){previewCalls++;}})};
    window.SoduWorkAPI={taskStorageKey:()=>scope,libraryOutputKey:(ref,file)=>file.artifactId,getLibraryOutputStatus:async key=>({ok:true,item:saved.find(item=>item.id==='local-'+key)||null}),getLibraryStorageStatus:async()=>({storage:{local:{available:true},remote:{backend:remoteBackend,available:true,connected:true,configured:true}}}),
     listLibrary:async f=>{listCalls.push(f);return{items:saved.filter(x=>(f.folderId==='server-history-root'?x.backend==='local'&&!x.id.startsWith('local-'):x.backend===f.storage)&&(!f.query||x.filename.includes(f.query))),folders:[],folder:f.folderId?{id:f.folderId,storageOrigin:'server-history'}:null};},
-    saveLibraryDelivery:async payload=>{uploads++;if(fail)throw Error('保存失败：连接中断');if(waitSave)await new Promise(r=>window.releaseSave=r);const item={id:'local-'+payload.manifest.filename,backend:'local',storage:'local',title:payload.manifest.filename,filename:payload.manifest.filename,kind:'document',files:[{path:payload.manifest.filename,size:30}],size:30};saved.push(item);return{ok:true,delivery:item};},
+    saveLibraryDelivery:async payload=>{uploads++;if(fail)throw Error('保存失败：连接中断');if(waitSave)await new Promise(r=>window.releaseSave=r);const item={id:(deliveryBackend==='local'?'local-':'remote-')+payload.manifest.filename,backend:deliveryBackend,storage:deliveryBackend,title:payload.manifest.filename,filename:payload.manifest.filename,kind:'document',files:payload.manifest.files||[{path:payload.manifest.filename,size:30}],size:30};saved.push(item);return{ok:true,delivery:item};},
     uploadLibraryOutput:async(ref,file)=>{uploads++;if(fail)throw Error('保存失败：连接中断');const item={id:'local-'+file.artifactId,backend:'local',filename:file.name,title:file.name,kind:'document',size:30};saved.push(item);return{ok:true,item};}};
    window.api={inspectDelivery:async()=>({ok:true,manifest:{files:[{path:currentFile.name,size:30}]}}),prepareDelivery:async(ref,ids)=>({ok:true,manifest:{filename:currentFile.name},data:'fixture'})};void 0;`);
   for(const file of JSON.parse(read('core/locales/manifest.json')))await js(read('core/locales/'+file));
-  for(const file of ['core/i18n-dom.js','core/i18n.js','components/panels/library-file-icons.js','components/panels/panels-library-dialogs.js','components/panels/library-transfer.js','components/panels/chat-deliveries.js','components/panels/panels-library.js'])await js(read(file)+'\nvoid 0;');
+  for(const file of ['core/i18n-dom.js','core/i18n.js','components/panels/library-file-icons.js','components/panels/panels-library-dialogs.js','components/panels/library-transfer.js','components/panels/chat-dom-patch.js','components/panels/panels-chat-tools.js','components/panels/chat-deliveries.js','components/panels/panels-library.js'])await js(read(file)+'\nvoid 0;');
   await js(`SoduWorkI18n.setLocale('zh-CN',{persist:false,broadcast:false});
    WorkspaceHost={open:async(view,payload)=>{routes.push({view,...payload});return openLibraryPanel(payload);}};
    messages.addEventListener('click',e=>{const node=e.target.closest('button');if(!node)return;if(node.hasAttribute('data-library-output'))window.pending=LibraryTransfer.saveDecorated(node);else window.pending=ChatDeliveries.handle(node,api);});
@@ -62,17 +62,46 @@ if(typeof electron==='string'){
   assert.equal(await js(`document.querySelector('[data-delivery-retry]').disabled`),true);
   assert.equal(await js(`document.querySelector('[data-delivery-retry]').innerText`),'正在保存到资料库…');await shot('excel-saving');
   await js('waitSave=false;releaseSave();');await js('pending');
-  assert.equal(await js(`document.querySelector('[data-delivery-retry]').innerText`),'已保存到资料库');await shot('excel-saved');
+  assert.equal(await js(`document.querySelector('[data-delivery-retry]').innerText`),'已保存到资料库');assert.equal(await js(`document.querySelector('[data-delivery-open]').hidden`),true);await shot('excel-saved');
   const before=await js('uploads');await click('[data-delivery-retry]');
   assert.equal(await js('uploads'),before);assert.equal(await js(`document.activeElement.querySelector('.library-card-copy b').textContent`),'中学课程表.xlsx');
   assert.equal(await js('listCalls.at(-1).storage'),'local');assert.equal(await js('previewCalls'),0);
   report.cases.push('Excel: icon-only save, failure retry, busy state, saved receipt, locate in the real library panel without duplicate upload or opening Office');
   await js('closeLibraryPanel();');
-  for(const ext of ['docx','pptx','html','md','png','pdf']){
-   await js(`render('${ext}');`);await click('[data-delivery-retry]');
-   assert.equal(await js(`document.querySelector('[data-delivery-retry]').innerText`),'已保存到资料库');
+  for(const storage of ['local','nfs','minio']){
+   await js(`deliveryBackend='${storage}';`);
+   for(const ext of ['doc','docx','xls','xlsx','xlsm','ppt','pptx','zip','7z','html','md','txt','png','pdf']){
+    const name=ext+'-'+storage,previewable=['html','md','txt','png','pdf'].includes(ext);
+    await js(`render('${name}');`);
+    assert.equal(await js(`document.querySelector('[data-delivery-open]').hidden`),true,'No preview before saving');
+    await click('[data-delivery-retry]');
+    assert.equal(await js(`document.querySelector('[data-delivery-retry]').innerText`),'已保存到资料库');
+    assert.equal(await js(`document.querySelector('[data-delivery-open]').hidden`),!previewable,storage+': '+ext);
+    await js(`render('${name}');`);
+    assert.equal(await js(`document.querySelector('[data-delivery-open]').hidden`),!previewable,'Same policy after rerender');
+    const previews=await js('previewCalls'),routeCount=await js('routes.length');
+    if(!previewable){
+     await js(`ChatDeliveries.handle(document.querySelector('[data-delivery-open]'),api);`);
+     assert.equal(await js('previewCalls'),previews);assert.equal(await js('routes.length'),routeCount);
+    }else if(storage==='local'){
+     await click('[data-delivery-open]');
+     for(let i=0;i<40&&await js('previewCalls')===previews;i++)await delay(25);
+     assert.equal(await js('previewCalls'),previews+1,ext+' explicit preview');
+    }
+   }
+   report.cases.push(storage+': Office/archive files never expose saved preview; HTML, Markdown, text, image and PDF retain it, including rerender');
   }
-  report.cases.push('Word, PowerPoint, HTML, Markdown, PNG and PDF all retain their library entry after saving');
+  await js(`deliveryBackend='local';render('md-bundle');
+   const second={...currentFile,artifactId:'second-md',name:'second.md'};
+   const bundle={filename:'documents.zip',files:[{path:currentFile.name,size:30},{path:second.name,size:30}]};
+   api.inspectDelivery=async()=>({ok:true,manifest:bundle});
+   api.prepareDelivery=async()=>({ok:true,manifest:bundle,data:'fixture'});
+   messages.innerHTML='<article class="nmsg ai"><div class="ntext">Two generated files</div></article>';
+   ChatDeliveries.decorate(messages,[currentFile,second],'bundle',{status:'idle'});`);
+  await click('[data-delivery-retry]');
+  assert.equal(await js(`document.querySelector('[data-delivery-open]').hidden`),true,'A ZIP package of previewable documents has no package preview icon');
+  await shot('bundle-saved');
+  report.cases.push('Multi-file ZIP result retains save/reveal actions without a preview icon');
   for(const locale of ['zh-CN','en-US','ja-JP','ko-KR']){
    await js(`SoduWorkI18n.setLocale('${locale}',{persist:false,broadcast:false});render('xlsx-${locale}');`);
    for(const width of [1100,390]){win.setContentSize(width,760);await delay(50);await fit();await shot('file-'+width+'-'+locale);}

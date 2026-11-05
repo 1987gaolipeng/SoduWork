@@ -123,28 +123,42 @@ function create(app, owner, guard, configuredWorkRoot = '') {
     await awaited(io.writeFile(target, bytes, { flag: 'wx', mode: 0o600 }));
     return key;
   }
+  async function existingFile(operation) {
+    try { return await operation(); }
+    catch (failure) {
+      guard();
+      // Only classify missing source objects here. Index, destination and
+      // permission failures retain their own meaning.
+      if (failure.code === 'ENOENT') throw error('LOCAL_LIBRARY_FILE_MISSING', '找不到这份资料的本地文件，可能已被删除或移动。请恢复文件后重试，或从原会话重新保存、重新上传到资料库。');
+      throw failure;
+    }
+  }
   async function read(row) {
-    const target = objectPath(row._object), stat = await checkedFile(target);
-    if (stat.size > MAX_BYTES) throw error('LOCAL_LIBRARY_TOO_LARGE', '文件超过 64MB，请使用系统打开或导出');
-    const bytes = await awaited(io.readFile(target));
-    if (bytes.length > MAX_BYTES) throw error('LOCAL_LIBRARY_TOO_LARGE', '文件超过 64MB，请使用系统打开或导出');
-    await checkedFile(target); return bytes;
+    return existingFile(async () => {
+      const target = objectPath(row._object), stat = await checkedFile(target);
+      if (stat.size > MAX_BYTES) throw error('LOCAL_LIBRARY_TOO_LARGE', '文件超过 64MB，请使用系统打开或导出');
+      const bytes = await awaited(io.readFile(target));
+      if (bytes.length > MAX_BYTES) throw error('LOCAL_LIBRARY_TOO_LARGE', '文件超过 64MB，请使用系统打开或导出');
+      await checkedFile(target); return bytes;
+    });
   }
   async function locate(row, displayFilename = '') {
-    const target = objectPath(row._object);
-    await checkedFile(target);
-    // Older indexes kept the user-visible title separately from the object key.
-    // Keep those objects readable, but materialize a same-directory alias so the
-    // native shell shows the current filename for open/reveal/export actions.
-    const visible = String(displayFilename || '').trim();
-    if (!visible || path.basename(target) === visible || path.basename(visible) !== visible || /[\x00-\x1f]/.test(visible)) return target;
-    const alias = path.join(path.dirname(target), visible);
-    try { await checkedFile(alias); return alias; }
-    catch (e) { if (e.code !== 'ENOENT') throw e; }
-    guard();
-    try { await awaited(io.copyFile(target, alias, require('node:fs').constants.COPYFILE_EXCL)); }
-    catch (e) { if (e.code !== 'EEXIST') throw e; }
-    guard(); await checkedFile(alias); return alias;
+    return existingFile(async () => {
+      const target = objectPath(row._object);
+      await checkedFile(target);
+      // Older indexes kept the user-visible title separately from the object key.
+      // Keep those objects readable, but materialize a same-directory alias so the
+      // native shell shows the current filename for open/reveal/export actions.
+      const visible = String(displayFilename || '').trim();
+      if (!visible || path.basename(target) === visible || path.basename(visible) !== visible || /[\x00-\x1f]/.test(visible)) return target;
+      const alias = path.join(path.dirname(target), visible);
+      try { await checkedFile(alias); return alias; }
+      catch (e) { if (e.code !== 'ENOENT') throw e; }
+      guard();
+      try { await awaited(io.copyFile(target, alias, require('node:fs').constants.COPYFILE_EXCL)); }
+      catch (e) { if (e.code !== 'EEXIST') throw e; }
+      guard(); await checkedFile(alias); return alias;
+    });
   }
   async function garbageCollect(index) {
     // Garbage is recorded in the same index commit as the metadata change.

@@ -2,9 +2,9 @@
 (function (global) {
   'use strict';
   const TABS = [['recommended', '推荐'], ['favorites', '收藏'], ['folders', '文件夹'], ['images', '图像'], ['all', '全部']];
-  // Documents are the library's text-authoring entry point; notes use the same editor,
-  // so omit a duplicate creation action and preserve product menu order for other types.
-  const CREATE_ITEMS = [['document', '文档'], ['image', '图像'], ['spreadsheet', '电子表格'], ['presentation', '演示文稿'], ['folder', '文件夹'], ['upload', '上传文件']];
+  const FILE_TYPES = [['document', '文档'], ['image', '图像'], ['spreadsheet', '电子表格'], ['presentation', '演示文稿'], ['folder', '文件夹']];
+  // Existing documents remain filterable; the creation menu offers only supported entry points.
+  const CREATE_ITEMS = [...FILE_TYPES.filter(([kind]) => kind !== 'document'), ['upload', '上传文件']];
   const STORAGE_TABS = [['local', '本地存储'], ['remote', '远程存储']];
   const MAX_BATCH_ITEMS = 100;
   const CREATE_PROMPTS = {
@@ -41,11 +41,11 @@
     share: '<path d="M12 16V4M7 9l5-5 5 5M5 20h14"/>',
     error: '<circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 17h.01"/>',
   };
-  const state = { scope: 'recommended', storage: 'local', query: '', folderId: '', folder: null, folders: [], items: [], selected: new Set(), selectedFolders: new Set(), view: 'list', filterKind: 'all', trashCount: 0, showHidden: false, busy: false, error: '', storageStatus: { local: { available: true, configured: true, connected: true }, remote: { backend: '', available: false, configured: false, connected: false } }, storageStatusLoading: false };
+  const state = { scope: 'recommended', storage: 'local', query: '', folderId: '', folder: null, folders: [], items: [], selected: new Set(), selectedFolders: new Set(), view: 'list', filterKind: 'all', trashCount: 0, busy: false, error: '', storageStatus: { local: { available: true, configured: true, connected: true }, remote: { backend: '', available: false, configured: false, connected: false } }, storageStatusLoading: false };
   let root, uploadInput, uploadTarget, searchTimer, requestId = 0, storageStatusRequest = 0, previewPane, imageEpoch = 0;
   let lifecycleEpoch = 0, batchBusy = false;
   let loadedFilterKey = '', contentMarkup = '';
-  let libraryRefreshAt = 0;
+  let libraryRefreshTimer = null, listRequest = null, statusRequest = null;
   function filterKey() { return JSON.stringify([state.scope, storedBackend(state.folder), state.query, state.folderId]); }
   function hasCurrentSnapshot() { return loadedFilterKey === filterKey(); }
   function invalidateSnapshot(clear = false) {
@@ -133,18 +133,16 @@
     root.id = 'libraryPanel'; root.className = 'panel library-panel';
     if (!root.isConnected) document.body.appendChild(root);
     state.view = preference('soduwork_work_library_view') === 'grid' ? 'grid' : 'list';
-    state.showHidden = preference('soduwork_work_library_show_hidden') === '1';
     root.innerHTML = '<div class="library-page"><header class="library-head ws-page-head"><h1 data-library-title>资料库</h1>' +
       '<div class="library-toolbar">' +
-      '<nav class="library-storage-tabs" role="tablist" aria-label="存储位置">' + STORAGE_TABS.map(([key, label]) => '<button role="tab" data-library-storage="' + key + '"><span>' + label + '</span>' + (key === 'remote' ? '<i class="library-storage-status-dot" data-library-storage-status="remote" aria-label="远程存储连接状态"></i>' : '') + '</button>').join('') + '</nav><span class="library-storage-quota" data-library-storage-quota="remote" aria-live="polite" hidden></span>' +
+      '<nav class="library-storage-tabs" role="tablist" aria-label="存储位置">' + STORAGE_TABS.map(([key, label]) => '<button role="tab" data-library-storage="' + key + '"><span>' + label + '</span>' + (key === 'remote' ? '<i class="library-storage-status-dot" data-library-storage-status="remote" aria-label="远程存储连接状态"></i>' : '') + '</button>').join('') + '</nav>' +
       '<div class="library-menu-wrap"><button class="library-icon-button" data-library-menu-toggle="filter" aria-label="筛选类型" aria-expanded="false">' + icon('filter') + '</button>' +
-      '<div class="library-menu library-filter-menu" data-library-menu="filter" hidden><div class="library-menu-label">文件类型</div>' + [['all', '全部类型'], ...CREATE_ITEMS.slice(0, 5)].map(([kind, label]) => '<button data-library-filter-kind="' + kind + '">' + esc(label) + '</button>').join('') + '</div></div>' +
+      '<div class="library-menu library-filter-menu" data-library-menu="filter" hidden><div class="library-menu-label">文件类型</div>' + [['all', '全部类型'], ...FILE_TYPES].map(([kind, label]) => '<button data-library-filter-kind="' + kind + '">' + esc(label) + '</button>').join('') + '</div></div>' +
       '<div class="library-view-toggle" role="group" aria-label="资料视图"><button class="library-icon-button" data-library-view="grid" aria-label="网格视图">' + icon('grid') + '</button><button class="library-icon-button" data-library-view="list" aria-label="列表视图">' + icon('list') + '</button></div>' +
       '<label class="library-search">' + icon('search') + '<input type="search" data-library-search placeholder="搜索资料库" aria-label="搜索资料库" autocomplete="off"></label>' +
       '<div class="library-menu-wrap library-create-wrap"><button class="library-create" data-library-menu-toggle="create" aria-expanded="false">新建 ' + icon('chevron') + '</button>' + createMenuMarkup('create') + '</div>' +
       '<div class="library-menu-wrap"><button class="library-icon-button" data-library-menu-toggle="options" aria-label="资料库设置" aria-expanded="false">' + icon('settings') + '</button><div class="library-menu library-options-menu" data-library-menu="options" hidden>' +
-      '<div class="library-menu-label">设置</div><label class="library-setting-row">' + icon('braces') + '<span>显示隐藏文件</span><input type="checkbox" data-library-hidden-files><i aria-hidden="true"></i></label>' +
-      '<div class="library-menu-divider"></div><div class="library-menu-label">管理</div><button data-library-trash>' + icon('trash') + '<span>回收站</span></button></div></div></div></header>' +
+      '<div class="library-menu-label">管理</div><button data-library-trash>' + icon('trash') + '<span>回收站</span></button></div></div></div></header>' +
       '<nav class="library-tabs" role="tablist" aria-label="资料分类">' + TABS.map(([key, label]) => '<button role="tab" data-library-scope="' + key + '">' + label + '</button>').join('') + '</nav>' +
       '<div class="library-trash-nav" hidden><button data-library-root>' + icon('back') + '返回资料库</button><button data-library-empty-trash class="library-danger">清空回收站</button></div>' +
       '<div class="library-breadcrumb" data-library-breadcrumb hidden></div><div class="library-list-head" data-library-list-head hidden><label class="library-row-select library-list-select"><input type="checkbox" data-library-select-all aria-label="选择全部资料"></label><span>名称</span><span class="library-source-heading">&#26469;&#28304;</span><span data-library-date-heading>修改日期</span><span>大小</span><span></span></div>' +
@@ -239,7 +237,8 @@
     }
     if (d.libraryFolder !== undefined) { previewPane?.close(); state.folder = state.folders.find(row => row.id === d.libraryFolder) || null; state.storage = storedBackend(state.folder); state.folderId = d.libraryFolder; state.scope = 'all'; state.selected.clear(); state.selectedFolders.clear(); load(); return; }
     if (d.libraryDownload !== undefined) {
-      closeMenus(); try { await global.SoduWorkAPI.downloadLibraryItem(d.libraryDownload, d.filename); } catch (error) { notify(errorText(error, '下载失败')); } return;
+      const epoch = lifecycleEpoch;
+      closeMenus(); try { await global.SoduWorkAPI.downloadLibraryItem(d.libraryDownload, d.filename); } catch (error) { if (epoch === lifecycleEpoch) await dialogs.showError(error, '下载失败'); } return;
     }
     if (d.libraryFilePreview !== undefined) {
       closeMenus(); const item = state.items.find(row => row.id === d.libraryFilePreview);
@@ -428,7 +427,7 @@
         },
       });
       if (epoch !== lifecycleEpoch || !sent) return;
-    } catch (error) { if (epoch === lifecycleEpoch) notify(errorText(error, '批量分享失败，请重试')); }
+    } catch (error) { if (epoch === lifecycleEpoch) await dialogs.showError(error, '批量分享失败，请重试'); }
     finally { if (epoch === lifecycleEpoch) { batchBusy = false; if (button.isConnected) button.disabled = false; render(); } }
   }
   async function discussSelected(button) {
@@ -455,7 +454,7 @@
       else if (typeof global.openComposePanel === 'function') global.openComposePanel(payload);
       else throw new Error('对话面板暂时不可用');
       state.selected.clear(); state.selectedFolders.clear();
-    } catch (error) { if (epoch === lifecycleEpoch) notify(errorText(error, '读取资料失败，请重试')); }
+    } catch (error) { if (epoch === lifecycleEpoch) await dialogs.showError(error, '读取资料失败，请重试'); }
     finally { if (epoch === lifecycleEpoch) { batchBusy = false; if (button.isConnected) button.disabled = false; render(); } }
   }
   async function discussItem(button, id) {
@@ -474,7 +473,7 @@
       if (typeof global.WorkspaceHost?.open === 'function') global.WorkspaceHost.open('create', payload);
       else if (typeof global.openComposePanel === 'function') global.openComposePanel(payload);
       else notify('对话面板暂时不可用');
-    } catch (error) { if (epoch === lifecycleEpoch) notify(errorText(error, '读取资料失败，请重试')); }
+    } catch (error) { if (epoch === lifecycleEpoch) await dialogs.showError(error, '读取资料失败，请重试'); }
     finally { if (button.isConnected) button.disabled = false; }
   }
 
@@ -599,7 +598,7 @@
           return global.SoduWorkAPI.shareLibraryItem(id, ids, note, shareOptions);
         } });
       if (epoch === lifecycleEpoch && sent) notify('文件已分享，成员会收到通知');
-    } catch (error) { if (epoch === lifecycleEpoch) notify(errorText(error, '分享失败，请重试')); }
+    } catch (error) { if (epoch === lifecycleEpoch) await dialogs.showError(error, '分享失败，请重试'); }
     finally { if (epoch === lifecycleEpoch) shareBusy = false; if (button.isConnected) button.disabled = false; }
   }
   async function shareFolder(button, id) {
@@ -617,7 +616,7 @@
       const sent = await dialogs.openShareDialog({ folders: [{ ...folder, displayName: String(folder.name || '文件夹'), displaySize: tx('文件夹内容') }], bundled: true, members,
         onSubmit: async (ids, note) => global.SoduWorkAPI.shareLibraryItems([], ids, note, { requestId: newShareRequestId(), folderIds: [String(folder.id)] }) });
       if (epoch === lifecycleEpoch && sent) notify(tx('文件夹已打包分享，成员会收到 1 条通知'));
-    } catch (error) { if (epoch === lifecycleEpoch) notify(errorText(error, '分享失败，请重试')); }
+    } catch (error) { if (epoch === lifecycleEpoch) await dialogs.showError(error, '分享失败，请重试'); }
     finally { if (epoch === lifecycleEpoch) shareBusy = false; if (button.isConnected) button.disabled = false; }
   }
   function openCreateConversation(kind) {
@@ -780,8 +779,9 @@
     if (!item) return;
     if (storedBackend(item) !== 'local') { notify('远程文件请下载后查看'); return; }
     if (!global.SoduWorkAPI?.openLibraryExternally) { notify('当前客户端不支持，请下载后使用'); return; }
+    const epoch = lifecycleEpoch;
     try { await global.SoduWorkAPI.openLibraryExternally(id); }
-    catch (error) { notify(errorText(error, '打开失败，请下载后使用')); }
+    catch (error) { if (epoch === lifecycleEpoch) await dialogs.showError(error, '打开失败，请下载后使用'); }
   }
   async function revealLibraryFile(id) {
     closeMenus();
@@ -789,8 +789,9 @@
     if (!item) return;
     if (storedBackend(item) !== 'local') { notify('远程文件请下载后查看'); return; }
     if (!global.SoduWorkAPI?.revealLibraryItem) { notify('当前客户端不支持，请下载后使用'); return; }
+    const epoch = lifecycleEpoch;
     try { await global.SoduWorkAPI.revealLibraryItem(id); }
-    catch (error) { notify(errorText(error, '打开文件位置失败')); }
+    catch (error) { if (epoch === lifecycleEpoch) await dialogs.showError(error, '打开文件位置失败'); }
  }
   function itemRow(item) {
     const trashed = state.scope === 'trash';
@@ -812,8 +813,8 @@
     const action = trashed ? ' disabled' : ' data-library-file-preview="' + esc(item.id) + '"';
     const iconKind = image ? 'image' : ['document', 'note'].includes(String(item.kind || '').toLowerCase()) ? 'document' : item.kind;
     const preview = (image && !trashed ? '<img class="library-card-image" data-library-image="' + esc(item.id) + '" alt="" hidden>' : '') + '<span class="library-file-glyph" data-library-image-fallback>' + global.SoduWorkLibraryFileIcons.markup(item) + '</span>';
-    return '<article class="library-card library-file-card kind-' + esc(iconKind || 'document') + (hiddenItem(item) ? ' is-hidden-item' : '') + '"><label class="library-row-select"><input type="checkbox" data-library-select="' + esc(item.id) + '" data-user-attributes="aria-label" aria-label="' + esc(tx('选择资料：{name}', { name })) + '"' + (state.selected.has(item.id) ? ' checked' : '') + '></label><button class="library-card-main"' + action + '>' +
-      '<span class="library-card-name"><span class="library-card-preview kind-' + esc(iconKind) + '">' + preview + '</span><span class="library-card-copy"><b data-user-content>' + esc(name) + '</b><small data-user-content>' + esc(formatSize(item.size) + deliveryLabel) + (item.favorite ? ' · ' + tx('已收藏') : '') + (hiddenItem(item) ? ' · ' + tx('已隐藏') : '') + '</small></span></span>' +
+    return '<article class="library-card library-file-card kind-' + esc(iconKind || 'document') + '"><label class="library-row-select"><input type="checkbox" data-library-select="' + esc(item.id) + '" data-user-attributes="aria-label" aria-label="' + esc(tx('选择资料：{name}', { name })) + '"' + (state.selected.has(item.id) ? ' checked' : '') + '></label><button class="library-card-main"' + action + '>' +
+      '<span class="library-card-name"><span class="library-card-preview kind-' + esc(iconKind) + '">' + preview + '</span><span class="library-card-copy"><b data-user-content>' + esc(name) + '</b><small data-user-content>' + esc(formatSize(item.size) + deliveryLabel) + (item.favorite ? ' · ' + tx('已收藏') : '') + '</small></span></span>' +
       '<span class="library-card-date">' + esc(formatDate(trashed ? item.deletedAt : item.updatedAt)) + '</span><span class="library-card-size">' + esc(formatSize(item.size)) + '</span><span class="library-card-grid-date">' + tx('已修改') + ' · ' + esc(formatGridDate(trashed ? item.deletedAt : item.updatedAt)) + '</span></button>' + '<div class="library-source-cell">' + sourceChip + '</div>' + itemActions(item) + '</article>';
   }
   function folderRow(folder) {
@@ -873,6 +874,17 @@
     root.querySelector('[data-library-empty-trash]').disabled = state.trashCount < 1 || state.busy;
     root.querySelector('[data-library-date-heading]').textContent = trash ? '删除日期' : '修改日期';
     root.querySelectorAll('[data-library-scope]').forEach(button => { const selected = button.dataset.libraryScope === state.scope; button.classList.toggle('active', selected); button.setAttribute('aria-selected', String(selected)); });
+    const remote = state.storageStatus.remote || {};
+    const quota = remote.quota || remote;
+    const quotaBytes = Number(quota.quotaBytes ?? quota.limitBytes);
+    const remainingBytes = Number(quota.remainingBytes ?? NaN);
+    const quotaReady = !state.storageStatusLoading && !!remote.available && !!remote.connected
+      && Number.isFinite(quotaBytes) && quotaBytes > 0
+      && Number.isFinite(remainingBytes) && remainingBytes >= 0;
+    const remainingPercent = quotaReady ? Math.round(Math.min(1, remainingBytes / quotaBytes) * 100) : null;
+    const connectedTitle = quotaReady
+      ? tx('远程存储已连接 · 剩余 {percent}%', { percent: remainingPercent })
+      : tx('远程存储已连接');
     root.querySelectorAll('[data-library-storage]').forEach(button => {
       const key = button.dataset.libraryStorage;
       const selected = key === 'remote' ? state.storage !== 'local' : state.storage === 'local';
@@ -883,7 +895,7 @@
       button.disabled = !available;
       button.setAttribute('aria-selected', String(selected));
       button.setAttribute('aria-disabled', String(!available));
-      button.title = key === 'local' ? '' : (available && capability.connected ? '远程存储已连接' : capability.message || '远程存储未配置') + (providerLabel(capability.backend) ? ' · ' + providerLabel(capability.backend) : '');
+      button.title = key === 'local' ? '' : available && capability.connected ? connectedTitle : tx(capability.message || '远程存储未配置');
     });
     const remoteDot = root.querySelector('[data-library-storage-status="remote"]');
     if (remoteDot) {
@@ -922,7 +934,7 @@
     breadcrumb.innerHTML = state.folder ? '<button data-library-root>资料库</button><span>/</span><b data-user-content>' + esc(state.folder.name) + '</b>' : '';
     const query = state.query.toLocaleLowerCase();
     const showFolders = !trash && ['all', 'folder'].includes(state.filterKind) && ['all', 'folders', 'favorites'].includes(state.scope);
-    const folders = showFolders ? recentFirst(state.folders.filter(folder => (!query || folder.name.toLocaleLowerCase().includes(query)) && (state.showHidden || !folder.name.startsWith('.')))) : [];
+    const folders = showFolders ? recentFirst(state.folders.filter(folder => !query || folder.name.toLocaleLowerCase().includes(query))) : [];
     const items = state.scope === 'folders' || state.filterKind === 'folder' ? [] : recentFirst(state.items.filter(item => {
       if (state.scope === 'images' && !isImageItem(item)) return false;
       if (state.scope === 'favorites' && !item.favorite) return false;
@@ -931,7 +943,7 @@
         || (state.filterKind === 'document' && ['document', 'note'].includes(kind))
         || (state.filterKind === 'image' && isImageItem(item))
         || kind === state.filterKind;
-      return matchesKind && (trash || state.showHidden || !hiddenItem(item));
+      return matchesKind;
     }));
     const visibleIds = items.map(item => item.id);
     if (!state.busy && previewPane?.selectedId() && !visibleIds.includes(previewPane.selectedId())) previewPane.close();
@@ -1067,20 +1079,18 @@
         receiptNavigation = false; lifecycleEpoch++;
         state.scope = 'recommended'; state.storage = 'local';
         state.query = ''; state.folderId = ''; state.folder = null;
-        state.filterKind = 'all'; state.showHidden = false;
+        state.filterKind = 'all';
         state.selected.clear(); state.selectedFolders.clear(); previewPane?.close();
         root.querySelector('[data-library-search]').value = '';
       }
-      // A library save can complete while this panel is hidden. Do not reuse
-      // the previous recommended snapshot when the user opens the library;
-      // fetch the current recommendation set immediately.
-      invalidateSnapshot(true);
+      // Revalidate on every entry, including saves while hidden, without
+      // discarding the same-location snapshot or rebuilding unchanged rows.
       loadStorageStatus(); return load();
     }
     receiptNavigation = true;
     const epoch = ++lifecycleEpoch;
     state.scope = options.revealOnly ? 'all' : 'recommended'; state.folderId = ''; state.folder = null;
-    state.filterKind = 'all'; state.showHidden = Boolean(options.revealOnly); previewPane?.close();
+    state.filterKind = 'all'; previewPane?.close();
     const history = options.storageOrigin === 'server-history';
     const targetStorage = ['minio', 'nfs'].includes(options.storage) ? options.storage : 'local';
     // Resolve current storage availability before selecting the receipt's provider.

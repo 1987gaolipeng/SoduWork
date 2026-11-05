@@ -8,7 +8,7 @@ fs.mkdirSync(output, { recursive:true });
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(),'soduwork-library-e2e-'));
 app.setPath('userData',path.join(temporary,'profile'));
 const client = path.resolve(__dirname,'..'), backend = path.resolve(client,'../hub-backend');
-const report = {ok:false,cases:[],screenshots:[],errors:[]};
+const report = {ok:false,boundary:'Production library UI and Hub HTTP APIs against an isolated loopback store; PC-local routing is covered separately.',cases:[],screenshots:[],errors:[]};
 let win, server, logs = '';
 const read = file => fs.readFileSync(path.join(client,file),'utf8');
 const js = code => win.webContents.executeJavaScript(code.trim().startsWith('(await ') ? '(async()=>('+code+'))()' : code, true);
@@ -36,10 +36,12 @@ async function shot(name) {
   const file=path.join(output,name+'.png');fs.writeFileSync(file,(await win.webContents.capturePage()).toPNG());report.screenshots.push(file);
 }
 async function createDoc(title,content) {
-  await click('[data-library-menu-toggle="create"]'); await click('[data-library-menu="create"] [data-library-create-kind="document"]');
-  await until('!!document.querySelector("[data-library-editor-title]")');
-  await type('[data-library-editor-title]',title); await type('[data-library-editor-content]',content);
-  await click('.library-note-editor-save');await until('!document.querySelector(".library-document-dialog")'); await loaded();
+  assert.equal(await js('document.querySelector("[data-library-create-kind=document]")'), null);
+  await js(`(() => { const input=document.querySelector('[data-library-upload]'), data=new DataTransfer();
+    data.items.add(new File([${JSON.stringify(content)}],${JSON.stringify(title+'.txt')},{type:'text/plain'}));
+    input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true})); })()`);
+  await until(`document.querySelector('[data-library-content]').textContent.includes(${JSON.stringify(title)})`);
+  await loaded();
 }
 async function startServer() {
   const probe=require('node:net').createServer();await new Promise(r=>probe.listen(0,'127.0.0.1',r));
@@ -148,7 +150,10 @@ app.whenReady().then(async()=>{
   win.webContents.session.webRequest.onBeforeRequest({urls:['http://*/*','https://*/*']},(r,cb)=>cb({cancel:!r.url.startsWith(url+'/')}));
   await win.loadFile(path.join(__dirname,'fixtures/library.html'));
   await js(`localStorage.setItem('soduwork_work_hub_environment_v1','development');localStorage.setItem('soduwork_work_development_hub_url_v1',${JSON.stringify(url)});localStorage.setItem('soduwork_work_user_id','e2e-alice');window.notices=[];window.petSay=m=>notices.push(m);window.handoffs=[];window.WorkspaceHost={open:(view,payload)=>{handoffs.push({view,payload});}};void 0;`);
-  await js('window.__SODUWORK_TEST_HUB_CONFIG__ = { allowSwitch: true };');
+  // This fixture exercises the Hub HTTP library store, including its historical
+  // storage=local rows. Keep the HTTP facade here; PC-local routing and real IPC
+  // are covered by library-client-local.cjs and generated-output-library-roundtrip.cjs.
+  await js('window.__SODUWORK_TEST_HUB_CONFIG__ = { allowSwitch: true }; window.SoduWorkLocalLibraryAPI = { install() {} }; void 0;');
   for(const file of JSON.parse(read('core/locales/manifest.json')))await js(read('core/locales/'+file));
   for(const file of ['core/i18n-dom.js','core/i18n.js','core/api-work-plugins.js', 'api.js','components/panels/library-file-icons.js','components/panels/panels-library-dialogs.js','components/panels/library-delivery.js','components/panels/library-preview-html.js','components/panels/library-preview-archive.js','components/panels/library-preview-pane.js','components/panels/panels-library.js'])await js(read(file)+'\nvoid 0;');
   await js('SoduWorkI18n.setLocale("zh-CN");openLibraryPanel()');await loaded();
@@ -158,13 +163,14 @@ app.whenReady().then(async()=>{
   await createDoc('保存','原始资料：保存，不翻译业务内容。');
   const id=await js('(await SoduWorkAPI.listLibrary({scope:"all",storage:"local"})).items[0].id');
   assert.equal(await js(`(await SoduWorkAPI.readLibraryContent(${JSON.stringify(id)})).content`),'原始资料：保存，不翻译业务内容。');
-  report.cases.push('Create a text document by real mouse/keyboard and read exact saved bytes through the production API');
+  report.cases.push('Upload a text document through the production API and read exact saved bytes; no document creation entry');
   await click('[data-library-menu-toggle="create"]');await click('[data-library-menu="create"] [data-library-create-kind="folder"]');
   await type('[data-library-folder-name]','删除');await click('.library-folder-editor-save');await until('!document.querySelector(".library-folder-dialog")');await loaded();
   await menu(id);await click('[data-library-move="'+id+'"]');await until('!!document.querySelector(".library-move-dialog")');
   await click('[data-library-move-folder]:not([data-library-move-folder=""])');await loaded();
   const listed=await js('(await SoduWorkAPI.listLibrary({scope:"all",storage:"local"}))');
   const folder=listed.folders.find(x=>x.name==='删除');assert.ok(folder);
+  await click('[data-library-scope=all]');await loaded();
   await click('[data-library-folder="'+folder.id+'"]');await loaded();
   await menu(id);await click('[data-library-rename="'+id+'"]');await type('[data-library-folder-name]','保存（新版）');await click('.library-folder-editor-save');await loaded();
   await menu(id);await click('[data-library-favorite="'+id+'"]');await loaded();
@@ -234,14 +240,14 @@ app.whenReady().then(async()=>{
   await js('SoduWorkI18n.setLocale("en-US")');await sleep(150);await shot('library-en');
   assert.equal(await js('document.querySelector("[data-library-title]").textContent'),'Library');
   assert.ok((await js('document.querySelector("[data-library-content]").innerText')).includes('删除'));
-  await click('[data-library-menu-toggle=create]');await click('[data-library-menu=create] [data-library-create-kind=document]');
-  assert.equal(await js('document.querySelector("[data-library-editor-title]").value'),'Untitled document');
-  await type('[data-library-editor-title]','删除');await type('[data-library-editor-content]','保存');
-  await js('SoduWorkI18n.setLocale("zh-CN");SoduWorkI18n.setLocale("en-US")');await sleep(100);
-  assert.equal(await js('document.querySelector("[data-library-editor-title]").value'),'删除');assert.equal(await js('document.querySelector("[data-library-editor-content]").value'),'保存');
-  await shot('library-editor-en');await click('[data-library-editor-cancel]');
-  report.cases.push('Language changes translate library/dialog controls while preserving names and unsaved text');
+  assert.equal(await js('document.querySelector("[data-library-create-kind=document]")'), null);
   const namedId=await js('(await SoduWorkAPI.listLibrary({scope:"all",storage:"local"})).items.find(x=>x.filename==="上传.txt").id');
+  await menu(namedId);await click('[data-library-rename="'+namedId+'"]');
+  await type('[data-library-folder-name]','删除');
+  await js('SoduWorkI18n.setLocale("zh-CN");SoduWorkI18n.setLocale("en-US")');await sleep(100);
+  assert.equal(await js('document.querySelector("[data-library-folder-name]").value'),'删除');
+  await shot('library-rename-en');await click('[data-library-folder-cancel]');
+  report.cases.push('Language changes translate library/dialog controls while preserving names and unsaved text');
   await menu(namedId);await click('[data-library-rename="'+namedId+'"]');await type('[data-library-folder-name]','保存 & 删除');await click('.library-folder-editor-save');await loaded();
   await menu(namedId);await click('[data-library-delete="'+namedId+'"]');
   const confirmation=await js('document.querySelector(".library-confirm-description").textContent');

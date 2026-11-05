@@ -57,7 +57,10 @@ if (typeof electron === 'string') {
     await click(selector);
     for (const type of ['keyDown', 'keyUp'])
       win.webContents.sendInputEvent({ type, keyCode: 'A', modifiers: ['control'] });
-    await win.webContents.insertText(text);
+    await until(`(() => { const input = document.querySelector(${JSON.stringify(selector)});
+      return input === document.activeElement && input.selectionStart === 0 && input.selectionEnd === input.value.length; })()`);
+    if (text) await win.webContents.insertText(text);
+    else for (const type of ['keyDown', 'keyUp']) win.webContents.sendInputEvent({ type, keyCode: 'Backspace' });
   }
   async function loaded() {
     await until('!!document.querySelector("[data-library-title]") && !document.querySelector(".library-spinner")');
@@ -71,16 +74,10 @@ if (typeof electron === 'string') {
     fs.writeFileSync(path.join(output, name + '.png'), (await win.webContents.capturePage()).toPNG());
   }
   async function checkActions(menu, storage, folderId = '') {
-    await menuCreate(menu, 'document');
-    await until('!!document.querySelector(".library-document-dialog")');
-    await enter('[data-library-editor-title]', '验证文档');
-    await enter('[data-library-editor-content]', '从当前资料库创建。');
-    await click('.library-note-editor-save');
-    await until('!document.querySelector(".library-document-dialog")'); await loaded();
-    assert.deepEqual(await js('fixture.documents.at(-1)'), {
-      kind: 'document', title: '验证文档', content: '从当前资料库创建。',
-      folderId, storage, format: 'txt', filename: '验证文档.txt',
-    });
+    assert.deepEqual(await js(`[...document.querySelectorAll('[data-library-menu="${menu}"] [data-library-create-kind]')].map(e => e.dataset.libraryCreateKind)`),
+      ['image', 'spreadsheet', 'presentation', 'folder', 'upload']);
+    assert.deepEqual(await js(`[...document.querySelectorAll('[data-library-filter-kind]')].map(e => e.dataset.libraryFilterKind)`),
+      ['all', 'document', 'image', 'spreadsheet', 'presentation', 'folder']);
     for (const kind of ['image', 'spreadsheet', 'presentation']) {
       const before = await js('fixture.handoffs.length');
       await menuCreate(menu, kind);
@@ -109,7 +106,62 @@ if (typeof electron === 'string') {
     await loaded();
     assert.deepEqual(await js('fixture.uploads.at(-1)'), { name: '验证上传.txt', content: '上传原文', folderId, storage });
     assert.equal(await js('document.querySelectorAll("[data-library-menu]:not([hidden])").length'), 0);
-    report.cases.push(`${menu}: all 6 actions run once in ${storage}/${folderId || 'root'} with exact storage/folder context`);
+    report.cases.push(`${menu}: all 5 actions (no document creation) run once in ${storage}/${folderId || 'root'} with exact storage/folder context`);
+  }
+  async function checkSavedVisibility() {
+    await js(`fixture.saved = [
+      { id: 'saved-normal', title: 'report.txt', filename: 'report.txt', kind: 'file' },
+      { id: 'saved-dot', title: '.notes.md', filename: '.notes.md', kind: 'document', favorite: true },
+      { id: 'saved-hidden', title: 'legacy.txt', filename: 'legacy.txt', kind: 'file', extra: { hidden: true } },
+      { id: 'saved-trash', title: '.deleted.txt', filename: '.deleted.txt', kind: 'file', deletedAt: '2026-11-03' },
+    ];
+    SoduWorkAPI.listLibrary = async filters => ({
+      items: fixture.saved.filter(item => Boolean(item.deletedAt) === (filters.scope === 'trash')
+        && (filters.scope !== 'favorites' || item.favorite)
+        && (!filters.query || item.filename.includes(filters.query))).map(item => ({ ...item, backend: filters.storage })),
+      folders: !filters.folderId && filters.scope !== 'trash' ? [{ id: 'saved-folder', name: '.saved-folder', backend: filters.storage }] : [],
+      folder: null, trashCount: 1,
+    }); void 0;`);
+    const ids = () => js('[...document.querySelectorAll("[data-library-select]")].map(e => e.dataset.librarySelect).sort()');
+    for (const preference of ['0', '1']) {
+      await js(`closeLibraryPanel(); document.querySelector('#libraryPanel').remove();
+        localStorage.setItem('soduwork_work_library_show_hidden', ${JSON.stringify(preference)});
+        openLibraryPanel(); void 0;`); await loaded();
+      for (const storage of ['local', 'remote']) {
+        await click(`[data-library-storage="${storage}"]`); await loaded();
+        await click('[data-library-scope=recommended]'); await loaded();
+        assert.deepEqual(await ids(), ['saved-dot', 'saved-hidden', 'saved-normal']);
+        for (const view of ['list', 'grid']) {
+          await click(`[data-library-view="${view}"]`);
+          assert.deepEqual(await ids(), ['saved-dot', 'saved-hidden', 'saved-normal']);
+          assert.equal(await js('document.querySelectorAll(".is-hidden-item").length'), 0);
+          assert.equal(await js('document.querySelector("[data-library-content]").textContent.includes("已隐藏")'), false);
+        }
+        await click('[data-library-menu-toggle=options]');
+        assert.equal(await js('document.querySelector("[data-library-hidden-files]")'), null);
+        assert.equal(await js('document.querySelector("[data-library-menu=options]").textContent.trim()'), '管理回收站');
+        await snapshot(`saved-files-${storage}-${preference}`);
+        await click('[data-library-trash]'); await loaded();
+        assert.deepEqual(await ids(), ['saved-trash']);
+        await click('[data-library-root]'); await loaded();
+        await click('[data-library-scope=all]'); await loaded();
+        assert.equal(await js('!!document.querySelector("[data-library-folder=saved-folder]")'), true);
+        await click('[data-library-scope=folders]'); await loaded();
+        assert.equal(await js('!!document.querySelector("[data-library-folder=saved-folder]")'), true);
+        assert.deepEqual(await ids(), []);
+        await click('[data-library-scope=favorites]'); await loaded();
+        assert.deepEqual(await ids(), ['saved-dot']);
+        await click('[data-library-scope=all]'); await loaded();
+        await enter('[data-library-search]', '.notes');
+        await until('document.querySelectorAll("[data-library-select]").length === 1');
+        assert.deepEqual(await ids(), ['saved-dot']);
+        await enter('[data-library-search]', '');
+        await until('document.querySelectorAll("[data-library-select]").length === 3');
+        report.cases.push(`${storage}: saved dotfiles, legacy hidden items and dotfolders remain visible with old preference ${preference}; list/grid, search, favorites and trash work`);
+      }
+    }
+    assert.equal(await js('fixture.saved.find(item => item.id === "saved-hidden").extra.hidden'), true,
+      'Displaying previously hidden files must not rewrite stored metadata');
   }
   app.whenReady().then(async () => {
     win = new BrowserWindow({ show: false, width: 1250, height: 1050,
@@ -171,9 +223,10 @@ if (typeof electron === 'string') {
     assert.equal(await js('document.querySelector("[data-library-menu-toggle=empty-create]")'), null,
       'Preserve the folder view with one toolbar create entry');
     await checkActions('create', 'nfs', 'fixture-folder');
-    assert.equal(await js('fixture.documents.length'), 5);
+    assert.equal(await js('fixture.documents.length'), 0);
     assert.equal(await js('fixture.folders.length'), 5);
     assert.equal(await js('fixture.uploads.length'), 5);
+    await checkSavedVisibility();
     assert.deepEqual(report.errors, []);
     report.ok = true;
   }).catch(async error => {

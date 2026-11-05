@@ -572,3 +572,19 @@ test('generated-file save rejects account switch during native context lookup', 
   await assert.rejects(h.api.saveLibraryDelivery({ manifest: { source: 'local', sessionId: 's', revision: 'v', files: [{}] }, filename: 'a.md', data: 'YQ==' }), /切换|变化/);
   assert.equal(h.nativeCalls.length, 0);
 });
+
+
+test('missing local files reject single and bundled shares before any network transmission', async () => {
+  const h = harness(); await h.signIn('alice');
+  h.native = async action => action === 'list'
+    ? { items: [{ id: 'local-missing', filename: 'lost.pptx' }], folders: [] }
+    : { ok: false, code: 'LOCAL_LIBRARY_FILE_MISSING', message: 'Local file is missing' };
+  for (const invoke of [
+    () => h.api.readLibraryContent('local-missing'),
+    () => h.api.openLibraryExternally('local-missing'),
+    () => h.api.shareLibraryItem('local-missing', ['bob'], '', shareOptions),
+    () => h.api.shareLibraryItems(['local-missing'], ['bob'], '', shareOptions),
+    () => h.api.shareLibraryItems([], ['bob'], '', { ...shareOptions, folderIds: ['local-folder-one'] }),
+  ]) await assert.rejects(invoke(), error => error.code === 'LOCAL_LIBRARY_FILE_MISSING');
+  assert.equal(h.calls.length, 0);
+});

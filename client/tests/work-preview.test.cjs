@@ -18,6 +18,10 @@ test('Hub PDF files use the native PDF preview even with a generic attachment ki
   assert.equal(tools.previewKind({name:'local.pdf'}), 'pdf');
   assert.equal(tools.previewKind({taskId:'task', attachmentId:'zip', name:'archive.zip', kind:'task-file'}), 'external');
   assert.equal(tools.previewKind({name:'report.docx', kind:'document'}), 'external');
+  for (const ext of ['ZIP', '7z', 'rar', 'tar', 'gz']) {
+    assert.equal(tools.previewKind({name:'result.'+ext, kind:'website', contentType:'text/html'}), 'external');
+  }
+  assert.equal(tools.previewKind({name:'download', kind:'text', contentType:'application/zip'}), 'external');
   assert.equal(tools.previewKind({name:'sheet.xlsx', contentType:'application/octet-stream'}), 'external');
   assert.equal(tools.previewKind({name:'document', kind:'document', contentType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}), 'external');
   assert.equal(tools.previewKind({name:'data.json', taskId:'task', attachmentId:'json', contentType:'application/json'}), 'text');

@@ -3,6 +3,8 @@
 (function (global) {
   'use strict';
   const messages = {
+    "本地文件不存在": "Local file not found",
+    "找不到这份资料的本地文件，可能已被删除或移动。请恢复文件后重试，或从原会话重新保存、重新上传到资料库。": "The local file for this item could not be found. It may have been deleted or moved. Restore it and try again, or save it again from the original conversation or upload it to the library.",
     '名称重复': 'Name already exists',
     '知道了': 'Got it',
     '当前文件夹下已有同名资料，请重命名后重试': 'A file with this name already exists in this folder. Rename it and try again.',
@@ -105,6 +107,7 @@
     '大小': 'Size',
     '远程存储连接状态': 'Remote storage connection status',
     '远程存储已连接': 'Remote storage connected',
+    '远程存储已连接 · 剩余 {percent}%': 'Remote storage connected · {percent}% remaining',
     '已用': 'Used',
     '剩余': 'Remaining',
     '远程存储未配置': 'Remote storage is not configured',

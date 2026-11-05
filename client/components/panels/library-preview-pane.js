@@ -130,7 +130,7 @@
   }
   function create({ root, onClose }) {
     let pane, body, status, item, selectedFile, files = [], request = 0, scope = '', restoreFocus;
-    let fileTitle = '';
+    let fileTitle = '', fileMissing = false;
     let urls = [], htmlPreview, workspace, navigator, archive = false, archiveDownload, dragCleanup, closingAnimation;
     const api = () => global.SoduWorkAPI;
     const account = () => api()?.taskStorageKey?.('ops') || '';
@@ -177,11 +177,18 @@
       const b = node('button', '', tx(text)); b.type = 'button'; b.setAttribute(attr, '');
       b.addEventListener('click', fn); return b;
     }
+    function missingFile(error) {
+      if (error?.code !== 'LOCAL_LIBRARY_FILE_MISSING') return false;
+      release(); actions(false); fileMissing = true; archiveDownload.disabled = true;
+      message('本地文件不存在', tx('找不到这份资料的本地文件，可能已被删除或移动。请恢复文件后重试，或从原会话重新保存、重新上传到资料库。'));
+      status.textContent = '';
+      return true;
+    }
     async function action(b, fn) {
       const ticket = request; b.disabled = true;
       try { await fn(); }
-      catch (error) { if (pane && ticket === request && account() === scope) status.textContent = error.message || tx('操作失败，请重试'); }
-      finally { if (b.isConnected) b.disabled = b.hidden || (b === archiveDownload ? false : !selectedFile); }
+      catch (error) { if (pane && ticket === request && account() === scope && !missingFile(error)) status.textContent = error.message || tx('操作失败，请重试'); }
+      finally { if (b.isConnected) b.disabled = fileMissing || b.hidden || (b === archiveDownload ? false : !selectedFile); }
     }
     function mount() {
       if (pane) return;
@@ -357,7 +364,7 @@
           body.replaceChildren(view); status.textContent = tx('只读预览');
         }
       } catch (error) {
-        if (valid()) {
+        if (valid() && !missingFile(error)) {
           const retry = error.retryable !== false && ![413, 415].includes(error.status);
           unavailable(file, error.message || tx('读取文件失败'), retry);
           status.textContent = retry ? guidance('可重试，或使用系统打开和下载', '可重试，或下载原文件') : tx('请下载原文件后查看');
@@ -369,7 +376,7 @@
       // A new explicit selection supersedes a pending animated dismissal.
       if (closingAnimation) { closingAnimation.cancel(); closingAnimation = null; pane.inert = false; pane.classList.remove('is-closing'); }
       if (!pane) restoreFocus = document.activeElement;
-      mount(); item = next; scope = account(); markSelection();
+      mount(); item = next; fileMissing = false; archiveDownload.disabled = false; scope = account(); markSelection();
       const ticket = ++request; release(); files = []; selectedFile = null;
       navigator?.element.remove(); navigator = null; pane.classList.remove('has-archive'); archiveDownload.hidden = true; actions(true);
       archive = !next.extra?.soduWorkDelivery && kindOf(next) === 'archive';
@@ -392,7 +399,7 @@
           else archiveDownload.hidden = true;
           await preview(files[entry]);
         } else { files = [next]; await preview(next); }
-      } catch (error) { if (pane && ticket === request && account() === scope) {
+      } catch (error) { if (pane && ticket === request && account() === scope && !missingFile(error)) {
         unavailable(next, error.message, () => void open(next));
         status.textContent = tx('可重试，或下载原文件');
       } }

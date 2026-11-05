@@ -419,3 +419,46 @@ test('account switch after the index commit never deletes the newly committed re
   assert.equal((await f.call('readContent', { id: item.id })).content, 'committed safely');
   assert.equal(fs.readdirSync(path.join(f.account(), 'objects')).length, 1);
 });
+
+
+test('missing local objects return a safe IPC error for read/open/reveal/export and preserve metadata', async t => {
+  const f = fixture(t), row = (await create(f)).item;
+  const indexPath = path.join(f.account(), 'index.json');
+  const before = fs.readFileSync(indexPath, 'utf8'), index = JSON.parse(before);
+  const target = path.join(f.account(), index.items.find(x => x.id === row.id)._object);
+  fs.unlinkSync(target);
+  for (const action of ['readBinary', 'readContent', 'openExternal', 'reveal', 'exportFile']) {
+    const result = await f.call(action, { id: row.id });
+    assert.equal(result.ok, false, action);
+    assert.equal(result.code, 'LOCAL_LIBRARY_FILE_MISSING', action);
+    assert.match(result.message, /删除或移动/);
+    assert.doesNotMatch(result.message, /ENOENT|lstat|objects|[A-Z]:\\/);
+  }
+  assert.deepEqual(f.opened, []); assert.deepEqual(f.revealed, []);
+  assert.equal(fs.readFileSync(indexPath, 'utf8'), before);
+  fs.writeFileSync(target, 'restored');
+  assert.equal((await f.call('readContent', { id: row.id })).content, 'restored');
+  await f.call('openExternal', { id: row.id }); assert.deepEqual(f.opened, [target]);
+  // A missing enclosing object directory is the same recoverable failure.
+  fs.unlinkSync(target); fs.rmdirSync(path.dirname(target));
+  assert.equal((await f.call('readBinary', { id: row.id })).code, 'LOCAL_LIBRARY_FILE_MISSING');
+});
+
+test('missing output receipts allow re-saving while permission errors stay distinct', async t => {
+  const f = fixture(t), body = { name: 'output.txt', dataBase64: data('result'), source: { outputKey: 'fixture-output' } };
+  const first = (await f.call('upload', body)).item;
+  const index = JSON.parse(fs.readFileSync(path.join(f.account(), 'index.json'), 'utf8'));
+  const target = path.join(f.account(), index.items.find(x => x.id === first.id)._object);
+  const original = fsp.readFile;
+  fsp.readFile = async (filename, ...args) => {
+    if (filename === target) throw Object.assign(Error('access denied'), { code: 'EACCES' });
+    return original(filename, ...args);
+  };
+  try { await assert.rejects(f.call('readBinary', { id: first.id }), e => e.code === 'EACCES'); }
+  finally { fsp.readFile = original; }
+  fs.unlinkSync(target);
+  assert.deepEqual(await f.call('outputStatus', { outputKey: body.source.outputKey }), { ok: true, item: null });
+  const second = (await f.call('upload', body)).item;
+  assert.notEqual(second.id, first.id);
+  assert.equal((await f.call('readContent', { id: second.id })).content, 'result');
+});

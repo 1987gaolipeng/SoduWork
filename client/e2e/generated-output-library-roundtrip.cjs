@@ -78,7 +78,7 @@ if (typeof electron === 'string') {
     await win.loadFile(path.join(client, 'desk.html'));
     await win.webContents.insertCSS(read('components/panels/chat-deliveries.css') + read('components/panels/library-transfer.css') + '#messages{margin:80px;max-width:800px}');
     await js(`localStorage.setItem('soduwork_work_root',${JSON.stringify(path.join(root, 'library-workspace'))});window.notices=[];window.petSay=text=>notices.push(text);window.messages=document.createElement('main');messages.id='messages';document.body.append(messages);void 0;`);
-    for (const file of ['api-library-local.js', 'core/api-work-plugins.js', 'api.js', 'components/panels/library-file-icons.js', 'components/panels/panels-library-dialogs.js', 'components/panels/panels-library.js', 'components/panels/library-transfer.js', 'components/panels/chat-deliveries.js']) await js(read(file) + '\nvoid 0;');
+    for (const file of ['api-library-local.js', 'core/api-work-plugins.js', 'api.js', 'components/panels/library-file-icons.js', 'components/panels/panels-library-dialogs.js', 'components/panels/panels-library.js', 'components/panels/library-transfer.js', 'components/panels/chat-dom-patch.js', 'components/panels/panels-chat-tools.js', 'components/panels/chat-deliveries.js']) await js(read(file) + '\nvoid 0;');
     await js(`SoduWorkAPI.registerClient()`);
     await js(`window.WorkspaceHost={open:(_view,payload)=>openLibraryPanel(payload)};messages.addEventListener('click',event=>{const node=event.target.closest('button');if(node)window.pending=node.hasAttribute('data-library-output')?LibraryTransfer.saveDecorated(node):ChatDeliveries.handle(node,soduWorkAPI.conversationSession);});void 0;`);
     for (const ext of sessions.keys()) {
@@ -92,6 +92,7 @@ if (typeof electron === 'string') {
         assert.match(await js(`document.querySelector('[data-delivery-status]').textContent`), /Fixture disk write failed/);
       }
       await click(action); assert.equal(await js(`document.querySelector('${action}').classList.contains('is-saved')`), true);
+      if (!legacy) assert.equal(await js(`document.querySelector('[data-delivery-open]').hidden`), !['md','html','png','pdf'].includes(ext), ext + ' saved preview eligibility');
       const item = (await list()).items.find(item => item.sessionId === ext);
       assert.ok(item, 'Saved item appears in Recommended: ' + ext);
       assert.ok((await list('all')).items.some(row => row.id === item.id));
@@ -104,7 +105,7 @@ if (typeof electron === 'string') {
       await until(`document.querySelector('[data-library-select="${item.id}"]')`);
       assert.equal(await js(`document.body.innerText.includes(${JSON.stringify(item.filename)})`), true);
       await js('closeLibraryPanel();void 0;');
-      if (!legacy) { await js(read('components/panels/chat-deliveries.js') + '\nvoid 0;'); await render(ext); await until(`document.querySelector('${action}').classList.contains('is-saved')`); assert.equal(writes, written); }
+      if (!legacy) { await js(read('components/panels/chat-deliveries.js') + '\nvoid 0;'); await render(ext); await until(`document.querySelector('${action}').classList.contains('is-saved')`); assert.equal(writes, written); assert.equal(await js(`document.querySelector('[data-delivery-open]').hidden`), !['md','html','png','pdf'].includes(ext), ext + ' restored preview eligibility'); }
       report.cases.push(ext + ': explicit save, exact bytes, recommended/all visibility, duplicate click, receipt restoration');
     }
     await render('bundle');

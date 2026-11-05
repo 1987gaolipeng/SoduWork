@@ -826,8 +826,8 @@
     },
     {
       "path": "client/components/panels/chat-deliveries.js",
-      "bytes": 36929,
-      "sha256": "0db2307beb6a4bef6d4b60343deeb16545456415b9dde4f99323f615a3360da7"
+      "bytes": 37643,
+      "sha256": "d3a476378e3d4f5e53ad9df1c3307f33ccb74e7ce38a2b3b7f14c1a2a1ae4c81"
     },
     {
       "path": "client/components/panels/chat-dom-patch.js",
@@ -1201,8 +1201,8 @@
     },
     {
       "path": "client/components/panels/library-preview-pane.js",
-      "bytes": 27160,
-      "sha256": "f37fbb07a23c749f172bd06383c3f1e2bd153de80da95df1bb40674ea9c852b6"
+      "bytes": 27767,
+      "sha256": "aac72ef58df3f8852dbe229ca58ae605c2f97b55a1b24feb33afcc1237a65858"
     },
     {
       "path": "client/components/panels/library-share-dialog.css",
@@ -1356,8 +1356,8 @@
     },
     {
       "path": "client/components/panels/panels-chat-tools.js",
-      "bytes": 45965,
-      "sha256": "fbc42550fd2b0610894449e2028805b89e96dad8382855e489bece5bf082e049"
+      "bytes": 46241,
+      "sha256": "f3fde052c1f1363cfca450587225d911106a233d80d0aa0f915a18be542c2eb5"
     },
     {
       "path": "client/components/panels/panels-chat-tools.test.js",
@@ -1511,18 +1511,18 @@
     },
     {
       "path": "client/components/panels/panels-library-dialogs.js",
-      "bytes": 22184,
-      "sha256": "5b5e4206f2560f95226a3c6e0c8e9c29796ae1f21303cc59382f178991ce650e"
+      "bytes": 22738,
+      "sha256": "fcd8a20b3876124498dab823c2bfe4a6c3d2e29393d3e0e9e8b34c12dc0e38cb"
     },
     {
       "path": "client/components/panels/panels-library.css",
-      "bytes": 59096,
-      "sha256": "221e95211c7ecb07f8414e1fc490fee855ec2bed23027eb604678140b7d1ada4"
+      "bytes": 57796,
+      "sha256": "7cae5d356dc2f7c59d34738eee0ded14e3740300dc6a9925f69ef25803185bfa"
     },
     {
       "path": "client/components/panels/panels-library.js",
-      "bytes": 82564,
-      "sha256": "21dcf8b561b1b5b34dd5cd519fa8ce56bd3cde6a9a26f29fa3c1e6b9bbe3cd93"
+      "bytes": 82612,
+      "sha256": "4a088129fb3e0ddf70f981f1f60a07808720100189f403f2478b3afdef03ec8f"
     },
     {
       "path": "client/components/panels/panels-misc.js",
@@ -2491,8 +2491,8 @@
     },
     {
       "path": "client/core/locales/en-US-library.js",
-      "bytes": 31999,
-      "sha256": "acfc974fe471b08c13f127da1fa733711b0eb07b8f1aa2b7d778ba92b9e2b6a3"
+      "bytes": 32505,
+      "sha256": "9084c724c1aede33f7e573ab1bcd3102c86816f791d4db5f4e86e83bf814e7c8"
     },
     {
       "path": "client/core/locales/en-US-native.js",
@@ -2561,8 +2561,8 @@
     },
     {
       "path": "client/core/locales/ja-JP-gap-pages.js",
-      "bytes": 758270,
-      "sha256": "7db8d01dbd062b0b42580df6e35e4a9d43cea20229e426c5b2c3fbf392bd038f"
+      "bytes": 758378,
+      "sha256": "b4fce4c68788e72e016aea55252232b7371db92df71e00d16554a8b2fec83ee4"
     },
     {
       "path": "client/core/locales/ja-JP-runtime-surfaces.js",
@@ -2581,8 +2581,8 @@
     },
     {
       "path": "client/core/locales/ko-KR-gap-pages.js",
-      "bytes": 709235,
-      "sha256": "ef391284c260b4de062ed92ef07be29e31adfd5fd53a4b8d0f4859e79196a977"
+      "bytes": 709343,
+      "sha256": "61440110eb8906ac9c27767b42212ee3cba64edaeea9e020f82fcc27cc8e98af"
     },
     {
       "path": "client/core/locales/ko-KR-runtime-surfaces.js",
@@ -3806,13 +3806,13 @@
     },
     {
       "path": "client/e2e/generated-file-library-actions.cjs",
-      "bytes": 12586,
-      "sha256": "68f32c1c465ac35b6cee6cf113e896b8c84867f19d5e44412c57b633a9af0dd1"
+      "bytes": 15015,
+      "sha256": "692a14aa727bad9ff2e753b65b56be36be6c5a0e83e09a8cf365168fb78ee80e"
     },
     {
       "path": "client/e2e/generated-output-library-roundtrip.cjs",
-      "bytes": 11841,
-      "sha256": "fdec5d845d9fb53420211b070eff30d8f528b053385eed834093c5f07b9f5849"
+      "bytes": 12262,
+      "sha256": "910b3f2227591d3a5c465625348736c86d3dc0a8ee310ed00845e301d65d3f03"
     },
     {
       "path": "client/e2e/global-search.cjs",
@@ -3971,8 +3971,8 @@
     },
     {
       "path": "client/e2e/library-client-local.cjs",
-      "bytes": 30891,
-      "sha256": "bd8438f11ba208732b0656b2e8f21577dede34fca51b65828a03a7f3d818ec17"
+      "bytes": 35945,
+      "sha256": "303ff2370c657e5f0ce5ddb630e6bbe76f830a02e46080598c0dc00ce28c84ff"
     },
     {
       "path": "client/e2e/library-content-preview.cjs",
@@ -3981,8 +3981,8 @@
     },
     {
       "path": "client/e2e/library-empty-create.cjs",
-      "bytes": 13105,
-      "sha256": "94530b01b85c46603c02b622bc7b85d2d546f57b0022637eeb3496c97d383871"
+      "bytes": 17304,
+      "sha256": "9a0c18c7b27c4d3686d9f0babf35fd33d3ebf3dc729c82eec6e767ae752573f1"
     },
     {
       "path": "client/e2e/library-file-icons.cjs",
@@ -4021,8 +4021,8 @@
     },
     {
       "path": "client/e2e/library-remote-storage.cjs",
-      "bytes": 17986,
-      "sha256": "8fdc5d1c42f4fa5e4aed4d4ab67c70639c6074513ecf953e902f0478aa20807d"
+      "bytes": 20138,
+      "sha256": "cb8564f2396f09d7a22e479342bc0c063352bfb4dba3024697bbd0007b56cfce"
     },
     {
       "path": "client/e2e/library-share.cjs",
@@ -4041,8 +4041,8 @@
     },
     {
       "path": "client/e2e/library.cjs",
-      "bytes": 30283,
-      "sha256": "556a239eb7cbfbd1188ddaf4071670a3a2278433dbea2b840d4c49e46738e905"
+      "bytes": 30662,
+      "sha256": "84c9515112f033184e8f86f98901d38c2d74caa2940aafaf3ebfbb356f26b429"
     },
     {
       "path": "client/e2e/live-output-matrix.mjs",
@@ -6170,24 +6170,34 @@
       "sha256": "c1351afd0d8034bbcccfe5e5b67d8a74d2b0faba14b1f4994c0d3b8e56a5a3c7"
     },
     {
+      "path": "client/main/library-index-cache.cjs",
+      "bytes": 1188,
+      "sha256": "fe73e7179b9c54d25ea97216a73d52f0e94039f17428eea44e98f01b545eac6b"
+    },
+    {
       "path": "client/main/library-local-actions.cjs",
-      "bytes": 18324,
-      "sha256": "547a9870e8db219a4ba0c8923138c1b39dab31588b13066ba5c9d393b58b3d5e"
+      "bytes": 18455,
+      "sha256": "519c5842e513e12659578433bc20a76784033c3b46963c38b5410b799a8ed3d2"
     },
     {
       "path": "client/main/library-local-store.cjs",
-      "bytes": 10303,
-      "sha256": "d0dce869b94cbec0621d0d9eb116ac5ae3447ea3dc1f9689d731fead4f93381c"
+      "bytes": 10949,
+      "sha256": "2d2446dd9218ffb1982d390cf24ab23e1e8fb0774946d83dc373a4fe338dff8a"
     },
     {
       "path": "client/main/library-local.cjs",
-      "bytes": 4785,
-      "sha256": "d6ff88644419febaef73647a6c17c511a4a9958b0c27cbae8444877e30a0ca74"
+      "bytes": 5441,
+      "sha256": "a9c6a6bfc4cda84a3f01edeac57ada5fa82352e07d8d1773178b2e95fd6c5953"
     },
     {
       "path": "client/main/library-output.cjs",
       "bytes": 2621,
       "sha256": "427a4f5a5d7255d6e261d72c37f436752ffe64d5c873ad5055ac4d28eb10fbe2"
+    },
+    {
+      "path": "client/main/library-thumbnail.cjs",
+      "bytes": 2515,
+      "sha256": "a6a13a4b158ab6658f8fd1a73fb486f60c46f1335342f457e036f244ad31e0e2"
     },
     {
       "path": "client/main/lifecycle-diagnostics.js",
@@ -8981,8 +8991,8 @@
     },
     {
       "path": "client/tests/library-batch-i18n.test.cjs",
-      "bytes": 3336,
-      "sha256": "98b1a6e7c818baa8370437decd5a8e7db78f20404332b2caa31f4e5d496363b4"
+      "bytes": 4446,
+      "sha256": "71e150f6f29ed7ddf92a65bbfe65306deb736237933c6157c801fec3a91aa30c"
     },
     {
       "path": "client/tests/library-binary.test.cjs",
@@ -9001,13 +9011,13 @@
     },
     {
       "path": "client/tests/library-local-api.test.cjs",
-      "bytes": 39485,
-      "sha256": "b99b9e485ee66ad140e98420cbcdb2d5c8660a5ee10fc481085792d7b115879d"
+      "bytes": 40388,
+      "sha256": "66329e811ff1f617cb9aeb9c3161ae9dc699f7dbb71a375b52746f9c81871d1b"
     },
     {
       "path": "client/tests/library-local.test.cjs",
-      "bytes": 27432,
-      "sha256": "d162acb4e32b7eb0bb2b32236e01460dbe8f727c51528a47a9ff63abfc821c89"
+      "bytes": 29966,
+      "sha256": "543e4b526e7dffacb2eb5b6b644f0f26b1547cf186e4df09d9f012784d1bfac1"
     },
     {
       "path": "client/tests/library-output.test.cjs",
@@ -10986,8 +10996,8 @@
     },
     {
       "path": "client/tests/work-preview.test.cjs",
-      "bytes": 23473,
-      "sha256": "db55ad8b97c70eebb3a55bba14af1d447947ddb3bfa9eea41d5eb5d09185af56"
+      "bytes": 23756,
+      "sha256": "2b740594506222c2444c10cfe69e8e5f8f2e418281c995a28c1b7f870be3be0e"
     },
     {
       "path": "client/tests/work-reference-materials.test.cjs",

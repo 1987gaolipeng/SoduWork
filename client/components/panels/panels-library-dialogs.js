@@ -5,7 +5,9 @@
     const tx = source => global.SoduWorkI18n?.translateText(source) || source;
     async function showError(error, fallback) {
       const message = errorText(error, fallback);
-      if (error?.code === 'LIBRARY_NAME_CONFLICT' || /同名/.test(message)) {
+      if (error?.code === 'LOCAL_LIBRARY_FILE_MISSING') {
+        await openConfirmDialog({ title: '本地文件不存在', description: '找不到这份资料的本地文件，可能已被删除或移动。请恢复文件后重试，或从原会话重新保存、重新上传到资料库。', confirm: '知道了', alert: true });
+      } else if (error?.code === 'LIBRARY_NAME_CONFLICT' || /同名/.test(message)) {
         await openConfirmDialog({ title: '名称重复', description: message, confirm: '知道了', alert: true });
       } else notify(message);
     }
@@ -265,8 +267,13 @@
           if (!settled && epoch === getEpoch()) finish(true);
         } catch (failure) {
           if (!settled && epoch === getEpoch()) {
-            error.textContent = errorText(failure, tx('分享失败，请重试')); error.hidden = false;
-            if (failure?.code === 'LIBRARY_NAME_CONFLICT' || /同名/.test(error.textContent)) await showError(failure, '分享失败，请重试');
+            if (failure?.code === 'LOCAL_LIBRARY_FILE_MISSING') {
+              sending = false; refresh();
+              await showError(failure, '分享失败，请重试');
+            } else {
+              error.textContent = errorText(failure, tx('分享失败，请重试')); error.hidden = false;
+              if (failure?.code === 'LIBRARY_NAME_CONFLICT' || /同名/.test(error.textContent)) await showError(failure, '分享失败，请重试');
+            }
           }
         } finally { if (!settled) { sending = false; refresh(); } }
       });

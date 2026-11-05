@@ -65,6 +65,15 @@ function install(deps) {
         await replaceFile(temporary, destination, { check: guard, checkPath: checkDestination }); guard();
       } finally { await fs.unlink(temporary).catch(() => {}); }
       return { ok: true, path: destination };
+    }, { readOnly: ['thumbnail', 'list', 'status', 'readBinary', 'readContent', 'openExternal', 'reveal', 'exportFile'].includes(action) }).then(async result => {
+      if (action !== 'thumbnail') return result;
+      return require('./library-thumbnail.cjs').create(store, result.target, deps.nativeImage);
+    }).catch(failure => {
+      guard();
+      // Electron drops custom Error properties on rejected IPC calls. Preserve
+      // this expected failure as structured data, without exposing a disk path.
+      if (failure.code === 'LOCAL_LIBRARY_FILE_MISSING') return { ok: false, code: failure.code, message: failure.message };
+      throw failure;
     });
   });
 }

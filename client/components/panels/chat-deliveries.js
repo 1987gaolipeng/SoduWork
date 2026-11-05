@@ -212,6 +212,18 @@
     }
     while (groups.size > 120) { const old = groups.keys().next().value; groups.delete(old); if (!jobs.get(old)?.busy) jobs.delete(old); }
   }
+  function canPreviewSaved(group, delivery) {
+    if (!delivery || group.files.length !== 1) return false;
+    const rows = delivery.files || group.files;
+    if (rows.length !== 1) return false; // Multi-file results are displayed as ZIP packages.
+    const file = group.files[0];
+    const savedFile = { ...file, name: delivery.filename || rows[0].path || file.name };
+    // Saving changes storage, not preview support. Use the same policy as the chat workbench.
+    return [file, savedFile].every(item => {
+      const kind = global.ChatTools?.previewKind?.(item);
+      return Boolean(kind && kind !== 'external');
+    });
+  }
   function paint(card, group) {
     const job = jobs.get(group.id), result = job?.delivery || group.delivery;
     const status = card.querySelector('[data-delivery-status]');
@@ -224,7 +236,7 @@
     const open = card.querySelector('[data-delivery-open]');
     card.classList.toggle('has-error', Boolean(job?.localError || job?.error));
     card.classList.toggle('is-busy', Boolean(job?.busy));
-    if (open) { open.hidden = !result; open.classList.toggle('is-saved', Boolean(result)); }
+    if (open) { open.hidden = !canPreviewSaved(group, result); open.classList.toggle('is-saved', Boolean(result)); }
     if (retry) {
       retry.hidden = false;
       retry.disabled = Boolean(job?.busy);
@@ -448,6 +460,7 @@
     }
     if (node.closest('[data-delivery-open]')) {
       const delivery = jobs.get(group.id)?.delivery || group.delivery;
+      if (!canPreviewSaved(group, delivery)) return true;
       if (delivery?.id?.startsWith('local-')) {
         try { await global.LibraryTransfer.openSavedItem(delivery, { preview: true }); }
         catch (error) { if (group.scope === scope()) global.petSay?.(error.message); }
