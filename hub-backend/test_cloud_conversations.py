@@ -151,6 +151,15 @@ class CloudConversationTests(unittest.IsolatedAsyncioTestCase):
             users = [item for item in replay.json()["items"] if item.get("kind") == "user"]
             self.assertEqual(len(users), 1, replay.text)
             self.assertEqual(users[0]["text"], "CLOUD_NEW_TEST: write a report")
+            from app.services import execution_sessions
+            original_read = execution_sessions.read_task
+            with patch.object(execution_sessions, 'read_task', wraps=original_read) as read:
+                larger = await self.http.get(f'/api/v1/tasks/{receipt["taskId"]}/ai-session?limit=1000')
+                self.assertEqual(larger.status_code, 200, larger.text)
+                self.assertEqual(read.call_args.kwargs['limit'], 1000)
+                self.assertEqual(larger.json()['items'], replay.json()['items'])
+            excessive = await self.http.get(f'/api/v1/tasks/{receipt["taskId"]}/ai-session?limit=1001')
+            self.assertEqual(excessive.status_code, 422)
             async with db.SessionLocal() as session:
                 settled = await execution_settlement.settle_terminal(session, receipt["taskId"], receipt["ref"])
                 self.assertTrue(settled["ok"], settled)

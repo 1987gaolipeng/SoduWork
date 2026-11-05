@@ -48,6 +48,8 @@ async def envelope(session, client, task_id, ref, text, ctx):
     result = {"schema": 1, "ownerUserId": client.user_ref, "ref": ref,
             "runnerId": runner.id, "runnerBootId": "", "text": text,
             "executionSelection": normalize(chosen)}
+    if ctx.get("_turnPlugins"):
+        result["plugins"] = ctx["_turnPlugins"]
     if ctx.get("_turnFiles"):
         # Keep bounded user material with the pending intent so a Hub restart
         # cannot deliver text without its files. Acceptance clears the payload.
@@ -158,6 +160,16 @@ async def deliver(row_id):
             return "waiting"
         cfg = dict(ai_exec._cfg_of(ctx, ai_remote))
         selection = cfg.pop("_executionSelection", None)
+        plugin_turn = None
+        if payload.get("plugins"):
+            from . import conversation_turn_plugins
+            try:
+                await conversation_turn_plugins.validate(session, caller, handoff, payload["ref"], payload["plugins"])
+                plugin_turn = conversation_turn_plugins.authorization(caller, runner,
+                    payload["ref"], payload["plugins"], row.id)
+            except Exception as error:
+                await _save(session, row, attempts, "rejected", {"error": str(getattr(error, "detail", error))})
+                return "rejected"
         packet = {}
         if payload.get("files"):
             if "turnFiles1" not in getattr(runner, "caps", []):
@@ -187,6 +199,7 @@ async def deliver(row_id):
             reply = await runner.call("job.comment", {
                 "ref": payload["ref"], "text": payload["text"], "cfg": cfg,
                 "recordUser": True, "turnId": row.id,
+                **({"pluginTurn": plugin_turn} if plugin_turn else {}),
                 **({"files": packet} if packet else {}),
                 **({"executionSelection": selection} if selection is not None else {}),
             }, timeout=60)

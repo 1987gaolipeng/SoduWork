@@ -290,5 +290,28 @@ class CloudMessageRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.comment_calls, 0)
 
 
+    async def test_plugin_turn_retries_keep_same_task_and_version_conflicts_do_not_resend(self):
+        from app.services import conversation_turn_plugins
+        self.ctx['_turnPlugins'] = [{'pluginId':'local:plugin-builder','checksum':'a'*64}]
+        def authorize(client, runner, ref, selections, turn_id):
+            return {'operation':'plugin.prepare','args':{'ref':ref,'plugins':selections},'authorization':'temporary'}
+        with patch.object(conversation_turn_plugins,'validate',AsyncMock()), \
+             patch.object(conversation_turn_plugins,'authorization',authorize):
+            self.failure='after'
+            first=await self.send()
+            self.assertTrue(first['uncertain'])
+            row=await self.receipt()
+            self.assertEqual(row.payload['plugins'],self.ctx['_turnPlugins'])
+            self.assertNotIn('temporary',json.dumps(row.payload))
+            await recovery.attempt(row.id)
+            second=await self.send()
+            self.assertTrue(second['ok'])
+            self.assertEqual(self.comment_calls,1)
+            self.ctx['_turnPlugins']=[{'pluginId':'local:plugin-builder','checksum':'b'*64}]
+            with self.assertRaises(HTTPException):
+                await self.send()
+            self.assertEqual(self.comment_calls,1)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -246,6 +246,8 @@ def comment_digest(ref: str, payload: dict) -> str:
     """Keep immutable intent, without retaining prompts or renewable credentials."""
     value = {"ref": str(ref), "text": str(payload.get("text") or ""),
              "executionSelection": payload.get("executionSelection")}
+    if payload.get("pluginTurn"):
+        value["plugins"] = (payload["pluginTurn"].get("args") or {}).get("plugins")
     packet = payload.get("files") or {}
     if packet.get("items"):
         # Transfers can be re-uploaded after a proven negative receipt. Bind

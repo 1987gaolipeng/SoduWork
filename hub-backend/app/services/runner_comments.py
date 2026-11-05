@@ -68,6 +68,15 @@ async def comment(machine, m, read_local_files, read_packet=None, drop_transfer=
         return result
     user_text = str(m.get("text") or "")
     text = str(m.get("promptText") or user_text)
+    prepared_plugins = None
+    if m.get("pluginTurn"):
+        from . import runner_turn_plugins
+        try:
+            prepared_plugins = await runner_turn_plugins.prepare(machine, m)
+            text = prepared_plugins["promptText"]
+            m = {**m, "plugins": prepared_plugins["plugins"]}
+        except (ValueError, KeyError, TimeoutError) as exc:
+            return {"ok": False, "error": str(exc)}
     staged = []
     packet = m.get("files") or {}
     if packet.get("items"):
@@ -101,6 +110,10 @@ async def comment(machine, m, read_local_files, read_packet=None, drop_transfer=
     from app.services import runtime_images
     try:
         cfg = {**dict(m.get("cfg") or {}), "_admissionKey": str(m.get("_admissionKey") or "")}
+        if prepared_plugins is not None:
+            cfg["pluginResourceBundles"] = prepared_plugins["resourceBundles"]
+        elif not m.get("_localParent"):
+            cfg["pluginResourceBundles"] = []
         if selected is not None:
             cfg["_executionSelection"] = selected
         turn_cfg = await asyncio.to_thread(runtime_images.prepare, cfg,

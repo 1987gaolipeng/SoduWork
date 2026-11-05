@@ -199,7 +199,7 @@ async def ai_states(session: AsyncSession, task_ids: list[str]) -> dict:
     if not task_ids:
         return {}
     from .. import automation_models as am
-    from . import ai_exec, execution_sessions
+    from . import ai_exec, execution_context, execution_sessions
     rows = (await session.execute(
         select(models.TaskEvent)
         .where(models.TaskEvent.task_id.in_(task_ids),
@@ -245,11 +245,20 @@ async def ai_states(session: AsyncSession, task_ids: list[str]) -> dict:
     if refs:
         session_rows = list((await session.execute(select(am.ExecutionSession).where(
             am.ExecutionSession.ref.in_(set(refs.values()))))).scalars().all())
-        by_ref = {row.ref: row for row in session_rows}
+        by_ref = {(row.task_id, row.ref): row for row in session_rows}
         for task_id, ref in refs.items():
-            row = by_ref.get(ref)
+            row = by_ref.get((task_id, ref))
             if row is None or task_id not in out:
                 continue
+            # The initial routing draft can predate Runner selection. Publish
+            # the actual execution location with list/realtime metadata so a
+            # sidebar does not need to load each transcript to identify it.
+            context = execution_context.public((row.metadata_ or {}).get("executionContext"))
+            runner = context.get("runner") or {}
+            if runner.get("clientId"):
+                out[task_id]["runnerKind"] = "work-computer"
+            elif runner.get("mode") == "remote":
+                out[task_id]["runnerKind"] = "cloud"
             state = execution_sessions.canonical_state(row.state, "running")
             out[task_id]["executionState"] = state
             if state == "done":

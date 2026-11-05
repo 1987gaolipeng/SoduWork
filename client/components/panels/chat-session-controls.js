@@ -78,7 +78,13 @@
       }
       button.setAttribute('aria-busy', String(saving));
       button.disabled = Boolean(state.cloudHandoff);
-      if (state.cloudHandoff) { label.textContent = '云端权限'; button.title = '权限由云端执行环境管理'; pop.hidden = true; }
+      if (state.cloudHandoff) {
+        const personal = state.cloudHandoff.target?.runnerKind === 'work-computer';
+        label.textContent = personal ? '电脑权限' : '云端权限';
+        button.title = personal ? '权限由所选本人电脑的执行环境管理' : '权限由云端执行环境管理';
+        button.setAttribute('aria-label', label.textContent + '：' + button.title);
+        pop.hidden = true;
+      }
       const current = pop.querySelector('[data-access-current]');
       current.textContent = '当前权限：' + global.WorkComposer.permissionLabel(state.accessPolicy?.mode || (state.mode === 'readonly' ? 'readonly' : 'legacy'));
       pop.querySelectorAll('[data-access-mode]').forEach(row => {

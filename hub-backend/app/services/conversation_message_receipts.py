@@ -27,6 +27,8 @@ async def send(session, client, task_id, ref, text, message_id, ctx, *, executio
         {"text": text, "executionSelection": execution_selection}, sort_keys=True, ensure_ascii=False)
     if file_manifest:
         content = json.dumps({"content": content, "files": file_manifest}, sort_keys=True, ensure_ascii=False)
+    if ctx.get("_turnPlugins"):
+        content = json.dumps({"content": content, "plugins": ctx["_turnPlugins"]}, sort_keys=True, ensure_ascii=False)
     digest = hashlib.sha256(content.encode()).hexdigest()
     row = await session.get(Receipt, row_id)
     account_id = str(uuid.uuid5(uuid.NAMESPACE_URL,
@@ -38,6 +40,8 @@ async def send(session, client, task_id, ref, text, message_id, ctx, *, executio
     if row is None:
         from . import cloud_message_recovery
         payload = await cloud_message_recovery.envelope(session, client, task_id, ref, text, ctx)
+        if ctx.get("_turnPlugins") and not payload:
+            raise HTTPException(409, "原会话暂不支持可靠的插件续聊，请刷新原电脑连接")
         if payload:
             row_id = account_id
         row = Receipt(id=row_id, task_id=task_id, owner_client_id=client.id,

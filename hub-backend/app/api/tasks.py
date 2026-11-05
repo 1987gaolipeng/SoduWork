@@ -1533,13 +1533,6 @@ async def ai_say_task(
     from ..services import conversation_turn_files
     turn_files, file_manifest = conversation_turn_files.decode(body.get("files", []))
     from ..services import conversation_turn_plugins
-    from ..services import conversation_turn_skills
-    turn_skills = conversation_turn_skills.normalize(body.get("skills"))
-    if turn_skills:
-        if body.get("messageId") is None:
-            raise HTTPException(422, "技能续聊需要消息回执编号")
-        await conversation_turn_skills.validate(session, client, handoff, ref, turn_skills)
-        ctx = {**ctx, "_turnSkills": turn_skills}
     turn_plugins = conversation_turn_plugins.normalize(body.get("plugins"))
     if turn_plugins:
         if body.get("messageId") is None:
