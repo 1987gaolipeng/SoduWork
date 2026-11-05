@@ -3,13 +3,14 @@
 Keep provider loading, executor selection, model resolution and run receipts real.
 The RPC boundary never starts an Agent or contacts a model service.
 """
+import hashlib
 import importlib
 import json
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 os.environ.setdefault("AUTH_SECRET", "isolated-schedule-runner-test-secret")
@@ -26,7 +27,7 @@ from app.services import (
     ai_exec, ai_local, ai_remote, client_access, dispatch_identity,
     model_catalog, runner_hub, schedule_conversations, schedules,
 )
-from app.services import conversation_handoffs, task_dispatch, tasks as task_service
+from app.services import cloud_conversations, conversation_handoffs, task_dispatch, tasks as task_service
 from app.conversation_handoff_models import ConversationHandoff
 from tests.sqlite_schema import create_fresh_sqlite_schema
 
@@ -41,7 +42,8 @@ class ScheduleRunnerDispatchTests(unittest.IsolatedAsyncioTestCase):
             await create_fresh_sqlite_schema(connection, Base.metadata)
         self.session = async_sessionmaker(self.engine, expire_on_commit=False)()
         self.owner = models.User(id="owner", username="owner", is_active=True)
-        self.client = models.Client(id="device", user_ref="owner", auth_state="active", config={})
+        self.client = models.Client(id="device", user_ref="owner", auth_state="active", config={},
+                                    last_seen_at=datetime.now(timezone.utc))
         self.session.add_all([self.owner, self.client])
         await self.session.flush()
         self.schedule = models.AiSchedule(
@@ -173,6 +175,91 @@ class ScheduleRunnerDispatchTests(unittest.IsolatedAsyncioTestCase):
                 await schedules.reconcile_runs(self.session, schedule_id="schedule")
                 self.assertEqual(run.state, "succeeded")
             self.assertEqual(dispatched, [handoff.task_id])
+
+    async def test_new_cloud_occurrence_sends_readable_stable_trigger_time(self):
+        await self.cloud_target()
+        run = await schedules.begin_run(self.session, self.schedule, "timer")
+        run.started_at = datetime(2026, 11, 5, 6, 55, 14, 655257, tzinfo=timezone.utc)
+        await self.session.commit()
+        dispatch = AsyncMock(return_value={"ok": True, "ref": "readable-time-ref"})
+        with patch.object(task_dispatch, "dispatch", dispatch):
+            result = await schedules.run_one(self.session, self.schedule, schedule_run_id=run.id)
+            self.assertTrue(result["ok"], result)
+            handoff = await self.session.scalar(select(ConversationHandoff))
+            expected = (self.schedule.title + "\n\n" + self.schedule.note +
+                        "\n\n自动化触发时间：2026-11-05 14:55:14（北京时间）")
+            self.assertEqual(handoff.options["instruction"], expected)
+            self.assertEqual(handoff.options["userText"], expected)
+            original_hash = handoff.request_hash
+            retried = await schedules.run_one(self.session, self.schedule, schedule_run_id=run.id)
+        self.assertTrue(retried["ok"], retried)
+        self.assertEqual(retried["taskId"], result["taskId"])
+        self.assertEqual(handoff.request_hash, original_hash)
+        dispatch.assert_awaited_once()
+        self.assertEqual(self.calls, [])
+
+    async def test_cloud_old_iso_handoff_recovers_before_run_receipt_without_duplicate_task(self):
+        await self.cloud_target()
+        run = await schedules.begin_run(self.session, self.schedule, "timer")
+        run.started_at = datetime(2026, 11, 5, 6, 55, 14, 655257, tzinfo=timezone.utc)
+        await self.session.commit()
+        request_id = "schedule-" + hashlib.sha256(
+            (self.schedule.id + ":" + run.id).encode("utf-8")).hexdigest()
+        old_text = (self.schedule.title + "\n\n" + self.schedule.note +
+                    "\n\n自动化触发时间：2026-11-05T14:55:14.655257+08:00")
+        dispatch = AsyncMock(return_value={"ok": True, "ref": "legacy-time-ref"})
+        with patch.object(task_dispatch, "dispatch", dispatch):
+            original = await cloud_conversations.create(self.session, self.client, request_id, {
+                "sessionId": request_id, "agentId": "codex", "model": "",
+                "title": self.schedule.title, "text": old_text, "userText": old_text,
+                "requiredSkills": [], "targetRunnerId": "cloud", "targetRunnerKind": "cloud",
+            }, [])
+            # A crash here has committed the handoff, but not linked the run.
+            await self.session.refresh(run)
+            self.assertEqual(run.state, "starting")
+            self.assertFalse(run.task_id)
+            self.assertNotIn("executionMode", run.receipt)
+            handoff = await self.session.scalar(select(ConversationHandoff))
+            original_hash = handoff.request_hash
+            with patch.object(cloud_conversations, "create", wraps=cloud_conversations.create) as create:
+                recovered = await schedules.run_one(self.session, self.schedule, schedule_run_id=run.id)
+            self.assertEqual(create.await_count, 2)
+            self.assertTrue(create.await_args_list[0].args[3]["text"].endswith(
+                "2026-11-05 14:55:14（北京时间）"))
+            self.assertEqual(create.await_args_list[1].args[3]["text"], old_text)
+            self.assertEqual(create.await_args_list[1].args[3]["userText"], old_text)
+            # Legacy formatting must not authorize a changed instruction.
+            self.schedule.note += " Changed after the original submission."
+            await self.session.commit()
+            with self.assertRaises(HTTPException) as changed:
+                await schedules.run_one(self.session, self.schedule, schedule_run_id=run.id)
+            self.assertEqual(changed.exception.status_code, 409)
+            self.assertEqual(changed.exception.detail,
+                             "此云端会话请求编号已用于另一条消息或附件，请使用原请求重试")
+        self.assertTrue(recovered["ok"], recovered)
+        self.assertEqual(recovered["taskId"], original["taskId"])
+        self.assertEqual(run.receipt["conversationId"], request_id)
+        self.assertEqual(run.receipt["executionMode"], schedules.CLOUD_PROTOCOL)
+        self.assertEqual(handoff.request_hash, original_hash)
+        self.assertEqual(handoff.options["instruction"], old_text)
+        self.assertEqual(len((await self.session.scalars(select(models.Task))).all()), 1)
+        self.assertEqual(len((await self.session.scalars(select(ConversationHandoff))).all()), 1)
+        dispatch.assert_awaited_once()
+        self.assertEqual(self.calls, [])
+
+    async def test_cloud_other_conflicts_never_retry_with_legacy_trigger_time(self):
+        await self.cloud_target()
+        run = await schedules.begin_run(self.session, self.schedule, "timer")
+        await self.session.commit()
+        conflict = HTTPException(409, "暂时没有匹配 Agent、技能且可接单的云端环境")
+        with patch.object(cloud_conversations, "create", AsyncMock(side_effect=conflict)) as create:
+            with self.assertRaises(HTTPException) as caught:
+                await schedules.run_one(self.session, self.schedule, schedule_run_id=run.id)
+        self.assertIs(caught.exception, conflict)
+        create.assert_awaited_once()
+        self.assertIsNone(await self.session.scalar(select(ConversationHandoff)))
+        self.assertIsNone(await self.session.scalar(select(models.Task)))
+        self.assertEqual(self.calls, [])
 
     async def test_unavailable_or_reassigned_cloud_target_cannot_pass_preflight(self):
         await self.cloud_target()

@@ -151,6 +151,7 @@
     "触发 · {value1} · {value2}{value3}": "Trigger · {value1} · {value2}{value3}",
     "触发 · {value1}{value2}": "Trigger · {value1}{value2}",
     "{value1} · 展示最近 20 次真实运行": "{value1} · Latest 20 actual runs",
+    "{value1} · 展示最近 20 次触发与执行记录": "{value1} · Latest 20 trigger and execution records",
     "自动运行": "Automatic run",
     "按插件": "Use plugin",
     "的方法 · 交给": "method · Assign to",

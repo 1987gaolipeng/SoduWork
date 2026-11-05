@@ -70,7 +70,7 @@ test('scheduled computer automation is preflighted and retryable', () => {
 test('自动化执行记录展示普通会话、状态和打开入口', () => {
   assert.match(api, /schedules\/.*\/runs/);
   assert.match(panel, /listScheduleRuns/);
-  assert.match(panel, /提示词、模型过程和最终结果都在/);
+  assert.match(panel, /客户端接收任务后才会创建会话/);
   assert.match(panel, /data-run-chat/);
   assert.match(panel, /starting:/);
   assert.match(panel, /waiting:/);

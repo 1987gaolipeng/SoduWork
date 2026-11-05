@@ -45,7 +45,9 @@ async function click(selector) {
   await wait(40);
 }
 async function phase(name) {
+  await js("Promise.all(document.getAnimations().filter(animation=>Number.isFinite(animation.effect.getTiming().iterations)).map(animation=>animation.finished.catch(()=>{})))");
   const state = await js(`({states:[...document.querySelectorAll('.sch-run-state')].map(node=>node.textContent),
+    chatLinks:document.querySelectorAll('[data-run-chat]').length,
     text:document.querySelector('#schRunContent')?.innerText||'',cache:structuredClone(_schRunRows),errors:errors.slice()})`);
   report.phases.push({ name, ...state, historyCalls: clone(historyCalls), acknowledgements: clone(acknowledgements), sends });
   fs.writeFileSync(path.join(out, name + '.png'), (await win.webContents.capturePage()).toPNG()); return state;
@@ -129,35 +131,60 @@ app.whenReady().then(async () => {
     (request, callback) => { report.network.push(request.url); callback({ cancel: true }); });
   buildPage();
   for (const [name, result, expected, label] of [
-    ['completed', { ok: true }, 'succeeded', '已完成'], ['failed', { ok: false }, 'failed', '失败'],
-    ['cancelled', { ok: true, cancelled: true }, 'cancelled', '已取消'],
+    // The Hub conversation contract projects cancelled occurrences onto failed.
+    ['completed', { ok: true }, 'succeeded', '完成'], ['failed', { ok: false }, 'failed', '失败'],
+    ['cancelled', { ok: true, cancelled: true }, 'failed', '失败'],
+    ['paused', { ok: true, paused: true }, 'failed', '失败'],
   ]) await check('close then ' + name + ' receipt then reopen reads authoritative state', async () => {
     await openRuns(); assert.deepEqual((await phase(name + '-running')).states, ['执行中']);
     await click('[data-run-chat]'); assert.equal(await js('openedChats.length'), 1);
     await settle(result); assert.equal(records.get(actor + ':run-1').state, expected);
     await js('openSchedulePanel()'); await openRuns(); const state = await phase(name + '-reopened');
     assert.deepEqual(state.states, [label]); assert.equal(sends, 1, 'viewing history never resends the automation');
+    assert.equal(state.chatLinks, expected === 'succeeded' ? 1 : 0,
+      'failed and cancelled history has no conversation navigation');
+  });
+  await check('an unaccepted trigger shows pending state without a fabricated chat entry', async () => {
+    const row = records.get(actor + ':run-1');
+    row.state = 'running'; delete row.conversationId; row.receipt.phase = 'device';
+    await openRuns(); const state = await phase('unaccepted-trigger');
+    assert.deepEqual(state.states, ['待执行']); assert.equal(state.chatLinks, 0);
+    assert.match(state.text, /触发不代表已开始执行/);
+    assert.match(state.text, /触发与执行记录/);
+  });
+  await check('a previously visible chat button cannot navigate after the cached receipt fails', async () => {
+    await openRuns();
+    await js("_schRunRows['schedule-0'][0].state='failed';void 0");
+    await click('[data-run-chat]'); assert.equal(await js('openedChats.length'), 0);
+    await js('_schRenderRunDrawer(false)');
+    const state = await phase('stale-button-blocked');
+    assert.deepEqual(state.states, ['失败']); assert.equal(state.chatLinks, 0);
   });
   await check('reopened cached pending receipt resumes polling without inferring completion from idle', async () => {
     await openRuns(); await click('[data-run-close]'); await worker.tick();
     assert.equal(records.get(actor + ':run-1').state, 'running', 'an idle handle does not prove completion');
     await openRuns(); const before = historyCalls.length;
     await settle({ ok: true });
-    await until(() => historyCalls.length > before && js("document.querySelector('.sch-run-state')?.textContent==='已完成'"), 'reopened pending history polls the terminal receipt');
+    await until(() => historyCalls.length > before && js("document.querySelector('.sch-run-state')?.textContent==='完成'"), 'reopened pending history polls the terminal receipt');
     await phase('pending-poll-restored'); assert.equal(sends, 1);
   });
-  await check('waiting receipt stays waiting until authoritative state changes', async () => {
-    await settle({ ok: true, paused: true }); await openRuns(); await click('[data-run-close]');
+  await check('pending in-chat approval stays running until the original completion arrives', async () => {
+    // An active approval keeps its turn promise pending; a resolved pause is
+    // terminal for this occurrence and is covered separately above.
+    await openRuns(); await click('[data-run-close]');
     await worker.tick(); await openRuns();
-    assert.deepEqual((await phase('waiting-reopened')).states, ['等待输入']);
-    assert.equal(records.get(actor + ':run-1').state, 'waiting'); assert.equal(sends, 1);
+    assert.deepEqual((await phase('waiting-reopened')).states, ['执行中']);
+    assert.equal(records.get(actor + ':run-1').state, 'running'); assert.equal(sends, 1);
+    await settle({ ok: true });
+    await until(() => js("document.querySelector('.sch-run-state')?.textContent==='完成'"), 'approval completion reaches history');
+    assert.equal(records.get(actor + ':run-1').state, 'succeeded'); assert.equal(sends, 1);
   });
   await check('reopen failure retains cached state and exposes a working retry', async () => {
     await openRuns(); await click('[data-run-close]'); await settle({ ok: true }); historyFailure = true;
     await openRuns(); const failed = await phase('refresh-failed');
     assert.deepEqual(failed.states, ['执行中']); assert.match(failed.text, /记录暂时没有加载成功/);
     historyFailure = false; await click('[data-run-retry]');
-    await until(() => js("document.querySelector('.sch-run-state')?.textContent==='已完成'"), 'explicit retry reads completion');
+    await until(() => js("document.querySelector('.sch-run-state')?.textContent==='完成'"), 'explicit retry reads completion');
     await phase('refresh-retried');
   });
   await check('late previous-account history cannot replace the new account receipt', async () => {

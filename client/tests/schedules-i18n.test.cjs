@@ -28,6 +28,35 @@ function boot(locale) {
 
 const CJK = /[\u4e00-\u9fff]/;
 
+test('history distinguishes trigger records from execution in every supported locale', () => {
+  const messages = [
+    '自动化触发后，这里会记录状态；开始执行后可查看对应会话。',
+    '触发不代表已开始执行',
+    '客户端接收任务后才会创建会话；失败或取消的记录请查看原因。',
+    '09:00 · 展示最近 20 次触发与执行记录',
+    '执行端不在线，本次未执行。请启动原执行设备上的客户端后重试；不会自动改派其他设备。',
+    '执行端未在规定时间内接收，本次未执行。请启动原执行设备上的客户端后重新执行。',
+    '执行端已失联，未收到完成回执，本次记为失败。请确认客户端在线后检查原会话，必要时重新执行。',
+    '客户端执行被中断；为避免重复操作未自动重发，请在最近聊天中查看原会话。',
+    '客户端执行被中断；为避免重复操作未自动重发，请检查客户端状态。',
+    '自动化消息未被接收，请在最近聊天中查看原会话并确认执行状态。',
+    '本轮执行已暂停，请在最近聊天中查看原会话并处理待确认事项；本次内容不会自动重发。',
+    '本轮执行未完成，请在最近聊天中查看原会话了解详细原因。',
+    '本轮执行已停止，可在最近聊天中查看原会话。',
+    '本轮执行中断，请在最近聊天中查看原会话；本次内容不会自动重发。',
+  ];
+  for (const locale of ['zh-CN', 'en-US', 'ja-JP', 'ko-KR']) {
+    const tt = boot(locale).SoduWorkI18n.translateText;
+    for (const source of messages) {
+      const result = tt(source);
+      if (locale === 'zh-CN') assert.equal(result, source);
+      else assert.notEqual(result, source, locale + ': ' + source);
+      assert.ok(!result.includes('{value'));
+      if (locale === 'en-US') assert.ok(!CJK.test(result));
+    }
+  }
+});
+
 test('one-time timing labels, validation and localized summary render in English', () => {
   const context = boot('en-US');
   const tt = source => context.SoduWorkI18n.translateText(source);

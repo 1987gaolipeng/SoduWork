@@ -116,8 +116,8 @@
     },
     {
       "path": "client/api.js",
-      "bytes": 140167,
-      "sha256": "ea8f150549851aa40f186343f8c12ed50bb90813c1ea56bd3d74d1e228496932"
+      "bytes": 140820,
+      "sha256": "55804ff312f8c6bd5f6cc4349c6e9bbf6bf02f3c911e82eb4bb4e506f4bc72c1"
     },
     {
       "path": "client/app-window-chrome.html",
@@ -1596,8 +1596,8 @@
     },
     {
       "path": "client/components/panels/panels-schedules-runs.js",
-      "bytes": 15743,
-      "sha256": "ce97a9718509934b25759b12bb0b8e7480905bbd6d285bc73437bc98670c9ad3"
+      "bytes": 18379,
+      "sha256": "06bbc1f6ce558fc2c141faacda9e872918075c3e3b4adbf4d811f5bd658a4865"
     },
     {
       "path": "client/components/panels/panels-schedules.css",
@@ -2476,8 +2476,8 @@
     },
     {
       "path": "client/core/locales/en-US-dynamic-work.js",
-      "bytes": 21856,
-      "sha256": "259686a5cee1970c41ce2a82752eef8a0b2a76be69fc2f36b363264b81589520"
+      "bytes": 21971,
+      "sha256": "d31a722081f8fd1754c8ef4ff703dc25e4ce8704567e7a9e80be8946ab884c87"
     },
     {
       "path": "client/core/locales/en-US-final-pages.js",
@@ -2511,8 +2511,8 @@
     },
     {
       "path": "client/core/locales/en-US-runtime-pages.js",
-      "bytes": 52159,
-      "sha256": "c4bc0b7a650fb568fc1d82929fab0a6cd8c6f4af2f50b04d5d7d1ab297e1a657"
+      "bytes": 55063,
+      "sha256": "c47ad05868879be8701de7e2f87b49ea33b892381f7b3bffa60674a83e21b0a9"
     },
     {
       "path": "client/core/locales/en-US-runtime-surfaces.js",
@@ -2571,8 +2571,8 @@
     },
     {
       "path": "client/core/locales/ja-JP.js",
-      "bytes": 4111,
-      "sha256": "bbf1740374b98c3b5935fbdfcbc89caedac41b2de6b926506b4dcf492355a46e"
+      "bytes": 8485,
+      "sha256": "58b12635bdaf90a26bd881c05a9fd3689ac03db9785fd69e595b94d6572b507d"
     },
     {
       "path": "client/core/locales/ko-KR-agent-pages.js",
@@ -2591,8 +2591,8 @@
     },
     {
       "path": "client/core/locales/ko-KR.js",
-      "bytes": 3880,
-      "sha256": "03ea5165c82e008637ff9c5fe262531cd36d83a919a85ff2b5f01e0b8b434089"
+      "bytes": 7950,
+      "sha256": "e5426f03bf4f27a929b51a03a93dfa89f8a45f720c46e9b6705b457de3903547"
     },
     {
       "path": "client/core/locales/locale-registry.js",
@@ -4631,8 +4631,8 @@
     },
     {
       "path": "client/e2e/schedule-run-settlement.cjs",
-      "bytes": 12948,
-      "sha256": "a56c9ddb6c8ac610401d6feef8e5a28da314548e7b6e3b7b18d26fc4e6941a1a"
+      "bytes": 14824,
+      "sha256": "142eb4c07e63eaa5cfb229891791ea8d3fcedb6b1e1202c3c826d38ee2d4d946"
     },
     {
       "path": "client/e2e/screenshot-editor.cjs",
@@ -5510,9 +5510,14 @@
       "sha256": "a0512e5a349a76c62cd97bd943e1c3495bca0b19207c3e784301a049f1abf395"
     },
     {
+      "path": "client/main/automation-conversation-polling.cjs",
+      "bytes": 3175,
+      "sha256": "6db95d437df381b786f11f2704884feaa4530074d78e0a0477022751954c6646"
+    },
+    {
       "path": "client/main/automation-conversations.js",
-      "bytes": 15096,
-      "sha256": "3b6bb82f19f8c9271b867e67a4d28f3a1c599c0625b1272f69044d6b3470ad10"
+      "bytes": 18350,
+      "sha256": "4e816830abfac15320c755f26c5ab6c9bfdb7e9776c5665c056d24a06b59f888"
     },
     {
       "path": "client/main/automation-preflight.cjs",
@@ -7176,8 +7181,8 @@
     },
     {
       "path": "client/preload.js",
-      "bytes": 33943,
-      "sha256": "277e35e591fd9ec61af54fb07d989f101ce0b55b3153f91995108188b9364f4d"
+      "bytes": 34053,
+      "sha256": "e766d41aa52baedd02aa3a9cdae094786a3be207c7b1584b08506a9758d97e2f"
     },
     {
       "path": "client/runner/README.md",
@@ -7780,9 +7785,19 @@
       "sha256": "fbc2198a1134961b952b7f90574e065dae4f5f099bd88fe5b789ab55a4895788"
     },
     {
+      "path": "client/tests/automation-conversation-install.test.cjs",
+      "bytes": 4697,
+      "sha256": "a794c9b96c958faf4a7e52e8e6bff8f812522a8205c3ddd6a6777f96286b73eb"
+    },
+    {
+      "path": "client/tests/automation-conversation-polling.test.cjs",
+      "bytes": 11827,
+      "sha256": "82933c94046cc493cf89113885176dbbdc826557f002b4b82bddc074a2c56963"
+    },
+    {
       "path": "client/tests/automation-conversations.test.cjs",
-      "bytes": 16683,
-      "sha256": "35e82683a47dd5826ebc1cc9e67e0c96532d47807b9cca7451bc8d7a729a96e7"
+      "bytes": 28666,
+      "sha256": "4c825248458ec01fd6af7bb0ed3ef73b124867ee7b2ed28b781cc5243bc023aa"
     },
     {
       "path": "client/tests/automation-create-menu.html",
@@ -7811,8 +7826,8 @@
     },
     {
       "path": "client/tests/automation-preflight-api.test.cjs",
-      "bytes": 3800,
-      "sha256": "1dfeaf784213cbba50a3836000e441bc32f4174f56f507d351e5f10bb0099414"
+      "bytes": 6754,
+      "sha256": "462a335162ed066fc4c31cfc51d7e80eb327cb85e1f89946a0a78a8e4300962e"
     },
     {
       "path": "client/tests/automation-preflight.test.cjs",
@@ -8871,8 +8886,8 @@
     },
     {
       "path": "client/tests/i18n.test.cjs",
-      "bytes": 15368,
-      "sha256": "0f9713b2e5ea73775ab81b76d3f4d23a9c3322b4baabc29c6ea871597ca0b9b6"
+      "bytes": 21884,
+      "sha256": "06fc9db7de29b25c2de3ac72918611ed3dd864279be8727f78155fcb3315b38d"
     },
     {
       "path": "client/tests/im-api-scope.test.cjs",
@@ -10261,8 +10276,8 @@
     },
     {
       "path": "client/tests/schedule-card-actions.test.cjs",
-      "bytes": 17860,
-      "sha256": "9a8d1b5c38a47199147f16deb3b12edf7284a6cfda8cfd331965e8b145d436d5"
+      "bytes": 25825,
+      "sha256": "049b94b93634d9ca68cb6a7a148ebaced6f354b61059ed4d26076a14e05eddd2"
     },
     {
       "path": "client/tests/schedule-execution-options.test.cjs",
@@ -10286,8 +10301,8 @@
     },
     {
       "path": "client/tests/schedule-plugins.test.cjs",
-      "bytes": 9929,
-      "sha256": "a205d1a0011fe110c586a5708c76953d5b19615dc509e6cab33891eda96037b4"
+      "bytes": 9926,
+      "sha256": "d8ca5cfbdc7c43fa97d89720770337d774920677b4cc583dfda6d4f700559483"
     },
     {
       "path": "client/tests/schedule-scope.test.cjs",
@@ -10296,8 +10311,8 @@
     },
     {
       "path": "client/tests/schedules-i18n.test.cjs",
-      "bytes": 8496,
-      "sha256": "50f4717d2cce31b18f2bf627ec7464adb8c02d90d795391f05709bbdf1252c9e"
+      "bytes": 10433,
+      "sha256": "7575981afb5af0921ecade91867a3be85b7ef054fb4c4aa1e98862c3538cce2c"
     },
     {
       "path": "client/tests/screenshot-editor-model.test.cjs",
@@ -13761,8 +13776,13 @@
     },
     {
       "path": "hub-backend/app/services/schedule_conversations.py",
-      "bytes": 15089,
-      "sha256": "356f48dd5bc92025850ea669e42574fb6aded133c20a2c72a84ebda20c44f02c"
+      "bytes": 16695,
+      "sha256": "5e8b815697759b08ba046a8cfb1af4299e66786623b1cbeb1f3ecda417a2dc77"
+    },
+    {
+      "path": "hub-backend/app/services/schedule_device_liveness.py",
+      "bytes": 5928,
+      "sha256": "5f79c7fb594a4df7eedd2c23f3e3b5ed0f08d94890032bf20b30f9040683a8b0"
     },
     {
       "path": "hub-backend/app/services/schedule_execution.py",
@@ -13781,8 +13801,8 @@
     },
     {
       "path": "hub-backend/app/services/schedule_run_contracts.py",
-      "bytes": 13682,
-      "sha256": "a39f5662ddb51f7ae101476a3161783dacfc136ddd45b0dc437e227765b00afd"
+      "bytes": 13782,
+      "sha256": "54c4d3a68e3a934b05b5e8435017c6429343051d8fedaaaa92bf090c97439f7a"
     },
     {
       "path": "hub-backend/app/services/schedule_source_app.py",
@@ -13796,8 +13816,8 @@
     },
     {
       "path": "hub-backend/app/services/schedules.py",
-      "bytes": 34931,
-      "sha256": "423129274a53851c731e5e0e002ae22adc9436c066e062a85434f9255f029d3c"
+      "bytes": 36825,
+      "sha256": "eb812827cc828ada563ae5e0c5358daaba5ba14b06ce49628c5e9b94eae57cf8"
     },
     {
       "path": "hub-backend/app/services/scm_support.py",
@@ -17341,8 +17361,8 @@
     },
     {
       "path": "hub-backend/test_schedule_conversations.py",
-      "bytes": 19904,
-      "sha256": "fcb65a9cda8bf9b2ae7158ea1ae8745017ccf204bd43a762ef16b960c37e7551"
+      "bytes": 19981,
+      "sha256": "9005ad4d226cc05e92a44cab91310d26942ccc458aa01d0b5835a9b95405687e"
     },
     {
       "path": "hub-backend/test_schedule_loop_isolation.py",
@@ -17356,13 +17376,13 @@
     },
     {
       "path": "hub-backend/test_schedule_run_reconciliation.py",
-      "bytes": 7522,
-      "sha256": "fa5c217f4eda92b72e11ea8d0d56452d9852446b96a66a614eacfbf7087981db"
+      "bytes": 7750,
+      "sha256": "a5b6d360117a4dc6f7b72e3464a32c1177e206ebaca52aebfcd7799d500390da"
     },
     {
       "path": "hub-backend/test_schedule_runner_dispatch.py",
-      "bytes": 25433,
-      "sha256": "be0c420bbfc557fdc5187c4ddbaece94e60d150deab74ce845548c690342730f"
+      "bytes": 31183,
+      "sha256": "6cc807d671f2b5055906393c21feac8ac3f9db7832fe75d63fb33fb6907ea96c"
     },
     {
       "path": "hub-backend/test_schedule_source_app.py",
@@ -18101,8 +18121,8 @@
     },
     {
       "path": "hub-backend/tests/test_schedule_once.py",
-      "bytes": 36377,
-      "sha256": "a4e0f3e9661209cfed92f5962b2fe637e3fc657777f294df078929f4822586a7"
+      "bytes": 36414,
+      "sha256": "e1abc1c523a9ac3ca062c624c572d544c926d28735572dddd75b66f9e61f721c"
     },
     {
       "path": "hub-backend/tests/test_schedule_once_migration.py",
@@ -18111,8 +18131,8 @@
     },
     {
       "path": "hub-backend/tests/test_schedule_repo_scope.py",
-      "bytes": 11171,
-      "sha256": "91ccedd8d7a32a840128ff096b16e016e3c7685b912ecc4260f9bdb5bb7b3caa"
+      "bytes": 11288,
+      "sha256": "4725e85f8fb8f7bfcfda6c7377a4f260f2506e72be18af6ed72af9bcbf739f22"
     },
     {
       "path": "hub-backend/tests/test_security_config.py",

@@ -521,7 +521,7 @@ class OnceLedgerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run.error, "")
         self.assertEqual(self.plan.last_error, "")
 
-    async def test_previous_worker_can_finish_after_cross_client_lease_takeover(self):
+    async def test_previous_worker_can_finish_after_legacy_cross_client_lease_takeover(self):
         from app.services import schedule_conversations as chats
         run, _ = await schedules.claim_run(self.session, self.plan, "timer",
                                            schedules.trigger_identity(self.plan))
@@ -530,10 +530,10 @@ class OnceLedgerTests(unittest.IsolatedAsyncioTestCase):
         await chats.acknowledge(self.session, self.client, run.id, {
             "instanceId": "worker-a", "conversationId": "shared-chat", "state": "running"
         })
-        run.receipt = {**run.receipt, "leaseUntil": 0}
+        # Older Hubs allowed this takeover. New Hubs only let another worker
+        # observe an existing conversation, but must still accept old receipts.
+        run.receipt = {**run.receipt, "worker": "worker-b", "previousWorker": "worker-a"}
         await self.session.commit()
-        takeover = await chats.claim(self.session, self.client, run.id, "worker-b")
-        self.assertTrue(takeover["ok"])
         self.assertEqual(run.receipt["previousWorker"], "worker-a")
         await chats.acknowledge(self.session, self.client, run.id, {
             "instanceId": "worker-a", "conversationId": "shared-chat", "state": "succeeded"
@@ -550,9 +550,8 @@ class OnceLedgerTests(unittest.IsolatedAsyncioTestCase):
         await chats.acknowledge(self.session, self.client, run.id, {
             "instanceId": "worker-a", "conversationId": "shared-chat", "state": "running"
         })
-        run.receipt = {**run.receipt, "leaseUntil": 0}
+        run.receipt = {**run.receipt, "worker": "worker-b", "previousWorker": "worker-a"}
         await self.session.commit()
-        await chats.claim(self.session, self.client, run.id, "worker-b")
         await chats.acknowledge(self.session, self.client, run.id, {
             "instanceId": "worker-b", "conversationId": "shared-chat", "state": "succeeded"
         })

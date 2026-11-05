@@ -19,7 +19,9 @@ class ScheduleRunReconciliationTests(unittest.IsolatedAsyncioTestCase):
                 await connection.run_sync(table.create)
         self.session = async_sessionmaker(self.engine, expire_on_commit=False)()
         self.client = models.Client(id="device")
-        self.started = datetime.now(timezone.utc) - timedelta(hours=2)
+        # Fresh handoffs wait for a device; stale handoffs are covered by the
+        # device-liveness suite and must now terminate instead of waiting forever.
+        self.started = datetime.now(timezone.utc) - timedelta(seconds=10)
         self.finished = self.started + timedelta(seconds=5)
         self.plan = models.AiSchedule(id="schedule", owner_client_id="device", title="Morning briefing",
                                      assignee_id="local:pi", every="daily")
@@ -65,12 +67,12 @@ class ScheduleRunReconciliationTests(unittest.IsolatedAsyncioTestCase):
         await self.reconcile()
         self.assertEqual(self.run.state, "failed")
         self.assertEqual(self.run.error, "旧版自动化已迁移为普通会话，请重新执行")
-        self.assertEqual(self.run.finished_at, self.finished)
+        self.assertEqual(schedules._utc(self.run.finished_at), schedules._utc(self.finished))
         self.assertEqual((self.run.task_id, self.run.workflow_run_id), ("", ""))
         self.assertEqual(self.run.receipt, {"migratedFrom": "legacy-task-workflow"})
         self.assertEqual(self.task.status, "todo")
         await self.reconcile()
-        self.assertEqual(self.run.finished_at, self.finished)
+        self.assertEqual(schedules._utc(self.run.finished_at), schedules._utc(self.finished))
 
     async def test_missing_legacy_task_is_retired_with_actionable_diagnostic(self):
         self.run.task_id = "missing-task"

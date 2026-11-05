@@ -8,11 +8,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { resultState } = require('./pi-session/task-turn');
 const TERMINAL = new Set(['succeeded', 'failed', 'cancelled']);
-// Keep manual launches responsive: the UI waits for the worker to publish the
-// newly created chat id before navigating, so a one-second poll made the
-// immediate-execution button feel stalled. The inbox is cheap when idle and
-// still coalesces concurrent work through `ticking`.
-const POLL_INTERVAL_MS = 250;
+const { createPoller, POLL_INTERVAL_MS } = require('./automation-conversation-polling.cjs');
+const discovery = require('./native-discovery.cjs');
 const keyOf = (identity, runId) => crypto.createHash('sha256')
   .update(String(identity.hub).replace(/\/+$/, '') + '\n' + identity.clientId + '\n' + runId).digest('hex');
 
@@ -66,58 +63,81 @@ function pluginSelection(spec, catalog) {
 }
 
 function createWorker({ identityOf, request, journal, conversation, catalog,
-  instanceId = crypto.randomUUID(), onError = () => {} }) {
+  instanceId = crypto.randomUUID(), onError = () => {}, now = Date.now }) {
   let ticking = false, stopped = false;
   let authBlockedUntil = 0, authBlockedIdentity = '', authNoticeSent = false;
   const jobs = new Map();
   const identityKey = identity => identity && identity.hub && identity.clientId
-    ? String(identity.hub).replace(/\/+$/, '') + '\n' + identity.clientId : '';
+    ? identity.session ? discovery.scopeOf(identity)
+      : String(identity.hub).replace(/\/+$/, '') + '\n' + identity.clientId : '';
   const isAuthError = error => !!(error && (error.authRequired || error.permissionRequired ||
     error.status === 401 || error.status === 403));
   function blockIdentity(identity, error) {
     const key = identityKey(identity);
     if (key !== authBlockedIdentity) authNoticeSent = false;
     authBlockedIdentity = key;
-    authBlockedUntil = Date.now() + 60_000;
+    authBlockedUntil = now() + 60_000;
     if (!authNoticeSent) {
       authNoticeSent = true;
       onError(error && error.permissionRequired ? '当前连接没有自动化权限，请重新登录或联系管理员' : '登录已过期，自动化已暂停，请重新连接 SoduWork 服务');
     }
   }
   function save(key, record) { journal.write(key, record); return record; }
-  async function acknowledge(identity, id, record) {
+  async function acknowledge(identity, id, record, workerId = instanceId) {
     try {
       await request(identity, '/automation-conversations/' + encodeURIComponent(id) + '/state', {
-        instanceId, conversationId: record.conversationId || '', state: record.state,
+        instanceId: workerId,
+        conversationId: record.conversationId || '', state: record.state,
         error: record.error || '',
       });
-    } catch (_) { throw Object.assign(Error('回执连接暂不可用'), { code: 'RECEIPT_UNAVAILABLE' }); }
+    } catch (error) {
+      if (isAuthError(error)) throw error;
+      throw Object.assign(Error('回执连接暂不可用'), { code: 'RECEIPT_UNAVAILABLE' });
+    }
   }
   async function processRun(identity, row) {
     const key = keyOf(identity, row.id);
-    const claimed = await request(identity, '/automation-conversations/' + encodeURIComponent(row.id) + '/claim', { instanceId });
-    if (claimed.terminal) { jobs.delete(key); return; }
-    if (!claimed.ok || claimed.busy) return;
     let record = journal.read(key);
+    // Observing a durable chat is not evidence that its execution is alive.
+    // Older Hubs can still grant a takeover; do not keep renewing that grant.
+    if (record?.phase === 'adopted' && !jobs.has(key)) return;
+    if (jobs.has(key) && record?.workerId && record.workerId !== instanceId) return;
+    const claimed = await request(identity, '/automation-conversations/' + encodeURIComponent(row.id) + '/claim', { instanceId });
+    record = journal.read(key);
+    const sameConversation = !!record?.conversationId && record.conversationId === claimed.conversationId;
+    if (claimed.terminal) {
+      if (claimed.errorCode === 'AUTOMATION_RECEIPT_TIMEOUT' && sameConversation &&
+          record?.state === 'succeeded' && record.workerId) await acknowledge(identity, row.id, record, record.workerId);
+      jobs.delete(key); return;
+    }
+    if (claimed.observeOnly) {
+      // Only a durable terminal receipt can be retried after restart, using
+      // its original owner token. Never revive execution or replay the prompt.
+      if (sameConversation && record?.workerId && TERMINAL.has(record.state)) {
+        await acknowledge(identity, row.id, record, record.workerId);
+      } else if (!jobs.has(key)) {
+        save(key, { phase: 'adopted', state: claimed.state || 'running',
+          conversationId: claimed.conversationId || '', error: '' });
+      }
+      return;
+    }
+    if (!claimed.ok || claimed.busy) return;
     if (record && TERMINAL.has(record.state)) {
+      record = save(key, { ...record, workerId: instanceId });
       await acknowledge(identity, row.id, record); jobs.delete(key); return;
     }
     if (record && record.phase === 'sending' && !jobs.has(key)) {
       // A crash between submit and completion is ambiguous. Never replay tools
       // automatically. The saved ordinary chat is still available to continue.
       record = save(key, { ...record, state: 'failed',
-        error: '客户端执行被中断；为避免重复操作未自动重发，请打开原对话查看并继续。' });
+        error: record.conversationId
+          ? '客户端执行被中断；为避免重复操作未自动重发，请在最近聊天中查看原会话。'
+          : '客户端执行被中断；为避免重复操作未自动重发，请检查客户端状态。' });
       await acknowledge(identity, row.id, record); return;
     }
     if (jobs.has(key)) {
       record = save(key, { ...record, state: 'running' });
       await acknowledge(identity, row.id, record); return;
-    }
-    if (record?.phase === 'adopted') {
-      // A foreign client owns the prompt. Keep the receipt leased and visible
-      // as running, but never reopen/send it from this client's journal.
-      await acknowledge(identity, row.id, { ...record, state: 'running' });
-      return;
     }
     const input = claimed.input || {};
     try {
@@ -127,14 +147,13 @@ function createWorker({ identityOf, request, journal, conversation, catalog,
          * A restarted client can legitimately have no local journal while another
          * client has already opened the ordinary chat.  Treating that receipt as a
          * provider failure used to paint a successful dispatch red and overwrite the
-         * schedule's compact last-error field with "另一客户端...".  Adopt the
-         * existing conversation as an active run and clear any stale error; the
+         * schedule's compact last-error field with a foreign-client warning. Adopt the
+         * existing conversation as an observed run and clear any stale error; the
          * client that owns the conversation will publish the terminal acknowledgement.
          * We deliberately do not send the prompt again.
          */
         record = save(key, { ...(record || {}), phase: 'adopted', state: 'running',
           conversationId: claimed.conversationId, error: '' });
-        await acknowledge(identity, row.id, record);
         return;
       }
       if (input.runId !== row.id || !String(input.text || '').trim()) throw Error('自动化输入不完整，本次未执行');
@@ -143,7 +162,7 @@ function createWorker({ identityOf, request, journal, conversation, catalog,
         const accessChoice = await conversation.captureAutomationAccess({ adapterId: input.adapterId }, identity, row.id, claimed.trigger);
         // Persist the first choice before any await that can create a runtime.
         // Existing journals without a choice retain their original contract.
-        record = save(key, { phase: 'prepared', state: 'running', accessChoice });
+        record = save(key, { phase: 'prepared', state: 'running', workerId: instanceId, accessChoice });
       }
       const plugin = pluginSelection(input.personalPlugin, await catalog(input.personalPlugin));
       const modelName = String(input.modelName || '').trim();
@@ -174,10 +193,11 @@ function createWorker({ identityOf, request, journal, conversation, catalog,
       // ordinary conversation immediately while the first prompt is submitted
       // and streamed there; the prompt itself is still persisted before the
       // running acknowledgement is sent.
-      record = save(key, { ...record, phase: 'created', state: 'running', conversationId: opened.sessionId });
+      record = save(key, { ...record, phase: 'created', state: 'running', workerId: instanceId,
+        conversationId: opened.sessionId });
       await acknowledge(identity, row.id, { ...record, state: 'starting' });
       const currentIdentity = await identityOf();
-      if (stopped || !currentIdentity || keyOf(currentIdentity, row.id) !== key) throw Error('客户端停止或连接环境已切换，本次消息未发送');
+      if (stopped || !currentIdentity || identityKey(currentIdentity) !== identityKey(identity)) throw Error('客户端停止或连接环境已切换，本次消息未发送');
       if (record.accessChoice && !require('./access-control/automation-access').matches(record.accessChoice, currentIdentity)) throw Error('连接账号已切换，本次消息未发送');
       // Persist BEFORE submitting. Lost completion acknowledgements only retry
       // the receipt, never the original message or its external side effects.
@@ -192,31 +212,43 @@ function createWorker({ identityOf, request, journal, conversation, catalog,
         ...(input.repoId ? { repoId: String(input.repoId).trim().slice(0, 160) } : {}),
         plugins: plugin ? [{ pluginId: plugin.pluginId }] : [],
       });
-      if (!sent || !sent.ok) throw Error('自动化消息未被接收，请打开对话查看原因后重试');
+      if (!sent || !sent.ok) throw Error('自动化消息未被接收，请在最近聊天中查看原会话并确认执行状态。');
       // The prompt is now in the ordinary conversation.  Publish its id only
       // after send is accepted so readers always see the complete Q&A chain.
       record = save(key, { ...record, state: 'running' });
       jobs.set(key, true);
-      await acknowledge(identity, row.id, record);
+      // Subscribe before any receipt I/O. A lost running acknowledgement must
+      // never detach the accepted turn from its durable completion receipt.
+      const runningReceipt = acknowledge(identity, row.id, record);
       const settle = async (state, error = '') => {
         const settled = save(key, { ...record, state, error });
         jobs.delete(key);
         try {
+          // Preserve receipt order even when the conversation finishes before
+          // the running request returns. The journal is already terminal.
+          await runningReceipt.catch(() => {});
           const current = await identityOf();
-          if (current && keyOf(current, row.id) === key) await acknowledge(current, row.id, settled);
+          if (current && identityKey(current) === identityKey(identity)) await acknowledge(current, row.id, settled);
         } catch (_) { onError('自动化回执未能写入，本次内容不会自动重发'); }
       };
       Promise.resolve(sent.completion).then(result => {
-        const state = { completed: 'succeeded', failed: 'failed', stopped: 'failed', waiting: 'running' }[resultState(result)];
-        return settle(state, state === 'failed' ? '本轮执行未完成，请打开对话查看详细原因并继续。' : '');
-      }, () => settle('failed', '本轮执行中断，请打开对话查看并继续。'))
+        const outcome = resultState(result);
+        // A resolved completion ends this occurrence. In-chat approvals keep
+        // the promise pending; a returned pause requires explicit recovery.
+        const state = outcome === 'completed' ? 'succeeded' : 'failed';
+        return settle(state, outcome === 'waiting'
+          ? '本轮执行已暂停，请在最近聊天中查看原会话并处理待确认事项；本次内容不会自动重发。'
+          : outcome === 'stopped' ? '本轮执行已停止，可在最近聊天中查看原会话。'
+          : state === 'failed' ? '本轮执行未完成，请在最近聊天中查看原会话了解详细原因。' : '');
+      }, () => settle('failed', '本轮执行中断，请在最近聊天中查看原会话；本次内容不会自动重发。'))
         .catch(() => onError('自动化回执未能写入，本次内容不会自动重发'));
+      await runningReceipt;
     } catch (error) {
       if (isAuthError(error)) throw error;
       if (error.code === 'RECEIPT_UNAVAILABLE') throw error;
       // Never echo provider errors, local paths, instruction contents or credentials.
       const reason = error.code ? '自动化本地记录暂不可用，请检查客户端后重试' : String(error.message || '自动化未启动').slice(0, 300);
-      record = save(key, { ...record, state: 'failed', error: reason });
+      record = save(key, { ...record, state: 'failed', workerId: instanceId, error: reason });
       await acknowledge(identity, row.id, record);
     }
   }
@@ -226,19 +258,31 @@ function createWorker({ identityOf, request, journal, conversation, catalog,
     let identity;
     try {
       identity = await identityOf();
-      if (!identity || !identity.hub || !identity.clientId) return;
+      if (!identity || !identity.hub || !identity.clientId) return { state: 'idle', scope: '' };
       const key = identityKey(identity);
       if (key !== authBlockedIdentity) { authBlockedIdentity = key; authBlockedUntil = 0; authNoticeSent = false; }
-      if (authBlockedUntil > Date.now()) return;
+      if (authBlockedUntil > now()) return { state: 'blocked', scope: key, retryAfterMs: authBlockedUntil - now() };
       const inbox = await request(identity, '/automation-conversations/inbox', {});
-      for (const row of inbox.items || []) {
+      const items = inbox.items || [];
+      let failed = false;
+      for (const row of items) {
         if (stopped) break;
         try { await processRun(identity, row); }
-        catch (_) { onError('自动化连接或回执同步暂不可用，稍后重试'); }
+        catch (error) {
+          if (isAuthError(error)) throw error;
+          failed = true;
+          onError('自动化连接或回执同步暂不可用，稍后重试');
+        }
       }
+      return { state: failed ? 'error' : items.length || jobs.size ? 'active' : 'idle', scope: key,
+        ...(discovery.confirmed(identity, 'automation-inbox') ? { pushConfirmed: true } : {}) };
     } catch (error) {
-      if (isAuthError(error)) blockIdentity(identity, error);
+      if (isAuthError(error)) {
+        blockIdentity(identity, error);
+        return { state: 'blocked', scope: identityKey(identity), retryAfterMs: authBlockedUntil - now() };
+      }
       /* Offline/old Hub: no fallback to a second execution route. */
+      return { state: 'error', scope: identityKey(identity) };
     }
     finally { ticking = false; }
   }
@@ -247,16 +291,26 @@ function createWorker({ identityOf, request, journal, conversation, catalog,
 
 function install({ app, ipcMain, identityOf, conversation, platformConnections }) {
   require('./automation-preflight.cjs').install({ app, ipcMain, identityOf, platformConnections });
-  let worker, timer;
+  let worker, poller, unsubscribe, stopped = false;
+  ipcMain.handle('automation-conversations-wake', async (event, input) => {
+    if (stopped || !require('./platform-connections/index.cjs').trustedSender(event)) return { ok: false };
+    const identity = await identityOf(app);
+    if (!identity || !input || String(input.hub).replace(/\/+$/, '') !== String(identity.hub).replace(/\/+$/, '')) return { ok: false };
+    poller?.wake();
+    return { ok: !!poller };
+  });
   app.whenReady().then(() => {
+    if (stopped) return;
     worker = createWorker({ identityOf: () => identityOf(app),
       request: require('./pi-session/task-input').request,
       journal: diskJournal(path.join(app.getPath('userData'), 'automation-conversations')),
       conversation, catalog: spec => require('./jiyong-scheduled-plugins.cjs').catalog(app,identityOf,spec),
       onError: message => console.warn('[automation-conversation]', message),
     });
-    timer = setInterval(() => worker.tick(), POLL_INTERVAL_MS); timer.unref(); worker.tick();
+    poller = createPoller({ tick: () => worker.tick() });
+    unsubscribe = discovery.register('automation-inbox', () => poller.wake());
+    poller.start();
   });
-  app.on('before-quit', () => { clearInterval(timer); if (worker) worker.stop(); });
+  app.on('before-quit', () => { stopped = true; poller?.stop(); worker?.stop(); unsubscribe?.(); });
 }
 module.exports = { createWorker, diskJournal, pluginSelection, keyOf, install, POLL_INTERVAL_MS };

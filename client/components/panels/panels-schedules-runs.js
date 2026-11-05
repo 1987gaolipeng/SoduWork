@@ -4,12 +4,32 @@
  */
 
 function _schConversationRunState(run) {
+  const receipt = run.receipt || {};
+  if (receipt.executionMode === 'soduwork.automation-conversation/v1' &&
+      ['starting', 'running', 'waiting'].includes(run.state) &&
+      (receipt.phase === 'device' || (run.state === 'waiting' && !_schRunChatId(run)))) {
+    return SCH_RUN_STATE.starting || ['待执行', 'starting'];
+  }
   return SCH_RUN_STATE[run.state] || ['待执行', 'starting'];
 }
 
 function _schRunChatId(run) {
   const receipt = run && run.receipt || {};
-  return String((run && run.conversationId) || receipt.conversationId || '');
+  return [run && run.conversationId, receipt.conversationId]
+    .find(value => typeof value === 'string' && value.trim())?.trim() || '';
+}
+
+function _schCanOpenRunConversation(run) {
+  return Boolean(run && (!run.state || ['starting', 'running', 'waiting', 'succeeded'].includes(run.state)) &&
+    _schRunChatId(run));
+}
+
+function _schOpenCachedRunConversation(sid, runId, chatId, scope) {
+  if (scope !== _schScope || _schRunOpen !== sid) return false;
+  // Re-read the authoritative cache: a visible button may outlive its receipt.
+  const row = (_schRunRows[sid] || []).find(item => runId
+    ? String(item.id || '') === runId : _schRunChatId(item) === chatId);
+  return _schOpenRunEntryConversation(row);
 }
 
 async function _schResolvePersonalPlugin(input) {
@@ -35,9 +55,9 @@ async function _schResolvePersonalPlugin(input) {
 }
 
 async function _schOpenRunEntryConversation(run) {
+  if (!_schCanOpenRunConversation(run)) return false;
   const chatId = _schRunChatId(run);
   const sessionTitle = String(run && (run.conversationTitle || run.automationTitle) || '');
-  if (!chatId) return false;
   if (globalThis.WorkspaceHost && typeof globalThis.WorkspaceHost.open === 'function') {
     if (typeof closeSchedulePanel === 'function') closeSchedulePanel();
     return globalThis.WorkspaceHost.open('create', {
@@ -56,6 +76,7 @@ async function _schOpenRunEntryConversation(run) {
 }
 
 async function _schLaunchDirectConversation(launched, scope) {
+  if (scope !== _schScope) return false;
   const input = launched && launched.conversationInput || {};
   const bridge = globalThis.soduWorkAPI &&
     (globalThis.soduWorkAPI.conversationSession || globalThis.soduWorkAPI.piSession);
@@ -67,13 +88,14 @@ async function _schLaunchDirectConversation(launched, scope) {
   let pluginLock;
   try { pluginLock = await _schResolvePersonalPlugin(input); }
   catch (error) {
-    if (runId && instanceId && typeof SoduWorkAPI.acknowledgeScheduleRun === 'function') {
+    if (scope === _schScope && runId && instanceId && typeof SoduWorkAPI.acknowledgeScheduleRun === 'function') {
       await SoduWorkAPI.acknowledgeScheduleRun(runId, {
         instanceId, conversationId: '', state: 'failed', error: String(error.message || error).slice(0, 300),
       }).catch(() => {});
     }
     return false;
   }
+  if (scope !== _schScope) return false;
   const options = {
     adapterId: String(input.adapterId || 'pi'), modelName: String(input.modelName || ''),
     cwd: String(input.cwd || ''), intent: 'chat', sessionTitle: conversationTitle,
@@ -94,22 +116,60 @@ async function _schLaunchDirectConversation(launched, scope) {
   catch (_) { return false; }
   if (scope !== _schScope || !opened || opened.ok === false || !opened.ref) return false;
   const chatId = String(opened.sessionId || opened.conversationId || '');
+  let settled = false;
+  let off = null;
+  let renewTimer = null;
+  let onScopeChange = null;
+  const stopRenewal = () => {
+    if (renewTimer !== null) clearTimeout(renewTimer);
+    renewTimer = null;
+    if (typeof off === 'function') off();
+    off = null;
+    if (onScopeChange && typeof globalThis.removeEventListener === 'function') {
+      globalThis.removeEventListener('soduwork-data-scope-changed', onScopeChange);
+    }
+    onScopeChange = null;
+  };
   const acknowledge = (state, error = '') => {
-    if (!runId || !instanceId || typeof SoduWorkAPI.acknowledgeScheduleRun !== 'function') return Promise.resolve();
+    if (scope !== _schScope || !runId || !instanceId ||
+        typeof SoduWorkAPI.acknowledgeScheduleRun !== 'function' ||
+        (settled && ['starting', 'running'].includes(state))) return Promise.resolve();
     return SoduWorkAPI.acknowledgeScheduleRun(runId, {
       instanceId, conversationId: chatId, state, error,
     }).catch(() => {});
   };
-  await acknowledge('starting');
+  const acceptReceipt = receipt => {
+    if (receipt && ['succeeded', 'failed', 'cancelled'].includes(receipt.state)) {
+      settled = true; stopRenewal();
+    }
+  };
+  const renew = () => {
+    if (settled || typeof off !== 'function' || !runId || !instanceId ||
+        typeof SoduWorkAPI.acknowledgeScheduleRun !== 'function') return;
+    if (scope !== _schScope) { settled = true; stopRenewal(); return; }
+    // Only this renderer owns the live send below. Renew serially, and stop
+    // with that send's terminal event or when its account scope is replaced.
+    renewTimer = setTimeout(async () => {
+      renewTimer = null;
+      if (settled || scope !== _schScope) { settled = true; stopRenewal(); return; }
+      acceptReceipt(await acknowledge('running'));
+      renew();
+    }, 60000);
+  };
+  if (typeof globalThis.addEventListener === 'function') {
+    onScopeChange = () => { settled = true; stopRenewal(); };
+    globalThis.addEventListener('soduwork-data-scope-changed', onScopeChange);
+  }
+  acceptReceipt(await acknowledge('starting'));
+  if (settled || scope !== _schScope) { settled = true; stopRenewal(); return false; }
   // Navigate as soon as the ordinary chat exists. Sending the first prompt
   // continues through the same native bridge after the user sees the chat.
   if (chatId) await _schOpenRunEntryConversation({conversationId: chatId, conversationTitle});
-  let settled = false;
-  let off = null;
+  if (settled || scope !== _schScope) { settled = true; stopRenewal(); return false; }
   const finish = (state, error = '') => {
     if (settled) return;
     settled = true;
-    if (typeof off === 'function') off();
+    stopRenewal();
     void acknowledge(state, error);
   };
   off = typeof bridge.onEvent === 'function' ? bridge.onEvent(event => {
@@ -128,7 +188,8 @@ async function _schLaunchDirectConversation(launched, scope) {
       finish('failed', String(sent && sent.reason || '自动化消息未被接收').slice(0, 300));
       return false;
     }
-    await acknowledge('running');
+    acceptReceipt(await acknowledge('running'));
+    renew();
     return true;
   } catch (error) {
     finish('failed', String(error && error.message || '自动化消息未被接收').slice(0, 300));
@@ -137,10 +198,13 @@ async function _schLaunchDirectConversation(launched, scope) {
 }
 
 async function _schLaunchRunConversation(sid, launched, scope) {
+  if (scope !== _schScope || ['failed', 'cancelled'].includes(launched && launched.state)) return false;
   if (launched && launched.conversationInput &&
       await _schLaunchDirectConversation(launched, scope)) return true;
+  if (scope !== _schScope) return false;
   if (await _schOpenRunEntryConversation(launched || {})) return true;
   const runId = String(launched && launched.scheduleRunId || '');
+  if (!runId) return false;
   // The local automation worker publishes the chat id immediately after the
   // session is created. Probe quickly during that handshake, then back off so
   // a slow model startup does not create a request storm.
@@ -152,8 +216,8 @@ async function _schLaunchRunConversation(sid, launched, scope) {
     try { rows = await SoduWorkAPI.listScheduleRuns(sid, 20); } catch (_) { continue; }
     if (scope !== _schScope) return false;
     _schRunRows[sid] = rows;
-    const row = (rows || []).find(item => runId && String(item.id) === runId) ||
-      (rows || []).find(item => item.trigger === 'manual');
+    const row = (rows || []).find(item => String(item.id) === runId);
+    if (row && ['failed', 'cancelled'].includes(row.state)) return false;
     if (row && await _schOpenRunEntryConversation(row)) return true;
   }
   return false;
@@ -174,7 +238,7 @@ function _schRunRowsHtml(sid) {
   if (!rows.length) {
     return '<div class="sch-runs-empty"><span class="sch-runs-empty-icon" aria-hidden="true">' +
       '<svg viewBox="0 0 24 24"><path d="M8 5h8M8 9h8M8 13h5"/><path d="M6 3h12v18H6z"/></svg></span>' +
-      '<span><b>还没有执行记录</b><small>运行一次后，这里会保留对应会话、状态与结果。</small></span></div>';
+      '<span><b>还没有执行记录</b><small>自动化触发后，这里会记录状态；开始执行后可查看对应会话。</small></span></div>';
   }
   return errorHtml + '<div class="sch-run-list" aria-label="最近执行记录">' + rows.map(run => {
     const state = _schConversationRunState(run);
@@ -188,8 +252,8 @@ function _schRunRowsHtml(sid) {
         _schLocal(run.startedAt) + (duration ? ' · ' + duration : '')) + '</i>' +
       (run.error ? '<em class="sch-run-error" title="' + esc(run.error) + '">' + esc(run.error) + '</em>' : '') + '</span>' +
       '<span class="sch-run-side"><em class="sch-run-state"><i></i>' + esc(state[0]) + '</em>' +
-      '<button class="btn-mini" data-run-chat="' + esc(chatId) + '" data-run-title="' + esc(title) + '"' +
-      (chatId ? '' : ' aria-label="\u6253\u5f00\u4f1a\u8bdd\uff08\u51c6\u5907\u4e2d\uff09"') + '>\u6253\u5f00\u4f1a\u8bdd</button>' +
+      (_schCanOpenRunConversation(run) ? '<button class="btn-mini" data-run-chat="' + esc(chatId) +
+        '" data-run-id="' + esc(run.id || '') + '">打开会话</button>' : '') +
       '</span></article>';
   }).join('') + '</div>';
 }
@@ -203,7 +267,7 @@ function _schRunDrawerHtml(sid) {
   const attention = rows.filter(run => run.state === 'failed' || run.state === 'cancelled').length;
   return '<div class="sch-run-drawer-head"><div class="sch-run-drawer-title">' +
     "<span>执行记录</span><h2 id=\"schRunTitle\"" + (schedule.title ? ' data-user-content' : '') + '>' + esc(schedule.title || '自动化会话') + '</h2>' +
-    '<p>' + esc(schedule.id ? _schRhythm(schedule) : '自动化会话') + ' · 展示最近 20 次真实运行</p></div>' +
+    '<p>' + esc(schedule.id ? _schRhythm(schedule) : '自动化会话') + ' · 展示最近 20 次触发与执行记录</p></div>' +
     '<div class="sch-run-drawer-actions"><button class="btn-mini" data-run-refresh' +
     (_schRunLoading[sid] ? ' disabled' : '') + '>刷新</button>' +
     '<button class="sch-run-close" data-run-close aria-label="关闭执行记录">' +
@@ -211,8 +275,8 @@ function _schRunDrawerHtml(sid) {
     '<div class="sch-run-overview"><span class="sch-run-latest ' + latestState[1] + '"><small>最近状态</small>' +
     '<b><i></i>' + esc(latestState[0]) + '</b></span><span><small>最近记录</small><b>' + rows.length + '</b></span>' +
     '<span><small>已完成</small><b>' + succeeded + '</b></span><span><small>需关注</small><b>' + attention + '</b></span></div>' +
-    '<div class="sch-run-drawer-note"><i></i><span><b>每次运行都可追溯</b>' +
-    '<small>自动化任务的提示词、模型过程和最终结果都在对应会话中查看。</small></span></div>' +
+    '<div class="sch-run-drawer-note"><i></i><span><b>触发不代表已开始执行</b>' +
+    '<small>客户端接收任务后才会创建会话；失败或取消的记录请查看原因。</small></span></div>' +
     '<div class="sch-run-drawer-body"' + (_schRunLoading[sid] ? ' aria-busy="true"' : '') + '>' +
     _schRunRowsHtml(sid) + '</div>';
 }
@@ -230,6 +294,7 @@ function _schRenderRunDrawer(focusDrawer) {
     return;
   }
   const sid = _schRunOpen;
+  const scope = _schScope;
   content.innerHTML = _schRunDrawerHtml(sid);
   layer.classList.add('show'); layer.setAttribute('aria-hidden', 'false');
   content.querySelectorAll('[data-run-close]').forEach(button =>
@@ -239,17 +304,8 @@ function _schRenderRunDrawer(focusDrawer) {
   const refresh = content.querySelector('[data-run-refresh]');
   if (refresh) refresh.addEventListener('click', () => _schToggleRuns(sid, true));
   content.querySelectorAll('[data-run-chat]').forEach(button => button.addEventListener('click', () => {
-    const chatId = button.getAttribute('data-run-chat');
-    if (chatId) {
-      void _schOpenRunEntryConversation({ conversationId: chatId,
-        conversationTitle: button.getAttribute('data-run-title') || '' });
-      return;
-    }
-    // Refresh the receipt so the same visible entry becomes actionable as
-    // soon as the client has accepted the first message.
-    button.disabled = true;
-    button.textContent = '\u6b63\u5728\u51c6\u5907';
-    void _schToggleRuns(sid, true);
+    void _schOpenCachedRunConversation(sid, button.getAttribute('data-run-id'),
+      button.getAttribute('data-run-chat'), scope);
   }));
   if (focusDrawer) requestAnimationFrame(() => {
     const drawer = layer.querySelector('.sch-run-drawer');

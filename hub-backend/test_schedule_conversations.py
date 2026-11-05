@@ -19,7 +19,8 @@ class ConversationProtocolTests(unittest.IsolatedAsyncioTestCase):
             for table in [models.Client.__table__, models.AiSchedule.__table__, models.AiScheduleRun.__table__]:
                 await conn.run_sync(table.create)
         self.session = async_sessionmaker(self.engine, expire_on_commit=False)()
-        self.client = models.Client(id='device', config={'automationConversationV1': 1}, agent_models={'pi': 'chosen-model'})
+        self.client = models.Client(id='device', last_seen_at=datetime.now(timezone.utc),
+                                    config={'automationConversationV1': 1}, agent_models={'pi': 'chosen-model'})
         self.schedule = models.AiSchedule(id='schedule', owner_client_id='device', title='自动化标题',
             note='完整需求与验收\n材料说明', assignee_id='local:pi', enabled=False,
             plugin_inputs={'question': '全部保留'}, required_capabilities=[])

@@ -1,7 +1,7 @@
 """自动化节奏由服务端负责，每次触发保留独立运行记录。
 
 每次自动化触发都发送到一条新建的普通对话，不额外创建任务或需求记录。
-设备离线时新会话请求等待设备接收，不伪装成已经执行。
+设备离线时记录启动失败；未接收和失联的运行有界收尾，不伪装成已经执行。
 
 触发精度：`schedule_loop` 独立巡检（默认 120 秒一轮），不等待代码或产出巡检。
 到点后的两分钟内检查计划；实际派发仍使用数据库租约与唯一运行记录去重。
@@ -13,6 +13,7 @@ import hashlib
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from fastapi import HTTPException
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -87,6 +88,15 @@ def _utc(value: datetime) -> datetime:
 
 def _now_local(s=None) -> datetime:
     return datetime.now(timezone.utc).astimezone(schedule_zone(s))
+
+
+def format_trigger_time(s, instant: datetime) -> str:
+    """Readable run time in the schedule's zone, independent of the Hub's clock zone."""
+    local = _utc(instant).astimezone(schedule_zone(s))
+    zone_name = clean_time_zone(getattr(s, "time_zone", DEFAULT_TIME_ZONE))
+    offset = local.strftime("%z")
+    zone_label = "北京时间" if zone_name == DEFAULT_TIME_ZONE else f"UTC{offset[:3]}:{offset[3:]}"
+    return f"{local:%Y-%m-%d %H:%M:%S}（{zone_label}）"
 
 
 def _wall_candidate(day: date, hh: int, mm: int, zone) -> datetime:
@@ -342,6 +352,10 @@ async def reconcile_runs(session: AsyncSession, *, schedule_id: str = "",
                          owner_client_id: str = "", owner_user_id: str | None = None,
                          limit: int = 200) -> list:
     """Reconcile active ordinary-conversation receipts without task truth."""
+    from . import schedule_device_liveness
+    await schedule_device_liveness.reconcile_expired(
+        session, schedule_id=schedule_id, owner_client_id=owner_client_id,
+        owner_user_id=owner_user_id, limit=limit)
     cloud_mode = models.AiScheduleRun.receipt["executionMode"].as_string() == CLOUD_PROTOCOL
     damaged_cloud = cloud_mode & (
         models.AiScheduleRun.receipt["migratedFrom"].as_string() == "legacy-task-workflow")
@@ -363,7 +377,7 @@ async def reconcile_runs(session: AsyncSession, *, schedule_id: str = "",
                     else models.AiScheduleRun.owner_user_id.is_(None))
     active = list((await session.execute(
         q.order_by(models.AiScheduleRun.started_at.desc()).limit(
-            max(1, min(500, int(limit or 200)))))).scalars().all())
+            max(1, min(500, int(limit or 200)))).execution_options(populate_existing=True))).scalars().all())
     if not active:
         return active
     now = datetime.now(timezone.utc)
@@ -560,17 +574,29 @@ async def run_one(session: AsyncSession, s, who: str = "SoduWork（定时）",
             if repo:
                 instruction += '\n\n工程：' + str(repo.name or '')
             # Retrying an occurrence must keep the cloud request digest stable.
-            triggered_at = _utc(run.started_at).astimezone(schedule_zone(s))
-            instruction += '\n\n自动化触发时间：' + triggered_at.isoformat()
+            instruction_prefix = instruction + '\n\n自动化触发时间：'
+            instruction = instruction_prefix + format_trigger_time(s, run.started_at)
             required = clean_required_capabilities(s.required_capabilities)
             runner_kind = 'work-computer' if runner.client_id else 'cloud'
-            result = await cloud_conversations.create(session, client, request_id, {
+            request = {
                 'sessionId': request_id, 'agentId': cli,
                 'model': str(getattr(s, 'model_name', '') or ''),
                 'title': title, 'text': instruction, 'userText': instruction,
                 'requiredSkills': required_skill_names(required),
                 'targetRunnerId': runner.id, 'targetRunnerKind': runner_kind,
-            }, [])
+            }
+            try:
+                result = await cloud_conversations.create(session, client, request_id, request, [])
+            except HTTPException as exc:
+                if exc.status_code != 409 or exc.detail != (
+                        '此云端会话请求编号已用于另一条消息或附件，请使用原请求重试'):
+                    raise
+                # A pre-upgrade handoff may have committed before its run receipt.
+                # Resume only if the original ISO text still matches its digest.
+                legacy_instruction = instruction_prefix + _utc(run.started_at).astimezone(schedule_zone(s)).isoformat()
+                result = await cloud_conversations.create(session, client, request_id, {
+                    **request, 'text': legacy_instruction, 'userText': legacy_instruction,
+                }, [])
             await session.refresh(run)
             receipt = dict(run.receipt or {})
             receipt.update({
@@ -594,6 +620,10 @@ async def run_one(session: AsyncSession, s, who: str = "SoduWork（定时）",
     if not adapter:
         return {"ok": False, "code": "AUTOMATION_CONVERSATION_UNAVAILABLE",
                 "error": "当前执行设备没有可用的普通会话执行端，请升级客户端后重试"}
+    from .schedule_device_liveness import device_available
+    if not device_available(client):
+        return {"ok": False, "code": "AUTOMATION_TARGET_OFFLINE",
+                "error": "执行端不在线，本次未执行。请启动原执行设备上的客户端后重试；不会自动改派其他设备。"}
     return await schedule_conversations.prepare(
         session, s, client, repo, schedule_run_id, adapter, personal)
 

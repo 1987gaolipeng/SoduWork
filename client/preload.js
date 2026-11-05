@@ -306,6 +306,7 @@ const soduWorkBridge = {
     clear: () => { pageIpcEpoch++; pageIpcEvents.length = 0; },
   },
   automationPreflight: payload => ipcRenderer.invoke('automation-preflight', payload || {}),
+  automationConversationsWake: payload => ipcRenderer.invoke('automation-conversations-wake', payload || {}),
   platformConnections: Object.fromEntries(['status','refresh','prepare','connect','cancel','disconnect','openAuth'].map(action => [action, (provider, payload) => ipcRenderer.invoke('platform-connection-' + action, provider, payload || {})])),
   closeWindow: () => ipcRenderer.send('window-close'),
   minimizeWindow: () => ipcRenderer.send('window-minimize'),

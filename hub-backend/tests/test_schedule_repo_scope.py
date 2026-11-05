@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -32,6 +33,7 @@ class ScheduleRepoScopeTests(unittest.IsolatedAsyncioTestCase):
         self.session = async_sessionmaker(self.engine, expire_on_commit=False)()
         self.owner = models.User(id="owner", username="owner", org_id="team")
         self.client = models.Client(id="device", user_ref="owner",
+                                    last_seen_at=datetime.now(timezone.utc),
                                     config={"automationConversationV1": 1})
         self.session.add_all([
             models.OrgUnit(id="company", name="Company"),

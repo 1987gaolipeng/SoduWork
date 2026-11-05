@@ -15,7 +15,7 @@ function harness() {
   const window = { __SODUWORK_TEST_HUB_CONFIG__: { allowSwitch: true }, soduWorkAPI: h.bridge, dispatchEvent() {} };
   const context = { window, User: { id: 'device-1', name: 'Test' }, navigator: { platform: 'test' },
     localStorage: { getItem: k => values.get(k) ?? null, setItem: (k, v) => values.set(k, String(v)), removeItem: k => values.delete(k) },
-    fetch: async (url, options) => { h.calls.push({ url, options }); return new Response(JSON.stringify(await h.result)); },
+    fetch: async (url, options) => { h.calls.push({ url, options }); return new Response(JSON.stringify(await h.result), { status: h.status || 200 }); },
     URL, URLSearchParams, FormData, Response, AbortController, CustomEvent: class {}, console: { log() {}, error() {} },
     setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0 };
   vm.runInNewContext(source, context, { filename: 'api.js' });
@@ -53,3 +53,61 @@ for (const phase of ['hub', 'native']) for (const identity of ['account', 'hub']
     if (phase === 'hub') assert.equal(h.native.length, 0);
   });
 }
+
+test('manual run wakes the native inbox only after the Hub accepts it, without waiting for the wake', async () => {
+  const h = harness(), response = deferred(), wake = deferred(), wakes = [];
+  await h.login();
+  h.result = response.promise;
+  h.bridge.automationConversationsWake = payload => { wakes.push(payload); return wake.promise; };
+  const run = h.api.runSchedule('schedule/1', { instanceId: 'ui-owner' });
+  await tick();
+  assert.equal(wakes.length, 0);
+  const accepted = { ok: true, runId: 'run-1', conversationInput: { text: 'work' } };
+  response.resolve(accepted);
+  assert.deepEqual(copy(await run), accepted);
+  assert.deepEqual(copy(wakes), [{ hub: 'http://hub-a:8989' }]);
+  assert.equal(h.calls.length, 1, 'waking must not create a second run request');
+  assert.match(h.calls[0].url, /schedules\/schedule%2F1\/run$/);
+  assert.deepEqual(JSON.parse(h.calls[0].options.body), { instanceId: 'ui-owner' });
+  wake.resolve({ ok: true });
+});
+
+for (const bridge of ['missing', 'throws', 'rejects']) {
+  test('accepted manual run is preserved when native wake ' + bridge, async () => {
+    const h = harness(); await h.login();
+    h.result = { ok: true, runId: 'run-1' };
+    if (bridge === 'throws') h.bridge.automationConversationsWake = () => { throw Error('unavailable'); };
+    if (bridge === 'rejects') h.bridge.automationConversationsWake = async () => { throw Error('unavailable'); };
+    assert.deepEqual(copy(await h.api.runSchedule('schedule-1')), h.result);
+    await tick();
+    assert.equal(h.calls.length, 1);
+  });
+}
+
+for (const identity of ['account', 'hub']) {
+  test('manual run response cannot wake a different ' + identity, async () => {
+    const h = harness(), response = deferred(), wakes = [];
+    await h.login();
+    h.result = response.promise;
+    h.bridge.automationConversationsWake = payload => { wakes.push(payload); return Promise.resolve({ ok: true }); };
+    const run = h.api.runSchedule('schedule-1');
+    await tick();
+    if (identity === 'account') { h.user = 'bob'; await h.login(); }
+    else h.api.setHubEnvironment('development', 'http://hub-b:8989');
+    response.resolve({ ok: true, runId: 'run-1' });
+    await assert.rejects(run, error => error.code === 'STALE_TASK_SCOPE');
+    assert.equal(wakes.length, 0);
+    assert.equal(h.calls.length, 1);
+  });
+}
+
+test('failed manual run does not wake the native inbox', async () => {
+  const h = harness(), wakes = []; await h.login();
+  h.bridge.automationConversationsWake = payload => { wakes.push(payload); return { ok: true }; };
+  h.result = { detail: 'service temporarily unavailable' }; h.status = 503;
+  await assert.rejects(h.api.runSchedule('schedule-1'), error => error.status === 503);
+  assert.equal(wakes.length, 0);
+  h.status = 200; h.result = { ok: false, reason: 'run not created' };
+  assert.deepEqual(copy(await h.api.runSchedule('schedule-1')), h.result);
+  assert.equal(wakes.length, 0);
+});

@@ -308,6 +308,8 @@ def apply_attempt_outcome(run, out: dict, now: datetime | None = None) -> None:
     run.task_id = str(out.get("taskId") or "")[:36]
     run.workflow_run_id = str(out.get("workflowRunId") or "")[:36]
     receipt = dict(getattr(run, "receipt", None) or {})
+    if out.get('code') and not out.get('ok'):
+        receipt['errorCode'] = str(out['code'])[:100]
     for key in ("identifier", "warning", "deferredSchedule", "executionMode", "conversationId", "conversationTitle"):
         if key in out and out.get(key) not in (None, ""):
             receipt[key] = out.get(key)

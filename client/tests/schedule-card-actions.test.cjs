@@ -121,6 +121,37 @@ test('run entries open the ordinary automation conversation without task binding
   assert.equal(c.opened[0],'create');
   assert.equal(JSON.stringify(c.opened[1]),JSON.stringify({tab:'chat',chatId:'chat-1',chatTitle:'自动化 · Work · 2026-10-26 10:20',source:'schedule-run',sessionTitle:'自动化 · Work · 2026-10-26 10:20'}));
 });
+
+test('failed, cancelled and uncreated conversations cannot navigate even with stale ids', async () => {
+  let opened = 0;
+  const c = { WorkspaceHost: { open: () => { opened++; return true; } } };
+  vm.createContext(c); vm.runInContext(runs, c);
+  for (const row of [null, {}, { conversationId: '  ' }, { conversationId: {} },
+    { state: 'failed', conversationId: 'chat-1' }, { state: 'cancelled', receipt: { conversationId: 'chat-1' } },
+    { state: 'unexpected', conversationId: 'chat-1' }]) {
+    assert.equal(await c._schOpenRunEntryConversation(row), false);
+  }
+  assert.equal(opened, 0);
+  assert.equal(await c._schOpenRunEntryConversation({ state: 'running', receipt: { conversationId: ' chat-1 ' } }), true);
+  assert.equal(opened, 1);
+});
+
+test('history click rechecks the current run, drawer and account before navigating', async () => {
+  let opened = 0;
+  const c = { _schScope: 2, _schRunOpen: 's', _schRunRows: { s: [{ id: 'run', state: 'running', conversationId: 'chat-1' }] },
+    WorkspaceHost: { open: () => { opened++; return true; } } };
+  vm.createContext(c); vm.runInContext(runs, c);
+  assert.equal(await c._schOpenCachedRunConversation('s', 'run', 'chat-1', 2), true);
+  c._schRunRows.s[0] = { id: 'run', state: 'failed', conversationId: 'chat-1' };
+  assert.equal(await c._schOpenCachedRunConversation('s', 'run', 'chat-1', 2), false);
+  c._schRunRows.s[0].state = 'succeeded';
+  assert.equal(await c._schOpenCachedRunConversation('s', 'run', 'chat-1', 1), false);
+  c._schRunOpen = '';
+  assert.equal(await c._schOpenCachedRunConversation('s', 'run', 'chat-1', 2), false);
+  c._schRunOpen = 's'; c._schRunRows.s = [];
+  assert.equal(await c._schOpenCachedRunConversation('s', 'run', 'chat-1', 2), false);
+  assert.equal(opened, 1);
+});
 test('automation editor persists an explicit model alongside the selected Agent', () => {
   assert.match(editor, /id="schModel"/);
   assert.match(source, /modelName:\s*mode === 'direct'/);
@@ -140,9 +171,24 @@ test('starting a run waits for and opens its ordinary conversation id', async ()
   assert.equal(c.opened[1].chatId,'chat-1');
   assert.equal(c.opened[1].taskSession,undefined);
 });
+
+test('waiting for this launch never opens an older manual run and stops on failure', async () => {
+  let opened = 0, reads = 0;
+  const c = { _schScope: 0, _schRunRows: {}, setTimeout: fn => { fn(); return 0; },
+    WorkspaceHost: { open: () => { opened++; return true; } },
+    SoduWorkAPI: { listScheduleRuns: async () => { reads++; return [{ id: 'old', trigger: 'manual', conversationId: 'old-chat' }]; } } };
+  vm.createContext(c); vm.runInContext(runs, c);
+  assert.equal(await c._schLaunchRunConversation('s', { scheduleRunId: 'new' }, 0), false);
+  assert.equal(reads, 30); assert.equal(opened, 0);
+  c.SoduWorkAPI.listScheduleRuns = async () => { reads++; return [{ id: 'new', state: 'failed', conversationId: 'stale-chat' }]; };
+  assert.equal(await c._schLaunchRunConversation('s', { scheduleRunId: 'new' }, 0), false);
+  assert.equal(reads, 31); assert.equal(opened, 0);
+  assert.equal(await c._schLaunchRunConversation('s', {}, 0), false);
+  assert.equal(reads, 31);
+});
 test('immediate run opens the selected model and sends one ordinary prompt directly', async () => {
   const sent = [], acks = [];
-  const c={globalThis:null,_schScope:0,closeSchedulePanel(){c.closed=true;},
+  const c={globalThis:null,_schScope:0,setTimeout:()=>1,clearTimeout(){},closeSchedulePanel(){c.closed=true;},
     WorkspaceHost:{open:(...args)=>{c.opened=args;return true;}},
     soduWorkAPI:{conversationSession:{
       open:async options=>{c.openOptions=options;return {ok:true,ref:'ref-1',sessionId:'chat-direct'};},
@@ -163,7 +209,7 @@ test('immediate run opens the selected model and sends one ordinary prompt direc
 });
 test('immediate run with a personal plugin uses the automation open bridge and sends the locked plugin', async () => {
   const sent = [], calls = [];
-  const c={globalThis:null,_schScope:0,closeSchedulePanel(){c.closed=true;},
+  const c={globalThis:null,_schScope:0,setTimeout:()=>1,clearTimeout(){},closeSchedulePanel(){c.closed=true;},
     WorkspaceHost:{open:(...args)=>{c.opened=args;return true;}},
     soduWorkAPI:{personalPlugins:{list:async()=>({items:[{
       key:'weekly-report', pluginId:'local:weekly-report', enabled:true,
@@ -194,6 +240,93 @@ test('standalone run entries use the shared chat bridge when WorkspaceHost is ab
   assert.equal(c.closed,true); assert.equal(c.chatId,'chat-standalone');
 });
 
+function directRunFixture({ send, acknowledge } = {}) {
+  const acks = [], timers = new Map(), events = new Map(); let sequence = 0, listener = null, removed = 0;
+  const c = { _schScope: 0,
+    addEventListener: (name, listener) => events.set(name, listener),
+    removeEventListener: name => events.delete(name),
+    setTimeout: (fn, delay) => { const id = ++sequence; timers.set(id, { fn, delay }); return id; },
+    clearTimeout: id => timers.delete(id),
+    WorkspaceHost: { open: () => true },
+    soduWorkAPI: { conversationSession: {
+      open: async () => ({ ok: true, ref: 'ref', sessionId: 'chat' }),
+      send: (...args) => send ? send(listener, ...args) : Promise.resolve({ ok: true }),
+      onEvent: callback => { listener = callback; return () => { listener = null; removed++; }; },
+    } },
+    SoduWorkAPI: { acknowledgeScheduleRun: async (_id, body) => {
+      acks.push(body); return acknowledge ? acknowledge(body) : { ok: true };
+    } },
+  };
+  vm.createContext(c); vm.runInContext(runs, c);
+  return { c, acks, timers, events, removed: () => removed,
+    event: value => listener?.(value),
+    start: () => c._schLaunchDirectConversation({ scheduleRunId: 'run', instanceId: 'ui',
+      conversationInput: { text: 'run once' } }, 0),
+    tick: async () => { const [id, task] = timers.entries().next().value; timers.delete(id); await task.fn(); },
+  };
+}
+
+test('renderer-owned automation renews its active lease and stops on its terminal event', async () => {
+  const f = directRunFixture();
+  assert.equal(await f.start(), true);
+  assert.equal(f.timers.size, 1); assert.equal([...f.timers.values()][0].delay, 60000);
+  await f.tick();
+  assert.deepEqual(f.acks.map(item => item.state), ['starting', 'running', 'running']);
+  assert.equal(f.timers.size, 1, 'only one next renewal is pending');
+  f.event({ ref: 'another', kind: 'settled' }); assert.equal(f.timers.size, 1);
+  f.event({ ref: 'ref', kind: 'error', reason: 'stopped' });
+  assert.equal(f.timers.size, 0); assert.equal(f.removed(), 1);
+  assert.equal(f.events.size, 0);
+  assert.deepEqual(f.acks.map(item => item.state), ['starting', 'running', 'running', 'failed']);
+});
+
+test('an account change immediately removes the renderer lease timer and subscription', async () => {
+  const f = directRunFixture();
+  await f.start(); f.c._schScope++;
+  f.events.get('soduwork-data-scope-changed')();
+  assert.equal(f.timers.size, 0); assert.equal(f.events.size, 0); assert.equal(f.removed(), 1);
+  assert.deepEqual(f.acks.map(item => item.state), ['starting', 'running']);
+});
+
+test('renderer lease renewal stops on server terminal state or account replacement', async () => {
+  for (const mode of ['terminal', 'account']) {
+    let serverEnded = false;
+    const f = directRunFixture({ acknowledge: () => ({ ok: true, state: serverEnded ? 'failed' : 'running' }) });
+    await f.start();
+    if (mode === 'terminal') serverEnded = true;
+    else f.c._schScope++;
+    await f.tick();
+    assert.equal(f.timers.size, 0); assert.equal(f.removed(), 1);
+    assert.equal(f.acks.length, mode === 'terminal' ? 3 : 2);
+  }
+});
+
+test('completion received during send cannot be overwritten by a late running ack', async () => {
+  const f = directRunFixture({ send: async listener => { listener({ ref: 'ref', kind: 'settled' }); return { ok: true }; } });
+  await f.start();
+  assert.deepEqual(f.acks.map(item => item.state), ['starting', 'succeeded']);
+  assert.equal(f.timers.size, 0); assert.equal(f.removed(), 1);
+});
+
+test('slow lease renewal is serial and cannot restart after completion', async () => {
+  let calls = 0, release;
+  const f = directRunFixture({ acknowledge: () => ++calls === 3
+    ? new Promise(resolve => { release = resolve; }) : { ok: true } });
+  await f.start(); const pending = f.tick();
+  assert.equal(f.timers.size, 0, 'no overlapping renewal while the acknowledgement is pending');
+  f.event({ ref: 'ref', kind: 'settled' });
+  release({ ok: true, state: 'running' }); await pending;
+  assert.equal(f.timers.size, 0); assert.equal(f.events.size, 0);
+  assert.deepEqual(f.acks.map(item => item.state), ['starting', 'running', 'running', 'succeeded']);
+});
+
+test('a terminal dispatch receipt prevents starting a renderer conversation turn', async () => {
+  let sends = 0;
+  const f = directRunFixture({ acknowledge: () => ({ ok: true, state: 'failed' }), send: async () => { sends++; return { ok: true }; } });
+  assert.equal(await f.start(), false);
+  assert.equal(sends, 0); assert.equal(f.timers.size, 0);
+});
+
 test('automation run history exposes only the four user-facing states', () => {
   const c={globalThis:null,SCH_RUN_STATE:{
     starting:['待执行','starting'], running:['执行中','running'], waiting:['执行中','running'],
@@ -204,6 +337,11 @@ test('automation run history exposes only the four user-facing states', () => {
   assert.deepEqual(Array.from(c._schConversationRunState({state:'waiting'})),['执行中','running']);
   assert.deepEqual(Array.from(c._schConversationRunState({state:'succeeded'})),['完成','succeeded']);
   assert.deepEqual(Array.from(c._schConversationRunState({state:'cancelled'})),['失败','failed']);
+  const receipt = { executionMode: 'soduwork.automation-conversation/v1', phase: 'device' };
+  assert.deepEqual(Array.from(c._schConversationRunState({state:'running',receipt})),['待执行','starting']);
+  assert.deepEqual(Array.from(c._schConversationRunState({state:'waiting',receipt:{executionMode:receipt.executionMode}})),['待执行','starting']);
+  assert.deepEqual(Array.from(c._schConversationRunState({state:'running',conversationId:'chat',receipt:{executionMode:receipt.executionMode}})),['执行中','running']);
+  assert.deepEqual(Array.from(c._schConversationRunState({state:'failed',receipt})),['失败','failed']);
 });
 
 test('failed delete keeps the plan and reports failure, without a success notification',async()=>{

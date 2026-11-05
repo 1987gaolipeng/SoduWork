@@ -4,6 +4,46 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
 const script = fs.readFileSync(path.join(__dirname, '../core/i18n.js'), 'utf8');
+test('renderer catalog packages preserve frozen snapshots and match canonical package order', () => {
+  const context = vm.createContext({}), expected = {};
+  const directory = path.join(__dirname, '../core/locales');
+  const files = JSON.parse(fs.readFileSync(path.join(directory, 'manifest.json'), 'utf8'));
+  for (const file of files.filter(name => name !== 'locale-registry.js')) {
+    const before = context.SoduWorkLocaleMessages, snapshot = JSON.stringify(before);
+    const raw = require(path.join(directory, file));
+    const packages = file.startsWith('builtin-') ? raw : { [file.slice(0, 5)]: raw };
+    for (const [locale, messages] of Object.entries(packages)) {
+      Object.assign(expected[locale] ||= Object.create(null), messages);
+    }
+    vm.runInContext(fs.readFileSync(path.join(directory, file), 'utf8'), context, { filename: file });
+    assert.equal(JSON.stringify(before), snapshot, file + ' must not change earlier snapshots');
+    assert.ok(Object.isFrozen(context.SoduWorkLocaleMessages), file);
+    for (const messages of Object.values(context.SoduWorkLocaleMessages)) assert.ok(Object.isFrozen(messages), file);
+    assert.deepEqual(JSON.parse(JSON.stringify(context.SoduWorkLocaleMessages)), JSON.parse(JSON.stringify(expected)), file);
+  }
+});
+
+test('renderer catalog composition retains prototype-like keys and search supplement respects existing translations', () => {
+  const original = Object.freeze(JSON.parse('{"__proto__":"Own proto","constructor":"Own constructor","重试":"Existing retry"}'));
+  const catalogs = Object.freeze({ 'en-US': original });
+  const context = vm.createContext({ SoduWorkLocaleMessages: catalogs });
+  const directory = path.join(__dirname, '../core/locales');
+  for (const file of ['en-US-trace-pages.js', 'global-search.js']) {
+    vm.runInContext(fs.readFileSync(path.join(directory, file), 'utf8'), context, { filename: file });
+    const messages = context.SoduWorkLocaleMessages['en-US'];
+    assert.equal(Object.getPrototypeOf(messages), null);
+    assert.ok(Object.hasOwn(messages, '__proto__'));
+    assert.equal(messages.__proto__, 'Own proto');
+    assert.equal(messages.constructor, 'Own constructor');
+    assert.equal(messages['重试'], 'Existing retry');
+    assert.ok(Object.isFrozen(messages));
+    assert.ok(Object.isFrozen(context.SoduWorkLocaleMessages));
+  }
+  assert.equal(context.SoduWorkLocaleMessages['en-US']['打开全局搜索'], 'Open global search');
+  assert.equal(catalogs['en-US'], original);
+  assert.equal(original['打开全局搜索'], undefined);
+});
+
 test('localized slash actions resolve to the same work contract and preserve request text', () => {
   const window = { TaskPriority: { labels: {} }, addEventListener() {} };
   const context = vm.createContext({ window, document: { addEventListener() {} }, Intl, setTimeout, clearTimeout });
@@ -44,6 +84,49 @@ function client(saved = {}, blocked = false, options = {}) {
   return { api: context.SoduWorkI18n, context, storage, listeners, sent, read: code => vm.runInContext(code, context) };
 }
 
+test('keyed tooltips follow locale changes without replacing child content or user attributes', () => {
+  const c = client();
+  const makeElement = user => {
+    const attrs = { 'data-i18n-title': 'builtin.skill.office.description', title: 'Original description',
+      ...(user ? { 'data-user-attributes': 'title' } : {}) };
+    return { textContent: 'Keep controls', closest: () => false,
+      getAttribute: name => attrs[name] || null, setAttribute: (name, value) => { attrs[name] = value; } };
+  };
+  const system = makeElement(false), custom = makeElement(true);
+  c.context.document.querySelectorAll = () => [system, custom];
+  for (const locale of ['en-US', 'ja-JP', 'ko-KR', 'zh-CN', 'en-US']) {
+    c.api.setLocale(locale);
+    assert.equal(system.getAttribute('title'), c.api.t('builtin.skill.office.description'));
+    assert.equal(system.textContent, 'Keep controls');
+    assert.equal(custom.getAttribute('title'), 'Original description');
+  }
+});
+
+test('delivery download receipts and bounded HTTP errors follow every supported locale', () => {
+  const c = client();
+  const source = ['正在准备交付文件…', '文件已保存到所选位置',
+    '正在准备下载…', '正在打开材料…', '按验收意见继续修改',
+    '本轮执行已结束，可提交验收', '查看并提交',
+    '本轮执行已暂停，需要你在原对话中处理后继续。',
+    '等待钉钉授权超时，请重新连接并完成网页上的全部授权步骤',
+    '钉钉授权未完成，请检查连接后重试',
+    '源文件已丢失，请从原执行电脑或服务器备份恢复附件后重试',
+    '图片附件为空，请重新选择图片后发送',
+    '图片附件受加密保护，当前执行底座无法读取，请使用已获授权的可读图片',
+    '无法确定附件的图片类型，请重新选择图片后发送',
+    '交付文件访问权限已变化，请重新打开需求后重试',
+    '交付压缩包读取失败（HTTP 502），请刷新需求后重试'];
+  for (const locale of ['en-US', 'ja-JP', 'ko-KR', 'zh-CN']) {
+    c.api.setLocale(locale);
+    for (const text of source) {
+      const translated = c.api.translateText(text);
+      if (locale === 'zh-CN') assert.equal(translated, text);
+      else assert.notEqual(translated, text, locale + ': ' + text);
+      if (text.includes('502')) assert.match(translated, /HTTP 502/);
+    }
+  }
+});
+
 test('new client profiles default to English while explicit locale choices remain intact', () => {
   const fresh = client({}, false, { initialLocale: null });
   assert.equal(fresh.api.getLocale(), 'en-US');
@@ -59,6 +142,7 @@ test('ja-JP and ko-KR translate gap pages, localized templates and Issue terms',
   for (const locale of ['en-US', 'ja-JP', 'ko-KR']) {
     c.api.setLocale(locale);
     assert.notEqual(c.api.translateText(contextScope), contextScope);
+    assert.notEqual(c.api.translateText('暂未获取用量'), '暂未获取用量');
   }
   c.api.setLocale('ja-JP');
   assert.equal(c.api.translateText('文件已保存'), 'ファイルを保存しました');
@@ -256,4 +340,29 @@ test('server message descriptors switch locale without translating interpolated 
     assert.equal(api.t('notification.task_assignment', 'legacy fallback', params), expected[locale]);
     assert.notEqual(api.t('agent.auth.required', 'untranslated'), 'untranslated');
   }
+});
+
+
+test('collaboration card actions, permissions and summaries use shipped locale entries', () => {
+  const c = client();
+  const samples = [
+    '停止协作', '恢复协作', '收起协作卡，执行不会停止', '核对执行状态',
+    '成果承载区尚未就绪，请重新打开对话', '完成流程，保留结果', '需要你的许可',
+    '操作内容未完整提供。请拒绝本次操作，并让 Agent 提供明确、简短的操作。',
+    '不允许', '仅允许本次', '较早协作「Workflow A」待处理', '2 / 4 步完成', '已校验成果 · 6 项',
+  ];
+  for (const [locale, stop, summary] of [
+    ['en-US', 'Stop collaboration', 'Verified outputs · 6'],
+    ['ja-JP', '共同作業を停止', '検証済みの成果 · 6 件'],
+    ['ko-KR', '공동 작업 중지', '검증된 결과 · 6개'],
+  ]) {
+    c.api.setLocale(locale);
+    for (const source of samples) assert.notEqual(c.api.translateText(source), source, `${locale}: ${source}`);
+    assert.equal(c.api.translateText('停止协作'), stop);
+    assert.equal(c.api.translateText('已校验成果 · 6 项'), summary);
+    assert.ok(c.api.translateText('较早协作「Workflow A」待处理').includes('Workflow A'));
+    if (locale === 'en-US') for (const source of samples) assert.doesNotMatch(c.api.translateText(source), /[\u3400-\u9fff]/);
+  }
+  c.api.setLocale('zh-CN');
+  for (const source of samples) assert.equal(c.api.translateText(source), source);
 });

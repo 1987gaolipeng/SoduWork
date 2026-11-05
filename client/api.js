@@ -1576,10 +1576,21 @@
       mark(true); return (r && r.items) || [];
     },
     async runSchedule(sid, options) {
+      var epoch = _registrationEpoch, hub = base(), owner = taskStorageKey('ops');
       var body = options && options.instanceId ? { instanceId: String(options.instanceId) } : {};
       var r = await jfetch('/schedules/' + encodeURIComponent(sid) + '/run', {
         method: 'POST', body: JSON.stringify(body)
       });
+      // Wake only after the Hub accepts the run. The native worker coalesces wakes;
+      // an older/unavailable bridge must not turn an accepted run into a UI error.
+      if (epoch === _registrationEpoch && hub === base() && owner === taskStorageKey('ops') && r && r.ok !== false) {
+        var bridge = global.soduWorkAPI;
+        try {
+          if (bridge && typeof bridge.automationConversationsWake === 'function') {
+            Promise.resolve(bridge.automationConversationsWake({ hub: hub })).catch(function () {});
+          }
+        } catch (_) {}
+      }
       mark(true); return r;
     },
     async acknowledgeScheduleRun(runId, body) {

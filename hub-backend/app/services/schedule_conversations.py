@@ -118,7 +118,7 @@ async def prepare(session, schedule, client, repo, run_id, adapter, personal):
         instruction += '\n\n本次输入参数：\n' + json.dumps(inputs, ensure_ascii=False, indent=2)
     if repo:
         instruction += '\n\n工程：' + str(repo.name or '')
-    instruction += '\n\n自动化触发时间：' + schedules._now_local(schedule).isoformat()
+    instruction += '\n\n自动化触发时间：' + schedules.format_trigger_time(schedule, run.started_at)
     capabilities = clean_required_capabilities(schedule.required_capabilities)
     # Older focused workers call this helper with an empty ``personal`` value
     # instead of going through schedules.run_one(). Derive the persisted lock
@@ -149,10 +149,12 @@ async def prepare(session, schedule, client, repo, run_id, adapter, personal):
 
 async def inbox(session, client):
     # Capability registration is authenticated and confined to this device.
+    changed = False
     config = dict(client.config or {})
     if config.get('automationConversationV1') != 1:
         client.config = {**config, 'automationConversationV1': 1}
-    rows = (await session.execute(select(models.AiScheduleRun).where(
+        changed = True
+    query = select(models.AiScheduleRun.id, models.AiScheduleRun.state).where(
         schedule_access.owner_clause(client, models.AiScheduleRun),
         # Account scope permits managing the plan from another device, while
         # the ordinary conversation itself remains pinned to its original
@@ -160,10 +162,21 @@ async def inbox(session, client):
         models.AiScheduleRun.owner_client_id == str(client.id or ""),
         models.AiScheduleRun.receipt['executionMode'].as_string() == PROTOCOL,
         models.AiScheduleRun.state.in_(['starting', 'running', 'waiting'])
-    ).order_by(models.AiScheduleRun.started_at).limit(200))).scalars().all()
-    items = [{'id': row.id, 'state': row.state} for row in rows
-            if dict(row.receipt or {}).get('executionMode') == PROTOCOL]
-    await session.commit()
+    ).order_by(models.AiScheduleRun.started_at).limit(200)
+    rows = (await session.execute(query)).all()
+    # An empty inbox cannot contain expired native runs. Preserve the cached
+    # identity polling path's single projection read and zero empty commits.
+    expired = []
+    if rows:
+        from . import schedule_device_liveness
+        expired = await schedule_device_liveness.reconcile_expired(
+            session, owner_client_id=str(client.id or ''),
+            owner_user_id=str(client.user_ref or ''))
+        if expired:
+            rows = (await session.execute(query)).all()
+    items = [{'id': row.id, 'state': row.state} for row in rows]
+    if changed or expired:
+        await session.commit()
     return items
 
 
@@ -182,10 +195,21 @@ async def claim(session, client, run_id, instance):
     if not instance or len(instance) > 80:
         raise HTTPException(400, '缺少有效的执行端标识')
     run = await locked_run(session, client, run_id)
+    from .schedule_device_liveness import expire_run
+    await expire_run(session, run)
     receipt = dict(run.receipt or {})
     if run.state in ('succeeded', 'failed', 'cancelled'):
-        return {'ok': True, 'terminal': True, 'state': run.state}
+        await session.commit()
+        return {'ok': True, 'terminal': True, 'state': run.state,
+                'errorCode': receipt.get('errorCode', ''),
+                'conversationId': receipt.get('conversationId', '')}
     now = datetime.now(timezone.utc).timestamp()
+    if receipt.get('conversationId') and receipt.get('worker') != instance:
+        # A restarted client without the executing session only observes it.
+        # Claiming its lease and acknowledging "running" would keep a vanished
+        # execution alive indefinitely, including after uninstall/reinstall.
+        return {'ok': True, 'observeOnly': True, 'state': run.state,
+                'conversationId': receipt['conversationId']}
     if receipt.get('worker') != instance and float(receipt.get('leaseUntil') or 0) > now:
         return {'ok': False, 'busy': True}
     previous_worker = str(receipt.get('worker') or '')
@@ -206,6 +230,8 @@ async def claim(session, client, run_id, instance):
 
 async def acknowledge(session, client, run_id, body):
     run = await locked_run(session, client, run_id)
+    from .schedule_device_liveness import expire_run
+    await expire_run(session, run)
     receipt = dict(run.receipt or {})
     requested_state = str(body.get('state') or '')
     # The conversation surface has four states. Keep accepting legacy worker
@@ -233,18 +259,22 @@ async def acknowledge(session, client, run_id, body):
     current_worker = str(receipt.get('worker') or '')
     previous_worker = str(receipt.get('previousWorker') or '')
     same_conversation = bool(cid and cid == receipt.get('conversationId'))
+    receipt_timeout = (run.state == 'failed' and
+                       receipt.get('errorCode') == 'AUTOMATION_RECEIPT_TIMEOUT' and
+                       ack_worker and ack_worker == current_worker)
     legacy_false_failure = (run.state == 'failed' and
                             '另一客户端创建对话' in str(run.error or ''))
     stale_owner_completion = (run.state in ('starting', 'running', 'waiting') and
                               ack_worker == previous_worker and
                               ack_worker and ack_worker != current_worker)
     if (state == 'succeeded' and same_conversation and
-            (stale_owner_completion or
+            (receipt_timeout or stale_owner_completion or
              (legacy_false_failure and ack_worker and ack_worker != current_worker))):
         run.state = 'succeeded'
         run.error = ''
         run.finished_at = datetime.now(timezone.utc)
         receipt.pop('previousWorker', None)
+        receipt.pop('errorCode', None)
         run.receipt = receipt
         latest = await session.scalar(select(models.AiScheduleRun.id).where(
             models.AiScheduleRun.schedule_id == run.schedule_id
@@ -259,6 +289,7 @@ async def acknowledge(session, client, run_id, body):
     if receipt.get('worker') != str(body.get('instanceId') or ''):
         raise HTTPException(409, '本次执行已由另一个客户端接管')
     if run.state in ('succeeded', 'failed', 'cancelled'):
+        await session.commit()
         return {'ok': True, 'state': run.state}
     if state in ('running', 'succeeded') and not cid:
         raise HTTPException(400, '缺少普通会话标识')
