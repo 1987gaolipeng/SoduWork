@@ -44,6 +44,80 @@ const message = (changes = {}) => ({ id: 'server-1', messageId: 'client-1', send
   senderName: '发件人', recipientName: '接收人', text: '完整需求说明', kind: 'task_assignment', taskId: 'task-1',
   createdAt: 100, status: 'accepted', deliveredAt: null, readAt: null, attachments: [], ...changes });
 
+test('unchanged large histories do not rewrite storage, broadcast, or recreate receipts', async () => {
+  const sent = Array.from({ length: 2000 }, (_, i) => message({ id: 's' + i, messageId: 'c' + i,
+    senderId: 'user-a', recipientId: 'user-b', status: 'read', readAt: 300 }));
+  const f = fixture({ sent });
+  await f.sync.refresh('sent');
+  const original = f.values.get('user-a:notices');
+  let writes = 0, broadcasts = 0;
+  const save = f.ctx.localStorage.setItem;
+  f.ctx.localStorage.setItem = (...args) => { writes++; save(...args); };
+  f.ctx.WinSync = { pushNotices() { broadcasts++; } };
+  await f.sync.refresh('sent');
+  assert.equal(writes, 0); assert.equal(broadcasts, 0);
+  assert.equal(f.values.get('user-a:notices'), original);
+  assert.equal(f.sync.rows('received').length, 2000);
+});
+
+test('stable revision skips all history pages and remains bound to the durable account cache', async () => {
+  const f = fixture(), requested = [];
+  f.api.mateMessages = async (folder, limit, before, revision) => {
+    requested.push({ folder, before, revision });
+    if (revision === 'stable') return { ok: true, items: [], notModified: true, revision: 'stable' };
+    return { ok: true, items: [message({ id: before ? 'old' : 'new', messageId: before ? 'old' : 'new',
+      status: 'read', readAt: 300 })], nextCursor: before ? '' : 'new', revision: 'stable' };
+  };
+  await f.sync.refresh('received'); await f.sync.refresh('received');
+  assert.equal(requested.length, 3); assert.equal(requested[2].revision, 'stable');
+  assert.equal(f.sync.rows('received').length, 2);
+  f.values.set('user-a:notices', '[]');
+  await f.sync.refresh('received');
+  assert.equal(requested[3].revision, ''); assert.equal(f.sync.rows('received').length, 2);
+  f.scope('user-c'); await f.sync.refresh('received');
+  assert.equal(requested[5].revision, ''); assert.equal(f.sync.rows('received').length, 0);
+});
+
+test('a receipt changed during pagination cannot become a cached conditional snapshot', async () => {
+  const f = fixture(), requested = []; let changed = false;
+  f.api.mateMessages = async (_folder, _limit, before, revision) => {
+    requested.push(revision);
+    const result = { ok: true, items: [message({ id: before ? 'old' : 'new', messageId: before ? 'old' : 'new',
+      senderId: 'user-a', recipientId: 'user-b', status: changed ? 'read' : 'delivered',
+      readAt: changed ? 300 : null, deliveredAt: 200 })], nextCursor: before ? '' : 'new', revision: changed ? 'after' : 'before' };
+    changed = true; return result;
+  };
+  await f.sync.refresh('sent'); await f.sync.refresh('sent');
+  assert.equal(requested[2], '', 'mixed pages must force a complete retry on the next refresh');
+  assert.ok(f.sync.rows('sent').every(row => row.status === 'read'));
+});
+
+test('a cache replaced while notModified is in flight is reconciled unconditionally', async () => {
+  const f = fixture(), delayed = deferred(); let calls = 0;
+  f.api.mateMessages = async (_folder, _limit, _before, revision) => {
+    calls++;
+    if (revision) return delayed.promise;
+    return { ok: true, items: [message({ status: 'read', readAt: 300 })], revision: 'r1' };
+  };
+  await f.sync.refresh('received');
+  const next = f.sync.refresh('received');
+  f.values.set('user-a:notices', '[]');
+  delayed.resolve({ ok: true, items: [], revision: 'r1', notModified: true });
+  await next;
+  assert.equal(calls, 3); assert.equal(f.sync.rows('received').length, 1);
+});
+
+test('delivery batches preserve successful receipts when a peer acknowledgement fails', async () => {
+  const f = fixture({ received: [message(), message({ id: 'failed', messageId: 'failed' })] });
+  f.api.markMateMessageDelivered = async id => {
+    if (id === 'failed') throw Error('offline');
+    return { ok: true, status: 'delivered', deliveredAt: 200 };
+  };
+  await assert.rejects(f.sync.refresh('received'), /offline/);
+  assert.equal(f.sync.rows('received').find(row => row.serverMessageId === 'server-1').status, 'delivered');
+  assert.equal(f.sync.rows('received').find(row => row.serverMessageId === 'failed').status, 'accepted');
+});
+
 function mountChatList(f) {
   const opened = [];
   f.ctx.openTaskConversation = (...args) => { opened.push(args); return true; };

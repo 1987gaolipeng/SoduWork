@@ -32,8 +32,6 @@
     more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
     star: '<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3l-5.6 2.9 1.1-6.2L3 9.6l6.2-.9z"/>',
     download: '<path d="M12 3v13M7 11l5 5 5-5M4 17v4h16v-4"/>',
-    hidden: '<path d="M3 3 21 21M10.5 10.5a2.1 2.1 0 0 0 3 3M8 5.5a10 10 0 0 1 4-.8c6 0 9 7.3 9 7.3a15 15 0 0 1-3 4M6 7C4 9 3 12 3 12s3 7.3 9 7.3a10 10 0 0 0 4-.8"/>',
-    braces: '<path d="M9 3H7v6l-3 3 3 3v6h2M15 3h2v6l3 3-3 3v6h-2"/>',
     back: '<path d="m10 5-7 7 7 7M3 12h18"/>',
     chat: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v7a2.5 2.5 0 0 1-2.5 2.5H11l-4.8 4v-4H6.5A2.5 2.5 0 0 1 4 12.5zM8 8h8M8 11h5"/>',
     edit: '<path d="m14.5 5.5 4 4M5 19l3.2-.7L19.2 7.3a1.7 1.7 0 0 0-2.4-2.4L5.8 15.9z"/>',
@@ -59,11 +57,15 @@
   }
   function refreshLibrarySnapshot() {
     if (!root?.matches('.show,.workspace-hosted')) return;
-    const now = Date.now();
-    if (now - libraryRefreshAt < 50) return;
-    libraryRefreshAt = now;
-    invalidateSnapshot();
-    load();
+    // Multiple windows relay the same change through several channels. Merge
+    // that burst, but remember changes arriving after a read has started.
+    if (listRequest?.key === filterKey() && listRequest.epoch === lifecycleEpoch) listRequest.dirty = true;
+    if (libraryRefreshTimer !== null) return;
+    libraryRefreshTimer = setTimeout(() => { libraryRefreshTimer = null; load(); }, 50);
+  }
+  function loadAfterChange() {
+    if (listRequest?.key === filterKey() && listRequest.epoch === lifecycleEpoch) listRequest.dirty = true;
+    return load();
   }
   const imageUrls = new Map();
   const imageLoads = new Map();
@@ -79,7 +81,6 @@
     for (let i = 0; i < 32; i += 1) value += hex[Math.floor(Math.random() * hex.length)];
     return value.slice(0, 8) + '-' + value.slice(8, 12) + '-4' + value.slice(13, 16) + '-' + (8 + Math.floor(Math.random() * 4)).toString(16) + value.slice(17, 20) + '-' + value.slice(20);
   };
-  const hiddenItem = item => typeof (item.extra || {}).hidden === 'boolean' ? item.extra.hidden : String(item.filename || '').startsWith('.');
   // Keep concrete provider names in requests so a configuration refresh cannot
   // redirect a pending upload/editor/move to a different remote service.
   const storedBackend = row => ['local', 'minio', 'nfs'].includes(row?.backend) ? row.backend : state.storage;
@@ -88,8 +89,7 @@
   const storageAvailable = () => state.storage === 'local' ? state.storageStatus.local.available !== false : (!state.storageStatusLoading &&
     state.storageStatus.remote.available && state.storageStatus.remote.backend === state.storage);
   const storageMessage = () => state.storage === 'local' ? (state.storageStatus.local.message || '本地资料库暂时不可用，请确认当前账号') : state.storageStatus.remote.message || (state.storageStatus.remote.configured ? '远程存储暂时不可用' : '请先配置资料库存储环境');
-  const providerLabel = backend => backend === 'nfs' ? 'NFS' : backend === 'minio' ? 'MinIO' : '';
-  const dialogs = global.SoduWorkLibraryDialogs.create({ state, esc, icon, notify, errorText, load, getEpoch: () => lifecycleEpoch });
+  const dialogs = global.SoduWorkLibraryDialogs.create({ state, esc, icon, notify, errorText, load: loadAfterChange, getEpoch: () => lifecycleEpoch });
   const { openDocumentEditor, openMoveFolderDialog, openConfirmDialog, openNameDialog, openFolderDialog } = dialogs;
   // The source-conversation action is a blocking navigation failure. Keep it
   // visible in the center of the page so a bottom-corner pet toast cannot be
@@ -159,12 +159,8 @@
       '<button type="button" data-library-batch-clear>' + esc(tx('取消选择')) + '</button>';
     root.querySelector('[data-library-list-head]').after(batchToolbar);
     uploadInput = root.querySelector('[data-library-upload]');
-    root.querySelector('[data-library-hidden-files]').checked = state.showHidden;
     root.addEventListener('click', onClick);
     root.addEventListener('change', onChange);
-    root.querySelector('[data-library-hidden-files]').addEventListener('change', event => {
-      state.showHidden = event.target.checked; preference('soduwork_work_library_show_hidden', state.showHidden ? '1' : '0'); render();
-    });
     root.querySelector('[data-library-search]').addEventListener('input', event => {
       state.query = event.target.value || ''; requestId++; clearTimeout(searchTimer);
       searchTimer = setTimeout(load, 220);
@@ -190,7 +186,7 @@
   async function runAction(button, action, fallback, success) {
     const epoch = lifecycleEpoch;
     button.disabled = true; closeMenus();
-    try { await action(); if (epoch !== lifecycleEpoch) return; if (success) notify(success); await load(); }
+    try { await action(); if (epoch !== lifecycleEpoch) return; if (success) notify(success); await loadAfterChange(); }
     catch (error) { if (epoch === lifecycleEpoch) await dialogs.showError(error, fallback); }
     finally {
       if (button.isConnected) button.disabled = button.hasAttribute('data-library-empty-trash') ? state.trashCount < 1 || state.busy : false;
@@ -262,10 +258,6 @@
     if (d.libraryRename !== undefined) { await renameItem(button, d.libraryRename); return; }
     if (d.libraryMigrate !== undefined) { await migrateItem(button, d.libraryMigrate); return; }
     if (d.libraryMove !== undefined) { await moveItem(button, d.libraryMove); return; }
-    if (d.libraryHide !== undefined) {
-      const item = state.items.find(row => row.id === d.libraryHide); if (!item) return;
-      await runAction(button, () => global.SoduWorkAPI.updateLibraryItem(item.id, { extra: { ...(item.extra || {}), hidden: !hiddenItem(item) } }), '隐藏状态更新失败'); return;
-    }
     if (d.libraryDelete !== undefined) {
       const item = state.items.find(row => String(row.id) === String(d.libraryDelete));
       const name = item ? displayName(item) : tx('这份资料');
@@ -355,7 +347,7 @@
       succeeded.forEach(id => state.selected.delete(id));
       if (failed.length) notify('已删除 ' + succeeded.length + ' 项，' + failed.length + ' 项失败，请重试');
       else notify('已将 ' + succeeded.length + ' 项移入回收站');
-      await load();
+      await loadAfterChange();
     } catch (error) { if (epoch === lifecycleEpoch) await dialogs.showError(error, '批量删除失败'); }
     finally { if (epoch === lifecycleEpoch) { batchBusy = false; render(); } }
   }
@@ -390,7 +382,7 @@
       const totalFailed = failed.length + skipped;
       if (totalFailed) notify('已存储 ' + succeeded.length + ' 项，' + totalFailed + ' 项未完成，请重试');
       else notify('已将 ' + succeeded.length + ' 项资料存储到远端');
-      await load();
+      await loadAfterChange();
     } catch (error) {
       if (epoch !== lifecycleEpoch) return;
       if (error?.code === 'STALE_TASK_SCOPE') notify('账号或存储配置已变化，请重新选择后重试');
@@ -647,7 +639,7 @@
       try { await global.SoduWorkAPI.uploadLibraryFile(file, folderId, storage); }
       catch (error) { if (epoch === lifecycleEpoch) await dialogs.showError(error, '上传失败'); }
     }
-    event.target.value = ''; event.target.accept = ''; if (epoch === lifecycleEpoch) load();
+    event.target.value = ''; event.target.accept = ''; if (epoch === lifecycleEpoch) loadAfterChange();
   }
   async function createKind(kind) {
     if (isServerHistory()) { notify('请返回远程根目录保存新资料'); return; }
@@ -669,7 +661,7 @@
         openCreateConversation(kind);
         return;
       }
-      if (epoch === lifecycleEpoch) { notify('已创建'); load(); }
+      if (epoch === lifecycleEpoch) { notify('已创建'); loadAfterChange(); }
     } catch (error) { if (epoch === lifecycleEpoch) await dialogs.showError(error, '创建失败'); }
   }
   function itemActions(item, sourceChip) {
@@ -720,40 +712,91 @@
     return String(item && item.kind || '').toLowerCase() === 'image' || /^image\//i.test(String(item && item.contentType || ''));
   }
 
-  async function imageUrlFor(item) {
-    const id = String(item && item.id || '');
-    if (!id) return '';
-    if (imageUrls.has(id)) return imageUrls.get(id);
-    if (imageLoads.has(id)) return imageLoads.get(id);
+  let imageObserver, imageController, imageNodes = [], imageQueue = [], imageActive = 0;
+  let imageScrollCleanup;
+  function resetImageLoading(clearCache = false) {
+    imageEpoch++; imageObserver?.disconnect(); imageObserver = null;
+    imageController?.abort(); imageController = null;
+    imageScrollCleanup?.(); imageScrollCleanup = null;
+    imageNodes = []; imageQueue = []; imageLoads.clear();
+    if (clearCache) {
+      imageUrls.forEach(url => URL.revokeObjectURL(url)); imageUrls.clear();
+    }
+  }
+  async function imageUrlFor(item, signal) {
+    const id = String(item?.id || '');
+    const key = JSON.stringify([id, item?.updatedAt, item?.size, item?.backend]);
+    if (!id || signal.aborted) return '';
+    if (imageUrls.has(key)) {
+      const url = imageUrls.get(key); imageUrls.delete(key); imageUrls.set(key, url); return url;
+    }
+    if (imageLoads.has(key)) return imageLoads.get(key);
     const epoch = imageEpoch;
     const request = Promise.resolve().then(async () => {
-      if (!global.SoduWorkAPI || typeof global.SoduWorkAPI.readLibraryBinary !== 'function') return '';
-      const result = await global.SoduWorkAPI.readLibraryBinary(id);
-      const blob = result && result.blob;
-      if (!blob) return '';
-      const url = URL.createObjectURL(blob);
-      if (epoch !== imageEpoch) { try { URL.revokeObjectURL(url); } catch (_) {} return ''; }
-      imageUrls.set(id, url);
+      if (typeof global.SoduWorkAPI?.readLibraryThumbnail !== 'function') return '';
+      const result = await global.SoduWorkAPI.readLibraryThumbnail(id, { signal });
+      if (!result?.blob || result.blob.size > 512 * 1024 || signal.aborted || epoch !== imageEpoch) return '';
+      const url = URL.createObjectURL(result.blob);
+      imageUrls.set(key, url);
+      while (imageUrls.size > 96) {
+        const oldest = imageUrls.keys().next().value;
+        URL.revokeObjectURL(imageUrls.get(oldest)); imageUrls.delete(oldest);
+      }
       return url;
-    }).catch(() => '').finally(() => imageLoads.delete(id));
-    imageLoads.set(id, request);
-    return request;
+    }).catch(() => '').finally(() => { if (imageLoads.get(key) === request) imageLoads.delete(key); });
+    imageLoads.set(key, request); return request;
+  }
+  function pumpImageQueue() {
+    while (imageActive < 4 && imageQueue.length) {
+      const { node, item, epoch, signal } = imageQueue.shift();
+      if (signal.aborted || !node.isConnected || epoch !== imageEpoch) continue;
+      imageActive++;
+      imageUrlFor(item, signal).then(url => {
+        if (!url || signal.aborted || epoch !== imageEpoch || !node.isConnected) return;
+        const fallback = node.parentElement?.querySelector('[data-library-image-fallback]');
+        node.onload = () => { node.hidden = false; if (fallback) fallback.hidden = true; };
+        node.onerror = () => { node.hidden = true; if (fallback) fallback.hidden = false; };
+        node.src = url;
+      }).finally(() => { imageActive--; pumpImageQueue(); });
+    }
   }
   function hydrateImageThumbnails() {
     if (!root) return;
-    root.querySelectorAll('[data-library-image]').forEach(node => {
-      const id = node.dataset.libraryImage;
-      const item = state.items.find(row => String(row.id) === String(id));
-      if (!item) return;
-      imageUrlFor(item).then(url => {
-        if (url && node.isConnected) {
-          const fallback = node.parentElement?.querySelector('[data-library-image-fallback]');
-          node.onload = () => { node.hidden = false; if (fallback) fallback.hidden = true; };
-          node.onerror = () => { node.hidden = true; if (fallback) fallback.hidden = false; };
-          node.src = url;
-        }
+    const nodes = Array.from(root.querySelectorAll('[data-library-image]'));
+    if (nodes.length === imageNodes.length && nodes.every((node, i) => node === imageNodes[i])) return;
+    resetImageLoading(); imageNodes = nodes;
+    const epoch = imageEpoch, controller = imageController = new AbortController();
+    const items = new Map(state.items.map(item => [String(item.id), item]));
+    const queued = new Set();
+    const enqueue = node => {
+      const item = items.get(String(node.dataset.libraryImage));
+      if (!item || queued.has(node) || controller.signal.aborted) return;
+      queued.add(node); imageQueue.push({ node, item, epoch, signal: controller.signal }); pumpImageQueue();
+    };
+    if (typeof global.IntersectionObserver === 'function') {
+      const targets = new Map(nodes.map(node => [node.parentElement, node]));
+      imageObserver = new global.IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          const node = targets.get(entry.target);
+          if (!node) return;
+          if (entry.isIntersecting) enqueue(node);
+          else {
+            imageQueue = imageQueue.filter(job => job.node !== node);
+            if (!node.getAttribute('src')) queued.delete(node);
+          }
+        });
+      }, { root: null, rootMargin: '96px' });
+      targets.forEach((node, target) => imageObserver.observe(target));
+    } else {
+      // Old embedded browsers still load only the visible viewport.
+      const visible = () => nodes.forEach(node => {
+        const rect = node.parentElement.getBoundingClientRect();
+        if (rect.bottom >= -96 && rect.top <= global.innerHeight + 96) enqueue(node);
       });
-    });
+      root.addEventListener('scroll', visible, true); global.addEventListener('resize', visible);
+      imageScrollCleanup = () => { root.removeEventListener('scroll', visible, true); global.removeEventListener('resize', visible); };
+      visible();
+    }
   }
   /*
    * Source chips and the original-conversation action share one session ID. Explain
@@ -904,28 +947,6 @@
       remoteDot.classList.toggle('is-unavailable', !capability.available);
       remoteDot.title = root.querySelector('[data-library-storage="remote"]').title;
     }
-    const quotaLabel = root.querySelector('[data-library-storage-quota="remote"]');
-    if (quotaLabel) {
-      const capability = state.storageStatus.remote || {};
-      const quota = capability.quota || capability;
-      const quotaBytes = Number(quota.quotaBytes ?? quota.limitBytes);
-      const usedBytes = Number(quota.usedBytes);
-      const remainingBytes = Number(quota.remainingBytes);
-      const quotaReady = !!capability.available && !!capability.connected
-        && Number.isFinite(quotaBytes) && quotaBytes > 0
-        && Number.isFinite(usedBytes) && usedBytes >= 0
-        && Number.isFinite(remainingBytes) && remainingBytes >= 0;
-      quotaLabel.hidden = !quotaReady;
-      if (quotaReady) {
-        quotaLabel.textContent = tx('已用') + ' ' + formatSize(usedBytes) + ' · ' + tx('剩余') + ' ' + formatSize(remainingBytes);
-        quotaLabel.title = tx('远程存储') + ' · ' + formatSize(quotaBytes);
-        quotaLabel.setAttribute('aria-label', quotaLabel.textContent);
-      } else {
-        quotaLabel.textContent = '';
-        quotaLabel.removeAttribute('title');
-        quotaLabel.removeAttribute('aria-label');
-      }
-    }
     root.querySelectorAll('[data-library-view]').forEach(button => { const selected = button.dataset.libraryView === state.view; button.classList.toggle('active', selected); button.setAttribute('aria-pressed', String(selected)); });
     root.querySelectorAll('[data-library-filter-kind]').forEach(button => button.classList.toggle('active', button.dataset.libraryFilterKind === state.filterKind));
     root.querySelector('[data-library-menu-toggle="filter"]').classList.toggle('active', state.filterKind !== 'all');
@@ -1010,9 +1031,16 @@
     hydrateImageThumbnails(); previewPane?.refreshSelection();
   }
   async function loadStorageStatus() {
+    if (statusRequest?.request === storageStatusRequest && statusRequest.epoch === lifecycleEpoch) return statusRequest.promise;
     const request = ++storageStatusRequest;
+    const active = { request, epoch: lifecycleEpoch, promise: null };
+    statusRequest = active;
     state.storageStatusLoading = true;
     render();
+    active.promise = readStorageStatus(request, active);
+    return active.promise;
+  }
+  async function readStorageStatus(request, active) {
     try {
       const result = await global.SoduWorkAPI.getLibraryStorageStatus();
       if (request !== storageStatusRequest) return;
@@ -1036,29 +1064,40 @@
       state.storageStatus.remote = { ...state.storageStatus.remote, available: false, connected: false,
         message: errorText(error, '无法读取远程存储状态，请重试') };
     } finally {
+      if (statusRequest === active) statusRequest = null;
       if (request === storageStatusRequest) { state.storageStatusLoading = false; if (state.storage !== 'local') load(); else render(); }
     }
   }
   async function load() {
-    ensureRoot(); clearTimeout(searchTimer); const request = ++requestId;
-    if (state.storage !== 'local' && state.storageStatusLoading) { state.busy = !hasCurrentSnapshot(); state.error = ''; render(); return; }
+    ensureRoot(); clearTimeout(searchTimer); clearTimeout(libraryRefreshTimer); libraryRefreshTimer = null;
+    const key = filterKey(), epoch = lifecycleEpoch;
+    if (state.storage !== 'local' && state.storageStatusLoading) { requestId++; state.busy = !hasCurrentSnapshot(); state.error = ''; render(); return; }
     if (!storageAvailable()) {
+      requestId++;
       state.busy = false; state.error = storageMessage();
       if (!hasCurrentSnapshot()) { state.folders = []; state.items = []; previewPane?.close(); }
       render(); return;
     }
+    if (listRequest?.key === key && listRequest.epoch === epoch && listRequest.request === requestId) return listRequest.promise;
+    const request = ++requestId;
     const filters = { scope: state.scope, storage: storedBackend(state.folder), query: state.query, folderId: state.folderId };
-    const key = filterKey();
-    state.busy = !hasCurrentSnapshot(); state.error = ''; closeMenus(); render();
+    state.busy = !hasCurrentSnapshot(); state.error = ''; if (state.busy) closeMenus(); render();
+    const active = { key, epoch, request, dirty: false, promise: null };
+    listRequest = active;
+    active.promise = readLibrary(filters, active);
+    return active.promise;
+  }
+  async function readLibrary(filters, active) {
+    const { key, epoch, request } = active;
     try {
       const result = await global.SoduWorkAPI.listLibrary(filters);
-      if (request !== requestId) return;
+      if (request !== requestId || active.dirty) return;
       state.folders = filters.scope === 'trash' ? [] : (result && result.folders || []);
       state.items = result && result.items || []; state.folder = result && result.folder || null;
       state.trashCount = Number(result && result.trashCount || 0);
       loadedFilterKey = key;
     } catch (error) {
-      if (request !== requestId) return;
+      if (request !== requestId || active.dirty) return;
       state.error = isStorageError(error)
         ? errorText(error, '请配置资料库存储环境')
         : Number(error && error.status) === 404
@@ -1067,7 +1106,13 @@
       if (!hasCurrentSnapshot() || [401, 403].includes(Number(error && error.status))) {
         loadedFilterKey = ''; state.folders = []; state.items = [];
       }
-    } finally { if (request === requestId) { state.busy = false; render(); } }
+    } finally {
+      if (listRequest === active) listRequest = null;
+      if (request === requestId) {
+        if (active.dirty && epoch === lifecycleEpoch && key === filterKey() && root?.matches('.show,.workspace-hosted')) await load();
+        else { state.busy = false; render(); }
+      }
+    }
   }
   let receiptNavigation = false;
   async function openLibraryPanel(options) {
@@ -1118,10 +1163,11 @@
   }
   function closeLibraryPanel() {
     requestId++; storageStatusRequest++; lifecycleEpoch++; uploadTarget = null; clearTimeout(searchTimer);
+    clearTimeout(libraryRefreshTimer); libraryRefreshTimer = null; listRequest = null; statusRequest = null;
     shareBusy = false;
     batchBusy = false;
     dialogs.close(); previewPane?.close();
-    imageEpoch += 1; imageLoads.clear(); imageUrls.forEach(url => { try { URL.revokeObjectURL(url); } catch (_) {} }); imageUrls.clear();
+    resetImageLoading(true);
     if (root) { closeMenus(); root.classList.remove('show'); }
   }
   global.addEventListener('soduwork-library-changed', refreshLibrarySnapshot);

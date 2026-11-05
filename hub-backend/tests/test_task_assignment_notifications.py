@@ -324,5 +324,65 @@ class TaskAssignmentNotificationTests(unittest.IsolatedAsyncioTestCase):
                 await engine.dispose()
 
 
+    async def test_conditional_revision_skips_projection_and_is_account_and_folder_scoped(self):
+        await self.assigned()
+        initial = await mate_messages.list_for(self.session, self.recipient)
+        with patch.object(mate_messages, "public", side_effect=AssertionError("unchanged rows must not be projected")):
+            unchanged = await mate_messages.list_for(self.session, self.recipient, if_revision=initial["revision"])
+        self.assertTrue(unchanged["notModified"])
+        self.assertEqual(unchanged["items"], [])
+        other = await mate_messages.list_for(self.session, self.other, if_revision=initial["revision"])
+        sent = await mate_messages.list_for(self.session, self.recipient, "sent", if_revision=initial["revision"])
+        self.assertNotIn("notModified", other)
+        self.assertNotIn("notModified", sent)
+        self.assertEqual(other["items"], [])
+        # Verify the HTTP handler forwards the optional revision as well.
+        response = await api.list_mate_messages(client=self.recipient, session=self.session, ifRevision=initial["revision"])
+        self.assertTrue(response["notModified"])
+
+    async def test_old_message_receipts_invalidate_both_sender_and_recipient_revisions(self):
+        await self.assigned("older")
+        old = (await self.received())[0]
+        await self.assigned("newer")
+        received = await mate_messages.list_for(self.session, self.recipient)
+        sent = await mate_messages.list_for(self.session, self.sender, "sent")
+        for acknowledge in (mate_messages.mark_delivered, mate_messages.mark_read):
+            await acknowledge(self.session, self.recipient, old["id"])
+            next_received = await mate_messages.list_for(self.session, self.recipient, if_revision=received["revision"])
+            next_sent = await mate_messages.list_for(self.session, self.sender, "sent", if_revision=sent["revision"])
+            self.assertNotIn("notModified", next_received)
+            self.assertNotIn("notModified", next_sent)
+            self.assertNotEqual(next_received["revision"], received["revision"])
+            self.assertNotEqual(next_sent["revision"], sent["revision"])
+            received, sent = next_received, next_sent
+        await mate_messages.mark_read(self.session, self.recipient, old["id"])
+        unchanged = await mate_messages.list_for(self.session, self.sender, "sent", if_revision=sent["revision"])
+        self.assertTrue(unchanged["notModified"], "replayed acknowledgements must not invalidate the snapshot")
+
+    async def test_pagination_reports_a_changed_final_revision_and_never_skips_remaining_pages(self):
+        await self.assigned("one")
+        await self.assigned("two")
+        first = await mate_messages.list_for(self.session, self.recipient, limit=1)
+        self.assertTrue(first["nextCursor"])
+        await mate_messages.mark_read(self.session, self.recipient, first["items"][0]["id"])
+        final = await mate_messages.list_for(self.session, self.recipient, limit=1,
+                                             before=first["nextCursor"], if_revision=first["revision"])
+        self.assertEqual(len(final["items"]), 1)
+        self.assertNotEqual(final["revision"], first["revision"])
+        self.assertNotIn("notModified", final)
+        await self.assigned("three")
+        fresh = await mate_messages.list_for(self.session, self.recipient, if_revision=final["revision"])
+        self.assertEqual(len(fresh["items"]), 3)
+
+    async def test_revision_periodically_refreshes_derived_names_and_preview_tickets(self):
+        await self.assigned()
+        with patch.object(mate_messages.time, "time", return_value=900000):
+            before = await mate_messages.list_for(self.session, self.recipient)
+        with patch.object(mate_messages.time, "time", return_value=900901):
+            after = await mate_messages.list_for(self.session, self.recipient, if_revision=before["revision"])
+        self.assertNotIn("notModified", after)
+        self.assertNotEqual(before["revision"], after["revision"])
+
+
 if __name__ == "__main__":
     unittest.main()

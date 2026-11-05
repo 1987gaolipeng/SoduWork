@@ -63,6 +63,10 @@ function createZip(root) {
     name: item.name, bytes, st: item.st, compressed: zlib.deflateRawSync(bytes, { level: 6 }),
   }; }));
   if (archive.length > MAX_BYTES) throw new Error("ZIP archive is larger than 24 MB; remove large files");
-  return { data: archive, name: path.basename(base) + ".zip", size: archive.length, files: result.length, total };
+  return { data: archive, name: path.basename(base) + ".zip", size: archive.length, files: result.length, total,
+    website: result.some(file => /(?:^|\/)index\.(?:html?|xhtml)$/i.test(file.name)) };
 }
-module.exports = { createZip, createEntries, collect, MAX_BYTES, MAX_FILES };
+// Keep the synchronous primitive for worker/test callers. Native UI handlers
+// must use the bounded worker so scanning, reads, zlib and CRC stay off-thread.
+function createZipAsync(root, options) { return require('./zip-archive-worker').create(root, options); }
+module.exports = { createZip, createZipAsync, createEntries, collect, MAX_BYTES, MAX_FILES };

@@ -1,12 +1,15 @@
 """Real-time WebSocket delivery using short-lived device sessions. Prefer first-frame
 authentication; accept legacy query credentials only while DEVICE_AUTH_COMPAT is enabled.
 """
+import time
+
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from ..db import SessionLocal
 from ..config import get_settings
 from ..realtime import hub
 from ..services import device_auth
+from ..services import native_discovery
 
 router = APIRouter()
 settings = get_settings()
@@ -66,9 +69,28 @@ async def ws(websocket: WebSocket, device: str, secret: str | None = None,
                 device, str(getattr(c, "app_version", "") or ""), latest)
         except Exception:  # noqa: BLE001  Upgrade-notification failures must not prevent connection.
             pass
+        last_presence = {}
         while True:
-            # Read keepalive messages only to detect disconnects.
-            await websocket.receive_text()
+            raw = await websocket.receive_text()
+            discovery_request = native_discovery.heartbeat_request(raw)
+            if discovery_request is None:
+                continue
+            # The socket's authenticated binding is the only source of device
+            # and account identity. Client fields cannot select another target.
+            now = time.monotonic()
+            protocol = discovery_request["protocol"]
+            if now - last_presence.get(protocol, -float("inf")) < 10:
+                continue
+            last_presence[protocol] = now
+            try:
+                accepted_presence = await native_discovery.heartbeat(raw, device, c.user_ref, c.auth_version)
+            except native_discovery.PresenceUnavailable:
+                accepted_presence = False
+            if accepted_presence:
+                confirmation = {"type": "native-discovery-ready", "protocol": protocol}
+                if protocol == 2:
+                    confirmation["topics"] = await native_discovery.confirmed_topics(discovery_request["topics"])
+                await websocket.send_json(confirmation)
     except WebSocketDisconnect:
         pass
     except Exception:  # noqa: BLE001 - a broken peer must still be unregistered

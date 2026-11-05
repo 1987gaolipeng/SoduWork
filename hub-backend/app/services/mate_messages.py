@@ -1,8 +1,11 @@
 from datetime import datetime, timezone
 from urllib.parse import urlparse, quote
 import ipaddress
+import hashlib
+import json
 import logging
 import re
+import time
 import uuid
 
 from fastapi import HTTPException
@@ -125,12 +128,33 @@ async def create(session: AsyncSession, sender, recipient, payload, text, attach
     return row
 
 
-async def list_for(session: AsyncSession, client, folder="received", limit=100, before=""):
+async def _list_revision(session, user_id, side, column):
+    # Message bodies are immutable; delivery/read timestamps only transition
+    # from NULL to a value. Counts therefore detect even an update to an old
+    # row (MAX(updated_at) alone would miss same-timestamp/late-commit writes).
+    # This is a conditional snapshot, NOT an incremental time watermark.
+    stats = (await session.execute(select(
+        func.count(), func.max(models.MateMessage.id),
+        func.max(models.MateMessage.created_at), func.max(models.MateMessage.updated_at),
+        func.count(models.MateMessage.delivered_at), func.count(models.MateMessage.read_at),
+        func.max(models.MateMessage.delivered_at), func.max(models.MateMessage.read_at),
+    ).where(column == user_id))).one()
+    # Periodically refresh derived names and 24-hour website preview tickets.
+    payload = ["v1", user_id, side, int(time.time() // 900), *stats]
+    return hashlib.sha256(json.dumps(payload, default=str, separators=(",", ":")).encode()).hexdigest()
+
+
+async def list_for(session: AsyncSession, client, folder="received", limit=100, before="", if_revision=""):
     me = await session.get(models.User, client.user_ref) if client.user_ref else None
-    if me is None or not me.is_active:
+    if me is None or not me.is_active or me.account_deleted_at:
         return {"ok": False, "items": [], "nextCursor": ""}
     side = str(folder or "received").lower()
     column = models.MateMessage.sender_id if side == "sent" else models.MateMessage.recipient_id
+    side = "sent" if side == "sent" else "received"
+    revision = await _list_revision(session, me.id, side, column) if not before else ""
+    if revision and if_revision == revision:
+        return {"ok": True, "folder": side, "items": [], "nextCursor": "",
+                "notModified": True, "revision": revision}
     query = select(models.MateMessage).where(column == me.id)
     if before:
         cursor = (await session.execute(select(models.MateMessage).where(
@@ -144,6 +168,10 @@ async def list_for(session: AsyncSession, client, folder="received", limit=100, 
         models.MateMessage.created_at.desc(), models.MateMessage.id.desc()).limit(size + 1))).scalars())
     more = len(rows) > size
     rows = rows[:size]
+    # Only the first and final pages need a snapshot check. The client must
+    # not cache a revision if a commit occurs anywhere during pagination.
+    if before and not more:
+        revision = await _list_revision(session, me.id, side, column)
     unread = await session.scalar(select(func.count()).select_from(models.MateMessage).where(
         models.MateMessage.recipient_id == me.id,
         models.MateMessage.read_at.is_(None),
@@ -151,8 +179,10 @@ async def list_for(session: AsyncSession, client, folder="received", limit=100, 
     ids = {x.sender_id for x in rows} | {x.recipient_id for x in rows}
     users = {}
     if ids:
-        users = {u.id: u for u in (await session.execute(select(models.User).where(models.User.id.in_(ids)))).scalars().all()}
-    return {"ok": True, "folder": "sent" if side == "sent" else "received",
+        users = {u.id: u for u in (await session.execute(select(
+            models.User.id, models.User.display_name, models.User.username
+        ).where(models.User.id.in_(ids)))).all()}
+    return {"ok": True, "folder": side, "revision": revision,
             "nextCursor": rows[-1].id if more else "",
             "unreadCount": int(unread or 0),
             "items": [public(row, users.get(row.sender_id), users.get(row.recipient_id)) for row in rows]}

@@ -9,10 +9,10 @@ import os
 import re
 import tempfile
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
@@ -22,7 +22,7 @@ from ..db import get_session
 from ..deps import current_client
 from ..library_models import LibraryFolder, LibraryItem
 from ..models import Client
-from ..services import library_archive, library_conversation_save, library_formats, library_names, library_preview, library_storage
+from ..services import library_read_cache, library_archive, library_conversation_save, library_formats, library_names, library_preview, library_storage
 
 router = APIRouter(prefix="/api/v1/library", tags=["library"])
 _KINDS = {"note", "image", "document", "spreadsheet", "presentation", "file"}
@@ -333,8 +333,12 @@ async def library_storage_status(
     session: AsyncSession = Depends(get_session),
 ):
     """Return storage capability and the current user's remote space usage."""
+    owner = _owner_key(client)
+    # Authentication has completed. Do not retain its read transaction while
+    # waiting on an external storage service. No pending writes exist here.
+    await session.rollback()
     try:
-        payload = await asyncio.to_thread(library_storage.status)
+        payload = await library_read_cache.storage_status()
     except Exception as exc:  # noqa: BLE001 - keep a machine-readable boundary
         raise _storage_http_error(exc) from exc
 
@@ -350,7 +354,7 @@ async def library_storage_status(
             try:
                 used = await session.scalar(
                     select(func.coalesce(func.sum(LibraryItem.size), 0)).where(
-                        LibraryItem.owner_key == _owner_key(client),
+                        LibraryItem.owner_key == owner,
                         LibraryItem.backend == backend,
                     )
                 )
@@ -576,8 +580,13 @@ async def list_library(scope: str = Query("recommended"), query: str = Query("")
     # empty list while MinIO is missing makes an operational failure look like
     # a valid empty library and prevents the user from fixing the deployment.
     backend_filter = _select_storage(storage)
-    await _ensure_storage(backend_filter)
     owner = _owner_key(client)
+    await session.rollback()
+    try:
+        await library_read_cache.ensure_ready(backend_filter,
+            lambda: _storage_call("ensure_ready", backend=backend_filter))
+    except Exception as exc:
+        raise _storage_http_error(exc) from exc
     scope = scope if scope in _SCOPES else "recommended"
     # Collection tabs span all folders. Only tree views use the current folder;
     # clients enter a folder by switching to the "all" scope.
@@ -924,6 +933,8 @@ async def update_library_item(item_id: str, body: dict = Body(default_factory=di
 async def _update_library_item(item_id, body, client, session):
     owner = _owner_key(client)
     row = await _owned_item(session, owner, item_id)
+    if "expectedUpdatedAt" in body and body["expectedUpdatedAt"] != _item_api(row)["updatedAt"]:
+        raise HTTPException(409, "资料已在其他地方修改，请重新打开后核对；未覆盖原内容")
     _validate_metadata(body)
     if isinstance((row.extra or {}).get("soduWorkDelivery"), dict) and any(
             key in body for key in ("content", "extra", "storage", "backend")):
@@ -992,6 +1003,14 @@ async def _update_library_item(item_id, body, client, session):
         if "soduWorkSource" in (row.extra or {}) and "soduWorkSource" not in replacement_extra:
             replacement_extra["soduWorkSource"] = row.extra["soduWorkSource"]
         row.extra = replacement_extra
+    # SQLite's SQL current_timestamp is second-granular; consecutive edits must
+    # receive distinct revisions while the existing owner/item lock is held.
+    if session.is_modified(row) or replacement is not None:
+        previous = row.updated_at
+        if previous is not None and previous.tzinfo is None:
+            previous = previous.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        row.updated_at = max(now, previous + timedelta(microseconds=1)) if previous else now
     try:
         await session.commit()
     except Exception:
@@ -1061,6 +1080,10 @@ async def _attach_library_source(session, owner, item_id, source):
 @router.get("/items/{item_id}/content")
 async def read_library_content(item_id: str, preview: bool = Query(False), client: Client = Depends(current_client), session: AsyncSession = Depends(get_session)):
     row = await _owned_item(session, _owner_key(client), item_id)
+    # Keep the authorized metadata snapshot while releasing the DB connection
+    # before potentially slow remote I/O. Rollback must not expire that snapshot.
+    session.expunge(row)
+    await session.rollback()
     try:
         result = await library_preview.read_item(row, _storage_call, _item_backend(row), preview=preview)
     except HTTPException:
@@ -1077,6 +1100,8 @@ async def read_library_content(item_id: str, preview: bool = Query(False), clien
 @router.get("/items/{item_id}/archive")
 async def list_library_archive(item_id: str, client: Client = Depends(current_client), session: AsyncSession = Depends(get_session)):
     row = await _owned_item(session, _owner_key(client), item_id)
+    session.expunge(row)
+    await session.rollback()
     try:
         archive = await library_archive.read_item(row, _storage_call, _item_backend(row))
     except library_storage.LibraryStorageError as exc:
@@ -1089,6 +1114,8 @@ async def read_library_archive_file(item_id: str, path: str = Query(..., min_len
                                     preview: bool = Query(False), client: Client = Depends(current_client),
                                     session: AsyncSession = Depends(get_session)):
     row = await _owned_item(session, _owner_key(client), item_id)
+    session.expunge(row)
+    await session.rollback()
     try:
         result = await library_archive.read_item(row, _storage_call, _item_backend(row), member=path, preview=preview)
     except library_storage.LibraryStorageError as exc:
@@ -1098,6 +1125,29 @@ async def read_library_archive_file(item_id: str, path: str = Query(..., min_len
     from .deliveries import _download
     entry, content = result
     return _download(content, entry["filename"], entry["contentType"])
+
+
+@router.get("/items/{item_id}/thumbnail")
+async def thumbnail_library_item(item_id: str, client: Client = Depends(current_client), session: AsyncSession = Depends(get_session)):
+    from ..services import library_thumbnail
+    owner = _owner_key(client)
+    row = await _owned_item(session, owner, item_id)
+    if row.kind != "image" and not str(row.content_type or "").startswith("image/"):
+        raise HTTPException(415, "此资料不支持图片缩略图")
+    key, backend = row.storage_key, _item_backend(row)
+    cache_key = (library_read_cache.configuration_key(), owner, row.id, key, backend,
+                 str(row.updated_at), row.size)
+    if int(row.size or 0) > library_thumbnail.MAX_SOURCE:
+        raise HTTPException(413, "图片过大，请打开原文件查看")
+    await session.rollback()
+    try:
+        data = await library_thumbnail.cache.get(cache_key,
+            lambda: library_thumbnail.render(lambda: _storage_call("open_stream", key, backend=backend)),
+            ttl=30, size=len)
+    except Exception as exc:
+        raise _storage_http_error(exc) from exc
+    return Response(data, media_type="image/png", headers={
+        "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
 
 
 @router.get("/items/{item_id}/download")

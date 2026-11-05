@@ -33,7 +33,8 @@ if (typeof electron === 'string') {
     await win.loadFile(path.join(__dirname, 'fixtures/library.html'));
     await js(`window.calls=[];window.notices=[];window.batchFixture=false;window.batchCopyFail=false;window.fixtureStatus={storage:{local:{available:true},remote:{backend:'nfs',configured:true,available:true,connected:true,quotaBytes:1073741824,usedBytes:123,remainingBytes:1073741701},nfs:{configured:true,available:true},minio:{configured:false,available:false}}};
       window.petSay=m=>notices.push(m);window.waitList=false;window.releaseList=null;window.waitUpload=false;window.releaseUpload=null;
-      window.SoduWorkAPI={taskStorageKey:()=> 'storage-fixture',getLibraryStorageStatus:async()=>fixtureStatus,
+      window.statusCalls=0;
+      window.SoduWorkAPI={taskStorageKey:()=> 'storage-fixture',getLibraryStorageStatus:async()=>{statusCalls++;return fixtureStatus;},
         listLibrary:async filters=>{calls.push({op:'list',...filters});const batchItems=window.batchFixture&&filters.storage==='local'?[{id:'local-batch-a',title:'batch-a.txt',filename:'batch-a.txt',kind:'document',backend:'local',size:3},{id:'local-batch-b',title:'batch-b.txt',filename:'batch-b.txt',kind:'document',backend:'local',size:4}]:[{id:filters.storage==='local'?'local-fixture':'file-'+filters.storage,title:'fixture.txt',filename:'fixture.txt',kind:'document',backend:filters.storage,size:7}];const result={items:filters.folderId?[]:batchItems,folders:filters.folderId?[]:[{id:'folder-'+filters.storage,name:'目录',backend:filters.storage}],folder:filters.folderId?{id:filters.folderId,name:'目录',backend:filters.storage}:null,trashCount:1};if(waitList){waitList=false;await new Promise(r=>releaseList=r);}return result;},
         uploadLibraryFile:async(file,folderId,storage)=>{calls.push({op:'upload',name:file.name,folderId,storage});if(waitUpload)await new Promise(r=>releaseUpload=r);return{ok:true};},
         createLibraryFolder:async(name,parentId,storage)=>{calls.push({op:'folder',name,parentId,storage});return{folder:{id:'new-'+storage,backend:storage}};},
@@ -154,7 +155,7 @@ if (typeof electron === 'string') {
     assert.equal(await js('document.querySelector("[data-library-storage=remote]").getAttribute("aria-selected")'), 'true');
     assert.equal(await js('document.querySelector("[data-library-menu-toggle=create]").disabled'), true);
     assert.match(await js('document.querySelector("[data-library-state]").textContent'), /NFS mount unavailable/);
-    assert.equal(await js('document.querySelector("[data-library-storage-quota=remote]").hidden'), true);
+    assert.equal(await js('document.querySelector("[data-library-storage-quota=remote]")'), null);
     // The 2026-10-22 cache contract preserves the last successful view during
     // outages. An outage must still block writes and cannot pick another backend.
     assert.deepEqual(await js('[...document.querySelectorAll("[data-library-file-preview]")].map(node=>node.dataset.libraryFilePreview)'), ['file-nfs']);

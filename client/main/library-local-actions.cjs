@@ -126,10 +126,13 @@ async function execute(store, index, action, payload) {
     const scope = ['all', 'folders', 'favorites', 'images', 'trash', 'recommended'].includes(body.scope) ? body.scope : 'recommended';
     const current = ['all', 'folders'].includes(scope) ? folder(index, body.folderId) : null;
     const query = String(body.query || '').trim().toLowerCase();
+    const itemCounts = new Map(), childCounts = new Map();
+    for (const row of index.items) if (!row.deletedAt) itemCounts.set(row.folderId, (itemCounts.get(row.folderId) || 0) + 1);
+    for (const row of index.folders) childCounts.set(row.parentId, (childCounts.get(row.parentId) || 0) + 1);
     const folders = ['all', 'folders', 'favorites'].includes(scope) ? index.folders.filter(x =>
       (scope === 'favorites' ? x.favorite : x.parentId === (current?.id || null)) && x.name.toLowerCase().includes(query)).map(x => ({ ...publicRow(x),
-        itemCount: index.items.filter(i => i.folderId === x.id && !i.deletedAt).length,
-        childCount: index.folders.filter(i => i.parentId === x.id).length })).sort((a, b) => a.name.localeCompare(b.name)) : [];
+        itemCount: itemCounts.get(x.id) || 0,
+        childCount: childCounts.get(x.id) || 0 })).sort((a, b) => a.name.localeCompare(b.name)) : [];
     let items = scope === 'folders' ? [] : index.items.filter(x => Boolean(x.deletedAt) === (scope === 'trash') &&
       (!['all', 'folders'].includes(scope) || x.folderId === (current?.id || null)) &&
       (scope !== 'favorites' || x.favorite) && (scope !== 'images' || x.kind === 'image') &&
@@ -217,6 +220,10 @@ async function execute(store, index, action, payload) {
     return { ok: true, succeeded, failed };
   }
   const row = item(index, payload.id, action === 'restoreItem');
+  if (action === 'thumbnail') {
+    if (row.kind !== 'image' && !/^image\//.test(row.contentType || '')) throw error('LOCAL_LIBRARY_FORMAT_UNSUPPORTED', '此资料不支持图片缩略图');
+    return { target: await store.locate(row) };
+  }
   if (action === 'readBinary' || action === 'readContent') {
     const bytes = await store.read(row);
     if (action === 'readBinary') return { ok: true, data: bytes.toString('base64'), name: visibleFilename(row), mimeType: row.contentType, size: bytes.length, item: publicRow(row) };

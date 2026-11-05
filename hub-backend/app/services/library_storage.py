@@ -252,8 +252,8 @@ def ensure_ready(backend=None):
     return True
 
 
-def status():
-    """Return safe capabilities; only the selected remote provider is probed."""
+def status_plan():
+    """Build capabilities without I/O; callers must resolve the listed probes."""
     def record(backend, *, state, configured, available, code="", message=""):
         return {
             "backend": backend,
@@ -266,14 +266,7 @@ def status():
             "message": str(message or ""),
         }
 
-    try:
-        ensure_ready("local")
-        local = record("local", state="available", configured=True, available=True)
-    except Exception as exc:  # noqa: BLE001 - health is a safe boundary
-        error = _storage_error(exc)
-        local = record("local", state="unavailable", configured=True, available=False,
-                       code=error.code, message="本地存储暂不可用")
-
+    local = record("local", state="available", configured=True, available=True)
     storage = {"local": local}
     for backend in ("minio", "nfs"):
         try:
@@ -300,13 +293,7 @@ def status():
         remote = record("", state="disabled", configured=False, available=False,
                         code=exc.code, message=exc.message)
     else:
-        try:
-            ensure_ready(selected)
-            remote = record(selected, state="available", configured=True, available=True)
-        except Exception as exc:
-            error = _storage_error(exc)
-            remote = record(selected, state="unavailable", configured=True, available=False,
-                            code=error.code, message=error.message if error.code.startswith("LIBRARY_NFS_") else "远程存储暂不可用")
+        remote = record(selected, state="available", configured=True, available=True)
         storage[selected] = remote
     storage["remote"] = remote
 
@@ -316,8 +303,33 @@ def status():
         default = "local"
     # Keep the capability map nested for new clients while retaining the flat
     # aliases consumed by older desktop builds during a rolling upgrade.
-    return {"ok": True, "default": default, "storage": storage,
-            "remoteOrder": order, "remoteBackend": selected, **storage}
+    payload = {"ok": True, "default": default, "storage": storage,
+               "remoteOrder": order, "remoteBackend": selected, **storage}
+    return payload, ["local", selected] if selected else ["local"]
+
+
+def apply_status_failure(payload, backend, exc):
+    """Keep public health errors safe without changing readiness error semantics."""
+    error = _storage_error(exc)
+    record = {**payload["storage"][backend], "state": "unavailable",
+              "available": False, "enabled": False, "connected": False,
+              "code": error.code,
+              "message": ("本地存储暂不可用" if backend == "local" else
+                          error.message if error.code.startswith("LIBRARY_NFS_") else "远程存储暂不可用")}
+    payload["storage"][backend] = payload[backend] = record
+    if backend == payload["remoteBackend"]:
+        payload["storage"]["remote"] = payload["remote"] = record
+
+
+def status():
+    """Return safe capabilities; only the selected remote provider is probed."""
+    payload, backends = status_plan()
+    for backend in backends:
+        try:
+            ensure_ready(backend)
+        except Exception as exc:  # noqa: BLE001 - health is a safe boundary
+            apply_status_failure(payload, backend, exc)
+    return payload
 
 def bucket_name(backend=None):
     return configuration(backend)[3]

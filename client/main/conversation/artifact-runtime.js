@@ -430,9 +430,9 @@ async function action(session, ref, artifactId, rawAction, deps) {
   }
   if (actionName === 'share-related' && found.item.kind === 'website') {
     try {
-      const archive = shareArchive.createZip(path.dirname(found.path));
+      const archive = await shareArchive.createZipAsync(path.dirname(found.path));
       return { ok: true, name: archive.name, size: archive.size, at: Number(found.item.at || 0),
-        data: archive.data.toString('base64'), website: true,
+        data: archive.base64, website: true,
         preview: { status: 'zip_only', reason: 'Website assets are packaged for safe preview in SoduWork' } };
     } catch (error) {
       return { ok: false, reason: String(error && error.message || 'Website packaging failed') };

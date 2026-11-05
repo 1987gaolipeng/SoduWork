@@ -30,5 +30,9 @@ async def operations_insights(session: AsyncSession = Depends(get_session)):
     """Read-only operational analytics for adoption, plugin usage, automation health, and outputs.
 
     """
-    from ..services import operations_insights
-    return await operations_insights.insights(session)
+    from ..services.operations_insights_cache import get_insights
+    bind = session.bind
+    # Authentication already succeeded. Return its read connection before waiting
+    # on another reader's build; the shared task owns a separate session.
+    await session.rollback()
+    return await get_insights(bind)

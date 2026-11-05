@@ -33,7 +33,7 @@ if (typeof electron === 'string') {
       if (path.basename(fileURLToPath(request.url.split('?')[0])) !== 'desk.html') return net.fetch(request.url, { bypassCustomProtocolHandlers: true });
       const mock = fs.readFileSync(path.join(__dirname, 'fixtures/page-audit-api.js'), 'utf8');
       const html = fs.readFileSync(path.join(client, 'desk.html'), 'utf8')
-        .replace('<head>', '<head><script>' + mock + '\nsoduWorkAPI.workPreview.onComposerRefresh=()=>()=>{};</script>')
+        .replace('<head>', '<head><script>' + mock + '\nsoduWorkAPI.workPreview.onComposerRefresh=()=>()=>{};soduWorkAPI.distributionInfo=()=>({hubOrigin:"http://127.0.0.1:19999"});soduWorkAPI.readAloud={onStop:()=>()=>{}};</script>')
         .replace('<script src="desk-boot.js"></script>', '<script>fixtureInstallApi();</script><script src="desk-boot.js"></script>');
       return new Response(html, { headers: { 'content-type': 'text/html;charset=utf-8' } });
     });
@@ -75,6 +75,7 @@ if (typeof electron === 'string') {
     await check('capability refresh failure preserves content with retry', 'capShell.isConnected && !!document.querySelector("#capRefreshNotice button")');
 
     await js(`window.libraryRows={items:[{id:'file-one',title:'Fixture document',kind:'document',storage:'local',filename:'fixture.md',updatedAt:1720000000000}],folders:[]};
+      libraryRows.items.push(...Array.from({length:40},(_,i)=>({...libraryRows.items[0],id:'scroll-'+i,title:'Scroll fixture '+i})));
       fixtureOverrides.listLibrary=async()=>structuredClone(libraryRows);WorkspaceHost.open('library',{});void 0;`);
     await until('document.querySelector("[data-library-content]")?.textContent.includes("Fixture document")');
     await js(`window.libraryRow=document.querySelector('[data-library-content]').firstElementChild;window.pendingLibrary=[];
@@ -83,11 +84,49 @@ if (typeof electron === 'string') {
     await check('library reopen keeps loaded rows', 'libraryRow.isConnected && !document.querySelector("[data-library-content]").hidden');
     await js('pendingLibrary.shift().resolve(structuredClone(libraryRows));void 0;'); await wait(50);
     await check('unchanged library rows keep DOM identity', 'libraryRow === document.querySelector("[data-library-content]").firstElementChild');
+    await js(`window.libraryListCalls=0;window.libraryStatusCalls=0;window.pendingStorage=[];
+      fixtureOverrides.listLibrary=()=>{libraryListCalls++;return new Promise((resolve,reject)=>pendingLibrary.push({resolve,reject}));};
+      fixtureOverrides.getLibraryStorageStatus=()=>{libraryStatusCalls++;return new Promise(resolve=>pendingStorage.push(resolve));};
+      window.librarySearch=document.querySelector('[data-library-search]');librarySearch.focus({preventScroll:true});
+      document.querySelector('#libraryPanel').scrollTop=180;window.libraryScroll=document.querySelector('#libraryPanel').scrollTop;
+      window.libraryFirst=openLibraryPanel();window.librarySecond=openLibraryPanel();void 0;`);
+    await check('concurrent library entry shares one list and one status request', 'libraryListCalls===1 && libraryStatusCalls===1 && pendingLibrary.length===1');
+    await check('background library validation preserves input focus, scroll and row identity', 'document.activeElement===librarySearch && libraryScroll>0 && document.querySelector("#libraryPanel").scrollTop===libraryScroll && libraryRow===document.querySelector("[data-library-content]").firstElementChild');
+    await js(`pendingStorage.shift()({local:{available:true}});pendingLibrary.shift().resolve(structuredClone(libraryRows));Promise.all([libraryFirst,librarySecond]);`);
+    await js(`fixtureOverrides.getLibraryStorageStatus=async()=>({local:{available:true}});
+      document.querySelector('[data-library-select="file-one"]').click();window.libraryRow=document.querySelector('[data-library-content]').firstElementChild;
+      librarySearch.focus();libraryListCalls=0;
+      dispatchEvent(new Event('soduwork-library-changed'));dispatchEvent(new Event('soduwork-library-changed'));
+      dispatchEvent(new StorageEvent('storage',{key:'soduwork-library-change',newValue:'fixture-change'}));void 0;`);
+    await until('pendingLibrary.length===1');
+    await check('one notification burst starts one background read without clearing selection', 'libraryListCalls===1 && libraryRow.isConnected && document.querySelector("[data-library-select=file-one]").checked');
+    await js(`dispatchEvent(new Event('soduwork-library-changed'));void 0;`); await wait(70);
+    await check('a change during a slow read does not start a parallel list', 'libraryListCalls===1 && pendingLibrary.length===1');
+    await js('pendingLibrary.shift().resolve({items:[],folders:[]});void 0;');
+    await until('pendingLibrary.length===1 && libraryListCalls===2');
+    await check('invalidated responses do not clear selection before the trailing read', 'libraryRow.isConnected && document.querySelector("[data-library-select=file-one]").checked && document.activeElement===librarySearch');
+    await js('pendingLibrary.shift().resolve(structuredClone(libraryRows));void 0;'); await wait(70);
+    await check('last notification is revalidated exactly once and unchanged rows retain identity', 'libraryListCalls===2 && pendingLibrary.length===0 && libraryRow===document.querySelector("[data-library-content]").firstElementChild');
     await js('openLibraryPanel();void 0;'); await until('pendingLibrary.length>0');
     await js('pendingLibrary.shift().reject(Error("offline"));void 0;'); await wait(50);
     await check('library outage preserves rows and exposes retry', 'libraryRow.isConnected && !document.querySelector("[data-library-content]").hidden && !!document.querySelector("[data-library-retry]")');
+    await js(`openLibraryPanel();dispatchEvent(new Event('soduwork-library-changed'));closeLibraryPanel();
+      window.callsBeforeClose=libraryListCalls;pendingLibrary.shift().resolve({items:[{id:'closed-result',title:'Late closed result'}],folders:[]});void 0;`); await wait(80);
+    await check('closing cancels a scheduled refresh and fences the pending result', 'libraryListCalls===callsBeforeClose && !document.querySelector("[data-library-content]").textContent.includes("Late closed result")');
+    await js('openLibraryPanel();void 0;'); await until('pendingLibrary.length===1');
+    await js('pendingLibrary.shift().resolve(structuredClone(libraryRows));void 0;'); await wait(30);
+    await js(`librarySearch.value='older query';librarySearch.dispatchEvent(new Event('input',{bubbles:true}));void 0;`);
+    await until('pendingLibrary.length===1');
+    await js(`librarySearch.value='latest query';librarySearch.dispatchEvent(new Event('input',{bubbles:true}));void 0;`);
+    await until('pendingLibrary.length===2');
+    await js('pendingLibrary[1].resolve(structuredClone(libraryRows));void 0;'); await wait(20);
+    await js('pendingLibrary.shift().resolve({items:[{id:"old-query",title:"Outdated search result"}],folders:[]});pendingLibrary.shift();void 0;'); await wait(30);
+    await check('a late search response cannot replace the latest filter or query', 'librarySearch.value==="latest query" && !document.querySelector("[data-library-content]").textContent.includes("Outdated search result")');
+    await js('window.libraryRow=document.querySelector("[data-library-content]").firstElementChild;openLibraryPanel();void 0;'); await until('pendingLibrary.length===1');
     await js('fixtureOverrides.listLibrary=async()=>({items:[],folders:[]});fixtureOwner="second-owner";dispatchEvent(new Event("soduwork-data-scope-changed"));void 0;');
+    await js('pendingLibrary.shift().resolve(structuredClone(libraryRows));void 0;'); await wait(30);
     await check('identity change removes old library and capability data', '!libraryRow.isConnected && !capShell.isConnected');
+    report.rendererErrors = await js('fixtureErrors');
     await check('renderer has no unhandled errors', 'fixtureErrors.length===0');
     report.ok = true;
   }).catch(error => { report.error = String(error.stack || error); process.exitCode = 1; }).finally(() => {

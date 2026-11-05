@@ -359,9 +359,9 @@ async def message_teammate(
 @router.get("/team/messages")
 async def list_mate_messages(folder: str = "received", limit: int = 100, before: str = "",
                              client: Client = Depends(current_client),
-                             session: AsyncSession = Depends(get_session)):
+                             session: AsyncSession = Depends(get_session), ifRevision: str = ""):
     from ..services import mate_messages
-    return await mate_messages.list_for(session, client, folder, limit, before)
+    return await mate_messages.list_for(session, client, folder, limit, before, ifRevision)
 
 
 @router.get("/team/messages/{message_id}/preview/{asset_path:path}")

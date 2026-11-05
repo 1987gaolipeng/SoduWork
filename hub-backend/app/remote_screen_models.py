@@ -18,6 +18,7 @@ class RemoteScreenGrant(Base):
         Index("ix_remote_screen_grant_viewer_state", "viewer_client_id", "state"),
         Index("ix_remote_screen_grant_source_state", "source_client_id", "state"),
         Index("ix_remote_screen_grant_expires", "expires_at"),
+        Index("ix_remote_screen_source_state_expiry", "source_client_id", "state", "expires_at"),
     )
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True, default=_uuid)

@@ -2041,6 +2041,39 @@
         return parseJSON(txt);
       } catch (e) { markFromError(e); throw e; }
     },
+    async readLibraryThumbnail(id, options) {
+      const requestScope = taskStorageKey('ops');
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      if (options?.signal?.aborted) abort();
+      options?.signal?.addEventListener('abort', abort, { once: true });
+      const timer = setTimeout(abort, 30000);
+      let reader;
+      try {
+        const res = await fetch(apiUrl('/library/items/' + encodeURIComponent(id) + '/thumbnail'), {
+          headers: authHeaders(false), signal: controller.signal, cache: 'no-store'
+        });
+        assertLibraryScope(requestScope);
+        if (!res.ok) { await res.body?.cancel(); return null; }
+        if (Number(res.headers.get('content-length') || 0) > 512 * 1024) throw Error('LIBRARY_THUMBNAIL_TOO_LARGE');
+        reader = res.body?.getReader();
+        if (!reader) return null;
+        const chunks = []; let size = 0;
+        for (;;) {
+          const part = await reader.read(); assertLibraryScope(requestScope);
+          if (part.done) break;
+          size += part.value.byteLength;
+          if (size > 512 * 1024) throw Error('LIBRARY_THUMBNAIL_TOO_LARGE');
+          chunks.push(part.value);
+        }
+        return { blob: new Blob(chunks, { type: 'image/png' }) };
+      } finally {
+        try { await reader?.cancel(); } catch (_) {}
+        reader?.releaseLock(); clearTimeout(timer);
+        options?.signal?.removeEventListener('abort', abort);
+        controller.abort();
+      }
+    },
     async readLibraryBinary(id) {
       var requestScope = taskStorageKey('ops');
       try {

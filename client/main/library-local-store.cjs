@@ -6,6 +6,7 @@ const io = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const replacement = require('./verified-file-replace.cjs');
+const indexCache = require('./library-index-cache.cjs');
 const OWNER = /^[a-f0-9]{32}$/;
 const ITEM = /^local-[a-f0-9-]{36}$/;
 const FOLDER = /^local-folder-[a-f0-9-]{36}$/;
@@ -72,7 +73,7 @@ function create(app, owner, guard, configuredWorkRoot = '') {
     }
     return path.join(root, ...key.split('/'));
   }
-  async function load() {
+  async function load(readOnly = false) {
     guard();
     // Establish and validate every component of the destination before copying
     // legacy data. This prevents a pre-existing junction in the new workspace
@@ -82,15 +83,17 @@ function create(app, owner, guard, configuredWorkRoot = '') {
       try { await io.lstat(indexPath); }
       catch (e) { if (e.code !== 'ENOENT') throw e; await copyLegacyTree(legacyRoot, root, guard); }
     }
-    let content;
+    let content, indexStat;
     try {
-      const stat = await checkedFile(indexPath);
+      const stat = indexStat = await checkedFile(indexPath);
+      const cached = indexCache.get(indexPath, stat);
+      if (cached) return readOnly ? cached : clone(cached);
       if (stat.size > 32 * 1024 * 1024) throw error('LOCAL_LIBRARY_INDEX_CORRUPT', '本机资料索引过大');
       // JSON.stringify() does not write a BOM, but older Windows editors and
       // profile/sync tools may add one to an otherwise valid UTF-8 index. A
       // BOM is an encoding marker, not part of the JSON document.
       content = (await awaited(io.readFile(indexPath, 'utf8'))).replace(/^\uFEFF/, '');
-    } catch (e) { if (e.code === 'ENOENT') return { schema: 1, items: [], folders: [], garbage: [] }; throw e; }
+    } catch (e) { indexCache.remove(indexPath); if (e.code === 'ENOENT') return { schema: 1, items: [], folders: [], garbage: [] }; throw e; }
     let value;
     try {
       value = JSON.parse(content);
@@ -100,9 +103,15 @@ function create(app, owner, guard, configuredWorkRoot = '') {
       for (const row of value.folders) if (!FOLDER.test(row.id)) throw Error();
       for (const key of value.garbage) objectPath(key);
     } catch { throw error('LOCAL_LIBRARY_INDEX_CORRUPT', '本机资料索引损坏；原文件已保留，请勿覆盖索引'); }
+    const currentStat = await checkedFile(indexPath);
+    if (indexCache.signature(indexStat) === indexCache.signature(currentStat)) {
+      indexCache.set(indexPath, currentStat, value);
+      return readOnly ? value : clone(value);
+    }
     return value;
   }
   async function save(index) {
+    indexCache.remove(indexPath);
     guard(); await directories(root); await checkedFile(indexPath, true);
     const temporary = indexPath + '.' + crypto.randomUUID() + '.tmp';
     try {
@@ -174,11 +183,11 @@ function create(app, owner, guard, configuredWorkRoot = '') {
     }
     if (index.garbage.length) { index.garbage = []; await save(index); }
   }
-  async function run(fn) {
+  async function run(fn, { readOnly = false } = {}) {
     const key = root, previous = queues.get(key) || Promise.resolve();
     const pending = previous.catch(() => {}).then(async () => {
       guard();
-      try { return await fn(await load()); }
+      try { return await fn(await load(readOnly)); }
       finally {
         // Cleanup may finish after account switching, but only uses this
         // captured owner's validated paths and the committed reference set.

@@ -7,6 +7,7 @@ import * as jsxRuntime from 'react/jsx-runtime'
 import { transform } from 'esbuild'
 import * as locale from '../../src/i18n.js'
 import * as dialogFocus from '../../src/dialog-focus.js'
+import * as polling from '../../src/polling.js'
 
 let harnessSequence = 0
 
@@ -62,7 +63,7 @@ export async function createComponentHarness(file, { dependencies = {}, exportNa
   // has no DOM, so list refs are inert unless the test supplies its own adapter.
   const viewportHost = { useViewportHeight: () => () => {} }
   const imports = { './i18n.js': localeHost, '../i18n.js': localeHost, './dialog-focus.js': dialogFocus, './select-popover.js': selectPopover, './org-options.js': orgOptions, '../org-options.js': orgOptions,
-    '../viewport-height.js': viewportHost, 'react-dom': { createPortal: (children) => children }, 'react/jsx-runtime': jsxRuntime, ...dependencies, react: hooks }
+    '../viewport-height.js': viewportHost, './polling.js': polling, '../polling.js': polling, 'react-dom': { createPortal: (children) => children }, 'react/jsx-runtime': jsxRuntime, ...dependencies, react: hooks }
   const module = { exports: {} }
   new Function('require', 'module', 'exports', code)((name) => {
     assert.ok(name in imports, `unknown test dependency: ${name}`)

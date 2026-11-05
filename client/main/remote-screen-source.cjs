@@ -7,6 +7,7 @@
  */
 const { desktopCapturer, screen } = require('electron');
 const { fetchWithDeviceAuthRetry } = require('./device-auth-request');
+const { scopeOf } = require('./native-discovery.cjs');
 
 const POLL_MS = 3000;
 const FRAME_MS = 500;
@@ -28,7 +29,7 @@ function responseJson(response) {
   return response.text().then(text => {
     let data = {};
     try { data = text ? JSON.parse(text) : {}; } catch (_) {}
-    if (!response.ok) throw new Error(String(data.detail || data.error || 'remote screen request failed'));
+    if (!response.ok) throw Object.assign(new Error(String(data.detail || data.error || 'remote screen request failed')), { status: response.status });
     return data;
   });
 }
@@ -44,10 +45,14 @@ function create({
   pollMs = POLL_MS,
   frameMs = FRAME_MS,
   logger = console,
+  discovery = require('./native-discovery.cjs'),
+  pollingOptions = {},
+  autoStart = true,
 } = {}) {
   let disposed = false;
-  let pollTimer = null;
-  let polling = false;
+  let polling = null;
+  let lastIdentity = null;
+  const lifecycle = new AbortController();
   const prompts = new Set();
   const streams = new Map();
 
@@ -60,13 +65,25 @@ function create({
   }
 
   async function request(id, identityValue, method, path, body) {
+    await assertIdentity(identityValue);
     const response = await fetch(identityValue, baseUrl(identityValue) + path, {
       method,
       headers: body ? { 'Content-Type': 'application/json' } : undefined,
       body: body ? JSON.stringify(body) : undefined,
       redirect: 'error',
+      signal: AbortSignal.any([lifecycle.signal, AbortSignal.timeout(12000)]),
     });
-    return responseJson(response);
+    const result = await responseJson(response);
+    await assertIdentity(identityValue);
+    return result;
+  }
+
+  async function assertIdentity(value) {
+    const current = await identity();
+    if (disposed || !current?.session || scopeOf(current) !== scopeOf(value)) {
+      stopAll();
+      throw new Error('remote screen identity changed');
+    }
   }
 
   function stopStream(grantId) {
@@ -111,6 +128,7 @@ function create({
       if (disposed || streams.get(stream.grantId) !== stream || stream.socket.readyState !== 1 || inFlight) return;
       inFlight = true;
       try {
+        await assertIdentity(stream.identity);
         const frame = await captureFrame();
         if (disposed || streams.get(stream.grantId) !== stream || stream.socket.readyState !== 1) return;
         const packet = JSON.stringify({ type: 'frame', sequence: ++sequence,
@@ -127,9 +145,9 @@ function create({
   }
 
   function openStream(grant, identityValue) {
-    if (!WebSocketImpl || streams.size >= MAX_ACTIVE || streams.has(grant.id)) return;
+    if (disposed || !WebSocketImpl || streams.size >= MAX_ACTIVE || streams.has(grant.id)) return;
     const socket = new WebSocketImpl(socketUrl(identityValue));
-    const stream = { grantId: grant.id, socket, timer: null, ready: false };
+    const stream = { grantId: grant.id, socket, identity: identityValue, timer: null, ready: false };
     streams.set(grant.id, stream);
     socket.onopen = () => {
       try {
@@ -155,7 +173,7 @@ function create({
   }
 
   async function prompt(grant, identityValue) {
-    if (prompts.has(grant.id) || disposed || streams.size >= MAX_ACTIVE) return;
+    if (prompts.size || disposed || streams.size >= MAX_ACTIVE) return;
     prompts.add(grant.id);
     try {
       const answer = await dialog.showMessageBox({
@@ -168,7 +186,7 @@ function create({
         cancelId: 1,
         noLink: true,
       });
-      if (disposed) return;
+      await assertIdentity(identityValue);
       if (answer.response === 0) {
         const approved = await request(grant.id, identityValue, 'POST', `/api/v1/remote-screen/requests/${encodeURIComponent(grant.id)}/approve`, {});
         if (approved.state === 'active') openStream(approved, identityValue);
@@ -180,12 +198,19 @@ function create({
     } finally { prompts.delete(grant.id); }
   }
 
-  async function poll() {
-    if (polling || disposed) return;
-    polling = true;
+  function poll() {
+    if (disposed) return Promise.resolve();
+    if (polling) return polling;
+    polling = pollOnce().finally(() => { polling = null; });
+    return polling;
+  }
+
+  async function pollOnce() {
     try {
       const current = await identity();
-      if (!current || !current.session || !current.clientId) { stopAll(); return; }
+      if (scopeOf(current) !== scopeOf(lastIdentity)) stopAll();
+      lastIdentity = current;
+      if (!current?.hub || !current.session || !current.clientId) { stopAll(); return { state: 'blocked', scope: scopeOf(current) }; }
       const data = await request('', current, 'GET', '/api/v1/remote-screen/requests');
       const items = Array.isArray(data.items) ? data.items : [];
       const active = new Set(items.map(item => String(item.id || '')));
@@ -194,28 +219,30 @@ function create({
         if (grant.state === 'pending') void prompt(grant, current);
         else if (grant.state === 'active' && !streams.has(grant.id) && streams.size < MAX_ACTIVE) openStream(grant, current);
       }
+      return { state: items.length ? 'active' : 'idle', scope: scopeOf(current) };
     } catch (error) {
       logger.warn?.('[remote-screen] poll failed:', error?.message || error);
-    } finally { polling = false; }
+      return { state: [401, 403].includes(error.status) ? 'blocked' : 'error', scope: scopeOf(lastIdentity) };
+    }
   }
 
-  function schedule() {
-    if (disposed || pollTimer) return;
-    pollTimer = setInterval(() => { void poll(); }, pollMs);
-    pollTimer.unref?.();
-    void poll();
-  }
+  const poller = require('./native-discovery-polling.cjs').create({ ...pollingOptions, tick: poll,
+    baseMs: pollMs, idleMs: () => discovery.confirmed(lastIdentity) ? 60000 : 20000 });
+  const unsubscribe = discovery.register('remote-screen', () => poller.wake());
 
-  if (app?.whenReady) app.whenReady().then(schedule).catch(() => {});
-  else schedule();
+  if (autoStart) {
+    if (app?.whenReady) app.whenReady().then(() => poller.start()).catch(() => {});
+    else poller.start();
+  }
 
   return {
     poll,
     stopAll,
     dispose() {
       disposed = true;
-      if (pollTimer) clearInterval(pollTimer);
-      pollTimer = null;
+      lifecycle.abort();
+      poller.stop();
+      unsubscribe();
       stopAll();
     },
   };

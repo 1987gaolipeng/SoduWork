@@ -5,6 +5,7 @@ import { api } from './api.js'
 import { registerSelectPopover } from './select-popover.js'
 import { matchesOption } from './org-options.js'
 import { registerDialogLayer } from './dialog-focus.js'
+import { createRefreshLoop } from './polling.js'
 
 /* Icons. */
 const P = {
@@ -339,41 +340,56 @@ export function ToastHost() {
 /* Data-loading hook. */
 export function useAsync(fn, opts) {
   const interval = opts && opts.interval
+  const pauseWhenHidden = Boolean(opts && opts.pauseWhenHidden)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const fnRef = useRef(fn)
   const mountedRef = useRef(false)
   const busyRef = useRef(false)
+  const refreshRef = useRef(null)
   fnRef.current = fn
 
   /*
    * Show loading on initial fetch only, serialize requests per source, and avoid state
    * writes after unmount.
    */
-  const run = useCallback(async () => {
+  const run = useCallback(async (isCurrent = () => true) => {
     if (busyRef.current) return
+    const canUpdate = () => mountedRef.current && (typeof isCurrent !== 'function' || isCurrent())
     busyRef.current = true
     try {
       const next = await fnRef.current()
-      if (mountedRef.current) { setData(next); setError(null) }
+      if (canUpdate()) { setData(next); setError(null) }
+      return true
     } catch (e) {
-      if (mountedRef.current) setError(e)
+      if (canUpdate()) setError(e)
+      return false
     } finally {
       busyRef.current = false
-      if (mountedRef.current) setLoading(false)
+      if (canUpdate()) setLoading(false)
     }
   }, [])
   useEffect(() => {
     mountedRef.current = true
+    if (pauseWhenHidden) {
+      const loop = createRefreshLoop(run, { interval })
+      refreshRef.current = loop
+      return () => {
+        mountedRef.current = false
+        loop.stop()
+        if (refreshRef.current === loop) refreshRef.current = null
+      }
+    }
     run()
     const id = interval ? window.setInterval(run, interval) : null
     return () => {
       mountedRef.current = false
       if (id) window.clearInterval(id)
     }
-  }, [run, interval])
-  return { data, loading, error, reload: run }
+  }, [run, interval, pauseWhenHidden])
+  const reload = useCallback(() => refreshRef.current ? refreshRef.current.refresh() : run(), [run])
+  return { data, loading, error, reload }
 }
 const REFRESH_MS = 15000
 /* Live indicator shows automatic refresh activity. */

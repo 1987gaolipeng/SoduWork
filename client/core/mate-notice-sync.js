@@ -2,7 +2,8 @@
    The metadata contains only dismissal markers, never a second message list. */
 (function (global) {
   'use strict';
-  let epoch = 0, requests = new Map(), lastAttempt = 0;
+  let epoch = 0, requests = new Map(), revisions = new Map(), lastAttempt = 0;
+  const markerIndexes = new WeakMap();
   const statusOrder = { accepted: 0, delivered: 1, read: 2 };
   const legacyReceiptKey = /^(mate_receipt_.+)_(accepted|delivered|read)$/;
   const api = () => global.SoduWorkAPI || {};
@@ -33,17 +34,22 @@
   function dismissed(row, meta) {
     // Only dismiss IDs the user actually cleared. Client and server clocks
     // can differ, so legacy clearedAt values must never hide new messages.
-    return folderOf(row) !== 'sent' && Boolean(meta.ids?.includes(row.id) ||
+    return folderOf(row) !== 'sent' && Boolean(hasMarker(meta.ids, row.id) ||
       (row.kind === 'mate_receipt' && hasReceiptMarker(row, meta.ids)));
+  }
+  function hasMarker(markers, id) {
+    if (!Array.isArray(markers)) return false;
+    if (!markerIndexes.has(markers)) markerIndexes.set(markers, new Set(markers));
+    return markerIndexes.get(markers).has(id);
   }
   const receiptMarker = row => 'mate_receipt_' + row.serverMessageId + '@' + row.receiptStatus;
   const receiptMarkers = row => Object.keys(statusOrder).filter(state => statusOrder[state] <= statusOrder[row.receiptStatus])
     .map(receiptStatus => receiptMarker({ ...row, receiptStatus }));
   function hasReceiptMarker(row, markers) {
     // Support legacy highest-phase markers: consuming a terminal phase includes earlier phases without suppressing later transitions.
-    return Boolean(markers?.includes('mate_receipt_' + row.serverMessageId) || Object.keys(statusOrder)
+    return Boolean(hasMarker(markers, 'mate_receipt_' + row.serverMessageId) || Object.keys(statusOrder)
       .some(state => statusOrder[state] >= statusOrder[row.receiptStatus] &&
-        markers?.includes(receiptMarker({ ...row, receiptStatus: state }))));
+        hasMarker(markers, receiptMarker({ ...row, receiptStatus: state }))));
   }
   function belongsToAccount(row, folder) {
     const auth = api().clientAuthSnapshot?.() || {}, userId = String(auth.user?.id || '');
@@ -83,6 +89,14 @@
   }
   function commit(next, token) {
     if (!current(token)) return false;
+    const encoded = JSON.stringify(next);
+    const memoryChanged = JSON.stringify(notices) !== encoded;
+    // Another window may already have persisted these rows. Do not broadcast
+    // or rewrite the entire history on each unchanged poll.
+    if (localStorage.getItem(token.key) === encoded) {
+      if (memoryChanged) { notices.splice(0, notices.length, ...next); repaint(); }
+      return true;
+    }
     const previous = notices.slice();
     notices.splice(0, notices.length, ...next);
     if (_saveNotices() === false) {
@@ -119,9 +133,8 @@
       readAt: Math.max(stamp(item.readAt), stamp(old.readAt)) || null,
       read: folder === 'sent' || Boolean(old.read) || status === 'read' };
   }
-  function receipts(row, list, meta) {
+  function receiptFor(row, old, meta) {
     // Maintain one receipt per message and merge legacy per-phase records.
-    const old = list.filter(item => item.kind === 'mate_receipt' && item.serverMessageId === row.serverMessageId);
     const state = old.reduce((value, item) => statusOrder[item.receiptStatus] > statusOrder[value] ? item.receiptStatus : value,
       row.status in statusOrder ? row.status : 'accepted');
     const id = 'mate_receipt_' + row.serverMessageId;
@@ -141,51 +154,84 @@
         params: { recipient: who, subject: summary ? '\n' + summary.slice(0, 90) + (summary.length > 90 ? '…' : '') : '' } },
       read: Boolean(old.some(item => item.receiptStatus === state && item.read) ||
         hasReceiptMarker({ serverMessageId: row.serverMessageId, receiptStatus: state }, meta.readIds)), attachments: [] };
-    for (let index = list.length - 1; index >= 0; index--) if (old.includes(list[index])) list.splice(index, 1);
-    if (!dismissed(receipt, meta)) list.push(receipt);
-  }
-  function migrateReceipts(list, meta) {
-    // Prune orphan records only after fetching all sent-message pages to preserve read state during partial synchronization.
-    const sent = list.filter(row => row.kind !== 'mate_receipt' && folderOf(row) === 'sent' && row.serverMessageId && visibleRow(row));
-    for (const row of sent) receipts(row, list, meta);
-    return list.filter(row => row.kind !== 'mate_receipt' ||
-      (row.serverMessageId && row.id === 'mate_receipt_' + row.serverMessageId && !dismissed(row, meta)));
+    return dismissed(receipt, meta) ? null : receipt;
   }
   function merge(items, folder, token, complete = false) {
     if (!current(token)) return false;
     const meta = metadata(), list = _readNotices().filter(row => !dismissed(row, meta));
+    const server = new Map(), legacy = new Map(), receiptIndexes = new Map(), changedSent = new Map();
+    const legacyKey = row => JSON.stringify([folderOf(row), String(row.messageId || ''), String(row.senderId || '')]);
+    list.forEach((row, index) => {
+      if (row.kind === 'mate_receipt') {
+        const indexes = receiptIndexes.get(row.serverMessageId) || [];
+        indexes.push(index); receiptIndexes.set(row.serverMessageId, indexes);
+      } else {
+        if (row.serverMessageId) server.set(folderOf(row) + ':' + row.serverMessageId, index);
+        else {
+          const key = legacyKey(row), indexes = legacy.get(key) || [];
+          indexes.push(index); legacy.set(key, indexes);
+        }
+      }
+    });
     for (const item of items) {
       if (!item?.id || !belongsToAccount(item, folder)) continue;
       const serverId = String(item.id), clientId = String(item.messageId || item.clientMessageId || '');
-      const index = list.findIndex(row => match(row, serverId, clientId, folder, item));
+      const key = folder + ':' + serverId;
+      const index = server.get(key) ?? (legacy.get(legacyKey({ ...item, folder, messageId: clientId })) || [])
+        .find(index => match(list[index], serverId, clientId, folder, item)) ?? -1;
       const row = normalized(item, folder, list[index]);
       if (dismissed(row, meta)) continue;
-      if (index < 0) list.push(row); else list[index] = row;
-      if (folder === 'sent') receipts(row, list, meta);
+      if (index < 0) { server.set(key, list.length); list.push(row); } else { list[index] = row; server.set(key, index); }
+      if (folder === 'sent') changedSent.set(serverId, row);
     }
-    return commit(folder === 'sent' && complete ? migrateReceipts(list, meta) : list, token);
+    if (folder === 'sent' && complete) for (const row of list) {
+      if (row.kind !== 'mate_receipt' && folderOf(row) === 'sent' && row.serverMessageId && visibleRow(row)) changedSent.set(String(row.serverMessageId), row);
+    }
+    for (const row of changedSent.values()) {
+      const indexes = receiptIndexes.get(row.serverMessageId) || [];
+      const receipt = receiptFor(row, indexes.map(index => list[index]), meta);
+      if (indexes.length) { list[indexes[0]] = receipt; for (const index of indexes.slice(1)) list[index] = null; }
+      else if (receipt) list.push(receipt);
+    }
+    // Retain legacy receipt state until all sent pages have arrived.
+    return commit(list.filter(row => row && (!(folder === 'sent' && complete) || row.kind !== 'mate_receipt' ||
+      (row.serverMessageId && row.id === 'mate_receipt_' + row.serverMessageId && !dismissed(row, meta)))), token);
   }
   function updateReceipt(serverId, receipt, token) {
+    return updateReceipts([{ serverId, receipt }], token);
+  }
+  function updateReceipts(updates, token) {
     if (!current(token)) return false;
-    const list = _readNotices(), index = list.findIndex(row => match(row, serverId, '', 'received'));
-    if (index < 0) return false;
-    list[index] = normalized({ ...list[index], ...receipt, id: serverId,
-      messageId: list[index].messageId, createdAt: list[index].at }, 'received', list[index]);
+    const list = _readNotices(), indexes = new Map();
+    list.forEach((row, index) => { if (row.kind !== 'mate_receipt' && folderOf(row) === 'received') indexes.set(String(row.serverMessageId || ''), index); });
+    let changed = false;
+    for (const { serverId, receipt } of updates) {
+      const index = indexes.get(serverId);
+      if (index === undefined) continue;
+      list[index] = normalized({ ...list[index], ...receipt, id: serverId,
+        messageId: list[index].messageId, createdAt: list[index].at }, 'received', list[index]);
+      changed = true;
+    }
+    if (!changed) return false;
     return commit(list, token);
   }
   async function acknowledge(items, token) {
     if (!api().markMateMessageDelivered) return;
+    const storedRows = new Map(rows('received').filter(row => row.kind !== 'mate_receipt')
+      .map(row => [String(row.serverMessageId), row]));
     for (let offset = 0; offset < items.length; offset += 8) {
       const group = items.slice(offset, offset + 8);
       const results = await Promise.allSettled(group.map(async item => {
         if (!current(token)) return;
-        const stored = rows('received').find(row => row.kind !== 'mate_receipt' && row.serverMessageId === String(item.id));
+        const stored = storedRows.get(String(item.id));
         if (!stored || stored.status !== 'accepted') return;
         const result = await api().markMateMessageDelivered(item.id);
         if (!current(token)) return;
         if (!result || result.ok === false || !['delivered', 'read'].includes(result.status)) throw new Error('送达回执未获服务确认');
-        updateReceipt(String(item.id), result, token);
+        return { serverId: String(item.id), receipt: result };
       }));
+      const updates = results.filter(result => result.status === 'fulfilled' && result.value).map(result => result.value);
+      if (updates.length) updateReceipts(updates, token);
       const failed = results.find(result => result.status === 'rejected');
       if (failed) throw failed.reason;
     }
@@ -199,11 +245,28 @@
       : requests.get(key);
     const work = (async () => {
       if (!api().mateMessages) throw new Error('当前版本暂不支持通知同步');
-      let cursor = '', seen = new Set();
+      const cached = revisions.get(key);
+      const conditional = cached?.store === localStorage.getItem(token.key) ? cached.revision : '';
+      revisions.delete(key);
+      let cursor = '', seen = new Set(), revision = '', consistent = true, finalRevision = '';
       do {
-        const result = await api().mateMessages(target, 200, cursor);
+        const result = await api().mateMessages(target, 200, cursor, cursor ? '' : conditional);
         if (!current(token)) return { ok: false, stale: true };
         if (!result || result.ok === false || !Array.isArray(result.items)) throw new Error(result?.reason || '通知暂时无法加载，请重试');
+        if (result.notModified) {
+          // A revision is useful only with the exact durable cache that was
+          // reconciled. Another window may clear/replace that cache in flight.
+          if (!cursor && conditional && result.revision === conditional &&
+              cached.store === localStorage.getItem(token.key)) {
+            revisions.set(key, cached); refreshQuotaNotice();
+            return { ok: true, notModified: true };
+          }
+          if (!cursor && conditional) return refreshUnconditionally();
+          throw new Error('通知同步状态已变化，请重试');
+        }
+        if (!cursor) revision = String(result.revision || '');
+        if (result.revision && result.revision !== revision) consistent = false;
+        if (!result.nextCursor) finalRevision = String(result.revision || '');
         if (!merge(result.items, target, token, !result.nextCursor)) return { ok: false, stale: true };
         if (target === 'received') await acknowledge(result.items, token);
         cursor = String(result.nextCursor || '');
@@ -211,8 +274,18 @@
         seen.add(cursor);
       } while (cursor && current(token));
       const result = { ok: current(token) };
-      if (result.ok) refreshQuotaNotice();
+      if (result.ok) {
+        if (revision && consistent && finalRevision === revision) revisions.set(key,
+          { revision, store: localStorage.getItem(token.key) });
+        refreshQuotaNotice();
+      }
       return result;
+      async function refreshUnconditionally() {
+        // Avoid recursively joining this request when the cache was replaced
+        // by another window while the conditional request was in flight.
+        requests.delete(key);
+        return refresh(target);
+      }
     })();
     requests.set(key, work);
     work.finally(() => { if (requests.get(key) === work) requests.delete(key); }).catch(() => {});

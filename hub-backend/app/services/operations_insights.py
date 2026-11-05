@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 import re
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am
@@ -34,6 +35,15 @@ def _as_utc(value) -> datetime | None:
 def _product_day(value):
     stamp = _as_utc(value)
     return stamp.astimezone(_PRODUCT_ZONE).date() if stamp else None
+
+
+def _day_expression(session: AsyncSession, column):
+    """Group in the product timezone without transferring every timestamp to Python."""
+    if session.get_bind().dialect.name == "postgresql":
+        return func.date(func.timezone("Asia/Shanghai", column))
+    # SQLite date modifiers round fractional seconds to milliseconds, which can
+    # put 15:59:59.999999 UTC into the next day. Dates need only whole seconds.
+    return func.date(func.substr(column, 1, 19), "+8 hours")
 
 
 _MSG_RE = re.compile(r"['\"]message['\"]\s*:\s*['\"]([^'\"]+)")
@@ -111,7 +121,7 @@ async def _adoption(session: AsyncSession) -> dict:
             am.ExecutionSession.runner_client_id != ""))).scalar() or 0
     clients_total = (await session.execute(
         select(func.count()).select_from(models.Client))).scalar() or 0
-    runners = list((await session.execute(select(am.RunnerNode))).scalars().all())
+    runners = (await session.execute(select(am.RunnerNode.last_seen_at, am.RunnerNode.agents))).all()
     online = sum(1 for r in runners if r.last_seen_at is not None
                  and (now - (r.last_seen_at if r.last_seen_at.tzinfo
                              else r.last_seen_at.replace(tzinfo=timezone.utc))
@@ -221,14 +231,17 @@ async def _automation(session: AsyncSession) -> dict:
     # Normalize failure messages before aggregation.
     # Per-attempt identifiers must not split one recurring failure into many single-occurrence groups.
     counter: dict[tuple, int] = {}
-    for (raw,) in (await session.execute(
-            select(models.AiScheduleRun.error).where(
-                models.AiScheduleRun.started_at >= d7,
-                models.AiScheduleRun.state == "failed",
-                models.AiScheduleRun.error != ""))).all():
-        item = _humanize_error(raw)
-        key = (item["text"], item["code"])
-        counter[key] = counter.get(key, 0) + 1
+    # Duplicate errors are counted in SQL. Historical repr errors can still vary
+    # by attempt ID, so normalize bounded batches off the request event loop.
+    rows = await session.stream(select(models.AiScheduleRun.error, func.count()).where(
+        models.AiScheduleRun.started_at >= d7,
+        models.AiScheduleRun.state == "failed",
+        models.AiScheduleRun.error != "").group_by(models.AiScheduleRun.error))
+    try:
+        async for batch in rows.partitions(256):
+            await asyncio.to_thread(_count_errors, counter, batch)
+    finally:
+        await rows.close()
     top_errors = [{"error": text, "code": code, "n": count}
                   for (text, code), count in
                   sorted(counter.items(), key=lambda kv: -kv[1])[:3]]
@@ -236,6 +249,13 @@ async def _automation(session: AsyncSession) -> dict:
             "runs7d": int(fired), "completed7d": int(completed),
             "succeeded7d": succeeded, "running7d": running,
             "failed7d": failed, "topErrors": top_errors}
+
+
+def _count_errors(counter: dict, rows) -> None:
+    for raw, count in rows:
+        item = _humanize_error(raw)
+        key = (item["text"], item["code"])
+        counter[key] = counter.get(key, 0) + count
 
 
 async def _output(session: AsyncSession) -> dict:
@@ -257,14 +277,13 @@ async def _output(session: AsyncSession) -> dict:
 
 
 async def _trend(session: AsyncSession) -> list[dict]:
-    """Build daily task, session, and automation series for 30 days by bucketing retrieved
-    timestamps, avoiding database-specific date grouping.
-    """
+    """Return at most 30 daily aggregate rows per query, independent of history size."""
     now = _now()
     local_now = now.astimezone(_PRODUCT_ZONE)
     local_start = (local_now - timedelta(days=29)).replace(
         hour=0, minute=0, second=0, microsecond=0)
     start = local_start.astimezone(timezone.utc)
+    end = (local_start + timedelta(days=30)).astimezone(timezone.utc)
     days = [(local_start + timedelta(days=i)).date() for i in range(30)]
     buckets = {d.isoformat(): {"date": d.isoformat(), "tasksCreated": 0, "tasksDone": 0,
                                "aiSessions": 0, "activeClients": 0,
@@ -272,45 +291,34 @@ async def _trend(session: AsyncSession) -> list[dict]:
                                "automationSucceeded": 0, "automationRunning": 0,
                                "automationFailed": 0}
                for d in days}
-    day_clients: dict[str, set] = {d.isoformat(): set() for d in days}
+    task_day = _day_expression(session, models.Task.created_at)
+    task_rows = (await session.execute(select(task_day, func.count(),
+        func.sum(case((models.Task.status == "done", 1), else_=0))).where(
+        models.Task.created_at >= start, models.Task.created_at < end).group_by(task_day))).all()
+    for day, created, done in task_rows:
+        buckets[str(day)].update(tasksCreated=int(created), tasksDone=int(done))
 
-    def _day_key(stamp) -> str:
-        day = _product_day(stamp)
-        return day.isoformat() if day else ""
+    session_day = _day_expression(session, am.ExecutionSession.created_at)
+    session_rows = (await session.execute(select(session_day, func.count(),
+        func.count(func.distinct(func.nullif(am.ExecutionSession.runner_client_id, "")))).where(
+        am.ExecutionSession.created_at >= start, am.ExecutionSession.created_at < end
+    ).group_by(session_day))).all()
+    for day, count, clients in session_rows:
+        buckets[str(day)].update(aiSessions=int(count), activeClients=int(clients))
 
-    def _put(stamp, key):
-        slot = buckets.get(_day_key(stamp))
-        if slot is not None:
-            slot[key] += 1
-
-    for (created, status) in (await session.execute(
-            select(models.Task.created_at, models.Task.status).where(
-                models.Task.created_at >= start))).all():
-        _put(created, "tasksCreated")
-        if status == "done":
-            _put(created, "tasksDone")
-    for (created, cid) in (await session.execute(
-            select(am.ExecutionSession.created_at,
-                   am.ExecutionSession.runner_client_id).where(
-                am.ExecutionSession.created_at >= start))).all():
-        _put(created, "aiSessions")
-        slot = day_clients.get(_day_key(created))
-        if cid and slot is not None:
-            slot.add(cid)
-    for (started, state) in (await session.execute(
-            select(models.AiScheduleRun.started_at, models.AiScheduleRun.state).where(
-                models.AiScheduleRun.started_at >= start))).all():
-        _put(started, "automationRuns")
-        if state == "failed":
-            _put(started, "automationFailed")
-        if state in ("succeeded", "failed", "cancelled"):
-            _put(started, "automationCompleted")
-        if state == "succeeded":
-            _put(started, "automationSucceeded")
-        elif state not in ("succeeded", "failed", "cancelled"):
-            _put(started, "automationRunning")
-    for key, clients in day_clients.items():
-        buckets[key]["activeClients"] = len(clients)
+    run_day = _day_expression(session, models.AiScheduleRun.started_at)
+    state = models.AiScheduleRun.state
+    terminal = state.in_(("succeeded", "failed", "cancelled"))
+    run_rows = (await session.execute(select(run_day, func.count(),
+        func.sum(case((terminal, 1), else_=0)),
+        func.sum(case((state == "succeeded", 1), else_=0)),
+        func.sum(case((state == "failed", 1), else_=0)),
+        func.sum(case((terminal, 0), else_=1))).where(
+        models.AiScheduleRun.started_at >= start, models.AiScheduleRun.started_at < end
+    ).group_by(run_day))).all()
+    for day, count, completed, succeeded, failed, running in run_rows:
+        buckets[str(day)].update(automationRuns=int(count), automationCompleted=int(completed),
+            automationSucceeded=int(succeeded), automationFailed=int(failed), automationRunning=int(running))
     return [buckets[d.isoformat()] for d in days]
 
 
@@ -320,41 +328,29 @@ async def _departments(session: AsyncSession) -> list[dict]:
     """
     now = _now()
     d7, d30 = now - timedelta(days=7), now - timedelta(days=30)
-    clients = {c.id: c.user_ref for c in (await session.execute(
-        select(models.Client))).scalars().all() if c.user_ref}
-    users = {u.id: u for u in (await session.execute(
-        select(models.User))).scalars().all()}
-    orgs = {o.id: o.name for o in (await session.execute(
-        select(models.OrgUnit))).scalars().all()}
-
-    def org_of(client_id):
-        user = users.get(clients.get(client_id or ""))
-        return orgs.get(user.org_id, "") if user is not None and user.org_id else ""
-
     stats: dict[str, dict] = {}
-    for (cid,) in (await session.execute(
-            select(func.distinct(am.ExecutionSession.runner_client_id)).where(
-                am.ExecutionSession.created_at >= d7,
-                am.ExecutionSession.runner_client_id != ""))).all():
-        org = org_of(cid)
-        if not org:
-            continue
-        slot = stats.setdefault(org, {"org": org, "activeUsers7d": set(),
-                                      "tasks30d": 0, "done30d": 0})
-        slot["activeUsers7d"].add(clients.get(cid))
-    for (cid, status) in (await session.execute(
-            select(models.Task.owner_client_id, models.Task.status).where(
-                models.Task.created_at >= d30))).all():
-        org = org_of(cid)
-        if not org:
-            continue
-        slot = stats.setdefault(org, {"org": org, "activeUsers7d": set(),
-                                      "tasks30d": 0, "done30d": 0})
-        slot["tasks30d"] += 1
-        if status == "done":
-            slot["done30d"] += 1
-    out = [{**slot, "activeUsers7d": len(slot["activeUsers7d"])}
-           for slot in stats.values()]
+    # Group by the displayed department name, preserving existing same-name
+    # grouping, and count a person once even when several devices were active.
+    people = (await session.execute(select(models.OrgUnit.name,
+        func.count(func.distinct(models.User.id))).select_from(am.ExecutionSession)
+        .join(models.Client, models.Client.id == am.ExecutionSession.runner_client_id)
+        .join(models.User, models.User.id == models.Client.user_ref)
+        .join(models.OrgUnit, models.OrgUnit.id == models.User.org_id)
+        .where(am.ExecutionSession.created_at >= d7, models.OrgUnit.name != "")
+        .group_by(models.OrgUnit.name))).all()
+    for org, count in people:
+        stats[org] = {"org": org, "activeUsers7d": int(count), "tasks30d": 0, "done30d": 0}
+    tasks = (await session.execute(select(models.OrgUnit.name, func.count(),
+        func.sum(case((models.Task.status == "done", 1), else_=0))).select_from(models.Task)
+        .join(models.Client, models.Client.id == models.Task.owner_client_id)
+        .join(models.User, models.User.id == models.Client.user_ref)
+        .join(models.OrgUnit, models.OrgUnit.id == models.User.org_id)
+        .where(models.Task.created_at >= d30, models.OrgUnit.name != "")
+        .group_by(models.OrgUnit.name))).all()
+    for org, count, done in tasks:
+        slot = stats.setdefault(org, {"org": org, "activeUsers7d": 0})
+        slot.update(tasks30d=int(count), done30d=int(done))
+    out = list(stats.values())
     out.sort(key=lambda item: (-item["activeUsers7d"], -item["tasks30d"], item["org"]))
     return out[:8]
 

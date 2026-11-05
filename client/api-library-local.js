@@ -242,6 +242,18 @@
       return invoke('upload', { dataBase64: encoded, name: file.name || '资料', contentType: file.type || 'application/octet-stream',
         folderId: folderId || '', source: source || {}, storage: 'local' }, requestScope, context);
     };
+    api.readLibraryThumbnail = async function (id, options) {
+      if (!isLocal(id)) return remote.readLibraryThumbnail(id, options);
+      const requestScope = scope();
+      if (options?.signal?.aborted) return null;
+      const result = await invoke('thumbnail', { id }, requestScope);
+      assertScope(requestScope);
+      if (options?.signal?.aborted || !result?.data) return null;
+      if (result.data.length > 700000) throw failure('LOCAL_LIBRARY_BINARY_INVALID', '缩略图过大');
+      const raw = atob(result.data), bytes = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+      return { blob: new Blob([bytes], { type: 'image/png' }) };
+    };
     api.readLibraryBinary = async function (id) { return isLocal(id) ? localBinary(id, scope()) : remote.readLibraryBinary(id); };
     api.readLibraryContent = async function (id, options) {
       return isLocal(id) ? invoke('readContent', { id: id, preview: options?.preview === true }) : remote.readLibraryContent(id, options);

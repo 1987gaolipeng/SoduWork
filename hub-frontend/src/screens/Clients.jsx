@@ -1,4 +1,5 @@
 import { translateText as tx, localeMap, useLocale } from '../i18n.js'
+import { createRefreshLoop } from '../polling.js'
 import React, { useCallback, useRef, useState, useEffect } from 'react'
 import { api, can } from '../api.js'
 import { FilterInput, FilterSelect } from '../FilterControls.jsx'
@@ -185,6 +186,7 @@ function ClientDetail({ client, onClose, onChanged }) {
   const [confirm, setConfirm] = useState(null)   // Confirmation state for destructive remote actions.
   const detailScope = useRef(null)
   const pushLock = useRef(false)
+  const updatePolling = useRef(null)
 
   useEffect(() => {
     let alive = true
@@ -202,16 +204,16 @@ function ClientDetail({ client, onClose, onChanged }) {
 
   useEffect(() => {
     if (!can('client.view')) return undefined
-    let alive = true
-    const refresh = () => {
-      if (document.hidden) return
-      api.clientUpdates(client.id)
-        .then((next) => { if (alive) setUpdates(next.attempts || []) })
-        .catch(() => {})
+    setUpdates([])
+    const loop = createRefreshLoop(async (isCurrent) => {
+      const next = await api.clientUpdates(client.id)
+      if (isCurrent()) setUpdates(next.attempts || [])
+    }, { interval: 3000 })
+    updatePolling.current = loop
+    return () => {
+      loop.stop()
+      if (updatePolling.current === loop) updatePolling.current = null
     }
-    refresh()
-    const timer = window.setInterval(refresh, 3000)
-    return () => { alive = false; window.clearInterval(timer) }
   }, [client.id])
 
   async function reloadDetail() {
@@ -221,8 +223,7 @@ function ClientDetail({ client, onClose, onChanged }) {
     if (!scope || detailScope.current !== scope || scope.revision !== revision) return next
     setD(next)
     setOwner(next.ownerUserId || '')
-    if (can('client.view')) api.clientUpdates(client.id)
-      .then((history) => { if (detailScope.current === scope) setUpdates(history.attempts || []) }).catch(() => {})
+    updatePolling.current?.refresh()
     return next
   }
 

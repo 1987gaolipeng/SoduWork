@@ -51,6 +51,22 @@ test('trusted main process exports exact binary bytes but refuses files outside 
   assert.equal((await runtime.action(bad,'a','escape','share',{})).ok,false);
  }finally{fs.rmSync(root,{recursive:true,force:true})}
 });
+
+test('trusted website sharing awaits worker ZIP packaging and retains the transport payload', async () => {
+ const runtime=require('../main/conversation/artifact-runtime'),outputs=require('../main/pi-session/outputs');
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'soduwork-website-share-'));
+ try {
+  fs.writeFileSync(path.join(root,'index.html'),'<h1>Complete website</h1>');
+  fs.writeFileSync(path.join(root,'style.css'),'h1 { color: red }');
+  const session={cwd:root,outputSnapshot:()=>outputs.scan(root,0,0)};
+  const item=session.outputSnapshot().delivery.items.find(x=>x.name==='index.html');
+  const result=await runtime.action(session,'website-worker',item.artifactId,'share-related',{});
+  assert.equal(result.ok,true);assert.equal(result.website,true);
+  const bytes=Buffer.from(result.data,'base64');
+  assert.equal(bytes.readUInt32LE(0),0x04034b50);
+  assert.equal(result.size,bytes.length);assert.equal(result.path,undefined);
+ } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
 test('notice persistence keeps only safe attachment metadata and deduplicates message IDs',()=>{
  const source=fs.readFileSync(path.join(__dirname,'../core/store.js'),'utf8');
  const start=source.indexOf('const LS_NOTICES='),end=source.indexOf('function noticeUnread()',start);

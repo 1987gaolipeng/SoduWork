@@ -15,13 +15,13 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Body, Depends, HTTPException, WebSocket, WebSocketDisconnect
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import SessionLocal, get_session
 from ..deps import current_client
 from ..models import Client
-from ..services import device_auth
+from ..services import device_auth, native_discovery
 from ..remote_screen_models import RemoteScreenGrant
 
 router = APIRouter(prefix="/api/v1/remote-screen", tags=["remote-screen"])
@@ -366,7 +366,7 @@ async def _grant(grant_id: str, client: Client, session: AsyncSession) -> Remote
     row = await session.scalar(select(RemoteScreenGrant).where(RemoteScreenGrant.id == grant_id))
     if row is None or row.owner_user_id != _owner(client) or client.id not in {row.viewer_client_id, row.source_client_id}:
         raise HTTPException(404, "看屏授权不存在")
-    if row.expires_at <= _now() and row.state not in {"stopped", "expired"}:
+    if _epoch(row.expires_at) <= _now().timestamp() and row.state not in {"stopped", "expired"}:
         row.state = "expired"
         await session.commit()
     return row
@@ -386,11 +386,13 @@ async def screen_sources(client: Client = Depends(current_client), session: Asyn
     owner = _owner(client)
     rows = list((await session.scalars(select(Client).where(
         Client.user_ref == owner, Client.id != client.id, Client.auth_state == "active"
-    ).order_by(Client.last_seen_at.desc(), Client.id.asc()))).all())
+    ).order_by(Client.last_seen_at.desc(), Client.id.asc()).limit(50))).all())
     now = _now()
+    from ..realtime import hub
+    online_devices = hub.online_devices()
     items = []
-    for row in rows[:50]:
-        online = bool(row.last_seen_at and (now - (row.last_seen_at if row.last_seen_at.tzinfo else row.last_seen_at.replace(tzinfo=timezone.utc))).total_seconds() <= 45)
+    for row in rows:
+        online = row.id in online_devices or bool(row.last_seen_at and (now - (row.last_seen_at if row.last_seen_at.tzinfo else row.last_seen_at.replace(tzinfo=timezone.utc))).total_seconds() <= 45)
         items.append({
             "id": row.id, "name": row.name or "我的电脑", "online": online,
             "capability": "read-only-screen-v1", "platform": row.platform or "",
@@ -410,9 +412,22 @@ async def create_screen_request(
     source = await session.scalar(select(Client).where(Client.id == source_id, Client.user_ref == owner, Client.auth_state == "active"))
     if source is None:
         raise HTTPException(404, "这台电脑不属于当前账号")
+    # Keep cleanup out of empty discovery polls. Each creation cleans at most
+    # 100 expired rows for this source; expiry is also enforced on every read
+    # and media authorization, independently of cleanup progress.
+    expired = select(RemoteScreenGrant.id).where(
+        RemoteScreenGrant.source_client_id == source.id,
+        RemoteScreenGrant.owner_user_id == owner,
+        RemoteScreenGrant.state.in_(["pending", "active"]),
+        RemoteScreenGrant.expires_at <= _now(),
+    ).order_by(RemoteScreenGrant.expires_at).limit(100)
+    await session.execute(update(RemoteScreenGrant).where(
+        RemoteScreenGrant.id.in_(expired)).values(state="expired"),
+        execution_options={"synchronize_session": False})
     row = RemoteScreenGrant(owner_user_id=owner, viewer_client_id=client.id, source_client_id=source.id,
                             state="pending", permission="view", can_control=False, expires_at=_now() + _TTL)
-    session.add(row); await session.commit(); await session.refresh(row)
+    session.add(row); await session.commit()
+    await native_discovery.wake(source.id, owner, "remote-screen")
     return _json(row, source.name or "我的电脑")
 
 
@@ -426,26 +441,24 @@ async def source_screen_requests(
         RemoteScreenGrant.owner_user_id == owner,
         RemoteScreenGrant.source_client_id == client.id,
         RemoteScreenGrant.state.in_(["pending", "active"]),
-    ).order_by(RemoteScreenGrant.created_at.asc()))).all())
-    now = _now()
-    viewer_ids = {row.viewer_client_id for row in rows[:20]}
+        RemoteScreenGrant.expires_at > _now(),
+    ).order_by(RemoteScreenGrant.created_at.asc(), RemoteScreenGrant.id.asc()).limit(20))).all())
+    if not rows:
+        return {"items": []}
+    viewer_ids = {row.viewer_client_id for row in rows}
     viewers = {
-        viewer.id: viewer for viewer in (await session.scalars(select(Client).where(
-            Client.id.in_(viewer_ids or {"__none__"})
+        viewer.id: viewer for viewer in (await session.execute(select(Client.id, Client.name).where(
+            Client.id.in_(viewer_ids), Client.user_ref == owner
         ))).all()
     }
     items = []
-    for row in rows[:20]:
-        if row.expires_at <= now:
-            row.state = "expired"
-            continue
+    for row in rows:
         viewer = viewers.get(row.viewer_client_id)
         items.append({
             **_json(row, viewer.name if viewer else "mobile"),
             "viewerClientId": row.viewer_client_id,
             "viewerName": viewer.name if viewer else "mobile",
         })
-    await session.commit()
     return {"items": items}
 
 
@@ -472,6 +485,7 @@ async def stop_screen_request(grant_id: str, client: Client = Depends(current_cl
     row = await _grant(grant_id, client, session)
     row.state = "stopped"; row.stopped_at = _now(); row.ticket_hash = ""; await session.commit()
     await _media.stop(grant_id)
+    await native_discovery.wake(row.source_client_id, row.owner_user_id, "remote-screen")
     return {"ok": True, **_json(row)}
 
 

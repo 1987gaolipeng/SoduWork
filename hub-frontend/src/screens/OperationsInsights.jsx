@@ -172,7 +172,7 @@ const SORTS = {
 
 export default function OperationsInsights() {
   const uiLocale = useLocale();
-  const query = useAsync(() => api.operationsInsights(), AUTO)
+  const query = useAsync(() => api.operationsInsights(), { ...AUTO, pauseWhenHidden: true })
   const [category, setCategory] = useState('')
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState('use')

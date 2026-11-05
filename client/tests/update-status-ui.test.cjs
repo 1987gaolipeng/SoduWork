@@ -27,5 +27,6 @@ test('管理端区分等待执行结束并展示服务端保存的阻塞摘要',
   assert.match(screen, /updateMaintenance/);
   assert.match(screen, /waiting:\s*tx\(['"]等待当前执行结束['"]\)/);
   assert.match(screen, /已停止向这台设备派发新需求/);
-  assert.match(screen, /setInterval\(refresh,\s*3000\)/);
+  assert.match(screen, /createRefreshLoop\(async \(isCurrent\) => \{\s*const next = await api\.clientUpdates\(client\.id\)\s*if \(isCurrent\(\)\) setUpdates\(next\.attempts \|\| \[\]\)\s*\}, \{ interval: 3000 \}\)/);
+  assert.match(screen, /loop\.stop\(\)/);
 });

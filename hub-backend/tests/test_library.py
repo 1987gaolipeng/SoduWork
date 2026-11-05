@@ -10,7 +10,7 @@ import io
 import os
 import unittest
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 # Always force an isolated test database, even when a developer shell has a
 # production DATABASE_URL exported.
@@ -26,7 +26,7 @@ from app.deps import current_client
 from app.library_models import LibraryFolder, LibraryItem
 from app.models import Client
 from app.api import library
-from app.services import library_storage
+from app.services import library_read_cache, library_storage
 
 
 class _ObjectStream(io.BytesIO):
@@ -106,7 +106,7 @@ class LibraryHttpTestCase(unittest.IsolatedAsyncioTestCase):
         self.store = _FakeMinio()
         self.storage_patch = patch.multiple(
             library_storage,
-            ensure_ready=lambda: True,
+            ensure_ready=lambda backend=None: True,
             put_bytes=self.store.put_bytes,
             put_stream=self.store.put_stream,
             read_bytes=self.store.read_bytes,
@@ -173,7 +173,7 @@ class LibraryHttpTests(LibraryHttpTestCase):
             "local": {"backend": "local", "state": "available", "enabled": True},
             "minio": {"backend": "minio", "state": "disabled", "enabled": False},
         }
-        with patch.object(library_storage, "status", return_value=expected):
+        with patch.object(library_read_cache, "storage_status", AsyncMock(return_value=expected)):
             response = await self.request("GET", "/storage/status")
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json(), expected)
@@ -198,14 +198,33 @@ class LibraryHttpTests(LibraryHttpTestCase):
                 "remote": capability,
             }, "remote": capability, "remoteBackend": "nfs",
         }
-        with patch.object(library_storage, "status", return_value=expected):
+        with patch.object(library_read_cache, "storage_status", AsyncMock(return_value=expected)):
             response = await self.request("GET", "/storage/status")
+            other_owner = await self.request("GET", "/storage/status", owner="bob")
+            async with self.sessions() as session:
+                session.add(LibraryItem(id="alice-nfs-new", owner_key="alice", backend="nfs", size=50))
+                await session.commit()
+            refreshed = await self.request("GET", "/storage/status")
         self.assertEqual(response.status_code, 200, response.text)
         quota = response.json()["storage"]["remote"]
         self.assertEqual(quota["quotaBytes"], 1024 * 1024 * 1024)
         self.assertEqual(quota["usedBytes"], 300)
         self.assertEqual(quota["remainingBytes"], 1024 * 1024 * 1024 - 300)
         self.assertEqual(response.json()["remote"]["usedBytes"], 300)
+        self.assertEqual(other_owner.json()["remote"]["usedBytes"], 800)
+        self.assertEqual(refreshed.json()["remote"]["usedBytes"], 350)
+
+    async def test_mobile_edit_version_precondition_preserves_concurrent_pc_change(self):
+        item = await self.create_item("mobile edit", content="original")
+        path = f"/items/{item['id']}"
+        updated = await self.request("PATCH", path, json={"content": "PC change"})
+        self.assertEqual(updated.status_code, 200)
+        rejected = await self.request("PATCH", path, json={"content": "stale phone draft", "expectedUpdatedAt": item["updatedAt"]})
+        self.assertEqual(rejected.status_code, 409)
+        content = await self.request("GET", path + "/content")
+        self.assertEqual(content.json()["content"], "PC change")
+        accepted = await self.request("PATCH", path, json={"content": "phone change", "expectedUpdatedAt": updated.json()["item"]["updatedAt"]})
+        self.assertEqual(accepted.status_code, 200)
 
     async def test_note_content_can_be_saved_and_replaced(self):
         item = await self.create_item("draft", content="before")

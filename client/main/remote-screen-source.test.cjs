@@ -66,3 +66,42 @@ test('desktop source denies a request without opening a socket', async () => {
   assert.equal(f.calls.some(call => call.url.endsWith('/stop')), true);
   f.source.dispose();
 });
+
+test('a slow discovery request is shared and disposal aborts it', async () => {
+  let calls = 0, signal;
+  const source = create({ autoStart: false, logger: { warn() {} },
+    identityOf: async () => ({ hub: 'http://hub', clientId: 'pc', session: 'alice' }),
+    fetch: async (_identity, _url, options) => {
+      calls++; signal = options.signal;
+      return new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+    } });
+  const first = source.poll(), second = source.poll();
+  assert.equal(first, second);
+  await wait(); assert.equal(calls, 1); assert.equal(signal.aborted, false);
+  source.dispose(); await first; assert.equal(signal.aborted, true);
+  await source.poll(); assert.equal(calls, 1);
+});
+
+test('a delayed response from another account never opens a consent dialog', async () => {
+  let identity = { hub: 'http://hub', clientId: 'pc', session: 'alice' }, resolve, prompts = 0;
+  const source = create({ autoStart: false, logger: { warn() {} }, identityOf: async () => identity,
+    dialog: { showMessageBox() { prompts++; } },
+    fetch: async () => new Promise(done => { resolve = done; }) });
+  const pending = source.poll(); await wait();
+  identity = { ...identity, session: 'bob' };
+  resolve(response({ items: [{ id: 'old', state: 'pending' }] }));
+  await pending; assert.equal(prompts, 0); source.dispose();
+});
+
+test('consent is serialized and an account switch while the dialog is open prevents approval', async () => {
+  let identity = { hub: 'http://hub', clientId: 'pc', session: 'alice' }, resolve, prompts = 0;
+  const calls = [];
+  const source = create({ autoStart: false, logger: { warn() {} }, identityOf: async () => identity,
+    dialog: { showMessageBox() { prompts++; return new Promise(done => { resolve = done; }); } },
+    fetch: async (_identity, url) => { calls.push(url); return response({ items: [
+      { id: 'one', state: 'pending' }, { id: 'two', state: 'pending' }] }); } });
+  await source.poll(); assert.equal(prompts, 1);
+  identity = { ...identity, hub: 'http://another-hub' };
+  resolve({ response: 0 }); await wait();
+  assert.equal(calls.length, 1); source.dispose();
+});

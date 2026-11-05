@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { fetchWithDeviceAuthRetry, accountScopeKey } = require('../device-auth-request');
+const { scopeOf } = require('../native-discovery.cjs');
 
 function fingerprint(handle) {
   const value = handle.snapshot();
@@ -16,14 +17,16 @@ function fingerprint(handle) {
 // The Hub grants admission once. A durable local fence is written before send;
 // a process crash can never cause an automatic second native submission.
 function create({ app, identityOf, find, open, send, sync, fetch = fetchWithDeviceAuthRetry,
-  intervalMs = 5000, autoStart = true }) {
-  let closed = false, timer = null, running = null;
+  intervalMs = 5000, autoStart = true, discovery = require('../native-discovery.cjs'),
+  pollingOptions = {} }) {
+  let closed = false, running = null, lastIdentity = null;
+  const lifecycle = new AbortController();
   const root = path.join(app.getPath('userData'), 'personal-conversation-relay');
   const scope = identity => JSON.stringify([String(identity?.hub || '').replace(/\/+$/, ''),
     identity?.clientId || '', accountScopeKey(identity)]);
   async function assertIdentity(identity) {
     const current = await identityOf();
-    if (scope(current) !== scope(identity)) throw Error('账号或服务已切换，请在来源电脑重新确认');
+    if (closed || scopeOf(current) !== scopeOf(identity)) throw Error('账号或服务已切换，请在来源电脑重新确认');
   }
   function ledger(identity, id) {
     if (!/^[a-f0-9-]{36}$/.test(id)) throw Error('Invalid relay identity');
@@ -50,9 +53,9 @@ function create({ app, identityOf, find, open, send, sync, fetch = fetchWithDevi
     const response = await fetch(identity, String(identity.hub).replace(/\/+$/, '') +
       '/api/v1/personal-conversation-relay/' + route, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-      signal: AbortSignal.timeout(12000),
+      signal: AbortSignal.any([lifecycle.signal, AbortSignal.timeout(12000)]),
     });
-    if (!response.ok) throw Error('接力服务暂不可用 (' + response.status + ')');
+    if (!response.ok) throw Object.assign(Error('接力服务暂不可用 (' + response.status + ')'), { status: response.status });
     const result = await response.json();
     await assertIdentity(identity);
     return result;
@@ -126,23 +129,28 @@ function create({ app, identityOf, find, open, send, sync, fetch = fetchWithDevi
     if (running) return running;
     running = (async () => {
       const identity = await identityOf();
-      if (!identity?.session || !identity?.clientId || !identity?.hub) return;
-      const response = await request(identity, 'poll');
+      lastIdentity = identity;
+      if (!identity?.session || !identity?.clientId || !identity?.hub) return { state: 'blocked', scope: scope(identity) };
+      const response = await request(identity, 'poll', { discoveryProtocol: 1 });
+      let failed = false;
       for (const job of response.requests || []) {
         if (closed) break;
         try { await process(identity, job); }
-        catch (_) { /* Retry only discovery/acknowledgment, never native send. */ }
+        catch (_) { failed = true; /* Retry only discovery/acknowledgment, never native send. */ }
       }
+      return { state: failed ? 'error' : response.requests?.length ? 'active' : 'idle', scope: scope(identity) };
     })().finally(() => { running = null; });
     return running;
   }
-  function schedule() {
-    if (closed) return;
-    timer = setTimeout(() => { tick().catch(() => {}).finally(schedule); }, intervalMs);
-    timer.unref?.();
-  }
-  if (autoStart) schedule();
-  return { tick, close() { closed = true; clearTimeout(timer); } };
+  const poller = require('../native-discovery-polling.cjs').create({ ...pollingOptions,
+    tick: () => tick().catch(error => ({ state: [401, 403].includes(error.status) ? 'blocked' : 'error', scope: scope(lastIdentity) })),
+    // Prepared requests expire after 60 seconds. Leave room for HTTP/claim
+    // latency when a push is lost, including time spent in the previous poll.
+    baseMs: intervalMs, idleMs: () => discovery.confirmed(lastIdentity) ? 30000 : 20000,
+    maxStartGapMs: () => discovery.confirmed(lastIdentity) ? 30000 : 20000 });
+  const unsubscribe = discovery.register('personal-relay', () => poller.wake());
+  if (autoStart) poller.start();
+  return { tick, close() { closed = true; lifecycle.abort(); poller.stop(); unsubscribe(); } };
 }
 
 module.exports = { create, fingerprint };
