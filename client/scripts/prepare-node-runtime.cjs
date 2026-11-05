@@ -20,17 +20,23 @@ const DIGESTS = Object.freeze({
   'linux-arm64': '5ced2d48d1d7198739b7f86804de0171aefb6823b684b12341d3321afc3cb0b2',
 });
 
-function selectRelease(platform, arch, mirror = '') {
+function runtimeUrls(official, mirrored, mirrorOnly = false) {
+  if (mirrorOnly && !mirrored) throw Error('Mirror-only runtime downloads require a configured mirror');
+  return [...(mirrored ? [mirrored] : []), ...(mirrorOnly ? [] : [official])];
+}
+
+function selectRelease(platform, arch, mirror = '', { mirrorOnly = false } = {}) {
   const sha256 = DIGESTS[`${platform}-${arch}`];
   if (!sha256) throw Error(`Unsupported Node runtime target: ${platform}/${arch}`);
   const folder = `node-v${VERSION}-${platform === 'win32' ? 'win' : platform}-${arch}`;
   const file = folder + (platform === 'win32' ? '.zip' : '.tar.gz');
   const official = `https://nodejs.org/download/release/v${VERSION}/${file}`;
-  const urls = [official];
+  let mirrored;
   if (mirror) {
     if (new URL(mirror).protocol !== 'https:') throw Error('Node mirror must use HTTPS');
-    urls.unshift(`${mirror.replace(/\/+$/, '')}/v${VERSION}/${file}`);
+    mirrored = `${mirror.replace(/\/+$/, '')}/v${VERSION}/${file}`;
   }
+  const urls = runtimeUrls(official, mirrored, mirrorOnly);
   return { platform, arch, version: VERSION, file, folder, sha256, urls };
 }
 
@@ -40,34 +46,60 @@ async function digest(file) {
   return sum.digest('hex');
 }
 
-async function downloadFile(url, target, redirects = 0) {
-  if (new URL(url).protocol !== 'https:' || redirects > 6) throw Error('Invalid runtime download redirect');
-  const response = await new Promise((resolve, reject) => {
-    const request = https.get(url, { headers: { 'User-Agent': 'SoduWork-runtime-build' } }, resolve);
-    request.setTimeout(60000, () => request.destroy(Error('Runtime download timed out')));
-    request.on('error', reject);
-  });
-  if ([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location) {
-    response.resume();
-    return downloadFile(new URL(response.headers.location, url).href, target, redirects + 1);
-  }
-  if (response.statusCode !== 200) {
-    response.resume();
-    throw Error(`Runtime download failed: HTTP ${response.statusCode}`);
-  }
-  await pipeline(response, fs.createWriteStream(target, { flags: 'w' }));
+function downloadLabel(url) {
+  const parsed = new URL(url);
+  return parsed.origin + parsed.pathname;
 }
 
-async function ensureArchive(release, cacheRoot, { download = downloadFile } = {}) {
+async function downloadFile(url, target, { timeoutMs = 300000, get = https.get, log = console.error } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(Error('Runtime download exceeded total time limit')), timeoutMs);
+  async function transfer(current, redirects = 0) {
+    if (new URL(current).protocol !== 'https:' || redirects > 6) throw Error('Invalid runtime download redirect');
+    const response = await new Promise((resolve, reject) => {
+      const request = get(current, { signal: controller.signal,
+        headers: { 'User-Agent': 'SoduWork-runtime-build' } }, resolve);
+      request.setTimeout(60000, () => request.destroy(Error('Runtime download idle timeout')));
+      request.on('error', reject);
+    });
+    if ([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location) {
+      response.destroy();
+      return transfer(new URL(response.headers.location, current).href, redirects + 1);
+    }
+    if (response.statusCode !== 200) {
+      response.destroy();
+      throw Error(`Runtime download failed: HTTP ${response.statusCode}`);
+    }
+    let bytes = 0, lastProgress = Date.now();
+    response.on('data', chunk => {
+      bytes += chunk.length;
+      if (Date.now() - lastProgress >= 30000) {
+        log(`[runtime-download] ${downloadLabel(current)}: ${bytes} bytes received`);
+        lastProgress = Date.now();
+      }
+    });
+    await pipeline(response, fs.createWriteStream(target, { flags: 'w' }), { signal: controller.signal });
+  }
+  try { await transfer(url); }
+  catch (error) { throw controller.signal.aborted ? controller.signal.reason : error; }
+  finally { clearTimeout(timer); }
+}
+
+async function ensureArchive(release, cacheRoot, { download = downloadFile, log = console.error } = {}) {
   if (!/^[a-f0-9]{64}$/.test(release.sha256)) throw Error('Invalid runtime SHA-256');
   fs.mkdirSync(cacheRoot, { recursive: true });
   const archive = path.join(cacheRoot, release.sha256);
-  if (fs.existsSync(archive) && await digest(archive) === release.sha256) return archive;
+  if (fs.existsSync(archive) && await digest(archive) === release.sha256) {
+    log(`[runtime-download] verified cache hit: ${archive}`);
+    return archive;
+  }
   const partial = path.join(cacheRoot, `.download-${crypto.randomUUID()}`);
   let lastError;
   try {
     for (const url of release.urls) {
       try {
+        const started = Date.now();
+        log(`[runtime-download] fetching ${downloadLabel(url)}`);
         await download(url, partial);
         if (await digest(partial) !== release.sha256) throw Error('Runtime archive SHA-256 mismatch');
         // Concurrent builders publish only the same verified bytes. Windows
@@ -76,8 +108,15 @@ async function ensureArchive(release, cacheRoot, { download = downloadFile } = {
         catch (error) {
           if (!fs.existsSync(archive) || await digest(archive) !== release.sha256) throw error;
         }
+        log(`[runtime-download] verified ${fs.statSync(archive).size} bytes in ${Date.now() - started}ms`);
         return archive;
-      } catch (error) { lastError = error; }
+      } catch (error) {
+        lastError = error;
+        const message = String(error.message).replace(/https?:\/\/[^\s)]+/g, value => {
+          try { return downloadLabel(value); } catch { return '[URL]'; }
+        });
+        log(`[runtime-download] ${downloadLabel(url)} failed: ${error.code || error.name}: ${message}`);
+      }
     }
     throw lastError || Error('No runtime download sources');
   } finally { fs.rmSync(partial, { force: true }); }
@@ -153,8 +192,9 @@ async function contentInventory(root) {
 
 async function prepare({ root = path.resolve(__dirname, '..'), platform = process.platform,
   arch = process.env.npm_config_arch || process.arch, mirror = process.env.SODUWORK_NODE_MIRROR || 'https://npmmirror.com/mirrors/node',
+  mirrorOnly = process.env.SODUWORK_RUNTIME_MIRROR_ONLY === '1',
   cacheRoot = process.env.SODUWORK_DOWNLOAD_CACHE || path.join(root, '.runtime-cache') } = {}) {
-  const release = selectRelease(platform, arch, mirror);
+  const release = selectRelease(platform, arch, mirror, { mirrorOnly });
   root = path.resolve(root);
   for (const candidate of [root, path.join(root, '.runtime'), path.join(root, '.runtime/node')]) {
     const stat = fs.lstatSync(candidate, { throwIfNoEntry: false });
@@ -220,4 +260,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { VERSION, selectRelease, digest, downloadFile, ensureArchive, extractArchive, verifyRuntime, contentInventory, prepare };
+module.exports = { VERSION, runtimeUrls, selectRelease, digest, downloadFile, ensureArchive, extractArchive, verifyRuntime, contentInventory, prepare };

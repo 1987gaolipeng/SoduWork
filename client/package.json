@@ -1,8 +1,8 @@
 {
   "name": "soduwork",
   "productName": "SoduWork",
-  "version": "1.13.10",
-  "description": "SoduWork - 企业级 AI Native 工作平台",
+  "version": "1.13.13",
+  "description": "SoduWork - \u4f01\u4e1a\u7ea7 AI Native \u5de5\u4f5c\u5e73\u53f0",
   "main": "main.js",
   "scripts": {
     "start": "node scripts/start-client.cjs",

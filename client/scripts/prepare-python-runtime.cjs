@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
-const { ensureArchive, extractArchive } = require('./prepare-node-runtime.cjs');
+const { ensureArchive, extractArchive, runtimeUrls } = require('./prepare-node-runtime.cjs');
 
 const VERSION = '3.12.15';
 const RELEASE = '20261009';
@@ -41,7 +41,8 @@ function releaseFor(platform, arch, environment = process.env) {
   const official = `https://github.com/astral-sh/python-build-standalone/releases/download/${RELEASE}/${file}`;
   const mirror = environment.SODUWORK_PYTHON_MIRROR ?? 'https://registry.npmmirror.com/-/binary/python-build-standalone';
   if (mirror && !String(mirror).startsWith('https://')) throw Error('Python mirror must use HTTPS');
-  return { sha256: entry[1], urls: [...(mirror ? [`${mirror.replace(/\/$/, '')}/${RELEASE}/${file}`] : []), official] };
+  const mirrored = mirror ? `${mirror.replace(/\/$/, '')}/${RELEASE}/${file}` : '';
+  return { sha256: entry[1], urls: runtimeUrls(official, mirrored, environment.SODUWORK_RUNTIME_MIRROR_ONLY === '1') };
 }
 
 function executable(root, platform) {

@@ -134,8 +134,15 @@ def main() -> int:
     parser.add_argument("--profile", choices=("release", "extended", "live"), default="release",
                         help="release is offline; extended adds platform checks; live is explicit")
     parser.add_argument("--browser", action="store_true", help="also run the real-browser repaint smoke")
+    parser.add_argument("--shard-index", type=int, default=1,
+                        help="1-based quality shard index (default: 1)")
+    parser.add_argument("--shard-count", type=int, default=1,
+                        help="total quality shards (default: 1)")
     parser.add_argument("--list", action="store_true", help="show every registered smoke and exit")
     args = parser.parse_args()
+
+    if args.shard_count < 1 or not 1 <= args.shard_index <= args.shard_count:
+        parser.error("--shard-index must be between 1 and --shard-count, and --shard-count must be positive")
 
     manifest_errors = audit_manifest(BACKEND)
     if manifest_errors:
@@ -160,7 +167,15 @@ def main() -> int:
     smoke_scripts = list(scripts_for(args.profile))
     if args.browser and "smoke_client_render.py" not in smoke_scripts:
         smoke_scripts.append("smoke_client_render.py")
-    print(f"SoduWork quality gate · {args.profile} · {len(smoke_scripts)} smoke checks", flush=True)
+    all_smoke_scripts = smoke_scripts
+    if args.shard_count > 1:
+        smoke_scripts = [
+            script for index, script in enumerate(all_smoke_scripts)
+            if index % args.shard_count == args.shard_index - 1
+        ]
+    shard_label = f" · shard {args.shard_index}/{args.shard_count}" if args.shard_count > 1 else ""
+    print(f"SoduWork quality gate · {args.profile}{shard_label} · {len(smoke_scripts)} smoke checks",
+          flush=True)
 
     failures: list[tuple[str, str]] = []
     with tempfile.TemporaryDirectory(prefix="soduwork-gate-") as directory:

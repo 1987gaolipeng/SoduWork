@@ -90,7 +90,8 @@ chk("清空插件时不会残留隐藏版本字段",
 async def hub_side():
     await init_db()
     async with SessionLocal() as session:
-        session.add(models.Client(id="c-pa", name="我的机器"))
+        session.add(models.Client(id="c-pa", name="我的机器",
+                                  last_seen_at=datetime.now(timezone.utc)))
         await session.commit()
 
         both = models.AiSchedule(title="双选", owner_client_id="c-pa",

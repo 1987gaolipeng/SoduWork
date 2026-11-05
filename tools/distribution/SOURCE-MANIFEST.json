@@ -66,8 +66,8 @@
     },
     {
       "path": ".gitignore",
-      "bytes": 3866,
-      "sha256": "28f8f957c6f319f70543edc484354f5df5a2fb6fe2d97b28ec07e5a29ba4b00f"
+      "bytes": 3932,
+      "sha256": "1335a154e9f565456b6d207276c825efe28b57598bf0bb3213970b1b6731b2c0"
     },
     {
       "path": "CONTRIBUTING.md",
@@ -5506,8 +5506,8 @@
     },
     {
       "path": "client/main/client-update-contract.js",
-      "bytes": 4840,
-      "sha256": "8c21699756c87c4642bbfd102c8a99d54af66a8ec1fb6984d1168e4bb35cbe93"
+      "bytes": 4907,
+      "sha256": "3f62ef5386484b1c3a84c4f7aee583d061b154b500d5703fe9291ea1d5fedb28"
     },
     {
       "path": "client/main/client-update-download.cjs",
@@ -7107,12 +7107,12 @@
     {
       "path": "client/package-lock.json",
       "bytes": 176717,
-      "sha256": "e63749e64069c27c8b2dad404f1e0b9922c272b72a49b9358d910d66c993944c"
+      "sha256": "5783d7bc004af26570f97d782517ef2bde8ed8dc2e7920a026fe4d8d0bbe4f23"
     },
     {
       "path": "client/package.json",
-      "bytes": 8787,
-      "sha256": "6c07adea849cd3e8094fbd1eeea06900f70140d2df27667b076b08a39c855183"
+      "bytes": 8808,
+      "sha256": "81ad82fcd21da65cb77c0b452b60b0f72c125ea95fa6da98095bd0eee4e1026a"
     },
     {
       "path": "client/preload.js",
@@ -7158,6 +7158,11 @@
       "path": "client/scripts/build-macos.cjs",
       "bytes": 3911,
       "sha256": "54fc7776cfa916247c194346dbd349fc823a988008c0eb541ab8d12932efafe3"
+    },
+    {
+      "path": "client/scripts/client-build-version.cjs",
+      "bytes": 4957,
+      "sha256": "b7e7a63968fa5035fa8b1511c091c6e15fcba0d22f01c4d4564d1602c037798c"
     },
     {
       "path": "client/scripts/create-jiyong-examples.cjs",
@@ -7241,8 +7246,8 @@
     },
     {
       "path": "client/scripts/prepare-node-runtime.cjs",
-      "bytes": 11393,
-      "sha256": "d7ea4121f6d4f4012a06824f66ebbc0979d97443401fe2968c9789fad48aba1e"
+      "bytes": 13325,
+      "sha256": "4ba8257e0952248e5df5dff03cef2707d9aa5a3e93c1a79e01872d4b356741af"
     },
     {
       "path": "client/scripts/prepare-pi-runtime.cjs",
@@ -7251,8 +7256,8 @@
     },
     {
       "path": "client/scripts/prepare-python-runtime.cjs",
-      "bytes": 11455,
-      "sha256": "bdb33ab67cfd55bb9c30146d2aa557fb977e9520d7d0fe54f6d7dccb18467342"
+      "bytes": 11551,
+      "sha256": "21c35b5dedbbbcb5822cc47398b835dcb8e6b605ebb63acfd23dead13ac62237"
     },
     {
       "path": "client/scripts/prepare-runner.cjs",
@@ -7266,8 +7271,8 @@
     },
     {
       "path": "client/scripts/prepare-third-party.cjs",
-      "bytes": 8236,
-      "sha256": "6d2de942b2c4b17c86d5d3178a4f29e045757704611d1d1e193dea504966aaca"
+      "bytes": 8328,
+      "sha256": "563be0a32119f2465bdce2826b1f01ba05d520dd96f2a446f919cff8c9c841a8"
     },
     {
       "path": "client/scripts/python-office-requirements.txt",
@@ -8031,8 +8036,8 @@
     },
     {
       "path": "client/tests/client-update-contract.test.cjs",
-      "bytes": 5973,
-      "sha256": "fbb69ad65595dca88a570c9ecd6f3c2988e9b1557fc7e68c4271083da4536f32"
+      "bytes": 6342,
+      "sha256": "636760bad7b5badc6ff85e1eeddf23a1236c9dff6e3a563df2d9242466492231"
     },
     {
       "path": "client/tests/client-update-view.test.cjs",
@@ -8843,6 +8848,11 @@
       "path": "client/tests/install-layout.test.cjs",
       "bytes": 3221,
       "sha256": "0f96f9eb7c4f0f59d6e508a49cb8d6e4009b206e38c37bf8f1d2c2f705fe2057"
+    },
+    {
+      "path": "client/tests/installed-client-cdp.test.cjs",
+      "bytes": 2147,
+      "sha256": "bd91cabcf20ce0783f7fe98d7db142a031a09a9575ae90aa5d02c97f0745f45c"
     },
     {
       "path": "client/tests/installed-client-inspection.test.cjs",
@@ -9796,8 +9806,8 @@
     },
     {
       "path": "client/tests/prepare-node-runtime.test.cjs",
-      "bytes": 7561,
-      "sha256": "c2598133a7d5100e4ba7f259527c32bcc95f9d4d7bc504540ffe143177d608f5"
+      "bytes": 10458,
+      "sha256": "9945114d1034d6df981392e4de65441b78930abe918c8b61bc7dccfc0e260b67"
     },
     {
       "path": "client/tests/prepare-pi-runtime.test.cjs",
@@ -9806,8 +9816,8 @@
     },
     {
       "path": "client/tests/prepare-python-runtime.test.cjs",
-      "bytes": 8355,
-      "sha256": "99208a015f4c750f4edf9557482cade1bd3d45c68e03c354400104bb3aaa5f3c"
+      "bytes": 9023,
+      "sha256": "23e484e5076ef9c2e267eddd8d78592d8f370147e59d772775499c7c57cbb9eb"
     },
     {
       "path": "client/tests/prepare-runner.test.cjs",
@@ -11197,7 +11207,7 @@
     {
       "path": "client/version.json",
       "bytes": 27,
-      "sha256": "7910ba9b4bca7dd7c46ee6671bb8644b9ff93cc2a3f87fdd2b2b9f5dbd060482"
+      "sha256": "b835e50469e6418d56871f88a1520a51867ebc5d1f6d5d653c4b21324d2bba90"
     },
     {
       "path": "docs/README.en.md",
@@ -14901,8 +14911,8 @@
     },
     {
       "path": "hub-backend/quality_gate.py",
-      "bytes": 9040,
-      "sha256": "5f4e5364c7582e6e62e51b784b6029345b70867d74c65f8752ddee3c6226f073"
+      "bytes": 9852,
+      "sha256": "3d88f8ad585de71f6b9424e9209dd57349cf111e13bf924d1ea821fc935e9bbf"
     },
     {
       "path": "hub-backend/quality_manifest.py",
@@ -15556,8 +15566,8 @@
     },
     {
       "path": "hub-backend/smoke_personal_automation.py",
-      "bytes": 16953,
-      "sha256": "97bba5f400fb193d8f18d24fecf399302bab5589d5d1148300fdd678a0e5c194"
+      "bytes": 17028,
+      "sha256": "8178731617c66afa1610b5f8484548baca006b8c54e977e67b3d19b0642d7af8"
     },
     {
       "path": "hub-backend/smoke_plugin_admin_guard.py",
@@ -15926,8 +15936,8 @@
     },
     {
       "path": "hub-backend/smoke_schedules.py",
-      "bytes": 15092,
-      "sha256": "7971941b2ef631f3f98461ebc0a04fb5ef17ab24385abc78ee969cd4dd698b6c"
+      "bytes": 15168,
+      "sha256": "088412f9069a4e5d88b9ff52164046fa885f27e965e99affea0fd271eb228cb8"
     },
     {
       "path": "hub-backend/smoke_schema_migrations.py",
@@ -20530,14 +20540,19 @@
       "sha256": "67a6bec21a8cd985d6c263c7624a2f9b3fe649c801f5c46064541c323f3a3d26"
     },
     {
+      "path": "tools/ci/installed-client-cdp.cjs",
+      "bytes": 2844,
+      "sha256": "4d6f91c6f3c1d7f5540b380526848bde9bf60dbd3b8bac11e1acaebfd668fe9c"
+    },
+    {
       "path": "tools/ci/installed-client-inspection.cjs",
       "bytes": 1262,
       "sha256": "c482a3fd509aa46c2999b41cb1680758088e6b0609a15865640cf7afcffa7f51"
     },
     {
       "path": "tools/ci/installed-client-smoke.cjs",
-      "bytes": 10586,
-      "sha256": "4a15454c20a930d3b4cfccbe5cfc6786a435fbd3f28fbface2f8ce39987c3f43"
+      "bytes": 10631,
+      "sha256": "06ec35063c5fad31bd927f63de0fb1bc109e9e0f79a956bffcb9aee544d87970"
     },
     {
       "path": "tools/ci/installed-client-timing.cjs",

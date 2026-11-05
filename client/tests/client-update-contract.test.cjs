@@ -44,6 +44,11 @@ test('strict semantic versions never downgrade or accept malformed values', () =
   assert.equal(contract.newer('1.2.9', '1.2.10'), false);
   assert.equal(contract.newer('1.2.11-beta', '1.2.10'), false);
   assert.equal(contract.newer('1.2.11', 'bad'), false);
+  assert.equal(contract.newer('1.13.11', '1.13.11-beta.532'), true);
+  assert.equal(contract.newer('1.13.11-beta.532', '1.13.11'), false);
+  assert.equal(contract.newer('1.13.11-beta.10', '1.13.11-beta.9'), true);
+  assert.equal(contract.newer('1.13.11-beta.9', '1.13.11-beta.10'), false);
+  assert.equal(contract.newer('1.13.11-beta.532', '1.13.11-beta.532'), false);
 });
 
 test('signed canonical manifest verifies and any mutation fails', async () => {

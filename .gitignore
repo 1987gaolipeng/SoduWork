@@ -112,6 +112,9 @@ mobile/
 /.cache/python/
 /.cache/downloads/
 /.cache/win-tools/
+/.cache/mobile-pub/
+/.cache/mobile-gradle/
+/.cache/mobile-native/
 
 # Internal working records: operational logs and release history notes.
 # Excluded from the public distribution boundary; kept locally for the team.

@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const http = require('node:http');
 const { VERSION, selectRelease, downloadFile, ensureArchive, verifyRuntime, contentInventory, prepare } = require('../scripts/prepare-node-runtime.cjs');
 
 function directory(t) {
@@ -43,6 +44,57 @@ test('all supported targets pin the same Node version and platform-specific offi
   assert.equal(digests.size, 6);
   assert.throws(() => selectRelease('win32', 'x86'), /Unsupported/);
   assert.throws(() => selectRelease('linux', 'x64', 'http://mirror.example'), /HTTPS/);
+});
+
+test('CI mirror-only mode never selects the public fallback', () => {
+  const release = selectRelease('darwin', 'x64', 'https://mirror.example/node', { mirrorOnly: true });
+  assert.deepEqual(release.urls, [`https://mirror.example/node/v${VERSION}/${release.file}`]);
+  assert.throws(() => selectRelease('darwin', 'x64', '', { mirrorOnly: true }), /configured mirror/);
+});
+
+test('a continuously active download still obeys its total deadline and removes partial data', async t => {
+  const cache = directory(t);
+  const server = http.createServer((_req, response) => {
+    response.writeHead(200);
+    const interval = setInterval(() => response.write('data'), 5);
+    response.on('close', () => clearInterval(interval));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const get = (_url, options, callback) => http.get(`http://127.0.0.1:${server.address().port}`, options, callback);
+  const release = { sha256: hash('never finishes'), urls: ['https://fixture.invalid/archive'] };
+  await assert.rejects(ensureArchive(release, cache, { log: () => {},
+    download: (url, target) => downloadFile(url, target, { get, timeoutMs: 80, log: () => {} }),
+  }), /total time limit/);
+  assert.deepEqual(fs.readdirSync(cache), []);
+});
+
+test('redirects share one deadline instead of restarting the download clock', async t => {
+  const cache = directory(t);
+  const server = http.createServer((req, response) => {
+    const timer = setTimeout(() => {
+      response.writeHead(302, { Location: `https://fixture.invalid/${Number(req.url.slice(1) || 0) + 1}` });
+      response.end();
+    }, 30);
+    response.on('close', () => clearTimeout(timer));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const get = (url, options, callback) => http.get(
+    `http://127.0.0.1:${server.address().port}${new URL(url).pathname}`, options, callback);
+  await assert.rejects(downloadFile('https://fixture.invalid/0', path.join(cache, 'partial'),
+    { get, timeoutMs: 80, log: () => {} }), /total time limit/);
+});
+
+test('failed source diagnostics retain the cause without URL credentials or query secrets', async t => {
+  const cache = directory(t), messages = [];
+  const url = 'https://account:secret@mirror.test/file?token=private';
+  await assert.rejects(ensureArchive({ sha256: hash('unused'), urls: [url] }, cache, {
+    log: message => messages.push(message),
+    download: async () => { throw Object.assign(Error('Cannot fetch ' + url), { code: 'ETIMEDOUT' }); },
+  }), /Cannot fetch/);
+  assert.ok(messages.some(message => message.includes('mirror.test/file failed: ETIMEDOUT')));
+  assert.ok(messages.every(message => !/account|secret|private|token=/.test(message)));
 });
 
 test('archive cache checks bytes again and works offline after a verified download', async t => {

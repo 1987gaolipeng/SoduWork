@@ -223,7 +223,8 @@ async def _conversation_dispatch_contract():
             await connection.run_sync(table.create)
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-            client = models.Client(id="client-smoke", user_ref="owner")
+            client = models.Client(id="client-smoke", user_ref="owner",
+                                   last_seen_at=datetime.now(timezone.utc))
             session.add(client)
             await session.flush()  # Owner snapshot listeners read the persisted device.
             plan = models.AiSchedule(id="plan-smoke", title="汇总周报", note="形成可审阅简报",

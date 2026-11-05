@@ -27,7 +27,8 @@ const PRERELEASE = 0, RELEASE = 1;
 function parseVersion(value) {
   const match = VERSION.exec(String(value || '').trim());
   if (!match) return null;
-  const [major, minor, patch, beta] = match.slice(1).map(Number);
+  const [major, minor, patch] = match.slice(1, 4).map(Number);
+  const beta = match[4] === undefined ? undefined : Number(match[4]);
   // Matches the Hub ordering: stable releases outrank their own prereleases.
   return [major, minor, patch, beta === undefined ? RELEASE : PRERELEASE, beta || 0];
 }

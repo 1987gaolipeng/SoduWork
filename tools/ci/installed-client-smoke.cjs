@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 const { spawn, spawnSync } = require('node:child_process');
 const { waitForRenderer } = require('./installed-client-inspection.cjs');
 const { acceptanceTiming } = require('./installed-client-timing.cjs');
+const { connect } = require('./installed-client-cdp.cjs');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function main() {
@@ -54,16 +55,23 @@ async function main() {
   let launchError;
   child.on('error', error => { launchError = error; });
   const report = { ok: false, entry, installRoot, profile, expectedVersion, markerMode, timing,
-    startedAt: new Date().toISOString(), pages: [], limitations: ['No authenticated Hub, model call, or interactive desktop acceptance.'] };
+    startedAt: new Date().toISOString(), phases: [], currentPhase: 'launch', pages: [], limitations: ['No authenticated Hub, model call, or interactive desktop acceptance.'] };
+  const started = Date.now();
+  const phase = name => { report.currentPhase = name; report.phases.push({ phase: name, elapsedMs: Date.now() - started }); };
+  child.on('exit', (code, signal) => { report.processExit = { code, signal, elapsedMs: Date.now() - started, phase: report.currentPhase }; });
+  const trace = scope => value => report.phases.push({ phase: report.currentPhase, scope, ...value });
   if (process.platform === 'darwin') report.limitations.push(
     'Isolated macOS test uses mock Keychain; system Keychain authorization and credential migration are not certified.');
   const sockets = [];
   const timeout = setTimeout(() => child.kill(), timing.totalMs);
   try {
     let pages = [];
+    phase('renderer-discovery');
     const discoveryDeadline = Date.now() + timing.discoveryMs;
     while (Date.now() < discoveryDeadline) {
       if (launchError) throw launchError;
+      if (process.platform === 'darwin' && (child.exitCode !== null || child.signalCode !== null))
+        throw Error('Installed application exited before opening a renderer');
       try {
         const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(1000) });
         pages = (await response.json()).filter(row => row.type === 'page' && row.url.startsWith('file:'));
@@ -72,56 +80,42 @@ async function main() {
       await delay(500);
     }
     assert.ok(pages.length, 'Installed application never opened a renderer');
-    const response = await fetch(`http://127.0.0.1:${inspectorPort}/json/list`);
+    phase('main-inspector-discovery');
+    const response = await fetch(`http://127.0.0.1:${inspectorPort}/json/list`, { signal: AbortSignal.timeout(timing.commandMs) });
     const targets = await response.json();
-    const mainSocket = new WebSocket(targets[0].webSocketDebuggerUrl); sockets.push(mainSocket);
-    await new Promise((resolve, reject) => { mainSocket.onopen = resolve; mainSocket.onerror = reject; });
-    let mainId = 0;
-    const evaluateMain = expression => new Promise((resolve, reject) => {
-      const id = ++mainId;
-      const timer = setTimeout(() => reject(Error('Main process inspection timed out')), 5000);
-      mainSocket.onmessage = event => {
-        const message = JSON.parse(event.data);
-        if (message.id !== id) return;
-        clearTimeout(timer);
-        if (message.error || message.result.exceptionDetails) reject(Error(JSON.stringify(message)));
-        else resolve(message.result.result.value);
-      };
-      mainSocket.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, returnByValue: true } }));
-    });
+    assert.ok(targets[0]?.webSocketDebuggerUrl, 'Main inspector target is missing');
+    const mainSocket = await connect(targets[0].webSocketDebuggerUrl, { timeoutMs: timing.commandMs, trace: trace('main') }); sockets.push(mainSocket);
+    const evaluateMain = async expression => {
+      const value = await mainSocket.call('Runtime.evaluate', { expression, returnByValue: true });
+      assert.equal(value.exceptionDetails, undefined, 'Main process inspection failed');
+      return value.result.value;
+    };
+    phase('main-runtime-identity');
     report.runtimeStart = await evaluateMain("(()=>{const {app}=process.mainModule.require('electron');return {version:app.getVersion(),arch:process.arch,pid:process.pid,exe:process.execPath,profile:app.getPath('userData'),appPath:app.getAppPath(),packaged:app.isPackaged}})()");
     if (timing.translated) assert.equal(report.runtimeStart.arch, 'x64', 'Expected the inspected Intel application');
     assert.equal(report.runtimeStart.version, expectedVersion, 'Running application version differs');
     assert.equal(path.resolve(report.runtimeStart.profile).toLowerCase(), path.resolve(profile).toLowerCase(), 'Application ignored profile isolation');
     assert.equal(report.runtimeStart.packaged, true, 'Expected the actual installed application');
     for (const page of pages) {
-      const socket = new WebSocket(page.webSocketDebuggerUrl); sockets.push(socket);
-      await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
-      let id = 0;
-      const call = (method, params = {}) => new Promise((resolve, reject) => {
-        const requestId = ++id;
-        const timer = setTimeout(() => { socket.removeEventListener('message', listener); reject(Error(method + ' timed out')); }, timing.commandMs);
-        function listener(event) {
-          const value = JSON.parse(event.data);
-          if (value.id !== requestId) return;
-          clearTimeout(timer); socket.removeEventListener('message', listener);
-          value.error ? reject(Error(JSON.stringify(value.error))) : resolve(value.result);
-        }
-        socket.addEventListener('message', listener);
-        socket.send(JSON.stringify({ id: requestId, method, params }));
-      });
+      phase('renderer-connect-' + report.pages.length);
+      const socket = await connect(page.webSocketDebuggerUrl, { timeoutMs: timing.commandMs, trace: trace('renderer-' + report.pages.length) }); sockets.push(socket);
+      const call = socket.call;
+      phase('renderer-ready-' + report.pages.length);
       const dom = await waitForRenderer(call, { timeoutMs: timing.rendererMs });
       assert.equal(dom.ready, 'complete');
       assert.ok(dom.scripts > 0 && dom.body.length > 0, 'Renderer is empty');
       const key = 'soduwork-install-acceptance-marker';
+      phase('renderer-data-' + report.pages.length);
       if (markerMode === 'write') await call('Runtime.evaluate', { expression: `localStorage.setItem('${key}','preserved')` });
       const stored = await call('Runtime.evaluate', { returnByValue: true, expression: `localStorage.getItem('${key}')` });
       assert.equal(stored.result.value, 'preserved', 'Renderer user data was not preserved');
+      phase('renderer-screenshot-' + report.pages.length);
       const shot = await call('Page.captureScreenshot', { format: 'png' });
       const screenshot = output + '.page-' + report.pages.length + '.png';
       fs.writeFileSync(screenshot, Buffer.from(shot.data, 'base64'));
       report.pages.push({ ...dom, screenshot, localStoragePreserved: true });
       if (page === pages.at(-1)) {
+        phase('graceful-exit');
         // Ask Electron to exit normally through its local main-process inspector.
         // This is automation, not evidence of clicking the native confirmation UI.
         await evaluateMain("process.mainModule.require('electron').session.defaultSession.flushStorageData(); setTimeout(() => process.mainModule.require('electron').app.quit(), 100); true");
@@ -139,6 +133,7 @@ async function main() {
       socket.close();
     }
     report.ok = true;
+    phase('complete');
   } catch (error) { report.error = error.stack; throw error; }
   finally {
     clearTimeout(timeout);

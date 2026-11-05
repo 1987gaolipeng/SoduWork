@@ -6,6 +6,15 @@ const os = require('node:os');
 const path = require('node:path');
 const runtime = require('../scripts/prepare-python-runtime.cjs');
 
+test('CI Python uses only the configured mirror while local fallback remains available', () => {
+  const environment = { SODUWORK_PYTHON_MIRROR: 'https://mirror.example/python', SODUWORK_RUNTIME_MIRROR_ONLY: '1' };
+  const release = runtime.releaseFor('darwin', 'arm64', environment);
+  assert.equal(release.urls.length, 1);
+  assert.ok(release.urls[0].startsWith(environment.SODUWORK_PYTHON_MIRROR + '/'));
+  assert.equal(runtime.releaseFor('darwin', 'arm64', { ...environment, SODUWORK_RUNTIME_MIRROR_ONLY: '' }).urls.length, 2);
+  assert.throws(() => runtime.releaseFor('darwin', 'arm64', { ...environment, SODUWORK_PYTHON_MIRROR: '' }), /configured mirror/);
+});
+
 test('Python archive matrix is immutable and rejects unsupported targets and unsafe mirrors', () => {
   for (const platform of ['win32', 'darwin', 'linux']) for (const arch of ['x64', 'arm64']) {
     const item = runtime.releaseFor(platform, arch, {});
