@@ -284,6 +284,32 @@ function _agCopy(a, field, fallback = '') {
   return _agMessage(a?.copy?.[field], fallback || a?.[field] || '');
 }
 
+/* Phrase translation for server-composed job copy. The backend stays Chinese;
+ * lines rendered inside <pre data-alog> never pass through the DOM adapter,
+ * so they are translated here, per line, before escaping. */
+function _agTx(value) {
+  const text = String(value == null ? '' : value);
+  let out = text;
+  try { out = global.SoduWorkI18n?.translateText?.(text) || text; } catch (_) { return text; }
+  if (out !== text) return out;
+  /* Trailing parenthetical the exact catalog cannot match
+   * (e.g. "gpt-5（走我自己的额度）" -> model id + translated suffix). */
+  let m = text.match(/^([\s\S]*?)(（[^（）]{1,24}）)$/);
+  if (m) {
+    const suffix = _agTx(m[2]);
+    if (suffix !== m[2]) return m[1] + suffix;
+  }
+  /* Known-label prefix split so the label and reason translate independently
+   * (templates whose parameter contains sentence punctuation are skipped by
+   * the catalog, e.g. "OpenCode 安装失败：npm ERR! code 1"). */
+  m = text.match(/^(\s*)([^：:\n]{1,14}：)([\s\S]+)$/);
+  if (m) {
+    const head = _agTx(m[2]);
+    if (head !== m[2]) return m[1] + head + _agTx(m[3]);
+  }
+  return out;
+}
+
 function _agPresentation(a, ak) {
   const aliases = { needmodel: 'nollm', auth: 'unauthed', probeFailed: 'bad' };
   const declared = a.setupState || a.displayState || a.state;
@@ -559,7 +585,7 @@ function _agModelHtml(a) {
         (fallback && !cur ? '（' + esc(fallback) + '）' : '') + '</option>' +
       list.map(m => '<option value="' + esc(m.name) + '"' +
         (m.name === cur ? ' selected' : '') + '>' + esc(m.label || m.name) +
-        (m.provider ? ' · ' + esc(m.provider) : '') +
+        (m.provider ? ' · ' + esc(_agTx(m.provider)) : '') +
         (m.keyFrom === 'mine' ? ' · 走我的额度' : '') + '</option>').join('') +
       /*
        * Keep unavailable selected models visible and labeled rather than silently reverting the
@@ -601,8 +627,8 @@ function _agBodyHtml(a, s, ak) {
       (status.probeCurrent && (p.steps || []).length
         ? '<div class="ag-steps">' + p.steps.map(st =>
             '<div class="ag-step is-' + (st.ok ? 'ok' : 'bad') + '"><em>' +
-            (st.ok ? '✓' : '✕') + '</em><span>' + esc(st.name) + '：' +
-            esc(st.detail || '') + '</span></div>').join('') + '</div>'
+            (st.ok ? '✓' : '✕') + '</em><span>' + esc(_agTx(st.name)) + '：' +
+            esc(_agTx(st.detail || '')) + '</span></div>').join('') + '</div>'
         : '')
       : '') +
     '<div class="ag-cfg"><b>配置方式</b><span>' + esc(a.configHow || '') + '</span></div>' +
@@ -675,25 +701,28 @@ function _agJobHtml(job) {
     : harnessProbe
     ? '验证日常执行与完整回复；会使用所选模型额度，最多 3 分钟。'
     : '这一步可能要几十秒，日志在下面滚';
-  const lines = (job.lines || []).slice(-40).join('\n');
+  /* Log lines live inside <pre data-alog>, which the DOM adapter deliberately
+   * leaves alone; translate each line here instead. The head-model filter in
+   * _agPoll still matches the original Chinese prefix on raw j.lines. */
+  const lines = (job.lines || []).slice(-40).map(l => esc(_agTx(l))).join('\n');
   return '<div class="ag-job' + (harnessProbe ? ' is-harness2-probe' : '') + '">' +
     '<div class="ag-job-h">' +
       (running ? '<span class="ag-spin"></span>' : '') +
-      '<b>' + (running ? title + '…' : (job.ok ? '完成' : failed)) + '</b>' +
-      '<span>' + esc(job.detail || (running ? runningHint : '')) + '</span>' +
+      '<b>' + (running ? _agTx(title) + '…' : (job.ok ? _agTx('完成') : _agTx(failed))) + '</b>' +
+      '<span>' + esc(_agTx(job.detail || (running ? runningHint : ''))) + '</span>' +
       (running ? '' : '<button class="ag-job-t btn-mini" data-aclose="' + esc(job.key) + '">收起</button>') +
     '</div>' +
-    '<pre class="ag-log" data-alog="' + esc(job.key) + '">' + esc(lines) + '</pre>' +
+    '<pre class="ag-log" data-alog="' + esc(job.key) + '">' + lines + '</pre>' +
   '</div>';
 }
 
 function _agAgo(sec) {
   const d = Date.now() / 1000 - Number(sec || 0);
   if (!sec || d < 0) return '';
-  if (d < 60) return '刚刚';
-  if (d < 3600) return Math.floor(d / 60) + ' 分钟前';
-  if (d < 86400) return Math.floor(d / 3600) + ' 小时前';
-  return Math.floor(d / 86400) + ' 天前';
+  if (d < 60) return _agTx('刚刚');
+  if (d < 3600) return _agTx(Math.floor(d / 60) + ' 分钟前');
+  if (d < 86400) return _agTx(Math.floor(d / 3600) + ' 小时前');
+  return _agTx(Math.floor(d / 86400) + ' 天前');
 }
 
 function _agBind(box) {
