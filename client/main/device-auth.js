@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-let _safeStorage = null;
+let _credentials = null;
 let _activeHub = '';
 let _selectionVersion = 0;
 const _sessions = new Map();
@@ -66,11 +66,7 @@ function _changed(id) {
 }
 function _newDeviceId() { return 'soduwork-' + crypto.randomBytes(12).toString('hex'); }
 function _available() {
-  if (!_safeStorage || !_safeStorage.isEncryptionAvailable()) return false;
-  try {
-    return process.platform !== 'linux' || _safeStorage.getSelectedStorageBackend() !== 'basic_text' ||
-      process.env.SODUWORK_ALLOW_INSECURE_KEYSTORE === '1';
-  } catch (_) { return true; }
+  return !!_credentials?.available();
 }
 function _readDoc(app) {
   const file = _file(app);
@@ -138,10 +134,8 @@ function _writeDoc(app, doc) {
     }
   }
 }
-function _decrypt(row) {
-  if (!_available() || !row || !row.cipher) return '';
-  try { return _safeStorage.decryptString(Buffer.from(row.cipher, 'base64')); }
-  catch (_) { return ''; }
+function _decrypt(app, row) {
+  return _credentials.decrypt(_file(app), row);
 }
 function _recoverRow(app, hub) {
   /*
@@ -152,7 +146,7 @@ function _recoverRow(app, hub) {
     const bak = JSON.parse(fs.readFileSync(_file(app) + '.bak', 'utf8'));
     const row = bak && bak.v === 1 && bak.profiles ? bak.profiles[_slot(hub)] : null;
     if (!row || !DEVICE_ID.test(String(row.clientId || '').trim())) return null;
-    return _decrypt(row) ? row : null;
+    return _decrypt(app, row) ? row : null;
   } catch (_) { return null; }
 }
 function _legacyRunner(app, hub, clientId) {
@@ -176,7 +170,7 @@ function _scrubRunner(app) {
   } catch (_) { /* runner runtime also sanitizes its config on configure */ }
 }
 function _ensure(app, raw) {
-  if (!_available()) throw new Error(TEXT.noStore);
+  if (!_available()) throw _credentials?.error() || new Error(TEXT.noStore);
   const hub = _origin(raw && raw.hub);
   if (!require('./hub-endpoint.cjs').accepts(app, hub)) throw new Error('此客户端使用固定的 SoduWork 服务');
   const requestedId = String(raw && raw.clientId || '').trim();
@@ -185,7 +179,9 @@ function _ensure(app, raw) {
   let row = doc.profiles[key] || null;
   let changed = false;
   let clientId = row && String(row.clientId || '').trim();
-  let secret = row ? _decrypt(row) : '';
+  let secret = row ? _decrypt(app, row) : '';
+  if (row && !DEVICE_ID.test(clientId) && process.platform === 'darwin')
+    throw new Error('设备凭据记录无效，已保留原记录，请联系支持人员检查');
   if (row && (!DEVICE_ID.test(clientId) || !secret)) {
     /*
      * Recover undecryptable credentials from a compatible backup first, then rebuild device
@@ -196,7 +192,7 @@ function _ensure(app, raw) {
       doc.profiles[key] = recovered;
       row = recovered;
       clientId = String(row.clientId || '').trim();
-      secret = _decrypt(row);
+      secret = _decrypt(app, row);
     } else {
       delete doc.profiles[key];
       row = null;
@@ -215,7 +211,7 @@ function _ensure(app, raw) {
     clientId = legacy ? requestedId : _newDeviceId();
     if (!DEVICE_ID.test(clientId)) throw new Error(TEXT.badDevice);
     secret = legacy || crypto.randomBytes(32).toString('base64url');
-    row = { hub, clientId, cipher: _safeStorage.encryptString(secret).toString('base64'),
+    row = { hub, clientId, cipher: _credentials.encrypt(secret).toString('base64'),
       createdAt: new Date().toISOString() };
     doc.profiles[key] = row;
     changed = true;
@@ -254,13 +250,13 @@ function identity(app, hub = '', clientId = '') {
     if (!row) row = Object.values(doc.profiles).sort((a, b) =>
       String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0] || null;
     if (!row || (clientId && row.clientId !== clientId)) return null;
-    const secret = _decrypt(row);
+    const secret = _decrypt(app, row);
     return secret ? { hub: row.hub, clientId: row.clientId, secret } : null;
   } catch (_) { return null; }
 }
 
 function selectHub(app, rawHub) {
-  if (!_available()) return { ok: false, error: TEXT.noStore };
+  if (!_available()) return { ok: false, error: _credentials?.error()?.message || TEXT.noStore };
   try {
     // hub-endpoint decides: editable local-code runs persist a new endpoint,
     // fixed installs only ever accept their own hub.
@@ -275,7 +271,7 @@ function selectHub(app, rawHub) {
     }
     _activate(hub, previousHub);
     const row = doc.profiles[_slot(hub)] || null;
-    return { ok: true, hub, ready: !!(row && _decrypt(row)) };
+    return { ok: true, hub, ready: !!(row && _decrypt(app, row)) };
   } catch (error) {
     return { ok: false, error: String(error && error.message || error) };
   }
@@ -642,7 +638,7 @@ function notifySessionChanged(app, sender, result) {
 }
 
 function install({ app, ipcMain, safeStorage }) {
-  _safeStorage = safeStorage;
+  _credentials = require('./device-credential-store.cjs').create({ safeStorage, app });
   require('./device-auth-request').setIdentityRefresher(async previous => {
     const before = identity(app);
     if (!before || before.hub !== previous.hub || before.clientId !== previous.clientId) return null;

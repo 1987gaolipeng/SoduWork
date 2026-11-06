@@ -5991,8 +5991,13 @@
     },
     {
       "path": "client/main/device-auth.js",
-      "bytes": 30457,
-      "sha256": "fcedb29228c1f0b693e3499c3fa66c3709901caa3975f3dbd58bcc5416cad12c"
+      "bytes": 30416,
+      "sha256": "bf3b9b076c6f4031b2b080e4d91ec1e8665e2f598f7496d8f34dc51367a2b2db"
+    },
+    {
+      "path": "client/main/device-credential-store.cjs",
+      "bytes": 2754,
+      "sha256": "9d58b779a5d60a3c5a4acde8266450ae74fab3904a84bf25b1dbfb1f74e616d5"
     },
     {
       "path": "client/main/distribution.cjs",
@@ -8506,8 +8511,13 @@
     },
     {
       "path": "client/tests/device-auth.test.cjs",
-      "bytes": 35063,
-      "sha256": "4e9f22b30ffde7959b00a2052b9e417819ae17b3d1b96e6f97139fb586bf5942"
+      "bytes": 35418,
+      "sha256": "b18d0f08e86bbc4c84a457fc4efe8b63efa0aa27f4054974c203671c94dc25ff"
+    },
+    {
+      "path": "client/tests/device-keychain.test.cjs",
+      "bytes": 7847,
+      "sha256": "82d6bcd24e58cff04f2caeb42dcec504e155a23d1fe6be36a2ff351af9412baf"
     },
     {
       "path": "client/tests/device-session-api.test.cjs",

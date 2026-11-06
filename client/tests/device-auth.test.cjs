@@ -565,7 +565,11 @@ test('non-EXDEV write failures still fail closed without corrupting existing cre
   assert.equal(fs.existsSync(path.join(f.root, 'device-auth.json.next')), false);
 });
 
-function healingFixture() {
+function healingFixture(t) {
+  // Windows recovery remains supported. macOS synchronous Keychain errors are
+  // ambiguous and must preserve the identity (covered by device-keychain tests).
+  const store = require('../main/device-credential-store.cjs'), create = store.create;
+  t.mock.method(store, 'create', options => create({ ...options, platform: 'win32' }));
   const base = fixture();
   const safeStorage = {
     isEncryptionAvailable: () => true,
@@ -606,8 +610,8 @@ async function sessionResponseFixture(requests, user) {
   }) };
 }
 
-test('unreadable device rows self-heal from the .bak copy instead of blocking login', async (t) => {
-  const f = healingFixture();
+test('Windows unreadable device rows self-heal from the .bak copy instead of blocking login', async (t) => {
+  const f = healingFixture(t);
   t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
   const otherHub = 'http://other-hub.fixture.invalid';
   seedDoc(f.root, { v: 1, activeHub: HUB, profiles: {
@@ -640,8 +644,8 @@ test('unreadable device rows self-heal from the .bak copy instead of blocking lo
     'profiles of other hubs must not be touched by the recovery');
 });
 
-test('unreadable device rows without a usable backup re-enroll a fresh identity and still log in', async (t) => {
-  const f = healingFixture();
+test('Windows unreadable device rows without a usable backup re-enroll a fresh identity and still log in', async (t) => {
+  const f = healingFixture(t);
   t.after(() => fs.rmSync(f.root, { recursive: true, force: true }));
   seedDoc(f.root, { v: 1, activeHub: HUB, profiles: { [slot(HUB)]: brokenRow(HUB) } });
   seedDoc(f.root, { v: 1, activeHub: HUB, profiles: { [slot(HUB)]: brokenRow(HUB) } }, '.bak');
