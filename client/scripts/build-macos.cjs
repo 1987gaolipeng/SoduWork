@@ -5,7 +5,8 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { prepareRunner } = require('./prepare-runner.cjs');
 const { macosBuildEnvironment } = require('./macos-build-environment.cjs');
-const { notarizeArtifact, notarizeEnabled, signingIdentity } = require('./notarize-macos.cjs');
+const { notarizeArtifact, notarizeEnabled, signingIdentity, restoreNotarizedApp } = require('./notarize-macos.cjs');
+const { candidateVersion } = require('./client-build-version.cjs');
 
 function signingKeychain(env = process.env) {
   return env.SODUWORK_MAC_KEYCHAIN || (env.HOME ? path.join(env.HOME, 'Library/Keychains/login.keychain-db') : '');
@@ -54,8 +55,33 @@ function buildTargets({ root, platform, env, run, prepare, architectures, hostAr
     assert.ok(architectures.includes(arch === 'x64' ? 'x86_64' : 'arm64'), 'Bundled Runner architecture differs from ' + arch);
     run(python, [path.join(root, 'tools/ci/verify-runner-skills.py'), runner], { env, cwd: root, stdio: 'inherit' });
     // Finish each package before replacing the shared Runner with the next architecture.
-    run(process.execPath, [path.join(client, 'node_modules/electron-builder/cli.js'), '--mac', '--' + arch, '--publish', 'never',
-      '--config.mac.identity=-'], { env, cwd: client, stdio: 'inherit' });
+    beforePackages({ arch, env });
+    for (const id of distributions || [env.SODUWORK_DISTRIBUTION || 'internal']) {
+      const profileEnv = { ...env, SODUWORK_DISTRIBUTION: id };
+      beforePackage();
+      const signed = identity && notarizeEnabled(env);
+      const dmgPath = signed ? path.join(client, 'dist', id, `SoduWork-${candidateVersion(env, root)}-mac-${arch}.dmg`) : '';
+      const checkpoint = signed ? require('./macos-notary-dmg.cjs').checkpoint(dmgPath, profileEnv) : null;
+      const restored = checkpoint?.restore();
+      // Resume the immutable signed App before invoking electron-builder, so a
+      // notary wait interruption does not repeat application assembly/signing.
+      const appPath = path.join(client, 'dist', id, 'restored-app-' + arch,
+        require('../../tools/ci/client-distribution.cjs').profile(profileEnv).productName + '.app');
+      const restoredApp = !restored && signed && restoreNotarizedApp({ appPath, env: profileEnv, run });
+      if (!restored) run(process.execPath, [path.join(client, 'node_modules/electron-builder/cli.js'), '--config', 'scripts/distribution-builder.cjs', '--mac', '--' + arch, '--publish', 'never',
+        '--config.mac.identity=' + (identity || '-'),
+        ...(identity && notarizeEnabled(env) ? ['--config.mac.hardenedRuntime=true', '--config.afterSign=scripts/notarize-macos.cjs'] : []),
+        ...(restoredApp ? ['--prepackaged', appPath] : []),
+        ...(distributions ? ['--config.npmRebuild=false'] : [])], { env: profileEnv, cwd: client, stdio: 'inherit' });
+      if (signed) {
+        // The app inside is already notarized and stapled by the afterSign hook;
+        // notarizing the DMG as well lets the quarantined disk image mount offline.
+        assert.ok(fs.existsSync(dmgPath), 'electron-builder did not produce ' + path.relative(root, dmgPath));
+        if (checkpoint && !restored) checkpoint.save();
+        notarizeArtifact({ artifactPath: dmgPath, env: profileEnv, run });
+      }
+      afterPackage(profileEnv, arch);
+    }
   }
 }
 module.exports = { build };

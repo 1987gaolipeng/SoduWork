@@ -56,6 +56,11 @@ function notarizeApp({ appPath, env, run }) {
   }
 }
 
+function restoreNotarizedApp({ appPath, env, run }) {
+  if (!env.SODUWORK_MAC_NOTARY_STATE_DIR || !env.SODUWORK_MAC_BUILD_INPUT_ID) return false;
+  return require('./macos-notary-app.cjs').notarizeApp({ appPath, env, run, notarizeArtifact, resumeOnly: true });
+}
+
 // electron-builder afterSign hook (top-level option): runs after the app is
 // signed and before the DMG is packaged, so the DMG ships a stapled app that
 // passes Gatekeeper offline. No-ops unless a real Developer ID build is active.
@@ -72,3 +77,4 @@ exports.notaryKeychain = notaryKeychain;
 exports.notarizeEnabled = notarizeEnabled;
 exports.notarizeArtifact = notarizeArtifact;
 exports.notarizeApp = notarizeApp;
+exports.restoreNotarizedApp = restoreNotarizedApp;
