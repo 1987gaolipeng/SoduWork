@@ -4,6 +4,13 @@
   let catalog = { items: [], submissions: [], categories: [] };
   let loadRevision = 0;
   let libraryFilters = { source: 'all', category: '', status: 'all' };
+  const systemCopy = source => global.SoduWorkI18n?.html?.(source, source) || h(source);
+  function displayCopy(item, field) {
+    if (field === 'description' && !item.description) return systemCopy('公司发布的标准工作方法');
+    const source = item.builtIn && (item.locales?.['zh-CN'] || item.locales?.['zh-cn'])?.[field];
+    return source && global.SoduWorkI18n?.html ? global.SoduWorkI18n.html(source, source)
+      : '<span data-user-content>' + h(item[field] || '') + '</span>';
+  }
   const { icons: ICON, h, copyText, sourceName, nodeName, trustName, componentText, riskName,
     provenanceName, processBadge, processMetaHtml, processSectionHtml } = global.SoduWorkPluginCatalogFormat;
   async function load() {
@@ -143,9 +150,9 @@
       (item.enabled === false ? ' is-disabled' : '') + '"><button type="button" class="cap-plugin-open" data-plugin="' + h(item.pluginId) +
       '" aria-label="打开插件 ' + h(item.name) + '">' +
       '<span class="cap-plugin-brand ' + sourceClass(item) + ' ' + toneClass(item, hasWorkflow) + ' icon-' + iconKind(item, hasWorkflow) + '" aria-hidden="true">' + brandIcon(item, hasWorkflow) + '</span>' +
-      "<span class=\"cap-plugin-copy\"><span class=\"cap-plugin-title\"><b data-user-content>" + h(item.name) +
+      '<span class="cap-plugin-copy"><span class="cap-plugin-title"><b>' + displayCopy(item, 'name') +
         '</b></span>' +
-      "<span class=\"cap-plugin-desc\"" + (item.description ? ' data-user-content' : '') + '>' + h(item.description || '公司发布的标准工作方法') + '</span>' +
+      '<span class="cap-plugin-desc">' + displayCopy(item, 'description') + '</span>' +
       '<span class="cap-plugin-meta"><em>' + h(source) + '</em>' +
         (category ? '<i>·</i><em class="cap-plugin-category">' + h(category) + '</em>' : '') + '</span></span>' +
       '</button><div class="cap-plugin-side"><span class="cap-plugin-card-status is-' + h(!platformReady || readiness.runtimeBlocked ? 'warning' : life.tone) + '">' +
@@ -256,7 +263,7 @@
     ];
     const quality = cap.qualitySummary || {};
     const provenance = item.provenance || {};
-    const authorName = item.authorName || provenance.publisherName || '\u672a\u77e5\u4f5c\u8005';
+    const authorName = item.builtIn ? 'SoduWork' : item.authorName || provenance.publisherName || '\u672a\u77e5\u4f5c\u8005';
     const openSource = item.openSource || {};
     const entryNames = [
       entrypoints.conversation !== false ? '对话' : '',
@@ -319,14 +326,14 @@
         '<button class="btn-mini" id="capEnterpriseRemove">从我的对话中停用</button>' : '');
     const layer = ctx.openModal(item.name, '\u4f5c\u8005 \u00b7 ' + authorName + ' \u00b7 v' + item.version,
       global.SoduWorkPluginPresentation.tabs() + '<div class="cap-detail-pane" id="capDetailOverview" role="tabpanel" aria-labelledby="capDetailOverviewTab">' +
-      '<div class="cap-plugin-detail-head"><span class="cap-plugin-brand ' + toneClass(item, hasWorkflow) + ' icon-' + iconKind(item, hasWorkflow) + '">' + brandIcon(item, hasWorkflow) + "</span><div><b data-user-content>" + h(item.name) +
-      '</b>' + processBadge(item) + "<p" + (item.description ? ' data-user-content' : '') + '>' + h(item.description || '公司发布的标准工作方法') + '</p><em>' +
-      h(scope + ' \u00b7 \u4f5c\u8005 \u00b7 ' + authorName) + '</em></div></div>' + global.SoduWorkPluginLifecycle.html(item, readiness, h) + processSectionHtml(item) +
+      '<div class="cap-plugin-detail-head"><span class="cap-plugin-brand ' + toneClass(item, hasWorkflow) + ' icon-' + iconKind(item, hasWorkflow) + '">' + brandIcon(item, hasWorkflow) + '</span><div><b>' + displayCopy(item, 'name') +
+      '</b>' + processBadge(item) + '<p>' + displayCopy(item, 'description') + '</p><em>' +
+      systemCopy(scope) + ' · ' + systemCopy('作者') + ' · <span data-user-content>' + h(authorName) + '</span></em></div></div>' + global.SoduWorkPluginLifecycle.html(item, readiness, h) + processSectionHtml(item) +
       uiPresentation.notice +
       '<section class="cap-detail-section"><b>' + (hasWorkflow ? (uiPresentation.rows.length ? '人工需求流程' : '自动化流程') : '调用方式') +
       '</b><div class="cap-flow-line">' + (hasWorkflow ? flow.map(function (node, i) {
-        return (i ? '<i class="arrow">→</i>' : '') + '<span><small>' + (i + 1) + "</small><b" + (node.name ? ' data-user-content' : '') + '>' +
-          h(node.name || nodeName(node.type)) + '</b><em>' + h(nodeName(node.type)) + '</em></span>';
+        return (i ? '<i class="arrow">→</i>' : '') + '<span><small>' + (i + 1) + "</small><b" + (node.name && !item.builtIn ? ' data-user-content' : '') + '>' +
+          (item.builtIn ? systemCopy(node.name || nodeName(node.type)) : h(node.name || nodeName(node.type))) + '</b><em>' + h(nodeName(node.type)) + '</em></span>';
       }).join('') : '<span><small>✓</small><b>直接使用能力</b><em>' +
         h(entryNames.join(' · ') || '按授权入口使用') + '</em></span>') + '</div></section>' +
       (global.SoduWorkPlatformConnections ? global.SoduWorkPlatformConnections.markup(item) : '') +
@@ -360,6 +367,10 @@
         permissionReasons.map(h).join(' · ') + '</p>' : '') + '</div>',
       personalActions + enterpriseAction + uiPresentation.action);
     const detailModal = layer.querySelector('.cap-modal'); if (detailModal) detailModal.classList.add('cap-plugin-detail-modal');
+    const heading = layer.querySelector('#capModalTitle');
+    if (heading) heading.innerHTML = displayCopy(item, 'name');
+    const subtitle = layer.querySelector('#capModalSub');
+    if (subtitle) subtitle.innerHTML = systemCopy('作者') + ' · <span data-user-content>' + h(authorName) + '</span> · v' + h(item.version);
     global.SoduWorkPluginPresentation.detail(layer, ctx);
     global.SoduWorkPluginAccess?.bind(layer, item, ctx, openMaker, async function (permissions, isCurrent) {
       const snapshot = await load();

@@ -51,7 +51,7 @@ test('cold Runner history includes persisted task sources and refreshes after jo
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-harness-history-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const app = { getPath: () => root }, ref = 'runner-source-fixture';
-  const journal = require('../main/conversation/task-output-journal').create(app, ref);
+  const journal = await require('../main/conversation/task-output-journal').create(app, ref);
   journal.append(1, { kind: 'message', role: 'assistant', text: 'Task result', taskId: 'task', sourceAgent: { agentId: 'pi' } });
   journal.append(2, { kind: 'tool', event: { type: 'tool_execution_end', sourceAgent: { agentId: 'codex' } } });
   journal.append(3, { kind: 'message', role: 'user', text: 'User request', sourceAgent: { agentId: 'opencode' } });

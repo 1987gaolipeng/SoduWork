@@ -89,9 +89,14 @@ async def _save(session, row, attempts, phase, result, *, retry=True, commit=Tru
 async def _accept(session, row, attempts, handoff, receipt):
     # The next default turn must see the choice belonging to this receipt,
     # even if the Hub dies immediately after committing acceptance.
+    ref = str((row.payload or {}).get("ref") or "")
     changed = await _save(session, row, attempts, "accepted", receipt, commit=False)
     if changed:
         await cloud_turn_selection.accepted(session, handoff, receipt, commit=False)
+        from . import task_rework
+        await task_rework.acknowledge_continuation(session, row.task_id,
+            ref, row.created_at,
+            actor=row.owner_client_id)
     await session.commit()
     return changed
 

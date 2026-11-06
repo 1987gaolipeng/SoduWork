@@ -36,6 +36,26 @@ class ConversationTurnsTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException):
             await conversation_turns.apply(None,self.task,{**self.body,"conversationId":"other"})
 
+    async def test_runner_continuation_preserves_rework_until_admission_and_does_not_redispatch(self):
+        from app.services import ai_exec
+        self.task.status = "doing"
+        pending = {"ref": "original", "feedback": "shorten", "state": "awaiting_executor"}
+        self.task.work_routing = {"reworkPending": pending, "conversationTurn": {
+            "turnId": "first", "conversationId": "conversation", "state": "completed", "executor": "dispatch"}}
+        with patch.object(ai_exec, "last_dispatch_event", AsyncMock(return_value=SimpleNamespace(detail={"ref": "original"}))):
+            for invalid in ({"continuationRef": "different"}, {"conversationId": "other"}, {"executor": "native"}):
+                with self.assertRaises(HTTPException):
+                    await conversation_turns.apply(None, self.task, {
+                        **self.body, "executor": "dispatch", "continuationRef": "original", **invalid})
+            body = {**self.body, "executor": "dispatch", "continuationRef": "original"}
+            receipt = await conversation_turns.apply(None, self.task, body)
+            self.assertEqual(receipt["continuationRef"], "original")
+            self.assertEqual(self.task.work_routing["reworkPending"], pending)
+            await conversation_turns.apply(None, self.task, {**body, "action": "start"})
+            await conversation_turns.apply(None, self.task, {**body, "action": "complete"})
+            self.assertEqual(self.task.work_routing["conversationTurn"]["state"], "completed")
+            self.assertEqual(self.task.work_routing["reworkPending"], pending)
+
     async def test_prepare_persists_execution_submission_mode(self):
         result = await conversation_turns.apply(None, self.task, {
             **self.body, "action": "prepare", "executionSubmissionMode": "manual",

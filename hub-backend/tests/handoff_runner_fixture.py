@@ -62,8 +62,16 @@ async def run():
         await actual_run(item)
     machine._run_admitted = run_admitted
     await asyncio.to_thread(local_base.reclaim)
+    recovered = asyncio.Event()
+    original_recover = machine._admission.recover
+    def recover(runs):
+        original_recover(runs)
+        recovered.set()
+    machine._admission.recover = recover
     machine._ensure_admission_loop()
-    await asyncio.sleep(0)
+    # The fixture's ready receipt includes journal recovery, not just scheduling
+    # the worker. A single loop tick does not finish its asynchronous archive scan.
+    await asyncio.wait_for(recovered.wait(), timeout=10)
     print(json.dumps({"ready": True}), flush=True)
     try:
         while line := await asyncio.to_thread(sys.stdin.readline):

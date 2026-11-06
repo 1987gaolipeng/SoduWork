@@ -141,7 +141,7 @@ def _conversation_use(item: dict, dependency: dict) -> dict:
 
 async def client_catalog(session: AsyncSession, org_id: str | None,
                          actor_id: str = "", user_id: str = "",
-                         visible_org_ids: set[str] | None = None) -> dict:
+                         visible_org_ids: set[str] | None = None, *, client=None) -> dict:
     """Return the published employee catalog without package paths, secret references, or
     administrative configuration.
     """
@@ -320,7 +320,7 @@ async def client_catalog(session: AsyncSession, org_id: str | None,
     wanted_mcp = sorted(set().union(*mcp_requirements.values())) \
         if mcp_requirements else []
     available_mcp = set((await mcp_servers.readiness(
-        session, wanted_mcp)).get("available") or []) if wanted_mcp else set()
+        session, wanted_mcp, client=client)).get("available") or []) if wanted_mcp else set()
     dependency_states = {
         plugin_id: {
             "ok": not bool(required - available_mcp),
@@ -365,7 +365,7 @@ async def client_catalog(session: AsyncSession, org_id: str | None,
     accepted_mcp = sorted({str(name) for version in accepted_versions.values()
                            for name in dict(version.capability_report or {}).get("mcpServers") or []})
     accepted_available = set((await mcp_servers.readiness(
-        session, accepted_mcp)).get("available") or []) if accepted_mcp else set()
+        session, accepted_mcp, client=client)).get("available") or []) if accepted_mcp else set()
     for item in rows:
         item.update(installation_states.get(item["pluginId"], {
             "installed": False, "installedVersion": "",

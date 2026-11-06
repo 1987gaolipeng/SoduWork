@@ -219,7 +219,7 @@ test('passive cloud replay preserves local token owners and refreshes a late nat
   const f = await fixture(t);
   const prefixMetric = { fromMessage: 0, toMessage: 1, tokens: 17, elapsedMs: 2000 };
   const saved = { adapterId: 'harness2', snapshot: { messages: f.messages.slice(), turnMetrics: [prefixMetric] } };
-  const view = require('../main/conversation/cloud-conversation-view').create({ app: { getPath: () => f.root },
+  const view = await require('../main/conversation/cloud-conversation-view').create({ app: { getPath: () => f.root },
     ref: 'passive-usage', record: { transferId: 'token-owner-fixture', sessionId: 'token-owner', taskId: 'task' }, saved });
   t.after(() => view.close());
   view.appendTaskMessage('user', 'Remote request', [], 'task', 'remote-user');
@@ -232,7 +232,7 @@ test('passive cloud replay preserves local token owners and refreshes a late nat
   assert.deepEqual(prefixMetric, { fromMessage: 0, toMessage: 1, tokens: 17, elapsedMs: 2000 });
   assert.deepEqual(view.uiSnapshot({ messageLimit: 1 }).turnMetrics, snap.turnMetrics);
   view.close();
-  const reopened = require('../main/conversation/cloud-conversation-view').create({ app: { getPath: () => f.root },
+  const reopened = await require('../main/conversation/cloud-conversation-view').create({ app: { getPath: () => f.root },
     ref: 'passive-usage-reopened', record: { transferId: 'token-owner-fixture', sessionId: 'token-owner', taskId: 'task' }, saved });
   t.after(() => reopened.close());
   assert.deepEqual(reopened.snapshot().turnMetrics, snap.turnMetrics);

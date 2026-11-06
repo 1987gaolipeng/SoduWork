@@ -12,6 +12,11 @@ body{font-family:system-ui;margin:0;background:#fff;color:var(--ink);font-size:1
 <script>
 // Only the host page and offline Hub directory are fixtures. Feature renderers are production scripts.
 window.SoduWorkAPI={agentSetup:async()=>null};window.petSay=message=>{window.lastNotice=message};
+// Exercise the public components independently of the retired management entry.
+const customHost=document.createElement('section');document.body.append(customHost);
+const openCustom=document.createElement('button');openCustom.id='fixtureOpenCustom';openCustom.textContent='Open custom runtime component';
+openCustom.onclick=()=>CustomAgents.open(()=>CustomAgents.mount(customHost));document.querySelector('#composer').append(openCustom);
+CustomAgents.mount(customHost);
 const composeHost=document.querySelector('#compose-host');composeHost.innerHTML=ComposeRuntime.controls('<svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="4"/></svg>');
 ComposeRuntime.bind(composeHost,{api:()=>soduWorkAPI.conversationSession,say:petSay,refresh:()=>{},close:()=>document.querySelector('#cpRuntimePop').classList.remove('show')});
 document.querySelector('#cpRuntime').addEventListener('click',()=>document.querySelector('#cpRuntimePop').classList.toggle('show'));

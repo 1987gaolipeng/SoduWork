@@ -527,7 +527,8 @@
   function matches(item) {
     const needle = query.trim().toLowerCase();
     if (!needle) return true;
-    return [item.name, item.description, item.source, item.templateKey, item.url]
+    return [item.name, item.description, item.source, item.templateKey, item.url,
+      window.SoduWorkBuiltinSkills?.text(item), window.SoduWorkBuiltinSkills?.text(item, 'description')]
       .some(value => String(value || '').toLowerCase().includes(needle));
   }
 

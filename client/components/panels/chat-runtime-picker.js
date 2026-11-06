@@ -104,17 +104,24 @@
             brand.append(node('span', mark, 'agent-monogram')); choice.append(brand);
           } else choice.append(node('span', '•', 'runtime-brand'));
           const runtimeHealth = runtime.availability || {};
-          const runtimeVersion = runtime.version || runtimeHealth.version || runtimeHealth.detectedVersion || '';
+          const rawVersion = runtime.version || runtimeHealth.version || runtimeHealth.detectedVersion || '';
+          const runtimeVersion = global.AgentBrand?.version({ key: runtime.id, version: rawVersion }) || rawVersion;
           const runtimeReady = runtimeHealth.ok === true || (Array.isArray(result && result.availableRuntimes) && result.availableRuntimes.some(row => row && row.id === runtime.id)) || (!Array.isArray(result && result.availableRuntimes) && runtime.id === 'pi');
           const runtimeChecking = checkingId === runtime.id;
           const copy = node('span', '', 'cp-runtime-copy');
           const head = node('span', '', 'cp-runtime-head');
-          head.append(node('b', runtime.displayName || runtime.id));
-          if (runtimeVersion) head.append(node('small', 'v' + runtimeVersion, 'cp-runtime-version'));
-          head.append(node('small', tx(runtime.modelMode === 'account' ? '个人账号' : '企业模型'), 'cp-runtime-mode'));
+          const name = node('b', runtime.displayName || runtime.id);
+          name.title = name.textContent; name.setAttribute('data-user-content', ''); head.append(name);
+          if (runtimeVersion) {
+            const version = node('small', 'v' + runtimeVersion, 'cp-runtime-version');
+            version.title = version.textContent; version.setAttribute('translate', 'no'); head.append(version);
+          }
+          const mode = node('small', tx(runtime.modelMode === 'account' ? '个人账号' : '企业模型'), 'cp-runtime-mode');
+          mode.title = mode.textContent; head.append(mode);
           copy.append(head);
           const meta = node('span', '', 'cp-runtime-meta');
-          const state = node('em', runtimeChecking ? tx('检测中') : (runtimeReady ? (runtimeVersion ? 'v' + runtimeVersion : tx('可用')) : (selected ? '' : tx('待检测'))), 'cp-runtime-state');
+          const state = node('em', runtimeChecking ? tx('检测中') : (runtimeReady ? tx('可用') : (selected ? '' : tx('待检测'))), 'cp-runtime-state');
+          state.title = state.textContent;
           state.dataset.state = runtimeChecking ? 'checking' : (runtimeReady ? 'ready' : 'unknown'); state.hidden = selected && !runtimeChecking;
           const check = node('b', '✓', 'wc-check'); check.setAttribute('aria-label', tx('当前底座')); check.hidden = !selected || checkingId === runtime.id;
           meta.append(state, check); choice.append(copy, meta); host.append(choice);

@@ -1031,6 +1031,7 @@ async def _poll(session: AsyncSession, run: am.DeploymentRun) -> None:
 async def ingest_runner_snapshots(session: AsyncSession, runner, snapshots: list) -> list[dict]:
     """Accept Runner deployment snapshots only for runs assigned to that Runner."""
     updates = []
+    pending_progress = False
     seen: set[str] = set()
     for snap in list(snapshots or [])[:50]:
         if not isinstance(snap, dict):
@@ -1048,9 +1049,14 @@ async def ingest_runner_snapshots(session: AsyncSession, runner, snapshots: list
         await session.refresh(run, attribute_names=["result"])
         _apply_runner_status(run, snap)
         if run.state in _TERMINAL and (old not in _TERMINAL or recovering):
+            # Terminal handlers own durable receipts and external side effects.
+            # Flush preceding progress before entering that existing boundary.
+            if pending_progress:
+                await session.commit()
+                pending_progress = False
             await _after_terminal(session, run)
         else:
-            await session.commit()
+            pending_progress = True
         if _progress_signature(run) != before:
             task = await session.get(models.Task, run.task_id)
             updates.append({
@@ -1060,6 +1066,8 @@ async def ingest_runner_snapshots(session: AsyncSession, runner, snapshots: list
                     run, await session.get(am.Environment, run.environment_id),
                     await session.get(am.DeploymentTarget, run.target_id)),
             })
+    if pending_progress:
+        await session.commit()
     return updates
 
 

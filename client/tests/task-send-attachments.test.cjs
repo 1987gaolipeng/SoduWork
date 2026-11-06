@@ -49,7 +49,7 @@ function fixture(t, taskFiles = [], preparationError = '') {
     BrowserWindow: { getAllWindows: () => [], fromWebContents: () => null }, identityOf: async () => identity });
   const ready = installed.open({ adapterId: 'pi', cwd, capabilities: [] });
   t.after(async () => {
-    app.emit('before-quit'); await new Promise(resolve => setImmediate(resolve));
+    app.emit('before-quit'); await installed.dispose();
     assert.equal(path.dirname(path.resolve(directory)), path.resolve(os.tmpdir()));
     assert.ok(path.basename(directory).startsWith('soduwork-task-send-attachments-'));
     fs.rmSync(directory, { recursive: true, force: true });

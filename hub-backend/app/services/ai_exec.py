@@ -390,6 +390,11 @@ def with_llm(ctx: dict, llm: dict | None) -> dict:
             for field in ("input", "imageRouting", "visionFallbackAvailable", "maxOutputTokens", "capabilityProfile", "configRevision", "runtimeRevision"):
                 c2["llm"].pop(field, None)
             c2["llm"].update(model_fields(llm))
+            from .model_definition_contracts import _clean_thinking_config
+            for field in ("reasoning", "thinkingMode", "thinkingFormat", "thinkingAlwaysOn",
+                          "supportsReasoningEffort", "thinkingLevelMap"):
+                c2["llm"].pop(field, None)
+            c2["llm"].update(_clean_thinking_config(llm))
             out[k] = c2
     return out
 

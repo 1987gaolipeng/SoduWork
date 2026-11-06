@@ -62,10 +62,11 @@ async function fixture(t, spec, legacySendIdentity = false) {
   let auth = newAuth(), uid = 'fixture-account-a', enrollmentCount = 0, loggedOut = false;
   let failure = '', now = Date.now();
   const originalNow = Date.now, originalFetch = global.fetch;
-  let bridge;
+  let bridge, installed;
   t.after(async () => {
     try {
       app.emit('before-quit');
+      await installed?.dispose();
       await bridge?.dispose();
       await new Promise(resolve => setImmediate(resolve));
     } finally {
@@ -192,7 +193,7 @@ async function fixture(t, spec, legacySendIdentity = false) {
       modelConfig: { fetchModel: async () => ({ ok: true, model }) },
     })),
   });
-  const installed = loadIpc(bridge).install({ app, ipcMain, BrowserWindow, identityOf,
+  installed = loadIpc(bridge).install({ app, ipcMain, BrowserWindow, identityOf,
     // The explicit legacy shape is a negative control: the original production
     // callback returned a device key without the already-cached session.
     sendIdentityOf: legacySendIdentity ? (...args) => auth.identity(...args) : identityOf,

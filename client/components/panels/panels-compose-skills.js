@@ -68,7 +68,8 @@
       const q = String(query || '').toLowerCase();
       const used = recent();
       return items.filter((item) => {
-        const hay = [item.name, item.description, item.compatibility].join(' ').toLowerCase();
+        const hay = [item.name, item.description, item.compatibility,
+          global.SoduWorkBuiltinSkills?.text(item), global.SoduWorkBuiltinSkills?.text(item, 'description')].join(' ').toLowerCase();
         return !q || hay.includes(q);
       }).sort((a, b) => {
         const ai = used.indexOf(a.name);
@@ -83,8 +84,8 @@
       // permission changes. Keep the chip so execution can freshly validate it.
       const chosen = [...selected].map(name => items.find(item => item.name === name) || { name });
       tags.innerHTML = chosen.map((item) =>
-        '<span class="cp-skill-tag" title="' + esc(item.description || item.name) + '">' +
-          "<i>Skill</i><b data-user-content>" + esc(item.name) + '</b>' +
+        '<span class="cp-skill-tag"' + (global.SoduWorkBuiltinSkills?.title(item) || ' title="' + esc(item.description || item.name) + '"') + '>' +
+          '<i>Skill</i><b>' + (global.SoduWorkBuiltinSkills?.html(item) || esc(item.name)) + '</b>' +
           '<button data-remove-skill="' + esc(item.name) + '" aria-label="移除 ' + esc(item.name) + '">×</button>' +
         '</span>').join('');
       tags.classList.toggle('show', !!chosen.length);
@@ -131,7 +132,7 @@
               '" aria-disabled="' + (!item.selectable ? 'true' : 'false') +
               '" data-skill-name="' + esc(item.name) + '">' +
                 '<span class="cp-skill-glyph">' + (icon || '#') + '</span><span class="cp-skill-copy"><b>#' +
-                  esc(item.name) + "</b><i" + (item.description ? ' data-user-content' : '') + '>' + esc(item.description || '企业工作方法') + '</i></span>' +
+                  (global.SoduWorkBuiltinSkills?.html(item) || esc(item.name)) + '</b><i>' + (global.SoduWorkBuiltinSkills?.html(item, 'description') || esc(item.description || '企业工作方法')) + '</i></span>' +
                 '<em>' + esc(state) + '</em></button>';
           }).join('');
         if (active >= 0) input.setAttribute('aria-activedescendant', 'cpSkillOption' + active);

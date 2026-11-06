@@ -4,7 +4,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('soduWorkAPI', { conversationSession: {
   customAgents: Object.fromEntries(['list', 'add', 'activate', 'pick'].map(action =>
     [action, input => ipcRenderer.invoke('custom-agents-' + action, input)])),
-  runtimes: () => ipcRenderer.invoke('custom-fixture-runtimes'),
+  runtimes: options => ipcRenderer.invoke('custom-fixture-runtimes', options),
   probe: id => ipcRenderer.invoke('custom-fixture-probe', id),
   onRuntimesChanged(callback) {
     const listener = () => callback();

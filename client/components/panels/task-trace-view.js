@@ -191,7 +191,7 @@
     if (stage.error) desc = String(stage.error).slice(0, 260);
     if (lifecycle.description) desc = lifecycle.description;
     return {
-      kicker: variant === 'approval' ? 'DECISION CONTEXT' : variant === 'execution' ? 'LIVE TASK FLOW' : 'TASK LIFECYCLE',
+      kicker: variant === 'approval' ? '审批上下文' : variant === 'execution' ? '执行进展' : '需求进展',
       title, desc,
     };
   }
@@ -206,8 +206,7 @@
      */
     const nodeKind = node ? String(node.type || node.kind || '') : '';
     if (variant === 'execution') actions.push(['task', '进入需求', '']);
-    if (variant === 'task' && (trace.ai || []).length) actions.push(['live', '查看 AI 实况', 'primary']);
-    if (variant !== 'approval' && node && node.state === 'waiting_human') actions.push(['approval', '去人审专区', 'primary']);
+    if (variant === 'execution' && node && node.state === 'waiting_human') actions.push(['approval', '去人审专区', 'primary']);
     if (variant === 'task' && card.canRetry && node &&
         ['failed', 'blocked', 'rework'].includes(String(node.state || '')) &&
         (node.diagnosis || {}).retryable) {
@@ -231,6 +230,7 @@
       actions.push(['redispatch', '重新派这一关', '']);
     }
     if (variant === 'task' && card.canCancel) actions.push(['handoff', '转人工收尾', 'danger']);
+    if (!actions.length) return '';
     return '<div class="tfd-actions">' + actions.map((item) =>
       '<button class="' + item[2] + '" data-tfd-action="' + item[0] + '">' + item[1] + '</button>').join('') + '</div>';
   }

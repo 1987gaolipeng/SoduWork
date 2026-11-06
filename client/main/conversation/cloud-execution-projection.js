@@ -8,8 +8,58 @@ const liveOutput = require('./task-live-output');
 const { connectionScope } = require('../platform-connections/runtime.cjs');
 const { scope } = require('./cloud-execution-sync');
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
+class CacheRecovery extends Error {}
+function validCheckpoint(state) {
+  if (!Number.isSafeInteger(state?.cursor) || state.cursor < 0 || !Array.isArray(state.pages) ||
+      (state.generation && !/^[a-f0-9-]{36}$/.test(state.generation))) return false;
+  let through = 0;
+  for (const name of state.pages) {
+    const parts = typeof name === 'string' && name.match(/^(\d+)-(\d+)\.json$/);
+    if (!parts || Number(parts[1]) !== through || !Number.isSafeInteger(Number(parts[2])) || Number(parts[2]) <= through) return false;
+    through = Number(parts[2]);
+  }
+  return through === state.cursor;
+}
 
 function create({ app, root, read, save, materialize, directory }) {
+  async function readJson(file) {
+    try { return JSON.parse(await fs.readFile(file, 'utf8')); }
+    catch (error) {
+      if (error instanceof SyntaxError || error.code === 'ENOENT') throw new CacheRecovery('Unreadable projection cache');
+      throw error;
+    }
+  }
+  async function recoverCache(sessionId, identity, check) {
+    await check();
+    const current = read(sessionId), generation = crypto.randomUUID();
+    const owner = scope(identity);
+    if (!owner || current?.syncOwner !== owner || !current.syncId || !current.taskId)
+      throw Error('Cloud projection ownership changed');
+    const { transferId, cwd, ref } = current;
+    const pageBase = path.join(app.getPath('userData'), 'cloud-execution-sync', owner, hash(current.syncId + '\0' + ref));
+    const viewPath = path.join(root, transferId + '.view.json');
+    let saved, missingBase = false;
+    try { saved = await readJson(viewPath); }
+    catch (error) { if (!(error instanceof CacheRecovery)) throw error; missingBase = true; }
+    missingBase ||= !Array.isArray(saved?.snapshot?.messages);
+    // Preserve original handoff evidence and all raw pages. Recovery writes a
+    // new page generation and never executes or resubmits the Hub task.
+    const archive = path.join(pageBase, generation);
+    await fs.mkdir(archive, { recursive: true, mode: 0o700 });
+    await durable.writeFile(path.join(archive, 'previous-state.json'), JSON.stringify(current.syncState), { mode: 0o600, flush: true });
+    if (missingBase) {
+      await fs.copyFile(viewPath, path.join(archive, 'original-view.json')).catch(error => {
+        if (error.code !== 'ENOENT') throw error;
+      });
+      await check();
+      await durable.writeFile(viewPath, JSON.stringify({ cwd, adapterId: current.adapterId,
+        snapshot: { messages: [], tools: [], adapterId: current.adapterId, status: 'idle' } }), { mode: 0o600, flush: true });
+    }
+    await check();
+    await save({ ...read(sessionId), syncDetailSaved: false,
+      syncState: { ref, cursor: 0, pages: [], generation },
+      syncRecovery: { at: Date.now(), generation, historyGap: missingBase || current.syncRecovery?.historyGap === true } });
+  }
   async function open(row, identity, check) {
     if (!row?.id || !row.receipt?.taskId || !row.receipt.source || typeof row.title !== 'string')
       throw Error('云端会话记录不完整');
@@ -92,8 +142,16 @@ function create({ app, root, read, save, materialize, directory }) {
         const through = page?.last ?? cursor;
         const nextPages = [...(read(sessionId).syncState.pages || [])];
         if (through > cursor) {
-          await restoreOutput();
+          try { await restoreOutput(); }
+          catch (error) {
+            if (!(error instanceof CacheRecovery)) throw error;
+            handle?.close(); handle = output = null;
+            await recoverCache(sessionId, identity, check);
+            cursor = 0;
+            return { restarted: true };
+          }
           const name = cursor + '-' + through + '.json';
+          const pageRoot = pageDirectory();
           await fs.mkdir(pageRoot, { recursive: true, mode: 0o700 });
           await durable.writeFile(path.join(pageRoot, name), JSON.stringify({ from: cursor, through, items: page.items }), { mode: 0o600, flush: true });
           await check();
@@ -108,7 +166,7 @@ function create({ app, root, read, save, materialize, directory }) {
           syncSnapshot: page ? { ...page, items: [] } : null,
           cloudApprovals: Array.isArray(details.approvals) ? details.approvals : [],
           cloudMessages: Array.isArray(details.messages) ? details.messages : [], syncArtifactsPending: true,
-          syncState: { ref, cursor: through, pages: nextPages },
+          syncState: { ...current.syncState, ref, cursor: through, pages: nextPages },
           ...(page?.activeExecutionSelection ? { activeExecutionSelection: page.activeExecutionSelection } : {}),
           ...(meta.artifactUrl ? { artifactUrl: meta.artifactUrl } : {}),
           at: Date.parse(page?.updatedAt || meta.createdAt) || current.at });
@@ -131,14 +189,14 @@ function create({ app, root, read, save, materialize, directory }) {
       presence() { const current = read(sessionId); return { id: sessionId, title: current.title, cwd: '',
         workspaceName: '云端环境', workspaceLabel: '云端环境', location: 'cloud', locationMode: 'remote', cloud: true,
         adapterId: current.adapterId, taskId: current.taskId, taskIds: [current.taskId], at: current.at,
-        state: current.cloudApprovals?.length || current.syncSnapshot?.historyGap || current.syncArtifactsPending ? 'waiting' : current.remoteState,
-        needsAttention: Boolean(current.cloudApprovals?.length || current.syncSnapshot?.historyGap || current.syncArtifactsPending),
+        state: current.cloudApprovals?.length || current.syncSnapshot?.historyGap || current.syncRecovery?.historyGap || current.syncArtifactsPending ? 'waiting' : current.remoteState,
+        needsAttention: Boolean(current.cloudApprovals?.length || current.syncSnapshot?.historyGap || current.syncRecovery?.historyGap || current.syncArtifactsPending),
         outputPending: Boolean(current.syncArtifactsPending), outputError: current.syncArtifactError || '',
-        historyGap: current.syncSnapshot?.historyGap || null,
+        historyGap: current.syncSnapshot?.historyGap || (current.syncRecovery?.historyGap ? { reason: 'local-cache-recovery' } : null),
         cloudApprovals: current.cloudApprovals || [] }; },
       close() { handle?.close(); },
     };
   }
-  return { open };
+  return { open, recoverCache };
 }
 module.exports = { create };

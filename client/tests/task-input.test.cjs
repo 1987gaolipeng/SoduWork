@@ -2,6 +2,35 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { attachmentUrl, prepare, request } = require('../main/pi-session/task-input');
 
+test('rework of a dispatched task keeps its Runner workspace even after an old native follow-up', async t => {
+ const context = require('../main/conversation/requirement-context');
+ const delivery = require('../main/pi-session/task-delivery.cjs');
+ t.mock.method(context, 'assertOwner', () => {});
+ t.mock.method(delivery, 'capture', () => { throw Error('Must not scan the unrelated native cwd'); });
+ for (const previousExecutor of ['dispatch', 'native']) {
+  const calls = [], handle = { sessionId: 'chat' };
+  const task = { id: 't', status: 'doing', workRouting: {
+   executionContext: { agent: { id: 'runner:original:pi' }, runner: { mode: 'local' } },
+   conversationTurn: { executor: previousExecutor, conversationId: 'chat', state: 'completed' },
+   reworkPending: { feedback: 'Shorten to 100 characters' },
+  } };
+  t.mock.method(global, 'fetch', async (url, options) => {
+   calls.push({ url, body: options.body && JSON.parse(options.body) });
+   if (url.endsWith('/tasks/t')) return Response.json(task);
+   if (url.includes('/ai-session?')) return Response.json({ ref: 'original-run', canSend: true });
+   if (url.endsWith('/conversation-turn')) return Response.json({ turn: { state: 'queued' }, task });
+   throw Error('Unexpected request ' + url);
+  });
+  const input = await prepare({ hub: 'http://fixture' }, 't', 'chat', 'repair', 'Revise',
+   { reuseConversation: true, followUp: true }, { handle });
+  assert.equal(input.executor, 'dispatch'); assert.ok(input.controlled);
+  assert.match(input.text, /Shorten to 100 characters/); assert.deepEqual(input.attachments, []);
+  await input.beforeTurn(); await input.afterTurn('completed');
+  assert.deepEqual(calls.filter(c => c.body).map(c => [c.body.action, c.body.executor, c.body.continuationRef]),
+   [['prepare', 'dispatch', 'original-run'], ['start', 'dispatch', 'original-run'], ['complete', 'dispatch', 'original-run']]);
+ }
+});
+
 test('offline successful execution keeps its result and replays start then completion after app restart', async t => {
  const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
  const {create} = require('../main/pi-session/start-receipts.cjs');

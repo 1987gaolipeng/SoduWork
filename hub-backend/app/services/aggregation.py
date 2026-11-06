@@ -37,14 +37,16 @@ async def create_integration(
 
 
 async def list_integrations(session: AsyncSession) -> list[dict]:
-    res = await session.execute(select(models.Integration).order_by(models.Integration.created_at.desc()))
-    out = []
-    for i in res.scalars().all():
-        cnt = await session.scalar(
-            select(func.count()).select_from(models.Task).where(models.Task.integration_id == i.id)
-        )
-        out.append(integration_to_api(i, {"taskCount": int(cnt or 0)}))
-    return out
+    query = select(models.Integration).order_by(models.Integration.created_at.desc())
+    res = await session.execute(query)
+    integrations = res.scalars().all()
+    counts = dict((await session.execute(
+        select(models.Task.integration_id, func.count())
+        .where(models.Task.integration_id.in_(query.with_only_columns(models.Integration.id).order_by(None)))
+        .group_by(models.Task.integration_id)
+    )).all()) if integrations else {}
+    return [integration_to_api(item, {"taskCount": int(counts.get(item.id, 0))})
+            for item in integrations]
 
 
 async def update_integration(

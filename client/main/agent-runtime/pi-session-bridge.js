@@ -350,15 +350,18 @@ function createPiSessionBridge(options) {
       locationMode: 'remote', location: 'cloud', cloud: true };
   }
   function historyPriority(row) { return normalizeHistoryRow(row).cloud ? 2 : 1; }
-  async function findRunnerRow(id) {
+  async function findRunnerRow(id, { nativeOnly = false } = {}) {
     const wanted = String(id || '').trim();
     if (!wanted) return null;
     // A sidebar row may be replaced by its synchronized replay receipt while
     // navigation is in flight. Resolve its authenticated alias by exact ID.
-    const cloud = (await externalRows({ includeAliases: true })).chats.find(row => row.id === wanted);
+    const cloud = !nativeOnly && (await externalRows({ includeAliases: true })).chats.find(row => row.id === wanted);
     if (cloud) return cloud;
     const results = await Promise.all(runnerAdapters.map(async (adapter) => {
-      try { return await adapter.history(Number.MAX_SAFE_INTEGER); }
+      try {
+        return typeof adapter.historyEntry === 'function'
+          ? await adapter.historyEntry(wanted) : await adapter.history(Number.MAX_SAFE_INTEGER);
+      }
       catch (error) { return { ok: false, reason: _reason(error), chats: [] }; }
     }));
     const row = results.flatMap(result => result.chats || [])
@@ -696,7 +699,7 @@ function createPiSessionBridge(options) {
 
   const api = {
     setExternalHistory(source) { externalHistory = source; },
-    async archivedConversation(app, id) {
+    async archivedConversation(app, id, options = {}) {
       const wanted = String(id || '');
       if (!wanted) return null;
       const switched = runtimeSegments.read(app || opts.app, wanted);
@@ -708,7 +711,7 @@ function createPiSessionBridge(options) {
         if (found && found.ok && found.entry) return normalizeHistoryRow({ ...found.entry, adapterId: 'pi' });
         if (found && found.ok === false && !found.notFound) unreadable = found;
       }
-      const runner = await findRunnerRow(wanted);
+      const runner = await findRunnerRow(wanted, options);
       if (runner) return normalizeHistoryRow(runner);
       if (unreadable) throw new RuntimeContractError('HISTORY_UNAVAILABLE',
         String(unreadable.reason || '暂时无法读取会话存档'));

@@ -115,9 +115,9 @@ function _renderSkills() {
       return '<button class="sk-card' + (on ? ' on' : '') + '" data-name="' + esc(s.name) + '" ' +
         'aria-pressed="' + on + '" title="' + esc(s.path || '') + '">' +
         '<span class="sk-c-ico">' + _skIcon(s.name) + '</span>' +
-        "<span class=\"sk-c-main\"><span class=\"sk-c-top\"><b data-user-content>" + esc(s.name) + '</b>' +
+        '<span class="sk-c-main"><span class="sk-c-top"><b>' + (window.SoduWorkBuiltinSkills?.html(s) || esc(s.name)) + '</b>' +
         '<em class="sk-c-src">' + esc(_skSource(s.path)) + '</em></span>' +
-        "<i class=\"sk-c-desc\"" + (s.description ? ' data-user-content' : '') + '>' + esc(s.description || '') + '</i></span>' +
+        '<i class="sk-c-desc">' + (window.SoduWorkBuiltinSkills?.html(s, 'description') || esc(s.description || '')) + '</i></span>' +
         '<span class="sk-c-mark">' + (on ? _SK_ICONS.check : '') + '</span></button>';
     }).join('') + '</div>' +
     /* Use HTML formatting here; Markdown markers would appear literally. */

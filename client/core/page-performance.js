@@ -5,7 +5,7 @@
   const views = new Set(['settings', 'shortcuts', 'skin', 'history', 'aidesk', 'create', 'apps', 'skills',
     'library', 'models', 'agents', 'codeacct', 'cloud', 'usage', 'notices', 'briefs', 'team', 'inbox', 'memory', 'schedules', 'archive']);
   const paths = new Set(['/team/capability', '/plugins/catalog', '/capabilities', '/skills', '/skills/refresh',
-    '/mcp-servers', '/my-models', '/my-git', '/library', '/library/storage/status', '/agent-setup']);
+    '/mcp-servers', '/my-models', '/my-git', '/library', '/library/storage/status', '/agent-setup', '/tasks/:id', '/task-execution-options']);
   const clock = () => global.performance?.now?.() ?? Date.now();
   const ms = value => Math.round(Math.max(0, Math.min(3600000, Number(value) || 0)) * 10) / 10;
   let events = [], epoch = 0, serial = 0, clearedAt = 0, input = null, frames = [], scheduled = false;
@@ -39,7 +39,7 @@
     }
   }
   function beginRequest(path, method) {
-    const name = String(path || '').split(/[?#]/, 1)[0];
+    const name = String(path || '').split(/[?#]/, 1)[0].replace(/^\/tasks\/[^/]+$/, '/tasks/:id');
     if (!paths.has(name)) return null;
     const generation = epoch, start = clock();
     const requestId = global.crypto?.randomUUID?.() || 'page-' + Date.now().toString(36) + '-' + (++serial) + '-' + Math.random().toString(36).slice(2, 10);
@@ -67,6 +67,16 @@
       },
     };
   }
+  function interaction(name) {
+    if (!['requirement-detail', 'schedule-editor'].includes(name)) return null;
+    const start = clock(), generation = epoch;
+    const row = { kind: 'interaction', name, at: Date.now(), firstFrameMs: null, stages: {} };
+    record(row, generation); frames.push({ row, start, generation }); frames = frames.slice(-LIMIT); frame();
+    return { mark(stage) {
+      if (generation === epoch && ['shell', 'data', 'agents', 'plugins', 'methods', 'ready', 'cancelled', 'failed'].includes(stage))
+        row.stages[stage] = ms(clock() - start);
+    } };
+  }
   function clear() {
     epoch++; events = []; frames = []; input = null; clearedAt = clock();
     try { global.soduWorkAPI?.pagePerformance?.clear?.(); } catch (_) {}
@@ -81,7 +91,9 @@
     } catch (_) {}
     if (generation !== epoch) ipc = { available: Boolean(ipc.available), events: [] };
     return { version: 1, capturedAt: Date.now(), maxEntries: LIMIT, windowMs: WINDOW_MS,
-      events: generation === epoch ? events.map(row => ({ ...row, ...(row.server ? { server: { ...row.server } } : {}) })) : [], ipc };
+      events: generation === epoch ? events.map(row => ({ ...row,
+        ...(row.stages ? { stages: { ...row.stages } } : {}),
+        ...(row.server ? { server: { ...row.server } } : {}) })) : [], ipc };
   }
   global.document?.addEventListener?.('click', event => {
     const target = event.target?.closest?.('[data-view],[data-rail-view],#wsRailMine');
@@ -99,5 +111,5 @@
     }
   } catch (_) { /* Unsupported observers cannot affect navigation. */ }
   global.addEventListener?.('soduwork-data-scope-changed', clear);
-  global.SoduWorkPagePerformance = Object.freeze({ navigate, beginRequest, snapshot, clear });
+  global.SoduWorkPagePerformance = Object.freeze({ navigate, beginRequest, interaction, snapshot, clear });
 })(typeof window === 'undefined' ? globalThis : window);

@@ -88,6 +88,15 @@ test('audit timeline renders conversation states and preserves actual event orde
   assert.ok(html.indexOf(latestTime) < html.indexOf(middleTime));
 });
 
+test('requirement hero omits duplicate navigation while preserving execution evidence', () => {
+  const f = fixture(), trace = snapshot(2, 'waiting_human', '等待验收');
+  const html = f.api.html(trace, { variant: 'task' });
+  const hero = html.match(/<section class="tfd-hero[\s\S]*?<\/section>/)[0];
+  assert.doesNotMatch(hero, /查看 AI 实况|去人审专区|tfd-actions/);
+  assert.match(hero, /等待验收/);
+  assert.match(hero, /2/);
+});
+
 test('open trace refreshes after completion and reopening task events', async () => {
   const f = fixture(), root = f.container();
   await f.api.mount(root, { taskId: 'task-1', trace: snapshot(1, 'running', '执行工作'), refreshMs: 0 });

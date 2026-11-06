@@ -17,8 +17,12 @@
  const matches=(key,value)=>value&&value.ok===true&&value.provider===key;
  function ready(item){return providers(item).every(key=>matches(key,connection(item,key))&&connection(item,key).connected);}
  function remember(item,key,value){
+  const previous=latest.get(key);
   const items=[item,...(global.SoduWorkCapabilityPlugins?.snapshot().items||[]).filter(x=>providers(x).includes(key))];
   for(const target of items){target.platformConnections={...(target.platformConnections||{}),[key]:value};target.platformConnection=value;}
+  latest.set(key,value);
+  if(previous?.connected!==value?.connected||previous?.disconnected!==value?.disconnected)
+   global.dispatchEvent?.(new CustomEvent('soduwork:plugins-changed'));
  }
  // Old installed manifests also get the correct instructions for this desktop connection entry.
  function setupDescription(item){const keys=providers(item);return keys.length?'点击「连接账号」。'+keys.map(key=>PLATFORMS[key].intro).join(' '):String(item&&item.setup&&item.setup.description||'');}
@@ -56,7 +60,7 @@
    if(!live())return;
    current=value||{};
    if(current.provider===key){
-    stateRevisions.set(key,(stateRevisions.get(key)||0)+1);latest.set(key,current);remember(item,key,current);
+    stateRevisions.set(key,(stateRevisions.get(key)||0)+1);remember(item,key,current);
     if(typeof options.onState==='function')options.onState(current);
    }
    const label={needs_setup:'尚未连接',needs_auth:'等待账号授权',preparing:'正在准备运行环境…',connecting:'正在连接…',awaiting_user:'等待你完成授权',connected:'已连接',disconnected:'已断开本机连接',error:'连接需要处理'};

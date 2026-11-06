@@ -809,7 +809,8 @@ function install({ app, ipcMain, dialog, safeStorage, identityOf, fetchImpl }) {
   const access = sourceAccess.authorizer({ app, identityOf, fetchImpl, read, normalizeBody });
   const shared = service({ app, identityOf, fetchImpl });
   ipcMain.handle('personal-plugin-choose-package', () => require('./plugin-package-picker').choose(dialog));
-  ipcMain.handle('personal-plugin-list', (_event, options) => ({ ok: true, items: catalog(app, Boolean(options && options.includeDisabled)) }));
+  ipcMain.handle('personal-plugin-list', async (_event, options) => ({ ok: true,
+    items: await require('./personal-plugin-catalog-worker.cjs').catalog(app, Boolean(options && options.includeDisabled)) }));
   ipcMain.handle('personal-plugin-get', (_event, pluginId) => ({ ok: true, plugin: get(app, pluginId) }));
   ipcMain.handle('personal-plugin-preflight', async (_event, body) => preflightCandidate(app,await access.body(body),{identityOf,fetchImpl}));
   ipcMain.handle('personal-plugin-preflight-archive', async (_event, _name, content) => {

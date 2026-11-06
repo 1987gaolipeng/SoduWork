@@ -12,17 +12,58 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
 const stale = error => error.code === 'STALE_TASK_SCOPE';
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
+test('thumbnail requests never fetch originals, abort on close, and discard changed-account responses', async () => {
+  const h = harness(); await h.signIn('alice');
+  h.fetch = async () => new Response(bytes, { headers: { 'Content-Type': 'image/png' } });
+  const got = await h.api.readLibraryThumbnail('image-one');
+  assert.deepEqual(Buffer.from(await got.blob.arrayBuffer()), bytes);
+  assert(h.calls.every(call => call.url.endsWith('/image-one/thumbnail')));
+  const pending = deferred(), controller = new AbortController();
+  h.fetch = async (url, options) => { assert.equal(options.signal.aborted, false); return pending.promise; };
+  const cancelled = h.api.readLibraryThumbnail('image-one', { signal: controller.signal });
+  await tick(); controller.abort();
+  assert.equal(h.calls.at(-1).options.signal.aborted, true);
+  await h.signIn('bob'); pending.resolve(new Response(bytes));
+  await assert.rejects(cancelled, stale);
+  h.fetch = async () => new Response(bytes, { headers: { 'Content-Length': String(512 * 1024 + 1) } });
+  await assert.rejects(h.api.readLibraryThumbnail('image-one'), /THUMBNAIL_TOO_LARGE/);
+  h.fetch = async () => new Response('', { status: 404 });
+  assert.equal(await h.api.readLibraryThumbnail('old-hub'), null);
+});
+
+test('local thumbnails use only thumbnail IPC and fence account changes', async () => {
+  const h = harness(); await h.signIn('alice');
+  h.bridge.localLibrary.call = async (action) => {
+    assert.equal(action, 'thumbnail'); return { ok: true, data: bytes.toString('base64') };
+  };
+  const result = await h.api.readLibraryThumbnail('local-one');
+  assert.deepEqual(Buffer.from(await result.blob.arrayBuffer()), bytes); assert.equal(h.calls.length, 0);
+  h.bridge.localLibrary.call = async () => { await h.signIn('bob'); return { ok: true, data: bytes.toString('base64') }; };
+  await assert.rejects(h.api.readLibraryThumbnail('local-one'), stale);
+});
+
 test('desktop ZIP downloads use the native attachment path and preserve cancellation or failure', async () => {
   const h = harness(); await h.signIn('alice');
   let received, result = {ok:true};
   h.bridge.downloadAttachment = async payload => { received = payload; return result; };
   assert.equal((await h.api.downloadArtifactsZip('task','Website','v2')).ok,true);
-  assert.deepEqual(JSON.parse(JSON.stringify(received)),{taskId:'task',artifactVersionId:'v2',filename:'Website.zip'});
+  assert.deepEqual(JSON.parse(JSON.stringify(received)),{deliveryBundle:true,taskId:'task',artifactVersionId:'v2',filename:'Website.zip'});
   assert.equal(h.calls.length,0); assert.equal(h.objectUrls.length,0);
   result = {ok:false,canceled:true};
   assert.equal((await h.api.downloadArtifactsZip('task','Website','v2')).canceled,true);
   result = {ok:false,reason:'disk full'};
   await assert.rejects(h.api.downloadArtifactsZip('task','Website','v2'),/disk full/);
+});
+
+test('bundle filenames preserve work titles and remain valid on Windows', () => {
+  const {api} = harness();
+  for (const [title, expected] of [
+    ['春节传统文化由来介绍', '春节传统文化由来介绍.zip'],
+    ['  Site: design / final. ', 'Site design  final.zip'],
+    ['CON', '_CON.zip'], ['nul.report', '_nul.report.zip'],
+    ['...', '交付物.zip'], ['\u0000', '交付物.zip'],
+    ['🎨'.repeat(41), '🎨'.repeat(40) + '.zip'],
+  ]) assert.equal(api.artifactZipFilename(title), expected);
 });
 
 test('a pinned bundle uses existing library upload with stable file identity and unchanged bytes', async () => {

@@ -628,6 +628,7 @@ function _wireSchForm() {
   let probeTimer = 0;
   let probeSeq = 0;
   const scheduleProbe = () => {
+    if (_schEditorPending) return;
     const line = document.getElementById('schReady');
     if (!line || !SoduWorkAPI.preflightSchedule) return;
     clearTimeout(probeTimer);
@@ -768,10 +769,15 @@ function _wireSchForm() {
     sync();
   });
   ['schH', 'schM', 'schWd'].forEach(id => document.getElementById(id).addEventListener('change', sync));
-  document.getElementById('schWho').addEventListener('change', () => {
+  document.getElementById('schWho').addEventListener('change', async event => {
+    if (event.catalogRefresh) { _schRefreshModelField(); scheduleProbe(); return; }
     // A different substrate may have a different model namespace. Never carry
     // the previous substrate's explicit model into the new selection.
     _schRefreshModelField('');
+    const selected = document.getElementById('schWho').value;
+    await _schLoadNativeModelOptions(_schAgents.filter(item => item.id === selected));
+    if (!isCurrent() || document.getElementById('schWho').value !== selected) return;
+    _schRefreshModelField();
     scheduleProbe();
   });
   document.getElementById('schModel')?.addEventListener('change', scheduleProbe);
@@ -787,8 +793,16 @@ function _wireSchForm() {
   applyMethodCaps();
   sync();
   document.getElementById('schCancel').addEventListener('click', () => _schCloseEditor(true));
+  saveButton.scheduleDraft = () => {
+    const body = readBody();
+    // Catalog hydration must preserve input verbatim, including fields whose
+    // plugin schema has not arrived yet. Save-time normalization stays in readBody.
+    return { ...body, title: document.getElementById('schTitle').value,
+      note: document.getElementById('schNote').value,
+      pluginInputs: { ...inputValues, ...body.pluginInputs } };
+  };
   document.getElementById('schSave').addEventListener('click', async () => {
-    if (saving || !isCurrent()) return;
+    if (saving || _schEditorPending || !isCurrent()) return;
     const body = readBody();
     if (_schTimingError(body, true)) return;
     if (!body.title) {

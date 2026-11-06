@@ -424,18 +424,19 @@ async def decide(request_id: str, body: dict = Body(default_factory=dict),
 
     rework = None
     if decision == "reject" and request.action == "review":
-        # Default to automatic rework for compatibility with older clients.
+        # Ordinary rejection returns feedback to the executor without starting work.
         # rework=False returns the task to the backlog for manual reassignment.
         if body.get("rework") is False:
             rework = await task_rework.return_to_backlog(
                 session, task, rework_note, request_id=request.id,
                 actor=user.display_name or user.username)
         else:
-            # Workflow tasks rewind through their graph; direct AI tasks resume the exact
-            # session that produced this locked artifact. Both paths return one user-facing fact.
+            # Workflow tasks rewind through their graph; direct tasks wait for
+            # the executor to explicitly continue from the rejected delivery.
             rework = await task_rework.resume_after_rejection(
                 session, task, rework_note, artifact_version_id=request.artifact_version_id,
-                request_id=request.id, actor=user.display_name or user.username)
+                request_id=request.id, actor=user.display_name or user.username,
+                fallback_on_missing_ref=True, wait_for_executor=True)
 
     execution = None
     who = user.display_name or user.username
@@ -473,6 +474,8 @@ async def decide(request_id: str, body: dict = Body(default_factory=dict),
         verb = "批准" if decision == "approve" else "退回"
         if rework and rework.get("mode") == "backlog":
             suffix = "，已退回待开始，回需求池等人工重新安排"
+        elif rework and rework.get("waitingForExecutor"):
+            suffix = "，请在需求详情中继续修正"
         elif rework and rework.get("started"):
             suffix = "，已自动进入返修"
         elif rework and not rework.get("started") and rework.get("error"):

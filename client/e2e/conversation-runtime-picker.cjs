@@ -13,15 +13,32 @@ if (typeof electron === 'string') {
   const js = s => win.webContents.executeJavaScript(s, true), sleep = ms => new Promise(r => setTimeout(r, ms));
   async function until(s) { for(let i=0;i<100;i++){if(await js('Boolean('+s+')'))return;await sleep(25);}throw Error('Timed out: '+s); }
   async function click(selector) {
+    await js(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest'});void 0`);
     const point = await js(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`);
     for (const type of ['mouseDown','mouseUp']) win.webContents.sendInputEvent({ type, button:'left',clickCount:1,...point });
     await sleep(60);
+  }
+  async function assertRuntimeRow(expectedVersion = 'v0.4.40') {
+    const row = await js(`(()=>{
+      const el=document.querySelector('[data-runtime=dsh]');el.scrollIntoView({block:'nearest'});
+      const name=el.querySelector('.cp-runtime-head b'),version=el.querySelector('.cp-runtime-version'),state=el.querySelector('.cp-runtime-state');
+      const bounds=node=>{const r=node.getBoundingClientRect();return{left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width}};
+      return{name:name.textContent,title:name.title,version:version.textContent,versionTitle:version.title,status:state.textContent,
+        nameBounds:bounds(name),versionBounds:bounds(version),copyBounds:bounds(el.querySelector('.cp-runtime-copy')),
+        metaBounds:bounds(el.querySelector('.cp-runtime-meta')),rowBounds:bounds(el),nameClipped:name.scrollWidth>name.clientWidth,
+        overflow:[...el.querySelectorAll('.cp-runtime-head>*')].some(n=>bounds(n).right>bounds(el.querySelector('.cp-runtime-copy')).right+1)};
+    })()`);
+    assert.equal(row.name,'DeepSeek Harness');assert.equal(row.title,row.name);
+    assert.equal(row.version,expectedVersion);assert.equal(row.versionTitle,expectedVersion);assert.doesNotMatch(row.status,/0\.4\.40|@openma/);
+    assert.equal(row.nameClipped,false,JSON.stringify(row));assert.equal(row.overflow,false,JSON.stringify(row));
+    assert.ok(row.versionBounds.top>=row.nameBounds.bottom-1,JSON.stringify(row));
+    assert.ok(row.copyBounds.right<=row.metaBounds.left&&row.metaBounds.right<=row.rowBounds.right,JSON.stringify(row));
   }
   app.whenReady().then(async () => {
     win = new BrowserWindow({ show:false,width:1000,height:760,webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false,backgroundThrottling:false,offscreen:true} });
     await win.loadFile(path.join(__dirname,'fixtures/conversation-runtime-picker.html'));await until('window.fixtureReady');
     await js('document.querySelector("#nchatInput").value="Keep my draft";document.querySelector("#nchatInput").dispatchEvent(new Event("input"));void 0');
-    for(const agent of ['opencode','qwen','harness2','pi']) {
+    for(const agent of ['opencode','qwen','dsh','harness2','pi']) {
       await click('#nchatRuntime'); await until('document.querySelector("[data-runtime=qwen]")');
       await click('[data-runtime='+agent+']'); await until('state.adapterId==='+JSON.stringify(agent));
       assert.equal(await js('state.ref'),'same-conversation');assert.equal(await js('document.querySelector("#nchatInput").value'),'Keep my draft');
@@ -47,15 +64,26 @@ if (typeof electron === 'string') {
     assert.equal(await js('document.querySelector("#nchatRuntimeMore").hidden'),false);
     await click('#nchatRuntimeMore');
     assert.equal(await js('agentManagementOpened'),1);
-    for(const width of [390,1000]) {
-      win.setSize(width,760);await sleep(80);await click('#nchatRuntime');
+    for(const [width,locale] of [[320,'zh-CN'],[390,'en-US'],[1000,'zh-CN']]) {
+      win.setSize(width,760);await js('locale='+JSON.stringify(locale));await sleep(80);await click('#nchatRuntime');
       const bounds=await js('(()=>{const r=document.querySelector(".nchat-runtime-pop").getBoundingClientRect();return{left:r.left,right:r.right,top:r.top,width:innerWidth}})()');
       assert.ok(bounds.left>=11&&bounds.right<=bounds.width-11&&bounds.top>=0,JSON.stringify(bounds));
-      if(width===1000){const output=path.resolve(__dirname,'../../outputs/conversation-runtime-switch-20261015');fs.mkdirSync(output,{recursive:true});fs.writeFileSync(path.join(output,'agent-picker.png'),(await win.webContents.capturePage()).toPNG());}
+      await assertRuntimeRow();
+      assert.equal(await js('document.querySelector("[data-runtime=dsh] .cp-runtime-state").textContent'),await js('SoduWorkI18n.translateText("可用")'));
+      const output=path.resolve(__dirname,'../outputs/deepseek-picker');fs.mkdirSync(output,{recursive:true});fs.writeFileSync(path.join(output,'agent-picker-'+width+'.png'),(await win.webContents.capturePage()).toPNG());
       await js('controls.reset();void 0');
     }
+    await js('runtimes.find(row=>row.id==="dsh").version="@openma/deepseek-harness-acp 0.5.0-beta.2+very.long.build.identifier";void 0');
+    win.setSize(320,760);await click('#nchatRuntime');
+    await assertRuntimeRow('v0.5.0-beta.2+very.long.build.identifier');
+    assert.equal(await js('runtimes.find(row=>row.id==="dsh").version'),'@openma/deepseek-harness-acp 0.5.0-beta.2+very.long.build.identifier');
     assert.deepEqual(await js('errors'),[]);
-    console.log('PASS: Chromium Agent/model controls; Pi -> OpenCode -> Qwen -> Harness² -> Pi, preserved draft/ref, busy/failure/concurrency, stale model response, narrow layout');
+    win.setSize(1000,760);
+    await win.loadFile(path.join(__dirname,'fixtures/cloud-start-compose.html'));
+    await until('document.querySelector("[data-runtime=dsh]")');await click('#cpRuntime');
+    await until('document.querySelector("[data-runtime=dsh] .cp-runtime-version").textContent==="v0.4.40"');
+    await assertRuntimeRow();
+    console.log('PASS: Chromium Agent/model controls; DeepSeek version in both pickers; preserved draft/ref, busy/failure/concurrency, stale model response, Chinese/English and narrow layout');
     app.exit(0);
   }).catch(e=>{console.error(e);app.exit(1)});
 }

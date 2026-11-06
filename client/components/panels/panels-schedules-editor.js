@@ -3,6 +3,7 @@
  */
 let _schEditorReturnFocus = null;
 let _schEditorRequest = 0;
+let _schEditorPending = false;
 
 /*
  * Load templates only from administrator-configured automation_templates_v1 through
@@ -162,6 +163,7 @@ function _schModelOptionsFor(agentId) {
 }
 
 async function _schLoadNativeModelOptions(agents) {
+  const scope = _schScope;
   const nativeAgents = (agents || []).filter(item => item && item.nativeModelPick);
   if (!nativeAgents.length) return;
   const bridge = window.soduWorkAPI && (window.soduWorkAPI.conversationSession || window.soduWorkAPI.piSession);
@@ -171,9 +173,9 @@ async function _schLoadNativeModelOptions(agents) {
     if (!adapterId) return;
     try {
       const result = await bridge.runtimeModels(adapterId);
-      if (_schNativeModelOptions) _schNativeModelOptions[agent.id] = _schNormalizeNativeModelOptions(result);
+      if (scope === _schScope && _schNativeModelOptions) _schNativeModelOptions[agent.id] = _schNormalizeNativeModelOptions(result);
     } catch (_) {
-      if (_schNativeModelOptions) _schNativeModelOptions[agent.id] = [];
+      if (scope === _schScope && _schNativeModelOptions) _schNativeModelOptions[agent.id] = [];
     }
   }));
 }
@@ -204,7 +206,8 @@ async function _schLoadExecutionAgents(context) {
         if (scope !== _schScope) return [];
         _schAgentReason = String((((result || {}).availability || {}).agentReason) ||
           (!agents.length ? '当前设备还没有在线执行底座，请打开 Agent 管理确认 Runner 已启动' : ''));
-        await _schLoadNativeModelOptions(agents);
+        const selected = context?.assigneeId || (agents.find(item => item.available !== false) || agents[0])?.id;
+        await _schLoadNativeModelOptions(agents.filter(item => item.id === selected));
         if (scope !== _schScope) return [];
         return agents;
       } catch (_) {
@@ -221,7 +224,8 @@ async function _schLoadExecutionAgents(context) {
           available: item.online !== false }));
       _schAgentReason = String((result && result.reason) ||
         (!agents.length ? '当前设备还没有在线执行底座，请打开 Agent 管理确认 Runner 已启动' : ''));
-      await _schLoadNativeModelOptions(agents);
+      const selected = context?.assigneeId || (agents.find(item => item.available !== false) || agents[0])?.id;
+      await _schLoadNativeModelOptions(agents.filter(item => item.id === selected));
       if (scope !== _schScope) return [];
       return agents;
     }
@@ -278,7 +282,9 @@ function _schRefreshAgentField(preferred) {
   if (hint) hint.textContent = _schAgentReason || (_schAgents.length
     ? '保存的是执行底座类型；每次运行会在当前设备选择可用席位'
     : '请打开 Agent 管理，确认 Runner 已启动并已连接当前环境');
-  select.dispatchEvent(new Event('change', { bubbles: true }));
+  // Refreshing a catalog must not impersonate a user's substrate change.
+  const event = new Event('change', { bubbles: true }); event.catalogRefresh = true;
+  select.dispatchEvent(event);
   _schRefreshModelField();
 }
 
@@ -400,15 +406,37 @@ function _schAgentFieldHtml(current) {
 
 async function _schPrepareEditor(value, source) {
   const request = ++_schEditorRequest;
-  if (source) { source.disabled = true; source.setAttribute('aria-busy', 'true'); }
+  const timing = window.SoduWorkPagePerformance?.interaction?.('schedule-editor');
+  _schEditorPending = true;
+  _schOpenEditor(value, source);
+  timing?.mark('shell');
+  const content = document.getElementById('schEditorContent');
+  const save = document.getElementById('schSave');
+  if (save) { save.disabled = true; save.setAttribute('aria-busy', 'true'); }
   try {
     const draft = value === 'new' ? {} : value;
-    await Promise.all([_schLoadExecutionAgents(draft), _schLoadPlugins(_schProjectId(draft.repoId)), _schmLoad()]);
+    await Promise.all([_schLoadExecutionAgents(draft).then(() => timing?.mark('agents')),
+      _schLoadPlugins(_schProjectId(draft.repoId)).then(() => timing?.mark('plugins')),
+      _schmLoad().then(() => timing?.mark('methods'))]);
     if (request !== _schEditorRequest || !document.getElementById('schPanel')?.classList.contains('show')) return false;
-    if (value !== 'new' && !value.id && !value.assigneeId) value.assigneeId = _schDefaultAgentId();
-    _schOpenEditor(value, source);
+    // Capture edited fields before replacing catalog-dependent controls.
+    const current = save?.scheduleDraft?.();
+    const focused = content?.contains(document.activeElement) ? document.activeElement.id : '';
+    const selection = document.activeElement?.selectionStart;
+    const selectionEnd = document.activeElement?.selectionEnd;
+    const scroll = content?.querySelector('.sch-editor-scroll')?.scrollTop || 0;
+    if (current) _schEditing = { ...draft, ...current };
+    _schEditorPending = false;
+    _schRenderEditorDrawer(false);
+    const input = focused && document.getElementById(focused);
+    input?.focus?.({ preventScroll: true });
+    if (Number.isInteger(selection)) input?.setSelectionRange?.(selection, selectionEnd);
+    const scroller = content?.querySelector('.sch-editor-scroll');
+    if (scroller) scroller.scrollTop = scroll;
+    timing?.mark('ready');
     return true;
   } finally {
+    if (request === _schEditorRequest) _schEditorPending = false;
     if (source?.isConnected) { source.disabled = false; source.removeAttribute('aria-busy'); }
   }
 }
@@ -421,7 +449,7 @@ function _schBindAgentReload() {
     button.disabled = true;
     try {
       await _schLoadExecutionAgents({ title: document.getElementById('schTitle')?.value,
-        note: document.getElementById('schNote')?.value });
+        note: document.getElementById('schNote')?.value, assigneeId: select?.value });
       if (select === document.getElementById('schWho')) _schRefreshAgentField();
     } finally { button.disabled = false; }
   });
@@ -437,6 +465,7 @@ function _schOpenEditor(value, source) {
 
 function _schCloseEditor(restoreFocus) {
   _schEditorRequest += 1;
+  _schEditorPending = false;
   const returnFocus = _schEditorReturnFocus;
   _schEditorReturnFocus = null;
   _schEditing = null;

@@ -25,7 +25,8 @@
       const allRows = [...known.values()];
       const query = String(options.search && options.search.value || '').trim().toLocaleLowerCase();
       const rows = allRows.filter(item => (!options.selectedOnly || !options.selectedOnly.checked || selected.has(item.name)) &&
-        (!query || [item.name, item.description].join(' ').toLocaleLowerCase().includes(query)));
+        (!query || [item.name, item.description, global.SoduWorkBuiltinSkills?.text(item),
+          global.SoduWorkBuiltinSkills?.text(item, 'description')].join(' ').toLocaleLowerCase().includes(query)));
       if (count) count.textContent = selected.size
         ? '已选 ' + selected.size + ' 项' : '未选择 · 插件自身方法会自动加载';
       if (!rows.length) {
@@ -35,10 +36,10 @@
       }
       root.innerHTML = rows.map(item => {
         const checked = selected.has(item.name);
-        return '<label' + (item.description ? ' data-user-attributes="title"' : '') + ' title="' + h(item.description || '团队工作方法') + '" class="' + (item.unavailable ? 'is-unavailable' : '') + '">' +
+        return '<label' + (global.SoduWorkBuiltinSkills?.title(item) || ' title="' + h(item.description || '团队工作方法') + '"') + ' class="' + (item.unavailable ? 'is-unavailable' : '') + '">' +
           '<input type="checkbox" data-plugin-skill value="' + h(item.name) + '"' +
-          (checked ? ' checked' : '') + "><span><b data-user-content>" + h(item.name) + "</b><em" + (item.description ? ' data-user-content' : '') + '>' +
-          h(item.description || '团队工作方法') + '</em></span>' +
+          (checked ? ' checked' : '') + '><span><b>' + (global.SoduWorkBuiltinSkills?.html(item) || h(item.name)) + '</b><em>' +
+          (global.SoduWorkBuiltinSkills?.html(item, 'description') || h(item.description || '团队工作方法')) + '</em></span>' +
           (item.unavailable ? '<small>待校验</small>' : '') + '</label>';
       }).join('');
     }

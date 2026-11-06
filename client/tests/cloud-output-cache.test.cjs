@@ -14,6 +14,23 @@ async function fixture(t, options = {}) {
   return { root, app, record, cache: cacheModule.create({ app, ...options }) };
 }
 
+test('async index validates 200 fresh files without blocking and rejects replaced bytes immediately', async t => {
+  const f = await fixture(t, { fetch: async () => new Response('fixture') });
+  const rows = Array.from({ length: 200 }, (_, index) => attachment('file-' + index, 'result-' + index + '.txt', 'fixture'));
+  const result = await f.cache.materialize(f.record, { hub: 'http://fixture.invalid' }, rows);
+  f.record.materializedOutputs = result.materializedOutputs;
+  let ticks = 0;
+  const timer = setInterval(() => ticks++, 1);
+  try {
+    const actual = await cacheModule.indexAsync(f.app, f.record);
+    assert.equal(actual.files.length, 200);
+    assert.deepEqual(actual, cacheModule.index(f.app, f.record));
+    assert.ok(ticks > 0);
+    await fs.writeFile(actual.files[0].path, 'changed');
+    assert.equal((await cacheModule.indexAsync(f.app, f.record)).files.length, 199);
+  } finally { clearInterval(timer); }
+});
+
 test('real HTTP bytes are privately materialized, previewed with dependencies, reused and repaired after same-size changes', async t => {
   const bytes = new Map([['page', '<!doctype html><title>Cloud result</title><link rel="stylesheet" href="assets/style.css"><h1>Done</h1>'],
     ['css', 'h1{color:green}']]);

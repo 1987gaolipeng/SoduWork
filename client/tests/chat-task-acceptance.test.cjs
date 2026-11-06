@@ -13,8 +13,7 @@ test('验收会话预填需求、验收标准和相关文件，并保留模式�
     title: '检查交付页面',
     note: '确认页面在窄屏下可用',
     criteria: ['无横向滚动', '主要操作可聚焦'],
-    // Same-named files are deliberate: the prompt must carry the attachment
-    // IDs so the model and task-input loader resolve the exact bytes.
+    // Same-named files remain visible; native preparation owns their immutable identifiers.
     attachments: [
       {id: 'att-screenshot-1', filename: '验收截图.png', size: 128},
       {id: 'att-screenshot-2', filename: '验收截图.png', size: 256},
@@ -28,10 +27,8 @@ test('验收会话预填需求、验收标准和相关文件，并保留模式�
   assert.match(manual, /检查交付页面/);
   assert.match(manual, /无横向滚动/);
   assert.match(manual, /验收截图\.png/);
-  assert.match(manual, /att-screenshot-1/);
-  assert.match(manual, /att-screenshot-2/);
-  assert.match(manual, /重名文件请以附件 ID 精确定位/);
-  assert.match(manual, /128 bytes/);
+  assert.equal((manual.match(/验收截图\.png/g) || []).length, 2);
+  assert.doesNotMatch(manual, /att-screenshot-1|att-screenshot-2|附件 ID|128 bytes/);
   assert.doesNotMatch(manual, /old-rework|返修说明\.md/);
   assert.doesNotMatch(manual, /process-log|过程记录\.md/);
   assert.match(manual, /最终由我确认/);

@@ -293,8 +293,8 @@ async def register_candidate(session: AsyncSession, version: am.PluginVersion,
         raise ValueError("只有隔离待审版本可以登记提交时的发布身份")
     if not version.package_path or not os.path.isfile(version.package_path):
         raise ValueError("插件原始包已缺失，不能核对发布身份")
-    with open(version.package_path, "rb") as stream:
-        parsed = plugin_packages.parse(stream.read())
+    from . import file_io
+    parsed = await file_io.run(plugin_packages.parse_file, version.package_path)
     if parsed.get("checksum") != version.checksum:
         raise ValueError("插件包内容与不可变版本不一致")
     verified = verify_candidate(parsed, candidate)

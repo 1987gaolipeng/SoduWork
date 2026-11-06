@@ -189,6 +189,7 @@ async def _settle_terminal(session: AsyncSession, task_id: str, ref: str,
     await session.refresh(row)
     if row.state != expected_state or int((row.metadata_ or {}).get("round") or 1) != round_no:
         return {"ok": False, "retry": False, "reason": "execution-advanced"}
+    persisted_output = False
     if not status.get("ok"):
         # A terminal cloud stream can already have uploaded and verified its
         # attachments before the status RPC becomes unavailable (for example
@@ -200,9 +201,11 @@ async def _settle_terminal(session: AsyncSession, task_id: str, ref: str,
             models.Attachment.task_id == task_id,
             models.Attachment.source_ref == ref,
             models.Attachment.uploaded_by.like("agent:%"),
+            func.coalesce(models.Attachment.evidence_meta["round"].as_integer(), 1) == round_no,
         ).limit(1))
+        persisted_output = bool(persisted)
         if persisted or getattr(task, "artifact_url", ""):
-            status = {"ok": True, "done": True, "attachments": [],
+            status = {"ok": True, "done": True, "attachments": [], "round": round_no,
                       "artifactUrl": getattr(task, "artifact_url", "") or ""}
         else:
             return {
@@ -214,7 +217,7 @@ async def _settle_terminal(session: AsyncSession, task_id: str, ref: str,
         return {"ok": False, "retry": True, "reason": "terminal-not-visible-yet"}
 
     receipt: dict = {}
-    has_output = bool(status.get("attachments") or status.get("artifactUrl"))
+    has_output = bool(status.get("attachments") or status.get("artifactUrl") or persisted_output)
     if has_output:
         receipt = await ai_exec.pull_artifacts(
             session, task_id, ctx, status, ref, settle=not workflow_managed)
@@ -236,7 +239,8 @@ async def _settle_terminal(session: AsyncSession, task_id: str, ref: str,
                 scm_hint=scm_hint,
             )
 
-    incomplete = bool(receipt.get("missing")) or bool(status.get("artifactsDropped"))
+    delivery_error = str(receipt.get("submissionError") or "")
+    incomplete = bool(receipt.get("missing")) or bool(status.get("artifactsDropped")) or bool(delivery_error)
     # Mobile review uses this durable terminal path, even after the phone closes.
     # A failed report must never become a successful review of the source task.
     acceptance_error = None
@@ -262,9 +266,10 @@ async def _settle_terminal(session: AsyncSession, task_id: str, ref: str,
         "at": datetime.now(timezone.utc).isoformat(),
         "files": int(receipt.get("files") or 0),
         "missing": list(receipt.get("missing") or [])[:50],
-        **({"error": acceptance_error} if acceptance_error else {}),
+        **({"error": acceptance_error or delivery_error} if acceptance_error or delivery_error else {}),
     }
-    if not await _save_mark(session, row, mark, expected_state=expected_state, error=acceptance_error):
+    if not await _save_mark(session, row, mark, expected_state=expected_state,
+                            error=acceptance_error or delivery_error or ("" if previous.get("state") == "incomplete" else None)):
         return {"ok": False, "retry": False, "reason": "execution-advanced"}
     await project_context.record_completion(session, task, row, status, receipt)
     await session.commit()

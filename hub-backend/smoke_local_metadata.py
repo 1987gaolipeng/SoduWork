@@ -184,6 +184,34 @@ class MetadataTests(unittest.TestCase):
         self.assertEqual(self.saved()["state"], "stopped")
         self.assertEqual(self.saved()["accessPolicy"], self.policy)
 
+    def test_terminal_state_is_durable_before_slow_delivery_inspection(self):
+        from app.services import ai_local, local_completion, local_dialogue_outcome
+        from app.services import local_turn_outcome
+        for code, expected in ((0, "done"), (1, "failed")):
+            with self.subTest(state=expected):
+                self.run.update(state="running", started=time.time(), lines=[], queue=[],
+                                cfg={}, round=7, admissionKey="comment:latest-turn")
+                local_base._save_meta(self.ref)
+                inspected = []
+                def inspect(_run):
+                    # A restart may occur while repository inspection is still pending.
+                    # The public terminal state must already exist in the durable archive.
+                    with local_base._LOCK:
+                        self.assertEqual(self.run["state"], expected)
+                    saved = self.saved()
+                    self.assertEqual(saved["state"], expected)
+                    self.assertEqual(saved["round"], 7)
+                    self.assertEqual(saved["admissionKey"], "comment:latest-turn")
+                    self.assertEqual(saved["exit"], code)
+                    self.assertGreater(saved["ended"], 0)
+                    inspected.append(True)
+                with patch.object(local_completion, "assess", return_value={}), \
+                     patch.object(local_turn_outcome, "recovery", return_value={}), \
+                     patch.object(local_dialogue_outcome, "failure", return_value={}), \
+                     patch.object(ai_local, "_git_delivery", side_effect=inspect):
+                    local_stream._finish(self.ref, code, {}, "")
+                self.assertEqual(inspected, [True])
+
 
 if __name__ == "__main__":
     unittest.main()

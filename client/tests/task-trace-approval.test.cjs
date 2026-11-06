@@ -7,6 +7,16 @@ const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../components/panels/task-trace-approval.js'), 'utf8');
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
+test('manual-only fixed deliveries keep analysis and manual confirmation while disabling automatic review', () => {
+  const f = fixture({ action: 'review', gate: { readiness: { requiresHumanConfirmation: true } } });
+  const html = f.api.html([f.item], { variant: 'task', taskId: 'task-1' });
+  assert.match(html, /value="auto" disabled/);
+  assert.match(html, /value="manual" checked/);
+  assert.match(html, /本轮没有可自动核验的交付物/);
+  assert.match(html, /data-tfd-acceptance-session="1"/);
+  assert.match(html, /data-tfd-approval-action="approve"/);
+});
+
 function fixture(approval = {}, decide = async () => ({ok: true, request: {status: 'approved'}})) {
   const notices = [], handlers = {}, calls = [];
   const item = {id: 'gate-1', status: 'pending', action: 'baseline', ...approval};

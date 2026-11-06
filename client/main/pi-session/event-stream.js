@@ -625,7 +625,7 @@ function statusText(state) {
   if (state.protocolIssue) return protocolGuard.reason(state.protocolIssue);
   if (s === 'incomplete') {
     if (state.incompleteReason === 'reasoning-limit') {
-      return '模型的单次输出上限已被思考内容用完，尚未生成答复。请在模型管理中提高最大输出量，或关闭深度思考后继续。已有内容和工具结果已保留，不会自动重复执行。';
+      return '模型的单次输出上限已被思考内容用完，尚未生成答复。请检查模型管理中的最大输出量；也可降低模型支持的思考强度或选择其他模型后继续。部分模型不支持关闭思考。已有内容和工具结果已保留，不会自动重复执行。';
     }
     if (state.incompleteReason === 'context-full') {
       return '会话上下文已超过模型窗口，自动压缩后仍未恢复。这个会话在新窗口模型下才能继续；请新建会话接着做，或在模型管理里检查该模型的上下文窗口配置。';

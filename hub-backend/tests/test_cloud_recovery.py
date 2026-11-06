@@ -271,6 +271,26 @@ class CloudRecoveryTests(unittest.IsolatedAsyncioTestCase):
             row = await session.get(am.ExecutionSession, row_id)
             self.assertEqual(row.metadata_, {"round": 2, "sentinel": "preserve"})
 
+    async def test_delivery_rejection_is_visible_and_can_reconcile_without_reexecuting(self):
+        row_id, tid = await self.execution(settled=False)
+        with patch.object(ai_exec, "load", AsyncMock(return_value={})), \
+             patch.object(ai_exec, "status_sync", return_value={"ok": True, "done": True, "attachments": [{"id": "page"}]}), \
+             patch.object(ai_exec, "pull_artifacts", AsyncMock(return_value={"submissionError": "交付文件校验未通过"})) as pull, \
+             patch.object(project_context, "record_completion", AsyncMock()):
+            async with self.sessions() as session:
+                blocked = await execution_settlement.settle_terminal(session, tid, "execution", include_task=False)
+                self.assertFalse(blocked["ok"])
+                self.assertEqual(blocked["settlement"]["state"], "incomplete")
+                row = await session.get(am.ExecutionSession, row_id)
+                self.assertEqual(row.metadata_["error"], "交付文件校验未通过")
+                pull.return_value = {"files": 1}
+                recovered = await execution_settlement.settle_terminal(session, tid, "execution", include_task=False)
+                self.assertTrue(recovered["ok"])
+                self.assertEqual(recovered["settlement"]["state"], "done")
+                await session.refresh(row)
+                self.assertEqual(row.metadata_["error"], "")
+                self.assertEqual(row.state, "done")
+
     async def test_terminal_callers_commit_one_settlement_and_reload_persisted_receipt(self):
         row_id, tid = await self.execution(settled=False)
         ready, release = asyncio.Event(), threading.Event()
@@ -303,6 +323,31 @@ class CloudRecoveryTests(unittest.IsolatedAsyncioTestCase):
                 repeated = await execution_settlement.settle_terminal(second, tid, "execution", include_task=False)
                 self.assertTrue(repeated["idempotent"])
                 self.assertEqual(completion.await_count, 1)
+
+    async def test_unavailable_runner_reconciles_stored_outputs_only_from_the_current_round(self):
+        row_id, tid = await self.execution(settled=False)
+        async with self.sessions() as session:
+            row = await session.get(am.ExecutionSession, row_id)
+            row.metadata_ = {"round": 2}
+            attachment = models.Attachment(task_id=tid, filename="result.md", content_type="text/markdown",
+                storage_key="isolated-result", backend="local", size=10, role="output",
+                uploaded_by="agent:runner", source_ref="execution", evidence_meta={"round": 1})
+            session.add(attachment)
+            await session.commit()
+            with patch.object(ai_exec, "load", AsyncMock(return_value={})), \
+                 patch.object(ai_exec, "status_sync", return_value={"ok": False, "error": "Runner offline"}), \
+                 patch.object(ai_exec, "pull_artifacts", AsyncMock(return_value={"files": 0})) as pull, \
+                 patch.object(project_context, "record_completion", AsyncMock()):
+                stale = await execution_settlement.settle_terminal(session, tid, "execution", include_task=False)
+                self.assertTrue(stale["retry"])
+                pull.assert_not_awaited()
+                attachment.evidence_meta = {"round": 2}
+                await session.commit()
+                recovered = await execution_settlement.settle_terminal(session, tid, "execution", include_task=False)
+                self.assertTrue(recovered["ok"])
+                self.assertEqual(recovered["settlement"]["state"], "done")
+                self.assertEqual(pull.await_args.args[3]["round"], 2)
+                self.assertTrue(pull.await_args.kwargs["settle"])
 
     async def artifact_fixture(self):
         _, tid = await self.execution(settled=False)

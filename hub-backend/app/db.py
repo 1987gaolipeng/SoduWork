@@ -444,23 +444,18 @@ def _backfill_data(conn) -> None:
          "WHERE client.id = ai_schedule.owner_client_id) "
          "WHERE created_by IS NULL OR created_by = ''"),
     ):
-        try:
-            conn.execute(text(sql))
-        except Exception:
-            pass   # Defer unsupported legacy backfills without preventing service startup.
+        conn.execute(text(sql))
 
     # Pre-Alembic ledgers predate occurrence identities. Backfill before adding the unique
     # index so adoption remains safe even when the historical table already has many rows.
-    try:
-        conn.execute(text(
-            "UPDATE ai_schedule_run "
-            "SET idempotency_key = 'legacy:' || id "
-            "WHERE idempotency_key IS NULL OR idempotency_key = ''"))
-        conn.execute(text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_ai_schedule_run_idempotency_key "
-            "ON ai_schedule_run (idempotency_key)"))
-    except Exception:
-        pass
+    # Adoption must fail before stamping if required data or uniqueness repairs fail.
+    conn.execute(text(
+        "UPDATE ai_schedule_run "
+        "SET idempotency_key = 'legacy:' || id "
+        "WHERE idempotency_key IS NULL OR idempotency_key = ''"))
+    conn.execute(text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_ai_schedule_run_idempotency_key "
+        "ON ai_schedule_run (idempotency_key)"))
 
 
 async def get_session():

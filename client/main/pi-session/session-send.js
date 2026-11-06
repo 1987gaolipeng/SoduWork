@@ -264,7 +264,7 @@ async send(text, turnAttachments, sendOptions) {
         }
         if (interrupted()) return { ok: true, cancelled: true, manualStop: true };
         modelPrompt = require('./input-context.cjs').augment(modelPrompt,
-          materialUnderstanding.eligible ? materialUnderstanding.prompt : '');
+          [turn.promptText, materialUnderstanding.eligible ? materialUnderstanding.prompt : ''].filter(Boolean).join('\n\n'));
         await ctx.beginTurnJournal(turn);
         let completion;
         try {

@@ -5,7 +5,7 @@ are imported inside handlers so there is one policy implementation and no
 import-time cycle with the compatibility exports in admin.py.
 """
 from fastapi import APIRouter, Body, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_session
@@ -26,17 +26,26 @@ async def list_projects(user: User = Depends(require_perm("task.view")), session
     from ..models import Project
     from ..schemas import _ms
     scope = await rbac.scope_org_ids(session, user)   # None leaves superusers unrestricted.
-    projs = (await session.execute(select(Project).order_by(Project.created_at.desc()))).scalars().all()
+    query = select(Project)
+    if scope is not None:
+        query = query.where(or_(Project.org_id.is_(None), Project.org_id.in_(scope)))
+    projs = (await session.execute(query.order_by(Project.created_at.desc()))).scalars().all()
     owner_ids = {str(p.owner_user_id) for p in projs if p.owner_user_id}
     owners = {u.id: u for u in (await session.execute(select(User).where(
         User.id.in_(owner_ids or {"__none__"})
     ))).scalars().all()}
+    active = Task.archived_at.is_(None) & (Task.status != "cancel")
+    counts = {pid: (int(total), int(done), int(closed)) for pid, total, done, closed in
+              (await session.execute(select(
+                  Task.project_id,
+                  func.sum(case((active, 1), else_=0)),
+                  func.sum(case((active & (Task.status == "done"), 1), else_=0)),
+                  func.sum(case((active, 0), else_=1)),
+              ).where(Task.project_id.in_(query.with_only_columns(Project.id)))
+               .group_by(Task.project_id))).all()}
     out = []
     for p in projs:
-        if scope is not None and p.org_id is not None and p.org_id not in scope:
-            continue
-        ts = (await session.execute(select(Task).where(Task.project_id == p.id))).scalars().all()
-        active = [t for t in ts if not t.archived_at and t.status != "cancel"]
+        total, done, closed = counts.get(p.id, (0, 0, 0))
         out.append({"id": p.id, "name": p.name, "desc": p.desc, "status": p.status,
                     "group": getattr(p, "group", "") or "", "repoUrl": getattr(p, "repo_url", "") or "",
                     "extProjectId": getattr(p, "ext_project_id", "") or "",
@@ -44,8 +53,7 @@ async def list_projects(user: User = Depends(require_perm("task.view")), session
                     "ownerName": ((owners[p.owner_user_id].display_name or
                                    owners[p.owner_user_id].username)
                                   if p.owner_user_id in owners else ""),
-                    "total": len(active), "done": sum(1 for t in active if t.status == "done"),
-                    "closed": len(ts) - len(active),
+                    "total": total, "done": done, "closed": closed,
                     "createdAt": _ms(p.created_at)})
     return out
 

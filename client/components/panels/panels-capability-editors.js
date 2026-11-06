@@ -138,9 +138,9 @@
       '<button type="button" class="cap-skill-open" data-skill-details="' + h(item.name) +
       '" aria-label="查看 ' + h(item.name) + ' 完整内容">' +
       '<span class="cap-card-icon cap-plugin-brand cap-ability-icon icon-skill" aria-hidden="true">' + ctx.skillIcon + '</span>' +
-      "<span class=\"cap-card-main\"><span class=\"cap-card-title\"><b data-user-content>" + h(item.name) + '</b>' +
+      '<span class="cap-card-main"><span class="cap-card-title"><b>' + (global.SoduWorkBuiltinSkills?.html(item) || h(item.name)) + '</b>' +
         '<em class="' + (personal ? 'personal' : '') + '">' + h(item.source || '公司能力库') + '</em></span>' +
-        "<span class=\"cap-card-desc\"" + (item.description ? ' data-user-content' : '') + '>' + h(item.description || '暂无说明') + '</span>' +
+        '<span class="cap-card-desc">' + (global.SoduWorkBuiltinSkills?.html(item, 'description') || h(item.description || '暂无说明')) + '</span>' +
         '<span class="cap-passport">' +
           '<span class="' + (installed ? 'ok' : 'warn') + '">' + stateText + '</span>' +
           (item.hasScripts ? '<span class="warn">含脚本</span>' : '<span>纯方法</span>') +
@@ -275,7 +275,9 @@
     try {
       const info = await SoduWorkAPI.skillDetails(name);
       if (layer.hidden || layer._skillView !== marker) return;
-      layer.querySelector('#capModalSub').textContent = info.description;
+      const presentation = { ...info, name, builtIn: info.builtIn || data.skills?.find(item => item.name === name)?.builtIn };
+      layer.querySelector('#capModalTitle').innerHTML = global.SoduWorkBuiltinSkills?.html(presentation) || h(name);
+      layer.querySelector('#capModalSub').innerHTML = global.SoduWorkBuiltinSkills?.html(presentation, 'description') || h(info.description);
       const submission = info.submission;
       const state = submission && submission.status;
       layer.querySelector('#capModalBody').innerHTML =

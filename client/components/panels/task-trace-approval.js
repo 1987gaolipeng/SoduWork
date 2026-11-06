@@ -38,6 +38,11 @@
     }
   });
   const acceptanceKey = (id, consent) => String(id || '') + ':' + String(consent || '');
+  function manualConfirmationOnly(item) {
+    const confirmation = item?.confirmation || {}, artifact = confirmation.lockedArtifact || item?.artifact || {};
+    return item?.action === 'review' && ((item.gate || confirmation.gate)?.readiness?.requiresHumanConfirmation === true ||
+      (artifact.kind === 'manual' && artifact.manifest?.manual === true));
+  }
   global.addEventListener?.('soduwork-data-scope-changed', () => {
     acceptanceEpoch++; acceptanceModes.clear(); acceptanceOpens.clear(); recentAcceptanceOpens.clear();
     eligibilitySnapshot = '';
@@ -102,6 +107,13 @@
       assertCurrent();
       if (global.Requirements && (!latest || global.Requirements.stage(latest) !== 'reviewing' || latest.reviewedAt || latest.canViewExecution === false))
         throw new Error('需求状态或验收权限已变化，请刷新后重试');
+      if (mode === 'auto' && global.SoduWorkAPI?.getAcceptanceContext) {
+        const context = await global.SoduWorkAPI.getAcceptanceContext(id);
+        assertCurrent();
+        if (context?.readiness?.requiresHumanConfirmation === true ||
+            (context?.artifact?.kind === 'manual' && context?.artifact?.manifest?.manual === true))
+          throw new Error('本轮没有可自动核验的交付物，请使用手动验收确认实际结果');
+      }
       const capabilityResult = currentTeamCapability();
       const capability = capabilityResult && typeof capabilityResult.then === 'function'
         ? await capabilityResult : capabilityResult;
@@ -274,7 +286,8 @@
     const direct = String(requestId(item)).startsWith('direct:');
     const taskId = String(opts.taskId || '');
     const review = String(item.action || '') === 'review';
-    const mode = acceptanceModes.get(acceptanceKey(requestId(item), item.artifactVersionId || artifact.id || subject)) || 'manual';
+    const manualOnly = manualConfirmationOnly(item);
+    const mode = manualOnly ? 'manual' : acceptanceModes.get(acceptanceKey(requestId(item), item.artifactVersionId || artifact.id || subject)) || 'manual';
     return '<section class="tfd-inline-approval is-' + tone(item.status) +
       '" data-tfd-acceptance-choice="' + mode + '" data-tfd-approval-id="' + esc(requestId(item)) + '" data-tfd-consent="' + esc(item.artifactVersionId || artifact.id || subject) + '" data-tfd-blocking="' + blocking + '"' + (direct ? ' data-tfd-direct="1"' : '') + '>' +
       '<header><div class="tfd-inline-approval-title"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 4-4 7-8 9-4-2-8-5-8-9V6zM12 8v5m0 3h.01"/></svg><b>' +
@@ -284,10 +297,10 @@
       (review ? '' : '<p class="tfd-inline-rule">' + (blocking
         ? (required > 1 ? '需 ' + required + ' 人批准后继续下一步。' : '批准后继续下一步，退回则暂停并修改。')
         : (required > 1 ? '本次交付需 ' + required + ' 人确认。' : '请确认本次需求的交付结果。')) + '</p>') +
-      evidence + notice +
+      evidence + notice + (review ? '<p role="status" data-tfd-manual-only' + (manualOnly ? '' : ' hidden') + '>本轮没有可自动核验的交付物，请使用手动验收确认实际结果</p>' : '') +
       (review && taskId ? '<fieldset class="tfd-acceptance-method"><legend>验收方式</legend><div class="tfd-acceptance-options">' +
         ['manual', 'auto'].map(value => '<label><input type="radio" name="tfd-acceptance-' + esc(requestId(item)) + '" data-tfd-acceptance-mode value="' + value + '"' +
-          (mode === value ? ' checked' : '') + '><span>' + (value === 'manual' ? '手动验收' : '自动验收') + '</span></label>').join('') +
+          (mode === value ? ' checked' : '') + (manualOnly && value === 'auto' ? ' disabled' : '') + '><span>' + (value === 'manual' ? '手动验收' : '自动验收') + '</span></label>').join('') +
         '</div><p data-tfd-mode-manual>在新会话中核对本次固定版本与证据，不重新执行原需求；分析完成后回到此卡提交确认或退回。</p>' +
         '<p data-tfd-mode-auto>打开独立验收会话，由 SoduWork 核对本次固定版本。只有完整报告且每项标准可证实才会自动提交；失败或未通过保留待验收并附逐项证据。原交付物不重新执行或修改，启动失败可重试。</p></fieldset>' : '') +
       (verify ? '<label class="tfd-inline-verify"' + (review && taskId ? ' data-tfd-mode-manual' : '') + '><input type="checkbox" data-tfd-approval-verify><span>我已核对本次版本、证据与环境范围</span></label>' : '') +
@@ -342,8 +355,9 @@
   }
   function syncAcceptanceMode(block, mode) {
     if (!block) return;
-    const selected = mode === 'auto' ? 'auto' : 'manual';
+    const selected = mode === 'auto' && block.dataset.tfdManualOnly !== 'true' ? 'auto' : 'manual';
     block.dataset.tfdAcceptanceChoice = selected;
+    block.querySelectorAll?.('[data-tfd-acceptance-mode]').forEach(input => { input.checked = input.value === selected; });
     block.querySelectorAll?.('[data-tfd-mode-manual], [data-tfd-mode-auto]').forEach((element) => {
       if (typeof element.hasAttribute !== 'function') return;
       const visible = selected === 'manual'
@@ -376,10 +390,17 @@
     const approval = detailsByCard.get(block) || current(((state || {}).trace || {}).approvals, id) ||
       (String(id || '').startsWith('direct:') ? {id, action: 'review', status: 'pending'} : null);
     const gate = approval && (approval.gate || (approval.confirmation || {}).gate) || {};
+    const manualOnly = manualConfirmationOnly(approval);
+    block.dataset.tfdManualOnly = String(manualOnly);
+    const manualHint = block.querySelector('[data-tfd-manual-only]');
+    if (manualHint) manualHint.hidden = !manualOnly;
+    if (manualOnly) syncAcceptanceMode(block, 'manual');
     const verify = block.querySelector('[data-tfd-approval-verify]');
     block.querySelectorAll('[data-tfd-approval-action], [data-tfd-approval-file], [data-tfd-acceptance-session], [data-tfd-acceptance-mode]').forEach((item) => {
       item.disabled = !approval || approval.status !== 'pending' || ['loading', 'denied', 'error'].includes(block.dataset.approvalAccess) ||
         Boolean(approval.myDecision) || submitting.has(id) || block.dataset.approvalSubmitted === 'true' ||
+        (manualOnly && (item.getAttribute('data-tfd-acceptance-session') === 'auto' ||
+          (item.hasAttribute?.('data-tfd-acceptance-mode') && item.value === 'auto'))) ||
         (item.getAttribute('data-tfd-approval-action') === 'approve' &&
           ((needsVerification(approval) && !(verify && verify.checked)) ||
             (gate.readiness?.canApprove === false)));
@@ -469,7 +490,7 @@
       syncActions(block, state);
       return;
     }
-    // Rejection defaults to automatic rework; pass false only when returning the task to pending.
+    // Rejection retains executor-owned feedback; workflow gates keep their graph transitions.
     if (decision === 'approve' && ((needsVerification(approval) && !(verify && verify.checked)) ||
         (gate.readiness && gate.readiness.canApprove === false))) {
       showError(block, '请先补齐证据并确认当前版本。');
@@ -492,7 +513,7 @@
       const rework = (result || {}).rework || {};
       say(direct
         ? (decision === 'approve' ? '交付结果已确认'
-          : '已打回，系统将按你的意见进入返修流程')
+          : '已退回，修改意见已经留在需求里')
         : (decision === 'approve' ? (request.status === 'approved'
         ? (blocking ? '审批已通过，流程将继续下一步' : '交付结果已确认')
         : '你的批准意见已提交，仍需等待其他审批人' + (blocking ? '，流程暂不继续' : '确认')) :

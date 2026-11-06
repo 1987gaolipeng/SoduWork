@@ -474,7 +474,7 @@ function _rnCompactAgents(agents) {
   if (!agents.length) return '<span class="rn-agent-empty">未发现 Agent</span>';
   const visible = agents.slice(0, 5);
   return visible.map((a) => '<span>' + esc(a.name || a.key) +
-    (a.version ? ' <i>' + esc(a.version) + '</i>' : '') + '</span>').join('') +
+    (a.version ? ' <i>' + esc(typeof AgentBrand !== 'undefined' ? AgentBrand.version(a) : a.version) + '</i>' : '') + '</span>').join('') +
     (agents.length > visible.length ? '<em>+' + (agents.length - visible.length) + '</em>' : '');
 }
 

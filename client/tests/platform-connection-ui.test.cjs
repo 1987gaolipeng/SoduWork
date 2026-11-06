@@ -4,11 +4,11 @@ const vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
 const source=fs.readFileSync(path.join(__dirname,'../components/panels/platform-plugin-connect.js'),'utf8');
 const status=(key,patch={})=>({ok:true,provider:key,installed:true,state:'needs_auth',connected:false,...patch});
 const tick=()=>new Promise(r=>setImmediate(r));
-function fixture(api){
+function fixture(api,notifications=[]){
  const timers=new Map(),events=new Map(),catalog={items:[]};let next=0,layer;
- const window={soduWorkAPI:{platformConnections:api},SoduWorkCapabilityPlugins:{snapshot:()=>catalog},addEventListener:(name,handler)=>events.set(name,handler)};
+ const window={soduWorkAPI:{platformConnections:api},SoduWorkCapabilityPlugins:{snapshot:()=>catalog},addEventListener:(name,handler)=>events.set(name,handler),dispatchEvent:event=>notifications.push(event.type)};
  window.SoduWorkPluginPlatforms=require('../core/plugin-platforms');
- vm.runInNewContext(source,{window,setTimeout:fn=>{timers.set(++next,fn);return next;},clearTimeout:id=>timers.delete(id)});
+ vm.runInNewContext(source,{window,CustomEvent:class{constructor(type){this.type=type;}},setTimeout:fn=>{timers.set(++next,fn);return next;},clearTimeout:id=>timers.delete(id)});
  const ctx={closeModal(){if(layer)layer.isConnected=false;},openModal(_title,_subtitle,body,footer){
   const nodes=new Map([...((body+footer).matchAll(/id="([^"]+)"/g))].map(m=>[m[1],{textContent:'',value:'',dataset:{},disabled:false,hidden:false}]));
   layer={isConnected:true,querySelector:sel=>nodes.get(sel.slice(1))||null};return layer;
@@ -31,6 +31,17 @@ test('continuation requires a connected account and an explicit click',async()=>
  const page=f.open('wecom',{onReady:()=>continued++});await tick();
  assert.equal(continued,0);assert.equal(page.get('capPlatformContinue').hidden,false);
  page.get('capPlatformContinue').onclick();assert.equal(continued,1);
+});
+
+test('connection changes invalidate slash plugins without a polling reload loop',async()=>{
+ const notices=[];let connected=false;
+ const f=fixture({refresh:async()=>status('feishu',{connected,state:connected?'connected':'needs_auth'})},notices);
+ const page=f.open('feishu');await tick();notices.length=0;
+ connected=true;await page.get('capPlatformCheck').onclick();
+ assert.deepEqual(notices,['soduwork:plugins-changed']);
+ await page.get('capPlatformCheck').onclick();assert.equal(notices.length,1);
+ connected=false;await page.get('capPlatformCheck').onclick();assert.equal(notices.length,2);
+ assert.equal(f.ui.ready(page.item),false);
 });
 
 test('closing shared modal with its outer controls prevents late connection starts',async()=>{

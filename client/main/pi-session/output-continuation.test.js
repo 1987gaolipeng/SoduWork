@@ -94,7 +94,8 @@ function fakeSession(acc, reasons) {
   });
   thinkingOnlyAcc.markIncomplete(thinkingOnly.incompleteReason);
   assert.equal(thinkingOnlyAcc.snapshot().status, 'incomplete');
-  assert.match(thinkingOnlyAcc.snapshot().statusText, /单次输出上限.*提高最大输出量/);
+  assert.match(thinkingOnlyAcc.snapshot().statusText, /单次输出上限.*检查模型管理中的最大输出量/);
+  assert.match(thinkingOnlyAcc.snapshot().statusText, /部分模型不支持关闭思考/);
   assert.equal(thinkingOnlySession.calls, 1,
     'thinking-only length stops must not re-enter an automatic continuation loop');
 

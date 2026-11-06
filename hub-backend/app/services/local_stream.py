@@ -997,6 +997,9 @@ def _finish(ref: str, code: int, term: dict, hard_err: str) -> None:
             run["state"] = "recovering"
         cfg = run.get("cfg") or {}
         _record_terminal(ref, run)
+        # Commit terminal state before pollers can observe it and restart the Runner.
+        # Slow delivery inspection below must not leave a completed turn running on disk.
+        _save_meta(ref)
     if retry_stall:
         # A Runner restart deliberately restores no secret from disk.  The active
         # desktop normally re-authorizes within the next poll; if it is offline,

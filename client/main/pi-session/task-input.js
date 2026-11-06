@@ -155,6 +155,9 @@ async function prepare(identity, taskId, conversationId, turnId, instruction, re
   // follow-up turns flow back to the task. Otherwise a later correction, such as changing the output
   // format to Markdown, can leave its files in the workspace without registering task deliverables.
   const followUp = reuse && !explicitNative && requested.followUp === true;
+  const runnerContinuation = reuse && !explicitNative && (followUp || reworkSession) &&
+    spec.mode === 'dispatch' && (/^runner:/.test(spec.agentId) ||
+      task.workRouting?.conversationTurn?.executor === 'dispatch');
   const assertNativeChoice = current => {
     const routing = current?.workRouting || {}, context = routing.executionContext || {};
     if (routing.selectedStrategy !== 'direct' || routing.workflowBindingId || routing.selectedWorkflowBindingId ||
@@ -184,8 +187,14 @@ async function prepare(identity, taskId, conversationId, turnId, instruction, re
       controlled.executionSpec(fresh, checked), route => request(identity, route));
   };
   if (reuse || explicitNative) {
-    await verifyReuse(false, followUp);
-    spec = { ...spec, mode: 'native' };
+    await verifyReuse(false, followUp || runnerContinuation);
+    if (runnerContinuation) {
+      // Keep the original executor and workspace. A local transcript is not a
+      // native workspace copy of the Runner files shown in that transcript.
+      const page = await request(identity, route + '/ai-session?since=1000000000');
+      if (!page.ref || page.canSend === false) throw Error(page.readOnlyReason || '原执行会话不可继续，请刷新需求后重试');
+      spec = { ...spec, continuationRef: String(page.ref) };
+    } else spec = { ...spec, mode: 'native' };
   }
   // When manually restarting rejected work, include the review feedback in the new turn.
   // Preserve the original feedback rather than relying on a short generic rework request.
@@ -197,7 +206,7 @@ async function prepare(identity, taskId, conversationId, turnId, instruction, re
      '\n（验收人已退回上一版交付，本轮请按此意见返修现有交付并重新完整提交，不要从零重做。）') : '')) :
     taskPrompt(task, instruction);
   if (!followUp && text.length > 50000) throw new Error('需求文字超过 50000 字符，请把长材料作为附件后重试；内容没有被截断或执行');
-  let attachments = followUp ? [] : await loadTaskAttachments(identity, route,
+  let attachments = followUp || runnerContinuation ? [] : await loadTaskAttachments(identity, route,
     reworkSession ? {latestDelivery: true} : undefined);
   const scope = { conversationId, turnId };
   // Freeze receipt ownership while preparation still has an authenticated account.
@@ -215,6 +224,7 @@ async function prepare(identity, taskId, conversationId, turnId, instruction, re
   };
   const transition = action => freshIdentity()
     .then(id => request(id, route + '/conversation-turn', { action, ...scope, executor: spec.mode,
+      ...(spec.continuationRef ? { continuationRef: spec.continuationRef } : {}),
       ...(submissionMode ? { submissionMode } : {}),
       ...(explicitNative && action === 'prepare' ? { executionChoice: 'native',
         agentId: spec.agentId, model: spec.model } : {}) }));
@@ -222,6 +232,9 @@ async function prepare(identity, taskId, conversationId, turnId, instruction, re
   // queue retries uploads without re-executing the model or rereading files.
   let settlementFailed = false;
   const deliverThen = async (action, outcome) => {
+    // Controlled executors publish their own artifacts. Scanning this handle's
+    // unrelated local cwd can neither collect nor replace those remote results.
+    if (spec.mode !== 'native') return transition(action);
     if (settlementFailed) {
       // The queue reports a capture failure separately from model completion.
       // Release the execution receipt so a repair is possible; never mark it complete.
@@ -261,7 +274,7 @@ async function prepare(identity, taskId, conversationId, turnId, instruction, re
     executor: spec.mode,
     ...(spec.mode === 'native' && !reuse ? { modelName: String(spec.model || '') } : {}),
     controlled: spec.mode === 'native' ? null : controlled.create({ task: receipt.task || task, spec, scope,
-      request: (route, body) => request(identity, route, body) }),
+      request: async (route, body) => request(await freshIdentity(), route, body) }),
     ...(startReceipt ? { onStarted: async () => {
       executionStarted = true;
       const recorded = await startReceipt(scope);
@@ -271,7 +284,7 @@ async function prepare(identity, taskId, conversationId, turnId, instruction, re
     beforeTurn: async () => {
       // Queued work must not execute with stale account/project/repository data.
       try {
-        if (!releaseRecovery && (reuse || explicitNative)) await verifyReuse(true, followUp);
+        if (!releaseRecovery && (reuse || explicitNative)) await verifyReuse(true, followUp || runnerContinuation);
         if (releaseRecovery) {
           const current = await request(await freshIdentity(), route);
           const turn = current.workRouting?.conversationTurn;
@@ -294,7 +307,9 @@ async function prepare(identity, taskId, conversationId, turnId, instruction, re
       // Mint a fresh receipt attempt, but retain this conversation's context.
       const next = { ...scope, turnId: 'recovery-' + require('node:crypto').randomUUID() };
       const receipt = await request(await freshIdentity(), route + '/conversation-turn',
-        { action: 'prepare', ...next, executor: spec.mode, ...(submissionMode ? { submissionMode } : {}) });
+        { action: 'prepare', ...next, executor: spec.mode,
+          ...(spec.continuationRef ? { continuationRef: spec.continuationRef } : {}),
+          ...(submissionMode ? { submissionMode } : {}) });
       if (receipt.turn.state !== 'queued') throw new Error('需求状态已变化，请刷新后查看结果');
       scope.turnId = next.turnId;
       settlementFailed = false;

@@ -135,12 +135,12 @@ async def _plugin_context(session: AsyncSession, plugin: am.Plugin,
 
 async def resolve(session: AsyncSession, org_id: str | None, plugin_ids,
                   project_id: str = "", user_id: str = "",
-                  *, include_resources: bool = False) -> dict:
+                  *, include_resources: bool = False, client=None) -> dict:
     """Use the accepted installed version; workflow bindings never gate a chat."""
     from types import SimpleNamespace
     from . import plugin_installed, plugin_package_resources
     selected = await plugin_installed.resolve(
-        session, org_id, user_id, plugin_ids if isinstance(plugin_ids, list) else [])
+        session, org_id, user_id, plugin_ids if isinstance(plugin_ids, list) else [], client=client)
     items = []
     for plugin, version, preferences in selected:
         bundle = plugin_package_resources.for_version(version) if include_resources else None

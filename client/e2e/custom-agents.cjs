@@ -48,7 +48,7 @@ app.whenReady().then(async () => {
   const runner = { async rpc(operation, payload, timeout) {
     calls.push(operation); rpcTimeouts.push(timeout);
     if (operation === 'runtime.detect') {
-      assert.ok(applied.has(payload.key));
+      if (!applied.has(payload.key)) return { ok: true, data: { installed: false, state: 'missing' } };
       return { ok: true, data: { installed: true, state: 'ready', version: 'fixture', accessControl: applied.get(payload.key).accessControl } };
     }
     assert.equal(operation, 'runtime.catalog.apply');
@@ -65,7 +65,7 @@ app.whenReady().then(async () => {
   const controller = install({ app, ipcMain, session: bridge, runner, BrowserWindow,
     dialog: { async showOpenDialog() { picks++; return { canceled: false, filePaths: [path.join(temporary, 'example-agent.exe')] }; } } });
   const store = createStore(app);
-  ipcMain.handle('custom-fixture-runtimes', () => ({ ok: true, runtimes: bridge.runtimes() }));
+  ipcMain.handle('custom-fixture-runtimes', (_event, options) => bridge.availableRuntimes(app, options));
   ipcMain.handle('custom-fixture-probe', (_event, id) => bridge.probe(app, id));
   const isolated = electronSession.fromPartition('soduwork-custom-' + Date.now());
   const deskURL = pathToFileURL(path.resolve(__dirname, '../desk.html')).href;
@@ -82,7 +82,9 @@ app.whenReady().then(async () => {
     await js(fs.readFileSync(path.resolve(__dirname, '../core/locales', name), 'utf8'));
   }
   for (const name of ['i18n-dom.js', 'i18n.js']) await js(fs.readFileSync(path.resolve(__dirname, '../core', name), 'utf8'));
-  await click('#agAddRuntime'); await until('document.querySelector("dialog[open]")');
+  await js('SoduWorkI18n.setLocale("zh-CN")');
+  assert.equal(await js('document.querySelector("#agAddRuntime").hidden'), true);
+  await click('#fixtureOpenCustom'); await until('document.querySelector("dialog[open]")');
   await click('.ca-primary');
   assert.match(await js('document.querySelector(".ca-error").textContent'), /请填写/);
   assert.equal(fs.existsSync(store.file), false);
@@ -99,7 +101,7 @@ app.whenReady().then(async () => {
   assert.equal(await js('ComposeRuntime.catalog().some(x=>x.id===' + JSON.stringify(first) + ')'), false);
   await screenshot('pending-offline'); await click('.ca-primary');
   await until('document.querySelector("[data-ca-activate]")');
-  report.checks.push('Real management entry and native dialog validate input, use trusted picker IPC, persist offline as pending, and keep unacknowledged runtimes out of the conversation picker');
+  report.checks.push('Public custom-runtime components validate input, use trusted picker IPC, persist offline as pending, and keep unacknowledged runtimes out of the conversation picker; the retired management entry stays hidden');
 
   mode = 'online'; await click('[data-ca-activate]');
   await until('document.querySelector("[data-ca-probe]") && ComposeRuntime.catalog().some(x=>x.id===' + JSON.stringify(first) + ')');
@@ -112,7 +114,7 @@ app.whenReady().then(async () => {
   assert.match(await js('document.querySelector(".ca-result").textContent'), /程序已找到/);
   report.checks.push('Retry acknowledges the same declaration once, registers a real Runner adapter, refreshes the existing production conversation picker and selects/probes the new substrate with truthful capability flags');
 
-  mode = 'lost-ack'; await click('#agAddRuntime'); await until('document.querySelector("dialog")');
+  mode = 'lost-ack'; await click('#fixtureOpenCustom'); await until('document.querySelector("dialog")');
   await setFields({ displayName: '企业模型测试', command: 'example-acp', args: '--acp\n--verbose', modelMode: 'managed' });
   assert.equal(await js('document.querySelector(".ca-model-env").hidden'), false);
   await click('.ca-primary'); await until('!document.querySelector(".ca-success").hidden');
@@ -143,7 +145,7 @@ app.whenReady().then(async () => {
     assert.equal(await js('document.querySelector("#cpRuntimeName").textContent'), '保存');
     assert.match(await js('document.querySelector("#cpRuntime").title'), /保存/);
     assert.match(await js('document.querySelector("#cpRuntime").getAttribute("aria-label")'), /保存/);
-    await click('#agAddRuntime'); await until('document.querySelector("dialog")');
+    await click('#fixtureOpenCustom'); await until('document.querySelector("dialog")');
     await setFields({ displayName: 'My Agent', command: 'example-acp', modelMode: 'managed' });
     await delay(100);
     const title = await js('document.querySelector("#caTitle").textContent');

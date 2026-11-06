@@ -329,7 +329,11 @@ async function open(opts) {
   const ref = opts.ref || ('chat-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8));
   let updatedAt = Number(opts.resumeAt || 0) || Date.now();
   /* Preserve the original first user message during restoration so follow-ups do not replace the title. */
-  let displayTitle = require('./history-state').originalMessageTitle(sessionEntries, piSession.state?.messages) ||
+  const originalTitle = require('./history-state').originalMessageTitle(sessionEntries, piSession.state?.messages);
+  const requestedTitle = require('../conversation/automatic-title').resolve(
+    require('./session-helpers').repairPersistedTitle(opts.sessionTitle, originalTitle));
+  let displayTitle = String(requestedTitle || '').replace(/\s+/g, ' ').trim().slice(0, 240) ||
+    originalTitle ||
     (taskRef ? taskTitle : '');
   let inFlight = false;
   let closed = false;
@@ -579,6 +583,7 @@ async function open(opts) {
     },
   });
   const _promptComplete = (prompt, options) => {
+    piSession.soduworkRetryPolicy = input => run.retryBudget.plan(input);
     _openTiming('prompt-start', openStarted);
     return runControl.promptComplete(run,
       (value, config) => require('./background-process').run(() =>

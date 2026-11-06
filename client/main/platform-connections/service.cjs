@@ -4,6 +4,9 @@ const feishu = require('./feishu.cjs'), wecomQr = require('./wecom-qr.cjs');
 const wecomAuthError = require('./wecom-auth-error.cjs');
 const CLEAR = { authUrl: '', qrCode: '', userCode: '', expiresAt: 0, phase: '', account: '' };
 const LOCAL_ONLY = '已断开本机连接；平台侧授权未撤销，需要使用时请重新连接';
+// DWS 1.0.61 allows sixteen minutes for device authorization. Leave one minute
+// for credential persistence and final verification before cancelling its process.
+const DINGTALK_AUTH_TIMEOUT_MS = 17 * 60 * 1000;
 function create({ app, identityOf, safeStorage, shell }, { loginHint, authResult }) {
   const states = new Map(), jobs = new Map(), checks = new Map(), disconnects = new Map(), retiring = new Map();
   let revision = 0, lastEnvironment = '';
@@ -171,6 +174,18 @@ function create({ app, identityOf, safeStorage, shell }, { loginHint, authResult
       job.qr?.dispose();
       set(context, key, { ...CLEAR, state: 'error', message, checkedAt: new Date().toISOString() });
     }
+    async function failDingtalk(error) {
+      if (!active()) return;
+      try { await guard(context, key, saved.revision); if (!active()) return; }
+      catch (_) { return; }
+      let message = /超时/.test(String(error?.message || ''))
+        ? '等待钉钉授权超时，请重新连接并完成网页上的全部授权步骤'
+        : '钉钉授权未完成，请检查连接后重试';
+      try { lifecycle.finish(app, key, context.scope, saved.revision); }
+      catch (_) { message = '本机连接状态无法保存，请检查目录权限后重试'; }
+      if (running(job)) retire(name, jobs);
+      set(context, key, { ...CLEAR, state: 'error', message, checkedAt: new Date().toISOString() });
+    }
     set(context, key, { ...CLEAR, scope: context.scope, disconnectError: '', state: 'connecting', message: '正在获取官方授权入口…' });
     if (key === 'feishu') {
       job.completion = Promise.resolve().then(() => feishu.connect(app, context.identity, context.scope,
@@ -194,7 +209,7 @@ function create({ app, identityOf, safeStorage, shell }, { loginHint, authResult
         ? ['auth', 'init', '--noninteractive', '--no-browser', '--output-qrcode', job.qr.name]
         : ['auth', 'login', '--device', '--no-browser', '--format', 'json'];
       job.command = await runtime.launch(app, key, context.scope, args, {
-        timeout: 300000, ...(job.qr ? { cwd: job.qr.cwd } : {}), onOutput: raw => {
+        timeout: key === 'dingtalk' ? DINGTALK_AUTH_TIMEOUT_MS : 300000, ...(job.qr ? { cwd: job.qr.cwd } : {}), onOutput: raw => {
           if (!active()) return;
           const hint = loginHint(key, raw);
           if (hint.authUrl) set(context, key, { state: 'awaiting_user', ...hint,
@@ -208,7 +223,7 @@ function create({ app, identityOf, safeStorage, shell }, { loginHint, authResult
         job.qr?.dispose(); set(context, key, CLEAR);
         if (result.code !== 0) {
           if (key === 'wecom') await failWecom(result);
-          else set(context, key, { state: 'error', message: '授权未完成或已过期，请重新连接' });
+          else await failDingtalk(result);
           return;
         }
         lifecycle.finish(app, key, context.scope, saved.revision);
@@ -216,13 +231,13 @@ function create({ app, identityOf, safeStorage, shell }, { loginHint, authResult
         await refresh(key);
       }).catch(async error => {
         if (key === 'wecom') await failWecom(error);
-        else if (active()) set(context, key, { ...CLEAR, state: 'error', message: '授权已超时，请重新连接' });
+        else await failDingtalk(error);
       })
         .finally(() => { if (jobs.get(name) === job) jobs.delete(name); job.qr?.dispose(); });
     } catch (error) {
       if (key === 'wecom') await failWecom(error);
+      else await failDingtalk(error);
       job.qr?.dispose(); if (jobs.get(name) === job) jobs.delete(name);
-      if (key !== 'wecom' && !job.cancelled) set(context, key, { state: 'error', message: error.message });
       if (!job.cancelled) throw error;
     }
     })().catch(() => {});
@@ -230,7 +245,9 @@ function create({ app, identityOf, safeStorage, shell }, { loginHint, authResult
   }
   async function cancel(key) {
     const context = await owner(key), name = id(context, key);
+    const saved = lifecycle.read(app, key, context.scope);
     retire(name, jobs); revision++;
+    lifecycle.finish(app, key, context.scope, saved.revision);
     set(context, key, { ...CLEAR, state: 'needs_auth', message: '已取消本次授权' });
     return status(key);
   }

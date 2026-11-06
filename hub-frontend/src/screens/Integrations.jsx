@@ -2,7 +2,7 @@ import { translateText as tx, localeMap, useLocale } from '../i18n.js'
 import React, { useState } from 'react'
 import { api } from '../api.js'
 import { useViewportHeight } from '../viewport-height.js'
-import { useAsync, Loading, Icon, Modal, Confirm, toast, LiveDot, AUTO } from '../ui.jsx'
+import { useAsync, Loading, ErrorState, Icon, Modal, Confirm, toast, LiveDot, AUTO } from '../ui.jsx'
 
 function ago(ms) {
   if (!ms) return '—'
@@ -82,6 +82,7 @@ export default function Integrations() {
   const [rotateTarget, setRotateTarget] = useState(null)
   const [tokenReveal, setTokenReveal] = useState(null)
   if (ints.loading) return <Loading />
+  if (ints.error && !ints.data) return <ErrorState msg={ints.error.message} onRetry={ints.reload} />
   const list = ints.data || []
 
   return (

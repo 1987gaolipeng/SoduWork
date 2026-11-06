@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import unittest
 import uuid
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -55,7 +56,7 @@ class NoticeAudienceRegressionTests(unittest.IsolatedAsyncioTestCase):
             f"file:{memory_name}?mode=memory&cache=shared", uri=True,
         )
         self.addCleanup(self._schema_anchor.close)
-        with sqlite3.connect(_schema_template()) as source:
+        with closing(sqlite3.connect(_schema_template())) as source:
             source.backup(self._schema_anchor)
         database_url = f"sqlite+aiosqlite:///file:{memory_name}?mode=memory&cache=shared&uri=true"
         self.engine = create_async_engine(database_url)

@@ -35,10 +35,8 @@
         !['rework_input', 'process', 'verification'].includes(String(file.role || ''))).map(file => {
         if (typeof file === 'string') return file;
         if (!file) return '';
-        const name = file.filename || file.name || file.title || '附件';
-        const id = String(file.id || file.attachmentId || '').trim();
-        const size = Number(file.size) > 0 ? '，' + file.size + ' bytes' : '';
-        return id ? name + '（附件 ID: ' + id + size + '）' : name;
+        // Native acceptance preparation binds immutable identifiers outside the editable user message.
+        return file.filename || file.name || file.title || '附件';
       }).filter(Boolean)
       : [];
     const lines = [mode === 'auto' ? '【自动验收】' : '【验收分析】',
@@ -47,7 +45,7 @@
     if (note) lines.push('需求说明：' + note.slice(0, 900));
     if (criteria.length) lines.push('验收标准：\n' + criteria.slice(0, 20).map((value, index) => (index + 1) + '. ' + value).join('\n'));
     else lines.push('验收标准：请以需求中已保存的完成标准为准，缺少证据时明确指出。');
-    lines.push('相关文件（已按附件 ID 绑定，重名文件请以附件 ID 精确定位）：' +
+    lines.push('相关文件：' +
       (files.length ? '\n' + files.slice(0, 30).map(value => '- ' + value).join('\n') : '发送时自动载入需求附件与交付证据'));
     lines.push(mode === 'auto'
       ? '请完成核验后按自动验收约定输出审核结果；不要重新执行原需求。'

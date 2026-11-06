@@ -285,7 +285,7 @@ test('返修没有服务端收据时仍尝试本机映射，由打开结果判�
 
 test('返修历史探测未命中时仍把原收据交给精确打开', async () => {
  const f = fixture({
-  SoduWorkAPI: { getTask: async id => ({ id, status: 'doing', workRouting: {
+  SoduWorkAPI: { getTask: async id => ({ id, status: 'doing', canContinueExecution: true, workRouting: {
     conversationTurn: { conversationId: 'old-rework-session' },
     reworkPending: { feedback: '补充边界处理' },
   } }) },
@@ -305,6 +305,15 @@ test('返修原会话仍在时继续使用原会话',()=>{
   {},[{id:'old',taskId:'a'}],{findByTask:()=>({conversationId:'old'})});
  assert.equal(out.chatId,'old');
  assert.notEqual(out.forceNew,true);
+});
+
+test('a stale rework entry cannot open a conversation without current execution permission', async () => {
+ for (const permission of [false, undefined]) {
+  const f = fixture({ SoduWorkAPI: { getTask: async id => ({ id, status: 'doing',
+   canViewExecution: true, canContinueExecution: permission }) } });
+  await f.api.open('a', 'Shared requirement', { source: 'rework', navigation: true });
+  assert.equal(f.calls.length, 0);
+ }
 });
 test('double click opens once and uses only ordinary compose navigation',async()=>{
  const f=fixture();await Promise.all([f.api.open('a'),f.api.open('a')]);assert.equal(f.calls.length,1);

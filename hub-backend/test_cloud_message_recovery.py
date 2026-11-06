@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from app import models
 from app.automation_models import ExecutionSession, ResourceLease
+from app.automation_models import ApprovalRequest
 from app.conversation_handoff_models import ConversationHandoff as Handoff, ConversationMessageReceipt as Receipt
 from app.db import Base
 from app.services import cloud_message_recovery as recovery, cloud_recovery
@@ -30,7 +31,7 @@ class CloudMessageRecoveryTests(unittest.IsolatedAsyncioTestCase):
         async with self.engine.begin() as connection:
             await connection.run_sync(lambda conn: Base.metadata.create_all(conn, tables=[
                 model.__table__ for model in (models.User, models.Client, models.Task,
-                    ExecutionSession, ResourceLease, Handoff, Receipt)]))
+                    models.TaskEvent, ApprovalRequest, ExecutionSession, ResourceLease, Handoff, Receipt)]))
         async with self.sessions() as session:
             session.add(models.User(id='user', username='cloud-message-user', is_active=True))
             self.client = models.Client(id='device', user_ref='user', auth_state='active')
@@ -107,6 +108,43 @@ class CloudMessageRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.receipt()).phase, 'accepted')
         self.assertEqual(self.comment_calls, 1)
         self.assertIsNone((await self.receipt()).payload)
+
+    async def reject_for_rework(self):
+        async with self.sessions() as session:
+            task = await session.get(models.Task, 'task')
+            session.add(ApprovalRequest(id='review', task_id=task.id, artifact_version_id='version',
+                action='review', status='rejected', resolved_at=recovery.now()))
+            task.work_routing = {'reworkPending': {'state': 'awaiting_executor',
+                'ref': 'execution', 'requestId': 'review', 'feedback': 'Revise'}}
+            await session.commit()
+
+    async def test_accepted_rework_survives_caller_exit_and_consumes_feedback_once(self):
+        await self.reject_for_rework()
+        with patch.object(recovery, 'attempt', side_effect=asyncio.CancelledError):
+            with self.assertRaises(asyncio.CancelledError):
+                await self.send()
+        async with self.sessions() as session:
+            self.assertIn('reworkPending', (await session.get(models.Task, 'task')).work_routing)
+        await recovery.recover()
+        await recovery.recover()
+        async with self.sessions() as session:
+            self.assertNotIn('reworkPending', (await session.get(models.Task, 'task')).work_routing)
+            events = list(await session.scalars(select(models.TaskEvent).where(models.TaskEvent.kind == 'ai.rework')))
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0].detail['requestId'], 'review')
+        self.assertEqual(self.comment_calls, 1)
+        self.assertIsNone((await self.receipt()).payload)
+
+    async def test_delayed_receipt_from_before_rejection_cannot_consume_new_feedback(self):
+        self.failure = 'after'
+        await self.send()
+        await self.reject_for_rework()
+        await recovery.attempt((await self.receipt()).id)
+        self.assertEqual((await self.receipt()).phase, 'accepted')
+        async with self.sessions() as session:
+            self.assertIn('reworkPending', (await session.get(models.Task, 'task')).work_routing)
+            self.assertIsNone(await session.scalar(select(models.TaskEvent).where(models.TaskEvent.kind == 'ai.rework')))
+        self.assertEqual(self.comment_calls, 1)
 
     async def test_saved_selection_recovers_with_negotiated_runner_capabilities(self):
         from app.services import cloud_execution_sync, conversation_handoffs, task_execution_model

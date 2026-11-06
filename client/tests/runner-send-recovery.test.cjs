@@ -10,6 +10,7 @@ async function until(check) { for (let n = 0; n < 200; n++) { if (check()) retur
 
 async function fixture(t, config = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-send-recovery-'));
+  const app = config.persist ? { getPath: () => path.join(root, 'profile') } : undefined;
   const alias = 'send-recovery', ref = _uuidV5('9af442c8-cd1d-4b91-a668-22da2b2635bf', 'chat:' + alias + ':harness2');
   const calls = []; let dispatches = 0, comments = 0, status = 'done', read = null;
   const runtime = { async rpc(op, input) {
@@ -26,7 +27,7 @@ async function fixture(t, config = {}) {
       items: status === 'done' ? [{ seq: comments + 1, kind: 'say', text: 'Recovered reply ' + comments }] : [] } };
     throw Error('Unexpected recovery operation: ' + op);
   } };
-  const adapter = createRunnerRuntimeAdapter({ runtimeSpec: catalog.runtime('harness2'),
+  const adapter = createRunnerRuntimeAdapter({ app, runtimeSpec: catalog.runtime('harness2'),
     ...(config.realRunner ? {} : { runnerRuntime: runtime }),
     modelConfig: { fetchModel: async () => ({ ok: true, model: { id: 'synthetic', key: 'synthetic', baseUrl: 'http://synthetic.invalid' } }) } });
   const session = await adapter.createSession({ identity: {}, native: { runner: { openOptions: { ref: alias, cwd: root } } } });
@@ -37,9 +38,48 @@ async function fixture(t, config = {}) {
     if (path.dirname(resolved) === path.resolve(os.tmpdir()) && path.basename(resolved).startsWith('soduwork-send-recovery-'))
       fs.rmSync(resolved, { recursive: true, force: true });
   });
-  return { handle, session, calls, ref, setRead: value => { read = value; }, setStatus: value => { status = value; },
+  return { app, handle, session, calls, ref, setRead: value => { read = value; }, setStatus: value => { status = value; },
     get dispatches() { return dispatches; }, get comments() { return comments; } };
 }
+
+test('closed Runner handles ignore late task callbacks and retain durable history on reopen', async t => {
+  const f = await fixture(t, { persist: true });
+  f.handle.appendTaskMessage('assistant', 'Durable receipt', [], 'task', 'receipt-1');
+  f.handle.appendTaskRuntimeEvent({ kind: 'text', streamId: 'fixture:stream', text: 'Partial' }, 'task');
+  f.handle.close(); f.handle.close();
+  const before = JSON.stringify(f.handle.snapshot().messages);
+  for (let i = 0; i < 1000; i++) {
+    f.handle.appendTaskMessage('assistant', 'Late receipt', [], 'task', 'late-' + i);
+    f.handle.appendTaskTool({ type: 'tool_execution_end', toolName: 'read', result: 'Late' }, 'task');
+    f.handle.appendTaskRuntimeEvent({ kind: 'task-stream-end', streamPrefix: 'fixture' }, 'task');
+    f.handle.rememberWorkflowPlugin('late-plugin');
+  }
+  assert.equal(JSON.stringify(f.handle.snapshot().messages), before);
+  const log = await require('../main/conversation/task-output-journal').create(f.app, f.ref);
+  try {
+    const rows = []; await log.restore(Infinity, row => rows.push(row));
+    assert.equal(rows.length, 1); assert.equal(rows[0].text, 'Durable receipt');
+    assert.match(log.context(), /Durable receipt/);
+  } finally { log.close(); }
+  assert.equal(f.dispatches, 0);
+});
+
+test('a dispatch admitted after close still sends stop without writing a closed journal', async t => {
+  const admission = deferred();
+  const f = await fixture(t, { persist: true, dispatch: () => admission.promise });
+  f.handle.appendTaskMessage('assistant', 'Task context', [], 'task', 'receipt');
+  const submission = f.handle.submit('Continue', []);
+  await until(() => f.dispatches === 1);
+  f.handle.close();
+  admission.resolve({ ok: true, data: { ref: f.ref, state: 'running' } });
+  assert.equal((await submission.completion).ok, false);
+  await until(() => f.calls.some(row => row.op === 'job.stop'));
+  assert.equal(f.calls.filter(row => row.op === 'job.stop').length, 1);
+  assert.equal(f.dispatches, 1); assert.equal(f.comments, 0);
+  const log = await require('../main/conversation/task-output-journal').create(f.app, f.ref);
+  try { assert.match(log.context(), /Task context/); }
+  finally { log.close(); }
+});
 
 test('the real offline Runner proves no write occurred and never traps a new explicit submission', async t => {
   const f = await fixture(t, { realRunner: true });

@@ -9,12 +9,18 @@ const REQUEST_TIMEOUT = 30000
 // Repository operations include GitLab authentication and paginated API reads.
 const REPOSITORY_TIMEOUT = 180000
 
-async function fetchSafe(path, options = {}, timeout = REQUEST_TIMEOUT) {
+async function fetchSafe(path, options = {}, timeout = REQUEST_TIMEOUT, consume = responseData) {
   const controller = new AbortController()
   const timer = window.setTimeout(() => controller.abort(), timeout)
   try {
-    return await fetch(path, { ...options, signal: controller.signal })
+    const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal
+    const res = await fetch(path, { ...options, signal })
+    // Keep cancellation active until the response body has been consumed.
+    if (res.status === 401) res.body?.cancel().catch(() => {})
+    const data = res.status === 401 ? null : await consume(res)
+    return { res, data }
   } catch (error) {
+    if (options.signal?.aborted) throw error
     if (error && error.name === 'AbortError') throw new Error(tx("请求超时，请稍后重试"))
     throw new Error(tx("无法连接 SoduWork 服务，请检查后台地址或网络"))
   } finally {
@@ -59,7 +65,7 @@ export function can(key) { return !!(me && (me.isSuper || (me.permissions || [])
 async function call(method, path, body, timeout = REQUEST_TIMEOUT) {
   const headers = { 'Content-Type': 'application/json' }
   if (token) headers['Authorization'] = 'Bearer ' + token
-  const res = await fetchSafe('/api/v1' + path, {
+  const { res, data } = await fetchSafe('/api/v1' + path, {
     method,
     headers,
     body: body != null ? JSON.stringify(body) : undefined,
@@ -69,7 +75,6 @@ async function call(method, path, body, timeout = REQUEST_TIMEOUT) {
     window.dispatchEvent(new Event('soduwork-hub-unauth'))
     throw new Error(tx("登录已失效，请重新登录"))
   }
-  const data = await responseData(res)
   if (!res.ok) throw responseError(res, data)
   return data
 }
@@ -77,12 +82,11 @@ async function call(method, path, body, timeout = REQUEST_TIMEOUT) {
 async function upload(path, file) {
   const fd = new FormData(); fd.append('file', file)
   const headers = {}; if (token) headers.Authorization = 'Bearer ' + token
-  const res = await fetchSafe('/api/v1' + path, { method: 'POST', headers, body: fd }, 90000)
+  const { res, data } = await fetchSafe('/api/v1' + path, { method: 'POST', headers, body: fd }, 90000)
   if (res.status === 401) {
     setToken(''); setUser(''); window.dispatchEvent(new Event('soduwork-hub-unauth'))
     throw new Error(tx("登录已失效，请重新登录"))
   }
-  const data = await responseData(res)
   if (!res.ok) throw responseError(res, data)
   return data
 }
@@ -90,26 +94,26 @@ async function upload(path, file) {
 
 async function uploadForm(path, form, timeout = 120000) {
   const headers = {}; if (token) headers.Authorization = 'Bearer ' + token
-  const res = await fetchSafe('/api/v1' + path, {
+  const { res, data } = await fetchSafe('/api/v1' + path, {
     method: 'POST', headers, body: form,
   }, timeout)
   if (res.status === 401) {
     setToken(''); setUser(''); window.dispatchEvent(new Event('soduwork-hub-unauth'))
     throw new Error('Session expired')
   }
-  const data = await responseData(res)
   if (!res.ok) throw responseError(res, data)
   return data
 }
 async function download(path, filename) {
   const headers = {}; if (token) headers.Authorization = 'Bearer ' + token
-  const res = await fetchSafe('/api/v1' + path, { headers }, 120000)
+  const { res, data } = await fetchSafe('/api/v1' + path, { headers }, 120000,
+    response => response.ok ? response.blob() : responseData(response))
   if (res.status === 401) {
     setToken(''); setUser(''); window.dispatchEvent(new Event('soduwork-hub-unauth'))
     throw new Error(tx("登录已失效，请重新登录"))
   }
-  if (!res.ok) throw responseError(res, await responseData(res))
-  const blob = await res.blob(); const url = URL.createObjectURL(blob)
+  if (!res.ok) throw responseError(res, data)
+  const url = URL.createObjectURL(data)
   const link = document.createElement('a')
   link.href = url; link.download = filename; document.body.appendChild(link); link.click(); link.remove()
   setTimeout(() => URL.revokeObjectURL(url), 1000)
@@ -125,8 +129,7 @@ export const api = {
   accountLegal: () => call('GET', '/admin/account-legal'),
   saveAccountLegal: (body) => call('PUT', '/admin/account-legal', body),
   health: async () => {
-    const res = await fetchSafe('/healthz', {}, 6000)
-    const data = await responseData(res)
+    const { res, data } = await fetchSafe('/healthz', {}, 6000)
     if (!res.ok) throw responseError(res, data)
     return data
   },
@@ -366,11 +369,12 @@ export const api = {
   reviewSkillSubmission: (id, body) => call('POST',
     '/admin/capabilities/skill-submissions/' + encodeURIComponent(id) + '/review', body),
   downloadSkillSubmission: async (id, checksum, path, name) => {
-    const res = await fetchSafe('/api/v1/admin/capabilities/skill-submissions/' +
+    const { res, data } = await fetchSafe('/api/v1/admin/capabilities/skill-submissions/' +
       encodeURIComponent(id) + '/download?' + new URLSearchParams({ checksum, path: path || '' }),
-      { headers: { Authorization: 'Bearer ' + token } }, 60000)
-    if (!res.ok) throw responseError(res, await responseData(res))
-    const url = URL.createObjectURL(await res.blob())
+      { headers: { Authorization: 'Bearer ' + token } }, 60000,
+      response => response.ok ? response.blob() : responseData(response))
+    if (!res.ok) throw responseError(res, data)
+    const url = URL.createObjectURL(data)
     const link = document.createElement('a')
     link.href = url; link.download = path ? path.split('/').pop() : name + '.skill'; link.click()
     setTimeout(() => URL.revokeObjectURL(url), 30000)

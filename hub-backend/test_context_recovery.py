@@ -194,6 +194,24 @@ class ContextRecoveryTests(unittest.TestCase):
         unknown = with_llm(changed, {"base": "http://model.invalid", "key": "fixture", "model": "unknown"})
         assert policy.window(unknown["cfg"]) == 128000
 
+    def test_dispatch_carries_thinking_contract_and_clears_it_on_model_switch(self):
+        from app.services.ai_exec import with_llm
+        before = {"cfg": {"llm": {}}, "localCfg": {"llm": {}}}
+        model = {"base": "http://model.invalid", "key": "fixture", "model": "reasoner",
+                 "reasoning": True, "thinkingMode": "always", "thinkingFormat": "zai",
+                 "supportsReasoningEffort": True, "thinkingLevelMap": {"off": None, "low": "low"}}
+        changed = with_llm(before, model)
+        for key in ("cfg", "localCfg"):
+            assert changed[key]["llm"]["thinkingLevelMap"] == {"off": None, "low": "low"}
+            assert changed[key]["llm"]["thinkingFormat"] == "zai"
+            assert before[key]["llm"] == {}
+        next_model = {"base": "http://model.invalid", "key": "fixture", "model": "plain"}
+        switched = with_llm(changed, next_model)
+        for key in ("cfg", "localCfg"):
+            assert "thinkingLevelMap" not in switched[key]["llm"]
+            assert "thinkingFormat" not in switched[key]["llm"]
+            assert "reasoning" not in switched[key]["llm"]
+
 
 
 for cli in list(base._PROFILES):

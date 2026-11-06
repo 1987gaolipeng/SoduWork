@@ -22,7 +22,10 @@ function fixture(t) {
     async submit(text, files, options) {
       await options.beforeTurn();
       assert.equal(options.taskId, undefined, 'review must not create a requirement execution receipt');
-      assert.match(text, /验收分析/);
+      assert.match(text, /Review this delivery/);
+      assert.doesNotMatch(text, /artifactVersionId|criterion|本次固定交付版本/);
+      assert.match(options.promptText, /本次固定交付版本：v1/);
+      assert.match(options.promptText, /验收分析/);
       calls.push('sent');
       return { accepted: true, completion: Promise.resolve({ ok: true }) };
     } };

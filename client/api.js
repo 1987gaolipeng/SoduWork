@@ -326,12 +326,27 @@
   /* Abort fetch after the timeout so a slow backend cannot block initialization indefinitely. */
   var DEFAULT_TIMEOUT = 8000;
   function _abortSignal(ms) {
+    return _requestAbort(undefined, ms).signal;
+  }
+  function _requestAbort(parent, ms) {
     /*
      * Pass an explicit abort reason so the UI displays the timeout instead of Chromium's
      * generic abort error.
      */
-    try { var c = new AbortController(); setTimeout(function(){ c.abort(new Error('请求超时（' + Math.round(ms / 1000) + ' 秒），请检查网络后重试')); }, ms); return c.signal; }
-    catch(e){ return undefined; }  /* Older environments without AbortController fall back to an untimed request. */
+    var c;
+    try { c = new AbortController(); }
+    catch(e){ return { signal: parent, dispose: function () {} }; }
+    var timer;
+    var cancel = function () { c.abort(parent.reason); };
+    var dispose = function () { clearTimeout(timer); parent?.removeEventListener('abort', cancel); };
+    if (parent?.aborted) cancel();
+    else {
+      parent?.addEventListener('abort', cancel, { once: true });
+      timer = setTimeout(function () {
+        c.abort(new Error('请求超时（' + Math.round(ms / 1000) + ' 秒），请检查网络后重试'));
+      }, ms);
+    }
+    return { signal: c.signal, dispose };
   }
 
   /*
@@ -598,7 +613,7 @@
     if (!o.signal) o.signal = _abortSignal(DEFAULT_TIMEOUT);
     var res;
     try { res = await fetch(apiUrl(path), o); }
-    catch (error) { mark(false); throw error; }
+    catch (error) { if (!opts?.signal?.aborted || error?.name !== 'AbortError') mark(false); throw error; }
     try { trace?.response?.(res); } catch (_) {}
     /*
      * Any HTTP response proves reachability; 4xx/5xx are request failures, not offline status.
@@ -814,9 +829,12 @@
      * Task details may open before list initialization. Fetch directly from the current Hub
      * and discard responses from earlier environments.
      */
-    async getTask(taskId) {
+    async getTask(taskId, options) {
       var requestHub = base();
-      var task = await jfetch('/tasks/' + encodeURIComponent(taskId));
+      var request = _requestAbort(options?.signal, DEFAULT_TIMEOUT);
+      var task;
+      try { task = await jfetch('/tasks/' + encodeURIComponent(taskId), request.signal ? { signal: request.signal } : undefined); }
+      finally { request.dispose(); }
       if (requestHub !== base()) {
         var stale = new Error('后台环境已经切换，请重新打开需求');
         stale.code = 'STALE_HUB';
@@ -1788,14 +1806,20 @@
     },
     /* Return confirmed milestones and an optional draft; the draft exists only before any milestone is confirmed. */
     /*
-     * Download task outputs as an archive through authenticated fetch, then save the blob.
-     * Opening the URL in a browser omits the device header and returns 401.
+     * Use one portable archive name for the material card, save dialog and acceptance input.
      */
+    artifactZipFilename(title) {
+      var name = Array.from(String(title || '交付物').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '').trim())
+        .slice(0, 40).join('').replace(/[. ]+$/g, '') || '交付物';
+      if (/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name)) name = '_' + name;
+      return name + '.zip';
+    },
     async downloadArtifactsZip(tid, title, artifactVersionId) {
-      var filename = ((title || '产出').replace(/[\\/:*?"<>|]/g, '').slice(0, 40) || '产出') + '.zip';
+      // Opening the URL in a browser omits the device header and returns 401.
+      var filename = global.SoduWorkAPI.artifactZipFilename(title);
       // Desktop downloads use the same native save dialog and account checks as individual files.
       if (global.soduWorkAPI?.downloadAttachment) {
-        var saved = await global.soduWorkAPI.downloadAttachment({ taskId: String(tid),
+        var saved = await global.soduWorkAPI.downloadAttachment({ deliveryBundle: true, taskId: String(tid),
           artifactVersionId: String(artifactVersionId || ''), filename: filename });
         if (!saved || (saved.ok === false && !saved.canceled && !saved.cancelled))
           throw new Error(saved?.reason || '下载未完成');
@@ -2194,7 +2218,7 @@
       var target = file && (file.path || file.relative || '');
       var got;
       if (file?.deliveryBundle && file.taskId && file.artifactVersionId && global.soduWorkAPI?.readAttachmentBinary) {
-        got = await global.soduWorkAPI.readAttachmentBinary({ taskId: file.taskId,
+        got = await global.soduWorkAPI.readAttachmentBinary({ deliveryBundle: true, taskId: file.taskId,
           artifactVersionId: file.artifactVersionId, filename: file.name || '交付物.zip' });
         assertLibraryScope(requestScope);
       } else if (bridge && typeof bridge.readOutputBinary === 'function' && (target || file?.artifactId) && !(file?.taskId && file?.attachmentId)) {

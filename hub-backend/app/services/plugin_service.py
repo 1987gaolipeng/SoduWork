@@ -383,8 +383,8 @@ async def approve_version(session: AsyncSession, version: am.PluginVersion, enab
         if signature_state not in {"unsigned", "platform"}:
             if not version.package_path or not os.path.isfile(version.package_path):
                 raise ValueError("签名插件的原始包已缺失，不能发布")
-            with open(version.package_path, "rb") as stream:
-                parsed = plugin_packages.parse(stream.read())
+            from . import file_io
+            parsed = await file_io.run(plugin_packages.parse_file, version.package_path)
             if parsed.get("checksum") != version.checksum:
                 raise ValueError("插件包内容与不可变版本不一致")
             plugin = await session.get(am.Plugin, version.plugin_id)

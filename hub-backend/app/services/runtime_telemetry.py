@@ -17,6 +17,7 @@ _LATENCY_BUCKETS = (50, 100, 250, 500, 1000, 2500, 5000, math.inf)
 _TIMING_FIELDS = ("admissionMs", "upstreamHeadersMs", "bodyMs", "totalMs")
 _minutes: dict[int, dict[tuple[str, str], dict]] = {}
 _recent_errors: deque[dict] = deque(maxlen=30)
+_stream_minutes: dict[int, dict] = {}
 
 
 def _now_ms() -> int:
@@ -28,6 +29,24 @@ def _trim(now_minute: int) -> None:
     for key in tuple(_minutes):
         if key < oldest:
             _minutes.pop(key, None)
+    for key in tuple(_stream_minutes):
+        if key < oldest:
+            _stream_minutes.pop(key, None)
+
+
+def record_stream(route: str, outcome: str, duration_ms: float, request_id: str = "",
+                  status: int = 0, source: str = "") -> None:
+    """Record stream completion independently of the already-sent HTTP status."""
+    minute = int(time.time() // 60)
+    _trim(minute)
+    row = _stream_minutes.setdefault(minute, {"completed": 0, "failed": 0, "cancelled": 0, "totalMs": 0.0})
+    final = outcome if outcome in {"completed", "failed", "cancelled"} else "failed"
+    row[final] += 1
+    row["totalMs"] += max(0.0, float(duration_ms))
+    if final == "failed":
+        _recent_errors.appendleft({"at": _now_ms(), "requestId": request_id,
+            "method": "STREAM", "route": str(route)[:180], "status": int(status),
+            "type": source if source in {"admission", "upstream", "proxy"} else "stream"})
 
 
 def record(method: str, route: str, status: int, duration_ms: float,
@@ -121,9 +140,12 @@ def summary() -> dict:
         "uptimeSeconds": max(0, int(time.time() - _STARTED)),
         "startedAt": int(_STARTED * 1000), "routes": routes[:12],
         "recentErrors": list(_recent_errors),
+        "streams": {key: sum(row[key] for row in _stream_minutes.values())
+                    for key in ("completed", "failed", "cancelled", "totalMs")},
     }
 
 
 def reset_for_test() -> None:
     _minutes.clear()
     _recent_errors.clear()
+    _stream_minutes.clear()

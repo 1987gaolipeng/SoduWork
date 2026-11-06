@@ -15,6 +15,7 @@ function fixture(options = {}) {
     getURL: () => require('node:url').pathToFileURL(path.join(__dirname, '../desk.html')).href };
   const event = { sender, senderFrame: sender.mainFrame };
   const context = vm.createContext({
+    _accountSync: options.accountSync,
     _cloudHandoff: options.cloudHandoff || { observe() {} },
     skillTurn: require('../main/pi-session/skill-turn'), sendIdentityOf: null,
     taskInput: { request: async (_identity, route) => options.request(route) },
@@ -70,6 +71,7 @@ function fixture(options = {}) {
           actor(app, identity) { return actual.actor(app, identity === undefined ? cachedIdentity() : identity); } };
       }
       if (name === '../conversation/acceptance-session' && options.acceptance) return options.acceptance;
+      if (name === '../conversation/account-native-source.cjs') return require('../main/conversation/account-native-source.cjs');
       if (!['../native-locale.cjs', '../agent-runtime/runtime-catalog', '../access-control/policy', '../access-control/preferences', '../access-control/automation-access', '../platform-connections/runtime.cjs', '../conversation/history-access', '../conversation/requirement-context', '../conversation/acceptance-session', '../conversation/work-conversation-opening', '../conversation-connectors.cjs', './resume-cwd', './task-access'].includes(name)) throw Error('Unexpected dependency ' + name);
       return require(path.join(__dirname, '../main/pi-session', name));
     },
@@ -191,6 +193,38 @@ test('a live finalization failure discards renderer ownership without closing th
   assert.equal(f.viewDetachments(), 1);
   assert.equal(closes, 0, 'failed reattachment cannot destroy a pre-existing runtime');
   assert.equal(f.ownerActions.some(action => action[0] === 'quarantine'), false);
+});
+
+test('opening a synchronized local alias reattaches the native runtime without a partial account projection', async () => {
+  const identity = automationIdentity();
+  let projections = 0;
+  const live = { ref: 'native-ref', sessionId: 'native-session', cwd: os.tmpdir(),
+    historyRow: () => ({ id: 'native-session', workOwner: require('../main/platform-connections/runtime.cjs').scope(identity) }) };
+  const f = fixture({ live, identityOf: async () => identity, accountSync: {
+    isAccountConversation: id => id === 'account-copy',
+    row: async () => ({ id: 'account-copy', sourceClientId: identity.clientId, sourceSessionId: live.sessionId }),
+    openProjection: async () => { projections++; return null; },
+  } });
+  const result = await f.open({ chatId: 'account-copy' });
+  assert.equal(result.ok, true, result.reason);
+  assert.equal(f.calls.length, 0, 'no second runtime is started');
+  assert.equal(f.viewAttachments(), 1);
+  assert.equal(projections, 0, 'the complete native transcript remains authoritative');
+});
+
+test('an alias restored before the history cache is ready still opens the native conversation', async () => {
+  const identity = automationIdentity();
+  const live = { ref: 'native-ref', sessionId: 'native-session', cwd: os.tmpdir(),
+    historyRow: () => ({ id: 'native-session', workOwner: require('../main/platform-connections/runtime.cjs').scope(identity) }) };
+  const f = fixture({ live, identityOf: async () => identity, accountSync: {
+    isAccountConversation: () => false,
+    openProjection: async () => ({ historyRow: () => ({ id: 'account-copy',
+      sourceClientId: identity.clientId, sourceSessionId: live.sessionId }) }),
+  }, attachView: () => { throw Error('A local source must not become a passive account view'); } });
+  const result = await f.open({ chatId: 'account-copy' });
+  assert.equal(result.ok, true, result.reason);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.viewAttachments(), 1);
 });
 
 test('an unconfirmed close leaves the failed open quarantined', async () => {

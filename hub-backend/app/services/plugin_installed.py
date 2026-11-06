@@ -9,7 +9,7 @@ from . import (mcp_servers, plugin_audience, plugin_installations,
 from . import plugin_application_mcp
 
 
-async def resolve(session, org_id, user_id, plugin_ids, *, provision_defaults=True):
+async def resolve(session, org_id, user_id, plugin_ids, *, provision_defaults=True, client=None):
     if not user_id:
         raise ValueError("当前设备尚未绑定员工")
     ids = list(dict.fromkeys(str(item).strip() for item in plugin_ids if str(item).strip()))
@@ -51,7 +51,7 @@ async def resolve(session, org_id, user_id, plugin_ids, *, provision_defaults=Tr
             names = plugin_application_mcp.company_names(
                 dict(version.manifest or {}), dict(version.capability_report or {}).get("mcpServers") or [])
             if names and policy["authentication"] == plugin_marketplace.ON_INSTALL:
-                readiness = await mcp_servers.readiness(session, names)
+                readiness = await mcp_servers.readiness(session, names, client=client)
                 if not readiness.get("ok"):
                     raise ValueError("安装前需要配置企业连接：" + "、".join(readiness.get("missing") or []))
             installed = await plugin_installations.install_current(

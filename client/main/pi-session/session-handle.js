@@ -169,7 +169,7 @@ async bindTask(taskId, title) {
       ctx.handle.taskIds = bound.taskIds.slice();
       ctx.handle.taskBindings = bound.taskBindings.slice();
       ctx.handle.activeTaskId = bound.activeTaskId;
-      ctx.displayTitle = ctx.displayTitle || ctx.taskTitle;
+      ctx.displayTitle = require('../conversation/automatic-title').resolve(ctx.displayTitle, ctx._snapshot()) || ctx.taskTitle;
       ctx.updatedAt = Date.now();
       ctx._emit({ kind: 'task-bound', taskId: id, taskTitle: ctx.taskTitle,
         taskIds: bound.taskIds, taskBindings: bound.taskBindings, activeTaskId: bound.activeTaskId });

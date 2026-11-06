@@ -207,15 +207,17 @@ async def request_observability(request: Request, call_next):
     from .services import runtime_telemetry
 
     from .services.cluster_bus import bus
-    if bus.enabled and not bus.healthy and request.method not in ("GET", "HEAD", "OPTIONS"):
-        return JSONResponse(status_code=503, headers={"Retry-After": "3"},
-                            content={"detail": "服务节点正在恢复连接，请稍后重试"})
     offered = str(request.headers.get("X-Request-ID") or "")
     request_id = offered if _REQUEST_ID.fullmatch(offered) else uuid.uuid4().hex
     request.state.request_id = request_id
     started = time.perf_counter()
     try:
-        response = await call_next(request)
+        if bus.enabled and not bus.healthy and request.method not in ("GET", "HEAD", "OPTIONS"):
+            request.state.exception_type = "cluster_unavailable"
+            response = JSONResponse(status_code=503, headers={"Retry-After": "3"},
+                                    content={"detail": "服务节点正在恢复连接，请稍后重试"})
+        else:
+            response = await call_next(request)
     except Exception as exc:
         elapsed = (time.perf_counter() - started) * 1000
         request.state.exception_type = type(exc).__name__

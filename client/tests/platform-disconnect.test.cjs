@@ -193,6 +193,41 @@ test('failed authorization remains an error until an explicit retry', async t =>
   assert.equal(failed.state, 'error'); assert.equal(failed.connected, false);
   assert.equal((await f.service.refresh('dingtalk')).state, 'error');
 });
+
+test('DingTalk device authorization survives five minutes and settles after the official window', async t => {
+  const f = fixture(t), complete = deferred(); let loginOptions, now = Date.now(), checks = 0;
+  t.mock.method(Date, 'now', () => now);
+  t.mock.method(runtime, 'launch', async (_app, key, _scope, args, options) => {
+    assert.equal(key, 'dingtalk');
+    if (args[1] === 'login') {
+      loginOptions = options;
+      return { completion: complete.promise, cancel() {} };
+    }
+    checks++;
+    return { completion: Promise.resolve({ code: 0, output: '{"authenticated":true}' }), cancel() {} };
+  });
+  await f.service.connect('dingtalk'); await turn();
+  assert.ok(loginOptions.timeout > 16 * 60 * 1000 && loginOptions.timeout <= 18 * 60 * 1000);
+  now += 6 * 60 * 1000;
+  assert.equal((await f.service.status('dingtalk')).state, 'connecting');
+  complete.resolve({ code: 0 }); await turn(); await turn();
+  assert.equal((await f.service.status('dingtalk')).connected, true);
+  assert.equal(checks, 1);
+});
+
+test('DingTalk failure and cancellation release the persistent connecting fence', async t => {
+  const f = fixture(t), scope = runtime.platformScope(f.app, f.state.identity, 'dingtalk');
+  t.mock.method(runtime, 'launch', async () => ({ completion: Promise.reject(Error('平台程序响应超时，请重试')), cancel() {} }));
+  await f.service.connect('dingtalk'); await turn(); await turn();
+  assert.equal(life.read(f.app, 'dingtalk', scope).connecting, false);
+  assert.match((await f.service.status('dingtalk')).message, /等待钉钉授权超时/);
+  const complete = deferred();
+  t.mock.method(runtime, 'launch', async () => ({ completion: complete.promise, cancel() { complete.resolve({ code: 0 }); } }));
+  await f.service.connect('dingtalk'); await turn();
+  await f.service.cancel('dingtalk'); await turn();
+  assert.equal(life.read(f.app, 'dingtalk', scope).connecting, false);
+  assert.equal((await f.service.status('dingtalk')).connected, false);
+});
 test('a throwing stop is a structured failure behind the persistent fence and is retryable', async t => {
   const f = fixture(t), complete = deferred();
   t.mock.method(runtime, 'launch', async () => ({ completion: complete.promise,

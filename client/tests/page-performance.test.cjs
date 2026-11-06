@@ -66,6 +66,20 @@ test('buffers have a hard cap and expire; snapshots cannot mutate retained recor
   s.advance(600001); assert.equal((await s.api.snapshot()).events.length, 0);
 });
 
+test('detail interaction phases retain no task IDs, content or mutable stage references', async () => {
+  const s = renderer(), span = s.api.interaction('requirement-detail');
+  s.advance(5); span.mark('shell'); s.advance(1000); span.mark('ready');
+  const request = s.api.beginRequest('/tasks/private-id?token=secret', 'GET'); request.finish(true);
+  assert.equal(s.api.interaction('private-title'), null);
+  const report = await s.api.snapshot();
+  assert.doesNotMatch(JSON.stringify(report), /private-id|secret|private-title/);
+  assert.equal(report.events[0].stages.shell, 5);
+  report.events[0].stages.shell = 999;
+  assert.equal((await s.api.snapshot()).events[0].stages.shell, 5);
+  s.api.clear(); span.mark('failed');
+  assert.equal((await s.api.snapshot()).events.length, 0);
+});
+
 test('identity change during an asynchronous snapshot cannot expose the previous scope', async () => {
   const s = renderer(); let resolve;
   s.window.soduWorkAPI = { pagePerformance: { snapshot: () => new Promise(r => { resolve = r; }) } };

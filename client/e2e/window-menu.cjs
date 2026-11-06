@@ -42,7 +42,11 @@ if (typeof electron === 'string') {
     const previewUrl = 'http://127.0.0.1:' + server.address().port + '/preview';
     ipcMain.handle('pi-session-history', () => ({ ok: true, chats: [] }));
     ipcMain.handle('open-external', (_e, url) => { external.push(url); return { ok: true }; });
-    const testApp = { getAppPath: () => tmp, getVersion: () => require('../package.json').version };
+    const testApp = { getAppPath: () => tmp, getVersion: () => require('../package.json').version,
+      isPackaged: false, getPath: key => key === 'userData' ? path.join(tmp, 'profile') : tmp };
+    const hubEndpoint = require('../main/hub-endpoint.cjs');
+    hubEndpoint.initialize(testApp, {});
+    assert.equal(hubEndpoint.prepare(testApp, 'https://isolated-menu-hub.example:8443').ok, true);
     const titlebar = require('../main/workspace-titlebar.cjs').create({ app: testApp, ipcMain, BrowserWindow, Menu: electron.Menu });
     require('../main/app-menu-info.cjs').install({ app: testApp, ipcMain, BrowserWindow,
       dialog: { showMessageBox: async (_parent, options) => { confirmCount++; assert.equal(options.defaultId, 0); return { response: answer }; } }, quit: reason => { assert.equal(reason, 'app-menu'); quitCount++; } });
@@ -61,13 +65,15 @@ if (typeof electron === 'string') {
     await win.loadFile(path.join(tmp, 'desk.html'));
     await js(`window.errors=[];window.notices=[];window.navigation=[];addEventListener('error',e=>errors.push(e.message));addEventListener('unhandledrejection',e=>errors.push(String(e.reason)));window.petSay=v=>notices.push(v);window.SoduWorkAPI={online:true,hubBase:()=>''};window.WorkspaceHost={open:(key,payload)=>navigation.push({key,payload})};void 0;`);
     for (const file of JSON.parse(read('core/locales/manifest.json'))) await js(read('core/locales/'+file));
-    for (const file of ['core/i18n-dom.js','core/i18n.js','components/workspace/workspace-chat-history.js','components/workspace/workspace-shell.js','components/workspace/window-menu.js']) await js(read(file)+'\nvoid 0;');
+    for (const file of ['core/i18n-dom.js','core/i18n.js','components/workspace/workspace-chat-history.js','components/workspace/workspace-chat-list.js','components/workspace/workspace-shell.js','components/workspace/window-menu.js']) await js(read(file)+'\nvoid 0;');
+    await js("SoduWorkI18n.setLocale('zh-CN');void 0;");
     await until(`document.documentElement.dataset.windowTitlebar==='overlay'`);
     assert.equal((await js('soduWorkAPI.getWindowTitlebar()')).mode, 'overlay');
     assert.equal(await js(`getComputedStyle(document.querySelector('.window-menu')).webkitAppRegion`), 'drag');
     assert.equal(await js(`getComputedStyle(document.querySelector('[data-window-menu="file"]')).webkitAppRegion`), 'no-drag');
-    assert.equal(await js(`document.querySelector('.wm-title-brand').hidden`), false);
-    report.cases.push('Production titlebar options expose native Windows captions, one SoduWork brand and draggable empty space; menu buttons remain non-draggable.');
+    assert.equal(await js(`document.querySelector('.window-menu nav').hidden`), false);
+    assert.equal(await js(`document.querySelectorAll('.wm-title-brand').length`), 0);
+    report.cases.push('Production titlebar options expose native Windows captions and draggable empty space without duplicating the sidebar brand; menu buttons remain non-draggable.');
     await js(`document.documentElement.style.setProperty('--bg-0','#17191f');document.documentElement.style.setProperty('--ink-3','#dadde4');void 0;`);
     for (let i = 0; i < 100 && titlebarThemes.at(-1)?.color !== '#17191f'; i++) await delay(20);
     assert.deepEqual(titlebarThemes.at(-1), { color: '#17191f', symbolColor: '#dadde4', height: 34 });
@@ -109,11 +115,16 @@ if (typeof electron === 'string') {
     report.cases.push('Menu keyboard Left/Right/End/Escape works and returns focus to its trigger.');
     await showHelp('about');
     assert.ok(await js(`document.querySelector('.wm-about-details').textContent.includes(${JSON.stringify(require('../package.json').version)})`));
-    await shot('about');
-    const homepage = require('../package.json').homepage;
-    if (homepage) { await click('[data-window-website]'); assert.deepEqual(external, [homepage]); }
-    else { assert.equal(await js(`!!document.querySelector('[data-window-website]')`), false); assert.deepEqual(external, []); }
+    await shot('about'); await click('[data-window-website]'); assert.deepEqual(external, ['https://isolated-menu-hub.example:8443']);
+    assert.equal(hubEndpoint.prepare(testApp, 'https://switched-menu-hub.example:9443').ok, true);
+    await click('[data-window-website]');
+    assert.equal(external.at(-1), 'https://switched-menu-hub.example:9443');
     key('ESC'); await until(`!document.querySelector('.wm-dialog').open`);
+    await showHelp('about');
+    assert.equal(await js(`document.querySelector('[data-window-website]').textContent`), 'switched-menu-hub.example:9443');
+    await click('[data-window-dialog-close]');
+    await click('[data-window-menu="help"]'); await click('[data-window-command="website"]');
+    assert.deepEqual(external, ['https://isolated-menu-hub.example:8443', 'https://switched-menu-hub.example:9443', 'https://switched-menu-hub.example:9443']);
     await showHelp('history'); assert.equal(await js(`document.querySelectorAll('.wm-releases section').length`), require('../main/release-history.json').releases.length);
     assert.equal(await js(`document.querySelector('.wm-withdrawn').textContent`), '已撤回'); await shot('release-history'); await click('[data-window-dialog-close]');
     report.cases.push('About displays actual installed version; Website dispatches exactly the confirmed address; release history shows the withdrawn version explicitly.');
@@ -133,7 +144,7 @@ if (typeof electron === 'string') {
     await js(`SoduWorkI18n.setLocale('zh-CN');document.documentElement.dataset.theme='azure';
       for(const href of ['components/panels/panels-chat.css','components/panels/chat-workspace-split.css']){const link=document.createElement('link');link.rel='stylesheet';link.href=href;document.head.append(link);}
       const root=document.createElement('div');root.id='previewChat';root.className='nchat';root.style='position:absolute;inset:50px 20px 20px 70px;z-index:200;background:white';root.innerHTML='<div class="nchat-stage"><div class="nchat-main">保留的对话</div></div>';document.body.append(root);void 0;`);
-    for (const file of ['components/panels/chat-dom-patch.js', 'components/panels/panels-chat-tools.js','components/panels/chat-output-links.js','components/panels/chat-workspace-info.js','components/panels/chat-workspace-split.js','components/panels/chat-workspace-controls.js', 'components/panels/panels-chat-workspace.js']) await js(read(file)+'\nvoid 0;');
+    for (const file of ['components/panels/chat-dom-patch.js', 'components/panels/panels-chat-tools.js','components/panels/chat-output-links.js','components/panels/chat-workspace-info.js','components/panels/chat-workspace-split.js','components/workspace/native-preview-overlays.js','components/panels/chat-workspace-controls.js', 'components/panels/panels-chat-workspace.js']) await js(read(file)+'\nvoid 0;');
     await js(`ChatWorkbench.bind(document.querySelector('#previewChat'),()=>({ref:'menu-preview'}));ChatWorkbench.openLink(${JSON.stringify(previewUrl)});ChatWorkbench.maximize(true);void 0;`);
     const nativeView = () => win.contentView.children.find(v => v.webContents && v.webContents !== win.webContents);
     for (let i = 0; i < 100 && !nativeView(); i++) await delay(30);

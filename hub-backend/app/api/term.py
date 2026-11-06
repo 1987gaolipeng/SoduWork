@@ -207,9 +207,7 @@ async def _cli_sid_of(tid: str) -> tuple[str, str]:
 
 
 class _RemoteTerm:
-    """Adapt a remote Runner terminal to the local pty_term.Term interface. Schedule asynchronous
-    write, resize, and close requests on the event loop while preserving the shared WebSocket
-    protocol.
+    """Relay remote terminal operations with ordered writes and transport backpressure.
     """
 
     def __init__(self, runner, task: str):
@@ -228,19 +226,19 @@ class _RemoteTerm:
     def info(self) -> dict:
         return self._info
 
-    def write(self, data: str) -> None:
-        asyncio.ensure_future(runner_hub.term_write(self._r, self._task, data))
+    async def write(self, data: str) -> None:
+        await runner_hub.term_write(self._r, self._task, data)
 
-    def resize(self, cols: int, rows: int) -> None:
-        asyncio.ensure_future(runner_hub.term_resize(self._r, self._task, cols, rows))
+    async def resize(self, cols: int, rows: int) -> None:
+        await runner_hub.term_resize(self._r, self._task, cols, rows)
 
-    def close(self) -> None:
-        asyncio.ensure_future(runner_hub.term_close(self._r, self._task))
+    async def close(self) -> None:
+        await runner_hub.term_close(self._r, self._task)
 
-    def unsubscribe(self, fn) -> None:
+    async def unsubscribe(self, fn) -> None:
         # Disconnecting a viewer must not close the remote terminal, allowing refresh and reconnection.
         # Detach callbacks without sending Runner close.
-        asyncio.ensure_future(runner_hub.term_detach(self._r, self._task))
+        await runner_hub.term_detach(self._r, self._task)
 
 
 async def _serve_terminal(websocket: WebSocket, task: str, cols: int, rows: int,
@@ -341,9 +339,16 @@ async def _serve_terminal(websocket: WebSocket, task: str, cols: int, rows: int,
                 continue
             kind = message.get("t")
             if kind == "i":
-                term.write(str(message.get("d") or ""))
+                if rn is not None:
+                    await term.write(str(message.get("d") or ""))
+                else:
+                    term.write(str(message.get("d") or ""))
             elif kind == "size":
-                term.resize(int(message.get("cols") or 100), int(message.get("rows") or 30))
+                cols, rows = int(message.get("cols") or 100), int(message.get("rows") or 30)
+                if rn is not None:
+                    await term.resize(cols, rows)
+                else:
+                    term.resize(cols, rows)
             elif kind == "kill":
                 if rn is not None:
                     await runner_hub.term_close(rn, task)
@@ -354,9 +359,12 @@ async def _serve_terminal(websocket: WebSocket, task: str, cols: int, rows: int,
     except Exception:  # noqa: BLE001
         pass
     finally:
-        term.unsubscribe(on_data)
         pump_task.cancel()
         await asyncio.gather(pump_task, return_exceptions=True)
+        if rn is not None:
+            await term.unsubscribe(on_data)
+        else:
+            term.unsubscribe(on_data)
         # Retain terminals across viewer disconnects; sweep() handles eventual cleanup.
 
 

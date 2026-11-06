@@ -33,6 +33,7 @@ from ..services import (
     multimodal_proxy,
     vision_router,
     model_capabilities,
+    runtime_telemetry,
 )
 
 log = logging.getLogger("uvicorn.error")
@@ -118,14 +119,39 @@ def _err(status: int, msg: str, upstream: str = "") -> JSONResponse:
     return JSONResponse(status_code=status, content=body)
 
 
-async def _stream_upstream_response(resp):
+async def _stream_upstream_response(resp, outcome=None):
     """Forward bytes unchanged; never pretend a truncated stream completed."""
+    iterator = resp.chunks().__aiter__()
+    pending = None
+    boundary, tail = True, b""
     try:
-        async for chunk in resp.chunks():
+        while True:
+            pending = asyncio.create_task(anext(iterator))
+            while not pending.done():
+                done, _ = await asyncio.wait({pending}, timeout=OPEN_KEEPALIVE_INTERVAL)
+                if not done and boundary:
+                    yield OPEN_KEEPALIVE_COMMENT
+            try:
+                chunk = pending.result()
+            except StopAsyncIteration:
+                break
+            pending = None
+            if chunk:
+                tail = (tail + chunk)[-4:]
+                # Never insert a comment into a partially transmitted SSE event.
+                boundary = tail.endswith(b"\n\n") or tail.endswith(b"\r\n\r\n")
             yield chunk
     except model_errors.UpstreamError as exc:
+        if outcome is not None:
+            outcome["streamError"] = exc.status
         yield _in_stream_error_frame(exc)
     finally:
+        if pending is not None:
+            if not pending.done():
+                pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+        if hasattr(iterator, "aclose"):
+            await iterator.aclose()
         await resp.aclose()
 
 
@@ -271,6 +297,7 @@ async def _open_then_stream(request: Request, open_call, *, responses: bool = Fa
         task = asyncio.create_task(open_call())
         upstream = None
         completed = False
+        outcome, error_status, error_source = "cancelled", 0, ""
         try:
             yield OPEN_KEEPALIVE_COMMENT
             while True:
@@ -285,25 +312,38 @@ async def _open_then_stream(request: Request, open_call, *, responses: bool = Fa
                 opened.timing["mode"] = "stream"
             log.info("[ai-proxy] upstream open ok openMs=%.1f",
                      (time.perf_counter() - started) * 1000)
-            upstream = _stream_upstream_response(opened)
+            upstream = _stream_upstream_response(opened, holder)
             async for chunk in upstream:
                 yield chunk
             completed = True
+            error_status = int(holder.get("streamError") or 0)
+            outcome = "failed" if error_status else "completed"
+            error_source = "upstream" if error_status else ""
         except model_errors.UpstreamError as exc:
+            outcome, error_status = "failed", exc.status
+            error_source = "admission" if isinstance(exc, model_runtime.CapacityError) or isinstance(exc.__cause__, model_runtime.CapacityError) else "upstream"
             log.warning("[ai-proxy] upstream open failed status=%s after %.1fs",
                         exc.status, time.perf_counter() - started)
             yield _in_stream_error_frame(exc, responses=responses)
         except HTTPException as exc:
+            outcome = "cancelled" if exc.status_code == 499 else "failed"
+            error_status, error_source = exc.status_code, "admission"
             if exc.status_code != 499:
                 yield _in_stream_error_frame(model_errors.UpstreamError(exc.status_code, ""),
                                              responses=responses)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001  Convert unexpected upstream-opening failures to stream errors.
+            outcome, error_status, error_source = "failed", 502, "proxy"
             log.warning("[ai-proxy] upstream open crashed after %.1fs: %s",
                         time.perf_counter() - started, type(exc).__name__)
             yield _in_stream_error_frame(model_errors.UpstreamError(502, ""), responses=responses)
         finally:
+            route = getattr(getattr(request, "scope", {}).get("route"), "path", "") if request is not None else ""
+            runtime_telemetry.record_stream(route or PROXY_PATH, outcome,
+                (time.perf_counter() - started) * 1000,
+                getattr(request.state, "request_id", "") if request is not None else "",
+                error_status, error_source)
             async def settle():
                 if not task.done():
                     task.cancel()
@@ -355,8 +395,14 @@ def _proxy_error(exc, *, responses=False):
         })
     result = _err(exc.status if 400 <= exc.status < 600 else 502,
                   _error_message(exc, responses=responses), exc.body)
-    if getattr(exc, "retry_after", 0):
-        result.headers["Retry-After"] = str(exc.retry_after)
+    delay = getattr(exc, "retry_after", 0)
+    if isinstance(delay, (int, float)) and 0 < delay <= 86400:
+        payload = json.loads(result.body)
+        payload["error"]["retry_after_ms"] = int(delay * 1000)
+        # Preserve the hint for SDKs that retain only error.message.
+        payload["error"]["message"] += f" Retry after {delay:g} seconds."
+        result = JSONResponse(status_code=result.status_code, content=payload,
+                              headers={"Retry-After": str(delay)})
     return result
 
 

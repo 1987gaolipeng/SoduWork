@@ -14,7 +14,7 @@ function shouldInterrupt(input, now) {
   const clock = Number(now) || Date.now();
   return Boolean(state.promptActive && !state.activeTool && !state.waitingUser &&
     Number(state.lastActivityAt || 0) > 0 &&
-    clock - Number(state.lastActivityAt) >= HARD_IDLE_MS);
+    clock - Math.max(Number(state.lastActivityAt), Number(state.retryWaitUntil) || 0) >= HARD_IDLE_MS);
 }
 
 function reason(idleMs) {

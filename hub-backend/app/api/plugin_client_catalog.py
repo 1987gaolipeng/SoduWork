@@ -69,9 +69,10 @@ async def _client_plugin_bytes(file: UploadFile) -> bytes:
 
 async def _catalog_item(session: AsyncSession, actor, plugin_id: str) -> dict:
     visible_orgs = await rbac.company_org_ids(session, actor)
+    client = await session.get(Client, actor.client_id)
     snapshot = await plugin_service.client_catalog(
         session, actor.org_id, "", actor.user_id,
-        visible_org_ids=visible_orgs)
+        visible_org_ids=visible_orgs, client=client)
     item = next((
         row for row in snapshot.get("items") or []
         if str(row.get("pluginId") or "") == str(plugin_id)
@@ -94,7 +95,7 @@ async def client_plugin_catalog(
     visible_orgs = await rbac.company_org_ids(session, actor)
     return await plugin_service.client_catalog(
         session, actor.org_id, actor.id, actor.user_id,
-        visible_org_ids=visible_orgs)
+        visible_org_ids=visible_orgs, client=client)
 
 
 @router.get("/plugins/recommendations")
@@ -280,7 +281,7 @@ async def client_plugin_conversation_context(
     try:
         result = await plugin_conversation.resolve(
             session, actor.org_id, body.get("pluginIds") or [],
-            project_id=str(body.get("projectId") or "")[:36], user_id=actor.user_id)
+            project_id=str(body.get("projectId") or "")[:36], user_id=actor.user_id, client=client)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     result.pop("_bindingIds", None)
@@ -323,7 +324,7 @@ async def client_plugin_conversation_grant(
                   if not remote_ids else await plugin_conversation.resolve(
                       session, actor.org_id, remote_ids,
                       project_id=str(body.get("projectId") or "")[:36],
-                      user_id=actor.user_id, include_resources=True))
+                      user_id=actor.user_id, include_resources=True, client=client))
         binding_ids = list(result.pop("_bindingIds", []) or [])[:3]
         version_ids = list(result.pop("_versionIds", []) or [])[:3]
         items = list(result.get("items") or [])
@@ -355,7 +356,7 @@ async def client_plugin_conversation_grant(
         # when the readiness implementation changes.
         remote_real_names = _external_mcp_names(remote_names)
         if remote_real_names:
-            readiness = await mcp_servers.readiness(session, remote_real_names)
+            readiness = await mcp_servers.readiness(session, remote_real_names, client=client)
             if not readiness.get("ok"):
                 raise ValueError(
                     "插件需要但企业尚未启用的 MCP：" +

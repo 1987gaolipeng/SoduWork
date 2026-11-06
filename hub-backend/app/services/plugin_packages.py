@@ -2,7 +2,6 @@
 not grant trust or enable execution.
 """
 from __future__ import annotations
-
 import hashlib
 import io
 import json
@@ -88,6 +87,12 @@ def _canonical_digest(zf: zipfile.ZipFile, names: dict[str, zipfile.ZipInfo],
         digest.update(zf.read(names[name]))
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def parse_file(filename: str) -> dict:
+    """Read and validate a stored package with the same bounded import contract."""
+    with open(filename, "rb") as stream:
+        return parse(stream.read(_MAX_PACKAGE + 1))
 
 
 def parse(data: bytes) -> dict:

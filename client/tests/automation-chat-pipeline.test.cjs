@@ -143,5 +143,8 @@ test('automation and UI really call the same chat open/send pipeline; internal c
     const beforeDefault = warms.length;
     assert.equal((await handlers.get('pi-session-open')(event, {})).ok, true);
     assert.equal(warms.length, beforeDefault + 1, 'legacy unspecified new chats still default to Pi');
-  } finally { quit.forEach(fn => fn()); Object.assign(auth, savedAuth); fs.rmSync(directory, { recursive: true, force: true }); }
+  } finally {
+    await Promise.all(quit.map(fn => fn()));
+    Object.assign(auth, savedAuth); fs.rmSync(directory, { recursive: true, force: true });
+  }
 });

@@ -8,6 +8,8 @@ function createState() {
     startedAt: 0,
     terminalAt: 0,
     lastActivityAt: Date.now(),
+    retryWaitUntil: 0,
+    retryBudget: require('./model-retry-budget.cjs').create(),
     toolSteps: 0,
     toolProgress: toolProgress.create(),
     stopReason: '',
@@ -219,6 +221,8 @@ function stopProtocolIssue(state, issue, ctx) {
 function observeEvent(state, ev, executionPolicy) {
   toolProgress.observe(state.toolProgress, ev);
   state.lastActivityAt = Date.now();
+  if (ev?.type === 'auto_retry_start') state.retryWaitUntil = state.lastActivityAt + Math.max(0, Number(ev.delayMs) || 0);
+  else if (['auto_retry_end', 'message_start', 'agent_settled'].includes(ev?.type)) state.retryWaitUntil = 0;
   if (ev?.type === 'compaction_start') state.compactingSince = state.lastActivityAt;
   if (ev?.type === 'compaction_end') state.compactingSince = 0;
   if (ev && ev.type === 'agent_start' && !state.startedAt) state.startedAt = state.lastActivityAt;
@@ -287,6 +291,7 @@ function startMonitor(state, ctx) {
       waitingUser: ctx.status() === 'waiting-user' ||
         Boolean(state.compactingSince && now - state.compactingSince < 5 * 60 * 1000),
       lastActivityAt: state.lastActivityAt,
+      retryWaitUntil: state.retryWaitUntil,
     }, now)) {
       stopStalledAgent(state, ctx);
       return;
@@ -360,7 +365,7 @@ function scheduleStall(state, context, ctx) {
   state.stalledIncident = null;
   const request = context || {};
   const asGoal = Boolean(request.goalMode && ctx.goalIntent === 'goal');
-  if (state.stallRecoveryCount >= stallRecovery.MAX_RECOVERIES) {
+  if (state.stallRecoveryCount >= stallRecovery.MAX_RECOVERIES || !state.retryBudget.reserve()) {
     const terminal = incident.reason +
       '\u81ea\u52a8\u6062\u590d\u540e\u4ecd\u672a\u7ee7\u7eed\uff0c\u5df2\u505c\u6b62\u7b49\u5f85\u3002\u5de5\u4f5c\u76ee\u5f55\u548c\u5df2\u6709\u8f93\u51fa\u5747\u5df2\u4fdd\u7559\uff0c\u53ef\u76f4\u63a5\u91cd\u8bd5\u6216\u7ee7\u7eed\u3002';
     state.stopReason = terminal;
@@ -460,7 +465,7 @@ function scheduleProtocol(state, context, ctx) {
     kind: 'protocol', code: issue.code, reason: ctx.protocolGuard.reason(issue),
     used: Number(issue.parameters || 0), limit: 1, unit: 'automatic recovery',
   } : null);
-  if (!paused || state.protocolRecoveryCount >= 1 || state.protocolPending) return false;
+  if (!paused || state.protocolRecoveryCount >= 1 || state.protocolPending || !state.retryBudget.reserve()) return false;
   /* Repeated tool narration gets one bounded recovery. The provider is
      aborted first, the polluted assistant turn is quarantined, and the
      existing recovery counter prevents an endless retry loop. If the clean
@@ -557,6 +562,8 @@ function resetTurn(state, resetRecovery, preserveBudget = false) {
   if (!preserveBudget || !state.startedAt) state.startedAt = Date.now();
   state.terminalAt = 0;
   state.lastActivityAt = Date.now();
+  state.retryWaitUntil = 0;
+  if (!preserveBudget) state.retryBudget.reset();
   state.compactingSince = 0;
   state.permissionWaitSince = 0;
   if (!preserveBudget) {

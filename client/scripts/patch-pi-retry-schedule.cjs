@@ -17,7 +17,7 @@ function patchSource(file) {
   try { source = fs.readFileSync(file, 'utf8'); } catch (error) {
     return { ok: false, file, reason: String(error && error.message || error) };
   }
-  if (source.includes(MARKER)) return { ok: true, already: true, file };
+  if (source.includes(MARKER) || source.includes('SODUWORK_TURN_RETRY_POLICY')) return { ok: true, already: true, file };
   const isSettingsManager = file.endsWith(path.join('core', 'settings-manager.js'));
   const isAgentSession = file.endsWith(path.join('core', 'agent-session.js'));
   // Older local development builds may already contain the compatibility
@@ -77,13 +77,32 @@ function candidateFiles({ root = path.resolve(__dirname, '..'), resourcesPath = 
 }
 
 function patchPiRetrySchedule(options = {}) {
-  const results = candidateFiles(options).map(patchSource);
+  const results = candidateFiles(options).map(patchSource).map(patchRetryPolicy);
   const existing = results.filter(item => !item.skipped);
   const failed = existing.find(item => item.ok === false);
   // A package can expose the SDK only under resourcesPath in a packaged app,
   // so absence of local candidates is allowed. An existing unsupported copy
   // is an actionable packaging error.
   return { ok: !failed, results };
+}
+
+function patchRetryPolicy(result) {
+  if (!result.ok || result.skipped || !result.file.endsWith(path.join('core', 'agent-session.js'))) return result;
+  const source = fs.readFileSync(result.file, 'utf8');
+  if (source.includes('SODUWORK_TURN_RETRY_POLICY')) return result;
+  const start = '    async _prepareRetry(message) {\n        const settings = this.settingsManager.getRetrySettings();';
+  const normalized = source.replace(/\r\n/g, '\n');
+  const delay = 'const scheduledDelay = settings.delayScheduleMs?.[this._retryAttempt - 1];';
+  if (!normalized.includes(start) || !normalized.includes(delay))
+    return { ...result, ok: false, reason: 'unsupported agent retry policy layout' };
+  const next = normalized.replace(start, start + `
+        // SODUWORK_TURN_RETRY_POLICY: automatic recovery shares the host turn budget.
+        const hostRetry = settings.enabled && this._retryAttempt < settings.maxRetries
+            ? this.soduworkRetryPolicy?.({ settings, attempt: this._retryAttempt + 1, error: message }) : undefined;
+        if (hostRetry === false) return false;`).replace(delay,
+    'const scheduledDelay = hostRetry?.delayMs ?? settings.delayScheduleMs?.[this._retryAttempt - 1];');
+  fs.writeFileSync(result.file, next, 'utf8');
+  return { ...result, patched: true };
 }
 
 if (require.main === module) {

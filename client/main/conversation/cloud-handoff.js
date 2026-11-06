@@ -162,7 +162,7 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
     facade.cloudArtifactCache = true;
     facade.deliveryOwner = require('../platform-connections/runtime.cjs').scope(current);
     facade.outputSnapshot = () => outputCache.index(app, read(record.sessionId));
-    facade.outputSnapshotAsync = async () => facade.outputSnapshot();
+    facade.outputSnapshotAsync = () => outputCache.indexAsync(app, read(record.sessionId));
     facade.outputs = () => facade.outputSnapshot().files;
     return facade;
   }
@@ -178,7 +178,7 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
     }
     await materializeOutputs(record, current, attachments, { previewOnly: input.previewOnly === true });
     const projected = await artifactSession(handle);
-    const files = projected.outputSnapshot().files;
+    const files = (await projected.outputSnapshotAsync()).files;
     const file = files.find(row => row.remoteAttachmentId === String(input.attachmentId));
     if (!file) throw Error('云端成果未完整保存，请重试');
     notify(handle, { kind: 'settled' });
@@ -200,7 +200,7 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
       accepted: Boolean(record.accepted), acceptedAt: record.acceptedAt || '',
       canAbort: record.canAbort === undefined ? !record.accepted && ['preparing', 'uploading', 'prepared'].includes(record.phase) : record.canAbort === true,
       pendingApprovals: (record.cloudApprovals || []).length, pendingMessages: (record.cloudMessages || []).length,
-      historyGap: record.syncSnapshot?.historyGap || null,
+      historyGap: record.syncSnapshot?.historyGap || (record.syncRecovery?.historyGap ? { reason: 'local-cache-recovery' } : null),
       outputPending: Boolean(record.syncArtifactsPending), outputError: record.syncArtifactError || '',
       // A cloud runner can produce a reachable URL without uploading a file
       // (for example a preview server, PR, or deployment). Keep it on the
@@ -577,7 +577,7 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
     if (record.remoteProjection) {
       const saved = record.saved || remoteSaved(record, record.adapterId, record.options?.model || '');
       let handle;
-      handle = require('./cloud-conversation-view').create({ app, ref, record, saved,
+      handle = await require('./cloud-conversation-view').create({ app, ref, record, saved,
         recordOf: () => read(record.sessionId), artifactDirectory: () => outputCache.directory(app, read(record.sessionId)),
         // The projection never executes locally. These callbacks append a
         // turn to the existing Hub task, so a desktop can continue a cloud
@@ -597,12 +597,23 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
       throw Error('云端交接状态无效，已阻止本地重复执行');
     }
     let saved;
-    try { saved = JSON.parse(await fs.readFile(path.join(root, record.transferId + '.view.json'), 'utf8')); }
-    catch (_) { throw Error('云端会话的本地展示记录无法读取，请保留数据目录后重试'); }
+    const savedPath = path.join(root, record.transferId + '.view.json');
+    try {
+      saved = JSON.parse(await fs.readFile(savedPath, 'utf8'));
+      if (!Array.isArray(saved?.snapshot?.messages)) throw new SyntaxError('Invalid projection view');
+    } catch (error) {
+      if (!(error instanceof SyntaxError) && error.code !== 'ENOENT') throw error;
+      if (!record.syncId) throw Error('云端会话的本地展示记录无法读取，请保留数据目录后重试');
+      const captured = await identity(record);
+      await projection.recoverCache(sessionId, captured, () => identity(record));
+      record = read(sessionId);
+      saved = JSON.parse(await fs.readFile(savedPath, 'utf8'));
+      synchronization.wake();
+    }
     if (!path.isAbsolute(saved.cwd || '') || !Array.isArray(saved.snapshot?.messages)) {
       throw Error('云端会话的本地展示记录无效，未启动新的本地执行');
     }
-    const handle = require('./cloud-conversation-view').create({ app, ref, record, saved,
+    const handle = await require('./cloud-conversation-view').create({ app, ref, record, saved,
       recordOf: () => read(record.sessionId), artifactDirectory: () => outputCache.directory(app, read(record.sessionId)) });
     if (record.phase !== 'committed') {
       const snapshot = handle.snapshot, close = handle.close;

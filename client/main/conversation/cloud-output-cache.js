@@ -84,7 +84,7 @@ function directory(app, record) {
     hash(JSON.stringify([record.sessionId, record.transferId, record.taskId])));
 }
 
-function index(app, record) {
+function* indexChecks(app, record) {
   const cwd = directory(app, record), contract = require('./delivery-contract');
   const files = [];
   let realRoot;
@@ -93,17 +93,17 @@ function index(app, record) {
     let cursor = anchor;
     for (const piece of path.relative(anchor, cwd).split(path.sep)) {
       cursor = path.join(cursor, piece);
-      if (syncFs.lstatSync(cursor).isSymbolicLink()) return { files: [], cloudOutputs: [] };
+      if ((yield ['lstat', cursor]).isSymbolicLink()) return { files: [], cloudOutputs: [] };
     }
-    realRoot = syncFs.realpathSync(cwd);
+    realRoot = yield ['realpath', cwd];
   } catch (_) { return { files: [], cloudOutputs: [] }; }
   for (const [id, saved] of Object.entries(record.materializedOutputs || {})) {
     const relative = safeName(saved.path);
     if (!relative) continue;
     const target = path.join(cwd, ...relative.split('/'));
     try {
-      const real = syncFs.realpathSync(target), rel = path.relative(realRoot, real);
-      const stat = syncFs.lstatSync(target);
+      const real = yield ['realpath', target], rel = path.relative(realRoot, real);
+      const stat = yield ['lstat', target];
       if (!rel || rel.startsWith('..') || path.isAbsolute(rel) || !stat.isFile() || stat.isSymbolicLink() || stat.size !== saved.size ||
           !saved.version || VERSION_KEYS.some(key => stat[key] !== saved.version[key])) continue;
       const kind = contract._kindOf(relative) || 'file';
@@ -121,6 +121,30 @@ function index(app, record) {
     size: file.size, artifactId: file.artifactId })),
     delivery: { schemaVersion: 1, source: 'manifest', presentation: record.deliveryPresentation || 'artifacts',
       summary: '', items: record.deliveryPresentation === 'summary' ? [] : files, warnings: [] } };
+}
+
+function index(app, record) {
+  const checks = indexChecks(app, record);
+  let step = checks.next();
+  while (!step.done) {
+    let value;
+    try { value = syncFs[step.value[0] + 'Sync'](step.value[1]); }
+    catch (error) { step = checks.throw(error); continue; }
+    step = checks.next(value);
+  }
+  return step.value;
+}
+
+async function indexAsync(app, record) {
+  const checks = indexChecks(app, record);
+  let step = checks.next();
+  while (!step.done) {
+    let value;
+    try { value = await fs[step.value[0]](step.value[1]); }
+    catch (error) { step = checks.throw(error); continue; }
+    step = checks.next(value);
+  }
+  return step.value;
 }
 
 async function directories(root, relative = '', trustedRoot = root) {
@@ -230,4 +254,4 @@ function create({ app, fetch = fetchWithDeviceAuthRetry, fileLimit = FILE_LIMIT,
   return { materialize };
 }
 
-module.exports = { create, directory, index, rows, safeName, bind, project, canPreview };
+module.exports = { create, directory, index, indexAsync, rows, safeName, bind, project, canPreview };

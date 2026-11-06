@@ -198,6 +198,9 @@
     let task = await global.SoduWorkAPI.getTask(id);
     if (seq !== generation) return false;
     if (!task?.id) throw new Error('需求不存在或无权访问');
+    if (payload.source === 'rework' && task.canContinueExecution !== true) {
+      throw new Error('只有执行人可以继续修正这条需求');
+    }
     if (task.canViewExecution === false) {
       if (global.RequirementsDetail && global.__deskPanel === 'workspace') return global.RequirementsDetail.open(id);
       return global.soduWorkAPI?.openDeskWindow?.({panel: 'workspace', view: 'history', requirementId: id}) || false;

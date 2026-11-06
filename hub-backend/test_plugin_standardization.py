@@ -360,6 +360,43 @@ class InstalledLifecycleTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await plugin_mcp_gateway._installed_names(self.session, client, claims)
 
+    async def test_personal_connection_is_consistent_from_catalog_to_grant_and_revocation(self):
+        from app.api import plugin_client_catalog as api
+        from app.auth import verify_claims
+        from fastapi import HTTPException
+
+        version = await self.publish(mcpServers=["feishu"])
+        self.session.add(am.PluginCatalogPolicy(plugin_id=version.plugin_id,
+                         authentication="on_install", installation="installed_by_default"))
+        client = await self.session.get(models.Client, "reader-device")
+        client.auth_state = "active"
+        endpoint = "http://127.0.0.1:39231/mcp"
+        client.mcp_servers = [{"id": "native-feishu", "name": "feishu", "type": "http",
+            "enabled": True, "approved": True, "approvedTarget": endpoint, "url": endpoint,
+            "headers": {"Authorization": "Bearer isolated-native-secret"}}]
+        peer = models.Client(id="reader-other-device", user_ref="reader", auth_state="active")
+        self.session.add(peer)
+        await self.session.commit()
+        catalog = await api.client_plugin_catalog(client=client, session=self.session)
+        item = next(item for item in catalog["items"] if item["pluginId"] == version.plugin_id)
+        self.assertTrue(item["dependencyReadiness"]["ok"])
+        body = {"pluginIds": [version.plugin_id], "resourceProtocol": 1}
+        result = await api.client_plugin_conversation_grant(body, client, self.session)
+        self.assertEqual(result["mcpGrant"]["servers"], ["feishu"])
+        claims = verify_claims(result["mcpGrant"]["ticket"], token_type="plugin-mcp")
+        self.assertEqual(claims["pvids"], [version.id])
+        self.assertEqual(set(await plugin_mcp_gateway.authorized_servers(self.session, client, claims)), {"feishu"})
+        self.assertNotIn("isolated-native-secret", json.dumps([catalog, result]))
+        with self.assertRaises(HTTPException) as rejected:
+            await api.client_plugin_conversation_grant(body, peer, self.session)
+        self.assertEqual(rejected.exception.status_code, 409)
+        client.mcp_servers = []
+        await self.session.commit()
+        with self.assertRaises(HTTPException):
+            await api.client_plugin_conversation_grant(body, client, self.session)
+        with self.assertRaises(ValueError):
+            await plugin_mcp_gateway.authorized_servers(self.session, client, claims)
+
     async def test_market_app_uses_native_connection_without_company_registry(self):
         from app.api import plugin_client_catalog as api
         from fastapi import HTTPException

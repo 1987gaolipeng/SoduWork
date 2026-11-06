@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException
 from app.api import mcp_selection as target
+from app.services import mcp_servers
 
 
 class SelectionTests(unittest.IsolatedAsyncioTestCase):
@@ -58,3 +59,42 @@ class SelectionTests(unittest.IsolatedAsyncioTestCase):
             result = await self.select({"kind": "personal", "id": "a", "enabled": True})
         self.assertTrue(result["warning"])
         target.skill_preferences.enable.assert_not_called()
+
+
+class PersonalReadinessTests(unittest.IsolatedAsyncioTestCase):
+    def client(self, **changes):
+        row = {"id": "personal-feishu", "name": "feishu", "type": "http", "enabled": True,
+               "url": "http://127.0.0.1:39231/mcp", "approved": True,
+               "approvedTarget": "http://127.0.0.1:39231/mcp", **changes}
+        return SimpleNamespace(mcp_servers=[row], mcp_enabled=[])
+
+    async def test_native_personal_connection_matches_dispatch_without_granting_another_device(self):
+        with patch.object(mcp_servers, "load", AsyncMock(return_value=[])):
+            client = self.client()
+            ready = await mcp_servers.readiness(None, ["feishu"], client=client)
+            self.assertTrue(ready["ok"])
+            _, payload = await mcp_servers.runtime_for_dispatch(None, ["feishu"], client=client, materialize=False)
+            self.assertEqual(set(payload["servers"]), {"feishu"})
+            other = SimpleNamespace(mcp_servers=[], mcp_enabled=[])
+            self.assertFalse((await mcp_servers.readiness(None, ["feishu"], client=other))["ok"])
+            self.assertFalse((await mcp_servers.readiness(None, ["feishu"]))["ok"],
+                             "Company workflow readiness cannot consume a device credential")
+
+    async def test_disabled_unapproved_or_changed_target_is_not_ready(self):
+        with patch.object(mcp_servers, "load", AsyncMock(return_value=[])):
+            for changes in ({"enabled": False}, {"approved": False}, {"url": "https://changed.invalid/mcp"}):
+                client = self.client(**changes)
+                self.assertFalse((await mcp_servers.readiness(None, ["feishu"], client=client))["ok"])
+                with self.assertRaises(ValueError):
+                    await mcp_servers.runtime_for_dispatch(None, ["feishu"], client=client, materialize=False)
+
+    async def test_company_opt_in_and_same_name_precedence_match_dispatch(self):
+        company = {"name": "feishu", "type": "http", "enabled": True, "url": "https://company.invalid/mcp"}
+        with patch.object(mcp_servers, "load", AsyncMock(return_value=[company])):
+            client = SimpleNamespace(mcp_servers=[], mcp_enabled=[])
+            self.assertFalse((await mcp_servers.readiness(None, ["feishu"], client=client))["ok"])
+            client = self.client()
+            client.mcp_enabled = ["feishu"]
+            self.assertTrue((await mcp_servers.readiness(None, ["feishu"], client=client))["ok"])
+            _, payload = await mcp_servers.runtime_for_dispatch(None, ["feishu"], client=client, materialize=False)
+            self.assertEqual(payload["servers"]["feishu"]["url"], company["url"])

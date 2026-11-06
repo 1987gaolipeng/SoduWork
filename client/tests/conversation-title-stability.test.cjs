@@ -4,6 +4,32 @@ const fs = require('node:fs'), os = require('node:os'), path = require('node:pat
 const titles = require('../main/conversation/titles');
 const { openReply } = require('../main/pi-session/open-reply');
 
+test('assigned requirements replace empty automatic titles before send, after binding and on reopen', { timeout:30000 }, async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-assigned-title-'));
+  const f = await require('../e2e/fixtures/resumed-pi.cjs').create(root);
+  t.after(async () => { await f.close(); fs.rmSync(root,{recursive:true,force:true}); });
+  const app = {getPath:()=>root};
+  await f.open({resumePath:undefined, sessionTitle:'未命名对话', taskRef:'assigned', taskTitle:'Assigned report'});
+  assert.equal(openReply(app,f.handle).title,'Assigned report');
+  assert.equal((await f.handle.send('Produce the report',[],{internal:true})).ok,true);
+  assert.equal(f.handle.historyRow().title,'Assigned report');
+  const resumePath = f.handle.resumeLocation();
+  f.handle.close();
+  await f.open({resumePath, sessionTitle:'未命名对话'});
+  assert.notEqual(f.handle.historyRow().title,'未命名对话');
+  f.handle.close();
+  await f.open({resumePath:undefined, sessionTitle:'未命名对话'});
+  assert.equal(f.handle.historyRow(),null,'unused drafts do not create placeholder sidebar rows');
+  await f.handle.bindTask('later-assigned','Transferred report');
+  assert.equal(openReply(app,f.handle).title,'Transferred report');
+  titles.save(app,f.handle.sessionId,'My chosen name');
+  await f.handle.bindTask('another-task','Another task');
+  assert.equal(openReply(app,f.handle).title,'My chosen name');
+  f.handle.close();
+  await f.open({sessionTitle:'未命名对话',taskRef:'assigned',taskTitle:'Assigned report'});
+  assert.equal(f.handle.historyRow().title,'Create an isolated report','existing conversation keeps its first subject');
+});
+
 test('a real long Pi archive keeps its first title across bounded reopen, follow-up and a saved rename', { timeout:30000 }, async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-title-stability-'));
   const f = await require('../e2e/fixtures/resumed-pi.cjs').create(root);

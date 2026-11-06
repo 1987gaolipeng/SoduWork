@@ -12,7 +12,7 @@ test('the durable outbox keeps only the newest complete checkpoint per source se
   const store = require('./account-sync-store').create(file);
   const job = revision => ({
     id: 'job-' + revision, ownerKey: 'account', clientId: 'desktop',
-    body: { sourceSessionId: 'session', sourceRevision: revision },
+    body: { sourceSessionId: 'session', sourceRevision: revision, snapshotComplete: true },
   });
   store.enqueue(job(1));
   store.enqueue(job(2));

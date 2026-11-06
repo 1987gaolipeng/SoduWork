@@ -98,6 +98,7 @@ a = Analysis(
     datas=(winpty_datas + [
         (os.path.join(backend, "app", "agent_catalog.json"), "app"),
         (os.path.join(backend, "app", "services", "dsh_session_storage.mjs"), "app/services"),
+        (os.path.join(backend, "app", "services", "codex_gateway_startup.mjs"), "app/services"),
         (os.path.join(backend, "app", "services", "dsh_gateway_bundle"), "app/services/dsh_gateway_bundle"),
         (os.path.join(backend, "app", "services", "harness2_vendor", "LICENSE"), "app/services/harness2_vendor"),
         (os.path.join(backend, "app", "services", "harness2_vendor", "UPSTREAM.md"), "app/services/harness2_vendor"),

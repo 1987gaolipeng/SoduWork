@@ -20,6 +20,10 @@ const _deviceAuth = require('./main/device-auth');
 const _cloudComputerCredentials = require('./main/cloud-computer-credentials.cjs');
 const _clientUpdater = require('./main/client-updater');
 const _installLayout = require('./main/install-layout');
+const _nativeAppIcon = require('./main/native-app-icon.cjs').create({
+  app, shell, profile: _distribution.current(), launchPath: executable => _installLayout.launchPath(executable), root: __dirname,
+});
+_nativeAppIcon.install();
 const _updateWorkloads = require('./main/update-workloads');
 /* Restore native workspace window placement through the shared window-state module. */
 const _geom = require('./main/window-geometry');
@@ -165,9 +169,10 @@ _workPreview.install({ ipcMain, BrowserWindow, WebContentsView, screen, shell, a
 require('./main/app-settings-ipc.cjs').install({ app, ipcMain, safeStorage,
   identityOf: _deviceAuth.authenticatedIdentity,
   ownerOf: () => { const id = _deviceAuth.identity(app), owner = _deviceAuth.localOwner(app); return id && owner ? id.hub + ':' + owner : ''; } });
-_attachmentFiles.install({ app, ipcMain, BrowserWindow, dialog, net, shell, identityOf: _deviceAuth.identity });
+_attachmentFiles.install({ app, ipcMain, BrowserWindow, dialog, net, shell, identityOf: _deviceAuth.identity,
+  authenticatedIdentityOf: _deviceAuth.authenticatedIdentity });
 _libraryExternal.install({ app, ipcMain, BrowserWindow, shell });
-require('./main/library-local.cjs').install({ app, ipcMain, BrowserWindow, shell, dialog });
+require('./main/library-local.cjs').install({ app, ipcMain, BrowserWindow, shell, dialog, nativeImage });
 require('./main/pi-session/attachment-materialize').install({ app, ipcMain,
   identityOf: _deviceAuth.authenticatedIdentity, sessionOf: ref => _piSessions.get(String(ref || '')) });
 require('./main/file-type-icons.cjs').install({ app, ipcMain });
@@ -425,10 +430,7 @@ function openDeskWindow(payload, sourceWin) {
  * Use the full product icon for native windows; tray rendering trims its padding.
  */
 function _appIcon() {
-  const ico = path.join(__dirname, 'icon.ico');
-  if (fs.existsSync(ico)) return ico;
-  const png = path.join(__dirname, 'icon.png');
-  return fs.existsSync(png) ? png : undefined;
+  return _nativeAppIcon.icon();
 }
 
 /*
@@ -669,7 +671,6 @@ if (!gotTheLock) {
     /* Open the main workspace on startup. The overlay starts separately and follows saved pet and dock preferences. */
     openDeskWindow({ panel: 'workspace' }, null);
     _fileOpen.signal();
-    try { app.setAppUserModelId(_distribution.current().appId); } catch (e) {}
     /*
      * Use cached tray visibility before renderer startup to avoid flashing an explicitly
      * hidden icon.

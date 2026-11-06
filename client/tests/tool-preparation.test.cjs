@@ -106,18 +106,18 @@ test('Runner controlled tasks receive preparation and clear stopped tasks withou
   assert.deepEqual(handle.snapshot().toolPreparations, []);
 });
 
-test('reopened cloud drafts retain the same message anchor and disappear on remote stop', t => {
+test('reopened cloud drafts retain the same message anchor and disappear on remote stop', async t => {
   const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-preparing-cloud-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const record = { transferId: 'p', sessionId: 'p', taskId: 't', remoteState: 'running' };
   const make = () => require('../main/conversation/cloud-conversation-view').create({ app: { getPath: () => root },
     record, ref: 'cloud-p', saved: { adapterId: 'pi', snapshot: { messages: [], pendingUser: { role: 'user', text: 'write', blocks: [] } } } });
-  let handle = make();
+  let handle = await make();
   live.create(handle, 't').consume('run', [{ seq: 1, kind: 'say', text: 'Preparing file' },
     { seq: 2, kind: 'tool-preparing', callId: 'a', tool: 'write', arguments: { path: 'cloud.html' } }]);
   assert.equal(handle.snapshot().toolPreparations[0].after, 1);
-  handle.close(); handle = make();
+  handle.close(); handle = await make();
   assert.equal(handle.snapshot().toolPreparations[0].after, 1);
   const output = live.create(handle, 't');
   output.consume('run', [{ seq: 3, kind: 'do', callId: 'a', tool: 'write', arguments: { path: 'cloud.html' } }]);
@@ -128,7 +128,7 @@ test('reopened cloud drafts retain the same message anchor and disappear on remo
   record.remoteState = 'running';
   assert.deepEqual(handle.snapshot().toolPreparations, []);
   output.consume('run', [{ seq: 5, kind: 'tool-preparing', callId: 'c', tool: 'write', arguments: { path: 'orphan.html' } }]);
-  handle.close(); handle = make();
+  handle.close(); handle = await make();
   handle.appendTaskMessage('user', 'next', [], 't', 'next-turn');
   assert.deepEqual(handle.snapshot().toolPreparations, []); handle.close();
 });

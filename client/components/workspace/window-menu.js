@@ -147,9 +147,10 @@
     const items = popup.querySelectorAll('button:not(:disabled)'); (last ? items[items.length - 1] : items[0])?.focus();
   }
   async function appInfo() {
+    // Coalesce concurrent requests without retaining a previous Hub after a switch.
     if (!infoPromise) infoPromise = Promise.resolve().then(() => api()?.getAppInfo?.()).then(result => {
       if (!result) throw Error('应用信息暂不可用'); info = result; return result;
-    }).catch(error => { infoPromise = null; throw error; });
+    }).finally(() => { infoPromise = null; });
     return infoPromise;
   }
   function closeDialog() { if (dialog?.open) dialog.close(); }

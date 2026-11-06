@@ -100,11 +100,28 @@ test('automation editor keeps model selection independent from the chosen Agent'
   await run(ctx, '_schLoadExecutionAgents({})');
   assert.match(run(ctx, '_schModelFieldHtml("", "local:pi")'), /soduwork-prd-large/);
   assert.match(run(ctx, '_schModelFieldHtml("", "local:pi")'), /selected/);
+  // Native catalogs load only when that substrate is selected.
+  await run(ctx, '_schLoadNativeModelOptions(_schAgents.filter(item => item.id === "local:codex"))');
   assert.match(run(ctx, '_schModelFieldHtml("", "local:codex")'), /gpt-5-codex/);
   assert.doesNotMatch(run(ctx, '_schModelFieldHtml("", "local:codex")'), /soduwork-prd-large/);
   assert.doesNotMatch(run(ctx, '_schModelFieldHtml("", "local:codex")'), /<select[^>]+disabled/);
   assert.equal(run(ctx, '_schAgentAllowsModel("local:codex")'), true);
   assert.equal(run(ctx, '_schAgentAllowsModel("local:pi")'), true);
+});
+
+test('a new automation loads the default native substrate without loading unrelated catalogs', async () => {
+  const queried = [];
+  const ctx = context({ taskExecutionOptions: async () => ({ substrates: [
+    { key: 'local:qwen', cli: 'qwen', available: false, nativeModelPick: true },
+    { key: 'local:codex', cli: 'codex', available: true, nativeModelPick: true },
+    { key: 'local:kimi', cli: 'kimi', available: true, nativeModelPick: true },
+  ] }) }, { conversationSession: { runtimeModels: async id => {
+    queried.push(id); return { models: [{ id: 'native-default' }] };
+  } } });
+  await run(ctx, '_schLoadExecutionAgents({})');
+  assert.deepEqual(queried, ['codex']);
+  assert.equal(run(ctx, '_schDefaultAgentId()'), 'local:codex');
+  assert.match(run(ctx, '_schModelFieldHtml("", "local:codex")'), /native-default/);
 });
 
 test('automation model selector translates labels generated after the editor opens', async () => {

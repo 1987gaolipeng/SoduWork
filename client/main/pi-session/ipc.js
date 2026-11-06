@@ -273,11 +273,12 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
   });
   if (app.isReady?.()) _cloudHandoff.synchronization.start();
   else app.on('ready', () => _cloudHandoff.synchronization.start());
-  const accountSyncStore = require('../conversation/account-sync-store').create(
+  const accountSyncStore = require('../conversation/account-sync-store').createWorker(
     path.join(app.getPath('userData'), 'account-conversations-sync', 'outbox.json'));
   _accountSync = require('../conversation/account-sync').create({
     app, store: accountSyncStore, identityOf: sendIdentityOf || identityOf,
     localIdentityOf: async () => (sendIdentityOf || identityOf)(app),
+    resolveNativeSource: (item, identity) => require('../conversation/account-native-source.cjs').resolve({ app, session, item, identity }),
     realtime: true,
   });
   // Account-conversation WebSocket messages are invalidation hints, but they
@@ -419,6 +420,13 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
       if (expectedIdentity && (!openingConnection || openingConnection !== connectionOf(expectedIdentity))) {
         return { ok: false, reason: '连接环境已切换，本次自动化未启动' };
       }
+      if (opts.chatId && !session.findBySessionId(opts.chatId) &&
+          typeof _accountSync !== 'undefined' && _accountSync?.isAccountConversation?.(opts.chatId)) {
+        const item = await _accountSync.row(opts.chatId);
+        const native = await require('../conversation/account-native-source.cjs').resolve({ app, session, item, identity });
+        await assertHistoryCurrent();
+        if (native) opts.chatId = native.id;
+      }
       // Start the SDK/model work while local capability policy and Skill
       // discovery are being resolved. `prewarm` shares model-config's pending
       // request, so session.open will await the same result instead of
@@ -491,6 +499,14 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         const projection = await _accountSync.openProjection(opts.chatId).catch(() => null);
         if (projection) {
           await assertHistoryCurrent();
+          // A restored sidebar can open before account history finishes loading.
+          // Resolve the authenticated projection metadata before attaching a view.
+          const native = await require('../conversation/account-native-source.cjs').resolve({
+            app, session, item: projection.historyRow?.(), identity });
+          await assertHistoryCurrent();
+          if (native && native.id !== opts.chatId) {
+            return openConversation(event, { ...opts, chatId: native.id }, identity, automationContext);
+          }
           const handle = session.attachView(projection);
           _sessionOwners?.bind(handle, identity, { connection: true });
           if (event) _attach(handle, require('../conversation/app-surfaces.cjs').forSender(BrowserWindow, event.sender));
@@ -886,7 +902,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
             await require('../conversation/acceptance-session').attach(app, s, { resumed: true }, fresh);
             return fresh;
           } });
-        text = taskTurn.text;
+        text = taskTurn.displayText ?? taskTurn.text;
         // Stage requirement materials and current attachments together, preserving distinct files even when names match.
         rawAttachments = (taskTurn.attachments || []).concat(Array.isArray(rawAttachments) ? rawAttachments : []);
       } catch (error) {
@@ -932,7 +948,8 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     const clearPluginSelection = Boolean(rawOptions &&
       (rawOptions.clearPluginSelection === true || rawOptions.pluginSelection === 'clear'));
     const sendOptions = {
-      ...(taskTurn?.acceptanceOnly ? { beforeTurn: taskTurn.beforeTurn, afterTurn: taskTurn.afterTurn } : {}),
+      ...(taskTurn?.acceptanceOnly ? { beforeTurn: taskTurn.beforeTurn, afterTurn: taskTurn.afterTurn,
+        promptText: taskTurn.text } : {}),
       ...(taskLifecycle ? { taskId, taskTitle: taskTurn.task.title || '',
         beforeTurn: taskTurn.beforeTurn, afterTurn: taskTurn.afterTurn, beforeRetry: taskTurn.beforeRetry,
         ...(taskTurn.onStarted ? { onStarted: taskTurn.onStarted } : {}), retry: rawOptions.retry === true,
@@ -1110,7 +1127,18 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     sync: () => _accountSync.flush(),
   });
   let accountingQuitReady = false;
+  let persistenceClose = null;
+  const disposePersistence = () => {
+    if (!persistenceClose) persistenceClose = Promise.allSettled([
+      _accountSync.close(), _usage?.persist?.(),
+    ]).then(results => {
+      if (results.some(result => result.status === 'rejected'))
+        console.warn('[conversation] Pending local data could not be saved before exit');
+    });
+    return persistenceClose;
+  };
   app.on('before-quit', event => {
+    const persisted = disposePersistence();
     void _cloudHandoff?.synchronization.close();
     personalRelay.close();
     _publicationQueue.clear();
@@ -1123,14 +1151,14 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     try { session.closeAll(); } catch (e) { /* Do not throw during shutdown cleanup. */ }
     // Disk writes run asynchronously during conversations. Complete their
     // durability boundary before Electron tears down the main process.
-    if (!accountingQuitReady && event?.preventDefault && _usage?.persist) {
+    if (!accountingQuitReady && event?.preventDefault) {
       event.preventDefault();
-      _usage.persist().catch(() => {
-        console.warn('[usage] Pending accounting could not be saved before exit');
-      }).finally(() => { accountingQuitReady = true; app.quit(); });
+      persisted.finally(() => { accountingQuitReady = true; app.quit(); });
     }
+    return persisted;
   });
   return {
+    dispose: disposePersistence,
     open: (options, identity) => openConversation(null, options, identity),
     ...require('../access-control/automation-access').service(app, openConversation),
     async send(ref, text, files, options) {

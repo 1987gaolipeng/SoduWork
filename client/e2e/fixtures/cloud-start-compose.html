@@ -6,6 +6,7 @@
 <style>:root{--bg-0:#fff;--bg-2:#f7f8fa;--line:#e4e7ec;--ink:#22252b;--ink-2:#525766;--ink-3:#7b808b;--ink-4:#969ba5;--accent:#4f78df;--font-ui:system-ui}body{font:15px system-ui;margin:0;color:var(--ink);background:#fff}.cp-mid{max-width:780px;margin:90px auto;padding:24px}.cp-hero{font-size:30px;font-weight:650;margin-bottom:12px}.cp-hero-note{color:var(--ink-3);margin-bottom:32px}.wc-input{min-height:130px;padding:20px}.cp-box{width:100%}.cp-chat{display:none}#receipt{max-width:760px;margin:12px auto;padding:12px;white-space:pre-wrap;font-size:14px}button{font:inherit}svg{fill:none;stroke:currentColor;stroke-width:1.7}#narrow{position:fixed;top:20px;right:24px;padding:8px 12px;background:#fff;border:1px solid var(--line);border-radius:8px}</style>
 </head><body><button id="narrow">切换窄屏</button><output id="receipt" aria-live="polite"></output>
 <script src="../../components/panels/work-composer.js"></script>
+<script src="../../components/panels/agent-brand.js"></script>
 <script src="../../components/panels/panels-compose-runtime.js"></script>
 <script src="../../components/panels/compose-execution.js"></script>
 <script src="../../components/panels/compose-surface.js"></script>
@@ -15,7 +16,8 @@ let starts=0;window.petSay=text=>{receipt.textContent=text};
 const readyRuntimes=[
  {id:'pi',displayName:'Pi',modelMode:'managed',group:'recommended',order:10},
  {id:'codex-harness',displayName:'Codex Harness',modelMode:'managed',group:'recommended',order:20},
- {id:'qwen',displayName:'Qwen Code',modelMode:'managed',group:'more',order:60}
+ {id:'qwen',displayName:'Qwen Code',modelMode:'managed',group:'more',order:60},
+ {id:'dsh',displayName:'DeepSeek Harness',modelMode:'managed',group:'more',order:70,availability:{ok:true,version:'@openma/deepseek-harness-acp 0.4.40'}}
 ];
 window.soduWorkAPI={conversationSession:{runtimes:async()=>({ok:true,runtimes:readyRuntimes,availableRuntimes:readyRuntimes,missing:[]}),probe:async()=>({ok:true}),
  cloud:{targets:async(agent)=>({ok:true,targets:agent === 'unavailable' ? [] : [{id:'remote',agentId:agent || 'pi'}]}),start:async input=>{starts++;receipt.textContent='cloud-start\n'+input.text+'\nsends:'+starts;return {ok:true,sessionId:'cloud-test'}}}}};window.ComposeModelPicker={ready:async()=>true,value:()=>({modelName:'test-model'})};
