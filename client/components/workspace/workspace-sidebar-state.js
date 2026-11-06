@@ -186,6 +186,19 @@
         snapshot({ ...rows.get(String(row.id)), ...row }));
       next.rows = [...rows.values()];
     }
+    function forgetMany(ids, { preserveArchivedProjects = false, preserveProjectIds = [] } = {}) {
+      const removed = new Set(unique(ids));
+      if (!removed.size) return;
+      const preserved = new Set(unique(preserveProjectIds));
+      commit(next => {
+        next.pins = next.pins.filter(id => !removed.has(id));
+        next.recent = next.recent.filter(id => !removed.has(id));
+        for (const project of [...next.projects.filter(project => !preserved.has(project.id)),
+          ...(preserveArchivedProjects ? [] : next.archivedProjects)]) {
+          project.chatIds = project.chatIds.filter(id => !removed.has(id));
+        }
+      });
+    }
     function view(items) {
       refresh();
       const current = new Map((items || []).filter(row => row?.id).map(row => [String(row.id), row]));
@@ -356,12 +369,8 @@
           remember(next, [item]);
         });
       },
-      forget(id) { commit(next => {
-        next.pins = next.pins.filter(v => v !== id);
-        next.recent = next.recent.filter(v => v !== id);
-        next.projects.forEach(p => { p.chatIds = p.chatIds.filter(v => v !== id); });
-        next.archivedProjects.forEach(p => { p.chatIds = p.chatIds.filter(v => v !== id); });
-      }); },
+      forget(id) { forgetMany([id]); },
+      forgetMany,
     };
   }
 
@@ -384,7 +393,9 @@
         const local = new Map(store.get().projects.filter(row => !row.appId).map(row => [row.id, row]));
         for (const id of new Set([...local.keys(), ...remote.keys(), ...Object.keys(checkpoints)])) {
           if (!current()) return;
-          const here = local.get(id), there = remote.get(id), saved = checkpoints[id];
+          // A previous project's save may have awaited while this project was edited.
+          const here = store.get().projects.find(row => row.id === id && !row.appId);
+          const there = remote.get(id), saved = checkpoints[id];
           const hash = digest(here);
           const dirty = saved ? hash !== saved.hash : !!here && !there;
           if (dirty) {

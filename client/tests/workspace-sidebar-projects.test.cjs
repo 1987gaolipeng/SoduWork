@@ -60,6 +60,36 @@ test('project sync preserves edits made in flight and does not publish applicati
   await sync.run(); assert.equal(remote.get(id).name, '发送期间的改名'); assert.equal(remote.size, 1);
 });
 
+test('deleting a chat while another project saves cannot restore its old project membership', async () => {
+  const f = fixture(), remote = new Map(), errors = [];
+  let sync, autoSync = false, pause = false, release;
+  const store = f.api.create({storage: f.storage, key: 'one', onChange: () => {
+    if (autoSync) void sync.run();
+  }});
+  const first = store.saveProject({name: 'First'}), second = store.saveProject({name: 'Second'});
+  store.fileChat('deleted-chat', second, {id: 'deleted-chat', title: 'Deleted conversation'});
+  sync = f.api.projectSync({store, storage: f.storage, key: 'one', error: e => errors.push(e), api: {
+    conversationProjects: async () => ({items: [...remote.values()]}),
+    saveConversationProject: async (id, body) => {
+      if (pause && id === first) await new Promise(resolve => { release = resolve; });
+      assert.equal(body.revision, remote.get(id)?.revision || 0);
+      const row = {...body, id, revision: body.revision + 1}; remote.set(id, row); return row;
+    },
+  }});
+  await sync.run();
+  store.saveProject({id: first, name: 'First edited'});
+  autoSync = true; pause = true;
+  const work = sync.run(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(typeof release, 'function');
+  store.forgetMany(['deleted-chat']);
+  assert.deepEqual(Array.from(store.get().projects.find(row => row.id === second).chatIds), []);
+  pause = false; release(); await work;
+  assert.deepEqual(Array.from(store.get().projects.find(row => row.id === second).chatIds), []);
+  assert.deepEqual(Array.from(remote.get(second).chatIds), []);
+  assert.equal(f.create().view([]).projects.find(row => row.id === second).items.length, 0);
+  assert.equal(errors.length, 0);
+});
+
 test('project push during a pending read is reconciled once without recursive remote-write loops', async () => {
   const f = fixture(); let sync, release, calls = 0, remote = {id: 'project-phone', name: 'Old', revision: 1, chatIds: []};
   const store = f.api.create({storage: f.storage, key: 'one', onChange: () => { void sync?.run(); }});

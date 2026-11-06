@@ -78,6 +78,8 @@ class AccountConversation(Base):
     state: Mapped[str] = mapped_column(String(24), default="idle")
     archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     deleted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # Zero denotes a source snapshot predating explicit account lifecycle intent.
+    lifecycle_revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),

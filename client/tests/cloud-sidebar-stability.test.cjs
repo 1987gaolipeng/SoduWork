@@ -44,6 +44,9 @@ test('archived and deleted account presence remove rows without resurrecting the
     assert.deepEqual(f.ids(), [other.id]);
   }
   f.api.updateChatState({ sessionId: copy.id, presence: { ...copy, archived: false } });
+  assert.equal(f.ids().includes(copy.id), false, 'ordinary presence cannot implicitly restore an archived/deleted conversation');
+  f.api.updateChatState({ kind: 'history-lifecycle', sessionId: copy.id,
+    presence: { ...copy, archived: false, deleted: false } });
   assert.ok(f.ids().includes(copy.id));
 });
 

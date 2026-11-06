@@ -9,8 +9,8 @@ import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
-from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..account_conversation_models import (
@@ -122,6 +122,7 @@ def _conversation_json(row: AccountConversation, client_id: str) -> dict:
         "state": row.state or "idle",
         "archived": bool(row.archived),
         "deleted": bool(row.deleted),
+        "lifecycleRevision": int(row.lifecycle_revision or 0),
         "revision": int(row.revision or 0),
         "updatedAt": _iso(row.updated_at),
         "sourceRevision": int(row.source_revision or 0),
@@ -152,13 +153,14 @@ async def _load_owned(
     conversation_id: str,
     owner: str,
     session: AsyncSession,
+    *,
+    lock: bool = False,
 ) -> AccountConversation:
-    row = await session.scalar(
-        select(AccountConversation).where(
-            AccountConversation.id == conversation_id,
-            AccountConversation.owner_user_id == owner,
-        )
+    query = select(AccountConversation).where(
+        AccountConversation.id == conversation_id,
+        AccountConversation.owner_user_id == owner,
     )
+    row = await session.scalar(query.with_for_update() if lock else query)
     if row is None:
         # Do not reveal whether another account owns the id.
         raise HTTPException(status_code=404, detail="会话不存在或无权访问")
@@ -261,6 +263,81 @@ async def account_conversation_source(
         "sourceEpoch": row.source_epoch,
         "sourceRevision": int(row.source_revision or 0),
     }
+
+
+@router.post("/{conversation_id}/lifecycle")
+async def update_account_conversation_lifecycle(
+    conversation_id: str,
+    body: dict = Body(default_factory=dict),
+    client: Client = Depends(current_client),
+    session: AsyncSession = Depends(get_session),
+):
+    """Account intent is independent of source-device transcript checkpoints."""
+    action = body.get("action")
+    if not isinstance(action, str) or action not in {"archive", "restore", "delete"}:
+        raise HTTPException(status_code=422, detail="会话操作必须为 archive、restore 或 delete")
+    expected_revision = body.get("expectedRevision")
+    if type(expected_revision) is not int or expected_revision < 1:
+        raise HTTPException(status_code=422, detail="请提供有效的会话目录版本")
+    owner = _owner(client)
+    # Use the same row -> account cursor lock order as source /sync. The source
+    # writer and every device's lifecycle writer serialize against this row.
+    row = await _load_owned(conversation_id, owner, session, lock=True)
+    if row.deleted and action != "delete":
+        raise HTTPException(status_code=410, detail={
+            "code": "ACCOUNT_CONVERSATION_DELETED",
+            "message": "会话已删除，无法归档或恢复",
+            "conversation": _conversation_json(row, client.id),
+        })
+    reached = bool(row.deleted) if action == "delete" else bool(row.archived) == (action == "archive")
+    if reached and int(row.lifecycle_revision or 0) > 0:
+        # A lost receipt may be retried with the old revision, but this is only
+        # a read: it must never reverse a newer archive/restore/delete action.
+        return {"ok": True, "conversation": _conversation_json(row, client.id)}
+    if expected_revision != int(row.revision or 0):
+        raise HTTPException(status_code=409, detail={
+            "code": "ACCOUNT_CONVERSATION_CHANGED",
+            "message": "会话已更新，请刷新后重试",
+            "conversation": _conversation_json(row, client.id),
+        })
+    # SQLite does not implement SELECT FOR UPDATE. Claim the observed version
+    # with an explicit conditional write on every supported database before
+    # allocating a directory revision. ORM dirty-field updates could otherwise
+    # acknowledge a restore without writing archived=False from a stale object.
+    changes = {"deleted": True} if action == "delete" else {"archived": action == "archive"}
+    try:
+        changed = await session.execute(update(AccountConversation).where(
+            AccountConversation.id == conversation_id,
+            AccountConversation.owner_user_id == owner,
+            AccountConversation.revision == expected_revision,
+        ).values(**changes).execution_options(synchronize_session=False))
+    except OperationalError as exc:
+        await session.rollback()
+        if session.get_bind().dialect.name == "sqlite" and any(
+                reason in str(exc.orig).lower() for reason in ("locked", "busy")):
+            raise HTTPException(status_code=409, detail="会话状态更新发生并发冲突，请刷新后重试") from exc
+        raise
+    if changed.rowcount != 1:
+        await session.rollback()
+        latest = await _load_owned(conversation_id, owner, session)
+        raise HTTPException(status_code=409, detail={
+            "code": "ACCOUNT_CONVERSATION_CHANGED",
+            "message": "会话已更新，请刷新后重试",
+            "conversation": _conversation_json(latest, client.id),
+        })
+    await session.refresh(row)
+    # Even a first explicit restore of an active row records intent, allowing
+    # clients to distinguish it from an old source snapshot's default false.
+    row.revision = await _next_directory_revision(owner, session)
+    row.lifecycle_revision = row.revision
+    row.updated_at = _now()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail="会话状态更新发生并发冲突，请刷新后重试") from exc
+    await _publish_account_update(owner, row)
+    return {"ok": True, "conversation": _conversation_json(row, client.id)}
 
 
 def _sync_digest(body: dict) -> str:
@@ -378,6 +455,8 @@ async def sync_account_conversation(
             owner_user_id=owner,
             source_client_id=source_client_id,
             source_session_id=source_session_id,
+            archived=archived,
+            deleted=deleted,
         )
         session.add(row)
         await session.flush()
@@ -389,8 +468,8 @@ async def sync_account_conversation(
     row.source_digest = digest
     row.title = title
     row.state = state
-    row.archived = archived
-    row.deleted = deleted
+    # Existing lifecycle state belongs to explicit account actions, not a
+    # delayed source snapshot or outbox replay. Deletion remains a tombstone.
     row.updated_at = _now()
     row.revision = await _next_directory_revision(owner, session)
 

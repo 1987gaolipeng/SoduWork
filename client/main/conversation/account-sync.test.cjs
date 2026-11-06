@@ -240,7 +240,7 @@ test('archived account rows stay out of fresh and cached history and retain live
   const restored = await sync.history({ force: true });
   assert.equal(restored.chats[0].id, 'acct-archived');
   assert.equal(restored.chats[0].archived, false);
-  assert.equal(nativeLookups, 1);
+  assert.equal(nativeLookups, 0, 'a different source device never probes this device\'s archives');
 });
 
 test('failed directory refresh hides archived rows loaded from disk', async t => {

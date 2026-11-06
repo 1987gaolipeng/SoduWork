@@ -350,7 +350,7 @@ function createPiSessionBridge(options) {
       locationMode: 'remote', location: 'cloud', cloud: true };
   }
   function historyPriority(row) { return normalizeHistoryRow(row).cloud ? 2 : 1; }
-  async function findRunnerRow(id, { nativeOnly = false } = {}) {
+  async function findRunnerRow(id, { nativeOnly = false, strict = false } = {}) {
     const wanted = String(id || '').trim();
     if (!wanted) return null;
     // A sidebar row may be replaced by its synchronized replay receipt while
@@ -360,19 +360,152 @@ function createPiSessionBridge(options) {
     const results = await Promise.all(runnerAdapters.map(async (adapter) => {
       try {
         return typeof adapter.historyEntry === 'function'
-          ? await adapter.historyEntry(wanted) : await adapter.history(Number.MAX_SAFE_INTEGER);
+          ? await adapter.historyEntry(wanted, { strict }) : await adapter.history(Number.MAX_SAFE_INTEGER, { strict });
       }
       catch (error) { return { ok: false, reason: _reason(error), chats: [] }; }
     }));
     const row = results.flatMap(result => result.chats || [])
       .find(item => item && item.id === wanted);
     if (row) return row;
-    if (runnerAdapters.length && !results.some(result => result && result.ok)) {
+    if (runnerAdapters.length && (strict ? results.some(result => !result?.ok || !Array.isArray(result.chats))
+      : !results.some(result => result && result.ok))) {
       const failed = results.find(result => result && result.reason);
       throw new RuntimeContractError('RUNNER_HISTORY_UNAVAILABLE',
         String(failed && failed.reason || '读不到 Runner 会话目录'));
     }
     return null;
+  }
+
+  function missingHistoryId(id) {
+    if (typeof id !== 'string' || !id.trim() || id !== id.trim() || id.length > 512 || /[\x00-\x1f]/.test(id))
+      throw Error('会话标识无效');
+    return id;
+  }
+
+  function missingHistoryManifest(app, id) {
+    const fs = require('node:fs'), crypto = require('node:crypto');
+    if (!app?.getPath) throw Error('会话存档目录不可用');
+    // The manifest cache is useful for rendering, but never evidence that a
+    // missing transcript can be cleaned up. Read the fixed, private ID path.
+    const root = path.resolve(app.getPath('userData'));
+    const file = path.join(root, 'conversation-runtime-segments', crypto.createHash('sha256').update(id).digest('hex') + '.json');
+    let record;
+    try {
+      require('../plugin-resources').assertNoLinks(root, file);
+      if (!fs.lstatSync(file).isFile()) throw Error('invalid manifest');
+      record = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch (error) {
+      if (error.code === 'ENOENT') return null;
+      throw Error('无法读取会话的 Agent 切换记录，请检查本地存储');
+    }
+    if (record?.version !== 1 || record.id !== id || !Array.isArray(record.segments) ||
+        !record.active?.adapterId || !record.active?.sessionId || record.segments.length > 1000)
+      throw Error('无法读取会话的 Agent 切换记录，请检查本地存储');
+    for (const segment of [...record.segments, record.active]) missingHistoryId(segment?.sessionId);
+    runtimeSegments.assertOwner(app, record, require('../conversation/requirement-context').cachedIdentity(app));
+    return record;
+  }
+
+  function missingHistoryBusy(app, ids) {
+    return ids.some(id => {
+      const live = bySessionId.get(id)?.raw || sessionModule.findBySessionId?.(id);
+      return workOpenings.has(id) || live?.inFlight?.() ||
+        ['starting', 'running', 'streaming', 'queued', 'waiting', 'waiting-user', 'responding'].includes(live?.snapshot?.()?.status);
+    });
+  }
+
+  function missingHistoryActor(app) {
+    const access = require('../conversation/history-access'), captured = access.actor(app);
+    const connection = actor => JSON.stringify([String(actor.identity?.hub || '').replace(/\/+$/, ''), actor.identity?.clientId || '']);
+    const capturedConnection = connection(captured);
+    return { captured, guard() {
+      access.assertCurrent(app, captured);
+      if (connection(access.actor(app)) !== capturedConnection)
+        throw Error('账号或服务已切换，请重新打开会话');
+    } };
+  }
+
+  function missingHistoryHasMemory(ids) {
+    return ids.some(id => {
+      const live = bySessionId.get(id)?.raw || sessionModule.findBySessionId?.(id);
+      if (!live) return false;
+      if (typeof live.snapshot !== 'function') throw Error('暂时无法读取会话存档');
+      const snapshot = live.snapshot();
+      if (!snapshot || typeof snapshot !== 'object') throw Error('暂时无法读取会话存档');
+      // Idle process handles can outlive deleted native files. Only actual
+      // in-memory work, including paused queued turns, prevents missing cleanup.
+      return Boolean(snapshot.messages?.length || snapshot.tools?.length || snapshot.queue?.length ||
+        snapshot.execution?.queue?.length || snapshot.pendingUi);
+    });
+  }
+
+  async function probeMissingHistory(app, id) {
+    try {
+      app ||= opts.app;
+      const actor = missingHistoryActor(app);
+      const wanted = missingHistoryId(id);
+      await runtimeSegments.flush(app, wanted);
+      const manifest = missingHistoryManifest(app, wanted);
+      const aliasIds = [...new Set([wanted, ...(manifest?.segments || []).map(part => part.sessionId), manifest?.active?.sessionId].filter(Boolean))];
+      const result = missing => { actor.guard(); return { ok: true, missing, aliasIds }; };
+      if (missingHistoryBusy(app, aliasIds)) return { ok: false, reason: '这条会话还在执行，完成或停止后再操作' };
+      if (typeof sessionModule.historyEntry !== 'function') throw Error('暂时无法读取会话存档');
+      for (const alias of aliasIds) {
+        // A linked segment may also have its own manifest. An owner mismatch
+        // must block cleanup even when every native transcript is absent.
+        const linked = alias === wanted ? manifest : missingHistoryManifest(app, alias);
+        if (linked && [linked.id, ...linked.segments.map(part => part.sessionId), linked.active.sessionId]
+          .some(candidate => !aliasIds.includes(candidate))) throw Error('会话切换记录已变化，请重新打开会话');
+        try { require('../conversation/history-access').assertOwner(app, alias, actor.captured); }
+        catch (error) { if (error.code !== 'HISTORY_OWNER_MISSING') throw error; }
+      }
+      const failures = [];
+      for (const alias of aliasIds) {
+        const [piResult, runnerResult] = await Promise.allSettled([
+          Promise.resolve().then(() => sessionModule.historyEntry(app, alias, { strict: true })),
+          findRunnerRow(alias, { nativeOnly: true, strict: true }),
+        ]);
+        const pi = piResult.value;
+        if (pi?.ok && pi.entry || runnerResult.status === 'fulfilled' && runnerResult.value)
+          return result(false);
+        if (piResult.status === 'rejected' || pi?.notFound !== true)
+          failures.push(piResult.reason || pi?.reason || '暂时无法读取会话存档');
+        if (runnerResult.status === 'rejected') failures.push(runnerResult.reason);
+      }
+      if (failures.length) throw Error(_reason(failures[0]));
+      if (missingHistoryBusy(app, aliasIds)) throw Error('这条会话还在执行，完成或停止后再操作');
+      if (missingHistoryHasMemory(aliasIds)) return result(false);
+      if (JSON.stringify(missingHistoryManifest(app, wanted)) !== JSON.stringify(manifest))
+        throw Error('会话切换记录已变化，请重新打开会话');
+      return result(true);
+    } catch (error) { return { ok: false, reason: _reason(error) }; }
+  }
+
+  async function removeMissingHistory(app, id) {
+    app ||= opts.app;
+    try {
+      const actor = missingHistoryActor(app);
+      const checked = await probeMissingHistory(app, id);
+      if (!checked.ok || !checked.missing) return checked.ok
+        ? { ...checked, ok: false, reason: '会话内容仍然存在，请重新打开后删除' } : checked;
+      actor.guard();
+      if (missingHistoryBusy(app, checked.aliasIds)) throw Error('这条会话还在执行，完成或停止后再操作');
+      if (missingHistoryHasMemory(checked.aliasIds)) throw Error('会话内容仍然存在，请重新打开后删除');
+      const root = sessionModule.archiveRoot?.(app), state = sessionModule.archiveState;
+      if (!root || !state?.read || !state?.write) throw Error('归档状态不可用');
+      try {
+        require('../plugin-resources').assertNoLinks(path.resolve(app.getPath('userData')), path.join(root, state.FILE_NAME || 'archive-state.json'));
+        const flags = state.read(root);
+        if (checked.aliasIds.some(alias => Object.hasOwn(flags.conversations, alias))) {
+          for (const alias of checked.aliasIds) delete flags.conversations[alias];
+          state.write(root, flags);
+        }
+      } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      // These helpers touch archive flags and the hashed manifest only. No
+      // transcript, working directory, title, or output file is deleted.
+      await runtimeSegments.remove(app, id);
+      return { ...checked, id, alreadyDeleted: true };
+    } catch (error) { return { ok: false, reason: _reason(error) }; }
   }
 
   function closeAll() {
@@ -407,10 +540,11 @@ function createPiSessionBridge(options) {
     }
     const merged = new Map();
     const sourcePriority = new Map();
+    const lifecycle = require('../conversation/history-lifecycle-view.cjs').create(rows[0]?.lifecycle, archivedIds || {});
     rows.forEach((result, sourceIndex) => (result.chats || []).forEach((row) => {
       if (!row || !row.id) return;
       const normalized = normalizeHistoryRow({ ...row, adapterId: row.adapterId || 'pi' });
-      if (archivedIds && Object.prototype.hasOwnProperty.call(archivedIds, normalized.id)) return;
+      if (!lifecycle.visible(normalized)) return;
       const old = merged.get(normalized.id);
       // The external cloud inventory is authoritative when a handed-off Pi
       // row with the same id is still present locally. Keep its metadata and
@@ -424,17 +558,27 @@ function createPiSessionBridge(options) {
       }
     }));
     const chats = runtimeSegments.mergeHistory(app || opts.app, [...merged.values()])
-      .filter(row => !archivedIds || !Object.hasOwn(archivedIds, row.id))
+      .map(lifecycle.project).filter(row => lifecycle.visible(row))
       .sort((left, right) => Number(right.at || 0) - Number(left.at || 0))
       .slice(0, Math.max(1, Number(limit) || 50));
     const ok = rows.some((result) => result.ok);
     const failed = rows.find((result) => result.reason);
-    return { ok, chats, reason: ok ? '' : String(failed && failed.reason || '') };
+    // A cold renderer may still hold pinned/project snapshots for rows omitted
+    // from active history. Carry explicit account lifecycle evidence so it can
+    // clear those references without interpreting a missing row as deletion.
+    const lifecycleRows = (rows[0]?.lifecycle || []).map(state => {
+      const projected = lifecycle.project(state);
+      return { id: projected.id, historyAliasIds: projected.historyAliasIds || [],
+        archived: projected.archived === true, deleted: projected.deleted === true,
+        revision: Number(projected.revision || 0), lifecycleRevision: Number(projected.lifecycleRevision || 0) };
+    });
+    return { ok, chats, ...(lifecycleRows.length ? { lifecycle: lifecycleRows } : {}),
+      reason: ok ? '' : String(failed && failed.reason || '') };
   }
 
   async function archivedHistory(app, limit = Number.MAX_SAFE_INTEGER) {
     const rows = await Promise.all([
-      externalRows(),
+      externalRows({ archived: true }),
       typeof sessionModule.archivedHistory === 'function'
         ? Promise.resolve(sessionModule.archivedHistory(app || opts.app, limit))
           .catch((error) => ({ ok: false, reason: _reason(error), chats: [] }))
@@ -456,6 +600,7 @@ function createPiSessionBridge(options) {
     }
     const merged = new Map();
     const sourcePriority = new Map();
+    const lifecycle = require('../conversation/history-lifecycle-view.cjs').create(rows[0]?.lifecycle, archivedIds || {});
     rows.forEach((result, sourceIndex) => (result.chats || []).forEach((row) => {
       if (!row || !row.id) return;
       const normalized = normalizeHistoryRow({
@@ -463,8 +608,8 @@ function createPiSessionBridge(options) {
         adapterId: row.adapterId || 'pi',
         archivedAt: row.archivedAt || (archivedIds && archivedIds[row.id]) || 0,
       });
-      if (archivedIds && !Object.prototype.hasOwnProperty.call(archivedIds, normalized.id)) return;
-      if (!archivedIds && typeof sessionModule.isArchived === 'function') {
+      if (archivedIds && !lifecycle.visible(normalized, true)) return;
+      if (!archivedIds && !normalized.archived && typeof sessionModule.isArchived === 'function') {
         try {
           if (!sessionModule.isArchived(app || opts.app, normalized.id)) return;
         } catch (_) { return; }
@@ -481,6 +626,7 @@ function createPiSessionBridge(options) {
     const ok = rows.some(result => result.ok);
     const failed = rows.find(result => result && result.reason);
     const chats = runtimeSegments.mergeHistory(app || opts.app, [...merged.values()])
+      .map(lifecycle.project).filter(row => !row.deleted && (!archivedIds || lifecycle.visible(row, true)))
       .sort((left, right) => Number(right.archivedAt || right.at || 0) - Number(left.archivedAt || left.at || 0))
       .slice(0, Math.max(1, Number(limit) || Number.MAX_SAFE_INTEGER));
     return { ok, chats, reason: ok ? '' : String(failed && failed.reason || '') };
@@ -558,11 +704,11 @@ function createPiSessionBridge(options) {
     if (deleted && (deleted.ok || deleted.notFound) && typeof sessionModule.setArchived === 'function') {
       sessionModule.setArchived(app || opts.app, wanted, false);
     }
-    if (deleted && deleted.notFound) return { ...deleted, alreadyDeleted: true };
+    if (deleted && deleted.notFound) return { ...deleted, ok: true, alreadyDeleted: true };
     return deleted;
   }
 
-  async function permanentlyDeleteHistory(app, id) {
+  async function permanentlyDeleteHistory(app, id, { retainManifest = false } = {}) {
     const record = runtimeSegments.read(app || opts.app, id);
     if (!record) return permanentlyDeleteNativeHistory(app, id);
     if (!sessionModule.isArchived?.(app || opts.app, id)) return { ok: false, reason: '只能从归档历史彻底删除会话' };
@@ -576,7 +722,12 @@ function createPiSessionBridge(options) {
       if (!result?.ok && !result?.notFound) return result;
     }
     const result = await permanentlyDeleteNativeHistory(app, id);
-    if (result?.ok || result?.notFound) await runtimeSegments.remove(app || opts.app, id);
+    if (result?.ok || result?.notFound) {
+      // Account lifecycle commits still need every source alias after the
+      // transcripts are gone. The IPC transaction cleans this up after ACK.
+      if (retainManifest) return { ...result, ok: true, retainedManifest: true };
+      await runtimeSegments.remove(app || opts.app, id);
+    }
     return result;
   }
 
@@ -707,7 +858,7 @@ function createPiSessionBridge(options) {
       // The sidebar is capped at 50 items; opening by identity is not.
       let unreadable = null;
       if (typeof sessionModule.historyEntry === 'function') {
-        const found = await sessionModule.historyEntry(app || opts.app, wanted);
+        const found = await sessionModule.historyEntry(app || opts.app, wanted, { strict: options.strict === true });
         if (found && found.ok && found.entry) return normalizeHistoryRow({ ...found.entry, adapterId: 'pi' });
         if (found && found.ok === false && !found.notFound) unreadable = found;
       }
@@ -723,6 +874,8 @@ function createPiSessionBridge(options) {
     list,
     findBySessionId,
     findRunnerRow,
+    probeMissingHistory,
+    removeMissingHistory,
     async forgetRunner(app, id) {
       const row = await findRunnerRow(id);
       if (!row) return { ok: false, notFound: true, reason: '这条会话不在执行底座的运行记录里' };

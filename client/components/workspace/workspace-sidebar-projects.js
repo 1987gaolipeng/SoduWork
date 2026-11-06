@@ -41,6 +41,7 @@
     root.querySelector('#wsPinnedBox').dataset.sidebarSection = 'pinned';
     root.querySelector('#wsChatsBox').dataset.sidebarSection = 'recent';
     let store = null, scope = '', dialog = null, sync = null;
+    const archivingProjects = new Set();
     let lastSync = 0;
     invalidations.set(box, () => { void sync?.run(); });
     const notify = error => {
@@ -171,12 +172,16 @@
           archive.onclick = async () => {
             if (!global.confirm || global.confirm(global.SoduWorkI18n?.t('archive.project.confirm', '归档项目“{name}”？项目和其中的会话会从主列表隐藏，可在“归档会话”中恢复。', { name: project.name }) || ('归档项目“' + project.name + '”？项目和其中的会话会从主列表隐藏，可在“归档会话”中恢复。')) !== false) {
               archive.disabled = true;
+              let preserving;
               try {
                 const archiveStore = state();
                 if (scope !== currentScope) throw Error('账号已切换，请重新打开项目');
                 const api = global.soduWorkAPI?.conversationSession || global.soduWorkAPI?.piSession;
                 if (!api?.archiveHistory || !api?.restoreHistory) throw Error('归档会话接口暂不可用，请重试');
                 const ids = archiveStore.get().projects.find(item => item.id === id)?.chatIds || [];
+                // Individual archive receipts can arrive before the whole group
+                // moves to archivedProjects. Retain its members for restoration.
+                preserving = { id, scope: currentScope }; archivingProjects.add(preserving);
                 const archived = [];
                 for (const chatId of ids) {
                   let result;
@@ -196,6 +201,7 @@
                 }
                 global.WorkspaceShell?.refreshConversationHistory?.();
               } catch (e) { archive.disabled = false; error(e.message); }
+              finally { if (preserving) archivingProjects.delete(preserving); }
             }
           };
           footer.appendChild(archive);
@@ -312,6 +318,13 @@
       }); },
       openMoveMenu: id => moveMenu(id),
       forget: id => safe(() => state().forget(id)),
+      forgetMany: ids => safe(() => { state().forgetMany(ids); return true; }),
+      forgetArchived: ids => safe(() => {
+        const current = state();
+        current.forgetMany(ids, { preserveArchivedProjects: true,
+          preserveProjectIds: [...archivingProjects].filter(project => project.scope === scope).map(project => project.id) });
+        return true;
+      }),
       file: (id, projectId, row) => file(id, projectId, row),
       remember: items => safe(() => state().remember(items)),
       enhanceRow(row, item) {

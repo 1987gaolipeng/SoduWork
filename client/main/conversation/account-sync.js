@@ -95,6 +95,9 @@ function historyRow(item, identity) {
     id: item.id, title: item.title || '账号会话', at: item.updatedAt || '',
     state: item.state || 'idle', adapterId: 'account-sync', accountConversation: true,
     accountProjection: true, archived: item.archived === true, owner: runtime.connectionScope(identity),
+    deleted: item.deleted === true, revision: Number(item.revision || 0),
+    lifecycleRevision: Number(item.lifecycleRevision || 0),
+    historyAliasIds: [...new Set([item.id, ...(item.historyAliasIds || [])].filter(Boolean))],
     accountCanSend: item.canSend === true, sourceClientId: item.sourceClientId,
     sourceSessionId: item.sourceSessionId, locationMode: 'account', location: 'account', cloud: false,
   };
@@ -142,6 +145,7 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
   let historyPromise = null;
   let historyAt = 0;
   let historyScope = '';
+  let historyGeneration = 0, directoryLoaded = false;
   let historyCursor = 0, historyHasMore = false;
   let historyEpoch = 0, loadedEpoch = -1, historyInitialized = false;
   let historyFailures = 0, historyRetryAt = 0;
@@ -149,6 +153,9 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
   const deletedIds = new Set();
   const historyTtl = 3000;
   const historyPageSize = 100;
+  const historyMaxPages = 5;
+  const nativeProjections = new Map(), nativeQueue = [];
+  let nativeActive = 0;
 
   function identityKey(identity) {
     try { return accountScopeKey(identity); } catch (_) { return ''; }
@@ -158,6 +165,39 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
     // Directory permissions such as canSend depend on the current device.
     return identity ? JSON.stringify([String(identity.hub || '').replace(/\/+$/, ''),
       identityKey(identity), identity.clientId]) : '';
+  }
+
+  function selectDirectory(identity) {
+    const scope = directoryScope(identity);
+    if (scope !== historyScope) {
+      historyGeneration++;
+      historyScope = scope;
+      historyPromise = null;
+      accountRows.clear(); accountIds.clear(); deletedIds.clear();
+      historyCursor = 0; historyHasMore = false; historyAt = 0; directoryLoaded = false;
+      historyInitialized = false; directoryChanges.clear(); loadedEpoch = -1;
+      historyFailures = 0; historyRetryAt = 0;
+    }
+    return scope;
+  }
+
+  function nativeProjection(item, identity) {
+    if (!resolveNativeSource || item.sourceClientId !== identity.clientId) return Promise.resolve(null);
+    const scope = directoryScope(identity), generation = historyGeneration;
+    const key = JSON.stringify([scope, generation, item.id, item.revision || 0]);
+    if (nativeProjections.has(key)) return nativeProjections.get(key);
+    const drain = () => {
+      while (nativeActive < 4 && nativeQueue.length) {
+        const job = nativeQueue.shift(); nativeActive++;
+        Promise.resolve().then(() => closed || job.generation !== historyGeneration || job.scope !== historyScope
+          ? null : resolveNativeSource(job.item, job.identity)).catch(() => null)
+          .then(job.resolve).finally(() => { nativeActive--; drain(); });
+      }
+    };
+    const pending = new Promise(resolve => { nativeQueue.push({ item, identity, scope, generation, resolve }); });
+    const tracked = pending.finally(() => { if (nativeProjections.get(key) === tracked) nativeProjections.delete(key); });
+    nativeProjections.set(key, tracked); drain();
+    return tracked;
   }
 
   function endpoint(identity, route) {
@@ -173,20 +213,38 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
   }
 
   async function projectedRow(item, identity) {
-    const native = !item.archived && resolveNativeSource && await resolveNativeSource(item, identity).catch(() => null);
-    return native ? { ...native, owner: runtime.connectionScope(identity) } : historyRow(item, identity);
+    const native = await nativeProjection(item, identity);
+    const lifecycle = { revision: Number(item.revision || 0), lifecycleRevision: Number(item.lifecycleRevision || 0),
+      deleted: item.deleted === true };
+    return native ? { ...native, ...lifecycle,
+      archived: item.archived === true || !lifecycle.lifecycleRevision && native.archived === true,
+      owner: runtime.connectionScope(identity), accountId: item.id,
+      sourceSessionId: item.sourceSessionId, sourceClientId: item.sourceClientId,
+      historyAliasIds: [...new Set([...(native.historyAliasIds || []), native.id, item.id].filter(Boolean))] }
+      : historyRow(item, identity);
+  }
+
+  function rememberDirectory(item) {
+    if (!item?.id) return;
+    const id = String(item.id), previous = accountRows.get(id);
+    if (previous && Number(previous.revision || 0) > Number(item.revision || 0)) return;
+    accountRows.set(id, item);
+    if (item.deleted) { accountIds.delete(id); deletedIds.add(id); }
+    else { accountIds.add(id); deletedIds.delete(id); }
   }
 
   async function emitChanged(id, row, identity, projected) {
+    const captured = directoryScope(identity), generation = historyGeneration;
+    const current = async () => !closed && generation === historyGeneration && captured === historyScope &&
+      captured === directoryScope(await (localIdentityOf || identityOf)?.(app)) &&
+      (!row || accountRows.get(String(id)) === row);
+    if (!await current()) return;
     const presence = projected || (row ? await projectedRow(row, identity) : {
       id, deleted: true, accountConversation: true, owner: runtime.connectionScope(identity),
     });
     for (const listener of listeners) {
-      try {
-        const current = await (localIdentityOf || identityOf)(app);
-        if (closed || directoryScope(current) !== directoryScope(identity)) return;
-        await listener(String(presence.id || id || ''), row, presence);
-      } catch (_) {}
+      if (!await current()) return;
+      try { await listener(String(presence.id || id || ''), row, presence); } catch (_) {}
     }
   }
 
@@ -354,6 +412,7 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
       Object.assign(state, { sourceEpoch: previous.sourceEpoch || state.sourceEpoch,
         sourceRevision: Number(previous.sourceRevision || 0), contentDigest: previous.contentDigest || '',
         digest: previous.digest || '', ackedRevision: Number(previous.ackedRevision || 0),
+        conversationId: previous.conversationId || '',
         legacy: previous.legacy === true, messageTimes: Object.assign(Object.create(null), previous.messageTimes || {}) });
       if (!closed && typeof handle.on === 'function') state.dispose = handle.on(() => {
         if (state.recordTimer) clearTimeout(state.recordTimer);
@@ -394,12 +453,14 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
     const checkpoint = { sourceEpoch: state.sourceEpoch, sourceRevision: body.sourceRevision,
       contentDigest, digest: requestDigest, messageTimes: times, sourceSessionId: state.sourceSessionId,
       ackedRevision: state.ackedRevision || 0, hub: state.identity.hub,
+      conversationId: state.conversationId || '',
       clientId: state.identity.clientId, ownerKey: state.ownerKey };
     const job = { id: state.key + ':' + body.sourceRevision + ':' + requestDigest.slice(0, 12),
       ownerKey: state.ownerKey, hub: state.identity.hub, clientId: state.identity.clientId, body, createdAt: now() };
     const commit = () => {
       const ackedRevision = Math.max(state.ackedRevision || 0, checkpoint.ackedRevision);
-      Object.assign(state, checkpoint, { ackedRevision, legacy: false, error: '' });
+      const conversationId = state.conversationId || checkpoint.conversationId;
+      Object.assign(state, checkpoint, { ackedRevision, conversationId, legacy: false, error: '' });
       state.handle.accountSync = { ...state.handle.accountSync, state: 'queued', sourceRevision: body.sourceRevision };
     };
     // The fallback supports external in-memory adapters; production always
@@ -458,6 +519,7 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
           const receipt = await send(job, identity);
           await store.ack(job.id, receipt);
           if (state && state.sourceEpoch === job.body.sourceEpoch) {
+            state.conversationId = receipt.conversationId;
             state.ackedRevision = Math.max(state.ackedRevision || 0, job.body.sourceRevision);
             if (!state.pending && state.sourceRevision === job.body.sourceRevision)
               state.handle.accountSync = { ...state.handle.accountSync, state: 'synced', sourceRevision: job.body.sourceRevision };
@@ -490,46 +552,36 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
     return flushing;
   }
 
-  async function history(options = {}) {
+  async function loadHistory(options = {}) {
     if (closed) return { ok: false, chats: [] };
     if (historyPromise) return historyPromise;
-    const load = readHistory(options);
+    // Callers select their authenticated directory before entering this shared
+    // read. Capture it before identity lookup yields so old callers cannot join
+    // or reset a newer account's in-flight load.
+    const load = readHistory(options, historyScope, historyGeneration);
     historyPromise = load;
     try { return await load; }
     finally { if (historyPromise === load) historyPromise = null; }
   }
 
-  async function readHistory({ force = false, notify = false, hintedIds = [] } = {}) {
+  async function readHistory({ force = false, notify = false, hintedIds = [] } = {}, captured, generation) {
     const currentIdentity = () => typeof localIdentityOf === 'function'
       ? localIdentityOf(app) : typeof identityOf === 'function' ? identityOf(app) : null;
     const identity = await currentIdentity();
     if (closed || !identity) return { ok: false, chats: [] };
     const scope = directoryScope;
     const currentScope = scope(identity);
-    if (currentScope && currentScope !== historyScope) {
-      accountRows.clear();
-      accountIds.clear();
-      deletedIds.clear();
-      historyCursor = 0;
-      historyHasMore = false;
-      historyAt = 0;
-      historyInitialized = false;
-      directoryChanges.clear();
-      loadedEpoch = -1;
-      historyFailures = 0; historyRetryAt = 0;
-    }
-    const captured = currentScope;
+    if (generation !== historyGeneration || captured !== currentScope || captured !== historyScope)
+      return { ok: false, chats: [] };
     const capturedEpoch = historyEpoch;
     const publishChanges = notify || historyInitialized;
     const cachedResult = async () => {
-      const chats = await Promise.all([...accountRows.values()].filter(item => !item.deleted && !item.archived)
-        .map(item => projectedRow(item, identity)));
-      return closed || captured !== scope(await currentIdentity())
+      return closed || generation !== historyGeneration || captured !== scope(await currentIdentity())
         ? { ok: false, chats: [] }
-        : { ok: false, chats, stale: true, partial: historyHasMore, cursor: historyCursor };
+        : { ok: false, stale: true, partial: historyHasMore, cursor: historyCursor };
     };
     async function failedResult(reason) {
-      if (closed || captured !== scope(await currentIdentity())) return { ok: false, chats: [] };
+      if (closed || generation !== historyGeneration || captured !== scope(await currentIdentity())) return { ok: false, chats: [] };
       historyFailures++;
       historyRetryAt = now() + Math.min(60000, 5000 * 2 ** Math.min(historyFailures - 1, 4));
       return { ...await cachedResult(), ...(reason ? { reason } : {}) };
@@ -538,31 +590,30 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
     // periodic reconciliation cannot bypass the socket queue's retry backoff.
     if (historyRetryAt > now()) return cachedResult();
     const cacheTtl = socketReady ? 30000 : historyTtl;
-    if (!force && !historyHasMore && loadedEpoch === historyEpoch && currentScope === historyScope && now() - historyAt < cacheTtl) {
-      const chats = await Promise.all([...accountRows.values()].filter(item => item && !item.deleted && !item.archived)
-        .map(item => projectedRow(item, identity)));
-      return closed || currentScope !== scope(await currentIdentity())
-        ? { ok: false, chats: [] } : { ok: true, chats };
+    if (!force && directoryLoaded && !historyHasMore && loadedEpoch === historyEpoch && currentScope === historyScope && now() - historyAt < cacheTtl) {
+      return closed || generation !== historyGeneration || currentScope !== scope(await currentIdentity())
+        ? { ok: false, chats: [] } : { ok: true };
     }
     return (async () => {
       connectRealtime(identity).catch(() => {});
       scheduleReconcile(); // Also repairs changes while no socket can connect.
-      if (captured !== historyScope && store.directory) {
+      if (!directoryLoaded && store.directory) {
         const saved = await store.directory(captured);
-        if (closed || captured !== scope(await currentIdentity())) return { ok: false, chats: [] };
-        for (const item of saved.items) { accountRows.set(String(item.id), item); accountIds.add(String(item.id)); }
+        if (closed || generation !== historyGeneration || captured !== scope(await currentIdentity())) return { ok: false, chats: [] };
+        for (const item of saved.items) rememberDirectory(item);
         historyCursor = saved.cursor;
       }
-      historyScope = captured;
+      directoryLoaded = true;
       let after = historyCursor;
+      const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(15000)]);
       // Each page commits independently and yields to the event loop. Never
       // report a fixed prefix as a complete directory to the sidebar.
-      while (!closed) {
+      for (let page = 0; !closed && page < historyMaxPages; page++) {
         const response = await fetch(identity,
           endpoint(identity, '/account-conversations?after=' + after + '&limit=' + historyPageSize), {
-            method: 'GET', redirect: 'error', signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(15000)]) });
+            method: 'GET', redirect: 'error', signal });
         const data = await response.json().catch(() => ({}));
-        if (closed || captured !== scope(await currentIdentity())) {
+        if (closed || generation !== historyGeneration || captured !== scope(await currentIdentity())) {
           return { ok: false, chats: [], reason: '账号或服务已切换' };
         }
         if (!response.ok || !Array.isArray(data.items)) return failedResult();
@@ -571,14 +622,13 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
           return failedResult('账号会话分页无效');
         }
         if (store.saveDirectory) await store.saveDirectory(captured, data.items, next);
-        if (closed || captured !== scope(await currentIdentity())) return { ok: false, chats: [] };
+        if (closed || generation !== historyGeneration || captured !== scope(await currentIdentity())) return { ok: false, chats: [] };
         for (const item of data.items) {
           if (!item?.id) continue;
           const id = String(item.id);
           if (publishChanges && (item.deleted ? !deletedIds.has(id) :
               JSON.stringify(accountRows.get(id)) !== JSON.stringify(item))) directoryChanges.add(id);
-          if (item.deleted) { accountRows.delete(id); accountIds.delete(id); deletedIds.add(id); }
-          else { accountRows.set(id, item); accountIds.add(id); deletedIds.delete(id); }
+          rememberDirectory(item);
         }
         after = next;
         historyCursor = next;
@@ -586,28 +636,217 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
         if (!historyHasMore) break;
         await new Promise(resolve => setTimeout(resolve, 0));
       }
-      const projections = new Map();
-      const chats = await Promise.all([...accountRows.values()].filter(item => !item.deleted && !item.archived)
-        .map(async item => {
-          const row = await projectedRow(item, identity);
-          projections.set(String(item.id), row);
-          return row;
-        }));
-      if (closed || captured !== scope(await currentIdentity())) return { ok: false, chats: [] };
+      if (closed || generation !== historyGeneration || captured !== scope(await currentIdentity())) return { ok: false, chats: [] };
       historyAt = now();
       historyScope = currentScope;
       historyFailures = 0; historyRetryAt = 0;
       loadedEpoch = capturedEpoch;
       historyInitialized = true;
+      const projections = new Map();
       for (const id of hintedIds) if (accountRows.has(id) || deletedIds.has(id)) directoryChanges.add(id);
-      for (const id of [...directoryChanges]) {
-        if (closed || captured !== scope(await currentIdentity())) return { ok: false, chats: [] };
+      const changedIds = [...directoryChanges];
+      await Promise.all(changedIds.map(async id => {
+        const item = accountRows.get(id);
+        if (item) projections.set(id, { item, presence: await projectedRow(item, identity) });
+      }));
+      for (const id of changedIds) {
+        if (closed || generation !== historyGeneration || captured !== scope(await currentIdentity())) return { ok: false, chats: [] };
         directoryChanges.delete(id);
-        await emitChanged(id, accountRows.get(id) || null, identity, projections.get(id));
+        const item = accountRows.get(id) || null;
+        const cached = projections.get(id);
+        await emitChanged(id, item, identity, cached?.item === item ? cached.presence : undefined);
       }
       scheduleReconcile();
-      return { ok: true, chats, partial: historyHasMore, cursor: historyCursor };
+      return { ok: true, projections, partial: historyHasMore, cursor: historyCursor };
     })().catch(() => failedResult());
+  }
+
+  async function history({ archived = false, ...options } = {}) {
+    const identity = await (localIdentityOf || identityOf)?.(app);
+    const captured = selectDirectory(identity), generation = historyGeneration;
+    if (!captured || closed) return { ok: false, chats: [], lifecycle: [] };
+    const { projections, ...result } = await loadHistory(options);
+    const current = () => (localIdentityOf || identityOf)?.(app);
+    if (closed || generation !== historyGeneration || captured !== historyScope || captured !== directoryScope(await current()))
+      return { ok: false, chats: [], lifecycle: [] };
+    const values = [...accountRows.values()];
+    const rows = await Promise.all(values.map(item => {
+      const cached = projections?.get(String(item.id));
+      return cached?.item === item ? cached.presence : projectedRow(item, identity);
+    }));
+    if (closed || generation !== historyGeneration || captured !== directoryScope(await current())) return { ok: false, chats: [], lifecycle: [] };
+    // A lifecycle response can overtake a slow native projection. Overlay its
+    // authoritative flags before publishing this directory snapshot.
+    for (let index = 0; index < values.length; index++) {
+      const latest = accountRows.get(String(values[index].id));
+      if (!latest || latest === values[index]) continue;
+      values[index] = latest;
+      rows[index] = { ...rows[index], revision: Number(latest.revision || 0),
+        lifecycleRevision: Number(latest.lifecycleRevision || 0), deleted: latest.deleted === true,
+        archived: latest.archived === true || !latest.lifecycleRevision && rows[index].archived === true };
+    }
+    const lifecycle = values.map((item, index) => {
+      const projected = rows[index];
+      const nativeIds = !projected.accountProjection ? projected.nativeIds || [projected.id] : [];
+      return { id: item.id, sourceSessionId: item.sourceSessionId, sourceClientId: item.sourceClientId,
+        ...(nativeIds.length ? { nativeId: nativeIds[0] } : {}), nativeIds,
+        historyAliasIds: [...new Set([item.id, ...nativeIds, ...(projected.historyAliasIds || [])])],
+        archived: projected.archived === true, deleted: item.deleted === true,
+        revision: Number(item.revision || 0), lifecycleRevision: Number(item.lifecycleRevision || 0) };
+    });
+    return { ...result, chats: rows.filter(item => !item.deleted && item.archived === archived), lifecycle };
+  }
+
+  function sameRoute(value, identity) {
+    return value.ownerKey === identityKey(identity) && value.clientId === identity.clientId &&
+      String(value.hub || '').replace(/\/+$/, '') === String(identity.hub || '').replace(/\/+$/, '');
+  }
+
+  async function lifecycleTarget(id, identity, prepare) {
+    const wanted = String(id || '').trim();
+    if (!wanted || wanted.length > 512) throw Error('会话标识无效');
+    const captured = selectDirectory(identity), generation = historyGeneration;
+    const check = async () => {
+      if (closed || generation !== historyGeneration || captured !== directoryScope(await (localIdentityOf || identityOf)?.(app)))
+        throw Error('账号或服务已切换，请重新打开会话');
+    };
+    const aliases = require('./account-native-source.cjs').aliases({ app, id: wanted, identity });
+    const states = [...bound.values()].filter(state => sameRoute({ ...state.identity, ownerKey: state.ownerKey }, identity) &&
+      aliases.includes(state.sourceSessionId));
+    const pending = async () => (await (store.pending ? store.pending() : store.jobs())).filter(job =>
+      sameRoute(job, identity) && aliases.includes(job.body?.sourceSessionId));
+    let jobs = await pending();
+    if (prepare && (states.length || jobs.length)) {
+      for (const state of states) {
+        await state.ready;
+        if (state.pending) await state.pending;
+        await state.record();
+        if (state.error) throw Error('本地会话尚未同步，请重试后再操作：' + state.error);
+      }
+      await check();
+      await flush();
+      await check();
+      jobs = await pending();
+      if (jobs.length || states.some(state => state.error))
+        throw Error('本地会话尚未同步成功，本次操作未完成，请联网后重试');
+    }
+    const checkpointIds = new Set(states.map(state => state.conversationId).filter(Boolean));
+    for (const sourceSessionId of aliases) {
+      const key = JSON.stringify([String(identity.hub).replace(/\/+$/, ''), identityKey(identity), identity.clientId, sourceSessionId]);
+      const saved = await store.session?.(key) || await store.session?.(identityKey(identity) + ':' + sourceSessionId);
+      if (saved?.conversationId && (!saved.hub || String(saved.hub).replace(/\/+$/, '') === String(identity.hub).replace(/\/+$/, '')) &&
+          (!saved.clientId || saved.clientId === identity.clientId)) checkpointIds.add(saved.conversationId);
+    }
+    await check();
+    const loaded = await loadHistory({ force: true });
+    await check();
+    let item = historyScope === captured && [...accountRows.values()].find(value => value.id === wanted ||
+      value.sourceClientId === identity.clientId && (aliases.includes(value.sourceSessionId) || checkpointIds.has(value.id)));
+    if (checkpointIds.size) {
+      // ACK may arrive before a directory page. Resolve its authenticated ID
+      // directly rather than treating the native archive as local-only.
+      for (const accountId of checkpointIds) {
+        if (accountRows.has(accountId)) continue;
+        const response = await fetch(identity, endpoint(identity, '/account-conversations/' + encodeURIComponent(accountId) + '/source'),
+          { method: 'GET', redirect: 'error', signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(15000)]) });
+        const data = await response.json().catch(() => ({}));
+        await check();
+        if (!response.ok || data.conversation?.id !== accountId) throw Error('无法确认账号会话状态，请稍后重试');
+        const value = data.conversation;
+        if (value.sourceClientId !== identity.clientId || !aliases.includes(value.sourceSessionId))
+          throw Error('账号会话来源不匹配，请刷新后重试');
+        rememberDirectory(value); item ||= accountRows.get(accountId);
+      }
+    }
+    if (!item) {
+      if (states.length || jobs.length) {
+        if (prepare) throw Error('本地会话同步尚未确认，本次操作未完成，请稍后重试');
+        return { ok: true, found: true, pending: true, conversation: null, projection: null,
+          aliasIds: aliases, nativeIds: aliases };
+      }
+      if (!loaded.ok || loaded.stale || loaded.partial)
+        throw Error('账号会话目录尚未完整确认，本次操作未完成，请稍后重试');
+      return { ok: true, found: false, aliasIds: [wanted], nativeIds: [] };
+    }
+    const native = await projectedRow(item, identity);
+    await check();
+    const sourceAliases = item.sourceClientId === identity.clientId
+      ? require('./account-native-source.cjs').aliases({ app, id: item.sourceSessionId, identity }) : [];
+    if (prepare && sourceAliases.length && (!loaded.ok || loaded.stale || loaded.partial))
+      throw Error('这条本地会话的同步来源尚未完整确认，本次操作未完成，请稍后重试');
+    if (prepare && sourceAliases.some(alias => !aliases.includes(alias)))
+      return lifecycleTarget(sourceAliases[0], identity, true);
+    const conversations = [item, ...[...accountRows.values()].filter(value => value.id !== item.id &&
+      value.sourceClientId === identity.clientId && sourceAliases.includes(value.sourceSessionId))];
+    const nativeIds = !native.accountProjection ? native.nativeIds || sourceAliases : [];
+    const aliasIds = [...new Set([wanted, ...conversations.map(value => value.id), ...sourceAliases, ...(native.historyAliasIds || [])])];
+    const projection = historyRow({ ...item, historyAliasIds: aliasIds }, identity);
+    return { ok: true, found: true, conversation: item, conversations, projection, aliasIds, nativeIds };
+  }
+
+  async function resolveLifecycle(id, { prepare = false } = {}) {
+    try {
+      const identity = await (localIdentityOf || identityOf)?.(app);
+      if (closed || !identity?.session || !identityKey(identity)) throw Error('请先登录 SoduWork 后操作会话');
+      return await lifecycleTarget(id, identity, prepare);
+    } catch (error) { return { ok: false, reason: String(error.message || error) }; }
+  }
+
+  const lifecycleMutations = new Map();
+  async function setLifecycle(id, action) {
+    if (!['archive', 'restore', 'delete'].includes(action)) return { ok: false, reason: '会话操作无效' };
+    const locks = [];
+    const confirmed = [];
+    try {
+      const identity = await (localIdentityOf || identityOf)?.(app);
+      if (closed || !identity?.session || !identityKey(identity)) throw Error('请先登录 SoduWork 后操作会话');
+      const captured = directoryScope(identity);
+      const resolved = await lifecycleTarget(id, identity, true);
+      const generation = historyGeneration;
+      if (!resolved.found) return { ...resolved, localOnly: true };
+      const targets = resolved.conversations || [resolved.conversation];
+      const keys = targets.map(item => captured + ':' + item.id);
+      if (keys.some(key => lifecycleMutations.has(key))) throw Error('这条会话正在更新，请稍后重试');
+      for (const key of keys) { locks.push(key); lifecycleMutations.set(key, true); }
+      const check = async () => {
+        if (closed || generation !== historyGeneration || captured !== directoryScope(await (localIdentityOf || identityOf)?.(app)))
+          throw Error('账号或服务已切换，请重新打开会话');
+      };
+      for (const target of targets) {
+        await check();
+        const item = accountRows.get(target.id) || target;
+        const response = await fetch(identity, endpoint(identity, '/account-conversations/' + encodeURIComponent(item.id) + '/lifecycle'), {
+          method: 'POST', redirect: 'error', signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(15000)]),
+          headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, expectedRevision: Number(item.revision || 0) }) });
+        const data = await response.json().catch(() => ({}));
+        await check();
+        const conversation = data.conversation;
+        if (!response.ok || data.ok !== true || conversation?.id !== item.id ||
+            !Number.isSafeInteger(conversation.revision) || conversation.revision < Number(item.revision || 0) ||
+            !Number.isSafeInteger(conversation.lifecycleRevision) || conversation.lifecycleRevision <= 0 ||
+            (action === 'delete' ? conversation.deleted !== true : conversation.deleted === true || conversation.archived !== (action === 'archive')))
+          throw Error(typeof data.detail === 'string' ? data.detail : '账号会话操作未确认，请刷新后重试');
+        if (store.saveDirectory) await store.saveDirectory(captured, [conversation]);
+        await check();
+        rememberDirectory(conversation);
+        confirmed.push(conversation);
+        await emitChanged(item.id, accountRows.get(item.id), identity);
+        await check();
+      }
+      // Other devices can publish a newer lifecycle while native projection or
+      // notification work yields. Never apply an obsolete local action then.
+      for (const item of confirmed) {
+        const latest = accountRows.get(item.id);
+        if (Number(latest?.lifecycleRevision || 0) > item.lifecycleRevision &&
+            (latest.deleted !== item.deleted || latest.archived !== item.archived))
+          throw Error('会话状态已更新，本次操作未全部完成，请刷新后重试');
+      }
+      const conversation = confirmed[0], lifecycleRevision = Math.max(...confirmed.map(item => item.lifecycleRevision));
+      const projection = historyRow({ ...conversation, lifecycleRevision, historyAliasIds: resolved.aliasIds }, identity);
+      return { ...resolved, id: conversation.id, conversation, conversations: confirmed, projection,
+        archived: conversation.archived === true, deleted: conversation.deleted === true, lifecycleRevision };
+    } catch (error) { return { ok: false, reason: String(error.message || error), ...(confirmed.length ? { partial: true } : {}) }; }
+    finally { for (const key of locks) lifecycleMutations.delete(key); }
   }
 
   async function row(id) {
@@ -617,19 +856,19 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
       ? await localIdentityOf(app)
       : typeof identityOf === 'function' ? await identityOf(app) : null;
     if (!identity) return null;
+    const currentScope = selectDirectory(identity), generation = historyGeneration;
     const cached = accountRows.get(wanted);
-    const currentScope = directoryScope(identity);
     if (cached && currentScope === historyScope) return cached;
     const response = await fetch(identity,
       endpoint(identity, '/account-conversations/' + encodeURIComponent(wanted) + '/source'), {
-        method: 'GET', redirect: 'error', signal: AbortSignal.timeout(15000) });
+        method: 'GET', redirect: 'error', signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(15000)]) });
     const data = await response.json().catch(() => ({}));
     if (response.status === 404) return null;
-    if (!response.ok || !data.conversation) return null;
+    if (!response.ok || data.conversation?.id !== wanted) return null;
     const current = await (localIdentityOf || identityOf)(app);
-    if (closed || currentScope !== directoryScope(current)) return null;
-    accountRows.set(wanted, data.conversation);
-    return data.conversation;
+    if (closed || generation !== historyGeneration || currentScope !== directoryScope(current)) return null;
+    rememberDirectory(data.conversation);
+    return accountRows.get(wanted);
   }
 
   async function openProjection(id) {
@@ -637,6 +876,9 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
     if (!wanted) return null;
     const identity = typeof identityOf === 'function' ? await identityOf(app) : null;
     if (!identity) return null;
+    const captured = selectDirectory(identity), generation = historyGeneration;
+    const current = async () => !closed && generation === historyGeneration &&
+      captured === directoryScope(await (localIdentityOf || identityOf)?.(app));
     const base = endpoint(identity, '/account-conversations/' + encodeURIComponent(wanted) + '/messages');
     let metadata = null;
     let snapshotValue = null;
@@ -648,9 +890,11 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
         let nextMetadata = null;
         const messages = [];
         for (let page = 0; page < 200; page++) {
+          if (!await current()) return false;
           const response = await fetch(identity, base + '?after=' + after + '&limit=100', {
-            method: 'GET', redirect: 'error', signal: AbortSignal.timeout(15000) });
+            method: 'GET', redirect: 'error', signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(15000)]) });
           const data = await response.json().catch(() => ({}));
+          if (!await current()) return false;
           if (response.status === 404) return false;
           if (!response.ok || !data.conversation || !Array.isArray(data.items) || typeof data.cursor !== 'number') {
             throw Error('跨设备会话正文读取失败');
@@ -669,10 +913,11 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
           if (next <= after || data.hasMore !== true) break;
           after = next;
         }
-        if (!nextMetadata || nextMetadata.id !== wanted) return false;
+        if (!nextMetadata || nextMetadata.id !== wanted || !await current()) return false;
         metadata = nextMetadata;
-        accountIds.add(wanted);
-        accountRows.set(wanted, metadata);
+        rememberDirectory(metadata);
+        metadata = accountRows.get(wanted);
+        if (metadata.deleted) return false;
         snapshotValue = {
           messages: messages.sort((a, b) => a.position - b.position),
           status: safeText(metadata.state || 'idle', 24),
@@ -707,6 +952,7 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
   function close() {
     if (closing) return closing;
     closed = true;
+    while (nativeQueue.length) nativeQueue.shift().resolve(null);
     lifetime.abort();
     stopRealtime();
     if (reconcileTimer) clearTimeout(reconcileTimer);
@@ -730,7 +976,7 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
   }
 
   Promise.resolve(store.jobs(1)).then(jobs => { if (jobs.length) schedule(); }).catch(() => {});
-  return { bind, flush, close, history, row, openProjection, onChange(listener) {
+  return { bind, flush, close, history, row, openProjection, resolveLifecycle, setLifecycle, onChange(listener) {
       if (typeof listener !== 'function') return () => {};
       listeners.add(listener); return () => listeners.delete(listener);
     }, isRemote: () => false,

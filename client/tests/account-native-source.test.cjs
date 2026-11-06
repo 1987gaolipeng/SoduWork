@@ -20,11 +20,11 @@ test('owned account projection resolves to the native conversation without impor
   const f = setup(t), row = await resolve(f);
   assert.equal(row.id, 'native');
   assert.equal(row.adapterId, 'pi');
-  assert.deepEqual(row.historyAliasIds, ['account-copy']);
+  assert.deepEqual(row.historyAliasIds, ['native', 'account-copy']);
   assert.equal(row.accountConversation, undefined);
-  for (const item of [{ ...f.item, sourceClientId: 'another-device' }, { ...f.item, deleted: true }]) {
-    assert.equal(await resolve({ ...f, item }), null);
-  }
+  assert.equal(await resolve({ ...f, item: { ...f.item, sourceClientId: 'another-device' } }), null);
+  assert.equal((await resolve({ ...f, item: { ...f.item, deleted: true } })).id, 'native',
+    'a deleted account row still identifies its native alias for suppression');
 });
 
 test('an account alias probes native archives without reentering the external account history provider', async t => {
@@ -47,13 +47,19 @@ test('runtime segments resolve to their stable public identity after rework or a
   f.session.findBySessionId = id => {
     assert.equal(id, 'native'); return { historyRow: () => f.native };
   };
-  assert.equal((await resolve(f)).id, 'native');
+  const resolved = await resolve(f);
+  assert.equal(resolved.id, 'native');
+  assert.deepEqual(resolved.nativeIds, ['native', 'second-runtime']);
+  assert.deepEqual(require('../main/conversation/account-native-source.cjs').aliases({
+    app: f.app, id: 'second-runtime', identity: f.identity }), ['native', 'second-runtime']);
+  assert.throws(() => require('../main/conversation/account-native-source.cjs').aliases({
+    app: f.app, id: 'second-runtime', identity: identity('two') }), /账号/);
 });
 
-test('archived native conversations are not resurrected by account sync', async t => {
+test('archived native conversations preserve their archive state instead of falling back to an active account projection', async t => {
   const f = setup(t);
   f.session.isArchived = () => true;
-  assert.equal(await resolve(f), null);
+  assert.equal((await resolve(f)).archived, true);
 });
 
 test('account history canonicalizes both fresh and cached rows while keeping foreign records', async t => {
@@ -69,7 +75,7 @@ test('account history canonicalizes both fresh and cached rows while keeping for
   for (let i = 0; i < 2; i++) {
     const result = await sync.history();
     assert.deepEqual(result.chats.map(row => row.id), ['native', 'foreign']);
-    assert.deepEqual(result.chats[0].historyAliasIds, ['account-copy']);
+    assert.deepEqual(result.chats[0].historyAliasIds, ['native', 'account-copy']);
     assert.equal(result.chats[1].accountConversation, true);
   }
   assert.equal(calls, 1);

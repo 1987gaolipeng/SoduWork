@@ -127,6 +127,41 @@ test('delivery download receipts and bounded HTTP errors follow every supported 
   }
 });
 
+test('conversation lifecycle status and retry copy follow renderer locales and preserve error details', () => {
+  const c = client();
+  const phrases = [
+    '账号或服务已切换，请重新打开会话',
+    '无法核对账号会话状态，请稍后重试',
+    '这条会话还在执行，完成或停止后再操作',
+    '账号会话状态未保存，请重试',
+    '该会话将从当前账号的会话列表中删除，其他设备也会同步；需求和成果文件不会删除。',
+    '删除未完成',
+    '删除没有完成。账号会话已归档，请在归档会话中重试。',
+    '本地会话尚未同步成功，本次操作未完成，请联网后重试',
+    '无法确认账号会话状态，请稍后重试',
+    '账号会话来源不匹配，请刷新后重试',
+    '本地会话同步尚未确认，本次操作未完成，请稍后重试',
+    '无法读取账号会话状态，本次操作未完成，请联网后重试',
+    '请先登录 SoduWork 后操作会话',
+    '会话操作无效',
+    '这条会话正在更新，请稍后重试',
+    '账号会话操作未确认，请刷新后重试',
+    '会话状态已更新，本次操作未全部完成，请刷新后重试',
+  ];
+  for (const id of ['en-US', 'ja-JP', 'ko-KR', 'zh-CN']) {
+    c.api.setLocale(id);
+    const catalog = id === 'zh-CN' ? null : require('../core/locales/' + (id === 'en-US' ? 'en-US-native' : id) + '.js');
+    for (const source of phrases) {
+      assert.equal(c.api.translateText(source), catalog ? catalog[source] : source, id + ': ' + source);
+    }
+    for (const source of ['删除没有完成：{reason}', '本地会话尚未同步，请重试后再操作：{reason}']) {
+      const reason = 'EBUSY: D:/work/保存.jsonl';
+      const text = source.replace('{reason}', reason);
+      assert.equal(c.api.translateText(text), catalog ? catalog[source].replace('{reason}', reason) : text, id);
+    }
+  }
+});
+
 test('new client profiles default to English while explicit locale choices remain intact', () => {
   const fresh = client({}, false, { initialLocale: null });
   assert.equal(fresh.api.getLocale(), 'en-US');

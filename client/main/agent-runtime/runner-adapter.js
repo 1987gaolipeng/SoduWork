@@ -1842,21 +1842,22 @@ function getRunnerSessionDetails(runtimeSession) {
   return RUNNER_SESSION_DETAILS.get(runtimeSession) || null;
 }
 
-function _runnerInventory(runtime) {
+function _runnerInventory(runtime, { force = false } = {}) {
   let slot = RUNNER_INVENTORIES.get(runtime);
   if (!slot) {
     slot = { at: 0, runs: [], pending: null, revision: 0 };
     RUNNER_INVENTORIES.set(runtime, slot);
   }
   if (slot.pending) return slot.pending;
-  if (slot.at && Date.now() - slot.at < 750) return Promise.resolve(slot.runs);
+  if (!force && slot.at && Date.now() - slot.at < 750) return Promise.resolve(slot.runs);
   const revision = slot.revision;
   slot.pending = Promise.resolve(runtime.rpc('runtime.sessions', {}, 10000)).then((reply) => {
     if (!reply || reply.ok === false) {
       throw new Error(String(reply && reply.error || '读不到 Runner 会话目录'));
     }
+    if (!Array.isArray(reply.data?.runs)) throw new Error('Runner 会话目录响应无效');
     if (slot.revision === revision) {
-      slot.runs = Array.isArray(reply.data && reply.data.runs) ? reply.data.runs : [];
+      slot.runs = reply.data.runs;
       slot.at = Date.now();
     }
     return slot.runs;
@@ -1947,17 +1948,17 @@ function createRunnerRuntimeAdapter(options) {
       const handle = await createRunnerHandle(request, defaults, initialSession);
       return wrapRunnerSession(handle, request, { ok: true, resumed: true }, runtimeSpec);
     },
-    async historyEntry(id) {
+    async historyEntry(id, { strict = false } = {}) {
       try {
-        const row = (await _runnerInventory(runtime)).find(row => row.ref === id && isChat(row));
+        const row = (await _runnerInventory(runtime, { force: strict })).find(row => row.ref === id && isChat(row));
         return { ok: true, chats: row ? [await historyRow(row)] : [] };
       } catch (error) {
         return { ok: false, reason: String(error && error.message || error), chats: [] };
       }
     },
-    async history(limit = 50) {
+    async history(limit = 50, { strict = false } = {}) {
       try {
-        const runs = await _runnerInventory(runtime);
+        const runs = await _runnerInventory(runtime, { force: strict });
         const selected = runs.filter(isChat).slice(0, Math.max(1, Number(limit) || 50));
         const chats = [];
         // Bound concurrent journal streams when the full sidebar is requested.

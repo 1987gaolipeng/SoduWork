@@ -49,6 +49,13 @@ function create(file, { persistent = false, maxBytes = 256 * 1024 * 1024 } = {})
         }
         db.prepare("INSERT INTO metadata VALUES('legacy-import','done')").run();
       }
+      if (!db.prepare("SELECT 1 FROM metadata WHERE key='lifecycle-tombstones'").get()) {
+        // Previous clients discarded deleted directory rows but advanced the
+        // cursor past them. Reconcile once from the beginning to recover those
+        // ownership-scoped tombstones without touching checkpoints or uploads.
+        db.exec('DELETE FROM cursors;');
+        db.prepare("INSERT INTO metadata VALUES('lifecycle-tombstones','done')").run();
+      }
       db.exec('PRAGMA user_version=1;');
     });
   });
@@ -114,10 +121,16 @@ function create(file, { persistent = false, maxBytes = 256 * 1024 * 1024 } = {})
     saveDirectory: (scope, items, cursor) => access(db => transaction(db, () => {
       for (const item of items) {
         if (!item?.id) continue;
-        if (item.deleted) db.prepare('DELETE FROM directory WHERE scope=? AND id=?').run(scope, item.id);
-        else db.prepare('INSERT OR REPLACE INTO directory VALUES(?,?,?)').run(scope, item.id, JSON.stringify(item));
+        const previous = db.prepare('SELECT value FROM directory WHERE scope=? AND id=?').get(scope, item.id);
+        if (previous && Number(JSON.parse(previous.value).revision || 0) > Number(item.revision || 0)) continue;
+        // Retain deletion tombstones so a native transcript cannot reappear
+        // after restart while the directory cursor already passed its deletion.
+        db.prepare('INSERT OR REPLACE INTO directory VALUES(?,?,?)').run(scope, item.id, JSON.stringify(item));
       }
-      db.prepare('INSERT OR REPLACE INTO cursors VALUES(?,?)').run(scope, cursor);
+      // A single lifecycle receipt is not a complete directory page. Advancing
+      // its cursor would skip unrelated conversations changed before that row.
+      if (Number.isSafeInteger(cursor) && cursor >= 0) db.prepare(
+        'INSERT INTO cursors VALUES(?,?) ON CONFLICT(scope) DO UPDATE SET value=MAX(value,excluded.value)').run(scope, cursor);
     })),
     clear: () => access(db => transaction(db, () => db.exec('DELETE FROM jobs; DELETE FROM checkpoints; DELETE FROM directory; DELETE FROM cursors;'))),
     close() { connection?.close(); connection = null; },

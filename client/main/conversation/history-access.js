@@ -112,7 +112,12 @@ function assertOwner(app, id, captured = actor(app), row = {}, options = {}) {
     const migrated = bindLegacyOwner(app, id, captured);
     if (migrated?.owner) owners.push(migrated.owner);
   }
-  if (!owners.length || owners.some(owner => !owner || (owner !== captured.owner &&
+  if (!owners.length) {
+    const error = Error('无法确认这条会话属于当前账号，请切回原账号');
+    error.code = 'HISTORY_OWNER_MISSING';
+    throw error;
+  }
+  if (owners.some(owner => !owner || (owner !== captured.owner &&
       !runtime.scopeMatches(owner, captured.identity, captured.candidates))))
     throw Error('无法确认这条会话属于当前账号，请切回原账号');
 }

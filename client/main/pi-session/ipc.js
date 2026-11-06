@@ -301,7 +301,8 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
       require('../conversation/app-surfaces.cjs').all(BrowserWindow.getAllWindows()).forEach(win => {
         if (win.isDestroyed()) return;
         win.webContents.send('pi-session-event', {
-          kind: 'account-conversation-sync', ref: handle?.ref || '', sessionId: id, presence,
+          kind: Number(presence.lifecycleRevision || 0) > 0 ? 'history-lifecycle' : 'account-conversation-sync',
+          ref: handle?.ref || '', sessionId: id, presence,
         });
       });
     } catch (_) {
@@ -314,12 +315,13 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
   // cloud authority or exposing account sync as a Runner.
   session.setExternalHistory?.({
     async history(options) {
-      const [cloud, account] = await Promise.allSettled([_cloudHandoff.history(options), _accountSync.history()]);
+      const [cloud, account] = await Promise.allSettled([_cloudHandoff.history(options), _accountSync.history(options)]);
       const rows = [];
       if (cloud.status === 'fulfilled') rows.push(...(cloud.value.chats || []));
       if (account.status === 'fulfilled') rows.push(...(account.value.chats || []));
       const seen = new Set();
-      return { ok: true, chats: rows.filter(row => row && row.id && !seen.has(row.id) && seen.add(row.id)) };
+      return { ok: true, chats: rows.filter(row => row && row.id && !seen.has(row.id) && seen.add(row.id)),
+        lifecycle: account.status === 'fulfilled' ? account.value.lifecycle || [] : [] };
     },
     isRemote(id) { return typeof _cloudHandoff.isRemote === 'function' && _cloudHandoff.isRemote(id); },
     forget(id) {
@@ -348,7 +350,8 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
   require('./environment-ipc').install({
     app, ipcMain, session, identityOf, capabilityGrantsOf, _skillDirs, workDir, _saveConf, _conf,
   });
-  require('./history-ipc').install({ app, ipcMain, session, BrowserWindow, dialog, shell, cloudHistory: _cloudHandoff });
+  require('./history-ipc').install({ app, ipcMain, session, BrowserWindow, dialog, shell,
+    cloudHistory: _cloudHandoff, accountHistory: _accountSync });
   require('../conversation/work-conversation-cards').install({ app, ipcMain, session, BrowserWindow,
     identityOf: sendIdentityOf || identityOf,
     newCwd: options => _newSessionCwd(app, 'chat-' + require('node:crypto').randomUUID(), options) });

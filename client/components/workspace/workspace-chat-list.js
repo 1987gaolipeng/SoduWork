@@ -34,6 +34,59 @@
     return String(api?.taskStorageKey?.('tasks') || '');
   }
   let historyOwner = accountOwner(), hadOwner = Boolean(historyOwner), historyEpoch = 0;
+  let mutationGeneration = 0, lifecycleOverflow = false;
+  const lifecycle = new Map(), MAX_LIFECYCLE_IDS = 1024;
+  function rowIds(row, fallback) {
+    return [...new Set([fallback, row?.id, row?.localId,
+      ...(Array.isArray(row?.historyAliasIds) ? row.historyAliasIds : []),
+      ...(Array.isArray(row?.aliasIds) ? row.aliasIds : [])].filter(Boolean).map(String))];
+  }
+  function hiddenRow(row) {
+    return rowIds(row).some(id => lifecycle.get(id)?.hidden);
+  }
+  function needsHistoryConfirmation(row) {
+    return lifecycleOverflow && !row.pending && !rowIds(row).some(id =>
+      lifecycle.get(id)?.hidden === false || ctx.chatItems.some(item => rowIds(item).includes(id)));
+  }
+  function applyLifecycle(row, fallback, startedAt = Infinity) {
+    const hidden = row.archived === true || row.deleted === true;
+    const ids = new Set(rowIds(row, fallback));
+    // Canonical IDs, authenticated aliases and an existing record form one lifecycle.
+    // Do not join by title/task/sourceSessionId: foreign copies can be independent.
+    for (const id of ids) {
+      for (const alias of lifecycle.get(id)?.ids || []) ids.add(alias);
+      for (const item of ctx.chatItems) {
+        const aliases = rowIds(item);
+        if (aliases.includes(id)) for (const alias of aliases) ids.add(alias);
+      }
+    }
+    if (!ids.size) return false;
+    const previous = [...new Set([...ids].map(id => lifecycle.get(id)).filter(Boolean))];
+    const suppliedRevision = Number(row.lifecycleRevision ?? row.revision);
+    const revision = Number.isFinite(suppliedRevision) && suppliedRevision > 0 ? suppliedRevision : 0;
+    if (previous.some(record => revision && record.revision > revision ||
+        record.generation > startedAt && record.hidden !== hidden)) return false;
+    const retainedRevision = Math.max(revision, ...previous.map(record => record.revision), 0);
+    const changed = [...ids].some(id => {
+      const record = lifecycle.get(id);
+      return !record || record.hidden !== hidden || record.revision !== retainedRevision;
+    });
+    if (changed) { mutationGeneration++; ctx.historyLoad = null; }
+    const record = { hidden, revision: retainedRevision, generation: mutationGeneration, ids: new Set(ids) };
+    for (const id of ids) {
+      lifecycle.get(id)?.ids.delete(id);
+      lifecycle.delete(id); lifecycle.set(id, record);
+    }
+    while (lifecycle.size > MAX_LIFECYCLE_IDS) {
+      const oldest = lifecycle.keys().next().value;
+      lifecycle.get(oldest).ids.delete(oldest); lifecycle.delete(oldest);
+      // After eviction, unknown presence is only an invalidation hint. The
+      // authoritative history read confirms it instead of reviving an old row.
+      lifecycleOverflow = true;
+    }
+    if (hidden) ctx.chatItems = ctx.chatItems.filter(item => !hiddenRow(item));
+    return { changed, hidden, ids: [...ids] };
+  }
   function syncHistoryOwner() {
     const next = accountOwner();
     if (next === historyOwner) return false;
@@ -42,6 +95,8 @@
     // renewal and device replacement have the same Hub/account owner key.
     if (!hadOwner) { hadOwner = Boolean(next); return false; }
     historyEpoch++;
+    mutationGeneration++;
+    lifecycle.clear(); lifecycleOverflow = false;
     ctx.historyLoad = null;
     ctx.chatItems = []; ctx.chatNames?.clear();
     ctx.activeChatId = ''; ctx.chatsLoading = Boolean(next);
@@ -86,12 +141,24 @@ function togglePinned(id) {
     renderChats();
   }
 
-function forgetPinned(id) {
-    if (!id) return;
-    if (ctx.sidebarProjects) { ctx.sidebarProjects.forget(String(id)); return; }
-    const ids = pinnedIds();
-    if (!ids.delete(String(id))) return;
-    try { localStorage.setItem(pinStorageKey(), JSON.stringify([...ids])); } catch (e) {}
+function forgetPinned(id, failureMessage = '会话已删除，但侧栏记录未能保存，请重新点击删除清理', archived = false) {
+    const removed = [...new Set((Array.isArray(id) ? id : [id]).filter(Boolean).map(String))];
+    if (!removed.length) return true;
+    try {
+      if (archived && ctx.sidebarProjects?.forgetArchived) return ctx.sidebarProjects.forgetArchived(removed) === true;
+      if (ctx.sidebarProjects?.forgetMany) return ctx.sidebarProjects.forgetMany(removed) === true;
+      if (ctx.sidebarProjects) {
+        for (const key of removed) if (ctx.sidebarProjects.forget(key) === null) return false;
+        return true;
+      }
+      const ids = pinnedIds(); let changed = false;
+      for (const key of removed) if (ids.delete(key)) changed = true;
+      if (changed) localStorage.setItem(pinStorageKey(), JSON.stringify([...ids]));
+      return true;
+    } catch (error) {
+      global.petSay?.(failureMessage);
+      return false;
+    }
   }
 
 /*
@@ -99,16 +166,20 @@ function forgetPinned(id) {
  * application dialog. Send a second IPC with confirmed only after acceptance; cancellation
  * never executes deletion.
  */
-async function requestDelete(api, key) {
+async function requestDelete(api, key, current) {
     let got = null;
     try { got = await api.deleteHistory(key); }
     catch (error) { return { ok: false, reason: String(error && error.message || error) }; }
+    if (!current()) return { ok: false, cancelled: true };
     if (!got || !got.needsConfirm) return got;
     const dialog = global.SoduWorkConfirmDialog;
     if (!dialog || typeof dialog.open !== 'function') return { ok: false, reason: '确认弹窗没有加载出来，这次先不删' };
     const approved = await dialog.open({ ...(got.confirm || {}), danger: true });
-    if (!approved) return { ok: false, cancelled: true };
-    try { return await api.deleteHistory(key, { confirmed: true }); }
+    if (!approved || !current()) return { ok: false, cancelled: true };
+    // A missing-content confirmation must never authorize deleting files that
+    // become available while the confirmation dialog is open.
+    const options = got.missingContent === true ? { confirmed: true, missingOnly: true } : { confirmed: true };
+    try { return await api.deleteHistory(key, options); }
     catch (error) { return { ok: false, reason: String(error && error.message || error) }; }
 }
 
@@ -116,21 +187,28 @@ async function deleteHistoryChat(id) {
     const key = String(id || '');
     const api = global.soduWorkAPI && (global.soduWorkAPI.conversationSession || global.soduWorkAPI.piSession);
     if (!key || !api || typeof api.deleteHistory !== 'function') return false;
-    const got = await requestDelete(api, key);
+    syncHistoryOwner();
+    const epoch = historyEpoch, startedAt = mutationGeneration;
+    const current = () => { syncHistoryOwner(); return epoch === historyEpoch; };
+    const got = await requestDelete(api, key, current);
+    syncHistoryOwner();
+    if (epoch !== historyEpoch) return false;
     if (!got || !got.ok) {
       if (!(got && got.cancelled) && typeof global.petSay === 'function') {
         global.petSay(String(got && got.reason || '这条会话暂时删不掉'));
       }
       return false;
     }
-    forgetPinned(key);
+    const applied = applyLifecycle({ ...got, deleted: true }, key, startedAt);
+    if (!applied) return true;
+    if (!forgetPinned(applied.ids)) return false;
+    for (const id of applied.ids) ctx.chatNames?.delete(id);
     if (global.ChatCollaborationStore && typeof ChatCollaborationStore.remove === 'function') {
       // The conversation is gone; its requirement bindings must not survive it,
       // or the next "open conversation" would try to resume a missing archive.
-      ChatCollaborationStore.remove(key);
+      for (const id of applied.ids) ChatCollaborationStore.remove(id);
     }
-    ctx.chatItems = ctx.chatItems.filter((row) => String(row && row.id || '') !== key);
-    if (ctx.activeChatId === key) {
+    if (hiddenRow({ id: ctx.activeChatId })) {
       ctx.activeChatId = '';
       if (global.WorkspaceHost) global.WorkspaceHost.open('create', { newSession: true });
     }
@@ -142,16 +220,21 @@ async function archiveHistoryChat(id) {
     const key = String(id || '');
     const api = global.soduWorkAPI && (global.soduWorkAPI.conversationSession || global.soduWorkAPI.piSession);
     if (!key || !api || typeof api.archiveHistory !== 'function') return false;
+    syncHistoryOwner();
+    const epoch = historyEpoch, startedAt = mutationGeneration;
     let got = null;
     try { got = await api.archiveHistory(key); }
     catch (error) { got = { ok: false, reason: String(error && error.message || error) }; }
+    syncHistoryOwner();
+    if (epoch !== historyEpoch) return false;
     if (!got || !got.ok) {
       if (typeof global.petSay === 'function') global.petSay(String(got && got.reason || '这条会话暂时无法归档'));
       return false;
     }
-    ctx.sidebarProjects?.forget(key);
-    ctx.chatItems = ctx.chatItems.filter((row) => String(row && row.id || '') !== key);
-    if (ctx.activeChatId === key) {
+    const applied = applyLifecycle({ ...got, archived: true }, key, startedAt);
+    if (!applied) return true;
+    if (!forgetPinned(applied.ids, '这条会话暂时无法归档', true)) return false;
+    if (hiddenRow({ id: ctx.activeChatId })) {
       ctx.activeChatId = '';
       if (global.WorkspaceHost) global.WorkspaceHost.open('create', { newSession: true });
     }
@@ -180,9 +263,25 @@ function updateChatState(event) {
     const id = String(event && event.sessionId || row && row.id || '');
     if (!id || !row) return;
     if (row.archived || row.deleted) {
-      removeChat(id);
+      // A legacy snapshot has no lifecycle ordering. After an explicit restore,
+      // only another explicit lifecycle action may hide this conversation again.
+      if (event.kind !== 'history-lifecycle' &&
+          rowIds(row, id).some(key => lifecycle.get(key)?.hidden === false)) return;
+      const applied = applyLifecycle(row, id);
+      if (applied) {
+        if (event.kind === 'history-lifecycle') {
+          forgetPinned(applied.ids, row.deleted ? undefined : '这条会话暂时无法归档', !row.deleted);
+        }
+        renderChats();
+      }
       return;
     }
+    if (event.kind === 'history-lifecycle' && row.archived === false && row.deleted === false) {
+      const restored = applyLifecycle(row, id);
+      if (!restored) return;
+      if (restored.changed && !row.title) void refreshConversationHistory();
+    }
+    if (hiddenRow({ ...row, id })) return;
     if (event.kind === 'renamed' && global.ChatChrome?.rename) global.ChatChrome.rename(id, row.title);
     const index = ctx.chatItems.findIndex((item) => String(item.id || '') === id);
     if (index < 0) {
@@ -548,8 +647,10 @@ function renderChats() {
         return acc;
       }, new Map()));
     const groups = ctx.sidebarProjects?.partition(list);
-    const pinned = groups ? groups.pinned : list.filter((item) => pins.has(String(item.id || '')));
-    const normal = groups ? groups.recent : list.filter((item) => !pins.has(String(item.id || '')));
+    const pinned = (groups ? groups.pinned : list.filter((item) => pins.has(String(item.id || ''))))
+      .filter(item => !hiddenRow(item));
+    const normal = (groups ? groups.recent : list.filter((item) => !pins.has(String(item.id || ''))))
+      .filter(item => !hiddenRow(item));
     const pinnedBox = ctx.root.querySelector('#wsPinnedBox');
     pinnedBox.hidden = !pinned.length;
     pinnedBox.classList.toggle('is-empty', !pinned.length);
@@ -557,8 +658,9 @@ function renderChats() {
     _syncChatList(ctx.pinnedChats, pinned, true, pool);
     _syncChatList(ctx.chats, normal, false, pool);
     for (const project of groups?.projects || []) {
-      _syncChatList(project.target, project.items, false, pool);
-      if (!project.items.length) ctx._empty(project.target, '拖入会话，开始整理');
+      const items = project.items.filter(item => !hiddenRow(item));
+      _syncChatList(project.target, items, false, pool);
+      if (!items.length) ctx._empty(project.target, '拖入会话，开始整理');
     }
     if (!normal.length) ctx._empty(ctx.chats, list.length ? '没有更多聊天' :
       (ctx.chatsLoading ? '正在加载聊天…' : '还没有聊天'));
@@ -586,11 +688,29 @@ function refreshConversationHistory() {
       ctx.renderChats();
       return Promise.resolve(false);
     }
-    const epoch = historyEpoch;
-    const current = () => { syncHistoryOwner(); return epoch === historyEpoch; };
+    const epoch = historyEpoch, generation = mutationGeneration;
+    const current = () => { syncHistoryOwner(); return epoch === historyEpoch && generation === mutationGeneration; };
     const job = Promise.resolve().then(() => current() ? api.history() : null).then((got) => {
       if (!current()) return false;
-      if (got && got.ok) ctx.setChats(got.chats || []);
+      if (got && got.ok) {
+        // Native history supplies authenticated lifecycle records, including
+        // cold-start tombstones that have not produced a presence event.
+        const archived = new Set(), deleted = new Set();
+        for (const row of Array.isArray(got.lifecycle) ? got.lifecycle : []) {
+          if (!row?.id || !(row.archived === true || row.deleted === true ||
+              row.archived === false && row.deleted === false && Number(row.lifecycleRevision) > 0)) continue;
+          const applied = applyLifecycle(row);
+          if (applied) for (const id of applied.ids) {
+            archived.delete(id); deleted.delete(id);
+            if (applied.hidden) (row.deleted ? deleted : archived).add(id);
+          }
+        }
+        // The directory may exceed the bounded live-event ledger. Retain this
+        // response's accepted cleanup IDs even when old ledger entries expire.
+        forgetPinned([...archived], '这条会话暂时无法归档', true);
+        forgetPinned([...deleted]);
+        ctx.setChats(got.chats || []);
+      }
       else { ctx.chatsLoading = false; ctx.renderChats(); }
       return Boolean(got && got.ok);
     }).catch(() => {
@@ -605,12 +725,14 @@ function refreshConversationHistory() {
   /* Insert an optimistic row on the first message, then replace it by title and time once Pi's archive index is available. */
   function setChats(items) {
     ctx.chatsLoading = false;
-    ctx.chatItems = ctx._reconcileChats(ctx.chatItems, (items || []).map(rememberChatName), Date.now());
+    ctx.chatItems = ctx._reconcileChats(ctx.chatItems.filter(item => !hiddenRow(item)),
+      (items || []).filter(item => !hiddenRow(item)).map(rememberChatName), Date.now());
     renderChats();
   }
 
   function upsertChat(item) {
-    if (!item) return;
+    if (!item || hiddenRow(item)) return;
+    if (needsHistoryConfirmation(item)) { void refreshConversationHistory(); return; }
     const next = ctx._upsertChatItems(ctx.chatItems, rememberChatName(item), { deferUnconfirmedCloudTasks: true });
     if (next === null) {
       void refreshConversationHistory();

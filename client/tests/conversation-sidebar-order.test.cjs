@@ -155,15 +155,15 @@ test('history deletion confirms and routes both Pi archives and Runner records',
   assert.match(source, /await dialog\.open\(\{ \.\.\.\(got\.confirm \|\| \{\}\), danger: true \}\)/);
   assert.match(ipc, /active\.inFlight\(\)/);
   assert.match(ipc, /await active\.close\(\)/);
-  assert.match(ipc, /found && found\.notFound/);
+  assert.match(ipc, /allowMissing: !canonicalId/);
   // Pi archives now pass through recycle readiness checks before native delete.
   assert.match(ipc, /trash = trashWithRecovery/);
   assert.match(ipc, /await trash\(shell, piEntry\.path\)/);
-  assert.match(ipc, /session\.findRunnerRow\(id\)/);
+  assert.match(ipc, /session\.findRunnerRow\(id, \{ strict: true \}\)/);
   assert.match(ipc, /session\.forgetRunner\(app, id\)/);
   assert.match(source, /const canDelete = Boolean\(id\) && !c\.pending/);
   const archives = fs.readFileSync(path.join(__dirname, '../main/pi-session/archive-history.js'), 'utf8');
-  assert.match(session, /_historyIndex\(app\)\.find\(wanted\)/);
+  assert.match(session, /_historyIndex\(app\)\.find\(wanted, \{ strict: options\.strict === true \}\)/);
   assert.match(archives, /fs\.promises\.realpath\(root\)/);
   assert.match(archives, /path\.extname\(target\)\.toLowerCase\(\) !== '\.jsonl'/);
   // Load both dialog logic and styling so deletion can request confirmation.
