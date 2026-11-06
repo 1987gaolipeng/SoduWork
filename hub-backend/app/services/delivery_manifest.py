@@ -34,7 +34,7 @@ _SUPPORT_EXTS = {
     ".woff", ".woff2", ".ttf", ".ico", ".map",
 }
 _EVIDENCE_WORDS = re.compile(
-    r"(^|[/_.-])(screen(?:shot)?|preview|evidence|proof|qa|test[-_ ]?report|"
+    r"(^|[/_.-])(screen(?:shot)?s?|shots|preview|evidence|proof|qa|verify|verification|test[-_ ]?report|"
     r"截图|预览|证据|验收|测试报告)([/_.-]|$)", re.I)
 _BUNDLE_WORDS = re.compile(r"(^|[/_.-])(完整产出|交付包|deliverable|artifact|bundle)([/_.-]|$)", re.I)
 _ZIP_MAX_ENTRIES = 10_000
@@ -197,7 +197,7 @@ def _zip_validation(name: str, data: bytes) -> dict:
 
 
 def validate_bytes(name: object, data: bytes | bytearray | None,
-                   content_type: str = "") -> dict:
+                   content_type: str = "", *, category: str = "") -> dict:
     """Perform lightweight structural validation on bytes without executing files or extracting
     them to disk.
     """
@@ -243,7 +243,22 @@ def validate_bytes(name: object, data: bytes | bytearray | None,
         except UnicodeError:
             return _failed("HTML 文本编码无法解析")
         if not any(tag in text for tag in ("<!doctype html", "<html", "<body", "<main")):
-            return _failed("HTML 缺少可识别的页面结构")
+            # Website components are supporting sources, not standalone pages.
+            # Parse real tags rather than accepting tag-like text in comments.
+            from html.parser import HTMLParser
+
+            class FragmentParser(HTMLParser):
+                recognized = False
+
+                def handle_starttag(self, tag, attrs):
+                    if tag in {"header", "footer", "nav", "section", "article", "aside", "div",
+                               "span", "a", "p", "ul", "ol", "li", "form", "table", "template"}:
+                        self.recognized = True
+
+            parser = FragmentParser()
+            parser.feed(text)
+            if (category or classify_name(path)) != "supporting" or not parser.recognized:
+                return _failed("HTML 缺少可识别的页面结构")
     if ext == ".svg":
         text = raw[:8192].decode("utf-8", errors="ignore").lower()
         if "<svg" not in text:

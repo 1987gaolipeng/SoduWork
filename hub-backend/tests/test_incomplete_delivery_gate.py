@@ -125,6 +125,51 @@ class IncompleteTurnDeliveryTests(_Base):
 class FailCancelsAutoReviewTests(_Base):
     """Applying a failed receipt revokes automatic pending reviews from the same turn."""
 
+    async def test_rejection_survives_late_native_files_until_executor_starts_new_turn(self):
+        from unittest.mock import AsyncMock, patch
+        from app.api import approvals
+        from app.realtime import hub
+        from app.services import tasks, task_requirements
+        engine, session, task = await self._prepared()
+        try:
+            session.add(models.Client(id="review-device", user_ref="u-requester"))
+            await session.commit()
+            async def deliver(name, turn="turn-9"):
+                return await conversation_turns.deliver_artifacts(session, task,
+                    conversation_id="conv-9", turn_id=turn, outcome="completed",
+                    files=[(name, b"Complete revised report", "text/markdown")])
+            with patch.object(hub, "publish", new=AsyncMock()):
+                await deliver("report.md")
+                request = (await self._requests(session))[0]
+                await approvals.decide(request.id, {"decision": "reject", "note": "Revise report"},
+                    await session.get(models.Client, "review-device"), session)
+                late = await deliver("late.md")
+                self.assertTrue(late["pendingRework"])
+                self.assertEqual([r.status for r in await self._requests(session)], ["rejected"])
+                await conversation_turns.apply(session, task,
+                    {"action": "complete", "turnId": "turn-9", "conversationId": "conv-9"})
+                await session.commit()
+                for _ in range(3):
+                    worker = await session.get(models.Client, "device-owner")
+                    api = await task_requirements.decorate(session, worker, task,
+                        await tasks.task_to_api_live(session, task))
+                    self.assertEqual(api["requirementStage"], "delivering")
+                    self.assertTrue(api["canContinueExecution"])
+                    self.assertEqual(api["workRouting"]["reworkPending"]["feedback"], "Revise report")
+                for action in ("prepare", "start"):
+                    await conversation_turns.apply(session, task,
+                        {"action": action, "turnId": "turn-10", "conversationId": "conv-9"})
+                await session.commit()
+                self.assertNotIn("reworkPending", task.work_routing)
+                result = await deliver("revised.md", "turn-10")
+                self.assertNotIn("deferred", result)
+                await deliver("revised.md", "turn-10")
+                self.assertEqual(sorted(r.status for r in await self._requests(session)), ["pending", "rejected"])
+                api = await tasks.task_to_api_live(session, task)
+                self.assertEqual(api["requirementStage"], "reviewing")
+        finally:
+            await self._dispose(engine, session)
+
     async def test_fail_cancels_pending_review_of_same_conversation(self):
         engine, session, task = await self._prepared()
         try:

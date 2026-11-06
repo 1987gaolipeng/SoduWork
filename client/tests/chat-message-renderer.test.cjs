@@ -211,7 +211,7 @@ test('operation receipts remain between their delivery and the next conversation
   ctx._pending = '';
   ctx._sessionOptions = {};
   const entry = { taskId: 'task', task: { title: 'Delivery' }, nativeTurn: true,
-    trace: { approvals: [{ id: 'r1', action: 'review', status: 'rejected', createdAt: 25 }] } };
+    trace: { approvals: [{ id: 'r1', action: 'review', status: 'rejected', createdAt: 25, myDecision:{decision:'reject'} }] } };
   ctx._collabEntries = () => [entry];
   ctx._snap = { status: 'idle', tools: [], messages: [
     { role: 'user', text: 'Execute', sentAt: 10 },
@@ -220,7 +220,7 @@ test('operation receipts remain between their delivery and the next conversation
   renderer._render();
   ctx._snap.messages.push({ role: 'user', text: 'Rework', sentAt: 30 },
     { role: 'assistant', sentAt: 40, done: true, blocks: [{ kind: 'text', text: 'Revised delivery', done: true }] });
-  entry.trace.approvals.push({ id: 'r2', action: 'review', status: 'approved', createdAt: 45 });
+  entry.trace.approvals.push({ id: 'r2', action: 'review', status: 'approved', createdAt: 45, myDecision:{decision:'approve'} });
   renderer._render();
   ctx._snap.messages.push({ role: 'user', text: 'Continue', sentAt: 50 });
   for (const reopen of [false, true]) {
@@ -239,7 +239,7 @@ test('legacy projected delivery precedes its receipt and a pending follow-up', (
   sandbox.TaskTraceApproval = { html: () => '', bind() {} };
   sandbox.TaskExecutionStream = { rowsHtml: () => '<p>Legacy delivery</p>' };
   const entry = { taskId: 'legacy', task: {},
-    trace: { approvals: [{ id: 'legacy-review', action: 'review', status: 'approved' }] },
+    trace: { approvals: [{ id: 'legacy-review', action: 'review', status: 'approved', myDecision:{decision:'approve'} }] },
     controller: { snapshot: () => ({ status: 'completed', events: [{ kind: 'text' }] }) } };
   ctx._collabEntries = () => [entry];
   renderer._render();
@@ -900,4 +900,82 @@ test('an older running collaborator updates its turn stack when it settles beyon
   assert.equal(writes, firstWrites + 1, 'settlement must refresh the crew even outside the last 40 tools');
   renderer._render();
   assert.equal(writes, firstWrites + 1, 'the unchanged settled snapshot resumes incremental rendering');
+});
+
+
+test('quota guidance never renders a red conversation error while genuine failures remain visible', () => {
+  const { renderer, ctx, list, sandbox } = setupRender();
+  sandbox.SoduWorkQuota = require('../core/token-quota');
+  ctx._pending = ''; ctx._sessionOptions = {};
+  ctx._snap = { status: 'unreachable', statusText: 'Allowance reached', code: 'TOKEN_QUOTA_EXCEEDED',
+    quota: { enabled: true, exceeded: true, reason: 'model_exhausted' }, tools: [],
+    messages: [{ role: 'user', text: 'Saved request' }, { role: 'assistant', done: true, blocks: [{ kind: 'text', text: 'Saved answer' }] }] };
+  renderer._render();
+  assert.doesNotMatch(list.innerHTML, /class="nbad show"/);
+  assert.match(list.innerHTML, /Saved answer/);
+  ctx._snap = { ...ctx._snap, code: '', quota: null, statusText: 'Provider authentication failed' };
+  renderer._render();
+  assert.match(list.innerHTML, /class="nbad show"/);
+  assert.match(list.innerHTML, /Provider authentication failed/);
+});
+
+test('historical open failures offer session reopen instead of a dead model retry', () => {
+  const { renderer, ctx, list } = setupRender();
+  ctx._ref = '';
+  ctx._sessionId = 'history-session';
+  ctx._pending = '';
+  ctx._snap = { status: 'unreachable', statusText: '打不开对话（当前账号或设备无权在此会话中执行这项需求）',
+    sessionOpenCode: 'TASK_ACCESS_DENIED', messages: [], tools: [],
+    execution: { running: false, modelRecovery: { id: 'stale-model-retry', available: true } } };
+  renderer._render();
+  assert.match(list.innerHTML, /data-session-retry/);
+  assert.doesNotMatch(list.innerHTML, /data-model-retry/);
+});
+
+test('work-card access failures keep the historical session reopen action', () => {
+  const { renderer, ctx, list } = setupRender();
+  ctx._ref = '';
+  ctx._sessionId = 'history-work-card';
+  ctx._snap = { status: 'unreachable', openBlocked: true,
+    statusText: '打不开对话（当前账号或设备无权在此会话中执行这项需求）', messages: [], tools: [] };
+  renderer._render();
+  assert.match(list.innerHTML, /data-session-retry/);
+  assert.doesNotMatch(list.innerHTML, /data-plugin-retry/);
+});
+
+test('permanent plugin capability denials offer a new chat handoff instead of same-session resume', () => {
+  const { renderer, ctx, list } = setupRender();
+  ctx._pending = '';
+  ctx._snap = { status: 'unreachable', statusText: 'stale authorization', tools: [], messages: [] };
+  ctx._retryDraft = { text: 'Use the selected plugin', files: [], plugins: [{ pluginId: 'browser-work' }] };
+  ctx._pluginAuthorization = { missing: ['browser'] };
+  renderer._render();
+  assert.match(list.innerHTML, /data-plugin-new-session/);
+  assert.doesNotMatch(list.innerHTML, /data-plugin-retry/);
+  assert.match(list.innerHTML, /浏览网页/);
+});
+
+test('runtime error rows localize native persisted notices without authorization metadata', () => {
+  const {renderer,ctx,list,sandbox} = setupRender();
+  const source = '当前会话没有授权：浏览网页。请新建会话并开启对应能力后再使用这个插件';
+  let received;
+  sandbox.ChatStatus = {notice:value => {received=value;return 'This chat requires browser access';}};
+  ctx._pending = '';
+  ctx._snap = {status:'unreachable',statusText:source,tools:[],messages:[]};
+  renderer._render();
+  assert.equal(received, source);
+  assert.match(list.innerHTML, /This chat requires browser access/);
+  assert.doesNotMatch(list.innerHTML, />当前会话没有授权/);
+  assert.match(list.innerHTML, /data-runtime-notice="当前会话没有授权/);
+  assert.equal(ctx._snap.statusText, source, 'locale changes must not rewrite persisted run diagnostics');
+});
+
+test('permanent plugin denials never render a generic resume action', () => {
+  const { renderer, ctx, list } = setupRender();
+  ctx._pending = '';
+  ctx._snap = { status: 'unreachable', statusText: 'read-only authorization', tools: [], messages: [] };
+  ctx._retryDraft = { text: 'Use the selected plugin', files: [], plugins: [{ pluginId: 'office-work' }] };
+  ctx._pluginAuthorization = { readOnlyConflicts: ['office'] };
+  renderer._render();
+  assert.doesNotMatch(list.innerHTML, /data-plugin-retry|data-plugin-new-session/);
 });

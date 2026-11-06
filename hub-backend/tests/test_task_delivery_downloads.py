@@ -20,7 +20,7 @@ from app.automation_models import ArtifactVersion, ApprovalAssignment, ApprovalD
 from app.db import Base, get_session
 from app.deps import current_client
 from app.models import Attachment, Client, Task, User
-from app.services import delivery_collections, storage
+from app.services import delivery_bundle, delivery_collections, storage
 
 
 def archive_bytes(files):
@@ -133,6 +133,28 @@ class TaskDeliveryDownloadsTests(unittest.IsolatedAsyncioTestCase):
         self.assert_archive(reply, dict(website))
         self.assertEqual(reply.content, raw)
 
+    async def test_single_complete_bundle_downloads_original_bytes_with_work_title(self):
+        from urllib.parse import unquote
+        files = {"index.html": b"<html>Final website</html>", "assets/theme.css": b"body{}"}
+        raw = archive_bytes(files.items())
+        tid, version, _ = await self.seed([("完整产出-site.zip", raw, "output")])
+        reply = await self.download(tid, version)
+        self.assert_archive(reply, files)
+        self.assertEqual(reply.content, raw)
+        self.assertEqual(unquote(reply.headers["Content-Disposition"].split("''")[1]),
+                         "Website and report.zip")
+
+    def test_bundle_filenames_match_desktop_windows_rules(self):
+        for title, expected in [
+            ("春节传统文化由来介绍", "春节传统文化由来介绍.zip"),
+            ("  Site: design / final. ", "Site design  final.zip"),
+            ("CON", "_CON.zip"), ("nul.report", "_nul.report.zip"),
+            ("...", "交付物.zip"), ("\x00", "交付物.zip"),
+            ("🎨" * 41, "🎨" * 40 + ".zip"),
+        ]:
+            with self.subTest(title=title):
+                self.assertEqual(delivery_bundle.archive_filename(title), expected)
+
     async def test_conflicting_or_case_ambiguous_paths_never_silently_overwrite(self):
         for name, data in (("report.md", b"New report"), ("REPORT.md", b"Old report")):
             with self.subTest(name=name):
@@ -158,7 +180,7 @@ class TaskDeliveryDownloadsTests(unittest.IsolatedAsyncioTestCase):
         storage.delete(rows[1].storage_key, rows[1].backend)
         reply = await self.download(tid, version)
         self.assertEqual(reply.status_code, 502, reply.text)
-        self.assertIn("拒绝返回不完整", reply.json()["detail"])
+        self.assertEqual(reply.json()["detail"], "当前固定版本的源文件已丢失，拒绝返回不完整压缩包")
 
     async def test_damaged_or_unsafe_zip_member_cannot_be_laundered_by_merge(self):
         link = zipfile.ZipInfo("assets/theme.css")

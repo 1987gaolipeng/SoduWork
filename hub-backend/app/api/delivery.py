@@ -112,6 +112,9 @@ async def artifacts_zip(
     try:
         payload = await delivery_bundle.collect(selected, force_bundle=True,
             validate_standalone=True, limits=delivery_bundle.task_download_limits())
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=502,
+                            detail="当前固定版本的源文件已丢失，拒绝返回不完整压缩包") from exc
     except HTTPException as exc:
         if exc.status_code in (409, 413):
             raise
@@ -121,12 +124,11 @@ async def artifacts_zip(
                             detail="当前固定版本的成果读取失败，拒绝返回不完整压缩包") from exc
     buf = io.BytesIO(payload["bytes"])
     used = {item["path"] for item in payload["files"]}
-    safe = "".join(c for c in (t.title or "产出") if c not in '\\/:*?"<>|').strip()[:40] or "产出"
     from urllib.parse import quote
     return StreamingResponse(
         buf, media_type="application/zip",
         headers={"Content-Disposition":
-                 f"attachment; filename*=UTF-8''{quote(safe + '.zip')}",
+                 f"attachment; filename*=UTF-8''{quote(delivery_bundle.archive_filename(t.title))}",
                  "X-Artifact-Count": str(len(used)),
                  "X-Artifact-SHA256": hashlib.sha256(payload["bytes"]).hexdigest(),
                  "X-Artifact-Version": str(artifact.id if artifact else "")})

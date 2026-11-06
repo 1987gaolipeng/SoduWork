@@ -45,12 +45,20 @@
     }
     function operationResults(entry) {
       const results = new Map();
+      const me = String(global.__teamCap?.meId || '').trim();
       for (const approval of entry.trace?.approvals || []) {
-        const decision = approval.myDecision?.decision || approval.myDecision ||
-          ({ approved: 'approve', rejected: 'reject' })[approval.status];
+        // Task traces contain everyone's decisions. A global gate outcome is not a personal receipt.
+        const mine = approval.myDecision || (me && approval.decisions?.find(row => String(row.userId || '') === me));
+        const receipt = approvalResults.get(acceptanceKey(entry.taskId, approval.id));
+        const decision = mine?.decision || (typeof mine === 'string' ? mine : '') ||
+          (receipt && (({ approved: 'approve', rejected: 'reject' })[approval.status] || receipt.decision));
         if (approval.action === 'review' && ['approve', 'reject'].includes(decision)) {
-          const receipt = approvalResults.get(acceptanceKey(entry.taskId, approval.id));
-          results.set(approval.id, { decision, status: approval.status, note: approval.myDecision?.note || receipt?.note || '' });
+          // A delayed pending trace cannot undo the final status returned by Hub.
+          // The receipt is scoped to this exact request; new requests remain independent.
+          const settledReceipt = ['approved', 'rejected'].includes(receipt?.status);
+          const status = settledReceipt && (!approval.status || approval.status === 'pending')
+            ? receipt.status : approval.status || receipt?.status;
+          results.set(approval.id, { decision, status, note: mine?.note || receipt?.note || '' });
         }
       }
       for (const result of approvalResults.values()) {

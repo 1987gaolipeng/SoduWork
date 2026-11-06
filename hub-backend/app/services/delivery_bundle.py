@@ -18,6 +18,14 @@ from fastapi import HTTPException
 from . import delivery_collections as collections, delivery_manifest, storage
 
 
+def archive_filename(title):
+    """Match desktop filenames across cards, acceptance inputs and downloads."""
+    name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '', str(title or "交付物")).strip()[:40].rstrip(". ") or "交付物"
+    if re.match(r"^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)", name, re.I):
+        name = "_" + name
+    return name + ".zip"
+
+
 def select_artifact(rows, artifact):
     """Resolve only the immutable version's deliverables, shared by review and download."""
     from . import delivery_truth

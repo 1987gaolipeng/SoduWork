@@ -22,8 +22,9 @@ function harness(t) {
   const handlers = {};
   const modulePath=require.resolve('../main/attachment-files');delete require.cache[modulePath];
   require(modulePath).install({app,BrowserWindow:Window,identityOf:()=>state.identity,ownerOf:()=>state.owner,ipcMain:{handle:(name,fn)=>handlers[name]=fn},
+    authenticatedIdentityOf:async()=>{await state.waitAuth?.();return {...state.identity,session:'current-account-session'}},
     fetchAuthenticated:async(identity,target,options)=>{state.fetched.push({target,options,identity});await state.waitFetch?.();return state.response?.() || new Response(state.data,{status:state.status,headers:{'Content-Type':state.type}})},
-    net:{fetch:async(target,options)=>{state.fetched.push({target,options});await state.waitFetch?.();return new Response(state.data,{status:state.status,headers:{'Content-Type':state.type}})}},
+    net:{fetch:async(target,options)=>{state.fetched.push({target,options});await state.waitFetch?.();return state.ticketResponse?.(target) || new Response(state.data,{status:state.status,headers:{'Content-Type':state.type}})}},
     shell:{openPath:async target=>{state.opened.push(target);return state.openError||''}},
     dialog:{showSaveDialog:async()=>{await state.waitDialog?.();return{canceled:state.cancel,filePath:state.savePath||path.join(root,'saved.bin')}}}});
   const api={previewAttachment:p=>handlers['attachment-preview']({sender:{id:1}},p),downloadAttachment:p=>handlers['attachment-download']({sender:{id:1}},p),readAttachmentBinary:p=>handlers['attachment-read-binary']({sender:{id:1}},p)};
@@ -104,12 +105,13 @@ test('permission and disk failures have actionable messages without exposing loc
 });
 
 test('delivery bundles share native save and binary reads with exact Hub version routing', async t => {
-  const h = harness(t), payload = {taskId:'task-one', artifactVersionId:'version-two', filename:'交付物.zip'};
+  const h = harness(t), payload = {deliveryBundle:true, taskId:'task-one', artifactVersionId:'version-two', filename:'交付物.zip'};
   h.state.data = Buffer.from([80,75,3,4,0,255,42]); h.state.type = 'application/zip';
   assert.equal((await h.api.downloadAttachment(payload)).ok, true);
   assert.deepEqual(fs.readFileSync(path.join(h.root,'saved.bin')), h.state.data);
   assert.equal(h.state.fetched[0].target,'http://127.0.0.1:9999/api/v1/tasks/task-one/artifacts.zip?artifactVersionId=version-two');
   assert.equal(h.state.fetched[0].identity.clientId,'device');
+  assert.equal(h.state.fetched[0].identity.session,'current-account-session');
   const binary = await h.api.readAttachmentBinary(payload);
   assert.deepEqual(Buffer.from(binary.data,'base64'),h.state.data);
   assert.equal(binary.name,'交付物.zip');
@@ -119,6 +121,59 @@ test('delivery bundles share native save and binary reads with exact Hub version
   h.state.cancel = true;
   assert.equal((await h.api.downloadAttachment(payload)).canceled,true);
   assert.equal(h.state.fetched.length,count);
+});
+
+test('serialized task attachments keep their own route despite task and artifact metadata', async t => {
+  const h = harness(t);
+  for (const filename of ['autumn.txt', '元旦新年贺词.txt', '作品.zip']) {
+    const file = {id:'12345678',taskId:'assigned-task',artifactVersionId:'v1',role:'output',
+      filename,contentType:'application/octet-stream',size:h.state.data.length,url};
+    h.state.fetched.length = 0;
+    assert.equal((await h.api.downloadAttachment(file)).ok, true);
+    assert.deepEqual(fs.readFileSync(path.join(h.root,'saved.bin')), h.state.data);
+    const binary = await h.api.readAttachmentBinary(file);
+    assert.deepEqual(Buffer.from(binary.data,'base64'), h.state.data);
+    assert.equal(h.state.fetched.length, 2);
+    for (const request of h.state.fetched) {
+      assert.equal(request.target, url);
+      assert.equal(request.identity, undefined, 'ordinary signed URLs must not receive account credentials');
+    }
+    await assert.rejects(h.api.downloadAttachment({...file,url:url.replace('127.0.0.1','external.invalid')}));
+    await assert.rejects(h.api.downloadAttachment({...file,url:''}));
+    assert.equal(h.state.fetched.length, 2);
+  }
+});
+
+test('expired attachment tickets renew through the signed account for previews, downloads and library reads', async t => {
+  const h = harness(t), refreshed = url.replace('abcdefghijklmnopqrstuvwx', 'renewedabcdefghijklmnopq');
+  h.state.type = 'text/markdown';
+  h.state.ticketResponse = target => new Response(target.includes('renewed') ? h.state.data : 'expired', {
+    status: target.includes('renewed') ? 200 : 401, headers: {'Content-Type': h.state.type},
+  });
+  h.state.response = () => Response.json({ok:true,attachmentId:'12345678',url:refreshed});
+  for (const action of [() => h.open('说明.md'), () => h.api.downloadAttachment({url,filename:'说明.md'}),
+    () => h.api.readAttachmentBinary({url,filename:'说明.md'})]) {
+    h.state.fetched.length = 0;
+    assert.equal((await action()).ok, true);
+    assert.equal(h.state.fetched.length, 3);
+    const renewal = h.state.fetched[1];
+    assert.equal(renewal.target, 'http://127.0.0.1:9999/api/v1/attachments/12345678/access');
+    assert.equal(renewal.options.method, 'POST');
+    assert.equal(renewal.identity.session, 'current-account-session');
+  }
+  assert.deepEqual(fs.readFileSync(path.join(h.root,'saved.bin')),h.state.data);
+});
+
+test('attachment renewal cannot change the attachment or leak a result across accounts', async t => {
+  const h = harness(t);
+  h.state.ticketResponse = () => new Response('expired', {status:401});
+  for (const target of [url.replace('127.0.0.1','external.invalid'),url.replace('12345678','87654321')]) {
+    h.state.response = () => Response.json({ok:true,attachmentId:'12345678',url:target});
+    await assert.rejects(h.open('说明.md'), /不属于|不匹配/);
+  }
+  h.state.waitAuth = () => {h.state.owner = 'bob';};
+  await assert.rejects(h.api.downloadAttachment({taskId:'task-1',filename:'作品.zip'}), /已切换/);
+  assert.equal(fs.existsSync(path.join(h.root,'saved.bin')), false);
 });
 
 test('bundle writes reject account changes during the authenticated download', async t => {
@@ -174,6 +229,13 @@ test('missing stored objects explain recovery while other 404 bodies stay privat
     h.state.data=Buffer.from(data);
     await assert.rejects(h.api.readAttachmentBinary({url,filename:'output.md'}),/^Error: 附件不存在或你没有查看权限$/);
   }
+});
+
+test('missing bundle sources report recovery and never create a phantom downloaded file', async t => {
+  const h=harness(t);h.state.status=502;h.state.type='application/json';
+  h.state.data=Buffer.from(JSON.stringify({detail:'当前固定版本的源文件已丢失，拒绝返回不完整压缩包'}));
+  await assert.rejects(h.api.downloadAttachment({taskId:'task',artifactVersionId:'v2',filename:'作品.zip'}),/源文件已丢失.*原执行电脑/);
+  assert.deepEqual(fs.readdirSync(h.root),[]);
 });
 
 test('active SVG or executable attachments cannot use the passive-image path or launch via the OS', async t=>{

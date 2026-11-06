@@ -32,3 +32,15 @@ test('acceptance downloads one pinned ZIP; optional evidence is fetched only whe
 });
 for (const [name,headers] of [['stale version',{'X-Artifact-Version':'v1'}],['corrupt bytes',{'X-Artifact-SHA256':'0'.repeat(64)}],['oversized response',{'content-length':String(257*1024*1024)}]])
   test('bundle rejects '+name,async t=>{t.mock.method(global,'fetch',async()=>response(headers));await assert.rejects(load(identity,'/tasks/t',bundle));});
+
+test('acceptance explains missing archive sources without exposing arbitrary service bodies', async t => {
+  for (const [status,detail,expected] of [
+    [502,'当前固定版本的源文件已丢失，拒绝返回不完整压缩包',/源文件已丢失.*原执行电脑/],
+    [502,'private storage path and credentials',/HTTP 502/],
+    [401,'private authentication detail',/访问权限已变化/],
+  ]) {
+    t.mock.method(global,'fetch',async()=>Response.json({detail},{status}));
+    await assert.rejects(load(identity,'/tasks/t',bundle),expected);
+    t.mock.restoreAll();
+  }
+});

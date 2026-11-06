@@ -808,19 +808,17 @@
       ['missing', 'readOnlyConflicts', 'unsupported'].some(key =>
         Array.isArray(ctx._pluginAuthorization[key]) && ctx._pluginAuthorization[key].length));
     const missingCapabilityLabels = { browser: '浏览网页', office: 'Office 文档', computer: '操作电脑' };
-    const locale = global.SoduWorkI18n?.getLocale?.() || 'zh-CN';
-    const joiner = locale === 'zh-CN' ? '、' : ', ';
-    const colon = locale === 'zh-CN' ? '：' : ': ';
-    const period = locale === 'zh-CN' ? '。' : '. ';
     const pluginStatus = ctx._pluginAuthorization?.missing?.length
-      ? uiText('当前会话没有授权') + colon + ctx._pluginAuthorization.missing
-        .map(id => uiText(missingCapabilityLabels[id] || id)).join(joiner) + period +
-        uiText('请新建会话并开启对应能力后再使用这个插件') : '';
+      ? '当前会话没有授权：' + ctx._pluginAuthorization.missing
+        .map(id => missingCapabilityLabels[id] || id).join('、') +
+        '。请新建会话并开启对应能力后再使用这个插件' : '';
     const sessionOpenFailure = !ctx._ref && Boolean(ctx._sessionId) &&
       Boolean(ctx._snap?.openBlocked || ctx._snap?.sessionOpenCode || ctx._snap?.sessionNotFound);
+    const runtimeNotice = budgetStopped ? execution.reason : (pluginStatus || ctx._snap.statusText || '');
     parts.push('<div data-chat-node="runtime-error" class="nbad' +
       (!quotaBlocked && (st === 'unreachable' || st === 'no-output' || outputIncomplete || budgetStopped) ? ' show' : '') + '">' +
-      '<span class="nbad-copy">' + ctx.esc(budgetStopped ? execution.reason : (pluginStatus || ctx._snap.statusText || '')) + '</span>' +
+      '<span class="nbad-copy" translate="no" data-runtime-notice="' + ctx.esc(runtimeNotice || '') + '">' +
+      ctx.esc((global.ChatStatus?.notice || uiText)(runtimeNotice)) + '</span>' +
       (sessionOpenFailure ?
         '<button type="button" data-session-retry>' + uiText('重新打开会话') + '</button>' :
        execution.modelRecovery && execution.modelRecovery.available && ctx._ref ?

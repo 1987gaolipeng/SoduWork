@@ -62,6 +62,25 @@ app.whenReady().then(async()=>{
     const files = await js(`(()=>{const n=document.querySelector('[data-rq-material-group="output"]');return n.textContent})()`);
     assert.ok(files.includes('秋天的散文.html')); assert.ok(!files.includes('秋天的散文.md'));
     report.checks.push('Pending review on a doing task exposes manual/automatic modes and correct actions; only revised HTML is current');
+    await click('[data-tfd-acceptance-mode][value="auto"]');
+    await js(`RequirementsDetail.close();window.fixtureOriginalDetail=SoduWorkAPI.approvalDetail;
+      SoduWorkAPI.approvalDetail=async id=>{const reply=await fixtureOriginalDetail(id);
+        reply.item.gate={readiness:{requiresHumanConfirmation:true}};return reply};
+      RequirementsDetail.open('acceptance')`);
+    await wait(200);
+    assert.equal(await js(`document.querySelector('[data-tfd-acceptance-mode][value="auto"]').disabled`),true);
+    assert.equal(await js(`document.querySelector('[data-tfd-acceptance-mode][value="manual"]').checked`),true);
+    assert.equal(await js(`document.querySelector('[data-tfd-approval-action="approve"]').disabled`),false);
+    assert.equal(await js(`document.querySelector('[data-tfd-acceptance-session="auto"]').hidden`),true);
+    assert.equal(await js(`document.querySelector('[data-tfd-acceptance-session="1"]').disabled`),false);
+    assert.equal(await js(`document.querySelector('[data-tfd-manual-only]').hidden`),false);
+    await shot('manual-only-after-refresh');
+    await js(`RequirementsDetail.close();SoduWorkAPI.approvalDetail=fixtureOriginalDetail;RequirementsDetail.open('acceptance')`);
+    await wait(200);
+    assert.equal(await js(`document.querySelector('[data-tfd-acceptance-mode][value="auto"]').disabled`),false);
+    await click('[data-tfd-acceptance-mode][value="auto"]');
+    assert.equal(await js(`document.querySelector('[data-tfd-acceptance-session="auto"]').hidden`),false);
+    report.checks.push('A manual-only Hub gate overrides remembered auto mode after refresh while preserving manual review; a subsequent verifiable version restores auto selection');
     await js(`RequirementsDetail.close();fixtureApprovals=[];Object.assign(tasks[0],{requirementStage:'delivering',canReview:false,canSubmitReview:true});
       RequirementsBoard.render(true);RequirementsDetail.open('acceptance')`);
     await click('.rq-detail-more>summary');
@@ -97,6 +116,19 @@ app.whenReady().then(async()=>{
     assert.equal(await js(`document.querySelectorAll('details.nacceptance-result').length`),0);
     assert.equal(await js(`document.querySelectorAll('[data-acceptance-result-action]').length`),0);
     report.checks.push('Rejecting the current analysis submits the correct approval and replaces obsolete controls with its result');
+    await js(`window.__teamCap={meId:'executor'};window.roleEntry={taskId:'split-role',task:{title:'Assigned work',canReview:false},
+      trace:{approvals:[{id:'other-review',action:'review',status:'approved',createdAt:20,
+        decisions:[{userId:'reviewer',decision:'approve',note:'Checked by reviewer',at:30}]}]}};
+      acceptanceRenderer.reset();document.querySelector('#analysis').innerHTML=acceptanceRenderer.resultsHtml(roleEntry)`);
+    assert.equal(await js("document.querySelectorAll('#analysis [data-acceptance-operation]').length"),0);
+    await js(`__teamCap={meId:'reviewer'};acceptanceRenderer.reset();
+      document.querySelector('#analysis').innerHTML=acceptanceRenderer.resultsHtml(roleEntry)`);
+    assert.equal(await js("document.querySelectorAll('#analysis [data-acceptance-operation]').length"),1);
+    assert.equal(await js("document.querySelectorAll('#analysis button,#analysis textarea').length"),0);
+    await js(`__teamCap={meId:'executor'};acceptanceRenderer.reset();
+      document.querySelector('#analysis').innerHTML=acceptanceRenderer.resultsHtml(roleEntry)`);
+    assert.equal(await js("document.querySelector('#analysis').textContent"),'');
+    report.checks.push('The executor sees no reviewer receipt; the actual reviewer retains a read-only operation result');
     await js(`document.body.innerHTML='<div class="nchat"><div class="nmd"><div class="noutput-library"><div class="noutput-library-row"><span class="noutput-library-file-icon"><span class="library-native-file-icon"><img alt="HTML" src="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2718%27 height=%2718%27%3E%3Crect width=%2718%27 height=%2718%27 fill=%27purple%27/%3E%3C/svg%3E"></span></span><button class="noutput-library-name">秋天的散文.html</button></div></div></div></div>';`);
     const align = await js(`(()=>{const r=s=>document.querySelector(s).getBoundingClientRect(),i=r('.noutput-library-file-icon img'),n=r('.noutput-library-name');return Math.abs((i.top+i.height/2)-(n.top+n.height/2))})()`);
     assert.ok(align<=1,'File icon and name must share their vertical center: '+align);

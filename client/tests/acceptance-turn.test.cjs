@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { prepare } = require('../main/pi-session/acceptance-turn');
+test.beforeEach(() => require('../main/native-locale.cjs').setLocale('zh-CN'));
 
 function fixture(t, overrides = {}) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'acceptance-turn-'));
@@ -67,6 +68,34 @@ test('停止、失败、缺报告和标准不足都不自动批准', async t => 
     runtime: f.runtime, request: f.request }), /验收标准/);
 });
 
+test('manual-only deliveries reject automatic review before execution, including queued and older Hub contexts', async t => {
+  const f = fixture(t, { readiness: { requiresHumanConfirmation: true } });
+  const options = { identity: {}, taskId: 't', requested: { acceptanceMode: 'auto' }, runtime: f.runtime, request: f.request };
+  await assert.rejects(prepare(options), /手动验收/);
+  const analysis = await prepare({ ...options, requested: {} });
+  assert.equal(analysis.afterTurn, undefined);
+  f.context.readiness.requiresHumanConfirmation = false;
+  const queued = await prepare(options);
+  f.context.readiness.requiresHumanConfirmation = true;
+  await assert.rejects(queued.beforeTurn(), /手动验收/);
+  delete f.context.readiness;
+  f.context.artifact = { kind: 'manual', manifest: { manual: true } };
+  await assert.rejects(prepare(options), /手动验收/);
+  assert.ok(f.calls.every(call => !call.body));
+});
+
+test('review bubbles preserve business text while machine identifiers remain in model context', async t => {
+  const f = fixture(t, { artifact: { id: 'artifact-secret-id', checksum: 'digest', manifest: { complete: true } },
+    attachments: [{ id: 'file-a', filename: '交付物.md' }] });
+  const turn = await prepare({ identity: {}, taskId: 't', instruction: '检查文风', requested: { acceptanceMode: 'auto' },
+    runtime: f.runtime, request: f.request });
+  assert.match(turn.displayText, /作文/); assert.match(turn.displayText, /字数400字/);
+  assert.match(turn.displayText, /交付物.md/); assert.match(turn.displayText, /检查文风/);
+  assert.doesNotMatch(turn.displayText, /artifact-secret-id|file-a|digest|criterion|checks|验收报告-/);
+  assert.match(turn.text, /artifact-secret-id/); assert.match(turn.text, /file-a/);
+  assert.match(turn.text, /criterion/); assert.match(turn.text, /验收报告-/);
+});
+
 test('排队期间产出更新或审核权收回时拒绝使用旧快照', async t => {
   const f = fixture(t);
   const turn = await prepare({ identity: {}, taskId: 't', requested: { acceptanceMode: 'auto' },
@@ -104,6 +133,8 @@ test('过程文件默认不进入验收上下文，明确选择后才按附件 I
     requested: { acceptanceAttachmentIds: ['process-a'] }, runtime: f.runtime, request: f.request });
   assert.deepEqual(selected.attachmentIds, ['file-a', 'process-a']);
   assert.match(selected.text, /过程记录\.md/);
+  assert.match(selected.displayText, /交付成果\n- 交付物\.md\n\n过程与验证材料\n- 过程记录\.md/);
+  assert.doesNotMatch(selected.displayText, /上一轮交付\.md|核验截图\.png|process-a/);
   await assert.rejects(prepare({ identity: {}, taskId: 't',
     requested: { acceptanceAttachmentIds: ['missing'] }, runtime: f.runtime, request: f.request }), /过程文件已变化/);
 });
@@ -122,6 +153,24 @@ test('自动验收退回时输出返修卡并显示实际返修去向', async t 
   await turn.afterTurn('completed');
   assert.match(f.notices[0][1], /验收退回卡/);
   assert.match(f.notices[0][1], /原 AI 已继续修改/);
+});
+
+test('rejected delivery reports executor confirmation without claiming a missing session or automatic rework', async t => {
+  const f = fixture(t);
+  const request = async (identity, route, body) => {
+    const result = await f.request(identity, route, body);
+    return body ? { ...result, rework: { started: false, waitingForExecutor: true } } : result;
+  };
+  const turn = await prepare({ identity: {}, taskId: 't', requested: { acceptanceMode: 'auto' },
+    runtime: f.runtime, request });
+  fs.writeFileSync(turn.reportPath, JSON.stringify({ verdict: 'reject', summary: '字数不足',
+    checks: [{ criterion: 'c1', result: 'fail', evidence: '正文只有 280 字' }] }));
+  await turn.afterTurn('completed');
+  await turn.afterTurn('completed');
+  assert.equal(f.notices.length, 1);
+  assert.match(f.notices[0][1], /等待执行人根据返修意见继续修正/);
+  assert.doesNotMatch(f.notices[0][1], /未找到可续跑会话|原 AI 已继续修改/);
+  assert.equal(f.calls.filter(call => call.body).length, 1);
 });
 
 test('同人复用原执行会话只允许绑定的执行设备和需求进入验收轮次', async t => {
@@ -243,17 +292,24 @@ test('oversized acceptance context is compacted without losing review metadata',
     task: { id: 't', title: 'Large task', note: 'note-' + 'x'.repeat(70000) },
     artifact: { version: 'v1', gallery: 'g'.repeat(70000) },
     evidence: [{ id: 'evidence-1', detail: 'e'.repeat(70000) }],
+    optionalAttachments: [{ id: 'optional-proof', filename: 'verification.txt', size: 42 }],
     criteria: [
-      { id: 'criterion-one', label: 'criterion-one' },
+      { id: 'criterion-one', label: 'criterion-one-' + 'c'.repeat(70000) },
       { id: 'criterion-two', label: 'criterion-two' },
     ],
   });
   const turn = await prepare({ identity: {}, taskId: 't',
-    requested: { acceptanceMode: 'auto' }, runtime: f.runtime, request: f.request });
+    requested: { acceptanceMode: 'auto', acceptanceAttachmentIds: ['optional-proof'] }, runtime: f.runtime, request: f.request });
   assert.ok(turn.text.length < 50000);
+  assert.match(turn.text, /需求：Large task/);
+  assert.match(turn.text, /本次固定交付版本：v1/);
+  assert.match(turn.text, /optional-proof/);
+  assert.equal(turn.text.split('已有证据：').length, 2);
   assert.match(turn.text, /criterion-one/);
   assert.match(turn.text, /criterion-two/);
   assert.match(turn.text, /Some content omitted/);
+  assert.ok(turn.displayText.length < 16000);
+  assert.doesNotMatch(turn.displayText, /Some content omitted|Read the bound attachments|optional-proof/);
   assert.ok(turn.reportPath);
   await turn.beforeTurn();
   assert.equal(f.calls.length, 2);

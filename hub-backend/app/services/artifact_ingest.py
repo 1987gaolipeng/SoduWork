@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am
 from . import ai_exec as _exec
+from . import file_io
 
 log = _exec.log
 KINDS_ARTIFACTS = _exec.KINDS_ARTIFACTS
@@ -24,6 +25,24 @@ _by_ref_async = _exec._by_ref_async
 last_dispatch_event = _exec.last_dispatch_event
 provider_name = _exec.provider_name
 runner_info_sync = _exec.runner_info_sync
+
+
+def _read_local_artifact(wd: str, name: str) -> bytes | None:
+    """Read only contained local execution output, preserving transparent decryption."""
+    try:
+        root = os.path.realpath(wd)
+        candidate = os.path.realpath(os.path.join(root, *name.split("/")))
+        if os.path.commonpath([root, candidate]) != root or not os.path.isfile(candidate):
+            return None
+        with open(candidate, "rb") as stream:
+            return stream.read()
+    except (OSError, ValueError):
+        return None
+
+
+def _verify_bytes(name: str, data: bytes, content_type: str) -> tuple[dict, str]:
+    from . import delivery_manifest
+    return delivery_manifest.validate_bytes(name, data, content_type), hashlib.sha256(data).hexdigest()
 
 
 async def pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, ref: str = "",
@@ -145,22 +164,8 @@ async def _pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, r
         if not fn or fn in received:
             continue                                  # Deduplicate within one execution only; rework outputs with the same name create a new version.
         data = None
-        local = ""
         if wd:
-            root = os.path.realpath(wd)
-            candidate = os.path.realpath(os.path.join(root, *fn.split("/")))
-            try:
-                if os.path.commonpath([root, candidate]) == root:
-                    local = candidate
-            except ValueError:
-                local = ""
-        if local and os.path.isfile(local):
-            try:
-                with open(local, "rb") as fh:
-                    data = fh.read()
-                log.info("产出取本地原文（绕开透明加密）: %s", fn)
-            except Exception:  # noqa: BLE001
-                data = None
+            data = await file_io.run(_read_local_artifact, wd, fn)
         if data is None:
             _fp = _ref_provider or _p(ctx)
             # Use execution-scoped artifact retrieval whenever a ref is available.
@@ -175,7 +180,7 @@ async def _pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, r
         import mimetypes
         import uuid as _uuid
         ctype = mimetypes.guess_type(fn)[0] or "application/octet-stream"
-        verification = delivery_manifest.validate_bytes(fn, data, ctype)
+        verification, digest = await file_io.run(_verify_bytes, fn, data, ctype)
         category = delivery_manifest.classify_name(fn, role="output")
         if verification.get("state") != "passed":
             # Keep damaged deliverables and supporting files visible as failed delivery items.
@@ -207,7 +212,7 @@ async def _pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, r
                                role=role, source_ref=ref,
                                workflow_run_id=_source_run, node_run_id=_source_node,
                                evidence_meta={"provider": actual_provider,
-                                              "sha256": hashlib.sha256(data).hexdigest(),
+                                              "sha256": digest,
                                               "identifier": marker,
                                               **({"round": round_no} if round_no else {}),
                                               "category": category,
@@ -302,8 +307,13 @@ async def _pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, r
     from .conversation_turns import default_submission_mode, normalize_submission_mode
     mode = normalize_submission_mode((t.work_routing or {}).get("executionSubmissionMode"),
                                      fallback=default_submission_mode(t))
+    submission_error = ""
     if (settle and s.get("done") and (received or url) and not _source_run
             and t.status not in {"done", "cancel"} and mode == "auto"):
+        from . import delivery_validation
+        repaired = await delivery_validation.recheck_components(session, tid, source_ref=ref, round_no=round_no)
+        invalid = [item for item in invalid if not (item.get("name") in repaired and
+                   item.get("reason") == delivery_validation.HTML_STRUCTURE_ERROR)]
         code = {}
         try:
             from . import code_delivery
@@ -315,21 +325,45 @@ async def _pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, r
                                if delivery_manifest.is_deliverable_name(name)]
             if not _dropped and not invalid and not missing_outputs:
                 candidate_ready = False
+                from .artifact_version_guard import OutputAwaitingRework
                 try:
                     from . import release_control as _release
-                    _, created = await _release.ensure_current_output(
-                        session, t, source_ref=ref, who="SoduWork")
+                    artifact, created = await _release.ensure_current_output(
+                        session, t, source_ref=ref, who="SoduWork", automatic_round=round_no)
+                    # Retry a missing approval after a prior candidate-only commit.
+                    # Workflow nodes keep their own gates and never reach this path.
+                    await _release.ensure_request(session, t, artifact, "review")
                     await session.commit()
                     candidate_ready = True
                     if created:
                         from . import task_access, tasks as tasks_svc
                         await task_access.publish_task(session, t, "task.updated",
                                                        await tasks_svc.task_to_api_live(session, t))
+                except OutputAwaitingRework:
+                    # Keep late receipts without reopening review or repeating notifications.
+                    await session.commit()
                 except ValueError as error:
+                    submission_error = str(error)[:500]
                     log.warning("Output review unavailable for %s: %s", tid, error)
                 if candidate_ready:
                     await code_delivery.notify_reviewer(
                         session, t, url or "?".join(sorted(deliverables)) or "??")
+            else:
+                submission_error = ("交付文件校验未通过：" + str(invalid[0].get("name") or "") + "（" +
+                                    str(invalid[0].get("reason") or "文件校验失败") + "）" if invalid else
+                                    "交付文件尚未收集完整，请重试同步本轮成果")
+            if submission_error:
+                # Sweeps may retry the same receipt; notify only when its failure changes.
+                previous = await session.scalar(select(TaskEvent).where(
+                    TaskEvent.task_id == tid, TaskEvent.kind == "artifact.delivery_rejected"
+                ).order_by(TaskEvent.at.desc(), TaskEvent.id.desc()).limit(1))
+                detail = {"ref": ref, "round": round_no, "reason": submission_error}
+                if previous is None or any((previous.detail or {}).get(key) != value for key, value in detail.items()):
+                    task_events.record(session, tid, "artifact.delivery_rejected", detail, actor=who)
+                    await session.commit()
+                    from .task_access import publish_owner
+                    await publish_owner(session, t, {"type": "notice", "taskId": tid,
+                        "text": f"「{t.title}」尚未进入待验收：{submission_error}"})
     elif staged:
         # Release a successful no-op conflict transaction before any library RPC.
         await session.commit()
@@ -338,4 +372,5 @@ async def _pull_artifacts(session: AsyncSession, tid: str, ctx: dict, s: dict, r
             "valid": sorted(valid), "deliverables": sorted(deliverables),
             "evidence": sorted(evidence), "ignored": sorted(ignored),
             "invalid": invalid[-100:],
+            "submissionError": submission_error,
             "missing": missing}

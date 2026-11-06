@@ -173,7 +173,7 @@ def _check_bytes(row, data):
     # Empty supporting assets can be intentional (e.g. a source marker).
     # Primary deliverables must still pass the existing content validator.
     if row["role"] == "primary":
-        result = delivery_manifest.validate_bytes(row["path"], data, row["contentType"])
+        result = delivery_manifest.validate_bytes(row["path"], data, row["contentType"], category="primary")
         if result.get("state") != "passed":
             reason = str(result.get("reason") or "未通过文件结构校验")
             raise HTTPException(422, "成果文件结构无效：" + row["path"] + "（" + reason + "）")

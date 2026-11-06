@@ -141,33 +141,51 @@ function statusError(status) {
   return '\u9644\u4ef6\u6682\u65f6\u6ca1\u6709\u52a0\u8f7d\u6210\u529f\uff08HTTP ' + status + '\uff09';
 }
 
-async function fetchAttachmentResponse(url, identity) {
+async function authenticatedIdentity(event, found) {
+  const current = await (DEPS.authenticatedIdentityOf || DEPS.identityOf)(DEPS.app);
+  assertCurrent(event, found);
+  if (!current || ['hub', 'clientId', 'secret'].some(key => current[key] !== found.identity[key]))
+    throw Error('附件操作已取消：账号或服务已切换，请重新打开附件');
+  return { ...current };
+}
+
+async function refreshAttachment(event, found, parsed, mode) {
+  const identity = await authenticatedIdentity(event, found);
+  const response = await (DEPS.fetchAuthenticated || require('./device-auth-request').fetchWithDeviceAuthRetry)(
+    identity, new URL('/api/v1/attachments/' + parsed.id + '/access', identity.hub).href,
+    { method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(15000) });
+  assertCurrent(event, found);
+  if (!response.ok) throw Error(statusError(response.status));
+  const bytes = await require('./library-binary.cjs').readResponse(response, 16 * 1024);
+  const data = JSON.parse(bytes.toString('utf8'));
+  const next = parseAttachmentUrl(data.url, identity.hub, mode);
+  if (data.attachmentId !== parsed.id || next.id !== parsed.id) throw Error('附件访问凭证与文件不匹配');
+  assertCurrent(event, found);
+  return next;
+}
+
+async function fetchAttachmentResponse(url, identity, renew) {
   const options = { redirect: 'manual', signal: AbortSignal.timeout(60000) };
-  const response = identity
+  let response = identity
     ? await (DEPS.fetchAuthenticated || require('./device-auth-request').fetchWithDeviceAuthRetry)(identity, url, options)
     : await DEPS.net.fetch(url, options);
+  if (response.status === 401 && renew) {
+    await response.body?.cancel?.().catch(() => {});
+    // Refresh only the validated attachment through its current account ACL, once.
+    const next = await renew();
+    response = await fetchAttachmentResponse(next.url);
+  }
   if (response.status >= 300 && response.status < 400) {
     throw new Error('\u9644\u4ef6\u670d\u52a1\u8fd4\u56de\u4e86\u4e0d\u5b89\u5168\u7684\u8df3\u8f6c');
   }
   if (!response.ok) {
-    // Keep the known missing-object error distinct from an ACL/record 404.
-    // Never display arbitrary proxy HTML or unbounded server error bodies.
-    let missingFile = false;
-    if (response.status === 404) {
-      try {
-        const body = await require('./library-binary.cjs').readResponse(response, 16 * 1024);
-        missingFile = JSON.parse(body.toString('utf8')).detail === '附件文件已丢失';
-      } catch (_) {}
-    }
-    throw new Error(missingFile
-      ? '源文件已丢失，请从原执行电脑或服务器备份恢复附件后重试'
-      : statusError(response.status));
+    throw new Error(await require('./delivery-download-error.cjs').message(response, statusError(response.status)));
   }
   return response;
 }
 
-async function fetchAttachment(url, identity) {
-  const response = await fetchAttachmentResponse(url, identity);
+async function fetchAttachment(url, identity, renew) {
+  const response = await fetchAttachmentResponse(url, identity, renew);
   const data = await require('./library-binary.cjs').readResponse(response, MAX_ATTACHMENT_BYTES);
   const rawType = response.headers.get('content-type') || '';
   const charset = /;\s*charset\s*=\s*"?([a-z0-9_-]{1,40})(?:"|\s|;|$)/i.exec(rawType);
@@ -214,7 +232,11 @@ async function saveArchive(response, target, assertActive) {
 }
 
 function downloadSource(payload, found) {
-  if (payload.taskId === undefined) return parseAttachmentUrl(payload.url, found.identity.hub);
+  // Task attachment metadata also contains taskId. Only a bundle request selects the archive route.
+  // Retain identifier-only requests from older renderers without authenticating renderer URLs.
+  const bundle = payload.deliveryBundle === true ||
+    (payload.taskId !== undefined && !payload.url && !payload.id && !payload.attachmentId);
+  if (!bundle) return parseAttachmentUrl(payload.url, found.identity.hub);
   // Build the sole supported archive route from identifiers; never authenticate a renderer URL.
   const valid = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value);
   if (!valid(payload.taskId) || (payload.artifactVersionId && !valid(payload.artifactVersionId)))
@@ -331,7 +353,7 @@ async function preview(event, raw) {
   const found = identityFor(event);
   const parsed = parseAttachmentUrl(payload.url, found.identity.hub, 'preview');
   const filename = safeFilename(payload.filename, parsed.id);
-  const result = await fetchAttachment(parsed.url);
+  const result = await fetchAttachment(parsed.url, undefined, () => refreshAttachment(event, found, parsed, 'preview'));
   assertCurrent(event, found);
   if (payload.inlineText === true) {
     if (!/\.(?:md|markdown|txt)$/i.test(filename)) return { ok: false, reason: '这份附件不支持文本预览' };
@@ -368,11 +390,11 @@ async function download(event, raw) {
   if (picked.canceled || !picked.filePath) return { ok: false, canceled: true };
   assertCurrent(event, found);
   if (parsed.identity) {
-    const response = await fetchAttachmentResponse(parsed.url, parsed.identity);
+    const response = await fetchAttachmentResponse(parsed.url, await authenticatedIdentity(event, found));
     await saveArchive(response, picked.filePath, () => assertCurrent(event, found));
     return { ok: true };
   }
-  const result = await fetchAttachment(parsed.url, parsed.identity);
+  const result = await fetchAttachment(parsed.url, undefined, () => refreshAttachment(event, found, parsed));
   assertCurrent(event, found);
   fs.writeFileSync(picked.filePath, result.data);
   return { ok: true };
@@ -383,7 +405,8 @@ async function readBinary(event, raw) {
   const found = identityFor(event);
   const parsed = downloadSource(payload, found);
   const filename = safeFilename(payload.filename, parsed.id);
-  const result = await fetchAttachment(parsed.url, parsed.identity);
+  const result = await fetchAttachment(parsed.url, parsed.identity ? await authenticatedIdentity(event, found) : undefined,
+    parsed.identity ? undefined : () => refreshAttachment(event, found, parsed));
   assertCurrent(event, found);
   return { ok: true, name: filename, size: result.data.length,
     mimeType: result.contentType || 'application/octet-stream', data: result.data.toString('base64') };

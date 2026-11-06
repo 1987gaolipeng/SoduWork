@@ -11,8 +11,14 @@ async function load(identity, route, bundle) {
   const response = await fetchWithDeviceAuthRetry(identity, url, {
     redirect: 'error', signal: AbortSignal.timeout(120000),
   });
+  if (!response.ok) {
+    const fallback = response.status === 401 || response.status === 403
+      ? '交付文件访问权限已变化，请重新打开需求后重试'
+      : '交付压缩包读取失败（HTTP ' + response.status + '），请刷新需求后重试';
+    throw Error(await require('../delivery-download-error.cjs').message(response, fallback));
+  }
   const digest = response.headers.get('X-Artifact-SHA256') || '';
-  if (!response.ok || !response.body || response.headers.get('X-Artifact-Version') !== bundle.artifactVersionId ||
+  if (!response.body || response.headers.get('X-Artifact-Version') !== bundle.artifactVersionId ||
       !/^[a-f0-9]{64}$/i.test(digest) || Number(response.headers.get('content-length')) > MAX_BYTES) {
     await response.body?.cancel?.().catch(() => {});
     throw Error('本次交付压缩包未能完整读取，请刷新需求后重试');

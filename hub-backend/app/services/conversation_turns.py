@@ -168,13 +168,13 @@ async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str
         fn = delivery_manifest.normalize_name(name)
         if not fn or fn in received:
             continue
-        verification = delivery_manifest.validate_bytes(fn, data, ctype)
+        declared = (categories or {}).get(name)
+        category = delivery_manifest.classify_name(fn, role="output", meta={"category": declared})
+        verification = delivery_manifest.validate_bytes(fn, data, ctype, category=category)
         if verification.get("state") == "passed":
             truncated = await delivery_manifest.code_truncation(fn, data)
             if truncated:
                 verification = {"state": "failed", "reason": truncated}
-        declared = (categories or {}).get(name)
-        category = delivery_manifest.classify_name(fn, role="output", meta={"category": declared})
         if verification.get("state") != "passed":
             # Retain invalid files as downloadable evidence without blocking valid outputs.
             # Exclude invalid files from output and verification roles.
@@ -258,10 +258,11 @@ async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str
     except Exception:  # noqa: BLE001 - Code-delivery checks must not prevent artifact storage.
         code = {}
     if not code.get("applies"):
+        from .artifact_version_guard import OutputAwaitingRework
         try:
             from . import release_control
             artifact, _ = await release_control.ensure_current_output(session, task, source_ref=ref,
-                                                                        who=who)
+                                                                        who=who, automatic_round=round_no)
             # Completed AI delivery automatically creates the candidate and human review gate.
             # Project the task as awaiting review without requiring a manual board move.
             # Avoid a separate state update that could race with candidate creation.
@@ -274,6 +275,11 @@ async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str
                                actor=who)
             from . import code_delivery as _cd
             await _cd.notify_reviewer(session, task, "、".join(deliverables or got))
+        except OutputAwaitingRework:
+            # A late delivery receipt cannot undo a reviewer's rejection.
+            await session.commit()
+            return {"ok": True, "files": got, "round": round_no, "deferred": True,
+                    "pendingRework": True, "submissionMode": submission_mode}
         except ValueError as error:
             # Report structural validation failures explicitly.
             # Do not conceal them behind a generic missing-deliverable or conflict message.

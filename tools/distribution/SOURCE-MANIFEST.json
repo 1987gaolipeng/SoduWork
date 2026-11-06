@@ -751,8 +751,8 @@
     },
     {
       "path": "client/components/panels/chat-acceptance-results.js",
-      "bytes": 23518,
-      "sha256": "7f7c39537d2373557bc2c2a30a669adbaeb54cac81a7e97140310e86cbf00ffd"
+      "bytes": 24226,
+      "sha256": "b824a456377d8ced5398fd82515d6b82f66353fc8125e5cbc1a11cb44588c5fb"
     },
     {
       "path": "client/components/panels/chat-cloud-handoff.css",
@@ -871,8 +871,8 @@
     },
     {
       "path": "client/components/panels/chat-message-renderer.js",
-      "bytes": 61306,
-      "sha256": "90a838521e655a86b79ffe411855f92811c7b8d75ea6e1662895077ece99f418"
+      "bytes": 61203,
+      "sha256": "1ff26a0dfa97c5c199b9f80193d31d046f34ea05afddf4cbe62827fb2617a267"
     },
     {
       "path": "client/components/panels/chat-opening.css",
@@ -4491,8 +4491,8 @@
     },
     {
       "path": "client/e2e/requirements-acceptance-regression.cjs",
-      "bytes": 10434,
-      "sha256": "db90b051d371326e7a90dff80044c89758f1623e660c8072eb0f091893bb0df9"
+      "bytes": 13437,
+      "sha256": "52caf71a89246e6bc7599b3bc1ed6f2c7825b959d3f7fdfb1668fb965fb79ae8"
     },
     {
       "path": "client/e2e/requirements-activity.cjs",
@@ -4741,8 +4741,8 @@
     },
     {
       "path": "client/e2e/task-attachment-open.cjs",
-      "bytes": 16321,
-      "sha256": "4e3ab02bbcd3d164eaa47a1d4db3eb7732c1ecf3313fdf63b1c2d1539c56474f"
+      "bytes": 21160,
+      "sha256": "09edf4b922e303b656510d904b9aff78a1fcf0b6d3a877e92bb592d6bec98e27"
     },
     {
       "path": "client/e2e/task-compose-access.cjs",
@@ -5496,8 +5496,8 @@
     },
     {
       "path": "client/main/attachment-files.js",
-      "bytes": 20422,
-      "sha256": "ac54c7a0eeef57159357bea6edcc7cdf6f1a00a0297107b4a8df0769ed1efd84"
+      "bytes": 22081,
+      "sha256": "0e68fb1a6e71132f083316d49485238207b40b83ee9a7bb5bd1d535c563554c2"
     },
     {
       "path": "client/main/automation-connector-probe.cjs",
@@ -6050,6 +6050,11 @@
       "sha256": "70ac707df90bd68b51abd49b71645a9dc2d9849b137d4383629df107fca3fc66"
     },
     {
+      "path": "client/main/delivery-download-error.cjs",
+      "bytes": 828,
+      "sha256": "45b9e541c2d4127c4a065f74ec2a55c9a5b67d526465efca73bdb36955e7bafa"
+    },
+    {
       "path": "client/main/desk-flags.js",
       "bytes": 1902,
       "sha256": "3e56e0bc5395bd005286182fc34e7f0a2395c4282728e96239c419a8a9571302"
@@ -6306,13 +6311,13 @@
     },
     {
       "path": "client/main/pi-session/acceptance-bundle.js",
-      "bytes": 1945,
-      "sha256": "c2320250661a6dc52dbaca1b4e71f879b44c9bbfef6ce5fcb864d89311f66f6b"
+      "bytes": 2298,
+      "sha256": "7ba5698b65232930f813656f9cd511c536db1e99ac293d7f092e44da57cd9228"
     },
     {
       "path": "client/main/pi-session/acceptance-turn.js",
-      "bytes": 16641,
-      "sha256": "e4c00dcca4cb34d72bcbfea5b4162e3cc14e934199af717a9488fd2a88b9a918"
+      "bytes": 18963,
+      "sha256": "1c3da879934720c9211969a49625ff65cbbd36eafed89864d9c66d26e7443515"
     },
     {
       "path": "client/main/pi-session/action-handoff.js",
@@ -7341,8 +7346,8 @@
     },
     {
       "path": "client/tests/acceptance-bundle.test.cjs",
-      "bytes": 2650,
-      "sha256": "9352ca3e1bb8cf4e847a8b1538f56e8f3f6aeaf532292da9b06d71bddc002ae1"
+      "bytes": 3239,
+      "sha256": "49091b37351da6e153ecb86c965bd4d1e451fa6ed54ed8e3b7359698f03fcc9b"
     },
     {
       "path": "client/tests/acceptance-session.test.cjs",
@@ -7356,8 +7361,8 @@
     },
     {
       "path": "client/tests/acceptance-turn.test.cjs",
-      "bytes": 12779,
-      "sha256": "d630abef08e9bf05c45dd3ea9d04d451f9432b1eced889d5f67e497aa67dd8a6"
+      "bytes": 16489,
+      "sha256": "df23a3454a1d448b0442cc94daa202e0bbb2f0a8daa2113b9b247c772b77ab19"
     },
     {
       "path": "client/tests/access-change-feedback.test.cjs",
@@ -7841,8 +7846,8 @@
     },
     {
       "path": "client/tests/chat-acceptance-results.test.cjs",
-      "bytes": 16468,
-      "sha256": "f6a112c79d86d6231360d7e1aae82a7f2d95c872d0e1b3d6df6401e862621d00"
+      "bytes": 19155,
+      "sha256": "1e33df6275f2fcf5df4a7a0c15f7ddc372c0c0d8e8eace398dd09cf67b0e76b8"
     },
     {
       "path": "client/tests/chat-crew-security.test.cjs",
@@ -7886,8 +7891,8 @@
     },
     {
       "path": "client/tests/chat-message-renderer.test.cjs",
-      "bytes": 50198,
-      "sha256": "6976dd0875992960e6fd9ab8d9408bce023cfe717216e780ac1d60a7719f547d"
+      "bytes": 54503,
+      "sha256": "ce0f71bfd416e310b87f71f53010e10834858f123107c93019fb5bad5cb6df06"
     },
     {
       "path": "client/tests/chat-output-refresh.test.cjs",
@@ -10476,8 +10481,8 @@
     },
     {
       "path": "client/tests/task-attachment-runtime.test.cjs",
-      "bytes": 16806,
-      "sha256": "49cb7826e5a15d0c28811a6059e30fc553566c9e55b0ea67832387dad8034bf4"
+      "bytes": 20664,
+      "sha256": "bc49b5d291f4f4e0cf412d0712bbb1a10c50441baefa5cc7f0e8037f9cc355cc"
     },
     {
       "path": "client/tests/task-attachment-ux.test.cjs",
@@ -11526,8 +11531,8 @@
     },
     {
       "path": "hub-backend/app/api/delivery.py",
-      "bytes": 7693,
-      "sha256": "bfe684fa84e5a1715a9cfe10b054bbcd25525ce9a9ad2d6ca28f47c73f1e90ec"
+      "bytes": 7820,
+      "sha256": "93a4b7835c65b9dead2013ab1fedf4a0b2ee5449b73fdeabc3a13057204fc1b5"
     },
     {
       "path": "hub-backend/app/api/desktop_capabilities.py",
@@ -12136,8 +12141,8 @@
     },
     {
       "path": "hub-backend/app/services/artifact_ingest.py",
-      "bytes": 17940,
-      "sha256": "99f4f0d483ba76807a658823d5d8736d4bc302457e5e8ca75b995e054451ed70"
+      "bytes": 20441,
+      "sha256": "4d858eaf98709548617f965edb7d17fe25fd6eeedefc2ab927ed04090c338e69"
     },
     {
       "path": "hub-backend/app/services/artifact_version_guard.py",
@@ -12396,8 +12401,8 @@
     },
     {
       "path": "hub-backend/app/services/conversation_turns.py",
-      "bytes": 27512,
-      "sha256": "0b1a86463ab703ca98f3cc8d69b14029084fbb63722763ecd957f8e0fe472c96"
+      "bytes": 27929,
+      "sha256": "9cddcf7ef3e0992abe45556405f22878ff27ea6ce4064bad7c4a41f30f394294"
     },
     {
       "path": "hub-backend/app/services/custom_agent_catalog.py",
@@ -12431,13 +12436,13 @@
     },
     {
       "path": "hub-backend/app/services/delivery_bundle.py",
-      "bytes": 8907,
-      "sha256": "4d7133b36c2e9fc94b7f4a82ffb0a53ad0b1bc194ee9efe99e878aa4847760d7"
+      "bytes": 9266,
+      "sha256": "61d1de7c9e368a49e29e5fc72030ba4e20fd0b7fc0452e8e400251fdfa84effa"
     },
     {
       "path": "hub-backend/app/services/delivery_collections.py",
-      "bytes": 19678,
-      "sha256": "532b1bfb82b0b30f4252fcf8545375f505dc400674099b2fc98d309f00d6dcd4"
+      "bytes": 19698,
+      "sha256": "2a366f42dbb6697b63351c09a9cb2788643b9532dc27604a8bbb5bebd502b690"
     },
     {
       "path": "hub-backend/app/services/delivery_evidence.py",
@@ -12446,8 +12451,8 @@
     },
     {
       "path": "hub-backend/app/services/delivery_manifest.py",
-      "bytes": 16868,
-      "sha256": "107c2d1761627022467058a30a8ec6bca3ec1f8f8e128e49e7037c304b795025"
+      "bytes": 17666,
+      "sha256": "2b1f0ae3f8f047826b11d68c386e63365bcffa94b72bebf805523669cb40aad5"
     },
     {
       "path": "hub-backend/app/services/delivery_truth.py",
@@ -17681,8 +17686,8 @@
     },
     {
       "path": "hub-backend/tests/test_cloud_output_delivery.py",
-      "bytes": 10727,
-      "sha256": "06083ec49676a8abf1fda1af2c641c0ce235284a0c922165fb40cdb7760747e9"
+      "bytes": 28044,
+      "sha256": "b0a97f02303f2bff736998f5d7d263d5c14a14e720b270411a2c2cece3c129d7"
     },
     {
       "path": "hub-backend/tests/test_cloud_recovery.py",
@@ -17771,8 +17776,8 @@
     },
     {
       "path": "hub-backend/tests/test_incomplete_delivery_gate.py",
-      "bytes": 11510,
-      "sha256": "f12f252294bd1d7a6233a752956f2fdefbe34c13948bde02f732be1b2a24b46a"
+      "bytes": 14329,
+      "sha256": "57239fe2057095eb6b35eaa62697f9ef3df61d5603a0240228a66b826303087c"
     },
     {
       "path": "hub-backend/tests/test_library.py",
@@ -18051,8 +18056,8 @@
     },
     {
       "path": "hub-backend/tests/test_task_delivery_downloads.py",
-      "bytes": 12841,
-      "sha256": "1152e1be148d8240d57cfc53d4d9949cd47d37cb18982b8dd2688f02b6fa74b9"
+      "bytes": 14115,
+      "sha256": "41e1c1f012539b25162db8504b6ffa8f8ba5aff291f35578691a1e870c7f1b8a"
     },
     {
       "path": "hub-backend/tests/test_task_notification_fanout.py",

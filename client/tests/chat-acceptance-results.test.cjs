@@ -20,6 +20,28 @@ function fixture() {
   return { window, ctx, create, invalidations: () => invalidations };
 }
 
+test('another reviewer decision never becomes an executor operation receipt', () => {
+  const f = fixture();
+  f.window.__teamCap = {meId:'executor'};
+  f.window.TaskTraceApproval = {html:() => ''};
+  const entry = {taskId:'task',task:{canReview:false,createdBy:'reviewer'},trace:{approvals:[
+    {id:'review',action:'review',status:'approved',createdAt:20,
+      decisions:[{userId:'reviewer',decision:'approve',note:'Verified',at:30}]},
+  ]}};
+  const helper = f.create(), messages = [{role:'assistant',sentAt:10}];
+  assert.equal(helper.resultsHtml(entry), '');
+  assert.equal(helper.timeline([entry], messages).length, 0);
+  helper.reset();
+  assert.equal(helper.resultsHtml(entry), '', 'reopening the executor session must not create a receipt');
+  f.window.__teamCap = {meId:'reviewer'};
+  assert.match(helper.resultsHtml(entry), /已确认验收/);
+  assert.match(helper.resultsHtml(entry), /Verified/);
+  assert.equal(helper.timeline([entry], messages).length, 1);
+  f.window.__teamCap = {};
+  helper.reset();
+  assert.equal(helper.resultsHtml(entry), '', 'unknown identity must not claim another person\'s decision');
+});
+
 test('each approval retains its own position through decisions, follow-ups and reopening', () => {
   const f = fixture();
   f.window.TaskTraceApproval = { html: (_rows, _opts, id) => '<button>' + id + '</button>' };
@@ -32,8 +54,9 @@ test('each approval retains its own position through decisions, follow-ups and r
   const helper = f.create();
   assert.equal(helper.timeline([entry], f.ctx._snap.messages)[0].index, 2);
   entry.trace.approvals[0].status = 'rejected';
+  entry.trace.approvals[0].myDecision = {decision:'reject'};
   f.ctx._snap.messages.push(message(30), message(40));
-  entry.trace.approvals.push({ id: 'b', action: 'review', status: 'rejected', createdAt: 45 });
+  entry.trace.approvals.push({ id: 'b', action: 'review', status: 'rejected', createdAt: 45, myDecision:{decision:'reject'} });
   assert.deepEqual(Array.from(helper.timeline([entry], f.ctx._snap.messages), row => row.index), [2, 4]);
   f.ctx._snap.messages.push(message(50), message(60));
   assert.deepEqual(Array.from(helper.timeline([entry], f.ctx._snap.messages), row => row.index), [2, 4]);
@@ -47,7 +70,7 @@ test('approval positions respect native and renderer history windows and untimed
   f.window.TaskTraceApproval = { html: () => 'Pending' };
   f.ctx._collabEntryStatus = () => 'completed';
   const entry = { taskId: 't', task: {}, trace: { approvals: [
-    { id: 'a', action: 'review', status: 'approved', createdAt: 25 },
+    { id: 'a', action: 'review', status: 'approved', createdAt: 25, myDecision:{decision:'approve'} },
   ] } };
   const helper = f.create();
   assert.equal(helper.timeline([entry], [])[0].index, 0);
@@ -67,7 +90,7 @@ test('approval positions respect native and renderer history windows and untimed
 test('an approval slot follows a stable projected message key when native indices change', () => {
   const f = fixture();
   f.window.TaskTraceApproval = { html: () => '' };
-  const entry = { taskId: 't', task: {}, trace: { approvals: [{ id: 'a', action: 'review', status: 'approved' }] } };
+  const entry = { taskId: 't', task: {}, trace: { approvals: [{ id: 'a', action: 'review', status: 'approved', myDecision:{decision:'approve'} }] } };
   const helper = f.create();
   assert.equal(helper.timeline([entry], [{ taskOutputKey: 'run:result' }])[0].index, 1);
   assert.equal(helper.timeline([entry], [{}, {}, { taskOutputKey: 'run:result' }, {}])[0].index, 3);
@@ -79,12 +102,13 @@ test('approvals sharing a message boundary keep chronological order as their sta
   f.ctx._collabEntryStatus = () => 'completed';
   const entry = { taskId: 't', task: {}, trace: { approvals: [
     { id: 'new', action: 'review', status: 'pending', createdAt: 40 },
-    { id: 'old', action: 'review', status: 'rejected', createdAt: 30 },
+    { id: 'old', action: 'review', status: 'rejected', createdAt: 30, myDecision:{decision:'reject'} },
   ] } };
   const helper = f.create(), messages = [{ sentAt: 20 }, { sentAt: 50 }];
   const ids = () => Array.from(helper.timeline([entry], messages), row => JSON.parse(row.key)[1]);
   assert.deepEqual(ids(), ['old', 'new']);
   entry.trace.approvals[0].status = 'approved';
+  entry.trace.approvals[0].myDecision = {decision:'approve'};
   assert.deepEqual(ids(), ['old', 'new']);
   helper.reset();
   delete entry.trace.approvals[0].createdAt;
@@ -206,9 +230,31 @@ test('chat approval receipts replace controls before refresh and survive a new r
   assert.match(html,/Checked/,'a list refresh without notes preserves the successful local receipt');
   entry.trace.approvals.push({id:'r2',action:'review',status:'pending'});
   assert.deepEqual(Array.from(helper.pendingApprovals(entry),row=>row.id),['r2']);
+  entry.trace.approvals[0].myDecision={decision:'approve'};
   helper.reset();
   assert.match(helper.resultsHtml(entry),/已确认验收/,'authoritative resolved reviews remain readable after reopen');
   assert.equal(options.onAcceptanceClosed({getAttribute:()=> 'r2'},{decision:'reject'}),false,'old callbacks cannot change another conversation');
+});
+
+for (const status of ['approved', 'rejected']) test(`a ${status} Hub receipt survives a delayed pending trace`, () => {
+  const f = fixture(); let options;
+  f.window.TaskTraceApproval = {bind(_root, state) { options = state.opts; }};
+  const approval = {id:'review', action:'review', status:'pending'};
+  const entry = {taskId:'task', task:{title:'Delivery'}, trace:{approvals:[approval]}};
+  const helper = f.create();
+  helper.bindApproval({}, entry.taskId, entry);
+  assert.equal(options.onAcceptanceClosed({getAttribute:()=>approval.id}, {
+    decision:status === 'approved' ? 'approve' : 'reject', status, note:'Recorded by Hub',
+  }), true);
+  for (const delayedStatus of ['pending', undefined]) {
+    approval.status = delayedStatus;
+    const html = helper.resultsHtml(entry);
+    assert.match(html, status === 'approved' ? /已确认验收/ : /已退回修改/);
+    assert.doesNotMatch(html, /等待其他审批人|<button|<textarea|<input/);
+    assert.equal(approval.status, delayedStatus, 'presentation must not rewrite the Hub snapshot');
+  }
+  entry.trace.approvals.push({id:'next-review', action:'review', status:'pending'});
+  assert.deepEqual(Array.from(helper.pendingApprovals(entry), row=>row.id), ['next-review']);
 });
 
 test('generic workflow approvals retain their existing dismissal behavior', () => {
