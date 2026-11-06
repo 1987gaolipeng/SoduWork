@@ -28,7 +28,9 @@ def clean_protocol_caps(value) -> list[str]:
         return []
     # executionSelection1 exceeds the old 16-character display-style limit.
     # Drop malformed/oversized identifiers instead of creating truncated aliases.
-    return list(dict.fromkeys(item for item in value[:8]
+    # Desktop hello already advertises nine capabilities, including admit1.
+    # Leave bounded room for protocol growth without dropping admission support.
+    return list(dict.fromkeys(item for item in value[:32]
                               if isinstance(item, str) and 0 < len(item) <= 64))
 
 
