@@ -180,7 +180,9 @@ app.whenReady().then(async () => {
   await js(`ctx._snap.messages.push({role:'assistant',done:false,sentAt:60,blocks:[{kind:'text',text:'Follow-up',done:false}]});
     for(let i=0;i<100;i++){ctx._snap.messages.at(-1).blocks[0].text+=' next';renderer._render();}void 0;`);
   assert.equal(await chronological(),true);
-  await js(`entry.trace.approvals[1].status='approved';ctx._snap.status='idle';
+  await js(`entry.trace.approvals[1].status='approved';
+    entry.trace.approvals[0].myDecision={decision:'reject',note:'Change the theme'};
+    entry.trace.approvals[1].myDecision={decision:'approve'};ctx._snap.status='idle';
     ctx._snap.messages.at(-1).done=true;ctx._snap.messages.at(-1).blocks[0].done=true;paint();void 0;`);
   assert.equal(await chronological(),true,'reopening reconstructs the same chronological positions');
   report.checks.push('Two native-click decisions remain in their original message slots across rework, 100 streamed frames and reopening');

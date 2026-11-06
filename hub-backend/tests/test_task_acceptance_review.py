@@ -2,6 +2,9 @@
 
 """
 import unittest
+import sqlite3
+import uuid
+from contextlib import closing
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
@@ -10,15 +13,25 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app import automation_models as am, models
 from app.api import tasks as api
-from app.db import Base
+from test_unified_requirements import _schema_template
 
 
 class AcceptanceReviewTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-        async with self.engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        # Clone the existing schema fixture while retaining a private in-memory database.
+        memory_name = "soduwork_acceptance_" + uuid.uuid4().hex
+        self._schema_anchor = sqlite3.connect(
+            f"file:{memory_name}?mode=memory&cache=shared", uri=True,
+        )
+        self.addCleanup(self._schema_anchor.close)
+        with closing(sqlite3.connect(_schema_template())) as source:
+            source.backup(self._schema_anchor)
+        self.engine = create_async_engine(
+            f"sqlite+aiosqlite:///file:{memory_name}?mode=memory&cache=shared&uri=true",
+        )
+        self.addAsyncCleanup(self.engine.dispose)
         self.session = async_sessionmaker(self.engine, expire_on_commit=False)()
+        self.addAsyncCleanup(self.session.close)
         self.actor = models.User(id="reviewer", username="reviewer", display_name="验收人")
         self.client = models.Client(id="review-device", user_ref="reviewer")
         self.task = models.Task(id="review-task", title="写作文", status="done",
@@ -38,13 +51,12 @@ class AcceptanceReviewTests(unittest.IsolatedAsyncioTestCase):
         self.publish = patch("app.services.task_access.publish_task", new_callable=AsyncMock)
         self.notify = patch("app.services.receipts.notify_on_close", new_callable=AsyncMock)
         self.publish_mock = self.publish.start()
+        self.addCleanup(self.publish.stop)
         self.notify_mock = self.notify.start()
+        self.addCleanup(self.notify.stop)
 
     async def asyncTearDown(self):
-        self.publish.stop()
-        self.notify.stop()
-        await self.session.close()
-        await self.engine.dispose()
+        """Registered cleanups also release resources when setup fails."""
 
     def body(self, verdict="approve"):
         return {"approvalId": "approval-1", "artifactVersionId": "artifact-1",
@@ -85,12 +97,13 @@ class AcceptanceReviewTests(unittest.IsolatedAsyncioTestCase):
         result = await api.auto_review_task_artifact(self.task.id, body, self.client, self.session)
         self.assertEqual(result["verdict"], "approved")
 
-    async def test_reject_records_evidence_and_uses_default_ai_rework(self):
+    async def test_reject_records_evidence_and_waits_for_executor_rework(self):
         result = await api.auto_review_task_artifact(self.task.id, self.body("reject"), self.client, self.session)
         self.assertEqual(result["verdict"], "rejected")
-        # Without a reachable original session, retain a retryable rework card.
+        # Review feedback remains actionable without authorizing a new model run.
         # With a real conversation/reference, resume_after_rejection returns the task to doing.
-        self.assertEqual(result["rework"]["fallback"], "rework_pending")
+        self.assertTrue(result["rework"]["waitingForExecutor"])
+        self.assertEqual(self.task.work_routing["reworkPending"]["state"], "awaiting_executor")
         self.assertTrue(self.task.work_routing.get("reworkPending"))
         self.assertIsNone(self.task.reviewed_at)
         events = (await self.session.execute(select(models.TaskEvent).where(
@@ -257,8 +270,20 @@ class AcceptanceReviewTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(set(archive.namelist()), {'index.html','assets/style.css'})
             self.assertEqual(archive.read('index.html'), contents['html'])
         self.assertEqual(response.headers['X-Artifact-SHA256'],hashlib.sha256(data).hexdigest())
+        from urllib.parse import unquote
+        self.assertEqual(value['deliveryBundle']['filename'],
+                         unquote(response.headers['Content-Disposition'].split("''")[1]))
         self.assertEqual(before,len((await self.session.execute(select(models.Attachment))).scalars().all()))
         self.assertEqual(self.artifact.manifest,manifest)
+
+    async def test_single_zip_is_bound_as_the_review_deliverable_without_extra_bundle(self):
+        self.session.add(models.Attachment(id='only-zip', task_id=self.task.id,
+            filename='完整产出-site.zip', role='output', size=512, storage_key='site'))
+        self.artifact.manifest = {**self.artifact.manifest, 'primary': [{'id': 'only-zip'}]}
+        await self.session.commit()
+        value = await self.context()
+        self.assertEqual(value['attachmentIds'], ['only-zip'])
+        self.assertIsNone(value['deliveryBundle'])
 
     async def test_missing_frozen_file_never_silently_reduces_review_input(self):
         self.artifact.manifest = {**self.artifact.manifest,'primary':[{'id':'deleted'}]}

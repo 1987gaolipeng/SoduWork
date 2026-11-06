@@ -387,6 +387,32 @@ class TransitionTests(unittest.TestCase):
         self.assertEqual(run["state"], "interrupted")
         self.assertEqual(len(self.prompts()), 1)
 
+    def test_failed_transition_fences_late_ack_before_process_cleanup(self):
+        policy = access_policy.normalize({"schema": access_policy.SCHEMA, "revision": 1,
+            "mode": "standard", "workspaceRoot": str(self.ws)})
+        target = access_policy.normalize({**policy, "mode": "full", "revision": 2})
+        ref = "late-permission-ack"
+        run = {"state": "running", "ws": str(self.ws), "accessPolicy": target,
+               "appliedAccessPolicy": {"state": "applied", "policyHash": target["policyHash"]},
+               "_accessTransition": {"id": "expired-change", "phase": "in-process-applying",
+                   "inProcess": True, "oldHash": policy["policyHash"], "targetPolicy": target}}
+        local_base._RUNS[ref] = run
+        self.refs.append(ref)
+        observed = []
+        def slow_cleanup(_ref):
+            # Simulate the native ACK arriving while process termination is still pending.
+            reply = access_transition.control(ref, target,
+                {"id": "expired-change", "stage": "in-process-applied"})
+            observed.append(reply)
+            return True
+        with patch.object(local_stream, "_kill_tree", side_effect=slow_cleanup):
+            result = access_transition._restore_failed(ref, run, {"accessPolicy": policy})
+        self.assertFalse(result["ok"])
+        self.assertEqual(len(observed), 1)
+        self.assertFalse(observed[0]["requested"], "An expired change must not authorize continuation")
+        self.assertEqual(run["accessPolicy"], policy)
+        self.assertEqual(run["state"], "interrupted")
+
     def test_hot_control_rejects_unmatched_transition_and_native_session(self):
         ref, run, policy = self.start()
         target = access_policy.normalize({**policy, "revision": 2, "mode": "full"})

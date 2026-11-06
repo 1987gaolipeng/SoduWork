@@ -103,8 +103,7 @@ async def context(session, client, tid):
                 attachment_to_api(row)["role"] in {"input", "process", "verification", "output"}]
     bundle = None
     if len(selected) >= 2:
-        safe = "".join(c for c in (task.title or "交付物") if c not in '\\/:*?"<>|').strip()[:40] or "交付物"
-        bundle = {"filename": safe + ".zip", "artifactVersionId": artifact.id,
+        bundle = {"filename": delivery_bundle.archive_filename(task.title), "artifactVersionId": artifact.id,
                   "attachmentIds": [row.id for row in selected], "fileCount": len(selected)}
     return {"task": await tasks.task_to_api_live(session, task),
             "approvalId": request.id if request else "direct:" + task.id,
@@ -222,11 +221,11 @@ async def _apply(session, client, tid, body):
                             result.get("detail") or "验收版本或证据已经变化，请重新核验")
     rework, blocked, closed = None, None, False
     if report["verdict"] == "reject":
-        # Automatic rejection defaults to returning itemized feedback to the original AI for rework.
+        # Automated review returns feedback to the executor without authorizing another run.
         # Return to the unstarted requirement pool only when a human explicitly selects that option.
         rework = await task_rework.resume_after_rejection(
             session, task, note, artifact_version_id=artifact.id,
-            request_id=request.id, actor=who, fallback_on_missing_ref=True)
+            request_id=request.id, actor=who, fallback_on_missing_ref=True, wait_for_executor=True)
     elif request.status == "approved":
         applied = await task_status.mark(session, task, "done", why="AI 逐项验收通过")
         # Support legacy done-before-review projections, but never treat done alone as approval evidence.

@@ -72,6 +72,24 @@ class ManualReviewSource(unittest.IsolatedAsyncioTestCase):
             pending = task.work_routing["reworkPending"]
             self.assertEqual(pending["ref"], "conversation:original")
             self.assertEqual(pending["feedback"], "补充修订说明")
+            with self.assertRaises(HTTPException) as unchanged:
+                await tasks.submit_task_for_review(task.id, {},
+                    await session.get(models.Client, "worker-device"), session)
+            self.assertEqual(unchanged.exception.status_code, 409)
+            self.assertEqual(task.work_routing["reworkPending"], pending)
+            session.add(models.Attachment(id="output-revised", task_id=task.id,
+                filename="report.md", content_type="text/markdown", size=20,
+                storage_key="test/report-revised.md", backend="local", role="output",
+                source_ref="conversation:original", uploaded_by="agent:conversation",
+                evidence_meta={"sha256": "b" * 64, "round": 2,
+                               "category": "primary", "verification": {"state": "passed"}}))
+            await session.commit()
+            with patch.object(hub, "publish", new=AsyncMock()):
+                submitted_again = await tasks.submit_task_for_review(task.id, {},
+                    await session.get(models.Client, "worker-device"), session)
+            self.assertEqual(submitted_again["task"]["requirementStage"], "reviewing")
+            self.assertNotIn("reworkPending", task.work_routing)
+            self.assertNotEqual(submitted_again["request"]["id"], submitted["request"]["id"])
 
     async def test_empty_delivery_can_be_explicitly_submitted_but_not_automatically(self):
         from app.api import approvals, tasks
@@ -248,6 +266,19 @@ class ManualReviewSource(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(task.work_routing, original_routing)
             self.assertEqual(artifact.source_ref, "")
             self.assertEqual(artifact.checksum, "fixed")
+            self.assertFalse(session.dirty)
+            # Delayed completion and exhausted automatic retries do not consume human feedback.
+            session.add_all([
+                models.TaskEvent(task_id=task.id, kind="conversation.turn",
+                    detail={"state": "completed", "conversationId": "original"},
+                    at=now+timedelta(milliseconds=2)),
+                models.TaskEvent(task_id=task.id, kind="ai.rework_exhausted",
+                    detail={"requestId": request.id}, at=now+timedelta(milliseconds=3)),
+            ])
+            await session.commit()
+            refreshed = await tasks.task_to_api_live(session, task)
+            self.assertEqual(refreshed["workRouting"]["reworkPending"]["feedback"], decision.note)
+            self.assertEqual(task.work_routing, original_routing)
             self.assertFalse(session.dirty)
             # An explicit pool return must never be presented as automatic rework.
             pool_return = models.TaskEvent(task_id=task.id, kind="review.returned_to_backlog",

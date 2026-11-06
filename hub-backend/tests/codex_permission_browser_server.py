@@ -75,7 +75,8 @@ def browser_command(kind):
     }
     inner = "node " + " ".join(quote(part) for part in [BROWSER_SCRIPT, *variants[kind]]) + " --session chat-permission-e2e"
     shell = Path(os.environ.get("SystemRoot", "C:/Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe"
-    return json.dumps(str(shell)) + " -NoProfile -Command " + json.dumps(inner)
+    # Native shell arguments contain literal Unicode, not JSON's ASCII escapes.
+    return json.dumps(str(shell), ensure_ascii=False) + " -NoProfile -Command " + json.dumps(inner, ensure_ascii=False)
 
 
 def run_job(job_id, kind):

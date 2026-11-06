@@ -111,6 +111,11 @@ def _restore_failed(ref, run, old):
     # No new prompt is allowed until the bridge acknowledges native permissions.
     from .local_stream import _kill_tree
     from . import access_broker
+    with _LOCK:
+        change = run.get("_accessTransition")
+        if change:
+            # Fence late native ACKs before slow process cleanup can yield to them.
+            change["cancelled"] = True
     _kill_tree(ref)
     access_broker.close(ref)
     with _LOCK:

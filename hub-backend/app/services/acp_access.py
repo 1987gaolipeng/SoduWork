@@ -42,6 +42,10 @@ class BridgeAccess:
                 raise AccessError("Invalid access mode")
 
     def agent_environment(self, agent_name: str, env: dict) -> dict:
+        if self.enabled and agent_name in {"codex-harness", "codex"}:
+            # Bootstrap conservatively across adapter versions. The authenticated
+            # policy handshake selects the advertised mode before any prompt.
+            env = {**env, "INITIAL_AGENT_MODE": "read-only"}
         if self.enabled and agent_name == "opencode":
             try:
                 from .opencode_access import Guard
@@ -382,9 +386,12 @@ class BridgeAccess:
             available = {str(item.get("id")) for item in modes.get("availableModes", [])
                          if isinstance(item, dict)}
             mapping = {
-                "codex-harness": {"standard": ("agent",), "readonly": ("read-only",),
+                # New adapters reserve 'agent' for a remote auto-review service.
+                # Prefer the advertised user-approval mode; older adapters expose
+                # only 'agent', whose historical contract is workspace access.
+                "codex-harness": {"standard": ("workspace-write", "agent"), "readonly": ("read-only",),
                                   "full": ("agent-full-access",)},
-                "codex": {"standard": ("agent",), "readonly": ("read-only",),
+                "codex": {"standard": ("workspace-write", "agent"), "readonly": ("read-only",),
                           "full": ("agent-full-access",)},
                 "qwen": {"standard": ("default",), "readonly": ("plan",), "full": ("yolo",)},
                 "kimi": {"standard": ("default",), "readonly": ("plan",), "full": ("yolo",)},

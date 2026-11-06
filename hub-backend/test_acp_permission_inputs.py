@@ -3,10 +3,74 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.services.acp_access import BridgeAccess
 from app.services.acp_bridge import AcpBridge
+
+
+class CodexModeCompatibilityTests(unittest.TestCase):
+    def access(self, mode, agent):
+        return BridgeAccess(json.dumps({"url": "http://127.0.0.1:1", "token": "fixture",
+            "policy": {"mode": mode}}), agent_name=agent)
+
+    def test_standard_prefers_user_approval_and_retains_older_adapter_support(self):
+        for agent in ("codex-harness", "codex"):
+            for available, expected in (
+                (["agent", "workspace-write", "agent-full-access", "read-only"], "workspace-write"),
+                (["agent", "agent-full-access", "read-only"], "agent"),
+            ):
+                with self.subTest(agent=agent, available=available):
+                    access = self.access("standard", agent)
+                    bridge = SimpleNamespace(agent_name=agent, session_id="restored-session")
+                    with patch.object(access, "call", return_value={"ok": True}) as receipt:
+                        bridge.request = unittest.mock.Mock(return_value={})
+                        access.apply(bridge, {"modes": {"availableModes": [{"id": v} for v in available]}})
+                    bridge.request.assert_called_once_with("session/set_mode", {
+                        "sessionId": "restored-session", "modeId": expected})
+                    receipt.assert_called_once_with("/applied", {"mode": "standard", "nativeMode": expected})
+
+    def test_full_and_readonly_are_reapplied_without_inheriting_auto_review(self):
+        for agent in ("codex-harness", "codex"):
+            for mode, native in (("full", "agent-full-access"), ("readonly", "read-only")):
+                with self.subTest(agent=agent, mode=mode):
+                    access = self.access(mode, agent)
+                    env = {"INITIAL_AGENT_MODE": "agent", "CODEX_HOME": "isolated"}
+                    self.assertEqual(access.agent_environment(agent, env), {**env, "INITIAL_AGENT_MODE": "read-only"})
+                    self.assertEqual(env["INITIAL_AGENT_MODE"], "agent")
+                    bridge = SimpleNamespace(agent_name=agent, session_id="saved", request=unittest.mock.Mock(return_value={}))
+                    with patch.object(access, "call", return_value={"ok": True}):
+                        access.apply(bridge, {"modes": {"currentModeId": "agent", "availableModes": [
+                            {"id": v} for v in ("agent", "workspace-write", "agent-full-access", "read-only")]}})
+                    self.assertEqual(bridge.request.call_args.args[1]["modeId"], native)
+
+    def test_unsupported_or_rejected_mode_never_acknowledges_applied_access(self):
+        access = self.access("full", "codex-harness")
+        bridge = SimpleNamespace(agent_name="codex-harness", session_id="saved", request=unittest.mock.Mock())
+        with patch.object(access, "call") as receipt:
+            with self.assertRaisesRegex(Exception, "UNSUPPORTED"):
+                access.apply(bridge, {"modes": {"availableModes": [{"id": "agent"}]}})
+            bridge.request.side_effect = RuntimeError("native mode rejected")
+            with self.assertRaisesRegex(RuntimeError, "native mode rejected"):
+                access.apply(bridge, {"modes": {"availableModes": [{"id": "agent-full-access"}]}})
+            receipt.assert_not_called()
+
+    def test_bootstrap_does_not_change_legacy_or_other_agent_environments(self):
+        env = {"INITIAL_AGENT_MODE": "agent"}
+        self.assertEqual(BridgeAccess("", agent_name="codex-harness").agent_environment("codex-harness", env), env)
+        self.assertEqual(self.access("full", "qwen").agent_environment("qwen", env), env)
+
+    def test_managed_codex_uses_its_own_native_package_and_no_inherited_credential_logs(self):
+        from app.services import acp_agents
+        env = {"CODEX_PATH": "personal-codex", "APP_SERVER_LOGS": "personal-logs"}
+        acp_agents.inject_llm_env("codex-harness", env, {
+            "base": "http://127.0.0.1:1/v1", "key": "fixture-secret", "model": "fixture"})
+        self.assertNotIn("CODEX_PATH", env)
+        self.assertNotIn("APP_SERVER_LOGS", env)
+        self.assertIn("codex_gateway_startup.mjs", env["NODE_OPTIONS"])
+        self.assertNotIn("fixture-secret", env["NODE_OPTIONS"])
+        self.assertNotIn("fixture-secret", env["CODEX_CONFIG"])
 
 
 class CodexPermissionInputsTests(unittest.TestCase):

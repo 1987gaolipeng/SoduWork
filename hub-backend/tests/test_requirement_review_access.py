@@ -53,16 +53,34 @@ class RequirementReviewAccessTests(unittest.IsolatedAsyncioTestCase):
             session.add(am.ApprovalDecision(request_id="review", user_id="owner",
                                             user_name="Owner", decision="approve", note="Checked"))
             await session.commit()
-        detail = await self.call("GET", "tasks/shared")
-        self.assertFalse(detail.json()["canReview"], "A remaining co-sign gate is not another vote")
+        for who in ("owner", "second-device"):
+            detail = await self.call("GET", "tasks/shared", who)
+            self.assertFalse(detail.json()["canReview"], "A remaining co-sign gate is not another vote")
+            listing = await self.call("GET", "tasks", who)
+            item = next(row for row in listing.json() if row["id"] == "shared")
+            self.assertFalse(item["canReview"])
         async with self.sessions() as session:
             task = await session.get(models.Task, "shared")
+            prepared = await task_requirements.prepare_notifications(session, task, list(self.clients.values()))
+            self.assertEqual(prepared["owner"].reviewable, set())
+            self.assertEqual(prepared["second-device"].reviewable, set())
+            self.assertEqual((await session.get(am.ApprovalRequest, "review")).status, "pending")
             task.status, task.reviewed_at = "done", datetime.now(timezone.utc)
             (await session.get(am.ApprovalRequest, "review")).status = "approved"
             await session.commit()
         detail = await self.call("GET", "tasks/shared")
         self.assertEqual(detail.json()["requirementStage"], "delivered")
         self.assertFalse(detail.json()["canReview"])
+
+    async def test_direct_unreviewed_completion_keeps_creator_review_entry(self):
+        async with self.sessions() as session:
+            task = await session.get(models.Task, "shared")
+            task.status = "done"
+            await session.commit()
+        for who, allowed in (("owner", True), ("peer", False)):
+            detail = await self.call("GET", "tasks/shared", who)
+            self.assertEqual(detail.status_code, 200, detail.text)
+            self.assertEqual(detail.json()["canReview"], allowed)
 
     async def test_stale_expired_unassigned_and_foreign_reviews_are_not_actionable(self):
         await self.seed()

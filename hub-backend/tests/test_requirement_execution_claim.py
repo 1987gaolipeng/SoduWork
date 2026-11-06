@@ -135,6 +135,18 @@ class RequirementExecutionClaimTests(unittest.IsolatedAsyncioTestCase):
                 setattr(task, key, value)
             await session.commit()
 
+    async def test_rework_permission_belongs_to_executor_not_creator_or_viewer(self):
+        await self.assign(owner_client_id="peer", owner_user_id="peer", status="doing",
+                          work_routing={"reworkPending": {"feedback": "Revise the output"}})
+        for client_id, permitted in (("peer", True), ("owner", False)):
+            result = await self.call("GET", "tasks/shared", client_id)
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertTrue(result.json()["canViewExecution"])
+            self.assertEqual(result.json()["canContinueExecution"], permitted)
+        await self.assign(archived_at=datetime.now(timezone.utc))
+        result = await self.call("GET", "tasks/shared", "peer")
+        self.assertFalse(result.json()["canContinueExecution"])
+
     async def test_assignee_claim_preserves_requirement_and_grants_only_device_execution(self):
         await self.assign()
         before = (await self.call("GET", "tasks/shared", "peer")).json()

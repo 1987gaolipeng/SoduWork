@@ -16,6 +16,9 @@ from tests.test_task_acceptance_review import AcceptanceReviewTests
 class MobileAcceptanceTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.fixture = AcceptanceReviewTests('test_context_is_read_only_and_carries_fixed_version')
+        # This composed fixture is not run by unittest; register cleanup on the owning test.
+        self.fixture.addCleanup = self.addCleanup
+        self.fixture.addAsyncCleanup = self.addAsyncCleanup
         await self.fixture.asyncSetUp()
         f = self.fixture
         self.session = f.session
@@ -64,7 +67,20 @@ class MobileAcceptanceTests(unittest.IsolatedAsyncioTestCase):
         await self.session.commit()
         result = await self.settle()
         self.assertEqual(result['verdict'], 'rejected')
+        self.assertTrue(result['rework']['waitingForExecutor'])
         self.assertEqual(result['rework']['fallback'], 'rework_pending')
+        self.assertFalse(result['rework']['started'])
+        pending = self.fixture.task.work_routing['reworkPending']
+        self.assertEqual(pending['state'], 'awaiting_executor')
+        self.assertEqual(pending['versionId'], self.fixture.artifact.id)
+        self.assertEqual(pending['requestId'], self.fixture.request.id)
+        self.assertEqual(self.fixture.task.status, 'doing')
+        self.assertEqual(await self.settle(), result)
+        from app.services import task_rework, ai_exec
+        with patch.object(ai_exec, 'say_sync') as send:
+            self.assertEqual((await task_rework.retry_once(self.session))['sent'], 0)
+            send.assert_not_called()
+        self.assertEqual(self.fixture.task.work_routing['reworkPending'], pending)
 
     async def test_recovery_after_decision_commit_uses_only_its_own_report(self):
         result = await self.settle()

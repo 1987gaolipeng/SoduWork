@@ -1916,9 +1916,19 @@ async def submit_task_for_review(
             source_ref=("conversation:" + str(turn["conversationId"])) if turn.get("conversationId") else "",
             allow_empty=True)
         request = await release_control.ensure_request(session, task, artifact, "review")
+        if request.status != "pending":
+            raise ValueError("本轮交付已验收或退回，请修改交付内容后重新提交")
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
+    routing = dict(task.work_routing or {})
+    rework = routing.pop("reworkPending", None)
+    if rework:
+        # An explicit executor submission settles feedback without starting a model run.
+        task.work_routing = routing
+        ev.record(session, tid, "ai.rework_taken", {
+            "requestId": rework.get("requestId"), "by": "manual_submission",
+        }, actor=who)
     ev.record(session, tid, "artifact.submitted_for_review",
               {"requestId": request.id, "versionId": artifact.id, "note": note}, actor=who)
     await session.commit()

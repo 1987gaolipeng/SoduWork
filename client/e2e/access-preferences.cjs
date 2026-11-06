@@ -17,9 +17,13 @@ if (typeof electron === 'string') {
   const report = { ok: false, cases: [], layouts: [], errors: [] };
   const read = file => fs.readFileSync(path.join(client, file), 'utf8');
   const preferences = require('../main/access-control/preferences'), locale = require('../main/native-locale.cjs');
+  locale.setLocale('zh-CN');
   const desk = path.join(client, 'desk.html'), pageURL = pathToFileURL(desk).href;
   const source = read('desk.html'), start = source.indexOf('  <div class="set-group set-access-default">');
-  const markup = source.slice(start, source.indexOf('  <div class="set-group hub-environment">', start));
+  const end = source.indexOf('  <div class="set-group ', start + 1);
+  assert.ok(start >= 0 && end > start, 'The production access settings section must be present');
+  const markup = source.slice(start, end);
+  assert.doesNotMatch(markup, /<script\b/i, 'The isolated settings fixture must not include desktop startup');
   const scripts = [...JSON.parse(read('core/locales/manifest.json')).map(name => 'core/locales/' + name),
     'core/i18n-dom.js', 'core/i18n.js', 'components/settings/access-preferences.js'];
   const html = '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
@@ -66,9 +70,11 @@ if (typeof electron === 'string') {
   app.whenReady().then(async () => {
     // Replace only the outer desktop shell with the actual settings section.
     // This keeps its trusted production URL while avoiding auth/model startup.
-    protocol.handle('file', request => request.url.split('?')[0] === pageURL
-      ? new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
-      : net.fetch(request.url, { bypassCustomProtocolHandlers: true }));
+    protocol.handle('file', request => {
+      return request.url.split('?')[0] === pageURL
+        ? new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } })
+        : net.fetch(request.url, { bypassCustomProtocolHandlers: true });
+    });
     function HiddenConsent(options) {
       const win = new BrowserWindow({ ...options, webPreferences: { ...options.webPreferences, backgroundThrottling: false } });
       win.show = () => {}; win.focus = () => {};
@@ -93,9 +99,14 @@ if (typeof electron === 'string') {
     assert.equal(preferences.hasFullConsent(app, {}), true);
     await new Promise(resolve => { owner.webContents.once('did-finish-load', resolve); owner.reload(); });
     await selected(owner, 'full');
-    for (const opts of [{ chatId: 'history' }, { taskSession: true }, { taskRef: 'task' }, { automationId: 'schedule' },
-      ...['claude', 'codex', 'dsh'].map(adapterId => ({ adapterId }))]) assert.equal(preferences.forNewChat(app, opts, true), opts);
-    report.cases.push('Checked native consent saves full access; reload preserves it, while existing chats, tasks, automations and unsupported adapters do not inherit it.');
+    for (const opts of [{ chatId: 'history' }, { automationId: 'schedule' }, { accessMode: 'readonly' }]) {
+      assert.equal(preferences.forNewChat(app, opts, true), opts);
+    }
+    for (const opts of [{ taskSession: true }, { taskRef: 'task' },
+      ...['pi', 'opencode', 'codex-harness', 'qwen', 'kimi', 'claude', 'codex', 'dsh', 'harness2'].map(adapterId => ({ adapterId }))]) {
+      assert.deepEqual(preferences.forNewChat(app, opts, true), { ...opts, accessMode: 'full' });
+    }
+    report.cases.push('Checked native consent persists through reload; all supported new chats and new local tasks inherit it, while existing chats, automation and explicit session modes retain their grants.');
     for (const [width, lang, theme] of [[1120, 'zh-CN', 'azure'], [360, 'en-US', 'ruby'], [360, 'zh-CN', 'azure'], [1120, 'en-US', 'ruby']]) await layout(width, lang, theme);
     await click(owner, '[data-default-access=standard]'); await selected(owner, 'standard'); await selected(peer, 'standard');
     assert.equal(preferences.hasFullConsent(app, {}), false);

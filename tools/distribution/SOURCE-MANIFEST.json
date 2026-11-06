@@ -2736,8 +2736,8 @@
     },
     {
       "path": "client/e2e/acceptance-card-stability.cjs",
-      "bytes": 15853,
-      "sha256": "63d19e82c1354ca00199794e1d982660946d3372811c883f186a8933e622ebfa"
+      "bytes": 16000,
+      "sha256": "9657e1f8c3fb106a90cbcf027fe3d7b9f8bc686dd9d6329e879c3a594e10c2b3"
     },
     {
       "path": "client/e2e/access-change-feedback.cjs",
@@ -2751,8 +2751,8 @@
     },
     {
       "path": "client/e2e/access-preferences.cjs",
-      "bytes": 9944,
-      "sha256": "6bbf39968cb9fee145655c55a69746bf789b579792f24d7e2de852fac7e64ab4"
+      "bytes": 10516,
+      "sha256": "580c42000a4a174f7b65904a9e13811e87fb28d99821f2ec4b2f7c557a5839f9"
     },
     {
       "path": "client/e2e/access-session-change.cjs",
@@ -11641,8 +11641,8 @@
     },
     {
       "path": "hub-backend/app/api/plugin_permissions.py",
-      "bytes": 6336,
-      "sha256": "67f5ce2f01724689bae47a7fce62d4e0f30513bb91cc144d1f60d3922a57c38a"
+      "bytes": 6283,
+      "sha256": "0a6138ae6c9ac85610e015f1400b89339e3ac9bc6d21e114f0a8b9daa091594f"
     },
     {
       "path": "hub-backend/app/api/plugin_publishers.py",
@@ -11731,8 +11731,8 @@
     },
     {
       "path": "hub-backend/app/api/tasks.py",
-      "bytes": 96829,
-      "sha256": "dfaaa32095dbbf63016c12a635c79cd6058f04adc0931a64414efb60be85a2e9"
+      "bytes": 97355,
+      "sha256": "ab4b3b0f89c772245b92468af35f9f2a3bd851858cb74a05354cc6fca61495b9"
     },
     {
       "path": "hub-backend/app/api/term.py",
@@ -11956,8 +11956,8 @@
     },
     {
       "path": "hub-backend/app/services/access_transition.py",
-      "bytes": 11834,
-      "sha256": "4cc5cbfa9d84bd913223fdec58b98f3d3365e7286d43e6780e06c71bf285658c"
+      "bytes": 12038,
+      "sha256": "d810c6c8a55217ac9eb3c318a2f957476e693264bafb27ec6931ef0ec363caf6"
     },
     {
       "path": "hub-backend/app/services/account_legal.py",
@@ -11981,8 +11981,8 @@
     },
     {
       "path": "hub-backend/app/services/acp_access.py",
-      "bytes": 24462,
-      "sha256": "a5d9ccda2700d9ce7d33106818ec5b30f3df55cefb361aa604ce6e1278076652"
+      "bytes": 25031,
+      "sha256": "aaf117afe00fac227f980ec9ff0cdce1e24fa38765e273d1c439d8e03dae8ee6"
     },
     {
       "path": "hub-backend/app/services/acp_agents.py",
@@ -12308,6 +12308,11 @@
       "path": "hub-backend/app/services/codex_account_home.py",
       "bytes": 9008,
       "sha256": "c2bec3bdd071661201c28672b459e1d03fddbea3c4e3c59c56b8cec3cea5d840"
+    },
+    {
+      "path": "hub-backend/app/services/codex_gateway_startup.mjs",
+      "bytes": 2764,
+      "sha256": "842f689dd9b7dad291d81e8ecb135dbb30d2500e2cfaf15a532e9929a279c7f3"
     },
     {
       "path": "hub-backend/app/services/codex_login_flow.py",
@@ -13776,8 +13781,8 @@
     },
     {
       "path": "hub-backend/app/services/task_acceptance_review.py",
-      "bytes": 15630,
-      "sha256": "6ef880c3dcf3793409e33aa9fd42bb9bdde0874170f2db452df537df6db553de"
+      "bytes": 15561,
+      "sha256": "7fb60e60e1cd160b3970f790b2ad439aa1171893c84cda6cbc10158474e284db"
     },
     {
       "path": "hub-backend/app/services/task_access.py",
@@ -15041,8 +15046,8 @@
     },
     {
       "path": "hub-backend/smoke_access_transition.py",
-      "bytes": 21759,
-      "sha256": "5a46f1a030f3c251c040cd9eded6425a96ae725ffd32d3ca6183e3c5cdd51b97"
+      "bytes": 23342,
+      "sha256": "c19df5eab58360b991d5c8d8a4ef56545752bb87d82f6d25fa97b67fc372dc56"
     },
     {
       "path": "hub-backend/smoke_acp_runtime.py",
@@ -16251,8 +16256,8 @@
     },
     {
       "path": "hub-backend/test_acp_permission_inputs.py",
-      "bytes": 11355,
-      "sha256": "d8c292f0cfbbec3006a716977ddbd67fab109de33c536cf6371b6d6d8f0ff4c1"
+      "bytes": 15642,
+      "sha256": "e5ab8f8a25a6f9a9c3a9c7621a635fc65d73627cf2935f0d9dc915eb2e3e1341"
     },
     {
       "path": "hub-backend/test_acp_process_lifecycle.py",
@@ -17461,8 +17466,8 @@
     },
     {
       "path": "hub-backend/tests/codex_permission_browser_server.py",
-      "bytes": 8294,
-      "sha256": "2a94de189ea7bf065dbae568b649d2a7e8b4e28da00b072ddf34ef2d1f0226fc"
+      "bytes": 8414,
+      "sha256": "9a0e96bf66031f3b393077908f4979229928e015454068c8738b46410e19a378"
     },
     {
       "path": "hub-backend/tests/collaboration_browser_server.py",
@@ -17676,8 +17681,8 @@
     },
     {
       "path": "hub-backend/tests/test_cloud_acceptance.py",
-      "bytes": 9712,
-      "sha256": "4ca1794d48bb70ec7e28a4aec74bf0c02c3f4b029f4da070aaf54b87020974de"
+      "bytes": 10738,
+      "sha256": "6bcda9bc93620243a323043a6c525f9aed8f242c927bb8f7eb6b624082224174"
     },
     {
       "path": "hub-backend/tests/test_cloud_execution_sync.py",
@@ -17876,8 +17881,8 @@
     },
     {
       "path": "hub-backend/tests/test_manual_review_source.py",
-      "bytes": 20216,
-      "sha256": "5f400589228845eae743b24ef1bc8d3fd8317b7f6d1ee36afd0c437e9d577c89"
+      "bytes": 22389,
+      "sha256": "bcd208d13a253c532ea762cf3c460dd6e37651be43d23150c1df1a229e381139"
     },
     {
       "path": "hub-backend/tests/test_mate_message_draft.py",
@@ -17936,8 +17941,8 @@
     },
     {
       "path": "hub-backend/tests/test_requirement_execution_claim.py",
-      "bytes": 18624,
-      "sha256": "04b4be42f57c8c570920c9ea45e209ff63d4beb2f7bc99ef06e7af7629666305"
+      "bytes": 19438,
+      "sha256": "7329607322b2ad3ec15ddae251641544ea0416f78712bb137d907662e10aae84"
     },
     {
       "path": "hub-backend/tests/test_requirement_maintenance.py",
@@ -17956,8 +17961,8 @@
     },
     {
       "path": "hub-backend/tests/test_requirement_review_access.py",
-      "bytes": 5255,
-      "sha256": "6018fc0e25dcf0246014d432fc09c40e6a6880d13d2fe3a1e11817fd2c9496b6"
+      "bytes": 6373,
+      "sha256": "c12374aabfd1aad974cf86b9feeacdad340da1e364924c4aa2c78ebf5358789f"
     },
     {
       "path": "hub-backend/tests/test_review_creator_only.py",
@@ -18041,8 +18046,8 @@
     },
     {
       "path": "hub-backend/tests/test_task_acceptance_review.py",
-      "bytes": 18724,
-      "sha256": "1028b523a4edb70d30274fe71a3b47dee80d05ae6deb0e989200bd7a1536bb82"
+      "bytes": 20187,
+      "sha256": "d0882eac6eb22c5b3f4e182706ed5fa0df167baa774caaca4152bc73cf5dcc59"
     },
     {
       "path": "hub-backend/tests/test_task_assignment_notifications.py",

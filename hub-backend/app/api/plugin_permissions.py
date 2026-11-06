@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .. import automation_models as am, models
 from ..db import get_session
 from ..deps import current_client, require_perm
-from ..services import audit, plugin_access, plugin_audience, plugin_packages, rbac
+from ..services import audit, file_io, plugin_access, plugin_audience, plugin_packages, rbac
 
 admin_router = APIRouter(prefix="/api/v1/admin/plugins", tags=["plugins"])
 router = APIRouter(prefix="/api/v1/plugins", tags=["plugins"])
@@ -106,8 +106,7 @@ async def editable_plugin(plugin_id: str, client=Depends(current_client),
     if version is None:
         raise HTTPException(409, "插件没有可供编辑的版本")
     try:
-        with open(version.package_path, "rb") as stream:
-            parsed = plugin_packages.parse(stream.read(plugin_packages._MAX_PACKAGE + 1))
+        parsed = await file_io.run(plugin_packages.parse_file, version.package_path)
         if parsed["checksum"] != version.checksum:
             raise ValueError("插件包校验失败")
         draft = plugin_packages.personal_draft(parsed)
