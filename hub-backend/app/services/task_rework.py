@@ -1,7 +1,6 @@
-"""Continue direct AI execution after rejection of an immutable output; workflow tasks use graph
-rework. Persist failed delivery as reworkPending with bounded backoff and a deterministic
-rework:<requestId> message ID. Retry transient or uncertain delivery idempotently; permanent
-failures require visible manual intervention.
+"""Retain rejected delivery for executor-owned continuation; workflow tasks use graph rework.
+Explicitly authorized automatic continuation retains bounded retries and a deterministic
+rework:<requestId> message ID. Ordinary rejection waits for the executor without model calls.
 """
 from __future__ import annotations
 
@@ -173,6 +172,65 @@ async def _record_pending(
             "exhausted": card.get("state") == "failed"}
 
 
+async def acknowledge_continuation(session, task_id, ref, submitted_at, *, actor="SoduWork",
+                                  conversation_id="", turn_id="", message_id=""):
+    """Consume feedback only for an accepted executor message submitted after rejection.
+
+    Keep this in the caller's receipt transaction. A delayed ACK or duplicate
+    message from a previous review must never consume a newer rejection.
+    """
+    from . import artifact_version_guard, task_events
+
+    await artifact_version_guard.lock_task(session, task_id)
+    task = await session.get(models.Task, task_id, populate_existing=True)
+    routing = dict(task.work_routing or {})
+    pending = dict(routing.get("reworkPending") or {})
+    turn = dict(routing.get("conversationTurn") or {})
+    # Earlier clients switched a Runner transcript to native execution. Permit
+    # its rejected local receipt only when the current controlled turn proves
+    # that this same conversation is resuming the original Runner.
+    controlled = (conversation_id and turn.get("conversationId") == conversation_id
+                  and turn.get("turnId") == turn_id and turn.get("state") == "running"
+                  and turn.get("continuationRef") == ref and turn.get("executor") == "dispatch")
+    restored = controlled and pending.get("ref") in {conversation_id, "conversation:" + conversation_id}
+    if not pending and controlled:
+        # Older native follow-ups consumed the marker without collecting their
+        # files. The rejected review remains authoritative for explicit recovery.
+        request = await session.scalar(select(am.ApprovalRequest).where(
+            am.ApprovalRequest.task_id == task_id, am.ApprovalRequest.action == "review",
+            am.ApprovalRequest.status == "rejected").order_by(
+                am.ApprovalRequest.resolved_at.desc()).limit(1))
+    elif pending and (pending.get("ref") == ref or restored):
+        request = await session.get(am.ApprovalRequest, pending.get("requestId"))
+    else:
+        return False
+    if request is None or request.task_id != task_id or request.status != "rejected":
+        return False
+    boundary = request.resolved_at or request.created_at
+    def utc(value):
+        return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+    if submitted_at is None or utc(submitted_at) <= utc(boundary):
+        return False
+    if task.status in {"done", "cancel"} or task.archived_at:
+        return False
+    if controlled:
+        previous = (await session.scalars(select(models.TaskEvent).where(
+            models.TaskEvent.task_id == task_id, models.TaskEvent.kind == "ai.rework",
+            models.TaskEvent.at >= boundary))).all()
+        if any((row.detail or {}).get("messageId") == message_id and
+               (row.detail or {}).get("turnId") == turn_id for row in previous):
+            return False
+    routing.pop("reworkPending", None)
+    task.work_routing = routing
+    task_events.record(session, task.id, "ai.rework", {
+        "ref": ref, "requestId": request.id, "versionId": request.artifact_version_id,
+        "feedback": str(pending.get("feedback") or "")[:500], "by": "executor",
+        **({"conversationId": conversation_id, "turnId": turn_id, "messageId": message_id}
+           if controlled else {}),
+    }, actor=actor)
+    return True
+
+
 async def resume_after_rejection(
     session: AsyncSession,
     task: models.Task,
@@ -182,8 +240,9 @@ async def resume_after_rejection(
     request_id: str = "",
     actor: str = "SoduWork",
     fallback_on_missing_ref: bool = False,
+    wait_for_executor: bool = False,
 ) -> dict:
-    """Resume only the direct AI run that produced the rejected artifact."""
+    """Retain executor-owned feedback or resume the exact authorized AI run."""
     from . import ai_exec, task_status
 
     feedback = str(feedback or "").strip()
@@ -212,11 +271,35 @@ async def resume_after_rejection(
         dispatch = await ai_exec.last_dispatch_event(session, task.id)
         detail = dict(dispatch.detail or {}) if dispatch is not None else {}
         ref = str(detail.get("ref") or detail.get("issueId") or "")
+    execution = (await session.execute(select(am.ExecutionSession).where(
+        am.ExecutionSession.ref == ref
+    ).limit(1))).scalar_one_or_none() if ref else None
+    if execution is not None and execution.workflow_run_id:
+        return {"mode": "workflow", "started": False,
+                "error": "原执行属于已经结束的工作流，请从失败阶段重试"}
+    if wait_for_executor:
+        # Rejecting delivery requests revision; it does not authorize another
+        # model run on the executor's behalf. The existing continuation action
+        # consumes this marker, while background retry scans leave it untouched.
+        if task.status in ("todo", "done"):
+            await task_status.mark(session, task, "doing", why="验收退回待返修")
+        task.work_routing = {**dict(task.work_routing or {}), "reworkPending": {
+            "state": "awaiting_executor", "feedback": feedback[:1000], "ref": ref,
+            "requestId": request_id, "versionId": artifact_version_id, "actor": actor,
+            "at": datetime.now(timezone.utc).isoformat(), "attempts": 0,
+            "messageId": _message_id(request_id),
+        }}
+        await session.commit()
+        return {"mode": "executor", "started": False, "ref": ref,
+                "fallback": "rework_pending",
+                "waitingForExecutor": True, "message": "已退回，等待执行人继续修正"}
     if not ref:
         if fallback_on_missing_ref:
-            # Preserve automatic acceptance's rework decision even without a resumable session ref.
+            # Preserve every reviewer's rework decision without a resumable session ref.
             # Create terminal evidence rather than blindly retrying a missing session.
             # A later manually arranged execution receives the retained review feedback.
+            if task.status in ("todo", "done"):
+                await task_status.mark(session, task, "doing", why="验收退回待返修")
             return await _record_pending(
                 session, task, "", feedback, version_id=artifact_version_id,
                 request_id=request_id, actor=actor,
@@ -224,12 +307,6 @@ async def resume_after_rejection(
                 retryable=False)
         return {"mode": "human", "started": False, "error": "这条需求没有可续跑的 AI 会话"}
 
-    execution = (await session.execute(select(am.ExecutionSession).where(
-        am.ExecutionSession.ref == ref
-    ).limit(1))).scalar_one_or_none()
-    if execution is not None and execution.workflow_run_id:
-        return {"mode": "workflow", "started": False,
-                "error": "原执行属于已经结束的工作流，请从失败阶段重试"}
     if ref.startswith("conversation:"):
         # Do not send an RPC to a client-only conversation that Hub cannot resume.
         # Persisted feedback enters the client's later execution or follow-up through taskPrompt.

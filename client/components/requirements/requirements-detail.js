@@ -4,6 +4,7 @@
   const R = global.Requirements;
   const pendingSchedules = new Map();
   let identityEpoch = 0;
+  let loadController = null, loadTiming = null;
   let root = null, task = null, seq = 0, returnFocus = null, busy = false, editing = false, files = [], pendingUploads = [];
   let pendingConfirmation = null, evidenceReturnFocus = null, evidenceRequest = 0, editBaseline = null, saving = false;
   let refreshRequest = 0, refreshFlight = null, editVersion = null, mountedTrace = null, refreshPending = false;
@@ -19,10 +20,17 @@
   const sectionIcon = name => global.RequirementFields?.sectionIcon?.(name) || '';
   function errorText(error) {
     return error.status === 409 && /需求已被.*更新/.test(error.message || '') ? '这条需求已被同事更新。请先重新加载，再保存你的修改。' :
-      String(error.message || '操作没有完成，请重试');
+      String(error.message || '操作没有完成，请重试').replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
   }
   function feedback(text) {
     const message = root?.querySelector('[data-rq-error]'); if (message) { message.textContent = text; message.hidden = !text; }
+  }
+  function bundleName(title) {
+    return global.SoduWorkAPI?.artifactZipFilename?.(title) || title + '.zip';
+  }
+  function bundleFeedback(text) {
+    const node = root?.querySelector('[data-rq-bundle-status]');
+    if (node) { node.textContent = text; node.hidden = !text; }
   }
   function editValues() {
     const fields = root?.querySelector('#rqEditForm')?.elements;
@@ -136,6 +144,8 @@
     if (isComments) void loadComments(); else void loadExtensions();
   }
   function finalizeClose() {
+    loadController?.abort(); loadController = null;
+    loadTiming?.mark('cancelled'); loadTiming = null;
     global.ForwardSelect?.destroy(root);
     global.RequirementConfirm?.cancel();
     settleConfirmation(false);
@@ -246,7 +256,7 @@
          * Use one rework entry point: reuse the local conversation when available, otherwise
          * create one with prior delivery, attachment IDs, and feedback.
          */
-        if (task.canViewExecution !== false) {
+        if (task.canContinueExecution === true) {
           const item = task;
           Promise.resolve(close()).then(closed => closed === false ? null : global.openTaskConversation(
             item.id, R.content(item).title, {
@@ -375,27 +385,42 @@
     if (typeof detailId !== "undefined") detailId = String(id || "");
     returnFocus = previousFocus;
     const request = ++seq;
+    loadController = typeof AbortController === 'function' ? new AbortController() : null;
+    const controller = loadController;
+    loadTiming = global.SoduWorkPagePerformance?.interaction?.('requirement-detail');
+    const timing = loadTiming;
     root = mount();
-    root.querySelector('.rq-detail-content').innerHTML = '<p class="rq-detail-loading" role="status">正在加载需求…</p>';
+    const cached = typeof Store !== 'undefined' && ['ready', 'stale'].includes(Store.taskState)
+      ? Store.tasks?.find(row => String(row.id) === String(id)) : null;
+    // Cached content is read-only. All action controls wait for fresh Hub authority.
+    root.querySelector('.rq-detail-content').innerHTML = '<p class="rq-detail-loading" role="status">正在加载需求…</p>' +
+      (cached ? '<section class="rq-detail-section"><h3 data-user-content>' + esc(cached.title) +
+        '</h3><p data-user-content style="white-space:pre-wrap">' + esc(cached.note || '') + '</p></section>' : '');
+    timing?.mark('shell');
     root.querySelector('[data-rq-dismiss]').focus();
     try {
-      const value = await global.SoduWorkAPI.getTask(id);
+      const value = await global.SoduWorkAPI.getTask(id, { signal: controller?.signal });
       if (request !== seq || !root) return;
       if (!value?.id) throw new Error('需求已移除或当前账号无权访问');
       task = value; render();
+      timing?.mark('data');
       root.querySelector('.rq-detail-content').dataset.taskId = id;
       const attachments = await global.SoduWorkAPI.listAttachments(id);
       if (request !== seq || !root || task?.id !== id) return;
       renderAttachments(attachments);
       global.TaskPluginInput?.resume(id);
+      timing?.mark('ready');
     } catch (error) {
       if (request !== seq || !root) return;
+      timing?.mark('failed');
       if (task) feedback(errorText(error));
       else {
         root.querySelector('.rq-detail-content').innerHTML = '<p class="rq-detail-error" role="alert">' +
           esc(errorText(error)) + '</p><button type="button" id="rqLoadRetry">重新加载</button>';
         root.querySelector('#rqLoadRetry').onclick = () => open(id);
       }
+    } finally {
+      if (request === seq) { loadController = null; loadTiming = null; }
     }
   }
   function refresh(id) {
@@ -630,12 +655,14 @@
     // Show persisted rework failures with their feedback and a retry action.
     const reworkPending = task.workRouting && task.workRouting.reworkPending || null;
     const reworkCard = reworkPending ?
-      '<div class="rq-rework-pending" role="status"><b>返修待处理</b><p>' +
-      esc(String(reworkPending.feedback || '').slice(0, 200)) +
-      (reworkPending.error ? '<small>自动返修未启动：' + esc(String(reworkPending.error).slice(0, 80)) + '</small>' : '') +
-      '</p><p class="rq-rework-route">系统会优先续接原执行会话；原会话不可用时自动新开修正会话，上一轮交付会作为输入保留。</p><div class="rq-rework-actions">' +
-      (task.canViewExecution !== false ? '<button type="button" class="rq-primary" data-rq-rework>继续修正</button>' : '') +
-      '</div></div>' : '';
+      '<div class="rq-rework-pending" role="status"><b>返修待处理</b><p><span data-user-content>' +
+      esc(String(reworkPending.feedback || '').slice(0, 200)) + '</span>' +
+      (task.canContinueExecution === true && reworkPending.error ? '<small>自动返修未启动：' + esc(String(reworkPending.error).slice(0, 80)) + '</small>' : '') +
+      '</p><p class="rq-rework-route">' + (task.canContinueExecution === true
+        ? '系统会优先续接原执行会话；原会话不可用时自动新开修正会话，上一轮交付会作为输入保留。'
+        : '等待执行人根据返修意见继续修正。') + '</p>' +
+      (task.canContinueExecution === true ? '<div class="rq-rework-actions"><button type="button" class="rq-primary" data-rq-rework>继续修正</button></div>' : '') +
+      '</div>' : '';
     /*
      * Render exactly one review surface: the creator's Hub card, a creator-direct card when no
      * approval exists, or a waiting notice for every other participant. The executor never gets
@@ -748,13 +775,13 @@
     const storedBundles = outputs.filter(isBundle);
     const deliverables = outputs.filter(file => !isBundle(file));
     const autoBundle = outputs.length >= 2
-      ? [{autoBundle: true, id: '', name: '自动压缩包.zip', size: 0, attachmentIds: outputs.map(file => file.id)}]
+      ? [{autoBundle: true, id: '', name: bundleName(R.content(task).title || task.title || '交付物'), size: 0, attachmentIds: outputs.map(file => file.id)}]
       : [];
     const archive = archived.length ? '<details class="rq-material-group rq-material-archive"><summary>历史轮次 · ' + archived.length + ' 份<small>历史交付与未通过校验的文件，仅供追溯</small></summary>' + archived.map(materialRow).join('') + '</details>' : '';
     node.innerHTML = section('rq-material-input', 'input', '需求资料', [...input, ...other], '创建需求时提供的原始资料') +
       section('rq-material-evidence', 'evidence', '过程证据', evidence, '截图、验证记录和执行过程材料') +
       section('rq-material-output', 'output', '交付物', autoBundle.length ? autoBundle : [...deliverables, ...storedBundles], '仅包含本轮交付文件') +
-      archive +
+      (autoBundle.length ? '<p data-rq-bundle-status role="status" aria-live="polite" hidden></p>' : '') + archive +
       (rework.length ? '<details class="rq-material-group rq-material-rework" data-rq-material-group="rework"><summary>返修参考资料 · ' + rework.length + ' 个<small>仅供返修使用，不计入交付产物</small></summary>' +
         rework.map(materialRow).join('') + '</details>' : '') || '<p>暂无材料</p>';
     if (R.canManageMaterials(task)) node.querySelectorAll('.rq-material').forEach((row, i) => {
@@ -828,10 +855,12 @@
   async function downloadAttachment(id) {
     const file = files.find(row => String(row.id) === id), request = seq;
     if (!file) return;
+    feedback('正在准备下载…');
     try {
       if (!global.soduWorkAPI?.downloadAttachment) throw new Error('当前客户端不支持附件下载');
       const result = await global.soduWorkAPI.downloadAttachment({...file, url: global.SoduWorkAPI.attachmentUrl(file)});
       if (result?.ok === false && !result.cancelled && !result.canceled) throw new Error(result.reason || '下载未完成');
+      if (request === seq) feedback(result?.ok ? '文件已保存到所选位置' : '');
     } catch (error) { if (request === seq) feedback(errorText(error)); }
   }
   async function downloadBundle(button, saveToLibrary = false) {
@@ -839,6 +868,8 @@
     const request = seq;
     button.disabled = true;
     button.setAttribute?.('aria-busy', 'true');
+    feedback('');
+    bundleFeedback('正在准备交付文件…');
     try {
       if (!task || typeof global.SoduWorkAPI?.downloadArtifactsZip !== 'function') throw new Error('当前客户端不支持自动压缩包下载');
       const id = task.id, title = R.content(task).title || task.title || '交付物';
@@ -854,12 +885,14 @@
       if (saveToLibrary) {
         if (!artifact?.id || !global.LibraryTransfer?.saveOutput) throw Error('交付信息暂时不可用，请刷新后重试');
         await global.LibraryTransfer.saveOutput('', { deliveryBundle: true, taskId: id,
-          attachmentIds: ids, artifactVersionId: artifact.id, name: title + '.zip' }, button);
+          attachmentIds: ids, artifactVersionId: artifact.id, name: bundleName(title) }, button);
+        if (request === seq) bundleFeedback('');
       } else {
         const result = await global.SoduWorkAPI.downloadArtifactsZip(id, title, artifact?.id || '');
         if (result?.ok === false && !result.canceled && !result.cancelled) throw Error(result.reason || '下载未完成');
+        if (request === seq) bundleFeedback(result?.ok ? '文件已保存到所选位置' : '');
       }
-    } catch (error) { if (request === seq) feedback(errorText(error)); }
+    } catch (error) { if (request === seq) { feedback(errorText(error)); bundleFeedback(errorText(error)); } }
     finally { button.disabled = false; button.setAttribute?.('aria-busy', 'false'); }
   }
   async function removeAttachment(id) {
@@ -966,14 +999,18 @@
     } finally { if (request === seq) { busy = false; resumePendingRefresh(); } }
   }
   async function openAttachment(id) {
+    const request = seq;
+    feedback('正在打开材料…');
     try {
       const file = files.find(row => String(row.id) === String(id));
       if (!file) throw new Error('材料已更新，请重新加载后再打开');
       if (!global.ConversationAttachments?.openTaskAttachment) throw new Error('当前客户端版本不支持附件预览');
       await ConversationAttachments.openTaskAttachment({ ...file, url: global.SoduWorkAPI.attachmentUrl(file) }, {
-        api: global.soduWorkAPI, say: message => global.petSay?.(message),
+        api: global.soduWorkAPI, isCurrent: () => request === seq,
+        say: message => { if (request === seq) feedback(message); },
       });
-    } catch (error) { feedback(errorText(error)); }
+      if (request === seq) feedback('');
+    } catch (error) { if (request === seq) feedback(errorText(error)); }
   }
   async function save(patch) {
     if (busy || !task) return;

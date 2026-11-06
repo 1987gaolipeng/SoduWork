@@ -10,7 +10,7 @@ const toolArgs = require('../../components/shared/execution-tool-args');
 const preparation = require('../pi-session/tool-preparation');
 const attachmentContract = require('../pi-session/attachment-contract');
 
-function create({ app, ref, record, saved, recordOf = () => record,
+async function create({ app, ref, record, saved, recordOf = () => record,
   artifactDirectory: resolvedDirectory, sendRemote, stopRemote }) {
   // Cloud results are always materialized into a private per-conversation
   // cache. Direct cloud sessions use the cache recorded in the view; a local
@@ -39,7 +39,7 @@ function create({ app, ref, record, saved, recordOf = () => record,
     });
   }
   const runtimeMessages = require('../agent-runtime/runner-messages').create(acc.state);
-  const log = journal.create(app, 'cloud:' + record.transferId);
+  const log = await journal.create(app, 'cloud:' + record.transferId);
   let closed = false, cachedSnapshot = null, cachedUi = null, cachedState;
   function apply(row) {
     if (row.kind === 'message') {
@@ -74,7 +74,7 @@ function create({ app, ref, record, saved, recordOf = () => record,
         ? { ...row.event, args: toolArgs.normalize(row.event) } : row.event);
     }
   }
-  log.restore(Number.MAX_SAFE_INTEGER, apply);
+  await log.restore(Number.MAX_SAFE_INTEGER, apply);
   function emit(kind) {
     const snap = handle.uiSnapshot();
     for (const fn of listeners) { try { fn({ kind }, snap); } catch (_) { /* independent view observers */ } }
@@ -176,7 +176,7 @@ function create({ app, ref, record, saved, recordOf = () => record,
     cancel: typeof stopRemote === 'function' ? (...args) => stopRemote(handle, ...args) : locked,
     selectModel: locked, setAccessPolicy: locked, setThinkingMode: locked,
     continueGoal: locked, disableGoal: locked, updateQueue: locked,
-    close() { closed = true; listeners.clear(); },
+    close() { closed = true; log.close(); listeners.clear(); },
   };
   return handle;
 }

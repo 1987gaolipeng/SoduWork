@@ -219,9 +219,12 @@ async def _cancel_old(session: AsyncSession, task_id: str, stream: str) -> None:
 async def _new_artifact(session: AsyncSession, task: models.Task, *, kind: str,
                         payload: dict, source_ref: str = "", commit: str = "",
                         branch: str = "", target: str = "", url: str = "",
-                        who: str = "SoduWork") -> tuple[am.ArtifactVersion, bool]:
+                        who: str = "SoduWork", automatic_round: int | None = None) -> tuple[am.ArtifactVersion, bool]:
     from . import artifact_version_guard
     await artifact_version_guard.lock_task(session, task.id)
+    if automatic_round is not None:
+        await session.refresh(task)
+        await artifact_version_guard.require_rework_execution(session, task, source_ref, automatic_round)
     digest = _checksum({"kind": kind, **payload})
     existing = (await session.execute(select(am.ArtifactVersion).where(
         am.ArtifactVersion.task_id == task.id,
@@ -289,7 +292,8 @@ async def ensure_code_candidate(session: AsyncSession, task: models.Task, state:
 
 
 async def ensure_output_candidate(session: AsyncSession, task: models.Task, manifest: dict,
-                                  source_ref: str = "", who: str = "SoduWork") -> tuple[am.ArtifactVersion, bool]:
+                                  source_ref: str = "", who: str = "SoduWork",
+                                  automatic_round: int | None = None) -> tuple[am.ArtifactVersion, bool]:
     url = (task.artifact_url or "").strip()
     text = str((manifest or {}).get("text") or "").strip()[:20000]
     kind = ("manual" if (manifest or {}).get("manual") else
@@ -297,7 +301,8 @@ async def ensure_output_candidate(session: AsyncSession, task: models.Task, mani
             "url" if url else "text" if text else "files")
     payload = {**(manifest or {}), "url": url, **({"text": text} if text else {})}
     return await _new_artifact(session, task, kind=kind, payload=payload,
-                               source_ref=source_ref, url=payload["url"], who=who)
+                               source_ref=source_ref, url=payload["url"], who=who,
+                               automatic_round=automatic_round)
 
 
 async def ensure_requirement_candidate(
@@ -380,8 +385,11 @@ async def output_manifest(session: AsyncSession, task: models.Task, *,
 async def ensure_current_output(session: AsyncSession, task: models.Task, *, source_ref: str = "",
                                 workflow_run_id: str = "",
                                 source_refs: list[str] | None = None,
-                                text: str = "", who: str = "SoduWork", allow_empty: bool = False
+                                text: str = "", who: str = "SoduWork", allow_empty: bool = False,
+                                automatic_round: int | None = None
                                 ) -> tuple[am.ArtifactVersion, bool]:
+    from . import delivery_validation
+    await delivery_validation.recheck_components(session, task.id, source_ref=source_ref)
     manifest = await output_manifest(
         session, task, source_ref=source_ref,
         workflow_run_id=workflow_run_id, source_refs=source_refs)
@@ -429,7 +437,8 @@ async def ensure_current_output(session: AsyncSession, task: models.Task, *, sou
     # output batch's producer so rejection can route back to that conversation.
     # Mixed or unverified provenance remains unscoped; never select the latest dispatch.
     producer = source_ref or delivery_manifest.unique_output_source(manifest)
-    return await ensure_output_candidate(session, task, manifest, source_ref=producer, who=who)
+    return await ensure_output_candidate(session, task, manifest, source_ref=producer, who=who,
+                                         automatic_round=automatic_round)
 
 
 async def ensure_request(session: AsyncSession, task: models.Task, artifact: am.ArtifactVersion,

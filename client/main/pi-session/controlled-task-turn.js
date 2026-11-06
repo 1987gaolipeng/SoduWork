@@ -50,6 +50,9 @@ function create({ request, task, spec, scope, interval = 1500, wait = ms => new 
   const route = '/tasks/' + encodeURIComponent(task.id);
   let runId = '', stopping = false, stopAcknowledged = false, stopPromise = null;
   let latest = null;
+  const continuation = spec.continuationRef ? require('./controlled-task-continuation.cjs').create({
+    request, route, ref: spec.continuationRef, scope,
+  }) : null;
   async function cancel() {
     stopping = true;
     if (stopAcknowledged) return { ok: true, accepted: false, stopped: true, alreadyStopped: true };
@@ -78,14 +81,24 @@ function create({ request, task, spec, scope, interval = 1500, wait = ms => new 
     return stopPromise;
   }
   async function execute(handle, text, files) {
-    const output = liveOutput.create(handle, task.id);
+    const outputs = new Map();
     const cursors = new Map();
     async function readOutput(ref) {
       const since = cursors.get(ref) || 0;
       const page = await request(route + '/ai-session?ref=' + encodeURIComponent(ref) + '&since=' + since);
       if (page.ok === false) throw new Error('执行输出暂时不可用');
       if (page.ref && page.ref !== ref) throw new Error('执行输出标识不一致');
-      await output.consume(ref, page.items);
+      // Attribute output to the Hub's execution receipt, never to the queue host or requested selection.
+      const sourceAgent = require('../conversation/agent-source.cjs').normalize({
+        agentId: page.activeExecutionSelection?.agentId || page.engine || page.cli,
+        runId: ref,
+      });
+      if (!outputs.has(ref)) outputs.set(ref, liveOutput.create(handle, task.id, { sourceAgent }));
+      const output = outputs.get(ref);
+      output.setSourceAgent(sourceAgent);
+      const items = continuation ? continuation.items(page) : page.items;
+      // An older Hub can learn the runtime after its first page. Keep already consumed events idempotent.
+      await output.consume(ref, (items || []).filter(item => Number(item.seq) > since));
       const last = Math.max(since, Number(page.last || 0), ...(page.items || []).map(x => Number(x.seq) || 0));
       cursors.set(ref, last);
       return { page, drained: last >= Number(page.seq || last) };
@@ -95,7 +108,8 @@ function create({ request, task, spec, scope, interval = 1500, wait = ms => new 
     if (stopping) return { ok: true, cancelled: true };
     let started;
     try {
-      started = await request(spec.mode === 'workflow' ? route + '/plugin-runs' : route + '/ai-dispatch',
+      started = continuation ? await continuation.start(text, files) :
+        await request(spec.mode === 'workflow' ? route + '/plugin-runs' : route + '/ai-dispatch',
         spec.mode === 'workflow' ? { bindingId: spec.bindingId, inputs: spec.inputs, instruction: text,
           repoId: spec.repoId, execution: spec.context.execution || {}, conversationTurn: scope }
           : { assigneeId: spec.agentId, assigneeType: spec.assigneeType || 'agent', brief: text, repo: spec.repo, model: spec.model,
@@ -154,7 +168,7 @@ function create({ request, task, spec, scope, interval = 1500, wait = ms => new 
       }
       const returnedId = String((spec.mode === 'workflow' ? latest.id || latest.runId : latest.ref || latest.runId) || '');
       if (returnedId && returnedId !== runId) throw new Error('执行记录标识发生变化，请核对需求后再继续队列');
-      const status = outcome(latest, spec.mode);
+      const status = outcome(continuation ? { status: continuation.status(latest) } : latest, spec.mode);
       const waiting = /waiting/.test(latest.state || latest.status || '') ||
         (latest.nodes || []).some(node => /^(waiting_human|waiting_external)$/.test(node.state || ''));
       handle.taskExecutionChanged({ taskId: task.id, runId, executor: spec.mode,
@@ -162,6 +176,10 @@ function create({ request, task, spec, scope, interval = 1500, wait = ms => new 
         status: status || (waiting ? 'waiting' : 'running'),
         run: latest });
       if (drained && status && !(spec.mode === 'workflow' && status === 'failed')) {
+        // Transcript completion does not ingest Runner outputs. Reconcile the
+        // exact execution before acknowledging this controlled conversation turn.
+        if (continuation && status === 'completed')
+          await request(route + '/ai-status?ref=' + encodeURIComponent(runId));
         // Preserve the authoritative failure without copying raw provider envelopes into chat.
         const error = status === 'failed' ? modelErrors.describe(latest.error) : null;
         let reason = error ? modelErrors.forDisplay(latest.error) || '需求执行失败，请检查当前步骤' : '';
@@ -169,7 +187,7 @@ function create({ request, task, spec, scope, interval = 1500, wait = ms => new 
         else if (error?.status === 401 || error?.status === 403) reason += '；请检查模型授权或切换有权限的模型。';
         else if (error?.status === 429) reason += '；请稍后重试或检查模型额度。';
         // A result receipt must never replace the executor's actual answer.
-        if (!output.answers()) handle.appendTaskMessage('assistant', status === 'completed'
+        if (![...outputs.values()].some(output => output.answers())) handle.appendTaskMessage('assistant', status === 'completed'
           ? '需求执行已结束，但执行器没有返回正文。请核对成果后再继续。'
           : reason || '本次需求已停止或未完成，已有过程保留在当前对话中。', [], task.id);
         return { ok: status !== 'failed', cancelled: status === 'stopped',

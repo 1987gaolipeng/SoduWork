@@ -63,6 +63,87 @@ test('controlled Runner compares execution ref, not the database record id', asy
   assert.equal(result.ok,true);assert.equal(messages.length,2);
 });
 
+test('controlled dispatch retains the selected engine and attributes replayed output to the actual Hub receipt', async () => {
+  for (const engine of ['opencode', 'kimi', 'harness2']) {
+    const messages = [], calls = []; let page = 0;
+    const adapter = create({ task: { id: 'assigned' },
+      spec: { mode: 'dispatch', context: {}, agentId: 'runner:device:' + engine }, scope: {}, wait: async () => {},
+      request: async (route, body) => {
+        calls.push({ route, body });
+        if (body) return { ref: 'execution' };
+        page++;
+        return { ref: 'execution', engine, status: page === 1 ? 'running' : 'done', seq: page, last: page,
+          items: Array.from({ length: page }, (_, i) => ({ seq: i + 1, kind: 'say', text: 'Output ' + (i + 1) })) };
+      } });
+    const result = await adapter.execute({ appendTaskMessage: (...args) => messages.push(args), taskExecutionChanged() {} }, 'request', []);
+    assert.equal(result.ok, true);
+    assert.equal(calls.filter(call => call.body).length, 1);
+    assert.equal(calls[0].body.assigneeId, 'runner:device:' + engine);
+    assert.deepEqual(messages.slice(1).map(row => row[1]), ['Output 1', 'Output 2']);
+    for (const row of messages.slice(1)) assert.deepEqual(row[6], { agentId: engine, runId: 'execution' });
+  }
+});
+
+test('requested engines cannot fabricate runtime attribution when Hub metadata is absent or different', async () => {
+  for (const engine of [undefined, 'unknown-runtime', 'qwen']) {
+    const messages = [];
+    const adapter = create({ task: { id: 'assigned' },
+      spec: { mode: 'dispatch', context: {}, agentId: 'local:opencode' }, scope: {},
+      request: async (route, body) => body ? { ref: 'execution' } : {
+        ref: 'execution', engine, status: 'done', seq: 1, items: [{ seq: 1, kind: 'say', text: 'Result' }],
+      } });
+    await adapter.execute({ appendTaskMessage: (...args) => messages.push(args), taskExecutionChanged() {} }, 'request', []);
+    assert.equal(messages[1][6]?.agentId, engine === 'qwen' ? 'qwen' : undefined);
+  }
+});
+
+test('late engine receipts preserve pending legacy tools and replay cursors across workflow executions', async () => {
+  const messages = [], tools = []; let polls = 0;
+  const adapter = create({ task: { id: 'workflow' },
+    spec: { mode: 'workflow', context: {}, bindingId: 'binding' }, scope: {}, wait: async () => {},
+    request: async (route, body) => {
+      if (body) return { id: 'workflow-run' };
+      if (route === '/plugin-runs/workflow-run') {
+        polls++;
+        return { id: 'workflow-run', state: polls === 1 ? 'running' : 'succeeded',
+          nodes: ['one','two'].map(ref => ({executor:{kind:'ai',ref}})) };
+      }
+      const ref = new URL('http://fixture' + route).searchParams.get('ref');
+      const engine = polls === 1 ? undefined : ref === 'one' ? 'opencode' : 'kimi';
+      return { ref, engine, seq: polls === 1 ? 1 : 3, last: polls === 1 ? 1 : 3,
+        items: [{seq:1,kind:'do',tool:'read',text:'file'}, ...(polls === 1 ? [] : [
+          {seq:2,kind:'out',tool:'read',text:'verified'}, {seq:3,kind:'say',text:ref}])] };
+    } });
+  assert.equal((await adapter.execute({ appendTaskMessage: (...args) => messages.push(args),
+    appendTaskTool: item => tools.push(item), taskExecutionChanged() {} }, 'request', [])).ok, true);
+  assert.equal(tools.length,4);
+  for (const ref of ['one','two']) {
+    const rows=tools.filter(item=>item.toolCallId.includes(':'+ref+':'));
+    assert.deepEqual(rows.map(item=>item.type),['tool_execution_start','tool_execution_end']);
+    assert.equal(rows[0].toolCallId,rows[1].toolCallId);
+    assert.equal(rows[1].sourceAgent.agentId,ref==='one'?'opencode':'kimi');
+  }
+  assert.deepEqual(messages.slice(1).map(item=>item[6].agentId),['opencode','kimi']);
+});
+
+test('ten thousand replayed receipts with transient read failures never duplicate dispatch or output', {timeout:10000}, async t => {
+  const messages=[],started=performance.now(); let dispatched=0,reads=0;
+  const adapter=create({task:{id:'load'},spec:{mode:'dispatch',agentId:'local:opencode',context:{}},scope:{},
+    wait:async()=>{assert.ok(reads<150,'polling must make bounded progress');},request:async(route,body)=>{
+      if(body){dispatched++;return{ref:'load-run'};}
+      reads++;if(reads%11===0)throw Error('Transient fixture read failure');
+      const since=Number(new URL('http://fixture'+route).searchParams.get('since'));
+      const last=Math.min(10000,since+100),first=Math.max(1,since-20);
+      return{ref:'load-run',engine:'opencode',status:last===10000?'done':'running',last,seq:10000,
+        items:Array.from({length:last-first+1},(_,i)=>({seq:first+i,kind:'say',text:'Output '+(first+i)}))};
+    }});
+  assert.equal((await adapter.execute({appendTaskMessage:(...args)=>messages.push(args),taskExecutionChanged(){}},'request',[])).ok,true);
+  assert.equal(dispatched,1);assert.equal(messages.length,10001);
+  assert.equal(new Set(messages.slice(1).map(row=>row[1])).size,10000);
+  assert.ok(messages.slice(1).every(row=>row[6]?.agentId==='opencode'));
+  t.diagnostic(JSON.stringify({receipts:10000,reads,elapsedMs:performance.now()-started}));
+});
+
 test('assigned task model failures retain safe actionable diagnostics without rerouting', async () => {
   for (const error of ['404 status code (no body)',
     '模型服务地址或模型不存在（HTTP 404）；请切换可用模型。',
@@ -143,4 +224,112 @@ test('cancel during dispatch waits for acknowledged stop and preserves squad rou
   const running=adapter.execute({appendTaskMessage:()=>{},taskExecutionChanged:()=>{}},'task',[]);
   await adapter.cancel();assert.equal(stopCalls,0);release();
   assert.equal((await running).cancelled,true);assert.equal(reads,1);
+});
+
+test('Runner continuation ignores old completion and publishes only its admitted revision', async () => {
+  const messages = [], calls = [], key = 'comment:revision-2'; let reads = 0;
+  const adapter = create({ task: { id: 't' }, spec: { mode: 'dispatch', continuationRef: 'original' },
+    scope: { conversationId: 'chat', turnId: 'repair' }, wait: async () => {},
+    request: async (url, body) => {
+      calls.push({ url, body });
+      if (url.endsWith('/ai-say')) {
+        assert.equal(body.expectedRef, 'original');
+        assert.equal(body.conversationTurn.conversationId, 'chat');
+        assert.match(body.messageId, /^task-/);
+        return { ok: true, delivery: 'accepted', admissionKey: key };
+      }
+      if (url.includes('/ai-status?')) return { done: true };
+      assert.match(url, /ai-session\?ref=original/);
+      reads++;
+      return reads === 1
+        ? { ref: 'original', status: 'done', admissionKey: 'dispatch:first', seq: 1, last: 1,
+          items: [{ seq: 1, admissionKey: 'dispatch:first', kind: 'say', text: 'Rejected output' }] }
+        : { ref: 'original', status: 'running', admissionKey: 'comment:later', seq: 4, last: 4,
+          items: [{ seq: 2, admissionKey: key, kind: 'say', text: 'Revised output' },
+            { seq: 3, admissionKey: key, kind: 'turn-end', turnState: 'done' },
+            { seq: 4, admissionKey: 'comment:later', kind: 'say', text: 'Another turn' }] };
+    } });
+  const result = await adapter.execute({ appendTaskMessage: (...args) => messages.push(args),
+    taskExecutionChanged() {} }, 'Revise', []);
+  assert.equal(result.ok, true);
+  assert.deepEqual(messages.map(row => row[1]), ['Revise', 'Revised output']);
+  assert.equal(reads, 2);
+  assert.ok(calls.at(-1).url.endsWith('/ai-status?ref=original'));
+  assert.equal(calls.filter(row => row.url.endsWith('/ai-dispatch')).length, 0);
+});
+
+test('uncertain continuation retries the same message and immutable attachment bytes', async t => {
+  const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'continuation-input-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, 'feedback.txt'); fs.writeFileSync(file, 'Original feedback');
+  const calls = [], scope = { conversationId: 'chat', turnId: 'repair' };
+  const continuation = require('../main/pi-session/controlled-task-continuation.cjs').create({
+    route: '/tasks/t', ref: 'original', scope, request: async (_, body) => {
+      calls.push(body);
+      if (calls.length === 1) throw Error('Lost acknowledgement');
+      return { delivery: 'accepted', admissionKey: 'comment:one' };
+    } });
+  await assert.rejects(continuation.start('Revise', [{ path: file, name: 'feedback.txt' }]), /Lost/);
+  scope.turnId = 'recovery'; fs.writeFileSync(file, 'Changed local feedback');
+  await continuation.start('Revise', [{ path: file, name: 'feedback.txt' }]);
+  assert.equal(calls[0].messageId, calls[1].messageId);
+  assert.equal(Buffer.from(calls[1].files[0].data, 'base64').toString(), 'Original feedback');
+  await assert.rejects(continuation.start('Different instruction', []), /原消息/);
+});
+
+test('completed revision retries delivery reconciliation without dispatching another execution', async () => {
+  const scope = { conversationId: 'chat', turnId: 'revision' }, sends = [];
+  let reconciliations = 0;
+  const adapter = create({ task: { id: 't' }, spec: { mode: 'dispatch', continuationRef: 'original' }, scope,
+    request: async (url, body) => {
+      if (url.endsWith('/ai-say')) {
+        sends.push(body); return { delivery: 'accepted', admissionKey: 'comment:revision' };
+      }
+      if (url.includes('/ai-status?')) {
+        if (++reconciliations === 1) throw Error('Delivery temporarily unavailable');
+        return { done: true };
+      }
+      assert.match(url, /ai-session\?ref=original/);
+      return { ref: 'original', status: 'done', admissionKey: 'comment:revision', seq: 2, last: 2,
+        items: [{ seq: 1, kind: 'say', text: 'Revised file', admissionKey: 'comment:revision' },
+          { seq: 2, kind: 'turn-end', turnState: 'done', admissionKey: 'comment:revision' }] };
+    } });
+  const handle = { appendTaskMessage() {}, taskExecutionChanged() {} };
+  await assert.rejects(adapter.execute(handle, 'Revise', []), /Delivery temporarily unavailable/);
+  scope.turnId = 'delivery-recovery';
+  assert.equal((await adapter.execute(handle, 'Revise', [])).ok, true);
+  assert.equal(reconciliations, 2);
+  assert.equal(sends.length, 2);
+  assert.equal(sends[0].messageId, sends[1].messageId);
+});
+
+test('delivery retry rebinds an accepted message while failed execution retry creates a new send', async () => {
+  const calls = [], scope = { conversationId: 'chat', turnId: 'first' };
+  const continuation = require('../main/pi-session/controlled-task-continuation.cjs').create({
+    route: '/tasks/t', ref: 'original', scope, request: async (_, body) => {
+      calls.push(body);
+      return { delivery: 'accepted', admissionKey: 'comment:' + body.messageId };
+    } });
+  const first = await continuation.start('Revise', []);
+  continuation.items({ items: [{ kind: 'turn-end', turnState: 'done', admissionKey: first.admissionKey }] });
+  scope.turnId = 'delivery-recovery';
+  const restored = await continuation.start('Revise', []);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].messageId, calls[1].messageId);
+  assert.equal(calls[1].conversationTurn.turnId, 'delivery-recovery');
+  assert.equal(restored.admissionKey, first.admissionKey);
+
+  const failedScope = { conversationId: 'chat', turnId: 'failed' };
+  const failed = require('../main/pi-session/controlled-task-continuation.cjs').create({
+    route: '/tasks/t', ref: 'original', scope: failedScope, request: async (_, body) => {
+      calls.push(body); return { delivery: 'accepted', admissionKey: 'comment:' + body.messageId };
+    } });
+  const error = await failed.start('Revise', []);
+  assert.equal(failed.status({ status: 'failed', admissionKey: error.admissionKey }), 'failed');
+  failedScope.turnId = 'execution-retry';
+  const retried = await failed.start('Revise', []);
+  assert.notEqual(retried.admissionKey, error.admissionKey);
+  assert.notEqual(calls[2].messageId, calls[3].messageId);
+  assert.equal(failed.status({ status: 'running', admissionKey: retried.admissionKey }), 'running');
 });

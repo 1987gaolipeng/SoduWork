@@ -16,7 +16,7 @@ async def _legacy_rework_contexts(session, pairs, rejected_rows):
     The immutable reviewed files establish provenance. Later work or a deliberate pool
     return settles that review; this projection never updates the task or review history.
     """
-    from . import ai_exec, delivery_manifest, task_rework
+    from . import ai_exec, delivery_manifest
 
     eligible = {}
     for task, api in pairs:
@@ -51,10 +51,15 @@ async def _legacy_rework_contexts(session, pairs, rejected_rows):
     if not anchors:
         return {}
     # Do not count task.execution_started: rejection itself may reopen a done task.
-    settled_kinds = (*task_rework._SETTLED_KINDS, *ai_exec.KINDS_DISPATCHED, "conversation.turn")
-    settled = (await session.scalars(select(models.TaskEvent.task_id).where(
+    # A failed automatic retry or an old turn's late completion leaves human
+    # rework outstanding. Only new execution or an explicit pool return settles it.
+    settled_kinds = ("ai.rework", "ai.rework_taken", "review.returned_to_backlog",
+                     *ai_exec.KINDS_DISPATCHED, "conversation.turn")
+    events = (await session.scalars(select(models.TaskEvent).where(
         models.TaskEvent.kind.in_(settled_kinds), or_(*anchors),
-    ).distinct())).all()
+    ))).all()
+    settled = {event.task_id for event in events if event.kind != "conversation.turn"
+               or (event.detail or {}).get("state") == "queued"}
     return {task_id: context for task_id, context in contexts.items() if task_id not in settled}
 
 

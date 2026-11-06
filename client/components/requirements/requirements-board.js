@@ -133,6 +133,8 @@
     if (!force && signature === state.signature) return; state.signature = signature;
     const body = root.querySelector('.hb-body'), top = body.scrollTop;
     const left = body.querySelector('.rq-kanban')?.scrollLeft || 0, tableLeft = body.querySelector('.rq-table-wrap')?.scrollLeft || 0;
+    const ganttScroll = body.querySelector('.gv-body');
+    const ganttPosition = { left: ganttScroll?.scrollLeft || 0, top: ganttScroll?.scrollTop || 0 };
     const scrolls = [...body.querySelectorAll('.rq-lane-cards')].map(node => [node.id, node.scrollTop]);
     const focused = document.activeElement;
     const focusAttribute = focused && body.contains(focused) ? ['data-rq-open','data-rq-actions','data-rq-assign','data-rq-more','data-gvod','id'].find(name => focused.hasAttribute(name)) : '';
@@ -172,15 +174,16 @@
     else if (state.view === 'gantt' && global.GanttView) {
       const today = new Date(); if (state.year == null) { state.year = today.getFullYear(); state.month = today.getMonth(); }
       body.innerHTML = GanttView.html(list.map(task => ({label:R.content(task).title,sub:task.assigneeName || '',tasks:[{...task,...R.content(task),createdAt:task.createdAt || task.created}]})), {
-        year:state.year,month:state.month,onlyOverdue:state.onlyOverdue,labelHead:'需求',clickAttr:'data-rq-open'});
+        year:state.year,month:state.month,onlyOverdue:state.onlyOverdue,labelHead:'需求',clickAttr:'data-rq-open',taskRows:true});
       body.querySelectorAll('[data-rq-open]').forEach(node => { node.tabIndex = 0; node.setAttribute('role','button'); });
     } else body.innerHTML = state.view === 'list' ? V.list(list, state, ctx) : V.board(list, state, ctx);
     if (state.view === 'kanban' && state.group === 'stage') {
       /* RequirementsView predates execution-boundary drops and only marks
          triage cards draggable. Enable the two authoritative transitions as
          well; the drop handler still validates the exact current stage. */
+      const byId = new Map(data.map(row => [String(row.id), row]));
       body.querySelectorAll('[data-hbid]').forEach(card => {
-        const task = data.find(row => String(row.id) === card.dataset.hbid);
+        const task = byId.get(card.dataset.hbid);
         const canDrag = Boolean(task && (R.canTriage(task) ||
           moveAction(task, 'reviewing') || moveAction(task, 'delivered')));
         card.draggable = canDrag && state.movingId !== card.dataset.hbid;
@@ -189,6 +192,7 @@
     body.scrollTop = top;
     const board = body.querySelector('.rq-kanban'); if (board) board.scrollLeft = left;
     const table = body.querySelector('.rq-table-wrap'); if (table) table.scrollLeft = tableLeft;
+    const gantt = body.querySelector('.gv-body'); if (gantt) { gantt.scrollLeft = ganttPosition.left; gantt.scrollTop = ganttPosition.top; }
     scrolls.forEach(([id,position]) => { const lane = document.getElementById(id); if (lane) lane.scrollTop = position; });
     if (focusAttribute) [...body.querySelectorAll('[' + focusAttribute + ']')].find(node => node.getAttribute(focusAttribute) === focusId)?.focus({preventScroll:true});
   }

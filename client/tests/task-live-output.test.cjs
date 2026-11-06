@@ -101,18 +101,18 @@ test('cloud file do events preserve file paths, structured arguments and semanti
   assert.deepEqual(tools[5].args, { detail: filename });
 });
 
-test('existing cloud tool journals repair only unambiguous command-only file inputs on replay', t => {
+test('existing cloud tool journals repair only unambiguous command-only file inputs on replay', async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-cloud-tool-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const app = { getPath: () => root }, filename = '云端运行验证.html';
-  const journal = require('../main/conversation/task-output-journal').create(app, 'cloud:legacy-file-inputs');
+  const journal = await require('../main/conversation/task-output-journal').create(app, 'cloud:legacy-file-inputs');
   for (const [i, toolName] of ['write', 'read', 'edit', 'bash', 'mcp__read'].entries()) {
     journal.append(0, { kind: 'tool', event: { type: 'tool_execution_start', toolCallId: String(i),
       toolName, args: { command: filename } } });
     journal.append(0, { kind: 'tool', event: { type: 'tool_execution_end', toolCallId: String(i),
       toolName, result: { content: [{ type: 'text', text: 'complete' }] } } });
   }
-  const view = require('../main/conversation/cloud-conversation-view').create({ app, ref: 'view',
+  const view = await require('../main/conversation/cloud-conversation-view').create({ app, ref: 'view',
     record: { transferId: 'legacy-file-inputs', sessionId: 'session', taskId: 'task' },
     saved: { cwd: root, adapterId: 'pi', snapshot: { messages: [] } } });
   const tools = view.snapshot().tools;
@@ -170,29 +170,29 @@ test('workflow forwards each node attempt, holds on approval and retries transie
   assert.deepEqual(acc.snapshot().messages.slice(1).map(m => m.blocks[0].text), ['attempt1', 'attempt2']);
 });
 
-test('Runner journal restores task interleaving and forwards context only until accepted', t => {
+test('Runner journal restores task interleaving and forwards context only until accepted', async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-task-journal-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const make = () => require('../main/conversation/task-output-journal').create({ getPath: () => root }, 'runner:test');
-  const journal = make();
+  const journal = await make();
   journal.append(3, { kind: 'message', role: 'assistant', text: 'actual answer', taskId: 't' });
   journal.append(3, { kind: 'tool', event: { type: 'tool_execution_end' } });
-  assert.match(journal.context(), /actual answer/);
-  const restored = make(), rows = [];
-  restored.restore(2, x => rows.push(x)); assert.equal(rows.length, 0);
-  restored.restore(3, x => rows.push(x)); assert.equal(rows.length, 2);
-  restored.restore(4, x => rows.push(x)); assert.equal(rows.length, 2);
-  restored.append(4, { kind: 'context-sent' }); assert.equal(make().context(), '');
+  assert.match(await journal.context(), /actual answer/);
+  const restored = await make(), rows = [];
+  await restored.restore(2, x => rows.push(x)); assert.equal(rows.length, 0);
+  await restored.restore(3, x => rows.push(x)); assert.equal(rows.length, 2);
+  await restored.restore(4, x => rows.push(x)); assert.equal(rows.length, 2);
+  restored.append(4, { kind: 'context-sent' }); assert.equal(await (await make()).context(), '');
 });
 
-test('passive cloud replay preserves native reasoning and usage once across pages and reopening', t => {
+test('passive cloud replay preserves native reasoning and usage once across pages and reopening', async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-cloud-thought-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const make = () => require('../main/conversation/cloud-conversation-view').create({
     app: { getPath: () => root }, ref: 'cloud-test', record: { transferId: 'test', sessionId: 'test', taskId: 't' },
     saved: { cwd: root, adapterId: 'pi', snapshot: { messages: [] } },
   });
-  const handle = make(), output = live.create(handle, 't', { includeUser: true });
+  const handle = await make(), output = live.create(handle, 't', { includeUser: true });
   const first = [
     { seq: 1, kind: 'user', text: 'Make a report', round: 1 },
     { seq: 2, kind: 'thinking', streamId: 'pi:11:0', text: 'Let', delta: true, done: false, round: 1 },
@@ -213,7 +213,7 @@ test('passive cloud replay preserves native reasoning and usage once across page
   assert.equal(snapshot.messages[1].done, true);
   assert.equal(snapshot.messages[2].usage.totalTokens, 30);
   handle.close();
-  const reopened = make();
+  const reopened = await make();
   live.create(reopened, 't', { includeUser: true }).consume('r', first.concat(last));
   snapshot = reopened.snapshot();
   assert.equal(snapshot.messages.length, 3); assert.equal(snapshot.tools.length, 0);

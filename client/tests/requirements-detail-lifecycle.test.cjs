@@ -10,6 +10,21 @@ const source = fs.readFileSync(path.join(__dirname, '../components/requirements/
 const deferred = () => { let resolve; const promise = new Promise(r => {resolve = r;}); return {promise, resolve}; };
 const task = id => ({id, title: 'Requirement ' + id, status: 'todo', triageStage: 'ready',
   canViewExecution: true, canEditRequirement: false});
+
+test('cached detail is read-only while Hub is delayed and close aborts its request', async () => {
+  const pending = deferred(); let signal;
+  const f = fixture({ getTask: (_id, options) => { signal = options.signal; return pending.promise; } });
+  f.context.AbortController = AbortController;
+  f.context.Store = { taskState: 'ready', tasks: [{ ...task('a'), title: '<Cached title>', canEditRequirement: true }] };
+  const opening = f.api.open('a');
+  const content = f.active().querySelector('.rq-detail-content');
+  assert.match(content.innerHTML, /Cached title/);
+  assert.doesNotMatch(content.innerHTML, /data-rq-edit|data-rq-execute|data-rq-accept/);
+  f.api.close();
+  assert.equal(signal.aborted, true);
+  pending.resolve(task('a')); await opening;
+  assert.equal(f.active(), undefined);
+});
 function fixture(overrides = {}) {
   const roots = [], calls = [], events = {};
   class Node {
@@ -330,8 +345,8 @@ test('需求资料、过程证据、交付物和返修资料分组折叠展示�
     assert.match(html, new RegExp(label));
   }
   assert.match(html, /data-rq-bundle-download/);
-  assert.match(html, /自动压缩包/);
-  assert.match(html, /自动压缩包\.zip/);
+  assert.match(html, /Requirement material-groups\.zip/);
+  assert.doesNotMatch(html, /自动压缩包\.zip/);
   assert.doesNotMatch(html, /data-rq-file-id="output-[abc]"/);
   assert.match(html, /交付物 · 1 份/);
 });
@@ -680,7 +695,7 @@ test('delivery badge distinguishes accepted-but-stalled from fully closed', asyn
 });
 
 test('pending rework feedback is rendered as a visible card', async () => {
-  const f = fixture({getTask: async id => ({...task(id), status: 'doing',
+  const f = fixture({getTask: async id => ({...task(id), status: 'doing', canContinueExecution: true,
     workRouting: {reworkPending: {feedback: '驳回：地图边界穿帮', error: '这个本地会话已经不在了'}}})});
   await f.api.open('rework');
   const html = f.content().innerHTML;
@@ -693,9 +708,9 @@ test('pending rework feedback is rendered as a visible card', async () => {
   assert.doesNotMatch(f.active().querySelector('.rq-detail-footer').innerHTML, /data-rq-chat/);
 });
 
-test('返修入口在非原执行设备也能自动选择续接或新会话', async () => {
+test('authorized executor can continue rework from a permitted device', async () => {
   const calls = [];
-  const f = fixture({clientId: 'device-other', getTask: async id => ({...task(id), status: 'doing',
+  const f = fixture({clientId: 'device-other', getTask: async id => ({...task(id), status: 'doing', canContinueExecution: true,
     ownerClientId: 'device-owner', workRouting: {reworkPending: {feedback: '修正文案'}}})});
   f.context.openTaskConversation = (...args) => { calls.push(args); return Promise.resolve(true); };
   await f.api.open('remote-rework');
@@ -705,6 +720,20 @@ test('返修入口在非原执行设备也能自动选择续接或新会话', as
   assert.equal(calls[0][2].source, 'rework');
   assert.equal(calls[0][2].forceNew, false);
   assert.equal(calls[0][2].reworkSession, true);
+});
+
+test('shared viewers and creators cannot invoke rework through a stale detail button', async () => {
+  for (const permission of [false, undefined]) {
+    const calls = [];
+    const f = fixture({getTask: async id => ({...task(id), status: 'doing', canViewExecution: true,
+      canContinueExecution: permission, workRouting: {reworkPending: {feedback: 'Revise the output'}}})});
+    f.context.openTaskConversation = (...args) => { calls.push(args); return Promise.resolve(true); };
+    await f.api.open('shared-rework');
+    assert.doesNotMatch(f.content().innerHTML, /data-rq-rework>/);
+    f.click('[data-rq-rework]');
+    await new Promise(setImmediate);
+    assert.equal(calls.length, 0);
+  }
 });
 
 test('跨执行会话的同名产物按最新交付批次展示，旧批次进入过程留档', async () => {

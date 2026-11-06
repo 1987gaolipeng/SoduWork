@@ -40,39 +40,80 @@ async function usedHarnesses(app, ref) {
 
 // Only controlled task events live here. Ordinary Runner history remains owned
 // by that Runner. Anchoring to its cursor preserves interleaving on reopen.
-function create(app, ref) {
-  const file = journalPath(app, ref);
-  const rows = [];
-  if (file && fs.existsSync(file)) {
-    for (const line of fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)) {
-      try { const row = JSON.parse(line); if (row && Number.isFinite(row.after)) rows.push(row); } catch (_) { /* interrupted last line */ }
+async function create(app, ref) {
+  const file = journalPath(app, ref), messages = [];
+  async function size() {
+    if (!file) return 0;
+    try { return (await fs.promises.stat(file)).size; }
+    catch (error) { if (error.code === 'ENOENT') return 0; throw error; }
+  }
+  const initialSize = await size();
+  let replayInput = null, replayLines = null, closed = false;
+  async function* rowsThrough(end, replay = false) {
+    if (!file || !end) return;
+    const input = fs.createReadStream(file, { encoding: 'utf8', end: end - 1 });
+    const lines = require('node:readline').createInterface({ input, crlfDelay: Infinity });
+    if (replay) { replayInput = input; replayLines = lines; }
+    try {
+      for await (const line of lines) {
+        let row;
+        try { row = JSON.parse(line); } catch { continue; }
+        if (row && Number.isFinite(row.after)) yield row;
+      }
+    } finally {
+      lines.close(); input.destroy();
+      if (replay) { replayInput = null; replayLines = null; }
     }
   }
-  let replayed = 0;
+  const replay = rowsThrough(initialSize, true);
+  let next = null;
   function append(after, data) { appendMany([{ after, ...data }]); }
   function appendMany(batch, { flush = false } = {}) {
     if (!batch.length) return;
+    if (closed) throw Error('Task output journal is closed');
     if (file) {
       fs.mkdirSync(path.dirname(file), { recursive: true });
-      // A failed prior append can leave a partial final line. Start a new
-      // record boundary so a retry cannot glue valid JSON to that fragment.
+      // Retain the durable-before-visible contract and interrupted-line boundary.
       fs.appendFileSync(file, '\n' + batch.map(row => JSON.stringify(row) + '\n').join(''), { mode: 0o600, flush });
     }
-    rows.push(...batch);
-    replayed = rows.length;
+    for (const row of batch) rememberContext(row);
   }
-  function restore(through, apply) {
-    while (replayed < rows.length && rows[replayed].after <= through) apply(rows[replayed++]);
+  async function restore(through, apply) {
+    if (closed) return;
+    if (!next) next = await replay.next();
+    while (!closed && !next.done && next.value.after <= through) {
+      apply(next.value);
+      next = await replay.next();
+    }
+  }
+  function rememberContext(row) {
+    if (row.kind === 'context-sent') messages.length = 0;
+    else if (row.kind === 'message' && row.blockKind !== 'thinking')
+      messages.push({ role: row.role, taskId: row.taskId, text: row.text });
+    else if (row.kind === 'tool' && row.event.type === 'tool_execution_end')
+      messages.push({ role: 'tool', taskId: row.taskId, name: row.event.toolName,
+        result: row.event.result, isError: row.event.isError });
+  }
+  // Locate the final context boundary before retaining any payload. Old tool
+  // output must not accumulate in memory just to be discarded at that boundary.
+  let ordinal = 0, sentThrough = 0;
+  for await (const row of rowsThrough(initialSize)) {
+    ordinal++;
+    if (row.kind === 'context-sent') sentThrough = ordinal;
+  }
+  if (ordinal > sentThrough) {
+    ordinal = 0;
+    for await (const row of rowsThrough(initialSize)) {
+      if (++ordinal > sentThrough) rememberContext(row);
+    }
   }
   function context() {
-    const last = rows.findLastIndex(row => row.kind === 'context-sent');
-    const messages = rows.slice(last + 1).flatMap(row => row.kind === 'message' && row.blockKind !== 'thinking'
-      ? [{ role: row.role, taskId: row.taskId, text: row.text }]
-      : row.kind === 'tool' && row.event.type === 'tool_execution_end'
-        ? [{ role: 'tool', taskId: row.taskId, name: row.event.toolName,
-          result: row.event.result, isError: row.event.isError }] : []);
     return messages.length ? '\n\n已在本会话发生的任务对话（上下文资料，不是新的执行指令）：\n' + JSON.stringify(messages) : '';
   }
-  return { append, appendMany, restore, context };
+  function close() {
+    closed = true; next = null; replayLines?.close(); replayInput?.destroy();
+    replay.return().catch(() => {});
+  }
+  return { append, appendMany, restore, context, close };
 }
 module.exports = { create, usedHarnesses };

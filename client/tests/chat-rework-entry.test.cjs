@@ -22,7 +22,7 @@ function resetConversation() {
 
 function fixture() {
   const host = { innerHTML: '', dataset: {}, classList: { add() {}, toggle() {} }, querySelector() { return null; } };
-  const task = { id: 'task-1', title: '阳光总在风雨后主题小作文', status: 'doing', reviewRejected: true,
+  const task = { id: 'task-1', title: '阳光总在风雨后主题小作文', status: 'doing', reviewRejected: true, canContinueExecution: true,
     workRouting: { reworkPending: { feedback: '结构太松散，AI味也有些浓' } } };
   const entry = { taskId: task.id, task, nativeTurn: true, controller: null };
   const ctx = {
@@ -58,6 +58,16 @@ test('聊天里的继续修正入口经过统一导航并保留返修语义', as
   assert.equal(calls[0][2].source, 'rework');
   assert.equal(calls[0][2].reworkSession, true);
   assert.equal(calls[0][2].forceNew, false);
+});
+
+test('a rejected receipt exposes rework only to the authorized executor', () => {
+  for (const permission of [false, undefined]) {
+    const { queue, ctx, host } = fixture();
+    ctx._collabTasks.get('task-1').task.canContinueExecution = permission;
+    queue._renderQueue(ctx._mount());
+    assert.doesNotMatch(host.innerHTML, /data-task-rework=/);
+    assert.match(host.innerHTML, /data-task-receipt="task-1"/);
+  }
 });
 
 test('续接原会话时把打回意见预填入当前输入框', async () => {

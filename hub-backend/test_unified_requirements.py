@@ -6,6 +6,7 @@ import shutil
 import tempfile
 import unittest
 import uuid
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -21,21 +22,56 @@ from app.db import Base, get_session
 from app.deps import current_ai_client, current_client
 from app.services import device_auth, org_memory, task_access, task_requirements, task_status, task_notifications
 from app.memory_record_models import MemoryRecord
-from app import automation_models, library_models, session_memory_models, conversation_handoff_models
-from tests.sqlite_schema import create_fresh_sqlite_schema
+from app import (  # noqa: F401 - register the complete schema before creating the fixture
+    account_models, account_privacy_models, automation_models, conversation_handoff_models,
+    library_models, mail_models, project_context_models, repository_issue_models,
+    session_memory_models, task_notification_models,
+)
+
+
+
+
+_SCHEMA_ROOT = Path(tempfile.mkdtemp(prefix="soduwork-requirements-schema-"))
+_SCHEMA_TEMPLATE = _SCHEMA_ROOT / "schema.db"
+
+
+def _schema_template():
+    if not _SCHEMA_TEMPLATE.exists():
+        schema_engine = create_engine("sqlite:///" + _SCHEMA_TEMPLATE.as_posix())
+        try:
+            with schema_engine.connect() as connection:
+                connection.exec_driver_sql("BEGIN")
+                Base.metadata.create_all(connection)
+                connection.commit()
+        finally:
+            schema_engine.dispose()
+    return _SCHEMA_TEMPLATE
+
+
+atexit.register(lambda: shutil.rmtree(_SCHEMA_ROOT, ignore_errors=True))
+
+
+async def _dispose_fixture_engine(test):
+    engine = getattr(test, "engine", None)
+    if engine is not None:
+        await engine.dispose()
 
 
 class UnifiedRequirementTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="soduwork-requirements-test-")
         self.addCleanup(self.temp.cleanup)
-        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-        async def close_engine():
-            await self.engine.dispose()
-        self.addAsyncCleanup(close_engine)
+        memory_name = "soduwork_requirements_" + uuid.uuid4().hex
+        self._schema_anchor = sqlite3.connect(
+            f"file:{memory_name}?mode=memory&cache=shared", uri=True,
+        )
+        self.addCleanup(self._schema_anchor.close)
+        with closing(sqlite3.connect(_schema_template())) as source:
+            source.backup(self._schema_anchor)
+        database_url = f"sqlite+aiosqlite:///file:{memory_name}?mode=memory&cache=shared&uri=true"
+        self.engine = create_async_engine(database_url)
+        self.addAsyncCleanup(_dispose_fixture_engine, self)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
-        async with self.engine.begin() as connection:
-            await create_fresh_sqlite_schema(connection, Base.metadata)
         self.clients = {}
         async with self.sessions() as session:
             session.add_all([models.OrgUnit(id="company", name="Company"), models.OrgUnit(id="other", name="Other")])
@@ -298,7 +334,7 @@ class UnifiedRequirementTests(unittest.IsolatedAsyncioTestCase):
             await session.commit()
         from types import SimpleNamespace
         artifact = SimpleNamespace(id="artifact-review")
-        request = SimpleNamespace(id="request-review")
+        request = SimpleNamespace(id="request-review", status="pending")
         with patch("app.services.release_control.ensure_current_output",
                    new_callable=AsyncMock, return_value=(artifact, False)) as ensure_output, \
              patch("app.services.release_control.ensure_request",

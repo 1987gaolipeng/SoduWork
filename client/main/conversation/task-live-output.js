@@ -8,7 +8,7 @@ const attachmentContract = require('../pi-session/attachment-contract');
 // Translate executor events into the SAME message/tool contract as an ordinary
 // turn. Cursors and tool identities are scoped to an execution, never a task title.
 function create(handle, taskId, options = {}) {
-  const source = agentSource.fields(options.sourceAgent);
+  let source = agentSource.fields(options.sourceAgent);
   const visibleText = (value, final = true) => ['codex-harness', 'codex'].includes(source.sourceAgent?.agentId)
     ? require('../agent-runtime/assistant-text.cjs').cleanStream(value, final) : value;
   const cursors = new Map(), pending = new Map();
@@ -187,7 +187,9 @@ function create(handle, taskId, options = {}) {
       return rollback(error);
     }
   }
-  return { consume, finish, lastText: ref => lastTexts.get(ref) || '', answers: () => answers,
+  // Late authoritative metadata must not reset cursors, pending tools, or text buffers.
+  function setSourceAgent(value) { source = agentSource.fields(value); }
+  return { consume, finish, setSourceAgent, lastText: ref => lastTexts.get(ref) || '', answers: () => answers,
     text: ref => [...(transcripts.get(ref)?.values() || [])].filter(Boolean).join('\n\n') };
 }
 

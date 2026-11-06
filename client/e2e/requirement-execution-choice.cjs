@@ -602,8 +602,16 @@ if (typeof electron === 'string') {
       assert.equal((await state()).choice.id,'local:codex');assert.equal((await state()).plugin,'');
       await js(`window.enabledPending=[...document.querySelectorAll('#fwdPop button,#fwdPop input,#fwdPop textarea,#fwdPop select')]
         .filter(e=>!e.disabled&&e.getClientRects().length);enabledPending.at(-1).focus();void 0;`);await key('Tab');
+      // Dispatch locks the tabs as well as selectors. The close control is the
+      // only focus target, so both Tab directions must remain on that control.
+      row.pendingFocusableCount=await js('enabledPending.length');
+      assert.equal(row.pendingFocusableCount,1);
       assert.equal(await js(`document.activeElement===enabledPending[0]`),true);
-      await key('Tab');assert.equal(await js(`document.activeElement===enabledPending[1]`),true);
+      await key('Tab');
+      assert.equal(await js(`document.activeElement===enabledPending[0]`),true);
+      for(const type of ['keyDown','keyUp'])win.webContents.sendInputEvent({type,keyCode:'Tab',modifiers:['shift']});
+      await js('new Promise(r=>requestAnimationFrame(()=>r(true)))');
+      assert.equal(await js(`document.activeElement===enabledPending[0]`),true);
       await key('Escape');assert.equal(await js(`Boolean(document.querySelector('#fwdPop'))`),true);
       row.pendingScreenshot=await screenshot('direct-controls-pending');
       await js(`releaseBusy({ok:false,reason:'隔离执行端暂未接单'});void 0;`);

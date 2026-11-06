@@ -196,7 +196,7 @@
           : rt.reviewedAt ? (rtEng ? '已验收 · 等待合并' : '已验收 · 办结中')
           : rt.reviewRejected ? '已打回 · 等待返修'
           : '已返回结果 · 待需求验收';
-        const reworkAction = rt.reviewRejected
+        const reworkAction = rt.reviewRejected && rt.canContinueExecution === true
           ? '<button type="button" class="nqueue-rework-action" data-task-rework="' + ctx.esc(entry.taskId) + '">继续修正</button>'
           : '';
         return '<div class="nqueue-receipt"><span aria-hidden="true">✓</span><span>' + ctx.esc(entry.task.title || '需求') +

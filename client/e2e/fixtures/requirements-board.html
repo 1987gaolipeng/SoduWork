@@ -34,7 +34,8 @@ Object.assign(tasks.find(t=>t.id==='ready-0'),{updatedAt:Date.now()+60000});
 Object.assign(tasks.find(t=>t.id==='ready-1'),{createdAt:Date.now()+120000,updatedAt:Date.now()-600000});
 Object.assign(tasks.find(t=>t.id==='ready-2'),{assigneeName:'',assigneeUserId:null,projectId:null,projectName:'',kind:'bug',due:fixtureDay(-1),createdByName:'提出人不是负责人'});
 Object.assign(tasks.find(t=>t.id==='ready-3'),{due:null});
-tasks.push({...tasks[0],id:'approval-only',title:'核对新的交付成果',status:'doing',triageStage:'ready',requirementStage:'reviewing',myRoles:['requester'],ai:{state:'done',name:'OpenCode'}});
+// Review fixtures must model the creator-owned permission returned by the Hub.
+tasks.push({...tasks[0],id:'approval-only',title:'核对新的交付成果',status:'doing',triageStage:'ready',requirementStage:'reviewing',myRoles:['creator'],canReview:true,ai:{state:'done',name:'OpenCode'}});
 tasks.push({...tasks[0],id:'ai-returned',title:'智能体返回内容尚未提交验收',status:'doing',triageStage:'ready',ai:{state:'done',name:'Pi'}});
 tasks.push({...tasks[0],id:'paused-work',title:'等待外部材料的进行中工作',status:'paused',triageStage:'ready'});
 tasks.push({...tasks[0],id:'shared-only',title:'团队共享的需求',myRoles:[],canEditRequirement:false,canViewExecution:false,readOnly:true});

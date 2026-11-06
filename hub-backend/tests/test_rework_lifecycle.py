@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app import automation_models as am, models
+from app import conversation_handoff_models as _conversation_handoff_models
 from app.db import Base
 from app.services import execution_sessions, task_rework
 
@@ -100,10 +101,8 @@ class ReworkLifecycleApi(_Base):
             self.assertTrue(any(cid == "dev-1" and "驳回" in p.get("text", "")
                                 for cid, p in notices))
 
-    async def test_reject_to_ai_conversation_terminal_flow(self):
-        """toAI=true with a client session skips unreachable RPC and records terminal fallback with
-        reusable feedback.
-        """
+    async def test_reject_to_ai_conversation_waits_for_executor(self):
+        """Rejection retains feedback without authorizing a new execution."""
         async with self.sessions() as session:
             await self._fixture(session, task_id="t-conv", status="done",
                                 source_ref="conversation:sess-9")
@@ -112,21 +111,173 @@ class ReworkLifecycleApi(_Base):
                 note="驳回：缺用药说明", to_ai=True)
             fresh = await session.get(models.Task, "t-conv")
             card = dict(fresh.work_routing or {}).get("reworkPending") or {}
-            self.assertEqual(card.get("state"), "failed")       # Client-hosted conversations produce terminal fallback.
+            self.assertEqual(card.get("state"), "awaiting_executor")
             self.assertEqual(fresh.status, "doing")
-            self.assertIn("客户端", card.get("error") or "")
-            self.assertEqual(card.get("attempts"), 1)
+            self.assertNotIn("error", card)
+            self.assertEqual(card.get("attempts"), 0)
             self.assertEqual(card.get("feedback"), "驳回：缺用药说明")
             self.assertNotIn("ai.rework_pending", await self._kinds(session, "t-conv"))
-            self.assertIn("ai.rework_exhausted", await self._kinds(session, "t-conv"))
-            # Report that rework did not start rather than claiming AI resumed successfully.
-            self.assertTrue(any(cid == "dev-1" and "未启动" in p.get("text", "")
+            self.assertNotIn("ai.rework_exhausted", await self._kinds(session, "t-conv"))
+            self.assertTrue(out["rework"]["waitingForExecutor"])
+            self.assertTrue(any(cid == "dev-1" and "驳回" in p.get("text", "")
                                 for cid, p in notices))
             rejected = (await session.execute(
                 select(models.TaskEvent).where(
                     models.TaskEvent.task_id == "t-conv",
                     models.TaskEvent.kind == "artifact.rejected"))).scalars().all()
             self.assertFalse((rejected[0].detail if rejected else {}).get("toAI"))
+
+    async def test_manual_rejection_without_resumable_source_keeps_executor_rework_entry(self):
+        async with self.sessions() as session:
+            await self._fixture(session, task_id="t-manual", status="done", source_ref="")
+            await self._reject_via_api(session, task_id="t-manual", to_ai=True)
+            fresh = await session.get(models.Task, "t-manual")
+            self.assertEqual(fresh.status, "doing")
+            pending = dict(fresh.work_routing or {}).get("reworkPending") or {}
+            self.assertEqual(pending.get("feedback"), "驳回：缺少药材图谱")
+            self.assertEqual(pending.get("state"), "awaiting_executor")
+            self.assertEqual(pending.get("ref"), "")
+
+    async def test_online_runner_rejection_never_launches_or_retries_without_executor(self):
+        from app.services import ai_exec, task_requirements, tasks
+        from unittest.mock import Mock
+        import subprocess
+        from pathlib import Path
+        async with self.sessions() as session:
+            task = await self._fixture(session, task_id="t-online", source_ref="runner:online")
+            task.kind = "requirement"
+            task.triage_stage = "ready"
+            await session.commit()
+            send = Mock(side_effect=AssertionError("Rejection cannot start execution"))
+            with patch.object(ai_exec, "say_sync", send):
+                await self._reject_via_api(session, task_id=task.id)
+                for _ in range(3):
+                    self.assertEqual((await task_rework.retry_once(session)).get("sent", 0), 0)
+                    executor = await session.get(models.Client, "dev-1")
+                    api = await task_requirements.decorate(session, executor, task,
+                        await tasks.task_to_api_live(session, task))
+                    self.assertTrue(api["canContinueExecution"])
+                    self.assertEqual(api["requirementStage"], "delivering")
+                    self.assertEqual(api["workRouting"]["reworkPending"]["state"], "awaiting_executor")
+                send.assert_not_called()
+            # Feed the real server projection into the production board predicates.
+            client = Path(__file__).resolve().parents[2] / "client"
+            check = subprocess.run(["node", "-e", "const R=require('./core/requirements.js');"
+                "const t=JSON.parse(require('node:fs').readFileSync(0,'utf8'));"
+                "require('node:assert/strict').equal(R.nextStep(t,{}).action,'继续修正');"
+                "require('node:assert/strict').ok(R.inScope(t,'actionable',{}));"],
+                cwd=client, input=json.dumps(api), text=True, capture_output=True)
+            self.assertEqual(check.returncode, 0, check.stderr)
+            reviewer = await session.get(models.Client, "c-review")
+            other = await task_requirements.decorate(session, reviewer, task,
+                await tasks.task_to_api_live(session, task))
+            self.assertFalse(other["canContinueExecution"])
+
+    async def test_runner_followup_api_consumes_feedback_but_old_duplicate_does_not(self):
+        from app.api import tasks as tasks_api
+        from app.services import ai_exec, task_continuation, release_control
+        from app.realtime import hub
+        from unittest.mock import AsyncMock
+        async with self.sessions() as session:
+            task = await self._fixture(session, task_id="t-say", source_ref="runner:original")
+            session.add(models.TaskEvent(task_id=task.id, kind=ai_exec.EV_DISPATCHED,
+                detail={"ref": "runner:original"}))
+            await session.commit()
+            await self._reject_via_api(session, task_id=task.id)
+            worker = await session.get(models.Client, "dev-1")
+            with patch.object(ai_exec, "load", AsyncMock(return_value={})), \
+                 patch.object(task_continuation, "prepare", AsyncMock(return_value={})), \
+                 patch.object(ai_exec, "say_sync", return_value={"ok": True}) as send, \
+                 patch.object(hub, "publish", AsyncMock()):
+                result = await tasks_api.ai_say_task(task.id,
+                    {"text": "Revise", "messageId": "revision-1"}, worker, session)
+                self.assertEqual(result["delivery"], "accepted")
+                self.assertNotIn("reworkPending", task.work_routing)
+                await release_control.ensure_output_candidate(session, task,
+                    {"schemaVersion": "2", "complete": True, "primary": [],
+                     "problems": [], "text": "Revised result"},
+                    source_ref="runner:original")
+                await session.commit()
+                await self._reject_via_api(session, task_id=task.id, note="Revise again")
+                duplicate = await tasks_api.ai_say_task(task.id,
+                    {"text": "Revise", "messageId": "revision-1"}, worker, session)
+                self.assertTrue(duplicate["duplicate"])
+                self.assertEqual(task.work_routing["reworkPending"]["feedback"], "Revise again")
+                self.assertEqual(send.call_count, 1)
+
+    async def test_controlled_continuation_checks_scope_and_reuses_delivery_receipt(self):
+        from fastapi import HTTPException
+        from app.api import tasks as tasks_api
+        from app.services import ai_exec, task_continuation, conversation_turns, artifact_version_guard
+        from app.realtime import hub
+        from unittest.mock import AsyncMock
+        async with self.sessions() as session:
+            task = await self._fixture(session, task_id="t-controlled", source_ref="runner:original")
+            task.work_routing = {"conversationTurn": {"conversationId": "chat", "turnId": "initial",
+                "executor": "dispatch", "state": "completed"}}
+            session.add(models.TaskEvent(task_id=task.id, kind=ai_exec.EV_DISPATCHED,
+                detail={"ref": "runner:original"}))
+            session.add(am.ExecutionSession(task_id=task.id, ref="runner:original", state="done"))
+            await session.commit()
+            await self._reject_via_api(session, task_id=task.id)
+            worker = await session.get(models.Client, "dev-1")
+            with patch.object(ai_exec, "load", AsyncMock(return_value={})), \
+                 patch.object(task_continuation, "prepare", AsyncMock(return_value={})), \
+                 patch.object(ai_exec, "say_sync", return_value={"ok": True,
+                     "admissionKey": "comment:revision"}) as send, \
+                 patch.object(hub, "publish", AsyncMock()):
+                for turn_id in ("revision", "delivery-recovery"):
+                    scope = {"conversationId": "chat", "turnId": turn_id}
+                    transition = {**scope, "executor": "dispatch", "continuationRef": "runner:original"}
+                    await conversation_turns.apply(session, task, {**transition, "action": "prepare"})
+                    await conversation_turns.apply(session, task, {**transition, "action": "start"})
+                    await session.commit()
+                    with self.assertRaises(artifact_version_guard.OutputAwaitingRework):
+                        await artifact_version_guard.require_rework_execution(session, task, "runner:original", 2)
+                    body = {"text": "Revise", "messageId": "same-delivery", "expectedRef": "runner:original",
+                            "conversationTurn": scope}
+                    for invalid in ({"expectedRef": "wrong-run"},
+                                    {"conversationTurn": {**scope, "turnId": "other"}}):
+                        with self.assertRaises(HTTPException) as caught:
+                            await tasks_api.ai_say_task(task.id, {**body, **invalid}, worker, session)
+                        self.assertEqual(caught.exception.status_code, 409)
+                    result = await tasks_api.ai_say_task(task.id, body, worker, session)
+                    self.assertEqual(result["delivery"], "accepted")
+                    self.assertEqual(send.call_count, 1)
+                    await artifact_version_guard.require_rework_execution(session, task, "runner:original", 2)
+                    await conversation_turns.apply(session, task, {**transition, "action": "complete"})
+                    await session.commit()
+                events = list(await session.scalars(select(models.TaskEvent).where(
+                    models.TaskEvent.task_id == task.id, models.TaskEvent.kind == "ai.rework")))
+                self.assertEqual({row.detail["turnId"] for row in events}, {"revision", "delivery-recovery"})
+
+    async def test_pinned_reconciliation_rejects_missing_changed_or_unavailable_runner(self):
+        from fastapi import HTTPException
+        from app.api import tasks as tasks_api
+        from app.services import ai_exec
+        from unittest.mock import AsyncMock
+        async with self.sessions() as session:
+            task = await self._fixture(session, task_id="t-pinned")
+            worker = await session.get(models.Client, "dev-1")
+            with self.assertRaises(HTTPException) as missing:
+                await tasks_api.ai_status_task(task.id, worker, session, ref="original")
+            self.assertEqual(missing.exception.status_code, 409)
+            session.add(models.TaskEvent(task_id=task.id, kind=ai_exec.EV_DISPATCHED,
+                detail={"ref": "original"}))
+            await session.commit()
+            with patch.object(ai_exec, "load", AsyncMock(return_value={})), \
+                 patch.object(ai_exec, "status_sync", return_value={"ok": False}) as read, \
+                 patch.object(ai_exec, "pull_artifacts", AsyncMock()) as collect:
+                with self.assertRaises(HTTPException) as changed:
+                    await tasks_api.ai_status_task(task.id, worker, session, ref="other")
+                self.assertEqual(changed.exception.status_code, 409)
+                read.assert_not_called()
+                with self.assertRaises(HTTPException) as unavailable:
+                    await tasks_api.ai_status_task(task.id, worker, session, ref="original")
+                self.assertEqual(unavailable.exception.status_code, 502)
+                read.assert_called_once_with({}, "original")
+                collect.assert_not_called()
+            self.assertEqual(task.status, "doing")
 
     async def test_offline_rework_then_retry_delivers_and_dispatch_clears(self):
         """Offline Runners enter backoff; due redelivery resumes rework, and manual redispatch
@@ -143,6 +294,11 @@ class ReworkLifecycleApi(_Base):
 
             with patch.object(ai_exec, "say_sync", new=fake_offline):
                 await self._reject_via_api(session, task_id="t-off", to_ai=True)
+                # An explicitly authorized continuation retains bounded offline retry.
+                task = await session.get(models.Task, "t-off")
+                card = task.work_routing["reworkPending"]
+                await task_rework.resume_after_rejection(session, task, card["feedback"],
+                    artifact_version_id=card["versionId"], request_id=card["requestId"])
             fresh = await session.get(models.Task, "t-off")
             card = dict(fresh.work_routing)["reworkPending"]
             self.assertEqual(card["state"], "pending")
@@ -175,10 +331,8 @@ class ReworkLifecycleApi(_Base):
                     session, fresh, {"issueId": "runner:xyz", "runnerId": "dev-1"})
             self.assertNotIn("reworkPending", dict(fresh.work_routing or {}))
 
-    async def test_second_rejection_reopens_budget_via_api(self):
-        """Reject repeated rejection of one version; a new version gets a new card, retry budget,
-        and message ID.
-        """
+    async def test_second_rejection_creates_new_executor_feedback_via_api(self):
+        """A new rejected version gets fresh feedback without starting automatic retry."""
         async with self.sessions() as session:
             await self._fixture(session, task_id="t-two", status="doing",
                                 source_ref="runner:abc", artifact_id="t-two-v1")
@@ -212,9 +366,9 @@ class ReworkLifecycleApi(_Base):
             fresh = await session.get(models.Task, "t-two")
             card2 = dict(fresh.work_routing)["reworkPending"]
             self.assertNotEqual(card2["messageId"], card1["messageId"])
-            self.assertEqual(card2["attempts"], 1)               # Reset the retry budget for the new card.
+            self.assertEqual(card2["attempts"], 0)
             self.assertIn("第二轮", card2["feedback"])
-            self.assertEqual(card2["state"], "pending")
+            self.assertEqual(card2["state"], "awaiting_executor")
 
 
 class ResumeBranches(_Base):

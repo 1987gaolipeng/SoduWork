@@ -140,6 +140,7 @@
     if (task.canClaim === true) return true;
     if (stage(task) === 'delivered' || task.canViewExecution === false) return false;
     if (task.status === 'done' && !task.reviewedAt) return false; // After submission, the reviewer owns the decision; role membership alone does not make it actionable.
+    if (canSubmitReview(task) || canResumeRework(task)) return true;
     if (task.needsMe === true) return true;
     if (!roles(task).some(role => ['executor', 'assignee'].includes(role))) return false;
     // Owning a device is not an instruction to interrupt its running agent.
@@ -197,6 +198,8 @@
     }
     if (phase === 'delivered') return { text: '查看成果与验收记录', action: '查看交付', icon: 'complete' };
     if (phase === 'reviewing') return { text: '成果已提交，等待验收', action: '查看交付', icon: 'confirm' };
+    if (canResumeRework(task)) return { text: '按验收意见继续修改', action: '继续修正', icon: 'edit', attention: true };
+    if (canSubmitReview(task)) return { text: '本轮执行已结束，可提交验收', action: '查看并提交', icon: 'confirm', attention: true };
     if (task.ai?.state === 'failed') return { text: '执行未完成，查看原因', action: '查看执行情况', icon: 'attention', attention: actionable(task, context) };
     if (task.ai?.state === 'dispatching') return { text: task.ai.attentionRaised ? '派发待确认，查看执行情况' : '正在安排 AI 执行',
       action: '查看执行情况', icon: task.ai.attentionRaised ? 'attention' : 'progress', attention: actionable(task, context) };
@@ -224,6 +227,12 @@
   function canSubmitReview(task) {
     return Boolean(task && task.canSubmitReview === true && task.status === 'doing' &&
       stage(task) === 'delivering' && !task.archivedAt && !task.maintenanceBlocked &&
+      !['running', 'dispatching'].includes(task.ai?.state) &&
+      !['queued', 'starting', 'running', 'waiting'].includes(task.workRouting?.conversationTurn?.state));
+  }
+  function canResumeRework(task) {
+    return Boolean(task && task.canContinueExecution === true && task.workRouting?.reworkPending &&
+      task.status === 'doing' && stage(task) === 'delivering' && !task.archivedAt && !task.maintenanceBlocked &&
       !['running', 'dispatching'].includes(task.ai?.state) &&
       !['queued', 'starting', 'running', 'waiting'].includes(task.workRouting?.conversationTurn?.state));
   }

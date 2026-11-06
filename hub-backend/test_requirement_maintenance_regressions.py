@@ -8,6 +8,7 @@ def load_tests(loader, tests, pattern):
         "tests.test_requirement_maintenance_policy.RequirementMaintenancePolicyTests",
         "tests.test_handoff_maintenance_boundary.HandoffMaintenanceBoundaryTests",
         "tests.test_notice_audience_regression.NoticeAudienceRegressionTests",
+        "tests.test_requirement_review_access.RequirementReviewAccessTests",
     ))
 
 

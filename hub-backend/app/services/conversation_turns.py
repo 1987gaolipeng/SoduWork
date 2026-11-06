@@ -356,6 +356,7 @@ async def apply(session, task, body, actor=""):
         fallback=stored_submission_mode or default_submission_mode(task))
     same = current.get("turnId") == turn_id and current.get("conversationId") == conversation_id
     executor = str(body.get("executor") or "native")
+    continuation_ref = str(body.get("continuationRef") or "")
     if executor not in {"native", "workflow", "dispatch"}:
         raise HTTPException(422, "不支持的需求执行方式")
     native_choice = body.get("executionChoice") == "native"
@@ -366,6 +367,8 @@ async def apply(session, task, body, actor=""):
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
         if same:
+            if continuation_ref != str(current.get("continuationRef") or ""):
+                raise HTTPException(409, "原执行会话已变化，请刷新需求后重试")
             if (has_submission_mode and stored_submission_mode and
                     submission_mode != normalize_submission_mode(stored_submission_mode)):
                 raise HTTPException(409, "当前执行轮次已确定提交方式，不能中途切换")
@@ -378,7 +381,17 @@ async def apply(session, task, body, actor=""):
             raise HTTPException(409, "仅待开始且没有交付结果的需求可以重新选择执行方式")
         if task.status in ("done", "cancel"):
             raise HTTPException(409, "需求已经结束")
-        if (current.get("state") == "completed" and executor != "native"):
+        if continuation_ref:
+            from . import ai_exec
+            dispatch = await ai_exec.last_dispatch_event(session, task.id)
+            detail = dict(dispatch.detail or {}) if dispatch else {}
+            if (executor != "dispatch" or native_choice or
+                    current.get("conversationId") != conversation_id or
+                    continuation_ref != str(detail.get("ref") or detail.get("issueId") or "")):
+                raise HTTPException(409, "原执行会话已变化，请从需求入口继续修正")
+            if await _has_active_execution(session, task.id):
+                raise HTTPException(409, "原执行尚未结束，请等待后再继续修正")
+        if (current.get("state") == "completed" and executor != "native" and not continuation_ref):
             raise HTTPException(409, "这项需求已经在会话中返回结果，请先查看结果，避免重复执行")
         # Native conversation execution may start a new turn after completion.
         # Follow-up requests run through a new start/complete cycle and output round.
@@ -414,9 +427,13 @@ async def apply(session, task, body, actor=""):
         if submission_mode:
             routing["executionSubmissionMode"] = submission_mode
         current = {"turnId": turn_id, "conversationId": conversation_id, "state": "queued", "executor": executor}
+        if continuation_ref:
+            current["continuationRef"] = continuation_ref
         # Starting manual rework clears the existing pending-rework marker.
         # A later rejection or failure creates a new reworkPending marker.
-        rework_taken = routing.pop("reworkPending", None)
+        # Runner rework is acknowledged only after its message admission. Queue
+        # preparation alone must not make an old Runner output eligible again.
+        rework_taken = routing.pop("reworkPending", None) if not continuation_ref else None
         if rework_taken is not None:
             task_events.record(session, task.id, "ai.rework_taken", {
                 "ref": conversation_id, "turnId": turn_id,

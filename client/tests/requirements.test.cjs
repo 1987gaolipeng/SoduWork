@@ -83,6 +83,23 @@ test('manual review submission requires an idle executor in the delivering stage
   }
 });
 
+test('executor follow-up remains actionable after delivery and rework completion', () => {
+  const task = {status:'doing',requirementStage:'delivering',myRoles:['executor'],ai:{state:'done'},
+    workRouting:{conversationTurn:{state:'completed'}},canSubmitReview:true};
+  assert.equal(R.inScope(task,'actionable'),true);
+  assert.match(R.nextStep(task).text,/提交验收/);
+  const rework = {...task,canSubmitReview:false,canContinueExecution:true,
+    workRouting:{...task.workRouting,reworkPending:{feedback:'Revise'}}};
+  assert.equal(R.inScope(rework,'actionable'),true);
+  assert.equal(R.nextStep(rework).action,'继续修正');
+  for (const fields of [{canSubmitReview:false,canContinueExecution:false,myRoles:['creator']},
+    {canViewExecution:false},{status:'done',reviewedAt:1},{archivedAt:1},
+    {ai:{state:'running'}},{workRouting:{conversationTurn:{state:'waiting'}}}]) {
+    assert.equal(R.inScope({...task,...fields},'actionable'),false,JSON.stringify(fields));
+  }
+  assert.equal(R.inScope({...rework,canContinueExecution:false,myRoles:['creator']},'actionable'),false);
+});
+
 test('requirements support human assignment and exact tag filtering', () => {
   const task = {id:'tagged', status:'todo', triageStage:'ready', canEditRequirement:true,
     assigneeUserId:'member-1', tags:['growth', 'quarter'], myRoles:['creator']};

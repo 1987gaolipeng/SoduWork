@@ -289,6 +289,7 @@ async def decorate(session, client, task, api, *, context=None, prepared=None, e
         # Preparation-stage maintenance already proves aggregate creator rights.
         api["myRoles"] = list(dict.fromkeys(list(api.get("myRoles") or []) + ["creator"]))
     api.update(canEditRequirement=editable, canViewExecution=execution, canComment=execution,
+               canContinueExecution=bool(execution and task_access.can_continue_execution(task, client)),
                canDeleteRequirement=maintenance, canArchiveRequirement=maintenance,
                canManageRequirementMaterials=authority,
                canSubmitReview=bool(execution and is_review_submitter(task, client)
@@ -305,6 +306,8 @@ async def decorate(session, client, task, api, *, context=None, prepared=None, e
         if reviewable is None:
             reviewable = await requirement_review_access.pending_task_ids(session, client.user_ref, [task.id])
         pending_review = task.id in reviewable
+    # Formal reviews use personal assignment and decision rights, including
+    # pending co-sign requests after this reviewer has already voted.
     api["canReview"] = bool(
         pending_review or (execution and task.status == "done" and api.get("requirementStage") != "reviewing"
         and not getattr(task, "reviewed_at", None)

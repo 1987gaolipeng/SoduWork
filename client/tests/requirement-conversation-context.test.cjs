@@ -51,8 +51,8 @@ function fixture(t, adapterId = 'pi') {
   const runtime = () => ({ app, handle, workRoot, identity: auth, identityOf: async () => auth });
   const validate = (task = tasks.one, requested = { reuseConversation: true }) => context.validate(runtime(), task,
     requested, executionSpec(task, requested), request);
-  t.after(() => {
-    app.emit('before-quit');
+  t.after(async () => {
+    await Promise.all(app.listeners('before-quit').map(listener => listener()));
     assert.equal(path.dirname(path.resolve(root)), path.resolve(os.tmpdir()));
     assert.ok(path.basename(root).startsWith('soduwork-requirement-context-'));
     fs.rmSync(root, { recursive: true, force: true });

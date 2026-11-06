@@ -137,7 +137,7 @@ function fixture() {
   window.soduWorkAPI = { accessPreferences: { get: async () => ({ mode: 'standard' }), onChange: () => () => {} },
     workPreview: { hide: async () => ({ ok: true }), destroy: async () => ({ ok: true }) },
     conversationSession: {
-      runtimes: async () => ({ ok: true, runtimes: runtimeRows }), probe: async () => ({ ok: true }),
+      runtimes: async () => ({ ok: true, runtimes: runtimeRows, availableRuntimes: runtimeRows }), probe: async () => ({ ok: true }),
       cloud: { targets: async adapterId => ({ ok: true, targets: [{ id: 'fixture-cloud', agentId: adapterId }] }) },
       capabilities: async () => ({ ok: true, items: [], skills: [{name:'fixture-skill',installed:true,selectable:true}] }), workdir: async () => ({ ok: true, dir: '/isolated-fixture' }),
       setMode: async () => ({ mode: 'full' }), history: async () => ({ ok: true, chats: [] }),
@@ -534,7 +534,10 @@ app.whenReady().then(async () => {
         assert.equal(await js("Boolean(document.querySelector('#cpParseRetry'))"), false);
         assert.match(await js('document.querySelector(".cp-parse-warning").textContent'), /无法连接模型服务/);
         await type('#wesTaskDraft #cpNote', 'User-edited acceptance context survives the retry');
-        // Requirement retries use the same conversation input as other draft refinements.
+        // Explicitly select requirement editing; ordinary chat must not mutate an open work draft.
+        await type('#nchatInput', '/');
+        await until("Boolean(document.querySelector('#cpChat .nplugin-option.is-action:not([disabled])'))", 'explicit requirement retry action');
+        await click('#cpChat .nplugin-option.is-action:not([disabled])');
         await type('#nchatInput', '重试');
         await click('#nchatSend');
         await until('calls.parse.length===2', 'explicit chat parse retry');
@@ -577,7 +580,8 @@ app.whenReady().then(async () => {
       {role:'assistant',done:true,blocks:[{kind:'text',text:'此前的回复'}],completedAt:200,taskOutputKey:'before-reply'}];
       fixtureArchives[fixtureOwner+':history-session']={cards:[],started:true};void 0;`);
     await js("openComposePanel({chatId:'history-session'}).then(()=>true)");
-    await js("NativeChat.openWorkAction({id:'work.requirement.create',text:'在对话中途记录需求'}).then(()=>true)");
+    // Parsing intentionally waits for the fixture; do not await it before resolving pendingParse.
+    await js("void NativeChat.openWorkAction({id:'work.requirement.create',text:'在对话中途记录需求'})");
     await until('Boolean(pendingParse)', 'mid-conversation parse'); await js("pendingParse('success');successfulRequirements=true;void 0;");
     await until('Boolean(document.querySelector("#wesTaskDraft #cpCreate"))', 'mid-conversation form');
     await click('#wesTaskDraft #cpCreate');

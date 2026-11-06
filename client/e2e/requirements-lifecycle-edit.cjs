@@ -64,7 +64,8 @@ async function snapshot(label) {
     submit:!!document.querySelector('[data-rq-submit-review]'),materials:!!document.querySelector('[data-rq-add-files]'),
     file:document.querySelector('[data-rq-file]')?.textContent,
     outer:document.querySelector('[data-rq-execution]')?.open,
-    timeline:document.querySelector('[data-tfd-open="timeline"]')?.open,
+    timeline:!document.querySelector('[data-rq-evidence-modal]')?.hidden,
+    evidenceTop:document.querySelector('.rq-evidence-modal .rq-detail-modal-body')?.scrollTop,
     top:content.scrollTop,height:content.scrollHeight,viewport:content.clientHeight,
     patches:fixtureCalls.filter(x=>x[0]==='patch').length,chats:fixtureCalls.filter(x=>x[0]==='chat').length,
     traceReads:window.traceReads}})()`);
@@ -115,6 +116,8 @@ app.whenReady().then(async () => {
         timeline:Array.from({length:18},(_,i)=>({kind:'advance',actor:'测试负责人',at:1792713600000+i*60000,
           detail:{note:'第 '+(i+1)+' 条执行证据已留存，版本 '+traceRevision}}))};
         await new Promise(resolve=>setTimeout(resolve,60));return result;};
+      SoduWorkAPI.getTaskComments=async()=>[];
+      SoduWorkAPI.getTaskEvents=async id=>(await SoduWorkAPI.taskTrace(id)).timeline;
       Store.applyServerEvent=event=>{fixtureCalls.push(['server-event',event.type]);
         window.dispatchEvent(new CustomEvent('soduwork-work-task-change',{detail:{type:event.type,taskId:event.task.id}}));
         return refreshOpenDetail(event.task.id);};
@@ -139,27 +142,36 @@ app.whenReady().then(async () => {
     await shotHero('ready');
     report.cases.push('Ready requirement remains editable and shows authoritative 1/4 lifecycle');
 
-    await click('[data-tfd-open="timeline"]>summary');
-    await js(`document.querySelector('.rq-detail-content').scrollTop+=900;void 0`);
+    await click('.rq-detail-more>summary');
+    await click('[data-rq-comments-open]');
+    await until(`document.querySelector('[data-rq-comment-list]')?.textContent.includes('版本 '+traceRevision)`, 'activity evidence');
+    await js(`document.querySelector('.rq-evidence-modal .rq-detail-modal-body').scrollTop+=900;void 0`);
     const beforeTrace = await snapshot('before-trace-event');
-    await js(`traceRevision++;window.dispatchEvent(new CustomEvent('soduwork-work-task-change',{detail:{taskId:'lifecycle'}}));void 0`);
-    await until(`document.querySelector('[data-tfd-open="timeline"]')?.textContent.includes('版本 '+traceRevision)`, 'trace event');
+    await js(`traceRevision++;window.dispatchEvent(new CustomEvent('soduwork-requirement-comment',{detail:{taskId:'lifecycle'}}));void 0`);
+    await until(`document.querySelector('[data-rq-comment-list]')?.textContent.includes('版本 '+traceRevision)`, 'trace event');
     const afterTrace = await snapshot('after-trace-event');
     assert.equal(afterTrace.timeline, true); assert.equal(afterTrace.outer, true);
     assert.ok(Math.abs(afterTrace.top - beforeTrace.top) <= 2, 'trace-only refresh preserves reading position');
+    assert.ok(Math.abs(afterTrace.evidenceTop - beforeTrace.evidenceTop) <= 2, 'activity refresh preserves reading position');
     report.cases.push('Task event refreshes real trace runtime while retaining expanded evidence and scroll');
 
     const beforeDoing = await snapshot('before-doing');
     await js(`setPhase('doing');notifyTaskChange()`);
     await until(`document.querySelector('.tfd-hero h3')?.textContent==='执行工作'`, 'doing lifecycle');
     const doing = await snapshot('doing');
-    assert.equal(doing.edit, false); assert.equal(doing.submit, true); assert.equal(doing.materials, true);
+    assert.equal(doing.edit, false); assert.equal(doing.submit, false); assert.equal(doing.materials, true);
     assert.equal(doing.file, '需求背景与验收依据.md'); assert.equal(doing.outer, true);
-    verify(doing.timeline === true, 'detail refresh retains expanded audit evidence');
+    verify(doing.timeline === true, 'detail refresh retains the open activity evidence panel');
     verify(Math.abs(doing.top - beforeDoing.top) <= 2, 'detail refresh preserves reading position');
+    await click('[data-rq-evidence-close]');
     await shotHero('doing');
-    report.cases.push('Execution removes definition editing, retains materials/manual submission and in-place evidence');
+    report.cases.push('Running execution removes editing and premature submission while retaining materials and evidence');
 
+    await js(`tasks[0].maintenanceBlocked=false;notifyTaskChange()`);
+    await until(`!!document.querySelector('[data-rq-submit-review]')`, 'stopped execution can submit');
+    assert.equal(await js(`!!document.querySelector('[data-rq-edit]')`), false);
+
+    await click('.rq-detail-more>summary');
     await click('[data-rq-submit-review]');
     await until(`document.querySelector('.rq-delivery-state')?.textContent==='待验收'`, 'manual review submission');
     await click('[data-rq-execution]>summary');
@@ -246,6 +258,26 @@ app.whenReady().then(async () => {
     await click('[form=rqEditForm][type=submit]', true);
     assert.equal(await js(`fixtureCalls.filter(x=>x[0]==='patch').length`), 1);
     report.cases.push('A pending save rejected after execution starts keeps draft controls locked and cannot issue another write');
+
+    await js(`RequirementsDetail.close(true);setPhase('doing');Object.assign(tasks[0],{
+      maintenanceBlocked:false,canContinueExecution:true,canSubmitReview:false,ai:{state:'done'},
+      workRouting:{conversationTurn:{state:'completed'},reworkPending:{state:'awaiting_executor',feedback:'补充结尾'}}
+    });RequirementsBoard.render(true);RequirementsDetail.open('lifecycle')`);
+    await until(`!!document.querySelector('[data-rq-rework]')`, 'executor rework entry');
+    assert.equal(await js(`Requirements.inScope(tasks[0],'actionable',{})`), true);
+    for (let index = 0; index < 3; index++) await js(`notifyTaskChange()`);
+    assert.equal(await js(`!!document.querySelector('[data-rq-rework]')`), true);
+    assert.equal(await js(`fixtureCalls.filter(x=>x[0]==='chat').length`), 0);
+    await click('[data-rq-rework]');
+    const reworkCalls = await js(`fixtureCalls.filter(x=>x[0]==='chat')`);
+    assert.equal(reworkCalls.length, 1);
+    assert.equal(reworkCalls[0][1], 'lifecycle');
+    assert.equal(reworkCalls[0][2].reworkSession, true);
+    assert.equal(reworkCalls[0][2].forceNew, false);
+    await js(`tasks[0].canContinueExecution=false;RequirementsDetail.open('lifecycle')`);
+    await until(`!!document.querySelector('.rq-rework-pending')`, 'reviewer can read feedback');
+    assert.equal(await js(`!!document.querySelector('[data-rq-rework]')`), false);
+    report.cases.push('Rejected work stays actionable across refreshes, starts only on the executor click, and hides continuation from reviewers');
     assert.deepEqual(await js('fixtureErrors'), []); assert.deepEqual(report.errors, []);
     assert.deepEqual(report.failures, []);
     report.ok = true;

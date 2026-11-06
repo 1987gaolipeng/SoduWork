@@ -46,7 +46,11 @@ app.whenReady().then(async()=>{
    for(let i=0;i<index;i++)await key('ArrowDown');await key('Return');
    assert.equal(await js(`document.querySelector(${JSON.stringify(selector)}).value`),value);
   };
-  const setting=async(keyName,value)=>{await click('.rq-menu-toggle');await choose('#rq'+keyName,value);await key('Escape');};
+  const setting=async(keyName,value)=>{
+   if(!await js('document.querySelector("#rqMenu").matches(":popover-open")'))await click('.rq-menu-toggle');
+   await choose('#rq'+keyName,value);
+   if(await js('document.querySelector("#rqMenu").matches(":popover-open")'))await key('Escape');
+  };
   const filter=async(keyName,value)=>{await click('#rqFilterToggle');await choose('#rqFilters [data-rq-filter="'+keyName+'"]',value);await key('Escape');};
   const ids=()=>js('[...document.querySelectorAll(".hb-body [data-hbid]")].map(n=>n.dataset.hbid)');
   const clear=async()=>{await click('.rq-menu-toggle');await click('#rqMenu [data-rq-clear]');};
@@ -78,6 +82,9 @@ app.whenReady().then(async()=>{
   assert.equal(await js('document.querySelectorAll(".rq-card-tags .is-normal").length'),0);
   await click('[data-rq-scope="actionable"]');
   assert.equal(await js('!!document.querySelector("[data-rq-open=delivering-0]")'),false);
+  await js('Object.assign(tasks.find(t=>t.id==="approval-only"),{canReview:false,myRoles:["requester"]});RequirementsBoard.render(true)');
+  assert.equal(await js('!!document.querySelector("[data-rq-open=approval-only]")'),false,'a requester without Hub review permission must not receive an acceptance action');
+  await js('Object.assign(tasks.find(t=>t.id==="approval-only"),{canReview:true,myRoles:["creator"]});RequirementsBoard.render(true)');
   assert.equal(await js('!!document.querySelector("[data-rq-open=approval-only]")'),true);
   await click('[data-rq-open="approval-only"]');
   assert.deepEqual(await js('fixtureCalls.find(call=>call[0]==="approval-detail")'),['approval-detail','review-1']);
@@ -85,7 +92,7 @@ app.whenReady().then(async()=>{
   assert.equal(await js('document.querySelector("[data-tfd-approval-action=approve]").disabled'),false);
   await click('[data-tfd-open="inline-approval-evidence"] summary');
   assert.equal(await js('document.querySelector("[data-tfd-open=inline-approval-evidence]").open'),true);
-  // Switch reviewer identity through the actual entry flow and create a separate review conversation without reusing another device's archive.
+  // Exercise the shared acceptance entry without forcing a second conversation.
   assert.equal(await js('document.querySelector("[data-tfd-acceptance-mode]:checked").value'),'manual');
   assert.equal(await js('document.querySelector("[data-tfd-acceptance-session=auto]").getClientRects().length'),0);
   fs.writeFileSync(path.join(output,'acceptance-manual.png'),(await win.webContents.capturePage()).toPNG());
@@ -95,7 +102,7 @@ app.whenReady().then(async()=>{
   await js('RequirementsDetail.open("approval-only")');
   assert.equal(await js('document.querySelector("[data-tfd-acceptance-mode]:checked").value'),'auto','刷新保留同一验收版本选择');
   fs.writeFileSync(path.join(output,'acceptance-auto.png'),(await win.webContents.capturePage()).toPNG());
-  await js('window.openTaskConversation=async()=>false;true');
+  await js('window.fixtureOriginalOpenTaskConversation=window.openTaskConversation;window.openTaskConversation=async()=>false;true');
   await click('[data-tfd-acceptance-session=auto]');
   assert.ok(await js('!!document.querySelector(".rq-detail")'));
   assert.ok(await js('document.querySelector("[data-tfd-approval-error]").textContent.includes("未能打开")'));
@@ -103,7 +110,7 @@ app.whenReady().then(async()=>{
   await click('[data-tfd-acceptance-session=auto]');
   assert.equal(await js('!!document.querySelector(".rq-detail")'),false);
   assert.deepEqual(await js('fixtureCalls.find(c=>c[0]==="acceptance-chat")[2]'),{
-    source:'acceptance',forceNew:true,acceptanceSession:true,acceptanceMode:'auto',approvalId:'review-1'});
+    source:'acceptance',forceNew:false,acceptanceSession:true,acceptanceMode:'auto',approvalId:'review-1'});
   // Board and detail share one acceptance entry: reopen the requirement, then
   // choose the mode inside its acceptance card instead of creating a second
   // direct SoduWork button/session from the board.
@@ -111,7 +118,9 @@ app.whenReady().then(async()=>{
   assert.equal(await js('!!document.querySelector(".rq-detail [data-tfd-acceptance-mode]")'),true);
   assert.equal(await js('!!document.querySelector("[data-rq-acceptance]")'),false);
   assert.equal(await js('tasks.find(t=>t.id==="approval-only").requirementStage'),'reviewing');
-  report.checks.push('手动与自动验收真实切换、刷新保留；失败保留详情与重试，成功携带模式与审批票进入新会话，卡片默认分析不改状态');
+  report.checks.push('manual/automatic acceptance preserves selection, retries failures, carries the approval ticket and permits authorized conversation reuse');
+  await js('window.openTaskConversation=window.fixtureOriginalOpenTaskConversation;true');
+  await click('[data-rq-dismiss]');
   await click('[data-rq-scope="related"]');
   report.checks.push('personal default, five visible active stages and true human attention; exact pending approval loads in the production inline decision card');
   await js('tasks.find(t=>t.id==="delivering-0").readOnly=true');
@@ -239,8 +248,11 @@ app.whenReady().then(async()=>{
   await click('.rq-detail-footer [type="submit"]');await wait(120);
   assert.equal(await js('tasks[0].title'),'更新后的真实表单标题');assert.equal(await js('fixtureCalls.find(x=>x[0]==="patch")[2].requirementVersion'),1);
   report.checks.push('real mouse/keyboard edits title and preserves CAS version');
-  await click('[data-rq-chat]');assert.ok(await js('fixtureCalls.some(x=>x[0]==="chat"&&x[1]==="intake-0")'));
+  assert.equal(await js('!!document.querySelector("[data-rq-chat]")'),false,'preparation must not expose a stale execution chat');
+  await click('[data-rq-dismiss]');
   assert.equal(await js('document.activeElement.dataset.rqOpen'),'intake-0','saving and rebuilding the board retains a valid return focus');
+  await click('[data-rq-open="delivering-0"]');
+  await click('[data-rq-chat]');assert.ok(await js('fixtureCalls.some(x=>x[0]==="chat"&&x[1]==="delivering-0")'));
   report.checks.push('same Task id opens its unified conversation');
   await js('RequirementsBoard.move("ready-0","clarifying")');
   assert.equal(await js('tasks.find(t=>t.id==="ready-0").triageStage'),'clarifying');
@@ -251,6 +263,9 @@ app.whenReady().then(async()=>{
   await js('RequirementsBoard.move("shared-only","ready")');
   assert.equal(await js('fixtureCalls.filter(c=>c[0]==="patch").length'),triagePatches);
   await js('RequirementsBoard.move("ready-0","ready")');
+  await js('RequirementsBoard.move("delivering-0","reviewing")');
+  assert.equal(await js('fixtureCalls.some(c=>c[0]==="submit-review")'),false,'running work cannot submit a premature review');
+  await js('Object.assign(tasks.find(t=>t.id==="delivering-0"),{canSubmitReview:true,ai:{state:"stopped"}});RequirementsBoard.render(true)');
   await js('RequirementsBoard.move("delivering-0","reviewing")');
   assert.deepEqual(await js('fixtureCalls.filter(c=>c[0]==="submit-review").at(-1)'),['submit-review','delivering-0']);
   assert.equal(await js('tasks.find(t=>t.id==="delivering-0").requirementStage'),'reviewing','in-progress work can be submitted for verification');
@@ -313,8 +328,9 @@ app.whenReady().then(async()=>{
   await click('[data-rq-open="intake-0"]');assert.equal(await js('!!document.querySelector(".rq-detail [data-rq-chat],.rq-detail [data-rq-journey],#rqEditForm")'),false);
   report.checks.push('shared viewer cannot enter private chat or execution, or edit');
   await click('[data-rq-dismiss]');assert.equal(await js('document.activeElement.dataset.rqOpen'),'intake-0');
-  await click('[data-rq-scope="created"]');await setting('Group','owner');await setting('Sort','created');
-  await filter('priority','high');await click('[data-rq-view="list"]');
+  await click('[data-rq-scope="created"]');await setting('Group','owner');
+  assert.equal(await js('document.querySelector("#rqSort").disabled'),true,'kanban keeps its fixed recent-activity order');
+  await click('[data-rq-view="list"]');await setting('Sort','created');await filter('priority','high');
   const aliceIds=await ids();await js('RequirementsBoard.close()');assert.equal(await js('document.querySelector("#historyBoard").classList.contains("show")'),false);await js('openTaskCenter()');await wait(100);
   assert.deepEqual(await ids(),aliceIds);assert.equal(await js('document.querySelector("[data-rq-view=list]").getAttribute("aria-pressed")'),'true');
   await click('#hbSearch');await win.webContents.insertText('GitHub');
@@ -336,9 +352,9 @@ app.whenReady().then(async()=>{
   assert.equal(await js('document.querySelector("#rqFilters").childElementCount'),0,'old account filter options must be discarded');
   assert.equal(await js('document.querySelector("[data-rq-view=kanban]").getAttribute("aria-pressed")'),'true');
   assert.equal(await js('document.querySelector("#rqGroup").value'),'stage');
-  assert.equal(await js('document.querySelector("#rqSort").value'),'priority');
+  assert.equal(await js('document.querySelector("#rqSort").value'),'updated');
   assert.equal(await js('document.querySelector("#rqChips").hidden'),true);
-  assert.equal(await js('document.querySelector("[data-rq-scope=related]").getAttribute("aria-pressed")'),'true');
+  assert.equal(await js('document.querySelector("[data-rq-scope=actionable]").getAttribute("aria-pressed")'),'true');
   await click('.rq-menu-toggle');await click('[data-rq-view="gantt"]');
   assert.equal(await js('document.querySelector("[data-gvod]").checked'),false);
   assert.equal(await js('document.querySelector(".gv-nav b").textContent'),month,'another account starts on the current month');

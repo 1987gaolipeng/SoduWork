@@ -1315,6 +1315,7 @@ async def ai_status_task(
     tid: str,
     client: Client = Depends(current_client),
     session: AsyncSession = Depends(get_session),
+    ref: str = "",
 ):
     """Behavior and constraints for this operation."""
     import asyncio as _aio
@@ -1327,12 +1328,21 @@ async def ai_status_task(
     t = await _view_task(session, client, tid)
     ev_row = await ai_exec.last_dispatch_event(session, tid)   # Recognize historical multica.* events.
     if ev_row is None:
+        if ref:
+            raise HTTPException(409, "原执行会话已变化，请刷新需求后重试")
         return {"done": False, "dispatched": False}
     ctx = await ai_exec.load(session)
     runner = {}
     d = ev_row.detail or {}
+    if ref and ref != str(d.get("ref") or d.get("issueId") or ""):
+        raise HTTPException(409, "原执行会话已变化，请刷新需求后重试")
+    require_snapshot = bool(ref)
     ref = d.get("ref") or d.get("issueId", "")
     s = await _aio.to_thread(ai_exec.status_sync, ctx, ref)
+    if require_snapshot and not s.get("ok"):
+        # A continuation must not acknowledge delivery using stale task files
+        # when its authoritative Runner snapshot could not be read.
+        raise HTTPException(502, "交付结果暂未同步，请恢复本轮重试")
     if s.get("ok") and (s.get("attachments") or s.get("artifactUrl")):
         await ai_exec.pull_artifacts(session, tid, ctx, s, ref)   # Reuse the administrative path's idempotent artifact import.
         await session.refresh(t)
@@ -1474,6 +1484,9 @@ async def ai_say_task(
     deduplicates retries.
     """
     import asyncio as _aio
+    from datetime import datetime, timezone
+
+    submitted_at = datetime.now(timezone.utc)
 
     from ..services import ai_exec
     text = str(body.get("text") or "").strip()
@@ -1497,6 +1510,17 @@ async def ai_say_task(
     raw_selection = body.get("executionSelection")
     ctx = await cloud_turn_selection.prepare(session, client, ctx, handoff, raw_selection)
     ref = d.get("ref") or d.get("issueId", "")
+    expected_ref = body.get("expectedRef")
+    controlled_turn = body.get("conversationTurn")
+    if expected_ref is not None and expected_ref != ref:
+        raise HTTPException(409, "原执行会话已变化，请刷新需求后重试")
+    if controlled_turn is not None:
+        current = dict((t.work_routing or {}).get("conversationTurn") or {})
+        if (not isinstance(controlled_turn, dict) or current.get("state") != "running"
+                or current.get("executor") != "dispatch" or current.get("continuationRef") != ref
+                or current.get("conversationId") != controlled_turn.get("conversationId")
+                or current.get("turnId") != controlled_turn.get("turnId")):
+            raise HTTPException(409, "需求执行状态已变化，请从需求入口继续修正")
     if not handoff:
         from ..services import task_continuation
         try:
@@ -1506,7 +1530,7 @@ async def ai_say_task(
     from ..services import conversation_turn_files
     turn_files, file_manifest = conversation_turn_files.decode(body.get("files", []))
     if turn_files:
-        if not handoff or body.get("messageId") is None:
+        if (not handoff and not controlled_turn) or body.get("messageId") is None:
             raise HTTPException(409, "追加文件需要支持回执的远程会话；需求材料请从需求入口提交")
         from ..services import ai_remote
         runner = ai_remote._runner_of_ref(ref)
@@ -1527,6 +1551,22 @@ async def ai_say_task(
                     "\u6267\u884c\u5e95\u5ea7\u6ca1\u6709\u63a5\u53d7\u8fd9\u6761\u7559\u8a00")[:120]
         raise HTTPException(status_code=502, detail="\u6ca1\u53d1\u51fa\u53bb：" + error)
     await cloud_turn_selection.accepted(session, handoff, r)
+    if ((t.work_routing or {}).get("reworkPending") or controlled_turn) and r.get("delivery") in (None, "accepted"):
+        from ..services import task_rework
+        if body.get("messageId") is not None:
+            from ..conversation_handoff_models import ConversationMessageReceipt
+            from sqlalchemy import select, func
+            submitted_at = await session.scalar(select(func.min(ConversationMessageReceipt.created_at)).where(
+                ConversationMessageReceipt.task_id == tid,
+                ConversationMessageReceipt.message_id == body["messageId"],
+            ))
+        if await task_rework.acknowledge_continuation(session, tid, ref, submitted_at,
+                actor=client.user_ref or client.id,
+                conversation_id=str((controlled_turn or {}).get("conversationId") or ""),
+                turn_id=str((controlled_turn or {}).get("turnId") or ""),
+                message_id=str(body.get("messageId") or "")):
+            await session.commit()
+            await _task_access.publish_task(session, t, "task.updated", await svc.task_to_api_live(session, t))
     from ..services import turn_correlation
     return {"ok": True, "queued": bool(r.get("queued")),
             **turn_correlation.public(r),
@@ -1570,9 +1610,8 @@ async def reject_task_artifact(
     client: Client = Depends(current_client),
     session: AsyncSession = Depends(get_session),
 ):
-    """Reject the current output and clear its prior review. Notify the task holder, or resume the
-    same AI workspace/session when toAI is true. Preserve task state and record feedback in the
-    timeline.
+    """Reject delivery and retain executor-owned rework; toAI=false returns it to the backlog.
+    Workflow-managed tasks retain their graph transitions. Direct tasks wait for continuation.
     """
     from ..services import release_control
     from ..services import task_events as ev
@@ -1643,7 +1682,8 @@ async def reject_task_artifact(
     if to_ai:
         rework = (await task_rework.resume_after_rejection(
             session, t, note, artifact_version_id=artifact.id,
-            request_id=str((decided.get("request") or {}).get("id") or ""), actor=who))
+            request_id=str((decided.get("request") or {}).get("id") or ""), actor=who,
+            fallback_on_missing_ref=True, wait_for_executor=True))
     else:
         # Return tasks to the backlog on the server, matching approval-inbox rejection semantics.
         # Retain feedback in task details rather than relying on a client-side state patch.

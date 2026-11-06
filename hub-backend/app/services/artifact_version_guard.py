@@ -7,6 +7,84 @@ from .. import automation_models as am, models
 from . import task_events, task_requirements
 
 
+class OutputAwaitingRework(ValueError):
+    """An automatic receipt cannot supersede a rejected delivery."""
+
+
+def _round(value):
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+async def require_rework_execution(session, task, source_ref, round_no):
+    """Fence automatic collection by the accepted execution after the last rejection.
+
+    Call under the task lock used by candidate creation and review decisions.
+    New files, changed classification, and transport round numbers are not user intent.
+    Explicit manual submission remains governed by its own authorized API.
+    """
+    from . import ai_exec
+
+    if task.status in {"done", "cancel"} or task.archived_at:
+        raise OutputAwaitingRework("需求已结束，旧执行结果不再自动提交")
+    rejected = (await session.execute(select(am.ApprovalRequest, am.ArtifactVersion).join(
+        am.ArtifactVersion, am.ArtifactVersion.id == am.ApprovalRequest.artifact_version_id,
+    ).where(am.ApprovalRequest.task_id == task.id, am.ApprovalRequest.action == "review",
+            am.ApprovalRequest.status == "rejected")
+        .order_by(am.ApprovalRequest.resolved_at.desc(), am.ArtifactVersion.seq.desc())
+        .limit(1).execution_options(populate_existing=True))).first()
+    if rejected is None:
+        return
+    request, artifact = rejected
+    boundary = request.resolved_at or request.created_at
+    events = list((await session.scalars(select(models.TaskEvent).where(
+        models.TaskEvent.task_id == task.id, models.TaskEvent.at >= boundary,
+        models.TaskEvent.kind.in_((*ai_exec.KINDS_DISPATCHED, "ai.rework", "conversation.turn")),
+    ).order_by(models.TaskEvent.at.desc(), models.TaskEvent.id.desc()))).all())
+    started = False
+    for event in events:
+        detail = dict(event.detail or {})
+        if event.kind == "conversation.turn":
+            # Only a newly prepared turn proves continuation. An old turn can
+            # report start or completion after the review has already rejected it.
+            if detail.get("state") != "queued":
+                continue
+            ref = str(detail.get("continuationRef") or "")
+            if ref:
+                # A queued Runner continuation is not proof of admission. Keep
+                # old output fenced until this exact turn has an accepted send.
+                if not any(row.kind == "ai.rework" and
+                           (row.detail or {}).get("conversationId") == detail.get("conversationId") and
+                           (row.detail or {}).get("turnId") == detail.get("turnId") and
+                           (row.detail or {}).get("ref") == ref for row in events):
+                    break
+            else:
+                ref = "conversation:" + str(detail.get("conversationId") or "")
+        else:
+            ref = str(detail.get("ref") or detail.get("issueId") or "")
+        # The latest authorized execution owns delivery; older sources cannot
+        # win a race by reporting additional files after a replacement starts.
+        started = ref == source_ref
+        break
+    previous_round = 0
+    for item in dict(artifact.manifest or {}).get("files") or []:
+        if item.get("sourceRef") == source_ref:
+            previous_round = max(previous_round, _round(item.get("round")))
+    if not previous_round:
+        receipts = (await session.scalars(select(models.TaskEvent).where(
+            models.TaskEvent.task_id == task.id, models.TaskEvent.at <= boundary,
+            models.TaskEvent.kind.in_(ai_exec.KINDS_ARTIFACTS),
+        ))).all()
+        previous_round = max((_round((row.detail or {}).get("round")) for row in receipts
+                              if (row.detail or {}).get("ref") == source_ref), default=0)
+    same_source = artifact.source_ref == source_ref or previous_round > 0
+    if (not started or (same_source and _round(round_no) <= previous_round)
+            or (task.work_routing or {}).get("reworkPending")):
+        raise OutputAwaitingRework("交付已退回，等待执行人继续修改后重新提交")
+
+
 async def lock_task(session, task_id):
     # Hold through the caller's commit, not just through candidate construction.
     # SQLite ignores FOR UPDATE; a no-op write acquires its transaction writer lock.

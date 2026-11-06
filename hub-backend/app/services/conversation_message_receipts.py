@@ -42,6 +42,7 @@ async def send(session, client, task_id, ref, text, message_id, ctx, *, executio
             row_id = account_id
         row = Receipt(id=row_id, task_id=task_id, owner_client_id=client.id,
                       message_id=message_id, content_hash=digest, payload=payload,
+                      created_at=cloud_message_recovery.now(),
                       phase="queued" if payload else "sending",
                       retry_after=cloud_message_recovery.now() if payload else None)
         session.add(row)
