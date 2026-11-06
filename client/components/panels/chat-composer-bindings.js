@@ -391,6 +391,10 @@ function _bind(el) {
       state: () => ({ ref: ctx._ref, adapterId: ctx._snap?.adapterId || ctx._sessionOptions.adapterId || 'pi', displayName: ctx._snap?.displayName || ctx._sessionOptions.displayName, model: ctx._model,
         mode: ctx._mode, accessPolicy: ctx._snap?.accessPolicy, nextAccessPolicy: ctx._snap?.nextAccessPolicy, accessControl: ctx._snap?.accessControl || ctx._sessionOptions.accessControl,
         selection: ctx._snap && ctx._snap.modelSelection, thinking: ctx._snap && ctx._snap.thinking,
+        taskRuntime: ctx._activeCollabTaskId && !(ctx._sessionOptions.acceptanceSession || ctx._sessionOptions.acceptanceExecutionSession) &&
+          global.RequirementSessionContext?.executionRuntime(ctx._collabTasks?.get(ctx._activeCollabTaskId)?.task ||
+            (ctx._collaborationTask?.id === ctx._activeCollabTaskId ? ctx._collaborationTask : null),
+          ctx._sessionId, ctx._snap?.execution?.taskExecutions),
         cloudHandoff: ctx._snap?.cloudHandoff, busy: ctx._runtimeBusy(), runtimeSwitching: ctx._snap?.runtimeSwitching,
         recoveryRequired: ctx._snap?.execution?.recoveryRequired, recoveryReason: ctx._snap?.statusText, ...draftControls.state() }),
       say: message => { if (typeof petSay === 'function') petSay(message); },

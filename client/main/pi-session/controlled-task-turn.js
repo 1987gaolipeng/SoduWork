@@ -93,15 +93,20 @@ function create({ request, task, spec, scope, interval = 1500, wait = ms => new 
         agentId: page.activeExecutionSelection?.agentId || page.engine || page.cli,
         runId: ref,
       });
-      if (!outputs.has(ref)) outputs.set(ref, liveOutput.create(handle, task.id, { sourceAgent }));
+      if (!outputs.has(ref)) outputs.set(ref, liveOutput.create(handle, task.id, { sourceAgent, coalesceText: true }));
       const output = outputs.get(ref);
       output.setSourceAgent(sourceAgent);
       const items = continuation ? continuation.items(page) : page.items;
       // An older Hub can learn the runtime after its first page. Keep already consumed events idempotent.
       await output.consume(ref, (items || []).filter(item => Number(item.seq) > since));
       const last = Math.max(since, Number(page.last || 0), ...(page.items || []).map(x => Number(x.seq) || 0));
+      const drained = last >= Number(page.seq || last);
+      // A terminal receipt can omit the final text event. Flush only after all
+      // pages arrive, and before advancing the cursor so failed saves retry.
+      const pageStatus = continuation ? { status: continuation.status(page) } : page;
+      if (drained && outcome(pageStatus, 'dispatch')) await output.finish(ref);
       cursors.set(ref, last);
-      return { page, drained: last >= Number(page.seq || last) };
+      return { page, drained };
     }
     handle.appendTaskMessage('user', text, files, task.id);
     handle.taskExecutionChanged({ taskId: task.id, executor: spec.mode, status: 'running', sameMessageStream: true });
@@ -152,6 +157,9 @@ function create({ request, task, spec, scope, interval = 1500, wait = ms => new 
           const result = await readOutput(runId);
           latest = result.page;
           drained = result.drained;
+        }
+        if (drained && outcome(continuation ? { status: continuation.status(latest) } : latest, spec.mode)) {
+          for (const [ref, output] of outputs) await output.finish(ref);
         }
       } catch (error) {
         if (error.authRequired || error.permissionRequired) {

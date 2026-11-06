@@ -10,7 +10,9 @@ if (typeof electron === 'string') {
   app.disableHardwareAcceleration();
   const assert = require('node:assert/strict'), root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-agent-picker-'));
   app.setPath('userData', root); let win;
-  const js = s => win.webContents.executeJavaScript(s, true), sleep = ms => new Promise(r => setTimeout(r, ms));
+  const js = s => win.webContents.executeJavaScript(s, true).catch(error => {
+    throw Error(error.message + '\nFixture expression: ' + s, { cause: error });
+  }), sleep = ms => new Promise(r => setTimeout(r, ms));
   async function until(s) { for(let i=0;i<100;i++){if(await js('Boolean('+s+')'))return;await sleep(25);}throw Error('Timed out: '+s); }
   async function click(selector) {
     await js(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest'});void 0`);
@@ -37,12 +39,27 @@ if (typeof electron === 'string') {
   app.whenReady().then(async () => {
     win = new BrowserWindow({ show:false,width:1000,height:760,webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false,backgroundThrottling:false,offscreen:true} });
     await win.loadFile(path.join(__dirname,'fixtures/conversation-runtime-picker.html'));await until('window.fixtureReady');
+    await js('runtimes=' + JSON.stringify(require('../main/agent-runtime/runtime-catalog').runtimes().map(row => ({
+      ...row, ...(row.id === 'dsh' ? { availability: { ok: true, detectedVersion: '@openma/deepseek-harness-acp 0.4.40' } } : {}),
+    }))) + ';void 0');
     await js('document.querySelector("#nchatInput").value="Keep my draft";document.querySelector("#nchatInput").dispatchEvent(new Event("input"));void 0');
-    for(const agent of ['opencode','qwen','dsh','harness2','pi']) {
+    for(const agent of [...require('../main/agent-runtime/runtime-catalog').runtimes().map(row => row.id).filter(id => id !== 'pi'), 'pi']) {
       await click('#nchatRuntime'); await until('document.querySelector("[data-runtime=qwen]")');
       await click('[data-runtime='+agent+']'); await until('state.adapterId==='+JSON.stringify(agent));
       assert.equal(await js('state.ref'),'same-conversation');assert.equal(await js('document.querySelector("#nchatInput").value'),'Keep my draft');
     }
+    for (const runtime of require('../main/agent-runtime/runtime-catalog').runtimes()) {
+      await js('state.taskRuntime=' + JSON.stringify(runtime.id) + ';controls.render();void 0');
+      assert.equal(await js('document.querySelector("#nchatRuntimeName").textContent'), runtime.displayName);
+      assert.equal(await js('document.querySelector("#nchatRuntime").disabled'), true);
+      const count = await js('calls.length'); await click('#nchatRuntime');
+      assert.equal(await js('calls.length'), count);
+      assert.equal(await js('state.adapterId'), 'pi');
+      assert.equal(await js('document.querySelector("#nchatInput").value'), 'Keep my draft');
+    }
+    await js('delete state.taskRuntime;controls.render();void 0');
+    assert.equal(await js('document.querySelector("#nchatRuntimeName").textContent'), 'Pi');
+    assert.equal(await js('document.querySelector("#nchatRuntime").disabled'), false);
     await click('#nchatModel>button');await until('document.querySelector("[data-model-name=b]")');await click('[data-model-name=b]');
     await until('state.selection.name==="b"');
     await js('state.busy=true;controls.render();void 0');await click('#nchatRuntime');
