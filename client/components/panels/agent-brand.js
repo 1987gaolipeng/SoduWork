@@ -173,7 +173,14 @@
     }
     return { before, appendTools, breakRun };
   }
-  const api = Object.freeze({ MONOGRAMS, LABELS, canonical, className, glyph, html, sourceKey, transcript });
+  function version(agent) {
+    const raw = String(agent && agent.version || '').trim();
+    if (canonical(agent) !== 'dsh') return raw;
+    // CLI banners may include the package name; keep diagnostic metadata unchanged.
+    const match = raw.match(/^(?:@openma\/deepseek-harness-acp(?:\s+|@)|deepseek-harness-acp\s+|dsh\s+)?v?(\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?)$/i);
+    return match ? match[1] : raw;
+  }
+  const api = Object.freeze({ MONOGRAMS, LABELS, canonical, className, glyph, html, sourceKey, transcript, version });
   global.AgentBrand = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

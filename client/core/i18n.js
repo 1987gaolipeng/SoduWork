@@ -280,15 +280,23 @@
     return String(template).replace(/\{(\w+)\}/g, (match, name) => params && Object.hasOwn(params, name) ? String(params[name]) : match);
   }
   function applyKeyed(root = global.document) {
-    const elements = Array.from(root?.querySelectorAll?.('[data-i18n]') || []);
-    if (root?.matches?.('[data-i18n]')) elements.unshift(root);
+    const selector = '[data-i18n],[data-i18n-title]';
+    const elements = Array.from(root?.querySelectorAll?.(selector) || []);
+    if (root?.matches?.(selector)) elements.unshift(root);
     elements.forEach(el => {
       if (el.closest?.('[data-user-content],[translate="no"],[contenteditable="true"]')) return;
       const key = el.getAttribute('data-i18n');
       let params;
       try { params = JSON.parse(el.getAttribute('data-i18n-params') || 'null'); } catch (_) {}
-      const value = t(key, el.getAttribute('data-i18n-source') || el.textContent, params);
-      if (el.textContent !== value) el.textContent = value;
+      if (key) {
+        const value = t(key, el.getAttribute('data-i18n-source') || el.textContent, params);
+        if (el.textContent !== value) el.textContent = value;
+      }
+      const titleKey = el.getAttribute('data-i18n-title');
+      if (titleKey && !(el.getAttribute('data-user-attributes') || '').split(/\s+/).includes('title')) {
+        const value = t(titleKey, el.getAttribute('data-i18n-title-source') || el.getAttribute('title'), params);
+        if (el.getAttribute('title') !== value) el.setAttribute('title', value);
+      }
     });
   }
   function html(key, fallback, params = {}) {

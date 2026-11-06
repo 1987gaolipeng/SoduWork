@@ -4,6 +4,15 @@ const path = require('node:path');
 
 const brand = require('../components/panels/agent-brand');
 
+for (const raw of ['@openma/deepseek-harness-acp 0.4.40', '@openma/deepseek-harness-acp@0.4.40', 'v0.4.40', '0.4.40']) {
+  const agent = { key: 'runner:local:dsh', version: raw };
+  assert.equal(brand.version(agent), '0.4.40');
+  assert.equal(agent.version, raw, 'display formatting must not mutate runtime metadata');
+}
+assert.equal(brand.version({ key: 'dsh', version: '@openma/deepseek-harness-acp 0.5.0-beta.2+build.1' }), '0.5.0-beta.2+build.1');
+assert.equal(brand.version({ key: 'dsh', version: 'unknown' }), 'unknown');
+assert.equal(brand.version({ key: 'pi', version: '0.84.4' }), '0.84.4');
+
 [
   ['runner:pc-01:pi', 'pi'],
   [{ key: 'codex-harness', name: 'Codex Harness' }, 'codex-harness'],
@@ -31,6 +40,14 @@ for (const [id, mark] of Object.entries(brand.MONOGRAMS)) {
 
 const agents = fs.readFileSync(path.join(__dirname,
   '../components/panels/panels-agents.js'), 'utf8');
+const context = { AgentBrand: brand, addEventListener() {}, esc: value => String(value || '') };
+context.window = context;
+require('node:vm').runInNewContext(agents, context);
+const deepseek = { key: 'dsh', name: 'DeepSeek Harness', installed: true, version: '@openma/deepseek-harness-acp 0.4.40' };
+assert.match(context._agRowHtml(deepseek), /class="ag-ver[^"]*"[^>]*>0\.4\.40<\/span>/);
+context.fixtureAgents = [deepseek];
+require('node:vm').runInContext("_agData = { machines: [{ runnerId: 'local', scope: 'current-instance', agents: fixtureAgents }] }; _agOpen = 'local~dsh'", context);
+assert.match(context._agDrawer(), /class="ag-ver">0\.4\.40<\/span>/);
 const aidesk = fs.readFileSync(path.join(__dirname,
   '../components/panels/panels-aidesk-office.js'), 'utf8');
 const aideskCss = fs.readFileSync(path.join(__dirname,

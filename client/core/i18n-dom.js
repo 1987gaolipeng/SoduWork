@@ -35,6 +35,7 @@
       if (protectedElement(el, true)) return;
       const saved = attributes.get(el) || Object.create(null);
       for (const name of ATTRS) {
+        if (name === 'title' && el.hasAttribute('data-i18n-title')) continue;
         if ((el.getAttribute('data-user-attributes') || '').split(/\s+/).includes(name)) continue;
         if (!el.hasAttribute(name)) { delete saved[name]; continue; }
         saved[name] = project(el.getAttribute(name), saved[name], value => el.setAttribute(name, value), el);
@@ -50,7 +51,7 @@
       while (walker.nextNode()) text(walker.currentNode);
       root.querySelectorAll?.('*').forEach(attrs);
     }
-    const options = { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: [...ATTRS, 'data-i18n', 'data-i18n-source', 'data-i18n-params'] };
+    const options = { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: [...ATTRS, 'data-i18n', 'data-i18n-source', 'data-i18n-params', 'data-i18n-title', 'data-i18n-title-source'] };
     function start() {
       if (observer || !doc.body) return;
       observer = new global.MutationObserver(records => {

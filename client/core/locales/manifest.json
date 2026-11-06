@@ -31,5 +31,7 @@
   "zh-CN-runtime-surfaces.js",
   "en-US-runtime-surfaces.js",
   "ja-JP-runtime-surfaces.js",
-  "ko-KR-runtime-surfaces.js"
+  "ko-KR-runtime-surfaces.js",
+  "builtin-skills.js",
+  "builtin-ui.js"
 ]

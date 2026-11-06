@@ -7,9 +7,10 @@ const nativeLocale = require('./native-locale.cjs');
 const packageInfo = require('../package.json');
 const bundledHistory = require('./release-history.json');
 
-// Distributors may set a public homepage in package.json; never infer it from a Hub URL.
 const distribution = require('./distribution.cjs');
+const hubEndpoint = require('./hub-endpoint.cjs');
 const canonical = file => process.platform === 'win32' ? path.resolve(file).toLowerCase() : path.resolve(file);
+const hubWebsite = app => hubEndpoint.current(app)?.hub || distribution.current().hubOrigin;
 
 function appInfo(app) {
   const version = app.getVersion();
@@ -20,7 +21,8 @@ function appInfo(app) {
     .sort((a, b) => newer(a.version, b.version) ? -1 : newer(b.version, a.version) ? 1 : 0)
     .map(({ version, date, status, title, notes }) => ({ version, date, status, title, notes: [...notes] })) : [];
   return { name: distribution.current().productName, version, description: packageInfo.description || '',
-    license: packageInfo.license || '', website: distribution.current().websiteUrl, releaseHistory };
+    // The help entry follows this installation's active Hub, including isolated source profiles.
+    license: packageInfo.license || '', website: hubWebsite(app), releaseHistory };
 }
 
 function createTrustedWindow({ app, BrowserWindow, getRendererRoot }) {
@@ -61,7 +63,11 @@ function install({ app, ipcMain, BrowserWindow, dialog, quit, getRendererRoot, s
   ipcMain.handle('app-info', event => {
     requireWindow(event);
     if (!releaseNotes) return appInfo(app);
-    return withHistory(appInfo(app)).then(info => { requireWindow(event); return info; });
+    return withHistory(appInfo(app)).then(info => {
+      requireWindow(event);
+      // Release history may finish after the user selects a different Hub.
+      return { ...info, website: hubWebsite(app) };
+    });
   });
   async function requestQuit(event) {
     const parent = requireWindow(event);

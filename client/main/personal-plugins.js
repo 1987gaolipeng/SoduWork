@@ -470,7 +470,7 @@ function publicPlugin(plugin, detail) {
 }
 
 function builderPlugin() {
-  const body = normalizeBody(require('./plugin-builder-plugin.cjs').body());
+  const body = normalizeBuiltinBody(require('./plugin-builder-plugin.cjs').body());
   const version = build(body);
   return {
     id: BUILDER_ID, key: body.key, name: body.name, description: body.description,
@@ -480,7 +480,7 @@ function builderPlugin() {
 }
 
 function skillStudioPlugin(app) {
-  const body = normalizeBody(skillStudio.body(app));
+  const body = normalizeBuiltinBody(skillStudio.body(app));
   const version = build(body);
   return {
     id: SKILL_STUDIO_ID, key: body.key, name: body.name, description: body.description,
@@ -489,11 +489,15 @@ function skillStudioPlugin(app) {
   };
 }
 
+function normalizeBuiltinBody(body) {
+  return normalizeBody(require('./builtin-plugin-locales.cjs').withLocales(body));
+}
+
 function builtinPlugins(app, ids) {
   const items = [builderPlugin()];
   if (!ids || ids.includes(APP_DEVELOPER_ID)) {
     try {
-      const body = normalizeBody(require('./app-developer-plugin.cjs').body(app)), version = build(body);
+      const body = normalizeBuiltinBody(require('./app-developer-plugin.cjs').body(app)), version = build(body);
       items.push({ id: APP_DEVELOPER_ID, key: body.key, name: body.name, description: body.description,
         enabled: true, builtIn: true, currentVersion: body.version, versions: [{ ...version, version: body.version }],
         createdAt: '2026-10-20T00:00:00.000Z', updatedAt: '2026-10-20T00:00:00.000Z' });
@@ -504,7 +508,7 @@ function builtinPlugins(app, ids) {
   }
   if (!ids || ids.includes(PRODUCT_INCUBATOR_ID)) {
     try {
-      const body = normalizeBody(productIncubator.body(app)), version = build(body);
+      const body = normalizeBuiltinBody(productIncubator.body(app)), version = build(body);
       items.push({ id: PRODUCT_INCUBATOR_ID, key: body.key, name: body.name, description: body.description,
         enabled: true, builtIn: true, currentVersion: body.version, versions: [{ ...version, version: body.version }],
         createdAt: '2026-09-09T00:00:00.000Z', updatedAt: '2026-09-09T00:00:00.000Z' });
@@ -516,7 +520,7 @@ function builtinPlugins(app, ids) {
   // A missing optional resource must never break ordinary chat or other plugins.
   if (!ids || ids.includes(MCP_STUDIO_ID)) {
     try {
-      const body = normalizeBody(mcpStudio.body(app)), version = build(body);
+      const body = normalizeBuiltinBody(mcpStudio.body(app)), version = build(body);
       items.push({id:MCP_STUDIO_ID,key:body.key,name:body.name,description:body.description,
         enabled:true,builtIn:true,currentVersion:body.version,versions:[{...version,version:body.version}],
         createdAt:'2026-09-08T00:00:00.000Z',updatedAt:'2026-09-08T00:00:00.000Z'});

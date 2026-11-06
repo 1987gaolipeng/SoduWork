@@ -290,7 +290,7 @@ function _agCopy(a, field, fallback = '') {
 function _agTx(value) {
   const text = String(value == null ? '' : value);
   let out = text;
-  try { out = global.SoduWorkI18n?.translateText?.(text) || text; } catch (_) { return text; }
+  try { out = window.SoduWorkI18n?.translateText?.(text) || text; } catch (_) { return text; }
   if (out !== text) return out;
   /* Trailing parenthetical the exact catalog cannot match
    * (e.g. "gpt-5（走我自己的额度）" -> model id + translated suffix). */
@@ -485,7 +485,7 @@ function _agRowHtml(a, m) {
           (a.version
             ? '<span class="ag-ver' + (a.verFrom === 'cli' ? ' is-guess' : '') + '" ' +
               'title="' + (a.verFrom === 'cli' ? '版本由程序自检得出' : '') + '">' +
-              esc(a.version) + (bundled && a.key !== 'harness2' ? ' · 内置' : '') + '</span>'
+              esc(typeof AgentBrand !== 'undefined' ? AgentBrand.version(a) : a.version) + (bundled && a.key !== 'harness2' ? ' · 内置' : '') + '</span>'
             : '') +
           /* Expose the current machine status even when the card is collapsed. */
           '<span class="cfg-state ag-row-st is-' + status.tone + '" title="' + esc(status.reason) + '">' + status.label + '</span>' +
@@ -527,7 +527,7 @@ function _agDrawer() {
       '<header class="ag-drawer-head">' + bot +
         '<div class="ag-drawer-tt"><b' + (a.name ? ' data-user-content' : '') + '>' +
           esc(displayName) + '</b>' +
-          (a.version ? '<span class="ag-ver">' + esc(a.version) + (a.bundled && a.key !== 'harness2' ? ' · 内置' : '') + '</span>' : '') +
+          (a.version ? '<span class="ag-ver">' + esc(typeof AgentBrand !== 'undefined' ? AgentBrand.version(a) : a.version) + (a.bundled && a.key !== 'harness2' ? ' · 内置' : '') + '</span>' : '') +
           '<span class="cfg-state is-' + status.tone + '">' + status.label + '</span></div>' +
         '<button class="btn-mini ag-drawer-x" data-adrawer-x="1" aria-label="关闭详情">✕</button>' +
       '</header>' +

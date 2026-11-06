@@ -14,7 +14,12 @@ const sources = [
   'OpenAI 官方 CLI。用它自己的账号（ChatGPT 登录或 OpenAI key），不吃 SoduWork 这边的模型配置。',
   'Apache-2.0 开源编码 Agent；通过 ACP 接入，支持公司 OpenAI 兼容模型。',
   'MIT 开源的 DeepSeek 官方 Agent 框架（dsh）；通过 ACP 接入，支持公司 OpenAI 兼容模型或个人 DeepSeek Key。',
-  '日常对话通过 OpenCode 直接执行；Google Research Harness² 的实验性推演仅用于显式诊断。',
+  'Harness² 文本推演后由 OpenCode 执行，增加耗时与模型用量',
+  '每轮先运行 Google Research Harness² 的七阶段文本推演，再由 OpenCode 执行工具；推演会增加耗时与模型用量，失败时不会切换底座。',
+  '② 仅验证 OpenCode 执行组件；不运行 Harness² 推演，会使用所选模型额度，最多 3 分钟。',
+  '收到执行回复，但尚未确认 OpenCode 执行组件完整结束，请点「测一下」重试。',
+  '上次测试尚未验证当前执行组件；请点「测一下」重新验证。',
+  '通了 —— Harness² 0.1.0 的 OpenCode 执行组件已验证；此测试不包含推演。',
 ];
 
 function loadI18n() {

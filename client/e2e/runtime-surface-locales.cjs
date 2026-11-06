@@ -31,8 +31,20 @@ app.whenReady().then(async () => {
     SoduWorkAPI.agentSetup=SoduWorkAPI.localAgentSetup;openAgentsPanel();void 0;`);
   await tick();
   await js(`document.querySelector('[data-atoggle="fixture-local~claude"]').click()`);
+  await js(read('components/panels/panels-chat-status.js'));
+  await js(`window.runtimeNotice='当前会话没有授权：浏览网页。请新建会话并开启对应能力后再使用这个插件';
+    const notice=document.createElement('span');notice.dataset.runtimeNotice=runtimeNotice;notice.setAttribute('translate','no');
+    notice.textContent=ChatStatus.notice(runtimeNotice);document.body.append(notice);
+    const reply=document.createElement('p');reply.dataset.messageContent='';reply.id='originalReply';
+    reply.textContent=runtimeNotice;document.body.append(reply);`);
   for (const locale of ['en-US', 'ja-JP', 'ko-KR', 'zh-CN', 'en-US']) {
     await js(`SoduWorkI18n.setLocale(${JSON.stringify(locale)})`); await tick();
+    const runtimeNotice=await js('document.querySelector("[data-runtime-notice]").textContent');
+    assert.equal(runtimeNotice,await js('ChatStatus.notice(window.runtimeNotice)'));
+    assert.equal(await js('document.querySelector("#originalReply").textContent'),await js('window.runtimeNotice'));
+    if(locale==='en-US')assert.doesNotMatch(runtimeNotice,/[\u3400-\u9fff]/);
+    if(locale==='ja-JP')assert.ok(runtimeNotice.includes('ウェブを閲覧'));
+    if(locale==='ko-KR')assert.ok(runtimeNotice.includes('웹 탐색'));
     const text = await js('document.querySelector("#agDrawerWrap").innerText');
     assert.ok(text.includes('Claude Code'));
     assert.ok(!text.includes('Claude Code CLI'));

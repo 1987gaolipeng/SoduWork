@@ -36,7 +36,7 @@
 .gv-rowlabel b{font-size:var(--text-sm);font-weight:700;color:var(--ink-2);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gv-rowlabel span{font-size:max(var(--font-min-readable, 14.5px), 11px);color:var(--ink-5);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.gv-lane{position:relative;flex:1;min-width:420px}
+.gv-lane{position:relative;flex:1;min-width:var(--gv-timeline-width, 420px)}
 .gv-cells{position:absolute;inset:0;display:flex;pointer-events:none}
 .gv-cell{flex:1;border-right:1px solid var(--line-2)}
 .gv-cell:last-child{border-right:none}
@@ -77,3 +77,19 @@
 .gv-act-solo{height:22px;line-height:22px;padding:0 8px;box-sizing:border-box;
   font-size:max(var(--font-min-readable, 14.5px), 11.5px);font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .gv-empty{padding:44px 20px;text-align:center;font-size:var(--text-sm);color:var(--ink-5)}
+/* Fixed columns keep task labels and calendar days readable at every viewport width. */
+.gv-task-rows{--gv-label-width:240px}
+.gv-task-rows .gv-body{overflow-x:scroll;overflow-y:auto}
+.gv-task-rows .gv-body::-webkit-scrollbar{width:10px;height:12px}
+.gv-task-rows .gv-body::-webkit-scrollbar-track{background:var(--bg-1)}
+.gv-task-rows .gv-body::-webkit-scrollbar-thumb{background:var(--ink-5);border:2px solid var(--bg-1);border-radius:8px}
+.gv-task-rows .gv-body::-webkit-scrollbar-thumb:hover{background:var(--ink-3)}
+.gv-task-rows .gv-row{width:100%;min-width:calc(var(--gv-label-width) + var(--gv-timeline-width))}
+.gv-task-rows .gv-rowlabel{flex-basis:var(--gv-label-width);box-sizing:border-box;padding:9px 12px;position:sticky;left:0;z-index:1;background:var(--bg-0)}
+.gv-task-rows .gv-lane{flex:1 0 var(--gv-timeline-width);isolation:isolate}
+.gv-task-rows .gv-rowlabel b,.gv-task-rows .gv-rowlabel span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5}
+.gv-task-rows .gv-rowlabel b[role=button]{cursor:pointer}
+.gv-task-rows .gv-rowlabel b[role=button]:hover{color:var(--accent)}
+.gv-task-rows .gv-rowlabel b[role=button]:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-sm)}
+.gv-task-rows .gv-bar{text-align:center;min-width:0;padding:0}
+.gv-task-rows .gv-act{min-width:0}

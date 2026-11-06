@@ -12,6 +12,40 @@
     return i18n.translateText(value);
   }
 
+  function notice(value) {
+    const source = String(value || '');
+    const locale = global.SoduWorkI18n?.getLocale?.() || 'zh-CN';
+    if (locale === 'zh-CN') return source;
+    // Localize system-owned status envelopes only; model replies and user names stay untouched.
+    const wrapped = source.match(/^(这一轮没发出去|打不开对话|开不了对话|需求执行失败)（([\s\S]*)）$/);
+    if (wrapped) return tx(wrapped[1] + '（{reason}）').replace('{reason}', () => notice(wrapped[2]));
+    const patterns = [
+      ['当前会话没有授权', '请新建会话并开启对应能力后再使用这个插件', true],
+      ['当前会话是只读模式，插件还需要', '请改为可读写后重新开始会话', true],
+      ['当前对话尚未接入插件依赖的连接器', '请在插件或连接器设置中完成连接并启用后重试', false],
+      ['当前对话底座不支持插件声明的能力', '', true],
+    ];
+    const labels = new Set(['浏览网页', 'Office 文档', '操作电脑', '文件处理', '命令与构建', '代码仓库']);
+    const parts = source.split(new RegExp('；(?=' + patterns.map(([prefix]) => prefix + '：').join('|') + ')'));
+    const localized = parts.map(part => {
+      for (const [prefix, suffix, capabilities] of patterns) {
+        const begin = prefix + '：', end = suffix ? '。' + suffix : '';
+        if (!part.startsWith(begin) || (end && !part.endsWith(end))) continue;
+        const namesSource = part.slice(begin.length, end ? -end.length : undefined);
+        const names = capabilities ? namesSource.split('、').map(label => labels.has(label) ? tx(label) : label).join(', ') : namesSource;
+        return tx(begin + '{names}' + end).replace('{names}', () => names);
+      }
+      return tx(part);
+    });
+    return localized.every((part, index) => part === parts[index]) ? tx(source) : localized.join('; ');
+  }
+
+  global.addEventListener?.('soduwork-locale-change', () => {
+    global.document?.querySelectorAll?.('[data-runtime-notice]').forEach(node => {
+      node.textContent = notice(node.getAttribute('data-runtime-notice'));
+    });
+  });
+
   const LONG_WORK_COPY = [
     '正在核对这一轮的细节，已有工作会继续保留 · 可随时停止',
     '复杂步骤仍在执行，SoduWork 正在等待真实工具结果 · 可随时停止',
@@ -481,7 +515,7 @@
     };
   }
 
-  const api = { longWork, rotating, work, runtimeBusy, createThinking, outputTokens: usageValue, estimateOutput };
+  const api = { notice, longWork, rotating, work, runtimeBusy, createThinking, outputTokens: usageValue, estimateOutput };
   global.ChatStatus = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

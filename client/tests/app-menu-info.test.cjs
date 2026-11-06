@@ -12,12 +12,12 @@ const { appInfo, install } = require('../main/app-menu-info.cjs');
 // default remains English and has independent locale coverage.
 test.beforeEach(() => require('../main/native-locale.cjs').setLocale('zh-CN'));
 
-function fixture({ version = '1.12.52', showMessageBox, quit, getRendererRoot, shell, openNewConversation } = {}) {
+function fixture({ version = '1.12.52', showMessageBox, quit, getRendererRoot, shell, openNewConversation, releaseNotes } = {}) {
   const root = path.resolve(__dirname, '..'), handlers = new Map(), owners = new Map();
   const dialogs = [], exits = [];
   const app = { getAppPath: () => root, getVersion: () => version };
   const ipcMain = { handle: (channel, fn) => handlers.set(channel, fn) };
-  const controller = install({ app, ipcMain, getRendererRoot, shell, openNewConversation, BrowserWindow: { fromWebContents: wc => owners.get(wc) },
+  const controller = install({ app, ipcMain, getRendererRoot, shell, openNewConversation, releaseNotes, BrowserWindow: { fromWebContents: wc => owners.get(wc) },
     dialog: { showMessageBox: async (owner, options) => {
       dialogs.push({ owner, options });
       return showMessageBox ? showMessageBox(owner, options) : { response: 0 };
@@ -36,7 +36,7 @@ test('application metadata uses the running version and only bundled published h
   const current = appInfo({ getVersion: () => '1.12.52' });
   assert.equal(current.name, 'SoduWork');
   assert.equal(current.version, '1.12.52');
-  assert.equal(current.website, '');
+  assert.equal(current.website, require('../main/distribution.cjs').current().hubOrigin);
   assert.deepEqual(current.releaseHistory.map(row => row.version), ['1.12.52', '1.12.51']);
   assert.equal(current.releaseHistory[1].status, 'withdrawn');
   assert.ok(current.releaseHistory.every(row => row.date === '2026-10-01' && !('source' in row)));
@@ -58,7 +58,7 @@ test('real preload exposes only the two narrow menu invocations and reaches the 
     require: id => { assert.equal(id, 'electron'); return { ipcRenderer, webUtils: {},
       contextBridge: { exposeInMainWorld: (name, api) => { exposed[name] = api; } } }; },
   });
-  assert.equal((await exposed.soduWorkAPI.getAppInfo('ignored-url')).website, '');
+  assert.equal((await exposed.soduWorkAPI.getAppInfo('ignored-url')).website, require('../main/distribution.cjs').current().hubOrigin);
   assert.deepEqual(await exposed.soduWorkAPI.requestAppQuit({ force: true }), { ok: true, canceled: true });
   assert.deepEqual(calls, [{ channel: 'app-info', args: [] }, { channel: 'app-request-quit', args: [] }]);
   assert.deepEqual(f.exits, []);
@@ -72,6 +72,42 @@ test('quit defaults to continuing work and requires an explicit confirmation res
   assert.equal(options.defaultId, 0); assert.equal(options.cancelId, 0);
   assert.match(options.detail, /本机.*后台工作会停止/);
   assert.deepEqual(f.exits, []);
+});
+
+function isolatedProfile(t, app) {
+  const folder = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'soduwork-menu-profile-'));
+  t.after(() => fs.rmSync(folder, { recursive: true, force: true }));
+  app.getPath = () => folder;
+  require('../main/hub-endpoint.cjs').initialize(app, {});
+}
+
+test('renderer and native help follow the current installation Hub without crossing profiles', async t => {
+  const endpoint = require('../main/hub-endpoint.cjs'), urls = [];
+  const f = fixture({ shell: { openExternal: async url => urls.push(url) } });
+  const other = fixture(), requester = f.owner();
+  f.app.isPackaged = other.app.isPackaged = true;
+  isolatedProfile(t, f.app); isolatedProfile(t, other.app);
+  assert.equal(endpoint.prepare(f.app, 'https://tenant-a.invalid:9443').ok, true);
+  assert.equal(endpoint.prepare(other.app, 'https://tenant-b.invalid').ok, true);
+  assert.equal(f.handlers.get('app-info')(requester.event).website, 'https://tenant-a.invalid:9443');
+  await f.controller.nativeCommand('website', requester.window);
+  assert.equal(endpoint.prepare(f.app, 'http://127.0.0.1:8765').ok, true);
+  await f.controller.nativeCommand('website', requester.window);
+  assert.deepEqual(urls, ['https://tenant-a.invalid:9443', 'http://127.0.0.1:8765']);
+  assert.equal(appInfo(other.app).website, 'https://tenant-b.invalid');
+});
+
+test('a Hub switch during release history loading does not return the retired website', async t => {
+  let finish;
+  const endpoint = require('../main/hub-endpoint.cjs');
+  const f = fixture({ releaseNotes: { list: () => new Promise(resolve => { finish = resolve; }) } });
+  f.app.isPackaged = true;
+  isolatedProfile(t, f.app);
+  assert.equal(endpoint.prepare(f.app, 'https://tenant-before.invalid').ok, true);
+  const request = f.handlers.get('app-info')(f.owner().event);
+  assert.equal(endpoint.prepare(f.app, 'https://tenant-after.invalid:9443').ok, true);
+  finish({ releases: [] });
+  assert.equal((await request).website, 'https://tenant-after.invalid:9443');
 });
 
 test('concurrent menu requests share one confirmation and call normal quit once', async () => {
@@ -185,14 +221,14 @@ test('legacy renderer fallback shows real help in its current window and reuses 
   assert.match(f.dialogs[0].options.detail, /SoduWork 1\.12\.52/);
   assert.match(f.dialogs[1].options.detail, /1\.12\.51.*已撤回/);
   await f.controller.nativeCommand('website', requester.window);
-  assert.deepEqual(urls, []);
+  assert.deepEqual(urls, [require('../main/distribution.cjs').current().hubOrigin]);
   await f.controller.nativeCommand('new', requester.window); assert.equal(newConversations, 1);
   assert.equal(await f.controller.nativeCommand('arbitrary-command', requester.window), false);
   assert.equal((await f.controller.nativeCommand('quit', requester.window)).canceled, true);
   assert.deepEqual(f.exits, []);
   const remote = f.owner('https://example.com/');
   await assert.rejects(f.controller.nativeCommand('website', remote.window), /only available/);
-  assert.equal(urls.length, 0);
+  assert.equal(urls.length, 1); // Rejected remote sender cannot open another URL.
 });
 
 test('native fallback and renderer exit requests share the same confirmation and quit exactly once', async () => {

@@ -10,7 +10,8 @@ const vm = require('node:vm');
 const CORE = path.join(__dirname, '../core/');
 const LOCALES = path.join(CORE, 'locales/');
 const LOCALE_FILES = ['en-US.js', 'en-US-workspace.js', 'en-US-chat.js', 'en-US-notification-pages.js',
-  'en-US-chat-pages.js', 'ja-JP.js', 'ja-JP-gap-pages.js', 'ko-KR.js', 'ko-KR-gap-pages.js'];
+  'en-US-chat-pages.js', 'ja-JP.js', 'ja-JP-gap-pages.js', 'ko-KR.js', 'ko-KR-gap-pages.js',
+  'en-US-runtime-surfaces.js', 'ja-JP-runtime-surfaces.js', 'ko-KR-runtime-surfaces.js'];
 
 // Node locale modules export values instead of populating browser globals.
 // Use a VM to simulate script loading into SoduWorkLocaleMessages.
@@ -44,6 +45,30 @@ function mergedCatalog(locale) {
     require(path.join(LOCALES, locale + '.js')),
     require(path.join(LOCALES, locale + '-gap-pages.js')));
 }
+
+test('system notices localize capability failures and envelopes without rewriting named resources', () => {
+  const denied = '当前会话没有授权：浏览网页、Office 文档。请新建会话并开启对应能力后再使用这个插件';
+  const readonly = '当前会话是只读模式，插件还需要：文件处理、命令与构建。请改为可读写后重新开始会话';
+  const missing = '当前对话尚未接入插件依赖的连接器：销售部飞书；保存$&。请在插件或连接器设置中完成连接并启用后重试';
+  const unsupported = '当前对话底座不支持插件声明的能力：custom-capability、保存';
+  const i18n = loadI18n('en-US');
+  delete require.cache[require.resolve('../components/panels/panels-chat-status.js')];
+  const status = require('../components/panels/panels-chat-status.js');
+  for (const [locale, expected] of [['en-US','Browse the web'],['ja-JP','ウェブを閲覧'],['ko-KR','웹 탐색']]) {
+    i18n.setLocale(locale, {persist:false,broadcast:false});
+    const rendered = status.notice('这一轮没发出去（' + denied + '；' + readonly + '）');
+    assert.ok(rendered.includes(expected), locale);
+    assert.doesNotMatch(rendered, /当前|请新建|浏览网页|文件处理|命令与构建/);
+    assert.ok(status.notice(missing).includes('销售部飞书；保存$&'));
+    assert.doesNotMatch(status.notice(missing), /当前对话|完成连接/);
+    assert.ok(status.notice(unsupported).includes('custom-capability'));
+    assert.ok(status.notice(unsupported).includes('保存'));
+    assert.doesNotMatch(status.notice(unsupported), /当前对话/);
+    assert.equal(status.notice('客户原话；请保留名称'), '客户原话；请保留名称');
+  }
+  i18n.setLocale('zh-CN', {persist:false,broadcast:false});
+  assert.equal(status.notice(denied), denied);
+});
 
 const EXPECT = {
   'ja-JP': { pending: 'ご要望を理解しています…', explain: '結果を分かりやすくまとめています…', busy: '処理中' },

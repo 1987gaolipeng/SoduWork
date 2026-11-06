@@ -67,7 +67,7 @@
     return h;
   }
 
-  /* rows: [{label, sub, tasks:[...]}]；opts: {year, month(0-based), query, onlyOverdue, clickAttr} */
+  /* taskRows keeps stable task labels outside duration-scaled bars. */
   function html(rows, opts) {
     const y = opts.year, m = opts.month;
     const days = new Date(y, m + 1, 0).getDate();
@@ -90,8 +90,9 @@
       total += bars.length;
       const laneN = _packLanes(bars);
       const pct = (n) => (n / days * 100).toFixed(3) + '%';
+      const interval = span => (m + 1) + '/' + (span.sd + 1) + ' – ' + (m + 1) + '/' + (span.ed + 1);
       const barsH = bars.map(b => {
-        const top = b.lane * 30 + 4;
+        const top = b.lane * 30 + (opts.taskRows ? 12 : 4);
         let s = '';
         if (b.plan) {
           const RC = { daily: '每天', weekly: '每周', monthly: '每月' };
@@ -99,20 +100,24 @@
             : ((b.st === 'done' ? '✓ ' : '') + b.title);
           s += '<div class="gv-bar ' + (b.routine ? 'gv-routine' : 'gv-' + b.st) + '" ' + clickAttr + '="' + esc(b.id) + '"' +
             ' style="left:' + pct(b.plan.sd) + ';width:' + pct(b.plan.ed - b.plan.sd + 1) + ';top:' + top + 'px"' +
-            ' title="' + esc(b.title) + (b.routine ? ' · 例行' : ' · 计划') + '">' + esc(label) + '</div>';
+            ' title="' + esc(b.title) + ' · ' + interval(b.plan) + (b.routine ? ' · 例行' : ' · 计划') + '"' +
+            ' aria-label="' + esc(b.title) + ' · ' + interval(b.plan) + '">' +
+            (opts.taskRows ? (b.st === 'done' ? '✓' : '') : esc(label)) + '</div>';
         }
         if (b.act) {
           /* Place actual duration beneath the plan, or use it as the titled primary bar when no plan exists. */
           const solo = !b.plan;
           s += '<div class="gv-act gv-act-' + b.st + (solo ? ' gv-act-solo' : '') + '" ' + clickAttr + '="' + esc(b.id) + '"' +
-            ' style="left:' + pct(b.act.sd) + ';width:' + pct(b.act.ed - b.act.sd + 1) + ';top:' + (top + (solo ? 0 : 19)) + 'px"' +
-            ' title="' + esc(b.title) + ' · 实际">' + (solo ? esc(b.title) : '') + '</div>';
+            ' style="left:' + pct(b.act.sd) + ';width:' + pct(b.act.ed - b.act.sd + 1) + ';top:' + (top + (solo ? 0 : opts.taskRows ? 26 : 19)) + 'px"' +
+            ' title="' + esc(b.title) + ' · ' + interval(b.act) + ' · 实际"' +
+            ' aria-label="' + esc(b.title) + ' · ' + interval(b.act) + '">' + (solo && !opts.taskRows ? esc(b.title) : '') + '</div>';
         }
         return s;
       }).join('');
       return '<div class="gv-row">' +
-        "<div class=\"gv-rowlabel\"><b data-user-content>" + esc(r.label) + '</b>' + (r.sub ? '<span>' + esc(r.sub) + '</span>' : '') + '</div>' +
-        '<div class="gv-lane" style="height:' + (laneN * 30 + 8) + 'px">' +
+        '<div class="gv-rowlabel"><b data-user-content' + (opts.taskRows ? ' ' + clickAttr + '="' + esc(bars[0].id) + '"' : '') +
+        ' title="' + esc(r.label) + '">' + esc(r.label) + '</b>' + (r.sub ? '<span data-user-content title="' + esc(r.sub) + '">' + esc(r.sub) + '</span>' : '') + '</div>' +
+        '<div class="gv-lane" style="min-height:' + (laneN * 30 + (opts.taskRows ? 28 : 8)) + 'px">' +
         '<div class="gv-cells">' + _cells(days, todayIdx, y, m) + '</div>' + barsH + '</div></div>';
     }).join('');
 
@@ -123,7 +128,7 @@
     }
     head += '</div></div></div>';
 
-    return '<div class="gv">' +
+    return '<div class="gv' + (opts.taskRows ? ' gv-task-rows' : '') + '"' + (opts.taskRows ? ' style="--gv-timeline-width:' + (days * 40) + 'px"' : '') + '>' +
       '<div class="gv-tools">' +
       '<span class="gv-lg"><i class="gv-dot gv-run"></i>进行中</span>' +
       '<span class="gv-lg"><i class="gv-dot gv-done"></i>已完成</span>' +
