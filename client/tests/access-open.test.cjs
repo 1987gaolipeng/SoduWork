@@ -5,6 +5,12 @@ const fs = require('node:fs'), path = require('node:path'), os = require('node:o
 const source = fs.readFileSync(path.join(__dirname, '../main/pi-session/ipc.js'), 'utf8');
 const handler = source.slice(source.indexOf('  async function openConversation('), source.indexOf("  ipcMain.handle('pi-session-open',"));
 
+function standardPreferenceFixture(t, options = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-saved-standard-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(root, 'access-preferences.json'), JSON.stringify({ schema: 1, mode: 'standard', revision: 0 }));
+  return fixture({ ...options, app: { getPath: () => root } });
+}
 function fixture(options = {}) {
   const calls = [], dialogs = [], ownerActions = [], cwd = os.tmpdir();
   let viewAttachments = 0, viewDetachments = 0, rendererGrants = 0;
@@ -584,35 +590,43 @@ test('本机新建需求继承系统权限，显式选择优先且后台派发�
   assert.equal(f.calls.at(-1).accessPolicy.mode, 'standard', '历史未确认的 full 不能提升权限');
 });
 
-test('a composer task full choice uses task-scoped native confirmation and cancellation never falls back to standard', async () => {
+test('a fresh interactive desktop chat inherits full access while headless calls cannot inherit it', async () => {
+  const fresh = fixture();
+  assert.equal((await fresh.open({ adapterId: 'pi' })).ok, true);
+  assert.equal(fresh.calls[0].accessPolicy.mode, 'full'); assert.equal(fresh.dialogs.length, 0);
+  const headless = fixture();
+  assert.equal((await headless.open({ adapterId: 'pi' }, null)).ok, true);
+  assert.equal(headless.calls[0].accessPolicy, null, 'headless legacy calls do not inherit device preferences');
+});
+test('a composer task full choice uses task-scoped native confirmation and cancellation never falls back to standard', async t => {
   const options = { taskRef: 'fixture-task', taskSession: true, adapterId: 'pi', accessMode: 'full' };
-  const allowed = fixture({ response: 1 });
+  const allowed = standardPreferenceFixture(t, { response: 1 });
   assert.equal((await allowed.open(options)).ok, true);
   assert.equal(allowed.calls[0].accessPolicy.mode, 'full');
   assert.equal(allowed.dialogs.length, 1);
-  const cancelled = fixture();
+  const cancelled = standardPreferenceFixture(t);
   assert.equal((await cancelled.open(options)).cancelled, true);
   assert.equal(cancelled.calls.length, 0);
   assert.equal(cancelled.dialogs.length, 1);
 });
 
-test('full access requires native consent before opening; cancel and noninteractive callers cannot enable it', async () => {
-  const cancelled = fixture();
+test('full access requires native consent before opening with a saved standard default; cancel and noninteractive callers cannot enable it', async t => {
+  const cancelled = standardPreferenceFixture(t);
   assert.equal((await cancelled.open({ accessMode: 'full' })).cancelled, true);
   assert.equal(cancelled.calls.length, 0);
   assert.equal(cancelled.dialogs[0].fixture, true);
-  const headless = fixture({ response: 1 });
+  const headless = standardPreferenceFixture(t, { response: 1 });
   assert.equal((await headless.open({ accessMode: 'full' }, null)).ok, false);
   assert.equal(headless.calls.length, 0);
   assert.equal(headless.dialogs.length, 0);
-  const allowed = fixture({ response: 1 });
+  const allowed = standardPreferenceFixture(t, { response: 1 });
   assert.equal((await allowed.open({ accessMode: 'full' })).ok, true);
   assert.equal(allowed.calls[0].accessPolicy.mode, 'full');
   assert.equal(allowed.calls[0].accessPolicy.schema, 'soduwork.access-policy/v1');
 });
 
-test('main process compiles policy and ignores renderer-supplied full access on standard or unsupported calls', async () => {
-  const forged = { schema: 'soduwork.access-policy/v1', mode: 'full', revision: 100, workspaceRoot: os.tmpdir() };
+test('main process compiles policy and ignores renderer-supplied full access on standard or unsupported calls', async t => {
+  const forged = { schema: 'sodo.access-policy/v1', mode: 'full', revision: 100, workspaceRoot: os.tmpdir() };
   const standard = fixture();
   const raw = { accessMode: 'standard', accessPolicy: forged };
   assert.equal((await standard.open(raw)).ok, true);
@@ -623,7 +637,7 @@ test('main process compiles policy and ignores renderer-supplied full access on 
   assert.equal((await legacy.open({ adapterId: 'unknown-runtime', mode: 'full', accessPolicy: forged })).ok, true);
   assert.equal(legacy.calls[0].accessPolicy, null);
   assert.equal(legacy.calls[0].readOnly, false);
-  const newChat = fixture();
+  const newChat = standardPreferenceFixture(t);
   assert.equal((await newChat.open({ mode: 'full', accessPolicy: forged })).ok, true);
   assert.equal(newChat.calls[0].accessPolicy.mode, 'standard');
 });

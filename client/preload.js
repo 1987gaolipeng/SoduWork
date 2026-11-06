@@ -165,15 +165,18 @@ const conversationSession = {
  * renderer.
  */
 const workPreview = {
+  appCache: payload => ipcRenderer.invoke('work-preview-app-cache', payload || {}),
   show: (payload) => ipcRenderer.invoke('work-preview-show', payload || {}),
   /* Open independent native application windows. */
   showDetached: (payload) => ipcRenderer.invoke('work-preview-show-detached', payload || {}),
+  showEmbedded: payload => ipcRenderer.invoke('work-preview-show-embedded', payload || {}),
   windowDisplay: () => ipcRenderer.invoke('work-preview-window-display'),
   /*
    * Bridge real desk.html composer components to main-process conversation following,
    * content insertion, expansion, and send receipts.
    */
   composerHello: () => ipcRenderer.invoke('work-preview-composer-hello'),
+  composerActivity: busy => ipcRenderer.invoke('work-preview-composer-activity', { busy }),
   composerDock: (opts) => ipcRenderer.invoke('work-preview-composer-dock', opts || {}),
   composerStep: (payload) => ipcRenderer.invoke('work-preview-composer-step', payload || {}),
   composerSent: () => ipcRenderer.invoke('work-preview-composer-sent'),

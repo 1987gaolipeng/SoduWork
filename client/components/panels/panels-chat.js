@@ -627,7 +627,8 @@
     try {
       const result = method === 'permission' && global.AccessControls ? await AccessControls.answer(button, api, answerRef) : await api.answerUi(answerRef, res);
       if (answerEpoch !== _viewEpoch || answerRef !== _ref) return;
-      if (result?.ok === false && typeof petSay === 'function') petSay(result.reason || '权限确认失败，请重试');
+      if (value === 'full' && result?.snapshot) { _snap = result.snapshot; _scheduleRender(); }
+      if (result?.ok === false && !result.cancelled && !result.canceled && typeof petSay === 'function') petSay(result.reason || '权限确认失败，请重试');
     } catch (error) {
       if (answerEpoch === _viewEpoch && answerRef === _ref && typeof petSay === 'function') petSay('权限确认失败，请重试');
     } finally { if (method !== 'permission' && button?.isConnected) button.disabled = false; }

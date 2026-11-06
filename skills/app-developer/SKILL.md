@@ -16,7 +16,7 @@ description: Build SoduWork apps and skills.
 执行 [development-workflow.md](references/development-workflow.md)：设计→实现→检查→安装打开→写回→重开/升版；缺证据不报通过。
 
 - 设计：[design-quality.md](references/design-quality.md)；GitHub调研/许可；视觉调研可选，查最新同类。
-- 单个彩色图标：[icon-design.md](references/icon-design.md)；配色自由、方形饱满、小尺寸清楚；顶层 icon=PNG≤256px/96KB；查明暗背景，不强制整套/灰色版。
+- 单个图标：[icon-design.md](references/icon-design.md)；单色或彩色图标；透明/白/纯色底，禁多色及紫色渐变，渐变仅同色系明暗；顶层 icon=PNG≤256px/96KB。
 - 五类：[instant-types.md](references/instant-types.md)；持续角色：[robot-persona.md](references/robot-persona.md)。入口用业务词语，真实执行后拟人表达；关窗计划仍运行。
 - 账号/组织/对话/通知/本机及云资料：[host-data-sdk.md](references/host-data-sdk.md)；先声明能力，再调用真实SDK，分页读全，不编造接口。
 - SDK/参数/鉴权/数据/MCP：[host-sdk.md](references/host-sdk.md)；复制同源SDK，读sdk/README.md；无顶层connect；宿主错误不伪装预览。

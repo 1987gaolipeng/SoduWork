@@ -359,7 +359,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
    * Read fixed-name plugin drafts only from outputs of active registered sessions; never
    * accept renderer-supplied file paths.
    */
-  pluginDraft.installIpc(ipcMain, session);
+  pluginDraft.installIpc(ipcMain, session, app);
   async function openConversation(event, raw, expectedIdentity, automationContext) {
     const preview = require('../work-preview');
     const appRequest = raw?.appRequestId ? preview.appRequestContext(event, raw.appRequestId) : null;
@@ -478,8 +478,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
           ].map((item) => String(item || '').trim()).filter(Boolean));
           if (!opts.requireTaskBinding || !requestedTaskId || boundTaskIds.has(requestedTaskId)) {
             await assertHistoryCurrent();
-            appRequest?.assertActive();
-            require('./app-mcp-grant.cjs').bind(live, event?.sender, appPluginId, app, { identityOf: sendIdentityOf || identityOf, assertActive: appRequest?.assertActive });
+            require('./app-mcp-grant.cjs').bind(live, event?.sender, appPluginId, app, { identityOf: sendIdentityOf || identityOf });
             _bindUsage(live, identity, live.usageAgentKey || opts.adapterId || 'pi');
             if (event) _attach(live, require('../conversation/app-surfaces.cjs').forSender(BrowserWindow, event.sender));
             else _detach(live);
@@ -771,8 +770,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         require('../conversation/requirement-context').assertOwner(app, opened.session, identity);
         accessConsent?.assertValid();
         await assertHistoryCurrent();
-        appRequest?.assertActive();
-        require('./app-mcp-grant.cjs').bind(opened.session, event?.sender, appPluginId, app, { identityOf: sendIdentityOf || identityOf, assertActive: appRequest?.assertActive });
+        require('./app-mcp-grant.cjs').bind(opened.session, event?.sender, appPluginId, app, { identityOf: sendIdentityOf || identityOf });
         _bindUsage(opened.session, identity, opts.adapterId || 'pi');
         if (event) _attach(opened.session, require('../conversation/app-surfaces.cjs').forSender(BrowserWindow, event.sender));
         else _detach(opened.session);

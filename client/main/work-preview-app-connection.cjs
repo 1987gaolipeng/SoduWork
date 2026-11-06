@@ -109,6 +109,7 @@ function resolve(item, deps, assertActive = () => {}) {
   };
   const current = read();
   const resolved = { ...connection, token: current.token, revision: current.revision, readCurrent: read,
+    notifyChanged: change => {read();item.view?.webContents?.send('app-data-changed',change);},
     inspect: action => require('./work-preview-app-inspect.cjs').inspect(item, action, read) };
   return require('./jiyong-mcp-bindings.cjs').extend(resolved,remote ? {jiyong:connection.jiyong} : require('./personal-plugins').get(deps.app,bound.pluginId),bound);
 }

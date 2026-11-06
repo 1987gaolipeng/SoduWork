@@ -4,25 +4,20 @@ const fs = require('node:fs'), path = require('node:path'), crypto = require('no
 const processGrants = require('../agent-runtime/process-grants');
 const sources = new WeakMap();
 const turnBindings = new WeakMap();
-function bind(session, sender, pluginId, app, deps = {}) {
-  const pageOwner = require('../work-preview-app-owner.cjs');
-  let assertActive = deps.assertActive;
-  if (pageOwner.assertSender(sender)) assertActive ||= () => pageOwner.assertSender(sender);
-  assertActive?.();
-  session.appPluginId = pluginId || session.appPluginId || (sender && app
+function bind(session, sender, pluginId, app, deps) {
+  session.appPluginId = pluginId || session.appPluginId || (app
     ? require('../app-conversation-connection.cjs').association(app, session.snapshot?.().activePlugins) : '') || '';
-  sources.set(session, { sender, app, deps, nativePluginId: pluginId || '', assertActive });
+  sources.set(session, { sender, app, deps, nativePluginId: pluginId || '' });
 }
 function nativePluginId(session) { return sources.get(session)?.nativePluginId || ''; }
 function unbind(session) { sources.delete(session); }
 function forSession(session) {
   if (!session) return null;
   const accepted = turnBindings.get(session);
-  const { sender, app, deps, assertActive } = accepted || sources.get(session) || {};
-  assertActive?.();
+  const { sender, app, deps } = accepted || sources.get(session) || {};
   const pluginId = accepted ? accepted.pluginId : session.appPluginId;
   if (!pluginId) return null;
-  return mapResult(context(sender, pluginId, accepted?.expected, app, deps), value => { assertActive?.(); return value; });
+  return context(sender, pluginId, accepted?.expected, app, deps);
 }
 // Local/native ownership stays synchronous; remote history additionally awaits
 // the current account's accepted Hub installation. Callers may await either.
@@ -36,7 +31,6 @@ function context(sender, expectedPluginId, expectedSettings, app, deps) {
   if (app && (!current || current.pluginId !== expectedPluginId || (current.requiresMcp && !current.connection)))
     current = require('../app-conversation-connection.cjs').context(app, expectedPluginId, deps);
   return mapResult(current, value => {
-    require('../work-preview-app-owner.cjs').assertSender(sender);
     if (!value || value.pluginId !== expectedPluginId) throw Error('应用连接不可用，请重新打开即用同步连接');
     if (expectedSettings && stamp(value) !== expectedSettings) throw Error('应用账号或设置已变化，请重新发送消息');
     return value;
@@ -45,12 +39,10 @@ function context(sender, expectedPluginId, expectedSettings, app, deps) {
 function stamp(value) { return value?.connection?.credentialKey ? value.connection.scope + ':' + value.connection.revision + (value.connection.versionId ? ':' + value.connection.versionId : '') : ''; }
 function guardSend(session, options) {
   const source = sources.get(session) || {}, { sender, app, deps } = source;
-  source.assertActive?.();
   const selected = (options.clearPluginSelection ? [] : options.pluginIds?.length
     ? options.pluginIds : session.snapshot?.().activePlugins || []).slice();
   const selectedApp = app ? require('../app-conversation-connection.cjs').association(app, selected, deps) : '';
   return mapResult(selectedApp, selectedApp => {
-    source.assertActive?.();
     const pluginId = selectedApp || source.nativePluginId || '';
     // Capture each accepted turn independently. Selecting another application or
     // moving this conversation cannot change an already-queued turn's authority.
@@ -59,19 +51,14 @@ function guardSend(session, options) {
       if (!selected.length) options.clearPluginSelection = true;
     }
     return mapResult(context(sender, pluginId, undefined, app, deps), current => {
-      source.assertActive?.();
       const expected = stamp(current), prior = options.beforeTurn;
       options.beforeTurn = async (...args) => {
-        source.assertActive?.();
         await context(sender, pluginId, expected, app, deps);
-        source.assertActive?.();
         const result = await prior?.(...args);
-        source.assertActive?.();
         await context(sender, pluginId, expected, app, deps);
-        source.assertActive?.();
         session.appPluginId = pluginId;
         session.appMcpExpected = expected;
-        turnBindings.set(session, { sender, pluginId, app, deps, expected, assertActive: source.assertActive });
+        turnBindings.set(session, { sender, pluginId, app, deps, expected });
         return result;
       };
     });

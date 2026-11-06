@@ -286,7 +286,7 @@
     const noticeText = navLabel('notices');
     const moreMenu = '<div class="ws-rail-more-wrap"><button class="ws-rail-button ws-rail-menu-button" type="button" data-rail-menu="more" aria-label="' + moreText + '" aria-expanded="false" title="' + moreText + '">' + railIcon('more') + '<span>' + moreText + '</span></button>' +
       '<div class="ws-rail-popover ws-rail-more-popover" id="wsRailMoreMenu" hidden><div class="ws-rail-popover-title">' + moreText + '</div>' + more + '</div></div>';
-    return '<div class="ws-rail-top">' + primary + moreMenu + '</div>' +
+    return '<div class="ws-rail-top">' + primary + '<div id="wsSidebarApps" class="ws-sidebar-apps"></div>' + moreMenu + '</div>' +
       '<div class="ws-rail-bottom">' +
         '<button class="ws-rail-button ws-rail-settings" type="button" data-rail-view="settings" aria-label="' + settingsText + '" title="' + settingsText + '">' + railIcon('settings') + '<span>' + settingsText + '</span></button>' +
         '<button class="ws-update ws-rail-update" id="wsUpdate" hidden title="有新版本已就绪，点一下重启更新" aria-label="重启并更新">' +
@@ -366,6 +366,7 @@
       railMoreMenu.addEventListener('click', onRailMoreMenuClick);
     }
     syncRail();
+    global.WorkspaceSidebarApps?.mount();
     refreshNoticeBadge();
     if (updateStatus) applyUpdateState(updateStatus);
   }

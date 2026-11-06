@@ -43,8 +43,8 @@ async def accepted(session, client, user, body):
         raise ValueError('目标即用标识无效')
     if app_id.startswith('local:'):
         key = body.get('packageKey')
-        if not isinstance(key, str) or not re.fullmatch(r'[a-z][a-z0-9-]{0,62}', key):
-            raise ValueError('云端数据需要合法的稳定包名')
+        if not isinstance(key, str) or not re.fullmatch(r'[a-z][a-z0-9-]{1,62}', key) or app_id != 'local:' + key:
+            raise ValueError('云端数据包名须与已安装个人即用标识一致')
         version, checksum = body.get('version'), body.get('checksum')
         if (not isinstance(version, str) or len(version) > 120
                 or not re.fullmatch(r'\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?', version)
@@ -54,10 +54,7 @@ async def accepted(session, client, user, body):
         initialization = data_contract.initialization(declaration, body.get('initialization'))
         # Personal namespaces are owner-private; local declarations cannot grant
         # access to an enterprise package namespace or another account.
-        # A local installation UUID differs on every device. The signed-in
-        # owner's package key is the portable personal namespace; it never
-        # overlaps a market application's independently authorized namespace.
-        package = 'personal:' + key
+        package = app_id
     else:
         from .plugin_client_catalog import _client_actor
         from ..services import plugin_package_resources, jiyong_initialization, plugin_installed

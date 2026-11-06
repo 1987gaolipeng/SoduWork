@@ -1,5 +1,7 @@
 (function (global) {
   const messages = {
+    "始终允许": "Always allow",
+    "内容由 AI 生成，请核实重要信息": "AI-generated content; please verify important information",
     "审批权限列表暂时不可用": "Review permissions are temporarily unavailable",
     "登录后即可整理会话": "Sign in to organize conversations",
     "用时": "Time",

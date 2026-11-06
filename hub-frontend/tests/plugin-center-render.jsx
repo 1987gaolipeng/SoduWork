@@ -21,7 +21,7 @@ import '../src/console-theme.css'
 import './plugin-center-render.css'
 
 const params = new URLSearchParams(location.search)
-setLocale('zh-CN') // Deterministic starting language; scenarios explicitly exercise other locales.
+setLocale('zh-CN') // Chinese journeys must not inherit the headless browser's system language.
 document.documentElement.dataset.theme = params.get('theme') || 'light'
 setUser({ id: 'isolated-test-admin', isSuper: true })
 const failures = [], checks = [], calls = []
@@ -94,7 +94,7 @@ api.pluginRuns = async () => ({ items: [] })
 api.pluginRecommendation = async (id) => {
   calls.push(['recommendation', id])
   if (recommendationFails) throw new Error('Simulated recommendation read failure')
-  const echo = { composeRecommended: composePlacements.get(id) === true }
+  const echo = { composeRecommended: composePlacements.get(id) === true, sidebarRecommended: Boolean(plugins.find(item => item.id === id)?.catalogPolicy?.sidebarRecommended) }
   if (recommendationGate) await recommendationGate
   return echo
 }
@@ -131,7 +131,7 @@ function check(condition, label) { (condition ? checks : failures).push(label) }
 const q = (selector) => document.querySelector(selector)
 const all = (selector) => [...document.querySelectorAll(selector)]
 const button = (text, root = document) => [...root.querySelectorAll('button')].find((element) => element.textContent.trim() === text)
-async function click(element) { if (!element) throw new Error('Missing control'); element.focus(); element.click(); await pause() }
+async function click(element) { if (!element) throw new Error('Missing control: ' + [...document.querySelectorAll('button')].map(node => node.textContent.trim()).join(' | ')); element.focus(); element.click(); await pause() }
 async function select(label, optionText) {
   const trigger = q(`.select-menu-trigger[aria-label="${label}"]`)
   await click(trigger)
@@ -339,6 +339,19 @@ try {
     await escape(); await open('contracts')
     await until(() => q('.plugin-cover-actions button') && !q('.plugin-cover-actions button').disabled)
     check(Boolean(button('推荐', q('.plugin-cover-actions'))) && !q('.plugin-recommend-status'), 'cancel remains effective after detail remount')
+    await escape()
+    appFixture.catalogPolicy.sidebarRecommended = true
+    await open('contracts')
+    await until(() => q('.plugin-cover-actions button') && !q('.plugin-cover-actions button').disabled)
+    check(Boolean(button('编辑推荐', q('.plugin-cover-actions'))), 'sidebar-only recommendation is recognized before opening settings')
+    await click(q('.plugin-cover-actions button')); await until(() => q('.rec-modal'))
+    check(q('#optSidebar').getAttribute('aria-checked') === 'true', 'settings echo the saved sidebar placement')
+    check(q('#optCompose').getAttribute('aria-checked') === 'false' && q('#optApp').getAttribute('aria-checked') === 'false', 'sidebar placement is independent of existing placements')
+    await click(button('保存', q('.rec-modal'))); await until(() => !q('.rec-modal'))
+    check(calls.filter(([kind]) => kind === 'recommend').at(-1)[2].sidebarRecommended === true, 'saving sends administrator sidebar placement')
+    await click(q('.plugin-cover-actions button')); await until(() => q('.rec-modal'))
+    await click(button('取消推荐', q('.rec-modal'))); await until(() => !q('.rec-modal'))
+    check(appFixture.catalogPolicy.sidebarRecommended === false, 'cancel recommendation removes sidebar placement too')
     await escape()
     composePlacements.set('contracts', true)
     recommendationFails = true

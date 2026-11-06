@@ -175,16 +175,9 @@ async def lifespan(app: FastAPI):
     finally:
         try:
             from .services import model_transport
+            await model_transport.shutdown()
             from .services import jiyong_cloud_database
-            from .services import shared_auth_cache
-            from .services.shutdown import shutdown
-            await shutdown(bg, [("automation-inbox-hints", automation_inbox_events.stop),
-                                ("cloud-sync-hints", cloud_sync_notifications.stop),
-                                ("client-domain-hints", client_domain_events.stop),
-                                ("cluster", cluster_runtime.stop),
-                                ("models", model_transport.shutdown),
-                                ("cloud-database", jiyong_cloud_database.close),
-                                ("auth-cache", shared_auth_cache.close)])
+            await jiyong_cloud_database.close()
         finally:
             # Legacy local execution can own login jobs on the Hub. Drain them
             # even when an unrelated shutdown step fails, without stopping chats.

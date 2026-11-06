@@ -53,6 +53,7 @@ async function create(connection) {
     const upstream = (target.protocol === 'https:' ? https : http).request(target, { method: request.method, headers, timeout: 300000 }, reply => {
       const forwarded = {};
       for (const key of ['content-type', 'mcp-session-id', 'cache-control']) if (reply.headers[key]) forwarded[key] = reply.headers[key];
+      require('./app-mcp-change.cjs').observe(reply,connection,()=>closed);
       response.writeHead(reply.statusCode, forwarded); reply.pipe(response);
     });
     active.add(upstream); let size = 0;

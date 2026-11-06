@@ -129,7 +129,8 @@ test('the home rail starts a new conversation and utility pages reclaim the side
   assert.match(shellCss, /\.ws-rail\{[^}]*padding:18px 4px 10px/);
   assert.match(shellCss, /\.ws-rail-button\{[^}]*width:36px;height:36px/);
   assert.match(shellCss, /\.ws-rail-button svg\{width:20px;height:20px/);
-  assert.match(source, /ws-rail-top\">' \+ primary \+ moreMenu/);
+  assert.match(source, /ws-rail-top\">' \+ primary \+ '<div id="wsSidebarApps" class="ws-sidebar-apps"><\/div>' \+ moreMenu/,
+    'administrator app slots follow primary navigation and precede the More menu');
   assert.match(shellCss, /\.ws-rail-more-wrap\{position:relative/);
   /* Keep rail buttons and avatars circular while preserving the active gradient. */
   assert.match(shellCss, /\.ws-rail-button\{[^}]*border-radius:50%/);

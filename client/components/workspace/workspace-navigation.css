@@ -32,6 +32,16 @@ html[data-desk-panel="workspace"][data-workspace-layout="utility"] .ws-resizer{d
   background:var(--ws-side);border-right:0;overflow:visible}
 .ws-rail-top,.ws-rail-bottom{display:flex;flex-direction:column;align-items:center;gap:6px;width:100%}
 .ws-rail-bottom{margin-top:auto}
+.ws-sidebar-apps{display:flex;flex-direction:column;align-items:center;gap:6px;max-height:30vh;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;width:100%;flex-shrink:0}
+.ws-sidebar-apps:empty{display:none}
+.ws-sidebar-app img{width:23px;height:23px;object-fit:contain;border-radius:5px}
+.workspace-app-panel{display:none;position:fixed;left:var(--ws-main-left,52px);right:0;top:0;bottom:0;background:var(--bg-0);z-index:10}
+.workspace-app-panel.show{display:block}
+.workspace-app-status{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:var(--ink-3);padding:24px;text-align:center}
+.workspace-app-status b{font-size:18px;font-weight:600;color:var(--ink)}
+.workspace-app-status p{margin:0;font-size:14px}
+.workspace-app-mark{width:64px;height:64px;display:grid;place-items:center;border-radius:16px;background:var(--bg-1);font-size:24px}
+.workspace-app-mark img{width:56px;height:56px;object-fit:contain;border-radius:12px}
 .ws-rail-more-wrap{position:relative;width:100%;display:flex;justify-content:center}
 
 

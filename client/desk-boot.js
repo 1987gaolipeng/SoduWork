@@ -255,7 +255,7 @@
     account: 'personalAccountPanel', settings: 'settingsPanel', shortcuts: 'shortcutsPanel', archive: 'archivePanel', skin: 'skinManager', notices: 'noticePanel',
     team: 'teamPanel', inbox: 'teamPanel', daily: 'briefPanel', schedules: 'schPanel',
     skills: 'capPanel', library: 'libraryPanel', models: 'mdPanel', agents: 'agPanel', cloud: 'cloudEnvironmentPanel', codeacct: 'caPanel', usage: 'usagePanel',
-    apps: 'appsPanel',
+    apps: 'appsPanel', sidebarapp: 'workspaceAppPanel',
   };
   let _workspaceView = '';
   function _workspacePayload(view, payload) {
@@ -269,6 +269,7 @@
       try { window.AccountCenter?.closePanel(); } catch (e) { console.warn('[workspace] 收起个人账户失败', e); }
       return;
     }
+    if (_workspaceView === 'sidebarapp') { window.WorkspaceSidebarApps?.close(); return; }
     const name = CLOSERS[_workspaceView];
     if (name && typeof window[name] === 'function') {
       try { window[name](); } catch (e) { console.warn('[workspace] 收起旧页面失败', e); }
@@ -294,7 +295,7 @@
       if (typeof window.closeArchiveHistory === 'function') window.closeArchiveHistory();
       _workspaceCloseCurrent(key);
       document.querySelectorAll('.workspace-hosted').forEach((x) => x.classList.remove('workspace-hosted'));
-      const fn = OPENERS[key] || OPENERS.aidesk;
+      const fn = key === 'sidebarapp' ? p => window.WorkspaceSidebarApps.open(p) : OPENERS[key] || OPENERS.aidesk;
       const opened = fn(_workspacePayload(key, payload));
       const target = document.getElementById(WORKSPACE_TARGET[key]);
       if (target) target.classList.add('workspace-hosted');

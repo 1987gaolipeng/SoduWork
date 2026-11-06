@@ -97,6 +97,19 @@ def for_version(version) -> dict:
     return parsed["resourceBundle"]
 
 
+def cache_tag(version) -> str:
+    import hashlib
+    import json
+    try:
+        stat = os.stat(str(version.package_path or ""))
+    except OSError as exc:
+        raise ValueError("插件原始包缺失，请重新发布完整版本") from exc
+    fingerprint = json.dumps([version.id, version.checksum, version.manifest,
+                              stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns],
+                             sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return '"' + hashlib.sha256(fingerprint.encode()).hexdigest() + '"'
+
+
 def ui_for_version(version) -> dict:
     from . import plugin_packages, plugin_app_contracts
     path = str(version.package_path or '')

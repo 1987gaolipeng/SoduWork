@@ -14,9 +14,9 @@ test('maintenance permits authenticated reattachment but blocks new and archived
   const live = { ref: 'live-ref', sessionId: 'existing' };
   const frame = {}, event = { senderFrame: frame, sender: { mainFrame: frame,
     isDestroyed: () => false, getURL: () => pathToFileURL(path.resolve(__dirname, '../desk.html')).href } };
-  const emptyStorage = path.join(require('node:os').tmpdir(), 'soduwork-update-reattach-' + require('node:crypto').randomUUID());
-  const context = vm.createContext({ app: { getPath: () => emptyStorage }, identityOf: async () => identity, sendIdentityOf: null,
-    _cloudHandoff: { observe() {} },
+  const emptyStorage = path.join(require('node:os').tmpdir(), 'sodo-update-reattach-' + require('node:crypto').randomUUID());
+  const context = vm.createContext({ app: { getPath: () => emptyStorage }, identityOf: async () => identity, sendIdentityOf: undefined,
+    _cloudHandoff: { observe() {} }, _sessionOwners: null, _discardRenderer() {},
     require: name => {
       if (['../work-preview', '../conversation/app-surfaces.cjs', './app-mcp-grant.cjs'].includes(name)) {
         return require(path.join(__dirname, '../main/pi-session', name));

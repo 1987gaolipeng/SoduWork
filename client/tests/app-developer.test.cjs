@@ -33,7 +33,7 @@ test('bundled authoring check uses installer rules, rejects root scripts and mis
   }
   const draft = path.join(f.out, drafts.DRAFT_NAME);
   const body = JSON.parse(fs.readFileSync(draft, 'utf8'));
-  assert.throws(() => validator.validate(draft, f.root), /缺少专属彩色图标/);
+  assert.throws(() => validator.validate(draft, f.root), /缺少专属图标/);
   body.icon = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jxqkAAAAASUVORK5CYII=';
   const write = () => fs.writeFileSync(draft, JSON.stringify(body));
   write();
@@ -151,7 +151,7 @@ test('bundled file handoff example preserves retry identity and separates accept
   const f = fixture(t), detail = personal.get(f.app, personal.APP_DEVELOPER_ID);
   const bundle = resources.materialize(detail.localDraft.resources, f.root, detail.key);
   const guide = fs.readFileSync(path.join(bundle.directory, 'references/developer/references/local-files.md'), 'utf8');
-  const code = guide.match(/```js\r?\n([\s\S]*?)\r?\n```/)[1];
+  const code = guide.match(/```js\n([\s\S]*?)\n```/)[1];
   const calls = [], picked = [{ id: 'opaque-file', name: 'material.txt', size: 12 }];
   let sendFails = true, cleanupFails = false;
   const context = vm.createContext({ soduWorkApp: {
@@ -271,6 +271,8 @@ test('app entry selects the built-in developer in a new conversation while retai
   const build = require('../package.json').build;
   assert.ok(build.files.includes('sdk/**/*'));
   assert.ok(build.files.includes('app-window-chrome.html'));
+  assert.ok(build.files.includes('app-composer-launcher.html'));
+  assert.ok(fs.existsSync(path.resolve(__dirname, '../app-composer-launcher.html')));
   assert.ok(build.extraResources.some(x => x.from === '../skills'));
 });
 

@@ -64,6 +64,7 @@
       "index.html",
       "desk.html",
       "app-window-chrome.html",
+      "app-composer-launcher.html",
       "sdk/**/*",
       "desk-boot.js",
       "desk-window.css",

@@ -77,6 +77,7 @@ function restore(app, pluginId, selected, deps) {
   const connection = { pluginId, server: saved.server, url: endpoint.href,
     credentialKey: saved.credentialKey, scope: expectedScope, expiresAt: Number.MAX_SAFE_INTEGER,
     ...current, readCurrent, context: {},
+    ...(live?.connection?.scope === expectedScope && live.connection.notifyChanged ? {notifyChanged:live.connection.notifyChanged} : {}),
     ...(live?.connection?.scope === expectedScope && live.connection.server === saved.server && live.connection.inspect
       ? { inspect: live.connection.inspect } : {}) };
   if (remote) {
