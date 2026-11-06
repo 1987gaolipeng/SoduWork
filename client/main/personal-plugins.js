@@ -623,10 +623,9 @@ async function preflightCandidate(app,body,deps={}) {
   const cloud=await require('./jiyong-cloud-data.cjs').preflight({app,...deps},body);
   if(cloud)preview.checks.push(cloud);
   if(cloud?.ok===false)return {...preview,ok:false};
-  const runtime=await require('./app-candidate-preflight.cjs').run(app,build(body).body);
-  if(runtime.executed)preview.checks.push(...runtime.checks.map(row=>({...row,label:row.label+(row.reason?'：'+row.reason:'')})));
-  else preview.checks.push({key:'app-external',label:'在线服务首屏、业务授权与交互：需实际连接后验证',ok:null,state:'pending'});
-  return {...preview,ok:preview.ok&&runtime.ok!==false&&preview.checks.every(row=>row.ok!==false),runtime};
+  // Installation validates the package without executing its pages. Native
+  // startup diagnostics remain an explicit development check only.
+  return preview;
 }
 
 function preflightArchive(content) {
