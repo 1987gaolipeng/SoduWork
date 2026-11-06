@@ -50,7 +50,7 @@ jobs:
           node tools/check-source-manifest.cjs
           node tools/brand-keyword-gate.cjs
           node tools/check-docs.cjs
-          node --test tools/source-manifest.test.cjs tools/check-docs.test.cjs tools/check-source-provenance.test.cjs client/tests/repository-layout.test.cjs
+          node --test tools/source-manifest.test.cjs tools/check-docs.test.cjs tools/check-source-provenance.test.cjs tools/ci/test-release-transfer.cjs client/tests/repository-layout.test.cjs
           python -m unittest discover -s tools/github -p 'test_*.py'
       - name: Verify isolated HTTP startup, persistence, and shutdown
         run: python tools/dev/verify_local_start.py

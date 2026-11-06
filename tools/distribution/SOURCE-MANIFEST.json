@@ -51,8 +51,8 @@
     },
     {
       "path": ".github/workflows/ci.yml",
-      "bytes": 6338,
-      "sha256": "824c37c0eede05bda90b67b29f8d1756fb4d04227ea083edadca7411bd188872"
+      "bytes": 6373,
+      "sha256": "8d1c3bf450242e7bd73dfbe56a237869775573eaad8523c79836f702a7496f3d"
     },
     {
       "path": ".github/workflows/release.yml",
@@ -11476,13 +11476,13 @@
     },
     {
       "path": "docs/open-source.en.md",
-      "bytes": 3883,
-      "sha256": "420788787ef3eef6ff1686bcafb8eceb9ae3c7b7ecc4c7eba3a8acfe890c6b8e"
+      "bytes": 4202,
+      "sha256": "0bc5cf416a6180346cdbba820a6a92ca4ffb2a76f3acc15c123349e6df01c9af"
     },
     {
       "path": "docs/open-source.md",
-      "bytes": 3481,
-      "sha256": "e83c7621c9f9a083c74a948e398427cfd690ce7fe8582c8b8d0c8230e831feeb"
+      "bytes": 3784,
+      "sha256": "4342a968e767962697db3ba4050d6312ef257f51f0a4c3ae0bbe21a202a344a4"
     },
     {
       "path": "docs/plugin-authoring.en.md",
@@ -15211,8 +15211,8 @@
     },
     {
       "path": "hub-backend/quality_manifest.py",
-      "bytes": 17048,
-      "sha256": "98d15a58e1fdb1e1f57b4526e3623c3c89ad352282ed31126734408d5497f377"
+      "bytes": 17393,
+      "sha256": "85252a65937387b0b57384e252b3d0b74706c8f2f727c37173ce9d257ee67bd2"
     },
     {
       "path": "hub-backend/repair_skill_package.py",

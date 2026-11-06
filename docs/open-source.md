@@ -20,6 +20,8 @@
 
 升级验收可通过 `SODUWORK_ACCEPT_BASELINES_FILE` 提供旧安装包清单。每项包含产品名、版本、格式、SHA-256 和下载地址或本地路径；校验使用固定版本的包，不自动选择最新包。
 
+自托管安装包默认使用 `stable` 升级通道。需要测试版时，在打包前设置 `client/package.json` 的 `soduworkUpdateChannel` 为 `beta`，并发布到同名通道；仅支持 `stable` 和 `beta`。通道随安装包身份固定，不根据登录地址或运行环境自动切换。
+
 ## 导出公开源码
 
 从根目录执行发布范围和许可检查：

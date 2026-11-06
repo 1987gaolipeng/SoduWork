@@ -20,6 +20,8 @@ Automatic updates require your own release trust. Neither `client/update-trust.j
 
 Use `SODUWORK_ACCEPT_BASELINES_FILE` to supply previous installers for upgrade acceptance. Each record contains product name, version, format, SHA-256, and a download URL or local path. Checks use fixed versions rather than automatically choosing the latest package.
 
+Self-hosted packages use the `stable` update channel by default. Set `soduworkUpdateChannel` in `client/package.json` to `beta` before packaging a beta build and publish to the matching channel. Only `stable` and `beta` are supported; the packaged channel does not change with the login server or runtime environment.
+
 ## Export public source
 
 Run scope and license checks from the root:
