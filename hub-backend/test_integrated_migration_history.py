@@ -74,8 +74,10 @@ class IntegratedMigrationHistoryTests(unittest.TestCase):
 
     def test_release_and_account_lines_have_one_head_and_expected_parents(self):
         script = ScriptDirectory.from_config(_config())
-        self.assertEqual(script.get_heads(), ["0079_merge_public_projects"])
+        self.assertEqual(script.get_heads(), ["0080_merge_public_discovery"])
         expected = {
+            "0080_merge_public_discovery": ("0079_merge_public_projects", "0079_native_discovery"),
+            "0079_native_discovery": "0078_account_task_projection",
             "0079_merge_public_projects": ("0077_merge_public_runtime", "0078_account_task_projection"),
             "0078_account_task_projection": "0077_conversation_projects",
             "0077_conversation_projects": "0076_merge_model_runtime",
@@ -125,7 +127,7 @@ class IntegratedMigrationHistoryTests(unittest.TestCase):
                          "0065_merge_usage_notifications", "0067_merge_release_account_ownership",
                          "0065_im_transport", "0066_merge_im_transport", "0065_merge_feature_branches",
                          "0068_merge_notification_account", "0077_merge_public_runtime", "0078_account_task_projection"):
-            path = list(script.iterate_revisions("0079_merge_public_projects", baseline))
+            path = list(script.iterate_revisions("0080_merge_public_discovery", baseline))
             self.assertTrue(path, baseline)
 
     def test_existing_branch_databases_preserve_personal_configuration(self):
@@ -151,10 +153,13 @@ class IntegratedMigrationHistoryTests(unittest.TestCase):
                         with closing(sqlite3.connect(database)) as connection:
                             self.assertEqual(connection.execute(
                                 "SELECT version_num FROM alembic_version").fetchall(),
-                                [("0079_merge_public_projects",)])
+                                [("0080_merge_public_discovery",)])
                             name, raw = connection.execute(
                                 "SELECT name, git_creds FROM client WHERE id='fixture-history-device'").fetchone()
                             self.assertEqual(name, "Preserved device")
+                            self.assertEqual([row[2] for row in connection.execute(
+                                "PRAGMA index_info('ix_remote_screen_source_state_expiry')")],
+                                ["source_client_id", "state", "expires_at"])
                             self.assertEqual(json.loads(raw), {"token": "fixture-history-token"})
                             self.assertIsNotNone(connection.execute(
                                 "SELECT name FROM sqlite_master WHERE type='table' AND name='im_connection'").fetchone())

@@ -10,7 +10,7 @@ test('Mac fresh, old and upgrade installs use separate cleaned DMG mounts', asyn
   const distribution = { productName: 'SoduWork', appId: 'com.soduwork.app' };
   const record = { version, artifacts: ['arm64', 'x64'].map(arch =>
     ({ name: `SoduWork-9.9.1-mac-${arch}.dmg`, arch, format: 'dmg' })) };
-  const mounts = [], smoke = [], errors = [];
+  const mounts = [], smoke = [], errors = [], profiles = new Map();
   let checks;
   async function run(file, args) {
     if (file === 'hdiutil') {
@@ -34,6 +34,8 @@ test('Mac fresh, old and upgrade installs use separate cleaned DMG mounts', asyn
       return args[1].includes('arm64-dmg') ? 'arm64' : 'x86_64';
     } else if (file === process.execPath) {
       const profile = args[3], mode = args[6];
+      assert.ok(path.basename(profile).startsWith('soduwork-acceptance-profile-'));
+      profiles.set(path.basename(args[4]), profile);
       await fs.mkdir(profile, { recursive: true });
       const sentinel = path.join(profile, 'acceptance-sentinel.txt');
       if (mode === 'write') await fs.writeFile(sentinel, 'preserve-install-acceptance-data');
@@ -66,6 +68,12 @@ test('Mac fresh, old and upgrade installs use separate cleaned DMG mounts', asyn
     [`${arch}-dmg-fresh.json`, version, 'write'], [`${arch}-dmg-restart.json`, version, 'read'],
     [`${arch}-dmg-old.json`, '9.9.0', 'write'], [`${arch}-dmg-upgrade.json`, version, 'read'],
   ]));
+  for (const arch of ['arm64', 'x64']) {
+    const get = label => profiles.get(`${arch}-dmg-${label}.json`);
+    assert.equal(get('fresh'), get('restart'));
+    assert.equal(get('old'), get('upgrade'));
+    assert.notEqual(get('fresh'), get('old'), 'Upgrade must read the original old-version profile');
+  }
   assert.deepEqual(JSON.parse(JSON.stringify(checks)), ['arm64', 'x64'].map(arch =>
     ({ name: arch + '-dmg', ok: true, oldVersion: '9.9.0', oldSignature: { verified: true, policy: 'strict' } })));
   assert.deepEqual(await fs.readdir(root), ['release-evidence']);

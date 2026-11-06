@@ -1271,8 +1271,8 @@
     },
     {
       "path": "client/components/panels/panels-agents.js",
-      "bytes": 45452,
-      "sha256": "27ada08e8078fb72957f3aeb82382cdfc5776ac8f1bdc177c5f137367f90da15"
+      "bytes": 46916,
+      "sha256": "873d9e848351d94689d167baf00f5b26afc453591cac83d2e65d147bfb1ecfec"
     },
     {
       "path": "client/components/panels/panels-aidesk-control.css",
@@ -2425,6 +2425,11 @@
       "sha256": "127040250079e19aa9f6e4194ab91456fec6c0331795752f91ef40725b918e4a"
     },
     {
+      "path": "client/core/locales/en-US-agent-pages.js",
+      "bytes": 34277,
+      "sha256": "9c407d3c8b7a5c755f5cb76e18f8d48b13d961916ddfa36b4d6fe2b17e98f309"
+    },
+    {
       "path": "client/core/locales/en-US-capability-pages.js",
       "bytes": 40265,
       "sha256": "41c1447908afec91bddcdd1d2486b905662179072494acafe9dfb83a4f757209"
@@ -2535,6 +2540,11 @@
       "sha256": "a42ad910d75407a15716ebcdf691e4605dcc9e904c919415df01a2a1c1d69f3b"
     },
     {
+      "path": "client/core/locales/ja-JP-agent-pages.js",
+      "bytes": 41201,
+      "sha256": "65e71f4a4e95118f96984ed9cbdb62f7f11ab4566f7e40671b143aec0630391c"
+    },
+    {
       "path": "client/core/locales/ja-JP-gap-pages.js",
       "bytes": 756040,
       "sha256": "1e1c7bab31f329d27c72cbf078cfe37bda49509cbaf6dca5d4664ed29790f919"
@@ -2548,6 +2558,11 @@
       "path": "client/core/locales/ja-JP.js",
       "bytes": 4078,
       "sha256": "48b27a7767f224b465bb4cbd33cb66fc5063353d3b591508a6a93bc468dcc8c8"
+    },
+    {
+      "path": "client/core/locales/ko-KR-agent-pages.js",
+      "bytes": 37641,
+      "sha256": "e8e5024be226736888503c53ced6446ced20e61ad12369e05a0e7a5b3b930115"
     },
     {
       "path": "client/core/locales/ko-KR-gap-pages.js",
@@ -2571,8 +2586,8 @@
     },
     {
       "path": "client/core/locales/manifest.json",
-      "bytes": 744,
-      "sha256": "7f0b9dd5344f0c450711c7708ef9185c5d82125f4c5708a0e65a744b298f836c"
+      "bytes": 822,
+      "sha256": "842e505be47224ac31a9c8a76d3c2a6aea8853cb33a7211cb39706c6e956c7d6"
     },
     {
       "path": "client/core/locales/zh-CN-runtime-surfaces.js",
@@ -5981,8 +5996,8 @@
     },
     {
       "path": "client/main/distribution.cjs",
-      "bytes": 3188,
-      "sha256": "7c9eb2c1326183618e9b7411eba410161bff8d7251b9f4e4e093f4d7d3e20950"
+      "bytes": 3375,
+      "sha256": "10ff95505b34be33142d56783bbb1e0c1c4dae5a6e9bbf98e5de645b969b44b5"
     },
     {
       "path": "client/main/file-open.cjs",
@@ -6526,8 +6541,8 @@
     },
     {
       "path": "client/main/pi-session/session-resources.js",
-      "bytes": 16375,
-      "sha256": "51c0a71158c72cd6521b23f7b6d4273c969bfdd2de39be9bbe864487607c158f"
+      "bytes": 16973,
+      "sha256": "a59b45f561be28ea1844ad0a378b45312545326021946368024646353d77d4cf"
     },
     {
       "path": "client/main/pi-session/session-send.js",
@@ -7416,8 +7431,8 @@
     },
     {
       "path": "client/tests/agent-management-i18n.test.cjs",
-      "bytes": 2626,
-      "sha256": "df1e325565939bcf07adf49abd8676920f36e5be2dfc5c52aa42a7f3dab8f845"
+      "bytes": 9562,
+      "sha256": "ff9a1fabcfb34ba8d166ae5a27fcf6cd27eedaf7891553a48956053cb555ae0b"
     },
     {
       "path": "client/tests/agent-management-state.test.cjs",
@@ -8511,8 +8526,8 @@
     },
     {
       "path": "client/tests/distribution.test.cjs",
-      "bytes": 4068,
-      "sha256": "4a1edf3927b549cba26f3f6d3d8e4e51c0ee2782e0854be0e6d802e396e5102e"
+      "bytes": 5039,
+      "sha256": "b45519ccd2b6189663e6842764febbf9330860bee3dec7f79027d71d6c03bdce"
     },
     {
       "path": "client/tests/dock-drag-sync.test.cjs",
@@ -8936,8 +8951,8 @@
     },
     {
       "path": "client/tests/macos-acceptance.test.cjs",
-      "bytes": 4182,
-      "sha256": "c92a0a37a72570d2d99825290c3e03acfcc43f0b1f744a8bea010d0742ab3e46"
+      "bytes": 4649,
+      "sha256": "f8278c28370303dbfeeb7d2c3da3cf16cdde81577f1e7e894496cc88d5508eac"
     },
     {
       "path": "client/tests/macos-build-environment.test.cjs",
@@ -10161,8 +10176,8 @@
     },
     {
       "path": "client/tests/session-resources.test.cjs",
-      "bytes": 9643,
-      "sha256": "09b86496c4b8ede0ac381602686af4ebe253d74aab72398777dceab9b28b7169"
+      "bytes": 10629,
+      "sha256": "c5aba23a1175eb3becfc6388875cd551270105cb6f57f495bc62b1a03a49cf9a"
     },
     {
       "path": "client/tests/settings-client-update-i18n.test.cjs",
@@ -14560,6 +14575,16 @@
       "sha256": "6690d59bbd2c599202a7bf945991b388a05afe587d4cc7891ee5692cbe57a883"
     },
     {
+      "path": "hub-backend/migrations/versions/0079_native_discovery.py",
+      "bytes": 2139,
+      "sha256": "65e867babdce9492080bd62be91637a1f1ce04e66a2011dd914cf4f85f41637a"
+    },
+    {
+      "path": "hub-backend/migrations/versions/0080_merge_public_discovery.py",
+      "bytes": 316,
+      "sha256": "30f88cd178d2f2fa89911f958a997bfb57cfc18642be707c1ef3c67b3cb51c7a"
+    },
+    {
       "path": "hub-backend/migrations/versions/a4bc7a24e3aa_merge_runner_capacity_and_work_item_.py",
       "bytes": 448,
       "sha256": "dab8d9cd986a43ed818869f9b3f10d95cb616839e51828e869dcb70210d0715d"
@@ -16541,8 +16566,8 @@
     },
     {
       "path": "hub-backend/test_integrated_migration_history.py",
-      "bytes": 10994,
-      "sha256": "d0b2450f07fe7352d094d5483f85a1bc8e58e4657f19c5123c36251c17d1f989"
+      "bytes": 11422,
+      "sha256": "6cb83e45b576b0417e619d160dd91a4fa82666800050998f2c2b27f1bce60e60"
     },
     {
       "path": "hub-backend/test_jiyong_cloud_data.py",
@@ -20361,8 +20386,8 @@
     },
     {
       "path": "tools/ci/accept-macos.cjs",
-      "bytes": 4949,
-      "sha256": "d067c910a653ff3d1a5ea5637c9cff4e896042adc9cab2a87ca37a321d1528c7"
+      "bytes": 5111,
+      "sha256": "66da9dc4814af35350035570b321ae4351d2fbe933a289ee63d7793104df9f77"
     },
     {
       "path": "tools/ci/accept-windows.cjs",
@@ -20401,8 +20426,8 @@
     },
     {
       "path": "tools/ci/publish-client.cjs",
-      "bytes": 7802,
-      "sha256": "016875c07d48f6860c139eddd74f4e4edf3f7474cb6081f19117ed991081d5b6"
+      "bytes": 7809,
+      "sha256": "7d9d318d6c75966abdae9d68d5d362e3f6a0847b5cca445513d014ae48dc7c81"
     },
     {
       "path": "tools/ci/release-artifacts.cjs",
@@ -20486,8 +20511,8 @@
     },
     {
       "path": "tools/distribution/PUBLIC-SOURCE.json",
-      "bytes": 2192,
-      "sha256": "226e6a6289588064083d33caf8ea4f5d8aaaa7f8fb1c9321a192d8c176f443ff"
+      "bytes": 3177,
+      "sha256": "12f8e121ae810fd79355c0303c505309ff8c9a3ed20ce7a9cabd4b815fc9b89e"
     },
     {
       "path": "tools/export_source.py",

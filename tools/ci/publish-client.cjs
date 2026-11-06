@@ -117,7 +117,7 @@ async function enable() {
   }
   console.log(`Enabled ${report.enabled.length} accepted ${channel} artifacts on SoduWork Hub`);
 }
-module.exports = { matches, targets, connection, stagedEntries };
+module.exports = { matches, targets, connection, stagedEntries, stage };
 if (require.main === module) {
   const [command, platform] = process.argv.slice(2);
   assert.ok(['stage', 'enable'].includes(command));

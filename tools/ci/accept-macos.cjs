@@ -49,22 +49,23 @@ async function main() {
       const previous = await soduworkBaseline('macos-' + item.arch + '-dmg', current);
       const installed = path.join(current, 'installed');
       const profile = path.join(current, 'soduwork-acceptance-profile-' + name);
+      const upgradeProfile = previous ? path.join(current, 'soduwork-acceptance-profile-upgrade-' + name) : profile;
       let app = await unpack(path.join(contract.dist, item.name), item.format, installed);
       assert.match(await run('lipo', ['-archs', app.binary]), item.arch === 'x64' ? /x86_64/ : /arm64/);
       assert.match(await run('lipo', ['-archs', path.join(app.app, 'Contents/Resources/runner/soduwork-runner')]),
         item.arch === 'x64' ? /x86_64/ : /arm64/, 'Bundled Runner architecture must match the target Mac');
-      async function smoke(label, version, mode) {
+      async function smoke(label, version, mode, data = profile) {
         await run(process.execPath, [path.join(__dirname, 'installed-client-smoke.cjs'), app.binary,
-          installed, profile, path.join(output, name + '-' + label + '.json'), version, mode]);
+          installed, data, path.join(output, name + '-' + label + '.json'), version, mode]);
       }
       await smoke('fresh', record.version, 'write'); await smoke('restart', record.version, 'read');
       await fs.rm(installed, { recursive: true });
       app = await unpack(previous.path, 'dmg', installed, { legacyBaseline: previous });
       const oldSignature = app.signature;
-      await smoke('old', previous.version, 'write');
+      await smoke('old', previous.version, 'write', upgradeProfile);
       await fs.rm(installed, { recursive: true });
       app = await unpack(path.join(contract.dist, item.name), item.format, installed);
-      await smoke('upgrade', record.version, 'read');
+      await smoke('upgrade', record.version, 'read', upgradeProfile);
       await fs.rm(installed, { recursive: true });
       assert.equal(await fs.readFile(path.join(profile, 'acceptance-sentinel.txt'), 'utf8'), 'preserve-install-acceptance-data');
       checks.push({ name, ok: true, oldVersion: previous.version, oldSignature });

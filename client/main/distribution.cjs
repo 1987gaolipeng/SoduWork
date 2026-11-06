@@ -29,10 +29,12 @@ function getProfile(id = PROFILE_ID) {
         Buffer.from(value, 'base64').length !== 32 || Buffer.from(value, 'base64').toString('base64') !== value)) {
     throw new Error('Client distribution has invalid update trust');
   }
+  const updateChannel = packageInfo.soduworkUpdateChannel || 'stable';
+  if (!['stable', 'beta'].includes(updateChannel)) throw new Error('Invalid Client update channel');
   const build = packageInfo.build || {};
   const productName = packageInfo.productName || build.productName || 'SoduWork';
   const profile = JSON.parse(JSON.stringify({
-    distributionId: PROFILE_ID, hubOrigin: PRODUCTION_HUB, websiteUrl: packageInfo.homepage || '',
+    distributionId: PROFILE_ID, updateChannel, hubOrigin: PRODUCTION_HUB, websiteUrl: packageInfo.homepage || '',
     appId: build.appId || 'com.soduwork.app', productName,
     windowsExecutableName: build.win?.executableName || productName,
     linuxExecutableName: build.linux?.executableName || packageInfo.name,

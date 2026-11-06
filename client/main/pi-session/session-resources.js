@@ -109,6 +109,13 @@ function configureSoduWorkRetryPolicy(settingsManager) {
     && !Array.isArray(projectRetry.delayScheduleMs)) {
     overrides.retry.delayScheduleMs = [5000, 15000, 30000, 60000, 120000, 240000];
   }
+  // Pi's default one-minute cap otherwise truncates our later backoff steps.
+  // Respect a user's explicit cap; host schedules remain bounded to five minutes.
+  const schedule = projectRetry.delayScheduleMs ?? globalRetry.delayScheduleMs ?? overrides.retry.delayScheduleMs;
+  if (globalRetry.maxAgentDelayMs == null && projectRetry.maxAgentDelayMs == null && Array.isArray(schedule)) {
+    const longest = schedule.reduce((max, value) => Number.isFinite(value) ? Math.max(max, value) : max, 0);
+    if (longest > 60000) overrides.retry.maxAgentDelayMs = Math.min(300000, Math.ceil(longest));
+  }
   if (!Number.isInteger(provider.maxRetries) && !Number.isInteger(projectProvider.maxRetries)) {
     overrides.retry.provider = { maxRetries: 0, maxRetryDelayMs: 0 };
   }

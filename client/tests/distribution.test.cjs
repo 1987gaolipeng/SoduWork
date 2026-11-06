@@ -48,6 +48,27 @@ test('bundled metadata cannot inject another Hub or update signing key', () => {
   assert.throws(() => distribution.selected({ SODUWORK_RELEASE_HUB_URL: 'https://another.example.test' }), /does not match/);
 });
 
+test('self-hosted update channels are explicit, validated and bound to package identity', () => {
+  const packageInfo = require('../package.json');
+  const previous = packageInfo.soduworkUpdateChannel;
+  try {
+    delete packageInfo.soduworkUpdateChannel;
+    const stable = distribution.getProfile();
+    assert.equal(stable.updateChannel, 'stable');
+    packageInfo.soduworkUpdateChannel = 'beta';
+    const beta = distribution.getProfile();
+    assert.equal(beta.updateChannel, 'beta');
+    assert.notEqual(beta.configSha256, stable.configSha256);
+    assert.deepEqual(distribution.fromMetadata(beta), beta);
+    assert.throws(() => distribution.fromMetadata(stable), /differs/);
+    packageInfo.soduworkUpdateChannel = 'unknown';
+    assert.throws(() => distribution.getProfile(), /Invalid Client update channel/);
+  } finally {
+    if (previous === undefined) delete packageInfo.soduworkUpdateChannel;
+    else packageInfo.soduworkUpdateChannel = previous;
+  }
+});
+
 test('an otherwise valid signed manifest is rejected when public trust has no keys', () => {
   const signing = crypto.generateKeyPairSync('ed25519');
   const manifest = { schema: 1, version: '99.0.0', releaseId: '00000000-0000-4000-8000-000000000001',
