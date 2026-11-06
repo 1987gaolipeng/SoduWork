@@ -194,7 +194,7 @@ export default function App() {
     return (
       <div className="app">
         <div className="landing">
-          <img src="/soduwork.png" alt="SoduWork" className="logo-box" style={{ width: 44, height: 44 }} />
+          <img src="/soduwork.png" alt="" className="logo-box" style={{ width: 44, height: 44 }} />
           <h2>{tx("SoduWork 管理端是管理端")}</h2>
           <p>{tx("你好，")}{(me && (me.displayName || me.username)) || tx("同事")}{tx("。日常需求、收件箱认领和工作日报都在")}<b>{tx("桌面端「SoduWork」")}</b>{tx("里完成；")}<br />{tx("这里是负责人与管理员使用的管理控制台。如需管理权限，请联系管理员为你的角色开通。")}</p>
           <button className="btn btn-ghost" onClick={() => { setToken(''); setUser(''); setAuthed(false); setMe(null); setShowLogin(false) }}>{tx("退出登录")}</button>
@@ -208,8 +208,8 @@ export default function App() {
     <div className="app" data-screen={cur && cur.id}>
       <aside className="sidebar">
         <div className="brand">
-          <img src="/soduwork.png" alt="SoduWork" className="logo-box" />
-          <span className="brand-copy"><b>{t('brand.title')}</b><small>{tx("企业智能工作台")}</small></span>
+          <img src="/soduwork.png" alt="" className="logo-box" />
+          <span className="brand-copy"><b>{t('brand.title')}</b><small title={tx("企业智能工作台")}>{tx("企业智能工作台")}</small></span>
           <span className="brand-edition">{tx("企业")}</span>
         </div>
         <nav className="nav" aria-label={t('nav.aria')}>

@@ -9,6 +9,9 @@ const runtime = path.dirname(require('electron'));
 const client = path.resolve(__dirname, '..');
 const installed = path.join(root, 'runtime');
 fs.mkdirSync(installed);
+// Keep the small diagnostic profile, but do not accumulate copied Electron
+// distributions on the persistent Windows Runner after success or failure.
+process.once('exit', () => fs.rmSync(installed, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }));
 for (const item of fs.readdirSync(runtime, { withFileTypes: true })) {
   if (item.name === 'resources') continue;
   fs.cpSync(path.join(runtime, item.name), path.join(installed, item.name), { recursive: true });

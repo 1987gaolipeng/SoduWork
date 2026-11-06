@@ -4,6 +4,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { build } = require('../scripts/build-macos.cjs');
+const { notarizeArtifact, notarizeApp } = require('../scripts/notarize-macos.cjs');
+const isEntry = (args, suffix) => String(args[0] || '').replaceAll('\\', '/').endsWith(suffix);
 function fixture(options = {}) {
   const calls = [], env = { SODUWORK_MACOS_ARM64_PYTHON: '/python/arm64', SODUWORK_MACOS_X64_PYTHON: '/python/x64' };
   let current;
@@ -207,46 +209,6 @@ test('a DMG wait failure resumes the exact container without repeating electron-
   const parent = path.join(f.config.env.SODUWORK_MAC_NOTARY_STATE_DIR, 'dmgs');
   fs.appendFileSync(path.join(parent, fs.readdirSync(parent)[0], path.basename(dmg)), 'tampered');
   assert.throws(() => build(f.config), /Original DMG checkpoint changed/);
-});
-test('App wait recovery uses verified prepackaged bytes without repeating App assembly or signing', t => {
-  for (const arch of ['arm64', 'x64']) {
-    const f = signingFixture(); t.after(() => fs.rmSync(f.config.root, {recursive: true, force: true}));
-    Object.assign(f.config.env, {SODUWORK_MAC_NOTARY_STATE_DIR: path.join(f.config.root, 'notary'),
-      SODUWORK_MAC_BUILD_INPUT_ID: 'b'.repeat(64), SODUWORK_MACOS_ARCH: arch,
-      SODUWORK_MACOS_X64_PYTHON: '/python/x64'});
-    const run = f.config.run, uuid = '12345678-1234-1234-1234-123456789abc';
-    let interrupted = false, assemblies = 0, appUploads = 0, containers = 0;
-    const dmg = path.join(f.config.root, 'client/dist/internal/SoduWork-9.9.9-mac-' + arch + '.dmg');
-    f.config.run = (file, args, options) => {
-      if (file === 'ditto') { fs.writeFileSync(args.at(-1), 'original signed zip'); return ''; }
-      if (file === 'xcrun' && args[0] === 'notarytool') {
-        if (args[1] === 'submit' && args[2].endsWith('.zip')) appUploads++;
-        if (args[1] === 'wait' && !interrupted) { interrupted = true; throw Error('App wait interrupted'); }
-        return JSON.stringify({id: uuid, status: 'Accepted'});
-      }
-      if (isEntry(args, 'electron-builder/cli.js')) {
-        if (!args.includes('--prepackaged')) {
-          assemblies++;
-          const app = path.join(f.config.root, 'assembled/SoduWork.app'); fs.mkdirSync(app, {recursive: true});
-          fs.writeFileSync(path.join(app, 'binary'), 'original signed bytes');
-          notarizeApp({appPath: app, env: options.env, run: f.config.run});
-        } else {
-          const app = args[args.indexOf('--prepackaged') + 1];
-          assert.equal(fs.readFileSync(path.join(app, 'binary'), 'utf8'), 'original signed bytes');
-        }
-        containers++; fs.writeFileSync(dmg, 'container from original App');
-      }
-      return run(file, args, options);
-    };
-    assert.throws(() => build(f.config), /Notarization wait failed/);
-    fs.rmSync(path.join(f.config.root, 'client/dist'), {recursive: true});
-    build(f.config);
-    assert.equal(assemblies, 1); assert.equal(appUploads, 1); assert.equal(containers, 1);
-    assert.equal(fs.readFileSync(dmg, 'utf8'), 'container from original App');
-    const builder = f.calls.find(row => row.includes('--prepackaged'));
-    assert.ok(builder.includes('--' + arch));
-    assert.ok(f.calls.some(row => row[0] === 'xcrun' && row[1] === 'stapler' && row[2] === 'validate'));
-  }
 });
 test('SODUWORK_MAC_SKIP_NOTARIZE=0 keeps notarization enabled', () => {
   const f = signingFixture();

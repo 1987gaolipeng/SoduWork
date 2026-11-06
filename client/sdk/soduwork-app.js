@@ -5,7 +5,7 @@
 (function (global) {
   'use strict';
   if (global.soduWorkApp) return;
-  const channel = 'soduwork.app/v1', native = global.soduWorkAppBridge || global.sodoWorkAppBridge;
+  const channel = 'soduwork.app/v1', native = global.soduWorkAppBridge;
   const methods = new Set(['files.pickLocal','files.copyLocal','files.begin','files.append','files.finish','files.cancel','files.getUrl','ai.generate', 'context.get', 'user.getCurrent', 'notifications.list', 'library.list', 'library.read', 'conversations.list', 'conversations.messages', 'directory.list', 'composer.mention', 'composer.send', 'composer.insertText', 'composer.expand', 'composer.collapse', 'settings.get', 'settings.update', 'automation.create', 'data.apps', 'data.get', 'data.list', 'data.batch', 'data.assetPut', 'data.assetGet', 'mcp.connect',
     'attachments.pick','attachments.begin','attachments.append','attachments.finish','attachments.release','attachments.check']);
   const origins = new Set([location.origin]), pending = new Map();

@@ -7,14 +7,14 @@ const installed = path.resolve('fixture-installed', 'soduwork');
 const portable = path.resolve('fixture-portable', 'soduwork');
 test('update channel follows the bundled distribution on every platform', async () => {
   const { getProfile } = require('../main/distribution.cjs');
-  for (const updateChannel of ['stable', 'beta']) {
+  for (const id of ['stage', 'internal', 'cn', 'global']) {
     for (const platform of ['win32', 'darwin', 'linux']) {
       for (const version of ['1.13.11-beta.532', '1.13.11']) {
         const params = await target.query(version, {
-          profile: { ...getProfile(), updateChannel }, platform, arch: 'x64', realpath: async () => '',
-          env: { SODUWORK_UPDATE_CHANNEL: updateChannel === 'beta' ? 'stable' : 'beta' },
+          profile: getProfile(id), platform, arch: 'x64', realpath: async () => '',
+          env: { SODUWORK_DISTRIBUTION: id === 'stage' ? 'internal' : 'stage' },
         });
-        assert.equal(params.get('channel'), updateChannel);
+        assert.equal(params.get('channel'), id === 'stage' ? 'beta' : 'stable');
         assert.equal(params.get('current'), version);
       }
     }

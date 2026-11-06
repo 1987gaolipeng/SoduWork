@@ -33,7 +33,7 @@ async function adapter(key){provider(key);return import(pathToFileURL(path.join(
 function node(){return nodeRuntime.resolve().node;}
 function env(selected=nodeRuntime.resolve()){const next={...selected.env};for(const k of ['NODE_OPTIONS','SODUWORK_PROXY_KEY','SODUWORK_MCP_KEY','SODUWORK_MCP_SERVERS','SODUWORK_MCP_SERVERS_JSON','APP_ID','APP_SECRET','USER_ACCESS_TOKEN'])delete next[k];return next;}
 function stop(child){
- if(!child||!child.pid||child.exitCode!==null||child.signalCode!=null||stoppedChildren.has(child))return true;
+ if(!child||!child.pid||child.exitCode!==null||stoppedChildren.has(child))return true;
  if(process.platform==='win32'){
   const result=spawnSync('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore',timeout:5000});
   // taskkill completes before Node can deliver the child's exit event. Remember
@@ -101,6 +101,10 @@ function scopeMatches(stored,identity,candidates){
  if(typeof stored!=='string'||!/^[a-f0-9]{32}$/.test(stored))return false;
  let current;try{current=scope(identity);}catch(_){return false;}
  if(stored===current)return true;
+ // Recognize the persisted pre-rename account fingerprint, using only the
+ // validated current account UID. New writes and credential scopes stay unchanged.
+ const previous=crypto.createHash('sha256').update('sodo-account\0'+_claims(identity).uid).digest('hex').slice(0,32);
+ if(stored===previous)return true;
  // Recompute legacy fingerprints from local enrollment history and the current account to verify ownership.
  for(const candidate of Array.isArray(candidates)?candidates:[]){
   if(!candidate||!candidate.hub||!candidate.clientId)continue;

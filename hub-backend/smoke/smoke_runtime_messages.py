@@ -252,7 +252,7 @@ class MessageTests(unittest.TestCase):
             self.assertEqual(len([x for x in run["lines"] if x["kind"] == "usage"]), 1)
 
     def test_actual_acp_child_emits_live_thoughts_and_context_only(self):
-        root = Path(__file__).resolve().parent.parent
+        root = Path(__file__).resolve().parent
         with tempfile.TemporaryDirectory(prefix="soduwork-stream-") as cwd:
             command = [sys.executable, str(root / "app/services/acp_bridge.py"),
                        "--cwd", cwd, "--agent-name", "fixture", "--permission", "workspace", "--",

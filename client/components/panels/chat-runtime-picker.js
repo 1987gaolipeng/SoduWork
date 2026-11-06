@@ -45,8 +45,11 @@
         const icon = node('span', '', 'wc-runtime-missing-icon');
         icon.dataset.runtimeMissing = row.id || ''; icon.title = tx(row.displayName || row.id || '');
         icon.setAttribute('aria-hidden', 'true');
-        const mark = global.AgentBrand?.MONOGRAMS?.[row.id];
-        icon.append(node('span', mark || 'AI', 'agent-monogram'));
+        const src = global.AgentBrand?.ICONS?.[row.id];
+        if (src) {
+          const image = node('img'); image.src = src; image.alt = ''; image.draggable = false;
+          image.className = 'agent-brand'; icon.append(image);
+        } else icon.textContent = '•';
         return icon;
       }));
       missingWrap.hidden = rows.length === 0; missing.hidden = rows.length === 0; more.hidden = rows.length === 0;
@@ -98,10 +101,11 @@
           choice.type = 'button'; choice.dataset.runtime = runtime.id; choice.dataset.sessionAgent = runtime.id;
           choice.setAttribute('aria-selected', String(selected)); choice.setAttribute('aria-pressed', String(selected));
           choice.classList.toggle('on', selected);
-          const mark = global.AgentBrand?.MONOGRAMS?.[runtime.id];
-          if (mark) {
+          const src = global.AgentBrand?.ICONS?.[runtime.id];
+          if (src) {
             const brand = node('span', '', global.AgentBrand.className(runtime.id, 'runtime-brand'));
-            brand.append(node('span', mark, 'agent-monogram')); choice.append(brand);
+            const image = node('img'); image.src = src; image.alt = ''; image.draggable = false;
+            brand.append(image); choice.append(brand);
           } else choice.append(node('span', '•', 'runtime-brand'));
           const runtimeHealth = runtime.availability || {};
           const rawVersion = runtime.version || runtimeHealth.version || runtimeHealth.detectedVersion || '';
@@ -176,13 +180,11 @@
       const s = options.state();
       const identity = s.ref || (s.draftOnly ? 'draft:' + s.draftId : '');
       if (lastIdentity !== identity) { lastIdentity = identity; ref = s.ref || ''; saving = false; request = null; checkingId = ''; availability = null; availabilityFlight = null; availabilityIdentity = identity; close(); }
-      const taskRuntime = Boolean(s.taskRuntime);
-      button.disabled = taskRuntime || (!s.ref && !s.draftOnly) || saving || s.runtimeSwitching || (s.cloudHandoff && s.cloudHandoff.phase !== 'committed');
+      button.disabled = (!s.ref && !s.draftOnly) || saving || s.runtimeSwitching || (s.cloudHandoff && s.cloudHandoff.phase !== 'committed');
       if (more) more.disabled = Boolean(saving);
       button.setAttribute('aria-haspopup', 'dialog'); button.setAttribute('aria-busy', String(saving || !!s.runtimeSwitching));
       button.setAttribute('role', 'button'); button.title = tx('切换 Agent · 保留当前对话和工作目录');
-      if (taskRuntime) { close(); button.title = tx('沿用需求已保存的工程、分支和模型配置'); }
-      if (!taskRuntime && identity && !availability && !availabilityFlight) void loadAvailability().catch(() => {});
+      if (identity && !availability && !availabilityFlight) void loadAvailability().catch(() => {});
       if (!pop.hidden) position();
     }
     on(global, 'agent-runtimes-changed', refreshAvailability);

@@ -39,7 +39,7 @@ test('file bridge validates chunk order, quotas, cancellation, installed capabil
   await assert.rejects(()=>f.call('files.append',{id:start.id,offset:1,data:Buffer.from('a')}),/顺序/);
   await assert.rejects(()=>f.call('files.finish',{id:start.id}),/完整/);
   await f.call('files.cancel',{id:start.id});await assert.rejects(()=>f.call('files.finish',{id:start.id}),/不存在/);
-  const contract=require('../main/sodo-app-bridge-contract.cjs');assert.equal(contract.METHOD_CAPABILITY['files.getUrl'],'data.read');assert.equal(contract.METHOD_CAPABILITY['files.begin'],'data.write');
+  const contract=require('../main/soduwork-app-bridge-contract.cjs');assert.equal(contract.METHOD_CAPABILITY['files.getUrl'],'data.read');assert.equal(contract.METHOD_CAPABILITY['files.begin'],'data.write');
   assert.throws(()=>contract.normalizeRequest({id:'a',method:'files.append',params:{id:'upload_'+'a'.repeat(32),offset:0,data:new Uint8Array(512*1024+1)}}),/512KiB/);
   assert.throws(()=>contract.normalizeRequest({id:'a',method:'files.getUrl',params:{projectId:'p',id:'../../private'}}));
   const r=await files.handle({item:f.item()},{method:'files.begin',params:{projectId:'p',name:'file.mp4',type:'video/mp4',size:0}},f.deps);assert.ok(r.ok);await files.handle({item:f.item()},{method:'files.cancel',params:{id:r.id}},f.deps);
@@ -67,6 +67,6 @@ test('native picker preview and copy use opaque authorized references without re
  const selected=await files.execute(f.app,f.binding,'files.pickLocal',{},()=>{},options);assert.equal(picked,1);const item=selected.items[0];assert.ok(!JSON.stringify(item).includes(f.root));assert.match(item.sourceId,/^source_/);assert.equal(fs.existsSync(path.join(f.root,'jiyong-files')),false,'selection and preview do not write project files');
  assert.deepEqual(Buffer.from(await (await f.request({url:item.url,method:'GET'})).arrayBuffer()),bytes);
  const copy=await f.call('files.copyLocal',{projectId:'native',sourceId:item.sourceId});assert.deepEqual(Buffer.from(await (await f.request({url:copy.file.url,method:'GET'})).arrayBuffer()),bytes);assert.equal((await f.call('files.copyLocal',{projectId:'native',sourceId:item.sourceId})).file.id,copy.file.id,'repeat copy is idempotent');
- const contract=require('../main/sodo-app-bridge-contract.cjs');assert.equal(contract.METHOD_CAPABILITY['files.copyLocal'],'data.write');assert.throws(()=>contract.normalizeRequest({id:'x',method:'files.copyLocal',params:{projectId:'p',sourceId:item.sourceId,path:source}}));
+ const contract=require('../main/soduwork-app-bridge-contract.cjs');assert.equal(contract.METHOD_CAPABILITY['files.copyLocal'],'data.write');assert.throws(()=>contract.normalizeRequest({id:'x',method:'files.copyLocal',params:{projectId:'p',sourceId:item.sourceId,path:source}}));
  await assert.rejects(()=>f.call('files.copyLocal',{projectId:'p',sourceId:'source_'+'0'.repeat(32)}));fs.appendFileSync(source,'changed');await assert.rejects(()=>f.call('files.copyLocal',{projectId:'native',sourceId:item.sourceId}),/变化/);f.switchAccount();assert.equal((await f.request({url:item.url,method:'GET'})).status,403);
 });

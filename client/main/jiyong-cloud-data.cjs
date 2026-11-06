@@ -49,9 +49,11 @@ async function perform(deps,binding,installed,method,params,assertCurrent,initia
     if (method === 'data.assetPut') input = {...input,data:Buffer.from(input.data).toString('base64')};
   } else input = method === 'initialize' ? {} : contract.dataRequest(method,params,declaration);
   const local = binding.pluginId.startsWith('local:');
+  const packageKey=installed.localDraft?.key || installed.key;
+  if(local && (typeof packageKey!=='string' || !/^[a-z][a-z0-9-]{0,62}$/.test(packageKey)))throw Error('无法确定即用的稳定包名，请重新安装可信版本');
   const result = await send(deps,'data',{
     appId:binding.pluginId, method, params:input,
-    ...(local ? {packageKey:installed.localDraft?.key || binding.pluginId.slice(6),version:installed.version,
+    ...(local ? {packageKey,version:installed.version,
       checksum:installed.checksum,declaration,initialization} : {versionId:installed.versionId}),
   },check);
   if (method === 'data.assetGet' && result.asset) {

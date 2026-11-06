@@ -50,7 +50,7 @@ const plugins = rows.map(([id, name, description, kind, ready], index) => {
     capabilities: { hasWorkflow: kind === 'workflow', executionMode: kind === 'workflow' ? 'workflow' : 'direct', skills: kind === 'connector' ? [] : ['frontend-design', 'delivery-check'], mcpServers: kind === 'connector' ? ['hr-service'] : [], runtime: ['files'], agentKinds: ['local:codex'], entrypoints: { conversation: true, task: true, automation: kind === 'workflow' } },
     workflow: { nodes: kind === 'workflow' ? [{ key: 'understand', name: '明确需求', type: 'ai' }, { key: 'deliver', name: '完成交付', type: 'ai' }, { key: 'verify', name: '检查成果', type: 'ai_review' }] : [] },
   }
-  return { id, key: id, qualifiedKey: 'soduwork/' + id, name, description, orgId: index % 3 ? 'fixture-org' : null, sourceKind: index % 3 ? 'personal' : 'builtin', enabled: ready, updatedAt: 1788314400000 - index, latestVersion: version, versions: [version], bindings: [], catalogPolicy: { installation: 'available' } }
+  return { id, key: id, qualifiedKey: 'soduwork/' + id, name, description, orgId: index % 3 ? 'fixture-org' : null, sourceKind: index % 3 ? 'soduwork' : 'builtin', enabled: ready, updatedAt: 1788314400000 - index, latestVersion: version, versions: [version], bindings: [], catalogPolicy: { installation: 'available' } }
 })
 plugins.find((item) => item.id === 'contracts').latestVersion.manifest.setup = {
   title: '合同审核的安装偏好', description: '所选插件版本的配置定义。', preferences: [

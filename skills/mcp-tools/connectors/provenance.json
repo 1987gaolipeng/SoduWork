@@ -193,6 +193,11 @@
     }
   ],
   "developerConnectors": {
+    "authoring": "actual logged-in local SoduWork development client / local:mcp-studio",
+    "ref": "chat-mvbygnji-uf12",
+    "model": "dev-coding-large-agent-soduwork",
+    "date": "2026-10-17",
+    "cloudCredentialsAvailable": false,
     "files": [
       {
         "file": "providers/aliyun-ecs.json",

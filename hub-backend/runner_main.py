@@ -603,10 +603,10 @@ class Runner:
                     headers.update({"X-Soduwork-Device": self.client_id, "X-Soduwork-Secret": self.secret})
                 if self.key and self.id:
                     # Send machine identity with its key; Hub verifies it matches the hello identity.
-                    headers.update({"X-Soduwork-Runner-Id": self.id,
-                                    "X-Soduwork-Runner-Key": self.key})
+                    headers.update({"X-SoduWork-Runner-Id": self.id,
+                                    "X-SoduWork-Runner-Key": self.key})
                 if self.token:
-                    headers["X-Soduwork-Runner-Token"] = self.token
+                    headers["X-SoduWork-Runner-Token"] = self.token
                 async with websockets.connect(self.url, max_size=8 * 1024 * 1024,
                                               additional_headers=headers, proxy=None) as ws:
                     self.ws = ws
@@ -2148,7 +2148,7 @@ def main() -> None:
     ap.add_argument("--config", default="", help="runner JSON 配置文件（独立部署兼容入口）")
     ap.add_argument("--config-stdin", action="store_true", help="通过桌面私有管道接收启动配置")
     ap.add_argument("--hub", default=os.environ.get("SODUWORK_HUB") or "",
-                    help="后端地址，如 ws://192.0.2.40:9080")
+                    help="后端地址，如 ws://192.0.2.230:9080")
     ap.add_argument("--token", default=os.environ.get("SODUWORK_RUNNER_TOKEN") or "")
     ap.add_argument("--key", default=os.environ.get("SODUWORK_RUNNER_KEY") or "",
                     help="一机一钥（管理端→终端管理里发的这台机器专属钥匙；配了就别再用共享 token）")

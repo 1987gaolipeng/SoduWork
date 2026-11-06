@@ -14,7 +14,8 @@ function prepare(app, options, resume, identity, interactive, historySource) {
   const entries = fs.readFileSync(resume.path, 'utf8').split('\n').flatMap(line => {
     try { return [JSON.parse(line)]; } catch { return []; }
   });
-  const started = entries.some(item => item.type === 'custom' && item.customType === 'soduwork.access.policy');
+  const started = entries.map(require('./persisted-entry-compat.cjs').canonicalEntry)
+    .some(item => item.type === 'custom' && item.customType === 'soduwork.access.policy');
   if (started) {
     if (options.adapterId && options.adapterId !== (resume.adapterId || 'pi'))
       throw Error('这条会话已经初始化过执行底座，请先接回会话，再使用 Agent 选择器切换');

@@ -22,7 +22,7 @@
   for(const target of items){target.platformConnections={...(target.platformConnections||{}),[key]:value};target.platformConnection=value;}
   latest.set(key,value);
   if(previous?.connected!==value?.connected||previous?.disconnected!==value?.disconnected)
-   global.dispatchEvent?.(new CustomEvent('soduwork:plugins-changed', {detail:{platformStatusOnly:true}}));
+   global.dispatchEvent?.(new CustomEvent('soduwork:plugins-changed'));
  }
  // Old installed manifests also get the correct instructions for this desktop connection entry.
  function setupDescription(item){const keys=providers(item);return keys.length?'点击「连接账号」。'+keys.map(key=>PLATFORMS[key].intro).join(' '):String(item&&item.setup&&item.setup.description||'');}

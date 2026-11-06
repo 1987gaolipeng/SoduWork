@@ -39,7 +39,69 @@
     const send = gate.querySelector('[data-send-code]');
     const consentRequiredMessage = '请阅读并同意用户协议和隐私政策。';
     const api = () => hooks.api();
-    function setStatus(message, kind) { status.textContent = message || ''; status.className = 'soduwork-auth-status' + (kind ? ' is-' + kind : ''); }
+    const tx = value => (global.SoduWorkI18n && typeof global.SoduWorkI18n.translateText === 'function')
+      ? global.SoduWorkI18n.translateText(String(value || '')) : String(value || '');
+    function setStatus(message, kind) {
+      statusSource = String(message || '');
+      status.textContent = tx(statusSource);
+      status.className = 'soduwork-auth-status' + (kind ? ' is-' + kind : '');
+    }
+    function modeCopy() {
+      return mode === 'register'
+        ? { title: '创建你的账号', intro: '验证邮箱后即可使用，无需等待审核' }
+        : mode === 'resetPassword'
+          ? { title: '找回密码', intro: '验证邮箱后，设置新的登录密码' }
+          : mode === 'emailCode'
+            ? { title: '欢迎回来', intro: '使用邮箱验证码登录' }
+            : { title: '欢迎回来', intro: '使用账号和密码登录' };
+    }
+    function refreshLocale() {
+      const copy = modeCopy();
+      const text = (selector, source) => {
+        const node = gate.querySelector(selector);
+        if (node) node.textContent = tx(source);
+      };
+      const attr = (selector, name, source) => {
+        const node = gate.querySelector(selector);
+        if (node) node.setAttribute(name, tx(source));
+      };
+      text('.ac-brand span', '让工作更简单');
+      text('h1', copy.title); text('.ac-auth-intro', copy.intro);
+      attr('.ac-auth-tabs', 'aria-label', '登录方式');
+      text('[data-auth-mode="emailCode"]', '验证码登录');
+      text('[data-auth-mode="password"]', '密码登录');
+      text('[data-auth-code] > span', '邮箱验证码');
+      text('[data-send-code]', '获取验证码');
+      text('.ac-password-label', mode === 'password' ? '密码' : '设置密码');
+      text('[data-auth-confirm] > span', '确认密码');
+      const toggle = gate.querySelector('[data-password-toggle]');
+      if (toggle) {
+        const shown = password.type === 'text';
+        toggle.textContent = tx(shown ? '隐藏' : '显示');
+        toggle.setAttribute('aria-label', tx(shown ? '隐藏密码' : '显示密码'));
+      }
+      const passwordLogin = mode === 'password';
+      text('.ac-account-label', passwordLogin ? '账号' : '邮箱');
+      account.placeholder = tx(passwordLogin ? '输入账号' : 'name@example.com');
+      password.placeholder = tx('输入密码');
+      confirm.placeholder = tx('再次输入密码');
+      const consentText = gate.querySelector('.ac-consent label span');
+      if (consentText) consentText.textContent = tx('我已阅读并同意');
+      gate.querySelectorAll('[data-legal]').forEach(node => {
+        node.textContent = tx(node.dataset.legal === 'privacy' ? '隐私政策' : '用户协议');
+      });
+      text('[data-recheck-policy]', '重新检查');
+      text('.soduwork-auth-retry', '重试连接');
+      text('[data-auth-mode="register"]', '创建账号');
+      text('[data-auth-mode="resetPassword"]', '忘记密码');
+      text('.ac-auth-back', '返回登录');
+      text('.soduwork-auth-secure', '密码和验证码不会保存在本机');
+      const hub = gate.querySelector('.soduwork-auth-hub');
+      if (hub && hub.firstChild && hub.firstChild.nodeType === 3) hub.firstChild.nodeValue = tx('连接 ');
+      if (!busy) text('.soduwork-auth-submit span', actionLabel());
+      refreshCooldown(); refreshAvailability();
+      if (statusSource) status.textContent = tx(statusSource);
+    }
     function actionLabel() { return mode === 'register' ? '注册并进入工作区' : mode === 'resetPassword' ? '重置密码' : '登录'; }
     function supportsEmail() { return typeof policy?.mailReady === 'boolean'; }
     function canMail() { return !policyError && policy?.mailReady === true; }
@@ -233,11 +295,13 @@
       policyError = true;
       stopDelivery(); refreshAvailability(); refreshCooldown();
     }
+    const onLocaleChange = () => refreshLocale();
+    global.addEventListener?.('soduwork-locale-change', onLocaleChange);
     changeMode('password');
     return { form, accountInput: account, passwordInput: password, displayInput: null,
       statusNode: status, submitButton: submit, setBusy, setPolicy, setPolicyError, setStatus,
       invalidate() { stopDelivery(); revision++; challenge = null; password.value = ''; confirm.value = ''; code.value = ''; },
-      dispose() { stopDelivery(); disposed = true; revision++; if (clock) clearInterval(clock); } };
+      dispose() { stopDelivery(); disposed = true; revision++; if (clock) clearInterval(clock); global.removeEventListener?.('soduwork-locale-change', onLocaleChange); gate._accountUiPasswordLocaleDispose?.(); delete gate._accountUiPasswordLocaleDispose; } };
   }
   global.EmailAuth = { mount };
 })(window);

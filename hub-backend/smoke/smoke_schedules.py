@@ -12,7 +12,7 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
-ROOT = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+ROOT = os.path.abspath(os.path.dirname(__file__))
 SMOKE_ROOT = tempfile.mkdtemp(prefix="soduwork-schedule-smoke-")
 SMOKE_DB = os.path.join(SMOKE_ROOT, "schedule.db")
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///" + SMOKE_DB.replace("\\", "/")

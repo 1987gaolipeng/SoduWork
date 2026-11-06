@@ -607,5 +607,6 @@
   };
   global.addEventListener?.('soduwork-data-scope-changed', ownerChanged);
   global.addEventListener?.('soduwork-device-auth', ownerChanged);
+  global.addEventListener?.('soduwork-locale-change', () => { if (boundOptions) paint(boundOptions.root); });
   if (typeof module !== 'undefined' && module.exports) module.exports = global.ComposeRuntime;
 })(window);

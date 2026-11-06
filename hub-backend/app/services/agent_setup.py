@@ -39,9 +39,13 @@ from .claude_runtime import account_setup as _claude_account_setup
 
 log = logging.getLogger("uvicorn.error")
 
-# A liveness probe must distinguish model output from the echoed user prompt.
-# Ask the model to concatenate separated fragments so the expected response is never a substring
-# of the prompt itself. Echoed input alone must not satisfy the probe.
+# The probe marker must demonstrate an actual model response.
+# Prompt echo alone must not satisfy the probe.
+# Pi and OpenCode JSON output can echo the user's prompt.
+# For example: {"type":"message_start","message":{"role":"user",...}}.
+# An echoed prompt does not prove the model responded.
+# Construct the expected answer by joining two separately supplied marker halves.
+# Only an actual answer should contain the joined marker.
 _TOK_A = "SODUWORK_"
 _TOK_B = "AGENT_OK"
 _TOKEN = _TOK_A + _TOK_B                    # Keep the complete expected marker absent from the prompt.

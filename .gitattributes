@@ -3,8 +3,6 @@
 # The reported line can obscure the actual line-ending problem.
 # hub-backend/installers/runner-install.sh is distributed to Linux hosts.
 *.sh text eol=lf
-*.command text eol=lf
-*.cmd text eol=crlf
 ops/soduworkctl text eol=lf
 *.service text eol=lf
 *.timer text eol=lf

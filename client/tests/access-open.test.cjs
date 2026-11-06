@@ -626,7 +626,7 @@ test('full access requires native consent before opening with a saved standard d
 });
 
 test('main process compiles policy and ignores renderer-supplied full access on standard or unsupported calls', async t => {
-  const forged = { schema: 'sodo.access-policy/v1', mode: 'full', revision: 100, workspaceRoot: os.tmpdir() };
+  const forged = { schema: 'soduwork.access-policy/v1', mode: 'full', revision: 100, workspaceRoot: os.tmpdir() };
   const standard = fixture();
   const raw = { accessMode: 'standard', accessPolicy: forged };
   assert.equal((await standard.open(raw)).ok, true);

@@ -2,10 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createComponentHarness } from './helpers/react-harness.mjs'
 import * as healthVersion from '../src/health-version.js'
-import { setLocale } from '../src/i18n.js'
 
 async function mount(t, { permissions = ['identity.manage', 'task.view'], active = 'overview', isSuper = false } = {}) {
-  setLocale('zh-CN')
   const values = new Map([['soduwork-hub-screen', active]])
   const descriptors = new Map(['window', 'document', 'sessionStorage'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
   const events = new EventTarget()

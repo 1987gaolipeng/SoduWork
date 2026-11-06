@@ -256,19 +256,9 @@ function _bindClientUpdateStatus() {
   void _refreshClientUpdateStatus();
 }
 
-/* Size-segment toasts: compose through the locale packs (template + size word)
-   so a translated prefix is never paired with an untranslated Chinese value
-   (e.g. "Font size: 大"). Falls back to plain Chinese without SoduWorkI18n. */
-function _saySegSize(template, value) {
-  const label = ({ small: '小', medium: '中', large: '大' }[value] || '中');
-  const i18n = globalThis.SoduWorkI18n;
-  if (!i18n || typeof i18n.t !== 'function') { petSay(template.replace('{size}', label)); return; }
-  petSay(i18n.t(template, template, { size: i18n.t(label) }));
-}
-
-/* Form bindings. */
+/* ---------- 表单绑定 ---------- */
 function _bindSettingsEvents() {
-  /* Skins determine task and pet shapes; separate shape and gender controls are not exposed for the current block and orb characters. */
+  /* 任务形状/SoduWork 形象设置已移除：形状由皮肤决定(玻璃圆珠/SoduWork 方块)，当前 SoduWork/球宠物无性别之分 */
   _bindAppSeg('remindSeg', 'remind', v => {
     cfg.remind = v; saveCfg();
     if (typeof applyRemind === 'function') applyRemind();
@@ -495,9 +485,9 @@ if (document.readyState === 'loading') {
 function _initSettings() {
   _bindSettingsEvents();
   _bindClientUpdateStatus();
-  applyScale();        /* Apply the saved task-view scale. */
-  applyFontScale();    /* Font size is independent of overall UI scale. */
-  applyPetVisible();   /* Apply the pet visibility preference. */
+  applyScale();        /* 应用保存的任务视图大小 */
+  applyFontScale();    /* 字体大小是独立一档（用户定） */
+  applyPetVisible();   /* 桌宠显隐（设置项） */
   _syncSeg('scaleSeg', 'scale', cfg.uiScale || 'medium');
   _syncSeg('fontSeg', 'font', cfg.fontScale || 'medium');
   _syncLocaleSelect((cfg && cfg.locale) || (globalThis.SoduWorkI18n && SoduWorkI18n.getLocale && SoduWorkI18n.getLocale()) || 'zh-CN');

@@ -41,8 +41,7 @@ async function installedLinuxFormat(deps = {}) {
 async function query(current, deps = {}) {
   const platform = deps.platform || process.platform;
   const profile = deps.profile || require('./distribution.cjs').current();
-  const channel = profile.updateChannel || 'stable';
-  if (!['stable', 'beta'].includes(channel)) throw new Error('Invalid Client update channel');
+  const channel = profile.distributionId === 'stage' ? 'beta' : 'stable';
   const params = new URLSearchParams({ current, platform, arch: deps.arch || process.arch, channel });
   if (platform === 'linux') params.set('format', await installedLinuxFormat(deps));
   return params;

@@ -570,7 +570,7 @@ async function exportToFile(app, dialog, pluginId) {
   const result = await dialog.showSaveDialog(require("./native-locale.cjs").dialogOptions({
     title: '导出个人插件压缩包',
     defaultPath: path.join(app.getPath('documents'), exportName(draft)),
-    filters: [{ name: 'SoduWork 插件压缩包', extensions: ['soduwork-plugin'] }],
+    filters: [{ name: 'SoduWork 插件压缩包', extensions: ['soduwork-plugin', 'soduwork-plugin', 'soduwork-plugin'] }],
     properties: ['createDirectory', 'showOverwriteConfirmation'],
   }));
   if (!result || result.canceled || !result.filePath) return { ok: true, canceled: true };
@@ -623,9 +623,10 @@ async function preflightCandidate(app,body,deps={}) {
   const cloud=await require('./jiyong-cloud-data.cjs').preflight({app,...deps},body);
   if(cloud)preview.checks.push(cloud);
   if(cloud?.ok===false)return {...preview,ok:false};
-  // Installation validates the package without executing its pages. Native
-  // startup diagnostics remain an explicit development check only.
-  return preview;
+  const runtime=await require('./app-candidate-preflight.cjs').run(app,build(body).body);
+  if(runtime.executed)preview.checks.push(...runtime.checks.map(row=>({...row,label:row.label+(row.reason?'：'+row.reason:'')})));
+  else preview.checks.push({key:'app-external',label:'在线服务首屏、业务授权与交互：需实际连接后验证',ok:null,state:'pending'});
+  return {...preview,ok:preview.ok&&runtime.ok!==false&&preview.checks.every(row=>row.ok!==false),runtime};
 }
 
 function preflightArchive(content) {
@@ -794,6 +795,7 @@ function service({ app, identityOf, fetchImpl, beforeWrite = async () => {}, val
       if(checked.ok===false)return {ok:false,installed:false,reason:checked.checks.filter(row=>row.ok===false).map(row=>row.label).join('\n'),checks:checked.checks};
       const current=await access.body(body);
       if(build(current).checksum!==build(authorized).checksum)throw Error('即用候选内容已变化，请重新检查后安装');
+      require('./jiyong-edit-source.cjs').assertInstallCurrent(app,current);
       await beforeWrite(current);
       validateWrite(current);
       const result=create(app,current);
@@ -818,17 +820,7 @@ function install({ app, ipcMain, dialog, safeStorage, identityOf, fetchImpl }) {
     return {...result,...await preflightCandidate(app,body,{identityOf,fetchImpl}),personalDraft:body};
   });
   ipcMain.handle('personal-plugin-initialize',async(_event,pluginId)=>require('./jiyong-initialization.cjs').initialize({app,identityOf,fetchImpl},String(pluginId)));
-  ipcMain.handle('personal-plugin-create', async (_event, body) => {
-    const authorized=await access.body(body), checked=await preflightCandidate(app,authorized,{identityOf,fetchImpl});
-    if(checked.ok===false)return {ok:false,installed:false,reason:checked.checks.filter(row=>row.ok===false).map(row=>row.label).join('\n'),checks:checked.checks};
-    // Recheck source authorization after asynchronous readiness checks.
-    const current=await access.body(body);
-    if(build(current).checksum!==build(authorized).checksum)throw Error('即用候选内容已变化，请重新检查后安装');
-    require('./jiyong-edit-source.cjs').assertInstallCurrent(app,current);
-    const result=create(app,current);
-    try{result.initialization=await require('./jiyong-initialization.cjs').initialize({app,identityOf,fetchImpl},result.plugin.pluginId,result.plugin);return result;}
-    catch(error){return {ok:false,installed:true,plugin:result.plugin,reason:'即用已保存，但数据初始化未完成：'+error.message};}
-  });
+  ipcMain.handle('personal-plugin-create', (_event, body) => shared.create(body));
   ipcMain.handle('personal-plugin-metadata-update', (_event, pluginId, options) =>
     require('./personal-plugin-metadata.cjs').update({app,identityOf,pluginId,options}));
   ipcMain.handle('personal-plugin-configure', async (_event, id, checksum, config) => {

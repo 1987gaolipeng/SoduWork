@@ -65,7 +65,7 @@
     if (button && !button.disabled) void choose(button.dataset.defaultAccess);
   });
   api()?.onChange?.(value => { ++serial; accept(value); });
-  global.addEventListener?.('sodo-locale-change', () => paint());
+  global.addEventListener?.('soduwork-locale-change', () => paint());
   global.AccessPreferences = Object.freeze({ refresh,
     ready: () => loaded ? Promise.resolve({ ...state }) : refresh(),
     snapshot: () => ({ ...state }),

@@ -24,6 +24,21 @@ function fixture(t) {
       fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(value)); return file;
     } };
 }
+test('pre-rename history lists and opens for its account but conflicts and other accounts stay blocked', t => {
+  const f = fixture(t), id = 'pre-rename';
+  const previous = crypto.createHash('sha256').update('sodo-account\0one').digest('hex').slice(0, 32);
+  f.write('session-memory-bindings', id, { owner: previous, ids: [] });
+  const rows = [{ id, workOwner: previous }];
+  assert.deepEqual(access.visible(f.app, rows).map(row => row.id), [id]);
+  assert.doesNotThrow(() => access.assertOwner(f.app, id, access.actor(f.app), rows[0]));
+  f.switch(identity('two'));
+  assert.deepEqual(access.visible(f.app, rows), []);
+  assert.throws(() => access.assertOwner(f.app, id, access.actor(f.app), rows[0]), /当前账号/);
+  f.switch(identity());
+  f.write('requirement-session-context', id, { owner: scope(identity('two')) });
+  assert.deepEqual(access.visible(f.app, rows), []);
+  assert.throws(() => access.assertOwner(f.app, id, access.actor(f.app), rows[0]), /当前账号/);
+});
 test('ordinary, work and live rows use persisted account ownership and return after switching back', t => {
   const f = fixture(t), rows = ['alice', 'bob', 'unbound'].map(id => ({ id, count: 1 }));
   assert.deepEqual(access.visible(f.app, rows).map(row => row.id), ['alice']);

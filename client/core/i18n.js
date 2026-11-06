@@ -332,6 +332,7 @@
     formatNumber: (value, options) => new Intl.NumberFormat(read(), options).format(value),
     formatDate: (value, options) => new Intl.DateTimeFormat(read(), options).format(new Date(value)),
   });
+  global.SoduWorkI18n = global.SoduWorkI18n; // Read-only compatibility entry point for published renderer extensions.
   function ready() { applyKeyed(); adapter?.start(); }
   if (global.document?.readyState === 'loading') global.addEventListener('DOMContentLoaded', ready, { once: true });
   else ready();

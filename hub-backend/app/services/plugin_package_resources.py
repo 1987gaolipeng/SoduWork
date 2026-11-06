@@ -14,7 +14,7 @@ from . import plugin_resources
 
 PREFIX = "references/plugin-package/"
 METADATA = {
-    "plugin.json", "workflow.json", "soduwork/workflow.json",
+    "plugin.json", "workflow.json", "soduwork/workflow.json", "soduwork/workflow.json",
     ".mcp.json", "mcp.json", ".app.json", "plugin-signature.json",
     "signature.json", "hooks/hooks.json",
 }
@@ -33,7 +33,7 @@ def build(parsed: dict) -> dict:
             relative = name[len(root):]
             # Control/configuration files are not runtime resources. In particular,
             # never copy MCP headers/env or automatically register imported hooks.
-            if (relative in excluded or relative.startswith(("soduwork/",))
+            if (relative in excluded or relative.startswith(("soduwork/", "soduwork/"))
                     or any(part.startswith(".") for part in relative.split("/"))):
                 continue
             kind = ("script" if "/scripts/" in "/" + relative

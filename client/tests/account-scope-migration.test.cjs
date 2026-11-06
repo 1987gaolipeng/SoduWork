@@ -11,8 +11,30 @@ const runtime = require('../main/platform-connections/runtime.cjs');
 const deviceAuth = require('../main/device-auth');
 const { sessions, identity } = require('./helpers/platform-session-fixture.cjs');
 
-const OLD = { hub: 'http://192.0.2.10:8989', clientId: 'soduwork-olddddd0000000000000' };
+const OLD = { hub: 'http://192.0.2.149:8989', clientId: 'soduwork-olddddd0000000000000' };
 const legacyOwner = identityArg => runtime.legacyScope(OLD.hub, OLD.clientId, identityArg);
+const previousAccountOwner = uid => crypto.createHash('sha256').update('sodo-account\0' + uid).digest('hex').slice(0, 32);
+
+test('pre-rename account ownership requires the same valid account and never changes new writes', () => {
+  const stored = previousAccountOwner('one');
+  assert.equal(runtime.scopeMatches(stored, migratedIdentity(), []), true);
+  assert.equal(runtime.scopeMatches(stored, identity('two'), [OLD]), false);
+  for (const session of [sessions().expired, sessions().future, sessions().wrongType, sessions().missingUid, 'invalid']) {
+    assert.equal(runtime.scopeMatches(stored, { ...identity(), session }, [OLD]), false);
+  }
+  assert.notEqual(runtime.scope(identity()), stored);
+  assert.notEqual(runtime.connectionScope(identity()), stored);
+});
+
+test('pre-rename memory ownership converges without enrollment history', t => {
+  const f = bindingFixture(t), id = 'pre-rename-memory', oldOwner = previousAccountOwner('one');
+  const dir = path.join(f.root, 'session-memory-bindings');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, crypto.createHash('sha256').update(id).digest('hex') + '.json');
+  fs.writeFileSync(file, JSON.stringify({ owner: oldOwner, ids: [] }));
+  withProfiles([], () => assert.deepEqual(memory.binding(f.app, id, migratedIdentity()), []));
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).owner, runtime.scope(migratedIdentity()));
+});
 
 function migratedIdentity() {
   // Keep account UID constant while changing Hub address and device registration.

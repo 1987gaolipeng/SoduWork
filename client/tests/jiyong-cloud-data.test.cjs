@@ -47,6 +47,7 @@ test('data access routes cloud requests with host-owned identity and never creat
   assert.equal(sent.url,'https://hub.example/api/v1/jiyong/data');
   assert.equal(sent.options.headers.Authorization,'Device '+f.identity.session);
   assert.equal(sent.body.appId,f.installed.pluginId);assert.equal(sent.body.checksum,f.installed.checksum);
+  assert.equal(sent.body.packageKey,f.body.key,'portable cloud identity comes from the package key, not the random installation UUID');
   assert.equal(sent.body.declaration.storage.location,'cloud');assert.equal(sent.body.initialization.schemaVersion,1);
   assert.equal(sent.body.ownerId,undefined);assert.equal(sent.body.databaseUrl,undefined);
   assert.equal(fs.existsSync(path.join(f.root,'jiyong-data')),false);

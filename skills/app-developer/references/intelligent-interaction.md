@@ -19,7 +19,7 @@
 | --- | --- | --- |
 | 页面内生成/改写/分类/短步骤建议 | `soduWorkApp.ai.generate`；声明 `ai.generate` | 单次文字生成，无历史、Agent规划器或工具；结果由页面校验、回显和按需保存 |
 | 多步骤规划、查资料、调用工具、执行工作 | `soduWorkApp.chat.send`；声明 `conversation.send`，控制对话栏另声明 `composer.control` | 使用当前即用会话、随包业务技能和本轮授权能力；发送受理不是完成 |
-| 页面与 AI 共用本机业务成果 | 页面 `data.get/list/batch`，技能通过宿主 `soduwork-jiyong` 的 `data_get/list/batch` | 按 host-sdk.md 声明集合、data.read/write、mcp.connect 与 MCP；同源存储、revision 合并及读回 |
+| 页面与 AI 共用业务成果 | 页面 `data.get/list/batch`，技能通过宿主 `soduwork-jiyong` 的 `data_get/list/batch` | 按 host-sdk.md 与 cloud-data.md 声明存储位置、集合、data.read/write、mcp.connect 与 MCP；同源存储、revision 合并及读回 |
 | 在线业务的成果/进度/消息 | 现有业务 API/MCP + 页面读取 | 业务端保存并校验权限；不用本机数据冒充跨机器同步 |
 | 页面获知数据可能变化 | `events.onRefresh/onTurnSettled` + 加载/聚焦补读 | 轮次结束信号，无业务正文/请求ID，不是完成通知；两方法是同一信号，选一个订阅 |
 | 宿主通知、对话或资料变化 | `events.onDataChanged` + 对应读取接口 | 仅 identity/notifications/conversations/library 主题；不是即用自有集合的变更推送 |

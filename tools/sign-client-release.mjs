@@ -91,7 +91,7 @@ async function main() {
   const dryRun = args.includes("--dry-run");
   const reuseExisting = args.includes("--reuse-existing");
   const positional = args.filter((value) => !["--dry-run", "--reuse-existing"].includes(value));
-  if (positional.length !== 1) fail("usage: sign-client-release.mjs <installer> [--dry-run] [--reuse-existing]");
+  if (positional.length !== 1) fail("usage: sign-upload-client-release.mjs <installer> [--dry-run] [--reuse-existing]");
 
   const installer = resolve(positional[0]);
   if (!existsSync(installer)) fail("installer does not exist");
@@ -112,6 +112,22 @@ async function main() {
   const size = statSync(installer).size;
   if (size < 1024 * 1024) fail("installer is too small");
   const digest = await sha256(installer);
+  const profile = distributions.selected();
+  if (profile.distributionId !== 'internal') {
+    const receiptPath = env('SODUWORK_CLIENT_DISTRIBUTION_RECEIPT');
+    if (!receiptPath || !existsSync(receiptPath)) fail('Cloud Client signing requires the accepted distribution receipt');
+    const receipt = JSON.parse(readFileSync(receiptPath, 'utf8'));
+    const binding = receipt.distribution;
+    const artifact = receipt.artifacts?.find(row => row.name === name);
+    if (receipt.schema !== 1 || receipt.ok !== true || receipt.version !== version ||
+        binding?.id !== profile.distributionId || binding?.hubUrl !== profile.hubOrigin ||
+        binding?.configSha256 !== profile.configSha256 || artifact?.sha256 !== digest ||
+        artifact?.size !== size || artifact?.platform !== platform || artifact?.arch !== env('SODUWORK_CLIENT_ARCH', 'x64') ||
+        (env('CI_COMMIT_SHA') && receipt.sourceCommit !== env('CI_COMMIT_SHA')) ||
+        (env('CI_PIPELINE_ID') && String(receipt.pipelineId) !== env('CI_PIPELINE_ID'))) {
+      fail('Accepted installer evidence differs from the selected Client distribution');
+    }
+  }
   if (!dryRun) {
     const receiptPath = resolve(env("SODUWORK_CLIENT_COMPATIBILITY_REPORT", installer + ".compatibility.json"));
     if (existsSync(receiptPath)) {
@@ -129,13 +145,18 @@ async function main() {
   if (!env("SODUWORK_CLIENT_SIGNING_KEY_FILE") || !existsSync(keyFile)) {
     fail("SODUWORK_CLIENT_SIGNING_KEY_FILE is required");
   }
-  const keyId = env("SODUWORK_CLIENT_SIGNING_KEY_ID", "");
+  const keyId = env("SODUWORK_CLIENT_SIGNING_KEY_ID", "soduwork-client-release-2026b");
   if (!KEY_ID_RE.test(keyId)) fail("SODUWORK_CLIENT_SIGNING_KEY_ID is invalid");
   const key = privateKey(readFileSync(keyFile, "ascii").trim());
 
   const here = dirname(fileURLToPath(import.meta.url));
   const trustFile = resolve(env("SODUWORK_CLIENT_TRUST_FILE", join(here, "..", "client", "update-trust.json")));
-  const trust = JSON.parse(readFileSync(trustFile, "utf8"));
+  const trust = profile.distributionId === 'internal'
+    ? JSON.parse(readFileSync(trustFile, "utf8")) : profile.updateTrust;
+  if (profile.distributionId !== 'internal' && env('SODUWORK_CLIENT_TRUST_FILE') &&
+      distributions.digest(JSON.parse(readFileSync(trustFile, 'utf8'))) !== distributions.digest(trust)) {
+    fail('Cloud Client trust override differs from its bundled distribution');
+  }
   if (String(trust?.keys?.[keyId] || "") !== publicKeyRaw(key)) {
     fail(`signing key ${keyId} is not trusted by this client source tree`);
   }
@@ -143,7 +164,7 @@ async function main() {
   const channel = env("SODUWORK_CLIENT_CHANNEL", "beta");
   if (!["stable", "beta"].includes(channel)) fail("SODUWORK_CLIENT_CHANNEL must be stable or beta");
   const minimum = env("SODUWORK_CLIENT_MINIMUM_VERSION");
-  if (minimum && !VERSION_RE.test(minimum)) fail("SODUWORK_CLIENT_MINIMUM_VERSION must be x.y.z");
+  if (minimum && !VERSION_RE.test(minimum)) fail("SODUWORK_CLIENT_MINIMUM_VERSION must be x.y.z or x.y.z-beta.N");
   const mandatory = /^(1|true|yes)$/i.test(env("SODUWORK_CLIENT_MANDATORY"));
   const arch = env("SODUWORK_CLIENT_ARCH", "x64");
   if (!["x64", "arm64"].includes(arch)) fail("SODUWORK_CLIENT_ARCH must be x64 or arm64");
@@ -213,6 +234,39 @@ async function main() {
   const destination = new URL(url);
   if (!['https:', 'http:'].includes(destination.protocol) || destination.username || destination.password) {
     fail('upload URL must be HTTP(S) without embedded credentials');
+  }
+  // An exact deterministic ID can survive a clean-workspace retry, including
+  // a lost upload response. Metadata reuse is not a download-integrity receipt:
+  // activation and full public download verification remain mandatory.
+  function recordReceipt(release, reused) {
+    const receipt = env('SODUWORK_CLIENT_UPLOAD_RECEIPT');
+    if (receipt) writeFileSync(resolve(receipt), JSON.stringify({ schema: 1, ok: true,
+      uploadUrl: url, release, bundle: bundlePath, sha256: digest, reused,
+      uploadedAt: new Date().toISOString(),
+    }, null, 2) + '\n');
+  }
+  if (reuseExisting) {
+    if (destination.pathname !== '/api/v1/admin/client-releases/upload' || destination.search || destination.hash)
+      fail('Upload reuse requires the standard release upload endpoint');
+    const response = await fetch(new URL('/api/v1/admin/client-releases', destination), {
+      headers: { Authorization: `Bearer ${token}` }, redirect: 'error', signal: AbortSignal.timeout(60000),
+    });
+    if (!response.ok) fail(`client release reconciliation failed (HTTP ${response.status})`);
+    let catalog;
+    try { catalog = await response.json(); } catch { fail('client release reconciliation returned invalid JSON'); }
+    if (!Array.isArray(catalog?.releases)) fail('client release reconciliation returned invalid catalog');
+    const rows = catalog.releases.filter(row => row.id === bundle.releaseId);
+    if (rows.length > 1) fail('Duplicate immutable release ID');
+    if (rows.length) {
+      const row = rows[0];
+      const expected = { version, channel, platform, arch, artifactName: name,
+        artifactSize: size, sha256: digest, keyId, notes, mandatory, minVersion: minimum };
+      if (Object.entries(expected).some(([key, value]) => row[key] !== value))
+        fail('Existing Hub release differs from the signed installer');
+      recordReceipt(row, true);
+      process.stdout.write(`reused staged client ${version} release=${bundle.releaseId}; download verification still required\n`);
+      return;
+    }
   }
   // An exact deterministic ID can survive a clean-workspace retry, including
   // a lost upload response. Metadata reuse is not a download-integrity receipt:

@@ -120,13 +120,13 @@
   }
   function invalidate(event) {
     ++request; picks = []; loaded = false; renderRail();
-    if (event.type === 'sodo-data-scope-changed') { handles.clear(); close(); }
+    if (event.type === 'soduwork-data-scope-changed') { handles.clear(); close(); }
     else void refresh();
   }
   global.WorkspaceSidebarApps = { mount, refresh, renderRail, open, close };
-  for (const event of ['sodo-data-scope-changed', 'sodo:plugins-changed', 'sodo-plugin-policy', 'sodo-device-auth']) global.addEventListener(event, invalidate);
+  for (const event of ['soduwork-data-scope-changed', 'soduwork:plugins-changed', 'soduwork-plugin-policy', 'soduwork-device-auth']) global.addEventListener(event, invalidate);
   global.addEventListener('focus', () => { if (loaded) void refresh(); });
-  global.addEventListener('sodo-locale-change', renderRail);
+  global.addEventListener('soduwork-locale-change', renderRail);
   const timer = setInterval(() => { if (loaded && !document.hidden) void refresh(); }, 60000);
   global.addEventListener('beforeunload', () => clearInterval(timer));
 })(window);

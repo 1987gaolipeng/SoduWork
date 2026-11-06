@@ -20,9 +20,10 @@ if (typeof electron === 'string') {
   locale.setLocale('zh-CN');
   const desk = path.join(client, 'desk.html'), pageURL = pathToFileURL(desk).href;
   const source = read('desk.html'), start = source.indexOf('  <div class="set-group set-access-default">');
-  const end = source.indexOf('  <div class="set-group client-update-card">', start);
-  assert.ok(start >= 0 && end > start, 'settings fixture uses the bounded production access section');
+  const end = source.indexOf('  <div class="set-group ', start + 1);
+  assert.ok(start >= 0 && end > start, 'The production access settings section must be present');
   const markup = source.slice(start, end);
+  assert.doesNotMatch(markup, /<script\b/i, 'The isolated settings fixture must not include desktop startup');
   const scripts = [...JSON.parse(read('core/locales/manifest.json')).map(name => 'core/locales/' + name),
     'core/i18n-dom.js', 'core/i18n.js', 'components/settings/access-preferences.js'];
   const html = '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
@@ -108,9 +109,14 @@ if (typeof electron === 'string') {
     assert.equal(preferences.hasFullConsent(app, {}), true);
     await new Promise(resolve => { owner.webContents.once('did-finish-load', resolve); owner.reload(); });
     await selected(owner, 'full');
-    for (const opts of [{ chatId: 'history' }, { automationId: 'schedule' }, { adapterId: 'claude' }]) assert.equal(preferences.forNewChat(app, opts, true), opts);
-    for (const opts of [{ taskSession: true }, { taskRef: 'task' }, { adapterId: 'codex' }, { adapterId: 'dsh' }]) assert.equal(preferences.forNewChat(app, opts, true).accessMode, 'full');
-    report.cases.push('Checked native consent saves full access; reload preserves it. New local task sessions and supported adapters inherit the default; history, automation and unsupported adapters retain their grants.');
+    for (const opts of [{ chatId: 'history' }, { automationId: 'schedule' }, { accessMode: 'readonly' }]) {
+      assert.equal(preferences.forNewChat(app, opts, true), opts);
+    }
+    for (const opts of [{ taskSession: true }, { taskRef: 'task' },
+      ...['pi', 'opencode', 'codex-harness', 'qwen', 'kimi', 'claude', 'codex', 'dsh', 'harness2'].map(adapterId => ({ adapterId }))]) {
+      assert.deepEqual(preferences.forNewChat(app, opts, true), { ...opts, accessMode: 'full' });
+    }
+    report.cases.push('Checked native consent persists through reload; all supported new chats and new local tasks inherit it, while existing chats, automation and explicit session modes retain their grants.');
     for (const [width, lang, theme] of [[1120, 'zh-CN', 'azure'], [360, 'en-US', 'cnbm'], [360, 'zh-CN', 'azure'], [1120, 'en-US', 'cnbm']]) await layout(width, lang, theme);
     await click(owner, '[data-default-access=standard]'); await selected(owner, 'standard'); await selected(peer, 'standard');
     assert.equal(preferences.hasFullConsent(app, {}), false);

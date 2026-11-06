@@ -95,7 +95,7 @@ if (typeof electron === 'string') {
     await js('WorkspaceSidebarApps.close();releaseCatalog();await pendingOpen;window.catalogGate=null;');
     assert.equal(views.length, beforeLateOpen, 'late directory response cannot open an app after navigation');
     await js('window.catalogGate=new Promise(resolve=>window.releaseCatalog=resolve);window.pendingRefresh=WorkspaceSidebarApps.refresh();void 0;');
-    await js('fixtureScope="account-b";dispatchEvent(new Event("sodo-data-scope-changed"))');
+    await js('fixtureScope="account-b";dispatchEvent(new Event("soduwork-data-scope-changed"))');
     await js('releaseCatalog();await pendingRefresh;window.catalogGate=null;');
     assert.equal(await js('document.querySelectorAll("[data-sidebar-app]").length'), 0);
     console.log(JSON.stringify({ ok: true, evidence: temp, cases: ['authorized administrator placements', 'in-place native open without windows', 'navigation and composer draft retention', 'modal occlusion', 'resize and pinned conversation', 'popup tabs', 'permission removal and last-tab cleanup', 'scope reset'], boundary: 'Fixture catalogs and renderer DOM actions, production application opening/native views/preloads. No real accounts, admin publication, models or native mouse claims.' }));

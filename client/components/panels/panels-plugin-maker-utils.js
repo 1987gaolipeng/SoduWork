@@ -91,7 +91,7 @@
       }
     }
     const input = document.createElement('input');
-    input.type = 'file'; input.accept = '.json,.zip,.soduwork-plugin,application/json,application/zip';
+    input.type = 'file'; input.accept = '.json,.zip,.soduwork-plugin,.soduwork-plugin,.soduwork-plugin,application/json,application/zip';
     input.addEventListener('change', async () => {
       const file = input.files && input.files[0];
       if (!file) { callbacks.cancel?.(); return; }

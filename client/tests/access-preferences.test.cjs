@@ -4,7 +4,7 @@ const fs = require('node:fs'), os = require('node:os'), path = require('node:pat
 const { pathToFileURL } = require('node:url');
 const preferences = require('../main/access-control/preferences');
 function fixture(t, confirm, initialMode) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sodo-access-preference-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-access-preference-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const app = { getPath: () => root }, handlers = new Map(), notifications = [], confirmations = [];
   if (initialMode) fs.writeFileSync(path.join(root, 'access-preferences.json'), JSON.stringify({ schema: 1, mode: initialMode, revision: 0 }));

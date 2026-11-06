@@ -9,6 +9,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 
 
 def main():
@@ -62,6 +63,8 @@ def main():
                 raise RuntimeError('isolated cloud migration failed: ' + result.stderr.decode(errors='replace'))
             print('Verifying cloud data behavior', flush=True)
             asyncio.run(verify(root))
+            if '--native' in sys.argv:
+                run_native(root, flags)
             print('Verifying independent database and asset backup restore', flush=True)
             asyncio.run(backup_restore(binary, suffix, port, root, flags))
         print(json.dumps({'ok': True, 'checks': ['independent Alembic migration', 'read-only readiness',
@@ -77,6 +80,42 @@ def main():
         if root.parent != Path(tempfile.gettempdir()).resolve() or not root.name.startswith('soduwork-jiyong-pg-'):
             raise RuntimeError('temporary PostgreSQL cleanup path escaped intended directory')
         shutil.rmtree(root)
+
+
+def run_native(root, flags):
+    with socket.socket() as probe:
+        probe.bind(('127.0.0.1', 0))
+        port = probe.getsockname()[1]
+    accounts = root / 'native-accounts.json'
+    with (root / 'native-http.log').open('wb') as log:
+        server = subprocess.Popen([sys.executable, 'jiyong_cloud_e2e_fixture.py', str(root), str(port)],
+                                  stdout=log, stderr=log, creationflags=flags)
+        try:
+            for _ in range(600):
+                if accounts.exists():
+                    break
+                if server.poll() is not None:
+                    raise RuntimeError('isolated auth HTTP fixture failed: ' + (root / 'native-http.log').read_text(errors='replace')[-2500:])
+                time.sleep(.1)
+            if not accounts.exists():
+                raise RuntimeError('isolated auth HTTP fixture did not become ready')
+            print('Verifying real native page/HTTP/auth/PostgreSQL loop across fresh device profiles', flush=True)
+            node = shutil.which('node')
+            evidence = Path('../.local/jiyong-cloud-evidence')
+            evidence.mkdir(parents=True, exist_ok=True)
+            with (evidence / 'native-client.log').open('wb') as client_log:
+                result = subprocess.run([node, '../client/e2e/jiyong-cloud-loop.cjs', str(accounts)], timeout=300,
+                                        stdout=client_log, stderr=client_log, creationflags=flags)
+            if result.returncode:
+                raise RuntimeError('native cloud loop failed: ' + (evidence / 'native-client.log').read_text(errors='replace')[-4000:])
+            for phase in ['write', 'second-device', 'other-account', 'reopen-upgraded']:
+                shutil.copyfile(root / (phase + '.json'), evidence / ('loop-' + phase + '.json'))
+        finally:
+            server.terminate()
+            try:
+                server.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                server.kill(); server.wait(timeout=5)
 
 
 async def prepare(port, root):

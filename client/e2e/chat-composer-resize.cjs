@@ -88,7 +88,7 @@ if (typeof electron === 'string') {
     const bounds = await js(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect();return{visible:e.checkVisibility(),left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:innerWidth,height:innerHeight,overflow:e.scrollWidth>e.clientWidth+1}})()`);
     assert.ok(bounds.visible && bounds.left >= -1 && bounds.right <= bounds.width + 1 && bounds.top >= -1 && bounds.bottom <= bounds.height + 1 && !bounds.overflow, JSON.stringify({ selector, bounds }));
   }
-  const model = { name: 'long-model', label: 'fixture-coding-large-model-enterprise-long-model-name', contextWindow: 128000, contextWindowKnown: true };
+  const model = { name: 'long-model', label: 'dev-coding-large-agent-soduwork-enterprise-long-model-name', contextWindow: 128000, contextWindowKnown: true };
   const capability = { supported: true, schema: 'soduwork.access-policy/v1', modes: ['standard', 'readonly', 'full'], canChangeDuringSession: true, changeTakesEffect: 'next-turn' };
   const state = { status: 'idle', adapterId: 'codex-harness', displayName: 'Codex Harness Enterprise Long Agent',
     messages: [{ role: 'user', text: 'Isolated layout sample', done: true }, { role: 'assistant', done: true, blocks: [{ kind: 'text', text: 'Existing conversation is preserved.', done: true }] }], tools: [],

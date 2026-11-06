@@ -252,14 +252,11 @@ function writeModels(dir, model) {
   return file;
 }
 
-
-
-
-
-
-
-
-
+/*
+ * Configure task MCP capabilities using short-lived backend tickets; keep long-lived
+ * device keys in main-process secure storage. Match runtime_payload server structure and
+ * expose its path through SODUWORK_MCP_SERVERS.
+ */
 function writeMcpServers(dir, identity, mcpKey = '') {
   const hub = String((identity && identity.hub) || '').replace(/\/+$/, '');
   if (!hub || !identity.clientId || !mcpKey) return '';
@@ -337,8 +334,9 @@ async function prepare(app, identity, modelName = '', options = {}) {
   process.env[ENV_AGENT_DIR] = dir;
   if (mcp) process.env.SODUWORK_MCP_SERVERS = mcp;    // Expose the servers.json location to the bridge.
   noProxyFor(got.model.baseUrl);
-  // Configuration reads must not submit inference requests or consume model quota.
-  // Actual model calls start when the user sends a message or runs a task.
+  if (!got.historical && got.model.modality !== 'image') {
+    warmupGateway(got.model.baseUrl, got.model.key, got.model.id);
+  }
   return { ok: true, agentDir: dir, provider: 'soduwork', model: got.model, mcpServers: mcp };
 }
 

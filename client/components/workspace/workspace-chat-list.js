@@ -725,10 +725,8 @@ function refreshConversationHistory() {
   /* Insert an optimistic row on the first message, then replace it by title and time once Pi's archive index is available. */
   function setChats(items) {
     ctx.chatsLoading = false;
-    // Apply lifecycle visibility before the existing optimistic-row reconciliation.
-    ctx.chatItems = ctx.chatItems.filter(item => !hiddenRow(item));
-    items = (items || []).filter(item => !hiddenRow(item));
-    ctx.chatItems = ctx._reconcileChats(ctx.chatItems, (items || []).map(rememberChatName), Date.now());
+    ctx.chatItems = ctx._reconcileChats(ctx.chatItems.filter(item => !hiddenRow(item)),
+      (items || []).filter(item => !hiddenRow(item)).map(rememberChatName), Date.now());
     renderChats();
   }
 

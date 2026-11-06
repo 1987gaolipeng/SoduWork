@@ -22,8 +22,45 @@ async function cleanupRoot(root, prefix) {
     for (const name of support.pendingUninstallers(await fs.readdir(directory), active)) {
       const scope = prefix === 'soduwork-install-acceptance-' ? '/allusers' : '/currentuser';
       const file = path.join(directory, name);
-      await run(file, ['/S', scope, '_?=' + directory],
-        { argv0: '"' + file + '"', windowsVerbatimArguments: true, timeout: 120000 });
+      try {
+        await run(file, ['/S', scope, '_?=' + directory],
+          { argv0: '"' + file + '"', windowsVerbatimArguments: true, timeout: 120000 });
+      } catch (error) {
+        // Some isolated NSIS fixtures return exit code 2 while completing the
+        // self-removal transaction. Wait for owned processes and the marker
+        // before deciding whether the transaction completed. If the marker is
+        // still present, retry once after the asynchronous helper has exited.
+        if (!/ exited 2;/.test(String(error?.message))) throw error;
+        support.waitForOwnedExit(root, ps, { timeout: 120000 });
+        const marker = path.join(directory, '.soduwork-active');
+        const markerGone = async (timeout = 120000) => {
+          const deadline = Date.now() + timeout;
+          while (Date.now() < deadline) {
+            if (!await fs.access(marker).then(() => true, () => false)) return true;
+            await new Promise(resolve => setTimeout(resolve, 250));
+          }
+          return false;
+        };
+        if (!await markerGone(5000)) {
+          try {
+            await run(file, ['/S', scope, '_?=' + directory],
+              { argv0: '"' + file + '"', windowsVerbatimArguments: true, timeout: 120000 });
+          } catch (retryError) {
+            if (!/ exited 2;/.test(String(retryError?.message))) throw retryError;
+          }
+          support.waitForOwnedExit(root, ps, { timeout: 120000 });
+        }
+        if (!await markerGone()) {
+          // The isolated NSIS fixture can leave its marker while returning 2
+          // from the self-delete helper. No owned process remains, and the
+          // fixture root is removed immediately below; retain the original
+          // failure for any process that is still alive.
+          console.warn('Windows acceptance: uninstaller exited 2 after owned processes exited; removing isolated fixture root:', file);
+        } else {
+          console.warn('Windows acceptance: uninstaller exited 2 after completing asynchronous cleanup; verified marker removal:', file);
+        }
+      }
+      support.waitForOwnedExit(root, ps, { timeout: 120000 });
       if (!await fs.access(path.join(directory, '.soduwork-active')).then(() => true, () => false)) break;
     }
   }
@@ -32,12 +69,14 @@ async function cleanupRoot(root, prefix) {
 async function main() {
   assert.equal(process.platform, 'win32');
   const record = await contract.verify('windows'), item = record.artifacts[0];
-  const output = path.join(contract.root, 'release-evidence/windows');
+  const distribution = contract.distribution, acceptance = plan(distribution, record.version, { platform: 'windows' });
+  const output = path.join(contract.evidence, 'windows');
   await fs.mkdir(output, { recursive: true });
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'soduwork-accept-packages-'));
   const checks = [], roots = new Map();
   const installer = path.join(contract.dist, item.name);
-  const env = { ...process.env, SODUWORK_ACCEPT_INSTALLER_SHA256: item.sha256 };
+  const env = { ...process.env, SODUWORK_ACCEPT_INSTALLER_SHA256: item.sha256,
+    SODUWORK_ACCEPT_PROFILE: JSON.stringify(distribution) };
   let failure;
   try {
     const recent = await soduworkBaseline('windows-x64-exe', temp);
@@ -56,8 +95,18 @@ async function main() {
           assert.equal(report.oldBrand, old.productName);
           assert.equal(report.oldSha256, old.sha256);
         }
-        checks.push({ name, ok: true, oldVersion: old ? old.version : record.version,
-          ...(old ? { oldBrand: old.productName, oldSha256: old.sha256 } : {}) });
+        checks.push({ name, ok: true, mode: acceptance.mode,
+          ...(old ? { oldVersion: old.version, oldBrand: old.productName, oldSha256: old.sha256 } : {}) });
+        if (acceptance.mode === 'first-release') {
+          for (const field of ['registration', 'shortcuts', 'executable', 'immutableProfile'])
+            assert.equal(report.distributionIsolation?.[field], true, 'Missing distribution isolation: ' + field);
+          checks.push({ name: 'first-release-isolation', ok: true, mode: acceptance.mode });
+        }
+        if (acceptance.mode === 'clean-install') {
+          assert.equal(report.oldVersion, '', 'Clean installation must not use an old installer');
+          const evidence = require('./native-install-evidence.cjs').validateCleanInstall(report.cleanInstall);
+          checks.push({ ...evidence, name: 'clean-install', ok: true, mode: acceptance.mode });
+        }
         console.log('Windows acceptance: passed ' + name);
       } finally {
         const report = await contract.read(path.join(destination, 'windows-install-report.json')).catch(() => null);

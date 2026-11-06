@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createInterface } = require('node:readline');
 const harnesses = require('../conversation/used-harnesses');
+const { canonicalEntry } = require('../conversation/persisted-entry-compat.cjs');
 
 function inside(root, target) {
   const relative = path.relative(root, target);
@@ -35,7 +36,7 @@ async function readSummary(file, stat, project) {
   try {
     for await (const line of lines) {
       let entry;
-      try { entry = JSON.parse(line); } catch { continue; } // Includes an incomplete final append.
+      try { entry = canonicalEntry(JSON.parse(line)); } catch { continue; } // Includes an incomplete final append.
       if (!entry || typeof entry !== 'object') continue;
       if (!header) {
         if (entry.type !== 'session' || typeof entry.id !== 'string' || !entry.id) return null;

@@ -30,15 +30,36 @@ function notarizeEnabled(env = process.env) {
   return Boolean(signingIdentity(env)) && !['1', 'true', 'yes'].includes(skip);
 }
 
+function unlockSigningKeychain(env, run) {
+  const password = env.SODUWORK_MAC_KEYCHAIN_PASSWORD;
+  if (!password) return;
+  const keychain = env.SODUWORK_MAC_KEYCHAIN || env.CSC_KEYCHAIN ||
+    (env.HOME ? path.join(env.HOME, 'Library/Keychains/login.keychain-db') : '');
+  if (!keychain) throw new Error('Configure the signing keychain before notarization');
+  try {
+    // Signing and compression can outlast the earlier CI unlock. Refresh access
+    // in the submitting process, including when the profile uses the search list.
+    run('security', ['unlock-keychain', '-p', password, keychain],
+      { env, stdio: 'pipe', timeout: 30000 });
+  } catch {
+    // execFileSync errors include command arguments; never propagate the password.
+    throw new Error('Unable to unlock the signing keychain before notarization');
+  }
+}
+
 // `--wait` blocks until Apple's notary service issues the verdict; a rejected
 // or invalid submission must fail the build instead of shipping a blocked DMG.
 function notarizeArtifact({ artifactPath, env, run, staple = true }) {
+  unlockSigningKeychain(env, run);
   const args = ['notarytool', 'submit', artifactPath, '--keychain-profile', notaryProfile(env)];
   const keychain = notaryKeychain(env);
   // iCloud keychains are valid search-list entries but are not accepted by
   // notarytool's explicit --keychain file argument. CI marks that case and
   // lets notarytool resolve the profile through the user search list.
   if (keychain && env.SODUWORK_MAC_NOTARY_KEYCHAIN_SEARCH !== '1') args.push('--keychain', keychain);
+  if (env.SODUWORK_MAC_NOTARY_STATE_DIR) return require('./macos-notary-session.cjs').notarize({
+    artifactPath, env, run, staple, credentials: args.slice(3),
+  });
   args.push('--wait');
   run('xcrun', args);
   if (staple) run('xcrun', ['stapler', 'staple', artifactPath]);
@@ -46,19 +67,17 @@ function notarizeArtifact({ artifactPath, env, run, staple = true }) {
 
 // Signers see the app as a bundle; notarytool accepts a zip of it.
 function notarizeApp({ appPath, env, run }) {
+  if (env.SODUWORK_MAC_NOTARY_STATE_DIR && env.SODUWORK_MAC_BUILD_INPUT_ID)
+    return require('./macos-notary-app.cjs').notarizeApp({ appPath, env, run, notarizeArtifact });
   const zipPath = appPath + '.notarize.zip';
   run('ditto', ['-c', '-k', '--keepParent', appPath, zipPath]);
   try {
     notarizeArtifact({ artifactPath: zipPath, env, run, staple: false });
     run('xcrun', ['stapler', 'staple', appPath]);
   } finally {
-    fs.rmSync(zipPath, { force: true });
+    // A failed wait can be resumed against this exact archive and submission ID.
+    if (!env.SODUWORK_MAC_NOTARY_STATE_DIR) fs.rmSync(zipPath, { force: true });
   }
-}
-
-function restoreNotarizedApp({ appPath, env, run }) {
-  if (!env.SODUWORK_MAC_NOTARY_STATE_DIR || !env.SODUWORK_MAC_BUILD_INPUT_ID) return false;
-  return require('./macos-notary-app.cjs').notarizeApp({ appPath, env, run, notarizeArtifact, resumeOnly: true });
 }
 
 // electron-builder afterSign hook (top-level option): runs after the app is
@@ -68,7 +87,7 @@ exports.default = async function afterSign(context) {
   const env = process.env;
   if (!notarizeEnabled(env)) return;
   const appPath = path.join(context.appOutDir, context.packager.appInfo.productFilename + '.app');
-  notarizeApp({ appPath, env, run: (file, args) => execFileSync(file, args, { stdio: 'inherit' }) });
+  notarizeApp({ appPath, env, run: (file, args, options) => execFileSync(file, args, { stdio: 'inherit', ...options }) });
 };
 
 exports.signingIdentity = signingIdentity;
@@ -77,4 +96,3 @@ exports.notaryKeychain = notaryKeychain;
 exports.notarizeEnabled = notarizeEnabled;
 exports.notarizeArtifact = notarizeArtifact;
 exports.notarizeApp = notarizeApp;
-exports.restoreNotarizedApp = restoreNotarizedApp;

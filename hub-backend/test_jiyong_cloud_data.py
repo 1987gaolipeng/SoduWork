@@ -108,11 +108,13 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_namespace_is_derived_from_account_not_device_or_payload(self):
         execute = AsyncMock(return_value={'ok': True, 'item': None, 'revision': 0})
         with patch.object(api.storage, 'execute', execute):
-            for device in ['device-a', 'device-b']:
+            for index, device in enumerate(['device-a', 'device-b']):
                 self.device.id = device
-                response = await self.http.post('/api/v1/jiyong/data', json=body())
+                candidate = body()
+                candidate['appId'] = 'local:' + str(index + 1) * 8 + '-1111-4111-8111-111111111111'
+                response = await self.http.post('/api/v1/jiyong/data', json=candidate)
                 self.assertEqual(response.status_code, 200, response.text)
-                self.assertEqual(execute.call_args.args[:3], ('org-a:user-a', 'local:cloud-notes', 'cloud-notes'))
+                self.assertEqual(execute.call_args.args[:3], ('org-a:user-a', 'personal:cloud-notes', 'cloud-notes'))
             bad = body(); bad['ownerId'] = 'user-b'
             self.assertEqual((await self.http.post('/api/v1/jiyong/data', json=bad)).status_code, 422)
             self.assertEqual(execute.await_count, 2)
@@ -145,7 +147,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_invalid_seed_local_storage_and_inactive_account_never_reach_database(self):
         with patch.object(api.storage, 'execute', AsyncMock()) as execute:
-            for mutate in [lambda x: x.update(packageKey='another'),
+            for mutate in [lambda x: x.update(packageKey='../another'),
                            lambda x: x['declaration'].update(storage={'location': 'local'}),
                            lambda x: x['initialization']['migrations'][0].update(version=3)]:
                 raw = body(); mutate(raw)

@@ -142,7 +142,8 @@
       return out;
     }
     if (!viewing && out.reuseCurrent && info.sessionId) out.chatId = text(info.sessionId);
-    /* In-progress and completed requirements can resume only archives available on this device. When history lookup confirms no archive exists, pass an empty chatId so the controller creates a requirement-scoped conversation instead of reopening a stale mapping. */
+    /* When no local conversation is mapped to an active or completed task,
+       let the controller create a conversation with requirement context. */
     if (!out.chatId && viewing && !out.reuseCurrent && source.status && source.status !== 'todo') {
       out.forceNew = true;
       out.navigation = false;

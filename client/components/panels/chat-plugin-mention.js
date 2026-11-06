@@ -764,6 +764,7 @@
         input.removeEventListener('keydown', onKeydown, true);
         document.removeEventListener('mousedown', onDocumentMouseDown);
         if (eventRoot) eventRoot.removeEventListener('soduwork:plugins-changed', onCatalogChanged);
+        eventRoot?.removeEventListener('resize', positionMenu);
         if (eventRoot && eventRoot.PluginInputSheet) eventRoot.PluginInputSheet.close();
         close();
         strip.remove();

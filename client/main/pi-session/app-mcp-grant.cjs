@@ -4,20 +4,25 @@ const fs = require('node:fs'), path = require('node:path'), crypto = require('no
 const processGrants = require('../agent-runtime/process-grants');
 const sources = new WeakMap();
 const turnBindings = new WeakMap();
-function bind(session, sender, pluginId, app, deps) {
-  session.appPluginId = pluginId || session.appPluginId || (app
+function bind(session, sender, pluginId, app, deps = {}) {
+  const pageOwner = require('../work-preview-app-owner.cjs');
+  let assertActive = deps.assertActive;
+  if (pageOwner.assertSender(sender)) assertActive ||= () => pageOwner.assertSender(sender);
+  assertActive?.();
+  session.appPluginId = pluginId || session.appPluginId || (sender && app
     ? require('../app-conversation-connection.cjs').association(app, session.snapshot?.().activePlugins) : '') || '';
-  sources.set(session, { sender, app, deps, nativePluginId: pluginId || '' });
+  sources.set(session, { sender, app, deps, nativePluginId: pluginId || '', assertActive });
 }
 function nativePluginId(session) { return sources.get(session)?.nativePluginId || ''; }
 function unbind(session) { sources.delete(session); }
 function forSession(session) {
   if (!session) return null;
   const accepted = turnBindings.get(session);
-  const { sender, app, deps } = accepted || sources.get(session) || {};
+  const { sender, app, deps, assertActive } = accepted || sources.get(session) || {};
+  assertActive?.();
   const pluginId = accepted ? accepted.pluginId : session.appPluginId;
   if (!pluginId) return null;
-  return context(sender, pluginId, accepted?.expected, app, deps);
+  return mapResult(context(sender, pluginId, accepted?.expected, app, deps), value => { assertActive?.(); return value; });
 }
 // Local/native ownership stays synchronous; remote history additionally awaits
 // the current account's accepted Hub installation. Callers may await either.
@@ -26,11 +31,18 @@ function context(sender, expectedPluginId, expectedSettings, app, deps) {
   if (!expectedPluginId) return null;
   const preview = require('../work-preview');
   require('../work-preview-app-owner.cjs').assertSender(sender);
-  let current = preview.appContextFor(sender);
+  let current;
+  try { current = preview.appContextFor(sender); }
+  catch (error) { if (!app) throw error; } // Stored MCP authority survives a stale page.
   // A native standalone app has a valid identity without any business connection.
-  if (app && (!current || current.pluginId !== expectedPluginId || (current.requiresMcp && !current.connection)))
-    current = require('../app-conversation-connection.cjs').context(app, expectedPluginId, deps);
+  if (app && (!current || current.pluginId !== expectedPluginId ||
+      (current.requiresMcp && (!current.connection || current.connection.credentialKey)))) {
+    const native = current;
+    const restored = require('../app-conversation-connection.cjs').context(app, expectedPluginId, deps);
+    current = mapResult(restored, value => value || native);
+  }
   return mapResult(current, value => {
+    require('../work-preview-app-owner.cjs').assertSender(sender);
     if (!value || value.pluginId !== expectedPluginId) throw Error('应用连接不可用，请重新打开即用同步连接');
     if (expectedSettings && stamp(value) !== expectedSettings) throw Error('应用账号或设置已变化，请重新发送消息');
     return value;
@@ -39,10 +51,12 @@ function context(sender, expectedPluginId, expectedSettings, app, deps) {
 function stamp(value) { return value?.connection?.credentialKey ? value.connection.scope + ':' + value.connection.revision + (value.connection.versionId ? ':' + value.connection.versionId : '') : ''; }
 function guardSend(session, options) {
   const source = sources.get(session) || {}, { sender, app, deps } = source;
+  source.assertActive?.();
   const selected = (options.clearPluginSelection ? [] : options.pluginIds?.length
     ? options.pluginIds : session.snapshot?.().activePlugins || []).slice();
   const selectedApp = app ? require('../app-conversation-connection.cjs').association(app, selected, deps) : '';
   return mapResult(selectedApp, selectedApp => {
+    source.assertActive?.();
     const pluginId = selectedApp || source.nativePluginId || '';
     // Capture each accepted turn independently. Selecting another application or
     // moving this conversation cannot change an already-queued turn's authority.
@@ -51,14 +65,19 @@ function guardSend(session, options) {
       if (!selected.length) options.clearPluginSelection = true;
     }
     return mapResult(context(sender, pluginId, undefined, app, deps), current => {
+      source.assertActive?.();
       const expected = stamp(current), prior = options.beforeTurn;
       options.beforeTurn = async (...args) => {
+        source.assertActive?.();
         await context(sender, pluginId, expected, app, deps);
+        source.assertActive?.();
         const result = await prior?.(...args);
+        source.assertActive?.();
         await context(sender, pluginId, expected, app, deps);
+        source.assertActive?.();
         session.appPluginId = pluginId;
         session.appMcpExpected = expected;
-        turnBindings.set(session, { sender, pluginId, app, deps, expected });
+        turnBindings.set(session, { sender, pluginId, app, deps, expected, assertActive: source.assertActive });
         return result;
       };
     });
@@ -104,7 +123,9 @@ async function extend({ app, ref, connection, base }) {
       ...viewGuide].join('\n');
     return processGrants.attach({ ...base, configFile: file,
       servers: [...new Set([...(base?.servers || []), connection.server])],
-      guide: [base?.guide, guide].filter(Boolean).join('\n\n'),
+      guide: [base?.guide, guide,
+        'MCP 凭据由宿主读取应用已保存的接入参数，与页面登录会话独立，可并发使用；无需打开页面或让用户发消息续租。HTTP 401 表示凭据或授权校验失败，按实际错误报告，不猜测为定时租约过期。',
+      ].filter(Boolean).join('\n\n'),
       cleanup: () => { proxy?.cleanup(); if (base?.cleanup) base.cleanup(); else grants.removeConfig(app, file); },
       redact: value => (base?.redact ? base.redact(value) : String(value || ''))
         .split(connection.token).join('[已隐藏凭据]').split(proxy.token).join('[已隐藏凭据]'),

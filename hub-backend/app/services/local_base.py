@@ -24,8 +24,8 @@ _IDLE_LIMIT_S = int(os.environ.get("SODUWORK_LOCAL_IDLE_LIMIT_S") or 15 * 60)
 _HARD_LIMIT_S = int(os.environ.get("SODUWORK_LOCAL_HARD_LIMIT_S") or 8 * 3600)
 _TIMEOUT_S = _HARD_LIMIT_S          # Compatibility alias for older callers.
 
-# Context window: when the model service does not report its actual size,
-# use a configurable estimate and label it as estimated in the UI. Learn the actual size from overflow errors (see _learn_window).
+# Use a configurable context-window estimate when the gateway cannot report the real limit.
+# Label estimates in the UI and replace them with observed limits when overflow errors provide one.
 _CTX_WINDOW_DEFAULT = int(os.environ.get("SODUWORK_LOCAL_CTX_WINDOW") or 128000)
 _COMPACT_AT = 0.85                  # Compact before the next turn when context occupancy reaches this threshold.
 
@@ -1037,7 +1037,7 @@ def _env_for(prof: dict, cfg: dict, runtime_ref: str = "") -> dict:
         "provider": {"company": {
             "npm": provider_pkg, "name": "SoduWork 模型服务",
             "options": {"baseURL": base, "apiKey": "{env:SODUWORK_LLM_KEY}"},
-            "models": {model: {"name": "编码模型",
+            "models": {model: {"name": "公司 coding 模型",
                 "limit": {"context": context_limit, "output": min(output_limit, context_limit)},
                 "modalities": {
                 "input": ["text", "image"] if runtime_images.transport_supported(llm) else ["text"],
@@ -1106,7 +1106,7 @@ def _write_pi_models(base: str, model: str, kind: str = "openai-compat", context
             "baseUrl": base,
             "api": "anthropic-messages" if kind == "anthropic" else "openai-completions",
             "apiKey": "$SODUWORK_LLM_KEY",
-            "models": [{"id": model, "name": "编码模型",
+            "models": [{"id": model, "name": "公司 coding 模型",
                         "input": ["text", "image"] if runtime_images.transport_supported(llm) else ["text"],
                         "contextWindow": context_window,
                         "maxTokens": min(runtime_images.model_fields(llm).get("maxOutputTokens", DEFAULT_OUTPUT), context_window)}],

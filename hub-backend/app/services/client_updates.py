@@ -217,7 +217,7 @@ def format_rank(artifact_name: str) -> int:
 
 
 def installer_brand_rank(artifact_name: str) -> int:
-    """Rank public filenames; only the current SoduWork- prefix exists."""
+    """Rank the canonical public filename."""
     name = str(artifact_name or "").lower()
     for rank, prefix in enumerate(("soduwork-",)):
         if name.startswith(prefix):
@@ -226,7 +226,7 @@ def installer_brand_rank(artifact_name: str) -> int:
 
 
 def installer_supported_by_client(artifact_name: str, current: str) -> bool:
-    """Older signed-manifest parsers reject an unrecognized installer before downloading."""
+    """Accept only the canonical SoduWork installer for the current client."""
     version = parse_version(current)
     if installer_brand_rank(artifact_name) > 0:
         return False

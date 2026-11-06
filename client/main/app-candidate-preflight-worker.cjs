@@ -61,9 +61,9 @@ app.whenReady().then(async()=>{
   fs.writeFileSync(path.join(folder,'composer.html'),'<!doctype html><meta charset="utf-8"><style>body{margin:0}footer{position:fixed;bottom:6px;left:8px;right:8px;color:#8b8b93;font:12px/16px "Segoe UI",sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}</style><footer title="AI业务未在隔离预检中执行">AI业务未在隔离预检中执行</footer><script>soduWorkAPI.workPreview.onComposerSubmit(p=>soduWorkAPI.workPreview.composerSubmitResult({id:p.id,ok:false,reason:"隔离预检不执行真实AI，请通过页面操作实测"}));</script>');
   let observed=Promise.resolve(),contentReady=Promise.resolve(),composerContent;
   require('./work-preview').install({app,ipcMain,
-    BrowserWindow:Object.assign(function(options){const win=new BrowserWindow({...options,show:false});win.show=()=>{};win.maximize=()=>{};windows.push(win);return win;},{fromWebContents:wc=>BrowserWindow.fromWebContents(wc)}),
+    BrowserWindow:Object.assign(function(options){const win=new BrowserWindow({...options,show:false,webPreferences:{...options.webPreferences,offscreen:true}});win.show=()=>{};win.maximize=()=>{};windows.push(win);return win;},{fromWebContents:wc=>BrowserWindow.fromWebContents(wc)}),
     WebContentsView:function(options){
-      const view=new WebContentsView({...options,webPreferences:{...options.webPreferences,backgroundThrottling:false}}),load=view.webContents.loadFile.bind(view.webContents);
+      const view=new WebContentsView({...options,webPreferences:{...options.webPreferences,offscreen:true,backgroundThrottling:false}}),load=view.webContents.loadFile.bind(view.webContents);
       view.webContents.loadFile=(file,opts)=>{if(path.basename(file)==='desk.html'){composerContent=view.webContents;return load(path.join(folder,'composer.html'),opts);}return load(file,opts);};
       if(path.basename(options.webPreferences?.preload||'')==='work-preview-app-preload.cjs'){
         observed=observe(view.webContents);
@@ -125,6 +125,13 @@ app.whenReady().then(async()=>{
   report.errors=[...new Set(report.errors)].slice(0,20);
   check('app-startup',report.errors.length?'首屏发现脚本、资源或SDK运行错误':'首屏观察期内未发现脚本、资源或SDK运行错误',report.errors.length===0,{reason:report.errors.join('\n')});
   report.stage='screenshot';
-  try{fs.writeFileSync(path.join(folder,'first-screen.png'),(await content.capturePage({x:0,y:0,width:1024,height:640},{stayHidden:true,stayAwake:true})).toPNG());}catch(error){report.warnings=[...(report.warnings||[]),'首屏截图未取得：'+error.message];}
+  try{
+    // Capture the renderer surface directly; native hidden-window capture
+    // can fail without a Viz frame or crash during display transitions.
+    const shot=await content.debugger.sendCommand('Page.captureScreenshot',{format:'png',fromSurface:true,captureBeyondViewport:false});
+    const png=Buffer.from(shot.data,'base64');
+    if(!png.length)throw Error('首屏截图为空');
+    fs.writeFileSync(path.join(folder,'first-screen.png'),png);
+  }catch(error){report.warnings=[...(report.warnings||[]),'首屏截图未取得：'+error.message];}
   check('app-check-hidden','隔离诊断窗口保持隐藏',windows.every(win=>win.isDestroyed()||!win.isVisible()));
 }).catch(error=>check('app-startup','原生启动检查失败',false,{reason:String(error.stack||error).slice(0,2500)})).finally(finish);

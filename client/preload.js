@@ -485,7 +485,7 @@ const soduWorkBridge = {
   capturePage: (rect) => ipcRenderer.invoke('window-capture', rect),
   /* Forward capture options so the main-process service can hide only this
      requesting workspace window before acquiring display pixels. */
-  startScreenshot: options => ipcRenderer.invoke('screenshot-start', { hideOwner: options?.hideOwner === true }),
+  startScreenshot: (options) => ipcRenderer.invoke('screenshot-start', options || {}),
 
   /*
    * Open or update native workspace and tool windows through openDeskWindow and onDeskOpen;

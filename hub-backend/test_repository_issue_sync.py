@@ -46,7 +46,7 @@ def upstream(iid=1, *, created=None, **changes):
         "title": "Issue " + str(iid), "description": "Original upstream description",
         "labels": ["type::bug"], "author": {"id": 42, "username": "bound.actor", "name": "External Author"},
         "assignees": [{"id": 114, "username": "external.same"}],
-        "web_url": "https://git.example/example/project/-/issues/" + str(iid), **changes}
+        "web_url": "https://git.example/Industrialagents/soduwork/-/issues/" + str(iid), **changes}
 
 
 class RepositoryIssueSyncTests(unittest.IsolatedAsyncioTestCase):
@@ -88,7 +88,7 @@ class RepositoryIssueSyncTests(unittest.IsolatedAsyncioTestCase):
                         "user": "fixture-account", "secret": "fixture-secret", "kind": "token"}}),
                 models.IntegrationBinding(id="binding", integration_id="integration", external_actor="bound.actor", client_id="trusted-device"),
                 am.ScmRepository(id="catalog", integration_id="integration", org_id="org-a", provider="gitlab",
-                    external_id="149", full_name="example/project", display_name="project", active=True, archived=False),
+                    external_id="149", full_name="Industrialagents/soduwork", display_name="soduwork", active=True, archived=False),
                 am.ScmRepository(id="other-catalog", integration_id="integration", org_id="org-b", provider="gitlab",
                     external_id="150", full_name="Other/private", display_name="private", active=True, archived=False),
             ])
@@ -155,7 +155,7 @@ class RepositoryIssueSyncTests(unittest.IsolatedAsyncioTestCase):
                 enabled=True, config={"orgId": "org-a", "pullAuth": {
                     "user": "github-account", "secret": "github-fixture-token", "kind": "token"}}))
             session.add(am.ScmRepository(id="github-catalog", integration_id="github-integration", org_id="org-a",
-                provider="github", external_id="149", full_name="example/hezi", display_name="project",
+                provider="github", external_id="149", full_name="example/soduwork", display_name="soduwork",
                 active=True, archived=False))
             await session.commit()
         path = "/api/v1/admin/repository-catalog/github-catalog/issue-sync"
@@ -379,7 +379,7 @@ class RepositoryIssueSyncTests(unittest.IsolatedAsyncioTestCase):
                 for iid in (1, 2):
                     result = await aggregation.ingest_one(session, integration, {
                         "external_id": str(iid), "title": "Legacy overwrite", "status": "done",
-                        "external_url": "https://git.example/example/project/-/issues/" + str(iid),
+                        "external_url": "https://git.example/Industrialagents/soduwork/-/issues/" + str(iid),
                     })
                     self.assertEqual(result.get("skipped"), "repository_issue_subscription")
                 task = await session.get(models.Task, task_id)
@@ -434,9 +434,9 @@ class RepositoryIssueSyncTests(unittest.IsolatedAsyncioTestCase):
             await session.commit()
             for fields in (
                 {"external_project_id": 149, "external_url": "https://git.example/Renamed/repository/-/issues/1"},
-                {"external_url": "https://git.example/nested/gitlab/example/project/-/issues/1"},
-                {"external_url": "https://git.example/nested/gitlab/example/project/-/work_items/1"},
-                {"ext_repo": "example/project"},
+                {"external_url": "https://git.example/nested/gitlab/Industrialagents/soduwork/-/issues/1"},
+                {"external_url": "https://git.example/nested/gitlab/Industrialagents/soduwork/-/work_items/1"},
+                {"ext_repo": "Industrialagents/soduwork"},
             ):
                 with self.subTest(fields=fields):
                     result = await aggregation.ingest_one(session, integration,
@@ -444,7 +444,7 @@ class RepositoryIssueSyncTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(result.get("skipped"), "repository_issue_subscription")
             result = await aggregation.ingest_one(session, integration, {
                 "external_id": "100", "external_project_id": 150,
-                "external_url": "https://git.example/nested/gitlab/example/project/-/issues/100",
+                "external_url": "https://git.example/nested/gitlab/Industrialagents/soduwork/-/issues/100",
                 "title": "Stable project identity wins",
             })
             self.assertTrue(result["created"])

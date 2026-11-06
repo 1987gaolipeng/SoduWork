@@ -68,7 +68,7 @@ async def authenticated_client(
             raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
     elif settings.device_auth_compat and x_soduwork_device and x_soduwork_secret:
         try:
-            client = await device_auth.client_from_secret(session, x_soduwork_device, x_soduwork_secret,
+            client = await device_auth.client_from_secret(session, x_box_device, x_box_secret,
                                                           include_quota=include_quota)
         except device_auth.DeviceAuthError as exc:
             raise HTTPException(status_code=exc.status, detail=str(exc)) from exc

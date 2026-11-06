@@ -220,11 +220,11 @@ html[data-desk-panel="chatbar"] #chatbarRailBtn:focus-visible{outline:2px solid 
 
 /*
  * Authentication hides conversation content without hiding the expansion entry. Reuse the
- * login UI while keeping the authentication gate enforced.
+ * login UI while keeping soduwork-auth-pending enforced.
  */
 html[data-desk-panel="chatbar"].soduwork-auth-pending body>#chatbarRail,
-html[data-desk-panel="chatbar"].soduwork-auth-pending body>#chatbarPin{visibility:visible !important}
-html[data-desk-panel="chatbar"].soduwork-auth-pending body>#chatbarPin{z-index:2147483601}
+html[data-desk-panel="chatbar"].soduwork-auth-pending body>:is(#chatbarPin,#chatbarPinRight){visibility:visible !important}
+html[data-desk-panel="chatbar"].soduwork-auth-pending body>:is(#chatbarPin,#chatbarPinRight){z-index:2147483601}
 html[data-desk-panel="chatbar"].soduwork-auth-pending body:not([data-composer-state="rail"])>#soduWorkClientAuthGate:not([hidden]){
   display:grid !important;padding:48px 12px 16px;-webkit-app-region:no-drag
 }

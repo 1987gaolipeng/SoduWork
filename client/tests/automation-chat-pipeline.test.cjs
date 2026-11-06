@@ -148,3 +148,10 @@ test('automation and UI really call the same chat open/send pipeline; internal c
     Object.assign(auth, savedAuth); fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('automation turns bypass the interactive plugin-debug bridge', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../main/pi-session/ipc.js'), 'utf8');
+  assert.match(source, /const automationTurn = rawOptions\?\.source === 'automation'/);
+  assert.match(source, /const debugBlocked = automationTurn \? '' : pluginDebug\.guard\(s\)/);
+  assert.match(source, /workflowTurn = automationTurn \? null/);
+});

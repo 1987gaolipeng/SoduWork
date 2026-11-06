@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 
 
-ROOT = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+ROOT = os.path.abspath(os.path.dirname(__file__))
 SMOKE_ROOT = tempfile.mkdtemp(prefix="soduwork-scheduler-concurrency-")
 SMOKE_DB = os.path.join(SMOKE_ROOT, ".smoke-scheduler-concurrency.db")
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///" + SMOKE_DB.replace("\\", "/")
