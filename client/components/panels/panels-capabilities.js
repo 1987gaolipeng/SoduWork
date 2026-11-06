@@ -139,9 +139,7 @@
     const root = ensurePanel();
     root.classList.add('show');
     if (typeof expandForOverlay === 'function') expandForOverlay();
-    // Keep the mounted toolbar, focus and loaded content during a same-tab refresh.
-    if (!root.querySelector('.cap-shell')?.classList.contains('cap-tab-' + tab)) render();
-    else syncHead();
+    render();
     return load().finally(function () {
       if (root.classList.contains('show')) pluginCatalogSync().start(pluginSnapshot());
     });
@@ -318,11 +316,7 @@
         return;
       }
       catalogReady = false; loadErrors.delete('plugins');
-      if (!panel()?.classList.contains('show')) {
-        // Reopening must not reuse a request invalidated while this page was hidden.
-        loadFlight = null;
-        return;
-      }
+      if (!panel()?.classList.contains('show')) return;
       if (catalogActive()) renderContent();
       syncHead();
       loadCurrent('plugins');

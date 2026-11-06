@@ -200,16 +200,21 @@ test('resume-cwd：显式换目录优先，失效回退存档目录，再回退�
   require('node:fs').rmSync(base, { recursive: true, force: true });
 });
 
-test('conversation composer omits the removed workspace-switch action and its private handler', () => {
+test('聊天条「换」按钮链路：入口、绑定与重开参数齐备', () => {
   const composer = read('components/panels/work-composer.js');
-  assert.doesNotMatch(composer, /nchatWdPick|wc-wd-pick/);
+  assert.match(composer, /class="wc-wd-pick" id="nchatWdPick" title="换个文件夹继续这条会话"/);
   const bindings = read('components/panels/chat-composer-bindings.js');
-  assert.doesNotMatch(bindings, /nchatWdPick|_changeConversationWorkspace/);
+  assert.match(bindings, /const wdPick = el\.querySelector\('#nchatWdPick'\);[\s\S]{0,120}ctx\._changeConversationWorkspace\?\.\(\)/);
   const chat = read('components/panels/panels-chat.js');
-  assert.doesNotMatch(chat, /_changeConversationWorkspace/);
+  assert.match(chat, /get _changeConversationWorkspace\(\) \{ return _changeConversationWorkspace; \}/);
+  const handler = chat.slice(chat.indexOf('async function _changeConversationWorkspace'));
+  /* 忙碌与云端防护、从当前目录打开选择器、同目录不重开、reset 后携带覆盖参数重开。 */
+  assert.match(handler, /if \(_runtimeBusy\(\)\)/);
+  assert.match(handler, /_snap\?\.cloudHandoff\?\.phase === 'committed'/);
+  assert.match(handler, /api\.pickCwd\(_wd\?\.dir \? \{ defaultPath: _wd\.dir \} : \{\}\)/);
+  assert.match(handler, /resumeWorkspace: dir, cwd: dir, workspaceLabel: label, chatTitle: title/);
   const css = read('components/panels/work-composer.css');
-  assert.doesNotMatch(css, /\.wc-wd-pick/);
-  assert.match(bindings, /api\.openSessionWorkdir\(ctx\._ref\)/, 'the workspace label still opens the current folder');
+  assert.match(css, /\.wc-wd-pick\{[^}]*var\(--ink-5\)/);
 });
 
 test('主进程持久化模块：三个 IPC、来源校验与失效目录拦截齐备', () => {

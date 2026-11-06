@@ -111,8 +111,8 @@ def main(installation_mode="upgrade"):
             checkout = root / "checkout"
             for name in ["tools/sign-client-release.mjs", "client/scripts/installer-compatibility-report.cjs",
                          "client/main/client-update-contract.js", "tools/ci/verify-client-publication.cjs",
-                         "tools/ci/release-artifacts.cjs", "tools/ci/publish-client.cjs",
-                         "tools/ci/client-publisher-auth.cjs", "tools/ci/release-transfer.cjs",
+                         "tools/ci/release-artifacts.cjs", "tools/ci/publish-client.cjs", "tools/ci/release-transfer.cjs",
+                         "tools/ci/client-publisher-auth.cjs",
                          "tools/ci/client-release-notes.cjs", "tools/ci/localized-release-notes.cjs",
                          "client/scripts/client-build-version.cjs",
                          "tools/ci/release-notes-ai.cjs",
@@ -209,7 +209,7 @@ def main(installation_mode="upgrade"):
             receipt_file.write_text(json.dumps(receipt))
             command = "tools/ci/publish-client.cjs"
             rejected = node(command, "stage", "linux", success=False)
-            assert "manual release gate" in rejected.stderr
+            assert "manual release gate" in rejected.stderr, rejected.stderr
             authorization_file = checkout / "release-evidence/release-authorization.json"
             authorization = dict(schema=1, ok=True, component="client", version=version,
                 branch=f"release/client-{version}", tag=f"client-v{version}", sourceCommit="a" * 40,

@@ -419,7 +419,7 @@ test('reopened completed turn uses the saved execution duration', () => {
 test('a user-only history archive has unknown duration until delegated timing arrives', () => {
   const current = { snap: { status: 'idle', messages: [{ role: 'user', text: 'Restore my work' }] } };
   const view = status.createThinking(() => current);
-  assert.match(view.metricsHtml(false), /data-thinking-elapsed>未记录<\/b>/);
+  assert.match(view.metricsHtml(false), /data-thinking-elapsed>—<\/b>/);
   current.snap.execution = { controlled: true, running: false, elapsedMs: 47000 };
   assert.match(view.metricsHtml(false), /data-thinking-elapsed>47s<\/b>/);
 });

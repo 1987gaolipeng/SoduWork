@@ -49,19 +49,15 @@ if (typeof electron === 'string') {
       assert.equal(await js('state.ref'),'same-conversation');assert.equal(await js('document.querySelector("#nchatInput").value'),'Keep my draft');
     }
     for (const runtime of require('../main/agent-runtime/runtime-catalog').runtimes()) {
-      await js('state.taskRuntime=' + JSON.stringify(runtime.id) + ';state.busy=true;controls.render();void 0');
+      await js('state.taskRuntime=' + JSON.stringify(runtime.id) + ';controls.render();void 0');
       assert.equal(await js('document.querySelector("#nchatRuntimeName").textContent'), runtime.displayName);
-      assert.equal(await js('document.querySelector("#nchatRuntime").disabled'), false);
+      assert.equal(await js('document.querySelector("#nchatRuntime").disabled'), true);
       const count = await js('calls.length'); await click('#nchatRuntime');
       assert.equal(await js('calls.length'), count);
       assert.equal(await js('state.adapterId'), 'pi');
       assert.equal(await js('document.querySelector("#nchatInput").value'), 'Keep my draft');
     }
-    await js('state.taskRuntime="finished-requirement";state.busy=false;controls.render();void 0');
-    assert.equal(await js('document.querySelector("#nchatRuntime").disabled'), false);
-    await click('#nchatRuntime'); await until('document.querySelector("[data-runtime=qwen]")'); await click('[data-runtime=qwen]');
-    await until('state.adapterId==="qwen"');
-    await js('state.adapterId="pi";state.displayName="Pi";delete state.taskRuntime;controls.render();void 0');
+    await js('delete state.taskRuntime;controls.render();void 0');
     assert.equal(await js('document.querySelector("#nchatRuntimeName").textContent'), 'Pi');
     assert.equal(await js('document.querySelector("#nchatRuntime").disabled'), false);
     await click('#nchatModel>button');await until('document.querySelector("[data-model-name=b]")');await click('[data-model-name=b]');

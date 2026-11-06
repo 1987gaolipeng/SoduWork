@@ -9,7 +9,7 @@ function fixture(t) {
 }
 const message = (id, text = '多语言 😀 ' + id) => JSON.stringify({ type: 'message', id: String(id), message: { role: 'user', content: text } });
 
-test('phone history uses persisted turn times through pagination, transport and completed summaries', async t => {
+test('native history uses persisted turn times through pagination, transport and completed summaries', async t => {
   const f = fixture(t), start = Date.parse('2026-11-09T01:00:00Z');
   const entries = [
     {type: 'message', id: 'user', timestamp: new Date(start + 2000).toISOString(),
@@ -44,13 +44,9 @@ test('phone history uses persisted turn times through pagination, transport and 
   assert.deepEqual(items.map(row => row.createdAt), [start, start + 31000, start + 60000,
     start + 81000, start + 90000].map(value => new Date(value).toISOString()).concat(''));
 
-  const window = {SoduWorkRunnerMessages: require('../main/agent-runtime/runner-messages')};
-  require('node:vm').runInNewContext(fs.readFileSync(path.resolve(__dirname, '../../mobile/shared-conversation/snapshot.js'), 'utf8'), {window});
-  const handle = {status: 'idle', personal: true, taskId: 'native-clock',
-    events: new Map(items.map(row => [row.revision, {seq: row.revision,
-      kind: row.role === 'user' ? 'user' : 'say', text: row.text, at: row.createdAt}]))};
+  const messageTime = require('../main/conversation/message-time');
   const summary = require('../components/panels/chat-turn-summary');
-  const project = () => summary.project(window.SoduWorkMobileSnapshot.project(handle), new Set([1, 3, 5]));
+  const project = () => summary.project({messages: entries.map(messageTime.storedMessage)}, new Set([1, 3, 5]));
   assert.deepEqual(project().map(turn => turn.elapsedMs), [31000, 21000, null]);
   t.mock.method(Date, 'now', () => start + 86400000);
   assert.deepEqual(project().map(turn => turn.elapsedMs), [31000, 21000, null]);

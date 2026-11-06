@@ -99,7 +99,6 @@ function historyRow(item, identity) {
     state: item.state || 'idle', adapterId: 'account-sync', accountConversation: true,
     accountProjection: true, archived: item.archived === true, owner: runtime.connectionScope(identity),
     deleted: item.deleted === true, revision: Number(item.revision || 0),
-    emptyPlaceholder: item.messageCount === 0 && !item.taskProjectionId && item.state === 'idle',
     lifecycleRevision: Number(item.lifecycleRevision || 0),
     historyAliasIds: [...new Set([item.id, ...(item.historyAliasIds || [])].filter(Boolean))],
     accountCanSend: item.canSend === true, sourceClientId: item.sourceClientId,
@@ -136,10 +135,6 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
   }
   const accountIds = new Set();
   const accountRows = new Map();
-  // Keep every authenticated directory alias addressable. A sidebar row may
-  // outlive a refresh and still carry a native/session alias instead of the
-  // Hub conversation id; opening it must resolve the same account record.
-  const accountAliasRows = new Map();
   const sourceRows = new Map();
   const listeners = new Set();
   let socket = null;
@@ -154,7 +149,6 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
   let historyPromise = null;
   let historyAt = 0;
   let historyScope = '';
-  let directoryClientId = '';
   let historyGeneration = 0, directoryLoaded = false;
   let historyCursor = 0, historyHasMore = false;
   let historyEpoch = 0, loadedEpoch = -1, historyInitialized = false;
@@ -179,12 +173,11 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
 
   function selectDirectory(identity) {
     const scope = directoryScope(identity);
-    directoryClientId = String(identity?.clientId || '');
     if (scope !== historyScope) {
       historyGeneration++;
       historyScope = scope;
       historyPromise = null;
-      accountRows.clear(); accountAliasRows.clear(); sourceRows.clear(); accountIds.clear(); deletedIds.clear();
+      accountRows.clear(); sourceRows.clear(); accountIds.clear(); deletedIds.clear();
       historyCursor = 0; historyHasMore = false; historyAt = 0; directoryLoaded = false;
       historyInitialized = false; directoryChanges.clear(); loadedEpoch = -1;
       historyFailures = 0; historyRetryAt = 0;
@@ -228,12 +221,10 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
     const lifecycle = { revision: Number(item.revision || 0), lifecycleRevision: Number(item.lifecycleRevision || 0),
       deleted: item.deleted === true };
     return native ? { ...native, ...lifecycle,
-      emptyPlaceholder: item.messageCount === 0 && !item.taskProjectionId && item.state === 'idle' &&
-        !(native.count > 0) && !['running', 'waiting', 'starting'].includes(native.state),
       archived: item.archived === true || !lifecycle.lifecycleRevision && native.archived === true,
       owner: runtime.connectionScope(identity), accountId: item.id,
       sourceSessionId: item.sourceSessionId, sourceClientId: item.sourceClientId,
-      historyAliasIds: [...new Set([...(native.historyAliasIds || []), ...(item.historyAliasIds || []), native.id, item.id].filter(Boolean))] }
+      historyAliasIds: [...new Set([...(native.historyAliasIds || []), native.id, item.id].filter(Boolean))] }
       : historyRow(item, identity);
   }
 
@@ -241,35 +232,10 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
     if (!item?.id) return;
     const id = String(item.id), previous = accountRows.get(id);
     if (previous && Number(previous.revision || 0) > Number(item.revision || 0)) return;
-    if (previous) {
-      for (const alias of directoryAliases(previous))
-        if (accountAliasRows.get(alias) === previous) accountAliasRows.delete(alias);
-    }
     accountRows.set(id, item);
-    for (const alias of directoryAliases(item)) {
-      const existing = accountAliasRows.get(alias);
-      const owned = item.sourceClientId === directoryClientId;
-      const existingOwned = existing?.sourceClientId === directoryClientId;
-      const newer = Number(item.revision || 0) > Number(existing?.revision || 0);
-      if (!existing || owned && !existingOwned || owned === existingOwned && newer)
-        accountAliasRows.set(alias, item);
-    }
     sourceRows.set(JSON.stringify([item.sourceClientId, item.sourceSessionId]), item);
     if (item.deleted) { accountIds.delete(id); deletedIds.add(id); }
     else { accountIds.add(id); deletedIds.delete(id); }
-  }
-
-  function directoryAliases(item) {
-    return [...new Set([item?.id, item?.sourceSessionId,
-      ...(Array.isArray(item?.historyAliasIds) ? item.historyAliasIds : []),
-      ...(Array.isArray(item?.aliasIds) ? item.aliasIds : [])].filter(Boolean).map(value => String(value)))];
-  }
-
-  function directoryRow(id) {
-    const wanted = String(id || '');
-    // Alias rows carry the newest authenticated directory version. Prefer
-    // that mapping when a stale canonical id is retained in the sidebar.
-    return accountAliasRows.get(wanted) || accountRows.get(wanted) || null;
   }
 
   async function emitChanged(id, row, identity, projected) {
@@ -475,10 +441,6 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
     if (state.deleted || deletion.blocked(state.key) || isProjection(state.handle)) return;
     const times = { ...state.messageTimes };
     const view = snapshot(state.handle, times, now, metadataOnly);
-    // Opening a review composer must not publish a durable empty chat.
-    // Existing checkpoints still reconcile; the first submitted turn starts sync.
-    if (!state.sourceRevision && state.handle.acceptanceSession && view.state === 'idle' &&
-        (metadataOnly ? view.messageCount === 0 : view.messages.length === 0)) return;
     const content = { sourceClientId: state.identity.clientId, sourceSessionId: view.sessionId,
       sourceEpoch: state.sourceEpoch, title: view.title, state: view.state,
       archived: false, deleted: false, snapshotComplete: !metadataOnly, messages: view.messages,
@@ -716,52 +678,6 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
     })().catch(() => failedResult());
   }
 
-  function directoryIdentity(item) {
-    const source = String(item?.sourceSessionId || '').trim();
-    return source ? 'source:' + source : 'account:' + String(item?.id || '');
-  }
-
-  function directoryVersion(item) {
-    const revision = Number(item?.revision || 0);
-    const lifecycleRevision = Number(item?.lifecycleRevision || 0);
-    const updatedAt = Date.parse(item?.updatedAt || item?.updated || '') || 0;
-    return [lifecycleRevision, revision, updatedAt, String(item?.id || '')];
-  }
-
-  function collapseDirectoryRows(items, identity) {
-    const groups = new Map();
-    for (const item of items || []) {
-      if (!item?.id) continue;
-      const key = directoryIdentity(item);
-      const group = groups.get(key) || [];
-      group.push(item);
-      groups.set(key, group);
-    }
-    return [...groups.values()].map(group => {
-      const owned = group.filter(item => item.sourceClientId && item.sourceClientId === identity.clientId);
-      const candidates = owned.length ? owned : group;
-      const winner = [...candidates].sort((left, right) => {
-        const a = directoryVersion(left), b = directoryVersion(right);
-        for (let index = 0; index < a.length - 1; index++) {
-          if (a[index] !== b[index]) return b[index] - a[index];
-        }
-        return a.at(-1).localeCompare(b.at(-1));
-      })[0];
-      const aliases = [...new Set(group.flatMap(item => [item.id, ...(item.historyAliasIds || [])])
-        .filter(Boolean).map(String))];
-      const revision = Math.max(...group.map(item => Number(item.revision || 0)), 0);
-      const lifecycleRevision = Math.max(...group.map(item => Number(item.lifecycleRevision || 0)), 0);
-      // A cloud tombstone or archive is authoritative for the shared source
-      // identity, even if another device still reports stale active metadata.
-      return { ...winner,
-        archived: group.some(item => item.archived === true),
-        deleted: group.some(item => item.deleted === true),
-        revision, lifecycleRevision,
-        historyAliasIds: aliases.filter(id => id !== String(winner.id)),
-      };
-    });
-  }
-
   async function history({ archived = false, ...options } = {}) {
     const identity = await (localIdentityOf || identityOf)?.(app);
     const captured = selectDirectory(identity), generation = historyGeneration;
@@ -770,7 +686,7 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
     const current = () => (localIdentityOf || identityOf)?.(app);
     if (closed || generation !== historyGeneration || captured !== historyScope || captured !== directoryScope(await current()))
       return { ok: false, chats: [], lifecycle: [] };
-    const values = collapseDirectoryRows([...accountRows.values()], identity);
+    const values = [...accountRows.values()];
     const rows = await Promise.all(values.map(item => {
       const cached = projections?.get(String(item.id));
       return cached?.item === item ? cached.presence : projectedRow(item, identity);
@@ -958,21 +874,18 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
       : typeof identityOf === 'function' ? await identityOf(app) : null;
     if (!identity) return null;
     const currentScope = selectDirectory(identity), generation = historyGeneration;
-    const cached = directoryRow(wanted);
+    const cached = accountRows.get(wanted);
     if (cached && currentScope === historyScope) return cached;
     const response = await fetch(identity,
       endpoint(identity, '/account-conversations/' + encodeURIComponent(wanted) + '/source'), {
         method: 'GET', redirect: 'error', signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(15000)]) });
     const data = await response.json().catch(() => ({}));
-    if (response.status === 404) {
-      await loadHistory({ force: true });
-      return directoryRow(wanted);
-    }
+    if (response.status === 404) return null;
     if (!response.ok || data.conversation?.id !== wanted) return null;
     const current = await (localIdentityOf || identityOf)(app);
     if (closed || generation !== historyGeneration || currentScope !== directoryScope(current)) return null;
     rememberDirectory(data.conversation);
-    return directoryRow(wanted);
+    return accountRows.get(wanted);
   }
 
   async function openProjection(id) {
@@ -983,13 +896,7 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
     const captured = selectDirectory(identity), generation = historyGeneration;
     const current = async () => !closed && generation === historyGeneration &&
       captured === directoryScope(await (localIdentityOf || identityOf)?.(app));
-    // A restored sidebar can carry an alias before the authenticated directory
-    // has been loaded in this process. Resolve it through the same single-flight
-    // directory read used by the sidebar before constructing the messages URL.
-    let cached = directoryRow(wanted);
-    if (!cached) cached = await row(wanted);
-    if (!await current()) return null;
-    let accountId = String(cached?.id || wanted);
+    const base = endpoint(identity, '/account-conversations/' + encodeURIComponent(wanted) + '/messages');
     let metadata = null;
     let snapshotValue = null;
     let refreshPromise = null;
@@ -999,35 +906,16 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
         let recovered = false;
         let messages = [];
         let nextMetadata = null;
-        for (let attempt = 0; attempt < 2; attempt++) {
-          let after = 0;
-          nextMetadata = null;
-          messages = [];
-          let missing = false;
-          const base = endpoint(identity, '/account-conversations/' + encodeURIComponent(accountId) + '/messages');
-          for (let page = 0; page < 200; page++) {
-            if (!await current()) return false;
-            const response = await fetch(identity, base + '?after=' + after + '&limit=100', {
-              method: 'GET', redirect: 'error', signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(15000)]) });
-            const data = await response.json().catch(() => ({}));
-            if (!await current()) return false;
-            if (response.status === 404) { missing = true; break; }
-            if (!response.ok || !data.conversation || !Array.isArray(data.items) || typeof data.cursor !== 'number') {
-              throw Error('跨设备会话正文读取失败');
-            }
-            nextMetadata = data.conversation;
-            for (const item of data.items) {
-              if (!item || typeof item.id !== 'string' || item.deleted) continue;
-              const at = Date.parse(String(item.createdAt || ''));
-              messages.push({ id: item.id, role: item.role, text: safeText(item.text), position: Number(item.position || 0),
-                sentAt: Number.isFinite(at) ? at : now(), done: item.done === true });
-            }
-            if (messages.length > MAX_MESSAGES || messages.reduce((n, item) => n + item.text.length, 0) > 32 * 1024 * 1024) {
-              throw Error('跨设备会话正文超过桌面端读取上限');
-            }
-            const next = data.cursor;
-            if (next <= after || data.hasMore !== true) break;
-            after = next;
+        const messages = [];
+        for (let page = 0; page < 200; page++) {
+          if (!await current()) return false;
+          const response = await fetch(identity, base + '?after=' + after + '&limit=100', {
+            method: 'GET', redirect: 'error', signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(15000)]) });
+          const data = await response.json().catch(() => ({}));
+          if (!await current()) return false;
+          if (response.status === 404) return false;
+          if (!response.ok || !data.conversation || !Array.isArray(data.items) || typeof data.cursor !== 'number') {
+            throw Error('跨设备会话正文读取失败');
           }
           if (!missing) break;
           if (recovered) return false;
@@ -1037,10 +925,10 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
           if (!refreshed || refreshed.deleted) return false;
           accountId = String(refreshed.id || accountId);
         }
-        if (!nextMetadata || nextMetadata.id !== accountId || !await current()) return false;
+        if (!nextMetadata || nextMetadata.id !== wanted || !await current()) return false;
         metadata = nextMetadata;
         rememberDirectory(metadata);
-        metadata = directoryRow(wanted) || accountRows.get(accountId);
+        metadata = accountRows.get(wanted);
         if (metadata.deleted) return false;
         snapshotValue = {
           messages: messages.sort((a, b) => a.position - b.position).map(require('./history-message.cjs').project),

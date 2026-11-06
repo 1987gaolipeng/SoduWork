@@ -482,6 +482,10 @@ function _bind(el) {
       if (ctx._ref && typeof api.openSessionWorkdir === 'function') api.openSessionWorkdir(ctx._ref);
       else api.openWorkdir();
     });
+    const wdPick = el.querySelector('#nchatWdPick');
+    if (wdPick) wdPick.addEventListener('click', () => {
+      void ctx._changeConversationWorkspace?.();
+    });
     ctx._paintBar();
     if (global.ChatChrome) ChatChrome.bind(el, () => ({ ref: ctx._ref, snapshot: ctx._snap }));
     if (global.LibraryTransfer?.bindSession) global.LibraryTransfer.bindSession(() => ({

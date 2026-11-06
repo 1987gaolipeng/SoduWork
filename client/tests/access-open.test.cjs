@@ -133,7 +133,7 @@ test('local history aliases reopen their canonical registered view without ident
   const bridge = require('../main/agent-runtime/pi-session-bridge').createPiSessionBridge({
     sessionModule: { open() { assert.fail('read-only history must not execute'); }, probe() {} }, runnerAdapters: [],
   });
-  const row = {id: 'copy-local', cached: true};
+  const row = {id: 'copy-local', cached: true, historyAliasIds: ['source-alias']};
   const f = fixture({ session: bridge, sharedHistory: { resolve: async () => row,
     open: async () => ({ref: 'local-copy', sessionId: row.id, localReplica: true, close: async () => true}) },
     openReply: handle => ({ok: true, sessionId: handle.sessionId}),
@@ -141,6 +141,37 @@ test('local history aliases reopen their canonical registered view without ident
   t.after(async () => { for (const h of bridge.list()) await h.close(); });
   for (let i = 0; i < 3; i++) assert.equal((await f.open({chatId: 'source-alias'})).sessionId, row.id);
   assert.equal(bridge.list().length, 1);
+});
+
+test('a downloaded account transcript cannot intercept authenticated original opens or bypass account login', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sw-account-copy-open-'));
+  const app = { getPath: () => root }, actor = automationIdentity();
+  const store = require('../main/conversation/replica-store.cjs').create(path.join(root, 'replicas.sqlite'));
+  t.after(() => { store.close(); fs.rmSync(root, { recursive: true, force: true }); });
+  const original = 'acct-original', copy = 'copy-local';
+  store.register([{ id: copy, cached: true, source: { id: original }, historyAliasIds: ['explicit-native-alias'] }]);
+  let current = actor, localReads = 0, accountReads = 0;
+  const f = fixture({ app, cachedIdentity: () => current, identityOf: async () => current,
+    sharedHistory: { resolve: async id => store.get(id), open: async id => {
+      localReads++; return { sessionId: id, localReplica: true };
+    } },
+    accountSync: { isAccountConversation: id => id === original,
+      row: async () => ({ id: original, sourceClientId: 'other-device', sourceSessionId: 'foreign-native' }),
+      openProjection: async id => { accountReads++; return { sessionId: id, adapterId: 'account-sync' }; } },
+    openReply: handle => ({ ok: true, sessionId: handle.sessionId, localReplica: handle.localReplica,
+      adapterId: handle.adapterId }),
+  });
+  assert.equal(store.get(original).id, copy, 'the passive read locator remains available');
+  const reply = await f.open({ chatId: original });
+  assert.equal(reply.ok, true, reply.reason); assert.equal(reply.sessionId, original);
+  assert.equal(reply.adapterId, 'account-sync'); assert.equal(localReads, 0); assert.equal(accountReads, 1);
+  current = null;
+  assert.equal((await f.open({ chatId: original })).ok, false);
+  for (const id of [copy, 'explicit-native-alias']) {
+    const local = await f.open({ chatId: id });
+    assert.equal(local.ok, true, local.reason); assert.equal(local.sessionId, copy); assert.equal(local.localReplica, true);
+  }
+  assert.equal(accountReads, 1); assert.equal(f.calls.length, 0);
 });
 
 test('owned local history remains readable offline without starting a runtime or changing cloud access', async () => {

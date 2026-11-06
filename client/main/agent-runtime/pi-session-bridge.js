@@ -380,77 +380,7 @@ function createPiSessionBridge(options) {
     return { ...value, cwd: '', workDir: '', workspaceDir: '', workspaceName: '云端环境', workspaceLabel: '云端环境',
       locationMode: 'remote', location: 'cloud', cloud: true };
   }
-  function historyPriority(row) {
-    if (normalizeHistoryRow(row).cloud) return 4;
-    // A cached replica is a complete local read-only transcript. Prefer it
-    // over an account directory projection when both describe one origin, so
-    // a temporary Hub message read failure cannot leave an unusable sidebar
-    // row. Hub lifecycle metadata remains authoritative through the aliases.
-    if (row?.cached === true || row?.localReplica === true) return 3;
-    if (row?.accountProjection === true || row?.accountConversation === true) return 2;
-    return 1;
-  }
-  function historyIdentityIds(row) {
-    const value = row && typeof row === 'object' ? row : {};
-    return [...new Set([
-      value.id,
-      ...(Array.isArray(value.historyAliasIds) ? value.historyAliasIds : []),
-      ...(Array.isArray(value.aliasIds) ? value.aliasIds : []),
-      value.accountId,
-      value.sourceSessionId,
-      value.source?.id,
-      value.source?.conversationId,
-    ].filter(Boolean).map(String))];
-  }
-  function prefersHistoryRow(candidate, candidateSource, current, currentSource) {
-    if (!current) return true;
-    const candidatePriority = historyPriority(candidate), currentPriority = historyPriority(current);
-    return candidatePriority > currentPriority || candidatePriority === currentPriority &&
-      (candidateSource < currentSource || candidateSource === currentSource &&
-        Number(candidate.at || 0) >= Number(current.at || 0));
-  }
-  function mergeHistoryRow(merged, sourcePriority, aliasIndex, row, sourceIndex) {
-    const ids = historyIdentityIds(row);
-    const groups = [...new Set(ids.map(id => aliasIndex.get(id)).filter(key => key && merged.has(key)))];
-    if (!groups.length) {
-      const key = String(row.id);
-      const current = merged.get(key), currentSource = sourcePriority.get(key);
-      if (prefersHistoryRow(row, sourceIndex, current, currentSource)) {
-        merged.set(key, row); sourcePriority.set(key, sourceIndex);
-      }
-      for (const id of ids) aliasIndex.set(id, key);
-      return;
-    }
-    const candidates = [row, ...groups.map(key => merged.get(key)).filter(Boolean)];
-    let winner = candidates[0], winnerSource = sourceIndex;
-    for (let index = 1; index < candidates.length; index++) {
-      const candidate = candidates[index], candidateSource = sourcePriority.get(groups[index - 1]);
-      if (prefersHistoryRow(candidate, candidateSource, winner, winnerSource)) {
-        winner = candidate; winnerSource = candidateSource;
-      }
-    }
-    const aliases = [...new Set(candidates.flatMap(historyIdentityIds)
-      .concat(candidates.flatMap(item => item.historyAliasIds || [])))].filter(id => id !== String(winner.id));
-    const mergedRow = aliases.length ? { ...winner,
-      historyAliasIds: [...new Set([...(winner.historyAliasIds || []), ...aliases])] } : winner;
-    for (const key of groups) { merged.delete(key); sourcePriority.delete(key); }
-    const key = String(mergedRow.id);
-    merged.set(key, mergedRow); sourcePriority.set(key, winnerSource);
-    for (const id of new Set([...aliases, ...historyIdentityIds(mergedRow)])) aliasIndex.set(id, key);
-  }
-  function lifecycleVisibleWithAliases(lifecycle, row, archived) {
-    const ids = historyIdentityIds(row), originalId = String(row.id);
-    let known = false;
-    for (const id of ids) {
-      const candidate = { ...row, id };
-      const projected = lifecycle.project(candidate);
-      if (id === originalId || Object.hasOwn(projected, 'lifecycleRevision')) {
-        known = true;
-        if (!lifecycle.visible(candidate, archived)) return false;
-      }
-    }
-    return known || lifecycle.visible(row, archived);
-  }
+  function historyPriority(row) { return normalizeHistoryRow(row).cloud ? 2 : 1; }
   async function findRunnerRow(id, { nativeOnly = false, strict = false } = {}) {
     const wanted = String(id || '').trim();
     if (!wanted) return null;
@@ -641,11 +571,6 @@ function createPiSessionBridge(options) {
       for (let i = 1; i < rows.length; i++) rows[i].chats = await replicaHistory.projectRows(rows[i].chats || [], false);
       const copies = await replicaHistory.indexedRows(false, Number(limit) || 50);
       rows.push({ ok: true, chats: copies.filter(row => row.cached) });
-      // The preferred executable origin and its cached transcript are one
-      // sidebar entry. Reapply durable archive/restore intent on every read,
-      // including a cold start with no renderer lifecycle cache.
-      rows[0].lifecycle = [...(rows[0].lifecycle || []),
-        ...(await replicaHistory.remoteLifecycle?.(rows[0].chats || []) || [])];
     }
     let archivedIds = null;
     if (sessionModule.archiveState && typeof sessionModule.archiveState.read === 'function' &&
@@ -660,13 +585,22 @@ function createPiSessionBridge(options) {
     }
     const merged = new Map();
     const sourcePriority = new Map();
-    const aliasIndex = new Map();
     const lifecycle = require('../conversation/history-lifecycle-view.cjs').create(rows[0]?.lifecycle, archivedIds || {});
     rows.forEach((result, sourceIndex) => (result.chats || []).forEach((row) => {
       if (!row || !row.id) return;
       const normalized = normalizeHistoryRow({ ...row, adapterId: row.adapterId || 'pi' });
-      if (!lifecycleVisibleWithAliases(lifecycle, normalized, false)) return;
-      mergeHistoryRow(merged, sourcePriority, aliasIndex, normalized, sourceIndex);
+      if (!lifecycle.visible(normalized)) return;
+      const old = merged.get(normalized.id);
+      // The external cloud inventory is authoritative when a handed-off Pi
+      // row with the same id is still present locally. Keep its metadata and
+      // private replay scope instead of letting the local copy win on `at`.
+      const oldSource = sourcePriority.get(normalized.id);
+      if (!old || historyPriority(normalized) > historyPriority(old) ||
+          historyPriority(normalized) === historyPriority(old) &&
+          (sourceIndex < oldSource || (sourceIndex === oldSource && Number(normalized.at || 0) >= Number(old.at || 0)))) {
+        merged.set(normalized.id, normalized);
+        sourcePriority.set(normalized.id, sourceIndex);
+      }
     }));
     const chats = runtimeSegments.mergeHistory(app || opts.app, [...merged.values()])
       .map(lifecycle.project).filter(row => lifecycle.visible(row))
@@ -717,7 +651,6 @@ function createPiSessionBridge(options) {
     }
     const merged = new Map();
     const sourcePriority = new Map();
-    const aliasIndex = new Map();
     const lifecycle = require('../conversation/history-lifecycle-view.cjs').create(rows[0]?.lifecycle, archivedIds || {});
     rows.forEach((result, sourceIndex) => (result.chats || []).forEach((row) => {
       if (!row || !row.id) return;
@@ -726,7 +659,7 @@ function createPiSessionBridge(options) {
         adapterId: row.adapterId || 'pi',
         archivedAt: row.archivedAt || (archivedIds && archivedIds[row.id]) || 0,
       });
-      if (archivedIds && !lifecycleVisibleWithAliases(lifecycle, normalized, true)) return;
+      if (archivedIds && !lifecycle.visible(normalized, true)) return;
       if (!archivedIds && !normalized.archived && typeof sessionModule.isArchived === 'function') {
         try {
           if (!sessionModule.isArchived(app || opts.app, normalized.id)) return;

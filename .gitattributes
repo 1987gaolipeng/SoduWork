@@ -18,14 +18,3 @@ third-party/licenses/legal-import/string_decoder-LICENSE.txt whitespace=-blank-a
 # This generated copy retains literal template-string whitespace from the
 # pinned desktop highlight.js bundle; byte identity is checked by the builder.
 mobile/assets/shared-conversation/pc/vendor/markdown/highlight.min.js whitespace=-blank-at-eol
-# Native WebView assets are reviewed byte-for-byte across Windows and Unix.
-# Keep canonical generated text in LF while leaving binary assets unchanged.
-mobile/assets/shared-conversation/**/*.js text eol=lf
-mobile/assets/shared-conversation/**/*.css text eol=lf
-mobile/assets/shared-conversation/**/*.html text eol=lf
-mobile/assets/shared-conversation/**/*.json text eol=lf
-mobile/assets/shared-conversation/**/*.svg text eol=lf
-mobile/assets/shared-conversation/**/*.md text eol=lf
-mobile/assets/shared-conversation/**/*.txt text eol=lf
-mobile/assets/shared-conversation/**/LICENSE.* text eol=lf
-mobile/assets/shared-conversation/**/*.png -text

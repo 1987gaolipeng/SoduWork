@@ -97,57 +97,6 @@ class CloudMessageRecoveryTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as session:
             return await session.scalar(select(Receipt))
 
-    async def test_endpoint_backed_image_releases_policy_lock_before_upload_and_receipt_probe(self):
-        from app.services import runner_hub, cluster_runtime
-        from app.services.runner_content_store import Store
-        async with self.sessions() as session:
-            session.add(RunnerNode(id='cloud', owner_user_id='user', client_id='', org_id='',
-                                   auth_state='active', management_state='', dispatch_mode='accepting'))
-            await session.commit()
-        socket = SimpleNamespace()
-        runner = runner_hub._Runner(socket, {'runnerId': 'cloud', 'bootId': 'boot-one',
-            'caps': ['admit1', 'executionSelection1', 'turnFiles1', 'conversationContent1']})
-        runner.owner_user_id, runner.ready = 'user', True
-        store = Store(str(Path(self.temp.name) / 'content'))
-        operations, chunks = [], []
-
-        async def wire(packet):
-            op = packet['op']
-            operations.append(op)
-            if op.startswith('content.'):
-                reply = await asyncio.to_thread(store.handle, packet)
-            elif op == 'input.chunk':
-                chunks.append(base64.b64decode(packet['b64']))
-                reply = {'ok': True, 'data': {}}
-            else:
-                reply = await self.rpc(op, packet)
-            runner.resolve(packet['id'], reply)
-
-        socket.send_json = wire
-        self.runner = runner
-        self.ctx['_turnFiles'] = [('image.png', b'isolated image bytes', 'image/png')]
-        with patch.object(db, 'SessionLocal', self.sessions), \
-             patch.object(runner_hub, 'get', return_value=runner), \
-             patch.object(runner_hub, '_LOOP', asyncio.get_running_loop()), \
-             patch.object(cluster_runtime, 'check_owner', AsyncMock()):
-            with patch.object(recovery, 'attempt', side_effect=asyncio.CancelledError):
-                with self.assertRaises(asyncio.CancelledError):
-                    await self.send()
-            row = await self.receipt()
-            self.assertIn('contentRef', row.payload)
-            self.assertNotIn('files', row.payload)
-            self.failure = 'after'
-            await recovery.attempt(row.id)
-            self.assertEqual(self.comment_calls, 1)
-            self.assertEqual((await self.receipt()).phase, 'uncertain')
-            self.assertEqual(b''.join(chunks), b'isolated image bytes')
-            await recovery.attempt(row.id)
-            self.assertEqual((await self.receipt()).phase, 'accepted')
-            self.assertEqual(self.comment_calls, 1)
-            self.assertEqual(operations.count('input.chunk'), 1)
-            self.assertEqual(operations.count('job.has'), 1)
-            self.assertEqual(len(self.queue.active_items()), 1)
-
     async def test_skill_selection_survives_restart_and_lost_ack_on_original_execution(self):
         from app.services import conversation_turn_skills
         self.ctx['_turnSkills'] = ['office']
