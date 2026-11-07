@@ -303,10 +303,19 @@
     button.classList.toggle('is-refreshing', Boolean(running));
   }
 
-  window.addEventListener('soduwork-plugin-policy', function () {
-    loadRevision++; loadFlight = null;
-    if (catalogActive()) { renderContent(); syncHead(); pluginCatalogSync().refresh({ quiet: true, policy: true }); }
-  });
+  for (const event of ['soduwork-plugin-policy', 'soduwork:plugins-changed']) {
+    window.addEventListener(event, change => {
+      if (event === 'soduwork:plugins-changed' && change.detail?.platformStatusOnly) {
+        if (catalogActive()) renderContent();
+        return;
+      }
+      catalogReady = false; loadErrors.delete('plugins');
+      if (!panel()?.classList.contains('show')) return;
+      if (catalogActive()) renderContent();
+      syncHead();
+      loadCurrent('plugins');
+    });
+  }
   window.addEventListener('soduwork-locale-change', function () {
     if (catalogActive()) pluginCatalogSync().refresh({ quiet: true, policy: true });
   });
