@@ -1,5 +1,7 @@
 ﻿'use strict';
 
+const { project } = require('./history-message.cjs');
+
 // Passive history never constructs a runtime or imports source credentials.
 // Retain only message indexes and page cursors between bounded window reads.
 async function create({ row, read }) {
@@ -14,19 +16,20 @@ async function create({ row, read }) {
     ? 'stream:' + String(item.streamId || item.id || cursor + ':' + index)
     : 'message:' + cursor + ':' + index;
   function window(limit) {
-    const messages = new Map(); let bytes = 0;
+    const messages = new Map(); let bytes = 2;
     function apply(entry, item) {
       const evicted = [];
       const old = messages.get(entry.index);
-      const message = { ...item, id: entry.id, done: true,
-        text: item.delta === true ? (old?.text || '') + (item.text || '') : item.text || '' };
+      const message = project({ ...item, id: entry.id, done: true,
+        text: item.delta === true ? (old?.text || '') + (item.text || '') : item.text || '' });
       const size = Buffer.byteLength(JSON.stringify(message));
       if (size > MAX_MESSAGE_BYTES) throw Error('单条历史消息过大，请在原执行底座查看完整内容');
-      bytes += size - (old ? Buffer.byteLength(JSON.stringify(old)) : 0);
+      // Account for the JSON array brackets and separators sent over IPC.
+      bytes += size - (old ? Buffer.byteLength(JSON.stringify(old)) : 0) + (!old && messages.size ? 1 : 0);
       messages.set(entry.index, message);
       while (messages.size > limit || bytes > MAX_BYTES) {
         const first = messages.keys().next().value, removed = messages.get(first);
-        bytes -= Buffer.byteLength(JSON.stringify(removed)); messages.delete(first);
+        bytes -= Buffer.byteLength(JSON.stringify(removed)) + (messages.size > 1 ? 1 : 0); messages.delete(first);
         evicted.push(first);
       }
       return evicted;

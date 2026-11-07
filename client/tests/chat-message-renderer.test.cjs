@@ -424,6 +424,35 @@ function setupPickerRender(getTasksSnapshot) {
   return { ...harness, controller, views, transcriptWrites: () => transcriptWrites };
 }
 
+test('passive local history renders every saved assistant answer across reopen and stream pages', async () => {
+  const { create } = require('../main/conversation/local-history-view.cjs');
+  for (const format of ['messages', 'events']) {
+    const items = Array.from({ length: 5 }, (_, i) => [
+      { id: 'u' + i, role: 'user', text: 'Saved question ' + i },
+      ...(format === 'messages' && i > 0 ? [{ id: 'usage' + i, role: 'assistant', text: '', done: true }] : []),
+      ...(format === 'events' ? [
+        { id: 'a' + i, streamId: 's' + i, role: 'assistant', text: 'Saved ', delta: true },
+        { id: 'b' + i, streamId: 's' + i, role: 'assistant', text: 'answer ' + i, delta: true },
+      ] : [{ id: 'a' + i, role: 'assistant', text: 'Saved answer ' + i }]),
+    ]).flat();
+    for (let reopen = 0; reopen < 2; reopen++) {
+      const view = await create({ row: { id: 'history' }, read: async (_id, { after }) => ({
+        format, items: items.slice(after, after + 2), nextCursor: after + 2 < items.length ? after + 2 : null,
+      }) });
+      const { renderer, ctx, list } = setupRender();
+      ctx._pending = ''; ctx._sessionOptions = {}; ctx._snap = view.snapshot();
+      renderer._render();
+      for (let i = 0; i < 5; i++) {
+        assert.ok(list.innerHTML.includes('Saved question ' + i));
+        assert.ok(list.innerHTML.includes('Saved answer ' + i));
+      }
+      assert.equal((list.innerHTML.match(/class="nmsg ai/g) || []).length, 5);
+      assert.equal((await view.send('Do not execute')).accepted, false);
+      await view.close();
+    }
+  }
+});
+
 test('new waiting, thinking and tool turns never stream a completed acceptance card', () => {
   for (const kind of ['验收分析结果','验收退回卡','验收确认卡']) {
     const {renderer,ctx,list}=setupRender();

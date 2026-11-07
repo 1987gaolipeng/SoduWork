@@ -182,6 +182,9 @@ test('an open account projection refreshes its transcript after a realtime inval
   f.advance();
   await view.refresh();
   assert.deepEqual(view.snapshot().messages.map(item => item.id), ['m1', 'm2']);
+  assert.equal(view.snapshot().messages[1].blocks[0].kind, 'text');
+  assert.equal(view.snapshot().messages[1].blocks[0].text, '第二条');
+  assert.equal(view.snapshot().messages[1].blocks[0].done, true);
   assert.equal(view.historyRow().title, '已更新');
 });
 

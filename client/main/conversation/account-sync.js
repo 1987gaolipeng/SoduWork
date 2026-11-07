@@ -955,7 +955,7 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
         metadata = accountRows.get(wanted);
         if (metadata.deleted) return false;
         snapshotValue = {
-          messages: messages.sort((a, b) => a.position - b.position),
+          messages: messages.sort((a, b) => a.position - b.position).map(require('./history-message.cjs').project),
           status: safeText(metadata.state || 'idle', 24),
           adapterId: 'account-sync', displayName: '账号会话',
           modelSelection: {}, execution: { accountConversation: true, readOnly: true },
