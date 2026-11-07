@@ -1,8 +1,14 @@
 'use strict';
 /*
- * Ordinary new conversations do not inherit old workspaces; only explicit project or
- * directory choices seed drafts. Preserve history restoration and selected-directory
- * records.
+ * 工作目录延续契约（2026-11-06 恢复 bad599b6 行为，用户明确推翻 704088f9 的
+ * 「普通新会话分配独立工作目录」决定）：
+ * 1. 纯新对话入口沿用上一个会话的工作目录（workspaceSource: 'last-session'）；
+ *    无活动会话时沿用最近一次手选目录（'recent'）。项目归属仍然只认显式传入，
+ *    云端会话目录（远端缓存路径）永不延续。
+ * 2. 修改工作区的选择对话框从上次位置打开（pickCwd 支持 defaultPath）。
+ * 3. 「换个文件夹继续」：resume 分支显式覆盖目录并写回存档
+ *    （soduwork.workspace.moved），远端中转继续不适用。
+ * 保留的历史回归：显式传入优先、目录来源不回流会话记录、recent 持久化模块。
  */
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -51,13 +57,16 @@ function bootShell({ recent = { ok: true, dir: '', name: '' } } = {}) {
 }
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
-test('纯新对话入口不继承活动会话工作目录和项目归属', () => {
+test('纯新对话入口沿用活动会话工作目录，项目归属仍不继承', () => {
   const { shell } = bootShell();
   shell.setChats([{ id: 'c1', cwd: 'D:/work/soduwork', workspaceName: 'soduwork',
     sidebarProjectId: 'proj-1', sidebarProjectName: '客户360' }]);
   shell.setActiveChat('c1');
   const payload = JSON.parse(JSON.stringify(shell.newSessionPayload()));
-  assert.deepEqual(payload, { newSession: true });
+  assert.equal(payload.cwd, 'D:/work/soduwork');
+  assert.equal(payload.workspaceLabel, 'soduwork');
+  assert.equal(payload.workspaceSource, 'last-session');
+  assert.equal(payload.newSession, true);
   assert.equal('sidebarProjectId' in payload, false);
   assert.equal('sidebarProjectName' in payload, false);
   assert.equal('projectId' in payload, false);
@@ -72,13 +81,24 @@ test('云端会话的目录不延续（远端缓存路径不得串进本地草�
   assert.equal('workspaceSource' in payload, false);
 });
 
-test('冷启动即使记住最近手选目录也创建独立工作区', async () => {
+test('云端会话不污染目录，但最近手选目录仍可作冷启动兜底', async () => {
+  const { shell } = bootShell({ recent: { ok: true, dir: 'D:/work/local', name: 'local' } });
+  shell.setChats([{ id: 'c2', cloud: true, cwd: 'C:/cache/remote-only', workspaceName: '云端' }]);
+  shell.setActiveChat('c2');
+  shell.refreshRecentWorkspace();
+  await flush();
+  const payload = shell.newSessionPayload();
+  assert.equal(payload.cwd, 'D:/work/local');
+  assert.equal(payload.workspaceSource, 'recent');
+});
+
+test('冷启动沿用最近一次手选目录（主进程已校验目录仍存在）', async () => {
   const { shell } = bootShell({ recent: { ok: true, dir: 'D:/work/soduwork', name: 'soduwork' } });
   shell.setActiveChat('');
   shell.refreshRecentWorkspace();
   await flush();
   assert.deepEqual(JSON.parse(JSON.stringify(shell.newSessionPayload())),
-    { newSession: true });
+    { cwd: 'D:/work/soduwork', workspaceLabel: 'soduwork', workspaceSource: 'recent', newSession: true });
 });
 
 test('最近目录已失效（主进程返回空）时不兜底，回落默认工作区', async () => {
@@ -121,7 +141,7 @@ test('newSessionWorkspace 透传目录来源且显式入口清空残留；归属
   assert.equal(cleared.workspaceSource, '');
 });
 
-test('真实调用序：纯入口 payload 清空旧草稿目录并使用独立工作区', () => {
+test('真实调用序：纯入口 payload 携带沿用目录，新会话草稿直接落到该目录', () => {
   const { shell } = bootShell({ recent: { ok: true, dir: 'D:/work/soduwork', name: 'soduwork' } });
   shell.setChats([{ id: 'c1', cwd: 'D:/work/soduwork', workspaceName: 'soduwork' }]);
   shell.setActiveChat('c1');
@@ -129,11 +149,72 @@ test('真实调用序：纯入口 payload 清空旧草稿目录并使用独立�
   vm.runInNewContext(read('components/panels/compose-surface.js'), { window }, { filename: 'compose-surface.js' });
   const next = window.ComposeSurface.newSessionWorkspace(
     { dir: 'old', name: '旧目录', direct: true }, shell.newSessionPayload());
-  assert.equal(next.dir, '');
-  assert.notEqual(next.name, 'soduwork');
-  assert.equal(next.direct, false);
-  assert.equal(next.workspaceSource, '');
+  assert.equal(next.dir, 'D:/work/soduwork');
+  assert.equal(next.name, 'soduwork');
+  assert.equal(next.direct, true);
+  assert.equal(next.workspaceSource, 'last-session');
   assert.equal(next.projectId, '');
+});
+
+test('修改工作区：选择对话框从当前目录或最近手选目录打开（defaultPath）', () => {
+  const compose = read('components/panels/panels-compose.js');
+  const section = compose.slice(compose.indexOf('async function _pickWorkspace'));
+  assert.match(section, /_workspace\.direct \? _workspace\.dir : ''/);
+  assert.match(section, /global\.soduWorkAPI\?\.recentWorkspace\?\.get\?\.?\(\)/);
+  assert.match(section, /defaultPath: startDir/);
+  const environment = read('main/pi-session/environment-ipc.js');
+  assert.match(environment, /ipcMain\.handle\('pi-session-pick-cwd'[\s\S]*?options\?\.defaultPath[\s\S]*?path\.isAbsolute\(requested\)/);
+  const preload = read('preload.js');
+  assert.match(preload, /pickCwd: \(options\) => ipcRenderer\.invoke\('pi-session-pick-cwd', options \|\| \{\}\)/);
+});
+
+test('换个文件夹继续：resume 分支只认显式 resumeWorkspace，远端中转不适用', () => {
+  const ipc = read('main/pi-session/ipc.js');
+  /* 显式覆盖参数独立于既有 opts.cwd：历史调用方不会悄悄移动会话。 */
+  assert.match(ipc, /const resumeOverride = resume && opts\.nativeRelay !== true\s*\n\s*\? String\(opts\.resumeWorkspace \|\| ''\)\.trim\(\) : '';/);
+  assert.match(ipc, /require\('\.\/resume-cwd'\)\(app, resume, _defaultCwd, resumeOverride\)/);
+  /* 远端中转继续的防护保持原样：原目录不可用仍然报错，不迁移。 */
+  assert.match(ipc, /if \(opts\.nativeRelay === true && resume\) \{\s*\n\s*require\('\.\/resume-cwd'\)\(app, resume, \(\) => \{/);
+  assert.match(ipc, /resumeCwd: resume \? cwd : '',[\s\S]{0,220}workspaceMoved,/);
+  const sessionOpen = read('main/pi-session/session-open.js');
+  assert.match(sessionOpen, /opts\.workspaceMoved && opts\.resumeCwd[\s\S]{0,160}appendCustomEntry\('soduwork\.workspace\.moved', \{ version: 1, cwd: opts\.resumeCwd \}\)/);
+});
+
+test('resume-cwd：显式换目录优先，失效回退存档目录，再回退默认工作区', () => {
+  const resumeCwd = require('../main/pi-session/resume-cwd');
+  const os = require('node:os');
+  const base = require('node:fs').mkdtempSync(path.join(os.tmpdir(), 'soduwork-resume-cwd-'));
+  const picked = path.join(base, 'picked');
+  const archived = path.join(base, 'archived');
+  require('node:fs').mkdirSync(picked);
+  require('node:fs').mkdirSync(archived);
+  const fallback = () => 'FALLBACK';
+  /* 用户显式选择的新目录存在：覆盖存档目录。 */
+  assert.equal(resumeCwd({}, { cwd: archived }, fallback, picked), path.resolve(picked));
+  /* 新目录已删除：沿用存档目录，不落入默认工作区。 */
+  assert.equal(resumeCwd({}, { cwd: archived }, fallback, path.join(base, 'gone')), path.resolve(archived));
+  /* 相对路径不是合法覆盖。 */
+  assert.equal(resumeCwd({}, { cwd: archived }, fallback, 'relative/dir'), path.resolve(archived));
+  /* 存档目录也失效：回落默认工作区。 */
+  assert.equal(resumeCwd({}, { cwd: path.join(base, 'gone-too') }, fallback, path.join(base, 'gone')), 'FALLBACK');
+  require('node:fs').rmSync(base, { recursive: true, force: true });
+});
+
+test('聊天条「换」按钮链路：入口、绑定与重开参数齐备', () => {
+  const composer = read('components/panels/work-composer.js');
+  assert.match(composer, /class="wc-wd-pick" id="nchatWdPick" title="换个文件夹继续这条会话"/);
+  const bindings = read('components/panels/chat-composer-bindings.js');
+  assert.match(bindings, /const wdPick = el\.querySelector\('#nchatWdPick'\);[\s\S]{0,120}ctx\._changeConversationWorkspace\?\.\(\)/);
+  const chat = read('components/panels/panels-chat.js');
+  assert.match(chat, /get _changeConversationWorkspace\(\) \{ return _changeConversationWorkspace; \}/);
+  const handler = chat.slice(chat.indexOf('async function _changeConversationWorkspace'));
+  /* 忙碌与云端防护、从当前目录打开选择器、同目录不重开、reset 后携带覆盖参数重开。 */
+  assert.match(handler, /if \(_runtimeBusy\(\)\)/);
+  assert.match(handler, /_snap\?\.cloudHandoff\?\.phase === 'committed'/);
+  assert.match(handler, /api\.pickCwd\(_wd\?\.dir \? \{ defaultPath: _wd\.dir \} : \{\}\)/);
+  assert.match(handler, /resumeWorkspace: dir, cwd: dir, workspaceLabel: label, chatTitle: title/);
+  const css = read('components/panels/work-composer.css');
+  assert.match(css, /\.wc-wd-pick\{[^}]*var\(--ink-5\)/);
 });
 
 test('主进程持久化模块：三个 IPC、来源校验与失效目录拦截齐备', () => {

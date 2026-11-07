@@ -28,7 +28,7 @@ async function mapLimit(items, visit) {
 }
 
 async function readSummary(file, stat, project) {
-  let header, firstMessage = '', name, count = 0, activity, workOwner, initialized = false;
+  let header, firstMessage = '', name, count = 0, activity, workOwner, initialized = false, movedCwd = '';
   const bindings = [];
   const usedHarnesses = new Set();
   const input = fs.createReadStream(file, { encoding: 'utf8' });
@@ -46,6 +46,12 @@ async function readSummary(file, stat, project) {
       if (entry.type === 'session_info') name = typeof entry.name === 'string' ? entry.name.trim() : '';
       if (entry.type === 'custom' && entry.customType === 'soduwork.work-entry' && entry.data?.version === 1 &&
           typeof entry.data.owner === 'string') workOwner = entry.data.owner;
+      // An explicit workspace move (「换个文件夹继续」) supersedes the session header's
+      // original directory; later moves win.
+      if (entry.type === 'custom' && entry.customType === 'soduwork.workspace.moved' &&
+          entry.data?.version === 1 && typeof entry.data.cwd === 'string' && entry.data.cwd) {
+        movedCwd = entry.data.cwd;
+      }
       // Permission metadata indicates an initialized runtime even if no message was sent before exit.
       if (entry.type === 'custom' && entry.customType === 'soduwork.access.policy') initialized = true;
       if (entry.type === 'custom' && entry.customType === 'soduwork.task.binding') bindings.push(entry);
@@ -71,7 +77,8 @@ async function readSummary(file, stat, project) {
   if (!header) return null;
   const headerTime = Date.parse(header.timestamp);
   return project({
-    id: header.id, path: file, cwd: typeof header.cwd === 'string' ? header.cwd : '',
+    id: header.id, path: file,
+    cwd: movedCwd || (typeof header.cwd === 'string' ? header.cwd : ''),
     name, firstMessage: firstMessage || '(no messages)', messageCount: count, usedHarnesses: [...usedHarnesses],
     ...(workOwner ? { workOwner, workOnly: count === 0 && !initialized } : {}),
     createdAt: Number.isFinite(headerTime) ? headerTime : stat.birthtimeMs,

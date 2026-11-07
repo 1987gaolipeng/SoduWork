@@ -428,6 +428,7 @@
         label: '权限', value: '兼容权限', title: '本次会话权限', popup: true, chevron: false }) +
       contextButton({ id: 'nchatWd', valueId: 'nchatWdName', icon: 'folder',
         label: '工作位置', value: '准备工作区', title: '打开本次会话的工作文件夹' }) +
+      '<button type="button" class="wc-wd-pick" id="nchatWdPick" title="换个文件夹继续这条会话">换</button>' +
       contextButton({ id: 'nchatAbility', valueId: 'nchatAbilityName', icon: 'ability',
         label: '能力', value: '基础对话', title: '能力在会话开始时确定', muted: true }) + '</div>';
     const next = replace(node, {

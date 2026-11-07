@@ -33,6 +33,21 @@ test('archive history records all actual runtime sources without promoting an un
   await f.write('unanswered', [header('unanswered'), message('Not answered'), binding('task', 'Task')]);
   assert.deepEqual((await sessions.historyEntry(f.app, 'unanswered')).entry.usedHarnesses, []);
 });
+const moved = dir => ({ type: 'custom', customType: 'soduwork.workspace.moved', data: { version: 1, cwd: dir } });
+
+test('换个文件夹继续：存档投影优先返回最新的工作目录覆盖', async t => {
+  const f = await fixture(t);
+  await f.write('moved-once', [header('moved-once'), message('Question'), moved('D:/new/place')]);
+  assert.equal((await sessions.historyEntry(f.app, 'moved-once')).entry.cwd, 'D:/new/place');
+  /* 多次换目录时，最新一次生效。 */
+  await f.write('moved-twice', [header('moved-twice'), message('Question'),
+    moved('D:/first/place'), moved('D:/second/place')]);
+  assert.equal((await sessions.historyEntry(f.app, 'moved-twice')).entry.cwd, 'D:/second/place');
+  /* 没有换目录记录的会话仍返回存档头部目录。 */
+  await f.write('unmoved', [header('unmoved'), message('Question')]);
+  assert.equal((await sessions.historyEntry(f.app, 'unmoved')).entry.cwd, '/project');
+});
+
 async function fixture(t) {
   const base = await fs.mkdtemp(path.join(os.tmpdir(), 'soduwork-history-index-'));
   const root = path.join(base, 'pi-agent'), directory = path.join(root, 'sessions', 'project');

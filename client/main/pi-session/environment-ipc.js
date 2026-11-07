@@ -150,12 +150,15 @@ function install({ app, ipcMain, session, identityOf, capabilityGrantsOf, _skill
     if (!fs.statSync(dir).isDirectory()) return { ok: false, reason: '所选工作位置不是文件夹' };
     return options?.persist === false ? { ok: true, dir, name: path.basename(dir) } : saveWorkdir(dir);
   });
-  ipcMain.handle('pi-session-pick-cwd', async (event) => {
+  ipcMain.handle('pi-session-pick-cwd', async (event, options = {}) => {
     const { dialog, BrowserWindow } = require('electron');
     const win = BrowserWindow.fromWebContents(event.sender);
+    /* Start from the caller's previous choice (current session folder or the last
+       hand-picked workspace) so changing the workspace does not jump back to the root. */
+    const requested = typeof options?.defaultPath === 'string' ? options.defaultPath.trim() : '';
     const result = await dialog.showOpenDialog(win, require("../native-locale.cjs").dialogOptions({
       title: '选择本次会话直接使用的文件夹',
-      defaultPath: workDir(app),
+      defaultPath: path.isAbsolute(requested) ? requested : workDir(app),
       properties: ['openDirectory', 'createDirectory'],
     }));
     if (result.canceled || !result.filePaths.length) return { ok: false, canceled: true };

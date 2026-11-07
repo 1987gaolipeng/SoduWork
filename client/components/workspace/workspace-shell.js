@@ -722,10 +722,25 @@
     return { ...context, cwd, workspaceLabel };
   }
 
-  /* The main process creates an independent workspace for ordinary new chats.
-     Pass cwd or project membership only when the user explicitly selected them. */
+  /* 顶部「新对话」/窗口菜单「新建」等纯新对话入口的参数：项目归属只认显式
+     传入（cda885c8），但工作目录作为默认值延续——显式传入优先；其次沿用当
+     前活动会话的目录（云端会话目录不沿用，见 newSessionContext 的防护）；
+     无活动会话时用最近一次手选的目录兜底（冷启动，主进程已校验目录仍存在）。
+     用户点「默认工作区」会同步清掉最近手选记录，之后的新对话不再延续。 */
   function newSessionPayload(extra) {
-    return { ...(extra || {}), newSession: true };
+    const given = extra || {};
+    let inherited = {};
+    if (!given.cwd) {
+      const context = newSessionContext();
+      if (context.cwd) {
+        inherited = { cwd: context.cwd, workspaceLabel: context.workspaceLabel || '',
+          workspaceSource: 'last-session' };
+      } else if (recentWorkspace.dir) {
+        inherited = { cwd: recentWorkspace.dir, workspaceLabel: recentWorkspace.name || '',
+          workspaceSource: 'recent' };
+      }
+    }
+    return { ...inherited, ...given, newSession: true };
   }
 
   function projectForChat(id) { return sidebarProjects?.projectForChat(String(id || '')) || null; }

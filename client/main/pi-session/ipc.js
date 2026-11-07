@@ -602,7 +602,18 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
           throw Error('原会话工作目录不可用，请在来源电脑恢复目录后重试');
         });
       }
-      const cwd = resume ? require('./resume-cwd')(app, resume, _defaultCwd) : _newSessionCwd(app, ref, opts);
+      /* 「换个文件夹继续」：resume 默认锚定存档目录，仅当用户在聊天条显式选择
+         新文件夹时才迁移本轮续聊的工作目录；远端中转继续不适用。 */
+      let workspaceMoved = '';
+      const resumeOverride = resume && opts.nativeRelay !== true
+        ? String(opts.resumeWorkspace || '').trim() : '';
+      const cwd = resume
+        ? require('./resume-cwd')(app, resume, _defaultCwd, resumeOverride)
+        : _newSessionCwd(app, ref, opts);
+      if (resumeOverride && path.resolve(cwd) === path.resolve(resumeOverride) &&
+          path.resolve(cwd) !== path.resolve(String(resume.cwd || ''))) {
+        workspaceMoved = cwd;
+      }
       const permitted = await workOpening.applyPolicy({ app, event, options: opts, resume, work, cwd,
         automationContext, accessConsent, BrowserWindow, confirmFullAccess });
       if (!permitted.ok) { await capabilityPromise.catch(() => {}); return permitted; }
@@ -720,6 +731,9 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         resumedConversation: Boolean(resume && !work.bootstrap),
         /* SDK uses the validated directory; the archive path remains separate. */
         resumeCwd: resume ? cwd : '',
+        /* Set when this continuation explicitly moved to a user-picked folder;
+           session-open persists the choice into the archive for future opens. */
+        workspaceMoved,
         resumeAt: resume ? resume.at : 0,
         // Historical archives must paint immediately. Third-party extensions
         // are loaded serially by the SDK and one stalled extension used to
