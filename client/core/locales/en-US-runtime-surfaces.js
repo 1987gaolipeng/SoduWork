@@ -1,5 +1,13 @@
 (function (global) {
   const messages = {
+    '等待连接': 'Waiting for connection',
+    '需要重新登录': 'Sign in again',
+    '等待授权': 'Waiting for authorization',
+    '停止中': 'Stopping',
+    '正在重新连接执行记录；后续需求继续等待': 'Reconnecting to the execution record; subsequent requirements remain queued.',
+    '停止尚未确认；后续需求继续等待': 'Stopping is not confirmed; subsequent requirements remain queued.',
+    '登录已过期，请重新连接后继续': 'Your sign-in has expired. Reconnect to continue.',
+    '当前连接没有执行此操作的权限': 'The current connection is not authorized to perform this action.',
     '删除本地会话': 'Delete local conversation',
     '删除本地记录': 'Delete local history',
     '删除本机保存的会话记录，不删除云端原会话、需求或成果文件。重启后不会自动恢复本地副本。': 'Delete this local history only. Cloud originals, requirements and output files are retained. Restarting will not restore the deleted local copy.',

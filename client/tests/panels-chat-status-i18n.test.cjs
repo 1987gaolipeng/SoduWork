@@ -46,6 +46,20 @@ function mergedCatalog(locale) {
     require(path.join(LOCALES, locale + '-gap-pages.js')));
 }
 
+test('controller reconnect and authentication reasons translate before rendering', () => {
+  const status = require('../components/panels/panels-chat-status');
+  const reasons = ['正在重新连接执行记录；后续需求继续等待', '停止尚未确认；后续需求继续等待',
+    '登录已过期，请重新连接后继续', '当前连接没有执行此操作的权限'];
+  for (const locale of ['en-US', 'ja-JP', 'ko-KR']) {
+    const i18n = loadI18n(locale);
+    for (const reason of reasons) {
+      const translated = i18n.translateText(reason);
+      assert.notEqual(translated, reason);
+      assert.equal(status.work({status:'waiting-user',statusText:reason}), translated);
+    }
+  }
+});
+
 test('system notices localize capability failures and envelopes without rewriting named resources', () => {
   const denied = '当前会话没有授权：浏览网页、Office 文档。请新建会话并开启对应能力后再使用这个插件';
   const readonly = '当前会话是只读模式，插件还需要：文件处理、命令与构建。请改为可读写后重新开始会话';

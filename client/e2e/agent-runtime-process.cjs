@@ -201,7 +201,14 @@ app.whenReady().then(async () => {
           observation.injectedFailure = true;
           throw Error('Isolated transient cleanup snapshot failure');
         }
-        const result = await guard.stop(); observation.confirmed = true; return result;
+        try {
+          const result = await guard.stop(); observation.confirmed = true; return result;
+        } catch (error) {
+          observation.error = String(error.message);
+          observation.causes = (error.errors || []).map(cause => ({ message: cause.message, code: cause.code }));
+          observation.report = error.report;
+          throw error;
+        }
       } };
     },
     authFactory: options => createHostAuth({ ...options,
