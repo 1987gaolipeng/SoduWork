@@ -26,7 +26,7 @@ os.environ.update({
 })
 
 import httpx
-from sqlalchemy import create_engine, func, select, update
+from sqlalchemy import create_engine, event, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -682,6 +682,67 @@ class RepositoryIssueSyncTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as session:
             result = await sync.run(session, "catalog")
             self.assertEqual(result["skipped"], "not_due")
+
+    async def test_source_uses_one_fresh_query_per_operation_under_pressure(self):
+        queries = []
+        def record(_connection, _cursor, statement, _parameters, _context, _many):
+            if statement.lstrip().upper().startswith("SELECT"):
+                queries.append(statement)
+        event.listen(self.engine.sync_engine, "before_cursor_execute", record)
+        try:
+            async with self.sessions() as session:
+                for _ in range(100):
+                    repo, cfg = await sync.source(session, "catalog")
+                    self.assertEqual(repo.external_id, "149")
+                    self.assertEqual(cfg["_auth_user"], "fixture-account")
+                self.assertEqual(len(queries), 100)
+        finally:
+            event.remove(self.engine.sync_engine, "before_cursor_execute", record)
+
+    async def test_source_observes_revocation_and_rotation_despite_retained_identity_map(self):
+        async with self.sessions() as session:
+            repo, cfg = await sync.source(session, "catalog")
+            integration = await session.get(models.Integration, "integration")
+            await session.commit()
+            async with self.sessions() as other:
+                row = await other.get(models.Integration, "integration")
+                row.config = {**row.config, "pullAuth": {"user": "rotated", "secret": "new-test-secret"}}
+                await other.commit()
+            _, cfg = await sync.source(session, "catalog")
+            self.assertEqual(cfg["_auth_user"], "rotated")
+            await session.commit()
+            async with self.sessions() as other:
+                await other.execute(update(am.ScmRepository).where(am.ScmRepository.id == repo.id).values(archived=True))
+                await other.commit()
+            with self.assertRaises(ValueError):
+                await sync.source(session, "catalog")
+            self.assertTrue(repo.archived)
+            self.assertEqual(integration.config["pullAuth"]["user"], "rotated")
+
+    async def test_writeback_stops_new_remote_writes_after_subscription_paused_mid_batch(self):
+        await self.first_import()
+        async with self.sessions() as session:
+            first = await session.scalar(select(Link))
+            first.started_at = self.clock
+            first.writeback_state = "pending"
+            session.add(Link(id="next-writeback", catalog_id="catalog", issue_id="1002", issue_iid=2,
+                task_id=first.task_id + "-second", started_at=self.clock + timedelta(seconds=1), writeback_state="pending"))
+            session.add(models.Task(id=first.task_id + "-second", title="Second isolated issue"))
+            await session.commit()
+        original = sync.call_remote
+        async def remote_then_pause(session, lease, method, *args):
+            result = await original(session, lease, method, *args)
+            async with self.sessions() as other:
+                await other.execute(update(Sync).where(Sync.catalog_id == "catalog").values(enabled=False))
+                await other.commit()
+            return result
+        with patch.object(sync, "call_remote", side_effect=remote_then_pause):
+            async with self.sessions() as session:
+                self.assertEqual(await worker.writebacks(session, "catalog"), 1)
+                second = await session.get(Link, "next-writeback")
+                self.assertEqual(second.writeback_state, "error")
+                self.assertIsNone(second.sent_at)
+        self.assertEqual(self.started.call_count, 1)
 
     async def test_first_start_is_transactional_frozen_and_retries_to_sent_once(self):
         task_id = await self.first_import()
