@@ -1,9 +1,9 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
-function setup() {
+function setup(platformConnections) {
   const events = {}, pending = [];
-  const window = { SoduWorkPluginCatalogFormat: {}, addEventListener: (name, fn) => { events[name] = fn; } };
+  const window = { SoduWorkPlatformConnections: platformConnections, SoduWorkPluginCatalogFormat: {}, addEventListener: (name, fn) => { events[name] = fn; } };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../components/panels/panels-capability-plugins.js'), 'utf8'), {
     window, SoduWorkAPI: { pluginCatalog: () => new Promise((resolve, reject) => { resolve.reject = reject; pending.push(resolve); }) },
   });
@@ -48,3 +48,34 @@ for (const event of ['soduwork-plugin-policy', 'soduwork:plugins-changed']) {
     assert.equal(s.catalog.snapshot().items.length, 0);
   });
 }
+
+test('catalog counts are available while platform status is still pending', async () => {
+  let finish;
+  const platform = new Promise(resolve => { finish = resolve; });
+  const s = setup({ hydrate: () => platform });
+  let published;
+  const loading = s.catalog.load(value => { published = value; });
+  s.pending[0]({ items: [{ pluginId: 'personal', personal: true }] });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(published, s.catalog.snapshot());
+  assert.equal(s.catalog.managedCount(), 1);
+  assert.equal(s.catalog.marketCount(), 0);
+  finish(); await loading;
+});
+
+test('a confirmed empty catalog survives a transient failure but expires on scope change', async () => {
+  const s = setup();
+  const first = s.catalog.load(); s.pending[0]({ items: [] }); await first;
+  const failed = s.catalog.load(); s.pending[1].reject(Error('offline')); await failed;
+  assert.equal(s.catalog.hasCompleteCatalog(), true);
+  s.events['soduwork-data-scope-changed']();
+  assert.equal(s.catalog.hasCompleteCatalog(), false);
+});
+
+test('a platform status notification preserves the published catalog', async () => {
+  const s = setup();
+  const loading = s.catalog.load(); s.pending[0](snapshot('installed')); await loading;
+  s.events['soduwork:plugins-changed']({ type: 'soduwork:plugins-changed', detail: { platformStatusOnly: true } });
+  assert.equal(s.catalog.snapshot().items[0].pluginId, 'installed');
+  assert.equal(s.catalog.hasCompleteCatalog(), true);
+});

@@ -22,18 +22,18 @@
   for(const target of items){target.platformConnections={...(target.platformConnections||{}),[key]:value};target.platformConnection=value;}
   latest.set(key,value);
   if(previous?.connected!==value?.connected||previous?.disconnected!==value?.disconnected)
-   global.dispatchEvent?.(new CustomEvent('soduwork:plugins-changed'));
+   global.dispatchEvent?.(new CustomEvent('soduwork:plugins-changed', {detail:{platformStatusOnly:true}}));
  }
  // Old installed manifests also get the correct instructions for this desktop connection entry.
  function setupDescription(item){const keys=providers(item);return keys.length?'点击「连接账号」。'+keys.map(key=>PLATFORMS[key].intro).join(' '):String(item&&item.setup&&item.setup.description||'');}
- async function hydrate(items){
+ async function hydrate(items,isCurrent=()=>true){
   if(!api())return;
   const pending=new Map(),epoch=scopeRevision;
   await Promise.all(items.flatMap(item=>providers(item).map(async key=>{
    if(!pending.has(key))pending.set(key,Promise.resolve().then(()=>api().status(key)));
    const version=stateRevisions.get(key)||0;
-   try{const value=await pending.get(key);if(epoch!==scopeRevision)return;remember(item,key,version===(stateRevisions.get(key)||0)?(value?.provider===key&&(value.ok||value.disconnected)?value:{}):(latest.get(key)||{}));}
-   catch(_){if(epoch===scopeRevision)remember(item,key,version===(stateRevisions.get(key)||0)?{}:(latest.get(key)||{}));}
+   try{const value=await pending.get(key);if(epoch!==scopeRevision||!isCurrent())return;remember(item,key,version===(stateRevisions.get(key)||0)?(value?.provider===key&&(value.ok||value.disconnected)?value:{}):(latest.get(key)||{}));}
+   catch(_){if(epoch===scopeRevision&&isCurrent())remember(item,key,version===(stateRevisions.get(key)||0)?{}:(latest.get(key)||{}));}
   })));
  }
  function markup(item){

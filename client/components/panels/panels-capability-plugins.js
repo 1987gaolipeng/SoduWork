@@ -2,6 +2,7 @@
 (function (global) {
   'use strict';
   let catalog = { items: [], submissions: [], categories: [] };
+  let completeCatalog = false;
   let loadRevision = 0;
   let libraryFilters = { source: 'all', category: '', status: 'all' };
   const systemCopy = source => global.SoduWorkI18n?.html?.(source, source) || h(source);
@@ -13,32 +14,39 @@
   }
   const { icons: ICON, h, copyText, sourceName, nodeName, trustName, componentText, riskName,
     provenanceName, processBadge, processMetaHtml, processSectionHtml } = global.SoduWorkPluginCatalogFormat;
-  async function load() {
+  async function load(onCatalog) {
     const request = ++loadRevision;
     let next;
     try {
       next = await SoduWorkAPI.pluginCatalog() || { items: [], submissions: [] };
       if (request !== loadRevision) return catalog;
-      if (global.SoduWorkPlatformConnections) await global.SoduWorkPlatformConnections.hydrate(next.items || []);
-      if (request !== loadRevision) return catalog;
-      if (next.remoteError && catalog.items.length) {
+      if (next.remoteError && (completeCatalog || catalog.items.length)) {
         catalog = { ...catalog, remoteError: next.remoteError }; return catalog;
       }
+      completeCatalog = !next.remoteError;
       next.error = '';
       catalog = next;
+      if (typeof onCatalog === 'function') onCatalog(next);
+      if (global.SoduWorkPlatformConnections) await global.SoduWorkPlatformConnections.hydrate(next.items || [], () => request === loadRevision);
+      if (request !== loadRevision) return catalog;
       if (window.PluginUIHost && typeof PluginUIHost.invalidateCatalog === 'function') {
         PluginUIHost.invalidateCatalog();
       }
     } catch (error) {
-      if (request === loadRevision && [401, 403].includes(Number(error && error.status))) catalog = { items: [], submissions: [], categories: [] };
-      if (request === loadRevision) catalog = catalog.items.length
+      if (request === loadRevision && [401, 403].includes(Number(error && error.status))) {
+        completeCatalog = false;
+        catalog = { items: [], submissions: [], categories: [] };
+      }
+      if (request === loadRevision) catalog = completeCatalog || catalog.items.length
         ? { ...catalog, remoteError: String(error && error.message || error) }
         : { items: [], submissions: [], categories: [], error: String(error && error.message || error) };
     }
     return catalog;
   }
-  function invalidateCatalog() {
+  function invalidateCatalog(event) {
+    if (event?.type === 'soduwork:plugins-changed' && event.detail?.platformStatusOnly) return;
     ++loadRevision;
+    completeCatalog = false;
     catalog = { items: [], submissions: [], categories: [] };
   }
   ['soduwork-data-scope-changed', 'soduwork-plugin-policy', 'soduwork:plugins-changed'].forEach(name => {
@@ -734,5 +742,5 @@
       openLocalImport: openLocalImport, load: load,
     }, initial, versions);
   }
-  global.SoduWorkCapabilityPlugins = { load, count, managedCount, marketCount, marketItems, snapshot, hasPendingReview, revision, render, open: openById, choosePackage, openMaker, openLocalImport, brandIcon, iconKind, toneClass };
+  global.SoduWorkCapabilityPlugins = { load, hasCompleteCatalog: () => completeCatalog, count, managedCount, marketCount, marketItems, snapshot, hasPendingReview, revision, render, open: openById, choosePackage, openMaker, openLocalImport, brandIcon, iconKind, toneClass };
 })(window);

@@ -103,7 +103,7 @@
     dispose();content._connectorContext=ctx;
     content.innerHTML='<div class="cap-connections-view"><section class="cap-section cap-template-section" aria-labelledby="myConnectorsHeading"><header class="connector-section-heading"><div class="cap-section-head"><b id="myConnectorsHeading">我的连接器</b><span>已添加的产品与服务</span><em data-my-connection-count>0</em></div><div data-connection-tools></div></header>'+
       '<div class="cap-connector-save" role="status" hidden><span></span><button class="btn-mini" data-connector-retry>重试保存</button></div>'+
-      (!(ctx.data.summary||{}).mcpReady?'<p class="connector-access-note">公司尚未开放连接执行能力；已保存的配置会为你保留。</p>':'')+
+      (ctx.data && !ctx.data.summary?.mcpReady?'<p class="connector-access-note">公司尚未开放连接执行能力；已保存的配置会为你保留。</p>':'')+
       '<div class="cap-template-row connector-connections" data-my-connections></div><div class="connector-empty" data-connections-empty><b></b><p></p><button class="btn-mini" data-connection-empty-add>添加连接</button></div></section>'+
       '<section class="cap-section cap-template-section connector-common-section" aria-labelledby="commonConnectorsHeading"><header class="connector-section-heading"><div class="cap-section-head"><b id="commonConnectorsHeading" tabindex="-1">常用连接器</b><span>连接一次，供对话、插件和自动化复用</span><em data-connector-results></em></div><div class="connector-library-tools"><button class="connector-link" data-connector-custom>使用连接地址</button><button class="connector-link" data-connector-import>导入配置</button></div></header>'+
       '<div class="cap-template-row connector-library-grid" data-connector-library></div><p class="connector-library-empty" data-library-empty hidden>没有找到匹配的产品，试试其他名称，或使用连接地址添加。</p></section></div>';
@@ -178,7 +178,7 @@
     function contentActions(){return content?._connectorActions||global.SoduWorkMcpManagement.enhance(document.createElement('div'),{...ctx.editorContext(),compactConnections:true});}
     entries().forEach(item=>addCard('native',item));
     (ctx.getMcp().company||[]).forEach(item=>addCard('company',item));
-    [...(ctx.data.mcpTemplates||[])].sort((a,b)=>Number(String(b.key||'').startsWith('connector-'))-Number(String(a.key||'').startsWith('connector-'))).forEach(item=>addCard('template',item));
+    [...(ctx.data?.mcpTemplates||[])].sort((a,b)=>Number(String(b.key||'').startsWith('connector-'))-Number(String(a.key||'').startsWith('connector-'))).forEach(item=>addCard('template',item));
     function refresh(){
       if(!current())return;let count=0;const needle=String(ctx.query||'').trim().toLowerCase();
       cards.forEach(x=>{

@@ -15,11 +15,13 @@
   let companyMcp = new Set();
   let busy = false;
   let runtimeSkills = new Map();
-  let runtimeKnown = false;
+  let runtimeRevision = 0;
   let pluginSync = null;
   let skillSync = null;
   let viewRevision = 0, loadRevision = 0;
   let loadFlight = null;
+  let catalogReady = false;
+  const loadErrors = new Map();
   let skillEditRevision = 0, connectorEditRevision = 0;
   const ICON = {
     cap: '<svg viewBox="0 0 24 24"><path d="M8 3h8v5h5v8h-5v5H8v-5H3V8h5z"/><path d="M10 8h4M8 10v4m8-4v4m-6 2h4"/></svg>',
@@ -58,6 +60,13 @@
     return Boolean(root && root.classList.contains('show') && tab === 'skills');
   }
 
+  async function refreshRuntime(force) {
+    const request = ++runtimeRevision;
+    const local = SoduWorkSkillCatalogSync.runtimeApi();
+    const runtime = local && await local.capabilities(force ? { force: true } : undefined);
+    if (request === runtimeRevision) runtimeSkills = SoduWorkSkillCatalogSync.runtimeMap(runtime);
+  }
+
   function skillController() {
     if (skillSync) return skillSync;
     if (!window.SoduWorkSkillCatalogSync) throw new Error('Skill catalog sync is not loaded');
@@ -79,12 +88,7 @@
         enabled = new Set((data.skills || []).filter(x => x.enabled).map(x => x.name));
         saved = new Set(enabled);
       },
-      refreshRuntime: async function () {
-        const local = SoduWorkSkillCatalogSync.runtimeApi();
-        const runtime = local && await local.capabilities({ force: true });
-        runtimeKnown = Boolean(runtime && runtime.ok !== false);
-        runtimeSkills = SoduWorkSkillCatalogSync.runtimeMap(runtime);
-      },
+      refreshRuntime: () => refreshRuntime(true),
       errorText: errorText,
       onState: function (state) {
         SoduWorkSkillCatalogSync.syncView(document, enabled, data?.skills, runtimeSkills, state); syncHead();
@@ -129,6 +133,7 @@
     const root = ensurePanel();
     root.classList.add('show');
     if (typeof expandForOverlay === 'function') expandForOverlay();
+    render();
     return load().finally(function () {
       if (root.classList.contains('show')) pluginCatalogSync().start(pluginSnapshot());
     });
@@ -154,66 +159,76 @@
     return flight;
   }
 
-  async function loadCurrent() {
-    const revision = ++loadRevision;
-    const body = document.getElementById('capBody');
-    const before = JSON.stringify([data, mcp, [...runtimeSkills], runtimeKnown, pluginSnapshot()]);
-    if (body && (!data || !mcp)) body.innerHTML = '<div class="cap-state">正在同步公司能力目录与我的选择…</div>';
-    try {
-      if (connectorSync && !await connectorSync.flush()) throw new Error('请先重试保存连接器选择');
+  async function loadCurrent(onlySection) {
+    const revision = onlySection ? loadRevision : ++loadRevision;
+    const skillEdits = skillEditRevision, connectorEdits = connectorEditRevision;
+    function update(section) {
       if (revision !== loadRevision) return;
-      const local = SoduWorkSkillCatalogSync.runtimeApi();
-      const skillEdits = skillEditRevision, connectorEdits = connectorEditRevision;
-      const rows = await Promise.all([
-        SoduWorkAPI.capabilityCatalog(),
-        SoduWorkAPI.myMcpServers(),
-        local ? local.capabilities().catch(() => null) : Promise.resolve(null),
-        window.SoduWorkCapabilityPlugins ? SoduWorkCapabilityPlugins.load() : Promise.resolve(null),
-      ]);
-      if (revision !== loadRevision) return;
-      data = rows[0] || { skills: [], mcpTemplates: [], summary: {} };
-      if (connectorEdits === connectorEditRevision) mcp = rows[1] || { company: [], personal: [], enabledCompany: [] };
-      runtimeKnown = Boolean(rows[2] && rows[2].ok !== false);
-      runtimeSkills = SoduWorkSkillCatalogSync.runtimeMap(rows[2]);
-      const edited = dirty() || skillEdits !== skillEditRevision;
-      if (skillEdits === skillEditRevision) saved = new Set((data.skills || []).filter(x => x.enabled).map(x => x.name));
-      enabled = edited ? new Set([...enabled].filter(name => (data.skills || []).some(x => x.name === name))) : new Set(saved);
-      companyMcp = new Set(mcp.enabledCompany || []);
-      if (connectorEdits === connectorEditRevision) connectorController().replace(mcp);
-      document.getElementById('capRefreshNotice')?.remove();
-      if (before !== JSON.stringify([data, mcp, [...runtimeSkills], runtimeKnown, pluginSnapshot()])) {
-        if (document.getElementById('capContent')) { renderContent(); syncHead(); }
-        else render();
+      if (section === tab || (section === 'plugins' && tab === 'market') ||
+          (section === 'skills' && tab === 'connections' && mcp)) renderContent();
+      if (tab === 'connections') {
+        const add = document.getElementById('capAddButton');
+        if (add) add.disabled = !mcp;
       }
-      skillController().sync();
-      // The Runner owns the live Skill inventory. Refresh immediately so a
-      // newly installed Skill never requires a heartbeat, manual click, or restart.
-      if (tab === 'skills') skillController().refresh({ silent: true });
-    } catch (error) {
-      if (revision !== loadRevision) return;
-      if ([401, 403].includes(Number(error && error.status))) { data = null; mcp = null; }
-      if (data && mcp && body) {
-        document.getElementById('capRefreshNotice')?.remove();
-        const notice = document.createElement('div');
-        notice.id = 'capRefreshNotice'; notice.className = 'cap-state bad'; notice.setAttribute('role', 'status');
-        const message = document.createElement('span'); message.textContent = '刷新失败，正在显示上次内容。';
-        const retry = document.createElement('button');
-        retry.className = 'btn-mini'; retry.type = 'button'; retry.textContent = '重试';
-        retry.addEventListener('click', load); notice.append(message, retry); body.prepend(notice);
-        return;
-      }
-      if (body) body.innerHTML =
-        '<div class="cap-state bad"><b>能力目录没有加载成功</b><span>' +
-        h(errorText(error, '请检查后台连接')) +
-        '</span><button class="btn-mini primary" id="capRetry">重试</button></div>';
-      const retry = document.getElementById('capRetry');
-      if (retry) retry.addEventListener('click', load);
+      syncHead();
     }
+    async function read(section, fetch, apply) {
+      if (onlySection && onlySection !== section) return;
+      try {
+        const value = await fetch();
+        if (revision !== loadRevision) return;
+        loadErrors.delete(section);
+        apply(value);
+      } catch (error) {
+        if (revision !== loadRevision) return;
+        loadErrors.set(section, errorText(error, '刷新失败'));
+        if ([401, 403].includes(Number(error?.status))) {
+          if (section === 'skills') { data = null; enabled.clear(); saved.clear(); }
+          if (section === 'connections') { connectorSync?.reset(); mcp = null; companyMcp.clear(); }
+        }
+      }
+      update(section);
+    }
+    await Promise.all([
+      read('skills', () => SoduWorkAPI.capabilityCatalog(), value => {
+        data = value || { skills: [], mcpTemplates: [], summary: {} };
+        const edited = dirty() || skillEdits !== skillEditRevision;
+        if (skillEdits === skillEditRevision) saved = new Set((data.skills || []).filter(x => x.enabled).map(x => x.name));
+        enabled = edited ? new Set([...enabled].filter(name => (data.skills || []).some(x => x.name === name))) : new Set(saved);
+        skillController().sync();
+        if (tab === 'skills') skillController().refresh({ silent: true });
+      }),
+      read('connections', async () => {
+        if (connectorSync && !await connectorSync.flush()) throw new Error('请先重试保存连接器选择');
+        if (revision === loadRevision) return SoduWorkAPI.myMcpServers();
+      }, value => {
+        if (connectorEdits === connectorEditRevision) connectorController().replace(value || { company: [], personal: [], enabledCompany: [] });
+      }),
+      read('plugins', () => SoduWorkCapabilityPlugins.load(value => {
+        if (revision !== loadRevision) return;
+        recordCatalog(value);
+        update('plugins');
+      }), recordCatalog),
+      (async () => {
+        if (onlySection) return;
+        // Keep the last inventory when the optional runtime is temporarily offline.
+        try { await refreshRuntime(false); } catch { return; }
+        if (revision !== loadRevision) return;
+        if (data && tab === 'skills') renderContent();
+      })(),
+    ]);
+  }
+
+  function recordCatalog(value) {
+    catalogReady = Boolean(SoduWorkCapabilityPlugins.hasCompleteCatalog() || value?.items?.length);
+    const error = value?.error || value?.remoteError;
+    if (error) loadErrors.set('plugins', error);
+    else loadErrors.delete('plugins');
   }
 
   function render() {
     const body = document.getElementById('capBody');
-    if (!body || !data || !mcp) return;
+    if (!body) return;
     const restoreTabFocus = body.contains(document.activeElement) && document.activeElement.matches('.cap-tab');
     body.innerHTML =
       '<div class="cap-shell cap-tab-' + h(tab) + '">' +
@@ -237,7 +252,7 @@
         // Keep old deep links/session state working while exposing one clear
         // user-facing destination.
         const nextTab = requestedTab === 'apps' || requestedTab === 'mcp' ? 'connections' : requestedTab;
-        const enteredSkills = nextTab === 'skills' && tab !== 'skills';
+        const enteredSkills = data && nextTab === 'skills' && tab !== 'skills';
         viewRevision++; tab = nextTab;
         query = '';
         render();
@@ -288,10 +303,19 @@
     button.classList.toggle('is-refreshing', Boolean(running));
   }
 
-  window.addEventListener('soduwork-plugin-policy', function () {
-    loadRevision++; loadFlight = null;
-    if (catalogActive()) { renderContent(); syncHead(); pluginCatalogSync().refresh({ quiet: true, policy: true }); }
-  });
+  for (const event of ['soduwork-plugin-policy', 'soduwork:plugins-changed']) {
+    window.addEventListener(event, change => {
+      if (event === 'soduwork:plugins-changed' && change.detail?.platformStatusOnly) {
+        if (catalogActive()) renderContent();
+        return;
+      }
+      catalogReady = false; loadErrors.delete('plugins');
+      if (!panel()?.classList.contains('show')) return;
+      if (catalogActive()) renderContent();
+      syncHead();
+      loadCurrent('plugins');
+    });
+  }
   window.addEventListener('soduwork-locale-change', function () {
     if (catalogActive()) pluginCatalogSync().refresh({ quiet: true, policy: true });
   });
@@ -312,7 +336,7 @@
       load: function () { return SoduWorkCapabilityPlugins.load(); },
       revision: function (value) { return SoduWorkCapabilityPlugins.revision(value); },
       onState: syncCatalogRefreshButton,
-      onUpdate: function () { if (catalogActive()) { renderContent(); syncHead(); } },
+      onUpdate: function (value) { recordCatalog(value); if (catalogActive()) { renderContent(); syncHead(); } },
       onManualResult: function (value, changed) {
         if (value && value.remoteError) {
           say('\u4f01\u4e1a\u76ee\u5f55\u6682\u65f6\u672a\u8fde\u63a5\uff0c\u672c\u673a\u63d2\u4ef6\u5df2\u540c\u6b65');
@@ -348,9 +372,15 @@
       ? SoduWorkCapabilityPlugins.marketCount() : 0;
   }
 
+  function displayCount(key, count) {
+    const known = key === 'connections' ? mcp : key === 'skills' ? data :
+      key === 'market' ? window.SoduWorkCapabilityPlugins?.hasCompleteCatalog() : catalogReady;
+    return known ? String(count) : '—';
+  }
+
   function tabButton(key, label, count) {
     return '<button class="cap-tab' + (tab === key ? ' on' : '') +
-      '" data-cap-tab="' + key + '" aria-pressed="' + (tab === key) + '">' + label + '<i>' + Number(count || 0) + '</i></button>';
+      '" data-cap-tab="' + key + '" aria-pressed="' + (tab === key) + '">' + label + '<i>' + displayCount(key, count) + '</i></button>';
   }
 
   function searchHint() {
@@ -400,6 +430,7 @@
     });
     const add = document.getElementById('capAddButton');
     const menu = document.getElementById('capAddMenu');
+    if (connection) add.disabled = !mcp;
     if (connection) add.addEventListener('click', () => SoduWorkConnectorDirectory.openLibrary(connectorDirectoryContext()));
     else SoduWorkPluginPresentation.addMenu(add, menu);
     menu.querySelectorAll('[data-cap-add]').forEach(function (button) {
@@ -418,10 +449,10 @@
     const count = document.getElementById('capHeadCount');
     for (const [key, value] of [['connections', connectionCount()], ['plugins', pluginCount()], ['skills', enabled.size], ['market', marketCount()]]) {
       const badge = document.querySelector('[data-cap-tab="' + key + '"] i');
-      if (badge) badge.textContent = String(value);
+      if (badge) badge.textContent = displayCount(key, value);
     }
-    if (count) count.textContent = '插件 ' + pluginCount() + ' · 连接器 ' + connectionCount() +
-      ' · 技能 ' + enabled.size;
+    if (count) count.textContent = '插件 ' + displayCount('plugins', pluginCount()) + ' · 连接器 ' + displayCount('connections', connectionCount()) +
+      ' · 技能 ' + displayCount('skills', enabled.size);
   }
 
   function pluginContext() {
@@ -536,19 +567,41 @@
     const content = document.getElementById('capContent');
     if (!content) return;
     if (tab !== 'connections') window.SoduWorkConnectorDirectory?.dispose();
-    if (tab === 'plugins' && window.SoduWorkCapabilityPlugins) {
-      SoduWorkCapabilityPlugins.render(content, query, pluginContext());
-    } else if (tab === 'connections') {
-      // The directory and MCP records are one catalog. Render the richer
-      // connection management view once so users never need to understand the
-      // implementation protocol behind a connection.
-      renderMcp(content);
-    } else if (tab === 'market' && window.SoduWorkCapabilityDirectory) {
-      SoduWorkCapabilityDirectory.renderMarket(content, query, directoryContext());
-    } else if (tab === 'skills') {
-      renderSkills(content);
-    } else {
-      renderMcp(content);
+    const section = tab === 'market' ? 'plugins' : tab;
+    let error = loadErrors.get(section);
+    let ready = displayCount(tab, 0) !== '—';
+    content.querySelector('[data-cap-load-error]')?.remove();
+    try {
+      if (!ready) {
+        content.innerHTML = error ? '' : '<div class="cap-state">正在加载…</div>';
+      } else if (tab === 'plugins' && window.SoduWorkCapabilityPlugins) {
+        SoduWorkCapabilityPlugins.render(content, query, pluginContext());
+      } else if (tab === 'connections') {
+        // The directory and MCP records are one catalog. Render the richer
+        // connection management view once so users never need to understand the
+        // implementation protocol behind a connection.
+        renderMcp(content);
+      } else if (tab === 'market' && window.SoduWorkCapabilityDirectory) {
+        SoduWorkCapabilityDirectory.renderMarket(content, query, directoryContext());
+      } else if (tab === 'skills') {
+        renderSkills(content);
+      } else {
+        renderMcp(content);
+      }
+    } catch (failure) {
+      ready = false;
+      error = errorText(failure, '内容未能显示');
+      content.textContent = '';
+    }
+    if (error) {
+      const notice = document.createElement('div');
+      notice.dataset.capLoadError = '';
+      notice.className = 'cap-state bad';
+      notice.textContent = (ready ? '刷新失败，显示上次结果。' : '加载失败。') + error;
+      const retry = document.createElement('button');
+      retry.className = 'btn-mini'; retry.textContent = '重试';
+      retry.onclick = () => { retry.disabled = true; loadCurrent(section); };
+      notice.append(retry); content.prepend(notice);
     }
   }
 
@@ -573,7 +626,7 @@
     if (!content) return;
     const visible = (data.skills || []).filter(skillSelectable).filter(matches);
     const shape = JSON.stringify(visible.map(item => ({ ...item, enabled: undefined, status: undefined })));
-    if (content._skillShape === shape) {
+    if (content._skillShape === shape && content.querySelector('.cap-skill-section')) {
       SoduWorkSkillCatalogSync.syncView(document, enabled, data.skills, runtimeSkills, skillController().state());
       return;
     }
@@ -663,13 +716,15 @@
   }
   window.addEventListener('soduwork-data-scope-changed', () => {
     loadRevision++; viewRevision++;
-    loadFlight = null; data = null; mcp = null; runtimeSkills = new Map(); runtimeKnown = false; query = '';
+    catalogReady = false; loadErrors.clear();
+    loadFlight = null; data = null; mcp = null; runtimeSkills = new Map(); runtimeRevision++; query = '';
     const body = document.getElementById('capBody'); if (body) body.textContent = '';
     // Identity changes must discard old choices, never auto-save them to the new account.
     panel()?.classList.remove('show');
     pluginSync?.stop(); skillSync?.stop(); closeModal();
     enabled = new Set(); saved = new Set();
     if (connectorSync) connectorSync.reset();
+    mcp = null;
     window.SoduWorkConnectorDirectory?.dispose();
     window.SoduWorkPlatformDirectory?.reset();
   });
