@@ -127,6 +127,7 @@ def _conversation_json(row: AccountConversation, client_id: str) -> dict:
         "createdAt": _iso(row.created_at),
         "updatedAt": _iso(row.updated_at),
         "sourceRevision": int(row.source_revision or 0),
+        "storageMode": row.storage_mode or "legacy",
         "canView": True,
         # The source device remains the only device that may checkpoint the
         # native session. Every device authenticated to the same account may,
@@ -216,7 +217,7 @@ async def list_account_conversations(
         .group_by(AccountConversationMessage.conversation_id)
     )).all()) if rows else {}
     return {
-        "items": [{**_conversation_json(row, client.id), "messageCount": counts.get(row.id, 0)}
+        "items": [{**_conversation_json(row, client.id), "messageCount": row.message_count if row.storage_mode == "endpoint" else counts.get(row.id, 0)}
                   for row in rows],
         "cursor": int(cursor),
         "hasMore": has_more,
@@ -232,6 +233,9 @@ async def list_account_conversation_messages(
     session: AsyncSession = Depends(get_session),
 ):
     row = await _load_owned(conversation_id, _owner(client), session)
+    if row.storage_mode == "endpoint":
+        from ..services import account_endpoint_history
+        return await account_endpoint_history.page(session, client, row, after, limit)
     messages = list((await session.scalars(
         select(AccountConversationMessage)
         .where(
@@ -418,6 +422,15 @@ async def sync_account_conversation(
     # this field and keep the legacy append/update semantics for compatibility.
     snapshot_complete = body.get("snapshotComplete") is True
     messages = _validate_messages(body.get("messages"))
+    endpoint_storage = body.get("storageMode") == "endpoint"
+    from ..services import conversation_content
+    if conversation_content.metadata_only() and not endpoint_storage:
+        raise HTTPException(409, "请更新来源电脑，Hub 已停用会话正文同步")
+    if endpoint_storage and (messages or snapshot_complete):
+        raise HTTPException(422, "终端会话只同步目录，不接收正文快照")
+    message_count = body.get("messageCount", 0)
+    if endpoint_storage and (type(message_count) is not int or not 0 <= message_count <= 1_000_000_000):
+        raise HTTPException(422, "会话消息数量无效")
     digest = _sync_digest(body)
     task_projection_id = _text(body.get("taskProjectionId"), "关联需求", 120)
     if task_projection_id:
@@ -437,7 +450,8 @@ async def sync_account_conversation(
         current_source_revision = int(row.source_revision or 0)
         if source_revision < current_source_revision:
             raise HTTPException(status_code=409, detail="同步版本落后于 Hub 当前版本")
-        if source_revision == current_source_revision:
+        endpoint_transition = endpoint_storage and row.storage_mode != "endpoint"
+        if source_revision == current_source_revision and not endpoint_transition:
             if row.source_digest and row.source_digest != digest:
                 raise HTTPException(status_code=409, detail="相同同步版本的内容不一致")
             return {
@@ -467,6 +481,11 @@ async def sync_account_conversation(
     row.source_epoch = source_epoch
     row.source_revision = source_revision
     row.source_digest = digest
+    if endpoint_storage:
+        row.storage_mode = "endpoint"
+        row.message_count = message_count
+    elif row.storage_mode == "endpoint":
+        raise HTTPException(409, "会话已使用终端存储，请更新客户端后重试")
     row.title = title
     row.state = state
     # Existing lifecycle state belongs to explicit account actions, not a
@@ -595,6 +614,10 @@ async def branch_account_conversation(
         ("user" if message.role == "user" else "assistant") + ": " + str(message.text or "")
         for message in messages
     ]
+    if row.storage_mode == "endpoint":
+        from ..services import account_endpoint_history
+        lines = [item["role"] + ": " + item["text"]
+                 for item in await account_endpoint_history.context(session, client, row, _MAX_MESSAGES)]
     selected = []
     total = 0
     context_limit = max(0, min(150_000, 190_000 - len(instruction)))

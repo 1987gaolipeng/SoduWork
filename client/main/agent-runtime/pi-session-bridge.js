@@ -331,12 +331,14 @@ function createPiSessionBridge(options) {
   /* Runner adapters share an inventory request. Query concurrently so an
      unavailable runner cannot incur one timeout per adapter. */
   let externalHistory = null;
+  let replicaHistory = null;
   async function externalRows(options) {
     try { return externalHistory ? await externalHistory.history(options) : { ok: false, chats: [] }; }
     catch (error) { return { ok: false, chats: [], reason: _reason(error) }; }
   }
   function normalizeHistoryRow(row) {
     const value = row && typeof row === 'object' ? row : {};
+    if (value.localReplica) return { ...value, cloud: false, locationMode: 'local', location: 'local' };
     let remote = value.cloud === true || String(value.locationMode || '').toLowerCase() === 'remote' ||
       String(value.location || '').toLowerCase() === 'cloud';
     if (!remote && externalHistory && typeof externalHistory.isRemote === 'function') {
@@ -536,6 +538,11 @@ function createPiSessionBridge(options) {
       ...runnerAdapters.map((adapter) => Promise.resolve(adapter.history(Number.MAX_SAFE_INTEGER))
         .catch((error) => ({ ok: false, reason: _reason(error), chats: [] }))),
     ]);
+    if (replicaHistory) {
+      for (let i = 1; i < rows.length; i++) rows[i].chats = await replicaHistory.projectRows(rows[i].chats || [], false);
+      const copies = await replicaHistory.indexedRows(false, Number(limit) || 50);
+      rows.push({ ok: true, chats: copies.filter(row => row.cached) });
+    }
     let archivedIds = null;
     if (sessionModule.archiveState && typeof sessionModule.archiveState.read === 'function' &&
         typeof sessionModule.archiveRoot === 'function') {
@@ -581,6 +588,7 @@ function createPiSessionBridge(options) {
         archived: projected.archived === true, deleted: projected.deleted === true,
         revision: Number(projected.revision || 0), lifecycleRevision: Number(projected.lifecycleRevision || 0) };
     });
+    if (replicaHistory) lifecycleRows.push(...await replicaHistory.store.lifecycleRows());
     return { ok, chats, ...(lifecycleRows.length ? { lifecycle: lifecycleRows } : {}),
       reason: ok ? '' : String(failed && failed.reason || '') };
   }
@@ -595,6 +603,11 @@ function createPiSessionBridge(options) {
       ...runnerAdapters.map((adapter) => Promise.resolve(adapter.history(Number.MAX_SAFE_INTEGER))
         .catch((error) => ({ ok: false, reason: _reason(error), chats: [] }))),
     ]);
+    if (replicaHistory) {
+      for (let i = 1; i < rows.length; i++) rows[i].chats = await replicaHistory.projectRows(rows[i].chats || [], true);
+      const copies = await replicaHistory.indexedRows(true, Number(limit) || 50);
+      rows.push({ ok: true, chats: copies });
+    }
     let archivedIds = null;
     if (typeof sessionModule.isArchived === 'function' &&
         sessionModule.archiveState && typeof sessionModule.archiveState.read === 'function' &&
@@ -682,7 +695,7 @@ function createPiSessionBridge(options) {
     return { ok: false, reason: '归档状态不可用' };
   }
 
-  async function permanentlyDeleteNativeHistory(app, id) {
+  async function permanentlyDeleteNativeHistory(app, id, { localOnly = false } = {}) {
     const wanted = String(id || '').trim();
     if (!wanted) return { ok: false, reason: '没有指定要删除的会话' };
     const piEntry = typeof sessionModule.historyEntry === 'function'
@@ -703,6 +716,7 @@ function createPiSessionBridge(options) {
       return { ok: false, reason: '这条会话还在执行，完成或停止后再删除' };
     }
     if (runner.cloud && externalHistory) {
+      if (localOnly) return { ok: true, remotePreserved: true };
       const deleted = await externalHistory.forget(wanted);
       if (deleted.ok) sessionModule.setArchived(app || opts.app, wanted, false);
       return deleted;
@@ -717,9 +731,9 @@ function createPiSessionBridge(options) {
     return deleted;
   }
 
-  async function permanentlyDeleteHistory(app, id, { retainManifest = false } = {}) {
+  async function permanentlyDeleteHistory(app, id, { retainManifest = false, localOnly = false } = {}) {
     const record = runtimeSegments.read(app || opts.app, id);
-    if (!record) return permanentlyDeleteNativeHistory(app, id);
+    if (!record) return permanentlyDeleteNativeHistory(app, id, { localOnly });
     if (!sessionModule.isArchived?.(app || opts.app, id)) return { ok: false, reason: '只能从归档历史彻底删除会话' };
     const live = findBySessionId(id);
     if (live?.inFlight?.()) return { ok: false, reason: '请先等待会话完成' };
@@ -727,10 +741,10 @@ function createPiSessionBridge(options) {
     // Keep the public archive and manifest until all native archives are gone.
     for (const part of [...record.segments, record.active].filter(p => p.sessionId !== id)) {
       sessionModule.setArchived?.(app || opts.app, part.sessionId, true);
-      const result = await permanentlyDeleteNativeHistory(app, part.sessionId);
+      const result = await permanentlyDeleteNativeHistory(app, part.sessionId, { localOnly });
       if (!result?.ok && !result?.notFound) return result;
     }
-    const result = await permanentlyDeleteNativeHistory(app, id);
+    const result = await permanentlyDeleteNativeHistory(app, id, { localOnly });
     if (result?.ok || result?.notFound) {
       // Account lifecycle commits still need every source alias after the
       // transcripts are gone. The IPC transaction cleans this up after ACK.
@@ -858,21 +872,23 @@ function createPiSessionBridge(options) {
   }
 
   const api = {
+    setReplicaHistory(source) { replicaHistory = source; },
     setExternalHistory(source) { externalHistory = source; },
     async archivedConversation(app, id, options = {}) {
       const wanted = String(id || '');
       if (!wanted) return null;
       const switched = runtimeSegments.read(app || opts.app, wanted);
-      if (switched) return normalizeHistoryRow(runtimeSegments.row(switched));
+      const normalize = row => options.nativeOnly ? { ...row, cloud: false, remoteProjection: false } : normalizeHistoryRow(row);
+      if (switched) return normalize(runtimeSegments.row(switched));
       // The sidebar is capped at 50 items; opening by identity is not.
       let unreadable = null;
       if (typeof sessionModule.historyEntry === 'function') {
         const found = await sessionModule.historyEntry(app || opts.app, wanted, { strict: options.strict === true });
-        if (found && found.ok && found.entry) return normalizeHistoryRow({ ...found.entry, adapterId: 'pi' });
+        if (found && found.ok && found.entry) return normalize({ ...found.entry, adapterId: 'pi' });
         if (found && found.ok === false && !found.notFound) unreadable = found;
       }
       const runner = await findRunnerRow(wanted, options);
-      if (runner) return normalizeHistoryRow(runner);
+      if (runner) return normalize(runner);
       if (unreadable) throw new RuntimeContractError('HISTORY_UNAVAILABLE',
         String(unreadable.reason || '暂时无法读取会话存档'));
       return null;
@@ -885,10 +901,10 @@ function createPiSessionBridge(options) {
     findRunnerRow,
     probeMissingHistory,
     removeMissingHistory,
-    async forgetRunner(app, id) {
-      const row = await findRunnerRow(id);
+    async forgetRunner(app, id, { localOnly = false } = {}) {
+      const row = await findRunnerRow(id, { nativeOnly: localOnly, strict: localOnly });
       if (!row) return { ok: false, notFound: true, reason: '这条会话不在执行底座的运行记录里' };
-      if (row.cloud && externalHistory) return externalHistory.forget(id);
+      if (!localOnly && row.cloud && externalHistory) return externalHistory.forget(id);
       const adapter = runnerAdapters.find(item => item && item.id === row.adapterId);
       if (!adapter || typeof adapter.forgetSession !== 'function') {
         return { ok: false, reason: '这个执行底座不支持删除会话' };

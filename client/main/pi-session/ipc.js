@@ -44,6 +44,7 @@ let _app = null;
 let _usage = null;
 let _cloudHandoff = null;
 let _accountSync = null;
+let _sharedHistory = null;
 let _deliverySync = null;
 let _sessionOwners = null;
 const { _conf, _saveConf, workDir, _defaultCwd, _newSessionCwd } = createConfiguration(() => _app);
@@ -142,6 +143,7 @@ function _scheduleRelease(handle) {
 
 function _wire(BrowserWindow, handle) {
   if (!handle || _wired.has(handle)) return;
+  _sharedHistory?.observe(handle, require('../conversation/requirement-context').cachedIdentity(_app));
   const dispose = handle.on((touched, snapshot) => {
     _push(BrowserWindow, handle, touched, snapshot);
     if (handle.detached) _scheduleRelease(handle);
@@ -210,6 +212,7 @@ function _attach(handle, win) {
 
 function _openReply(handle, extra) {
   const reply = require('./open-reply').openReply(_app, handle, extra);
+  if (handle.localReplica === true) return reply;
   const context = require('../conversation/requirement-context').publicContext(_app, handle.sessionId);
   if (context) {
     reply.requirementContext = context;
@@ -275,11 +278,14 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
   else app.on('ready', () => _cloudHandoff.synchronization.start());
   const accountSyncStore = require('../conversation/account-sync-store').createWorker(
     path.join(app.getPath('userData'), 'account-conversations-sync', 'outbox.json'));
+  _sharedHistory = require('../conversation/shared-history.cjs').create({ app, session });
+  session.setReplicaHistory?.(_sharedHistory);
   _accountSync = require('../conversation/account-sync').create({
     app, store: accountSyncStore, identityOf: sendIdentityOf || identityOf,
     localIdentityOf: async () => (sendIdentityOf || identityOf)(app),
     resolveNativeSource: (item, identity) => require('../conversation/account-native-source.cjs').resolve({ app, session, item, identity }),
-    realtime: true,
+    realtime: true, metadataOnly: true,
+    preserveLegacyOutbox: (job, identity) => _sharedHistory.preserveLegacyOutbox(job, identity),
   });
   // Account-conversation WebSocket messages are invalidation hints, but they
   // still need to reach the renderer.  Without this bridge the sync service
@@ -351,8 +357,8 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
   require('./environment-ipc').install({
     app, ipcMain, session, identityOf, capabilityGrantsOf, _skillDirs, workDir, _saveConf, _conf,
   });
-  require('./history-ipc').install({ app, ipcMain, session, BrowserWindow, dialog, shell,
-    cloudHistory: _cloudHandoff, accountHistory: _accountSync });
+  const historyActions = require('./history-ipc').install({ app, ipcMain, session, BrowserWindow, dialog, shell,
+    cloudHistory: _cloudHandoff, accountHistory: _accountSync, sharedHistory: _sharedHistory });
   require('../conversation/work-conversation-cards').install({ app, ipcMain, session, BrowserWindow,
     identityOf: sendIdentityOf || identityOf,
     newCwd: options => _newSessionCwd(app, 'chat-' + require('node:crypto').randomUUID(), options) });
@@ -407,8 +413,41 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
           typeof session.loadSdk === 'function') {
         Promise.resolve(session.loadSdk(app)).catch(() => {});
       }
-      const identity = await identityOf(app);
-      appRequest?.assertActive();
+      // Local history can be read without reconnecting the Hub or resuming an
+      // old account's execution process. Remote originals follow the usual path.
+      const local = opts.chatId && _sharedHistory ? await _sharedHistory.resolve(opts.chatId) : null;
+      const openLocalHistory = async () => {
+        const captured = historyAccess.actor(app);
+        if (local) {
+          if (local.deleted) return { ok: false, notFound: true, reason: '这条会话已经不存在了' };
+          const old = session.findBySessionId(opts.chatId);
+          if (old?.inFlight?.()) return { ok: false, reason: '这条会话还在执行，完成或停止后再操作' };
+          if (old && await old.close() === false) return { ok: false, reason: '会话仍在关闭，请稍后重试' };
+          const projection = await _sharedHistory.open(opts.chatId);
+          if (projection) {
+            const handle = session.attachView(projection);
+            if (captured.identity && captured.owner) _sessionOwners?.bind(handle, captured.identity);
+            if (event) _attach(handle, require('../conversation/app-surfaces.cjs').forSender(BrowserWindow, event.sender));
+            else _detach(handle);
+            _wire(BrowserWindow, handle);
+            return _openReply(handle, { resumed: true, attached: true, localReplica: true });
+          }
+        }
+        return { ok: false, notFound: true, reason: '这条会话已经不存在了' };
+      };
+      if (local) {
+        let executable = true;
+        try { historyAccess.assertOwner(app, opts.chatId, historyAccess.actor(app), local); }
+        catch (_) { executable = false; }
+        if (local.deleted || local.cached || !executable) return openLocalHistory();
+      }
+      let identity;
+      try { identity = await identityOf(app); }
+      catch (error) {
+        if (local && !automationContext && !expectedIdentity) return openLocalHistory();
+        throw error;
+      }
+      if (!identity && local && !automationContext && !expectedIdentity) return openLocalHistory();
       if (!identity) return { ok: false, reason: '这台电脑还没连上 SoduWork 后台（先打开桌宠登录一次）' };
       historyAccess.assertCurrent(app, requestActor, identity);
       const historyActor = historyAccess.actor(app, identity);
@@ -1075,6 +1114,9 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     if (!s) return { ok: false, reason: '\u4f1a\u8bdd\u4e0d\u5728\u4e86' };
     const win = BrowserWindow.fromWebContents(event.sender);
     const attached = _uiWindow.request(s, win, options);
+    if (s.localReplica) {
+      return Promise.resolve(s.loadHistory?.(options || {})).then(() => ({ ok: true, snapshot: s.snapshot() }));
+    }
     const raw = attached ? _uiWindow.snapshot(s) :
       (typeof s.uiSnapshot === 'function' ? s.uiSnapshot(options || {}) : s.snapshot());
     const snapshot = _contextSnapshot(s, raw);
@@ -1146,10 +1188,13 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     sync: () => _accountSync.flush(),
   });
   let accountingQuitReady = false;
+  const contentMigration = require('../conversation/content-migration.cjs').create({
+    app, identityOf: sendIdentityOf || identityOf });
+  contentMigration.start();
   let persistenceClose = null;
   const disposePersistence = () => {
     if (!persistenceClose) persistenceClose = Promise.allSettled([
-      _accountSync.close(), _usage?.persist?.(),
+      contentMigration.close(), _accountSync.close(), _sharedHistory?.close(), _usage?.persist?.(),
     ]).then(results => {
       if (results.some(result => result.status === 'rejected'))
         console.warn('[conversation] Pending local data could not be saved before exit');
@@ -1178,6 +1223,10 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
   });
   return {
     dispose: disposePersistence,
+    history: require('./local-history-remote.cjs').create({ app, session, history: _sharedHistory,
+      accountHistory: _accountSync,
+      identityOf: sendIdentityOf || identityOf,
+      action: historyActions.localAction }),
     open: (options, identity) => openConversation(null, options, identity),
     ...require('../access-control/automation-access').service(app, openConversation),
     async send(ref, text, files, options) {

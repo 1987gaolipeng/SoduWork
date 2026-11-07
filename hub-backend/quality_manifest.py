@@ -10,6 +10,7 @@ from public_source import INTERNAL_SMOKES, is_public_snapshot
 
 # Release checks are offline, deterministic and safe to run against isolated data.
 RELEASE_SMOKES = tuple(sorted((
+    "test_endpoint_conversations.py",
     "test_automation_inbox_push.py",
     "test_cloud_sync_notifications.py",
     "test_client_domain_events.py",
@@ -21,6 +22,7 @@ RELEASE_SMOKES = tuple(sorted((
     "test_cloud_execution_sync.py",
     "test_cloud_message_recovery.py",
     "test_conversation_turn_plugins.py",
+    "test_conversation_turn_skills.py",
     "test_cloud_recovery.py",
     "test_runner_event_delivery.py",
     "test_runner_inventory_scope.py",
@@ -43,7 +45,10 @@ RELEASE_SMOKES = tuple(sorted((
     "test_agent_install_recovery.py",
     "test_agent_platform_installation.py",
     "test_requirement_projection.py",
-    "test_requirement_maintenance_regressions.py",
+    # The four other maintenance suites have their own release entries below.
+    # Run every case under its module deadline rather than repeat all five in
+    # one aggregate process that exceeds the same 300-second deadline.
+    "test_requirement_review_access.py",
     "smoke_video_plugin.py",
     "smoke_acp_runtime.py",
     "smoke_runner_images.py",

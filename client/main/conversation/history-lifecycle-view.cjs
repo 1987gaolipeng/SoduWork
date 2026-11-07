@@ -34,6 +34,7 @@ function create(lifecycle = [], archivedIds = {}) {
   const byId = new Map();
   for (const group of groups.values()) for (const id of group.ids) byId.set(id, group);
   function project(row) {
+    if (row.localReplica === true) return row;
     const group = byId.get(row.id), state = group?.state;
     const ids = group ? [...group.ids] : [row.id];
     const localArchived = ids.some(id => Object.hasOwn(archivedIds || {}, id));

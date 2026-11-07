@@ -574,8 +574,8 @@ async def run_one(session: AsyncSession, s, who: str = "SoduWork（定时）",
             if repo:
                 instruction += '\n\n工程：' + str(repo.name or '')
             # Retrying an occurrence must keep the cloud request digest stable.
-            triggered_at = _utc(run.started_at).astimezone(schedule_zone(s))
-            instruction += '\n\n自动化触发时间：' + triggered_at.isoformat()
+            instruction_prefix = instruction + '\n\n自动化触发时间：'
+            instruction = instruction_prefix + format_trigger_time(s, run.started_at)
             from .schedule_instruction import for_run
             required = clean_required_capabilities(s.required_capabilities)
             runner_kind = 'work-computer' if runner.client_id else 'cloud'

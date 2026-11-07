@@ -208,7 +208,10 @@ class ScheduleRunnerDispatchTests(unittest.IsolatedAsyncioTestCase):
             handoff = await self.session.scalar(select(ConversationHandoff))
             expected = (self.schedule.title + "\n\n" + self.schedule.note +
                         "\n\n自动化触发时间：2026-11-05 14:55:14（北京时间）")
-            self.assertEqual(handoff.options["instruction"], expected)
+            # Execution includes the saved-run intent guard; the display text
+            # retains the exact business instruction and stable trigger time.
+            from app.services.schedule_instruction import for_run
+            self.assertEqual(handoff.options["instruction"], for_run(expected))
             self.assertEqual(handoff.options["userText"], expected)
             original_hash = handoff.request_hash
             retried = await schedules.run_one(self.session, self.schedule, schedule_run_id=run.id)

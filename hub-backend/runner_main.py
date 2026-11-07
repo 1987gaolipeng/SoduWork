@@ -688,7 +688,25 @@ class Runner:
         sys.stdout.buffer.write(blob.encode("utf-8"))
         sys.stdout.buffer.flush()
 
+    async def _conversation_content_store(self, realm):
+        import re
+        if not isinstance(realm, str) or not re.fullmatch(r"[a-f0-9]{64}", realm):
+            raise ValueError("Invalid local content realm")
+        if not hasattr(self, "_content_init_lock"):
+            self._content_init_lock = asyncio.Lock()
+            self._content_stores = {}
+        async with self._content_init_lock:
+            if realm not in self._content_stores:
+                from app.services.runner_content_store import Store
+                from app.services.local_base import _data_root
+                self._content_stores[realm] = await asyncio.to_thread(Store,
+                    os.path.join(_data_root(), "conversation-content", realm))
+            return self._content_stores[realm]
+
     async def _local_rpc_dispatch(self, message: dict) -> dict:
+        if message.get("op") == "runtime.content.read":
+            store = await self._conversation_content_store(message.get("realm"))
+            return await asyncio.to_thread(store.handle, {**message, "op": "content.read"})
         op = str(message.get("op") or "")
         if op == "desktop.capability.reply":
             bridge = getattr(self, "_desktop_capabilities", None)
@@ -941,12 +959,13 @@ class Runner:
             **admission,
             "skills": self._skill_inventory,
             "skillCatalog": _skill_report(self._skill_catalog),
-            "tags": self.tags, "caps": [ws_frames.CAP_BIN1, "handoff1", "executionSelection1", "sessionAck1", "turnFiles1", "turnSkills1"],
+            "tags": self.tags, "caps": [ws_frames.CAP_BIN1, "handoff1", "executionSelection1", "sessionAck1", "turnFiles1", "turnSkills1", "conversationContent1"],
         }
         if getattr(self, "desktop_owned", False):
             payload["caps"].append("desktopCapabilities1")
             payload["caps"].extend(["desktopPluginTurn1", "desktopPluginStart1"])
             payload["caps"].append("desktopLibrary1")
+            payload["caps"].append("desktopHistory1")
         if getattr(getattr(self, "_admission", None), "_journal", None) is not None:
             payload["caps"].append("admit1")
         message, prefetched = await _negotiate_hello(
@@ -1885,6 +1904,18 @@ class Runner:
         m = dict(m)
         m.pop("_localParent", None)
         op = str(m.get("op") or "")
+        if op.startswith("content."):
+            try:
+                # Both ingress paths share one store initialization and lock.
+                # Hub realms still have separate account/record namespaces.
+                import hashlib
+                realm = hashlib.sha256(self.hub.rstrip("/").encode()).hexdigest()
+                store = await self._conversation_content_store(realm)
+                result = await asyncio.to_thread(store.handle, m)
+            except Exception as exc:
+                result = {"ok": False, "error": str(exc)}
+            await self._send({**result, "op": "reply", "id": m.get("id")})
+            return
         if op.startswith("desktop.capability"):
             try:
                 if op != "desktop.capability" or not getattr(self, "desktop_owned", False):

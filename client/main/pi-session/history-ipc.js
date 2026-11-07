@@ -63,18 +63,42 @@ async function trashWithRecovery(shell, filePath) {
   }
 }
 
-function install({ app, ipcMain, session, BrowserWindow, dialog, shell, cloudHistory, accountHistory, trash = trashWithRecovery }) {
-  // Account projections reuse the existing record-deletion confirmation.
-  const recordDeleteOptions = row => ({
-    title: '删除聊天',
-    message: '删除“' + String(row.title || '这条会话') + '”？',
-    detail: '这条会话会从执行底座的运行记录里移除；需求、底座自己的原生存档和工作目录里的成果文件不会删除。',
-    buttons: ['取消', '删除记录'],
-  });
-  function authorize(id) {
-    const captured = historyAccess.actor(app);
-    historyAccess.assertOwner(app, id, captured);
-    return () => historyAccess.assertCurrent(app, captured);
+function install({ app, ipcMain, session, BrowserWindow, dialog, shell, cloudHistory, accountHistory, sharedHistory, trash = trashWithRecovery }) {
+  const localAction = sharedHistory ? require('./local-history-actions.cjs').create({
+    app, session, history: sharedHistory, BrowserWindow, shell, trash }) : async () => null;
+  const { authorize } = require('./history-lifecycle.cjs').create({ app, session, accountHistory, BrowserWindow });
+  function deletionFailure(guard, result, staged) {
+    if (!staged?.found) return result;
+    // Keep an actionable archive if local cleanup or the final Hub deletion
+    // fails. An irreversible tombstone must not swallow the retry entry.
+    guard.complete('archive', {}, staged);
+    const { translate } = require('../native-locale.cjs');
+    return { ...(result || {}), ok: false,
+      reason: translate('删除没有完成。账号会话已归档，请在归档会话中重试。') +
+        (result?.reason ? '\n' + translate(String(result.reason)) : '') };
+  }
+  async function finishDeletion(guard, result, staged, accountOnly = false) {
+    if (!result?.ok) return deletionFailure(guard, result, staged);
+    const committed = !accountOnly && staged?.found ? await guard.commit('delete') : staged;
+    if (committed?.ok && result.retainedManifest) {
+      guard();
+      const cleaned = await session.removeMissingHistory(app, guard.nativeId);
+      guard();
+      if (!cleaned?.ok) return cleaned || { ok: false, reason: '清理会话记录失败，请重试' };
+    }
+    return committed?.ok ? guard.complete('delete', result, committed)
+      : deletionFailure(guard, committed, staged);
+  }
+  async function checkMissing(guard, id) {
+    guard.ensureIdle();
+    const result = await session.probeMissingHistory(app, id);
+    guard.ensureIdle();
+    if (!result?.ok) return result || { ok: false, reason: '暂时无法核对会话内容，请稍后重试' };
+    if (!result.missing) return { ok: false, reason: '会话状态已变化，请刷新列表后重新删除' };
+    return result;
+  }
+  function removeTitles(ids) {
+    for (const id of ids) conversationTitles.remove(app, id);
   }
   ipcMain.handle('pi-session-history-rename', async (_event, rawId, rawTitle) => {
     try {
@@ -104,23 +128,8 @@ function install({ app, ipcMain, session, BrowserWindow, dialog, shell, cloudHis
     if (!requestedId) return { ok: false, reason: '没有指定要删除的会话' };
     let staged, target;
     try {
-      // Account projections are authorized by their authenticated source
-      // metadata, not by a nonexistent local archive with an acct-* id.
-      const assertIdle = sourceId => {
-        for (const id of [requestedId, sourceId]) {
-          if (session.findBySessionId(id)?.inFlight?.()) throw Error('这条会话还在执行，完成或停止后再删除');
-        }
-      };
-      const account = await accountHistory?.prepareDelete(requestedId, assertIdle);
-      if (account) {
-        if (rawOptions?.confirmed !== true) {
-          const copy = require('../native-locale.cjs').dialogOptions(recordDeleteOptions(account.row));
-          return { ok: false, needsConfirm: true, id: requestedId, confirm: {
-            title: copy.title, message: copy.message, detail: copy.detail,
-            cancel: copy.buttons[0], confirm: copy.buttons[1] } };
-        }
-        return await accountHistory.deleteHistory(requestedId, assertIdle);
-      }
+      const local = await localAction('delete', requestedId, rawOptions);
+      if (local) return local;
       const canonicalId = await cloudHistory?.resolveDeleteAlias(requestedId);
       const guard = await authorize(canonicalId || requestedId, { allowMissing: !canonicalId });
       target = guard;
@@ -253,6 +262,8 @@ function install({ app, ipcMain, session, BrowserWindow, dialog, shell, cloudHis
     const id = String(rawId || '').trim();
     if (!id) return { ok: false, reason: '没有指定要归档的会话' };
     try {
+      const local = await localAction('archive', id);
+      if (local) return local;
       const guard = await authorize(id);
       guard.ensureIdle();
       const nativeId = guard.nativeId || id;
@@ -274,6 +285,8 @@ function install({ app, ipcMain, session, BrowserWindow, dialog, shell, cloudHis
     const id = String(rawId || '').trim();
     if (!id) return { ok: false, reason: '没有指定要恢复的会话' };
     try {
+      const local = await localAction('restore', id);
+      if (local) return local;
       const guard = await authorize(id);
       const synced = await guard.commit('restore');
       if (!synced?.ok) return synced;
@@ -304,6 +317,8 @@ function install({ app, ipcMain, session, BrowserWindow, dialog, shell, cloudHis
     if (!id) return { ok: false, reason: '没有指定要彻底删除的会话' };
     let staged, target;
     try {
+      const local = await localAction('delete', id, { confirmed: true });
+      if (local) return local;
       const guard = await authorize(id, { allowMissing: true });
       target = guard;
       guard.ensureIdle();
@@ -347,6 +362,7 @@ function install({ app, ipcMain, session, BrowserWindow, dialog, shell, cloudHis
       catch (_) { return failed; }
     }
   });
+  return { localAction };
 }
 
 module.exports = { install, trashWithRecovery, currentWindowsSid, ensureRecycleBinFor };

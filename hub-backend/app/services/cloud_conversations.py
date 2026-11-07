@@ -204,12 +204,14 @@ async def create(session, client, request_id, raw, uploads):
                 uploaded_by=client.id, role="input", evidence_meta={"cloudRequestId": request_id}))
             manifest.append({"id": aid, **{k: item[k] for k in ("name", "contentType", "size", "sha256")}})
         options["inputs"] = manifest
+        from . import conversation_content
+        options = await conversation_content.save_options(picked["runnerId"], user.id, "handoff:" + row_id, options, session=session)
         row = Handoff(id=row_id, owner_client_id=client.id, owner_user_id=user.id,
             transfer_id=request_id, task_id=tid, sha256="", request_hash=digest,
             storage_key="", backend="", options=options, source=source,
             submitted_at=datetime.now(timezone.utc))
         task = Task(id=tid, owner_client_id=client.id, owner_user_id=user.id,
-            title=source["title"], note=instruction,
+            title=source["title"], note="" if options.get("contentRef") else instruction,
             kind="task", status="todo", origin="cloud-conversation", created_by=user.id,
             created_by_name=user.display_name or user.username,
             work_routing={"selectedStrategy": "direct", "requiredSkills": requested["requiredSkills"],
@@ -242,12 +244,14 @@ async def create(session, client, request_id, raw, uploads):
 
 async def dispatch_inputs(session, row, extra):
     """Re-read only the first message's authorized, immutable input snapshot."""
+    from . import conversation_content
+    options = await conversation_content.load_options(row.owner_user_id, "handoff:" + row.id, row.options, session=session)
     selected = {str(item.get("name") or ""): item for item in extra.get("skills", [])}
-    required = row.options.get("requiredSkills", [])
+    required = options.get("requiredSkills", [])
     if any(name not in selected for name in required):
         raise ValueError("云端会话所需技能已不可用，请恢复配置后重试")
     files = []
-    for item in row.options.get("inputs", []):
+    for item in options.get("inputs", []):
         attachment = await session.get(Attachment, item["id"])
         if (not attachment or attachment.task_id != row.task_id
                 or attachment.uploaded_by != row.owner_client_id or attachment.role != "input"):
@@ -256,30 +260,30 @@ async def dispatch_inputs(session, row, extra):
         if len(data) != item["size"] or hashlib.sha256(data).hexdigest() != item["sha256"]:
             raise ValueError("云端会话附件已变化，请重新发送")
         files.append((item["name"], data, item["contentType"]))
-    user_text = row.options.get("userText", row.options["instruction"])
-    prep = row.options.get("inputPreparation")
-    brief = row.options["instruction"]
-    if row.options.get("acceptance"):
+    user_text = options.get("userText", options["instruction"])
+    prep = options.get("inputPreparation")
+    brief = options["instruction"]
+    if options.get("acceptance"):
         from . import cloud_acceptance
         files, brief = await cloud_acceptance.inputs(session, row)
     if prep:
         brief = brief + "\n\n【附件理解约束】先区分步骤、处理对象、模板和参考；用户原始文字为空时，不得把这段兜底说明当成用户目标。"
     plugin_context = {}
-    if row.options.get("plugins"):
+    if options.get("plugins"):
         from ..models import Client
         from . import conversation_turn_plugins, dispatch_identity
         caller = await session.get(Client, row.owner_client_id)
         if not caller or caller.user_ref != row.owner_user_id:
             raise ValueError("会话归属已变化，不能使用原电脑插件")
         runner = await conversation_turn_plugins.validate_start(
-            session, caller, row.options["targetSnapshot"]["runnerId"])
+            session, caller, options["targetSnapshot"]["runnerId"])
         dispatch_id = handoffs.dispatch_id(row)
         plugin_context["pluginTurn"] = conversation_turn_plugins.authorization(
-            caller, runner, dispatch_identity.execution_ref(dispatch_id), row.options["plugins"], dispatch_id)
+            caller, runner, dispatch_identity.execution_ref(dispatch_id), options["plugins"], dispatch_id)
     return files, {**plugin_context, "dispatchId": handoffs.dispatch_id(row), "brief": brief,
         "conversationMode": "adaptive", "conversationUserText": user_text,
         "inputPreparation": prep,
         "agentExecution": extra.get("agentExecution", {}),
         "skills": [selected[name] for name in required], "requiredSkills": required,
         "requiredAgentCapabilities": ["files", "terminal"],
-        **cloud_code_delivery.context(row.options["instruction"], row.task_id)}
+        **cloud_code_delivery.context(options["instruction"], row.task_id)}

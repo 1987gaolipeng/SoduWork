@@ -27,6 +27,9 @@ class AccountConversationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
+        notifications = patch.object(account_conversations, "SessionLocal", self.sessions)
+        notifications.start()
+        self.addCleanup(notifications.stop)
         async with self.engine.begin() as connection:
             await connection.run_sync(lambda sync: Base.metadata.create_all(
                 sync,
@@ -77,6 +80,21 @@ class AccountConversationTests(unittest.IsolatedAsyncioTestCase):
             "snapshotComplete": True,
             **extra,
         }
+
+    async def test_creation_time_survives_later_sync_updates(self):
+        with patch.object(account_conversations, "_publish_account_update", new=AsyncMock()):
+            for revision in (1, 2):
+                response = await self.http.post("/api/v1/account-conversations/sync",
+                    json=self.checkpoint(revision, [], title=f"title-{revision}"))
+                self.assertEqual(response.status_code, 200)
+                page = (await self.http.get("/api/v1/account-conversations")).json()
+                row = page["items"][0]
+                self.assertTrue(row["createdAt"])
+                if revision == 1:
+                    created = row["createdAt"]
+                else:
+                    self.assertEqual(row["createdAt"], created)
+                    self.assertEqual(row["title"], "title-2")
 
     async def test_creation_time_survives_later_sync_updates(self):
         with patch.object(account_conversations, "_publish_account_update", new=AsyncMock()):

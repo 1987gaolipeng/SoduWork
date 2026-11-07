@@ -167,8 +167,8 @@ async def public_policy(
 async def complete_login(session, client, user, body, *, created=False):
     expected_key = client.secret_hash
     expected_version = user.auth_version
-    await session.refresh(user, with_for_update=True)
-    await session.refresh(client, with_for_update=True)
+    from ..services import desktop_login_policy
+    await desktop_login_policy.lock_assignment(session, client, user)
     if client.auth_state == "revoked" or client.secret_hash != expected_key:
         raise client_access.ClientAccessError("设备授权已变更，请重新登录", code="DEVICE_AUTH_FAILED", status=403)
     if user.auth_version != expected_version:
@@ -179,10 +179,13 @@ async def complete_login(session, client, user, body, *, created=False):
     if changed_binding:
         device_auth.activate(client, user)
     _update_device(client, body)
+    replaced_desktops = await desktop_login_policy.replace_previous(session, client, user)
     user.last_login_at = datetime.now(timezone.utc)
     await session.commit()
     if changed_binding:
         await device_connections.disconnect(client.id, 4401)
+    for previous_id in replaced_desktops:
+        await device_connections.disconnect(previous_id, 4401)
     token, expires_in = device_auth.issue_session(client)
     return {"ok": True, "created": created, "session": token, "expiresIn": expires_in,
             "device": client_to_api(client), "user": _safe_user(user),

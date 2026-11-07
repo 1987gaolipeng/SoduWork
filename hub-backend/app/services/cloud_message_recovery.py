@@ -135,6 +135,17 @@ async def deliver(row_id):
         runner = runner_hub.get(payload["runnerId"])
         if not runner or not runner.alive() or "admit1" not in getattr(runner, "caps", []):
             return "waiting"
+        durable_payload = dict(payload)
+        if payload.get("contentRef"):
+            from . import conversation_content
+            try:
+                saved = await conversation_content.get_json(payload["contentRef"], user.id, "message:" + row.id, session=session)
+            except Exception:
+                return "waiting"
+            if any(saved.get(key) != payload.get(key) for key in ("ownerUserId", "ref", "runnerId")):
+                await _save(session, row, attempts, "uncertain", {"error": "已保存消息的执行归属不匹配"}, retry=False)
+                return "uncertain"
+            payload = {**saved, "runnerBootId": durable_payload.get("runnerBootId", "")}
         boot = str(getattr(runner, "boot_id", "") or "")
         key = "comment:" + row.id
         if row.phase != "queued":
@@ -195,9 +206,10 @@ async def deliver(row_id):
             if error:
                 return "waiting"
         payload["runnerBootId"] = boot
+        durable_payload = {**durable_payload, "runnerBootId": boot} if durable_payload.get("contentRef") else payload
         changed = await session.execute(update(Receipt).where(
             Receipt.id == row.id, Receipt.phase.in_(PENDING), Receipt.recovery_attempts == attempts,
-        ).values(phase="sending", payload=payload).execution_options(synchronize_session=False))
+        ).values(phase="sending", payload=durable_payload).execution_options(synchronize_session=False))
         if changed.rowcount:
             from .cloud_sync_notifications import mark
             mark(session, row.task_id)

@@ -1,5 +1,15 @@
 (function (global) {
   const messages = {
+    '删除本地会话': 'Delete local conversation',
+    '删除本地记录': 'Delete local history',
+    '删除本机保存的会话记录，不删除云端原会话、需求或成果文件。重启后不会自动恢复本地副本。': 'Delete this local history only. Cloud originals, requirements and output files are retained. Restarting will not restore the deleted local copy.',
+    '本地历史为只读，请使用当前账号新建会话继续': 'Local history is read-only. Start a new conversation with the current account to continue.',
+    '本地历史没有正在执行的任务': 'This local history has no running task.',
+    '单条历史消息过大，请在原执行底座查看完整内容': 'This history message is too large to display here. Open the original runtime to view it in full.',
+    '会话已在其他窗口更新，请刷新后重试': 'This conversation changed in another window. Refresh and retry.',
+    '会话仍在关闭，请稍后重试': 'The conversation is still closing. Retry shortly.',
+    '本地会话记录不匹配，请刷新后重试': 'The local conversation record does not match. Refresh and retry.',
+    '这条会话已经不存在了': 'This conversation no longer exists.',
     "仅验证 OpenCode 执行组件；不运行 Harness² 推演，会使用所选模型额度，最多 3 分钟。": "Tests only the OpenCode execution component, without Harness² refinement. Uses the selected model's quota; up to 3 minutes.",
     "② 仅验证 OpenCode 执行组件；不运行 Harness² 推演，会使用所选模型额度，最多 3 分钟。": "② Tests only the OpenCode execution component, without Harness² refinement. Uses the selected model's quota; up to 3 minutes.",
     "收到执行回复，但尚未确认 OpenCode 执行组件完整结束，请点「测一下」重试。": "A reply was received, but OpenCode execution has not been confirmed complete. Click Test to retry.",

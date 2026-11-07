@@ -222,8 +222,9 @@ test('strict lookup refuses incomplete directory enumeration instead of proving 
   const f = await fixture(t);
   await f.write('denied-directory');
   const realReadDir = fs.readdir;
+  const realDirectory = await fs.realpath(f.directory);
   t.mock.method(fs, 'readdir', async (directory, ...args) => {
-    if (path.resolve(directory) === path.resolve(f.directory))
+    if (path.resolve(directory) === path.resolve(f.directory) || path.resolve(directory) === realDirectory)
       throw Object.assign(Error('fixture inaccessible directory'), { code: 'EACCES' });
     return realReadDir(directory, ...args);
   });

@@ -29,6 +29,7 @@ function ipcFixture({ app, bridge, owner, cwd, task, legacy = false }) {
     getURL: () => pathToFileURL(path.join(__dirname, '../desk.html')).href };
   const event = { sender, senderFrame: sender.mainFrame }, calls = [];
   const context = vm.createContext({ app, path, identityOf: async () => owner, sendIdentityOf: null,
+    _sessionOwners: null, _sharedHistory: null, _discardRenderer() {},
     taskInput: { request: async (requestOwner, route) => {
       assert.equal(requestOwner.clientId, owner.clientId);
       assert.equal(requestOwner.hub, owner.hub);

@@ -25,7 +25,7 @@ function create({ app, identityOf, conversation, pluginStore = plugins, fetchCat
   let queue = Promise.resolve();
   const scope = identity => [identity?.hub, identity?.clientId, accountId(identity)];
   async function run(body) {
-    if (!body || !['catalog', 'library.call', 'skill.set', 'plugin.get', 'plugin.preflight', 'plugin.install', 'plugin.use', 'plugin.prepare'].includes(body.operation)
+    if (!body || !['catalog', 'library.call', 'conversation.history', 'skill.set', 'plugin.get', 'plugin.preflight', 'plugin.install', 'plugin.use', 'plugin.prepare'].includes(body.operation)
         || !/^[A-Za-z0-9_-]{8,80}$/.test(body.requestId || '') || !body.args || Array.isArray(body.args)
         || typeof body.args !== 'object' || Buffer.byteLength(JSON.stringify(body)) > 512000) throw Error('操作内容不正确');
     const identity = await identityOf(app);
@@ -44,6 +44,12 @@ function create({ app, identityOf, conversation, pluginStore = plugins, fetchCat
     }
     await guard(true);
     const args = body.args;
+    if (body.operation === 'conversation.history') {
+      if (typeof conversation.history !== 'function') throw Error('请更新并重启这台电脑的 SoduWork');
+      const result = await conversation.history(args, guard);
+      await guard(true);
+      return result;
+    }
     if (body.operation === 'library.call') {
       const result = await library(args, body.requestId, () => guard(true));
       await guard(true);

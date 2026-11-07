@@ -56,7 +56,7 @@ function sourceMessage(sessionId, item, position, messageTimes, now) {
     createdAt: new Date(createdAt).toISOString() };
 }
 
-function snapshot(handle, messageTimes, now) {
+function snapshot(handle, messageTimes, now, metadataOnly = false) {
   const sessionId = safeText(handle.sessionId, 180);
   const raw = typeof handle.snapshot === 'function' ? handle.snapshot() : {};
   const rows = Array.isArray(raw.messages) ? raw.messages : [];
@@ -64,8 +64,8 @@ function snapshot(handle, messageTimes, now) {
   // Hub would retain an incomplete transcript and other devices could render
   // it as the source of truth. Refuse the snapshot and let the source device
   // report the bounded-sync error instead.
-  if (rows.length > MAX_MESSAGES) throw Error('source conversation exceeds the sync message limit');
-  const messages = rows.map((item, index) => sourceMessage(sessionId, item, index, messageTimes, now)).filter(Boolean);
+  if (!metadataOnly && rows.length > MAX_MESSAGES) throw Error('source conversation exceeds the sync message limit');
+  const messages = metadataOnly ? [] : rows.map((item, index) => sourceMessage(sessionId, item, index, messageTimes, now)).filter(Boolean);
   const history = typeof handle.historyRow === 'function' ? handle.historyRow(raw) : {};
   const title = safeText(history && history.title || raw.title || '本地会话', 200);
   const state = syncState(raw.status || history && history.state || 'idle');
@@ -77,7 +77,9 @@ function snapshot(handle, messageTimes, now) {
   ].filter(Boolean).map(String))];
   const taskProjectionId = !handle.acceptanceSession && taskIds.length === 1 &&
     rows.every(item => String(item?.taskId || '') === taskIds[0]) ? taskIds[0] : '';
-  return { sessionId, title, state, messages, taskProjectionId };
+  return { sessionId, title, state, messages, taskProjectionId,
+    ...(metadataOnly ? { messageCount: rows.length,
+      tailDigest: digest(rows.slice(-10).map(item => [item.id, item.role, messageText(item)])) } : {}) };
 }
 
 function digest(value) {
@@ -85,7 +87,7 @@ function digest(value) {
 }
 
 function isProjection(handle) {
-  if (handle.passiveCloudView) return true;
+  if (handle.passiveCloudView || handle.localReplica) return true;
   const view = typeof handle.snapshot === 'function' ? handle.snapshot() : {};
   return view?.execution?.accountConversation === true || view?.cloudHandoff?.phase === 'committed';
 }
@@ -106,7 +108,7 @@ function historyRow(item, identity) {
 
 function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, retryMs = 5000,
   fetch = fetchWithDeviceAuthRetry, now = () => Date.now(), realtime = false,
-  discovery = require('../native-discovery.cjs'), refreshOptions = {} }) {
+  discovery = require('../native-discovery.cjs'), refreshOptions = {}, metadataOnly = false, preserveLegacyOutbox }) {
   const bound = new Map();
   let closed = false;
   let timer = null;
@@ -133,6 +135,7 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
   }
   const accountIds = new Set();
   const accountRows = new Map();
+  const sourceRows = new Map();
   const listeners = new Set();
   let socket = null;
   let socketScope = '';
@@ -193,7 +196,7 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
       historyGeneration++;
       historyScope = scope;
       historyPromise = null;
-      accountRows.clear(); accountIds.clear(); deletedIds.clear();
+      accountRows.clear(); sourceRows.clear(); accountIds.clear(); deletedIds.clear();
       historyCursor = 0; historyHasMore = false; historyAt = 0; directoryLoaded = false;
       historyInitialized = false; directoryChanges.clear(); loadedEpoch = -1;
       historyFailures = 0; historyRetryAt = 0;
@@ -249,6 +252,7 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
     const id = String(item.id), previous = accountRows.get(id);
     if (previous && Number(previous.revision || 0) > Number(item.revision || 0)) return;
     accountRows.set(id, item);
+    sourceRows.set(JSON.stringify([item.sourceClientId, item.sourceSessionId]), item);
     if (item.deleted) { accountIds.delete(id); deletedIds.add(id); }
     else { accountIds.add(id); deletedIds.delete(id); }
   }
@@ -455,10 +459,11 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
   function enqueue(state) {
     if (state.deleted || deletion.blocked(state.key) || isProjection(state.handle)) return;
     const times = { ...state.messageTimes };
-    const view = snapshot(state.handle, times, now);
+    const view = snapshot(state.handle, times, now, metadataOnly);
     const content = { sourceClientId: state.identity.clientId, sourceSessionId: view.sessionId,
       sourceEpoch: state.sourceEpoch, title: view.title, state: view.state,
-      archived: false, deleted: false, snapshotComplete: true, messages: view.messages,
+      archived: false, deleted: false, snapshotComplete: !metadataOnly, messages: view.messages,
+      ...(metadataOnly ? { storageMode: 'endpoint', messageCount: view.messageCount, tailDigest: view.tailDigest } : {}),
       taskProjectionId: view.taskProjectionId };
     const contentDigest = digest(content);
     if (contentDigest === state.contentDigest && !state.legacy) return;
@@ -495,6 +500,13 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
     // Older outboxes may contain native states rejected by the Hub. Normalize
     // on every retry, preserving the source revision, epoch and message IDs.
     const body = { ...job.body, state: syncState(job.body.state) };
+    if (metadataOnly && body.storageMode !== 'endpoint') {
+      if (body.messages?.length) {
+        if (!preserveLegacyOutbox) throw Error('Legacy conversation content requires durable local migration');
+        await preserveLegacyOutbox(job, identity);
+      }
+      body.storageMode = 'endpoint'; body.snapshotComplete = false; body.messages = [];
+    }
     const response = await fetch(identity, endpoint(identity, '/account-conversations/sync'), {
       method: 'POST', redirect: 'error', signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(30000)]),
       headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -1000,9 +1012,12 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
   }
 
   Promise.resolve(store.jobs(1)).then(jobs => { if (jobs.length) schedule(); }).catch(() => {});
-  return { bind, flush, close, history, row, openProjection,
-    prepareDelete: deletion.prepare, deleteHistory: deletion.forget,
-    deleteNativeHistory: deletion.deleteNative, onChange(listener) {
+  return { bind, flush, close, history, row, openProjection, resolveLifecycle, setLifecycle,
+    sourceProjection(id, identity) {
+      if (directoryScope(identity) !== historyScope) return null;
+      const row = sourceRows.get(JSON.stringify([identity.clientId, id]));
+      return row && !row.deleted ? row : null;
+    }, onChange(listener) {
       if (typeof listener !== 'function') return () => {};
       listeners.add(listener); return () => listeners.delete(listener);
     }, isRemote: () => false,

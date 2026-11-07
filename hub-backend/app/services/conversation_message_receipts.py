@@ -48,6 +48,12 @@ async def send(session, client, task_id, ref, text, message_id, ctx, *, executio
             raise HTTPException(409, "原会话暂不支持可靠的插件续聊，请刷新原电脑连接")
         if payload:
             row_id = account_id
+            from . import conversation_content
+            conversation_content.require_endpoint(payload["runnerId"])
+            if conversation_content.supported(payload["runnerId"]):
+                pointer = await conversation_content.put_json(payload["runnerId"], client.user_ref, "message:" + row_id, payload, session=session)
+                payload = {key: payload[key] for key in ("schema", "ownerUserId", "ref", "runnerId", "runnerBootId")}
+                payload["contentRef"] = pointer
         row = Receipt(id=row_id, task_id=task_id, owner_client_id=client.id,
                       message_id=message_id, content_hash=digest, payload=payload,
                       created_at=cloud_message_recovery.now(),

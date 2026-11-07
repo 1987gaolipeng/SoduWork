@@ -1,6 +1,7 @@
-"""Provider-independent session index with incremental event retention and replay. Runners retain
-raw recovery archives; the server retains structured audit and display events so clients do not
-depend on a machine staying online.
+"""Provider-independent session index with incremental receipts and replay.
+
+Endpoint-capable Runners retain transcript bodies. Hub metadata preserves event
+ordering and audit identity; body reads report endpoint unavailability explicitly.
 """
 from __future__ import annotations
 
@@ -232,7 +233,7 @@ def _event_api(row: am.ExecutionEvent) -> dict:
            "at": row.at.isoformat() if row.at else ""}
     for key in ("seg", "round", "admissionKey", "admissionStartSeq", "turnState", "textTruncated", "full", "sourceId", "callId", "isError",
                 "streamId", "done", "delta", "arguments", "usage", "usageScope", "toolKind", "sentAt", "state", "cancelReason", "attachments", "plugins",
-                "serviceUrl", "previewUrl", "host", "port", "services", "phase"):
+                "serviceUrl", "previewUrl", "host", "port", "services", "phase", "contentUnavailable"):
         if detail.get(key) not in (None, ""):
             out[key] = detail[key]
     return out
@@ -683,6 +684,7 @@ async def ingest_event_page(session: AsyncSession, row, items: list, round_no=No
     have = set((await session.scalars(select(am.ExecutionEvent.seq).where(
         am.ExecutionEvent.session_id == row.id, am.ExecutionEvent.seq.in_(seqs)))).all()) if seqs else set()
     now = datetime.now(timezone.utc)
+    prepared = []
     for item in events:
         seq = int(item["seq"])
         if seq in have:
@@ -714,7 +716,7 @@ async def ingest_event_page(session: AsyncSession, row, items: list, round_no=No
             detail["attachments"] = [{"name": str(part.get("name") or "")[:200]}
                 for part in item["attachments"][:20] if isinstance(part, dict) and part.get("name")]
         at = _no_future(_dt(item.get("at")), now) or now
-        await _insert_event_once(session, {
+        prepared.append({
             "session_id": row.id, "seq": seq, "kind": str(item.get("kind") or "out")[:32],
             "tool": str(item.get("tool") or "")[:120],
             "text": str(item.get("text") or "")[:50000 if item.get("streamId") else 4000],
@@ -723,6 +725,9 @@ async def ingest_event_page(session: AsyncSession, row, items: list, round_no=No
         have.add(seq)
         if row.last_event_at is None or _dt(row.last_event_at) < at:
             row.last_event_at = at
+    from . import endpoint_events
+    for values in await endpoint_events.externalize(session, row, prepared):
+        await _insert_event_once(session, values)
     await advance_persisted_sequence(session, row)
     return seqs
 
@@ -996,8 +1001,9 @@ async def read_task(session: AsyncSession, task_id: str, ref: str = "", since: i
         event_query = event_query.where(am.ExecutionEvent.seq <= through)
     events = list((await session.execute(event_query.order_by(am.ExecutionEvent.seq).limit(
             min(1000, max(1, int(limit or 400)))))).scalars().all())
+    from . import endpoint_events
     visible = execution_event_policy.visible_items(
-        [_event_api(x) for x in events])
+        [_event_api(x) for x in await endpoint_events.hydrate(events, session=session)])
     out = session_api(row, items=visible)
     out["persistedThrough"] = through
     out["last"] = int(events[-1].seq) if events else int(since or 0)
@@ -1043,11 +1049,12 @@ async def list_task(session: AsyncSession, task_id: str, *, limit: int = 40,
         bucket.append(event)
         if per_session and len(bucket) > per_session:
             del bucket[0]
+    from . import endpoint_events
     return {
         "sessions": [session_api(
             row,
             items=execution_event_policy.visible_items(
-                [_event_api(x) for x in grouped.get(row.id, [])]))
+                [_event_api(x) for x in await endpoint_events.hydrate(grouped.get(row.id, []), strict=False, session=session)]))
                      for row in rows],
         "truncated": truncated,
     }
