@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import gc
 import hashlib
 import inspect
 import json
@@ -61,6 +62,9 @@ class UploadIOTests(unittest.IsolatedAsyncioTestCase):
         async with self.engine.begin() as conn:
             await conn.run_sync(lambda connection: Base.metadata.create_all(
                 connection, tables=[ClientRelease.__table__, AuditLog.__table__]))
+        # Concurrent integrity errors can retain SQLite cursor/traceback cycles.
+        # Release these after disposal and before deleting the isolated database.
+        self.addCleanup(gc.collect)
         self.addAsyncCleanup(self.engine.dispose)
         key = Ed25519PrivateKey.generate()
         self.private = base64.b64encode(key.private_bytes(
