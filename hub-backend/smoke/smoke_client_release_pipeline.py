@@ -112,7 +112,7 @@ def main(installation_mode="upgrade"):
             for name in ["tools/sign-client-release.mjs", "client/scripts/installer-compatibility-report.cjs",
                          "client/main/client-update-contract.js", "tools/ci/verify-client-publication.cjs",
                          "tools/ci/release-artifacts.cjs", "tools/ci/publish-client.cjs",
-                         "tools/ci/client-publisher-auth.cjs",
+                         "tools/ci/client-publisher-auth.cjs", "tools/ci/release-transfer.cjs",
                          "tools/ci/client-release-notes.cjs", "tools/ci/localized-release-notes.cjs",
                          "client/scripts/client-build-version.cjs",
                          "tools/ci/release-notes-ai.cjs",
