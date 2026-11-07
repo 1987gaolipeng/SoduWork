@@ -43,7 +43,7 @@ if (typeof electron === 'string') {
       ...row, ...(row.id === 'dsh' ? { availability: { ok: true, detectedVersion: '@openma/deepseek-harness-acp 0.4.40' } } : {}),
     }))) + ';void 0');
     await js('document.querySelector("#nchatInput").value="Keep my draft";document.querySelector("#nchatInput").dispatchEvent(new Event("input"));void 0');
-    for(const agent of ['opencode','qwen','dsh','harness2','pi']) {
+    for(const agent of [...require('../main/agent-runtime/runtime-catalog').runtimes().map(row => row.id).filter(id => id !== 'pi'), 'pi']) {
       await click('#nchatRuntime'); await until('document.querySelector("[data-runtime=qwen]")');
       await click('[data-runtime='+agent+']'); await until('state.adapterId==='+JSON.stringify(agent));
       assert.equal(await js('state.ref'),'same-conversation');assert.equal(await js('document.querySelector("#nchatInput").value'),'Keep my draft');

@@ -93,7 +93,7 @@ function create({ request, task, spec, scope, interval = 1500, wait = ms => new 
         agentId: page.activeExecutionSelection?.agentId || page.engine || page.cli,
         runId: ref,
       });
-      if (!outputs.has(ref)) outputs.set(ref, liveOutput.create(handle, task.id, { sourceAgent }));
+      if (!outputs.has(ref)) outputs.set(ref, liveOutput.create(handle, task.id, { sourceAgent, coalesceText: true }));
       const output = outputs.get(ref);
       output.setSourceAgent(sourceAgent);
       const items = continuation ? continuation.items(page) : page.items;

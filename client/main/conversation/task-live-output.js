@@ -196,7 +196,10 @@ function create(handle, taskId, options = {}) {
     }
   }
   // Late authoritative metadata must not reset cursors, pending tools, or text buffers.
-  function setSourceAgent(value) { source = agentSource.fields(value); }
+  function setSourceAgent(value) {
+    const next = agentSource.fields(value);
+    if (next.sourceAgent) source = next;
+  }
   return { consume, finish, setSourceAgent, lastText: ref => lastTexts.get(ref) || '', answers: () => answers,
     text: ref => [...(transcripts.get(ref)?.values() || [])].filter(Boolean).join('\n\n') };
 }
