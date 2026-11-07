@@ -7,6 +7,8 @@
     "通了 —— Harness² {version} 的 OpenCode 执行组件已验证；此测试不包含推演。": "Connected — the OpenCode execution component for Harness² {version} is verified. This test does not include refinement.",
     "Harness² 文本推演后由 OpenCode 执行，增加耗时与模型用量": "Harness² text refinement, then OpenCode execution; adds latency and model usage.",
     "每轮先运行 Google Research Harness² 的七阶段文本推演，再由 OpenCode 执行工具；推演会增加耗时与模型用量，失败时不会切换底座。": "Each turn runs Google Research Harness² seven-stage text refinement, then OpenCode executes tools. Refinement adds latency and model usage; failure does not switch runtimes.",
+    '加载更多': 'Load more',
+    '通知无法保存到本机，请检查存储空间后重试。': 'Notifications could not be saved locally. Check available storage and retry.',
   "当前 Hub 不支持单条连接更新，请升级 Hub 后再检查连接": "This Hub does not support individual connection updates. Upgrade the Hub and check the connection again.",
   "连接已在其他位置修改，请刷新后再检查连接": "This connection was changed elsewhere. Refresh the list and check the connection again.",
   "正在验证钉钉本机登录状态…": "Verifying the local DingTalk sign-in…",

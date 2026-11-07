@@ -7,6 +7,7 @@
     // of the default login mode.
     let mode = 'password', policy = null, revision = 0, busy = false, sending = false;
     let policyError = false;
+    let legalLocales = {};
     let challenge = null, cooldownUntil = 0, clock = null, pendingPasswordMode = false;
     let delivery = null, deliveryTimer = null, disposed = false;
     gate.classList.add('ac-auth');
@@ -23,7 +24,7 @@
       '<button type="button" class="ac-text" data-password-toggle="soduWorkAuthPassword" aria-label="显示密码" aria-pressed="false">显示</button></span></label>' +
       '<label data-auth-confirm hidden><span>确认密码</span><input id="acConfirmPassword" type="password" autocomplete="new-password" maxlength="128" placeholder="再次输入密码"></label>' +
       '<div class="ac-consent" data-auth-consent hidden><label><input id="acConsent" type="checkbox"><span>我已阅读并同意</span></label>' +
-      '<button type="button" class="ac-link" data-legal="terms">《用户协议》</button>和<button type="button" class="ac-link" data-legal="privacy">《隐私政策》</button></div>' +
+      '<button type="button" class="ac-link" data-legal="terms">《用户协议》</button><span data-consent-and>和</span><button type="button" class="ac-link" data-legal="privacy">《隐私政策》</button></div>' +
       '<div class="soduwork-auth-status" role="status" aria-live="polite"></div>' +
       '<div class="ac-status" data-mail-availability hidden><span data-mail-message></span> ' +
       '<button type="button" class="ac-link" data-recheck-policy>重新检查</button></div>' +
@@ -31,12 +32,14 @@
       '<button class="soduwork-auth-submit ac-primary" type="submit"><span>登录</span></button></form>' +
       '<nav class="ac-auth-links"><button type="button" class="ac-link" data-auth-mode="register">创建账号</button><button type="button" class="ac-link" data-auth-mode="resetPassword">忘记密码</button></nav>' +
       '<button type="button" class="ac-link ac-auth-back" data-auth-mode="password" hidden>返回登录</button>' +
-      '<footer class="ac-auth-footer"><div class="ac-auth-connection-note"><span class="soduwork-auth-secure"><i></i>密码和验证码不会保存在本机</span><span class="soduwork-auth-hub">连接 <b></b></span></div><div><button type="button" class="ac-link" data-legal="terms">用户协议</button><i>·</i><button type="button" class="ac-link" data-legal="privacy">隐私政策</button></div></footer></main>';
+      '<footer class="ac-auth-footer"><div class="ac-auth-connection-note"><span class="soduwork-auth-secure"><i></i>密码和验证码不会保存在本机</span><span class="soduwork-auth-hub">连接 <b></b></span></div><div class="ac-auth-legal-links"><button type="button" class="ac-link" data-legal="terms">用户协议</button><i aria-hidden="true">·</i><button type="button" class="ac-link" data-legal="privacy">隐私政策</button></div>' +
+      '<label class="ac-auth-language" hidden><span>界面语言</span><select data-auth-language translate="no"></select></label></footer></main>';
     const form = gate.querySelector('form'), account = gate.querySelector('#soduWorkAuthAccount');
     const password = gate.querySelector('#soduWorkAuthPassword'), confirm = gate.querySelector('#acConfirmPassword');
     const code = gate.querySelector('#acEmailCode'), consent = gate.querySelector('#acConsent');
     const status = gate.querySelector('.soduwork-auth-status'), submit = gate.querySelector('[type="submit"]');
     const send = gate.querySelector('[data-send-code]');
+    const language = gate.querySelector('[data-auth-language]');
     const consentRequiredMessage = '请阅读并同意用户协议和隐私政策。';
     const api = () => hooks.api();
     const tx = value => (global.SoduWorkI18n && typeof global.SoduWorkI18n.translateText === 'function')
@@ -87,6 +90,7 @@
       confirm.placeholder = tx('再次输入密码');
       const consentText = gate.querySelector('.ac-consent label span');
       if (consentText) consentText.textContent = tx('我已阅读并同意');
+      text('[data-consent-and]', '和');
       gate.querySelectorAll('[data-legal]').forEach(node => {
         node.textContent = tx(node.dataset.legal === 'privacy' ? '隐私政策' : '用户协议');
       });
@@ -95,6 +99,9 @@
       text('[data-auth-mode="register"]', '创建账号');
       text('[data-auth-mode="resetPassword"]', '忘记密码');
       text('.ac-auth-back', '返回登录');
+      text('.ac-auth-language > span', '界面语言');
+      language.setAttribute('aria-label', tx('界面语言'));
+      language.value = global.SoduWorkI18n?.getLocale?.() || '';
       text('.soduwork-auth-secure', '密码和验证码不会保存在本机');
       const hub = gate.querySelector('.soduwork-auth-hub');
       if (hub && hub.firstChild && hub.firstChild.nodeType === 3) hub.firstChild.nodeValue = tx('连接 ');
@@ -218,7 +225,21 @@
           status.classList.contains('is-error') && status.textContent === consentRequiredMessage) setStatus('');
     });
     gate.querySelectorAll('[data-auth-mode]').forEach(button => button.addEventListener('click', () => changeMode(button.dataset.authMode)));
-    gate.querySelectorAll('[data-legal]').forEach(button => button.addEventListener('click', () => ui.legal(gate, policy?.legalDocuments || [], button.dataset.legal)));
+    gate.querySelectorAll('[data-legal]').forEach(button => button.addEventListener('click', () => ui.legal(gate, policy?.legalDocuments || [], button.dataset.legal, {
+      returnLabel: mode === 'register' ? '返回注册' : mode === 'resetPassword' ? '返回找回密码' : '返回登录',
+      requiredVersions: policy?.requiredConsentVersions,
+      onSelection: doc => { if (doc?.key) legalLocales[doc.key] = { version: doc.version, locale: doc.locale || '' }; },
+      getScope: identityScope,
+      load: typeof api()?.clientAuthPolicy === 'function' ? () => api().clientAuthPolicy() : undefined,
+      onLoaded: result => setPolicy(result)
+    })));
+    const languages = global.SoduWorkI18n?.options?.() || [];
+    gate.querySelector('.ac-auth-language').hidden = languages.length < 2;
+    languages.forEach(item => {
+      const option = document.createElement('option');
+      option.value = item.value; option.textContent = item.label; language.appendChild(option);
+    });
+    language.addEventListener('change', () => global.SoduWorkI18n?.setLocale?.(language.value));
     ui.bindPassword(gate);
     gate.querySelector('.soduwork-auth-retry').addEventListener('click', hooks.retry);
     gate.querySelector('[data-recheck-policy]').addEventListener('click', () => {
@@ -267,6 +288,11 @@
       const state = stamp(), action = mode;
       const payload = { email: value, password: password.value, newPassword: password.value,
         challengeId: challenge?.id || '', code: code.value, consents: policy?.requiredConsentVersions || {} };
+      if (action === 'register') payload.consentLocales = Object.fromEntries(['terms', 'privacy'].map(kind => {
+        const selected = ui.legalSelection?.(policy?.legalDocuments, kind, global.SoduWorkI18n?.getLocale?.() || 'zh-CN', policy?.requiredConsentVersions?.[kind]).document;
+        const read = legalLocales[kind];
+        return [kind, (read?.version === policy?.requiredConsentVersions?.[kind] ? read.locale : selected?.locale) || ''];
+      }));
       setBusy(true); setStatus('');
       try {
         const result = ui.check(await (action === 'password' && (!ui.email(value) || (policy && !supportsEmail()))
@@ -279,11 +305,18 @@
         }
         setStatus('验证成功，正在进入工作区…', 'success'); hooks.success(result);
       } catch (error) {
+        if (current(state) && error?.code === 'CONSENT_REQUIRED') {
+          consent.checked = false;
+          try { const latest = await api().clientAuthPolicy(); if (current(state)) setPolicy(latest); } catch (_) {}
+        }
         if (current(state)) { password.value = ''; confirm.value = ''; setStatus(ui.error(error), 'error'); setBusy(false); }
       }
     });
     function setPolicy(next) {
       policyError = false;
+      if (policy && ['terms', 'privacy'].some(kind => policy.requiredConsentVersions?.[kind] !== next?.requiredConsentVersions?.[kind])) {
+        consent.checked = false; legalLocales = {};
+      }
       policy = next || {};
       if (!canMail() && mode === 'emailCode') {
         if (busy) pendingPasswordMode = true; else changeMode('password');

@@ -197,17 +197,21 @@ async def _binding(session: AsyncSession, client_id: str, *, include_quota=False
         .outerjoin(User, Client.user_ref == User.id)
         .where(Client.id == client_id).execution_options(populate_existing=True))
     if include_quota:
-        from . import client_access, quota_plans
+        from . import client_access, legal_publications, quota_plans
         default, personal, grant = (aliased(AppSetting, name="quota_" + name)
                                     for name in ("default", "personal", "grant"))
-        query = (query.add_columns(default.value, personal.value, grant.value)
+        legal = aliased(AppSetting, name="legal_publication")
+        query = (query.add_columns(default.value, personal.value, grant.value, legal.key)
                  .outerjoin(default, default.key == client_access.POLICY_KEY)
                  .outerjoin(personal, personal.key == client_access.USER_QUOTA_PREFIX + Client.user_ref)
-                 .outerjoin(grant, grant.key == quota_plans.GRANT_PREFIX + Client.user_ref))
+                 .outerjoin(grant, grant.key == quota_plans.GRANT_PREFIX + Client.user_ref)
+                 .outerjoin(legal, legal.key == legal_publications.MARKER))
     row = (await session.execute(query)).one_or_none()
     if row:
         row[0].__dict__.pop("_quota_policy_rows", None)
+        row[0].__dict__.pop("_legal_publications_enabled", None)
         if include_quota:
+            row[0]._legal_publications_enabled = row[7] is not None
             row[0]._quota_policy_rows = {
                 client_access.POLICY_KEY: row[4],
                 client_access.USER_QUOTA_PREFIX + str(row[0].user_ref or ""): row[5],
@@ -282,6 +286,7 @@ async def _load_verified_client(session, principal, *, include_quota=False):
         client = await session.get(Client, principal.id, populate_existing=True)
         if client is not None:
             client.__dict__.pop("_quota_policy_rows", None)
+            client.__dict__.pop("_legal_publications_enabled", None)
     if (client is None or client.auth_state != "active" or
             client.user_ref != principal.user_ref or
             int(client.auth_version or 1) != int(principal.auth_version or 1)):

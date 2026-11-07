@@ -212,6 +212,18 @@ test('available email policy does not manufacture an unavailable-service warning
   assert.equal(f.gate.querySelector('[data-auth-mode="register"]').hidden, true);
 });
 
+test('registration consent survives identical policy refresh but never applies to changed required versions', () => {
+  const f = view();
+  const policy = { mailReady: true, requiredConsentVersions: { terms: 'v1', privacy: 'v1' } };
+  f.mounted.setPolicy(policy); f.mode('register');
+  const consent = f.gate.querySelector('#acConsent'); consent.checked = true;
+  f.mounted.setPolicy({ ...policy }); assert.equal(consent.checked, true);
+  f.mounted.setPolicy({ ...policy, requiredConsentVersions: { privacy: 'v1', terms: 'v1' } });
+  assert.equal(consent.checked, true);
+  f.mounted.setPolicy({ ...policy, requiredConsentVersions: { terms: 'v2', privacy: 'v1' } });
+  assert.equal(consent.checked, false);
+});
+
 function deliveryView(statusReply, sentReply = {}) {
   const f = view(); f.mounted.setPolicy({ mailReady: true, allowSelfRegistration: true });
   f.mode('emailCode');

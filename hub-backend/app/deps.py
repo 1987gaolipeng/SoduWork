@@ -90,8 +90,11 @@ async def authenticated_client(
 
 async def enforce_client_quota(session: AsyncSession, client: Client) -> dict:
     try:
+        from .services.legal_publications import assert_ai_access
         # Consume only this authentication query's rules, never a prior request's cache.
         rows = client.__dict__.pop("_quota_policy_rows", None)
+        published = client.__dict__.pop("_legal_publications_enabled", None)
+        await assert_ai_access(session, str(client.user_ref or ""), publications_enabled=published)
         status = await client_access.assert_quota(session, str(client.user_ref or ""), policy_rows=rows)
     except client_access.ClientAccessError as exc:
         raise HTTPException(status_code=exc.status, detail=exc.detail()) from exc

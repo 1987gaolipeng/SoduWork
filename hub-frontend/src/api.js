@@ -120,6 +120,11 @@ async function download(path, filename) {
 }
 
 export const api = {
+  legalDocument: kind => call('GET', '/admin/legal-documents/' + encodeURIComponent(kind)),
+  saveLegalDraft: (kind, body) => call('PUT', '/admin/legal-documents/' + encodeURIComponent(kind) + '/draft', body),
+  publishLegalDocument: (kind, body) => call('POST', '/admin/legal-documents/' + encodeURIComponent(kind) + '/publish', body),
+  legalDocumentVersion: id => call('GET', '/admin/legal-documents/versions/' + encodeURIComponent(id)),
+  cancelLegalPublication: id => call('POST', '/admin/legal-documents/versions/' + encodeURIComponent(id) + '/cancel', {}),
   accountPrivacyRequests: () => call('GET', '/admin/account-privacy-requests'),
   retryAccountPrivacyRequest: (id) => call('POST', '/admin/account-privacy-requests/' + encodeURIComponent(id) + '/retry', {}),
   mailSettings: () => call('GET', '/admin/mail-settings'),
