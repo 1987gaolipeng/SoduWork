@@ -12,6 +12,30 @@ function fixture(extra={}) {
   vm.runInNewContext(source,{window});return {api:window.TaskConversationNavigation,calls,notices,listeners};
 }
 
+function remoteRequirement() {
+ return {id:'remote-req',kind:'requirement',status:'done',workRouting:{executionContext:{
+  location:{mode:'remote'},runner:{runnerId:'isolated-cloud'}}}};
+}
+test('remote requirement viewing bypasses local review history and stale task mappings',async()=>{
+ const task=remoteRequirement();
+ const f=fixture({SoduWorkAPI:{getTask:async()=>task},
+  NativeChat:{sessionInfo:()=>({sessionId:'local-review',taskIds:[task.id]})},
+  soduWorkAPI:{conversationSession:{history:async()=>assert.fail('remote navigation must not probe local history')}}});
+ await f.api.open(task.id,'',{source:'task-list',chatId:'local-review'});
+ assert.equal(f.calls[0].payload.chatId,'task-execution:remote-req');
+ assert.equal(f.calls[0].payload.forceNew,false);
+ assert.equal(f.calls[0].payload.navigation,true);
+});
+test('remote navigation does not replace explicit review, dispatch, or local execution',()=>{
+ const f=fixture(),task=remoteRequirement();
+ for(const source of ['acceptance','rework','task-add','task-create','task-dispatch']) {
+  const result=f.api.resolve({taskId:task.id,source,chatId:'chosen'},task,{},[],null);
+  assert.equal(result.chatId,'chosen',source);
+ }
+ task.workRouting.executionContext.location.mode='local';
+ assert.equal(f.api.resolve({taskId:task.id,chatId:'local'},task,{},[],null).chatId,'local');
+});
+
 test('释放未执行需求后，旧存档和本地索引不再抢占新会话', () => {
  const f=fixture();
  const store={isQueueRemoved:(chat,id)=>chat==='released'&&id==='a',

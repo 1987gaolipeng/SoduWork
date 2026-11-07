@@ -121,6 +121,26 @@ class ScheduleRunnerDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.calls, [])
         self.assertIsNone(await self.session.scalar(select(models.AiScheduleRun)))
 
+    async def test_cross_device_occurrence_has_execution_intent_without_rewriting_user_note(self):
+        await self.cloud_target()
+        note = '创建晨报，每天09:00，工作内容：只回复 AUTO-OK，不读写文件，先暂停保存。'
+        self.schedule.note = note
+        async def dispatch(task_id, body, client, session):
+            return {"ok": True, "ref": "fixture-ref"}
+        with patch.object(task_dispatch, "dispatch", side_effect=dispatch):
+            result = await personal_schedules.run_my_schedule(
+                "schedule", body={}, client=self.client, session=self.session)
+        self.assertTrue(result['ok'], result)
+        run = await self.session.get(models.AiScheduleRun, result['scheduleRunId'])
+        handoff = await self.session.get(ConversationHandoff,
+            conversation_handoffs.identity(self.client.id, run.receipt['conversationId']))
+        self.assertTrue(handoff.options['instruction'].startswith('【执行已有自动化的本轮工作】'))
+        self.assertIn(note, handoff.options['instruction'])
+        self.assertIn('不要再次创建本自动化', handoff.options['instruction'])
+        self.assertNotIn('【执行已有自动化的本轮工作】', handoff.options['userText'])
+        self.assertEqual(self.schedule.note, note)
+        self.assertFalse(self.schedule.enabled)
+
     async def test_cloud_occurrence_creates_valid_handoff_and_retries_without_dispatching_twice(self):
         await self.cloud_target()
         dispatched = []

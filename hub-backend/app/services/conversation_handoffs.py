@@ -146,6 +146,8 @@ async def _targets(client, clients, orgs, allowed_runners=None, personal_clients
         if not runner_hub.supports_capabilities(runner, ["files", "terminal"]):
             continue
         result.append({**candidate, "agentId": agent["id"], "modelMode": agent["modelMode"],
+                       "skillsKnown": bool(getattr(runner, "skills_known", False)),
+                       "skills": sorted(getattr(runner, "skills", []) or []),
                        "host": candidate.get("host") or runner.host or "",
                        "runnerName": candidate.get("machineLabel") or runner.host or runner.id})
     return result

@@ -111,6 +111,25 @@ function composeFixture(){
   click(v){const button=v==='cloud'?cloud:local;for(const fn of panel.events.click||[])fn({target:{closest:s=>s==='[data-execution]'?button:null}})},
   changeOwner(){owner='bob'},leave(){current=false},start:options=>window.ComposeExecution.start({text:'draft',attachments:[],isCurrent:()=>current,...options})};
 }
+
+test('remote conversation bar identifies downloaded results without relabeling the cache as an execution workspace',()=>{
+ const root=element(),workspace={dir:'C:/profile/cloud-results/private-hash',name:'private-hash'};
+ const ctx={document:{getElementById:id=>root.querySelector('#'+id)},global:{ChatChrome:{setWorkspace(){}}},
+  _wd:workspace,_snap:{cloudHandoff:{phase:'committed',target:{runnerKind:'cloud'}}},_mode:'full',
+  _sessionCaps:[],_composerControls:null};
+ ctx.ChatChrome=ctx.global.ChatChrome;
+ const source=read('panels-chat.js'),start=source.indexOf('  function _paintBar()');
+ vm.runInNewContext(source.slice(start,source.indexOf('  function _thinkingStatusHtml',start))+'\n_paintBar();',ctx);
+ assert.equal(root.querySelector('#nchatWdName').textContent,'云端成果');
+ assert.match(root.querySelector('#nchatWd').title,/成果缓存/);
+ assert.doesNotMatch(root.querySelector('#nchatWd').title,/AI 就在/);
+ assert.equal(workspace.name,'private-hash','display changes cannot mutate the output cache identity');
+ ctx._snap.cloudHandoff.target.runnerKind='work-computer';ctx._paintBar();
+ assert.equal(root.querySelector('#nchatWdName').textContent,'电脑成果');
+ ctx._snap={};ctx._paintBar();
+ assert.equal(root.querySelector('#nchatWdName').textContent,'private-hash');
+ assert.match(root.querySelector('#nchatWd').title,/AI 就在/);
+});
 test('new drafts default local; a pending cloud check cannot switch back after the user selects local',async()=>{
  const f=composeFixture(),wait=deferred();assert.equal(f.window.ComposeExecution.value(),'local');f.runtime.refreshAccess=()=>wait.promise;
  f.click('cloud');f.click('local');wait.resolve();await tick();assert.equal(f.window.ComposeExecution.value(),'local');assert.equal(f.local.getAttribute('aria-pressed'),'true');assert.equal(f.starts.length,0);

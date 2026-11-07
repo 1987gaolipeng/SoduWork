@@ -93,6 +93,7 @@ function isProjection(handle) {
 function historyRow(item, identity) {
   return {
     id: item.id, title: item.title || '账号会话', at: item.updatedAt || '',
+    createdAt: item.createdAt || item.updatedAt || '',
     state: item.state || 'idle', adapterId: 'account-sync', accountConversation: true,
     accountProjection: true, archived: item.archived === true, owner: runtime.connectionScope(identity),
     deleted: item.deleted === true, revision: Number(item.revision || 0),
@@ -153,9 +154,28 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
   const deletedIds = new Set();
   const historyTtl = 3000;
   const historyPageSize = 100;
-  const historyMaxPages = 5;
-  const nativeProjections = new Map(), nativeQueue = [];
-  let nativeActive = 0;
+  const deletion = require('./account-history-delete.cjs').create({ app, store, fetch,
+    identityOf: localIdentityOf || identityOf, closed: () => closed, retry: schedule,
+    async drain(key) {
+      const state = bound.get(key);
+      await state?.ready;
+      await state?.pending;
+      if (flushing) await flushing;
+    },
+    marked(key) { const state = bound.get(key); if (state) state.deleted = true; },
+    changed: deletedHistory });
+
+  async function deletedHistory(id, row, identity) {
+    if (historyPromise) await historyPromise;
+    const current = await (localIdentityOf || identityOf)(app);
+    if (closed || directoryScope(current) !== directoryScope(identity)) return;
+    const scope = directoryScope(identity);
+    const cursor = (await store.directory?.(scope))?.cursor ?? (historyScope === scope ? historyCursor : 0);
+    if (store.saveDirectory) await store.saveDirectory(scope, [row], cursor);
+    if (closed || directoryScope(await (localIdentityOf || identityOf)(app)) !== directoryScope(identity)) return;
+    accountRows.delete(id); accountIds.delete(id); deletedIds.add(id); historyAt = 0;
+    await emitChanged(id, null, identity);
+  }
 
   function identityKey(identity) {
     try { return accountScopeKey(identity); } catch (_) { return ''; }
@@ -409,7 +429,7 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
       previous ||= {};
       if (previous.hub && String(previous.hub).replace(/\/+$/, '') !== hub ||
           previous.clientId && previous.clientId !== identity.clientId) previous = {};
-      Object.assign(state, { sourceEpoch: previous.sourceEpoch || state.sourceEpoch,
+      Object.assign(state, { deleted: previous.deleted === true, sourceEpoch: previous.sourceEpoch || state.sourceEpoch,
         sourceRevision: Number(previous.sourceRevision || 0), contentDigest: previous.contentDigest || '',
         digest: previous.digest || '', ackedRevision: Number(previous.ackedRevision || 0),
         conversationId: previous.conversationId || '',
@@ -433,7 +453,7 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
   }
 
   function enqueue(state) {
-    if (isProjection(state.handle)) return;
+    if (state.deleted || deletion.blocked(state.key) || isProjection(state.handle)) return;
     const times = { ...state.messageTimes };
     const view = snapshot(state.handle, times, now);
     const content = { sourceClientId: state.identity.clientId, sourceSessionId: view.sessionId,
@@ -479,7 +499,8 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
       method: 'POST', redirect: 'error', signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(30000)]),
       headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok || data.ok !== true || data.sourceRevision !== job.body.sourceRevision || !data.conversationId) {
+    if (!response.ok || data.ok !== true || data.sourceRevision !== job.body.sourceRevision || !data.conversationId ||
+        job.conversationId && data.conversationId !== job.conversationId) {
       const error = Error(typeof data.detail === 'string' ? data.detail : '本地会话同步未确认');
       error.status = response.status; throw error;
     }
@@ -504,6 +525,7 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
         : await store.jobs(100);
       for (const job of jobs) {
         if (closed) break;
+        if (deletion.blocked(require('./account-history-delete.cjs').sourceKey(job, job.body?.sourceSessionId))) continue;
         const state = [...bound.values()].find(item => item.ownerKey === job.ownerKey &&
           item.identity.clientId === job.clientId && item.sourceSessionId === job.body.sourceSessionId &&
           String(item.identity.hub).replace(/\/+$/, '') === String(job.hub).replace(/\/+$/, ''));
@@ -518,6 +540,8 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
         try {
           const receipt = await send(job, identity);
           await store.ack(job.id, receipt);
+          if (job.body.deleted === true) await deletedHistory(receipt.conversationId,
+            { ...job.body, id: receipt.conversationId, deleted: true }, identity);
           if (state && state.sourceEpoch === job.body.sourceEpoch) {
             state.conversationId = receipt.conversationId;
             state.ackedRevision = Math.max(state.ackedRevision || 0, job.body.sourceRevision);
@@ -976,7 +1000,9 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
   }
 
   Promise.resolve(store.jobs(1)).then(jobs => { if (jobs.length) schedule(); }).catch(() => {});
-  return { bind, flush, close, history, row, openProjection, resolveLifecycle, setLifecycle, onChange(listener) {
+  return { bind, flush, close, history, row, openProjection,
+    prepareDelete: deletion.prepare, deleteHistory: deletion.forget,
+    deleteNativeHistory: deletion.deleteNative, onChange(listener) {
       if (typeof listener !== 'function') return () => {};
       listeners.add(listener); return () => listeners.delete(listener);
     }, isRemote: () => false,

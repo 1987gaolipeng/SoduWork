@@ -314,6 +314,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
   // cloud handoff provider and add the account projection without changing the
   // cloud authority or exposing account sync as a Runner.
   session.setExternalHistory?.({
+    historyEntry(id) { return _cloudHandoff.historyEntry?.(id) || null; },
     async history(options) {
       const [cloud, account] = await Promise.allSettled([_cloudHandoff.history(options), _accountSync.history(options)]);
       const rows = [];
@@ -444,6 +445,9 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         const live = session.findBySessionId(opts.chatId);
         if (live) {
           try {
+          // Reattaching a requirement projection must recheck Hub ownership;
+          // an existing local view is not authority for remote access.
+          await _cloudHandoff.refreshTaskExecution?.(opts.chatId, true);
           // A live handle is already attached to this device and must keep the
           // strict memory binding check. Archived history is different: the
           // device session can be in the middle of renewal, so checking its

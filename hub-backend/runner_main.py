@@ -941,11 +941,11 @@ class Runner:
             **admission,
             "skills": self._skill_inventory,
             "skillCatalog": _skill_report(self._skill_catalog),
-            "tags": self.tags, "caps": [ws_frames.CAP_BIN1, "handoff1", "executionSelection1", "sessionAck1", "turnFiles1"],
+            "tags": self.tags, "caps": [ws_frames.CAP_BIN1, "handoff1", "executionSelection1", "sessionAck1", "turnFiles1", "turnSkills1"],
         }
         if getattr(self, "desktop_owned", False):
             payload["caps"].append("desktopCapabilities1")
-            payload["caps"].append("desktopPluginTurn1")
+            payload["caps"].extend(["desktopPluginTurn1", "desktopPluginStart1"])
             payload["caps"].append("desktopLibrary1")
         if getattr(getattr(self, "_admission", None), "_journal", None) is not None:
             payload["caps"].append("admit1")
@@ -1505,6 +1505,12 @@ class Runner:
                         ctx, inputs = await asyncio.to_thread(
                             handoff_restore.restore_inputs, ctx, inputs, self.work_root)
                     except (ValueError, OSError) as exc:
+                        return {"ok": False, "error": str(exc)}
+                if ctx.get("pluginTurn"):
+                    from app.services import runner_turn_plugins
+                    try:
+                        await runner_turn_plugins.prepare_start(self, expected_ref, ctx, cfg)
+                    except (ValueError, KeyError, TimeoutError) as exc:
                         return {"ok": False, "error": str(exc)}
                 r = await asyncio.to_thread(
                     ai_local.dispatch_sync, cfg, t, inputs,

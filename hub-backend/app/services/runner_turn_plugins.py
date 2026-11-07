@@ -25,3 +25,27 @@ async def prepare(machine, message):
     if result.get("ok") is not True:
         raise ValueError(result.get("error") or "原电脑未能准备插件")
     return result["data"]
+
+
+async def prepare_start(machine, ref, ctx, cfg):
+    """Use the Runner-prepared workspace, never a path supplied by mobile."""
+    packet = ctx.pop("pluginTurn", None)
+    if not packet:
+        return
+    if (not getattr(machine, "desktop_owned", False) or not isinstance(packet, dict)
+            or packet.get("operation") != "plugin.prepare"
+            or (packet.get("args") or {}).get("ref") != ref
+            or not ctx.get("workspacePrepared") or not ctx.get("workDir")):
+        raise ValueError("插件首轮必须在所属电脑的已准备工作区执行")
+    context = {"ref": ref, "cwd": ctx["workDir"], "text": str(ctx.get("brief") or ""),
+               "readOnly": (ctx.get("accessPolicy") or {}).get("mode") == "readonly" or ctx.get("mode") == "plan",
+               "capabilityIds": ctx.get("requiredAgentCapabilities") or []}
+    if not hasattr(machine, "_desktop_capabilities"):
+        machine._desktop_capabilities = DesktopCapabilities(machine._write_local_rpc)
+    result = await machine._desktop_capabilities.call({**packet, "_turnContext": context})
+    if result.get("ok") is not True:
+        raise ValueError(result.get("error") or "原电脑未能准备插件")
+    data = result["data"]
+    ctx["brief"] = data["promptText"]
+    ctx["conversationPlugins"] = data["plugins"]
+    cfg["pluginResourceBundles"] = data["resourceBundles"]

@@ -30,7 +30,7 @@ MAX_TOTAL_BYTES = 96 * 1024 * 1024
 
 def clean_options(raw, has_files=False):
     if not isinstance(raw, dict) or set(raw) - {
-        "sessionId", "agentId", "model", "title", "text", "userText", "inputPreparation", "requiredSkills", "targetRunnerId", "targetRunnerKind", "acceptance"
+        "sessionId", "agentId", "model", "title", "text", "userText", "inputPreparation", "requiredSkills", "targetRunnerId", "targetRunnerKind", "acceptance", "plugins"
     }:
         raise HTTPException(400, "云端会话选项不正确；不能指定本地目录、执行机或额外执行配置")
     out = {}
@@ -75,6 +75,12 @@ def clean_options(raw, has_files=False):
     if not isinstance(target_runner_kind, str) or target_runner_kind not in handoffs.RUNNER_KINDS | {""}:
         raise HTTPException(400, "目标执行机类型不正确")
     out["targetRunnerKind"] = target_runner_kind.strip()
+    from . import conversation_turn_plugins
+    plugins = conversation_turn_plugins.normalize(raw.get("plugins"))
+    if plugins:
+        if not out["targetRunnerId"] or out["targetRunnerKind"] != "work-computer" or raw.get("acceptance"):
+            raise HTTPException(422, "本机插件需要明确选择本人电脑，不能用于验收会话")
+        out["plugins"] = plugins
     if raw.get("acceptance") is not None:
         from . import cloud_acceptance
         out["acceptance"] = cloud_acceptance.clean(raw["acceptance"])
@@ -171,6 +177,10 @@ async def create(session, client, request_id, raw, uploads):
                **({"targetRunnerKind": requested["targetRunnerKind"]}
                   if requested["targetRunnerKind"] else {})}
     picked = await handoffs.destination(session, client, options, source)
+    if requested.get("plugins"):
+        from . import conversation_turn_plugins
+        await conversation_turn_plugins.validate_start(session, client, picked["runnerId"])
+        options["plugins"] = requested["plugins"]
     # Keep the runner's reachable host alongside the friendly display name.
     # Cloud website previews may report localhost:<port>; the desktop must
     # rewrite that loopback to the selected Runner host before opening it.
@@ -254,7 +264,19 @@ async def dispatch_inputs(session, row, extra):
         files, brief = await cloud_acceptance.inputs(session, row)
     if prep:
         brief = brief + "\n\n【附件理解约束】先区分步骤、处理对象、模板和参考；用户原始文字为空时，不得把这段兜底说明当成用户目标。"
-    return files, {"dispatchId": handoffs.dispatch_id(row), "brief": brief,
+    plugin_context = {}
+    if row.options.get("plugins"):
+        from ..models import Client
+        from . import conversation_turn_plugins, dispatch_identity
+        caller = await session.get(Client, row.owner_client_id)
+        if not caller or caller.user_ref != row.owner_user_id:
+            raise ValueError("会话归属已变化，不能使用原电脑插件")
+        runner = await conversation_turn_plugins.validate_start(
+            session, caller, row.options["targetSnapshot"]["runnerId"])
+        dispatch_id = handoffs.dispatch_id(row)
+        plugin_context["pluginTurn"] = conversation_turn_plugins.authorization(
+            caller, runner, dispatch_identity.execution_ref(dispatch_id), row.options["plugins"], dispatch_id)
+    return files, {**plugin_context, "dispatchId": handoffs.dispatch_id(row), "brief": brief,
         "conversationMode": "adaptive", "conversationUserText": user_text,
         "inputPreparation": prep,
         "agentExecution": extra.get("agentExecution", {}),

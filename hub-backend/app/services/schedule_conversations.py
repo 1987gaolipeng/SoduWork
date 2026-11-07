@@ -118,7 +118,9 @@ async def prepare(session, schedule, client, repo, run_id, adapter, personal):
         instruction += '\n\n本次输入参数：\n' + json.dumps(inputs, ensure_ascii=False, indent=2)
     if repo:
         instruction += '\n\n工程：' + str(repo.name or '')
-    instruction += '\n\n自动化触发时间：' + schedules.format_trigger_time(schedule, run.started_at)
+    instruction += '\n\n自动化触发时间：' + schedules._now_local(schedule).isoformat()
+    from .schedule_instruction import for_run
+    instruction = for_run(instruction)
     capabilities = clean_required_capabilities(schedule.required_capabilities)
     # Older focused workers call this helper with an empty ``personal`` value
     # instead of going through schedules.run_one(). Derive the persisted lock

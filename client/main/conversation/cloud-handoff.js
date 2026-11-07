@@ -95,6 +95,8 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
   discovery = require('../native-discovery.cjs'), syncOptions = {} }) {
   const root = path.join(app.getPath('userData'), 'conversation-handoffs');
   const previews = new Map(), records = new Map(), remoteRecords = new Map(), watches = new WeakMap(), operations = new Map(), writes = new Map();
+  const taskViews = new Map();
+  const taskExecution = require('./task-execution-view');
   let remoteDirectoryPromise = null, remoteDirectoryAt = 0, remoteDirectoryScope = '';
   const remoteDirectoryTtl = 5000, remoteDirectoryPageSize = 100, remoteDirectoryMaxPages = 20;
   const previewRevisions = new Map();
@@ -110,14 +112,14 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
     records.set(id, record); return record;
   }
   function read(id) {
-    return readReceipt(id) || remoteRecords.get(id) || null;
+    return readReceipt(id) || taskViews.get(id) || remoteRecords.get(id) || null;
   }
   function save(record) {
     const id = record.sessionId, previous = records.get(id);
     // A cross-device row is a cache of Hub metadata, never a second durable
     // execution receipt. Its transcript is recovered through ai-session.
     if (record.remoteProjection) {
-      remoteRecords.set(id, record);
+      (record.taskExecutionView ? taskViews : remoteRecords).set(id, record);
       return Promise.resolve(record);
     }
     // Publish the current revision before another async poll/send reads it,
@@ -568,7 +570,30 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
           cloud: true, taskId: record.taskId, runId: record.ref },
       } : {}) };
   }
+  async function refreshTaskExecution(sessionId, live = false) {
+    if (!taskExecution.taskId(sessionId)) return null;
+    const previous = taskViews.get(sessionId);
+    const current = await identity(previous);
+    const row = await taskExecution.resolve(sessionId, current, request);
+    const record = { ...remoteRecord(row, current), taskExecutionView: true,
+      transferId: 'task-execution:' + row.taskId + ':' + row.ref };
+    await identity(record);
+    if (live && previous && previous.ref !== record.ref) {
+      throw Error('需求已有新的执行记录，请关闭原会话后重新打开');
+    }
+    // Directory refreshes cannot discard an explicitly opened requirement.
+    taskViews.set(sessionId, { ...(previous?.ref === record.ref ? previous : {}), ...record });
+    return taskViews.get(sessionId);
+  }
+  async function historyEntry(sessionId) {
+    // Work cards restore before a runtime opens. Formal requirements are not
+    // ordinary cloud-directory entries, so resolve their authority by ID.
+    const record = await refreshTaskExecution(sessionId);
+    return record ? remoteHistoryRow(record) : null;
+  }
   async function reopen(sessionId, ref) {
+    // A known task projection fails closed: never fall back to a local runtime.
+    await refreshTaskExecution(sessionId);
     let record = read(sessionId);
     if (!record && remoteDirectory) {
       // Directory discovery is optional for an unknown local archive. Its
@@ -753,6 +778,10 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
     watches.set(handle, watch); watch.wake();
   }
   function send(handle, text, attachments, options = {}) { return busy(handle, async () => {
+    if (read(handle.sessionId)?.taskExecutionView) {
+      const current = await refreshTaskExecution(handle.sessionId, true);
+      if (!current.canSend) throw Error('当前账号暂不能继续这条远程需求');
+    }
     const record = guard(handle);
     if (!record || record.phase !== 'committed') return { ok: false, reason: '云端交接尚未确认，请先恢复或撤销交接' };
     if (attachments?.length || options.skills?.length || options.plugins?.length) return { ok: false,
@@ -787,6 +816,10 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
   }); }
   async function stop(handle) {
     try {
+      if (read(handle.sessionId)?.taskExecutionView) {
+        const current = await refreshTaskExecution(handle.sessionId, true);
+        if (!current.canSend) throw Error('当前账号暂不能停止这条远程需求');
+      }
       const record = guard(handle); if (!record || record.phase !== 'committed') return { ok: false, reason: '交接尚未完成' };
       const receipt = await request(await identity(record), '/tasks/' + encodeURIComponent(record.taskId) + '/ai-stop', json({}));
       observe(handle); return receipt;
@@ -838,7 +871,7 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
     }
     return cloudStart.forget(id);
   }
-  return { reopen, start: cloudStart.start, history, forget, resolveDeleteAlias, isRemote,
+  return { reopen, refreshTaskExecution, start: cloudStart.start, history, historyEntry, forget, resolveDeleteAlias, isRemote,
     synchronization, onSynchronized(listener) { syncListeners.add(listener); return () => syncListeners.delete(listener); },
     targets: async agentId => request(await identity(), '/conversation-handoffs/targets?agentId=' + encodeURIComponent(agentId || 'pi')),
     ...Object.fromEntries(Object.entries({ selectExecution: executionSelection.selectExecution, executionRuntimes: executionSelection.executionRuntimes, preview, confirm, recover, abort, guard, view, observe, send, stop, materialize, artifactSession,

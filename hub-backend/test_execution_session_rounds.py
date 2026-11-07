@@ -60,6 +60,19 @@ class ExecutionSessionRoundsTests(unittest.IsolatedAsyncioTestCase):
         stack.enter_context(patch.object(project_context, "record_completion", AsyncMock()))
         return stack
 
+    async def test_user_plugin_badges_survive_sync_without_instructions_or_grants(self):
+        await self.seed(state="done")
+        async with db.SessionLocal() as session:
+            execution = await session.scalar(select(ExecutionSession).where(ExecutionSession.task_id == self.tid))
+            await execution_sessions.ingest_event_page(session, execution, [{
+                "seq":1,"kind":"user","text":"summarize", "plugins":[{
+                    "pluginId":"local:summary","name":"Summary","version":"1", "scopeLabel":"本人电脑",
+                    "instructions":"private method", "authorization":"private grant", "path":"private/path"}]}])
+            await session.commit()
+            page = await execution_sessions.read_task(session,self.tid,self.ref)
+            self.assertEqual(page['items'][0]['plugins'], [{
+                "pluginId":"local:summary","name":"Summary","version":"1","scopeLabel":"本人电脑"}])
+
     async def test_failure_resume_success_then_same_filename_updated_without_duplicates(self):
         await self.seed()
         content = {"round": 2, "data": b"# Cloud proof\nROUND-TWO\n"}

@@ -47,9 +47,28 @@ async def validate(session, client, handoff, ref, selections):
         raise HTTPException(409, "请更新并重启原电脑客户端后，在此会话继续使用插件")
 
 
+async def validate_start(session, client, runner_id):
+    from . import runner_hub
+    from ..api.desktop_capabilities import resolve
+    runner = runner_hub.get(runner_id)
+    if not runner or not runner.client_id:
+        raise HTTPException(409, "所选本人电脑暂不可用，不会切换到其他执行机")
+    _, current = await resolve(session, client, runner.client_id)
+    if current is not runner or not {"desktopPluginStart1", "admit1"}.issubset(set(runner.caps)):
+        raise HTTPException(409, "请更新并重启原电脑执行器后使用插件新建对话")
+    return runner
+
+
 def authorization(client, runner, ref, selections, turn_id):
     from ..auth import sign_claims
     from ..api.desktop_capabilities import digest
+    # Desktop capability IDs have a narrower alphabet than dispatch/turn IDs.
+    # Keep valid existing IDs; map internal IDs deterministically before signing.
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", str(turn_id)):
+        import hashlib
+        import json
+        turn_id = "plugin-" + hashlib.sha256(json.dumps(
+            [ref, turn_id], ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
     packet = {"operation": "plugin.prepare", "requestId": turn_id,
               "targetClientId": runner.client_id, "ownerUserId": client.user_ref,
               "args": {"ref": ref, "plugins": normalize(selections)}}

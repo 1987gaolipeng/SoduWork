@@ -96,6 +96,38 @@ class CloudMessageRecoveryTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as session:
             return await session.scalar(select(Receipt))
 
+    async def test_skill_selection_survives_restart_and_lost_ack_on_original_execution(self):
+        from app.services import conversation_turn_skills
+        self.ctx['_turnSkills'] = ['office']
+        with patch.object(recovery, 'attempt', side_effect=asyncio.CancelledError):
+            with self.assertRaises(asyncio.CancelledError):
+                await self.send()
+        row = await self.receipt()
+        self.assertEqual(row.payload['skills'], ['office'])
+        self.failure = 'after'
+        with patch.object(conversation_turn_skills, 'validate', AsyncMock()) as validate:
+            await recovery.attempt(row.id)
+            await recovery.attempt(row.id)
+        validate.assert_awaited_once()
+        item = self.queue.active_items()[0]
+        self.assertEqual(item.payload['turnSkills'], ['office'])
+        self.assertEqual(item.ref, 'execution')
+        self.assertEqual(self.comment_calls, 1)
+        self.assertEqual((await self.receipt()).phase, 'accepted')
+        self.ctx['_turnSkills'] = ['browser-use']
+        with self.assertRaises(HTTPException) as conflict:
+            await self.send()
+        self.assertEqual(conflict.exception.status_code, 409)
+
+    async def test_revoked_skill_is_not_delivered_as_plain_text(self):
+        from app.services import conversation_turn_skills
+        self.ctx['_turnSkills'] = ['office']
+        with patch.object(conversation_turn_skills, 'validate',
+                          AsyncMock(side_effect=HTTPException(403, 'Skill revoked'))):
+            await self.send()
+        self.assertEqual((await self.receipt()).phase, 'rejected')
+        self.assertEqual(self.comment_calls, 0)
+
     async def test_commit_survives_caller_exit_and_worker_finishes_without_observer(self):
         with patch.object(recovery, 'attempt', side_effect=asyncio.CancelledError):
             with self.assertRaises(asyncio.CancelledError):

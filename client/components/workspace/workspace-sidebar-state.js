@@ -383,8 +383,6 @@
   }
   function create({ storage, key, deviceStorage, legacyPins = [], writable = true, migrate, onChange }) {
     let raw = null, state = normalized({ pins: legacyPins }), initialized = false, readError = null;
-    let accountState = state;
-    const device = createDevicePartition(deviceStorage, key);
     const observedTimes = new Map();
     function stableNewestFirst(rows) {
       const time = row => {

@@ -231,7 +231,7 @@ def _event_api(row: am.ExecutionEvent) -> dict:
            "tool": row.tool or "", "text": row.text or "",
            "at": row.at.isoformat() if row.at else ""}
     for key in ("seg", "round", "admissionKey", "admissionStartSeq", "turnState", "textTruncated", "full", "sourceId", "callId", "isError",
-                "streamId", "done", "delta", "arguments", "usage", "usageScope", "toolKind", "sentAt", "state", "cancelReason", "attachments",
+                "streamId", "done", "delta", "arguments", "usage", "usageScope", "toolKind", "sentAt", "state", "cancelReason", "attachments", "plugins",
                 "serviceUrl", "previewUrl", "host", "port", "services", "phase"):
         if detail.get(key) not in (None, ""):
             out[key] = detail[key]
@@ -706,6 +706,9 @@ async def ingest_event_page(session: AsyncSession, row, items: list, round_no=No
         if item.get("kind") == "say" and (len(str(item.get("full") or "")) > 20000
                 or len(str(item.get("text") or "")) > (50000 if item.get("streamId") else 4000)):
             detail["textTruncated"] = True
+        if item.get("kind") == "user" and isinstance(item.get("plugins"), list):
+            from .conversation_plugins import badges
+            detail["plugins"] = badges(item["plugins"])
         if item.get("kind") == "user" and isinstance(item.get("attachments"), list):
             # Runner paths belong to another machine; retain visible names only.
             detail["attachments"] = [{"name": str(part.get("name") or "")[:200]}
@@ -917,9 +920,23 @@ async def ingest_live_snapshot(session: AsyncSession, task: models.Task, ref: st
     if not ref or not live.get("ok"):
         return None
     dispatch = dict(dispatch or {})
+    rid = str(live.get("runnerId") or dispatch.get("runnerId") or "backend-local")
+    # A reader's device is not the executor. Use the durable registry for
+    # remote snapshots; unknown remote nodes must not mint execution identity.
+    node = await session.get(am.RunnerNode, rid) if rid != "backend-local" else None
+    if rid != "backend-local" and (node is None or node.auth_state == "revoked"
+            or node.management_state in {"retired", "pending_setup"}):
+        return None
+    if node and node.owner_user_id:
+        owner = await session.get(models.Client, task.owner_client_id)
+        if (owner is None or owner.auth_state != "active"
+                or owner.user_ref != node.owner_user_id
+                or (task.owner_user_id and task.owner_user_id != node.owner_user_id)):
+            return None
     runner = SimpleNamespace(
-        id=str(live.get("runnerId") or dispatch.get("runnerId") or "backend-local"),
-        client_id=str(task.owner_client_id or ""),
+        id=rid,
+        client_id=str(node.client_id or "") if node else str(task.owner_client_id or ""),
+        org_id=str(node.org_id or "") if node else "",
         host=str(live.get("host") or dispatch.get("host") or "后端执行机"),
     )
     snap = {

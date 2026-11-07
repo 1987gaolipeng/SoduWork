@@ -353,6 +353,15 @@ function createPiSessionBridge(options) {
   async function findRunnerRow(id, { nativeOnly = false, strict = false } = {}) {
     const wanted = String(id || '').trim();
     if (!wanted) return null;
+    if (!nativeOnly && typeof externalHistory?.historyEntry === 'function') {
+      // Exact remote lookup may cover executions excluded from the ordinary
+      // directory. Authentication failures must not fall back to local history.
+      const entry = await externalHistory.historyEntry(wanted);
+      if (entry) {
+        if (entry.id !== wanted) throw new RuntimeContractError('HISTORY_ID_MISMATCH', '会话记录不匹配，请重新打开');
+        return entry;
+      }
+    }
     // A sidebar row may be replaced by its synchronized replay receipt while
     // navigation is in flight. Resolve its authenticated alias by exact ID.
     const cloud = !nativeOnly && (await externalRows({ includeAliases: true })).chats.find(row => row.id === wanted);

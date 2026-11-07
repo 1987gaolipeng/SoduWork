@@ -388,17 +388,21 @@
   let _sessionCaps = [];
   let _sessionInputs = [];
   function _paintBar() {
+    const remote = _snap?.cloudHandoff?.phase === 'committed';
+    const workspace = remote ? { ..._wd,
+      name: _snap.cloudHandoff.target?.runnerKind === 'work-computer' ? '电脑成果' : '云端成果' } : _wd;
     const wd = document.getElementById('nchatWdName');
-    if (wd) wd.textContent = _wd.name || '选个文件夹';
+    if (wd) wd.textContent = workspace.name || '选个文件夹';
     const el = document.getElementById('nchatWd');
-    if (el) el.title = _wd.dir ? ('AI 就在这儿干活：' + _wd.dir + ' · 点击打开') : '还没选文件夹';
+    if (el) el.title = remote ? (_wd.dir ? '已同步到本机的成果缓存 · 点击打开' : '远程成果尚未同步到本机')
+      : _wd.dir ? ('AI 就在这儿干活：' + _wd.dir + ' · 点击打开') : '还没选文件夹';
     const md = document.getElementById('nchatModeName');
     if (md) md.textContent = (_snap?.nextAccessPolicy || _snap?.accessPolicy) ? WorkComposer.permissionLabel((_snap.nextAccessPolicy || _snap.accessPolicy).mode) : (_mode === 'readonly' ? '只读' : '兼容权限');
     const ability = document.getElementById('nchatAbilityName');
     if (ability) {
       ability.textContent = _sessionCaps.length ? (_sessionCaps.length + ' 项能力') : '基础对话';
     }
-    if (global.ChatChrome) ChatChrome.setWorkspace(_wd);
+    if (global.ChatChrome) ChatChrome.setWorkspace(workspace);
     if (_composerControls) _composerControls.render();
   }
   function _thinkingStatusHtml(busy) {

@@ -64,7 +64,7 @@ function create(file, { persistent = false, maxBytes = 256 * 1024 * 1024 } = {})
       attempts: Number(job.attempts || 0) };
     if (db.prepare('SELECT 1 FROM jobs WHERE id=?').get(next.id)) return next;
     const source = sourceKey(next), revision = Number(next.body?.sourceRevision || 0);
-    if (next.body?.snapshotComplete === true && revision > 0) db.prepare(
+    if ((next.body?.snapshotComplete === true || next.body?.deleted === true) && revision > 0) db.prepare(
       'DELETE FROM jobs WHERE source=? AND revision<=?').run(source, revision);
     const size = Buffer.byteLength(JSON.stringify(next));
     const total = db.prepare('SELECT COALESCE(SUM(bytes),0) AS total FROM jobs').get().total;

@@ -124,6 +124,7 @@ def _conversation_json(row: AccountConversation, client_id: str) -> dict:
         "deleted": bool(row.deleted),
         "lifecycleRevision": int(row.lifecycle_revision or 0),
         "revision": int(row.revision or 0),
+        "createdAt": _iso(row.created_at),
         "updatedAt": _iso(row.updated_at),
         "sourceRevision": int(row.source_revision or 0),
         "canView": True,

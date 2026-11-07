@@ -13,6 +13,21 @@ function fixture() {
     create: key => window.WorkspaceSidebarState.create({ storage, key: key || 'one' }) };
 }
 const ids = rows => Array.from(rows, row => row.id);
+test('background timestamp refreshes do not reorder existing recent conversations', () => {
+  const s = fixture().create();
+  const first = [{ id: 'a', at: 300 }, { id: 'b', at: 200 }, { id: 'c', at: 100 }];
+  assert.deepEqual(ids(s.view(first).recent), ['a', 'b', 'c']);
+  const refreshed = [{ id: 'c', at: 900, state: 'running' }, { id: 'b', at: 800 }, { id: 'a', at: 300 }];
+  assert.deepEqual(ids(s.view(refreshed).recent), ['a', 'b', 'c']);
+  assert.deepEqual(ids(s.view([{ id: 'new', at: 1000 }, ...refreshed]).recent), ['new', 'a', 'b', 'c']);
+});
+
+test('replacing a synchronization alias keeps its established position', () => {
+  const s = fixture().create();
+  s.view([{ id: 'a', at: 300 }, { id: 'acct-source', _uiKey: 'shared', at: 100 }]);
+  assert.deepEqual(ids(s.view([{ id: 'native-source', _uiKey: 'shared', at: 900 }, { id: 'a', at: 300 }]).recent),
+    ['a', 'native-source']);
+});
 const a = { id: 'a', title: '需求沟通', adapterId: 'codex', taskIds: ['task-one'], state: 'running' };
 const b = { id: 'b', title: '项目进展', state: 'completed' };
 const appIcon = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jxqkAAAAASUVORK5CYII=';

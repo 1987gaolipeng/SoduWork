@@ -77,6 +77,14 @@ async def comment(machine, m, read_local_files, read_packet=None, drop_transfer=
             m = {**m, "plugins": prepared_plugins["plugins"]}
         except (ValueError, KeyError, TimeoutError) as exc:
             return {"ok": False, "error": str(exc)}
+    prepared_skills = None
+    if m.get("turnSkills"):
+        from . import conversation_turn_skills
+        try:
+            prepared_skills = await conversation_turn_skills.prepare(machine, m)
+            text += prepared_skills["prompt"]
+        except (ValueError, KeyError, OSError) as exc:
+            return {"ok": False, "error": str(exc)}
     staged = []
     packet = m.get("files") or {}
     if packet.get("items"):
@@ -110,6 +118,8 @@ async def comment(machine, m, read_local_files, read_packet=None, drop_transfer=
     from app.services import runtime_images
     try:
         cfg = {**dict(m.get("cfg") or {}), "_admissionKey": str(m.get("_admissionKey") or "")}
+        if prepared_skills is not None:
+            cfg["skillSelection"] = prepared_skills["selection"]
         if prepared_plugins is not None:
             cfg["pluginResourceBundles"] = prepared_plugins["resourceBundles"]
         elif not m.get("_localParent"):

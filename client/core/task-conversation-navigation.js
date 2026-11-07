@@ -6,6 +6,15 @@
   const acceptanceSessions = new Map();
   let generation = 0;
   const text = value => String(value || '').trim();
+  function remoteExecutionId(payload, task) {
+    const context = task?.workRouting?.executionContext || {};
+    if (payload.navigation === false || payload.reuseCurrent || payload.forceNew ||
+        payload.acceptanceSession || payload.acceptanceExecutionSession ||
+        ['acceptance', 'rework', 'task-add', 'task-create', 'task-dispatch'].includes(payload.source)) return '';
+    return ['requirement', 'bug', 'ticket', 'improvement', 'other'].includes(task?.kind) &&
+      task.status !== 'todo' && context.location?.mode === 'remote' && text(context.runner?.runnerId)
+      ? 'task-execution:' + text(task.id) : '';
+  }
   function taskIds(row) {
     return [row.taskId, ...(row.taskIds || []), ...(row.taskBindings || []).map(x => x.taskId)].map(text);
   }
@@ -36,6 +45,12 @@
     out.repoId = text(out.repoId || source.repoId || source.repo?.id);
     if (source.id) out.task = source;
     if (!out.taskTitle) out.taskTitle = text(source.title);
+    const remoteId = remoteExecutionId(out, source);
+    if (remoteId) {
+      out.chatId = remoteId;
+      out.forceNew = false;
+      return out;
+    }
     /*
      * Create a bound review conversation once and reuse it on repeated opens. When execution
      * and review belong to the same user, prefer the execution conversation and fall back only
@@ -207,6 +222,10 @@
       return global.soduWorkAPI?.openDeskWindow?.({panel: 'workspace', view: 'history', requirementId: id}) || false;
     }
     const info = global.NativeChat?.sessionInfo?.() || {};
+    // The main process verifies the exact Hub execution. Local review archives
+    // and a paginated sidebar cannot establish the remote session's identity.
+    const remoteId = remoteExecutionId(payload, task);
+    if (remoteId) payload.chatId = remoteId;
     let history = payload.acceptanceSession && !payload.reuseExecutionSession ? [] : null; // null = archive not consulted (explicit chatId/turnId wins).
     const hubTurnId = text(task?.workRouting?.conversationTurn?.conversationId);
     /*

@@ -90,6 +90,42 @@ class CloudConversationTests(unittest.IsolatedAsyncioTestCase):
             data={"options": json.dumps(body if options is None else options)},
             files=[("files", item) for item in files])
 
+    async def test_personal_plugin_first_turn_keeps_hub_conversation_and_deduplication(self):
+        from app.automation_models import RunnerNode
+        runner = self.fixture.runner
+        runner.client_id = "u-plugin-desktop"
+        runner.tags = [runner_hub.CLIENT_TAG]
+        runner.caps = ["handoff1", "desktopCapabilities1", "desktopPluginTurn1", "desktopPluginStart1", "admit1"]
+        async with db.SessionLocal() as session:
+            session.add(models.Client(id=runner.client_id, user_ref=self.fixture.owner.id, auth_state="active"))
+            node = await session.get(RunnerNode, runner.id)
+            node.client_id = runner.client_id
+            await session.commit()
+        await asyncio.to_thread(self.fixture.peer.call, runner, "fixture.desktop", {})
+        selected = [{"pluginId":"local:fixture", "checksum":"a" * 64}]
+        args = dict(plugins=selected, targetRunnerId=runner.id, targetRunnerKind="work-computer")
+        response = await self.create("plugin-normal-chat", files=(("note.txt",b"material"),), **args)
+        self.assertEqual(response.status_code,200,response.text)
+        receipt = response.json()
+        self.assertEqual(receipt["phase"],"committed",receipt)
+        await self.fixture.complete(receipt["ref"])
+        read = await self.http.get('/api/v1/tasks/' + receipt['taskId'] + '/ai-session')
+        self.assertEqual(read.status_code,200,read.text)
+        users = [item for item in read.json()['items'] if item.get('kind') == 'user']
+        self.assertEqual(len(users),1)
+        self.assertEqual(users[0]['text'],'CLOUD_NEW_TEST: write a report')
+        self.assertEqual(users[0]['plugins'][0]['pluginId'],'local:fixture')
+        context = json.loads((fixture.WORK / 'plugin-start-context.json').read_text(encoding='utf-8'))
+        self.assertEqual(context['ref'],receipt['ref'])
+        self.assertTrue(Path(context['cwd']).is_relative_to(fixture.WORK))
+        again = await self.create("plugin-normal-chat", files=(("note.txt",b"material"),), **args)
+        self.assertEqual(again.status_code,200,again.text)
+        self.assertEqual(again.json()['taskId'],receipt['taskId'])
+        self.assertEqual(self.fixture.peer.calls.count('job.dispatch'),1)
+        changed = await self.create("plugin-normal-chat", files=(("note.txt",b"material"),),
+            **{**args,'plugins':[{**selected[0],'checksum':'b' * 64}]})
+        self.assertEqual(changed.status_code,409,changed.text)
+
     async def test_direct_entry_security_idempotency_inputs_and_capacity(self):
         peer, runner = self.fixture.peer, self.fixture.runner
         with self.subTest("validated contract rejects silent downgrades before execution"):

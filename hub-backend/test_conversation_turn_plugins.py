@@ -68,6 +68,94 @@ class TurnPluginsTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["ok"])
         send.assert_not_called()
 
+    def test_internal_dispatch_id_passes_real_desktop_capability_entry(self):
+        import json
+        import subprocess
+        import tempfile
+        from pathlib import Path
+        from app.auth import verify_claims
+        from app.api.desktop_capabilities import digest
+        script = Path(__file__).parent / "tests/desktop_plugin_request_fixture.cjs"
+        with tempfile.TemporaryDirectory(prefix="soduwork-plugin-request-") as root:
+            selected = json.loads(subprocess.check_output(
+                ["node", str(script), root, "catalog"], text=True, encoding="utf-8"))
+            client, runner = SimpleNamespace(user_ref="owner"), SimpleNamespace(client_id="pc")
+            ref, dispatch_id = "initial-ref", "handoff:" + "a" * 64
+            packet = plugins.authorization(client, runner, ref, [selected], dispatch_id)
+            self.assertRegex(packet["requestId"], r"^[A-Za-z0-9_-]{8,80}$")
+            self.assertEqual(packet["requestId"], plugins.authorization(client,runner,ref,[selected],dispatch_id)["requestId"])
+            self.assertNotEqual(packet["requestId"], plugins.authorization(client,runner,"other",[selected],dispatch_id)["requestId"])
+            claims = verify_claims(packet["authorization"], token_type="desktop-capability")
+            self.assertEqual(claims["digest"],digest({k:v for k,v in packet.items() if k != "authorization"}))
+            result = subprocess.run(["node",str(script),root],input=json.dumps(packet),
+                text=True,encoding="utf-8",capture_output=True,check=True)
+            resolved = json.loads(result.stdout)
+            self.assertEqual(resolved["plugins"][0]["pluginId"],selected["pluginId"])
+            self.assertTrue(resolved["hasPrompt"])
+            self.assertGreater(resolved["resourceCount"],0)
+            legacy = plugins.authorization(client,runner,ref,[selected],"valid-existing-id")
+            self.assertEqual(legacy["requestId"],"valid-existing-id")
+            bad = {**packet,"requestId":dispatch_id}
+            rejected = subprocess.run(["node",str(script),root],input=json.dumps(bad),
+                text=True,encoding="utf-8",capture_output=True)
+            self.assertNotEqual(rejected.returncode,0)
+            self.assertIn("操作内容不正确",rejected.stderr)
+
+    def test_new_chat_options_keep_only_pinned_plugin_identifiers(self):
+        from app.services.cloud_conversations import clean_options
+        base = {"sessionId":"mobile:new", "agentId":"pi", "text":"summarize", "plugins":self.selection,
+                "targetRunnerId":"pc", "targetRunnerKind":"work-computer"}
+        self.assertEqual(clean_options(base)["plugins"], self.selection)
+        for changes in [{"targetRunnerKind":"cloud"}, {"targetRunnerId":""},
+                        {"plugins":[{**self.selection[0], "prompt":"injected"}]}]:
+            with self.assertRaises(HTTPException):
+                clean_options({**base, **changes})
+        plain = clean_options({k:v for k,v in base.items() if k != "plugins"})
+        self.assertNotIn("plugins", plain)  # Preserve hashes of old pending requests.
+
+    async def test_new_chat_requires_owner_and_explicit_start_protocol(self):
+        from app.services import runner_hub
+        from app.api import desktop_capabilities
+        runner = SimpleNamespace(client_id="pc", caps=["desktopPluginTurn1", "admit1"])
+        with patch.object(runner_hub,"get",return_value=runner), \
+             patch.object(desktop_capabilities,"resolve",AsyncMock(return_value=(None,runner))) as resolve:
+            with self.assertRaises(HTTPException):
+                await plugins.validate_start(None, SimpleNamespace(user_ref="owner"), "pc-runner")
+            runner.caps.append("desktopPluginStart1")
+            self.assertIs(await plugins.validate_start(None, SimpleNamespace(user_ref="owner"), "pc-runner"),runner)
+            resolve.side_effect=HTTPException(403,"not owner")
+            with self.assertRaises(HTTPException):
+                await plugins.validate_start(None, SimpleNamespace(user_ref="other"), "pc-runner")
+
+    async def test_first_turn_resolves_in_prepared_workspace_without_pc_sync(self):
+        ref="initial-ref"
+        packet={"operation":"plugin.prepare","args":{"ref":ref,"plugins":self.selection}}
+        result={"promptText":"work + verified method", "plugins":[{"pluginId":"local:plugin-builder"}],
+                "resourceBundles":[{"key":"builder", "resources":[]}]}
+        pipe=SimpleNamespace(call=AsyncMock(return_value={"ok":True,"data":result}))
+        machine=SimpleNamespace(desktop_owned=True,_desktop_capabilities=pipe)
+        ctx={"pluginTurn":packet,"workspacePrepared":True,"workDir":"runner-owned-workspace",
+             "brief":"work","conversationUserText":"work","requiredAgentCapabilities":["files"],
+             "accessPolicy":{"mode":"readonly"}}
+        cfg={}
+        await runner_turn_plugins.prepare_start(machine,ref,ctx,cfg)
+        sent=pipe.call.call_args.args[0]
+        self.assertEqual(sent["_turnContext"]["cwd"],"runner-owned-workspace")
+        self.assertEqual(sent["_turnContext"]["capabilityIds"],["files"])
+        self.assertTrue(sent["_turnContext"]["readOnly"])
+        self.assertEqual(ctx["brief"],result["promptText"])
+        self.assertEqual(ctx["conversationUserText"],"work")
+        self.assertEqual(ctx["conversationPlugins"],result["plugins"])
+        self.assertEqual(cfg["pluginResourceBundles"],result["resourceBundles"])
+        self.assertNotIn("pluginTurn",ctx)
+        for changes in [{"workspacePrepared":False}, {"workDir":""},
+                        {"pluginTurn":{**packet,"args":{"ref":"other"}}}]:
+            with self.assertRaises(ValueError):
+                await runner_turn_plugins.prepare_start(machine,ref,{**ctx,"pluginTurn":packet,**changes},{})
+        pipe.call.return_value={"ok":False,"error":"version changed"}
+        with self.assertRaisesRegex(ValueError,"version changed"):
+            await runner_turn_plugins.prepare_start(machine,ref,{**ctx,"pluginTurn":packet},{})
+
 
 if __name__ == "__main__":
     unittest.main()
