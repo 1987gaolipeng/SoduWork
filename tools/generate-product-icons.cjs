@@ -6,6 +6,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 const { iconGeometry } = require('./product-icon-geometry.cjs');
+const { opaqueIconBitmap } = require('./product-icon-bitmap.cjs');
 const root = path.resolve(__dirname, '..');
 const scriptIndex = process.argv.findIndex(arg => path.resolve(arg) === __filename);
 const args = process.argv.slice(scriptIndex + 1);
@@ -100,22 +101,13 @@ async function main() {
   const window = new BrowserWindow({ show: false, webPreferences: {
     offscreen: true, contextIsolation: true, nodeIntegration: false, sandbox: true
   } });
-  let opaque, normalizedDesktop;
+  const opaque = nativeImage.createFromBitmap(opaqueIconBitmap(tile.toBitmap()), {width: 1024, height: 1024});
+  let normalizedDesktop;
   const geometry = iconGeometry(desktop.toBitmap(), desktopSize.width, desktopSize.height);
   const desktopSource = desktop.crop(geometry.crop).toDataURL();
   try {
     await window.loadURL('data:text/html,<html></html>');
     const data = await window.webContents.executeJavaScript(`(async () => {
-      const image = new Image();
-      image.src = ${JSON.stringify('data:image/png;base64,' + source.toString('base64'))};
-      await image.decode();
-      const canvas = document.createElement('canvas');
-      canvas.width = canvas.height = 1024;
-      const context = canvas.getContext('2d', { alpha: false });
-      context.fillStyle = '#001333';
-      context.fillRect(0, 0, 1024, 1024);
-      context.drawImage(image, 0, 0);
-      const opaque = canvas.toDataURL('image/png');
       const mark = new Image();
       mark.src = ${JSON.stringify(desktopSource)};
       await mark.decode();
@@ -123,9 +115,8 @@ async function main() {
       transparent.width = transparent.height = 1024;
       const target = ${JSON.stringify(geometry.target)};
       transparent.getContext('2d').drawImage(mark, target.x, target.y, target.width, target.height);
-      return { opaque, desktop: transparent.toDataURL('image/png') };
+      return { desktop: transparent.toDataURL('image/png') };
     })()`);
-    opaque = nativeImage.createFromDataURL(data.opaque);
     normalizedDesktop = nativeImage.createFromDataURL(data.desktop);
   } finally {
     window.destroy();

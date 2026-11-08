@@ -2011,7 +2011,7 @@ function createRunnerRuntimeAdapter(options) {
         return { ok: false, reason: String(error && error.message || error), chats: [] };
       }
     },
-    async history(limit = 50, { strict = false, metadataOnly = false } = {}) {
+    async history(limit = 50, { strict = false } = {}) {
       try {
         const runs = await _runnerInventory(runtime, { force: strict });
         const selected = runs.filter(isChat).slice(0, Math.max(1, Number(limit) || 50));

@@ -153,13 +153,6 @@ function install({ app, ipcMain, session, BrowserWindow, dialog, shell, cloudHis
         (!runnerRow || runnerRow.accountConversation) && guard.account?.found === true);
       if (accountOnly) runnerRow = guard.account?.projection || guard.row || { title: '这条会话' };
       if (!switched && !piEntry && !runnerRow) {
-        if (found && found.notFound) {
-          const result = { ok: true, id, alreadyDeleted: true };
-          // Retry a confirmed deletion whose archive was already recycled but
-          // whose source tombstone could not yet be persisted.
-          return rawOptions?.confirmed === true && accountHistory?.deleteNativeHistory
-            ? await accountHistory.deleteNativeHistory(id, async () => result) : result;
-        }
         return (found && found.ok === false && found.reason)
           ? found : { ok: false, reason: '找不到这条会话' };
       }
@@ -241,12 +234,11 @@ function install({ app, ipcMain, session, BrowserWindow, dialog, shell, cloudHis
         return await finishDeletion(guard, deleted, synced);
       }
       guard();
-      if (canonicalId) return cloudHistory.forget(canonicalId);
-      if (piEntry) {
-        const remove = async () => { guard(); await trash(shell, piEntry.path); };
-        if (accountHistory?.deleteNativeHistory) await accountHistory.deleteNativeHistory(id, remove, piEntry);
-        else await remove();
+      if (canonicalId) {
+        const deleted = await cloudHistory.forget(canonicalId);
+        return await finishDeletion(guard, deleted, synced);
       }
+      if (piEntry) await trash(shell, piEntry.path);
       else {
         const forgot = await session.forgetRunner(app, id);
         if (!forgot.ok && !forgot.notFound) return deletionFailure(guard, forgot, synced);

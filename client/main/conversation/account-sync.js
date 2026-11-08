@@ -157,28 +157,9 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
   const deletedIds = new Set();
   const historyTtl = 3000;
   const historyPageSize = 100;
-  const deletion = require('./account-history-delete.cjs').create({ app, store, fetch,
-    identityOf: localIdentityOf || identityOf, closed: () => closed, retry: schedule,
-    async drain(key) {
-      const state = bound.get(key);
-      await state?.ready;
-      await state?.pending;
-      if (flushing) await flushing;
-    },
-    marked(key) { const state = bound.get(key); if (state) state.deleted = true; },
-    changed: deletedHistory });
-
-  async function deletedHistory(id, row, identity) {
-    if (historyPromise) await historyPromise;
-    const current = await (localIdentityOf || identityOf)(app);
-    if (closed || directoryScope(current) !== directoryScope(identity)) return;
-    const scope = directoryScope(identity);
-    const cursor = (await store.directory?.(scope))?.cursor ?? (historyScope === scope ? historyCursor : 0);
-    if (store.saveDirectory) await store.saveDirectory(scope, [row], cursor);
-    if (closed || directoryScope(await (localIdentityOf || identityOf)(app)) !== directoryScope(identity)) return;
-    accountRows.delete(id); accountIds.delete(id); deletedIds.add(id); historyAt = 0;
-    await emitChanged(id, null, identity);
-  }
+  const historyMaxPages = 5;
+  const nativeProjections = new Map(), nativeQueue = [];
+  let nativeActive = 0;
 
   function identityKey(identity) {
     try { return accountScopeKey(identity); } catch (_) { return ''; }

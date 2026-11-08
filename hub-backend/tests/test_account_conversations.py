@@ -81,20 +81,83 @@ class AccountConversationTests(unittest.IsolatedAsyncioTestCase):
             **extra,
         }
 
-    async def test_creation_time_survives_later_sync_updates(self):
-        with patch.object(account_conversations, "_publish_account_update", new=AsyncMock()):
-            for revision in (1, 2):
-                response = await self.http.post("/api/v1/account-conversations/sync",
-                    json=self.checkpoint(revision, [], title=f"title-{revision}"))
-                self.assertEqual(response.status_code, 200)
-                page = (await self.http.get("/api/v1/account-conversations")).json()
-                row = page["items"][0]
-                self.assertTrue(row["createdAt"])
-                if revision == 1:
-                    created = row["createdAt"]
-                else:
-                    self.assertEqual(row["createdAt"], created)
-                    self.assertEqual(row["title"], "title-2")
+    async def create_conversation(self, **extra):
+        response = await self.http.post("/api/v1/account-conversations/sync",
+            json=self.checkpoint(1, [], **extra))
+        self.assertEqual(response.status_code, 200, response.text)
+        conversation_id = response.json()["conversationId"]
+        source = await self.http.get(f"/api/v1/account-conversations/{conversation_id}/source")
+        return source.json()["conversation"]
+
+    async def lifecycle(self, row, action, **extra):
+        return await self.http.post(f"/api/v1/account-conversations/{row['id']}/lifecycle",
+            json={"action": action, "expectedRevision": row["revision"], **extra})
+
+    async def test_real_device_auth_and_new_source_push_remain_compatible_with_lifecycle(self):
+        from app.models import User
+        from app.services import client_domain_events, device_auth
+        from app.services.auth_cache_transactions import AuthSession
+
+        # Keep the production authentication dependency and transaction hooks;
+        # only the database is private. With Redis disabled, identities read SQL.
+        self.sessions = async_sessionmaker(self.engine, expire_on_commit=False,
+                                          sync_session_class=AuthSession)
+        async with self.engine.begin() as connection:
+            await connection.run_sync(lambda sync: Base.metadata.create_all(
+                sync, tables=[User.__table__]))
+        async with self.sessions() as session:
+            session.add_all([User(id="user-1", username="alice", is_active=True),
+                             User(id="user-other", username="bob", is_active=True)])
+            second = Client(id="desktop-2", user_ref="user-1", auth_state="active", auth_version=1)
+            stranger = Client(id="desktop-other", user_ref="user-other", auth_state="active", auth_version=1)
+            session.add_all([second, stranger])
+            source = await session.get(Client, "desktop-1")
+            headers = {value.id: {"Authorization": "Device " + device_auth.issue_session(value)[0]}
+                       for value in (source, second, stranger)}
+            await session.commit()
+        self.app.dependency_overrides.pop(current_client)
+
+        with patch.object(account_conversations, "_publish_account_update", new=AsyncMock()) as publish, \
+                patch.object(client_domain_events, "account_changed", new=AsyncMock()) as project_change, \
+                patch.object(device_auth, "_LAST_SEEN_WRITES", {}):
+            created = await self.http.post("/api/v1/account-conversations/sync",
+                headers=headers["desktop-1"], json=self.checkpoint(1, []))
+            self.assertEqual(created.status_code, 200, created.text)
+            self.assertEqual(project_change.await_count, 1)
+            self.assertEqual(project_change.await_args.args[1:], ("user-1", "conversation-projects"))
+            listed = await self.http.get("/api/v1/account-conversations", headers=headers["desktop-2"])
+            self.assertEqual(listed.status_code, 200, listed.text)
+            row = listed.json()["items"][0]
+            endpoint = f"/api/v1/account-conversations/{row['id']}/lifecycle"
+            archived = await self.http.post(endpoint, headers=headers["desktop-2"],
+                json={"action": "archive", "expectedRevision": row["revision"]})
+            self.assertEqual(archived.status_code, 200, archived.text)
+            self.assertTrue(archived.json()["conversation"]["archived"])
+            self.assertEqual(project_change.await_count, 1, "lifecycle changes do not create another source")
+            self.assertEqual(publish.await_count, 2)
+
+            replay = await self.http.post("/api/v1/account-conversations/sync",
+                headers=headers["desktop-1"], json=self.checkpoint(2, []))
+            self.assertEqual(replay.status_code, 200, replay.text)
+            self.assertEqual(project_change.await_count, 1)
+            current = (await self.http.get("/api/v1/account-conversations",
+                headers=headers["desktop-2"])).json()["items"][0]
+            self.assertTrue(current["archived"], "ordinary source sync preserves account intent")
+            forbidden = await self.http.post(endpoint, headers=headers["desktop-other"],
+                json={"action": "restore", "expectedRevision": current["revision"]})
+            self.assertEqual(forbidden.status_code, 404)
+            self.assertEqual(publish.await_count, 3)
+
+            async with self.sessions() as session:
+                device_auth.revoke(await session.get(Client, "desktop-2"))
+                await session.commit()
+            for response in [
+                await self.http.get("/api/v1/account-conversations", headers=headers["desktop-2"]),
+                await self.http.post(endpoint, headers=headers["desktop-2"],
+                    json={"action": "restore", "expectedRevision": current["revision"]}),
+            ]:
+                self.assertEqual(response.status_code, 403, response.text)
+            self.assertEqual(publish.await_count, 3, "revoked devices cannot publish lifecycle updates")
 
     async def test_creation_time_survives_later_sync_updates(self):
         with patch.object(account_conversations, "_publish_account_update", new=AsyncMock()):
