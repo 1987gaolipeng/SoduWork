@@ -44,6 +44,33 @@
   function hiddenRow(row) {
     return rowIds(row).some(id => lifecycle.get(id)?.hidden);
   }
+  function activeConversationIds() {
+    const ids = new Set(rowIds({ id: ctx.activeChatId }));
+    try {
+      const info = global.NativeChat?.sessionInfo?.();
+      for (const key of ['sessionId', 'ref', 'runtimeConversationId']) {
+        if (info?.[key]) ids.add(String(info[key]));
+      }
+    } catch (_) { /* The native bridge may be unavailable during teardown. */ }
+    return ids;
+  }
+  async function openNewConversation() {
+    const payload = { newSession: true, tab: 'chat' };
+    try {
+      if (typeof global.WorkspaceHost?.open === 'function') {
+        const opened = await Promise.resolve(global.WorkspaceHost.open('create', payload));
+        if (opened !== false) return true;
+      }
+      if (typeof global.openComposePanel === 'function')
+        return (await Promise.resolve(global.openComposePanel(payload))) !== false;
+    } catch (_) {
+      try {
+        if (typeof global.openComposePanel === 'function')
+          return (await Promise.resolve(global.openComposePanel(payload))) !== false;
+      } catch (_) { /* Keep the list usable even when the shell is closing. */ }
+    }
+    return false;
+  }
   function needsHistoryConfirmation(row) {
     return lifecycleOverflow && !row.pending && !rowIds(row).some(id =>
       lifecycle.get(id)?.hidden === false || ctx.chatItems.some(item => rowIds(item).includes(id)));
@@ -93,7 +120,7 @@
     historyOwner = next;
     // The initial bootstrap only binds the already-open local history. Token
     // renewal and device replacement have the same Hub/account owner key.
-    if (!hadOwner) { hadOwner = Boolean(next); return false; }
+    if (!hadOwner) { hadOwner = Boolean(next); return Boolean(next); }
     historyEpoch++;
     mutationGeneration++;
     lifecycle.clear(); lifecycleOverflow = false;
@@ -187,6 +214,7 @@ async function deleteHistoryChat(id) {
     const key = String(id || '');
     const api = global.soduWorkAPI && (global.soduWorkAPI.conversationSession || global.soduWorkAPI.piSession);
     if (!key || !api || typeof api.deleteHistory !== 'function') return false;
+    const activeIds = activeConversationIds();
     syncHistoryOwner();
     const epoch = historyEpoch, startedAt = mutationGeneration;
     const current = () => { syncHistoryOwner(); return epoch === historyEpoch; };
@@ -208,9 +236,9 @@ async function deleteHistoryChat(id) {
       // or the next "open conversation" would try to resume a missing archive.
       for (const id of applied.ids) ChatCollaborationStore.remove(id);
     }
-    if (hiddenRow({ id: ctx.activeChatId })) {
+    if ([...activeIds].some(activeId => applied.ids.includes(activeId)) || hiddenRow({ id: ctx.activeChatId })) {
       ctx.activeChatId = '';
-      if (global.WorkspaceHost) global.WorkspaceHost.open('create', { newSession: true });
+      await openNewConversation();
     }
     renderChats();
     return true;
@@ -220,6 +248,7 @@ async function archiveHistoryChat(id) {
     const key = String(id || '');
     const api = global.soduWorkAPI && (global.soduWorkAPI.conversationSession || global.soduWorkAPI.piSession);
     if (!key || !api || typeof api.archiveHistory !== 'function') return false;
+    const activeIds = activeConversationIds();
     syncHistoryOwner();
     const epoch = historyEpoch, startedAt = mutationGeneration;
     let got = null;
@@ -234,9 +263,9 @@ async function archiveHistoryChat(id) {
     const applied = applyLifecycle({ ...got, archived: true }, key, startedAt);
     if (!applied) return true;
     if (!forgetPinned(applied.ids, '这条会话暂时无法归档', true)) return false;
-    if (hiddenRow({ id: ctx.activeChatId })) {
+    if ([...activeIds].some(activeId => applied.ids.includes(activeId)) || hiddenRow({ id: ctx.activeChatId })) {
       ctx.activeChatId = '';
-      if (global.WorkspaceHost) global.WorkspaceHost.open('create', { newSession: true });
+      await openNewConversation();
     }
     renderChats();
     return true;

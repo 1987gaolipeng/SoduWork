@@ -6,8 +6,17 @@ const { createRunnerRuntimeAdapter, _uuidV5 } = require('../main/agent-runtime/r
 const catalog = require('../main/agent-runtime/runtime-catalog');
 const segments = require('../main/conversation/runtime-segments');
 const sessionArchive = require('../main/pi-session/session');
+const { goalSwitchBlocked } = require('../main/agent-runtime/switchable-conversation');
 const identity = uid => ({ hub: 'http://127.0.0.1:9', clientId: 'test-device', session:
   Buffer.from(JSON.stringify({ typ: 'device', uid, cid: 'test-device', iat: Math.floor(Date.now()/1000)-10, exp: Math.floor(Date.now()/1000)+3600 })).toString('base64url') + '.' + 'a'.repeat(64) });
+
+test('completed goal conversations can switch while active goals remain protected', () => {
+  assert.equal(goalSwitchBlocked({ execution: { configured: false } }), false);
+  assert.equal(goalSwitchBlocked({ execution: { configured: true, active: true } }), true);
+  assert.equal(goalSwitchBlocked({ execution: { configured: true, terminalConfirmed: false, harness: { state: 'idle' } } }), true);
+  assert.equal(goalSwitchBlocked({ execution: { configured: true, terminalConfirmed: true, harness: { state: 'idle' } } }), false);
+  assert.equal(goalSwitchBlocked({ execution: { configured: true, harness: { state: 'completed' } } }), false);
+});
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-agent-switch-')), app = { getPath: () => root };
