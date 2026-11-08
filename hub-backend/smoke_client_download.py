@@ -31,14 +31,14 @@ def main() -> None:
             assert download._package_version(download._pkg()) == "1.10.0"
             from app.db import Base, engine, get_session as open_session
 
-            async def _dir_info():
+            async def _dir_info(endpoint=download.client_info):
                 # This test isolates the downloads-directory fallback, so the release-channel table stays empty.
                 async with engine.begin() as conn:
                     await conn.run_sync(Base.metadata.create_all)
                 agen = open_session()
                 session = await agen.__anext__()
                 try:
-                    return await download.client_info(session)
+                    return await endpoint(session)
                 finally:
                     await agen.aclose()
 
@@ -51,7 +51,7 @@ def main() -> None:
             touch(root / "SoduWork-Mobile-invalid.apk", 1000)
             assert download._mobile_pkg().name == "SoduWork-Mobile-1.12.12.apk"
             assert download._mobile_package_version(download._mobile_pkg()) == "1.12.12"
-            mobile = asyncio.run(download.mobile_info())
+            mobile = asyncio.run(_dir_info(download.mobile_info))
             assert mobile["available"] is True
             assert mobile["version"] == "1.12.12"
             assert mobile["artifactFilename"] == "SoduWork-Mobile-1.12.12.apk"

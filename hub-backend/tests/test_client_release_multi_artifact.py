@@ -402,10 +402,9 @@ class PublicBetaDownloadTests(_SqliteIsolated):
                 self.assertEqual((await client.get("/api/v1/download/client/linux/deb")).status_code, 200)
 
 
-class MobileDownloadBrandTests(unittest.IsolatedAsyncioTestCase):
+class MobileDownloadBrandTests(_SqliteIsolated):
     async def test_old_package_paths_keep_working_with_current_download_name(self):
-        app = FastAPI()
-        app.include_router(download.router)
+        app = await self._app([])
         for filename in ("SoduWork-Mobile.apk", "SoduWork-Mobile-1.2.3.apk"):
             with self.subTest(filename=filename), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)

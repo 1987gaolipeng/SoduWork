@@ -181,12 +181,12 @@
       const identity = s.ref || (s.draftOnly ? 'draft:' + s.draftId : '');
       if (lastIdentity !== identity) { lastIdentity = identity; ref = s.ref || ''; saving = false; request = null; checkingId = ''; availability = null; availabilityFlight = null; availabilityIdentity = identity; close(); }
       const taskRuntime = Boolean(s.taskRuntime);
-      button.disabled = taskRuntime || (!s.ref && !s.draftOnly) || saving || s.runtimeSwitching || (s.cloudHandoff && s.cloudHandoff.phase !== 'committed');
+      button.disabled = (!s.ref && !s.draftOnly) || saving || s.runtimeSwitching || (s.cloudHandoff && s.cloudHandoff.phase !== 'committed');
       if (more) more.disabled = Boolean(saving);
       button.setAttribute('aria-haspopup', 'dialog'); button.setAttribute('aria-busy', String(saving || !!s.runtimeSwitching));
       button.setAttribute('role', 'button'); button.title = tx('切换 Agent · 保留当前对话和工作目录');
-      if (taskRuntime) { close(); button.title = tx('沿用需求已保存的工程、分支和模型配置'); }
-      if (!taskRuntime && identity && !availability && !availabilityFlight) void loadAvailability().catch(() => {});
+      if (taskRuntime) { button.title = tx('需求已保存工程、分支和模型配置；执行结束后可切换 Agent'); }
+      if (identity && !availability && !availabilityFlight) void loadAvailability().catch(() => {});
       if (!pop.hidden) position();
     }
     on(global, 'agent-runtimes-changed', refreshAvailability);
@@ -207,7 +207,6 @@
         modelPop.previousElementSibling?.setAttribute('aria-expanded', 'false');
       }
       const state = options.state();
-      if (state.taskRuntime) return;
       if (state.busy) {
         options.say(state.recoveryRequired
           ? (state.recoveryReason || tx('执行状态尚未确认')) + '；' + tx('请先点击“核实执行状态”后再切换 Agent')

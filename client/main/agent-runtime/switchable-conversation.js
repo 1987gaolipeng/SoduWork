@@ -17,6 +17,17 @@ function busy(handle) {
     s.pendingUi || s.pendingPermissions?.length || s.queue?.length || s.execution?.queue?.length ||
     s.execution?.turnQueue?.active || s.execution?.turnQueue?.pending?.length;
 }
+const TERMINAL_GOAL_STATES = new Set(['completed', 'done', 'failed', 'stopped', 'interrupted', 'cancelled', 'canceled']);
+function goalSwitchBlocked(snapshot) {
+  const execution = snapshot?.execution || {};
+  if (!execution.configured) return false;
+  if (execution.active || execution.running || execution.recoveryRequired || execution.paused ||
+      execution.pendingPermissions?.length || execution.queue?.length ||
+      execution.turnQueue?.active || execution.turnQueue?.pending?.length) return true;
+  if (execution.terminalConfirmed) return false;
+  const state = String(execution.harness?.state || '').toLowerCase();
+  return !TERMINAL_GOAL_STATES.has(state);
+}
 function descriptor(raw, history = raw.historyRow?.()) {
   const nativeDispatchId = history?.nativeDispatchId;
   return { sessionId: raw.sessionId, adapterId: raw.adapterId, ref: raw.ref,

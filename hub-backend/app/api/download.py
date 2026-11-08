@@ -148,6 +148,8 @@ async def client_release_download(release_id: str, session=Depends(get_session))
 
 def _release_media_type(artifact_name: str) -> str:
     lowered = artifact_name.lower()
+    if lowered.endswith(".apk"):
+        return "application/vnd.android.package-archive"
     if lowered.endswith(".deb"):
         return "application/vnd.debian.binary-package"
     if lowered.endswith(".rpm"):
@@ -377,9 +379,11 @@ async def client_download(session=Depends(get_session)):
 
 
 @router.get("/mobile/info")
-async def mobile_info():
+async def mobile_info(session=Depends(get_session)):
     """Public metadata for the Android trial package and mobile web entry."""
-    package = _mobile_pkg()
+    from .android_downloads import select_package
+    selected, managed = await select_package(session)
+    package = selected[1] if selected else (None if managed else _mobile_pkg())
     if package is None:
         return {
             "available": False,
@@ -394,6 +398,7 @@ async def mobile_info():
         "artifactFilename": package.name,
         "version": _mobile_package_version(package),
         "size": stat.st_size,
+        "sha256": selected[0].sha256 if selected else "",
         "sizeText": f"{stat.st_size / 1024 / 1024:.1f} MB",
         "updatedAt": datetime.fromtimestamp(
             stat.st_mtime, tz=timezone.utc
@@ -403,8 +408,10 @@ async def mobile_info():
 
 
 @router.get("/mobile/android")
-async def mobile_android_download():
-    package = _mobile_pkg()
+async def mobile_android_download(session=Depends(get_session)):
+    from .android_downloads import select_package
+    selected, managed = await select_package(session)
+    package = selected[1] if selected else (None if managed else _mobile_pkg())
     if package is None:
         raise HTTPException(status_code=404, detail="移动端试用包尚未发布")
     return FileResponse(
@@ -415,9 +422,11 @@ async def mobile_android_download():
 
 
 @router.get("/mobile/android/{filename}")
-async def mobile_android_version_download(filename: str):
+async def mobile_android_version_download(filename: str, session=Depends(get_session)):
     """Serve a published version by name; never redirect a Release link to latest."""
-    package = _mobile_path(filename)
+    from .android_downloads import select_package
+    selected, managed = await select_package(session, filename)
+    package = selected[1] if selected else (None if managed else _mobile_path(filename))
     if package is None:
         raise HTTPException(status_code=404, detail="移动端安装包不存在或尚未发布")
     return FileResponse(package, media_type="application/vnd.android.package-archive",

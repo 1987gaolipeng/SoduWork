@@ -322,6 +322,7 @@ RELEASE_PLATFORM_SUFFIXES: dict[str, frozenset[str]] = {
     "darwin": frozenset({".dmg", ".zip"}),
     # tar.gz is a double suffix: Path.suffix alone would only see ".gz".
     "linux": frozenset({".appimage", ".deb", ".rpm", ".tar.gz"}),
+    "android": frozenset({".apk"}),
 }
 
 
@@ -330,6 +331,8 @@ _INSTALLER_STEM = r"SoduWork"
 
 
 def _expected_installer_names(platform: str, arch: str, version: str) -> set[str]:
+    if platform == "android":
+        return {f"SoduWork-Mobile-{version}.apk"}
     base = "mac" if platform == "darwin" else platform
     if platform == "win32":
         return {f"SoduWork-{version}-Setup.exe"}
@@ -389,7 +392,8 @@ def release_from_bundle(bundle: dict, installer: Path) -> SimpleNamespace:
     if candidate.channel not in {"stable", "beta"}:
         raise UpdateContractError("client release channel is invalid")
     suffixes = RELEASE_PLATFORM_SUFFIXES.get(candidate.platform)
-    if suffixes is None or candidate.arch not in RELEASE_ARCHES:
+    arches = {"universal"} if candidate.platform == "android" else RELEASE_ARCHES
+    if suffixes is None or candidate.arch not in arches:
         raise UpdateContractError("client release target is invalid")
     expected_names = _expected_installer_names(
         candidate.platform, candidate.arch, candidate.version)

@@ -163,11 +163,6 @@
   padding:9px 14px;font-size:14px;line-height:1.7;color:var(--ink);white-space:pre-wrap;word-break:break-word}
 .nmsg.ai{align-self:stretch;width:100%}
 
-/* Message body */
-/* Do not use white-space:pre-wrap here. The former inline-span renderer needed it for line breaks,
-   but marked emits real HTML (<p>/<ol>/<li>...) with newlines between tags. pre-wrap renders those
-   newlines as extra blank lines between paragraphs and list items; adjusting margins cannot fix it. */
-
 .nmsg.user.long{width:min(610px,88%);max-width:88%}
 .nmsg.user.long .nbubble{width:100%;box-sizing:border-box}
 .nuser-long summary{list-style:none;display:flex;align-items:flex-start;gap:12px;cursor:pointer;user-select:none}
@@ -189,7 +184,7 @@
 .nuser-criteria ul{margin:7px 0 1px;padding:7px 0 0 19px;border-top:1px solid color-mix(in srgb,var(--line) 52%,transparent)}
 .nuser-criteria li+li{margin-top:3px}
 /* Let Markdown shrink inside reply flex rows; code and tables scroll internally. */
-.ntext{position:relative;min-width:0;max-width:100%;font-size:14px;line-height:1.68;color:var(--ink);white-space:normal;word-break:break-word}
+.ntext{position:relative;width:100%;min-width:0;max-width:100%;box-sizing:border-box;font-size:14px;line-height:1.68;color:var(--ink);white-space:normal;word-break:break-word}
 .nmessage-footer{display:flex;align-items:center;justify-content:flex-end;gap:6px;min-height:28px;margin-top:4px;white-space:normal;
   /* Keep the action row in the hit-test tree even while it is visually quiet.
      Toggling pointer-events on hover made the target under the mouse change

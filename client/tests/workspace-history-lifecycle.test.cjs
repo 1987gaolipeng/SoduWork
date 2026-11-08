@@ -124,6 +124,20 @@ test('successful deletion atomically forgets every canonical and authenticated a
   assert.deepEqual(f.ids(), ['independent']);
 });
 
+test('deleting the active alias clears the route and opens a fresh conversation', async () => {
+  const opens = [];
+  const f = fixture({ deleteHistory: async () => ({ ok: true, id: 'native', aliasIds: ['account-copy'], deleted: true }) });
+  f.window.WorkspaceHost = { open: async (...args) => { opens.push(args); return true; } };
+  f.api.setChats([{ ...row('native'), historyAliasIds: ['account-copy'] }]);
+  f.ctx.activeChatId = 'account-copy';
+  assert.equal(await f.api.deleteHistoryChat('account-copy'), true);
+  assert.equal(f.ctx.activeChatId, '');
+  assert.equal(opens.length, 1);
+  assert.equal(opens[0][0], 'create');
+  assert.equal(opens[0][1].newSession, true);
+  assert.equal(opens[0][1].tab, 'chat');
+});
+
 test('archive receipts remove all active aliases while retaining archived project members for restoration', async () => {
   const aliases = ['account-copy', 'segment', 'old-copy'];
   const f = fixture({ archiveHistory: async () => ({ok:true,id:'native',archived:true,aliasIds:aliases}) });

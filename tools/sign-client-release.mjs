@@ -97,11 +97,12 @@ async function main() {
   if (!existsSync(installer)) fail("installer does not exist");
   const name = basename(installer);
   const platform = env("SODUWORK_CLIENT_PLATFORM", "win32");
-  if (!["win32", "darwin", "linux"].includes(platform)) fail("SODUWORK_CLIENT_PLATFORM must be win32, darwin or linux");
+  if (!["win32", "darwin", "linux", "android"].includes(platform)) fail("Unsupported SODUWORK_CLIENT_PLATFORM");
   /* Accept only the current SoduWork installer prefix. */
   const stem = 'SoduWork';
   const stemVersion = '\\d+\\.\\d+\\.\\d+(?:-beta\\.(?:1|[1-9]\\d*))?';
   const patterns = {
+    android: new RegExp(`^${stem}-Mobile-(${stemVersion})\\.apk$`),
     win32: new RegExp(`^${stem}-(${stemVersion})-Setup\\.exe$`),
     darwin: new RegExp(`^${stem}-(${stemVersion})-mac(?:-(x64|arm64))?\\.(dmg|zip)$`),
     linux: new RegExp(`^${stem}-(${stemVersion})-linux(?:-(x64|arm64))?\\.(AppImage|deb|rpm|tar\\.gz)$`),
@@ -166,8 +167,9 @@ async function main() {
   const minimum = env("SODUWORK_CLIENT_MINIMUM_VERSION");
   if (minimum && !VERSION_RE.test(minimum)) fail("SODUWORK_CLIENT_MINIMUM_VERSION must be x.y.z or x.y.z-beta.N");
   const mandatory = /^(1|true|yes)$/i.test(env("SODUWORK_CLIENT_MANDATORY"));
-  const arch = env("SODUWORK_CLIENT_ARCH", "x64");
-  if (!["x64", "arm64"].includes(arch)) fail("SODUWORK_CLIENT_ARCH must be x64 or arm64");
+  const arch = env("SODUWORK_CLIENT_ARCH", platform === "android" ? "universal" : "x64");
+  const arches = platform === "android" ? ["universal"] : ["x64", "arm64"];
+  if (!arches.includes(arch)) fail("SODUWORK_CLIENT_ARCH does not match platform");
   const notes = env("SODUWORK_CLIENT_RELEASE_NOTES");
   const bundlePath = resolve(env(
     "SODUWORK_CLIENT_RELEASE_BUNDLE",
@@ -215,7 +217,7 @@ async function main() {
       const hex = bytes.toString('hex');
       payload.releaseId = `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
     }
-    if (!["x64", "arm64"].includes(payload.arch)) fail("SODUWORK_CLIENT_ARCH must be x64 or arm64");
+    if (!arches.includes(payload.arch)) fail("SODUWORK_CLIENT_ARCH does not match platform");
     payload.artifact.url = `/api/v1/client-updates/artifacts/${payload.releaseId}`;
     bundle = {
       ...payload,
