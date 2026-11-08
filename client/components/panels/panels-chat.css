@@ -180,7 +180,8 @@
 .nuser-criteria summary{width:max-content;max-width:100%;cursor:pointer;color:var(--ink-4);list-style-position:inside}
 .nuser-criteria ul{margin:7px 0 1px;padding:7px 0 0 19px;border-top:1px solid color-mix(in srgb,var(--line) 52%,transparent)}
 .nuser-criteria li+li{margin-top:3px}
-.ntext{position:relative;font-size:14px;line-height:1.68;color:var(--ink);white-space:normal;word-break:break-word}
+/* Let Markdown shrink inside reply flex rows; code and tables scroll internally. */
+.ntext{position:relative;min-width:0;max-width:100%;font-size:14px;line-height:1.68;color:var(--ink);white-space:normal;word-break:break-word}
 .nmessage-footer{display:flex;align-items:center;justify-content:flex-end;gap:6px;min-height:28px;margin-top:4px;white-space:normal;
   /* Keep the action row in the hit-test tree even while it is visually quiet.
      Toggling pointer-events on hover made the target under the mouse change

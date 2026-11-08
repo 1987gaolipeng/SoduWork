@@ -372,7 +372,9 @@
         if (sameTurn && thinkingElapsedMs > 0) return thinkingElapsedMs;
         const saved = snapshotElapsedMs();
         if (saved > 0) return saved;
-        if (current.snap?.messages?.some(message => message.role === 'assistant')) return null;
+        // Restored delegated history can contain only the initiating user
+        // message until its execution pages arrive. No clock means unknown.
+        if (current.snap?.messages?.some(message => ['user', 'assistant'].includes(message.role))) return null;
       }
       // A fresh submit owns the clock. The runtime snapshot may still carry
       // the previous turn's elapsed value while the new request is being

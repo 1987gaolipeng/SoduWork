@@ -240,12 +240,41 @@ function createPiSessionBridge(options) {
       try {
         opened = await openNative(legacyOptions);
       } catch (error) {
-        if (!canRecoverExpiredRunnerResume(error, legacyOptions, restored)) throw error;
-        // The transcript is already in runtime-segments.prefix. Do not replay
-        // the dead provider session; start a clean native segment and let the
-        // normal persistence callback replace the active descriptor.
-        legacyOptions = { ...legacyOptions, resumePath: '', resumeCwd: '', runtimeConversationId: '' };
-        opened = await openNative(legacyOptions);
+        if (error.code === 'RUNNER_SEGMENT_NOT_ADMITTED' && restored && error.snapshot) {
+          const old = restored.active, previous = restored.prefix || { messages: [], tools: [] };
+          const recovered = JSON.parse(JSON.stringify(error.snapshot)), offset = previous.messages.length;
+          const toolIds = new Map((recovered.tools || []).map(tool => [tool.id, old.sessionId + ':' + tool.id]));
+          for (const tool of recovered.tools || []) tool.id = toolIds.get(tool.id);
+          for (const message of recovered.messages || []) for (const block of message.blocks || [])
+            if (block.toolCall?.id && toolIds.has(block.toolCall.id)) block.toolCall.id = toolIds.get(block.toolCall.id);
+          const prefix = { messages: [...previous.messages, ...(recovered.messages || [])],
+            tools: [...previous.tools, ...(recovered.tools || []).map(tool => ({ ...tool,
+              after: Number(tool.after || 0) + offset }))],
+            usageReceipts: [...(previous.usageReceipts || []), ...(recovered.usageReceipts || [])],
+            turnMetrics: [...(previous.turnMetrics || []), ...(recovered.turnMetrics || []).map(metric => ({ ...metric,
+              fromMessage: metric.fromMessage + offset, toMessage: metric.toMessage + offset }))] };
+          legacyOptions = { ...legacyOptions, resumePath: '', resumeCwd: '', runtimeConversationId: '',
+            nativeDispatchId: '', nativeSessionStarted: undefined, verifyLegacySegment: false,
+            contextPrompts: [...(openOptions.contextPrompts || []), runtimeSegments.brief(prefix)] };
+          opened = await openNative(legacyOptions);
+          record = opened.record;
+          for (const binding of error.taskBindings || []) {
+            const bound = await opened.raw.bindTask(binding.taskId, binding.title || binding.taskTitle);
+            if (bound?.ok === false) throw Error(bound.reason);
+          }
+          restored = { ...restored, prefix, segments: [...restored.segments, old],
+            active: { ...old, sessionId: opened.raw.sessionId, ref: opened.raw.ref,
+              path: opened.raw.sessionId, nativeDispatchId: opened.raw.historyRow().nativeDispatchId, started: false } };
+          await runtimeSegments.save(legacyOptions.app, restored);
+        } else {
+          if (!canRecoverExpiredRunnerResume(error, legacyOptions, restored)) throw error;
+          // The transcript is already in runtime-segments.prefix. Do not replay
+          // the dead provider session; start a clean native segment and let the
+          // normal persistence callback replace the active descriptor.
+          legacyOptions = { ...legacyOptions, resumePath: '', resumeCwd: '', runtimeConversationId: '',
+            nativeDispatchId: '', nativeSessionStarted: undefined, verifyLegacySegment: false };
+          opened = await openNative(legacyOptions);
+        }
       }
       record = opened.record; const details = opened.details;
       let raw = details.handle;

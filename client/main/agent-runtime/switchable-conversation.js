@@ -17,17 +17,23 @@ function busy(handle) {
     s.pendingUi || s.pendingPermissions?.length || s.queue?.length || s.execution?.queue?.length ||
     s.execution?.turnQueue?.active || s.execution?.turnQueue?.pending?.length;
 }
-function descriptor(raw) {
+function descriptor(raw, history = raw.historyRow?.()) {
+  const nativeDispatchId = history?.nativeDispatchId;
   return { sessionId: raw.sessionId, adapterId: raw.adapterId, ref: raw.ref,
+    ...(nativeDispatchId ? { nativeDispatchId } : {}),
     path: raw.resumeLocation?.() || (raw.adapterId !== 'pi' ? raw.sessionId : '') };
 }
 function resumeOptions(options) {
   const row = segments.read(options.app, options.runtimeConversationId);
   if (!row) return { options, row: null };
   segments.assertOwner(options.app, row, options.identity);
-  const canResume = row.active.adapterId !== 'pi' ? row.active.started : row.active.path && fs.existsSync(row.active.path);
+  const runner = row.active.adapterId !== 'pi';
+  const canResume = runner ? row.active.path : row.active.path && fs.existsSync(row.active.path);
   return { row, options: { ...options, adapterId: row.active.adapterId, cwd: row.cwd,
     resumeCwd: row.cwd, resumePath: canResume ? row.active.path : '',
+    ...(runner ? { nativeDispatchId: row.active.nativeDispatchId || '',
+      nativeSessionStarted: row.active.nativeDispatchId ? row.active.started !== false : undefined,
+      verifyLegacySegment: !row.active.nativeDispatchId } : {}),
     // A switched conversation still has historical context even when its active
     // native archive was removed or moved. Mark it as resumed so session-open can
     // recover an unavailable saved model from the current default instead of
@@ -82,12 +88,13 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
         const current = raw.historyRow?.();
         const next = { ...record, title: segments.title(record) || current?.title || '', accessPolicy: snap.nextAccessPolicy || snap.accessPolicy || record.accessPolicy,
           activePluginIds: snap.activePlugins || record.activePluginIds,
-          active: { ...record.active, ...descriptor(raw),
+          active: { ...record.active, ...descriptor(raw, current),
             modelName: snap.modelSelection?.name ?? record.active.modelName,
             ...(raw.adapterId === 'codex' ? { reasoningEffort: snap.thinking?.level || '' } : {}),
             usedHarnesses: harnesses.merge(record.active.usedHarnesses,
               current?.usedHarnesses || harnesses.fromSnapshot(snap, raw.adapterId)),
-            started: record.active.started || Number(current?.count || 0) > 0 } };
+            started: typeof current?.nativeSessionStarted === 'boolean' ? current.nativeSessionStarted
+              : record.active.started || Number(current?.count || 0) > 0 } };
         if (next.title !== record.title || JSON.stringify(next.active) !== JSON.stringify(record.active) ||
             JSON.stringify(next.accessPolicy) !== JSON.stringify(record.accessPolicy) ||
             JSON.stringify(next.activePluginIds) !== JSON.stringify(record.activePluginIds)) {
@@ -135,6 +142,7 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
       const nextOptions = { ...options, ref: 'chat-' + crypto.randomUUID(), cwd: raw.cwd, adapterId: agentId,
         sessionTitle: segments.title(record) || raw.historyRow?.()?.title || '',
         modelName, reasoningEffort: '', resumePath: '', resumeCwd: '', runtimeConversationId: '',
+        nativeDispatchId: '', nativeSessionStarted: undefined, verifyLegacySegment: false,
         intent: '', mode: '', goal: '', acceptance: '', accessPolicy: policy,
         activePluginIds: before.activePlugins || [],
         contextPrompts: [...(options.contextPrompts || []), segments.brief(before)] };

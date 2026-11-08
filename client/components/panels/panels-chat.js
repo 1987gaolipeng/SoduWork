@@ -91,6 +91,7 @@
     get _ensure() { return _ensure; },
     get _changeConversationWorkspace() { return _changeConversationWorkspace; },
     get _retryOpenChat() { return _retryOpenChat; },
+    get enter() { return enter; },
     get _goalAction() { return _goalAction; },
     get _goalActionPending() { return _goalActionPending; }, set _goalActionPending(value) { _goalActionPending = value; },
     get _hotToolBodies() { return _hotToolBodies; }, set _hotToolBodies(value) { _hotToolBodies = value; },

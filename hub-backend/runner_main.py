@@ -1909,7 +1909,7 @@ class Runner:
                 # Both ingress paths share one store initialization and lock.
                 # Hub realms still have separate account/record namespaces.
                 import hashlib
-                realm = hashlib.sha256(self.hub.rstrip("/").encode()).hexdigest()
+                realm = hashlib.sha256(self.http_base.encode()).hexdigest()
                 store = await self._conversation_content_store(realm)
                 result = await asyncio.to_thread(store.handle, m)
             except Exception as exc:
