@@ -234,6 +234,29 @@ test('operation receipts remain between their delivery and the next conversation
   }
 });
 
+test('same-person pending acceptance follows the native task delivery in the transcript', () => {
+  const harness = setupRender();
+  const { renderer, ctx, list, sandbox } = harness;
+  sandbox.__teamCap = { meId: 'self' };
+  sandbox.TaskTraceApproval = { html: () => '<section data-acceptance-marker="1"></section>', bind() {} };
+  ctx._pending = '';
+  ctx._sessionOptions = {};
+  const entry = { taskId: 'task', task: { title: 'Delivery', createdBy: 'self' }, nativeTurn: true,
+    trace: { approvals: [{ id: 'direct:task', action: 'review', status: 'pending', createdAt: 10 }] } };
+  ctx._collabEntries = () => [entry];
+  ctx._collabTasks.set(entry.taskId, entry);
+  ctx._collabEntryStatus = () => 'completed';
+  ctx._snap = { status: 'idle', tools: [], messages: [
+    { role: 'user', text: 'Execute', sentAt: 5 },
+    { role: 'assistant', taskId: 'task', taskOutputKey: 'task:result', sentAt: 20, done: true,
+      blocks: [{ kind: 'text', text: 'Delivery output', done: true }] },
+  ], execution: { running: false, harness: { phases: [] }, quality: {} } };
+  renderer._render();
+  const output = list.innerHTML.indexOf('Delivery output');
+  const approval = list.innerHTML.indexOf('data-acceptance-marker="1"');
+  assert.ok(output >= 0 && approval > output, `${output},${approval}`);
+});
+
 test('legacy projected delivery precedes its receipt and a pending follow-up', () => {
   const { renderer, ctx, list, sandbox } = setupRender();
   sandbox.TaskTraceApproval = { html: () => '', bind() {} };

@@ -252,6 +252,7 @@ test('language updates the lexical cfg and calls its persistence function', () =
   assert.equal(c.read('cfg.locale'), 'en-US');
   assert.equal(c.read('saves'), 1);
   assert.equal(c.storage.get('soduwork_work_cfg_v5_locale'), 'en-US');
+  assert.equal(c.storage.get('soduwork_work_cfg_v5_locale_explicit'), '1');
   assert.equal(c.api.t('settings'), 'Settings');
   assert.equal(c.context.document.documentElement.lang, 'en-US');
 });
@@ -281,6 +282,7 @@ test('accepted remote configuration updates the reload mirror without saving bac
   const c = client();
   c.api.setLocale('en-US', { persist: false });
   assert.equal(c.storage.get('soduwork_work_cfg_v5_locale'), 'en-US');
+  assert.equal(c.storage.get('soduwork_work_cfg_v5_locale_explicit'), undefined);
   assert.equal(c.read('saves'), 0);
   assert.equal(c.sent.at(-1), 'en-US');
   c.listeners.get('ipc-locale')('zh-CN');

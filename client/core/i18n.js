@@ -315,6 +315,15 @@
     // writing the configuration back to Hub or creating cross-window echoes.
     try { if (global.localStorage.getItem('soduwork_work_cfg_v5_locale') !== next) global.localStorage.setItem('soduwork_work_cfg_v5_locale', next); } catch (_) {}
     if (options.persist !== false) {
+      // Keep a durable marker for an explicit local choice. Initial and remote
+      // hydration calls use persist:false, so they must not claim ownership of
+      // the per-device locale preference.
+      try {
+        if (!options.initial) {
+          global.localStorage.setItem('soduwork_work_cfg_v5_locale_explicit', '1');
+          global.localStorage.removeItem('soduwork_work_cfg_v5_locale_source');
+        }
+      } catch (_) {}
       try { if (typeof saveCfg === 'function') saveCfg(); else global.saveCfg?.(); } catch (_) {}
     }
     if (options.broadcast !== false) { try { global.soduWorkAPI?.setLocale?.(next); } catch (_) {} }
