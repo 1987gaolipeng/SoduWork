@@ -560,6 +560,16 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
           return _openReply(handle, { resumed: true, attached: true, accountConversation: true });
         }
       }
+      // Account projections are read-only views and are not registered Agent
+      // adapters. Never pass a stale projection row to session.open: that
+      // would turn a recoverable history miss into an adapter-not-registered
+      // error page. The sidebar can refresh the authenticated directory and
+      // retry the projection without creating a duplicate local session.
+      if (opts.chatId && (String(opts.adapterId || '').toLowerCase() === 'account-sync' ||
+          opts.accountConversation === true || opts.accountProjection === true)) {
+        return { ok: false, notFound: true,
+          reason: '账号会话暂时无法读取，请刷新历史后重试' };
+      }
       if (opts.chatId && typeof _cloudHandoff.reopen === 'function') {
         const remote = await _cloudHandoff.reopen(opts.chatId,
           'cloud-' + require('node:crypto').randomUUID());
@@ -632,6 +642,11 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         delete opts.accessDraftId; delete opts.accessConsentId;
       }
       if (resume?.adapterId && !work.first) opts.adapterId = resume.adapterId;
+      if (resume && (String(opts.adapterId || '').toLowerCase() === 'account-sync' ||
+          resume.accountConversation === true || resume.accountProjection === true)) {
+        return { ok: false, notFound: true,
+          reason: '账号会话暂时无法读取，请刷新历史后重试' };
+      }
       // History links can omit the Agent or carry a stale composer choice.
       // Resolve the archived identity first, then warm only its actual runtime.
       if (resume && String(opts.adapterId || 'pi') === 'pi' && typeof session.prewarm === 'function') {

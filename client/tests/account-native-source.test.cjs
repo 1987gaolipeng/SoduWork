@@ -69,7 +69,7 @@ test('account history canonicalizes both fresh and cached rows while keeping for
     identityOf: async () => f.identity, store: { jobs: () => [] },
     resolveNativeSource: (item, identity) => resolve({ ...f, item, identity }),
     fetch: async () => { calls++; return { ok: true, json: async () => ({ items: [f.item,
-      { ...f.item, id: 'foreign', sourceClientId: 'other-device' }], hasMore: false }) }; },
+      { ...f.item, id: 'foreign', sourceClientId: 'other-device', sourceSessionId: 'foreign-native' }], hasMore: false }) }; },
   });
   t.after(() => sync.close());
   for (let i = 0; i < 2; i++) {
@@ -79,4 +79,33 @@ test('account history canonicalizes both fresh and cached rows while keeping for
     assert.equal(result.chats[1].accountConversation, true);
   }
   assert.equal(calls, 1);
+});
+
+test('account history collapses device projections that share one source session', async t => {
+  const f = setup(t);
+  const duplicate = { ...f.item, id: 'account-old-device', sourceClientId: 'another-device', title: 'Requirement' };
+  let calls = 0;
+  const sync = require('../main/conversation/account-sync').create({ app: f.app,
+    identityOf: async () => f.identity, store: { jobs: () => [] },
+    resolveNativeSource: (item, identity) => resolve({ ...f, item, identity }),
+    fetch: async () => { calls++; return { ok: true, json: async () => ({ items: [f.item, duplicate], hasMore: false }) }; },
+  });
+  t.after(() => sync.close());
+  const result = await sync.history();
+  assert.equal(calls, 1);
+  assert.deepEqual(result.chats.map(row => row.id), ['native']);
+  assert.deepEqual(result.chats[0].historyAliasIds, ['native', 'account-copy', 'account-old-device']);
+  assert.equal(result.lifecycle.length, 1);
+  assert.deepEqual(result.lifecycle[0].historyAliasIds, ['account-copy', 'native', 'account-old-device']);
+});
+
+test('source aliases resolve to the current device account record when Hub has a stale duplicate', async t => {
+  const f = setup(t), duplicate = { ...f.item, id: 'account-old-device', sourceClientId: 'another-device' };
+  const sync = require('../main/conversation/account-sync').create({ app: f.app,
+    identityOf: async () => f.identity, store: { jobs: () => [] },
+    fetch: async () => ({ ok: true, json: async () => ({ items: [f.item, duplicate], hasMore: false }) }),
+  });
+  t.after(() => sync.close());
+  await sync.history();
+  assert.equal((await sync.row('native')).id, 'account-copy');
 });

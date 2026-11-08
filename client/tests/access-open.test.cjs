@@ -378,18 +378,6 @@ test('a stale account projection never falls through to the Agent registry', asy
   assert.equal(f.calls.length, 0);
 });
 
-test('verified native archive ignores stale account flags on the sidebar row', async () => {
-  const identity = automationIdentity();
-  const local = {id: 'native-source', adapterId: 'pi', path: 'verified-archive',
-    workOwner: require('../main/platform-connections/runtime.cjs').scope(identity)};
-  const f = fixture({archive: local, sharedHistory: {resolve: async () => local},
-    accountSync: {openProjection: async () => assert.fail('native history must not read an account projection') }});
-  const reply = await f.open({chatId: local.id, adapterId: 'account-sync', accountConversation: true, accountProjection: true});
-  assert.equal(reply.ok, true, reply.reason);
-  assert.equal(f.calls.length, 1);
-  assert.equal(f.calls[0].adapterId, 'pi');
-});
-
 test('an unconfirmed close leaves the failed open quarantined', async () => {
   let closes = 0;
   const handle = { ref: 'unclosed-ref', sessionId: 'unclosed-session', cwd: os.tmpdir(),

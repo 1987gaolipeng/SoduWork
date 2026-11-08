@@ -135,6 +135,10 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
   }
   const accountIds = new Set();
   const accountRows = new Map();
+  // Keep every authenticated directory alias addressable. A sidebar row may
+  // outlive a refresh and still carry a native/session alias instead of the
+  // Hub conversation id; opening it must resolve the same account record.
+  const accountAliasRows = new Map();
   const sourceRows = new Map();
   const listeners = new Set();
   let socket = null;
@@ -149,6 +153,7 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
   let historyPromise = null;
   let historyAt = 0;
   let historyScope = '';
+  let directoryClientId = '';
   let historyGeneration = 0, directoryLoaded = false;
   let historyCursor = 0, historyHasMore = false;
   let historyEpoch = 0, loadedEpoch = -1, historyInitialized = false;
@@ -173,11 +178,12 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
 
   function selectDirectory(identity) {
     const scope = directoryScope(identity);
+    directoryClientId = String(identity?.clientId || '');
     if (scope !== historyScope) {
       historyGeneration++;
       historyScope = scope;
       historyPromise = null;
-      accountRows.clear(); sourceRows.clear(); accountIds.clear(); deletedIds.clear();
+      accountRows.clear(); accountAliasRows.clear(); sourceRows.clear(); accountIds.clear(); deletedIds.clear();
       historyCursor = 0; historyHasMore = false; historyAt = 0; directoryLoaded = false;
       historyInitialized = false; directoryChanges.clear(); loadedEpoch = -1;
       historyFailures = 0; historyRetryAt = 0;
@@ -224,7 +230,7 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
       archived: item.archived === true || !lifecycle.lifecycleRevision && native.archived === true,
       owner: runtime.connectionScope(identity), accountId: item.id,
       sourceSessionId: item.sourceSessionId, sourceClientId: item.sourceClientId,
-      historyAliasIds: [...new Set([...(native.historyAliasIds || []), native.id, item.id].filter(Boolean))] }
+      historyAliasIds: [...new Set([...(native.historyAliasIds || []), ...(item.historyAliasIds || []), native.id, item.id].filter(Boolean))] }
       : historyRow(item, identity);
   }
 
@@ -232,10 +238,33 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
     if (!item?.id) return;
     const id = String(item.id), previous = accountRows.get(id);
     if (previous && Number(previous.revision || 0) > Number(item.revision || 0)) return;
+    if (previous) {
+      for (const alias of directoryAliases(previous))
+        if (accountAliasRows.get(alias) === previous) accountAliasRows.delete(alias);
+    }
     accountRows.set(id, item);
+    for (const alias of directoryAliases(item)) {
+      const existing = accountAliasRows.get(alias);
+      const owned = item.sourceClientId === directoryClientId;
+      const existingOwned = existing?.sourceClientId === directoryClientId;
+      const newer = Number(item.revision || 0) > Number(existing?.revision || 0);
+      if (!existing || owned && !existingOwned || owned === existingOwned && newer)
+        accountAliasRows.set(alias, item);
+    }
     sourceRows.set(JSON.stringify([item.sourceClientId, item.sourceSessionId]), item);
     if (item.deleted) { accountIds.delete(id); deletedIds.add(id); }
     else { accountIds.add(id); deletedIds.delete(id); }
+  }
+
+  function directoryAliases(item) {
+    return [...new Set([item?.id, item?.sourceSessionId,
+      ...(Array.isArray(item?.historyAliasIds) ? item.historyAliasIds : []),
+      ...(Array.isArray(item?.aliasIds) ? item.aliasIds : [])].filter(Boolean).map(value => String(value)))];
+  }
+
+  function directoryRow(id) {
+    const wanted = String(id || '');
+    return accountRows.get(wanted) || accountAliasRows.get(wanted) || null;
   }
 
   async function emitChanged(id, row, identity, projected) {
@@ -678,6 +707,52 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
     })().catch(() => failedResult());
   }
 
+  function directoryIdentity(item) {
+    const source = String(item?.sourceSessionId || '').trim();
+    return source ? 'source:' + source : 'account:' + String(item?.id || '');
+  }
+
+  function directoryVersion(item) {
+    const revision = Number(item?.revision || 0);
+    const lifecycleRevision = Number(item?.lifecycleRevision || 0);
+    const updatedAt = Date.parse(item?.updatedAt || item?.updated || '') || 0;
+    return [lifecycleRevision, revision, updatedAt, String(item?.id || '')];
+  }
+
+  function collapseDirectoryRows(items, identity) {
+    const groups = new Map();
+    for (const item of items || []) {
+      if (!item?.id) continue;
+      const key = directoryIdentity(item);
+      const group = groups.get(key) || [];
+      group.push(item);
+      groups.set(key, group);
+    }
+    return [...groups.values()].map(group => {
+      const owned = group.filter(item => item.sourceClientId && item.sourceClientId === identity.clientId);
+      const candidates = owned.length ? owned : group;
+      const winner = [...candidates].sort((left, right) => {
+        const a = directoryVersion(left), b = directoryVersion(right);
+        for (let index = 0; index < a.length - 1; index++) {
+          if (a[index] !== b[index]) return b[index] - a[index];
+        }
+        return a.at(-1).localeCompare(b.at(-1));
+      })[0];
+      const aliases = [...new Set(group.flatMap(item => [item.id, ...(item.historyAliasIds || [])])
+        .filter(Boolean).map(String))];
+      const revision = Math.max(...group.map(item => Number(item.revision || 0)), 0);
+      const lifecycleRevision = Math.max(...group.map(item => Number(item.lifecycleRevision || 0)), 0);
+      // A cloud tombstone or archive is authoritative for the shared source
+      // identity, even if another device still reports stale active metadata.
+      return { ...winner,
+        archived: group.some(item => item.archived === true),
+        deleted: group.some(item => item.deleted === true),
+        revision, lifecycleRevision,
+        historyAliasIds: aliases.filter(id => id !== String(winner.id)),
+      };
+    });
+  }
+
   async function history({ archived = false, ...options } = {}) {
     const identity = await (localIdentityOf || identityOf)?.(app);
     const captured = selectDirectory(identity), generation = historyGeneration;
@@ -686,7 +761,7 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
     const current = () => (localIdentityOf || identityOf)?.(app);
     if (closed || generation !== historyGeneration || captured !== historyScope || captured !== directoryScope(await current()))
       return { ok: false, chats: [], lifecycle: [] };
-    const values = [...accountRows.values()];
+    const values = collapseDirectoryRows([...accountRows.values()], identity);
     const rows = await Promise.all(values.map(item => {
       const cached = projections?.get(String(item.id));
       return cached?.item === item ? cached.presence : projectedRow(item, identity);
@@ -874,18 +949,21 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
       : typeof identityOf === 'function' ? await identityOf(app) : null;
     if (!identity) return null;
     const currentScope = selectDirectory(identity), generation = historyGeneration;
-    const cached = accountRows.get(wanted);
+    const cached = directoryRow(wanted);
     if (cached && currentScope === historyScope) return cached;
     const response = await fetch(identity,
       endpoint(identity, '/account-conversations/' + encodeURIComponent(wanted) + '/source'), {
         method: 'GET', redirect: 'error', signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(15000)]) });
     const data = await response.json().catch(() => ({}));
-    if (response.status === 404) return null;
+    if (response.status === 404) {
+      await loadHistory({ force: true });
+      return directoryRow(wanted);
+    }
     if (!response.ok || data.conversation?.id !== wanted) return null;
     const current = await (localIdentityOf || identityOf)(app);
     if (closed || generation !== historyGeneration || currentScope !== directoryScope(current)) return null;
     rememberDirectory(data.conversation);
-    return accountRows.get(wanted);
+    return directoryRow(wanted);
   }
 
   async function openProjection(id) {
@@ -896,7 +974,9 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
     const captured = selectDirectory(identity), generation = historyGeneration;
     const current = async () => !closed && generation === historyGeneration &&
       captured === directoryScope(await (localIdentityOf || identityOf)?.(app));
-    const base = endpoint(identity, '/account-conversations/' + encodeURIComponent(wanted) + '/messages');
+    const cached = directoryRow(wanted);
+    const accountId = String(cached?.id || wanted);
+    const base = endpoint(identity, '/account-conversations/' + encodeURIComponent(accountId) + '/messages');
     let metadata = null;
     let snapshotValue = null;
     let refreshPromise = null;
@@ -930,10 +1010,10 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
           if (next <= after || data.hasMore !== true) break;
           after = next;
         }
-        if (!nextMetadata || nextMetadata.id !== wanted || !await current()) return false;
+        if (!nextMetadata || nextMetadata.id !== accountId || !await current()) return false;
         metadata = nextMetadata;
         rememberDirectory(metadata);
-        metadata = accountRows.get(wanted);
+        metadata = directoryRow(wanted) || accountRows.get(accountId);
         if (metadata.deleted) return false;
         snapshotValue = {
           messages: messages.sort((a, b) => a.position - b.position).map(require('./history-message.cjs').project),
@@ -955,7 +1035,7 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
       ui: { get title() { return title(); }, mode: 'readonly', selectedSkills: [], capabilities: [] },
       snapshot: () => snapshotValue,
       uiSnapshot: () => snapshotValue,
-      historyRow: () => historyRow({ ...metadata, id: wanted, title: title(), state: snapshotValue.status }, identity),
+      historyRow: () => historyRow({ ...metadata, id: accountId, title: title(), state: snapshotValue.status }, identity),
       refresh,
       on: () => () => {},
       status: () => snapshotValue.status,
@@ -1002,7 +1082,10 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
       if (typeof listener !== 'function') return () => {};
       listeners.add(listener); return () => listeners.delete(listener);
     }, isRemote: () => false,
-    isAccountConversation: id => accountIds.has(String(id || '')), jobs: () => store.jobs() };
+    isAccountConversation: id => {
+      const row = directoryRow(id);
+      return Boolean(row && !row.deleted && accountIds.has(String(row.id)));
+    }, jobs: () => store.jobs() };
 }
 
 module.exports = { create };

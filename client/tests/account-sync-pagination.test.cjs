@@ -31,6 +31,27 @@ test('account history rejects a late page after an account or Hub change', async
     assert.equal(result.ok, false); assert.deepEqual(result.chats, []);
   }
 });
+
+test('account history opens a stale sidebar alias through its canonical Hub id', async t => {
+  const item = { id: 'hub-conversation', title: 'Archived chat', historyAliasIds: ['stale-sidebar-id'] };
+  const f = fixture(t, async (_actor, route) => {
+    const url = new URL(route);
+    if (url.pathname.endsWith('/messages')) {
+      assert.equal(url.pathname.endsWith('/account-conversations/hub-conversation/messages'), true);
+      return new Response(JSON.stringify({ conversation: item,
+        items: [{ id: 'message-1', role: 'assistant', text: 'ready' }], cursor: 1, hasMore: false }));
+    }
+    return new Response(JSON.stringify({ items: [item], cursor: 1, hasMore: false }));
+  });
+  const history = await f.sync.history();
+  assert.equal(history.chats[0].id, 'hub-conversation');
+  assert.equal(f.sync.isAccountConversation('stale-sidebar-id'), true);
+  assert.equal((await f.sync.row('stale-sidebar-id')).id, 'hub-conversation');
+  const projection = await f.sync.openProjection('stale-sidebar-id');
+  assert.equal(projection.snapshot().messages[0].text, 'ready');
+  assert.equal(projection.historyRow().id, 'hub-conversation');
+});
+
 test('a repeating directory cursor fails without returning a silently truncated history', async t => {
   const f = fixture(t, async () => new Response(JSON.stringify({ items: [{ id: 'one' }], cursor: 0, hasMore: true })));
   const result = await f.sync.history();
