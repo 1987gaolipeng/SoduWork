@@ -264,7 +264,9 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
 
   function directoryRow(id) {
     const wanted = String(id || '');
-    return accountRows.get(wanted) || accountAliasRows.get(wanted) || null;
+    // Alias rows carry the newest authenticated directory version. Prefer
+    // that mapping when a stale canonical id is retained in the sidebar.
+    return accountAliasRows.get(wanted) || accountRows.get(wanted) || null;
   }
 
   async function emitChanged(id, row, identity, projected) {
@@ -974,41 +976,59 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
     const captured = selectDirectory(identity), generation = historyGeneration;
     const current = async () => !closed && generation === historyGeneration &&
       captured === directoryScope(await (localIdentityOf || identityOf)?.(app));
-    const cached = directoryRow(wanted);
-    const accountId = String(cached?.id || wanted);
-    const base = endpoint(identity, '/account-conversations/' + encodeURIComponent(accountId) + '/messages');
+    // A restored sidebar can carry an alias before the authenticated directory
+    // has been loaded in this process. Resolve it through the same single-flight
+    // directory read used by the sidebar before constructing the messages URL.
+    let cached = directoryRow(wanted);
+    if (!cached) cached = await row(wanted);
+    if (!await current()) return null;
+    let accountId = String(cached?.id || wanted);
     let metadata = null;
     let snapshotValue = null;
     let refreshPromise = null;
     async function refresh() {
       if (refreshPromise) return refreshPromise;
       refreshPromise = (async () => {
-        let after = 0;
+        let recovered = false;
+        let messages = [];
         let nextMetadata = null;
-        const messages = [];
-        for (let page = 0; page < 200; page++) {
-          if (!await current()) return false;
-          const response = await fetch(identity, base + '?after=' + after + '&limit=100', {
-            method: 'GET', redirect: 'error', signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(15000)]) });
-          const data = await response.json().catch(() => ({}));
-          if (!await current()) return false;
-          if (response.status === 404) return false;
-          if (!response.ok || !data.conversation || !Array.isArray(data.items) || typeof data.cursor !== 'number') {
-            throw Error('跨设备会话正文读取失败');
+        for (let attempt = 0; attempt < 2; attempt++) {
+          let after = 0;
+          nextMetadata = null;
+          messages = [];
+          let missing = false;
+          const base = endpoint(identity, '/account-conversations/' + encodeURIComponent(accountId) + '/messages');
+          for (let page = 0; page < 200; page++) {
+            if (!await current()) return false;
+            const response = await fetch(identity, base + '?after=' + after + '&limit=100', {
+              method: 'GET', redirect: 'error', signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(15000)]) });
+            const data = await response.json().catch(() => ({}));
+            if (!await current()) return false;
+            if (response.status === 404) { missing = true; break; }
+            if (!response.ok || !data.conversation || !Array.isArray(data.items) || typeof data.cursor !== 'number') {
+              throw Error('跨设备会话正文读取失败');
+            }
+            nextMetadata = data.conversation;
+            for (const item of data.items) {
+              if (!item || typeof item.id !== 'string' || item.deleted) continue;
+              const at = Date.parse(String(item.createdAt || ''));
+              messages.push({ id: item.id, role: item.role, text: safeText(item.text), position: Number(item.position || 0),
+                sentAt: Number.isFinite(at) ? at : now(), done: item.done === true });
+            }
+            if (messages.length > MAX_MESSAGES || messages.reduce((n, item) => n + item.text.length, 0) > 32 * 1024 * 1024) {
+              throw Error('跨设备会话正文超过桌面端读取上限');
+            }
+            const next = data.cursor;
+            if (next <= after || data.hasMore !== true) break;
+            after = next;
           }
-          nextMetadata = data.conversation;
-          for (const item of data.items) {
-            if (!item || typeof item.id !== 'string' || item.deleted) continue;
-            const at = Date.parse(String(item.createdAt || ''));
-            messages.push({ id: item.id, role: item.role, text: safeText(item.text), position: Number(item.position || 0),
-              sentAt: Number.isFinite(at) ? at : now(), done: item.done === true });
-          }
-          if (messages.length > MAX_MESSAGES || messages.reduce((n, item) => n + item.text.length, 0) > 32 * 1024 * 1024) {
-            throw Error('跨设备会话正文超过桌面端读取上限');
-          }
-          const next = data.cursor;
-          if (next <= after || data.hasMore !== true) break;
-          after = next;
+          if (!missing) break;
+          if (recovered) return false;
+          recovered = true;
+          await loadHistory({ force: true });
+          const refreshed = directoryRow(wanted) || await row(wanted);
+          if (!refreshed || refreshed.deleted) return false;
+          accountId = String(refreshed.id || accountId);
         }
         if (!nextMetadata || nextMetadata.id !== accountId || !await current()) return false;
         metadata = nextMetadata;
