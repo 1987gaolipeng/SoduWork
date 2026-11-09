@@ -917,6 +917,13 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     let selectedSkills;
     try { selectedSkills = skillTurn.names(rawOptions?.skills); }
     catch (error) { return skillTurn.failure(error); }
+    let pluginInputs = [];
+    try {
+      const rows = Array.isArray(rawOptions?.plugins) ? rawOptions.plugins : [];
+      if (rows.some(row => row?.inputValues && typeof row.inputValues === 'object')) {
+        pluginInputs = require('./plugin-context').inputSelections(rows, rows.map(row => row?.pluginId));
+      }
+    } catch (error) { return { ok: false, reason: error.message }; }
     let currentIdentity;
     try {
       // Memory ownership requires the current account's signed session. Device
@@ -1029,6 +1036,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         executor: taskTurn.executor, controlled: taskTurn.controlled,
         ...(typeof taskTurn.modelName === 'string' ? { modelName: taskTurn.modelName } : {}) } : {}),
       pluginIds,
+      pluginInputs,
       ...(clearPluginSelection ? { clearPluginSelection: true } : {}),
       skills: selectedSkills,
       sentAt: Number.isFinite(rawOptions?.sentAt) && rawOptions.sentAt > 0 ? Math.min(rawOptions.sentAt, Date.now()) : Date.now(),

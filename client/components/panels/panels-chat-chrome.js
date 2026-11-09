@@ -86,6 +86,7 @@
 
   function paint() {
     if (!root) return;
+    root.classList.toggle('nchat-summary-open', summaryOpen);
     const context = typeof getContext === 'function' ? getContext() : null;
     global.ChatCloudHandoff?.sync(root, context?.snapshot, context);
     const titleNode = root.querySelector('#nchatTitle');

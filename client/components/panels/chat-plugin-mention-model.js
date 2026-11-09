@@ -291,6 +291,11 @@
       row && row.slot === 'workspace.navigation');
   }
 
+  function displayText(item, field, translate) {
+    const source = item?.builtIn && (item.locales?.['zh-CN'] || item.locales?.['zh-cn'])?.[field];
+    return String(source && translate ? translate(source) : item?.[field] || '');
+  }
+
   function normalizeCatalog(payload) {
     const iconValue = (item) => {
       const source = item && typeof item === 'object' ? item : {};
@@ -314,6 +319,8 @@
       qualifiedKey: String(item && item.qualifiedKey || item && item.key || ''),
       scope: String(item && item.scope || ''),
       name: String(item && item.name || item && item.key || '企业插件'),
+      builtIn: item.builtIn === true,
+      locales: item.locales,
       icon: iconValue(item),
       description: String(item && item.description || ''),
       version: String(item && (item.conversationVersion || item.version) || ''),
@@ -359,6 +366,6 @@
   return {
     normalizeActions, pluginBuilderAction, commandText, normalizePluginInputs,
     prepareConversationInputs, preparedConversationText, availability, pluginKind,
-    normalizeCatalog, isWorkspaceApp, catalogWarning, retryableGrantFailure,
+    normalizeCatalog, displayText, isWorkspaceApp, catalogWarning, retryableGrantFailure,
   };
 });

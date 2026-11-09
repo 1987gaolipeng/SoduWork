@@ -26,7 +26,7 @@ test('preparation stages never expose an execution conversation and assigned dev
     assert.equal(R.canOpenConversation({status:'todo', triageStage, canViewExecution:true}, 'local'), false);
   }
   const transferred = {status:'todo',triageStage:'ready',readOnly:true,canViewExecution:true,canClaimExecution:true};
-  assert.equal(R.nextStep(transferred).action, '接手并安排执行');
+  assert.equal(R.nextStep(transferred).action, '安排执行');
   assert.equal(R.nextStep({...transferred,canClaimExecution:false}).text, '等待负责人安排执行');
 });
 

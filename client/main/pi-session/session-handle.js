@@ -378,13 +378,16 @@ updateQueue(id, action, value) {
       if (action === 'retry-model') {
         if (ctx.closed || ctx.inFlight || ctx.turnQueue.active() || ctx.acc.state.pendingUi) return { ok: false, reason: '当前执行尚未结束，请稍后重试' };
         const recovery = ctx.modelRecovery.view();
+        if (recovery?.id !== id) return { ok: false, reason: '这轮状态已变化，请刷新后确认' };
         if (recovery?.requiresModelChange && recovery.failedModelName === ctx.modelSelection.capture()) {
           return { ok: false, reason: '当前模型仍不可用，请先切换到可用模型后再恢复这一轮' };
         }
-        const payload = ctx.modelRecovery.take(id);
-        if (!payload) return { ok: false, reason: '这轮状态已变化，请刷新后确认' };
-        payload.options.modelName = ctx.modelSelection.capture();
-        const item = ctx.turnQueue.add(payload);
+        let item;
+        ctx.modelRecovery.take(id, value => {
+          value.options.modelName = ctx.modelSelection.capture();
+          item = ctx.turnQueue.add(value);
+          return Boolean(item);
+        });
         if (!item) return { ok: false, reason: '这条需求已有一轮在执行或排队中，请先处理当前轮次再恢复' };
         ctx._drainTurns();
         return { ok: true, queueId: item.id, snapshot: ctx._snapshot() };

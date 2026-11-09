@@ -8272,6 +8272,14 @@
     '更新接入密钥': '설정 키 업데이트',
     '准备云端 Agent': '클라우드 Agent 준비',
   });
+  Object.assign(messages, {
+    '连接信息已保存': '연결 정보가 저장되었습니다',
+    '请确认目标电脑没有运行中的会话。更新后旧密钥立即失效；已保存 SSH 连接时，客户端会先验证连接，再自动更新并启动 Runner。没有可用 SSH 连接时，将提供一次性接入命令。': '대상 컴퓨터에서 실행 중인 대화가 없는지 확인하세요. 갱신하면 기존 키가 즉시 만료됩니다. 저장된 SSH 연결이 있으면 연결을 확인한 후 Runner를 자동으로 업데이트하고 시작합니다. 그렇지 않으면 일회용 연결 명령을 제공합니다.',
+    '新目录在 Runner 重新接入后生效。已有文件会保留在原目录。': '새 작업 디렉터리는 Runner가 다시 연결되면 적용됩니다. 기존 파일은 원래 디렉터리에 남습니다.',
+    'Runner 安装已完成': 'Runner 설치가 완료되었습니다',
+    'SSH 连接已验证；Runner 是否在线以下方检查结果为准。': 'SSH 연결을 확인했습니다. Runner의 온라인 상태는 아래 연결 확인 결과를 참고하세요.',
+    '插件参数过长，请缩短后重试': '플러그인 입력이 너무 깁니다. 줄인 후 다시 시도하세요.',
+  });
   if (typeof module !== 'undefined' && module.exports) { module.exports = Object.freeze(messages); return; }
   global.SoduWorkLocaleMessages = Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages, { 'ko-KR': Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages['ko-KR'], messages)) }));
 })(globalThis);

@@ -8272,6 +8272,14 @@
     '更新接入密钥': 'セットアップキーを更新',
     '准备云端 Agent': 'クラウド Agent を準備',
   });
+  Object.assign(messages, {
+    '连接信息已保存': '接続情報を保存しました',
+    '请确认目标电脑没有运行中的会话。更新后旧密钥立即失效；已保存 SSH 连接时，客户端会先验证连接，再自动更新并启动 Runner。没有可用 SSH 连接时，将提供一次性接入命令。': '対象コンピューターで会話が実行中でないことを確認してください。更新すると古いキーは直ちに無効になります。SSH 接続が保存されている場合、接続を確認してから Runner を自動更新・起動します。それ以外の場合は一度限りの接続コマンドを表示します。',
+    '新目录在 Runner 重新接入后生效。已有文件会保留在原目录。': '新しい作業ディレクトリは Runner の再接続後に有効になります。既存のファイルは元の場所に残ります。',
+    'Runner 安装已完成': 'Runner のインストールが完了しました',
+    'SSH 连接已验证；Runner 是否在线以下方检查结果为准。': 'SSH 接続は確認済みです。Runner のオンライン状態は下の接続確認結果をご覧ください。',
+    '插件参数过长，请缩短后重试': 'プラグインの入力が長すぎます。短くして再試行してください。',
+  });
   if (typeof module !== 'undefined' && module.exports) { module.exports = Object.freeze(messages); return; }
   global.SoduWorkLocaleMessages = Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages, { 'ja-JP': Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages['ja-JP'], messages)) }));
 })(globalThis);

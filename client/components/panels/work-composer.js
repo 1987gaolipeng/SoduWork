@@ -156,14 +156,17 @@
     const selected = new Set((selection || []).map(item => item.pluginId));
     return items.map(item => {
       const state = global.ChatPluginMention.availability(item, '');
-      const description = item.description || '选择后用于本轮对话';
+      const display = field => global.ChatPluginMentionModel?.displayText(item, field,
+        value => global.SoduWorkI18n?.translateText?.(value) || value) || item[field] || '';
+      const name = display('name');
+      const description = display('description') || '选择后用于本轮对话';
       const icons = global.SoduWorkPluginIcon;
       const icon = icons?.markup?.(item) || icons?.imageFor?.(item) || ICONS.ability;
       return '<button type="button" class="wc-more-plugin" data-more-plugin="' + esc(item.pluginId || '') +
         '" aria-pressed="' + selected.has(item.pluginId) + '"' + (!state.available ? ' disabled' : '') +
-        ' title="' + esc(item.name + '：' + (state.available ? description : state.label)) + '">' +
+        ' title="' + esc(name + '：' + (state.available ? description : state.label)) + '">' +
         '<i class="wc-plugin-icon" aria-hidden="true">' + icon + '</i>' +
-        '<span><b data-user-content>' + esc(item.name) + '</b><small>' + esc(description) + '</small></span>' +
+        '<span><b data-user-content>' + esc(name) + '</b><small' + (item.description ? ' data-user-content' : '') + '>' + esc(description) + '</small></span>' +
         (selected.has(item.pluginId) ? '<em class="wc-plugin-selected" aria-label="已选择">✓</em>' :
           !state.available ? '<em>' + esc(state.label) + '</em>' : '') + '</button>';
     }).join('');

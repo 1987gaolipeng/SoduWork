@@ -208,7 +208,7 @@
     if (task.ai?.state === 'done') return { text: '成果已返回，待确认', action: '查看交付', icon: 'confirm' };
     if (phase === 'intake') return { text: canEdit(task) ? '补充目标与完成标准' : '等待相关人梳理需求', action: canEdit(task) ? '完善需求' : '查看详情', icon: 'edit' };
     if (phase === 'clarifying') return { text: canEdit(task) ? '补齐背景与相关材料' : '等待相关人补充材料', action: canEdit(task) ? '完善需求' : '查看详情', icon: 'edit' };
-    if (phase === 'ready') return { text: canArrange ? '安排自己、同事或 AI 执行' : '等待负责人安排执行', action: canArrange ? (task.readOnly ? '接手并安排执行' : '安排执行') : '查看进展', icon: 'assign' };
+    if (phase === 'ready') return { text: canArrange ? '安排自己、同事或 AI 执行' : '等待负责人安排执行', action: canArrange ? '安排执行' : '查看进展', icon: 'assign' };
     return { text: actionable(task, context) ? '更新进展，完成后提交成果' : '跟进进展与交付结果', action: '查看进展', icon: 'progress' };
   }
   function canEdit(task) {

@@ -27,7 +27,7 @@
   --font-min-readable:14px;--text-xs:14px;--text-sm:14px;--text-base:14px;--text-md:15px;
 }
 #composePanel{--font-min-readable:12px;--text-xs:12px;--text-sm:13px;--text-base:14px;--text-md:15px}
-.nchat{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--bg-0)}
+.nchat{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--bg-0);container:conversation / inline-size}
 /*
  * Keep .nchat-main a full-height flex column so the message area can scroll and the
  * composer remains visible. min-width:0 prevents long code from widening the layout.
@@ -52,7 +52,7 @@
   display:flex;flex:1 1 auto;min-width:0;min-height:0;overflow:hidden}
 .nchat-head-icon{position:relative}.nchat-head-icon>i{position:absolute;right:1px;top:1px;min-width:14px;height:14px;
   box-sizing:border-box;padding:0 3px;border-radius:7px;background:var(--accent);color:#fff;font-size:max(var(--font-min-readable, 14.5px), 8.5px);font-style:normal;
-  font-weight:600;line-height:14px;text-align:center}.nchat-head-icon[hidden]{display:none}.nchat-summary{position:absolute;z-index:20;top:39px;right:34px;width:320px;
+  font-weight:600;line-height:14px;text-align:center}.nchat-head-icon[hidden]{display:none}.nchat-summary{position:absolute;z-index:20;top:calc(100% + 18px);right:0;width:min(320px,calc(100vw - 56px));
   max-height:min(520px,calc(100vh - 82px));box-sizing:border-box;overflow:hidden;border:1px solid color-mix(in srgb,var(--line) 88%,transparent);
   border-radius:14px;background:var(--bg-0);box-shadow:0 18px 48px -25px rgba(15,23,42,.38);text-align:left}
 .nchat-summary[hidden]{display:none}.nchat-summary>header{height:42px;box-sizing:border-box;padding:0 13px;display:flex;
@@ -69,6 +69,9 @@
 .nchat-summary .nchat-summary-more{display:flex;align-items:center;justify-content:center;gap:4px;margin-top:2px;padding:8px;
   border:0;border-radius:9px;background:transparent;color:var(--ink-4);font:inherit;font-size:max(var(--font-min-readable, 14.5px), 11px);cursor:pointer}
 .nchat-summary .nchat-summary-more:hover{background:var(--bg-2);color:var(--ink-2)}
+@container conversation (min-width:960px){
+  .nchat-summary-open>.nchat-stage{margin-right:344px}
+}
 
 .nchat-title-tools{display:flex;align-items:center;flex:none}
 .nchat-title-tools>.nchat-head-icon{width:28px;height:28px;border-radius:7px}
