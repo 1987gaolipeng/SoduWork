@@ -25,6 +25,18 @@ const options = { acceptanceSession: true, taskRef: 'task-1', acceptanceMode: 'a
 const metadataFile = fixture => path.join(fixture.directory, 'acceptance-session-context',
   crypto.createHash('sha256').update('review-chat').digest('hex') + '.json');
 
+test('history labels distinguish persisted review purpose without renaming the execution', async t => {
+  const f = fixture(t);
+  await acceptance.attach(f.app, f.handle, {...options, acceptanceMode: 'manual'}, identity());
+  const original = {id: 'review-chat', title: 'Requirement', at: Date.now()};
+  const row = acceptance.projectHistory(f.app, original);
+  assert.match(row.title, /^验收分析 · Requirement · /);
+  assert.equal(row.acceptanceReview.approvalId, 'review-1');
+  assert.equal(acceptance.projectHistory(f.app, row).title, row.title);
+  assert.equal(original.title, 'Requirement');
+  assert.equal(acceptance.projectHistory(f.app, {...original, id: 'execution'}).title, 'Requirement');
+});
+
 test('自动验收模式、需求和审批单随原会话恢复，不依赖渲染层重新传参', async t => {
   const f = fixture(t);
   await acceptance.attach(f.app, f.handle, options, identity());

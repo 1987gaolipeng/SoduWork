@@ -169,6 +169,45 @@
       var result = await invoke('outputStatus', { outputKey: deliveryKey(manifest) });
       return { ok: true, delivery: result?.item?.id ? deliveryReceipt(result.item, manifest) : null };
     };
+    function taskDeliveryManifest(receipt) {
+      if (receipt?.state !== 'synced' || !receipt.delivery?.id) return null;
+      // Hub packages support preview/download. Only a PC library receipt proves
+      // that the user saved this exact version into the computer library.
+      return Object.assign({}, receipt.delivery, { source: 'local' });
+    }
+    api.getTaskLibraryDeliveryStatus = async function (taskId) {
+      var requestScope = scope();
+      var receipt = await remote.getTaskDelivery(taskId);
+      assertScope(requestScope);
+      var manifest = taskDeliveryManifest(receipt);
+      if (!manifest) return { ok: true, delivery: null };
+      var saved = await api.getLibraryDeliveryStatus(manifest);
+      assertScope(requestScope);
+      return Object.assign({}, saved, { manifest: manifest });
+    };
+    api.saveTaskLibraryDelivery = async function (taskId) {
+      var requestScope = scope();
+      var receipt = await remote.getTaskDelivery(taskId);
+      assertScope(requestScope);
+      if (!receipt.delivery && receipt.retryable) receipt = await remote.syncTaskDelivery(taskId);
+      assertScope(requestScope);
+      var manifest = taskDeliveryManifest(receipt);
+      if (!manifest) throw failure('LIBRARY_DELIVERY_PENDING', receipt.error || '成果正在收集，请稍后重试');
+      var saved = await api.getLibraryDeliveryStatus(manifest);
+      assertScope(requestScope);
+      if (saved.delivery) return saved;
+      var got = await remote.readLibraryBinary(receipt.delivery.id);
+      assertScope(requestScope);
+      if (got.blob?.size !== manifest.size) throw failure('LIBRARY_DELIVERY_INVALID', '成果读取不完整，请重试');
+      var data = await dependencies.blobToBase64(got.blob);
+      assertScope(requestScope);
+      var latest = await remote.getTaskDelivery(taskId);
+      assertScope(requestScope);
+      if (latest.state !== 'synced' || latest.delivery?.id !== manifest.id || latest.delivery?.revision !== manifest.revision)
+        throw failure('LIBRARY_DELIVERY_CHANGED', '成果已变化，请重新打开后保存');
+      return api.saveLibraryDelivery({ manifest: manifest, filename: manifest.filename,
+        contentType: got.blob.type, data: data });
+    };
     api.getLibraryOutputStatus = function (outputKey, file) {
       return invoke('outputStatus', { outputKey: outputKey, name: file?.name || file?.filename, size: file?.size, sha256: file?.sha256 });
     };

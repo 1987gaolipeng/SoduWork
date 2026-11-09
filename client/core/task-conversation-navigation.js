@@ -227,6 +227,19 @@
     const remoteId = remoteExecutionId(payload, task);
     if (remoteId) payload.chatId = remoteId;
     let history = payload.acceptanceSession && !payload.reuseExecutionSession ? [] : null; // null = archive not consulted (explicit chatId/turnId wins).
+    if (payload.acceptanceSession && !payload.reuseExecutionSession && !payload.chatId && !payload.forceNew) {
+      const sessions = global.soduWorkAPI?.conversationSession || global.soduWorkAPI?.piSession;
+      if (sessions?.history) {
+        const result = await sessions.history();
+        if (seq !== generation) return false;
+        if (result?.ok === false) throw new Error('无法读取验收会话，请重试');
+        const matches = (result?.chats || []).filter(row => !row.archived && !row.deleted &&
+          row.acceptanceReview?.taskRef === id && row.acceptanceReview?.approvalId === text(payload.approvalId) &&
+          row.acceptanceReview?.acceptanceMode === (payload.acceptanceMode || 'manual'));
+        matches.sort((a, b) => Number(b.at || 0) - Number(a.at || 0));
+        if (matches[0]) payload.chatId = matches[0].id;
+      }
+    }
     const hubTurnId = text(task?.workRouting?.conversationTurn?.conversationId);
     /*
      * The active execution archive can be absent from the history projection while the

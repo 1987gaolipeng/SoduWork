@@ -112,7 +112,10 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
     records.set(id, record); return record;
   }
   function read(id) {
-    return readReceipt(id) || taskViews.get(id) || remoteRecords.get(id) || null;
+    const record = readReceipt(id) || taskViews.get(id) || remoteRecords.get(id) || null;
+    const review = record && [...remoteRecords.values()].find(row => row.taskId === record.taskId &&
+      row.owner === record.owner && row.conversationReview);
+    return review ? { ...record, title: review.title, conversationReview: review.conversationReview } : record;
   }
   function save(record) {
     const id = record.sessionId, previous = records.get(id);
@@ -238,6 +241,7 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
       remoteProjection: true, phase: 'committed', title: String(row.title || 'Cloud conversation').slice(0, 200),
       at: Number.isFinite(numericAt) ? numericAt : Date.parse(row.at) || 0,
       taskId, ref: String(row.ref || '').trim(), adapterId, remoteState,
+      conversationReview: row.conversationReview || null,
       target: row.target || null, options: { model }, activeExecutionSelection: row.activeExecutionSelection || null,
       workflowKnown: row.workflow === false || row.workflow === true,
       workflow: row.workflow === true,
@@ -301,6 +305,8 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
     // Hub task as the directory entry. Keep its replayable history entry.
     const tasks = new Set((local.chats || []).map(row => row.taskId).filter(Boolean));
     const cached = (local.chats || []).map(row => ({ ...row,
+      ...(remote.find(alias => alias.taskId === row.taskId && alias.conversationReview)
+        ? { title: remote.find(alias => alias.taskId === row.taskId && alias.conversationReview).title } : {}),
       historyAliasIds: remote.filter(alias => alias.taskId && alias.taskId === row.taskId &&
         alias.sessionId !== row.id).map(alias => alias.sessionId) }));
     return { ok: true, chats: [...cached, ...remote.filter(row =>

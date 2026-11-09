@@ -16,6 +16,18 @@ function remoteRequirement() {
  return {id:'remote-req',kind:'requirement',status:'done',workRouting:{executionContext:{
   location:{mode:'remote'},runner:{runnerId:'isolated-cloud'}}}};
 }
+
+test('fresh navigation reuses only the persisted matching review and approval',async()=>{
+ const rows=[
+  {id:'execution',taskId:'req',title:'Same'},
+  {id:'wrong',at:30,acceptanceReview:{taskRef:'req',approvalId:'old',acceptanceMode:'manual'}},
+  {id:'review',at:10,acceptanceReview:{taskRef:'req',approvalId:'approval',acceptanceMode:'manual'}}];
+ const f=fixture({SoduWorkAPI:{getTask:async()=>({id:'req'})},
+  soduWorkAPI:{conversationSession:{history:async()=>({ok:true,chats:rows})}}});
+ await f.api.open('req','Same',{source:'acceptance',acceptanceSession:true,approvalId:'approval'});
+ assert.equal(f.calls[0].payload.chatId,'review');
+ assert.equal(f.calls[0].payload.forceNew,false);
+});
 test('remote requirement viewing bypasses local review history and stale task mappings',async()=>{
  const task=remoteRequirement();
  const f=fixture({SoduWorkAPI:{getTask:async()=>task},

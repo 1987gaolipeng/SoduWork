@@ -358,3 +358,20 @@ test('a late unversioned archived presence cannot hide a conversation explicitly
   f.api.updateChatState(presence({ ...row(), archived: true }));
   assert.deepEqual(f.ids(), ['conversation']);
 });
+
+
+test('empty review projections remove only exact sidebar aliases without lifecycle deletion and can later become real chats', async () => {
+  const f = fixture();
+  f.api.updateChatState(presence(row('native-empty')));
+  f.api.updateChatState(presence(row('cloud-real')));
+  const empty = { ...row('account-empty'), accountConversation: true,
+    sourceSessionId: 'native-empty', emptyPlaceholder: true };
+  f.api.updateChatState(presence(empty));
+  assert.deepEqual(f.ids(), ['cloud-real']);
+  const read = f.api.refreshConversationHistory(); await tick();
+  f.reads[0].resolve({ ok: true, chats: [empty, row('cloud-real')] }); await read;
+  assert.deepEqual(f.ids(), ['cloud-real']);
+  f.api.updateChatState(presence({ ...empty, emptyPlaceholder: false, title: 'Submitted review' }));
+  assert.equal(f.ids().includes('account-empty'), true);
+  assert.equal(f.ids().includes('cloud-real'), true);
+});

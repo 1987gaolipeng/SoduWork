@@ -265,7 +265,7 @@ async def dispatch_inputs(session, row, extra):
     brief = options["instruction"]
     if options.get("acceptance"):
         from . import cloud_acceptance
-        files, brief = await cloud_acceptance.inputs(session, row)
+        files, brief = await cloud_acceptance.inputs(session, row, instruction=options["instruction"])
     if prep:
         brief = brief + "\n\n【附件理解约束】先区分步骤、处理对象、模板和参考；用户原始文字为空时，不得把这段兜底说明当成用户目标。"
     plugin_context = {}

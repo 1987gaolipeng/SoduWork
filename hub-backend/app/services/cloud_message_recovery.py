@@ -146,6 +146,12 @@ async def deliver(row_id):
                 await _save(session, row, attempts, "uncertain", {"error": "已保存消息的执行归属不匹配"}, retry=False)
                 return "uncertain"
             payload = {**saved, "runnerBootId": durable_payload.get("runnerBootId", "")}
+        # Hydration borrows this transaction's personal Runner policy lock.
+        # Admission probes and file uploads authorize in their own transaction;
+        # release the read lock before either RPC can wait on its own caller.
+        # The attempt was already persisted; the sending claim below still
+        # fences concurrent recovery and commits before job.comment.
+        await session.commit()
         boot = str(getattr(runner, "boot_id", "") or "")
         key = "comment:" + row.id
         if row.phase != "queued":

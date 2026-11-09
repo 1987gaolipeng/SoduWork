@@ -110,7 +110,16 @@
     delete merged.localId;
     return merged;
   }
+  function _emptyPlaceholderIds(items) {
+    return new Set((items || []).filter(row => row?.emptyPlaceholder === true)
+      .flatMap(row => [row.id, row.sourceSessionId, ...(row.historyAliasIds || [])]).filter(Boolean).map(String));
+  }
   function _reconcileChats(current, items, now) {
+    // Empty metadata is not a deletion. Suppress only exact source identities;
+    // drafts remain intact and the first submitted turn can appear normally.
+    const emptyIds = _emptyPlaceholderIds(items);
+    current = (current || []).filter(row => !emptyIds.has(String(row.id)));
+    items = (items || []).filter(row => !row.emptyPlaceholder);
     const clock = Number(now || Date.now());
     const available = [...(current || []), ...(items || [])];
     const retained = new Set((current || []).filter(row =>
@@ -169,6 +178,10 @@
   }
   function _upsertChatItems(current, item, { deferUnconfirmedCloudTasks = false } = {}) {
     if (!item) return (current || []).slice(0, MAX_CHAT_ITEMS);
+    if (item.emptyPlaceholder) {
+      const ids = _emptyPlaceholderIds([item]);
+      return (current || []).filter(row => !ids.has(String(row.id)));
+    }
     const previous = current || [];
     if (previous.some(row => _syncedCopy(item, row))) return _withoutSyncedCopies(previous);
     const rows = _withoutSyncedCopies(previous, [...previous, item]);

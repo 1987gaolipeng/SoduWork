@@ -105,6 +105,44 @@ function response(body, status = 200) {
     async json() { return body; } };
 }
 
+test('unsent review drafts do not checkpoint until their first submitted message', async t => {
+  const identity = { hub: 'http://hub.test', clientId: 'desktop', session: 'fixture' };
+  const queued = new Map(), sent = [], view = { status: 'idle', messages: [] };
+  const sync = require('./account-sync').create({ app: {}, metadataOnly: true, identityOf: async () => identity,
+    store: { session: () => null, setSession() {}, enqueue: job => queued.set(job.id, job),
+      jobs: () => [...queued.values()], ack: id => queued.delete(id), fail() {} },
+    fetch: async (_identity, _url, request) => {
+      const body = JSON.parse(request.body); sent.push(body);
+      return response({ ok: true, conversationId: 'account-review', sourceRevision: body.sourceRevision });
+    } });
+  t.after(() => sync.close());
+  sync.bind({ sessionId: 'native-review', acceptanceSession: { taskRef: 'requirement' }, snapshot: () => view,
+    historyRow: () => ({ title: 'Requirement', taskId: 'requirement' }) }, identity);
+  await sync.flush();
+  assert.equal(sent.length, 0);
+  view.messages.push({ role: 'user', text: 'Review the delivery' });
+  await sync.flush();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].messageCount, 1);
+  assert.equal(sent[0].taskProjectionId, '');
+});
+
+test('legacy idle zero-message account rows carry a reversible visibility hint', async t => {
+  const actor = require('../../tests/helpers/platform-session-fixture.cjs').identity();
+  const sync = require('./account-sync').create({ app: {}, store: { jobs: () => [] },
+    identityOf: async () => actor, resolveNativeSource: async () => null,
+    fetch: async () => response({ items: [
+      { id: 'empty', sourceSessionId: 'native-empty', messageCount: 0, state: 'idle' },
+      { id: 'unknown', state: 'idle' },
+      { id: 'sent', messageCount: 2, state: 'idle' },
+      { id: 'task', messageCount: 0, state: 'idle', taskProjectionId: 'task' },
+    ], cursor: 4, hasMore: false }) });
+  t.after(() => sync.close());
+  const page = await sync.history();
+  assert.deepEqual(page.chats.map(row => row.emptyPlaceholder), [true, false, false, false]);
+  assert.equal(page.chats[0].deleted, false);
+});
+
 test('only a dedicated task transcript publishes its task projection identity', async t => {
   const identity = { hub: 'http://hub.test', clientId: 'desktop', session: 'fixture' };
   const saved = new Map(), queued = new Map(), sent = [];

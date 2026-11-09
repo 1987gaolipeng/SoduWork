@@ -228,7 +228,13 @@ async def ai_states(session: AsyncSession, task_ids: list[str]) -> dict:
                 "runnerOnline": detail.get("runnerOnline"),
             }
         elif e.kind == ai_exec.EV_DISPATCH_FAILED:
-            refs.pop(e.task_id, None)
+            # Terminal settlement also uses this event kind. It must not
+            # detach an established session: another turn can resume its ref.
+            # A failed new dispatch still supersedes any older execution.
+            failed_ref = str(detail.get("ref") or "")
+            if not (detail.get("phase") == "execution" and failed_ref and
+                    refs.get(e.task_id) == failed_ref):
+                refs.pop(e.task_id, None)
             out[e.task_id] = {"state": "failed",
                               "name": detail.get("assigneeName") or detail.get("assigneeCli") or "AI",
                               "error": detail.get("error") or "安排执行失败",
@@ -261,11 +267,13 @@ async def ai_states(session: AsyncSession, task_ids: list[str]) -> dict:
                 out[task_id]["runnerKind"] = "cloud"
             state = execution_sessions.canonical_state(row.state, "running")
             out[task_id]["executionState"] = state
-            if state == "done":
-                out[task_id]["state"] = "done"
+            if state in {"done", "running", "queued", "dispatching", "working", "streaming"}:
+                out[task_id]["state"] = state
+                for key in ("error", "phase", "phaseName"):
+                    out[task_id].pop(key, None)
             elif state in {"failed", "stopped", "interrupted", "cancelled", "canceled"}:
                 meta = dict(row.metadata_ or {})
-                out[task_id]["state"] = "failed"
+                out[task_id]["state"] = "stopped" if state in {"stopped", "cancelled", "canceled"} else "failed"
                 out[task_id]["error"] = str(meta.get("error") or "AI 执行未完成")[:300]
     return out
 

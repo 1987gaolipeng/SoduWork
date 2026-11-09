@@ -554,6 +554,54 @@ test('generated files persist in the default PC library with durable owner-scope
   await h.signIn('bob'); assert.equal((await h.api.listLibrary()).items.length, 0);
 });
 
+test('cloud package receipts remain unsaved until exact bytes enter the PC library', async () => {
+  const h = harness(); await h.signIn('alice');
+  const delivery = { id: 'hub-package', source: 'cloud', sessionId: 'cloud-session', revision: 'v1',
+    filename: 'result.zip', size: bytes.length, files: [{ path: 'a.txt', size: 5 }] };
+  let saved = null;
+  h.native = async (action, payload) => {
+    if (action === 'outputStatus') return { ok: true, item: saved };
+    if (action === 'upload') {
+      assert.deepEqual(Buffer.from(payload.dataBase64, 'base64'), bytes);
+      assert.equal(payload.name, 'result.zip');
+      assert.equal(payload.source.sessionId, 'cloud-session');
+      assert.equal(payload.source.outputKey, JSON.stringify(['delivery', 'cloud-session', 'v1']));
+      return { ok: true, item: saved = { id: 'local-cloud-copy', filename: payload.name } };
+    }
+    throw Error('Unexpected local action: ' + action);
+  };
+  h.fetch = async (url, request) => {
+    assert.ok(!request.method || request.method === 'GET');
+    return url.includes('/from-task/') ? new Response(JSON.stringify({ ok: true, state: 'synced', delivery }))
+      : new Response(bytes, { headers: { 'Content-Type': 'application/zip', 'Content-Length': String(bytes.length) } });
+  };
+  assert.equal((await h.api.getTaskLibraryDeliveryStatus('task')).delivery, null);
+  assert.deepEqual(h.nativeCalls.map(c => c.action), ['outputStatus']);
+  assert.equal((await h.api.saveTaskLibraryDelivery('task')).delivery.id, 'local-cloud-copy');
+  assert.equal((await h.api.getTaskLibraryDeliveryStatus('task')).delivery.id, 'local-cloud-copy');
+  await h.api.saveTaskLibraryDelivery('task');
+  assert.equal(h.nativeCalls.filter(c => c.action === 'upload').length, 1);
+});
+
+test('cloud save rejects a changed version and an account switch before local persistence', async () => {
+  for (const changed of ['revision', 'account']) {
+    const h = harness(); await h.signIn('alice');
+    h.native = async () => ({ ok: true, item: null });
+    let reads = 0;
+    h.fetch = async url => {
+      if (url.includes('/from-task/')) return new Response(JSON.stringify({ state: 'synced', delivery: {
+        id: 'hub-package', sessionId: 's', revision: ++reads > 1 ? 'v2' : 'v1',
+        filename: 'result.zip', size: bytes.length, files: [{ path: 'a.txt' }],
+      } }));
+      if (changed === 'account') await h.signIn('bob');
+      return new Response(bytes);
+    };
+    await assert.rejects(h.api.saveTaskLibraryDelivery('task'), error =>
+      error.code === (changed === 'account' ? 'STALE_TASK_SCOPE' : 'LIBRARY_DELIVERY_CHANGED'));
+    assert.equal(h.nativeCalls.filter(c => c.action === 'upload').length, 0);
+  }
+});
+
 test('generated-file save rejects absent persistence receipts and supports retry', async () => {
   const h = harness(); await h.signIn('alice');
   const payload = { manifest: { source: 'local', sessionId: 's', revision: 'v', files: [{ path: 'a.md' }] }, filename: 'a.md', data: 'YQ==' };

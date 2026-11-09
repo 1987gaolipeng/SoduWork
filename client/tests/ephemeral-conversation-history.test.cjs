@@ -36,3 +36,14 @@ test('normal newly opened Pi conversations still appear in live history without 
     assert.equal(rows[0].id, 'normal'); assert.equal(rows[0].live, true);
   }
 });
+
+
+test('an unsent task review title does not create a phantom history entry', () => {
+  const f = handle('review-draft', false);
+  f.ctx.taskTitle = 'Requirement with the same title';
+  f.handle.taskRef = 'requirement';
+  f.ctx._snapshot = () => ({ status: 'idle', messages: [] });
+  assert.equal(f.handle.historyRow(), null);
+  assert.deepEqual(history.mergeHistory([], [f.handle]), []);
+  assert.equal(f.handle.historyRow({ status: 'idle', messages: [{ role: 'user', text: 'Review this delivery' }] }).id, 'review-draft');
+});

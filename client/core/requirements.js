@@ -154,11 +154,15 @@
     if (scope === 'actionable') return actionable(task, context);
     return true;
   }
+  function isRequirement(task) {
+    // Conversation execution records share the Task store, but are not work items.
+    return !['cloud-conversation', 'conversation-handoff'].includes(task.origin);
+  }
   function select(rows, filter, context) {
     const f = filter || {}, q = String(f.q || '').trim().toLowerCase();
     const priority = { critical: 0, high: 1, normal: 2, low: 3 };
     const stamp = row => new Date(row.updatedAt || row.createdAt || row.created || 0).getTime() || 0;
-    return rows.filter(task => (!f.archive || (stage(task) === 'closed') === (f.archive === 'archived')) &&
+    return rows.filter(task => isRequirement(task) && (!f.archive || (stage(task) === 'closed') === (f.archive === 'archived')) &&
       inScope(task, f.scope, context) && (!f.kind || (task.kind || 'requirement') === f.kind) &&
       (!f.priority || (task.priority || 'normal') === f.priority) && (!f.phase || column(task) === f.phase) &&
       (!f.project || String(task.projectId || '__none') === f.project) &&
@@ -319,7 +323,7 @@
     return { action, patch };
   }
   return { lanes, columns, priorities, sorts, defaults, viewSettings, kinds, scopes, scopeOptions, normalizeScope, content, displayNote, stage, column,
-    day, timeInfo, dateTimestamp, overdue, blocked, roles, approval, canReview, approvalActionable, waitingOn, actionable, inScope, select, owner, nextStep,
+    day, timeInfo, dateTimestamp, overdue, blocked, roles, approval, canReview, approvalActionable, waitingOn, actionable, inScope, isRequirement, select, owner, nextStep,
     canEdit, canManageMaterials, canSubmitReview, canManageAutomation, canTriage, executing, maintenance,
     canArchive, canDelete, canOpenConversation, editPatch, stagePatch, resolveStageMove };
 });

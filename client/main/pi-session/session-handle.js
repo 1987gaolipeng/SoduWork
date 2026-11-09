@@ -181,6 +181,8 @@ historyRow(existingSnapshot) {
       // In-memory SDK storage alone does not exclude them from live history.
       if (ctx.opts?.ephemeral === true) return null;
       const snap = existingSnapshot || ctx._snapshot();
+      // A task title is navigation context, not evidence of a submitted turn.
+      if (!(snap.messages || []).length && !ctx.inFlight && !ctx.turnQueue.size()) return null;
       const title = ctx.displayTitle || ctx.taskTitle || _messageTitle(snap) ||
         (ctx.handle.taskRef ? "协作需求" : '');
       if (!title) return null; // Do not add empty, never-used conversations to history.

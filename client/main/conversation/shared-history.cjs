@@ -19,7 +19,9 @@ function create({ app, session, store = require('./replica-store.cjs').createWor
   async function projectRows(rows, archived = false) {
     const native = rows.filter(isNative).map(row => {
       const record = require('./runtime-segments').read(app, row.id);
-      return { ...row, archived: row.archived === true || session.isArchived?.(app, row.id) === true ||
+      return { ...require('./acceptance-session').projectHistory(app, row),
+        accountConversation: false, accountProjection: false,
+        archived: row.archived === true || session.isArchived?.(app, row.id) === true ||
         (archived && (!row.adapterId || row.adapterId === 'pi')), historyAliasIds: [...new Set([
         ...(row.historyAliasIds || []), ...[...(record?.segments || []), record?.active].filter(Boolean).map(part => part.sessionId),
       ])].filter(id => id !== row.id) };
@@ -50,6 +52,33 @@ function create({ app, session, store = require('./replica-store.cjs').createWor
       if (session.findBySessionId(alias)?.inFlight?.()) throw Error('这条会话还在执行，完成或停止后再操作');
     }
     return store.lifecycle(row.id, action, { account: accountId(identity), hub: identity?.hub, device: identity?.clientId });
+  }
+  async function remoteLifecycle(rows, identity = require('./requirement-context').cachedIdentity(app)) {
+    const owner = accountId(identity);
+    if (!owner || !identity?.hub) return [];
+    const states = [];
+    for (const archived of [false, true]) {
+      let after;
+      do {
+        const page = await store.list({ archived, after, limit: 200 });
+        after = page.next;
+        for (const copy of page.items) {
+          // Archive/restore controls the merged local view. Deleting a cached
+          // copy must still leave the independent cloud original available.
+          if (!copy.cached || !copy.taskId || copy.deleted || !copy.replicaRevision || copy.source?.account !== owner) continue;
+          try { if (new URL(copy.source.hub).origin !== new URL(identity.hub).origin) continue; }
+          catch (_) { continue; }
+          for (const row of rows) {
+            if (!row.cloud && !row.remoteProjection && !row.accountProjection) continue;
+            if (row.id !== copy.source.id && !(row.historyAliasIds || []).includes(copy.source.id) &&
+                !(copy.taskId && row.taskId === copy.taskId)) continue;
+            states.push({ id: row.id, archived: copy.archived, deleted: false,
+              lifecycleRevision: copy.replicaRevision, revision: copy.revision });
+          }
+        }
+      } while (after);
+    }
+    return states;
   }
   async function read(id, options = {}) {
     const row = await resolve(id);
@@ -114,7 +143,9 @@ function create({ app, session, store = require('./replica-store.cjs').createWor
     const remote = original.cloud || original.accountProjection;
     const id = remote ? 'copy-' + require('node:crypto').createHash('sha256').update(
       JSON.stringify([identity?.hub, accountId(identity), original.id])).digest('hex') : original.id;
-    const [row] = await register([{ ...original, id, cloud: false, accountProjection: false,
+    const displayed = remote ? original : require('./acceptance-session').projectHistory(app, original);
+    const [row] = await register([{ ...displayed, id, cloud: false, accountProjection: false,
+      accountConversation: false,
       remoteProjection: false, cached: !!remote, source: remote ? { hub: identity?.hub, id: original.id, account: accountId(identity) } : null,
       creator: { account: accountId(identity), hub: identity?.hub }, historyAliasIds: remote ? [] : original.historyAliasIds || [] }]);
     if (row.deleted || !remote) return;
@@ -180,7 +211,7 @@ function create({ app, session, store = require('./replica-store.cjs').createWor
     await refreshing;
     return { ...await store.directory(after, limit), workspace: await store.workspace() };
   }
-  return { resolve, read, open, register, projectRows, lifecycle, capture, observe, store, directory, preserveLegacyOutbox,
+  return { resolve, read, open, register, projectRows, lifecycle, remoteLifecycle, capture, observe, store, directory, preserveLegacyOutbox,
     list: options => store.list(options),
     async indexedRows(archived, limit) {
       const items = []; let after;

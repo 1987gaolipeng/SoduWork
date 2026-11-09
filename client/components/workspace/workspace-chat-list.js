@@ -291,6 +291,7 @@ function updateChatState(event) {
     const row = rememberChatName(event && event.presence);
     const id = String(event && event.sessionId || row && row.id || '');
     if (!id || !row) return;
+    if (row.emptyPlaceholder) { ctx.upsertChat({ ...row, id }); return; }
     if (row.archived || row.deleted) {
       // A legacy snapshot has no lifecycle ordering. After an explicit restore,
       // only another explicit lifecycle action may hide this conversation again.

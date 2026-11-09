@@ -3,6 +3,7 @@
 // Bounded byte checkpoints avoid rescanning a JSONL archive for every page.
 // Offsets are private to this reader and invalidated on any file version change.
 const fs = require('node:fs');
+const connectorContext = require('../pi-session/connector-context.cjs');
 function create() {
   const files = new Map();
   return async function page(file, options, guard = () => {}) {
@@ -25,8 +26,11 @@ function create() {
       if (!message || !['user', 'assistant'].includes(message.role)) return true;
       if (index < offset) { index++; return true; }
       if (items.length >= limit) { more = true; return false; }
-      const text = typeof message.content === 'string' ? message.content :
+      const rawText = typeof message.content === 'string' ? message.content :
         (Array.isArray(message.content) ? message.content : []).filter(block => block.type === 'text').map(block => String(block.text || '')).join('\n');
+      // Archives retain runtime input; public history must expose the same
+      // user text as the live composer, including for relay acknowledgement.
+      const text = message.role === 'user' ? connectorContext.strip(rawText) : rawText;
       const size = Buffer.byteLength(text);
       if (size > 1024 * 1024) throw Error('单条消息超过1MB，当前只读接口无法返回');
       if (bytes + size > 1024 * 1024 && items.length) { more = true; return false; }
