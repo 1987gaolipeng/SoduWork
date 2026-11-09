@@ -13,6 +13,19 @@
 - Runner 保留 Python 依赖元数据和 wheel 内许可；Hub 保留本目录与项目 LICENSE。首版技能仅包含 `tools/distribution/PUBLIC-SOURCE.json` 声明的本项目自有指南，已移除第三方技能套件。
 - 这些检查不是完整 SBOM、漏洞扫描或法律许可认证。
 
+## Hub 镜像中的 Python 依赖
+
+Hub 镜像构建时按 `hub-backend/requirements.txt` 用 pip 安装 Python 依赖。各依赖的原始许可文件随安装保留在镜像的 Python `site-packages` 中对应的 `*.dist-info` 目录里。
+
+**Pillow**：Hub 用它校验和处理图片，包括用户头像（校验后裁成 256×256）、AI 生成图片的格式校验（PNG、JPEG、WEBP）和文件库缩略图。
+
+- 项目：https://python-pillow.github.io/
+- 源码：https://github.com/python-pillow/Pillow
+- 版本：12.x（`hub-backend/requirements.txt` 限定 `>=12.3,<13`，以镜像实际安装版本为准）
+- 许可：MIT-CMU。版权归 Secret Labs AB、Fredrik Lundh、Jeffrey A. Clark 及贡献者所有。
+
+MIT-CMU 许可要求保留版权和许可声明，并且未经书面许可，不得用作者的名字为相关分发做宣传。SoduWork 不修改 Pillow，许可原文保留在镜像中 Pillow 的 `dist-info` 目录。Pillow 的 wheel 还捆绑了 libjpeg、libpng、zlib、libwebp、FreeType 等图像库，这些库的许可同样收录在该目录的许可文件中。
+
 ## 二进制发行尚需完成
 
 1. **proxy-agent-negotiate 1.1.0**：固定版本的 npm 包和上游标签仅在元数据中声明 MIT，未附完整原始许可。二进制分发前须取得上游原始材料或验证替代实现；证据保留在 `licenses/proxy-agent-negotiate-upstream-evidence.txt`。Pi 1.4.0 已移除旧版原生剪贴板依赖。

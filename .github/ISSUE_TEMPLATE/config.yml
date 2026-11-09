@@ -1,1 +1,11 @@
 blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability / 报告安全漏洞
+    url: "https://github.com/mdiri-ai/SoduWork/security/advisories/new"
+    about: Report privately. Never post exploit details in a public issue. / 请私下报告，不要在公开 Issue 中发布可利用的细节。
+  - name: Questions and ideas / 提问与讨论
+    url: "https://github.com/mdiri-ai/SoduWork/discussions"
+    about: Ask how to use SoduWork or share what you built. / 询问用法，或分享你做的东西。
+  - name: Documentation / 文档
+    url: https://dev.soduwork.ai
+    about: Get started, plugin authoring and deployment guides. / 快速开始、插件开发与部署指南。

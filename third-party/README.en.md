@@ -15,6 +15,19 @@ This directory retains verified license texts and source evidence. Project MIT t
 - Runner retains dependency metadata and wheel-provided licenses. Hub retains this directory and the project license. The first release bundles only project-owned skills declared in `tools/distribution/PUBLIC-SOURCE.json`; upstream skill bundles were removed.
 - These checks do not constitute a complete SBOM, vulnerability scan, or legal certification.
 
+## Python dependencies in the Hub image
+
+The Hub image installs its Python dependencies with pip from `hub-backend/requirements.txt`. Each dependency's original license files stay in its `*.dist-info` directory under the image's Python `site-packages`.
+
+**Pillow**: the Hub uses it to validate and process images, including user avatars (validated and cropped to 256×256), format checks for AI-generated images (PNG, JPEG, WEBP), and file library thumbnails.
+
+- Project: https://python-pillow.github.io/
+- Source: https://github.com/python-pillow/Pillow
+- Version: 12.x (`hub-backend/requirements.txt` requires `>=12.3,<13`; the installed version in the image is authoritative)
+- License: MIT-CMU. Copyright Secret Labs AB, Fredrik Lundh, Jeffrey A. Clark and contributors.
+
+The MIT-CMU license requires the copyright and permission notices to be retained, and the authors' names may not be used in advertising for the distribution without prior written permission. SoduWork does not modify Pillow; the original license stays in Pillow's `dist-info` directory in the image. Pillow wheels also bundle image libraries such as libjpeg, libpng, zlib, libwebp and FreeType, whose licenses are included in the same directory's license file.
+
 ## Outstanding binary-release work
 
 1. **proxy-agent-negotiate 1.1.0:** the exact npm release and tagged source declare MIT but omit the original full license notice. Obtain the original material or verify a replacement before binary distribution. Evidence is retained in `licenses/proxy-agent-negotiate-upstream-evidence.txt`. Pi 1.4.0 no longer includes the old native clipboard package.

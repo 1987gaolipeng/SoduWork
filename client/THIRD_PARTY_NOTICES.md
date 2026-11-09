@@ -48,6 +48,27 @@ their upstream license files in the packaged `resources/ssh2` directory.
 - Version: 1.17.0
 - License: MIT (ssh2/asn1/safer-buffer); BSD-3-Clause (bcrypt-pbkdf); Unlicense (tweetnacl).
 
+## PyInstaller (Runner executable)
+
+The desktop installers for Windows, macOS and Linux include a standalone Runner
+(`soduwork-runner.exe` on Windows, `soduwork-runner` on macOS and Linux) built with
+PyInstaller. PyInstaller is a build tool only; users do not need to install Python
+or PyInstaller. Each Runner executable embeds the unmodified PyInstaller bootloader
+and run-time hooks taken from the PyInstaller wheel.
+
+- Project: https://pyinstaller.org/
+- Source: https://github.com/pyinstaller/pyinstaller/tree/v6.21.0
+- Version: 6.21.0 (pinned in `hub-backend/requirements-runner-build.txt`)
+- License: GNU GPL version 2 or later, with the PyInstaller Bootloader Exception.
+  Run-time hooks are licensed under Apache-2.0.
+
+The Bootloader Exception permits the bootloader to be combined with and distributed
+as part of an executable without placing the combined program under the GPL. The
+Runner's own code remains under the SoduWork MIT license, and its Python
+dependencies keep their own licenses. The complete PyInstaller license, including
+the exception, is included as `COPYING.txt` in the Runner's `third-party/pyinstaller`
+directory.
+
 ## Pi runtime and bundled dependencies
 
 Pi SDK 1.4.0 is MIT licensed, Copyright (c) 2025 Mario Zechner. Its original license is
