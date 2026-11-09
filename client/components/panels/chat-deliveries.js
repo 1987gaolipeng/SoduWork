@@ -193,7 +193,11 @@
       const matchesReceipt = (message === messages[0] || snapshot.deliverySync?.currentTurn === false) && available.every(captured);
       const id = jobKey(ref, available) + (matchesReceipt && snapshot.deliverySync?.revision ? ':' + snapshot.deliverySync.revision : '');
       const old = groups.get(id);
-      const group = { id, ref, files: available, scope: scope(), taskId, snapshot, remote: Boolean(cloudTaskId), current: message === messages[0], ...(old?.delivery ? { delivery: old.delivery } : {}) };
+      const rounds = [...new Set(available.map(file => Number(file.round) || 0))];
+      const executionRefs = [...new Set(available.map(file => file.sourceRef || ''))];
+      const selection = old?.selection || { round: rounds.length === 1 ? rounds[0] : 0,
+        executionRef: executionRefs.length === 1 ? executionRefs[0] : '' };
+      const group = { id, ref, files: available, selection, scope: scope(), taskId, snapshot, remote: Boolean(cloudTaskId), current: message === messages[0], ...(old?.delivery ? { delivery: old.delivery } : {}) };
       groups.set(id, group);
       available.sort((a, b) => Number(b.primary !== false && b.role !== 'supporting') - Number(a.primary !== false && a.role !== 'supporting'));
       const first = available[0], count = available.length, amount = totalSize(available);
@@ -239,6 +243,12 @@
       : job?.error ? (text.title + ' · ' + text.retry + ' · ') + job.error
       : result ? (result.storage === 'local' || !group.remote ? text.localSaved : text.savedCrossDevice)
       : job?.busy ? (group.remote ? text.collecting : text.preparing) : (group.remote ? text.collecting : text.localFiles);
+    if (status && job?.error && !job.localError) {
+      // Keep complete UI phrases in separate nodes so locale changes can
+      // translate and restore them without rewriting user-supplied details.
+      status.replaceChildren(...[text.title, ' · ', text.retry, ' · ', job.error]
+        .map(value => document.createTextNode(value)));
+    }
     const retry = card.querySelector('[data-delivery-retry]');
     const open = card.querySelector('[data-delivery-open]');
     card.classList.toggle('has-error', Boolean(job?.localError || job?.error));
@@ -304,7 +314,7 @@
     job = Object.assign(job || {}, { busy: true, error: '', manual: true }); jobs.set(group.id, job); repaint(group);
     try {
       let result;
-      if (group.taskId) result = await global.SoduWorkAPI.saveTaskLibraryDelivery(group.taskId);
+      if (group.taskId) result = await global.SoduWorkAPI.saveTaskLibraryDelivery(group.taskId, { ...group.selection });
       else {
         const payload = await api.prepareDelivery(group.ref, group.files.map(key));
         if (!payload?.ok) throw Error(payload?.reason || '\u6210\u679c\u6587\u4ef6\u5c1a\u672a\u51c6\u5907\u597d');
@@ -316,6 +326,11 @@
       if (group.scope !== scope()) return;
       if (!result?.ok || !result.delivery?.id) throw Error(result?.error || result?.reason || '\u6210\u679c\u96c6\u540c\u6b65\u5931\u8d25');
       job.delivery = group.delivery = result.delivery;
+      if (group.taskId && result.manifest?.id && result.manifest.revision) {
+        const current = groups.get(group.id);
+        if (current?.scope === group.scope) current.selection = { ...group.selection,
+          deliveryId: result.manifest.id, revision: result.manifest.revision };
+      }
       announceLibraryChange({ itemId: result.delivery.id });
     } catch (error) {
       job.error = /Failed to fetch|NetworkError|fetch failed/i.test(error.message || '') ? '\u7f51\u7edc\u6682\u65f6\u4e0d\u53ef\u7528' : error.message || '\u6210\u679c\u96c6\u540c\u6b65\u5931\u8d25';
@@ -324,11 +339,14 @@
   function hydrateRemoteStatus(group) {
     if (!group.taskId || group.statusRequested || group.delivery || typeof global.SoduWorkAPI?.getTaskLibraryDeliveryStatus !== 'function') return;
     group.statusRequested = true;
-    Promise.resolve(global.SoduWorkAPI.getTaskLibraryDeliveryStatus(group.taskId)).then(result => {
-      if (group.scope !== scope() || jobs.get(group.id)?.manual) return;
+    Promise.resolve(global.SoduWorkAPI.getTaskLibraryDeliveryStatus(group.taskId, { ...group.selection })).then(result => {
+      if (group.scope !== scope() || groups.get(group.id) !== group || jobs.get(group.id)?.manual) return;
       if (result?.delivery) group.delivery = result.delivery;
       // Server package revisions must never guard a materialized local ZIP.
-      if (result?.manifest) group.package = result.manifest;
+      if (result?.manifest) {
+        group.package = result.manifest;
+        group.selection = { ...group.selection, deliveryId: result.manifest.id, revision: result.manifest.revision };
+      }
       repaint(group);
     }).catch(() => { /* A legacy task may not have a delivery yet; the normal sync path handles it. */ });
   }
@@ -548,5 +566,9 @@
   }
   global.addEventListener?.('soduwork-data-scope-changed', () => { groups.clear(); jobs.clear(); localJobs.clear(); completed.clear(); });
   function settled(ref) { completed.add(ref); if (completed.size > 120) completed.delete(completed.values().next().value); }
-  global.ChatDeliveries = { decorate, hydrate, handle, settled, isSettled, outputRound, localContinuation, continueLocal, _groupFiles: groupFiles, _artifactUrlFor: artifactUrlFor };
+  function deliverySelection(card) {
+    const group = groups.get(card?.dataset?.delivery);
+    return group && group.scope === scope() ? { ...group.selection } : null;
+  }
+  global.ChatDeliveries = { decorate, hydrate, handle, settled, isSettled, outputRound, deliverySelection, localContinuation, continueLocal, _groupFiles: groupFiles, _artifactUrlFor: artifactUrlFor };
 })(typeof window !== 'undefined' ? window : globalThis);

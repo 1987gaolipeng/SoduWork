@@ -144,6 +144,37 @@ test('archived task copies keep executable origins out of cold recent history un
   await bridge.dispose();
 });
 
+test('remote lifecycle skips unrelated inventory and resolves all alias batches with the newest explicit intent', async t => {
+  const f = setup(t), who = identity();
+  f.store.list = () => assert.fail('Lifecycle overlays must not scan the local inventory');
+  let queries = 0;
+  const lookup = f.store.remoteLifecycleRows.bind(f.store);
+  f.store.remoteLifecycleRows = options => { queries++; return lookup(options); };
+  assert.deepEqual(await f.history.remoteLifecycle([], who), []);
+  assert.deepEqual(await f.history.remoteLifecycle([{ id: 'native' }], who), []);
+  assert.equal(queries, 0);
+  const origin = { id: 'last-alias', taskId: 'shared-task', cloud: true };
+  await f.history.capture({ snapshot: () => ({ messages: [{ role: 'assistant', text: 'retained' }] }),
+    historyRow: () => origin }, who);
+  const original = f.store.get('last-alias');
+  await f.history.lifecycle(original.id, 'archive', who);
+  f.store.register([{ id: 'second-copy', cached: true, taskId: origin.taskId,
+    source: { id: 'another-origin', account: 'one', hub: who.hub } }]);
+  await f.history.lifecycle('second-copy', 'archive', who);
+  await f.history.lifecycle('second-copy', 'restore', who);
+  f.store.register([{ id: 'foreign-copy', cached: true, taskId: origin.taskId,
+    source: { id: 'foreign-origin', account: 'one', hub: 'https://foreign.test' } }]);
+  await f.history.lifecycle('foreign-copy', 'archive', who);
+  const rows = Array.from({ length: 205 }, (_, index) => ({ id: 'view-' + index, cloud: true,
+    historyAliasIds: [index === 204 ? 'last-alias' : 'missing-' + index] }));
+  rows.push({ id: 'task-view', taskId: origin.taskId, remoteProjection: true });
+  const states = await f.history.remoteLifecycle(rows, who);
+  assert.deepEqual(states.map(row => [row.id, row.archived]).sort(), [['task-view', false], ['view-204', true]]);
+  assert.equal(queries, 3, 'Every source identity batch is queried, including the last alias');
+  assert.deepEqual(await f.history.remoteLifecycle(rows, { ...who, hub: 'malformed' }), []);
+  assert.equal(queries, 3);
+});
+
 test('large cloud snapshots are cached in bounded batches without losing their tail', async t => {
   const f = setup(t), original = f.store.cache.bind(f.store), writes = [];
   f.store.cache = (id, messages, options) => {

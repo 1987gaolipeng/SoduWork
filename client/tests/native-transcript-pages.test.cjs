@@ -8,6 +8,64 @@ function fixture(t) {
   return { file, read: create() };
 }
 const message = (id, text = '多语言 😀 ' + id) => JSON.stringify({ type: 'message', id: String(id), message: { role: 'user', content: text } });
+
+test('phone history uses persisted turn times through pagination, transport and completed summaries', async t => {
+  const f = fixture(t), start = Date.parse('2026-11-09T01:00:00Z');
+  const entries = [
+    {type: 'message', id: 'user', timestamp: new Date(start + 2000).toISOString(),
+      message: {role: 'user', content: 'request', timestamp: start + 1000, sentAt: start}},
+    {type: 'message', id: 'answer', timestamp: new Date(start + 32000).toISOString(),
+      message: {role: 'assistant', content: 'answer', timestamp: start + 1000, completedAt: start + 31000}},
+    {type: 'message', id: 'legacy-user', message: {role: 'user', content: 'legacy request', timestamp: new Date(start + 60000).toISOString()}},
+    {type: 'message', id: 'legacy-answer', timestamp: new Date(start + 81000).toISOString(),
+      message: {role: 'assistant', content: 'legacy answer', timestamp: start + 61000}},
+    {type: 'message', id: 'unknown-user', message: {role: 'user', content: 'old request', timestamp: start + 90000}},
+    {type: 'message', id: 'unknown-answer', message: {role: 'assistant', content: 'old answer', timestamp: start + 91000}},
+  ];
+  const source = entries.map(value => JSON.stringify(value)).join('\n');
+  fs.writeFileSync(f.file, source);
+  const remote = require('../main/pi-session/local-history-remote.cjs').create({
+    app: {}, session: {}, identityOf: async () => require('./helpers/platform-session-fixture.cjs').identity(),
+    history: {resolve: async () => ({id: 'native-clock', revision: 1}),
+      read: async (_, options) => {
+        const page = await f.read(f.file, options);
+        return {...page, nextCursor: page.nextOffset};
+      }},
+  });
+  const items = [], cursors = [];
+  let after = 0;
+  do {
+    const page = await remote({action: 'read', id: 'native-clock', after, limit: 2}, async () => {});
+    items.push(...page.items); cursors.push(page.cursor); after = page.cursor;
+    if (!page.hasMore) break;
+  } while (true);
+  assert.deepEqual(cursors, [2, 4, 6]);
+  assert.deepEqual(items.map(row => row.id), entries.map(row => row.id));
+  assert.deepEqual(items.map(row => row.createdAt), [start, start + 31000, start + 60000,
+    start + 81000, start + 90000].map(value => new Date(value).toISOString()).concat(''));
+
+  const window = {SoduWorkRunnerMessages: require('../main/agent-runtime/runner-messages')};
+  require('node:vm').runInNewContext(fs.readFileSync(path.resolve(__dirname, '../../mobile/shared-conversation/snapshot.js'), 'utf8'), {window});
+  const handle = {status: 'idle', personal: true, taskId: 'native-clock',
+    events: new Map(items.map(row => [row.revision, {seq: row.revision,
+      kind: row.role === 'user' ? 'user' : 'say', text: row.text, at: row.createdAt}]))};
+  const summary = require('../components/panels/chat-turn-summary');
+  const project = () => summary.project(window.SoduWorkMobileSnapshot.project(handle), new Set([1, 3, 5]));
+  assert.deepEqual(project().map(turn => turn.elapsedMs), [31000, 21000, null]);
+  t.mock.method(Date, 'now', () => start + 86400000);
+  assert.deepEqual(project().map(turn => turn.elapsedMs), [31000, 21000, null]);
+  assert.equal(fs.readFileSync(f.file, 'utf8'), source, 'reading never rewrites the archive');
+});
+
+test('native phone timestamps reject invalid receipt times without inventing a completion', async t => {
+  const f = fixture(t);
+  fs.writeFileSync(f.file, [
+    {type: 'message', id: 'invalid-user', message: {role: 'user', content: 'request', sentAt: -1, timestamp: 'invalid'}},
+    {type: 'message', id: 'invalid-answer', timestamp: 'invalid',
+      message: {role: 'assistant', content: 'answer', completedAt: 8640000000000001, timestamp: '2026-11-09T01:00:00Z'}},
+  ].map(value => JSON.stringify(value)).join('\n'));
+  assert.deepEqual((await f.read(f.file, {})).items.map(row => row.timestamp), ['', '']);
+});
 test('native history exposes visible user text without rewriting archive or pagination identity', async t => {
   const f = fixture(t), context = require('../main/pi-session/connector-context.cjs');
   const augmented = context.augment('next turn', 'Internal connector capability guide');

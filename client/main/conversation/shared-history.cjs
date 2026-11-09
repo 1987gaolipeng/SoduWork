@@ -54,31 +54,43 @@ function create({ app, session, store = require('./replica-store.cjs').createWor
     return store.lifecycle(row.id, action, { account: accountId(identity), hub: identity?.hub, device: identity?.clientId });
   }
   async function remoteLifecycle(rows, identity = require('./requirement-context').cachedIdentity(app)) {
+    const remote = rows.filter(row => row.cloud || row.remoteProjection || row.accountProjection);
+    if (!remote.length) return [];
     const owner = accountId(identity);
     if (!owner || !identity?.hub) return [];
-    const states = [];
-    for (const archived of [false, true]) {
-      let after;
-      do {
-        const page = await store.list({ archived, after, limit: 200 });
-        after = page.next;
-        for (const copy of page.items) {
-          // Archive/restore controls the merged local view. Deleting a cached
-          // copy must still leave the independent cloud original available.
-          if (!copy.cached || !copy.taskId || copy.deleted || !copy.replicaRevision || copy.source?.account !== owner) continue;
-          try { if (new URL(copy.source.hub).origin !== new URL(identity.hub).origin) continue; }
-          catch (_) { continue; }
-          for (const row of rows) {
-            if (!row.cloud && !row.remoteProjection && !row.accountProjection) continue;
-            if (row.id !== copy.source.id && !(row.historyAliasIds || []).includes(copy.source.id) &&
-                !(copy.taskId && row.taskId === copy.taskId)) continue;
-            states.push({ id: row.id, archived: copy.archived, deleted: false,
+    let hub;
+    try { hub = new URL(identity.hub).origin; } catch (_) { return []; }
+    const bySource = new Map(), byTask = new Map(), states = new Map();
+    const add = (index, id, row) => {
+      if (!id) return;
+      if (!index.has(id)) index.set(id, new Set());
+      index.get(id).add(row);
+    };
+    for (const row of remote) {
+      for (const id of [row.id, ...(row.historyAliasIds || [])]) add(bySource, id, row);
+      add(byTask, row.taskId, row);
+    }
+    const sourceIds = [...bySource.keys()], taskIds = [...byTask.keys()];
+    for (let offset = 0; offset < Math.max(sourceIds.length, taskIds.length); offset += 200) {
+      const copies = await store.remoteLifecycleRows({ account: owner,
+        sourceIds: sourceIds.slice(offset, offset + 200), taskIds: taskIds.slice(offset, offset + 200) });
+      for (const copy of copies) {
+        try { if (new URL(copy.source.hub).origin !== hub) continue; }
+        catch (_) { continue; }
+        // Deleted copies are excluded by the store: deleting a local transcript
+        // must not hide its cloud original. The latest explicit intent wins.
+        const matched = new Set([...(bySource.get(copy.source.id) || []), ...(byTask.get(copy.taskId) || [])]);
+        for (const row of matched) {
+          const previous = states.get(row.id);
+          if (!previous || copy.replicaRevision > previous.lifecycleRevision ||
+              (copy.replicaRevision === previous.lifecycleRevision && copy.revision >= previous.revision)) {
+            states.set(row.id, { id: row.id, archived: copy.archived, deleted: false,
               lifecycleRevision: copy.replicaRevision, revision: copy.revision });
           }
         }
-      } while (after);
+      }
     }
-    return states;
+    return [...states.values()];
   }
   async function read(id, options = {}) {
     const row = await resolve(id);

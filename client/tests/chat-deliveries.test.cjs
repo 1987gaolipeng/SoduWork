@@ -27,12 +27,19 @@ test('cloud card does not paint a package receipt as a saved PC library item', a
   const api = {
     getTaskDelivery: async () => { throw Error('Package receipt is not a save receipt'); },
     syncTaskDelivery: async () => { throw Error('Package preparation is not a library save'); },
-    getTaskLibraryDeliveryStatus: async () => ({ ok: true, delivery: null, manifest: { files: [{ path: 'a.txt' }] } }),
-    saveTaskLibraryDelivery: async () => { saves++; return { ok: true, delivery: { id: 'local-saved', files: [{ path: 'a.txt' }] } }; },
+    getTaskLibraryDeliveryStatus: async (taskId, selected) => {
+      assert.equal(taskId, 'cloud');
+      assert.deepEqual({...selected}, {round: 1, executionRef: 'run'});
+      return { ok: true, delivery: null, manifest: {id: 'immutable', revision: 'v1', files: [{ path: 'a.txt' }] } };
+    },
+    saveTaskLibraryDelivery: async (_taskId, selected) => {
+      assert.deepEqual({...selected}, {round: 1, executionRef: 'run', deliveryId: 'immutable', revision: 'v1'});
+      saves++; return { ok: true, delivery: { id: 'local-saved', files: [{ path: 'a.txt' }] } };
+    },
   };
   const deliveries = helper(document, { SoduWorkAPI: api });
   const snapshot = { status: 'idle', cloudHandoff: { taskId: 'cloud' } };
-  deliveries.decorate(root, [{ taskId: 'cloud', artifactId: 'a', name: 'a.txt', role: 'output' }], 'ref', snapshot);
+  deliveries.decorate(root, [{ taskId: 'cloud', artifactId: 'a', name: 'a.txt', role: 'output', round: 1, sourceRef: 'run' }], 'ref', snapshot);
   decorated = true;
   deliveries.hydrate(root, { ref: 'ref', snapshot });
   await new Promise(resolve => setImmediate(resolve));

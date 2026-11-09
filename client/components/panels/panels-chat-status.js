@@ -302,7 +302,7 @@
       return { value, estimated, known, initial };
     }
     function elapsedText(elapsedMs) {
-      if (elapsedMs === null) return '—';
+      if (elapsedMs === null) return tx('未记录');
       const seconds = Math.max(0, Math.floor(Number(elapsedMs || 0) / 1000));
       if (seconds < 60) return seconds + 's';
       const minutes = Math.floor(seconds / 60);

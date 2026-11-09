@@ -602,6 +602,57 @@ test('cloud save rejects a changed version and an account switch before local pe
   }
 });
 
+test('historical card selection rejects current receipts before status, sync or download', async () => {
+  for (const selection of [{round: 1, executionRef: 'run'}, {round: 2, executionRef: 'other'}, {}]) {
+    const h = harness(); await h.signIn('alice');
+    h.fetch = async url => {
+      assert.match(url, /\/from-task\//);
+      return new Response(JSON.stringify({state: 'pending', round: 2, executionRef: 'run', retryable: true}));
+    };
+    for (const method of ['getTaskLibraryDeliveryStatus', 'saveTaskLibraryDelivery']) {
+      await assert.rejects(h.api[method]('task', selection), error => error.code === 'LIBRARY_DELIVERY_CHANGED');
+    }
+    assert.equal(h.nativeCalls.length, 0);
+    assert.equal(h.calls.some(call => call.request?.method === 'POST'), false);
+  }
+});
+
+test('verified historical receipts keep their original bytes and saved state after a later task turn', async () => {
+  const h = harness(); await h.signIn('alice');
+  const delivery = {id: 'original-package', source: 'cloud', sessionId: 'cloud-session', revision: 'original-v1',
+    filename: 'old.zip', size: bytes.length, files: [{path: 'old.txt'}]};
+  let round = 1, saved = null;
+  h.fetch = async url => {
+    if (url.includes('/from-task/')) return new Response(JSON.stringify({state: 'synced', round, executionRef: 'run',
+      delivery: round === 1 ? delivery : {...delivery, id: 'new-package', revision: 'new-v2', filename: 'new.zip'}}));
+    if (url.endsWith('/deliveries/original-package')) return new Response(JSON.stringify({delivery}));
+    assert.match(url, /original-package/);
+    return new Response(bytes);
+  };
+  h.native = async (action, payload) => {
+    if (action === 'outputStatus') return {ok: true, item: saved};
+    assert.equal(action, 'upload'); assert.equal(payload.name, 'old.zip');
+    assert.deepEqual(Buffer.from(payload.dataBase64, 'base64'), bytes);
+    return {ok: true, item: saved = {id: 'local-original'}};
+  };
+  const initial = await h.api.getTaskLibraryDeliveryStatus('task', {round: 1, executionRef: 'run'});
+  const selected = {round: 1, executionRef: 'run', deliveryId: initial.manifest.id, revision: initial.manifest.revision};
+  round = 2;
+  assert.equal((await h.api.saveTaskLibraryDelivery('task', selected)).delivery.id, 'local-original');
+  assert.equal((await h.api.getTaskLibraryDeliveryStatus('task', selected)).delivery.id, 'local-original');
+  assert.equal(h.calls.filter(call => call.url.includes('/from-task/')).length, 1);
+});
+
+test('collection changing turns rejects the newly collected receipt before saving', async () => {
+  const h = harness(); await h.signIn('alice');
+  h.fetch = async (_url, request) => new Response(JSON.stringify(request.method === 'POST'
+    ? {state: 'synced', round: 2, executionRef: 'run', delivery: {id: 'new-package', revision: 'v2'}}
+    : {state: 'pending', round: 1, executionRef: 'run', retryable: true}));
+  await assert.rejects(h.api.saveTaskLibraryDelivery('task', {round: 1, executionRef: 'run'}),
+    error => error.code === 'LIBRARY_DELIVERY_CHANGED');
+  assert.equal(h.nativeCalls.length, 0);
+});
+
 test('generated-file save rejects absent persistence receipts and supports retry', async () => {
   const h = harness(); await h.signIn('alice');
   const payload = { manifest: { source: 'local', sessionId: 's', revision: 'v', files: [{ path: 'a.md' }] }, filename: 'a.md', data: 'YQ==' };
