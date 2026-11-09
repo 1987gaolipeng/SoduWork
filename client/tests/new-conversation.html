@@ -157,8 +157,8 @@ window.WorkspaceHost={open:(view,payload={})=>{
   await waitFor(()=>opened.some(x=>x.chatId==='saved-8'));
   WorkspaceShell.setActiveChat('saved-7');
   openCreateEntry({tab:'task'});
-  chk('普通新建需求入口延续本地工作目录',routes.at(-1).payload.cwd==='C:\\workdir'&&
-    routes.at(-1).payload.workspaceSource==='last-session');
+  chk('普通新建需求入口沿用当前本地会话工作目录并标明来源',
+    routes.at(-1).payload.cwd==='C:\\workdir'&&routes.at(-1).payload.workspaceSource==='last-session');
   chk('统一新建入口不会恢复上一条会话',routes.at(-1).payload.newSession===true&&!routes.at(-1).payload.chatId);
 
   openCreateEntry({tab:'task',cwd:'C:\\explicit-work'});
