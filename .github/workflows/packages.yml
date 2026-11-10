@@ -19,7 +19,7 @@ jobs:
         include:
           - {shard: windows, os: windows-2022, arch: x64}
           - {shard: linux, os: ubuntu-22.04, arch: x64}
-          - {shard: macos-arm64, os: macos-15, arch: arm64}
+          - {shard: macos-arm64, os: macos-26, arch: arm64}
           - {shard: macos-x64, os: macos-15-intel, arch: x64}
           - {shard: android, os: ubuntu-22.04, arch: x64}
     runs-on: ${{ matrix.os }}
