@@ -16,6 +16,15 @@ Automated acceptance does not cover interactive Windows UAC, macOS Gatekeeper/no
 
 ## Repository setup
 
+To validate packaging before publication approval, set `PACKAGE_VALIDATION_REPOSITORY`
+to this repository's `owner/name` and manually run **Native package validation**.
+It builds Windows x64, Linux x64 (DEB/RPM/tar.gz), Mac ARM64/x64 and Android on
+native GitHub-hosted runners. Android uses Flutter 3.47.7 and a disposable test
+signing key, then installs and launches the APK in an emulator. Each job uploads
+only its build/checksum report. Installers stay on the ephemeral runner while
+binary distribution review remains pending. This workflow neither creates a
+Release nor supplies upgrade-acceptance receipts to `Public release`.
+
 1. Set the repository variable `PUBLIC_RELEASE_REPOSITORY` to the final public repository's `owner/name`. The workflow must exist on the default branch before its manual entry appears in Actions. The public branch must include the reviewed `mobile/` Flutter source before selecting the Client path; a missing mobile source is a hard failure.
 2. Protect `release/source-*`, `release/client-*` and `release/hub-*`, prohibit force pushes and restrict updates to maintainers. Protect `source-v*`, `client-v*` and `hub-v*`; prohibit moving or deleting published tags.
 3. Create the `public-release` Environment in advance, configure **Required reviewers**, restrict deployment to protected release branches and disable administrator bypass. Configure self-review according to team responsibilities. Preflight checks the actual reviewer gate through the GitHub API and fails if it is missing; it does not rely on YAML to create the environment automatically.

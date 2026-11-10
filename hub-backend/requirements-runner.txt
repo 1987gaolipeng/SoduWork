@@ -20,5 +20,7 @@ cryptography==49.0.0
 
 # Apache-2.0: official MongoDB driver without dynamic downloads or user-supplied runtimes.
 pymongo==4.18.3
+# Keep the transitive DNS dependency aligned with reviewed Runner notices.
+dnspython==2.9.0
 # MIT: use the same established Redis client as Hub.
 redis>=5.2,<6

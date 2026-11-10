@@ -32,7 +32,7 @@ class BuildTests(unittest.TestCase):
                 build.download('https://example.test/file', self.root / 'file', hashlib.sha256(b'expected').hexdigest())
 
     def test_android_requires_reviewed_mobile_source(self):
-        with patch.object(build.platform, 'system', return_value='Linux'), \
+        with patch.object(build, 'ROOT', self.root), patch.object(build.platform, 'system', return_value='Linux'), \
                 self.assertRaisesRegex(ValueError, 'reviewed mobile'):
             build.android(self.ctx | {'component': 'client'}, self.root, self.root)
 

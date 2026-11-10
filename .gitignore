@@ -86,7 +86,7 @@ __pycache__/
 client/deep-research/
 smoke_*.out.txt
 # Local mobile builds are not part of this source distribution.
-mobile/
+# Reviewed Flutter source is versioned; local caches remain in mobile/.gitignore.
 
 # Retired independent conversation prototype. The maintained conversation lives
 # in client/components/panels and client/main/{conversation,agent-runtime,pi-session}.

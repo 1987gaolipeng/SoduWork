@@ -38,13 +38,16 @@ test('restored Electron downloads stay outside source while unknown and tracked 
 
 test('generated binaries, runtime identities and retired routes cannot return as source', () => {
   const bad = ['client/runner/_internal/skills/browser-use/SKILL.md', 'client/runner/soduwork-runner.exe',
-    'client/pi-chat/assets/main.js', 'skin-server/data/users/person/profile.json', 'skin-server/server.js', 'mobile/lib/main.dart', 'mobile-web-dist/.gitkeep',
+    'client/pi-chat/assets/main.js', 'skin-server/data/users/person/profile.json', 'skin-server/server.js',
+    'mobile/build/app.apk', 'mobile/android/key.properties', 'mobile/android/local.properties',
+    'mobile/android/upload.jks', 'mobile/.dart_tool/package_config.json', 'mobile-web-dist/.gitkeep',
     'hub-backend/uploads/report.md', 'client/components/panels/panels-ms-agent.js',
     '.github/private.env', '.github/workflows/company-deploy.yml'];
   for (const name of bad) assert.ok(auditFiles([name]).length > 0, name);
   assert.deepEqual(auditFiles(['client/runner/README.md', 'hub-backend/runner.spec',
     'hub-backend/migrations/versions/0053_unified_requirements.py', 'skills/browser-use/SKILL.md',
-    '.github/workflows/ci.yml', '.github/ISSUE_TEMPLATE/bug_report.yml']), []);
+    '.github/workflows/ci.yml', '.github/workflows/packages.yml', 'mobile/lib/main.dart',
+    '.github/ISSUE_TEMPLATE/bug_report.yml']), []);
 });
 
 test('all distribution formats reject stale Runner reuse and broad resource copying', () => {

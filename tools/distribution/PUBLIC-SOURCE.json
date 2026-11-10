@@ -47,9 +47,12 @@
     "skin-server/",
     "tools/mediaops-sync/",
     "hub-backend/plugins/platforms/",
-    "mobile/",
     "mobile-web-dist/",
-    "docs/development/"
+    "docs/development/",
+    "mobile/deploy/",
+    "mobile/docker/",
+    "mobile/docs/",
+    "mobile/ios/"
   ],
   "excludedFiles": [
     "PROJECT_CONTEXT.md",

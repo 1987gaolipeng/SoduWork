@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.request
 
 from release import ROOT, context, expected, policy, read, require, seal, write
@@ -47,7 +48,7 @@ def prepare_python(scratch, shard):
     run(python, "-m", "pip", "install", "-r", ROOT / "hub-backend/requirements-runner-build.txt")
 
 
-def native(ctx, shard, folder, scratch):
+def package_native(ctx, shard, scratch, *, validation=False):
     host = {"windows": "Windows", "linux": "Linux", "macos-arm64": "Darwin", "macos-x64": "Darwin"}[shard]
     require(platform.system() == host, "Native host required")
     target_arch = "arm64" if shard == "macos-arm64" else "x64"
@@ -59,6 +60,10 @@ def native(ctx, shard, folder, scratch):
     env = {**os.environ, "CI_COMMIT_SHA": ctx["commit"], "CI_PIPELINE_ID": ctx["runId"],
            "CI_JOB_ID": ctx["runId"], "CSC_IDENTITY_AUTO_DISCOVERY": "false"}
     require(not env.get("SODUWORK_INTERNAL_BUILD"), "Internal-only builds cannot enter public workflows")
+    if validation:
+        # Validation emits only a checksum report. Public release entry points
+        # still require the distribution review and full upgrade acceptance.
+        env["SODUWORK_INTERNAL_BUILD"] = "1"
     npm = "npm.cmd" if shard == "windows" else "npm"
     run(npm, "ci", cwd=ROOT / "client", env=env)
     if shard.startswith("macos-"):
@@ -68,6 +73,12 @@ def native(ctx, shard, folder, scratch):
     else:
         run(npm, "run", "build" if shard == "windows" else "build:linux", "--", "--publish", "never", cwd=ROOT / "client", env=env)
         run("node", "tools/ci/release-artifacts.cjs", "inventory", shard, env=env)
+    return env
+
+
+def native(ctx, shard, folder, scratch):
+    env = package_native(ctx, shard, scratch)
+    target_arch = "arm64" if shard == "macos-arm64" else "x64"
     keys = {"windows": ["windows-x64-exe"], "linux": ["linux-x64-deb", "linux-x64-rpm", "linux-x64-tar.gz"],
             "macos-arm64": ["macos-arm64-dmg"], "macos-x64": ["macos-x64-dmg"]}[shard]
     baselines = read(ROOT / "tools/ci/soduwork-acceptance-baselines.json")
@@ -93,7 +104,7 @@ def native(ctx, shard, folder, scratch):
     return read(receipt)
 
 
-def android(ctx, folder, scratch):
+def android(ctx, folder, scratch, *, signing_env=None):
     """Build, sign, inspect and install-test the public Android APK.
 
     The public branch must carry the reviewed Flutter project.  Keeping this
@@ -105,8 +116,9 @@ def android(ctx, folder, scratch):
     require((mobile / "pubspec.yaml").is_file(),
             "Public Android release requires the reviewed mobile/ Flutter source")
     require(shutil.which("flutter"), "Flutter SDK is required for the Android release")
-    keystore_b64 = os.environ.get("SODUWORK_ANDROID_KEYSTORE_B64", "")
-    password = os.environ.get("SODUWORK_ANDROID_KEYSTORE_PASSWORD", "")
+    signing_env = os.environ if signing_env is None else signing_env
+    keystore_b64 = signing_env.get("SODUWORK_ANDROID_KEYSTORE_B64", "")
+    password = signing_env.get("SODUWORK_ANDROID_KEYSTORE_PASSWORD", "")
     require(keystore_b64 and password, "Android signing secrets are required")
     pubspec = (mobile / "pubspec.yaml").read_text(encoding="utf-8")
     match = re.search(r"^version:\s*([^+\s]+)\+([0-9]+)\s*$", pubspec, re.MULTILINE)
@@ -117,14 +129,21 @@ def android(ctx, folder, scratch):
     signing = Path(tempfile.mkdtemp(prefix="soduwork-android-signing-", dir=scratch))
     keystore = signing / "release.jks"
     properties = mobile / "android/key.properties"
+    require(not properties.exists(), "Refusing to replace existing Android signing configuration")
     try:
         keystore.write_bytes(base64.b64decode(keystore_b64, validate=True))
         properties.write_text(f"storeFile={keystore}\nstorePassword={password}\n"
-                              f"keyAlias={os.environ.get('SODUWORK_ANDROID_KEY_ALIAS', 'soduwork-release')}\n"
+                              f"keyAlias={signing_env.get('SODUWORK_ANDROID_KEY_ALIAS', 'soduwork-release')}\n"
                               f"keyPassword={password}\n", encoding="utf-8")
-        run("flutter", "pub", "get", cwd=mobile)
+        run("flutter", "pub", "get", "--enforce-lockfile", cwd=mobile)
+        run("flutter", "analyze", cwd=mobile)
         run("flutter", "test", cwd=mobile)
-        run("flutter", "build", "apk", "--release", cwd=mobile,
+        run("flutter", "build", "apk", "--release",
+            "--dart-define=SODUWORK_HUB_URL=https://service.soduwork.ai",
+            "--dart-define=SODUWORK_ANDROID_WEBVIEW=true",
+            "--dart-define=SODUWORK_SHARED_CONVERSATION=true",
+            "--dart-define=SODUWORK_ENTERPRISE_ONLY=true",
+            f"--dart-define=SODUWORK_APP_VERSION={ctx['version']}+{match.group(2)}", cwd=mobile,
             env={**os.environ, "CI_COMMIT_SHA": ctx["commit"], "CI_PIPELINE_ID": ctx["runId"]})
         artifact = mobile / "build/app/outputs/flutter-apk/app-release.apk"
         require(artifact.is_file(), "Flutter did not produce app-release.apk")
@@ -142,14 +161,17 @@ def android(ctx, folder, scratch):
         if shutil.which("adb"):
             run("adb", "wait-for-device")
             run("adb", "install", "-r", str(artifact))
-            run("adb", "shell", "am", "force-stop", app_id.group(1))
-            run("adb", "shell", "monkey", "-p", app_id.group(1), "1")
-            run("adb", "uninstall", app_id.group(1))
+            try:
+                run("adb", "shell", "am", "force-stop", app_id.group(1))
+                run("adb", "shell", "am", "start", "-W", "-n", app_id.group(1) + "/.MainActivity")
+                time.sleep(5)
+                pid = subprocess.check_output(["adb", "shell", "pidof", app_id.group(1)], text=True).strip()
+                require(re.fullmatch(r"[1-9]\d*(?: [1-9]\d*)*", pid), "Android app did not remain running")
+            finally:
+                run("adb", "uninstall", app_id.group(1))
             acceptance = "emulator-install-launch-cleanup"
         else:
-            require(os.environ.get("SODUWORK_ANDROID_SKIP_EMULATOR") == "1",
-                    "Android acceptance requires adb or an explicit non-release skip")
-            acceptance = "package-inspection-only"
+            raise ValueError("Android acceptance requires adb and an emulator")
         output = folder / expected(ctx, "android")[0]
         shutil.copyfile(artifact, output)
         return {"ok": True, "checks": ["flutter-tests", "signature", "package-identity", acceptance],

@@ -118,7 +118,7 @@ jobs:
       - uses: subosito/flutter-action@fd55f4c5af5b953cc57a2be44cb082c8f6635e8e # v2.21.0
         if: matrix.shard == 'android'
         with:
-          flutter-version: '3.38.2'
+          flutter-version: '3.47.7'
           channel: stable
           cache: true
       - name: Prepare Linux package tools
