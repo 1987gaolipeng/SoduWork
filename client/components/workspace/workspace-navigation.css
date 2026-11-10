@@ -64,9 +64,8 @@ html[data-desk-panel="workspace"][data-workspace-layout="utility"] .ws-resizer{d
 .ws-rail-update svg{width:18px;height:18px;stroke-width:2;}
 .ws-rail-update i{background:#ef4444;box-shadow:0 0 0 2px color-mix(in srgb,var(--bg-2) 72%,var(--bg-0))}
 .ws-rail-bottom .ws-rail-notices{background:transparent;border-color:transparent;box-shadow:none}
-.ws-rail-notices svg{width:24px;height:24px}
+.ws-rail-notices svg{width:22px;height:22px}
 .ws-rail-notices:is(:hover,.active){color:var(--accent)}
-.ws-rail-notices:has(em.show) rect{display:none}
 .ws-rail-account{appearance:none;width:32px;height:32px;margin-top:4px;padding:0;border:0;border-radius:50%;display:grid;place-items:center;background:transparent;cursor:pointer}
 .ws-rail-account:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 68%,transparent);outline-offset:3px}
 .ws-rail-avatar{width:24px;height:24px;border-radius:50%;overflow:hidden;display:grid;place-items:center;background:#af4035;color:#fff;font:500 11px/1 var(--font-ui)}
@@ -75,7 +74,12 @@ html[data-desk-panel="workspace"][data-workspace-layout="utility"] .ws-resizer{d
 .ws-rail-account:hover .ws-rail-avatar{background:#96352d}
 .ws-rail-update[hidden]{display:none}
 .ws-rail-notices em{display:none}
-.ws-rail-notices em.show{position:absolute;inset:0;display:grid;place-items:center;color:var(--ink-2);font:600 10px/1 var(--font-ui);font-variant-numeric:tabular-nums}
+.ws-rail-notices em.show{
+  position:absolute;top:-1px;left:calc(50% + 2px);display:grid;place-items:center;
+  box-sizing:border-box;min-width:14px;height:14px;padding:0 3px;border-radius:999px;
+  background:#ad455f;color:#fff;box-shadow:0 0 0 1.5px var(--ws-side);
+  font:600 10px/1 var(--font-ui);font-variant-numeric:tabular-nums;pointer-events:none;
+}
 .ws-rail-popover{position:fixed;left:0;top:0;width:168px;padding:8px;border:1px solid color-mix(in srgb,var(--line) 82%,transparent);border-radius:12px;background:var(--bg-0);
   box-shadow:0 16px 38px -18px rgba(24,39,64,.38);color:var(--ink);z-index:1200}
 .ws-rail-popover[hidden]{display:none}

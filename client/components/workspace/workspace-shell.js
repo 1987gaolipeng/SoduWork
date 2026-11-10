@@ -292,10 +292,7 @@
         '<button class="ws-update ws-rail-update" id="wsUpdate" hidden title="有新版本已就绪，点一下重启更新" aria-label="重启并更新">' +
           '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v9"/><path d="m8.5 9.5 3.5 3.5 3.5-3.5"/><path d="M5 15a7 7 0 0 0 14 0"/></svg><i></i></button>' +
         '<button class="ws-rail-button ws-rail-notices" type="button" data-rail-view="notices" aria-label="' + noticeText + '" title="' + noticeText + '" aria-describedby="wsRailNoticeBadge">' +
-          '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
-            '<circle cx="12" cy="12" r="11" opacity=".2"/><path d="M12 1a11 11 0 0 1 11 11"/>' +
-            '<rect x="8.5" y="8.5" width="7" height="7" rx="1.4" transform="rotate(45 12 12)" fill="currentColor" stroke="none" opacity=".36"/>' +
-          '</svg><em id="wsRailNoticeBadge"></em></button>' +
+          railIcon('notices') + '<em id="wsRailNoticeBadge"></em></button>' +
         '<button class="ws-rail-account" id="wsRailMine" type="button" title="打开个人信息" aria-label="打开个人信息">' +
           '<span class="ws-rail-avatar" data-soduwork-user-initial aria-hidden="true">我</span></button>' +
       '</div>';
