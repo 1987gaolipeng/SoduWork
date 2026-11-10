@@ -113,6 +113,9 @@ jobs:
           python -m venv hub-backend/.venv
           if [ "$RUNNER_OS" = Windows ]; then
             hub-backend/.venv/Scripts/python.exe -m pip install -r hub-backend/requirements-test.txt
+            choco install ripgrep --no-progress --yes
+            echo 'C:\\ProgramData\\chocolatey\\bin' >> "$GITHUB_PATH"
+            rg --version
           else
             hub-backend/.venv/bin/python -m pip install -r hub-backend/requirements-test.txt
             sudo apt-get update
