@@ -174,7 +174,7 @@
     else if (state.view === 'gantt' && global.GanttView) {
       const today = new Date(); if (state.year == null) { state.year = today.getFullYear(); state.month = today.getMonth(); }
       body.innerHTML = GanttView.html(list.map(task => ({label:R.content(task).title,sub:task.assigneeName || '',tasks:[{...task,...R.content(task),createdAt:task.createdAt || task.created}]})), {
-        year:state.year,month:state.month,onlyOverdue:state.onlyOverdue,labelHead:'需求',clickAttr:'data-rq-open',taskRows:true});
+        year:state.year,month:state.month,onlyOverdue:state.onlyOverdue,isOverdue:R.overdue,labelHead:'需求',clickAttr:'data-rq-open',taskRows:true});
       body.querySelectorAll('[data-rq-open]').forEach(node => { node.tabIndex = 0; node.setAttribute('role','button'); });
     } else body.innerHTML = state.view === 'list' ? V.list(list, state, ctx) : V.board(list, state, ctx);
     if (state.view === 'kanban' && state.group === 'stage') {

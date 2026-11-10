@@ -23,7 +23,7 @@
     const s = Math.max(s0, m0), ee = Math.min(e, m1);
     return { sd: Math.round((s - m0) / DAY), ed: Math.round((ee - m0) / DAY) };
   }
-  function _bar(t, m0, m1, days) {
+  function _bar(t, m0, m1, days, isOverdue, now) {
     /*
      * Recurring work has a cadence rather than a fixed duration; display a dashed bar across
      * the month.
@@ -36,10 +36,10 @@
     const due = t.due ? _dayStart(t.due) : null;
     const plan = _span(start, due, m0, m1, days);
     const aS = t.actualStart ? _dayStart(t.actualStart) : null;
-    const aE = t.actualEnd ? _dayStart(t.actualEnd) : (aS != null && t.status !== 'done' ? _dayStart(Date.now()) : null);
+    const aE = t.actualEnd ? _dayStart(t.actualEnd) : (aS != null && t.status !== 'done' ? _dayStart(now) : null);
     const act = _span(aS, aE, m0, m1, days);
     if (!plan && !act) return null;
-    const overdue = t.due && t.due < Date.now() && t.status !== 'done';
+    const overdue = isOverdue(t, now);
     const st = t.status === 'done' ? 'done' : overdue ? 'over' : 'run';
     return { id: t.id, title: t.title || '未命名', st, plan, act, days };
   }
@@ -73,6 +73,9 @@
     const days = new Date(y, m + 1, 0).getDate();
     const m0 = new Date(y, m, 1).getTime(), m1 = new Date(y, m, days).getTime();
     const now = new Date(); const todayIdx = (now.getFullYear() === y && now.getMonth() === m) ? now.getDate() - 1 : -1;
+    // Requirement deadlines use calendar days; other callers keep timestamp semantics.
+    const isOverdue = typeof opts.isOverdue === 'function' ? opts.isOverdue
+      : (task, time) => task.due && task.due < time && task.status !== 'done';
     const q = (opts.query || '').trim().toLowerCase();
     const clickAttr = opts.clickAttr || 'data-gvtid';
 
@@ -81,7 +84,7 @@
       const bars = [];
       (r.tasks || []).forEach(t => {
         if (q && !(t.title || '').toLowerCase().includes(q)) return;
-        const b = _bar(t, m0, m1, days);
+        const b = _bar(t, m0, m1, days, isOverdue, now.getTime());
         if (!b) return;
         if (opts.onlyOverdue && b.st !== 'over') return;
         bars.push(b);

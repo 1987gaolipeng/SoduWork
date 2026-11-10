@@ -716,8 +716,8 @@
     },
     {
       "path": "client/components/gantt/gantt.js",
-      "bytes": 8106,
-      "sha256": "9f387875f7285ec9c91a81ac9d390a47e9e899f5c460b5923805a768df06d834"
+      "bytes": 8351,
+      "sha256": "d961153845a75d33e5836f3dd0bb476bf9e2673d56a9b1046cbe712ad9f94321"
     },
     {
       "path": "client/components/panels/access-controls.css",
@@ -2031,8 +2031,8 @@
     },
     {
       "path": "client/components/requirements/requirements-board.js",
-      "bytes": 38559,
-      "sha256": "6048092f66afbe01778b2c44e2dcec16e3f046db2eb9cafe56e014892dde52a0"
+      "bytes": 38579,
+      "sha256": "c498858ff9124b9920d6bacb6d063319666ede8623f0f136309a0ef215b9fa0c"
     },
     {
       "path": "client/components/requirements/requirements-detail.js",
@@ -2091,8 +2091,8 @@
     },
     {
       "path": "client/components/settings/settings.js",
-      "bytes": 24564,
-      "sha256": "bf8fd1886e697e351c970cbb0c9eece2248fc0ea79c0c0e5d600e7a89904c1c3"
+      "bytes": 25033,
+      "sha256": "64c786bb73a988b8e6c9af7d04049c3ca251557598bc77f3d779da4282b1b6a3"
     },
     {
       "path": "client/components/settings/shortcut-settings.css",
@@ -3821,8 +3821,8 @@
     },
     {
       "path": "client/e2e/gantt-readability.cjs",
-      "bytes": 12234,
-      "sha256": "4136a30cd2768b0be4317c26e89f9d73f59ee102245721696c5adb515654c097"
+      "bytes": 14196,
+      "sha256": "eccd89c185b65501ba0dd4f4f3bee61b9a5602966fbc9e1d1611a861da669474"
     },
     {
       "path": "client/e2e/generated-file-library-actions.cjs",
@@ -10251,8 +10251,8 @@
     },
     {
       "path": "client/tests/requirements-board-entry.test.cjs",
-      "bytes": 8925,
-      "sha256": "41789ba4fb7d75602145569d720ccc3af7bf012b45302ede5a2c0994cc4db7b0"
+      "bytes": 13257,
+      "sha256": "b51dde150af1fae4b5af1873a2708dacc1534964d84478177950f5a372d66192"
     },
     {
       "path": "client/tests/requirements-detail-lifecycle.test.cjs",
@@ -18581,8 +18581,8 @@
     },
     {
       "path": "hub-frontend/src/App.jsx",
-      "bytes": 17387,
-      "sha256": "79fc810c68f0e83098953d64cc64ba1bb07906cfc021ac4d5693d14c6c0e3033"
+      "bytes": 17403,
+      "sha256": "949deffcbbb1891597dc54b17898fea4ec70e7d7b1ebb1275a0ca203b81a167a"
     },
     {
       "path": "hub-frontend/src/FilterControls.jsx",
