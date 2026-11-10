@@ -4,6 +4,22 @@ const fs = require('node:fs'), path = require('node:path'), vm = require('node:v
 const context = {}; context.window = context;
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../components/panels/work-automation-bindings.js'), 'utf8'), context);
 const B = context.WorkAutomationBindings;
+
+test('explicit activation directives preserve pause intent and ignore task content', () => {
+  const resolve = (text, enabled, raw = {}) => B.resolve(raw, text, {enabled}, {});
+  const request = '创建测试自动化，名称 AUTO-1110，每天北京时间 23:55 执行，工作内容是“只回复 AUTO-1110-OK”。保存为暂停状态，不立即运行。';
+  assert.equal(resolve(request, true, {enabled: true}).enabled, false);
+  for (const text of ['暂不启用', '创建后不启用', '保存后不要启用', 'Please save as paused.']) {
+    assert.equal(resolve(text, true).enabled, false, text);
+  }
+  assert.equal(resolve('创建后启用', false).enabled, true);
+  for (const text of ['不立即运行', '如果保存为暂停状态会怎样', '不要保存为暂停状态',
+    '工作内容是“保存为暂停状态”。', '工作内容是“示例。创建后启用”。',
+    '名称改为「保存为暂停状态」', '每天23:55执行']) {
+    assert.equal(resolve(text, true).enabled, true, text);
+    assert.equal(resolve(text, false, {enabled: true}).enabled, false, text);
+  }
+});
 const catalogs = {
   methods:[{key:'games',name:'小游戏'},{key:'report',name:'报表'}],
   repos:[{id:'game-repo',name:'游戏工程',projectId:'game-project'},{id:'report-repo',name:'报表'}],

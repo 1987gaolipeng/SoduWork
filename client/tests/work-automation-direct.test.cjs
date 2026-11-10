@@ -18,6 +18,16 @@ function fixture(overrides = {}) {
 }
 const params = text => ({text,context:{spaceId:'space-a',spaceName:'研发空间',page:'https://ops.example/资料/index.html',appName:'示例云端资料库'}});
 
+test('pause directive reaches the created schedule and survives unrelated refinement', async () => {
+  const f = fixture();
+  await f.direct.create(params('每天23:55执行，只回复 AUTO-1110-OK。保存为暂停状态，不立即运行。'));
+  assert.equal(f.writes.length, 1);
+  assert.equal(f.writes[0].enabled, false);
+  const catalogs = {seed: {}, agents: [{id: 'local:pi'}], repos: [], methods: []};
+  const refined = f.window.WorkAutomationSheet.draft({title: 'Updated'}, '名称改为 Updated', f.writes[0], catalogs);
+  assert.equal(refined.enabled, false);
+});
+
 test('a hosted character creates a pinned schedule without inventing an external business space',async()=>{
   const f=fixture(),method={pluginId:'local:idea',key:'jiyong-bot-idea',name:'灵感扭蛋机',version:'1.0.0',checksum:'a'.repeat(64),enabled:true,personal:true,entrypoints:{automation:true},inputs:[],capabilities:{mcpServers:['soduwork-jiyong']}};
   f.window._schmLoad=async()=>[method];

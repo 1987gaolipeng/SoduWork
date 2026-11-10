@@ -93,6 +93,15 @@
   function resolve(raw, text, prior, catalogs) {
     const next = { ...prior, bindingIssues: [...(prior.bindingIssues || [])] };
     const source = directiveText(trim(text));
+    // Only explicit schedule directives change activation; quoted work content
+    // and "do not run immediately" are not instructions to pause the schedule.
+    const activationText = source.replace(/```[\s\S]*?```|“[^”]*”|「[^」]*」|『[^』]*』|"[^"]*"|'[^']*'/g, ' ');
+    for (const clause of activationText.split(/[，,。；;\n.!！]/).map(trim)) {
+      if (/^(?:请)?(?:保存为暂停(?:状态|计划)?|(?:创建|保存)后(?:暂不|不要|不)启用|暂不启用|保持暂停(?:状态)?|暂停(?:此|这个|该)?(?:计划|自动化))$/.test(clause) ||
+          /^(?:please\s+)?(?:save (?:it )?as paused|keep (?:it )?paused|do not enable (?:it )?after (?:creation|saving))$/i.test(clause)) next.enabled = false;
+      else if (/^(?:请)?(?:创建后启用|保存后启用|启用(?:此|这个|该)(?:计划|自动化))$/.test(clause) ||
+          /^(?:please\s+)?enable (?:it )?after (?:creation|saving)$/i.test(clause)) next.enabled = true;
+    }
     for (const kind of Object.keys(fields)) {
       const items = rows(catalogs, kind), field = fields[kind];
       let refs = references(source, kind, items);

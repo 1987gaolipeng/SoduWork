@@ -120,6 +120,8 @@
     const rawKey = String(field.key || '').trim();
     const exactKey = rawKey.toLowerCase();
     const compactKey = exactKey.replace(/[-_]/g, '');
+    // A plain text payload is a conversation input, not every field ending in Text.
+    if (exactKey === 'text') return 3;
     if (CONVERSATION_INPUT_KEYS.has(exactKey) || CONVERSATION_INPUT_KEYS.has(compactKey)) return 3;
     const tokens = rawKey.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase()
       .split(/[^a-z0-9]+/).filter(Boolean);
