@@ -104,6 +104,27 @@ test('invalid runtime ids and transports are not probed, and duplicate directory
   assert.deepEqual(reported.map(row => row.key).sort(), ['local:custom-agent', 'local:pi']);
 });
 
+test('a timed-out Runner can be checked again without publishing its stale result', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const slow = deferred();
+  const f = fixture({ catalog: {ok: true, runtimes: [runtime('pi'), runtime('codex')]},
+    probe: id => id === 'pi' ? {ok: true} : slow.promise });
+  const reported = [];
+  const first = f.api.localAgents(task, {}, row => reported.push(row.key));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(reported, ['local:pi']);
+  t.mock.timers.tick(15000);
+  const result = await first;
+  assert.deepEqual(Array.from(result.failures, failure => failure.id), ['codex']);
+
+  f.sessions.probe = async () => ({ok: true});
+  const retry = await f.api.localAgents(task, {});
+  assert.deepEqual(Array.from(retry.agents, row => row.key).sort(), ['local:codex', 'local:pi']);
+  slow.resolve({ok: true});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(reported, ['local:pi']);
+});
+
 test('probe failure, exceptions and truthy non-boolean ok never become available Agents', async () => {
   const replies = {pi: {ok: true}, missing: {ok: false}, numeric: {ok: 1}, textual: {ok: 'true'}, empty: null};
   const f = fixture({catalog: {ok: true, runtimes: Object.keys(replies).concat('broken').map(id => runtime(id))},

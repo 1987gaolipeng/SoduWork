@@ -188,6 +188,7 @@ function install({ app, ipcMain, session, identityOf, capabilityGrantsOf, _skill
 
   ipcMain.handle('pi-session-runtimes', async (_event, options) => {
     try {
+      if (options?.catalogOnly === true) return { ok: true, runtimes: session.runtimes() };
       if (typeof session.availableRuntimes === 'function') return await session.availableRuntimes(app, options || {});
       const catalog = session.runtimes();
       return { ok: true, runtimes: catalog,

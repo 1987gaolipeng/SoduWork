@@ -2021,8 +2021,8 @@
     },
     {
       "path": "client/components/requirements/requirement-session-choice.js",
-      "bytes": 10235,
-      "sha256": "f9d23c53a9cdcb9c375699769d492d4351562939e7812fd5503a9b0d994c8c8c"
+      "bytes": 10337,
+      "sha256": "2023a27da5f5fd5b44edec0185e57c8ff28249db609d4ff4bb2f862a4e6f0aa1"
     },
     {
       "path": "client/components/requirements/requirements-board.css",
@@ -6496,8 +6496,8 @@
     },
     {
       "path": "client/main/pi-session/environment-ipc.js",
-      "bytes": 10752,
-      "sha256": "768e887c1b007436abae170050abc33c03a8fa87e30fdc7d636cc7a20a7d8131"
+      "bytes": 10844,
+      "sha256": "7bd287c63b451240781fef9d9833bdad9e53b3005fc267414c7b21377a39a84d"
     },
     {
       "path": "client/main/pi-session/event-publication.js",
@@ -8571,8 +8571,8 @@
     },
     {
       "path": "client/tests/conversation-capability-prewarm.test.cjs",
-      "bytes": 4077,
-      "sha256": "b6c786a0a5a9cc65bc477f6ea63ea96d8f56d5a13c9b832277a31a506a3e1622"
+      "bytes": 5916,
+      "sha256": "c8ae0ca5a3645705b84145ed994d745f36252334ed8ffe48e879218260f39eef"
     },
     {
       "path": "client/tests/conversation-connectors.test.cjs",
@@ -10206,8 +10206,8 @@
     },
     {
       "path": "client/tests/requirement-local-agents.test.cjs",
-      "bytes": 10215,
-      "sha256": "1cb6ea53f5860fb4d420bf4e030f90839e1ec39979c8567a26380e2fe7f25695"
+      "bytes": 11207,
+      "sha256": "538beb10d7bb82841d14173f59b2cc619ea3f42f658dcc71b48e6274d28c5710"
     },
     {
       "path": "client/tests/requirement-maintenance.test.cjs",

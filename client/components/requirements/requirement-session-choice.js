@@ -27,7 +27,8 @@
       catch (_) { return {ok:false, reason:'本机执行服务未能响应，请重新检查连接'}; }
       finally { clearTimeout(timer); }
     }
-    const catalog = await bounded(() => sessions.runtimes(), 5000);
+    // Probe each registered runtime once so a slow Runner cannot delay a ready Pi.
+    const catalog = await bounded(() => sessions.runtimes({catalogOnly:true}), 5000);
     if (!catalog?.ok || !Array.isArray(catalog.runtimes)) return {ok:false, agents:[],
       failures:[{name:'本机 Agent', reason:String(catalog?.reason || '无法读取本机执行目录').slice(0, 240)}]};
     const seen = new Set();
