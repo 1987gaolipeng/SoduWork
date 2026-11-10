@@ -16,4 +16,4 @@ node tools/check-third-party.cjs
 
 Or run `npm run check:licenses` from `client/`. Checks verify fixed-version evidence, hashes, and build integration. Packaging collects original licenses for copied runtime dependencies. Runner retains installed Python metadata and licenses; Hub includes project and third-party materials.
 
-See [distribution materials](../third-party/README.en.md) for coverage and remaining work. The first release is source-only.
+See [distribution materials](../third-party/README.en.md) for coverage and remaining work.

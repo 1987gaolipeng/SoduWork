@@ -15,8 +15,7 @@
 Works with Pi · OpenCode · DeepSeek Harness · Qwen Code · Kimi Code · Codex Harness · Codex · Claude Code · Google Harness²
 
 ```bash
-git clone https://github.com/mdiri-ai/SoduWork && cd SoduWork
-python start.py --desktop
+git clone https://github.com/mdiri-ai/SoduWork && cd SoduWork && python start.py --desktop
 ```
 
 [Website](https://soduwork.ai) | [Live demo](https://soduwork.ai) | [Docs](https://dev.soduwork.ai) | [Releases](https://github.com/mdiri-ai/SoduWork/releases) | [Discord](https://discord.gg/AXYNrAYHy)
@@ -280,12 +279,12 @@ You don't have to write this by hand: describe the work to Plugin Developer in a
 | Methods that can't move | Method and environment are separate: plugins define the method; harness, model, runner and secrets are chosen when the plugin is bound. Plugin versions are immutable and portable |
 | Work nobody can trace | Interaction and execution are separate: the client handles chat and approvals; the runtime and runners do the work — locally or remotely — and every run lands in the audit record |
 
-<img src="docs/assets/product-architecture.en.png" alt="SoduWork product architecture" width="760" />
+<p align="center"><img src="docs/assets/product-architecture.en.png" alt="SoduWork product architecture" width="760" /></p>
 
 <details>
 <summary>Inside the runner</summary>
 
-<img src="docs/assets/runner-architecture.en.png" alt="SoduWork runner architecture" width="900" />
+<p align="center"><img src="docs/assets/runner-architecture.en.png" alt="SoduWork runner architecture" width="900" /></p>
 
 The runner connects to the Hub over a WebSocket. Every dispatch has an ID, so the same task is never taken twice. Each harness runs in its own subprocess. Events are saved on the execution host before they are sent, and are sent again after a disconnect.
 

@@ -2,9 +2,9 @@
 
 [简体中文](README.md) · **English** · [Notices](../docs/third-party-notices.en.md)
 
-Preparation remains on the internal GitLab. See [MIT review boundaries](mit-review.en.md)
-for file-level provenance checks, license scope and explicitly internal installer
-builds. Original third-party copyrights and licenses remain unchanged.
+See [MIT review boundaries](mit-review.en.md) for file-level provenance checks,
+license scope and local validation builds. Original third-party copyrights and
+licenses remain unchanged.
 
 This directory retains verified license texts and source evidence. Project MIT terms do not override third-party terms. Hashes in `manifest.json` use UTF-8/LF. Review the owner, terms, exact version, and actual artifact when updating evidence; changing a hash alone is insufficient.
 
@@ -37,4 +37,4 @@ The MIT-CMU license requires the copyright and permission notices to be retained
 
 The current single-host self-hosting recipe does not deploy Redis or Valkey. Any additional server components introduced by a downstream deployment need their own inventory and license review.
 
-`public-release.json` distinguishes obtained source evidence from unresolved binary-release work. The first public release distributes source only.
+`public-release.json` distinguishes obtained source evidence from unresolved binary-release work. Installers and container images are published only after the items above are resolved for the exact artifacts.

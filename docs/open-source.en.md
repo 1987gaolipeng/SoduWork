@@ -53,6 +53,6 @@ The exporter checks every file against the manifest and rejects unlisted content
 
 Extract the verified ZIP into a new empty directory, initialize a new Git repository there, review the files, and connect your own GitHub remote. Do not make the original development repository public or import private branches, old tags, or development history.
 
-Root `README.md` is the Chinese entry point, with a top link to `docs/README.en.md`. Relative navigation works across forks and repository renames. Follow the [translation conventions](development.en.md#documentation-and-translations) to add another language.
+Root `README.md` is the English entry point, with a top link to the Chinese `README.zh-CN.md`. Relative navigation works across forks and repository renames. Follow the [translation conventions](development.en.md#documentation-and-translations) to add another language.
 
-See [LICENSE](../LICENSE), [NOTICE.md](../NOTICE.md), and `third-party/` for project and dependency terms. The first release distributes source. Installers, container images, and other binary dependencies need separate licensing and runtime verification.
+See [LICENSE](../LICENSE), [NOTICE.md](../NOTICE.md), and `third-party/` for project and dependency terms. Installers, container images, and other binary dependencies need separate licensing and runtime verification.

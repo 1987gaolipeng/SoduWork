@@ -1,6 +1,6 @@
 # Run SoduWork from source
 
-[简体中文](getting-started.md) · **English** · [Back to README](README.en.md) · [Developer guide](development.en.md)
+[简体中文](getting-started.md) · **English** · [Back to README](../README.md) · [Developer guide](development.en.md)
 
 Your first run has four steps: install the prerequisites, extract the source, start, and sign in. This launcher runs the Hub service, browser management UI, and desktop client on your computer with a private SQLite database. No separate server is needed.
 

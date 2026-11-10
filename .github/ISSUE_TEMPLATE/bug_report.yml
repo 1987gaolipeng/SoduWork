@@ -4,7 +4,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        For security vulnerabilities, follow SECURITY.md and establish a private channel first.
+        For security vulnerabilities, follow SECURITY.md and report through GitHub private vulnerability reporting.
   - type: input
     id: version
     attributes:

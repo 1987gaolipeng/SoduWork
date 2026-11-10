@@ -2,7 +2,7 @@
 
 [简体中文](mit-review.md) · **English** · [Third-party materials](README.en.md)
 
-Preparation currently takes place on the `opensource` branch in the internal GitLab. The root MIT license and MDiRi attribution cover project-owned material the project has the right to license. This document does not announce publication, certify zero risk, or provide legal clearance.
+The root MIT license and MDiRi attribution cover project-owned material the project has the right to license. This document records review boundaries; it does not certify zero risk or provide legal clearance.
 
 ## Project and third-party material
 
@@ -24,15 +24,15 @@ Review origin, original terms, local changes and applicable obligations before c
 
 Both npm lockfiles use only HTTPS downloads from the official `registry.npmjs.org` with integrity hashes; dependency versions remain unchanged. Private registries, credential-bearing URLs, local links and missing integrity records are rejected. Declared license identifiers do not substitute for original permission.
 
-The internal Windows validation wheel for `dnspython 2.9.0` omits the original license file. Its complete ISC notice was obtained from the matching official pinned commit and recorded with a hash. Runner builds include that text and verify the installed version and notice hash. Future versions require review rather than inheriting an old record. Other platforms and final runtime dependencies still require artifact-level checks.
+The Windows validation wheel for `dnspython 2.9.0` omits the original license file. Its complete ISC notice was obtained from the matching official pinned commit and recorded with a hash. Runner builds include that text and verify the installed version and notice hash. Future versions require review rather than inheriting an old record. Other platforms and final runtime dependencies still require artifact-level checks.
 
-## Source launches and internal installers
+## Source launches and local validation builds
 
 Ordinary source launches remain available. Reading or switching model configuration does not automatically submit inference requests. Model calls start when a user sends a message or runs a task.
 
-`public-release.json` retains unresolved binary-distribution items: original dependency permission, Windows shell corresponding-source archives and final platform artifact inventories. The source-only release scope or any unresolved item blocks an ordinary installer build.
+`public-release.json` retains unresolved binary-distribution items: original dependency permission, Windows shell corresponding-source archives and final platform artifact inventories. While `tools/distribution/PUBLIC-SOURCE.json` sets `sourceOnly: true` or any item is unresolved, an ordinary installer build stops.
 
-Explicit internal validation builds are available as follows. This does not grant public distribution rights:
+To validate an installer locally before those items are resolved, build explicitly as follows. This does not grant public distribution rights:
 
 ```powershell
 $env:SODUWORK_INTERNAL_BUILD = '1'
@@ -45,10 +45,4 @@ cd client
 SODUWORK_INTERNAL_BUILD=1 npm run build:linux
 ```
 
-Internal builds retain every blocker and write `internalOnly: true` and `publicDistributionAllowed: false` to `third-party/inventory/distribution-review.json`. No pending item becomes resolved as a result.
-
-## Before publication
-
-The company must verify ownership and open-source authorization for its code, images, contractor work, customer-commissioned work and historical contributions, including contractual and confidentiality limits. MDiRi project attribution is retained but does not substitute for those records. Keep contracts, personnel and customer information inside the company, outside public source.
-
-Before actual publication, review the final commit, intended public history, attachments, license obligations and credentials. Revoke or rotate any real credential previously exposed. An internal GitLab commit or local source export does not constitute publication or complete legal review.
+Validation builds retain every blocker and write `internalOnly: true` and `publicDistributionAllowed: false` to `third-party/inventory/distribution-review.json`. No pending item becomes resolved as a result.

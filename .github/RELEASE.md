@@ -4,7 +4,7 @@
 
 `ci.yml` and `security.yml` run ordinary push/PR checks and provide the shared quality gates for `release.yml`. Release branch pushes and tags do not trigger duplicate checks. Client tests run on Linux and Windows; source HTTP startup checks run on all three operating systems. The PostgreSQL job checks migrations, schema drift, backup and restore using a disposable database.
 
-**Public release** offers three manual paths: source, Client and Hub. Currently, `PUBLIC-SOURCE.json` still sets `sourceOnly: true`, binary licensing reviews remain pending, and previous-installer baselines are empty. The source path can prepare a candidate; Client and Hub fail preflight. `SODUWORK_INTERNAL_BUILD` cannot bypass publication gates. Workflow source does not establish a successful GitHub-hosted run.
+**Public release** offers three manual paths: source, Client and Hub. Client and Hub preflight fails while `PUBLIC-SOURCE.json` sets `sourceOnly: true`, any item in `third-party/public-release.json` is pending, or previous-installer baselines are missing. The source path does not depend on these gates. `SODUWORK_INTERNAL_BUILD` cannot bypass publication gates. Workflow source does not establish a successful GitHub-hosted run.
 
 | Component | Build and acceptance | GitHub Release assets |
 | --- | --- | --- |

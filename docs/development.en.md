@@ -99,20 +99,20 @@ node tools/check-docs.cjs
 python tools/security/scan_secrets.py --download
 ```
 
-For startup changes, also run `python tools/dev/verify_local_start.py --desktop`, which needs network access and a graphical desktop. For documentation changes, verify links and commands; do not imply unperformed platform acceptance. Stage new files before refreshing the source manifest as described in [Contributing](contributing.en.md).
+For startup changes, also run `python tools/dev/verify_local_start.py --desktop`, which needs network access and a graphical desktop. For documentation changes, verify links and commands; do not imply unperformed platform acceptance. Stage new files before refreshing the source manifest as described in [Contributing](../CONTRIBUTING.md).
 
 ## Comment conventions
 
 Prefer English for new public interfaces, security boundaries, and compatibility explanations. Describe current behavior and reasons; rewrite or remove internal discussions, personal anecdotes, temporary machine details, and obsolete implementation notes. Preserve protocol identifiers, storage keys, test semantics, and original third-party notices. UI translations, skill instructions, and prompts need separate validation.
 
-See [GitHub configuration](../.github/README.md) for automated checks and platform limits. Secret scanning covers current source and does not replace private-history review.
+See [GitHub configuration](../.github/CI.md) for automated checks and platform limits. Secret scanning covers current source and does not replace private-history review.
 
 ## Documentation and translations
 
 Use the relative language links at the top of each page on GitHub. The same paths work in downloaded source; no documentation server is needed.
 
-- The default Chinese overview is root `README.md`; English is `docs/README.en.md`. Documentation indexes are `docs/README.md` and `docs/index.en.md`.
-- Paired guides use `name.md` / `name.en.md`. English versions of root contribution and security policies live in `docs/contributing.en.md` and `docs/security.en.md`; English self-hosting lives in `ops/self-host/README.en.md`.
+- The default overview is root `README.md` in English; Chinese is root `README.zh-CN.md`. Documentation indexes are `docs/README.md` (Chinese) and `docs/index.en.md` (English).
+- Root `CONTRIBUTING.md` and `SECURITY.md` are in English; their Chinese versions live in `docs/contributing.zh-CN.md` and `docs/security.zh-CN.md`. Other paired guides use `name.md` (Chinese) / `name.en.md` (English); English self-hosting lives in `ops/self-host/README.en.md`.
 - Keep commands, prerequisites, data handling, and permission guidance synchronized in both languages. Preserve reciprocal language links and a navigation link at the top.
 - Use an explicit suffix for another language, such as `.ja.md`, and register completed pages in the overview and index. Label untranslated references with their actual language; do not add empty translations or label Chinese destinations as English.
 - Use relative documentation links without hardcoded GitHub repository addresses or private development branch names so forks and source archives remain usable.

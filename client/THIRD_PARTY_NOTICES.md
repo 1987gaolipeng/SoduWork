@@ -1,6 +1,6 @@
 # Third-party notices
 
-The first release distributes source only. The installer sections below describe retained build recipes and are not a claim that installer binaries are included or cleared for publication.
+The sections below list third-party components bundled in the desktop installers and their licenses. Components used only by source builds are recorded in `third-party/manifest.json`.
 
 ## 7-Zip (Windows installer)
 
@@ -66,7 +66,7 @@ The Bootloader Exception permits the bootloader to be combined with and distribu
 as part of an executable without placing the combined program under the GPL. The
 Runner's own code remains under the SoduWork MIT license, and its Python
 dependencies keep their own licenses. The complete PyInstaller license, including
-the exception, is included as `COPYING.txt` in the Runner's `third-party/pyinstaller`
+the exception, is included as `COPYING.txt` in the Runner's `third-party/python/pyinstaller-<version>`
 directory.
 
 ## Pi runtime and bundled dependencies

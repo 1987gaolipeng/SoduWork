@@ -15,8 +15,7 @@
 支持 Pi · OpenCode · DeepSeek Harness · Qwen Code · Kimi Code · Codex Harness · Codex · Claude Code · Google Harness²
 
 ```bash
-git clone https://github.com/mdiri-ai/SoduWork && cd SoduWork
-python start.py --desktop
+git clone https://github.com/mdiri-ai/SoduWork && cd SoduWork && python start.py --desktop
 ```
 
 [官网](https://soduwork.ai) | [在线体验](https://soduwork.ai) | [文档](https://dev.soduwork.ai/zh-CN/) | [Releases](https://github.com/mdiri-ai/SoduWork/releases) | [Discord](https://discord.gg/AXYNrAYHy)
@@ -280,12 +279,12 @@ flowchart LR
 | 方法换个环境就用不了 | **方法与环境分开**：插件只定义做法，Harness、模型、执行机和密钥在绑定时决定；插件版本不可变、可迁移 |
 | 做过的事无从追溯 | **交互与执行分开**：客户端负责对话和审批，运行时和执行机负责干活，本机或远程都可以，每次运行都进入审计记录 |
 
-<img src="docs/assets/product-architecture.zh-CN.png" alt="SoduWork 产品架构" width="760" />
+<p align="center"><img src="docs/assets/product-architecture.zh-CN.png" alt="SoduWork 产品架构" width="760" /></p>
 
 <details>
 <summary>执行机（Runner）内部</summary>
 
-<img src="docs/assets/runner-architecture.zh-CN.png" alt="SoduWork Runner 架构" width="900" />
+<p align="center"><img src="docs/assets/runner-architecture.zh-CN.png" alt="SoduWork Runner 架构" width="900" /></p>
 
 执行机通过 WebSocket 连接 Hub。每次派发都带编号，同一任务不会重复接收；每个 Harness 在独立子进程里运行；事件先在执行机落盘再发送，断线后自动补发。
 
@@ -363,7 +362,7 @@ SoduWork 不替代 Agent Harness，而是把它们接进团队工作台，补上
 
 欢迎提交 Issue、想法、插件、文档和代码。
 
-1. 阅读[贡献指南](CONTRIBUTING.md)，了解本地环境和提交前需要运行的检查。
+1. 阅读[贡献指南](docs/contributing.zh-CN.md)，了解本地环境和提交前需要运行的检查。
 2. Fork 仓库，新建分支，提交改动。
 3. 发起 Pull Request，说明改了什么、怎么测试的。
 
@@ -388,7 +387,7 @@ SoduWork 不替代 Agent Harness，而是把它们接进团队工作台，补上
 
 ## 安全
 
-发现安全问题，请不要在公开 Issue 中披露，按 [SECURITY.md](SECURITY.md) 私下报告。
+发现安全问题，请不要在公开 Issue 中披露，按[安全问题报告](docs/security.zh-CN.md)私下报告。
 
 ## 许可与致谢
 

@@ -11,4 +11,4 @@ List checks actually run, platform, and remaining gaps.
 - [ ] Related documentation updated; workflow and release procedures are in English.
 - [ ] No credentials, private addresses, business data, or runtime output included.
 
-See the [contribution guide](../docs/contributing.en.md).
+See the [contribution guide](../CONTRIBUTING.md).

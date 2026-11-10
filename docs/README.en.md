@@ -1,10 +1,10 @@
 # SoduWork
 
-[简体中文](../README.md) · **English**
+[简体中文](../README.zh-CN.md) · **English**
 
-An AI workspace for teams. Use the desktop client for conversations, collaboration, and task execution; manage members, models, and execution environments in a browser. Project-owned code is licensed by MDiRi under the [MIT license](../LICENSE). The first release distributes source code.
+An AI workspace for teams. Use the desktop client for conversations, collaboration, and task execution; manage members, models, and execution environments in a browser. Project-owned code is licensed by MDiRi under the [MIT license](../LICENSE).
 
-[Quick start](getting-started.en.md) · [Developer guide](development.en.md) · [All documentation](index.en.md) · [Contributing](contributing.en.md)
+[Quick start](getting-started.en.md) · [Developer guide](development.en.md) · [All documentation](index.en.md) · [Contributing](../CONTRIBUTING.md)
 
 ## First time? Follow these four steps
 
@@ -63,7 +63,7 @@ Admin UI: hub-frontend/ ─────┘                              │
 | `tools/` | Local startup, quality checks, and source export | [Development and verification](development.en.md) |
 | `third-party/` | Dependency licenses and provenance | [Third-party notices](third-party-notices.en.md) |
 | `docs/` | Usage, development, and distribution guides | [Documentation index](index.en.md) |
-| `.github/` | Automated checks, dependency updates, and bilingual collaboration templates | [GitHub configuration](../.github/README.md) |
+| `.github/` | Automated checks, dependency updates, and bilingual collaboration templates | [GitHub configuration](../.github/CI.md) |
 
 Each application owns its dependencies. There is no root-level `npm install` step. The [developer guide](development.en.md) explains where to change the UI, APIs, desktop, or extensions and how to verify each change.
 
@@ -83,7 +83,7 @@ The source tree and final installers may contain different components. Public in
 
 The first release includes desktop, Hub, the management UI, Runner source, project-owned skills, and generic deployment tools. Mobile applications, third-party skill bundles, internal design records, and company-specific operations are excluded. Generic model APIs and executor compatibility, including Codex, use services and permissions supplied by the user. See [release scope](release-scope.en.md).
 
-Follow the [contribution guide](contributing.en.md) before submitting changes. Report security issues through a [private channel](security.en.md). Source integrity checks do not certify installers, containers, or every operating system.
+Follow the [contribution guide](../CONTRIBUTING.md) before submitting changes. Report security issues through a [private channel](../SECURITY.md). Source integrity checks do not certify installers, containers, or every operating system.
 
 Maintainers preparing a public repository should follow the [source distribution guide](open-source.en.md) to export the committed, manifest-checked tree. Public repositories must not inherit private development history or old tags.
 

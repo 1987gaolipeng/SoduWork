@@ -99,20 +99,20 @@ node tools/check-docs.cjs
 python tools/security/scan_secrets.py --download
 ```
 
-涉及启动过程时，再运行 `python tools/dev/verify_local_start.py --desktop`，需要网络和图形桌面。纯文档修改核对链接和命令即可，不必声称完成未实际运行的平台验收。新增文件先加入 Git，再按[贡献指南](../CONTRIBUTING.md)更新源码清单。
+涉及启动过程时，再运行 `python tools/dev/verify_local_start.py --desktop`，需要网络和图形桌面。纯文档修改核对链接和命令即可，不必声称完成未实际运行的平台验收。新增文件先加入 Git，再按[贡献指南](contributing.zh-CN.md)更新源码清单。
 
 ## 注释约定
 
 新增公开接口、安全边界和兼容性说明优先使用英文，描述当前行为及原因。内部讨论、个人经历、临时机器环境和失效实现说明应改写或移除。保留协议标识、存储键、测试语义及第三方许可原文；界面翻译、技能指令和 Prompt 单独验证，不与注释整理混改。
 
-GitHub 自动验证范围和平台限制见[配置说明](../.github/README.md)。秘密扫描只覆盖当前源码，不能代替私有历史审查。
+GitHub 自动验证范围和平台限制见[配置说明](../.github/CI.md)。秘密扫描只覆盖当前源码，不能代替私有历史审查。
 
 ## 文档与翻译
 
 GitHub 上通过页面顶部的相对链接切换语言，下载后的源码也可沿同样路径阅读，无需文档服务。
 
-- 默认中文首页是根目录 `README.md`，英文首页是 `docs/README.en.md`；文档索引分别为 `docs/README.md`、`docs/index.en.md`。
-- 配对指南沿用 `name.md` / `name.en.md`。根目录贡献、安全文档的英文版放在 `docs/contributing.en.md` 和 `docs/security.en.md`；自托管英文版放在 `ops/self-host/README.en.md`。
+- 默认首页是根目录英文 `README.md`，中文首页是根目录 `README.zh-CN.md`；文档索引分别为 `docs/README.md`（中文）、`docs/index.en.md`（英文）。
+- 根目录 `CONTRIBUTING.md`、`SECURITY.md` 为英文，中文版放在 `docs/contributing.zh-CN.md` 和 `docs/security.zh-CN.md`。其他配对指南沿用 `name.md`（中文）/ `name.en.md`（英文）；自托管英文版放在 `ops/self-host/README.en.md`。
 - 修改启动命令、前置条件、数据或权限说明时同步两种语言，顶部保留互相切换和返回导航的链接。
 - 增加语言时使用明确后缀（例如 `.ja.md`），在首页与文档索引登记已经完成的页面；未翻译内容标明原语言，不提供空页面或把中文链接标作英文。
 - 文档使用相对链接，不写死某个 GitHub 仓库地址或私有开发分支，便于 Fork 和源码包复用。

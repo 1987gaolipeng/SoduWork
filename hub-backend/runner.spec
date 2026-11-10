@@ -46,6 +46,16 @@ for override in notice_manifest.get("pythonNoticeOverrides", []):
     if hashlib.sha256(content.encode("utf-8")).hexdigest() != notice["sha256"]:
         raise RuntimeError("Original Python notice changed: " + override["name"])
     license_data.append((str(original), "third-party/python/" + override["name"] + "-" + override["version"]))
+# PyInstaller is a build-time dependency, but its bootloader is embedded in the
+# Runner executable. Keep its license, including the Bootloader Exception.
+from importlib.metadata import distribution
+pyinstaller_dist = distribution("pyinstaller")
+pyinstaller_notices = [Path(pyinstaller_dist.locate_file(item)) for item in pyinstaller_dist.files or []
+                       if item.name.upper().startswith(("COPYING", "LICENSE"))]
+if not pyinstaller_notices:
+    raise RuntimeError("PyInstaller license file is missing from the build environment")
+for notice in pyinstaller_notices:
+    license_data.append((str(notice), "third-party/python/pyinstaller-" + pyinstaller_dist.version))
 license_data = sorted(set(license_data))
 
 hidden = [

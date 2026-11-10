@@ -7,7 +7,7 @@ const { sourceFiles } = require('./source-files.cjs');
 const root = path.resolve(__dirname, '..');
 const SOURCE_ROOTS = new Set(['client', 'hub-backend', 'hub-frontend', 'skills', 'docs', 'ops', 'tools', 'third-party']);
 const GITHUB_FILES = new Set([
-  '.github/README.md', '.github/dependabot.yml', '.github/PULL_REQUEST_TEMPLATE.md',
+  '.github/CI.md', '.github/dependabot.yml', '.github/PULL_REQUEST_TEMPLATE.md',
   '.github/ISSUE_TEMPLATE/config.yml', '.github/ISSUE_TEMPLATE/bug_report.yml',
   '.github/ISSUE_TEMPLATE/feature_request.yml', '.github/workflows/ci.yml', '.github/workflows/security.yml',
   '.github/workflows/release.yml', '.github/RELEASE.md',

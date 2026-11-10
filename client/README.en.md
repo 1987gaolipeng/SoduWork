@@ -40,7 +40,7 @@ Run `npm test` for unit/contract tests and `npm run check:layout` for source bou
 
 ## Packaging
 
-The first public release is source-only. Before distributing native installers, complete the outstanding [distribution materials](../third-party/README.en.md) and platform acceptance.
+Before distributing native installers, complete the outstanding [distribution materials](../third-party/README.en.md) and platform acceptance.
 
 On Windows, install `../hub-backend/requirements-runner-build.txt` in the backend build environment, then run `npm run build` or `npm run build-portable`. Packaging rebuilds the single-file Runner from `runner_main.py` and `runner.spec`. Do not reuse an old EXE as build input.
 

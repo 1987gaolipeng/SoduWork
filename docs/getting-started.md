@@ -1,6 +1,6 @@
 # 从零运行 SoduWork
 
-**简体中文** · [English](getting-started.en.md) · [返回 README](../README.md) · [开发指南](development.md)
+**简体中文** · [English](getting-started.en.md) · [返回 README](../README.zh-CN.md) · [开发指南](development.md)
 
 第一次使用只需要走完「装环境 → 解压 → 启动 → 登录」。这个入口在当前电脑运行 Hub（后台服务）、浏览器管理端和桌面客户端，使用独立 SQLite 数据库。没有服务器也可以体验。
 

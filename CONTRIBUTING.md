@@ -1,52 +1,52 @@
-# 参与 SoduWork 开发
+# Contributing to SoduWork
 
-**简体中文** · [English](docs/contributing.en.md) · [文档导航](docs/README.md)
+[简体中文](docs/contributing.zh-CN.md) · **English** · [Documentation](docs/index.en.md)
 
-感谢你参与 SoduWork。问题反馈、文档、翻译、测试和代码都欢迎。参与本项目即表示同意遵守[行为准则](CODE_OF_CONDUCT.md)。
+Thanks for helping with SoduWork. Bug reports, docs, translations, tests and code are all welcome. By taking part, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-## 开始之前
+## Before you start
 
-- **报告问题、提出建议**：用 [Issue 模板](https://github.com/mdiri-ai/SoduWork/issues/new/choose)提交。使用问题和想法请发到 [Discussions](https://github.com/mdiri-ai/SoduWork/discussions)。
-- **安全问题**：不要发公开 Issue，按 [SECURITY.md](SECURITY.md) 私下报告。
-- **较大的改动**（新功能、数据结构、公开协议）：先开 Issue 说明用户问题和方案，确认方向后再提交 PR。
-- **本地环境**：按[启动指南](docs/getting-started.md)准备独立的本地实例，目录结构和各模块入口见[开发指南](docs/development.md)。公开源码范围以 [tools/distribution/PUBLIC-SOURCE.json](tools/distribution/PUBLIC-SOURCE.json) 和[首版范围](docs/release-scope.md)为准。
+- **Bugs and feature requests**: use the [issue templates](https://github.com/mdiri-ai/SoduWork/issues/new/choose). Questions and ideas go to [Discussions](https://github.com/mdiri-ai/SoduWork/discussions).
+- **Security issues**: don't open a public issue. Report privately as described in the [security policy](SECURITY.md).
+- **Larger changes** (new features, data schemas, public protocols): open an issue first to describe the user problem and your approach, and agree on the direction before sending a pull request.
+- **Local setup**: follow the [startup guide](docs/getting-started.en.md) to run an isolated local instance. The [developer guide](docs/development.en.md) explains the layout and where each module starts. The public source boundary is defined in [PUBLIC-SOURCE.json](tools/distribution/PUBLIC-SOURCE.json) and the [release scope](docs/release-scope.en.md).
 
-## 提交改动
+## Making a change
 
-1. 从最新主线建立短期开发分支，保留已有未提交修改。验证只使用隔离账号、临时端口和合成数据。
-2. 在 PR 里说明用户问题、复现方式和预期行为。数据结构变更使用 Alembic 迁移。设备身份、用户数据和公开协议不得直接删除。
-3. 运行与变更相关的测试：
-   - 客户端：在 `client/` 运行 `npm test`；
-   - 管理端：在 `hub-frontend/` 运行 `npm run build` 和 `node --test tests/*.test.mjs`；
-   - 启动器：在根目录运行 `python -m unittest tools.dev.test_start_local`；
-   - 后端：在 `hub-backend/` 用 `python quality_gate.py --help` 选择检查。
-4. 在根目录运行 `node tools/check-public-source.cjs` 和 `node tools/check-third-party.cjs`。新增公开文件时，先加入 Git，再用 `node tools/check-source-manifest.cjs --write-manifest` 更新清单、用 `node tools/check-source-manifest.cjs` 校验，并把更新后的清单一起提交。
-5. 提交中不要包含运行日志、截图、数据库、账号、令牌、私有地址、安装包或依赖缓存。
-6. 在 PR 里写明实际验证过的平台和未覆盖的范围。测试夹具通过不能代替真实模型或生产环境验证。发行物从当前源码构建，不复制旧版 Runner 或已安装应用中的资源。
+1. Create a short-lived branch from the latest mainline and preserve existing uncommitted changes. Validate with isolated accounts, temporary ports, and synthetic data.
+2. In the pull request, explain the user problem, reproduction, and expected behavior. Use Alembic migrations for schema changes. Do not directly delete device records, user data, or public protocols.
+3. Run the checks relevant to your change:
+   - Client: `npm test` in `client/`;
+   - Admin console: `npm run build` and `node --test tests/*.test.mjs` in `hub-frontend/`;
+   - Launcher: `python -m unittest tools.dev.test_start_local` at the root;
+   - Backend: choose checks with `python quality_gate.py --help` in `hub-backend/`.
+4. Run `node tools/check-public-source.cjs` and `node tools/check-third-party.cjs` from the root. When you add public files, stage them first, refresh the manifest with `node tools/check-source-manifest.cjs --write-manifest`, verify with `node tools/check-source-manifest.cjs`, and commit the updated manifest with your change.
+5. Exclude logs, screenshots, databases, accounts, tokens, private addresses, installers, and dependency caches.
+6. In the pull request, state the platforms you actually verified and any remaining gaps. Passing fixtures do not prove real-model or production behavior. Build release resources from current source rather than reusing old Runner binaries or an installed application's resources.
 
-提交前另外运行 `node tools/check-docs.cjs` 和 `python tools/security/scan_secrets.py --download`。扫描器固定版本和下载摘要，包含测试目录；已审查的误报按精确行摘要登记，不接受整目录豁免。联网下载或校验失败时检查失败，详见[扫描说明](tools/security/README.md)。
+Also run `node tools/check-docs.cjs` and `python tools/security/scan_secrets.py --download` before submitting. The scanner pins its version and download checksums, includes tests, and approves reviewed false positives only by exact source-line hashes. Download or verification failure fails the check. See [secret scanning](tools/security/README.md).
 
-## 文档与翻译
+## Docs and translations
 
-修改文档时，按[翻译约定](docs/development.md#文档与翻译)同步中英文配对版本，并保留页面顶部的语言切换链接。
+For documentation changes, keep paired Chinese and English pages in sync according to the [translation conventions](docs/development.en.md#documentation-and-translations), and keep the language links at the top of each page.
 
-## 提交签名（DCO）
+## Sign your commits (DCO)
 
-本项目使用 [Developer Certificate of Origin 1.1](DCO.txt)（DCO）。在提交上签名，表示你按 DCO 声明自己有权按本项目的许可提交这段修改。
+This project uses the [Developer Certificate of Origin 1.1](DCO.txt) (DCO). By signing off a commit, you certify that you have the right to submit the change under the project's license.
 
 ```bash
 git commit -s -m "Fix upload retry after a timeout"
 ```
 
-提交信息末尾会多一行 `Signed-off-by: 你的名字 <you@example.com>`。请使用真实姓名和能联系到你的邮箱。每个 PR 都会检查签名，漏签时可以补签：
+This adds a `Signed-off-by: Your Name <you@example.com>` line to the commit message. Use your real name and an email address where you can be reached. Every pull request checks for sign-offs. To add a missing one:
 
 ```bash
-git commit --amend -s          # 最近一次提交
-git rebase --signoff main      # 当前分支上的所有提交
+git commit --amend -s          # last commit
+git rebase --signoff main      # all commits on your branch
 ```
 
-贡献政策今后可能调整，调整只适用于公布之后的贡献。
+The contribution policy may change; any change applies only to contributions made after it is announced.
 
-## 许可
+## License
 
-MDiRi 的项目源码适用 [MIT 许可](LICENSE)，你提交的贡献按同一许可发布。保留的第三方代码、依赖和素材适用各自的许可，并保留原始声明，见 [NOTICE.md](NOTICE.md)。引入技能、模型、文档或素材之前，先确认来源和分发条件；项目许可证不能覆盖第三方内容。
+MDiRi project source uses the [MIT License](LICENSE), and your contributions are released under the same license. Retained third-party code, dependencies and assets keep their own licenses and original notices; see [third-party notices](docs/third-party-notices.en.md). Verify provenance and distribution rights before adding a skill, model, document, or asset; the project license does not override third-party terms.

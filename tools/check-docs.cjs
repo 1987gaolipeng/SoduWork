@@ -4,8 +4,8 @@ const path = require('node:path');
 const { sourceFiles } = require('./source-files.cjs');
 const ROOT = path.resolve(__dirname, '..');
 const PAIRS = [
-  ['README.md', 'docs/README.en.md'], ['docs/README.md', 'docs/index.en.md'],
-  ['CONTRIBUTING.md', 'docs/contributing.en.md'], ['SECURITY.md', 'docs/security.en.md'],
+  ['README.md', 'README.zh-CN.md'], ['docs/README.md', 'docs/index.en.md'],
+  ['CONTRIBUTING.md', 'docs/contributing.zh-CN.md'], ['SECURITY.md', 'docs/security.zh-CN.md'],
   ['NOTICE.md', 'docs/third-party-notices.en.md'],
   ...['getting-started', 'development', 'release-scope', 'open-source', 'plugin-authoring']
     .map(name => [`docs/${name}.md`, `docs/${name}.en.md`]),

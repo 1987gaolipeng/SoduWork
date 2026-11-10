@@ -26,9 +26,9 @@ Stop the service and back up the complete data directory before updates. Restore
 
 ## Source and installers
 
-The first release distributes source only. Desktop installers, native runtimes, third-party models, imported plugins, and container images each need their own provenance, licensing, and runtime validation. Passing the source manifest check does not authorize distribution of those artifacts.
+Desktop installers, native runtimes, third-party models, imported plugins, and container images each need their own provenance, licensing, and runtime validation. Passing the source manifest check does not authorize distribution of those artifacts.
 
-See the [GitHub workflow guide](../.github/RELEASE.md) for source, Client and Hub pipelines. Binary paths remain blocked by distribution scope, third-party evidence and upgrade baselines. Workflow source does not establish publication clearance or a successful hosted run.
+See the [GitHub workflow guide](../.github/RELEASE.md) for source, Client and Hub pipelines. Client and Hub paths run only after the distribution scope, third-party evidence and upgrade baselines pass preflight. Workflow source does not establish publication clearance or a successful hosted run.
 
 Initialize a public repository from a verified source ZIP, or squash the reviewed source into the public branch. Private development history, old tags, and previous artifacts are outside scope; do not turn the original development repository public. `tools/export_source.py` exports only the committed tree, checking every file against the manifest. It omits Git history, untracked files, and dependency caches.
 

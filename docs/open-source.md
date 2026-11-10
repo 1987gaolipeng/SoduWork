@@ -53,6 +53,6 @@ python tools/export_source.py --output ../soduwork-source-v1.zip
 
 把已验证的 ZIP 解压到新的空目录，在该目录初始化新的 Git 仓库并审查文件，再连接自己的 GitHub 远程地址。不要直接公开原开发仓库，不要带入私有分支、旧标签或开发历史。
 
-根目录 `README.md` 是中文入口，顶部可切换到 `docs/README.en.md`。导航采用相对链接，Fork 或更换仓库名后无需改写地址。补充语言遵循[翻译约定](development.md#文档与翻译)。
+根目录 `README.md` 是英文入口，顶部可切换到中文 `README.zh-CN.md`。导航采用相对链接，Fork 或更换仓库名后无需改写地址。补充语言遵循[翻译约定](development.md#文档与翻译)。
 
-项目许可见 [LICENSE](../LICENSE)，第三方原始许可证与署名见 [NOTICE.md](../NOTICE.md) 和 `third-party/`。首版发布源码；安装包、容器镜像和其他二进制依赖需要分别完成许可与运行验证。
+项目许可见 [LICENSE](../LICENSE)，第三方原始许可证与署名见 [NOTICE.md](../NOTICE.md) 和 `third-party/`。安装包、容器镜像和其他二进制依赖需要分别完成许可与运行验证。
