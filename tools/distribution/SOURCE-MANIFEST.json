@@ -51,8 +51,8 @@
     },
     {
       "path": ".github/workflows/ci.yml",
-      "bytes": 6373,
-      "sha256": "8d1c3bf450242e7bd73dfbe56a237869775573eaad8523c79836f702a7496f3d"
+      "bytes": 6699,
+      "sha256": "d94d335236a5b15b15aede471eadc583857b0af37ca183f6cbe76444ebfda80e"
     },
     {
       "path": ".github/workflows/release.yml",
@@ -2091,8 +2091,8 @@
     },
     {
       "path": "client/components/settings/settings.js",
-      "bytes": 24564,
-      "sha256": "bf8fd1886e697e351c970cbb0c9eece2248fc0ea79c0c0e5d600e7a89904c1c3"
+      "bytes": 25033,
+      "sha256": "64c786bb73a988b8e6c9af7d04049c3ca251557598bc77f3d779da4282b1b6a3"
     },
     {
       "path": "client/components/settings/shortcut-settings.css",
@@ -18581,8 +18581,8 @@
     },
     {
       "path": "hub-frontend/src/App.jsx",
-      "bytes": 17387,
-      "sha256": "79fc810c68f0e83098953d64cc64ba1bb07906cfc021ac4d5693d14c6c0e3033"
+      "bytes": 17403,
+      "sha256": "949deffcbbb1891597dc54b17898fea4ec70e7d7b1ebb1275a0ca203b81a167a"
     },
     {
       "path": "hub-frontend/src/FilterControls.jsx",

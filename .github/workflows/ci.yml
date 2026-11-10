@@ -37,9 +37,19 @@ jobs:
         with:
           node-version: '22'
           package-manager-cache: false
-      - name: Check prerequisites and launcher regressions
+      - name: Install Linux display dependencies
+        if: runner.os == 'Linux'
         run: |
-          python start.py --check --desktop
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth
+      - name: Check prerequisites and launcher regressions
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a python start.py --check --desktop
+          else
+            python start.py --check --desktop
+          fi
           python -m unittest tools.dev.test_start_local tools.dev.test_deploy tools.dev.test_source_export tools.security.test_scan_secrets
       - name: Check public source and documentation
         run: |
