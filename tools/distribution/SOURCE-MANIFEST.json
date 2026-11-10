@@ -15276,8 +15276,8 @@
     },
     {
       "path": "hub-backend/requirements.txt",
-      "bytes": 1919,
-      "sha256": "520e52427e605a45d63075767d09328d02b7774db27eb489c52087fc0c373d14"
+      "bytes": 2008,
+      "sha256": "584bd80f585dda090185e62dae1031d5d06735f912c099683c0ee2d986064f4f"
     },
     {
       "path": "hub-backend/route_test_support.py",
