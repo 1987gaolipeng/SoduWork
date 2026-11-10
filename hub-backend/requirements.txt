@@ -3,6 +3,8 @@
 fastapi>=0.136,<0.144
 uvicorn[standard]>=0.34,<0.35
 sqlalchemy>=2.0,<2.1
+# SQLAlchemy's asyncio bridge requires greenlet on every supported platform.
+greenlet>=3.1,<4
 alembic>=1.14,<2
 aiosqlite>=0.20
 asyncpg>=0.30
