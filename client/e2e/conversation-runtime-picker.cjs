@@ -57,10 +57,32 @@ if (typeof electron === 'string') {
       assert.equal(await js('state.adapterId'), 'pi');
       assert.equal(await js('document.querySelector("#nchatInput").value'), 'Keep my draft');
     }
-    await js('state.taskRuntime="finished-requirement";state.busy=false;controls.render();void 0');
-    assert.equal(await js('document.querySelector("#nchatRuntime").disabled'), false);
-    await click('#nchatRuntime'); await until('document.querySelector("[data-runtime=qwen]")'); await click('[data-runtime=qwen]');
-    await until('state.adapterId==="qwen"');
+    // Completed task associations must remain available without replacing the selected runtime badge.
+    for (const status of ['done', 'cancel']) {
+      await js('window.boundTask={id:"finished-requirement",status:' + JSON.stringify(status) +
+        ',executionContext:{agent:{id:"runner:device:pi"}},workRouting:{conversationTurn:{conversationId:"same-conversation",executor:"dispatch"}}};' +
+        'window.taskExecutions=[{taskId:"finished-requirement",executor:"dispatch",status:"completed",run:{engine:"pi"}}];state.busy=false;controls.render();void 0');
+      for (const agent of ['harness2', 'qwen', 'pi']) {
+        await click('#nchatRuntime'); await until('document.querySelector("[data-runtime=' + agent + ']")');
+        await click('[data-runtime=' + agent + ']'); await until('state.adapterId===' + JSON.stringify(agent));
+        const badge = await js('({id:document.querySelector("#nchatRuntimeIcon [data-agent-brand]").dataset.agentBrand,' +
+          'src:document.querySelector("#nchatRuntimeIcon img").getAttribute("src"),name:document.querySelector("#nchatRuntimeName").textContent})');
+        assert.equal(badge.id, agent); assert.equal(badge.src, await js('AgentBrand.ICONS[' + JSON.stringify(agent) + ']'));
+        assert.equal(badge.name, await js('AgentBrand.LABELS[' + JSON.stringify(agent) + ']'));
+        assert.equal(await js('boundTask.id'), 'finished-requirement');
+        assert.equal(await js('taskExecutions[0].run.engine'), 'pi');
+        assert.equal(await js('document.querySelector("#nchatInput").value'), 'Keep my draft');
+        await js('state.busy=true;controls.render();void 0');
+        assert.equal(await js('document.querySelector("#nchatRuntimeIcon [data-agent-brand]").dataset.agentBrand'), agent);
+        await js('state.busy=false;controls.render();void 0');
+        if (status === 'done' && agent === 'harness2') {
+          const output = path.resolve(__dirname, '../../outputs/runtime-badge-20261110');
+          fs.mkdirSync(output, { recursive: true });
+          fs.writeFileSync(path.join(output, 'completed-task-harness2.png'), (await win.webContents.capturePage()).toPNG());
+        }
+      }
+    }
+    await js('delete window.boundTask;delete window.taskExecutions;void 0');
     await js('state.adapterId="pi";state.displayName="Pi";delete state.taskRuntime;controls.render();void 0');
     assert.equal(await js('document.querySelector("#nchatRuntimeName").textContent'), 'Pi');
     assert.equal(await js('document.querySelector("#nchatRuntime").disabled'), false);

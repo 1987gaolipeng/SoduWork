@@ -61,6 +61,32 @@ for (const { id } of catalog.runtimes()) {
   });
 }
 
+test('finished requirements cannot relabel the selected conversation runtime with persisted dispatch metadata', () => {
+  for (const { id } of catalog.runtimes()) {
+    for (const status of ['done', 'cancel']) {
+      const task = { id: 'task', status, executionContext: { agent: { id: 'runner:device:' + id } },
+        workRouting: { conversationTurn: { conversationId: 'chat', executor: 'dispatch', state: 'completed' } } };
+      const executions = [{ taskId: 'task', executor: 'dispatch', status: 'completed', run: { engine: id } }];
+      const before = JSON.stringify({ task, executions });
+      assert.equal(context.executionRuntime(task, 'chat', executions), '', id + ': ' + status);
+      assert.equal(JSON.stringify({ task, executions }), before, 'display selection must preserve task receipts');
+    }
+  }
+});
+
+test('unfinished review and rework retain the assigned executor after a completed dispatch turn', () => {
+  for (const status of ['todo', 'doing', undefined]) {
+    const task = { id: 'task', status, requirementStage: 'reviewing',
+      executionContext: { agent: { id: 'runner:device:harness2' } }, workRouting: {
+        conversationTurn: { conversationId: 'chat', executor: 'dispatch', state: 'completed' },
+        reworkPending: { feedback: 'Revise the original deliverable' },
+      } };
+    assert.equal(context.executionRuntime(task, 'chat', []), 'harness2');
+    assert.equal(context.executionRuntime(task, 'chat', [{ taskId: 'task', executor: 'dispatch',
+      status: 'completed', run: { engine: 'qwen' } }]), 'qwen');
+  }
+});
+
 test('custom runtime identifiers stay explicit while malformed routing metadata cannot become a runtime choice', () => {
   const task = { id: 'task', workRouting: { conversationTurn: { conversationId: 'chat', executor: 'dispatch' } } };
   for (const id of ['custom-reviewer', 'local:custom-reviewer', 'runner:device:custom-reviewer'])

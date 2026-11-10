@@ -64,6 +64,9 @@
     return result.sort((a,b) => Number(b.current)-Number(a.current) || Number(b.at || 0)-Number(a.at || 0));
   }
   function executionRuntime(task, sessionId, executions) {
+    // Finished requirements use the selected conversation runtime for ordinary
+    // follow-ups, matching task-input's TASK_FINISHED fallback in the main process.
+    if (task?.status === 'done' || task?.status === 'cancel') return '';
     const receipt = task?.workRouting?.conversationTurn;
     // Only the requirement bound to this conversation can describe its next
     // controlled turn. Never relabel the local archive or another task's host.
