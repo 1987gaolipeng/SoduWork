@@ -612,7 +612,7 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
     finally { if (historyPromise === load) historyPromise = null; }
   }
 
-  async function readHistory({ force = false, notify = false, hintedIds = [] } = {}, captured, generation) {
+  async function readHistory({ force = false, notify = false, hintedIds = [], source } = {}, captured, generation) {
     const currentIdentity = () => typeof localIdentityOf === 'function'
       ? localIdentityOf(app) : typeof identityOf === 'function' ? identityOf(app) : null;
     const identity = await currentIdentity();
@@ -695,7 +695,8 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
       const changedIds = [...directoryChanges];
       await Promise.all(changedIds.map(async id => {
         const item = accountRows.get(id);
-        if (item) projections.set(id, { item, presence: await projectedRow(item, identity) });
+        if (item) projections.set(id, { item, presence: source === 'account'
+          ? historyRow(item, identity) : await projectedRow(item, identity) });
       }));
       for (const id of changedIds) {
         if (closed || generation !== historyGeneration || captured !== scope(await currentIdentity())) return { ok: false, chats: [] };
@@ -705,7 +706,7 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
         await emitChanged(id, item, identity, cached?.item === item ? cached.presence : undefined);
       }
       scheduleReconcile();
-      return { ok: true, projections, partial: historyHasMore, cursor: historyCursor };
+      return { ok: true, projections, projectionSource: source, partial: historyHasMore, cursor: historyCursor };
     })().catch(() => failedResult());
   }
 
@@ -755,17 +756,19 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
     });
   }
 
-  async function history({ archived = false, ...options } = {}) {
+  async function history({ archived = false, source, ...options } = {}) {
     const identity = await (localIdentityOf || identityOf)?.(app);
     const captured = selectDirectory(identity), generation = historyGeneration;
     if (!captured || closed) return { ok: false, chats: [], lifecycle: [] };
-    const { projections, ...result } = await loadHistory(options);
+    const { projections, projectionSource, ...result } = await loadHistory({ ...options, source });
     const current = () => (localIdentityOf || identityOf)?.(app);
     if (closed || generation !== historyGeneration || captured !== historyScope || captured !== directoryScope(await current()))
       return { ok: false, chats: [], lifecycle: [] };
     const values = collapseDirectoryRows([...accountRows.values()], identity);
     const rows = await Promise.all(values.map(item => {
-      const cached = projections?.get(String(item.id));
+      if (source === 'account') return historyRow(item, identity);
+      // Concurrent callers share the authorized directory load, not its view.
+      const cached = projectionSource === 'account' ? null : projections?.get(String(item.id));
       return cached?.item === item ? cached.presence : projectedRow(item, identity);
     }));
     if (closed || generation !== historyGeneration || captured !== directoryScope(await current())) return { ok: false, chats: [], lifecycle: [] };

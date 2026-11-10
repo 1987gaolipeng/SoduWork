@@ -40,8 +40,7 @@ if (typeof electron === 'string') {
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const previewUrl = 'http://127.0.0.1:' + server.address().port + '/preview';
-    ipcMain.handle('pi-session-history', () => ({ ok: true, chats: [] }));
-    ipcMain.handle('recent-workspace-get', () => ({ dir: '', name: '' }));
+    ipcMain.handle('pi-session-history', require('./fixtures/history-ipc.cjs').create(() => ({ ok: true, chats: [] })));
     ipcMain.handle('open-external', (_e, url) => { external.push(url); return { ok: true }; });
     const testApp = { getAppPath: () => tmp, getVersion: () => require('../package.json').version,
       isPackaged: false, getPath: key => key === 'userData' ? path.join(tmp, 'profile') : tmp };

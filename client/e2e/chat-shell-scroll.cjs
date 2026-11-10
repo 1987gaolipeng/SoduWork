@@ -160,7 +160,8 @@ app.whenReady().then(async () => {
       'pi-session-outputs': {ok: true, files: [], artifacts: []}, 'pi-session-runtimes': {ok: true, runtimes: []},
       'pi-session-snapshot': {ok: true, snapshot: state}, 'pi-session-release': {ok: true},
       'pi-session-read-output': {ok:true,text:'# Isolated result'}, 'recent-workspace-get':{ok:true,dir:''},
-      'access-preferences-get': {ok: true}})) ipcMain.handle(name, () => value);
+      'access-preferences-get': {ok: true}})) ipcMain.handle(name, name === 'pi-session-history'
+        ? require('./fixtures/history-ipc.cjs').create(() => value) : () => value);
     const styles = [...read('desk.html').matchAll(/<link\b[^>]*rel=["']stylesheet["'][^>]*href=["']([^"']+)/g)]
       .map(match => pathToFileURL(path.join(client, match[1])).href);
     const html = '<!doctype html><html lang="zh-CN" data-theme="azure" data-desk-panel="workspace" data-workspace-view="create" data-workspace-layout="conversation" data-window-menu><meta charset="utf-8"><base href="'+pathToFileURL(client+path.sep).href+'"><body></body></html>';

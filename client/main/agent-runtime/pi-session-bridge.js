@@ -627,7 +627,73 @@ function createPiSessionBridge(options) {
     catch (error) { return { ok: false, reason: _reason(error) }; }
   }
 
+  let localRefresh = null, localRefreshedAt = 0;
+  async function refreshLocalHistory(app) {
+    if (localRefresh) return localRefresh;
+    if (Date.now() - localRefreshedAt < 5000) return;
+    localRefresh = (async () => {
+      const results = await Promise.allSettled([
+        sessionModule.history(app, Number.MAX_SAFE_INTEGER),
+        sessionModule.archivedHistory?.(app, Number.MAX_SAFE_INTEGER) || { ok: true, chats: [] },
+        ...runnerAdapters.map(adapter => adapter.history(Number.MAX_SAFE_INTEGER, { metadataOnly: true })),
+      ]);
+      const records = new Map(runtimeSegments.list(app).map(record => [record.id, record]));
+      const failures = [], inventory = [];
+      for (let index = 0; index < results.length; index++) {
+        const result = results[index];
+        if (result.status !== 'fulfilled' || result.value?.ok === false) {
+          failures.push(result.status === 'rejected' ? _reason(result.reason) : result.value.reason);
+          continue;
+        }
+        inventory.push(...(result.value?.chats || []).map(row => index === 1 ? { ...row, archived: true } : row));
+      }
+      // Merge native segments together before indexing their canonical title,
+      // runtime and aliases. External account/cloud providers are never read.
+      await replicaHistory.projectRows(runtimeSegments.mergeHistory(app, inventory), false, records);
+      if (failures.length) throw Error(failures.filter(Boolean).join('; ') || 'Local history inventory is unavailable');
+      localRefreshedAt = Date.now();
+    })().finally(() => { localRefresh = null; });
+    return localRefresh;
+  }
+
+  async function localHistory(app, options) {
+    if (!replicaHistory?.page) return { ok: false, chats: [], reason: 'Local history index is unavailable' };
+    const initial = await replicaHistory.page(options);
+    if (options.refresh !== true) return initial;
+    let refreshError = '';
+    try { await refreshLocalHistory(app); }
+    catch (error) { refreshError = _reason(error); }
+    const result = await replicaHistory.page({ ...options, catalogRevision: initial.localCatalog.revision });
+    if (!result.localCatalog.items) result.localCatalog = initial.localCatalog;
+    // Discovery failures cannot hide previously verified local transcripts.
+    return { ...result, ...(refreshError ? { refreshError } : {}) };
+  }
+
+  async function accountHistory(options) {
+    const limit = options.limit ?? 50, after = options.after;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) throw Error('Invalid history page size');
+    if (after != null && (!Number.isFinite(after.at) || typeof after.id !== 'string' || !after.id.trim() ||
+        after.id.length > 512 || /[\x00-\x1f]/.test(after.id))) throw Error('Invalid history cursor');
+    const result = await externalRows({ source: 'account', archived: options.archived === true });
+    const lifecycle = require('../conversation/history-lifecycle-view.cjs').create(result.lifecycle || []);
+    const at = row => {
+      const value = (options.archived && row.archivedAt) || row.at || 0;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : Date.parse(value) || 0;
+    };
+    // Account originals keep their executable identity. Downloaded local copies
+    // are separate read-only records and cannot win a merge against them.
+    const rows = (result.chats || []).filter(row => row?.id).map(normalizeHistoryRow)
+      .map(lifecycle.project).filter(row => lifecycle.visible(row, options.archived === true))
+      .sort((left, right) => at(right) - at(left) || (left.id === right.id ? 0 : left.id < right.id ? 1 : -1))
+      .filter(row => !after || at(row) < after.at || at(row) === after.at && row.id < after.id);
+    const chats = rows.slice(0, limit), last = chats.at(-1);
+    return { ...result, chats, next: rows.length > limit ? { at: at(last), id: last.id } : null };
+  }
+
   async function history(app, limit = 50) {
+    if (limit?.source === 'local') return localHistory(app || opts.app, limit);
+    if (limit?.source === 'account') return accountHistory(limit);
     const rows = await Promise.all([
       externalRows(),
       Promise.resolve(sessionModule.history(app || opts.app, limit))

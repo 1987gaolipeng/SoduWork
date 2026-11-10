@@ -34,8 +34,21 @@
     return String(api?.taskStorageKey?.('tasks') || '');
   }
   let historyOwner = accountOwner(), hadOwner = Boolean(historyOwner), historyEpoch = 0;
-  let mutationGeneration = 0, lifecycleOverflow = false;
+  let mutationGeneration = 0, accountMutationGeneration = 0, lifecycleOverflow = false;
   const lifecycle = new Map(), MAX_LIFECYCLE_IDS = 1024;
+  let localRows = [], localLoad = null, localReady = false, localNext = null, localRestart = false;
+  let localCatalog = null, localRecords = new Map(), localAliases = new Set();
+  let localError = '', accountError = '', nativeRefreshStarted = false;
+  let localRefreshTimer = null, localRefreshPending = false, closed = false;
+  const historyApi = () => global.soduWorkAPI && (global.soduWorkAPI.conversationSession || global.soduWorkAPI.piSession);
+  const supportsLocalHistory = () => historyApi()?.localHistorySupported === true;
+  const isLocalId = id => localAliases.has(String(id || ''));
+  const canonicalLocalId = id => global.WorkspaceSidebarState?.localHistoryId(id) || '';
+  const localVisible = row => {
+    const record = localRecords.get(canonicalLocalId(row?.id));
+    return record && !record.archived && !record.deleted;
+  };
+  const historyText = (key, fallback) => global.SoduWorkI18n?.t(key, fallback) || fallback;
   function rowIds(row, fallback) {
     return [...new Set([fallback, row?.id, row?.localId,
       ...(Array.isArray(row?.historyAliasIds) ? row.historyAliasIds : []),
@@ -98,7 +111,14 @@
       const record = lifecycle.get(id);
       return !record || record.hidden !== hidden || record.revision !== retainedRevision;
     });
-    if (changed) { mutationGeneration++; ctx.historyLoad = null; }
+    if (changed) {
+      mutationGeneration++;
+      // A device tombstone cannot invalidate an unrelated account directory
+      // reply that is loading concurrently with the local catalog.
+      if (!supportsLocalHistory() || [...ids].some(id => !isLocalId(id))) {
+        accountMutationGeneration++; ctx.historyLoad = null;
+      }
+    }
     const record = { hidden, revision: retainedRevision, generation: mutationGeneration, ids: new Set(ids) };
     for (const id of ids) {
       lifecycle.get(id)?.ids.delete(id);
@@ -125,20 +145,44 @@
     mutationGeneration++;
     lifecycle.clear(); lifecycleOverflow = false;
     ctx.historyLoad = null;
-    ctx.chatItems = []; ctx.chatNames?.clear();
-    ctx.activeChatId = ''; ctx.chatsLoading = Boolean(next);
+    ctx.chatItems = supportsLocalHistory() ? ctx.chatItems.filter(row => isLocalId(row.id)) : [];
+    if (supportsLocalHistory()) {
+      for (const id of ctx.chatNames?.keys() || []) if (!isLocalId(id)) ctx.chatNames.delete(id);
+    } else ctx.chatNames?.clear();
+    if (!isLocalId(ctx.activeChatId)) ctx.activeChatId = '';
+    ctx.chatsLoading = !localReady && Boolean(next); accountError = '';
     closeChatMenu();
     try { ctx.sessionOff?.(); } finally { ctx.sessionOff = null; }
     if (ctx.root) ctx.renderChats();
     return true;
   }
   function refreshAccount() {
-    if (!syncHistoryOwner() || !ctx.root || !historyOwner) return;
+    if (!syncHistoryOwner() || !ctx.root) return;
     subscribeConversationPresence();
     void refreshConversationHistory();
   }
   global.addEventListener?.('soduwork-device-auth', refreshAccount);
   global.addEventListener?.('soduwork-data-scope-changed', refreshAccount);
+  global.addEventListener?.('beforeunload', () => {
+    closed = true; localRefreshPending = false;
+    if (localRefreshTimer !== null) global.clearTimeout(localRefreshTimer);
+    localRefreshTimer = null;
+  });
+  function scheduleLocalHistoryRefresh() {
+    if (!supportsLocalHistory() || closed || typeof global.setTimeout !== 'function') return;
+    if (localRefreshTimer !== null) global.clearTimeout(localRefreshTimer);
+    // Native persistence trails presence. This coalesced read is best effort;
+    // only the resulting durable catalog can promote a row to shared history.
+    localRefreshTimer = global.setTimeout(() => {
+      localRefreshTimer = null; localRefreshPending = true;
+      flushLocalHistoryRefresh();
+    }, 1200);
+  }
+  function flushLocalHistoryRefresh() {
+    if (closed || !localRefreshPending || localLoad) return;
+    localRefreshPending = false;
+    void refreshLocalHistory();
+  }
 
 function pinStorageKey() {
     let scope = 'default';
@@ -291,6 +335,11 @@ function updateChatState(event) {
     const row = rememberChatName(event && event.presence);
     const id = String(event && event.sessionId || row && row.id || '');
     if (!id || !row) return;
+    const previous = ctx.chatItems.find(item => String(item.id || '') === id);
+    if (!row.emptyPlaceholder && !row.accountConversation && !row.remoteProjection &&
+        (event.kind === 'renamed' || event.kind === 'history-lifecycle' ||
+        !previous || ctx.chatState(previous) !== ctx.chatState(row) &&
+        ['completed', 'failed', 'stopped'].includes(ctx.chatState(row)))) scheduleLocalHistoryRefresh();
     if (row.emptyPlaceholder) { ctx.upsertChat({ ...row, id }); return; }
     if (row.archived || row.deleted) {
       // A legacy snapshot has no lifecycle ordering. After an explicit restore,
@@ -663,7 +712,8 @@ function _syncChatList(target, items, isPinned, pool) {
 
 function renderChats() {
     ctx.mount();
-    const list = ctx.chatItems.slice(0, ctx.MAX_CHAT_ITEMS);
+    const list = localReady ? [...ctx.chatItems.filter(item => isLocalId(item.id)),
+      ...ctx.chatItems.filter(item => !isLocalId(item.id)).slice(0, ctx.MAX_CHAT_ITEMS)] : ctx.chatItems.slice(0, ctx.MAX_CHAT_ITEMS);
     ctx.sidebarProjects?.remember(list);
     const pins = pinnedIds();
     const scroller = ctx.root.querySelector('#wsSideScroll');
@@ -679,20 +729,51 @@ function renderChats() {
     const groups = ctx.sidebarProjects?.partition(list);
     const pinned = (groups ? groups.pinned : list.filter((item) => pins.has(String(item.id || ''))))
       .filter(item => !hiddenRow(item));
-    const normal = (groups ? groups.recent : list.filter((item) => !pins.has(String(item.id || ''))))
+    const recent = (groups ? groups.recent : list.filter((item) => !pins.has(String(item.id || ''))))
       .filter(item => !hiddenRow(item));
+    const normal = supportsLocalHistory() ? recent.filter(item => isLocalId(item.id) || item.pending) : recent;
+    const account = supportsLocalHistory() ? recent.filter(item => !isLocalId(item.id) && !item.pending) : [];
     const pinnedBox = ctx.root.querySelector('#wsPinnedBox');
     pinnedBox.hidden = !pinned.length;
     pinnedBox.classList.toggle('is-empty', !pinned.length);
     ctx.root.querySelector('#wsChatsBox').classList.toggle('is-empty', !normal.length);
     _syncChatList(ctx.pinnedChats, pinned, true, pool);
     _syncChatList(ctx.chats, normal, false, pool);
+    if (supportsLocalHistory()) {
+      let box = ctx.root.querySelector('#wsAccountChatsBox');
+      if (!box) {
+        box = document.createElement('section'); box.id = 'wsAccountChatsBox'; box.className = 'ws-list ws-chat-group';
+        box.dataset.sidebarSection = 'recent';
+        const heading = document.createElement('div'); heading.className = 'ws-projects-heading';
+        const label = document.createElement('span'); label.dataset.historyAccountHeading = ''; heading.appendChild(label);
+        const body = document.createElement('div'); body.id = 'wsAccountChats'; body.className = 'ws-list-body';
+        const status = document.createElement('div'); status.id = 'wsAccountHistoryStatus'; status.className = 'ws-history-status'; status.setAttribute('role', 'status');
+        box.append(heading, body, status); ctx.root.querySelector('#wsSideScroll').appendChild(box);
+      }
+      box.querySelector('[data-history-account-heading]').textContent = historyText('workspace.history.account', '账号会话');
+      box.hidden = !account.length && !accountError;
+      _syncChatList(box.querySelector('#wsAccountChats'), account, false, pool);
+      box.querySelector('#wsAccountHistoryStatus').textContent = accountError ? historyText('workspace.history.accountError', '账号会话暂时无法读取') : '';
+      let actions = ctx.root.querySelector('#wsLocalHistoryActions');
+      if (!actions) {
+        actions = document.createElement('div'); actions.id = 'wsLocalHistoryActions'; actions.className = 'ws-history-actions';
+        const status = document.createElement('span'); status.setAttribute('role', 'status');
+        const button = document.createElement('button'); button.type = 'button';
+        button.onclick = () => { void refreshLocalHistory({ append: !localError, refresh: !!localError }); };
+        actions.append(status, button); ctx.root.querySelector('#wsChatsBox').appendChild(actions);
+      }
+      actions.hidden = !localNext && !localRestart && !localError && (localReady || !localLoad);
+      actions.querySelector('span').textContent = localError ? historyText('workspace.history.localError', '本机历史暂时无法读取') : '';
+      const button = actions.querySelector('button'); button.disabled = !!localLoad;
+      button.textContent = localLoad ? historyText('workspace.history.loading', '正在加载…') : localError
+        ? historyText('workspace.history.retry', '重新加载') : historyText('workspace.history.more', '加载更多');
+    }
     for (const project of groups?.projects || []) {
       const items = project.items.filter(item => !hiddenRow(item));
       _syncChatList(project.target, items, false, pool);
       if (!items.length) ctx._empty(project.target, '拖入会话，开始整理');
     }
-    if (!normal.length) ctx._empty(ctx.chats, list.length ? '没有更多聊天' :
+    if (!normal.length && !localError) ctx._empty(ctx.chats, list.length ? '没有更多聊天' :
       (ctx.chatsLoading ? '正在加载聊天…' : '还没有聊天'));
     if (ctx.openChatMenu && !ctx.openChatMenu.row?.isConnected) closeChatMenu();
     scroller.scrollTop = scrollTop;
@@ -708,7 +789,7 @@ function subscribeConversationPresence() {
       ? api.onEventBatch(receive, { presenceOnly: true }) : api.onEvent(receive);
   }
 
-function refreshConversationHistory() {
+function refreshAccountHistory() {
     syncHistoryOwner();
     // Main-process history captures an authenticated actor before reading.
     // A pre-login request cannot be reused when the first account arrives.
@@ -720,15 +801,20 @@ function refreshConversationHistory() {
       ctx.renderChats();
       return Promise.resolve(false);
     }
-    const epoch = historyEpoch, generation = mutationGeneration;
-    const current = () => { syncHistoryOwner(); return epoch === historyEpoch && generation === mutationGeneration; };
-    const job = Promise.resolve().then(() => current() ? api.history() : null).then((got) => {
+    const epoch = historyEpoch, generation = accountMutationGeneration;
+    const current = () => { syncHistoryOwner(); return epoch === historyEpoch && generation === accountMutationGeneration; };
+    const job = Promise.resolve().then(() => {
+      if (!current()) return null;
+      return supportsLocalHistory() ? api.history({ source: 'account' }) : api.history();
+    }).then((got) => {
       if (!current()) return false;
       if (got && got.ok) {
+        accountError = '';
         // Native history supplies authenticated lifecycle records, including
         // cold-start tombstones that have not produced a presence event.
         const archived = new Set(), deleted = new Set();
         for (const row of Array.isArray(got.lifecycle) ? got.lifecycle : []) {
+          if (supportsLocalHistory() && isLocalId(row?.id)) continue;
           if (!row?.id || !(row.archived === true || row.deleted === true ||
               row.archived === false && row.deleted === false && Number(row.lifecycleRevision) > 0)) continue;
           const applied = applyLifecycle(row);
@@ -741,12 +827,13 @@ function refreshConversationHistory() {
         // response's accepted cleanup IDs even when old ledger entries expire.
         forgetPinned([...archived], '这条会话暂时无法归档', true);
         forgetPinned([...deleted]);
-        ctx.setChats(got.chats || []);
+        ctx.setChats(supportsLocalHistory() ? [...localRows, ...(got.chats || []).filter(row => !isLocalId(row.id))] : got.chats || []);
       }
-      else { ctx.chatsLoading = false; ctx.renderChats(); }
+      else { accountError = 'unavailable'; ctx.chatsLoading = false; ctx.renderChats(); }
       return Boolean(got && got.ok);
     }).catch(() => {
       if (!current()) return false;
+      accountError = 'unavailable';
       ctx.chatsLoading = false;
       ctx.renderChats();
       return false;
@@ -754,25 +841,100 @@ function refreshConversationHistory() {
     ctx.historyLoad = job;
     return job;
   }
+  function refreshLocalHistory({ append = false, refresh = false } = {}) {
+    if (!supportsLocalHistory()) return Promise.resolve(false);
+    if (localLoad) return localLoad;
+    if (append && !localNext && !localRestart) return Promise.resolve(true);
+    const workspace = localCatalog?.workspace;
+    const options = { source: 'local', limit: 50, ...(refresh ? { refresh: true } : {}),
+      ...(append && localNext && !localRestart ? { after: localNext } : {}),
+      ...(localCatalog ? { workspace, catalogRevision: localCatalog.revision } : {}) };
+    const job = Promise.resolve().then(() => historyApi().history(options)).then(got => {
+      if (got?.ok && got.localCatalog && (!workspace || got.localCatalog.workspace === workspace) &&
+          got.localCatalog.revision < global.WorkspaceSidebarState.localHistoryRevision(got.localCatalog.workspace)) return false;
+      if (!got?.ok || !got.localCatalog || workspace && got.localCatalog.workspace !== workspace ||
+          !global.WorkspaceSidebarState?.setLocalHistory(got.localCatalog, got.chats || [])) throw Error('Local history unavailable');
+      const catalog = got.localCatalog;
+      let addedLocalIds = [];
+      if (Array.isArray(catalog.items)) {
+        const previousAliases = localAliases;
+        addedLocalIds = catalog.items.filter(row => {
+          const previous = localRecords.get(String(row.id));
+          return !row.archived && !row.deleted && (!previous || previous.archived || previous.deleted);
+        }).map(row => String(row.id));
+        localRecords = new Map(catalog.items.map(row => [String(row.id), row]));
+        localAliases = new Set(catalog.items.flatMap(row => [String(row.id), ...(row.historyAliasIds || [])]));
+        ctx.chatItems = ctx.chatItems.filter(row => !previousAliases.has(String(row.id)) || localVisible(row));
+        const archived = [], deleted = [];
+        for (const row of catalog.items) {
+          if (global.WorkspaceSidebarState.localHistoryId(row.id) !== row.id) continue;
+          if (row.archived || row.deleted || hiddenRow(row)) {
+            applyLifecycle({ ...row, lifecycleRevision: catalog.revision });
+            if (row.deleted) deleted.push(row.id); else if (row.archived) archived.push(row.id);
+          }
+        }
+        forgetPinned(archived, '这条会话暂时无法归档', true); forgetPinned(deleted);
+      }
+      localCatalog = { workspace: catalog.workspace, revision: catalog.revision };
+      const oldRows = localRows.filter(localVisible), incoming = (got.chats || []).filter(localVisible);
+      const ids = new Set(incoming.map(row => row.id));
+      localRows = append ? [...oldRows.filter(row => !ids.has(row.id)), ...incoming]
+        : [...incoming, ...oldRows.filter(row => !ids.has(row.id))];
+      const loadedIds = new Set(localRows.map(row => canonicalLocalId(row.id)));
+      const addedUnloaded = addedLocalIds.some(id => !loadedIds.has(id));
+      // A newly imported older record can precede an existing cursor or follow
+      // an exhausted one. Restart traversal without discarding loaded rows.
+      if (append || !localReady || localRestart || addedUnloaded) localNext = got.next || null;
+      else if (oldRows.length <= 50) localNext = got.next || null;
+      localRestart = append && addedUnloaded;
+      localReady = true; localError = got.refreshError ? 'refresh' : '';
+      const remote = ctx.chatItems.filter(row => !isLocalId(row.id));
+      ctx.setChats([...localRows, ...remote]);
+      return true;
+    }).catch(() => { localError = 'unavailable'; ctx.chatsLoading = false; ctx.renderChats(); return false; })
+      .finally(() => { if (localLoad === job) localLoad = null; ctx.renderChats(); flushLocalHistoryRefresh(); });
+    localLoad = job;
+    return job;
+  }
+  function refreshConversationHistory() {
+    const local = supportsLocalHistory() ? refreshLocalHistory() : null;
+    if (local && !nativeRefreshStarted) {
+      nativeRefreshStarted = true;
+      void local.then(() => refreshLocalHistory({ refresh: true }));
+    }
+    const remote = refreshAccountHistory();
+    return local ? Promise.all([local, remote]).then(values => values.some(Boolean)) : remote;
+  }
   /* Insert an optimistic row on the first message, then replace it by title and time once Pi's archive index is available. */
   function setChats(items) {
     ctx.chatsLoading = false;
     // Apply lifecycle visibility before the existing optimistic-row reconciliation.
     ctx.chatItems = ctx.chatItems.filter(item => !hiddenRow(item));
     items = (items || []).filter(item => !hiddenRow(item));
-    ctx.chatItems = ctx._reconcileChats(ctx.chatItems, (items || []).map(rememberChatName), Date.now());
+    items = (items || []).map(rememberChatName);
+    if (localReady) {
+      const currentLocal = ctx.chatItems.filter(row => isLocalId(row.id)), incomingLocal = items.filter(row => isLocalId(row.id));
+      const limit = Math.max(1, new Set([...currentLocal, ...incomingLocal].map(row => row.id)).size);
+      ctx.chatItems = [...ctx._reconcileChats(currentLocal, incomingLocal, Date.now(), { limit, canonicalId: canonicalLocalId }),
+        ...ctx._reconcileChats(ctx.chatItems.filter(row => !isLocalId(row.id)), items.filter(row => !isLocalId(row.id)), Date.now())];
+    } else ctx.chatItems = ctx._reconcileChats(ctx.chatItems, items, Date.now());
     renderChats();
   }
 
   function upsertChat(item) {
     if (!item || hiddenRow(item)) return;
     if (needsHistoryConfirmation(item)) { void refreshConversationHistory(); return; }
-    const next = ctx._upsertChatItems(ctx.chatItems, rememberChatName(item), { deferUnconfirmedCloudTasks: true });
+    const local = localReady && isLocalId(item.id);
+    const current = localReady ? ctx.chatItems.filter(row => isLocalId(row.id) === local) : ctx.chatItems;
+    const options = { deferUnconfirmedCloudTasks: true, ...(local ? { limit: Math.max(1, current.length + 1), canonicalId: canonicalLocalId } : {}) };
+    const next = ctx._upsertChatItems(current, rememberChatName(item), options);
     if (next === null) {
       void refreshConversationHistory();
       return;
     }
-    ctx.chatItems = next;
+    if (!localReady) ctx.chatItems = next;
+    else if (local) ctx.chatItems = [...next, ...ctx.chatItems.filter(row => !isLocalId(row.id))];
+    else ctx.chatItems = [...ctx.chatItems.filter(row => isLocalId(row.id)), ...next];
     renderChats();
   }
 
@@ -798,7 +960,7 @@ function refreshConversationHistory() {
     }
   }
 
-  return { setChats, upsertChat, removeChat, setActiveChat, pinStorageKey, legacyPinnedIds, pinnedIds, togglePinned, forgetPinned, deleteHistoryChat, archiveHistoryChat, rememberChatName, updateChatState, renameChat, closeChatMenu, openChatRename, chatMenuItem, _newChatRow, _paintChatLocale, _paintChatRow, _syncChatList, renderChats, subscribeConversationPresence, refreshConversationHistory };
+  return { setChats, upsertChat, removeChat, setActiveChat, pinStorageKey, legacyPinnedIds, pinnedIds, togglePinned, forgetPinned, deleteHistoryChat, archiveHistoryChat, rememberChatName, updateChatState, renameChat, closeChatMenu, openChatRename, chatMenuItem, _newChatRow, _paintChatLocale, _paintChatRow, _syncChatList, renderChats, subscribeConversationPresence, refreshConversationHistory, refreshLocalHistory };
   }
   global.WorkspaceChatList = { create };
 })(window);

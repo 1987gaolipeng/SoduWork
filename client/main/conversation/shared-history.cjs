@@ -16,10 +16,12 @@ function create({ app, session, store = require('./replica-store.cjs').createWor
     for (let i = 0; i < rows.length; i += 200) result.push(...await store.register(rows.slice(i, i + 200)));
     return result;
   }
-  async function projectRows(rows, archived = false) {
+  async function projectRows(rows, archived = false, records) {
     const native = rows.filter(isNative).map(row => {
-      const record = require('./runtime-segments').read(app, row.id);
-      return { ...row, archived: row.archived === true || session.isArchived?.(app, row.id) === true ||
+      const record = records ? records.get(row.id) : require('./runtime-segments').read(app, row.id);
+      return { ...require('./acceptance-session').projectHistory(app, row),
+        accountConversation: false, accountProjection: false,
+        archived: row.archived === true || session.isArchived?.(app, row.id) === true ||
         (archived && (!row.adapterId || row.adapterId === 'pi')), historyAliasIds: [...new Set([
         ...(row.historyAliasIds || []), ...[...(record?.segments || []), record?.active].filter(Boolean).map(part => part.sessionId),
       ])].filter(id => id !== row.id) };
@@ -182,6 +184,7 @@ function create({ app, session, store = require('./replica-store.cjs').createWor
   }
   return { resolve, read, open, register, projectRows, lifecycle, capture, observe, store, directory, preserveLegacyOutbox,
     list: options => store.list(options),
+    page: options => store.page(options),
     async indexedRows(archived, limit) {
       const items = []; let after;
       do {
@@ -196,4 +199,9 @@ function create({ app, session, store = require('./replica-store.cjs').createWor
       closed = true; observed.clear(); await store.close();
     })(); } };
 }
-module.exports = { create };
+// Source locators permit passive transcript recovery, not lifecycle ownership
+// or interception of an authenticated account original.
+function isLocalIdentity(row, id) {
+  return !!row && (row.id === id || Array.isArray(row.historyAliasIds) && row.historyAliasIds.includes(id));
+}
+module.exports = { create, isLocalIdentity };

@@ -383,6 +383,8 @@
   }
   function create({ storage, key, deviceStorage, legacyPins = [], writable = true, migrate, onChange }) {
     let raw = null, state = normalized({ pins: legacyPins }), initialized = false, readError = null;
+    let accountState = state;
+    const device = createDevicePartition(deviceStorage, key);
     const observedTimes = new Map();
     function stableNewestFirst(rows) {
       const time = row => {
@@ -669,7 +671,7 @@
         for (const id of new Set([...local.keys(), ...remote.keys(), ...Object.keys(checkpoints)])) {
           if (!current()) return;
           // A previous project's save may have awaited while this project was edited.
-          const here = store.get().projects.find(row => row.id === id && !row.appId);
+          const here = getAccount().projects.find(row => row.id === id && !row.appId);
           const there = remote.get(id), saved = checkpoints[id];
           const hash = digest(here);
           const dirty = saved ? hash !== saved.hash : !!here && !there;

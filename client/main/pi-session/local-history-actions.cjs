@@ -76,7 +76,7 @@ function create({ app, session, history, BrowserWindow, shell, trash }) {
   return async (action, id, options) => {
     const settings = options && typeof options === 'object' && !Array.isArray(options) ? options : {};
     const row = await history.resolve(id);
-    if (!row) return null;
+    if (!require('../conversation/shared-history.cjs').isLocalIdentity(row, id)) return null;
     const previous = queues.get(row.id) || Promise.resolve();
     const pending = previous.catch(() => {}).then(() => run(action, row.id, settings));
     queues.set(row.id, pending);

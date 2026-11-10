@@ -55,7 +55,7 @@
         store = global.WorkspaceSidebarState.create({...options, onChange: () => { void sync?.run(); }});
         scope = options.key;
         const ownScope = scope;
-        sync = global.WorkspaceSidebarState.projectSync({store, api: global.SoduWorkAPI,
+        sync = options.writable === false ? null : global.WorkspaceSidebarState.projectSync({store, api: global.SoduWorkAPI,
           storage: localStorage, key: scope, current: () => ownScope === scope &&
             global.WorkspaceSidebarState.storageKey(global.SoduWorkAPI) === ownScope,
           changed: () => render(), error: e => { console.warn('Project sync:', e.message); }});

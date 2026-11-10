@@ -25,6 +25,7 @@ function timedPageInvoke(channel, ...args) {
  * Expose a runtime-neutral conversation facade; retain piSession as a compatibility alias.
  */
 const conversationSession = {
+  localHistorySupported: true,
   probe: (adapterId) => ipcRenderer.invoke('pi-session-probe', adapterId || 'pi'),
   runtimes: options => timedPageInvoke('pi-session-runtimes', options || {}),
   customAgents: Object.fromEntries(['list', 'add', 'activate', 'pick'].map(action =>
@@ -44,7 +45,7 @@ const conversationSession = {
   pathForFile: (file) => {
     try { return webUtils.getPathForFile(file); } catch (error) { return ''; }
   },
-  history: () => timedPageInvoke('pi-session-history'),
+  history: options => timedPageInvoke('pi-session-history', options),
   search: query => ipcRenderer.invoke('conversation-search', String(query || '').slice(0, 200)),
   searchHistory: () => timedPageInvoke('conversation-search-history'),
   cancelSearch: (clearCache = false) => ipcRenderer.send('conversation-search-cancel', clearCache === true),

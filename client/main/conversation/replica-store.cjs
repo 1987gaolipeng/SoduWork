@@ -7,7 +7,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
 
-const METHODS = ['register', 'join', 'importChunk', 'importPlan', 'importPage', 'sealImport', 'get', 'list', 'directory', 'lifecycleRows', 'lifecycle', 'cache', 'messages', 'changes', 'ack', 'workspace', 'close'];
+const METHODS = ['register', 'join', 'importChunk', 'importPlan', 'importPage', 'sealImport', 'get', 'list', 'catalog', 'page', 'directory', 'lifecycleRows', 'remoteLifecycleRows', 'lifecycle', 'cache', 'messages', 'changes', 'ack', 'workspace', 'close'];
+const REMOTE_LIFECYCLE = "deleted=0 AND revision>0 AND json_extract(data,'$.cached')=1 AND coalesce(json_extract(data,'$.taskId'),'')<>''";
 function key(value) {
   if (typeof value !== 'string' || !value.trim() || value.length > 512 || /[\x00-\x1f]/.test(value))
     throw Error('Invalid local conversation identity');
@@ -68,12 +69,19 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
       json_extract(data,'$.source.conversationId')=? OR json_extract(data,'$.sourceSessionId')=?
       ORDER BY updated DESC, id DESC LIMIT 1`).get(wanted, wanted, wanted);
   };
-  function project(row) {
+  function project(row, aliases) {
     if (!row) return null;
     return { ...JSON.parse(row.data), id: row.id, localReplica: true, archived: !!row.archived,
       deleted: !!row.deleted, replicaRevision: row.revision, replicaUpdatedAt: row.updated,
       revision: row.catalog_revision,
-      historyAliasIds: db.prepare('SELECT alias FROM aliases WHERE replica=? AND alias<>?').all(row.id, row.id).map(r => r.alias) };
+      historyAliasIds: aliases || db.prepare('SELECT alias FROM aliases WHERE replica=? AND alias<>?').all(row.id, row.id).map(r => r.alias) };
+  }
+  function projectPage(rows) {
+    if (!rows.length) return [];
+    const aliases = new Map(rows.map(row => [row.id, []]));
+    for (const row of db.prepare(`SELECT replica,alias FROM aliases WHERE replica IN (${rows.map(() => '?').join(',')}) AND alias<>replica`)
+      .iterate(...rows.map(row => row.id))) aliases.get(row.replica).push(row.alias);
+    return rows.map(row => project(row, aliases.get(row.id)));
   }
   function register(rows) {
     if (!Array.isArray(rows) || rows.length > 500) throw Error('Invalid local history batch');
@@ -91,7 +99,8 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
       delete data.historyAliasIds;
       const updated = Number.isFinite(Number(raw.at)) ? Number(raw.at) : Date.parse(raw.at) || old?.updated || Date.now();
       const encoded = JSON.stringify(data);
-      if (!old || old.data !== encoded || old.updated !== updated) {
+      const previousAliases = new Set(old ? db.prepare('SELECT alias FROM aliases WHERE replica=?').all(canonical).map(row => row.alias) : []);
+      if (!old || old.data !== encoded || old.updated !== updated || ids.some(alias => !previousAliases.has(alias))) {
         const revision = Number(db.prepare("INSERT INTO operations(replica,action,actor,created) VALUES(?,'upsert','{}',?)")
           .run(canonical, Date.now()).lastInsertRowid);
         db.prepare(`INSERT INTO replicas(id,data,updated,archived,catalog_revision) VALUES(?,?,?,?,?)
@@ -268,11 +277,49 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
       }));
     },
     workspace: () => db.prepare("SELECT value FROM metadata WHERE key='workspace'").get().value,
+    catalog(knownRevision) {
+      if (knownRevision !== undefined) bounded(knownRevision, 0, Number.MAX_SAFE_INTEGER);
+      const workspace = db.prepare("SELECT value FROM metadata WHERE key='workspace'").get().value;
+      const revision = Number(db.prepare('SELECT coalesce(max(revision),0) AS revision FROM operations').get().revision);
+      if (knownRevision === revision) return { workspace, revision };
+      // This inventory proves device-local membership without exposing titles,
+      // creator identities or message bodies. Aliases are loaded in one pass.
+      const items = db.prepare('SELECT id,archived,deleted FROM replicas ORDER BY id').all()
+        .map(row => ({ id: row.id, historyAliasIds: [], originIds: [], archived: !!row.archived, deleted: !!row.deleted }));
+      const byId = new Map(items.map(row => [row.id, row]));
+      const claimed = new Set();
+      for (const row of db.prepare('SELECT replica,alias FROM aliases ORDER BY alias').iterate()) {
+        claimed.add(row.alias);
+        if (row.alias !== row.replica) byId.get(row.replica)?.historyAliasIds.push(row.alias);
+      }
+      // Source IDs locate downloaded content for legacy organization recovery.
+      // They are not identity aliases: a local copy never owns the lifecycle or
+      // execution authority of its account-authorized original.
+      const origins = db.prepare(`SELECT id,json_extract(data,'$.source.id') AS source_id,
+        json_extract(data,'$.source.conversationId') AS conversation_id,
+        json_extract(data,'$.sourceSessionId') AS session_id FROM replicas ORDER BY updated DESC,id DESC`);
+      for (const row of origins.iterate()) for (const alias of [row.source_id, row.conversation_id, row.session_id]) {
+        if (claimed.has(alias)) continue;
+        try { key(alias); } catch (_) { continue; }
+        claimed.add(alias);
+        if (alias !== row.id) byId.get(row.id).originIds.push(alias);
+      }
+      return { workspace, revision, items };
+    },
+    page(options = {}) {
+      const localCatalog = this.catalog(options.catalogRevision);
+      if (options.workspace !== undefined && options.workspace !== localCatalog.workspace)
+        throw Error('Local history workspace changed');
+      // Both projections execute in the same worker turn, so lifecycle intent
+      // cannot change between membership validation and the visible page.
+      const page = this.list({ after: options.after, limit: options.limit, archived: options.archived === true });
+      return { ok: true, chats: page.items, next: page.next, localCatalog };
+    },
     directory(after = 0, limit = 100) {
       bounded(after, 0, Number.MAX_SAFE_INTEGER); bounded(limit, 100, 200);
       const rows = db.prepare('SELECT * FROM replicas WHERE catalog_revision>? ORDER BY catalog_revision LIMIT ?').all(after, limit + 1);
       const page = rows.slice(0, limit);
-      return { items: page.map(project), cursor: page.at(-1)?.catalog_revision || after, hasMore: rows.length > limit };
+      return { items: projectPage(page), cursor: page.at(-1)?.catalog_revision || after, hasMore: rows.length > limit };
     },
     list(options = {}) {
       const limit = bounded(options.limit, 50, 200) || 50;
@@ -283,7 +330,7 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
           .all(options.archived ? 1 : 0, cursor.at, cursor.at, key(cursor.id), limit + 1)
         : db.prepare('SELECT * FROM replicas WHERE deleted=0 AND archived=? ORDER BY updated DESC,id DESC LIMIT ?').all(options.archived ? 1 : 0, limit + 1);
       const page = rows.slice(0, limit), last = page.at(-1);
-      return { items: page.map(project), next: rows.length > limit ? { at: last.updated, id: last.id } : null };
+      return { items: projectPage(page), next: rows.length > limit ? { at: last.updated, id: last.id } : null };
     },
     lifecycle(id, action, actor = {}) {
       if (!['archive', 'restore', 'delete'].includes(action)) throw Error('Invalid replica operation');

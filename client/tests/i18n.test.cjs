@@ -4,6 +4,21 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
 const script = fs.readFileSync(path.join(__dirname, '../core/i18n.js'), 'utf8');
+
+test('device and account history controls retain all four locale translations', () => {
+  const c = client();
+  const expected = {
+    'zh-CN': ['账号会话', '加载更多', '重新加载', '本机历史暂时无法读取', '账号会话暂时无法读取', '正在加载…'],
+    'en-US': ['Account chats', 'Load more', 'Reload', 'Local history is temporarily unavailable', 'Account chats are temporarily unavailable', 'Loading…'],
+    'ja-JP': ['アカウントのチャット', 'さらに読み込む', '再読み込み', 'ローカル履歴を一時的に読み込めません', 'アカウントのチャットを一時的に読み込めません', '読み込み中…'],
+    'ko-KR': ['계정 대화', '더 불러오기', '새로고침', '현재 로컬 기록을 불러올 수 없습니다', '현재 계정 대화를 불러올 수 없습니다', '불러오는 중…'],
+  };
+  const keys = ['account', 'more', 'retry', 'localError', 'accountError', 'loading'];
+  for (const [locale, values] of Object.entries(expected)) {
+    c.api.setLocale(locale);
+    assert.deepEqual(keys.map(key => c.api.t('workspace.history.' + key)), values);
+  }
+});
 test('renderer catalog packages preserve frozen snapshots and match canonical package order', () => {
   const context = vm.createContext({}), expected = {};
   const directory = path.join(__dirname, '../core/locales');

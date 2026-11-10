@@ -415,7 +415,12 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
       }
       // Local history can be read without reconnecting the Hub or resuming an
       // old account's execution process. Remote originals follow the usual path.
-      const local = opts.chatId && _sharedHistory ? await _sharedHistory.resolve(opts.chatId) : null;
+      // A downloaded source locator is not a native identity. Account and cloud
+      // originals retain their authenticated opening and continuation paths.
+      const resolvedLocal = opts.chatId && !_cloudHandoff.isRemote?.(opts.chatId) && _sharedHistory
+        ? await _sharedHistory.resolve(opts.chatId) : null;
+      const local = resolvedLocal && require('../conversation/shared-history.cjs').isLocalIdentity(resolvedLocal, opts.chatId)
+        ? resolvedLocal : null;
       const openLocalHistory = async () => {
         const captured = historyAccess.actor(app);
         if (local) {

@@ -9,10 +9,13 @@ fs.mkdirSync(output, { recursive: true });
 app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-sidebar-projects-')));
 const report = { ok: false, cases: [], screenshots: [] };
 let win, picks = 0, finishArchive;
+// These account-directory fixtures exercise private grouping and late account
+// replies. Runtime labels do not imply a native transcript in this empty profile.
 const rows = Array.from({ length: 50 }, (_, i) => ({ id: 'chat-' + i,
   title: ['合同审核与修改建议', '本周产品进展', '讨论客户需求', '整理交付资料'][i % 4] + (i > 3 ? ' ' + i : ''),
-  adapterId: ['pi', 'codex', 'opencode'][i % 3], at: 1000 - i, state: i === 0 ? 'running' : 'completed' }));
-ipcMain.handle('pi-session-history', () => ({ ok: true, chats: rows }));
+  adapterId: ['pi', 'codex', 'opencode'][i % 3], accountProjection: true,
+  at: 1000 - i, state: i === 0 ? 'running' : 'completed' }));
+ipcMain.handle('pi-session-history', require('./fixtures/history-ipc.cjs').create(() => ({ ok: true, chats: rows })));
 ipcMain.handle('pi-session-pick-cwd', () => { picks++; return { ok: true, dir: 'C:\\Work\\paperclip', name: 'paperclip' }; });
 ipcMain.handle('pi-session-history-delete', (_, id) => {
   const i = rows.findIndex(r => r.id === id); if (i >= 0) rows.splice(i, 1); return { ok: true };
@@ -81,7 +84,7 @@ async function run() {
   await js('drag("chat-0","pinned");drag("chat-2","pinned","chat-0")');
   assert.deepEqual(await js('[...document.querySelectorAll("#wsPinnedChats .ws-chat")].map(el=>el.dataset.chatId)'), ['chat-2', 'chat-0']);
   await js('drag("chat-2","recent","chat-3")');
-  assert.equal(await js('row("chat-2").parentElement.id'), 'wsChats');
+  assert.equal(await js('row("chat-2").parentElement.id'), 'wsAccountChats');
   assert.equal(await js('document.querySelectorAll(".ws-chat-row").length'), 50);
   assert.equal(await js('document.querySelectorAll("[data-chat-dragging],.is-drop-target,.is-drop-before").length'), 0);
   report.cases.push('real DOM drag handlers move/reorder between project, pinned and recent; no duplicates or accidental navigation');
@@ -91,7 +94,7 @@ async function run() {
   await js('document.querySelector("[data-move-to=\\""+firstProject+"\\"]").click()');
   assert.equal(await js('row("chat-3").closest(".ws-project").dataset.projectId'), await js('firstProject'));
   await js('row("chat-0").querySelector(".ws-chat-pin").click()');
-  assert.equal(await js('row("chat-0").parentElement.id'), 'wsChats');
+  assert.equal(await js('row("chat-0").parentElement.id'), 'wsAccountChats');
   await js('row("chat-0").querySelector(".ws-chat-pin").click()');
   assert.equal(await js('row("chat-0").parentElement.id'), 'wsPinnedChats');
   report.cases.push('keyboard-accessible move dialog and existing pin button share the same placement state');
@@ -112,17 +115,24 @@ async function run() {
   await js('document.documentElement.dataset.theme="warm"');
   await shot('03-edit-project-warm');
   assert.equal(await js('getComputedStyle(document.querySelector(".ws-project-dialog")).backgroundColor'), 'rgb(255, 253, 250)');
-  win.setSize(760, 560); await delay(100);
+  win.setSize(760, 560);
+  report.smallWindow = { bounds: win.getBounds(), content: win.getContentSize(),
+    viewport: await js('({width:innerWidth,height:innerHeight,ratio:devicePixelRatio})') };
+  // Hidden offscreen Windows bounds may round up by one device-independent pixel.
+  await until(`innerWidth <= ${report.smallWindow.bounds.width} && innerHeight <= ${report.smallWindow.bounds.height}`);
+  await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
   assert.ok(await js('document.querySelector(".ws-project-dialog").getBoundingClientRect().right<=innerWidth'));
   assert.ok(await js('document.querySelector(".ws-project-dialog").getBoundingClientRect().bottom<=innerHeight'));
   await shot('04-small-window');
   await js('document.querySelector(".ws-project-remove").click();document.querySelector(".ws-project-remove-confirm button").click()');
   assert.equal(await js('document.querySelectorAll(".ws-project").length'), 0);
-  assert.equal(await js('row("chat-1").parentElement.id'), 'wsChats');
-  assert.equal(await js('row("chat-3").parentElement.id'), 'wsChats');
+  assert.equal(await js('row("chat-1").parentElement.id'), 'wsAccountChats');
+  assert.equal(await js('row("chat-3").parentElement.id'), 'wsAccountChats');
   report.cases.push('theme-aware editor fits short windows; confirmed removal only ungroups and preserves conversations');
-  // A late archive result must update the initiating account's groups only.
-  await js('document.querySelector("#wsProjectAdd").click();document.querySelector("#wsProjectName").value="Archive scope";document.querySelector(".ws-project-save").click();window.archiveProjectId=projectId();drag("chat-1",archiveProjectId);');
+  // This imported account group remains private; new UI-created groups above
+  // now belong to the device and intentionally survive account switches.
+  await js(`window.archiveProjectId='project-account-archive-scope';WorkspaceSidebarState.create(WorkspaceSidebarState.accountOptions({storage:localStorage,api:SoduWorkAPI}))
+    .applyRemoteProject({id:archiveProjectId,name:'Archive scope',folders:[],chatIds:['chat-1']});WorkspaceShell.setChats(${JSON.stringify(rows)});`);
   await js(`window.firstKey=WorkspaceSidebarState.accountOptions({storage:localStorage,api:SoduWorkAPI}).key;fixtureAccount='second-employee';window.secondKey=WorkspaceSidebarState.accountOptions({storage:localStorage,api:SoduWorkAPI}).key;fixtureAccount='employee';
     window.secondState=JSON.parse(localStorage.getItem(firstKey));secondState.projects[0].name='Other account project';localStorage.setItem(secondKey,JSON.stringify(secondState));
     window.confirm=()=>true;document.querySelector('.ws-project-edit').click();document.querySelector('.ws-project-archive').click();void 0;

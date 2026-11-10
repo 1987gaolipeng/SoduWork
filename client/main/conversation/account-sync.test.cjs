@@ -253,6 +253,77 @@ test('fresh and cached account history retain authenticated ownership through ac
   assert.equal(requests, 2);
 });
 
+test('account-only history preserves the original identity while default history retains native projection', async t => {
+  const actor = require('../../tests/helpers/platform-session-fixture.cjs').identity();
+  let scans = 0, requests = 0;
+  const sync = require('./account-sync').create({ app: {}, store: { jobs: () => [] }, identityOf: () => actor,
+    resolveNativeSource: async () => { scans++; return { id: 'native-1', adapterId: 'pi', count: 2 }; },
+    fetch: async () => { requests++; return response({ items: [{ id: 'acct-1', sourceSessionId: 'native-1',
+      sourceClientId: actor.clientId, title: 'Original', canSend: true, messageCount: 2 }], hasMore: false }); } });
+  t.after(() => sync.close());
+  const account = (await sync.history({ source: 'account' })).chats[0];
+  assert.equal(account.id, 'acct-1'); assert.equal(account.accountProjection, true);
+  assert.equal(scans, 0);
+  const legacy = (await sync.history()).chats[0];
+  assert.equal(legacy.id, 'native-1'); assert.equal(scans, 1);
+  assert.equal(requests, 1);
+});
+
+test('account-only forced refresh publishes current directory rows without native discovery', async t => {
+  const actor = require('../../tests/helpers/platform-session-fixture.cjs').identity();
+  let scans = 0, revision = 1;
+  const changes = [];
+  const sync = require('./account-sync').create({ app: {}, store: { jobs: () => [] }, identityOf: () => actor,
+    realtime: false,
+    resolveNativeSource: async () => { scans++; return { id: 'native-1', adapterId: 'pi', count: 2 }; },
+    fetch: async () => response({ items: [{ id: 'acct-1', sourceSessionId: 'native-1',
+      sourceClientId: actor.clientId, title: 'Revision ' + revision, revision,
+      messageCount: 2, canSend: true }], hasMore: false }) });
+  t.after(() => sync.close());
+  sync.onChange((id, row, presence) => changes.push({ id, row, presence }));
+  await sync.history({ source: 'account' });
+  revision++;
+  const result = await sync.history({ source: 'account', force: true });
+  assert.equal(result.chats[0].revision, 2); assert.equal(scans, 0);
+  assert.equal(changes.length, 1); assert.equal(changes[0].id, 'acct-1');
+  assert.equal(changes[0].presence.accountProjection, true);
+  assert.equal(changes[0].presence.owner, require('../platform-connections/runtime.cjs').connectionScope(actor));
+  assert.equal((await sync.history()).chats[0].id, 'native-1');
+  assert.equal(scans, 1, 'the legacy view still resolves its native identity');
+});
+
+test('coalesced account-only and legacy directory callers keep their respective identities in either order', async t => {
+  const actor = require('../../tests/helpers/platform-session-fixture.cjs').identity();
+  for (const firstSource of ['account', undefined]) {
+    let revision = 1, scans = 0, requests = 0, release, entered;
+    const waiting = new Promise(resolve => { entered = resolve; });
+    const gate = new Promise(resolve => { release = resolve; });
+    const sync = require('./account-sync').create({ app: {}, store: { jobs: () => [] }, identityOf: () => actor,
+      realtime: false,
+      resolveNativeSource: async () => { scans++; return { id: 'native-1', adapterId: 'pi', count: 2 }; },
+      fetch: async () => {
+        requests++;
+        if (revision === 2) { entered(); await gate; }
+        return response({ items: [{ id: 'acct-1', sourceSessionId: 'native-1', sourceClientId: actor.clientId,
+          title: 'Revision ' + revision, revision, messageCount: 2 }], hasMore: false });
+      } });
+    t.after(() => sync.close());
+    await sync.history({ source: 'account' }); revision = 2;
+    const first = sync.history({ source: firstSource, force: true });
+    await waiting;
+    const second = sync.history({ source: firstSource === 'account' ? undefined : 'account', force: true });
+    await new Promise(resolve => setImmediate(resolve)); release();
+    const results = await Promise.all([first, second]);
+    const account = results[firstSource === 'account' ? 0 : 1];
+    const legacy = results[firstSource === 'account' ? 1 : 0];
+    assert.equal(account.chats[0].id, 'acct-1'); assert.equal(account.chats[0].accountProjection, true);
+    assert.equal(legacy.chats[0].id, 'native-1'); assert.equal(legacy.chats[0].accountProjection, undefined);
+    assert.equal(requests, 2, 'different views still coalesce the same authorized refresh');
+    assert.ok(scans > 0, 'the legacy caller retains its native projection');
+    await sync.close();
+  }
+});
+
 test('archived account rows stay out of fresh and cached history and retain live archive state', async t => {
   const { identity } = require('../../tests/helpers/platform-session-fixture.cjs');
   const previous = global.WebSocket, sockets = [], events = [];

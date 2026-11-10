@@ -81,8 +81,26 @@ if (typeof electron === 'string') {
     const archiveIds = ['pi-fixture', ...rows.map(row => row.ref)];
     for (const id of archiveIds) assert.equal((await js(api + '.archiveHistory(' + JSON.stringify(id) + ')')).ok, true);
     assert.equal((await js(api + '.history()')).chats.length, 0);
+    // A different account can browse the same local archive while Hub history is pending.
+    await js(`window.legacyArchiveStore=WorkspaceSidebarState.create(WorkspaceSidebarState.accountOptions({storage:localStorage,api:SoduWorkAPI}));
+      window.legacyArchiveProject=legacyArchiveStore.saveProject({name:'Shared archive fixture',folders:[]});
+      legacyArchiveStore.move({id:${JSON.stringify(archiveIds[1])},title:'Saved local archive'},legacyArchiveProject);
+      legacyArchiveStore.archiveProject(legacyArchiveProject);
+      SoduWorkAPI.clientAuthSnapshot=()=>({clientId:'device',user:{id:'two'}});void 0;`);
+    let releaseAccountHistory;
+    bridge.setExternalHistory({ history: () => new Promise(resolve => { releaseAccountHistory = resolve; }) });
     await js('openArchiveHistory();void 0;');
     await until('document.querySelectorAll("#archiveHistoryList .archive-history-item").length===' + archiveIds.length);
+    await until('document.querySelectorAll("#archiveProjectsList .archive-history-item").length===1');
+    assert.equal(await js('document.querySelector("#archiveProjectsList .archive-history-item-title").textContent'), 'Shared archive fixture');
+    assert.equal(typeof releaseAccountHistory, 'function');
+    bridge.setExternalHistory(null);
+    releaseAccountHistory({ ok: true, chats: [] });
+    await js(`WorkspaceSidebarState.create(WorkspaceSidebarState.accountOptions({storage:localStorage,api:SoduWorkAPI})).permanentlyDeleteProject(legacyArchiveProject);
+      SoduWorkAPI.clientAuthSnapshot=()=>({clientId:'device',user:{id:'one'}});
+      window.dispatchEvent(new Event('soduwork-data-scope-changed'));void 0;`);
+    await until('document.querySelectorAll("#archiveProjectsList .archive-history-item").length===0');
+    report.cases.push('a cold archive view shares validated local groups across accounts without waiting for account history');
     assert.deepEqual((await js(api + '.archivedHistory()')).chats.map(row => row.id).sort(), archiveIds.slice().sort());
     report.cases.push('Pi and every production Runner adapter archive through real preload/IPC and durable archive-state');
     for (const locale of ['en-US', 'zh-CN', 'en-US']) {
@@ -128,7 +146,9 @@ if (typeof electron === 'string') {
     report.cases.push('restoring archived project restores its chats, grouping and immediate sidebar refresh');
     await click('#archiveChatsTab');
     for (const width of [390, 760, 1280]) {
-      win.setSize(width, 760); await delay(100);
+      win.setSize(width, 760);
+      await until(`innerWidth >= ${width - 32} && innerWidth <= ${width}`);
+      await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
       const layout = await js('(()=>{const p=document.querySelector("#archivePanel"),h=document.querySelector(".archive-history-head");return{width:p.clientWidth,scroll:p.scrollWidth,title:h.getBoundingClientRect().height,kicker:!!document.querySelector(".archive-history-kicker")}})()');
       assert.ok(layout.scroll <= layout.width + 1, JSON.stringify(layout)); assert.equal(layout.kicker, false);
       if (width >= 760) assert.ok(layout.title <= 65, JSON.stringify(layout));

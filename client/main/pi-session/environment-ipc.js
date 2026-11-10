@@ -115,7 +115,7 @@ function install({ app, ipcMain, session, identityOf, capabilityGrantsOf, _skill
       ]);
       return {
         ok: true, policyOk: view.policyOk, policyReason: view.policyReason,
-        items: view.items, skills: view.businessSkills || [],
+        items: view.items, skills: view.skillCatalog || view.businessSkills || [],
       };
     } catch (error) {
       return { ok: false, items: [], reason: String((error && error.message) || error) };
@@ -205,12 +205,18 @@ function install({ app, ipcMain, session, identityOf, capabilityGrantsOf, _skill
   });
 
   /* Conversation history for sidebar navigation. */
-  ipcMain.handle('pi-session-history', async () => {
+  ipcMain.handle('pi-session-history', async (_event, options) => {
     try {
       const access = require('../conversation/history-access');
-      const captured = access.actor(app);
-      const result = await session.history(app);
-      access.assertCurrent(app, captured);
+      const local = options?.source === 'local';
+      const account = options?.source === 'account';
+      const profile = app.getPath('userData');
+      const captured = local ? null : access.actor(app);
+      if (account) access.assertCurrent(app, captured);
+      const result = await session.history(app, local || account ? options : undefined);
+      if (local) {
+        if (app.getPath('userData') !== profile) throw Error('Local history workspace changed');
+      } else access.assertCurrent(app, captured);
       const identity = require('../conversation/requirement-context').cachedIdentity(app);
       const rows = require('../conversation/work-conversation-cards').visibleHistory(app, result.chats || [], identity);
       return { ...result, chats: rows.map(row => conversationTitles.decorate(app,

@@ -1,5 +1,11 @@
 (function (global) {
   const messages = {
+    "workspace.history.account": "账号会话",
+    "workspace.history.more": "加载更多",
+    "workspace.history.retry": "重新加载",
+    "workspace.history.localError": "本机历史暂时无法读取",
+    "workspace.history.accountError": "账号会话暂时无法读取",
+    "workspace.history.loading": "正在加载…",
     "harness2.stage.准备运行环境": "准备运行环境",
     "harness2.stage.启动执行组件": "启动执行组件",
     "harness2.stage.初始化执行组件": "初始化执行组件",

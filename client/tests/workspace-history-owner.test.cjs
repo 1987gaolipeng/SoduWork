@@ -11,6 +11,7 @@ function fixture(user = 'user-a', options = {}) {
     SoduWorkAPI: { hubBase: () => hub, clientAuthSnapshot: () => ({ user: user ? { id: user } : null, clientId: device }),
       taskStorageKey: () => ['cache', hub, device, user || 'unbound'].join('@') },
     soduWorkAPI: { conversationSession: {
+      localHistorySupported: options.local === true,
       history: options.history || (() => new Promise((resolve, reject) => pending.push({ user, resolve, reject }))),
       onEvent() {},
       onEventBatch(fn) { const sub = { fn, closed: false }; subscriptions.push(sub); return () => { sub.closed = true; }; },

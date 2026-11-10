@@ -180,7 +180,20 @@ test('first prompt creates an immediate history row backed by the real Pi sessio
      the shell destructures it and the chat list still reconciles every chat update. */
   assert.match(shell, /_reconcileChats, _upsertChatItems \} = global\.WorkspaceChatHistory/);
   const chatHistory = read('components', 'workspace', 'workspace-chat-history.js');
-  assert.match(chatHistory, /function _reconcileChats\(current, items, now\)/);
+  const historyScope = { window: {} };
+  vm.runInNewContext(chatHistory, historyScope);
+  const now = 1700000000000;
+  const rows = historyScope.window.WorkspaceChatHistory._reconcileChats(
+    [{ localId: 'draft-first', title: 'First prompt', at: now, pending: true }],
+    [{ id: 'real-pi-session', title: 'First prompt', at: now + 1, state: 'running' }],
+    now + 2,
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, 'real-pi-session');
+  assert.equal(rows[0].title, 'First prompt');
+  assert.equal(rows[0].pending, false);
+  assert.equal(rows[0]._uiKey, 'draft:draft-first');
+  assert.equal(Object.hasOwn(rows[0], 'localId'), false);
   const chatList = read('components', 'workspace', 'workspace-chat-list.js');
   assert.match(chatList, /ctx\.chatItems = ctx\._reconcileChats\(/);
   /* Allow selecting optimistic rows once they have a real session ID, even during startup. */

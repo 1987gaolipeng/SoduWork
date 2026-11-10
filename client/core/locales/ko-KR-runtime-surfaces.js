@@ -1,5 +1,11 @@
 (function (global) {
   const messages = {
+    "workspace.history.account": "계정 대화",
+    "workspace.history.more": "더 불러오기",
+    "workspace.history.retry": "새로고침",
+    "workspace.history.localError": "현재 로컬 기록을 불러올 수 없습니다",
+    "workspace.history.accountError": "현재 계정 대화를 불러올 수 없습니다",
+    "workspace.history.loading": "불러오는 중…",
     "harness2.stage.准备运行环境": "실행 환경 준비",
     "harness2.stage.启动执行组件": "실행기 시작",
     "harness2.stage.初始化执行组件": "실행기 초기화",
