@@ -16,7 +16,7 @@ if (typeof electron === 'string') {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-composer-resize-'));
   const baseline = process.argv.includes('--baseline'), name = baseline ? 'baseline' : 'current';
   const report = { ok: false, baseline, boundary: 'Real renderer/preload/IPC and pointer drag; synthetic session and model catalog; network blocked.', layouts: [], cases: [], errors: [] };
-  let win;
+  let win, openedWorkdirs = 0;
   fs.mkdirSync(out, { recursive: true }); app.setPath('userData', path.join(root, 'profile'));
   const read = file => fs.readFileSync(path.join(client, file), 'utf8');
   const js = source => win.webContents.executeJavaScript(source, true);
@@ -58,7 +58,7 @@ if (typeof electron === 'string') {
     assert.equal(await js(`document.querySelector('.nchat').classList.contains('ncw-resizing')`), false);
   }
   async function geometry() {
-    return js(`(()=>{const selectors=['#nchatMore','[data-execution-menu]','#nchatRuntime','#nchatWd','#nchatMode','#nchatMeta','.nmodel-button','#nchatMic','#nchatSend'];const box=document.querySelector('.nbox').getBoundingClientRect(),main=document.querySelector('.nchat-main').getBoundingClientRect();
+    return js(`(()=>{const selectors=['#nchatMore','[data-execution-menu]','#nchatRuntime','#nchatWd','#nchatMode','#nchatMeta','.nmodel-button','#nchatSend'];const box=document.querySelector('.nbox').getBoundingClientRect(),main=document.querySelector('.nchat-main').getBoundingClientRect();
       const controls=selectors.map(selector=>{const e=document.querySelector(selector),r=e.getBoundingClientRect();return{selector,left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)),visible:e.checkVisibility(),inside:r.left>=box.left-1&&r.right<=box.right+1&&r.top>=box.top-1&&r.bottom<=box.bottom+1}});
       const overlaps=[];for(let a=0;a<controls.length;a++)for(let b=a+1;b<controls.length;b++){const x=controls[a],y=controls[b];if(Math.min(x.right,y.right)-Math.max(x.left,y.left)>1&&Math.min(x.bottom,y.bottom)-Math.max(x.top,y.top)>1)overlaps.push([x.selector,y.selector]);}
       const permission=document.querySelector('#nchatMode'),label=permission.querySelector('b'),s=getComputedStyle(document.querySelector('.nbox'));return{viewport:innerWidth,mainWidth:main.width,composerWidth:box.width,queryWidth:box.width-parseFloat(s.borderLeftWidth)-parseFloat(s.borderRightWidth),toolbarHeight:document.querySelector('.wc-toolbar').getBoundingClientRect().height,controls,overlaps,overflow:document.documentElement.scrollWidth>innerWidth+1,risk:permission.classList.contains('wc-permission-risk'),permissionClipped:label.scrollWidth>label.clientWidth+1,pendingVisible:document.querySelector('.nchat-access-pending').checkVisibility(),input:document.querySelector('#nchatInput').value};})()`);
@@ -71,7 +71,7 @@ if (typeof electron === 'string') {
     assert.ok(Math.max(...centers) - Math.min(...centers) <= 1, 'Every control stays on one row: '+JSON.stringify(g));
     assert.ok(g.toolbarHeight <= 52, 'Footer height must not grow after dragging');
     assert.ok(precedes('#nchatMore', '[data-execution-menu]') && precedes('[data-execution-menu]', '#nchatMode') && precedes('#nchatMode', '#nchatWd'), 'Add, execution, access, workspace order');
-    assert.ok(precedes('.nmodel-button', '#nchatRuntime') && precedes('#nchatRuntime', '#nchatMic'), 'Model, Agent, voice order');
+    assert.ok(precedes('.nmodel-button', '#nchatRuntime') && precedes('#nchatRuntime', '#nchatSend'), 'Model, Agent, send order');
     assert.ok(box('.nmodel-button').width <= 120.5, 'Compact model trigger');
     assert.ok(g.controls.every(row => row.visible && row.inside && row.width >= 15 && row.height >= 15 && row.hit), JSON.stringify(g));
     assert.equal(g.overflow, false); assert.equal(g.risk, true); assert.equal(g.permissionClipped, false);
@@ -105,7 +105,8 @@ if (typeof electron === 'string') {
     ipcMain.handle('work-preview-show', (_e, options) => ({ ok: true, state: { tabId: options.tabId, url: options.url, loading: false } }));
     for (const [channel, value] of Object.entries({ 'pi-session-history': { ok: true, chats: [] }, 'pi-session-outputs': { ok: true, files: [], artifacts: [] },
       'pi-session-runtimes': { ok: true, runtimes: [{ id: state.adapterId, modelMode: 'managed' }] },
-      'pi-session-release': { ok: true }, 'work-preview-hide': { ok: true }, 'work-preview-destroy': { ok: true }, 'pi-session-open-session-workdir': { ok: true }, 'access-preferences-get': { ok: true } })) ipcMain.handle(channel, () => value);
+      'pi-session-release': { ok: true }, 'work-preview-hide': { ok: true }, 'work-preview-destroy': { ok: true }, 'access-preferences-get': { ok: true } })) ipcMain.handle(channel, () => value);
+    ipcMain.handle('pi-session-open-session-workdir', () => { openedWorkdirs++; return { ok: true }; });
     ipcMain.handle('pi-session-set-access-mode', () => ({ ok: true, snapshot: state }));
     ipcMain.handle('pi-session-artifact-action', (_e, _ref, _id, action) => action === 'read'
       ? { ok: true, text: '# 成果阅读位置\n\n' + Array.from({ length: 70 }, (_, i) => '## Section ' + i + '\n\n内容保留，不因全屏重建。').join('\n\n') }
@@ -136,7 +137,10 @@ if (typeof electron === 'string') {
     // The add menu uses the same installed-plugin normalizer as the live shell.
     for (const file of ['components/panels/compose-candidate-navigation.js', 'components/panels/chat-plugin-mention-model.js',
       'components/panels/chat-plugin-mention.js']) await js(read(file) + '\nvoid 0;');
+    await js(read('components/panels/panels-chat-chrome.js') + '\nvoid 0;');
     await js(`NativeChat.enter('','resize-fixture',{adapterId:'codex-harness'})`); await until(`NativeChat.sessionInfo().ref==='resize-fixture'`);
+    assert.equal(await js(`document.querySelector('#nchatMic').checkVisibility()`), false,
+      'the existing unsupported voice control stays hidden');
     await js(`ChatWorkbench.openLink('https://isolated.invalid/preview');void 0;`);
     await until(`document.querySelector('[data-wb-resize]')?.checkVisibility()`);
     win.webContents.debugger.attach('1.3'); await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
@@ -176,8 +180,12 @@ if (typeof electron === 'string') {
     await click('.nmodel-button'); await until(`document.querySelectorAll('[data-model-name]').length===1`); await popup('.nmodel-pop'); await shot('model-menu');
     await click('[data-model-name="long-model"]'); await until(`document.querySelector('.nmodel-pop').hidden`);
     await click('#nchatMore'); await popup('#nchatMorePop'); await shot('add-menu'); await click('#nchatMore');
-    await click('#nchatWd'); await click('#nchatMeta'); await popup('.nctx-pop'); await click('#nchatMeta');
-    report.cases.push('Narrow-column permission, model, add, workspace and context controls are actually mouse-clickable through production handlers/preload; model selection returns through controlled IPC.');
+    assert.deepEqual(await js(`(()=>{const e=document.querySelector('#nchatWd');return{tag:e.tagName,tabIndex:e.tabIndex,cursor:getComputedStyle(e).cursor}})()`),
+      { tag: 'SPAN', tabIndex: -1, cursor: 'default' });
+    await click('#nchatWd'); assert.equal(openedWorkdirs, 0, 'the existing workspace label is display-only');
+    await click('[data-chat-open-location]'); assert.equal(openedWorkdirs, 1, 'the header retains explicit folder access');
+    await click('#nchatMeta'); await popup('.nctx-pop'); await click('#nchatMeta');
+    report.cases.push('Narrow-column permission, model, add and context controls remain clickable; workspace is a static non-focusable label with no open/change action, while the independent header still opens its original location.');
     await drag(.7); check(await geometry()); await drag(.3); check(await geometry());
     // A real Markdown document gives us a persistent scrollable preview. Only
     // the artifact read boundary is stubbed; rendering and resizing are production.

@@ -139,14 +139,26 @@ class LegalPublicationsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(denied.status_code, 403)
 
     async def test_published_snapshot_is_immutable_and_multilingual(self):
+        before = (await self.status())['documents']
+        privacy_fallback = [row for row in before if row['key'] == 'privacy']
+        self.assertEqual([row['locale'] for row in privacy_fallback], ['zh-CN', 'en-US', 'ja-JP', 'ko-KR'])
         first = await self.publish()
         docs = (await self.status())['documents']
-        self.assertEqual([row['locale'] for row in docs if row['key'] == 'terms'], ['en-US', 'ja-JP'])
-        self.assertEqual(next(row for row in docs if row.get('locale') == 'en-US')['content'], self.payload()['translations']['en-US']['content'])
+        published_terms = [row for row in docs if row['key'] == 'terms']
+        self.assertEqual([row['locale'] for row in published_terms], ['en-US', 'ja-JP'])
+        self.assertEqual(len(docs), 6)
+        self.assertEqual([row for row in docs if row['key'] == 'privacy'], privacy_fallback)
+        for locale, translation in self.payload()['translations'].items():
+            row = next(row for row in docs if row['key'] == 'terms' and row['locale'] == locale)
+            self.assertEqual(row['content'], translation['content'])
+            self.assertEqual(row['digest'], legal.digest({**translation, 'format': self.payload()['format']}))
         await self.publish(version='v2')
+        current = (await self.status())['documents']
+        self.assertEqual([row for row in current if row['key'] == 'privacy'], privacy_fallback)
         old = await self.call('GET', '/api/v1/client-auth/legal-documents/versions/' + first['id'])
         self.assertEqual(old.status_code, 200)
         self.assertTrue(all(row['version'] == 'v1' for row in old.json()['documents']))
+        self.assertEqual(old.json()['documents'], published_terms)
         self.assertEqual((await self.state())['history'][1]['digest'], first['digest'])
         state = await self.state()
         saved = await self.call('PUT', '/api/v1/admin/legal-documents/terms/draft', {'revision': state['revision'], 'draft': self.payload('v1')})

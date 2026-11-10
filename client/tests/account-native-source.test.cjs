@@ -56,6 +56,64 @@ test('runtime segments resolve to their stable public identity after rework or a
     app: f.app, id: 'second-runtime', identity: identity('two') }), /账号/);
 });
 
+test('a passive account view cannot mask an authenticated native archive after startup', async t => {
+  const f = setup(t);
+  let lookups = 0;
+  const projection = { adapterId: 'account-sync', inFlight: () => false,
+    historyRow: () => ({ ...f.item, accountConversation: true, accountProjection: true }),
+    snapshot: () => ({ execution: { accountConversation: true, readOnly: true } }) };
+  f.session = { findBySessionId: () => projection,
+    archivedConversation: async (_app, id, options) => {
+      lookups++;
+      assert.equal(id, f.native.id);
+      assert.deepEqual(options, { nativeOnly: true });
+      return f.native;
+    } };
+  const restored = await resolve(f);
+  assert.equal(restored.id, 'native');
+  assert.equal(restored.adapterId, 'pi');
+  assert.equal(restored.accountConversation, undefined);
+  assert.deepEqual(restored.historyAliasIds, ['native', 'account-copy']);
+  assert.equal(lookups, 1);
+  assert.equal((await resolve({ ...f, item: { ...f.item, deleted: true } })).id, 'native',
+    'tombstone mapping still identifies the native archive for lifecycle suppression');
+  f.session.archivedConversation = async () => null;
+  assert.equal(await resolve(f), null, 'an account projection is never a native archive fallback');
+});
+
+test('passive-view recovery preserves device and archive ownership boundaries', async t => {
+  const f = setup(t);
+  let lookups = 0;
+  f.session = { findBySessionId: () => ({ adapterId: 'account-sync', inFlight: () => false }),
+    archivedConversation: async () => {
+      lookups++;
+      return { ...f.native, workOwner: scope(identity('two')) };
+    } };
+  assert.equal(await resolve({ ...f, item: { ...f.item, sourceClientId: 'another-device' } }), null);
+  assert.equal(lookups, 0, 'foreign-device projections must not probe local execution archives');
+  await assert.rejects(resolve(f), /当前账号/);
+  assert.equal(lookups, 1);
+});
+
+test('passive-view recovery never replaces a cloud execution or an active handle', async t => {
+  const f = setup(t);
+  let lookups = 0;
+  const live = { adapterId: 'account-sync', inFlight: () => false, passiveCloudView: true };
+  f.session = { findBySessionId: () => live,
+    archivedConversation: async () => { lookups++; return f.native; } };
+  assert.equal(await resolve(f), null);
+  live.passiveCloudView = false;
+  live.inFlight = () => true;
+  assert.equal(await resolve(f), null);
+  assert.equal(lookups, 0);
+  live.inFlight = () => false;
+  for (const invalid of [{ ...f.native, cloud: true }, { ...f.native, accountProjection: true },
+    { ...f.native, accountConversation: true }, { ...f.native, adapterId: 'account-sync' }]) {
+    f.session.archivedConversation = async () => invalid;
+    assert.equal(await resolve(f), null);
+  }
+});
+
 test('archived native conversations preserve their archive state instead of falling back to an active account projection', async t => {
   const f = setup(t);
   f.session.isArchived = () => true;

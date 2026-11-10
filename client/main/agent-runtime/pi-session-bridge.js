@@ -640,7 +640,16 @@ function createPiSessionBridge(options) {
     if (replicaHistory) {
       for (let i = 1; i < rows.length; i++) rows[i].chats = await replicaHistory.projectRows(rows[i].chats || [], false);
       const copies = await replicaHistory.indexedRows(false, Number(limit) || 50);
-      rows.push({ ok: true, chats: copies.filter(row => row.cached) });
+      // A runtime directory can be empty while its account/process reconnects.
+      // Retain every durable local transcript, not only downloaded copies.
+      // Native discovery still wins when present; stored lifecycle intent and
+      // execution ownership remain enforced by their existing boundaries.
+      rows.push({ ok: true, chats: copies });
+      // The preferred executable origin and its cached transcript are one
+      // sidebar entry. Reapply durable archive/restore intent on every read,
+      // including a cold start with no renderer lifecycle cache.
+      rows[0].lifecycle = [...(rows[0].lifecycle || []),
+        ...(await replicaHistory.remoteLifecycle?.(rows[0].chats || []) || [])];
     }
     let archivedIds = null;
     if (sessionModule.archiveState && typeof sessionModule.archiveState.read === 'function' &&

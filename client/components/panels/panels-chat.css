@@ -696,7 +696,8 @@
   color:var(--ink-3,#8a8f98);cursor:pointer;max-width:190px}
 .nwd svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.8;flex:0 0 auto}
 .nwd span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.nwd:hover,.nmode:hover{background:var(--surface-2,rgba(0,0,0,.04));color:var(--ink-2,#4a5058)}
+.nwd{cursor:default}
+.nmode:hover{background:var(--surface-2,rgba(0,0,0,.04));color:var(--ink-2,#4a5058)}
 .nwd.ghost{padding:3px 8px}
 .nmode.ro{background:var(--warn-soft,#fff4e5);border-color:transparent;color:var(--warn,#b25e09);font-weight:600}
 

@@ -258,12 +258,6 @@ async function open(opts) {
   }
   let piSession = created.session;
   require('../conversation/native-agent-source.cjs').install(piSession.sessionManager, 'pi');
-  /* Persist an explicit「换个文件夹继续」choice so later resumes (and sidebar
-     labels) keep working in the folder the user chose, not the archived one. */
-  if (opts.workspaceMoved && opts.resumeCwd) {
-    try { piSession.sessionManager.appendCustomEntry('soduwork.workspace.moved', { version: 1, cwd: opts.resumeCwd }); }
-    catch (_) { /* archival persistence must not fail the open */ }
-  }
   const accessChanged = () => {
     queueMicrotask(() => {
       runControl.permissionWait(run, Boolean(access?.broker.pending().length));

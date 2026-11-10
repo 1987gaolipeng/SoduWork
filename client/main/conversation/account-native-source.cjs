@@ -13,9 +13,15 @@ async function resolve({ app, session, item, identity }) {
   if (record) { segments.assertOwner(app, record, identity); id = record.id; }
   const archived = session.isArchived?.(app, id) === true;
   const live = session.findBySessionId?.(id);
-  const row = live ? live.historyRow?.() || { id, adapterId: live.adapterId }
+  if (live?.passiveCloudView) return null;
+  // A previously attached account view must not mask a native archive that
+  // became available after startup. The projection itself grants no execution
+  // rights: the source device and the archive owner are still checked here.
+  const accountView = live?.adapterId === 'account-sync';
+  if (accountView && live.inFlight?.()) return null;
+  const row = live && !accountView ? live.historyRow?.() || { id, adapterId: live.adapterId }
     : await session.archivedConversation?.(app, id, { nativeOnly: true });
-  if (!row || row.accountConversation || row.cloud || live?.passiveCloudView) return null;
+  if (!row || row.accountConversation || row.accountProjection || row.adapterId === 'account-sync' || row.cloud) return null;
   access.assertOwner(app, id, access.actor(app, identity), row);
   const nativeIds = [...new Set([id, ...(record?.segments || []).map(part => part.sessionId),
     record?.active?.sessionId, item.sourceSessionId].filter(Boolean))];

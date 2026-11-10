@@ -2176,6 +2176,10 @@ def main() -> None:
         from app.services import acp_bridge
         raise SystemExit(acp_bridge.main())
 
+    if len(sys.argv) > 1 and sys.argv[1] == "--harness2-native":
+        from app.services import harness2_native
+        raise SystemExit(harness2_native.main())
+
     if len(sys.argv) > 1 and sys.argv[1] == "--harness2-bridge":
         sys.argv = [sys.argv[0], *sys.argv[2:]]
         from app.services import harness2_bridge

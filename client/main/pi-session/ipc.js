@@ -463,12 +463,55 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
       if (expectedIdentity && (!openingConnection || openingConnection !== connectionOf(expectedIdentity))) {
         return { ok: false, reason: '连接环境已切换，本次自动化未启动' };
       }
-      if (opts.chatId && !session.findBySessionId(opts.chatId) &&
+      const selectNativeSource = async native => {
+        await assertHistoryCurrent();
+        // A previously attached account projection may have hidden an archive
+        // while local history was unavailable. Retire only that passive view;
+        // an existing execution runtime must be reattached below, never closed.
+        const views = new Set([opts.chatId, native.id].map(id => session.findBySessionId(id)));
+        for (const view of views) {
+          if (view?.adapterId !== 'account-sync') continue;
+          if (view.inFlight?.()) throw Error('这条会话还在执行，完成或停止后再操作');
+          if (!await closeFailedOpen(view)) throw Error('会话仍在关闭，请稍后重试');
+          await assertHistoryCurrent();
+        }
+        nativeLocal = true;
+        Object.assign(opts, { chatId: native.id, adapterId: native.adapterId || 'pi',
+          accountConversation: false, accountProjection: false });
+      };
+      const selectedLive = opts.chatId && session.findBySessionId(opts.chatId);
+      if (opts.chatId && (!selectedLive || selectedLive.adapterId === 'account-sync') &&
           typeof _accountSync !== 'undefined' && _accountSync?.isAccountConversation?.(opts.chatId)) {
         const item = await _accountSync.row(opts.chatId);
+        await assertHistoryCurrent();
+        if (item?.deleted) return { ok: false, notFound: true, reason: '这条会话已经不存在了' };
         const native = await require('../conversation/account-native-source.cjs').resolve({ app, session, item, identity });
         await assertHistoryCurrent();
-        if (native) opts.chatId = native.id;
+        if (native) await selectNativeSource(native);
+      }
+      // Resolve account aliases before choosing a live handle or native archive.
+      // A source alias may already equal the native ID after an earlier lookup;
+      // equality is not evidence that this conversation must stay read-only.
+      if (opts.chatId && !nativeLocal && (!selectedLive || selectedLive.adapterId === 'account-sync') &&
+          typeof _accountSync !== 'undefined' && typeof _accountSync?.openProjection === 'function') {
+        const projection = await _accountSync.openProjection(opts.chatId).catch(() => null);
+        if (projection) {
+          await assertHistoryCurrent();
+          const item = projection.historyRow?.();
+          if (item?.deleted) return { ok: false, notFound: true, reason: '这条会话已经不存在了' };
+          const native = await require('../conversation/account-native-source.cjs').resolve({
+            app, session, item, identity });
+          await assertHistoryCurrent();
+          if (native) await selectNativeSource(native);
+          else if (!session.findBySessionId(opts.chatId)) {
+            const handle = session.attachView(projection);
+            _sessionOwners?.bind(handle, identity, { connection: true });
+            if (event) _attach(handle, require('../conversation/app-surfaces.cjs').forSender(BrowserWindow, event.sender));
+            else _detach(handle);
+            _wire(BrowserWindow, handle);
+            return _openReply(handle, { resumed: true, attached: true, accountConversation: true });
+          }
+        }
       }
       // Start the SDK/model work while local capability policy and Skill
       // discovery are being resolved. `prewarm` shares model-config's pending
@@ -534,31 +577,6 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
             _discardRenderer(live);
             throw error;
           }
-        }
-      }
-      // Keep the archived/cloud reopen path usable while the optional account
-      // projection is still being installed (and for isolated IPC harnesses
-      // that do not provide that optional service).
-      if (opts.chatId && !nativeLocal && typeof _accountSync !== 'undefined' &&
-          typeof _accountSync?.openProjection === 'function') {
-        const projection = await _accountSync.openProjection(opts.chatId).catch(() => null);
-        if (projection) {
-          await assertHistoryCurrent();
-          // A restored sidebar can open before account history finishes loading.
-          // Resolve the authenticated projection metadata before attaching a view.
-          const native = await require('../conversation/account-native-source.cjs').resolve({
-            app, session, item: projection.historyRow?.(), identity });
-          await assertHistoryCurrent();
-          if (native && native.id !== opts.chatId) {
-            return openConversation(event, { ...opts, chatId: native.id, adapterId: native.adapterId || 'pi',
-              accountConversation: false, accountProjection: false }, identity, automationContext);
-          }
-          const handle = session.attachView(projection);
-          _sessionOwners?.bind(handle, identity, { connection: true });
-          if (event) _attach(handle, require('../conversation/app-surfaces.cjs').forSender(BrowserWindow, event.sender));
-          else _detach(handle);
-          _wire(BrowserWindow, handle);
-          return _openReply(handle, { resumed: true, attached: true, accountConversation: true });
         }
       }
       // Account projections are read-only views and are not registered Agent
@@ -661,18 +679,11 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
           throw Error('原会话工作目录不可用，请在来源电脑恢复目录后重试');
         });
       }
-      /* 「换个文件夹继续」：resume 默认锚定存档目录，仅当用户在聊天条显式选择
-         新文件夹时才迁移本轮续聊的工作目录；远端中转继续不适用。 */
-      let workspaceMoved = '';
-      const resumeOverride = resume && opts.nativeRelay !== true
-        ? String(opts.resumeWorkspace || '').trim() : '';
+      // Existing conversations keep their persisted directory. A missing local
+      // directory retains the established recovery fallback; new drafts choose.
       const cwd = resume
-        ? require('./resume-cwd')(app, resume, _defaultCwd, resumeOverride)
+        ? require('./resume-cwd')(app, resume, _defaultCwd)
         : _newSessionCwd(app, ref, opts);
-      if (resumeOverride && path.resolve(cwd) === path.resolve(resumeOverride) &&
-          path.resolve(cwd) !== path.resolve(String(resume.cwd || ''))) {
-        workspaceMoved = cwd;
-      }
       const permitted = await workOpening.applyPolicy({ app, event, options: opts, resume, work, cwd,
         automationContext, accessConsent, BrowserWindow, confirmFullAccess });
       if (!permitted.ok) { await capabilityPromise.catch(() => {}); return permitted; }
@@ -699,7 +710,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         };
       }
       const memoryContext = await memoryContextPromise;
-      const spec = sessionSpec.build(opts, resolved, {
+      const spec = sessionSpec.build({ ...opts, cwd }, resolved, {
         cwd,
         readOnly: (_conf().mode || 'full') === 'readonly',
       });
@@ -790,9 +801,6 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         resumedConversation: Boolean(resume && !work.bootstrap),
         /* SDK uses the validated directory; the archive path remains separate. */
         resumeCwd: resume ? cwd : '',
-        /* Set when this continuation explicitly moved to a user-picked folder;
-           session-open persists the choice into the archive for future opens. */
-        workspaceMoved,
         resumeAt: resume ? resume.at : 0,
         // Historical archives must paint immediately. Third-party extensions
         // are loaded serially by the SDK and one stalled extension used to

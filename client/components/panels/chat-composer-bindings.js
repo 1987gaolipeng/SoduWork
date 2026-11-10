@@ -138,9 +138,9 @@ function _mount() {
             '<div class="nbar">' +
               '<div class="nbar-left">' +
                 '<button type="button" class="nmeta" id="nchatMeta" title="查看上下文用量" aria-label="查看上下文用量"></button>' +
-                '<button class="nwd" id="nchatWd" title="AI 就在这个文件夹里干活 · 点击打开">' +
+                '<span class="nwd" id="nchatWd" title="工作位置">' +
                   '<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8' +
-                    'a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>…</span></button>' +
+                    'a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>…</span></span>' +
                 '<button class="nmode" id="nchatMode" title="只读＝只让它看，不许写文件、不许跑命令">' +
                   '<span></span></button>' +
               '</div>' +
@@ -475,16 +475,6 @@ function _bind(el) {
         return;
       }
       ctx._proposalAction(event);
-    });
-    el.querySelector('#nchatWd').addEventListener('click', () => {
-      const api = ctx._api();
-      if (!api) return;
-      if (ctx._ref && typeof api.openSessionWorkdir === 'function') api.openSessionWorkdir(ctx._ref);
-      else api.openWorkdir();
-    });
-    const wdPick = el.querySelector('#nchatWdPick');
-    if (wdPick) wdPick.addEventListener('click', () => {
-      void ctx._changeConversationWorkspace?.();
     });
     ctx._paintBar();
     if (global.ChatChrome) ChatChrome.bind(el, () => ({ ref: ctx._ref, snapshot: ctx._snap }));

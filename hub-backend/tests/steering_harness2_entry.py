@@ -14,7 +14,7 @@ native_init = acp_bridge.AcpBridge.__init__
 
 def fixture_vendor(self, argv, *args, **kwargs):
     assert len(model_calls) == 7, "each user turn must refine before starting the vendor"
-    assert argv == [sys.executable, "acp"], "only the fixture executor may be replaced"
+    assert argv[0] == sys.executable and Path(argv[1]).name == "harness2_native.py", "only the native executor may be replaced"
     peer = str(Path(__file__).with_name("steering_native_peer.py"))
     native_init(self, [sys.executable, peer, "harness2"], *args, **kwargs)
 

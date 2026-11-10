@@ -1,14 +1,10 @@
 'use strict';
 /*
- * 工作目录延续契约（2026-11-06 恢复 bad599b6 行为，用户明确推翻 704088f9 的
- * 「普通新会话分配独立工作目录」决定）：
- * 1. 纯新对话入口沿用上一个会话的工作目录（workspaceSource: 'last-session'）；
- *    无活动会话时沿用最近一次手选目录（'recent'）。项目归属仍然只认显式传入，
- *    云端会话目录（远端缓存路径）永不延续。
- * 2. 修改工作区的选择对话框从上次位置打开（pickCwd 支持 defaultPath）。
- * 3. 「换个文件夹继续」：resume 分支显式覆盖目录并写回存档
- *    （soduwork.workspace.moved），远端中转继续不适用。
- * 保留的历史回归：显式传入优先、目录来源不回流会话记录、recent 持久化模块。
+ * New drafts inherit the last local or explicitly selected workspace, never
+ * remote output caches. The draft picker opens at the last selected location.
+ * Once a conversation starts, its archive owns the working directory. Stale
+ * renderer overrides cannot relocate it; missing-path recovery remains intact.
+ * Existing migrated archives retain their persisted location on reopen.
  */
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -168,19 +164,19 @@ test('修改工作区：选择对话框从当前目录或最近手选目录打�
   assert.match(preload, /pickCwd: \(options\) => ipcRenderer\.invoke\('pi-session-pick-cwd', options \|\| \{\}\)/);
 });
 
-test('换个文件夹继续：resume 分支只认显式 resumeWorkspace，远端中转不适用', () => {
+test('archived conversations ignore removed workspace overrides and retain remote recovery protection', () => {
   const ipc = read('main/pi-session/ipc.js');
-  /* 显式覆盖参数独立于既有 opts.cwd：历史调用方不会悄悄移动会话。 */
-  assert.match(ipc, /const resumeOverride = resume && opts\.nativeRelay !== true\s*\n\s*\? String\(opts\.resumeWorkspace \|\| ''\)\.trim\(\) : '';/);
-  assert.match(ipc, /require\('\.\/resume-cwd'\)\(app, resume, _defaultCwd, resumeOverride\)/);
-  /* 远端中转继续的防护保持原样：原目录不可用仍然报错，不迁移。 */
+  assert.doesNotMatch(ipc, /resumeWorkspace|resumeOverride|workspaceMoved/);
+  assert.match(ipc, /require\('\.\/resume-cwd'\)\(app, resume, _defaultCwd\)/);
   assert.match(ipc, /if \(opts\.nativeRelay === true && resume\) \{\s*\n\s*require\('\.\/resume-cwd'\)\(app, resume, \(\) => \{/);
-  assert.match(ipc, /resumeCwd: resume \? cwd : '',[\s\S]{0,220}workspaceMoved,/);
+  assert.match(ipc, /resumeCwd: resume \? cwd : '',/);
   const sessionOpen = read('main/pi-session/session-open.js');
-  assert.match(sessionOpen, /opts\.workspaceMoved && opts\.resumeCwd[\s\S]{0,160}appendCustomEntry\('soduwork\.workspace\.moved', \{ version: 1, cwd: opts\.resumeCwd \}\)/);
+  assert.doesNotMatch(sessionOpen, /workspaceMoved|soduwork\.workspace\.moved/);
+  assert.match(read('main/pi-session/archive-history.js'), /soduwork\.workspace\.moved/,
+    'previously migrated archives must retain their recorded directory');
 });
 
-test('resume-cwd：显式换目录优先，失效回退存档目录，再回退默认工作区', () => {
+test('resume-cwd keeps the archive directory despite stale overrides and preserves missing-path recovery', () => {
   const resumeCwd = require('../main/pi-session/resume-cwd');
   const os = require('node:os');
   const base = require('node:fs').mkdtempSync(path.join(os.tmpdir(), 'soduwork-resume-cwd-'));
@@ -189,13 +185,9 @@ test('resume-cwd：显式换目录优先，失效回退存档目录，再回退�
   require('node:fs').mkdirSync(picked);
   require('node:fs').mkdirSync(archived);
   const fallback = () => 'FALLBACK';
-  /* 用户显式选择的新目录存在：覆盖存档目录。 */
-  assert.equal(resumeCwd({}, { cwd: archived }, fallback, picked), path.resolve(picked));
-  /* 新目录已删除：沿用存档目录，不落入默认工作区。 */
+  assert.equal(resumeCwd({}, { cwd: archived }, fallback, picked), path.resolve(archived));
   assert.equal(resumeCwd({}, { cwd: archived }, fallback, path.join(base, 'gone')), path.resolve(archived));
-  /* 相对路径不是合法覆盖。 */
   assert.equal(resumeCwd({}, { cwd: archived }, fallback, 'relative/dir'), path.resolve(archived));
-  /* 存档目录也失效：回落默认工作区。 */
   assert.equal(resumeCwd({}, { cwd: path.join(base, 'gone-too') }, fallback, path.join(base, 'gone')), 'FALLBACK');
   require('node:fs').rmSync(base, { recursive: true, force: true });
 });
@@ -214,7 +206,11 @@ test('聊天条「换」按钮链路：入口、绑定与重开参数齐备', ()
   assert.match(handler, /api\.pickCwd\(_wd\?\.dir \? \{ defaultPath: _wd\.dir \} : \{\}\)/);
   assert.match(handler, /resumeWorkspace: dir, cwd: dir, workspaceLabel: label, chatTitle: title/);
   const css = read('components/panels/work-composer.css');
-  assert.match(css, /\.wc-wd-pick\{[^}]*var\(--ink-5\)/);
+  assert.doesNotMatch(css, /\.wc-wd-pick/);
+  assert.doesNotMatch(bindings, /querySelector\('#nchatWd'\)\.addEventListener/);
+  assert.match(composer, /id: 'nchatWd',[\s\S]{0,160}readOnly: true/);
+  assert.match(read('components/panels/panels-chat-chrome.js'), /data-chat-open-location/,
+    'the independent header action still opens the existing directory');
 });
 
 test('主进程持久化模块：三个 IPC、来源校验与失效目录拦截齐备', () => {

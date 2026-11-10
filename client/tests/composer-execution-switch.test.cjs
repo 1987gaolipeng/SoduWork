@@ -121,14 +121,15 @@ test('remote conversation bar identifies downloaded results without relabeling t
  const source=read('panels-chat.js'),start=source.indexOf('  function _paintBar()');
  vm.runInNewContext(source.slice(start,source.indexOf('  function _thinkingStatusHtml',start))+'\n_paintBar();',ctx);
  assert.equal(root.querySelector('#nchatWdName').textContent,'云端成果');
- assert.match(root.querySelector('#nchatWd').title,/成果缓存/);
+ assert.equal(root.querySelector('#nchatWd').title,workspace.dir);
  assert.doesNotMatch(root.querySelector('#nchatWd').title,/AI 就在/);
  assert.equal(workspace.name,'private-hash','display changes cannot mutate the output cache identity');
  ctx._snap.cloudHandoff.target.runnerKind='work-computer';ctx._paintBar();
  assert.equal(root.querySelector('#nchatWdName').textContent,'电脑成果');
  ctx._snap={};ctx._paintBar();
  assert.equal(root.querySelector('#nchatWdName').textContent,'private-hash');
- assert.match(root.querySelector('#nchatWd').title,/AI 就在/);
+ assert.equal(root.querySelector('#nchatWd').title,workspace.dir);
+ assert.doesNotMatch(root.querySelector('#nchatWd').title,/点击打开/);
 });
 test('new drafts default local; a pending cloud check cannot switch back after the user selects local',async()=>{
  const f=composeFixture(),wait=deferred();assert.equal(f.window.ComposeExecution.value(),'local');f.runtime.refreshAccess=()=>wait.promise;

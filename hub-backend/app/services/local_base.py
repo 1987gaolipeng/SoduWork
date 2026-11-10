@@ -901,19 +901,16 @@ def _prepare_codex_home(env: dict) -> None:
 
 
 def _env_for(prof: dict, cfg: dict, runtime_ref: str = "") -> dict:
-    """Build the child-process environment; inject OpenCode model configuration and credentials through environment variables instead of files."""
-    # The bundled Harness² adapter supplies both its own model-only stages and
-    # the existing OpenCode executor environment. It must not fall through to
-    # the default managed-CLI branch below.
-    if prof is _PROFILES.get("harness2"):
-        return _harness2_runtime.environment(dict(os.environ), cfg, runtime_ref=runtime_ref)
+    """Prepare subprocess configuration, injecting OpenCode settings and secrets through
+    environment variables rather than encrypted configuration files.
+    """
     env = dict(os.environ)
     from . import runtime_images
     env.pop(runtime_images.ENV_KEY, None)
     if cfg.get(runtime_images.CFG_KEY):
         if not runtime_ref:
             raise runtime_images.ImageInputError("图片附件缺少会话归属，请重新发送")
-        if (prof.get("acp_key") or prof is _PROFILES.get("opencode")) and not runtime_images.transport_supported(cfg.get("llm")):
+        if (prof.get("acp_key") or prof is _PROFILES.get("opencode") or prof is _PROFILES.get("harness2")) and not runtime_images.transport_supported(cfg.get("llm")):
             raise runtime_images.ImageInputError("当前所选模型未启用图片输入，请手动选择支持图片的模型后重试；原图已保留，未自动更换模型")
         env[runtime_images.ENV_KEY] = runtime_images.environment(cfg, os.path.join(_store_dir(runtime_ref), "inputs"))
     # Agent skills may launch Python subprocesses. Keep their text boundary
@@ -969,6 +966,9 @@ def _env_for(prof: dict, cfg: dict, runtime_ref: str = "") -> dict:
     # Add repository hosts to NO_PROXY while preserving system proxies for other requests.
     # Set this before the needs_llm early return so agents using native accounts also inherit it.
     _git_host_no_proxy(env, str((cfg or {}).get("repoGitUrl") or ""))
+    if prof is _PROFILES.get("harness2"):
+        return _no_proxy_for(_harness2_runtime.environment(env, cfg, runtime_ref=runtime_ref),
+                             str((cfg.get("llm") or {}).get("base") or ""))
     if not prof.get("needs_llm"):
         if prof.get("acp_key"):
             _acp_agents.home_env(prof["acp_key"], env, _data_root())

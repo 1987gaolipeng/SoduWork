@@ -171,6 +171,11 @@ async function fetchModel(identity, modelName = '', timeoutMs = 8000, fetchImpl 
           supportsReasoningEffort: d.supportsReasoningEffort,
           thinkingAlwaysOn: d.thinkingAlwaysOn,
           thinkingLevelMap: d.thinkingLevelMap }),
+        // Preserve declared policy separately from normalized capabilities.
+        ...(['none', 'always', 'controllable'].includes(d.thinkingMode)
+          ? { thinkingMode: d.thinkingMode } : {}),
+        ...(typeof d.thinkingAlwaysOn === 'boolean' ? { thinkingAlwaysOn: d.thinkingAlwaysOn } : {}),
+        ...(thinkingCapabilities.LEVELS.includes(d.thinkingLevel) ? { thinkingLevel: d.thinkingLevel } : {}),
         // Image forwarding is an explicit server-side opt-in.  Older servers
         // advertised every model as image-capable, which made text-only
         // gateways reject an attached image with an opaque HTTP 400.

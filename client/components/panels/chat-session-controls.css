@@ -40,7 +40,6 @@
   .nbox.work-composer .wc-runtime-more{padding-inline:4px}
   .nbox.work-composer #nchatContext>#nchatWd{width:30px;max-width:30px;flex:0 0 30px;padding:0;justify-content:center}
   .nbox.work-composer #nchatWd .wc-context-copy{display:none}
-  .nbox.work-composer .wc-wd-pick{display:none}
 }
 @container chat-composer (max-width:540px){
   .nbox.work-composer .nchat-access-wrap>#nchatMode{position:relative;width:30px;max-width:30px;height:30px;padding:0;justify-content:center}

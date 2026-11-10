@@ -41,7 +41,7 @@ if (typeof electron === 'string') {
     await win.loadFile(path.join(__dirname,'fixtures/conversation-runtime-picker.html'));await until('window.fixtureReady');
     await js('runtimes=' + JSON.stringify(require('../main/agent-runtime/runtime-catalog').runtimes().map(row => ({
       ...row, ...(row.id === 'dsh' ? { availability: { ok: true, detectedVersion: '@openma/deepseek-harness-acp 0.4.40' } } : {}),
-    }))) + ';void 0');
+    }))) + ';window.dispatchEvent(new Event("agent-runtimes-changed"));void 0');
     await js('document.querySelector("#nchatInput").value="Keep my draft";document.querySelector("#nchatInput").dispatchEvent(new Event("input"));void 0');
     for(const agent of [...require('../main/agent-runtime/runtime-catalog').runtimes().map(row => row.id).filter(id => id !== 'pi'), 'pi']) {
       await click('#nchatRuntime'); await until('document.querySelector("[data-runtime=qwen]")');
@@ -94,7 +94,7 @@ if (typeof electron === 'string') {
       const output=path.resolve(__dirname,'../outputs/deepseek-picker');fs.mkdirSync(output,{recursive:true});fs.writeFileSync(path.join(output,'agent-picker-'+width+'.png'),(await win.webContents.capturePage()).toPNG());
       await js('controls.reset();void 0');
     }
-    await js('runtimes.find(row=>row.id==="dsh").version="@openma/deepseek-harness-acp 0.5.0-beta.2+very.long.build.identifier";void 0');
+    await js('runtimes.find(row=>row.id==="dsh").version="@openma/deepseek-harness-acp 0.5.0-beta.2+very.long.build.identifier";window.dispatchEvent(new Event("agent-runtimes-changed"));void 0');
     win.setSize(320,760);await click('#nchatRuntime');
     await assertRuntimeRow('v0.5.0-beta.2+very.long.build.identifier');
     assert.equal(await js('runtimes.find(row=>row.id==="dsh").version'),'@openma/deepseek-harness-acp 0.5.0-beta.2+very.long.build.identifier');

@@ -395,8 +395,10 @@
     const wd = document.getElementById('nchatWdName');
     if (wd) wd.textContent = workspace.name || '选个文件夹';
     const el = document.getElementById('nchatWd');
-    if (el) el.title = remote ? (_wd.dir ? '已同步到本机的成果缓存 · 点击打开' : '远程成果尚未同步到本机')
-      : _wd.dir ? ('AI 就在这儿干活：' + _wd.dir + ' · 点击打开') : '还没选文件夹';
+    if (el) {
+      el.title = _wd.dir || (remote ? workspace.name : '还没选文件夹');
+      el.setAttribute('aria-label', workspace.name || '工作位置');
+    }
     const md = document.getElementById('nchatModeName');
     if (md) md.textContent = (_snap?.nextAccessPolicy || _snap?.accessPolicy) ? WorkComposer.permissionLabel((_snap.nextAccessPolicy || _snap.accessPolicy).mode) : (_mode === 'readonly' ? '只读' : '兼容权限');
     const ability = document.getElementById('nchatAbilityName');

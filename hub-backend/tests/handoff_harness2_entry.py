@@ -24,9 +24,9 @@ def fixture_complete(model, messages, on_usage=None, *, timeout=20):
 
 def fixture_vendor(self, argv, *args, **kwargs):
     assert len(model_calls) == 7, "handoff must refine before starting the vendor"
-    assert argv == [sys.executable, "acp"], "only the synthetic executor may be replaced"
+    assert argv[0] == sys.executable and Path(argv[1]).name == "harness2_native.py", "only the native executor may be replaced"
     peer = str(Path(__file__).with_name("handoff_vendor_peer.py"))
-    native_init(self, [sys.executable, peer, "opencode"], *args, **kwargs)
+    native_init(self, [sys.executable, peer, "harness2"], *args, **kwargs)
 
 
 acp_bridge.AcpBridge.__init__ = fixture_vendor
