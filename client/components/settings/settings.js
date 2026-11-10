@@ -256,6 +256,16 @@ function _bindClientUpdateStatus() {
   void _refreshClientUpdateStatus();
 }
 
+/* Size-segment toasts: compose through the locale packs (template + size word)
+   so a translated prefix is never paired with an untranslated Chinese value
+   (e.g. "Font size: 大"). Falls back to plain Chinese without SoduWorkI18n. */
+function _saySegSize(template, value) {
+  const label = ({ small: '小', medium: '中', large: '大' }[value] || '中');
+  const i18n = globalThis.SoduWorkI18n;
+  if (!i18n || typeof i18n.t !== 'function') { petSay(template.replace('{size}', label)); return; }
+  petSay(i18n.t(template, template, { size: i18n.t(label) }));
+}
+
 /* Form bindings. */
 function _bindSettingsEvents() {
   /* Skins determine task and pet shapes; separate shape and gender controls are not exposed for the current block and orb characters. */
@@ -267,12 +277,12 @@ function _bindSettingsEvents() {
   _bindAppSeg('scaleSeg', 'scale', v => {
     cfg.uiScale = v; saveCfg();
     applyScale(v);
-    petSay('任务视图：' + ({ small: '小', medium: '中', large: '大' }[v] || '中'));
+    _saySegSize('任务视图：{size}', v);
   });
   _bindAppSeg('fontSeg', 'font', v => {
     cfg.fontScale = v; saveCfg();
     applyFontScale(v);
-    petSay('字体：' + ({ small: '小', medium: '中', large: '大' }[v] || '中'));
+    _saySegSize('字体：{size}', v);
   });
   const localeSelect = document.getElementById('localeSelect');
   if (localeSelect) localeSelect.addEventListener('change', () => {
