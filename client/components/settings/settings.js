@@ -256,6 +256,16 @@ function _bindClientUpdateStatus() {
   void _refreshClientUpdateStatus();
 }
 
+/* 切换「需求视图大小 / 字体大小」时气泡文案：模板（任务视图：{size} / 字体：{size}）
+   和尺寸词（小/中/大）都走语言包再拼，否则英文界面会出现「Font size: 大」
+   这类前缀已翻、参数残留中文的混排。SoduWorkI18n 缺席时按中文原样兜底。 */
+function _saySegSize(template, value) {
+  const label = ({ small: '小', medium: '中', large: '大' }[value] || '中');
+  const i18n = globalThis.SoduWorkI18n;
+  if (!i18n || typeof i18n.t !== 'function') { petSay(template.replace('{size}', label)); return; }
+  petSay(i18n.t(template, template, { size: i18n.t(label) }));
+}
+
 /* ---------- 表单绑定 ---------- */
 function _bindSettingsEvents() {
   /* 任务形状/SoduWork 形象设置已移除：形状由皮肤决定(玻璃圆珠/SoduWork 方块)，当前 SoduWork/球宠物无性别之分 */
