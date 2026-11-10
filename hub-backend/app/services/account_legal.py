@@ -246,15 +246,12 @@ async def save_settings(session, body):
     return {**value, "configured": True}
 
 
-async def documents(session, *, active=None):
-    from .legal_publications import active_versions, public_documents
-    active = await active_versions(session) if active is None else active
-    result = await legacy_documents(session)
-    for kind, row in active.items():
-        result["documents"] = [item for item in result["documents"] if item["key"] != kind] + public_documents(row)
-        result["requiredConsentVersions"][kind] = row.version
-    result["configured"] = result["configured"] or all(kind in active for kind in ("terms", "privacy"))
-    return result
+def _legacy_document(kind, locale, operator, contact):
+    texts = _LEGAL_TEXTS[locale]
+    version = TERMS_VERSION if kind == "terms" else PRIVACY_VERSION
+    return {"key": kind, "title": texts["titles"][kind], "version": version,
+            "locale": locale, "defaultLocale": locale == "zh-CN", "format": "text",
+            "content": texts[kind].format(version=version, operator=operator, contact=contact)}
 
 
 async def legacy_documents(session):
@@ -270,5 +267,12 @@ async def legacy_documents(session):
             "configured": cfg["configured"]}
 
 
-async def documents(session):
-    return await legacy_documents(session)
+async def documents(session, *, active=None):
+    from .legal_publications import active_versions, public_documents
+    active = await active_versions(session) if active is None else active
+    result = await legacy_documents(session)
+    for kind, row in active.items():
+        result["documents"] = [item for item in result["documents"] if item["key"] != kind] + public_documents(row)
+        result["requiredConsentVersions"][kind] = row.version
+    result["configured"] = result["configured"] or all(kind in active for kind in ("terms", "privacy"))
+    return result
