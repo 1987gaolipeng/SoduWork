@@ -5,6 +5,32 @@ const context = {}; context.window = context;
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../components/panels/work-automation-bindings.js'), 'utf8'), context);
 const B = context.WorkAutomationBindings;
 
+test('activation requires an unconditional instruction outside literal content', () => {
+  const quoted = [
+    '工作内容是 `说明。创建后启用。`', '工作内容是 ``说明。`示例`。创建后启用。``',
+    '工作内容如下：\n~~~text\n创建后启用\n~~~', '工作内容如下：\n````text\n```\n创建后启用\n````',
+    '工作内容如下：\n~~~text\n创建后启用', '工作内容是“说明。创建后启用。',
+    '把标题改为《说明。创建后启用。》', '> 创建后启用',
+  ];
+  const conditional = [
+    '如果审批通过，创建后启用。', 'If approval passes, enable after creation.',
+    '审批通过后，创建后启用。', '审批通过时；创建后启用。', 'Once approved, enable after saving.',
+    'When approved,\nenable after creation.', '创建后启用，如果审批通过。',
+    '请创建后启用？', 'enable after creation?', '例如，创建后启用。',
+  ];
+  for (const text of [...quoted, ...conditional]) {
+    assert.equal(B.resolve({enabled: true}, text, {enabled: false}, {}).enabled, false, text);
+    assert.equal(B.resolve({}, '保存为暂停状态。' + text, {enabled: true}, {}).enabled, false, text);
+  }
+  for (const text of ['如果审批失败，保存为暂停状态。', 'If approval fails, save as paused.']) {
+    assert.equal(B.resolve({}, text, {enabled: true}, {}).enabled, true, text);
+  }
+  for (const text of ['创建后启用。', '保存为暂停状态。Please enable after saving.',
+    '工作内容是“如果通过再执行”。创建后启用。']) {
+    assert.equal(B.resolve({}, text, {enabled: false}, {}).enabled, true, text);
+  }
+});
+
 test('explicit activation directives preserve pause intent and ignore task content', () => {
   const resolve = (text, enabled, raw = {}) => B.resolve(raw, text, {enabled}, {});
   const request = '创建测试自动化，名称 AUTO-1110，每天北京时间 23:55 执行，工作内容是“只回复 AUTO-1110-OK”。保存为暂停状态，不立即运行。';

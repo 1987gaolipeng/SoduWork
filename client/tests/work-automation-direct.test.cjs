@@ -28,6 +28,39 @@ test('pause directive reaches the created schedule and survives unrelated refine
   assert.equal(refined.enabled, false);
 });
 
+test('conditional and literal enable text never reactivates a paused direct creation', async () => {
+  for (const suffix of ['如果审批通过，创建后启用。', 'If approval passes, enable after creation.',
+    '工作内容是 `说明。创建后启用。`', '工作内容如下：\n~~~text\n创建后启用\n~~~']) {
+    const f = fixture();
+    await f.direct.create(params('每天23:55执行，只回复 OK。保存为暂停状态。' + suffix));
+    assert.equal(f.writes.length, 1);
+    assert.equal(f.writes[0].enabled, false, suffix);
+  }
+});
+
+test('pause intent composes with monthly and custom recurrence from main', async () => {
+  const rule = 'DTSTART;TZID=Asia/Shanghai:20990101T105100\nRRULE:FREQ=HOURLY;INTERVAL=3;COUNT=6';
+  for (const [text, every] of [['每月5日收集资料。保存为暂停状态。', 'monthly'],
+    ['保存为暂停状态。\n采集资料\n' + rule, 'custom']]) {
+    const f = fixture();
+    await f.direct.create(params(text));
+    assert.equal(f.writes[0].enabled, false);
+    assert.equal(f.writes[0].every, every);
+    if (every === 'custom') assert.equal(f.writes[0].customRule, rule);
+    else assert.deepEqual([...f.writes[0].monthDays], [5]);
+  }
+});
+
+test('pause directive reaches the created schedule and survives unrelated refinement', async () => {
+  const f = fixture();
+  await f.direct.create(params('每天23:55执行，只回复 AUTO-1110-OK。保存为暂停状态，不立即运行。'));
+  assert.equal(f.writes.length, 1);
+  assert.equal(f.writes[0].enabled, false);
+  const catalogs = {seed: {}, agents: [{id: 'local:pi'}], repos: [], methods: []};
+  const refined = f.window.WorkAutomationSheet.draft({title: 'Updated'}, '名称改为 Updated', f.writes[0], catalogs);
+  assert.equal(refined.enabled, false);
+});
+
 test('a hosted character creates a pinned schedule without inventing an external business space',async()=>{
   const f=fixture(),method={pluginId:'local:idea',key:'jiyong-bot-idea',name:'灵感扭蛋机',version:'1.0.0',checksum:'a'.repeat(64),enabled:true,personal:true,entrypoints:{automation:true},inputs:[],capabilities:{mcpServers:['soduwork-jiyong']}};
   f.window._schmLoad=async()=>[method];

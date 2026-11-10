@@ -90,13 +90,55 @@
     return { action:'select', name, id:trim(value.id), evidence };
   }
   function issue(kind, name, reason) { return { field:fields[kind], message: labels[kind] + '“' + name + '”' + reason + '，请在表单中明确选择。' }; }
+  function activationClauses(text) {
+    // Literal content is not schedule control. Mask before splitting so sentence
+    // punctuation inside a quote or code block cannot manufacture a directive.
+    const pairs = {'“':'”','「':'」','『':'』','《':'》','"':'"',"'":"'"};
+    let plain = '', fence = null;
+    for (const line of text.split(/\r?\n/)) {
+      if (fence) {
+        if (new RegExp('^ {0,3}' + fence[0] + '{' + fence.length + ',}\\s*$').test(line)) fence = null;
+        continue;
+      }
+      const start = line.match(/^ {0,3}(`{3,}|~{3,})/);
+      if (start) { fence = start[1]; plain += '\n\uFFF0'; }
+      else plain += '\n' + (/^\s*>/.test(line) ? '\uFFF0' : line);
+    }
+    let visible = '';
+    for (let i = 0; i < plain.length; i++) {
+      const char = plain[i];
+      if (char === '`') {
+        const run = plain.slice(i).match(/^`+/)[0];
+        let end = i + run.length;
+        for (; end < plain.length; end++) {
+          if (plain[end] !== '`') continue;
+          const closing = plain.slice(end).match(/^`+/)[0];
+          if (closing.length === run.length) break;
+          end += closing.length - 1;
+        }
+        visible += '\uFFF0'; i = Math.min(plain.length, end + run.length) - 1;
+      } else if (pairs[char] && !(char === "'" && /\w/.test(plain[i - 1] || '') && /\w/.test(plain[i + 1] || ''))) {
+        let end = i + 1;
+        for (; end < plain.length; end++) {
+          if (plain[end] === '\\') { end++; continue; }
+          if (plain[end] === pairs[char]) break;
+        }
+        visible += '\uFFF0'; i = end;
+      } else visible += char;
+    }
+    // Keep conditional context across commas, semicolons and line wraps. Only
+    // complete, unambiguous imperative sentences may alter activation.
+    const uncertain = /如果|假如|假设|若|除非|只有|一旦|比如|例如|是否|能否|能不能|(?:审批|审核|批准|确认|同意|通过).{0,12}(?:后|时|再)|\b(?:if|unless|whether|when|once|after approval|provided|example|suppose|compare)\b/i;
+    return (visible.match(/[^。.!！?？]+[。.!！?？]?/g) || [])
+      .filter(sentence => !/[?？]/.test(sentence) && !uncertain.test(sentence))
+      .flatMap(sentence => sentence.replace(/[。.!！]$/, '').split(/[，,；;\n]/).map(trim));
+  }
   function resolve(raw, text, prior, catalogs) {
     const next = { ...prior, bindingIssues: [...(prior.bindingIssues || [])] };
     const source = directiveText(trim(text));
     // Only explicit schedule directives change activation; quoted work content
     // and "do not run immediately" are not instructions to pause the schedule.
-    const activationText = source.replace(/```[\s\S]*?```|“[^”]*”|「[^」]*」|『[^』]*』|"[^"]*"|'[^']*'/g, ' ');
-    for (const clause of activationText.split(/[，,。；;\n.!！]/).map(trim)) {
+    for (const clause of activationClauses(trim(text))) {
       if (/^(?:请)?(?:保存为暂停(?:状态|计划)?|(?:创建|保存)后(?:暂不|不要|不)启用|暂不启用|保持暂停(?:状态)?|暂停(?:此|这个|该)?(?:计划|自动化))$/.test(clause) ||
           /^(?:please\s+)?(?:save (?:it )?as paused|keep (?:it )?paused|do not enable (?:it )?after (?:creation|saving))$/i.test(clause)) next.enabled = false;
       else if (/^(?:请)?(?:创建后启用|保存后启用|启用(?:此|这个|该)(?:计划|自动化))$/.test(clause) ||
