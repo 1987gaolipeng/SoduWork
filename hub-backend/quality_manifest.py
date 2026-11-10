@@ -41,6 +41,7 @@ RELEASE_SMOKES = tuple(sorted((
     "test_jiyong_contract.py",
     "test_jiyong_cloud_data.py",
     "test_schedule_source_app.py",
+    "test_schedule_calendar.py",
     "test_plugin_window_contracts.py",
     "test_agent_install_recovery.py",
     "test_agent_platform_installation.py",

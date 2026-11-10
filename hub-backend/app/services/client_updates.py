@@ -15,7 +15,7 @@ import re
 import shutil
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
 from typing import Any
 
@@ -241,11 +241,26 @@ def release_root() -> Path:
     return (Path(__file__).resolve().parents[2] / "client-releases").resolve()
 
 
+def _artifact_path_namespace(path: Path) -> Path:
+    """Keep resolved Windows roots and descendants in one explicit namespace."""
+    if not isinstance(path, PureWindowsPath) or not path.is_absolute():
+        return path
+    value = str(path)
+    if value.startswith("\\\\?\\"):
+        return path
+    if re.fullmatch(r"[A-Za-z]:", path.drive):
+        return type(path)("\\\\?\\" + value)
+    if value.startswith("\\\\") and not value.startswith("\\\\.\\"):
+        return type(path)("\\\\?\\UNC\\" + value[2:])
+    return path
+
+
 def safe_artifact_path(relative: str) -> Path:
     raw = str(relative or "").replace("\\", "/").strip("/")
     if not raw or any(part in {"", ".", ".."} for part in raw.split("/")):
         raise UpdateContractError("安装包路径无效")
-    root = release_root()
+    # Parent creation can change realpath's missing-path error and prefix choice.
+    root = _artifact_path_namespace(release_root())
     target = (root / Path(*raw.split("/"))).resolve()
     try:
         target.relative_to(root)

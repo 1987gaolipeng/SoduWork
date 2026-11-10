@@ -219,8 +219,12 @@
   "agent.setup.unknown": "状態を確認できません。再度確認してください。",
   "agent.ready": "利用可能です。",
   "agent.probe.passed": "実行テストに成功しました。",
-  "agent.probe.failed": "実行テストに失敗しました。詳細を確認してください。"
-};
+  "agent.probe.failed": "実行テストに失敗しました。詳細を確認してください。",
+    '\u7b49\u5f85\u8865\u8dd1\u4e00\u6b21': '\u30ad\u30e3\u30c3\u30c1\u30a2\u30c3\u30d7\u5b9f\u884c\u5f85\u3061',
+    '\u672c\u6b21\u9884\u7ea6\u5df2\u89e6\u53d1': '\u3053\u306e\u4e88\u7d04\u306f\u5b9f\u884c\u6e08\u307f\u3067\u3059',
+    '\u672c\u6b21\u9884\u7ea6\u5df2\u89e6\u53d1\uff1b\u4fee\u6539\u4e3a\u5c06\u6765\u65f6\u95f4\u53ef\u91cd\u65b0\u9884\u7ea6': '\u3053\u306e\u4e88\u7d04\u306f\u5b9f\u884c\u6e08\u307f\u3067\u3059\u3002\u5c06\u6765\u306e\u6642\u523b\u306b\u5909\u66f4\u3059\u308c\u3070\u518d\u4e88\u7d04\u3067\u304d\u307e\u3059',
+    '\u5230\u70b9\u89e6\u53d1\u4e00\u6b21\uff1b\u5931\u8d25\u6309\u8bbe\u7f6e\u91cd\u8bd5': '\u6307\u5b9a\u6642\u523b\u306b1\u56de\u5b9f\u884c\u3057\u3001\u5931\u6557\u6642\u306f\u8a2d\u5b9a\u306b\u5f93\u3063\u3066\u30ea\u30c8\u30e9\u30a4\u3057\u307e\u3059',
+  };
   if (typeof module !== 'undefined' && module.exports) { module.exports = Object.freeze(messages); return; }
   global.SoduWorkLocaleMessages = Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages, { 'ja-JP': Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages?.['ja-JP'], messages)) }));
 })(globalThis);

@@ -124,10 +124,16 @@
       if (kind === 'method' && next[field] !== prior[field]) next.pluginInputs = {};
       if (kind === 'repo' && !next[field]) next.flow = false;
     }
-    if (/(?:每月|每年|monthly|yearly)/i.test(source)) {
+    if (/(?:^|\n)\s*(?:DTSTART(?:;TZID=[^:;]+)?:|RRULE:)/i.test(source)) {
+      next.every = 'custom';
+      next.bindingIssues = next.bindingIssues.filter(item => item.field !== 'every');
+    } else if (/(?:每月|monthly)/i.test(source)) {
+      next.every = 'monthly';
+      next.bindingIssues = next.bindingIssues.filter(item => item.field !== 'every');
+    } else if (/(?:每年|yearly)/i.test(source)) {
       next.every = '';
       next.bindingIssues = next.bindingIssues.filter(item => item.field !== 'every');
-      next.bindingIssues.push({field:'every',message:'当前支持每天、每周、每小时或指定日期执行一次，请确认时间安排；月度或年度要求需要调整后再创建。'});
+      next.bindingIssues.push({field:'every',message:'当前不支持年度执行，请确认时间安排后再创建。'});
     } else if (/(?:每天|每日|每周|每小时|今天|明天|后天|今晚|明晚|单次|一次)/.test(source)) {
       next.bindingIssues = next.bindingIssues.filter(item => item.field !== 'every');
     }
@@ -161,7 +167,8 @@
     return next;
   }
   function validate(value, catalogs) {
-    if (value.bindingIssues?.length) return value.bindingIssues.map(item => item.message).join('\n');
+    if (value.bindingIssues?.length) return value.bindingIssues.map(item =>
+      global.SoduWorkI18n?.translateText?.(item.message) || item.message).join('\n');
     for (const kind of Object.keys(fields)) {
       const id = value[fields[kind]];
       if (id && !rows(catalogs, kind).some(item => idOf(item, kind) === String(id))) {

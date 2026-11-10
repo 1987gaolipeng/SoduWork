@@ -118,9 +118,10 @@ test('English explicit plugin instructions use the same grounded binding path', 
   const result = run(text,{automationBindings:{method:{action:'select',id:'mini-game',name:'Mini game',evidence:text}}},prior,c);
   assert.equal(result.personalPluginKey,'mini-game');
 });
-test('unsupported monthly schedules cannot silently become daily', () => {
+test('monthly schedules remain monthly and do not create an unsupported binding issue', () => {
   const result = run('每月一号生成报告');
-  assert.equal(result.every,'');assert.match(B.validate(result,catalogs), /月度/);
+  assert.equal(result.every,'monthly');
+  assert.doesNotMatch(B.validate(result,catalogs), /月度|支持/);
 });
 test('hypothetical clearing does not erase existing method or repo', () => {
   for (const text of ['如果不用插件会怎样','如果不关联工程会怎样','if no plugin is available, compare the results']) {

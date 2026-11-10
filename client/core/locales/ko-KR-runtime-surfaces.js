@@ -219,8 +219,12 @@
   "agent.setup.unknown": "상태를 확인할 수 없습니다. 다시 확인하세요.",
   "agent.ready": "사용할 수 있습니다.",
   "agent.probe.passed": "실행 테스트를 통과했습니다.",
-  "agent.probe.failed": "실행 테스트에 실패했습니다. 테스트 상세 정보를 확인하세요."
-};
+  "agent.probe.failed": "실행 테스트에 실패했습니다. 테스트 상세 정보를 확인하세요.",
+    '\u7b49\u5f85\u8865\u8dd1\u4e00\u6b21': '\uc77c\ud68c \ubcf4\ucda9 \uc2e4\ud589\uc744 \ub300\uae30 \uc911\uc785\ub2c8\ub2e4',
+    '\u672c\u6b21\u9884\u7ea6\u5df2\u89e6\u53d1': '\uc774 \uc608\uc57d\uc740 \uc774\ubbf8 \uc2e4\ud589\ub418\uc5c8\uc2b5\ub2c8\ub2e4',
+    '\u672c\u6b21\u9884\u7ea6\u5df2\u89e6\u53d1\uff1b\u4fee\u6539\u4e3a\u5c06\u6765\u65f6\u95f4\u53ef\u91cd\u65b0\u9884\u7ea6': '\uc774 \uc608\uc57d\uc740 \uc774\ubbf8 \uc2e4\ud589\ub418\uc5c8\uc2b5\ub2c8\ub2e4. \uc608\uc815\ub41c \ubbf8\ub798 \uc2dc\uac04\uc73c\ub85c \ubc14\uafb8\uba74 \ub2e4\uc2dc \uc608\uc57d\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4',
+    '\u5230\u70b9\u89e6\u53d1\u4e00\u6b21\uff1b\u5931\u8d25\u6309\u8bbe\u7f6e\u91cd\u8bd5': '\uc9c0\uc815\ud55c \uc2dc\uac04\uc5d0 1\ud68c \uc2e4\ud589\ud558\uace0, \uc2e4\ud328\ud55c \uc2e4\ud589\uc740 \uc7ac\uc2dc\ub3c4 \uc124\uc815\uc744 \ub530\ub985\ub2c8\ub2e4',
+  };
   if (typeof module !== 'undefined' && module.exports) { module.exports = Object.freeze(messages); return; }
   global.SoduWorkLocaleMessages = Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages, { 'ko-KR': Object.freeze(Object.assign(Object.create(null), global.SoduWorkLocaleMessages?.['ko-KR'], messages)) }));
 })(globalThis);

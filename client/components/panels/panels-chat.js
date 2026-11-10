@@ -89,7 +89,6 @@
     get _composerControls() { return _composerControls; }, set _composerControls(value) { _composerControls = value; },
     get _dismissProposal() { return _dismissProposal; },
     get _ensure() { return _ensure; },
-    get _changeConversationWorkspace() { return _changeConversationWorkspace; },
     get _retryOpenChat() { return _retryOpenChat; },
     get enter() { return enter; },
     get _goalAction() { return _goalAction; },
@@ -896,47 +895,6 @@
     const host = document.getElementById('cpChat');
     if (host) host.innerHTML = '';
     });
-  }
-  /* 「换个文件夹继续」：重开当前会话并把本轮续聊迁到用户选择的文件夹。
-     存档对话记录保持不变；主进程校验目录并把选择写回存档供以后重开沿用。 */
-  async function _changeConversationWorkspace() {
-    const api = _api();
-    const chatId = String(_sessionId || '').trim();
-    if (!api || !chatId) {
-      if (typeof petSay === 'function') petSay('先打开一条对话，再换工作区');
-      return;
-    }
-    if (_runtimeBusy()) {
-      if (typeof petSay === 'function') petSay('这一轮还在进行，结束后再换工作区');
-      return;
-    }
-    if (_snap?.cloudHandoff?.phase === 'committed') {
-      if (typeof petSay === 'function') petSay('这条会话已交给云端执行，暂不支持换本地工作区');
-      return;
-    }
-    let picked;
-    try {
-      if (typeof api.pickCwd !== 'function') return;
-      picked = await api.pickCwd(_wd?.dir ? { defaultPath: _wd.dir } : {});
-    } catch (_) { return; } /* canceling the dialog is not an error */
-    if (!picked || !picked.ok || !picked.dir) return;
-    const dir = String(picked.dir);
-    if (dir === String(_wd?.dir || '')) {
-      if (typeof petSay === 'function') petSay('这条会话已经在这个文件夹里干活了');
-      return;
-    }
-    const label = String(picked.name || '').trim() ||
-      dir.split(/[\\/]/).filter(Boolean).pop() || '所选文件夹';
-    const title = (global.ChatChrome?.sessionTitle || '').trim();
-    const epoch = _viewEpoch;
-    reset();
-    if (epoch !== _viewEpoch) return; // A newer navigation superseded this change.
-    const ok = await enter('', chatId, {
-      resumeWorkspace: dir, cwd: dir, workspaceLabel: label, chatTitle: title,
-    });
-    if (typeof petSay !== 'function') return;
-    if (ok) petSay('已换到「' + label + '」继续这条会话');
-    else petSay('没换成功，这条会话保持在原工作区');
   }
   function sessionInfo() {
     const rows = _collabEntries();

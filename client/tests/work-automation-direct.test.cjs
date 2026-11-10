@@ -34,16 +34,39 @@ test('direct entry parses /自动化 and creates once without opening a form; fu
   assert.ok(f.parses[0][0].startsWith('/自动化 '));assert.equal(f.parses[0][3].kind,'automation');
   assert.equal(f.window.WorkAutomationSheet.hasSurface(),false);
 });
-test('one-off keeps its date; missing date and unsupported monthly frequency never become daily',async()=>{
+test('one-off keeps its date; missing date is rejected and monthly frequency is preserved',async()=>{
   const f=fixture();
   const once=await f.direct.create(params('2030年12月20日晚上8点执行一次，采集资料'));
   assert.equal(once.schedule.every,'once');assert.equal(f.writes[0].runAt,'2030-12-20T12:00:00.000Z');
   await assert.rejects(f.direct.create(params('执行一次，收集资料')),/日期|时间/);
-  await assert.rejects(f.direct.create(params('每月5日收集资料')),/月度|支持/);
+  const monthly=await f.direct.create(params('每月5日收集资料'));
+  assert.equal(monthly.schedule.every,'monthly');assert.deepEqual([...monthly.schedule.monthDays],[5]);
   await assert.rejects(f.direct.create(params('每两小时收集资料')),/支持/);
   await assert.rejects(f.direct.create(params('每天25点收集资料')),/时间无效/);
-  assert.equal(f.writes.length,1);
+  assert.equal(f.writes.length,2);
 });
+
+test('direct automation accepts explicit custom recurrence and returns the saved rule', async () => {
+  const f = fixture();
+  const rule = 'DTSTART;TZID=Asia/Shanghai:20990101T105100\nRRULE:FREQ=HOURLY;INTERVAL=3;COUNT=6';
+  const result = await f.direct.create(params('每三小时采集资料\n' + rule));
+  assert.equal(f.writes.length, 1);
+  assert.equal(f.writes[0].every, 'custom');
+  assert.equal(f.writes[0].customRule, rule);
+  assert.equal(result.schedule.customRule, rule);
+  assert.ok(f.writes[0].note.includes(rule));
+  const offsetRule = rule.replace('Asia/Shanghai', 'Etc/GMT+8');
+  assert.equal((await f.direct.create(params('采集资料\n' + offsetRule))).schedule.customRule, offsetRule);
+});
+test('unsupported calendar exclusions cannot silently reach direct creation', async () => {
+  const f = fixture();
+  const rule = 'DTSTART;TZID=Asia/Shanghai:20990101T105100\nRRULE:FREQ=DAILY';
+  for (const extra of ['\nEXDATE:20990102T105100', ';COUNT=1\n 0']) {
+    await assert.rejects(f.direct.create(params('Generate a report\n' + rule + extra)));
+  }
+  assert.equal(f.writes.length, 0);
+});
+
 test('parse errors, unavailable named executor, missing agent and blocked preflight cannot create',async()=>{
   for(const overrides of [
     {parseTaskText:async()=>({_parseError:'模型解析失败'})},

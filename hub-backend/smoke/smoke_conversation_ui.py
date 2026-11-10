@@ -103,7 +103,10 @@ chk("全部标签关闭后不保留空的成果承载页",
 chk("工具过程使用短摘要、稳定节点和可折叠详情",
     "SHORT_SUMMARY = 38" in tools and "commandSummary" in tools
     and "data-tool-node" in chat and "ntool-head" in chat
-    and ":focus-visible" in chat_css and "@media(max-width:960px)" in chat_css)
+    and ":focus-visible" in chat_css
+    # Compact and wide preview rules must not overlap at the 960px boundary.
+    and "@media(max-width:959px)" in chat_css
+    and "@media(min-width:960px)" in chat_css)
 chk("干活型收口契约真实进入每条会话的系统提示",
     "agentContract.prompts" in session and "appendSystemPrompt" in session
     and "最终答复必须以结果开头" in contract and "还需要我做什么" in contract)
