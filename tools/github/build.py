@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -91,9 +93,75 @@ def native(ctx, shard, folder, scratch):
     return read(receipt)
 
 
+def android(ctx, folder, scratch):
+    """Build, sign, inspect and install-test the public Android APK.
+
+    The public branch must carry the reviewed Flutter project.  Keeping this
+    check here makes a missing public mobile source a hard release failure
+    instead of silently publishing a desktop-only candidate.
+    """
+    require(platform.system() == "Linux", "Android builds run on Linux GitHub runners")
+    mobile = ROOT / "mobile"
+    require((mobile / "pubspec.yaml").is_file(),
+            "Public Android release requires the reviewed mobile/ Flutter source")
+    require(shutil.which("flutter"), "Flutter SDK is required for the Android release")
+    keystore_b64 = os.environ.get("SODUWORK_ANDROID_KEYSTORE_B64", "")
+    password = os.environ.get("SODUWORK_ANDROID_KEYSTORE_PASSWORD", "")
+    require(keystore_b64 and password, "Android signing secrets are required")
+    pubspec = (mobile / "pubspec.yaml").read_text(encoding="utf-8")
+    match = re.search(r"^version:\s*([^+\s]+)\+([0-9]+)\s*$", pubspec, re.MULTILINE)
+    require(match and match.group(1) == ctx["version"], "Android and Client release versions differ")
+    gradle = (mobile / "android/app/build.gradle.kts").read_text(encoding="utf-8")
+    app_id = re.search(r'^\s*applicationId\s*=\s*"([a-z][a-z0-9_.]+)"\s*$', gradle, re.MULTILINE)
+    require(app_id, "Android application ID is missing")
+    signing = Path(tempfile.mkdtemp(prefix="soduwork-android-signing-", dir=scratch))
+    keystore = signing / "release.jks"
+    properties = mobile / "android/key.properties"
+    try:
+        keystore.write_bytes(base64.b64decode(keystore_b64, validate=True))
+        properties.write_text(f"storeFile={keystore}\nstorePassword={password}\n"
+                              f"keyAlias={os.environ.get('SODUWORK_ANDROID_KEY_ALIAS', 'soduwork-release')}\n"
+                              f"keyPassword={password}\n", encoding="utf-8")
+        run("flutter", "pub", "get", cwd=mobile)
+        run("flutter", "test", cwd=mobile)
+        run("flutter", "build", "apk", "--release", cwd=mobile,
+            env={**os.environ, "CI_COMMIT_SHA": ctx["commit"], "CI_PIPELINE_ID": ctx["runId"]})
+        artifact = mobile / "build/app/outputs/flutter-apk/app-release.apk"
+        require(artifact.is_file(), "Flutter did not produce app-release.apk")
+        build_tools = sorted(Path(os.environ.get("ANDROID_HOME", "/opt/android-sdk"), "build-tools").glob("*/aapt"))
+        sign_tools = sorted(Path(os.environ.get("ANDROID_HOME", "/opt/android-sdk"), "build-tools").glob("*/apksigner"))
+        require(build_tools and sign_tools, "Android build-tools (aapt/apksigner) are required")
+        badging = subprocess.check_output([str(build_tools[-1]), "dump", "badging", str(artifact)], text=True)
+        package = re.search(r"^package: name='([^']+)' versionCode='([^']+)' versionName='([^']+)'", badging, re.MULTILINE)
+        require(package and package.group(1) == app_id.group(1) and package.group(3) == ctx["version"],
+                "Android package identity differs from the release")
+        signature = subprocess.check_output([str(sign_tools[-1]), "verify", "--verbose", "--print-certs", str(artifact)], text=True)
+        require("Verified using v2 scheme (APK Signature Scheme v2): true" in signature or
+                "Verified using v3 scheme (APK Signature Scheme v3): true" in signature,
+                "Android APK signature verification failed")
+        if shutil.which("adb"):
+            run("adb", "wait-for-device")
+            run("adb", "install", "-r", str(artifact))
+            run("adb", "shell", "am", "force-stop", app_id.group(1))
+            run("adb", "shell", "monkey", "-p", app_id.group(1), "1")
+            run("adb", "uninstall", app_id.group(1))
+            acceptance = "emulator-install-launch-cleanup"
+        else:
+            require(os.environ.get("SODUWORK_ANDROID_SKIP_EMULATOR") == "1",
+                    "Android acceptance requires adb or an explicit non-release skip")
+            acceptance = "package-inspection-only"
+        output = folder / expected(ctx, "android")[0]
+        shutil.copyfile(artifact, output)
+        return {"ok": True, "checks": ["flutter-tests", "signature", "package-identity", acceptance],
+                "applicationId": app_id.group(1)}
+    finally:
+        properties.unlink(missing_ok=True)
+        shutil.rmtree(signing, ignore_errors=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("shard", choices=["source", "hub", "windows", "linux", "macos-arm64", "macos-x64"])
+    parser.add_argument("shard", choices=["source", "hub", "windows", "linux", "macos-arm64", "macos-x64", "android"])
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     ctx = context()
@@ -112,6 +180,8 @@ def main():
         elif args.shard == "hub":
             from hub import build_and_accept
             checks = build_and_accept(ctx, folder)
+        elif args.shard == "android":
+            checks = android(ctx, folder, scratch)
         else:
             checks = native(ctx, args.shard, folder, scratch)
         seal(ctx, args.shard, folder, checks)

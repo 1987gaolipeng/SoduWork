@@ -41,8 +41,8 @@
     },
     {
       "path": ".github/RELEASE.md",
-      "bytes": 7663,
-      "sha256": "68cf92436cacb118ddcdebdd09f841701a35b58f307836ffc8bf53d378733d61"
+      "bytes": 8406,
+      "sha256": "25de5aaede2757a621e57bcec9d8d0709ce2cac19622aa1e638ed7f917cbac92"
     },
     {
       "path": ".github/dependabot.yml",
@@ -56,8 +56,8 @@
     },
     {
       "path": ".github/workflows/release.yml",
-      "bytes": 7185,
-      "sha256": "8bfb7f69061802d1b0ecf85fedad3b815875895ed838a1d56443f5882990d0e9"
+      "bytes": 8658,
+      "sha256": "5ee1441ecfd1066f12013792806fb420b2a0f5582eb5568cd2b8436e86193911"
     },
     {
       "path": ".github/workflows/security.yml",
@@ -21161,8 +21161,8 @@
     },
     {
       "path": "tools/github/build.py",
-      "bytes": 5916,
-      "sha256": "d678171db82add9e5faddc17ed4a4574771d74ddc5799822c2c5bf8bf08531e0"
+      "bytes": 10439,
+      "sha256": "bfbdd33e0a2ea21cf127b8c7338fbf02d3a994d3a2b03a0841a1f8ce616e35a5"
     },
     {
       "path": "tools/github/check_public_ci.py",
@@ -21186,18 +21186,18 @@
     },
     {
       "path": "tools/github/release.py",
-      "bytes": 12384,
-      "sha256": "7caa3a02a9572dc068a88b417abc8b05c8ba1bafa42942a716f05912cf5f4ee1"
+      "bytes": 12443,
+      "sha256": "fc9b1bff1f0db72a69c2906dcc162ac409d5ef4af2db2a63de8c8755e686049e"
     },
     {
       "path": "tools/github/test_build.py",
-      "bytes": 4053,
-      "sha256": "b93738f6c4b08a7a3e01030e9d888bea2f415be36342a8cbf690f400ee70e171"
+      "bytes": 4346,
+      "sha256": "57f4319aea7512431f2f19cda0ba6293df6f29dcf48a45ed49e9e729319792c5"
     },
     {
       "path": "tools/github/test_release.py",
-      "bytes": 10829,
-      "sha256": "30ee6a9afdf11257bcf6197988c6a6074b9de37e21640d9bc8ee48ffcdeddc23"
+      "bytes": 11057,
+      "sha256": "8e0314fe464d320e48b8b57a810dacce2e443ae74415ad0d4bdebfd6c55f1a73"
     },
     {
       "path": "tools/security/README.md",

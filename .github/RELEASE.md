@@ -9,22 +9,23 @@
 | Component | Build and acceptance | GitHub Release assets |
 | --- | --- | --- |
 | source | Export the committed tree; verify the file inventory, public boundary and shared quality gates | Source ZIP without Git history |
-| client | Windows fresh installation, repair, upgrade and compatibility; Mac DMG, signature, restart and upgrade; installation, startup, upgrade and removal in Ubuntu 22/24 and Rocky 9 containers | Windows x64 EXE, Linux x64 DEB/RPM/tar.gz, Mac ARM64/x64 DMG: six packages |
+| client | Windows fresh installation, repair, upgrade and compatibility; Mac DMG, signature, restart and upgrade; installation, startup, upgrade and removal in Ubuntu 22/24 and Rocky 9 containers; Android release build, signature/package inspection, emulator install, launch and cleanup | Windows x64 EXE, Linux x64 DEB/RPM/tar.gz, Mac ARM64/x64 DMG, Android APK |
 | hub | Public self-hosting Dockerfile; disposable PostgreSQL, migrations, health/readiness, frontend assets, restart, image export and reload | Linux amd64 Docker image tar.gz |
 
 Automated acceptance does not cover interactive Windows UAC, macOS Gatekeeper/notarization, real desktop login or customer filesystem filters. Mac packages retain ad-hoc signatures; Developer ID notarization and commercial Windows signing are not integrated. Hub acceptance uses one isolated node, without production deployment, real-model calls or browser interaction certification. Receipts record these limitations.
 
 ## Repository setup
 
-1. Set the repository variable `PUBLIC_RELEASE_REPOSITORY` to the final public repository's `owner/name`. The workflow must exist on the default branch before its manual entry appears in Actions.
+1. Set the repository variable `PUBLIC_RELEASE_REPOSITORY` to the final public repository's `owner/name`. The workflow must exist on the default branch before its manual entry appears in Actions. The public branch must include the reviewed `mobile/` Flutter source before selecting the Client path; a missing mobile source is a hard failure.
 2. Protect `release/source-*`, `release/client-*` and `release/hub-*`, prohibit force pushes and restrict updates to maintainers. Protect `source-v*`, `client-v*` and `hub-v*`; prohibit moving or deleting published tags.
 3. Create the `public-release` Environment in advance, configure **Required reviewers**, restrict deployment to protected release branches and disable administrator bypass. Configure self-review according to team responsibilities. Preflight checks the actual reviewer gate through the GitHub API and fails if it is missing; it does not rely on YAML to create the environment automatically.
 4. Keep `GITHUB_TOKEN` read-only by default. Only the approved publication job receives `contents: write` and `actions: read`. Do not configure company credentials, cluster addresses, private registries, upload tokens or SSH keys. PR jobs receive no release credentials; these workflows do not use `pull_request_target` or self-hosted runners.
 5. Allow the official checkout/setup/artifact actions pinned to commit SHAs. Artifacts are downloaded from the current run; final publication uses the candidate's immutable artifact ID. Candidates are retained for 30 days and must be approved before expiry. Expired or missing artifacts require a new candidate, not receipts borrowed from another run.
+6. Configure `SODUWORK_ANDROID_KEYSTORE_B64`, `SODUWORK_ANDROID_KEYSTORE_PASSWORD`, and (optionally) `SODUWORK_ANDROID_KEY_ALIAS` as Actions secrets. The signing key must be dedicated to the public Android application and must never be committed. The Android job uses an ephemeral API 35 emulator for install, launch and cleanup acceptance.
 
 ## Release procedure
 
-1. Create `release/<component>-X.Y.Z` from reviewed public source. All four Client package/version/lock version fields must agree. Source and Hub versions are frozen by the branch and input, recorded in receipts, and also written to Hub OCI labels.
+1. Create `release/<component>-X.Y.Z` from reviewed public source. Client package/version/lock fields and the Android `pubspec.yaml` version must agree. Source and Hub versions are frozen by the branch and input, recorded in receipts, and also written to Hub OCI labels.
 2. Manually run **Public release** on that branch with the matching component and version. Build and accept each candidate once. A source fix creates a new SHA and requires a new candidate.
 3. After candidate preparation, stop at the `public-release` approval gate. For preparation-only work, do not create a formal tag or approve publication.
 4. Review the receipts, create `component-vX.Y.Z` at **the same SHA**, then approve the original run. Before publishing, the workflow rechecks the remote release branch head, lightweight or annotated tag, source version, run ID, all platform receipts and file digests.
@@ -37,7 +38,7 @@ When preparing the public repository, reviewed source may be squashed into `publ
 
 Review and commit genuine resolution evidence for `third-party/public-release.json`: original licenses, corresponding source archives and actual artifact inventories. Then update the distribution scope in `PUBLIC-SOURCE.json` and the source manifest. Do not simply clear pending items to make CI pass.
 
-Client also requires six entries in `tools/ci/soduwork-acceptance-baselines.json`: `windows-x64-exe`, `linux-x64-deb`, `linux-x64-rpm`, `linux-x64-tar.gz`, `macos-arm64-dmg` and `macos-x64-dmg`. Each entry includes `productName: SoduWork`, a strictly older `version`, `sha256`, and a `url` pointing to the same public GitHub repository, with optional `format`/`size`. Local paths and internal fallback downloads are rejected. The first public binary release has no previous public baseline and needs a separately reviewed first-release acceptance contract. Never substitute the candidate for an older version to claim a successful upgrade.
+Client desktop acceptance requires six entries in `tools/ci/soduwork-acceptance-baselines.json`: `windows-x64-exe`, `linux-x64-deb`, `linux-x64-rpm`, `linux-x64-tar.gz`, `macos-arm64-dmg` and `macos-x64-dmg`. Each entry includes `productName: SoduWork`, a strictly older `version`, `sha256`, and a `url` pointing to the same public GitHub repository, with optional `format`/`size`. Local paths and internal fallback downloads are rejected. The first public binary release has no previous public baseline and needs a separately reviewed first-release acceptance contract. Never substitute the candidate for an older version to claim a successful upgrade. Android is checked independently through signed package identity and emulator installation; it does not reuse a desktop baseline.
 
 Hub images are delivered as Release assets. After downloading and verifying the manifest, run `docker load --input <image.tar.gz>` and configure your environment using the [self-hosting guide](../ops/self-host/README.en.md). This workflow does not push to GHCR or migrate company cluster deployment, backup schedules, domains or update services.
 
