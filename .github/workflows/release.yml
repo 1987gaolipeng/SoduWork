@@ -211,6 +211,7 @@ jobs:
 
   publish:
     needs: candidate
+    if: ${{ !cancelled() && needs.candidate.result == 'success' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     environment: public-release
