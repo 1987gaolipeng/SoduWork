@@ -2,7 +2,7 @@
 # Earlier constraints pinned Starlette 0.41.3 and prevented the planned security upgrades.
 fastapi>=0.136,<0.144
 uvicorn[standard]>=0.34,<0.35
-sqlalchemy>=2.0,<2.1
+sqlalchemy[asyncio]>=2.0,<2.1
 alembic>=1.14,<2
 aiosqlite>=0.20
 asyncpg>=0.30

@@ -15276,8 +15276,8 @@
     },
     {
       "path": "hub-backend/requirements.txt",
-      "bytes": 1825,
-      "sha256": "9247ceb6edf4449b63c0dbc222afe09d7183f573e0a56dab6e600db70bd24133"
+      "bytes": 1834,
+      "sha256": "bdd2be60a82fa054dc987762094378ef558f82d586e78df3f25e9260acc5c623"
     },
     {
       "path": "hub-backend/route_test_support.py",
@@ -18581,8 +18581,8 @@
     },
     {
       "path": "hub-frontend/src/App.jsx",
-      "bytes": 17387,
-      "sha256": "79fc810c68f0e83098953d64cc64ba1bb07906cfc021ac4d5693d14c6c0e3033"
+      "bytes": 17403,
+      "sha256": "949deffcbbb1891597dc54b17898fea4ec70e7d7b1ebb1275a0ca203b81a167a"
     },
     {
       "path": "hub-frontend/src/FilterControls.jsx",
