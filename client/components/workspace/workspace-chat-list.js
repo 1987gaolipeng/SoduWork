@@ -699,7 +699,7 @@ function renderChats() {
   }
 function subscribeConversationPresence() {
     syncHistoryOwner();
-    if (hadOwner && !historyOwner) return;
+    if (!historyOwner) return;
     if (ctx.sessionOff) return;
     const api = global.soduWorkAPI && (global.soduWorkAPI.conversationSession || global.soduWorkAPI.piSession);
     const epoch = historyEpoch;
@@ -710,7 +710,9 @@ function subscribeConversationPresence() {
 
 function refreshConversationHistory() {
     syncHistoryOwner();
-    if (hadOwner && !historyOwner) return Promise.resolve(false);
+    // Main-process history captures an authenticated actor before reading.
+    // A pre-login request cannot be reused when the first account arrives.
+    if (!historyOwner) return Promise.resolve(false);
     if (ctx.historyLoad) return ctx.historyLoad;
     const api = global.soduWorkAPI && (global.soduWorkAPI.conversationSession || global.soduWorkAPI.piSession);
     if (!api || typeof api.history !== 'function') {

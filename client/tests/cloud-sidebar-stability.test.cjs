@@ -6,9 +6,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function fixture(loadHistory) {
-  const window = { soduWorkAPI: { conversationSession: { history: loadHistory } } };
-  for (const name of ['workspace-chat-history', 'workspace-chat-list']) {
+function fixture(loadHistory, { authenticated = true } = {}) {
+  const window = {
+    SoduWorkAPI: { hubBase: () => 'https://sidebar-fixture.invalid',
+      clientAuthSnapshot: () => ({ clientId: 'fixture-device', user: authenticated ? { id: 'fixture-user' } : null }) },
+    soduWorkAPI: { conversationSession: { history: loadHistory } },
+  };
+  for (const name of ['workspace-chat-history', 'workspace-sidebar-state', 'workspace-chat-list']) {
     let source = fs.readFileSync(path.join(__dirname, '../components/workspace', name + '.js'), 'utf8');
     if (name === 'workspace-chat-list') {
       // Keep the production event/reconciliation path; only omit DOM painting.
@@ -17,7 +21,7 @@ function fixture(loadHistory) {
       assert.ok(start > 0 && end > start);
       source = source.slice(0, start) + 'function renderChats() {}\n' + source.slice(end);
     }
-    vm.runInNewContext(source, { window });
+    vm.runInNewContext(source, { window, URL });
   }
   const history = window.WorkspaceChatHistory;
   const ctx = { ...history, root: null, chatItems: [], chatNames: new Map(), activeChatId: '', mount() {} };
@@ -32,6 +36,16 @@ const cloud = { id: 'mobile:n1', taskId: 'task-n1', title: 'N1', cloud: true, ad
 const copy = { id: 'acct-n1', sourceSessionId: 'mobile:n1', title: 'N1', accountConversation: true,
   at: '2026-10-31T06:57:33Z' };
 const other = { id: 'other', title: 'Other', at: 200 };
+
+test('signed-out cloud alias invalidation cannot start an authenticated history read', async () => {
+  let reads = 0;
+  const f = fixture(() => { reads++; return { ok: true, chats: [cloud, other] }; }, { authenticated: false });
+  f.api.setChats([other, cloud]);
+  f.api.upsertChat({ id: 'unconfirmed', taskId: cloud.taskId, title: cloud.title, cloud: true });
+  assert.equal(await f.api.refreshConversationHistory(), false);
+  assert.equal(reads, 0);
+  assert.deepEqual(f.ids(), [other.id, cloud.id]);
+});
 
 test('archived and deleted account presence remove rows without resurrecting them', () => {
   const f = fixture();

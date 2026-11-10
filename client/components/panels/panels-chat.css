@@ -32,7 +32,7 @@
  * Keep .nchat-main a full-height flex column so the message area can scroll and the
  * composer remains visible. min-width:0 prevents long code from widening the layout.
  */
-.nchat-main{flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--bg-0);overflow:hidden;container:chat-column / inline-size}
+.nchat-main{--nchat-column-max:780px;--nchat-column-gutter:24px;flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--bg-0);overflow:hidden;container:chat-column / inline-size}
 /* Only the transcript scrolls; the footer remains anchored while reading history. */
 .nchat-main>.nchat-content-area{flex:1 1 0;min-height:0}
 .nchat-head{height:54px;box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;gap:18px;
@@ -135,8 +135,11 @@
 .nchat-jump-latest:active{box-shadow:0 3px 10px -8px rgba(15,23,42,.5)}
 .nchat-jump-latest:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 55%,transparent);outline-offset:2px}
 .nchat-jump-latest svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-.nchat-inner{width:min(760px,100%);margin:0 auto;box-sizing:border-box;
-  padding:18px 24px 8px;display:flex;flex-direction:column;gap:8px}
+/* Anchor to the chat column, not its scrollbar-reduced viewport. The same
+   maximum width and gutters align message edges with the composer below. */
+.nchat-inner{width:min(var(--nchat-column-max),calc(100cqw - 2 * var(--nchat-column-gutter)));
+  margin:0 0 0 max(var(--nchat-column-gutter),calc((100cqw - var(--nchat-column-max)) / 2));box-sizing:border-box;
+  padding:18px 0 8px;display:flex;flex-direction:column;gap:8px}
 
 .nmsg{display:flex;flex-direction:column;gap:6px;width:100%;max-width:100%;box-sizing:border-box}
 /*
@@ -427,7 +430,6 @@
 @media(prefers-reduced-motion:reduce){.nqueue-toolbar button[data-queue-action="add"],.nqueue-grip>span,.nqueue-row>.nqueue-send-now{transition:none}}
 /* Composer styling shared with the starter. */
 .nchat-foot{flex:none;padding:8px 24px 18px}
-.nchat-footin{width:min(760px,100%);margin:0 auto}
 .ai-disclaimer{width:100%;box-sizing:border-box;margin:6px 0 0;text-align:center;color:var(--ink-4);font-size:max(var(--font-min-readable, 14.5px), 12px);line-height:20px;user-select:text}
 .nbox{border:1px solid color-mix(in srgb,var(--line) 88%,transparent);border-radius:16px;
   background:var(--bg-0);box-shadow:0 1px 2px rgba(16,24,40,.035),0 0 24px -18px rgba(16,24,40,.24);
@@ -821,12 +823,11 @@
 @media(prefers-reduced-motion:reduce){.nstatus-copy.swap{animation:none}}
 
 /* Active conversation composer: compact, elevated and visually detached from the transcript. */
-.nchat-foot{position:relative;z-index:5;flex:none;display:flex;min-height:0;max-height:75%;box-sizing:border-box;padding:10px 24px 20px;
+.nchat-foot{position:relative;z-index:5;flex:none;display:flex;min-height:0;max-height:75%;box-sizing:border-box;padding:10px var(--nchat-column-gutter) 20px;
   background:transparent;pointer-events:none;cursor:default}
 /* The execution switch adds another action; reclaim gutters on narrow splits. */
-@container chat-column (max-width:380px){.nchat-foot{padding-inline:10px}}
-.nchat-footin{width:min(820px,100%);margin:0 auto;display:flex;flex-direction:column;min-height:0}
-.nchat-footin.nchat-compose-shell{width:min(780px,100%)}
+@container chat-column (max-width:380px){.nchat-inner,.nchat-foot{--nchat-column-gutter:10px}}
+.nchat-footin{width:min(var(--nchat-column-max),100%);margin:0 auto;display:flex;flex-direction:column;min-height:0}
 .nchat-entry-dock{position:relative;isolation:isolate;min-width:0;min-height:0;display:flex;flex-direction:column;pointer-events:auto;cursor:default}
 /* When context fills a short window, the queue yields its list height first. */
 .nchat-entry-dock>.nchat-queue{flex:0 1 auto;min-height:30px}
