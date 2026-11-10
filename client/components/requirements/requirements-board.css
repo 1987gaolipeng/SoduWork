@@ -382,6 +382,7 @@ html[data-desk-panel="workspace"]:is([data-workspace-view="history"],[data-works
 }
 .rq-session-choice{padding:18px 22px;border-bottom:1px solid var(--line);color:var(--ink-2);font-size:var(--text-sm)}
 .rq-session-choice label{display:grid;gap:8px;font-weight:600}
+.rq-session-controls{margin:0;padding:0;border:0;min-width:0}
 .rq-session-choice select,.rq-session-choice textarea{width:100%;min-width:0;padding:10px 12px;box-sizing:border-box;border:1px solid var(--line);border-radius:var(--r-md);background:var(--bg-1);color:var(--ink);font:inherit}
 .rq-session-choice label span{color:var(--ink-3);font-weight:400}
 .rq-session-details p{margin:16px 0 10px;line-height:1.7;color:var(--ink-3)}

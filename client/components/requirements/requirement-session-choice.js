@@ -82,15 +82,15 @@
     if (!result?.ok) throw Error(result?.reason || '需求未能进入会话');
     return result;
   }
-  async function mount(host, task, {valid, completed}) {
+  async function mount(host, task, {valid, completed, setBusy}) {
     const policy = global.RequirementSessionContext;
     const sessions = global.soduWorkAPI?.conversationSession || global.soduWorkAPI?.piSession;
     if (!policy || !sessions?.history || !global.NativeChat?.enqueueTask) return;
     const box = document.createElement('section'); box.className = 'rq-session-choice';
-    box.innerHTML = '<label>执行会话<select aria-label="选择执行会话" disabled><option>正在读取项目会话…</option></select></label>' +
+    box.innerHTML = '<fieldset class="rq-session-controls"><label>执行会话<select aria-label="选择执行会话" disabled><option>正在读取项目会话…</option></select></label>' +
       '<div class="rq-session-details" hidden><p>沿用这段会话的上下文、Agent、模型和工作目录。需求说明与材料会作为下一项工作加入。</p>' +
       '<div class="rq-session-facts" data-user-content></div><label><span>补充说明 <small>选填</small></span><textarea rows="2" maxlength="2000" placeholder="这条需求需要特别注意什么"></textarea></label>' +
-      '<footer><span class="rq-session-status" role="status"></span><button type="button" class="rq-primary">在此会话执行</button></footer></div>';
+      '<footer><span class="rq-session-status" role="status"></span><button type="button" class="rq-primary">在此会话执行</button></footer></div></fieldset>';
     host.querySelector('.fwd-head').after(box);
     const select = box.querySelector('select'), details = box.querySelector('.rq-session-details');
     const status = box.querySelector('.rq-session-status'), send = box.querySelector('button');
@@ -99,6 +99,11 @@
     function change() {
       const chosen = candidates.find(row => row.sessionId === select.value);
       host.classList.toggle('uses-existing-session', Boolean(chosen)); details.hidden = !chosen;
+      const materials = host.querySelector('.fwd-materials');
+      if (materials) {
+        const before = chosen ? details.querySelector('label') : host.querySelector('.fwd-note-wrap');
+        before.before(materials);
+      }
       if (!chosen) return;
       status.textContent = chosen.reason || ''; send.disabled = Boolean(chosen.reason);
       box.querySelector('.rq-session-facts').textContent = [chosen.title, global.AgentBrand?.LABELS[chosen.adapterId] || chosen.adapterId,
@@ -106,10 +111,11 @@
     }
     select.onchange = change;
     send.onclick = async () => {
-      if (busy || !live() || send.disabled) return;
+      if (busy || !live() || send.disabled || host.querySelector('#fwdConfirm').dataset.idleLabel != null) return;
       const chosen = candidates.find(row => row.sessionId === select.value); if (!chosen || chosen.reason) return;
-      busy = true; select.disabled = true; send.disabled = true; send.textContent = '正在加入会话…'; status.textContent = '';
-      const confirm = host.querySelector('#fwdConfirm'); confirm.dataset.idleLabel = confirm.textContent;
+      busy = true; send.textContent = '正在加入会话…'; status.textContent = '';
+      if (setBusy) setBusy(true, send.textContent);
+      else box.querySelector('fieldset').disabled = true;
       try {
         const result = await global.NativeChat.enqueueTask(task.id, {source:'requirement-session', reuseConversation:true,
           chatId: chosen.sessionId, brief: box.querySelector('textarea').value.trim()});
@@ -118,7 +124,11 @@
         await completed(task.id, result.conversationId || chosen.sessionId);
       } catch (error) { if (live()) status.textContent = error.message || '会话暂时无法打开，需求已保留'; }
       finally {
-        if (live()) { busy = false; select.disabled = false; send.disabled = false; send.textContent = '在此会话执行'; delete confirm.dataset.idleLabel; }
+        if (live()) {
+          busy = false; send.textContent = '在此会话执行';
+          if (setBusy) setBusy(false);
+          else box.querySelector('fieldset').disabled = false;
+        }
       }
     };
     try {

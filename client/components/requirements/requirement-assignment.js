@@ -14,6 +14,61 @@
     if (returnFocus?.isConnected) returnFocus.focus({preventScroll: true});
     returnFocus = null;
   }
+  function bindMaterials(host, task, valid) {
+    const list = host.querySelector('[data-material-list]');
+    const status = host.querySelector('[data-material-status]');
+    const input = host.querySelector('input[type=file]');
+    let revision = 0;
+    async function refresh() {
+      const request = ++revision;
+      try {
+        const files = await global.SoduWorkAPI.listAttachments(task.id);
+        if (!valid() || request !== revision) return;
+        const inputs = files.filter(file => file.role === 'input' || file.role === 'rework_input' || (!file.role && !file.byAgent));
+        list.replaceChildren(...inputs.map(file => {
+          const item = document.createElement('li');
+          item.textContent = file.name || file.filename || '附件';
+          item.setAttribute('data-user-content', '');
+          return item;
+        }));
+        status.textContent = inputs.length ? '' : '暂无输入材料';
+      } catch (_) {
+        if (valid() && request === revision) status.textContent = '无法读取相关材料';
+      }
+    }
+    void refresh();
+    if (!input) return;
+    host.querySelector('[data-material-add]').onclick = () => input.click();
+    input.onchange = async () => {
+      const files = Array.from(input.files);
+      input.value = '';
+      if (!files.length || !valid() || root.querySelector('#fwdConfirm').dataset.idleLabel != null) return;
+      revision++;
+      _fwdSetBusy(true, '正在上传材料…');
+      status.textContent = '正在上传材料…';
+      const failures = [];
+      try {
+        for (const file of files) {
+          if (!valid()) return;
+          try {
+            const result = await global.SoduWorkAPI.uploadAttachment(task.id, file, {purpose: 'requirement_input'});
+            if (!result || result.ok === false) failures.push(file.name);
+          } catch (_) { failures.push(file.name); }
+        }
+        if (!valid()) return;
+        await refresh();
+        if (valid() && failures.length) {
+          status.replaceChildren('上传失败，可重新选择失败的文件。');
+          const names = document.createElement('span');
+          names.setAttribute('data-user-content', '');
+          names.textContent = failures.join('、');
+          status.append(names);
+        }
+      } finally {
+        if (valid()) _fwdSetBusy(false);
+      }
+    };
+  }
   async function open(taskId, tab) {
     close(); const request = ++generation;
     returnFocus = document.activeElement;
@@ -47,6 +102,9 @@
       '<div class="fwd-repo" id="fwdRepo" style="display:none"><label><span>关联工程</span>' +
       '<select class="fwd-repo-sel" id="fwdRepoSel" aria-label="关联工程" disabled><option>正在加载…</option></select></label>' +
       '<small id="fwdRepoHint"></small></div>' +
+      '<section class="fwd-materials"><div class="fwd-property-heading"><b>相关材料</b>' +
+      (global.Requirements?.canManageMaterials?.(task) ? '<button type="button" data-material-add>添加材料</button><input type="file" multiple hidden>' : '') +
+      '</div><ul data-material-list></ul><small data-material-status role="status">正在加载材料…</small></section>' +
       '<label class="fwd-note-wrap"><span>补充内容 <i>选填</i></span>' +
       '<textarea class="fwd-note" id="fwdNote" rows="5" maxlength="2000" ' +
       'placeholder="补充验收标准、口径或参考资料（选填）"></textarea></label>' +
@@ -65,7 +123,9 @@
       document.body.appendChild(root);
       global.ForwardSelect?.enhance(root);
       const assignmentScope = identityEpoch;
+      bindMaterials(root.querySelector('.fwd-materials'), task, () => request === generation && assignmentScope === identityEpoch);
       void global.RequirementSessionChoice?.mount(root.querySelector('#fwdPop'), task, {
+        setBusy: _fwdSetBusy,
         valid: () => request === generation && assignmentScope === identityEpoch,
         completed: (id, chatId) => completed(id, assignmentScope, chatId),
       });
@@ -83,7 +143,7 @@
           if (root.querySelector('#fwdConfirm')?.dataset.idleLabel == null) _closeFwd();
         }
         if (event.key !== 'Tab') return;
-        const nodes = [...root.querySelectorAll('button:not([disabled]),input:not([disabled]),textarea:not([disabled]),select:not([disabled])')].filter(n => n.getClientRects().length);
+        const nodes = [...root.querySelectorAll('button:enabled,input:enabled,textarea:enabled,select:enabled')].filter(n => n.getClientRects().length);
         const first = nodes[0], last = nodes.at(-1);
         if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
         else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }

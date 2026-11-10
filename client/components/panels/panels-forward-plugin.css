@@ -236,6 +236,11 @@
 .frw-main .fwd-repo label{grid-template-columns:1fr;gap:6px}
 .frw-main .fwd-repo>small{margin:5px 0 0}
 .frw-main .fwd-note-wrap{margin:0 0 14px;gap:6px}
+.fwd-materials{margin:0 0 16px}
+.fwd-materials ul{max-height:6em;overflow:auto;margin:4px 0;padding-inline-start:18px;overflow-wrap:anywhere}
+.fwd-materials :is(ul,small):empty{display:none}
+.fwd-materials small,.fwd-directory-hint{color:var(--ink-3);overflow-wrap:anywhere}
+.fwd-decision:has(.fwd-directory-hint){flex-direction:column;align-items:stretch}
 .frw-main .fwd-note{width:100%;height:142px;min-height:100px;max-height:260px;line-height:1.6;resize:vertical;background:var(--bg-0)}
 .frw-main .fwd-foot{flex-wrap:wrap;gap:4px;color:var(--ink-4)}
 .fwd-settings{padding-left:20px}

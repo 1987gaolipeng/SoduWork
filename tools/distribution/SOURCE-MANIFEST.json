@@ -1491,8 +1491,8 @@
     },
     {
       "path": "client/components/panels/panels-forward-options.js",
-      "bytes": 35885,
-      "sha256": "841175c0ac89e69a3356b97a79439e56a0629b2e9c65e83b3e62576b990f6619"
+      "bytes": 36603,
+      "sha256": "e78d19e8c9f3a5f66dda6c8a08b15d965c5b2b45743fd331f0d365ebd0406ef2"
     },
     {
       "path": "client/components/panels/panels-forward-picker.js",
@@ -1501,8 +1501,8 @@
     },
     {
       "path": "client/components/panels/panels-forward-plugin.css",
-      "bytes": 40072,
-      "sha256": "e9b96cdc6f32932d67034d49c76046b95e697f6b9a7efc1203a528d25588daed"
+      "bytes": 40429,
+      "sha256": "210029c94d32a797f0c2b9fd0ccc4af819d6d0428531cb86d604912f4c678e5c"
     },
     {
       "path": "client/components/panels/panels-forward-plugin.js",
@@ -2001,8 +2001,8 @@
     },
     {
       "path": "client/components/requirements/requirement-assignment.js",
-      "bytes": 7104,
-      "sha256": "3cd79f5a74175f3aac9584b15bc8cfc81a804d774cca977a8a2ceca6075919d9"
+      "bytes": 9968,
+      "sha256": "22f4ec0d7a29a4a22df0531c8faa7d051dc39be391e5afa0437c403ae73e1473"
     },
     {
       "path": "client/components/requirements/requirement-confirm.css",
@@ -2021,13 +2021,13 @@
     },
     {
       "path": "client/components/requirements/requirement-session-choice.js",
-      "bytes": 10337,
-      "sha256": "2023a27da5f5fd5b44edec0185e57c8ff28249db609d4ff4bb2f862a4e6f0aa1"
+      "bytes": 10684,
+      "sha256": "0bc913d1c1a009ddb2029e7af39db68db2e5447579e49967c16ad1da6d418ccd"
     },
     {
       "path": "client/components/requirements/requirements-board.css",
-      "bytes": 63954,
-      "sha256": "d85e8d76057285fc3efc718a6ad41d7f6144084e4685e875dfb8d1d22ff58b66"
+      "bytes": 64016,
+      "sha256": "b5ba522c9f3295fd410d9379591f994368e8a8bf9c77181ac7ecdca27265d744"
     },
     {
       "path": "client/components/requirements/requirements-board.js",
@@ -2496,8 +2496,8 @@
     },
     {
       "path": "client/core/locales/en-US-final-pages.js",
-      "bytes": 45855,
-      "sha256": "0d5979a33d48a586ec668dfff78cc9b727ebdf79f8750bfa69a6bd9ba420a461"
+      "bytes": 46557,
+      "sha256": "b6cfe6b87b46c6a0851f3d065ab8d046a0e298c071f935e8175fdc555bcee75a"
     },
     {
       "path": "client/core/locales/en-US-gap-pages.js",
@@ -2576,8 +2576,8 @@
     },
     {
       "path": "client/core/locales/ja-JP-gap-pages.js",
-      "bytes": 758378,
-      "sha256": "b4fce4c68788e72e016aea55252232b7371db92df71e00d16554a8b2fec83ee4"
+      "bytes": 759239,
+      "sha256": "08a2550746091180cd5879994143e4d595c57948b05b569d00e3e0a6f0259537"
     },
     {
       "path": "client/core/locales/ja-JP-runtime-surfaces.js",
@@ -2596,8 +2596,8 @@
     },
     {
       "path": "client/core/locales/ko-KR-gap-pages.js",
-      "bytes": 709343,
-      "sha256": "61440110eb8906ac9c27767b42212ee3cba64edaeea9e020f82fcc27cc8e98af"
+      "bytes": 710152,
+      "sha256": "87d65f631998470a3cbe9924e7868762101d266f8c299dc81329215b7a284228"
     },
     {
       "path": "client/core/locales/ko-KR-runtime-surfaces.js",
@@ -4461,8 +4461,8 @@
     },
     {
       "path": "client/e2e/requirement-native-default-model.cjs",
-      "bytes": 16302,
-      "sha256": "88634c53d89eef48e182141f5d9416607a276564380d2cd8a3ca392f0aecbee7"
+      "bytes": 19561,
+      "sha256": "2f10267d735b0db349be2fea90dc1bca745b19d5bda818e38e2a6cf2d709b365"
     },
     {
       "path": "client/e2e/requirement-receipt-navigation.cjs",
