@@ -64,19 +64,32 @@ test('optional frozen Runner brainstorm copy is prepared and empty minimal packa
 
 test('only reviewed dependency documentation is excluded; redistribution notices survive unchanged', async t => {
   const root = await fixture(t, false), docs = [
-    PI + '/node_modules/bignumber.js/doc/API.html', PI + '/node_modules/tslib/tslib.es6.html', PI + '/node_modules/tslib/tslib.html',
+    'resources/pi/node_modules/bignumber.js/doc/API.html',
+    'resources/pi/node_modules/tslib/tslib.es6.html', 'resources/pi/node_modules/tslib/tslib.html',
   ];
-  for (const file of [...docs, 'LICENSES.chromium.html', 'resources/vendor/LICENSE.html']) await write(root, file, HTML);
+  const originals = new Map();
+  const lock = require('../package-lock.json');
+  for (const file of docs) {
+    const relative = file.slice('resources/pi/'.length);
+    const packagePath = relative.split('/').slice(0, 2).join('/');
+    assert.ok(lock.packages[packagePath] && !lock.packages[packagePath].dev, 'reviewed document belongs to a locked runtime dependency');
+    const source = path.resolve(__dirname, '..', relative);
+    const bytes = await fs.readFile(source);
+    originals.set(source, bytes);
+    await write(root, file, bytes);
+  }
+  for (const file of ['LICENSES.chromium.html', 'resources/vendor/LICENSE.html']) await write(root, file, HTML);
   const result = await prepareHtmlResources(root);
   assert.deepEqual(result.excludedDocuments.sort(), docs.sort());
   for (const file of docs) assert.equal(await exists(root, file), false);
+  for (const [source, bytes] of originals) assert.deepEqual(await fs.readFile(source), bytes, 'dependency source is read-only');
   for (const file of ['LICENSES.chromium.html', 'resources/vendor/LICENSE.html']) {
     assert.equal(await fs.readFile(path.join(root, file), 'utf8'), HTML);
   }
 });
 
 test('unknown root and runtime HTML fail before deleting templates or rewriting consumers', async t => {
-  for (const relative of ['unknown.htm', 'resources/skills/unknown/new.html', PI + '/node_modules/tslib/unreviewed.html']) {
+  for (const relative of ['unknown.htm', 'resources/skills/unknown/new.html', 'resources/pi/node_modules/tslib/unreviewed.html']) {
     const root = await fixture(t); await write(root, relative, HTML);
     await assert.rejects(prepareHtmlResources(root), /Unreviewed loose HTML resource/);
     assert.equal(await fs.readFile(path.join(root, INDEX), 'utf8'), entry);

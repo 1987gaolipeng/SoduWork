@@ -7366,8 +7366,8 @@
     },
     {
       "path": "client/scripts/prepare-html-resources.cjs",
-      "bytes": 6968,
-      "sha256": "6d0f1b89533f3deee5b8e8e3ae1d7b2eff4af42b48b8af3498052cfaae99ef83"
+      "bytes": 6989,
+      "sha256": "af7cf0d7065bf545de3c9dfe04dcda4be7748ca2352c4560312f6619ced06a05"
     },
     {
       "path": "client/scripts/prepare-installer.cjs",
@@ -10016,8 +10016,8 @@
     },
     {
       "path": "client/tests/prepare-html-resources.test.cjs",
-      "bytes": 8619,
-      "sha256": "12796bcf21be4f39fda2042ed63231d62435ce8ce1876aa886dd8457c47df349"
+      "bytes": 9320,
+      "sha256": "73fe3e2f34fc71f547af1d7dedc0975b58ce1236e23adf204b8663081bed30b8"
     },
     {
       "path": "client/tests/prepare-node-runtime.test.cjs",
