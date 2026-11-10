@@ -36,7 +36,9 @@ function audit(root, names, pairs = PAIRS) {
   let checkedLinks = 0;
   for (const name of names) texts.set(name, fs.readFileSync(path.join(root, name), 'utf8'));
   for (const [name, text] of texts) {
-    for (const link of links(text)) {
+    const imageSources = [...prose(text).matchAll(/<img\b[^>]*?\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi)]
+      .map(match => match[1] ?? match[2] ?? match[3]);
+    for (const link of [...links(text), ...imageSources]) {
       if (/^[a-z][a-z\d+.-]*:|^\/\//i.test(link)) continue;
       checkedLinks++;
       const [target, fragment] = link.split('#');

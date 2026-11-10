@@ -66,6 +66,24 @@ class LocalStartupTests(unittest.TestCase):
             self.assertEqual(start.default_state(), fresh)
             self.assertEqual(marker.read_text(encoding="utf-8"), "{}")
 
+    def test_macos_default_desktop_profile_is_outside_installed_client(self):
+        home = Path(self.temp.name)
+        app_data = home / 'Library/Application Support'
+        installed = app_data / 'SoduWork'
+        with patch.object(Path, 'home', return_value=home), patch.object(sys, 'platform', 'darwin'), \
+                patch.object(start, 'os', wraps=os) as platform_os:
+            platform_os.name = 'posix'
+            state = start.default_state()
+            self.assertEqual(state, installed / 'source-service')
+            with patch.object(start.subprocess, 'Popen') as popen:
+                start.launch_desktop(state, state / 'application/client', {}, 'http://127.0.0.1:18989', io.BytesIO())
+            profile = Path(popen.call_args.kwargs['env']['SODUWORK_USER_DATA'])
+            self.assertFalse(profile.resolve().is_relative_to(installed.resolve()))
+            self.assertTrue((profile / 'hub-endpoint.json').is_file())
+            self.assertFalse((state / 'desktop-profile').exists())
+            self.assertEqual(start.desktop_profile(state), profile)
+            self.assertEqual(start.desktop_profile(self.state), self.state / 'desktop-profile')
+
     def test_refuses_existing_unrelated_data_without_changes(self):
         self.state.mkdir()
         private = self.state / ".env"

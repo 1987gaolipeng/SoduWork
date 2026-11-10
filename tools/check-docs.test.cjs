@@ -29,3 +29,13 @@ test('external links and literal code examples do not require local files', t =>
   const root = fixture(t, { 'README.md': '[web](https://example.com/)\n```md\n[x](missing.md)\n```\n' });
   assert.equal(audit(root, ['README.md'], []).ok, true);
 });
+test('README HTML images must exist locally; remote images and fenced examples are skipped', t => {
+  const root = fixture(t, {
+    'README.md': '<p><img src="hero.gif"></p>\n<img width="80" src=\'logo.svg\'>\n' +
+      '<img src="https://example.com/banner.png">\n```html\n<img src="example.png">\n```\n',
+    'logo.svg': '<svg/>',
+  });
+  const result = audit(root, ['README.md'], []);
+  assert.equal(result.checkedLinks, 2);
+  assert.deepEqual(result.errors, ['README.md: missing or escaping link hero.gif']);
+});

@@ -297,10 +297,20 @@ def serve(state: Path, config: dict, args) -> None:
             stop_child(child)
 
 
+def desktop_profile(state: Path) -> Path:
+    if sys.platform == 'darwin':
+        app_data = Path.home() / 'Library/Application Support'
+        if state.resolve() == (app_data / 'SoduWork/source-service').resolve():
+            # The existing Hub state is below the installed Electron profile.
+            # Keep its database in place and put the source desktop outside it.
+            return app_data / 'SoduWork Development/source-service-desktop'
+    return state / 'desktop-profile'
+
+
 def launch_desktop(state: Path, client: Path, env: dict, base: str, output) -> subprocess.Popen:
     """The source session owns a separate profile and never rewrites an installed client."""
-    profile = state / 'desktop-profile'
-    profile.mkdir(parents=True, exist_ok=True)
+    profile = desktop_profile(state)
+    profile.mkdir(parents=True, exist_ok=True, mode=0o700)
     (profile / 'hub-endpoint.json').write_text(json.dumps({'hub': base}), encoding='utf-8')
     config = profile / 'chat-config.json'
     if not config.exists():

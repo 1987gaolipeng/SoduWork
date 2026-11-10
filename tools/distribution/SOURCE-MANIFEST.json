@@ -96,13 +96,13 @@
     },
     {
       "path": "README.md",
-      "bytes": 21033,
-      "sha256": "c5e58c06d66147a1e8f3dadf2607da008d9f638546599913293656acb74468b4"
+      "bytes": 20923,
+      "sha256": "2989acc179a94c2fb164c669d376cceef231cc7df4603af9ca3ca5c4a786a69c"
     },
     {
       "path": "README.zh-CN.md",
-      "bytes": 20621,
-      "sha256": "fded37cccc262848e6af10a389039204993bb3d63da91f554e2a5178e8d6c10c"
+      "bytes": 20485,
+      "sha256": "f7665ad6cb0f48e5bd70071c7064bbe801cd8b7fae359a3ef3f475f44964aedd"
     },
     {
       "path": "SECURITY.md",
@@ -11496,13 +11496,13 @@
     },
     {
       "path": "docs/getting-started.en.md",
-      "bytes": 12087,
-      "sha256": "3bfa6581ba5db5d33b064ffeac415055f55eda03c5652e2b2339dd5dfb752b26"
+      "bytes": 12386,
+      "sha256": "05f2e3f052af0333f489f02514610168799b6c1f85413f96ee7644138cd69274"
     },
     {
       "path": "docs/getting-started.md",
-      "bytes": 11708,
-      "sha256": "0468fe7681448f2d59bad372c36dc5a599276df221f9b75aa0ca14baba42ef06"
+      "bytes": 11966,
+      "sha256": "ee4a5e8251f5ec0d901193478cc919d78a80b7f8b830f55ea6dc2d2a703f685c"
     },
     {
       "path": "docs/index.en.md",
@@ -20951,13 +20951,13 @@
     },
     {
       "path": "tools/check-docs.cjs",
-      "bytes": 3609,
-      "sha256": "2ed37d49ab9602841be18dc6a206a756526cf15e74f74eed283cf9a90b498e35"
+      "bytes": 3805,
+      "sha256": "cf75036311567c80d7d2d2bcac7b6b4902cd983d268a453a650b51e2dae256df"
     },
     {
       "path": "tools/check-docs.test.cjs",
-      "bytes": 1658,
-      "sha256": "c00659a4984a99533c885a07b115fc899778ae0d1f61529ae65b71569b1c5799"
+      "bytes": 2175,
+      "sha256": "7657486f83e6629cb442ab49fc75c5986949589979f957d9b2fc25754b6eccb3"
     },
     {
       "path": "tools/check-public-source.cjs",
@@ -21116,8 +21116,8 @@
     },
     {
       "path": "tools/dev/start_local.py",
-      "bytes": 20152,
-      "sha256": "6ffc07bd9ff830d316e74d10165b51ff5175f45b70aa3db9e6713125a69cf113"
+      "bytes": 20652,
+      "sha256": "6e2169abd45edddb845724dbe26ef64e352b0475963b32233e878fd194f02c95"
     },
     {
       "path": "tools/dev/test_deploy.py",
@@ -21136,13 +21136,13 @@
     },
     {
       "path": "tools/dev/test_start_local.py",
-      "bytes": 21185,
-      "sha256": "bde90b28e1093eb968db9520c4fe667129fba406b3d22bc62fb888aa2ce9a17c"
+      "bytes": 22367,
+      "sha256": "677da0c87647d0a8058cc036c6a883e8080a337edd177279665d103e96fa4d47"
     },
     {
       "path": "tools/dev/verify_local_start.py",
-      "bytes": 14081,
-      "sha256": "bde9cc293f79f28db0802629b881d970fe231b8589749c7affb637ef24b75b76"
+      "bytes": 14147,
+      "sha256": "58412cb97fdc56e43c90fb5c6ecb563b20fce70cb871721e14f94121fb5bbbb9"
     },
     {
       "path": "tools/distribution/PUBLIC-SOURCE.json",

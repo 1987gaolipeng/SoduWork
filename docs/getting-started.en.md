@@ -35,7 +35,7 @@ The browser and desktop client then open:
 - The browser starts on an introduction page. Click **Enter admin console** to reach sign-in. You do not need to download another client from this page.
 - Sign in to both interfaces with **`admin` and the password you just chose**. This account belongs to your local instance, not an online service. No additional registration is needed.
 - If the browser does not open automatically, visit [http://127.0.0.1:18989](http://127.0.0.1:18989). If you change the port, use the new address printed by the launcher.
-- The linked desktop client already points to this local service and uses a separate `desktop-profile/`. It does not overwrite an installed client's accounts, server address, or history.
+- The linked desktop client already points to this local service and uses a separate desktop profile. It does not overwrite an installed client's accounts, server address, or history.
 
 Successful startup makes the application available. AI responses still require your own model service.
 
@@ -65,7 +65,7 @@ If the model is missing, refresh the catalog or reopen the desktop model selecto
 - Use the same launcher next time and sign in with the same account. Data and model settings are retained.
 - Press **Ctrl+C** in the startup terminal and wait for shutdown. Closing the desktop window may only minimize it to the tray; choose Quit from the tray to exit the application.
 - Do not launch a second copy. If an instance is already running, use its existing terminal and page.
-- Before updating source, stop the service and back up the entire data directory. Then update the source and run the same launcher. Do not edit the managed application copy inside the data directory.
+- Before updating source, stop the service and back up the entire data directory and any separate desktop profile. Then update the source and run the same launcher. Do not edit the managed application copy inside the data directory.
 
 ## Troubleshooting
 
@@ -161,9 +161,9 @@ Use the same data directory for preparation and startup. It must be outside the 
 | macOS | `~/Library/Application Support/SoduWork/source-service` |
 | Linux | `$XDG_DATA_HOME/soduwork/source-service`, or `~/.local/share/soduwork/source-service` |
 
-The directory contains the database, attachments, service signing key, private desktop profile, logs, and reusable dependencies. Treat the whole directory as private. Never commit it or include it in a source archive. The launcher does not inherit the checkout's `.env`, production database settings, or model credentials.
+The directory contains the database, attachments, service signing key, logs, and reusable dependencies. The desktop profile normally lives in `desktop-profile/` inside this directory. When using the default macOS data directory, the desktop profile lives separately at `~/Library/Application Support/SoduWork Development/source-service-desktop`. Treat the data directory and desktop profile as private. Never commit it or include it in a source archive. The launcher does not inherit the checkout's `.env`, production database settings, or model credentials.
 
-Before updating source, stop the service and back up the entire data directory. Then update the source and run the same launcher again. To roll back, restore the matching source version and data backup together. Do not delete a database to reset a forgotten password.
+Before updating source, stop the service and back up the entire data directory and any separate desktop profile. Then update the source and run the same launcher again. To roll back, restore the matching source version and data backup together. Do not delete a database to reset a forgotten password.
 
 ## Verify the source launcher
 
