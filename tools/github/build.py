@@ -58,7 +58,12 @@ def package_native(ctx, shard, scratch, *, validation=False):
     # A narrow bridge for the retained generic inventory/acceptance tools.
     # Values come from the real GitHub context, never a fabricated GitLab run.
     env = {**os.environ, "CI_COMMIT_SHA": ctx["commit"], "CI_PIPELINE_ID": ctx["runId"],
-           "CI_JOB_ID": ctx["runId"], "CSC_IDENTITY_AUTO_DISCOVERY": "false"}
+           "CI_JOB_ID": ctx["runId"], "CSC_IDENTITY_AUTO_DISCOVERY": "false",
+           # Reuse the download-base options with upstream URLs on hosted
+           # runners. Retain pinned hashes, without domestic mirror fallbacks.
+           "SODUWORK_NODE_MIRROR": "https://nodejs.org/download/release",
+           "SODUWORK_PYTHON_MIRROR": "https://github.com/astral-sh/python-build-standalone/releases/download",
+           "SODUWORK_RUNTIME_MIRROR_ONLY": "1"}
     require(not env.get("SODUWORK_INTERNAL_BUILD"), "Internal-only builds cannot enter public workflows")
     if validation:
         # Validation emits only a checksum report. Public release entry points

@@ -80,7 +80,7 @@ jobs:
           api-level: 35
           target: google_apis
           arch: x86_64
-          profile: Pixel_6
+          profile: pixel_2
           script: python tools/github/validate_packages.py android --output release-evidence/android-build.json
       - name: Retain build evidence only
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

@@ -48,7 +48,7 @@ async function main() {
       assert.equal(detail.verification, 'verified-redistribution-bundle');
       assert.equal(fs.readFileSync(path.join(root, detail.path)).length, detail.actualSize);
     }
-    const critical = ['resources/app.asar', 'resources/pi/@earendil-works/pi-coding-agent/package.json',
+    const critical = ['resources/app.asar', 'resources/pi/node_modules/@earendil-works/pi-coding-agent/package.json',
       'resources/skills/office/SKILL.md'];
     for (const name of critical) {
       const item = manifest.files.find(file => file.path === name); assert.ok(item, name);

@@ -49,7 +49,7 @@ if [ "$kind" != tgz ]; then
 fi
 runuser -u acceptance -- env ELECTRON_RUN_AS_NODE=1 "$app/soduwork" -e 'console.log(process.versions)' > /evidence/node-runtime.txt
 runuser -u acceptance -- env SODUWORK_DATA_ROOT="$profile/runner" SODUWORK_BUNDLED_NODE="$app/soduwork" \
-  SODUWORK_BUNDLED_PI_CLI="$app/resources/pi/@earendil-works/pi-coding-agent/dist/cli.js" SODUWORK_SKILL_ROOTS="$app/resources/skills" \
+  SODUWORK_BUNDLED_PI_CLI="$app/resources/pi/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" SODUWORK_SKILL_ROOTS="$app/resources/skills" \
   timeout 90 "$app/resources/runner/soduwork-runner" --doctor > /evidence/runner-doctor.json 2> /evidence/runner-doctor.log
 runuser -u acceptance -- env ELECTRON_RUN_AS_NODE=1 "$app/soduwork" -e \
   'const r=require("/evidence/runner-doctor.json");if(!r.ok||!r.frozen||!r.terminal.ok||!r.skills.length)process.exit(1);'

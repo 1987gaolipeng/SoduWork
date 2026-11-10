@@ -57,12 +57,12 @@
     {
       "path": ".github/workflows/packages.yml",
       "bytes": 3597,
-      "sha256": "3361b83f437ddd1b20e8f33c168fd86a2d392e2650cf4949f7ff27d30b4a222a"
+      "sha256": "65611961028e4a5c8e9d4b094d16d0ccfbc7d5c51296da96ebcc9642890edead"
     },
     {
       "path": ".github/workflows/release.yml",
-      "bytes": 8725,
-      "sha256": "c5fa0bc56acb98b9eadeef3ff9a36b56ea9be8d45c01f6a519c6b4000a1107cb"
+      "bytes": 9054,
+      "sha256": "4290a67073c83e95a6e4db10ed97bbc0aa164053f2455303f1b9df75d36c9ea7"
     },
     {
       "path": ".github/workflows/security.yml",
@@ -3901,8 +3901,8 @@
     },
     {
       "path": "client/e2e/installer-all-notices.cjs",
-      "bytes": 4966,
-      "sha256": "04aa4cf0e9c90683670b096bd34170d388d78680c767336a1310312610cca6e3"
+      "bytes": 4979,
+      "sha256": "c4c09ea6851664e24df8f67ba46f659bb4f3742b3b77d38570739fa8bf51ece9"
     },
     {
       "path": "client/e2e/installer-bootstrap-compatibility.cjs",
@@ -3916,8 +3916,8 @@
     },
     {
       "path": "client/e2e/installer-html-resources.cjs",
-      "bytes": 8154,
-      "sha256": "19ce67c872a5b08c4920fb02579b8e3da0c80843dd8d5241f5052cdcc6f75700"
+      "bytes": 8180,
+      "sha256": "8bc1e05b7b93b5fb0da440932248bd06f393e0adfa742cbd7901730447f5cb3b"
     },
     {
       "path": "client/e2e/installer-notice-compatibility.cjs",
@@ -4256,8 +4256,8 @@
     },
     {
       "path": "client/e2e/packaged-agent-catalog.cjs",
-      "bytes": 4712,
-      "sha256": "3a7ab752ce894c0203083c7c4e28961e8e57d2a8141bc41f7b589ece29b6847b"
+      "bytes": 4725,
+      "sha256": "373f66e4bbdc848cfa75291d7cc505a037a4b7c48ad3bcc8c33c7826d0efa9fd"
     },
     {
       "path": "client/e2e/packaged-runner.cjs",
@@ -6726,8 +6726,8 @@
     },
     {
       "path": "client/main/pi-session/session-helpers.js",
-      "bytes": 6772,
-      "sha256": "b741b4f86f1b18e838f59ffe7a4a637946616985e07eae4a70ab87fd1a18aef3"
+      "bytes": 6788,
+      "sha256": "b97a552a15191e4aeb636a63aafe60671f52e52d24874e0a12edba1c927d0c73"
     },
     {
       "path": "client/main/pi-session/session-open.js",
@@ -7241,8 +7241,8 @@
     },
     {
       "path": "client/package.json",
-      "bytes": 8834,
-      "sha256": "3a4620bad754038fb343b73a20b5628f5a7c1c5114b5b185a15c0fc42c5d6521"
+      "bytes": 8980,
+      "sha256": "c500d038f047332c5d2ef8f4202841bf7fafabb233d732058dd70a7f85e492f3"
     },
     {
       "path": "client/preload.js",
@@ -7351,8 +7351,8 @@
     },
     {
       "path": "client/scripts/patch-pi-retry-schedule.cjs",
-      "bytes": 6258,
-      "sha256": "194f42dd8577cac10ecdee06e394b2f447f790da8f3eee9d9e528c5549e093a1"
+      "bytes": 6290,
+      "sha256": "2bd5b5ccf1e643c3bb3fccd81113c30a4dbb1243eb77c5d45357e914d3faf879"
     },
     {
       "path": "client/scripts/payload-sources.cjs",
@@ -7416,8 +7416,8 @@
     },
     {
       "path": "client/scripts/verify-runtime.cjs",
-      "bytes": 3123,
-      "sha256": "e52e11d274270fee80c4618a4691b18a0e9515543010587dfde7168cc4b16ebd"
+      "bytes": 3136,
+      "sha256": "f160fbb9a564a562472f442360fcd82b6df7437f42de92e25519ec3402502942"
     },
     {
       "path": "client/sdk/README.en.md",
@@ -10026,8 +10026,8 @@
     },
     {
       "path": "client/tests/prepare-pi-runtime.test.cjs",
-      "bytes": 3031,
-      "sha256": "ed7cddb1e9f2de5fa3de7e00b118bdd1d31af02f0be7c9520c21aa794ce3a7d3"
+      "bytes": 5506,
+      "sha256": "a9a18fce3c7cab1ee23fb1686573ad28454d91ffe85be4f01a037b77d9f450e2"
     },
     {
       "path": "client/tests/prepare-python-runtime.test.cjs",
@@ -15311,8 +15311,8 @@
     },
     {
       "path": "hub-backend/scripts/check_packaged_runner_task.py",
-      "bytes": 9301,
-      "sha256": "b02513083a77c4cbe097dc25369adcb8555253fa5cce8a93735a6a9b4d66d338"
+      "bytes": 9314,
+      "sha256": "d0c27608825c7f6d953f05fb24c1e1dff4ee1a49af5f5531fc79ef577e89cf69"
     },
     {
       "path": "hub-backend/sign_client_release.py",
@@ -23916,8 +23916,8 @@
     },
     {
       "path": "tools/github/build.py",
-      "bytes": 11646,
-      "sha256": "ed6be1b390815903caec05339be98f000b92afec9dc34cb28b936bdd101a5065"
+      "bytes": 12032,
+      "sha256": "5acbdce08e2902803f1815f06369b46f100aaeb5ddb3bf10309077211b58ffdc"
     },
     {
       "path": "tools/github/check_public_ci.py",
@@ -23931,8 +23931,8 @@
     },
     {
       "path": "tools/github/linux-installed-check.sh",
-      "bytes": 4864,
-      "sha256": "d2a46ae4d57115ccdb5b60214eb745545dd550ab7c9e09e5509625c46d80c275"
+      "bytes": 4877,
+      "sha256": "d598434ff410a4fdf8a778a72239ce1a388833e865adbb1386f2554008a85321"
     },
     {
       "path": "tools/github/postgres.py",

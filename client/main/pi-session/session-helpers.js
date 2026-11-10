@@ -6,7 +6,7 @@ const inputContext = require('./input-context.cjs');
 function entryCandidates(app) {
   const out = [];
   if (app && app.isPackaged) {
-    out.push(path.join(require('../agent-runtime/process-context').current()?.resourcesPath || process.resourcesPath, 'pi', '@earendil-works',
+    out.push(path.join(require('../agent-runtime/process-context').current()?.resourcesPath || process.resourcesPath, 'pi', 'node_modules', '@earendil-works',
       'pi-coding-agent', 'dist', 'index.js'));
   }
   const clientRoot = path.dirname(path.dirname(__dirname));
