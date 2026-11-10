@@ -92,14 +92,14 @@ app.whenReady().then(async () => {
   report.cases.push('Real pointer input opens create/edit project dialogs; their rendered backdrop matches native caption colors, and save/close restores the original theme.');
 
   await click('#wsProjectAdd');
-  await js(`document.documentElement.style.setProperty('--bg-0','#17191f');
+  await js(`document.documentElement.style.setProperty('--ws-side','#17191f');
     document.documentElement.style.setProperty('--ink','#eef0f4');
     document.documentElement.style.setProperty('--ink-3','#dadde4');void 0;`);
   await matchesBar('theme change during modal'); await shot('project-modal-dark');
   for (const type of ['keyDown', 'keyUp']) win.webContents.sendInputEvent({ type, keyCode: 'Escape' });
   await until(() => Promise.resolve(themes.at(-1).color === '#17191f'), 'Escape restores current theme');
   await matchesBar('dark theme restored');
-  await js(`for (const key of ['--bg-0','--ink','--ink-3']) document.documentElement.style.removeProperty(key);void 0;`);
+  await js(`for (const key of ['--ws-side','--ink','--ink-3']) document.documentElement.style.removeProperty(key);void 0;`);
   await until(() => Promise.resolve(themes.at(-1).color === initial), 'original skin restored');
   report.cases.push('Theme changes while a modal is open update the composition; Escape restores the new theme and normal keyboard close behavior.');
 

@@ -218,7 +218,6 @@ html[data-desk-panel="workspace"] #settingsPanel {
   padding: 0 var(--settings-gutter) 32px !important;
   min-height: 0 !important;
   border: 1px solid var(--settings-line) !important;
-  border-radius: 22px !important;
   background: var(--settings-canvas) !important;
   box-shadow: 0 18px 54px rgba(32, 52, 82, .10) !important;
   overflow-y: auto !important;

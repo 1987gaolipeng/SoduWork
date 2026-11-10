@@ -106,7 +106,7 @@ html[data-desk-panel="workspace"] #settingsPanel > .ws-page-head{
 }
 /* Library owns its scrollport. Let the title band span it without moving the content. */
 html[data-desk-panel="workspace"] #libraryPanel{
-  padding:0 var(--ws-head-gutter) 24px!important;border-radius:18px!important;
+  padding:0 var(--ws-head-gutter) 24px!important;
 }
 html[data-desk-panel="workspace"] #libraryPanel .ws-page-head{
   width:auto;max-width:none;margin:0 calc(-1 * var(--ws-head-gutter))!important;
