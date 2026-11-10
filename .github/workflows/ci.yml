@@ -64,6 +64,11 @@ jobs:
           python -m unittest discover -s tools/github -p 'test_*.py'
       - name: Verify isolated HTTP startup, persistence, and shutdown
         run: python tools/dev/verify_local_start.py
+      - name: Show isolated launcher logs when startup verification fails
+        if: failure()
+        shell: bash
+        run: |
+          find "${TMPDIR:-/tmp}" -type f -name '*.launcher-*.log' -print -exec tail -200 {} \; 2>/dev/null || true
 
   frontend:
     runs-on: ubuntu-latest
