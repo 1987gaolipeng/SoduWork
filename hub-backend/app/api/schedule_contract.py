@@ -7,11 +7,20 @@ from fastapi import HTTPException
 
 
 def schedule_payload(s, *, timestamp, administrative=False) -> dict:
+    from datetime import datetime, timezone
     from ..services import schedules as sch
     # Automation is a plain conversation. Enterprise workflow bindings are not
     # exposed, while a personal plugin remains an ordinary-chat plugin resolved
     # by the owner desktop.
-    next_at = sch.next_run_instant(s, s.last_run_at)
+    # A finite custom rule can still have a pending first occurrence after its
+    # wall time. Use the same durable origin as due(), not the response clock.
+    origin = s.last_run_at or (s.created_at if s.every == "custom" else None)
+    next_at = sch.next_run_instant(s, origin)
+    end_date = str(getattr(s, "end_date", None) or "")
+    current = datetime.now(timezone.utc)
+    if s.every not in ("once", "custom") and end_date and current.astimezone(sch.schedule_zone(s)).date().isoformat() > end_date:
+        pending = sch.next_run_instant(s, s.last_run_at or s.created_at)
+        next_at = pending if sch.calendar_window_allows(s, current, pending) else None
     next_local = next_at.astimezone(sch.schedule_zone(s)) if next_at else None
     personal_key = str(getattr(s, "personal_plugin_key", "") or "")
     personal_policy = str(getattr(s, "personal_plugin_version_policy", "latest") or "latest")
@@ -21,10 +30,19 @@ def schedule_payload(s, *, timestamp, administrative=False) -> dict:
     # cleared. Do not advertise a phantom pinned plugin to a new editor.
     if not personal_key:
         personal_policy, personal_version, personal_checksum = "latest", "", ""
+    weekdays = sch.schedule_timing.clean_weekdays(getattr(s, "weekdays", None))
+    if s.every == "weekly" and not weekdays:
+        weekdays = sch.schedule_timing.clean_weekdays(getattr(s, "weekday", None))
     payload = {"id": s.id, "title": s.title, "note": s.note, "every": s.every,
             "runAt": timestamp(getattr(s, "run_at", None)),
             "onceFired": bool(getattr(s, "once_fired", False)),
             "atHour": s.at_hour, "atMinute": s.at_minute, "weekday": s.weekday,
+            "customRule": str(getattr(s, "custom_rule", "") or ""),
+            "weekdays": weekdays,
+            "monthDays": sch.schedule_timing.clean_month_days(getattr(s, "month_days", None)),
+            "monthDayPolicy": str(getattr(s, "month_day_policy", "skip") or "skip"),
+            "startDate": str(getattr(s, "start_date", None) or ""),
+            "endDate": str(getattr(s, "end_date", None) or ""),
             "timeZone": sch.clean_time_zone(s.time_zone),
             "assigneeId": s.assignee_id, "assigneeType": s.assignee_type,
             "modelName": str(getattr(s, "model_name", "") or ""),
@@ -59,6 +77,7 @@ def apply_schedule_update(s, body: dict) -> None:
     from ..services import schedules as sch, schedule_timing
     once_edit = getattr(s, "every", "") == "once" or body.get("every") == "once"
     before_execution = schedule_timing.execution_snapshot(s) if once_edit else None
+    before_timing = schedule_timing.snapshot(s)
     if "title" in body:
         s.title = str(body.get("title") or "").strip()[:200]
     if "note" in body:
@@ -158,3 +177,6 @@ def apply_schedule_update(s, body: dict) -> None:
         schedule_timing.apply(s, body)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    after_timing = schedule_timing.snapshot(s)
+    if before_timing != after_timing and not once_edit:
+        s.retry_count, s.next_retry_at = 0, None

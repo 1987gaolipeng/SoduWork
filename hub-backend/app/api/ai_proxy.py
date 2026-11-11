@@ -155,13 +155,13 @@ async def _stream_upstream_response(resp, outcome=None):
         await resp.aclose()
 
 
-
-
-
-
-
-
-
+# Long upstream prefill may exceed the ingress idle timeout before response headers arrive.
+# Without response bytes, ingress can terminate the client connection after about 60 seconds.
+# That can precede Hub's 300-second upstream read timeout and replace the error with an HTML 504 page.
+# In this case Hub's structured error cannot reach the client.
+# Include upstream opening in the stream so response headers are sent immediately.
+# Emit periodic SSE comments (: soduwork-keepalive) while waiting for upstream headers.
+# SSE clients ignore these comments while ingress sees activity and retains the connection.
 OPEN_KEEPALIVE_INTERVAL = 15.0
 OPEN_KEEPALIVE_COMMENT = b": soduwork-keepalive\n\n"
 

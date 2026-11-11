@@ -18,7 +18,7 @@ let mcpConfig=null,probeTools=[],refreshes=0;
 runtime.paths=(...args)=>{const p=realPaths(...args);if(args[1]==='feishu')p.prefix=toolPrefix;return p;};
 runtime.execute=(command,args,options)=>{
  assert.equal(args[args.indexOf('--token-mode')+1],'user_access_token');
- assert.equal(options.env.USER_ACCESS_TOKEN,'fixture-personal-access');
+ assert.equal(options.env.USER_ACCESS_TOKEN,refreshes ? 'fixture-rotated-access' : 'fixture-personal-access');
  return realExecute(command,['--require',path.join(__dirname,'fixtures/feishu-mcp-http.cjs'),...args],
   {...options,env:{...options.env,SODUWORK_E2E_MCP_ROOT:path.join(toolPrefix,'node_modules/@larksuiteoapi/lark-mcp')}});
 };
@@ -39,9 +39,11 @@ async function rpc(selected,method,params={}){
  if(payload.error)throw Error(JSON.stringify(payload.error));return payload.result;
 }
 runtime.inspect=async(_app,key)=>({status:'installed',label:runtime.LABELS[key]});
+let dingtalkAuthorized=false, finishDingtalk;
 runtime.launch=async(_app,key,_scope,args,options)=>{
- if(args[1]==='show'||args[1]==='status')return{completion:Promise.resolve({code:0,output:key==='wecom'?'unauthorized':'{"authenticated":false}'})};
+ if(args[1]==='show'||args[1]==='status')return{completion:Promise.resolve({code:0,output:key==='wecom'?'unauthorized':JSON.stringify({success:true,authenticated:dingtalkAuthorized})})};
  let finish;const completion=new Promise(resolve=>{finish=resolve});
+ if(key==='dingtalk')finishDingtalk=()=>{dingtalkAuthorized=true;finish({code:0,output:'{"success":true}'})};
  setTimeout(()=>options.onOutput(key==='wecom'?'https://work.weixin.qq.com/ai/qc/gen?scode=fixture':'https://login.dingtalk.com/device user_code: ABCD-EFGH'),30);
  return{completion,cancel(){cancelled++;finish({code:1,output:''})}};
 };
@@ -68,14 +70,18 @@ global.fetch=async(url,options)=>{
  }
  if(url===hub+'/api/v1/mcp-servers/probe'){
   const selected=JSON.parse(options.body);
+  if(selected.headers.Authorization==='••••'){
+    assert.equal(selected.id,mcpConfig.id);selected.headers={...mcpConfig.headers};
+  }
   const init=await rpc(selected,'initialize',{protocolVersion:'2024-11-05',capabilities:{},clientInfo:{name:'soduwork-qa',version:'1'}});
   assert.ok(init.serverInfo.name.includes('Feishu'));probeTools=(await rpc(selected,'tools/list')).tools;
   assert.ok(probeTools.length>0);return reply({ok:true,tools:probeTools});
  }
- if(url===hub+'/api/v1/mcp-servers'){
-  if(options.method==='PUT'){mcpConfig=JSON.parse(options.body).servers.find(x=>x.name==='feishu');return reply({ok:true});}
-  return reply({personal:mcpConfig?[mcpConfig]:[],company:[],enabledCompany:[]});
+ if(url===hub+'/api/v1/mcp-servers/upsert'){
+  const body=JSON.parse(options.body);assert.equal(options.method,'POST');assert.equal(body.original?.id||null,mcpConfig?.id||null);
+  mcpConfig=body.server;return reply({ok:true});
  }
+ if(url===hub+'/api/v1/mcp-servers')return reply({personal:mcpConfig?[{...mcpConfig,headers:{Authorization:'••••'}}]:[],company:[],enabledCompany:[]});
  if(String(url).startsWith('http://127.0.0.1:'))return realFetch(url,options);
  assert.equal(url,hub+'/api/v1/clients/enroll');
  assert.equal(JSON.parse(options.body).device,'device');
@@ -92,7 +98,9 @@ const service=require('../main/platform-connections/index.cjs').install({app,ipc
 const checks=[];let win;
 const labels={wecom:'企业微信',dingtalk:'钉钉',feishu:'飞书'};
 const run=code=>win.webContents.executeJavaScript(code,true);
-async function until(code){for(let i=0;i<80;i++){if(await run(code))return;await new Promise(r=>setTimeout(r,100));}throw Error('UI state timeout: '+code)}
+async function until(code){for(let i=0;i<80;i++){if(await run(code))return;await new Promise(r=>setTimeout(r,100));}
+ const note=await run("document.getElementById('capPlatformNote')?.textContent");
+ throw Error('UI state timeout: '+code+' ('+String(note||'')+')');}
 async function click(id){const pos=await run(`(()=>{const b=document.getElementById(${JSON.stringify(id)});if(!b||b.disabled)throw Error('Disabled button');const r=b.getBoundingClientRect();return{x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`);win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...pos});win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...pos});}
 async function ownUI(key){
  const visible=await run("document.querySelector('.modal').innerText");
@@ -159,6 +167,7 @@ app.whenReady().then(async()=>{
  assert.ok(JSON.stringify(doc).includes('Isolated personal document'),JSON.stringify(doc));
  const scope=runtime.platformScope(app,await identityOf(),'feishu'),saved=feishu.read(app,scope,safeStorage);
  assert.ok(saved,'environment-bound Feishu credentials must be encrypted and persisted');
+ assert.equal(saved.port,Number(new URL(mcpConfig.url).port));
  saved.expiresAt=1;feishu.save(app,scope,saved,safeStorage);
  await feishu.ensureToken(app,scope,saved,safeStorage,identityOf);
  assert.equal(refreshes,1);
@@ -169,6 +178,15 @@ app.whenReady().then(async()=>{
  checks.push('official MCP child initialize/tools/list/read document using personal token, refresh rotation and no credential IPC exposure');
  for(const key of ['wecom','dingtalk']){await run(`testOpen('${key}')`);await until("document.getElementById('capPlatformState').dataset.state==='needs_auth'");await ownUI(key);}
  checks.push('switching away from connected Feishu preserves independent CLI platform states');
+ await click('capPlatformStart');await until("!document.getElementById('capPlatformAuth').hidden");
+ finishDingtalk();await until("document.getElementById('capPlatformState').dataset.state==='connected'");
+ checks.push('DingTalk browser completion triggers CLI status verification and updates the open dialog');
+ const localScope=runtime.platformScope(app,await identityOf(),'feishu');
+ mcpConfig.id='previous-'+localScope.slice(0,23);
+ feishu.closeScope(localScope);
+ await run("testOpen('feishu')");await until("document.getElementById('capPlatformState').dataset.state==='connected'");
+ assert.equal(mcpConfig.id,'previous-'+localScope.slice(0,23));
+ checks.push('Feishu reuses the older scoped ID only after a masked credential reaches the authenticated loopback proxy');
  const originalScope=runtime.scope(await identityOf());
  activeSession=fixtures.renewed;
  await run('soduWorkAPI.deviceAuthClearSession()');

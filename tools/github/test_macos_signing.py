@@ -1,4 +1,5 @@
 """Run the real shell lifecycle with synthetic security/notary commands."""
+import base64
 import os
 from pathlib import Path
 import shutil
@@ -51,13 +52,13 @@ xcrun() {
             "BASH_ENV": self.bootstrap.as_posix(), "RUNNER_TEMP": self.root.as_posix(),
             "GITHUB_ENV": (self.root / "github-env").as_posix(),
             "MOCK_SEARCH": self.search.as_posix(),
-            "SODUWORK_MAC_CERTIFICATE_B64": "Zml4dHVyZS1jZXJ0",
+            "SODUWORK_MAC_CERTIFICATE_B64": base64.b64encode(b"synthetic certificate fixture").decode("ascii"),
             "SODUWORK_MAC_CERTIFICATE_PASSWORD": "fixture",
             "SODUWORK_MAC_KEYCHAIN_PASSWORD": "fixture",
             "SODUWORK_MAC_SIGN_IDENTITY": "Developer ID Application: Fixture (TEST)",
             "SODUWORK_MAC_NOTARY_KEY_ID": "FIXTURE",
             "SODUWORK_MAC_NOTARY_ISSUER": "fixture-issuer",
-            "SODUWORK_MAC_NOTARY_PRIVATE_KEY_B64": "Zml4dHVyZS1rZXk=",
+            "SODUWORK_MAC_NOTARY_PRIVATE_KEY_B64": base64.b64encode(b"synthetic notary fixture").decode("ascii"),
         })
 
     def run_script(self, name, extra=None):
