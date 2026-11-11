@@ -98,7 +98,7 @@ process.stdin.on('end', async () => {
   } catch (error) { console.error(error.stack); process.exitCode = 1; }
 });
 """
-        with tempfile.TemporaryDirectory(prefix="sodu-public-plugin-roundtrip-") as root:
+        with tempfile.TemporaryDirectory(prefix="soduwork-public-plugin-roundtrip-") as root:
             result = subprocess.run(["node", "-e", script],
                                     input=json.dumps({"pack": package, "root": root}),
                                     text=True, encoding="utf8", capture_output=True, timeout=30,
