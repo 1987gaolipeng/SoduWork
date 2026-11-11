@@ -8,6 +8,7 @@ const { spawn, spawnSync } = require('node:child_process');
 const { waitForRenderer } = require('./installed-client-inspection.cjs');
 const { acceptanceTiming } = require('./installed-client-timing.cjs');
 const { connect } = require('./installed-client-cdp.cjs');
+const { secureStorageProbe } = require('./installed-client-secure-storage.cjs');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function main() {
@@ -99,7 +100,8 @@ async function main() {
     assert.equal(path.resolve(report.runtimeStart.profile).toLowerCase(), path.resolve(profile).toLowerCase(), 'Application ignored profile isolation');
     assert.equal(report.runtimeStart.packaged, true, 'Expected the actual installed application');
     phase('secure-storage');
-    report.secureStorage = await evaluateMain("(()=>{const {safeStorage}=process.mainModule.require('electron');if(!safeStorage.isEncryptionAvailable())throw Error('Electron safeStorage is unavailable');const cipher=safeStorage.encryptString('soduwork-keychain-smoke');const plain=safeStorage.decryptString(cipher);return {available:true,roundTrip:plain==='soduwork-keychain-smoke'};})()");
+    report.secureStorage = await evaluateMain('(' + secureStorageProbe.toString() + ')(' +
+      JSON.stringify(profile) + ',' + JSON.stringify(markerMode) + ')');
     assert.equal(report.secureStorage.roundTrip, true, 'Electron safeStorage round-trip failed');
     for (const page of pages) {
       phase('renderer-connect-' + report.pages.length);

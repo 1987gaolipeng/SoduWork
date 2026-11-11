@@ -23,6 +23,7 @@
     "acceptance-common.cjs",
     "installed-client-inspection.cjs",
     "installed-client-smoke.cjs",
+    "installed-client-secure-storage.cjs",
     "installed-client-timing.cjs",
     "macos-signature.cjs",
     "merge-macos.cjs",
