@@ -26,6 +26,14 @@ test('the policy may name exclusions while ordinary source remains distributable
   assert.equal(check(f.root).ok, true);
 });
 
+test('public coding-agent guidance is distributable while private project context stays excluded', t => {
+  const f = fixture(t);
+  f.write('AGENTS.md', '# Contributor guidance\nRead CONTRIBUTING.md and run component checks.\n');
+  assert.equal(check(f.root).ok, true);
+  f.write('PROJECT_CONTEXT.md', 'Private project context');
+  assert.ok(check(f.root).errors.includes('Excluded first-release material: PROJECT_CONTEXT.md'));
+});
+
 test('renamed private source, fixtures and embedded assets cannot evade content checks', t => {
   const f = fixture(t);
   for (const identifier of productionPolicy.excludedIdentifiers) {

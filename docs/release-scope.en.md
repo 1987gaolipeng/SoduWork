@@ -1,6 +1,6 @@
 # First release scope
 
-[Release scope](release-scope.md) · **English** · [Documentation](index.en.md)
+[Release scope](release-scope.md) · **English** · [Documentation](README.md)
 
 Project copyright is attributed to **MDiRi**. See the root [LICENSE](../LICENSE).
 

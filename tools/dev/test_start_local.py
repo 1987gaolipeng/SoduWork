@@ -40,11 +40,12 @@ class LocalStartupTests(unittest.TestCase):
 
     def test_node_version_matches_runtime_dependency_minimum(self):
         with patch.object(build.shutil, 'which', side_effect=lambda name: name):
-            for version in ['v22.18.0', 'v20.20.0']:
+            for version in ['v22.18.0', 'v20.20.0', 'v22.18.9-rc.1', 'v26.0', 'v26.0.0-invalid suffix']:
                 with self.subTest(version=version), patch.object(build.subprocess, 'check_output', return_value=version), \
                         self.assertRaisesRegex(build.StartupError, '22.19'):
                     build.check_dependencies()
-            for version in ['v22.19.0', 'v24.18.0']:
+            for version in ['v22.19.0', 'v24.18.0', 'v26.0.0-nightly.20250611d1045ea0f2',
+                            'v24.0.0-rc.1', 'v24.0.0+build.42']:
                 with self.subTest(version=version), patch.object(build.subprocess, 'check_output', return_value=version):
                     self.assertEqual(len(build.check_dependencies()), 2)
 
@@ -176,6 +177,18 @@ class LocalStartupTests(unittest.TestCase):
         self.assertEqual(len(seen), 1)
         self.assertIsNotNone(seen[0].poll())
 
+    def test_timed_out_download_reaps_its_process_and_allows_retry(self):
+        root = Path(self.temp.name)
+        marker = root / 'finished'
+        command = [sys.executable, '-c',
+                   'import time,pathlib,sys; time.sleep(2); pathlib.Path(sys.argv[1]).touch()', str(marker)]
+        with self.assertRaisesRegex(build.StartupError, 'timed out'):
+            build.run(command, cwd=root, log=root / 'download.log', label='Download fixture', timeout=.1)
+        self.assertFalse(marker.exists())
+        build.run([sys.executable, '-c', 'import pathlib,sys; pathlib.Path(sys.argv[1]).touch()', str(marker)],
+                  cwd=root, log=root / 'download.log', label='Retry fixture', timeout=5)
+        self.assertTrue(marker.exists())
+
     def test_busy_port_is_left_running(self):
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
@@ -277,6 +290,28 @@ class LocalStartupTests(unittest.TestCase):
                 patch.object(build, 'run'), patch.dict(os.environ, {'DISPLAY': ':fixture'}):
             with self.assertRaisesRegex(build.StartupError, 'Electron was not downloaded'):
                 build.prepare_desktop(self.state, self.state / 'startup.log')
+        self.assertFalse((self.state / 'desktop-dependencies.sha256').exists())
+
+    def test_desktop_download_failure_keeps_overrides_and_reports_recovery(self):
+        client = self.state / 'application/client'
+        client.mkdir(parents=True)
+        (client / 'package-lock.json').write_text('{}')
+        calls = []
+        def run(command, **kwargs):
+            calls.append((command, kwargs))
+            if command[0] == 'node':
+                self.assertEqual(os.environ['ELECTRON_MIRROR'], 'https://mirror.example/electron/')
+                self.assertEqual(os.environ['HTTPS_PROXY'], 'http://proxy.example:8080')
+                raise build.StartupError('Download fixture timed out')
+        with patch.object(build, 'check_dependencies', return_value=('node', 'npm')), \
+                patch.object(build, 'run', side_effect=run), patch.dict(os.environ, {
+                    'DISPLAY': ':fixture', 'ELECTRON_MIRROR': 'https://mirror.example/electron/',
+                    'HTTPS_PROXY': 'http://proxy.example:8080',
+                }):
+            with self.assertRaisesRegex(build.StartupError, 'ELECTRON_MIRROR'):
+                build.prepare_desktop(self.state, self.state / 'startup.log')
+        self.assertEqual(calls[-1][1]['timeout'], build.ELECTRON_DOWNLOAD_TIMEOUT)
+        self.assertIsNone(calls[-1][1].get('env'))
         self.assertFalse((self.state / 'desktop-dependencies.sha256').exists())
 
     def test_desktop_failure_is_reported_and_a_normal_quit_returns(self):

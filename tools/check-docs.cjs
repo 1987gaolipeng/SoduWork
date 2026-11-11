@@ -4,13 +4,13 @@ const path = require('node:path');
 const { sourceFiles } = require('./source-files.cjs');
 const ROOT = path.resolve(__dirname, '..');
 const PAIRS = [
-  ['README.md', 'README.zh-CN.md'], ['docs/README.md', 'docs/index.en.md'],
+  ['README.md', 'README.zh-CN.md'], ['docs/README.md', 'docs/README.zh-CN.md'],
   ['CONTRIBUTING.md', 'docs/contributing.zh-CN.md'], ['SECURITY.md', 'docs/security.zh-CN.md'],
-  ['NOTICE.md', 'docs/third-party-notices.en.md'],
+  ['NOTICE.md', 'NOTICE.zh-CN.md'],
   ...['getting-started', 'development', 'release-scope', 'open-source', 'plugin-authoring']
     .map(name => [`docs/${name}.md`, `docs/${name}.en.md`]),
   ...['client', 'hub-backend', 'hub-frontend', 'third-party', 'ops/self-host', 'client/sdk']
-    .map(name => [`${name}/README.md`, `${name}/README.en.md`]),
+    .map(name => [`${name}/README.md`, `${name}/README.zh-CN.md`]),
   ['hub-backend/CONNECTOR_OAUTH.md', 'hub-backend/CONNECTOR_OAUTH.en.md'],
 ];
 
@@ -63,7 +63,7 @@ function audit(root, names, pairs = PAIRS) {
 function check() {
   const names = sourceFiles(ROOT).filter(name => name.endsWith('.md') && (
     !name.includes('/') || name.startsWith('docs/') || name.startsWith('.github/') || name === 'tools/security/README.md' ||
-    PAIRS.some(pair => pair.includes(name))));
+    /\/README(?:\.en|\.zh-CN)?\.md$/.test(name) || PAIRS.some(pair => pair.includes(name))));
   return audit(ROOT, names);
 }
 if (require.main === module) {

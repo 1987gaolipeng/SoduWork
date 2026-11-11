@@ -1,6 +1,6 @@
 # GitHub workflows and checks
 
-[Documentation](../docs/index.en.md)
+[Documentation](../docs/README.md)
 
 Workflow documentation, release procedures, issue forms and the pull request template are maintained in English. Security reports follow the [security policy](../SECURITY.md); do not disclose exploitable details in a public issue.
 

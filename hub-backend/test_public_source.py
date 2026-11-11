@@ -30,8 +30,8 @@ class PublicSourceTests(unittest.TestCase):
 
     def test_generic_quality_and_delivery_tests_are_not_excluded(self):
         self.assertEqual(len(INTERNAL_SMOKES), 10)
-        for name in ("smoke_release.py", "smoke_quality.py", "smoke_approvals.py",
-                     "smoke_repository_assets.py", "smoke_deploy.py", "test_optional_services.py"):
+        for name in ("smoke/smoke_release.py", "smoke/smoke_quality.py", "smoke/smoke_approvals.py",
+                     "smoke/smoke_repository_assets.py", "smoke/smoke_deploy.py", "test_optional_services.py"):
             self.assertNotIn(name, INTERNAL_SMOKES)
 
     def test_invalid_marker_does_not_enable_a_public_profile(self):

@@ -227,6 +227,7 @@ export const api = {
   requestClientUpdate: (id, b = {}) => call('POST', '/admin/clients/' + encodeURIComponent(id) + '/updates', b),
   // List, stage, enable, and disable signed client releases; the server revalidates signatures on enablement.
   clientReleases: () => call('GET', '/admin/client-releases'),
+  clientReleaseNotes: () => call('GET', '/admin/client-release-notes'),
   clientUpdateAttempts: (filter = {}) => {
     const q = new URLSearchParams()
     if (filter.releaseId) q.set('releaseId', filter.releaseId)

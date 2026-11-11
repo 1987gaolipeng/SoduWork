@@ -2,6 +2,8 @@
 
 **简体中文** · [English](getting-started.en.md) · [返回 README](../README.zh-CN.md) · [开发指南](development.md)
 
+命令示例中的 `sh start.sh` 适用于 macOS/Linux；Windows PowerShell 使用 `.\start.cmd`，命令提示符使用 `start.cmd`，参数相同。独立 Python 工具示例使用 `python3`；Windows 使用 `py`，已激活虚拟环境时使用 `python`。
+
 第一次使用只需要走完「装环境 → 解压 → 启动 → 登录」。这个入口在当前电脑运行 Hub（后台服务）、浏览器管理端和桌面客户端，使用独立 SQLite 数据库。没有服务器也可以体验。
 
 ## 装环境、解压、启动
@@ -123,6 +125,30 @@ sh start.sh --desktop --port 18990
 
 ### 浏览器能打开，桌面端打不开
 
+Electron 二进制文件的下载有十分钟超时限制。超时后，配置能访问的镜像或代理，再运行同一个启动命令。例如，按终端类型设置镜像。
+
+macOS/Linux：
+
+```sh
+ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ sh start.sh --desktop
+```
+
+Windows PowerShell：
+
+```powershell
+$env:ELECTRON_MIRROR = 'https://npmmirror.com/mirrors/electron/'
+.\start.cmd --desktop
+```
+
+Windows 命令提示符：
+
+```bat
+set ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
+start.cmd --desktop
+```
+
+安装器会沿用已有镜像和代理设置，并校验下载文件的摘要。慢速网络可将 `ELECTRON_DOWNLOAD_TIMEOUT` 设置为更大的秒数。下次启动会复用已安装成功的依赖。
+
 查看同一数据目录中的 `desktop.log`。Electron 下载失败时先解决下载问题，再重试。Linux 桌面需要图形会话和 Electron 所需的系统库（如 NSS、GTK、X11/Wayland）；启动器不会关闭沙箱或自动修改系统包。
 
 需要先看管理端时，Windows 双击 `start.cmd`，macOS 双击 `start.command`，Linux 运行 `sh start.sh`。浏览器管理端用于管理配置，不是桌面的 AI 对话工作区。
@@ -133,20 +159,20 @@ sh start.sh --desktop --port 18990
 
 ## 按需使用的命令
 
-在源码根目录执行；macOS / Linux 将 `python` 换成 `python3`，或使用 `sh start.sh`：
+在源码根目录执行。表格使用 macOS/Linux 的启动脚本；Windows PowerShell 使用 `.\start.cmd`，命令提示符使用 `start.cmd`，参数相同。
 
 | 需要做什么 | 命令 |
 | --- | --- |
-| 联动启动（与双击桌面入口相同） | `python start.py --desktop` |
-| 只启动浏览器管理端 | `python start.py` |
-| 只检查环境 | `python start.py --check --desktop` |
-| 提前下载和构建，暂不启动 | `python start.py --prepare-only --desktop` |
-| 不自动打开浏览器 | `python start.py --desktop --no-browser` |
-| 指定独立的数据目录 | `python start.py --desktop --data-dir "D:/SoduWork-data"` |
+| 联动启动（与双击桌面入口相同） | `sh start.sh --desktop` |
+| 只启动浏览器管理端 | `sh start.sh` |
+| 只检查环境 | `sh start.sh --check --desktop` |
+| 提前下载和构建，暂不启动 | `sh start.sh --prepare-only --desktop` |
+| 不自动打开浏览器 | `sh start.sh --desktop --no-browser` |
+| 指定独立的数据目录 | `sh start.sh --desktop --data-dir "D:/SoduWork-data"` |
 
 准备和启动应使用同一个数据目录。自动化脚本可显式用 `--password-stdin` 从标准输入提供首次密码；不要将密码写进命令参数或脚本。Windows 设置 `SODUWORK_NO_PAUSE=1` 可在失败时直接返回错误码。
 
-开发者需要分别调试前后端时，见[开发指南](development.md)。Vite 开发代理默认连接 `http://127.0.0.1:9080`，连接本启动器时使用 `SODUWORK_DEV_HUB=http://127.0.0.1:18989`。本指南默认只供当前电脑访问；团队部署见 [Docker 自托管](../ops/self-host/README.md)。
+开发者需要分别调试前后端时，见[开发指南](development.md)。Vite 开发代理默认连接 `http://127.0.0.1:9080`，连接本启动器时使用 `SODUWORK_DEV_HUB=http://127.0.0.1:18989`。本指南默认只供当前电脑访问；团队部署见 [Docker 自托管](../ops/self-host/README.zh-CN.md)。
 
 ## 数据放在哪里
 
@@ -159,7 +185,7 @@ sh start.sh --desktop --port 18990
 也可以明确指定独立目录和端口：
 
 ```sh
-python start.py --data-dir "D:/SoduWork-local" --port 18990
+sh start.sh --data-dir "D:/SoduWork-local" --port 18990
 ```
 
 目录必须位于源码目录之外，并且为空，或者已由这个启动器初始化。它不会采用源码目录中的 `.env`、数据库、个人 Agent 配置和生产环境变量。
@@ -179,13 +205,13 @@ python start.py --data-dir "D:/SoduWork-local" --port 18990
 快速检查隔离、失败恢复、端口占用和密码处理：
 
 ```sh
-python -m unittest tools.dev.test_start_local
+python3 -m unittest tools.dev.test_start_local
 ```
 
 真实隔离启动验证（会在临时目录安装依赖、构建管理端、创建数据库和做 HTTP 检查，需要网络）：
 
 ```sh
-python tools/dev/verify_local_start.py
+python3 tools/dev/verify_local_start.py
 ```
 
 在有图形桌面的系统上加 `--desktop`，可同时验证原生 Electron 启动、专用服务地址，以及 Ctrl+C / 关闭启动器后的桌面进程清理。

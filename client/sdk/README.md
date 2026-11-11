@@ -1,47 +1,57 @@
-# SoduWork 即用 H5 桥
+# SoduWork H5 application bridge
 
-**简体中文** · [English](README.en.md) · [插件协议](../../docs/plugin-authoring.md)
+[简体中文](README.zh-CN.md) · **English** · [Plugin authoring](../../docs/plugin-authoring.en.md)
 
-SDK 1.6：当前用户、组织人员、对话/通知正文、本机/云资料只读接口。完整方法、权限、返回和分页契约见随包 `references/developer/references/host-data-sdk.md`；前端用 `soduWorkApp.user.getCurrent()`、`conversations.list/messages()`、`notifications.list()`、`library.list/read()`，不调用宿主私有API。页面只要求中英文；默认一个完整视觉主题，不强制明暗双模式。
+`soduwork-app.js` is public JavaScript that application authors may copy to their sites. The native shell owns the application's conversation, permissions, and refresh lifecycle. H5 pages do not access Electron, device credentials, or native session references.
 
-SDK 1.4 新增：`data.get/list/batch/assetPut/assetGet`、公共 `mcp.connect`。宿主参数声明、SQLite、素材、MCP 绑定及鉴权建议，按需读取开发技能随包 `references/developer/references/host-sdk.md`。页面和后台工具共用宿主数据，窗口关闭不删除数据或计划。
+SDK 1.6 adds read-only access to the current user, organization members, conversation and notification content, and local/cloud materials. The packaged developer guide `references/developer/references/host-data-sdk.md` defines methods, permissions, receipts, and pagination. Pages use `soduWorkApp.user.getCurrent()`, `conversations.list/messages()`, `notifications.list()`, and `library.list/read()`; they do not call private host APIs. Pages only need Chinese and English, with one complete visual theme by default; both light and dark modes are not required.
 
-## 读取外壳界面语言
+SDK 1.4 adds `data.get/list/batch/assetPut/assetGet` and public `mcp.connect`. Read the packaged `references/developer/references/host-sdk.md` for host settings, SQLite, assets, MCP binding, and authentication. Pages and background tools share host data. Closing a window does not delete its data or schedules.
 
-声明 `context.read` 后，`await soduWorkApp.context.get()` 的回执提供 `locale`（例如 `zh-CN`、`en-US`），取自主窗口当前界面语言。原生应用和顶层显式授权的 iframe 共用该接口，继续执行来源与应用能力校验。业务页可用它初始化内置文案；旧外壳未返回语言或桥接不可用时，业务页自行回退英文。该接口不翻译业务数据、不改写页面用户手选的语言。
+## Read the shell interface language
 
-## 直接创建自动化（SDK 1.2）
+After declaring `context.read`, call `await soduWorkApp.context.get()` to read `locale`
+(for example, `zh-CN` or `en-US`) from the main window's current interface language.
+Native applications and direct iframes explicitly authorized by the top level use the
+same interface and retain origin and capability checks. Use the value to initialize
+application text, with English as a fallback when an older shell omits the locale or
+the bridge is unavailable. The interface does not translate business data or override
+the user's language choice inside an application.
 
-应用清单单独声明 `automation.create`，页面即可在用户提交业务弹窗后调用：
+## Create automation directly (SDK 1.2)
 
-机器人等持续执行业务应用复用此接口。即用页面严禁出现“自动化”按钮，入口、表单和状态用实际业务词语，例如“订阅简报”“定时整理”“每日汇报”；内部 `automation.create` 接口名不变。表单应明示时间、频率和操作范围，用户提交才创建；保存计划不代表业务执行成功，不以页面定时器替代宿主调度。该接口不提供计划查询、暂停或删除能力，不能编造相关 SDK 方法或用本地开关伪装操作成功。
+Declare `automation.create` separately in the application manifest, then call it after the user submits the business action:
+
+Applications with recurring work, including bots, reuse this interface. Application pages must not display an "Automation" button. Use business terms for actions, forms, and states, such as "Subscribe to briefing", "Schedule cleanup", or "Daily report"; the internal `automation.create` method name stays the same. Show the time, frequency, and scope in the form, and create the schedule only after the user submits it. Saving a schedule does not mean the business operation succeeded. Use host scheduling rather than page timers. This interface does not provide schedule listing, pausing, or deletion: do not invent SDK methods or use local switches to pretend those operations succeeded.
 
 ```js
 const receipt = await soduWorkApp.automation.create({
-  text: '每天早上9点收集行业资料，保留来源和摘要',
+  text: 'Collect industry sources every day at 09:00, retaining links and summaries',
   requestId: soduWorkApp.createRequestId(),
   context: {spaceId: currentSpaceId, spaceName: currentSpaceName, page: location.href}
 });
 if (!receipt.ok) throw new Error(receipt.reason);
-// receipt.state === 'created'，receipt.schedule.id 是已保存计划的编号。
+// receipt.state === 'created'; receipt.schedule.id identifies the saved schedule.
 ```
 
-该入口复用 `/自动化` 的解析、能力绑定、时间校验、执行预检和正式 schedules API，直接保存，不打开待确认草稿卡片。普通聊天 `/自动化` 不受影响。正文最多8000字，原文和空间固定写入计划说明；空间信息不是额外业务授权，不复制应用凭据给计划。支持每天、每周指定一天、每小时、指定日期执行一次，未写时间默认北京时间每天18:00，页面应提前明示该默认值。不支持或不完整的时间、无可用执行底座、执行预检受阻时返回失败。
+This reuses automation parsing, capability binding, time validation, execution preflight, and the schedules API. It saves directly without opening a draft confirmation card. Ordinary chat automation is unchanged.
 
-通过同一公共 SDK 支持已授权的直接 iframe；未声明能力、应用停用、来源改变或执行前使用权被撤销均拒绝创建。重试保留相同 requestId；不同正文不能复用编号。超时或创建传输失败返回 uncertain，应先核对自动化管理列表，不能盲目另发请求。创建成功表示计划已保存，不表示计划已执行或资料已入库；预检 waiting 会随回执返回。此入口需要新版原生主进程和工作区宿主，修改源码后重启客户端。
+Text is limited to 8,000 characters. The original instruction and space are retained in the schedule description. Space metadata grants no additional access, and application credentials are not copied into a schedule. Supported schedules include daily, a weekday, hourly, and one-off dates. **Without a time, the default is daily at 18:00 Beijing time**; disclose that default before submission. Unsupported or incomplete schedules, missing execution agents, and blocked preflight return failure.
 
-`soduwork-app.js` 是可直接复制到业务站点的公共 JS。即用壳负责当前即用的原生对话、权限和刷新；H5 不访问 Electron、设备凭据或原生会话 ref。
+Authorized direct iframes use the same SDK. Missing capability, disabled application, changed origin, or revoked access blocks creation. Retry with the same requestId; do not reuse it for different text. Timeout or transport failure can return `uncertain`: inspect the automation list before resubmitting. Success means saved, not executed or imported. A waiting preflight state is returned in the receipt. Updated native main-process and workspace hosts are required; restart the client after updating source.
 
-## 直接发送
+An application schedule may include `context.characterName` (optional, at most 120 characters), meaning the role's name, not the developer or signed-in user. The host adds the installed application's name and icon and retains the creation card and receipt in its conversation panel. Confirm execution through the automation execution records.
 
-插件基础信息中，外部页面的 `source.bridge.capabilities` 声明 `conversation.send` 与 `composer.control`。安装后从 SoduWork 的即用入口打开页面：
+## Send a conversation message
+
+Declare `conversation.send` and `composer.control` in `source.bridge.capabilities`, then open the page through its installed application:
 
 ```html
 <script src="soduwork-app.js"></script>
 <script>
 async function createTopic(description) {
   const result = await soduWorkApp.chat.send({
-    text: '请在当前系列生成一个图文话题：' + description,
+    text: 'Create an illustrated topic for the current series: ' + description,
     requestId: crypto.randomUUID()
   });
   if (!result.ok) throw new Error(result.reason);
@@ -52,76 +62,79 @@ soduWorkApp.events.onRefresh(async () => {
 </script>
 ```
 
-成功回执表示消息被真实会话接受，不表示模型执行完成。生成任务只改业务记录，不把凭据放在正文或 URL 中。请求文字最多 8000 字符；同一次操作重试保留同一个 requestId，成功发送不会重复执行。发送失败时保留业务记录、单独补发任务；超时结果未知时先核对右侧对话。
+An accepted receipt means the real conversation accepted the message, not that the model completed it. Keep credentials out of text and URLs. Text is limited to 8,000 characters. Reuse requestId on retries to prevent duplicate sends. Preserve business records after send failure and retry messaging separately. If the outcome is unknown, inspect the conversation first.
 
-## 跨域 iframe
+## Cross-origin iframe
 
-应用顶层与直接嵌入的 iframe 各加载同一份 SDK。应用顶层显式授权业务来源：
+Load the same SDK in the top-level application and its direct iframe. The top level explicitly authorizes business origins:
 
 ```js
 soduWorkApp.configure({allowedFrameOrigins: ['https://business.example']});
 ```
 
-iframe 显式指定即用壳页面来源（默认尝试 document.referrer 的来源）：
+The iframe specifies the shell origin; otherwise it attempts to derive it from document.referrer:
 
 ```js
 soduWorkApp.configure({parentOrigin: 'https://shell.example'});
-const receipt = await soduWorkApp.chat.send({text: '处理当前记录', requestId: crypto.randomUUID()});
+const receipt = await soduWorkApp.chat.send({
+  text: 'Process the current record', requestId: crypto.randomUUID()
+});
 ```
 
-SDK 使用 `postMessage`，双方指定精确来源，顶层同时检查消息来源、实际 iframe 窗口及声明地址。不接受通配符或 opaque origin。允许发送、填入文本、展开/折叠对话、附件 ID／受限二进制分块及下述即用设置读写；不能从 iframe 转发 mcp.connect、本地路径或任意 IPC。
+The bridge uses postMessage with exact origins. The top level checks the sender, actual iframe window, and declared URL. Wildcards and opaque origins are rejected. Direct iframes can send/fill text, expand/collapse conversation, transfer attachment IDs and bounded binary chunks, and use authorized application settings. They cannot forward `mcp.connect`, local filesystem paths, or arbitrary IPC.
 
-## 本地参考附件（SDK 1.3）
+## Local reference attachments (SDK 1.3)
 
-完整选择/取消/移除、同次重试、清理与业务上传说明见开发插件随包 `references/developer/references/local-files.md`。`attachments.pick` 通过原生桥触发壳文件选择器，返回引用元数据；它不返回字节或原始路径，不表示文件已上传到业务系统。页面要直接保存持久素材，应通过标准 File 获取字节后调用 `data.assetPut`，不能混用临时附件 ID 与持久素材 ID。
+The packaged developer guide `references/developer/references/local-files.md` covers selection, cancellation, removal, retries, cleanup, and business uploads. `attachments.pick` opens the shell's native file picker and returns reference metadata. It does not return bytes or raw paths and does not upload files to an application's service. For persistent assets, obtain bytes through a standard browser `File` and call `data.assetPut`; temporary attachment IDs and persistent asset IDs are different.
 
-清单声明 `composer.control` 以选择、暂存、检查和释放附件，发送仍需 `conversation.send`。原生壳只将 ID、名称、MIME 和大小交给页面，原始路径留在主进程，ID 按即用页面实例隔离。
+Declare `composer.control` to select, stage, check, and release attachments. Sending still requires `conversation.send`. Pages receive only ID, name, MIME type, and size. Raw paths remain in the main process, and IDs are isolated to the application page instance.
 
 ```js
-const picked = await soduWorkApp.attachments.pick(); // {ok, items}; 取消时 items=[]
+const picked = await soduWorkApp.attachments.pick(); // {ok, items}; cancellation returns items=[]
 const pasted = await soduWorkApp.attachments.importFile(file, {signal, onProgress});
 const ids = [...picked.items.map(item => item.id), pasted.id];
 await soduWorkApp.attachments.check(ids);
-const result = await soduWorkApp.chat.send({text:'参考附件完成任务', requestId:crypto.randomUUID(), attachmentIds:ids});
+const result = await soduWorkApp.chat.send({
+  text: 'Complete the task using these attachments',
+  requestId: crypto.randomUUID(), attachmentIds: ids
+});
 if (result.ok) await soduWorkApp.attachments.release(ids);
 ```
 
-本地选择仅登记路径，不复制；粘贴和拖拽通过 1 MiB 分块传输到壳的临时目录，不转 base64、不主动上传云端。每个即用页面最多20个附件、合计256 MiB；不能使用整文件 IPC 绕过限制。源文件变化／删除、暂存未完成或未知 ID 会阻止发送。
+Local selection registers paths without copying. Paste and drag-and-drop transfer 1 MiB chunks into the shell's temporary directory, without base64 conversion or automatic cloud upload. Each application page may hold at most 20 attachments totaling 256 MiB. Do not bypass these limits with whole-file IPC. Changed or deleted source files, incomplete staging, and unknown IDs block sending.
 
-发送通过原有 NativeChat 附件复制管线进入会话目录，不消费对话栏原有草稿或附件。接收回执表示会话发送已接受；请求去重同时包含文本和附件 ID 集合。移除引用应调用 release；关闭或整页跳转会释放应用附件，正在执行的复制持有独立占用，复制完成再清理临时源。只删除壳创建的暂存，不删除用户原文件，也不清理已复制的会话附件。关掉业务表单本身不等于关闭即用窗口。
+Sending uses the existing NativeChat copy pipeline to place attachments in the conversation directory, without consuming the conversation panel's draft or attachments. Acceptance means the conversation accepted the send; deduplication covers both text and the attachment ID set. Call `release` when removing references. Closing or navigating the page releases its attachments; copies already running hold independent references until completion. Cleanup deletes only shell-created staging, not the user's originals or copies already in the conversation. Closing a business form alone does not close the application window.
 
-2026-10-23 验证：附件／桥接／发送／生命周期模块回归与运营应用原生隔离端到端通过。完整客户端串行运行5108项，5105通过、1项启动器1000次替换压力测试失败、2项平台跳过；未修改的 native-launcher-swap 模块随后独立复跑3项全部通过，没有调整断言或跳过失败项。此前并行运行也出现网络／进程时序失败，不能把这些完整运行描述为全绿。原生端到端使用真实 SDK、IPC、磁盘暂存与会话复制，业务接口和对话接收为夹具，没有调用真实模型或发布。
+Historical validation on 2026-10-23 covered attachment, bridge, send, and lifecycle modules plus isolated native execution. The full serial client run had 5,105 passes, one launcher stress failure, and two platform skips out of 5,108 tests; the unchanged launcher module then passed its three tests independently. That run was not entirely green. Native validation used the real SDK, IPC, disk staging, and conversation copying with fixture business endpoints and conversation acceptance; no real model or publication was involved.
 
-原生标题栏“刷新”只重新加载即用页面，保留右侧会话及草稿。对话轮次结束由壳通知 `onRefresh`，业务页自行重新读取已授权的数据；失败和取消也可能结束轮次，数据刷新不等于执行成功。
+Native refresh reloads the application page while retaining the conversation and draft. At turn completion, `onRefresh` asks the business page to reload authorized data. Failed or cancelled turns may also end; refresh does not prove success.
 
-需要业务完成通知时，由应用自己的接口登记 `requestId`，由业务技能在写入并读回后通过应用 MCP 保存结果回执，页面在 `onRefresh`、加载或聚焦时补读消息。业务 `type` 及 JSON 字段由技能与前端共同约定；服务端校验接收人和真实结果，前端使用已支持处理器展示通知／定位内容。重复消息去重，缺失回执保持待确认。此方案按需接入，不要求无账号轻即用建设消息服务。当前 SDK 未提供任意业务消息投递或 `onMessage`；宿主通用投递和即用开发插件／脚手架配套更新见 `docs/development/app-result-messages-backlog.md`（后续待办）。
+For business completion notifications, the application's own service records `requestId`. After writing and reading back a result, its business skill saves a receipt through the application's MCP. The page retrieves messages on `onRefresh`, load, or focus. The skill and page agree on business `type` and JSON fields; the server verifies the recipient and actual result, and supported page handlers display the notification or locate its content. Deduplicate messages and keep missing receipts unconfirmed. This is optional; applications without accounts do not need a messaging service. The current SDK has no arbitrary business-message delivery API or `onMessage` method.
 
-本接口运行在 SoduWork 原生应用页或它授权的 iframe 中。普通外部浏览器页面没有即用壳时返回未连接，不注册或依赖自定义 URL 协议。
+An ordinary external browser without the native shell returns disconnected. No custom URL protocol is required.
 
-## 应用自定义设置（SDK 1.1）
+## Application-defined settings (SDK 1.1)
 
-应用自行定义参数名称、类型与业务含义；设置读写不要求业务登录或 MCP。新应用不要求、不推荐引入 ukey，认证由实际服务决定，旧即用已有凭据继续兼容。纯本地、单机或无账号应用可直接安装、打开并使用已声明的对话桥；不需要持久化时也不申请设置权限。
+Applications choose their parameter names, types, and business meaning. Settings do not require business login or MCP. New applications do not need or benefit from introducing a `ukey` merely to use the bridge; existing credentials remain compatible, and the application's actual service determines authentication. Local, standalone, and account-free applications may install, open, and use declared conversation capabilities directly. Do not request settings permissions if persistence is unnecessary.
 
-### 包内纯静态 H5
+### Packaged static H5 pages
 
-轻即用入口可声明为 `ui.contributions[].source: {"type":"package","entry":"ui/index.html","openMode":"workspace","bridge":{"version":1,"capabilities":["conversation.send","composer.control"]}}`。入口及相对引用的 HTML/CSS/JS/图片/JSON/字体都须包含在 `resources`（kind `ui` 或 `asset`）中；入口本身为 kind `ui`。导入后壳直接读取包内资源，不启动 HTTP 服务，不要求业务登录或 ukey。所有依赖随包提供，支持无外网运行。
+An application entry may declare `ui.contributions[].source` as:
 
-使用相对路径和标准浏览器 API；localStorage/IndexedDB 按当前账号与应用隔离，关闭重开、同应用升版保留。壳能力仍通过本 SDK 的既有声明与原生桥调用，页面没有 Node.js 或文件系统权限。在线应用的 external/URL 模式继续兼容；包内脚本只在页面中执行，不会自动启动 Python/Node 后端。
+```json
+{"type":"package","entry":"ui/index.html","openMode":"workspace","bridge":{"version":1,"capabilities":["conversation.send","composer.control"]}}
+```
 
-本节是可选的业务登录集成示例。纯本地、单机或无账号应用无需登录、ukey、MCP 或设置读写权限，即可安装、打开并使用已声明的对话桥；不要为了使用即用窗口而增加认证。ukey 只是示例凭据名，实际认证由应用业务需求和所连接服务决定。SoduWork 自身的会话身份不等于应用业务账号。
+Include the entry and all relative HTML, CSS, JavaScript, images, JSON, and fonts in `resources` with kind `ui` or `asset`; the entry itself must be `ui`. The shell reads imported package resources directly, without starting an HTTP service or requiring login or `ukey`. Bundle all dependencies to support offline use.
 
-### 包内纯静态 H5
+Use relative paths and standard browser APIs. `localStorage` and IndexedDB are isolated by the current account and application and persist across reopening and upgrades of the same application. Shell capabilities still require this SDK's declarations and native bridge. Pages have no Node.js or filesystem access. External/URL applications remain supported; packaged page scripts do not automatically start Python or Node backends. Optional business authentication is separate from SoduWork's session identity.
 
-轻应用入口可声明为 `ui.contributions[].source: {"type":"package","entry":"ui/index.html","openMode":"workspace","bridge":{"version":1,"capabilities":["conversation.send","composer.control"]}}`。入口及相对引用的 HTML/CSS/JS/图片/JSON/字体都须包含在 `resources`（kind `ui` 或 `asset`）中；入口本身为 kind `ui`。导入后壳直接读取包内资源，不启动 HTTP 服务，不要求业务登录或 ukey。所有依赖随包提供，支持无外网运行。
+### Read and save parameters
 
-使用相对路径和标准浏览器 API；localStorage/IndexedDB 按当前账号与应用隔离，关闭重开、同应用升版保留。壳能力仍通过本 SDK 的既有声明与原生桥调用，页面没有 Node.js 或文件系统权限。在线应用的 external/URL 模式继续兼容；包内脚本只在页面中执行，不会自动启动 Python/Node 后端。
-
-本节是可选的业务登录集成示例。纯本地、单机或无账号应用无需登录、ukey、MCP 或设置读写权限，即可安装、打开并使用已声明的对话桥；不要为了使用应用窗口而增加认证。ukey 只是示例凭据名，实际认证由应用业务需求和所连接服务决定。SoduWork 自身的会话身份不等于应用业务账号。
-
-应用清单额外声明 `settings.read`、`settings.write`。接口只作用于当前已安装、启用的本机应用及其清单来源，页面不能传另一个应用 ID。设置按 SoduWork 登录账号、应用 ID、页面来源隔离，使用系统 safeStorage 加密保存，与“应用 → 应用设置”共用存储。不是 SSO，也不绑定两套用户体系。
+Declare `settings.read` and `settings.write`. Settings are limited to the current installed, enabled application and its manifest origin. Pages cannot supply another application ID. Storage is isolated by SoduWork account, application, and origin, encrypted with system safeStorage, and shared with the application settings panel. This does not provide SSO.
 
 ```js
-// 无需业务登录，即可保存任意符合限制的 JSON 参数。
+// Save supported JSON parameters without requiring business login.
 const state = await soduWorkApp.settings.get();
 if (!state.ok) throw new Error(state.reason);
 const saved = await soduWorkApp.settings.update({
@@ -131,19 +144,19 @@ const saved = await soduWorkApp.settings.update({
 if (!saved.ok) throw new Error(saved.reason);
 ```
 
-`values` 支持字符串、数字、布尔、null、数组及嵌套 JSON 对象；最多 100 个参数、64 KiB、8 层，拒绝原型污染字段。更新合并顶层字段；删除用 `remove:['field']`。这保存参数值，不会自动生成设置表单，也不会自动向 MCP 或业务服务传参。
+Values support JSON types, up to 100 parameters, 64 KiB, and 8 levels. Prototype-pollution fields are rejected. Updates merge top-level fields; use `remove:['field']` to delete. Normal reads and save receipts hide credentials. Fields marked secret or named like ukey/token/password are hidden; secret reads require both explicit keys and includeSecrets. Mark other sensitive business fields explicitly. Never log or export credentials, or put them in prompts, URLs, or resources.
 
-宿主设置弹窗中的普通表单沿用插件 `setup.preferences` 声明、`setupConfig` 安装配置及现有校验/保存链路；未声明时仅展示即用信息，不提供通用 JSON、默认模型或 ukey 输入。桥接设置用于页面自动同步及安全参数，不自动复制到安装偏好；未出现在设置界面的原凭据和值仍保留。敏感 Key 不可放入 `setup.preferences`。
+Saving parameter values does not generate a settings form or automatically pass them to MCP or a business service. The host settings dialog uses the plugin's `setup.preferences`, installed `setupConfig`, and existing validation/save flow. Without a declaration it shows application information, not a generic JSON editor, default model, or `ukey` input. Bridge settings are for page synchronization and secure parameters; they are not copied into installation preferences. Values and credentials absent from the form remain stored. Never place sensitive keys in `setup.preferences`.
 
-用户填写的模型 API Key 等敏感字段应显式加入 `secretKeys`。普通读取及保存回执隐藏敏感字段；明确请求秘密须同时指定 `keys` 与 `includeSecrets:true`。自动名称检测只是补充，不能代替应用的敏感标记。不要把秘密写入日志、提示词、URL、公开 `context`、资源或导出包。
+Explicitly list user-provided model API keys and other sensitive fields in `secretKeys`. Automatic name detection supplements that declaration; it does not replace it. Secret reads must specify both `keys` and `includeSecrets:true`. Keep secrets out of public `context` and exported packages as well as logs, prompts, URLs, and resources.
 
-当前即用及顶层明确授权的直接 iframe 可按相同接口读写本即用设置；只授权可信业务来源。这不是 SoduWork 账号/设备令牌读取权限。无原生宿主、清单未声明权限、来源改变或应用停用时失败关闭。
+The application and explicitly trusted direct iframes may read their own application settings, including credentials when explicitly requested. This does not grant access to SoduWork account or device tokens. Missing host, undeclared capabilities, changed origin, or disabled application fails closed.
 
-### 按需业务认证与自有 MCP
+Integrate the service's real login or authorization only when that service requires it. Automatic login may store a service-issued credential with the business account identity and validate it against the original service on reopening. Business-page logout leaves shell settings intact and pauses automatic login in the current window. Explicit removal deletes credentials; server-side revocation remains authoritative. On account changes, update credentials and account identity atomically. Recheck the current page account after asynchronous responses and use expectedRevision to avoid stale writes. Present business login success and shell-sync failure separately, allowing sync retries.
 
-仅在业务服务要求认证时接入其真实登录/授权方式。自动登录可保存服务签发的凭据及业务账号标识，重开时向原服务验证；页面退出只结束会话并暂停当前窗口自动登录，主动删除凭据使用 `remove`。换号时原子更新，并核对账号与 `expectedRevision`，避免旧异步响应覆盖新设置。服务端撤销/禁用仍生效，业务登录与宿主同步失败分别呈现。
+## Application-owned MCP
 
-顶层应用为已声明的自有 MCP 引用实际认证字段，凭据不经过模型。下面的 `credentialField` 是应用自己选定且已安全保存的字段名，并非固定名称：
+A top-level application may reference a settings credential in a separately declared MCP connection. `credentialField` below is the application's chosen, securely stored field name, not a required fixed name:
 
 ```js
 await soduWorkAppBridge.mcp.connect({
@@ -152,34 +165,33 @@ await soduWorkAppBridge.mcp.connect({
 });
 ```
 
-`context` 仅接受公开目标标识 `spaceId`、`recordId` 和名称 `spaceName`、`recordName`；不要传入凭据或业务专用对象。页面 URL 的查询参数只保留 `lang`，记录目标使用这些显式字段。
+`context` accepts only public target identifiers `spaceId` and `recordId`, and names `spaceName` and `recordName`. Do not include credentials or application-specific objects. Page URL query parameters retain only `lang`; use the explicit fields for record targets.
 
-`mcp.connect` 仍需单独声明；只允许该应用来源下的 `/mcp` 和已声明的连接器名称。宿主读取 `credentialKey` 对应的字符串，以 `Authorization: Bearer <应用服务凭据>` 认证，每轮生成可撤销的本机代理租约；真实凭据不写入 Agent 配置。账号或设置版本改变后旧租约拒绝后续调用，下一轮读取新设置。旧账号已被服务端接收的操作不能撤回；排队消息绑定提交时的设置版本，换号后须重新发送。远端 Hub 任务不代读本机安全存储。
+`mcp.connect` must be separately authorized and allows only the application origin's `/mcp` and declared connector name. The shell reads the string named by `credentialKey` and injects it as a bearer credential through revocable per-turn local proxy leases; the real credential does not enter Agent configuration. Account or settings revisions invalidate old leases; subsequent turns read fresh settings. Operations already accepted by the old account's service cannot be undone. Queued messages retain their submission settings revision and must be resent after account changes. Remote Hub tasks cannot read local safeStorage.
 
-当前 `credentialKey` 只映射 MCP 认证字段，不映射任意请求头或工具参数。模型 ID、供应商 Key 等额外配置不会自动随 MCP 调用发送；应用应通过其服务已实现的显式配置接口处理，不能把秘密塞进 `context` 或工具提示词。应用服务凭据与模型供应商 Key 用途不同，不应混用。
+`credentialKey` maps only the MCP authentication field, not arbitrary headers or tool parameters. Model IDs, provider keys, and other settings are not automatically sent with MCP calls. Use an explicit configuration API actually implemented by the application's service; never put secrets into `context` or tool prompts. Application service credentials and model provider keys serve different purposes and must not be interchanged.
 
+## Colleague directory and conversation mentions (SDK 1.5)
 
-即用计划可传 `context.characterName`（可选，最多120字）；它表示角色名，非开发者或登录人。宿主补入已安装即用图标与名称，当前即用右侧保留创建卡和回执。创建成功不等于执行完成；查看自动化的执行记录确认。
-
-
-### 同事目录与 @对话（SDK 1.5）
-声明 `directory.read` 与 `notifications.send`。读取 `await soduWorkApp.directory.list()` → `{ok,members:[{id,name,orgId,org,canReceive}],orgUnits:[{id,name,parentId}],organizationDirectoryAvailable,truncated,reason}`。目录复用当前账号可见同事；不包含自己、凭据、手机号或邮箱。组织为可见在职成员所在部门。单次最多500项，truncated=true表示未完整列出；旧Hub缺组织ID时 organizationDirectoryAvailable=false，不能猜ID。
+Declare `directory.read` and `notifications.send`. `await soduWorkApp.directory.list()` returns `{ok,members:[{id,name,orgId,org,canReceive}],orgUnits:[{id,name,parentId}],organizationDirectoryAvailable,truncated,reason}`. The directory contains colleagues visible to the current account, excluding the current user, credentials, phone numbers, and email addresses. Organization units are the departments of visible active members. A response has at most 500 entries; `truncated:true` means it is incomplete. Older Hubs without organization IDs return `organizationDirectoryAvailable:false`; never guess those IDs.
 
 ```js
 const directory = await soduWorkApp.directory.list();
 if (!directory.ok) throw Error(directory.reason);
 const member = directory.members.find(row => row.id === selectedUserId && row.canReceive);
-if (!member) throw Error('请选择可联系的同事');
+if (!member) throw Error('Select a colleague who can receive notifications');
 const review = await soduWorkApp.chat.mention({
-  recipientUserId: member.id, text: '请核对这份行动清单', requestId: crypto.randomUUID()
+  recipientUserId: member.id, text: 'Please review this action list', requestId: crypto.randomUUID()
 });
 ```
 
-也可用 `query:'@姓名'`；按目录中首个精确姓名匹配打开卡片，无精确匹配时显示同事选择。稳定用户ID优先。text≤500字；保留原对话草稿，默认不勾选旧会话附件、不自动请求AI小结。返回 `{ok,opened,state:'review'|'select'}` 仅表示右侧卡片/选人已打开；需用户核对并点击“发送通知”，后续通知保存、送达、已读复用既有链路。失败返回reason；不得报告“已发送”。不解析普通 chat.send 文本中的 @，也不自动群发。每次新操作用新requestId；同ID同内容防重，不能用于新一次发送。
+Alternatively, pass `query:'@Name'` to open a card for the first exact directory name match, or the colleague picker when no exact match exists. Prefer stable user IDs. Text is limited to 500 characters. The existing conversation draft is retained; earlier attachments are not selected by default and no AI summary is requested automatically. `{ok,opened,state:'review'|'select'}` only means the review card or picker opened. The user must review it and click "Send notification"; saving, delivery, and read state then use the existing notification flow. Failures return `reason`; do not report that a message was sent. Ordinary `chat.send` text does not parse mentions or trigger bulk sending. Each new operation needs a new `requestId`; identical IDs and contents are deduplicated and must not be reused for a new send.
 
-## 本地／云端数据声明
+## Local and cloud storage declarations
 
-数据接口保持不变。新即用在顶层 `jiyong.storage` 显式声明 `{"location":"local"}` 或 `{"location":"cloud"}`，遵从创建时必选项；旧包省略仍用本地。云端需要包内版本化 `initialization.script` JSON，由 Hub 按稳定包身份和当前账号自动开通独立空间；页面与技能共用 `data.*`，不持有数据库密码、不执行随包服务脚本。预检只读检查云端就绪；安装／首次访问才初始化。未联网、未配置或撤权须报错，不能回退本地写库；写超时先读取核对。格式、迁移与证据要求见即用开发随包 `references/developer/references/cloud-data.md` 及同目录两个 JSON Schema。
+The data methods remain the same. New applications explicitly declare top-level `jiyong.storage` as `{"location":"local"}` or `{"location":"cloud"}`, matching the required choice during creation. Older packages that omit it still use local storage. Cloud storage requires packaged, versioned `initialization.script` JSON. The Hub provisions an isolated space using the stable package identity and current account. Pages and skills share `data.*` without database passwords or executing packaged service scripts.
+
+Preflight checks cloud readiness without writing; installation or first access initializes storage. Offline, unconfigured, or revoked access must report failure, never silently fall back to local writes. After a write timeout, read back to confirm the result. The packaged `references/developer/references/cloud-data.md` and its two neighboring JSON Schemas define formats, migration, and evidence requirements.
 
 ## In-app one-shot AI
 

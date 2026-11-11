@@ -3,6 +3,7 @@
   // Core Japanese copy. Untranslated source phrases intentionally fall back to
   // English through the locale registry instead of mixing Chinese into a page.
   const messages = {
+    '放大': '拡大', '更大文字 · 清晰易读': '大きな文字 · 読みやすい表示',
     '账号或密码不正确': 'アカウントまたはパスワードが正しくありません',
     '操作过于频繁，请稍后重试': '操作が集中しています。しばらくしてからもう一度お試しください',
     '账号应为 3-64 个字符，且不能包含空格': 'アカウントは3〜64文字で、空白を含めることはできません',

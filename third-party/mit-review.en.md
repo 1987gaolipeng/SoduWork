@@ -1,6 +1,6 @@
 # MIT source preparation and review boundaries
 
-[简体中文](mit-review.md) · **English** · [Third-party materials](README.en.md)
+[简体中文](mit-review.md) · **English** · [Third-party materials](README.md)
 
 The root MIT license and MDiRi attribution cover project-owned material the project has the right to license. This document records review boundaries; it does not certify zero risk or provide legal clearance.
 
