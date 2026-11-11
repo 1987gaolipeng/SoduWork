@@ -141,8 +141,7 @@ html[data-desk-panel="workspace"][data-workspace-layout="utility"] .ws-resizer{d
 .ws-list-body{flex:0 0 auto;min-height:0;display:flex;flex-direction:column;gap:1px}
 /* History controls stay in the sidebar scrollport and follow the active theme. */
 .ws-history-actions{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:4px 10px 8px}
-.ws-history-actions[hidden],.ws-history-status[hidden],#wsAccountChatsBox[hidden]{display:none}
-#wsAccountChatsBox>.ws-projects-heading{padding:10px 10px 4px;color:var(--ink-4);font-size:14.5px;font-weight:400;line-height:1.3}
+.ws-history-actions[hidden],.ws-history-status[hidden]{display:none}
 .ws-history-status{margin:0;padding:4px 10px;color:var(--ink-4);font-size:var(--font-min-readable,14.5px);line-height:1.45;overflow-wrap:anywhere}
 .ws-history-status:empty,.ws-history-actions>span:empty{display:none}
 .ws-history-actions>span{padding:0;color:var(--ink-4);font-size:var(--font-min-readable,14.5px);line-height:1.45;overflow-wrap:anywhere}

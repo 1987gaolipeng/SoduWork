@@ -712,8 +712,11 @@ function _syncChatList(target, items, isPinned, pool) {
 
 function renderChats() {
     ctx.mount();
-    const list = localReady ? [...ctx.chatItems.filter(item => isLocalId(item.id)),
-      ...ctx.chatItems.filter(item => !isLocalId(item.id)).slice(0, ctx.MAX_CHAT_ITEMS)] : ctx.chatItems.slice(0, ctx.MAX_CHAT_ITEMS);
+    let accountCount = 0;
+    // Source-specific read limits do not create separate presentation groups.
+    // Existing project state owns chronological and manual placement.
+    const list = localReady ? ctx.chatItems.filter(item => isLocalId(item.id) || ++accountCount <= ctx.MAX_CHAT_ITEMS)
+      : ctx.chatItems.slice(0, ctx.MAX_CHAT_ITEMS);
     ctx.sidebarProjects?.remember(list);
     const pins = pinnedIds();
     const scroller = ctx.root.querySelector('#wsSideScroll');
@@ -731,29 +734,21 @@ function renderChats() {
       .filter(item => !hiddenRow(item));
     const recent = (groups ? groups.recent : list.filter((item) => !pins.has(String(item.id || ''))))
       .filter(item => !hiddenRow(item));
-    const normal = supportsLocalHistory() ? recent.filter(item => isLocalId(item.id) || item.pending) : recent;
-    const account = supportsLocalHistory() ? recent.filter(item => !isLocalId(item.id) && !item.pending) : [];
     const pinnedBox = ctx.root.querySelector('#wsPinnedBox');
     pinnedBox.hidden = !pinned.length;
     pinnedBox.classList.toggle('is-empty', !pinned.length);
-    ctx.root.querySelector('#wsChatsBox').classList.toggle('is-empty', !normal.length);
+    ctx.root.querySelector('#wsChatsBox').classList.toggle('is-empty', !recent.length);
     _syncChatList(ctx.pinnedChats, pinned, true, pool);
-    _syncChatList(ctx.chats, normal, false, pool);
+    _syncChatList(ctx.chats, recent, false, pool);
     if (supportsLocalHistory()) {
-      let box = ctx.root.querySelector('#wsAccountChatsBox');
-      if (!box) {
-        box = document.createElement('section'); box.id = 'wsAccountChatsBox'; box.className = 'ws-list ws-chat-group';
-        box.dataset.sidebarSection = 'recent';
-        const heading = document.createElement('div'); heading.className = 'ws-projects-heading';
-        const label = document.createElement('span'); label.dataset.historyAccountHeading = ''; heading.appendChild(label);
-        const body = document.createElement('div'); body.id = 'wsAccountChats'; body.className = 'ws-list-body';
-        const status = document.createElement('div'); status.id = 'wsAccountHistoryStatus'; status.className = 'ws-history-status'; status.setAttribute('role', 'status');
-        box.append(heading, body, status); ctx.root.querySelector('#wsSideScroll').appendChild(box);
+      let accountStatus = ctx.root.querySelector('#wsAccountHistoryStatus');
+      if (!accountStatus) {
+        accountStatus = document.createElement('div'); accountStatus.id = 'wsAccountHistoryStatus';
+        accountStatus.className = 'ws-history-status'; accountStatus.setAttribute('role', 'status');
+        ctx.root.querySelector('#wsChatsBox').appendChild(accountStatus);
       }
-      box.querySelector('[data-history-account-heading]').textContent = historyText('workspace.history.account', '账号会话');
-      box.hidden = !account.length && !accountError;
-      _syncChatList(box.querySelector('#wsAccountChats'), account, false, pool);
-      box.querySelector('#wsAccountHistoryStatus').textContent = accountError ? historyText('workspace.history.accountError', '账号会话暂时无法读取') : '';
+      accountStatus.hidden = !accountError;
+      accountStatus.textContent = accountError ? historyText('workspace.history.accountError', '部分会话暂时无法读取') : '';
       let actions = ctx.root.querySelector('#wsLocalHistoryActions');
       if (!actions) {
         actions = document.createElement('div'); actions.id = 'wsLocalHistoryActions'; actions.className = 'ws-history-actions';
@@ -773,7 +768,7 @@ function renderChats() {
       _syncChatList(project.target, items, false, pool);
       if (!items.length) ctx._empty(project.target, '拖入会话，开始整理');
     }
-    if (!normal.length && !localError) ctx._empty(ctx.chats, list.length ? '没有更多聊天' :
+    if (!recent.length && !localError && !accountError) ctx._empty(ctx.chats, list.length ? '没有更多聊天' :
       (ctx.chatsLoading ? '正在加载聊天…' : '还没有聊天'));
     if (ctx.openChatMenu && !ctx.openChatMenu.row?.isConnected) closeChatMenu();
     scroller.scrollTop = scrollTop;

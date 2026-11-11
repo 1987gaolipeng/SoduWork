@@ -1,10 +1,9 @@
 (function (global) {
   const messages = {
-    "workspace.history.account": "Account chats",
     "workspace.history.more": "Load more",
     "workspace.history.retry": "Reload",
     "workspace.history.localError": "Local history is temporarily unavailable",
-    "workspace.history.accountError": "Account chats are temporarily unavailable",
+    "workspace.history.accountError": "Some conversations are temporarily unavailable",
     "workspace.history.loading": "Loading…",
     "harness2.stage.准备运行环境": "Runtime preparation",
     "harness2.stage.启动执行组件": "Executor startup",

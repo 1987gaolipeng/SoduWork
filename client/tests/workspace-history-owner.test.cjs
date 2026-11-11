@@ -35,7 +35,7 @@ function fixture(user = 'user-a', options = {}) {
     updateChatState(event) { ctx.chatItems.push(event.presence); } };
   const api = window.WorkspaceChatList.create(ctx);
   if (options.realHistory) { ctx.setChats = api.setChats; ctx.upsertChat = api.upsertChat; ctx.updateChatState = api.updateChatState; }
-  return { ctx, api, pending, subscriptions, renders, history: window.WorkspaceChatHistory,
+  return { ctx, api, pending, subscriptions, renders, history: window.WorkspaceChatHistory, window,
     unload() { for (const fn of events.get('beforeunload') || []) fn(); },
     async switch(nextUser, name = 'soduwork-data-scope-changed', nextHub = hub, nextDevice = device) {
       user = nextUser; hub = nextHub; device = nextDevice;
@@ -314,6 +314,26 @@ test('an executable account original remains independent of an active or deleted
   assert.equal(f.ctx.chatItems[0].accountCanSend, true);
   await f.switch(''); await tick();
   assert.equal(f.ctx.chatItems.length, 0, 'The authorized original never becomes shared local history');
+});
+
+test('one recent projection sorts mixed history chronologically without coalescing account originals into copies', async () => {
+  const local = [{ id: 'native', title: 'Native', at: 200 },
+    { id: 'copy', title: 'Downloaded', at: 100, cached: true, localReplica: true, source: { id: 'account-original' } }];
+  const account = [{ id: 'account-original', title: 'Original', at: 300, accountConversation: true, accountCanSend: true },
+    { id: 'account-older', title: 'Older', at: 50, accountConversation: true }];
+  const f = fixture('user-a', { local: true, realHistory: true, history: async options => options.source === 'local'
+    ? { ok: true, chats: local, next: null, localCatalog: { workspace: 'unified-profile', revision: 1,
+      items: local.map(row => ({ id: row.id, originIds: row.source ? [row.source.id] : [] })) } }
+    : { ok: true, chats: account } });
+  await f.api.refreshConversationHistory(); await tick();
+  const values = new Map(), storage = { getItem: key => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value), key: index => [...values.keys()][index], get length() { return values.size; } };
+  const state = f.window.WorkspaceSidebarState.create({ storage, deviceStorage: storage, key: 'unified-owner' });
+  state.remember(f.ctx.chatItems);
+  const recent = state.view(f.ctx.chatItems).recent;
+  assert.deepEqual(Array.from(recent, row => row.id), ['account-original', 'native', 'copy', 'account-older']);
+  assert.equal(recent[0].accountCanSend, true);
+  assert.equal(recent[2].cached, true);
 });
 
 test('actual reconciliation retains loaded local pages while independently bounding account history and upserts', async () => {

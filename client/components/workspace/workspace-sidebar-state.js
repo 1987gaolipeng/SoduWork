@@ -211,6 +211,29 @@
     const migrationId = id => canonical(id) || localHistory?.origins.get(String(id || '')) || '';
     const localIds = ids => unique((ids || []).map(canonical).filter(Boolean));
     const remoteIds = ids => unique(ids).filter(id => !canonical(id));
+    function orderedIds(deviceIds, accountIds) {
+      const local = localIds(deviceIds), positions = new Map(local.map((id, index) => [id, index]));
+      const account = unique((accountIds || []).map(id => canonical(id) || id));
+      const boundaries = new Array(account.length);
+      let boundary = local.length;
+      for (let index = account.length - 1; index >= 0; index--) {
+        if (positions.has(account[index])) boundary = positions.get(account[index]);
+        boundaries[index] = boundary;
+      }
+      // Account lists retain local IDs only as placement anchors. Membership
+      // and local relative order always come from the current device state.
+      const buckets = new Map();
+      let minimum = 0;
+      account.forEach((id, index) => {
+        if (canonical(id)) return;
+        const at = Math.max(minimum, boundaries[index]); minimum = at;
+        if (!buckets.has(at)) buckets.set(at, []);
+        buckets.get(at).push(id);
+      });
+      const result = [];
+      local.forEach((id, index) => { result.push(...(buckets.get(index) || []), id); });
+      return result.concat(buckets.get(local.length) || []);
+    }
     const owns = id => (shared.projectOwners[id] || []).includes(key);
     function read(account) {
       if (!enabled()) return account;
@@ -294,7 +317,7 @@
         return record && !record.archived && !record.deleted;
       });
       const merged = { ...account, rows: [...visibleRows, ...account.rows.filter(row => !canonical(row.id))],
-        pins: [...shared.pins, ...remoteIds(account.pins)], recent: [...shared.recent, ...remoteIds(account.recent)],
+        pins: orderedIds(shared.pins, account.pins), recent: orderedIds(shared.recent, account.recent),
         manualOrder: { recent: shared.manualOrder.recent || account.manualOrder.recent,
           projects: { ...account.manualOrder.projects, ...shared.manualOrder.projects } }, collapsed: shared.collapsed };
       for (const section of ['projects', 'archivedProjects']) {
@@ -303,7 +326,7 @@
         merged[section] = [...locals.values()].map(project => {
           const privateProject = [...account.projects, ...account.archivedProjects].find(row => row.id === project.id);
           return { ...project, businessProjectId: privateProject?.businessProjectId || '',
-            ...applicationFields(privateProject), chatIds: unique([...project.chatIds, ...remoteIds(privateProject?.chatIds)]) };
+            ...applicationFields(privateProject), chatIds: orderedIds(project.chatIds, privateProject?.chatIds) };
         });
         for (const project of account[section]) if (!allShared.has(project.id) && !shared.projectOwners[project.id])
           merged[section].push({ ...project, chatIds: remoteIds(project.chatIds) });
@@ -316,7 +339,7 @@
       for (const project of shared.projects) if (owns(project.id)) {
         const previous = [...account.projects, ...account.archivedProjects].find(row => row.id === project.id);
         projects.push({ ...previous, ...project, businessProjectId: previous?.businessProjectId || '',
-          ...applicationFields(previous), chatIds: unique([...project.chatIds, ...remoteIds(previous?.chatIds)]) });
+          ...applicationFields(previous), chatIds: orderedIds(project.chatIds, previous?.chatIds) });
       }
       return normalized({ ...account, projects });
     }
@@ -326,7 +349,7 @@
       const local = { ...next, pins: localIds(next.pins), recent: localIds(next.recent),
         rows: next.rows.filter(row => canonical(row.id)).map(row => localSnapshot({ ...row, id: canonical(row.id) })),
         migratedIds: shared.migratedIds, projectOwners: copy(shared.projectOwners) };
-      const privateState = { ...next, pins: remoteIds(next.pins), recent: remoteIds(next.recent),
+      const privateState = { ...next, pins: unique(next.pins), recent: unique(next.recent),
         rows: next.rows.filter(row => !canonical(row.id)) };
       for (const section of ['projects', 'archivedProjects']) {
         local[section] = []; privateState[section] = [];
@@ -340,7 +363,7 @@
             const prior = [...account.projects, ...account.archivedProjects].find(row => row.id === project.id);
             if (prior || local.projectOwners[project.id].includes(key) || localProjectId === project.id && project.businessProjectId)
               privateState[section].push(prior && !local.projectOwners[project.id].includes(key) && localProjectId !== project.id
-                ? prior : { ...project, chatIds: remoteIds(project.chatIds) });
+                ? prior : { ...project, chatIds: unique(project.chatIds) });
           } else privateState[section].push(project);
         }
       }

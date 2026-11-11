@@ -1,10 +1,9 @@
 (function (global) {
   const messages = {
-    "workspace.history.account": "アカウントのチャット",
     "workspace.history.more": "さらに読み込む",
     "workspace.history.retry": "再読み込み",
     "workspace.history.localError": "ローカル履歴を一時的に読み込めません",
-    "workspace.history.accountError": "アカウントのチャットを一時的に読み込めません",
+    "workspace.history.accountError": "一部の会話を一時的に読み込めません",
     "workspace.history.loading": "読み込み中…",
     "harness2.stage.准备运行环境": "実行環境の準備",
     "harness2.stage.启动执行组件": "実行機構の起動",

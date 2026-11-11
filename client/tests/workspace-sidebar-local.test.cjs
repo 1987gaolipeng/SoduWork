@@ -88,6 +88,63 @@ test('device unpin, project removal and manual ordering survive restart without 
   }
 });
 
+for (const section of ['recent', 'pinned', 'project']) {
+  test('mixed ' + section + ' drag order survives reopening without sharing account rows', () => {
+    const f = fixture();
+    const rows = [{ id: 'native-a', title: 'Local', createdAt: 20 },
+      { id: 'remote-a', title: 'Private A', createdAt: 10 }];
+    f.catalog(['native-a'], rows.slice(0, 1));
+    const a = f.open('a');
+    let target = section;
+    if (section === 'pinned') rows.forEach(row => a.togglePin(row.id, row));
+    if (section === 'project') {
+      target = a.saveProject({ name: 'Mixed project' });
+      rows.forEach(row => a.fileChat(row.id, target, row));
+    }
+    const ids = store => {
+      const view = store.view(rows);
+      return plain(section === 'project' ? view.projects.find(p => p.id === target).items : view[section]).map(row => row.id);
+    };
+    a.move(rows[1], target, rows[0].id, rows);
+    assert.deepEqual(ids(a), ['remote-a', 'native-a']);
+    assert.deepEqual(ids(f.open('a')), ['remote-a', 'native-a']);
+    const b = f.open('b');
+    assert.equal(b.get().rows.some(row => row.id === 'remote-a'), false);
+    assert.doesNotMatch(f.values.get(localKey), /remote-a|Private A/);
+    assert.deepEqual(ids(f.open('a')), ['remote-a', 'native-a']);
+    if (section === 'project') {
+      a.archiveProject(target); a.restoreProject(target);
+      assert.deepEqual(ids(f.open('a')), ['remote-a', 'native-a']);
+      assert.deepEqual(plain(a.getAccount().projects.find(p => p.id === target).chatIds), ['remote-a', 'native-a']);
+    }
+  });
+}
+
+test('private order anchors obey current device order and canonical aliases without reviving removed membership', () => {
+  const f = fixture();
+  let rows = [{ id: 'native-a', createdAt: 40 }, { id: 'native-b', createdAt: 30 },
+    { id: 'remote-a', title: 'Private A', createdAt: 20 }, { id: 'remote-b', createdAt: 10 }];
+  f.catalog(['native-a', 'native-b'], rows.slice(0, 2));
+  const a = f.open('a');
+  a.move(rows[2], 'recent', 'native-a', rows);
+  a.move(rows[3], 'recent', 'native-b', rows);
+  const ids = store => plain(store.view(rows).recent).map(row => row.id);
+  assert.deepEqual(ids(a), ['remote-a', 'native-a', 'remote-b', 'native-b']);
+  const b = f.open('b'); b.move(rows[1], 'recent', 'native-a', rows.slice(0, 2));
+  assert.deepEqual(ids(f.open('a')).filter(id => id.startsWith('native')), ['native-b', 'native-a']);
+  assert.deepEqual(ids(f.open('a')).filter(id => id.startsWith('remote')), ['remote-a', 'remote-b']);
+  f.catalog([{ id: 'native-a', deleted: true }, { id: 'canonical-a', historyAliasIds: ['native-a'] }, 'native-b'],
+    [{ ...rows[0], id: 'canonical-a' }, rows[1]], 2);
+  rows = [{ ...rows[0], id: 'canonical-a' }, ...rows.slice(1)];
+  const reopened = f.open('a');
+  assert.equal(ids(reopened).includes('native-a'), false);
+  assert.deepEqual(ids(reopened).filter(id => !id.startsWith('remote')), ['native-b', 'canonical-a']);
+  reopened.togglePin('canonical-a', rows[0]);
+  f.open('b').togglePin('canonical-a');
+  assert.equal(f.open('a').get().pins.includes('canonical-a'), false, 'A stale private anchor cannot restore a removed device pin');
+  assert.doesNotMatch(f.values.get(localKey), /remote-a|remote-b|Private A/);
+});
+
 test('all legacy account keys migrate only exact validated IDs and preserve archived membership', () => {
   const old = 'soduwork_sidebar_projects_v1:' + encodeURIComponent('soduwork_tasks_v5@' +
     [hub, 'previous-device', 'a'].map(encodeURIComponent).join('@'));
