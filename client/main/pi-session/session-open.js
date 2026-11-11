@@ -1,5 +1,4 @@
 'use strict';
-const { entriesOf } = require('../conversation/persisted-entry-compat.cjs');
 
 // Session construction owns state; collaborators receive live accessors.
 function create(shared) {
@@ -131,7 +130,7 @@ async function open(opts) {
       return { ok: false, reason: '接回历史会话失败：' + String((e && e.message) || e) };
     }
   }
-  const savedModel = resumedManager && entriesOf(resumedManager).reverse().find(entry =>
+  const savedModel = resumedManager && [...resumedManager.getEntries()].reverse().find(entry =>
     entry.type === 'custom' && entry.customType === 'soduwork.model.selection');
   const explicitModel = typeof opts.modelName === 'string';
   let modelName = explicitModel ? opts.modelName : (savedModel && savedModel.data && savedModel.data.name) || '';
@@ -180,9 +179,9 @@ async function open(opts) {
   const openingPrompts = goalAtOpen && openingProfile.kind === 'conversation'
     ? [goalQuality.conversationPrompt(goal)]
     : (goalAtOpen ? [goalHarness.prompt(goal)] : []);
-  const savedAccess = resumedManager && entriesOf(resumedManager).reverse().find(entry =>
+  const savedAccess = resumedManager && [...resumedManager.getEntries()].reverse().find(entry =>
     entry.type === 'custom' && entry.customType === 'soduwork.access.policy');
-  const pendingEntry = resumedManager && entriesOf(resumedManager).reverse().find(entry =>
+  const pendingEntry = resumedManager && [...resumedManager.getEntries()].reverse().find(entry =>
     entry.type === 'custom' && entry.customType === 'soduwork.access.pending');
   const accessRules = require('../access-control/policy');
   const restoredAccess = resumedManager ? accessRules.restoreState(savedAccess?.data, pendingEntry?.data, effectiveCwd) : null;
