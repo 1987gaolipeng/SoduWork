@@ -400,7 +400,6 @@ LIVE_SMOKES = (
     "smoke/smoke_live_push.py",
     "smoke/smoke_models.py",
     "smoke/smoke_plugin_e2e.py",
-    "smoke/smoke_ppm_connector.py",
     "smoke/smoke_runner_job.py",
     "smoke/smoke_runner_management_live.py",
     "smoke/smoke_runner_term.py",
@@ -426,7 +425,6 @@ GROUPS: Mapping[str, tuple[str, ...]] = {
 # acknowledgement is handled separately by quality_gate.py.
 LIVE_REQUIREMENTS: Mapping[str, tuple[str, ...]] = {
     "smoke/smoke_ai_proxy.py": ("SODUWORK_SMOKE_LIVE_AI=1",),
-    "smoke/smoke_ppm_connector.py": ("SMOKE_ALLOW_LIVE_DB=1",),
     "smoke/smoke_runner_job.py": ("SMOKE_ALLOW_LIVE_DB=1",),
 }
 

@@ -10,7 +10,6 @@
     time: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></svg>',
     memory: '<svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v7c0 4 16 4 16 0V5M4 12v7c0 4 16 4 16 0v-7"/></svg>',
     reasoning: '<svg viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="5" rx="1.5"/><rect x="2" y="17" width="6" height="5" rx="1.5"/><rect x="16" y="17" width="6" height="5" rx="1.5"/><path d="M12 7v5m-7 5v-5h14v5"/></svg>',
-    xingtu: '<svg viewBox="0 0 24 24"><path d="m12 2 2.7 6.3 6.8.6-5.2 4.5 1.6 6.6-5.9-3.5L6.1 20l1.6-6.6-5.2-4.5 6.8-.6z"/></svg>',
     market: '<svg viewBox="0 0 24 24"><path d="M4 9h16l-1-5H5z"/><path d="M5 9v11h14V9M9 20v-6h6v6"/><path d="M4 9c0 2 3 3 4 0 0 2 3 3 4 0 0 2 3 3 4 0 0 2 3 3 4 0"/></svg>',
     shield: '<svg viewBox="0 0 24 24"><path d="M12 3 20 6v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="m9 12 2 2 4-4"/></svg>',
   };
@@ -63,7 +62,6 @@
   function appBrand(item) {
     const identity = [item.templateKey, item.name].join(' ').toLowerCase();
     const rules = [
-      [/PPM|xingtu|\bppm\b/, 'xingtu', 'flow'],
       [/\bgit\b|gitlab|github|仓库/, 'git', 'code'],
       [/filesystem|文件|目录/, 'files', 'slides'],
       [/fetch|网页|web|browser/, 'web', 'research'],
