@@ -40,3 +40,21 @@ test('Pi retry schedule patch is idempotent and preserves exponential fallback',
   assert.match(agentSource, /settings\.baseDelayMs \* 2 \*\* \(this\._retryAttempt - 1\)/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('current SDK retry helpers preserve fallback and cap an explicit schedule', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-pi-retry-current-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(dir, 'core'));
+  const settingsFile = path.join(dir, 'core/settings-manager.js');
+  const agentFile = path.join(dir, 'core/agent-session.js');
+  fs.writeFileSync(settingsFile, '            baseDelayMs: this.settings.retry?.baseDelayMs ?? SETTINGS_DEFAULTS.retry.baseDelayMs,');
+  fs.writeFileSync(agentFile, '        const delayMs = retryDelayMs(settings, this._retryAttempt);');
+  assert.equal(patchSource(settingsFile).patched, true);
+  assert.equal(patchSource(agentFile).patched, true);
+  const delay = new Function('settings', 'retryDelayMs', fs.readFileSync(agentFile, 'utf8') + '; return delayMs;');
+  assert.equal(delay.call({_retryAttempt: 1}, {delayScheduleMs: [240000], maxAgentDelayMs: 60000}, () => 2000), 60000);
+  assert.equal(delay.call({_retryAttempt: 1}, {delayScheduleMs: [15000], maxAgentDelayMs: 60000}, () => 2000), 15000);
+  assert.equal(delay.call({_retryAttempt: 1}, {}, () => 2000), 2000);
+  assert.equal(patchSource(settingsFile).already, true);
+  assert.equal(patchSource(agentFile).already, true);
+});
