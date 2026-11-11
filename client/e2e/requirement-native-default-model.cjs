@@ -144,10 +144,11 @@ if (typeof electron === 'string') {
     // default remains an empty override; users may also select it explicitly.
     await js(`(async()=>{window.originalOptions=SoduWorkAPI.taskExecutionOptions;
       SoduWorkAPI.taskExecutionOptions=async()=>({...await originalOptions(),
-        models:[],modelOptions:[{name:'only-model'}],defaultModel:'only-model',defaultModels:{pi:'only-model'}});
+        models:[],modelOptions:[{name:'only-model',providerId:'fixture-provider',providerName:'Example provider'}],defaultModel:'only-model',defaultModels:{pi:'only-model'}});
       RequirementAssignment.close();await RequirementAssignment.open(taskFixture.id);})()`);
     await waitDOM(`document.querySelector('#fwdModel option[value="only-model"]')`);
-    assert.equal(await js(`document.querySelector('#fwdModel option[value=""]').textContent`),'跟随底座默认 · only-model');
+    assert.equal(await js(`document.querySelector('#fwdModel option[value=""]').textContent`),'跟随底座默认 · only-model · Example provider');
+    assert.equal(await js(`document.querySelector('#fwdModel option[value="only-model"]').textContent`),'only-model · Example provider');
     assert.equal(await js(`document.querySelector('#fwdModel').value`),'');
     await js(`{const select=document.querySelector('#fwdModel');select.value='only-model';select.dispatchEvent(new Event('change'));}void 0;`);
     assert.equal(await js('_fwdModel'),'only-model');

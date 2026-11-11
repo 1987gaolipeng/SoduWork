@@ -70,3 +70,18 @@ test('assignment includes the concrete catalog default and shows the selected Ag
   assert.equal(context._fwpModelState({defaultModel:'only',models:[]},'').models.length,1);
   assert.equal(context._fwpModelState(options,'removed').stale,true);
 });
+
+
+test('assignment labels identify an unambiguous provider without changing model values', () => {
+  const context = {window:{},esc:value=>String(value).replaceAll('<','&lt;')};
+  vm.runInNewContext(fs.readFileSync(path.join(root,'components/panels/panels-forward-plugin.js'),'utf8'),context);
+  const row = {name:'model-a',providerId:'provider-a',providerName:'Example <provider>'};
+  const options = {defaultModels:{pi:'model-a'},defaultModel:'model-a',modelOptions:[row]};
+  assert.equal(context._fwpDefaultModelLabel(options,{cli:'pi'}),'跟随底座默认 · model-a · Example <provider>');
+  const state=context._fwpModelState(options,'model-a');
+  assert.equal(state.value,'model-a');assert.equal(state.stale,false);
+  assert.match(context._fwpModelOptions(state,'Default'),/value="model-a" selected>model-a · Example &lt;provider>/);
+  assert.equal(context._fwpModelLabel({...options,modelOptions:[row,{...row}]},'model-a'),'model-a · Example <provider>');
+  assert.equal(context._fwpModelLabel({...options,modelOptions:[row,{...row,providerId:'provider-b'}]},'model-a'),'model-a');
+  assert.equal(context._fwpModelLabel({...options,modelOptions:[row,{...row,providerName:''}]},'model-a'),'model-a');
+});
