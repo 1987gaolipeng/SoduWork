@@ -87,10 +87,10 @@ function _fwpModelState(options, selected) {
 
 function _fwpDefaultModelLabel(options, agent) {
   const cli = String(agent?.cli || agent?.key || '').replace(/^local:/, '');
-  // A different device can have its own saved preference. Do not pretend the
-  // requesting device's default is the remote execution device's selection.
+  // Defer remote or mixed-seat resolution without claiming which device owns
+  // the preference; dispatch may use the requesting credential owner's model.
   if (agent?.remote || agent?.locationMode === 'remote' || agent?.locationMode === 'mixed')
-    return '跟随执行端默认（执行时解析）';
+    return '跟随默认模型（派发时解析）';
   if (options?.defaultModelErrors?.[cli]) return '底座默认不可用，请明确选择模型';
   const resolved = options?.defaultModels?.[cli];
   if (resolved) return '跟随底座默认 · ' + resolved;

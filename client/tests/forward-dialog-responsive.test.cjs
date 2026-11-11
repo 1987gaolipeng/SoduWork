@@ -65,7 +65,7 @@ test('assignment includes the concrete catalog default and shows the selected Ag
   assert.match(context._fwpModelOptions(state,'Default'),/value="catalog-default" selected/);
   assert.equal(context._fwpDefaultModelLabel(options,{cli:'pi'}),'跟随底座默认 · review');
   assert.match(context._fwpDefaultModelLabel(options,{cli:'qwen'}),/不可用/);
-  assert.match(context._fwpDefaultModelLabel(options,{cli:'pi',remote:true}),/执行时解析/);
+  assert.match(context._fwpDefaultModelLabel(options,{cli:'pi',remote:true}),/派发时解析/);
   assert.match(context._fwpDefaultModelLabel({defaultModel:'old-hub-default'},{cli:'pi'}),/目录默认：old-hub-default/);
   assert.equal(context._fwpModelState({defaultModel:'only',models:[]},'').models.length,1);
   assert.equal(context._fwpModelState(options,'removed').stale,true);
