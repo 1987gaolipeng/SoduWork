@@ -1180,7 +1180,9 @@ async def put_model_provider(
     from ..services import model_config_guard
     p = await model_config_guard.catalog(session, ModelProvider, pid, body.get("expectedRevision"))
     if p is None:
-        p = ModelProvider(id=pid[:48], builtin=False)
+        if len(pid) > 48:
+            raise HTTPException(status_code=400, detail="模型服务标识最多 48 个字符，请缩短后再保存")
+        p = ModelProvider(id=pid, builtin=False)
         session.add(p)
     if "name" in body:
         p.name = str(body.get("name") or "")[:64]
@@ -1196,6 +1198,7 @@ async def put_model_provider(
     if "note" in body:
         p.note = str(body.get("note") or "")[:300]
     new_key = str(body.get("apiKey") or "").strip()
+    key_truncated = len(new_key) > 400
     if new_key:
         p.api_key = new_key[:400]
     await session.commit()
@@ -1203,7 +1206,7 @@ async def put_model_provider(
     await models_changed(session)
     await audit.log(session, user, "model.provider", "setting", pid, p.name,
                     {"baseUrl": p.base_url, "enabled": p.enabled, "keyChanged": bool(new_key)})
-    return {"ok": True, "keyChanged": bool(new_key)}
+    return {"ok": True, "keyChanged": bool(new_key), "keyTruncated": key_truncated}
 
 
 @router.delete("/model-providers/{pid}")
@@ -1247,6 +1250,8 @@ async def put_model_def(
     if not pid or not name:
         raise HTTPException(status_code=400, detail="要选一个模型服务、并填模型标识")
     mid = pid + ":" + name
+    if len(mid) > 64:
+        raise HTTPException(status_code=400, detail="模型服务标识加模型标识共超过 64 个字符，请缩短模型标识")
     m = await model_config_guard.catalog(session, ModelDef, mid, body.get("expectedRevision"))
     if await session.get(ModelProvider, pid, populate_existing=True) is None:
         raise HTTPException(status_code=400, detail="这个模型服务不存在")

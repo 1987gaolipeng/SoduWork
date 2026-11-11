@@ -11636,8 +11636,8 @@
     },
     {
       "path": "hub-backend/app/api/admin.py",
-      "bytes": 90128,
-      "sha256": "840ad423b702c3ce95a8343b334d2045a223c0f6b829a8109adfb86b430413c3"
+      "bytes": 90497,
+      "sha256": "974810e7cca14325e852f2e3fc9cb154256dfcee9694560b89414acb42c06489"
     },
     {
       "path": "hub-backend/app/api/admin_cloud_runners.py",
@@ -15251,8 +15251,8 @@
     },
     {
       "path": "hub-backend/quality_manifest.py",
-      "bytes": 17393,
-      "sha256": "85252a65937387b0b57384e252b3d0b74706c8f2f727c37173ce9d257ee67bd2"
+      "bytes": 17436,
+      "sha256": "754e2536292252b64a14be9a1da41dcd0d9e06099c5ad73ea6a0527059b71ece"
     },
     {
       "path": "hub-backend/repair_skill_package.py",
@@ -17203,6 +17203,11 @@
       "path": "hub-backend/test_model_definition_contracts.py",
       "bytes": 12369,
       "sha256": "4d2c9ac2a849996a25120abd09aed3c07bfb149f7ec65e3c265a63233648a2a4"
+    },
+    {
+      "path": "hub-backend/test_model_identifier_boundaries.py",
+      "bytes": 6147,
+      "sha256": "37c593791bfc120ea4b8e90a839c46f158c39753ef6900a76f4ef378ed3f3886"
     },
     {
       "path": "hub-backend/test_model_provider_cache.py",
