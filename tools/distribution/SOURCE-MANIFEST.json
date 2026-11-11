@@ -18581,8 +18581,8 @@
     },
     {
       "path": "hub-frontend/src/App.jsx",
-      "bytes": 17403,
-      "sha256": "949deffcbbb1891597dc54b17898fea4ec70e7d7b1ebb1275a0ca203b81a167a"
+      "bytes": 18560,
+      "sha256": "2a366c188949c869cc8920cede65d5a33a56b1b829ae9a245eb288a9a365def0"
     },
     {
       "path": "hub-frontend/src/FilterControls.jsx",
@@ -18690,6 +18690,16 @@
       "sha256": "aa632ab02c1972710aac161347673f2810b9b2876b9c3b2ced4932f36c02520f"
     },
     {
+      "path": "hub-frontend/src/enlarge-theme.css",
+      "bytes": 3902,
+      "sha256": "5950eec5587253edd34af6fa79e39233ee720ab5fe787efd82be1db59a8092c2"
+    },
+    {
+      "path": "hub-frontend/src/enlarge-theme.js",
+      "bytes": 2730,
+      "sha256": "0ef8bdee6b986388331e083f8fcc29b48894c2707ac3e06219fa93c04d46be97"
+    },
+    {
       "path": "hub-frontend/src/filter-controls.css",
       "bytes": 8845,
       "sha256": "26b5e4422609cd37647c64637af0a649d8d7f0207433134479fc9a17cd4f6a96"
@@ -18771,8 +18781,8 @@
     },
     {
       "path": "hub-frontend/src/locales/governance-overview.js",
-      "bytes": 16360,
-      "sha256": "a000b01caa6bdc1e42b0d061888d67170bb99f9c307bc44c0299a42e8ea3d27d"
+      "bytes": 16976,
+      "sha256": "2d6a3f9bfae1c369c53cfc2dab95886e3cf531ea45af077ccb4c626c7e15da21"
     },
     {
       "path": "hub-frontend/src/locales/insights-metrics.js",
@@ -18916,8 +18926,8 @@
     },
     {
       "path": "hub-frontend/src/main.jsx",
-      "bytes": 1334,
-      "sha256": "fb9ad604153e0c26f2deaeee2821314ca77bb1ee865b1972b67d5b059467ad78"
+      "bytes": 1564,
+      "sha256": "56575ab9fa5deb0abb1da295ce9a74c113f1ee0cc0c2af0d297544dac14fa76e"
     },
     {
       "path": "hub-frontend/src/org-options.js",
@@ -19841,8 +19851,8 @@
     },
     {
       "path": "hub-frontend/tests/helpers/react-harness.mjs",
-      "bytes": 4842,
-      "sha256": "e59551f5c68f909c804edd40510bb9d8094e4d9d905aa0216317fd7a051b8843"
+      "bytes": 4978,
+      "sha256": "8d43579ff8386b0db494164960a57465e35aca2d8ec405b9c49be182a09b351f"
     },
     {
       "path": "hub-frontend/tests/i18n-audit.test.mjs",
