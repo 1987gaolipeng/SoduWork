@@ -55,6 +55,7 @@
     "mobile/ios/"
   ],
   "excludedFiles": [
+    "client/tests/platform-plugins.test.cjs",
     "hub-backend/app/connectors/ppm.py",
     "hub-backend/smoke/smoke_ppm_connector.py",
     "hub-backend/smoke_ppm_connector.py",
