@@ -160,6 +160,14 @@ class CommittedSourceExportTests(unittest.TestCase):
         self.export()
         self.assertEqual(self.output.read_bytes(), original)
 
+    def test_export_ignores_host_line_ending_settings(self):
+        self.git('config', 'core.autocrlf', 'true')
+        self.git('config', 'core.eol', 'crlf')
+        self.export()
+        with zipfile.ZipFile(self.output) as archive:
+            self.assertEqual(archive.read('README.md'), b'Committed source\n')
+            self.assertEqual(archive.read('fixture.bin'), b'\0\r\n\xff')
+
     def test_committed_private_files_fail_even_with_automatically_generated_inventory(self):
         (self.root / 'private').mkdir()
         (self.root / 'private/fixture.txt').write_text('Excluded fixture')

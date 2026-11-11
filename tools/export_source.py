@@ -102,7 +102,8 @@ def export(output: Path) -> int:
     try:
         with output.open('xb') as stream:
             created = True
-            subprocess.run(['git', 'archive', '--format=zip', commit], cwd=ROOT, stdout=stream, check=True)
+            subprocess.run(['git', '-c', 'core.autocrlf=false', '-c', 'core.eol=lf',
+                            'archive', '--format=zip', commit], cwd=ROOT, stdout=stream, check=True)
         add_manifest(output, commit, expected)
         count = verify(output)
     except BaseException:
