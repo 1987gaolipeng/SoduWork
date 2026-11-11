@@ -198,8 +198,8 @@
             (item.sub ? '<i>' + escape(item.sub) + '</i>' : '') + '</span></button>').join('') +
       emptyList() + '</div>' + (!selected.modelName && enterpriseDefaultErrors[runtime().id]
         ? '<div class="cp-native-note is-warning">默认模型暂不可用，请选择其他模型</div>' : '') +
-      (selectedModel?.providerKind === 'anthropic'
-        ? '<div class="cp-native-note is-warning" role="note">当前企业模型对话通道要求 OpenAI 兼容协议；请切换模型，或在「我的模型」配置对应接口。Anthropic 配置可保留给支持它的 Agent。</div>' : '') + thinking;
+      (enterpriseModels.some(item => item.providerKind === 'anthropic')
+        ? '<div class="cp-native-note is-warning" role="note">企业模型对话通道只支持 OpenAI 兼容协议；列表中的 Anthropic 模型需使用支持其协议的 Agent。</div>' : '') + thinking;
   }
 
   function codexHtml(selected) {

@@ -68,6 +68,37 @@ async function run() {
   await js("SoduWorkI18n.setLocale('en-US',{persist:false,broadcast:false});void 0");
   assert.match(await js('document.querySelector("[role=note]").textContent'), /OpenAI-compatible/);
   report.cases.push('English protocol guidance is translated in the real renderer');
+  await js(fs.readFileSync(path.join(__dirname, '../components/panels/panels-agents.js'), 'utf8'));
+  await js(`SoduWorkI18n.setLocale('zh-CN',{persist:false,broadcast:false});
+    window.defaultWrites=[];
+    window.agentFixture={modelCount:2,models:[{name:'openai-model',providerKind:'openai-compat'},
+      {name:'anthropic-model',providerKind:'anthropic'}],machines:[{runnerId:'fixture-runner',scope:'current-instance',
+      label:'Isolated computer',env:{ok:true},agents:[{key:'pi',name:'Pi',state:'ready',setupState:'ready',installed:true,
+        present:true,bundled:true,modelPick:true,model:'openai-model',modelEffective:'openai-model'}]}]};
+    SoduWorkAPI.localAgentSetup=async()=>structuredClone(agentFixture);
+    SoduWorkAPI.setAgentModel=async(key,value)=>{
+      const note=document.querySelector('.ag-model [role=note]'),r=note?.getBoundingClientRect();
+      defaultWrites.push({key,value,warning:note?.textContent,visible:!!r&&r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight});
+      agentFixture.machines[0].agents[0].model=value;return {ok:true};};
+    closeModelsPanel();WorkspaceShell.setActive('agents');openAgentsPanel();void 0`);
+  win.setSize(1100, 1000);
+  await until('!!document.querySelector("[data-atoggle]")');
+  await click('[data-atoggle="fixture-runner~pi"]');
+  await until('!!document.querySelector("[data-amodel]")');
+  await js('document.querySelector(".ag-model [role=note]").scrollIntoView({block:"center"})');
+  assert.equal(await js('defaultWrites.length'), 0);
+  assert.match(await js('document.querySelector(".ag-model [role=note]").textContent'), /只支持 OpenAI 兼容协议/);
+  await js('document.querySelector("[data-amodel]").focus()');
+  for (const type of ['keyDown', 'keyUp']) win.webContents.sendInputEvent({ type, keyCode: 'End' });
+  await until('defaultWrites.length===1 && document.querySelector("[data-amodel]")?.value==="anthropic-model" && !document.querySelector("[data-amodel]").disabled');
+  const savedDefault = await js('defaultWrites[0]');
+  assert.equal(savedDefault.key, 'pi'); assert.equal(savedDefault.value, 'anthropic-model');
+  assert.equal(savedDefault.visible, true);
+  assert.match(savedDefault.warning, /只支持 OpenAI 兼容协议/);
+  report.cases.push('managed Agent default warning is visible before native selection and before autosave; chosen default persists');
+  await js("SoduWorkI18n.setLocale('en-US',{persist:false,broadcast:false});void 0");
+  assert.match(await js('document.querySelector(".ag-model [role=note]").textContent'), /OpenAI-compatible protocols only/);
+  report.cases.push('pre-save Agent default guidance translates to English');
   assert.deepEqual(await js('errors'), []);
   report.ok = true;
 }

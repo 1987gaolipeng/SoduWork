@@ -568,7 +568,6 @@ function _agModelHtml(a) {
   }
   const cur = a.model || '';
   const fallback = a.modelEffective || '';
-  const selected = list.find(m => m.name === (cur || fallback));
   return '<div class="ag-model' + (a.modelGone ? ' is-bad' : '') + '">' +
     '<span class="ag-model-cap">模型</span>' +
     '<select class="ag-model-sel" data-amodel="' + esc(a.key) + '" data-amodel-value="' + esc(cur) + '">' +
@@ -585,8 +584,8 @@ function _agModelHtml(a) {
        */
       (a.modelGone ? '<option value="' + esc(cur) + '" selected>' + esc(cur) + '（已不可用）</option>' : '') +
     '</select>' +
-    (selected?.providerKind === 'anthropic'
-      ? '<span class="ag-model-warn">当前企业模型对话通道要求 OpenAI 兼容协议；请切换模型，或在「我的模型」配置对应接口。Anthropic 配置可保留给支持它的 Agent。</span>' : '') +
+    (list.some(m => m.providerKind === 'anthropic')
+      ? '<span class="ag-model-warn" role="note">企业模型对话通道只支持 OpenAI 兼容协议；列表中的 Anthropic 模型需使用支持其协议的 Agent。</span>' : '') +
     (a.modelGone
       ? '<span class="ag-model-warn">这个模型现在用不了，派活会退回默认' +
         (fallback ? '（' + esc(fallback) + '）' : '') + '</span>'

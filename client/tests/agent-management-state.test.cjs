@@ -22,8 +22,10 @@ test('managed Agent defaults disclose Anthropic incompatibility while account-ba
   for (const model of ['anthropic-model', '']) {
     const html = f.context._agModelHtml({ modelPick: true, key: 'pi', model, modelEffective: 'anthropic-model' });
     assert.match(html, /OpenAI 兼容协议/);
-    assert.match(html, /Anthropic 配置可保留/);
+    assert.match(html, /Anthropic 模型需使用支持其协议的 Agent/);
   }
+  assert.match(f.context._agModelHtml({ modelPick: true, key: 'pi', model: 'openai-model' }), /role="note"/);
+  f.run("_agData={models:[{name:'openai-model',providerKind:'openai-compat'}]}");
   assert.doesNotMatch(f.context._agModelHtml({ modelPick: true, key: 'pi', model: 'openai-model' }), /ag-model-warn/);
   assert.doesNotMatch(f.context._agModelHtml({ modelPick: false, key: 'claude', model: 'anthropic-model' }), /OpenAI 兼容/);
 });

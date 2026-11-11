@@ -83,10 +83,10 @@ test('managed picker shows protocol and warns on an incompatible selected defaul
   await f.picker.ready();
   assert.equal(f.picker.value().modelName, 'anthropic-fixture');
   assert.match(f.nodes.cpModelPop.innerHTML, /Anthropic/);
-  assert.match(f.nodes.cpModelPop.innerHTML, /role="note">当前企业模型对话通道要求 OpenAI/);
+  assert.match(f.nodes.cpModelPop.innerHTML, /role="note">企业模型对话通道只支持 OpenAI/);
   f.choose('openai-fixture');
   assert.equal(f.picker.value().modelName, 'openai-fixture');
-  assert.doesNotMatch(f.nodes.cpModelPop.innerHTML, /role="note">当前企业模型/);
+  assert.match(f.nodes.cpModelPop.innerHTML, /role="note">企业模型/);
 });
 
 test('binding after preference paint reuses the pending directory and a new draft refreshes completed data', async () => {
