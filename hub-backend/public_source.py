@@ -9,7 +9,6 @@ INTERNAL_SMOKES = frozenset((
     "smoke/smoke_gerrit_nodes.py",
     "smoke/smoke_release_channels.py", "smoke/smoke_rollback.py",
     "smoke/smoke_demo_console.py",
-    "smoke/smoke_soduwork_light_flows.py",
 ))
 
 
