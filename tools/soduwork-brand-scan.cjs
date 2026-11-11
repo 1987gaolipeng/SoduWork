@@ -30,10 +30,6 @@ function scan() {
   const decoder = new TextDecoder('utf-8', { fatal: true });
   for (const file of sourceFiles(root)) {
     if (excluded.test(file)) continue;
-    // The compatibility inventory is the reviewed record of retained legacy
-    // identifiers; scanning its evidence would make the gate reject its own
-    // audit data instead of checking product source.
-    if (file === 'tools/soduwork-brand-compatibility.json') continue;
     if (!extensions.test(file) && !/(?:^|\/)(?:LICENSE|Dockerfile[^/]*|Makefile|\.gitignore|\.gitattributes|soduworkctl)$/.test(file)) continue;
     const full = path.join(root, file);
     const stat = fs.statSync(full, { throwIfNoEntry: false });
@@ -51,12 +47,12 @@ function scan() {
 
 function check() {
   const rows = scan();
-  const exceptions = JSON.parse(fs.readFileSync(path.join(root, 'tools/soduwork-brand-compatibility.json'), 'utf8')).sourceExceptions || [];
+  // Public source admits no retained legacy-brand exceptions.
   const errors = rows.flatMap((row) => {
     const result = [];
     if (row.forbiddenPath) result.push(`${row.file}: retired brand in path`);
     for (const hit of row.hits) {
-      if (!retained(row.file, hit.text, exceptions)) result.push(`${row.file}:${hit.line}: retired brand in content`);
+      result.push(`${row.file}:${hit.line}: retired brand in content`);
     }
     return result;
   });

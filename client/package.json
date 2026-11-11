@@ -8,7 +8,7 @@
     "start": "node scripts/start-client.cjs",
     "start:raw": "electron .",
     "test": "node --test --test-concurrency=1 --test-timeout=120000 tests/*.test.cjs tests/*.test.js main/agent-runtime/*.test.js main/agent-runtime/*.test.cjs main/conversation/*.test.js main/pi-session/*.test.js main/conversation/*.test.cjs main/*.test.cjs",
-    "check:branding": "node ../tools/soduwork-brand-scan.cjs && node ../tools/verify-soduwork-branding.cjs",
+    "check:branding": "node ../tools/brand-keyword-gate.cjs",
     "check:layout": "node ../tools/check-repository-layout.cjs",
     "check:source-size": "node ../tools/check-source-size.cjs",
     "check:security": "node ../tools/check-unsanitized-html.cjs",
