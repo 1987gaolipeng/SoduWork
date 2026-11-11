@@ -23,6 +23,8 @@ Your first run has four steps: install the prerequisites, extract the source, st
 
 You do not need to create a database, install Docker or Git, prepare an `.env` file, or install each project separately. First-time setup needs internet access; later starts reuse completed work.
 
+On Windows, desktop startup also prepares and verifies a private PortableGit command runtime in this instance's application copy so Agents can use Bash, Git, and common tools. No separate Git installation or WSL configuration is needed. Later starts preserve the runtime and download cache and check the tools again. If preparation fails, inspect `startup.log`, fix network access, and rerun the same launcher.
+
 ## Know when startup is complete
 
 The terminal prints these key lines (use the actual address shown):
