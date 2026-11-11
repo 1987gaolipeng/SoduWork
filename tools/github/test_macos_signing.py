@@ -15,7 +15,7 @@ BASH = str(git_bash) if git_bash.is_file() else shutil.which("bash")
 @unittest.skipUnless(BASH, "Bash is required for the macOS signing shell lifecycle")
 class MacSigningLifecycleTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="sodu-signing-test space-")
+        self.temp = tempfile.TemporaryDirectory(prefix="soduwork-signing-test space-")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.search = self.root / "search-list"
