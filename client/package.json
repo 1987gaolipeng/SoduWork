@@ -214,6 +214,7 @@
       ],
       "icon": "icon.png",
       "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
       "identity": null,
       "artifactName": "SoduWork-${version}-mac-${arch}.${ext}",
       "extraResources": [

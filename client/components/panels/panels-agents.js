@@ -576,6 +576,7 @@ function _agModelHtml(a) {
       list.map(m => '<option value="' + esc(m.name) + '"' +
         (m.name === cur ? ' selected' : '') + '>' + esc(m.label || m.name) +
         (m.provider ? ' · ' + esc(_agTx(m.provider)) : '') +
+        (m.providerKind === 'anthropic' ? ' · Anthropic' : '') +
         (m.keyFrom === 'mine' ? ' · 走我的额度' : '') + '</option>').join('') +
       /*
        * Keep unavailable selected models visible and labeled rather than silently reverting the
@@ -583,6 +584,8 @@ function _agModelHtml(a) {
        */
       (a.modelGone ? '<option value="' + esc(cur) + '" selected>' + esc(cur) + '（已不可用）</option>' : '') +
     '</select>' +
+    (list.some(m => m.providerKind === 'anthropic')
+      ? '<span class="ag-model-warn" role="note">企业模型对话通道只支持 OpenAI 兼容协议；列表中的 Anthropic 模型需使用支持其协议的 Agent。</span>' : '') +
     (a.modelGone
       ? '<span class="ag-model-warn">这个模型现在用不了，派活会退回默认' +
         (fallback ? '（' + esc(fallback) + '）' : '') + '</span>'

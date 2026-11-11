@@ -295,3 +295,35 @@ test('a missing Developer ID keychain identity stops packaging before building',
   assert.equal(f.calls.filter(row => row[0] === 'xcrun').length, 0);
   fs.rmSync(f.config.root, { recursive: true, force: true });
 });
+
+test('a public release signs and notarizes both architectures with the configured identity', t => {
+  const f = signingFixture();
+  t.after(() => fs.rmSync(f.config.root, { recursive: true, force: true }));
+  f.config.env.SODUWORK_MAC_RELEASE = '1';
+  delete f.config.env.SODUWORK_MACOS_ARCH;
+  f.config.env.SODUWORK_MACOS_X64_PYTHON = '/python/x64';
+  fs.writeFileSync(path.join(f.config.root, 'client/dist/SoduWork-9.9.9-mac-x64.dmg'), 'dmg');
+  build(f.config);
+  const packageCalls = f.calls.filter(row => isEntry(row.slice(1), 'electron-builder/cli.js'));
+  assert.equal(packageCalls.length, 2);
+  for (const call of packageCalls) {
+    assert.ok(call.includes('--config.mac.identity=' + IDENTITY));
+    assert.ok(call.includes('--config.mac.hardenedRuntime=true'));
+    assert.ok(call.includes('--config.afterSign=scripts/notarize-macos.cjs'));
+    assert.ok(!call.includes('--config.mac.identity=-'));
+  }
+  assert.equal(f.calls.filter(row => row[0] === 'xcrun' && row[1] === 'notarytool').length, 2);
+  assert.equal(f.calls.filter(row => row[0] === 'xcrun' && row[1] === 'stapler').length, 2);
+});
+
+test('a macOS release refuses missing identity or disabled notarization before tool lookup', () => {
+  for (const env of [
+    { SODUWORK_MAC_RELEASE: '1' },
+    { SODUWORK_MAC_RELEASE: '1', SODUWORK_MAC_SIGN_IDENTITY: IDENTITY, SODUWORK_MAC_SKIP_NOTARIZE: 'yes' },
+  ]) {
+    const f = fixture(); Object.assign(f.config.env, env);
+    f.config.run = () => assert.fail('invalid release configuration must fail before tool lookup');
+    assert.throws(() => build(f.config), /require SODUWORK_MAC_SIGN_IDENTITY|cannot skip notarization/);
+    assert.deepEqual(f.calls, []);
+  }
+});

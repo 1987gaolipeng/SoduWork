@@ -99,7 +99,7 @@ async function uploadForm(path, form, timeout = 120000) {
   }, timeout)
   if (res.status === 401) {
     setToken(''); setUser(''); window.dispatchEvent(new Event('soduwork-hub-unauth'))
-    throw new Error('Session expired')
+    throw new Error(tx("登录已失效，请重新登录"))
   }
   if (!res.ok) throw responseError(res, data)
   return data
@@ -180,6 +180,12 @@ export const api = {
   updateDomain: (id, b) => call('PATCH', '/admin/domains/' + id, b),
   deleteDomain: (id) => call('DELETE', '/admin/domains/' + id),
   audit: (p) => call('GET', '/admin/audit' + (p && Object.keys(p).length ? '?' + new URLSearchParams(p).toString() : '')),
+  quotaPlans: () => call('GET', '/admin/quotas'),
+  saveQuotaPlans: (body) => call('PUT', '/admin/quotas', body),
+  quotaMembers: (params = {}) => call('GET', '/admin/quotas/members' +
+    (Object.keys(params).length ? '?' + new URLSearchParams(params).toString() : '')),
+  quotaMember: (id) => call('GET', '/admin/quotas/members/' + encodeURIComponent(id)),
+  assignQuota: (id, body) => call('PUT', '/admin/quotas/members/' + encodeURIComponent(id), body),
   // Organization memory is restricted to administrators with org.manage.
   // Superadministrators may pass orgId to inspect another organization's memory.
   orgMemories: ({ archived = false, offset = 0, orgId = '' } = {}) => call('GET', '/admin/org-memory?' + new URLSearchParams({ archived: String(Boolean(archived)), offset: String(offset), ...(orgId ? { orgId } : {}) }).toString()),
@@ -232,6 +238,7 @@ export const api = {
   requestClientUpdate: (id, b = {}) => call('POST', '/admin/clients/' + encodeURIComponent(id) + '/updates', b),
   // List, stage, enable, and disable signed client releases; the server revalidates signatures on enablement.
   clientReleases: () => call('GET', '/admin/client-releases'),
+  clientReleaseNotes: () => call('GET', '/admin/client-release-notes'),
   downloadClientRelease: (id, filename) => download('/admin/client-releases/' + encodeURIComponent(id) + '/download', filename, 900000),
   clientUpdateAttempts: (filter = {}) => {
     const q = new URLSearchParams()
