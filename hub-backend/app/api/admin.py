@@ -1197,9 +1197,14 @@ async def put_model_provider(
     """
     from ..models import ModelProvider
     from ..services import model_config_guard
+    new_key = str(body.get("apiKey") or "").strip()
+    if len(new_key) > 400:
+        raise HTTPException(status_code=400, detail="模型服务密钥最多 400 个字符，原密钥未更改")
     p = await model_config_guard.catalog(session, ModelProvider, pid, body.get("expectedRevision"))
     if p is None:
-        p = ModelProvider(id=pid[:48], builtin=False)
+        if len(pid) > 48:
+            raise HTTPException(status_code=400, detail="模型服务标识最多 48 个字符，请缩短后再保存")
+        p = ModelProvider(id=pid, builtin=False)
         session.add(p)
     if "name" in body:
         p.name = str(body.get("name") or "")[:64]
@@ -1214,9 +1219,8 @@ async def put_model_provider(
         p.enabled = bool(body.get("enabled"))
     if "note" in body:
         p.note = str(body.get("note") or "")[:300]
-    new_key = str(body.get("apiKey") or "").strip()
     if new_key:
-        p.api_key = new_key[:400]
+        p.api_key = new_key
     await session.commit()
     from ..services.client_domain_events import models_changed
     await models_changed(session)
@@ -1267,6 +1271,10 @@ async def put_model_def(
         raise HTTPException(status_code=400, detail="要选一个模型服务、并填模型标识")
     mid = pid + ":" + name
     m = await model_config_guard.catalog(session, ModelDef, mid, body.get("expectedRevision"))
+    # Existing SQLite catalogs may contain longer identifiers from older versions.
+    # Keep those exact rows editable; never truncate or rename their identities.
+    if m is None and len(mid) > 64:
+        raise HTTPException(status_code=400, detail="模型服务标识加模型标识共超过 64 个字符，请缩短模型标识")
     if await session.get(ModelProvider, pid, populate_existing=True) is None:
         raise HTTPException(status_code=400, detail="这个模型服务不存在")
     if m is None:
