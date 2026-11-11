@@ -1,8 +1,10 @@
 # 参与 SoduWork 开发
 
-**简体中文** · [English](../CONTRIBUTING.md) · [文档导航](README.md)
+**简体中文** · [English](../CONTRIBUTING.md) · [文档导航](README.zh-CN.md)
 
 感谢你参与 SoduWork。问题反馈、文档、翻译、测试和代码都欢迎。参与本项目即表示同意遵守[行为准则](../CODE_OF_CONDUCT.md)。
+
+使用编程 Agent 的贡献者可以先阅读公开的 [AGENTS.md](../AGENTS.md)。
 
 ## 开始之前
 
@@ -49,4 +51,4 @@ git rebase --signoff main      # 当前分支上的所有提交
 
 ## 许可
 
-MDiRi 的项目源码适用 [MIT 许可](../LICENSE)，你提交的贡献按同一许可发布。保留的第三方代码、依赖和素材适用各自的许可，并保留原始声明，见 [NOTICE.md](../NOTICE.md)。引入技能、模型、文档或素材之前，先确认来源和分发条件；项目许可证不能覆盖第三方内容。
+MDiRi 的项目源码适用 [MIT 许可](../LICENSE)，你提交的贡献按同一许可发布。保留的第三方代码、依赖和素材适用各自的许可，并保留原始声明，见 [NOTICE.zh-CN.md](../NOTICE.zh-CN.md)。引入技能、模型、文档或素材之前，先确认来源和分发条件；项目许可证不能覆盖第三方内容。

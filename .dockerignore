@@ -29,4 +29,4 @@ hub-frontend/tests
 hub-backend/tests
 hub-backend/plugin_smoke
 hub-backend/test_*.py
-hub-backend/smoke_*.py
+hub-backend/smoke/

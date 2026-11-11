@@ -4,11 +4,11 @@ import json
 from pathlib import Path
 
 INTERNAL_SMOKES = frozenset((
-    "smoke_change_hygiene.py", "smoke_smart_route.py", "smoke_gerrit_client.py",
-    "smoke_gerrit_flow.py", "smoke_gerrit_merge.py", "smoke_gerrit_attested_merge.py",
-    "smoke_gerrit_nodes.py",
-    "smoke_release_channels.py", "smoke_rollback.py",
-    "smoke_demo_console.py",
+    "smoke/smoke_change_hygiene.py", "smoke/smoke_smart_route.py", "smoke/smoke_gerrit_client.py",
+    "smoke/smoke_gerrit_flow.py", "smoke/smoke_gerrit_merge.py", "smoke/smoke_gerrit_attested_merge.py",
+    "smoke/smoke_gerrit_nodes.py",
+    "smoke/smoke_release_channels.py", "smoke/smoke_rollback.py",
+    "smoke/smoke_demo_console.py",
 ))
 
 

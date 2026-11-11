@@ -1,31 +1,43 @@
-# SoduWork 管理端
+# SoduWork management UI
 
-**简体中文** · [English](README.en.md) · [开发指南](../docs/development.md#管理页面)
+[简体中文](README.zh-CN.md) · **English** · [Developer guide](../docs/development.en.md#management-ui)
 
-React + Vite 应用，对接 `../hub-backend` 的管理 API。当前入口为 `src/main.jsx`，路由与页面在 `src/` 维护；设计原型不参与应用运行。
+Command examples use `sh start.sh` on macOS/Linux. On Windows, use `.\start.cmd` in PowerShell or `start.cmd` in Command Prompt with the same arguments. Standalone Python tools use `python3`; use `py` on Windows, or `python` inside an activated virtual environment.
 
-## 职责
+React + Vite application for Hub administration. Entry point: `src/main.jsx`; routes and screens live under `src/`.
 
-管理组织与账号、客户端与执行网络、模型与能力、任务与审批、插件和发布配置。权限由 Hub 校验，前端隐藏按钮不能替代接口权限检查。
+Manage organizations, accounts, clients, execution networks, models, capabilities, tasks, approvals, plugins, and release configuration. Hub enforces authorization; hiding a button is not an access check.
 
-## 开发运行
+## Develop
 
-先起后端（另一个终端）：
-```bash
-cd ../hub-backend
-.venv/Scripts/python -m uvicorn app.main:app --port 9080
+The simplest setup is to run `sh start.sh` at the repository root in one terminal, then start Vite in another.
+
+PowerShell:
+
+```powershell
+cd hub-frontend
+npm ci
+$env:SODUWORK_DEV_HUB = 'http://127.0.0.1:18989'
+npm run dev
 ```
-再起前端：
-```bash
-npm ci             # 按锁文件安装
-npm run dev        # http://localhost:5173
-```
-Vite 将 `/api`、`/healthz` 和 `/readyz` 代理到 `127.0.0.1:9080`（见 `vite.config.js`）。如果配合根目录 `python start.py` 使用，先通过 `SODUWORK_DEV_HUB` 将代理指向 `http://127.0.0.1:18989`，具体命令见[开发指南](../docs/development.md#管理页面)。登录使用 Hub 的用户账号；首次初始化管理员由 Hub 的 `ADMIN_USER` / `ADMIN_PASS` 配置产生，后续通过用户管理维护，不是前端写死账号。
 
-## 验证与构建
-```bash
+macOS / Linux:
+
+```sh
+cd hub-frontend
+npm ci
+SODUWORK_DEV_HUB=http://127.0.0.1:18989 npm run dev
+```
+
+Open the Vite address, normally **http://localhost:5173**, and sign in with the account created by the root launcher.
+
+For a direct Uvicorn backend on port 9080, omit the override. Vite proxies `/api`, `/healthz`, and `/readyz`. Direct backend bootstrap uses its private `ADMIN_USER` / `ADMIN_PASS` settings; accounts are not hardcoded in the frontend.
+
+## Verify
+
+```sh
 node --test tests/*.test.mjs
-npm run build      # dist/ 为生成物，由 Hub 或部署环境托管
+npm run build
 ```
 
-浏览器场景见 `tests/` 中的独立运行脚本；真实环境测试与隔离页面夹具应分别记录。`dist/`、依赖和本地配置不提交到 Git。
+The build generates `dist/`, served by Hub or the deployment environment. Do not commit generated output, dependencies, or private configuration. Browser checks have separate scripts under `tests/`; distinguish fixtures from actual service or provider acceptance.

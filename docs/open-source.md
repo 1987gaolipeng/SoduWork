@@ -1,8 +1,8 @@
 # 源码使用与分发
 
-**简体中文** · [English](open-source.en.md) · [文档导航](README.md)
+**简体中文** · [English](open-source.en.md) · [文档导航](README.zh-CN.md)
 
-本地使用见[启动指南](getting-started.md)，开发见[开发指南](development.md)，团队部署见[自托管指南](../ops/self-host/README.md)。
+本地使用见[启动指南](getting-started.md)，开发见[开发指南](development.md)，团队部署见[自托管指南](../ops/self-host/README.zh-CN.md)。
 
 ## 配置自己的服务
 
@@ -47,4 +47,4 @@ python tools/export_source.py --output ../soduwork-source-v1.zip
 
 根目录 `README.md` 是英文入口，顶部可切换到中文 `README.zh-CN.md`。导航采用相对链接，Fork 或更换仓库名后无需改写地址。补充语言遵循[翻译约定](development.md#文档与翻译)。
 
-项目许可见 [LICENSE](../LICENSE)，第三方原始许可证与署名见 [NOTICE.md](../NOTICE.md) 和 `third-party/`。安装包、容器镜像和其他二进制依赖需要分别完成许可与运行验证。
+项目许可见 [LICENSE](../LICENSE)，第三方原始许可证与署名见 [NOTICE.zh-CN.md](../NOTICE.zh-CN.md) 和 `third-party/`。安装包、容器镜像和其他二进制依赖需要分别完成许可与运行验证。

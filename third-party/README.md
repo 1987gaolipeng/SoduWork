@@ -1,38 +1,40 @@
-# 第三方分发材料
+# Third-party distribution materials
 
-**简体中文** · [English](README.en.md) · [依赖声明](../NOTICE.md)
+[简体中文](README.zh-CN.md) · **English** · [Notices](../NOTICE.md)
 
-本目录保留经过核验的许可原文和来源证据。项目 MIT 许可证不覆盖第三方内容。`manifest.json` 摘要按 UTF-8/LF 计算；更新时核对版权人、条款、固定版本和实际发行物，不能仅改摘要来通过检查。
+See [MIT review boundaries](mit-review.en.md) for file-level provenance checks,
+license scope and local validation builds. Original third-party copyrights and
+licenses remain unchanged.
 
-逐文件来源核验、MIT 适用范围及本地验证构建方式见 [MIT 审查边界](mit-review.md)。第三方原始版权和许可证保持不变。
+This directory retains verified license texts and source evidence. Project MIT terms do not override third-party terms. Hashes in `manifest.json` use UTF-8/LF. Review the owner, terms, exact version, and actual artifact when updating evidence; changing a hash alone is insufficient.
 
-## 构建接入
+## Build integration
 
-- 客户端 beforePack 检查许可快照和锁定版本，收集实际复制的 Pi/SSH 依赖声明；Electron LICENSE 和 Chromium notices 由 electron-builder 保留。
-- 许可位于 README 的组件保留全文；缺失原文需要经过审查的固定版本证据，未知缺失项阻断构建。
-- Runner 保留 Python 依赖元数据和 wheel 内许可；Hub 保留本目录与项目 LICENSE。首版技能仅包含 `tools/distribution/PUBLIC-SOURCE.json` 声明的本项目自有指南，已移除第三方技能套件。
-- 这些检查不是完整 SBOM、漏洞扫描或法律许可认证。
+- Desktop beforePack checks license snapshots and dependency lock versions, collecting original notices for copied Pi/SSH packages. Electron's LICENSE and Chromium notices remain supplied by electron-builder.
+- When a package places its license in README, retain the complete text. Missing original material needs reviewed fixed-version evidence; an unknown omission fails the build.
+- Runner retains dependency metadata and wheel-provided licenses. Hub retains this directory and the project license. The first release bundles only project-owned skills declared in `tools/distribution/PUBLIC-SOURCE.json`; upstream skill bundles were removed.
+- These checks do not constitute a complete SBOM, vulnerability scan, or legal certification.
 
-## Hub 镜像中的 Python 依赖
+## Python dependencies in the Hub image
 
-Hub 镜像构建时按 `hub-backend/requirements.txt` 用 pip 安装 Python 依赖。各依赖的原始许可文件随安装保留在镜像的 Python `site-packages` 中对应的 `*.dist-info` 目录里。
+The Hub image installs its Python dependencies with pip from `hub-backend/requirements.txt`. Each dependency's original license files stay in its `*.dist-info` directory under the image's Python `site-packages`.
 
-**Pillow**：Hub 用它校验和处理图片，包括用户头像（校验后裁成 256×256）、AI 生成图片的格式校验（PNG、JPEG、WEBP）和文件库缩略图。
+**Pillow**: the Hub uses it to validate and process images, including user avatars (validated and cropped to 256×256), format checks for AI-generated images (PNG, JPEG, WEBP), and file library thumbnails.
 
-- 项目：https://python-pillow.github.io/
-- 源码：https://github.com/python-pillow/Pillow
-- 版本：12.x（`hub-backend/requirements.txt` 限定 `>=12.3,<13`，以镜像实际安装版本为准）
-- 许可：MIT-CMU。版权归 Secret Labs AB、Fredrik Lundh、Jeffrey A. Clark 及贡献者所有。
+- Project: https://python-pillow.github.io/
+- Source: https://github.com/python-pillow/Pillow
+- Version: 12.x (`hub-backend/requirements.txt` requires `>=12.3,<13`; the installed version in the image is authoritative)
+- License: MIT-CMU. Copyright Secret Labs AB, Fredrik Lundh, Jeffrey A. Clark and contributors.
 
-MIT-CMU 许可要求保留版权和许可声明，并且未经书面许可，不得用作者的名字为相关分发做宣传。SoduWork 不修改 Pillow，许可原文保留在镜像中 Pillow 的 `dist-info` 目录。Pillow 的 wheel 还捆绑了 libjpeg、libpng、zlib、libwebp、FreeType 等图像库，这些库的许可同样收录在该目录的许可文件中。
+The MIT-CMU license requires the copyright and permission notices to be retained, and the authors' names may not be used in advertising for the distribution without prior written permission. SoduWork does not modify Pillow; the original license stays in Pillow's `dist-info` directory in the image. Pillow wheels also bundle image libraries such as libjpeg, libpng, zlib, libwebp and FreeType, whose licenses are included in the same directory's license file.
 
-## 二进制发行尚需完成
+## Outstanding binary-release work
 
-1. **proxy-agent-negotiate 1.1.0**：固定版本的 npm 包和上游标签仅在元数据中声明 MIT，未附完整原始许可。二进制分发前须取得上游原始材料或验证替代实现；证据保留在 `licenses/proxy-agent-negotiate-upstream-evidence.txt`。Pi 1.4.0 已移除旧版原生剪贴板依赖。
-2. **Windows 外壳对应源码**：[获取清单](windows-shell-corresponding-source.md)已记录版本和核验步骤；具体发行物仍须实际归档 PortableGit/MSYS2/Bash/7-Zip 对应源码、补丁和构建材料，并核对摘要。清单或上游链接不代表某个安装包已完成该项。
-3. **各平台最终清单**：`native-artifacts.json` 是源树静态盘点；Windows、macOS、Linux 最终安装包均须由各自构建生成逐件记录和许可材料。
-4. **图标和商标**：分开记录图形来源、分发许可与商标使用边界；兼容服务名称不表示官方认证。
+1. **proxy-agent-negotiate 1.1.0:** the exact npm release and tagged source declare MIT but omit the original full license notice. Obtain the original material or verify a replacement before binary distribution. Evidence is retained in `licenses/proxy-agent-negotiate-upstream-evidence.txt`. Pi 1.4.0 no longer includes the old native clipboard package.
+2. **Windows shell corresponding source:** the version-specific acquisition checklist is documented in [windows-shell-corresponding-source.md](windows-shell-corresponding-source.md), currently in Chinese. Physically archive and verify source, patches, and build material for the exact PortableGit/MSYS2/Bash/7-Zip artifacts distributed. A checklist or upstream URL is not evidence that a particular release has completed this work.
+3. **Platform inventories:** `native-artifacts.json` is a static source-tree inventory. Final Windows, macOS, and Linux packages require per-artifact records and notices from their own builds.
+4. **Icons and trademarks:** record asset provenance and distribution terms separately from product names and trademark use. Compatibility names do not imply endorsement.
 
-当前单机自托管配方不部署 Redis 或 Valkey。下游新增服务组件需自行登记依赖和审查许可。
+The current single-host self-hosting recipe does not deploy Redis or Valkey. Any additional server components introduced by a downstream deployment need their own inventory and license review.
 
-`public-release.json` 区分已取得的源码证据与尚未完成的二进制发行材料。安装包和容器镜像须针对实际发行物完成上述各项后再发布。
+`public-release.json` distinguishes obtained source evidence from unresolved binary-release work. Installers and container images are published only after the items above are resolved for the exact artifacts.

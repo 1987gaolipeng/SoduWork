@@ -1,6 +1,6 @@
 # SoduWork 企业能力包编写指南（schemaVersion 1）
 
-**简体中文** · [English](plugin-authoring.en.md) · [文档导航](README.md)
+**简体中文** · [English](plugin-authoring.en.md) · [文档导航](README.zh-CN.md)
 
 应用作者可从“应用 → 添加 → 开发应用”使用内置开发技能，它继承插件开发助手的基础规范，并提供独立窗口、公共 H5 SDK、页面与对话/刷新联动及验证流程。应用草稿根级使用 `template: "app"`，声明真实 HTTP(S) 的 `ui.contributions` / `workspace.navigation` 页面，`source.openMode` 为 `workspace`；本地 HTML 资源不会由安装器自动启动。未声明窗口大小时默认 1280×800，仍可最大化/全屏。安装、版本和 `.soduwork-plugin` 导出继续使用本指南的同一链路；“安装并打开”进入应用独立窗口。详见[应用开发技能](../skills/app-developer/SKILL.md)。
 
@@ -580,9 +580,9 @@ my-team-flow.soduwork-plugin
 
 ## H5 应用对话与刷新
 
-应用可引入公共 `client/sdk/soduwork-app.js`，通过 `soduWorkApp.chat.send({text,requestId})` 向自己的原生侧栏发送业务任务。跨域直接 iframe 用 postMessage，顶层显式授权精确来源，子页指定 parentOrigin；使用说明、发送回执与刷新事件见 [H5 SDK](../client/sdk/README.md)。无需增加面向用户的技能选择器，页面业务动作携带上下文，插件按自然语言匹配技能。`conversation.send` 与 `composer.control` 必须由插件的 source.bridge.capabilities 明确声明。
+应用可引入公共 `client/sdk/soduwork-app.js`，通过 `soduWorkApp.chat.send({text,requestId})` 向自己的原生侧栏发送业务任务。跨域直接 iframe 用 postMessage，顶层显式授权精确来源，子页指定 parentOrigin；使用说明、发送回执与刷新事件见 [H5 SDK](../client/sdk/README.zh-CN.md)。无需增加面向用户的技能选择器，页面业务动作携带上下文，插件按自然语言匹配技能。`conversation.send` 与 `composer.control` 必须由插件的 source.bridge.capabilities 明确声明。
 
 
 ### 应用专属设置与 ukey
 
-本机应用在 `source.bridge.capabilities` 声明 `settings.read` / `settings.write` 后，可通过公共 SDK `soduWorkApp.settings.get/update` 同步任意 JSON 业务参数。与应用设置面板共用按账号/应用/来源隔离的加密存储；显式读取自己应用的 ukey 可恢复业务登录，退出页面保留壳内凭据。原生顶层自有 MCP 使用 `credentialKey:'ukey'` 引用设置，技能继续走每轮受控 MCP，不接触密钥。跨域 iframe、凭据读写、CAS 与换号旧授权失效的完整合同见 [H5 SDK](../client/sdk/README.md)。凭据不属于草稿 setup，不随版本/导出包或提示词分发；没有两套用户的 SSO 同步。
+本机应用在 `source.bridge.capabilities` 声明 `settings.read` / `settings.write` 后，可通过公共 SDK `soduWorkApp.settings.get/update` 同步任意 JSON 业务参数。与应用设置面板共用按账号/应用/来源隔离的加密存储；显式读取自己应用的 ukey 可恢复业务登录，退出页面保留壳内凭据。原生顶层自有 MCP 使用 `credentialKey:'ukey'` 引用设置，技能继续走每轮受控 MCP，不接触密钥。跨域 iframe、凭据读写、CAS 与换号旧授权失效的完整合同见 [H5 SDK](../client/sdk/README.zh-CN.md)。凭据不属于草稿 setup，不随版本/导出包或提示词分发；没有两套用户的 SSO 同步。

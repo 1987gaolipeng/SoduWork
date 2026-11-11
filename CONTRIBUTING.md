@@ -1,8 +1,10 @@
 # Contributing to SoduWork
 
-[简体中文](docs/contributing.zh-CN.md) · **English** · [Documentation](docs/index.en.md)
+[简体中文](docs/contributing.zh-CN.md) · **English** · [Documentation](docs/README.md)
 
 Thanks for helping with SoduWork. Bug reports, docs, translations, tests and code are all welcome. By taking part, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+Contributors using coding agents can start with the public [AGENTS.md](AGENTS.md).
 
 ## Before you start
 
@@ -49,4 +51,4 @@ The contribution policy may change; any change applies only to contributions mad
 
 ## License
 
-MDiRi project source uses the [MIT License](LICENSE), and your contributions are released under the same license. Retained third-party code, dependencies and assets keep their own licenses and original notices; see [third-party notices](docs/third-party-notices.en.md). Verify provenance and distribution rights before adding a skill, model, document, or asset; the project license does not override third-party terms.
+MDiRi project source uses the [MIT License](LICENSE), and your contributions are released under the same license. Retained third-party code, dependencies and assets keep their own licenses and original notices; see [third-party notices](NOTICE.md). Verify provenance and distribution rights before adding a skill, model, document, or asset; the project license does not override third-party terms.

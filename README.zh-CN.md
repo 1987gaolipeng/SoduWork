@@ -14,9 +14,16 @@
 
 支持 Pi · OpenCode · DeepSeek Harness · Qwen Code · Kimi Code · Codex Harness · Codex · Claude Code · Google Harness²
 
-```bash
-git clone https://github.com/mdiri-ai/SoduWork && cd SoduWork && python start.py --desktop
+```sh
+git clone https://github.com/mdiri-ai/SoduWork
+cd SoduWork
 ```
+
+| 系统 | 启动命令 |
+| --- | --- |
+| macOS / Linux | `sh start.sh --desktop` |
+| Windows PowerShell | `.\start.cmd --desktop` |
+| Windows 命令提示符 | `start.cmd --desktop` |
 
 [官网](https://soduwork.ai) | [在线体验](https://soduwork.ai) | [文档](https://dev.soduwork.ai/zh-CN/) | [Releases](https://github.com/mdiri-ai/SoduWork/releases) | [Discord](https://discord.gg/AXYNrAYHy)
 
@@ -83,10 +90,7 @@ git clone https://github.com/mdiri-ai/SoduWork && cd SoduWork && python start.py
 
 准备好 Python 3.12+、Node.js 22.19+ 和 Git，两条命令跑起来：
 
-```bash
-git clone https://github.com/mdiri-ai/SoduWork && cd SoduWork
-python start.py --desktop
-```
+在克隆后的目录里，macOS/Linux 运行 `sh start.sh --desktop`，Windows PowerShell 运行 `.\start.cmd --desktop`，命令提示符运行 `start.cmd --desktop`。
 
 首次运行会自动安装依赖，在本机同时启动 Hub、管理端和桌面客户端。按提示为 `admin` 账号设置密码（12–128 位）。然后在管理端 **模型目录** 里接入模型服务，回到客户端新建对话，试一个小任务。Pi 已内置，开箱可用。
 
@@ -118,8 +122,8 @@ python start.py --desktop
 装好并启动 Docker 后，在仓库根目录运行：
 
 ```bash
-python ops/self-host/deploy.py up
-python ops/self-host/deploy.py credentials   # 查看初始管理员密码
+python3 ops/self-host/deploy.py up
+python3 ops/self-host/deploy.py credentials   # 查看初始管理员密码
 ```
 
 一台服务器即可启动 Hub、管理端和 PostgreSQL；前面加一层 HTTPS 反向代理，就能开放给团队使用。详见[用 Docker 自部署](https://dev.soduwork.ai/zh-CN/docs/get-started/docker)和[团队部署](https://dev.soduwork.ai/zh-CN/docs/deploy)。
@@ -303,7 +307,11 @@ flowchart LR
 - **模型请求**由执行机直接发给你配置的模型服务；每次运行使用短期凭据，密钥不会以明文写进 Harness 的配置文件。
 - **调用外部服务时**，提示词和相关文件会发给你配置的模型服务或连接器；使用自建模型时，推理也可以留在自己的环境中。
 
-<!-- 【待研发确认】客户端是否有遥测、收集哪些内容、如何关闭 -->
+**遥测与更新。** 此公开源码没有单独向 MDiRi 上传分析或崩溃报告的功能。客户端默认连接 `http://127.0.0.1:18989`，运行所需请求发送到登录页“连接”中选择的 Hub。选择公开演示服务时，这些请求会发送给该服务的运营方；选择自己的 Hub 时，这些流量由自己的部署处理。
+
+- 所选 Hub 接收设备和账号认证，以及你所用功能需要的数据。用量统计包含会话 ID 和标题、Agent／模型／供应商标识、Token 与费用计数以及时间。更新尝试会报告版本、进度、状态和错误。这些属于运行记录，并非可选的分析订阅。
+- 安装版客户端会在启动时及之后每六小时向所选 Hub 检查更新，请求包含当前版本、平台、CPU 架构和更新通道，并使用设备会话认证。从源码启动的客户端跳过安装包更新检查。目前没有单独关闭 Hub 用量统计或安装版自动更新轮询的设置；如需避免向演示服务发送这些流量，请连接自己的 Hub。版本说明也从所选 Hub 读取。
+- Hub 的请求和数据库性能统计保留在 Hub 进程内，不会自动上传到 MDiRi。依赖和可选 Agent 下载会访问配置的包仓库或镜像，模型与连接器会访问你配置的服务；这些服务各自适用其数据政策。
 
 ## 常见问题
 

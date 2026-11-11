@@ -14,9 +14,16 @@
 
 Works with Pi · OpenCode · DeepSeek Harness · Qwen Code · Kimi Code · Codex Harness · Codex · Claude Code · Google Harness²
 
-```bash
-git clone https://github.com/mdiri-ai/SoduWork && cd SoduWork && python start.py --desktop
+```sh
+git clone https://github.com/mdiri-ai/SoduWork
+cd SoduWork
 ```
+
+| Platform | Start command |
+| --- | --- |
+| macOS / Linux | `sh start.sh --desktop` |
+| Windows PowerShell | `.\start.cmd --desktop` |
+| Windows Command Prompt | `start.cmd --desktop` |
 
 [Website](https://soduwork.ai) | [Live demo](https://soduwork.ai) | [Docs](https://dev.soduwork.ai) | [Releases](https://github.com/mdiri-ai/SoduWork/releases) | [Discord](https://discord.gg/AXYNrAYHy)
 
@@ -83,10 +90,7 @@ git clone https://github.com/mdiri-ai/SoduWork && cd SoduWork && python start.py
 
 You need Python 3.12+, Node.js 22.19+ and Git.
 
-```bash
-git clone https://github.com/mdiri-ai/SoduWork && cd SoduWork
-python start.py --desktop
-```
+From the cloned repository, run `sh start.sh --desktop` on macOS/Linux, `.\start.cmd --desktop` in Windows PowerShell, or `start.cmd --desktop` in Command Prompt.
 
 The first run installs dependencies, then starts the Hub, the admin console and the desktop client on this computer. Set a password for the `admin` account (12–128 characters) when asked. Then add a model provider under **Model catalog** in the admin console, start a chat in the client and try a small task. Pi is built in.
 
@@ -118,8 +122,8 @@ Download from [Releases](https://github.com/mdiri-ai/SoduWork/releases). On firs
 With Docker installed and running, from the repository root:
 
 ```bash
-python ops/self-host/deploy.py up
-python ops/self-host/deploy.py credentials   # show the initial admin password
+python3 ops/self-host/deploy.py up
+python3 ops/self-host/deploy.py credentials   # show the initial admin password
 ```
 
 This starts the Hub, the admin console and PostgreSQL on one server. Put an HTTPS reverse proxy in front of it to open it to your team. See [Deploy with Docker](https://dev.soduwork.ai/docs/get-started/docker) and [Deploy for a team](https://dev.soduwork.ai/docs/deploy).
@@ -303,7 +307,11 @@ The runner connects to the Hub over a WebSocket. Every dispatch has an ID, so th
 - Model requests go from the runner to the model provider you configure. Each run gets a short-lived credential; keys are not written to the harness's config files in plain text.
 - Prompts and files sent to a model provider or connector you configure are visible to that service. With self-hosted models, inference can stay in your environment.
 
-<!-- [to confirm with engineering] whether the client sends telemetry, what it collects and how to turn it off -->
+**Telemetry and updates.** This public source does not include a separate analytics or crash-reporting upload to MDiRi. The client defaults to `http://127.0.0.1:18989`; its operational requests go to the Hub selected under **Connection** on the sign-in screen. Selecting the public demo sends those requests to its operator. Selecting your own Hub keeps this traffic with your deployment.
+
+- The selected Hub receives device/account authentication and the data required by the features you use. Usage accounting includes the conversation ID and title, Agent/model/provider identifiers, token and cost counters, and timestamps. Update attempts report version, progress, status and errors. These are operational records, not an optional analytics subscription.
+- Installed clients check the selected Hub for updates at startup and periodically (every six hours). Checks include the current version, platform, CPU architecture and update channel, authenticated with the device session. Source-launched clients skip installer update checks. There is currently no separate setting to disable Hub accounting or installed-client update polling; use your own Hub to avoid sending this traffic to the demo service. Release-note requests also use the selected Hub.
+- Hub request/database performance statistics are maintained within the Hub process; they are not automatically exported to MDiRi. Dependencies and optional Agent downloads contact their configured package registries or mirrors, and models/connectors contact the services you configure. Those services have their own data policies.
 
 ## FAQ
 

@@ -7,13 +7,14 @@ const output = process.argv[2];
 if (!output || !path.isAbsolute(output)) throw Error('Absolute evidence directory required');
 fs.mkdirSync(output, { recursive: true });
 app.setPath('userData', path.join(output, 'profile'));
+app.disableHardwareAcceleration();
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const report = { ok: false, boundary: 'real Electron UI with explicit fixture APIs', checks: [], layouts: [], themes: [] };
 let win;
 app.whenReady().then(async () => {
   try {
     win = new BrowserWindow({ width: 1440, height: 1000, show: false,
-      webPreferences: { offscreen: true, contextIsolation: true, sandbox: true } });
+      webPreferences: { offscreen: true, contextIsolation: true, sandbox: true, backgroundThrottling: false } });
     const js = source => win.webContents.executeJavaScript(source, true).catch(error => { report.failedExpression = source; throw error; });
     const click = async selector => {
       let point;
@@ -54,14 +55,14 @@ app.whenReady().then(async () => {
     await js(`localStorage.clear()`);
     await new Promise(resolve => { win.webContents.once('did-finish-load', resolve); win.reload(); });
     await wait(150);
-    const requirementSurface = await js(`(()=>{const rgb=n=>getComputedStyle(document.querySelector(n)).backgroundColor;const board=document.querySelector('#historyBoard');const rect=board.getBoundingClientRect();return{head:rgb('.hb-head'),controls:rgb('.rq-controls'),top:rect.top,right:innerWidth-rect.right,bottom:innerHeight-rect.bottom}})()`);
-    assert.equal(requirementSurface.head, 'rgb(249, 249, 249)', 'requirement menu surface uses #F9F9F9');
-    assert.equal(requirementSurface.controls, 'rgb(249, 249, 249)', 'requirement controls surface uses #F9F9F9');
+    const requirementSurface = await js(`(()=>{const rgb=n=>getComputedStyle(document.querySelector(n)).backgroundColor;const board=document.querySelector('#historyBoard');const rect=board.getBoundingClientRect();const probe=document.createElement('span');probe.style.backgroundColor='var(--bg-0)';board.append(probe);const paper=getComputedStyle(probe).backgroundColor;probe.remove();return{paper,head:rgb('.hb-head'),controls:rgb('.rq-controls'),top:rect.top,right:innerWidth-rect.right,bottom:innerHeight-rect.bottom}})()`);
+    assert.equal(requirementSurface.head, requirementSurface.paper, 'requirement menu follows the theme paper surface');
+    assert.equal(requirementSurface.controls, requirementSurface.paper, 'requirement controls follow the theme paper surface');
     assert.equal(requirementSurface.top, 2);
     assert.equal(requirementSurface.right, 6);
     assert.equal(requirementSurface.bottom, 15);
     report.requirementSurface = requirementSurface;
-    report.checks.push('requirement menu surfaces use #F9F9F9 and the board uses the shared workspace frame');
+    report.checks.push('requirement menu surfaces use the theme paper color and the board uses the shared workspace frame');
     const example = {title:'完善产品上线前的客户引导与团队协作流程',note:'梳理新成员从加入项目到提交首份交付的完整流程。\n重点检查权限说明、需求分工与验收反馈，减少来回确认。',acceptanceCriteria:['新成员可以独立找到与自己有关的需求','可以从需求直接进入同一项目的工作会话','交付材料有清晰的来源和验收记录']};
     await js(`Object.assign(tasks.find(t=>t.id==='intake-0'),${JSON.stringify(example)});RequirementsBoard.render(true)`);
     for (const width of [1440, 1366, 960, 600, 390]) {
@@ -77,10 +78,10 @@ app.whenReady().then(async () => {
     win.setContentSize(1440, 1000); await wait(100);
     await click('[data-rq-open="intake-0"]');
     assert.equal(await js(`!!document.querySelector('#rqEditForm')`), false, 'default detail reads as a document');
-    const detailIdentity = await js(`(()=>{const title=document.querySelector('#rqDetailTitle'),meta=document.querySelector('[data-rq-header-meta]'),footer=document.querySelector('.rq-detail-footer'),primary=footer?.querySelector('[data-rq-assign],[data-rq-approval],[data-rq-chat]');return{title:title?.textContent.trim(),meta:meta?.textContent.trim(),metaVisible:!!meta&&!meta.hidden,footerVisible:!!footer&&!footer.hidden,primaryVisible:!!primary&&!!primary.getClientRects().length}})()`);
+    const detailIdentity = await js(`(()=>{const title=document.querySelector('#rqDetailTitle'),meta=document.querySelector('[data-rq-header-meta]'),footer=document.querySelector('.rq-detail-footer'),primary=footer?.querySelector('[data-rq-ready]');return{title:title?.textContent.trim(),meta:meta?.textContent.trim(),metaVisible:!!meta&&!meta.hidden,footerVisible:!!footer&&!footer.hidden,primaryVisible:!!primary&&!!primary.getClientRects().length}})()`);
     assert.equal(detailIdentity.title, example.title, 'detail header identifies the opened requirement');
     assert.ok(detailIdentity.metaVisible && detailIdentity.meta.includes('待梳理'), 'detail header exposes current stage');
-    assert.ok(detailIdentity.footerVisible && detailIdentity.primaryVisible, 'detail keeps a primary action in the footer');
+    assert.ok(detailIdentity.footerVisible && detailIdentity.primaryVisible, 'intake detail keeps Move to ready in the footer');
     const detailLayout = await layout('detail-wide');
     assert.ok(detailLayout.footer && detailLayout.drawer && detailLayout.footer.bottom <= detailLayout.drawer.bottom + 1, 'detail footer stays inside drawer');
     await capture('detail-wide');

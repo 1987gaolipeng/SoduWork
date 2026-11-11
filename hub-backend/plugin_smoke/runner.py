@@ -89,12 +89,12 @@ def run_case(name):
 def run_groups(groups, *, execute=None, entry=None):
     """Every case gets a clean interpreter, database, data root and patch lifetime."""
     execute = execute or subprocess.run
-    entry = entry or Path(__file__).resolve().parents[1] / "smoke_plugins.py"
+    command = [sys.executable, str(entry)] if entry else [sys.executable, "-m", "smoke.smoke_plugins"]
     failed = []
     for group in groups:
         print("Plugin smoke group: " + group, flush=True)
         for case in GROUPS[group]:
-            result = execute([sys.executable, str(entry), "--case", case], check=False)
+            result = execute([*command, "--case", case], check=False)
             if result.returncode:
                 failed.append(case)
     if failed:
