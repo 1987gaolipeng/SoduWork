@@ -118,7 +118,8 @@ jobs:
           else
             hub-backend/.venv/bin/python -m pip install -r hub-backend/requirements-test.txt
             sudo apt-get update
-            sudo apt-get install -y xvfb xauth libgtk-3-0 libnss3 libasound2
+            sudo apt-get install -y xvfb xauth libgtk-3-0 libnss3 libasound2 ripgrep
+            rg --version
           fi
       - run: npm ci
         working-directory: client
