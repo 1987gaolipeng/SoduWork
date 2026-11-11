@@ -14,17 +14,65 @@ const subscribers = new Set()
 const missing = new Set()
 let locale = readLocale()
 
+// Accepts tags, not just the four exact values: `zh`, `ZH-hans-sg`, `zh_CN`,
+// `ja`, `ko` all resolve deterministically. ICU-dependent parsing is avoided so
+// results never depend on the host. Traditional tags map to zh-CN: simplified
+// copy is more readable than English for those users, and Traditional Chinese
+// should be a first-class locale in its own issue rather than a silent remap.
 export function normalizeLocale(value) {
   const raw = String(value || '').trim()
   if (LOCALES[raw]) return raw
-  if (raw.toLowerCase().startsWith('en')) return 'en-US'
-  if (raw.toLowerCase().startsWith('ja')) return 'ja-JP'
-  if (/^(ko|kr)/i.test(raw)) return 'ko-KR'
+  const tag = raw.replace(/_/g, '-').toLowerCase()
+  const [primary] = tag.split('-').filter(Boolean)
+  if (primary === 'en') return 'en-US'
+  if (primary === 'ja') return 'ja-JP'
+  if (primary === 'ko' || primary === 'kr') return 'ko-KR'
+  // zh, zh-CN, zh-SG, zh-MY, zh-CHS, zh-Hans, zh-TW, zh-HK, zh-Hant…
+  if (primary === 'zh') return SOURCE_LOCALE
   return FALLBACK
 }
 function fallbackLocale(value) { return FALLBACKS[normalizeLocale(value)] || FALLBACK }
+
+// Only a browser knows the user's preferred language. Node/SSR runtimes expose a
+// global `navigator` (Node 21+) whose value comes from the build machine's
+// locale, so the host is gated on `window`; a server render gets no preference.
+function browserPreferences() {
+  if (typeof window === 'undefined') return {}
+  const nav = typeof navigator === 'undefined' ? null : navigator
+  if (!nav) return {}
+  return { languages: nav.languages, language: nav.language }
+}
+
+// Pure locale detection: every input is a parameter, so callers and tests never
+// touch globals and results cannot depend on the host machine.
+// Order: the user's saved pick wins, then the browser preference list, then the
+// single `language` value, then the documented fallback. Unsupported tags are
+// skipped so a later supported entry in the list still wins.
+export function detectLocale({ stored, languages, language } = {}) {
+  const saved = String(stored ?? '').trim()
+  if (saved) return normalizeLocale(saved)
+  for (const tag of [...(Array.isArray(languages) ? languages : []), language]) {
+    const text = String(tag ?? '').trim()
+    if (!text) continue
+    const resolved = normalizeLocale(text)
+    if (resolved !== FALLBACK || text.toLowerCase().startsWith('en')) return resolved
+  }
+  return FALLBACK
+}
+
+// Browser preference alone, or null when no browser locale is available.
+export function browserLocale() {
+  const prefs = browserPreferences()
+  if (!prefs.languages && !prefs.language) return null
+  return detectLocale(prefs)
+}
+
+// A language the user saved explicitly always wins; otherwise follow the
+// browser so a first-time Chinese user does not land on an English console.
 function readLocale() {
-  try { return normalizeLocale(localStorage.getItem(STORAGE_KEY)) } catch { return FALLBACK }
+  let stored = ''
+  try { stored = String(localStorage.getItem(STORAGE_KEY) || '') } catch { /* Private browsing or Node without storage. */ }
+  return detectLocale({ stored, ...browserPreferences() })
 }
 export function getLocale() { return locale }
 export function subscribeLocale(listener) {
