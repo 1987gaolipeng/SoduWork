@@ -3,6 +3,7 @@
   // Core Korean copy. Untranslated source phrases intentionally fall back to
   // English through the locale registry instead of mixing Chinese into a page.
   const messages = {
+    '放大': '확대', '更大文字 · 清晰易读': '더 큰 글자 · 선명하고 읽기 편한 표시',
     '账号或密码不正确': '계정 또는 비밀번호가 올바르지 않습니다',
     '操作过于频繁，请稍后重试': '작업이 너무 잦습니다. 잠시 후 다시 시도해 주세요',
     '账号应为 3-64 个字符，且不能包含空格': '계정은 3-64자여야 하며 공백을 포함할 수 없습니다',
