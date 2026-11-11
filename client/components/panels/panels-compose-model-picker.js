@@ -172,7 +172,9 @@
     const rows = enterpriseModels.map((item) => ({
         name: item.name,
         label: item.label || item.name,
-        sub: [item.providerName ? tx(item.providerName) : '', item.keyFrom === 'mine' ? tx('自己的额度') : ''].filter(Boolean).join(' \u00b7 '),
+        sub: [item.providerName ? tx(item.providerName) : '', item.providerKind === 'anthropic' ? 'Anthropic' :
+          item.providerKind === 'openai-compat' ? tx('OpenAI 兼容') : '',
+          item.keyFrom === 'mine' ? tx('自己的额度') : ''].filter(Boolean).join(' \u00b7 '),
       }));
     if (!cloud() && runtime().id === 'pi' && global.SoduWorkModelChoice) rows.push(...imageModels.map(item => ({
       name: SoduWorkModelChoice.imageKey(item), label: item.label || item.name,
@@ -195,7 +197,9 @@
           '<span class="cp-model-symbol" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="m10 3 2 5 5 2-5 2-2 5-2-5-5-2 5-2Z"/></svg></span><span class="cp-mtxt"><b>' + escape(item.label) + '</b>' +
             (item.sub ? '<i>' + escape(item.sub) + '</i>' : '') + '</span></button>').join('') +
       emptyList() + '</div>' + (!selected.modelName && enterpriseDefaultErrors[runtime().id]
-        ? '<div class="cp-native-note is-warning">默认模型暂不可用，请选择其他模型</div>' : '') + thinking;
+        ? '<div class="cp-native-note is-warning">默认模型暂不可用，请选择其他模型</div>' : '') +
+      (selectedModel?.providerKind === 'anthropic'
+        ? '<div class="cp-native-note is-warning" role="note">当前企业模型对话通道要求 OpenAI 兼容协议；请切换模型，或在「我的模型」配置对应接口。Anthropic 配置可保留给支持它的 Agent。</div>' : '') + thinking;
   }
 
   function codexHtml(selected) {
