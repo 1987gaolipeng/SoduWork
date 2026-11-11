@@ -165,7 +165,7 @@ class HandoffFallbackTests(unittest.IsolatedAsyncioTestCase):
                 workspace = Path(info["data"]["workDir"])
                 self.assertTrue((workspace / "delivery.md").is_file())
                 self.assertEqual((workspace / "input.txt").read_text(encoding="utf-8"), "portable input")
-                prompts = [json.loads(line) for line in (workspace / "prompts.jsonl").read_text(encoding="utf-8").splitlines()]
+                prompts = [json.loads(line) for line in (workspace / ".cache/prompts.jsonl").read_text(encoding="utf-8").splitlines()]
                 self.assertEqual(len(prompts), 1)
                 self.assertIn("Keep the report title unchanged.", prompts[0]["prompt"])
                 repeated = await self.prepare(transfer, source=origin)

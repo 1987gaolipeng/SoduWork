@@ -1,47 +1,61 @@
-# SoduWork 桌面客户端
+# SoduWork desktop client
 
-**简体中文** · [English](README.en.md) · [开发指南](../docs/development.md#桌面客户端)
+[简体中文](README.zh-CN.md) · **English** · [Developer guide](../docs/development.en.md#desktop-client)
 
-当前工作区使用 Electron 与原生 HTML/CSS/JavaScript；管理端的 React 构建不参与桌面渲染。
+Command examples use `sh start.sh` on macOS/Linux. On Windows, use `.\start.cmd` in PowerShell or `start.cmd` in Command Prompt with the same arguments. Standalone Python tools use `python3`; use `py` on Windows, or `python` inside an activated virtual environment.
 
-## 模块边界
+The desktop uses Electron and native HTML/CSS/JavaScript. The React management UI is a separate application.
 
-| 位置 | 职责 |
+## Source map
+
+| Location | Responsibility |
 | --- | --- |
-| `main.js`、`main/` | 应用启动、原生窗口、设备身份、更新、文件及执行底座；覆盖窗生命周期在 `main/desktop-overlay.cjs` |
-| `preload.js` | 受限的渲染端 IPC 接口；不向页面开放通用 Node 权限 |
-| `desk.html`、`desk-boot.js` | 主工作区的资源装载与启动 |
-| `index.html` | 透明桌宠及快捷工具覆盖窗 |
-| `core/` | 客户端状态、同步、语言及共享基础能力 |
-| `components/requirements/` | 需求池、单一需求抽屉、派活生命周期及共享表单字段 |
-| `components/` 其它目录 | 对话、AI 团队、插件等界面模块；共用执行选择器保留在 `panels/` |
-| `theme/`、`assets/`、`vendor/` | 主题、素材及带许可的随附依赖 |
-| `tests/`、`e2e/` | 单元/契约检查与 Electron 场景验证；不随产品安装 |
-| `scripts/`、`build/` | 运行时准备、打包与原生安装支持 |
-| `runner/`、`dist/`、`.runtime/` | 生成的 Runner、发行包和随附运行时；不作为源码维护 |
+| `main.js`, `main/` | Application lifecycle, native windows, device identity, updates, files, and execution runtimes; overlay lifecycle is in `main/desktop-overlay.cjs` |
+| `preload.js` | Restricted renderer IPC; no general Node access for pages |
+| `desk.html`, `desk-boot.js` | Main workspace loading and startup |
+| `index.html` | Transparent pet and shortcut overlay |
+| `core/` | State, synchronization, localization, and shared utilities |
+| `components/requirements/` | Requirement pool, requirement drawer, dispatch lifecycle, and shared fields |
+| Other `components/` directories | Conversations, AI team, and business views; runtime selectors also live under `panels/` |
+| `theme/`, `assets/`, `vendor/` | Themes, assets, and licensed renderer dependencies |
+| `tests/`, `e2e/` | Unit/contract checks and Electron validation; excluded from product packaging |
+| `scripts/`, `build/` | Runtime preparation and native packaging |
+| `runner/`, `dist/`, `.runtime/` | Generated Runner, release packages, and runtime resources |
 
-普通对话、需求执行与目标使用同一会话链路：`panels-chat` → `conversationSession` → 主进程会话 IPC → `agent-runtime` → Pi 或 Runner。AI 团队点击工作打开对应会话；需求抽屉按需展开共享 TaskTrace。桌面竖条直接进入需求池，不保留旧任务看板、旧详情聊天框或独立 AI 工位会话。旧 `detail` 链接继续定位同一条需求，不新增数据记录。
+Conversations and task execution share the same session path: `panels-chat` → `conversationSession` → main-process IPC → `agent-runtime` → Pi or Runner. AI team assignments open the corresponding conversation. Requirement drawers expand task traces; legacy detail links resolve the same requirement rather than creating duplicate records.
 
-三端结构、派活规则和保留的兼容边界见 [当前需求工程结构](../docs/release-scope.md)。
+The desktop rail opens the requirement pool directly. The old task board, detail chat box, and separate AI workstation conversation are retired. The [release scope](../docs/release-scope.en.md) describes the shared structure, assignment rules, and compatibility boundaries.
 
-渲染脚本按 HTML 中的顺序共享作用域。拆分时同时核对资源引用、顶层声明、调用顺序和 Electron 加载；单独语法检查不足以证明页面可用。
+HTML script order defines dependencies. When splitting scripts, verify resource references, shared state, loading order, and actual Electron behavior.
 
-## 开发与验证
+## Run and verify
 
-首次体验推荐根目录的 `python start.py --desktop`。独立开发时保持 Hub 运行，在 `client/` 安装依赖 `npm ci` 后执行 `npm start`，三种桌面系统共用这一入口。开发 Runner 使用 `../hub-backend/` 中的虚拟环境与源码；不要手工复制旧发行版 Runner 代替当前源码。
+For a first local session, run `sh start.sh --desktop` from the repository root. For independent development, keep Hub running and execute:
 
-`npm test` 运行客户端的单元和契约检查。`npm run check:layout` 检查源码与生成目录的边界。`e2e/` 脚本应按文件声明选择隔离夹具或真实服务：隔离界面通过不等于真实模型、用户账号或线上交付验证通过。
+```sh
+cd client
+npm ci
+npm start
+```
 
-## Windows 打包
+Use Node.js 22.19+. A separately started client retains its own profile and Hub connection settings. See the [developer guide](../docs/development.en.md) for service addresses and profile isolation.
 
-1. 在后端虚拟环境安装 `../hub-backend/requirements-runner-build.txt`。
-2. 执行 `npm run build` 或 `npm run build-portable`。
-3. 发布前按当前发布门禁验证最终安装包、升级与回滚。
+Development Runner execution uses the virtual environment and source in `../hub-backend/`; do not substitute a Runner copied from an old release.
 
-两种打包入口都会执行 `prepare:runner`，从 `runner_main.py` 和 `runner.spec` 重建单文件 Runner。源码、技能和依赖清单是唯一构建输入；已有 EXE 不会跳过编译。应用打包排除测试文件，Runner 资源只选择单文件可执行程序。
+Run `npm test` for unit/contract tests and `npm run check:layout` for source boundaries. Inspect the requirements of each `e2e/` script before using it. Fixture success does not establish real-model or production acceptance.
 
-Windows 原生安装输入由 `scripts/payload-sources.cjs` 按清单摘要冻结，再生成 NSIS 资源表，避免文件系统过滤层向不同构建进程暴露不同字节。源文件在清单生成后发生变化时构建立刻失败。冻结输入每目录最多 64 个文件，避免编译器对大目录反复扫描；安装与验包共用一个解包函数，保留压缩与逐文件校验，旧版本的安装兼容例外见验证器。`.runtime/installer/payload-sources/` 是可重建的中间产物，不提交仓库。原生安装及其故障注入测试共用构建目录，应顺序执行。
+## Packaging
 
-OpenCode 为可选底座，不再随客户端分发，也不会在构建时下载。Agent 管理继续识别本机安装，并提供主动安装入口。`build-light` 已退役，常规构建统一采用轻量配方。
+Before distributing native installers, complete the outstanding [distribution materials](../third-party/README.md) and platform acceptance.
 
-底座名单、显示信息、模型归属及权限声明来自 `../hub-backend/app/agent_catalog.json`，打包复制到 `resources/agent_catalog.json`；不在渲染端再维护第二份支持名单。扩展方式见 [Agent 扩展约定](../docs/release-scope.md)。
+On Windows, install `../hub-backend/requirements-runner-build.txt` in the backend build environment, then run `npm run build` or `npm run build-portable`. Packaging rebuilds the single-file Runner from `runner_main.py` and `runner.spec`. Do not reuse an old EXE as build input.
+
+Windows packaging freezes source payloads through `scripts/payload-sources.cjs` to handle filesystems that expose different bytes to different processes. Source changes after manifest generation fail the build. Generated `.runtime/installer/payload-sources/` is not versioned. Native installer builds share resources and should run sequentially.
+
+Frozen input directories contain at most 64 files to avoid repeated compiler scans. Installation and verification share one extraction function with compression and per-file verification; the verifier documents compatibility exceptions for older installers. Installer fault-injection tests share the build directory and must also run sequentially. Before release, verify the final installer, upgrade, and rollback. Packaging excludes test files and selects only the single-file Runner executable as a Runner resource.
+
+OpenCode is optional and is neither bundled nor downloaded during packaging. There is one lightweight build recipe. Agent identifiers, display metadata, model scope, and permissions come from the shared `../hub-backend/app/agent_catalog.json`, copied into release resources. Avoid a second renderer-owned catalog.
+
+Agent management still detects installed OpenCode and offers explicit installation. `build-light` is retired; the normal build uses the lightweight recipe.
+
+See [release scope](../docs/release-scope.en.md), [plugin authoring](../docs/plugin-authoring.en.md), and the [H5 SDK](sdk/README.md).

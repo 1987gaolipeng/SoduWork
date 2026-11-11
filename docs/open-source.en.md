@@ -1,8 +1,8 @@
 # Using and distributing source
 
-[简体中文](open-source.md) · **English** · [Documentation](index.en.md)
+[简体中文](open-source.md) · **English** · [Documentation](README.md)
 
-For local use, see [startup](getting-started.en.md); for changes, see [development](development.en.md); for a team deployment, see [self-hosting](../ops/self-host/README.en.md).
+For local use, see [startup](getting-started.en.md); for changes, see [development](development.en.md); for a team deployment, see [self-hosting](../ops/self-host/README.md).
 
 ## Configure your services
 

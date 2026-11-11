@@ -78,7 +78,7 @@ function renderSkinGrid() {
 }
 
 /* Map palette IDs to display labels; show unknown values unchanged. */
-const _PALETTE_LABEL = { vivid: '活力', steady: '稳重', warm: '暖调', minimal: '极简', ruby: '宝石红', azure: '扁平蓝', signature: 'SoduWork' };
+const _PALETTE_LABEL = { vivid: '活力', steady: '稳重', warm: '暖调', minimal: '极简', ruby: '宝石红', azure: '扁平蓝', signature: 'SoduWork', enlarged: '放大' };
 
 /* Render one skin card. */
 function renderSkinCard(s, curId) {

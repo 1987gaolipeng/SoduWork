@@ -1,6 +1,6 @@
 # Plugin authoring (schemaVersion 1)
 
-[简体中文](plugin-authoring.md) · **English** · [Documentation](index.en.md)
+[简体中文](plugin-authoring.md) · **English** · [Documentation](README.md)
 
 A SoduWork plugin is a portable capability package containing instructions, skills, MCP connections, tools, permissions, and an optional workflow. Source examples live in `hub-backend/plugins/*.json`.
 
@@ -256,7 +256,7 @@ Hosted routes and remote worker labels cannot downgrade to local execution. Git-
 
 ## H5 applications and settings
 
-Use the public [H5 SDK](../client/sdk/README.en.md) for chat sends, refresh notifications, exact-origin direct iframes, and explicit conversation/composer capabilities. Business actions provide context; a separate user-facing skill picker is unnecessary.
+Use the public [H5 SDK](../client/sdk/README.md) for chat sends, refresh notifications, exact-origin direct iframes, and explicit conversation/composer capabilities. Business actions provide context; a separate user-facing skill picker is unnecessary.
 
 settings.read/settings.write provide account/application/origin-isolated encrypted JSON settings. Explicit reads of the application's own ukey can restore its own service login. Native application-owned MCP can reference credentialKey:'ukey'; per-turn MCP keeps credentials out of models. Settings credentials are not draft setup, exported package data, or prompts, and do not establish SSO.
 

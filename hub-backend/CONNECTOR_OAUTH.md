@@ -1,6 +1,6 @@
 # 连接器 OAuth 部署与验证
 
-**简体中文** · [English](CONNECTOR_OAUTH.en.md) · [后端说明](README.md)
+**简体中文** · [English](CONNECTOR_OAUTH.en.md) · [后端说明](README.zh-CN.md)
 
 首批个人连接支持 Google Drive、OneDrive、Outlook、SharePoint 和 Microsoft Teams。企业微信、飞书、钉钉已有的原生授权流程不变。公司共享连接不能绑定管理员个人 OAuth；普通用户通过平台登录完成自己的授权。
 

@@ -126,13 +126,18 @@ test('built-in app developer inherits the current plugin contract and exact publ
   assert.match(design, /性能、可访问性与维护成本/);
   const developerGuide = fs.readFileSync(path.join(folder, 'references/bridge-and-delivery.md'), 'utf8');
   const sdkGuide = fs.readFileSync(path.join(folder, 'sdk/README.md'), 'utf8');
+  assert.equal(sdkGuide, fs.readFileSync(path.resolve(__dirname, '../sdk/README.md'), 'utf8'),
+    'the distributed SDK guide must match the canonical public documentation');
   assert.match(detail.localDraft.instructions, /机器人[\s\S]*soduWorkApp\.automation\.create/);
+  assert.match(developerGuide, /即用页面严禁出现“自动化”按钮/);
+  assert.match(developerGuide, /订阅简报/);
+  assert.match(developerGuide, /不代表业务执行成功|不是执行结果/);
+  assert.match(sdkGuide, /must not[^\n]*[“"]Automation[”"] button/i);
+  assert.match(sdkGuide, /Subscribe to (?:a )?briefing/i);
+  assert.match(sdkGuide, /sav(?:ed|ing)[^\n]*does not mean[^\n]*(?:succeeded|success|executed)/i);
   for (const guide of [developerGuide, sdkGuide]) {
-    assert.match(guide, /即用页面严禁出现“自动化”按钮/);
-    assert.match(guide, /订阅简报/);
     assert.doesNotMatch(guide, /偷菜/);
     assert.match(guide, /automation\.create/);
-    assert.match(guide, /不代表业务执行成功|不是执行结果/);
   }
   assert.match(developerGuide, /不能编造 SDK 尚未提供的列表、暂停、删除接口/);
   const script = path.join(folder, 'scripts/scaffold.cjs');

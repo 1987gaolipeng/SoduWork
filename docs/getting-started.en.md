@@ -2,6 +2,8 @@
 
 [简体中文](getting-started.md) · **English** · [Back to README](../README.md) · [Developer guide](development.en.md)
 
+Command examples use `sh start.sh` on macOS/Linux. On Windows, use `.\start.cmd` in PowerShell or `start.cmd` in Command Prompt with the same arguments. Standalone Python tools use `python3`; use `py` on Windows, or `python` inside an activated virtual environment.
+
 Your first run has four steps: install the prerequisites, extract the source, start, and sign in. This launcher runs the Hub service, browser management UI, and desktop client on your computer with a private SQLite database. No separate server is needed.
 
 ## Install, extract and start
@@ -122,6 +124,30 @@ The browser address becomes `http://127.0.0.1:18990`, and the linked desktop cli
 
 ### Browser works but desktop does not
 
+The Electron binary download has a ten-minute limit. If it times out, choose a reachable mirror or configure your proxy, then rerun the same launcher. For example, set the mirror for your shell before starting.
+
+macOS/Linux:
+
+```sh
+ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ sh start.sh --desktop
+```
+
+Windows PowerShell:
+
+```powershell
+$env:ELECTRON_MIRROR = 'https://npmmirror.com/mirrors/electron/'
+.\start.cmd --desktop
+```
+
+Windows Command Prompt:
+
+```bat
+set ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
+start.cmd --desktop
+```
+
+Existing mirror and proxy settings are passed to the installer, which verifies download checksums. Slow connections can set `ELECTRON_DOWNLOAD_TIMEOUT` to a larger number of seconds. Successfully installed dependencies are reused on the next attempt.
+
 Check `desktop.log` in the same data directory. Resolve Electron download problems and retry. Linux desktop mode requires a graphical session and Electron's native libraries, such as NSS, GTK, and X11/Wayland. The launcher does not disable the sandbox or install operating system packages.
 
 To use management while resolving desktop setup, double-click `start.cmd` on Windows or `start.command` on macOS, or run `sh start.sh` on Linux. The browser management UI is for configuration; it is not the desktop AI conversation workspace.
@@ -132,28 +158,28 @@ The local service has stopped. Run the same launcher again; your data remains av
 
 ## Optional commands
 
-Run these from the source root. On macOS/Linux, use `python3` instead of `python`, or use `sh start.sh`:
+Run these from the source root. The table uses the macOS/Linux wrapper. Windows PowerShell uses `.\start.cmd` with the same arguments, and Command Prompt uses `start.cmd`.
 
 | Need | Command |
 | --- | --- |
-| Linked desktop startup | `python start.py --desktop` |
-| Management service only | `python start.py` |
-| Check prerequisites only | `python start.py --check --desktop` |
-| Download and build without starting | `python start.py --prepare-only --desktop` |
-| Do not open a browser automatically | `python start.py --desktop --no-browser` |
-| Use a dedicated data directory | `python start.py --desktop --data-dir "D:/SoduWork-data"` |
+| Linked desktop startup | `sh start.sh --desktop` |
+| Management service only | `sh start.sh` |
+| Check prerequisites only | `sh start.sh --check --desktop` |
+| Download and build without starting | `sh start.sh --prepare-only --desktop` |
+| Do not open a browser automatically | `sh start.sh --desktop --no-browser` |
+| Use a dedicated data directory | `sh start.sh --desktop --data-dir "D:/SoduWork-data"` |
 
 Use the same data directory for preparation and startup. Automation may explicitly use `--password-stdin` for the first password; never put passwords in command arguments or scripts. On Windows, set `SODUWORK_NO_PAUSE=1` to return a failing exit code without waiting for a keypress.
 
-For independent source development, see the [developer guide](development.en.md). The Vite proxy defaults to `http://127.0.0.1:9080`; set `SODUWORK_DEV_HUB=http://127.0.0.1:18989` when using this launcher. The default service is accessible only on this computer. For team deployment, see [Docker self-hosting](../ops/self-host/README.en.md).
+For independent source development, see the [developer guide](development.en.md). The Vite proxy defaults to `http://127.0.0.1:9080`; set `SODUWORK_DEV_HUB=http://127.0.0.1:18989` when using this launcher. The default service is accessible only on this computer. For team deployment, see [Docker self-hosting](../ops/self-host/README.md).
 
 ## Ports, storage and updates
 
 ```sh
-python start.py --desktop --port 18990 --data-dir "/path/to/private/soduwork-data"
+sh start.sh --desktop --port 18990 --data-dir "/path/to/private/soduwork-data"
 ```
 
-Use the same data directory for preparation and startup. It must be outside the source directory and either empty or already initialized by this launcher. The default service listens only on loopback. Use the [self-hosting guide](../ops/self-host/README.en.md) for team deployment with PostgreSQL, HTTPS, and backups.
+Use the same data directory for preparation and startup. It must be outside the source directory and either empty or already initialized by this launcher. The default service listens only on loopback. Use the [self-hosting guide](../ops/self-host/README.md) for team deployment with PostgreSQL, HTTPS, and backups.
 
 | Platform | Default private data directory |
 | --- | --- |
@@ -168,8 +194,8 @@ Before updating source, stop the service and back up the entire data directory a
 ## Verify the source launcher
 
 ```sh
-python -m unittest tools.dev.test_start_local
-python tools/dev/verify_local_start.py
+python3 -m unittest tools.dev.test_start_local
+python3 tools/dev/verify_local_start.py
 ```
 
 The second command installs dependencies in a new temporary instance and verifies real HTTP login, persistence, uploads, source downloads, and process shutdown. It does not use a production database or call a paid model. Native macOS/Linux desktop behavior must be checked on those systems; Windows-only validation is not evidence of a complete three-platform release.

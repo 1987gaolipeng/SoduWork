@@ -1,5 +1,6 @@
 (function (global) {
   const messages = {
+    '放大': 'Enlarged', '更大文字 · 清晰易读': 'Larger text · Clear and readable',
     '对话 · 打开对话页': 'Chat · Open conversations', '自动化 · 管理定时任务': 'Automation · Manage scheduled tasks',
     'SoduWork·品牌伙伴': 'SoduWork companion', '玻璃球': 'Glass orb', '扁平球': 'Flat orb', '奶糖小兔': 'Candy bunny', '钻石盒子': 'Diamond box', '小猫': 'Kitten', '机器人': 'Robot',
     '水滴': 'Water drop', '光球': 'Light orb', '皮肤': 'Appearance', '皮肤管理…': 'Manage appearance…', '主窗口': 'Main window', '主窗口 · 打开 SoduWork': 'Main window · Open SoduWork',

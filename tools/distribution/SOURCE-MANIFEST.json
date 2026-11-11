@@ -6,8 +6,8 @@
   "files": [
     {
       "path": ".dockerignore",
-      "bytes": 448,
-      "sha256": "4e23759c21f81f2352dae0f7dc0478d7d1739dd4e8251ab56f65228847a10f44"
+      "bytes": 444,
+      "sha256": "8224b7904e8e52df578d3e74df585857ae764f7552a7fd2d8a3d61a65b4dfe95"
     },
     {
       "path": ".gitattributes",
@@ -16,8 +16,8 @@
     },
     {
       "path": ".github/CI.md",
-      "bytes": 2566,
-      "sha256": "618ec06644386a790c969cdbd16582c85545602bc6cbb4361fd0ddc262017e66"
+      "bytes": 2564,
+      "sha256": "007c4087e577ccf4d89734ba4a6ab76cb89e454327cc9e58d643acfb29d2d3ae"
     },
     {
       "path": ".github/ISSUE_TEMPLATE/bug_report.yml",
@@ -41,8 +41,8 @@
     },
     {
       "path": ".github/RELEASE.md",
-      "bytes": 9041,
-      "sha256": "7c2804fce7a626b9c8226707d572d262d0775d7570e57443ccda246bee4e5124"
+      "bytes": 9038,
+      "sha256": "2e741e0f7813f95c598008102b5cc496fdf85f4f6d2975688ed093aa1321210f"
     },
     {
       "path": ".github/dependabot.yml",
@@ -75,14 +75,19 @@
       "sha256": "f339a3b035473fe60032cdf80e0b2b01c047b5184212837ec934eef4b33dcd70"
     },
     {
+      "path": "AGENTS.md",
+      "bytes": 2450,
+      "sha256": "d7afb74c6529365ddf3d17d32a8ac4d6360180cd8aac47f76f57d85d3df0d769"
+    },
+    {
       "path": "CODE_OF_CONDUCT.md",
       "bytes": 5508,
       "sha256": "496735585a6ad4665d2a5b4c2df6d5f6b77b11915d57a4e7807d48fc5965e2cd"
     },
     {
       "path": "CONTRIBUTING.md",
-      "bytes": 4402,
-      "sha256": "44f891a30658220b1ee9b343ba86f8aa99e63e45c832bdf1478663af4d92854a"
+      "bytes": 4463,
+      "sha256": "2e30707d3333635b010148198ea73ca0b340ca84d0b7b67f03721bfff624c102"
     },
     {
       "path": "DCO.txt",
@@ -96,33 +101,43 @@
     },
     {
       "path": "NOTICE.md",
-      "bytes": 1182,
-      "sha256": "76bdba01f390c8137cca1abc24c0b4f5208ae03950173ae11dd2ce5bc71012e1"
+      "bytes": 1218,
+      "sha256": "3c94c34b88287d0e013115c3ba8ef904472fdecc4f25bebecffa67403e9786fc"
+    },
+    {
+      "path": "NOTICE.zh-CN.md",
+      "bytes": 1167,
+      "sha256": "b0ef9f804eb667f62f79eb4036c2148124d485d36becf9dcb1a53bc18453c04d"
     },
     {
       "path": "README.md",
-      "bytes": 20923,
-      "sha256": "2989acc179a94c2fb164c669d376cceef231cc7df4603af9ca3ca5c4a786a69c"
+      "bytes": 22614,
+      "sha256": "219788310095529a77702a269b1d408f77b3e5e901294e19e514ad83d72b3901"
     },
     {
       "path": "README.zh-CN.md",
-      "bytes": 20485,
-      "sha256": "f7665ad6cb0f48e5bd70071c7064bbe801cd8b7fae359a3ef3f475f44964aedd"
+      "bytes": 21971,
+      "sha256": "f48a4380fdcabfe1124ea73d73c3a363d0089252e7f7a67815d57dc7fd33a540"
     },
     {
       "path": "SECURITY.md",
-      "bytes": 2368,
-      "sha256": "b13b64eb21e090ced5de8d5aedf12652a5cfaf2a475c07b05434b351c274ab3a"
+      "bytes": 2363,
+      "sha256": "c4e3ae41ccc47840a4343a28a32dff634755c02d842e78f54f00a065ae6d5bd2"
     },
     {
       "path": "client/README.en.md",
-      "bytes": 3702,
-      "sha256": "0a411eba038c198a8d91ccc33844908faabc27e40042ac9fd78754c6b8b414b0"
+      "bytes": 110,
+      "sha256": "c268cff4c05717dde42a2f2f5b0df1988e1a3db03838a5f8673589714ce79366"
     },
     {
       "path": "client/README.md",
-      "bytes": 4286,
-      "sha256": "db50480b984c57015070a425d75900ebc89e28a6c5e8e48616a33670ad2cab54"
+      "bytes": 5063,
+      "sha256": "8bd9f7bb070996a694cb397601d9746a0d331eb165cf321c8575e3b9ea4e3a0d"
+    },
+    {
+      "path": "client/README.zh-CN.md",
+      "bytes": 4540,
+      "sha256": "e003471e4995ca236bc43a487ed426a24d0f78c0806983615fa1119bc31c6e8f"
     },
     {
       "path": "client/THIRD_PARTY_NOTICES.md",
@@ -2261,8 +2276,8 @@
     },
     {
       "path": "client/components/skin-manager/skin-manager.js",
-      "bytes": 9067,
-      "sha256": "f93e736535a53e580b8192527e332fa0a3685fd7855f8594986f3a0599ad6429"
+      "bytes": 9087,
+      "sha256": "d169d0d7108d5a7791d8b83ac1ce5b65663c459bc2d364dd9e010d1d1b099f39"
     },
     {
       "path": "client/components/skin-manager/skin-model.js",
@@ -2546,8 +2561,8 @@
     },
     {
       "path": "client/core/locales/en-US-shell.js",
-      "bytes": 12318,
-      "sha256": "768e302d507cbed22b5261dd510d4c3c9e9990e7d0f6702e8b3f74aaa3bc403d"
+      "bytes": 12413,
+      "sha256": "d63c1da73ac5cbbc972e600cd8407c7ec81c2c0977021b4d79f1af432689ef37"
     },
     {
       "path": "client/core/locales/en-US-trace-pages.js",
@@ -2591,8 +2606,8 @@
     },
     {
       "path": "client/core/locales/ja-JP.js",
-      "bytes": 9217,
-      "sha256": "9ed8d6186354cc31b1172ec792674a4b5cbd56783e83c88aeb937d308a08aa51"
+      "bytes": 9317,
+      "sha256": "9a3bcb17c0c2843b0856bbc1d8006663fe385607881c428a10bbd2be7c538a11"
     },
     {
       "path": "client/core/locales/ko-KR-agent-pages.js",
@@ -2611,8 +2626,8 @@
     },
     {
       "path": "client/core/locales/ko-KR.js",
-      "bytes": 8598,
-      "sha256": "d05a95fbaa997d73d7ed3db605c6b94f8237df91d59be6a09aca5ee24215b5e3"
+      "bytes": 8688,
+      "sha256": "ae5b451d0848b0ca15c6b3de97ded5b5de2ab6f604dedbcb4dbec672dab1f1f6"
     },
     {
       "path": "client/core/locales/locale-registry.js",
@@ -2701,8 +2716,8 @@
     },
     {
       "path": "client/core/skin-registry.js",
-      "bytes": 11655,
-      "sha256": "90d918b1176cfa5242d164c83e5eb7fa479e815dc4f13563a07daa6077d3fb2c"
+      "bytes": 11910,
+      "sha256": "f881cf36a7c9f1b418b2f66c661eaf18756037016920e02f849be2a2d4f590ae"
     },
     {
       "path": "client/core/store-lifecycle.js",
@@ -2751,8 +2766,8 @@
     },
     {
       "path": "client/desk.html",
-      "bytes": 51654,
-      "sha256": "53eb7a07433b005c6e15df6bd4a0c2ab4c61cbcc011cce89c7392603bcd57c8a"
+      "bytes": 51710,
+      "sha256": "90e4ae333f2199cc4e46971233767d2c8821be59dae2d6b914d4d8386fba8f6a"
     },
     {
       "path": "client/e2e/acceptance-card-stability.cjs",
@@ -3390,6 +3405,11 @@
       "sha256": "b0a56b168776ca931c46eff44ed598b940358f7a06f59cd22690e7efa35874ea"
     },
     {
+      "path": "client/e2e/enlarged-theme.cjs",
+      "bytes": 8475,
+      "sha256": "30689009befef3d74265cf9ec1fc83a6c0b7d1ef631c7bdbce8f07af7dd266a5"
+    },
+    {
       "path": "client/e2e/escape-layers.cjs",
       "bytes": 19908,
       "sha256": "57ad5f83010bfaa3ad72794cb2c9a53a5688d6d3aecb23180cf095bba2b1a292"
@@ -3861,8 +3881,8 @@
     },
     {
       "path": "client/e2e/hub-connection.cjs",
-      "bytes": 14548,
-      "sha256": "91e83b214cddb0eda83d67cb90a13f96a56ea67deb0c8bb907acdc9cdb6334b9"
+      "bytes": 16975,
+      "sha256": "7f41024c2be5c7b52a7aec5906e0ec38f7b071fb9641914d85e6b5f51726378c"
     },
     {
       "path": "client/e2e/i18n-panels.cjs",
@@ -4526,8 +4546,8 @@
     },
     {
       "path": "client/e2e/requirements-appearance.cjs",
-      "bytes": 12656,
-      "sha256": "d849ccb633cf74f30c0a3ae7be31abff38f1e51cb1c7aab988a45f8d309072db"
+      "bytes": 12910,
+      "sha256": "a0ab6a921b6de09c5d30d6ce29c986d92d92c5af61fe87e03385745500b4caec"
     },
     {
       "path": "client/e2e/requirements-board.cjs",
@@ -4866,8 +4886,8 @@
     },
     {
       "path": "client/e2e/titlebar-modal-theme.cjs",
-      "bytes": 11074,
-      "sha256": "ed4ec8999aa202c25ba72afed7751d67ad0453e136b2f0417f78af94e23ea63f"
+      "bytes": 11237,
+      "sha256": "f53e383a42d5d9a8994cc7a313ae0d9c1b754baee14c062b9c59eeb3a671e3e8"
     },
     {
       "path": "client/e2e/tool-details-lazy.cjs",
@@ -4926,8 +4946,8 @@
     },
     {
       "path": "client/e2e/window-menu.cjs",
-      "bytes": 20531,
-      "sha256": "39d42aacbdb14ae155bd9b10f636151e661eba366d5bcf15dadb71e0bd6f5046"
+      "bytes": 20889,
+      "sha256": "3ebc28724e7e047ac9d67ec515c2e915de151968072e80966bf940993220bc31"
     },
     {
       "path": "client/e2e/window-render-stability.cjs",
@@ -5081,8 +5101,8 @@
     },
     {
       "path": "client/index.html",
-      "bytes": 17938,
-      "sha256": "e0e2236f123e88adc1795a3d97e2764b5f4291c8dcfd9f0edcef89d9589283b4"
+      "bytes": 17994,
+      "sha256": "d0abfa0c35525a61205bf7383c291af8016bb9d8593152369f55b0fb11ef779a"
     },
     {
       "path": "client/main.js",
@@ -7421,13 +7441,18 @@
     },
     {
       "path": "client/sdk/README.en.md",
-      "bytes": 8016,
-      "sha256": "84a18e4bf973d9de26c519e7d5e52dc5e8f1ba647937f29f3b68f6c732c2a38d"
+      "bytes": 110,
+      "sha256": "c268cff4c05717dde42a2f2f5b0df1988e1a3db03838a5f8673589714ce79366"
     },
     {
       "path": "client/sdk/README.md",
-      "bytes": 19509,
-      "sha256": "70a12f746f5068ae07c4617ac407b36eed8ceb4ebd8ac8ff9f89ffe71a43685a"
+      "bytes": 20521,
+      "sha256": "b38d274dbb914b08241fc74526a017c25e27b354c7b24a8b9f5265db33a9f4f2"
+    },
+    {
+      "path": "client/sdk/README.zh-CN.md",
+      "bytes": 19506,
+      "sha256": "f6b5c1c90254cf1c49d57573bfd1510b99949a77c1760f6f28c278d51d1a6ab9"
     },
     {
       "path": "client/sdk/soduwork-app.js",
@@ -7731,8 +7756,8 @@
     },
     {
       "path": "client/tests/app-developer.test.cjs",
-      "bytes": 21825,
-      "sha256": "1caed33d1483739367831c40c97bf21e83a11741ef9605a734b61addd17b3900"
+      "bytes": 22253,
+      "sha256": "d285d2fb7ae1dcc717a60ddf12e1ee8796c817ac512bbfe788e21ab27f8d1e89"
     },
     {
       "path": "client/tests/app-draft-isolation.test.cjs",
@@ -10636,8 +10661,8 @@
     },
     {
       "path": "client/tests/source-size-review.test.cjs",
-      "bytes": 4688,
-      "sha256": "b87694df0caa29f41c14a1f2e7f47e87a441449ae53f4e1492f31575fefb2422"
+      "bytes": 4694,
+      "sha256": "5ce830f87957f0d1eabe2e2aca379543cbfaa18da21552a745eb40eb1a4ecd19"
     },
     {
       "path": "client/tests/stability-followup.test.cjs",
@@ -10951,8 +10976,8 @@
     },
     {
       "path": "client/tests/uninstall-resources.test.cjs",
-      "bytes": 7121,
-      "sha256": "eae9e453b46122f6ef483e9ec9ffb01d7624ae0d96df739ce28787ab9e64bc25"
+      "bytes": 8355,
+      "sha256": "a45097a93737398bee820b2e330635ef09e9d8aa3ede4b36976ae72fa7dd43e5"
     },
     {
       "path": "client/tests/update-linux-install.test.cjs",
@@ -11305,6 +11330,11 @@
       "sha256": "d837ff826394703ffaed0b4a91a4f6c9634b5689a554e294e6491a0c6e41a56f"
     },
     {
+      "path": "client/theme/enlarged-theme.css",
+      "bytes": 1010,
+      "sha256": "9ff00f27f1983357b41d2a21443411bdb2db7884e3ad733cdd3477c1c29fd71a"
+    },
+    {
       "path": "client/theme/variables.css",
       "bytes": 26487,
       "sha256": "a4867f82edb5ce7a0813bddb18c616b5fc0857f703976e89036543c402221bfc"
@@ -11456,13 +11486,18 @@
     },
     {
       "path": "docs/README.en.md",
-      "bytes": 7320,
-      "sha256": "9f95dba2af04d09a37affc323a6f5dd04548dd2c69fdea0e6fa390808d9b784e"
+      "bytes": 108,
+      "sha256": "d70fd8773fd451b7c2a79169719bb62af1c3077f81f9d3e4a6eb20d07610bb5e"
     },
     {
       "path": "docs/README.md",
-      "bytes": 1485,
-      "sha256": "35e221b61ec9520c06a66405730b981cad83d85dc3c4d3e9b92a26a5e354fa4c"
+      "bytes": 1770,
+      "sha256": "416b393fa950131f7d9b46a7500d089bbbb1b2af58bfe6fa2dea0bc6cf9f8f30"
+    },
+    {
+      "path": "docs/README.zh-CN.md",
+      "bytes": 1513,
+      "sha256": "924a1fca7f4810f95a0a5d3017cd6776c68b6ccc2528a271066e0934a03316dd"
     },
     {
       "path": "docs/assets/product-architecture.en.png",
@@ -11486,33 +11521,33 @@
     },
     {
       "path": "docs/contributing.zh-CN.md",
-      "bytes": 3909,
-      "sha256": "fa161d50e74a051a7591e26c7ebb84ab19cbd837576e00adae0654cbb96ba1ea"
+      "bytes": 4013,
+      "sha256": "adafcec370d6db6b4e359b964ad6b3e136401b7ca7620a6f9d4cb16d7b4975d5"
     },
     {
       "path": "docs/development.en.md",
-      "bytes": 7641,
-      "sha256": "eb89b4ca60d922515ff1ef34b04a1b852ef3bfcb2fb1c0573e0dcda70f11076c"
+      "bytes": 7944,
+      "sha256": "4fd95abdcf6271d65711cb77b7982725d2e091daee774345c152fc230cd274d4"
     },
     {
       "path": "docs/development.md",
-      "bytes": 6781,
-      "sha256": "bc533b5a808d7a9b22e7283c595a74a88245c74361c11cc0c9cbc9df4a2f2b7e"
+      "bytes": 7100,
+      "sha256": "697ba1a426fc9be0f086be9fc116b4ca8b1ce7af74595cd3b19adfa756883048"
     },
     {
       "path": "docs/getting-started.en.md",
-      "bytes": 12386,
-      "sha256": "05f2e3f052af0333f489f02514610168799b6c1f85413f96ee7644138cd69274"
+      "bytes": 13499,
+      "sha256": "214bbe434a6f1d63d05b0289e044ef1ad166b4f043c62eca3bd6ea65d3454a68"
     },
     {
       "path": "docs/getting-started.md",
-      "bytes": 11966,
-      "sha256": "ee4a5e8251f5ec0d901193478cc919d78a80b7f8b830f55ea6dc2d2a703f685c"
+      "bytes": 13012,
+      "sha256": "c2b87d9904d702017203352dbbf94e6b6fa8f93959b3e733bfbd8955e54521ec"
     },
     {
       "path": "docs/index.en.md",
-      "bytes": 1779,
-      "sha256": "07a07aebfca1a19c6b18f56fa680a1e2938e0c20b809f358216670794e403e2d"
+      "bytes": 108,
+      "sha256": "d70fd8773fd451b7c2a79169719bb62af1c3077f81f9d3e4a6eb20d07610bb5e"
     },
     {
       "path": "docs/native-discovery.md",
@@ -11521,43 +11556,43 @@
     },
     {
       "path": "docs/open-source.en.md",
-      "bytes": 4174,
-      "sha256": "c64a6ae5273f5bef32e03acca11111820e648b21f104d22567a2bad8ac5ce88d"
+      "bytes": 4169,
+      "sha256": "d0092b1d694753fefad56793b71d25711e9d48086ccd4b593081671ffb3341f9"
     },
     {
       "path": "docs/open-source.md",
-      "bytes": 3767,
-      "sha256": "3ecb7830418cfbaa2cbf0dd823f80013d5eab419fe6f596d1ab49a899334144d"
+      "bytes": 3791,
+      "sha256": "74b855102d2d9ba11cd38164464b37d19198350859e59a02a0251be4b2e05460"
     },
     {
       "path": "docs/plugin-authoring.en.md",
-      "bytes": 21252,
-      "sha256": "c593cdd8620ce325cb9aeeeaea52b58f2c3259efb751b8010ffdc4d9de88c1db"
+      "bytes": 21247,
+      "sha256": "f0259446c41ca397104b5153419456e122608b38833b6ac16c80a49b103fa775"
     },
     {
       "path": "docs/plugin-authoring.md",
-      "bytes": 33559,
-      "sha256": "64349c236564ff5ec6d548c1b3ef78191fc7b47d8be9254b6c1e3124b4d16f02"
+      "bytes": 33577,
+      "sha256": "ed4a5331399aaa325b678cb911f4a2876f280bd7f65d867365a10a460758d18f"
     },
     {
       "path": "docs/release-scope.en.md",
-      "bytes": 3279,
-      "sha256": "b807515fbcc8727d11a98a8b306799625ba05dc0ce836e0cd504be14742951c0"
+      "bytes": 3277,
+      "sha256": "808a7a33197153cb0c31e56b5130d86aa86710d70f02e36c8c270e620b1d4ea2"
     },
     {
       "path": "docs/release-scope.md",
-      "bytes": 3299,
-      "sha256": "eafb400b5cf595002ca9312b11d32d6968531c23fbcd6794cc37ecfdf573fde1"
+      "bytes": 3297,
+      "sha256": "e9ec77a607b2008549ebfa904ae47fd19678303e747d4933472b550c9fac3152"
     },
     {
       "path": "docs/security.zh-CN.md",
-      "bytes": 2217,
-      "sha256": "eea1a297802abf0711bfe066ca2034c6f971df13b84ea2924a89ecaa506a331c"
+      "bytes": 2229,
+      "sha256": "2d126a8d67204364bba2290755d2352d7ec3b836473b96998eb0a25179e138ac"
     },
     {
       "path": "docs/third-party-notices.en.md",
-      "bytes": 1218,
-      "sha256": "8835a8aa125c1b9a2eb7fc89e157d3a2e18d8f1c800fb2f1dcf85f790add8407"
+      "bytes": 120,
+      "sha256": "c6cebc41810203d76cc35df9abb328716464820a6b555ac819c0ba774c1a0995"
     },
     {
       "path": "hub-backend/.env.example",
@@ -11571,23 +11606,28 @@
     },
     {
       "path": "hub-backend/CONNECTOR_OAUTH.en.md",
-      "bytes": 7088,
-      "sha256": "db4423f3526162f2d939f88e55cddc9e60e04b7d6dbeec0b8716d1e3a043f897"
+      "bytes": 7085,
+      "sha256": "32d067877f39030efcec9904108d34a2a5d5e05cd927ae5cdb736c4bfe6d1832"
     },
     {
       "path": "hub-backend/CONNECTOR_OAUTH.md",
-      "bytes": 6658,
-      "sha256": "28e67bab49e20b076e0faeab9c9f7bab32e9b3abc5469e8425b17900daaadb12"
+      "bytes": 6664,
+      "sha256": "341a68f14a6982050a38e852125fe3e6449df31fab63ec679bcd9ca0fbc22885"
     },
     {
       "path": "hub-backend/README.en.md",
-      "bytes": 4756,
-      "sha256": "5cd9c7e29b04903a5b90583f34a6d967939d433053f22b4d55ad0f5e9e5198d7"
+      "bytes": 110,
+      "sha256": "c268cff4c05717dde42a2f2f5b0df1988e1a3db03838a5f8673589714ce79366"
     },
     {
       "path": "hub-backend/README.md",
-      "bytes": 5401,
-      "sha256": "e87b240066074681aacdb12177e051f28e950feab32200f21ad37b19f626f787"
+      "bytes": 5912,
+      "sha256": "09437580964eb30dba2d431cd4ca4331931e68d1820ce7de5b2a99a3b9ce9140"
+    },
+    {
+      "path": "hub-backend/README.zh-CN.md",
+      "bytes": 5938,
+      "sha256": "d7943a08c6c87eb265733d06bc5c785b5207354326f09099dfaba412185c5d20"
     },
     {
       "path": "hub-backend/alembic.ini",
@@ -14406,8 +14446,8 @@
     },
     {
       "path": "hub-backend/commercial_acceptance_manifest.py",
-      "bytes": 9362,
-      "sha256": "d5a7fc182578bbaaea659d9aa6566630687928cc42c4e8c24ec656cf51986ae6"
+      "bytes": 9574,
+      "sha256": "9d8e07aca7f098c78e88c07b1594e01cf08e8c347d2c2c76a9057584313aa85b"
     },
     {
       "path": "hub-backend/commercial_gate.py",
@@ -15111,8 +15151,8 @@
     },
     {
       "path": "hub-backend/plugin_smoke/runner.py",
-      "bytes": 3758,
-      "sha256": "9420e4eacdc9fcee6d8daabccce2cb05441f6155cefd77a34cff80732c4c7c31"
+      "bytes": 3765,
+      "sha256": "2caabe93c4b5e0d7308064017bc5cf9ddeb607801612a7bb6ce1fd972d539e22"
     },
     {
       "path": "hub-backend/plugin_smoke/support.py",
@@ -15236,13 +15276,13 @@
     },
     {
       "path": "hub-backend/product_coverage_manifest.py",
-      "bytes": 10181,
-      "sha256": "81faaec2f99ac6e7ae5e25523072123e0ab2322b08dc795488f8abfac64bcebc"
+      "bytes": 10847,
+      "sha256": "73e77ceb1c2a10547898ee05d835bfbe5c414da791b5e4fcd47a6defdc3d267f"
     },
     {
       "path": "hub-backend/public_source.py",
-      "bytes": 1332,
-      "sha256": "a8bb0cf8ebbbf773ef3e39e8961810ee79bbf9f1d88edd7cac09677448a3fbe6"
+      "bytes": 1392,
+      "sha256": "0af331b8b11af7896383857afc379f9ad2cc5e60b9db35db65d79eb02c3dd8b2"
     },
     {
       "path": "hub-backend/publish_release.py",
@@ -15251,13 +15291,13 @@
     },
     {
       "path": "hub-backend/quality_gate.py",
-      "bytes": 9852,
-      "sha256": "3d88f8ad585de71f6b9424e9209dd57349cf111e13bf924d1ea821fc935e9bbf"
+      "bytes": 9920,
+      "sha256": "83b9b103fa9afceb8a53ed27114740f50d6e03ea4e54b2eb064e6730fe4c308d"
     },
     {
       "path": "hub-backend/quality_manifest.py",
-      "bytes": 17393,
-      "sha256": "85252a65937387b0b57384e252b3d0b74706c8f2f727c37173ce9d257ee67bd2"
+      "bytes": 19082,
+      "sha256": "3fcccbfd4d4ef93d0d355994b52ab13e56c36ae81ff4c837a4f8443dfd615efc"
     },
     {
       "path": "hub-backend/repair_skill_package.py",
@@ -15325,1182 +15365,1187 @@
       "sha256": "49d8a8c32882f159e2ed3b9aa9385f4d391336a20438cf84635ebd2805d843a4"
     },
     {
-      "path": "hub-backend/smoke_access_policy.py",
-      "bytes": 30698,
-      "sha256": "372d0125a2b403250a53ef29bc460e112ab201ce1072313d0a1f334c06855e23"
+      "path": "hub-backend/smoke/__init__.py",
+      "bytes": 80,
+      "sha256": "2f4353876fced4fa0181b72d28886212458ae2db1b6839883211089e646ce62a"
     },
     {
-      "path": "hub-backend/smoke_access_scope.py",
-      "bytes": 8948,
-      "sha256": "6514ac6adff4e39a3366c11f254fe55928e999313ba3f3ab520e7541361b088d"
+      "path": "hub-backend/smoke/smoke_access_policy.py",
+      "bytes": 30735,
+      "sha256": "375bbca6a0340112da910c48b00ca6b734875b29f51266c8d2cd49abd5d29351"
     },
     {
-      "path": "hub-backend/smoke_access_transition.py",
-      "bytes": 23342,
-      "sha256": "c19df5eab58360b991d5c8d8a4ef56545752bb87d82f6d25fa97b67fc372dc56"
+      "path": "hub-backend/smoke/smoke_access_scope.py",
+      "bytes": 8955,
+      "sha256": "688dd5b3c11a058a33f7f6657251d7cf12fbc2d0cdc1d00ac9d9f96b83ef281f"
     },
     {
-      "path": "hub-backend/smoke_acp_runtime.py",
-      "bytes": 12889,
-      "sha256": "028b30acb6f56c5d6031acc177ffb7c3113dd743eaa00e489e2c7932f96ea6c4"
+      "path": "hub-backend/smoke/smoke_access_transition.py",
+      "bytes": 23379,
+      "sha256": "9d2e4442a406725dae4b73a922f9f4298dfff81cdfabb11425b8f10ebd65d199"
     },
     {
-      "path": "hub-backend/smoke_acp_team_admin.py",
+      "path": "hub-backend/smoke/smoke_acp_runtime.py",
+      "bytes": 12926,
+      "sha256": "487fef12af89ccaabbc34c35f9becb10e225d877629a33e151b472ad78e1a692"
+    },
+    {
+      "path": "hub-backend/smoke/smoke_acp_team_admin.py",
       "bytes": 6015,
       "sha256": "3b2bd53fd0cfda9d8acd5b890347933a34c5653b8d8e4b5b7c41e60bd4e6bf34"
     },
     {
-      "path": "hub-backend/smoke_admin_security.py",
+      "path": "hub-backend/smoke/smoke_admin_security.py",
       "bytes": 23320,
       "sha256": "2627b6e171bea5045dee8de2155a0c3d38bf4f7a6dbba6b8c10fbcd4bd0b8fb3"
     },
     {
-      "path": "hub-backend/smoke_agent_model.py",
+      "path": "hub-backend/smoke/smoke_agent_model.py",
       "bytes": 4799,
       "sha256": "91b05d225ea4c671cf3e6dccb7a8f46ecf950ee346a19892c1e3ad5de6322fdf"
     },
     {
-      "path": "hub-backend/smoke_agent_naming.py",
+      "path": "hub-backend/smoke/smoke_agent_naming.py",
       "bytes": 10048,
       "sha256": "e3a0ef8aa77d6f1d33343efb80a8266965789e061ac0e8f95bd485b8c5be8322"
     },
     {
-      "path": "hub-backend/smoke_agent_product_design.py",
-      "bytes": 3242,
-      "sha256": "be7120166360972c19d4a52964bf5359ce792ebcf7041184127afc3431bbe184"
+      "path": "hub-backend/smoke/smoke_agent_product_design.py",
+      "bytes": 3249,
+      "sha256": "f292ff65dbde4e938280f64ec2026815d1383ccea93636aec83e41ea6104bb91"
     },
     {
-      "path": "hub-backend/smoke_agent_switch.py",
+      "path": "hub-backend/smoke/smoke_agent_switch.py",
       "bytes": 3211,
       "sha256": "bda0113e18f2444f2d614fcb123e1ae5a979b465e4981581f2a738f01b4b69b3"
     },
     {
-      "path": "hub-backend/smoke_agents.py",
+      "path": "hub-backend/smoke/smoke_agents.py",
       "bytes": 14846,
       "sha256": "920c58dd19f4684db5cc3dccf71bd8adc6afcc4b200a00f72390432bcd534e37"
     },
     {
-      "path": "hub-backend/smoke_ai_errand.py",
+      "path": "hub-backend/smoke/smoke_ai_errand.py",
       "bytes": 4991,
       "sha256": "efea8331b459e8bcd2553e52cdb7fe1d8edbf540307d9edb1f7077575ed98db4"
     },
     {
-      "path": "hub-backend/smoke_ai_followup.py",
+      "path": "hub-backend/smoke/smoke_ai_followup.py",
       "bytes": 5812,
       "sha256": "548b5dc0e789210f1d0c6ee6f6b230caea2dc2a15079c11603fc39b966c057ca"
     },
     {
-      "path": "hub-backend/smoke_ai_proxy.py",
+      "path": "hub-backend/smoke/smoke_ai_proxy.py",
       "bytes": 11549,
       "sha256": "96bd0bef6bfc292e1dfd206e21187abd0d1c8013523ba88efc8de614d580fa29"
     },
     {
-      "path": "hub-backend/smoke_ai_review.py",
+      "path": "hub-backend/smoke/smoke_ai_review.py",
       "bytes": 8543,
       "sha256": "3320dbeecc51d5e7ebf95d0a69375ef32c23886ff09a717734468da78a090ba9"
     },
     {
-      "path": "hub-backend/smoke_ai_unreachable.py",
+      "path": "hub-backend/smoke/smoke_ai_unreachable.py",
       "bytes": 9966,
       "sha256": "1f775a5af397acd65e5cc3f879397f0315b7acb6331c9f25a0ca31117731ac8e"
     },
     {
-      "path": "hub-backend/smoke_aidesk.py",
+      "path": "hub-backend/smoke/smoke_aidesk.py",
       "bytes": 11426,
       "sha256": "784664c52184fad955dce89e05f9bdc04c9f9c7e02e712432eb45137f1f6a9b7"
     },
     {
-      "path": "hub-backend/smoke_alert.py",
+      "path": "hub-backend/smoke/smoke_alert.py",
       "bytes": 6583,
       "sha256": "78013ee2df99deee3c727040fda136dcbd538671974d0cdb43e25ec639f8f485"
     },
     {
-      "path": "hub-backend/smoke_app_publication.py",
+      "path": "hub-backend/smoke/smoke_app_publication.py",
       "bytes": 10686,
       "sha256": "0fb2815a99faa2afe5815512405f8ff7093a226f74d61b3178f181c038b14c9e"
     },
     {
-      "path": "hub-backend/smoke_applicable_flows.py",
+      "path": "hub-backend/smoke/smoke_applicable_flows.py",
       "bytes": 5898,
       "sha256": "c04a3d326ed050d65f102cddb9df38df9faa984a0cfd61facd8f5e52c258cf16"
     },
     {
-      "path": "hub-backend/smoke_approval_revoke.py",
+      "path": "hub-backend/smoke/smoke_approval_revoke.py",
       "bytes": 9824,
       "sha256": "b54566a7f0d6d246e479422950bfdd43aa8d0bda4cd578660b0e926ebf0a87d5"
     },
     {
-      "path": "hub-backend/smoke_approvals.py",
-      "bytes": 17833,
-      "sha256": "288a1c943593f76b05b424883b58b067ac090f75007ffdf1e8214e9acc22efea"
+      "path": "hub-backend/smoke/smoke_approvals.py",
+      "bytes": 17840,
+      "sha256": "5dba896383fdcc378e9b14b4b62d4759bd6ca7500aa01ee0039d750a423cae66"
     },
     {
-      "path": "hub-backend/smoke_approvals_bulk.py",
+      "path": "hub-backend/smoke/smoke_approvals_bulk.py",
       "bytes": 3489,
       "sha256": "73962869a80498957cc17abdb17e1fb1636a3bf7954404c01ea4dcfd3beae80d"
     },
     {
-      "path": "hub-backend/smoke_artifacts.py",
+      "path": "hub-backend/smoke/smoke_artifacts.py",
       "bytes": 26212,
       "sha256": "7acd5645f8e92d826a87f47cbab95b347cb36c7c3d1bfcda91e295c0d0667581"
     },
     {
-      "path": "hub-backend/smoke_audit_scope.py",
+      "path": "hub-backend/smoke/smoke_audit_scope.py",
       "bytes": 4374,
       "sha256": "f85223167d2ea63fd4863e05893060c11f22e2e67649c6698eefa02587d94402"
     },
     {
-      "path": "hub-backend/smoke_autobatch_flow.py",
+      "path": "hub-backend/smoke/smoke_autobatch_flow.py",
       "bytes": 9475,
       "sha256": "64db9d0f2e5884b0e8457600ab4caae1573c779968129954a5653beebe07fd29"
     },
     {
-      "path": "hub-backend/smoke_automation_templates.py",
+      "path": "hub-backend/smoke/smoke_automation_templates.py",
       "bytes": 1872,
       "sha256": "4731023ef322958edf6552bd2378d33af9f929d7d3564a1b124137c7a5af09a5"
     },
     {
-      "path": "hub-backend/smoke_builtin_delivery_e2e.py",
-      "bytes": 22956,
-      "sha256": "00dc87d63747ef548aaee7aa58e6d099b6f2e419d4e291252181ad6350c336ac"
+      "path": "hub-backend/smoke/smoke_builtin_delivery_e2e.py",
+      "bytes": 22973,
+      "sha256": "ee69707acf4dcc7dbfbc2765189333f94c12a5c90a1361e5cf109453427dad80"
     },
     {
-      "path": "hub-backend/smoke_capabilities.py",
+      "path": "hub-backend/smoke/smoke_capabilities.py",
       "bytes": 14772,
       "sha256": "29621f1e01479c826988cf08c3898656e00c38bff10549587a20e94efc8c502c"
     },
     {
-      "path": "hub-backend/smoke_change_password.py",
+      "path": "hub-backend/smoke/smoke_change_password.py",
       "bytes": 8129,
       "sha256": "a70f2d78983968469fb99b795ecd019c03044b98eb80058862fea661e04c39d9"
     },
     {
-      "path": "hub-backend/smoke_claude_thinking.py",
+      "path": "hub-backend/smoke/smoke_claude_thinking.py",
       "bytes": 3206,
       "sha256": "b56ab1e67c3d3b8007f315b6b225c21390bc5e76a9d4e745f9283952f1b76762"
     },
     {
-      "path": "hub-backend/smoke_client_auth.py",
+      "path": "hub-backend/smoke/smoke_client_auth.py",
       "bytes": 12885,
       "sha256": "37f411216953c1c92b99947a2c8275258d7501a293e616fd247b650e514c9806"
     },
     {
-      "path": "hub-backend/smoke_client_download.py",
+      "path": "hub-backend/smoke/smoke_client_download.py",
       "bytes": 2283,
       "sha256": "aa5e703a54e5343e0f207cad7d24ebb337f638aa46911339b580e2c9933ae68c"
     },
     {
-      "path": "hub-backend/smoke_client_release_bundle.py",
-      "bytes": 4378,
-      "sha256": "71ac2046092e1f213291aacb76bf5f6220f942f16e0f6549d8b5461bda995168"
+      "path": "hub-backend/smoke/smoke_client_release_bundle.py",
+      "bytes": 4385,
+      "sha256": "0d41f45b6e5510883ad504a21c5ae37457dd65ac07f5376246582f969f0f32f4"
     },
     {
-      "path": "hub-backend/smoke_client_release_multichannel.py",
-      "bytes": 11181,
-      "sha256": "86651fca906503f0b6cc9d502a68a11155d9ebaa4c3cc255be6e8739925efb28"
+      "path": "hub-backend/smoke/smoke_client_release_multichannel.py",
+      "bytes": 11188,
+      "sha256": "6f4b952c19eb33f0a535ddf3cb20497c9cfe02e9f017753ac99daf7f446592cb"
     },
     {
-      "path": "hub-backend/smoke_client_release_pipeline.py",
+      "path": "hub-backend/smoke/smoke_client_release_pipeline.py",
       "bytes": 16420,
-      "sha256": "8cd9ceeded79c9e28ffdef77763ba3524931bdb327437b6350e1fe48fc4cea19"
+      "sha256": "fe8a30afb4f1e191a2b3a4de974aedc49580753fa08a183721b1b2d1c24df24e"
     },
     {
-      "path": "hub-backend/smoke_client_release_uploader.py",
-      "bytes": 5761,
-      "sha256": "8bf376e620c4f79d407651db452adc723a2b9c262788ceacf784fa23b89497ff"
+      "path": "hub-backend/smoke/smoke_client_release_uploader.py",
+      "bytes": 5768,
+      "sha256": "75cc44b13809c2595a187e8b93bde963c093ab53ce1248c02414c76784faa37a"
     },
     {
-      "path": "hub-backend/smoke_client_render.py",
-      "bytes": 3202,
-      "sha256": "67eaeb4c561ce7a77853f05d161c1af5ccc0b107bc494757f99b76339699af73"
+      "path": "hub-backend/smoke/smoke_client_render.py",
+      "bytes": 3219,
+      "sha256": "0c4e005eb0f2c6d359f3bce1f4584b654d971c8488b38cdd33545be8bf72b0f0"
     },
     {
-      "path": "hub-backend/smoke_client_update_api.py",
+      "path": "hub-backend/smoke/smoke_client_update_api.py",
       "bytes": 8991,
       "sha256": "7a4e9b00561c487b506a9e228008e622ba09d034bbcd889f3e345260963627f3"
     },
     {
-      "path": "hub-backend/smoke_client_update_supersession.py",
+      "path": "hub-backend/smoke/smoke_client_update_supersession.py",
       "bytes": 5478,
       "sha256": "83b39e1e09053d2974d9bb728e52c4838269768937898c3d1ebe536ca69e779b"
     },
     {
-      "path": "hub-backend/smoke_client_updates.py",
-      "bytes": 3013,
-      "sha256": "ab2361f71ae573013b2f9208c639901ac37633309a40a67b5cd25c287cc18ab5"
+      "path": "hub-backend/smoke/smoke_client_updates.py",
+      "bytes": 3020,
+      "sha256": "43afbbe92822ce2058f38b51dec305e1ead65e35b91ca8a2ffa465dd0fa7f50b"
     },
     {
-      "path": "hub-backend/smoke_cloud_durable_execution.py",
+      "path": "hub-backend/smoke/smoke_cloud_durable_execution.py",
       "bytes": 311,
       "sha256": "1e04e1c741dcd3c71823227457031182054b054b466b61d0d41ad30ee26b9ca9"
     },
     {
-      "path": "hub-backend/smoke_cluster_contract.py",
+      "path": "hub-backend/smoke/smoke_cluster_contract.py",
       "bytes": 526,
       "sha256": "3c9513deb4074b33cbd94e6abe2f63c7d5ba9648f866ad9ead2cd6a0ea56dbcb"
     },
     {
-      "path": "hub-backend/smoke_codex_cli.py",
-      "bytes": 11692,
-      "sha256": "d1d2fc79ebe3f007318997531b26173b55ec79e5ed349047bfa00d3a84513a29"
+      "path": "hub-backend/smoke/smoke_codex_cli.py",
+      "bytes": 11698,
+      "sha256": "c7ad8f87069d29eef3621edeac95a9a358996ec9125b139c511fb0bcedb32677"
     },
     {
-      "path": "hub-backend/smoke_codex_permissions.py",
+      "path": "hub-backend/smoke/smoke_codex_permissions.py",
       "bytes": 408,
       "sha256": "5322fd5c9d65e6a83eaf791bf6766f409221e4fc581dcc64afe2bb3c7856e24e"
     },
     {
-      "path": "hub-backend/smoke_codex_workflow_runtime.py",
-      "bytes": 4742,
-      "sha256": "b2389c489fddfd2828e5c5dd37adf7dd391abb08dc15b0e429fd684e25cdcc11"
+      "path": "hub-backend/smoke/smoke_codex_workflow_runtime.py",
+      "bytes": 4759,
+      "sha256": "9b5bf126c4dec55416473c56d6763e579fb9c9f38be0d093e6e6bc8307360cd0"
     },
     {
-      "path": "hub-backend/smoke_commercial_gate.py",
-      "bytes": 6357,
-      "sha256": "d05e60a0b2b0fc972926e768362d257775ba5108f9acfb60323008d087b66b1c"
+      "path": "hub-backend/smoke/smoke_commercial_gate.py",
+      "bytes": 6364,
+      "sha256": "f99be5ecfa2d16bb71d9a922de51f73730b09a34545998b57cad4bc421cc4cec"
     },
     {
-      "path": "hub-backend/smoke_console_merge.py",
+      "path": "hub-backend/smoke/smoke_console_merge.py",
       "bytes": 4777,
       "sha256": "6b7fdaf8234b92fa836c44a7cfd223091bdb6650c4c5f32d80fd06185a99bba3"
     },
     {
-      "path": "hub-backend/smoke_context_recovery.py",
+      "path": "hub-backend/smoke/smoke_context_recovery.py",
       "bytes": 433,
       "sha256": "d9f287bc52ab370217220b9ca067d108e10f758c3e1c55509e16d4c22199d34f"
     },
     {
-      "path": "hub-backend/smoke_conversation_ui.py",
+      "path": "hub-backend/smoke/smoke_conversation_ui.py",
       "bytes": 7367,
-      "sha256": "709f5ad57dc53698f3705cd324489c777fd9b6a6de553bc0ba7bb5b7a5678b61"
+      "sha256": "9683aeefb8498afa948876c1e54465b483dc86f233dbd7c60f575f68d52ab26b"
     },
     {
-      "path": "hub-backend/smoke_critical_plugin_evaluations.py",
-      "bytes": 4081,
-      "sha256": "9d5a67ca0edd1eb08a7368fa8c2f367182b9f64d25b61ed435d40711c8b03c18"
+      "path": "hub-backend/smoke/smoke_critical_plugin_evaluations.py",
+      "bytes": 4098,
+      "sha256": "684214937b8b306a084540943579440b125e5d59287057d96417e459ff54a535"
     },
     {
-      "path": "hub-backend/smoke_current_device_dispatch.py",
-      "bytes": 13288,
-      "sha256": "6beb71cbc4ba138340149e49728cbeac83f28423213e68d365e358c89ecc375c"
+      "path": "hub-backend/smoke/smoke_current_device_dispatch.py",
+      "bytes": 13295,
+      "sha256": "8834f7d1cc263aefd13dbcbacaa15f69ab304ebbf7d664ad07dcb7046925c437"
     },
     {
-      "path": "hub-backend/smoke_database_backup.py",
+      "path": "hub-backend/smoke/smoke_database_backup.py",
       "bytes": 2704,
       "sha256": "ab96c80dbe8a88ac6bd52750aaf2a03a653bf4e2f0c12f745276fb5db56133ab"
     },
     {
-      "path": "hub-backend/smoke_delivery_audit.py",
-      "bytes": 4104,
-      "sha256": "f778e588041a2ff9184e3da9f0969684da273901e679e7d9783a9ed0437f45d7"
+      "path": "hub-backend/smoke/smoke_delivery_audit.py",
+      "bytes": 4121,
+      "sha256": "c48bb24a19f6f755392370a6466c470dc9b722e031791e28f91b3704c0cc97ae"
     },
     {
-      "path": "hub-backend/smoke_delivery_board.py",
+      "path": "hub-backend/smoke/smoke_delivery_board.py",
       "bytes": 7697,
       "sha256": "601448170942621f7b4f20ebccc414994f65e8c9773d1c5c512f2df92cb01203"
     },
     {
-      "path": "hub-backend/smoke_delivery_truth.py",
+      "path": "hub-backend/smoke/smoke_delivery_truth.py",
       "bytes": 21278,
       "sha256": "6b3a821349d08b802ccf20c37b9bf76696aca2f94b8b4939caa3fff1adeb48de"
     },
     {
-      "path": "hub-backend/smoke_deploy.py",
+      "path": "hub-backend/smoke/smoke_deploy.py",
       "bytes": 11235,
       "sha256": "9eee33ce7092aa78d4cf151227cdae7d96c1ce9d5669ea48f33aedd0b317f51f"
     },
     {
-      "path": "hub-backend/smoke_deploy_argv.py",
+      "path": "hub-backend/smoke/smoke_deploy_argv.py",
       "bytes": 1941,
       "sha256": "e83a85d0cea53248e508ff9456a00dc3f13eba717b01b9486f9ca27c20569eb3"
     },
     {
-      "path": "hub-backend/smoke_deploy_assert.py",
+      "path": "hub-backend/smoke/smoke_deploy_assert.py",
       "bytes": 9065,
       "sha256": "a7594379570e66788cf6c9496fdfd595ecf5bc0d2b1b0dce0b662142969a302e"
     },
     {
-      "path": "hub-backend/smoke_deploy_failkind.py",
+      "path": "hub-backend/smoke/smoke_deploy_failkind.py",
       "bytes": 9302,
       "sha256": "f18b8c7acc2515a7ee88355e0ee53d5cc8bdd5da76eaa2d7480875482c5174ee"
     },
     {
-      "path": "hub-backend/smoke_deployment_client_release.py",
-      "bytes": 11579,
-      "sha256": "496ed35604647ce280b10001bb39b72d11b131371f938360536f111d5f63221a"
+      "path": "hub-backend/smoke/smoke_deployment_client_release.py",
+      "bytes": 11586,
+      "sha256": "4f43e59a9da9ff788f0eb981880ed8bb4b241aecbf8fa9fc98627bb49d6dfaed"
     },
     {
-      "path": "hub-backend/smoke_deployment_fifo.py",
-      "bytes": 7141,
-      "sha256": "5eee138a02b4e7f7738dea72907787731ecdf38b40daddc2315026a6f7f8a93d"
+      "path": "hub-backend/smoke/smoke_deployment_fifo.py",
+      "bytes": 7158,
+      "sha256": "dc2b9434e9512ea95921c7ece27c6411bf6e2c4e0283aaf6dc59b9e9100fcedd"
     },
     {
-      "path": "hub-backend/smoke_deployment_runner_binding.py",
-      "bytes": 3507,
-      "sha256": "379ad96b96b9875f171e3462ff444e05c1851e5053d10fac7db44db191c5d562"
+      "path": "hub-backend/smoke/smoke_deployment_runner_binding.py",
+      "bytes": 3514,
+      "sha256": "115094b358d6afca95dbcb87dd84eaa54c455a66365e9feafb181b7ba5eb9b2f"
     },
     {
-      "path": "hub-backend/smoke_desktop_control.py",
+      "path": "hub-backend/smoke/smoke_desktop_control.py",
       "bytes": 3952,
       "sha256": "43f06c3a94ea89cc57e52910b95fc9935055bfca3442c31dea8beb342b17eb42"
     },
     {
-      "path": "hub-backend/smoke_devflow.py",
+      "path": "hub-backend/smoke/smoke_devflow.py",
       "bytes": 9324,
       "sha256": "ea3511ca3002ee0dde9b74fbc08d55ebc291263641aa5adea3fbb167f329e45a"
     },
     {
-      "path": "hub-backend/smoke_devflow_api.py",
-      "bytes": 7529,
-      "sha256": "f3bfbf55ba80df9a2cdd8cf6bcd4cffe5e8bfa2bc1fb859fa1c41abae626671f"
+      "path": "hub-backend/smoke/smoke_devflow_api.py",
+      "bytes": 7526,
+      "sha256": "7732c8dc112c247784742f4ce2db71200747e4aa59ea10b32cb35c101e7acfa5"
     },
     {
-      "path": "hub-backend/smoke_device_security.py",
-      "bytes": 21273,
-      "sha256": "be2ba08e118270e00299e2f31d2d9d7f21e805d25307fca1c7f95c588feec357"
+      "path": "hub-backend/smoke/smoke_device_security.py",
+      "bytes": 21280,
+      "sha256": "d49e52ae3a14e77f959aa4ef980c20d46c8f3b956d92a3e5820b74d1bebe9769"
     },
     {
-      "path": "hub-backend/smoke_dispatch_reconcile.py",
+      "path": "hub-backend/smoke/smoke_dispatch_reconcile.py",
       "bytes": 11724,
       "sha256": "eafe155fabe6d9e8793e8606640eadc27ee2b001b6b3eaa4818bf8596d6c7fdb"
     },
     {
-      "path": "hub-backend/smoke_dispatch_reliability.py",
+      "path": "hub-backend/smoke/smoke_dispatch_reliability.py",
       "bytes": 21247,
       "sha256": "6a86dce906e2f7a5c52a88d90507423aee6f3568ccc9ad093d9bf9dbad878447"
     },
     {
-      "path": "hub-backend/smoke_dsh_runtime.py",
+      "path": "hub-backend/smoke/smoke_dsh_runtime.py",
       "bytes": 17512,
       "sha256": "170c1703914b73cf27466dd85c81ee0472f3ad242cdfd9c82dc877e021ac7eaa"
     },
     {
-      "path": "hub-backend/smoke_enterprise_delivery_http.py",
-      "bytes": 14145,
-      "sha256": "6fcea950ae8a8a048c737bd356743631bb9cddaedfe06f3c350c1cee79c58e55"
+      "path": "hub-backend/smoke/smoke_enterprise_delivery_http.py",
+      "bytes": 14152,
+      "sha256": "71e7609c3a16a4901415b2580f083ebdb10ee8b909c92b27ca09b8b63f2fc5e4"
     },
     {
-      "path": "hub-backend/smoke_enterprise_workflows.py",
-      "bytes": 11541,
-      "sha256": "026f4dd98b829e46429b0fc9c88c960d382c61c076c8ce651ce2eff236b33bbf"
+      "path": "hub-backend/smoke/smoke_enterprise_workflows.py",
+      "bytes": 11558,
+      "sha256": "27c6115e3b1f7cccf2580471b45dcb73914ca88cbe1ad128091db7ebfcc3ea0b"
     },
     {
-      "path": "hub-backend/smoke_environment_config.py",
+      "path": "hub-backend/smoke/smoke_environment_config.py",
       "bytes": 12521,
       "sha256": "dac97b51a87dc48a92414857198e7650982363818562e098d2ed1f7ac3fa8dfa"
     },
     {
-      "path": "hub-backend/smoke_execution_capabilities.py",
+      "path": "hub-backend/smoke/smoke_execution_capabilities.py",
       "bytes": 18586,
       "sha256": "89fb0175a4e871ea09e75c537afa42bcd72358b3dafa87a87998c69882c0d252"
     },
     {
-      "path": "hub-backend/smoke_execution_context.py",
+      "path": "hub-backend/smoke/smoke_execution_context.py",
       "bytes": 4076,
       "sha256": "e2d10ec7f5af9317300010f850ccc6c0a8633ee23b449513ba3f132e87d37d7c"
     },
     {
-      "path": "hub-backend/smoke_execution_context_http.py",
+      "path": "hub-backend/smoke/smoke_execution_context_http.py",
       "bytes": 12405,
       "sha256": "0c5a841691196ecd5e13f03b9c15a0f19c158796bb2aa8c56cf578a43bf9fafd"
     },
     {
-      "path": "hub-backend/smoke_execution_event_policy.py",
+      "path": "hub-backend/smoke/smoke_execution_event_policy.py",
       "bytes": 2944,
       "sha256": "256795aceead8522ca732557dfafaa21a4ce1713514c9e3a882a22cced43ff44"
     },
     {
-      "path": "hub-backend/smoke_execution_live.py",
-      "bytes": 13668,
-      "sha256": "e9313137c4a544b24826e046290031834f30c87e6ea4158552ee69a8046cf807"
+      "path": "hub-backend/smoke/smoke_execution_live.py",
+      "bytes": 13685,
+      "sha256": "ed89d45b4c7b8dafd8a827e3cb7489fd5415fc85ddd1e3cec744a9802b308b5c"
     },
     {
-      "path": "hub-backend/smoke_execution_names.py",
+      "path": "hub-backend/smoke/smoke_execution_names.py",
       "bytes": 11655,
       "sha256": "c77e460e717356ee86e66228040f2410d6397cb0e1d7ef8228750a3f57fbe5f4"
     },
     {
-      "path": "hub-backend/smoke_execution_policy.py",
+      "path": "hub-backend/smoke/smoke_execution_policy.py",
       "bytes": 11208,
       "sha256": "70e65fe328fc16a4e2b733af06c4a5af5e302f8dfc988dfd3ed0bdf1ba262b4f"
     },
     {
-      "path": "hub-backend/smoke_execution_sessions.py",
+      "path": "hub-backend/smoke/smoke_execution_sessions.py",
       "bytes": 28817,
       "sha256": "1268a7765f94ca312edeab162413bed8cd2613f28652b1c81b2d09eb2496f6a1"
     },
     {
-      "path": "hub-backend/smoke_failure_exit.py",
+      "path": "hub-backend/smoke/smoke_failure_exit.py",
       "bytes": 12679,
       "sha256": "f1689c8569f580d4105d4201907760c1c55705b6c63a6d35daa14bce3103db3e"
     },
     {
-      "path": "hub-backend/smoke_flow_retired.py",
+      "path": "hub-backend/smoke/smoke_flow_retired.py",
       "bytes": 3187,
       "sha256": "90853a43b35be4b7426d485ddfb3e531c32f3c3a73b9473a6f4cfc9041654659"
     },
     {
-      "path": "hub-backend/smoke_full_backup.py",
+      "path": "hub-backend/smoke/smoke_full_backup.py",
       "bytes": 5869,
       "sha256": "dac1a020323f5e2f9ac9c67a710b949f90dad0c6b4e9435fd428074242e81883"
     },
     {
-      "path": "hub-backend/smoke_gate_contract.py",
+      "path": "hub-backend/smoke/smoke_gate_contract.py",
       "bytes": 19928,
       "sha256": "fe2c4ca0f549b8796dfde7e60e252b08bf9944660680b5b90f118c624e22cb7a"
     },
     {
-      "path": "hub-backend/smoke_gate_steps.py",
+      "path": "hub-backend/smoke/smoke_gate_steps.py",
       "bytes": 2567,
       "sha256": "578c69b2dfef5c389dad171ee4bfd11a133bd9472c370e7bca86f39c8c2cb81d"
     },
     {
-      "path": "hub-backend/smoke_git_delivery_coalescing.py",
+      "path": "hub-backend/smoke/smoke_git_delivery_coalescing.py",
       "bytes": 4972,
       "sha256": "c620fb4e5158f96aa65b63b9038f7b1d329f4ec447b2cbdd07659be616c845bf"
     },
     {
-      "path": "hub-backend/smoke_git_probe.py",
+      "path": "hub-backend/smoke/smoke_git_probe.py",
       "bytes": 5808,
       "sha256": "3b8aa6881aeb5f004201ddc0c850d4c611f39762bfd2026e411602dbb9332e8d"
     },
     {
-      "path": "hub-backend/smoke_gitcreds.py",
+      "path": "hub-backend/smoke/smoke_gitcreds.py",
       "bytes": 11585,
       "sha256": "c705c80f19753603dd8289fba392bfdac56af5cadc7a03fe93ae90ad765ad528"
     },
     {
-      "path": "hub-backend/smoke_golden_delivery.py",
+      "path": "hub-backend/smoke/smoke_golden_delivery.py",
       "bytes": 18941,
       "sha256": "fab3714c82c3beb28dfed3ab3e6329358f55d76570cd582405b82e97e6a1dd0b"
     },
     {
-      "path": "hub-backend/smoke_handoff.py",
+      "path": "hub-backend/smoke/smoke_handoff.py",
       "bytes": 6060,
       "sha256": "e610d89483d0448e5829986dc04eb29457cf9716cd09409640cd9f9a963eabc1"
     },
     {
-      "path": "hub-backend/smoke_human_task_routing.py",
-      "bytes": 8794,
-      "sha256": "5f92cf07ad439e85d94f4483da8d32839608a1746b0927b91f66dc667764c617"
+      "path": "hub-backend/smoke/smoke_human_task_routing.py",
+      "bytes": 8801,
+      "sha256": "40727528b490143629e40625d02c46ff688992d32e0f3d9b8f534d012290f8d4"
     },
     {
-      "path": "hub-backend/smoke_identity.py",
+      "path": "hub-backend/smoke/smoke_identity.py",
       "bytes": 7914,
       "sha256": "f086ad867aeb9acb66b81fdc33260db4122f1ff00f86ea6c862665d1c8b3e3e3"
     },
     {
-      "path": "hub-backend/smoke_inactive_team_members.py",
-      "bytes": 5132,
-      "sha256": "1e866eb46bc7efe8b80daf0d181c92acd7d86bc093837e6c9f0f44ac09aafa51"
+      "path": "hub-backend/smoke/smoke_inactive_team_members.py",
+      "bytes": 5139,
+      "sha256": "e7d46528679e1402c45940e604411ad6189010041c11a1ca0b43aba59b6e0d73"
     },
     {
-      "path": "hub-backend/smoke_jiyong_cloud_postgres.py",
-      "bytes": 16875,
-      "sha256": "c144c371206b4abaecdc2f5a78defcc77b322988431b9e246ffd806f19a6f361"
+      "path": "hub-backend/smoke/smoke_jiyong_cloud_postgres.py",
+      "bytes": 17669,
+      "sha256": "5b3c9c1fd64b47df76e493684a9d405144977c8d1b71f0520ed4da33482a7bbc"
     },
     {
-      "path": "hub-backend/smoke_live_push.py",
+      "path": "hub-backend/smoke/smoke_live_push.py",
       "bytes": 14619,
       "sha256": "98c520aae44edcd3c1f8124cc086aae36803776f2b65492e069de859514ca4be"
     },
     {
-      "path": "hub-backend/smoke_live_view_cache.py",
+      "path": "hub-backend/smoke/smoke_live_view_cache.py",
       "bytes": 3110,
       "sha256": "d32c8b603e3bd5e68eb4f824a39e8f278960c0c15b73e91de800c2809eb55dde"
     },
     {
-      "path": "hub-backend/smoke_local_env_guards.py",
+      "path": "hub-backend/smoke/smoke_local_env_guards.py",
       "bytes": 12397,
-      "sha256": "70dce1d027fc6bdd697fc27c8835e85ce555c689b3afd4e4384475204ffe51af"
+      "sha256": "21c4cca0d8bb6214b656093d8d4b28a30ad3fe619fd48a2fb84bc9bf7da11c60"
     },
     {
-      "path": "hub-backend/smoke_local_metadata.py",
+      "path": "hub-backend/smoke/smoke_local_metadata.py",
       "bytes": 10627,
       "sha256": "000e8c26741c8f6bb320a9e781d9165a0d4fe068868ca0552029ac09486d47e6"
     },
     {
-      "path": "hub-backend/smoke_log_safety.py",
+      "path": "hub-backend/smoke/smoke_log_safety.py",
       "bytes": 4277,
       "sha256": "de78aa927e8c6d2e0ccda8eb21786a46c1d8201b230823b336b4d1d42ee0ebb1"
     },
     {
-      "path": "hub-backend/smoke_managed_agents.py",
+      "path": "hub-backend/smoke/smoke_managed_agents.py",
       "bytes": 5988,
       "sha256": "370a0577f61d014bc327b4579065c2f01c7a78e0c20fb87b998b04e0d76d0aaa"
     },
     {
-      "path": "hub-backend/smoke_managed_work_route.py",
+      "path": "hub-backend/smoke/smoke_managed_work_route.py",
       "bytes": 11177,
       "sha256": "5f411b905dfd6997334d879a30c37825acbd9555ea4a748742bf1f26387f66bd"
     },
     {
-      "path": "hub-backend/smoke_mcp_http.py",
-      "bytes": 10552,
-      "sha256": "7ca2ef18b5a8d3d712fac7fe481c7cca12fa60a74220828680666a3f981e4a69"
+      "path": "hub-backend/smoke/smoke_mcp_http.py",
+      "bytes": 10559,
+      "sha256": "470c7609e5d300060e0d88987b92a603786214dcaa51699bc5e39954c43f42f9"
     },
     {
-      "path": "hub-backend/smoke_mcp_runner_probe.py",
+      "path": "hub-backend/smoke/smoke_mcp_runner_probe.py",
       "bytes": 9152,
       "sha256": "69a760175f6edc7b21b0fabedf2dab4b07971a9f94e5f7ff039d76706d759d31"
     },
     {
-      "path": "hub-backend/smoke_mcp_transport.py",
+      "path": "hub-backend/smoke/smoke_mcp_transport.py",
       "bytes": 321,
       "sha256": "3e90f0c2ebee6fae698903f00f8d57eeaaa11babaac46108f678316df106d777"
     },
     {
-      "path": "hub-backend/smoke_mcp_ui.py",
+      "path": "hub-backend/smoke/smoke_mcp_ui.py",
       "bytes": 3032,
-      "sha256": "eed24533ba48ad74180dba202452a736b49a62f92334b2becac1cba5603a19d2"
+      "sha256": "242b867366755b79cb3c50ae6142dc03f8677fd540cbf41708623d44cffe2eca"
     },
     {
-      "path": "hub-backend/smoke_merge_reauth.py",
+      "path": "hub-backend/smoke/smoke_merge_reauth.py",
       "bytes": 5983,
       "sha256": "7441c7fc691fce384607d9d79f9c3a8ef47569a5c3be84863693d48a4767c411"
     },
     {
-      "path": "hub-backend/smoke_model_alias.py",
+      "path": "hub-backend/smoke/smoke_model_alias.py",
       "bytes": 4868,
       "sha256": "5b4293456a4314ab2ff855cdaa61e272bf7a1e5cc31d0efb79600593773ea426"
     },
     {
-      "path": "hub-backend/smoke_model_concurrency.py",
+      "path": "hub-backend/smoke/smoke_model_concurrency.py",
       "bytes": 585,
       "sha256": "c85ba5a1d3c9065f46cdec66638df1ec002f32a1a208a1e764dbbccbf0342970"
     },
     {
-      "path": "hub-backend/smoke_model_transport_socket.py",
-      "bytes": 4584,
-      "sha256": "00f1fb32c67adba65403b0687bd102ab9c275bee3776a7c8960d61a2e8456dd4"
+      "path": "hub-backend/smoke/smoke_model_transport_socket.py",
+      "bytes": 4670,
+      "sha256": "b0089019a1f3cd44da8a4f5c77299eb3ef2fecbae2311eac5bb624f334299235"
     },
     {
-      "path": "hub-backend/smoke_models.py",
+      "path": "hub-backend/smoke/smoke_models.py",
       "bytes": 12158,
       "sha256": "122bf28cff8c816b51d9203de09271bd7076af3e97e9006ba2fc37b8a3eab6dd"
     },
     {
-      "path": "hub-backend/smoke_noask.py",
+      "path": "hub-backend/smoke/smoke_noask.py",
       "bytes": 12286,
       "sha256": "e537afb2af07c081bb6b0e1a9ad218c0d620885e581a15bbbd7bd4513538473d"
     },
     {
-      "path": "hub-backend/smoke_office_plugins.py",
+      "path": "hub-backend/smoke/smoke_office_plugins.py",
       "bytes": 9245,
       "sha256": "2c05407a7eda7f2ecc875d83ad22c4ada050470051dc924a237b1069e036ea70"
     },
     {
-      "path": "hub-backend/smoke_officecli_detection.py",
+      "path": "hub-backend/smoke/smoke_officecli_detection.py",
       "bytes": 2269,
       "sha256": "9ac009cc412d755f5cb88b825004aacda3fbe1168d7c7d999260e61756bcb360"
     },
     {
-      "path": "hub-backend/smoke_operations.py",
+      "path": "hub-backend/smoke/smoke_operations.py",
       "bytes": 3385,
       "sha256": "e82e9579895d605874a4022ded3880341eddfcdd23667ec933f224586d8ac92e"
     },
     {
-      "path": "hub-backend/smoke_operations_insights.py",
+      "path": "hub-backend/smoke/smoke_operations_insights.py",
       "bytes": 11337,
       "sha256": "d82b77e65dc94b9456a3a148748ba00a7da1ddbc354056acca4928f9cf3ca50d"
     },
     {
-      "path": "hub-backend/smoke_personal_automation.py",
+      "path": "hub-backend/smoke/smoke_personal_automation.py",
       "bytes": 17028,
       "sha256": "8178731617c66afa1610b5f8484548baca006b8c54e977e67b3d19b0642d7af8"
     },
     {
-      "path": "hub-backend/smoke_plugin_admin_guard.py",
-      "bytes": 7764,
-      "sha256": "c32e47632c0fbca4212b680b82c7dba41248e68f64dd89c548d4f79a1894c333"
+      "path": "hub-backend/smoke/smoke_plugin_admin_guard.py",
+      "bytes": 7781,
+      "sha256": "4fd982a08d26837d6ad7efb5c4b02b0f11394f913507cfaba50ea7103f49ec3f"
     },
     {
-      "path": "hub-backend/smoke_plugin_advanced_draft.py",
-      "bytes": 10375,
-      "sha256": "7602b861c414b6d84011d3138a54427cefd1dc4615b90f68264439cbb5e486ea"
+      "path": "hub-backend/smoke/smoke_plugin_advanced_draft.py",
+      "bytes": 10382,
+      "sha256": "8d7ad73416de32bae04a0bbaf7fc57b0e09a3fa3b8978b503675f6ef4c3ce463"
     },
     {
-      "path": "hub-backend/smoke_plugin_audience.py",
+      "path": "hub-backend/smoke/smoke_plugin_audience.py",
       "bytes": 15790,
       "sha256": "d8eb062eb85cea293b14f762e74048a3c0f2698e6d73cede98a9997bdfe55692"
     },
     {
-      "path": "hub-backend/smoke_plugin_capability_package.py",
-      "bytes": 9433,
-      "sha256": "378b2cc38b427265efc42406d7ee1be5ec33ee118131741332f2b28e745cfe3c"
+      "path": "hub-backend/smoke/smoke_plugin_capability_package.py",
+      "bytes": 9450,
+      "sha256": "1519fa460819ae26289e6f489e312f174339085823f526dc5a3493b3fe8f25ec"
     },
     {
-      "path": "hub-backend/smoke_plugin_client_api.py",
+      "path": "hub-backend/smoke/smoke_plugin_client_api.py",
       "bytes": 19505,
       "sha256": "f007f4f640d4bcefedd398bc5ee645dc5d5f77579fa06ed1c7317f0d511e8636"
     },
     {
-      "path": "hub-backend/smoke_plugin_conversation.py",
+      "path": "hub-backend/smoke/smoke_plugin_conversation.py",
       "bytes": 11705,
       "sha256": "0887b72e92ce7b3c7389a1e6b6b9522994fc12cf812d2c0713c46b2ade885ee6"
     },
     {
-      "path": "hub-backend/smoke_plugin_e2e.py",
-      "bytes": 11284,
-      "sha256": "77a6ec2c979b09817a98ea355c094e83a44da735fa62f59ac7ed13e2243a08ee"
+      "path": "hub-backend/smoke/smoke_plugin_e2e.py",
+      "bytes": 11291,
+      "sha256": "de2a34647149c9a4f4a8ab325283747bd2fe7e0e809df3397a25921de2f33d54"
     },
     {
-      "path": "hub-backend/smoke_plugin_employee_catalog.py",
+      "path": "hub-backend/smoke/smoke_plugin_employee_catalog.py",
       "bytes": 23139,
       "sha256": "05149b7e31f4f952608f147a0d4171f75f3056ab979b3983c0508c16d772c30c"
     },
     {
-      "path": "hub-backend/smoke_plugin_evaluations.py",
-      "bytes": 11963,
-      "sha256": "e70460c1340d593d37b3b51995a631ffca8445ca32fc823876c22529bedb7a38"
+      "path": "hub-backend/smoke/smoke_plugin_evaluations.py",
+      "bytes": 11980,
+      "sha256": "47122c13da3e8c5bd01420b4adccb664196f20db83ef39ec9717f95001086f74"
     },
     {
-      "path": "hub-backend/smoke_plugin_governance.py",
-      "bytes": 6650,
-      "sha256": "c02a51e79dbd8b493892962e4ac8ac3980e8e67c528225f2f55207ba7b4b9c97"
+      "path": "hub-backend/smoke/smoke_plugin_governance.py",
+      "bytes": 6667,
+      "sha256": "463d30920b04db42f9f0c3d7f7e8ae3336b05bec55cae40e828d0d0e66e55a6c"
     },
     {
-      "path": "hub-backend/smoke_plugin_identity.py",
-      "bytes": 7154,
-      "sha256": "92eed1b672bdc775d67cd7f60737909ab1a782a9a65bdb5894a68f8c7f53bf1f"
+      "path": "hub-backend/smoke/smoke_plugin_identity.py",
+      "bytes": 7161,
+      "sha256": "36b56b8a2f2cc041c5a2db50e3620705ecf31139de684b4ed65e13777ff28e0d"
     },
     {
-      "path": "hub-backend/smoke_plugin_marketplace.py",
+      "path": "hub-backend/smoke/smoke_plugin_marketplace.py",
       "bytes": 19564,
       "sha256": "977fb431d7d2d296c023a04d41958aa023923e291c6640e16860f536f74444dd"
     },
     {
-      "path": "hub-backend/smoke_plugin_mcp_gateway.py",
+      "path": "hub-backend/smoke/smoke_plugin_mcp_gateway.py",
       "bytes": 26781,
       "sha256": "001e9aeb929dc5f0d4ec12905aac882db12790ae6dd92deff41a869eedc32daa"
     },
     {
-      "path": "hub-backend/smoke_plugin_process.py",
-      "bytes": 4640,
-      "sha256": "e554ef98bfb35effd73cc47791ef65536e83a2ca88320c783b5a63194a54b29d"
+      "path": "hub-backend/smoke/smoke_plugin_process.py",
+      "bytes": 4657,
+      "sha256": "6327bdfff5767057d1e2be7cdae144d14b3835536bbe945e4a9d35315cb485d1"
     },
     {
-      "path": "hub-backend/smoke_plugin_ready.py",
-      "bytes": 17251,
-      "sha256": "cb2c712e206a45aa513ec1b18a3c406bac8a78f1afa25ac8487396b9777cf0be"
+      "path": "hub-backend/smoke/smoke_plugin_ready.py",
+      "bytes": 17268,
+      "sha256": "848636e055a5dae60ca3fcad51bc8099eaa32310c40150028b4e2cd1588aed1c"
     },
     {
-      "path": "hub-backend/smoke_plugin_rollout.py",
-      "bytes": 10024,
-      "sha256": "d8737445eb13a10266ccad310f530c30306ff8b27a5f1cd0c95b5292b121011c"
+      "path": "hub-backend/smoke/smoke_plugin_rollout.py",
+      "bytes": 10041,
+      "sha256": "ae626d6ec96b6a86ed16a6962ccfadf302c10c711f59912f613ff97c1ab725e6"
     },
     {
-      "path": "hub-backend/smoke_plugin_setup.py",
+      "path": "hub-backend/smoke/smoke_plugin_setup.py",
       "bytes": 7466,
       "sha256": "9af50cea6901df885bdd750e29aaa83f245cea9057ac87b76360da94fdadf5b1"
     },
     {
-      "path": "hub-backend/smoke_plugin_signatures.py",
+      "path": "hub-backend/smoke/smoke_plugin_signatures.py",
       "bytes": 9757,
       "sha256": "604130d1f0fd25258acd9cad652c16029fdf985207f0d484aa050afa446f46fa"
     },
     {
-      "path": "hub-backend/smoke_plugin_ui.py",
+      "path": "hub-backend/smoke/smoke_plugin_ui.py",
       "bytes": 17783,
-      "sha256": "7e9e008d8ea1913af94f9bfeae1950e1cd5b2fa8f0cb1c844d1769029790d48b"
+      "sha256": "0e565d977c28acc1f006bbea86b17d6ce8a842ece03e55411ca439bde3ac794b"
     },
     {
-      "path": "hub-backend/smoke_plugin_ui_contract.py",
+      "path": "hub-backend/smoke/smoke_plugin_ui_contract.py",
       "bytes": 8035,
       "sha256": "a6b7ea9bce3b027c9c277bdc59215b60b13ee7fc7762f9f807e6bfdd10e1d82c"
     },
     {
-      "path": "hub-backend/smoke_plugins.py",
+      "path": "hub-backend/smoke/smoke_plugins.py",
       "bytes": 1126,
       "sha256": "718661e4ccdf19fd0eb4ce991289b416dcf2e9cf484af9b4e10ac4772d713d16"
     },
     {
-      "path": "hub-backend/smoke_ppm_connector.py",
+      "path": "hub-backend/smoke/smoke_ppm_connector.py",
       "bytes": 4665,
       "sha256": "c78b64d52c8fa0d4340710073046b34a26750389ad3dcd5e11d4b25cdcc96c24"
     },
     {
-      "path": "hub-backend/smoke_product_coverage.py",
-      "bytes": 1188,
-      "sha256": "eae01c7a2566a2ceafdc0315e76b0de31a7838f3679be5ff799a083e07e7e575"
+      "path": "hub-backend/smoke/smoke_product_coverage.py",
+      "bytes": 1195,
+      "sha256": "04404f6f43fc482c483187e21b35c3afef3fa4cad15decac0c397971adaecd30"
     },
     {
-      "path": "hub-backend/smoke_project_context.py",
-      "bytes": 11227,
-      "sha256": "23a8421cd782e191a9516c45807b911f7cc3590cf94282a44e6c6a289bec5dd1"
+      "path": "hub-backend/smoke/smoke_project_context.py",
+      "bytes": 11234,
+      "sha256": "31eaadc3c5eeb45f33508bf8420da7b08cd8dec8487e12a52ee85610912aac84"
     },
     {
-      "path": "hub-backend/smoke_project_org_adoption.py",
+      "path": "hub-backend/smoke/smoke_project_org_adoption.py",
       "bytes": 2762,
       "sha256": "467ed6acf431f58fd6763da3ff9d94617d3e69e98f3aaaf26a77169de80a95c9"
     },
     {
-      "path": "hub-backend/smoke_project_setup.py",
+      "path": "hub-backend/smoke/smoke_project_setup.py",
       "bytes": 24290,
       "sha256": "ed5da1fa2b9e7d7477612b2398fd8c963541680d94fd07d1c834b980751c8d77"
     },
     {
-      "path": "hub-backend/smoke_prompt_contract.py",
+      "path": "hub-backend/smoke/smoke_prompt_contract.py",
       "bytes": 3298,
       "sha256": "6b6b8fdafc12c03b6aea1b880a2eb91b73634c642f0fc30a15dc91b9a133fdae"
     },
     {
-      "path": "hub-backend/smoke_quality.py",
+      "path": "hub-backend/smoke/smoke_quality.py",
       "bytes": 6599,
       "sha256": "109fe84398c4cba7e280642bffa6f2e572a8b4073c7941e8bfce6f02ad11a260"
     },
     {
-      "path": "hub-backend/smoke_quality_config.py",
+      "path": "hub-backend/smoke/smoke_quality_config.py",
       "bytes": 4802,
       "sha256": "99905aa6541a405b285aad2dc2ea3f82bee551ba4e2f3058d5900ff3979f7b77"
     },
     {
-      "path": "hub-backend/smoke_quality_manifest.py",
-      "bytes": 4594,
-      "sha256": "bce83e929f3202e45836f16997c170d8672b4bd88aaf00ba687794ba503f4c27"
+      "path": "hub-backend/smoke/smoke_quality_manifest.py",
+      "bytes": 5080,
+      "sha256": "e0be3d390783308cf99d58c320d5dedfbbabd09e493e4fb660c23967188cd93c"
     },
     {
-      "path": "hub-backend/smoke_quality_runner.py",
+      "path": "hub-backend/smoke/smoke_quality_runner.py",
       "bytes": 20233,
       "sha256": "0299cbdbfa7b701a70392d4d5a256a30a3a0a300d963844ae2b795e7933da35f"
     },
     {
-      "path": "hub-backend/smoke_redeploy.py",
-      "bytes": 7362,
-      "sha256": "fd80c3f2760f8824d0b3005bdbb29e80e4594368e386ab1dfa802c5023c94311"
+      "path": "hub-backend/smoke/smoke_redeploy.py",
+      "bytes": 7359,
+      "sha256": "179bfc811252fd5c5ba23dd119b40671f2f8134b6c338c4cbfa1d4121c687ac4"
     },
     {
-      "path": "hub-backend/smoke_release.py",
+      "path": "hub-backend/smoke/smoke_release.py",
       "bytes": 36659,
       "sha256": "3050d9c410e54a9a632be1accb4735fb1aa5d2ee59d4fe56dffad51a23348989"
     },
     {
-      "path": "hub-backend/smoke_release_trust.py",
-      "bytes": 2783,
-      "sha256": "baa6b8dbec61eba4c599a2d969634912dfb9fe2b78a97321be13e2775db06b70"
+      "path": "hub-backend/smoke/smoke_release_trust.py",
+      "bytes": 2790,
+      "sha256": "8fd1b1ddc7209cde56f8a19e0c69981215ccac6b07cee7bda9a78d675e0526ea"
     },
     {
-      "path": "hub-backend/smoke_repository_assets.py",
+      "path": "hub-backend/smoke/smoke_repository_assets.py",
       "bytes": 14629,
       "sha256": "867f408af1f489b1a255c3b28fcca4d8638199a59aadda1d053f6eb5c8bec666"
     },
     {
-      "path": "hub-backend/smoke_repository_http.py",
+      "path": "hub-backend/smoke/smoke_repository_http.py",
       "bytes": 8614,
       "sha256": "72ac31930107a6177bfbfd897af4d3fd7711b905a711602b9276c6fe9e031801"
     },
     {
-      "path": "hub-backend/smoke_responses_vision.py",
+      "path": "hub-backend/smoke/smoke_responses_vision.py",
       "bytes": 3053,
       "sha256": "4edcb9b52af26c83d8e56c9a838de1a9c82cb9868ebb24693d60806b351a71d6"
     },
     {
-      "path": "hub-backend/smoke_review_delivery_mode.py",
+      "path": "hub-backend/smoke/smoke_review_delivery_mode.py",
       "bytes": 8116,
       "sha256": "f0fe105df810272e7749c7d48e73f98c9bca5fc5d676e39ec465e2e0200624a7"
     },
     {
-      "path": "hub-backend/smoke_rework_backlog.py",
+      "path": "hub-backend/smoke/smoke_rework_backlog.py",
       "bytes": 5711,
       "sha256": "f92c01c7380b52772dcc7c53b02ccc8dfd13bb2b71d9f593180bcd3f0c1a0823"
     },
     {
-      "path": "hub-backend/smoke_rework_delivery_progress.py",
+      "path": "hub-backend/smoke/smoke_rework_delivery_progress.py",
       "bytes": 14031,
       "sha256": "24cb432a679b7ea5508021135c0f9233743faa94da392a6b226b755623d04316"
     },
     {
-      "path": "hub-backend/smoke_rework_guard.py",
+      "path": "hub-backend/smoke/smoke_rework_guard.py",
       "bytes": 16974,
       "sha256": "c1235c05a12272cec877ce9131a4d66799f268b3faf95a48de0ca0ea7f7bf96d"
     },
     {
-      "path": "hub-backend/smoke_route_tags.py",
+      "path": "hub-backend/smoke/smoke_route_tags.py",
       "bytes": 3501,
       "sha256": "976f6414922e56c83a5ea0908bd1f2872dfabc01571541a5ae100ee19277e8ed"
     },
     {
-      "path": "hub-backend/smoke_run_close.py",
+      "path": "hub-backend/smoke/smoke_run_close.py",
       "bytes": 3232,
       "sha256": "76abd2d1f3bcb42f02ae486d3ee96f820a977082aa509a8c813702cee7dee92a"
     },
     {
-      "path": "hub-backend/smoke_runner_admission.py",
+      "path": "hub-backend/smoke/smoke_runner_admission.py",
       "bytes": 7341,
       "sha256": "f982c00f3e3872852b017629f80999a4c0ad6188b270254702fb51d9c10d2797"
     },
     {
-      "path": "hub-backend/smoke_runner_capability_ui.py",
-      "bytes": 3350,
-      "sha256": "802eaab881e48724267a733e2e820a9dbe7b8e90c4570d586e0e63d576ba468c"
+      "path": "hub-backend/smoke/smoke_runner_capability_ui.py",
+      "bytes": 3357,
+      "sha256": "b26515c00bc06c803ec9c1930d9b33fca8f707d3843568efbeb07e9c976a0694"
     },
     {
-      "path": "hub-backend/smoke_runner_enroll.py",
+      "path": "hub-backend/smoke/smoke_runner_enroll.py",
       "bytes": 11396,
       "sha256": "a9935f384c9f94a2cb101d61ca6a33eddfb147255bcf0e448cdcfcf2c5306e8d"
     },
     {
-      "path": "hub-backend/smoke_runner_fast_handshake.py",
-      "bytes": 5730,
-      "sha256": "e2b405aad6746608f804a2b899a6ce891c6246a4d90f443b543886d5ab323343"
+      "path": "hub-backend/smoke/smoke_runner_fast_handshake.py",
+      "bytes": 5747,
+      "sha256": "17441d6dd3bdb28a0010ebe61ea28769b623224afe550f702aa89d039174e6e9"
     },
     {
-      "path": "hub-backend/smoke_runner_http_assertions.py",
+      "path": "hub-backend/smoke/smoke_runner_http_assertions.py",
       "bytes": 7239,
       "sha256": "f5f0dafd2cdaa6380395dd6236c81aa6013d7549dd69a5af908b8c53ecb615ba"
     },
     {
-      "path": "hub-backend/smoke_runner_images.py",
-      "bytes": 19700,
-      "sha256": "8236b040b26492df8a42ac1cdf99fc28464c79f5dad555e060dada6d0650157e"
+      "path": "hub-backend/smoke/smoke_runner_images.py",
+      "bytes": 19768,
+      "sha256": "3fd92d0d4fe5e623f510f20aaf71dc869e0c880ccfac8118ff57f0fa23cbbba2"
     },
     {
-      "path": "hub-backend/smoke_runner_imports.py",
-      "bytes": 8453,
-      "sha256": "fe017d25461db15a0d7d5f81d8d8ef0ef238ac9685c005f700bddcc74b091432"
+      "path": "hub-backend/smoke/smoke_runner_imports.py",
+      "bytes": 8470,
+      "sha256": "64c320756d81b304d224f00d88b59c23131964d9b3c9e446bbe9b3bf854ce0ad"
     },
     {
-      "path": "hub-backend/smoke_runner_job.py",
+      "path": "hub-backend/smoke/smoke_runner_job.py",
       "bytes": 30978,
       "sha256": "b1f1b11d4fc54403ecd5db8db0d8c38bd5fc94a8ff7766f81997fb8b799ca468"
     },
     {
-      "path": "hub-backend/smoke_runner_key.py",
+      "path": "hub-backend/smoke/smoke_runner_key.py",
       "bytes": 5668,
       "sha256": "79fec6c309a7864050d4c423d80939b39d8c49e728bdf0d2088af5fc4572f020"
     },
     {
-      "path": "hub-backend/smoke_runner_management.py",
-      "bytes": 23515,
-      "sha256": "69538ee374ed38a3644469044f35055676cc9e9e018b582827694de4aaa5dc2a"
+      "path": "hub-backend/smoke/smoke_runner_management.py",
+      "bytes": 23522,
+      "sha256": "5f017f9d5c7b239c2f7740d68eee89e1d1e7f2ee248510da5c6383575afc7303"
     },
     {
-      "path": "hub-backend/smoke_runner_management_live.py",
+      "path": "hub-backend/smoke/smoke_runner_management_live.py",
       "bytes": 5746,
       "sha256": "a2380e3da7a9c6e30e6ccfaa9194dbb3534a6bc361bf59f1f04e76f833a3e911"
     },
     {
-      "path": "hub-backend/smoke_runner_node_shim.py",
+      "path": "hub-backend/smoke/smoke_runner_node_shim.py",
       "bytes": 7046,
       "sha256": "18fbe09f1d442625496ac2857db9eb79d7775cec36439c87e32286c822288769"
     },
     {
-      "path": "hub-backend/smoke_runner_quality.py",
+      "path": "hub-backend/smoke/smoke_runner_quality.py",
       "bytes": 4663,
       "sha256": "524ef28db59a226e5e2bf505f7a4c95d651e56bf3dfb826bc4f58023cc247316"
     },
     {
-      "path": "hub-backend/smoke_runner_read_rpc_concurrency.py",
+      "path": "hub-backend/smoke/smoke_runner_read_rpc_concurrency.py",
       "bytes": 2049,
       "sha256": "cb93038ef30f79880da2557b63f6d4751f8c84ed5f952a2138d5853ddf6d4448"
     },
     {
-      "path": "hub-backend/smoke_runner_release.py",
-      "bytes": 8866,
-      "sha256": "d4bf570b792199be1666e4d46afa480f8af0a33ebbf28d0f60cbca1c40e23586"
+      "path": "hub-backend/smoke/smoke_runner_release.py",
+      "bytes": 8873,
+      "sha256": "8474c51ad88a99b246e3a725922131959a728d2543dc679adb7476524434f7e2"
     },
     {
-      "path": "hub-backend/smoke_runner_route.py",
+      "path": "hub-backend/smoke/smoke_runner_route.py",
       "bytes": 6012,
       "sha256": "6ead6508efacc8b308363414c3f64dde59b6e6edfb7e7529fb4e3a5aef36b377"
     },
     {
-      "path": "hub-backend/smoke_runner_rpc_concurrency.py",
+      "path": "hub-backend/smoke/smoke_runner_rpc_concurrency.py",
       "bytes": 4247,
       "sha256": "91769042ca923544b41516a0dcfbb97e69d18f2b1c32a965d96f32cbdf06a007"
     },
     {
-      "path": "hub-backend/smoke_runner_scm_rpc_concurrency.py",
+      "path": "hub-backend/smoke/smoke_runner_scm_rpc_concurrency.py",
       "bytes": 2016,
       "sha256": "87d4046420ea596003e090fe88af5ae1c6e2c4e4794a3ff515c773d005907768"
     },
     {
-      "path": "hub-backend/smoke_runner_scope.py",
+      "path": "hub-backend/smoke/smoke_runner_scope.py",
       "bytes": 3773,
       "sha256": "8136d5e37a467ae8599fdc86a6b70aeb77fbf42a226acb7e5f00e9a34de3e245"
     },
     {
-      "path": "hub-backend/smoke_runner_shell_path.py",
+      "path": "hub-backend/smoke/smoke_runner_shell_path.py",
       "bytes": 4797,
       "sha256": "8f163e5e88356026d51f0539d05a6cb4753e96a86502d424c016640e48c7653c"
     },
     {
-      "path": "hub-backend/smoke_runner_single.py",
-      "bytes": 2101,
-      "sha256": "1dc095b6971f7a72349150b4b4220d9e1b46d026bc7647b87893f926037b3bde"
+      "path": "hub-backend/smoke/smoke_runner_single.py",
+      "bytes": 2118,
+      "sha256": "a4fd16a90a59dd7c0d50bd85068f1376c2691d015ef6d03c747889f96e48483b"
     },
     {
-      "path": "hub-backend/smoke_runner_skill_refresh.py",
-      "bytes": 3441,
-      "sha256": "24693b67e7b53183158c971142fd47eec0bccec5e5273df1d27dbd4e0f920499"
+      "path": "hub-backend/smoke/smoke_runner_skill_refresh.py",
+      "bytes": 3458,
+      "sha256": "f13f753b7c53f379a209e54bf02a8e7737a0a2e2cfa6c29f8d0f7b88f008f4b9"
     },
     {
-      "path": "hub-backend/smoke_runner_steering.py",
+      "path": "hub-backend/smoke/smoke_runner_steering.py",
       "bytes": 401,
       "sha256": "3a356ed9df0d22f2d1b1ad86383986e255cbe7cd0f99deaaef3ec8e1d32df968"
     },
     {
-      "path": "hub-backend/smoke_runner_term.py",
-      "bytes": 16331,
-      "sha256": "510c478f7104d88b28220dc1de5dc79d20e48fbc655bc5d7164bad4dfc4e73a9"
+      "path": "hub-backend/smoke/smoke_runner_term.py",
+      "bytes": 16365,
+      "sha256": "da0bafe49d188caf428d0604deedad6cd910795e7924170ff371be5f3ff710de"
     },
     {
-      "path": "hub-backend/smoke_runner_ws_concurrency.py",
+      "path": "hub-backend/smoke/smoke_runner_ws_concurrency.py",
       "bytes": 2776,
       "sha256": "f7be497600da55c0eb27b5b1b6756941ba943fea196d64e4d1c847d3c86ba877"
     },
     {
-      "path": "hub-backend/smoke_runtime_components.py",
+      "path": "hub-backend/smoke/smoke_runtime_components.py",
       "bytes": 7532,
       "sha256": "2baf4e235d4773b1f7cae661c23498ab8fcf89298739b3afc1a3397b7dc6332a"
     },
     {
-      "path": "hub-backend/smoke_runtime_messages.py",
-      "bytes": 19745,
-      "sha256": "97c9a723be4f24fe7c5de0b47a555e95a9a456c603fe4d0f2a97836d2a26b78f"
+      "path": "hub-backend/smoke/smoke_runtime_messages.py",
+      "bytes": 19813,
+      "sha256": "652f3c1cdf863346a8e6f735bc3318a5b787fd6ef00f61acb875afe5110a037e"
     },
     {
-      "path": "hub-backend/smoke_schedule_expiry.py",
+      "path": "hub-backend/smoke/smoke_schedule_expiry.py",
       "bytes": 6215,
       "sha256": "0922dfa5361685a8cc80bf1991c03b6b4c60793aacd99fec2cc4a0e45e0dd5db"
     },
     {
-      "path": "hub-backend/smoke_schedule_ledger.py",
-      "bytes": 5391,
-      "sha256": "21ed399b37e35260fd3ca2164b96fc55bb8012fb24057a67cd1768d61a250c7b"
+      "path": "hub-backend/smoke/smoke_schedule_ledger.py",
+      "bytes": 5408,
+      "sha256": "f57de673e042c098d5af577ec3b25e8f0b666b189ee3f1fc7bba60cbabc5a514"
     },
     {
-      "path": "hub-backend/smoke_scheduler_concurrency.py",
-      "bytes": 12090,
-      "sha256": "b5666c93ed862877c699c0e32730351b2b1668451fed1e37a1b76d915e5f10dc"
+      "path": "hub-backend/smoke/smoke_scheduler_concurrency.py",
+      "bytes": 12107,
+      "sha256": "41bd1b285fffc12ded86e6e627b0dc9be263420552466766e05ca7497d837156"
     },
     {
-      "path": "hub-backend/smoke_schedules.py",
-      "bytes": 15168,
-      "sha256": "088412f9069a4e5d88b9ff52164046fa885f27e965e99affea0fd271eb228cb8"
+      "path": "hub-backend/smoke/smoke_schedules.py",
+      "bytes": 15185,
+      "sha256": "14f3cf518b6d816cad062abee30ca99225683065a349628c4f2eed2814037fde"
     },
     {
-      "path": "hub-backend/smoke_schema_migrations.py",
-      "bytes": 23298,
-      "sha256": "c82eceb664d10ecfec519d264f1b895a58a72c1bc599e0c8d8df291a3830ab78"
+      "path": "hub-backend/smoke/smoke_schema_migrations.py",
+      "bytes": 23305,
+      "sha256": "48fdceeb9f6b296cfc7871df919e41cda99cc50287233dba185e9dee1b215e3f"
     },
     {
-      "path": "hub-backend/smoke_script_tool.py",
+      "path": "hub-backend/smoke/smoke_script_tool.py",
       "bytes": 10102,
       "sha256": "051a3dcd7c4fc59f4998e835cf803326a24b880a9f589f3553ab1462cc7163df"
     },
     {
-      "path": "hub-backend/smoke_server_image.py",
+      "path": "hub-backend/smoke/smoke_server_image.py",
       "bytes": 6092,
-      "sha256": "11945b08439855f1986e233a3e7c8706072cd2e7bfcc13778fc9a3a4d67ae9cb"
+      "sha256": "d3eca06b190fec20390a448eb6ff88f8bc1b74b92a25ac8be22e4a72b77c2ed8"
     },
     {
-      "path": "hub-backend/smoke_session_memory_http.py",
+      "path": "hub-backend/smoke/smoke_session_memory_http.py",
       "bytes": 9500,
       "sha256": "15bbfeb246b3c3bc927ffb241cacc15dd8c7d58e78e6991a48b1295976676b89"
     },
     {
-      "path": "hub-backend/smoke_skill_read_scope.py",
+      "path": "hub-backend/smoke/smoke_skill_read_scope.py",
       "bytes": 20865,
       "sha256": "8af507cc346290d7ac4048be05922149721f91177d21c994c3b29ddf2ab38265"
     },
     {
-      "path": "hub-backend/smoke_skill_scan_async.py",
+      "path": "hub-backend/smoke/smoke_skill_scan_async.py",
       "bytes": 2543,
       "sha256": "d3d6e04ee4989386d6c514d9b1edf2b783a414cb6120ba2a665c9de5e2ddf539"
     },
     {
-      "path": "hub-backend/smoke_skills.py",
+      "path": "hub-backend/smoke/smoke_skills.py",
       "bytes": 9636,
       "sha256": "3f4fe9e696a5f654a236990d6906f1b77cb72b8a433a7df80031558cb7f69e82"
     },
     {
-      "path": "hub-backend/smoke_skills_api.py",
+      "path": "hub-backend/smoke/smoke_skills_api.py",
       "bytes": 6997,
       "sha256": "0067f172e05f8879c1e6620848466672f3389728429dbd89b8f66d4f3708289c"
     },
     {
-      "path": "hub-backend/smoke_soduwork_light_flows.py",
-      "bytes": 3681,
-      "sha256": "2bbde113e23c2c8a6fc24f5ed81872e7205675f98b1bb705925decfabf80393e"
+      "path": "hub-backend/smoke/smoke_soduwork_light_flows.py",
+      "bytes": 3688,
+      "sha256": "cdafb727b3af3c2c008413cbb2921d32f15f87aa5c0f420feebb27ca0f2246f9"
     },
     {
-      "path": "hub-backend/smoke_soduwork_self_deploy.py",
-      "bytes": 2403,
-      "sha256": "4deee55728152f3b9f887a77295ce3e00bc5e4c363067492ed066f959ffe1219"
+      "path": "hub-backend/smoke/smoke_soduwork_self_deploy.py",
+      "bytes": 2410,
+      "sha256": "3990e06a08bcc2985977810cb076ab588a35d108a08610af3021ae4c11070136"
     },
     {
-      "path": "hub-backend/smoke_stability_hardening.py",
+      "path": "hub-backend/smoke/smoke_stability_hardening.py",
       "bytes": 1001,
       "sha256": "bc68ddd0cd3a006da2c8f07cc0281a07f4666d8005210a2fefb50fd4770b1f9a"
     },
     {
-      "path": "hub-backend/smoke_stage_agent.py",
+      "path": "hub-backend/smoke/smoke_stage_agent.py",
       "bytes": 8770,
       "sha256": "4a9fbfd06a955809a185e2e3f8f4a890c03507915cb4e23d9599f31e0598f0d9"
     },
     {
-      "path": "hub-backend/smoke_stage_model.py",
+      "path": "hub-backend/smoke/smoke_stage_model.py",
       "bytes": 6894,
       "sha256": "45604b412800c1649cbf468f232523a9c6fa3b2f8793dad0a9ddda1ed89526d4"
     },
     {
-      "path": "hub-backend/smoke_stall_watch.py",
+      "path": "hub-backend/smoke/smoke_stall_watch.py",
       "bytes": 5318,
       "sha256": "1b33942269e5166865a16191ccaf5e81735425450c8302f8748949d8a075507d"
     },
     {
-      "path": "hub-backend/smoke_status_authority.py",
+      "path": "hub-backend/smoke/smoke_status_authority.py",
       "bytes": 7245,
       "sha256": "ab06159441866eb83c2ab69a1419f9ae14f4005c715a7f03223c0006c3a99871"
     },
     {
-      "path": "hub-backend/smoke_stream_recovery.py",
-      "bytes": 7978,
-      "sha256": "60fafdebb81774817d5a018dbb0af0189a07fe9b738bea2a301bb1ad37b62ca6"
+      "path": "hub-backend/smoke/smoke_stream_recovery.py",
+      "bytes": 8012,
+      "sha256": "86e5869ee6710807958638713ea14235683fa1441a36b1da9bc6373738402d4f"
     },
     {
-      "path": "hub-backend/smoke_task_ai.py",
+      "path": "hub-backend/smoke/smoke_task_ai.py",
       "bytes": 9812,
       "sha256": "9633cdfe13a896747eae227e3c5e538f0ae5d3661f833ad08feab1686d0630c9"
     },
     {
-      "path": "hub-backend/smoke_task_attachments.py",
+      "path": "hub-backend/smoke/smoke_task_attachments.py",
       "bytes": 5655,
       "sha256": "adc2b594f5ed5f249ae187b43892391fc5db967f2a480cff89bfe259f6ff346a"
     },
     {
-      "path": "hub-backend/smoke_task_commands.py",
-      "bytes": 14110,
-      "sha256": "8ec5f8ce6622b60a49b01df6788846b1814e86ef4cd205a1ab2e7cea1b320daa"
+      "path": "hub-backend/smoke/smoke_task_commands.py",
+      "bytes": 14127,
+      "sha256": "dbb861f6ce6f06dbe65aadbc862839e22095e356b127149fb39954785eb61b84"
     },
     {
-      "path": "hub-backend/smoke_task_evolution.py",
+      "path": "hub-backend/smoke/smoke_task_evolution.py",
       "bytes": 8805,
       "sha256": "fd02309c885da45224784100db4b5b4cbc2979e4061ae3871a6b249cdb00aa93"
     },
     {
-      "path": "hub-backend/smoke_task_execution_options.py",
+      "path": "hub-backend/smoke/smoke_task_execution_options.py",
       "bytes": 8273,
       "sha256": "2c64ee685fbde612cd9d0e6d5ada7a8051fadeb16f81a28e0c1d116f8e1eca7e"
     },
     {
-      "path": "hub-backend/smoke_task_flow_ui.py",
+      "path": "hub-backend/smoke/smoke_task_flow_ui.py",
       "bytes": 13207,
-      "sha256": "b214723b5706d32e99b8e772f60001d206df5456276667f54d9de110d4f1a80e"
+      "sha256": "414bf761b9aabf411646335bf309b93d49227cc9aa24ab463b073f5cfe5afd97"
     },
     {
-      "path": "hub-backend/smoke_task_frozen_routing.py",
+      "path": "hub-backend/smoke/smoke_task_frozen_routing.py",
       "bytes": 1297,
       "sha256": "5815ece2c7d9d82294931f6d22a3a7f19f8f994ba2d6ddd42894d750c566dff0"
     },
     {
-      "path": "hub-backend/smoke_task_trace.py",
+      "path": "hub-backend/smoke/smoke_task_trace.py",
       "bytes": 30639,
       "sha256": "4c5d4b4718a58f2e603e86c4d3d63f7348176e301c94ec5b48b7d1299268a1b0"
     },
     {
-      "path": "hub-backend/smoke_task_transfer.py",
+      "path": "hub-backend/smoke/smoke_task_transfer.py",
       "bytes": 10554,
       "sha256": "40d221620934f12c33a52103eaacb3329fae7625e63c0ca0bd3227d1ffa5629f"
     },
     {
-      "path": "hub-backend/smoke_team_daily_report.py",
-      "bytes": 11454,
-      "sha256": "92550342dd3e39d1922688a12279a4a6e1d3611fd7ea9aca2922a0f6ff646304"
+      "path": "hub-backend/smoke/smoke_team_daily_report.py",
+      "bytes": 11461,
+      "sha256": "a04a3324b5c59d7ee1ed9b31358d159314ebe5bffc530b596ef238b7a5efb11d"
     },
     {
-      "path": "hub-backend/smoke_team_message.py",
+      "path": "hub-backend/smoke/smoke_team_message.py",
       "bytes": 4552,
       "sha256": "b8fe564f223bc472290656dfc2c09269f05f694c6815f4942d852336b0680870"
     },
     {
-      "path": "hub-backend/smoke_terminal_security.py",
-      "bytes": 407,
-      "sha256": "13bedd0e348ae0ed7379d5e2184aca0e1dfb0467091b40d4c54e3754c449ea5a"
+      "path": "hub-backend/smoke/smoke_terminal_security.py",
+      "bytes": 414,
+      "sha256": "ab897951269c5fa5b0df362df01fdb88c58d95064b899081e599aad62eafc378"
     },
     {
-      "path": "hub-backend/smoke_update_nudges.py",
+      "path": "hub-backend/smoke/smoke_update_nudges.py",
       "bytes": 4303,
       "sha256": "d4cf4be0166d89e852cc9aeef9e9163b576b8575dd1364b490069409773a51c3"
     },
     {
-      "path": "hub-backend/smoke_usage_ledger.py",
+      "path": "hub-backend/smoke/smoke_usage_ledger.py",
       "bytes": 7951,
       "sha256": "32fa2c01cba4e4eaeca202496e42c87308b9ca1a86eea0f757fbbe708c924a56"
     },
     {
-      "path": "hub-backend/smoke_usage_privacy.py",
+      "path": "hub-backend/smoke/smoke_usage_privacy.py",
       "bytes": 5601,
       "sha256": "9a978aa1a18e3067ccf775c29f89f3d256655eafce9807d5023f4e516e437038"
     },
     {
-      "path": "hub-backend/smoke_usage_rollup.py",
+      "path": "hub-backend/smoke/smoke_usage_rollup.py",
       "bytes": 6926,
       "sha256": "f87417381e0d99c0a630b80ceb05893212e924b9f5062c2e46aa471277a9063c"
     },
     {
-      "path": "hub-backend/smoke_usage_stats.py",
+      "path": "hub-backend/smoke/smoke_usage_stats.py",
       "bytes": 6794,
       "sha256": "c4d7c8413d3f03a129c4f9d8074b3fa72998ffc6c595121aa469dbaab206fc8a"
     },
     {
-      "path": "hub-backend/smoke_video_plugin.py",
+      "path": "hub-backend/smoke/smoke_video_plugin.py",
       "bytes": 473,
       "sha256": "702071f31790e0542210b70977749168666d31b4d0a6c487ce9995479e57f91a"
     },
     {
-      "path": "hub-backend/smoke_vision_router.py",
+      "path": "hub-backend/smoke/smoke_vision_router.py",
       "bytes": 5450,
       "sha256": "cee27b7ce21e592380ffbfbcf118aee64f196bba5c39f9e09d94b40ba12237c3"
     },
     {
-      "path": "hub-backend/smoke_work_catalog.py",
+      "path": "hub-backend/smoke/smoke_work_catalog.py",
       "bytes": 16841,
       "sha256": "3b2bdd48cb014159bd94f97be60b4c9c38613ec9426c46ee449f74f390447bcf"
     },
     {
-      "path": "hub-backend/smoke_work_reports.py",
-      "bytes": 9212,
-      "sha256": "123ddfb195f0c7256625a055b77452be3718861afe0181a77c5d8f1101575d1f"
+      "path": "hub-backend/smoke/smoke_work_reports.py",
+      "bytes": 9219,
+      "sha256": "ae1dc8380424992a25d86c33085cc5c3a7d8c57d5f51476f818a02444f39a629"
     },
     {
-      "path": "hub-backend/smoke_workdirs.py",
+      "path": "hub-backend/smoke/smoke_workdirs.py",
       "bytes": 10180,
       "sha256": "508a333495f11511295806ff3200513b8aeb2e8d0367e8c1ddbe4f48a97a24cd"
     },
     {
-      "path": "hub-backend/smoke_workflow_adoption.py",
+      "path": "hub-backend/smoke/smoke_workflow_adoption.py",
       "bytes": 13307,
       "sha256": "1d6f959ed5fcfea3f2481c8ad95c219907724b73a99f0a60fcc5b96e31416c32"
     },
     {
-      "path": "hub-backend/smoke_workflow_inputs.py",
+      "path": "hub-backend/smoke/smoke_workflow_inputs.py",
       "bytes": 4957,
       "sha256": "59a413b6af1c6d7b8b95e71323a2b3b43ca4260368776d77914746b81509fbbd"
     },
     {
-      "path": "hub-backend/smoke_workflow_terminal_wakeup.py",
+      "path": "hub-backend/smoke/smoke_workflow_terminal_wakeup.py",
       "bytes": 4707,
       "sha256": "3e2ac2bb8d6e5628dc5ae5a791381e424b0cfb23717368c138b6ab791d00339c"
     },
     {
-      "path": "hub-backend/smoke_workspace_guard.py",
+      "path": "hub-backend/smoke/smoke_workspace_guard.py",
       "bytes": 2754,
       "sha256": "ba692389df35c190e423d07aaa9203016c4abcea9a64fb8a2f6e5659421eb777"
     },
     {
-      "path": "hub-backend/smoke_workspace_ui.py",
+      "path": "hub-backend/smoke/smoke_workspace_ui.py",
       "bytes": 16738,
-      "sha256": "4804b99d18b80cdd32f79aef7aafeb40881bf9e14262c1b6d69facf31d5b956b"
+      "sha256": "907a0c8e3a51f021cfd153a4af307e27393c762e257b9b94d1ee56c17a7acf6c"
     },
     {
-      "path": "hub-backend/smoke_ws_frames.py",
-      "bytes": 4824,
-      "sha256": "40892de2e9952258a2f67b0c3a78bb63c7ea3b2af1da7b460cf6737d5e6fc298"
+      "path": "hub-backend/smoke/smoke_ws_frames.py",
+      "bytes": 4830,
+      "sha256": "3d5321b3bef3520fcddbe7967811c2fb2a0e23b853a9ac0e7d1094e7e3472a2a"
     },
     {
-      "path": "hub-backend/smoke_zero_route.py",
+      "path": "hub-backend/smoke/smoke_zero_route.py",
       "bytes": 6723,
       "sha256": "ef9d97049f84d493d68c460b269c5a17e1547387afa7c6928f1f57e340843c25"
     },
@@ -17006,8 +17051,8 @@
     },
     {
       "path": "hub-backend/test_handoff_agent_fallback.py",
-      "bytes": 12166,
-      "sha256": "7808c3279f7fd40fb827f9e8aff2a2ee83e1f427a41fb444df32280b0fab309e"
+      "bytes": 12173,
+      "sha256": "4e907f73ef4705170858d526d8f677da71bad5476329c9168490cd95db01b553"
     },
     {
       "path": "hub-backend/test_handoff_maintenance_boundary.py",
@@ -17371,8 +17416,8 @@
     },
     {
       "path": "hub-backend/test_plugin_smoke_groups.py",
-      "bytes": 2845,
-      "sha256": "e8e217ceab1961192a188a80930744383e2c2f653f940f4a7b9240be4bbd623d"
+      "bytes": 2856,
+      "sha256": "e8f7530f0a02e42a77ebd0747682fd6b0e76d2a3ac25538ca7590670fa9441b9"
     },
     {
       "path": "hub-backend/test_plugin_standardization.py",
@@ -17401,8 +17446,8 @@
     },
     {
       "path": "hub-backend/test_public_source.py",
-      "bytes": 2256,
-      "sha256": "33fda61d3b4a7e3f4ce01c29332647d3c33f9c85b4f48a83b0523af55c2f6e27"
+      "bytes": 2286,
+      "sha256": "a594dd2901d8c4cb2000eabe684020991d2b82e27a7a60387081aec0d04360ee"
     },
     {
       "path": "hub-backend/test_quota_plans.py",
@@ -17861,8 +17906,8 @@
     },
     {
       "path": "hub-backend/tests/handoff_harness2_entry.py",
-      "bytes": 665,
-      "sha256": "f04482c327c211a47b454a6a5b3fc9e7e6ae3b6d21b0ffc991b180e9a759eb7b"
+      "bytes": 1348,
+      "sha256": "d0ab6c23bc60a653c434becb30ddf6ebaa9d73e51040dab46ebe79ecb16a9778"
     },
     {
       "path": "hub-backend/tests/handoff_http_fixture.py",
@@ -17926,8 +17971,8 @@
     },
     {
       "path": "hub-backend/tests/qwen_native_vision.py",
-      "bytes": 12143,
-      "sha256": "e99fb267e19e4ef191e5ef4344d7c99e90775fafb7f11793c80f4b8f6ffea8e1"
+      "bytes": 12149,
+      "sha256": "758dac913dab8c200c4f9638fd03a4d257ec1441cc017a7af3d2f1befedea3f3"
     },
     {
       "path": "hub-backend/tests/runner_dialogue_checks.py",
@@ -18546,13 +18591,18 @@
     },
     {
       "path": "hub-frontend/README.en.md",
-      "bytes": 1482,
-      "sha256": "d628ed1485098632d7aa7137ff76cab0d33ed80980018d13e66995e191eca23c"
+      "bytes": 110,
+      "sha256": "c268cff4c05717dde42a2f2f5b0df1988e1a3db03838a5f8673589714ce79366"
     },
     {
       "path": "hub-frontend/README.md",
-      "bytes": 1500,
-      "sha256": "27070412c90d600880162f6aa568ff9e92254e9ddfdf2f1fe0601ffb737eab3f"
+      "bytes": 1751,
+      "sha256": "ccece4ed5b3d4ac707d6ee5df670762dda5cbb71e6ec9fa8705f107ea75ccdaf"
+    },
+    {
+      "path": "hub-frontend/README.zh-CN.md",
+      "bytes": 1754,
+      "sha256": "37a70e49f7f3072660a582c716afea2acf8d4fe2520cc0dbf5b99852a3500793"
     },
     {
       "path": "hub-frontend/index.html",
@@ -18646,8 +18696,8 @@
     },
     {
       "path": "hub-frontend/src/api.js",
-      "bytes": 26644,
-      "sha256": "9b0a78392e403de7f0b57c8e9e889da112b78dbbe21d7fbfdc36966a82e6eec3"
+      "bytes": 26716,
+      "sha256": "85b4aeeed6eee5e19591e88711558748b736c8474323b7dce87eef5aa1409e4c"
     },
     {
       "path": "hub-frontend/src/client-appearance.js",
@@ -18706,8 +18756,8 @@
     },
     {
       "path": "hub-frontend/src/i18n.js",
-      "bytes": 5898,
-      "sha256": "f410d4bd38ed1a42725222f11fb876a35aae43d3e4169b097924ae97d8b85a7d"
+      "bytes": 8280,
+      "sha256": "8fead267d3037099e2c81c33c62ced2cbc1324df3bde8f853938fc1e6768e800"
     },
     {
       "path": "hub-frontend/src/landing-particles.js",
@@ -19780,6 +19830,11 @@
       "sha256": "3920c2215faced2c8266f3daf3646a63572fb38e2364cf3a7ac6d59842961888"
     },
     {
+      "path": "hub-frontend/tests/fixtures/admin-release-hub.py",
+      "bytes": 4322,
+      "sha256": "7f48b73102983e137adf30d1ed335cb73d069ba700d9a4985b65271df1c77769"
+    },
+    {
       "path": "hub-frontend/tests/fixtures/connector-arguments.json",
       "bytes": 1006,
       "sha256": "98b5f7cbe79b64420e304f091fac915bafd380a401942dc88403a348122dd31f"
@@ -19861,8 +19916,8 @@
     },
     {
       "path": "hub-frontend/tests/i18n.test.mjs",
-      "bytes": 6425,
-      "sha256": "8178c1110cf70f76bc43382a20c787fa2363025661353e0dc338c83cadc4280d"
+      "bytes": 11799,
+      "sha256": "a3cc325fe6411aa86c429554372e0e9b1d2b5ba7c26a23231c71f1596ee9d81a"
     },
     {
       "path": "hub-frontend/tests/insights-metrics.test.mjs",
@@ -19888,6 +19943,11 @@
       "path": "hub-frontend/tests/layout-safety.test.mjs",
       "bytes": 2192,
       "sha256": "93cce80d577bf4f0b6ae9bd95296e4caeb26fe341591040d74a65ceb60b6e9c7"
+    },
+    {
+      "path": "hub-frontend/tests/locale-release-browser.cjs",
+      "bytes": 8402,
+      "sha256": "9e7bba7c790bfc10510e9f79a76c9c1f0a66092cb612032f27ed4d523879231b"
     },
     {
       "path": "hub-frontend/tests/mail-settings-browser.cjs",
@@ -20043,6 +20103,11 @@
       "path": "hub-frontend/tests/quota-management.test.mjs",
       "bytes": 14484,
       "sha256": "10568ec63f06517323e38811b9ff0682b082d17b8c50b0772f86cda3a2422027"
+    },
+    {
+      "path": "hub-frontend/tests/real-admin-release-browser.cjs",
+      "bytes": 7668,
+      "sha256": "73fd6715f3e3626408b02e8dfefba8e4822c6da20d6e80228a9f777663cb53ec"
     },
     {
       "path": "hub-frontend/tests/repository-api-timeout.test.mjs",
@@ -22916,13 +22981,18 @@
     },
     {
       "path": "ops/self-host/README.en.md",
-      "bytes": 6331,
-      "sha256": "e6eb90412447b38078fa0db4a53d7dc97192366a6a94f5da6d8a6206e86ec53a"
+      "bytes": 110,
+      "sha256": "c268cff4c05717dde42a2f2f5b0df1988e1a3db03838a5f8673589714ce79366"
     },
     {
       "path": "ops/self-host/README.md",
-      "bytes": 6410,
-      "sha256": "a6991dc6c7df0480766b15f1bd8395582facf5ac3fcebc49660f4dc0a369cc1e"
+      "bytes": 6623,
+      "sha256": "b65ee7f5d51e2ec8dd56dbede2c216776f870d3940e27bd49539fe97951c6b6d"
+    },
+    {
+      "path": "ops/self-host/README.zh-CN.md",
+      "bytes": 6681,
+      "sha256": "c879e5393f9b1945299d2f8c004b136ce66d821026f75aff36d9ef1ac1f54e65"
     },
     {
       "path": "ops/self-host/compose.yaml",
@@ -23611,13 +23681,18 @@
     },
     {
       "path": "third-party/README.en.md",
-      "bytes": 4187,
-      "sha256": "806a31f9210ee468ef3f54337df85303227bbdb84ad6480447d2af9b336fae50"
+      "bytes": 110,
+      "sha256": "c268cff4c05717dde42a2f2f5b0df1988e1a3db03838a5f8673589714ce79366"
     },
     {
       "path": "third-party/README.md",
-      "bytes": 3504,
-      "sha256": "a9b05e241496f7c50c4eaba79f98c66902e75bad1a8259886c77853b71efd83c"
+      "bytes": 4172,
+      "sha256": "128a5ea5c28d2e6c4ead1fc326719f00c55e397d9b5b8f6db5bccba45ed81384"
+    },
+    {
+      "path": "third-party/README.zh-CN.md",
+      "bytes": 3507,
+      "sha256": "9982d5ebe1496529b8bad3eccb321521e34fd354013bbc2323e62fa78996a012"
     },
     {
       "path": "third-party/licenses/aws-sdk-LICENSE.txt",
@@ -23661,13 +23736,13 @@
     },
     {
       "path": "third-party/mit-review.en.md",
-      "bytes": 3644,
-      "sha256": "127526a7c8724671cacba43b6eaba3f18bd995deb30a2785d0bb06fa96b5815c"
+      "bytes": 3641,
+      "sha256": "e7369b8a24c86a4ba33ef24e312806a364616af81b40af83025eb3b37d746086"
     },
     {
       "path": "third-party/mit-review.md",
-      "bytes": 3184,
-      "sha256": "e46a4c3b8a39016c96574358d8ab4a6331cd297309d6e99b5ecf2e52bce13506"
+      "bytes": 3190,
+      "sha256": "bdd0d8ac22add14cc02abd75ea5281d7629483fbbff1e75366b90f39830a811d"
     },
     {
       "path": "third-party/native-artifacts.json",
@@ -23706,8 +23781,8 @@
     },
     {
       "path": "tools/check-docs.cjs",
-      "bytes": 3805,
-      "sha256": "cf75036311567c80d7d2d2bcac7b6b4902cd983d268a453a650b51e2dae256df"
+      "bytes": 3844,
+      "sha256": "d7bbf97bd7edcd3d08738fdfa2eb7df3948144bd6117c1f981126b0321e419e4"
     },
     {
       "path": "tools/check-docs.test.cjs",
@@ -23721,8 +23796,8 @@
     },
     {
       "path": "tools/check-public-source.test.cjs",
-      "bytes": 2425,
-      "sha256": "321714a34da195588f07a5a0ef7b7fd54be247eeb10257fcba5a83d5e0593cd2"
+      "bytes": 2859,
+      "sha256": "0a9daa177226cd5879bd5d5d2b33ad1888da54169260dbabc13c609ee94c4e41"
     },
     {
       "path": "tools/check-repository-layout.cjs",
@@ -23861,8 +23936,8 @@
     },
     {
       "path": "tools/dev/local_environment.py",
-      "bytes": 13703,
-      "sha256": "b0e2f8eaa32a3e80023e80846070e1f8676ba70c11dac90b6eb421f55526dac3"
+      "bytes": 15137,
+      "sha256": "8e39bf869e574e81a4b0c9aa5953d37948d9b7013b9e3056e40586f0a9804b08"
     },
     {
       "path": "tools/dev/local_server.py",
@@ -23891,8 +23966,8 @@
     },
     {
       "path": "tools/dev/test_start_local.py",
-      "bytes": 22367,
-      "sha256": "677da0c87647d0a8058cc036c6a883e8080a337edd177279665d103e96fa4d47"
+      "bytes": 24626,
+      "sha256": "2c35f0c2ce32abd315d6fe59ae3c2d17d67ca88f73dbc9ab74da2d41fa419533"
     },
     {
       "path": "tools/dev/verify_local_start.py",
@@ -23901,8 +23976,8 @@
     },
     {
       "path": "tools/distribution/PUBLIC-SOURCE.json",
-      "bytes": 3245,
-      "sha256": "611ef3f6e3aeaac4af54db7315806b019d78b2a04dab97af0794e665df33ffe2"
+      "bytes": 3228,
+      "sha256": "41dfd7132410a0e6bb2282f29be098042558f0c2fcc21ac0b6dfa08a4755bd33"
     },
     {
       "path": "tools/export_source.py",
@@ -23976,8 +24051,8 @@
     },
     {
       "path": "tools/security/secret-exceptions.json",
-      "bytes": 5298,
-      "sha256": "a1f637c1ab9c1655e12a0a6f5469cdace8b02ed1cef93a45ddab5c2fcb26976b"
+      "bytes": 5328,
+      "sha256": "be50157e5f963c401b93794b1c46a6709e9ea4f7abbdd7a5ff01683c3828c3ca"
     },
     {
       "path": "tools/security/test_scan_secrets.py",

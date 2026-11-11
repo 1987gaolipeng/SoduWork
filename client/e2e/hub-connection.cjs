@@ -43,11 +43,13 @@ async function service(label) {
   const server = http.createServer(async (req, res) => {
     let raw = ''; for await (const part of req) raw += part;
     const body = raw ? JSON.parse(raw) : {}, device = body.device;
-    requests.push({ label, path: req.url, device, key: req.headers['x-device-key'], authorization: req.headers.authorization });
+    requests.push({ label, path: req.url, body, device, key: req.headers['x-device-key'], authorization: req.headers.authorization });
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', '*');
     res.setHeader('Content-Type', 'application/json');
     if (req.method === 'OPTIONS') return res.end('{}');
+    if (req.url.startsWith('/api/v1/client-updates/check?')) return res.end(JSON.stringify({ hasUpdate: false }));
+    if (req.url === '/api/v1/usage/events') return res.end(JSON.stringify({ ok: true }));
     if (req.url.endsWith('/policy')) return res.end(JSON.stringify({ allowSelfRegistration: false }));
     if (req.url.endsWith('/enroll') || req.url.endsWith('/login')) {
       if (secrets.has(device)) assert.equal(req.headers['x-device-key'], secrets.get(device));
@@ -92,7 +94,9 @@ app.whenReady().then(async () => {
   ipcMain.handle('app-version', () => 'fixture');
   ipcMain.handle('sys-info', () => ({ platform: 'fixture', hostname: 'isolated' }));
   ipcMain.handle('runner-configure', () => ({ ok: true }));
-  ipcMain.handle('client-update-status', () => ({ ok: true, currentVersion: 'fixture', phase: 'idle' }));
+  require('../main/client-updater').install({ app, ipcMain, BrowserWindow,
+    identityOf: auth.authenticatedIdentity, getWindow: () => win,
+    dialog: { showMessageBox: async () => { throw Error('No installer should be offered in this fixture'); } } });
   ipcMain.handle('work-root-default', () => path.join(root, 'work'));
   const url = file => pathToFileURL(path.join(client, file)).href;
   const desk = fs.readFileSync(path.join(client, 'desk.html'), 'utf8');
@@ -182,6 +186,35 @@ app.whenReady().then(async () => {
   assert.equal(requests.filter(row => row.label === 'bob').length, 0);
   assert.ok(requests.filter(row => row.key).every(row => row.key !== 'fixture-old-local-key'));
   report.cases.push('explicit internal loopback profile supports normal secure login; foreign IPC is rejected without request or identity change');
+
+  const beforeUpdates = requests.filter(row => row.path.startsWith('/api/v1/client-updates/')).length;
+  assert.equal((await run('soduWorkAPI.checkClientUpdate()')).state, 'development');
+  assert.equal(requests.filter(row => row.path.startsWith('/api/v1/client-updates/')).length, beforeUpdates,
+    'unpackaged source runs do not perform installer update checks');
+  assert.equal((await run('soduWorkAPI.checkClientUpdate({ testMode: true })')).state, 'current');
+  const update = requests.find(row => row.path.startsWith('/api/v1/client-updates/check?'));
+  assert.equal(update.label, 'alice');
+  assert.equal(update.authorization, 'Device session-alice');
+  const updateQuery = new URL(update.path, a.url).searchParams;
+  assert.equal(updateQuery.get('current'), app.getVersion());
+  assert.equal(updateQuery.get('platform'), process.platform);
+  assert.equal(updateQuery.get('arch'), process.arch);
+  assert.equal(updateQuery.get('channel'), 'stable');
+  const usage = require('../main/agent-runtime/usage-reporter').createUsageReporter({
+    app, identityOf: auth.authenticatedIdentity });
+  usage.observe({ usageIdentity: identityA, sessionId: 'privacy-fixture-chat', adapterId: 'pi', model: 'fixture-model' },
+    { messages: [{ role: 'assistant', done: true, content: 'fixture-private-answer',
+      usage: { input: 4, output: 6, totalTokens: 10 } }] });
+  await usage.flush();
+  const accounting = requests.find(row => row.path === '/api/v1/usage/events');
+  assert.ok(accounting, 'usage accounting reaches the selected Hub through real HTTP');
+  assert.equal(accounting.label, 'alice');
+  assert.equal(accounting.authorization, 'Device session-alice');
+  assert.equal(accounting.body.model, 'fixture-model');
+  assert.equal(accounting.body.usage.total, 10);
+  assert.ok(!JSON.stringify(accounting.body).includes('fixture-private-answer'));
+  assert.equal(requests.filter(row => row.label === 'bob').length, 0);
+  report.cases.push('source update checks stay local; explicit update IPC and usage accounting use the authenticated selected Hub over HTTP');
 
   win.destroy(); await open();
   await until('SoduWorkAPI.clientAuthSnapshot().user?.id === "alice"');

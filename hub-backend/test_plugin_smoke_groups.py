@@ -54,7 +54,7 @@ class PluginSmokeGroupTests(unittest.TestCase):
     def test_import_and_group_listing_do_not_import_application_or_mutate_settings(self):
         source = """import os, sys
 before = dict(os.environ)
-import smoke_plugins
+from smoke import smoke_plugins
 assert 'app.db' not in sys.modules
 assert os.environ == before
 assert smoke_plugins.main(['--list']) == 0

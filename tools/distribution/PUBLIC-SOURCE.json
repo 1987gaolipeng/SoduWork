@@ -56,7 +56,6 @@
   ],
   "excludedFiles": [
     "PROJECT_CONTEXT.md",
-    "AGENTS.md",
     "client/distributions.json",
     ".gitlab-ci.yml",
     "tools/seed_local_demo_data.py",

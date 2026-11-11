@@ -1,6 +1,6 @@
 # Reporting security issues
 
-[简体中文](docs/security.zh-CN.md) · **English** · [Documentation](docs/index.en.md)
+[简体中文](docs/security.zh-CN.md) · **English** · [Documentation](docs/README.md)
 
 ## How to report
 
@@ -22,6 +22,6 @@ Use a dedicated Hub authentication key, enable HTTPS in production, and back up 
 
 Pi SDK is pinned to 1.4.0, with patched `undici 8.12.2` and `brace-expansion 5.0.12`. Node.js 22.19.0 or newer is required. The current runtime audit (`npm audit --omit=dev`) reports zero findings; the GitHub security workflow rejects high-severity runtime findings.
 
-Build dependencies are also reviewed: Electron is locked to 44.9.3 and fast-uri to 3.1.9. Both full and runtime dependency audits currently report zero findings. Third-party licenses and per-platform materials shipped with installers are described in [third-party distribution materials](third-party/README.en.md).
+Build dependencies are also reviewed: Electron is locked to 44.9.3 and fast-uri to 3.1.9. Both full and runtime dependency audits currently report zero findings. Third-party licenses and per-platform materials shipped with installers are described in [third-party distribution materials](third-party/README.md).
 
 SDK upgrades require session recovery, tool budgets, cancellation, delivery, extension caching, and complete production-dependency packaging checks. Advisory data changes, so repeat audits before every release.

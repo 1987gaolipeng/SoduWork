@@ -49,7 +49,7 @@ Review and commit genuine resolution evidence for `third-party/public-release.js
 
 Client desktop acceptance requires six entries in `tools/ci/soduwork-acceptance-baselines.json`: `windows-x64-exe`, `linux-x64-deb`, `linux-x64-rpm`, `linux-x64-tar.gz`, `macos-arm64-dmg` and `macos-x64-dmg`. Each entry includes `productName: SoduWork`, a strictly older `version`, `sha256`, and a `url` pointing to the same public GitHub repository, with optional `format`/`size`. Local paths and internal fallback downloads are rejected. The first public binary release has no previous public baseline and needs a separately reviewed first-release acceptance contract. Never substitute the candidate for an older version to claim a successful upgrade. Android is checked independently through signed package identity and emulator installation; it does not reuse a desktop baseline.
 
-Hub images are delivered as Release assets. After downloading and verifying the manifest, run `docker load --input <image.tar.gz>` and configure your environment using the [self-hosting guide](../ops/self-host/README.en.md). This workflow does not push to GHCR or migrate company cluster deployment, backup schedules, domains or update services.
+Hub images are delivered as Release assets. After downloading and verifying the manifest, run `docker load --input <image.tar.gz>` and configure your environment using the [self-hosting guide](../ops/self-host/README.md). This workflow does not push to GHCR or migrate company cluster deployment, backup schedules, domains or update services.
 
 ## Local validation
 
