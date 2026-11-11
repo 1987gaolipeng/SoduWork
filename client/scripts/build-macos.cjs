@@ -8,6 +8,22 @@ const { macosBuildEnvironment } = require('./macos-build-environment.cjs');
 const { notarizeArtifact, notarizeEnabled, signingIdentity } = require('./notarize-macos.cjs');
 const { candidateVersion } = require('./client-build-version.cjs');
 
+const truthy = value => ['1', 'true', 'yes'].includes(String(value || '').trim().toLowerCase());
+
+function releaseBuild(env = process.env) {
+  return truthy(env.SODUWORK_MAC_RELEASE);
+}
+
+function signingArguments(env = process.env) {
+  const identity = signingIdentity(env);
+  if (releaseBuild(env)) {
+    assert.ok(identity, 'macOS release builds require SODUWORK_MAC_SIGN_IDENTITY');
+    assert.ok(!truthy(env.SODUWORK_MAC_SKIP_NOTARIZE),
+      'macOS release builds cannot skip notarization');
+  }
+  return ['--config.mac.identity=' + (identity || '-')];
+}
+
 function signingKeychain(env = process.env) {
   return env.SODUWORK_MAC_KEYCHAIN || (env.HOME ? path.join(env.HOME, 'Library/Keychains/login.keychain-db') : '');
 }
@@ -16,6 +32,7 @@ function build({ root = path.resolve(__dirname, '../..'), platform = process.pla
   env = process.env, run = execFileSync, prepare = prepareRunner, hostArch = process.arch,
   distributions, preparedRunner, beforePackages = () => {}, beforePackage = () => {}, afterPackage = () => {} } = {}) {
   assert.equal(platform, 'darwin', 'macOS packages require a native Mac runner');
+  signingArguments(env);
   assert.ok((!distributions || (distributions.length === 1 && distributions[0] === 'self-hosted')) &&
     (!env.SODUWORK_DISTRIBUTION || env.SODUWORK_DISTRIBUTION === 'self-hosted'),
   'Public macOS builds support only the self-hosted distribution');
@@ -48,7 +65,7 @@ function buildTargets({ root, platform, env, run, prepare, architectures, hostAr
       'print(platform.machine())'], { env, encoding: 'utf8' }).trim();
     assert.equal(actual, arch === 'x64' ? 'x86_64' : 'arm64', 'Build Python architecture differs from ' + arch);
   }
-  // Real Developer ID signing stays opt-in so GitLab CI keeps its ad-hoc contract.
+  // Validation builds may use ad-hoc signing; public releases require Developer ID.
   const identity = signingIdentity(env);
   if (identity) {
     const keychain = signingKeychain(env);
@@ -68,7 +85,7 @@ function buildTargets({ root, platform, env, run, prepare, architectures, hostAr
     const signed = identity && notarizeEnabled(env);
     const dmgPath = signed ? path.join(client, 'dist', `SoduWork-${candidateVersion(env, root)}-mac-${arch}.dmg`) : '';
     run(process.execPath, [path.join(client, 'node_modules/electron-builder/cli.js'), '--mac', '--' + arch, '--publish', 'never',
-      '--config.mac.identity=' + (identity || '-'),
+      ...signingArguments(env),
       ...(signed ? ['--config.mac.hardenedRuntime=true', '--config.afterSign=scripts/notarize-macos.cjs'] : [])],
     { env, cwd: client, stdio: 'inherit' });
     if (signed) {
@@ -79,7 +96,7 @@ function buildTargets({ root, platform, env, run, prepare, architectures, hostAr
     afterPackage(env, arch);
   }
 }
-module.exports = { build };
+module.exports = { build, releaseBuild, signingArguments };
 if (require.main === module) {
   try { build(); } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

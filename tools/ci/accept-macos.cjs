@@ -1,9 +1,25 @@
 'use strict';
 const fs = require('node:fs/promises'), path = require('node:path'), os = require('node:os'), assert = require('node:assert/strict');
 const contract = require('./release-artifacts.cjs');
-const { run, soduworkBaseline } = require('./acceptance-common.cjs');
+const { run, soduworkBaseline, assertUpgradeVersion } = require('./acceptance-common.cjs');
 const { verifySignature } = require('./macos-signature.cjs');
+// Only a pinned, explicitly marked older SoduWork installer may predate
+// notarization. Its bundle must still pass strict codesign verification.
+async function legacyNotarizationBaseline(file, baseline) {
+  if (baseline?.notarization !== 'legacy-ad-hoc') return false;
+  assert.equal(baseline.productName, 'SoduWork', 'Legacy baseline must be SoduWork');
+  assert.equal(path.resolve(baseline.path || ''), path.resolve(file), 'Legacy baseline path differs');
+  assertUpgradeVersion(baseline.version, require('../../client/package.json').version);
+  assert.match(baseline.sha256 || '', /^[a-f0-9]{64}$/, 'Legacy baseline must have a pinned SHA-256');
+  const actual = await contract.fingerprint(file);
+  assert.equal(actual.sha256, baseline.sha256, 'Legacy baseline digest differs');
+  if (baseline.size !== undefined) assert.equal(actual.size, baseline.size, 'Legacy baseline size differs');
+  return true;
+}
+
 async function unpack(file, format, destination, { execute = run, mountRoot = os.tmpdir(), legacyBaseline } = {}) {
+  const release = process.env.SODUWORK_MAC_RELEASE === '1';
+  const legacy = release && await legacyNotarizationBaseline(file, legacyBaseline);
   await fs.mkdir(destination, { recursive: true });
   if (format === 'dmg') {
     await execute('hdiutil', ['verify', file]);
@@ -33,11 +49,22 @@ async function unpack(file, format, destination, { execute = run, mountRoot = os
   const executable = await execute('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleExecutable', path.join(app, 'Contents/Info.plist')]);
   assert.equal(path.basename(executable), executable);
   const signature = await verifySignature({ file, app, execute, legacyBaseline });
+  if (release) {
+    if (!legacy) {
+      await execute('spctl', ['--assess', '--type', 'execute', app]);
+      await execute('xcrun', ['stapler', 'validate', app]);
+    }
+    signature.notarization = legacy ? 'pinned-legacy-ad-hoc' : 'verified';
+  }
   return { app, binary: path.join(app, 'Contents/MacOS', executable), signature };
 }
 async function main() {
   assert.equal(process.platform, 'darwin');
   const arch = process.argv?.[2];
+  if (process.env.SODUWORK_MAC_RELEASE === '1') {
+    assert.equal(process.env.SODUWORK_MAC_REAL_KEYCHAIN, '1',
+      'Public macOS acceptance requires the real login Keychain');
+  }
   const record = await contract.verify('macos', arch);
   const output = path.join(contract.root, 'release-evidence/macos', arch || ''); await fs.mkdir(output, { recursive: true });
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'soduwork-mac-acceptance-'));
@@ -78,10 +105,13 @@ async function main() {
           : { freshInstalled: true, restarted: true, reinstalled: true, uninstalled: true,
             userDataPreserved: true, upgraded: false, oldVersion: '' }) });
     }
-    await contract.acceptance('macos', checks, [
-      'Isolated app copies; no Gatekeeper quarantine/notarization or drag-and-drop UI certification.',
-      'Mock Keychain in isolated test profiles; no system Keychain authorization or credential migration certification.',
-    ], arch);
+    const limitations = process.env.SODUWORK_MAC_RELEASE === '1'
+      ? ['No interactive drag-and-drop UI certification; legacy baseline notarization exceptions are recorded in oldSignature.']
+      : [
+        'Isolated app copies; no Gatekeeper quarantine/notarization or drag-and-drop UI certification.',
+        'Mock Keychain in isolated test profiles; no system Keychain authorization or credential migration certification.',
+      ];
+    await contract.acceptance('macos', checks, limitations, arch);
   } finally { await fs.rm(temp, { recursive: true, force: true }); }
 }
 module.exports = { unpack };
