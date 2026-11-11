@@ -1,4 +1,6 @@
 // Isolated Electron + real preload + real connection IPC. Platform replies are fixtures.
+// Set SODUWORK_E2E_FEISHU_PREFIX to a disposable npm prefix containing the exact
+// packages in runtime.provider('feishu'); never read an installed user's tools.
 const {app,BrowserWindow,ipcMain,safeStorage}=require('electron');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const evidence=process.argv[2];if(!evidence||!path.isAbsolute(evidence))throw Error('Explicit evidence directory required');
@@ -9,12 +11,32 @@ const runtime=require('../main/platform-connections/runtime.cjs');
 const feishu=require('../main/platform-connections/feishu.cjs');
 const auth=require('../main/platform-connections/feishu-auth.cjs');
 const realPaths=runtime.paths,realExecute=runtime.execute,realFetch=global.fetch;
-const toolPrefix=process.env.SODUWORK_E2E_FEISHU_PREFIX||path.join(app.getPath('appData'),'soduwork/platform-connections/tools/feishu/0.5.1');
-const sdk=require(path.join(toolPrefix,'node_modules/@larksuiteoapi/node-sdk'));
-const sdkVersion=require(path.join(toolPrefix,'node_modules/@larksuiteoapi/node-sdk/package.json')).version;
-assert.equal(sdkVersion,runtime.provider('feishu').registrationSdk.version);
+let toolPrefix,sdk,sdkVersion;
+try{
+ toolPrefix=process.env.SODUWORK_E2E_FEISHU_PREFIX;
+ assert.ok(toolPrefix&&path.isAbsolute(toolPrefix),'Set SODUWORK_E2E_FEISHU_PREFIX to an absolute isolated npm prefix');
+ const declared=runtime.provider('feishu');
+ const lock=JSON.parse(fs.readFileSync(path.join(toolPrefix,'package-lock.json'),'utf8'));
+ for(const expected of [declared,declared.registrationSdk]){
+  const installed=JSON.parse(fs.readFileSync(path.join(toolPrefix,'node_modules',expected.package,'package.json'),'utf8'));
+  assert.equal(installed.version,expected.version,expected.package+': unexpected installed version');
+  const locked=lock.packages?.['node_modules/'+expected.package];
+  assert.equal(locked?.version,expected.version,expected.package+': unexpected locked version');
+  assert.equal(locked?.integrity,expected.npmIntegrity,expected.package+': registry integrity differs from runtime declaration');
+ }
+ sdk=require(path.join(toolPrefix,'node_modules',declared.registrationSdk.package));
+ sdkVersion=declared.registrationSdk.version;
+}catch(error){
+ const message='Platform E2E dependency preflight failed: '+error.message;
+ fs.writeFileSync(path.join(evidence,'failure.txt'),message+'\n');
+ console.error(message);
+ // Exit before creating a BrowserWindow; uncaught Electron startup errors open
+ // a modal dialog and leave headless CI waiting for a user who cannot dismiss it.
+ process.exit(1);
+}
 let opened=0,cancelled=0,registrationAllowed=false,userAllowed=false,registrations=0,loginAttempts=0;
 let mcpConfig=null,probeTools=[],refreshes=0;
+const ownedPorts=new Set();
 runtime.paths=(...args)=>{const p=realPaths(...args);if(args[1]==='feishu')p.prefix=toolPrefix;return p;};
 runtime.execute=(command,args,options)=>{
  assert.equal(args[args.indexOf('--token-mode')+1],'user_access_token');
@@ -79,7 +101,7 @@ global.fetch=async(url,options)=>{
  }
  if(url===hub+'/api/v1/mcp-servers/upsert'){
   const body=JSON.parse(options.body);assert.equal(options.method,'POST');assert.equal(body.original?.id||null,mcpConfig?.id||null);
-  mcpConfig=body.server;return reply({ok:true});
+  mcpConfig=body.server;ownedPorts.add(Number(new URL(mcpConfig.url).port));return reply({ok:true});
  }
  if(url===hub+'/api/v1/mcp-servers')return reply({personal:mcpConfig?[{...mcpConfig,headers:{Authorization:'••••'}}]:[],company:[],enabledCompany:[]});
  if(String(url).startsWith('http://127.0.0.1:'))return realFetch(url,options);
@@ -210,7 +232,7 @@ app.whenReady().then(async()=>{
  checks.push('unrecognized provider rejected at real IPC boundary');
  await new Promise(r=>setTimeout(r,500));
  fs.writeFileSync(path.join(evidence,'connection-form.png'),(await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
- fs.writeFileSync(path.join(evidence,'result.json'),JSON.stringify({ok:true,mode:'isolated platform replies; real Electron preload/IPC/UI',checks,officialSdk:sdkVersion,officialMcp:runtime.provider('feishu').version,toolCount:probeTools.length},null,2));
+ fs.writeFileSync(path.join(evidence,'result.json'),JSON.stringify({ok:true,mode:'isolated platform replies; real Electron preload/IPC/UI',checks,officialSdk:sdkVersion,officialMcp:runtime.provider('feishu').version,toolCount:probeTools.length,ownedPorts:[...ownedPorts]},null,2));
  console.log(JSON.stringify({ok:true,checks:checks.length}));service.close();app.quit();
 }).catch(error=>{fs.writeFileSync(path.join(evidence,'failure.txt'),error.stack);console.error(error.message);service.close();app.exit(1)});
-setTimeout(()=>{console.error('UI test timeout');app.exit(1)},55000).unref();
+setTimeout(()=>{fs.writeFileSync(path.join(evidence,'failure.txt'),'UI test timeout\n');console.error('UI test timeout');service.close();app.exit(1)},55000).unref();
