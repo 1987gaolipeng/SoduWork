@@ -1,9 +1,9 @@
 // Exercise production React, API serialization, native controls and layout against an isolated HTTP fixture.
 const { app, BrowserWindow, session } = require('electron')
-const fs = require('node:fs'), path = require('node:path'), http = require('node:http')
+const fs = require('node:fs'), path = require('node:path'), http = require('node:http'), os = require('node:os')
 const assert = require('node:assert/strict')
 const root = path.resolve(__dirname, '..'), dist = path.join(root, 'dist')
-const output = path.resolve(root, '../outputs/quota-admin-browser-20261025')
+const output = process.argv[2] || fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-quota-admin-'))
 fs.mkdirSync(output, { recursive: true })
 app.setPath('userData', path.join(output, 'profile'))
 app.disableHardwareAcceleration()
