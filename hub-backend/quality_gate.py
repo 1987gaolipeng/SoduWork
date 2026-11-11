@@ -35,8 +35,8 @@ LIVE_ENV_KEYS = ("SMOKE_ALLOW_LIVE_DB", "SODUWORK_SMOKE_LIVE_AI", "SMOKE_BASE")
 # The isolated admin dispatch suite takes over five minutes on Windows. Keep a
 # finite per-module deadline without changing the default for other checks.
 CHECK_TIMEOUTS = {
-    "smoke/smoke_plugins.py": 1800,
-    "smoke/smoke_schema_migrations.py": 1800,
+    "smoke_plugins.py": 1800,
+    "smoke_schema_migrations.py": 1800,
     "test_admin_requirement_dispatch.py": 600,
 }
 
@@ -165,8 +165,8 @@ def main() -> int:
             return 2
 
     smoke_scripts = list(scripts_for(args.profile))
-    if args.browser and "smoke/smoke_client_render.py" not in smoke_scripts:
-        smoke_scripts.append("smoke/smoke_client_render.py")
+    if args.browser and "smoke_client_render.py" not in smoke_scripts:
+        smoke_scripts.append("smoke_client_render.py")
     all_smoke_scripts = smoke_scripts
     if args.shard_count > 1:
         smoke_scripts = [

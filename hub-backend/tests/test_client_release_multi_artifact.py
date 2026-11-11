@@ -59,7 +59,7 @@ def _bundle(installer, *, version="1.12.69", artifact_name=None, release_id=None
         "minVersion": "",
         "notes": "",
         "publishedAt": "2026-10-12T08:00:00Z",
-        "keyId": "fixture-release-key",
+        "keyId": "soduwork-client-release-2026b",
         "signature": "irrelevant",
     }
 
@@ -72,7 +72,7 @@ def _release_row(release_id, version, name, *, enabled=True, platform="linux", a
         arch=arch, artifact_name=name,
         artifact_path=f"{channel}/{platform}/{arch}/{version}/{name}",
         artifact_size=2, sha256=hashlib.sha256(b"00").hexdigest(),
-        key_id="fixture-release-key", signature="s" * 88,
+        key_id="soduwork-client-release-2026b", signature="s" * 88,
         notes="", mandatory=False, min_version="", enabled=enabled,
         created_by="test", created_at=None)
 
@@ -311,12 +311,6 @@ class WindowsDownloadRouteTests(_SqliteIsolated):
         self.assertIn('filename="SoduWork-Setup.exe"', response.headers["content-disposition"])
 
 
-class PublicDownloadSurfaceTests(unittest.TestCase):
-    def test_excluded_mobile_packages_have_no_download_routes(self):
-        paths = {route.path for route in download.router.routes}
-        self.assertFalse(any('/mobile' in route for route in paths))
-
-
 class PublicBetaDownloadTests(_SqliteIsolated):
     targets = (
         ("win32", "x64", "Setup.exe", ""),
@@ -408,6 +402,24 @@ class PublicBetaDownloadTests(_SqliteIsolated):
                 self.assertEqual((await client.get("/api/v1/download/client/linux/deb")).status_code, 200)
 
 
+class MobileDownloadBrandTests(_SqliteIsolated):
+    async def test_old_package_paths_keep_working_with_current_download_name(self):
+        app = await self._app([])
+        for filename in ("SoduWork-Mobile.apk", "SoduWork-Mobile-1.2.3.apk"):
+            with self.subTest(filename=filename), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / filename).write_bytes(b"isolated-apk")
+                with patch.object(download, "_DIR", root):
+                    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                                 base_url="http://test") as client:
+                        info = (await client.get("/api/v1/download/mobile/info")).json()
+                        response = await client.get("/api/v1/download/mobile/android")
+                self.assertTrue(info["available"])
+                self.assertEqual(info["filename"], "SoduWork-Mobile.apk")
+                self.assertEqual(info["artifactFilename"], filename)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.content, b"isolated-apk")
+                self.assertIn('filename="SoduWork-Mobile.apk"', response.headers["content-disposition"])
 
 
 if __name__ == "__main__":

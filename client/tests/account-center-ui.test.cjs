@@ -41,3 +41,24 @@ test('workspace and account avatars use circular clipping surfaces', () => {
   assert.match(workspaceCss, /\.ws-avatar\{[\s\S]*?border-radius:50%/);
   assert.match(accountCss, /#personalAccountPanel \.soduwork-account-avatar\s*\{[\s\S]*?border-radius:\s*50%/);
 });
+
+test('personal account page header follows the shared title spacing', () => {
+  const css = read('components/client-auth/personal-account.css');
+  assert.match(css, /personal-account-head\s*\{[\s\S]*?align-items:\s*flex-start/);
+  assert.match(css, /personal-account-head\s*\{[\s\S]*?gap:\s*8px\s+12px/);
+  assert.match(css, /personal-account-head p\s*\{[\s\S]*?font:\s*400[^;]*\/1\.5/);
+});
+
+test('workspace window menu reserves its titlebar before the personal account panel', () => {
+  const css = read('components/workspace/window-menu.css');
+  const workspaceHostRule = css.match(/html\[data-window-menu\]\[data-desk-panel="workspace"\][\s\S]*?\{[\s\S]*?\}/);
+  assert.ok(workspaceHostRule, 'workspace host offset rule should exist');
+  assert.match(workspaceHostRule[0], /#personalAccountPanel/);
+  assert.match(workspaceHostRule[0], /top:calc\(var\(--window-menu-height\) \+ 10px\)!important/);
+});
+
+test('signed-in device activity is isolated for phrase localization', () => {
+  const source = read('components/client-auth/account-center.js');
+  assert.match(source, /class="ac-last-active"/);
+  assert.doesNotMatch(source, /item\.lastSeenAt \? '最近活动 '/);
+});

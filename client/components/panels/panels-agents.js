@@ -1,19 +1,9 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+/*
+ * Agent runtime installation and configuration: show availability,
+ * installation/version/path, missing setup, and real execution checks separately.
+ * Installed does not imply usable. This surface manages the current client only;
+ * cloud runtime maintenance belongs to the cloud-computer surface.
+ */
 
 let _agData = null;                 /* {env, agents, modelCount} */
 let _agOpen = '';                   /* Currently expanded agent; only one opens at a time. */
@@ -282,32 +272,6 @@ function _agCopy(a, field, fallback = '') {
     return String(a.name || fallback || a.key).replace(/\s+CLI$/i, '');
   }
   return _agMessage(a?.copy?.[field], fallback || a?.[field] || '');
-}
-
-/* Phrase translation for server-composed job copy. The backend stays Chinese;
- * lines rendered inside <pre data-alog> never pass through the DOM adapter,
- * so they are translated here, per line, before escaping. */
-function _agTx(value) {
-  const text = String(value == null ? '' : value);
-  let out = text;
-  try { out = window.SoduWorkI18n?.translateText?.(text) || text; } catch (_) { return text; }
-  if (out !== text) return out;
-  /* Trailing parenthetical the exact catalog cannot match
-   * (e.g. "gpt-5（走我自己的额度）" -> model id + translated suffix). */
-  let m = text.match(/^([\s\S]*?)(（[^（）]{1,24}）)$/);
-  if (m) {
-    const suffix = _agTx(m[2]);
-    if (suffix !== m[2]) return m[1] + suffix;
-  }
-  /* Known-label prefix split so the label and reason translate independently
-   * (templates whose parameter contains sentence punctuation are skipped by
-   * the catalog, e.g. "OpenCode 安装失败：npm ERR! code 1"). */
-  m = text.match(/^(\s*)([^：:\n]{1,14}：)([\s\S]+)$/);
-  if (m) {
-    const head = _agTx(m[2]);
-    if (head !== m[2]) return m[1] + head + _agTx(m[3]);
-  }
-  return out;
 }
 
 function _agPresentation(a, ak) {
@@ -640,7 +604,7 @@ function _agBodyHtml(a, s, ak) {
         '<button class="btn-mini" data-alogin="' + esc(ak) + '"' + dis + '>连接 Codex</button></div>' : '') +
     (bundled ? '<div class="ag-cfg"><b>随 SoduWork 内置</b><span>' +
       (a.key === 'harness2'
-        ? 'Google Research Harness² 核心随 SoduWork 升级；首次使用点击「准备组件」准备执行组件。「重装 / 升到最新」会准备 SoduWork 支持的执行组件版本；卸载仅停用本底座，保留共享 OpenCode。'
+        ? 'Harness² 核心及独立执行器随 SoduWork 升级，无需安装其他底座；停用会保留任务记录，点「启用」可重新启用。'
         : '安装包已包含 ' + esc(a.name || a.key) +
           '；升级 SoduWork 时会一起升级，不需要单独安装、更新或卸载。') + '</span></div>' : '') +
     /*
@@ -663,7 +627,7 @@ function _agBodyHtml(a, s, ak) {
     (_agConfirm === ak && _agCanUninstall(a)
       ? '<div class="sch-confirm"><div>真的把 ' + esc(a.name) + ' 从执行机上卸掉？' +
         '<i>' + (a.key === 'harness2'
-          ? '停用这台机器上的 Harness²，新任务不能再派给它；保留内置核心、共享 OpenCode 和任务记录。点「启用」可重新启用。'
+          ? '停用这台机器上的 Harness²，新任务不能再派给它；保留内置文件和任务记录。点「启用」可重新启用。'
           : '这台机器上所有人都会少一个能派活的助手；手上正在跑的活会失败。装回来只要点一次「装上」。') + '</i></div>' +
         '<div class="sch-c-ops">' +
         '<button class="btn-mini" data-acancel="1">算了</button>' +
@@ -699,7 +663,7 @@ function _agJobHtml(job) {
   const runningHint = job.action === 'login'
     ? '请按下方官方地址与设备码完成登录。此操作不启动模型对话。'
     : harnessProbe
-    ? '仅验证 OpenCode 执行组件；不运行 Harness² 推演，会使用所选模型额度，最多 3 分钟。'
+    ? '验证 Harness² 独立执行器；不运行推演，会使用所选模型额度，最多 3 分钟。'
     : '这一步可能要几十秒，日志在下面滚';
   /* Log lines live inside <pre data-alog>, which the DOM adapter deliberately
    * leaves alone; translate each line here instead. The head-model filter in

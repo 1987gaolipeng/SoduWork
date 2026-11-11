@@ -17,7 +17,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent
 _TEMP = tempfile.TemporaryDirectory(prefix="soduwork-smoke-client-release-bundle-")
 TEMP = Path(_TEMP.name)
 DB = TEMP / "release.db"

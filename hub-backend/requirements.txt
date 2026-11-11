@@ -44,5 +44,3 @@ PyMySQL[rsa]==1.2.3
 
 # Apache-2.0: official MongoDB driver without dynamic downloads or user-supplied runtimes.
 pymongo==4.18.3
-# Keep the reviewed ISC notice aligned with the frozen Runner metadata.
-dnspython==2.9.0

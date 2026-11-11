@@ -51,14 +51,14 @@ function fixture({ parsed = {}, mates = { mates: [mate] }, execution = options }
     vm.runInContext(source, ctx, { filename: file });
   }
   const click = selection => handlers.click({ stopPropagation() {}, target: { closest: s => s === '[data-selv]' ? { dataset: { selv: selection } } : null } });
-  return { ctx, box, fields, calls, alerts, click, serverEvents, state: () => ctx.audit.snapshot(),
-    async open(text = '修复缺陷，转给示例成员', opts = {}) { ctx.ComposeDraft.open(text, opts); await flush(); },
+  return { ctx, box, fields, calls, alerts, serverEvents, click, state: () => ctx.audit.snapshot(),
+    async open(text = '修复缺陷，转给礼朋', opts = {}) { ctx.ComposeDraft.open(text, opts); await flush(); },
     async refine(text, opts = {}) { return ctx.ComposeDraft.refine(text, opts); } };
 }
 
 test('直接交办后立即合并服务端任务投影，创建人仍可在我提出查看', async () => {
-  const f = fixture({ parsed: { title: '转交后的需求', ...explicit('示例成员') } });
-  await f.open('转交给示例成员');
+  const f = fixture({ parsed: { title: '转交后的需求', ...explicit('礼朋') } });
+  await f.open('转交给礼朋');
   await f.ctx.audit.create();
   const event = f.serverEvents.find(row => row.type === 'task.created');
   assert.ok(event, '应把转交回执并入本地任务镜像');

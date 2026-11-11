@@ -10,7 +10,9 @@ const BAD_HUB = '后台地址应为不带路径的 http:// 或 https:// 地址';
 // The isolated integration harness keeps a fixed connection:
 // - an unpackaged, separately profiled integration harness may opt into its own
 //   loopback backend (SODUWORK_TEST_HUB_URL; internalTest, never editable);
-// Both packaged and source clients may select a self-hosted Hub at login.
+// - an unpackaged local-code run may repoint the client from the login gate.
+//   That choice is persisted beside the profile; packaged installs always stay
+//   on production and ignore any saved override.
 function normalizeHub(raw) {
   const value = String(raw || '').trim();
   let parsed;
@@ -30,14 +32,15 @@ function loadSavedHub(app) {
 function saveHub(app, hub) {
   fs.writeFileSync(savedFile(app), JSON.stringify({ hub }), { encoding: 'utf8', mode: 0o600 });
 }
-function initialize(app, env = process.env) {
-  let hub = PRODUCTION_HUB, internalTest = false, editable = false;
+function initialize(app, env = process.env, distributionProfile = distribution.current()) {
+  let hub = distributionProfile.hubOrigin, internalTest = false, editable = false;
   const testHub = env.SODUWORK_TEST_HUB_URL;
   const testProfile = env.SODUWORK_USER_DATA;
   if (!app.isPackaged && testHub) {
     const value = new URL(testHub);
     const profile = path.resolve(app.getPath('userData'));
-    const reserved = ['SoduWork'].map(name => path.resolve(app.getPath('appData'), name).toLowerCase());
+    const installedProfiles = ['stage', 'internal', 'cn', 'global'].map(id => distribution.getProfile(id).userDataName);
+    const reserved = [...installedProfiles, 'SoduWork', 'soduwork'].map(name => path.resolve(app.getPath('appData'), name).toLowerCase());
     if (!['http:', 'https:'].includes(value.protocol) ||
         !['127.0.0.1', '[::1]', 'localhost'].includes(value.hostname) ||
         value.username || value.password || value.search || value.hash || value.pathname !== '/' ||

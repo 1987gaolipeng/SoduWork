@@ -6,7 +6,7 @@
   let identity = '', epoch = 0, projects = new Map(), projectRequest = 0, menuAnchor = null;
   let createMenuDismiss = null;
   const panel = () => document.getElementById('historyBoard');
-  const rows = () => typeof tasks === 'undefined' ? [] : tasks;
+  const rows = () => typeof tasks === 'undefined' ? [] : tasks.filter(R.isRequirement);
   const notify = text => global.petSay?.(text);
   const storageKey = () => global.SoduWorkAPI?.taskStorageKey?.('tasks');
   function syncIdentity() {
@@ -174,7 +174,7 @@
     else if (state.view === 'gantt' && global.GanttView) {
       const today = new Date(); if (state.year == null) { state.year = today.getFullYear(); state.month = today.getMonth(); }
       body.innerHTML = GanttView.html(list.map(task => ({label:R.content(task).title,sub:task.assigneeName || '',tasks:[{...task,...R.content(task),createdAt:task.createdAt || task.created}]})), {
-        year:state.year,month:state.month,onlyOverdue:state.onlyOverdue,isOverdue:R.overdue,labelHead:'需求',clickAttr:'data-rq-open',taskRows:true});
+        year:state.year,month:state.month,onlyOverdue:state.onlyOverdue,labelHead:'需求',clickAttr:'data-rq-open',taskRows:true});
       body.querySelectorAll('[data-rq-open]').forEach(node => { node.tabIndex = 0; node.setAttribute('role','button'); });
     } else body.innerHTML = state.view === 'list' ? V.list(list, state, ctx) : V.board(list, state, ctx);
     if (state.view === 'kanban' && state.group === 'stage') {
