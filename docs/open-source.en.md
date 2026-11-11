@@ -31,27 +31,19 @@ node tools/check-public-source.cjs
 node tools/check-third-party.cjs
 ```
 
-After changing source, stage the reviewed files, then refresh and verify the manifest:
-
-```sh
-node tools/check-source-manifest.cjs --write-manifest
-node tools/check-source-manifest.cjs
-git add tools/distribution/SOURCE-MANIFEST.json
-```
-
-Review and commit both the source and manifest before exporting the committed tree. The output must be outside the source directory and must not already exist:
+Review and commit the source before exporting. Git tracks development changes; there is no source manifest to refresh or commit for ordinary PRs or dependency updates. The output must be outside the source directory and must not already exist:
 
 ```sh
 python tools/export_source.py --output ../soduwork-source-v1.zip
 ```
 
-The exporter checks every file against the manifest and rejects unlisted content, symbolic links, and escaping paths. It exports the current commit without Git history, untracked files, or caches. Uncommitted changes are not included; choose a new filename to preserve existing archives.
+The exporter generates `tools/distribution/SOURCE-MANIFEST.json` from the archived files, records the source commit, and verifies the resulting ZIP. It rejects excluded material, symbolic links and escaping paths. It exports the current commit without Git history, untracked files or caches. Uncommitted changes are not included; choose a new filename to preserve existing archives.
 
-`tools/distribution/SOURCE-MANIFEST.json` records hashes and sizes. UTF-8 text uses canonical LF newlines, supporting Windows CRLF checkouts; binary files use exact bytes. The manifest verifies integrity and does not replace secret scanning, third-party authorization, or Git history review.
+The generated manifest records hashes and sizes. UTF-8 text uses canonical LF newlines, supporting Windows CRLF; binary files use exact bytes. In an extracted exporter-produced ZIP, run `node tools/check-source-manifest.cjs` to detect changed, missing or extra files. In a Git checkout, that command uses Git's inventory and does not require a manifest. The manifest verifies archive consistency, not publisher identity, and does not replace secret scanning, third-party authorization or Git history review.
 
 ## Prepare a GitHub repository
 
-Extract the verified ZIP into a new empty directory, initialize a new Git repository there, review the files, and connect your own GitHub remote. Do not make the original development repository public or import private branches, old tags, or development history.
+Extract the verified ZIP into a new empty directory, initialize a new Git repository there, review the files, and connect your own GitHub remote. The generated source manifest is ignored by Git and must not be added to the new repository. Do not make the original development repository public or import private branches, old tags, or development history.
 
 Root `README.md` is the English entry point, with a top link to the Chinese `README.zh-CN.md`. Relative navigation works across forks and repository renames. Follow the [translation conventions](development.en.md#documentation-and-translations) to add another language.
 

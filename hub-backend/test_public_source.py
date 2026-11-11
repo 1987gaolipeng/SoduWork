@@ -11,20 +11,27 @@ class PublicSourceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             self.assertFalse(is_public_snapshot(Path(folder)))
 
-    def test_explicit_distribution_profile_and_quality_inventory_required(self):
+    def test_explicit_distribution_profile_and_quality_entry_required(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            data = {"schema": 1, "ok": True, "distribution": "public-source",
-                    "files": [{"path": "hub-backend/quality_manifest.py"}]}
-            marker = root / "tools/distribution/SOURCE-MANIFEST.json"
+            data = {"schema": 1, "id": "opensource-v1", "sourceOnly": True,
+                    "excludedFiles": [".gitlab-ci.yml"]}
+            marker = root / "tools/distribution/PUBLIC-SOURCE.json"
             marker.parent.mkdir(parents=True)
             marker.write_text(json.dumps(data), encoding="utf-8")
+            backend = root / "hub-backend"
+            backend.mkdir()
+            quality = backend / "quality_manifest.py"
+            quality.write_text('# fixture', encoding='utf-8')
             self.assertTrue(is_public_snapshot(root))
-            data["files"] = []
-            marker.write_text(json.dumps(data), encoding="utf-8")
+            self.assertFalse((marker.parent / 'SOURCE-MANIFEST.json').exists())
+            (root / '.gitlab-ci.yml').write_text('# internal fixture', encoding='utf-8')
+            self.assertFalse(is_public_snapshot(root))
+            (root / '.gitlab-ci.yml').unlink()
+            quality.unlink()
             with self.assertRaises(ValueError):
                 is_public_snapshot(root)
-            data["distribution"] = "other"
+            data["id"] = "other"
             marker.write_text(json.dumps(data), encoding="utf-8")
             self.assertFalse(is_public_snapshot(root))
 
@@ -38,10 +45,28 @@ class PublicSourceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             (root / "tools/distribution").mkdir(parents=True)
-            for value in (None, [], {"distribution": "public-source", "files": None}):
-                (root / "tools/distribution/SOURCE-MANIFEST.json").write_text(json.dumps(value), encoding="utf-8")
+            (root / 'hub-backend').mkdir()
+            (root / 'hub-backend/quality_manifest.py').write_text('# fixture', encoding='utf-8')
+            valid = {'schema': 1, 'id': 'opensource-v1', 'sourceOnly': True,
+                     'excludedFiles': ['.gitlab-ci.yml']}
+            for value in (None, [], {**valid, 'schema': 2}, {**valid, 'sourceOnly': 'true'},
+                          {**valid, 'excludedFiles': []}, {**valid, 'excludedFiles': None},
+                          {**valid, 'excludedFiles': [None]}):
+                (root / "tools/distribution/PUBLIC-SOURCE.json").write_text(json.dumps(value), encoding="utf-8")
                 with self.assertRaises(ValueError):
                     is_public_snapshot(root)
+
+    def test_public_checkout_keeps_every_generic_quality_check(self):
+        from quality_manifest import RELEASE_SMOKES, audit_manifest
+        backend = Path(__file__).resolve().parent
+        self.assertTrue(is_public_snapshot(backend.parent))
+        self.assertEqual(audit_manifest(backend), [])
+        for name in ('smoke/smoke_release.py', 'smoke/smoke_quality.py', 'test_optional_services.py'):
+            self.assertIn(name, RELEASE_SMOKES)
+        self.assertFalse(INTERNAL_SMOKES.intersection(RELEASE_SMOKES))
+        with tempfile.TemporaryDirectory() as folder:
+            errors = audit_manifest(Path(folder), {'release': ('smoke/smoke_quality.py',), 'extended': (), 'live': ()})
+            self.assertTrue(any('registered smoke files do not exist: smoke/smoke_quality.py' in error for error in errors))
 
 
 if __name__ == "__main__":

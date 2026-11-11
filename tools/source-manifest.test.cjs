@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
+const crypto = require('node:crypto');
 const path = require('node:path');
 const {sourceFiles, snapshotFiles, snapshotApprovals} = require('./source-files.cjs');
 const {check, canonicalBytes} = require('./check-source-manifest.cjs');
@@ -15,7 +16,13 @@ function fixture(t, content = 'hello') {
   fs.writeFileSync(path.join(dest,'README.md'),content);
   execFileSync('git',['init'],{cwd:dest,stdio:'pipe'});
   execFileSync('git',['add','README.md'],{cwd:dest,stdio:'pipe'});
-  check(dest,{writeManifest:true});
+  fs.mkdirSync(path.join(dest,'tools/distribution'), {recursive:true});
+  const data = canonicalBytes(Buffer.from(content));
+  fs.writeFileSync(path.join(dest,'tools/distribution/SOURCE-MANIFEST.json'), JSON.stringify({
+    schema:1, ok:true, distribution:'public-source',
+    scope:'Current source snapshot only; not Git history, complete secret detection or legal clearance.',
+    files:[{path:'README.md', bytes:data.length, sha256:crypto.createHash('sha256').update(data).digest('hex')}],
+  }));
   fs.rmSync(path.join(dest,'.git'),{recursive:true});
   return {root,dest};
 }
@@ -63,10 +70,29 @@ test('standalone inventory verifies bytes and rejects extra files', t => {
   fs.writeFileSync(path.join(dest,'README.md'),'changed');
   assert.throws(()=>check(dest),/does not match/);
 });
-test('standalone inventory cannot be regenerated from an incomplete directory', t => {
+test('verification cannot rewrite an incomplete archive inventory', t => {
   const {dest}=fixture(t);
+  const file=path.join(dest,'tools/distribution/SOURCE-MANIFEST.json'), before=fs.readFileSync(file);
   fs.unlinkSync(path.join(dest,'README.md'));
-  assert.throws(()=>check(dest,{writeManifest:true}),/own Git checkout/);
+  assert.throws(()=>check(dest),/ENOENT/);
+  assert.deepEqual(fs.readFileSync(file),before);
+});
+
+test('Git checkouts accept source changes without maintaining a manifest', t => {
+  const {dest}=fixture(t);
+  fs.unlinkSync(path.join(dest,'tools/distribution/SOURCE-MANIFEST.json'));
+  execFileSync('git',['init'],{cwd:dest,stdio:'pipe'});
+  execFileSync('git',['add','README.md'],{cwd:dest,stdio:'pipe'});
+  fs.writeFileSync(path.join(dest,'README.md'),'updated dependency\n');
+  fs.writeFileSync(path.join(dest,'new.cjs'),'new source\n');
+  assert.equal(check(dest).inventory,'git');
+  assert.deepEqual(sourceFiles(dest),['README.md','new.cjs']);
+  assert.equal(fs.existsSync(path.join(dest,'tools/distribution/SOURCE-MANIFEST.json')),false);
+  // An old export manifest cannot constrain a checkout's current source.
+  fs.writeFileSync(path.join(dest,'tools/distribution/SOURCE-MANIFEST.json'),'stale');
+  assert.equal(check(dest).ok,true);
+  const approvals=[{file:'new.cjs'}];
+  assert.deepEqual(snapshotApprovals(dest,approvals),approvals);
 });
 
 test('Windows CRLF and archive LF verify the same text without hiding content changes', t => {

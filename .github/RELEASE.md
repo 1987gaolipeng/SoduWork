@@ -41,11 +41,11 @@ Release nor supplies upgrade-acceptance receipts to `Public release`.
 5. Create a draft Release, upload the original bytes and download each asset for verification. Publish only after all checks pass, then verify complete anonymous downloads. Never rebuild or overwrite assets. Retry only the publication job after a network failure. A draft from the same run can resume; a Release belonging to another run or containing different bytes is rejected.
 6. Preserve the release branch head and tag. Merge release completion work into the public mainline while preserving history. New changes belong to a new version.
 
-When preparing the public repository, reviewed source may be squashed into `public` without private development history, old tags or internal artifacts. The source ZIP still contains only the committed tree verified against the source manifest.
+When preparing the public repository, reviewed source may be squashed into `public` without private development history, old tags or internal artifacts. The source exporter creates a ZIP from the committed tree, generates its manifest from the archived bytes, and verifies the archive before returning it. The manifest is not tracked in Git.
 
 ## Binary publication gates
 
-Review and commit genuine resolution evidence for `third-party/public-release.json`: original licenses, corresponding source archives and actual artifact inventories. Then update the distribution scope in `PUBLIC-SOURCE.json` and the source manifest. Do not simply clear pending items to make CI pass.
+Review and commit genuine resolution evidence for `third-party/public-release.json`: original licenses, corresponding source archives and actual artifact inventories. Then update the distribution scope in `PUBLIC-SOURCE.json`. Do not simply clear pending items to make CI pass.
 
 Client desktop acceptance requires six entries in `tools/ci/soduwork-acceptance-baselines.json`: `windows-x64-exe`, `linux-x64-deb`, `linux-x64-rpm`, `linux-x64-tar.gz`, `macos-arm64-dmg` and `macos-x64-dmg`. Each entry includes `productName: SoduWork`, a strictly older `version`, `sha256`, and a `url` pointing to the same public GitHub repository, with optional `format`/`size`. Local paths and internal fallback downloads are rejected. The first public binary release has no previous public baseline and needs a separately reviewed first-release acceptance contract. Never substitute the candidate for an older version to claim a successful upgrade. Android is checked independently through signed package identity and emulator installation; it does not reuse a desktop baseline.
 
@@ -59,12 +59,11 @@ python -m unittest tools.dev.test_source_export tools.dev.test_deploy tools.secu
 python tools/github/check_public_ci.py
 node --test tools/check-public-source.test.cjs tools/source-manifest.test.cjs tools/check-docs.test.cjs
 node tools/check-public-source.cjs
-node tools/check-source-manifest.cjs
 node tools/check-docs.cjs
 actionlint .github/workflows/*.yml
 ```
 
-Application source changes still require full regression checks for affected modules. After adding new files to the Git index, update the manifest with `node tools/check-source-manifest.cjs --write-manifest` and verify it again. Manifest generation must not conceal unreviewed files.
+Application source changes still require full regression checks for affected modules. Review and commit new files before exporting. Do not generate or commit a source manifest in a checkout. In an extracted exporter-produced ZIP, run `node tools/check-source-manifest.cjs` to verify the generated inventory. Public-source, secret and third-party checks remain independent of archive integrity.
 
 Release procedures, workflow documentation and contribution templates are maintained in English.
 

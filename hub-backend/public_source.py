@@ -1,4 +1,4 @@
-"""Explicit public source snapshot boundary; never infer it from a missing file."""
+"""Explicit public distribution boundary, independent of generated archive hashes."""
 from __future__ import annotations
 import json
 from pathlib import Path
@@ -14,18 +14,19 @@ INTERNAL_SMOKES = frozenset((
 
 def is_public_snapshot(root: Path | None = None) -> bool:
     root = root or Path(__file__).resolve().parent.parent
-    marker = root / "tools/distribution/SOURCE-MANIFEST.json"
+    marker = root / "tools/distribution/PUBLIC-SOURCE.json"
     if not marker.is_file():
         return False
     data = json.loads(marker.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
-        raise ValueError("Invalid public source manifest")
-    if data.get("distribution") != "public-source":
+        raise ValueError("Invalid public source profile")
+    if data.get("id") != "opensource-v1":
         return False
-    if not isinstance(data.get("files"), list):
-        raise ValueError("Invalid public source inventory")
-    paths = {entry.get("path") for entry in data.get("files", ()) if isinstance(entry, dict)}
-    if (data.get("schema") != 1 or data.get("ok") is not True
-            or "hub-backend/quality_manifest.py" not in paths):
+    excluded = data.get("excludedFiles")
+    if (data.get("schema") != 1 or type(data.get("sourceOnly")) is not bool
+            or not isinstance(excluded, list) or any(not isinstance(name, str) for name in excluded)
+            or ".gitlab-ci.yml" not in excluded
+            or not (root / "hub-backend/quality_manifest.py").is_file()):
         raise ValueError("Invalid public source test profile")
-    return True
+    # A copied profile must not disable internal checks in a full checkout.
+    return not (root / ".gitlab-ci.yml").exists()

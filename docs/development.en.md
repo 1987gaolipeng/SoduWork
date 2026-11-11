@@ -101,7 +101,7 @@ node tools/check-docs.cjs
 python3 tools/security/scan_secrets.py --download
 ```
 
-For startup changes, also run `python3 tools/dev/verify_local_start.py --desktop`, which needs network access and a graphical desktop. For documentation changes, verify links and commands; do not imply unperformed platform acceptance. Stage new files before refreshing the source manifest as described in [Contributing](../CONTRIBUTING.md).
+For startup changes, also run `python3 tools/dev/verify_local_start.py --desktop`, which needs network access and a graphical desktop. For documentation changes, verify links and commands; do not imply unperformed platform acceptance. Review and stage new source files as described in [Contributing](../CONTRIBUTING.md); archive manifests are generated during export and are not committed.
 
 ## Comment conventions
 

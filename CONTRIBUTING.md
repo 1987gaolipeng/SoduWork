@@ -22,7 +22,7 @@ Contributors using coding agents can start with the public [AGENTS.md](AGENTS.md
    - Admin console: `npm run build` and `node --test tests/*.test.mjs` in `hub-frontend/`;
    - Launcher: `python -m unittest tools.dev.test_start_local` at the root;
    - Backend: choose checks with `python quality_gate.py --help` in `hub-backend/`.
-4. Run `node tools/check-public-source.cjs` and `node tools/check-third-party.cjs` from the root. When you add public files, stage them first, refresh the manifest with `node tools/check-source-manifest.cjs --write-manifest`, verify with `node tools/check-source-manifest.cjs`, and commit the updated manifest with your change.
+4. Run `node tools/check-public-source.cjs` and `node tools/check-third-party.cjs` from the root. Review and stage new public files. Git tracks the source inventory; do not generate or commit `SOURCE-MANIFEST.json`. The source exporter generates it inside each archive from the committed files.
 5. Exclude logs, screenshots, databases, accounts, tokens, private addresses, installers, and dependency caches.
 6. In the pull request, state the platforms you actually verified and any remaining gaps. Passing fixtures do not prove real-model or production behavior. Build release resources from current source rather than reusing old Runner binaries or an installed application's resources.
 
