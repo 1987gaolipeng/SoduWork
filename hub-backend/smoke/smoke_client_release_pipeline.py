@@ -13,6 +13,7 @@ import shutil
 import socket
 import ssl
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -20,8 +21,11 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 
 
-def main():
-    repo = Path(__file__).resolve().parents[2]
+def main(installation_mode="upgrade"):
+    assert installation_mode in {"upgrade", "clean-install"}
+    clean = installation_mode == "clean-install"
+    version = "1.13.11" if clean else "9.9.1"
+    repo = Path(__file__).resolve().parents[1]
     with tempfile.TemporaryDirectory(prefix="soduwork-release-pipeline-") as temporary:
         root = Path(temporary)
         os.environ.update(DATABASE_URL="sqlite+aiosqlite:///" + (root / ".smoke.db").as_posix(),
@@ -107,11 +111,32 @@ def main():
             checkout = root / "checkout"
             for name in ["tools/sign-client-release.mjs", "client/scripts/installer-compatibility-report.cjs",
                          "client/main/client-update-contract.js", "tools/ci/verify-client-publication.cjs",
-                         "tools/ci/release-artifacts.cjs", "tools/ci/publish-client.cjs", "tools/ci/release-transfer.cjs"]:
+                         "tools/ci/release-artifacts.cjs", "tools/ci/publish-client.cjs", "tools/ci/release-transfer.cjs",
+                         "tools/ci/client-publisher-auth.cjs",
+                         "tools/ci/client-release-notes.cjs", "tools/ci/localized-release-notes.cjs",
+                         "client/scripts/client-build-version.cjs",
+                         "tools/ci/release-notes-ai.cjs",
+                         "tools/ci/release-context.cjs",
+                         "mobile/tool/android-release-contract.cjs", "mobile/tool/android-stage-contract.cjs",
+                         "client/main/distribution.cjs", "client/distributions.json",
+                         "tools/ci/client-distribution.cjs", "tools/ci/client-target.cjs",
+                         "tools/ci/distribution-baselines.cjs", "tools/ci/distribution-acceptance-baselines.json",
+                         "tools/ci/native-install-evidence.cjs",
+                         "tools/ci/soduwork-acceptance-baselines.json",
+                         "tools/ci/release-branches.cjs"]:
                 target = checkout / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(repo / name, target)
-            (checkout / "client/package.json").write_text(json.dumps({"version": "9.9.1"}))
+            (checkout / "client/package.json").write_text(json.dumps({"version": version}))
+            # Both modes use this isolated Hub and signing identity. Published
+            # production baselines must not leak into the first-install fixture.
+            pins_file = checkout / "tools/ci/distribution-acceptance-baselines.json"
+            pins = json.loads(pins_file.read_text())
+            pins["internal"] = ({"mode": "clean-install", "firstReleaseVersion": version,
+                "appId": "com.soduwork.app", "productName": "SoduWork", "baselines": {}} if clean else
+                {"baselines": {"fixture": {"distributionId": "internal",
+                    "appId": "com.soduwork.app", "productName": "SoduWork", "version": "9.9.0"}}})
+            pins_file.write_text(json.dumps(pins))
             (checkout / "client/update-trust.json").write_text(json.dumps(trust))
             key_file = root / "test.key"
             key_file.write_text(seed)
@@ -119,12 +144,18 @@ def main():
             dist = checkout / "client/dist"
             dist.mkdir(parents=True)
             for fmt in ("deb", "rpm", "tar.gz"):
-                (dist / f"SoduWork-9.9.1-linux.{fmt}").write_bytes(b"fixture-installer-only\n" * 60000)
+                (dist / f"SoduWork-{version}-linux.{fmt}").write_bytes(b"fixture-installer-only\n" * 60000)
             environment = {**os.environ, "CI_COMMIT_SHA": "a" * 40, "CI_PIPELINE_ID": "1", "CI_JOB_ID": "2",
                 "CI_COMMIT_REF_PROTECTED": "true", "CI_PIPELINE_CREATED_AT": "2026-10-15T02:00:00Z",
+                "CI_COMMIT_TAG": "", "CI_COMMIT_BRANCH": f"release/client-{version}", "CI_PIPELINE_SOURCE": "api",
+                "SODUWORK_PIPELINE_ACTION": "client-release", "NODE_EXTRA_CA_CERTS": str(certificate_file),
+                # This fixture publishes desktop Linux; Android has its own candidate/acceptance tests.
+                "SODUWORK_INCLUDE_ANDROID": "0",
+                "SODUWORK_DISTRIBUTION": "internal", "SODUWORK_RELEASE_DISTRIBUTIONS": "internal",
                 "SODUWORK_RELEASE_PLATFORMS": "linux", "SODUWORK_RELEASE_HUB_URL": origin,
                 "SODUWORK_RELEASE_USER": "publisher", "SODUWORK_RELEASE_PASSWORD": "fixture-password",
                 "SODUWORK_CLIENT_CHANNEL": "stable", "SODUWORK_CLIENT_COMPAT_PREFIX": "SoduWork", "SODUWORK_CLIENT_RELEASE_UPLOAD_TOKEN": "",
+                "SODUWORK_CLIENT_MINIMUM_VERSION": "",
                 "SODUWORK_CLIENT_SIGNING_KEY_ID": "pipeline-fixture", "SODUWORK_CLIENT_SIGNING_KEY_FILE": str(key_file),
                 "SODUWORK_CLIENT_TRUST_FILE": str(checkout / "client/update-trust.json")}
 
@@ -157,23 +188,57 @@ def main():
                 locales[locale] = {"summary": summary, "sections": [{"id": "features", "title": title,
                     "items": [{"id": "notes", "text": summary}]}]}
                 notes += "\n\n" + "\n".join([locale, summary, title, "• " + summary])
-            environment["SODUWORK_CLIENT_RELEASE_NOTES"] = notes
-            environment["NODE_EXTRA_CA_CERTS"] = str(certificate_file)
+            notes_file = checkout / "release-evidence/client-release-notes.json"
+            notes_record = dict(schema=1, version=version, sourceCommit="a" * 40, pipelineId="1",
+                tag=environment.get("CI_COMMIT_TAG", ""), previousTag="client-v9.9.0", previousCommit="b" * 40,
+                date="2026-10-15", commits=[], notes=notes, locales=locales,
+                notesSha256=hashlib.sha256(notes.encode()).hexdigest())
+            notes_file.write_text(json.dumps(notes_record), encoding="utf-8")
             node("tools/ci/release-artifacts.cjs", "inventory", "linux")
             build = json.loads((dist / "linux-build.json").read_text())
-            evidence = checkout / "release-evidence/linux"
-            evidence.mkdir(parents=True, exist_ok=True)
-            receipt = dict(schema=1, kind="soduwork-native-install-acceptance", ok=True,
-                sourceCommit=build["sourceCommit"], pipelineId=build["pipelineId"], artifacts=build["artifacts"],
-                checks=[dict(name=name, ok=True) for name in
+            receipt = dict(schema=1, kind="soduwork-native-install-acceptance", ok=True, version=build["version"],
+                distribution=build["distribution"],
+                sourceCommit=build["sourceCommit"], pipelineId=build["pipelineId"], notesSha256=build["notesSha256"], artifacts=build["artifacts"],
+                checks=[dict(name=name, ok=True, mode=installation_mode,
+                    **({"freshInstalled": True, "restarted": True, "reinstalled": True, "uninstalled": True,
+                        "userDataPreserved": True, "distributionIdentityVerified": True, "upgraded": False,
+                        "oldVersion": ""} if clean else {})) for name in
                     ["ubuntu22-deb", "ubuntu24-deb", "rocky9-rpm", "ubuntu22-tgz"]],
                 limitations=["Fixture receipt for API orchestration testing; not native installation evidence."])
             receipt_file = evidence / "acceptance.json"
             receipt_file.write_text(json.dumps(receipt))
             command = "tools/ci/publish-client.cjs"
-            # Public distributors use protected refs and exact-byte acceptance receipts.
-            # Company release tags, distribution baselines and private note-generation
-            # pipelines are intentionally not part of the source distribution.
+            rejected = node(command, "stage", "linux", success=False)
+            assert "manual release gate" in rejected.stderr, rejected.stderr
+            authorization_file = checkout / "release-evidence/release-authorization.json"
+            authorization = dict(schema=1, ok=True, component="client", version=version,
+                branch=f"release/client-{version}", tag=f"client-v{version}", sourceCommit="a" * 40,
+                pipelineId="1", platforms=["linux"], distributions=[build["distribution"]])
+            # Synthetic authorization exercises API orchestration only, not a real Git tag or native installer.
+            authorization_file.write_text(json.dumps(authorization))
+            target_authorization_file = evidence.parent / "target-authorization.json"
+            target_authorization_file.write_text(json.dumps(dict(schema=1, ok=True,
+                sourceCommit="a" * 40, pipelineId="1", distribution=build["distribution"])))
+            changed_locales = {
+                "zh-CN": {"summary": "打包后生成了不同说明。", "sections": [{
+                    "id": "features", "title": "功能更新",
+                    "items": [{"id": "notes", "text": "打包后生成了不同说明。"}],
+                }]},
+                "en-US": {"summary": "Different notes were generated after packaging.", "sections": [{
+                    "id": "features", "title": "Feature updates",
+                    "items": [{"id": "notes", "text": "Different notes were generated after packaging."}],
+                }]},
+            }
+            changed_notes = "\n".join([
+                "zh-CN", changed_locales["zh-CN"]["summary"], "功能更新", "• 打包后生成了不同说明。",
+                "", "en-US", changed_locales["en-US"]["summary"], "Feature updates",
+                "• Different notes were generated after packaging.",
+            ])
+            notes_file.write_text(json.dumps({**notes_record, "notes": changed_notes, "locales": changed_locales,
+                "notesSha256": hashlib.sha256(changed_notes.encode()).hexdigest()}), encoding="utf-8")
+            rejected = node(command, "stage", "linux", success=False)
+            assert "Build used different release notes" in rejected.stderr
+            notes_file.write_text(json.dumps(notes_record), encoding="utf-8")
             node(command, "stage", "linux", success=False, extra={"CI_COMMIT_REF_PROTECTED": "false"})
             receipt["ok"] = False
             receipt_file.write_text(json.dumps(receipt))
@@ -189,6 +254,7 @@ def main():
             for blob in signed.values():
                 bundle = json.loads(blob)
                 assert bundle["notes"] == notes
+                assert bundle["minVersion"] == (version if clean else "")
                 signature = base64.b64decode(bundle.pop("signature"))
                 canonical = lambda value: json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
                 key.public_key().verify(signature, canonical(bundle))
@@ -211,6 +277,7 @@ def main():
             token = api("/api/v1/admin/login", body={"user": "publisher", "pw": "fixture-password"})["token"]
             rows = api("/api/v1/admin/client-releases", token)["releases"]
             assert all(row["notes"] == notes for row in rows)
+            assert all(row["minVersion"] == (version if clean else "") for row in rows)
             assert len(rows) == 3 and not any(row["enabled"] for row in rows)
             assert all(row["artifactName"].startswith("SoduWork-") for row in rows)
             # Old alias receipts and added alias entries must never reach activation.
@@ -223,11 +290,16 @@ def main():
             index_file.write_text(json.dumps({**index, "entries": [*index["entries"], alias]}))
             node(command, "enable", success=False)
             index_file.write_text(json.dumps(index))
+            authorization_file.write_text(json.dumps({**authorization, "platforms": ["windows", "linux"]}))
             node(command, "enable", success=False, extra={"SODUWORK_RELEASE_PLATFORMS": "windows,linux"})
+            authorization_file.write_text(json.dumps(authorization))
             assert not any(row["enabled"] for row in api("/api/v1/admin/client-releases", token)["releases"])
+            if clean:
+                node(command, "enable", success=False, extra={"SODUWORK_CLIENT_MINIMUM_VERSION": "1.12.97"})
+                assert not any(row["enabled"] for row in api("/api/v1/admin/client-releases", token)["releases"])
             # A server-side integrity failure records partial activation; retry
             # uses the same IDs after the fixture artifact has been restored.
-            corrupt = root / "hub-artifacts/stable/linux/x64/9.9.1/SoduWork-9.9.1-linux.rpm"
+            corrupt = root / f"hub-artifacts/stable/linux/x64/{version}/SoduWork-{version}-linux.rpm"
             original = corrupt.read_bytes()
             corrupt.write_bytes(b"corrupted")
             node(command, "enable", success=False)
@@ -239,21 +311,19 @@ def main():
             node(command, "stage", "linux")
             rows = api("/api/v1/admin/client-releases", token)["releases"]
             assert len(rows) == 3 and all(row["enabled"] for row in rows)
-            api("/api/v1/admin/client-release-notes/9.9.1?channel=stable", token,
-                {"status": "published", "expectedRevision": 0, "locales": locales}, method="PUT")
-            published_notes = api("/api/v1/admin/client-release-notes/9.9.1?channel=stable", token)
+            published_notes = api(f"/api/v1/admin/client-release-notes/{version}?channel=stable", token)
             assert published_notes["status"] == "published"
             assert published_notes["locales"] == locales
             assert all(row["sha256"] == hashlib.sha256((dist / row["artifactName"]).read_bytes()).hexdigest() for row in rows)
             public_info = api("/api/v1/download/client/linux/info")
             for fmt in ("deb", "rpm", "tar.gz"):
-                assert public_info["formats"][fmt]["filename"] == f"SoduWork-9.9.1-linux.{fmt}"
+                assert public_info["formats"][fmt]["filename"] == f"SoduWork-{version}-linux.{fmt}"
                 with urllib.request.urlopen(origin + "/api/v1/download/client/linux/" + fmt, context=tls_context) as response:
                     assert hashlib.sha256(response.read()).hexdigest() == public_info["formats"][fmt]["sha256"]
             node("tools/ci/verify-client-publication.cjs")
             verification = json.loads((evidence.parent / "publication-verification.json").read_text())
             assert verification["ok"] and len(verification["artifacts"]) == 3
-            print("release pipeline: protected ref, failed receipt, stage, clean retry, complete-set check, integrity rejection and activation retry passed")
+            print(f"release pipeline ({installation_mode}): protected ref, failed receipt, stage, clean retry, complete-set check, integrity rejection and activation retry passed")
         finally:
             server.should_exit = True
             thread.join(timeout=15)
@@ -262,4 +332,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) == 2:
+        main(sys.argv[1])
+    else:
+        for mode in ("upgrade", "clean-install"):
+            subprocess.run([sys.executable, __file__, mode], check=True)

@@ -6,50 +6,48 @@ const yaml = require('js-yaml');
 const repo = path.resolve(__dirname, '../..');
 
 const internalCiFiles = ['.gitlab-ci.yml', 'tools/ci/client-release.gitlab.yml'];
+const sourceSnapshotScope = 'Current source snapshot only; not Git history, complete secret detection or legal clearance.';
 function internalCiSkip(root) {
   // Missing CI in a normal checkout remains an error. Only an explicit source
-  // profile that excludes both internal contracts can omit these tests.
+  // export whose manifest excludes both internal contracts can omit these tests.
   if (internalCiFiles.some(name => fs.existsSync(path.join(root, name)))) return false;
-  let profile;
-  try { profile = JSON.parse(fs.readFileSync(path.join(root, 'tools/distribution/PUBLIC-SOURCE.json'), 'utf8')); }
+  let manifest;
+  try { manifest = JSON.parse(fs.readFileSync(path.join(root, 'tools/distribution/SOURCE-MANIFEST.json'), 'utf8')); }
   catch { return false; }
-  if (!profile || profile.schema !== 1 || profile.id !== 'opensource-v1' || typeof profile.sourceOnly !== 'boolean' ||
-      !Array.isArray(profile.excludedFiles) || !profile.excludedFiles.every(name => typeof name === 'string') ||
-      !profile.excludedFiles.includes('.gitlab-ci.yml') || !Array.isArray(profile.buildChecks) ||
-      !profile.buildChecks.every(name => typeof name === 'string') ||
-      profile.buildChecks.includes('client-release.gitlab.yml') ||
-      !fs.existsSync(path.join(root, 'client/tests/client-release-artifacts.test.cjs'))) return false;
+  if (!manifest || manifest.schema !== 1 || manifest.ok !== true || manifest.scope !== sourceSnapshotScope ||
+      !Array.isArray(manifest.files)) return false;
+  const names = new Set(manifest.files.map(item => item && item.path));
+  if (!names.has('client/tests/client-release-artifacts.test.cjs') ||
+      internalCiFiles.some(name => names.has(name))) return false;
   return 'Public source snapshot excludes company GitLab configuration; generic release artifact checks still run.';
 }
 
-function profileFixture(t) {
+function manifestFixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-ci-boundary-'));
   fs.mkdirSync(path.join(root, 'tools/distribution'), { recursive: true });
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  fs.mkdirSync(path.join(root, 'client/tests'), { recursive: true });
-  fs.writeFileSync(path.join(root, 'client/tests/client-release-artifacts.test.cjs'), '// fixture');
-  const profile = { schema: 1, id: 'opensource-v1', sourceOnly: true,
-    excludedFiles: ['.gitlab-ci.yml'], buildChecks: [] };
-  const write = value => fs.writeFileSync(path.join(root, 'tools/distribution/PUBLIC-SOURCE.json'), JSON.stringify(value));
-  return { root, profile, write };
+  const manifest = { schema: 1, ok: true, scope: sourceSnapshotScope,
+    files: [{ path: 'client/tests/client-release-artifacts.test.cjs' }] };
+  const write = value => fs.writeFileSync(path.join(root, 'tools/distribution/SOURCE-MANIFEST.json'), JSON.stringify(value));
+  return { root, manifest, write };
 }
 
 test('missing internal CI configuration in a normal checkout cannot silently skip contracts', t => {
-  const f = profileFixture(t);
+  const f = manifestFixture(t);
   assert.equal(internalCiSkip(f.root), false);
-  fs.writeFileSync(path.join(f.root, 'tools/distribution/PUBLIC-SOURCE.json'), '{malformed');
+  fs.writeFileSync(path.join(f.root, 'tools/distribution/SOURCE-MANIFEST.json'), '{malformed');
   assert.equal(internalCiSkip(f.root), false);
-  for (const value of [null, {}, { ...f.profile, schema: 2 }, { ...f.profile, sourceOnly: 'true' },
-    { ...f.profile, id: 'unrelated profile' }, { ...f.profile, excludedFiles: [] },
-    { ...f.profile, excludedFiles: [null] }, { ...f.profile, buildChecks: null },
-    { ...f.profile, buildChecks: ['client-release.gitlab.yml'] }]) {
+  for (const value of [null, {}, { ...f.manifest, schema: 2 }, { ...f.manifest, ok: false },
+    { ...f.manifest, scope: 'unrelated manifest' }, { ...f.manifest, files: [] },
+    { ...f.manifest, files: [null] },
+    ...internalCiFiles.map(name => ({ ...f.manifest, files: [...f.manifest.files, { path: name }] }))]) {
     f.write(value);
     assert.equal(internalCiSkip(f.root), false);
   }
 });
 
 test('only a declared source snapshot without either internal CI file skips company contracts', t => {
-  const f = profileFixture(t); f.write(f.profile);
+  const f = manifestFixture(t); f.write(f.manifest);
   assert.match(internalCiSkip(f.root), /Public source snapshot/);
   for (const name of internalCiFiles) {
     const file = path.join(f.root, name);

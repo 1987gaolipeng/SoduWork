@@ -10,6 +10,7 @@ import { healthReleaseLabel } from './health-version.js'
 
 // Lazy-load management pages so the login introduction does not bundle all plugin, automation, and organization code.
 const Overview = lazy(() => import('./screens/Overview.jsx'))
+const LegalDocuments = lazy(() => import('./screens/LegalDocuments.jsx'))
 const IntegrationsHub = lazy(() => import('./screens/IntegrationsHub.jsx'))
 const Clients = lazy(() => import('./screens/Clients.jsx'))
 const ClientReleases = lazy(() => import('./screens/ClientReleases.jsx'))
@@ -66,6 +67,7 @@ const NAV = localeMap(() => ([
   { id: 'users', label: '用户管理', sub: '成员、部门与角色归属', icon: 'users', Comp: Users, group: '组织治理', perm: 'user.manage' },
   { id: 'roles', label: '角色权限', sub: '角色和最小权限策略', icon: 'shield', Comp: Roles, group: '组织治理', perm: 'role.manage' },
   { id: 'account-security', label: '账户与安全', sub: '注册邮件、协议与个人数据处理', icon: 'shield', Comp: MailSettings, group: '组织治理', perm: 'identity.manage' },
+  { id: 'legal-documents', label: '协议与隐私政策', sub: '协议草稿、多语言发布与历史记录', icon: 'file', Comp: LegalDocuments, group: '组织治理', superOnly: true },
   { id: 'identity', label: '身份接入', sub: '企业 OIDC、账号映射与登录安全', icon: 'lock', Comp: IdentityCenter, group: '组织治理', perm: 'identity.manage' },
   { id: 'audit', label: '审计日志', sub: '关键操作与责任追溯', icon: 'ticket', Comp: Audit, group: '组织治理', perm: 'audit.view' },
 ]))
@@ -75,6 +77,12 @@ const LEGACY_SCREEN = {
   tasks: 'overview', inbox: 'overview', subs: 'overview',
 }
 const normalizeScreen = (id) => LEGACY_SCREEN[id] || id
+const canLeavePage = proceed => {
+  let resumed = false
+  return window.dispatchEvent(new CustomEvent('soduwork-before-admin-leave', {
+    cancelable: true, detail: { proceed: () => { if (!resumed) { resumed = true; proceed() } } },
+  }))
+}
 
 export default function App() {
   const uiLocale = useLocale();
@@ -101,8 +109,9 @@ export default function App() {
   const navigate = useCallback((screen) => {
     // Navigation to the current screen can still change that page's filters.
     closeHealth()
-    setActive(normalizeScreen(screen))
-  }, [closeHealth])
+    const next = screen && normalizeScreen(screen)
+    if (next && next !== active && canLeavePage(() => setActive(next))) setActive(next)
+  }, [active, closeHealth])
 
   useEffect(() => {
     if (!authed) return undefined
@@ -221,14 +230,17 @@ export default function App() {
       value === '能力配置' ? 'group.capabilities' : value === '组织治理' ? 'group.org' : ''
     return key ? t(key, value) : value
   }
-  const logout = () => { setProfileOpen(false); setToken(''); setUser(''); setAuthed(false); setMe(null); setShowLogin(false) }
+  const logout = () => {
+    const proceed = () => { setProfileOpen(false); setToken(''); setUser(''); setAuthed(false); setMe(null); setShowLogin(false) }
+    if (canLeavePage(proceed)) proceed()
+  }
 
   // Guide accounts without management permissions to the client rather than empty administration pages.
   if (visible.length === 0) {
     return (
       <div className="app">
         <div className="landing">
-          <img src="/soduwork.png" alt="SoduWork" className="logo-box" style={{ width: 44, height: 44 }} />
+          <img src="/soduwork.png" alt="" className="logo-box" style={{ width: 44, height: 44 }} />
           <h2>{tx("SoduWork 管理端是管理端")}</h2>
           <p>{tx("你好，")}{(me && (me.displayName || me.username)) || tx("同事")}{tx("。日常需求、收件箱认领和工作日报都在")}<b>{tx("桌面端「SoduWork」")}</b>{tx("里完成；")}<br />{tx("这里是负责人与管理员使用的管理控制台。如需管理权限，请联系管理员为你的角色开通。")}</p>
           <button className="btn btn-ghost" onClick={() => { setToken(''); setUser(''); setAuthed(false); setMe(null); setShowLogin(false) }}>{tx("退出登录")}</button>
@@ -242,7 +254,7 @@ export default function App() {
     <div className="app" data-screen={cur && cur.id}>
       <aside className="sidebar">
         <div className="brand">
-          <img src="/soduwork.png" alt="SoduWork" className="logo-box" />
+          <img src="/soduwork.png" alt="" className="logo-box" />
           <span className="brand-copy"><b>{t('brand.title')}</b><small>{tx("企业智能工作台")}</small></span>
           <span className="brand-edition">{tx("企业")}</span>
         </div>

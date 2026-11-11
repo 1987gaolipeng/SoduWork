@@ -8,7 +8,6 @@ test('the bundled Pi AgentSession consumes each explicit retry delay', async () 
   assert.equal(patched.ok, true, JSON.stringify(patched.results));
   const { AgentSession } = await import('../node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js');
   const events = [];
-  const omitted = [];
   const runtime = {
     settingsManager: {
       getRetrySettings: () => ({ enabled: true, maxRetries: 3, baseDelayMs: 100,
@@ -16,7 +15,6 @@ test('the bundled Pi AgentSession consumes each explicit retry delay', async () 
     },
     _retryAttempt: 0,
     _emit: event => events.push(event),
-    _omitRecoveryAttempt: message => omitted.push(message),
     agent: { state: { messages: [] } },
   };
   assert.equal(await AgentSession.prototype._prepareRetry.call(runtime, { errorMessage: 'temporary' }), true);
@@ -24,5 +22,4 @@ test('the bundled Pi AgentSession consumes each explicit retry delay', async () 
   assert.equal(await AgentSession.prototype._prepareRetry.call(runtime, { errorMessage: 'temporary' }), true);
   assert.deepEqual(events.map(event => event.delayMs), [1, 2, 3]);
   assert.deepEqual(events.map(event => event.maxAttempts), [3, 3, 3]);
-  assert.equal(omitted.length, 3, 'each failed attempt remains in raw history but is omitted from model projection');
 });

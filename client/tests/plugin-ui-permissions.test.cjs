@@ -71,8 +71,6 @@ test('a different plugin policy change does not cancel a pending source authoriz
 });
 test('already open plugin application requests check current rights; other apps retain their contract',async()=>{
   const s=setup();
-  // This fixture isolates plugin permissions after a valid parent authorization.
-  s.window.soduWorkAPI.workPreviewAppHost={authorize:async id=>({ok:id==='authorized-request'})};
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../components/panels/soduwork-app-bridge-host.js'),'utf8'),s.context);
   s.setAllowed(false);
   const request={id:'authorized-request',appId:'plugin:enterprise-ui',method:'notifications.send',params:{recipientUserId:'fixture',text:'hello'}};

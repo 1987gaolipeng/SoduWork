@@ -38,8 +38,8 @@ from app.services import (code_delivery, delivery_truth, deployments, plugin_pac
                           workflow_engine, workflow_runs)
 
 
-ROOT = os.path.dirname(os.path.dirname(__file__))
-MODEL = "fixture-coding-large-model"
+ROOT = os.path.dirname(__file__)
+MODEL = "dev-coding-large-agent-soduwork"
 passed = failed = 0
 lines: list[str] = []
 flow_state: dict[str, dict] = {}

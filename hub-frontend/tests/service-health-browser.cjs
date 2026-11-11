@@ -142,6 +142,27 @@ if (!process.versions.electron) {
     await check('same-screen navigation event also closes popover', async () => {
       await open(); await navigate('overview'); assert.equal(await closed(), true)
     })
+    for (const source of ['sidebar', 'navigation event']) await check(`${source} preserves a canceled leave guard and resumes only once`, async () => {
+      await navigate('overview'); await open()
+      await js(`window.fixtureLeaveCount=0;window.fixtureLeaveProceed=null;
+        window.fixtureLeaveGuard=event=>{event.preventDefault();window.fixtureLeaveCount++;window.fixtureLeaveProceed=event.detail.proceed};
+        window.addEventListener('soduwork-before-admin-leave',window.fixtureLeaveGuard)`)
+      try {
+        if (source === 'sidebar') await click('.nav-item[title^="运营分析"]')
+        else await js(`window.dispatchEvent(new CustomEvent('soduwork-hub-nav',{detail:{screen:'insights'}}))`)
+        assert.equal(await closed(), true, 'navigation intent dismisses health even when the page vetoes leaving')
+        assert.equal(await js('document.querySelector(".app").dataset.screen'), 'overview', 'canceling the leave event preserves the current page')
+        assert.equal(await js('window.fixtureLeaveCount'), 1)
+        assert.equal(await js('typeof window.fixtureLeaveProceed'), 'function')
+      } finally {
+        await js(`window.removeEventListener('soduwork-before-admin-leave',window.fixtureLeaveGuard)`)
+      }
+      await js('window.fixtureLeaveProceed()')
+      await wait('document.querySelector(".app").dataset.screen==="insights"', 'deferred navigation after confirmation')
+      await navigate('overview')
+      await js('window.fixtureLeaveProceed()')
+      assert.equal(await js('document.querySelector(".app").dataset.screen'), 'overview', 'an already-consumed confirmation cannot replay navigation')
+    })
     await check('outside click closes popover and preserves target action', async () => {
       await open(); await click('.side-foot')
       assert.equal(await closed(), true)
