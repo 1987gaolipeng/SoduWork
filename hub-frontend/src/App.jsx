@@ -1,5 +1,5 @@
 import { translateText as tx, localeMap, useLocale } from './i18n.js'
-import React, { lazy, Suspense, useState, useEffect, useRef } from 'react'
+import React, { lazy, Suspense, useState, useEffect, useRef, useCallback } from 'react'
 import { api, getToken, getUser, setUser, setToken, can } from './api.js'
 import Login from './Login.jsx'
 import LocaleSettings from './LocaleSettings.jsx'
@@ -90,6 +90,7 @@ export default function App() {
   const [showLogin, setShowLogin] = useState(!!SSO_ERROR)   // Explain SSO callback failures directly.
   const [me, setMe] = useState(getUser())
   const [health, setHealth] = useState({ state: 'checking', version: '' })
+  const healthRef = useRef(null)
   const [collapsedGroups, setCollapsedGroups] = useState({})
   const [profileOpen, setProfileOpen] = useState(false)
   const profileRef = useRef(null)
@@ -101,6 +102,40 @@ export default function App() {
       return normalizeScreen(saved)
     } catch (_e) { return 'overview' }
   })
+
+  const closeHealth = useCallback(() => {
+    if (healthRef.current) healthRef.current.open = false
+  }, [])
+  const navigate = useCallback((screen) => {
+    // Navigation to the current screen can still change that page's filters.
+    closeHealth()
+    const next = screen && normalizeScreen(screen)
+    if (next && next !== active && canLeavePage(() => setActive(next))) setActive(next)
+  }, [active, closeHealth])
+
+  useEffect(() => {
+    if (!authed) return undefined
+    const closeOutside = (event) => {
+      const details = healthRef.current
+      if (details?.open && !details.contains(event.target)) closeHealth()
+    }
+    const closeOnEscape = (event) => {
+      const details = healthRef.current
+      if (event.key !== 'Escape' || event.defaultPrevented || !details?.open) return
+      const restoreFocus = details.contains(document.activeElement)
+      closeHealth()
+      if (restoreFocus) {
+        event.preventDefault()
+        details.querySelector('summary')?.focus()
+      }
+    }
+    document.addEventListener('pointerdown', closeOutside, true)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside, true)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [authed, closeHealth])
 
   useEffect(() => {
     const h = () => { setAuthed(false); setMe(null) }
@@ -119,13 +154,10 @@ export default function App() {
 
   // Cross-page navigation with preset filters.
   useEffect(() => {
-    const h = (e) => {
-      const next = e.detail?.screen && normalizeScreen(e.detail.screen)
-      if (next && next !== active && canLeavePage(() => setActive(next))) setActive(next)
-    }
+    const h = (e) => { if (e.detail && e.detail.screen) navigate(e.detail.screen) }
     window.addEventListener('soduwork-hub-nav', h)
     return () => window.removeEventListener('soduwork-hub-nav', h)
-  }, [active])
+  }, [navigate])
 
   // Refresh /me after login to obtain current permissions.
   useEffect(() => {
@@ -233,7 +265,7 @@ export default function App() {
                 onClick={() => setCollapsedGroups((old) => ({ ...old, [g]: old[g] !== true }))}><span>{groupLabel(g)}</span></button>
               {collapsedGroups[g] !== true && visible.filter((n) => n.group === g).map((n) => (
                 <button key={n.id} title={navLabel(n) + ' · ' + t('sub.' + n.id, n.sub)} aria-current={cur && n.id === cur.id ? 'page' : undefined}
-                  className={'nav-item' + (cur && n.id === cur.id ? ' active' : '')} onClick={() => { if (n.id !== active && canLeavePage(() => setActive(n.id))) setActive(n.id) }}>
+                  className={'nav-item' + (cur && n.id === cur.id ? ' active' : '')} onClick={() => navigate(n.id)}>
                   <span className="ico"><Icon name={n.icon} /></span><span className="nav-copy">{navLabel(n)}</span>
                 </button>
               ))}
@@ -271,9 +303,7 @@ export default function App() {
               <h1>{cur && navLabel(cur)}</h1>
             </div>
             <div className="top-actions">
-              <details className={`env is-${health.state}`} onKeyDown={(event) => {
-                if (event.key === 'Escape') { event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus() }
-              }}>
+              <details ref={healthRef} className={`env is-${health.state}`}>
                 <summary aria-label={healthTitle + " · " + tx("服务版本信息")}><span className={healthOk ? "dot" : "dot off"} aria-hidden="true" /><span className="env-copy"><b>{healthTitle}</b><small>{healthSub}</small></span></summary>
                 <dl className="env-details">
                   <div><dt>{tx("版本")}</dt><dd>{healthVersion || '—'}</dd></div>

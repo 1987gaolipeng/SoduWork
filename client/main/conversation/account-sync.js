@@ -472,7 +472,7 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
   }
 
   function enqueue(state) {
-    if (state.deleted || deletion.blocked(state.key) || isProjection(state.handle)) return;
+    if (state.deleted || isProjection(state.handle)) return;
     const times = { ...state.messageTimes };
     const view = snapshot(state.handle, times, now, metadataOnly);
     // Opening a review composer must not publish a durable empty chat.
@@ -538,6 +538,23 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
     return data;
   }
 
+  async function deletedHistory(id, row, identity) {
+    if (historyPromise) await historyPromise;
+    const current = await (localIdentityOf || identityOf)?.(app);
+    const scope = directoryScope(identity);
+    if (closed || directoryScope(current) !== scope) return;
+    const tombstone = { ...directoryRow(id), ...row, id, deleted: true };
+    const cursor = (await store.directory?.(scope))?.cursor ?? (historyScope === scope ? historyCursor : 0);
+    if (store.saveDirectory) await store.saveDirectory(scope, [tombstone], cursor);
+    if (closed || directoryScope(await (localIdentityOf || identityOf)?.(app)) !== scope) return;
+    selectDirectory(identity);
+    rememberDirectory(tombstone);
+    for (const state of bound.values()) if (directoryScope(state.identity) === scope &&
+        state.sourceSessionId === row.sourceSessionId) state.deleted = true;
+    historyAt = 0;
+    await emitChanged(id, tombstone, identity);
+  }
+
   async function flush() {
     if (closed) return { ok: false, closed: true };
     if (flushing) return flushing;
@@ -556,7 +573,6 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
         : await store.jobs(100);
       for (const job of jobs) {
         if (closed) break;
-        if (deletion.blocked(require('./account-history-delete.cjs').sourceKey(job, job.body?.sourceSessionId))) continue;
         const state = [...bound.values()].find(item => item.ownerKey === job.ownerKey &&
           item.identity.clientId === job.clientId && item.sourceSessionId === job.body.sourceSessionId &&
           String(item.identity.hub).replace(/\/+$/, '') === String(job.hub).replace(/\/+$/, ''));

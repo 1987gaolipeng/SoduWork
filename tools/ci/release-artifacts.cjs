@@ -4,12 +4,8 @@ const fs = require('node:fs/promises'), path = require('node:path'), assert = re
 const { createReadStream } = require('node:fs');
 const { createHash } = require('node:crypto');
 const root = path.resolve(__dirname, '../..');
-const distributions = require('./client-distribution.cjs');
-const { candidateVersion } = require('../../client/scripts/client-build-version.cjs');
-const distribution = distributions.profile();
-const dist = distributions.dist();
-const evidence = distributions.evidence();
-const version = candidateVersion(process.env, root);
+const dist = path.join(root, 'client/dist');
+const version = require('../../client/package.json').version;
 const read = async file => JSON.parse((await fs.readFile(file, 'utf8')).replace(/^\uFEFF/, ''));
 const write = async (file, value) => {
   await fs.mkdir(path.dirname(file), { recursive: true });
@@ -72,38 +68,18 @@ function validateAcceptance(record, receipt) {
   assert.equal(receipt.sourceCommit, record.sourceCommit);
   assert.equal(receipt.pipelineId, record.pipelineId);
   assert.deepEqual(receipt.artifacts, record.artifacts, 'Acceptance tested other bytes');
-  assert.deepEqual(receipt.commonBuild, record.commonBuild, 'Acceptance used a different shared build');
-  assert.deepEqual(receipt.commonBuilds, record.commonBuilds, 'Acceptance used different shared Mac builds');
-  const profile = distributions.profile({ SODUWORK_DISTRIBUTION: record.distribution.id });
-  distributions.validate(record.distribution, distributions.identity(profile));
-  const acceptancePlan = require('./distribution-baselines.cjs').plan(profile, record.version, { platform: record.platform });
-  const { mode } = acceptancePlan;
-  const required = record.platform === 'windows' ? ['fresh-repair', mode === 'upgrade' ? 'soduwork-upgrade'
-    : mode === 'clean-install' ? 'clean-install' : 'first-release-isolation', 'compatibility']
+  const required = record.platform === 'windows' ? ['fresh-repair', 'soduwork-upgrade', 'compatibility']
     : record.platform === 'linux' ? ['ubuntu22-deb', 'ubuntu24-deb', 'rocky9-rpm', 'ubuntu22-tgz']
       : record.artifacts.map(item => item.arch + '-' + item.format);
   assert.deepEqual(receipt.checks.map(item => item.name).sort(), required.sort());
-  for (const check of receipt.checks) {
-    assert.equal(check.ok, true, check.name);
-    assert.equal(check.mode, mode, 'Native acceptance mode differs from the pinned distribution baseline');
-    if (record.platform === 'windows' && mode === 'upgrade' && check.name === 'soduwork-upgrade') {
-      const baseline = acceptancePlan.baselines['windows-x64-exe'];
-      assert.ok(baseline, 'Missing pinned Windows upgrade baseline');
-      assert.equal(check.oldVersion, baseline.version, 'Upgrade tested another baseline version');
-      assert.equal(check.oldSha256, baseline.sha256, 'Upgrade tested other baseline bytes');
-      assert.equal(check.oldBrand, baseline.productName, 'Upgrade tested another product identity');
-    }
-    if (mode === 'clean-install' && (record.platform !== 'windows' || check.name === 'clean-install'))
-      require('./native-install-evidence.cjs').validateCleanInstall(check);
-  }
+  for (const check of receipt.checks) assert.equal(check.ok, true, check.name);
   return receipt;
 }
 async function acceptance(platform, checks, limitations = [], arch) {
   const record = await verify(platform, arch);
-  const receipt = { schema: 1, version: record.version, kind: arch === undefined ? 'soduwork-native-install-acceptance' : 'soduwork-native-install-acceptance-shard', ok: true,
-    sourceCommit: record.sourceCommit, pipelineId: record.pipelineId, distribution: record.distribution, notesSha256: record.notesSha256, artifacts: record.artifacts,
-    ...(record.commonBuild ? { commonBuild: record.commonBuild } : {}),
-    ...(record.commonBuilds ? { commonBuilds: record.commonBuilds } : {}), checks, limitations, finishedAt: new Date().toISOString() };
+  const receipt = { schema: 1, kind: arch === undefined ? 'soduwork-native-install-acceptance' : 'soduwork-native-install-acceptance-shard', ok: true,
+    sourceCommit: record.sourceCommit, pipelineId: record.pipelineId, artifacts: record.artifacts,
+    checks, limitations, finishedAt: new Date().toISOString() };
   validateAcceptance(record, receipt);
   await write(path.join(root, 'release-evidence', platform, ...(arch === undefined ? [] : [arch]), 'acceptance.json'), receipt);
   return receipt;

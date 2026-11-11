@@ -39,8 +39,7 @@ async function main() {
   assert.equal(process.platform, 'darwin');
   const arch = process.argv?.[2];
   const record = await contract.verify('macos', arch);
-  const distribution = contract.distribution, acceptance = plan(distribution, record.version, { platform: 'macos' });
-  const output = path.join(contract.evidence, 'macos', arch || ''); await fs.mkdir(output, { recursive: true });
+  const output = path.join(contract.root, 'release-evidence/macos', arch || ''); await fs.mkdir(output, { recursive: true });
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'soduwork-mac-acceptance-'));
   const checks = [];
   try {
@@ -52,22 +51,13 @@ async function main() {
       const profile = path.join(current, 'soduwork-acceptance-profile-' + name);
       // Upgrade starts from old-version data, never from the fresh candidate's profile.
       const upgradeProfile = previous ? path.join(current, 'soduwork-acceptance-profile-upgrade-' + name) : profile;
-      const foreign = path.join(installed, 'SoduWork.app', 'acceptance-sentinel.txt');
-      if (acceptance.mode === 'first-release') {
-        assert.notEqual(distribution.productName, 'SoduWork');
-        assert.notEqual(distribution.appId, 'com.soduwork.app');
-        assert.notEqual(distribution.userDataName, 'SoduWork');
-        await fs.mkdir(path.dirname(foreign), { recursive: true });
-        await fs.writeFile(foreign, 'preserve-other-distribution');
-      }
-      let app = await unpack(path.join(contract.dist, item.name), item.format, installed, { distribution });
+      let app = await unpack(path.join(contract.dist, item.name), item.format, installed);
       assert.match(await run('lipo', ['-archs', app.binary]), item.arch === 'x64' ? /x86_64/ : /arm64/);
       assert.match(await run('lipo', ['-archs', path.join(app.app, 'Contents/Resources/runner/soduwork-runner')]),
         item.arch === 'x64' ? /x86_64/ : /arm64/, 'Bundled Runner architecture must match the target Mac');
       async function smoke(label, version, mode, targetProfile = profile) {
         await run(process.execPath, [path.join(__dirname, 'installed-client-smoke.cjs'), app.binary,
-          installed, targetProfile, path.join(output, name + '-' + label + '.json'), version, mode],
-        { env: { ...process.env, SODUWORK_ACCEPT_PROFILE: version === record.version ? JSON.stringify(distribution) : '' } });
+          installed, targetProfile, path.join(output, name + '-' + label + '.json'), version, mode]);
       }
       await smoke('fresh', record.version, 'write'); await smoke('restart', record.version, 'read');
       await fs.rm(app.app, { recursive: true });
@@ -78,17 +68,15 @@ async function main() {
         await smoke('old', previous.version, 'write', upgradeProfile);
         await fs.rm(app.app, { recursive: true });
       }
-      app = await unpack(path.join(contract.dist, item.name), item.format, installed, { distribution });
+      app = await unpack(path.join(contract.dist, item.name), item.format, installed);
       await smoke(previous ? 'upgrade' : 'reinstall', record.version, 'read', upgradeProfile);
       await fs.rm(app.app, { recursive: true });
       assert.equal(await fs.readFile(path.join(upgradeProfile, 'acceptance-sentinel.txt'), 'utf8'), 'preserve-install-acceptance-data');
-      if (acceptance.mode === 'first-release') assert.equal(await fs.readFile(foreign, 'utf8'), 'preserve-other-distribution');
       assert.equal(await fs.access(app.app).then(() => true, () => false), false, 'Uninstall must remove the app');
-      checks.push({ name, ok: true, mode: acceptance.mode,
+      checks.push({ name, ok: true,
         ...(previous ? { oldVersion: previous.version, oldSignature }
-          : acceptance.mode === 'first-release' ? { reinstalled: true, distributionIsolation: true }
-            : { freshInstalled: true, restarted: true, reinstalled: true, uninstalled: true,
-              userDataPreserved: true, distributionIdentityVerified: true, upgraded: false, oldVersion: '' }) });
+          : { freshInstalled: true, restarted: true, reinstalled: true, uninstalled: true,
+            userDataPreserved: true, upgraded: false, oldVersion: '' }) });
     }
     await contract.acceptance('macos', checks, [
       'Isolated app copies; no Gatekeeper quarantine/notarization or drag-and-drop UI certification.',

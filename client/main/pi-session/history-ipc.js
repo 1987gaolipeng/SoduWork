@@ -182,7 +182,12 @@ function install({ app, ipcMain, session, BrowserWindow, dialog, shell, cloudHis
         message: '删除“' + String(piEntry.title || '这条会话') + '”？',
         detail: '会话存档会移到系统回收站；需求和工作目录里的成果文件不会删除。',
         buttons: ['取消', '移到回收站'],
-      } : recordDeleteOptions(runnerRow);
+      } : {
+        title: '删除聊天',
+        message: '删除“' + String(runnerRow.title || '这条会话') + '”？',
+        detail: '这条会话会从执行底座的运行记录里移除；需求、底座自己的原生存档和工作目录里的成果文件不会删除。',
+        buttons: ['取消', '删除记录'],
+      };
       if (!(rawOptions && rawOptions.confirmed === true)) {
         const copy = require('../native-locale.cjs').dialogOptions(options);
         return { ok: false, needsConfirm: true, id, missingContent: missingOnly, confirm: {

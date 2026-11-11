@@ -11,8 +11,9 @@ function fixture(seed = {}, bridge = {}, storage, internal = true, clock = { set
     fetch: async (url, options) => { requests.push({ url, options }); return { ok: true, text: async () => '{}' }; } });
   return { api: window.SoduWorkAPI, values, requests, bridge };
 }
-const legacy = 'http://192.0.2.149:8989';
-for (const id of ['cn', 'global']) test(`${id} renderer uses bundled Hub from its first request and rejects another fixed Hub`, async () => {
+const legacy = 'http://192.0.2.10:8989';
+const unassigned = 'https://unassigned-legacy-hub.invalid';
+for (const id of ['self-hosted']) test(`${id} renderer uses bundled Hub from its first request and rejects another fixed Hub`, async () => {
   const profile = require('../main/distribution.cjs').getProfile(id);
   const enrollments = [];
   const bridge = { distributionInfo: () => profile,
@@ -36,9 +37,10 @@ for (const id of ['cn', 'global']) test(`${id} renderer uses bundled Hub from it
 for (const [name, seed, expected, bridge] of [
   ['fresh', {}, 'http://127.0.0.1:18989'],
   ['local-code fresh', {}, 'http://127.0.0.1:18989', { runtimeForm: () => 'local-code' }],
-  ['explicit production', { soduwork_work_hub_environment_v1: 'production' }, legacy],
+  ['production without saved URL', { soduwork_work_hub_environment_v1: 'production' }, unassigned],
+  ['production with saved URL', { soduwork_work_hub_environment_v1: 'production', soduwork_work_hub_url: legacy }, legacy],
   ['legacy default', { soduwork_work_hub_url: legacy }, legacy],
-  ['old credential without URL', { soduwork_work_device_secret: 'old-key' }, legacy],
+  ['old credential without URL', { soduwork_work_device_secret: 'old-key' }, unassigned],
   ['old dev default', { soduwork_work_hub_environment_v1: 'development' }, 'http://127.0.0.1:9080'],
   ['custom connection', { soduwork_work_hub_url: 'https://old.example.com' }, 'https://old.example.com'],
 ]) test(`internal fixture migration preserves ${name}`, () => assert.equal(fixture(seed, bridge).api.hubBase(), expected));
@@ -195,8 +197,8 @@ for (const seed of [
   assert.ok(f.requests.every(row => row.url.startsWith(production + '/')));
 });
 
-test('fixed product never migrates an old local key to the production identity or deletes it', async () => {
-  const payloads = [], oldHub = 'http://localhost:18989';
+for (const oldHub of ['http://localhost:18989', '']) test('fixed product isolates legacy key with saved URL: ' + oldHub, async () => {
+  const payloads = [];
   const f = fixture({ soduwork_work_hub_url: oldHub, soduwork_work_device_secret: 'old-local-key',
     soduwork_work_task_ops_v1: '[{"id":"legacy-only"}]' }, {
     getHubConnection: async () => ({ hub: production, internalTest: false }),
@@ -205,7 +207,7 @@ test('fixed product never migrates an old local key to the production identity o
   }, undefined, false);
   await f.api.registerClient(); await f.api.myModels();
   assert.equal(payloads[0].hub, production); assert.equal(payloads[0].legacySecret, '');
-  assert.equal(f.values.get('soduwork_work_legacy_auth_hub_v1'), oldHub);
+  assert.equal(f.values.get('soduwork_work_legacy_auth_hub_v1'), oldHub || unassigned);
   assert.equal(f.values.get('soduwork_work_device_secret'), 'old-local-key');
   assert.equal(f.values.get('soduwork_work_task_ops_v1'), '[{"id":"legacy-only"}]');
   assert.ok(!JSON.stringify(f.requests).includes('old-local-key'));

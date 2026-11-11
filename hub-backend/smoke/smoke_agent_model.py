@@ -66,6 +66,17 @@ async def main():
         chk("旧模型名仍兼容执行但实际使用 SoduWork 新名",
             renamed.get("model") == "dev-coding-large-agent-soduwork", renamed)
 
+        # Persisted preferences need the same compatibility path as explicit overrides.
+        box.agent_models = {"pi": "dev-coding-large-agent-hugengyong"}
+        await s.commit()
+        preferred = await model_catalog.resolve_for_agent(s, box, "pi")
+        chk("Stored legacy preference executes the current model without fallback",
+            preferred.get("model") == "dev-coding-large-agent-soduwork"
+            and "fellBackFrom" not in preferred, preferred)
+        await s.refresh(box)
+        chk("Resolving an alias does not rewrite the stored preference",
+            box.agent_models == {"pi": "dev-coding-large-agent-hugengyong"})
+
         # Runtime preferences remain independent of machine identity.
         chk("★同一个底座在别的机器上也认这份指定",
             ai_exec_route.cli_of("runner:rn-trial:pi") == ai_exec_route.cli_of("local:pi") == "pi")

@@ -6,7 +6,7 @@ const source = fs.readFileSync(path.join(__dirname, '../components/client-auth/e
 function element(dataset = {}) {
   const listeners = new Map(), classes = new Set();
   const node = { dataset, value: '', textContent: '', className: '', hidden: false, disabled: false, checked: false,
-    focus() {}, setAttribute() {}, addEventListener(name, callback) { listeners.set(name, callback); },
+    focus() {}, setAttribute() {}, appendChild() {}, addEventListener(name, callback) { listeners.set(name, callback); },
     fire(name) { return listeners.get(name)?.({ preventDefault() {} }); },
     classList: { add(name) { classes.add(name); }, remove(name) { classes.delete(name); }, toggle(name, on) { if (on) classes.add(name); else classes.delete(name); },
       contains(name) { return classes.has(name) || node.className.split(' ').includes(name); } } };
@@ -42,19 +42,34 @@ function view() {
     : selector === '[role="tab"]' ? modes.slice(0, 2) : [];
   const form = gate.querySelector('form'), submit = gate.querySelector('[type="submit"]');
   form.querySelectorAll = () => [...nodes.values()]; submit.querySelector = () => gate.querySelector('submit-label');
+  const localeListeners = new Map();
   const calls = [], window = { AccountUI: { email: value => /^.+@.+\..+$/.test(value), code: value => /^\d{6}$/.test(value),
     check: value => value, error: error => error.message, bindPassword() {}, legal() {} } };
+  window.addEventListener = (type, listener) => {
+    if (!localeListeners.has(type)) localeListeners.set(type, new Set());
+    localeListeners.get(type).add(listener);
+  };
+  window.removeEventListener = (type, listener) => localeListeners.get(type)?.delete(listener);
+  window.dispatchEvent = event => { for (const listener of localeListeners.get(event.type) || []) listener(event); };
+  const localeContext = { window, globalThis: window, console, localStorage: { getItem: () => 'zh-CN' },
+    CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init?.detail; } } };
+  const localeDir = path.join(__dirname, '../core/locales');
+  for (const file of JSON.parse(fs.readFileSync(path.join(localeDir, 'manifest.json'), 'utf8')))
+    vm.runInNewContext(fs.readFileSync(path.join(localeDir, file), 'utf8'), localeContext);
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../core/i18n.js'), 'utf8'), localeContext);
+  window.SoduWorkI18n.setLocale('zh-CN', { persist: false, broadcast: false });
   const api = { hubBase: () => hub, clientAuthSnapshot: () => ({ clientId, user }),
     async clientLogin(payload) { calls.push({ kind: 'legacy', payload }); return { ok: true, user: { id: 'test' } }; },
     async clientAccountAction(action, payload) { calls.push({ kind: action, payload }); return { ok: true, user: { id: 'test' } }; } };
   let retries = 0;
-  const context = { window, Date: class extends Date { static now() { return now; } },
+  const context = { window, document: { createElement: () => element() },
+    Date: class extends Date { static now() { return now; } },
     setTimeout: (fn, delay) => addTimer(fn, delay), clearTimeout: id => timers.delete(id),
     setInterval: (fn, delay) => addTimer(fn, delay, true), clearInterval: id => timers.delete(id) };
   vm.runInNewContext(source, context);
   const mounted = window.EmailAuth.mount(gate, { api: () => api, retry() { retries++; }, success() {} });
   return { gate, mounted, calls, api, window, context, advance, flush, timers, retries: () => retries,
-    setLocale(locale) { i18n.locale = locale; window.dispatchEvent({ type: 'soduwork-locale-change' }); },
+    setLocale(locale) { window.SoduWorkI18n.setLocale(locale, { persist: false, broadcast: false }); },
     switchHub() { hub = 'http://second.invalid'; }, switchDevice() { clientId = 'device-b'; }, switchUser() { user = { id: 'second-user' }; },
     mode: name => modes.find(row => row.dataset.authMode === name).fire('click') };
 }

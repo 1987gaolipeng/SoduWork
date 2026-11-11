@@ -126,16 +126,16 @@ chk("SoduWork 品牌覆盖窗口、安装包与快捷方式",
     and '"shortcutName": "SoduWork"' in package_json
     and '<title>SoduWork · 工作台</title>' in desk
     and "tray.setToolTip(_nativeText('SoduWork · 桌面任务助手'))" in main)
-chk("SoduWork 保持接口标识，stage/内网数据目录兼容且多云目录独立",
+chk("Public identity preserves protocol and user-data compatibility",
     '"appId": "com.soduwork.app"' in package_json
     and "global.SoduWorkAPI = SoduWorkAPI" in text("api.js")
     and "global.SoduWorkAPI = SoduWorkAPI" in text("api.js")
     and "require('./main/userdata-path.cjs').initializeUserData(app)" in main
     and "profile = require('./distribution.cjs').current()" in text("main/userdata-path.cjs")
     and "path.join(app.getPath('appData'), profile.userDataName)" in text("main/userdata-path.cjs")
-    and {key: value["userDataName"] for key, value in distributions.items()} == {
-        "internal": "SoduWork", "stage": "SoduWork",
-        "cn": "SoduWork CN", "global": "SoduWork Global"}
+    and "const PROFILE_ID = 'self-hosted'" in distribution_source
+    and "Unknown Client distribution" in distribution_source
+    and not (CLIENT / "distributions.json").exists()
     and not (CLIENT / "main/userdata-migrate.js").exists())
 # Assert the navigation intent: task creation must not become a left-navigation destination.
 # Avoid exact whole-list assertions that fail when unrelated navigation entries are added.

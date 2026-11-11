@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react'
 import { dictionary } from './locales/shell.js'
 import { messages } from './locales/messages.js'
 import { messagesByLocale } from './locales/extra-languages.js'
+import quotaMessages from './locales/quota-management.js'
 import { serverMessages } from './locales/server-messages.js'
 
 export const LOCALES = Object.freeze({ 'zh-CN': '简体中文', 'en-US': 'English', 'ja-JP': '日本語', 'ko-KR': '한국어' })

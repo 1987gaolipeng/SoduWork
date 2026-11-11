@@ -14,8 +14,6 @@ function publicRoutes(item) {
 }
 async function main() {
   const limit = concurrency();
-  require('./client-target.cjs').requireTarget();
-  const notes = require('./client-release-notes.cjs').read();
   const remote = await publisher.connection();
   const { entries, channel } = await publisher.stagedEntries(remote);
   assert.equal(channel, 'stable', 'Public download verification requires the stable channel');
@@ -26,8 +24,7 @@ async function main() {
   assert.deepEqual([...activation.enabled].sort(), entries.map(({ item }) => item.releaseId).sort());
   const rows = (await remote.request('/api/v1/admin/client-releases')).releases;
   const report = { schema: 1, ok: false, hub: remote.url, sourceCommit: process.env.CI_COMMIT_SHA,
-    pipelineId: process.env.CI_PIPELINE_ID, distribution: distributions.identity(), notesSha256: notes.notesSha256, artifacts: [] };
-  await contract.write(path.join(contract.evidence, 'publication-verification.json'), report);
+    pipelineId: process.env.CI_PIPELINE_ID, artifacts: [] };
   try {
     await transferAll(entries, async ({ item, build }) => {
       const row = rows.find(row => row.id === item.releaseId);
@@ -56,11 +53,10 @@ async function main() {
         assert.equal(metadata.version, build.version); assert.equal(metadata.sha256, item.sha256);
         assert.equal(metadata.size, item.size);
       }
-      const { size, elapsedMs } = await verifyDownload(downloadUrl, item);
+      const { size } = await verifyDownload(downloadUrl, item);
       report.artifacts.push({ name: item.name, size, sha256: item.sha256, releaseId: item.releaseId,
-        version: build.version, url: downloadUrl, signature: 'verified', download: 'verified', elapsedMs });
-    }, { limit, phase: 'verify-download' });
-    report.artifacts.sort((a, b) => a.name.localeCompare(b.name));
+        version: build.version, url: downloadUrl, signature: 'verified', download: 'verified' });
+    }, { limit, phase: 'public-download' });
     report.ok = true;
   } finally {
     report.finishedAt = new Date().toISOString();

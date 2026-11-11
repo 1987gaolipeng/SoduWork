@@ -100,40 +100,24 @@ test('wrong target Python prevents all packaging; wrong Runner prevents its pack
   assert.throws(() => build(f.config), /Runner architecture differs/); assert.equal(f.calls.length, 1);
 });
 
-test('multiple distributions share one verified Runner for each architecture', () => {
-  const f = fixture(); f.config.env.SODUWORK_MACOS_ARCH = 'x64';
-  f.config.distributions = ['stage', 'internal', 'cn', 'global'];
-  const profiles = [], prepared = [];
-  const run = f.config.run;
-  f.config.run = (file, args, options) => {
-    if (isEntry(args, 'electron-builder/cli.js')) profiles.push(options.env.SODUWORK_DISTRIBUTION);
-    return run(file, args, options);
-  };
-  f.config.beforePackages = () => prepared.push('common');
-  build(f.config);
-  assert.deepEqual(prepared, ['common']);
-  assert.equal(f.calls.filter(row => row[0] === 'prepare').length, 1);
-  assert.deepEqual(profiles, f.config.distributions);
+test('private distributions and unverified build checkpoints fail before tool lookup', () => {
+  for (const options of [{distributions: ['stage', 'internal', 'cn', 'global']},
+    {preparedRunner: '/original/soduwork-runner'}, {env: {SODUWORK_DISTRIBUTION: 'stage'}},
+    {env: {SODUWORK_MAC_NOTARY_STATE_DIR: '/private/checkpoints'}},
+    {env: {SODUWORK_MAC_BUILD_INPUT_ID: 'a'.repeat(64)}}]) {
+    const f = fixture(); Object.assign(f.config, options);
+    f.config.run = () => assert.fail('unsupported options must fail before tool lookup');
+    assert.throws(() => build(f.config), /self-hosted distribution|Private build checkpoints/);
+    assert.deepEqual(f.calls, []);
+  }
 });
 
-test('a checkpoint Runner packages only remaining environments without probing Python and still enforces architecture', () => {
-  const f = fixture(); f.config.env = { SODUWORK_MACOS_ARCH: 'x64' };
-  f.config.preparedRunner = '/original/soduwork-runner'; f.config.distributions = ['global'];
-  const run = f.config.run; let packaged = 0;
-  f.config.prepare = () => assert.fail('must preserve original Runner');
-  f.config.run = (file, args, options) => {
-    if (file === 'lipo') { assert.equal(args[1], f.config.preparedRunner); return 'x86_64'; }
-    assert.notEqual(args[0], '-c', 'No Python is required after restoring verified preparation');
-    if (isEntry(args, 'electron-builder/cli.js')) {
-      assert.equal(options.env.SODUWORK_DISTRIBUTION, 'global'); packaged++;
-    }
-    return run(file, args, options);
-  };
-  build(f.config); assert.equal(packaged, 1);
-  const inspect = f.config.run;
-  f.config.run = (file, args, options) => file === 'lipo' ? 'arm64' : inspect(file, args, options);
-  assert.throws(() => build(f.config), /Runner architecture differs/);
-  assert.equal(packaged, 1);
+test('explicit self-hosted packaging preserves the verified Runner path', () => {
+  const f = fixture(); f.config.env.SODUWORK_MACOS_ARCH = 'x64';
+  f.config.distributions = ['self-hosted'];
+  build(f.config);
+  assert.equal(f.calls.filter(row => row[0] === 'prepare').length, 1);
+  assert.equal(f.calls.filter(row => isEntry(row.slice(1), 'electron-builder/cli.js')).length, 1);
 });
 
 const IDENTITY = 'Developer ID Application: Test (TEAMID)';
@@ -144,9 +128,9 @@ function signingFixture() {
   f.config.env.SODUWORK_MACOS_ARCH = 'arm64';
   delete f.config.env.SODUWORK_MACOS_X64_PYTHON;
   f.config.root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'soduwork-signing-'));
-  fs.mkdirSync(path.join(f.config.root, 'client/dist/internal'), { recursive: true });
+  fs.mkdirSync(path.join(f.config.root, 'client/dist'), { recursive: true });
   fs.writeFileSync(path.join(f.config.root, 'client/package.json'), JSON.stringify({ version: '9.9.9' }));
-  fs.writeFileSync(path.join(f.config.root, 'client/dist/internal/SoduWork-9.9.9-mac-arm64.dmg'), 'dmg');
+  fs.writeFileSync(path.join(f.config.root, 'client/dist/SoduWork-9.9.9-mac-arm64.dmg'), 'dmg');
   const run = f.config.run;
   f.config.run = (file, args, options) => {
     if (file === 'security') {
@@ -172,9 +156,9 @@ test('Developer ID signing forwards the identity, hardened runtime and notarizat
   assert.ok(builder.includes('--config.mac.identity=-') === false);
   const submit = f.calls.find(row => row[0] === 'xcrun' && row[1] === 'notarytool');
   assert.deepEqual(submit.slice(1), ['notarytool', 'submit',
-    path.join(f.config.root, 'client/dist/internal/SoduWork-9.9.9-mac-arm64.dmg'), '--keychain-profile', 'SODUWORK_NOTARY', '--wait']);
+    path.join(f.config.root, 'client/dist/SoduWork-9.9.9-mac-arm64.dmg'), '--keychain-profile', 'SODUWORK_NOTARY', '--wait']);
   assert.deepEqual(f.calls.find(row => row[0] === 'xcrun' && row[1] === 'stapler').slice(1),
-    ['stapler', 'staple', path.join(f.config.root, 'client/dist/internal/SoduWork-9.9.9-mac-arm64.dmg')]);
+    ['stapler', 'staple', path.join(f.config.root, 'client/dist/SoduWork-9.9.9-mac-arm64.dmg')]);
   fs.rmSync(f.config.root, { recursive: true, force: true });
 });
 test('SODUWORK_MAC_SKIP_NOTARIZE keeps a signed but unnotarized build', () => {
@@ -187,69 +171,15 @@ test('SODUWORK_MAC_SKIP_NOTARIZE keeps a signed but unnotarized build', () => {
   assert.ok(builder.includes('--config.afterSign=scripts/notarize-macos.cjs') === false);
   fs.rmSync(f.config.root, { recursive: true, force: true });
 });
-test('a DMG wait failure resumes the exact container without repeating electron-builder or upload', t => {
-  const f = signingFixture(); t.after(() => fs.rmSync(f.config.root, { recursive: true, force: true }));
-  Object.assign(f.config.env, { SODUWORK_MAC_NOTARY_STATE_DIR: path.join(f.config.root, 'notary'),
-    SODUWORK_MAC_BUILD_INPUT_ID: 'a'.repeat(64) });
-  const run = f.config.run, uuid = '12345678-1234-1234-1234-123456789abc'; let wait = true, uploads = 0;
-  f.config.run = (file, args, options) => {
-    if (file === 'xcrun' && args[0] === 'notarytool') {
-      if (args[1] === 'submit') uploads++;
-      if (args[1] === 'wait' && wait) { wait = false; throw Object.assign(Error('injected timeout'), { code: 'ETIMEDOUT' }); }
-      return JSON.stringify({ id: uuid, status: 'Accepted' });
-    }
-    return run(file, args, options);
-  };
-  assert.throws(() => build(f.config), /Notarization wait failed/);
-  const dmg = path.join(f.config.root, 'client/dist/internal/SoduWork-9.9.9-mac-arm64.dmg');
-  fs.writeFileSync(dmg, 'unrelated retry container'); build(f.config);
-  assert.equal(fs.readFileSync(dmg, 'utf8'), 'dmg');
-  assert.equal(f.calls.filter(row => isEntry(row.slice(1), 'electron-builder/cli.js')).length, 1);
-  assert.equal(uploads, 1);
-  const parent = path.join(f.config.env.SODUWORK_MAC_NOTARY_STATE_DIR, 'dmgs');
-  fs.appendFileSync(path.join(parent, fs.readdirSync(parent)[0], path.basename(dmg)), 'tampered');
-  assert.throws(() => build(f.config), /Original DMG checkpoint changed/);
-});
-test('App wait recovery uses verified prepackaged bytes without repeating App assembly or signing', t => {
-  for (const arch of ['arm64', 'x64']) {
-    const f = signingFixture(); t.after(() => fs.rmSync(f.config.root, {recursive: true, force: true}));
-    Object.assign(f.config.env, {SODUWORK_MAC_NOTARY_STATE_DIR: path.join(f.config.root, 'notary'),
-      SODUWORK_MAC_BUILD_INPUT_ID: 'b'.repeat(64), SODUWORK_MACOS_ARCH: arch,
-      SODUWORK_MACOS_X64_PYTHON: '/python/x64'});
-    const run = f.config.run, uuid = '12345678-1234-1234-1234-123456789abc';
-    let interrupted = false, assemblies = 0, appUploads = 0, containers = 0;
-    const dmg = path.join(f.config.root, 'client/dist/internal/SoduWork-9.9.9-mac-' + arch + '.dmg');
-    f.config.run = (file, args, options) => {
-      if (file === 'ditto') { fs.writeFileSync(args.at(-1), 'original signed zip'); return ''; }
-      if (file === 'xcrun' && args[0] === 'notarytool') {
-        if (args[1] === 'submit' && args[2].endsWith('.zip')) appUploads++;
-        if (args[1] === 'wait' && !interrupted) { interrupted = true; throw Error('App wait interrupted'); }
-        return JSON.stringify({id: uuid, status: 'Accepted'});
-      }
-      if (isEntry(args, 'electron-builder/cli.js')) {
-        if (!args.includes('--prepackaged')) {
-          assemblies++;
-          const app = path.join(f.config.root, 'assembled/SoduWork.app'); fs.mkdirSync(app, {recursive: true});
-          fs.writeFileSync(path.join(app, 'binary'), 'original signed bytes');
-          notarizeApp({appPath: app, env: options.env, run: f.config.run});
-        } else {
-          const app = args[args.indexOf('--prepackaged') + 1];
-          assert.equal(fs.readFileSync(path.join(app, 'binary'), 'utf8'), 'original signed bytes');
-        }
-        containers++; fs.writeFileSync(dmg, 'container from original App');
-      }
-      return run(file, args, options);
-    };
-    assert.throws(() => build(f.config), /Notarization wait failed/);
-    fs.rmSync(path.join(f.config.root, 'client/dist'), {recursive: true});
-    build(f.config);
-    assert.equal(assemblies, 1); assert.equal(appUploads, 1); assert.equal(containers, 1);
-    assert.equal(fs.readFileSync(dmg, 'utf8'), 'container from original App');
-    const builder = f.calls.find(row => row.includes('--prepackaged'));
-    assert.ok(builder.includes('--' + arch));
-    assert.ok(f.calls.some(row => row[0] === 'xcrun' && row[1] === 'stapler' && row[2] === 'validate'));
+test('private notarization checkpoint options fail before keychain access or submission', () => {
+  for (const key of ['SODUWORK_MAC_NOTARY_STATE_DIR', 'SODUWORK_MAC_BUILD_INPUT_ID']) {
+    const env = {[key]: 'private-checkpoint', SODUWORK_MAC_KEYCHAIN_PASSWORD: 'fixture-only-password'};
+    const run = () => assert.fail('unsupported checkpoints must not touch native tools');
+    assert.throws(() => notarizeArtifact({artifactPath: '/tmp/SoduWork.dmg', env, run}), /Private notarization checkpoints/);
+    assert.throws(() => notarizeApp({appPath: '/tmp/SoduWork.app', env, run}), /Private notarization checkpoints/);
   }
 });
+
 test('SODUWORK_MAC_SKIP_NOTARIZE=0 keeps notarization enabled', () => {
   const f = signingFixture();
   f.config.env.SODUWORK_MAC_SKIP_NOTARIZE = '0';

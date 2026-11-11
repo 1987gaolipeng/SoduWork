@@ -69,14 +69,12 @@ async function cleanupRoot(root, prefix) {
 async function main() {
   assert.equal(process.platform, 'win32');
   const record = await contract.verify('windows'), item = record.artifacts[0];
-  const distribution = contract.distribution, acceptance = plan(distribution, record.version, { platform: 'windows' });
-  const output = path.join(contract.evidence, 'windows');
+  const output = path.join(contract.root, 'release-evidence/windows');
   await fs.mkdir(output, { recursive: true });
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'soduwork-accept-packages-'));
   const checks = [], roots = new Map();
   const installer = path.join(contract.dist, item.name);
-  const env = { ...process.env, SODUWORK_ACCEPT_INSTALLER_SHA256: item.sha256,
-    SODUWORK_ACCEPT_PROFILE: JSON.stringify(distribution) };
+  const env = { ...process.env, SODUWORK_ACCEPT_INSTALLER_SHA256: item.sha256 };
   let failure;
   try {
     const recent = await soduworkBaseline('windows-x64-exe', temp);
@@ -95,18 +93,8 @@ async function main() {
           assert.equal(report.oldBrand, old.productName);
           assert.equal(report.oldSha256, old.sha256);
         }
-        checks.push({ name, ok: true, mode: acceptance.mode,
-          ...(old ? { oldVersion: old.version, oldBrand: old.productName, oldSha256: old.sha256 } : {}) });
-        if (acceptance.mode === 'first-release') {
-          for (const field of ['registration', 'shortcuts', 'executable', 'immutableProfile'])
-            assert.equal(report.distributionIsolation?.[field], true, 'Missing distribution isolation: ' + field);
-          checks.push({ name: 'first-release-isolation', ok: true, mode: acceptance.mode });
-        }
-        if (acceptance.mode === 'clean-install') {
-          assert.equal(report.oldVersion, '', 'Clean installation must not use an old installer');
-          const evidence = require('./native-install-evidence.cjs').validateCleanInstall(report.cleanInstall);
-          checks.push({ ...evidence, name: 'clean-install', ok: true, mode: acceptance.mode });
-        }
+        checks.push({ name, ok: true, oldVersion: old ? old.version : record.version,
+          ...(old ? { oldBrand: old.productName, oldSha256: old.sha256 } : {}) });
         console.log('Windows acceptance: passed ' + name);
       } finally {
         const report = await contract.read(path.join(destination, 'windows-install-report.json')).catch(() => null);

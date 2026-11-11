@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const { check, retained, forbidden } = require('../../tools/soduwork-brand-scan.cjs');
+const { check, inspect, retained, forbidden } = require('../../tools/soduwork-brand-scan.cjs');
 
 test('branding gate rejects unaudited content and paths', () => {
   const result = check();
@@ -20,4 +20,12 @@ test('a compatibility exception grants only its exact file and reviewed line', (
   assert.equal(retained(file, text, [{...exception, reason: ''}]), false);
   assert.equal(retained(file, text, [{...exception, file: 'client/*'}]), false);
   assert.equal(retained(file, text, [{...exception, lines: [forbidden[0]]}]), false);
+});
+
+test('public brand inspection rejects legacy content and path identifiers', () => {
+  for (const token of forbidden) {
+    const content = inspect('client/example.js', 'const value = "' + token + '";');
+    assert.equal(content.count, 1);
+    assert.equal(inspect('client/' + token + '.js', '').forbiddenPath, true);
+  }
 });

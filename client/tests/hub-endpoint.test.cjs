@@ -10,7 +10,7 @@ function appAt(profile, packaged = false, appData = path.dirname(profile)) {
 test('packaged and source clients default to a local Hub and allow explicit configuration', () => {
   for (const packaged of [false, true]) {
     const app = appAt(path.resolve('fixture-profile'), packaged);
-    assert.deepEqual(endpoint.initialize(app, { SODUWORK_HUB_URL: 'http://localhost:9080' }), { hub: production, internalTest: false, editable: !packaged });
+    assert.deepEqual(endpoint.initialize(app, { SODUWORK_HUB_URL: 'http://localhost:9080' }), { hub: production, internalTest: false, editable: true });
     assert.equal(endpoint.accepts(app, 'http://localhost:9080'), false);
   }
   const app = appAt(path.resolve('fixture-profile'), true);
@@ -33,7 +33,7 @@ test('internal loopback override requires unpackaged execution and a separate pr
   }
 });
 
-test('fixed main identity ignores legacy active Hub and rejects foreign IPC before any network or write', async t => {
+test('main identity isolates legacy Hub credentials until explicit selection, including packaged restarts', async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-fixed-hub-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const app = appAt(root, true), handlers = new Map(), requests = [];

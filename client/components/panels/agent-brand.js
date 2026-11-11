@@ -3,16 +3,16 @@
 (function (global) {
   'use strict';
 
-  const ICONS = Object.freeze({
-    pi: 'assets/agent-brands/pi.svg',
-    'codex-harness': 'assets/agent-brands/chatgpt.svg',
-    opencode: 'assets/agent-brands/opencode.svg',
-    claude: 'assets/agent-brands/claude.png',
-    codex: 'assets/agent-brands/chatgpt.svg',
-    qwen: 'assets/agent-brands/qwen.png',
-    kimi: 'assets/agent-brands/kimi.png',
-    dsh: 'assets/agent-brands/deepseek.svg',
-    harness2: 'assets/agent-brands/harness2.svg',
+  const MONOGRAMS = Object.freeze({
+    pi: 'PI',
+    'codex-harness': 'CX',
+    opencode: 'OC',
+    claude: 'CL',
+    codex: 'CX',
+    qwen: 'QW',
+    kimi: 'KM',
+    dsh: 'DS',
+    harness2: 'H2',
   });
 
   const LABELS = Object.freeze({
@@ -180,7 +180,7 @@
     const match = raw.match(/^(?:@openma\/deepseek-harness-acp(?:\s+|@)|deepseek-harness-acp\s+|dsh\s+)?v?(\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?)$/i);
     return match ? match[1] : raw;
   }
-  const api = Object.freeze({ ICONS, LABELS, canonical, className, glyph, html, sourceKey, transcript, version });
+  const api = Object.freeze({ MONOGRAMS, LABELS, canonical, className, glyph, html, sourceKey, transcript, version });
   global.AgentBrand = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

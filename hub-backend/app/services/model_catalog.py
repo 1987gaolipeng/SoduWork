@@ -51,6 +51,7 @@ FLASH_THINKING_UPGRADE_FLAG = "model_thinking_glm53_flash_controllable_20261022"
 
 def canonical_model_name(value: str) -> str:
     name = str(value or "").strip()
+    name = MODEL_ALIASES.get(name, name)
     return MEDIA_MODEL_ALIASES.get(name, name)
 
 # Provider templates are the only catalog rows startup may add.

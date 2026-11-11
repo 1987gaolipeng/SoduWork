@@ -1,4 +1,4 @@
-"""Contract checks for the split SoduWork daytime-change and release-window flows."""
+"""Contract checks for the SoduWork change candidate workflow."""
 from __future__ import annotations
 
 import json
@@ -39,8 +39,6 @@ def by_key(workflow):
 
 def main() -> int:
     fast, fast_flow, fast_report = load("soduwork-fast-change.json")
-    release, release_flow, release_report = load(
-        "soduwork-batch-release-149.json")
     fast_nodes = by_key(fast_flow)
 
     ok(fast["key"] == "soduwork-fast-change", "fast key")
@@ -79,51 +77,6 @@ def main() -> int:
     ok(fast_report.get("fatal") in (None, [], False), "fast normalization clean",
        fast_report)
 
-    ok(release["key"] == "soduwork-batch-release-149", "release key")
-    ok(release["version"] == "1.0.1", "release version")
-    ok(list(release_nodes) == [
-        "integrate", "merge", "releaseChain", "verifyRelease", "receipt"],
-       "release node order", list(release_nodes))
-    ok([x["type"] for x in release_flow["nodes"]] == [
-        "ai", "merge", "deploy_chain", "validate", "publish"],
-       "release node types")
-    release_cfg = release_nodes["integrate"]["config"]
-    ok(release_cfg.get("agentKind") == "local:codex",
-       "release uses local Codex")
-    ok(release_cfg.get("model") == "gpt-5.6-sol",
-       "release fixed high model")
-    ok(release_cfg.get("reasoningEffort") == "xhigh",
-       "release fixed xhigh")
-    ok(release_cfg.get("fallbackMode") == "strict",
-       "release cannot downgrade")
-    inputs = {item["key"]: item for item in release.get("inputs") or []}
-    ok(inputs.get("candidateChanges", {}).get("required") is True,
-       "candidate list is required")
-    ok(release_nodes["merge"]["config"].get("autoSubmit") is True,
-       "release merge is automation-ready")
-    ok(release_nodes["releaseChain"].get("dependsOn") == ["merge"],
-       "deploy waits for merge")
-    verify = release_nodes["verifyRelease"]
-    ok(set(verify.get("dependsOn") or []) == {"merge", "releaseChain"},
-       "verification binds merge and deploy")
-    ok(verify["config"].get("deployVerify") is True,
-       "release checks deployment")
-    ok(verify["config"].get("shaCheck") is True,
-       "release checks immutable version")
-    serialized_flow = json.dumps(release_flow, ensure_ascii=False)
-    ok("192.0.2.149" not in serialized_flow,
-       "release has no hardcoded host")
-    ok("environmentId" not in serialized_flow
-       and "environmentKey" not in serialized_flow,
-       "release uses project environment binding")
-    ok(len(release.get("evaluations") or []) == 2,
-       "release has positive and negative evaluations")
-    ok((release.get("evaluations") or [None, {}])[1].get(
-        "expectedOutputs") == [],
-       "unsafe candidate evaluation must block")
-    ok(release_report.get("fatal") in (None, [], False),
-       "release normalization clean", release_report)
-
     engine = (ROOT / "app" / "services" / "workflow_engine.py").read_text(
         encoding="utf-8")
     ok("_verified_git_delivery" in engine
@@ -133,8 +86,6 @@ def main() -> int:
         encoding="utf-8")
     ok('"soduwork-fast-change.json"' in bootstrap,
        "fast flow is bootstrapped")
-    ok('"soduwork-batch-release-149.json"' in bootstrap,
-       "release flow is bootstrapped")
 
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0

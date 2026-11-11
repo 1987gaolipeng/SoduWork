@@ -6,7 +6,7 @@ database. Keep the release image small, deterministic and self-contained at the 
 
 Expensive, rarely-changing dependency layers (OS packages, global npm tooling, pinned Python
 requirements) live in the `deps` stage so they can be published once as a dependency base image
-at an operator-provided registry. Dockerfile.server defaults to `deps` for a self-contained
+at an operator-provided registry. ops/self-host/Dockerfile.server defaults to `deps` for a self-contained
 build; deployment can explicitly select a published base with SODUWORK_HUB_BASE_IMAGE. Release
 builds reconcile the current Python requirements before copying application source.
 """
@@ -76,16 +76,7 @@ ok('org.opencontainers.image.revision="${SODUWORK_VERSION}"' in source,
 ok(bool(re.search(r"(?m)^ARG HUB_BASE_IMAGE=deps\s*$", source)),
    "server image must default to the self-contained deps stage")
 ok("--build-arg HUB_BASE_IMAGE=deps" in source,
-   "self-contained build (--build-arg HUB_BASE_IMAGE=deps) is not documented in Dockerfile.server")
-deploy_source = (ROOT / "ops" / "deploy-server.sh").read_text(encoding="utf-8")
-ok('HUB_BASE_IMAGE="${SODUWORK_HUB_BASE_IMAGE:-}"' in deploy_source
-   and "s/^SODUWORK_HUB_BASE_IMAGE=//p" in deploy_source,
-   "deployment must accept an explicit dependency base from the environment or deployment config")
-ok(bool(re.search(
-    r'if \[\[ -n "\$\{HUB_BASE_IMAGE\}" \]\]; then\s+'
-    r'BUILD_ARGS\+=\(--build-arg "HUB_BASE_IMAGE=\$\{HUB_BASE_IMAGE\}"\)',
-    deploy_source,
-)), "deployment must forward a dependency base only when explicitly configured")
+   "self-contained build (--build-arg HUB_BASE_IMAGE=deps) is not documented in ops/self-host/Dockerfile.server")
 RUNTIME_MARKER = "FROM ${HUB_BASE_IMAGE} AS runtime"
 ok(RUNTIME_MARKER in source,
    "runtime stage does not derive from the dependency base")

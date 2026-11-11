@@ -55,6 +55,7 @@
     "mobile/ios/"
   ],
   "excludedFiles": [
+    "client/tests/platform-plugins.test.cjs",
     "hub-backend/app/connectors/ppm.py",
     "hub-backend/smoke/smoke_ppm_connector.py",
     "hub-backend/smoke_ppm_connector.py",
@@ -111,7 +112,17 @@
     "skills/browser-use/en-assets-final",
     "skills/browser-use/en-real-filters",
     "skills/browser-use/real-tab",
-    "skills/browser-use/voice-tab"
+    "skills/browser-use/voice-tab",
+    "hub-backend/smoke_full_backup_ops.py",
+    "hub-backend/smoke_release_ops.py",
+    "hub-backend/smoke_server_release.py",
+    "hub-backend/test_ops_cli.py",
+    "hub-backend/test_release_transactions.py",
+    "hub-backend/smoke_soduwork_light_flows.py",
+    "hub-backend/smoke_client_download.py",
+    "hub-backend/smoke_cloud_durable_execution.py",
+    "hub-backend/smoke_jiyong_cloud_postgres.py",
+    "hub-backend/smoke_release_trust.py"
   ],
   "excludedIdentifiers": [
     "PpmConnector",

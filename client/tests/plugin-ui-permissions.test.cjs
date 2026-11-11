@@ -12,7 +12,8 @@ function setup() {
     effects.push(['authorize',id]); return {canUse:allowed,canEdit:true};
   }, sendMateMessage: async () => {effects.push(['notification']);return {ok:true};} };
   const window = { SoduWorkAPI:api, addEventListener:(name,fn)=>{events[name]=fn;},
-    soduWorkAPI:{openExternal:async url=>effects.push(['external',url])} };
+    soduWorkAPI:{openExternal:async url=>effects.push(['external',url]),
+      workPreviewAppHost:{authorize:async id=>({ok:id==='authorized-request'})}} };
   const context = {window,SoduWorkAPI:api,soduWorkAPI:window.soduWorkAPI,URL,Date,Map,Set,console};
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../components/panels/plugin-ui-host.js'),'utf8'),context);
@@ -78,4 +79,13 @@ test('already open plugin application requests check current rights; other apps 
   assert.equal(denied.ok,false);
   assert.equal(s.effects.filter(row=>row[0]==='notification').length,0);
   assert.equal((await s.window.SoduWorkAppBridgeHost._handle({...request,appId:'standalone-app'})).ok,true);
+});
+
+// Native request authorization remains required even for non-plugin applications.
+test('expired native application requests cannot send notifications',async()=>{
+  const s=setup();
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'../components/panels/soduwork-app-bridge-host.js'),'utf8'),s.context);
+  await assert.rejects(s.window.SoduWorkAppBridgeHost._handle({id:'expired-request',appId:'standalone-app',
+    method:'notifications.send',params:{recipientUserId:'fixture',text:'hello'}}),/authorization expired/);
+  assert.equal(s.effects.filter(row=>row[0]==='notification').length,0);
 });
