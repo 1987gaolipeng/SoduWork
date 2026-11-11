@@ -20,7 +20,7 @@ def platform_archives(root: str) -> tuple[str, ...]:
     return tuple(
         str(path.relative_to(root))
         for provider in ("feishu", "dingtalk", "wecom")
-        for path in sorted(path for suffix in ("*.soduwork-plugin", "*.soduwork-plugin", "*.soduwork-plugin")
+        for path in sorted(path for suffix in ("*.soduwork-plugin",)
                            for path in (Path(root) / "platforms" / "releases" / provider).glob(suffix))
         if path.is_file() and not path.is_symlink()
     )
@@ -32,31 +32,34 @@ async def bootstrap_example(session: AsyncSession, provenance_api) -> None:
     # Discover the project workflows included in this source distribution.
     for filename in (
         "ai-errand.json",
-        # End-to-end delivery flows distinguish requirements, requirement changes, and bug fixes.
-        # The configured repository and release provider determine the deployment path.
-        # Verification produces check and screenshot receipts attached to acceptance records.
-        "delivery-req-184.json", "delivery-change-184.json", "delivery-bugfix-184.json",
-        "soduwork-change-149.json", "soduwork-bugfix-149.json", "project-production-release.json",
-        "soduwork-fast-change.json", "soduwork-batch-release-149.json",
-        # Open-source method packages record their licenses and sources in skills/THIRD-PARTY.md.
-        # Repository-distributed skills are exposed through corresponding marketplace plugins.
-        # Administrators approve availability and employees choose installation and use.
-        "mattpocock-engineering.json", "superpowers.json",
-        # The img2threejs method lives in skills/img2threejs.
-        # Its plugin supplies marketplace approval, installation, and task activation.
-        "img2threejs.json",
-        "skill-studio.json", "mcp-studio.json", "product-incubator.json",
-        # Conversational video generation uses the built-in soduwork-media MCP service.
-        # The plugin needs no third-party MCP endpoint or exposed model key.
+        "autonomous-dev-iterator.json",
+        "deep-research.json",
+        "delivery-audit.json",
+        "diagram-studio.json",
+        "document-studio.json",
+        "engineering-delivery.json",
+        "goal-delivery-harness.json",
+        "knowledge-synthesis.json",
+        "mcp-studio.json",
+        "meeting-to-action.json",
+        "pdf-toolbox.json",
+        "presentation-studio.json",
+        "product-incubator.json",
+        "product-prototype.json",
+        "project-production-release.json",
+        "project-validation-release.json",
+        "skill-studio.json",
+        "soduwork-fast-change.json",
+        "software-delivery.json",
+        "spreadsheet-analyst.json",
         "viral-video-studio.json",
-        "feishu.soduwork-plugin", "dingtalk.soduwork-plugin", "wecom.soduwork-plugin",
-        "feishu.soduwork-plugin", "dingtalk.soduwork-plugin", "wecom.soduwork-plugin",
+        "web-collect.json",
         "feishu.soduwork-plugin", "dingtalk.soduwork-plugin", "wecom.soduwork-plugin",
     ) + platform_archives(root):
         path = os.path.join(root, filename)
         if not os.path.isfile(path):
             continue
-        if filename.endswith((".soduwork-plugin", ".soduwork-plugin", ".soduwork-plugin")):
+        if filename.endswith((".soduwork-plugin",)):
             try:
                 with open(path, "rb") as f:
                     parsed = plugin_packages.parse(f.read(plugin_packages._MAX_PACKAGE + 1))
