@@ -17,6 +17,43 @@ function loadEnvironment(mocks) {
   return module.exports;
 }
 
+test('requirement picker publishes ready Pi while a cold Runner is still probing', { timeout: 3000 }, async () => {
+  const handlers = new Map();
+  const rows = [{ id: 'pi', transport: 'direct' }, { id: 'codex', transport: 'runner' }];
+  const available = { ok: true, runtimes: rows, availableRuntimes: rows, missing: [] };
+  let releaseRunner;
+  const runnerHealth = new Promise(resolve => { releaseRunner = resolve; });
+  let scans = 0;
+  const probes = [];
+  loadEnvironment({ electron: {} }).install({
+    app: {}, ipcMain: { handle: (name, handler) => handlers.set(name, handler) },
+    session: {
+      runtimes: () => rows,
+      availableRuntimes: async () => { scans++; await runnerHealth; return available; },
+      probe: async (_, id) => { probes.push(id); return id === 'pi' ? { ok: true } : runnerHealth; },
+    },
+  });
+  const sessions = {
+    runtimes: options => handlers.get('pi-session-runtimes')({}, options),
+    probe: id => handlers.get('pi-session-probe')({}, id),
+  };
+  const window = { soduWorkAPI: { conversationSession: sessions }, NativeChat: { enqueueTask() {} } };
+  const picker = path.resolve(__dirname, '../components/requirements/requirement-session-choice.js');
+  vm.runInNewContext(fs.readFileSync(picker, 'utf8'), { window, setTimeout, clearTimeout });
+  const reported = [];
+  const discovery = window.RequirementSessionChoice.localAgents({}, {}, row => reported.push(row.key));
+  try {
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(probes, ['pi', 'codex']);
+    assert.deepEqual(reported, ['local:pi']);
+    assert.equal(scans, 0);
+  } finally { releaseRunner({ ok: true }); }
+  assert.equal((await discovery).ok, true);
+  assert.deepEqual(reported, ['local:pi', 'local:codex']);
+  assert.equal(await sessions.runtimes(), available);
+  assert.equal(scans, 1);
+});
+
 test('local capability discovery fences the first send on Pi warmup', async () => {
   const handlers = new Map();
   let releaseWarmup;

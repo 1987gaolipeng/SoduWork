@@ -57,10 +57,11 @@ app.whenReady().then(async () => {
     const requirementSurface = await js(`(()=>{const rgb=n=>getComputedStyle(document.querySelector(n)).backgroundColor;const board=document.querySelector('#historyBoard');const rect=board.getBoundingClientRect();return{head:rgb('.hb-head'),controls:rgb('.rq-controls'),top:rect.top,right:innerWidth-rect.right,bottom:innerHeight-rect.bottom}})()`);
     assert.equal(requirementSurface.head, 'rgb(249, 249, 249)', 'requirement menu surface uses #F9F9F9');
     assert.equal(requirementSurface.controls, 'rgb(249, 249, 249)', 'requirement controls surface uses #F9F9F9');
-    assert.ok(requirementSurface.top <= 6.1 && requirementSurface.right <= 6.1 && requirementSurface.bottom <= 6.1,
-      'requirement page keeps a compact six-pixel frame');
+    assert.equal(requirementSurface.top, 2);
+    assert.equal(requirementSurface.right, 6);
+    assert.equal(requirementSurface.bottom, 15);
     report.requirementSurface = requirementSurface;
-    report.checks.push('requirement menu surfaces use #F9F9F9 and hosted frame uses six pixels');
+    report.checks.push('requirement menu surfaces use #F9F9F9 and the board uses the shared workspace frame');
     const example = {title:'完善产品上线前的客户引导与团队协作流程',note:'梳理新成员从加入项目到提交首份交付的完整流程。\n重点检查权限说明、需求分工与验收反馈，减少来回确认。',acceptanceCriteria:['新成员可以独立找到与自己有关的需求','可以从需求直接进入同一项目的工作会话','交付材料有清晰的来源和验收记录']};
     await js(`Object.assign(tasks.find(t=>t.id==='intake-0'),${JSON.stringify(example)});RequirementsBoard.render(true)`);
     for (const width of [1440, 1366, 960, 600, 390]) {

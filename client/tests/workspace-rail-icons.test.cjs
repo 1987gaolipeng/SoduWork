@@ -14,5 +14,5 @@ test('workspace rail reuses the apps page gift icon and restores other sidebar i
   assert.doesNotMatch(shell, /MULTI_SOLID_ICONS|APP_ICON_FIXED_COLORS|colorfulSolid/);
   assert.doesNotMatch(css, /ws-rail-button\.active \.ws-icon-solid\[data-icon=/);
   assert.match(css, /\.ws-rail-account\{[^}]*width:32px;height:32px/);
-  assert.match(css, /\.ws-rail-avatar\{[^}]*width:21px;height:21px/);
+  assert.match(css, /\.ws-rail-avatar\{[^}]*width:24px;height:24px/);
 });

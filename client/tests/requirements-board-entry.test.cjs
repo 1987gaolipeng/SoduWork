@@ -6,10 +6,11 @@ const path = require('node:path');
 const vm = require('node:vm');
 const Requirements = require('../core/requirements.js');
 
-function fixture(saved) {
+function fixture(saved, clock) {
   class Node {
     constructor() {
       this.children = new Map(); this.classes = new Set(); this.scrollTop = 0; this.dataset = {};
+      this.listeners = new Map();
       this.classList = { contains: name => this.classes.has(name), add: name => this.classes.add(name), remove: name => this.classes.delete(name),
         toggle: (name, value) => value ? this.classes.add(name) : this.classes.delete(name) };
     }
@@ -21,12 +22,20 @@ function fixture(saved) {
     matches() { return false; }
     contains() { return false; }
     setAttribute() {}
+    addEventListener(type, listener) { this.listeners.set(type, listener); }
+    dispatchEvent(event) { this.listeners.get(event.type)?.(event); }
   }
   const root = new Node(), rendered = [], stored = new Map([['account:requirement-view', JSON.stringify(saved)]]);
+  let mounted = !clock;
   const context = { Requirements,
     RequirementsView: { labels: {phase: '', kind: '', priority: '', project: '', owner: '', tag: '', due: '', attention: ''},
       icon: () => '', chips: () => '', options: () => '', board: (rows, state) => { rendered.push({ids: rows.map(row => row.id), state: {...state}}); return ''; } },
-    document: { getElementById: id => id === 'historyBoard' ? root : null, activeElement: null },
+    document: {
+      getElementById: id => id === 'historyBoard' && mounted ? root : null,
+      createElement: () => root,
+      body: { appendChild() { mounted = true; } },
+      activeElement: null,
+    },
     localStorage: { getItem: key => stored.get(key), setItem: (key, value) => stored.set(key, value) },
     SoduWorkAPI: { taskStorageKey: () => 'account' }, Store: {taskState: 'ready'},
     tasks: [
@@ -37,7 +46,19 @@ function fixture(saved) {
     addEventListener() {},
   };
   context.window = context;
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../components/requirements/requirements-board.js'), 'utf8'), context);
+  const sandbox = vm.createContext(context);
+  const load = file => vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), sandbox, {filename: file});
+  if (clock) {
+    context.Date = class extends Date {
+      constructor(...args) { super(...(args.length ? args : [clock.now])); }
+      static now() { return clock.now; }
+    };
+    load('core/requirements.js');
+    load('components/requirements/requirements-view.js');
+    context.esc = context.RequirementsView.esc;
+    load('components/gantt/gantt.js');
+  }
+  load('components/requirements/requirements-board.js');
   return {api: context.RequirementsBoard, root, rendered, stored, context};
 }
 
@@ -112,6 +133,91 @@ test('visible pool refresh and repeated open preserve explicit view; navigation 
   f.api.close(); f.api.open();
   assert.equal(f.root.querySelector('#rqScope').value, 'actionable');
   assert.equal(f.root.querySelector('#rqArchive').value, 'active');
+});
+
+function ganttFixture() {
+  const clock = { now: new Date(2026, 10, 10, 14, 30).getTime() };
+  const f = fixture({view: 'gantt'}, clock);
+  const task = (id, due, extra = {}) => ({
+    id, title: id, status: 'todo', myRoles: ['creator'], start: new Date(2026, 10, 8).getTime(),
+    due: f.context.Requirements.dateTimestamp(due), ...extra,
+  });
+  const change = (target) => f.root.dispatchEvent({type: 'change', target});
+  return {
+    ...f, clock, task,
+    html: () => f.root.querySelector('.hb-body').innerHTML,
+    select: (id, value) => change({id, value, dataset: {}, hasAttribute: () => false}),
+    onlyOverdue: () => change({dataset: {}, checked: true, hasAttribute: name => name === 'data-gvod'}),
+    showView: view => {
+      const button = {dataset: {rqView: view}, hasAttribute: name => name === 'data-rq-view', closest: () => null};
+      f.root.dispatchEvent({type: 'click', target: {closest: () => button}});
+    },
+  };
+}
+
+function ganttBars(html) {
+  return Object.fromEntries(Array.from(
+    html.matchAll(/class="gv-bar gv-(\w+)" data-(?:rq-open|gvtid)="([^"]+)"/g),
+    ([, state, id]) => [id, state],
+  ));
+}
+
+test('requirements Gantt uses the local due day for coloring, filtering and the count', () => {
+  const f = ganttFixture();
+  f.context.tasks = [
+    f.task('yesterday', '2026-11-09'),
+    f.task('today', '2026-11-10'),
+    f.task('tomorrow', '2026-11-11'),
+    f.task('undated', null),
+    f.task('reviewing', '2026-11-09', {status: 'done'}),
+    f.task('completed', '2026-11-09', {status: 'done', reviewedAt: f.clock.now}),
+  ];
+  f.api.open();
+  f.select('rqScope', 'all');
+  assert.deepEqual(ganttBars(f.html()), {
+    yesterday: 'over', today: 'run', tomorrow: 'run', undated: 'run', reviewing: 'done', completed: 'done',
+  });
+  f.onlyOverdue();
+  assert.deepEqual(ganttBars(f.html()), {yesterday: 'over'});
+  assert.match(f.html(), /class="gv-count">任务 1 项</);
+
+  f.clock.now = new Date(2026, 10, 10, 23, 59, 59, 999).getTime();
+  f.api.render(true);
+  assert.deepEqual(ganttBars(f.html()), {yesterday: 'over'});
+
+  f.clock.now = new Date(2026, 10, 11).getTime();
+  f.api.render(true);
+  assert.deepEqual(ganttBars(f.html()), {yesterday: 'over', today: 'over'});
+  assert.match(f.html(), /class="gv-count">任务 2 项</);
+});
+
+test('canceled and archived requirements are excluded from overdue Gantt results', () => {
+  const f = ganttFixture();
+  f.context.tasks = [
+    f.task('canceled', '2026-11-09', {status: 'cancel'}),
+    f.task('archived', '2026-11-09', {archivedAt: f.clock.now}),
+  ];
+  f.api.open();
+  f.select('rqArchive', 'archived');
+  f.select('rqScope', 'all');
+  f.showView('gantt');
+  assert.deepEqual(ganttBars(f.html()), {canceled: 'run', archived: 'run'});
+  f.onlyOverdue();
+  assert.deepEqual(ganttBars(f.html()), {});
+  assert.match(f.html(), /class="gv-count">任务 0 项</);
+});
+
+test('shared team Gantt retains timestamp-based overdue behavior without a requirements predicate', () => {
+  const f = ganttFixture();
+  const rows = [{label: 'Owner', tasks: [
+    f.task('earlier', null, {due: new Date(2026, 10, 10, 12).getTime()}),
+    f.task('later', null, {due: new Date(2026, 10, 10, 18).getTime()}),
+    f.task('completed', '2026-11-09', {status: 'done'}),
+  ]}];
+  const options = {year: 2026, month: 10};
+  const { GanttView } = f.context;
+  assert.deepEqual(ganttBars(GanttView.html(rows, options)), {earlier: 'over', later: 'run', completed: 'done'});
+  assert.deepEqual(ganttBars(GanttView.html(rows, {...options, onlyOverdue: true})), {earlier: 'over'});
 });
 
 function moveFixture() {

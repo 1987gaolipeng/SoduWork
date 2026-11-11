@@ -371,10 +371,10 @@ html[data-desk-panel="workspace"] #schPanel .sch-body>*{width:100%;max-width:148
   html[data-desk-panel="workspace"] :is(.dk-sub,.hb-count,.sch-h-sub,.ap-head-copy>small,.np-sub,.sm-sub,.tp-sub,.set-page-sub,.detail-page-sub,.add-page-sub){display:none!important}
 }
 /* Narrow the default sidebar in small windows while preserving explicitly resized widths. */
-@media(max-width:980px){.workspace-shell{grid-template-columns:var(--ws-rail-w,52px) var(--ws-side-w,188px) minmax(0,1fr)}
-  html[data-desk-panel="workspace"] :is(#aiDeskPanel,#historyBoard,#settingsPanel,#shortcutsPanel,#skinManager,#noticePanel,#teamPanel,#schPanel,#skPanel,#capPanel,#appsPanel,#mdPanel,#agPanel,#cloudEnvironmentPanel,#caPanel,#usagePanel,#sessionMemoryPanel,#composePanel,#libraryPanel){left:var(--ws-main-left,248px)!important}
-  html[data-desk-panel="workspace"] #aiDeskPanel{left:var(--ws-main-left,248px)!important}
-  html[data-desk-panel="workspace"] #addMask.workspace-hosted{left:var(--ws-main-left,248px)!important}.ws-brand small{display:none}}
+@media(max-width:980px){
+  html[data-desk-panel="workspace"]{--ws-side-w:188px}
+  .ws-brand small{display:none}
+}
 @media(prefers-reduced-motion:reduce){.ws-nav-item{transition:none}}
 
 
@@ -491,12 +491,6 @@ html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-sub{
   html[data-desk-panel="workspace"] #settingsPanel > .set-page-head .set-page-sub{
     display:none!important;
   }
-}
-
-/* The requirement pool keeps its navigation quiet and neutral so the module
-   accent remains reserved for active states and actions. */
-html[data-desk-panel="workspace"]:is([data-workspace-view="history"],[data-workspace-view="workitems"]) :is(.ws-rail,.ws-side,.ws-stage){
-  background:#F9F9F9;
 }
 
 /*

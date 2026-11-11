@@ -6,7 +6,7 @@
    real mouse clicks (especially inside a folder). */
 .library-panel.show,
 .library-panel.workspace-hosted{display:block;opacity:1;pointer-events:auto;transform:none;}
-html[data-desk-panel="workspace"] #libraryPanel{position:fixed!important;left:var(--ws-main-left,52px)!important;right:10px!important;top:10px!important;bottom:10px!important;width:auto!important;height:auto!important;padding:34px clamp(28px,6vw,150px) 56px!important;overflow:auto!important;background:var(--ws-main-bg,var(--bg-0))!important;border:1px solid color-mix(in srgb,var(--line) 88%,transparent);border-radius:18px!important;box-shadow:0 8px 28px -24px rgba(30,45,70,.28);z-index:20!important;}
+html[data-desk-panel="workspace"] #libraryPanel{position:fixed!important;left:var(--ws-main-left,52px)!important;right:10px!important;width:auto!important;height:auto!important;padding:34px clamp(28px,6vw,150px) 56px!important;overflow:auto!important;background:var(--ws-main-bg,var(--bg-0))!important;border:1px solid color-mix(in srgb,var(--line) 88%,transparent);box-shadow:0 8px 28px -24px rgba(30,45,70,.28);z-index:20!important;}
 .library-page{min-height:100%;}
 .library-head{max-width:1660px;margin:0 auto 25px;display:flex;align-items:center;justify-content:space-between;gap:16px;}
 .library-head h1{margin:0;font-size:31px;line-height:1.15;letter-spacing:-.8px;font-weight:700;color:var(--ink);}

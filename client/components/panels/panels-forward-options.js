@@ -390,7 +390,16 @@ function _fwdSyncConfirm(tid) {
     ? '<label class="fwd-model"><span>本次模型</span><select id="fwdModel"' + (busy ? ' disabled' : '') + '>' +
       _fwpModelOptions(modelState, '跟随底座默认') +
       '</select></label>' : '';
-  decision.innerHTML = modelHtml;
+  let directoryHint = '';
+  if (choice.type === 'direct' || choice.type === 'native') {
+    if (_fwdOptions?.selection?.repoId) {
+      directoryHint = '所选工程的工作目录由执行端确定。';
+    } else if (choice.type === 'native' || (/^local:/.test(choice.id) && !agent?.remote &&
+        (!agent?.locationMode || agent.locationMode === 'local'))) {
+      directoryHint = '新建本机会话时，文件路径相对于独立的会话目录。会话建立后，点击「打开位置」可查看目录。';
+    }
+  }
+  decision.innerHTML = modelHtml + (directoryHint ? '<small class="fwd-directory-hint">' + directoryHint + '</small>' : '');
   window.ForwardSelect?.enhance(decision);
   const modelSelect = document.getElementById('fwdModel');
   if (modelSelect) modelSelect.addEventListener('change', () => {
@@ -420,7 +429,7 @@ function _fwdSetBusy(on, label) {
   const button = document.getElementById('fwdConfirm');
   if (!button) return;
   const controls = document.getElementById('fwdPop')?.querySelectorAll(
-    '#fwdPluginSelect,#fwdAgentSelect,#fwdRepoSel,#fwdModel,#fwdSubmissionMode,#fwdNote,[data-fwp-model],[data-fwp-kind],.fwd-tab,[data-fwp-toggle],[data-fwd-recheck]') || [];
+    '#fwdPluginSelect,#fwdAgentSelect,#fwdRepoSel,#fwdModel,#fwdSubmissionMode,#fwdNote,[data-fwp-model],[data-fwp-kind],.fwd-tab,[data-fwp-toggle],[data-fwd-recheck],[data-material-add],.rq-session-controls') || [];
   controls.forEach(control => {
     if (on) {
       if (control.dataset.fwdWasDisabled == null) control.dataset.fwdWasDisabled = control.disabled ? '1' : '0';
@@ -777,7 +786,9 @@ async function _fwdCarry(tid) {
   if ((task.tags || []).length) pieces.push((task.tags || []).length + ' 个标签');
   if ((task.progress || []).some(item => (item.text || '').trim())) pieces.push('已有进展');
   let count = 0;
-  try { count = ((await SoduWorkAPI.listAttachments(tid)) || []).filter(item => !item.byAgent).length; } catch (error) {}
+  if (!document.querySelector('.fwd-materials')) {
+    try { count = ((await SoduWorkAPI.listAttachments(tid)) || []).filter(item => !item.byAgent).length; } catch (error) {}
+  }
   if (count) pieces.push(count + ' 个附件');
   if (document.getElementById('fwdFoot') !== foot ||
       _fwdTaskId !== carryTask || _fwdTab !== carryTab || _fwdLoadSeq !== carrySeq) return;

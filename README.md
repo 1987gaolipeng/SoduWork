@@ -25,8 +25,6 @@ git clone https://github.com/mdiri-ai/SoduWork && cd SoduWork && python start.py
 [![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](#quick-start)
 [![Discord](https://img.shields.io/badge/chat-Discord-5865F2.svg)](https://discord.gg/AXYNrAYHy)
 
-<img src="docs/assets/hero.gif" alt="SoduWork: from request to sign-off to a reusable plugin" width="880" />
-
 </div>
 
 ---

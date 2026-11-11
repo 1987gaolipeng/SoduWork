@@ -150,6 +150,10 @@
   width:100%;height:100%;
   object-fit:cover;object-position:center top;
   display:block;
+  /* The fixed-height preview box cover-crops taller artwork; fade the bottom edge
+     into the card background so the cut reads as a soft strip, never a sliced row. */
+  -webkit-mask-image:linear-gradient(180deg,#000 70%,transparent 100%);
+  mask-image:linear-gradient(180deg,#000 70%,transparent 100%);
 }
 .skin-preview.shot-fail{background:var(--bg-2)}
 .soduwork-logo-preview img{width:72px;height:72px;object-fit:contain}

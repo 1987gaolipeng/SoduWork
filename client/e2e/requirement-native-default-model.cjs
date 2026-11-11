@@ -72,9 +72,15 @@ if (typeof electron === 'string') {
       window.clone=v=>JSON.parse(JSON.stringify(v));window.petSay=text=>toasts.push(text);
       window.save=()=>{};window.render=()=>{};window.workRoot=()=>'';window._humanErr=(error,fallback)=>error.detail||fallback;
       window.taskFixture={id:'isolated-default-task',title:'开发美食网站',note:'实现首页并提供验收说明',kind:'task',
-        status:'todo',triageStage:'ready',tags:[],workRouting:{requiredAgentCapabilities:[]}};
+        status:'todo',triageStage:'ready',canManageRequirementMaterials:true,tags:[],workRouting:{requiredAgentCapabilities:[]}};
+      window.inputMaterials=[];
       window.SoduWorkAPI={getTask:async()=>clone(taskFixture),getTasksSnapshot:async()=>({online:true,items:[clone(taskFixture)]}),
-        listAttachments:async()=>[],listTeammates:async()=>({mates:[]}),taskStorageKey:()=> 'isolated-default-owner',
+        listAttachments:async()=>clone(inputMaterials),listTeammates:async()=>({mates:[]}),taskStorageKey:()=> 'isolated-default-owner',
+        uploadAttachment:async(id,file,metadata)=>{
+          await new Promise(resolve=>window.finishUpload=resolve);
+          calls.push({kind:'upload',id,name:file.name,purpose:metadata.purpose});
+          inputMaterials.push({id:'material-1',name:file.name,role:'input'});return {ok:true};
+        },
         taskExecutionOptions:async()=>({selection:{taskId:taskFixture.id,repoId:'',projectId:''},task:clone(taskFixture),
           scenario:{key:'office',name:'综合办公'},repos:[],workflows:[],blockedWorkflows:[],
           substrates:[{key:'local:pi',name:'Pi',cli:'pi',available:true,onlineSeats:1,modelPick:true}],models:[],
@@ -105,7 +111,7 @@ if (typeof electron === 'string') {
         _fail:(title,reason)=>{ctx._taskOpenError=title+': '+reason;errors.push(ctx._taskOpenError);},
         reset(){calls.push({kind:'reset',sessionId:ctx._sessionId});ctx._viewEpoch++;ctx._ref='';ctx._sessionId='';ctx._snap=null;ctx._model=null;
           ctx._sessionOptions={};ctx._collabTasks.clear();ctx._activeCollabTaskId='';ctx._collaborationTaskId='';ctx._collaborationTask=null;}};void 0;`);
-    const scripts = ['components/panels/panels-icons.js','core/requirement-session-context.js',
+    const scripts = ['components/panels/panels-icons.js','core/requirements.js','core/requirement-session-context.js',
       'components/panels/chat-work-cards.js','components/panels/chat-work-intent.js','components/panels/chat-task-start.js',
       'components/panels/chat-task-controller.js','components/panels/chat-session-controller.js',
       'components/panels/task-execution-context.js','components/panels/task-execution-client.js',
@@ -133,11 +139,43 @@ if (typeof electron === 'string') {
     assert.equal(await js(`Boolean(document.querySelector('[data-fwd-choice="native"]'))`),false);
     assert.equal(await js(`Boolean(document.querySelector('.rq-session-unavailable'))`),false);
     assert.equal(await js(`calls.some(row=>['open','bind','send'].includes(row.kind))`),false);
+    assert.match(await js(`document.querySelector('.fwd-directory-hint').textContent`), /独立的会话目录/);
+    await js(`const files=new DataTransfer();files.items.add(new File(['id,title'],'issues.csv'));
+      const picker=document.querySelector('.fwd-materials input[type=file]');picker.files=files.files;
+      picker.dispatchEvent(new Event('change'));void 0;`);
+    assert.equal(await js(`document.getElementById('fwdConfirm').disabled`),true);
+    await js('finishUpload();void 0;');
+    await waitDOM(`document.querySelector('[data-material-list]').textContent==='issues.csv'&&!document.getElementById('fwdConfirm').disabled`);
+    assert.deepEqual(await js(`calls.filter(row=>row.kind==='upload')`), [
+      {kind:'upload',id:'isolated-default-task',name:'issues.csv',purpose:'requirement_input'},
+    ]);
+    report.cases.push({name:'local dispatch explains its session folder, waits for upload and lists the attached CSV',ok:true});
     report.assignmentVisual = await js(`(()=>{const e=document.querySelector('#fwdPop'),s=getComputedStyle(e);return {
       rect:JSON.parse(JSON.stringify(e.getBoundingClientRect())),display:s.display,visibility:s.visibility,opacity:s.opacity,
       css:document.styleSheets.length,text:e.innerText};})()`);
     report.cases.push({name:'default model restored; assignment mounts without errors or execution',ok:true,
       state:restored,screenshot:await screenshot('01-default-model-assignment')});
+    await js(`RequirementAssignment.close();taskFixture.projectId='fixture-project';
+      low.history=async()=>({ok:true,chats:[{id:'existing-chat',title:'Existing',projectId:taskFixture.projectId,
+        cwd:'D:/existing-chat',adapterId:'pi',status:'idle'}]});
+      low.runtimes=async()=>({ok:true,runtimes:[{id:'codex',displayName:'Codex',transport:'runner'}]});
+      low.probe=()=>new Promise(resolve=>window.finishProbe=resolve);
+      window.enqueue=NativeChat.enqueueTask;
+      NativeChat.enqueueTask=()=>new Promise(resolve=>window.finishReuse=resolve);
+      RequirementAssignment.open(taskFixture.id);`);
+    await waitDOM(`document.querySelector('.rq-session-choice option[value="existing-chat"]')&&window.finishProbe`);
+    await js(`const select=document.querySelector('.rq-session-choice select');select.value='existing-chat';
+      select.dispatchEvent(new Event('change'));document.querySelector('.rq-session-choice .rq-primary').click();void 0;`);
+    assert.match(await js(`document.querySelector('.rq-session-facts').textContent`), /D:\/existing-chat/);
+    assert.equal(await js(`document.querySelector('.rq-session-choice [data-material-add]').matches(':disabled')`),true);
+    await js(`finishProbe({ok:true,state:'ready'});void 0;`);
+    await frames();
+    await js(`finishReuse({ok:false,reason:'fixture refusal'});void 0;`);
+    await waitDOM(`document.querySelector('.rq-session-status').textContent==='fixture refusal'&&
+      document.querySelector('#fwdAgentSelect option[value="local:codex"]')`);
+    assert.equal(await js(`document.querySelector('.rq-session-choice [data-material-add]').matches(':disabled')`),false);
+    await js(`NativeChat.enqueueTask=enqueue;delete taskFixture.projectId;void 0;`);
+    report.cases.push({name:'reuse shows its exact folder, locks uploads while submitting and restores deferred Agent options after failure',ok:true});
     await js('RequirementAssignment.close();void 0;');
     await click('#nativeControllerRegression');
     const result = await js(`Promise.race([completed,new Promise((_,reject)=>setTimeout(()=>reject(Error('No enqueue completion')),5000))])`);

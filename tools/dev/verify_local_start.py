@@ -26,6 +26,7 @@ from urllib.request import ProxyHandler, Request, build_opener
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from tools.dev.local_environment import stop_child  # noqa: E402
+from tools.dev.start_local import desktop_profile  # noqa: E402
 
 
 HTTP = build_opener(ProxyHandler({}))
@@ -106,7 +107,7 @@ def stop(child, base):
 
 
 def desktop_ready(child, state, previous_pid=None):
-    journal = state / 'desktop-profile/diagnostics/lifecycle.jsonl'
+    journal = desktop_profile(state) / 'diagnostics/lifecycle.jsonl'
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         if child.poll() is not None:
@@ -183,7 +184,7 @@ def verify(*, desktop=False):
         desktop_pid = desktop_ready(child, state) if desktop else None
         if desktop:
             checks.append('native-electron-ready-with-isolated-local-hub-profile')
-            endpoint = json.loads((state / 'desktop-profile/hub-endpoint.json').read_text())
+            endpoint = json.loads((desktop_profile(state) / 'hub-endpoint.json').read_text())
             assert endpoint['hub'] == base
         print(f"Clean startup: {time.monotonic() - begin:.1f}s", flush=True)
         page = request(base, "/", raw=True)
