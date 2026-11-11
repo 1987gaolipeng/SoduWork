@@ -7,6 +7,7 @@ import Landing from './Landing.jsx'
 import { Icon, Loading, ThemeToggle, ToastHost } from './ui.jsx'
 import { getLocale, t } from './i18n.js'
 import { healthReleaseLabel } from './health-version.js'
+import { MAX_STEP, MIN_STEP, readScaleStep, stepScale, subscribeScale } from './enlarge-theme.js'
 
 // Lazy-load management pages so the login introduction does not bundle all plugin, automation, and organization code.
 const Overview = lazy(() => import('./screens/Overview.jsx'))
@@ -93,6 +94,8 @@ export default function App() {
   const healthRef = useRef(null)
   const [collapsedGroups, setCollapsedGroups] = useState({})
   const [profileOpen, setProfileOpen] = useState(false)
+  const [scaleStep, setScaleStepState] = useState(readScaleStep)
+  useEffect(() => subscribeScale(setScaleStepState), [])
   const profileRef = useRef(null)
   const profileTriggerRef = useRef(null)
   const [locale, setLocaleState] = useState(getLocale())
@@ -283,6 +286,20 @@ export default function App() {
               <div><b>{(me && me.displayName) || (me && me.username) || '—'}</b><span>{me && me.isSuper ? tx("超级管理员") : tx("管理员")}</span></div></div>
             <div className="profile-menu-meta"><span>{tx("登录环境")}</span><b>{tx("企业内网")}</b></div>
             <div className="profile-menu-actions"><span>{tx("界面主题")}</span><ThemeToggle /></div>
+            <div className="profile-menu-actions"><span>{tx("字体大小")}</span>
+              <span className="scale-steps">
+                <button type="button" className="icon-btn scale-toggle" disabled={scaleStep >= MAX_STEP}
+                  title={tx("放大界面字体")} aria-label={tx("放大界面字体")}
+                  onClick={() => stepScale(1)}>A+</button>
+                <button type="button" className="icon-btn scale-toggle" disabled={scaleStep <= MIN_STEP}
+                  title={tx("缩小界面字体")} aria-label={tx("缩小界面字体")}
+                  onClick={() => stepScale(-1)}>A-</button>
+                <span className="scale-level" aria-live="polite"
+                  title={tx("当前字号：{0}", [scaleStep > 0 ? `+${scaleStep}` : String(scaleStep)])}>
+                  {scaleStep > 0 ? `+${scaleStep}` : scaleStep}
+                </span>
+              </span>
+            </div>
             <LocaleSettings inline />
             <button type="button" className="profile-logout" onClick={logout}><Icon name="logout" />{t("account.logout")}</button>
           </div>}
