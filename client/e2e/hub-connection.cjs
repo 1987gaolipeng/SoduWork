@@ -87,7 +87,7 @@ async function service(label) {
     if (req.method === 'OPTIONS') return res.end('{}');
     if (req.url.startsWith('/api/v1/client-updates/check?')) return res.end(JSON.stringify({ hasUpdate: false }));
     if (req.url === '/api/v1/usage/events') return res.end(JSON.stringify({ ok: true }));
-    if (req.url.endsWith('/policy')) return res.end(JSON.stringify({ allowSelfRegistration: false }));
+    if (req.url.endsWith('/policy')) return res.end(JSON.stringify({ allowSelfRegistration: true, mailReady: true, passwordMinLength: 8 }));
     if (req.url.endsWith('/enroll') || req.url.endsWith('/login')) {
       if (secrets.has(device)) assert.equal(req.headers['x-device-key'], secrets.get(device));
       else secrets.set(device, req.headers['x-device-key']);
@@ -104,7 +104,8 @@ async function service(label) {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); servers.push(server);
   return { url: 'http://127.0.0.1:' + server.address().port, users, secrets };
 }
-async function open() {
+async function open(surface = 'legacy') {
+  assert.ok(['legacy', 'email'].includes(surface), 'known authentication fixture');
   win = new BrowserWindow({ show: false, width: 920, height: 860, webPreferences: {
     preload: path.join(client, 'preload.js'), contextIsolation: true, nodeIntegration: false, offscreen: true, backgroundThrottling: false } });
   win.webContents.on('preload-error', (_event, _path, error) => { report.preloadError = String(error); });
@@ -148,14 +149,18 @@ app.whenReady().then(async () => {
   const panelStart = desk.indexOf('<div class="panel" id="settingsPanel"');
   const card = desk.slice(panelStart, desk.indexOf('<section class="archive-history-panel"', panelStart));
   assert.ok(panelStart >= 0 && card.includes('settingsPanel'), 'load the real settings panel markup');
-  fs.writeFileSync(path.join(root, 'connection.html'), `<!doctype html><html><meta charset="utf-8">
+  fs.copyFileSync(path.join(client, 'icon.png'), path.join(root, 'icon.png'));
+  for (const surface of ['legacy', 'email']) fs.writeFileSync(path.join(root, surface + '-connection.html'), `<!doctype html><html><meta charset="utf-8">
     <link rel="stylesheet" href="${url('theme/variables.css')}">
     <link rel="stylesheet" href="${url('components/panels/panels-detail.css')}">
     <link rel="stylesheet" href="${url('components/settings/settings.css')}">
     <link rel="stylesheet" href="${url('components/client-auth/client-auth.css')}">
+    ${surface === 'email' ? '<link rel="stylesheet" href="' + url('components/client-auth/account-center.css') + '">' : ''}
     <style>body{font:15px system-ui;margin:20px;background:white}#settingsPanel{position:relative;margin:20px auto}</style>
     <body>${card}
     <script>var cfg={};var User={id:'fixture-renderer'};
+      window.fixtureErrors=[];addEventListener('error',event=>fixtureErrors.push(event.message));
+      addEventListener('unhandledrejection',event=>fixtureErrors.push(String(event.reason)));
       if (!localStorage.getItem('fixture-history')) {
         localStorage.setItem('soduwork_work_hub_environment_v1', 'development');
         localStorage.setItem('soduwork_work_hub_url', 'http://127.0.0.1:18989');
@@ -165,6 +170,7 @@ app.whenReady().then(async () => {
     </script>
     <script src="${url('core/api-work-plugins.js')}"></script><script src="${url('api.js')}"></script>
     <script src="${url('components/settings/settings.js')}"></script>
+    ${surface === 'email' ? ['account-ui.js', 'email-auth.js'].map(file => '<script src="' + url('components/client-auth/' + file) + '"></script>').join('') : ''}
     <script src="${url('components/client-auth/client-auth.js')}"></script></body></html>`);
   await open();
   await until('document.querySelector(".soduwork-auth-retry") && !document.querySelector(".soduwork-auth-retry").hidden');
@@ -184,7 +190,8 @@ app.whenReady().then(async () => {
   assert.equal(await run('document.querySelector(".soduwork-auth-connection").open'), true,
     'local-code legacy login opens the address editor through its own summary');
   assert.equal(requests.length, 0, 'offline product verification never reaches a backend');
-  assert.equal(await run('localStorage.getItem("soduwork_work_device_secret")'), 'fixture-old-local-key');
+  assert.equal(await run('localStorage.getItem("soduwork_work_device_secret")'), null,
+    'retired plaintext device keys are removed from renderer storage even while offline');
   await click('.soduwork-auth-retry');
   await until('!document.querySelector(".soduwork-auth-retry").disabled');
   assert.equal(await run('SoduWorkAPI.hubBase()'), endpoint.PRODUCTION_HUB);
