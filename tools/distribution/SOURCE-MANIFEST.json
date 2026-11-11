@@ -16526,8 +16526,8 @@
     },
     {
       "path": "hub-backend/test_account_privacy.py",
-      "bytes": 75215,
-      "sha256": "e27b946b0891f64f1b3423eea5fae56850afa2b7f1974061999a21a9c79e4caa"
+      "bytes": 76884,
+      "sha256": "d389ab3bf713dd1e3b5f079e4220249414dd717173c321bc7c478010c84b6f2b"
     },
     {
       "path": "hub-backend/test_account_task_isolation.py",

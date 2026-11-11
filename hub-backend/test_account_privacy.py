@@ -1087,9 +1087,33 @@ class AccountPrivacyTests(unittest.IsolatedAsyncioTestCase):
     async def test_legal_documents_available_without_login_and_consent_history(self):
         response=await self.http.get("/api/v1/client-auth/legal-documents")
         self.assertEqual(response.status_code,200,response.text)
-        self.assertEqual(len(response.json()["documents"]),2)
+        payload = response.json()
+        documents = payload["documents"]
+        titles = {
+            "zh-CN": {"terms": "用户协议", "privacy": "隐私政策"},
+            "en-US": {"terms": "Terms of Service", "privacy": "Privacy Policy"},
+            "ja-JP": {"terms": "利用規約", "privacy": "プライバシーポリシー"},
+            "ko-KR": {"terms": "이용약관", "privacy": "개인정보 처리방침"},
+        }
+        expected = {(locale, kind) for locale in titles for kind in ("terms", "privacy")}
+        self.assertEqual(len(documents), len(expected))
+        self.assertEqual({(doc["locale"], doc["key"]) for doc in documents}, expected)
+        self.assertEqual(payload["requiredConsentVersions"], auth_fixture.required_versions())
+        self.assertEqual(set(payload["requiredConsentVersions"]), {"terms", "privacy"})
+        for doc in documents:
+            with self.subTest(locale=doc["locale"], document=doc["key"]):
+                self.assertEqual(doc["title"], titles[doc["locale"]][doc["key"]])
+                self.assertEqual(doc["version"], payload["requiredConsentVersions"][doc["key"]])
+                self.assertEqual(doc["format"], "text")
+                self.assertEqual(doc["defaultLocale"], doc["locale"] == "zh-CN")
+                self.assertTrue(doc["content"].startswith("SoduWork " + doc["title"] + "\n"))
+                self.assertIn(doc["version"], doc["content"])
+                for placeholder in ("{version}", "{operator}", "{contact}"):
+                    self.assertNotIn(placeholder, doc["content"])
         privacy=(await self.call("GET", "/me/privacy")).json()
         self.assertEqual(len(privacy["consents"]),2)
+        self.assertEqual({item["document"]: item["version"] for item in privacy["consents"]},
+                         payload["requiredConsentVersions"])
         self.assertTrue(privacy["scopeSummary"])
         self.assertIn("注销会清理账号资料", privacy["deletionScopeSummary"])
         self.assertNotIn("导出", privacy["deletionScopeSummary"])
