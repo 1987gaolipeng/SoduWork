@@ -64,13 +64,15 @@ xcrun notarytool store-credentials "$profile" --key "$notary_key" \
   --key-id "$SODUWORK_MAC_NOTARY_KEY_ID" --issuer "$SODUWORK_MAC_NOTARY_ISSUER" \
   --keychain "$keychain" --validate
 
-if [[ -n "${GITHUB_ENV:-}" ]]; then
-  {
-    printf 'SODUWORK_MAC_SIGNING_STATE=%s\n' "$state"
-    printf 'SODUWORK_MAC_KEYCHAIN=%s\n' "$keychain"
-    printf 'SODUWORK_MAC_NOTARY_KEYCHAIN=%s\n' "$keychain"
-    printf 'SODUWORK_MAC_NOTARY_PROFILE=%s\n' "$profile"
-  } >> "$GITHUB_ENV"
+# Check the write explicitly: Bash versions differ in errexit handling for a
+# redirected command group, and failed handoff must keep the rollback trap active.
+if ! printf '%s\n' \
+  "SODUWORK_MAC_SIGNING_STATE=$state" \
+  "SODUWORK_MAC_KEYCHAIN=$keychain" \
+  "SODUWORK_MAC_NOTARY_KEYCHAIN=$keychain" \
+  "SODUWORK_MAC_NOTARY_PROFILE=$profile" >> "$GITHUB_ENV"; then
+  printf 'Unable to export macOS signing state to GITHUB_ENV\n' >&2
+  exit 1
 fi
 # Imported material is no longer needed as plaintext files.
 rm -f "$certificate" "$notary_key"

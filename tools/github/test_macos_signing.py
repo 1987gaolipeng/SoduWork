@@ -45,6 +45,12 @@ xcrun() {
   if [[ "DOLLAR{MOCK_NOTARY_FAILURE:-}" == 1 ]]; then return 17; fi
   if [[ "DOLLAR{MOCK_NOTARY_SIGNAL:-}" == 1 ]]; then kill -TERM "DOLLARDOLLAR"; fi
 }
+printf() {
+  if [[ "DOLLAR{MOCK_EXPORT_WRITE_FAILURE:-}" == 1 && "DOLLAR*" == *SODUWORK_MAC_SIGNING_STATE=* ]]; then
+    return 23
+  fi
+  builtin printf "DOLLAR@"
+}
 """.replace("DOLLAR", "$"), encoding="utf-8")
         self.env = {key: value for key, value in os.environ.items()
                     if not key.startswith("SODUWORK_MAC_")}
@@ -71,9 +77,11 @@ xcrun() {
                     Path(self.env["GITHUB_ENV"]).read_text(encoding="utf-8").splitlines())
 
     def test_success_preserves_login_then_restores_and_removes_owned_material(self):
+        Path(self.env["GITHUB_ENV"]).write_text("EXISTING_VARIABLE=retained\n", encoding="utf-8")
         result = self.run_script("prepare-macos-signing.sh")
         self.assertEqual(result.returncode, 0, result.stderr)
         exports = self.exports()
+        self.assertEqual(exports["EXISTING_VARIABLE"], "retained")
         state = Path(exports["SODUWORK_MAC_SIGNING_STATE"])
         current = self.search.read_text(encoding="utf-8").splitlines()
         self.assertEqual(current, self.original + [exports["SODUWORK_MAC_KEYCHAIN"]])
@@ -100,7 +108,17 @@ xcrun() {
 
     def test_failed_environment_export_also_restores_the_search_list(self):
         result = self.run_script("prepare-macos-signing.sh", {"GITHUB_ENV": self.root.as_posix()})
-        self.assertNotEqual(result.returncode, 0)
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Unable to export macOS signing state", result.stderr)
+        self.assertEqual(self.search.read_text(encoding="utf-8").splitlines(), self.original)
+        self.assertEqual(list(self.root.glob("soduwork-macos-signing.*")), [])
+
+    def test_environment_write_error_also_rolls_back_after_redirect_succeeds(self):
+        result = self.run_script("prepare-macos-signing.sh", {"MOCK_EXPORT_WRITE_FAILURE": "1"})
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Unable to export macOS signing state", result.stderr)
+        self.assertTrue(Path(self.env["GITHUB_ENV"]).is_file(), "redirection succeeded before the write failed")
+        self.assertEqual(self.exports(), {})
         self.assertEqual(self.search.read_text(encoding="utf-8").splitlines(), self.original)
         self.assertEqual(list(self.root.glob("soduwork-macos-signing.*")), [])
 
