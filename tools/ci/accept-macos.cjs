@@ -33,11 +33,19 @@ async function unpack(file, format, destination, { execute = run, mountRoot = os
   const executable = await execute('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleExecutable', path.join(app, 'Contents/Info.plist')]);
   assert.equal(path.basename(executable), executable);
   const signature = await verifySignature({ file, app, execute, legacyBaseline });
+  if (process.env.SODUWORK_MAC_RELEASE === '1') {
+    await execute('spctl', ['--assess', '--type', 'execute', app]);
+    await execute('xcrun', ['stapler', 'validate', app]);
+  }
   return { app, binary: path.join(app, 'Contents/MacOS', executable), signature };
 }
 async function main() {
   assert.equal(process.platform, 'darwin');
   const arch = process.argv?.[2];
+  if (process.env.SODUWORK_MAC_RELEASE === '1') {
+    assert.equal(process.env.SODUWORK_MAC_REAL_KEYCHAIN, '1',
+      'Public macOS acceptance requires the real login Keychain');
+  }
   const record = await contract.verify('macos', arch);
   const output = path.join(contract.root, 'release-evidence/macos', arch || ''); await fs.mkdir(output, { recursive: true });
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'soduwork-mac-acceptance-'));
@@ -70,10 +78,13 @@ async function main() {
       assert.equal(await fs.readFile(path.join(profile, 'acceptance-sentinel.txt'), 'utf8'), 'preserve-install-acceptance-data');
       checks.push({ name, ok: true, oldVersion: previous.version, oldSignature });
     }
-    await contract.acceptance('macos', checks, [
-      'Isolated app copies; no Gatekeeper quarantine/notarization or drag-and-drop UI certification.',
-      'Mock Keychain in isolated test profiles; no system Keychain authorization or credential migration certification.',
-    ], arch);
+    const limitations = process.env.SODUWORK_MAC_RELEASE === '1'
+      ? ['No interactive drag-and-drop UI certification.']
+      : [
+        'Isolated app copies; no Gatekeeper quarantine/notarization or drag-and-drop UI certification.',
+        'Mock Keychain in isolated test profiles; no system Keychain authorization or credential migration certification.',
+      ];
+    await contract.acceptance('macos', checks, limitations, arch);
   } finally { await fs.rm(temp, { recursive: true, force: true }); }
 }
 module.exports = { unpack };

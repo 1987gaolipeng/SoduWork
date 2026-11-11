@@ -5,13 +5,14 @@ const os = require('node:os');
 const path = require('node:path');
 const { build } = require('../scripts/build-macos.cjs');
 function fixture(options = {}) {
-  const calls = [], env = { SODUWORK_MACOS_ARM64_PYTHON: '/python/arm64', SODUWORK_MACOS_X64_PYTHON: '/python/x64' };
+  const calls = [], env = { SODUWORK_MACOS_ARM64_PYTHON: '/python/arm64', SODUWORK_MACOS_X64_PYTHON: '/python/x64', ...(options.env || {}) };
   let current;
   return { calls, config: { root: '/fixture', platform: 'darwin', hostArch: 'arm64', env,
     prepare({ python }) { current = python; calls.push(['prepare', python]); return '/fixture/runner'; },
     run(file, args) {
       if (file === '/usr/bin/arch') return '/Apple Tools/bin/' + args.at(-1);
       if (args[0] === '-c') return file.endsWith('x64') ? (options.wrongPython || 'x86_64') : 'arm64';
+      if (file === 'security') return options.identity || '';
       if (file === 'lipo') return options.wrongRunner || (current.endsWith('x64') ? 'x86_64' : 'arm64');
       calls.push([file, ...args]); return '';
     } } };
@@ -96,4 +97,31 @@ test('wrong target Python prevents all packaging; wrong Runner prevents its pack
   assert.throws(() => build(f.config), /Python architecture differs/); assert.equal(f.calls.length, 0);
   f = fixture({ wrongRunner: 'x86_64' });
   assert.throws(() => build(f.config), /Runner architecture differs/); assert.equal(f.calls.length, 1);
+});
+
+test('a configured Developer ID identity is passed to every macOS package', () => {
+  const f = fixture({ identity: 'Developer ID Application: SoduWork (TEAM123)', env: {
+    SODUWORK_MAC_SIGN_IDENTITY: 'Developer ID Application: SoduWork (TEAM123)',
+  } });
+  build(f.config);
+  const packageCalls = f.calls.filter(row => row[0] === process.execPath);
+  assert.equal(packageCalls.length, 2);
+  for (const call of packageCalls) {
+    assert.ok(call.includes('--config.mac.identity=Developer ID Application: SoduWork (TEAM123)'));
+    assert.ok(!call.includes('--config.mac.identity=-'));
+  }
+});
+
+test('a macOS release build refuses to fall back to ad-hoc signing', () => {
+  const f = fixture({ env: { SODUWORK_MAC_RELEASE: '1' } });
+  assert.throws(() => build(f.config), /require SODUWORK_MAC_SIGN_IDENTITY/);
+});
+
+test('a macOS release build refuses to skip notarization', () => {
+  const f = fixture({ identity: 'Developer ID Application: SoduWork (TEAM123)', env: {
+    SODUWORK_MAC_RELEASE: '1',
+    SODUWORK_MAC_SIGN_IDENTITY: 'Developer ID Application: SoduWork (TEAM123)',
+    SODUWORK_MAC_SKIP_NOTARIZE: '1',
+  } });
+  assert.throws(() => build(f.config), /cannot skip notarization/);
 });

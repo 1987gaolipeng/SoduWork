@@ -32,6 +32,7 @@ async function fixture(t, options = {}) {
     }
     if (file === '/usr/libexec/PlistBuddy') return 'SoduWork';
     if (file === 'codesign') return '';
+    if (file === 'spctl' || file === 'xcrun') return '';
     throw Error('Unexpected command: ' + file);
   } };
   return { root, mounts, acceptance, source, calls, attached, config, installed: path.join(acceptance, 'installed') };
@@ -86,4 +87,20 @@ test('partial attach failure still attempts detach and retains both errors if cl
   });
   assert.equal(f.calls.filter(call => call[0] === 'hdiutil' && call[1] === 'detach').length, 1);
   assert.equal(f.calls.some(call => call[0] === 'ditto'), false);
+});
+
+test('public release acceptance verifies Gatekeeper assessment and stapled notarization', async t => {
+  const previous = process.env.SODUWORK_MAC_RELEASE;
+  process.env.SODUWORK_MAC_RELEASE = '1';
+  t.after(() => {
+    if (previous === undefined) delete process.env.SODUWORK_MAC_RELEASE;
+    else process.env.SODUWORK_MAC_RELEASE = previous;
+  });
+  const f = await fixture(t);
+  const app = await unpack('signed.dmg', 'dmg', f.installed, f.config);
+  assert.equal(app.signature.verified, true);
+  assert.deepEqual(f.calls.filter(call => call[0] === 'spctl' || call[0] === 'xcrun'), [
+    ['spctl', '--assess', '--type', 'execute', app.app],
+    ['xcrun', 'stapler', 'validate', app.app],
+  ]);
 });

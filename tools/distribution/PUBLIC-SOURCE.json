@@ -35,7 +35,9 @@
     "windows-installed-check.cjs",
     "installed-client-cdp.cjs",
     "release-transfer.cjs",
-    "test-release-transfer.cjs"
+    "test-release-transfer.cjs",
+    "prepare-macos-signing.sh",
+    "cleanup-macos-signing.sh"
   ],
   "excludedPrefixes": [
     "docs/design/",
