@@ -36,3 +36,44 @@ test('notarization submits a zipped app and staples the original bundle', async 
   ]);
   assert.equal(await fs.stat(appPath).then(() => true), true);
 });
+
+test('installer afterSign forwards bounded and captured keychain command options', async () => {
+  const vm = require('node:vm');
+  const source = await fs.readFile(path.join(__dirname, '../scripts/prepare-installer.cjs'), 'utf8');
+  const calls = [];
+  const module = { exports: {} };
+  const capture = { timeout: 30000, stdio: 'pipe', encoding: 'utf8' };
+  let notaryCalls = 0;
+  vm.runInNewContext(source, {
+    module,
+    __dirname: path.join(__dirname, '../scripts'),
+    process: { env: {} },
+    require(name) {
+      if (name === 'node:child_process') return {
+        execFileSync: (...args) => calls.push(args),
+      };
+      if (name === 'app-builder-lib/out/toolsets/windows') return {};
+      if (name === './verify-runtime.cjs') return { verify() {}, verifyExecutables() {} };
+      if (name === './notarize-macos.cjs') return {
+        notarizeEnabled: () => true,
+        async notarizeApp({ run }) {
+          notaryCalls++;
+          run('security', ['unlock-keychain', 'synthetic.keychain-db'], capture);
+          run('xcrun', ['stapler', 'staple', 'SoduWork.app']);
+        },
+      };
+      return require(name);
+    },
+  });
+  const context = {
+    electronPlatformName: 'darwin', appOutDir: path.join(os.tmpdir(), 'soduwork-notary-hook'),
+    packager: { appInfo: { productFilename: 'SoduWork' } }, arch: 'arm64',
+  };
+  await module.exports(context);
+  assert.equal(notaryCalls, 0, 'afterPack must not notarize unsigned bytes');
+  await module.exports(context);
+  assert.equal(notaryCalls, 1);
+  assert.equal(calls[0][0], 'security');
+  assert.deepEqual({ ...calls[0][2] }, capture);
+  assert.deepEqual({ ...calls[1][2] }, { stdio: 'inherit' });
+});

@@ -54,7 +54,7 @@ async function prepare(context = {}) {
         const afterSign = macAfterPack.has(key);
         if (afterSign && notarizeEnabled(process.env)) {
           await notarizeApp({ appPath, env: process.env,
-            run: (file, args) => execFileSync(file, args, { stdio: 'inherit' }) });
+            run: (file, args, options) => execFileSync(file, args, { stdio: 'inherit', ...options }) });
         }
         macAfterPack.add(key);
       }
