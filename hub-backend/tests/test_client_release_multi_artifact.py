@@ -402,24 +402,32 @@ class PublicBetaDownloadTests(_SqliteIsolated):
                 self.assertEqual((await client.get("/api/v1/download/client/linux/deb")).status_code, 200)
 
 
-class MobileDownloadBrandTests(_SqliteIsolated):
-    async def test_old_package_paths_keep_working_with_current_download_name(self):
+class PublicMobileAvailabilityTests(_SqliteIsolated):
+    async def test_excluded_mobile_artifacts_are_unavailable_without_breaking_desktop(self):
         app = await self._app([])
-        for filename in ("SoduWork-Mobile.apk", "SoduWork-Mobile-1.2.3.apk"):
-            with self.subTest(filename=filename), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for filename in ("SoduWork-Mobile.apk", "SoduWork-Mobile-1.2.3.apk"):
                 (root / filename).write_bytes(b"isolated-apk")
-                with patch.object(download, "_DIR", root):
-                    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
-                                                 base_url="http://test") as client:
-                        info = (await client.get("/api/v1/download/mobile/info")).json()
-                        response = await client.get("/api/v1/download/mobile/android")
-                self.assertTrue(info["available"])
-                self.assertEqual(info["filename"], "SoduWork-Mobile.apk")
-                self.assertEqual(info["artifactFilename"], filename)
-                self.assertEqual(response.status_code, 200)
-                self.assertEqual(response.content, b"isolated-apk")
-                self.assertIn('filename="SoduWork-Mobile.apk"', response.headers["content-disposition"])
+            (root / "SoduWork-1.2.3-Setup.exe").write_bytes(b"isolated-desktop")
+            with patch.object(download, "_DIR", root):
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                             base_url="http://test") as client:
+                    response = await client.get("/api/v1/download/mobile/info")
+                    self.assertEqual(response.status_code, 200)
+                    info = response.json()
+                    self.assertFalse(info["available"])
+                    self.assertEqual(info["version"], "")
+                    self.assertEqual(info["webUrl"], "")
+                    for suffix in ("", "/SoduWork-Mobile-1.2.3.apk"):
+                        response = await client.get("/api/v1/download/mobile/android" + suffix)
+                        self.assertEqual(response.status_code, 404)
+                    desktop = await client.get("/api/v1/download/client/info")
+                    self.assertTrue(desktop.json()["available"])
+                    self.assertEqual(desktop.json()["version"], "1.2.3")
+                    desktop = await client.get("/api/v1/download/client")
+                    self.assertEqual(desktop.status_code, 200)
+                    self.assertEqual(desktop.content, b"isolated-desktop")
 
 
 if __name__ == "__main__":

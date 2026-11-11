@@ -23,7 +23,7 @@ if (!process.versions.electron) {
   const dist = path.resolve(distArg < 0 ? path.join(__dirname, '../dist') : process.argv[distArg + 1])
   app.setPath('userData', path.join(output, 'profile')); app.disableHardwareAcceleration()
   app.on('window-all-closed', () => {}) // Finish owned Hub cleanup before explicitly exiting.
-  const checks = [], errors = [], calls = []
+  const checks = [], errors = [], calls = [], failedRequests = [], canceledRequests = []
   let hub, win, origin, hubLog = '', timer
   const progress = label => fs.appendFileSync(path.join(output, 'progress.log'), label + '\n')
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -90,6 +90,16 @@ if (!process.versions.electron) {
     const isolated = session.fromPartition('service-health-' + Date.now())
     isolated.webRequest.onBeforeRequest((details, done) => done({ cancel: details.url !== 'about:blank' && !details.url.startsWith(origin + '/') && !details.url.startsWith('data:') }))
     isolated.webRequest.onCompleted(details => { if (new URL(details.url).pathname.startsWith('/api/') || details.url.endsWith('/healthz')) calls.push({ path: new URL(details.url).pathname, status: details.statusCode }) })
+    isolated.webRequest.onErrorOccurred(details => {
+      const url = new URL(details.url)
+      if (url.origin !== origin || (!url.pathname.startsWith('/api/') && url.pathname !== '/healthz')) return
+      const request = { path: url.pathname, error: details.error }
+      // Navigation legitimately aborts in-flight reads. Preserve these receipts,
+      // while independently rejecting uncaught Hub exceptions even if the
+      // browser canceled before it received an HTTP error response.
+      if (details.error === 'net::ERR_ABORTED') canceledRequests.push(request)
+      else failedRequests.push(request)
+    })
     win = new BrowserWindow({ show: false, width: 1440, height: 1000,
       webPreferences: { session: isolated, offscreen: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } })
     win.webContents.on('console-message', event => { if (/Uncaught|React error/.test(event.message)) errors.push(event.message) })
@@ -235,9 +245,15 @@ if (!process.versions.electron) {
       clearTimeout(timer)
       try { await stop(); checks.push({ name: 'isolated Hub process and port shut down', ok: true }) }
       catch (error) { checks.push({ name: 'isolated Hub cleanup', ok: false, error: error.message }) }
+      const hubErrors = hubLog.split(/\r?\n/).filter(line => /^(?:ERROR:|Traceback \(most recent call last\):|Fatal Python error:)/.test(line))
+      checks.push({ name: 'production Hub and application requests have no unhandled errors',
+        ok: hubErrors.length === 0 && failedRequests.length === 0,
+        ...(hubErrors.length ? { errors: hubErrors } : {}),
+        ...(failedRequests.length ? { requests: failedRequests } : {}),
+      })
       const ok = checks.every(check => check.ok)
       fs.writeFileSync(path.join(output, 'hub.log'), hubLog)
-      fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify({ ok, platform: process.platform, dist, checks, calls, errors,
+      fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify({ ok, platform: process.platform, dist, checks, calls, errors, failedRequests, canceledRequests,
         boundary: 'Built React, native Chromium pointer/keyboard, production Hub HTTP routes and fresh SQLite; no migrations, background jobs or external services.' }, null, 2))
       console.log(JSON.stringify({ ok, output, passed: checks.filter(check => check.ok).length, failed: checks.filter(check => !check.ok).length }))
       app.exit(ok ? 0 : 1)
