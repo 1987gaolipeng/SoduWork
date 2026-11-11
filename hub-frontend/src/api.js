@@ -99,7 +99,7 @@ async function uploadForm(path, form, timeout = 120000) {
   }, timeout)
   if (res.status === 401) {
     setToken(''); setUser(''); window.dispatchEvent(new Event('soduwork-hub-unauth'))
-    throw new Error('Session expired')
+    throw new Error(tx("登录已失效，请重新登录"))
   }
   if (!res.ok) throw responseError(res, data)
   return data
