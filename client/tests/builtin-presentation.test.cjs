@@ -12,7 +12,8 @@ test('every bundled Skill has display metadata in all shipped locales without ch
     const file = path.join(skillsRoot, dir, 'SKILL.md');
     return fs.existsSync(file) ? [fs.readFileSync(file, 'utf8').match(/^name:\s*["']?([^\r\n"']+)/m)?.[1]].filter(Boolean) : [];
   });
-  assert.ok(names.length > 30);
+  const profile = require('../../tools/distribution/PUBLIC-SOURCE.json');
+  assert.deepEqual([...names].sort(), [...profile.skills].sort());
   for (const locale of ['zh-CN', 'en-US', 'ja-JP', 'ko-KR']) {
     const context = { SoduWorkI18n: { t: (key, fallback) => packs[locale][key] || fallback } };
     vm.runInNewContext(fs.readFileSync(path.join(root, 'core/builtin-skill-presentation.js'), 'utf8'), context);

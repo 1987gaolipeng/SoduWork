@@ -274,6 +274,32 @@ function _agCopy(a, field, fallback = '') {
   return _agMessage(a?.copy?.[field], fallback || a?.[field] || '');
 }
 
+/* Phrase translation for server-composed job copy. The backend stays Chinese;
+ * lines rendered inside <pre data-alog> never pass through the DOM adapter,
+ * so they are translated here, per line, before escaping. */
+function _agTx(value) {
+  const text = String(value == null ? '' : value);
+  let out = text;
+  try { out = window.SoduWorkI18n?.translateText?.(text) || text; } catch (_) { return text; }
+  if (out !== text) return out;
+  /* Trailing parenthetical the exact catalog cannot match
+   * (e.g. "gpt-5（走我自己的额度）" -> model id + translated suffix). */
+  let m = text.match(/^([\s\S]*?)(（[^（）]{1,24}）)$/);
+  if (m && m[1]) {
+    const suffix = _agTx(m[2]);
+    if (suffix !== m[2]) return m[1] + suffix;
+  }
+  /* Known-label prefix split so the label and reason translate independently
+   * (templates whose parameter contains sentence punctuation are skipped by
+   * the catalog, e.g. "OpenCode 安装失败：npm ERR! code 1"). */
+  m = text.match(/^(\s*)([^：:\n]{1,14}：)([\s\S]+)$/);
+  if (m) {
+    const head = _agTx(m[2]);
+    if (head !== m[2]) return m[1] + head + _agTx(m[3]);
+  }
+  return out;
+}
+
 function _agPresentation(a, ak) {
   const aliases = { needmodel: 'nollm', auth: 'unauthed', probeFailed: 'bad' };
   const declared = a.setupState || a.displayState || a.state;
