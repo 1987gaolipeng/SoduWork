@@ -6,6 +6,7 @@
 | --- | --- |
 | 第一次运行桌面和管理端 | [从源码启动](getting-started.md) |
 | 理解目录、开始修改代码 | [开发指南](development.md) |
+| 开发和验证 Android 客户端 | [Android 指南](../mobile/README.zh-CN.md) |
 | 提交代码或补充翻译 | [贡献指南](contributing.zh-CN.md) |
 | 部署给团队使用 | [Docker 自托管](../ops/self-host/README.zh-CN.md) |
 | 编写插件或应用 | [插件开发协议](plugin-authoring.md) |
@@ -15,6 +16,6 @@
 | 查看工程、SDK 与 OAuth 协议 | [桌面](../client/README.zh-CN.md)、[后端](../hub-backend/README.zh-CN.md)、[管理端](../hub-frontend/README.zh-CN.md)、[H5 SDK](../client/sdk/README.zh-CN.md)、[OAuth](../hub-backend/CONNECTOR_OAUTH.md) |
 | 了解自动检查与敏感信息扫描 | [GitHub 配置](../.github/CI.md)、[扫描说明](../tools/security/README.md) |
 
-首页、启动、开发、三个工程说明、插件协议、H5 SDK、OAuth、安全与分发指南均提供中英文配对版本，可在页面顶部切换。运行时技能指令等内容保持原语言。补充其他语言请遵循[翻译约定](development.md#文档与翻译)。
+首页、启动、开发、各工程说明（含 Android）、插件协议、H5 SDK、OAuth、安全、首版范围与分发指南均提供中英文配对版本，可在页面顶部切换。运行时技能指令等内容保持原语言。补充其他语言请遵循[翻译约定](development.md#文档与翻译)。
 
 内部产品设计、架构讨论和验证过程材料不属于公开文档；接口和协议以当前源码及对应测试为准。

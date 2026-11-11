@@ -13,11 +13,12 @@ Follow the [startup guide](getting-started.en.md) and run `sh start.sh --desktop
 | Desktop windows, conversations, settings | `client/main.js`, `client/main/`, `client/core/`, `client/components/` | [Desktop reference](../client/README.md) |
 | APIs, authorization, data, execution | `hub-backend/app/main.py`, `app/api/`, `app/services/`, `runner_main.py` | [Backend reference](../hub-backend/README.md) |
 | Browser administration UI | `hub-frontend/src/main.jsx`, `hub-frontend/src/` | [Frontend reference](../hub-frontend/README.md) |
+| Android client | `mobile/lib/main.dart`, `mobile/lib/`, `mobile/android/` | [Android guide](../mobile/README.md) |
 | Skills, plugins, workflows | `skills/`, `hub-backend/plugins/` | [Plugin protocol](plugin-authoring.en.md) |
 | Local startup and deployment | `start.py`, `tools/dev/`, `ops/self-host/` | [Self-hosting](../ops/self-host/README.md) |
 | Distribution scope and integrity | `tools/distribution/`, `tools/export_source.py` | [Source distribution](open-source.en.md) |
 
-Backend `app/` paths and `runner_main.py` in the table are relative to `hub-backend/`. Each application installs its own dependencies; there is no root npm workspace.
+Backend `app/` paths and `runner_main.py` in the table are relative to `hub-backend/`. Each application installs its own dependencies; Android uses Flutter, and there is no root npm workspace.
 
 ## Management UI
 
