@@ -101,7 +101,11 @@ def _err(status: int, msg: str, upstream: str = "") -> JSONResponse:
     # Keep a machine-readable context error across the proxy boundary while
     # suppressing the raw envelope (which may contain keys or internal URLs).
     diagnostic = (str(upstream or "") + " " + str(msg or ""))[:65536]
-    if status in (400, 413, 422) and local_context_policy.OVERFLOW.search(diagnostic):
+    billing = model_errors.billing_diagnostic(upstream) if status in (400, 402, 403, 429) else None
+    if billing:
+        body["error"] = {"message": model_errors.billing_message(billing),
+                         "type": "soduwork_proxy_error", "status": status, **billing}
+    elif status in (400, 413, 422) and local_context_policy.OVERFLOW.search(diagnostic):
         window = local_context_policy.error_window(diagnostic)
         message = "Context length exceeded."
         if window:
@@ -396,8 +400,9 @@ def _proxy_error(exc, *, responses=False):
     result = _err(exc.status if 400 <= exc.status < 600 else 502,
                   _error_message(exc, responses=responses), exc.body)
     delay = getattr(exc, "retry_after", 0)
-    if isinstance(delay, (int, float)) and 0 < delay <= 86400:
-        payload = json.loads(result.body)
+    payload = json.loads(result.body)
+    if (payload.get("error", {}).get("code") != "upstream_billing_error"
+            and isinstance(delay, (int, float)) and 0 < delay <= 86400):
         payload["error"]["retry_after_ms"] = int(delay * 1000)
         # Preserve the hint for SDKs that retain only error.message.
         payload["error"]["message"] += f" Retry after {delay:g} seconds."
@@ -449,6 +454,13 @@ async def _client_by_bearer(
     return client
 
 
+def _protocol_guidance(conf):
+    return (f"模型「{conf['model']}」使用 Anthropic 或其他非 OpenAI 协议。"
+            "当前企业模型对话通道只支持 OpenAI 兼容接口；请在「我的模型」配置供应商提供的 "
+            "OpenAI 兼容地址和对应密钥，并选择该模型。连接测试成功不代表此通道兼容；"
+            "原配置可保留给支持其协议的 Agent。")
+
+
 @router.get("/config")
 async def proxy_config(
     model: str = "",
@@ -490,8 +502,9 @@ async def proxy_config(
     except client_access.ClientAccessError as exc:
         raise HTTPException(status_code=exc.status, detail=exc.detail()) from exc
     if conf.get("kind") != "openai-compat":
-        return {"ok": False, "path": PROXY_PATH,
-                "reason": f"默认模型「{conf['model']}」不是 OpenAI 兼容接口，AI 对话暂时用不了它"}
+        return {"ok": False, "path": PROXY_PATH, "code": "unsupported_model_protocol",
+                "protocol": conf.get("kind"), "supportedProtocols": ["openai-compat"],
+                "reason": _protocol_guidance(conf)}
     hit = next((m for m in usable if m["name"] == conf["model"]), {})
     image_models = await model_catalog.usable(session, client, "image")
     video_models = await model_catalog.usable(session, client, "video")
@@ -753,7 +766,7 @@ async def chat_completions(
     if not conf:
         return _err(400, "还没有可用的模型：去「我的模型」配一把自己的密钥，或让管理员配好共享模型服务")
     if conf.get("kind") != "openai-compat":
-        return _err(400, f"模型「{conf['model']}」不是 OpenAI 兼容接口，这条通道用不了它")
+        return _err(400, _protocol_guidance(conf))
 
     payload = dict(body)
     payload["model"] = conf["model"]
@@ -817,7 +830,7 @@ async def responses(
     if not conf:
         return _err(400, "还没有可用的模型：去「我的模型」配一把自己的密钥，或让管理员配好共享模型服务")
     if conf.get("kind") != "openai-compat":
-        return _err(400, f"模型「{conf['model']}」不是 OpenAI 兼容接口，这条通道用不了它")
+        return _err(400, _protocol_guidance(conf))
 
     async def _observe(images: list[dict[str, str]], context: str) -> dict:
         try:

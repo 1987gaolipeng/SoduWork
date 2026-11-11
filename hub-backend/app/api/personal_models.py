@@ -183,4 +183,5 @@ async def test_my_model(
         lst.extend(await model_catalog.usable(session, client, modality))
     probe = next((m["name"] for m in lst if m["providerId"] == pid), "")
     r = await _aio.to_thread(model_catalog.probe_sync, p["baseUrl"], key, probe, p["kind"])
-    return {**r, "keyFrom": key_from}
+    return {**r, "keyFrom": key_from, "protocol": p["kind"],
+            "gatewayCompatible": p["kind"] == "openai-compat"}
