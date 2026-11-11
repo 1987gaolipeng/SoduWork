@@ -28,7 +28,7 @@ const sources = [
   '停用这台机器上的 Harness²，新任务不能再派给它；保留内置文件和任务记录。点「启用」可重新启用。',
 ];
 
-function loadI18n(mobileEntry = '') {
+function loadI18n(withoutChineseCatalog = false) {
   const storage = new Map();
   const listeners = new Map();
   const context = vm.createContext({
@@ -41,15 +41,9 @@ function loadI18n(mobileEntry = '') {
     soduWorkAPI: { setLocale() {}, onLocaleChange: callback => listeners.set('ipc-locale', callback) },
   });
   vm.runInContext('window = globalThis; let cfg = {}; const saveCfg = () => {};', context);
-  if (mobileEntry) {
-    const mobile = path.join(root, '../mobile/assets/shared-conversation');
-    const html = fs.readFileSync(path.join(mobile, mobileEntry), 'utf8');
-    const scripts = [...html.matchAll(/<script src="([^"?]+)(?:\?[^"]*)?"/g)].map(match => match[1]);
-    for (const file of scripts.filter(file => file.startsWith('pc/core/locales/') || file === 'pc/core/i18n.js')) {
-      vm.runInContext(fs.readFileSync(path.join(mobile, file), 'utf8'), context, { filename: file });
-    }
-  } else {
+  {
     for (const file of JSON.parse(fs.readFileSync(path.join(root, 'core/locales/manifest.json'), 'utf8'))) {
+      if (withoutChineseCatalog && file.startsWith('zh-CN')) continue;
       vm.runInContext(fs.readFileSync(path.join(root, 'core/locales', file), 'utf8'), context);
     }
     vm.runInContext(fs.readFileSync(path.join(root, 'core/i18n.js'), 'utf8'), context);
@@ -129,10 +123,10 @@ test('Harness2 diagnostic templates preserve unknown provider text and bound nes
   }
 });
 
-test('generated Web and native mobile boot localize Harness2 diagnostics without the Chinese catalog', () => {
+test('public desktop locales localize Harness2 diagnostics with or without the Chinese catalog', () => {
   const text = 'Google Harness² 推演执行方法（提出任务方法改进）失败：模型连接或响应超时；请检查所选模型服务、网络和代理设置后重试。';
-  for (const entry of ['index.html', 'native-index.html']) {
-    const i18n = loadI18n(entry);
+  for (const withoutChineseCatalog of [false, true]) {
+    const i18n = loadI18n(withoutChineseCatalog);
     i18n.setLocale('en-US', { persist: false, broadcast: false });
     assert.equal(i18n.translateText(text), 'Google Harness²: Execution planning failed (Proposing task-specific improvements). The model connection or response timed out. Check the selected model service, network, and proxy settings, then retry.');
     i18n.setLocale('zh-CN', { persist: false, broadcast: false });

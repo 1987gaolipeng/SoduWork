@@ -49,6 +49,8 @@ function create({ owners: OWNERS, getDeps, ownerFor, ownerSession, safeWebUrl,
    * owns the composer view.
    */
   async function composerControl(owner, item, request, attachmentOwner = item) {
+    appOwner.assertCurrent(item);
+    appOwner.assertCurrent(attachmentOwner);
     const composer = item.composer;
     if (!composer || !composer.view || composer.view.webContents.isDestroyed()) {
       return { ok: false, code: 'APP_COMPOSER_GONE', reason: '输入框没有就绪，请稍后重试' };
@@ -141,12 +143,15 @@ function create({ owners: OWNERS, getDeps, ownerFor, ownerSession, safeWebUrl,
     try {
       const pendingLease = ownerSession(owner);
       const lease = pendingLease && typeof pendingLease.then === 'function' ? await pendingLease : pendingLease;
-      if (!lease || owner.closed) return { ok: false, reason: '主窗口已关闭，无法打开即用窗口' };
+      if (!lease || owner.closed) return { ok: false, reason: '主窗口已关闭，无法打开应用窗口' };
       if (embedded && order !== owner.showOrder) return { ok: false, reason: '页面已切换' };
+      packaged?.assertActive();
       const label = String(payload.label || '应用').slice(0, 160);
       const appVersion = String(payload.appVersion || '').trim().slice(0, 80);
       const existing = owner.views.get(id);
-      if (existing && !!existing.embeddedHost === embedded && hostFor(existing) && !hostFor(existing).isDestroyed() && liveContents(owner, existing) &&
+      let sameAccount = true;
+      try { if (existing?.appBridge) appOwner.assertCurrent(existing); } catch (_) { sameAccount = false; }
+      if (sameAccount && existing && !!existing.embeddedHost === embedded && hostFor(existing) && !hostFor(existing).isDestroyed() && liveContents(owner, existing) &&
           existing.requested === target && existing.appVersion === appVersion && (!packaged || (existing.packageRevision === packaged.revision && existing.packagePartition === packaged.partition)) && JSON.stringify(existing.appBridge) === JSON.stringify(requestedBridge)) {
         if (embedded) {
           owner.active = id; embeddedBounds(owner, existing, payload.bounds || {}); syncVisibility(owner);
@@ -381,6 +386,7 @@ function create({ owners: OWNERS, getDeps, ownerFor, ownerSession, safeWebUrl,
       view.setBackgroundColor('#00000000'); // Keep the view transparent outside its card surface.
       view.setVisible(!item.embeddedHost);
       hostFor(item).contentView.addChildView(view);
+      if (item.appBridge) appOwner.associate(view.webContents, item);
       item.composer = { view, loaded: false, dock: 'right', collapsed: false, expanded: false, hover: false, width: 0, railY: .5, railArrival: false, sessionId: '', theme: 'light' };
       layoutComposer(owner, item);
       item.composer.launching = view.webContents.loadFile(COMPOSER_LAUNCHER).catch(() => {});

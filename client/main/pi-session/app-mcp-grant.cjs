@@ -30,6 +30,7 @@ function mapResult(value, fn) { return value?.then ? value.then(fn) : fn(value);
 function context(sender, expectedPluginId, expectedSettings, app, deps) {
   if (!expectedPluginId) return null;
   const preview = require('../work-preview');
+  require('../work-preview-app-owner.cjs').assertSender(sender);
   let current;
   try { current = preview.appContextFor(sender); }
   catch (error) { if (!app) throw error; } // Stored MCP authority survives a stale page.

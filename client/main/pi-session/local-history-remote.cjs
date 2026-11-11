@@ -9,6 +9,16 @@ function create({ app, session, history, action, identityOf, accountHistory }) {
     return value;
   };
   function metadata(row, identity) {
+    let taskProjectionId = '';
+    // A downloaded transcript is another view of the same task, not another
+    // conversation. Only link copies from the current Hub/account; local
+    // history itself remains readable without granting source execution.
+    const account = require('../device-auth-request').accountId(identity);
+    if (row.cached && row.taskId && row.source?.id && account && row.source.account === account) {
+      try {
+        if (new URL(row.source.hub).origin === new URL(identity.hub).origin) taskProjectionId = String(row.taskId);
+      } catch (_) { /* Unverified provenance stays an independent local copy. */ }
+    }
     let source = null;
     if (!row.cached && !row.deleted) {
       try {
@@ -17,11 +27,14 @@ function create({ app, session, history, action, identityOf, accountHistory }) {
         source = accountHistory?.sourceProjection(row.id, identity);
       } catch (_) { /* Reading shared history never grants source execution. */ }
     }
-    return { id: row.id, sourceSessionId: row.id,
+    const messageCount = Number.isSafeInteger(row.count) ? row.count : undefined;
+    const state = row.status === 'idle' ? 'idle' : row.state || 'idle';
+    const empty = messageCount === 0 && !taskProjectionId && state === 'idle';
+    return { id: row.id, sourceSessionId: row.id, taskProjectionId, messageCount,
     sourceClientId: identity.clientId, sourceDeviceName: identity.name || '',
-    title: row.title || '', state: row.state || 'idle', archived: row.archived === true,
+    title: row.title || '', state, archived: row.archived === true,
     deleted: row.deleted === true, revision: row.revision || 0,
-    canContinue: !!source && source.canContinue !== false,
+    canContinue: !empty && !!source && source.canContinue !== false,
     continuationId: source?.id || '', continuationRevision: source?.revision || 0,
     localReplica: true, updatedAt: new Date(Number(row.replicaUpdatedAt) || 0).toISOString(),
     createdAt: row.createdAt || '' };

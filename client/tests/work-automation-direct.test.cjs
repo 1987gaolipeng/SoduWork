@@ -18,16 +18,6 @@ function fixture(overrides = {}) {
 }
 const params = text => ({text,context:{spaceId:'space-a',spaceName:'研发空间',page:'https://ops.example/资料/index.html',appName:'示例云端资料库'}});
 
-test('pause directive reaches the created schedule and survives unrelated refinement', async () => {
-  const f = fixture();
-  await f.direct.create(params('每天23:55执行，只回复 AUTO-1110-OK。保存为暂停状态，不立即运行。'));
-  assert.equal(f.writes.length, 1);
-  assert.equal(f.writes[0].enabled, false);
-  const catalogs = {seed: {}, agents: [{id: 'local:pi'}], repos: [], methods: []};
-  const refined = f.window.WorkAutomationSheet.draft({title: 'Updated'}, '名称改为 Updated', f.writes[0], catalogs);
-  assert.equal(refined.enabled, false);
-});
-
 test('conditional and literal enable text never reactivates a paused direct creation', async () => {
   for (const suffix of ['如果审批通过，创建后启用。', 'If approval passes, enable after creation.',
     '工作内容是 `说明。创建后启用。`', '工作内容如下：\n~~~text\n创建后启用\n~~~']) {

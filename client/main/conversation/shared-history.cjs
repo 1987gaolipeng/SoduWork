@@ -53,6 +53,45 @@ function create({ app, session, store = require('./replica-store.cjs').createWor
     }
     return store.lifecycle(row.id, action, { account: accountId(identity), hub: identity?.hub, device: identity?.clientId });
   }
+  async function remoteLifecycle(rows, identity = require('./requirement-context').cachedIdentity(app)) {
+    const remote = rows.filter(row => row.cloud || row.remoteProjection || row.accountProjection);
+    if (!remote.length) return [];
+    const owner = accountId(identity);
+    if (!owner || !identity?.hub) return [];
+    let hub;
+    try { hub = new URL(identity.hub).origin; } catch (_) { return []; }
+    const bySource = new Map(), byTask = new Map(), states = new Map();
+    const add = (index, id, row) => {
+      if (!id) return;
+      if (!index.has(id)) index.set(id, new Set());
+      index.get(id).add(row);
+    };
+    for (const row of remote) {
+      for (const id of [row.id, ...(row.historyAliasIds || [])]) add(bySource, id, row);
+      add(byTask, row.taskId, row);
+    }
+    const sourceIds = [...bySource.keys()], taskIds = [...byTask.keys()];
+    for (let offset = 0; offset < Math.max(sourceIds.length, taskIds.length); offset += 200) {
+      const copies = await store.remoteLifecycleRows({ account: owner,
+        sourceIds: sourceIds.slice(offset, offset + 200), taskIds: taskIds.slice(offset, offset + 200) });
+      for (const copy of copies) {
+        try { if (new URL(copy.source.hub).origin !== hub) continue; }
+        catch (_) { continue; }
+        // Deleted copies are excluded by the store: deleting a local transcript
+        // must not hide its cloud original. The latest explicit intent wins.
+        const matched = new Set([...(bySource.get(copy.source.id) || []), ...(byTask.get(copy.taskId) || [])]);
+        for (const row of matched) {
+          const previous = states.get(row.id);
+          if (!previous || copy.replicaRevision > previous.lifecycleRevision ||
+              (copy.replicaRevision === previous.lifecycleRevision && copy.revision >= previous.revision)) {
+            states.set(row.id, { id: row.id, archived: copy.archived, deleted: false,
+              lifecycleRevision: copy.replicaRevision, revision: copy.revision });
+          }
+        }
+      }
+    }
+    return [...states.values()];
+  }
   async function read(id, options = {}) {
     const row = await resolve(id);
     if (!row || row.deleted) throw Error('这条会话已经不存在了');
@@ -116,7 +155,9 @@ function create({ app, session, store = require('./replica-store.cjs').createWor
     const remote = original.cloud || original.accountProjection;
     const id = remote ? 'copy-' + require('node:crypto').createHash('sha256').update(
       JSON.stringify([identity?.hub, accountId(identity), original.id])).digest('hex') : original.id;
-    const [row] = await register([{ ...original, id, cloud: false, accountProjection: false,
+    const displayed = remote ? original : require('./acceptance-session').projectHistory(app, original);
+    const [row] = await register([{ ...displayed, id, cloud: false, accountProjection: false,
+      accountConversation: false,
       remoteProjection: false, cached: !!remote, source: remote ? { hub: identity?.hub, id: original.id, account: accountId(identity) } : null,
       creator: { account: accountId(identity), hub: identity?.hub }, historyAliasIds: remote ? [] : original.historyAliasIds || [] }]);
     if (row.deleted || !remote) return;
@@ -182,7 +223,7 @@ function create({ app, session, store = require('./replica-store.cjs').createWor
     await refreshing;
     return { ...await store.directory(after, limit), workspace: await store.workspace() };
   }
-  return { resolve, read, open, register, projectRows, lifecycle, capture, observe, store, directory, preserveLegacyOutbox,
+  return { resolve, read, open, register, projectRows, lifecycle, remoteLifecycle, capture, observe, store, directory, preserveLegacyOutbox,
     list: options => store.list(options),
     page: options => store.page(options),
     async indexedRows(archived, limit) {

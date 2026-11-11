@@ -413,6 +413,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
           typeof session.loadSdk === 'function') {
         Promise.resolve(session.loadSdk(app)).catch(() => {});
       }
+      appRequest?.assertActive();
       // Local history can be read without reconnecting the Hub or resuming an
       // old account's execution process. Remote originals follow the usual path.
       // A downloaded source locator is not a native identity. Account and cloud
@@ -425,10 +426,10 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         const captured = historyAccess.actor(app);
         if (local) {
           if (local.deleted) return { ok: false, notFound: true, reason: '这条会话已经不存在了' };
-          const old = session.findBySessionId(opts.chatId);
+          const old = session.findBySessionId(local.id);
           if (old?.inFlight?.()) return { ok: false, reason: '这条会话还在执行，完成或停止后再操作' };
           if (old && await old.close() === false) return { ok: false, reason: '会话仍在关闭，请稍后重试' };
-          const projection = await _sharedHistory.open(opts.chatId);
+          const projection = await _sharedHistory.open(local.id);
           if (projection) {
             const handle = session.attachView(projection);
             if (captured.identity && captured.owner) _sessionOwners?.bind(handle, captured.identity);
@@ -440,19 +441,25 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         }
         return { ok: false, notFound: true, reason: '这条会话已经不存在了' };
       };
+      let nativeLocal = false;
       if (local) {
         let executable = true;
         try { historyAccess.assertOwner(app, opts.chatId, historyAccess.actor(app), local); }
         catch (_) { executable = false; }
-        if (local.deleted || local.cached || !executable) return openLocalHistory();
+        if (local.deleted || local.cached || !executable) return await openLocalHistory();
+        // Canonical local identity wins over stale renderer projection flags.
+        nativeLocal = true;
+        Object.assign(opts, { adapterId: local.adapterId || 'pi',
+          accountConversation: false, accountProjection: false });
       }
       let identity;
       try { identity = await identityOf(app); }
       catch (error) {
-        if (local && !automationContext && !expectedIdentity) return openLocalHistory();
+        if (local && !automationContext && !expectedIdentity) return await openLocalHistory();
         throw error;
       }
-      if (!identity && local && !automationContext && !expectedIdentity) return openLocalHistory();
+      if (!identity && local && !automationContext && !expectedIdentity) return await openLocalHistory();
+      appRequest?.assertActive();
       if (!identity) return { ok: false, reason: '这台电脑还没连上 SoduWork 后台（先打开桌宠登录一次）' };
       historyAccess.assertCurrent(app, requestActor, identity);
       const historyActor = historyAccess.actor(app, identity);

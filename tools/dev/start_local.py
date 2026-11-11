@@ -163,8 +163,8 @@ def assert_available(host: str, port: int) -> None:
         if os.name == "nt":
             probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         else:
-            # Match the server's POSIX bind semantics after a clean shutdown:
-            # TIME_WAIT connections must not be mistaken for a live listener.
+            # Match Uvicorn's POSIX listener: closed connections in TIME_WAIT
+            # must not block restart, while a live listener still rejects bind.
             probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             probe.bind((host, port))

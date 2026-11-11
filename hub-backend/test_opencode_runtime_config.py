@@ -139,6 +139,37 @@ class OpenCodeRuntimeConfigTests(unittest.TestCase):
         self.assertEqual(self.personal.read_bytes(), b"invalid personal config: PRIVATE-FIXTURE")
         self.assertNotIn("agent", json.loads(self.environment["OPENCODE_CONFIG_CONTENT"]))
 
+    def test_harness_native_executor_preserves_model_scope_and_private_configuration(self):
+        from copy import deepcopy
+        config = {"llm": {"base": "http://127.0.0.1/v1", "key": "fixture",
+                          "model": "company/private-route"}, "networkAllowed": False}
+        original = deepcopy(config)
+        inherited = {**self.environment, harness2_runtime.EXECUTOR_ENV: "untrusted-cli"}
+        with (patch.dict(os.environ, self.environment),
+              patch.object(local_base, "_data_root", return_value=str(self.root / "runner")),
+              patch.object(local_base, "_store_dir", return_value=str(self.root / "session"))):
+            env = harness2_runtime.environment(inherited, config, runtime_ref="native-session")
+            repeated = harness2_runtime.environment(env, config, runtime_ref="native-session")
+        self.assertEqual(env, repeated)
+        self.assertEqual(config, original)
+        self.assertEqual(json.loads(env[harness2_runtime.MODEL_ENV]), config["llm"])
+        self.assertEqual(env[harness2_runtime.ROOT_ENV], str(self.root / "session" / "harness2"))
+        self.assertEqual(env[harness2_runtime.NETWORK_ENV], "0")
+        self.assertNotIn(harness2_runtime.EXECUTOR_ENV, env)
+        self.assertFalse(any(key.startswith("OPENCODE_") for key in env))
+        self.assertEqual(env["XDG_CONFIG_HOME"], self.environment["XDG_CONFIG_HOME"])
+        self.assertEqual(env["SODUWORK_DATA_ROOT"], str(self.root / "runner"))
+        self.assertEqual(inherited[harness2_runtime.EXECUTOR_ENV], "untrusted-cli")
+        self.assertEqual(self.personal.read_bytes(), b"invalid personal config: PRIVATE-FIXTURE")
+        identity = harness2_runtime.EXECUTOR_PROMPT
+        self.assertIn("Google Harness²", identity)
+        self.assertIn("not a foundation-model identity", identity)
+        self.assertIn("internal model", identity)
+        self.assertIn("No other agent CLI executes this turn", identity)
+        self.assertNotIn("private-route", identity)
+        self.assertNotIn("apiKey", identity)
+        self.assertNotIn("agent", json.loads(self.environment["OPENCODE_CONFIG_CONTENT"]))
+
     def test_source_bridge_redacts_opencode_invalid_config_diagnostic(self):
         diagnostic = "ConfigJsonError: EndOfFileExpected PRIVATE-FIXTURE apiKey=fixture-secret"
         peer = "import sys; print(" + repr(diagnostic) + ",file=sys.stderr)"

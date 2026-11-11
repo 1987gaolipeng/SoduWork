@@ -101,6 +101,7 @@ async function prepare(deps, raw) {
   read.pluginId=pluginId;read.scope=scope;
   pages.set(origin, read);
   return { url: origin + '/' + initial.row.source.entry, partition, revision: initial.revision,
+    assertActive: () => { if (ownerScope(deps.app, pluginId, origin) !== scope) throw Error('Application account changed'); },
     bridge: { appId: 'plugin:' + pluginId, contributionId, origin, version: 1,
       capabilities: initial.row.source.bridge?.capabilities || [] } };
 }

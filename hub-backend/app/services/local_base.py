@@ -901,9 +901,7 @@ def _prepare_codex_home(env: dict) -> None:
 
 
 def _env_for(prof: dict, cfg: dict, runtime_ref: str = "") -> dict:
-    """Prepare subprocess configuration, injecting OpenCode settings and secrets through
-    environment variables rather than encrypted configuration files.
-    """
+    """Build the child-process environment; inject OpenCode model configuration and credentials through environment variables instead of files."""
     env = dict(os.environ)
     from . import runtime_images
     env.pop(runtime_images.ENV_KEY, None)

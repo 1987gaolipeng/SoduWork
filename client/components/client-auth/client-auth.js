@@ -383,6 +383,7 @@
 
   function activate(user, quota) {
     updateIdentity(user, quota);
+    if (!currentQuota?.exceeded) dismissedQuotaNotice = '';
     void global.LegalUpdates?.refresh();
     if (emailView) emailView.invalidate();
     document.documentElement.classList.remove('soduwork-auth-pending');

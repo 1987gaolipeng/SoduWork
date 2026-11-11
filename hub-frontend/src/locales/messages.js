@@ -1,4 +1,7 @@
 import automationTemplates from './automation-templates.js'
+import quotaManagement from './quota-management.js'
+import accessCatalog from './access-catalog.js'
+import operationsOverview from './operations-overview.js'
 import legalDocuments from './legal-documents.js'
 import capabilityCatalog from './capability-catalog.js'
 import governanceOverview from './governance-overview.js'

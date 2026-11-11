@@ -166,6 +166,11 @@
   padding:9px 14px;font-size:14px;line-height:1.7;color:var(--ink);white-space:pre-wrap;word-break:break-word}
 .nmsg.ai{align-self:stretch;width:100%}
 
+/* Message body */
+/* Do not use white-space:pre-wrap here. The former inline-span renderer needed it for line breaks,
+   but marked emits real HTML (<p>/<ol>/<li>...) with newlines between tags. pre-wrap renders those
+   newlines as extra blank lines between paragraphs and list items; adjusting margins cannot fix it. */
+
 .nmsg.user.long{width:min(610px,88%);max-width:88%}
 .nmsg.user.long .nbubble{width:100%;box-sizing:border-box}
 .nuser-long summary{list-style:none;display:flex;align-items:flex-start;gap:12px;cursor:pointer;user-select:none}

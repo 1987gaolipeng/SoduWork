@@ -112,7 +112,10 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
     records.set(id, record); return record;
   }
   function read(id) {
-    return readReceipt(id) || taskViews.get(id) || remoteRecords.get(id) || null;
+    const record = readReceipt(id) || taskViews.get(id) || remoteRecords.get(id) || null;
+    const review = record && [...remoteRecords.values()].find(row => row.taskId === record.taskId &&
+      row.owner === record.owner && row.conversationReview);
+    return review ? { ...record, title: review.title, conversationReview: review.conversationReview } : record;
   }
   function save(record) {
     const id = record.sessionId, previous = records.get(id);

@@ -148,8 +148,12 @@ window.WorkspaceHost={open:(view,payload={})=>{
   // replay directories must remain isolated across the actual browser routes.
   WorkspaceShell.setActiveChat('saved-7');
   openPiChatEntry();
-  chk('普通新会话延续本地工作目录并标注来源',routes.at(-1).payload.cwd==='C:\\workdir'&&
-    routes.at(-1).payload.workspaceSource==='last-session');
+  /* Main commit fb2004f2 restores directory continuation; conversation and
+     project identity still require an explicit entry and must not leak. */
+  chk('普通新会话沿用当前本地会话工作目录并标明来源',
+    routes.at(-1).payload.cwd==='C:\\workdir'&&routes.at(-1).payload.workspaceSource==='last-session');
+  chk('新会话输入框展示沿用的工作目录',await waitFor(()=>
+    document.getElementById('cpWorkspaceName').textContent==='workdir（沿用上一会话）'));
   chk('桌宠新对话入口也明确新建',routes.at(-1).payload.newSession===true&&!routes.at(-1).payload.chatId);
   openPiChatEntry('saved-8');
   chk('桌宠历史入口仍只续接指定会话',routes.at(-1).payload.chatId==='saved-8'&&!routes.at(-1).payload.newSession);

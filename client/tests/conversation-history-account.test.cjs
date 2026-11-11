@@ -26,7 +26,7 @@ function fixture(t) {
 }
 test('local history remains visible across accounts while execution ownership stays strict', t => {
   const f = fixture(t), id = 'pre-rename';
-  const previous = crypto.createHash('sha256').update('sodo-account\0one').digest('hex').slice(0, 32);
+  const previous = crypto.createHash('sha256').update('soduwork-account\0one').digest('hex').slice(0, 32);
   f.write('session-memory-bindings', id, { owner: previous, ids: [] });
   const rows = [{ id, workOwner: previous }];
   assert.deepEqual(access.visible(f.app, rows).map(row => row.id), [id]);

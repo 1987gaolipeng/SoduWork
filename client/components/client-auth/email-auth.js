@@ -1,5 +1,27 @@
 (function (global) {
   'use strict';
+  function normalizeSingleLineInput(input) {
+    const raw = String(input.value || '');
+    const clean = raw.replace(/[\r\n]/g, '');
+    if (clean === raw) return;
+    const start = typeof input.selectionStart === 'number' ? input.selectionStart : raw.length;
+    const end = typeof input.selectionEnd === 'number' ? input.selectionEnd : start;
+    const removedBeforeStart = (raw.slice(0, start).match(/[\r\n]/g) || []).length;
+    const removedBeforeEnd = (raw.slice(0, end).match(/[\r\n]/g) || []).length;
+    input.value = clean;
+    try {
+      input.setSelectionRange(
+        Math.max(0, Math.min(clean.length, start - removedBeforeStart)),
+        Math.max(0, Math.min(clean.length, end - removedBeforeEnd))
+      );
+    } catch (_) { /* Some native input implementations do not expose selection APIs. */ }
+  }
+  function bindSingleLineInput(input) {
+    input.addEventListener('beforeinput', event => {
+      if (event.inputType === 'insertLineBreak' || event.inputType === 'insertParagraph') event.preventDefault();
+    });
+    input.addEventListener('input', () => normalizeSingleLineInput(input));
+  }
   function mount(gate, hooks) {
     const ui = global.AccountUI;
     // Established accounts may use a username, employee number, or email.
@@ -9,7 +31,7 @@
     let policyError = false;
     let legalLocales = {};
     let challenge = null, cooldownUntil = 0, clock = null, pendingPasswordMode = false;
-    let delivery = null, deliveryTimer = null, disposed = false;
+    let delivery = null, deliveryTimer = null, disposed = false, statusSource = '';
     gate.classList.add('ac-auth');
     gate.innerHTML = '<main class="soduwork-auth-card ac-auth-card">' +
       '<header class="ac-brand"><img src="icon.png" alt="" width="32" height="32"><b>SoduWork</b><span>让工作更简单</span></header>' +
@@ -115,11 +137,11 @@
     function refreshAvailability() {
       const unavailable = policyError || !!policy && !canMail();
       gate.querySelector('[data-mail-availability]').hidden = !unavailable;
-      gate.querySelector('[data-mail-message]').textContent = policyError
+      gate.querySelector('[data-mail-message]').textContent = tx(policyError
         ? '暂时无法读取邮件服务状态，请重新检查。'
         : !unavailable ? '' : !supportsEmail()
         ? '当前服务版本不支持邮箱验证，请更新服务或使用密码登录。'
-        : '管理员尚未配置或启用邮件服务，请联系管理员，或使用密码登录。';
+        : '管理员尚未配置或启用邮件服务，请联系管理员，或使用密码登录。');
     }
     function identityScope() {
       const bridge = api(), identity = bridge?.clientAuthSnapshot?.() || {};
@@ -178,7 +200,7 @@
     }
     function refreshCooldown() {
       const seconds = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000));
-      send.textContent = sending ? '正在发送…' : seconds ? seconds + ' 秒后重发' : '获取验证码';
+      send.textContent = sending ? tx('正在发送…') : seconds ? seconds + ' ' + tx('秒后重发') : tx('获取验证码');
       send.disabled = busy || sending || seconds > 0 || !canMail();
       if (!seconds && clock) { clearInterval(clock); clock = null; }
     }
@@ -188,7 +210,7 @@
       if (!busy && pendingPasswordMode) { pendingPasswordMode = false; changeMode('password'); return; }
       form.querySelectorAll('input,button').forEach(el => { el.disabled = busy; });
       gate.querySelectorAll('[data-auth-mode]').forEach(el => { el.disabled = busy || (el.dataset.authMode === 'register' && policy?.allowSelfRegistration === false); });
-      submit.querySelector('span').textContent = label || (busy ? '正在处理…' : actionLabel());
+      submit.querySelector('span').textContent = tx(label || (busy ? '正在处理…' : actionLabel()));
       submit.classList.toggle('is-busy', busy); refreshCooldown();
     }
     function changeMode(next) {
@@ -196,33 +218,34 @@
       stopDelivery();
       revision++; mode = next; challenge = null; code.value = ''; password.value = ''; confirm.value = '';
       password.type = 'password'; consent.checked = false;
-      gate.querySelector('[data-password-toggle]').textContent = '显示';
+      gate.querySelector('[data-password-toggle]').textContent = tx('显示');
       const login = mode === 'emailCode' || mode === 'password';
       gate.querySelector('.ac-auth-tabs').hidden = !login;
       gate.querySelector('.ac-auth-links').hidden = !login;
       gate.querySelector('.ac-auth-back').hidden = login;
-      gate.querySelector('h1').textContent = mode === 'register' ? '创建你的账号' : mode === 'resetPassword' ? '找回密码' : '欢迎回来';
-      gate.querySelector('.ac-auth-intro').textContent = mode === 'register' ? '验证邮箱后即可使用，无需等待审核' : mode === 'resetPassword' ? '验证邮箱后，设置新的登录密码' : mode === 'emailCode' ? '使用邮箱验证码登录' : '使用账号和密码登录';
+      gate.querySelector('h1').textContent = tx(modeCopy().title);
+      gate.querySelector('.ac-auth-intro').textContent = tx(modeCopy().intro);
       gate.querySelector('[data-auth-code]').hidden = mode === 'password';
       gate.querySelector('[data-auth-password]').hidden = mode === 'emailCode';
       gate.querySelector('[data-auth-confirm]').hidden = !['register', 'resetPassword'].includes(mode);
       gate.querySelector('[data-auth-consent]').hidden = mode !== 'register';
-      gate.querySelector('.ac-password-label').textContent = mode === 'password' ? '密码' : '设置密码';
+      gate.querySelector('.ac-password-label').textContent = tx(mode === 'password' ? '密码' : '设置密码');
       const passwordLogin = mode === 'password';
-      gate.querySelector('.ac-account-label').textContent = passwordLogin ? '账号' : '邮箱';
+      gate.querySelector('.ac-account-label').textContent = tx(passwordLogin ? '账号' : '邮箱');
       account.type = passwordLogin ? 'text' : 'email';
       account.maxLength = 254;
-      account.placeholder = passwordLogin ? '输入账号' : 'name@example.com';
+      account.placeholder = tx(passwordLogin ? '输入账号' : 'name@example.com');
       password.autocomplete = mode === 'password' ? 'current-password' : 'new-password';
       gate.querySelectorAll('[role="tab"]').forEach(el => el.setAttribute('aria-selected', String(el.dataset.authMode === mode)));
       setStatus(''); refreshAvailability();
-      setBusy(false); account.focus();
+      setBusy(false); refreshLocale(); account.focus();
     }
+    bindSingleLineInput(account);
     account.addEventListener('input', () => { stopDelivery(); revision++; challenge = null; code.value = ''; setStatus(''); });
     code.addEventListener('input', () => { code.value = code.value.replace(/\D/g, '').slice(0, 6); });
     consent.addEventListener('change', () => {
       if (mode === 'register' && consent.checked && policy?.requiredConsentVersions?.terms && policy?.requiredConsentVersions?.privacy &&
-          status.classList.contains('is-error') && status.textContent === consentRequiredMessage) setStatus('');
+          status.classList.contains('is-error') && statusSource === consentRequiredMessage) setStatus('');
     });
     gate.querySelectorAll('[data-auth-mode]').forEach(button => button.addEventListener('click', () => changeMode(button.dataset.authMode)));
     gate.querySelectorAll('[data-legal]').forEach(button => button.addEventListener('click', () => ui.legal(gate, policy?.legalDocuments || [], button.dataset.legal, {

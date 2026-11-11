@@ -192,19 +192,13 @@ test('resume-cwd keeps the archive directory despite stale overrides and preserv
   require('node:fs').rmSync(base, { recursive: true, force: true });
 });
 
-test('聊天条「换」按钮链路：入口、绑定与重开参数齐备', () => {
+test('conversation composer omits the removed workspace-switch action and its private handler', () => {
   const composer = read('components/panels/work-composer.js');
-  assert.match(composer, /class="wc-wd-pick" id="nchatWdPick" title="换个文件夹继续这条会话"/);
+  assert.doesNotMatch(composer, /nchatWdPick|wc-wd-pick/);
   const bindings = read('components/panels/chat-composer-bindings.js');
-  assert.match(bindings, /const wdPick = el\.querySelector\('#nchatWdPick'\);[\s\S]{0,120}ctx\._changeConversationWorkspace\?\.\(\)/);
+  assert.doesNotMatch(bindings, /nchatWdPick|_changeConversationWorkspace/);
   const chat = read('components/panels/panels-chat.js');
-  assert.match(chat, /get _changeConversationWorkspace\(\) \{ return _changeConversationWorkspace; \}/);
-  const handler = chat.slice(chat.indexOf('async function _changeConversationWorkspace'));
-  /* 忙碌与云端防护、从当前目录打开选择器、同目录不重开、reset 后携带覆盖参数重开。 */
-  assert.match(handler, /if \(_runtimeBusy\(\)\)/);
-  assert.match(handler, /_snap\?\.cloudHandoff\?\.phase === 'committed'/);
-  assert.match(handler, /api\.pickCwd\(_wd\?\.dir \? \{ defaultPath: _wd\.dir \} : \{\}\)/);
-  assert.match(handler, /resumeWorkspace: dir, cwd: dir, workspaceLabel: label, chatTitle: title/);
+  assert.doesNotMatch(chat, /_changeConversationWorkspace/);
   const css = read('components/panels/work-composer.css');
   assert.doesNotMatch(css, /\.wc-wd-pick/);
   assert.doesNotMatch(bindings, /querySelector\('#nchatWd'\)\.addEventListener/);

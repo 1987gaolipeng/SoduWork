@@ -45,7 +45,6 @@ function sourceFiles(root) {
   return files;
 }
 function snapshotApprovals(root, entries) {
-  if (fs.existsSync(path.join(root, '.git'))) return entries;
   const snapshot = snapshotFiles(root);
   if (!snapshot) return entries;
   // Apply approvals to included paths and files added after importing an archive.

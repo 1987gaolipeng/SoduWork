@@ -3,6 +3,7 @@
 share one contract.
 """
 from pathlib import Path
+import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 CLIENT = ROOT / "client"
@@ -71,9 +72,15 @@ chk("能力文件不是只判存在，而是起会话前真实读取",
 chk("基础能力严格取本机探活、设备授权与会话选择的交集",
     "const selectable = runtime.ok" in caps and "const deviceGranted" in caps
     and "requested.has(item.id) && item.selectable && item.deviceGranted" in caps)
+# The full guide catalog now includes foundation skills. Verify the existing
+# policy and grant behavior instead of depending on the catalog's map/filter order.
+capability_contract = subprocess.run(
+    ["node", "--test", "main/conversation/capabilities.test.js"],
+    cwd=CLIENT, capture_output=True, text=True, encoding="utf-8", timeout=60,
+)
 chk("策略不可达时业务 Skill 失败关闭，但不会误伤本机基础能力",
-    "const policyAllowed = true" in caps and "(policy.skills || []).filter" in caps
-    and "if (!catalog.policyOk) warnings.unshift" in caps)
+    capability_contract.returncode == 0,
+    capability_contract.stdout + capability_contract.stderr)
 chk("会话使用中性门面，Pi 只保留兼容别名",
     "conversationSession" in preload and "piSession: conversationSession" in preload
     and "conversationSession || global.soduWorkAPI.piSession" in chat)

@@ -42,6 +42,10 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
       CREATE INDEX IF NOT EXISTS replica_origin_id ON replicas(json_extract(data,'$.source.id'));
       CREATE INDEX IF NOT EXISTS replica_origin_conversation ON replicas(json_extract(data,'$.source.conversationId'));
       CREATE INDEX IF NOT EXISTS replica_origin_session ON replicas(json_extract(data,'$.sourceSessionId'));
+      CREATE INDEX IF NOT EXISTS replica_remote_lifecycle_source ON replicas(
+        json_extract(data,'$.source.account'),json_extract(data,'$.source.id')) WHERE ${REMOTE_LIFECYCLE};
+      CREATE INDEX IF NOT EXISTS replica_remote_lifecycle_task ON replicas(
+        json_extract(data,'$.source.account'),json_extract(data,'$.taskId')) WHERE ${REMOTE_LIFECYCLE};
       CREATE TABLE IF NOT EXISTS aliases(alias TEXT PRIMARY KEY,replica TEXT NOT NULL REFERENCES replicas(id));
       CREATE INDEX IF NOT EXISTS aliases_replica ON aliases(replica);
       CREATE TABLE IF NOT EXISTS messages(replica TEXT NOT NULL REFERENCES replicas(id),position INTEGER NOT NULL,
@@ -269,6 +273,28 @@ function create(file, { maxImportBytes = 512 * 1024 * 1024 } = {}) {
       });
     },
     get: id => project(resolve(id)),
+    remoteLifecycleRows({ account, sourceIds = [], taskIds = [] }) {
+      key(account);
+      const identities = values => {
+        if (!Array.isArray(values) || values.length > 200) throw Error('Invalid remote history batch');
+        return [...new Set(values.map(key))];
+      };
+      const sources = identities(sourceIds), tasks = identities(taskIds), result = new Map();
+      // Each lookup uses its own partial index. Do not deserialize transcripts,
+      // aliases, or unrelated inventory merely to overlay one remote history page.
+      for (const [field, values] of [['source.id', sources], ['taskId', tasks]]) {
+        if (!values.length) continue;
+        const query = `SELECT id,archived,revision,catalog_revision,
+          json_extract(data,'$.source.id') AS source_id,json_extract(data,'$.source.hub') AS hub,
+          json_extract(data,'$.taskId') AS task_id FROM replicas WHERE ${REMOTE_LIFECYCLE}
+          AND json_extract(data,'$.source.account')=? AND json_extract(data,'$.${field}') IN (${values.map(() => '?').join(',')})`;
+        for (const row of db.prepare(query).iterate(account, ...values)) result.set(row.id, {
+          id: row.id, source: { id: row.source_id, hub: row.hub }, taskId: row.task_id,
+          archived: !!row.archived, replicaRevision: row.revision, revision: row.catalog_revision,
+        });
+      }
+      return [...result.values()];
+    },
     lifecycleRows() {
       return db.prepare('SELECT id,archived,deleted,revision,catalog_revision FROM replicas WHERE archived=1 OR deleted=1').all().map(row => ({
         id: row.id, archived: !!row.archived, deleted: !!row.deleted, revision: row.catalog_revision,

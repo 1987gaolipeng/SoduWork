@@ -11,6 +11,17 @@ const ACCEPTANCE_PROMPT_LIMIT = 50000;
 const COMPACTION_MARK = '\n[Some content omitted to fit the acceptance context budget. Read the bound attachments and reject anything you cannot verify.]\n';
 const MANUAL_ONLY = '本轮没有可自动核验的交付物，请使用手动验收确认实际结果';
 
+function references(context) {
+  // Hub normalizes legacy AI outputs before assigning the input role. Original
+  // requirement material is needed for comparison, unlike optional run evidence.
+  return (Array.isArray(context.optionalAttachments) ? context.optionalAttachments : [])
+    .filter(file => file.role === 'input');
+}
+function referenceKey(context) {
+  return JSON.stringify(references(context).map(file => [String(file.id || file.attachmentId || ''),
+    file.evidenceMeta?.sha256 || '', file.size || 0]).sort((a, b) => a[0].localeCompare(b[0])));
+}
+
 function assertAutomaticReview(context, auto) {
   if (auto && (context.readiness?.requiresHumanConfirmation === true ||
       (context.artifact?.kind === 'manual' && context.artifact?.manifest?.manual === true)))
@@ -170,11 +181,14 @@ async function prepare({ identity, taskId, instruction = '', requested = {}, run
     const size = Number(file.size) > 0 ? '，' + Number(file.size) + ' bytes' : '';
     return (index + 1) + '. ' + name + (id ? '（附件 ID: ' + id + size + '）' : '');
   });
-  const readableIndex = attachmentIndex.concat(selectedOptional.map((file, index) => {
+  const referenceIndex = referenceAttachments.map((file, index) =>
+    (attachmentIndex.length + index + 1) + '. ' + String(file.filename || file.name || '附件').slice(0, 200) +
+    '（附件 ID: ' + String(file.id || file.attachmentId || '') + '；需求附件，只读参考，不是交付物）');
+  const readableIndex = attachmentIndex.concat(referenceIndex, selectedOptional.map((file, index) => {
     const name = String(file.filename || file.name || '附件').slice(0, 200);
     const id = String(file.id || file.attachmentId || '').trim();
     const size = Number(file.size) > 0 ? '，' + Number(file.size) + ' bytes' : '';
-    return (attachmentIndex.length + index + 1) + '. ' + name + (id ? '（附件 ID: ' + id + size + '；按需选择的过程文件）' : '');
+    return (attachmentIndex.length + referenceIndex.length + index + 1) + '. ' + name + (id ? '（附件 ID: ' + id + size + '；按需选择的过程文件）' : '');
   }));
   let lines = [auto ? '【自动验收】' : '【验收分析】',
     '你是验收助手。请核对已提交的成果是否满足需求，不要重新执行原需求，不要修改原交付物。',
@@ -292,6 +306,8 @@ async function prepare({ identity, taskId, instruction = '', requested = {}, run
     displaySummary(task.note || task.description),
     translate('验收标准') + '\n' + displaySummary(criteria.map(c => '- ' + c.label).join('\n')),
     description ? translate('交付成果') + '\n' + displaySummary(description) : '',
+    referenceAttachments.length ? translate('需求附件') + '\n' + displaySummary(referenceAttachments
+      .map(file => '- ' + String(file.filename || file.name || '附件')).join('\n')) : '',
     optionalNames.length ? translate('过程与验证材料') + '\n' + displaySummary(optionalNames.join('\n')) : '',
     context.readiness?.requiresHumanConfirmation ? translate(MANUAL_ONLY) : '',
     instruction ? translate('补充说明') + '\n' + instruction : ''].filter(Boolean).join('\n\n');

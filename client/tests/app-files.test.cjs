@@ -12,7 +12,7 @@ function fixture(t) {
   const session={setPermissionRequestHandler(){},setPermissionCheckHandler(){},protocol:{handle(_scheme,handler){route=handler;}}};
   const deps={app,session:{fromPartition:()=>session}};
   t.after(()=>{store.configure(undefined);fs.rmSync(root,{recursive:true,force:true});});
-  return {root,app,binding,deps,open:()=>pages.prepare(deps,{pluginId,contributionId:'main'}),switchAccount:()=>{account='account-b';},request:r=>route(r),call:(method,p)=>files.execute(app,binding,method,p),item:()=>({appBridge:{appId:'plugin:'+pluginId,origin:binding.origin,contributionId:'main'},view:{webContents:{getURL:()=>binding.origin+'/ui/index.html',isDestroyed:()=>false}}})};
+  return {root,app,binding,deps,open:()=>pages.prepare(deps,{pluginId,contributionId:'main'}),switchAccount:()=>{account='account-b';},request:r=>route(r),call:(method,p)=>files.execute(app,binding,method,p),item:()=>{const item={appBridge:{appId:'plugin:'+pluginId,origin:binding.origin,contributionId:'main'},view:{webContents:{getURL:()=>binding.origin+'/ui/index.html',isDestroyed:()=>false}}};require('../main/work-preview-app-owner.cjs').capture(item,deps);return item;}};
 }
 async function upload(f,projectId='project-1',type='image/png',bytes=Buffer.from('sample-image')) {
   const start=await f.call('files.begin',{projectId,name:'图片.png',type,size:bytes.length});
@@ -44,7 +44,7 @@ test('file bridge validates chunk order, quotas, cancellation, installed capabil
   assert.throws(()=>contract.normalizeRequest({id:'a',method:'files.getUrl',params:{projectId:'p',id:'../../private'}}));
   const r=await files.handle({item:f.item()},{method:'files.begin',params:{projectId:'p',name:'file.mp4',type:'video/mp4',size:0}},f.deps);assert.ok(r.ok);await files.handle({item:f.item()},{method:'files.cancel',params:{id:r.id}},f.deps);
   const missing=await files.handle({item:f.item()},{method:'files.getUrl',params:{projectId:'missing',id:'file_'+'a'.repeat(32)}},f.deps);assert.equal(missing.ok,false);assert.ok(!missing.reason.includes(f.root));
-  const bad=f.item();bad.appBridge.origin='https://external.invalid';await assert.rejects(()=>files.handle({item:bad},{method:'files.begin',params:{projectId:'p',name:'a',type:'image/png',size:1}},f.deps),/来源/);
+  const bad=f.item();bad.appBridge.origin='https://external.invalid';await assert.rejects(()=>files.handle({item:bad},{method:'files.begin',params:{projectId:'p',name:'a',type:'image/png',size:1}},f.deps),{code:'APP_ACCOUNT_CHANGED'});
 });
 test('account change, disabled app and active content cannot bypass file resource guards',async t=>{
   const f=fixture(t);await f.open();const {file}=await upload(f,'p','text/html',Buffer.from('<script>attack()</script>'));

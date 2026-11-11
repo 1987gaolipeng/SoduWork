@@ -175,7 +175,11 @@
       _reconcileLocalLocale() {
         const locale = localLocaleIntent();
         this._localLocaleIntent = locale;
-        if (!locale || normalizeLocale(this._cfg.locale) === locale) return false;
+        const stored = safeParseCfg(global.localStorage.getItem(LS_CFG));
+        // A recovered mirror also needs syncing when it matches the in-memory
+        // default: that default is not evidence of a persisted local choice.
+        if (!locale || (normalizeLocale(this._cfg.locale) === locale &&
+            normalizeLocale(stored.locale) === locale)) return false;
         ++this._cfgRevision;
         this._cfg.locale = locale;
         try {

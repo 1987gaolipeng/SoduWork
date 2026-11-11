@@ -202,24 +202,20 @@ class LocalStartupTests(unittest.TestCase):
                 start.assert_available("127.0.0.1", port)
             self.assertEqual(listener.getsockname()[1], port)
 
-    @unittest.skipIf(os.name == "nt", "POSIX TIME_WAIT reuse; Windows keeps exclusive binding")
-    def test_closed_server_connections_do_not_block_immediate_restart(self):
+    @unittest.skipIf(os.name == "nt", "POSIX listener reuse; Windows uses exclusive bind")
+    def test_closed_http_connection_allows_restart_but_live_reusable_listener_does_not(self):
         with socket.socket() as listener:
             listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             listener.bind(("127.0.0.1", 0))
             listener.listen()
             port = listener.getsockname()[1]
-            with socket.create_connection(("127.0.0.1", port), timeout=2) as client:
-                connection, _ = listener.accept()
-                connection.close()
-                self.assertEqual(client.recv(1), b"")
-        start.assert_available("127.0.0.1", port)
-        with socket.socket() as restarted:
-            restarted.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            restarted.bind(("127.0.0.1", port))
-            restarted.listen()
             with self.assertRaisesRegex(start.StartupError, "already in use"):
                 start.assert_available("127.0.0.1", port)
+            with socket.create_connection(("127.0.0.1", port), timeout=2) as peer:
+                accepted, _ = listener.accept()
+                accepted.close()
+                self.assertEqual(peer.recv(1), b"")
+        start.assert_available("127.0.0.1", port)
 
     def test_check_is_read_only_even_for_a_new_data_directory(self):
         with patch.object(start, 'dependency_report') as report, patch.object(start, 'initialize') as initialize:

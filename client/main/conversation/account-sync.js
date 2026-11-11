@@ -99,6 +99,7 @@ function historyRow(item, identity) {
     state: item.state || 'idle', adapterId: 'account-sync', accountConversation: true,
     accountProjection: true, archived: item.archived === true, owner: runtime.connectionScope(identity),
     deleted: item.deleted === true, revision: Number(item.revision || 0),
+    emptyPlaceholder: item.messageCount === 0 && !item.taskProjectionId && item.state === 'idle',
     lifecycleRevision: Number(item.lifecycleRevision || 0),
     historyAliasIds: [...new Set([item.id, ...(item.historyAliasIds || [])].filter(Boolean))],
     accountCanSend: item.canSend === true, sourceClientId: item.sourceClientId,
@@ -227,6 +228,8 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
     const lifecycle = { revision: Number(item.revision || 0), lifecycleRevision: Number(item.lifecycleRevision || 0),
       deleted: item.deleted === true };
     return native ? { ...native, ...lifecycle,
+      emptyPlaceholder: item.messageCount === 0 && !item.taskProjectionId && item.state === 'idle' &&
+        !(native.count > 0) && !['running', 'waiting', 'starting'].includes(native.state),
       archived: item.archived === true || !lifecycle.lifecycleRevision && native.archived === true,
       owner: runtime.connectionScope(identity), accountId: item.id,
       sourceSessionId: item.sourceSessionId, sourceClientId: item.sourceClientId,
@@ -472,6 +475,10 @@ function create({ app, identityOf, localIdentityOf, store, resolveNativeSource, 
     if (state.deleted || deletion.blocked(state.key) || isProjection(state.handle)) return;
     const times = { ...state.messageTimes };
     const view = snapshot(state.handle, times, now, metadataOnly);
+    // Opening a review composer must not publish a durable empty chat.
+    // Existing checkpoints still reconcile; the first submitted turn starts sync.
+    if (!state.sourceRevision && state.handle.acceptanceSession && view.state === 'idle' &&
+        (metadataOnly ? view.messageCount === 0 : view.messages.length === 0)) return;
     const content = { sourceClientId: state.identity.clientId, sourceSessionId: view.sessionId,
       sourceEpoch: state.sourceEpoch, title: view.title, state: view.state,
       archived: false, deleted: false, snapshotComplete: !metadataOnly, messages: view.messages,
