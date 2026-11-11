@@ -99,7 +99,7 @@ node tools/check-docs.cjs
 python tools/security/scan_secrets.py --download
 ```
 
-涉及启动过程时，再运行 `python tools/dev/verify_local_start.py --desktop`，需要网络和图形桌面。纯文档修改核对链接和命令即可，不必声称完成未实际运行的平台验收。新增文件先加入 Git，再按[贡献指南](contributing.zh-CN.md)更新源码清单。
+涉及启动过程时，再运行 `python tools/dev/verify_local_start.py --desktop`，需要网络和图形桌面。纯文档修改核对链接和命令即可，不必声称完成未实际运行的平台验收。按[贡献指南](contributing.zh-CN.md)审核并暂存新增源码文件；源码包清单在导出时自动生成，不提交到仓库。
 
 ## 注释约定
 

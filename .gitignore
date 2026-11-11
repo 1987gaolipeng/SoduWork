@@ -49,6 +49,9 @@ scratchpad/
 # Native CI acceptance receipts, fixtures, and extracted installer payloads.
 /release-evidence/
 
+# Source inventories are generated inside exported archives, never maintained in Git.
+/tools/distribution/SOURCE-MANIFEST.json
+
 # Local one-off client packaging entry points; maintained builds use package.json scripts.
 client/build.bat
 client/build.js

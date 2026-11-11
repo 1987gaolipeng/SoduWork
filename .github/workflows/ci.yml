@@ -81,7 +81,6 @@ jobs:
           python tools/github/check_public_ci.py
           node tools/check-repository-layout.cjs
           node tools/check-third-party.cjs
-          node tools/check-source-manifest.cjs
           node tools/brand-keyword-gate.cjs
           node tools/check-docs.cjs
           node --test tools/source-manifest.test.cjs tools/check-docs.test.cjs tools/check-source-provenance.test.cjs tools/ci/test-release-transfer.cjs client/tests/repository-layout.test.cjs

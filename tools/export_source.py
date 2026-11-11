@@ -8,6 +8,8 @@ import subprocess
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
+MANIFEST = 'tools/distribution/SOURCE-MANIFEST.json'
+SCOPE = 'Current source snapshot only; not Git history, complete secret detection or legal clearance.'
 
 
 def canonical(data: bytes) -> bytes:
@@ -19,19 +21,46 @@ def canonical(data: bytes) -> bytes:
         return data
 
 
+def archive_entries(bundle: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
+    entries = bundle.infolist()
+    if len({entry.filename for entry in entries}) != len(entries):
+        raise ValueError('Duplicate archive entries')
+    for entry in entries:
+        name = entry.filename.rstrip('/') if entry.is_dir() else entry.filename
+        if (name.startswith('/') or '\\' in name or ':' in name
+                or any(part in {'', '..', '.', '.git'} for part in name.split('/'))
+                or (entry.external_attr >> 16) & 0o170000 == 0o120000):
+            raise ValueError('Unsafe archive entry: ' + name)
+    return [entry for entry in entries if not entry.is_dir()]
+
+
+def add_manifest(archive: Path, commit: str, expected: set[str]) -> None:
+    """Hash archived bytes, never the working tree or a developer-maintained inventory."""
+    with zipfile.ZipFile(archive, 'a') as bundle:
+        entries = archive_entries(bundle)
+        if not entries or any(entry.filename == MANIFEST for entry in entries):
+            raise ValueError('Export requires source without a committed source manifest')
+        if {entry.filename for entry in entries} != expected:
+            raise ValueError('Archive files do not match the committed tree')
+        files = []
+        for entry in sorted(entries, key=lambda item: item.filename):
+            data = canonical(bundle.read(entry))
+            files.append({'path': entry.filename, 'bytes': len(data),
+                          'sha256': hashlib.sha256(data).hexdigest()})
+        manifest = {'schema': 1, 'ok': True, 'distribution': 'public-source',
+                    'scope': SCOPE, 'commit': commit, 'files': files}
+        info = zipfile.ZipInfo(MANIFEST, date_time=entries[0].date_time)
+        info.create_system = 3
+        info.external_attr = 0o100644 << 16
+        info.compress_type = zipfile.ZIP_DEFLATED
+        bundle.writestr(info, json.dumps(manifest, indent=2) + '\n')
+
+
 def verify(archive: Path) -> int:
     with zipfile.ZipFile(archive) as bundle:
-        entries = [entry for entry in bundle.infolist() if not entry.is_dir()]
+        entries = archive_entries(bundle)
         names = {entry.filename for entry in entries}
-        if len(names) != len(entries):
-            raise ValueError('Duplicate archive entries')
-        for entry in entries:
-            name = entry.filename
-            if (name.startswith('/') or '\\' in name or ':' in name
-                    or any(part in {'..', '.', '.git'} for part in name.split('/'))
-                    or (entry.external_attr >> 16) & 0o170000 == 0o120000):
-                raise ValueError('Unsafe archive entry: ' + name)
-        manifest = json.loads(bundle.read('tools/distribution/SOURCE-MANIFEST.json'))
+        manifest = json.loads(bundle.read(MANIFEST))
         profile = json.loads(bundle.read('tools/distribution/PUBLIC-SOURCE.json'))
         if (manifest.get('schema') != 1 or manifest.get('ok') is not True
                 or manifest.get('distribution') != 'public-source'
@@ -41,8 +70,8 @@ def verify(archive: Path) -> int:
         identifiers = profile.get('excludedIdentifiers', [])
         if not isinstance(identifiers, list) or any(not isinstance(value, str) or not value.strip() for value in identifiers):
             raise ValueError('Invalid excluded identifiers')
-        if len(expected) != len(manifest['files']) or set(expected) | {'tools/distribution/SOURCE-MANIFEST.json'} != names:
-            raise ValueError('Archive inventory does not match the committed manifest')
+        if len(expected) != len(manifest['files']) or set(expected) | {MANIFEST} != names:
+            raise ValueError('Archive inventory does not match the generated manifest')
         for name, entry in expected.items():
             if (any(name.startswith(prefix) for prefix in profile['excludedPrefixes'])
                     or name in profile['excludedFiles']
@@ -65,19 +94,22 @@ def export(output: Path) -> int:
     output = output.expanduser().resolve()
     if output.is_relative_to(ROOT):
         raise ValueError('Write the source archive outside the checkout')
-    tree = subprocess.check_output(['git', 'rev-parse', '--verify', 'HEAD^{tree}'], cwd=ROOT, text=True).strip()
+    commit = subprocess.check_output(['git', 'rev-parse', '--verify', 'HEAD^{commit}'], cwd=ROOT, text=True).strip()
+    expected = set(subprocess.check_output(['git', 'ls-tree', '-r', '--name-only', '-z', commit], cwd=ROOT)
+                   .decode('utf-8').rstrip('\0').split('\0'))
     output.parent.mkdir(parents=True, exist_ok=True)
     created = False
     try:
         with output.open('xb') as stream:
             created = True
-            subprocess.run(['git', 'archive', '--format=zip', tree], cwd=ROOT, stdout=stream, check=True)
+            subprocess.run(['git', 'archive', '--format=zip', commit], cwd=ROOT, stdout=stream, check=True)
+        add_manifest(output, commit, expected)
         count = verify(output)
     except BaseException:
         if created:
             output.unlink(missing_ok=True)
         raise
-    print(json.dumps({'ok': True, 'files': count, 'archive': str(output), 'gitHistory': False}))
+    print(json.dumps({'ok': True, 'files': count, 'archive': str(output), 'commit': commit, 'gitHistory': False}))
     return count
 
 

@@ -47,7 +47,6 @@ jobs:
           python -m unittest discover -s tools/github -p 'test_*.py'
           python tools/github/check_public_ci.py
           node tools/check-public-source.cjs
-          node tools/check-source-manifest.cjs
       - name: Install Linux packaging prerequisites
         if: matrix.shard == 'linux'
         run: |

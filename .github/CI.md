@@ -12,7 +12,7 @@ Ordinary checks use read-only permissions, do not persist checkout credentials, 
 
 `workflows/release.yml` provides manual source, Client and Hub pipelines with shared quality checks, immutable candidates and a reviewer gate. Only the final publication job receives write permission. Client and Hub publication runs only after the distribution scope, third-party release evidence and Client upgrade baselines pass preflight. See [release setup and boundaries](RELEASE.md).
 
-Dependabot proposes updates for GitHub Actions, both npm lockfiles, and backend pip requirements. Review changes to dependency versions, license evidence, secret exceptions, and source manifests together.
+Dependabot proposes updates for GitHub Actions, both npm lockfiles, and backend pip requirements. Review dependency changes, license evidence and secret exceptions together. Ordinary PRs use Git's file inventory and do not maintain a source manifest. Source exports generate their own manifests from committed archive bytes; archive integrity tests remain part of CI.
 
 These workflows must run in the target GitHub repository before their platform results can be claimed. Local Windows checks do not constitute a successful GitHub Actions run.
 

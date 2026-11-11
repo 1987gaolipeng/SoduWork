@@ -113,7 +113,10 @@ def scan(*, executable: str | None = None, download: bool = False) -> dict:
     inventory = subprocess.check_output([
         "node", "-e", "process.stdout.write(JSON.stringify(require('./tools/source-files.cjs').sourceFiles(process.cwd())))"
     ], cwd=ROOT, text=True, encoding="utf-8")
-    names = set(json.loads(inventory)) | {"tools/distribution/SOURCE-MANIFEST.json"}
+    names = set(json.loads(inventory))
+    manifest = "tools/distribution/SOURCE-MANIFEST.json"
+    if (ROOT / manifest).exists():
+        names.add(manifest)
     policy = json.loads((ROOT / "tools/security/secret-exceptions.json").read_text(encoding="utf-8"))
     if policy.get("schema") != 1 or policy.get("gitleaksVersion") != VERSION:
         raise ValueError("Secret-scan policy version mismatch")

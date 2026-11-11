@@ -20,7 +20,7 @@
    - 管理端：在 `hub-frontend/` 运行 `npm run build` 和 `node --test tests/*.test.mjs`；
    - 启动器：在根目录运行 `python -m unittest tools.dev.test_start_local`；
    - 后端：在 `hub-backend/` 用 `python quality_gate.py --help` 选择检查。
-4. 在根目录运行 `node tools/check-public-source.cjs` 和 `node tools/check-third-party.cjs`。新增公开文件时，先加入 Git，再用 `node tools/check-source-manifest.cjs --write-manifest` 更新清单、用 `node tools/check-source-manifest.cjs` 校验，并把更新后的清单一起提交。
+4. 在根目录运行 `node tools/check-public-source.cjs` 和 `node tools/check-third-party.cjs`。审核并暂存新增公开文件，源码文件列表由 Git 管理；不要生成或提交 `SOURCE-MANIFEST.json`。源码导出工具会根据已提交文件，在每个压缩包内自动生成清单。
 5. 提交中不要包含运行日志、截图、数据库、账号、令牌、私有地址、安装包或依赖缓存。
 6. 在 PR 里写明实际验证过的平台和未覆盖的范围。测试夹具通过不能代替真实模型或生产环境验证。发行物从当前源码构建，不复制旧版 Runner 或已安装应用中的资源。
 
