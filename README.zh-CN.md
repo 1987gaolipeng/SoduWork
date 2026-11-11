@@ -1,5 +1,7 @@
 [English](README.md) · **简体中文**
 
+> **中文文档入口：[文档目录](docs/README.zh-CN.md) · [安装与启动](docs/getting-started.md) · [开发指南](docs/development.md)**
+
 <div align="center">
 
 <img src="client/build/icons/256x256.png" alt="SoduWork" width="96" />
@@ -25,7 +27,7 @@ cd SoduWork
 | Windows PowerShell | `.\start.cmd --desktop` |
 | Windows 命令提示符 | `start.cmd --desktop` |
 
-[官网](https://soduwork.ai) | [在线体验](https://soduwork.ai) | [文档](https://dev.soduwork.ai/zh-CN/) | [Releases](https://github.com/mdiri-ai/SoduWork/releases) | [Discord](https://discord.gg/AXYNrAYHy)
+[官网](https://soduwork.ai) | [在线体验](https://soduwork.ai) | [中文文档](docs/README.zh-CN.md) | [在线文档](https://dev.soduwork.ai/zh-CN/) | [Releases](https://github.com/mdiri-ai/SoduWork/releases) | [Discord](https://discord.gg/AXYNrAYHy)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/mdiri-ai/SoduWork)](https://github.com/mdiri-ai/SoduWork/releases)
