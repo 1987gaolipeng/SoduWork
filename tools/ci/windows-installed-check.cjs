@@ -7,13 +7,11 @@ const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const support = require('./windows-acceptance-support.cjs');
 const { candidateVersion, displayVersions } = require('../../client/scripts/client-build-version.cjs');
-const distribution = require('./native-distribution-checks.cjs').expected(process.env);
-assert.ok(distribution, 'Native installation requires the immutable distribution descriptor');
-const productName = distribution.productName, executableName = distribution.windowsExecutableName + '.exe';
+const productName = 'SoduWork', executableName = 'SoduWork.exe';
+const nsisGuid = require('../../client/package.json').build.nsis.guid;
 const [installer, output, oldInstaller, oldVersion, oldBrand = productName] = process.argv.slice(2);
 assert.equal(oldBrand, productName, 'Upgrade baseline belongs to another distribution');
-const internalFamily = distribution.distributionId === 'internal' || distribution.distributionId === 'stage';
-const oldExecutableName = internalFamily ? oldBrand + '.exe' : executableName;
+const oldExecutableName = executableName;
 assert.equal(process.platform, 'win32');
 assert.ok(path.isAbsolute(installer) && path.isAbsolute(output));
 const expectedHash = process.env.SODUWORK_ACCEPT_INSTALLER_SHA256;
@@ -23,8 +21,7 @@ fs.mkdirSync(output, { recursive: true });
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-install-acceptance-'));
 const installed = path.join(root, productName + ' acceptance');
 const profile = path.join(root, 'soduwork-acceptance-profile-main');
-const report = { ok: false, root, installed, distributionId: distribution.distributionId,
-  configSha256: distribution.configSha256, version: candidateVersion(process.env), sha256: expectedHash, oldVersion: '', checks: [],
+const report = { ok: false, root, installed, version: candidateVersion(process.env), sha256: expectedHash, oldVersion: '', checks: [],
   limitations: ['Runs in Windows Runner SYSTEM session 0; no interactive user/UAC assertion.', 'Same-version repair is not an old-version upgrade.'] };
 // NSIS writes the registry DisplayVersion without the semver prerelease suffix
 // (1.13.11-beta.1 → 1.13.11 or the numeric 1.13.11.1 form); accept either.
@@ -151,7 +148,7 @@ try {
   assert.deepEqual(registrations(), [], 'An existing SoduWork installation must not be replaced');
   report.processesBefore = support.processes(root, ps);
   assert.deepEqual(report.processesBefore, [], 'Existing product processes block acceptance; they will not be stopped');
-  const verb = internalFamily ? 'SoduWork.Open' : distribution.appId + '.Open';
+  const verb = 'SoduWork.Open';
   // Interrupted acceptance runs leave the NSIS shell verb and the Applications
   // class behind after the temp root is gone. Clean only entries whose command
   // target is gone or lives in the acceptance root; genuine installations
@@ -193,7 +190,7 @@ try {
   assert.ok(displayVersion(report.oldVersion || report.version).includes(rows[0].version),
     'Registry DisplayVersion ' + rows[0].version + ' differs from candidate ' + (report.oldVersion || report.version));
   assert.ok(rows[0].name.startsWith(oldInstaller ? oldBrand : productName));
-  if (!oldInstaller) assert.equal(rows[0].key.toLowerCase().replace(/[{}]/g, ''), distribution.nsisGuid.toLowerCase());
+  if (!oldInstaller) assert.equal(rows[0].key.toLowerCase().replace(/[{}]/g, ''), nsisGuid.toLowerCase());
   assert.equal(typeof rows[0].location, 'string', 'Installation GUID key must contain InstallLocation');
   assert.equal(path.resolve(rows[0].location).toLowerCase(), path.resolve(installed).toLowerCase());
   for (const link of links) {
@@ -216,7 +213,7 @@ try {
     assert.ok(displayVersion(report.version).includes(report.upgradedRegistrations[0].version),
       'Upgraded DisplayVersion differs from candidate ' + report.version);
     assert.ok(report.upgradedRegistrations[0].name.startsWith(productName));
-    assert.equal(report.upgradedRegistrations[0].key.toLowerCase().replace(/[{}]/g, ''), distribution.nsisGuid.toLowerCase());
+    assert.equal(report.upgradedRegistrations[0].key.toLowerCase().replace(/[{}]/g, ''), nsisGuid.toLowerCase());
     assert.equal(typeof report.upgradedRegistrations[0].location, 'string', 'Upgraded installation GUID key must contain InstallLocation');
     assert.equal(path.resolve(report.upgradedRegistrations[0].location).toLowerCase(), path.resolve(installed).toLowerCase());
     assert.equal(fs.existsSync(path.join(installed, 'Uninstall SoduWork.exe')), true);
@@ -230,16 +227,6 @@ try {
   }
   assert.equal(fs.readFileSync(path.join(profile, 'acceptance-sentinel.txt'), 'utf8'), 'preserve-install-acceptance-data');
   report.checks.push({ name: 'uninstall removes application, registration and shortcuts; retains profile', ok: true });
-  if (!oldInstaller) report.cleanInstall = { freshInstalled: true, restarted: true, reinstalled: true,
-    uninstalled: true, userDataPreserved: true, distributionIdentityVerified: true, upgraded: false, oldVersion: '' };
-  if (!oldInstaller && !internalFamily) {
-    assert.notEqual(distribution.nsisGuid, '35643c48-76d7-54ae-9c89-cc281f9a86a4');
-    assert.notEqual(distribution.appId, 'com.soduwork.app');
-    assert.notEqual(productName, 'SoduWork');
-    assert.notEqual(executableName, 'SoduWork.exe');
-    assert.notEqual(distribution.userDataName, 'SoduWork');
-    report.distributionIsolation = { registration: true, shortcuts: true, executable: true, immutableProfile: true };
-  }
   report.ok = true;
 } catch (error) { report.error = error.stack; process.exitCode = 1; }
 finally {

@@ -8,7 +8,6 @@ const { spawn, spawnSync } = require('node:child_process');
 const { waitForRenderer } = require('./installed-client-inspection.cjs');
 const { acceptanceTiming } = require('./installed-client-timing.cjs');
 const { connect } = require('./installed-client-cdp.cjs');
-const distributionChecks = require('./native-distribution-checks.cjs');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function main() {
@@ -105,15 +104,6 @@ async function main() {
       const dom = await waitForRenderer(call, { timeoutMs: timing.rendererMs });
       assert.equal(dom.ready, 'complete');
       assert.ok(dom.scripts > 0 && dom.body.length > 0, 'Renderer is empty');
-      let distribution;
-      if (expectedDistribution) {
-        phase('renderer-distribution-' + report.pages.length);
-        const observed = await call('Runtime.evaluate', { returnByValue: true, awaitPromise: true,
-          expression: "(async()=>({hub:window.SoduWorkAPI.hubBase(),connection:await window.soduWorkAPI.getHubConnection()}))()" });
-        assert.equal(observed.exceptionDetails, undefined, 'Installed renderer distribution inspection failed');
-        distribution = observed.result.value;
-        distributionChecks.validateRenderer(distribution, expectedDistribution);
-      }
       const key = 'soduwork-install-acceptance-marker';
       phase('renderer-data-' + report.pages.length);
       if (markerMode === 'write') await call('Runtime.evaluate', { expression: `localStorage.setItem('${key}','preserved')` });

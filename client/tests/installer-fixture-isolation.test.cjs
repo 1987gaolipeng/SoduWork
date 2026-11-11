@@ -7,7 +7,7 @@ const os = require('node:os');
 const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
 const { createRequire } = require('node:module');
-const productionGuids = Object.values(require('../distributions.json')).map(value => value.nsisGuid);
+const productionGuids = [require('../package.json').build.nsis.guid];
 
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'soduwork-update-e2e-registry-'));
