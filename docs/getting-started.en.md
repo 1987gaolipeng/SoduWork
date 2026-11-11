@@ -45,6 +45,8 @@ Successful startup makes the application available. AI responses still require y
 
 ## Send your first AI message
 
+If you already saved an API key, continue at step 3: add a concrete chat model, then select Pi and that model in the desktop client. Configuration happens in the browser admin console; conversations happen in the desktop client. Both must use the same Hub.
+
 Have your provider's **API base URL, API key, and model ID** ready. These come from your model provider; the local administrator password cannot replace an API key. Real model calls may incur provider charges.
 
 1. Sign in to the browser management UI, open **Capabilities → Model catalog**, and choose **Connect a service**. In the Chinese UI these are **能力配置 → 模型目录 → 接一个服务**.
