@@ -69,8 +69,8 @@ function candidateFiles({ root = path.resolve(__dirname, '..'), resourcesPath = 
   ];
   if (resourcesPath) {
     files.push(
-      path.join(resourcesPath, 'pi', '@earendil-works', 'pi-coding-agent', 'dist', 'core', 'settings-manager.js'),
-      path.join(resourcesPath, 'pi', '@earendil-works', 'pi-coding-agent', 'dist', 'core', 'agent-session.js'),
+      path.join(resourcesPath, 'pi', 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist', 'core', 'settings-manager.js'),
+      path.join(resourcesPath, 'pi', 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist', 'core', 'agent-session.js'),
     );
   }
   return [...new Set(files)];

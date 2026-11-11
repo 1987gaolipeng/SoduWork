@@ -50,6 +50,7 @@
     "electron-builder": "^26.15.3"
   },
   "build": {
+    "npmRebuild": false,
     "appId": "com.soduwork.app",
     "afterPack": "scripts/prepare-installer.cjs",
     "afterSign": "scripts/prepare-installer.cjs",
@@ -106,6 +107,11 @@
       {
         "from": ".runtime/pi",
         "to": "pi"
+      },
+      {
+        "from": ".runtime/pi/node_modules",
+        "to": "pi/node_modules",
+        "filter": ["**/*"]
       },
       {
         "from": "node_modules/ssh2",

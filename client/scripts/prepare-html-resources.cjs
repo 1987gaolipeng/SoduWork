@@ -9,9 +9,9 @@ const { isNoticePath } = require('../build/verify-payload.cjs');
 
 const PI = 'resources/pi/node_modules/@earendil-works/pi-coding-agent';
 const DOCUMENTS = new Set([
-  PI + '/node_modules/bignumber.js/doc/API.html',
-  PI + '/node_modules/tslib/tslib.es6.html',
-  PI + '/node_modules/tslib/tslib.html',
+  'resources/pi/node_modules/bignumber.js/doc/API.html',
+  'resources/pi/node_modules/tslib/tslib.es6.html',
+  'resources/pi/node_modules/tslib/tslib.html',
 ]);
 const RULES = [
   { id: 'pi-export', template: PI + '/dist/core/export-html/template.html',

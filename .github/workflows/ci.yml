@@ -16,12 +16,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  mobile:
+    name: Android source tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - uses: subosito/flutter-action@fd55f4c5af5b953cc57a2be44cb082c8f6635e8e # v2.21.0
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: true
+      - name: Analyze and test the locked mobile source
+        working-directory: mobile
+        run: |
+          flutter pub get --enforce-lockfile
+          flutter analyze
+          flutter test
+
   startup:
     name: Source HTTP startup (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-26]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
@@ -37,9 +61,19 @@ jobs:
         with:
           node-version: '22'
           package-manager-cache: false
-      - name: Check prerequisites and launcher regressions
+      - name: Install Linux display dependencies
+        if: runner.os == 'Linux'
         run: |
-          python start.py --check --desktop
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth
+      - name: Check prerequisites and launcher regressions
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a python start.py --check --desktop
+          else
+            python start.py --check --desktop
+          fi
           python -m unittest tools.dev.test_start_local tools.dev.test_deploy tools.dev.test_source_export tools.security.test_scan_secrets
       - name: Check public source and documentation
         run: |
@@ -54,6 +88,12 @@ jobs:
           python -m unittest discover -s tools/github -p 'test_*.py'
       - name: Verify isolated HTTP startup, persistence, and shutdown
         run: python tools/dev/verify_local_start.py
+      - name: Show isolated launcher logs when startup verification fails
+        if: failure()
+        shell: bash
+        run: |
+          find "${TMPDIR:-/tmp}" -type f -name '*.launcher-*.log' -print -exec tail -200 {} \; 2>/dev/null || true
+          find "${TMPDIR:-/tmp}" -type f -path '*/soduwork-source-live-*/startup.log' -print -exec tail -200 {} \; 2>/dev/null || true
 
   frontend:
     runs-on: ubuntu-latest
@@ -97,10 +137,13 @@ jobs:
           python -m venv hub-backend/.venv
           if [ "$RUNNER_OS" = Windows ]; then
             hub-backend/.venv/Scripts/python.exe -m pip install -r hub-backend/requirements-test.txt
+            choco install ripgrep --no-progress --yes
+            echo 'C:\\ProgramData\\chocolatey\\bin' >> "$GITHUB_PATH"
+            rg --version
           else
             hub-backend/.venv/bin/python -m pip install -r hub-backend/requirements-test.txt
             sudo apt-get update
-            sudo apt-get install -y xvfb xauth libgtk-3-0 libnss3 libasound2
+            sudo apt-get install -y xvfb xauth ripgrep libgtk-3-0 libnss3 libasound2
           fi
       - run: npm ci
         working-directory: client
@@ -127,6 +170,9 @@ jobs:
           package-manager-cache: false
       - run: python -m pip install -r hub-backend/requirements-test.txt
       - run: python quality_gate.py --profile release --scope backend
+        working-directory: hub-backend
+      - name: Verify every Runner dialogue profile through real fixture subprocesses
+        run: python -m unittest -v test_runner_dialogue
         working-directory: hub-backend
 
   postgres:

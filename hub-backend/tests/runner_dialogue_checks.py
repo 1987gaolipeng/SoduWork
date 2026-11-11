@@ -39,12 +39,25 @@ async def exercise(machine, agent, workspace, until, refs):
         expected_state = "done" if marker == "DIALOGUE_SUCCESS" else "failed"
         assert data["status"] == expected_state, (marker, data)
         if marker == "DIALOGUE_EMPTY":
-            assert data["failureKind"] == "execution_no_output" and data["error"], data
-        elif marker == "DIALOGUE_ERROR":
-            expected_error = {"pi": "模型调用失败或已中断", "harness2": "Google Harness² 调用模型失败"}.get(agent, "fixture provider failure")
-            assert expected_error in data["error"], data
             if agent == "harness2":
-                assert "fixture provider failure" not in data["error"], "Harness2 must sanitize raw provider errors"
+                # Harness2 now runs seven real refinement calls on every user
+                # turn before the synthetic executor. An empty executor reply
+                # therefore leaves planning progress, not an empty whole turn.
+                rows = [row for row in data["items"] if row["seq"] > data["admissionStartSeq"]]
+                assert sum(row.get("kind") == "usage" and row.get("usageScope") == "step"
+                           for row in rows) == 7, rows
+                assert any(row.get("kind") == "thinking" and row.get("text") for row in rows), rows
+                assert not any(row.get("kind") in {"say", "do", "out"} for row in rows), rows
+                assert data["failureKind"] == "execution_incomplete" and data["error"], data
+            else:
+                assert data["failureKind"] == "execution_no_output" and data["error"], data
+        elif marker == "DIALOGUE_ERROR":
+            # Pi shares the current public model-error guidance with the Hub.
+            expected_error = {"pi": "模型调用失败，已有进度已保留；请重试或切换可用模型。",
+                              "harness2": "Google Harness² 调用模型失败"}.get(agent, "fixture provider failure")
+            assert expected_error in data["error"], data
+            if agent in {"pi", "harness2"}:
+                assert "fixture provider failure" not in data["error"], "Raw provider errors must be sanitized"
         elif marker == "DIALOGUE_THINKING":
             assert data["failureKind"] == "execution_incomplete" and data["error"], data
         elif marker == "DIALOGUE_EXIT":

@@ -15,3 +15,10 @@ Ordinary checks use read-only permissions, do not persist checkout credentials, 
 Dependabot proposes updates for GitHub Actions, both npm lockfiles, and backend pip requirements. Review changes to dependency versions, license evidence, secret exceptions, and source manifests together.
 
 These workflows must run in the target GitHub repository before their platform results can be claimed. Local Windows checks do not constitute a successful GitHub Actions run.
+
+Runner dialogue regression checks follow the shared public model-error guidance.
+Harness2 performs seven refinement calls before each executor turn: an empty
+executor reply with retained planning is an incomplete response, not a successful
+answer or a wholly empty turn. Tests require all seven usage events, retained
+planning, no answer or tool activity, failed settlement, sanitized provider errors,
+the same native session and exactly the requested number of turns.

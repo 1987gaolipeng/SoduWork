@@ -18,7 +18,7 @@ function requiredFiles(manifest, platform) {
   const runner = manifest.bundled.runner.relativePaths[platform];
   if (!runner) throw Error('Unsupported client platform: ' + platform);
   const common = [runner.replace(/^resources\//, ''),
-    'pi/@earendil-works/pi-coding-agent/dist/cli.js', 'skills/office/SKILL.md'];
+    'pi/node_modules/@earendil-works/pi-coding-agent/dist/cli.js', 'skills/office/SKILL.md'];
   return [...common, ...(platform === 'win32'
     ? ['node/node.exe', 'node/node_modules/npm/bin/npm-cli.js', 'python/python.exe', 'shell/bin/bash.exe', 'shell/cmd/git.exe']
     : ['node/bin/node', 'node/lib/node_modules/npm/bin/npm-cli.js', 'python/bin/python3'])];

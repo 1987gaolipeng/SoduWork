@@ -9,9 +9,18 @@ const TaskSync = require('../core/task-sync.js');
 const assigned = () => ({id:'assigned', title:'Assigned work', status:'todo',triageStage:'ready',readOnly:true,
   canViewExecution:true, canClaimExecution:true, myRoles:['assignee']});
 function fixture(overrides = {}) {
-  const calls = [], events = {}, roots = [];
+  const calls = [], events = {}, roots = [], attachmentReads = [];
+  const materialNodes = {
+    '[data-material-list]': {replaceChildren(){}},
+    '[data-material-status]': {textContent:''},
+    'input[type=file]': {files:[], value:'', click(){}},
+    '[data-material-add]': {},
+  };
+  const materials = {querySelector:selector => materialNodes[selector] || null};
   const window = {Requirements, addEventListener:(name, listener) => {events[name] = listener;},
-    SoduWorkAPI:{getTask:async () => assigned(), prepareRequirementExecution:async id => {
+    SoduWorkAPI:{getTask:async () => assigned(), listAttachments:async id => {
+      attachmentReads.push(id); return [];
+    }, prepareRequirementExecution:async id => {
       calls.push(['claim',id]); return {...assigned(),readOnly:false,canClaimExecution:false};
     }, ...overrides},
     RequirementsBoard:{refresh:async () => calls.push(['refresh'])},
@@ -19,7 +28,8 @@ function fixture(overrides = {}) {
   };
   const context = vm.createContext({window, SoduWorkAPI:window.SoduWorkAPI, tasks:[],
     document:{activeElement:null, createElement:() => {
-      const node={innerHTML:'',remove(){},addEventListener(){},querySelector:() => ({setAttribute(){},focus(){}})};
+      const node={innerHTML:'',remove(){},addEventListener(){},querySelector:selector =>
+        selector === '.fwd-materials' ? materials : ({setAttribute(){},focus(){}})};
       return node;
     }, body:{appendChild:node=>roots.push(node)}},
     esc:text=>text, _svg:()=>'', _fwdSwitch:()=>calls.push(['show-assignment']),
@@ -27,7 +37,7 @@ function fixture(overrides = {}) {
   for(const file of ['panels/chat-task-start.js','requirements/requirement-assignment.js','requirements/requirements-view.js'])
     vm.runInContext(fs.readFileSync(path.join(__dirname,'../components',file),'utf8'),context);
   window.ChatTaskController = window.ChatTaskStart;
-  return {window,calls,events,roots,api:window.RequirementAssignment};
+  return {window,calls,events,roots,attachmentReads,materialNodes,api:window.RequirementAssignment};
 }
 
 test('only explicit Hub claim capability makes a read-only assigned requirement actionable', () => {
@@ -49,6 +59,9 @@ test('explicit assignment click claims once before showing choices and never dis
   assert.equal(await f.api.open('assigned'),true);
   assert.deepEqual(f.calls,[['claim','assigned'],['refresh'],['show-assignment']]);
   assert.equal(f.roots.length,1);
+  await new Promise(done=>setImmediate(done));
+  assert.deepEqual(f.attachmentReads,['assigned']);
+  assert.equal(f.materialNodes['[data-material-status]'].textContent,'暂无输入材料');
 });
 
 test('denied claims remain visible and can be retried without opening execution choices', async () => {
@@ -60,8 +73,10 @@ test('denied claims remain visible and can be retried without opening execution 
   assert.equal(await f.api.open('assigned'),false);
   assert.match(f.calls[0][1],/已被转交/);
   assert.equal(f.roots.length,0);
+  assert.deepEqual(f.attachmentReads,[]);
   assert.equal(await f.api.open('assigned'),true);
   assert.equal(count,2);
+  assert.deepEqual(f.attachmentReads,['assigned']);
 });
 
 test('late claim response after account change cannot open a modal or refresh another account', async () => {
@@ -74,6 +89,7 @@ test('late claim response after account change cannot open a modal or refresh an
   assert.equal(await opening,false);
   assert.equal(f.roots.length,0);
   assert.deepEqual(f.calls,[]);
+  assert.deepEqual(f.attachmentReads,[]);
 });
 
 test('revoked claim capability from a fresh task response prevents any ownership write', async () => {

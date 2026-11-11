@@ -31,6 +31,11 @@ class BuildTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'digest differs'):
                 build.download('https://example.test/file', self.root / 'file', hashlib.sha256(b'expected').hexdigest())
 
+    def test_android_requires_reviewed_mobile_source(self):
+        with patch.object(build, 'ROOT', self.root), patch.object(build.platform, 'system', return_value='Linux'), \
+                self.assertRaisesRegex(ValueError, 'reviewed mobile'):
+            build.android(self.ctx | {'component': 'client'}, self.root, self.root)
+
     def test_postgres_refuses_non_fixture_databases_before_running_commands(self):
         for url in ['postgresql+asyncpg://user:fixture@db.example.test/soduwork_ci',
                     'postgresql+asyncpg://user:fixture@127.0.0.1/production']:

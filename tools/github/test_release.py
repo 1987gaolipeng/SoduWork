@@ -190,6 +190,10 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(check_public_ci.findings(".github/workflows/ci.yml", "http://10.1.2.3"), ["private address in pipeline"])
         self.assertEqual(check_public_ci.findings("tools/github/hub.py", "http://127.0.0.1"), [])
 
+    def test_client_candidate_includes_android_asset(self):
+        self.assertEqual(release.expected({"version": "1.2.3"}, "android"), ["SoduWork-1.2.3-android.apk"])
+        self.assertIn("android", release.SHARDS["client"])
+
 
 if __name__ == "__main__":
     unittest.main()
