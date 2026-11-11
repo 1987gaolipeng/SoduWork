@@ -77,9 +77,24 @@ function _fwpOption(value, label, selected) {
 }
 
 function _fwpModelState(options, selected) {
-  const models = Array.from(new Set((options?.models || []).filter(Boolean)));
+  // The API's legacy list deliberately omits its default. Keep every usable
+  // catalog entry selectable, including a catalog containing just one model.
+  const models = Array.from(new Set([options?.defaultModel, ...(options?.models || []),
+    ...(options?.modelOptions || []).map(item => item.name)].filter(Boolean)));
   const value = String(selected || '');
   return {models, value, stale: Boolean(value && !models.includes(value))};
+}
+
+function _fwpDefaultModelLabel(options, agent) {
+  const cli = String(agent?.cli || agent?.key || '').replace(/^local:/, '');
+  // Defer remote or mixed-seat resolution without claiming which device owns
+  // the preference; dispatch may use the requesting credential owner's model.
+  if (agent?.remote || agent?.locationMode === 'remote' || agent?.locationMode === 'mixed')
+    return '跟随默认模型（派发时解析）';
+  if (options?.defaultModelErrors?.[cli]) return '底座默认不可用，请明确选择模型';
+  const resolved = options?.defaultModels?.[cli];
+  if (resolved) return '跟随底座默认 · ' + resolved;
+  return options?.defaultModel ? '跟随底座默认（目录默认：' + options.defaultModel + '）' : '跟随底座默认';
 }
 
 function _fwpModelOptions(state, defaultLabel) {
