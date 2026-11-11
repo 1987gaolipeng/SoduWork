@@ -339,9 +339,8 @@ async function prepare(app, identity, modelName = '', options = {}) {
   process.env[ENV_AGENT_DIR] = dir;
   if (mcp) process.env.SODUWORK_MCP_SERVERS = mcp;    // Expose the servers.json location to the bridge.
   noProxyFor(got.model.baseUrl);
-  if (!got.historical && got.model.modality !== 'image') {
-    warmupGateway(got.model.baseUrl, got.model.key, got.model.id);
-  }
+  // Configuration reads must not submit inference requests or consume model quota.
+  // Actual model calls start when the user sends a message or runs a task.
   return { ok: true, agentDir: dir, provider: 'soduwork', model: got.model, mcpServers: mcp };
 }
 
