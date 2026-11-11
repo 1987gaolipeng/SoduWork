@@ -55,6 +55,9 @@
     "mobile/ios/"
   ],
   "excludedFiles": [
+    "hub-backend/app/connectors/ppm.py",
+    "hub-backend/smoke/smoke_ppm_connector.py",
+    "hub-backend/smoke_ppm_connector.py",
     "PROJECT_CONTEXT.md",
     "client/distributions.json",
     ".gitlab-ci.yml",
@@ -95,6 +98,11 @@
     "skills/browser-use/voice-tab"
   ],
   "excludedIdentifiers": [
+    "PpmConnector",
+    "connectors.ppm",
+    "smoke_ppm_connector",
+    "PPM Beta",
+    "xingtu",
     "疯狂运营",
     "mediaops",
     "media-ops",

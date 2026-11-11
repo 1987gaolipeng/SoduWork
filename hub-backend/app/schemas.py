@@ -340,7 +340,7 @@ def integration_to_api(i, stats: dict | None = None,
     cfg = dict(i.config or {})
     if "token" in cfg:
         cfg["token"] = "***"  # Mask any credential accidentally present in config; normal secrets stay outside persisted config.
-    # PPM polling credentials are write-only: persist them for unattended polling but return only masks.
+    # Integration credentials are write-only: persist them for unattended polling but return only masks.
     if "mcpKey" in cfg:
         cfg["mcpKey"] = "***"
     if isinstance(cfg.get("keycloak"), dict):

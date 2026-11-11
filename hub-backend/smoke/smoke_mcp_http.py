@@ -154,7 +154,7 @@ chk("图片、资源和结构化结果不丢失",
 chk("有状态会话主动关闭", SEEN["deleted"] is True, SEEN)
 
 c = mcp_servers._clean_one({
-    "name": "PPM", "type": "http", "url": "https://x/mcp",
+    "name": "Example HTTP", "type": "http", "url": "https://x/mcp",
     "headers": {"X-MCP-Key": "k"},
     "keycloak": {"tokenUrl": "https://kc/t", "clientId": "a", "username": "u",
                  "password": "p", "clientSecret": "s", "scope": "one"},
@@ -178,7 +178,7 @@ from unittest.mock import patch
 # This assertion tests configuration shape, not external identity infrastructure.
 with patch.object(mcp_http, "keycloak_token", return_value="isolated-fixture-token"):
     payload = mcp_servers.runtime_payload([c, stdio])
-chk("HTTP 派活形状完整", payload["servers"]["PPM"]["type"] == "http")
+chk("HTTP 派活形状完整", payload["servers"]["Example HTTP"]["type"] == "http")
 chk("stdio 派活形状保持兼容", "command" in payload["servers"]["本地"])
 
 bridge_source = os.path.abspath(os.path.join(
@@ -205,11 +205,11 @@ from app.api.admin import _mcp_mask, _mcp_restore  # noqa: E402
 masked = _mcp_mask(c)
 chk("接口不回显鉴权头和密码", masked["headers"]["X-MCP-Key"] == "••••"
     and masked["keycloak"]["password"] == "••••")
-restored = _mcp_restore({**masked, "name": "PPM改名"}, c)
+restored = _mcp_restore({**masked, "name": "Renamed HTTP"}, c)
 chk("掩码保存沿用旧凭据", restored["headers"]["X-MCP-Key"] == "k"
     and restored["keycloak"]["password"] == "p")
 
-probe = mcp_servers.probe_sync({"name": "假PPM", "type": "http", **SPEC})
+probe = mcp_servers.probe_sync({"name": "HTTP fixture", "type": "http", **SPEC})
 chk("HTTP 探活走完整会话", probe.get("ok") and "bug_list" in probe.get("tools", []), probe)
 
 
@@ -218,12 +218,12 @@ async def ref_chain():
     await init_db()
     async with SessionLocal() as session:
         await mcp_servers.save(session, [{
-            "name": "PPMMCP", "type": "http", **SPEC, "enabled": True,
+            "name": "Example MCP", "type": "http", **SPEC, "enabled": True,
         }])
         await session.commit()
     async with SessionLocal() as session:
         rows = await mcp_servers.load(session)
-        hit = next((item for item in rows if item.get("name") == "PPMMCP"), None)
+        hit = next((item for item in rows if item.get("name") == "Example MCP"), None)
         chk("mcpRef 能解析 HTTP 连接", hit is not None and hit["url"].endswith("/mcp"), hit)
     await engine.dispose()
 
