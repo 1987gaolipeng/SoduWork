@@ -175,6 +175,7 @@ RELEASE_SMOKES = tuple(sorted((
     "test_flash_thinking_upgrade.py",
     "test_ai_proxy_usage_passthrough.py",
     "test_local_artifact_contract.py",
+    "test_local_turn_outcome.py",
     "smoke/smoke_mcp_runner_probe.py",
     "smoke/smoke_mcp_ui.py",
     "smoke/smoke_merge_reauth.py",
