@@ -2,7 +2,7 @@
 from pathlib import Path
 
 
-SCRIPT = (Path(__file__).resolve().parent / "deployers" / "soduwork-hub-local.sh").read_text(
+SCRIPT = (Path(__file__).resolve().parents[1] / "deployers" / "soduwork-hub-local.sh").read_text(
     encoding="utf-8")
 
 

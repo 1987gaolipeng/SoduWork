@@ -65,7 +65,7 @@ class LocalStartupTests(unittest.TestCase):
             old.mkdir(parents=True)
             (old / "local-service.json").write_text("{}", encoding="utf-8")
             self.assertEqual(start.default_state(), old)
-            fresh.mkdir(parents=True)
+            fresh.mkdir(parents=True, exist_ok=True)
             marker = fresh / "local-service.json"
             marker.write_text("{}", encoding="utf-8")
             self.assertEqual(start.default_state(), fresh)
