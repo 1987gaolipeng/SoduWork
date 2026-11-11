@@ -24,22 +24,22 @@ JOURNEYS = {
     "UJ-02": {
         "tier": "p0", "label": "Conversation works without forcing a task",
         "roles": ("office_worker",), "productRequired": True,
-        "deterministic": ("smoke_conversation_ui.py",),
+        "deterministic": ("smoke/smoke_conversation_ui.py",),
         "product": ("../client/e2e/user-journeys.mjs",),
-        "live": ("smoke_ai_proxy.py",),
+        "live": ("smoke/smoke_ai_proxy.py",),
         "productMarker": "UJ-02",
     },
     "UJ-03": {
         "tier": "p0", "label": "Conversation can be promoted to one task",
         "roles": ("requester", "task_owner"), "productRequired": True,
-        "deterministic": ("smoke_conversation_ui.py", "smoke_task_commands.py"),
+        "deterministic": ("smoke/smoke_conversation_ui.py", "smoke/smoke_task_commands.py"),
         "product": ("../client/e2e/user-journeys.mjs",), "live": (),
         "productMarker": "UJ-03",
     },
     "UJ-04": {
         "tier": "p0", "label": "Create and track a normal task",
         "roles": ("task_owner",), "productRequired": True,
-        "deterministic": ("smoke_task_commands.py", "smoke_task_trace.py"),
+        "deterministic": ("smoke/smoke_task_commands.py", "smoke/smoke_task_trace.py"),
         "product": ("../client/e2e/user-journeys.mjs",), "live": (),
         "productMarker": "UJ-04",
     },
@@ -47,8 +47,8 @@ JOURNEYS = {
         "tier": "p0", "label": "People and AI can hand work to each other",
         "roles": ("task_owner", "team_lead", "ai_executor"),
         "productRequired": True,
-        "deterministic": ("smoke_task_transfer.py", "smoke_handoff.py",
-                          "smoke_current_device_dispatch.py"),
+        "deterministic": ("smoke/smoke_task_transfer.py", "smoke/smoke_handoff.py",
+                          "smoke/smoke_current_device_dispatch.py"),
         "product": ("../client/e2e/user-journeys.mjs",), "live": (),
         "productMarker": "UJ-05",
     },
@@ -56,24 +56,24 @@ JOURNEYS = {
         "tier": "p0", "label": "AI work progress is understandable",
         "roles": ("task_owner", "ai_executor", "runner_executor"),
         "productRequired": True,
-        "deterministic": ("smoke_aidesk.py", "smoke_task_trace.py"),
+        "deterministic": ("smoke/smoke_aidesk.py", "smoke/smoke_task_trace.py"),
         "product": ("../client/e2e/user-journeys.mjs",),
-        "live": ("smoke_execution_live.py",),
+        "live": ("smoke/smoke_execution_live.py",),
         "productMarker": "UJ-06",
     },
     "UJ-07": {
         "tier": "p0", "label": "Humans decide only at governed gates",
         "roles": ("project_owner", "release_authorizer", "business_acceptor"),
         "productRequired": True,
-        "deterministic": ("smoke_gate_contract.py", "smoke_golden_delivery.py"),
+        "deterministic": ("smoke/smoke_gate_contract.py", "smoke/smoke_golden_delivery.py"),
         "product": ("../client/e2e/user-journeys.mjs",),
-        "live": ("smoke_approvals.py",),
+        "live": ("smoke/smoke_approvals.py",),
         "productMarker": "UJ-07",
     },
     "UJ-08": {
         "tier": "p0", "label": "Daily and weekly briefs are employee features",
         "roles": ("office_worker", "team_lead"), "productRequired": True,
-        "deterministic": ("smoke_team_daily_report.py", "smoke_work_reports.py"),
+        "deterministic": ("smoke/smoke_team_daily_report.py", "smoke/smoke_work_reports.py"),
         "product": ("../client/e2e/user-journeys-catalog.mjs",), "live": (),
         "productMarker": "UJ-08",
     },
@@ -81,64 +81,64 @@ JOURNEYS = {
         "tier": "p0", "label": "Interrupted work recovers without duplication",
         "roles": ("task_owner", "runner_executor", "runner_admin"),
         "productRequired": True,
-        "deterministic": ("smoke_dispatch_reconcile.py",
-                          "smoke_dispatch_reliability.py",
-                          "smoke_execution_sessions.py"),
+        "deterministic": ("smoke/smoke_dispatch_reconcile.py",
+                          "smoke/smoke_dispatch_reliability.py",
+                          "smoke/smoke_execution_sessions.py"),
         "product": ("../client/e2e/user-journeys.mjs",),
-        "live": ("smoke_runner_job.py",),
+        "live": ("smoke/smoke_runner_job.py",),
         "productMarker": "UJ-09",
     },
     "UJ-10": {
         "tier": "p1", "label": "Requirement becomes a repository delivery",
         "roles": ("requester", "software_engineer", "ai_executor"),
         "productRequired": False,
-        "deterministic": ("smoke_golden_delivery.py", "smoke_repository_assets.py"),
-        "product": (), "live": ("smoke_live_push.py",),
+        "deterministic": ("smoke/smoke_golden_delivery.py", "smoke/smoke_repository_assets.py"),
+        "product": (), "live": ("smoke/smoke_live_push.py",),
     },
     "UJ-11": {
         "tier": "p1", "label": "Independent AI performs code review",
         "roles": ("ai_reviewer", "project_owner"), "productRequired": False,
-        "deterministic": ("smoke_ai_review.py",), "product": (), "live": (),
+        "deterministic": ("smoke/smoke_ai_review.py",), "product": (), "live": (),
     },
     "UJ-12": {
         "tier": "p1", "label": "Approved code merges automatically and once",
         "roles": ("workflow_engine", "project_owner"), "productRequired": False,
-        "deterministic": ("smoke_merge_reauth.py", "smoke_golden_delivery.py"),
-        "product": (), "live": ("smoke_live_push.py",),
+        "deterministic": ("smoke/smoke_merge_reauth.py", "smoke/smoke_golden_delivery.py"),
+        "product": (), "live": ("smoke/smoke_live_push.py",),
     },
     "UJ-13": {
         "tier": "p1", "label": "Authorized release ends in human acceptance",
         "roles": ("release_authorizer", "business_acceptor"),
         "productRequired": False,
-        "deterministic": ("smoke_gate_contract.py", "smoke_golden_delivery.py"),
-        "product": (), "live": ("smoke_live_push.py",),
+        "deterministic": ("smoke/smoke_gate_contract.py", "smoke/smoke_golden_delivery.py"),
+        "product": (), "live": ("smoke/smoke_live_push.py",),
     },
     "UJ-14": {
         "tier": "p1", "label": "Environment chains are configurable",
         "roles": ("environment_admin",), "productRequired": False,
-        "deterministic": ("smoke_environment_config.py",),
-        "product": (), "live": ("smoke_runner_management_live.py",),
+        "deterministic": ("smoke/smoke_environment_config.py",),
+        "product": (), "live": ("smoke/smoke_runner_management_live.py",),
     },
     "UJ-15": {
         "tier": "p1", "label": "Failed delivery is retryable and reversible",
         "roles": ("environment_admin", "delivery_operator"),
         "productRequired": False,
-        "deterministic": ("smoke_rollback.py", "smoke_delivery_truth.py"),
+        "deterministic": ("smoke/smoke_rollback.py", "smoke/smoke_delivery_truth.py"),
         "product": (), "live": (),
     },
     "UJ-16": {
         "tier": "p1", "label": "Workflow plugins are portable and governed",
         "roles": ("workflow_plugin_admin", "workflow_engine"),
         "productRequired": False,
-        "deterministic": ("smoke_plugin_governance.py", "smoke_plugin_ready.py"),
-        "product": (), "live": ("smoke_plugin_e2e.py",),
+        "deterministic": ("smoke/smoke_plugin_governance.py", "smoke/smoke_plugin_ready.py"),
+        "product": (), "live": ("smoke/smoke_plugin_e2e.py",),
     },
 }
 
 
 if is_public_snapshot():
     JOURNEYS["UJ-15"]["label"] = "Delivery evidence is retained and missing private rollback fails explicitly"
-    JOURNEYS["UJ-15"]["deterministic"] = ("test_optional_services.py", "smoke_delivery_truth.py")
+    JOURNEYS["UJ-15"]["deterministic"] = ("test_optional_services.py", "smoke/smoke_delivery_truth.py")
 
 
 def journey_ids(tier: str | None = None) -> tuple[str, ...]:
@@ -174,7 +174,7 @@ def audit(root: Path, groups: Mapping[str, Sequence[str]]) -> list[str]:
             path = (root / name).resolve()
             if not path.is_file():
                 errors.append(f"{journey_id} evidence does not exist: {name}")
-            if name.endswith(".py") and Path(name).name not in offline:
+            if name.endswith(".py") and name not in offline:
                 errors.append(f"{journey_id} deterministic smoke is not in an offline gate: {name}")
         for name in product:
             path = (root / name).resolve()
@@ -189,7 +189,7 @@ def audit(root: Path, groups: Mapping[str, Sequence[str]]) -> list[str]:
         for name in live_rows:
             if not (root / name).resolve().is_file():
                 errors.append(f"{journey_id} live evidence does not exist: {name}")
-            if name.endswith(".py") and Path(name).name not in live:
+            if name.endswith(".py") and name not in live:
                 errors.append(f"{journey_id} live smoke is not in the live gate: {name}")
     if not any(item.get("product") for item in JOURNEYS.values()):
         errors.append("commercial coverage has no real Electron journey")

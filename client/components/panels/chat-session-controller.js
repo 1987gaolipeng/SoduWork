@@ -387,6 +387,11 @@ async function _retryOpenChat() {
     if (!chatId || ctx._ref) return Boolean(ctx._ref);
     if (ctx._openingTask) return Boolean(await ctx._openingTask);
     const previous = ctx._sessionOptions || {};
+    // An unreadable archive may still be a work-only draft. Restore its cards
+    // and saved selection before deciding whether an Agent needs to open.
+    if (ctx._snap?.sessionOpenCode === 'WORK_CARDS_BLOCKED') {
+      return Boolean(await ctx.enter('', chatId, { ...previous }));
+    }
     const options = { ...previous, resumeAsOrdinary: true };
     delete options.taskSession;
     delete options.taskRef; delete options.taskTitle; delete options.requireTaskBinding;

@@ -1,17 +1,19 @@
-# SoduWork 第三方声明
+# Third-party notices
 
-**简体中文** · [English](docs/third-party-notices.en.md) · [文档导航](docs/README.md)
+[简体中文](NOTICE.zh-CN.md) · **English** · [Documentation](docs/README.md)
 
-自有源码使用根目录 MIT 许可证；第三方源码、技能、字体和素材适用各自原始许可证。具体来源、版本与原文见 third-party/manifest.json、client/THIRD_PARTY_NOTICES.md 以及技能目录内的 LICENSE、UPSTREAM.md、ADAPTATIONS.md。
+Project-owned source uses the root MIT license. Third-party code, fonts, assets, and any separately imported skills retain their original terms. See `third-party/manifest.json`, `client/THIRD_PARTY_NOTICES.md`, and any component-specific LICENSE, UPSTREAM.md, or ADAPTATIONS.md.
 
-连接器图标来源记录在 client/assets/connector-brands/sources.json。开源许可不等同于第三方商标授权。
+Connector icon provenance is recorded in `client/assets/connector-brands/sources.json`. An asset license does not grant a third-party trademark endorsement.
 
-安装包分发还需提供各个实际组件的许可及适用的对应源码。尚未完成的材料列于 third-party/public-release.json，不能将源码检查通过视为安装包合规审核通过。
+Binary releases need the notices and applicable corresponding source for the actual bundled components. Outstanding materials are tracked in `third-party/public-release.json`; a passing source check does not certify binary distribution.
+
+From the root:
 
 ```sh
 node tools/check-third-party.cjs
-cd client
-npm run check:licenses
 ```
 
-检查覆盖固定版本材料、摘要和构建资源接入；实际打包时还会收集复制到客户端的运行时依赖许可。Runner 保留已安装 Python 分发的原始元数据和许可，Hub 分发包含项目及第三方材料。生成的清单范围和未齐全事项见 third-party/README.md；这些检查不能代替最终发行物的材料核验。
+Or run `npm run check:licenses` from `client/`. Checks verify fixed-version evidence, hashes, and build integration. Packaging collects original licenses for copied runtime dependencies. Runner retains installed Python metadata and licenses; Hub includes project and third-party materials.
+
+See [distribution materials](third-party/README.md) for coverage and remaining work.

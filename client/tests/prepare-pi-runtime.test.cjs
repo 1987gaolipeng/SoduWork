@@ -60,3 +60,40 @@ test('unsafe package paths and linked dependencies cannot enter runtime staging'
   f.packages['node_modules/linked'] = { link: true };
   assert.throws(f.run, /Unsupported runtime package path/);
 });
+
+test('installer resource copying preserves the staged SDK used by the packaged loader and gate', async t => {
+  const f = fixture(t);
+  f.add('node_modules/dependency', '2.0.0');
+  f.add('node_modules/@earendil-works/pi-coding-agent/node_modules/dependency', '1.0.0');
+  const dist = path.join(f.root, 'node_modules/@earendil-works/pi-coding-agent/dist');
+  fs.mkdirSync(dist);
+  fs.writeFileSync(path.join(dist, 'index.js'), "module.exports = require('dependency');");
+  fs.writeFileSync(path.join(dist, 'cli.js'), '// fixture CLI');
+  f.run();
+  const resources = path.join(f.root, 'resources');
+  const { FileMatcher, copyFiles } = require('app-builder-lib/out/fileMatcher');
+  const mappings = require('../package.json').build.extraResources.filter(row => row.to === 'pi' || row.to.startsWith('pi/'));
+  for (const row of mappings) await copyFiles([new FileMatcher(
+    path.join(f.root, row.from), path.join(resources, row.to), value => value, row.filter)]);
+  const previous = process.resourcesPath;
+  t.after(() => { process.resourcesPath = previous; });
+  process.resourcesPath = resources;
+  const entry = require('../main/pi-session/session-helpers').entryCandidates({ isPackaged: true })[0];
+  assert.equal(require(entry), '1.0.0', 'the packaged SDK resolves its copied nested dependency');
+  assert.equal(require(path.join(resources, 'pi/node_modules/dependency')), '2.0.0');
+  const retryTargets = require('../scripts/patch-pi-retry-schedule.cjs')
+    .candidateFiles({ root: f.root, resourcesPath: resources }).filter(file => file.startsWith(resources + path.sep));
+  assert.equal(retryTargets.length, 2);
+  for (const file of retryTargets) assert.equal(path.dirname(path.dirname(file)), path.dirname(entry));
+  const gate = require('../scripts/verify-runtime.cjs');
+  const manifest = gate.readManifest(path.resolve(__dirname, '..'));
+  fs.writeFileSync(path.join(resources, 'runtime-manifest.json'), JSON.stringify(manifest));
+  for (const relative of gate.requiredFiles(manifest, 'linux').filter(name => !name.startsWith('pi/'))) {
+    const file = path.join(resources, relative);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'fixture');
+  }
+  assert.equal(gate.verify(f.root, 'linux', { packaged: true }).ok, true);
+  fs.unlinkSync(path.join(resources, 'pi/node_modules/@earendil-works/pi-coding-agent/dist/cli.js'));
+  assert.throws(() => gate.verify(f.root, 'linux', { packaged: true }), /missing or empty/);
+});

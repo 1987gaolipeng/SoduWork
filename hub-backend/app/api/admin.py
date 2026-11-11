@@ -533,16 +533,24 @@ async def assign_client(
         raise HTTPException(status_code=404, detail="SoduWork 不存在")
     await _assert_client_in_scope(session, user, c)
     connection_changed = False
+    replaced_desktops = []
     if body.userId:
         target = await session.get(User, body.userId)
         if target is None or not target.is_active:
             raise HTTPException(status_code=400, detail="目标用户不存在")
         await _assert_user_in_scope(session, user, target)
+        from ..services import desktop_login_policy
+        await desktop_login_policy.lock_assignment(session, c, target)
+        await _assert_client_in_scope(session, user, c)
+        await _assert_user_in_scope(session, user, target)
+        if not target.is_active or target.account_deleted_at:
+            raise HTTPException(status_code=400, detail="目标用户不存在")
         if not c.secret_hash:
             raise HTTPException(status_code=409, detail="这台 SoduWork 还没有提交设备密钥")
         if c.user_ref != target.id or c.auth_state != "active":
             connection_changed = True
             device_auth.activate(c, target)
+        replaced_desktops = await desktop_login_policy.replace_previous(session, c, target)
     else:
         connection_changed = bool(c.user_ref or c.auth_state == "active")
         if c.auth_state == "active":
@@ -551,6 +559,8 @@ async def assign_client(
     await session.commit()
     if connection_changed:
         await device_connections.disconnect(cid)
+    for previous_id in replaced_desktops:
+        await device_connections.disconnect(previous_id, 4401)
     await audit.log(session, user, "client.assign", "client", cid, c.name or cid,
                     {"ownerUserId": c.user_ref})
     return {"ok": True, "ownerUserId": c.user_ref, "authState": c.auth_state}
@@ -573,9 +583,18 @@ async def activate_client(
     if target is None or not target.is_active:
         raise HTTPException(status_code=400, detail="请选择一个可用的归属用户")
     await _assert_user_in_scope(session, user, target)
+    from ..services import desktop_login_policy
+    await desktop_login_policy.lock_assignment(session, c, target)
+    await _assert_client_in_scope(session, user, c)
+    await _assert_user_in_scope(session, user, target)
+    if not target.is_active or target.account_deleted_at or not c.secret_hash:
+        raise HTTPException(status_code=409, detail="设备或账号授权已变化，请刷新后重试")
     device_auth.activate(c, target)
+    replaced_desktops = await desktop_login_policy.replace_previous(session, c, target)
     await session.commit()
     await device_connections.disconnect(cid)
+    for previous_id in replaced_desktops:
+        await device_connections.disconnect(previous_id, 4401)
     await audit.log(session, user, "client.activate", "client", cid, c.name or cid,
                     {"ownerUserId": target.id})
     return {"ok": True, "ownerUserId": target.id, "authState": c.auth_state}

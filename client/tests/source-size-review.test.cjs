@@ -54,7 +54,7 @@ test('baseline distinguishes new and growing modules without penalizing existing
 test('resources, skills, tests and styles are visible with their own review categories', () => {
   for (const [name, expected] of [['client/core/locales/ja.js', 'resource'],
     ['skills/example/a.py', 'skill'], ['skills/example/tests/test_a.py', 'test'],
-    ['hub-backend/smoke_example.py', 'test'], ['client/main/a.test.js', 'test'],
+    ['hub-backend/smoke/smoke_example.py', 'test'], ['client/main/a.test.js', 'test'],
     ['client/theme/a.css', 'style'], ['tools/a.cjs', 'tool'], ['hub-backend/app/a.py', 'runtime']]) {
     assert.equal(category(name), expected);
   }

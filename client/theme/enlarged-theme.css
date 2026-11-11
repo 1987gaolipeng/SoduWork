@@ -1,0 +1,20 @@
+/* The opt-in Enlarged theme raises reading sizes without changing saved font
+   or window-scale preferences. Keep compact local surfaces on the same scale. */
+html[data-theme="enlarged"],
+html[data-theme="enlarged"] :is(
+  #cpChat, #cpChat .nchat-scroll, #composePanel, .ncollab-picker, .tfd-shell,
+  .requirements-board, .rq-detail, .wes-layer, .wi-tools, .wi-brief, .wi-rail
+){
+  --font-min-readable:15px;
+  --text-xs:15px;--text-sm:16px;--text-base:17px;--text-md:18px;
+  --text-lg:20px;--text-xl:23px;--text-2xl:28px;
+  --task-text-xs:15px;--task-text-sm:16px;--task-text-base:17px;--task-text-title:21px;
+  --rq-text:17px;--rq-label:15px;--rq-section:19px;
+}
+html[data-theme="enlarged"]{
+  --ink-3:#535b68;--ink-4:#646e7c;--ink-5:#727b87;
+  --ux-muted:#535b68;--ux-faint:#646e7c;
+}
+/* Labels can grow vertically in compact controls instead of clipping. */
+html[data-theme="enlarged"] :is(.ws-nav, .set-seg button){min-height:36px}
+html[data-theme="enlarged"] .si-desc{line-height:1.5;white-space:normal}

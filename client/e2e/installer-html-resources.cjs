@@ -28,7 +28,7 @@ async function main() {
   await beforeModule.exportFromFile(session, { outputPath: baselineFile, themeName: 'dark' });
   const baseline = fs.readFileSync(baselineFile);
   const templatePaths = [
-    'resources/pi/@earendil-works/pi-coding-agent/dist/core/export-html/template.html',
+    'resources/pi/node_modules/@earendil-works/pi-coding-agent/dist/core/export-html/template.html',
     'resources/skills/brainstorming/scripts/frame-template.html',
   ];
   const customerPaths = initial.files.filter(item => templatePaths.includes(item.path) ||

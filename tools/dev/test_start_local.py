@@ -40,11 +40,12 @@ class LocalStartupTests(unittest.TestCase):
 
     def test_node_version_matches_runtime_dependency_minimum(self):
         with patch.object(build.shutil, 'which', side_effect=lambda name: name):
-            for version in ['v22.18.0', 'v20.20.0']:
+            for version in ['v22.18.0', 'v20.20.0', 'v22.18.9-rc.1', 'v26.0', 'v26.0.0-invalid suffix']:
                 with self.subTest(version=version), patch.object(build.subprocess, 'check_output', return_value=version), \
                         self.assertRaisesRegex(build.StartupError, '22.19'):
                     build.check_dependencies()
-            for version in ['v22.19.0', 'v24.18.0']:
+            for version in ['v22.19.0', 'v24.18.0', 'v26.0.0-nightly.20250611d1045ea0f2',
+                            'v24.0.0-rc.1', 'v24.0.0+build.42']:
                 with self.subTest(version=version), patch.object(build.subprocess, 'check_output', return_value=version):
                     self.assertEqual(len(build.check_dependencies()), 2)
 
@@ -60,7 +61,11 @@ class LocalStartupTests(unittest.TestCase):
                 return  # Native macOS path is covered by its platform startup job.
             fresh = start.default_state()
             self.assertIn("soduwork", fresh.as_posix().lower())
-            fresh.mkdir(parents=True)
+            old = base / ("SoduWork/source-service" if os.name == "nt" else "soduwork/source-service")
+            old.mkdir(parents=True)
+            (old / "local-service.json").write_text("{}", encoding="utf-8")
+            self.assertEqual(start.default_state(), old)
+            fresh.mkdir(parents=True, exist_ok=True)
             marker = fresh / "local-service.json"
             marker.write_text("{}", encoding="utf-8")
             self.assertEqual(start.default_state(), fresh)
@@ -176,6 +181,18 @@ class LocalStartupTests(unittest.TestCase):
         self.assertEqual(len(seen), 1)
         self.assertIsNotNone(seen[0].poll())
 
+    def test_timed_out_download_reaps_its_process_and_allows_retry(self):
+        root = Path(self.temp.name)
+        marker = root / 'finished'
+        command = [sys.executable, '-c',
+                   'import time,pathlib,sys; time.sleep(2); pathlib.Path(sys.argv[1]).touch()', str(marker)]
+        with self.assertRaisesRegex(build.StartupError, 'timed out'):
+            build.run(command, cwd=root, log=root / 'download.log', label='Download fixture', timeout=.1)
+        self.assertFalse(marker.exists())
+        build.run([sys.executable, '-c', 'import pathlib,sys; pathlib.Path(sys.argv[1]).touch()', str(marker)],
+                  cwd=root, log=root / 'download.log', label='Retry fixture', timeout=5)
+        self.assertTrue(marker.exists())
+
     def test_busy_port_is_left_running(self):
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
@@ -185,24 +202,20 @@ class LocalStartupTests(unittest.TestCase):
                 start.assert_available("127.0.0.1", port)
             self.assertEqual(listener.getsockname()[1], port)
 
-    @unittest.skipIf(os.name == "nt", "POSIX TIME_WAIT reuse; Windows keeps exclusive binding")
-    def test_closed_server_connections_do_not_block_immediate_restart(self):
+    @unittest.skipIf(os.name == "nt", "POSIX listener reuse; Windows uses exclusive bind")
+    def test_closed_http_connection_allows_restart_but_live_reusable_listener_does_not(self):
         with socket.socket() as listener:
             listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             listener.bind(("127.0.0.1", 0))
             listener.listen()
             port = listener.getsockname()[1]
-            with socket.create_connection(("127.0.0.1", port), timeout=2) as client:
-                connection, _ = listener.accept()
-                connection.close()
-                self.assertEqual(client.recv(1), b"")
-        start.assert_available("127.0.0.1", port)
-        with socket.socket() as restarted:
-            restarted.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            restarted.bind(("127.0.0.1", port))
-            restarted.listen()
             with self.assertRaisesRegex(start.StartupError, "already in use"):
                 start.assert_available("127.0.0.1", port)
+            with socket.create_connection(("127.0.0.1", port), timeout=2) as peer:
+                accepted, _ = listener.accept()
+                accepted.close()
+                self.assertEqual(peer.recv(1), b"")
+        start.assert_available("127.0.0.1", port)
 
     def test_check_is_read_only_even_for_a_new_data_directory(self):
         with patch.object(start, 'dependency_report') as report, patch.object(start, 'initialize') as initialize:
@@ -277,6 +290,28 @@ class LocalStartupTests(unittest.TestCase):
                 patch.object(build, 'run'), patch.dict(os.environ, {'DISPLAY': ':fixture'}):
             with self.assertRaisesRegex(build.StartupError, 'Electron was not downloaded'):
                 build.prepare_desktop(self.state, self.state / 'startup.log')
+        self.assertFalse((self.state / 'desktop-dependencies.sha256').exists())
+
+    def test_desktop_download_failure_keeps_overrides_and_reports_recovery(self):
+        client = self.state / 'application/client'
+        client.mkdir(parents=True)
+        (client / 'package-lock.json').write_text('{}')
+        calls = []
+        def run(command, **kwargs):
+            calls.append((command, kwargs))
+            if command[0] == 'node':
+                self.assertEqual(os.environ['ELECTRON_MIRROR'], 'https://mirror.example/electron/')
+                self.assertEqual(os.environ['HTTPS_PROXY'], 'http://proxy.example:8080')
+                raise build.StartupError('Download fixture timed out')
+        with patch.object(build, 'check_dependencies', return_value=('node', 'npm')), \
+                patch.object(build, 'run', side_effect=run), patch.dict(os.environ, {
+                    'DISPLAY': ':fixture', 'ELECTRON_MIRROR': 'https://mirror.example/electron/',
+                    'HTTPS_PROXY': 'http://proxy.example:8080',
+                }):
+            with self.assertRaisesRegex(build.StartupError, 'ELECTRON_MIRROR'):
+                build.prepare_desktop(self.state, self.state / 'startup.log')
+        self.assertEqual(calls[-1][1]['timeout'], build.ELECTRON_DOWNLOAD_TIMEOUT)
+        self.assertIsNone(calls[-1][1].get('env'))
         self.assertFalse((self.state / 'desktop-dependencies.sha256').exists())
 
     def test_desktop_failure_is_reported_and_a_normal_quit_returns(self):

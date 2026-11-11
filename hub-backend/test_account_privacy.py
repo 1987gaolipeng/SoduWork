@@ -1087,9 +1087,19 @@ class AccountPrivacyTests(unittest.IsolatedAsyncioTestCase):
     async def test_legal_documents_available_without_login_and_consent_history(self):
         response=await self.http.get("/api/v1/client-auth/legal-documents")
         self.assertEqual(response.status_code,200,response.text)
-        self.assertEqual(len(response.json()["documents"]),2)
+        payload = response.json()
+        documents = payload["documents"]
+        expected = {(kind, locale) for kind in ("terms", "privacy")
+                    for locale in ("zh-CN", "en-US", "ja-JP", "ko-KR")}
+        self.assertCountEqual([(doc["key"], doc["locale"]) for doc in documents], expected)
+        for doc in documents:
+            self.assertEqual(doc["version"], payload["requiredConsentVersions"][doc["key"]])
+            self.assertTrue(doc["title"].strip())
+            self.assertTrue(doc["content"].strip())
         privacy=(await self.call("GET", "/me/privacy")).json()
         self.assertEqual(len(privacy["consents"]),2)
+        self.assertEqual({item["document"]: item["version"] for item in privacy["consents"]},
+                         payload["requiredConsentVersions"])
         self.assertTrue(privacy["scopeSummary"])
         self.assertIn("注销会清理账号资料", privacy["deletionScopeSummary"])
         self.assertNotIn("导出", privacy["deletionScopeSummary"])

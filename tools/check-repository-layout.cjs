@@ -5,12 +5,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { sourceFiles } = require('./source-files.cjs');
 const root = path.resolve(__dirname, '..');
-const SOURCE_ROOTS = new Set(['client', 'hub-backend', 'hub-frontend', 'skills', 'docs', 'ops', 'tools', 'third-party']);
+const SOURCE_ROOTS = new Set(['client', 'mobile', 'hub-backend', 'hub-frontend', 'skills', 'docs', 'ops', 'tools', 'third-party']);
 const GITHUB_FILES = new Set([
   '.github/CI.md', '.github/dependabot.yml', '.github/PULL_REQUEST_TEMPLATE.md',
   '.github/ISSUE_TEMPLATE/config.yml', '.github/ISSUE_TEMPLATE/bug_report.yml',
   '.github/ISSUE_TEMPLATE/feature_request.yml', '.github/workflows/ci.yml', '.github/workflows/security.yml',
-  '.github/workflows/release.yml', '.github/RELEASE.md',
+  '.github/workflows/release.yml', '.github/workflows/packages.yml', '.github/RELEASE.md',
 ]);
 const RETIRED = new Set([
   'SOURCE-MANIFEST.json', 'PUBLIC-SOURCE.json', 'Dockerfile.server',
@@ -49,6 +49,9 @@ function auditFiles(files) {
     const first = name.split('/')[0];
     if (name.includes('/') && !SOURCE_ROOTS.has(first) && !GITHUB_FILES.has(name)) errors.push('Undocumented source root: ' + first);
     if (GENERATED.test(name) || (name.startsWith('client/runner/') && name !== 'client/runner/README.md') ||
+        /^mobile\/(?:build|\.dart_tool|\.pub-cache)\//.test(name) ||
+        /^mobile\/android\/(?:key\.properties|local\.properties)$/.test(name) ||
+        (name.startsWith('mobile/') && /\.(?:jks|keystore|apk|aab)$/.test(name)) ||
         (name.startsWith('mobile-web-dist/') && name !== 'mobile-web-dist/.gitkeep')) {
       errors.push('Generated or runtime file tracked as source: ' + name);
     }

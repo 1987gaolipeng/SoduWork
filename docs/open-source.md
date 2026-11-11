@@ -1,8 +1,8 @@
 # 源码使用与分发
 
-**简体中文** · [English](open-source.en.md) · [文档导航](README.md)
+**简体中文** · [English](open-source.en.md) · [文档导航](README.zh-CN.md)
 
-本地使用见[启动指南](getting-started.md)，开发见[开发指南](development.md)，团队部署见[自托管指南](../ops/self-host/README.md)。
+本地使用见[启动指南](getting-started.md)，开发见[开发指南](development.md)，团队部署见[自托管指南](../ops/self-host/README.zh-CN.md)。
 
 ## 配置自己的服务
 
@@ -31,28 +31,20 @@ node tools/check-public-source.cjs
 node tools/check-third-party.cjs
 ```
 
-维护者修改源码后，先将需要分发的文件加入 Git，再更新并验证清单：
-
-```sh
-node tools/check-source-manifest.cjs --write-manifest
-node tools/check-source-manifest.cjs
-git add tools/distribution/SOURCE-MANIFEST.json
-```
-
-审查并提交代码和清单后，再导出已提交的文件树；输出文件必须在源码目录之外且尚不存在：
+审查并提交源码后再导出。开发阶段的改动由 Git 管理，普通 PR 和依赖更新无需生成或提交源码清单。输出文件必须在源码目录之外且尚不存在：
 
 ```sh
 python tools/export_source.py --output ../soduwork-source-v1.zip
 ```
 
-导出器逐文件核对清单，拒绝未列入清单的内容、符号链接和越界路径。它只导出当前提交，不包含 Git 历史、未跟踪文件或缓存。尚未提交的修改不会进入源码包；使用新的输出文件名保留既有包。
+导出器根据压缩包内的文件自动生成 `tools/distribution/SOURCE-MANIFEST.json`，记录源码提交，并验证生成的 ZIP。它拒绝分发范围之外的内容、符号链接和越界路径。它只导出当前提交，不包含 Git 历史、未跟踪文件或缓存。尚未提交的修改不会进入源码包；使用新的输出文件名保留既有包。
 
-`tools/distribution/SOURCE-MANIFEST.json` 记录摘要和大小。UTF-8 文本按 LF 换行计算，兼容 Windows CRLF；二进制按原字节计算。清单仅验证完整性，不代替秘密扫描、第三方授权或 Git 历史审查。
+自动生成的清单记录摘要和大小。UTF-8 文本按 LF 换行计算，兼容 Windows CRLF；二进制按原字节计算。在导出器生成的 ZIP 解压目录中，运行 `node tools/check-source-manifest.cjs` 可检测文件变化、缺失或额外文件。在 Git checkout 中，该命令使用 Git 文件列表，不要求存在清单。清单验证压缩包内容的一致性，不证明发布者身份，也不代替秘密扫描、第三方授权或 Git 历史审查。
 
 ## 准备 GitHub 仓库
 
-把已验证的 ZIP 解压到新的空目录，在该目录初始化新的 Git 仓库并审查文件，再连接自己的 GitHub 远程地址。不要直接公开原开发仓库，不要带入私有分支、旧标签或开发历史。
+把已验证的 ZIP 解压到新的空目录，在该目录初始化新的 Git 仓库并审查文件，再连接自己的 GitHub 远程地址。自动生成的源码清单由 Git 忽略，不应加入新仓库。不要直接公开原开发仓库，不要带入私有分支、旧标签或开发历史。
 
 根目录 `README.md` 是英文入口，顶部可切换到中文 `README.zh-CN.md`。导航采用相对链接，Fork 或更换仓库名后无需改写地址。补充语言遵循[翻译约定](development.md#文档与翻译)。
 
-项目许可见 [LICENSE](../LICENSE)，第三方原始许可证与署名见 [NOTICE.md](../NOTICE.md) 和 `third-party/`。安装包、容器镜像和其他二进制依赖需要分别完成许可与运行验证。
+项目许可见 [LICENSE](../LICENSE)，第三方原始许可证与署名见 [NOTICE.zh-CN.md](../NOTICE.zh-CN.md) 和 `third-party/`。安装包、容器镜像和其他二进制依赖需要分别完成许可与运行验证。

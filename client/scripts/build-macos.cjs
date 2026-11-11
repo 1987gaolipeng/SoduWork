@@ -6,25 +6,34 @@ const { execFileSync } = require('node:child_process');
 const { prepareRunner } = require('./prepare-runner.cjs');
 const { macosBuildEnvironment } = require('./macos-build-environment.cjs');
 const { notarizeArtifact, notarizeEnabled, signingIdentity } = require('./notarize-macos.cjs');
+const { candidateVersion } = require('./client-build-version.cjs');
 
 function signingKeychain(env = process.env) {
   return env.SODUWORK_MAC_KEYCHAIN || (env.HOME ? path.join(env.HOME, 'Library/Keychains/login.keychain-db') : '');
 }
 
 function build({ root = path.resolve(__dirname, '../..'), platform = process.platform,
-  env = process.env, run = execFileSync, prepare = prepareRunner, hostArch = process.arch } = {}) {
+  env = process.env, run = execFileSync, prepare = prepareRunner, hostArch = process.arch,
+  distributions, preparedRunner, beforePackages = () => {}, beforePackage = () => {}, afterPackage = () => {} } = {}) {
   assert.equal(platform, 'darwin', 'macOS packages require a native Mac runner');
+  assert.ok((!distributions || (distributions.length === 1 && distributions[0] === 'self-hosted')) &&
+    (!env.SODUWORK_DISTRIBUTION || env.SODUWORK_DISTRIBUTION === 'self-hosted'),
+  'Public macOS builds support only the self-hosted distribution');
+  assert.ok(!preparedRunner && !env.SODUWORK_MAC_NOTARY_STATE_DIR && !env.SODUWORK_MAC_BUILD_INPUT_ID,
+    'Private build checkpoints are unavailable in the public source');
   const architectures = env.SODUWORK_MACOS_ARCH === undefined ? ['arm64', 'x64'] : [env.SODUWORK_MACOS_ARCH];
   assert.ok(architectures.every(arch => ['arm64', 'x64'].includes(arch)), 'Invalid SODUWORK_MACOS_ARCH');
   assert.ok(hostArch !== 'x64' || !architectures.includes('arm64'), 'Intel Mac cannot execute ARM build tools; select SODUWORK_MACOS_ARCH=x64');
   const toolchain = macosBuildEnvironment({ env, run, hostArch });
   try {
-    return buildTargets({ root, platform, env: toolchain.env, run, prepare, architectures, hostArch });
+    return buildTargets({ root, platform, env: toolchain.env, run, prepare, architectures, hostArch,
+      beforePackages, beforePackage, afterPackage });
   } finally {
     toolchain.cleanup();
   }
 }
-function buildTargets({ root, platform, env, run, prepare, architectures, hostArch }) {
+function buildTargets({ root, platform, env, run, prepare, architectures, hostArch,
+  beforePackages, beforePackage, afterPackage }) {
   const client = path.join(root, 'client');
   const targets = architectures.map(arch => ({ arch,
     python: env['SODUWORK_MACOS_' + arch.toUpperCase() + '_PYTHON'] ||
@@ -54,8 +63,20 @@ function buildTargets({ root, platform, env, run, prepare, architectures, hostAr
     assert.ok(architectures.includes(arch === 'x64' ? 'x86_64' : 'arm64'), 'Bundled Runner architecture differs from ' + arch);
     run(python, [path.join(root, 'tools/ci/verify-runner-skills.py'), runner], { env, cwd: root, stdio: 'inherit' });
     // Finish each package before replacing the shared Runner with the next architecture.
+    beforePackages({ arch, env });
+    beforePackage();
+    const signed = identity && notarizeEnabled(env);
+    const dmgPath = signed ? path.join(client, 'dist', `SoduWork-${candidateVersion(env, root)}-mac-${arch}.dmg`) : '';
     run(process.execPath, [path.join(client, 'node_modules/electron-builder/cli.js'), '--mac', '--' + arch, '--publish', 'never',
-      '--config.mac.identity=-'], { env, cwd: client, stdio: 'inherit' });
+      '--config.mac.identity=' + (identity || '-'),
+      ...(signed ? ['--config.mac.hardenedRuntime=true', '--config.afterSign=scripts/notarize-macos.cjs'] : [])],
+    { env, cwd: client, stdio: 'inherit' });
+    if (signed) {
+      // The afterSign hook notarizes and staples the App; notarize its DMG too.
+      assert.ok(fs.existsSync(dmgPath), 'electron-builder did not produce ' + path.relative(root, dmgPath));
+      notarizeArtifact({ artifactPath: dmgPath, env, run });
+    }
+    afterPackage(env, arch);
   }
 }
 module.exports = { build };

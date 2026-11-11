@@ -1,6 +1,6 @@
 # Connector OAuth deployment and validation
 
-[简体中文](CONNECTOR_OAUTH.md) · **English** · [Backend guide](README.en.md)
+[简体中文](CONNECTOR_OAUTH.md) · **English** · [Backend guide](README.md)
 
 Personal built-in OAuth supports Google Drive, OneDrive, Outlook, SharePoint, and Microsoft Teams. Existing native WeCom, Feishu, and DingTalk flows are separate. Shared organization connections must not bind an administrator's personal OAuth account; users authorize their own connections through platform login.
 

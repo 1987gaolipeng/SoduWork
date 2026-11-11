@@ -1,25 +1,27 @@
 # Developer guide
 
-[简体中文](development.md) · **English** · [Documentation](index.en.md)
+[简体中文](development.md) · **English** · [Documentation](README.md)
+
+Command examples use `sh start.sh` on macOS/Linux. On Windows, use `.\start.cmd` in PowerShell or `start.cmd` in Command Prompt with the same arguments. Standalone Python tools use `python3`; use `py` on Windows, or `python` inside an activated virtual environment.
 
 ## First visit
 
-Follow the [startup guide](getting-started.en.md) and run `python start.py --desktop`. Once you can sign in, choose the component you want to change. The root holds project entry points, licensing, and contribution information. Dependency, build, and distribution configuration lives with the relevant component.
+Follow the [startup guide](getting-started.en.md) and run `sh start.sh --desktop`. Once you can sign in, choose the component you want to change. The root holds project entry points, licensing, and contribution information. Dependency, build, and distribution configuration lives with the relevant component.
 
 | Change | Source entry points | Component reference |
 | --- | --- | --- |
-| Desktop windows, conversations, settings | `client/main.js`, `client/main/`, `client/core/`, `client/components/` | [Desktop reference](../client/README.en.md) |
-| APIs, authorization, data, execution | `hub-backend/app/main.py`, `app/api/`, `app/services/`, `runner_main.py` | [Backend reference](../hub-backend/README.en.md) |
-| Browser administration UI | `hub-frontend/src/main.jsx`, `hub-frontend/src/` | [Frontend reference](../hub-frontend/README.en.md) |
+| Desktop windows, conversations, settings | `client/main.js`, `client/main/`, `client/core/`, `client/components/` | [Desktop reference](../client/README.md) |
+| APIs, authorization, data, execution | `hub-backend/app/main.py`, `app/api/`, `app/services/`, `runner_main.py` | [Backend reference](../hub-backend/README.md) |
+| Browser administration UI | `hub-frontend/src/main.jsx`, `hub-frontend/src/` | [Frontend reference](../hub-frontend/README.md) |
 | Skills, plugins, workflows | `skills/`, `hub-backend/plugins/` | [Plugin protocol](plugin-authoring.en.md) |
-| Local startup and deployment | `start.py`, `tools/dev/`, `ops/self-host/` | [Self-hosting](../ops/self-host/README.en.md) |
+| Local startup and deployment | `start.py`, `tools/dev/`, `ops/self-host/` | [Self-hosting](../ops/self-host/README.md) |
 | Distribution scope and integrity | `tools/distribution/`, `tools/export_source.py` | [Source distribution](open-source.en.md) |
 
 Backend `app/` paths and `runner_main.py` in the table are relative to `hub-backend/`. Each application installs its own dependencies; there is no root npm workspace.
 
 ## Management UI
 
-Run `python start.py` from the root in one terminal, then start Vite in another. The source launcher uses port **18989**, while Vite defaults to a backend on **9080**. Set the proxy target explicitly.
+Run `sh start.sh` from the root in one terminal, then start Vite in another. The source launcher uses port **18989**, while Vite defaults to a backend on **9080**. Set the proxy target explicitly.
 
 PowerShell:
 
@@ -51,15 +53,15 @@ node --test tests/*.test.mjs
 
 The root launcher synchronizes source to a private runtime copy; **it does not hot reload a running backend**. After changing source, stop and restart the same launcher command to preserve data. Do not edit the `application/` copy inside the private data directory.
 
-For automatic reload, create a separate development environment and start Uvicorn as described in the [backend reference](../hub-backend/README.en.md); its default port is 9080. Use an isolated database and test accounts. Keep environment files local. Add an Alembic migration for schema changes instead of deleting user data.
+For automatic reload, create a separate development environment and start Uvicorn as described in the [backend reference](../hub-backend/README.md); its default port is 9080. Use an isolated database and test accounts. Keep environment files local. Add an Alembic migration for schema changes instead of deleting user data.
 
 Run backend checks in its dedicated environment:
 
 ```sh
 cd hub-backend
-python -m pip install -r requirements-test.txt
-python quality_gate.py --list
-python quality_gate.py --profile release --scope backend
+python3 -m pip install -r requirements-test.txt
+python3 quality_gate.py --list
+python3 quality_gate.py --profile release --scope backend
 ```
 
 The full offline gate takes time. Start with the registered checks relevant to your change. `live` checks connect to real services or models and require your own isolated environment; they are outside default offline validation.
@@ -91,15 +93,15 @@ Models, executors such as Codex, and imported plugins use credentials and permis
 Run the checks relevant to your change from the root:
 
 ```sh
-python -m unittest tools.dev.test_start_local
+python3 -m unittest tools.dev.test_start_local
 node tools/check-public-source.cjs
 node tools/check-repository-layout.cjs
 node tools/check-third-party.cjs
 node tools/check-docs.cjs
-python tools/security/scan_secrets.py --download
+python3 tools/security/scan_secrets.py --download
 ```
 
-For startup changes, also run `python tools/dev/verify_local_start.py --desktop`, which needs network access and a graphical desktop. For documentation changes, verify links and commands; do not imply unperformed platform acceptance. Stage new files before refreshing the source manifest as described in [Contributing](../CONTRIBUTING.md).
+For startup changes, also run `python3 tools/dev/verify_local_start.py --desktop`, which needs network access and a graphical desktop. For documentation changes, verify links and commands; do not imply unperformed platform acceptance. Review and stage new source files as described in [Contributing](../CONTRIBUTING.md); archive manifests are generated during export and are not committed.
 
 ## Comment conventions
 
@@ -111,8 +113,8 @@ See [GitHub configuration](../.github/CI.md) for automated checks and platform l
 
 Use the relative language links at the top of each page on GitHub. The same paths work in downloaded source; no documentation server is needed.
 
-- The default overview is root `README.md` in English; Chinese is root `README.zh-CN.md`. Documentation indexes are `docs/README.md` (Chinese) and `docs/index.en.md` (English).
-- Root `CONTRIBUTING.md` and `SECURITY.md` are in English; their Chinese versions live in `docs/contributing.zh-CN.md` and `docs/security.zh-CN.md`. Other paired guides use `name.md` (Chinese) / `name.en.md` (English); English self-hosting lives in `ops/self-host/README.en.md`.
+- The root and component directories use English `README.md` and Chinese `README.zh-CN.md`. The documentation indexes follow the same convention in `docs/`. Previous `README.en.md` and `docs/index.en.md` URLs link to the canonical English pages.
+- Root `NOTICE.md` is English, paired with `NOTICE.zh-CN.md`. `CONTRIBUTING.md` and `SECURITY.md` are English, with Chinese versions in `docs/contributing.zh-CN.md` and `docs/security.zh-CN.md`. Other paired guides use `name.md` (Chinese) / `name.en.md` (English).
 - Keep commands, prerequisites, data handling, and permission guidance synchronized in both languages. Preserve reciprocal language links and a navigation link at the top.
 - Use an explicit suffix for another language, such as `.ja.md`, and register completed pages in the overview and index. Label untranslated references with their actual language; do not add empty translations or label Chinese destinations as English.
 - Use relative documentation links without hardcoded GitHub repository addresses or private development branch names so forks and source archives remain usable.

@@ -17,11 +17,6 @@ def delivered_node(payload: Path, executable: Path) -> Path:
     assert executable.is_file(), "Delivered Electron runtime is missing"
     return executable
 
-def delivered_node(payload: Path, executable: Path) -> Path:
-    assert executable.parent == payload and executable.suffix.lower() == ".exe", "Delivered Electron runtime must belong to the payload"
-    assert executable.is_file(), "Delivered Electron runtime is missing"
-    return executable
-
 def main():
     exe, payload, root, executable = [Path(x).resolve() for x in sys.argv[1:5]]
     bundled_node = delivered_node(payload, executable)

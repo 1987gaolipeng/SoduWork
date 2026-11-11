@@ -31,7 +31,7 @@ async function main() {
   const inventory = JSON.parse(fs.readFileSync(path.join(root, '.soduwork-payload.json'))).files;
   assert.ok(!inventory.some(row => /(?:^|\/)opencode(?:\/|\.exe$)/i.test(row.path)));
   assert.equal(fs.existsSync(path.join(resources, 'opencode')), false);
-  for (const name of ['shell/bin/bash.exe', 'pi/@earendil-works/pi-coding-agent/package.json']) {
+  for (const name of ['shell/bin/bash.exe', 'pi/node_modules/@earendil-works/pi-coding-agent/package.json']) {
     assert.ok(inventory.some(row => row.path === 'resources/' + name), name);
   }
   assert.ok(!inventory.some(row => /^resources\/skills\/.+(?:__pycache__|\.py[co]$|node_modules|\.venv)/.test(row.path)));

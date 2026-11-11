@@ -3,7 +3,6 @@ from .base import Connector
 from .example import ExampleConnector
 from .gitlab import GitLabConnector
 from .github import GitHubConnector
-from .ppm import PpmConnector
 from .testplat import TestPlatConnector
 
 REGISTRY: dict[str, Connector] = {
@@ -11,7 +10,6 @@ REGISTRY: dict[str, Connector] = {
     GitLabConnector.type: GitLabConnector(),
     GitHubConnector.type: GitHubConnector(),
     TestPlatConnector.type: TestPlatConnector(),   # Push-only testing-platform issue adapter.
-    PpmConnector.type: PpmConnector(),             # PPM MCP polling adapters.
 }
 
 

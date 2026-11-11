@@ -40,7 +40,7 @@ if (typeof electron === 'string') {
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const previewUrl = 'http://127.0.0.1:' + server.address().port + '/preview';
-    ipcMain.handle('pi-session-history', () => ({ ok: true, chats: [] }));
+    ipcMain.handle('pi-session-history', require('./fixtures/history-ipc.cjs').create(() => ({ ok: true, chats: [] })));
     ipcMain.handle('open-external', (_e, url) => { external.push(url); return { ok: true }; });
     const testApp = { getAppPath: () => tmp, getVersion: () => require('../package.json').version,
       isPackaged: false, getPath: key => key === 'userData' ? path.join(tmp, 'profile') : tmp };
@@ -74,8 +74,7 @@ if (typeof electron === 'string') {
     assert.equal(await js(`document.querySelector('.window-menu nav').hidden`), false);
     assert.equal(await js(`document.querySelectorAll('.wm-title-brand').length`), 0);
     report.cases.push('Production titlebar options expose native Windows captions and draggable empty space without duplicating the sidebar brand; menu buttons remain non-draggable.');
-    const initialCaptionColor = titlebarThemes.at(-1).color;
-    await js(`document.documentElement.style.setProperty('--ws-side','#17191f');document.documentElement.style.setProperty('--ink-3','#dadde4');void 0;`);
+    await js(`document.documentElement.style.setProperty('--bg-0','#17191f');document.documentElement.style.setProperty('--ink-3','#dadde4');void 0;`);
     for (let i = 0; i < 100 && titlebarThemes.at(-1)?.color !== '#17191f'; i++) await delay(20);
     assert.deepEqual(titlebarThemes.at(-1), { color: '#17191f', symbolColor: '#dadde4', height: 34 });
     await shot('titlebar-dark');

@@ -13,7 +13,7 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-titlebar-modal-'));
 fs.mkdirSync(output, { recursive: true });
 app.setPath('userData', path.join(temp, 'profile'));
 app.disableHardwareAcceleration();
-const report = { ok: false, boundary: 'Linux Electron, production project dialog/CSS and real native titlebar API; Windows caption painting still requires Windows acceptance.', cases: [], colors: [], errors: [] };
+const report = { ok: false, platform: process.platform, boundary: `${process.platform} Electron, production project dialog/CSS and real native titlebar API; rendered backdrop pixels are compared with the colors sent to the native caption API.`, cases: [], colors: [], errors: [] };
 const themes = [];
 let win;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -51,8 +51,9 @@ async function shot(name) {
 }
 const deadline = setTimeout(() => { console.error('Titlebar modal verification timed out'); app.exit(1); }, 60000);
 app.whenReady().then(async () => {
-  ipcMain.handle('pi-session-history', () => ({ ok: true, chats: [] }));
+  ipcMain.handle('pi-session-history', require('./fixtures/history-ipc.cjs').create(() => ({ ok: true, chats: [] })));
   ipcMain.handle('recent-workspace-get', () => ({ ok: true, dir: '' }));
+  ipcMain.handle('app-info', () => ({ version: 'fixture', website: '', releaseHistory: [] }));
   const fixture = path.join(__dirname, 'fixtures/sidebar-projects.html');
   const html = fs.readFileSync(fixture, 'utf8').replace('<head>', '<head><base href="' + pathToFileURL(path.dirname(fixture) + path.sep).href + '">')
     .replace('</head>', '<link rel="stylesheet" href="../../components/workspace/window-menu.css">' +

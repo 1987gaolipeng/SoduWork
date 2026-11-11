@@ -14,6 +14,7 @@ import signal
 import subprocess
 import sys
 import platform
+import re
 import time
 
 
@@ -24,6 +25,7 @@ BACKEND_FILES = (
     "requirements.txt", "requirements-runner.txt", "alembic.ini", "runner_main.py", "db_admin.py",
     "full_backup.py", "pack_plugin.py", "client-update-trust.json",
 )
+ELECTRON_DOWNLOAD_TIMEOUT = 600
 
 
 class StartupError(RuntimeError):
@@ -58,7 +60,8 @@ def spawn_options() -> dict:
             else {"start_new_session": True})
 
 
-def wait_child(child: subprocess.Popen, *, progress_label: str | None = None) -> int:
+def wait_child(child: subprocess.Popen, *, progress_label: str | None = None,
+               timeout: float | None = None) -> int:
     # Windows' infinite WaitForSingleObject defers Python signal handlers.
     # Bounded waits keep Ctrl+C responsive during both installs and serving.
     started = last_progress = time.monotonic()
@@ -67,6 +70,8 @@ def wait_child(child: subprocess.Popen, *, progress_label: str | None = None) ->
             return child.wait(timeout=.5)
         except subprocess.TimeoutExpired:
             now = time.monotonic()
+            if timeout is not None and now - started >= timeout:
+                raise subprocess.TimeoutExpired(child.args, timeout)
             if progress_label and now - last_progress >= 15:
                 print(f"  正在进行 / Still running: {progress_label} ({int(now - started)}s). "
                       "请保持窗口打开 / Keep this window open.", flush=True)
@@ -74,7 +79,7 @@ def wait_child(child: subprocess.Popen, *, progress_label: str | None = None) ->
 
 
 def run(command: list[str], *, cwd: Path, log: Path, label: str,
-        env: dict | None = None) -> None:
+        env: dict | None = None, timeout: float | None = None) -> None:
     print(label, flush=True)
     started = time.monotonic()
     with log.open("ab") as output:
@@ -83,7 +88,11 @@ def run(command: list[str], *, cwd: Path, log: Path, label: str,
         with subprocess.Popen(command, cwd=cwd, env=env, stdout=output,
                               stderr=subprocess.STDOUT, **spawn_options()) as child:
             try:
-                code = wait_child(child, progress_label=label)
+                code = wait_child(child, progress_label=label, timeout=timeout)
+            except subprocess.TimeoutExpired as exc:
+                stop_child(child)
+                raise StartupError(f"{label} timed out after {timeout:g}s. See {log}. "
+                                   "Check the network/proxy and retry; completed steps are reused.") from exc
             except BaseException:
                 stop_child(child)
                 raise
@@ -103,7 +112,8 @@ def check_dependencies() -> tuple[str, str]:
     try:
         version = subprocess.check_output([node, "--version"], text=True,
                                           timeout=15, **spawn_options()).strip()
-        if tuple(int(part) for part in version.lstrip("v").split(".")) < (22, 19, 0):
+        parsed = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", version)
+        if parsed is None or tuple(map(int, parsed.groups())) < (22, 19, 0):
             raise ValueError(version)
     except (ValueError, subprocess.SubprocessError) as exc:
         raise StartupError("Node.js 22.19 or newer is required. Check node --version.") from exc
@@ -271,8 +281,19 @@ def prepare_desktop(state: Path, log: Path) -> Path:
         # npm versions differ in install-script policy. Download the locked Electron
         # runtime explicitly without enabling unrelated dependencies' lifecycle scripts.
         if not electron_binary(client).is_file():
-            run([node, str(client / 'node_modules/electron/install.js')], cwd=client, log=log,
-                label='[Desktop] 下载桌面运行环境 / Downloading the Electron runtime')
+            print("桌面运行环境下载最多等待 10 分钟 / Electron download allows up to 10 minutes. "
+                  "If GitHub is unreachable, configure ELECTRON_MIRROR or your proxy and retry.", flush=True)
+            try:
+                run([node, str(client / 'node_modules/electron/install.js')], cwd=client, log=log,
+                    label='[Desktop] 下载桌面运行环境 / Downloading the Electron runtime',
+                    timeout=ELECTRON_DOWNLOAD_TIMEOUT)
+            except StartupError as exc:
+                raise StartupError(
+                    f"{exc}\nElectron 下载失败。检查网络、代理或设置 ELECTRON_MIRROR 后重试。\n"
+                    "Set ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ in your shell "
+                    "if that mirror is reachable, then run the same launcher again. "
+                    "See docs/getting-started.md for shell-specific commands."
+                ) from exc
         if not electron_binary(client).is_file():
             raise StartupError(f"Electron was not downloaded. Check npm install-script policy and {log}; then retry.")
         stamp.write_text(wanted, encoding='utf-8')

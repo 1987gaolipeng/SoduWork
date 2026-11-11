@@ -29,7 +29,8 @@ async function main() {
   }
   function verify(name) {
     const report = path.join(work, name + '.json');
-    const result = spawnSync(path.join(root, 'SoduWork.exe'), [path.join(root, '.soduwork-verify.cjs'), root, report], {
+    const profile = require('../scripts/installed-distribution.cjs').installedDistribution(root);
+    const result = spawnSync(path.join(root, profile.windowsExecutableName + '.exe'), [path.join(root, '.soduwork-verify.cjs'), root, report], {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', windowsHide: true, timeout: 300000,
     });
     assert.equal(result.error, undefined);
@@ -48,7 +49,7 @@ async function main() {
       assert.equal(detail.verification, 'verified-redistribution-bundle');
       assert.equal(fs.readFileSync(path.join(root, detail.path)).length, detail.actualSize);
     }
-    const critical = ['resources/app.asar', 'resources/pi/@earendil-works/pi-coding-agent/package.json',
+    const critical = ['resources/app.asar', 'resources/pi/node_modules/@earendil-works/pi-coding-agent/package.json',
       'resources/skills/office/SKILL.md'];
     for (const name of critical) {
       const item = manifest.files.find(file => file.path === name); assert.ok(item, name);

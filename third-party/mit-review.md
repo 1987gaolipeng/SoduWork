@@ -1,6 +1,6 @@
 # MIT 开源准备与审查边界
 
-**简体中文** · [English](mit-review.en.md) · [第三方材料](README.md)
+**简体中文** · [English](mit-review.en.md) · [第三方材料](README.zh-CN.md)
 
 根目录 MIT 许可证及 MDiRi 署名适用于项目有权授权的自有内容。本文件记录审查边界，不构成零风险或法律放行证明。
 

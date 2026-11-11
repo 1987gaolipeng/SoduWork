@@ -34,6 +34,12 @@ log = logging.getLogger("uvicorn.error")
 
 COMPANY = "company"
 
+# Normalize former organization-model aliases to the current product name.
+# Accept old names for compatibility without offering them in new dispatch selectors.
+MODEL_ALIASES = {
+    "dev-coding-large-agent-hugengyong": "dev-coding-large-agent-soduwork",
+}
+MODEL_RENAME_FLAG = "model_rename_company_soduwork_20260824"
 MEDIA_MODEL_ALIASES = {
     "doubao-seedance-1-0-pro-250528": "doubao-seedance-2-0",
 }
@@ -45,6 +51,7 @@ FLASH_THINKING_UPGRADE_FLAG = "model_thinking_glm53_flash_controllable_20261022"
 
 def canonical_model_name(value: str) -> str:
     name = str(value or "").strip()
+    name = MODEL_ALIASES.get(name, name)
     return MEDIA_MODEL_ALIASES.get(name, name)
 
 # Provider templates are the only catalog rows startup may add.
@@ -76,6 +83,7 @@ BUILTIN_PROVIDERS: list[dict] = [
 
 # Historical presets support explicit migration helpers and their protocol regressions.
 # They are not an initialization list; startup never creates or repairs model rows.
+# Historical verification is recorded in docs/development/builtin-model-catalog.md.
 def _always_thinking_config(format: str) -> dict:
     return {"thinkingMode": "always", "thinkingFormat": format,
             "supportsReasoningEffort": True,
