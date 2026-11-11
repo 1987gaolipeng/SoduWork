@@ -21,28 +21,34 @@ function freeze(value) {
   }
   return value;
 }
-function getProfile(id = 'internal') {
-  if (typeof id !== 'string' || !Object.hasOwn(profiles, id)) {
-    throw new Error('Unknown Client distribution: ' + String(id));
+function getProfile(id = PROFILE_ID) {
+  if (id !== PROFILE_ID) throw new Error('Unknown Client distribution: ' + String(id));
+  const { schema, keys } = updateTrust || {};
+  if (schema !== 1 || !keys || typeof keys !== 'object' || Array.isArray(keys) ||
+      Object.values(keys).some(value => typeof value !== 'string' ||
+        Buffer.from(value, 'base64').length !== 32 || Buffer.from(value, 'base64').toString('base64') !== value)) {
+    throw new Error('Client distribution has invalid update trust');
   }
-  const profile = JSON.parse(JSON.stringify({ distributionId: id, ...profiles[id],
-    updateTrust: id === 'internal' || id === 'stage' ? internalTrust : profiles[id].updateTrust }));
-  const { keys, schema } = profile.updateTrust || {};
-  if (schema !== 1 || !keys || !Object.keys(keys).length || Object.values(keys).some(value =>
-    typeof value !== 'string' || Buffer.from(value, 'base64').length !== 32)) {
-    throw new Error('Client distribution has invalid update trust: ' + id);
-  }
-  // The stage profile points the bundled origin at the stage Hub while
-  // keeping the internal install identity and signing trust, so testers
-  // install exactly the product they are accepting.
+  const updateChannel = packageInfo.soduworkUpdateChannel || 'stable';
+  if (!['stable', 'beta'].includes(updateChannel)) throw new Error('Invalid Client update channel');
+  const build = packageInfo.build || {};
+  const productName = packageInfo.productName || build.productName || 'SoduWork';
+  const profile = JSON.parse(JSON.stringify({
+    distributionId: PROFILE_ID, updateChannel, hubOrigin: PRODUCTION_HUB, websiteUrl: packageInfo.homepage || '',
+    appId: build.appId || 'com.soduwork.app', productName,
+    windowsExecutableName: build.win?.executableName || productName,
+    linuxExecutableName: build.linux?.executableName || packageInfo.name,
+    linuxPackageName: build.deb?.packageName || packageInfo.name,
+    nsisGuid: build.nsis?.guid || '', userDataName: productName, workspaceName: productName, updateTrust,
+  }));
+  // Empty trust is valid for source builds and cannot authorize an update manifest.
   return freeze({ ...profile, configSha256: digest(profile) });
 }
 
-// Build variables select registered public configuration; credentials and private keys never enter client metadata.
 function selected(env = process.env) {
-  const profile = getProfile(env.SODUWORK_DISTRIBUTION || 'internal');
+  const profile = getProfile(env.SODUWORK_DISTRIBUTION || PROFILE_ID);
   if (env.SODUWORK_RELEASE_HUB_URL && String(env.SODUWORK_RELEASE_HUB_URL).replace(/\/+$/, '') !== profile.hubOrigin) {
-    throw new Error('Release Hub URL does not match Client distribution: ' + profile.distributionId);
+    throw new Error('Release Hub URL does not match Client distribution');
   }
   return profile;
 }
@@ -56,7 +62,7 @@ function fromMetadata(metadata) {
   return profile;
 }
 
-// Installed clients read bundled metadata only; runtime environment variables and saved addresses cannot change the distribution environment.
+// Package identity and update trust are fixed; hub-endpoint owns editable service selection.
 function current() { return fromMetadata(packageInfo.soduworkDistribution); }
 function publicInfo() {
   const { distributionId, hubOrigin, websiteUrl, productName, configSha256 } = current();
