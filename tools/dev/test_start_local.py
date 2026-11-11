@@ -292,6 +292,49 @@ class LocalStartupTests(unittest.TestCase):
                 build.prepare_desktop(self.state, self.state / 'startup.log')
         self.assertFalse((self.state / 'desktop-dependencies.sha256').exists())
 
+    def cached_desktop(self):
+        client = self.state / 'application/client'
+        client.mkdir(parents=True)
+        lock = client / 'package-lock.json'
+        lock.write_text('{}')
+        binary = build.electron_binary(client)
+        binary.parent.mkdir(parents=True)
+        binary.write_text('electron fixture')
+        (self.state / 'desktop-dependencies.sha256').write_text(
+            build.hashlib.sha256(lock.read_bytes()).hexdigest())
+        return client
+
+    def test_cached_windows_desktop_verifies_shell_on_each_start(self):
+        with patch.object(sys, 'platform', 'win32'):
+            client = self.cached_desktop()
+            log = self.state / 'startup.log'
+            with patch.object(build, 'check_dependencies', return_value=('node', 'npm')), \
+                    patch.object(build, 'run') as run:
+                for _ in range(2):
+                    self.assertEqual(build.prepare_desktop(self.state, log), client)
+            self.assertEqual(run.call_count, 2)
+            for call in run.call_args_list:
+                self.assertEqual(call.args[0], [
+                    'node', str(client / 'scripts/prepare-shell-runtime.cjs')])
+                self.assertEqual(call.kwargs['cwd'], client)
+                self.assertEqual(call.kwargs['log'], log)
+
+    def test_windows_shell_preparation_failure_stops_desktop_preparation(self):
+        with patch.object(sys, 'platform', 'win32'):
+            self.cached_desktop()
+            with patch.object(build, 'check_dependencies', return_value=('node', 'npm')), \
+                    patch.object(build, 'run', side_effect=build.StartupError('shell fixture failed')):
+                with self.assertRaisesRegex(build.StartupError, 'shell fixture failed'):
+                    build.prepare_desktop(self.state, self.state / 'startup.log')
+
+    def test_cached_nonwindows_desktop_does_not_prepare_windows_shell(self):
+        with patch.object(sys, 'platform', 'darwin'):
+            client = self.cached_desktop()
+            with patch.object(build, 'check_dependencies', return_value=('node', 'npm')), \
+                    patch.object(build, 'run') as run:
+                self.assertEqual(build.prepare_desktop(self.state, self.state / 'startup.log'), client)
+            run.assert_not_called()
+
     def test_desktop_download_failure_keeps_overrides_and_reports_recovery(self):
         client = self.state / 'application/client'
         client.mkdir(parents=True)
@@ -383,11 +426,18 @@ class LocalStartupTests(unittest.TestCase):
             build.prepare(self.state, self.state / "startup.log")
             for name in ("LICENSE", "third-party/manifest.json"):
                 self.assertEqual((self.state / "application" / name).read_bytes(), (source / name).read_bytes())
+            generated = [self.state / 'application/client' / relative for relative in (
+                '.runtime/git/bin/bash.exe', '.runtime-cache/portable-git.part')]
+            for file in generated:
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_bytes(b'generated runtime fixture')
             calls.clear()
             put("client/assets/connector-brands/fixture.svg", "updated artwork")
             build.prepare(self.state, self.state / "startup.log")
             self.assertEqual(calls, ["[4/4] 构建管理页面 / Building the management UI"])
             self.assertEqual((self.state / "application/client/assets/connector-brands/fixture.svg").read_text(), "updated artwork")
+            for file in generated:
+                self.assertEqual(file.read_bytes(), b'generated runtime fixture')
 
     def test_interactive_password_recovers_without_restarting_or_printing_secrets(self):
         config = start.initialize(self.state, 'admin')
