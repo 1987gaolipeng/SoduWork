@@ -26,11 +26,8 @@ async function withPlatform(value, fn) {
 async function fixture(deferredTarget = '1.2.13', options = {}) {
   const packageInfo = require('../package.json');
   const priorDistribution = packageInfo.soduworkDistribution;
-  const priorChannel = packageInfo.soduworkUpdateChannel;
-  if (options.channel) {
-    packageInfo.soduworkUpdateChannel = options.channel;
-    packageInfo.soduworkDistribution = require('../main/distribution.cjs').getProfile();
-  }
+  if (options.distribution) packageInfo.soduworkDistribution =
+    require('../main/distribution.cjs').getProfile(options.distribution);
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'soduwork-updater-state-'));
   const appPath = path.join(root, 'app');
   const updateRoot = path.join(root, 'client-updates');
@@ -186,8 +183,6 @@ async function fixture(deferredTarget = '1.2.13', options = {}) {
     setCurrentVersion: (value) => { currentVersion = value; },
     restore: async () => {
       global.fetch = originalFetch;
-      if (priorChannel === undefined) delete packageInfo.soduworkUpdateChannel;
-      else packageInfo.soduworkUpdateChannel = priorChannel;
       if (priorDistribution === undefined) delete packageInfo.soduworkDistribution;
       else packageInfo.soduworkDistribution = priorDistribution;
       await fsp.rm(root, { recursive: true, force: true });
@@ -195,10 +190,10 @@ async function fixture(deferredTarget = '1.2.13', options = {}) {
   };
 }
 
-test('Windows self-hosted beta downloads, verifies and hands off a newer beta for installation', async () => {
+test('Windows Stage beta downloads, verifies and hands off a newer beta for installation', async () => {
   await withPlatform('win32', async () => {
     let launches = 0;
-    const ctx = await fixture('other', { download: true,
+    const ctx = await fixture('other', { distribution: 'stage', download: true,
       currentVersion: '1.13.11-beta.532', version: '1.13.11-beta.533', channel: 'beta',
       minVersion: '1.13.11-beta.532', artifactName: 'SoduWork-1.13.11-beta.533-Setup.exe',
       launchHelper: async () => { launches++; },

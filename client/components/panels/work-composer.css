@@ -91,7 +91,8 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
   transition:background-color .13s ease,color .13s ease}
 .wc-context-button:first-of-type{flex:1 1 auto;max-width:45%}
 .wc-context-button:not(:first-of-type){flex:0 1 auto}
-.wc-context-button:hover,.wc-context-button[aria-expanded="true"]{background:var(--bg-2);color:var(--ink-2)}
+.wc-context-button:not(.wc-context-static):hover,.wc-context-button[aria-expanded="true"]{background:var(--bg-2);color:var(--ink-2)}
+.wc-context-static{cursor:default}
 .wc-context-button:disabled{cursor:default;opacity:.78}
 .wc-context-button:disabled:hover{background:transparent;color:var(--ink-4)}
 .wc-context-button>svg{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-width:1.65;
@@ -419,6 +420,11 @@ html[data-desk-panel='workspace'] .work-composer .wc-input:focus-visible{outline
 .wc-chat-more-pop>.ntask:hover{background:var(--bg-2);color:var(--ink)}
 .wc-chat-more-pop>.wc-context-button{width:100%;height:40px;max-width:none;padding:6px 10px;justify-content:flex-start}
 .nbox.work-composer .wc-tools{flex:0 0 auto}.nbox.work-composer .wc-context{border-left:0;margin-left:0;padding-left:2px}
+/* 「换个文件夹继续」：工作位置 chip 旁的紧凑幽灵按钮。 */
+.wc-wd-pick{appearance:none;border:0;background:transparent;flex:0 0 auto;height:22px;padding:0 7px;margin-left:1px;
+  border-radius:8px;color:var(--ink-5);font:inherit;font-size:max(var(--font-min-readable, 14.5px), 11.5px);
+  line-height:1;cursor:pointer;transition:background-color .13s ease,color .13s ease}
+.wc-wd-pick:hover{background:var(--bg-2);color:var(--ink-2)}
 .nbox.work-composer .wc-context>#nchatWd{flex:0 1 auto;max-width:160px}
 @media(max-width:620px){
   .compose-panel[data-stage='compose'] #cpMorePop{width:min(440px,calc(100vw - 32px))}

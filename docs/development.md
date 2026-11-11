@@ -13,12 +13,11 @@
 | 桌面窗口、对话、用户设置 | `client/main.js`、`client/main/`、`client/core/`、`client/components/` | [桌面客户端](../client/README.zh-CN.md) |
 | API、权限、数据、任务执行 | `hub-backend/app/main.py`、`app/api/`、`app/services/`、`runner_main.py` | [Hub 后端](../hub-backend/README.zh-CN.md) |
 | 浏览器中的管理页面 | `hub-frontend/src/main.jsx`、`hub-frontend/src/` | [管理端](../hub-frontend/README.zh-CN.md) |
-| Android 客户端 | `mobile/lib/main.dart`、`mobile/lib/`、`mobile/android/` | [Android 指南](../mobile/README.zh-CN.md) |
 | 技能、插件与工作流 | `skills/`、`hub-backend/plugins/` | [插件协议](plugin-authoring.md) |
 | 本地启动与部署 | `start.py`、`tools/dev/`、`ops/self-host/` | [自托管](../ops/self-host/README.zh-CN.md) |
 | 分发范围和完整性 | `tools/distribution/`、`tools/export_source.py` | [源码分发](open-source.md) |
 
-上表中的后端 `app/` 和 `runner_main.py` 均相对于 `hub-backend/`。各工程分别安装依赖；Android 使用 Flutter，根目录没有统一的 npm 工作区。
+上表中的后端 `app/` 和 `runner_main.py` 均相对于 `hub-backend/`。三个工程分别安装依赖；根目录没有统一的 npm 工作区。
 
 ## 管理页面
 

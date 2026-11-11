@@ -9,7 +9,7 @@ const PAIRS = [
   ['NOTICE.md', 'NOTICE.zh-CN.md'],
   ...['getting-started', 'development', 'release-scope', 'open-source', 'plugin-authoring']
     .map(name => [`docs/${name}.md`, `docs/${name}.en.md`]),
-  ...['client', 'hub-backend', 'hub-frontend', 'mobile', 'third-party', 'ops/self-host', 'client/sdk']
+  ...['client', 'hub-backend', 'hub-frontend', 'third-party', 'ops/self-host', 'client/sdk']
     .map(name => [`${name}/README.md`, `${name}/README.zh-CN.md`]),
   ['hub-backend/CONNECTOR_OAUTH.md', 'hub-backend/CONNECTOR_OAUTH.en.md'],
 ];

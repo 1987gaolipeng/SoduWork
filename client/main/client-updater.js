@@ -89,8 +89,9 @@ function _set(patch) {
   return _publicState();
 }
 function _trust() {
-  // Self-hosted builds use the distributor's bundled trust file. Never load
-  // signing keys from user data or the selected Hub's network response.
+  const profile = require('./distribution.cjs').current();
+  // Cloud distributions trust only their own signature, never an intranet or another cloud public key.
+  if (profile.distributionId !== 'internal' && profile.distributionId !== 'stage') return profile.updateTrust;
   const candidates = [
     path.join(runtime.app.getAppPath(), 'update-trust.json'),
     path.join(__dirname, '..', 'update-trust.json'),
@@ -573,7 +574,7 @@ function _updateHelperScript() {
     '  If Len(root) = 0 Or Len(value) < Len(root) Then Exit Function',
     '  If LCase(Left(value, Len(root))) <> LCase(root) Then Exit Function',
     '  fileName = LCase(fso.GetFileName(value))',
-    '  IsOwnedExecutable = (fileName = LCase(appName) Or fileName = "soduwork-runner.exe" Or fileName = "openconsole.exe" Or fileName = "winpty-agent.exe")',
+    '  IsOwnedExecutable = (fileName = LCase(appName) Or fileName = "soduwork-runner.exe" Or fileName = "soduwork-runner.exe" Or fileName = "soduwork-runner.exe" Or fileName = "openconsole.exe" Or fileName = "winpty-agent.exe")',
     'End Function',
     'Sub DeleteSelf(fileSystem)',
     '  On Error Resume Next',

@@ -54,9 +54,24 @@ function view() {
   vm.runInNewContext(source, context);
   const mounted = window.EmailAuth.mount(gate, { api: () => api, retry() { retries++; }, success() {} });
   return { gate, mounted, calls, api, window, context, advance, flush, timers, retries: () => retries,
+    setLocale(locale) { i18n.locale = locale; window.dispatchEvent({ type: 'soduwork-locale-change' }); },
     switchHub() { hub = 'http://second.invalid'; }, switchDevice() { clientId = 'device-b'; }, switchUser() { user = { id: 'second-user' }; },
     mode: name => modes.find(row => row.dataset.authMode === name).fire('click') };
 }
+
+test('login labels stay in one locale and repaint after a language change', () => {
+  const f = view();
+  f.mounted.setPolicy({ mailReady: true, allowSelfRegistration: true });
+  f.setLocale('en-US');
+  assert.equal(f.gate.querySelector('.ac-account-label').textContent, 'Account');
+  assert.equal(f.gate.querySelector('.ac-password-label').textContent, 'Password');
+  assert.equal(f.gate.querySelector('[data-password-toggle]').textContent, 'Show');
+  assert.equal(f.gate.querySelector('.soduwork-auth-submit span').textContent, 'Sign in');
+  f.setLocale('zh-CN');
+  assert.equal(f.gate.querySelector('.ac-account-label').textContent, '账号');
+  assert.equal(f.gate.querySelector('.ac-password-label').textContent, '密码');
+  assert.equal(f.gate.querySelector('[data-password-toggle]').textContent, '显示');
+});
 
 test('login starts with a generic account field while registration uses email verification', () => {
   const f = view();
@@ -195,6 +210,18 @@ test('available email policy does not manufacture an unavailable-service warning
   const f = view(); f.mounted.setPolicy({ mailReady: true, allowSelfRegistration: false });
   assert.equal(f.gate.querySelector('[data-mail-availability]').hidden, true);
   assert.equal(f.gate.querySelector('[data-auth-mode="register"]').hidden, true);
+});
+
+test('registration consent survives identical policy refresh but never applies to changed required versions', () => {
+  const f = view();
+  const policy = { mailReady: true, requiredConsentVersions: { terms: 'v1', privacy: 'v1' } };
+  f.mounted.setPolicy(policy); f.mode('register');
+  const consent = f.gate.querySelector('#acConsent'); consent.checked = true;
+  f.mounted.setPolicy({ ...policy }); assert.equal(consent.checked, true);
+  f.mounted.setPolicy({ ...policy, requiredConsentVersions: { privacy: 'v1', terms: 'v1' } });
+  assert.equal(consent.checked, true);
+  f.mounted.setPolicy({ ...policy, requiredConsentVersions: { terms: 'v2', privacy: 'v1' } });
+  assert.equal(consent.checked, false);
 });
 
 function deliveryView(statusReply, sentReply = {}) {

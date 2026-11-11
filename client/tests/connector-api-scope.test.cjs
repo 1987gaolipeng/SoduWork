@@ -6,7 +6,7 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
 const stale=e=>e.code==='STALE_TASK_SCOPE';
 const file=()=>new File(['{"token":"private-fixture-secret"}'],'connection.json');
 function harness(){
- let user='alice',now=Date.now();const values=new Map([['soduwork_work_hub_url','http://hub-a:8989']]),calls=[];
+ let user='alice';const values=new Map([['soduwork_work_hub_url','http://hub-a:8989']]),calls=[];
  const h={calls,fetch:async()=>new Response('{"ok":true}')};
  const bridge={deviceAuthBootstrap:async()=>({ok:true,stored:true,clientId:'device-1',user:{id:user},session:'session-'+user,expiresIn:1800})};
  const window={__SODUWORK_TEST_HUB_CONFIG__:{allowSwitch:true},soduWorkAPI:bridge,dispatchEvent(){}};

@@ -104,9 +104,9 @@ async function uploadForm(path, form, timeout = 120000) {
   if (!res.ok) throw responseError(res, data)
   return data
 }
-async function download(path, filename) {
+async function download(path, filename, timeout = 120000) {
   const headers = {}; if (token) headers.Authorization = 'Bearer ' + token
-  const { res, data } = await fetchSafe('/api/v1' + path, { headers }, 120000,
+  const { res, data } = await fetchSafe('/api/v1' + path, { headers }, timeout,
     response => response.ok ? response.blob() : responseData(response))
   if (res.status === 401) {
     setToken(''); setUser(''); window.dispatchEvent(new Event('soduwork-hub-unauth'))
@@ -120,6 +120,11 @@ async function download(path, filename) {
 }
 
 export const api = {
+  legalDocument: kind => call('GET', '/admin/legal-documents/' + encodeURIComponent(kind)),
+  saveLegalDraft: (kind, body) => call('PUT', '/admin/legal-documents/' + encodeURIComponent(kind) + '/draft', body),
+  publishLegalDocument: (kind, body) => call('POST', '/admin/legal-documents/' + encodeURIComponent(kind) + '/publish', body),
+  legalDocumentVersion: id => call('GET', '/admin/legal-documents/versions/' + encodeURIComponent(id)),
+  cancelLegalPublication: id => call('POST', '/admin/legal-documents/versions/' + encodeURIComponent(id) + '/cancel', {}),
   accountPrivacyRequests: () => call('GET', '/admin/account-privacy-requests'),
   retryAccountPrivacyRequest: (id) => call('POST', '/admin/account-privacy-requests/' + encodeURIComponent(id) + '/retry', {}),
   mailSettings: () => call('GET', '/admin/mail-settings'),
@@ -227,7 +232,7 @@ export const api = {
   requestClientUpdate: (id, b = {}) => call('POST', '/admin/clients/' + encodeURIComponent(id) + '/updates', b),
   // List, stage, enable, and disable signed client releases; the server revalidates signatures on enablement.
   clientReleases: () => call('GET', '/admin/client-releases'),
-  clientReleaseNotes: () => call('GET', '/admin/client-release-notes'),
+  downloadClientRelease: (id, filename) => download('/admin/client-releases/' + encodeURIComponent(id) + '/download', filename, 900000),
   clientUpdateAttempts: (filter = {}) => {
     const q = new URLSearchParams()
     if (filter.releaseId) q.set('releaseId', filter.releaseId)

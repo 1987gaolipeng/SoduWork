@@ -4,13 +4,12 @@
 
 Project copyright is attributed to **MDiRi**. See the root [LICENSE](../LICENSE).
 
-The public source includes the desktop client, Android client (`mobile/`), Hub, management UI, Runner source, multi-platform source launchers, and generic Docker self-hosting. It retains project-owned office, task, MCP, and capability-authoring guides, generic workflows, isolation checks, and migration tests.
+The public source includes the desktop client, Hub, management UI, Runner source, multi-platform source launchers, and generic Docker self-hosting. It retains project-owned office, task, MCP, and capability-authoring guides, generic workflows, isolation checks, and migration tests.
 
 Excluded from this distribution:
 
 - Third-party skill bundles and their display metadata, and upstream platform-plugin reference snapshots.
-- The iOS project (`mobile/ios/`) and the `mobile/deploy/`, `mobile/docker/`, and `mobile/docs/` directories.
-- Internal product and architecture records, original brand design files, and validation process material.
+- Mobile applications, internal product and architecture records, original brand design files, and validation process material.
 - Non-public business plugins, applications, and their dedicated adapters, integration scripts, prompts, and assets.
 - Business-content synchronization and demo-data seeding tools.
 - Company cluster configuration, deployment pipelines, signing uploads, scheduled backups, and server rollback operations.
@@ -27,9 +26,9 @@ Stop the service and back up the complete data directory before updates. Restore
 
 ## Source and installers
 
-Desktop installers, Android packages, native runtimes, third-party models, imported plugins, and container images each need their own provenance, licensing, and runtime validation. Passing the source manifest check does not authorize distribution of those artifacts.
+Desktop installers, native runtimes, third-party models, imported plugins, and container images each need their own provenance, licensing, and runtime validation. Passing the source manifest check does not authorize distribution of those artifacts.
 
-See the [GitHub workflow guide](../.github/RELEASE.md) for source, Client and Hub pipelines. Client and Hub publication requires preflight checks for distribution scope, third-party evidence and the applicable platform acceptance requirements. Desktop upgrades require previous-installer baselines; Android separately verifies signing, package identity and emulator installation. Workflow source does not establish publication clearance or a successful hosted run.
+See the [GitHub workflow guide](../.github/RELEASE.md) for source, Client and Hub pipelines. Client and Hub publication requires preflight checks for distribution scope, third-party evidence and the applicable platform acceptance requirements. Desktop upgrades require previous-installer baselines. Workflow source does not establish publication clearance or a successful hosted run.
 
 Initialize a public repository from a verified source ZIP, or squash the reviewed source into the public branch. Private development history, old tags, and previous artifacts are outside scope; do not turn the original development repository public. `tools/export_source.py` exports only the current committed tree, generates `tools/distribution/SOURCE-MANIFEST.json` from the archived files, records the source commit, and verifies the resulting ZIP. The manifest is an export artifact and must not be committed to Git. The archive omits Git history, uncommitted changes, untracked files, and dependency caches.
 

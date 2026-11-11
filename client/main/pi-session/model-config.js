@@ -171,6 +171,11 @@ async function fetchModel(identity, modelName = '', timeoutMs = 8000, fetchImpl 
           supportsReasoningEffort: d.supportsReasoningEffort,
           thinkingAlwaysOn: d.thinkingAlwaysOn,
           thinkingLevelMap: d.thinkingLevelMap }),
+        // Preserve declared policy separately from normalized capabilities.
+        ...(['none', 'always', 'controllable'].includes(d.thinkingMode)
+          ? { thinkingMode: d.thinkingMode } : {}),
+        ...(typeof d.thinkingAlwaysOn === 'boolean' ? { thinkingAlwaysOn: d.thinkingAlwaysOn } : {}),
+        ...(thinkingCapabilities.LEVELS.includes(d.thinkingLevel) ? { thinkingLevel: d.thinkingLevel } : {}),
         // Image forwarding is an explicit server-side opt-in.  Older servers
         // advertised every model as image-capable, which made text-only
         // gateways reject an attached image with an opaque HTTP 400.
@@ -252,14 +257,11 @@ function writeModels(dir, model) {
   return file;
 }
 
-
-
-
-
-
-
-
-
+/*
+ * Configure task MCP capabilities using short-lived backend tickets; keep long-lived
+ * device keys in main-process secure storage. Match runtime_payload server structure and
+ * expose its path through SODUWORK_MCP_SERVERS.
+ */
 function writeMcpServers(dir, identity, mcpKey = '') {
   const hub = String((identity && identity.hub) || '').replace(/\/+$/, '');
   if (!hub || !identity.clientId || !mcpKey) return '';
@@ -337,8 +339,9 @@ async function prepare(app, identity, modelName = '', options = {}) {
   process.env[ENV_AGENT_DIR] = dir;
   if (mcp) process.env.SODUWORK_MCP_SERVERS = mcp;    // Expose the servers.json location to the bridge.
   noProxyFor(got.model.baseUrl);
-  // Configuration reads must not submit inference requests or consume model quota.
-  // Actual model calls start when the user sends a message or runs a task.
+  if (!got.historical && got.model.modality !== 'image') {
+    warmupGateway(got.model.baseUrl, got.model.key, got.model.id);
+  }
   return { ok: true, agentDir: dir, provider: 'soduwork', model: got.model, mcpServers: mcp };
 }
 

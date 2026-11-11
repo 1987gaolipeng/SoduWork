@@ -27,6 +27,11 @@ _DIR = Path(__file__).resolve().parent.parent.parent / "downloads"
 _DISPLAY_NAME = "SoduWork-Setup.exe"
 _LEGACY_FILENAME = "soduwork.exe"
 _VERSIONED_PACKAGE = re.compile(r"^SoduWork-(\d+)\.(\d+)\.(\d+)-Setup\.exe$")
+_MOBILE_DISPLAY_NAME = "SoduWork-Mobile.apk"
+_MOBILE_VERSIONED_PACKAGE = re.compile(
+    r"^SoduWork-Mobile-(\d+)\.(\d+)\.(\d+)(?:-beta\.([1-9][0-9]*))?\.apk$",
+    re.ASCII,
+)
 
 # Public Linux downloads from the release channel.
 _LINUX_FORMAT_SUFFIXES = (("deb", ".deb"), ("rpm", ".rpm"), ("tar.gz", ".tar.gz"))
@@ -143,6 +148,8 @@ async def client_release_download(release_id: str, session=Depends(get_session))
 
 def _release_media_type(artifact_name: str) -> str:
     lowered = artifact_name.lower()
+    if lowered.endswith(".apk"):
+        return "application/vnd.android.package-archive"
     if lowered.endswith(".deb"):
         return "application/vnd.debian.binary-package"
     if lowered.endswith(".rpm"):
@@ -269,6 +276,54 @@ def _package_version(package: Path) -> str:
     return ".".join(match.groups()) if match else ""
 
 
+def _mobile_directory() -> Path:
+    configured = get_settings().mobile_android_package_dir
+    return Path(configured) if configured else _DIR
+
+
+def _mobile_path(filename: str, *, allow_unversioned: bool = False) -> Path | None:
+    match = _MOBILE_VERSIONED_PACKAGE.fullmatch(filename)
+    if match and match[4] and _public_channel() != "beta":
+        return None
+    if not match and not (
+        allow_unversioned and filename == _MOBILE_DISPLAY_NAME
+    ):
+        return None
+    try:
+        directory = _mobile_directory().resolve(strict=True)
+        package = directory / filename
+        if package.is_symlink():
+            return None
+        resolved = package.resolve(strict=True)
+        if resolved.parent != directory or not resolved.is_file():
+            return None
+        return resolved
+    except (OSError, RuntimeError):
+        return None
+
+
+def _mobile_pkg() -> Path | None:
+    """Pick the public channel's latest APK; Stage prefers beta over legacy stable."""
+    versioned = []
+    for package in _mobile_directory().glob("SoduWork-Mobile-*.apk"):
+        match = _MOBILE_VERSIONED_PACKAGE.fullmatch(package.name)
+        trusted_path = _mobile_path(package.name) if match else None
+        if trusted_path is not None:
+            order = (bool(match[4]), *map(int, match.groups()[:3]), int(match[4] or 0))
+            versioned.append((order, trusted_path))
+    if versioned:
+        return max(versioned, key=lambda item: item[0])[1]
+    return _mobile_path(_MOBILE_DISPLAY_NAME, allow_unversioned=True)
+
+
+def _mobile_package_version(package: Path) -> str:
+    match = _MOBILE_VERSIONED_PACKAGE.fullmatch(package.name)
+    if not match:
+        return ""
+    version = ".".join(match.groups()[:3])
+    return f"{version}-beta.{match[4]}" if match[4] else version
+
+
 @router.get("/client/info")
 async def client_info(session=Depends(get_session)):
     """Return public installer metadata, preferring enabled release-channel artifacts and falling
@@ -321,6 +376,61 @@ async def client_download(session=Depends(get_session)):
         media_type="application/octet-stream",
         filename=_DISPLAY_NAME,
     )
+
+
+@router.get("/mobile/info")
+async def mobile_info(session=Depends(get_session)):
+    """Public metadata for the Android trial package and mobile web entry."""
+    from .android_downloads import select_package
+    selected, managed = await select_package(session)
+    package = selected[1] if selected else (None if managed else _mobile_pkg())
+    if package is None:
+        return {
+            "available": False,
+            "filename": _MOBILE_DISPLAY_NAME,
+            "version": "",
+            "webUrl": "/mobile/",
+        }
+    stat = package.stat()
+    return {
+        "available": True,
+        "filename": _MOBILE_DISPLAY_NAME,
+        "artifactFilename": package.name,
+        "version": _mobile_package_version(package),
+        "size": stat.st_size,
+        "sha256": selected[0].sha256 if selected else "",
+        "sizeText": f"{stat.st_size / 1024 / 1024:.1f} MB",
+        "updatedAt": datetime.fromtimestamp(
+            stat.st_mtime, tz=timezone.utc
+        ).isoformat(),
+        "webUrl": "/mobile/",
+    }
+
+
+@router.get("/mobile/android")
+async def mobile_android_download(session=Depends(get_session)):
+    from .android_downloads import select_package
+    selected, managed = await select_package(session)
+    package = selected[1] if selected else (None if managed else _mobile_pkg())
+    if package is None:
+        raise HTTPException(status_code=404, detail="移动端试用包尚未发布")
+    return FileResponse(
+        package,
+        media_type="application/vnd.android.package-archive",
+        filename=_MOBILE_DISPLAY_NAME,
+    )
+
+
+@router.get("/mobile/android/{filename}")
+async def mobile_android_version_download(filename: str, session=Depends(get_session)):
+    """Serve a published version by name; never redirect a Release link to latest."""
+    from .android_downloads import select_package
+    selected, managed = await select_package(session, filename)
+    package = selected[1] if selected else (None if managed else _mobile_path(filename))
+    if package is None:
+        raise HTTPException(status_code=404, detail="移动端安装包不存在或尚未发布")
+    return FileResponse(package, media_type="application/vnd.android.package-archive",
+                        filename=filename)
 
 
 # Standalone Runner installation.

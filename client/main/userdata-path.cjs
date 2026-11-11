@@ -28,7 +28,13 @@ function initializeUserData(app, env = process.env, profile = require('./distrib
     const namespace = crypto.createHash('sha256').update(process.platform === 'win32' ? checkout.toLowerCase() : checkout).digest('hex').slice(0, 20);
     directory = path.resolve(explicit || path.join(appData, 'SoduWork Development', profile.distributionId || 'internal', namespace));
     const candidate = resolvedDirectory(directory);
-    const installedNames = [...new Set(['SoduWork', 'soduwork', profile.userDataName])];
+    const distributions = require('./distribution.cjs');
+    const installedNames = ['internal', 'cn', 'global'].flatMap(id => {
+      const installed = distributions.getProfile(id);
+      // Linux's default Electron profile can use the package name. Reserve it
+      // alongside the product profile before a source checkout creates data.
+      return [installed.userDataName, installed.linuxPackageName];
+    });
     const reserved = installedNames.map(name => resolvedDirectory(path.join(appData, name)));
     // Source builds must never enroll, migrate, or renew an installed client's
     // credentials, even when a stale shell override points at its directory.

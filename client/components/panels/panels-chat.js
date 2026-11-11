@@ -89,7 +89,9 @@
     get _composerControls() { return _composerControls; }, set _composerControls(value) { _composerControls = value; },
     get _dismissProposal() { return _dismissProposal; },
     get _ensure() { return _ensure; },
+    get _changeConversationWorkspace() { return _changeConversationWorkspace; },
     get _retryOpenChat() { return _retryOpenChat; },
+    get enter() { return enter; },
     get _goalAction() { return _goalAction; },
     get _goalActionPending() { return _goalActionPending; }, set _goalActionPending(value) { _goalActionPending = value; },
     get _hotToolBodies() { return _hotToolBodies; }, set _hotToolBodies(value) { _hotToolBodies = value; },
@@ -387,17 +389,23 @@
   let _sessionCaps = [];
   let _sessionInputs = [];
   function _paintBar() {
+    const remote = _snap?.cloudHandoff?.phase === 'committed';
+    const workspace = remote ? { ..._wd,
+      name: _snap.cloudHandoff.target?.runnerKind === 'work-computer' ? '电脑成果' : '云端成果' } : _wd;
     const wd = document.getElementById('nchatWdName');
-    if (wd) wd.textContent = _wd.name || '选个文件夹';
+    if (wd) wd.textContent = workspace.name || '选个文件夹';
     const el = document.getElementById('nchatWd');
-    if (el) el.title = _wd.dir ? ('AI 就在这儿干活：' + _wd.dir + ' · 点击打开') : '还没选文件夹';
+    if (el) {
+      el.title = _wd.dir || (remote ? workspace.name : '还没选文件夹');
+      el.setAttribute('aria-label', workspace.name || '工作位置');
+    }
     const md = document.getElementById('nchatModeName');
     if (md) md.textContent = (_snap?.nextAccessPolicy || _snap?.accessPolicy) ? WorkComposer.permissionLabel((_snap.nextAccessPolicy || _snap.accessPolicy).mode) : (_mode === 'readonly' ? '只读' : '兼容权限');
     const ability = document.getElementById('nchatAbilityName');
     if (ability) {
       ability.textContent = _sessionCaps.length ? (_sessionCaps.length + ' 项能力') : '基础对话';
     }
-    if (global.ChatChrome) ChatChrome.setWorkspace(_wd);
+    if (global.ChatChrome) ChatChrome.setWorkspace(workspace);
     if (_composerControls) _composerControls.render();
   }
   function _thinkingStatusHtml(busy) {
@@ -627,7 +635,8 @@
     try {
       const result = method === 'permission' && global.AccessControls ? await AccessControls.answer(button, api, answerRef) : await api.answerUi(answerRef, res);
       if (answerEpoch !== _viewEpoch || answerRef !== _ref) return;
-      if (result?.ok === false && typeof petSay === 'function') petSay(result.reason || '权限确认失败，请重试');
+      if (value === 'full' && result?.snapshot) { _snap = result.snapshot; _scheduleRender(); }
+      if (result?.ok === false && !result.cancelled && !result.canceled && typeof petSay === 'function') petSay(result.reason || '权限确认失败，请重试');
     } catch (error) {
       if (answerEpoch === _viewEpoch && answerRef === _ref && typeof petSay === 'function') petSay('权限确认失败，请重试');
     } finally { if (method !== 'permission' && button?.isConnected) button.disabled = false; }
@@ -889,6 +898,47 @@
     const host = document.getElementById('cpChat');
     if (host) host.innerHTML = '';
     });
+  }
+  /* 「换个文件夹继续」：重开当前会话并把本轮续聊迁到用户选择的文件夹。
+     存档对话记录保持不变；主进程校验目录并把选择写回存档供以后重开沿用。 */
+  async function _changeConversationWorkspace() {
+    const api = _api();
+    const chatId = String(_sessionId || '').trim();
+    if (!api || !chatId) {
+      if (typeof petSay === 'function') petSay('先打开一条对话，再换工作区');
+      return;
+    }
+    if (_runtimeBusy()) {
+      if (typeof petSay === 'function') petSay('这一轮还在进行，结束后再换工作区');
+      return;
+    }
+    if (_snap?.cloudHandoff?.phase === 'committed') {
+      if (typeof petSay === 'function') petSay('这条会话已交给云端执行，暂不支持换本地工作区');
+      return;
+    }
+    let picked;
+    try {
+      if (typeof api.pickCwd !== 'function') return;
+      picked = await api.pickCwd(_wd?.dir ? { defaultPath: _wd.dir } : {});
+    } catch (_) { return; } /* canceling the dialog is not an error */
+    if (!picked || !picked.ok || !picked.dir) return;
+    const dir = String(picked.dir);
+    if (dir === String(_wd?.dir || '')) {
+      if (typeof petSay === 'function') petSay('这条会话已经在这个文件夹里干活了');
+      return;
+    }
+    const label = String(picked.name || '').trim() ||
+      dir.split(/[\\/]/).filter(Boolean).pop() || '所选文件夹';
+    const title = (global.ChatChrome?.sessionTitle || '').trim();
+    const epoch = _viewEpoch;
+    reset();
+    if (epoch !== _viewEpoch) return; // A newer navigation superseded this change.
+    const ok = await enter('', chatId, {
+      resumeWorkspace: dir, cwd: dir, workspaceLabel: label, chatTitle: title,
+    });
+    if (typeof petSay !== 'function') return;
+    if (ok) petSay('已换到「' + label + '」继续这条会话');
+    else petSay('没换成功，这条会话保持在原工作区');
   }
   function sessionInfo() {
     const rows = _collabEntries();

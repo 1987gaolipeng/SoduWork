@@ -106,62 +106,7 @@ def stop(child, base):
     raise AssertionError("Hub is still serving after the launcher exited")
 
 
-def desktop_ready(child, state, previous_pid=None):
-    journal = desktop_profile(state) / 'diagnostics/lifecycle.jsonl'
-    deadline = time.monotonic() + 45
-    while time.monotonic() < deadline:
-        if child.poll() is not None:
-            raise AssertionError(f'Desktop session stopped; see {child.launcher_log} and {state / "desktop.log"}')
-        if journal.is_file():
-            entries = [json.loads(line) for line in journal.read_text(encoding='utf-8').splitlines() if line]
-            # Read only events after the previous launch, including when older PIDs are reused.
-            previous = [index for index, row in enumerate(entries)
-                        if row['event'] == 'ready' and row.get('pid') == previous_pid]
-            current = entries[previous[-1] + 1:] if previous else entries
-            ready = [row for row in current if row['event'] == 'ready'
-                     and row.get('pid') != previous_pid and process_alive(row['pid'])]
-            if ready:
-                latest = ready[-1]
-                assert not any(row['event'] in ('uncaught-exception-monitor', 'unhandled-rejection')
-                               for row in entries if row.get('runId') == latest['runId']), 'Desktop initialization failed'
-                return latest['pid']
-        time.sleep(.25)
-    raise AssertionError(f'Electron did not become ready; see {state / "desktop.log"}')
-
-
-def process_alive(pid):
-    if os.name != 'nt':
-        try:
-            os.kill(pid, 0)
-            return True
-        except ProcessLookupError:
-            return False
-    import ctypes
-    from ctypes import wintypes
-    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
-    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel.OpenProcess.restype = wintypes.HANDLE
-    kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-    handle = kernel.OpenProcess(0x1000, False, pid)
-    if not handle:
-        return False
-    try:
-        code = wintypes.DWORD()
-        return bool(kernel.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259
-    finally:
-        kernel.CloseHandle(handle)
-
-
-def desktop_stopped(pid):
-    for _ in range(80):
-        if not process_alive(pid):
-            return
-        time.sleep(.1)
-    raise AssertionError('Electron was left running after the source launcher stopped')
-
-
-def verify(*, desktop=False):
+def verify():
     state = Path(tempfile.mkdtemp(prefix="soduwork-source-live-"))
     port = free_port()
     base = f"http://127.0.0.1:{port}"
