@@ -3,6 +3,8 @@
   // Core Korean copy. Untranslated source phrases intentionally fall back to
   // English through the locale registry instead of mixing Chinese into a page.
   const messages = {
+    '此邮箱尚未注册，请先创建账号。': '등록되지 않은 이메일입니다. 계정을 만들어 주세요.',
+    '自助注册已关闭，请联系管理员。': '직접 회원가입이 비활성화되어 있습니다. 관리자에게 문의하세요.',
     '放大': '확대', '更大文字 · 清晰易读': '더 큰 글자 · 선명하고 읽기 편한 표시',
     '账号或密码不正确': '계정 또는 비밀번호가 올바르지 않습니다',
     '操作过于频繁，请稍后重试': '작업이 너무 잦습니다. 잠시 후 다시 시도해 주세요',

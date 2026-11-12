@@ -3,6 +3,8 @@
   // Core Japanese copy. Untranslated source phrases intentionally fall back to
   // English through the locale registry instead of mixing Chinese into a page.
   const messages = {
+    '此邮箱尚未注册，请先创建账号。': 'このメールアドレスは未登録です。アカウントを作成してください。',
+    '自助注册已关闭，请联系管理员。': '新規登録は無効になっています。管理者にお問い合わせください。',
     '放大': '拡大', '更大文字 · 清晰易读': '大きな文字 · 読みやすい表示',
     '账号或密码不正确': 'アカウントまたはパスワードが正しくありません',
     '操作过于频繁，请稍后重试': '操作が集中しています。しばらくしてからもう一度お試しください',
