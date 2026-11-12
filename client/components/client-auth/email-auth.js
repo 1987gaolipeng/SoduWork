@@ -272,6 +272,19 @@
     });
     language.addEventListener('change', () => global.SoduWorkI18n?.setLocale?.(language.value));
     ui.bindPassword(gate);
+    form.addEventListener('keydown', event => {
+      if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey || !confirm.getClientRects().length) return;
+      // Keep the two password fields adjacent in keyboard order without removing
+      // the visibility button from navigation or changing ordinary sign-in.
+      const fields = [...form.querySelectorAll('input,button')].filter(node => !node.disabled && node.getClientRects().length);
+      const toggle = gate.querySelector('[data-password-toggle]');
+      if (!fields.includes(confirm) || !fields.includes(toggle)) return;
+      fields.splice(fields.indexOf(toggle), 1);
+      fields.splice(fields.indexOf(confirm) + 1, 0, toggle);
+      const index = fields.indexOf(event.target), next = fields[index + (event.shiftKey ? -1 : 1)];
+      if (index < 0 || !next) return;
+      event.preventDefault(); next.focus();
+    });
     gate.querySelector('.soduwork-auth-retry').addEventListener('click', hooks.retry);
     gate.querySelector('[data-recheck-policy]').addEventListener('click', () => {
       if (busy || sending) return;
