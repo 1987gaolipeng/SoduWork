@@ -236,14 +236,19 @@
       const submitReview = event.target.closest('[data-rq-submit-review]');
       if (submitReview && task && !busy && R.canSubmitReview(task) && global.SoduWorkAPI?.submitTaskReview) {
         busy = true; submitReview.disabled = true; feedback('');
-        const request = seq;
-        Promise.resolve(global.SoduWorkAPI.submitTaskReview(task.id, ''))
+        const request = seq, id = task.id;
+        Promise.resolve().then(() => {
+          if (request === seq) return global.SoduWorkAPI.submitTaskReview(id, '');
+        })
           .then(async result => {
             if (request !== seq) return;
-            await global.RequirementsBoard?.refresh?.();
-            await open(task.id);
+            if (result?.ok !== true) throw new Error(result?.reason || result?.error || result?.message || '操作没有完成，请重试');
+            // The accepted receipt completes this drawer. List refreshes must
+            // not reopen it or leave its submit action available for retries.
+            close(true);
             if (result?.already) global.petSay?.('这条需求已经在待验收，请直接查看验收卡');
             else global.petSay?.('已提交验收，等待验收人确认');
+            await global.RequirementsBoard?.refresh?.();
           })
           .catch(error => { if (request === seq) feedback(errorText(error)); })
           .finally(() => { if (request === seq) { busy = false; if (submitReview.isConnected) submitReview.disabled = false; } });
