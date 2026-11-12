@@ -236,8 +236,14 @@
       paintMenu();
       // Refresh on entry, never on each typed character or on a timer. Local
       // mutations also invalidate the owners immediately through their event.
-      if (match && !wasOpen && !loading && Date.now() - catalogAt >= catalogTtl) {
-        opts.onRefresh?.();
+      if (match && !wasOpen) {
+        if (typeof opts.onRefresh === 'function') {
+          if (!loading && Date.now() - catalogAt >= catalogTtl) opts.onRefresh();
+        } else {
+          // Older hosts refresh on each opening. Prefer the bounded refresh
+          // callback when both contracts are supplied to avoid duplicate work.
+          opts.onOpen?.();
+        }
       }
     }
     function onKeydown(event) {

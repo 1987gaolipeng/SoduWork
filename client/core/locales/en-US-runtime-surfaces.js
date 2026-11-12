@@ -214,6 +214,9 @@
   "在此执行机的终端运行以下命令，按官方页面完成登录，再刷新状态。": "Run this command in the terminal on this execution machine, sign in on the official page, then refresh the status.",
 
   "notification.task_assignment": "{sender} assigned the issue “{title}” to you",
+  "notification.plugin_unpublished": "“{name}” was removed from the company marketplace.",
+  "notification.plugin_version_revoked": "Version {version} of “{name}” was revoked and is no longer available.",
+  "发布状态更新": "Publication update",
   "notification.receipt.accepted": "Sent to {recipient}. Waiting for delivery.{subject}",
   "notification.receipt.delivered": "{recipient} received your message.{subject}",
   "notification.receipt.read": "{recipient} read your message.{subject}",

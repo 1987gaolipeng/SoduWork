@@ -278,7 +278,8 @@
       if (_skillPicker) _skillPicker.setItems(decorated);
     }).catch(() => { /* plugin icons are optional; the Skill list is already usable */ });
   }
-  function _loadCapabilities(force, preserveSelection = false) {
+  function _loadCapabilities(force, options = {}) {
+    const preserveSelection = options === true || options?.preserveSelection === true;
     const api = global.soduWorkAPI && (global.soduWorkAPI.conversationSession || global.soduWorkAPI.piSession);
     if (force === true) { _capabilityEpoch++; _skillIconSeq++; }
     if (_capLoading) {
@@ -313,7 +314,7 @@
     _capabilityRequestKey = _capabilityKey();
     const requestKey = _capabilityRequestKey;
     const requestEpoch = _capabilityEpoch;
-    const keepSelection = preserveSelection && _capabilities.length > 0;
+    const keepSelection = preserveSelection;
     _skillIconSeq += 1;
     _renderCapabilities();
     const task = (async () => {

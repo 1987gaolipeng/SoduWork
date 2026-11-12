@@ -165,6 +165,9 @@
   "在此执行机的终端运行以下命令，按官方页面完成登录，再刷新状态。": "在此执行机的终端运行以下命令，按官方页面完成登录，再刷新状态。",
 
   "notification.task_assignment": "{sender} 将需求「{title}」交给你",
+  "notification.plugin_unpublished": "「{name}」已从企业市场下架。",
+  "notification.plugin_version_revoked": "「{name}」的 v{version} 版本已撤销，无法继续使用。",
+  "发布状态更新": "发布状态更新",
   "notification.receipt.accepted": "已发送给{recipient}，等待对方接收。{subject}",
   "notification.receipt.delivered": "{recipient}已收到你发送的消息。{subject}",
   "notification.receipt.read": "{recipient}已读你发送的消息。{subject}",
