@@ -185,6 +185,9 @@
   "在此执行机的终端运行以下命令，按官方页面完成登录，再刷新状态。": "この実行マシンの端末で以下のコマンドを実行し、公式ページでログインしてから状態を更新してください。",
 
   "notification.task_assignment": "{sender} が課題「{title}」をあなたに割り当てました",
+  "notification.plugin_unpublished": "「{name}」は社内マーケットから取り下げられました。",
+  "notification.plugin_version_revoked": "「{name}」のバージョン {version} は取り消され、利用できなくなりました。",
+  "发布状态更新": "公開状況の更新",
   "notification.receipt.accepted": "{recipient} に送信しました。配信を待っています。{subject}",
   "notification.receipt.delivered": "{recipient} にメッセージが届きました。{subject}",
   "notification.receipt.read": "{recipient} がメッセージを読みました。{subject}",

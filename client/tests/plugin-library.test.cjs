@@ -570,9 +570,10 @@ function publicationFixture() {
       setAttribute() {}, focus: () => events.push(['focus', id]),
       querySelector: selector => element(selector),
       querySelectorAll: selector => selector === '[data-submission]'
-        ? Array.from(node.innerHTML.matchAll(/data-submission="([^"]+)"/g), match => {
-          const button = element('record:' + match[1]);
+        ? Array.from(node.innerHTML.matchAll(/data-submission="([^"]+)" data-submission-version="([^"]*)"/g), match => {
+          const button = element('record:' + match[1] + ':' + match[2]);
           button.dataset.submission = match[1];
+          button.dataset.submissionVersion = match[2];
           return button;
         }) : [],
     };
@@ -619,6 +620,82 @@ test('publication records include all submissions and preserve search when retur
   assert.ok(fixture.element('layer').innerHTML.includes('value="CITATION"'));
   detail[2].closeModal();
   assert.deepEqual(fixture.events.at(-1), ['focus', 'capPluginSubmissions']);
+});
+
+test('publication history opens every exact version and preserves search across detail and back navigation', () => {
+  const fixture = publicationFixture();
+  const rows = [
+    { pluginId: 'shared-plugin', versionId: 'version-2', name: 'Report', version: '2.0.0' },
+    { pluginId: 'shared-plugin', versionId: 'version-1', name: 'Report', version: '1.0.0',
+      reviewHistory: [{ decision: 'reject', note: 'Initial citation changes', reviewedBy: 'Reviewer' }] },
+    { pluginId: 'legacy-plugin', name: 'Legacy report', version: '2.0.0' },
+    { pluginId: 'legacy-plugin', name: 'Legacy report', version: '1.0.0' },
+  ];
+  fixture.open(rows);
+  const list = fixture.element('#capRecordList');
+  const buttons = list.querySelectorAll('[data-submission]');
+  assert.equal(buttons.length, rows.length, 'each submitted version has its own row');
+  buttons.forEach((button, index) => {
+    button.listeners.get('click')();
+    assert.equal(fixture.events.at(-1)[1], rows[index], 'click must not resolve the first receipt for the plugin');
+  });
+  const input = fixture.element('#capRecordSearch');
+  input.value = 'CITATION'; input.listeners.get('input')();
+  const shown = list.querySelectorAll('[data-submission]');
+  assert.equal(shown.length, 1, 'historical review feedback is searchable');
+  assert.equal(shown[0].dataset.submissionVersion, 'version-1');
+  shown[0].listeners.get('click')();
+  const detail = fixture.events.at(-1);
+  assert.equal(detail[1], rows[1]);
+  detail[3]();
+  assert.equal(list.querySelectorAll('[data-submission]').length, 1);
+  assert.equal(list.querySelectorAll('[data-submission]')[0].dataset.submissionVersion, 'version-1');
+  assert.ok(fixture.element('layer').innerHTML.includes('value="CITATION"'));
+});
+
+test('submission detail retains each review decision and safely renders reviewer feedback with legacy fallback', () => {
+  const sandbox = { window: {} };
+  vm.createContext(sandbox);
+  vm.runInContext(read('plugin-publication-ux.js'), sandbox);
+  let body;
+  const ctx = { closeModal() {}, openModal(title, subtitle, html) {
+    body = html;
+    return { querySelector: selector => selector === '#capSubmissionClose' ? { addEventListener() {} } : null };
+  } };
+  const options = { trustName: () => ['Revoked', 'danger'], sourceName: () => 'Organization' };
+  const receipt = { pluginId: 'report', versionId: 'version-1', version: '1.0.0', name: 'Report',
+    reviewDecision: 'revoke', reviewNote: 'Latest revocation', reviewedBy: 'Latest reviewer', reviewedAt: 3000,
+    reviewHistory: [
+      { id: 'review-3', decision: 'revoke', note: 'Latest revocation', reviewedBy: 'Latest reviewer', reviewedAt: 3000 },
+      { id: 'review-2', decision: 'approve', note: 'Approved after correction', reviewedBy: 'Approval reviewer', reviewedAt: 2000 },
+      { id: 'review-1', decision: 'reject', note: '<img src=x onerror="alert(1)">',
+        reviewedBy: '<script>alert(2)</script>', reviewedAt: 1000 },
+    ],
+  };
+  const before = JSON.stringify(receipt);
+  const open = sandbox.window.SoduWorkPluginPublication.openSubmission;
+  open(receipt, ctx, options);
+  assert.equal((body.match(/class="cap-review-feedback"/g) || []).length, 3);
+  assert.ok(body.includes('审核记录'));
+  assert.ok(body.includes('上架已撤销'));
+  assert.ok(body.includes('审核已通过'));
+  assert.ok(body.includes('审核未通过'));
+  assert.ok(body.indexOf('Latest revocation') < body.indexOf('Approved after correction'));
+  assert.ok(body.indexOf('Approved after correction') < body.indexOf('&lt;img'));
+  assert.ok(body.includes('<p data-user-content>&lt;img src=x onerror=&quot;alert(1)&quot;&gt;</p>'));
+  assert.ok(body.includes('<span data-user-content>&lt;script&gt;alert(2)&lt;/script&gt;</span>'));
+  for (const reviewedAt of [1000, 2000, 3000]) assert.ok(body.includes(new Date(reviewedAt).toLocaleString()));
+  assert.ok(!/<img|<script|onerror="/.test(body));
+  assert.equal(JSON.stringify(receipt), before);
+  for (const reviewHistory of [undefined, [], {}, [null]]) {
+    open({ ...receipt, reviewHistory, reviewNote: '<legacy feedback>', reviewedBy: '<legacy reviewer>' }, ctx, options);
+    assert.equal((body.match(/class="cap-review-feedback"/g) || []).length, 1);
+    assert.ok(body.includes('&lt;legacy feedback&gt;'));
+    assert.ok(body.includes('&lt;legacy reviewer&gt;'));
+    assert.ok(!body.includes('cap-review-history'));
+  }
+  open({ ...receipt, reviewHistory: [], reviewDecision: '', reviewNote: '', reviewedAt: 0 }, ctx, options);
+  assert.ok(body.includes('管理员还没有给出审查结论。'));
 });
 
 test('publication records show distinct empty states and escape plugin and review content', () => {

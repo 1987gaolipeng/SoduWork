@@ -185,6 +185,9 @@
   "在此执行机的终端运行以下命令，按官方页面完成登录，再刷新状态。": "이 실행 기기의 터미널에서 아래 명령을 실행하고 공식 페이지에서 로그인한 뒤 상태를 새로고침하세요.",
 
   "notification.task_assignment": "{sender}님이 요구 사항 “{title}”을(를) 배정했습니다",
+  "notification.plugin_unpublished": "“{name}”이(가) 회사 마켓에서 내려갔습니다.",
+  "notification.plugin_version_revoked": "“{name}”의 {version} 버전이 철회되어 더 이상 사용할 수 없습니다.",
+  "发布状态更新": "게시 상태 업데이트",
   "notification.receipt.accepted": "{recipient}님에게 보냈습니다. 전달 대기 중입니다.{subject}",
   "notification.receipt.delivered": "{recipient}님에게 메시지가 전달되었습니다.{subject}",
   "notification.receipt.read": "{recipient}님이 메시지를 읽었습니다.{subject}",

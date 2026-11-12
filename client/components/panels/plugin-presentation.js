@@ -197,11 +197,14 @@
     const list = layer.querySelector('#capRecordList');
     function renderRecords() {
       const needle = query.trim().toLowerCase();
-      const shown = rows.filter(item => [item.name, item.version, item.reviewNote].some(value => String(value || '').toLowerCase().includes(needle)));
+      const shown = rows.filter(item => [item.name, item.version, item.reviewNote,
+        ...(Array.isArray(item.reviewHistory) ? item.reviewHistory.flatMap(review => [review?.note, review?.reviewedBy]) : []),
+      ].some(value => String(value || '').toLowerCase().includes(needle)));
       list.innerHTML = shown.length ? shown.map(item => {
         const state = trustName(item.trustState, item.enabled, item.reviewDecision);
         const step = global.SoduWorkPluginPublication.currentStep(item);
-        return '<button type="button" class="cap-record" data-submission="' + h(item.pluginId) + '">' +
+        return '<button type="button" class="cap-record" data-submission="' + h(item.pluginId) +
+          '" data-submission-version="' + h(item.versionId || item.version) + '">' +
           '<span class="cap-record-name"><b data-user-content>' + h(item.name) + '</b><small data-user-content>v' + h(item.version) +
           '</small></span><em class="' + h(state[1]) + '">' + h(state[0]) + '</em><span class="cap-record-note"' +
           (item.reviewNote ? ' data-user-content' : '') + '>' + h(item.reviewNote || step.detail) +
@@ -209,8 +212,9 @@
       }).join('') : '<div class="cap-record-empty"><b>' + (query ? '没有匹配的申请' : '还没有提交申请') +
         '</b><p>' + (query ? '试试其他插件名称或版本。' : '在个人插件详情中提交到企业后，可以在这里跟进审核。') + '</p></div>';
       list.querySelectorAll('[data-submission]').forEach(button => button.addEventListener('click', () => {
-        const item = rows.find(row => row.pluginId === button.dataset.submission);
-        openSubmission(item, recordContext, () => records(rows, ctx, trustName, openSubmission, query));
+        const item = rows.find(row => row.pluginId === button.dataset.submission &&
+          String(row.versionId || row.version || '') === button.dataset.submissionVersion);
+        if (item) openSubmission(item, recordContext, () => records(rows, ctx, trustName, openSubmission, query));
       }));
     }
     input.addEventListener('input', () => { query = input.value; renderRecords(); });
