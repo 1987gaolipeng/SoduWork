@@ -10,6 +10,7 @@
   let pendingConfirmation = null, evidenceReturnFocus = null, evidenceRequest = 0, editBaseline = null, saving = false;
   let refreshRequest = 0, refreshFlight = null, editVersion = null, mountedTrace = null, refreshPending = false;
   let approvalState = '';
+  let summaryExport = null;
   function approvalSignature() {
     const context = global.RequirementsBoard?.context?.(), item = task && R.approval(task, context);
     return JSON.stringify([task?.id, item?.id, item?.status, item?.myDecision, task && R.waitingOn(task, context)]);
@@ -287,6 +288,7 @@
       const remove = event.target.closest('[data-rq-remove-file]');
       if (remove) void removeAttachment(remove.dataset.rqRemoveFile);
       if (event.target.closest('[data-rq-artifact]')) global.soduWorkAPI?.openExternal?.(task.artifactUrl);
+      if (event.target.closest('[data-rq-export-summary]')) void exportAcceptanceSummary();
       if (event.target.closest('[data-rq-add-files]')) root.querySelector('#rqFileInput')?.click();
       if (event.target.closest('[data-rq-retry-files]')) void uploadPending();
       if (event.target.closest('[data-rq-automation]')) void createAutomation();
@@ -713,8 +715,10 @@
       '<span class="rq-delivery-state ' + deliveryStateClass + '">' + deliveryState + '</span></div></div>' +
       reworkCard +
       (approvalCard ? '<div data-rq-approval-card>' + approvalCard + '</div>' : waitingOthers) +
-      (artifact ? '<div class="rq-delivery-actions">' +
-        '<button type="button" data-rq-artifact>查看交付链接 <span aria-hidden="true">↗</span></button></div>' : '') +
+      '<div class="rq-delivery-actions">' +
+      (artifact ? '<button type="button" data-rq-artifact>查看交付链接 <span aria-hidden="true">↗</span></button>' : '') +
+      '<button type="button" data-rq-export-summary' + (summaryExport?.request === seq ? ' disabled aria-busy="true"' : '') + '>导出验收摘要</button>' +
+      '<span data-rq-export-status role="status" aria-live="polite">' + (summaryExport?.request === seq ? '正在导出验收摘要…' : '') + '</span></div>' +
       '<div class="rq-delivery-sections"><details class="rq-evidence" data-rq-execution><summary><span><b>执行记录与交付证据</b><small>查看执行过程和可验证成果</small></span><i aria-hidden="true"></i></summary><div data-rq-trace></div></details>' +
       (progress.length ? '<details class="rq-evidence rq-history-panel"><summary><span><b>历史进展</b><small>' + progress.length + ' 条记录</small></span><i aria-hidden="true"></i></summary><ol class="rq-history">' +
         progress.map(row => '<li><div data-user-content>' + esc(row.text || row.content || '') + '</div><time>' +
@@ -871,6 +875,36 @@
         node.append(button);
       });
     } catch (error) { if (request === seq && panelRequest === evidenceRequest) node.textContent = errorText(error); }
+  }
+  async function exportAcceptanceSummary() {
+    if (!task || task.canViewExecution === false || summaryExport?.request === seq) return;
+    const subject = () => {
+      const approval = task && R.approval(task, global.RequirementsBoard?.context?.());
+      return { requirementVersion: task?.requirementVersion,
+        artifactVersionId: String(approval?.artifactVersionId || approval?.artifact?.id || '') };
+    };
+    const operation = { request: seq, id: task.id, ...subject() };
+    summaryExport = operation;
+    const update = text => {
+      if (operation.request !== seq || task?.id !== operation.id) return;
+      const status = root?.querySelector('[data-rq-export-status]');
+      const current = subject();
+      if (status) status.textContent = current.requirementVersion === operation.requirementVersion &&
+        current.artifactVersionId === operation.artifactVersionId ? text : '';
+      const button = root?.querySelector('[data-rq-export-summary]');
+      if (button) { button.disabled = summaryExport === operation; button.setAttribute('aria-busy', String(button.disabled)); }
+    };
+    update('正在导出验收摘要…');
+    let message = '';
+    try {
+      if (!global.soduWorkAPI?.exportAcceptanceSummary) throw Error('当前客户端不支持验收摘要导出');
+      const result = await global.soduWorkAPI.exportAcceptanceSummary({ taskId: operation.id,
+        ...(Number.isSafeInteger(operation.requirementVersion) ? { requirementVersion: operation.requirementVersion } : {}),
+        ...(operation.artifactVersionId ? { artifactVersionId: operation.artifactVersionId } : {}) });
+      if (!result?.ok && !result?.canceled && !result?.cancelled) throw Error(result?.reason || '验收摘要导出失败，请重试');
+      if (result.ok) message = '验收摘要已保存';
+    } catch (error) { message = errorText(error); }
+    finally { if (summaryExport === operation) summaryExport = null; update(message); }
   }
   async function downloadAttachment(id) {
     const file = files.find(row => String(row.id) === id), request = seq;
