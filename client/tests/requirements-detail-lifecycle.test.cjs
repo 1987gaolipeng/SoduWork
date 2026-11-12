@@ -538,6 +538,85 @@ test('material actions resolve the listed attachment and use narrow authenticate
   }
 });
 
+function downloadRow(f, id) {
+  const status = {textContent:'',hidden:true}, button = {disabled:false, attributes:{},
+    setAttribute(name,value) { this.attributes[name] = value; }};
+  const row = {dataset:{rqFileId:id},querySelector: selector => selector === '[data-rq-download]' ? button : status};
+  f.active().querySelectorAll = selector => selector === '.rq-material' ? [row] : [];
+  return {status,button};
+}
+
+test('attachment downloads expose row feedback and reject repeat clicks while saving', async () => {
+  const pending = deferred(), f = fixture({listAttachments:async()=>[{id:'file',filename:'完整产出-review.zip',role:'output'}]});
+  let downloads = 0;
+  f.context.soduWorkAPI.downloadAttachment = async () => { downloads++; return pending.promise; };
+  await f.api.open('review');
+  assert.match(f.active().querySelector('#rqAttachments').innerHTML, /data-rq-download-status role="status" aria-live="polite"/);
+  const row = downloadRow(f, 'file');
+  f.click('[data-rq-download]',{rqDownload:'file'});
+  f.click('[data-rq-download]',{rqDownload:'file'});
+  assert.equal(downloads,1);assert.equal(row.button.disabled,true);
+  assert.equal(row.button.attributes['aria-busy'],'true');
+  assert.equal(row.status.hidden,false);assert.match(row.status.textContent,/正在准备下载/);
+  pending.resolve({ok:true});await new Promise(setImmediate);
+  assert.match(row.status.textContent,/文件已保存/);assert.equal(row.button.disabled,false);
+  assert.equal(row.button.attributes['aria-busy'],'false');
+});
+
+test('failed attachment downloads retain visible errors, retry, and clear canceled saves', async () => {
+  const f = fixture({listAttachments:async()=>[{id:'file',filename:'report.txt'}]});
+  let attempt = 0;
+  f.context.soduWorkAPI.downloadAttachment = async () => {
+    if (++attempt === 1) throw Error("Error invoking remote method 'attachment-download': Error: 源文件已丢失，请恢复后重试");
+    if (attempt === 2) return {ok:true};
+    return {ok:false,canceled:true};
+  };
+  await f.api.open('review');const row = downloadRow(f,'file');
+  f.click('[data-rq-download]',{rqDownload:'file'});await new Promise(setImmediate);
+  assert.equal(row.status.textContent,'源文件已丢失，请恢复后重试');assert.equal(row.status.hidden,false);
+  assert.equal(row.button.disabled,false);
+  f.click('[data-rq-download]',{rqDownload:'file'});
+  assert.doesNotMatch(row.status.textContent,/已丢失/);
+  await new Promise(setImmediate);assert.match(row.status.textContent,/文件已保存/);
+  f.click('[data-rq-download]',{rqDownload:'file'});await new Promise(setImmediate);
+  assert.equal(row.status.textContent,'');assert.equal(row.status.hidden,true);assert.equal(row.button.disabled,false);
+});
+
+test('live material refresh keeps pending downloads disabled and updates the current row', async () => {
+  const pending = deferred(), f = fixture({listAttachments:async()=>[{id:'file',filename:'report.md'}]});
+  f.context.soduWorkAPI.downloadAttachment = () => pending.promise;
+  await f.api.open('review');downloadRow(f,'file');f.click('[data-rq-download]',{rqDownload:'file'});
+  await f.api.refresh('review');
+  const html = f.active().querySelector('#rqAttachments').innerHTML;
+  assert.match(html,/data-rq-download="file"[^>]*disabled/);assert.match(html,/正在准备下载/);
+  const replacement = downloadRow(f,'file');pending.resolve({ok:true});await new Promise(setImmediate);
+  assert.match(replacement.status.textContent,/文件已保存/);assert.equal(replacement.button.disabled,false);
+});
+
+test('late attachment download results cannot update another drawer or account', async () => {
+  for (const switchAccount of [false,true]) {
+    const pending = deferred(), f = fixture({listAttachments:async()=>[{id:'file',filename:'report.md'}]});
+    f.context.soduWorkAPI.downloadAttachment = () => pending.promise;
+    await f.api.open('old');downloadRow(f,'file');f.click('[data-rq-download]',{rqDownload:'file'});
+    if (switchAccount) f.events['soduwork-data-scope-changed']();
+    await f.api.open('new');const row = downloadRow(f,'file');
+    pending.resolve({ok:true});await new Promise(setImmediate);
+    assert.equal(row.status.textContent,'');assert.equal(row.status.hidden,true);
+    assert.doesNotMatch(f.active().querySelector('[data-rq-error]').textContent || '',/文件已保存/);
+  }
+});
+
+test('attachment downloads require an explicit save receipt before reporting success', async () => {
+  for (const result of [undefined,{ok:false,reason:'磁盘空间不足'}]) {
+    const f = fixture({listAttachments:async()=>[{id:'file',filename:'report.md'}]});
+    f.context.soduWorkAPI.downloadAttachment = async () => result;
+    await f.api.open('review');const row = downloadRow(f,'file');
+    f.click('[data-rq-download]',{rqDownload:'file'});await new Promise(setImmediate);
+    assert.equal(row.status.textContent,result?.reason || '下载未完成');assert.equal(row.status.hidden,false);
+    assert.equal(row.button.disabled,false);
+  }
+});
+
 test('missing requirements show an escaped error and a working retry action', async () => {
   let available = false;
   const f = fixture({getTask: async id => {
