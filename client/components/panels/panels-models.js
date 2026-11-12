@@ -57,7 +57,7 @@ function openModelsPanel(options) {
     const id = _mdEditor.split(':')[1] || ('custom-' + Date.now().toString(36) + '-' +
       Math.random().toString(36).slice(2, 7));
     _mdNew = { id, name: '', kind: 'openai-compat', baseUrl: '', defaultBaseUrl: '',
-      personal: true, authMode: 'key', modelNames: [], note: '', myKeySet: false, keySet: false };
+      personal: true, localOnly: true, authMode: 'key', modelNames: [], note: '', myKeySet: false, keySet: false };
   }
   let p = document.getElementById('mdPanel');
   if (!p) {
@@ -162,6 +162,7 @@ async function _mdLoad() {
 
 /* Provider status precedence: personal credentials, company credentials, missing key, missing endpoint. */
 function _mdState(p) {
+  if (p.localOnly) return 'local';
   if (p.authMode === 'none' && p.baseUrl) return 'local';
   if (p.myKeySet || _mdKeyEdits[p.id]) return 'mine';
   if (p.keySet) return 'org';
@@ -284,9 +285,10 @@ function _mdBodyHtml(p, s, ms, own, t) {
       '<label class="md-field md-field-wide"><span>API 地址</span><input class="md-in" data-purl="' +
         esc(p.id) + '" value="' + esc(p.baseUrl || '') + '" placeholder="https://…/v1"></label>' +
       (p.personal ? '<label class="md-field"><span>接口协议</span><select class="md-in" data-pkind="' +
-        esc(p.id) + '"><option value="openai-compat"' + (p.kind !== 'anthropic' ? ' selected' : '') +
-        '>OpenAI 兼容</option><option value="anthropic"' + (p.kind === 'anthropic' ? ' selected' : '') +
-        '>Anthropic</option></select></label>' +
+        esc(p.id) + '"><option value="openai-compat"' + (p.localOnly || p.kind !== 'anthropic' ? ' selected' : '') +
+        '>OpenAI 兼容</option>' +
+        (p.localOnly ? '' : '<option value="anthropic"' + (p.kind === 'anthropic' ? ' selected' : '') +
+        '>Anthropic</option>') + '</select></label>' +
         '<label class="md-auth-toggle"><input type="checkbox" data-pnoauth="' + esc(p.id) + '"' +
           (p.authMode === 'none' ? ' checked' : '') + '><span>本地服务无需密钥</span></label>' : '') +
       (!p.personal && p.addressOverridden ? '<button class="md-link md-reset-url" data-preset="' + esc(p.id) +
@@ -337,7 +339,7 @@ function _mdHost(raw) {
 function _mdAddService() {
   const id = 'custom-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7);
   _mdNew = { id, name: '', kind: 'openai-compat', baseUrl: '', defaultBaseUrl: '',
-    personal: true, authMode: 'key', modelNames: [], note: '', myKeySet: false, keySet: false };
+    personal: true, localOnly: true, authMode: 'key', modelNames: [], note: '', myKeySet: false, keySet: false };
   _mdEditor = '__new__:' + id;
   _mdOpen = id;
   _mdRender();
@@ -463,7 +465,7 @@ async function _mdDoTest(el) {
   if (!p || !String(p.baseUrl || '').trim()) {
     _mdTest[pid] = { state: 'bad', detail: '请先填写 API 地址' }; _mdRender(); return;
   }
-  if (!(_mdMyModels || []).some((m) => m.providerId === pid) &&
+  if (!p.localOnly && !(_mdMyModels || []).some((m) => m.providerId === pid) &&
       !(p.modelDefs || p.modelNames || []).length) {
     _mdTest[pid] = { state: 'bad', detail: '请先添加一个模型 ID' }; _mdRender(); return;
   }
@@ -485,6 +487,14 @@ async function _mdDoTest(el) {
     const r = await SoduWorkAPI.testMyModel(testPid);
     _mdTest[testPid] = { state: r && r.ok ? 'ok' : 'bad',
                      detail: (r && r.detail) || '没测出结果' };
+    if (r?.ok && p.localOnly && Array.isArray(r.models)) {
+      // The main-process probe persists discovered IDs atomically. Reload the
+      // merged catalog instead of saving again with a stale local revision.
+      const latest = await SoduWorkAPI.myModels();
+      if (latest && Array.isArray(latest.providers) && Array.isArray(latest.myModels)) {
+        _mdData = latest; _mdMyModels = latest.myModels.slice(); _mdReconcileChecks(latest);
+      }
+    }
   } catch (e) {
     _mdTest[pid] = { state: 'bad', detail: _humanErr(e, '没测成') };
   }
@@ -507,8 +517,13 @@ function _mdPayload() {
   }
   const providers = all.map((p) => ({ id: p.id, name: p.name, kind: p.kind || 'openai-compat',
     baseUrl: p.baseUrl || '', defaultBaseUrl: p.defaultBaseUrl || '', personal: !!p.personal,
-    authMode: p.authMode || 'key', note: p.note || '' }));
-  return { providers, models: _mdMyModels, keys: _mdKeyEdits, expectedRevision: _mdData && _mdData.revision };
+    authMode: p.authMode || 'key', note: p.note || '', localOnly: p.localOnly === true }));
+  const localProviders = all.filter(p => p.localOnly === true);
+  const localIds = new Set(localProviders.map(p => p.id));
+  return { providers, models: _mdMyModels, keys: _mdKeyEdits, expectedRevision: _mdData && _mdData.revision,
+    localProviders, localModels: _mdMyModels.filter(m => m.localOnly === true || localIds.has(m.providerId)),
+    localKeys: Object.fromEntries(Object.entries(_mdKeyEdits).filter(([id]) => localIds.has(id))),
+    localRevision: _mdData && _mdData.localRevision };
 }
 
 async function _mdSave(closeAfter) {
