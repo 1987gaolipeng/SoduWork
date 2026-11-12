@@ -1077,6 +1077,7 @@
           { method: 'POST', headers: { ...authHeaders(true), Accept: 'application/json; keepalive=1' },
             /* Use the model selected for this request, or the personal default when empty. */
             body: JSON.stringify({ text: text || '', model: model || '', keepalive: true,
+              locale: window.SoduWorkI18n?.getLocale?.() || 'zh-CN',
               attachments: Array.isArray(attachments) ? attachments : [],
               ...(options && (!options.kind || options.kind === 'requirement' || options.kind === 'automation') &&
                 Object.prototype.hasOwnProperty.call(options, 'instruction') ? { instruction: options.instruction } : {}),
