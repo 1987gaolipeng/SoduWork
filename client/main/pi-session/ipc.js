@@ -61,7 +61,8 @@ function _skillDirs(app) {
  * is unavailable instead of enabling bundled capabilities implicitly.
  */
 function _contextSnapshot(handle, snapshot) {
-  return { ...snapshot, ...(handle.requirementContext ? { requirementContext: handle.requirementContext } : {}),
+  const { usageReceipts, ...display } = snapshot || {};
+  return { ...display, ...(handle.requirementContext ? { requirementContext: handle.requirementContext } : {}),
     ...(handle.deliverySync ? { deliverySync: handle.deliverySync } : {}) };
 }
 function _send(win, handle, touched, snapshot, includeSnapshot, presenceSnapshot) {
@@ -1067,9 +1068,12 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         .replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64),
     };
     if (typeof authorizeAI === 'function') {
-      // Admission runs when the queued turn executes, including personal models.
+      // Pi can attribute personal funding per call. Other runtimes retain the
+      // strict account gate until they provide equally reliable usage receipts.
+      const agent = s.adapterId || 'pi';
+      const modelMode = require('../agent-runtime/runtime-catalog').runtime(agent)?.modelMode;
       sendOptions.beforeTurn = require('../conversation/quota-admission.cjs').beforeTurn(
-        authorizeAI, currentIdentity, sendOptions.beforeTurn);
+        authorizeAI, currentIdentity, sendOptions.beforeTurn, { agent, modelMode, controlled: Boolean(sendOptions.controlled) });
     }
     let workflowTurn;
     try {
@@ -1159,7 +1163,7 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
     const win = BrowserWindow.fromWebContents(event.sender);
     const attached = _uiWindow.request(s, win, options);
     if (s.localReplica) {
-      return Promise.resolve(s.loadHistory?.(options || {})).then(() => ({ ok: true, snapshot: s.snapshot() }));
+      return Promise.resolve(s.loadHistory?.(options || {})).then(() => ({ ok: true, snapshot: _contextSnapshot(s, s.snapshot()) }));
     }
     const raw = attached ? _uiWindow.snapshot(s) :
       (typeof s.uiSnapshot === 'function' ? s.uiSnapshot(options || {}) : s.snapshot());

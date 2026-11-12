@@ -154,6 +154,8 @@
     '媒体加载失败': 'Unable to load media',
     '媒体地址': 'Media URL',
     "总额度不限额": "No overall token limit",
+    "平台模型额度已用完": "Platform model allowance is used up",
+    "可选择账号允许的个人模型继续，或联系管理员调整平台额度。对话和草稿已保留。": "Choose a personal model allowed for your account, or ask your administrator to adjust the platform allowance. Your conversations and drafts are saved.",
     "本期额度已用完": "Your allowance is used up",
     "联系管理员调整额度后，即可继续。对话和草稿已保留。": "Ask your administrator to adjust your allowance, then continue. Your conversations and drafts are saved.",
     "试用已结束": "Your trial has ended",

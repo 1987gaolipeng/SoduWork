@@ -29,7 +29,7 @@ from app.schema_migrations import (
 
 OLD_MERGE = "0067_merge_release_account_ownership"
 CANONICAL_MERGE = "0067_merge_account_ownership"
-CURRENT_HEAD = "0085_merge_public_schedule"
+CURRENT_HEAD = "0086_usage_quota_scope"
 
 
 class IntegratedMigrationHistoryTests(unittest.TestCase):
@@ -108,6 +108,7 @@ class IntegratedMigrationHistoryTests(unittest.TestCase):
         script = ScriptDirectory.from_config(_config())
         self.assertEqual(script.get_heads(), [CURRENT_HEAD])
         expected = {
+            "0086_usage_quota_scope": "0085_merge_public_schedule",
             "0085_merge_public_schedule": ("0080_merge_public_discovery", "0084_schedule_custom_rule"),
             "0080_merge_public_discovery": ("0079_merge_public_projects", "0079_native_discovery"),
             "0084_schedule_custom_rule": "0083_schedule_timing_rules",

@@ -151,6 +151,11 @@ async function fetchModel(identity, modelName = '', timeoutMs = 8000, fetchImpl 
     if (!d || !d.ok) return { ok: false, reason: custom && d?.reason === '此底座不使用企业模型配置，请检查执行底座'
       ? '后台尚不支持新底座的模型配置，请更新后台后重试' : (d && d.reason) || '后台没给出可用的模型' };
     if (!d.key || !d.model) return { ok: false, reason: '后台回的配置不完整（缺 key 或 model）' };
+    if (d.quotaScope === 'personal' && (agent !== 'pi' || d.quotaVersion !== 2 ||
+        d.personalQuotaSupported !== true || typeof d.quotaUsageToken !== 'string' || !d.quotaUsageToken ||
+        !String(d.providerKey || d.provider || '').trim())) {
+      return { ok: false, reason: '服务端需要升级后才能校验个人 Token 额度' };
+    }
     const issuedAt = Date.now();
     const expiresIn = Math.max(0, Number(d.expiresIn) || 0);
     const value = {
@@ -161,6 +166,10 @@ async function fetchModel(identity, modelName = '', timeoutMs = 8000, fetchImpl 
         mcpKey: d.mcpKey || '',
         id: d.model,
         quotaProvider: d.providerKey || d.provider || '',
+        ...(d.quotaVersion === 2 && ['personal', 'platform'].includes(d.quotaScope) ? {
+          quotaVersion: 2, quotaScope: d.quotaScope,
+          ...(typeof d.quotaUsageToken === 'string' ? { quotaUsageToken: d.quotaUsageToken } : {}),
+        } : {}),
         label: d.label || d.model,
         maxOutputTokens: d.maxOutputTokens,
         capabilityProfile: d.capabilityProfile,
