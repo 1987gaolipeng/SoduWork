@@ -492,6 +492,7 @@ html[data-window-menu] .rq-detail{max-height:100%;}
 .rq-material .rq-attachment{width:auto;max-width:100%;margin:0;padding:0;border:0;border-radius:0;background:transparent;color:var(--accent);font-size:14px;line-height:1.4;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;}
 .rq-material .rq-attachment:hover{text-decoration:underline;text-underline-offset:3px;}
 .rq-material-meta{color:var(--ink-3);font-size:12px;line-height:1.3;}
+.rq-material-status{overflow-wrap:anywhere;color:var(--ink-2);}
 .rq-material-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex:0 0 auto;margin-left:auto;}
 .rq-material-icon{display:grid;place-items:center;width:30px;height:30px;padding:0!important;border:1px solid var(--line);border-radius:50%;background:var(--bg-0);color:var(--ink-3);font-size:17px!important;line-height:1;}
 .rq-material-icon:hover{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 38%,var(--line));background:var(--accent-soft);}

@@ -3,6 +3,7 @@
   'use strict';
   const R = global.Requirements;
   const pendingSchedules = new Map();
+  const downloadStates = new Map();
   let identityEpoch = 0;
   let loadController = null, loadTiming = null;
   let root = null, task = null, seq = 0, returnFocus = null, busy = false, editing = false, files = [], pendingUploads = [];
@@ -31,6 +32,16 @@
   function bundleFeedback(text) {
     const node = root?.querySelector('[data-rq-bundle-status]');
     if (node) { node.textContent = text; node.hidden = !text; }
+  }
+  function downloadFeedback(id, text, pending = false) {
+    downloadStates.set(id, {text, pending});
+    root?.querySelectorAll('.rq-material').forEach(row => {
+      if (row.dataset.rqFileId !== id) return;
+      const status = row.querySelector('[data-rq-download-status]'), button = row.querySelector('[data-rq-download]');
+      if (status) { status.textContent = text; status.hidden = !text; }
+      if (button) { button.disabled = pending; button.setAttribute('aria-busy', String(pending)); }
+    });
+    feedback(text);
   }
   function editValues() {
     const fields = root?.querySelector('#rqEditForm')?.elements;
@@ -154,7 +165,7 @@
     const journey = root?.querySelector('[data-rq-trace]');
     if (journey) global.TaskExecutionJourney?.unmount(journey);
     mountedTrace = null; refreshPending = false; refreshFlight = null;
-    seq++; task = null; busy = false; saving = false; editing = false; editBaseline = null; editVersion = null; files = []; pendingUploads = [];
+    seq++; downloadStates.clear(); task = null; busy = false; saving = false; editing = false; editBaseline = null; editVersion = null; files = []; pendingUploads = [];
     if (root) { root.remove(); root = null; }
     const origin = returnFocus?.isConnected ? returnFocus : [...document.querySelectorAll('[data-rq-open]')]
       .find(node => node.dataset.rqOpen === returnFocus?.dataset.rqOpen);
@@ -750,6 +761,7 @@
       const validation = String(file.evidenceMeta?.verification?.state || file.validation?.state || '').toLowerCase();
       const validationLabel = validation === 'failed' ? '校验未通过' : validation && validation !== 'passed' ? '待校验' : '';
       const autoBundle = file.autoBundle === true;
+      const downloadState = downloadStates.get(String(file.id)) || {};
       const bundleIds = autoBundle ? ' data-rq-bundle-ids="' + esc(JSON.stringify(file.attachmentIds || [])) + '"' : '';
       const meta = [autoBundle ? '自动打包' : extension, file.size ? formatBytes(file.size) : '', round > 0 ? 'v' + round : '', version ? version.slice(0, 12) : '', validationLabel].filter(Boolean).join(' · ');
       const open = autoBundle
@@ -757,9 +769,11 @@
         : '<button type="button" class="rq-attachment" data-rq-file="' + esc(file.id) + '">' + esc(name) + '</button>';
       const download = autoBundle
         ? '<button type="button" class="rq-material-icon rq-material-download" title="下载" aria-label="下载" data-rq-bundle-download' + bundleIds + '>↓</button>'
-        : '<button type="button" class="rq-material-icon rq-material-download" title="下载" aria-label="下载" data-rq-download="' + esc(file.id) + '">↓</button>';
+        : '<button type="button" class="rq-material-icon rq-material-download" title="下载" aria-label="下载" data-rq-download="' + esc(file.id) + '" aria-busy="' + Boolean(downloadState.pending) + '"' + (downloadState.pending ? ' disabled' : '') + '>↓</button>';
+      const status = autoBundle ? '' : '<span class="rq-material-meta rq-material-status" data-rq-download-status role="status" aria-live="polite"' +
+        (downloadState.text ? '' : ' hidden') + '>' + esc(downloadState.text || '') + '</span>';
       return '<div class="rq-material" role="listitem" data-rq-file-id="' + esc(file.id || '') + '"><div class="rq-material-info"><span class="rq-material-type" aria-hidden="true">' + esc(autoBundle ? 'ZIP' : extension.slice(0, 4)) + '</span><div>' +
-        open + (meta ? '<span class="rq-material-meta">' + esc(meta) + '</span>' : '') + '</div></div><div class="rq-material-actions">' +
+        open + (meta ? '<span class="rq-material-meta">' + esc(meta) + '</span>' : '') + status + '</div></div><div class="rq-material-actions">' +
         download + (global.LibraryTransfer?.button ? (autoBundle
           ? LibraryTransfer.button({deliveryBundle: true, taskId: task.id, attachmentIds: file.attachmentIds, name}, '', 'data-rq-bundle-library')
             .replace('data-rq-bundle-library=', bundleIds + ' data-rq-bundle-library=')
@@ -860,14 +874,14 @@
   }
   async function downloadAttachment(id) {
     const file = files.find(row => String(row.id) === id), request = seq;
-    if (!file) return;
-    feedback('正在准备下载…');
+    if (!file || downloadStates.get(id)?.pending) return;
+    downloadFeedback(id, '正在准备下载…', true);
     try {
       if (!global.soduWorkAPI?.downloadAttachment) throw new Error('当前客户端不支持附件下载');
       const result = await global.soduWorkAPI.downloadAttachment({...file, url: global.SoduWorkAPI.attachmentUrl(file)});
-      if (result?.ok === false && !result.cancelled && !result.canceled) throw new Error(result.reason || '下载未完成');
-      if (request === seq) feedback(result?.ok ? '文件已保存到所选位置' : '');
-    } catch (error) { if (request === seq) feedback(errorText(error)); }
+      if (!result?.ok && !result?.cancelled && !result?.canceled) throw new Error(result?.reason || '下载未完成');
+      if (request === seq) downloadFeedback(id, result?.ok ? '文件已保存到所选位置' : '');
+    } catch (error) { if (request === seq) downloadFeedback(id, errorText(error)); }
   }
   async function downloadBundle(button, saveToLibrary = false) {
     if (!button || button.disabled) return;
