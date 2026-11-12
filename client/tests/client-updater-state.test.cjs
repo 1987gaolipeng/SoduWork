@@ -808,8 +808,13 @@ test('mac/linux updates open the installer manually and report deferred', { time
 });
 
 test('a failed manual installer launch reports failure and drops the pending marker', { timeout: 12000 }, async () => {
+  const packageProbes = [];
   const ctx = await fixture('1.2.12', {
     platform: 'linux', arch: 'x64',
+    linuxExec: async (file, args) => {
+      packageProbes.push({ file, args });
+      return { error: new Error('fixture executable is not package-managed'), stdout: '' };
+    },
     shell: { openPath: async () => 'boom' },
   });
   try {
@@ -817,6 +822,11 @@ test('a failed manual installer launch reports failure and drops the pending mar
       await updater.check({ testMode: true });
       await assert.rejects(updater.installDownloaded(), /无法打开安装包/);
     });
+    const packageName = require('../main/distribution.cjs').current().linuxPackageName;
+    assert.deepEqual(packageProbes, [
+      { file: 'dpkg-query', args: ['-L', packageName] },
+      { file: 'rpm', args: ['-ql', packageName] },
+    ], 'package ownership queries must use the isolated executor');
     assert.equal(ctx.events.at(-1).state, 'failed');
     assert.ok(!ctx.events.some((event) => event.state === 'deferred'));
     await assert.rejects(() => fsp.stat(path.join(ctx.updateRoot, 'pending.json')));
