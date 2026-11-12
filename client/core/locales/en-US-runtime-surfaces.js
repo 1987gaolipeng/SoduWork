@@ -230,6 +230,7 @@
   "留在本地": "Stay local",
   "继续修正": "Continue revising",
   "继续编辑": "Continue editing",
+  "查看创建结果": "View creation result",
   "授权未完成，请重试": "Authorization is incomplete. Try again.",
   "仅在你需要创建、修改或发送内容时开启": "Enable only when you need to create, change, or send content.",
   "选择连接": "Select connection",
