@@ -351,3 +351,31 @@ test('older policy response cannot overwrite a newer explicit recheck', async ()
   f.resolvers[0]({ mailReady: false }); await first;
   assert.equal(f.auth.snapshot().policy.mailReady, true);
 });
+
+for (const [locale, welcome, register, recover, script] of [
+  ['ja-JP', 'おかえりなさい', 'アカウントを作成', 'パスワードを再設定', /[\u3040-\u30ff]/],
+  ['ko-KR', '다시 오신 것을 환영합니다', '계정 만들기', '비밀번호 재설정', /[\uac00-\ud7af]/],
+]) {
+  test(locale + ' localizes login, registration, recovery and mail errors without changing input', () => {
+    const f = view();
+    f.mounted.setPolicy({ mailReady: true, allowSelfRegistration: true });
+    f.mounted.accountInput.value = 'person@example.test';
+    f.mounted.passwordInput.value = 'User-entered-value';
+    f.setLocale(locale);
+    assert.equal(f.gate.querySelector('h1').textContent, welcome);
+    assert.equal(f.mounted.accountInput.value, 'person@example.test');
+    assert.equal(f.mounted.passwordInput.value, 'User-entered-value');
+    for (const selector of ['.ac-brand span', '.ac-auth-intro', '[data-auth-mode="emailCode"]',
+      '[data-auth-mode="password"]', '[data-auth-mode="register"]', '[data-auth-mode="resetPassword"]', '.soduwork-auth-secure'])
+      assert.match(f.gate.querySelector(selector).textContent, script, selector);
+    assert.match(f.mounted.passwordInput.placeholder, script);
+    f.mode('register'); assert.equal(f.gate.querySelector('h1').textContent, register);
+    f.mode('resetPassword'); assert.equal(f.gate.querySelector('h1').textContent, recover);
+    f.mounted.setPolicy({ mailReady: false });
+    assert.match(f.gate.querySelector('[data-mail-message]').textContent, script);
+    f.mounted.setPolicyError();
+    assert.match(f.gate.querySelector('[data-mail-message]').textContent, script);
+    f.setLocale('en-US'); assert.equal(f.gate.querySelector('h1').textContent, 'Reset password');
+    f.setLocale(locale); assert.equal(f.gate.querySelector('h1').textContent, recover);
+  });
+}

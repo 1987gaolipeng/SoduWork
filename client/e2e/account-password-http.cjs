@@ -45,6 +45,7 @@ if (typeof electron === 'string') {
     assert.equal(await js(`document.querySelector(${JSON.stringify(selector)}).value`), value);
   }
   async function shot(name) {
+    await delay(150); // Let the offscreen compositor paint the translated DOM.
     const target = path.join(out, name + '.png'); const image = await win.webContents.capturePage();
     fs.writeFileSync(target, image.toPNG()); report.screenshots.push(target);
   }
@@ -124,6 +125,7 @@ if (typeof electron === 'string') {
       refreshAccountProfile:()=>ipcRenderer.invoke('account-profile-refresh'),deviceAuthStatus:()=>ipcRenderer.invoke('device-auth-status'),
       getAppVersion:async()=> 'e2e',getSysInfo:async()=>({username:'fixture',hostname:'isolated',platform:'win32'}),configureRunner:async()=>({ok:true})});`);
     const files = ['core/api-work-plugins.js', 'api.js', 'components/client-auth/account-ui.js', 'components/client-auth/email-auth.js', 'components/client-auth/account-verification.js', 'components/client-auth/account-center.js', 'components/client-auth/client-auth.js'];
+    files.unshift(...JSON.parse(fs.readFileSync(path.join(client, 'core/locales/manifest.json'), 'utf8')).map(file => 'core/locales/' + file), 'core/i18n-dom.js', 'core/i18n.js');
     if (baseline) {
       const original = execFileSync('git', ['show', 'HEAD:client/components/client-auth/client-auth.js'], { cwd: repo, encoding: 'utf8' });
       const originalFile = path.join(temp, 'baseline-client-auth.js'); fs.writeFileSync(originalFile, original);
@@ -131,13 +133,36 @@ if (typeof electron === 'string') {
       report.baseline = { commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim(), file: 'client/components/client-auth/client-auth.js', sha256: require('node:crypto').createHash('sha256').update(original).digest('hex') };
     }
     const fixture = path.join(temp, 'fixture.html');
-    fs.writeFileSync(fixture, '<!doctype html><html><head><meta charset="utf-8"><base href="' + pathToFileURL(client + path.sep).href + '">' + ['theme/variables.css', 'components/client-auth/client-auth.css', 'components/client-auth/account-center.css'].map(p => '<link rel="stylesheet" href="' + p + '">').join('') + '</head><body><script>window.errors=[];window.lastChallenge=null;window.lastSensitiveChallenge=null;window.SoduWorkI18n={translateText:String,t:(_key,fallback)=>fallback};addEventListener("error",e=>errors.push(e.message));addEventListener("unhandledrejection",e=>errors.push(String(e.reason)));</script>' + files.map(p => '<script src="' + p + '"></script>').join('') + '<script>const realAction=SoduWorkAPI.clientAccountAction.bind(SoduWorkAPI);SoduWorkAPI.clientAccountAction=async(...args)=>{const result=await realAction(...args);if(args[0]==="emailChallenge"&&result.ok)lastChallenge=result.challengeId;return result;};const realRequest=SoduWorkAPI.clientAccountRequest.bind(SoduWorkAPI);SoduWorkAPI.clientAccountRequest=async(...args)=>{const result=await realRequest(...args);if(args[0]==="challenge")lastSensitiveChallenge=result.challengeId;return result;};</script></body></html>');
+    fs.writeFileSync(fixture, '<!doctype html><html><head><meta charset="utf-8"><base href="' + pathToFileURL(client + path.sep).href + '">' + ['theme/variables.css', 'components/client-auth/client-auth.css', 'components/client-auth/account-center.css'].map(p => '<link rel="stylesheet" href="' + p + '">').join('') + '</head><body><script>window.errors=[];window.lastChallenge=null;window.lastSensitiveChallenge=null;if(!localStorage.getItem("soduwork_work_cfg_v5_locale"))localStorage.setItem("soduwork_work_cfg_v5_locale","zh-CN");addEventListener("error",e=>errors.push(e.message));addEventListener("unhandledrejection",e=>errors.push(String(e.reason)));</script>' + files.map(p => '<script src="' + p + '"></script>').join('') + '<script>const realAction=SoduWorkAPI.clientAccountAction.bind(SoduWorkAPI);SoduWorkAPI.clientAccountAction=async(...args)=>{const result=await realAction(...args);if(args[0]==="emailChallenge"&&result.ok)lastChallenge=result.challengeId;return result;};const realRequest=SoduWorkAPI.clientAccountRequest.bind(SoduWorkAPI);SoduWorkAPI.clientAccountRequest=async(...args)=>{const result=await realRequest(...args);if(args[0]==="challenge")lastSensitiveChallenge=result.challengeId;return result;};</script></body></html>');
     win = new BrowserWindow({ show: false, width: 1100, height: 860, webPreferences: { preload, contextIsolation: true, nodeIntegration: false, offscreen: true, backgroundThrottling: false } });
     win.webContents.on('console-message', (_event, details) => { if (details?.level === 'error') process.stderr.write('Renderer: ' + details.message + '\n'); });
     win.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (request, cb) => { const allowed = request.url.startsWith(connection.hub + '/'); if (!allowed) report.errors.push('Blocked nonfixture request'); else report.requests.push({ method: request.method, path: new URL(request.url).pathname }); cb({ cancel: !allowed }); });
     await win.loadFile(fixture);
     process.stdout.write('Fixture document loaded\n');
     await until('ClientAuth.snapshot().policy?.mailReady===true && !document.querySelector(".soduwork-auth-submit").disabled');
+    for (const [locale, welcome, register, recover] of [
+      ['ja-JP', 'おかえりなさい', 'アカウントを作成', 'パスワードを再設定'],
+      ['ko-KR', '다시 오신 것을 환영합니다', '계정 만들기', '비밀번호 재설정'],
+      ['en-US', 'Welcome back', 'Create your account', 'Reset password'],
+      ['zh-CN', '欢迎回来', '创建你的账号', '找回密码'],
+    ]) {
+      await fill('#soduWorkAuthAccount', 'input-preserved@example.test'); await fill('#soduWorkAuthPassword', 'Untranslated-input');
+      await js(`(()=>{const select=document.querySelector('[data-auth-language]');select.value=${JSON.stringify(locale)};select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+      await delay(150);
+      assert.equal(await js('document.querySelector("h1").textContent'), welcome);
+      assert.equal(await js('document.querySelector("#soduWorkAuthAccount").value'), 'input-preserved@example.test');
+      assert.equal(await js('document.querySelector("#soduWorkAuthPassword").value'), 'Untranslated-input');
+      await shot('login-' + locale);
+      await click('[data-auth-mode="emailCode"]'); assert.equal(await js('document.querySelector("h1").textContent'), welcome);
+      await click('[data-auth-mode="register"]'); assert.equal(await js('document.querySelector("h1").textContent'), register);
+      await shot('registration-' + locale);
+      await click('.ac-auth-back'); await click('[data-auth-mode="resetPassword"]');
+      assert.equal(await js('document.querySelector("h1").textContent'), recover);
+      const reloaded = armReload(); win.reload(); await reloaded; await loginReady();
+      assert.equal(await js('SoduWorkI18n.getLocale()'), locale);
+      assert.equal(await js('document.querySelector("h1").textContent'), welcome);
+      record(locale + ' login, code login, registration and recovery localize; input stays unchanged and reload preserves locale');
+    }
     await click('[data-auth-mode="register"]'); await fill('#soduWorkAuthAccount', 'password-e2e@example.test'); await click('[data-send-code]');
     await until('!!lastChallenge'); await fill('#acEmailCode', await deliveredCode(await js('lastChallenge')));
     const password = 'Original-password-2026'; await fill('#soduWorkAuthPassword', password); await fill('#acConfirmPassword', password); await click('#acConsent');
