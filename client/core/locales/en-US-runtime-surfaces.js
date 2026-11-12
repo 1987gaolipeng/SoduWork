@@ -1,5 +1,10 @@
 (function (global) {
   const messages = {
+    '同公司可见': 'Visible within the company',
+    '仓库成员可见': 'Visible to repository members',
+    '仓库成员可查看需求内容；执行会话和日志仍按原有权限访问。': 'Repository members can view the issue content. Execution conversations and logs keep their existing access permissions.',
+    '同公司成员可查看需求内容；执行会话和日志仍按原有权限访问。': 'Company members can view the issue content. Execution conversations and logs keep their existing access permissions.',
+    '仅相关人可查看需求内容；执行会话和日志仍按原有权限访问。': 'Only related people can view the issue content. Execution conversations and logs keep their existing access permissions.',
     '已提交验收，等待验收人处理': 'Submitted for acceptance; waiting for the reviewer',
     '“需要我处理”仅显示当前轮到你操作的需求。执行中或已提交验收的需求仍保留在“与我相关”。': '“Needs my attention” only shows issues that currently require your action. Issues in progress or submitted for acceptance remain under “Related to me”.',
     '查看与我相关': 'View related issues',
