@@ -316,6 +316,7 @@ class LocalStartupTests(unittest.TestCase):
             service_env = start.runtime_environment(self.state, config, 'fixture-only-password',
                                                     '127.0.0.1', 18990)
             with patch.object(start.sys, 'platform', 'darwin'), \
+                    patch.object(Path, 'home', return_value=native_home), \
                     patch.object(start.subprocess, 'Popen') as popen:
                 start.launch_desktop(self.state, self.state / 'application/client', service_env,
                                      'http://127.0.0.1:18990', io.BytesIO())
