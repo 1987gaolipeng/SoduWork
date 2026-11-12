@@ -193,7 +193,8 @@
     const rejected = item.reviewDecision === 'reject';
     const local = (catalog.items || []).find(function (candidate) {
       return candidate.personal && !candidate.builtIn &&
-        ((item.key && candidate.key === item.key) || candidate.name === item.name);
+        (opts.localPluginId ? candidate.pluginId === opts.localPluginId :
+          ((item.key && candidate.key === item.key) || candidate.name === item.name));
     });
     const scope = item.visibility === 'users' ? '指定 ' + Number(item.audienceCount || 0) + ' 人' :
       item.visibility === 'org_units' ? '指定 ' + Number(item.audienceCount || 0) + ' 个团队' :
@@ -400,6 +401,13 @@
       .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))[0] || null;
   }
 
+  function submissionLabel(receipt) {
+    return !receipt ? '申请上架' :
+      receipt.reviewDecision === 'reject' ? '审核未通过' :
+      receipt.trustState === 'revoked' || receipt.reviewDecision === 'revoke' ? '上架已撤销' :
+      receipt.trustState === 'approved' ? (receipt.catalogReady ? '已上架' : '审核已通过') : '上架审核中';
+  }
+
   async function refreshPersonalSubmission(button, item, options) {
     if (!button) return;
     const opts = options || {}, api = opts.api || global.SoduWorkAPI;
@@ -414,10 +422,7 @@
       if (!catalog || catalog.remoteError || catalog.error) throw Error(catalog?.remoteError || catalog?.error || '上架状态暂不可用');
       const receipt = personalSubmission(item, catalog.submissions);
       button.disabled = Boolean(receipt);
-      button.textContent = !receipt ? '申请上架' :
-        receipt.reviewDecision === 'reject' ? '审核未通过' :
-        receipt.trustState === 'revoked' || receipt.reviewDecision === 'revoke' ? '上架已撤销' :
-        receipt.trustState === 'approved' ? (receipt.catalogReady ? '已上架' : '审核已通过') : '上架审核中';
+      button.textContent = submissionLabel(receipt);
       button.title = receipt ? (receipt.reviewNote || currentStep(receipt).detail) : '';
     } catch (error) {
       if (!current()) return;
@@ -428,6 +433,6 @@
 
   global.SoduWorkPluginPublication = {
     progress, currentStep, openUpgrade, submissionStrip, openSubmission, openPersonalPublish,
-    personalSubmission, refreshPersonalSubmission,
+    personalSubmission, refreshPersonalSubmission, submissionLabel,
   };
 })(window);
