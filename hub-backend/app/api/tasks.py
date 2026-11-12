@@ -1861,6 +1861,19 @@ async def task_acceptance_context(
     return await task_acceptance_review.context(session, client, tid)
 
 
+@router.get("/tasks/{tid}/acceptance-summary")
+async def task_acceptance_summary(
+    tid: str,
+    artifactVersionId: str | None = Query(default=None, max_length=36),
+    requirementVersion: int | None = Query(default=None, ge=1),
+    client: Client = Depends(current_client),
+):
+    """Export authorized delivery facts without changing their recorded acceptance state."""
+    from ..services import acceptance_summary
+    return await acceptance_summary.export(
+        client, tid, artifact_version_id=artifactVersionId, requirement_version=requirementVersion)
+
+
 @router.post("/tasks/{tid}/auto-review")
 async def auto_review_task_artifact(
     tid: str,
