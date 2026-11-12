@@ -52,7 +52,7 @@ app.whenReady().then(async()=>{
     })()`);
     const personal = ['approval','attention','manual-submit','manual-work'];
     assert.deepEqual(await ids(),personal);
-    assert.match(await js("document.querySelector('#rqScopeHint').textContent"),/当前轮到你操作.*执行中的需求仍保留在“与我相关”/);
+    assert.match(await js("document.querySelector('#rqScopeHint').textContent"),/当前轮到你操作.*执行中或已提交验收的需求仍保留在“与我相关”/);
     assert.equal(await js("document.querySelector('#rqScopeHint').hidden"),false);
     await screenshot('personal-actions');
     report.checks.push('Queued, streaming and local execution stay out of personal actions while actual decisions and manual follow-up remain');

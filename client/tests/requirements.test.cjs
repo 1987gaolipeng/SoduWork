@@ -226,6 +226,30 @@ test('active work still exposes explicit personal decisions and attention reques
   assert.equal(R.actionable({...task,myRoles:[],ai:{state:'streaming',attentionRaised:true}}),false);
 });
 
+test('submitted delivery leaves executor actions for both manual and agent projections', () => {
+  const base = {id:'submitted',status:'doing',requirementStage:'reviewing',myRoles:['assignee','executor'],
+    canViewExecution:true,canReview:false,canSubmitReview:false};
+  const staleInbox = {approvals:new Map([['submitted',{id:'review',action:'review'}]])};
+  const phases = [['doing','reviewing'],['done','reviewing'],['done','delivering'],['done','ready'],['done',undefined]];
+  for (const [status,requirementStage] of phases) for (const ai of [undefined,{state:'done'},{state:'stopped'}]) {
+    const task = {...base,status,requirementStage,ai}, before = JSON.stringify(task);
+    assert.equal(R.stage(task),'reviewing','completion takes precedence over a stale preparation or delivery stage');
+    assert.equal(R.actionable(task),false,JSON.stringify(task));
+    assert.equal(R.actionable(task,staleInbox),false,'another reviewer owns the pending decision');
+    assert.equal(R.inScope(task,'related'),true);
+    assert.equal(R.nextStep(task).text,'已提交验收，等待验收人处理');
+    assert.equal(R.canSubmitReview({...task,canSubmitReview:true}),false,'a stale capability cannot resubmit');
+    assert.equal(JSON.stringify(task),before);
+    assert.equal(R.actionable({...task,canReview:true}),true,'personal review remains actionable');
+    assert.equal(R.actionable({...task,needsMe:true}),true,'an explicit personal request remains actionable');
+    assert.equal(R.actionable({...task,ai:{state:'done',attentionRaised:true}}),true,'explicit executor attention remains actionable');
+    assert.equal(R.actionable({...task,myRoles:[],ai:{attentionRaised:true}}),false);
+    assert.equal(R.actionable({...task,canViewExecution:false,needsMe:true}),false);
+    assert.equal(R.actionable({...task,archivedAt:1,needsMe:true}),false);
+  }
+  assert.equal(R.actionable({...base,requirementStage:'delivering',canSubmitReview:true}),true,'unfinished submission stays with its executor');
+});
+
 test('personal review capability keeps a pending delivery actionable before the inbox refreshes', () => {
   const task = {id:'reviewing',status:'doing',requirementStage:'reviewing',
     myRoles:['creator'],canReview:true,ai:{state:'done'},canViewExecution:true};

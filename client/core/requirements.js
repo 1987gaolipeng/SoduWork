@@ -144,10 +144,11 @@
     if (approvalActionable(task, context)) return true;
     if (task.canClaim === true) return true;
     if (stage(task) === 'delivered' || task.canViewExecution === false) return false;
-    if (task.status === 'done' && !task.reviewedAt) return false; // After submission, the reviewer owns the decision; role membership alone does not make it actionable.
     if (canSubmitReview(task) || canResumeRework(task)) return true;
     if (task.needsMe === true) return true;
     if (!roles(task).some(role => ['executor', 'assignee'].includes(role))) return false;
+    // Formal submission may retain status=doing; the reviewer now owns the decision.
+    if (stage(task) === 'reviewing') return task.ai?.attentionRaised === true;
     // Owning a device is not an instruction to interrupt its running agent.
     if (executionActive(task) && !task.ai?.attentionRaised) return false;
     if (task.ai?.state === 'done') return false; // A decision comes from the approval queue, not a guessed role.
@@ -206,7 +207,7 @@
       return { text: labels[pending.action] || '查看证据并确认', action: '查看并确认', icon: 'confirm', attention: true };
     }
     if (phase === 'delivered') return { text: '查看成果与验收记录', action: '查看交付', icon: 'complete' };
-    if (phase === 'reviewing') return { text: '成果已提交，等待验收', action: '查看交付', icon: 'confirm' };
+    if (phase === 'reviewing') return { text: '已提交验收，等待验收人处理', action: '查看交付', icon: 'confirm' };
     if (canResumeRework(task)) return { text: '按验收意见继续修改', action: '继续修正', icon: 'edit', attention: true };
     if (canSubmitReview(task)) return { text: '本轮执行已结束，可提交验收', action: '查看并提交', icon: 'confirm', attention: true };
     if (task.ai?.state === 'failed') return { text: '执行未完成，查看原因', action: '查看执行情况', icon: 'attention', attention: actionable(task, context) };

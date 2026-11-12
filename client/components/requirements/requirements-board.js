@@ -313,7 +313,7 @@
       '<label id="rqGroupLabel">看板分组<select id="rqGroup" aria-label="看板分组">' + V.options([['stage','按阶段'],['project','按项目'],['owner','按负责人']], state.group) + '</select></label>' +
       '<label>排序<select id="rqSort" aria-label="排序">' + V.options(Object.entries(R.sorts), state.sort) + '</select></label><button type="button" data-rq-view="gantt">甘特视图</button>' +
       '<button type="button" data-rq-refresh>刷新需求</button><button type="button" data-rq-clear>清除筛选</button></div></div>' +
-      '<div id="rqScopeHint" class="rq-scope-hint" role="note" hidden><span>“需要我处理”仅显示当前轮到你操作的需求。执行中的需求仍保留在“与我相关”。</span>' +
+      '<div id="rqScopeHint" class="rq-scope-hint" role="note" hidden><span>“需要我处理”仅显示当前轮到你操作的需求。执行中或已提交验收的需求仍保留在“与我相关”。</span>' +
       '<button type="button" data-rq-scope="related">查看与我相关</button></div>' +
       '<div id="rqChips" class="rq-filter-chips" aria-label="已选筛选条件" hidden></div>' +
       '<div id="rqConnection" class="rq-connection" role="status" aria-live="polite" hidden><span>连接暂时中断，正在显示上次同步的需求，恢复后自动更新。</span><button type="button" data-rq-refresh>重试</button></div><main class="hb-body"></main>' +

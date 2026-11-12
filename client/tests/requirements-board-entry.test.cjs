@@ -104,7 +104,7 @@ test('personal action scope explains where active work remains and links to rela
   const hint = f.root.querySelector('#rqScopeHint');
   assert.equal(hint.hidden,false);
   assert.match(f.root.innerHTML,/当前轮到你操作/);
-  assert.match(f.root.innerHTML,/执行中的需求仍保留在/);
+  assert.match(f.root.innerHTML,/执行中或已提交验收的需求仍保留在/);
   assert.match(f.root.innerHTML,/data-rq-scope="related">查看与我相关/);
   const button = {dataset:{rqScope:'related'},hasAttribute:name=>name==='data-rq-scope',closest:()=>null};
   f.root.dispatchEvent({type:'click',target:{closest:selector=>selector==='button,[data-rq-open]'?button:null}});
