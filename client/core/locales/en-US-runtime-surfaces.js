@@ -1,5 +1,9 @@
 (function (global) {
   const messages = {
+    '已提交验收，等待验收人处理': 'Submitted for acceptance; waiting for the reviewer',
+    '“需要我处理”仅显示当前轮到你操作的需求。执行中或已提交验收的需求仍保留在“与我相关”。': '“Needs my attention” only shows issues that currently require your action. Issues in progress or submitted for acceptance remain under “Related to me”.',
+    '查看与我相关': 'View related issues',
+    '执行已安排，可在“与我相关”查看进展': 'Execution is scheduled. Follow its progress under “Related to me”.',
     "workspace.history.more": "Load more",
     "workspace.history.retry": "Reload",
     "workspace.history.localError": "Local history is temporarily unavailable",
