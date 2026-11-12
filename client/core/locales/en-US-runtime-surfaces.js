@@ -1,5 +1,10 @@
 (function (global) {
   const messages = {
+    '同公司可见': 'Visible within the company',
+    '仓库成员可见': 'Visible to repository members',
+    '仓库成员可查看需求内容；执行会话和日志仍按原有权限访问。': 'Repository members can view the issue content. Execution conversations and logs keep their existing access permissions.',
+    '同公司成员可查看需求内容；执行会话和日志仍按原有权限访问。': 'Company members can view the issue content. Execution conversations and logs keep their existing access permissions.',
+    '仅相关人可查看需求内容；执行会话和日志仍按原有权限访问。': 'Only related people can view the issue content. Execution conversations and logs keep their existing access permissions.',
     "workspace.history.more": "Load more",
     "workspace.history.retry": "Reload",
     "workspace.history.localError": "Local history is temporarily unavailable",
