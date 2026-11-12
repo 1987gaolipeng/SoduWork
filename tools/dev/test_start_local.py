@@ -391,12 +391,14 @@ class LocalStartupTests(unittest.TestCase):
             self.assertNotIn(key, desktop_env)
 
     def test_linux_desktop_environment_changes_do_not_apply_to_other_platforms(self):
+        # sys.platform is shared with shutil; keep executable discovery host-independent.
         for platform in ('win32', 'darwin'):
             with self.subTest(platform=platform), \
                     patch.dict(os.environ, {'XDG_CURRENT_DESKTOP': 'GNOME',
                                            'XDG_SESSION_TYPE': 'wayland',
                                            'XDG_DATA_HOME': '/native-data'}, clear=True), \
                     patch.object(start.sys, 'platform', platform), \
+                    patch('shutil.which', return_value='fixture-node'), \
                     patch.object(Path, 'home', return_value=Path(self.temp.name) / 'native-home'), \
                     patch.object(start.subprocess, 'Popen') as popen:
                 service_env = start.runtime_environment(
