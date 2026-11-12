@@ -238,6 +238,92 @@ test('contract kind without deliverables still exposes manual completion', async
   assert.match(f.active().querySelector('.rq-detail-footer').innerHTML, /data-rq-submit-review>提交验收/);
 });
 
+function submitReviewClick(f, button = {disabled: false, isConnected: true}) {
+  f.active().listeners.click({target: {closest: selector =>
+    selector.split(',').includes('[data-rq-submit-review]') ? button : null}});
+  return button;
+}
+
+for (const already of [false, true]) test(`manual review ${already ? 'retry receipt' : 'success'} closes its drawer before board refresh`, async () => {
+  const receipt = deferred(), refreshed = deferred(), submissions = [], reads = [];
+  const f = fixture({getTask: async id => { reads.push(id); return {...task(id), status: 'doing', canSubmitReview: true}; },
+    submitTaskReview: (...args) => { submissions.push(args); return receipt.promise; }});
+  let refreshes = 0;
+  f.context.RequirementsBoard.refresh = () => { refreshes++; return refreshed.promise; };
+  await f.api.open('submitted');
+  const button = submitReviewClick(f);
+  submitReviewClick(f, button);
+  await new Promise(setImmediate);
+  assert.equal(button.disabled, true);
+  assert.deepEqual(submissions, [['submitted', '']]);
+  receipt.resolve({ok: true, already});
+  await new Promise(setImmediate);
+  assert.equal(f.active(), undefined, 'the successful receipt closes the submitted requirement immediately');
+  assert.equal(refreshes, 1);
+  assert.ok(f.calls.some(row => row[0] === 'notice' && (already ? /已经在待验收/ : /已提交验收/).test(row[1])));
+  await f.api.open('next');
+  const next = f.active();
+  refreshed.resolve();
+  await new Promise(setImmediate);
+  assert.equal(f.active(), next, 'a late board refresh must not reopen or replace another requirement');
+  assert.deepEqual(reads, ['submitted', 'next']);
+});
+
+test('board refresh failure cannot turn accepted manual submission into a retryable failure', async () => {
+  const f = fixture({getTask: async id => ({...task(id), status: 'doing', canSubmitReview: true}),
+    submitTaskReview: async () => ({ok: true})});
+  f.context.RequirementsBoard.refresh = async () => { throw new Error('List unavailable'); };
+  await f.api.open('accepted');
+  submitReviewClick(f);
+  await new Promise(setImmediate);
+  assert.equal(f.active(), undefined);
+  assert.ok(f.calls.some(row => row[0] === 'notice' && /已提交验收/.test(row[1])));
+});
+
+for (const changed of ['close', 'requirement', 'identity']) test(`a stale manual review receipt cannot affect the drawer after ${changed}`, async () => {
+  const receipt = deferred(); let refreshes = 0;
+  const f = fixture({getTask: async id => ({...task(id), status: 'doing', canSubmitReview: true}),
+    submitTaskReview: () => receipt.promise});
+  f.context.RequirementsBoard.refresh = async () => { refreshes++; };
+  await f.api.open('submitted');
+  submitReviewClick(f);
+  await new Promise(setImmediate);
+  if (changed === 'close') f.api.close(true);
+  else if (changed === 'identity') f.events['soduwork-data-scope-changed']();
+  else await f.api.open('next');
+  const current = f.active();
+  receipt.resolve({ok: true});
+  await new Promise(setImmediate);
+  assert.equal(f.active(), current);
+  assert.equal(refreshes, 0);
+  assert.equal(f.calls.filter(row => row[0] === 'notice').length, 0);
+});
+
+for (const failure of ['asynchronous', 'synchronous', 'business']) test(`manual review ${failure} failure retains details and permits one retry`, async () => {
+  let attempts = 0;
+  const f = fixture({getTask: async id => ({...task(id), status: 'doing', canSubmitReview: true}),
+    submitTaskReview: () => {
+      if (++attempts > 1) return Promise.resolve({ok: true});
+      const error = new Error('Submission unavailable');
+      if (failure === 'synchronous') throw error;
+      if (failure === 'business') return {ok: false, reason: error.message};
+      return Promise.reject(error);
+    }});
+  await f.api.open('retry');
+  const drawer = f.active(), content = f.content().innerHTML, button = {disabled: false, isConnected: true};
+  assert.doesNotThrow(() => submitReviewClick(f, button));
+  await new Promise(setImmediate);
+  assert.equal(f.active(), drawer);
+  assert.equal(f.content().innerHTML, content);
+  assert.equal(button.disabled, false);
+  assert.match(drawer.querySelector('[data-rq-error]').textContent, /Submission unavailable/);
+  submitReviewClick(f, button);
+  submitReviewClick(f, button);
+  await new Promise(setImmediate);
+  assert.equal(attempts, 2);
+  assert.equal(f.active(), undefined);
+});
+
 test('live updates do not replace the optimistic version of an open editing draft', async () => {
   let value = {...task('versioned'),canEditRequirement:true,requirementVersion:3}; const writes = [];
   const f = fixture({getTask:async()=>({...value}),patchTask:async(_id,patch)=>{writes.push(patch); return {};}});
