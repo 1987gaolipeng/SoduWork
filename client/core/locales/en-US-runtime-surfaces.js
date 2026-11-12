@@ -1,5 +1,6 @@
 (function (global) {
   const messages = {
+    "需求标题最多 200 个字符": "Requirement titles can contain up to 200 characters",
     "workspace.history.more": "Load more",
     "workspace.history.retry": "Reload",
     "workspace.history.localError": "Local history is temporarily unavailable",

@@ -1,5 +1,6 @@
 (function (global) {
   const messages = {
+    "需求标题最多 200 个字符": "需求标题最多 200 个字符",
     "workspace.history.more": "加载更多",
     "workspace.history.retry": "重新加载",
     "workspace.history.localError": "本机历史暂时无法读取",

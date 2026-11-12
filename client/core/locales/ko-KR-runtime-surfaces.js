@@ -1,5 +1,6 @@
 (function (global) {
   const messages = {
+    "需求标题最多 200 个字符": "요구 사항 제목은 200자 이내로 입력하세요",
     "workspace.history.more": "더 불러오기",
     "workspace.history.retry": "새로고침",
     "workspace.history.localError": "현재 로컬 기록을 불러올 수 없습니다",

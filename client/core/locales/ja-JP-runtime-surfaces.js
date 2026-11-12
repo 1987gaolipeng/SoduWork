@@ -1,5 +1,6 @@
 (function (global) {
   const messages = {
+    "需求标题最多 200 个字符": "要件のタイトルは 200 文字以内で入力してください",
     "workspace.history.more": "さらに読み込む",
     "workspace.history.retry": "再読み込み",
     "workspace.history.localError": "ローカル履歴を一時的に読み込めません",
