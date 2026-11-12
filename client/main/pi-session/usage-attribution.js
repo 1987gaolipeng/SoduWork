@@ -10,13 +10,20 @@ function create(preparedModel) {
     if (event.type === 'message_start') {
       const prepared = preparedModel();
       const model = prepared?.model;
-      active = model?.id && typeof model.quotaProvider === 'string' && model.quotaProvider.trim()
-        ? { model: String(model.id), provider: model.quotaProvider.trim(), runtimeProvider: prepared.provider || '',
+      const provider = typeof model?.quotaProvider === 'string' ? model.quotaProvider.trim() : '';
+      active = model?.id
+        ? { model: String(model.id), provider, runtimeProvider: prepared.provider || '', localOnly: model.localOnly === true,
           quotaUsageToken: model.quotaVersion === 2 && typeof model.quotaUsageToken === 'string'
             ? model.quotaUsageToken : '' } : null;
     }
     if (event.type !== 'message_start' && event.type !== 'message_end') return;
-    if (!message.usageProvider && active && message.model === active.model &&
+    if (active && message.model === active.model &&
+        (!active.runtimeProvider || message.provider === active.runtimeProvider)) {
+      // Persist ownership with each call so switching models or reopening an
+      // archive cannot upload local usage as part of a managed cumulative total.
+      message.usageLocalOnly = active.localOnly;
+    }
+    if (!message.usageProvider && active?.provider && message.model === active.model &&
         (!active.runtimeProvider || message.provider === active.runtimeProvider)) {
       message.usageProvider = active.provider;
     }
