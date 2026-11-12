@@ -16,9 +16,60 @@ from unittest.mock import patch
 from tools.dev import local_environment as build
 from tools.dev import start_local as start
 from tools.dev import verify_local_start as verify
+from tools.dev import verify_desktop_fixture as desktop_fixture
 
 
 class LocalStartupTests(unittest.TestCase):
+    def test_unfinished_git_operations_block_before_touching_runtime_data(self):
+        checkout = Path(self.temp.name) / 'checkout'
+        metadata = checkout / '.git'
+        metadata.mkdir(parents=True)
+        for marker in ['rebase-merge', 'rebase-apply', 'MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD']:
+            with self.subTest(marker=marker):
+                (metadata / marker).touch()
+                with patch.object(start, 'ROOT', checkout), patch.object(start, 'initialize') as initialize, \
+                        patch.object(start, 'prepare') as prepare, patch.object(start, 'check_dependencies') as dependencies, \
+                        redirect_stdout(io.StringIO()), patch('sys.stderr', io.StringIO()) as errors:
+                    self.assertEqual(start.main(['--prepare-only', '--desktop', '--data-dir', str(self.state)]), 1)
+                self.assertIn('unfinished Git', errors.getvalue())
+                initialize.assert_not_called()
+                prepare.assert_not_called()
+                dependencies.assert_not_called()
+                self.assertFalse(self.state.exists())
+                (metadata / marker).unlink()
+
+    def test_source_checkout_guard_supports_worktrees_and_archives_without_git(self):
+        checkout = Path(self.temp.name) / 'checkout'
+        checkout.mkdir()
+        metadata = Path(self.temp.name) / 'metadata'
+        metadata.mkdir()
+        (checkout / '.git').write_text('gitdir: ../metadata\n', encoding='utf-8')
+        start.check_source_checkout(checkout)
+        (metadata / 'rebase-merge').mkdir()
+        with self.assertRaisesRegex(start.StartupError, 'unfinished Git rebase'):
+            start.check_source_checkout(checkout)
+        (checkout / '.git').unlink()
+        start.check_source_checkout(checkout)
+
+    def test_desktop_verifier_mocks_only_its_owned_electron_child(self):
+        self.state.mkdir(parents=True)
+        client = self.state / 'application/client'
+        with patch.object(sys, 'platform', 'darwin'), patch.object(start.subprocess, 'Popen') as popen:
+            desktop_fixture.launch_desktop_fixture(start.launch_desktop, self.state, client, {},
+                                                   'http://127.0.0.1:18989', io.BytesIO())
+            fixture_command = popen.call_args.args[0]
+            self.assertEqual(fixture_command[1:], [str(client / 'scripts/start-client.cjs'), '--use-mock-keychain'])
+            self.assertEqual(Path(popen.call_args.kwargs['env']['SODUWORK_USER_DATA']), self.state / 'desktop-profile')
+            start.launch_desktop(self.state, client, {}, 'http://127.0.0.1:18989', io.BytesIO())
+            self.assertEqual(popen.call_args.args[0][1:], [str(client / 'scripts/start-client.cjs')])
+
+    def test_desktop_fixture_refuses_an_ordinary_profile(self):
+        self.state.mkdir(parents=True)
+        with patch.object(sys, 'platform', 'darwin'), patch.object(start, 'main') as main, \
+                self.assertRaises(SystemExit):
+            desktop_fixture.main(['--data-dir', str(self.state), '--desktop'])
+        main.assert_not_called()
+
     def test_desktop_restart_ignores_live_historical_ready_events(self):
         journal = self.state / 'desktop-profile/diagnostics/lifecycle.jsonl'
         journal.parent.mkdir(parents=True)
@@ -257,6 +308,24 @@ class LocalStartupTests(unittest.TestCase):
                          {'hub': 'http://127.0.0.1:18990'})
         self.assertEqual(json.loads((self.state / 'desktop-profile/chat-config.json').read_text()),
                          {'workDir': str(self.state / 'workspaces')})
+
+    def test_macos_desktop_preserves_native_home_without_inheriting_service_secrets(self):
+        native_home = Path(self.temp.name) / 'native-home'
+        config = start.initialize(self.state, 'owner')
+        with patch.dict(os.environ, {'HOME': str(native_home), 'OPENAI_API_KEY': 'fixture-only-key'}):
+            service_env = start.runtime_environment(self.state, config, 'fixture-only-password',
+                                                    '127.0.0.1', 18990)
+            with patch.object(start.sys, 'platform', 'darwin'), \
+                    patch.object(Path, 'home', return_value=native_home), \
+                    patch.object(start.subprocess, 'Popen') as popen:
+                start.launch_desktop(self.state, self.state / 'application/client', service_env,
+                                     'http://127.0.0.1:18990', io.BytesIO())
+        desktop_env = popen.call_args.kwargs['env']
+        self.assertEqual(desktop_env['HOME'], str(native_home))
+        self.assertEqual(service_env['HOME'], str(self.state / 'home'))
+        self.assertEqual(desktop_env['SODUWORK_USER_DATA'], str(self.state / 'desktop-profile'))
+        for key in ('ADMIN_USER', 'ADMIN_PASS', 'AUTH_SECRET', 'DATABASE_URL', 'OPENAI_API_KEY'):
+            self.assertNotIn(key, desktop_env)
 
     def test_source_refresh_preserves_desktop_dependencies_but_removes_stale_code(self):
         source = Path(self.temp.name) / 'source'

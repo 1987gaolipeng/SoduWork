@@ -229,7 +229,7 @@ function _ensure(app, raw) {
 }
 
 function identity(app, hub = '', clientId = '') {
-  if (!_available()) return null;
+  if (!_credentials) return null;
   try {
     const fixed = require('./hub-endpoint.cjs').current(app);
     if (fixed) {
@@ -250,6 +250,8 @@ function identity(app, hub = '', clientId = '') {
     if (!row) row = Object.values(doc.profiles).sort((a, b) =>
       String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0] || null;
     if (!row || (clientId && row.clientId !== clientId)) return null;
+    // Passive startup services must not initialize native secure storage before
+    // the renderer is ready when this profile has no device credential to read.
     const secret = _decrypt(app, row);
     return secret ? { hub: row.hub, clientId: row.clientId, secret } : null;
   } catch (_) { return null; }
@@ -667,7 +669,7 @@ function install({ app, ipcMain, safeStorage }) {
   ipcMain.handle('device-auth-status', (_event, hub, clientId) => {
     const id = identity(app, hub, clientId);
     return { ready: !!id, hub: id ? id.hub : '', clientId: id ? id.clientId : '',
-      sessionReady: !!session(app, hub, clientId), secure: _available() };
+      sessionReady: !!session(app, hub, clientId), secure: !!id && _available() };
   });
 }
 

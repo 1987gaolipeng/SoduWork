@@ -14,6 +14,7 @@ function publicModel(model) {
   const m = model || {};
   const resolved = contextWindow.resolveContextWindow(m);
   return { id: String(m.id || ''), label: String(m.label || m.name || m.id || '默认模型'),
+    ...(m.localOnly === true ? { localOnly: true } : {}),
     ...(m.modality ? { modality: m.modality } : {}),
     ...(m.quotaVersion === 2 && ['personal', 'platform'].includes(m.quotaScope)
       ? { quotaVersion: 2, quotaScope: m.quotaScope } : {}),
@@ -40,8 +41,9 @@ function create({ name = '', model, resolve, apply, persist = () => {}, changed 
     view: () => ({ name: selected, activeName: active, model: publicModel(selectedModel),
       activeModel: publicModel(activeModel), pending: needsApply(selected) }),
     async select(name) {
-      if (typeof name !== 'string' || name.length > 300 || /[\r\n\0]/.test(name))
+      if (typeof name !== 'string' || name.length > require('../../core/model-choice').nameLimit(name) || /[\r\n\0]/.test(name))
         return { ok: false, reason: '模型名称无效' };
+      name = name.trim();
       if (selecting) return { ok: false, reason: '正在更新模型，请稍候' };
       selecting = true;
       try {
@@ -112,12 +114,17 @@ function preference(app, ref) {
 
 function piProvider(next) {
   const thinking = thinkingCapabilities.profile(next);
+  const localNoAuth = next?.localOnly === true && !String(next?.key || '').trim();
   const compat = {
     supportsDeveloperRole: false,
     supportsReasoningEffort: thinking.supportsReasoningEffort,
     ...(thinking.format ? { thinkingFormat: thinking.format } : {}),
   };
-  return { name: 'SoduWork \u6a21\u578b\u670d\u52a1', baseUrl: next.baseUrl, api: 'openai-completions', apiKey: next.key,
+  return { name: 'SoduWork \u6a21\u578b\u670d\u52a1', baseUrl: next.baseUrl, api: 'openai-completions',
+    // Pi's OpenAI transport requires a non-empty credential marker before it
+    // creates a client. Session setup removes this marker from the wire request
+    // after the model has been resolved.
+    apiKey: localNoAuth ? 'soduwork-local-no-key' : next.key,
     compat, models: [{ id: next.id, name: next.label || next.id,
       input: next.input || ['text'], reasoning: thinking.reasoning,
       ...(thinking.reasoning && thinking.thinkingLevelMap ? { thinkingLevelMap: thinking.thinkingLevelMap } : {}),

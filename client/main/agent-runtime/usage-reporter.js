@@ -8,6 +8,16 @@ const conversationTitles = require('../conversation/titles');
 const { empty, add, usageFromSnapshot } = require('./usage-values');
 const outboxStore = require('./usage-outbox');
 
+function quarantineLegacyPi(rows) {
+  const scopeOf = row => row.scope || JSON.stringify([row.hub, row.clientId, row.payload?.idempotencyKey]);
+  const unsafe = new Set(Object.values(rows).filter(row => row.ownershipVersion !== 1 &&
+    (['pi', 'local:pi'].includes(row.payload?.agent) || row.payload?.provider === 'soduwork')).map(scopeOf));
+  // Old Pi totals could include local calls even on a managed checkpoint.
+  // Preserve the entire legacy scope locally; fresh receipts rebuild only
+  // reportable usage under the original server idempotency key.
+  return Object.keys(rows).filter(key => rows[key].ownershipVersion !== 1 && unsafe.has(scopeOf(rows[key])));
+}
+
 function createUsageReporter(options) {
   const app = options.app;
   const identityOf = options.identityOf;
@@ -17,7 +27,7 @@ function createUsageReporter(options) {
   const file = path.join(app.getPath('userData'), 'usage-outbox.json');
   const outbox = outboxStore.create(file, options.onError || (() => {
     console.warn('[usage] Pending usage could not be saved; retained for retry');
-  }));
+  }), { quarantine: quarantineLegacyPi });
   let timer = null;
   let flushing = false;
   const observed = new WeakMap();
@@ -109,6 +119,7 @@ function createUsageReporter(options) {
       const rawModel = handle.model;
       const model = String(rawModel && typeof rawModel === 'object'
         ? (rawModel.id || rawModel.name || '') : (rawModel || ''));
+      const localModel = rawModel?.localOnly === true || model.startsWith('local:');
       /*
        * Prefer renamed titles from the title store, then the history-derived first-message
        * title. Persist the title in the outbox for offline retries; empty titles let
@@ -134,7 +145,7 @@ function createUsageReporter(options) {
         sourceTitle,
         agent: String(handle.usageAgentKey || handle.adapterId || 'unknown'),
         provider: String(handle.usageProvider || ''),
-        model,
+        model: localModel ? '' : model,
         credentialScope: String(handle.usageCredentialScope || 'personal'),
         billingMode: String(handle.usageBillingMode || 'unknown'),
         usage,
@@ -146,26 +157,31 @@ function createUsageReporter(options) {
         const day = new Date(Date.parse(payload.occurredAt) + 8 * 3600000).toISOString().slice(0, 10);
         const bucket = JSON.stringify([day, payload.agent, payload.provider, payload.model,
           payload.credentialScope, payload.billingMode, payload.quotaUsageToken || '']);
-        if (outbox.enqueue({ hub: identity.hub, clientId: identity.clientId, accountScope: identity.accountScope || '',
+        if (outbox.enqueue({ ownershipVersion: 1, hub: identity.hub, clientId: identity.clientId, accountScope: identity.accountScope || '',
           scope, bucket, payload })) schedule();
       }
       if (Array.isArray(snapshot?.usageReceipts) && snapshot.usageReceipts.length) {
         const cumulative = empty();
         for (const receipt of snapshot.usageReceipts) {
+          // A local call belongs only to this device. Exclude it before
+          // summing so later managed checkpoints cannot disclose or bill it.
+          if (receipt.localOnly === true || receipt.reportable === false) continue;
           add(cumulative, receipt.usage);
-          checkpoint({ ...base, usage: { ...cumulative }, model: receipt.model || model,
+          checkpoint({ ...base, usage: { ...cumulative }, model: receipt.model || base.model,
             agent: receipt.agent || base.agent,
             provider: receipt.provider !== undefined ? receipt.provider : base.provider,
             ...(typeof receipt.quotaUsageToken === 'string' && receipt.quotaUsageToken
               ? { quotaUsageToken: receipt.quotaUsageToken } : {}),
             occurredAt: receipt.at ? new Date(receipt.at).toISOString() : base.occurredAt });
         }
-      } else checkpoint(base);
+      } else if (!localModel) checkpoint(base);
       if (receipts) accountedReceipts.set(handle, receipts);
     } catch (_) { /* accounting cannot block the user's session */ }
   }
 
   if (outbox.pending()) schedule();
+  // A migration may leave no deliverable rows; still preserve its quarantine.
+  else void outbox.persist().catch(() => {});
   return { observe, flush, persist: outbox.persist };
 }
 
