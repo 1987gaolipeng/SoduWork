@@ -1868,7 +1868,7 @@
     },
     async draftMateMessage(context) {
       return await jfetch('/team/message-draft', {
-        method: 'POST', body: JSON.stringify(context || {}), signal: _abortSignal(30000)
+        method: 'POST', body: JSON.stringify({ ...(context || {}), locale: window.SoduWorkI18n?.getLocale?.() || 'zh-CN' }), signal: _abortSignal(30000)
       });
     },
     async mateMessageFile(id) {
