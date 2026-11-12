@@ -88,6 +88,33 @@ test('login labels stay in one locale and repaint after a language change', () =
   assert.equal(f.gate.querySelector('[data-password-toggle]').textContent, '显示');
 });
 
+test('registration and recovery explain password limits before and after invalid input', async () => {
+  const f = view();
+  f.mounted.setPolicy({ mailReady: true, passwordMinLength: 12 });
+  for (const mode of ['register', 'resetPassword']) {
+    f.mode(mode);
+    for (const locale of ['zh-CN', 'en-US', 'ja-JP', 'ko-KR']) {
+      f.setLocale(locale);
+      const hint = f.gate.querySelector('#acPasswordRequirements');
+      assert.equal(hint.hidden, false);
+      assert.match(hint.textContent, /12.*128/);
+      assert.doesNotMatch(hint.textContent, /\{min\}|\{max\}/);
+    }
+    f.mounted.accountInput.value = 'person@example.test';
+    f.api.clientAccountAction = async () => ({ ok: true, challengeId: 'test', expiresIn: 300, retryAfter: 0 });
+    await f.gate.querySelector('[data-send-code]').fire('click');
+    f.gate.querySelector('#acEmailCode').value = '123456';
+    f.mounted.passwordInput.value = 'short';
+    await f.mounted.form.fire('submit');
+    assert.equal(f.gate.querySelector('.soduwork-auth-status').textContent,
+      f.gate.querySelector('#acPasswordRequirements').textContent);
+    f.setLocale('en-US');
+    assert.equal(f.gate.querySelector('.soduwork-auth-status').textContent, 'Use 12 to 128 characters for your password.');
+  }
+  f.mode('password');
+  assert.equal(f.gate.querySelector('#acPasswordRequirements').hidden, true);
+});
+
 test('login starts with a generic account field while registration uses email verification', () => {
   const f = view();
   f.mounted.setPolicy({ mailReady: true, allowSelfRegistration: true });

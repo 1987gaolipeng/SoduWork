@@ -3,6 +3,7 @@
   // Core Japanese copy. Untranslated source phrases intentionally fall back to
   // English through the locale registry instead of mixing Chinese into a page.
   const messages = {
+    '密码需为 {min} 至 {max} 个字符。': 'パスワードは {min} 文字以上 {max} 文字以下で入力してください。',
     '放大': '拡大', '更大文字 · 清晰易读': '大きな文字 · 読みやすい表示',
     '账号或密码不正确': 'アカウントまたはパスワードが正しくありません',
     '操作过于频繁，请稍后重试': '操作が集中しています。しばらくしてからもう一度お試しください',
