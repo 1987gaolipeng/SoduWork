@@ -70,6 +70,60 @@ function fixture(overrides = {}) {
     content: () => active().querySelector('.rq-detail-content')};
 }
 
+test('acceptance summary export uses the displayed requirement version and reports native results beside its action', async () => {
+  const f = fixture({ getTask: async id => ({ ...task(id), requirementVersion: 4 }) });
+  const pending = deferred(), calls = [];
+  f.context.soduWorkAPI.exportAcceptanceSummary = input => { calls.push(input); return pending.promise; };
+  await f.api.open('export-task');
+  assert.match(f.content().innerHTML, /data-rq-export-summary/);
+  f.click('[data-rq-export-summary]'); f.click('[data-rq-export-summary]');
+  assert.equal(calls.length, 1); assert.equal(calls[0].taskId, 'export-task'); assert.equal(calls[0].requirementVersion, 4);
+  assert.equal(f.active().querySelector('[data-rq-export-summary]').disabled, true);
+  pending.resolve({ ok: true }); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.active().querySelector('[data-rq-export-status]').textContent, '验收摘要已保存');
+  assert.equal(f.active().querySelector('[data-rq-export-summary]').disabled, false);
+});
+
+test('acceptance summary cannot be exported from a requirement-only view', async () => {
+  const f = fixture({ getTask: async id => ({ ...task(id), canViewExecution: false }) });
+  f.context.soduWorkAPI.exportAcceptanceSummary = () => { throw Error('must not export'); };
+  await f.api.open('restricted');
+  assert.doesNotMatch(f.content().innerHTML, /data-rq-export-summary/);
+  f.click('[data-rq-export-summary]');
+});
+
+test('summary export pins the visible approval and suppresses receipts after a same-task version refresh', async () => {
+  let version = 4;
+  const f = fixture({ getTask: async id => ({ ...task(id), requirementVersion: version }) });
+  const pending = deferred(); let sent;
+  f.context.RequirementsBoard.context = () => ({ approvals: new Map([['export-task',
+    { id: 'review', taskId: 'export-task', action: 'review', status: 'pending', artifactVersionId: 'fixed-artifact' }]]) });
+  f.context.soduWorkAPI.exportAcceptanceSummary = input => { sent = input; return pending.promise; };
+  await f.api.open('export-task'); f.click('[data-rq-export-summary]');
+  assert.equal(sent.requirementVersion, 4);
+  assert.equal(sent.artifactVersionId, 'fixed-artifact');
+  version = 5; await f.api.refresh('export-task');
+  pending.resolve({ ok: true }); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.active().querySelector('[data-rq-export-status]').textContent, '');
+  assert.equal(f.active().querySelector('[data-rq-export-summary]').disabled, false);
+});
+
+test('canceled, failed and stale exports preserve the current detail and permit retry', async () => {
+  const f = fixture();
+  await f.api.open('first');
+  f.context.soduWorkAPI.exportAcceptanceSummary = async () => ({ ok: false, reason: 'Version changed' });
+  f.click('[data-rq-export-summary]'); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.active().querySelector('[data-rq-export-status]').textContent, 'Version changed');
+  f.context.soduWorkAPI.exportAcceptanceSummary = async () => ({ ok: false, canceled: true });
+  f.click('[data-rq-export-summary]'); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.active().querySelector('[data-rq-export-status]').textContent, '');
+  const pending = deferred(); f.context.soduWorkAPI.exportAcceptanceSummary = () => pending.promise;
+  f.click('[data-rq-export-summary]'); await f.api.open('second');
+  const current = f.active().querySelector('[data-rq-export-status]'); current.textContent = 'current';
+  pending.resolve({ ok: true }); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(current.textContent, 'current');
+});
+
 test('intake details offer preparation instead of execution and show the real delivery state', async () => {
   const f = fixture({getTask: async id => ({...task(id),triageStage:'intake',canEditRequirement:true})});
   await f.api.open('intake');
