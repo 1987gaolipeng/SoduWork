@@ -32,6 +32,7 @@ function accountingReceipts(state, cache) {
   cache.receipts = history.concat(live.filter(m => m.role === 'assistant' && m.done && m.usage)
     .map(m => ({ usage: m.usage, at: m.usageAt || m.completedAt || 0,
       model: m.usageModel || '', provider: m.usageProvider || '', agent: m.sourceAgent?.agentId || '',
+      ...(m.usageLocalOnly === true ? { localOnly: true } : {}),
       ...(m.quotaUsageToken ? { quotaUsageToken: m.quotaUsageToken } : {}) })));
   return cache.receipts;
 }
