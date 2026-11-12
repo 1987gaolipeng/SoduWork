@@ -11,6 +11,7 @@ const _distribution = require('./main/distribution.cjs');
  * Set it before any userData path consumers.
  */
 require('./main/userdata-path.cjs').initializeUserData(app);
+if (require('./main/keychain-startup.cjs').dispatch({ app, BrowserWindow, shell, nativeImage })) return;
 const _hubEndpoint = require('./main/hub-endpoint.cjs');
 _hubEndpoint.initialize(app);
 const _lifecycleDiagnostics = require('./main/lifecycle-diagnostics').install({ app });
@@ -168,6 +169,7 @@ _workPreview.install({ ipcMain, BrowserWindow, WebContentsView, screen, shell, a
 require('./main/app-settings-ipc.cjs').install({ app, ipcMain, safeStorage,
   identityOf: _deviceAuth.authenticatedIdentity,
   ownerOf: () => { const id = _deviceAuth.identity(app), owner = _deviceAuth.localOwner(app); return id && owner ? id.hub + ':' + owner : ''; } });
+require('./main/local-model-ipc.cjs').install({ app, ipcMain, safeStorage });
 _attachmentFiles.install({ app, ipcMain, BrowserWindow, dialog, net, shell, identityOf: _deviceAuth.identity,
   authenticatedIdentityOf: _deviceAuth.authenticatedIdentity });
 _libraryExternal.install({ app, ipcMain, BrowserWindow, shell });

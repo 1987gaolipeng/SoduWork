@@ -53,9 +53,18 @@ function create({ app, identityOf, onQuotaExceeded, onQuotaChanged, fetchImpl = 
 function beforeTurn(authorize, identity, previous, runtime) {
   const expectedScope = scope(identity);
   return async function (turn, ...args) {
+    const modelName = typeof turn?.modelName === 'string' ? turn.modelName.trim() : '';
+    if (modelName.startsWith('local:')) {
+      // Only ordinary Pi turns may use a desktop-owned endpoint. Validate the
+      // captured reference locally and never disclose it to Hub admission.
+      const local = runtime?.agent === 'pi' && runtime.modelMode === 'managed' && !runtime.controlled &&
+        await runtime.localModel?.(modelName);
+      if (!local?.localOnly) throw Error('本地模型不可用，请刷新模型配置后重试');
+      return previous?.apply(this, args);
+    }
     const selection = runtime?.agent === 'pi' && runtime.modelMode === 'managed' && !runtime.controlled &&
-      !require('../../core/model-choice').imageChoice(turn?.modelName) ? {
-      model: typeof turn?.modelName === 'string' ? turn.modelName : '', agent: 'pi',
+      !require('../../core/model-choice').imageChoice(modelName) ? {
+      model: modelName, agent: 'pi',
     } : undefined;
     await authorize(identity, expectedScope, selection);
     return previous?.apply(this, args);

@@ -438,6 +438,11 @@ const soduWorkBridge = {
     get: (id) => ipcRenderer.invoke('app-settings-get', id || '', {}),
     update: (id, options) => ipcRenderer.invoke('app-settings-update', id || '', options || {}),
   },
+  localModels: {
+    get: () => ipcRenderer.invoke('local-models-get'),
+    save: input => ipcRenderer.invoke('local-models-save', input || {}),
+    test: (providerId, modelName) => ipcRenderer.invoke('local-models-test', String(providerId || ''), String(modelName || '')),
+  },
   personalPlugins: {
     debug: (ref, options) => ipcRenderer.invoke('personal-plugin-debug', ref || '', options || {}),
     choosePackage: () => ipcRenderer.invoke('personal-plugin-choose-package'),
