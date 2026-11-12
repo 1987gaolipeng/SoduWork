@@ -48,6 +48,36 @@ if (typeof electron === 'string') {
     const target = path.join(out, name + '.png'); const image = await win.webContents.capturePage();
     fs.writeFileSync(target, image.toPNG()); report.screenshots.push(target);
   }
+  async function key(key, shift = false) {
+    if (!win.webContents.debugger.isAttached()) win.webContents.debugger.attach('1.3');
+    for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {
+      type, key, code: key === ' ' ? 'Space' : key, windowsVirtualKeyCode: key === 'Tab' ? 9 : 32, modifiers: shift ? 8 : 0,
+    });
+    await delay(30);
+  }
+  async function tabTo(selector, shift = false) {
+    await key('Tab', shift);
+    assert.equal(await js(`document.activeElement === document.querySelector(${JSON.stringify(selector)})`), true, 'Tab focus: ' + selector);
+  }
+  async function verifyAuthKeyboardOrder() {
+    await loginReady();
+    await click('[data-auth-mode="register"]'); await fill('#soduWorkAuthPassword', 'Keyboard-input');
+    await tabTo('#acConfirmPassword'); await tabTo('[data-password-toggle]');
+    await key(' '); assert.equal(await js('document.querySelector("#soduWorkAuthPassword").type'), 'text');
+    await key(' '); assert.equal(await js('document.querySelector("#soduWorkAuthPassword").type'), 'password');
+    await tabTo('#acConsent'); await tabTo('[data-password-toggle]', true);
+    await tabTo('#acConfirmPassword', true); await tabTo('#soduWorkAuthPassword', true);
+    record('registration tabs directly to confirmation and keeps password visibility keyboard-accessible in both directions');
+    await click('.ac-auth-back'); await click('[data-auth-mode="resetPassword"]');
+    await fill('#soduWorkAuthPassword', 'Keyboard-input');
+    await tabTo('#acConfirmPassword'); await tabTo('[data-password-toggle]'); await tabTo('.soduwork-auth-submit');
+    await tabTo('.ac-auth-back'); await tabTo('.soduwork-auth-submit', true); await tabTo('[data-password-toggle]', true);
+    await tabTo('#acConfirmPassword', true); await tabTo('#soduWorkAuthPassword', true);
+    record('password recovery keeps confirmation first and permits tabbing out of the form');
+    await click('.ac-auth-back'); await fill('#soduWorkAuthPassword', 'Keyboard-input');
+    await tabTo('[data-password-toggle]'); await tabTo('.soduwork-auth-submit');
+    record('password login retains its existing keyboard order');
+  }
   async function deliveredCode(challengeId) {
     const deadline = Date.now() + 15000;
     while (Date.now() < deadline) {
@@ -136,6 +166,7 @@ if (typeof electron === 'string') {
     win.webContents.on('console-message', (_event, details) => { if (details?.level === 'error') process.stderr.write('Renderer: ' + details.message + '\n'); });
     win.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (request, cb) => { const allowed = request.url.startsWith(connection.hub + '/'); if (!allowed) report.errors.push('Blocked nonfixture request'); else report.requests.push({ method: request.method, path: new URL(request.url).pathname }); cb({ cancel: !allowed }); });
     await win.loadFile(fixture);
+    await verifyAuthKeyboardOrder();
     process.stdout.write('Fixture document loaded\n');
     await until('ClientAuth.snapshot().policy?.mailReady===true && !document.querySelector(".soduwork-auth-submit").disabled');
     await click('[data-auth-mode="register"]'); await fill('#soduWorkAuthAccount', 'password-e2e@example.test'); await click('[data-send-code]');
