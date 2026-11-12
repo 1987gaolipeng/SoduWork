@@ -79,8 +79,11 @@ function prepareSourceApp({ root, binary, run = execFileSync }) {
     try { fs.renameSync(temporary, directory); }
     catch (error) {
       // Concurrent launches may prepare the same immutable bundle. Only use
-      // the winner after its completed receipt is visible.
-      if (!['EEXIST', 'ENOTEMPTY'].includes(error.code) || !ready()) throw error;
+      // the winner after its completed receipt is visible. Windows reports
+      // an existing destination directory as EPERM instead of EEXIST.
+      const collision = ['EEXIST', 'ENOTEMPTY'].includes(error.code) ||
+        (process.platform === 'win32' && error.code === 'EPERM');
+      if (!collision || !ready()) throw error;
     }
     return executable;
   } finally { fs.rmSync(temporary, { recursive: true, force: true }); }

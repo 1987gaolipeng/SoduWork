@@ -94,3 +94,66 @@ test('concurrent preparations publish one complete bundle and remove temporary c
   assert.equal(binary, winning);
   assert.equal(fs.readdirSync(path.join(f.root, '.runtime/source-macos')).length, 1);
 });
+
+function mockPlatform(t, platform) {
+  const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { ...descriptor, value: platform });
+  t.after(() => Object.defineProperty(process, 'platform', descriptor));
+}
+
+function competingPublication(t, f, failure) {
+  const rename = fs.renameSync;
+  const result = { winning: null };
+  let publishing = false;
+  t.mock.method(fs, 'renameSync', (source, target) => {
+    if (publishing) return rename(source, target);
+    publishing = true;
+    result.winning = prepareSourceApp(f);
+    throw failure;
+  });
+  return result;
+}
+
+test('Windows EPERM reuses a completed competing bundle and removes the losing copy', t => {
+  const f = fixture(t);
+  mockPlatform(t, 'win32');
+  const failure = Object.assign(Error('Destination directory exists'), { code: 'EPERM' });
+  const result = competingPublication(t, f, failure);
+  assert.equal(prepareSourceApp(f), result.winning);
+  assert.ok(fs.existsSync(result.winning));
+  assert.equal(fs.readdirSync(path.join(f.root, '.runtime/source-macos')).length, 1);
+});
+
+for (const incomplete of ['missing destination', 'missing receipt', 'wrong digest', 'missing executable']) {
+  test(`Windows EPERM preserves the error for a ${incomplete}`, t => {
+    const f = fixture(t);
+    mockPlatform(t, 'win32');
+    const failure = Object.assign(Error('Publication denied'), { code: 'EPERM' });
+    t.mock.method(fs, 'renameSync', (source, target) => {
+      if (incomplete !== 'missing destination') {
+        fs.cpSync(source, target, { recursive: true });
+        const receipt = path.join(target, 'source-app.json');
+        if (incomplete === 'missing receipt') fs.unlinkSync(receipt);
+        if (incomplete === 'wrong digest') fs.writeFileSync(receipt, JSON.stringify({ digest: 'stale' }));
+        if (incomplete === 'missing executable') fs.unlinkSync(path.join(target, 'SoduWork.app/Contents/MacOS/Electron'));
+      }
+      throw failure;
+    });
+    assert.throws(() => prepareSourceApp(f), error => error === failure);
+    assert.equal(fs.readFileSync(f.binary, 'utf8'), 'fixture executable');
+    assert.equal(fs.readdirSync(path.join(f.root, '.runtime/source-macos'))
+      .filter(name => name.startsWith('.preparing-')).length, 0);
+  });
+}
+
+for (const [platform, code] of [['darwin', 'EPERM'], ['win32', 'EIO']]) {
+  test(`${platform} ${code} is not masked by a completed competing bundle`, t => {
+    const f = fixture(t);
+    mockPlatform(t, platform);
+    const failure = Object.assign(Error('Publication failed'), { code });
+    const result = competingPublication(t, f, failure);
+    assert.throws(() => prepareSourceApp(f), error => error === failure);
+    assert.ok(fs.existsSync(result.winning));
+    assert.equal(fs.readdirSync(path.join(f.root, '.runtime/source-macos')).length, 1);
+  });
+}
