@@ -77,6 +77,8 @@ python3 quality_gate.py --list
 业务请求使用 `Authorization: Device <session>`，WebSocket 使用同一短期会话；长期密钥不得进入渲染进程、日志或 URL。
 任务与流程状态以 Hub 为唯一事实源，本地缓存只用于断网展示和待同步命令，不能反向覆盖服务端新状态。
 
+账号会话目录与来源投影包含 `contentLocation`：旧 Hub 正文为 `hub`，原始终端保留正文为 `source`，源版本匹配的有效迁移副本为 `replica`，无法确认引用时为 `unknown`。该字段不暴露私有副本标识，也不授予访问权限；客户端仍须执行既有账号、Hub 与执行权限检查。不能根据未知位置删除可能独立存在的本地副本。
+
 ### 统一需求池升级边界（0053）
 
 需求列表、详情和更新使用原 `/api/v1/tasks` 契约。`requirementContent` 是需求正文；已有交付 Task 的 `title/note` 仍可能包含私人执行上下文，需求编辑应携带 `requirementVersion`，只更新需求投影。`canEditRequirement` 与 `canViewExecution` 分离；共享需求不会开放执行记录、评论或输出附件。
