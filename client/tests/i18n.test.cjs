@@ -408,6 +408,20 @@ test('server message descriptors switch locale without translating interpolated 
   }
 });
 
+test('publication notices translate in every shipped locale while retaining exact plugin names and versions', () => {
+  const { api } = client(), params = { name: '保存 {version}', version: '2.0.0-beta' };
+  for (const locale of ['en-US', 'ja-JP', 'ko-KR', 'zh-CN']) {
+    api.setLocale(locale);
+    for (const key of ['notification.plugin_unpublished', 'notification.plugin_version_revoked']) {
+      const text = api.t(key, 'missing', params);
+      assert.notEqual(text, 'missing');
+      assert.ok(text.includes(params.name), locale + ' preserves business text');
+      if (key.endsWith('revoked')) assert.ok(text.includes(params.version));
+    }
+    if (locale !== 'zh-CN') assert.notEqual(api.translateText('发布状态更新'), '发布状态更新');
+  }
+});
+
 
 test('collaboration card actions, permissions and summaries use shipped locale entries', () => {
   const c = client();
