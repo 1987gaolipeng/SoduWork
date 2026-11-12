@@ -182,18 +182,31 @@ app.whenReady().then(async () => {
     await js('fixture.pendingCreates.shift()(true)'); await assertDialog('需求已创建');
     assert.equal(await js('fixture.creates.length'), 1);
   });
-  await runCase('inline-chat-receipt-shows-confirmed-time', async () => {
+  await runCase('inline-chat-receipt-shows-confirmed-creation-time', async () => {
+    const created = 1792700000000, updated = 1792700123000;
     await setup();
     await js("fixture.open({host:document.querySelector('#fixtureInline')}).then(()=>true)");
     await js("fixture.persistMode='defer'"); await click('#cpCreate');
     await until('fixture.pendingCreates.length===1');
-    await js("tasks[0].updatedAt=1792700123000;fixture.pendingCreates.shift()(true)");
+    // The Hub confirms both timestamps; a creation receipt must not prefer the later update.
+    await js(`delete tasks[0].createdAt;Object.assign(tasks[0], {created:${created}, updatedAt:${updated}});fixture.pendingCreates.shift()(true)`);
     await until('Boolean(document.querySelector(".cp-receipt-time"))');
-    assert.equal(await js('document.querySelector(".cp-receipt-time").dateTime'), new Date(1792700123000).toISOString());
-    assert.match(await js('document.querySelector(".cp-receipt-time").textContent'), /更新于/);
+    assert.equal(await js('document.querySelector(".cp-receipt-time").dateTime'), new Date(created).toISOString());
+    assert.match(await js('document.querySelector(".cp-receipt-time").parentElement.textContent'), /创建时间/);
+    assert.match(await js('document.querySelector(".cp-receipt-time").title'), /创建时间/);
     assert.equal(await js('document.querySelectorAll("[data-cp-receipt-close]").length'), 0);
     assert.equal(await js('fixture.creates.length'), 1);
+    const saved = await js('ComposeDraft.capture()');
+    assert.equal(saved.receipt.createdAt, created);
+    assert.equal(saved.receipt.updatedAt, updated);
     await shot('inline-chat-receipt-time');
+
+    await win.loadFile(page);
+    await js(`fixture.open({host:document.querySelector('#fixtureInline'),cardState:${JSON.stringify(saved)}}).then(()=>true)`);
+    await until('Boolean(document.querySelector(".cp-receipt-time"))');
+    assert.equal(await js('document.querySelector(".cp-receipt-time").dateTime'), new Date(created).toISOString());
+    assert.equal(await js('fixture.creates.length'), 0, 'restoring a receipt must not create another requirement');
+    await shot('inline-chat-receipt-time-restored');
   });
   await runCase('failure-shows-error-dialog-and-keeps-form', async () => {
     await setup(); await js("fixture.persistMode='throw'"); await click('#cpCreate');
