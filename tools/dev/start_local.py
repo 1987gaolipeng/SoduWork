@@ -27,6 +27,27 @@ DEFAULT_PORT = 18989
 HTTP = build_opener(ProxyHandler({}))
 
 
+def check_source_checkout(root: Path) -> None:
+    """Do not copy an intermediate Git checkout into the persistent runtime."""
+    git_dir = root / '.git'
+    if git_dir.is_file():
+        pointer = git_dir.read_text(encoding='utf-8').strip()
+        if not pointer.startswith('gitdir: ') or not pointer[8:].strip():
+            raise StartupError('Cannot locate the source Git worktree metadata. Run git status before starting.')
+        git_dir = (root / pointer[8:].strip()).resolve()
+    elif not git_dir.is_dir():
+        # Source archives do not require Git or inherit a parent repository.
+        return
+    for marker, operation in [('rebase-merge', 'rebase'), ('rebase-apply', 'rebase/apply'),
+                              ('MERGE_HEAD', 'merge'), ('CHERRY_PICK_HEAD', 'cherry-pick'),
+                              ('REVERT_HEAD', 'revert')]:
+        if (git_dir / marker).exists():
+            raise StartupError(
+                f'The source checkout has an unfinished Git {operation}. Run git status in the source directory, '
+                'then finish the operation or back up your work before aborting it. '
+                'Restart only after your intended branch is restored; application data was not changed.')
+
+
 def default_state() -> Path:
     if os.name == "nt":
         base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local"))
@@ -321,6 +342,10 @@ def launch_desktop(state: Path, client: Path, env: dict, base: str, output) -> s
             json.dump({'workDir': str(work)}, stream)
     desktop_env = {key: value for key, value in env.items()
                    if key not in {'ADMIN_USER', 'ADMIN_PASS', 'AUTH_SECRET', 'DATABASE_URL'}}
+    if sys.platform == 'darwin':
+        # macOS resolves the user's default Keychain through HOME. Isolate the
+        # application profile, not the native desktop's operating-system home.
+        desktop_env['HOME'] = str(Path.home())
     desktop_env.update(SODUWORK_USER_DATA=str(profile), VIRTUAL_ENV=str(state / 'venv'),
                        SODUWORK_SOURCE_SESSION='1')
     bin_dir = state / 'venv' / ('Scripts' if os.name == 'nt' else 'bin')
@@ -368,6 +393,7 @@ def main(argv=None) -> int:
         signal.signal(signal.SIGBREAK, signal.default_int_handler)
     signal.signal(signal.SIGTERM, signal.default_int_handler)
     try:
+        check_source_checkout(ROOT)
         if args.check:
             dependency_report(desktop=args.desktop)
             return 0

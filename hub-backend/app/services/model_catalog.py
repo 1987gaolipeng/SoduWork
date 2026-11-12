@@ -343,10 +343,12 @@ def _m_api(m) -> dict:
 
 
 def _personal_provider_rows(client) -> list[dict]:
-    """Return this client's personal model services and organization endpoint overrides."""
+    """Return managed personal overrides while excluding legacy client-local services."""
     cfg = dict(getattr(client, "config", None) or {}) if client is not None else {}
     rows = cfg.get("modelProviders") or []
-    return [dict(x) for x in rows if isinstance(x, dict)]
+    return [dict(x) for x in rows
+            if isinstance(x, dict)
+            and x.get("localOnly") is not True]
 
 
 def _clear_provider_cache(session, _flush_context):
