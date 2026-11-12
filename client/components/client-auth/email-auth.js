@@ -296,7 +296,18 @@
         else setStatus('验证码发送请求已受理，请查看邮箱（包括垃圾邮件）；未收到可稍后重试。', 'working');
         if (clock) clearInterval(clock);
         clock = setInterval(refreshCooldown, 1000);
-      } catch (error) { if (current(state)) setStatus(ui.error(error), 'error'); }
+      } catch (error) {
+        if (!current(state)) return;
+        if (mode === 'emailCode' && error?.code === 'ACCOUNT_NOT_REGISTERED') {
+          if (policy?.allowSelfRegistration === false) {
+            setStatus('自助注册已关闭，请联系管理员。', 'error');
+          } else {
+            // Registration requires its own proof and explicit consent; retain only the email.
+            changeMode('register');
+            setStatus('此邮箱尚未注册，请先创建账号。', 'working');
+          }
+        } else setStatus(ui.error(error), 'error');
+      }
       finally { sending = false; refreshCooldown(); }
     });
     form.addEventListener('submit', async event => {

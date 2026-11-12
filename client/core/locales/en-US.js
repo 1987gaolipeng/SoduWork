@@ -3,6 +3,8 @@
   // Product localization: 中文「即用」and English「App」are the same concept.
   // This is intentional, not a literal translation; keep app/jiyong IDs stable.
   const messages = {
+    '此邮箱尚未注册，请先创建账号。': 'This email is not registered. Create an account to continue.',
+    '自助注册已关闭，请联系管理员。': 'Self-registration is disabled. Contact your administrator.',
     '工作区': 'Workspace', '桌面任务助手': 'Desktop task assistant', '设置': 'Settings', '外观': 'Appearance', '通知': 'Notifications',
     '需求池': "Issues", '团队': 'Team', '收件箱': 'Inbox',
     '简报': 'Briefs', '添加任务': "Add issue", '任务详情': "Issue details", '多路控制台': 'Multi-console',

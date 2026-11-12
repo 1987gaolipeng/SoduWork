@@ -1,5 +1,9 @@
 (function (global) {
   const messages = {
+    '已提交验收，等待验收人处理': 'Submitted for acceptance; waiting for the reviewer',
+    '“需要我处理”仅显示当前轮到你操作的需求。执行中或已提交验收的需求仍保留在“与我相关”。': '“Needs my attention” only shows issues that currently require your action. Issues in progress or submitted for acceptance remain under “Related to me”.',
+    '查看与我相关': 'View related issues',
+    '执行已安排，可在“与我相关”查看进展': 'Execution is scheduled. Follow its progress under “Related to me”.',
     "workspace.history.more": "Load more",
     "workspace.history.retry": "Reload",
     "workspace.history.localError": "Local history is temporarily unavailable",
@@ -185,6 +189,11 @@
   "交付信息暂时不可用，请刷新后重试": "Delivery information is temporarily unavailable. Refresh and try again.",
   "交付压缩包下载失败": "The delivery archive could not be downloaded.",
   "正在准备交付文件…": "Preparing delivery files…",
+  "导出验收摘要": "Export acceptance summary",
+  "正在导出验收摘要…": "Exporting acceptance summary…",
+  "验收摘要已保存": "Acceptance summary saved",
+  "当前客户端不支持验收摘要导出": "This client does not support acceptance summary export",
+  "验收摘要导出失败，请重试": "Acceptance summary export failed. Please retry",
   "文件已保存到所选位置": "File saved to the selected location",
   "正在准备下载…": "Preparing the download…",
   "正在打开材料…": "Opening the attachment…",
