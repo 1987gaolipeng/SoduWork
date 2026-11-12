@@ -240,7 +240,9 @@
       !['running', 'dispatching'].includes(task.ai?.state) &&
       !['queued', 'starting', 'running', 'waiting'].includes(task.workRouting?.conversationTurn?.state));
   }
-  function canManageAutomation(task) { return capability(task, 'canManageRequirementAutomation'); }
+  function canManageAutomation(task) {
+    return Boolean(task && (!task.archivedAt || task.automationScheduleId) && capability(task, 'canManageRequirementAutomation'));
+  }
   // Definition editing, delivery operations and maintenance have separate capabilities.
   function executing(task) { return ['doing', 'paused', 'reviewing'].includes(task && task.status); }
   function maintenance(task, action) {

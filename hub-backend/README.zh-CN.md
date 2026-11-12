@@ -86,3 +86,11 @@ python3 quality_gate.py --list
 升级前必须备份数据库和匹配版本程序。0053 在事务中迁移并删除旧表；文件内容及对象存储键不变。同一交付 Task 的原需求若来自不同可见范围，升级明确失败并回滚，不能静默扩大权限。重复执行不会重复迁移。统一需求开始产生新写入后，自动降级被禁止，应使用升级前数据库备份和对应程序一起回滚。旧 `/work-items` 路由返回 410，旧插件 `work.task.create` 仅作为统一 Task 创建的别名。
 
 隔离验证入口：`python3 -B tests/unified_requirements_upgrade.py --sqlite` 和 `python3 -B tests/unified_requirements_upgrade.py`。后者仅创建随机本机 PostgreSQL 临时实例，完成后停止并清理，不使用业务数据库。权限回归为 `test_unified_requirements_acl.py`，包含真实迁移后的 HTTP 多身份和 WebSocket 投影检查。
+
+## 需求自动化草稿
+
+具有管理权限的用户可将未归档需求的公开内容复制为独立的自动化草稿。打开或取消表单不会创建记录。保存始终创建未启用的自动化，不改变原需求、需求版本或已有自动化关联。之后编辑或启用自动化与原需求相互独立。
+
+此路径的 `POST /api/v1/schedules` 接收 `sourceRequirement: {id, requirementVersion}` 和稳定的 `creationRequestId`。Hub 检查当前管理权限、归档状态和预期版本，随后由服务端生成 `source_requirement` 快照，记录来源 ID、公开标题及版本。响应以 `sourceRequirement` 返回这三项；普通自动化编辑不能替换来源，来源记录也不会扩大对原需求的访问权限。不复制执行路由、凭据或本地模型引用。
+
+同一账号、设备重复发送相同创建请求会返回已创建的自动化；同一标识携带不同内容时返回 409。原需求后来发生变化也不影响恢复丢失的创建响应。迁移 `0088_schedule_requirement_source` 为已有自动化增加默认空 JSON 字段，不推断历史来源，也不改写旧关联。
