@@ -71,7 +71,8 @@ function normalizeCard(value) {
     ...(value.revision === undefined ? {} : { revision: value.revision }) };
 }
 function normalizeDraftSelection(value) {
-  const limits = { adapterId: 160, modelName: 300, modelLabel: 300, reasoningEffort: 40, thinkingLevel: 40 };
+  const limits = { adapterId: 160, modelName: require('../../core/model-choice').nameLimit(value?.modelName),
+    modelLabel: 300, reasoningEffort: 40, thinkingLevel: 40 };
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
       Object.keys(value).some(key => !Object.hasOwn(limits, key))) throw Error('草稿执行选项包含不支持的字段');
   const result = { adapterId: 'pi', modelName: '', modelLabel: '', reasoningEffort: '', thinkingLevel: '' };

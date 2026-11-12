@@ -21,11 +21,15 @@ test('cleans inherited Chromium process handles without changing user configurat
 
 test('portable launch forwards literal arguments, preserves the profile and returns the child exit code',
   { skip: process.platform === 'win32' ? 'Executable fixture uses a POSIX symlink; Windows layout is covered above.' : false }, t => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-launcher with spaces-'));
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-launcher with spaces-')));
     t.after(() => fs.rmSync(root, { recursive: true, force: true }));
     const script = path.join(root, 'scripts/start-client.cjs');
     fs.mkdirSync(path.dirname(script), { recursive: true });
     fs.copyFileSync(path.join(__dirname, '../scripts/start-client.cjs'), script);
+    // Native bundle preparation is covered separately; this fixture isolates
+    // argument forwarding and process ownership with a Node executable.
+    fs.writeFileSync(path.join(root, 'scripts/source-macos-app.cjs'),
+      'exports.prepareSourceApp = ({ binary }) => binary;');
     fs.mkdirSync(path.dirname(command(process.platform, root)), { recursive: true });
     fs.symlinkSync(process.execPath, command(process.platform, root));
     fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ main: 'fixture.cjs' }));

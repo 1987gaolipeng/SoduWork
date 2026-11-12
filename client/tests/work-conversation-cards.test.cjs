@@ -48,6 +48,16 @@ test('creation lookup uses owned durable receipts and ignores deleted or unrelat
   assert.deepEqual(await f.store.findTaskCreation('task'),{ok:true,sessionId:''});
 });
 
+test('draft selection restores the complete encoded local model reference', async t => {
+  const f = await fixture(t);
+  const modelName = require('../main/local-model-store.cjs').ref('p'.repeat(48), '模'.repeat(160));
+  const made = await f.store.reserve({ title: 'Local model draft', draftSelection: { adapterId: 'pi', modelName } });
+  assert.equal(made.ok, true, made.reason);
+  assert.equal(made.draftSelection.modelName, modelName);
+  const restored = await f.module.create(f.dependencies).read(made.sessionId);
+  assert.equal(restored.draftSelection.modelName, modelName);
+});
+
 test('仅表单会话写入真实 Pi 存档、列入历史并可由 SDK 恢复，无模型消息', async t => {
   const f = await fixture(t);
   const created = await f.store.reserve({ title: '【需求】修复导出' });

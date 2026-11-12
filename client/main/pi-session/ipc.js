@@ -1068,12 +1068,15 @@ function install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf, capa
         .replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64),
     };
     if (typeof authorizeAI === 'function') {
+      // Resolve ownership for each captured turn, not the session's current
+      // model: queued turns can alternate between local and managed services.
       // Pi can attribute personal funding per call. Other runtimes retain the
       // strict account gate until they provide equally reliable usage receipts.
       const agent = s.adapterId || 'pi';
       const modelMode = require('../agent-runtime/runtime-catalog').runtime(agent)?.modelMode;
       sendOptions.beforeTurn = require('../conversation/quota-admission.cjs').beforeTurn(
-        authorizeAI, currentIdentity, sendOptions.beforeTurn, { agent, modelMode, controlled: Boolean(sendOptions.controlled) });
+        authorizeAI, currentIdentity, sendOptions.beforeTurn, { agent, modelMode, controlled: Boolean(sendOptions.controlled),
+          localModel: name => require('../local-model-store.cjs').resolve(name) });
     }
     let workflowTurn;
     try {

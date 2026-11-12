@@ -18,9 +18,16 @@ function accountingReceipt(entry, nativeAgentId) {
     ? { ...message.usage, costKnown: false } : message.usage;
   values.add(usage, raw);
   const source = require('../conversation/native-agent-source.cjs').fields(message, nativeAgentId);
+  // Older local and managed calls shared the SDK provider name. Without an
+  // ownership marker or resolved Hub attribution their origin is unknowable;
+  // do not disclose ambiguous legacy usage when an archive is reopened.
+  const ambiguousLegacy = message.usageLocalOnly === undefined && message.provider === 'soduwork' &&
+    !String(message.usageProvider || '').trim() && !String(message.quotaUsageToken || '').trim();
   return { usage, at: messageTime.epoch(message.completedAt) || messageTime.epoch(message.timestamp),
     model: String(message.model || ''), provider: String(message.usageProvider || message.provider || ''),
     agent: source.sourceAgent?.agentId || '',
+    ...(message.usageLocalOnly === true ? { localOnly: true } : {}),
+    ...(ambiguousLegacy ? { reportable: false } : {}),
     ...(typeof message.quotaUsageToken === 'string' && message.quotaUsageToken
       ? { quotaUsageToken: message.quotaUsageToken } : {}) };
 }

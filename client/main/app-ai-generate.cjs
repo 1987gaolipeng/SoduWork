@@ -58,16 +58,19 @@ function create({ app, authenticatedIdentityOf, authorizeAI, fetchImpl = global.
   const receipts = new WeakMap(), active = new Map();
   return async function generate(item, raw, assertCurrent = () => {}) {
     const params = normalize(raw);
+    const requestedModel = params.model || configuredModel(app);
+    const localRequested = String(requestedModel || '').startsWith('local:');
     let identity, owner;
     try {
       assertCurrent();
       identity = await authenticatedIdentityOf?.(app);
-      owner = scope(identity);
-      if (!identity?.hub || !identity.clientId || !authorizeAI) throw Error('login unavailable');
+      owner = localRequested ? 'local' : scope(identity);
+      if ((!identity?.hub || !identity.clientId || !authorizeAI) && !localRequested) throw Error('login unavailable');
       assertCurrent();
     } catch (_) { return failure('APP_AI_UNAVAILABLE', '请先登录 SoduWork，并确认即用仍可使用'); }
     const current = async () => {
       assertCurrent();
+      if (localRequested) return;
       const next = await authenticatedIdentityOf(app);
       if (scope(next) !== owner || next.hub !== identity.hub || next.clientId !== identity.clientId)
         throw Error('account changed');
@@ -102,22 +105,24 @@ function create({ app, authenticatedIdentityOf, authorizeAI, fetchImpl = global.
     wc?.once('destroyed', stop); wc?.on('did-start-navigation', navigation);
     const work = (async () => {
       try {
-        const selection = await resolveModel(identity, params.model || configuredModel(app), 8000, fetchImpl);
+        const selection = await resolveModel(identity, requestedModel, 8000, fetchImpl);
         await current();
         if (controller.signal.aborted) return;
         if (!selection?.ok || !selection.model || selection.model.modality === 'image')
           return failure(selection?.code === 'TOKEN_QUOTA_EXCEEDED' ? selection.code : 'APP_AI_MODEL_UNAVAILABLE', '所选文字模型当前不可用，请检查模型或额度');
         const model = selection.model;
-        // Inline app calls lack Pi's signed per-call receipt path, so retain
-        // strict account admission rather than borrowing Pi's funding scope.
-        await authorizeAI(identity, owner);
+        if (!model.localOnly) {
+          // Inline app calls lack Pi's signed per-call receipt path, so retain
+          // strict account admission rather than borrowing Pi's funding scope.
+          await authorizeAI(identity, owner);
+        }
         await current();
         if (controller.signal.aborted) return;
         const body = payload(model, params);
         dispatched = true;
         const response = await fetchImpl(model.baseUrl.replace(/\/+$/, '') + '/chat/completions', {
           method: 'POST', redirect: 'error', signal: controller.signal,
-          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + model.key }, body: JSON.stringify(body),
+          headers: { 'Content-Type': 'application/json', ...(model.key ? { Authorization: 'Bearer ' + model.key } : {}) }, body: JSON.stringify(body),
         });
         await current();
         if (!response.ok) {
