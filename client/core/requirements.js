@@ -133,6 +133,11 @@
     if (!item || (item.action === 'review' && !canReview(task))) return undefined;
     return item;
   }
+  function executionActive(task) {
+    const active = ['queued', 'starting', 'dispatching', 'running', 'working', 'streaming', 'waiting'];
+    return [task?.ai?.state, task?.ai?.executionState, task?.workRouting?.conversationTurn?.state]
+      .some(state => active.includes(state));
+  }
   function actionable(task, context) {
     if (stage(task) === 'closed') return false;
     if (stage(task) === 'reviewing' && task.canReview === true) return true;
@@ -144,7 +149,7 @@
     if (task.needsMe === true) return true;
     if (!roles(task).some(role => ['executor', 'assignee'].includes(role))) return false;
     // Owning a device is not an instruction to interrupt its running agent.
-    if (['running', 'dispatching'].includes(task.ai?.state) && !task.ai.attentionRaised) return false;
+    if (executionActive(task) && !task.ai?.attentionRaised) return false;
     if (task.ai?.state === 'done') return false; // A decision comes from the approval queue, not a guessed role.
     return true;
   }
@@ -209,6 +214,7 @@
       action: '查看执行情况', icon: task.ai.attentionRaised ? 'attention' : 'progress', attention: actionable(task, context) };
     if (task.status === 'paused') return { text: '已暂停，查看后安排继续', action: '查看进展', icon: 'pause', attention: actionable(task, context) };
     if (task.ai?.state === 'running') return { text: 'AI 正在执行，可查看进展', action: '查看进展', icon: 'progress' };
+    if (executionActive(task)) return { text: '执行已安排，可在“与我相关”查看进展', action: '查看进展', icon: 'progress' };
     if (task.ai?.state === 'done') return { text: '成果已返回，待确认', action: '查看交付', icon: 'confirm' };
     if (phase === 'intake') return { text: canEdit(task) ? '补充目标与完成标准' : '等待相关人梳理需求', action: canEdit(task) ? '完善需求' : '查看详情', icon: 'edit' };
     if (phase === 'clarifying') return { text: canEdit(task) ? '补齐背景与相关材料' : '等待相关人补充材料', action: canEdit(task) ? '完善需求' : '查看详情', icon: 'edit' };
@@ -231,14 +237,12 @@
   function canSubmitReview(task) {
     return Boolean(task && task.canSubmitReview === true && task.status === 'doing' &&
       stage(task) === 'delivering' && !task.archivedAt && !task.maintenanceBlocked &&
-      !['running', 'dispatching'].includes(task.ai?.state) &&
-      !['queued', 'starting', 'running', 'waiting'].includes(task.workRouting?.conversationTurn?.state));
+      !executionActive(task));
   }
   function canResumeRework(task) {
     return Boolean(task && task.canContinueExecution === true && task.workRouting?.reworkPending &&
       task.status === 'doing' && stage(task) === 'delivering' && !task.archivedAt && !task.maintenanceBlocked &&
-      !['running', 'dispatching'].includes(task.ai?.state) &&
-      !['queued', 'starting', 'running', 'waiting'].includes(task.workRouting?.conversationTurn?.state));
+      !executionActive(task));
   }
   function canManageAutomation(task) { return capability(task, 'canManageRequirementAutomation'); }
   // Definition editing, delivery operations and maintenance have separate capabilities.

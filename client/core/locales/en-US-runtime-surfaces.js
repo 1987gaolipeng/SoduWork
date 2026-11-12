@@ -1,5 +1,8 @@
 (function (global) {
   const messages = {
+    '“需要我处理”仅显示当前轮到你操作的需求。执行中的需求仍保留在“与我相关”。': '“Needs my attention” only shows issues that currently require your action. Issues in progress remain under “Related to me”.',
+    '查看与我相关': 'View related issues',
+    '执行已安排，可在“与我相关”查看进展': 'Execution is scheduled. Follow its progress under “Related to me”.',
     "workspace.history.more": "Load more",
     "workspace.history.retry": "Reload",
     "workspace.history.localError": "Local history is temporarily unavailable",

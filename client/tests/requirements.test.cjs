@@ -195,6 +195,37 @@ test('human attention distinguishes assigned work, running agents, returned resu
   assert.equal(R.actionable({...task,canViewExecution:false}),false,'shared source roles do not grant execution access');
 });
 
+test('active execution projections stay related without creating a personal action', () => {
+  const task = {id:'active',status:'doing',requirementStage:'delivering',myRoles:['assignee','executor'],
+    canViewExecution:true,canSubmitReview:true,canContinueExecution:true};
+  const projections = [
+    ...['queued','starting','dispatching','running','working','streaming'].flatMap(state => [
+      {ai:{state}}, {ai:{state:'done',executionState:state}},
+    ]),
+    ...['queued','starting','running','waiting'].map(state => ({workRouting:{conversationTurn:{state}}})),
+  ];
+  for (const projection of projections) {
+    const row = {...task,...projection}, before = JSON.stringify(row);
+    assert.equal(R.actionable(row),false,JSON.stringify(projection));
+    assert.equal(R.inScope(row,'related'),true,JSON.stringify(projection));
+    assert.equal(R.canSubmitReview(row),false,JSON.stringify(projection));
+    assert.equal(R.actionable({...row,canSubmitReview:false,workRouting:{...row.workRouting,reworkPending:{feedback:'Revise'}}}),false);
+    assert.equal(JSON.stringify(row),before);
+  }
+});
+
+test('active work still exposes explicit personal decisions and attention requests', () => {
+  const task = {id:'active',status:'doing',requirementStage:'delivering',myRoles:['assignee'],
+    canViewExecution:true,ai:{state:'streaming'}};
+  const approval = {approvals:new Map([['active',{id:'gate',action:'baseline'}]])};
+  assert.equal(R.actionable(task,approval),true);
+  assert.equal(R.actionable({...task,ai:{...task.ai,attentionRaised:true}}),true);
+  assert.equal(R.actionable({...task,needsMe:true}),true);
+  assert.equal(R.actionable({...task,status:'paused',ai:{state:'stopped'}}),true);
+  assert.equal(R.actionable({...task,ai:{state:'done'},canSubmitReview:true}),true);
+  assert.equal(R.actionable({...task,myRoles:[],ai:{state:'streaming',attentionRaised:true}}),false);
+});
+
 test('personal review capability keeps a pending delivery actionable before the inbox refreshes', () => {
   const task = {id:'reviewing',status:'doing',requirementStage:'reviewing',
     myRoles:['creator'],canReview:true,ai:{state:'done'},canViewExecution:true};
