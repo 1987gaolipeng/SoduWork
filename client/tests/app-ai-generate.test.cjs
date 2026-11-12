@@ -55,6 +55,29 @@ test('quota rejection and missing host authorization never dispatch inference', 
   const g = fixture({ authenticatedIdentityOf: async () => null });
   assert.equal((await g.generate(g.item, defaults)).code, 'APP_AI_UNAVAILABLE'); assert.deepEqual(g.calls, []);
 });
+test('local no-key models bypass Hub admission and omit the Authorization header', async () => {
+  const f = fixture({
+    configuredModel: () => 'local:custom-local:qwen3',
+    resolveModel: async () => ({ ok: true, localOnly: true,
+      model: { id: 'qwen3', baseUrl: 'http://127.0.0.1:8686/v1', key: '', maxOutputTokens: 1024, localOnly: true } }),
+  });
+  const result = await f.generate(f.item, defaults);
+  assert.equal(result.ok, true);
+  assert.equal(f.calls.some(row => row[0] === 'quota'), false);
+  const request = f.calls.find(row => row[0] === 'post')[2];
+  assert.equal('Authorization' in request.headers, false);
+});
+test('local one-shot inference can run without a Hub identity', async () => {
+  const f = fixture({
+    authenticatedIdentityOf: async () => null,
+    configuredModel: () => 'local:custom-local:qwen3',
+    resolveModel: async () => ({ ok: true, localOnly: true,
+      model: { id: 'qwen3', baseUrl: 'http://127.0.0.1:8686/v1', key: '', localOnly: true } }),
+  });
+  const result = await f.generate(f.item, defaults);
+  assert.equal(result.ok, true);
+  assert.equal(f.calls.filter(row => row[0] === 'quota').length, 0);
+});
 test('account and installation changes discard in-flight model results and cached receipts', async () => {
   let release; const f = fixture({ fetchImpl: () => new Promise(resolve => { release = resolve; }) });
   const pending = f.generate(f.item, defaults);
