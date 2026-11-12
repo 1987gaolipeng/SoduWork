@@ -630,9 +630,13 @@ async def resolve(session: AsyncSession, client, model_name: str = "",
         "contextWindow": m.get("ctxWindow"), "modelName": m.get("name"),
         "providerId": m.get("providerId"),
     })
+    from . import model_quota
     return {"base": p["baseUrl"], "key": key, "model": m["name"],
             "user": str(getattr(client, "user_ref", None) or getattr(client, "id", "") or "internal"),
             "quotaUserId": str(getattr(client, "user_ref", None) or ""),
+            "quotaClientId": str(getattr(client, "id", None) or ""),
+            "quotaAuthVersion": int(getattr(client, "auth_version", 1) or 1),
+            "fundingScope": model_quota.scope(p, key_from), "quotaScope": "platform",
             "provider": p["id"], "kind": p["kind"], "keyFrom": key_from,
             "contextWindow": resolved_window["contextWindow"],
             "contextWindowKnown": resolved_window["contextWindowKnown"],

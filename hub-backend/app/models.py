@@ -997,6 +997,8 @@ class AIUsageDaily(Base):
     # Freeze attribution on the increment. A later model/account switch must
     # never relabel historical usage through the mutable cumulative event.
     dimension_key: Mapped[str] = mapped_column(String(64), default="", server_default="")
+    # Immutable platform-budget attribution; legacy/unknown increments stay charged.
+    quota_scope: Mapped[str] = mapped_column(String(16), default="platform", server_default="platform")
     billing_user_id: Mapped[str] = mapped_column(String(36), default="", server_default="")
     org_id: Mapped[str] = mapped_column(String(36), default="", server_default="")
     client_id: Mapped[str] = mapped_column(String(64), default="", server_default="")
