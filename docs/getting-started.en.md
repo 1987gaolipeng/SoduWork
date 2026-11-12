@@ -66,6 +66,12 @@ Have your provider's **API base URL, API key, and model ID** ready. These come f
 
 If the model is missing, refresh the catalog or reopen the desktop model selector, then check that both interfaces connect to the same service address. For `401/403`, check the model key and access permissions; for `404`, check the API URL, model ID, and protocol. You can explore the management UI before connecting a model service.
 
+### Device-only model services
+
+Local services added in the desktop's **My models** panel are encrypted in that desktop profile. Their endpoints, keys, model references, and local usage are not uploaded to Hub. Select them in a local Pi conversation; cloud execution, handoff, scheduled tasks, and Hub model defaults require a Hub-managed model. Local image/video definitions remain stored but are not offered through the Hub media proxy.
+
+If secure storage cannot be read, the client preserves the saved configuration and asks you to resolve the storage problem. Invalid edits are rejected without replacing the previous configuration. Switching from a local model to a managed model keeps each call's usage separate.
+
 ## Start again and stop
 
 - Use the same launcher next time and sign in with the same account. Data and model settings are retained.
@@ -155,6 +161,16 @@ Existing mirror and proxy settings are passed to the installer, which verifies d
 Check `desktop.log` in the same data directory. Resolve Electron download problems and retry. Linux desktop mode requires a graphical session and Electron's native libraries, such as NSS, GTK, and X11/Wayland. The launcher does not disable the sandbox or install operating system packages.
 
 To use management while resolving desktop setup, double-click `start.cmd` on Windows or `start.command` on macOS, or run `sh start.sh` on Linux. The browser management UI is for configuration; it is not the desktop AI conversation workspace.
+
+### macOS Keychain and desktop identity
+
+If Git reports an unfinished rebase or merge, finish or safely abort that operation before starting. An intermediate checkout can temporarily restore an older launcher, including its former Keychain and Electron branding behavior. Run `git status` and confirm your intended branch is checked out. Stop the previous source session, then rerun `sh start.sh --desktop`; a running client continues using its previous application copy until restarted.
+
+Source desktop startup prepares a separate cached `SoduWork.app` with the product name and icon. It keeps the development profile separate and does not modify the installed client or the downloaded Electron bundle. This local development bundle uses ad-hoc signing; it is not a signed and notarized release installer.
+
+The macOS desktop retains your operating-system home so it can access the default Keychain. Its application data and workspace remain separate from the installed client, and the local Hub still uses an isolated home and database.
+
+If the default macOS Keychain is missing, startup shows a recovery page before opening the normal workspace. Use **Open Keychain Access** to inspect the login/default Keychain, then quit and restart SoduWork after correcting the system settings. If access is denied or cancelled, the login page reports the secure-storage failure and preserves existing credentials. SoduWork does not reset Keychains or fall back to plaintext storage. Only reset a Keychain when advised by [Apple Support](https://support.apple.com/guide/keychain-access/kyca2429/mac).
 
 ### Page stops working after closing the terminal
 
