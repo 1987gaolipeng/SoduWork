@@ -3,12 +3,14 @@
   'use strict';
   const R = global.Requirements;
   const pendingSchedules = new Map();
+  const downloadStates = new Map();
   let identityEpoch = 0;
   let loadController = null, loadTiming = null;
   let root = null, task = null, seq = 0, returnFocus = null, busy = false, editing = false, files = [], pendingUploads = [];
   let pendingConfirmation = null, evidenceReturnFocus = null, evidenceRequest = 0, editBaseline = null, saving = false;
   let refreshRequest = 0, refreshFlight = null, editVersion = null, mountedTrace = null, refreshPending = false;
   let approvalState = '';
+  let summaryExport = null;
   function approvalSignature() {
     const context = global.RequirementsBoard?.context?.(), item = task && R.approval(task, context);
     return JSON.stringify([task?.id, item?.id, item?.status, item?.myDecision, task && R.waitingOn(task, context)]);
@@ -31,6 +33,16 @@
   function bundleFeedback(text) {
     const node = root?.querySelector('[data-rq-bundle-status]');
     if (node) { node.textContent = text; node.hidden = !text; }
+  }
+  function downloadFeedback(id, text, pending = false) {
+    downloadStates.set(id, {text, pending});
+    root?.querySelectorAll('.rq-material').forEach(row => {
+      if (row.dataset.rqFileId !== id) return;
+      const status = row.querySelector('[data-rq-download-status]'), button = row.querySelector('[data-rq-download]');
+      if (status) { status.textContent = text; status.hidden = !text; }
+      if (button) { button.disabled = pending; button.setAttribute('aria-busy', String(pending)); }
+    });
+    feedback(text);
   }
   function editValues() {
     const fields = root?.querySelector('#rqEditForm')?.elements;
@@ -154,7 +166,7 @@
     const journey = root?.querySelector('[data-rq-trace]');
     if (journey) global.TaskExecutionJourney?.unmount(journey);
     mountedTrace = null; refreshPending = false; refreshFlight = null;
-    seq++; task = null; busy = false; saving = false; editing = false; editBaseline = null; editVersion = null; files = []; pendingUploads = [];
+    seq++; downloadStates.clear(); task = null; busy = false; saving = false; editing = false; editBaseline = null; editVersion = null; files = []; pendingUploads = [];
     if (root) { root.remove(); root = null; }
     const origin = returnFocus?.isConnected ? returnFocus : [...document.querySelectorAll('[data-rq-open]')]
       .find(node => node.dataset.rqOpen === returnFocus?.dataset.rqOpen);
@@ -276,6 +288,7 @@
       const remove = event.target.closest('[data-rq-remove-file]');
       if (remove) void removeAttachment(remove.dataset.rqRemoveFile);
       if (event.target.closest('[data-rq-artifact]')) global.soduWorkAPI?.openExternal?.(task.artifactUrl);
+      if (event.target.closest('[data-rq-export-summary]')) void exportAcceptanceSummary();
       if (event.target.closest('[data-rq-add-files]')) root.querySelector('#rqFileInput')?.click();
       if (event.target.closest('[data-rq-retry-files]')) void uploadPending();
       if (event.target.closest('[data-rq-automation]')) void createAutomation();
@@ -702,8 +715,10 @@
       '<span class="rq-delivery-state ' + deliveryStateClass + '">' + deliveryState + '</span></div></div>' +
       reworkCard +
       (approvalCard ? '<div data-rq-approval-card>' + approvalCard + '</div>' : waitingOthers) +
-      (artifact ? '<div class="rq-delivery-actions">' +
-        '<button type="button" data-rq-artifact>查看交付链接 <span aria-hidden="true">↗</span></button></div>' : '') +
+      '<div class="rq-delivery-actions">' +
+      (artifact ? '<button type="button" data-rq-artifact>查看交付链接 <span aria-hidden="true">↗</span></button>' : '') +
+      '<button type="button" data-rq-export-summary' + (summaryExport?.request === seq ? ' disabled aria-busy="true"' : '') + '>导出验收摘要</button>' +
+      '<span data-rq-export-status role="status" aria-live="polite">' + (summaryExport?.request === seq ? '正在导出验收摘要…' : '') + '</span></div>' +
       '<div class="rq-delivery-sections"><details class="rq-evidence" data-rq-execution><summary><span><b>执行记录与交付证据</b><small>查看执行过程和可验证成果</small></span><i aria-hidden="true"></i></summary><div data-rq-trace></div></details>' +
       (progress.length ? '<details class="rq-evidence rq-history-panel"><summary><span><b>历史进展</b><small>' + progress.length + ' 条记录</small></span><i aria-hidden="true"></i></summary><ol class="rq-history">' +
         progress.map(row => '<li><div data-user-content>' + esc(row.text || row.content || '') + '</div><time>' +
@@ -750,6 +765,7 @@
       const validation = String(file.evidenceMeta?.verification?.state || file.validation?.state || '').toLowerCase();
       const validationLabel = validation === 'failed' ? '校验未通过' : validation && validation !== 'passed' ? '待校验' : '';
       const autoBundle = file.autoBundle === true;
+      const downloadState = downloadStates.get(String(file.id)) || {};
       const bundleIds = autoBundle ? ' data-rq-bundle-ids="' + esc(JSON.stringify(file.attachmentIds || [])) + '"' : '';
       const meta = [autoBundle ? '自动打包' : extension, file.size ? formatBytes(file.size) : '', round > 0 ? 'v' + round : '', version ? version.slice(0, 12) : '', validationLabel].filter(Boolean).join(' · ');
       const open = autoBundle
@@ -757,9 +773,11 @@
         : '<button type="button" class="rq-attachment" data-rq-file="' + esc(file.id) + '">' + esc(name) + '</button>';
       const download = autoBundle
         ? '<button type="button" class="rq-material-icon rq-material-download" title="下载" aria-label="下载" data-rq-bundle-download' + bundleIds + '>↓</button>'
-        : '<button type="button" class="rq-material-icon rq-material-download" title="下载" aria-label="下载" data-rq-download="' + esc(file.id) + '">↓</button>';
+        : '<button type="button" class="rq-material-icon rq-material-download" title="下载" aria-label="下载" data-rq-download="' + esc(file.id) + '" aria-busy="' + Boolean(downloadState.pending) + '"' + (downloadState.pending ? ' disabled' : '') + '>↓</button>';
+      const status = autoBundle ? '' : '<span class="rq-material-meta rq-material-status" data-rq-download-status role="status" aria-live="polite"' +
+        (downloadState.text ? '' : ' hidden') + '>' + esc(downloadState.text || '') + '</span>';
       return '<div class="rq-material" role="listitem" data-rq-file-id="' + esc(file.id || '') + '"><div class="rq-material-info"><span class="rq-material-type" aria-hidden="true">' + esc(autoBundle ? 'ZIP' : extension.slice(0, 4)) + '</span><div>' +
-        open + (meta ? '<span class="rq-material-meta">' + esc(meta) + '</span>' : '') + '</div></div><div class="rq-material-actions">' +
+        open + (meta ? '<span class="rq-material-meta">' + esc(meta) + '</span>' : '') + status + '</div></div><div class="rq-material-actions">' +
         download + (global.LibraryTransfer?.button ? (autoBundle
           ? LibraryTransfer.button({deliveryBundle: true, taskId: task.id, attachmentIds: file.attachmentIds, name}, '', 'data-rq-bundle-library')
             .replace('data-rq-bundle-library=', bundleIds + ' data-rq-bundle-library=')
@@ -858,16 +876,46 @@
       });
     } catch (error) { if (request === seq && panelRequest === evidenceRequest) node.textContent = errorText(error); }
   }
+  async function exportAcceptanceSummary() {
+    if (!task || task.canViewExecution === false || summaryExport?.request === seq) return;
+    const subject = () => {
+      const approval = task && R.approval(task, global.RequirementsBoard?.context?.());
+      return { requirementVersion: task?.requirementVersion,
+        artifactVersionId: String(approval?.artifactVersionId || approval?.artifact?.id || '') };
+    };
+    const operation = { request: seq, id: task.id, ...subject() };
+    summaryExport = operation;
+    const update = text => {
+      if (operation.request !== seq || task?.id !== operation.id) return;
+      const status = root?.querySelector('[data-rq-export-status]');
+      const current = subject();
+      if (status) status.textContent = current.requirementVersion === operation.requirementVersion &&
+        current.artifactVersionId === operation.artifactVersionId ? text : '';
+      const button = root?.querySelector('[data-rq-export-summary]');
+      if (button) { button.disabled = summaryExport === operation; button.setAttribute('aria-busy', String(button.disabled)); }
+    };
+    update('正在导出验收摘要…');
+    let message = '';
+    try {
+      if (!global.soduWorkAPI?.exportAcceptanceSummary) throw Error('当前客户端不支持验收摘要导出');
+      const result = await global.soduWorkAPI.exportAcceptanceSummary({ taskId: operation.id,
+        ...(Number.isSafeInteger(operation.requirementVersion) ? { requirementVersion: operation.requirementVersion } : {}),
+        ...(operation.artifactVersionId ? { artifactVersionId: operation.artifactVersionId } : {}) });
+      if (!result?.ok && !result?.canceled && !result?.cancelled) throw Error(result?.reason || '验收摘要导出失败，请重试');
+      if (result.ok) message = '验收摘要已保存';
+    } catch (error) { message = errorText(error); }
+    finally { if (summaryExport === operation) summaryExport = null; update(message); }
+  }
   async function downloadAttachment(id) {
     const file = files.find(row => String(row.id) === id), request = seq;
-    if (!file) return;
-    feedback('正在准备下载…');
+    if (!file || downloadStates.get(id)?.pending) return;
+    downloadFeedback(id, '正在准备下载…', true);
     try {
       if (!global.soduWorkAPI?.downloadAttachment) throw new Error('当前客户端不支持附件下载');
       const result = await global.soduWorkAPI.downloadAttachment({...file, url: global.SoduWorkAPI.attachmentUrl(file)});
-      if (result?.ok === false && !result.cancelled && !result.canceled) throw new Error(result.reason || '下载未完成');
-      if (request === seq) feedback(result?.ok ? '文件已保存到所选位置' : '');
-    } catch (error) { if (request === seq) feedback(errorText(error)); }
+      if (!result?.ok && !result?.cancelled && !result?.canceled) throw new Error(result?.reason || '下载未完成');
+      if (request === seq) downloadFeedback(id, result?.ok ? '文件已保存到所选位置' : '');
+    } catch (error) { if (request === seq) downloadFeedback(id, errorText(error)); }
   }
   async function downloadBundle(button, saveToLibrary = false) {
     if (!button || button.disabled) return;
