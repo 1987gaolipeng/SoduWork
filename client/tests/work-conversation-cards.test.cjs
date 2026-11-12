@@ -92,6 +92,80 @@ test('卡片与二进制材料跨存储实例完整恢复，修改与关闭状�
   assert.equal(Buffer.from(restored.cards[0].files[0].data, 'base64').toString(), '原材料完整末尾');
 });
 
+test('account history restores cards from its owned native archive before any runtime starts', async t => {
+  let item;
+  const f = await fixture(t, { accountHistory: { row: async id => id === item?.id ? item : null } });
+  const made = await f.store.reserve({ title: 'Account source draft' });
+  const saved = await f.store.save(made.sessionId, card());
+  item = { id: 'acct-source', sourceSessionId: made.sessionId, sourceClientId: f.current().clientId };
+  const restored = await f.store.read(item.id);
+  assert.equal(restored.ok, true, restored.reason);
+  assert.equal(restored.sessionId, made.sessionId);
+  assert.equal(restored.workOnly, true, 'reading an account alias must not start a form-only Agent');
+  assert.deepEqual(restored.cards, [saved.card]);
+  assert.equal(f.live.size, 0);
+  assert.equal(fs.existsSync(f.module.location(f.app, item.id)), false, 'no second card store is created for the alias');
+
+  const archive = (await sessions.historyEntry(f.app, made.sessionId)).entry;
+  f.native.SessionManager.open(archive.path).appendMessage({ role: 'user',
+    content: [{ type: 'text', text: 'Continue the existing conversation' }], timestamp: Date.now() });
+  const chat = await f.store.read(item.id);
+  assert.equal(chat.ok, true, chat.reason);
+  assert.equal(chat.workOnly, false);
+  assert.equal(chat.sessionId, made.sessionId);
+  assert.deepEqual(chat.cards, [saved.card]);
+});
+
+test('another device account projection cannot read coincident local cards or gain a draft runtime', async t => {
+  let item;
+  const f = await fixture(t, { accountHistory: { row: async () => item } });
+  const made = await f.store.reserve({ title: 'Independent local draft' });
+  await f.store.save(made.sessionId, card());
+  item = { id: 'acct-remote', sourceSessionId: made.sessionId, sourceClientId: 'another-device' };
+  const restored = await f.store.read(item.id);
+  assert.equal(restored.ok, true, restored.reason);
+  assert.equal(restored.sessionId, item.id);
+  assert.equal(restored.workOnly, false);
+  assert.deepEqual(restored.cards, []);
+  assert.equal(restored.draftSelection, null);
+  assert.equal(f.live.size, 0);
+  assert.equal((await f.store.save(item.id, card())).ok, false, 'read preparation grants no account-alias write authority');
+});
+
+test('account card recovery rejects missing, deleted, foreign-owned and identity-switched sources', async t => {
+  let item, changed = false;
+  const f = await fixture(t, { accountHistory: { row: async () => {
+    if (changed) f.changeIdentity(identity('account-b'));
+    return item;
+  } } });
+  const made = await f.store.reserve({ title: 'Owned source' });
+  await f.store.save(made.sessionId, card());
+  assert.equal((await f.store.read('acct-missing')).ok, false);
+  item = { id: 'acct-source', sourceSessionId: made.sessionId, sourceClientId: f.current().clientId, deleted: true };
+  assert.equal((await f.store.read(item.id)).ok, false);
+  item.deleted = false;
+  f.changeIdentity(identity('account-b'));
+  const denied = await f.store.read(item.id);
+  assert.equal(denied.ok, false);
+  assert.match(denied.reason, /账号|权限/);
+  f.changeIdentity(identity()); changed = true;
+  const stale = await f.store.read(item.id);
+  assert.equal(stale.ok, false);
+  assert.match(stale.reason, /账号或服务已切换/);
+});
+
+test('owned account aliases retain card corruption failures instead of silently opening empty content', async t => {
+  let item;
+  const f = await fixture(t, { accountHistory: { row: async () => item } });
+  const made = await f.store.reserve({ title: 'Corrupt source cards' });
+  await f.store.save(made.sessionId, card());
+  item = { id: 'acct-corrupt', sourceSessionId: made.sessionId, sourceClientId: f.current().clientId };
+  await fsp.writeFile(f.module.location(f.app, made.sessionId), '{broken');
+  const restored = await f.store.read(item.id);
+  assert.equal(restored.ok, false);
+  assert.match(restored.reason, /损坏|读取/);
+});
+
 const draftSelection = (patch = {}) => ({ adapterId: 'qwen', modelName: 'chosen-model', modelLabel: 'Selected model',
   reasoningEffort: 'high', thinkingLevel: 'medium', ...patch });
 
