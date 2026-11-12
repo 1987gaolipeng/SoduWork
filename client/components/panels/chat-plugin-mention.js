@@ -314,12 +314,12 @@
       copy.className = 'nplugin-option-copy';
       const title = document.createElement('b');
       if (!isAction(item)) title.setAttribute('data-user-content', '');
-      title.textContent = isAction(item) ? '/' + item.command + ' · ' + item.name :
+      title.textContent = isAction(item) ? _uiText('/' + item.command) + ' · ' + _uiText(item.name) :
         (item.process && item.process.enterprise
         ? '【' + (item.process.label || _uiText('企业流程')) + '】' : '') + model.displayText(item, 'name', _uiText);
       const description = document.createElement('span');
       if (item.description) description.setAttribute('data-user-content', '');
-      description.textContent = model.displayText(item, 'description', _uiText) || (!isAction(item) &&
+      description.textContent = (isAction(item) ? _uiText(item.description) : model.displayText(item, 'description', _uiText)) || (!isAction(item) &&
         item.workflow.length ? item.workflow.map((step) => step.name).filter(Boolean).slice(0, 3).join(' · ')
           : '企业已发布的工作方法');
       copy.append(title, description);
