@@ -439,17 +439,32 @@
     }
   }
 
-  if (window.soduWorkAPI && window.soduWorkAPI.onDeviceAuthQuotaExceeded) {
-    window.soduWorkAPI.onDeviceAuthQuotaExceeded(function (detail) {
-      if (detail?.hub && detail.hub !== base()) return;
-      if (detail?.clientId && detail.clientId !== device()) return;
-      requireClientAuth('TOKEN_QUOTA_EXCEEDED', {
-        code: 'TOKEN_QUOTA_EXCEEDED',
-        message: '\u672c\u6708 AI Token \u989d\u5ea6\u5df2\u7528\u5b8c\uff0c\u8bf7\u8054\u7cfb\u7ba1\u7406\u5458\u8c03\u6574\u989d\u5ea6\u3002',
-        quota: detail && detail.quota || null,
-      });
-    });
+  var _quotaRefreshFlight = null;
+  function refreshNativeQuota(detail) {
+    if (detail?.hub && detail.hub !== base() || detail?.clientId && detail.clientId !== device()) return;
+    if (!_clientUser || !hasValidDeviceSession()) return;
+    // Usage acknowledgements and admission failures may arrive after an admin
+    // restores quota. They are refresh hints, never newer account truth.
+    var epoch = _registrationEpoch, hub = base();
+    if (_quotaRefreshFlight?.epoch === epoch && _quotaRefreshFlight.hub === hub) {
+      _quotaRefreshFlight.pending = true;
+      return _quotaRefreshFlight.promise;
+    }
+    var flight = { epoch: epoch, hub: hub, pending: false, promise: null };
+    _quotaRefreshFlight = flight;
+    flight.promise = (async function () {
+      do {
+        flight.pending = false;
+        await SoduWorkAPI.clientAuthMe();
+      } while (flight.pending && epoch === _registrationEpoch && hub === base());
+    })().catch(function () { /* Keep the last confirmed quota when offline. */ })
+      .finally(function () { if (_quotaRefreshFlight === flight) _quotaRefreshFlight = null; });
+    return flight.promise;
   }
+  window.soduWorkAPI?.onDeviceAuthQuotaExceeded?.(refreshNativeQuota);
+  window.soduWorkAPI?.onDeviceAuthQuotaChanged?.(function (detail) {
+    if (_clientQuota?.exceeded) return refreshNativeQuota(detail);
+  });
 
   async function syncRunnerConfig(workRootNow, registration) {
     try {

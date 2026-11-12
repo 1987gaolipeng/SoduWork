@@ -3,7 +3,7 @@
 const { fetchWithDeviceAuthRetry } = require('../device-auth-request');
 const { scope } = require('./runtime-segments');
 
-function create({ app, identityOf, onQuotaExceeded, fetchImpl = global.fetch }) {
+function create({ app, identityOf, onQuotaExceeded, onQuotaChanged, fetchImpl = global.fetch }) {
   return async function authorize(expected, expectedScope = scope(expected), selection) {
     const identity = await identityOf(app);
     const matches = value => value && value.hub === expected?.hub &&
@@ -41,6 +41,10 @@ function create({ app, identityOf, onQuotaExceeded, fetchImpl = global.fetch }) 
         throw Object.assign(Error(detail?.message || (response.status === 404 || invalidScope
           ? '服务端需要升级后才能校验个人 Token 额度' : '无法确认可用额度，请稍后重试')), require('../../core/token-quota').fields(detail));
       }
+      // A successful new turn can follow an administrator restoring allowance.
+      // Notify presentation without treating a model-specific personal grant
+      // as the account's global platform quota.
+      try { onQuotaChanged?.({ hub: identity.hub, clientId: identity.clientId }); } catch (_) {}
       return result.quota;
     } finally { clearTimeout(timer); }
   };

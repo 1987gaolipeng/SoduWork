@@ -381,6 +381,11 @@ const soduWorkBridge = {
     ipcRenderer.on('device-auth-quota-exceeded', handler);
     return () => ipcRenderer.removeListener('device-auth-quota-exceeded', handler);
   },
+  onDeviceAuthQuotaChanged: (cb) => {
+    const handler = (_event, detail) => { try { cb(detail || {}); } catch (_) {} };
+    ipcRenderer.on('device-auth-quota-changed', handler);
+    return () => ipcRenderer.removeListener('device-auth-quota-changed', handler);
+  },
 
   /* The main process controls update source, signature checks, download, and installation. */
   getAppVersion: () => ipcRenderer.invoke('app-version'),
