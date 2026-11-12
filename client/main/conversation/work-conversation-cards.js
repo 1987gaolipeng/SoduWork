@@ -200,7 +200,7 @@ function removeReservedSelection(app, created, owner, selection) {
   } catch (_) { /* Keep a later writer's card or selection record. */ }
 }
 
-function create({ app, identityOf, session, newCwd, loadStorageSdk: load, replace = fsp.rename, notify = () => {} }) {
+function create({ app, identityOf, session, accountHistory, newCwd, loadStorageSdk: load, replace = fsp.rename, notify = () => {} }) {
   async function auth() {
     const identity = await identityOf(app);
     if (!identity) throw Error('请先登录 SoduWork');
@@ -210,12 +210,15 @@ function create({ app, identityOf, session, newCwd, loadStorageSdk: load, replac
     const now = await auth();
     if (captured.owner !== now.owner || captured.connection !== now.connection) throw Error('账号或服务已切换，请在当前会话重试');
   }
-  async function resolve(id, captured) {
+  async function resolve(id, captured, { allowMissing = false } = {}) {
     await guard(captured);
     const live = session.findBySessionId?.(id);
     const row = live ? live.historyRow?.() || { id, adapterId: live.adapterId }
       : await session.archivedConversation(app, id);
-    if (!row) throw Error('这条会话已经不存在，工作表单未保存');
+    if (!row) {
+      if (allowMissing) return null;
+      throw Error('这条会话已经不存在，工作表单未保存');
+    }
     await guard(captured);
     memories.binding(app, id, captured.identity);
     // usageIdentity contains Hub and client identifiers, not an account-signed credential.
@@ -329,14 +332,34 @@ function create({ app, identityOf, session, newCwd, loadStorageSdk: load, replac
   }
   async function read(rawId) {
     return attempt(async () => {
-      const id = sessionId(rawId), captured = await auth();
-      const row = await resolve(id, captured), record = await diskRecord(app, id);
+      let id = sessionId(rawId);
+      const captured = await auth();
+      let row = await resolve(id, captured, { allowMissing: true });
+      if (accountHistory && (!row || row.accountProjection || row.adapterId === 'account-sync')) {
+        // Card restoration runs before Agent opening. Resolve a trusted account
+        // alias here as well, without starting a runtime or trusting renderer flags.
+        const item = await accountHistory.row(id);
+        await guard(captured);
+        if (!item || item.deleted) throw Error('这条会话已经不存在，工作表单未保存');
+        const native = await require('./account-native-source.cjs').resolve({ app, session, item, identity: captured.identity });
+        await guard(captured);
+        if (!native) {
+          // Other devices' transcripts have no local work-card store. The
+          // ordinary account opener still authorizes their readonly contents.
+          return { ok: true, sessionId: id, cards: [], workOnly: false,
+            draftSelection: null, draftSelectionRevision: 0 };
+        }
+        id = sessionId(native.id);
+        row = await resolve(id, captured);
+      }
+      if (!row) throw Error('这条会话已经不存在，工作表单未保存');
+      const record = await diskRecord(app, id);
       owner(record, captured); await guard(captured);
       const latest = row.workOnly ? await resolve(id, captured) : row;
       const cards = (record?.cards || []).map(card => restoredRequirementCard(card, captured));
       await guard(captured);
       const workOnly = draftOnly(id, latest);
-      return { ok: true, cards, presence: publicPresence({ ...latest, workOnly }), workOnly,
+      return { ok: true, sessionId: id, cards, presence: publicPresence({ ...latest, workOnly }), workOnly,
         draftSelection: workOnly ? record?.draftSelection || null : null,
         draftSelectionRevision: workOnly ? record?.draftSelectionRevision || 0 : 0 };
     });
