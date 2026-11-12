@@ -48,6 +48,8 @@ platform_key = secrets.token_urlsafe(24)
 personal_key = secrets.token_urlsafe(24)
 requests = []
 http_receipts = []
+provider_release = asyncio.Event()
+provider_release.set()
 provider = FastAPI()
 app = FastAPI()
 servers = []
@@ -114,6 +116,7 @@ async def completions(request: Request):
     requests.append({"model": body.get("model"), "keyKind": key_kind,
                      "messages": messages, "tool": result.get("tool"), "args": result.get("args")})
     index = len(requests)
+    await provider_release.wait()
     delta = ({"role": "assistant", "tool_calls": [{"index": 0, "id": "fixture_call_" + str(index),
               "type": "function", "function": {"name": result["tool"], "arguments": json.dumps(result["args"])}}]}
              if "tool" in result else {"role": "assistant", "content": result["text"]})
@@ -158,9 +161,20 @@ async def account(request: Request):
     return {"ok": True}
 
 
+@app.post("/__fixture__/provider")
+async def hold_provider(request: Request):
+    control(request)
+    if (await request.json()).get("hold"):
+        provider_release.clear()
+    else:
+        provider_release.set()
+    return {"ok": True}
+
+
 @app.post("/__fixture__/shutdown")
 async def shutdown(request: Request):
     control(request)
+    provider_release.set()
     for server, _, _ in servers:
         server.should_exit = True
     return {"ok": True}
