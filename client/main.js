@@ -138,14 +138,20 @@ const _remoteScreenSource = require('./main/remote-screen-source.cjs').create({
 });
 app.on('will-quit', () => _remoteScreenSource.dispose());
 const _onQuotaExceeded = (detail) => {
-    _deviceAuth.clearSession(app, detail || {});
+    // Quota admission is not an authentication failure. Retain the signed
+    // account identity so existing conversations keep their owner and events.
     BrowserWindow.getAllWindows().forEach((win) => {
       if (!win || win.isDestroyed()) return;
       try { win.webContents.send('device-auth-quota-exceeded', detail || {}); } catch (_) {}
     });
   };
 const _authorizeAI = require('./main/conversation/quota-admission.cjs').create({
-  app, identityOf: _deviceAuth.authenticatedIdentity, onQuotaExceeded: _onQuotaExceeded });
+  app, identityOf: _deviceAuth.authenticatedIdentity, onQuotaExceeded: _onQuotaExceeded,
+  onQuotaChanged: detail => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      try { if (!win.isDestroyed()) win.webContents.send('device-auth-quota-changed', detail); } catch (_) {}
+    }
+  } });
 const _ordinaryConversations = _piSessionIpc.install({ app, ipcMain, BrowserWindow, identityOf: _sessionIdentity,
   sendIdentityOf: _deviceAuth.authenticatedIdentity,
   capabilityGrantsOf: _runnerRuntime.capabilityGrants,
