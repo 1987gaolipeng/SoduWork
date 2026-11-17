@@ -188,7 +188,7 @@ flowchart LR
 **Harness** 是实际执行任务的 Agent 运行时，不是模型。SoduWork 通过统一的 Harness 适配接口接入各个 Harness，上层的需求、插件和验收流程不依赖任何一个 Harness。同一会话中可以随时切换 Harness，对话记录和工作目录都保留；支持 Agent Client Protocol（ACP）的程序，登记一条目录声明即可接入。
 
 <details>
-<summary>已支持的 9 种 Harness</summary>
+<summary>已支持的 7 种 Harness</summary>
 
 | Harness | 使用的模型 | 接入方式 |
 | --- | --- | --- |
