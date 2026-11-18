@@ -27,14 +27,25 @@ def _close(stream) -> None:
         pass
 
 
+def _write_all(destination, chunk: bytes) -> None:
+    # Popen(bufsize=0) and the spool files are raw streams. A successful write
+    # may consume only a prefix; flushing does not send the remaining bytes.
+    remaining = memoryview(chunk)
+    while remaining:
+        written = destination.write(remaining)
+        if written is None or written <= 0:
+            raise OSError("Spool write made no progress")
+        remaining = remaining[written:]
+    destination.flush()
+
+
 def _copy(source, destination, done: threading.Event) -> None:
     try:
         while True:
             chunk = os.read(source.fileno(), 64 * 1024)
             if not chunk:
                 break
-            destination.write(chunk)
-            destination.flush()
+            _write_all(destination, chunk)
     except (OSError, ValueError):
         pass
     finally:
@@ -47,8 +58,7 @@ def _feed(source, destination) -> None:
             chunk = os.read(source.fileno(), 64 * 1024)
             if not chunk:
                 break
-            destination.write(chunk)
-            destination.flush()
+            _write_all(destination, chunk)
     except (BrokenPipeError, OSError, ValueError):
         pass
     finally:
