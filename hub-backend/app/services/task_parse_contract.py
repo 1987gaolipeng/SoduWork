@@ -113,6 +113,7 @@ def _extract_json(s: str) -> dict:
 
 def _sanitize_parsed(d: dict) -> dict:
     """Allow known fields only and validate enums and dates before updating forms."""
+    from datetime import date, datetime
     import re
     out: dict = {}
     if not isinstance(d, dict):
@@ -150,12 +151,21 @@ def _sanitize_parsed(d: dict) -> dict:
     for k in ("start", "due"):
         v = str(d.get(k) or "").strip()
         if re.fullmatch(r"\d{4}-\d{2}-\d{2}", v):
+            try:
+                date.fromisoformat(v)
+            except ValueError:
+                continue
             out[k] = v
     if (rec := str(d.get("recur") or "").lower()) in ("daily", "weekly", "monthly"):
         out["recur"] = rec
     rem = str(d.get("remind") or "").strip().replace(" ", "T")
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", rem):
-        out["remind"] = rem
+        try:
+            datetime.fromisoformat(rem)
+        except ValueError:
+            pass
+        else:
+            out["remind"] = rem
     if isinstance(d.get("tags"), list):
         tt = [str(t).strip()[:16] for t in d["tags"] if str(t).strip()][:6]
         if tt:

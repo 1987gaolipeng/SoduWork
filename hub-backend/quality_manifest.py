@@ -310,6 +310,7 @@ RELEASE_SMOKES = tuple(sorted((
     "smoke/smoke_stability_hardening.py",
     "smoke/smoke_status_authority.py",
     "smoke/smoke_task_ai.py",
+    "test_task_parse_dates.py",
     "smoke/smoke_task_attachments.py",
     "smoke/smoke_task_commands.py",
     "smoke/smoke_task_evolution.py",
