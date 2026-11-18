@@ -85,7 +85,7 @@ _MS_HEAD = re.compile(r"^\s{0,3}#{1,4}\s*里程碑\s*[:：]?\s*(\d+)?", re.M)
 
 
 def _field(names: str) -> re.Pattern:
-    return re.compile(r"^[*\-\s]*(?:" + names + r")[*`\s]*[:：]\s*(.+)$", re.M)
+    return re.compile(r"^[*\- \t]*(?:" + names + r")[*` \t]*[:：][ \t]*(.*)$", re.M)
 
 
 _MS_FIELD = {
