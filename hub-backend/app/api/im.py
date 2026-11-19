@@ -136,8 +136,17 @@ async def dismiss(message_id: str, client=Depends(current_client), session=Depen
     return {"ok": True, "resent": False}
 
 
-@router.api_route("/webhooks/{connection_id}", methods=["GET", "POST"])
-async def webhook(connection_id: str, request: Request, session=Depends(get_session)):
+@router.get("/webhooks/{connection_id}", operation_id="im_webhook_get")
+async def webhook_get(connection_id: str, request: Request, session=Depends(get_session)):
+    return await _webhook(connection_id, request, session)
+
+
+@router.post("/webhooks/{connection_id}", operation_id="im_webhook_post")
+async def webhook_post(connection_id: str, request: Request, session=Depends(get_session)):
+    return await _webhook(connection_id, request, session)
+
+
+async def _webhook(connection_id: str, request: Request, session=Depends(get_session)):
     connections.enabled()
     connection = await session.get(im.IMConnection, connection_id)
     if not connection:
