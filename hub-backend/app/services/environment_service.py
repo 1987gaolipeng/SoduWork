@@ -317,6 +317,19 @@ async def preflight_chain(session: AsyncSession, repo: models.Repo,
             "stages": stages, "blockers": blockers, "warnings": warnings}
 
 
+def _validated_selector(value) -> dict:
+    """Reject selector shapes the runner matcher can never satisfy.
+
+    A string such as "not-array" used to be stored as ["n", "o", "t", ...] because the value was
+    iterated as characters, which silently detached the environment from every runner.
+    """
+    if value is not None and not isinstance(value, dict):
+        raise ValueError("Runner 选择器必须是对象")
+    if isinstance(value, dict) and "tags" in value and not isinstance(value["tags"], list):
+        raise ValueError("runnerSelector.tags 必须是数组")
+    return _selector(value)
+
+
 async def save_environment(session: AsyncSession, body: dict, row: am.Environment | None = None
                            ) -> am.Environment:
     creating = row is None
@@ -326,6 +339,8 @@ async def save_environment(session: AsyncSession, body: dict, row: am.Environmen
         if not _KEY.fullmatch(key):
             raise ValueError("环境标识只允许小写字母、数字和短横线，且以字母开头")
         org_id = body.get("orgId") or None
+        if org_id and await session.get(models.OrgUnit, org_id) is None:
+            raise ValueError("部门不存在")
         if await session.scalar(select(func.count(am.Environment.id)).where(
                 am.Environment.key == key, am.Environment.org_id == org_id)):
             raise ValueError("环境标识已经存在")
@@ -341,13 +356,16 @@ async def save_environment(session: AsyncSession, body: dict, row: am.Environmen
             raise ValueError("环境标识已经存在")
         row.key = key
     if "name" in body:
-        row.name = _text(body.get("name"), 80) or row.name
+        name = _text(body.get("name"), 80)
+        if not name:
+            raise ValueError("环境名称不能为空")
+        row.name = name
     if "tier" in body:
         row.tier = tier or "custom"
     if "description" in body:
         row.description = _text(body.get("description"), 400)
     if "runnerSelector" in body:
-        row.runner_selector = _selector(body.get("runnerSelector"))
+        row.runner_selector = _validated_selector(body.get("runnerSelector"))
     if "healthChecks" in body:
         row.health_checks = _checks(body.get("healthChecks"))
     if "rollback" in body:
@@ -593,7 +611,7 @@ async def save_target(session: AsyncSession, body: dict, row: am.DeploymentTarge
     row.config = config
     row.secret_refs = {str(k): str(v) for k, v in refs.items()}
     if "runnerSelector" in body:
-        row.runner_selector = _selector(body.get("runnerSelector"))
+        row.runner_selector = _validated_selector(body.get("runnerSelector"))
     if "healthChecks" in body:
         row.health_checks = _checks(body.get("healthChecks"))
     if "rollback" in body:
