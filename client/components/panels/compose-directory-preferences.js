@@ -113,7 +113,9 @@
   global.ComposeDirectoryPreferences = { bind: config => { options = config || {}; }, begin, sync, ready,
     selectionStarted, selectionCommitted, selectionRevision: () => explicitRevision, capture, remember, stop };
   for (const event of ['soduwork-data-scope-changed', 'soduwork-device-auth']) {
-    global.addEventListener?.(event, () => { if (active) void begin(); });
+    // Heartbeats also publish auth events. Restore only when the actual scope
+    // changes, preserving unsent choices and any restoration already in flight.
+    global.addEventListener?.(event, () => { if (active) void sync(); });
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = global.ComposeDirectoryPreferences;
 })(typeof window !== 'undefined' ? window : globalThis);

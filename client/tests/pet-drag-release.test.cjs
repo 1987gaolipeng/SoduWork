@@ -71,3 +71,24 @@ test('a regular click does not expand or shrink the overlay', () => {
   assert.equal(f.calls.shrink, 0);
   assert.equal(f.handlers.size, 0);
 });
+
+test('release retains a fast final move even before the animation frame runs', () => {
+  const f = fixture();
+  f.sandbox._onPetPointerDown(f.event(20, 20));
+  f.handlers.get('pointermove')(f.event(410, 310));
+  f.handlers.get('pointerup')(f.event(410, 310, { buttons: 0 }));
+  assert.deepEqual(f.calls.positions, [[400, 300]]);
+  assert.equal(f.frames.size, 0);
+});
+
+test('pointer loss and blur release the capture exactly once', () => {
+  const f = fixture(); let releaseCount = 0, lost;
+  f.sandbox.captureOverlayPointer = (_event, callback) => { lost = callback; return () => releaseCount++; };
+  f.sandbox._onPetPointerDown(f.event(20, 20));
+  f.handlers.get('pointermove')(f.event(100, 100));
+  lost();
+  f.sandbox._onPetPointerBlur();
+  assert.equal(releaseCount, 1);
+  assert.equal(f.calls.end, 1);
+  assert.equal(f.handlers.size, 0);
+});

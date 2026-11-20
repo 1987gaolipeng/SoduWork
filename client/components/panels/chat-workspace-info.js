@@ -176,6 +176,7 @@
 
   function status(snapshot, pending) {
     const snap = snapshot || {};
+    if (snap.status === 'queued') return tx(snap.statusText || '排队中');
     const messages = snap.messages || [];
     let turnAt = -1;
     messages.forEach((item, index) => { if (item.role === 'user') turnAt = index; });

@@ -16,6 +16,12 @@ const INLINE_PREVIEW_TYPES = new Set([
   'application/pdf', 'application/json',
   'text/plain', 'text/markdown', 'text/csv',
 ]);
+const PASSIVE_PREVIEW_EXTENSIONS = new Map([
+  ['.txt', 'text/plain'], ['.csv', 'text/csv'], ['.json', 'application/json'],
+  ['.png', 'image/png'], ['.jpg', 'image/jpeg'], ['.jpeg', 'image/jpeg'],
+  ['.gif', 'image/gif'], ['.webp', 'image/webp'], ['.bmp', 'image/bmp'],
+  ['.avif', 'image/avif'], ['.ico', 'image/x-icon'], ['.pdf', 'application/pdf'],
+]);
 // Opening received files is not permission to execute programs or shell scripts.
 const SYSTEM_OPEN_EXTENSIONS = new Set([
   // Office and rich-document formats are intentionally handed to the OS.
@@ -368,6 +374,12 @@ async function preview(event, raw) {
   const filename = safeFilename(payload.filename, parsed.id);
   const result = await fetchAttachment(parsed.url, undefined, () => refreshAttachment(event, found, parsed, 'preview'));
   assertCurrent(event, found);
+  // Local message uploads intentionally store a generic MIME type. Route only
+  // known passive extensions to existing isolated viewers, never the OS shell.
+  // Explicit server types, including HTML and SVG, remain authoritative.
+  if (!result.contentType || result.contentType === 'application/octet-stream') {
+    result.contentType = PASSIVE_PREVIEW_EXTENSIONS.get(path.extname(filename).toLowerCase()) || result.contentType;
+  }
   if (payload.inlineText === true) {
     if (!/\.(?:md|markdown|txt)$/i.test(filename)) return { ok: false, reason: '这份附件不支持文本预览' };
     const cap = 2 * 1024 * 1024;

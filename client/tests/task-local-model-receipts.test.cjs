@@ -50,7 +50,7 @@ test('native preparation freezes the verified local model and sends only a gener
   assert.equal(input.modelName, f.ref);
   f.select({ name: 'hub-model', model: { id: 'hub-model' } });
   await input.beforeTurn(); await input.onStarted(); await input.afterTurn('completed');
-  assert.deepEqual(f.received.map(row => row.action), ['prepare', 'start', 'started', 'complete']);
+  assert.deepEqual(f.received.map(row => row.action), ['prepare', 'start', 'started', 'wait', 'complete']);
   assert.ok(f.received.every(row => row.modelSource === 'device' && row.agentId === 'local:pi'));
   assert.doesNotMatch(JSON.stringify(f.received), /local:model-|private-wire-model|8686|"usage"/);
   assert.equal(input.modelName, f.ref, 'changing the future selection cannot change this queued turn');
@@ -149,7 +149,7 @@ test('production recovery and queue application keep receipt ownership bound to 
       assert.deepEqual(authorized, target === 'managed' ? [admitted] : [initial],
         'production quota admission observes the frozen queue choice rather than the future picker');
       const receipts = f.received.filter(row => row.turnId !== 'first');
-      assert.deepEqual(receipts.map(row => row.action), ['prepare', 'start', 'complete']);
+      assert.deepEqual(receipts.map(row => row.action), ['prepare', 'start', 'wait', 'complete']);
       assert.ok(receipts.every(row => (row.modelSource === 'device') === applied.at(-1).localOnly));
       assert.doesNotMatch(JSON.stringify(receipts), /local:model-|private-wire-model/);
     });
@@ -184,7 +184,7 @@ test('device-owned start and terminal receipts survive offline recreation withou
   f.online(true); f.receipts.dispose();
   const restored = create(f.options); t.after(() => restored.dispose());
   await restored.flush();
-  assert.deepEqual(f.received.map(row => row.action), ['prepare', 'start', 'started', 'complete']);
+  assert.deepEqual(f.received.map(row => row.action), ['prepare', 'start', 'started', 'wait', 'complete']);
   assert.ok(f.received.every(row => row.modelSource === 'device'));
   assert.equal(fs.readdirSync(directory).filter(name => name.endsWith('.json')).length, 0);
 });

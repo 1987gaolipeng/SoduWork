@@ -4,7 +4,10 @@ const { compatibility, DEFAULT_OUTPUT_TOKENS } = require('./model-capability-con
 
 function policy(conf) {
   const config = { ...conf, ...conf.config, id: conf.name };
-  const profile = thinking.profile(config), always = config.thinkingMode === 'always' || config.thinkingAlwaysOn === true;
+  const conflict = thinking.conflict(config);
+  if (conflict) throw Error(conflict);
+  const profile = thinking.profile(config), always = config.thinkingMode === 'always' || config.thinkingAlwaysOn === true ||
+    profile.reasoning && profile.thinkingLevelMap?.off === null;
   return { variants: new Set(), compatibility: { maxTokensField: 'max_tokens', toolChoice: 'auto', streamOptions: true,
     ...compatibility(conf.compatibility), ...compatibility(conf.config?.compatibility) },
   config, profile, always, budget: Math.min(always ? 2048 : 512, Number(config.maxOutputTokens) || DEFAULT_OUTPUT_TOKENS, Number(conf.ctxWindow || conf.contextWindow) || 128000) };
@@ -15,15 +18,22 @@ function thinkingParams(state) {
   const format = state.config.thinkingFormat || state.profile.format ||
     (state.config.thinkingMode === 'none' ? thinking.profile({ id: state.config.id }).format : '');
   const enabled = state.always;
-  if (format === 'qwen') return { enable_thinking: enabled };
+  const levels = state.profile.thinkingLevelMap || {};
+  // A disabled low level must not fall back to the provider's default effort.
+  // Use minimal only when explicitly mapped; extended levels also need a map.
+  const level = thinking.LEVELS.filter(value => value !== 'off').find(value => levels[value] !== null &&
+    (!['minimal', 'xhigh', 'max'].includes(value) || typeof levels[value] === 'string'));
+  const effort = enabled && state.profile.supportsReasoningEffort && level
+    ? { reasoning_effort: levels[level] || level } : {};
+  if (format === 'qwen') return { enable_thinking: enabled, ...effort };
   if (format === 'qwen-chat-template') return { chat_template_kwargs: { enable_thinking: enabled, preserve_thinking: true } };
-  if (format === 'deepseek') return { thinking: { type: enabled ? 'enabled' : 'disabled' } };
-  if (format === 'zai') return { thinking: { type: enabled ? 'enabled' : 'disabled', clear_thinking: false } };
+  if (format === 'deepseek') return { thinking: { type: enabled ? 'enabled' : 'disabled' }, ...effort };
+  if (format === 'zai') return { thinking: { type: enabled ? 'enabled' : 'disabled', clear_thinking: false }, ...effort };
   if (format === 'openrouter') return { reasoning: { enabled, ...(enabled ? { effort: 'low' } : {}) } };
   if (format === 'together') return { reasoning: { enabled } };
   if (format === 'baseten') return { chat_template_kwargs: { enable_thinking: enabled } };
   if (format === 'string-thinking') return { thinking: enabled ? 'enabled' : 'disabled' };
-  return enabled && state.profile.supportsReasoningEffort ? { reasoning_effort: 'low' } : {};
+  return effort;
 }
 function payload(conf, state, messages, stream, tools) {
   return { model: conf.name, messages, stream, [state.compatibility.maxTokensField]: state.budget,

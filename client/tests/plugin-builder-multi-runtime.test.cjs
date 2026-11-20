@@ -111,7 +111,7 @@ test('builder delivery example is accepted by the real manifest parser and expos
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-builder-delivery-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const app = { getPath: () => root }, builder = personal.get(app, personal.BUILDER_ID);
-  assert.equal(builder.version, '1.4.5');
+  assert.equal(builder.version, '1.4.6');
   assert.match(builder.localDraft.instructions, /source\.type=package.*entry=ui\/index\.html/);
   const instructions = builder.localDraft.instructions;
   const parseLine = prefix => {

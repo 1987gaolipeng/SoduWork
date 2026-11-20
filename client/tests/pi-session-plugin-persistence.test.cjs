@@ -261,5 +261,23 @@ test('Pi executes inherited plugins with fresh grants, restores selections, cons
       assert.equal(grants.size, 0);
       assert.match(fs.readFileSync(path.join(cwd, 'report.html'), 'utf8'), /Business report/);
     }
+    // Real Pi requests must carry authoring intent even when the visible text
+    // only describes the future plugin's business behavior.
+    generation = false; executions.length = 0; priorResults.length = 0;
+    const featureAuthor = await open({ ref: 'feature-authoring' });
+    const latestUserText = () => {
+      const content = requests.at(-1).messages.findLast(message => message.role === 'user').content;
+      return typeof content === 'string' ? content : content.filter(item => item.type === 'text').map(item => item.text).join('\n');
+    };
+    const feature = '我给你区域范围、时间、人数和偏好，输出预算、路线和 HTML 旅行计划。';
+    for (const [text, options] of [[feature, { pluginIds: ['local:plugin-builder'] }], ['再支持随机推荐', {}]]) {
+      await send(featureAuthor, text, options);
+      assert.match(latestUserText(), /"authoring":\{"intent":"plugin-authoring"/);
+      assert.match(latestUserText(), /changing values.*plugin inputs/);
+      assert.equal(require('../main/pi-session/plugin-context').parse(latestUserText()).text, text);
+    }
+    await send(featureAuthor, '改为普通旅行讨论', { clearPluginSelection: true });
+    assert.doesNotMatch(latestUserText(), /"authoring":/);
+    assert.doesNotMatch(JSON.stringify(featureAuthor.snapshot().messages), /"authoring":|changing values/);
     await require('../main/app-resource-cache.cjs').close();
   });

@@ -20,6 +20,10 @@ class _UnstableSnapshot(Exception):
     pass
 
 
+class _SnapshotCleanupError(OpenCodeSessionMigrationError):
+    pass
+
+
 _RETRY = "Close personal OpenCode applications and retry this conversation. The original history is unchanged."
 _SCHEMA = "This legacy OpenCode database is not compatible with the managed version. The original history is unchanged."
 _TIMEOUT = 30
@@ -91,7 +95,7 @@ def _temporary_snapshot():
             temporary.cleanup()
         except OSError as error:
             reason = str(failure) if isinstance(failure, OpenCodeSessionMigrationError) else "OpenCode history was not restored."
-            raise OpenCodeSessionMigrationError(
+            raise _SnapshotCleanupError(
                 reason + " Temporary history cleanup failed; close OpenCode applications and retry.") from error
 
 
@@ -130,6 +134,45 @@ def _snapshot(source: Path):
         raise OpenCodeSessionMigrationError(_RETRY)
 
 
+def _session_family(connection, session_id: str) -> list[dict]:
+    first = connection.execute("SELECT * FROM session WHERE id = ?", (session_id,)).fetchone()
+    if first is None:
+        return []
+    sessions = [dict(first)]
+    seen = {session_id}
+    if "parent_id" in _columns(connection, "session"):
+        for session in sessions:
+            for child in connection.execute("SELECT * FROM session WHERE parent_id = ?", (session["id"],)):
+                if child["id"] not in seen:
+                    seen.add(child["id"])
+                    sessions.append(dict(child))
+    return sessions
+
+
+def _has_v2_history(connection, sessions: list[dict]) -> bool:
+    tables = _tables(connection)
+    for table in ("session_message", "session_input", "session_context_epoch"):
+        if table not in tables:
+            continue
+        if "session_id" not in _columns(connection, table):
+            raise OpenCodeSessionMigrationError(_SCHEMA)
+        for session in sessions:
+            if connection.execute(f"SELECT 1 FROM {_quoted(table)} WHERE session_id = ? LIMIT 1",
+                                  (session["id"],)).fetchone():
+                return True
+    if "event" in tables and {"aggregate_id", "type"} <= _columns(connection, "event"):
+        for session in sessions:
+            if connection.execute("SELECT 1 FROM event WHERE aggregate_id = ? AND type GLOB ? LIMIT 1",
+                                  (session["id"], "session.next.*")).fetchone():
+                return True
+    return False
+
+
+def _has_v1_messages(connection, session_id: str) -> bool:
+    return ("message" in _tables(connection) and bool(connection.execute(
+        "SELECT 1 FROM message WHERE session_id = ? LIMIT 1", (session_id,)).fetchone()))
+
+
 def _read_payload(source: Path, session_id: str, workspace: str) -> dict:
     with _snapshot(source) as snapshot:
         connection = sqlite3.connect(snapshot)
@@ -140,19 +183,13 @@ def _read_payload(source: Path, session_id: str, workspace: str) -> dict:
             if any(table not in tables or not columns <= _columns(connection, table)
                    for table, columns in _REQUIRED.items()):
                 raise OpenCodeSessionMigrationError(_SCHEMA)
-            first = connection.execute("SELECT * FROM session WHERE id = ?", (session_id,)).fetchone()
-            if first is None:
+            sessions = _session_family(connection, session_id)
+            if not sessions:
                 raise OpenCodeSessionMigrationError(
                     "The original OpenCode session is missing. Restore its history before retrying this conversation.")
-            _check_workspace(dict(first), workspace)
-            sessions = [dict(first)]
-            seen = {session_id}
-            if "parent_id" in _columns(connection, "session"):
-                for session in sessions:
-                    for child in connection.execute("SELECT * FROM session WHERE parent_id = ?", (session["id"],)):
-                        if child["id"] not in seen:
-                            seen.add(child["id"])
-                            sessions.append(dict(child))
+            _check_workspace(sessions[0], workspace)
+            if _has_v2_history(connection, sessions):
+                raise OpenCodeSessionMigrationError(_SCHEMA)
             payload = {"session": sessions, "project": [], "message": [], "part": [], "todo": []}
             projects = set()
             for session in sessions:
@@ -223,14 +260,53 @@ def _existing(connection, session_id: str, workspace: str) -> bool:
     return True
 
 
-def _has_session(target: Path, session_id: str, workspace: str) -> bool:
+def _check_empty_target_source(source: Path | None, session_id: str, workspace: str) -> None:
+    # An empty managed session can be legitimate. Block only when the matching
+    # legacy history proves that continuing it would discard existing context.
+    if source is None or not source.is_file():
+        return
+    conflict = ""
+    try:
+        with _snapshot(source) as snapshot:
+            connection = sqlite3.connect(snapshot)
+            connection.row_factory = sqlite3.Row
+            try:
+                connection.execute("PRAGMA trusted_schema = OFF")
+                sessions = _session_family(connection, session_id)
+                if not sessions or not _same_workspace(sessions[0].get("directory", ""), workspace):
+                    return
+                if _has_v2_history(connection, sessions):
+                    conflict = _SCHEMA
+                elif _has_v1_messages(connection, session_id):
+                    conflict = ("The private OpenCode session is missing its original message history. "
+                                "Restore the original history before retrying; the private database was not replaced.")
+            finally:
+                connection.close()
+    except _SnapshotCleanupError:
+        raise
+    except (OpenCodeSessionMigrationError, OSError, sqlite3.Error):
+        # Unavailable personal storage cannot revoke an established private SID.
+        return
+    if conflict:
+        raise OpenCodeSessionMigrationError(conflict)
+
+
+def _has_session(target: Path, session_id: str, workspace: str, source: Path | None = None) -> bool:
     if not target.is_file():
         return False
     connection = sqlite3.connect(target.as_uri() + "?mode=ro", uri=True, timeout=_TIMEOUT)
+    connection.row_factory = sqlite3.Row
     try:
-        return _existing(connection, session_id, workspace)
+        if not _existing(connection, session_id, workspace):
+            return False
+        if _has_v2_history(connection, _session_family(connection, session_id)):
+            raise OpenCodeSessionMigrationError(_SCHEMA)
+        has_messages = _has_v1_messages(connection, session_id)
     finally:
         connection.close()
+    if not has_messages:
+        _check_empty_target_source(source, session_id, workspace)
+    return True
 
 
 def _initialize(target: Path, env: dict, executable: str) -> None:
@@ -313,7 +389,7 @@ def migrate_session(env: dict, session_id: str, workspace: str, executable: str)
         if source is not None and (source == target or
                                    (source.exists() and target.exists() and os.path.samefile(source, target))):
             raise OpenCodeSessionMigrationError("OpenCode's private and personal history locations must be separate.")
-        if _has_session(target, session_id, workspace):
+        if _has_session(target, session_id, workspace, source):
             return
         if source is None:
             raise OpenCodeSessionMigrationError(
@@ -322,7 +398,7 @@ def migrate_session(env: dict, session_id: str, workspace: str, executable: str)
         # The full temporary source snapshot is gone before any vendor process.
         target.parent.mkdir(parents=True, exist_ok=True)
         with _target_lock(target):
-            if _has_session(target, session_id, workspace):
+            if _has_session(target, session_id, workspace, source):
                 return
             _initialize(target, env, executable)
             _import_payload(target, payload, session_id, workspace)

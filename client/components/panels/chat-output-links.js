@@ -587,7 +587,7 @@
     if(!row || !/^\/(?:api\/v1\/)?attachments\/[^/?#]+\?/.test(row.url||'')) throw Error('这份成果暂时不可用，请刷新后重试');
     return {...row,url:hub.attachmentUrl(row)};
   }
-  async function readPreview(file, api, ref, mode='read') {
+  async function readPreview(file, api, ref, mode='read', current = () => true) {
     if (file.cloudPending && !file.processEvidence) file = await materialize(file, api, ref, { previewOnly: true });
     if (file.taskId && file.attachmentId) {
       const row = await taskAttachment(file,global.SoduWorkAPI);
@@ -598,7 +598,17 @@
       }
       return global.soduWorkAPI.previewAttachment({...row,inlineText:mode==='read',inlineImage:mode!=='read'});
     }
-    if (file.artifactId && api?.artifactAction) return api.artifactAction(ref,file.artifactId,mode);
+    if (file.artifactId && api?.artifactAction) {
+      const scope = global.SoduWorkAPI?.taskStorageKey?.('ops');
+      const reply = await api.artifactAction(ref,file.artifactId,mode);
+      // A runtime switch can invalidate an in-flight scan. Reauthorize the
+      // same read once; never replay file actions or bypass an access failure.
+      if (reply?.ok === false && reply.code === 'ARTIFACT_SOURCE_CHANGED' &&
+          ['read', 'image', 'image-full', 'preview'].includes(mode) && current() &&
+          scope === global.SoduWorkAPI?.taskStorageKey?.('ops'))
+        return api.artifactAction(ref,file.artifactId,mode);
+      return reply;
+    }
     if (mode==='read' && file.path && api?.readOutput) return api.readOutput(ref,file.path);
     return {ok:false,reason:'当前成果暂时不能预览，请刷新后重试'};
   }
@@ -632,7 +642,7 @@
           const current = mediaOwnerCurrent(owner, options);
           owner.onkeydown = event => { if (event.target === owner && ['Enter', ' '].includes(event.key)) { event.preventDefault(); owner.click(); } };
           global.ChatMedia.load(node, async () => {
-            const reply = await readPreview(file, options.api, options.ref, 'image-full');
+            const reply = await readPreview(file, options.api, options.ref, 'image-full', current);
             return current() ? imageUrl(reply) : '';
           });
         }
@@ -653,7 +663,7 @@
       const hint = node.querySelector('small');
       if (hint) hint.textContent = '正在加载图片…';
       try {
-        const reply = await readPreview(file, options.api, options.ref, 'image');
+        const reply = await readPreview(file, options.api, options.ref, 'image', valid);
         const src = imageUrl(reply);
         if (!src) throw Error(reply?.reason || '图片暂时无法预览');
         if (!valid()) return;
@@ -678,7 +688,7 @@
           const current = mediaOwnerCurrent(owner, options);
           owner.onkeydown = event => { if (event.target === owner && ['Enter', ' '].includes(event.key)) { event.preventDefault(); owner.click(); } };
           global.ChatMedia.load(node, async () => {
-            const reply = await readPreview(file, options.api, options.ref, 'preview');
+            const reply = await readPreview(file, options.api, options.ref, 'preview', current);
             return current() ? videoUrl(reply) : '';
           });
         }

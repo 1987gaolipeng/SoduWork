@@ -170,6 +170,14 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
       }
       const old = raw, oldDescriptor = { ...descriptor(old), usedHarnesses:
         old.historyRow?.()?.usedHarnesses || harnesses.fromSnapshot(old.snapshot(), old.adapterId) };
+      // Freeze the exact trusted index before retiring the old native segment.
+      // Its original scan boundary cannot be reconstructed from chat text later.
+      const artifactSnapshot = await require('../conversation/artifact-runtime').snapshotAsync(handle);
+      const artifactHistory = require('../conversation/runtime-artifacts.cjs').capture(old.cwd,
+        artifactSnapshot, { sessionId: old.sessionId, adapterId: old.adapterId });
+      await selection.validate?.();
+      switchIdentity(selection);
+      if (closed || busy(raw)) throw Error(closed ? '会话已关闭，本次切换已取消' : BUSY);
       const historical = clone({ messages: before.messages || [], tools: before.tools || [],
         usageReceipts: before.usageReceipts || [], turnMetrics: before.turnMetrics || [] });
       // Native tools may reuse small IDs. Namespace only the newly-finished
@@ -180,7 +188,7 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
         if (block.toolCall?.id && ids.has(block.toolCall.id)) block.toolCall.id = ids.get(block.toolCall.id);
       const nextRecord = { version: 1, id: publicId, owner,
         title: segments.title(record) || old.historyRow?.()?.title || '', cwd: old.cwd, originAdapter,
-        at: Date.now(), prefix: historical,
+        at: Date.now(), prefix: historical, artifactHistory,
         accessPolicy: policy, readOnly: options.readOnly,
         activePluginIds: before.activePlugins || [],
         segments: [...(record?.segments || []), oldDescriptor],
@@ -244,6 +252,8 @@ function create({ raw: initial, options, restored, openNative, disposeNative, pr
       if (key === 'ref') return publicRef;
       if (key === 'sessionId') return publicId;
       if (key === 'runtimeOriginAdapter') return originAdapter;
+      if (key === 'artifactHistory') return record?.artifactHistory;
+      if (key === 'artifactState') return record ? raw.snapshot() : undefined;
       if (key === 'runtimeAdapters') return [...new Set([originAdapter, ...(record?.segments || []).map(s => s.adapterId), raw.adapterId])];
       if (Object.hasOwn(overlays, key)) return overlays[key];
       if (Object.hasOwn(own, key)) return own[key];

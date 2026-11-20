@@ -78,7 +78,7 @@ npm ci
 npm start
 ```
 
-The independently started client keeps its own connection settings and profile, separate from the dedicated profile used by the root launcher's `--desktop` mode. Change the Hub URL on the login screen if needed. Quit and restart the application after main-process changes. Reopen the client after UI script changes to verify loading order and interactions.
+An independently started source client defaults to `http://127.0.0.1:18989` when no Hub URL is saved, matching a local Hub or Docker self-hosted service on its default port. Saved addresses remain in effect; change the Hub URL on the login screen for other ports. Its profile is separate from the root launcher's `--desktop` profile, which automatically connects to the Hub started in that session and follows `--port`. Packaged and official clients still default to `https://service.soduwork.ai` when no address is saved. Quit and restart the application after main-process changes. Reopen the client after UI script changes to verify loading order and interactions.
 
 Run `npm test` and `npm run check:layout` in `client/`. Electron end-to-end checks live in `e2e/`; inspect each script's environment requirements. `dist/`, `.runtime/`, and generated `runner/` files are build outputs. Do not commit them or substitute old release binaries for current source.
 

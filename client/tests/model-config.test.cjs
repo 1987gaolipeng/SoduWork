@@ -141,6 +141,21 @@ test('Hub explicit thinking level remains explicit through the runner boundary',
   }
 });
 
+test('conflicting mandatory-thinking declarations reject runtime admission without breaking normalization', async t => {
+  const cfg = require('../main/pi-session/model-config');
+  const ref = 'local:model-' + '7'.repeat(32);
+  t.mock.method(require('../main/local-model-store.cjs'), 'resolve', () => ({
+    modelRef: ref, name: 'glm_5.3_flash', baseUrl: 'https://fixture.invalid/v1', key: '',
+    config: { thinkingMode: 'none' },
+  }));
+  const local = await cfg.fetchModel(null, ref, 1000, () => { throw Error('No request expected'); }, false, 'pi', { allowLocal: true });
+  assert.equal(local.ok, false); assert.equal(local.code, 'MODEL_THINKING_CONFLICT');
+  assert.match(local.reason, /不支持关闭思考/);
+  const managed = await fetchDeclaredModel({ model: 'glm-5.3', reasoning: false });
+  assert.equal(managed.ok, false); assert.equal(managed.code, 'MODEL_THINKING_CONFLICT');
+  assert.match(managed.reason, /不支持关闭思考/);
+});
+
 test('模型中心支持个人自建服务与本地服务', () => {
   const panel = read('components', 'panels', 'panels-models.js');
   const api = read('api.js');

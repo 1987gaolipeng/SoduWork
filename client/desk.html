@@ -153,6 +153,18 @@
   .desk-blank span{font-size:max(var(--font-min-readable, 14.5px), calc(var(--text-sm) * var(--font-scale,1)))}
   .desk-blank svg{width:46px;height:46px;stroke:var(--ink-5,var(--ink-4));stroke-width:1.4;fill:none;
     stroke-linecap:round;stroke-linejoin:round;opacity:.5}
+  html[data-desk-panel="workspace"] .desk-blank.desk-startup-recovery{
+    position:fixed;top:var(--ws-panel-top,0px);display:flex;z-index:21;
+    background:var(--bg-0);padding:24px;text-align:center;
+  }
+  html[data-desk-panel="workspace"] body:has(> .workspace-shell) > .desk-startup-recovery{
+    left:var(--ws-main-left);right:var(--ws-frame-right);bottom:var(--ws-frame-bottom);
+    border-radius:var(--ws-frame-radius);
+  }
+  .desk-startup-recovery button{
+    padding:6px 12px;border:1px solid var(--line);border-radius:6px;
+    background:var(--bg-1);color:var(--ink);font:inherit;cursor:pointer;
+  }
   /* Show bubble feedback as a bottom-right toast in this window. */
   .desk-toast{
     /* Match the pet bubble feedback layer so dialog backdrops do not hide status/error text. */
@@ -174,12 +186,39 @@
 <link rel="stylesheet" href="theme/enlarged-theme.css">
 </head>
 <body>
-<!-- Window fallback while requirements and team identity load. On boot failure, desk-boot replaces this span with the specific error and keeps the window open for diagnosis. -->
+<!-- Keep the startup recovery control independent of desk-boot and its dependencies. -->
 <div class="desk-blank" id="deskBlank">
   <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 20h8M12 18v2"/><path d="M7.5 9.5h5M7.5 13h9"/></svg>
   <b id="deskBlankTitle">SoduWork</b>
-  <span id="deskBlankHint">正在载入…</span>
+  <span id="deskBlankHint" role="status">正在载入…</span>
+  <button id="deskBlankRetry" type="button" aria-describedby="deskBlankHint" hidden></button>
 </div>
+<script id="deskStartupRecovery">
+(function () {
+  if (window.__deskPanel !== 'workspace') return;
+  const blank = document.getElementById('deskBlank');
+  const hint = document.getElementById('deskBlankHint');
+  const retry = document.getElementById('deskBlankRetry');
+  const messages = {
+    zh: ['工作区尚未打开。你可以重新加载此窗口。', '重新加载工作区'],
+    en: ['The workspace has not opened yet. You can reload this window.', 'Reload workspace'],
+    ja: ['ワークスペースがまだ開いていません。このウィンドウを再読み込みできます。', 'ワークスペースを再読み込み'],
+    ko: ['작업 공간이 아직 열리지 않았습니다. 이 창을 새로 고칠 수 있습니다.', '작업 공간 새로 고침'],
+  };
+  function showRecovery() {
+    if (blank.style.display === 'none' || !retry.hidden) return;
+    const locale = window.SoduWorkI18n?.getLocale() || navigator.language;
+    const [status, label] = messages[locale.split('-')[0]] || messages.en;
+    hint.textContent = status;
+    retry.textContent = label;
+    retry.hidden = false;
+    blank.classList.add('desk-startup-recovery');
+  }
+  retry.addEventListener('click', () => location.reload());
+  window.addEventListener('soduwork-desk-startup-failed', showRecovery, { once: true });
+  setTimeout(showRecovery, 15000);
+})();
+</script>
 <div id="deskRoot"></div>
 <!-- The workspace sidebar uses this task-detail container. Without it, openDetail silently returns. Secondary views open centered, as requested. -->
 
@@ -409,6 +448,7 @@
 <script src="core/page-performance.js"></script>
 <script src="core/token-quota.js"></script>
 <script src="components/client-auth/quota-notice.js"></script>
+<script src="core/requirement-diagnostics.js"></script>
 <script src="api.js"></script>
 <script src="components/client-auth/legal-html.js"></script>
 <script src="components/client-auth/account-ui.js"></script>

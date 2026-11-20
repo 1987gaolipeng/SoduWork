@@ -310,13 +310,19 @@ class ReleaseTests(unittest.TestCase):
 
     def test_combined_candidate_requires_hub_and_every_desktop_shard(self):
         ctx = {**self.ctx, 'component': 'all'}
+        release.write(self.root / 'release-notes.json', {
+            'schema': 1, 'version': ctx['version'], 'sourceCommit': ctx['commit'],
+            'previousCommit': 'b' * 40, 'previousTag': 'v1.2.2', 'runId': ctx['runId'],
+            'repository': ctx['repository'], 'status': 'unavailable',
+            'locales': {}, 'sources': [], 'omitted': []})
+        digest = release.fingerprint(self.root / 'release-notes.json')['sha256']
         import shutil
         for shard in release.SHARDS['all']:
             folder = self.root / shard
             folder.mkdir()
             for name in release.expected(ctx, shard):
                 (folder / name).write_bytes(b'accepted fixture')
-            release.seal(ctx, shard, folder, self.linux_checks(ctx) if shard == 'linux' else {'ok': True})
+            release.seal(ctx, shard, folder, {**(self.linux_checks(ctx) if shard == 'linux' else {'ok': True}), 'releaseNotesSha256': digest})
             for file in folder.iterdir():
                 shutil.move(file, self.root / file.name)
             folder.rmdir()

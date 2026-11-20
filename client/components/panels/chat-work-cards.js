@@ -23,7 +23,7 @@
     const current = record => owned(record) && record.sessionId === String(ctx._sessionId || '');
     const tell = message => global.petSay?.(message);
     const isRequirement = record => record.actionId === 'work.requirement.create';
-    const isInline = record => isRequirement(record) || (record.actionId==='work.automation.create' && record.seed.source==='web-app');
+    const isInline = record => isRequirement(record) || record.actionId === 'work.automation.create';
     const messageOwner = (index) => ctx._snap?.history?.messageIndices?.[index] ??
       ((Number(ctx._snap?.history?.messageStart) || 0) + index);
     function transcriptAnchor() {
@@ -248,7 +248,7 @@
         if (typeof bridge[name] === 'function') bridge[name] = (...args) => { if (isView()) return originalBridge[name](...args); };
       }
       const seed = {...record.seed, ...options, bridge, cardId: record.id,
-        ...(isRequirement(record) ? { cardHost: () => {
+        ...(isInline(record) ? { cardHost: () => {
           const host = cardHost(record);
           host?.replaceChildren();
           return host;
@@ -334,7 +334,7 @@
           const {files, ...context} = options.conversationContext; seed.conversationContext = json(context);
         }
         seed.parseText = command.parseText || command.text || '';
-        if (id === 'work.requirement.create' || (id==='work.automation.create' && options.source==='web-app')) seed.transcriptAnchor = transcriptAnchor();
+        if (id === 'work.requirement.create' || id === 'work.automation.create') seed.transcriptAnchor = transcriptAnchor();
         seed.model = typeof options.model === 'function' ? options.model() : options.model || ctx._workModel?.() || '';
         record = {id: 'card-' + crypto.randomUUID(), owner, scopeEpoch, sessionId, actionId: id, prompt: command.text || '',
           seed, state: {phase: 'loading'}, files: [], closed: false, version: 0, revision: 0};
@@ -374,7 +374,7 @@
     }
     async function activate(record) {
       if (!current(record)) return false;
-      if (isRequirement(record) && ctx._mount?.()?.querySelector('#nchatList') && !cardHost(record)) return false;
+      if (isInline(record) && ctx._mount?.()?.querySelector('#nchatList') && !cardHost(record)) return false;
       capture();
       global.WorkEntrySheet?.close?.(false, true);
       return ctx._openWorkAction({id: record.actionId, text: record.prompt, parseText: record.seed.parseText},

@@ -1,9 +1,9 @@
 """Verify real HTTPS in frozen Runner networking components with disposable CAs.
 
 This freezes the production modules, not the complete desktop or Runner recipe.
-The fixture injects certifi's CA file and empties OpenSSL's default file paths;
-urllib, SSL contexts, hostname and certificate verification execute unchanged.
-Windows native trust remains enabled and its actual certificate count is reported.
+The fixture adds a disposable anchor to real native contexts without changing
+the host trust store. Transport, hostname and certificate checks execute normally.
+Explicit CA overrides are also verified independently of native default trust.
 """
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ import threading
 PAYLOAD = b"SoduWork frozen TLS fixture\n"
 WORKER = r'''
 import hashlib
+import importlib
 import json
 import os
 from pathlib import Path
@@ -32,17 +33,17 @@ import ssl
 import sys
 import urllib.request
 
-import certifi
+import truststore
 from app.services import local_stream, managed_agent_network
 
 root, good, unknown, wrong_host, mode = sys.argv[1:]
 root = Path(root)
-bundled = Path(certifi.where()).resolve(strict=True)
-bundled_bytes = bundled.read_bytes()
-assert b"-----BEGIN CERTIFICATE-----" in bundled_bytes
+verifier_name = {"darwin": "truststore._macos", "win32": "truststore._windows"}.get(
+    sys.platform, "truststore._openssl")
+verifier = importlib.import_module(verifier_name)
 frozen = bool(getattr(sys, "frozen", False))
 if frozen:
-    assert bundled.is_relative_to(Path(sys._MEIPASS).resolve())
+    assert Path(verifier.__file__).resolve().is_relative_to(Path(sys._MEIPASS).resolve())
 os.environ["SSL_CERT_FILE"] = ""
 os.environ["SSL_CERT_DIR"] = ""
 default_source = "empty OpenSSL CA environment paths"
@@ -57,8 +58,14 @@ if sys.platform != "win32":
     assert empty.cert_store_stats()["x509_ca"] == 0, "OpenSSL fixture still has default roots"
 assert empty.verify_mode == ssl.CERT_REQUIRED and empty.check_hostname
 
-# Replace only the CA data source. Production context and transport code remain intact.
-certifi.where = lambda: str(root / "trusted/ca.pem")
+# Add a fixture anchor; keep native certificate verification and production
+# transport intact. Explicit overrides must bypass this native default factory.
+native_context = truststore.SSLContext
+def fixture_context(protocol):
+    context = native_context(protocol)
+    context.load_verify_locations(cafile=str(root / "trusted/ca.pem"))
+    return context
+truststore.SSLContext = fixture_context
 if mode == "explicit-trusted":
     os.environ["SSL_CERT_FILE"] = str(root / "trusted/ca.pem")
 elif mode == "explicit-unrelated":
@@ -66,11 +73,11 @@ elif mode == "explicit-unrelated":
 elif mode == "explicit-missing":
     os.environ["SSL_CERT_FILE"] = str(root / "missing-ca.pem")
 else:
-    assert mode == "bundled"
+    assert mode == "native"
 
 checks = []
 for name, url in (("trusted", good), ("unknown", unknown), ("hostname", wrong_host)):
-    expected = name == "trusted" and mode in ("bundled", "explicit-trusted")
+    expected = name == "trusted" and mode in ("native", "explicit-trusted")
     try:
         with managed_agent_network.open_download(urllib.request.Request(url + "/archive"), timeout=5) as response:
             accepted = response.read() == b"SoduWork frozen TLS fixture\n"
@@ -86,7 +93,8 @@ for name, url in (("trusted", good), ("unknown", unknown), ("hostname", wrong_ho
 report = {"frozen": frozen, "python": sys.version.split()[0], "openssl": ssl.OPENSSL_VERSION,
           "defaultCAcount": empty.cert_store_stats()["x509_ca"],
           "defaultTrustFixture": default_source,
-          "bundledCAsha256": hashlib.sha256(bundled_bytes).hexdigest(),
+          "nativeVerifier": verifier_name,
+          "fixtureCAsha256": hashlib.sha256((root / "trusted/ca.pem").read_bytes()).hexdigest(),
           "mode": mode, "checks": checks,
           "ok": all(row["accepted"] == row["expected"] for row in checks)}
 print(json.dumps(report, ensure_ascii=True))
@@ -198,7 +206,9 @@ def main() -> int:
             env["PYTHONPATH"] = str(backend)
         else:
             build = [args.python, "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile",
-                     "--name", "soduwork-tls-probe", "--paths", str(backend), "--collect-data", "certifi",
+                     "--name", "soduwork-tls-probe", "--paths", str(backend), "--hidden-import",
+                     {"darwin": "truststore._macos", "win32": "truststore._windows"}.get(
+                         sys.platform, "truststore._openssl"),
                      "--add-data", str(backend / "app/agent_catalog.json") + os.pathsep + "app",
                      "--distpath", str(root / "dist"), "--workpath", str(root / "build"),
                      "--specpath", str(root), str(worker)]
@@ -214,7 +224,7 @@ def main() -> int:
         good = "https://localhost:%d" % trusted.server_port
         bad = "https://localhost:%d" % unknown.server_port
         wrong_host = "https://127.0.0.1:%d" % trusted.server_port
-        for mode in ("bundled", "explicit-trusted", "explicit-unrelated", "explicit-missing"):
+        for mode in ("native", "explicit-trusted", "explicit-unrelated", "explicit-missing"):
             result = subprocess.run([*command, str(root), good, bad, wrong_host, mode],
                                     cwd=root, env=env, capture_output=True, text=True, encoding="utf-8", timeout=60)
             try:

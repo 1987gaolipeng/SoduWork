@@ -71,6 +71,58 @@ class ConversationTurnsTests(unittest.IsolatedAsyncioTestCase):
         result = await self.apply("prepare")
         self.assertEqual(result["state"], "queued")
         self.assertEqual(self.task.work_routing["executionSubmissionMode"], "auto")
+    async def test_inferred_choice_is_distinct_from_initial_manual_mode(self):
+        self.body["submissionChoice"] = "infer"
+        await self.apply("prepare")
+        self.assertEqual(self.task.work_routing.get("executionSubmissionChoice"), "infer")
+        self.assertEqual(self.task.work_routing["executionSubmissionMode"], "manual")
+        await self.apply("prepare")
+        self.assertEqual(task_events.record.call_count, 1)
+        with self.assertRaises(HTTPException):
+            await conversation_turns.apply(None, self.task, {**self.body, "submissionChoice": "manual"})
+
+    async def test_inferred_choice_cannot_override_explicit_mode_or_controlled_executor(self):
+        for extra in ({"submissionMode": "manual"}, {"executor": "dispatch"}, {"submissionChoice": "unknown"}, {"submissionChoice": {}}):
+            with self.subTest(extra=extra), self.assertRaises(HTTPException):
+                await conversation_turns.apply(None, self.task, {**self.body, "submissionChoice": "infer", **extra})
+
+    async def test_inferred_retry_retains_promoted_effective_mode(self):
+        self.body["submissionChoice"] = "infer"
+        await self.apply("prepare")
+        self.task.work_routing = {**self.task.work_routing, "executionSubmissionMode": "auto"}
+        await self.apply("prepare")
+        self.assertEqual(self.task.work_routing["executionSubmissionMode"], "auto")
+
+    async def test_legacy_manual_is_not_reinterpreted_on_followup(self):
+        self.task.work_routing = {"executionSubmissionMode": "manual"}
+        await self.apply("prepare")
+        self.assertEqual(self.task.work_routing["executionSubmissionMode"], "manual")
+        self.assertNotEqual(self.task.work_routing.get("executionSubmissionChoice"), "infer")
+
+    async def test_review_recovery_ignores_legacy_null_turn(self):
+        from app.services import approval_routing
+        self.task.work_routing = {"conversationTurn": None}
+        await approval_routing._clear_restored_review_issue(None, self.task, None, None)
+        self.assertEqual(self.task.work_routing, {"conversationTurn": None})
+
+    async def test_capture_intent_and_failure_are_recoverable_and_scoped_to_turn(self):
+        await self.apply("prepare")
+        await self.apply("start")
+        for code in ("capture_pending", "capture_failed"):
+            await conversation_turns.apply(None, self.task, {**self.body, "action": "wait",
+                "deliveryIssue": {"code": code, "reason": "Please retry delivery"}})
+            self.assertEqual(self.task.work_routing["conversationTurn"].get("deliveryIssue", {}).get("code"), code)
+        await self.apply("fail")
+        self.body["turnId"] = "repair"
+        await self.apply("prepare")
+        self.assertNotIn("deliveryIssue", self.task.work_routing["conversationTurn"])
+
+    async def test_complete_clears_capture_intent_but_preserves_rejected_delivery(self):
+        for code in ("capture_pending", "invalid_delivery", "review_unassigned"):
+            self.task.work_routing = {"conversationTurn": {**self.body, "state": "waiting",
+                "deliveryIssue": {"code": code, "reason": "diagnostic"}}}
+            await self.apply("complete")
+            self.assertEqual("deliveryIssue" in self.task.work_routing["conversationTurn"], code != "capture_pending")
     async def test_completed_turn_is_not_automatic_business_acceptance(self):
         await self.apply("prepare");await self.apply("start");result=await self.apply("complete")
         self.assertEqual(result["state"],"completed")

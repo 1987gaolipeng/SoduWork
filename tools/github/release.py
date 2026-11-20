@@ -173,6 +173,15 @@ def candidate(ctx, folder):
             files.add(item["name"])
         receipts.append(receipt)
         files.add(name)
+    if ctx["component"] in ("client", "all"):
+        import release_notes
+        release_notes.validate(read(folder / release_notes.NAME), ctx)
+        notes_asset = fingerprint(folder / release_notes.NAME)
+        for receipt in receipts:
+            if receipt["shard"] != "hub":
+                require(receipt["acceptance"].get("releaseNotesSha256") == notes_asset["sha256"],
+                        "Installers used different release notes")
+        files.add(release_notes.NAME)
     require(set(p.name for p in folder.iterdir()) == files, "Unexpected candidate files")
     result = {**ctx, "receipts": receipts, "assets": [fingerprint(folder / name) for name in sorted(files)]}
     write(folder / "release-manifest.json", result)
@@ -235,6 +244,10 @@ def draft(ctx, folder):
         authorize(ctx)
     existing = find_release_by_tag(ctx["tag"])
     marker = f"Candidate: {ctx['repository']} / run {ctx['runId']} / {ctx['commit']}"
+    body = marker + "\n\nDraft for internal testing only. See release-manifest.json for checksums and acceptance scope."
+    if ctx["component"] in ("client", "all"):
+        import release_notes
+        body = release_notes.markdown(read(folder / release_notes.NAME)) + "\n---\n\n" + body
     if existing:
         require(existing.get("draft") is True, "Refusing to modify a public Release")
         require(marker in existing.get("body", ""), "Release belongs to another candidate; refusing overwrite")
@@ -244,7 +257,7 @@ def draft(ctx, folder):
         existing = api("/releases", payload={
             "tag_name": ctx["tag"], "target_commitish": ctx["commit"], "draft": True,
             "name": "SoduWork " + ("Client + Hub" if ctx["component"] == "all" else ctx["component"]) + " " + ctx["version"],
-            "body": marker + "\n\nDraft for internal testing only. See release-manifest.json for checksums and acceptance scope.",
+            "body": body,
         })
     require(isinstance(existing, dict) and type(existing.get("id")) is int and existing["id"] > 0,
             "Draft Release response has no valid ID")

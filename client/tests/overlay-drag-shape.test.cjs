@@ -71,6 +71,37 @@ const contains = (rects, el) => rects.some((r) =>
   el._x + el._w <= r.x + r.width && el._y + el._h <= r.y + r.height);
 const fullWindow = (r) => r.width >= VIEW_W && r.height >= VIEW_H;
 
+test('capture starts on press and preserves the original button target through fast moves', () => {
+  const transitions = [], listeners = new Map();
+  const { sandbox } = boot({ setOverlayDragging: flag => transitions.push(flag) });
+  const captures = [], releases = [];
+  const button = {
+    setPointerCapture: id => captures.push(id), releasePointerCapture: id => releases.push(id),
+    addEventListener: (key, fn) => listeners.set(key, fn), removeEventListener: key => listeners.delete(key),
+  };
+  let lost = 0;
+  const release = sandbox.captureOverlayPointer({ pointerId: 4, target: button }, () => lost++);
+  assert.deepEqual(captures, [4]);
+  assert.deepEqual(transitions, [true], 'hold input before movement or a renderer frame');
+  listeners.get('lostpointercapture')({ pointerId: 8 });
+  assert.equal(lost, 0);
+  listeners.get('lostpointercapture')({ pointerId: 4 });
+  assert.equal(lost, 1);
+  release(); release();
+  assert.deepEqual(releases, [4]);
+  assert.deepEqual(transitions, [true, false]);
+  assert.equal(listeners.size, 0);
+});
+
+test('released widgets cannot remain in a gap between uneven displays', () => {
+  const { sandbox } = boot();
+  sandbox.rememberOverlayDisplays({ displays: [
+    { x: 0, y: 0, width: 1000, height: 1000 }, { x: 1000, y: 300, width: 800, height: 600 },
+  ] });
+  assert.deepEqual({ ...sandbox.clampOverlayPosition(1200, 50, 80, 80) }, { x: 1200, y: 300 });
+  assert.deepEqual({ ...sandbox.clampOverlayPosition(1500, 400, 80, 80) }, { x: 1500, y: 400 });
+});
+
 test('拖动全程：不裁切、不整窗、IPC 个位数，松手恢复精确形状', () => {
   const { sandbox, shapeCalls, frame, dock } = boot();
   frame();                                       // Flush the initial queued shape update.

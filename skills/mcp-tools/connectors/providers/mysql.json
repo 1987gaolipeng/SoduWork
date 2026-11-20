@@ -56,8 +56,17 @@
       "example": ""
     },
     {
+      "key": "DISABLE_TLS",
+      "label": "关闭 TLS（明文连接）",
+      "type": "boolean",
+      "secret": false,
+      "required": false,
+      "pattern": "^(true|false)$",
+      "default": "false"
+    },
+    {
       "key": "TLS_CA_PEM",
-      "label": "TLS CA PEM（可选，换行写作\\n；远程连接始终校验证书）",
+      "label": "TLS CA PEM（用于验证证书，换行写作\\n）",
       "secret": false,
       "required": false,
       "example": ""
@@ -174,7 +183,7 @@
   ],
   "limitations": [
     "只提供固定只读操作，不执行用户 SQL，也不提供数据库写入。",
-    "非 localhost 连接必须通过 TLS 证书与主机名校验；自签名证书请提供 CA。",
+    "远程连接默认使用 TLS 并校验证书与主机名。数据库未启用 TLS 时，可在高级设置中选择明文连接。",
     "需升级包含 pg8000 / PyMySQL 的 Runner；最多 100 行、结果不超过 2 MB。",
     "尚未使用真实业务数据库授权验证。",
     "数据分页需指定稳定唯一的 order_by；最多跳过 10000 行。非快照，不保证并发修改期间跨页一致。"

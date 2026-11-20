@@ -1,7 +1,7 @@
 {
   "name": "soduwork",
   "productName": "SoduWork",
-  "version": "1.13.17",
+  "version": "1.13.19",
   "description": "SoduWork - \u4f01\u4e1a\u7ea7 AI Native \u5de5\u4f5c\u5e73\u53f0",
   "main": "main.js",
   "scripts": {
@@ -31,11 +31,11 @@
     "prebuild-portable": "npm run prepare:runner && npm run prepare:pi-cache && npm run prepare:pi-retry && npm run prepare:shell-runtime",
     "prebuild:mac": "npm run prepare:pi-cache && npm run prepare:pi-retry && npm run prepare:shell-runtime",
     "prebuild:linux": "npm run prepare:runner && npm run prepare:pi-cache && npm run prepare:pi-retry && npm run prepare:shell-runtime",
-    "build": "electron-builder --win nsis",
-    "build:dir": "electron-builder --win --dir",
-    "build-portable": "electron-builder --win portable",
+    "build": "electron-builder --config scripts/public-build-config.cjs --win nsis",
+    "build:dir": "electron-builder --config scripts/public-build-config.cjs --win --dir",
+    "build-portable": "electron-builder --config scripts/public-build-config.cjs --win portable",
     "build:mac": "node scripts/build-macos.cjs",
-    "build:linux": "electron-builder --linux",
+    "build:linux": "electron-builder --config scripts/public-build-config.cjs --linux",
     "check:licenses": "node ../tools/check-third-party.cjs",
     "test:source": "node --test ../tools/source-manifest.test.cjs"
   },

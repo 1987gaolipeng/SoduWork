@@ -166,3 +166,59 @@ test('a connection-only success confirms its output field without inventing unte
   assert.equal(report.checks.connection.status, 'passed');
   assert.deepEqual(report.compatibility, { maxTokensField: 'max_tokens' });
 });
+
+test('mandatory reasoning probes explicitly request supported low effort without disabling thinking', async () => {
+  for (const model of [
+    { name: 'glm_5.3_flash', config: { thinkingMode: 'auto' } },
+    { name: 'private-alias', config: { thinkingMode: 'always', thinkingFormat: 'zai', supportsReasoningEffort: true } },
+  ]) {
+    let body;
+    const report = await probe().run({ ...model, baseUrl: 'https://fixture.invalid/v1', authMode: 'none' }, ['connection'], {
+      fetchImpl: async (_url, options) => {
+        body = JSON.parse(options.body);
+        return new Response(JSON.stringify({ choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }] }),
+          { headers: { 'content-type': 'application/json' } });
+      },
+    });
+    assert.equal(report.checks.connection.status, 'passed');
+    assert.deepEqual(body.thinking, { type: 'enabled', clear_thinking: false });
+    assert.equal(body.reasoning_effort, 'low');
+    assert.equal(body.max_tokens, 2048);
+  }
+  await assert.rejects(probe().run({ name: 'glm-5.3', config: { thinkingMode: 'none' } }, ['connection'], {
+    fetchImpl: () => { throw Error('A conflicting declaration must not reach the provider'); },
+  }), /不支持关闭思考/);
+});
+
+test('reasoning probes select the lowest available configured effort and preserve remapping', () => {
+  const request = require('../main/model-capability-request.cjs');
+  for (const [thinkingLevelMap, expected] of [
+    [{ low: null, high: 'high', max: 'max' }, 'high'],
+    [{ low: 'high', high: 'max' }, 'high'],
+    [{ low: null, high: null, max: 'max' }, 'max'],
+  ]) {
+    const state = request.policy({ name: 'glm-5.3', config: { thinkingLevelMap } });
+    const body = request.payload({ name: 'glm-5.3' }, state, [], false);
+    assert.equal(body.reasoning_effort, expected);
+    assert.equal(body.thinking.type, 'enabled');
+  }
+  const unknown = request.policy({ name: 'gateway-model', config: { thinkingMode: 'auto' } });
+  const body = request.payload({ name: 'gateway-model' }, unknown, [], false);
+  assert.equal(body.reasoning_effort, undefined);
+  assert.equal(body.thinking, undefined);
+  assert.throws(() => request.policy({ name: 'glm-5.3', config: {
+    thinkingLevelMap: { low: null, high: null, max: null },
+  } }), /至少需要一个可用思考强度/);
+});
+
+for (const [level, effort] of [['minimal', 'low'], ['medium', 'high'], ['xhigh', 'max']]) {
+  test(`mandatory reasoning probes accept ${level} as the only explicitly mapped level`, () => {
+    const request = require('../main/model-capability-request.cjs');
+    const state = request.policy({ name: 'glm-5.3', config: {
+      thinkingLevelMap: { low: null, high: null, max: null, [level]: effort },
+    } });
+    const body = request.payload({ name: 'glm-5.3' }, state, [], false);
+    assert.equal(body.reasoning_effort, effort);
+    assert.equal(body.thinking.type, 'enabled');
+  });
+}

@@ -37,7 +37,10 @@ function toml(value) {
 function isAppServer(command, args) {
   const executable = path.basename(String(command)).toLowerCase();
   if (['codex', 'codex.exe', 'codex.cmd'].includes(executable)) return args[0] === 'app-server';
-  return ['node', 'node.exe'].includes(executable) && path.basename(String(args[0])).toLowerCase() === 'codex.js' && args[1] === 'app-server';
+  // codex-acp launches its bundled CLI with process.execPath, which can have a
+  // distro-specific name (e.g. Fedora's node-22) or a custom runtime name.
+  const isNode = String(command) === process.execPath || ['node', 'node.exe'].includes(executable);
+  return isNode && path.basename(String(args[0])).toLowerCase() === 'codex.js' && args[1] === 'app-server';
 }
 
 const gateway = configuration(process.env);

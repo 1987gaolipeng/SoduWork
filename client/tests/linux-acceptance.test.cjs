@@ -13,11 +13,14 @@ async function exercise(firstRelease, overrides = {}) {
   const state = { platform: 'linux', exitCode: undefined };
   const contract = {
     root: '/fixture', dist: '/fixture/dist',
-    verify: async () => ({ version, artifacts: ['deb', 'rpm', 'tar.gz'].map(format => ({ name: `candidate.${format}`, format })) }),
+    verify: async () => ({ version, defaultHubUrl: 'https://hub.example.test',
+      artifacts: ['deb', 'rpm', 'tar.gz'].map(format => ({ name: `candidate.${format}`, format })) }),
     read: async file => {
       reads.push(file);
       if (path.basename(file) !== 'result.json') {
-        return { secureStorage: { backend: 'gnome_libsecret', roundTrip: true, ...overrides.secureStorage } };
+        return { defaultHubUrl: path.basename(file) === 'old.json' ? undefined :
+          (overrides.defaultHubUrl ?? 'https://hub.example.test'),
+          secureStorage: { backend: 'gnome_libsecret', roundTrip: true, ...overrides.secureStorage } };
       }
       return { ok: true, version, upgraded: !firstRelease, reinstalled: firstRelease,
         oldVersion: firstRelease ? '' : '1.13.14', nodeShimExecutable: true,
@@ -30,7 +33,7 @@ async function exercise(firstRelease, overrides = {}) {
   };
   const modules = {
     'node:fs/promises': { mkdtemp: async () => '/fixture/packages', mkdir: async () => {}, copyFile: async () => {}, rm: async () => {} },
-    'node:path': path, 'node:os': { tmpdir: () => '/fixture', userInfo: () => ({ uid: 12001 }) },
+    'node:path': path.posix, 'node:os': { tmpdir: () => '/fixture', userInfo: () => ({ uid: 12001 }) },
     'node:assert/strict': assert, 'node:crypto': require('node:crypto'),
     '../ci/release-artifacts.cjs': contract,
     '../ci/acceptance-common.cjs': { run: async (...args) => { calls.push(args); },
@@ -61,6 +64,9 @@ for (const firstRelease of [true, false]) test(`Linux acceptance preserves ${fir
   for (const [, args] of calls.filter(([, args]) => args[0] === 'create')) {
     assert.equal(args[args.indexOf('--cap-add') + 1], 'IPC_LOCK');
     assert.equal(args.includes('--privileged'), false);
+    assert.ok(args.includes('/fixture/client/package.json:/client/package.json:ro'));
+    assert.ok(args.includes('/fixture/client/main/default-hub.cjs:/client/main/default-hub.cjs:ro'));
+    assert.ok(args.includes('SODUWORK_DEFAULT_HUB_URL=https://hub.example.test'));
   }
   const verifies = calls.filter(([, args]) => args[0] === 'exec' && args[4] === 'verify');
   assert.equal(verifies.length, 5);
@@ -100,6 +106,7 @@ test('Linux acceptance rejects missing package dependencies and insecure phase e
     { result: { upgradeDependencyResolutionVerified: true } },
     { secureStorage: { backend: 'basic_text' } },
     { secureStorage: { roundTrip: false } },
+    { defaultHubUrl: 'https://service.soduwork.ai' },
   ]) {
     const { calls, errors, state, checks } = await exercise(true, overrides);
     assert.equal(errors.length, 1);

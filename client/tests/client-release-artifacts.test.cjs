@@ -65,6 +65,8 @@ function fixture(t, version = '9.9.1') {
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const scripts = path.join(root, 'tools/ci'), dist = path.join(root, 'client/dist');
   fs.mkdirSync(scripts, { recursive: true }); fs.mkdirSync(dist, { recursive: true });
+  fs.mkdirSync(path.join(root, 'client/main'));
+  fs.copyFileSync(path.join(repo, 'client/main/default-hub.cjs'), path.join(root, 'client/main/default-hub.cjs'));
   for (const name of ['release-artifacts.cjs', 'publish-client.cjs', 'merge-macos.cjs', 'soduwork-acceptance-baselines.json'])
     fs.copyFileSync(path.join(repo, 'tools/ci', name), path.join(scripts, name));
   fs.writeFileSync(path.join(root, 'client/package.json'), JSON.stringify({ version, productName: 'SoduWork' }));

@@ -6,6 +6,31 @@ const user = (sentAt = 1000) => ({ role: 'user', sentAt, text: 'Request' });
 const reply = (text, completedAt = 5000) => ({ role: 'assistant', done: true, completedAt,
   blocks: [{ kind: 'text', text, done: true }] });
 
+test('stopped turns format fixed durations across minute and hour boundaries in every locale', t => {
+  const previous = global.SoduWorkI18n;
+  t.after(() => { global.SoduWorkI18n = previous; });
+  const view = summary.create({ esc: String });
+  const render = elapsedMs => view.html({ key: 'outcome:0', outcome: 'stopped', elapsedMs });
+  global.SoduWorkI18n = undefined;
+  for (const [ms, expected] of [[0, '0 秒'], [59999, '59 秒'], [60000, '1 分 0 秒'],
+    [318000, '5 分 18 秒'], [3599999, '59 分 59 秒'], [3600000, '1 小时 0 分 0 秒'],
+    [3661000, '1 小时 1 分 1 秒'], [90061000, '25 小时 1 分 1 秒']]) {
+    assert.ok(render(ms).includes('你在 ' + expected + '后停止了'), render(ms));
+  }
+  for (const ms of [null, undefined, NaN, Infinity, -1]) assert.match(render(ms), />你已停止<\/div>/);
+  for (const [file, minute, hour] of [
+    ['en-US-chat.js', 'You stopped after 5m 18s', 'You stopped after 1h 1m 1s'],
+    ['ja-JP-runtime-surfaces.js', '5 分 18 秒後に停止しました', '1 時間 1 分 1 秒後に停止しました'],
+    ['ko-KR-runtime-surfaces.js', '5분 18초 후 중지했습니다', '1시간 1분 1초 후 중지했습니다'],
+  ]) {
+    const messages = require('../core/locales/' + file);
+    global.SoduWorkI18n = { translateText: text => messages[text] || text };
+    assert.ok(render(318000).includes(minute), render(318000));
+    assert.ok(render(3661000).includes(hour), render(3661000));
+    assert.doesNotMatch(render(3661000), /\{hours\}|\{minutes\}|\{seconds\}/);
+  }
+});
+
 test('completed turn summaries preserve absolute ownership and independent round statistics', () => {
   const snap = { messages: [user(), reply('Progress'), reply('Answer'), user(9000), reply('Second', 12000)], tools: [],
     history: { messageIndices: [10, 11, 13, 14, 15] },

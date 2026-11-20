@@ -160,3 +160,50 @@ test('task videos refresh their signed stream URL for inline and side preview',a
     assert.equal(links.videoUrl({ok:true,url:'javascript:alert(1)'}),'');
   }finally{global.SoduWorkAPI=previous;}
 });
+
+test('a preview interrupted by a runtime switch reauthorizes once with the same artifact identity', async () => {
+  const calls = [], file = { artifactId: 'retained-image', name: 'result.png' };
+  const success = { ok: true, mimeType: 'image/png', data: 'AA==' };
+  const api = { artifactAction: async (...args) => {
+    calls.push(args);
+    return calls.length === 1 ? { ok: false, code: 'ARTIFACT_SOURCE_CHANGED' } : success;
+  } };
+  assert.equal(await links.readPreview(file, api, 'conversation', 'image-full'), success);
+  assert.deepEqual(calls, [
+    ['conversation', 'retained-image', 'image-full'],
+    ['conversation', 'retained-image', 'image-full'],
+  ]);
+});
+
+test('preview recovery is bounded and does not retry permission failures or file actions', async () => {
+  for (const [mode, code, expected] of [
+    ['image-full', 'ARTIFACT_SOURCE_CHANGED', 2],
+    ['image-full', 'ACCESS_DENIED', 1],
+    ['image-full', 'ARTIFACT_VERSION_CHANGED', 1],
+    ['open', 'ARTIFACT_SOURCE_CHANGED', 1],
+  ]) {
+    let calls = 0;
+    const failure = { ok: false, code, reason: 'Synthetic failure' };
+    const api = { artifactAction: async () => { calls++; return failure; } };
+    assert.equal(await links.readPreview({ artifactId: 'image' }, api, 'conversation', mode), failure);
+    assert.equal(calls, expected, mode + ':' + code);
+  }
+});
+
+test('an account change or detached preview prevents source-change recovery', async () => {
+  const previous = global.SoduWorkAPI;
+  try {
+    for (const boundary of ['account', 'view']) {
+      let account = 'account-a', mounted = true, calls = 0;
+      global.SoduWorkAPI = { taskStorageKey: () => account };
+      const api = { artifactAction: async () => {
+        calls++;
+        if (boundary === 'account') account = 'account-b'; else mounted = false;
+        return { ok: false, code: 'ARTIFACT_SOURCE_CHANGED' };
+      } };
+      const result = await links.readPreview({ artifactId: 'image' }, api, 'conversation', 'image-full', () => mounted);
+      assert.equal(result.ok, false);
+      assert.equal(calls, 1);
+    }
+  } finally { global.SoduWorkAPI = previous; }
+});

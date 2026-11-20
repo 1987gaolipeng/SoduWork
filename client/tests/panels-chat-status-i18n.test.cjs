@@ -46,6 +46,18 @@ function mergedCatalog(locale) {
     require(path.join(LOCALES, locale + '-gap-pages.js')));
 }
 
+test('Runner admission positions and long startup diagnostics translate without model-work claims', () => {
+  const status = require('../components/panels/panels-chat-status');
+  for (const [locale, expected] of [['en-US','Queued · Position 2'],['ja-JP','待機中 · 順番 2'],['ko-KR','대기 중 · 순서 2']]) {
+    loadI18n(locale);
+    assert.equal(status.work({status:'queued',execution:{queuePosition:2,running:false}}),expected);
+    const startup = status.work({status:'streaming',execution:{waitingForStart:true,
+      executionStartedAt:0,startupWaitSince:Date.now()-90001,running:false}});
+    assert.doesNotMatch(startup,/执行环境|理解|思考/);
+    assert.ok(startup.length>10,locale);
+  }
+});
+
 test('completed summaries explain missing timing in every supported non-Chinese locale', () => {
   const summary = require('../components/panels/chat-turn-summary');
   const expected = {'en-US': 'Not recorded', 'ja-JP': '未記録', 'ko-KR': '미기록'};

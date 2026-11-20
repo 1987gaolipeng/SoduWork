@@ -55,6 +55,32 @@ def add_session(connection, sid: str, workspace: Path, parent=None):
     connection.execute("INSERT INTO todo VALUES (?, 0, 'Keep the existing task', 'pending', 'high')", (sid,))
 
 
+def add_v2_state(connection, sid: str, table: str):
+    connection.executescript("""
+        CREATE TABLE IF NOT EXISTS session_message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+            type TEXT NOT NULL, seq INTEGER NOT NULL, time_created INTEGER NOT NULL,
+            time_updated INTEGER NOT NULL, data TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS session_input (id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+            prompt TEXT NOT NULL, delivery TEXT NOT NULL, admitted_seq INTEGER NOT NULL,
+            promoted_seq INTEGER, time_created INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS session_context_epoch (session_id TEXT PRIMARY KEY,
+            baseline TEXT NOT NULL, snapshot TEXT NOT NULL, baseline_seq INTEGER NOT NULL);
+    """)
+    if table == "session_message":
+        connection.execute("INSERT INTO session_message VALUES (?, ?, 'user', 1, 10, 10, ?)",
+                           (sid + "-v2-message", sid, '{"text":"Retain the newer history"}'))
+    elif table == "session_input":
+        connection.execute("INSERT INTO session_input VALUES (?, ?, ?, 'steer', 1, NULL, 10)",
+                           (sid + "-v2-input", sid, '{"text":"Retain the pending input"}'))
+    elif table == "session_context_epoch":
+        connection.execute("INSERT INTO session_context_epoch VALUES (?, 'baseline', '{}', 1)", (sid,))
+    elif table == "event":
+        if "type" not in {row[1] for row in connection.execute("PRAGMA table_info(event)")}:
+            connection.execute("ALTER TABLE event ADD COLUMN type TEXT")
+        connection.execute("INSERT INTO event (id, aggregate_id, data, type) VALUES (?, ?, '{}', ?)",
+                           (sid + "-v2-event", sid, "session.next.prompted"))
+
+
 class OpenCodeSessionMigrationTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory(prefix="soduwork-migration-test-")
@@ -239,6 +265,118 @@ class OpenCodeSessionMigrationTests(unittest.TestCase):
             connection.execute("INSERT INTO session_v2 VALUES ('personal-v2', 'PRIVATE_V2')")
         self.migrate()
         self.assertEqual([row["id"] for row in self.rows("session")], ["owned"])
+
+    def test_real_v2_state_for_the_selected_session_or_child_blocks_migration(self):
+        with closing(sqlite3.connect(self.source)) as connection, connection:
+            add_session(connection, "owned-child", self.workspace, "owned")
+        for sid in ("owned", "owned-child"):
+            for table in ("session_message", "session_input", "session_context_epoch", "event"):
+                with self.subTest(sid=sid, table=table):
+                    self.target = self.root / "runner" / (sid + "-" + table + ".db")
+                    self.env["OPENCODE_DB"] = str(self.target)
+                    with closing(sqlite3.connect(self.source)) as connection, connection:
+                        add_v2_state(connection, sid, table)
+                    try:
+                        before = self.source_files()
+                        with self.assertRaisesRegex(migration.OpenCodeSessionMigrationError, "not compatible"):
+                            self.migrate()
+                        self.assertEqual(self.source_files(), before)
+                        self.assertFalse(self.target.exists())
+                        self.assertEqual(self.initializations, [])
+                    finally:
+                        with closing(sqlite3.connect(self.source)) as connection, connection:
+                            for name in ("session_message", "session_input", "session_context_epoch"):
+                                connection.execute('DELETE FROM "' + name + '"')
+                            connection.execute("DELETE FROM event WHERE id = ?", (sid + "-v2-event",))
+
+    def test_v2_only_history_with_retained_empty_v1_tables_is_rejected(self):
+        with closing(sqlite3.connect(self.source)) as connection, connection:
+            for table in ("part", "message", "todo"):
+                connection.execute('DELETE FROM "' + table + '" WHERE session_id = ?', ("owned",))
+            add_v2_state(connection, "owned", "session_message")
+        with self.assertRaisesRegex(migration.OpenCodeSessionMigrationError, "not compatible"):
+            self.migrate()
+        self.assertFalse(self.target.exists())
+        self.assertEqual(self.initializations, [])
+
+    def test_unrelated_real_v2_history_does_not_block_owned_v1_history(self):
+        with closing(sqlite3.connect(self.source)) as connection, connection:
+            for table in ("session_message", "session_input", "session_context_epoch", "event"):
+                add_v2_state(connection, "personal", table)
+        self.migrate()
+        self.assertEqual([row["id"] for row in self.rows("session")], ["owned"])
+        self.assertEqual(json.loads(self.rows("part")[0]["data"])["text"], "history-for-owned")
+
+    def test_existing_empty_target_cannot_hide_newer_or_nonempty_legacy_history(self):
+        self.migrate()
+        with closing(sqlite3.connect(self.target)) as connection, connection:
+            for table in ("part", "message", "todo"):
+                connection.execute('DELETE FROM "' + table + '"')
+        original = self.target.read_bytes()
+        with self.assertRaisesRegex(migration.OpenCodeSessionMigrationError, "private.*history"):
+            self.migrate()
+        with closing(sqlite3.connect(self.source)) as connection, connection:
+            add_v2_state(connection, "owned", "session_message")
+        before = self.source_files()
+        with self.assertRaisesRegex(migration.OpenCodeSessionMigrationError, "not compatible"):
+            self.migrate()
+        self.assertEqual(self.target.read_bytes(), original)
+        self.assertEqual(self.source_files(), before)
+        self.assertEqual(len(self.initializations), 1)
+
+    def test_existing_compatible_empty_target_remains_authoritative_without_a_legacy_source(self):
+        with closing(sqlite3.connect(self.source)) as connection, connection:
+            for table in ("part", "message", "todo"):
+                connection.execute('DELETE FROM "' + table + '" WHERE session_id = ?', ("owned",))
+        self.migrate()
+        self.migrate()
+        with closing(sqlite3.connect(self.source)) as connection, connection:
+            connection.execute("DELETE FROM session WHERE id = ?", ("owned",))
+        self.migrate()
+        self.source.unlink()
+        self.migrate()
+        self.env.pop("SODUWORK_OPENCODE_LEGACY_DB")
+        self.migrate()
+        self.assertEqual([row["id"] for row in self.rows("session")], ["owned"])
+        self.assertEqual(self.rows("message"), [])
+        self.assertEqual(len(self.initializations), 1)
+
+    def test_existing_private_v1_history_does_not_consult_newer_personal_state(self):
+        self.migrate()
+        with closing(sqlite3.connect(self.source)) as connection, connection:
+            add_v2_state(connection, "owned", "session_message")
+        with patch.object(migration, "_snapshot") as snapshot:
+            self.migrate()
+        snapshot.assert_not_called()
+        self.assertEqual(json.loads(self.rows("part")[0]["data"])["text"], "history-for-owned")
+        self.assertEqual(len(self.initializations), 1)
+
+    def test_optional_empty_target_source_check_cannot_ignore_failed_snapshot_cleanup(self):
+        self.migrate()
+        with closing(sqlite3.connect(self.target)) as connection, connection:
+            for table in ("part", "message", "todo"):
+                connection.execute('DELETE FROM "' + table + '"')
+        directory = tempfile.TemporaryDirectory(prefix="soduwork-empty-source-cleanup-")
+        cleanup = directory.cleanup
+        try:
+            with patch.object(migration.tempfile, "TemporaryDirectory", return_value=directory), \
+                    patch.object(directory, "cleanup", side_effect=PermissionError("PRIVATE_TEMP_PATH")):
+                with self.assertRaisesRegex(migration.OpenCodeSessionMigrationError, "cleanup failed") as failure:
+                    self.migrate()
+            self.assertNotIn("PRIVATE_TEMP_PATH", str(failure.exception))
+            self.assertEqual(len(self.initializations), 1)
+        finally:
+            cleanup()
+
+    def test_existing_private_v2_state_cannot_be_resumed_as_v1(self):
+        self.migrate()
+        with closing(sqlite3.connect(self.target)) as connection, connection:
+            add_v2_state(connection, "owned", "session_input")
+        original = self.target.read_bytes()
+        with self.assertRaisesRegex(migration.OpenCodeSessionMigrationError, "not compatible"):
+            self.migrate()
+        self.assertEqual(self.target.read_bytes(), original)
+        self.assertEqual(len(self.initializations), 1)
 
     def test_unsafe_native_state_is_not_silently_dropped(self):
         for column in ("workspace_id", "revert"):

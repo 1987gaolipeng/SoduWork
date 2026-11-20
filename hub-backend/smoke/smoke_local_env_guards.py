@@ -107,8 +107,8 @@ def t_codex_temp_boundary() -> None:
 
             pi_env = local_base._env_for(
                 local_base._PROFILES["pi"], {"local_workspace_root": work,
-                    "llm": {"base": "http://127.0.0.1:9/v1", "model": "fixture", "key": "fixture"}},
-                runtime_ref="pi-temp-boundary")
+                    "llm": {"base": "http://model.invalid/v1", "model": "fixture",
+                            "key": "fixture-model-key"}}, runtime_ref="pi-temp-boundary")
             ok(pi_env.get("TEMP") == os.path.join(work, "temp"),
                "其他底座仍严格使用用户设定工作根下的 temp", pi_env.get("TEMP"))
         finally:
@@ -163,7 +163,8 @@ def t_remote_reinjection() -> None:
         forwarded = []
         with tempfile.TemporaryDirectory(prefix="soduwork-turn-cfg-") as store:
             for index in range(2):
-                current = {"llm": {"key": "synthetic-turn-%d" % index}}
+                current = {"llm": {"key": "synthetic-turn-%d" % index},
+                           "pluginResourceBundles": []}
                 admission = "comment:smoke-%d" % index
                 # Remote follow-ups explicitly clear resources from a previous
                 # plugin turn before preparing this turn's inputs.

@@ -18,6 +18,7 @@ import threading
 import unittest
 from unittest.mock import patch
 
+import truststore
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -69,7 +70,9 @@ class ManagedAgentTLSTest(unittest.TestCase):
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
         self.ca, leaf, key = make_certificates(self.root / "certificates")
+        # Native crypto providers need SystemRoot on a cold Windows process.
         self.stack.enter_context(patch.dict(os.environ, {
+            **{name: os.environ[name] for name in ("SYSTEMROOT",) if name in os.environ},
             "SSL_CERT_FILE": str(self.ca), "HTTP_PROXY": "", "HTTPS_PROXY": "",
             "NO_PROXY": "", "no_proxy": ""}, clear=True))
         self.stack.enter_context(patch.object(managed_agents.time, "sleep"))
@@ -167,14 +170,17 @@ class ManagedAgentTLSTest(unittest.TestCase):
                                    "route": "direct"}])
         self.assertEqual(len(self.origin_headers), 1)
 
-    def test_bundled_ca_completes_download_when_platform_defaults_have_no_roots(self):
+    def test_native_trust_completes_download_when_openssl_defaults_have_no_roots(self):
         # Frozen Python can retain build-machine CA paths that do not exist
         # on the user's computer. Reproduce its empty default trust store.
+        native = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        native.load_verify_locations(cafile=str(self.ca))
         with (patch.dict(os.environ, {"SSL_CERT_FILE": "", "SSL_CERT_DIR": ""}),
               patch.object(ssl.SSLContext, "load_default_certs", return_value=None),
-              patch("certifi.where", return_value=str(self.ca))):
+              patch.object(truststore, "SSLContext", return_value=native) as factory):
             self.assertEqual(ssl.create_default_context().cert_store_stats()["x509_ca"], 0)
             self.verified_download()
+        factory.assert_called_once_with(ssl.PROTOCOL_TLS_CLIENT)
         self.assertEqual(len(self.origin_headers), 1)
 
     def test_real_authenticated_connect_preserves_tls_and_does_not_leak_proxy_credentials(self):

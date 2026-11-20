@@ -1,7 +1,9 @@
 """Real content storage, transport authorization and Hub transaction boundaries."""
 import asyncio
 import base64
+import copy
 import hashlib
+import json
 import os
 import tempfile
 import unittest
@@ -14,16 +16,91 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 os.environ.setdefault("AUTH_SECRET", "isolated-endpoint-rpc-secret")
 os.environ.setdefault("ADMIN_PASS", "isolated-endpoint-rpc-password")
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from app import db, models
-from app.automation_models import RunnerNode
+from app.automation_models import ExecutionEvent, ExecutionSession, RunnerNode
 from app.services import runner_hub, cluster_runtime, endpoint_events, conversation_content, runner_access_policy
 from app.services.runner_content_store import Store, CHUNK
 
 
 class EndpointRpcTests(unittest.IsolatedAsyncioTestCase):
+    async def test_nul_event_projection_preserves_endpoint_body_and_hashes(self):
+        from app.services import execution_sessions
+        with tempfile.TemporaryDirectory(prefix="soduwork-endpoint-nul-") as root:
+            engine = create_async_engine("sqlite+aiosqlite:///" + str(Path(root) / "test.db"))
+            sessions = async_sessionmaker(engine, expire_on_commit=False)
+            try:
+                async with engine.begin() as connection:
+                    await connection.run_sync(lambda sync: db.Base.metadata.create_all(sync, tables=[
+                        models.Task.__table__, models.Client.__table__, models.User.__table__,
+                        RunnerNode.__table__, ExecutionSession.__table__, ExecutionEvent.__table__]))
+                async with sessions() as session:
+                    session.add(models.User(id="owner", username="isolated-nul-owner"))
+                    session.add(models.Client(id="pc", user_ref="owner", auth_state="active"))
+                    await session.flush()
+                    session.add(models.Task(id="task", owner_client_id="pc", title="Event fixture"))
+                    session.add(RunnerNode(id="runner", owner_user_id="owner", org_id="", client_id="",
+                        auth_state="active", management_state="disabled"))
+                    session.add(ExecutionSession(id="execution", task_id="task", ref="fixture-ref",
+                                                 runner_id="runner", state="running"))
+                    await session.commit()
+                    self.assertEqual((await session.get(models.Task, "task")).owner_user_id, "owner")
+                store = Store(str(Path(root) / "content"))
+                socket = SimpleNamespace()
+                node = runner_hub._Runner(socket, {"runnerId": "runner", "caps": ["conversationContent1"]})
+                node.owner_user_id, node.management_state, node.ready = "owner", "disabled", True
+
+                async def send(packet):
+                    node.resolve(packet["id"], await asyncio.to_thread(store.handle, packet))
+
+                socket.send_json = send
+                item = {"seq": 1, "kind": "o\x00ut", "tool": "read\x00tool",
+                        "text": "before\x00after\\u0000\n中文", "full": "full\x00output",
+                        "callId": "call\x00id", "services": [{"name": "service\x00name"}]}
+                original = copy.deepcopy(item)
+                bodies = [{"seq": 1, "text": item["text"], "detail": {
+                    "round": 1, "full": item["full"], "callId": item["callId"],
+                    "services": copy.deepcopy(item["services"])}}]
+                record = "events:execution:" + hashlib.sha256(
+                    json.dumps(bodies, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+                raw = json.dumps(bodies, ensure_ascii=False, separators=(",", ":")).encode()
+                with patch.object(db, "SessionLocal", sessions), patch.object(runner_hub, "get", return_value=node), \
+                     patch.object(cluster_runtime, "check_owner", AsyncMock()):
+                    async with sessions() as session:
+                        execution = await session.get(ExecutionSession, "execution")
+                        await execution_sessions.ingest_event_page(session, execution, [item], round_no=1)
+                        await session.commit()
+                    self.assertEqual(item, original)
+                    async with sessions() as session:
+                        rows = (await session.scalars(select(ExecutionEvent))).all()
+                        self.assertEqual(len(rows), 1)
+                        row = rows[0]
+                        self.assertEqual((row.text, row.kind, row.tool), ("", "o␀ut", "read␀tool"))
+                        self.assertEqual(row.detail["callId"], "call␀id")
+                        self.assertNotIn("full", row.detail)
+                        self.assertNotIn("services", row.detail)
+                        pointer = row.detail["contentRef"]
+                        self.assertEqual(pointer["record"], record)
+                        self.assertEqual(pointer["sha256"], hashlib.sha256(raw).hexdigest())
+                    # Reopen the real store to verify persistence independently
+                    # of the original writer, then hydrate the untouched body.
+                    store = Store(str(Path(root) / "content"))
+                    self.assertEqual(await conversation_content.get(pointer, "owner", record), raw)
+                    hydrated = (await endpoint_events.hydrate(rows))[0]
+                    self.assertEqual(hydrated.text, original["text"])
+                    self.assertEqual(hydrated.detail, bodies[0]["detail"])
+                    async with sessions() as session:
+                        execution = await session.get(ExecutionSession, "execution")
+                        await execution_sessions.ingest_event_page(session, execution, [item], round_no=1)
+                        await session.commit()
+                        self.assertEqual(execution.persisted_seq, 1)
+                        self.assertEqual(len((await session.scalars(select(ExecutionEvent))).all()), 1)
+                    self.assertEqual(item, original)
+            finally:
+                await engine.dispose()
+
     async def test_concurrent_history_probe_cannot_hold_socket_while_waiting_for_content_transaction(self):
         with tempfile.TemporaryDirectory(prefix="soduwork-content-lock-order-") as root:
             engine = create_async_engine("sqlite+aiosqlite:///" + str(Path(root) / "test.db"),

@@ -128,24 +128,17 @@ async function run() {
       {id:'pending',title:'核对成果并选择验收方式',status:'done',createdBy:'fixture-reviewer',canReview:true},
       {id:'direct',title:'User title 保存',status:'done',createdBy:'fixture-reviewer',canReview:true}
     ],{...Requirements.defaults,limits:{}},{approvals:new Map([['pending',{id:'review',action:'review',status:'pending'}]])});};renderIssues();`);
-  for (const [locale, label] of [
-    ['en-US', 'Review outputs and choose a review method'],
-    ['ja-JP', '成果を確認して検収方法を選択'],
-    ['ko-KR', '성과를 확인하고 검수 방식 선택'],
-    ['zh-CN', '核对成果并选择验收方式'],
-    ['en-US', 'Review outputs and choose a review method'],
-  ]) {
+  for (const locale of ['en-US', 'ja-JP', 'ko-KR', 'zh-CN', 'en-US']) {
     await js(`SoduWorkI18n.setLocale(${JSON.stringify(locale)})`); await tick();
     for (const redraw of [false, true]) {
       if (redraw) { await js('renderIssues()'); await tick(); }
-      assert.deepEqual(await js(`Array.from(document.querySelectorAll('.rq-card-decision'),node=>node.textContent)`), [label, label]);
-      assert.deepEqual(await js(`Array.from(document.querySelectorAll('.rq-card-decision'),node=>node.dataset.rqOpen).sort()`), ['direct', 'pending']);
+      assert.equal(await js(`document.querySelectorAll('.rq-card-decision,.rq-card-assign').length`), 0);
+      assert.deepEqual(await js(`Array.from(document.querySelectorAll('.rq-card [data-rq-open]'),node=>node.dataset.rqOpen).sort()`), ['direct', 'pending']);
       assert.deepEqual(await js(`['pending','direct'].map(id=>document.querySelector('[data-hbid="'+id+'"] .rq-card-title').textContent)`), ['核对成果并选择验收方式', 'User title 保存']);
-      assert.equal(await js(`document.querySelectorAll('.rq-card-decision svg').length`), 4);
     }
     await shot('acceptance-entry-' + locale);
   }
-  report.cases.push('Pending and direct acceptance entries follow all four locales before and after rerender; user titles and navigation remain unchanged');
+  report.cases.push('Pending and direct acceptance cards keep one detail entry across locales and rerenders; user titles remain unchanged');
   await js(read('components/panels/panels-chat-chrome.js'));
   await js(`document.body.innerHTML='<main class="nchat" id="summaryChat"><div class="nchat-stage"><div class="nchat-main">'+ChatChrome.header()+'</div></div></main>';
     ChatChrome.bind(document.querySelector('#summaryChat'),()=>({ref:'locale-fixture'}));ChatChrome.openSummary();`);

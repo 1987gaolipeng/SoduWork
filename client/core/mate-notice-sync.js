@@ -232,7 +232,9 @@
       textMessage: { key: 'notification.receipt.' + state, fallback: text,
         params: { recipient: who, subject: summary ? '\n' + summary.slice(0, 90) + (summary.length > 90 ? '…' : '') : '' } },
       read: Boolean(old.some(item => item.receiptStatus === state && item.read) ||
-        hasReceiptMarker({ serverMessageId: row.serverMessageId, receiptStatus: state }, meta.readIds)), attachments: [] };
+        hasReceiptMarker({ serverMessageId: row.serverMessageId, receiptStatus: state }, meta.readIds)),
+      // Receipt files use the same participant-authorized lookup as sent messages.
+      attachments: row.attachments || [] };
     return dismissed(receipt, meta) ? null : receipt;
   }
   function merge(items, folder, token, complete = false) {

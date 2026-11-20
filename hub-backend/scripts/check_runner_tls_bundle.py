@@ -1,26 +1,20 @@
-"""Verify CA data and its loader in the actual PyInstaller Runner artifact."""
-import ssl
+"""Verify native system trust support in the actual PyInstaller Runner artifact."""
 import sys
 from pathlib import Path
 
-import certifi
 from PyInstaller.archive.readers import CArchiveReader
 
 
-def check(binary):
+def check(binary, *, platform=sys.platform):
     archive = CArchiveReader(str(binary))
-    bundled = archive.extract("certifi/cacert.pem")
-    if bundled != Path(certifi.where()).read_bytes():
-        raise AssertionError("Frozen Runner CA bundle differs from the pinned dependency")
     modules = archive.open_embedded_archive("PYZ.pyz").toc
-    if not {"certifi", "certifi.core", "app.services.runner_tls", "app.services.runtime_tls"}.issubset(modules):
-        raise AssertionError("Frozen Runner is missing its CA loader")
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    context.load_verify_locations(cadata=bundled.decode("ascii"))
-    count = len(context.get_ca_certs())
-    if not count:
-        raise AssertionError("Frozen Runner CA bundle contains no trust anchors")
-    print(f"PASS frozen Runner CA bundle and loader ({count} trust anchors)")
+    backend = {"darwin": "truststore._macos", "win32": "truststore._windows"}.get(
+        platform, "truststore._openssl")
+    required = {"truststore", "truststore._api", backend,
+                "app.services.runner_tls", "app.services.runtime_tls"}
+    if not required.issubset(modules):
+        raise AssertionError("Frozen Runner is missing its native system trust verifier")
+    print(f"PASS frozen Runner native system trust verifier ({platform})")
 
 
 if __name__ == "__main__":

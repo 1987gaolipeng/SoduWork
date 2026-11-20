@@ -364,11 +364,23 @@ class AdmissionQueue:
         return max(rows, key=lambda item: item.sequence) if rows else None
 
     def claim_next(self, active: int, limit: int, can_start: bool,
-                   blocked_refs: set[str] | None = None) -> AdmissionItem | None:
+                   blocked_refs: set[str] | None = None,
+                   hub_blocked: bool = False,
+                   local_refs: set[str] | None = None) -> AdmissionItem | None:
         limit = max(MIN_CONCURRENCY, min(MAX_CONCURRENCY, int(limit or 1)))
         if not can_start or int(active or 0) >= limit:
             return None
         waiting = self._ordered_waiting()
+        if hub_blocked:
+            from .runner_event_scope import payload_destination
+            def local_item(item):
+                payload = item.payload or {}
+                return (payload_destination(payload) == "local" or
+                        ("_eventDestination" not in payload and
+                         payload.get("_localParent") is True and
+                         payload.get("op") == "job.comment" and
+                         item.ref in (local_refs or set())))
+            waiting = [item for item in waiting if local_item(item)]
         if not waiting:
             return None
         active_refs = {item.ref for item in self._items.values()

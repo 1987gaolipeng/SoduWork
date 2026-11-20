@@ -1,7 +1,7 @@
 """Use DSH's built-in pi-ai provider for managed OpenAI/Anthropic gateways.
 
-This changes only the model wire protocol. The DSH agent, native sandbox,
-approvals and sessions remain owned by the installed DeepSeek Harness.
+The route and native compaction budgets follow the selected model. The DSH
+agent, native sandbox, approvals and sessions remain owned by DeepSeek Harness.
 """
 from __future__ import annotations
 
@@ -14,6 +14,26 @@ from .runtime_defaults import DEFAULT_OUTPUT
 PROVIDER = "soduwork"
 KEY_ENV = "SODUWORK_API_KEY"
 PROFILE_ENV = "SODUWORK_DSH_PROVIDERS"
+COMPACTION_ENV = "SODUWORK_DSH_COMPACTION"
+
+
+def _request_budgets(context_limit: int, requested_output: int) -> tuple[int, dict]:
+    # Output and input share the provider's context window. Keep ordinary output
+    # limits unchanged, but never reserve the entire window for a completion.
+    input_reserve = min(4096, context_limit // 2)
+    output_limit = min(requested_output, context_limit - input_reserve)
+    message_budget = context_limit - output_limit
+    # DSH otherwise reserves 65,536 tokens and asks for a 65,536-token summary,
+    # disabling pressure compaction on smaller routes or exceeding output caps.
+    summary_limit = min(output_limit, 8192, message_budget // 4)
+    instruction_reserve = min(1024, message_budget // 16)
+    return output_limit, {
+        "auto": True,
+        "thresholdRatio": 0.8,
+        "retainRatio": 0.16,
+        "headroomTokens": summary_limit + instruction_reserve,
+        "maxTokens": summary_limit,
+    }
 
 
 def bundle_args() -> list[str]:
@@ -30,7 +50,8 @@ def inject_env(env: dict, llm: dict) -> None:
         raise ValueError("DeepSeek Harness requires a managed model endpoint, credential and model")
     protocol = "anthropic-messages" if llm.get("kind") == "anthropic" else "openai-completions"
     context_limit = context_window.resolve(llm)["contextWindow"]
-    output_limit = min(runtime_images.model_fields(llm).get("maxOutputTokens", DEFAULT_OUTPUT), context_limit)
+    output_limit, compaction = _request_budgets(
+        context_limit, runtime_images.model_fields(llm).get("maxOutputTokens", DEFAULT_OUTPUT))
     profile = {
         "displayName": "SoduWork",
         "baseURL": base.rstrip("/"),
@@ -53,5 +74,6 @@ def inject_env(env: dict, llm: dict) -> None:
     else:
         env.pop(KEY_ENV, None)
     env.update({PROFILE_ENV: json.dumps({PROVIDER: profile}, ensure_ascii=False),
+                COMPACTION_ENV: json.dumps(compaction),
                 "DSH_PROVIDER": PROVIDER, "DSH_MODEL": model, "DSH_ACP_MODELS": model,
                 "DSH_MAX_TOKENS": str(output_limit)})

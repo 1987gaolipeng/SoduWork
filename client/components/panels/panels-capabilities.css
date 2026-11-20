@@ -216,6 +216,8 @@ button.cap-card{cursor:default}
 .cap-modal-head>div{min-width:0;flex:1}
 .cap-modal-head b{display:block;font-size:16px;font-weight:650;color:var(--ink)}
 .cap-modal-head span{display:block;margin-top:3px;font-size:max(var(--font-min-readable, 14.5px), 12px);color:var(--ink-4);line-height:1.5}
+/* Inline values inside the subtitle (author name, version) stay on the subtitle line. */
+.cap-modal-head #capModalSub span{display:inline;margin:0;font-size:inherit;color:inherit;line-height:inherit}
 .cap-modal-close{width:30px;height:30px;border:0;border-radius:8px;background:transparent;color:var(--ink-4);font-size:18px}
 .cap-modal-close:hover{background:var(--bg-2);color:var(--ink)}
 .cap-modal-body{min-height:0;overflow:auto;padding:18px 19px;display:flex;flex-direction:column;gap:13px}

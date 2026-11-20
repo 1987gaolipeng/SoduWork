@@ -37,6 +37,9 @@ async function main() {
       try {
         await run('docker', ['create', '--name', container, '--cap-add', 'IPC_LOCK', '--cpus', '2', '--memory', '4g', '--pids-limit', '512',
           '-v', packages + ':/pkg:ro', '-v', path.join(contract.root, 'tools') + ':/checks:ro',
+          '-v', path.join(contract.root, 'client/package.json') + ':/client/package.json:ro',
+          '-v', path.join(contract.root, 'client/main/default-hub.cjs') + ':/client/main/default-hub.cjs:ro',
+          '-e', 'SODUWORK_DEFAULT_HUB_URL=' + record.defaultHubUrl,
           '-v', output + ':/evidence', '-e', 'SODUWORK_ACCEPT_UID=' + (os.userInfo().uid || 12001), image, 'sleep', 'infinity']);
         created = true;
         await run('docker', ['start', container]);
@@ -55,6 +58,8 @@ async function main() {
         assert.equal(result.legacyUnsignedRpmBaseline, legacyDigest !== '-');
         for (const phase of ['fresh', 'restart', ...(previous ? ['old'] : []), 'restored']) {
           const smoke = await contract.read(path.join(output, phase + '.json'));
+          if (phase !== 'old') assert.equal(smoke.defaultHubUrl, record.defaultHubUrl,
+            'Installed Linux candidate default Hub differs from the build request');
           assert.equal(smoke.secureStorage?.backend, 'gnome_libsecret');
           assert.equal(smoke.secureStorage?.roundTrip, true);
         }

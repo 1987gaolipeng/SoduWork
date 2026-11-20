@@ -112,6 +112,188 @@ class OpenCodeRuntimeConfigTests(unittest.TestCase):
         self.assertEqual(env["SODUWORK_OPENCODE_LEGACY_DB"], self.environment["OPENCODE_DB"])
         self.assertEqual(env["OPENCODE_DB"], str(private))
 
+    def test_managed_directory_links_cannot_redirect_into_personal_state(self):
+        from app.services.opencode_runtime_config import prepare_environment
+        for folder in ("config", "data", "state", "cache", "config/opencode", "data/opencode",
+                       "state/opencode", "cache/opencode", ""):
+            with self.subTest(folder=folder or "agent root"):
+                runner = self.root / ("runner-" + folder.replace("/", "-") + "-links")
+                target = self.root / ("personal-" + folder.replace("/", "-") + "-state")
+                target.mkdir()
+                sentinel = target / "personal-marker"
+                sentinel.write_bytes(b"original-personal-state")
+                link = runner / "agents" / "opencode" / folder
+                link.parent.mkdir(parents=True)
+                link.symlink_to(target, target_is_directory=True)
+                env = dict(self.environment)
+                with self.assertRaisesRegex(OSError, "OpenCode") as caught:
+                    prepare_environment(env, str(runner))
+                self.assertNotIn(str(self.root), str(caught.exception))
+                self.assertEqual(list(target.iterdir()), [sentinel])
+                self.assertEqual(sentinel.read_bytes(), b"original-personal-state")
+                self.assertEqual(env, self.environment, "Rejected paths cannot become the next prepared environment")
+
+    def test_new_session_database_links_cannot_open_personal_history(self):
+        from app.services.opencode_runtime_config import prepare_environment
+        source = Path(self.environment["OPENCODE_DB"])
+        source.write_bytes(b"original-personal-database")
+        for kind in ("symbolic", "hard"):
+            with self.subTest(kind=kind):
+                runner = self.root / ("runner-" + kind)
+                database = runner / "agents/opencode/data/opencode/opencode.db"
+                database.parent.mkdir(parents=True)
+                if kind == "symbolic":
+                    database.symlink_to(source)
+                else:
+                    os.link(source, database)
+                env = dict(self.environment)
+                with self.assertRaisesRegex(OSError, "OpenCode") as caught:
+                    prepare_environment(env, str(runner))
+                self.assertNotIn(str(self.root), str(caught.exception))
+                self.assertEqual(source.read_bytes(), b"original-personal-database")
+                self.assertEqual(env, self.environment)
+
+    def test_unknown_hard_link_target_is_rejected_even_without_a_legacy_override(self):
+        from app.services.opencode_runtime_config import prepare_environment
+        source = self.root / "other-personal.db"
+        source.write_bytes(b"original-personal-database")
+        database = self.root / "runner/agents/opencode/data/opencode/opencode.db"
+        database.parent.mkdir(parents=True)
+        os.link(source, database)
+        env = dict(self.environment)
+        del env["OPENCODE_DB"]
+        with self.assertRaisesRegex(OSError, "OpenCode"):
+            prepare_environment(env, str(self.root / "runner"))
+        self.assertEqual(source.read_bytes(), b"original-personal-database")
+
+    def test_known_sqlite_destination_links_cannot_modify_personal_files(self):
+        from app.services.opencode_runtime_config import prepare_environment
+        for database in ("opencode.db", "opencode.db.soduwork-migrate-lock"):
+            for suffix in ("", "-wal", "-shm", "-journal"):
+                for kind in ("symbolic", "hard"):
+                    with self.subTest(database=database, suffix=suffix, kind=kind):
+                        name = database + suffix + "-" + kind
+                        runner = self.root / ("runner-" + name)
+                        source = self.root / ("personal-" + name)
+                        source.write_bytes(b"original-personal-sqlite-file")
+                        destination = runner / "agents/opencode/data/opencode" / (database + suffix)
+                        destination.parent.mkdir(parents=True)
+                        if kind == "symbolic":
+                            destination.symlink_to(source)
+                        else:
+                            os.link(source, destination)
+                        env = dict(self.environment)
+                        with self.assertRaisesRegex(OSError, "OpenCode") as failure:
+                            prepare_environment(env, str(runner))
+                        self.assertNotIn(str(self.root), str(failure.exception))
+                        self.assertEqual(source.read_bytes(), b"original-personal-sqlite-file")
+                        self.assertEqual(env, self.environment)
+
+    def test_known_sqlite_destination_directories_are_rejected(self):
+        from app.services.opencode_runtime_config import prepare_environment
+        for database in ("opencode.db", "opencode.db.soduwork-migrate-lock"):
+            for suffix in ("", "-wal", "-shm", "-journal"):
+                with self.subTest(database=database, suffix=suffix):
+                    runner = self.root / ("runner-directory-" + database + suffix)
+                    destination = runner / "agents/opencode/data/opencode" / (database + suffix)
+                    destination.mkdir(parents=True)
+                    env = dict(self.environment)
+                    with self.assertRaisesRegex(OSError, "OpenCode"):
+                        prepare_environment(env, str(runner))
+                    self.assertEqual(env, self.environment)
+
+    def test_regular_sqlite_destinations_remain_unchanged_during_environment_preparation(self):
+        from app.services.opencode_runtime_config import prepare_environment
+        runner = self.root / "runner-regular-databases"
+        folder = runner / "agents/opencode/data/opencode"
+        folder.mkdir(parents=True)
+        files = []
+        for database in ("opencode.db", "opencode.db.soduwork-migrate-lock"):
+            for suffix in ("", "-wal", "-shm", "-journal"):
+                destination = folder / (database + suffix)
+                destination.write_bytes(b"regular-private-sqlite-file")
+                files.append(destination)
+        env = dict(self.environment)
+        prepare_environment(env, str(runner))
+        expected = dict(env)
+        prepare_environment(env)
+        self.assertEqual(env, expected)
+        for path in files:
+            self.assertEqual(path.read_bytes(), b"regular-private-sqlite-file")
+
+    def test_canonical_history_and_lock_paths_cannot_hide_companion_hard_links(self):
+        from app.services.opencode_runtime_config import prepare_environment
+        for suffix in ("-wal", "-shm", "-journal", ".soduwork-migrate-lock",
+                       ".soduwork-migrate-lock-wal", ".soduwork-migrate-lock-shm",
+                       ".soduwork-migrate-lock-journal"):
+            with self.subTest(suffix=suffix):
+                runner = self.root / ("runner-canonical-history" + suffix)
+                database = runner / "agents/opencode/data/opencode/opencode.db"
+                database.parent.mkdir(parents=True)
+                actual = database.with_name("actual-native.db")
+                actual.write_bytes(b"private-history-fixture")
+                database.symlink_to(actual)
+                source = self.root / ("external-canonical-history" + suffix)
+                source.write_bytes(b"original-personal-sqlite-file")
+                os.link(source, actual.with_name(actual.name + suffix))
+                env = dict(self.environment)
+                with self.assertRaisesRegex(OSError, "OpenCode"):
+                    prepare_environment(env, str(runner))
+                self.assertEqual(source.read_bytes(), b"original-personal-sqlite-file")
+                self.assertEqual(env, self.environment)
+
+    def test_canonical_migration_lock_cannot_hide_companion_hard_links(self):
+        from app.services.opencode_runtime_config import prepare_environment
+        for suffix in ("-wal", "-shm", "-journal"):
+            with self.subTest(suffix=suffix):
+                runner = self.root / ("runner-canonical-lock" + suffix)
+                database = runner / "agents/opencode/data/opencode/opencode.db"
+                database.parent.mkdir(parents=True)
+                actual = database.with_name("actual-lock.db")
+                actual.write_bytes(b"private-lock-fixture")
+                database.with_name(database.name + ".soduwork-migrate-lock").symlink_to(actual)
+                source = self.root / ("external-canonical-lock" + suffix)
+                source.write_bytes(b"original-personal-sqlite-file")
+                os.link(source, actual.with_name(actual.name + suffix))
+                env = dict(self.environment)
+                with self.assertRaisesRegex(OSError, "OpenCode"):
+                    prepare_environment(env, str(runner))
+                self.assertEqual(source.read_bytes(), b"original-personal-sqlite-file")
+                self.assertEqual(env, self.environment)
+
+    def test_internal_database_aliases_preserve_environment_idempotency(self):
+        from app.services.opencode_runtime_config import prepare_environment
+        runner = self.root / "runner-database-aliases"
+        database = runner / "agents/opencode/data/opencode/opencode.db"
+        database.parent.mkdir(parents=True)
+        for path in (database, database.with_name(database.name + ".soduwork-migrate-lock")):
+            actual = path.with_name("actual-" + path.name)
+            actual.write_bytes(b"private-database-fixture")
+            path.symlink_to(actual)
+        env = dict(self.environment)
+        prepare_environment(env, str(runner))
+        expected = dict(env)
+        prepare_environment(env)
+        self.assertEqual(env, expected)
+
+    def test_runner_root_alias_and_internal_directory_alias_preserve_idempotency(self):
+        from app.services.opencode_runtime_config import prepare_environment
+        actual = self.root / "actual-runner"
+        base = actual / "agents/opencode"
+        destination = base / "private-data"
+        destination.mkdir(parents=True)
+        (base / "data").symlink_to(destination, target_is_directory=True)
+        runner = self.root / "runner"
+        runner.symlink_to(actual, target_is_directory=True)
+        env = dict(self.environment)
+        prepare_environment(env, str(runner))
+        original = dict(env)
+        with patch.dict(os.environ, env, clear=True):
+            prepare_environment(env)
+        self.assertEqual(env, original)
+        self.assert_config(env)
+        self.assertEqual(Path(env["OPENCODE_DB"]).resolve(), destination / "opencode/opencode.db")
+
     def child_environment(self, agent, *, guarded=False):
         keys = [*self.environment]
         program = ("import json,os; print(json.dumps({k:os.environ.get(k) for k in "

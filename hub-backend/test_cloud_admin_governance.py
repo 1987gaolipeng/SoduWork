@@ -38,6 +38,26 @@ class CloudAdminGovernanceTests(Base):
             user.role_id = role.id
             await session.commit()
 
+    async def test_loopback_enrollment_commands_keep_the_administration_port(self):
+        await self.grant_manager()
+        with (patch.object(runner_enroll, "_lan_ip", return_value="192.0.2.20"),
+              patch.dict(runner_enroll.os.environ, {"PORT": "9080"})):
+            for port in (18989, 23456):
+                with self.subTest(port=port):
+                    reply = await self.http.post(
+                        f"http://127.0.0.1:{port}/api/v1/admin/runners/enroll",
+                        headers=self.admin_headers,
+                        json={"host": "Port regression", "orgId": self.org})
+                    self.assertEqual(reply.status_code, 200, reply.text)
+                    result = reply.json()
+                    expected = f"http://192.0.2.20:{port}"
+                    self.assertEqual(result["hub"], expected)
+                    commands = result["commands"]
+                    self.assertIn(expected + "/api/v1/download/runner-install.ps1", commands["windows"])
+                    self.assertIn(f"-Hub '{expected}'", commands["windows"])
+                    self.assertEqual(commands["linux"].count(f"'{expected}'"), 2)
+                    self.assertIn(f"--hub '{expected}'", commands["linux"])
+
     async def test_multiserver_lifecycle_permissions_and_audit(self):
         endpoint = "/api/v1/admin/runners"
         body = {"host": "Cloud A", "orgId": self.org, "hub": "https://soduwork.example.test"}
@@ -202,6 +222,56 @@ class CloudAdminGovernanceTests(Base):
         with patch.object(runner_enroll, "_lan_ip", return_value="192.0.2.20"):
             for local in ("http://[::]:9080", "http://[::1]:9080", "http://127.0.0.2:9080"):
                 self.assertEqual(runner_enroll.hub_url(local), "http://192.0.2.20:9080")
+
+
+class RunnerEnrollmentAddressTests(unittest.TestCase):
+    def test_loopback_and_wildcard_addresses_keep_the_request_port(self):
+        with (patch.object(runner_enroll, "_lan_ip", return_value="192.0.2.20"),
+              patch.dict(runner_enroll.os.environ, {"PORT": "9080"})):
+            for host in ("localhost", "127.0.0.1", "127.0.0.2", "0.0.0.0", "[::1]", "[::]"):
+                with self.subTest(host=host):
+                    self.assertEqual(runner_enroll.hub_url("", f"http://{host}:18989"),
+                                     "http://192.0.2.20:18989")
+
+    def test_loopback_fallback_keeps_scheme_path_and_default_ports(self):
+        cases = (
+            ("https://localhost:9443/hub/", "https://192.0.2.20:9443/hub"),
+            ("http://localhost/hub", "http://192.0.2.20/hub"),
+            ("https://[::1]/hub", "https://192.0.2.20/hub"),
+            ("wss://localhost:9443/hub", "https://192.0.2.20:9443/hub"),
+            ("localhost:18989", "http://192.0.2.20:18989"),
+        )
+        with (patch.object(runner_enroll, "_lan_ip", return_value="192.0.2.20"),
+              patch.dict(runner_enroll.os.environ, {"PORT": "9080"})):
+            for source, expected in cases:
+                with self.subTest(source=source):
+                    self.assertEqual(runner_enroll.hub_url(source), expected)
+
+    def test_non_loopback_addresses_keep_existing_priority(self):
+        remote = "https://hub.example.test:9443/hub"
+        with patch.object(runner_enroll, "_lan_ip") as lan:
+            self.assertEqual(runner_enroll.hub_url(remote, "http://127.0.0.1:18989"), remote)
+            self.assertEqual(runner_enroll.hub_url(remote, "http://other.example.test"), remote)
+            self.assertEqual(runner_enroll.hub_url("http://localhost:18989", remote), remote)
+            self.assertEqual(runner_enroll.hub_url("", "https://[2001:db8::1]:9443/hub"),
+                             "https://[2001:db8::1]:9443/hub")
+            lan.assert_not_called()
+
+    def test_first_loopback_candidate_is_used_when_no_remote_address_exists(self):
+        with patch.object(runner_enroll, "_lan_ip", return_value="192.0.2.20"):
+            self.assertEqual(runner_enroll.hub_url("https://localhost:9443/hub", "http://127.0.0.1:18989"),
+                             "https://192.0.2.20:9443/hub")
+
+    def test_unavailable_lan_keeps_the_local_service_port(self):
+        with patch.object(runner_enroll, "_lan_ip", return_value=""):
+            self.assertEqual(runner_enroll.hub_url("", "https://[::1]:9443/hub"),
+                             "https://127.0.0.1:9443/hub")
+
+    def test_no_url_keeps_the_legacy_environment_port_fallback(self):
+        with patch.object(runner_enroll, "_lan_ip", return_value="192.0.2.20"):
+            for port, expected in (("23456", "23456"), ("", "9080")):
+                with self.subTest(port=port), patch.dict(runner_enroll.os.environ, {"PORT": port}):
+                    self.assertEqual(runner_enroll.hub_url(), f"http://192.0.2.20:{expected}")
 
 
 if __name__ == "__main__":

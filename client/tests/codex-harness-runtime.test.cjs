@@ -285,10 +285,14 @@ test('Runner admission queue is tracked as live work until resources start the A
     const sent = session.send({ text: '即使忙也要先接住' });
     await until(() => session.snapshot().status === 'queued');
     const queued = session.snapshot();
-    assert.equal(queued.running, true);
+    assert.equal(queued.running, false);
+    assert.equal(queued.execution.running, false);
+    assert.equal(queued.execution.active, true);
+    assert.equal(queued.execution.waitingForStart, true);
+    assert.equal(getRunnerSessionDetails(session).handle.inFlight(), true);
     assert.equal(queued.execution.queuePosition, 2);
     assert.equal(queued.execution.queueClass, 'interactive');
-    assert.match(queued.statusText, /前面 2 项/);
+    assert.match(queued.statusText, /第 2 项/);
     const result = await timeout(sent.completion, 4000);
     assert.equal(result.ok, true);
     assert.equal(polls, 3);
@@ -443,6 +447,35 @@ test('Codex Harness turns proxy JSON failures into a product error, not an answe
   assert.match(result.reason, /\u5f53\u524d\u6a21\u578b\u4e0d\u80fd\u76f4\u63a5\u8bfb\u53d6\u56fe\u7247/);
   assert.equal(snapshot.status, 'unreachable');
   assert.deepEqual(snapshot.messages.map((row) => row.role), ['user']);
+});
+
+test('a queued Runner admission remains cancellable without claiming model execution', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(),'soduwork-admission-cancel-'));
+  const alias = 'queued-cancel', expectedRef = _uuidV5(NAMESPACE,'chat:'+alias+':codex-harness');
+  const calls = [];
+  const adapter = createRunnerRuntimeAdapter({
+    modelConfig:{fetchModel:async()=>({ok:true,model:{id:'fixture',key:'synthetic'}})},
+    runnerRuntime:{async rpc(op) {
+      calls.push(op);
+      if(op==='job.dispatch')return {ok:true,data:{ref:expectedRef,state:'queued',queued:true}};
+      if(op==='job.session')return {ok:true,data:{ok:true,status:'queued',executionStartedAt:0,queuePosition:1,items:[]}};
+      if(op==='job.stop')return {ok:true,data:{ok:true,state:'cancelled'}};
+      throw Error('Unexpected fixture operation: '+op);
+    }},
+  });
+  let session;
+  try {
+    session=await adapter.createSession({native:{runner:{openOptions:{cwd:root,ref:alias}}}});
+    const sent=session.send({text:'Wait for admission'});
+    await until(()=>session.snapshot().status==='queued');
+    assert.equal(session.snapshot().execution.running,false);
+    assert.equal(session.snapshot().execution.active,true);
+    assert.deepEqual(session.cancel(),{ok:true});
+    assert.equal((await timeout(sent.completion)).cancelled,true);
+    await until(()=>calls.includes('job.stop'));
+    assert.equal(calls.filter(op=>op==='job.stop').length,1);
+    assert.equal(session.snapshot().status,'aborted');
+  } finally {await session?.dispose();fs.rmSync(root,{recursive:true,force:true});}
 });
 
 test('Codex Harness exposes the same long-tool and stall signals as Pi', async () => {

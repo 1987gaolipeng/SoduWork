@@ -126,6 +126,8 @@ document.addEventListener('focusout', () => {
   const checkClientUpdate = () => {
     if (typeof _otaUpdate === 'function') void _otaUpdate(true);
   };
+  // The desktop overlay owns the inbox entry even when the workspace is closed.
+  watchClientUpdateNotices();
   setTimeout(checkClientUpdate, 8000);
   setInterval(checkClientUpdate, 6 * 60 * 60 * 1000);
 })();

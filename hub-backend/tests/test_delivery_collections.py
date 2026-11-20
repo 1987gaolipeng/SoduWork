@@ -128,6 +128,31 @@ class DeliveryCollectionsTestCase(unittest.IsolatedAsyncioTestCase):
             files={"file": ("payload.bin", data, "application/octet-stream")}, **kwargs)
 
 class DeliveryCollectionsTests(DeliveryCollectionsTestCase):
+    async def test_decomposed_paths_keep_archive_references_and_original_bytes(self):
+        folder, asset = 'cafe\u0301', 'the\u0301me.css'
+        name = folder + '/index.html'
+        html = ('<html><link href="' + asset + '"><body>Ready</body></html>').encode()
+        files = [(name, html), (folder + '/' + asset, b'body{color:red}')]
+        data = archive_bytes(files)
+        manifest = self.manifest(files=[entry(n, b, 'primary' if n == name else 'supporting') for n, b in files],
+                                 entryPath=name, kind='bundle')
+        made = await self.upload(manifest, data)
+        self.assertEqual(made.status_code, 200, made.text)
+        delivery_id = made.json()['delivery']['id']
+        downloaded = await self.http.get(f'/api/v1/deliveries/{delivery_id}/download')
+        self.assertEqual(downloaded.content, data)
+        for n, b in files:
+            response = await self.http.get(f'/api/v1/deliveries/{delivery_id}/files/{n}')
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.content, b)
+
+    async def test_unicode_equivalent_delivery_paths_are_rejected_as_collisions(self):
+        files = [('caf\u00e9.md', b'# First'), ('cafe\u0301.md', b'# Other')]
+        manifest = self.manifest(files=[entry(n, b) for n, b in files], entryPath=files[0][0], kind='bundle')
+        response = await self.upload(manifest, archive_bytes(files))
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn('重复', response.json()['detail'])
+
     async def test_utf16_html_is_saved_and_downloaded_without_changing_original_bytes(self):
         text = '<!doctype html><html><body><h1>工作汇报</h1></body></html>'
         for encoding, marker in (("utf-16-le", codecs.BOM_UTF16_LE),

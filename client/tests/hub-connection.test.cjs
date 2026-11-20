@@ -13,6 +13,30 @@ function fixture(seed = {}, bridge = {}, storage, internal = true, clock = { set
 }
 const legacy = 'http://192.0.2.10:8989';
 const unassigned = 'https://unassigned-legacy-hub.invalid';
+for (const isPackaged of [false, true]) test(`${isPackaged ? 'packaged' : 'source'} first requests follow the native default Hub`, async t => {
+  const endpoint = require('../main/hub-endpoint.cjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-default-routing-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const app = { isPackaged, getPath: () => root };
+  endpoint.initialize(app, {});
+  const expected = isPackaged ? 'https://service.soduwork.ai' : 'http://127.0.0.1:18989';
+  const enrollments = [];
+  const f = fixture({ soduwork_work_hub_url: 'https://old.example.test' }, {
+    runtimeForm: () => isPackaged ? 'packaged' : 'local-code',
+    getHubConnection: async () => endpoint.current(app),
+    deviceAuthBootstrap: async payload => { enrollments.push(payload); return { ok: true, stored: true,
+      clientId: 'fixture-device', session: 'fixture-session', user: { id: 'fixture-user' }, expiresIn: 1800 }; },
+  }, undefined, false);
+  await f.api.clientAuthPolicy();
+  await f.api.registerClient();
+  await f.api.myModels();
+  assert.equal(f.api.hubBase(), expected);
+  assert.equal(enrollments.length, 1);
+  assert.equal(enrollments[0].hub, expected);
+  assert.ok(f.requests.length > 0);
+  assert.ok(f.requests.every(row => row.url.startsWith(expected + '/')));
+});
+
 for (const id of ['self-hosted']) test(`${id} renderer uses bundled Hub from its first request and rejects another fixed Hub`, async () => {
   const profile = require('../main/distribution.cjs').getProfile(id);
   const enrollments = [];

@@ -52,13 +52,14 @@ class RunnerPlatformContractTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Public Runner distribution is blocked"):
                 runpy.run_path(str(backend / "runner.spec"), init_globals={"SPECPATH": str(backend)})
 
-    def test_all_runner_recipes_include_active_modules_ca_data_and_original_notices(self):
+    def test_all_runner_recipes_include_active_modules_native_trust_and_original_notices(self):
         from app.services import runner_sources
         # Replace installed-distribution metadata discovery only; execute the
         # production recipe and inspect its resulting PyInstaller arguments.
         import PyInstaller.utils.hooks as hooks
-        ca_data = hooks.collect_data_files("certifi", includes=["cacert.pem"])
-        self.assertTrue(ca_data)
+        def data_files(name, **kwargs):
+            self.assertNotEqual(name, "certifi", "Runner must use the installed OS trust")
+            return []
         from packaging.markers import default_environment
         # packaging caches the host environment. Supply each fixture target
         # explicitly, without poisoning later checks with the first mocked OS.
@@ -87,8 +88,7 @@ class RunnerPlatformContractTests(unittest.TestCase):
                       patch.dict(os.environ, {"SODUWORK_INTERNAL_BUILD": "1"}),
                       patch("importlib.metadata.version", side_effect=reviewed_versions.__getitem__),
                       patch.object(hooks, "copy_metadata", return_value=[]),
-                      patch.object(hooks, "collect_data_files", side_effect=lambda name, **kwargs:
-                                   ca_data if name == "certifi" else []),
+                      patch.object(hooks, "collect_data_files", side_effect=data_files),
                       patch.object(hooks, "collect_dynamic_libs", return_value=[])):
                     runpy.run_path(str(backend / "runner.spec"), init_globals={
                         "SPECPATH": str(backend), "Analysis": Analysis,
@@ -98,14 +98,15 @@ class RunnerPlatformContractTests(unittest.TestCase):
                               for path in runner_sources.build_inputs(backend, project)
                               if path.is_relative_to(backend)}
                 self.assertTrue(required.issubset(inputs), sorted(required - inputs))
+                native = {"win32": "truststore._windows", "darwin": "truststore._macos",
+                          "linux": "truststore._openssl"}[platform]
+                self.assertIn(native, captured["hiddenimports"])
                 retired = ("harness2", "claude_runtime", "agent_native_install")
                 self.assertFalse(any(any(name in path for name in retired) for path in inputs))
                 self.assertFalse(any(any(name in module for name in retired)
                                      for module in captured["hiddenimports"]))
                 self.assertFalse(any(part.startswith("harness2") for entry in captured["datas"]
                                      for path in entry for part in Path(path).parts))
-                for entry in ca_data:
-                    self.assertIn(entry, captured["datas"])
                 self.assertIn((str(backend / "app/agent_catalog.json"), "app"), captured["datas"])
                 original = project / "third-party/licenses/dnspython-LICENSE.txt"
                 self.assertIn((str(original), "third-party/python/dnspython-2.9.0"), captured["datas"])

@@ -482,7 +482,7 @@ async def settle_delivered(session: AsyncSession, t, state: dict, who: str = "So
     await notify_owner(session, t, what)
 
 
-async def notify_reviewer(session: AsyncSession, t, what: str) -> None:
+async def notify_reviewer(session: AsyncSession, t, what: str, *, publish=None) -> None:
     """Notify the task creator to review new outputs or a new code candidate."""
     from ..realtime import hub
     cid = getattr(t, "created_by", None)
@@ -491,7 +491,7 @@ async def notify_reviewer(session: AsyncSession, t, what: str) -> None:
     box = (await session.execute(
         select(models.Client.id).where(models.Client.user_ref == cid).limit(1))).scalar()
     if box:
-        await hub.publish(box, {"type": "notice",
+        await (publish or hub.publish)(box, {"type": "notice",
                                 "text": f"AI 完成了「{t.title}」：{what}（可在需求详情里审核）",
                                 "taskId": t.id}, user_id=cid)
 

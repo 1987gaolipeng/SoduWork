@@ -110,13 +110,20 @@
     ].join('\n\n');
   }
 
-  function acceptanceResolution(task, trace) {
+  function acceptanceResolution(task, trace, approvalId = '') {
     const item = task || {};
     if (item.reviewedAt || item.reviewed_at) return true;
     const routing = item.workRouting || item.work_routing || {};
     if (routing.reworkPending || routing.rework_pending || item.reviewRejected || item.review_rejected) return true;
     const approvals = Array.isArray(trace?.approvals) ? trace.approvals : [];
     const reviews = approvals.filter(row => String(row?.action || '').toLowerCase() === 'review');
+    // A cached previous round is not evidence that this approval finished.
+    // When the current approval is absent, wait for its authoritative trace.
+    if (approvalId) {
+      const current = reviews.find(row => String(row.id || '') === String(approvalId));
+      return Boolean(current && ['approved', 'rejected', 'declined', 'cancelled', 'canceled', 'revoked']
+        .includes(String(current.status || '').toLowerCase()));
+    }
     const pending = reviews.some(row => String(row?.status || '').toLowerCase() === 'pending' && !row.myDecision);
     const resolved = reviews.some(row => ['approved', 'rejected', 'declined', 'cancelled', 'canceled']
       .includes(String(row?.status || '').toLowerCase()));
@@ -151,7 +158,7 @@
     const id = String(taskId || '').trim();
     const bound = String(opts.taskRef || ctx._activeCollabTaskId || '').trim();
     if (!id || !bound || id !== bound) return false;
-    if (!acceptanceResolution(task, trace)) return false;
+    if (!acceptanceResolution(task, trace, opts.approvalId)) return false;
     ctx._sessionOptions = { ...opts, acceptanceExecutionSession: false,
       acceptanceSession: false, acceptanceMode: 'manual', approvalId: '', acceptanceAttachmentIds: [] };
     return true;

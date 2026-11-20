@@ -8,10 +8,13 @@ from pathlib import Path
 import ssl
 import tempfile
 import threading
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import urllib.error
 import urllib.request
+
+import truststore
 
 from app.services import local_stream, managed_agent_network as network, runtime_tls
 import test_managed_agent_tls as fixtures
@@ -24,14 +27,30 @@ class RuntimeTLSTest(unittest.TestCase):
         self.root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
         self.ca, self.leaf, self.key = fixtures.make_certificates(self.root / "trusted")
         self.other_ca, self.other_leaf, self.other_key = fixtures.make_certificates(self.root / "other")
+        # Keep Windows' native crypto providers available even on first use.
+        # Clearing SystemRoot makes verification depend on prior initialization.
         self.stack.enter_context(patch.dict(os.environ, {
+            **{name: os.environ[name] for name in ("SYSTEMROOT",) if name in os.environ},
             "SSL_CERT_FILE": "", "SSL_CERT_DIR": "", "HTTP_PROXY": "", "HTTPS_PROXY": "",
             "NO_PROXY": "", "no_proxy": ""}, clear=True))
         # Model a frozen OpenSSL whose compiled default paths are unavailable.
         # The real TLS handshakes below still verify issuer, hostname and dates.
         self.default_roots = self.stack.enter_context(
             patch.object(ssl.SSLContext, "load_default_certs", return_value=None))
-        self.bundle = self.stack.enter_context(patch.object(runtime_tls.certifi, "where", return_value=str(self.ca)))
+        self.native_ca = self.ca
+        self.native_class = truststore.SSLContext
+
+        def native_context(protocol):
+            # Exercise the real native verifier with a disposable trust anchor,
+            # without installing test certificates in the host's trust store.
+            context = self.native_class(protocol)
+            context.load_verify_locations(cafile=str(self.native_ca))
+            return context
+
+        self.native_factory = self.stack.enter_context(
+            patch.object(truststore, "SSLContext", side_effect=native_context))
+        self.bundle = Mock(side_effect=AssertionError("Bundled roots must not be loaded"))
+        self.stack.enter_context(patch.dict("sys.modules", {"certifi": SimpleNamespace(where=self.bundle)}))
         self.requests = []
 
     def server(self, *, leaf=None, key=None, redirect=None, status=200):
@@ -83,7 +102,7 @@ class RuntimeTLSTest(unittest.TestCase):
         self.assertIn("TLS 证书校验失败", self.gate(url))
         self.assertEqual(len(self.requests), before)
 
-    def test_missing_platform_roots_reproduces_old_failure_and_both_clients_use_the_bundle(self):
+    def test_missing_openssl_roots_reproduces_old_failure_and_both_clients_use_native_trust(self):
         url = self.server(leaf=self.leaf, key=self.key)
         old_context = ssl.create_default_context()
         self.assertEqual(old_context.cert_store_stats()["x509_ca"], 0)
@@ -96,36 +115,34 @@ class RuntimeTLSTest(unittest.TestCase):
         context = runtime_tls.client_context()
         self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
         self.assertTrue(context.check_hostname)
-        self.assertEqual(context.cert_store_stats()["x509_ca"], 1)
+        self.assertIsInstance(context, self.native_class)
         self.download(url)
         self.assertEqual(self.gate(url), "")
         self.assertEqual(len(self.requests), 2)
 
-    def test_unset_and_empty_overrides_use_the_same_bundle_without_changing_environment(self):
+    def test_unset_and_empty_overrides_use_native_trust_without_changing_environment(self):
         for unset in (False, True):
             with self.subTest(unset=unset), patch.dict(os.environ):
                 if unset:
                     os.environ.pop("SSL_CERT_FILE", None)
                     os.environ.pop("SSL_CERT_DIR", None)
                 before = dict(os.environ)
-                self.assertEqual(runtime_tls.client_context().cert_store_stats()["x509_ca"], 1)
+                self.assertIsInstance(runtime_tls.client_context(), self.native_class)
                 self.assertEqual(dict(os.environ), before)
+        self.assertEqual(self.native_factory.call_count, 2)
+        self.bundle.assert_not_called()
 
-    def test_available_default_roots_remain_trusted_alongside_the_bundle(self):
-        other_ca = str(self.other_ca)
-
-        def platform_roots(context, purpose=ssl.Purpose.SERVER_AUTH):
-            self.assertEqual(purpose, ssl.Purpose.SERVER_AUTH)
-            context.load_verify_locations(cafile=other_ca)
-
-        with patch.object(ssl.SSLContext, "load_default_certs", platform_roots):
-            self.assertEqual(runtime_tls.client_context().cert_store_stats()["x509_ca"], 2)
-            self.download(self.server(leaf=self.leaf, key=self.key))
-            self.download(self.server(leaf=self.other_leaf, key=self.other_key))
+    def test_native_rejection_never_falls_back_to_bundled_roots(self):
+        rejection = ssl.SSLCertVerificationError(1, "fixture-native-trust-rejection")
+        with patch("truststore._api._verify_peercerts_impl", side_effect=rejection) as verify:
+            self.assert_rejected(self.server(leaf=self.leaf, key=self.key))
+        self.assertEqual(verify.call_count, 2)
+        self.bundle.assert_not_called()
 
     def test_explicit_ca_file_does_not_add_default_or_bundled_roots(self):
         with patch.dict(os.environ, {"SSL_CERT_FILE": str(self.other_ca)}):
             self.default_roots.side_effect = AssertionError("Explicit trust loaded platform roots")
+            self.native_factory.side_effect = AssertionError("Explicit trust loaded native roots")
             self.bundle.side_effect = AssertionError("Explicit trust loaded bundled roots")
             self.download(self.server(leaf=self.other_leaf, key=self.other_key))
             self.assert_rejected(self.server(leaf=self.leaf, key=self.key))
@@ -135,6 +152,7 @@ class RuntimeTLSTest(unittest.TestCase):
         capath.mkdir()
         with patch.dict(os.environ, {"SSL_CERT_DIR": str(capath)}):
             self.default_roots.side_effect = AssertionError("Explicit trust loaded platform roots")
+            self.native_factory.side_effect = AssertionError("Explicit trust loaded native roots")
             self.bundle.side_effect = AssertionError("Explicit trust loaded bundled roots")
             self.assert_rejected(self.server(leaf=self.leaf, key=self.key))
 
@@ -163,22 +181,26 @@ class RuntimeTLSTest(unittest.TestCase):
                 self.assertNotIn("private-", message)
         self.assertEqual(self.requests, [])
 
-    def test_invalid_bundled_ca_fails_closed(self):
-        self.bundle.return_value = str(self.root / "missing-bundle.pem")
-        with self.assertRaises(OSError):
-            runtime_tls.client_context()
+    def test_missing_native_verifier_fails_closed_for_both_clients(self):
+        url = self.server(leaf=self.leaf, key=self.key)
+        with patch.dict("sys.modules", {"truststore": None}):
+            with self.assertRaises(ImportError):
+                self.download(url)
+            self.assertIn("直连失败", self.gate(url))
+        self.assertEqual(self.requests, [])
+        self.bundle.assert_not_called()
 
     def test_unknown_issuer_is_rejected_by_both_clients(self):
         self.assert_rejected(self.server(leaf=self.other_leaf, key=self.other_key))
 
     def test_wrong_hostname_is_rejected_by_both_clients(self):
         ca, leaf, key = fixtures.make_certificates(self.root / "wrong-name", hostname="other.invalid")
-        self.bundle.return_value = str(ca)
+        self.native_ca = ca
         self.assert_rejected(self.server(leaf=leaf, key=key))
 
     def test_expired_certificate_is_rejected_by_both_clients(self):
         ca, leaf, key = fixtures.make_certificates(self.root / "expired", expired=True)
-        self.bundle.return_value = str(ca)
+        self.native_ca = ca
         self.assert_rejected(self.server(leaf=leaf, key=key))
 
     def test_plain_http_does_not_load_invalid_tls_configuration(self):
@@ -188,8 +210,9 @@ class RuntimeTLSTest(unittest.TestCase):
             self.assertEqual(self.gate(url), "")
             self.bundle.assert_not_called()
             self.default_roots.assert_not_called()
+            self.native_factory.assert_not_called()
 
-    def test_http_redirects_to_https_use_the_bundle(self):
+    def test_http_redirects_to_https_use_native_trust(self):
         destination = self.server(leaf=self.leaf, key=self.key)
         url = self.server(redirect=destination)
         self.download(url)

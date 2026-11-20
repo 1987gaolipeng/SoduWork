@@ -34,6 +34,26 @@ test('plugin context is bounded, deduplicated and limited per turn', () => {
   assert.deepEqual(compact.map((item) => item.pluginId), ['p0', 'p1', 'p2']);
 });
 
+test('selected Plugin Developer owns authoring intent without changing visible feature requests', () => {
+  const request = '我给你区域范围、时间、人数、年龄和旅行偏好，你输出预算、路线和精美 HTML。';
+  const selected = [{ pluginId: 'local:plugin-builder', name: 'Plugin Developer', context: 'x'.repeat(20000) }];
+  const prompt = pluginContext.augment(request, selected);
+  const payload = JSON.parse(prompt.split(pluginContext.START)[1].split(pluginContext.END)[0]);
+  assert.equal(payload.authoring.intent, 'plugin-authoring');
+  assert.match(payload.authoring.instructions, /specification.*not as a request to perform/);
+  assert.match(payload.authoring.instructions, /changing values.*plugin inputs/);
+  assert.match(payload.authoring.instructions, /Ask only.*authoring decision/);
+  assert.match(payload.authoring.instructions, /soduwork-plugin-draft\.json/);
+  assert.match(payload.authoring.instructions, /install only after the user confirms/);
+  assert.equal(payload.plugins[0].context.length, pluginContext.MAX_CONTEXT);
+  assert.equal(pluginContext.parse(prompt).text, request);
+  assert.doesNotMatch(JSON.stringify(pluginContext.parse(prompt)), /authoring|changing values/);
+  for (const ordinary of [[], [{ pluginId: 'local:travel', name: 'Plugin Developer', context: 'Plan travel' }],
+    [{ pluginId: 'remote:plugin-builder', name: 'Plugin Developer', context: 'Plan travel' }]]) {
+    assert.doesNotMatch(pluginContext.augment(request, ordinary), /"authoring":|plugin-authoring/);
+  }
+});
+
 test('plugin capability declarations survive compaction in a bounded normalized shape', () => {
   const item = pluginContext.compact([{
     pluginId: 'p1', context: 'method',
@@ -135,7 +155,29 @@ test('IPC forwards only bounded ids, main process re-resolves them and events re
   assert.match(session, /typeof ctx\.opts\.resolvePlugins !== 'function'/);
   assert.match(session, /failureKind: 'plugin-grant', retrySafe: true/);
   assert.match(session, /if \(turn\.clearPluginSelection === true\) ctx\.persistPluginSelection\(\[\]\)/);
-  assert.match(session, /const effectivePluginIds = turn\.clearPluginSelection !== true && requestedPluginIds\.length\s*\? requestedPluginIds\.slice\(\) : ctx\.activePluginIds\.slice\(\)/);
+  const selectionStart = session.indexOf('const requestedPluginIds =');
+  const selectionEnd = session.indexOf('const accessReady =', selectionStart);
+  assert.ok(selectionStart >= 0 && selectionEnd > selectionStart, 'production selection must be inspectable');
+  const selectionSource = session.slice(selectionStart, selectionEnd);
+  const selection = turn => {
+    const commits = [], ctx = { activePluginIds: ['previous'],
+      persistPluginSelection(ids) { ctx.activePluginIds = Array.from(ids); commits.push(Array.from(ids)); } };
+    const result = require('node:vm').runInNewContext(selectionSource +
+      '\nJSON.stringify({ effectivePluginIds, inheritedPlugins });', {
+      turn, ctx, _pluginIds: ids => [...new Set(ids.filter(Boolean))],
+    });
+    return { ...JSON.parse(result), active: ctx.activePluginIds, commits };
+  };
+  assert.deepEqual(selection({}), { effectivePluginIds: ['previous'], inheritedPlugins: true,
+    active: ['previous'], commits: [] });
+  assert.deepEqual(selection({ pluginIds: ['explicit'] }), { effectivePluginIds: ['explicit'], inheritedPlugins: false,
+    active: ['previous'], commits: [] });
+  assert.deepEqual(selection({ pluginIds: ['captured'], inheritedPluginSelection: true }), {
+    effectivePluginIds: ['captured'], inheritedPlugins: true, active: ['previous'], commits: [] });
+  const cleared = selection({ pluginIds: ['ignored'], clearPluginSelection: true });
+  assert.deepEqual(cleared.effectivePluginIds, []);
+  assert.deepEqual(cleared.active, []);
+  assert.deepEqual(cleared.commits, [[]]);
   const start = ipc.indexOf('const sendOptions = {');
   const end = ipc.indexOf('\n    };', start);
   assert.ok(start >= 0 && end > start, 'production send options must be inspectable');
@@ -143,15 +185,20 @@ test('IPC forwards only bounded ids, main process re-resolves them and events re
   assert.match(optionsSource, /submissionId: String\(taskTurn\?\.acceptanceOnly \? taskTurn\.submissionId : rawOptions && rawOptions\.submissionId \|\| ''\)\s*\.replace\(\/\[\^a-zA-Z0-9_-\]\/g, ''\)\.slice\(0, 64\)/);
   const rawOptions = { submissionId: 'raw:\n' + 'x'.repeat(90), acceptanceOnly: true,
     metadata: { taskRef: 'forged' }, beforeTurn: () => 'forged', afterTurn: () => 'forged',
-    promptText: 'Untrusted guidance', modelSource: 'device' };
-  const options = taskTurn => require('node:vm').runInNewContext(optionsSource + '\nsendOptions;', {
+    promptText: 'Untrusted guidance', modelSource: 'device', inheritedPluginSelection: true, source: 'forged-source' };
+  const options = (taskTurn, automationTurn = false) => require('node:vm').runInNewContext(optionsSource + '\nsendOptions;', {
     rawOptions, taskTurn, taskLifecycle: false, pluginIds: ['resolved-plugin'], pluginInputs: {},
-    clearPluginSelection: false, selectedSkills: [],
+    clearPluginSelection: false, selectedSkills: [], automationTurn,
   });
   const ordinary = options(null);
   assert.equal(ordinary.submissionId, 'raw' + 'x'.repeat(61));
   assert.deepEqual(Object.keys(ordinary).sort(), ['pluginIds', 'pluginInputs', 'projectId', 'repoId',
     'sentAt', 'skills', 'submissionId'].sort(), 'renderer metadata must not become runtime options');
+  assert.equal(Object.hasOwn(ordinary, 'inheritedPluginSelection'), false,
+    'renderer input must not disguise an explicit plugin as an inherited selection');
+  const automated = options(null, true);
+  assert.equal(automated.source, 'automation');
+  assert.equal(Object.hasOwn(automated, 'inheritedPluginSelection'), false);
   const beforeTurn = () => 'trusted', afterTurn = () => 'trusted';
   const acceptance = options({ acceptanceOnly: true, submissionId: 'native:\n' + 'y'.repeat(90),
     task: { projectId: 'native-project', repoId: 'native-repo' }, text: 'Verified acceptance context', beforeTurn, afterTurn });

@@ -9,7 +9,7 @@ const vm = require('node:vm');
 // Exercise the real dock event handlers. Geometry is fixed at scale 1; native
 // window regions and Chromium geometry have separate isolated Electron coverage.
 function boot(initial = {}) {
-  const dockListeners = new Map(), documentListeners = new Map();
+  const dockListeners = new Map(), documentListeners = new Map(), windowListeners = new Map();
   const classes = new Set(), frames = new Map(), timers = new Map();
   const calls = { begin: 0, end: 0, depth: 0, save: 0, disarm: 0, writes: 0 };
   let sequence = 0;
@@ -50,6 +50,8 @@ function boot(initial = {}) {
     armGrabCursor() {}, disarmGrabCursor() { calls.disarm++; },
   };
   sandbox.window = sandbox;
+  sandbox.addEventListener = (type, callback) => add(windowListeners, type, callback);
+  sandbox.removeEventListener = (type, callback) => windowListeners.get(type)?.delete(callback);
   vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../components/pet/pet-dock.js'), 'utf8'), sandbox);
   sandbox._syncSidebar();
@@ -66,8 +68,21 @@ function boot(initial = {}) {
     fire('pointerdown', left + 8, top + 8);
     return { x: left + 8, y: top + 8 };
   };
-  return { sandbox, dock, calls, frames, documentListeners, fire, frame, snapshot, start };
+  return { sandbox, dock, calls, frames, documentListeners, windowListeners, fire, frame, snapshot, start };
 }
+
+test('blur releases a pending or moving dock capture and keeps the gesture reusable', () => {
+  const h = boot({ dockVisible: true }); let released = 0;
+  h.sandbox.captureOverlayPointer = () => () => released++;
+  const point = h.start();
+  h.fire('pointermove', point.x - 200, point.y + 50);
+  for (const cb of [...h.windowListeners.get('blur')]) cb();
+  assert.equal(released, 1);
+  assert.equal(h.calls.depth, 0);
+  assert.equal(h.frames.size, 0);
+  h.start(); h.fire('pointerup', 0, 0);
+  assert.equal(released, 2);
+});
 
 test('a missing dock preference stays hidden until explicitly enabled', () => {
   const h = boot({ dockVisible: undefined });

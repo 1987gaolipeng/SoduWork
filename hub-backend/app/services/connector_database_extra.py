@@ -73,9 +73,8 @@ def _pem(values, key="TLS_CA_PEM"):
 def _url(value):
     parts = urlsplit(value)
     if (parts.scheme not in {"https", "http"} or not parts.hostname or parts.username or parts.password
-            or parts.path not in {"", "/"} or parts.query or parts.fragment
-            or parts.scheme == "http" and parts.hostname.lower() not in LOCAL_HOSTS):
-        raise InputError("远程数据库必须使用 HTTPS，地址不能包含凭据、路径或参数")
+            or parts.path not in {"", "/"} or parts.query or parts.fragment):
+        raise InputError("数据库地址须使用 HTTP 或 HTTPS，且不能包含凭据、路径或参数")
     if parts.port is not None and not 1 <= parts.port <= 65535:
         raise InputError("数据库端口无效")
     return parts
@@ -89,8 +88,6 @@ def validate_config(kind, values):
         _number(int(values["REDIS_DB"]), 0, 15)
         if values["REDIS_USER"] and not values["REDIS_PASSWORD"]:
             raise InputError("Redis ACL 用户名需要同时配置密码")
-        if values["REDIS_HOST"].lower() not in LOCAL_HOSTS and values["REDIS_TLS"] != "true":
-            raise InputError("远程 Redis 必须启用 TLS")
     if kind == "mongodb":
         if bool(values["MONGO_USER"]) != bool(values["MONGO_PASSWORD"]):
             raise InputError("MongoDB 用户名和密码需要同时配置")
@@ -269,14 +266,15 @@ def _mongo_connection(values, timeout):
     temporary = None
     client = None
     host = values["MONGO_HOST"]
-    tls = host.lower() not in LOCAL_HOSTS or bool(ca) or values["MONGO_SRV"] == "true"
+    tls = values.get("DISABLE_TLS") != "true" and (
+        host.lower() not in LOCAL_HOSTS or bool(ca) or values["MONGO_SRV"] == "true")
     kwargs = dict(serverSelectionTimeoutMS=timeout * 1000, connectTimeoutMS=timeout * 1000,
                   socketTimeoutMS=timeout * 1000, timeoutMS=timeout * 1000, maxPoolSize=1,
                   retryReads=False, retryWrites=False, tls=tls, connect=False)
     if values["MONGO_USER"]:
         kwargs.update(username=values["MONGO_USER"], password=values["MONGO_PASSWORD"], authSource=values["MONGO_AUTH_DB"])
     try:
-        if ca:
+        if tls and ca:
             ssl.create_default_context(cadata=ca)
             fd, temporary = tempfile.mkstemp(prefix="soduwork-connector-ca-", suffix=".pem")
             with os.fdopen(fd, "w", encoding="utf-8") as file:

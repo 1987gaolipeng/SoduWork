@@ -96,7 +96,16 @@ for (const relative of fs.readdirSync(root, {recursive: true})) {
       if (line) events.push(JSON.parse(line));
     }
   }
+  const pending = new Set();
+  const compactions = [];
+  for (const event of events) {
+    if (event.type === 'tool/call') pending.add(event.data.callId);
+    if (event.type === 'tool/result') pending.delete(event.data.message.source.callId);
+    if (event.type === 'compaction/start') compactions.push({seq: event.seq, pendingTools: pending.size});
+  }
   sessions.push({
+    compactions,
+    summaries: events.filter(event => event.type === 'compaction/summary').length,
     id: events.find(event => event.type === 'session')?.id,
     toolCalls: events.filter(event => event.type === 'tool/call').map(event => ({
       id: event.data.callId, name: event.data.name
@@ -451,6 +460,8 @@ def run_case(args, scenario, root, output, installation):
                 )
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 message, finish, sent = fixture.response(body)
+                usage_hook = getattr(fixture, "response_usage", None)
+                usage = usage_hook(body, message) if callable(usage_hook) else None
                 if finish == "error":
                     data = json.dumps(
                         {
@@ -504,6 +515,11 @@ def run_case(args, scenario, root, output, installation):
                             )
                             + "\n\n"
                         )
+                    if usage is not None:
+                        pieces.append("data: " + json.dumps({
+                            "id": "fixture-response", "object": "chat.completion.chunk",
+                            "created": 1, "model": MODEL, "choices": [], "usage": usage,
+                        }) + "\n\n")
                     data = ("".join(pieces) + "data: [DONE]\n\n").encode()
                     typ = "text/event-stream"
                     self.send_response(200)

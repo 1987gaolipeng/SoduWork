@@ -141,6 +141,11 @@ function augment(text, input, runtimeGuide, selections) {
   const guide = neutralize(runtimeGuide).trim().slice(0, 4000);
   const inputs = inputSelections(selections, plugins.map(item => item.pluginId));
   return visible + '\n\n' + START + '\n' + JSON.stringify({
+    // The resolver-owned identity, not a display name or user wording, selects
+    // this per-turn authoring contract. Keep it inside the hidden protocol block.
+    ...(plugins.some(item => item.pluginId === 'local:plugin-builder') ? {
+      authoring: { intent: 'plugin-authoring', instructions: require('../plugin-builder-plugin.cjs').authoringInstructions() },
+    } : {}),
     plugins,
     ...(inputs.length ? { inputs } : {}),
     ...(guide ? { runtimeGuide: guide } : {}),

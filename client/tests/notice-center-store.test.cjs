@@ -46,6 +46,17 @@ test('publication notices use localized system copy and retain recipient read ac
   await f.context._loadMateNoticeFolder('sent');
   assert.match(f.html(),/Recipient &lt;script&gt;/);assert.doesNotMatch(f.html(),/<script>/);
 });
+test('a downloaded installer is shown as a local client update in the received folder', async () => {
+  const f = fixture();
+  f.rows.received = [{ id: 'client_update_ready_1.13.18', kind: 'client_update', at: Date.now(),
+    read: false, text: 'SoduWork 1.13.18 安装包已下载并通过校验。' }];
+  await f.open();
+  assert.match(f.html(), /class="np-subject">客户端更新</);
+  assert.match(f.html(), /SoduWork 1\.13\.18 安装包已下载并通过校验。/);
+  f.click({ 'data-nnotice': 'client_update_ready_1.13.18' });
+  assert.deepEqual(f.localReads, ['client_update_ready_1.13.18']);
+});
+
 test('notice center renders the shared store and refreshes receipt status without a parallel cache',async()=>{
   const f=fixture();f.rows.received=[row()];f.rows.sent=[{...row(),read:true}];await f.open();
   assert.match(f.html(),/收到需求/);assert.match(f.html(),/data-ntask="task-1"/);

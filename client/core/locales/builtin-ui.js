@@ -1,6 +1,9 @@
 /* System-authored capability and requirement copy, shared by renderer and main process. */
 (function (global) {
   const rows = {
+    '整理需求，补充信息': ['Organize and clarify', '要件を整理・補足', '요구사항 정리 및 보완'],
+    '安排人员或 AI 执行': ['Assign to people or AI', '担当者または AI に割当', '담당자 또는 AI에 배정'],
+    '跟进进展，处理确认': ['Track progress and decisions', '進捗確認・承認対応', '진행 상황 및 확인 사항 처리'],
     "正在整理本轮成果…": ["Preparing this turn’s outputs…","今回の成果を整理しています…","이번 작업의 결과를 정리하는 중…"],
     "正在检查插件草稿…": ["Checking the plugin draft…","プラグインの下書きを確認しています…","플러그인 초안을 확인하는 중…"],
     "正在修复插件草稿…": ["Repairing the plugin draft…","プラグインの下書きを修正しています…","플러그인 초안을 수정하는 중…"],
@@ -60,6 +63,8 @@
     '退回去向：等待执行人根据返修意见继续修正。': ['Returned for revision: waiting for the executor to act on the feedback.', '差し戻し先：実行担当者によるフィードバックに基づく修正を待っています。', '수정 요청: 실행 담당자가 피드백에 따라 수정하기를 기다리고 있습니다.'],
     '已退回，等待执行人继续修正': ['Returned; waiting for the executor to continue revising', '差し戻しました。実行担当者による修正の続行を待っています', '반려되었습니다. 실행 담당자의 수정 재개를 기다리고 있습니다'],
     '本轮交付已验收或退回，请修改交付内容后重新提交': ['This delivery has already been accepted or returned. Revise the deliverables before submitting again.', '今回の成果物は承認済み、または差し戻されています。内容を修正してから再提出してください。', '이번 산출물은 이미 승인되었거나 반려되었습니다. 산출물을 수정한 후 다시 제출하세요.'],
+    '文件夹包含超过12层的文件，请将文件移近所选文件夹后重试': ['Folder contains directories nested more than 12 levels; move files closer to the selected folder', 'フォルダー内のファイルが12階層を超えています。選択したフォルダーに近い場所へ移動して再試行してください。', '폴더 안의 파일이 12단계보다 깊이 있습니다. 선택한 폴더에 더 가까운 위치로 옮긴 뒤 다시 시도하세요.'],
+    '文件夹打包失败': ['Folder packaging failed', 'フォルダーの圧縮に失敗しました', '폴더 압축에 실패했습니다'],
     '执行进展': ['Execution progress', '実行状況', '실행 진행 상황'],
     '需求进展': ['Issue progress', '要件の進捗', '요구사항 진행 상황'],
     '只有执行人可以继续修正这条需求': ['Only the executor can continue revising this issue', 'この要件の修正を続行できるのは実行担当者のみです', '실행 담당자만 이 요구사항의 수정을 계속할 수 있습니다'],

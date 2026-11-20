@@ -14,6 +14,7 @@ from ..conversation_handoff_models import ConversationHandoff, ConversationMessa
 from ..schemas import attachment_to_api
 from . import conversation_handoffs, execution_sessions
 from .auth_principals import active_user
+from ..timestamps import iso_utc
 
 
 async def _owned_task(session, client, row, *, user=None):
@@ -77,7 +78,7 @@ def _public(row, task, execution):
     state = execution_sessions.session_api(execution) if execution else None
     return {"id": row.id, "receipt": receipt,
             "title": task.title or (row.source or {}).get("title") or "云端会话",
-            "createdAt": row.created_at.isoformat() if row.created_at else "",
+            "createdAt": iso_utc(row.created_at) if row.created_at else "",
             "execution": state, "artifactUrl": task.artifact_url or ""}
 
 
@@ -135,5 +136,5 @@ async def detail(session, client, handoff_id, *, ref="", since=0, limit=400):
                 for item in messages],
             "approvals": [{"id": item.id, "taskId": task.id, "action": item.action,
                 "status": item.status, "required": item.required_count,
-                "createdAt": item.created_at.isoformat() if item.created_at else ""}
+                "createdAt": iso_utc(item.created_at) if item.created_at else ""}
                 for item in approvals]}

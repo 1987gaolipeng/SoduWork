@@ -107,7 +107,7 @@ export function McpForm({ initial, template, onClose, onSave, busy, publishLabel
   }
   const field = f => f.type === 'boolean'
     ? <label key={f.key} className="chk-inline connector-write"><input type="checkbox" checked={env[f.key] === 'true'}
-        onChange={e => setEnv(f.key, String(e.target.checked))} /><span>{f.label}<small>{tx('仅在需要创建、修改或发送内容时开启')}</small></span></label>
+        onChange={e => setEnv(f.key, String(e.target.checked))} /><span>{f.label}{f.key === 'ALLOW_WRITES' && <small>{tx('仅在需要创建、修改或发送内容时开启')}</small>}</span></label>
     : <label key={f.key} className="df-field"><span className="f-lbl">{f.label}{!f.required && <em>{tx('选填')}</em>}</span>
         <input className="f-in" type={f.secret ? 'password' : 'text'} autoComplete="off" value={env[f.key] || ''}
           onPaste={e => { const value = window.SoduWorkConnectorConfig.credentialPaste(f.key, e.clipboardData.getData('text/plain'));

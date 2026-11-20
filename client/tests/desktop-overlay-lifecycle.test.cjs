@@ -286,6 +286,36 @@ test('other work windows cannot supply overlay ready, heartbeat or shape', (t) =
   assert.equal(win.ignored, true);
 });
 
+test('a captured press keeps fast movement outside its last region, then restores passthrough', t => {
+  const h = harness(t), win = h.controller.createWindow();
+  h.ready(win);
+  h.screen.cursor = { x: 120, y: 120 }; h.timers.tick(40);
+  h.send('window-set-overlay-dragging', win, true);
+  h.screen.cursor = { x: 1000, y: 700 };
+  h.workWindows.push({ isDestroyed: () => false, getBounds: () => ({ x: 900, y: 600, width: 400, height: 300 }) });
+  h.timers.tick(120);
+  assert.equal(win.ignored, false);
+  h.send('window-set-overlay-dragging', win, false);
+  assert.equal(win.ignored, true);
+});
+
+test('capture cannot outlive blur, reload, emergency or originate from a work window', t => {
+  const h = harness(t), win = h.controller.createWindow(); h.ready(win);
+  const foreign = { webContents: new EventEmitter() };
+  h.send('window-set-overlay-dragging', foreign, true);
+  assert.equal(win.ignored, true);
+  for (const interrupt of [() => win.emit('blur'), () => win.reload(), () => h.controller.emergencyPassthrough('test')]) {
+    h.send('window-set-overlay-dragging', win, true);
+    assert.equal(win.ignored, false);
+    interrupt();
+    h.send('window-set-overlay-dragging', win, true);
+    assert.equal(win.ignored, true);
+    if (h.controller.emergency) h.controller.recoverFromEmergency();
+    h.ready(win); h.timers.tick(40);
+    assert.equal(win.ignored, true);
+  }
+});
+
 test('single component keeps its visible shape and releases input before notifying renderer of blur', (t) => {
   const h = harness(t);
   const win = h.controller.createWindow();

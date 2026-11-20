@@ -152,6 +152,11 @@ async function fetchModel(identity, modelName = '', timeoutMs = 8000, fetchImpl 
       return { ok: false, reason: '本地模型不存在或凭据未配置，请在「我的模型」中刷新' };
     }
     const config = local.config || {};
+    const thinkingConflict = thinkingCapabilities.conflict({ ...local, ...config, id: local.name });
+    if (thinkingConflict) {
+      if (options.allowHistorical && options.app) return historicalModel(options.app, identity, modelName);
+      return { ok: false, code: 'MODEL_THINKING_CONFLICT', reason: thinkingConflict };
+    }
     const thinking = thinkingCapabilities.profile({ ...local, ...config, id: local.name });
     const capabilities = require('../model-capability-contract.cjs').runtimeFields(config, local.capabilityCheck);
     const incompatible = require('../model-capability-contract.cjs').incompatibility(capabilities, requestedAgent === 'pi' ? ['streaming'] : []);
@@ -235,6 +240,11 @@ async function fetchModel(identity, modelName = '', timeoutMs = 8000, fetchImpl 
     if (!d || !d.ok) return { ok: false, reason: custom && d?.reason === '此底座不使用企业模型配置，请检查执行底座'
       ? '后台尚不支持新底座的模型配置，请更新后台后重试' : (d && d.reason) || '后台没给出可用的模型' };
     if (!d.key || !d.model) return { ok: false, reason: '后台回的配置不完整（缺 key 或 model）' };
+    const thinkingConflict = thinkingCapabilities.conflict({ ...d, id: d.model });
+    if (thinkingConflict) {
+      if (options.allowHistorical && options.app) return historicalModel(options.app, identity, modelName);
+      return { ok: false, code: 'MODEL_THINKING_CONFLICT', reason: thinkingConflict };
+    }
     const managed = custom || require('../agent-runtime/runtime-catalog').runtime(requestedAgent)?.modelMode === 'managed';
     if (d.quotaScope === 'personal' && (!managed || d.quotaVersion !== 2 ||
         d.personalQuotaSupported !== true || typeof d.quotaUsageToken !== 'string' || !d.quotaUsageToken ||

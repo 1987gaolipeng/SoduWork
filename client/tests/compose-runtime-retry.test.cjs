@@ -3,10 +3,31 @@ const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), vm = require('node:vm'), path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../components/panels/panels-compose-runtime.js'), 'utf8');
 const flush = async () => { for (let i = 0; i < 40; i++) await Promise.resolve(); };
-const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
+const deferred = () => {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+};
 const fullCatalog = ['pi', 'codex-harness', 'opencode', 'qwen', 'dsh', 'codex'].map(id => ({ id }));
+function clock() {
+  let now = 0, sequence = 0;
+  const timers = new Map();
+  return {
+    setTimeout(fn, delay) { const id = ++sequence; timers.set(id, { fn, at: now + delay }); return id; },
+    clearTimeout(id) { timers.delete(id); },
+    async advance(ms) {
+      const end = now + ms;
+      while (true) {
+        const next = [...timers].filter(([, timer]) => timer.at <= end).sort((a, b) => a[1].at - b[1].at)[0];
+        if (!next) break;
+        now = next[1].at; timers.delete(next[0]); next[1].fn(); await flush();
+      }
+      now = end; await flush();
+    },
+  };
+}
 function fixture(first, options = {}) {
-  const handlers = new Map(), timers = new Map(), elements = new Map(); let calls = 0;
+  const handlers = new Map(), timers = new Map(), elements = new Map(); let calls = 0, refreshes = 0;
   let owner = 'hub-a/device/user-a';
   const listeners = new Map();
   const healthProject = reply => {
@@ -29,10 +50,13 @@ function fixture(first, options = {}) {
     probe: async () => ({ ok: true, accessControl: { supported: true, schema: 'soduwork.access-policy/v1' } }) };
   const ctx = { window: null, document: root, WorkComposer: { contextButton: () => '' },
     SoduWorkAPI: { taskStorageKey: () => owner }, addEventListener: (event, listener) => listeners.set(event, listener),
-    setTimeout(fn) { const id = {}; timers.set(id, fn); return id; }, clearTimeout(id) { timers.delete(id); } }; ctx.window = ctx;
+    setTimeout(fn) { const id = {}; timers.set(id, fn); return id; }, clearTimeout(id) { timers.delete(id); } };
+  if (options.clock) Object.assign(ctx, { setTimeout: options.clock.setTimeout, clearTimeout: options.clock.clearTimeout });
+  ctx.window = ctx;
   vm.runInNewContext(source, ctx);
-  const bind = () => ctx.ComposeRuntime.bind(root, { api: () => api }); bind();
-  return { api, context: ctx, runtime: ctx.ComposeRuntime, calls: () => calls, bind, click: () => handlers.get('#cpRuntime:click')(),
+  const bind = () => ctx.ComposeRuntime.bind(root, { api: () => api, refresh: () => { refreshes++; } }); bind();
+  return { api, context: ctx, runtime: ctx.ComposeRuntime, calls: () => calls, refreshes: () => refreshes,
+    bind, click: () => handlers.get('#cpRuntime:click')(),
     more: () => handlers.get('#cpRuntimeMore:click')({stopPropagation() {}}),
     owner(value, event = true) { owner = value; if (event) listeners.get('soduwork-data-scope-changed')?.(); },
     goalButton: () => element('#cpIntentMenu'),
@@ -206,6 +230,90 @@ test('a timed-out catalog releases its pending slot and a late result cannot rep
   assert.equal(f.runtime.catalog().length, 6); assert.ok(!f.runtime.catalog().some(row => row.id === 'obsolete'));
 });
 
+test('a slow last ACP runtime cannot discard the ready OpenCode projection after the composer deadline', async () => {
+  const { createRuntimeCatalog } = require('../main/agent-runtime/runtime-catalog');
+  const { createRunnerRuntimeAdapter } = require('../main/agent-runtime/runner-adapter');
+  const { createPiSessionBridge } = require('../main/agent-runtime/pi-session-bridge');
+  const document = require('../../hub-backend/app/agent_catalog.json');
+  const extension = { ...structuredClone(document.agents.find(row => row.id === 'dsh')),
+    id: 'atelier', displayName: 'Atelier', order: 95,
+    runner: { adapter: 'acp', bins: ['atelier'], args: ['acp'] },
+    install: { installer: 'manual', pkg: 'atelier', source: 'local build' } };
+  const catalog = createRuntimeCatalog({ ...document, agents: [...document.agents, extension] });
+  const time = clock(), calls = [];
+  const runtime = { rpc(op, payload, timeout) {
+    assert.equal(op, 'runtime.detect'); calls.push(payload.key);
+    if (payload.key === 'atelier') return new Promise((_, reject) => {
+      time.setTimeout(() => reject(Error('Runner request timed out')), timeout);
+    });
+    return Promise.resolve({ ok: true, data: {
+      installed: payload.key === 'opencode', state: payload.key === 'opencode' ? 'ready' : 'missing',
+    } });
+  } };
+  const bridge = createPiSessionBridge({ catalog,
+    runnerAdapters: catalog.runnerRuntimes().map(runtimeSpec => createRunnerRuntimeAdapter({ runtimeSpec, runnerRuntime: runtime })),
+    sessionModule: { probe: async () => ({ ok: true }), open: async () => { throw Error('No model is used'); } } });
+  let projection;
+  try {
+    const f = fixture(async () => {
+      // Cross-process dispatch starts the host deadline after the renderer deadline.
+      await new Promise(resolve => time.setTimeout(resolve, 1));
+      projection = await bridge.availableRuntimes(null, { force: true });
+      return projection;
+    }, { clock: time });
+    await flush(); await time.advance(1);
+    assert.equal(calls.at(-1), 'atelier');
+    assert.ok(calls.indexOf('opencode') < calls.indexOf('atelier'));
+    await time.advance(14999);
+    assert.equal(projection, undefined);
+    assert.equal(await f.runtime.ready(), true, 'Pi remains usable while the inventory is late');
+    const refreshes = f.refreshes();
+    await time.advance(1);
+    assert.deepEqual(projection.availableRuntimes.map(row => row.id), ['pi', 'opencode']);
+    assert.equal(projection.missing.find(row => row.id === 'atelier').availability.ok, false);
+    assert.deepEqual(Array.from(f.runtime.catalog(), row => row.id), ['pi', 'opencode']);
+    assert.ok(f.refreshes() > refreshes, 'the late inventory repaints the composer');
+    assert.match(f.runtime.controls(''), /data-runtime='opencode'/);
+    assert.doesNotMatch(f.runtime.controls(''), /data-runtime='atelier'/);
+  } finally { await bridge.dispose(); }
+});
+
+test('a timed-out inventory cannot fill a newer pending retry with its stale success', async () => {
+  const old = deferred(), fresh = deferred(), f = fixture(() => old.promise);
+  await flush(); f.expire(); await f.runtime.ready();
+  f.api.runtimes = () => fresh.promise;
+  f.bind(); await flush();
+  old.resolve({ ok: true, runtimes: [{ id: 'obsolete' }] }); await flush();
+  assert.deepEqual(Array.from(f.runtime.catalog(), row => row.id), ['pi']);
+  fresh.resolve({ ok: true, runtimes: fullCatalog, availableRuntimes: fullCatalog, missing: [] });
+  await f.runtime.ready();
+  assert.equal(f.runtime.catalog().length, fullCatalog.length);
+});
+
+for (const failure of ['unavailable', 'rejection']) {
+  test(`a timed-out catalog ${failure} cannot demote a successful retry`, async () => {
+    const old = deferred(), f = fixture(() => old.promise);
+    await flush(); f.expire(); await f.runtime.ready();
+    f.click(); await f.runtime.ready(); await flush();
+    assert.equal(f.runtime.catalog().length, fullCatalog.length);
+    if (failure === 'rejection') old.reject(Error('The old inventory failed'));
+    else old.resolve({ ok: false, runtimes: [], availableRuntimes: [] });
+    await flush();
+    assert.equal(f.runtime.catalog().length, fullCatalog.length);
+    assert.match(f.runtime.controls(''), /data-runtime='opencode'/);
+  });
+}
+
+test('a late inventory from the previous account cannot replace the current account catalog', async () => {
+  const old = deferred(), f = fixture(() => old.promise);
+  await flush(); f.expire(); await f.runtime.ready();
+  f.owner('hub-b/device/user-b'); await f.runtime.ready(); await flush();
+  assert.equal(f.runtime.catalog().length, fullCatalog.length);
+  old.resolve({ ok: true, runtimes: [{ id: 'previous-account' }] }); await flush();
+  assert.equal(f.runtime.catalog().length, fullCatalog.length);
+  assert.ok(!f.runtime.catalog().some(row => row.id === 'previous-account'));
+});
+
 test('selecting a chat-only Agent disables the goal entry and returning to Pi restores it', async () => {
   const f = fixture(() => ({ ok: true, runtimes: [
     { id: 'pi', goalMode: 'native' }, { id: 'chat-only-acp', goalMode: 'none' },
@@ -252,6 +360,36 @@ test('runtime-added events refresh the catalog once, preserve the selected Agent
   for (const listener of listeners) listener(); await flush();
   assert.equal(f.runtime.value(), 'custom-new');
 });
+
+for (const [label, latest, ready, state] of [
+  ['unavailable probe', { ok: false, state: 'missing', reason: 'The newer probe found no runtime' }, false, 'unavailable'],
+  ['unsupported access policy', { ok: true,
+    accessControl: { supported: false, schema: 'soduwork.access-policy/v1' } }, true, 'unsupported'],
+]) {
+  test(`late inventory preserves a newer ${label}`, async () => {
+    const old = deferred(), time = clock();
+    const f = fixture(() => old.promise, { project: false, clock: time });
+    f.api.probe = async () => latest;
+    await flush(); await time.advance(15000);
+    assert.equal(await f.runtime.ready(), ready);
+    assert.equal(f.runtime.accessState(), state);
+    assert.equal(f.runtime.accessSupported(), false);
+
+    // The catalog captured its health before the explicit probe completed.
+    const staleHealth = { ok: true, state: 'ready',
+      accessControl: { supported: true, schema: 'soduwork.access-policy/v1' } };
+    const rows = ['pi', 'opencode'].map(id => ({ id, availability: staleHealth }));
+    old.resolve({ ok: true, runtimes: rows, availableRuntimes: rows, missing: [] });
+    await flush();
+
+    assert.deepEqual(Array.from(f.runtime.catalog(), row => row.id), ['pi', 'opencode'],
+      'the late inventory still restores healthy choices');
+    assert.equal(await f.runtime.ready(), ready, 'older health must not change admission after a newer probe');
+    assert.equal(f.runtime.accessState(), state);
+    assert.equal(f.runtime.accessSupported(), false, 'older inventory cannot restore revoked permission support');
+    if (latest.reason) assert.equal(f.runtime.availability().reason, latest.reason);
+  });
+}
 
 test('directory runtime restoration requires an installed available Agent and never substitutes Pi', async () => {
   const f = fixture(() => ({ ok: true, runtimes: fullCatalog })); await f.runtime.ready();

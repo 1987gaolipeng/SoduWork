@@ -316,6 +316,13 @@ def _max_bytes():
     return configured * 1024 * 1024 if configured > 0 else None
 
 
+_LOSSY_OFFICE_EDITS = {
+    "spreadsheet": "XLSX 工作簿不支持在线编辑内容；请下载文件并使用电子表格应用编辑",
+    "legacy_document": "DOCX 文档不支持在线编辑内容；请下载文件并使用文字处理应用编辑",
+    "presentation": "PPTX 演示文稿不支持在线编辑内容；请下载文件并使用演示文稿应用编辑",
+}
+
+
 def _document_text_format(body: dict) -> str:
     """Resolve the plain-text document extension requested by the client."""
     requested = str(body.get("format") or body.get("textFormat") or "").strip().lower()
@@ -970,6 +977,11 @@ async def _update_library_item(item_id, body, client, session):
             raise HTTPException(400, "此资料类型不支持在线编辑")
         try:
             export_kind, text_format = library_formats.editor_format(row.kind, row.filename, row.content_type)
+            if export_kind in _LOSSY_OFFICE_EDITS:
+                # The text editor reads only plain text (the active worksheet,
+                # body paragraphs or slide text). Exporting that text builds a
+                # new package and discards tables, images, formulas and notes.
+                raise ValueError(_LOSSY_OFFICE_EDITS[export_kind])
             data, suffix, content_type = await asyncio.to_thread(
                 library_formats.export, export_kind, next_title, str(body.get("content") or ""), text_format
             )

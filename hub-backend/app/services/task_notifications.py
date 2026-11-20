@@ -109,6 +109,18 @@ async def deliver(job, sessions=SessionLocal):
                               for c in previous if c.id not in current)
     # Return the connection to the pool before waiting on device transports.
     await task_access.publish_events(events, publish=publish_reliably)
+    if metadata.get("review_request_id"):
+        from ..automation_models import ApprovalRequest
+        from . import code_delivery
+        async with sessions() as session:
+            task = await session.get(models.Task, tid)
+            request = await session.get(ApprovalRequest, metadata["review_request_id"])
+            # Delayed/retried notifications cannot invite acceptance of a gate
+            # already decided, cancelled, or superseded by a later revision.
+            if (task is not None and request is not None and request.task_id == tid
+                    and request.action == "review" and request.status == "pending"
+                    and not task.archived_at and not task.reviewed_at):
+                await code_delivery.notify_reviewer(session, task, "交付成果", publish=publish_reliably)
     if metadata.get("notification_id"):
         from . import task_assignment_notifications
         async with sessions() as session:

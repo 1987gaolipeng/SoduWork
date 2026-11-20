@@ -7,6 +7,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import models
+from ..timestamps import iso_utc
 
 
 SOURCE_LABELS = {
@@ -210,7 +211,7 @@ async def overview(
             "costKnown": daily_row.cost_known, "currency": daily_row.currency,
             "durationMs": int(daily_row.duration_ms or 0),
             "quality": event_row.quality or "unknown",
-            "occurredAt": daily_row.occurred_at.isoformat() if daily_row.occurred_at else "",
+            "occurredAt": iso_utc(daily_row.occurred_at) if daily_row.occurred_at else "",
         })
     cost_rows = (await session.execute(select(
         func.count(daily.id).label('records'),

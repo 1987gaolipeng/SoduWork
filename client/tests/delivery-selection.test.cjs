@@ -158,3 +158,92 @@ test('requested screenshots, explicit replacements, and summary-only work retain
   f.manifest({presentation:'summary',deliverables:[]});
   assert.equal(await taskDelivery.capture(f.handle,'completed'), null);
 });
+
+function nativeTurn(acc, request, content) {
+  acc.push({type:'message_end', message:{role:'user',content:request}});
+  acc.push({type:'message_start', message:{role:'assistant'}});
+  for (const [index, block] of content.entries()) {
+    acc.push({type:'message_update',assistantMessageEvent:{type:block.kind + '_end',contentIndex:index,
+      ...(block.kind === 'toolcall' ? {toolCall:block.toolCall} : {content:block.text})}});
+  }
+  acc.push({type:'message_end',message:{role:'assistant',stopReason:'stop'}});
+  acc.push({type:'agent_settled'});
+}
+
+test('native rework final links exclude an edited intermediate document without erasing history', async t => {
+  const f=fixture(t), acc=require('../main/pi-session/event-stream').create();
+  f.handle.snapshot=()=>acc.snapshot();
+  f.write('report.md','# Original rejected report',true);
+  nativeTurn(acc,'Write a report',[{kind:'text',text:'[Original report](report.md)'}]);
+  f.write('report.md','# Intermediate revision');
+  f.write('report-v2.md','# Final revised report');
+  nativeTurn(acc,'Revise the report based on the review feedback',[
+    {kind:'thinking',text:'Maybe deliver [old draft](report.md)'},
+    {kind:'text',text:'[Final revised report](report-v2.md)'},
+  ]);
+  assert.equal(acc.snapshot().messages.at(-1).text,'','use the real public snapshot shape');
+  assert.deepEqual(names(runtime.snapshot(f.handle)),['report-v2.md']);
+  assert.deepEqual((await taskDelivery.capture(f.handle,'completed')).files.map(row=>row.name),['report-v2.md']);
+  assert.equal(acc.snapshot().messages.length,4,'both conversation turns remain');
+  assert.equal(fs.readFileSync(path.join(f.cwd,'report.md'),'utf8'),'# Intermediate revision');
+  assert.equal(runtime.snapshot(f.handle).items.some(row=>row.relative==='report.md'),true);
+});
+
+test('native final links retain multiple deliverables and their unchanged required resources', async t => {
+  const f=fixture(t), acc=require('../main/pi-session/event-stream').create();
+  f.handle.snapshot=()=>acc.snapshot();
+  f.write('report.md','# Intermediate revision');
+  f.write('report-v2.md','# Final report');
+  f.write('report-v2.html','<!doctype html><html><head><link rel="stylesheet" href="assets/style.css"></head><body>Final report</body></html>');
+  f.write('assets/style.css','body{color:purple}',true);
+  nativeTurn(acc,'Revise the report',[
+    {kind:'text',text:'[Final report](report-v2.md) and [Website](report-v2.html)'},
+  ]);
+  assert.deepEqual(names(runtime.snapshot(f.handle)),['report-v2.html','report-v2.md']);
+  assert.deepEqual((await taskDelivery.capture(f.handle,'completed')).files.map(row=>row.name),
+    ['assets/style.css','report-v2.html','report-v2.md']);
+  f.manifest({deliverables:[{path:'report.md'},{path:'report-v2.md'}]});
+  assert.deepEqual(names(runtime.snapshot(f.handle)),['report-v2.md','report.md'],
+    'an explicit complete manifest retains its declared multi-file set');
+  f.manifest({deliverables:[{path:'report.md'},{path:'report-v2.md',replaces:['report.md']}]});
+  assert.deepEqual(names(runtime.snapshot(f.handle)),['report-v2.md']);
+});
+
+test('delivery selection ignores pre-tool prose, hidden scopes and unfinished replies in native snapshots', t => {
+  const select=require('../main/conversation/delivery-selection');
+  const user={role:'user',text:'Revise the report'};
+  const blocks=[{kind:'text',text:'[Intermediate](report.md)',done:true},
+    {kind:'toolcall',toolCall:{name:'write',arguments:{content:'[Unrelated](other.md)'}}},
+    {kind:'thinking',text:'[Thought](thought.md)'},
+    {kind:'text',text:'[Final](report-v2.md)',done:true}];
+  const assistant={role:'assistant',text:'',blocks,done:true,stopReason:'stop',scope:'normal'};
+  const answer=value=>select.turn({messages:[user,value]}).answer;
+  assert.equal(answer(assistant),'[Final](report-v2.md)');
+  assert.equal(answer({...assistant,blocks:blocks.slice(0,2)}),'');
+  for (const scope of ['goal-progress','goal-execution','goal-review','runtime-notice'])
+    assert.equal(answer({...assistant,scope}),'',scope);
+  for (const patch of [{done:false},{errorMessage:'failed'},{stopReason:'error'},{stopReason:'length'},
+    {blocks:[{kind:'text',text:'[Partial](report.md)',done:false}]}])
+    assert.equal(answer({...assistant,...patch}),'');
+  assert.equal(answer({...assistant,scope:'goal-final'}),'[Final](report-v2.md)');
+});
+
+test('legacy empty-block and Runner block replies retain their final-file selection', async t => {
+  const f=fixture(t);
+  f.write('report.md','# Intermediate revision');f.write('report-v2.md','# Final revised report');
+  const final='[Final revised report](report-v2.md)';
+  for (const reply of [
+    {text:final,blocks:[]},
+    {content:final,blocks:[]},
+    {content:[{type:'text',text:final}],blocks:[]},
+    // Runner's public reply has blocks without scope or per-block done flags.
+    {blocks:[{kind:'text',text:final}],done:true},
+  ]) {
+    f.state.messages=[{role:'user',text:'Revise the report'},{role:'assistant',...reply}];
+    assert.deepEqual((await taskDelivery.capture(f.handle,'completed')).files.map(row=>row.name),['report-v2.md']);
+  }
+  f.state.messages=[{role:'user',text:'Revise the report'},
+    {role:'assistant',text:final,blocks:[{kind:'thinking',text:'Private deliberation'}]}];
+  assert.deepEqual((await taskDelivery.capture(f.handle,'completed')).files.map(row=>row.name).sort(),['report-v2.md','report.md'],
+    'nonempty structured blocks remain authoritative instead of falling back to stale flattened text');
+});

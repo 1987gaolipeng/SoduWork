@@ -492,6 +492,9 @@ const Store={
   /* Merge WebSocket and integration events into local state without echoing them back to the server. */
   applyServerEvent(ev){
     if(!ev||!ev.type)return;
+    if(ev.task && (ev.type==='task.created'||ev.type==='task.updated')) {
+      try { window.RequirementDiagnostics?.emit('renderer.task',window.RequirementDiagnostics.task(ev.task)); } catch (_) {}
+    }
     if((ev.type==='task.created'||ev.type==='task.updated')&&ev.task?.projectionPending){
       const canonical=TaskSync.mergeSaveReceipt(this._shadow[ev.task.id],ev.task);
       delete canonical.statusTransition;
@@ -720,6 +723,23 @@ SoduWorkStoreLifecycle.install(Store,{
   },
   recovered:()=>{if(typeof _otaUpdate==='function')void _otaUpdate(true);},
 });
+
+function watchClientUpdateNotices() {
+  const updater = window.soduWorkAPI;
+  function record(status) {
+    const version = status?.targetVersion;
+    if (!version) return;
+    if (status.state === 'downloaded' && (!status.phase || status.phase === 'ready')) {
+      logNotice(`SoduWork ${version} 安装包已下载并通过校验。`, null, 'client_update',
+        { noticeEventId: 'client_update_ready_' + version });
+    } else if (status.state === 'manual') {
+      logNotice(`请前往下载页手动安装 SoduWork ${version}。`, null, 'client_update',
+        { noticeEventId: 'client_update_manual_' + version });
+    }
+  }
+  updater?.onClientUpdateStatus?.(record);
+  updater?.clientUpdateStatus?.().then(record).catch(() => {});
+}
 
 /* The renderer only triggers full-client updates; the main process owns Hub selection, validation, and execution. */
 async function _otaUpdate(silent){

@@ -3,8 +3,8 @@
  * Hub is authoritative for tasks. store.js queues per-task put/patch/delete
  * operations and replays them on reconnect instead of overwriting the task table.
  * Exposes task operations, configuration sync, registerClient, and connectWS.
- * The default Hub is https://service.soduwork.ai; the login gate can change it through
- * the main-process hub-endpoint policy. Identities and pending operations remain
+ * The main-process hub-endpoint policy selects the default: local for source runs,
+ * hosted for packaged clients. The login gate can change it. Identities and pending operations remain
  * isolated by service. X-Soduwork-Device identifies the installation using Electron
  * secure storage; User.id is only a legacy first-migration hint.
  * window.SoduWorkAPI is canonical; compatibility aliases remain at the end.
@@ -665,7 +665,10 @@
     if (!o.signal) o.signal = _abortSignal(DEFAULT_TIMEOUT);
     var res;
     try { res = await fetch(apiUrl(path), o); }
-    catch (error) { if (!opts?.signal?.aborted || error?.name !== 'AbortError') mark(false); throw error; }
+    catch (error) {
+      global.RequirementDiagnostics?.http(global.RequirementDiagnostics.emit,path,o.body,{},0);
+      if (!opts?.signal?.aborted || error?.name !== 'AbortError') mark(false); throw error;
+    }
     try { trace?.response?.(res); } catch (_) {}
     /*
      * Any HTTP response proves reachability; 4xx/5xx are request failures, not offline status.
@@ -673,6 +676,7 @@
      */
     mark(true);
     var txt = await res.text();
+    try { global.RequirementDiagnostics?.http(global.RequirementDiagnostics.emit,path,o.body,JSON.parse(txt),res.status); } catch (_) {}
     if (requestScope !== taskStorageKey('ops')) throw staleTaskScope();
     assertRequestAuth(auth, false);
     /*
@@ -1099,7 +1103,7 @@
     var result;
     try {
       result = await bridge.localRequirementParse({ model: reference, input: localParseInput(text, attachments),
-        instructions: localParseInstructions(options), maxOutputTokens: 1024, timeoutMs: 60000, requestId });
+        instructions: localParseInstructions(options), timeoutMs: 60000, requestId });
     } catch (_) {
       return { _parseError: '本地需求解析未能完成；原文已保留，请检查本地模型后重试或手动填写' };
     }
@@ -3217,8 +3221,6 @@
         var wr = (typeof workRoot === 'function') ? String(workRoot() || '').trim() : '';
         if (wr) body.workRoot = wr;
       } catch (e) { /* A missing workspace value must not prevent registration. */ }
-      /* Start the Runner with an existing local secret while Hub is offline; refresh after initial registration and let it reconnect. */
-      await syncRunnerConfig(body.workRoot || '', registration);
       try {
         if (window.soduWorkAPI && window.soduWorkAPI.deviceAuthBootstrap) {
           var secure = await registration.step(function () { return window.soduWorkAPI.deviceAuthBootstrap({
@@ -3242,7 +3244,9 @@
               rememberLoginAccount(loginAccount(secure.user.email) || loginAccount(secure.user.username), secure);
             }
             rememberSession(secure);
-            await syncRunnerConfig(body.workRoot || '', registration);
+            if (secure.ok && secure.session && !secure.activationRequired) {
+              await syncRunnerConfig(body.workRoot || '', registration);
+            }
             registration.check();
             if (secure.ok) mark(true);
             return secure;
@@ -3255,7 +3259,7 @@
         }
         var r = await registration.step(function () { return jfetch('/clients/register', { method: 'POST', body: JSON.stringify(body) }); });
         if (r && r.secret) setSecret(r.secret);  // Persist the initial device binding for subsequent requests.
-        await syncRunnerConfig(body.workRoot || '', registration);
+        if (r?.authState === 'active') await syncRunnerConfig(body.workRoot || '', registration);
         registration.check();
         mark(true); return r;
       }

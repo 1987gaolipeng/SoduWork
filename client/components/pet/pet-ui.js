@@ -240,6 +240,7 @@ function clampPetIntoView() {
   let nx = x, ny = y;
   if (nx < 0 || nx > maxX) nx = Math.max(12, Math.min(nx, Math.max(12, maxX - 12)));
   if (ny < 0 || ny > maxY) ny = Math.max(12, Math.min(ny, Math.max(12, maxY - 12)));
+  if (typeof clampOverlayPosition === 'function') ({ x: nx, y: ny } = clampOverlayPosition(nx, ny, pw, ph));
   if (nx !== x || ny !== y) {
     pet.style.right = 'auto'; pet.style.bottom = 'auto';
     pet.style.left = nx + 'px'; pet.style.top = ny + 'px';
@@ -284,6 +285,7 @@ function _keepRingOnScreen() {
 /* Dragging. */
 let dragging = false;
 let petPointerId = null;
+let releasePetPointer = null;
 let dragOX = 0, dragOY = 0;       /* Initial pointer coordinates. */
 let dragPX = 0, dragPY = 0;       /* Initial pet coordinates. */
 let dragEndTime = 0;
@@ -302,14 +304,14 @@ function _onPetPointerDown(e) {
   dragging = false;
   _downOnRing = !!(e.target && e.target.closest && e.target.closest('#petRing'));
   /*
-   * Listen on document so fast movement outside the pet does not interrupt dragging. Avoid
-   * pointer capture, which redirects ring clicks. Expand the overlay only when dragging
-   * starts.
+   * Capture the original pressed element so fast movement stays attached without
+   * redirecting ring clicks to the pet container. Expand only after the threshold.
    */
   document.addEventListener('pointermove', _onPetPointerMove);
   document.addEventListener('pointerup', _onPetPointerUp);
   document.addEventListener('pointercancel', _onPetPointerUp);
   window.addEventListener('blur', _onPetPointerBlur);
+  if (typeof captureOverlayPointer === 'function') releasePetPointer = captureOverlayPointer(e, _onPetPointerBlur);
   /* Use the default hover cursor and switch to grabbing only while pressed.
    Functional ring buttons retain click behavior instead of starting a drag. */
   if (!_downOnRing && typeof armGrabCursor === 'function') armGrabCursor(false);
@@ -364,6 +366,13 @@ function _onPetPointerUp(e) {
   if (petPointerId === null || (e && e.pointerId !== petPointerId)) return;
   petPointerId = null;
   const wasDragging = dragging;
+  // A release can arrive before the next animation frame; retain its last move.
+  if (wasDragging) {
+    let x = Math.max(0, Math.min(_pendX, window.innerWidth - pet.offsetWidth));
+    let y = Math.max(0, Math.min(_pendY, window.innerHeight - pet.offsetHeight));
+    if (typeof clampOverlayPosition === 'function') ({ x, y } = clampOverlayPosition(x, y, pet.offsetWidth, pet.offsetHeight));
+    setPetPos(x, y);
+  }
   dragging = false;
   dragOX = dragOY = 0;
   pet.classList.remove('dragging');
@@ -371,6 +380,7 @@ function _onPetPointerUp(e) {
   document.removeEventListener('pointerup', _onPetPointerUp);
   document.removeEventListener('pointercancel', _onPetPointerUp);
   window.removeEventListener('blur', _onPetPointerBlur);
+  if (releasePetPointer) { releasePetPointer(); releasePetPointer = null; }
   if (typeof disarmGrabCursor === 'function') disarmGrabCursor();
   /*
    * Shrink only after an actual drag to balance expandForOverlay. Shrinking before a click
@@ -529,6 +539,7 @@ window.addEventListener('load', () => {
 });
 
 window.addEventListener('resize', clampPetIntoView);
+window.addEventListener('overlay-displays-changed', clampPetIntoView);
 
 /* Initialize after DOM readiness. */
 if (document.readyState === 'loading') {

@@ -15,6 +15,7 @@ from .local_base import (_CTX_WINDOW_DEFAULT, _LOCK, _MEM_LINES, _PROFILES, _RUN
                          _WIN, _ANSI, _opencode_bin, _COMPACT_AT, _STORE, _friendly,
                          ctx_pct)
 from .local_base import _append_events, _append_raw, _record_event, _record_terminal, _save_meta
+from .local_base import _LAUNCH_TREE_UNCONFIRMED, _LAUNCH_TREE_UNCONFIRMED_ERROR
 from . import conversation_plugins, local_turn_outcome, local_context_policy
 
 log = logging.getLogger("uvicorn.error")
@@ -24,6 +25,7 @@ _CODEX_TRANSPORT_NOISE = re.compile(
     re.I)
 
 _STALL_RETRY_LIMIT = max(0, int(os.environ.get("SODUWORK_LOCAL_STALL_RETRIES") or 1))
+_LAUNCH_STOP_TIMEOUT_S = 3.0
 _STALL_RECOVERY_PROMPT = (
     "SoduWork 检测到上一轮长时间没有任何新输出，已经中断那一轮并自动续跑。\n"
     "不要重复已经完成的工作；先检查当前工作区、进程和服务的实际状态，从最后一步继续。"
@@ -136,6 +138,8 @@ def stop_sync(cfg: dict, ref: str) -> dict:
         run = _RUNS.get(ref)
         if not run:
             return {"ok": False, "error": "这个本地会话不在了"}
+        if run.get('failureKind') == _LAUNCH_TREE_UNCONFIRMED:
+            return {"ok": False, "error": _LAUNCH_TREE_UNCONFIRMED_ERROR}
         from . import local_task_goal
         goal_controlled = bool(run.get("goalContract")) and run.get("cli") != "pi"
         if goal_controlled:
@@ -159,15 +163,30 @@ def stop_sync(cfg: dict, ref: str) -> dict:
             return {"ok": False, "error": "它这会儿没在跑"}
         run["stopping"] = True
         run["queue"] = []          # Clear queued follow-ups when stopping so execution does not immediately restart.
+        launch_pending = run.get('_launchPending')
+        owner = run.get('_workerIdentity')
+        pid, proc = int(run.get('pid') or 0), run.get('proc')
     from . import access_broker
     access_broker.close(ref)
+    if launch_pending:
+        # The worker must observe any process returned by an in-flight Popen and
+        # confirm its exit. An accepted cancellation is not a stop receipt.
+        launch_pending['retry'].set()
+        if not launch_pending['done'].wait(_LAUNCH_STOP_TIMEOUT_S):
+            return {"ok": False, "error": launch_pending.get('error') or "启动仍在取消清理中，尚未确认进程退出", **goal_receipt}
+        with _LOCK:
+            current = _RUNS.get(ref)
+            if current is not run or current.get('_workerIdentity') is not owner:
+                return {"ok": False, "error": "会话执行已变更，未停止新的执行", **goal_receipt}
+        return {"ok": bool(launch_pending['stopped']),
+                "stopped": bool(launch_pending['stopped']), **goal_receipt}
     if run.get("contextCompacting"):
         return {"ok": True, "stopped": True, **goal_receipt}
-    ok = _kill_tree(ref)
+    ok = _kill_tree(ref, expected_pid=pid, expected_proc=proc)
     if not ok:
         with _LOCK:
             r = _RUNS.get(ref)
-            if r:
+            if r is run and r.get('_workerIdentity') is owner:
                 r["stopping"] = False
         return {"ok": False, "error": "没能确认它停下来（进程可能还在收尾，稍后可再点一次）"}
     return {"ok": True, "stopped": True, **goal_receipt}
@@ -685,8 +704,10 @@ def _llm_gate_check(prof: dict, cfg: dict) -> str:
     from urllib.parse import urlparse
     from .runtime_tls import https_handler
     host = urlparse(base).hostname or base
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), https_handler())
     try:
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            https_handler())
         opener.open(urllib.request.Request(
             base.rstrip("/") + "/models", headers={"User-Agent": "SoduWork-Gate/1"}),
             timeout=5).close()

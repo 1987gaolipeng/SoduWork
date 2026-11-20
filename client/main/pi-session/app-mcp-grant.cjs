@@ -52,17 +52,22 @@ function stamp(value) { return value?.connection?.credentialKey ? value.connecti
 function guardSend(session, options) {
   const source = sources.get(session) || {}, { sender, app, deps } = source;
   source.assertActive?.();
+  const inheritedSelection = !options.clearPluginSelection && !options.pluginIds?.length;
   const selected = (options.clearPluginSelection ? [] : options.pluginIds?.length
     ? options.pluginIds : session.snapshot?.().activePlugins || []).slice();
   const selectedApp = app ? require('../app-conversation-connection.cjs').association(app, selected, deps) : '';
   return mapResult(selectedApp, selectedApp => {
     source.assertActive?.();
-    const pluginId = selectedApp || source.nativePluginId || '';
+    const inheritedApp = inheritedSelection ? session.appPluginId : '';
+    const pluginId = selectedApp || source.nativePluginId || inheritedApp || '';
     // Capture each accepted turn independently. Selecting another application or
     // moving this conversation cannot change an already-queued turn's authority.
     if (!source.nativePluginId && app) {
       options.pluginIds = selected.slice();
       if (!selected.length) options.clearPluginSelection = true;
+      // Keep the accepted selection paired with this turn's application identity,
+      // but let ordinary chat retire unavailable inherited plugins at execution.
+      else if (inheritedSelection && !pluginId) options.inheritedPluginSelection = true;
     }
     return mapResult(context(sender, pluginId, undefined, app, deps), current => {
       source.assertActive?.();

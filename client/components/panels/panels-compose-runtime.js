@@ -301,12 +301,16 @@
   async function loadCatalog(options, force = false) {
     syncOwner();
     if (loadPromise) return loadPromise;
-    if (force) { catalogGeneration++; catalogLoaded = false; }
+    if (force) catalogLoaded = false;
     if (catalogLoaded) return catalog;
     const api = options.api();
     if (!api || typeof api.runtimes !== 'function') return catalog;
-    const generation = catalogGeneration;
-    const job = Promise.resolve().then(() => bounded(api.runtimes(force ? { force: true } : undefined))).then((reply) => {
+    const generation = ++catalogGeneration;
+    const observedProbes = new Map(Object.entries(probes));
+    // The UI deadline releases waiting controls, but the main process may
+    // still return healthy runtimes after one adapter reaches its own timeout.
+    // Apply that reply unless a newer read or account has superseded it.
+    const request = Promise.resolve().then(() => api.runtimes(force ? { force: true } : undefined)).then((reply) => {
       syncOwner();
       if (generation !== catalogGeneration) return catalog;
       const declared = normalize(reply && reply.runtimes);
@@ -332,7 +336,11 @@
         : declared.filter((row) => row.id !== 'pi');
       catalog = loaded; missingCatalog = normalize(declaredMissing.filter((row) => row.id !== 'pi')); catalogLoaded = true;
       if (location === 'local') for (const row of loaded) {
-        if (row.availability) probes[probeKey(row.id)] = row.availability;
+        const key = probeKey(row.id);
+        // A late inventory must not undo a newer individual health/policy check.
+        if (row.availability && probes[key] === observedProbes.get(key) && !pendingProbes.has(key)) {
+          probes[key] = row.availability;
+        }
       }
       const preferred = selectedByLocation[location];
       const fallback = catalog.find((row) => row.id === 'pi') || catalog[0];
@@ -341,8 +349,10 @@
       }
       renderRows(options.root);
       paint(options.root);
+      options.refresh();
       return catalog;
-    }).catch(() => {
+    });
+    const job = bounded(request).catch(() => {
       if (generation === catalogGeneration) {
         catalog = FALLBACK.filter((row) => row.id === 'pi');
         missingCatalog = fallbackMissing();

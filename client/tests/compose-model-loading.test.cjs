@@ -96,6 +96,56 @@ test('managed picker shows protocol and warns on an incompatible selected defaul
   assert.match(f.nodes.cpModelPop.innerHTML, /role="note">企业模型/);
 });
 
+test('unknown alias thinking is service-controlled while explicit and canonical fixed-thinking models select legal low', async () => {
+  const map = { off: null, minimal: null, low: 'low', medium: null, high: 'high', xhigh: null, max: 'max' };
+  for (const [model, expected] of [
+    [{ name: 'gateway-model', label: 'GLM 5.3', config: { thinkingMode: 'auto' } }, ''],
+    [{ name: 'local:model-' + 'b'.repeat(32), modelName: 'gateway-model', label: 'GLM 5.3', config: { thinkingMode: 'auto' } }, ''],
+    [{ name: 'gateway-model', config: { thinkingMode: 'always', thinkingFormat: 'zai', thinkingLevelMap: map } }, 'low'],
+    [{ name: 'local:model-' + 'a'.repeat(32), modelName: 'glm_5.3_flash', config: { thinkingMode: 'auto' } }, 'low'],
+    [{ name: 'glm-5.3', config: { thinkingMode: 'auto' } }, 'low'],
+    [{ name: 'ordinary-model', config: { thinkingMode: 'none' } }, ''],
+  ]) {
+    const f = fixture(); f.start();
+    f.requests[0].resolve({ usable: [model], defaultModels: { pi: model.name } });
+    await f.picker.ready(); f.choose(model.name);
+    assert.equal(f.picker.value().thinkingLevel, expected, model.name);
+    if (expected === 'low') {
+      assert.match(f.nodes.cpModelPop.innerHTML, /模型固定思考/);
+      assert.match(f.nodes.cpModelPop.innerHTML, /data-thinking-toggle disabled/);
+    } else if (model.config.thinkingMode === 'auto') {
+      assert.match(f.nodes.cpModelPop.innerHTML, /由服务决定 · 未确认/);
+      assert.doesNotMatch(f.nodes.cpModelPop.innerHTML, /不支持|已关闭|data-thinking-toggle/);
+    } else assert.match(f.nodes.cpModelPop.innerHTML, /不支持/);
+  }
+});
+
+test('declared alias protocols expose thinking controls while explicit off policies remain authoritative', async () => {
+  for (const [config, supported] of [
+    [{ thinkingMode: 'auto', thinkingFormat: 'zai' }, true],
+    [{ thinkingMode: 'none', thinkingFormat: 'zai' }, false],
+    [{ thinkingMode: 'auto', thinkingFormat: 'zai', reasoning: false }, false],
+  ]) {
+    const f = fixture(); f.start();
+    f.requests[0].resolve({ usable: [{ name: 'local:model-' + 'b'.repeat(32), modelName: 'gateway-model', config }] }); await f.picker.ready();
+    assert.equal(f.nodes.cpModelPop.innerHTML.includes('data-thinking-toggle'), supported);
+    assert.doesNotMatch(f.nodes.cpModelPop.innerHTML, /由服务决定 · 未确认/);
+  }
+});
+
+test('restored fixed-thinking selections retain valid high and max rather than resetting to low', async () => {
+  const f = fixture(); f.start();
+  f.requests[0].resolve({ usable: [{ name: 'glm-5.3', config: { thinkingMode: 'auto' } }] });
+  await f.picker.ready();
+  for (const level of ['high', 'max', 'low', 'off', 'medium', '']) {
+    assert.equal(await f.picker.restoreSelection({ adapterId: 'pi', modelName: 'glm-5.3', thinkingLevel: level }), true);
+    const expected = ['high', 'max', 'low'].includes(level) ? level : 'low';
+    assert.equal(f.picker.value().thinkingLevel, expected);
+    f.choose('glm-5.3');
+    assert.equal(f.picker.value().thinkingLevel, expected);
+  }
+});
+
 test('device-local models stay available to every local managed runtime and never enter cloud routes', async () => {
   const catalog = { usable: [{ name: 'managed-model' }, { name: 'local:private:model', localOnly: true }],
     defaultModels: { pi: 'managed-model', qwen: 'managed-model' },

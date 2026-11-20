@@ -221,7 +221,8 @@ function create({ app, fetch = fetchWithDeviceAuthRetry, fileLimit = FILE_LIMIT,
       const digester = crypto.createHash('sha256');
       try {
         const declared = response.headers?.get('content-length');
-        if (declared !== null && declared !== undefined && Number(declared) !== expected) throw Error('云端成果大小校验失败');
+        const encoding = String(response.headers?.get('content-encoding') || 'identity').trim().toLowerCase();
+        if (encoding === 'identity' && declared !== null && declared !== undefined && Number(declared) !== expected) throw Error('云端成果大小校验失败');
         stream = await fs.open(temporary, 'wx', 0o600);
         for await (const chunk of response.body) {
           count += chunk.byteLength;

@@ -103,20 +103,27 @@ def package_native(ctx, shard, scratch, *, validation=False):
     if shard.startswith("macos-"):
         env["SODUWORK_MACOS_ARCH"] = target_arch
         run(npm, "run", "build:mac", cwd=ROOT / "client", env=env)
-        python = ROOT / "hub-backend/.venv/bin/python"
-        run(python, "-m", "unittest", "test_runner_tls", cwd=ROOT / "hub-backend", env=env)
-        run(python, ROOT / "hub-backend/scripts/check_runner_tls_bundle.py",
-            ROOT / "client/runner/soduwork-runner", env=env)
-        run("node", "tools/ci/release-artifacts.cjs", "inventory", "macos", target_arch, env=env)
     else:
         run(npm, "run", "build" if shard == "windows" else "build:linux", "--", "--publish", "never", cwd=ROOT / "client", env=env)
-        if shard == "linux" and not validation:
-            linux_signing.sign_packages(ROOT / "client/dist", ctx["version"], os.environ)
-        run("node", "tools/ci/release-artifacts.cjs", "inventory", shard, env=env)
+    python = ROOT / ("hub-backend/.venv/Scripts/python.exe" if shard == "windows" else "hub-backend/.venv/bin/python")
+    runner = ROOT / ("client/runner/soduwork-runner.exe" if shard == "windows" else "client/runner/soduwork-runner")
+    run(python, "-m", "unittest", "test_runner_tls", cwd=ROOT / "hub-backend", env=env)
+    run(python, ROOT / "hub-backend/scripts/check_runner_tls_bundle.py", runner, env=env)
+    if shard == "linux" and not validation:
+        linux_signing.sign_packages(ROOT / "client/dist", ctx["version"], os.environ)
+    inventory_target = ("macos", target_arch) if shard.startswith("macos-") else (shard,)
+    run("node", "tools/ci/release-artifacts.cjs", "inventory", *inventory_target, env=env)
     return env
 
 
-def native(ctx, shard, folder, scratch):
+def native(ctx, shard, folder, scratch, *, preserve_release_history=False):
+    import release_notes
+    if preserve_release_history:
+        # On-demand packages prepare the published version's notes beforehand.
+        # Do not regenerate or publish notes for a different build identity.
+        notes_digest = hashlib.sha256((ROOT / "client/main/release-history.json").read_bytes()).hexdigest()
+    else:
+        notes_digest = release_notes.bundle(ctx, ROOT / "release-evidence" / release_notes.NAME, ROOT)
     env = package_native(ctx, shard, scratch)
     target_arch = "arm64" if shard == "macos-arm64" else "x64"
     keys = {"windows": ["windows-x64-exe"], "linux": ["linux-x64-deb", "linux-x64-rpm", "linux-x64-tar.gz"],
@@ -144,6 +151,7 @@ def native(ctx, shard, folder, scratch):
     for name in expected(ctx, shard):
         shutil.copyfile(ROOT / "client/dist" / name, folder / name)
     checks = read(receipt)
+    checks["bundledReleaseHistorySha256" if preserve_release_history else "releaseNotesSha256"] = notes_digest
     if shard == "linux":
         # Verify again after native acceptance and copying the accepted bytes.
         checks["linuxSigning"] = linux_signing.verify_packages(

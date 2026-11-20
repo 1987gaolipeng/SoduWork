@@ -201,7 +201,7 @@ test('the collection inbox explains the clarification flag without splitting or 
   const rows = ['intake','clarifying'].map(triageStage=>({...mine,id:triageStage,triageStage}));
   const before = JSON.stringify(rows);
   const html = views().board(rows,{archive:'active',group:'stage',limits:{}},{});
-  assert.match(html,/<p class="rq-lane-hint">待整理的需求；“待补充”表示仍需完善背景或完成标准<\/p>/);
+  assert.match(html, /class="rq-lane-hint" title="待整理的需求；“待补充”表示仍需完善背景或完成标准">整理需求，补充信息/);
   assert.match(html,/<span>收集箱<\/span><em>2<\/em>/);
   assert.match(html,/data-hbid="clarifying"[^>]*>[\s\S]*?class="rq-flag">待补充<\/span>/);
   assert.doesNotMatch(html,/data-rq-lane="clarifying"/);

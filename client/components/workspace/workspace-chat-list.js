@@ -27,7 +27,9 @@
     return legacy !== 'custom' && Object.hasOwn(labels, legacy) ? [legacy] : [];
   }
   function harnessIcon(id) {
-    if (global.AgentBrand?.html) return global.AgentBrand.html(id, { title: harnessNames()[id] });
+    // Sidebar details are already in the row's accessible name. Nested brand
+    // titles would otherwise restore a tooltip over the scrolling title.
+    if (global.AgentBrand?.html) return global.AgentBrand.html(id, { title: harnessNames()[id] }).replace(/ title="[^"]*"/g, '');
     return '<span class="agent-brand" data-agent-brand="' + id + '"><svg viewBox="0 0 24 24" aria-hidden="true">' +
       '<path d="m12 3 8 4v10l-8 4-8-4V7zM4 7l8 4 8-4M12 11v10"/></svg></span>';
   }
@@ -51,17 +53,32 @@
   let presenceSequence = 0, presenceFloor = 0;
   const presenceVersions = new Map();
   const executionFields = ['state', 'status', 'live', 'runtimeUnavailable', 'runtimeFailure', 'executionOutcome',
-    'workOnly', 'draftAdapterId'];
+    'workOnly', 'draftAdapterId', 'usedHarnesses'];
   function executionState(row) {
     return Object.fromEntries(executionFields.filter(key => Object.hasOwn(row, key)).map(key => [key, row[key]]));
   }
   function preserveNewerPresence(rows, startedAt) {
+    const currentRows = new Map(ctx.chatItems.map(row => [canonicalLocalId(row.id) || row.id, row]));
     return (rows || []).map(row => {
       const id = canonicalLocalId(row.id) || row.id;
       const aliases = [id, row.id, ...(row.historyAliasIds || [])];
-      if (startedAt >= presenceFloor && aliases.every(alias => (presenceVersions.get(alias) || 0) <= startedAt)) return row;
-      const current = ctx.chatItems.find(item => (canonicalLocalId(item.id) || item.id) === id);
-      return current ? { ...row, ...executionState(current) } : row;
+      const current = currentRows.get(id);
+      if (!current) return row;
+      const newer = startedAt < presenceFloor || aliases.some(alias => (presenceVersions.get(alias) || 0) > startedAt);
+      // A still-unused draft cannot gain usage from a trailing draft index.
+      // Real execution clears workOnly and may introduce its first runtime.
+      const staleDraftUsage = Array.isArray(current.usedHarnesses) && !current.usedHarnesses.length &&
+        current.workOnly === true && row.workOnly === true && !row.live && !(row.count > 0) &&
+        Array.isArray(row.usedHarnesses) && row.usedHarnesses.length > 0;
+      const preserve = newer || staleDraftUsage;
+      // Durable indexing trails live presence. Execution provenance grows for
+      // this identity even when a read starts after the event but before its write.
+      // Never infer usage from an unexecuted runtime selection or another row.
+      const provenance = Array.isArray(current.usedHarnesses) ? { usedHarnesses: [...new Set([
+        ...current.usedHarnesses, ...(Array.isArray(row.usedHarnesses) &&
+          !(preserve && !current.usedHarnesses.length) ? row.usedHarnesses : []),
+      ])] } : {};
+      return { ...row, ...(preserve ? executionState(current) : {}), ...provenance };
     });
   }
   let mutationGeneration = 0, accountMutationGeneration = 0, lifecycleOverflow = false;
@@ -405,7 +422,8 @@ function updateChatState(event) {
     const row = presence?.live ? { ...presence, workOnly: false, draftAdapterId: '' } : presence;
     const id = String(event && event.sessionId || row && row.id || '');
     if (!id || !row) return;
-    if (Object.hasOwn(row, 'state') || Object.hasOwn(row, 'status') || Object.hasOwn(row, 'draftAdapterId')) {
+    if (Object.hasOwn(row, 'state') || Object.hasOwn(row, 'status') || Object.hasOwn(row, 'draftAdapterId') ||
+        Array.isArray(row.usedHarnesses)) {
       const canonical = canonicalLocalId(id) || id;
       presenceVersions.delete(canonical); presenceVersions.set(canonical, ++presenceSequence);
       if (presenceVersions.size > 1024) {
@@ -555,39 +573,67 @@ function chatMenuItem(label, iconMarkup, className = '') {
     return item;
   }
 
-function bindTitleScroll(button, title) {
-    let frame = 0, origin = null, text = '';
-    function stop() {
-      if (frame) global.cancelAnimationFrame(frame);
-      frame = 0; origin = null; title.scrollLeft = 0;
-      title.style.paddingRight = '';
-    }
-    function tick(now) {
-      frame = 0;
-      if (!button.isConnected || global.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { stop(); return; }
-      const distance = Math.max(0, title.scrollWidth - title.clientWidth);
-      if (!distance) { stop(); return; }
-      if (origin === null || text !== title.textContent) { origin = now; text = title.textContent; }
-      // Pause at both ends and scroll only the text, leaving row controls stationary.
-      const travel = distance / 32 * 1000;
-      const elapsed = (now - origin) % (600 + travel + 1200);
-      title.scrollLeft = Math.min(distance, Math.max(0, elapsed - 600) * 0.032);
-      frame = global.requestAnimationFrame(tick);
-    }
-    function start() {
-      stop();
-      if (global.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
-      const controls = button.parentElement?.querySelector('.ws-chat-actions');
-      if (controls) {
-        const overlap = title.getBoundingClientRect().right - controls.getBoundingClientRect().left;
-        title.style.paddingRight = Math.max(0, overlap + 8) + 'px';
+function bindTitleScroll(row, title, text) {
+    let animation = null, frame = 0, active = false, hovered = false, distance = -1;
+    const motion = global.matchMedia?.('(prefers-reduced-motion: reduce)');
+    const position = () => {
+      const transform = global.getComputedStyle(text).transform;
+      return transform === 'none' ? 0 : new global.DOMMatrixReadOnly(transform).m41;
+    };
+    const move = (from, to, returning = false) => {
+      animation?.cancel();
+      animation = text.animate([
+        { transform: `translateX(${from}px)` }, { transform: `translateX(${to}px)` },
+      ], { duration: returning ? 240 : Math.max(160, Math.abs(to - from) / 0.032),
+        delay: !returning && Math.abs(from) < 0.1 ? 500 : 0,
+        easing: returning ? 'cubic-bezier(.2,0,0,1)' : 'linear', fill: 'both' });
+      // Hold the tail while hovered; never jump back in a repeating cycle.
+      if (returning) {
+        const returningAnimation = animation;
+        animation.onfinish = () => {
+          if (animation === returningAnimation) { animation.cancel(); animation = null; }
+        };
       }
-      frame = global.requestAnimationFrame(tick);
+    };
+    function measure() {
+      frame = 0;
+      if (!active || !row.isConnected || motion?.matches) { stop(true); return; }
+      const bounds = title.getBoundingClientRect();
+      const controls = row.querySelector('.ws-chat-actions')?.getBoundingClientRect();
+      const overlap = controls ? Math.max(0, bounds.right - controls.left + 8) : 0;
+      const visible = Math.max(0, bounds.width - overlap);
+      title.style.clipPath = overlap ? `inset(0 ${overlap}px 0 0)` : '';
+      const next = visible > 0 ? Math.max(0, text.getBoundingClientRect().width - visible) : 0;
+      if (Math.abs(next - distance) < 0.1) return;
+      distance = next;
+      const from = position();
+      if (next || from) move(from, -next, !next);
     }
-    button.addEventListener('mouseenter', start);
-    button.addEventListener('mouseleave', stop);
-    button.addEventListener('focus', start);
-    button.addEventListener('blur', stop);
+    function schedule() { if (active && !frame) frame = global.requestAnimationFrame(measure); }
+    const observer = global.ResizeObserver ? new global.ResizeObserver(schedule) : null;
+    function stop(immediate = false) {
+      active = false; distance = -1;
+      if (frame) global.cancelAnimationFrame(frame);
+      frame = 0; observer?.disconnect(); motion?.removeEventListener('change', reduced);
+      title.style.clipPath = '';
+      const from = animation && !immediate ? position() : 0;
+      animation?.cancel(); animation = null;
+      if (from && !motion?.matches && row.isConnected) move(from, 0, true);
+    }
+    function reduced() { if (motion.matches) stop(true); }
+    function update() {
+      const focused = row.contains(document.activeElement) && document.activeElement?.matches(':focus-visible');
+      if (!hovered && !focused) { stop(); return; }
+      if (active || motion?.matches) return;
+      active = true; observer?.observe(title); observer?.observe(text);
+      motion?.addEventListener('change', reduced); schedule();
+    }
+    row.addEventListener('mouseenter', () => { hovered = true; update(); });
+    row.addEventListener('mouseleave', () => { hovered = false; update(); });
+    row.addEventListener('focusin', update);
+    row.addEventListener('focusout', event => { if (!row.contains(event.relatedTarget) && !hovered) stop(); });
+    row.addEventListener('dragstart', () => { hovered = false; stop(true); });
+    row._stopTitleScroll = () => { hovered = false; stop(true); };
   }
 
 function _newChatRow() {
@@ -596,10 +642,12 @@ function _newChatRow() {
     b.type = 'button'; b.className = 'ws-task ws-chat';
     const dot = document.createElement('i'); dot.className = 'st-chat';
     const title = document.createElement('span'); title.className = 'ws-chat-title';
+    const titleText = document.createElement('span'); titleText.className = 'ws-chat-title-text';
+    title.appendChild(titleText);
     const runtime = document.createElement('small');
     runtime.className = 'ws-chat-runtime'; runtime.hidden = true;
     b.append(dot, title, runtime);
-    bindTitleScroll(b, title);
+    bindTitleScroll(row, title, titleText);
     b.addEventListener('click', (e) => {
       e.stopPropagation();
       const id = b.dataset.chatId || '';
@@ -730,9 +778,11 @@ function _paintChatLocale(button) {
     const separator = global.SoduWorkI18n?.getLocale() === 'en-US' ? ', ' : '，';
     const harnesses = (copy.draftHarness ? ctx.wsT('chat.harness.selected', '已选底座') + ' · ' : '') + copy.harnesses;
     button.setAttribute('aria-label', label + separator + status + (harnesses ? separator + harnesses : ''));
-    button.title = label + ' · ' + status + (harnesses ? ' · ' + harnesses : '');
-    button.querySelector('.ws-chat-runtime').title = harnesses;
-    const title = button.querySelector('.ws-chat-title');
+    // Long titles scroll within the row; retain details for screen readers
+    // without a browser tooltip obscuring neighboring conversations.
+    button.title = '';
+    button.querySelector('.ws-chat-runtime').title = '';
+    const title = button.querySelector('.ws-chat-title-text') || button.querySelector('.ws-chat-title');
     if (title.textContent !== label) title.textContent = label;
   }
 
@@ -820,7 +870,7 @@ function _syncChatList(target, items, isPinned, pool, emptyText) {
     Array.from(target.children).forEach((node) => {
       if (!node.classList.contains('ws-chat-row')) return;
       const key = String(node.dataset.chatKey || '');
-      if (!key || !wanted.has(key) || seen.has(key)) node.remove();
+      if (!key || !wanted.has(key) || seen.has(key)) { node._stopTitleScroll?.(); node.remove(); }
       else seen.add(key);
     });
     if (!items.length && emptyText && !target.querySelector('.ws-list-empty')) ctx._empty(target, emptyText);

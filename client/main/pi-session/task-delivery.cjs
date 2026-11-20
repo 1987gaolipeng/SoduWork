@@ -13,14 +13,25 @@ function remoteModel(value) {
   return name.startsWith('local:') || image?.name.startsWith('local:') ? '' : name.slice(0, 80);
 }
 
-async function capture(handle, outcome) {
-  if (!handle) return null;
+async function capture(handle, outcome, diagnosticScope = {}, {requiresFiles = false} = {}) {
+  const note = captureReason => require('../requirement-diagnostics.cjs').record('native.capture',
+    {...diagnosticScope,conversationId:diagnosticScope.conversationId || handle?.sessionId,outcome,captureReason});
+  if (!handle) { note('no-handle'); return null; }
   const snapshot = await artifacts.snapshotAsync(handle);
-  if (snapshot?.delivery?.presentation === 'summary') return null;
+  const required = outcome === 'completed' && requiresFiles;
+  if (required && snapshot?.delivery?.source !== 'manifest' &&
+      (snapshot?.got?.truncated || snapshot?.got?.fileChanges?.truncated))
+    throw Error('本轮成果扫描不完整，尚未提交验收；请检查交付清单后重新交付');
+  const empty = reason => {
+    note(reason);
+    if (required) throw Error('本轮未采集到约定的交付文件，尚未提交验收；请检查交付文件及清单后重新交付');
+    return null;
+  };
+  if (snapshot?.delivery?.presentation === 'summary') return empty('summary');
   let items = (snapshot?.delivery?.items || snapshot?.items || []).filter(item =>
     item?.path && !item.processEvidence && item.primary !== false &&
     (!item.pluginDraft || item.skillPackage && /\.skill$/i.test(item.name || item.relative || item.path)));
-  if (!items.length) return null;
+  if (!items.length) return empty('no-primary');
   const options = { completedTurn: true, includeEntries: true, snapshot, turnSince: snapshot?.got?.turnSince };
   let captured;
   if (items.every(item => item.artifactId)) {
@@ -33,18 +44,18 @@ async function capture(handle, outcome) {
         if (candidate.changedInTurn !== false) { changed.push(item); captured = candidate; }
       }
       items = changed;
-      if (!items.length) return null;
+      if (!items.length) return empty('unchanged');
     }
     if (!captured || items.length > 1 || snapshot.delivery?.source === 'manifest')
       captured = await packages.prepare(handle, items.map(item => item.artifactId), options);
-    if (captured.changedInTurn === false) return null;
+    if (captured.changedInTurn === false) return empty('unchanged');
   } else if (snapshot.delivery?.source !== 'manifest') {
     items = items.filter(item => item.changedInTurn === true);
   }
   const entries = captured?.entries?.length > 60
     ? [{name: '完整产出-' + captured.filename, bytes: captured.bytes, role: 'primary', contentType: captured.contentType}]
     : captured?.entries || items.map(item => ({...item, name: item.relative || item.name}));
-  if (!entries.length) return null;
+  if (!entries.length) return empty('no-entries');
   let total = 0;
   const files = entries.map(item => {
     let bytes;
@@ -56,6 +67,7 @@ async function capture(handle, outcome) {
     return {name: String(item.name || 'artifact'), category: item.role === 'supporting' || item.primary === false ? 'supporting' : 'primary',
       contentType: item.contentType || 'application/octet-stream', data: bytes.toString('base64')};
   });
+  note('captured');
   return {outcome: outcome === 'completed' ? 'completed' : 'incomplete',
     model: remoteModel(handle.model), files};
 }
@@ -72,6 +84,7 @@ async function send(identity, route, scope, payload) {
     String(identity.hub).replace(/\/+$/, '') + '/api/v1' + route + '/conversation-delivery',
     {method: 'POST', redirect: 'error', body: form, signal: AbortSignal.timeout(120000)});
   const data = await response.json().catch(() => ({}));
+  require('../requirement-diagnostics.cjs').http(identity, route + '/conversation-delivery', scope, data, response.status);
   if (!response.ok || data.ok === false) throw Object.assign(
     Error(typeof data.detail === 'string' ? data.detail : '交付物尚未同步，文件已保留待重试'), {status: response.status});
   return data;

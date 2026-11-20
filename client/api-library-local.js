@@ -319,6 +319,10 @@
     api.readLibraryContent = async function (id, options) {
       return isLocal(id) ? invoke('readContent', { id: id, preview: options?.preview === true }) : remote.readLibraryContent(id, options);
     };
+    api.repairLocalLibraryFilename = async function (id, filename) {
+      if (!isLocal(id)) throw failure('LOCAL_LIBRARY_INVALID', '只能修复这台电脑上的资料文件名');
+      return invoke('repairFilename', { id: id, filename: filename });
+    };
     api.updateLibraryItem = async function (id, body) {
       body = Object.assign({}, body);
       if (isLocal(id)) {

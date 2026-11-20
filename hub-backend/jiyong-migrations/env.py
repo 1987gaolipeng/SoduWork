@@ -8,7 +8,8 @@ from app.services.jiyong_cloud_database import database_url
 
 
 def migrate(connection):
-    context.configure(connection=connection, target_metadata=None)
+    context.configure(connection=connection, target_metadata=None,
+                      version_table='jiyong_alembic_version')
     with context.begin_transaction():
         context.run_migrations()
 
@@ -23,7 +24,8 @@ async def online():
 
 
 if context.is_offline_mode():
-    context.configure(url=database_url(), literal_binds=True)
+    context.configure(url=database_url(), literal_binds=True,
+                      version_table='jiyong_alembic_version')
     with context.begin_transaction():
         context.run_migrations()
 else:

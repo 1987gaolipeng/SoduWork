@@ -808,3 +808,79 @@ for (const action of ['delete', 'archive']) {
     });
   }
 }
+
+test('account directory refresh retains runtime provenance learned from opening a local conversation', async () => {
+  for (const presenceId of ['multi-runtime', 'native-segment']) {
+    const saved = { id: 'multi-runtime', title: 'Multiple runtimes', state: 'completed', adapterId: 'qwen',
+      usedHarnesses: ['qwen'], at: 1 };
+    let blocked = false, release;
+    const response = () => ({ ok: true, chats: [saved], localCatalog: { workspace: 'runtime-profile', revision: 1,
+      items: [{ id: saved.id, historyAliasIds: ['native-segment'] }] } });
+    const f = fixture('user-a', { local: true, realHistory: true, history: async options => options.source === 'local'
+      ? blocked ? new Promise(resolve => { release = resolve; }) : response() : { ok: true, chats: [] } });
+    await f.api.refreshLocalHistory(); await tick();
+    f.api.updateChatState({ kind: 'opened', presence: { ...saved, id: presenceId, usedHarnesses: ['pi', 'qwen'] } });
+    assert.deepEqual(Array.from(f.ctx.chatItems[0].usedHarnesses), ['pi', 'qwen']);
+    blocked = true;
+    const loading = f.api.refreshConversationHistory(); await tick(); await f.ctx.historyLoad;
+    assert.deepEqual(Array.from(f.ctx.chatItems[0].usedHarnesses), ['pi', 'qwen'],
+      'A separate account directory read cannot restore the stale local runtime badge');
+    blocked = false; release(response()); await loading; await tick();
+    assert.deepEqual(Array.from(f.ctx.chatItems[0].usedHarnesses), ['pi', 'qwen']);
+  }
+});
+
+test('late history and trailing durable snapshots cannot shrink observed runtime provenance', async () => {
+  for (const afterPresence of [false, true]) {
+    const f = fixture('user-a', { realHistory: true });
+    const saved = { id: 'multi-runtime', title: 'Multiple runtimes', adapterId: 'qwen', usedHarnesses: ['qwen'] };
+    f.api.setChats([saved]);
+    let loading;
+    if (!afterPresence) { loading = f.api.refreshConversationHistory(); await tick(); }
+    // Runtime provenance may arrive without a status transition.
+    f.api.updateChatState({ kind: 'opened', presence: { ...saved, usedHarnesses: ['pi', 'qwen'] } });
+    if (afterPresence) { loading = f.api.refreshConversationHistory(); await tick(); }
+    f.pending[0].resolve({ ok: true, chats: [{ ...saved, usedHarnesses: ['qwen', 'kimi'] }] });
+    await loading;
+    assert.deepEqual(Array.from(f.ctx.chatItems[0].usedHarnesses), ['pi', 'qwen', 'kimi']);
+  }
+});
+
+test('retained runtime provenance never crosses conversations or account epochs', async () => {
+  const f = fixture('user-a', { realHistory: true });
+  f.api.setChats([{ id: 'multi-runtime', title: 'Shared title', usedHarnesses: ['pi', 'qwen'] }]);
+  const first = f.api.refreshConversationHistory(); await tick();
+  f.pending[0].resolve({ ok: true, chats: [{ id: 'other', title: 'Shared title', usedHarnesses: [] }] }); await first;
+  assert.deepEqual(Array.from(f.ctx.chatItems.find(row => row.id === 'other').usedHarnesses), []);
+  await f.switch('user-b');
+  f.pending[1].resolve({ ok: true, chats: [{ id: 'multi-runtime', title: 'Other account', usedHarnesses: [] }] });
+  await f.ctx.historyLoad;
+  assert.deepEqual(Array.from(f.ctx.chatItems[0].usedHarnesses), []);
+});
+
+test('an explicitly unused draft never inherits usage from its selected or stale runtime', async () => {
+  for (const afterPresence of [false, true]) {
+    const f = fixture('user-a', { realHistory: true });
+    const draft = { id: 'unused', title: 'Draft', adapterId: 'qwen', workOnly: true };
+    f.api.setChats([draft]);
+    let loading;
+    if (!afterPresence) { loading = f.api.refreshConversationHistory(); await tick(); }
+    f.api.updateChatState({ kind: 'work-draft-selection-saved', presence: { ...draft, usedHarnesses: [], draftAdapterId: 'kimi' } });
+    if (afterPresence) { loading = f.api.refreshConversationHistory(); await tick(); }
+    f.pending[0].resolve({ ok: true, chats: [{ ...draft, usedHarnesses: ['qwen'] }] }); await loading;
+    assert.deepEqual(Array.from(f.ctx.chatItems[0].usedHarnesses), []);
+    assert.equal(f.ctx.chatItems[0].draftAdapterId, 'kimi');
+  }
+});
+
+test('a later executed history row can add genuine usage to a previously unused draft', async () => {
+  const f = fixture('user-a', { realHistory: true });
+  const draft = { id: 'unused', title: 'Draft', adapterId: 'qwen', workOnly: true, usedHarnesses: [] };
+  f.api.setChats([draft]);
+  f.api.updateChatState({ kind: 'work-draft-selection-saved', presence: { ...draft, draftAdapterId: 'kimi' } });
+  const loading = f.api.refreshConversationHistory(); await tick();
+  f.pending[0].resolve({ ok: true, chats: [{ ...draft, adapterId: 'kimi', workOnly: false,
+    count: 2, usedHarnesses: ['kimi'] }] }); await loading;
+  assert.deepEqual(Array.from(f.ctx.chatItems[0].usedHarnesses), ['kimi']);
+  assert.equal(f.ctx.chatItems[0].workOnly, false);
+});

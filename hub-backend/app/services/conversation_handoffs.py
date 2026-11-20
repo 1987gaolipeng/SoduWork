@@ -24,6 +24,7 @@ from . import ai_exec, ai_remote, dispatch_identity, portable_workspace, rbac, r
 from .execution_host_policy import cloud_runner_allowed
 from .schedule_run_contracts import is_local_model_reference
 from . import handoff_agent_policy
+from ..timestamps import iso_utc
 
 CAPABILITY = "handoff1"
 ARCHIVE_NAME = "soduwork-workspace-handoff.zip"
@@ -448,7 +449,7 @@ def public(row):
 
     return {"ok": True, "transferId": row.transfer_id, "taskId": row.task_id,
             "accepted": bool(row.submitted_at),
-            "acceptedAt": row.submitted_at.isoformat() if row.submitted_at else "",
+            "acceptedAt": iso_utc(row.submitted_at) if row.submitted_at else "",
             "phase": row.phase, "status": receipt.get("state") or row.phase,
             "sha256": row.sha256, "ref": receipt.get("ref") or receipt.get("issueId") or "",
             "target": target,

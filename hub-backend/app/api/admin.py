@@ -4,6 +4,7 @@ unassigned devices. Client.user_ref determines device ownership.
 """
 from datetime import datetime, timedelta, timezone
 import logging
+import uuid
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import case, func, or_, select, update
@@ -844,7 +845,9 @@ async def upload_task_attachment(
         raise HTTPException(status_code=400, detail="空文件")
     fn = (file.filename or "file").replace("/", "_").replace("\\", "_").strip()[:200] or "file"
     ct = file.content_type or "application/octet-stream"
-    a = Attachment(task_id=tid, filename=fn, content_type=ct, size=len(data), uploaded_by="admin:" + user.id)
+    # The column default is applied at flush; the storage key needs the id now.
+    a = Attachment(id=str(uuid.uuid4()), task_id=tid, filename=fn, content_type=ct, size=len(data),
+                   uploaded_by="admin:" + user.id)
     a.storage_key = f"att/{tid}/{a.id}/{fn}"
     a.backend = storage.put(a.storage_key, data, ct)
     session.add(a)

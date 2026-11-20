@@ -18,7 +18,7 @@ function identity() {
     session: Buffer.from(JSON.stringify(claims)).toString('base64url') + '.' + 'a'.repeat(64), secret: 'synthetic-secret' };
 }
 
-async function providerFixture(t, reply, authMode = 'none') {
+async function providerFixture(t, reply, authMode = 'none', modelOptions = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-private-parser-'));
   const requests = [], encryptionKey = crypto.randomBytes(32);
   const app = { getPath: () => root };
@@ -53,7 +53,7 @@ async function providerFixture(t, reply, authMode = 'none') {
   const baseUrl = 'http://127.0.0.1:' + server.address().port + '/v1';
   localModels.configure({ app, safeStorage });
   const saved = localModels.save({ providers: [{ id: 'private', baseUrl, authMode }],
-    models: [{ providerId: 'private', name: 'private-wire-model', modality: 'chat' }],
+    models: [{ providerId: 'private', name: 'private-wire-model', modality: 'chat', ...modelOptions }],
     keys: authMode === 'key' ? { private: 'private-provider-key' } : {} });
   const ref = saved.usable[0].name;
   const fetchImpl = (url, options) => {
@@ -139,6 +139,75 @@ test('requirement and automation renderer parsing use the real private generatio
     assert.match(result.note, /Preserve the original instruction/);
   }
   assert.equal(f.requests.length, 2);
+});
+
+test('requirement and automation extraction honor encrypted reasoning model output budgets', async t => {
+  const f = await providerFixture(t, received => {
+    const body = received.body;
+    const enoughBudget = body.max_completion_tokens >= 4096;
+    return completion(enoughBudget ? '{"title":"Artistic website","note":"Preserve the original request."}'
+      : '{"title":"Unfinished draft"}', enoughBudget ? 'stop' : 'length');
+  }, 'key', { config: { maxOutputTokens: 16384, reasoning: true, thinkingMode: 'always',
+    thinkingFormat: 'openai', supportsReasoningEffort: true } });
+  const api = rendererParser(f.parser);
+  for (const kind of ['requirement', 'automation']) {
+    const result = await api.parseTaskText('Create an artistic website.', f.ref, [], { kind });
+    assert.equal(result.title, 'Artistic website', JSON.stringify(result));
+    assert.equal(result._parseError, undefined);
+  }
+  assert.equal(f.requests.length, 2, 'each draft must make exactly one provider request');
+  for (const request of f.requests) {
+    assert.equal(request.body.max_completion_tokens, 16384);
+    assert.equal(request.body.max_tokens, undefined);
+    assert.equal(request.body.reasoning_effort, undefined, 'always-thinking models cannot be forced off');
+    assert.equal(request.body.tools, undefined, 'extraction remains stateless');
+  }
+  assert.doesNotMatch(fs.readFileSync(path.join(f.root, 'local-models.secure.json'), 'utf8'),
+    /private-wire-model|private-provider-key|16384/);
+});
+
+test('local extraction uses the model fallback and preserves configured output and context limits', async t => {
+  for (const [name, modelOptions, expected] of [
+    ['default output budget', {}, 16384],
+    ['larger configured output budget', { config: { maxOutputTokens: 32768 } }, 32768],
+    ['smaller configured output budget', { config: { maxOutputTokens: 1024 } }, 1024],
+    ['context-bounded fallback', { ctxWindow: 2048 }, 2048],
+  ]) {
+    await t.test(name, async t => {
+      const f = await providerFixture(t, () => completion('{"title":"Bounded draft"}'), 'none', modelOptions);
+      const result = await rendererParser(f.parser).parseTaskText('Preserve this requirement.', f.ref);
+      assert.equal(result.title, 'Bounded draft', JSON.stringify(result));
+      assert.equal(f.requests.length, 1);
+      assert.equal(f.requests[0].body.max_tokens, expected);
+    });
+  }
+});
+
+test('explicit per-call limits remain bounded when a private extraction caller supplies one', async t => {
+  const f = await providerFixture(t, () => completion('{"title":"Limited draft"}'), 'none',
+    { config: { maxOutputTokens: 16384 } });
+  const result = await f.parser({ model: f.ref, input: 'Preserve this requirement.', instructions: 'Return JSON.',
+    requestId: 'explicit-extraction-limit', maxOutputTokens: 128 });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(f.requests[0].body.max_tokens, 128);
+  await assert.rejects(f.parser({ model: f.ref, input: 'Preserve this requirement.', instructions: 'Return JSON.',
+    requestId: 'invalid-extraction-limit', maxOutputTokens: 1000000 }), /限制无效/);
+  assert.equal(f.requests.length, 1, 'an invalid caller budget must fail before dispatch');
+});
+
+test('reasoning-only truncated responses report the output limit without disclosing private content', async t => {
+  const privateReasoning = 'private-wire-model private-provider-key http://private-provider.invalid/v1';
+  const outputs = ['', null];
+  const f = await providerFixture(t, () => ({ body: { choices: [{ message: {
+    content: outputs.shift(), reasoning_content: privateReasoning }, finish_reason: 'length' }] } }));
+  const api = rendererParser(f.parser);
+  for (let index = 0; index < 2; index++) {
+    const result = await api.parseTaskText('Preserve this requirement.', f.ref);
+    assert.match(result._parseError, /长度上限.*原文已保留/);
+    assert.equal(result.title, undefined);
+    assert.doesNotMatch(JSON.stringify(result), /private-wire-model|private-provider-key|private-provider\.invalid/);
+  }
+  assert.equal(f.requests.length, 2, 'truncation must never trigger an automatic retry');
 });
 
 test('truncated structured output is rejected even when its partial JSON happens to be valid', async t => {

@@ -68,6 +68,7 @@ function fixture({ platform = 'win32', workspace = 'minimized', overlay = 'norma
     app: { isPackaged: true, on(name, callback) {
       assert.equal(name, 'second-instance'); secondInstance = callback;
     } },
+    _quitRelaunch: { deferLaunch: () => false },
     BrowserWindow: Window,
     _workWindows: workWindows,
     _WORK_SPEC: require('../main/window-specs'),

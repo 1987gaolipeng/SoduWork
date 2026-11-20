@@ -44,6 +44,7 @@ async function inventory(platform, arch) {
     artifacts.push({ ...item, ...actual });
   }
   const record = { schema: 1, kind: arch === undefined ? 'soduwork-client-build' : 'soduwork-client-build-shard', platform, version,
+    defaultHubUrl: require('../../client/main/default-hub.cjs').buildDefaultHub(),
     sourceCommit: process.env.CI_COMMIT_SHA, pipelineId: process.env.CI_PIPELINE_ID,
     jobId: process.env.CI_JOB_ID, artifacts };
   await write(manifest(platform, arch), record);
@@ -54,6 +55,8 @@ async function verify(platform, arch) {
   const record = await read(manifest(platform, arch));
   assert.equal(record.schema, 1); assert.equal(record.kind, arch === undefined ? 'soduwork-client-build' : 'soduwork-client-build-shard');
   assert.equal(record.platform, platform); assert.equal(record.version, version);
+  assert.equal(record.defaultHubUrl, require('../../client/main/default-hub.cjs').buildDefaultHub(),
+    'Artifacts were built for another default Hub');
   assert.equal(record.sourceCommit, process.env.CI_COMMIT_SHA, 'Artifacts came from a different commit');
   assert.equal(String(record.pipelineId), process.env.CI_PIPELINE_ID, 'Artifacts came from a different pipeline');
   assert.deepEqual(record.artifacts.map(({ name, platform, arch, format }) => ({ name, platform, arch, format })), wanted);
@@ -68,6 +71,7 @@ function validateAcceptance(record, receipt) {
   assert.equal(receipt.ok, true, 'Native acceptance has not passed');
   assert.equal(receipt.sourceCommit, record.sourceCommit);
   assert.equal(receipt.pipelineId, record.pipelineId);
+  assert.equal(receipt.defaultHubUrl, record.defaultHubUrl, 'Acceptance tested another default Hub');
   assert.deepEqual(receipt.artifacts, record.artifacts, 'Acceptance tested other bytes');
   // Only the committed, version-scoped release contract can omit the Windows
   // upgrade gate. Receipt contents or a runtime baseline override cannot opt out.
@@ -89,7 +93,8 @@ function validateAcceptance(record, receipt) {
 async function acceptance(platform, checks, limitations = [], arch) {
   const record = await verify(platform, arch);
   const receipt = { schema: 1, kind: arch === undefined ? 'soduwork-native-install-acceptance' : 'soduwork-native-install-acceptance-shard', ok: true,
-    sourceCommit: record.sourceCommit, pipelineId: record.pipelineId, artifacts: record.artifacts,
+    sourceCommit: record.sourceCommit, pipelineId: record.pipelineId, defaultHubUrl: record.defaultHubUrl,
+    artifacts: record.artifacts,
     checks, limitations, finishedAt: new Date().toISOString() };
   validateAcceptance(record, receipt);
   await write(path.join(root, 'release-evidence', platform, ...(arch === undefined ? [] : [arch]), 'acceptance.json'), receipt);

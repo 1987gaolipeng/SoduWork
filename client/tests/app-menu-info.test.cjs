@@ -238,9 +238,18 @@ test('menu and tray reuse the existing normal quit path including tray cleanup a
   assert.ok(source);
   assert.match(main, /app-menu-info\.cjs'\)\.install\(\{ app, ipcMain, BrowserWindow, dialog, shell,[\s\S]*?quit: _quitSoduWork, getRendererRoot: rendererRoot/);
   assert.match(main, /click: \(\) => _quitSoduWork\('tray'\)/);
-  const calls = [], ctx = { tray: { destroy: () => calls.push('tray-destroy') },
+  const calls = [], ctx = { _quitRelaunch: { markQuitting: () => calls.push('mark-quitting') },
+    tray: { destroy: () => calls.push('tray-destroy') },
     _lifecycleDiagnostics: { setExitReason: reason => calls.push(reason) }, app: { quit: () => calls.push('quit') } };
   vm.runInNewContext(source + '\n_quitSoduWork("app-menu");', ctx);
-  assert.deepEqual(calls, ['tray-destroy', 'app-menu', 'quit']);
+  assert.deepEqual(calls, ['mark-quitting', 'tray-destroy', 'app-menu', 'quit']);
   assert.equal(ctx.tray, null);
+
+  calls.length = 0;
+  const windows = ['workspace', 'overlay'].map(name => ({
+    isDestroyed: () => false, close: () => calls.push('close-' + name),
+  }));
+  ctx.BrowserWindow = { getAllWindows: () => [...windows, { isDestroyed: () => true }] };
+  vm.runInNewContext('_quitSoduWork("tray");', ctx);
+  assert.deepEqual(calls, ['mark-quitting', 'tray', 'quit', 'close-workspace', 'close-overlay']);
 });

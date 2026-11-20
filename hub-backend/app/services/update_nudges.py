@@ -76,19 +76,18 @@ async def nudge_stale_client(client_id: str, current: str, latest: str,
     the required upgrade. Limit notices to once per device per day.
     """
     cid = str(client_id or "")
-    from . import runner_release
-    current_v = runner_release.version_tuple(str(current or ""))
-    latest_v = runner_release.version_tuple(str(latest or ""))
-    if not cid or current_v is None or latest_v is None or current_v >= latest_v:
+    from . import client_updates
+    if (not cid or not client_updates.newer(latest, current)
+            or client_updates.supports_canonical_installer(current)):
         return False
     if not _due(cid, now, store=_client_last_sent, interval=_CLIENT_INTERVAL_SECONDS):
         return False
-    text = ("📦 你的 SoduWork 客户端是 %s，最新版 %s 已发布（修复了任务派活丢失等问题）。"
-            "请从下载页重新安装一次：老版本这次需要手动装，装完以后就恢复自动更新了。"
+    text = ("当前 SoduWork %s 需要手动升级，请前往下载页安装 %s。"
             % (current, latest))
     try:
         from ..realtime import hub
-        await hub.publish(cid, {"type": "notice", "text": text})
+        await hub.publish(cid, {"type": "notice", "kind": "client_update", "text": text,
+                                "noticeEventId": f"client_update_manual_{latest}"})
     except Exception as e:  # noqa: BLE001
         log.warning("客户端升级提醒发送失败 %s: %s", cid, type(e).__name__)
         return False

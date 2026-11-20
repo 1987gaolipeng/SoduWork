@@ -44,6 +44,27 @@ test('Agent management renders only this client even when cloud and other instan
   assert.doesNotMatch(f.body.innerHTML, /data-ak="(?:cloud|other|unknown)~/);
 });
 
+test('empty Hub catalog warns only on a machine with blocked Agents and no testable Agent', () => {
+  const f = fixture();
+  const pi = { key: 'pi', name: 'Pi', installed: true, state: 'nollm' };
+  const codex = { key: 'codex', name: 'Codex', installed: true, state: 'ready' };
+  function render(machines, modelCount = 0) {
+    f.context.inventory = { machines, modelCount };
+    f.run('_agData = inventory');
+    f.context._agRender();
+    return f.body.innerHTML;
+  }
+  assert.match(render([machine([pi])]), /class="ag-warn"/);
+  const mixed = render([machine([pi, codex])]);
+  assert.doesNotMatch(mixed, /class="ag-warn"/);
+  assert.match(mixed, /data-agstate="nollm" data-ak="computer~pi"/);
+  assert.match(mixed, /data-agstate="ready" data-ak="computer~codex"/);
+  assert.doesNotMatch(render([machine([pi])], 1), /class="ag-warn"/);
+  assert.doesNotMatch(render([machine([])]), /class="ag-warn"/);
+  const cloud = { ...machine([codex]), runnerId: 'cloud', scope: 'personal-cloud' };
+  assert.match(render([machine([pi]), cloud]), /class="ag-warn"/);
+});
+
 test('cloud-only and legacy backend inventories cannot become a local fallback', () => {
   const f = fixture(); f.context.agent = base;
   for (const payload of [

@@ -95,25 +95,8 @@ function looksLikeOutputLoop(accumulator, messageFrom, toolFrom, previousText) {
   }
   const tools = Array.isArray(state.tools) ? state.tools : [];
   if (tools.length > Math.max(0, Number(toolFrom) || 0)) return false;
-  /* A length stop with a thinking-only assistant turn is a stalled planning
-     turn, not a truncated answer. Re-prompting it asks the model to continue
-     planning again and again, which leaves the composer showing an endless
-     processing state without ever reaching a tool or a user-facing answer.
-     End this turn as incomplete so the user can retry explicitly. */
-  if (state.lastStopReason === 'length') {
-    const messages = Array.isArray(state.messages) ? state.messages : [];
-    for (let i = messages.length - 1; i >= Math.max(0, Number(messageFrom) || 0); i -= 1) {
-      const message = messages[i];
-      if (!message || message.role !== 'assistant') continue;
-      const blocks = Array.isArray(message.blocks) ? message.blocks : [];
-      const hasThinking = blocks.some(block => block?.kind === 'thinking' && String(block.text || '').trim());
-      const hasAnswer = blocks.some(block => block?.kind === 'text' && String(block.text || '').trim());
-      const hasToolCall = blocks.some(block => block?.kind === 'toolcall' &&
-        (String(block.text || '').trim() || block.toolCall));
-      if (hasThinking && !hasAnswer && !hasToolCall) return true;
-      break;
-    }
-  }
+  // A first reasoning-only length stop is not evidence of a repeated output
+  // loop. complete() owns its separate, single-use recovery allowance.
   const text = lastAssistantText(accumulator, messageFrom);
   if (!text) return false;
   const inspected = protocolGuard.inspect(text, { final: true });
@@ -125,7 +108,9 @@ function continuationPrompt(attempt, reason) {
   const semantic = reason === 'semantic';
   return [
     MARKER,
-    reason === 'missing-answer'
+    reason === 'reasoning-limit'
+      ? '上一次模型调用的输出额度被思考耗尽，尚未完成当前步骤。请基于同一会话中保留的要求、已有文件和成功工具结果，从一个较小的未完成步骤继续；需要写入较长内容时拆分为小步骤。减少重复规划，尽快执行必要操作或给出简短、完整的最终答复，不要把计划称为已完成。'
+      : reason === 'missing-answer'
       ? '上一轮只返回了思考内容，尚未提供最终答复。请继续给出原请求的最终答复，不要复述思考过程，也不要把思考或计划称作已完成的结果。'
       : semantic
       ? '上一条回复在声明下一步动作后提前结束。请立即执行刚才承诺的动作，不要再次复述计划，也不要等待用户发送“继续”。'
@@ -153,24 +138,31 @@ async function complete(session, accumulator, initialPrompt, initialOptions, hoo
     ? accumulator.state.tools.length : 0;
   const reason = () => {
     if (accumulator.state.lastStopReason === 'length') {
-      return contextRecovery.silentOverflow(accumulator, session) ? 'context-full' : 'length';
+      return contextRecovery.silentOverflow(accumulator, session) ? 'context-full'
+        : thinkingBudgetExhausted(accumulator, messageFrom) ? 'reasoning-limit' : 'length';
     }
     if (hasUnansweredThinking(accumulator, messageFrom)) return 'missing-answer';
     if (looksSemanticallyIncomplete(accumulator, messageFrom, toolFrom, cfg.userPrompt ?? initialPrompt)) return 'semantic';
     return '';
   };
   await contextRecovery.prompt(session, accumulator, initialPrompt, initialOptions, cfg);
-  let continuations = 0;
+  let continuations = 0, reasoningContinuations = 0;
   let why = reason();
   let loopDetected = looksLikeOutputLoop(accumulator, messageFrom, toolFrom, '');
-  while (!stopped() && why && why !== 'context-full' && !loopDetected && continuations < max) {
+  // Keep the same archive, model budget, reasoning preference and tool results.
+  // One reasoning recovery consumes the ordinary continuation budget; progress
+  // or a later text truncation must not reset this allowance.
+  const reasoningReady = () => why !== 'reasoning-limit' || reasoningContinuations === 0 &&
+    !(accumulator.state.tools || []).some(tool => tool.state === 'running');
+  while (!stopped() && why && why !== 'context-full' && !loopDetected && continuations < max && reasoningReady()) {
     continuations += 1;
     if (typeof cfg.onContinue === 'function') cfg.onContinue(continuations, max);
     const turnToolFrom = accumulator && accumulator.state && Array.isArray(accumulator.state.tools)
       ? accumulator.state.tools.length : 0;
     const previousText = lastAssistantText(accumulator, messageFrom);
     const previousWhy = why;
-    if (stopped()) break;
+    if (stopped() || !reasoningReady()) break;
+    if (why === 'reasoning-limit') reasoningContinuations += 1;
     await contextRecovery.prompt(session, accumulator, continuationPrompt(continuations, why), { images: [] }, cfg);
     loopDetected = looksLikeOutputLoop(accumulator, messageFrom, turnToolFrom, previousText);
     why = reason();
@@ -182,6 +174,7 @@ async function complete(session, accumulator, initialPrompt, initialOptions, hoo
   const incomplete = Boolean(why || loopDetected);
   const incompleteReason = loopDetected
     ? (thinkingBudgetExhausted(accumulator, messageFrom) ? 'reasoning-limit' : 'output-loop')
+    : why === 'reasoning-limit' ? 'reasoning-limit'
     : why === 'semantic' ? 'action-handoff'
     : why === 'missing-answer' ? 'missing-answer' : why === 'context-full' ? 'context-full' : '';
   if (!stopped()) {

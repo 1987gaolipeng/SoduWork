@@ -60,15 +60,24 @@ if (typeof electron === 'string') {
   recordArchive().then(() => {
     const env = { ...process.env };
     for (const key of ['ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'ELECTRON_NO_ATTACH_CONSOLE']) delete env[key];
-    const result = require('node:child_process').spawnSync(electron, [__filename, output],
-      { env, stdio: 'inherit', windowsHide: true, timeout: 120000 });
+    const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-review-order-electron-'));
+    env.SODUWORK_REVIEW_ORDER_PROFILE = profile;
+    let result;
+    try {
+      result = require('node:child_process').spawnSync(electron, [__filename, output],
+        { env, stdio: 'inherit', windowsHide: true, timeout: 120000 });
+    } finally {
+      // Wait for Chromium to release its profile before deleting it on Windows.
+      fs.rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
     process.exitCode = result.status ?? 1;
   }).catch(error => { console.error(error); process.exitCode = 1; });
 } else {
   const { app, BrowserWindow } = electron;
   const data = JSON.parse(fs.readFileSync(fixtureFile, 'utf8'));
   const report = { ok: false, checks: [], boundary: 'Real Pi SDK with a loopback fixture provider, production Electron renderer and synthetic Hub receipts; no production account.' };
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-review-order-electron-'));
+  const profile = process.env.SODUWORK_REVIEW_ORDER_PROFILE;
+  if (!profile) throw Error('Run this fixture through its Node launcher');
   app.setPath('userData', profile); app.disableHardwareAcceleration();
   let win;
   app.whenReady().then(async () => {
@@ -171,7 +180,6 @@ if (typeof electron === 'string') {
     fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report));
     if (win && !win.isDestroyed()) win.destroy();
-    fs.rmSync(profile, { recursive: true, force: true });
     app.exit(report.ok ? 0 : 1);
   });
 }

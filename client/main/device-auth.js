@@ -1,6 +1,6 @@
 /* Long-lived SoduWork device identity.
-   The renderer never receives the device key. Electron safeStorage protects it
-   with the operating-system credential facility; each Hub origin has its own key. */
+   Each Hub origin has its own device key. The main process protects it with
+   the selected credential store and never exposes it to the renderer. */
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -187,8 +187,8 @@ function migrateLegacy(app, raw) {
 }
 
 function credentialRow(hub, clientId, secret) {
-  return { hub, clientId, cipher: _credentials.encrypt(secret).toString('base64'),
-    createdAt: new Date().toISOString(), ...(_credentials.platform === 'linux' ? { storage: 'electron-safe-storage' } : {}) };
+  return { hub, clientId, cipher: _credentials.encrypt(secret, hub, clientId).toString('base64'),
+    createdAt: new Date().toISOString(), ...(_credentials.platform === 'linux' ? { storage: _credentials.storage || 'electron-safe-storage' } : {}) };
 }
 function _recoverRow(app, hub) {
   /*
@@ -759,8 +759,8 @@ function notifySessionChanged(app, sender, result) {
   } catch (_) {}
 }
 
-function install({ app, ipcMain, safeStorage }) {
-  _credentials = require('./device-credential-store.cjs').create({ safeStorage, app });
+function install({ app, ipcMain, safeStorage, credentials }) {
+  _credentials = credentials || require('./device-credential-store.cjs').create({ safeStorage, app });
   require('./device-auth-request').setIdentityRefresher(async previous => {
     const before = identity(app);
     if (!before || before.hub !== previous.hub || before.clientId !== previous.clientId) return null;

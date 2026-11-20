@@ -9,6 +9,7 @@ import base64
 import hashlib
 import json
 import os
+from io import BytesIO
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -177,9 +178,27 @@ def write_asset(file, data):
     finally:
         temporary.unlink(missing_ok=True)
 
+_object_client = None
+
+def _object_store():
+    global _object_client
+    if _object_client is None:
+        from minio import Minio
+        settings = get_settings()
+        _object_client = Minio(settings.jiyong_object_endpoint,
+                                access_key=settings.jiyong_object_access_key,
+                                secret_key=settings.jiyong_object_secret_key,
+                                secure=settings.jiyong_object_secure,
+                                region=settings.jiyong_object_region or None)
+    return _object_client
+
+def _object_key(space, asset):
+    prefix = get_settings().jiyong_object_prefix.strip('/')
+    return '/'.join(part for part in (prefix, space, asset) if part)
+
 
 async def assets(connection, space, schema, method, params):
-    root = Path(get_settings().jiyong_asset_dir) / space
+    settings = get_settings()
     if method == 'data.assetPut':
         data = params['data']
         row_id = asset_id(params['name'], params['type'], data)
@@ -188,19 +207,26 @@ async def assets(connection, space, schema, method, params):
             size = await connection.scalar(text(f'SELECT COALESCE(sum(size),0) FROM "{schema}".assets'))
             if size + len(data) > get_settings().jiyong_max_asset_bytes_per_space:
                 raise database.CloudError('云端素材空间已达上限', 'JIYONG_QUOTA', 409)
-        await asyncio.to_thread(write_asset, root / row_id, data)
+        def put():
+            _object_store().put_object(settings.jiyong_object_bucket, _object_key(space, row_id),
+                                       BytesIO(data), length=len(data), content_type=params['type'])
+        await asyncio.to_thread(put)
         metadata = {'id': row_id, 'name': params['name'], 'type': params['type'], 'size': len(data)}
         await connection.execute(text(f'INSERT INTO "{schema}".assets VALUES (:id,:name,:type,:size) ON CONFLICT(id) DO NOTHING'), metadata)
         return {'ok': True, 'asset': metadata}
     metadata = (await connection.execute(text(f'SELECT id,name,type,size FROM "{schema}".assets WHERE id=:id'), params)).mappings().first()
     if metadata is None:
         return {'ok': True, 'asset': None}
-    file = root / params['id']
     try:
-        stat = await asyncio.to_thread(file.stat)
-        if stat.st_size != metadata['size'] or metadata['size'] > 8 * 1024 * 1024:
+        if metadata['size'] > 8 * 1024 * 1024:
             raise OSError('invalid size')
-        data = await asyncio.to_thread(file.read_bytes)
+        def get():
+            response = _object_store().get_object(settings.jiyong_object_bucket, _object_key(space, params['id']))
+            try: return response.read()
+            finally: response.close(); response.release_conn()
+        data = await asyncio.to_thread(get)
+        if len(data) != metadata['size']:
+            raise OSError('invalid size')
         if asset_id(metadata['name'], metadata['type'], data) != metadata['id']:
             raise OSError('invalid digest')
     except OSError as exc:

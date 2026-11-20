@@ -238,7 +238,7 @@ class GoalAdmissionStopTests(unittest.IsolatedAsyncioTestCase):
                     self.assertNotIn("goalUserPending", self.run)
                     self.assertTrue(self.run["stopping"])
                     self.assertEqual(item.state, "cancelled")
-                    kill.assert_called_once_with(self.ref)
+                    kill.assert_called_once_with(self.ref, expected_pid=12345, expected_proc=None)
 
     async def test_pi_queued_admission_cancellation_does_not_gain_goal_stop_behavior(self):
         self.run["cli"] = "pi"

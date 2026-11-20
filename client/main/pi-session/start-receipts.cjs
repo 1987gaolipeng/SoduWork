@@ -51,6 +51,7 @@ function create({ app, identityOf, request, intervalMs = 15000 }) {
         const current = await identityOf(app);
         if (destination(current) !== row.destination) throw Error('连接或账号已切换，执行收据保留待同步');
         const step = row.steps[0];
+        require('../requirement-diagnostics.cjs').record('receipt.send', {...row,action:step.action});
         try {
           if (step.action === 'deliver') await require('./task-delivery.cjs').send(current,
             '/tasks/' + encodeURIComponent(row.taskId), {conversationId: row.conversationId, turnId: row.turnId}, step.payload);
@@ -58,8 +59,12 @@ function create({ app, identityOf, request, intervalMs = 15000 }) {
             action: step.action, executor: 'native', conversationId: row.conversationId, turnId: row.turnId,
             ...(row.modelSource === 'device' ? { modelSource: 'device', agentId: row.modelAgentId } : {}),
             ...(['auto', 'manual'].includes(step.submissionMode) ? {submissionMode: step.submissionMode} : {}),
+            ...(step.deliveryIssue ? {deliveryIssue: step.deliveryIssue} : {}),
           });
+          require('../requirement-diagnostics.cjs').record('receipt.result', {...row,action:step.action,ok:true});
         } catch (error) {
+          require('../requirement-diagnostics.cjs').record('receipt.error', {...row,action:step.action,
+            httpStatus:Number(error.status)||0,errorKey:String(error.message || error),obsolete:[404,409].includes(error.status)});
           // Revoked ownership, cancelled/replaced turns must never be resurrected.
           if (![404, 409].includes(error.status)) throw error;
           remove(id); return {pending: false, obsolete: true};
@@ -69,6 +74,8 @@ function create({ app, identityOf, request, intervalMs = 15000 }) {
         const latest = read(id);
         if (!latest) return {pending: false};
         if (latest.steps[0].action !== step.action) throw Error('Task receipt order changed');
+        // An in-flight waiting notice may have been upgraded to capture_failed.
+        if (JSON.stringify(latest.steps[0]) !== JSON.stringify(step)) continue;
         latest.steps.shift();
         if (latest.steps.length) save(id, latest);
         else remove(id);
@@ -84,10 +91,21 @@ function create({ app, identityOf, request, intervalMs = 15000 }) {
       ...(scope.modelSource === 'device' ? { modelSource: 'device', modelAgentId: String(scope.modelAgentId || '') } : {}), steps: []};
     if (scope.modelSource && (row.modelSource || 'managed') !== scope.modelSource)
       throw Error('Task receipt model source changed');
+    // A durable terminal freezes this attempt. A duplicate callback after a
+    // lost acknowledgement must not resurrect acknowledged start/upload steps
+    // or replace the captured bytes with a later workspace snapshot.
+    if (row.steps.some(step => ['complete', 'fail', 'cancel'].includes(step.action))) {
+      try { return await send(id); }
+      catch (_) { return {pending: true}; }
+    }
     if (started && !row.steps.some(step => step.action === 'started')) row.steps.unshift({action: 'started'});
     if (delivery && !row.steps.some(step => step.action === 'deliver')) {
       const terminalIndex = row.steps.findIndex(step => ['complete', 'fail', 'wait', 'cancel'].includes(step.action));
       row.steps.splice(terminalIndex < 0 ? row.steps.length : terminalIndex, 0, {action: 'deliver', payload: delivery});
+    }
+    if (terminal?.action === 'wait' && terminal.deliveryIssue) {
+      const waitingIndex = row.steps.findIndex(step => step.action === 'wait');
+      if (waitingIndex >= 0) row.steps[waitingIndex] = terminal;
     }
     if (terminal && !row.steps.some(step => ['complete', 'fail', 'cancel'].includes(step.action)) &&
         !row.steps.some(step => step.action === terminal.action)) row.steps.push(terminal);
@@ -125,6 +143,9 @@ function create({ app, identityOf, request, intervalMs = 15000 }) {
       record.finish = (scope, body, {started = false, delivery} = {}) => {
         if (!['complete', 'fail', 'wait', 'cancel'].includes(body?.action)) throw Error('Invalid terminal receipt');
         const terminal = {action: body.action,
+          ...(['wait', 'fail'].includes(body.action) &&
+            ['capture_pending', 'capture_failed', 'sync_pending'].includes(body.deliveryIssue?.code)
+            ? {deliveryIssue: {code: body.deliveryIssue.code, reason: String(body.deliveryIssue.reason || '').slice(0, 500)}} : {}),
           ...(['auto', 'manual'].includes(body.submissionMode) ? {submissionMode: body.submissionMode} : {})};
         return enqueue(target, taskId, scope, terminal, started, delivery);
       };

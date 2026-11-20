@@ -129,6 +129,37 @@ class LoginShutdownTests(unittest.TestCase):
 
 
 class RunnerLoginShutdownTests(unittest.IsolatedAsyncioTestCase):
+    async def test_shutdown_drains_a_blocked_refusal_without_leaving_a_socket_writer(self):
+        entered, cleaned = asyncio.Event(), asyncio.Event()
+        async def refusal():
+            entered.set()
+            try:
+                await asyncio.Future()
+            finally:
+                cleaned.set()
+        writer = asyncio.create_task(refusal())
+        await entered.wait()
+        async def run():
+            return
+        runner = SimpleNamespace(run=run, _shutdown_event=asyncio.Event(),
+                                 _rpc_rejections={writer}, _network_workers=Mock())
+        with patch.object(flow, "shutdown", return_value=True):
+            await asyncio.wait_for(runner_lifecycle.run_until_stopped(runner), 2)
+        self.assertTrue(writer.cancelled())
+        self.assertTrue(cleaned.is_set())
+        runner._network_workers.close.assert_called_once_with()
+
+    async def test_runner_exit_retires_remote_workers_even_if_login_cleanup_fails(self):
+        async def run():
+            return
+        workers = Mock()
+        runner = SimpleNamespace(run=run, _shutdown_event=asyncio.Event(),
+                                 _network_workers=workers)
+        with patch.object(flow, "shutdown", side_effect=RuntimeError("cleanup failed")):
+            with self.assertRaisesRegex(RuntimeError, "cleanup failed"):
+                await runner_lifecycle.run_until_stopped(runner)
+        workers.close.assert_called_once_with()
+
     async def test_normal_stop_drains_login_outside_event_loop(self):
         entered = asyncio.Event()
         stopped = asyncio.Event()

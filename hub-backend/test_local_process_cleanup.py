@@ -1,6 +1,7 @@
 """Execution receipts cannot replace confirmation that the trusted host exited."""
 from contextlib import ExitStack
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -259,6 +260,21 @@ class ExecutionHostCleanupTests(unittest.TestCase):
                 self.assertNotIn('piSettledByWatchdog', self.run)
                 self.assertNotIn('timedOut', self.run)
 
+    def test_stop_never_kills_a_successor_published_during_broker_shutdown(self):
+        self.run.update(proc=Mock(), queue=[])
+        successor = {**self.run, 'pid': 54321, 'proc': Mock(),
+                     '_workerIdentity': object(), 'stopping': False}
+        def replace(_):
+            local_process._RUNS[self.ref] = successor
+        with patch('app.services.access_broker.close', side_effect=replace), \
+                patch.object(local_stream, '_kill_pid_tree', return_value=True) as terminate:
+            result = local_stream.stop_sync({}, self.ref)
+        self.assertFalse(result['ok'])
+        terminate.assert_not_called()
+        self.assertEqual(successor['pid'], 54321)
+        self.assertEqual(successor['state'], 'running')
+        self.assertFalse(successor['stopping'])
+
     def test_exit_receipt_protects_host_before_joiner_publishes_its_fence(self):
         self.run.update(cli='pi', started=1, lastOut=1,
             piFinalResponseAt=time.time() - 60, stream={**self.spec, 'version': 1})
@@ -421,6 +437,370 @@ class ExecutionSettlementTests(unittest.TestCase):
         resume.assert_called_once()
         self.assertEqual(self.run['stallRetries'], 1)
         self.assertEqual(self.run['state'], 'recovering')
+
+
+class ExecutionLaunchIsolationTests(unittest.TestCase):
+    def setUp(self):
+        self.folder = self.enterContext(tempfile.TemporaryDirectory(prefix='soduwork-launch-isolation-'))
+        self.ref = 'slow-launch'
+        self.run = dict(cli='opencode', state='running', cfg={}, queue=[], round=1, seq=0)
+        self.enterContext(patch.dict(local_base._RUNS, {self.ref: self.run}))
+        self.threads = set()
+        self.enterContext(patch.object(local_process, '_THREADS', self.threads))
+        self.addCleanup(self.join_workers)
+        for name in ('_save_meta', '_append_raw', '_watchdog', '_capture_started'):
+            self.enterContext(patch.object(local_process, name))
+        self.enterContext(patch.object(local_process, '_store_dir', return_value=self.folder))
+        self.enterContext(patch.object(local_stream, '_save_meta'))
+        self.enterContext(patch.object(local_process, '_env_for', return_value=dict(os.environ)))
+        self.command = self.enterContext(patch.object(local_process, '_command_argv', return_value=['fixture-agent']))
+        self.real_prepare = local_spool.prepare
+        self.prepare = self.enterContext(patch.object(local_spool, 'prepare',
+            return_value=({'id': 'fixture-spool'}, ['fixture-host'])))
+        self.enterContext(patch.object(local_spool, 'cleanup'))
+        self.enterContext(patch.object(local_spool, 'follow', return_value=(0, 'completed')))
+        self.enterContext(patch('app.services.access_broker.attach'))
+        self.close_broker = self.enterContext(patch('app.services.access_broker.close'))
+        self.real_kill_tree = local_stream._kill_tree
+        self.kill = self.enterContext(patch.object(local_stream, '_kill_tree', return_value=True))
+        self.finished = threading.Event()
+        def finish(*_):
+            self.run.update(state='stopped' if self.run.get('stopping') else 'done', proc=None)
+            self.finished.set()
+        self.finish = Mock(side_effect=finish)
+
+    def join_workers(self):
+        for thread in self.threads:
+            thread.join(timeout=5)
+            self.assertFalse(thread.is_alive(), 'A launch worker leaked')
+
+    def launch(self):
+        local_process.spawn('fixture-agent', [], 'private fixture prompt', self.folder, self.ref, {}, {},
+            gate_check=lambda *_: '', on_line=Mock(), finish=self.finish, kill_tree=self.kill)
+
+    def await_cancel(self):
+        deadline = time.monotonic() + 1
+        while not self.run.get('stopping') and time.monotonic() < deadline:
+            time.sleep(.005)
+        self.assertTrue(self.run.get('stopping'), 'Pending Popen prevented recording cancellation')
+
+    def test_account_and_managed_runtimes_require_an_active_registered_run(self):
+        for cli in ('codex', 'codex-harness', 'opencode'):
+            with self.subTest(cli=cli), \
+                    patch.object(local_process.subprocess, 'Popen') as popen:
+                self.run['cli'] = cli
+                self.run.pop('state', None)
+                self.finished.clear()
+                self.launch()
+                self.assertTrue(self.finished.wait(3))
+                popen.assert_not_called()
+
+    def test_slow_launch_does_not_block_another_session_lock_or_stop(self):
+        entered, release, acquired, stopped = (threading.Event() for _ in range(4))
+        proc = Mock(pid=22222, poll=Mock(return_value=0))
+        def popen(*_args, **_kwargs):
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return proc
+        other_ref = 'unrelated-active-session'
+        self.enterContext(patch.dict(local_base._RUNS, {other_ref: {'state': 'running', 'pid': 33333}}))
+        def query_and_stop():
+            with local_base._LOCK:
+                acquired.set()
+            local_stream.stop_sync({}, other_ref)
+            stopped.set()
+        with patch.object(local_process.subprocess, 'Popen', side_effect=popen):
+            self.launch()
+            self.assertTrue(entered.wait(3))
+            other = threading.Thread(target=query_and_stop, daemon=True)
+            other.start()
+            try:
+                self.assertTrue(acquired.wait(.5), 'Slow launch held the global session lock')
+                self.assertTrue(stopped.wait(.5), 'Slow launch blocked another session stop')
+            finally:
+                release.set()
+                other.join(timeout=3)
+            self.assertTrue(self.finished.wait(3))
+
+    def test_cancelled_launch_kills_new_pid_without_feeding_the_prompt(self):
+        entered, release, stopped = (threading.Event() for _ in range(3))
+        proc = Mock(pid=22222, poll=Mock(return_value=0))
+        results = []
+        def popen(*_args, **_kwargs):
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return proc
+        def stop():
+            results.append(local_stream.stop_sync({}, self.ref))
+            stopped.set()
+        with patch.object(local_process.subprocess, 'Popen', side_effect=popen):
+            self.launch()
+            self.assertTrue(entered.wait(3))
+            stopper = threading.Thread(target=stop, daemon=True)
+            stopper.start()
+            try:
+                self.await_cancel()
+                self.assertFalse(stopped.wait(.05), 'Stop acknowledged a still-pending launch')
+                self.assertEqual(self.run['state'], 'running')
+            finally:
+                release.set()
+                stopper.join(timeout=3)
+            self.assertTrue(self.finished.wait(3))
+        self.assertTrue(results[0]['ok'])
+        self.kill.assert_called_once_with(self.ref, expected_pid=proc.pid, expected_proc=proc)
+        proc.stdin.write.assert_not_called()
+        self.assertEqual(self.run['state'], 'stopped')
+
+    def test_unconfirmed_launch_cleanup_retains_the_active_session_fence(self):
+        entered, release, exited = (threading.Event() for _ in range(3))
+        saved = []
+        local_process._save_meta.side_effect = lambda _: saved.append(
+            (self.run.get('pid'), self.run['state'], self.run.get('stopping')))
+        proc = Mock(pid=22222, poll=Mock(side_effect=lambda: 0 if exited.is_set() else None))
+        def popen(*_args, **_kwargs):
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return proc
+        with patch.object(local_process.subprocess, 'Popen', side_effect=popen), \
+                patch.object(local_stream, '_LAUNCH_STOP_TIMEOUT_S', .05):
+            self.launch()
+            self.assertTrue(entered.wait(3))
+            try:
+                result = local_stream.stop_sync({}, self.ref)
+                self.assertFalse(result['ok'])
+                self.assertTrue(self.run['stopping'])
+                release.set()
+                deadline = time.monotonic() + 2
+                while not self.kill.called and time.monotonic() < deadline:
+                    time.sleep(.005)
+                self.assertTrue(self.kill.called)
+                self.assertIn((proc.pid, 'running', True), saved, 'The pending PID was not archived')
+                self.assertFalse(self.finished.is_set(), 'A kill request was treated as observed exit')
+                self.assertEqual(self.run['state'], 'running')
+                self.assertIs(self.run['proc'], proc)
+                self.assertIn('_launchPending', self.run)
+                self.assertFalse(local_ctx.prepare_resume(self.ref, 'must not replace', {})['ok'])
+            finally:
+                release.set()
+                exited.set()
+            self.assertTrue(self.finished.wait(3))
+        proc.stdin.write.assert_not_called()
+        self.assertEqual(self.run['state'], 'stopped')
+
+    def test_replaced_worker_cleans_only_its_own_returned_process(self):
+        entered, release = threading.Event(), threading.Event()
+        proc = Mock(pid=22222, poll=Mock(return_value=0))
+        def popen(*_args, **_kwargs):
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return proc
+        with patch.object(local_process.subprocess, 'Popen', side_effect=popen), \
+                patch.object(local_stream, '_kill_pid_tree', return_value=True) as orphan_kill:
+            self.launch()
+            self.assertTrue(entered.wait(3))
+            replacement = {**self.run, '_workerIdentity': object(), 'pid': 44444,
+                           'proc': Mock(), 'stream': {'id': 'successor'}, 'terminal': {'done': True}}
+            local_base._RUNS[self.ref] = replacement
+            release.set()
+            self.join_workers()
+        orphan_kill.assert_called_once_with(proc.pid, proc)
+        self.kill.assert_not_called()
+        self.finish.assert_not_called()
+        self.close_broker.assert_not_called()
+        self.assertEqual(replacement['pid'], 44444)
+        self.assertEqual(replacement['stream'], {'id': 'successor'})
+        self.assertEqual(replacement['terminal'], {'done': True})
+        self.assertEqual(replacement['state'], 'running')
+        self.assertIs(replacement['_launchPending'], self.run['_launchPending'])
+        self.assertIs(replacement['_hostCleanup'], self.run['_hostCleanup'])
+
+    def test_replaced_worker_cannot_overwrite_successor_during_spool_preparation(self):
+        entered, release = threading.Event(), threading.Event()
+
+        def prepare(*args):
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return {'id': 'old-worker-spool'}, ['fixture-host']
+
+        self.prepare.side_effect = prepare
+        with patch.object(local_process.subprocess, 'Popen') as popen:
+            self.launch()
+            self.assertTrue(entered.wait(3))
+            replacement = {**self.run, '_workerIdentity': object(), 'pid': 44444,
+                           'stream': {'id': 'successor'}, 'terminal': {'done': True}}
+            local_base._RUNS[self.ref] = replacement
+            release.set()
+            self.join_workers()
+        self.assertEqual(popen.call_count, 0, 'A replaced worker must not launch another process')
+        self.finish.assert_not_called()
+        self.close_broker.assert_not_called()
+        self.assertEqual(replacement['pid'], 44444)
+        self.assertEqual(replacement['stream'], {'id': 'successor'})
+        self.assertEqual(replacement['terminal'], {'done': True})
+        self.assertEqual(replacement['state'], 'running')
+
+    def test_parent_exit_after_failed_tree_cleanup_cannot_release_the_launch(self):
+        entered, release = threading.Event(), threading.Event()
+        proc = Mock(pid=22222, poll=Mock(return_value=0))
+        self.kill.return_value = False
+        def popen(*_args, **_kwargs):
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return proc
+        with patch.object(local_process.subprocess, 'Popen', side_effect=popen), \
+                patch.object(local_stream, '_LAUNCH_STOP_TIMEOUT_S', .05):
+            self.launch()
+            self.assertTrue(entered.wait(3))
+            try:
+                self.assertFalse(local_stream.stop_sync({}, self.ref)['ok'])
+                release.set()
+                deadline = time.monotonic() + 2
+                while not self.kill.called and time.monotonic() < deadline:
+                    time.sleep(.005)
+                self.assertTrue(self.kill.called)
+                self.assertFalse(self.finished.wait(.1), 'Parent exit replaced tree cleanup confirmation')
+                self.assertEqual(self.run['state'], 'running')
+                self.assertTrue(self.run['stopping'])
+                self.assertIn('_hostCleanup', self.run)
+                attempts = self.kill.call_count
+                self.kill.return_value = True
+                self.run['_launchPending']['retry'].set()
+                self.assertFalse(local_stream.stop_sync({}, self.ref)['ok'])
+                self.assertFalse(self.finished.wait(.1), 'A dead-host retry replaced the failed tree receipt')
+                self.assertEqual(self.kill.call_count, attempts)
+            finally:
+                release.set()
+                # Invalidate only the disposable fixture owner to retire its
+                # blocked worker after verifying the production fence.
+                self.run['_workerIdentity'] = object()
+                self.run['_launchPending']['retry'].set()
+                self.join_workers()
+        self.finish.assert_not_called()
+        proc.stdin.write.assert_not_called()
+
+    def test_failed_permission_restore_cannot_release_an_inflight_launch(self):
+        entered, release = threading.Event(), threading.Event()
+        proc = Mock(pid=22222, poll=Mock(return_value=0))
+        def popen(*_args, **_kwargs):
+            entered.set()
+            self.assertTrue(release.wait(5))
+            return proc
+        with patch.object(local_process.subprocess, 'Popen', side_effect=popen):
+            self.launch()
+            self.assertTrue(entered.wait(3))
+            try:
+                self.run['_accessTransition'] = {'phase': 'in-process-applying'}
+                result = access_transition._restore_failed(self.ref, self.run,
+                    {'accessPolicy': {'mode': 'standard'}})
+                self.assertFalse(result['ok'])
+                self.assertEqual(self.run['state'], 'running')
+                self.assertIn('_hostCleanup', self.run)
+                self.run['stopping'] = True
+            finally:
+                release.set()
+            self.assertTrue(self.finished.wait(3))
+        proc.stdin.write.assert_not_called()
+
+    def test_real_os_launch_cancellation_waits_for_its_process_tree(self):
+        entered, release, stopped = (threading.Event() for _ in range(3))
+        marker = Path(self.folder, 'prompt-was-executed')
+        self.command.return_value = [sys.executable, '-c',
+            'import pathlib,sys,time; sys.stdin.read(); pathlib.Path(sys.argv[1]).touch(); time.sleep(60)',
+            str(marker)]
+        self.prepare.side_effect = self.real_prepare
+        self.kill.side_effect = self.real_kill_tree
+        real_popen = subprocess.Popen
+        processes, results = [], []
+        def popen(argv, *args, **kwargs):
+            proc = real_popen(argv, *args, **kwargs)
+            if 'local_spool_worker.py' in str(argv):
+                processes.append(proc)
+                entered.set()
+                self.assertTrue(release.wait(10))
+            return proc
+        def stop():
+            result = local_stream.stop_sync({}, self.ref)
+            results.append((result, processes[0].poll()))
+            stopped.set()
+        with patch.object(local_process.subprocess, 'Popen', side_effect=popen), \
+                patch.object(local_stream, '_LAUNCH_STOP_TIMEOUT_S', 8):
+            self.launch()
+            self.assertTrue(entered.wait(5))
+            stopper = threading.Thread(target=stop, daemon=True)
+            stopper.start()
+            try:
+                self.await_cancel()
+                self.assertFalse(stopped.wait(.05))
+                self.assertIsNone(processes[0].poll())
+                self.assertFalse(marker.exists())
+                release.set()
+                self.assertTrue(stopped.wait(10))
+                self.assertTrue(self.finished.wait(5))
+                self.assertTrue(results[0][0]['ok'])
+                self.assertIsNotNone(results[0][1], 'Stop acknowledged before the OS process exited')
+                self.assertFalse(marker.exists(), 'A cancelled launch received the user prompt')
+            finally:
+                release.set()
+                for proc in processes:
+                    if proc.poll() is None:
+                        self.real_kill_tree(self.ref, expected_pid=proc.pid, expected_proc=proc)
+                    proc.wait(timeout=5)
+                stopper.join(timeout=10)
+
+    def test_real_surviving_descendant_keeps_failed_launch_cleanup_active(self):
+        entered, release = threading.Event(), threading.Event()
+        child_file = Path(self.folder, 'isolated-child-pid')
+        source = ('import pathlib,subprocess,sys; '
+                  'p=subprocess.Popen([sys.executable,"-c","import time; time.sleep(60)"], '
+                  'start_new_session=True); pathlib.Path(sys.argv[1]).write_text(str(p.pid))')
+        argv = [sys.executable, '-c', source, str(child_file)]
+        self.prepare.return_value = ({'id': 'fixture-spool'}, argv)
+        self.kill.return_value = False
+        real_popen = subprocess.Popen
+        parents = []
+        child_pid = 0
+        def popen(command, *args, **kwargs):
+            proc = real_popen(command, *args, **kwargs)
+            if command == argv:
+                parents.append(proc)
+                entered.set()
+                self.assertTrue(release.wait(10))
+            return proc
+        with patch.object(local_process.subprocess, 'Popen', side_effect=popen), \
+                patch.object(local_stream, '_LAUNCH_STOP_TIMEOUT_S', .1):
+            self.launch()
+            self.assertTrue(entered.wait(5))
+            try:
+                deadline = time.monotonic() + 5
+                while not child_file.exists() and time.monotonic() < deadline:
+                    time.sleep(.005)
+                child_pid = int(child_file.read_text())
+                self.assertFalse(local_stream.stop_sync({}, self.ref)['ok'])
+                release.set()
+                self.assertEqual(parents[0].wait(timeout=3), 0)
+                deadline = time.monotonic() + 3
+                while not self.kill.called and time.monotonic() < deadline:
+                    time.sleep(.005)
+                self.assertTrue(self.kill.called)
+                self.assertTrue(local_stream._pid_alive(child_pid))
+                self.assertFalse(self.finished.wait(.1), 'A surviving child lost its admission fence')
+                self.assertEqual(self.run['state'], 'running')
+                self.assertTrue(local_stream._kill_pid_tree(child_pid))
+                self.kill.return_value = True
+                self.assertFalse(local_stream.stop_sync({}, self.ref)['ok'])
+                self.assertFalse(self.finished.wait(.1), 'A dead-host retry bypassed the unverified tree')
+            finally:
+                release.set()
+                if child_pid:
+                    local_stream._kill_pid_tree(child_pid)
+                self.kill.return_value = True
+                if self.run.get('_launchPending'):
+                    self.run['_workerIdentity'] = object()
+                    self.run['_launchPending']['retry'].set()
+                self.join_workers()
+                for proc in parents:
+                    proc.wait(timeout=5)
+                    proc.stdin.close()
 
 
 if __name__ == '__main__':

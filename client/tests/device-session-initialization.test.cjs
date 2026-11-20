@@ -49,17 +49,24 @@ function fixture() {
   return { api: window.SoduWorkAPI, bridge, context, requests, calls, timers, events, values, advance };
 }
 
-for (const stage of ['version', 'system', 'runner-before', 'bootstrap', 'runner-after']) {
+test('Runner waits through pending enrollment and starts automatically on first login', async () => {
+  const f = fixture();
+  f.bridge.deviceAuthBootstrap = async () => ({
+    ok: true, stored: true, clientId: 'fixture-install', authState: 'pending', activationRequired: true,
+  });
+  await f.api.registerClient();
+  await f.api.registerClient();
+  assert.ok(!f.calls.includes('runner'));
+  await f.api.clientLogin({ account: 'fixture-bob', password: 'fixture-only' });
+  assert.equal(f.calls.filter(call => call === 'runner').length, 1);
+});
+
+for (const stage of ['version', 'system', 'bootstrap', 'runner']) {
   test(`model-list authentication has a deadline at ${stage}, retries, and ignores the late IPC result`, async () => {
     const f = fixture(), gate = deferred();
-    let configCalls = 0;
     const method = stage === 'version' ? 'getAppVersion' : stage === 'system' ? 'getSysInfo' : stage === 'bootstrap' ? 'deviceAuthBootstrap' : 'configureRunner';
     const original = f.bridge[method];
-    f.bridge[method] = async (...args) => {
-      configCalls++;
-      if (stage !== 'runner-after' || configCalls === 2) return gate.promise;
-      return original(...args);
-    };
+    f.bridge[method] = () => gate.promise;
     const request = f.api.myModels(), failed = assert.rejects(request, { code: 'DEVICE_AUTH_INIT_TIMEOUT' });
     await flush(); assert.equal(f.requests.length, 0);
     assert.equal(f.timers.size, 1);

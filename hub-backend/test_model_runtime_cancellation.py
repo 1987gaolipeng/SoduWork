@@ -7,13 +7,128 @@ from unittest.mock import patch
 
 import aiosqlite
 import anyio
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSessionTransaction
 
 from app.services import model_runtime_transaction as boundary
-from test_model_runtime import IsolatedDatabase, runtime
+from test_model_runtime import CONF, DelayedStream, IsolatedDatabase, runtime, transport
 
 
 class CancellationTests(IsolatedDatabase):
+    async def test_timeout_log_distinguishes_pool_wait_without_request_secrets(self):
+        for error_type in (httpx.PoolTimeout, httpx.ConnectTimeout, httpx.ReadTimeout):
+            with self.subTest(error_type=error_type.__name__):
+                def failed(request):
+                    raise error_type("sensitive-upstream-detail", request=request)
+                async with httpx.AsyncClient(transport=httpx.MockTransport(failed)) as http:
+                    with patch.object(transport, "_client", return_value=http), \
+                            self.assertLogs("uvicorn.error", level="WARNING") as logs:
+                        with self.assertRaises(runtime.UpstreamError) as caught:
+                            await transport.open_response(CONF, "/responses", b"sensitive-request")
+                    self.assertEqual(caught.exception.status, 504)
+                    self.assertIn("error=" + error_type.__name__, " ".join(logs.output))
+                    self.assertNotIn("sensitive", " ".join(logs.output))
+                    self.assertNotIn(CONF["key"], " ".join(logs.output))
+                self.assertEqual((await runtime.snapshot())["running"], 0)
+
+    async def test_disconnect_wrapper_cancel_during_handoff_reclaims_response(self):
+        lease = await self.acquire()
+        entered, joining, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        stream = DelayedStream()
+        response = transport.Response(httpx.Response(200, stream=stream), lease)
+
+        class Request:
+            async def is_disconnected(self):
+                entered.set()
+                try:
+                    await asyncio.Future()
+                finally:
+                    joining.set()
+                    await release.wait()
+
+        async def opened():
+            await entered.wait()
+            return response
+
+        work = self.spawn(transport.until_disconnect(Request(), opened()))
+        try:
+            await asyncio.wait_for(joining.wait(), 2)
+            work.cancel()
+            release.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await asyncio.wait_for(work, 2)
+            self.assertTrue(stream.closed)
+            self.assertEqual((await runtime.snapshot())["running"], 0)
+        finally:
+            release.set()
+            await response.aclose()
+
+    async def test_repeated_cancel_during_response_reclaim_keeps_cleanup_owner(self):
+        lease = await self.acquire()
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        class SlowClose(DelayedStream):
+            async def aclose(self):
+                entered.set()
+                await release.wait()
+                await super().aclose()
+
+        stream = SlowClose()
+        raw = httpx.Response(200, stream=stream)
+        lease.lost.set()
+        async def opened():
+            return raw
+
+        work = self.spawn(lease.run(opened()))
+        try:
+            await asyncio.wait_for(entered.wait(), 2)
+            work.cancel()
+            await asyncio.sleep(0)
+            work.cancel()
+            await asyncio.sleep(0)
+            self.assertFalse(stream.closed)
+            release.set()
+            with self.assertRaises(runtime.CapacityError):
+                await asyncio.wait_for(work, 2)
+            self.assertTrue(stream.closed)
+        finally:
+            release.set()
+            await lease.close()
+
+    async def test_cancel_after_headers_before_handoff_closes_unowned_response(self):
+        lease = await self.acquire()
+        joining, release = asyncio.Event(), asyncio.Event()
+
+        class PausedWatcher(asyncio.Event):
+            async def wait(self):
+                try:
+                    return await super().wait()
+                finally:
+                    joining.set()
+                    await release.wait()
+
+        lease.lost = PausedWatcher()
+        stream = DelayedStream()
+        raw = httpx.Response(200, stream=stream)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda req: raw)) as http:
+            with patch.object(runtime, "acquire", return_value=lease), \
+                    patch.object(transport, "_client", return_value=http):
+                opening = self.spawn(transport.open_response(CONF, "/responses", b"{}"))
+                try:
+                    # Headers have arrived, but Lease.run still has to join its
+                    # cancelled watcher before the caller receives the socket.
+                    await asyncio.wait_for(joining.wait(), 2)
+                    opening.cancel()
+                    release.set()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await asyncio.wait_for(opening, 2)
+                    self.assertTrue(raw.is_closed, "an undelivered HTTP response must be reclaimed")
+                    self.assertTrue(stream.closed)
+                    self.assertEqual((await runtime.snapshot())["running"], 0)
+                finally:
+                    release.set()
+                    await raw.aclose()
+
     async def test_repeated_cancellation_during_close_still_removes_lease(self):
         lease = await self.acquire()
         lease.renewal.cancel()

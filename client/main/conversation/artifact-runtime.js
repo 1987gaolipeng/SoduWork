@@ -67,7 +67,7 @@ function recoveredFiles(session) {
 
 async function snapshotAsync(session) {
   if (!session) return null;
-  const cwd = session.cwd, sessionId = session.sessionId, owner = session.deliveryOwner;
+  const cwd = session.cwd, sessionId = session.sessionId, owner = session.deliveryOwner, history = session.artifactHistory;
   const asynchronous = session.outputSnapshotAsync, synchronous = session.outputSnapshot, list = session.outputs;
   const recovered = recoveredFiles(session);
   let scanned = typeof asynchronous === 'function'
@@ -75,16 +75,39 @@ async function snapshotAsync(session) {
     : typeof synchronous === 'function' ? await synchronous.call(session)
       : { files: typeof list === 'function' ? await list.call(session) : [] };
   const candidates = cwd ? await pluginDrafts.collectAsync(cwd, scanned || {}) : [];
-  const validation = await require('../pi-session/plugin-generation-gate.cjs').inspect({ handle: session, snapshot: scanned, files: candidates });
+  const retained = require('./runtime-artifacts.cjs').restore(cwd, history).filter(file => file.pluginDraft);
+  if (retained.length) {
+    // Recheck only exact retained package paths, including their current
+    // resource revisions. A saved validation receipt is never authority.
+    const checked = await pluginDrafts.collectAsync(cwd, { files: retained });
+    for (const file of checked) {
+      const previous = retained.find(item => item.path === file.path);
+      if (!previous) continue;
+      const index = candidates.findIndex(item => item.path === file.path);
+      const item = { ...previous, ...file, primary: false, changedInTurn: false };
+      if (index >= 0) candidates[index] = item; else candidates.push(item);
+    }
+  }
+  // A retained draft and a new segment's revision share one identity. Merge
+  // their full candidate set before validation and stale-card resolution.
+  const merged = pluginDrafts.mergePluginCandidates(candidates.map(file => ({ ...file, pluginSuperseded: false })));
+  const validation = await require('../pi-session/plugin-generation-gate.cjs').inspect({ handle: session, snapshot: scanned, files: merged });
   scanned = { ...scanned, pluginValidation: validation };
-  if (session.cwd !== cwd || session.sessionId !== sessionId || session.deliveryOwner !== owner ||
+  if (session.cwd !== cwd || session.sessionId !== sessionId || session.deliveryOwner !== owner || session.artifactHistory !== history ||
       session.outputSnapshotAsync !== asynchronous || session.outputSnapshot !== synchronous || session.outputs !== list)
-    throw Error('会话成果来源已变化，请刷新后重试');
-  return sessionSnapshot(session, scanned, recovered, candidates);
+    throw Object.assign(Error('会话成果来源已变化，请刷新后重试'), { code: 'ARTIFACT_SOURCE_CHANGED' });
+  return sessionSnapshot(session, scanned, recovered, merged);
 }
 
 function sessionSnapshot(session, scanned, recovered, candidates) {
   if (!session) return null;
+  const historical = require('./runtime-artifacts.cjs').restore(session.cwd, session.artifactHistory);
+  const historicalPaths = new Set(historical.map(file => path.resolve(file.path)));
+  const currentAnswer = selection.turn(session.artifactState || {}).answer;
+  const reused = historical.filter(file => file.historicalPrimary && !file.processEvidence &&
+    currentAnswer && selection.mentioned(currentAnswer, session.cwd, file)).map(file => ({ ...file, primary: true }));
+  const currentFile = file => !file.path || !historicalPaths.has(path.resolve(file.path)) ||
+    Boolean(currentAnswer && selection.mentioned(currentAnswer, session.cwd, file));
   const savedReports = require('./saved-report-artifacts');
   if (!recovered) recovered = recoveredFiles(session);
   if (!scanned) scanned = typeof session.outputSnapshot === 'function'
@@ -99,15 +122,18 @@ function sessionSnapshot(session, scanned, recovered, candidates) {
     processFiles.has(path.resolve(file.path || '')) || selection.processRoles.has(file.role) ||
     deliveryContract._kindOf(file.path) === 'image' && deliveryContract._isProcess(file)
     ? { ...file, processEvidence: true, evidenceSource: captures.has(captureKey(file)) ? 'capture' : 'manifest', primary: false } : file);
-  const got = { ...scanned, files: savedReports.currentFiles(session.cwd, scanned?.files, recovered).map(metadata) };
-  const originalDelivery = got.delivery || { source: 'legacy', items: got.files };
+  const got = { ...scanned, files: savedReports.currentFiles(session.cwd, scanned?.files, recovered).filter(currentFile).map(metadata) };
+  for (const file of reused) if (!got.files.some(item => item.path === file.path)) got.files.push(file);
+  const scannedDelivery = got.delivery || { source: 'legacy', items: got.files };
+  const originalDelivery = { ...scannedDelivery, items: [...(scannedDelivery.items || []),
+    ...reused.filter(file => !(scannedDelivery.items || []).some(item => item.path === file.path))] };
   const request = selection.turn(state).request;
   const allowCaptures = selection.requestsCaptures(request) || !request && originalDelivery.source === 'manifest';
   const delivery = selection.select(session.cwd, { ...originalDelivery,
     items: originalDelivery.presentation === 'summary' ? [] : savedReports.currentFiles(session.cwd, originalDelivery.items, recovered)
       .map(file => allowCaptures && !processFiles.has(path.resolve(file.path || '')) && !selection.processRoles.has(file.role)
         ? artifactTitle.decorate(session.cwd, file) : metadata(file))
-      .filter(file => !file.processEvidence) }, state);
+      .filter(file => !file.processEvidence && currentFile(file)) }, state);
   if (got.delivery) got.delivery = delivery;
   // A primary delivery list is a shortlist, not the set of files a user may
   // revisit. Keep scanned documents/websites/media addressable across turns,
@@ -119,6 +145,7 @@ function sessionSnapshot(session, scanned, recovered, candidates) {
     since: got.since ?? session.outputSince ?? session.startedAt, turnSince: got.turnSince,
   });
   for (const file of [...(got && got.files || []), ...recovered, ...screenshots]) {
+    if (!currentFile(file)) continue;
     const kind = deliveryContract._kindOf(file.path);
     if (!file.path || !kind || indexed.has(path.resolve(file.path))) continue;
     const relative = path.relative(session.cwd, file.path).split(path.sep).join('/');
@@ -148,6 +175,13 @@ function sessionSnapshot(session, scanned, recovered, candidates) {
   // Delivery consumers need the same installation metadata as the artifact index.
   const indexedByPath = new Map(items.filter(item => item.path).map(item => [path.resolve(item.path), item]));
   delivery.items = (delivery.items || []).map(item => item.path && indexedByPath.get(path.resolve(item.path)) || item);
+  // Historical artifacts are addressable, but never become this segment's
+  // newly scanned files or current-turn delivery/acceptance inputs.
+  const currentIds = new Set(items.map(file => file.artifactId));
+  // An archive folded into its manifest stays readable, but restoring its old
+  // metadata must not resurrect a second install candidate.
+  items.push(...historical.filter(file => !currentIds.has(file.artifactId))
+    .map(file => candidates && file.pluginDraft ? { ...file, pluginDraft: false } : file));
   return { got: got || {}, delivery, items };
 }
 
@@ -222,6 +256,18 @@ function publicArtifact(ref, item) {
 function decorate(ref, delivery) {
   return (delivery && Array.isArray(delivery.items) ? delivery.items : [])
     .map((item) => publicArtifact(ref, item));
+}
+
+async function decorateForSharing(ref, delivery) {
+  const artifacts = decorate(ref, delivery);
+  await Promise.all(artifacts.map(async (artifact, index) => {
+    if (artifact.kind !== 'website') return;
+    // share-related archives the resolved entry's parent. Display paths may be aliases or truncated.
+    const entry = await fs.promises.realpath(delivery.items[index].path).catch(() => null);
+    artifact.websiteDirectoryId = entry
+      ? crypto.createHash('sha256').update(path.dirname(entry)).digest('hex') : artifact.artifactId;
+  }));
+  return artifacts;
 }
 
 function sendError(response, code, message) {
@@ -448,7 +494,10 @@ async function action(session, ref, artifactId, rawAction, deps) {
         data: archive.base64, website: true,
         preview: { status: 'zip_only', reason: 'Website assets are packaged for safe preview in SoduWork' } };
     } catch (error) {
-      return { ok: false, reason: String(error && error.message || 'Website packaging failed') };
+      const reason = error?.code === 'ZIP_DEPTH_LIMIT'
+        ? require('../native-locale.cjs').translate('文件夹包含超过12层的文件，请将文件移近所选文件夹后重试')
+        : String(error && error.message || 'Website packaging failed');
+      return { ok: false, reason };
     }
   }
   if (actionName === 'share') {
@@ -522,6 +571,7 @@ module.exports = {
   snapshot: sessionSnapshot,
   snapshotAsync,
   decorate,
+  decorateForSharing,
   resolve,
   resolveSnapshot,
   resolveAsync,

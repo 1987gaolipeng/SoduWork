@@ -21,5 +21,14 @@ echo Enable "Add Python to PATH", then run this file again.
 cmd /c exit 1
 :finished
 set "SODUWORK_START_EXIT=%errorlevel%"
-if not "%SODUWORK_START_EXIT%"=="0" if not "%SODUWORK_NO_PAUSE%"=="1" pause
+if "%SODUWORK_START_EXIT%"=="0" goto done
+if "%SODUWORK_NO_PAUSE%"=="1" goto done
+:check_pause
+if [%1]==[] goto pause_on_error
+if "%~1"=="--password-stdin" goto done
+shift
+goto check_pause
+:pause_on_error
+pause
+:done
 exit /b %SODUWORK_START_EXIT%

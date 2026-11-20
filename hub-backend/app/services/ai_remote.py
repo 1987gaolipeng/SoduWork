@@ -521,11 +521,18 @@ async def runner_of_ref_async(ref: str):
     return None
 
 
-def status_sync(cfg: dict, ref: str) -> dict:
-    r = _runner_of_ref(ref)
+def status_sync(cfg: dict, ref: str, *, runner_id: str = "") -> dict:
+    r = runner_hub.get(runner_id) if runner_id else _runner_of_ref(ref)
     if r is None:
         return {"ok": False, "error": "这条活所在的执行机不在线"}
     res = runner_hub.call_sync(r, "job.status", {"ref": ref}, timeout=60)
+    if runner_id and res.get("ok"):
+        snapshot = res.get("data") or {}
+        if not snapshot.get("ok") and not snapshot.get("done"):
+            # job.has can reclaim an archived ref missing from the Runner's live map.
+            found = runner_hub.call_sync(r, "job.has", {"ref": ref}, timeout=15)
+            if found.get("ok") and (found.get("data") or {}).get("has"):
+                res = runner_hub.call_sync(r, "job.status", {"ref": ref}, timeout=60)
     if not res.get("ok"):
         return {"ok": False, "error": res.get("error") or "问不到状态"}
     d = dict(res.get("data") or {})
@@ -675,11 +682,11 @@ def _download(r, ref: str, att_id: str) -> bytes | None:
             return None
 
 
-def fetch_attachment_for_sync(cfg: dict, ref: str, att_id: str) -> bytes | None:
+def fetch_attachment_for_sync(cfg: dict, ref: str, att_id: str, *, runner_id: str = "") -> bytes | None:
     """Fetch an artifact from its execution's Runner and workspace. The execution ref prevents
     collisions between identical relative paths in different tasks.
     """
-    r = _runner_of_ref(ref)
+    r = runner_hub.get(runner_id) if runner_id else _runner_of_ref(ref)
     if r is None:
         return None
     return _download(r, ref, att_id)
@@ -696,8 +703,8 @@ def fetch_attachment_sync(cfg: dict, att_id: str) -> bytes | None:
     return None
 
 
-def stop_sync(cfg: dict, ref: str) -> dict:
-    r = _runner_of_ref(ref)
+def stop_sync(cfg: dict, ref: str, *, runner_id: str = "") -> dict:
+    r = runner_hub.get(runner_id) if runner_id else _runner_of_ref(ref)
     if r is None:
         return {"ok": False, "error": "这条活所在的执行机不在线"}
     res = runner_hub.call_sync(r, "job.stop", {"ref": ref}, timeout=60)

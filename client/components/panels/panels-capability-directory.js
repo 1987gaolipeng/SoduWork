@@ -230,26 +230,41 @@
     });
   }
 
+  // The desktop ships some platform plugins (for example Skill 创建与优化) as
+  // local:<key> built-ins. Their published platform copy must not be offered
+  // again as an install; opening it opens the copy that is already usable.
+  function bundledBuiltIns(catalog) {
+    const byKey = new Map();
+    (catalog.items || []).forEach(function (item) {
+      const id = String(item.pluginId || '');
+      if (item.builtIn && id.startsWith('local:')) byKey.set(id.slice('local:'.length), item);
+    });
+    return byKey;
+  }
+
   function marketRows(catalog) {
     const isWorkspaceApp = global.SoduWorkPluginPresentation && global.SoduWorkPluginPresentation.isWorkspaceApp;
+    const builtIns = bundledBuiltIns(catalog);
     return (catalog.items || []).filter(item =>
       !item.personal && item.listed !== false && !(isWorkspaceApp && isWorkspaceApp(item))).map(function (item) {
       const policy = item.marketPolicy || {};
       const taskOnly = policy.installation === 'not_available';
       const defaultInstall = policy.installation === 'installed_by_default';
+      const bundled = item.scope === 'platform' && item.key ? builtIns.get(String(item.key)) : null;
+      const installed = Boolean(item.installed || bundled);
       return {
-        id: item.pluginId, name: item.name, description: item.description,
+        id: bundled ? bundled.pluginId : item.pluginId, name: item.name, description: item.description,
         plugin: item,
         process: item.process,
         source: marketSource(item), category: categoryFor(item, catalog).name,
         categoryKey: categoryFor(item, catalog).key,
-        installed: Boolean(item.installed), updateAvailable: Boolean(item.updateAvailable),
+        installed, updateAvailable: Boolean(item.updateAvailable),
         featured: Boolean(policy.featured), taskOnly, defaultInstall,
         status: taskOnly ? '需求专用' :
           item.updateAvailable ? '有新版本' :
-          defaultInstall ? (item.installed ? '企业默认' :
+          defaultInstall ? (installed ? '企业默认' :
             item.installationState === 'default_blocked' ? '等待企业连接' : '默认已停用') :
-          item.installed ? '已安装' : '可安装',
+          installed ? '已安装' : '可安装',
       };
     });
   }

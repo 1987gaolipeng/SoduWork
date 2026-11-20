@@ -150,3 +150,49 @@ test('website images require delivery intent; standalone image results remain de
   assert.deepEqual(delivery.infer([page,image]).items.map(row=>row.name),['index.html']);
   assert.deepEqual(delivery.infer([image]).items.map(row=>row.name),['final-hero.png']);
 });
+
+test('JSON results are inferred only with delivery intent and retain turn provenance', () => {
+  const root = path.join(os.tmpdir(), 'soduwork-json-results');
+  const files = ['spring-parallel-prose.json', 'final-result.json', 'outputs/customers.json', 'deliverables/catalog.JSON',
+    'exports/records.json', 'data/customers.json'].map(name => ({ ...file(root, name), changedInTurn: true }));
+  files.push({ ...file(root, 'outputs/previous.json'), changedInTurn: false });
+  const result = delivery.infer(files);
+  assert.deepEqual(result.items.map(item => item.relative), [
+    'spring-parallel-prose.json', 'final-result.json', 'outputs/customers.json', 'deliverables/catalog.JSON',
+    'exports/records.json', 'outputs/previous.json',
+  ]);
+  assert.ok(result.items.every(item => item.kind === 'file' && item.primary));
+  assert.equal(result.items[0].changedInTurn, true);
+  assert.equal(result.items.at(-1).changedInTurn, false);
+});
+
+test('JSON output inference excludes configuration, locks and process evidence', () => {
+  const root = path.join(os.tmpdir(), 'soduwork-json-process');
+  const names = ['outputs/package.json', 'outputs/package-lock.json', 'outputs/npm-shrinkwrap.json',
+    'outputs/tsconfig.build.json', 'outputs/app.config.json', 'outputs/config.json',
+    'outputs/settings.json', 'outputs/.eslintrc.json', 'outputs/results.lock.json',
+    'outputs/logs/results.json', 'outputs/cache/results.json', 'outputs/.cache/results.json',
+    'outputs/config/results.json', 'outputs/src/results.json', 'outputs/test-results.json',
+    'outputs/code-review.json', 'outputs/workflow-decision.json', 'outputs/debug-result.json',
+    'credentials.json', 'secrets.json', 'auth.json', 'token.json', 'service-account.json',
+    '.private/result.json', 'outputs/.hidden/result.json'];
+  assert.deepEqual(delivery.infer(names.map(name => file(root, name))).items, []);
+});
+
+test('repository JSON is inferred only from output directories while manifests remain authoritative', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-json-project-'));
+  try {
+    fs.writeFileSync(path.join(root, 'package.json'), '{}');
+    const files = ['result.json', 'data/result.json', 'outputs/records.json'].map(name => file(root, name));
+    assert.deepEqual(delivery.classify(root, files).items.map(item => item.relative), ['outputs/records.json']);
+    fs.mkdirSync(path.join(root, '.soduwork'));
+    fs.writeFileSync(path.join(root, '.soduwork/delivery.json'), JSON.stringify({
+      schemaVersion: 1, deliverables: [{ path: 'package.json', kind: 'file' }],
+    }));
+    assert.deepEqual(delivery.classify(root, files).items.map(item => item.relative), ['package.json']);
+    fs.writeFileSync(path.join(root, '.soduwork/delivery.json'), JSON.stringify({
+      schemaVersion: 1, presentation: 'summary', deliverables: [],
+    }));
+    assert.deepEqual(delivery.classify(root, files).items, []);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

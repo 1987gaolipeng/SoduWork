@@ -247,8 +247,10 @@ class RunnerEnvironmentTests(unittest.IsolatedAsyncioTestCase):
     async def test_task_model_configuration_is_built_on_runner(self):
         run = {"taskId": "task", "cli": "opencode", "cfg": {"llm": {
             "base": "http://model.invalid/v1", "key": "task-scoped-model-key", "model": "fixture-model"}}}
-        with patch.dict(local_base._RUNS, {"ref": run}, clear=True), \
-             patch.dict(os.environ, {"PATH": "runner-bin", "HOME": "runner-home"}, clear=True):
+        with tempfile.TemporaryDirectory(prefix="soduwork-opencode-model-") as directory, \
+             patch.dict(local_base._RUNS, {"ref": run}, clear=True), \
+             patch.dict(os.environ, {"PATH": "runner-bin", "HOME": directory,
+                 "USERPROFILE": directory, "SODUWORK_DATA_ROOT": directory}, clear=True):
             env = runner_environment("task", "ref", "opencode")
         self.assertEqual(env["PATH"], "runner-bin")
         self.assertEqual(env["SODUWORK_LLM_KEY"], "task-scoped-model-key")
@@ -296,7 +298,8 @@ class RunnerEnvironmentTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory(prefix="soduwork-opencode-shell-") as directory, \
              patch.dict(local_base._RUNS, {"ref": {"taskId": "task", "cli": "opencode",
                  "cliSid": "ses_owned", "ws": directory, "cfg": {}}}, clear=True), \
-             patch.dict(os.environ, {"SODUWORK_DATA_ROOT": directory}, clear=True), \
+             patch.dict(os.environ, {"SODUWORK_DATA_ROOT": directory,
+                 "HOME": directory, "USERPROFILE": directory}, clear=True), \
              patch.object(migration, "migrate_session") as migrate:
             env = runner_environment("task", "ref", "opencode", mode="shell")
             migrate.assert_not_called()
@@ -309,7 +312,8 @@ class RunnerEnvironmentTests(unittest.IsolatedAsyncioTestCase):
             run = {"taskId": "task", "cli": "opencode", "cliSid": "ses_owned",
                    "ws": directory, "cfg": {}}
             with patch.dict(local_base._RUNS, {"ref": run}, clear=True), \
-                 patch.dict(os.environ, {"SODUWORK_DATA_ROOT": directory}, clear=True), \
+                 patch.dict(os.environ, {"SODUWORK_DATA_ROOT": directory,
+                     "HOME": directory, "USERPROFILE": directory}, clear=True), \
                  patch.dict(local_base._PROFILES["opencode"], {"bin": lambda: "fixture-opencode"}), \
                  patch.object(migration, "migrate_session", side_effect=
                               migration.OpenCodeSessionMigrationError("Unsupported legacy schema")):
@@ -321,7 +325,8 @@ class RunnerEnvironmentTests(unittest.IsolatedAsyncioTestCase):
         from app.services import opencode_session_migration as migration
         with tempfile.TemporaryDirectory(prefix="soduwork-opencode-terminal-") as directory, \
              patch.dict(local_base._RUNS, {}, clear=True), \
-             patch.dict(os.environ, {"SODUWORK_DATA_ROOT": directory}, clear=True), \
+             patch.dict(os.environ, {"SODUWORK_DATA_ROOT": directory,
+                 "HOME": directory, "USERPROFILE": directory}, clear=True), \
              patch.object(migration, "migrate_session") as migrate:
             runner_environment("task", "missing-ref", "opencode")
             migrate.assert_not_called()
@@ -334,7 +339,8 @@ class RunnerEnvironmentTests(unittest.IsolatedAsyncioTestCase):
             def recover(ref):
                 local_base._RUNS[ref] = run
             with patch.dict(local_base._RUNS, {}, clear=True), \
-                 patch.dict(os.environ, {"SODUWORK_DATA_ROOT": directory}, clear=True), \
+                 patch.dict(os.environ, {"SODUWORK_DATA_ROOT": directory,
+                     "HOME": directory, "USERPROFILE": directory}, clear=True), \
                  patch.dict(local_base._PROFILES["opencode"], {"bin": lambda: "fixture-opencode"}), \
                  patch.object(local_base, "rehydrate", side_effect=recover) as rehydrate, \
                  patch.object(migration, "migrate_session") as migrate:

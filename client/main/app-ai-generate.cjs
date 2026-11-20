@@ -76,10 +76,11 @@ async function soleModel(identity, fetchImpl, signal) {
   return names.size === 1 ? [...names][0] : '';
 }
 function create({ app, authenticatedIdentityOf, authorizeAI, fetchImpl = global.fetch,
-  resolveModel = modelConfig.fetchModel }) {
+  resolveModel = modelConfig.fetchModel, useModelOutputLimit = false }) {
   const receipts = new WeakMap(), active = new Map();
   return async function generate(item, raw, assertCurrent = () => {}) {
     const params = normalize(raw);
+    const modelBudgetRequested = useModelOutputLimit && raw.maxOutputTokens == null;
     let requestedModel = String(params.model || '').trim();
     const explicitModel = Boolean(requestedModel);
     let localRequested = requestedModel.startsWith('local:');
@@ -101,7 +102,7 @@ function create({ app, authenticatedIdentityOf, authorizeAI, fetchImpl = global.
     const rows = receipts.get(item) || new Map(); receipts.set(item, rows);
     // Scope is part of the key: a later account must never receive an old result.
     const key = JSON.stringify([owner, identity.hub, identity.clientId, params.requestId]);
-    const fingerprint = crypto.createHash('sha256').update(JSON.stringify(params)).digest('hex');
+    const fingerprint = crypto.createHash('sha256').update(JSON.stringify([params, modelBudgetRequested])).digest('hex');
     const prior = rows.get(key);
     if (prior) {
       if (prior.fingerprint !== fingerprint) return failure('APP_AI_REQUEST_CONFLICT', '请求编号已用于其他内容');
@@ -156,7 +157,11 @@ function create({ app, authenticatedIdentityOf, authorizeAI, fetchImpl = global.
         }
         await current();
         if (controller.signal.aborted) return;
-        const body = payload(model, params);
+        // Only a trusted native caller can choose the local model's budget.
+        // Public app requests retain their bounded default and explicit limits.
+        const generationParams = modelBudgetRequested && model.localOnly === true
+          ? { ...params, maxOutputTokens: require('./conversation/model-selection').outputLimit(model) } : params;
+        const body = payload(model, generationParams);
         dispatched = true;
         const response = await fetchImpl(model.baseUrl.replace(/\/+$/, '') + '/chat/completions', {
           method: 'POST', redirect: 'error', signal: controller.signal,
@@ -173,7 +178,8 @@ function create({ app, authenticatedIdentityOf, authorizeAI, fetchImpl = global.
         const choice = result?.choices?.[0];
         const text = choice?.message?.content;
         if (typeof text !== 'string' || !text.trim() || text.length > 262144)
-          return failure('APP_AI_EMPTY_RESULT', '模型未返回可用文字，请调整提示词或模型');
+          return { ...failure('APP_AI_EMPTY_RESULT', '模型未返回可用文字，请调整提示词或模型'),
+            ...(choice?.finish_reason === 'length' ? { finishReason: 'length' } : {}) };
         const usage = {};
         for (const [key, source] of [['inputTokens', 'prompt_tokens'], ['outputTokens', 'completion_tokens'], ['totalTokens', 'total_tokens']])
           if (Number.isSafeInteger(result.usage?.[source]) && result.usage[source] >= 0) usage[key] = result.usage[source];

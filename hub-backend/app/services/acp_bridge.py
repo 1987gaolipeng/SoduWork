@@ -247,7 +247,8 @@ class AcpBridge:
                 if self.session_id:
                     opencode_session_migration.migrate_session(
                         agent_env, self.session_id, self.cwd, self.argv[0])
-            except opencode_session_migration.OpenCodeSessionMigrationError as exc:
+            except (opencode_session_migration.OpenCodeSessionMigrationError,
+                    opencode_runtime_config.OpenCodeEnvironmentError) as exc:
                 raise BridgeError(str(exc)) from exc
             except OSError as exc:
                 raise BridgeError("OpenCode 受管数据目录无法创建，请检查 Runner 数据目录权限。") from exc

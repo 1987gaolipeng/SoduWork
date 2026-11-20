@@ -74,8 +74,9 @@ def _lan_ip() -> str:
 
 def hub_url(prefer: str = "", request_base: str = "") -> str:
     """Choose the Hub URL from an explicit override, the current non-loopback administration URL,
-    then the local LAN address.
+    then the local LAN address while preserving the local service URL.
     """
+    local_url = None
     for candidate in (prefer, request_base):
         url = str(candidate or "").strip().rstrip("/")
         if not url:
@@ -85,7 +86,8 @@ def hub_url(prefer: str = "", request_base: str = "") -> str:
         elif "://" not in url:
             url = "http://" + url
         url = validate_hub_url(url)
-        host = urlsplit(url).hostname
+        parsed = urlsplit(url)
+        host = parsed.hostname
         local = host in _LOOPBACK
         try:
             address = ipaddress.ip_address(host)
@@ -94,9 +96,17 @@ def hub_url(prefer: str = "", request_base: str = "") -> str:
             pass
         if not local:
             return url
-    ip = _lan_ip()
+        if local_url is None:
+            local_url = parsed
+    host = _lan_ip() or "127.0.0.1"
+    if ":" in host:
+        host = "[" + host + "]"
+    if local_url is not None:
+        # Only replace the host; keep HTTPS, the active port and any proxy path.
+        netloc = host + (":" + str(local_url.port) if local_url.port is not None else "")
+        return validate_hub_url(local_url._replace(netloc=netloc).geturl())
     port = os.environ.get("PORT") or "9080"
-    return validate_hub_url("http://%s:%s" % (ip or "127.0.0.1", port))
+    return validate_hub_url("http://%s:%s" % (host, port))
 
 
 def new_runner_id(host: str = "") -> str:

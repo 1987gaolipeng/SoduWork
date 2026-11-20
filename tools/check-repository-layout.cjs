@@ -11,6 +11,7 @@ const GITHUB_FILES = new Set([
   '.github/ISSUE_TEMPLATE/config.yml', '.github/ISSUE_TEMPLATE/bug_report.yml',
   '.github/ISSUE_TEMPLATE/feature_request.yml', '.github/workflows/ci.yml', '.github/workflows/security.yml',
   '.github/workflows/release.yml', '.github/workflows/packages.yml', '.github/RELEASE.md',
+  '.github/workflows/client-packages.yml',
 ]);
 const RETIRED = new Set([
   'SOURCE-MANIFEST.json', 'PUBLIC-SOURCE.json', 'Dockerfile.server',

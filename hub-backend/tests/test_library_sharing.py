@@ -31,7 +31,8 @@ class LibrarySharingTests(unittest.IsolatedAsyncioTestCase):
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.engine.begin() as connection:
             await connection.run_sync(lambda conn: Base.metadata.create_all(conn, tables=[
-                models.User.__table__, models.Client.__table__, models.Attachment.__table__, models.MateMessage.__table__,
+                models.OrgUnit.__table__, models.User.__table__, models.Client.__table__,
+                models.Attachment.__table__, models.MateMessage.__table__,
                 LibraryItem.__table__, LibraryFolder.__table__]))
         async with self.sessions() as session:
             for uid, org, active in [('sender', 'org-one', True), ('alice', 'org-one', True),

@@ -182,9 +182,9 @@ html[data-desk-panel="workspace"][data-workspace-layout="utility"] .ws-resizer{d
 :is(.ws-chat,.app-chat-history-row) .st-chat{display:none}
 :is(.ws-chat,.app-chat-history-row):is(.is-starting,.is-running,.is-waiting,.is-failed) .st-chat{display:block;width:8px;height:8px;box-sizing:border-box}
 .ws-chat .ws-chat-title{font-size:max(var(--font-min-readable, 14.5px), 14px)}
-.ws-chat-title{min-width:0;flex:1;line-height:1.35;overflow-x:auto;overflow-y:hidden;white-space:nowrap;text-overflow:clip;scrollbar-width:none;overscroll-behavior:contain}
-.ws-task span.ws-chat-title{overflow-x:auto;overflow-y:hidden;text-overflow:clip;white-space:nowrap}
-.ws-chat-title::-webkit-scrollbar{width:0;height:0;display:none}
+.ws-chat-title{min-width:0;flex:1;line-height:1.35;white-space:nowrap}
+.ws-task span.ws-chat-title{overflow:clip;text-overflow:clip;white-space:nowrap}
+.ws-task .ws-chat-title-text{display:inline-block;width:max-content;max-width:none;overflow:visible;text-overflow:clip;vertical-align:top}
 .ws-chat-runtime{display:inline-flex;align-items:center;flex:none;max-width:90px;overflow:visible;
   padding:0;border:0;background:transparent;line-height:1}
 .ws-chat-runtime[hidden]{display:none}

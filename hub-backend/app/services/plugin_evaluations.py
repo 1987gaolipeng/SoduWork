@@ -4,21 +4,25 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from sqlalchemy import select
+from sqlalchemy import BigInteger, cast, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am, models
-from . import (agent_route_selection, ai_exec, environment_service,
+from ..db import SessionLocal
+from . import (agent_route_selection, ai_exec, ai_remote, environment_service,
                plugin_runtime, workflow_inputs)
 
 
 ACTIVE_STATES = {"queued", "running"}
 FINAL_STATES = {"completed", "failed", "cancelled"}
 DECISIONS = {"passed", "failed"}
+RECOVERY_GRACE_MS = 15 * 60 * 1000
+log = logging.getLogger(__name__)
 
 
 def _now() -> datetime:
@@ -341,51 +345,80 @@ async def start(session: AsyncSession, version: am.PluginVersion, case_key: str,
     return row
 
 
+def _probe_time():
+    # Epoch milliseconds exceed the PostgreSQL INTEGER range.
+    return cast(am.PluginEvaluationRun.result["lastProbe"]["at"].as_string(), BigInteger)
+
+
+async def _execution_route(session: AsyncSession, row: am.PluginEvaluationRun):
+    executor = dict(row.executor or {})
+    if executor.get("provider") == "runner" and executor.get("runnerId"):
+        return ai_remote, {}, {"runner_id": executor["runnerId"]}
+    return ai_exec, await ai_exec.load(session), {}
+
+
 async def refresh(session: AsyncSession, row: am.PluginEvaluationRun) -> am.PluginEvaluationRun:
     if row.state not in ACTIVE_STATES or not row.external_ref:
         return row
-    ctx = await ai_exec.load(session)
-    executor = dict(row.executor or {})
-    if executor.get("provider") == "runner" and executor.get("runnerId"):
-        from . import ai_remote
-        ai_remote.remember(row.external_ref, str(executor["runnerId"]))
-    status = await asyncio.to_thread(ai_exec.status_sync, ctx, row.external_ref)
-    if not status.get("ok"):
-        row.result = {**dict(row.result or {}), "lastProbe": {
-            "ok": False, "error": str(status.get("error") or "")[:500], "at": _ms(_now())}}
-        await session.commit()
-        return row
-    row.result = {**dict(row.result or {}), "lastProbe": {
-        "ok": True, "status": str(status.get("status") or ""),
-        "running": bool(status.get("running")), "at": _ms(_now())}}
-    if not status.get("done"):
-        await session.commit()
-        return row
-    if status.get("error") or str(status.get("status") or "") in {"failed", "interrupted"}:
-        row.state, row.completed_at = "failed", _now()
-        row.active_key = None
-        row.error = str(status.get("error") or "发布评测执行失败")[:1200]
-        await session.commit()
-        return row
+    provider, ctx, route = await _execution_route(session, row)
+    previous = (row.result or {}).get("lastProbe") or {}
+    status = await asyncio.to_thread(provider.status_sync, ctx, row.external_ref, **route)
+    now = _now()
+    stamp = max(_ms(now), (previous.get("at") or 0) + 1)
+    state = status.get("status")
+    probe = {"ok": bool(status.get("ok")), "at": stamp, "status": str(state or ""),
+             "running": bool(status.get("running"))}
+    changes = {"result": {**(row.result or {}), "lastProbe": probe}}
+    unavailable = ""
+    if status.get("done") and (state in {"failed", "interrupted", "stopped", "cancelled"} or
+                               (status.get("ok") and status.get("error"))):
+        changes.update(state="cancelled" if state in {"cancelled", "stopped"} else "failed",
+                       error=str(status.get("error") or state or "发布评测执行失败")[:1200])
+    elif not status.get("ok"):
+        unavailable = str(status.get("error") or "无法取得执行状态")
+    elif status.get("done"):
+        result = await _collect_result(session, row, status, provider, ctx, route)
+        if result is None:
+            unavailable = "暂时无法取回执行产物"
+        else:
+            changes.update(state="completed", error="", result=result)
+    if unavailable:
+        since = stamp
+        if previous.get("ok") is False:
+            since = previous.get("unavailableSince") or previous.get("at") or stamp
+        probe.update(ok=False, unavailableSince=since, error=unavailable[:500])
+        if stamp - since >= RECOVERY_GRACE_MS:
+            changes.update(state="failed", error=f"无法确认执行结果：{unavailable}"[:1200])
+    if "state" in changes:
+        changes.update(completed_at=now, active_key=None)
+    # A page, worker or cancellation may settle the same row while the RPC is in flight.
+    run = am.PluginEvaluationRun
+    await session.execute(update(run).where(
+        run.id == row.id, run.state == row.state, _probe_time() == previous.get("at"),
+    ).values(**changes).execution_options(synchronize_session=False))
+    await session.commit()
+    await session.refresh(row)
+    return row
 
+
+async def _collect_result(session, row, status, provider, ctx, route):
     artifacts = []
     for item in list(status.get("attachments") or [])[:40]:
         attachment_id = str(item.get("id") or "")
         filename = str(item.get("filename") or attachment_id)[:300]
         raw = await asyncio.to_thread(
-            ai_exec.fetch_attachment_for_sync, ctx, row.external_ref, attachment_id)
+            provider.fetch_attachment_for_sync, ctx, row.external_ref, attachment_id, **route)
+        if raw is None:
+            return None
         artifacts.append({
-            "id": attachment_id, "filename": filename, "fetched": raw is not None,
-            "size": len(raw) if raw is not None else 0,
-            "sha256": hashlib.sha256(raw).hexdigest() if raw is not None else "",
+            "id": attachment_id, "filename": filename, "fetched": True,
+            "size": len(raw), "sha256": hashlib.sha256(raw).hexdigest(),
         })
     version = await session.get(am.PluginVersion, row.version_id)
     case = dict(row.case_snapshot or {})
     contract = _contract_check(version, case, status, artifacts) if version else {
         "ok": False, "items": [], "artifacts": [], "blockers": ["插件版本不存在"]}
-    row.state, row.completed_at, row.error = "completed", _now(), ""
-    row.active_key = None
-    row.result = {
+    return {
         "status": {
             "deliveryKind": str(status.get("deliveryKind") or ""),
             "artifactUrl": str(status.get("artifactUrl") or "")[:600],
@@ -394,8 +427,31 @@ async def refresh(session: AsyncSession, row: am.PluginEvaluationRun) -> am.Plug
         },
         "artifacts": artifacts, "contract": contract,
     }
-    await session.commit()
-    return row
+
+
+async def reconcile_once() -> None:
+    run = am.PluginEvaluationRun
+    async with SessionLocal() as session:
+        ids = (await session.scalars(select(run.id).where(
+            run.state.in_(ACTIVE_STATES), run.external_ref != "",
+        ).order_by(_probe_time().asc().nulls_first(), run.id).limit(32))).all()
+    for run_id in ids:
+        try:
+            async with SessionLocal() as session:
+                row = await session.get(run, run_id)
+                if row is not None:
+                    await refresh(session, row)
+        except Exception:
+            log.exception("Failed to refresh plugin evaluation %s", run_id)
+
+
+async def tick_loop() -> None:
+    while True:
+        try:
+            await reconcile_once()
+        except Exception:
+            log.exception("Failed to list active plugin evaluations")
+        await asyncio.sleep(15)
 
 
 async def list_runs(session: AsyncSession, version: am.PluginVersion,
@@ -469,12 +525,15 @@ async def cancel(session: AsyncSession, row: am.PluginEvaluationRun,
     if row.state not in ACTIVE_STATES:
         return row
     if row.external_ref:
-        ctx = await ai_exec.load(session)
-        await asyncio.to_thread(ai_exec.stop_sync, ctx, row.external_ref)
-    row.state, row.completed_at = "cancelled", _now()
-    row.active_key = None
-    row.error = "由 %s 取消" % (actor or "管理员")
+        provider, ctx, route = await _execution_route(session, row)
+        await asyncio.to_thread(provider.stop_sync, ctx, row.external_ref, **route)
+    run = am.PluginEvaluationRun
+    await session.execute(update(run).where(
+        run.id == row.id, run.state.in_(ACTIVE_STATES),
+    ).values(state="cancelled", completed_at=_now(), active_key=None,
+             error="由 %s 取消" % (actor or "管理员")).execution_options(synchronize_session=False))
     await session.commit()
+    await session.refresh(row)
     return row
 
 

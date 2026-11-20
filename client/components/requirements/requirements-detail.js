@@ -431,10 +431,17 @@
     root.querySelector('[data-rq-dismiss]').focus();
     try {
       const taskRead = ++taskRequest;
-      const value = await global.SoduWorkAPI.getTask(id, { signal: controller?.signal });
+      // Notification links can open this drawer before the board/inbox has
+      // loaded. Read approval authority here rather than relying on that cache.
+      let approvalError = null;
+      const [value] = await Promise.all([
+        global.SoduWorkAPI.getTask(id, { signal: controller?.signal }),
+        Promise.resolve().then(() => global.TaskApprovalInbox?.refresh()).catch(error => { approvalError = error; }),
+      ]);
       if (request !== seq || !root) return;
       if (!value?.id) throw new Error('需求已移除或当前账号无权访问');
       acceptTaskReply(value, taskRead); render();
+      if (approvalError) feedback('验收状态暂时无法读取，请重新打开需求重试。');
       timing?.mark('data');
       root.querySelector('.rq-detail-content').dataset.taskId = id;
       const attachments = await global.SoduWorkAPI.listAttachments(id);
@@ -702,13 +709,17 @@
     const hasExecution = task.maintenanceBlocked === true || ['running', 'dispatching', 'done'].includes(task.ai?.state) ||
       ['queued', 'starting', 'running', 'waiting'].includes(routing.conversationTurn?.state);
     const preparing = ['intake', 'clarifying', 'ready'].includes(phase) && !hasExecution && task.ai?.state !== 'failed';
+    const delivery = R.deliveryProgress(task, ctx);
+    const awaitingReview = phase === 'reviewing' || R.approval(task, ctx)?.action === 'review' || R.waitingOn(task, ctx).length > 0;
     const deliveryState = reviewed ? (closedDone ? '已验收'
         : hasEngineering ? '已验收 · 待合并' : '已验收 · 办结受阻')
-      : phase === 'reviewing' ? '待验收' : phase === 'closed' ? '已归档'
-      : preparing ? '尚未开始' : task.status === 'paused' ? '已暂停' : task.ai?.state === 'failed' ? '执行异常' : '处理中';
+      : phase === 'closed' ? '已归档' : delivery?.blocked ? delivery.text : awaitingReview ? '待验收'
+      : delivery ? delivery.text
+      : preparing ? '尚未开始' : task.status === 'paused' ? '已暂停' : task.ai?.state === 'failed' ? '执行异常'
+      : '处理中';
     const deliveryStateClass = reviewed ? (closedDone ? 'is-reviewed'
         : hasEngineering ? 'is-reviewed' : 'is-reviewed is-stalled')
-      : phase === 'reviewing' ? 'is-ready' : preparing || phase === 'closed' ? 'is-idle' : 'is-active';
+      : phase === 'closed' ? 'is-idle' : delivery ? delivery.className : awaitingReview ? 'is-ready' : preparing ? 'is-idle' : 'is-active';
     // Show persisted rework failures with their feedback and a retry action.
     const reworkPending = task.workRouting && task.workRouting.reworkPending || null;
     const reworkCard = reworkPending ?
@@ -757,7 +768,8 @@
     return '<section class="rq-delivery"><div class="rq-delivery-head"><div class="rq-delivery-title"><span class="rq-delivery-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 4-4 7-8 9-4-2-8-5-8-9V6zM12 8v5m0 3h.01"/></svg></span><div><h4>验收与交付</h4>' +
       '<p>验收决策、交付链接与执行证据</p></div></div><div class="rq-delivery-head-actions">' +
       '<span class="rq-delivery-state ' + deliveryStateClass + '">' + deliveryState + '</span></div></div>' +
-      reworkCard +
+      (delivery?.guidance ? '<p class="rq-acceptance-waiting" role="status">' + esc(delivery.guidance) + '</p>' : '') +
+      (delivery?.reason ? '<p class="rq-acceptance-waiting" data-user-content>' + esc(delivery.reason) + '</p>' : '') + reworkCard +
       (approvalCard ? '<div data-rq-approval-card>' + approvalCard + '</div>' : waitingOthers) +
       '<div class="rq-delivery-actions">' +
       (artifact ? '<button type="button" data-rq-artifact>查看交付链接 <span aria-hidden="true">↗</span></button>' : '') +

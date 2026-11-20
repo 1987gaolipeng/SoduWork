@@ -16,8 +16,9 @@ import sys
 import tempfile
 
 try:
-    from . import runtime_images
+    from . import context_window, runtime_images
 except ImportError:  # Direct script entry used by the source Runner bridge.
+    import context_window
     import runtime_images
 
 SETTINGS_ENV = "QWEN_CODE_SYSTEM_SETTINGS_PATH"
@@ -103,6 +104,8 @@ def settings(llm: dict, operator: dict, inherited_generation: dict | None = None
     # without imposing a smaller general task budget or editing user settings.
     model["loopProtection"] = "stop"
     generation = model.setdefault("generationConfig", {})
+    window = context_window.resolve(llm)["contextWindow"]
+    generation["contextWindowSize"] = window
     generation.setdefault("modalities", {})["image"] = image
     generation["splitToolMedia"] = True
     providers = result.setdefault("modelProviders", {})
@@ -118,6 +121,9 @@ def settings(llm: dict, operator: dict, inherited_generation: dict | None = None
 
     existing = next((row for row in rows if current_route(row)), {})
     entry_generation = copy.deepcopy(existing.get("generationConfig", inherited_generation or generation))
+    # Provider entries are sealed, so the native compactor cannot inherit the
+    # selected model's window from the top-level generation settings.
+    entry_generation["contextWindowSize"] = window
     entry_generation.setdefault("modalities", {})["image"] = image
     entry_generation["splitToolMedia"] = True
     entry = {**existing, "id": model_id, "name": MODEL_LABEL, "envKey": "OPENAI_API_KEY",

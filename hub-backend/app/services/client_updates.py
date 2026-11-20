@@ -225,13 +225,15 @@ def installer_brand_rank(artifact_name: str) -> int:
     return 1
 
 
+def supports_canonical_installer(current: str) -> bool:
+    """Return whether this client can use the canonical installer for automatic updates."""
+    version = parse_version(current)
+    return version is not None and version >= (1, 12, 81)
+
+
 def installer_supported_by_client(artifact_name: str, current: str) -> bool:
     """Accept only the canonical SoduWork installer for the current client."""
-    version = parse_version(current)
-    if installer_brand_rank(artifact_name) > 0:
-        return False
-    minimum = (1, 12, 81)
-    return version is not None and minimum is not None and version >= minimum
+    return installer_brand_rank(artifact_name) == 0 and supports_canonical_installer(current)
 
 
 def release_root() -> Path:

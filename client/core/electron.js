@@ -9,8 +9,27 @@ const IS_ELECTRON=typeof window.soduWorkAPI!=='undefined';
  * against cursor position.
  */
 let HAS_NATIVE_SHAPE=IS_ELECTRON&&typeof window.soduWorkAPI.setOverlayShape==='function';
+let _overlayDisplays=[];
+function rememberOverlayDisplays(info){
+  if(!Array.isArray(info?.displays))return;
+  _overlayDisplays=info.displays.filter(r=>[r.x,r.y,r.width,r.height].every(Number.isFinite)&&r.width>0&&r.height>0);
+  window.dispatchEvent(new CustomEvent('overlay-displays-changed'));
+}
+/* Keep restored/released widgets on a real monitor, not a gap in the virtual
+   desktop. During a gesture the pointer may still cross a display boundary. */
+function clampOverlayPosition(x,y,width,height){
+  let best={x,y},distance=Infinity;
+  for(const r of _overlayDisplays){
+    const nx=Math.max(r.x,Math.min(x,r.x+Math.max(0,r.width-width)));
+    const ny=Math.max(r.y,Math.min(y,r.y+Math.max(0,r.height-height)));
+    const d=(nx-x)**2+(ny-y)**2;
+    if(d<distance){best={x:nx,y:ny};distance=d;}
+  }
+  return best;
+}
 if(HAS_NATIVE_SHAPE&&typeof window.soduWorkAPI.getOverlayShape==='function'){
   window.soduWorkAPI.getOverlayShape().then(info=>{
+    rememberOverlayDisplays(info);
     if(info&&typeof info.supported==='boolean')HAS_NATIVE_SHAPE=info.supported;
     // A reload can report geometry before preload learns the current revision.
     // Resend after that query, even when the DOM and its geometry are unchanged.
@@ -121,6 +140,26 @@ const HIT_PAD=6;
 const DRAG_TILE_PAD=140;    /* Padding on each side of the element inside its tile. */
 const DRAG_TILE_SLACK=40;   /* Retile when the remaining edge clearance reaches this value (travel per tile: PAD-SLACK = 100px). */
 var _dragMode=false,_dragTiles=null;
+/* Capture the pressed element before the first move. Document listeners alone
+   lose fast moves outside a shaped native region. Keeping the original target
+   also preserves ordinary dock/ring button clicks. */
+function captureOverlayPointer(event,onLost){
+  const target=event.target;
+  if(!target||typeof target.setPointerCapture!=='function')return ()=>{};
+  try{target.setPointerCapture(event.pointerId);}catch(_){return ()=>{};}
+  const report=flag=>{if(IS_ELECTRON&&soduWorkAPI.setOverlayDragging)soduWorkAPI.setOverlayDragging(flag);};
+  let active=true;
+  const lost=e=>{if(e.pointerId===event.pointerId)onLost();};
+  target.addEventListener('lostpointercapture',lost);
+  report(true);
+  return ()=>{
+    if(!active)return;
+    active=false;
+    target.removeEventListener('lostpointercapture',lost);
+    try{target.releasePointerCapture(event.pointerId);}catch(_){}
+    report(false);
+  };
+}
 function _dragTile(el,r){
   var t=_dragTiles&&_dragTiles.get(el);
   if(t&&r.x>=t.x+DRAG_TILE_SLACK&&r.y>=t.y+DRAG_TILE_SLACK&&
@@ -175,6 +214,8 @@ if(typeof window!=='undefined')window.beginOverlayDrag=function(){
   _lastShapeKey=null;                      /* Create the drag region immediately before movement begins. */
   _interactiveCacheDirty=true;
   _queueOverlayShape(0);
+  /* Keep the main-process input guard from cutting input while the drag crosses work windows or display edges. */
+  if(IS_ELECTRON&&window.soduWorkAPI&&soduWorkAPI.setOverlayDragging)soduWorkAPI.setOverlayDragging(true);
 };
 if(typeof window!=='undefined')window.endOverlayDrag=function(){
   if(!_dragMode)return;
@@ -184,6 +225,7 @@ if(typeof window!=='undefined')window.endOverlayDrag=function(){
   _lastShapeKey=null;                      /* Force a fresh region calculation on release despite cached keys. */
   _interactiveCacheDirty=true;
   _queueOverlayShape(200);
+  if(IS_ELECTRON&&window.soduWorkAPI&&soduWorkAPI.setOverlayDragging)soduWorkAPI.setOverlayDragging(false);
 };
 function _queueOverlayShape(trackMs){
   if(!IS_ELECTRON||!window.soduWorkAPI||!soduWorkAPI.setOverlayShape)return;
@@ -210,6 +252,7 @@ if(typeof window!=='undefined')window.requestOverlayShapeSync=(trackMs,force)=>{
 if(typeof window!=='undefined')window.addEventListener('resize',()=>{
   _interactiveCacheDirty=true;
   _queueOverlayShape(700);
+  if(IS_ELECTRON&&soduWorkAPI.getOverlayShape)soduWorkAPI.getOverlayShape().then(rememberOverlayDisplays).catch(()=>{});
 });
 function isPointInteractive(x,y){
   const els=interactiveEls();

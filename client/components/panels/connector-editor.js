@@ -24,7 +24,7 @@
       const saved = String(raw === undefined || raw === null || raw === '' ? fallback ?? '' : raw);
       const tls = redis && field.key === 'REDIS_TLS';
       if (tls || field.type === 'boolean') {
-        const hint = tls ? '本机未启用 TLS 时可关闭。远程连接或使用 CA 证书时须开启。'
+        const hint = tls ? '关闭后使用明文连接。使用 CA 证书时须开启。'
           : field.key === 'ALLOW_WRITES' ? '仅在你需要创建、修改或发送内容时开启' : '';
         const checked = saved === 'true' || (tls && Boolean(value.env?.REDIS_CA_PEM));
         return '<label class="cap-confirm"><input data-connector-field="'+h(field.key)+'" type="checkbox"'+(checked?' checked':'')+'><span>'+h(tls?'使用 TLS':field.label)+(hint?'<small>'+h(hint)+'</small>':'')+'</span></label>';
@@ -172,10 +172,9 @@
         layer.querySelector('[data-connector-field="'+port.key+'"]')?.focus();
         throw Error('端口必须是 1 到 65535 之间的整数');
       }
-      if (redis && spec.env.REDIS_TLS === 'false' && (spec.env.REDIS_CA_PEM ||
-          !['localhost','127.0.0.1','::1'].includes(String(spec.env.REDIS_HOST).toLowerCase()))) {
+      if (redis && spec.env.REDIS_TLS === 'false' && spec.env.REDIS_CA_PEM) {
         layer.querySelector('[data-connector-field="REDIS_TLS"]')?.focus();
-        throw Error('远程 Redis 或使用 CA 证书的连接需要启用 TLS');
+        throw Error('使用 CA 证书的连接需要启用 TLS');
       }
       if (redis && spec.env.REDIS_USER && !spec.env.REDIS_PASSWORD) {
         layer.querySelector('[data-connector-field="REDIS_PASSWORD"]')?.focus();

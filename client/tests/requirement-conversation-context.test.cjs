@@ -21,6 +21,8 @@ function identity(user = 'alice', device = 'device', hub = 'http://fixture.inval
   })).toString('base64url') + '.' + '0'.repeat(64) };
 }
 function fixture(t, adapterId = 'pi') {
+  // HTTP is mocked separately; native WebSocket also needs an offline fixture.
+  t.mock.method(global, 'WebSocket', function () { throw new Error('Fixture WebSocket is unavailable'); });
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-requirement-context-'));
   const app = new EventEmitter(); app.getPath = () => root; app.getVersion = () => '0.0.0-fixture';
   const workRoot = path.join(root, 'SoduWork'), cwd = path.join(workRoot, 'repo-one');

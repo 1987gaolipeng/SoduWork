@@ -634,6 +634,7 @@ html[data-window-menu] .library-image-dialog{
 }
 .library-content:not(.is-list) .library-file-card .library-card-copy small,
 .library-content:not(.is-list) .library-folder-card .library-card-copy small{display:none;}
+.library-content:not(.is-list) .library-file-card .library-card-copy .library-filename-hint{display:block;order:1;color:var(--ink-3);white-space:normal;}
 .library-content:not(.is-list) .library-file-card .library-card-preview,
 .library-content:not(.is-list) .library-folder-card .library-card-preview{
   order:2;

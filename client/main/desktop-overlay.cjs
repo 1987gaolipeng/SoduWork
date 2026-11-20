@@ -2,6 +2,7 @@
 
 const path = require('node:path');
 const _overlayShape = require('./overlay-shape');
+const _overlayGeometry = require('./overlay-geometry.cjs');
 
 /*
  * Use native shape clipping only on supported platforms. Where setShape is ineffective, a
@@ -123,6 +124,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
   let _overlayAwaitingShape = true;
   let _overlayInputRects = [];
   let _overlayInputIgnored = null;
+  let _overlayDragging = false;
   let _overlayInputGuardTimer = null;
   let _initialPaintReady = false;
   let _initialRevealPending = true;
@@ -185,19 +187,28 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
     // retain keyboard focus or intercept transparent gaps. Guard every shape.
     try {
       const point = screen.getCursorScreenPoint();
-      const bounds = mainWindow.getContentBounds();
+      const local = _overlayGeometry.localPoint(screen, mainWindow, point);
+      /*
+       * An active pet/dock drag holds the pointer on the overlay via mouse capture.
+       * Keep input enabled while dragging so crossing work-window areas or display
+       * boundaries cannot cut the drag short.
+       */
+      if (_overlayDragging) {
+        _setOverlayInputIgnored(false);
+        return;
+      }
       /*
        * The desktop overlay is a full-screen transparent window. If a normal SoduWork
-       * window is under the cursor, its controls must win even when the pet or dock happens
-       * to overlap that point. This closes the first-click race before the work window emits
-       * its native focus event and applies on Windows, Linux and macOS alike.
+       * window is under the cursor outside a captured gesture, its controls must
+       * win. This closes the first-click race before the work window emits its native
+       * focus event and applies on Windows, Linux and macOS alike.
        */
       if (_isPointOverWorkWindow(point)) {
         _setOverlayInputIgnored(true);
         return;
       }
       const inside = _overlayShape.containsPoint(
-        _overlayInputRects, point.x - bounds.x, point.y - bounds.y);
+        _overlayInputRects, local.x, local.y);
       _setOverlayInputIgnored(!inside);
     } catch (e) {
       /* Enable passthrough when global cursor position is unavailable rather than blocking other applications. */
@@ -269,6 +280,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
   }
 
   function parkOverlayShape(invalidate = false) {
+    _overlayDragging = false;
     if (invalidate) _overlayShapeRevision++;
     _overlayAwaitingShape = false;
     _lastOverlayRects = [];
@@ -281,6 +293,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
   }
 
   function notifyOverlayBlur() {
+    _overlayDragging = false;
     if (!isCurrent(mainWindow) || _emergencyMode || _overlayAwaitingShape) return;
     // Keep the visible regions intact, but release input until the renderer has
     // dismissed transient panels and acknowledged this exact geometry revision.
@@ -300,7 +313,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
   let _workWindowFocused = false;
   function _setOverlayTopmost(flag) {
     if (!mainWindow || mainWindow.isDestroyed()) return;
-    mainWindow.setAlwaysOnTop(_workWindowFocused ? false : !!flag, overlayTopLevel());
+    mainWindow.setAlwaysOnTop(_overlayDragging ? true : (_workWindowFocused ? false : !!flag), overlayTopLevel());
   }
   function setWorkWindowFocused(focused) {
     const next = !!focused;
@@ -308,8 +321,9 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
     _workWindowFocused = next;
     if (!mainWindow || mainWindow.isDestroyed()) return;
     if (next) {
-      /* Keep the workspace above the transparent desktop layer while it owns focus. */
-      _setOverlayInputIgnored(true);
+      /* Keep the workspace above the transparent desktop layer while it owns focus.
+         An active drag keeps the overlay on top so the pet remains visible while crossing. */
+      if (!_overlayDragging) _setOverlayInputIgnored(true);
       _setOverlayTopmost(false);
     } else if (!_overlayHiddenByWorkspace && !_emergencyMode) {
       _setOverlayTopmost(true);
@@ -370,6 +384,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
     if (isCurrent(mainWindow) && !_emergencyMode) {
       try {
         _emergencyMode = true;
+        _overlayDragging = false;
         _overlayAwaitingShape = true;
         _overlayShapeRevision++;
         _lastOverlayRects = [];
@@ -540,16 +555,25 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
     const wc = owner.webContents;
     wc.executeJavaScript('window.devicePixelRatio', true).then((dpr) => {
       if (!isCurrent(owner) || navigation !== _navigationId || wc.isDestroyed()) return;
-      const sf = (screen.getPrimaryDisplay() || {}).scaleFactor || 1;
       const cur = wc.getZoomFactor() || 1;
-      const dsf = (dpr || 1) / cur;
-      const want = dsf / sf;
+      // Shape rectangles and pointer events must share the renderer's DIP space.
+      // Applying the primary monitor's scale to a spanning window breaks that
+      // relationship when the HWND is associated with a different monitor.
+      const spanning = (screen.getAllDisplays?.() || []).length > 1;
+      const sf = (screen.getPrimaryDisplay() || {}).scaleFactor || 1;
+      const want = spanning ? 1 : ((dpr || 1) / cur) / sf;
       if (Math.abs(want - cur) > 0.05) {
-        console.error('[overlay] DPI 混合态：dsf=' + dsf + ' scaleFactor=' + sf +
-          ' → zoom ' + cur.toFixed(2) + '→' + want.toFixed(2) + '（' + why + '）');
         wc.setZoomFactor(want);
       }
     }).catch(() => { /* Retry after renderer readiness. */ });
+  }
+
+  /*
+   * Cover every connected display so the pet can be dragged across monitors.
+   * Negative origins (monitors left of/above the primary) are preserved.
+   */
+  function _allDisplaysBounds() {
+    return _overlayGeometry.desktop(screen).bounds;
   }
 
   function createWindow() {
@@ -558,10 +582,10 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
     _initialPaintReady = false;
     _initialRevealPending = true;
     /*
-     * Use full display bounds, including the taskbar, so edge-aligned components reach the
-     * physical display edge.
+     * Use the bounding box of all displays, including the taskbar, so edge-aligned
+     * components reach the physical display edge and the pet can cross monitors.
      */
-    const { x: dispX, y: dispY, width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().bounds;
+    const { x: dispX, y: dispY, width: screenWidth, height: screenHeight } = _allDisplaysBounds();
 
     mainWindow = new BrowserWindow({
       width: screenWidth,
@@ -675,10 +699,11 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
      */
     const fitToScreen = () => {
       if (!isCurrent(owner)) return;
-      const b = screen.getPrimaryDisplay().bounds;
-      const w = mainWindow.getBounds();
-      if (w.x !== b.x || w.y !== b.y || w.width !== b.width || w.height !== b.height) {
-        mainWindow.setBounds(b);
+      const desktop = _overlayGeometry.desktop(screen);
+      const b = desktop.pixels || desktop.bounds;
+      const w = desktop.pixels ? screen.dipToScreenRect(mainWindow, mainWindow.getBounds()) : mainWindow.getBounds();
+      if (['x', 'y', 'width', 'height'].some(key => Math.abs(w[key] - b[key]) > 3)) {
+        mainWindow.setBounds(desktop.bounds);
         /* Recompute regions for the new client coordinates without hiding the window. */
         redrawOverlay();
       }
@@ -716,6 +741,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
       _appliedOverlayShape = [];
       _overlayInputRects = [];
       _overlayInputIgnored = null;
+      _overlayDragging = false;
       _overlayShapeEnabled = false;
       _overlayShapeReported = false;
       _overlayShapeRevision = 0;
@@ -816,6 +842,23 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
     else _setOverlayInputIgnored(ignore);
   });
 
+  onIpc('window-set-overlay-dragging', (event, dragging) => {
+    if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return;
+    const next = !!dragging;
+    if (next && (_emergencyMode || _overlayAwaitingShape || !_overlayShapeReported || !mainWindow.isVisible())) return;
+    if (_overlayDragging === next) return;
+    _overlayDragging = next;
+    if (next) {
+      /* The renderer entered drag mode. Keep input and stacking stable while the pet is
+         dragged so work-window or display boundaries cannot cut the drag short. */
+      _setOverlayInputIgnored(false);
+      _setOverlayTopmost(true);
+    } else {
+      _setOverlayTopmost(true);
+      _syncOverlayInputNow();
+    }
+  });
+
   /*
    * Validate visible interactive rectangles from the trusted overlay sender before applying
    * native regions; workspace windows cannot change the overlay shape.
@@ -846,6 +889,7 @@ function create({ app, BrowserWindow, ipcMain, screen, globalShortcut, Notificat
       requested: _lastOverlayRects,
       applied: _appliedOverlayShape,
       bounds: _overlayContentSize(),
+      displays: _overlayGeometry.localDisplays(screen, mainWindow),
     };
   });
 

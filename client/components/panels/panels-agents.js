@@ -386,11 +386,6 @@ function _agRender() {
   /* Keep the current instance identity on every action, even when only one card group is visible. */
   const machines = _agMachines();
   box.innerHTML = '<div id="agCustomAgents"></div>' +
-    (machines.length && _agData.modelCount === 0
-      /* This is HTML; Markdown emphasis would render literally. */
-      ? '<div class="ag-warn">你这台 SoduWork 现在一个模型都用不了，所以要模型的助手装了也派不了活。' +
-        '先去「我的模型」配一把 key，再回来测。</div>'
-      : '') +
     (machines.length ? machines.map(_agMachineHtml).join('')
       : '<div class="ag-blank">' + _AG_ICON + '<b>本机底座暂不可用</b><span>' +
         esc(_agData.env?.why || '当前客户端的 Runner 尚未连接，连接后会显示本机底座。') +
@@ -441,6 +436,10 @@ function _agMachineHtml(m) {
       '<div class="rn-overview"><span><b>' + upN + '</b> 已装</span>' +
       '<span><b>' + okN + '</b> 测通</span><span><b>' + list.length + '</b> 可管理</span></div>' +
     '</div>' +
+    (_agData?.modelCount === 0 && testN === 0 && list.some(a => presentation(a).state === 'nollm')
+      ? '<div class="ag-warn">你这台 SoduWork 现在一个模型都用不了，所以要模型的助手装了也派不了活。' +
+        '先去「我的模型」配一把 key，再回来测。</div>'
+      : '') +
     (okN === 0 && testN > 0
       ? '<div class="cfg-notice"><b>还没有测通的助手</b><span>点任一已安装助手上的「测一下」，会真跑一轮最小的活。</span></div>'
       : '') +

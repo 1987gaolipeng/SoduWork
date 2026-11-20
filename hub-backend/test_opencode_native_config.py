@@ -6,12 +6,15 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import socket
 import sqlite3
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 
@@ -40,6 +43,90 @@ class OpenCodeNativeConfigTests(unittest.TestCase):
         for native in (False, True):
             with self.subTest(native=native):
                 self.check_config(native=native, legacy=True)
+
+    def test_real_v2_history_cannot_be_imported_as_an_empty_v1_session(self):
+        from app.services import opencode_session_migration as migration
+        executable = Path(os.environ["SODUWORK_TEST_OPENCODE_BIN"]).resolve()
+        with tempfile.TemporaryDirectory(prefix="soduwork-native-v2-migration-") as directory:
+            root = Path(directory)
+            work, home, personal = root / "work", root / "home", root / "personal"
+            for path in (work, home, personal):
+                path.mkdir()
+            allowed = {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "SYSTEMDRIVE"}
+            env = {key: value for key, value in os.environ.items() if key.upper() in allowed}
+            env.update({"HOME": str(home), "USERPROFILE": str(home),
+                        "OPENCODE_DB": str(personal / "native.db"),
+                        "OPENCODE_CONFIG_CONTENT": '{"plugin":[],"mcp":{}}', "OPENCODE_PURE": "1"})
+            for key in ("APPDATA", "LOCALAPPDATA", "XDG_DATA_HOME", "XDG_CONFIG_HOME",
+                        "XDG_STATE_HOME", "XDG_CACHE_HOME", "TEMP", "TMP"):
+                path = root / key if key in {"TEMP", "TMP"} else personal / key
+                path.mkdir()
+                env[key] = str(path)
+            for key in ("OPENCODE_DISABLE_AUTOUPDATE", "OPENCODE_DISABLE_MODELS_FETCH",
+                        "OPENCODE_DISABLE_PROJECT_CONFIG", "OPENCODE_DISABLE_DEFAULT_PLUGINS",
+                        "OPENCODE_DISABLE_EXTERNAL_SKILLS", "OPENCODE_DISABLE_CLAUDE_CODE"):
+                env[key] = "1"
+            with socket.socket() as probe:
+                probe.bind(("127.0.0.1", 0))
+                port = probe.getsockname()[1]
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+            def request(path, body=None):
+                data = json.dumps(body).encode() if body is not None else None
+                req = urllib.request.Request(f"http://127.0.0.1:{port}" + path, data=data,
+                                             headers={"Content-Type": "application/json"})
+                with opener.open(req, timeout=10) as response:
+                    return json.load(response)
+
+            flags = ({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt"
+                     else {"start_new_session": True})
+            with (root / "server.log").open("w+") as log:
+                process = subprocess.Popen([str(executable), "serve", "--hostname", "127.0.0.1",
+                                            "--port", str(port)], cwd=work, env=env,
+                                           stdin=subprocess.DEVNULL, stdout=log, stderr=log, **flags)
+                try:
+                    deadline = time.monotonic() + 15
+                    while True:
+                        try:
+                            request("/global/health")
+                            break
+                        except (OSError, ValueError):
+                            self.assertIsNone(process.poll(), "The isolated native server exited")
+                            self.assertLess(time.monotonic(), deadline, "The isolated native server did not become ready")
+                            time.sleep(.1)
+                    # The absent provider fails locally after the native input is
+                    # promoted, so this check requires no model or provider access.
+                    created = request("/api/session", {
+                        "model": {"id": "fixture", "providerID": "fixture-unconfigured"}})
+                    sid = created["data"]["id"]
+                    request("/api/session/" + sid + "/prompt", {
+                        "prompt": {"text": "RETAIN-NATIVE-V2-HISTORY"}, "resume": True})
+                    deadline = time.monotonic() + 10
+                    while True:
+                        messages = request("/api/session/" + sid + "/message")["data"]
+                        if messages:
+                            break
+                        self.assertLess(time.monotonic(), deadline, "The native user message was not promoted")
+                        time.sleep(.1)
+                    self.assertEqual(messages[0]["text"], "RETAIN-NATIVE-V2-HISTORY")
+                finally:
+                    if process.poll() is None:
+                        from app.services.local_stream import _kill_pid_tree
+                        _kill_pid_tree(process.pid, process)
+                    process.wait(timeout=10)
+            with closing(sqlite3.connect(env["OPENCODE_DB"])) as connection:
+                for table in ("message", "part"):
+                    self.assertEqual(connection.execute(f"SELECT COUNT(*) FROM {table} WHERE session_id = ?",
+                                                        (sid,)).fetchone()[0], 0)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM session_message WHERE session_id = ?",
+                                                    (sid,)).fetchone()[0], 1)
+            before = self.snapshot(personal)
+            target = root / "managed" / "opencode.db"
+            with self.assertRaisesRegex(migration.OpenCodeSessionMigrationError, "not compatible"):
+                migration.migrate_session({**env, "OPENCODE_DB": str(target),
+                    "SODUWORK_OPENCODE_LEGACY_DB": env["OPENCODE_DB"]}, sid, str(work), str(executable))
+            self.assertFalse(target.exists())
+            self.assertEqual(self.snapshot(personal), before)
 
     @staticmethod
     def snapshot(directory):

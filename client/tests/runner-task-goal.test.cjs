@@ -10,23 +10,6 @@ const prompt = '请创建首页及 12 个内容页，每页至少 6 章节。\n�
 const receipt = (status, extra = {}) => ({ status, reason: '', objective: prompt, acceptance: '',
   elapsedMs: 120000, steps: 7, budgetMs: 240 * 60000, maxSteps: 1000, continuations: 1, ...extra });
 
-test('only explicit imperative continuation opts an ordinary conversation into a task goal', () => {
-  for (const text of [prompt, '请持续完成整个任务。', '继续工作直到整个任务完成。',
-    'Please keep working until the entire task is complete.']) {
-    assert.equal(goal.fromText(text)?.objective, text, text);
-  }
-  for (const text of ['请创建一个网站。', '完成后告诉我', '继续', '请不要持续完成整个任务。',
-    '不必自动执行，持续完成整个任务', '持续完成整个任务？', '解释“持续完成整个任务”。',
-    '以下是提示词：\n请持续完成整个任务。', '> 请持续完成整个任务。',
-    '```text\n请持续完成整个任务。\n```', '`请持续完成整个任务。`',
-    'Do not keep working until the entire task is complete.', 'How can I keep working until the task is complete?']) {
-    assert.equal(goal.fromText(text), null, text);
-  }
-  assert.equal(goal.fromText(prompt).budgetMinutes, 240);
-  assert.equal(goal.fromText(prompt).maxSteps, 1000);
-  assert.equal(goal.fromText('x'.repeat(50000) + '\n请持续完成整个任务。'), null);
-});
-
 test('explicit UI goal uses existing defaults and bounded user budget without changing Pi contracts', () => {
   assert.deepEqual(goal.fromOptions({ intent: 'goal', goal: 'Create site', acceptance: 'Verify links' }), {
     schemaVersion: 1, objective: 'Create site', acceptance: 'Verify links', budgetMinutes: 240, maxSteps: 1000,
@@ -40,9 +23,12 @@ test('explicit UI goal uses existing defaults and bounded user budget without ch
 async function fixture(t, settings = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-task-goal-'));
   const calls = [];
-  let observed = { status: 'done', taskGoal: receipt('completed') };
+  let observed = settings.observed || { status: 'done', taskGoal: receipt('completed') };
   const runtime = { async rpc(op, input) {
     calls.push({ op, input });
+    if (op === 'runtime.detect') return { ok: true, data: { accessControl: {
+      schema: 'soduwork.access-policy/v1', supported: true, modes: ['standard', 'readonly', 'full'],
+    } } };
     if (op === 'job.dispatch') return { ok: true, data: {
       ref: _uuidV5('9af442c8-cd1d-4b91-a668-22da2b2635bf', input.dispatchId), state: 'running',
     } };
@@ -58,20 +44,58 @@ async function fixture(t, settings = {}) {
   } };
   const adapter = createRunnerRuntimeAdapter({ runtimeSpec: catalog.runtime(settings.agent || 'dsh'), runnerRuntime: runtime,
     modelConfig: { fetchModel: async () => ({ ok: true, model: { id: 'synthetic', baseUrl: 'http://fixture.invalid', key: 'fixture-key' } }) } });
-  const session = await adapter.createSession({ identity: {}, native: { runner: { openOptions: {
-    cwd: root, ref: 'goal-fixture', ...settings.options,
+  const session = await adapter[settings.resume ? 'resumeSession' : 'createSession']({ identity: {}, native: { runner: { openOptions: {
+    cwd: root, ref: 'goal-fixture', ...(settings.resume ? {
+      resumePath: 'persisted-goal', accessPolicy: {
+        schema: 'soduwork.access-policy/v1', revision: 1, mode: 'standard', workspaceRoot: root,
+      },
+    } : {}), ...settings.options,
   } } } });
   const handle = getRunnerSessionDetails(session).handle;
   t.after(async () => { await session.dispose(); fs.rmSync(root, { recursive: true, force: true }); });
   return { calls, handle, session, setObserved(value) { observed = value; }, count: op => calls.filter(c => c.op === op).length };
 }
 
+function goalFixture(t, settings = {}) {
+  return fixture(t, { ...settings, options: { intent: 'goal', goal: prompt, ...settings.options } });
+}
+
 for (const agent of ['dsh', 'kimi', 'qwen', 'opencode', 'codex-harness', 'codex']) {
-  test(agent + ' passes one explicit goal to Runner and never creates a desktop continuation loop', async t => {
+  test(agent + ' keeps ordinary task instructions in chat without inferring a persistent goal', async t => {
     const f = await fixture(t, { agent });
+    f.setObserved({ status: 'done' });
+    for (const text of [prompt, 'Please keep working until the entire task is complete.']) {
+      assert.equal((await f.handle.submit(text, []).completion).ok, true);
+      assert.equal(f.handle.goalView().intent, '');
+      assert.equal(f.handle.snapshot().execution.visible, false);
+      assert.equal(f.handle.snapshot().taskGoal, undefined);
+    }
+    const dispatch = f.calls.find(c => c.op === 'job.dispatch').input;
+    const comment = f.calls.find(c => c.op === 'job.comment').input;
+    assert.equal(dispatch.ctx.taskGoal, undefined);
+    assert.equal(dispatch.ctx.conversationMode, 'adaptive');
+    assert.equal(comment.taskGoal, undefined);
+    assert.equal(comment.taskGoalControl, undefined);
+    assert.equal(f.count('job.dispatch'), 1);
+    assert.equal(f.count('job.comment'), 1);
+  });
+
+  test(agent + ' does not promote a later ordinary message into a goal', async t => {
+    const f = await fixture(t, { agent });
+    f.setObserved({ status: 'done' });
+    await f.handle.submit('介绍一下当前目录', []).completion;
+    await f.handle.submit(prompt, []).completion;
+    assert.equal(f.handle.goalView().intent, '');
+    assert.equal(f.handle.snapshot().execution.visible, false);
+    assert.equal(f.calls.find(c => c.op === 'job.comment').input.taskGoal, undefined);
+    assert.equal(f.count('job.comment'), 1);
+  });
+
+  test(agent + ' passes one explicit goal to Runner and never creates a desktop continuation loop', async t => {
+    const f = await fixture(t, { agent, options: { intent: 'goal', goal: prompt } });
     assert.equal((await f.handle.submit(prompt, []).completion).ok, true);
     const dispatch = f.calls.find(c => c.op === 'job.dispatch').input;
-    assert.deepEqual(dispatch.ctx.taskGoal, goal.fromText(prompt));
+    assert.deepEqual(dispatch.ctx.taskGoal, goal.fromOptions({ intent: 'goal', goal: prompt }));
     assert.equal(dispatch.ctx.conversationMode, 'goal');
     assert.equal(f.handle.snapshot().taskGoal.status, 'completed');
     assert.equal(f.handle.snapshot().execution.elapsedMs, 120000);
@@ -89,19 +113,40 @@ test('UI goal preserves its acceptance and user budgets in dispatch', async t =>
   });
 });
 
-test('ordinary messages do not acquire a goal, but a later explicit request can create one', async t => {
-  const f = await fixture(t);
-  f.setObserved({ status: 'done' });
-  await f.handle.submit('解释“持续完成整个任务”是什么意思。', []).completion;
-  assert.equal(f.calls.find(c => c.op === 'job.dispatch').input.ctx.taskGoal, undefined);
-  f.setObserved({ status: 'done', taskGoal: receipt('completed') });
+test('ordinary follow-up instructions do not reopen a completed configured goal', async t => {
+  const f = await goalFixture(t);
   await f.handle.submit(prompt, []).completion;
-  assert.equal(f.calls.find(c => c.op === 'job.comment').input.taskGoal.objective, prompt);
+  await f.handle.submit(prompt, []).completion;
+  const comment = f.calls.find(c => c.op === 'job.comment').input;
+  assert.equal(comment.taskGoal, undefined);
+  assert.equal(comment.taskGoalControl, undefined);
+  assert.equal(f.count('job.dispatch'), 1);
+  assert.equal(f.count('job.comment'), 1);
+  assert.equal(f.handle.snapshot().taskGoal.status, 'completed');
+});
+
+test('reopening a saved paused goal retains its contract and resumes without creating a new goal', async t => {
+  const f = await fixture(t, { resume: true,
+    observed: { status: 'stopped', taskGoal: receipt('paused', { reason: 'Awaiting user continuation' }) },
+  });
+  await until(() => f.handle.snapshot().taskGoal?.status === 'paused');
   assert.equal(f.handle.goalView().intent, 'goal');
+  assert.equal(f.handle.goalView().goal, prompt);
+  assert.equal(f.count('job.dispatch'), 0);
+  f.setObserved({ status: 'done', taskGoal: receipt('completed', { elapsedMs: 180000 }) });
+  const resumed = f.handle.continueGoal();
+  assert.equal(resumed.accepted, true);
+  assert.equal((await resumed.completion).ok, true);
+  const comment = f.calls.find(c => c.op === 'job.comment').input;
+  assert.equal(comment.ref, 'persisted-goal');
+  assert.equal(comment.taskGoalControl, 'continue');
+  assert.equal(comment.taskGoal, undefined);
+  assert.equal(f.handle.snapshot().execution.budgetMs, 240 * 60000);
+  assert.equal(f.handle.snapshot().execution.elapsedMs, 180000);
 });
 
 test('paused receipts remain paused and explicit continue retains the original cumulative budget', async t => {
-  const f = await fixture(t);
+  const f = await goalFixture(t);
   f.setObserved({ status: 'stopped', taskGoal: receipt('paused', { reason: '需要补充确认' }) });
   assert.equal((await f.handle.submit(prompt, []).completion).ok, true);
   await delay(0);
@@ -121,7 +166,7 @@ test('paused receipts remain paused and explicit continue retains the original c
 });
 
 test('budget exhaustion cannot be reset by continue; disabling an idle goal does not launch a model', async t => {
-  const f = await fixture(t);
+  const f = await goalFixture(t);
   f.setObserved({ status: 'stopped', taskGoal: receipt('paused', { elapsedMs: 240 * 60000, reason: '达到任务时间预算' }) });
   await f.handle.submit(prompt, []).completion;
   await delay(0);
@@ -143,7 +188,7 @@ test('budget exhaustion cannot be reset by continue; disabling an idle goal does
 
 test('pause requires stop acknowledgment and native terminal observation before another goal turn', async t => {
   let ack;
-  const f = await fixture(t, { stop: () => new Promise(resolve => { ack = resolve; }) });
+  const f = await goalFixture(t, { stop: () => new Promise(resolve => { ack = resolve; }) });
   f.setObserved({ status: 'running', taskGoal: receipt('working') });
   const first = f.handle.submit(prompt, []);
   await until(() => f.count('job.session') > 0);
@@ -162,7 +207,7 @@ test('pause requires stop acknowledgment and native terminal observation before 
 });
 
 test('a new user message explicitly resumes a paused goal without adding an internal turn', async t => {
-  const f = await fixture(t);
+  const f = await goalFixture(t);
   f.setObserved({ status: 'stopped', taskGoal: receipt('paused') });
   await f.handle.submit(prompt, []).completion;
   await delay(0);
@@ -180,7 +225,7 @@ test('a new user message explicitly resumes a paused goal without adding an inte
 
 test('a stop acknowledgment arriving during an old poll schedules a fresh terminal confirmation', async t => {
   let completeRead, reads = 0;
-  const f = await fixture(t, { read: input => ++reads === 1
+  const f = await goalFixture(t, { read: input => ++reads === 1
     ? new Promise(resolve => { completeRead = () => resolve({ ok: true, data: { ok: true, ref: input.ref,
       status: 'running', items: [], taskGoal: receipt('working') } }); })
     : { ok: true, data: { ok: true, ref: input.ref, status: 'stopped', items: [], taskGoal: receipt('paused') } } });
@@ -199,7 +244,7 @@ test('a stop acknowledgment arriving during an old poll schedules a fresh termin
 });
 
 test('failed preparation before a resumed goal admission keeps the original pause and the next user continue control', async t => {
-  const f = await fixture(t);
+  const f = await goalFixture(t);
   f.setObserved({ status: 'stopped', taskGoal: receipt('paused', { reason: '需要补充输入' }) });
   await f.handle.submit(prompt, []).completion;
   await delay(0);
@@ -221,7 +266,7 @@ test('failed preparation before a resumed goal admission keeps the original paus
 });
 
 test('continue button resumes the first queued user instruction once after a goal pauses', async t => {
-  const f = await fixture(t);
+  const f = await goalFixture(t);
   f.setObserved({ status: 'running', taskGoal: receipt('working') });
   const initial = f.handle.submit(prompt, []);
   await until(() => f.count('job.session') > 0);
@@ -245,7 +290,7 @@ test('continue button resumes the first queued user instruction once after a goa
 
 test('failed disable retains visible retry controls and never admits another turn before confirmation', async t => {
   let attempts = 0;
-  const f = await fixture(t, { stop: async () => {
+  const f = await goalFixture(t, { stop: async () => {
     if (++attempts === 1) return { ok: false, error: 'Stop refused' };
     f.setObserved({ status: 'stopped', taskGoal: receipt('disabled') });
     return { ok: true, data: { ok: true, taskGoal: receipt('disabled') } };
@@ -265,7 +310,7 @@ test('failed disable retains visible retry controls and never admits another tur
 
 test('structured goal pauses suppress only their own error while unrelated native failures stay visible', async t => {
   for (const failureKind of ['task_goal', 'authentication']) {
-    const f = await fixture(t);
+    const f = await goalFixture(t);
     f.setObserved({ status: 'stopped', failureKind, error: 'Failure detail',
       taskGoal: receipt('blocked', { reason: 'Need verification' }) });
     const result = await f.handle.submit(prompt, []).completion;

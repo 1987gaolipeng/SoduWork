@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import copy
 import logging
 import os
 import re
@@ -25,7 +26,7 @@ from .local_stream import comment_sync, is_running, stop_sync  # noqa: F401 - Pa
 from . import agent_naming, declared_outputs, dispatch_identity, execution_policy, conversation_plugins, access_policy
 from .local_ctx import _note, _try_compact  # noqa: F401
 from . import ai_prompts   # Product instructions shared across execution providers.
-from . import local_artifacts
+from . import local_artifacts, runner_usage_receipts
 from .local_artifacts import (
     _SKIP_DIRS,
     _SKIP_NAMES,
@@ -728,6 +729,7 @@ def _dispatch_sync_once(cfg: dict, t, files: list | None = None,
         _RUNS[sid] = {
             "cli": key, "ws": ws, "state": "running", "started": time.time(), "ended": None,
             "taskId": getattr(t, "id", ""), "title": getattr(t, "title", ""),
+            "eventDestination": cfg.get("_eventDestination") or "hub",
             "model": model,
             "modelLocalOnly": dict(cfg.get("llm") or {}).get("localOnly") is True,
             "reasoningEffort": reasoning_effort,
@@ -826,6 +828,9 @@ def status_sync(cfg: dict, ref: str) -> dict:
     from . import local_task_goal
     with _LOCK:
         run = _RUNS.get(ref)
+        metadata = ({runner_usage_receipts.PRIVACY_MARKER: runner_usage_receipts.private_model(run),
+                     'error': run.get('error') or '',
+                     'contextReport': copy.deepcopy(run.get('contextReport') or {})} if run else {})
     if not run:
         return {"ok": False, "error": "本地会话不在了"}
     artifact_mode = str(run.get("artifactMode") or ("git" if run.get("codeTask") else "files"))
@@ -874,7 +879,8 @@ def status_sync(cfg: dict, ref: str) -> dict:
         # Stable cross-CLI result contract: only the last completed assistant message
         # counts as text delivery. Tool output and progress lines never satisfy it.
         "finalText": final_text,
-        "error": run.get("error") or "",
+        "error": metadata['error'],
+        runner_usage_receipts.PRIVACY_MARKER: metadata[runner_usage_receipts.PRIVACY_MARKER],
         "failureKind": run.get("failureKind") or "",
         "failurePath": run.get("failurePath") or "",
         **({"taskGoal": local_task_goal.snapshot(run)} if run.get("goalContract") and run.get("cli") != "pi" else {}),
@@ -893,7 +899,7 @@ def status_sync(cfg: dict, ref: str) -> dict:
         "gitRemoteBranch": git_delivery.get("remoteBranch") or "",
         "gitHead": git_delivery.get("head") or "",
         "gitDeliveryPending": bool(git_delivery.get("_pending")),
-        "contextReport": dict(run.get("contextReport") or {}),
+        "contextReport": metadata['contextReport'],
         "workspaceGuard": guard,
         "executionPolicyGuard": execution_policy.guard_status(
             run.get("executionPolicy"), run.get("executionPolicyState"),
@@ -904,21 +910,22 @@ def status_sync(cfg: dict, ref: str) -> dict:
 def runner_info_sync(cfg: dict, ref: str) -> dict:
     with _LOCK:
         run = _RUNS.get(ref)
-    if not run:
-        return {}
-    prof = _PROFILES.get(run["cli"]) or {}
-    return {"workDir": run["ws"], "workDirAbs": run["ws"],
-            "taskStatus": run["state"],
-            "done": run["state"] not in ("running",),
-            "failed": run["state"] in ("failed", "interrupted"),
-            "error": run.get("error") or "",
-            "failureKind": run.get("failureKind") or "",
-            "failurePath": run.get("failurePath") or "",
-            "agentName": _seat_name(prof.get("name") or run["cli"]),
-            "cli": run["cli"], "cliName": prof.get("name") or run["cli"],
-            "cliSid": run.get("cliSid") or "",
-            "model": run.get("model") or "",
-            "device": os.environ.get("COMPUTERNAME", "本机")}
+        if not run:
+            return {}
+        prof = _PROFILES.get(run["cli"]) or {}
+        return {"workDir": run["ws"], "workDirAbs": run["ws"],
+                "taskStatus": run["state"],
+                "done": run["state"] not in ("running",),
+                "failed": run["state"] in ("failed", "interrupted"),
+                "error": run.get("error") or "",
+                "failureKind": run.get("failureKind") or "",
+                "failurePath": run.get("failurePath") or "",
+                "agentName": _seat_name(prof.get("name") or run["cli"]),
+                "cli": run["cli"], "cliName": prof.get("name") or run["cli"],
+                "cliSid": run.get("cliSid") or "",
+                "model": run.get("model") or "",
+                runner_usage_receipts.PRIVACY_MARKER: runner_usage_receipts.private_model(run),
+                "device": os.environ.get("COMPUTERNAME", "本机")}
 
 
 
@@ -957,6 +964,10 @@ def session_sync(cfg: dict, ref: str, since: int = 0, limit: int = 400) -> dict:
             cli = run.get("cli") or ""
             cli_name = (_PROFILES.get(cli) or {}).get("name") or cli
             cli_sid, model = run.get("cliSid") or "", run.get("model") or ""
+            # Ownership belongs to these captured fields, not a later turn.
+            metadata_private = runner_usage_receipts.private_model(run)
+            event_destination = ({"eventDestination": run["eventDestination"]}
+                                 if "eventDestination" in run else {})
     if not run:
         items = _read_events(ref, since, limit)
         if not items and since == 0:
@@ -978,6 +989,8 @@ def session_sync(cfg: dict, ref: str, since: int = 0, limit: int = 400) -> dict:
             "failureKind": failure_kind, "failurePath": failure_path,
             **({"taskGoal": local_task_goal.snapshot(run)} if run.get("goalContract") and cli != "pi" else {}),
             "cli": cli, "cliName": cli_name, "cliSid": cli_sid, "model": model,
+            runner_usage_receipts.PRIVACY_MARKER: metadata_private,
+            **event_destination,
             "activeExecutionSelection": {"agentId": cli, "modelName": model,
                 "reasoningEffort": str(run.get("reasoningEffort") or "")},
             # Report cumulative usage separately from current context occupancy.
@@ -1012,6 +1025,8 @@ def console_list_sync(cfg: dict, task_ids: list[str] | None = None) -> dict:
                 "usage": dict(run.get("usage") or {}),
                 "firstStarted": run.get("firstStarted") or run.get("started") or 0,
                 "model": run.get("model") or "", "cliSid": run.get("cliSid") or "",
+                runner_usage_receipts.PRIVACY_MARKER: runner_usage_receipts.private_model(run),
+                **({"eventDestination": run["eventDestination"]} if "eventDestination" in run else {}),
                 "tokens": dict(run.get("tokens") or {}),
                 "ctxWindow": run.get("ctxWindow") or _CTX_WINDOW_DEFAULT,
                 "ctxWindowKnown": bool(run.get("ctxWindowKnown")),

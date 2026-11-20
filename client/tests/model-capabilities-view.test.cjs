@@ -42,6 +42,53 @@ function load() {
   assert.equal(context.esc, undefined);
   return context.ModelCapabilitiesUI;
 }
+
+function thinkingEditor(values = {}) {
+  const fields = Object.fromEntries(Object.entries({ thinkingPreset: 'custom', thinkingFormat: 'qwen',
+    supportsReasoningEffort: 'no', thinkingMode: 'controllable', ...values }).map(([key, value]) => [key, {
+    value, disabled: false, addEventListener(name, callback) { this[name] = callback; },
+  }]));
+  const note = { hidden: true };
+  return { fields, note, querySelector(selector) {
+    if (selector === '[data-paddthinking]') return fields.thinkingMode;
+    if (selector === '[data-md-thinking-preset-note]') return note;
+    return fields[/data-mdfield="([^"]+)"/.exec(selector)?.[1]] || null;
+  } };
+}
+
+test('explicit GLM policy round-trips its legal levels and does not infer from a display label', () => {
+  const ui = load(), original = { name: 'gateway-model', label: 'GLM 5.3', config: { thinkingMode: 'auto' } };
+  const before = JSON.stringify(original);
+  assert.match(ui.fields(original), /value="custom" selected/);
+  const editor = thinkingEditor({ thinkingPreset: 'glm-5.3', thinkingMode: 'always', maxOutputTokens: '16384' });
+  const model = { ...original, ...ui.read(editor, original) };
+  assert.deepEqual(JSON.parse(JSON.stringify(model.config.thinkingLevelMap)),
+    { off: null, minimal: null, low: 'low', medium: null, high: 'high', xhigh: null, max: 'max' });
+  assert.equal(model.config.thinkingFormat, 'zai');
+  assert.equal(model.config.supportsReasoningEffort, true);
+  assert.equal(model.config.thinkingMode, 'always');
+  assert.match(ui.fields(model), /value="glm-5.3" selected/);
+  assert.equal(JSON.stringify(original), before);
+});
+
+test('preset controls stay consistent and returning to custom restores the edited controls across redraws', () => {
+  const ui = load(), editor = thinkingEditor();
+  ui.bindThinking(editor);
+  editor.fields.thinkingPreset.value = 'glm-5.3'; editor.fields.thinkingPreset.change();
+  for (const [key, value] of [['thinkingMode', 'always'], ['thinkingFormat', 'zai'], ['supportsReasoningEffort', 'yes']]) {
+    assert.equal(editor.fields[key].value, value); assert.equal(editor.fields[key].disabled, true);
+  }
+  assert.equal(editor.note.hidden, false);
+  const redrawn = thinkingEditor({ thinkingPreset: 'glm-5.3' });
+  ui.bindThinking(redrawn, ui.thinkingDraft(editor));
+  redrawn.fields.thinkingPreset.value = 'custom'; redrawn.fields.thinkingPreset.change();
+  for (const [key, value] of [['thinkingMode', 'controllable'], ['thinkingFormat', 'qwen'], ['supportsReasoningEffort', 'no']]) {
+    assert.equal(redrawn.fields[key].value, value); assert.equal(redrawn.fields[key].disabled, false);
+  }
+  assert.equal(redrawn.note.hidden, true);
+  const original = { config: { thinkingMode: 'controllable', thinkingFormat: 'qwen', thinkingLevelMap: { off: 'none', high: 'high' } } };
+  assert.equal(JSON.stringify(ui.read(redrawn, original).config.thinkingLevelMap), JSON.stringify(original.config.thinkingLevelMap));
+});
 test('model capability view renders inside a host with lexical, rather than window, helpers', () => {
   const ui = load();
   assert.match(ui.badges({ config: { imageRouting: 'native' } }), /图片输入<b>支持/);

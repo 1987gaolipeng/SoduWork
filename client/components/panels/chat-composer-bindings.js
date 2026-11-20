@@ -287,7 +287,7 @@ function _loadChatSkills(force) {
 
 function _canStop() {
     const snap = ctx._snap || {}, execution = snap.execution || {}, phase = execution.quality?.phase || '';
-    return snap.status === 'streaming' || execution.running === true ||
+    return ['streaming', 'queued'].includes(snap.status) || execution.running === true ||
       ['executing', 'implementing', 'reviewing', 'repairing'].includes(phase);
   }
 

@@ -44,13 +44,15 @@ function collector(state, cache, start) {
     previous.pending.every(message => message.done !== true);
   if (unchanged) return { visit() {}, finish: () => previous.rows };
   const rows = [], pending = [];
-  let turn = null;
+  let turn = state.leadingTurn?.turnOutcome ? { fromMessage: 0, sentAt: 0, endedAt: 0,
+    outcome: state.leadingTurn.turnOutcome, tokens: 0, count: 0, complete: true, known: false } : null;
   function finishTurn(toMessage) {
     if (!turn || toMessage < start) return;
     rows.push({ fromMessage: turn.fromMessage, toMessage,
+      ...(turn.outcome ? { outcome: turn.outcome.kind } : {}),
       // Persisted timestamps measure submit-to-finish wall time, not runtime
       // budget time (which may exclude permission waits).
-      elapsedMs: turn.count && turn.complete && turn.sentAt && turn.endedAt >= turn.sentAt
+      elapsedMs: turn.outcome ? turn.outcome.elapsedMs : turn.count && turn.complete && turn.sentAt && turn.endedAt >= turn.sentAt
         ? turn.endedAt - turn.sentAt : null,
       tokens: turn.count && turn.complete && turn.known ? turn.tokens : null });
   }
@@ -58,6 +60,7 @@ function collector(state, cache, start) {
     if (message?.role === 'user') {
       finishTurn(index - 1);
       turn = { fromMessage: index, sentAt: epoch(message.sentAt), endedAt: 0,
+        outcome: message.turnOutcome,
         tokens: 0, count: 0, complete: true, known: true };
     } else if (turn && message?.role === 'assistant') {
       turn.count++;

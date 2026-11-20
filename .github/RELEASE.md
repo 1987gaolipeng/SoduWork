@@ -42,12 +42,13 @@ requires a trusted signature with `localpkg_gpgcheck=True`. See
 for key requirements and first-install trust instructions. Standalone DEB signatures
 do not provide automatic APT repository authentication.
 
-The published 1.13.15 RPM predates package signing. Its committed upgrade baseline
-explicitly records `rpmSignature: "legacy-unsigned"`. In disposable acceptance
-containers only, the old installer is rechecked against its pinned SHA-256 before
-an old-package-only signature exception is applied. The receipt records the
-baseline exception and hash. Candidate installation, verification and upgrade
-still require the new signature; never mark a candidate as a legacy baseline.
+The current 1.13.18 RPM upgrade baseline is signed and requires normal OpenPGP
+verification. The older published 1.13.17 RPM predates package signing; testing
+that version requires an explicit `rpmSignature: "legacy-unsigned"` baseline.
+In disposable acceptance containers only, that old installer is rechecked against
+its pinned SHA-256 before the signature exception is applied. The receipt records
+the exception and hash. Never apply the exception to a signed baseline or a new
+candidate; installation, verification and upgrade require their signatures.
 
 ## Repository setup
 
@@ -82,13 +83,147 @@ digests. Publication still requires the independent protected Release workflow.
 2. Manually run **Draft release** on that branch with the matching component and full version. The version's major and minor numbers must match the branch; version-specific branches and tag refs are rejected. Runs are serialized per maintenance branch. Keep the branch at the candidate SHA until draft upload finishes. Build and accept each candidate once; a source fix creates a new SHA and requires a new candidate.
 3. The final job creates a **Draft Release only**, targeting the accepted SHA. It downloads every uploaded asset with authentication and verifies its digest. It never publishes the draft and does not require creating a formal tag first. An existing tag must point to the accepted SHA.
 4. Maintainers with access to draft releases download and test the candidate internally. Draft assets are not anonymous public downloads. The workflow contains no public-publish command; publishing later requires an explicit, separate maintainer action after internal testing.
-5. Never rebuild or overwrite accepted assets. Retry the draft job after a network failure: a draft from the same run can resume, while another candidate or an already public Release is rejected. For a new candidate of the same version, explicitly review and remove the obsolete draft first.
+5. Keep the current version number until its Release is public. Source fixes or new mainline changes require a new candidate SHA and build for that same version; they do not advance the patch number. Never overwrite accepted assets. Retry the draft job after a network failure: a draft from the same run can resume, while another candidate or an already public Release is rejected. To replace an unpublished candidate, explicitly review and remove its obsolete draft before creating the replacement, and preserve the old candidate's recovery records and artifacts.
 6. Use `component: all` to build Client and Hub together with one shared quality/security gate and one manifest. Individual components are diagnostic subsets and cannot be merged into another run's draft. Preserve the accepted SHA for the eventual `vX.Y.Z` tag.
-7. Keep using the same maintenance branch after publication. Develop new features on `main`, fix bugs there first where applicable, and backport selected fixes into the supported maintenance branches. Forward-port any release-only fixes to `main`; once the branches diverge, do not merge unrelated mainline features or older release version files wholesale between them. For the next patch release, bump the Client package, lockfile and renderer versions together on the maintenance branch. Pin the six desktop upgrade baselines to the previous public release's original asset URLs, sizes and SHA-256 digests; the baseline version must be strictly older than the new candidate.
+7. Keep using the same maintenance branch after publication. Develop new features on `main`, fix bugs there first where applicable, and backport selected fixes into the supported maintenance branches. Forward-port any release-only fixes to `main`; once the branches diverge, do not merge unrelated mainline features or older release version files wholesale between them. Only after the current Release is public, bump the Client package, lockfile and renderer versions together for the next patch release. Pin the six desktop upgrade baselines to the previous public release's original asset URLs, sizes and SHA-256 digests; the baseline version must be strictly older than the new candidate.
 
 When replacing old `release/X.Y.Z` branches, first preserve their published `vX.Y.Z` tags and verify that each branch's work is retained in `main`, the maintenance branch, or an explicitly named archive branch. Preserve unmerged work before deleting an obsolete branch. Delete only the obsolete branch refs and their exact branch-protection rules; retain the published tags, Releases, accepted assets, and active maintenance-branch protections.
 
 When preparing the public repository, reviewed source may be squashed into `public` without private development history, old tags or internal artifacts. The source exporter creates a ZIP from the committed tree, generates its manifest from the archived bytes, and verifies the archive before returning it. The manifest is not tracked in Git.
+
+## On-demand client packages
+
+The normal **Draft release** workflow continues to build the AWS-default public
+client and a deployment-independent Hub image. For an occasional deployment with
+another default address, run **On-demand client packages** (`client-packages.yml`).
+Select a protected branch containing the desired package version and these tools;
+older tags without this capability cannot use it directly. For an already released
+version, use a reviewed build-only branch based on that version. Record its actual
+source commit; do not move the published tag or claim the modified build has the
+original release's SHA. The workflow must be present on the default branch before
+GitHub exposes its manual entry.
+
+Inputs are `default_hub_url` (empty means `https://service.soduwork.ai`) and
+`artifact_label` (a short lowercase label such as `cn`, used only for downloads).
+It builds one environment, six desktop installers across four native jobs, reusing
+the public quality, binary-review, signing and installation acceptance gates.
+The existing `public-release` reviewer environment controls signing jobs. Original
+installer basenames, app identities, data directories, version and update trust
+remain unchanged. Native acceptance checks the installed candidate's default Hub;
+existing user-selected addresses continue to take precedence. The version must
+already have a stable Release with `release-manifest.json` and `release-notes.json`.
+Preflight verifies both assets against their published digests, checks the notes
+against the release manifest, and shares the same inputs with all native jobs.
+Packages reuse the published version's notes without regenerating or publishing
+them. Receipts retain both the original notes provenance and the new build identity.
+
+Download the four `client-<version>-<label>-<shard>-<run>` artifacts from Actions
+within 30 days. Each contains original installers, any Linux package signatures,
+and `client-packages.json` binding the URL, source, run, native acceptance and hashes.
+These are authenticated workflow downloads, not permanent public download links.
+The workflow has no Release-writing permission and never changes existing Release
+assets. Keep each environment's artifacts in a separate directory.
+
+Deployment remains outside this build workflow. Reuse the official same-version
+Hub image with the target environment's database, storage and service configuration.
+Verify migration/rollback readiness and deploy the Hub before enabling new clients.
+Verify the downloaded installer hashes and sign their update manifests with a key
+trusted by supported installed clients. Upload `installer` and signed JSON `bundle`
+as multipart fields to `POST /api/v1/admin/client-releases/upload`; this stages a
+disabled record. Review all intended platform records, then enable each with
+`PATCH /api/v1/admin/client-releases/<id>` and `{"enabled": true}`. Verify public
+downloads, signatures and the old client's update API. Preserve old records and
+rollback evidence. Keep deployment credentials and update-signing private keys on
+the deployment side; this workflow needs no Hub credentials. Same-version packages
+do not trigger an automatic upgrade. Old separate CN/Global installation identities
+still require the previously documented manual migration.
+
+## User-facing release notes
+
+For `client` and `all`, the `release-notes` job runs after preflight and before
+native builds. It compares the last published desktop ancestor release with the
+candidate commit, including merge commits, and sends only commit titles to the model
+(no commit bodies or file lists). Reviewed `docs/releases/X.Y.Z.json`
+content takes precedence; otherwise the job calls the configured OpenAI-compatible
+model. Configure these repository variables under Settings → Secrets and variables
+→ Actions → Variables; store the API key under Secrets:
+
+| Variable | Meaning | Default |
+| --- | --- | --- |
+| `RELEASE_NOTES_API_URL` | Full HTTPS chat-completions endpoint | `https://api.openai.com/v1/chat/completions` |
+| `RELEASE_NOTES_MODEL` | Provider's model ID | Required for model generation |
+| `RELEASE_NOTES_API_KEY_SECRET` | Name of the GitHub Secret containing the matching key, never the key value | `RELEASE_NOTES_API_KEY` |
+| `RELEASE_NOTES_TIMEOUT_SECONDS` | Network-operation timeout, integer from 1 to 600 seconds | `300` |
+| `RELEASE_NOTES_MAX_TOKENS` | Output token budget including thinking, integer from 1 to 131072 | `32768` |
+
+For an existing `OPENROUTER_API_KEY` Secret, set `RELEASE_NOTES_API_KEY_SECRET`
+to `OPENROUTER_API_KEY`, `RELEASE_NOTES_API_URL` to
+`https://openrouter.ai/api/v1/chat/completions`, and `RELEASE_NOTES_MODEL` to the
+chosen model ID. Change the endpoint, model and secret name together when switching
+providers. A missing selected Secret does not fall back to another provider's key.
+A non-default Secret name requires an explicit endpoint; it never uses the
+OpenAI endpoint implicitly.
+Model and provider access rules still apply; a free model may be rate limited.
+
+Empty numeric variables use their defaults. Invalid values leave generated notes
+unavailable without making a model request. The request uses system/user messages,
+without `reasoning_effort` or disabling thinking. Credentials are supplied only to
+the generation step. Changing these variables affects new generation runs;
+reruns that restore an existing artifact keep that artifact's notes.
+Source-only and Hub-only diagnostic builds do not generate desktop notes.
+
+For OpenRouter, generation requires a `:free` model or `openrouter/free`. Before
+inference, the job checks the public model catalog and verifies zero pricing,
+including request fees. Missing prices, conditional pricing, catalog failures,
+missing models or nonzero prices leave notes empty without sending an inference
+request. OpenRouter requests also set zero provider price limits for prompt,
+completion and request charges. The check applies to the main, EU and US
+OpenRouter endpoints; other configured services keep their existing request format.
+
+Generation logs record the model, timing, request settings, HTTP status and a
+bounded failure category. They never include keys, private endpoint addresses,
+commit text, provider response bodies or reasoning content. Failed generation
+creates a GitHub Actions warning annotation and a job summary while packaging
+continues. The warning distinguishes access denial, rate limits, missing or paid
+models, catalog verification failures and invalid output. When a replacement is
+needed, it directs maintainers to allow a free model/provider in OpenRouter and
+update the repository variable `RELEASE_NOTES_MODEL` before starting a new run.
+
+The JSON contains Chinese, English, Japanese and Korean prose with matching
+section/item IDs and commit provenance. Each version highlights only 3–5 important
+changes (fewer when appropriate), with one short sentence per item. The model cites
+only selected commits; the tool marks the rest as `not-highlighted`, without
+claiming they have no user impact. Ambiguous titles must not be expanded with
+invented details. User-facing prose must describe actual
+changes, without links, generic placeholders or copied release infrastructure
+metadata. Model errors, timeouts and invalid generated content produce an empty
+`status: unavailable` artifact and do not block packaging. Invalid explicitly
+reviewed input still fails validation. Empty notes preserve any existing bundled
+history and published Hub notes; they never become a links list or a fabricated
+summary. The missing content can be backfilled after editorial review.
+
+Every native build downloads the same immutable artifact ID, embeds the localized
+content, and records its digest in its acceptance receipt. Candidate verification
+requires matching digests and includes `release-notes.json` in the hashed release
+inventory. The draft body uses its English prose. Job retries reuse the original
+artifact, including an empty one; changing content requires a new candidate run
+or a separate presentation-only backfill. Publishing never regenerates notes.
+
+When deploying accepted installers to a Hub, consume `release-notes.json`, not
+GitHub's entire Release body. With a deployment-side admin token in environment
+variable `RELEASE_NOTES_HUB_TOKEN`, publish after enabling a matching installer:
+
+```sh
+python tools/github/publish_release_notes.py --file release-notes.json --hub https://hub.example.com
+```
+
+This updates only the version's localized presentation metadata with revision
+checking, then verifies the signed installer catalog is unchanged. An unavailable
+artifact is skipped. Do not copy Candidate markers, download links or checksums
+into signed `notes` as a fallback; use empty signed prose when no validated
+content exists. Keep Hub credentials outside GitHub build jobs. Existing versions
+can be backfilled from their reviewed JSON without rebuilding or resigning assets.
+The Hub records the first publication time of the localized metadata.
 
 ## Binary publication gates
 

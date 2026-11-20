@@ -423,6 +423,24 @@ def _dag(nodes: list[dict]) -> None:
         raise ValueError("首版插件工作流必须是无环图；返工请用节点 retry 策略表达")
 
 
+def _validate_rework_policies(node: dict, node_keys: set[str]) -> None:
+    config = node["config"]
+    for field in ("onFailure", "onReject"):
+        if field not in config:
+            continue
+        policy = config[field]
+        label = f"节点 {node['key']} 的 {field}"
+        if not isinstance(policy, dict):
+            raise ValueError(f'{label} 必须是对象，例如 {{"retryFrom": "implement", "maxRounds": 2}}')
+        target = policy.get("retryFrom")
+        if not isinstance(target, str) or target not in node_keys:
+            raise ValueError(f"{label}.retryFrom 必须引用工作流中已定义的节点")
+        if "maxRounds" in policy:
+            rounds = policy["maxRounds"]
+            if type(rounds) is not int or rounds < 1:
+                raise ValueError(f"{label}.maxRounds 必须是正整数")
+
+
 def normalize(manifest: dict, workflow: dict | None = None) -> tuple[dict, dict, dict]:
     """Return the normalized manifest, workflow, and capability report."""
     raw = dict(manifest or {})
@@ -568,6 +586,7 @@ def normalize(manifest: dict, workflow: dict | None = None) -> tuple[dict, dict,
     _dag(nodes)
     outputs_by_node = {node["key"]: list(node.get("outputs") or []) for node in nodes}
     for node in nodes:
+        _validate_rework_policies(node, keys)
         node["inputs"] = workflow_contracts.normalize_inputs(
             node.pop("_inputRefs", None), node["key"],
             list(node.get("dependsOn") or []), outputs_by_node)

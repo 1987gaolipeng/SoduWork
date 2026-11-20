@@ -2,6 +2,7 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
 const http = require('node:http'), crypto = require('node:crypto');
+const zlib = require('node:zlib');
 const cacheModule = require('../main/conversation/cloud-output-cache');
 const runtime = require('../main/conversation/artifact-runtime');
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
@@ -62,6 +63,131 @@ test('real HTTP bytes are privately materialized, previewed with dependencies, r
   const repaired = await f.cache.materialize(f.record, current, rows);
   assert.equal(calls.length, 3); assert.equal(repaired.files, 2);
   assert.equal(await fs.readFile(path.join(result.cwd, 'assets/style.css'), 'utf8'), bytes.get('css'));
+});
+
+test('compressed HTTP outputs validate decoded file bytes instead of the encoded Content-Length', async context => {
+  const bytes = Buffer.from('<h1>Published result</h1>'.repeat(100));
+  for (const [encoding, compress] of Object.entries({ gzip: zlib.gzipSync, deflate: zlib.deflateSync, br: zlib.brotliCompressSync })) {
+    await context.test(encoding, async scenario => {
+      const compressed = compress(bytes);
+      assert.notEqual(compressed.length, bytes.length);
+      const server = http.createServer((request, response) => {
+        assert.equal(request.headers.authorization, 'Device fixture-session');
+        response.writeHead(200, { 'Content-Encoding': encoding, 'Content-Length': compressed.length });
+        response.end(compressed);
+      });
+      await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+      scenario.after(() => new Promise(resolve => server.close(resolve)));
+      const fixtureState = await fixture(scenario);
+      const current = { hub: 'http://127.0.0.1:' + server.address().port, session: 'fixture-session' };
+      const result = await fixtureState.cache.materialize(fixtureState.record, current,
+        [attachment('compressed-result', 'result.html', bytes)]);
+      assert.deepEqual(await fs.readFile(path.join(result.cwd, 'result.html')), bytes);
+      assert.equal(result.materializedOutputs['compressed-result'].size, bytes.length);
+      assert.equal(result.materializedOutputs['compressed-result'].sha256, digest(bytes));
+    });
+  }
+});
+
+test('compressed HTTP outputs still reject decoded size and digest mismatches without leaving files', async context => {
+  const expected = Buffer.from('expected output'.repeat(100));
+  for (const [name, bytes, reason] of [
+    ['oversized', Buffer.concat([expected, Buffer.from('extra')]), /限制/],
+    ['truncated', expected.subarray(0, -1), /完整性/],
+    ['wrong-digest', Buffer.alloc(expected.length, 120), /完整性/],
+  ]) {
+    await context.test(name, async scenario => {
+      const compressed = zlib.gzipSync(bytes);
+      const server = http.createServer((_request, response) => {
+        response.writeHead(200, { 'Content-Encoding': 'gzip', 'Content-Length': compressed.length });
+        response.end(compressed);
+      });
+      await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+      scenario.after(() => new Promise(resolve => server.close(resolve)));
+      const fixtureState = await fixture(scenario);
+      const current = { hub: 'http://127.0.0.1:' + server.address().port, session: 'fixture-session' };
+      await assert.rejects(fixtureState.cache.materialize(fixtureState.record, current,
+        [attachment('compressed-result', 'result.txt', expected)]), reason);
+      assert.deepEqual(await fs.readdir(cacheModule.directory(fixtureState.app, fixtureState.record)), []);
+    });
+  }
+});
+
+test('broken compressed streams leave no partial output, preserve cached files and allow retry', async context => {
+  const expected = Buffer.from('<h1>Updated cloud result</h1>'.repeat(100));
+  const previous = Buffer.from('Previously verified cloud result');
+  for (const [encoding, compress, decompress] of [
+    ['gzip', zlib.gzipSync, zlib.gunzipSync],
+    ['deflate', zlib.deflateSync, zlib.inflateSync],
+    ['br', zlib.brotliCompressSync, zlib.brotliDecompressSync],
+  ]) {
+    const compressed = compress(expected), corrupted = Buffer.from(compressed);
+    // Damage the integrity trailer, or the Brotli header (Brotli has no checksum).
+    if (encoding === 'br') corrupted.fill(0xff, 0, 4);
+    else corrupted[corrupted.length - 1] ^= 0xff;
+    for (const [failure, damaged] of [
+      // Cut into the payload; fetch may tolerate a missing gzip/deflate trailer.
+      ['truncated', compressed.subarray(0, Math.floor(compressed.length / 2))],
+      ['corrupted', corrupted],
+    ]) {
+      await context.test(encoding + ': ' + failure, async scenario => {
+        assert.throws(() => decompress(damaged), 'the compressed stream itself must be invalid');
+        let wire = damaged, requests = 0;
+        const server = http.createServer((request, response) => {
+          assert.equal(request.headers.authorization, 'Device fixture-session');
+          requests++;
+          // Keep HTTP framing valid so the failure comes from the compressed body.
+          response.writeHead(200, { 'Content-Encoding': encoding, 'Content-Length': wire.length });
+          response.end(wire);
+        });
+        await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+        scenario.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+        const f = await fixture(scenario);
+        const current = { hub: 'http://127.0.0.1:' + server.address().port, session: 'fixture-session' };
+        const row = attachment('updated', 'result.html', expected);
+        const cwd = cacheModule.directory(f.app, f.record), target = path.join(cwd, row.filename);
+
+        await assert.rejects(f.cache.materialize(f.record, current, [row]));
+        assert.deepEqual(await fs.readdir(cwd), [], 'failed first download must remove temporary files');
+
+        wire = compress(previous);
+        const saved = await f.cache.materialize(f.record, current, [attachment('previous', row.filename, previous)]);
+        f.record.materializedOutputs = saved.materializedOutputs;
+        const receipt = structuredClone(saved.materializedOutputs);
+        wire = damaged;
+        await assert.rejects(f.cache.materialize(f.record, current, [row]));
+        assert.deepEqual(await fs.readFile(target), previous, 'a broken replacement must preserve verified bytes');
+        assert.deepEqual(f.record.materializedOutputs, receipt, 'a failed download must preserve the old receipt');
+        assert.deepEqual(await fs.readdir(cwd), [row.filename], 'failed replacement must not leave temporary files');
+        assert.equal(cacheModule.index(f.app, f.record).cloudOutputs[0].attachmentId, 'previous');
+
+        wire = compressed;
+        const retried = await f.cache.materialize(f.record, current, [row]);
+        assert.deepEqual(await fs.readFile(target), expected);
+        assert.equal(retried.materializedOutputs.updated.size, expected.length);
+        assert.equal(retried.materializedOutputs.updated.sha256, digest(expected));
+        assert.deepEqual(await fs.readdir(cwd), [row.filename]);
+        assert.equal(requests, 4, 'retry must fetch again instead of reusing a failed download');
+      });
+    }
+  }
+});
+
+test('identity responses retain the early Content-Length mismatch check', async context => {
+  for (const encoding of [undefined, 'identity']) {
+    await context.test(encoding || 'absent', async scenario => {
+      let canceled = false;
+      const headers = { 'content-length': '100' };
+      if (encoding) headers['content-encoding'] = encoding;
+      const fixtureState = await fixture(scenario, { fetch: async () => new Response(new ReadableStream({
+        cancel() { canceled = true; },
+      }), { headers }) });
+      await assert.rejects(fixtureState.cache.materialize(fixtureState.record, { hub: 'http://fixture.invalid' },
+        [attachment('identity-result', 'result.txt', 'fixture')]), /大小校验失败/);
+      assert.equal(canceled, true);
+      assert.deepEqual(await fs.readdir(cacheModule.directory(fixtureState.app, fixtureState.record)), []);
+    });
+  }
 });
 
 test('streaming limits cancel a lying body before reading the complete response', async t => {

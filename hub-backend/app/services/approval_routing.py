@@ -231,6 +231,33 @@ async def preview_assignments(session: AsyncSession, task: models.Task, action: 
             "excluded": sorted(excluded)}
 
 
+async def _clear_restored_review_issue(session: AsyncSession, task: models.Task,
+                                     request: am.ApprovalRequest,
+                                     artifact: am.ArtifactVersion | None) -> None:
+    current = (task.work_routing or {}).get("conversationTurn") or {}
+    if (current.get("deliveryIssue") or {}).get("code") != "review_unassigned":
+        return
+    # Assignment reconciliation also runs on read paths. Refresh under the task
+    # lock before replacing routing so a stale reader cannot undo a newer turn.
+    # Normal autoflush retains this transaction's admitted routing changes.
+    task = await session.scalar(select(models.Task).where(models.Task.id == task.id)
+        .with_for_update().execution_options(populate_existing=True))
+    if task is None:
+        return
+    routing = dict(task.work_routing or {})
+    current = dict(routing.get("conversationTurn") or {})
+    issue = current.get("deliveryIssue") or {}
+    if (issue.get("code") != "review_unassigned"
+            or issue.get("artifactVersionId") != request.artifact_version_id
+            or not current.get("conversationId") or artifact is None
+            or request.task_id != task.id or artifact.task_id != task.id
+            or artifact.source_ref != "conversation:" + current["conversationId"]):
+        return
+    current.pop("deliveryIssue", None)
+    routing["conversationTurn"] = current
+    task.work_routing = routing
+
+
 async def ensure_assignments(session: AsyncSession, task: models.Task,
                              request: am.ApprovalRequest) -> list[am.ApprovalAssignment]:
     existing = list((await session.execute(select(am.ApprovalAssignment).where(
@@ -242,9 +269,9 @@ async def ensure_assignments(session: AsyncSession, task: models.Task,
         # assignments before this rule existed, so inbox and detail reads do
         # not keep exposing the old approver.
         rules = dict(request.policy_snapshot or {})
+        artifact = await session.get(am.ArtifactVersion, request.artifact_version_id)
         candidates, excluded = await _candidate_map(
-            session, task, request.action, rules,
-            await session.get(am.ArtifactVersion, request.artifact_version_id))
+            session, task, request.action, rules, artifact)
         desired = set(candidates)
         if {str(row.user_id) for row in existing} != desired:
             if existing:
@@ -252,6 +279,7 @@ async def ensure_assignments(session: AsyncSession, task: models.Task,
                     am.ApprovalAssignment.request_id == request.id))
             existing = []
         if existing:
+            await _clear_restored_review_issue(session, task, request, artifact)
             return existing
         rows = []
         for uid, item in candidates.items():
@@ -266,6 +294,8 @@ async def ensure_assignments(session: AsyncSession, task: models.Task,
         await session.flush()
         if not rows:
             await _record_unassigned(session, task, request, excluded)
+        else:
+            await _clear_restored_review_issue(session, task, request, artifact)
         return rows
     if existing:
         if not dict(request.policy_snapshot or {}).get("separationOfDuties"):

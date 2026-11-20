@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import gzip
+import http.client
 import json
 import re
 import secrets
@@ -22,13 +23,18 @@ def docker(*args, output=False):
 
 def wait(check, seconds=180):
     end = time.monotonic() + seconds
+    last_error = None
     while time.monotonic() < end:
         try:
             return check()
-        except (OSError, ValueError, subprocess.CalledProcessError):
-            if time.monotonic() >= end:
+        except (OSError, ValueError, subprocess.CalledProcessError, http.client.HTTPException) as exc:
+            last_error = exc
+            remaining = end - time.monotonic()
+            if remaining <= 0:
                 raise
-            time.sleep(2)
+            time.sleep(min(2, remaining))
+    if last_error is not None:
+        raise last_error
     raise TimeoutError("Isolated Hub acceptance timed out")
 
 

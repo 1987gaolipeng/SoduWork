@@ -80,6 +80,20 @@ def normalize_submission_mode(value, *, fallback: str = "auto") -> str:
     return mode
 
 
+def _delivery_issue(task, code="", reason="", *, artifact_version_id=""):
+    """Keep the recoverable delivery blocker scoped to the current turn."""
+    routing = dict(task.work_routing or {})
+    current = dict(routing.get("conversationTurn") or {})
+    if code:
+        current["deliveryIssue"] = {"code": code, "reason": str(reason)[:500]}
+        if artifact_version_id:
+            current["deliveryIssue"]["artifactVersionId"] = artifact_version_id
+    else:
+        current.pop("deliveryIssue", None)
+    routing["conversationTurn"] = current
+    task.work_routing = routing
+
+
 def ensure_available(task, claimed=None, executor=None):
     from .task_requirements import ensure_executable
     ensure_executable(task)
@@ -168,11 +182,24 @@ async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str
     received: set[str] = set()
     round_no = 1
     ref = "conversation:" + conversation_id
-    receipts = (await session.execute(select(TaskEvent).where(
-        TaskEvent.task_id == task.id, TaskEvent.kind == EV_ARTIFACTS))).scalars().all()
+    events = (await session.execute(select(TaskEvent).where(
+        TaskEvent.task_id == task.id,
+        TaskEvent.kind.in_([EV_ARTIFACTS, "artifact.delivery_deferred"])))).scalars().all()
+    receipts = [event for event in events if event.kind == EV_ARTIFACTS]
+    # Older receipts lack outcome, but their deferred event identifies the
+    # incomplete round. A resumed completion must validate/freeze final bytes
+    # even when the same filename was already stored as process evidence.
+    deferred = {(str((event.detail or {}).get("ref") or ""),
+                 str((event.detail or {}).get("identifier") or ""),
+                 str((event.detail or {}).get("round") or ""))
+                for event in events if event.kind == "artifact.delivery_deferred"}
     for event in receipts:
         detail = dict(event.detail or {})
-        if str(detail.get("identifier") or "") != turn_id:
+        if str(detail.get("identifier") or "") != turn_id or str(detail.get("ref") or "") != ref:
+            continue
+        incomplete = detail.get("outcome") == "incomplete" or (
+            ref, turn_id, str(detail.get("round") or "")) in deferred
+        if outcome == "completed" and incomplete:
             continue
         received.update(str(x) for x in (detail.get("files") or []) if x)
     for event in receipts:
@@ -188,6 +215,7 @@ async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str
     got: list[str] = []
     valid: set[str] = set()
     deliverables: set[str] = set()
+    primary: set[str] = set()
     evidence: set[str] = set()
     ignored: set[str] = set()
     invalid: list[dict] = []
@@ -217,6 +245,8 @@ async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str
             role = "output"
             deliverables.add(fn)
             valid.add(fn)
+            if category == "primary" and outcome == "completed":
+                primary.add(fn)
             if outcome != "completed":
                 # Treat incomplete-turn outputs as process evidence, not deliverables.
                 # A later completed turn retransmits and reclassifies its full output set.
@@ -242,10 +272,12 @@ async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str
     if not got:
         return {"ok": True, "already": True, "files": [],
                 "submissionMode": submission_mode,
+                **({"deliveryBlocked": True, "reason": current["deliveryIssue"]["reason"]}
+                   if current.get("deliveryIssue", {}).get("code") in {"invalid_delivery", "review_unassigned"} else {}),
                 "pendingSubmission": submission_mode == "manual"}
     task_events.record(session, task.id, EV_ARTIFACTS,
                        {"files": got, "identifier": turn_id, "ref": ref,
-                        "provider": provider or "conversation", "round": round_no,
+                        "provider": provider or "conversation", "round": round_no, "outcome": outcome,
                         "valid": sorted(valid), "deliverables": sorted(deliverables),
                         "evidence": sorted(evidence), "ignored": sorted(ignored),
                         "invalid": invalid[-100:]}, actor=who)
@@ -263,6 +295,26 @@ async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str
                 "deferred": True, "invalid": invalid[-100:],
                 "submissionMode": submission_mode,
                 "pendingSubmission": submission_mode == "manual"}
+    if routing.get("executionSubmissionChoice") == "infer":
+        if not primary:
+            reason = "本轮没有校验通过的正式交付文件，请检查交付文件或清单后重新提交"
+            if invalid:
+                reason = str(invalid[0].get("reason") or reason)[:500]
+            _delivery_issue(task, "invalid_delivery", reason)
+            task_events.record(session, task.id, "artifact.delivery_rejected",
+                               {"ref": ref, "identifier": turn_id, "files": sorted(got), "reason": reason}, actor=who)
+            await session.commit()
+            from . import task_access, tasks as tasks_svc
+            await task_access.publish_task(session, task, "task.updated", await tasks_svc.task_to_api_live(session, task))
+            return {"ok": True, "files": got, "round": round_no, "invalid": invalid[-100:],
+                    "submissionMode": submission_mode, "pendingSubmission": False,
+                    "deliveryBlocked": True, "reason": reason}
+        # Resolve the new client's default only after validating current-turn
+        # primary output. Unknown historical manual choices remain untouched.
+        submission_mode = "auto"
+        routing["executionSubmissionMode"] = submission_mode
+        task.work_routing = routing
+    _delivery_issue(task)
     if submission_mode == "manual":
         # Manual submission mode stores artifacts without opening review.
         # submit-review explicitly freezes the candidate and creates the request later.
@@ -284,8 +336,10 @@ async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str
         code = await code_delivery.check(session, task, who="SoduWork", force=True)
     except Exception:  # noqa: BLE001 - Code-delivery checks must not prevent artifact storage.
         code = {}
+    review_request_id = ""
     if not code.get("applies"):
         from .artifact_version_guard import OutputAwaitingRework
+        artifact = None
         try:
             from . import release_control
             artifact, _ = await release_control.ensure_current_output(session, task, source_ref=ref,
@@ -300,8 +354,8 @@ async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str
                                {"requestId": request.id, "versionId": artifact.id,
                                 "note": "会话产出自动提交验收", "auto": True, "ref": ref},
                                actor=who)
-            from . import code_delivery as _cd
-            await _cd.notify_reviewer(session, task, "、".join(deliverables or got))
+            if request.status == "pending":
+                review_request_id = request.id
         except OutputAwaitingRework:
             # A late delivery receipt cannot undo a reviewer's rejection.
             await session.commit()
@@ -314,6 +368,13 @@ async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str
             # Choose recovery guidance from the failure type.
             # For transparent encryption failures, changing output format may work where regeneration does not.
             reason = str(error)[:500]
+            from . import approval_routing
+            reviewers = await approval_routing.preview_assignments(session, task, "review", {}) if artifact else {"ok": True}
+            missing_reviewer = not reviewers["ok"]
+            if missing_reviewer:
+                reason = "需求创建人缺失或账号不可用，验收受阻；请恢复创建人账号，或联系管理员核实需求归属后处理"
+            _delivery_issue(task, "review_unassigned" if missing_reviewer else "invalid_delivery", reason,
+                            artifact_version_id=artifact.id if missing_reviewer else "")
             # The generic reason may say no reviewable outputs remain.
             # Pass this turn's detailed invalid-file results to the recovery hint generator.
             # Otherwise format-specific guidance cannot be selected.
@@ -327,14 +388,16 @@ async def deliver_artifacts(session, task, *, conversation_id: str, turn_id: str
                 await publish_owner(session, task, {
                     "type": "notice", "taskId": task.id,
                     "text": f"「{task.title}」的产出自检未通过，未进入待验收：{reason}{('（' + hint + '）') if hint else ''}"})
+    # Persist the review and its notification atomically. A notice must never
+    # invite a click before the gate is committed, nor hold upload completion
+    # hostage to a slow device transport. The existing outbox owns retries.
+    from . import task_notifications
+    task_notifications.enqueue(session, task, "task.updated", review_request_id=review_request_id)
     await session.commit()
-    # Ingestion changes candidate and review state, so push task.updated.
-    # This keeps board and send-queue snapshots synchronized with the task version.
-    from . import task_access, tasks as tasks_svc
-    await task_access.publish_task(session, task, "task.updated",
-                                   await tasks_svc.task_to_api_live(session, task))
     return {"ok": True, "files": got, "round": round_no,
             "invalid": invalid[-100:], "submissionMode": submission_mode,
+            **({"deliveryBlocked": True, "reason": task.work_routing["conversationTurn"]["deliveryIssue"]["reason"]}
+               if task.work_routing.get("conversationTurn", {}).get("deliveryIssue") else {}),
             "pendingSubmission": False}
 
 
@@ -395,8 +458,28 @@ async def apply(session, task, body, actor=""):
         raise HTTPException(422, "不支持的需求执行方式")
     native_choice = body.get("executionChoice") == "native"
     if action == "prepare":
+        choice = routing.get("executionSubmissionChoice") if executor == "native" else None
+        requested_choice = body.get("submissionChoice")
+        if requested_choice is not None:
+            if (executor != "native" or not isinstance(requested_choice, str)
+                    or requested_choice not in {"infer", "manual", "auto"}):
+                raise HTTPException(422, "提交选择仅支持本机会话的自动判断、手动或自动提交")
+            if has_submission_mode and body.get(submission_key) and requested_choice != submission_mode:
+                raise HTTPException(422, "提交选择与提交方式不一致")
+            if same and requested_choice != choice:
+                raise HTTPException(409, "当前执行轮次已确定提交选择，不能中途切换")
+            choice = requested_choice
+        elif executor == "native" and has_submission_mode and body.get(submission_key):
+            if same and choice and choice != submission_mode:
+                raise HTTPException(409, "当前执行轮次已确定提交选择，不能中途切换")
+            choice = submission_mode
+        if choice == "infer" and not same:
+            submission_mode = default_submission_mode(task)
+        elif choice in SUBMISSION_MODES:
+            submission_mode = choice
         from . import dispatch_instructions
-        instructions = dispatch_instructions.submitted(body, submission_mode)
+        instructions = dispatch_instructions.submitted(body, current.get("initialSubmissionMode", submission_mode)
+                                                        if same else submission_mode)
         from .task_requirements import ensure_executable
         try:
             ensure_executable(task)
@@ -464,7 +547,13 @@ async def apply(session, task, body, actor=""):
                     **({"repo": previous_context["repo"]} if previous_context.get("repo") else {})})
         if submission_mode:
             routing["executionSubmissionMode"] = submission_mode
+        if choice:
+            routing["executionSubmissionChoice"] = choice
+        else:
+            routing.pop("executionSubmissionChoice", None)
         current = {"turnId": turn_id, "conversationId": conversation_id, "state": "queued", "executor": executor}
+        if choice == "infer":
+            current["initialSubmissionMode"] = submission_mode
         if model_source == "device":
             from .model_quota import managed_runtime
             current.update(modelSource="device", modelAgentId=managed_runtime(body.get("agentId")))
@@ -499,11 +588,20 @@ async def apply(session, task, body, actor=""):
                  "wait": "waiting", "cancel": "cancelled"}.get(action)
         if not state:
             raise HTTPException(422, "不支持的会话需求操作")
-        if current.get("state") == state:
+        issue = body.get("deliveryIssue")
+        if issue is not None:
+            if (action not in {"wait", "fail"} or executor != "native"
+                    or not isinstance(issue, dict)
+                    or issue.get("code") not in {"capture_pending", "capture_failed", "sync_pending"}
+                    or not isinstance(issue.get("reason"), str) or not issue["reason"].strip()):
+                raise HTTPException(422, "交付状态说明无效")
+            issue = {"code": issue["code"], "reason": issue["reason"][:500]}
+        same_state = current.get("state") == state
+        if same_state and (issue is None or issue == current.get("deliveryIssue")):
             return current
         allowed = {"start": {"queued"}, "complete": {"running", "waiting"},
                    "fail": ACTIVE, "wait": {"running"}, "cancel": ACTIVE}
-        if current.get("state") not in allowed[action]:
+        if not same_state and current.get("state") not in allowed[action]:
             raise HTTPException(409, "需求执行状态已变化")
         if action == "start" and not await task_status.mark(session, task, "doing", why="需求开始执行"):
             raise HTTPException(409, "需求正由其他流程接管")
@@ -518,6 +616,10 @@ async def apply(session, task, body, actor=""):
         # A completed model turn is a delivery receipt, not human acceptance.
         # Do not bypass delivery_truth by marking the business task done here.
         current = {**current, "state": state}
+        if issue is not None:
+            current["deliveryIssue"] = issue
+        elif action == "complete" and current.get("deliveryIssue", {}).get("code") in {"capture_pending", "sync_pending"}:
+            current.pop("deliveryIssue", None)
     routing["conversationTurn"] = current
     task.work_routing = routing
     task_events.record(session, task.id, "conversation.turn", current, actor)

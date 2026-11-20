@@ -132,6 +132,66 @@ class AutoSubmitTests(unittest.IsolatedAsyncioTestCase):
             await session.__aexit__(None, None, None)
             await engine.dispose()
 
+    async def test_inferred_markdown_without_contract_opens_review_and_retry_is_idempotent(self):
+        engine, sessions, session, task = await self._prepared()
+        try:
+            task.work_routing = {"conversationTurn": dict(task.work_routing["conversationTurn"]),
+                                 "executionSubmissionChoice": "infer", "executionSubmissionMode": "manual"}
+            await session.commit()
+            args = dict(conversation_id="conv-1", turn_id="turn-1",
+                        files=[("雪落无声.md", b"# Winter\nSnow falls.", "text/markdown")])
+            first = await conversation_turns.deliver_artifacts(session, task, **args)
+            self.assertEqual(first["submissionMode"], "auto")
+            self.assertFalse(first["pendingSubmission"])
+            self.assertEqual(task.work_routing["executionSubmissionChoice"], "infer")
+            self.assertEqual(task.work_routing["executionSubmissionMode"], "auto")
+            retry = await conversation_turns.deliver_artifacts(session, task, **args)
+            self.assertTrue(retry["already"])
+            self.assertFalse(retry["pendingSubmission"])
+            for model in (models.Attachment, am.ArtifactVersion, am.ApprovalRequest):
+                self.assertEqual(len((await session.scalars(select(model).where(model.task_id == task.id))).all()), 1)
+        finally:
+            await session.__aexit__(None, None, None)
+            await engine.dispose()
+
+    async def test_inferred_delivery_requires_a_valid_completed_primary(self):
+        for category, content, outcome in (("primary", b"not-json", "completed"),
+                                            ("supporting", b"{}", "completed"),
+                                            ("primary", b"{}", "incomplete")):
+            with self.subTest(category=category, outcome=outcome):
+                engine, sessions, session, task = await self._prepared()
+                try:
+                    task.work_routing = {"conversationTurn": dict(task.work_routing["conversationTurn"]),
+                                         "executionSubmissionChoice": "infer", "executionSubmissionMode": "manual"}
+                    await session.commit()
+                    result = await conversation_turns.deliver_artifacts(session, task,
+                        conversation_id="conv-1", turn_id="turn-1", outcome=outcome,
+                        categories={"result.json": category}, files=[("result.json", content, "application/json")])
+                    self.assertEqual((await session.scalars(select(am.ApprovalRequest))).all(), [])
+                    self.assertEqual(task.work_routing["executionSubmissionMode"], "manual")
+                    if outcome == "completed":
+                        self.assertTrue(result.get("deliveryBlocked"))
+                        self.assertTrue(result.get("reason"))
+                finally:
+                    await session.__aexit__(None, None, None)
+                    await engine.dispose()
+
+    async def test_lost_upload_response_retry_keeps_one_attachment_version_and_review(self):
+        engine, sessions, session, task = await self._prepared()
+        try:
+            args = dict(conversation_id='conv-1', turn_id='turn-1', provider='conversation',
+                        files=[('cafe\u0301.md', b'# Frozen result', 'text/markdown')])
+            first = await conversation_turns.deliver_artifacts(session, task, **args)
+            retry = await conversation_turns.deliver_artifacts(session, task, **args)
+            self.assertTrue(first['ok'])
+            self.assertTrue(retry['already'])
+            for model in (models.Attachment, am.ArtifactVersion, am.ApprovalRequest):
+                rows = (await session.scalars(select(model).where(model.task_id == task.id))).all()
+                self.assertEqual(len(rows), 1, model.__name__)
+        finally:
+            await session.__aexit__(None, None, None)
+            await engine.dispose()
+
     async def test_requester_alone_cannot_receive_review_without_creator(self):
         engine, sessions, session, task = await self._prepared()
         try:
@@ -151,6 +211,84 @@ class AutoSubmitTests(unittest.IsolatedAsyncioTestCase):
                 models.TaskEvent.task_id == task.id))).all()
             self.assertIn("approval.unassigned", kinds)
             self.assertNotIn("artifact.submitted_for_review", kinds)
+            self.assertEqual(task.work_routing["conversationTurn"]["deliveryIssue"]["code"], "review_unassigned")
+            self.assertIn("管理员", task.work_routing["conversationTurn"]["deliveryIssue"]["reason"])
+        finally:
+            await session.__aexit__(None, None, None)
+            await engine.dispose()
+
+    async def test_restored_creator_clears_only_current_review_assignment_issue(self):
+        from app.services import approval_routing
+        engine, sessions, session, task = await self._prepared()
+        try:
+            creator = await session.get(models.User, task.created_by)
+            creator.is_active = False
+            await session.commit()
+            await conversation_turns.deliver_artifacts(session, task,
+                conversation_id="conv-1", turn_id="turn-1",
+                files=[("review.md", b"Complete report", "text/markdown")])
+            request = (await session.scalars(select(am.ApprovalRequest))).one()
+            current = task.work_routing["conversationTurn"]
+            issue = dict(current["deliveryIssue"])
+            self.assertEqual(issue.get("artifactVersionId"), request.artifact_version_id)
+            creator.is_active = True
+            for existing_assignment in (False, True):
+                with self.subTest(existing_assignment=existing_assignment):
+                    task.work_routing = {**task.work_routing, "conversationTurn": {**current, "deliveryIssue": issue}}
+                    rows = await approval_routing.ensure_assignments(session, task, request)
+                    self.assertEqual([row.user_id for row in rows], [creator.id])
+                    self.assertNotIn("deliveryIssue", task.work_routing["conversationTurn"])
+                    self.assertEqual(request.status, "pending")
+                    await session.commit()
+        finally:
+            await session.__aexit__(None, None, None)
+            await engine.dispose()
+
+    async def test_restored_assignment_cannot_clear_other_version_or_conversation_issue(self):
+        from app.services import approval_routing
+        engine, sessions, session, task = await self._prepared()
+        try:
+            await conversation_turns.deliver_artifacts(session, task,
+                conversation_id="conv-1", turn_id="turn-1",
+                files=[("review.md", b"Complete report", "text/markdown")])
+            request = (await session.scalars(select(am.ApprovalRequest))).one()
+            current = task.work_routing["conversationTurn"]
+            for version, conversation in (("another-version", "conv-1"), (request.artifact_version_id, "another-conversation")):
+                with self.subTest(version=version, conversation=conversation):
+                    issue = {"code": "review_unassigned", "reason": "Current review is blocked", "artifactVersionId": version}
+                    task.work_routing = {**task.work_routing, "conversationTurn": {
+                        **current, "conversationId": conversation, "deliveryIssue": issue}}
+                    rows = await approval_routing.ensure_assignments(session, task, request)
+                    self.assertEqual(len(rows), 1)
+                    self.assertEqual(task.work_routing["conversationTurn"]["deliveryIssue"], issue)
+        finally:
+            await session.__aexit__(None, None, None)
+            await engine.dispose()
+
+    async def test_restored_assignment_refreshes_turn_before_clearing_stale_issue(self):
+        from sqlalchemy import update
+        from app.services import approval_routing
+        engine, sessions, session, task = await self._prepared()
+        try:
+            await conversation_turns.deliver_artifacts(session, task,
+                conversation_id="conv-1", turn_id="turn-1",
+                files=[("review.md", b"Complete report", "text/markdown")])
+            request = (await session.scalars(select(am.ApprovalRequest))).one()
+            old_turn = {**task.work_routing["conversationTurn"], "deliveryIssue": {
+                "code": "review_unassigned", "reason": "Old review", "artifactVersionId": request.artifact_version_id}}
+            task.work_routing = {**task.work_routing, "conversationTurn": old_turn}
+            await session.commit()
+            newer = {**task.work_routing, "conversationTurn": {
+                "conversationId": "new-conversation", "turnId": "new-turn", "state": "running"}}
+            # An independently committed prepare leaves the reader's ORM task stale.
+            await session.execute(update(models.Task).where(models.Task.id == task.id)
+                .values(work_routing=newer).execution_options(synchronize_session=False))
+            await session.commit()
+            self.assertEqual(task.work_routing["conversationTurn"], old_turn)
+            await approval_routing.ensure_assignments(session, task, request)
+            await session.commit()
+            await session.refresh(task)
+            self.assertEqual(task.work_routing, newer)
         finally:
             await session.__aexit__(None, None, None)
             await engine.dispose()

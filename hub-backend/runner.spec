@@ -58,11 +58,6 @@ for notice in pyinstaller_notices:
     license_data.append((str(notice), "third-party/python/pyinstaller-" + pyinstaller_dist.version))
 license_data = sorted(set(license_data))
 
-# The frozen Runner cannot depend on the build host's Python/Homebrew CA path.
-ca_data = collect_data_files("certifi", includes=["cacert.pem"])
-if not ca_data:
-    raise RuntimeError("Runner CA bundle is missing; install requirements-runner-build.txt")
-
 hidden = [
     "app.services.connector_database", "app.services.connector_database_extra",
     "pg8000.dbapi", "pymysql", "redis", "pymongo", "bson", "dns.resolver",
@@ -96,6 +91,9 @@ hidden = [
     "app.services.workspace_guard",
     "app.services.code_creds",
 ]
+# Retain the platform-native verifier in the frozen Runner.
+hidden.append({"darwin": "truststore._macos", "win32": "truststore._windows"}.get(
+    sys.platform, "truststore._openssl"))
 
 # winpty only exists on Windows; the macOS/Linux Runner uses the stdlib pty
 # (pty_term.py), so the collected ConPTY payload must stay Windows-only.
@@ -114,7 +112,7 @@ a = Analysis(
         (os.path.join(backend, "app", "services", "qwen_acp_outcome.mjs"), "app/services"),
         (os.path.join(backend, "app", "services", "codex_gateway_startup.mjs"), "app/services"),
         (os.path.join(backend, "app", "services", "dsh_gateway_bundle"), "app/services/dsh_gateway_bundle"),
-    ] + skill_data + license_data + ca_data),
+    ] + skill_data + license_data),
     hiddenimports=hidden,
     hookspath=[],
     hooksconfig={},

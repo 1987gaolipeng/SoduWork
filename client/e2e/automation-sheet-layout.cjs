@@ -351,6 +351,55 @@ if (typeof electron === 'string') {
       assert.equal(await js('saves.length-beforeCancel'),0);
       assert.equal(await js('WorkAutomationSheet.acceptsFollowup("改为十分钟后")'),false);
     });
+    await js(fs.readFileSync(path.join(client, 'components/panels/chat-work-cards.js'), 'utf8') + '\nvoid 0;');
+    await run('对话自动化关闭后显示草稿入口，继续编辑及恢复会话保留手动内容', async () => {
+      await js(`(async()=>{
+        WorkAutomationSheet.close(true);
+        const host=document.querySelector('#inlineHost');
+        host.innerHTML='<div id="nchatList"></div><div class="nchat-draft"></div>';
+        window.cardArchive=new Map();window.beforeCollapse=saves.length;
+        SoduWorkAPI.taskStorageKey=()=> 'isolated-collapse';
+        SoduWorkAPI.parseTaskText=async()=>({title:'检查报告',note:'检查报告并提醒我'});
+        window.WorkEntrySheet={close:(_from,silent)=>WorkAutomationSheet.close(silent)};
+        window.cardContext={_sessionId:'collapse-chat',_viewEpoch:0,_sessionOptions:{},_snap:{messages:[]},
+          _mount:()=>host,_api:()=>({
+            saveWorkCard:async(_id,card)=>{cardArchive.set(card.id,structuredClone(card));return {ok:true,card};},
+            workCards:async()=>({ok:true,workOnly:true,cards:[...cardArchive.values()]})}),
+          _render:()=>{for(const item of conversationCards.timeline([])){
+            if(!document.querySelector('[data-work-card-slot="'+item.id+'"]')){
+              const slot=document.createElement('section');slot.dataset.workCardSlot=item.id;
+              host.querySelector('#nchatList').appendChild(slot);
+            }
+          }},
+          _openWorkAction:async(command,options)=>{
+            const seed=await conversationCards.prepare(command,options);
+            await WorkAutomationSheet.open({...seed,text:command.text,host:seed.cardHost});
+          }};
+        window.conversationCards=ChatWorkCards.create(cardContext);
+        const command={id:'work.automation.create',text:'每天9点提醒我检查报告'};
+        const seed=await conversationCards.prepare(command,{proposal:{title:'检查报告',note:'检查报告并提醒我'}});
+        await WorkAutomationSheet.open({...seed,text:command.text,host:seed.cardHost});
+        document.querySelector('[name=title]').value='手动修改后的提醒';
+        document.querySelector('[data-waz-close]').click();
+        await conversationCards.flush();
+      })()`);
+      assert.equal(await js('document.querySelector(".nchat-work-record button").textContent'), '继续编辑');
+      assert.ok(await js('document.querySelector(".nchat-work-record").getBoundingClientRect().height>0'));
+      assert.match(await js('document.querySelector(".nchat-work-record").textContent'), /草稿 · 尚未创建.*手动修改后的提醒/);
+      await js('document.querySelector(".nchat-work-record button").click();void 0;'); await delay(100);
+      assert.equal(await js('document.querySelector("[name=title]").value'), '手动修改后的提醒');
+      await js(`(async()=>{
+        document.querySelector('[data-waz-close]').click();await conversationCards.flush();
+        conversationCards=ChatWorkCards.create(cardContext);
+        document.querySelector('#nchatList').replaceChildren();
+        await conversationCards.restore('collapse-chat');
+      })()`);
+      assert.ok(await js('document.querySelector(".nchat-work-record").getBoundingClientRect().height>0'));
+      assert.equal(await js('WorkAutomationSheet.hasSurface()'), false);
+      await js('document.querySelector(".nchat-work-record button").click();void 0;'); await delay(100);
+      assert.equal(await js('document.querySelector("[name=title]").value'), '手动修改后的提醒');
+      assert.equal(await js('saves.length-beforeCollapse'), 0);
+    });
     report.errors = await js('errors');
     report.ok = report.cases.every(row => row.ok) && !report.errors.length && !report.networkRequests.length;
   }).catch(error => { report.error = String(error.stack || error); }).finally(() => {

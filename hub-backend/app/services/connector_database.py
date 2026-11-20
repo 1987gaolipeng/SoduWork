@@ -98,7 +98,8 @@ def connect(kind: str, values: dict, timeout: int):
         raise ValueError("数据库端口无效")
     ca = values.get("TLS_CA_PEM", "").replace("\\n", "\n")
     local = host.lower() in {"localhost", "127.0.0.1", "::1"}
-    tls = ssl.create_default_context(cadata=ca or None) if ca or not local else None
+    use_tls = values.get("DISABLE_TLS") != "true" and (bool(ca) or not local)
+    tls = ssl.create_default_context(cadata=ca or None) if use_tls else None
     kwargs = dict(host=host, port=port, database=values[prefix + "DATABASE"],
                   user=values[prefix + "USER"], password=values[prefix + "PASSWORD"])
     if kind == "postgres":

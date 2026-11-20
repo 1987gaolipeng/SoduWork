@@ -5,8 +5,8 @@
 # Avoid installing the full Hub dependency set on Runner machines.
 # Runner uses additional_headers and proxy=None (websockets 15+).
 websockets>=15
-# MPL-2.0: explicit public CA bundle for frozen Python HTTPS clients.
-certifi==2026.10.23
+# MIT: native OS certificate trust; 0.10.5 fixes concurrent verification.
+truststore==0.10.5
 # Windows terminals use pywinpty/ConPTY; Linux and macOS use the standard-library pty module.
 # Windows normally uses the packaged soduwork-runner.exe; this file supports Linux installation.
 pywinpty>=3.0; sys_platform == "win32"

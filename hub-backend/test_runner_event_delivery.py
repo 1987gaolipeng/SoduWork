@@ -1,6 +1,7 @@
 """Durable transport fault tests with isolated disk, database and fake sockets."""
 import asyncio
 import contextvars
+import copy
 import os
 import subprocess
 import sys
@@ -8,7 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from test_handoff_target_diagnostics import TargetDiagnosticsTests as _Base
 from sqlalchemy import insert, select
@@ -75,6 +76,108 @@ def snapshot(ref="fixture-ref", task_id="fixture-task", seqs=(1,), *, round_no=1
 
 
 class OutboxTests(unittest.TestCase):
+    def test_local_recovery_archives_exact_packets_and_preserves_hub_and_marks(self):
+        import base64
+        import json
+        from app.services import durable_file
+        with tempfile.TemporaryDirectory() as root:
+            box = Outbox(root, "fixture", max_packets=3)
+            for seq in (1, 2):
+                box.append(snapshot(task_id="chat-local", seqs=(seq,)), ("fixture-ref", seq, "running"))
+            box.append(snapshot(ref="hub", task_id="real-task"), ("hub", 1, "running"))
+            marks = box.marks()
+            original = box.replay_pending()
+            self.assertTrue(box.at_capacity())
+            self.assertEqual(box.archive_local({"fixture-ref": "chat-local"}), 2)
+            self.assertFalse(box.at_capacity())
+            self.assertEqual(box.marks(), marks)
+            self.assertEqual(box.pending(), [original[2][1]])
+            files = list(box.root.glob("local-events-*.archive"))
+            self.assertEqual(len(files), 1)
+            archived = json.loads(durable_file.read_bytes(files[0]))
+            self.assertEqual(archived["reason"], "desktop-local-events")
+            for row, (_, packet) in zip(archived["packets"], original[:2]):
+                restored = box._packet((row["ref"], row["streamId"], row["deliverySeq"],
+                                        row["digest"], base64.b64decode(row["payload"])))
+                self.assertEqual(restored, packet)
+            recovered = Outbox(root, "fixture", max_packets=3)
+            self.assertEqual(recovered.archive_local({"fixture-ref": "chat-local"}), 0)
+            self.assertEqual(recovered.marks(), marks)
+
+    def test_local_recovery_rejects_mixed_or_unconfirmed_stream(self):
+        with tempfile.TemporaryDirectory() as root:
+            box = Outbox(root, "fixture")
+            box.append(snapshot(task_id="chat-local"), ("fixture-ref", 1, "running"))
+            box.append(snapshot(task_id="real-task", seqs=(2,)), ("fixture-ref", 2, "done"))
+            before = box.replay_pending()
+            self.assertEqual(box.archive_local({"fixture-ref": "chat-local"}), 0)
+            self.assertEqual(box.archive_local({}), 0)
+            self.assertEqual(box.replay_pending(), before)
+
+    def test_local_recovery_backup_failure_does_not_delete_or_advance(self):
+        with tempfile.TemporaryDirectory() as root:
+            box = Outbox(root, "fixture", max_packets=1)
+            box.append(snapshot(task_id="chat-local"), ("fixture-ref", 1, "done"))
+            before, marks = box.pending(), box.marks()
+            with patch("app.services.durable_file.write_bytes", side_effect=OSError("disk failure")):
+                with self.assertRaises(OSError):
+                    box.archive_local({"fixture-ref": "chat-local"})
+            self.assertEqual(box.pending(), before)
+            self.assertEqual(box.marks(), marks)
+            self.assertTrue(box.at_capacity())
+
+    def test_local_recovery_retry_after_archive_before_delete_is_idempotent(self):
+        from app.services import durable_file
+        with tempfile.TemporaryDirectory() as root:
+            box = Outbox(root, "fixture")
+            box.append(snapshot(task_id="chat-local"), ("fixture-ref", 1, "done"))
+            with patch.object(durable_file, "read_bytes", side_effect=[FileNotFoundError(), OSError("interrupted verification")]):
+                with self.assertRaises(OSError):
+                    box.archive_local({"fixture-ref": "chat-local"})
+            self.assertEqual(len(box.pending()), 1)
+            self.assertEqual(box.archive_local({"fixture-ref": "chat-local"}), 1)
+            self.assertEqual(len(list(box.root.glob("local-events-*.archive"))), 1)
+
+    def test_local_recovery_archive_limit_and_corruption_fail_closed(self):
+        from app.services import durable_file
+        with tempfile.TemporaryDirectory() as root:
+            box = Outbox(root, "fixture")
+            box.append(snapshot(task_id="chat-local"), ("fixture-ref", 1, "done"))
+            before = box.pending()
+            with patch.object(box, "max_bytes", 1):
+                with self.assertRaises(OutboxFull):
+                    box.archive_local({"fixture-ref": "chat-local"})
+            self.assertEqual(box.pending(), before)
+
+            with patch.object(durable_file, "read_bytes", return_value=b"corrupt"):
+                with self.assertRaisesRegex(OSError, "verification"):
+                    box.archive_local({"fixture-ref": "chat-local"})
+            self.assertEqual(box.pending(), before)
+
+    def test_local_recovery_repairs_interrupted_archive_wal_after_restart(self):
+        from app.services import durable_file
+        with tempfile.TemporaryDirectory() as root:
+            box = Outbox(root, "fixture")
+            box.append(snapshot(task_id="chat-local"), ("fixture-ref", 1, "done"))
+            with patch.object(durable_file, "read_bytes", side_effect=[FileNotFoundError(), OSError("interrupted")]):
+                with self.assertRaises(OSError):
+                    box.archive_local({"fixture-ref": "chat-local"})
+            target = next(box.root.glob("local-events-*.archive"))
+            target.unlink()
+            target.with_suffix(".archive.wal").write_bytes(b"SODUWORK-DURABLE-1\n{\"size\":")
+            recovered = Outbox(root, "fixture")
+            self.assertEqual(recovered.archive_local({"fixture-ref": "chat-local"}), 1)
+            self.assertEqual(recovered.pending(), [])
+
+    def test_local_recovery_can_archive_a_nearly_byte_full_stream(self):
+        with tempfile.TemporaryDirectory() as root:
+            box = Outbox(root, "fixture", max_bytes=10000)
+            event = snapshot(task_id="chat-local")
+            event["items"][0]["text"] = "x" * 8000
+            box.append(event, ("fixture-ref", 1, "done"))
+            self.assertEqual(box.archive_local({"fixture-ref": "chat-local"}), 1)
+            self.assertEqual(box.pending(), [])
+
     def test_abrupt_process_exit_after_commit_preserves_unacknowledged_packet(self):
         with tempfile.TemporaryDirectory() as root:
             code = ("import os, sys; from app.services.runner_event_outbox import Outbox; "
@@ -204,6 +307,29 @@ class DurableDeliveryTests(unittest.IsolatedAsyncioTestCase):
         row, events = await self.stored()
         self.assertEqual((row.delivery_seq, len(events)), (0, 0))
         await self.accept(self.message())
+
+    async def test_nul_display_projection_preserves_packet_digest_and_replay(self):
+        await self.seed()
+        message = self.message()
+        message["snapshot"]["items"][0].update(
+            text="before\x00after\\u0000\n\t中文", full="full\x00output",
+            tool="r" * 119 + "\x00", arguments={"path": "path\x00name"},
+            services=[{"name": "service\x00name"}])
+        message["digest"] = snapshot_digest(message["snapshot"])
+        original = copy.deepcopy(message)
+        ack, _ = await self.accept(message)
+        self.assertEqual(message, original)
+        self.assertEqual(ack["digest"], original["digest"])
+        self.assertEqual(ack["persistedThrough"], 1)
+        await self.accept(message)
+        row, events = await self.stored()
+        self.assertEqual((row.persisted_seq, len(events)), (1, 1))
+        self.assertEqual(row.delivery_digest, original["digest"])
+        self.assertEqual(events[0].text, "before␀after\\u0000\n\t中文")
+        self.assertEqual(events[0].tool, "r" * 119 + "␀")
+        self.assertEqual(events[0].detail["full"], "full␀output")
+        self.assertEqual(events[0].detail["arguments"], {"path": "path␀name"})
+        self.assertEqual(events[0].detail["services"], [{"name": "service␀name"}])
 
     async def test_packet_ack_does_not_skip_event_gap_and_late_page_repairs_cursor(self):
         await self.seed()
@@ -347,7 +473,278 @@ class DurableDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((row.delivery_seq, len(events)), (1, 1))
 
 
+class CaptureRecoveryTests(unittest.IsolatedAsyncioTestCase):
+    def machine(self, root, *, max_packets=4096):
+        machine = runner_main.Runner.__new__(runner_main.Runner)
+        machine._snap_lock, machine._session_marks = asyncio.Lock(), {}
+        machine._event_outbox = Outbox(root, "capture-recovery", max_packets=max_packets)
+        machine._outbox_blocked = False
+        machine._session_ack = True
+        machine._shutdown_event = asyncio.Event()
+        machine._session_snapshots = Mock(return_value=([], []))
+        return machine
+
+    async def capture(self, machine, attempts=1):
+        machine._shutdown_event.clear()
+        remaining = attempts
+
+        async def next_attempt(_delay):
+            nonlocal remaining
+            remaining -= 1
+            if not remaining:
+                machine._shutdown_event.set()
+
+        with patch.object(runner_main.asyncio, "sleep", side_effect=next_attempt):
+            await machine._capture_loop()
+
+    async def test_transient_collection_failure_recovers_even_without_new_events(self):
+        with tempfile.TemporaryDirectory() as root:
+            machine = self.machine(root)
+            machine._session_snapshots.side_effect = [OSError("temporary read failure"), ([], [])]
+            await self.capture(machine)
+            self.assertTrue(machine._outbox_blocked)
+            self.assertFalse(machine._event_outbox.at_capacity())
+            await self.capture(machine)
+            self.assertFalse(machine._outbox_blocked)
+            self.assertEqual(machine._event_outbox.pending(), [])
+
+    async def test_empty_collection_cannot_bypass_a_known_uncommitted_event(self):
+        with tempfile.TemporaryDirectory() as root:
+            machine = self.machine(root)
+            machine._session_snapshots.side_effect = [
+                ([snapshot()], [("fixture-ref", 1, "running")]), ([], []), ([], []), ([], [])]
+            with patch.object(machine._event_outbox, "append", side_effect=OSError("temporary write failure")):
+                await self.capture(machine, attempts=2)
+            self.assertTrue(machine._outbox_blocked)
+            self.assertFalse(machine._event_outbox.at_capacity())
+            self.assertEqual(machine._session_marks, {})
+            self.assertEqual(machine._event_outbox.pending(), [])
+            await self.capture(machine)
+            self.assertEqual([packet["snapshot"] for packet in machine._event_outbox.pending()], [snapshot()])
+            self.assertEqual(machine._session_marks, {"fixture-ref": (1, "running")})
+            self.assertFalse(machine._outbox_blocked)
+
+    async def test_partial_batch_retries_only_uncommitted_events_before_unblocking(self):
+        with tempfile.TemporaryDirectory() as root:
+            machine = self.machine(root)
+            first, second = snapshot(ref="first"), snapshot(ref="second")
+            machine._session_snapshots.side_effect = [
+                ([first, second], [("first", 1, "running"), ("second", 1, "running")]), ([], [])]
+            append = machine._event_outbox.append
+
+            def fail_second(item, mark):
+                if item["ref"] == "second":
+                    raise OSError("temporary second write failure")
+                append(item, mark)
+
+            with patch.object(machine._event_outbox, "append", side_effect=fail_second):
+                await self.capture(machine)
+            self.assertTrue(machine._outbox_blocked)
+            self.assertEqual(machine._session_marks, {"first": (1, "running")})
+            self.assertEqual([packet[1]["ref"] for packet in machine._event_outbox.replay_pending()], ["first"])
+            await self.capture(machine)
+            self.assertFalse(machine._outbox_blocked)
+            self.assertEqual(machine._session_marks, {"first": (1, "running"), "second": (1, "running")})
+            self.assertEqual([packet[1]["ref"] for packet in machine._event_outbox.replay_pending()],
+                             ["first", "second"])
+
+    async def test_capacity_probe_failure_recovers_without_repeating_a_committed_event(self):
+        with tempfile.TemporaryDirectory() as root:
+            machine = self.machine(root)
+            machine._session_snapshots.side_effect = [
+                ([snapshot()], [("fixture-ref", 1, "running")]), ([], [])]
+            with patch.object(machine._event_outbox, "at_capacity",
+                              side_effect=[OSError("temporary capacity read failure"), False]):
+                await self.capture(machine)
+                self.assertTrue(machine._outbox_blocked)
+                self.assertEqual(machine._session_marks, {"fixture-ref": (1, "running")})
+                await self.capture(machine)
+            self.assertFalse(machine._outbox_blocked)
+            self.assertEqual(len(machine._event_outbox.replay_pending()), 1)
+
+    async def test_failed_collection_or_full_outbox_keeps_admission_blocked(self):
+        with tempfile.TemporaryDirectory() as root:
+            machine = self.machine(root, max_packets=1)
+            machine._session_snapshots.side_effect = OSError("unresolved archive failure")
+            await self.capture(machine, attempts=2)
+            self.assertTrue(machine._outbox_blocked)
+            self.assertFalse(machine._event_outbox.at_capacity())
+            machine._session_snapshots.side_effect = None
+            machine._session_snapshots.return_value = ([], [])
+            machine._event_outbox.append(snapshot(), ("fixture-ref", 1, "running"))
+            await self.capture(machine)
+            self.assertTrue(machine._outbox_blocked)
+            self.assertTrue(machine._event_outbox.at_capacity())
+            self.assertEqual(len(machine._event_outbox.replay_pending()), 1)
+
+    async def test_ack_does_not_waive_an_unresolved_collection_or_append_failure(self):
+        for append_failure in (False, True):
+            with self.subTest(append_failure=append_failure), tempfile.TemporaryDirectory() as root:
+                machine = self.machine(root)
+                machine.id, machine.boot_id, machine.ws = "fixture-runner", "fixture-boot", object()
+                machine._delivery_attempts = {}
+                machine._admission_wake = asyncio.Event()
+                machine._event_outbox.append(snapshot(ref="retained"), ("retained", 1, "running"))
+                packet = machine._event_outbox.pending()[0]
+                if append_failure:
+                    machine._session_snapshots.return_value = (
+                        [snapshot()], [("fixture-ref", 1, "running")])
+                    with patch.object(machine._event_outbox, "append", side_effect=OSError("write failure")):
+                        await self.capture(machine)
+                else:
+                    machine._session_snapshots.side_effect = OSError("read failure")
+                    await self.capture(machine)
+                ack = {**packet, "op": "session.ack", "version": 1,
+                       "runnerId": machine.id, "bootId": machine.boot_id}
+                await machine._queue_message(ack, machine.ws)
+                self.assertFalse(machine._event_outbox.at_capacity())
+                self.assertEqual(machine._event_outbox.pending(), [])
+                self.assertTrue(machine._outbox_blocked)
+                machine._session_snapshots.side_effect = None
+                machine._session_snapshots.return_value = ([], [])
+                await self.capture(machine)
+                self.assertFalse(machine._outbox_blocked)
+                self.assertEqual([row[1]["ref"] for row in machine._event_outbox.replay_pending()],
+                                 ["fixture-ref"] if append_failure else [])
+
+    async def test_local_recovery_cannot_waive_unresolved_hub_retention(self):
+        from app.services import ai_local
+        for pending in (False, True):
+            with self.subTest(pending=pending), tempfile.TemporaryDirectory() as root:
+                machine = self.machine(root)
+                machine._admission_wake = asyncio.Event()
+                machine._event_outbox.append(snapshot("local", "chat-local"), ("local", 1, "done"))
+                machine._capture_failed = not pending
+                machine._capture_pending = ([(snapshot("hub", "real-task"), ("hub", 1, "running"))]
+                                            if pending else [])
+                machine._outbox_blocked = True
+                with patch.dict(ai_local._RUNS, {"local": {
+                        "taskId": "chat-local", "eventDestination": "local"}}, clear=True):
+                    await machine._recover_local_events()
+                self.assertEqual(machine._event_outbox.pending(), [])
+                self.assertTrue(machine._outbox_blocked)
+                self.assertEqual(len(machine._capture_pending), int(pending))
+
+    async def test_local_archive_error_during_delivery_cannot_clear_failed_hub_capture(self):
+        from app.services import ai_local
+        with tempfile.TemporaryDirectory() as root:
+            machine = self.machine(root)
+            machine._admission_wake = asyncio.Event()
+            machine._event_outbox.append(snapshot("local", "chat-local"), ("local", 1, "done"))
+            machine._capture_failed, machine._outbox_blocked = True, True
+            machine._delivery_attempts = {}
+            machine.id, machine.boot_id = "runner", "boot"
+            machine._send_strict = AsyncMock()
+            with patch.dict(ai_local._RUNS, {"local": {
+                    "taskId": "chat-local", "eventDestination": "local"}}, clear=True), \
+                    patch.object(machine._event_outbox, "archive_local", side_effect=OSError("archive unavailable")):
+                await machine._deliver_sessions()
+            self.assertTrue(machine._outbox_blocked)
+            self.assertTrue(machine._capture_failed)
+            self.assertEqual(len(machine._event_outbox.pending()), 1)
+            machine._send_strict.assert_not_awaited()
+
+
 class RunnerTransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_snapshot_scope_keeps_each_source_local_when_current_owner_changes(self):
+        from app.services import ai_local
+        for source in ("console", "session", "current", "hub"):
+            with self.subTest(source=source):
+                machine = runner_main.Runner.__new__(runner_main.Runner)
+                machine._agent_inventory, machine._session_marks = [], {}
+                run = {"ref": "scope-race", "taskId": "real-task", "cli": "opencode",
+                       "state": "done", "seq": 1, "eventDestination": "hub", "model": "hub-model",
+                       "modelLocalOnly": False,
+                       "cfg": {"llm": {"localOnly": False, "model": "hub-model"}}}
+                console = {**run, **({"eventDestination": "local"} if source == "console" else {})}
+
+                def read_session(*args):
+                    if source == "current":
+                        ai_local._RUNS[run["ref"]] = {**run, "eventDestination": "local"}
+                    return {"status": "done", "seq": 1,
+                            "eventDestination": "local" if source == "session" else "hub",
+                            "items": [{"kind": "say", "seq": 1, "text": "business text"}]}
+
+                with patch.dict(ai_local._RUNS, {run["ref"]: run}, clear=True), \
+                        patch.object(ai_local, "console_list_sync", return_value={"runs": [console]}), \
+                        patch.object(ai_local, "session_sync", side_effect=read_session) as read:
+                    snapshots, marks = machine._session_snapshots()
+                if source == "hub":
+                    self.assertEqual([row["ref"] for row in snapshots], [run["ref"]])
+                    self.assertEqual(snapshots[0]["items"][0]["text"], "business text")
+                    self.assertEqual(snapshots[0]["model"], "hub-model")
+                    self.assertEqual([mark[0] for mark in marks], [run["ref"]])
+                else:
+                    self.assertEqual(snapshots, [])
+                    self.assertEqual(marks, [])
+                    if source == "console":
+                        read.assert_not_called()
+
+    async def test_restart_recovery_frees_local_packets_and_never_recaptures_them(self):
+        from app.services import ai_local, dispatch_identity
+        with tempfile.TemporaryDirectory() as root:
+            task_id = "chat-00000000-0000-4000-8000-000000000001"
+            ref = dispatch_identity.execution_ref("chat:" + task_id + ":opencode")
+            box = Outbox(root, "fixture", max_packets=2)
+            for seq in (1, 2):
+                box.append(snapshot(ref, task_id, (seq,)), (ref, seq, "running"))
+            machine = runner_main.Runner.__new__(runner_main.Runner)
+            machine._event_outbox = Outbox(root, "fixture", max_packets=2)
+            machine._outbox_blocked = machine._event_outbox.at_capacity()
+            machine._snap_lock, machine._admission_wake = asyncio.Lock(), asyncio.Event()
+            machine._session_marks, machine._agent_inventory = box.marks(), []
+            run = dict(ref=ref, taskId=task_id, cli="opencode", state="done", seq=3)
+            with patch.dict(ai_local._RUNS, {ref: run}, clear=True), \
+                    patch.object(ai_local, "console_list_sync", return_value={"runs": [run]}), \
+                    patch.object(ai_local, "session_sync") as read:
+                await machine._capture_sessions()
+                await machine._capture_sessions()
+                read.assert_not_called()
+            self.assertEqual(machine._event_outbox.pending(), [])
+            self.assertFalse(machine._outbox_blocked)
+            self.assertTrue(machine._admission_wake.is_set())
+            self.assertEqual(machine._session_marks, {ref: (2, "running")})
+            self.assertEqual(len(list(box.root.glob("local-events-*.archive"))), 1)
+
+    async def test_local_archive_failure_retains_local_but_delivers_hub_packets(self):
+        from app.services import ai_local
+        for reliable in (False, True):
+            with self.subTest(reliable=reliable), tempfile.TemporaryDirectory() as root:
+                machine = runner_main.Runner.__new__(runner_main.Runner)
+                machine._snap_lock, machine._admission_wake = asyncio.Lock(), asyncio.Event()
+                machine._session_ack, machine._delivery_attempts = reliable, {}
+                machine.id, machine.boot_id = "runner", "boot"
+                machine._event_outbox = Outbox(root, "fixture", max_packets=2)
+                machine._event_outbox.append(snapshot("local", "chat-local"), ("local", 1, "done"))
+                machine._event_outbox.append(snapshot("hub", "real-task"), ("hub", 1, "done"))
+                machine._send_strict = AsyncMock()
+                with patch.dict(ai_local._RUNS, {"local": {
+                        "taskId": "chat-local", "eventDestination": "local"}}, clear=True), \
+                        patch("app.services.durable_file.write_bytes", side_effect=OSError("disk failure")):
+                    await machine._deliver_sessions()
+                machine._send_strict.assert_awaited_once()
+                message = machine._send_strict.await_args.args[0]
+                sent = message["snapshot"] if reliable else message["sessions"][0]
+                self.assertEqual(sent["taskId"], "real-task")
+                self.assertEqual(len(machine._event_outbox.pending()), 2)
+                self.assertTrue(machine._outbox_blocked)
+
+    async def test_local_archive_failure_does_not_stop_new_hub_capture(self):
+        from app.services import ai_local
+        with tempfile.TemporaryDirectory() as root:
+            machine = runner_main.Runner.__new__(runner_main.Runner)
+            machine._snap_lock, machine._admission_wake = asyncio.Lock(), asyncio.Event()
+            machine._session_marks, machine._agent_inventory = {}, []
+            machine._event_outbox = Outbox(root, "fixture")
+            machine._event_outbox.append(snapshot("local", "chat-local"), ("local", 1, "done"))
+            machine._session_snapshots = lambda: ([snapshot("hub", "real-task")], [("hub", 1, "running")])
+            with patch.dict(ai_local._RUNS, {"local": {
+                    "taskId": "chat-local", "eventDestination": "local"}}, clear=True), \
+                    patch("app.services.durable_file.write_bytes", side_effect=OSError("disk failure")):
+                await machine._capture_sessions()
+            self.assertEqual({p["ref"] for p in machine._event_outbox.pending()}, {"hub", "local"})
+            self.assertFalse(machine._outbox_blocked)
+
     async def test_network_job_replies_clean_admission_receipts_and_ignore_private_pipe_marker(self):
         from app.services import ai_local
         machine = runner_main.Runner.__new__(runner_main.Runner)
@@ -500,6 +897,7 @@ class RunnerTransportTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as root:
             machine = runner_main.Runner.__new__(runner_main.Runner)
             machine._session_ack, machine._delivery_attempts = False, {}
+            machine._snap_lock = asyncio.Lock()
             machine._event_outbox = Outbox(root, "fixture")
             machine._event_outbox.append(snapshot(), ("fixture-ref", 1, "done"))
             machine._send_strict = AsyncMock()

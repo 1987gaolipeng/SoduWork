@@ -1,5 +1,10 @@
 (function (global) {
   const messages = {
+    "你已停止": "You stopped",
+    "你在 {seconds} 秒后停止了": "You stopped after {seconds} seconds",
+    "你在 {minutes} 分 {seconds} 秒后停止了": "You stopped after {minutes}m {seconds}s",
+    "你在 {hours} 小时 {minutes} 分 {seconds} 秒后停止了": "You stopped after {hours}h {minutes}m {seconds}s",
+    "本轮已中断": "This turn was interrupted",
     "编辑 Markdown": "Edit Markdown",
     "始终允许": "Always allow",
     "内容由 AI 生成，请核实重要信息": "AI-generated content; please verify important information",
@@ -201,7 +206,7 @@
     '项目工作区': 'Project workspace', '{percent}% 已用': '{percent}% used', '已用 {used} 标记，共 {total}': '{used} of {total} tokens used',
     '模型：{name} · 用于之后发送的消息': 'Model: {name} · Used for subsequent messages', '目标模式 · 验收与继续执行': 'Goal mode · Review and continue',
     '继续对话': 'Continue chat', '工作区 · 模型选择': 'Workspace · Model selection', '收起项目': 'Collapse projects',
-    '排队中': 'Queued', '派活中': 'Assigning', '待执行': 'Pending', '已阻断': 'Blocked', '等待用户': 'Waiting for you', '等待人工': 'Waiting for review', '等待外部': 'Waiting for external input',
+    '排队中': 'Queued', '第 {count} 项': 'Position {count}', '执行环境启动时间较长，可停止后检查底座状态': 'The runtime is taking longer to start. You can stop and check its status.', '派活中': 'Assigning', '待执行': 'Pending', '已阻断': 'Blocked', '等待用户': 'Waiting for you', '等待人工': 'Waiting for review', '等待外部': 'Waiting for external input',
     '已停止': 'Stopped', '连接异常': 'Connection error', '本机 Runner': 'Local Runner', '当前用户': 'Current user', '自动选择': 'Automatic', '未绑定工程': 'No project linked', '默认分支': 'Default branch',
     '人工审批': 'Manual approval', '自动合并': 'Auto-merge', '执行步骤': 'Execution steps', '未提供': 'Not provided', '交付证据': 'Delivery evidence',
     '暂未产生交付成果。文件、截图和验证报告产生后会汇总在这里。': 'No outputs yet. Files, screenshots and verification reports will appear here.',

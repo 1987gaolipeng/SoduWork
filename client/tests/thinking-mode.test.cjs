@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { profile, view, set } = require('../main/conversation/thinking-capabilities');
+const { profile, view, set, conflict } = require('../main/conversation/thinking-capabilities');
 const { piProvider } = require('../main/conversation/model-selection');
 const sessionSpec = require('../main/conversation/session-spec');
 
@@ -56,6 +56,69 @@ test('thinking profiles distinguish controllable, always-on, and unavailable mod
   assert.equal(view(switchableSession).canDisable, true);
   assert.equal(set(switchableSession, true).ok, true);
   assert.equal(applied, 'medium');
+});
+
+test('GLM 5.3 wire identities expose only supported mandatory thinking levels', () => {
+  const expected = { off: null, minimal: null, low: 'low', medium: null,
+    high: 'high', xhigh: null, max: 'max' };
+  for (const id of ['glm-5.3', 'glm-5.3-flash', 'glm_5.3_flash', 'GLM5.3flash']) {
+    const result = profile({ id });
+    assert.equal(result.reasoning, true);
+    assert.equal(result.format, 'zai');
+    assert.deepEqual(result.thinkingLevelMap, expected);
+    assert.equal(profile({ id, thinkingMode: 'none' }).reasoning, false);
+    assert.match(conflict({ id, thinkingMode: 'none' }), /不支持关闭思考/);
+    assert.match(conflict({ id, reasoning: false }), /不支持关闭思考/);
+  }
+  assert.equal(profile({ id: 'private-alias', label: 'glm-5.3' }).reasoning, false,
+    'A display label is not a provider protocol declaration');
+  assert.deepEqual(profile({ id: 'local:model-' + '8'.repeat(32), wireModelId: 'glm_5.3_flash' }).thinkingLevelMap,
+    expected, 'The private transport identity remains available for capability normalization');
+  assert.equal(profile({ id: 'glm-5.3', thinkingLevelMap: { high: 'max' } }).thinkingLevelMap.high, 'max',
+    'An explicit supported effort mapping must not be silently reduced');
+  assert.match(conflict({ id: 'glm-5.3', thinkingLevelMap: { low: 'minimal' } }), /仅支持/);
+});
+
+test('an explicit thinking protocol enables an opaque alias without overriding an explicit disable', () => {
+  assert.equal(profile({ id: 'private-alias', thinkingFormat: 'zai' }).reasoning, true);
+  assert.equal(profile({ id: 'private-alias', thinkingFormat: 'zai', thinkingMode: 'none' }).reasoning, false);
+  assert.equal(profile({ id: 'private-alias', thinkingFormat: 'zai', reasoning: false }).reasoning, false);
+});
+
+test('real Pi transport honors mandatory GLM 5.3 reasoning and explicit alias protocols', async () => {
+  const { streamSimple } = await import('../node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js');
+  const { getSupportedThinkingLevels } = await import('../node_modules/@earendil-works/pi-ai/dist/models.js');
+  for (const spec of [
+    { id: 'glm_5.3_flash', reasoning: 'off', expected: 'low' },
+    { id: 'glm-5.3', reasoning: 'medium', expected: 'high' },
+    { id: 'glm-5.3-flash', reasoning: 'max', expected: 'max' },
+    { id: 'private-alias', thinkingFormat: 'zai', reasoning: 'off', expected: 'disabled' },
+    { id: 'private-alias', label: 'glm5.3', reasoning: 'off', expected: 'unknown' },
+  ]) {
+    const { reasoning, expected, ...config } = spec;
+    const provider = piProvider({ ...config, baseUrl: 'https://fixture.invalid/v1', maxOutputTokens: 4096 });
+    const model = { ...provider.models[0], api: provider.api, provider: 'soduwork', baseUrl: provider.baseUrl };
+    let request;
+    const result = await streamSimple(model, { messages: [{ role: 'user', content: 'Reply OK.', timestamp: 1 }] }, {
+      apiKey: 'synthetic-fixture', reasoning, maxRetries: 0, env: {}, fetch: async (_url, options) => {
+        request = JSON.parse(options.body);
+        const delta = { choices: [{ index: 0, delta: { content: 'OK' }, finish_reason: 'stop' }] };
+        return new Response('data: ' + JSON.stringify(delta) + '\n\ndata: [DONE]\n\n',
+          { headers: { 'content-type': 'text/event-stream' } });
+      },
+    }).result();
+    assert.equal(result.stopReason, 'stop');
+    assert.equal(request.max_completion_tokens, 4096, 'The configured output budget is unchanged');
+    if (expected === 'unknown') {
+      assert.equal(request.thinking, undefined); assert.equal(request.reasoning_effort, undefined);
+    } else if (expected === 'disabled') {
+      assert.equal(request.thinking.type, 'disabled'); assert.equal(request.reasoning_effort, undefined);
+    } else {
+      assert.deepEqual(getSupportedThinkingLevels(model), ['low', 'high', 'max']);
+      assert.deepEqual(request.thinking, { type: 'enabled', clear_thinking: false });
+      assert.equal(request.reasoning_effort, expected);
+    }
+  }
 });
 
 test('an explicit thinking-off choice survives goal defaults', () => {

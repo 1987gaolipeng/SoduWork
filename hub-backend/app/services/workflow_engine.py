@@ -21,6 +21,7 @@ from . import (agent_route_selection, ai_exec, ai_prompts, deployments, environm
                task_assignment, task_code_targets, workflow_context, workflow_contracts,
                workflow_control, resource_leases,
                workflow_inputs)
+from .workflow_contracts import stored_rework_policy
 from .workflow_runs import (
     RETRYABLE_GATE_TYPES, _bind_single_project_repo, _event, _ms, _now, execution_preferences,
     execution_route, list_runs, node_api, redispatch_running_gate, retry_failed_gate,
@@ -1668,7 +1669,7 @@ async def _ai_execution_lost(session: AsyncSession, run: am.WorkflowRun, nr: am.
     nr.output = workflow_contracts.failure_output("infrastructure", executionLost={
         "seconds": elapsed, "polls": polls, "error": reason, "ref": str(ref or "")})
     cfg = await _node_config(session, run, nr.node_key)
-    await _begin_rework(session, run, nr, dict(cfg.get("onFailure") or {}), nr.error)
+    await _begin_rework(session, run, nr, stored_rework_policy(cfg, "onFailure"), nr.error)
     _event(session, run.id, "node.execution_lost", node_id=nr.id, detail={
         "node": nr.node_key, "seconds": elapsed, "polls": polls, "error": reason})
 
@@ -1711,7 +1712,7 @@ async def _poll_node(session: AsyncSession, run: am.WorkflowRun, nr: am.NodeRun)
                 timeout={"limitSeconds": timeout_seconds, "elapsedSeconds": elapsed_seconds})
             _forget_output_settle(session, run, nr)
             await _begin_rework(
-                session, run, nr, dict(cfg.get("onFailure") or {}), nr.error)
+                session, run, nr, stored_rework_policy(cfg, "onFailure"), nr.error)
             _event(session, run.id, "node.timed_out", node_id=nr.id, detail={
                 "node": nr.node_key, "limitSeconds": timeout_seconds,
                 "elapsedSeconds": elapsed_seconds, "stopError": stop_error,
@@ -1736,7 +1737,7 @@ async def _poll_node(session: AsyncSession, run: am.WorkflowRun, nr: am.NodeRun)
             _forget_output_settle(session, run, nr)
             cfg = await _node_config(session, run, nr.node_key)
             await _begin_rework(
-                session, run, nr, dict(cfg.get("onFailure") or {}), nr.error)
+                session, run, nr, stored_rework_policy(cfg, "onFailure"), nr.error)
             if nr.state != before:
                 _event(session, run.id, "node.failed" if nr.state == "failed" else "node.waiting",
                        node_id=nr.id, detail={"node": nr.node_key, "state": nr.state,
@@ -1909,7 +1910,7 @@ async def _poll_node(session: AsyncSession, run: am.WorkflowRun, nr: am.NodeRun)
                                  if x.decision == "reject" and x.note), "人工环节未通过")
                 cfg = await _node_config(session, run, nr.node_key)
                 if not await _begin_rework(
-                        session, run, nr, dict(cfg.get("onReject") or {}), feedback):
+                        session, run, nr, stored_rework_policy(cfg, "onReject"), feedback):
                     nr.state, nr.error, nr.finished_at = "failed", feedback[:1200], _now()
             elif nr.node_type == "deploy":
                 # Approval authorizes deployment but does not prove it happened.
@@ -1993,7 +1994,7 @@ async def _poll_node(session: AsyncSession, run: am.WorkflowRun, nr: am.NodeRun)
         cfg = await _node_config(session, run, nr.node_key)
         evidence = _rework_evidence(nr)
         await _begin_rework(
-            session, run, nr, dict(cfg.get("onFailure") or {}), evidence)
+            session, run, nr, stored_rework_policy(cfg, "onFailure"), evidence)
     if nr.state != before:
         _event(session, run.id, "node.succeeded" if nr.state == "succeeded" else
                "node.failed" if nr.state == "failed" else "node.waiting",
@@ -2211,7 +2212,7 @@ async def tick(session: AsyncSession) -> dict:
                     if run:
                         cfg = await _node_config(session, run, nr.node_key)
                         await _begin_rework(
-                            session, run, nr, dict(cfg.get("onFailure") or {}),
+                            session, run, nr, stored_rework_policy(cfg, "onFailure"),
                             _rework_evidence(nr))
                 if outbox is not None:
                     outbox.status, outbox.error, outbox.attempts = (

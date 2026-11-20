@@ -37,8 +37,11 @@ async send(text, turnAttachments, sendOptions) {
       // cannot alter the active turn or capture an outdated selection.
       const requestedPluginIds = _pluginIds(Array.isArray(turn.pluginIds)
         ? turn.pluginIds : (turn.plugins || []).map((item) => item && item.pluginId));
+      // The host marks its accepted snapshot of an implicit selection. Renderer
+      // options cannot supply this marker through the normalized IPC boundary.
+      const inheritedPlugins = !requestedPluginIds.length || turn.inheritedPluginSelection === true;
       if (turn.clearPluginSelection === true) ctx.persistPluginSelection([]);
-      const effectivePluginIds = turn.clearPluginSelection !== true && requestedPluginIds.length
+      let effectivePluginIds = turn.clearPluginSelection !== true && requestedPluginIds.length
         ? requestedPluginIds.slice() : ctx.activePluginIds.slice();
       const accessReady = await ctx.liveAccess.wait();
       ctx.skillSelectionFailure = null;
@@ -47,6 +50,20 @@ async send(text, turnAttachments, sendOptions) {
       if (!turn.internal) {
         try { await ctx.accessChanges.apply(); }
         catch (error) { return { ok: false, retrySafe: true, reason: '权限变更未生效：' + String(error?.message || error) }; }
+      }
+      if (interrupted() || ctx.closed) return { ok: true, cancelled: true, manualStop: true };
+      if (inheritedPlugins && turn.clearPluginSelection !== true &&
+          !turn.internal && !turn.controlled && !turn.taskId && !ctx.handle.taskRef && !ctx.handle.taskIds?.length &&
+          !turn.goalMode && !ctx.goalEnabled && !ctx.goalVisible && ctx.opts.intent !== 'goal' &&
+          turn.source !== 'automation' && !ctx.handle.appPluginId && !ctx.opts.appContext) {
+        try {
+          const retained = require('../personal-plugins').pruneUnavailableInherited(ctx.opts.app, effectivePluginIds);
+          if (retained.length !== effectivePluginIds.length) ctx.persistPluginSelection(retained);
+          effectivePluginIds = retained;
+        } catch (error) {
+          return { ok: false, failureKind: 'plugin-grant', retrySafe: true,
+            reason: '插件没能在发送前完成授权：' + String(error?.message || error) };
+        }
       }
       const imageChoice = turn.modelName === undefined ? ctx.modelSelection.capture() : turn.modelName;
       if (require('./image-model').imageChoice(imageChoice)) {
@@ -137,7 +154,7 @@ async send(text, turnAttachments, sendOptions) {
         return { ok: true, cancelled: true, manualStop: true };
       }
       // A rejected preflight must not make later plain messages inherit an unusable plugin.
-      if (turn.clearPluginSelection !== true && requestedPluginIds.length) ctx.persistPluginSelection(requestedPluginIds);
+      if (turn.clearPluginSelection !== true && requestedPluginIds.length) ctx.persistPluginSelection(effectivePluginIds);
       const internal = Boolean(turn.internal);
       if (!internal || !ctx.desktopControlScope) {
         ctx.desktopControlScope = 'pi:' + ctx.ref + ':' + require('node:crypto').randomUUID();

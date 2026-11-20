@@ -31,6 +31,8 @@ function fixture(t) {
       return { accepted: true, completion: Promise.resolve({ ok: true }) };
     } };
   const modules = {
+    '../requirement-diagnostics.cjs': require('../main/requirement-diagnostics.cjs'),
+    '../device-auth-request': require('../main/device-auth-request'),
     './skill-turn': require('../main/pi-session/skill-turn'),
     '../conversation/requirement-context': require('../main/conversation/requirement-context'),
     '../conversation/acceptance-session': require('../main/conversation/acceptance-session'),
@@ -78,6 +80,9 @@ function fixture(t) {
 
 test('reopening analysis repairs a renderer-only task association through native bind and send handlers', async t => {
   const f = fixture(t);
+  const diagnosticRows=[];
+  t.mock.method(require('../main/requirement-diagnostics.cjs'),'record',(event,data)=>diagnosticRows.push({event,...data}));
+  f.handle.model={id:'synthetic-model',name:'Synthetic model'};
   const before = await f.send();
   assert.equal(before.ok, false);
   assert.match(before.reason, /原执行会话尚未绑定这项需求/);
@@ -88,6 +93,7 @@ test('reopening analysis repairs a renderer-only task association through native
   assert.equal(after.accepted, true);
   assert.deepEqual(f.calls, ['bound', 'prepared', 'sent']);
   assert.equal(f.ctx._sessionOptions.acceptanceSession, false);
+  assert.equal(diagnosticRows.find(row=>row.event==='native.send').modelKey,'synthetic-model');
 });
 
 test('dedicated acceptance IPC retains draft provenance while enforcing the saved approval mode', async t => {

@@ -20,7 +20,8 @@ from urllib.request import ProxyHandler, build_opener
 import webbrowser
 
 from .local_environment import (ROOT, StartupError, check_dependencies, check_desktop_session, dependency_report,
-                                prepare, prepare_desktop, spawn_options, stop_child, wait_child)
+                                prepare, prepare_desktop, source_copy_targets, spawn_options, stop_child, wait_child)
+from .local_path_check import check_windows_source_paths
 
 
 STATE_VERSION = 1
@@ -158,8 +159,11 @@ def initialized(state: Path) -> bool:
     try:
         with closing(sqlite3.connect(db.as_uri() + "?mode=ro", uri=True)) as conn:
             return bool(conn.execute("SELECT COUNT(*) FROM app_user").fetchone()[0])
-    except sqlite3.OperationalError as exc:
-        if "no such table" in str(exc):
+    except sqlite3.DatabaseError as exc:
+        # OperationalError ("no such table") is a subclass of DatabaseError, so this
+        # also covers a damaged/non-SQLite file, which raises DatabaseError directly
+        # (for example "file is not a database") instead of an OperationalError.
+        if isinstance(exc, sqlite3.OperationalError) and "no such table" in str(exc):
             return False
         raise StartupError("Cannot inspect the local database. See the data directory; no data was reset.") from exc
 
@@ -171,7 +175,7 @@ def password_for_start(state: Path, config: dict, stdin: bool) -> str:
     print(f"首次创建管理员 / Create the administrator account: {config['adminUser']}", flush=True)
     if stdin:
         password = sys.stdin.readline().rstrip("\r\n")
-    elif sys.stdin.isatty():
+    else:
         print("请设置并记住自己的密码；输入时不显示字符或星号，输入后按回车。\n"
               "Choose and remember your own password. Typing is hidden; press Enter when done.", flush=True)
         while True:
@@ -182,9 +186,6 @@ def password_for_start(state: Path, config: dict, stdin: bool) -> str:
             if password == getpass.getpass("再输一次 / Confirm password: "):
                 break
             print("两次密码不一致，请重试 / Passwords did not match; please try again.", flush=True)
-    else:
-        raise StartupError("Run from an interactive terminal to choose the administrator password. "
-                           "Automation may explicitly pass --password-stdin.")
     if not 12 <= len(password) <= 128 or password.isspace():
         raise StartupError("Choose an administrator password of 12-128 characters. No default password is provided.")
     return password
@@ -277,10 +278,13 @@ def open_management_page(base: str) -> None:
 def serve(state: Path, config: dict, args) -> None:
     assert_available(args.host, args.port)
     initializing = not initialized(state)
-    password = password_for_start(state, config, args.password_stdin)
+    if initializing and not args.password_stdin and not sys.stdin.isatty():
+        raise StartupError("Run from an interactive terminal to choose the administrator password. "
+                           "Automation may explicitly pass --password-stdin.")
     log = state / "startup.log"
     python, backend = prepare(state, log)
     client = prepare_desktop(state, log) if args.desktop else None
+    password = password_for_start(state, config, args.password_stdin)
     env = runtime_environment(state, config, password, args.host, args.port)
     base = env["HUB_PUBLIC_URL"]
     print("正在启动服务并准备数据库 / Starting SoduWork and applying database migrations...", flush=True)
@@ -395,6 +399,9 @@ def launch_desktop(state: Path, client: Path, env: dict, base: str, output) -> s
             json.dump({'workDir': str(work)}, stream)
     desktop_env = {key: value for key, value in env.items()
                    if key not in {'ADMIN_USER', 'ADMIN_PASS', 'AUTH_SECRET', 'DATABASE_URL'}}
+    # Explicit diagnostic output is desktop-only; do not broaden the Hub environment allowlist.
+    if os.environ.get('SODUWORK_REQUIREMENT_DIAGNOSTICS_DIR'):
+        desktop_env['SODUWORK_REQUIREMENT_DIAGNOSTICS_DIR'] = os.environ['SODUWORK_REQUIREMENT_DIAGNOSTICS_DIR']
     if sys.platform == 'darwin':
         # macOS resolves the user's default Keychain through HOME. Isolate the
         # application profile, not the native desktop's operating-system home.
@@ -445,6 +452,12 @@ def wait_session(server: subprocess.Popen, desktop: subprocess.Popen, state: Pat
 
 
 def main(argv=None) -> int:
+    if sys.platform == "win32":
+        # Redirected Windows output can use a legacy code page. Keep its encoding
+        # while ensuring bilingual diagnostics and Unicode paths cannot abort startup.
+        for stream in (sys.stdout, sys.stderr):
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(errors="backslashreplace")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", type=Path, default=default_state(), help="New empty directory, or this launcher's existing directory")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="HTTP port (default: 18989)")
@@ -472,6 +485,7 @@ def main(argv=None) -> int:
         if args.check:
             profile = desktop_profile(args.data_dir.expanduser().resolve()) if args.desktop else None
             dependency_report(desktop=args.desktop)
+            check_windows_source_paths(args.data_dir.expanduser(), source_copy_targets(), probe=False)
             if profile is not None:
                 print(f'Desktop profile: {profile}')
             return 0

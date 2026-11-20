@@ -4,6 +4,69 @@ const fs = require('node:fs'), os = require('node:os'), path = require('node:pat
 const delivery = require('../main/pi-session/task-delivery.cjs');
 const outputs = require('../main/pi-session/outputs');
 
+test('an explicit file contract cannot silently complete with an empty output inventory', async t => {
+  const f = workspace(t), actions = [];
+  t.mock.method(global, 'fetch', async (url, options) => {
+    if (String(url).endsWith('/attachments')) return Response.json([]);
+    if (options?.body) { const body = JSON.parse(options.body); actions.push(body.action); return Response.json({turn:{state:'queued'}}); }
+    return Response.json({id:'t', workRouting:{outputContract:{deliverables:[{path:'report.md'}]}}});
+  });
+  const turn = await require('../main/pi-session/task-input').prepare({hub:'https://fixture.invalid'},
+    't', 'chat', 'turn', 'Write a report', {}, {handle:f.handle});
+  await assert.rejects(turn.afterTurn('completed'), /未采集到.*交付文件/);
+  await turn.afterTurn('failed');
+  assert.deepEqual(actions, ['prepare', 'fail']);
+});
+
+for (const contract of [{}, {kind:'repository-change'}, {kind:'office-artifact'}]) {
+  test('text and kind-only contracts retain normal no-file completion: ' + (contract.kind || 'text'), async t => {
+    const f = workspace(t), actions = [];
+    t.mock.method(global, 'fetch', async (url, options) => {
+      if (String(url).endsWith('/attachments')) return Response.json([]);
+      if (options?.body) { const body = JSON.parse(options.body); actions.push(body.action); return Response.json({turn:{state:'queued'}}); }
+      return Response.json({id:'t', workRouting:{outputContract:contract}});
+    });
+    const turn = await require('../main/pi-session/task-input').prepare({hub:'https://fixture.invalid'},
+      't', 'chat', 'turn', 'Answer', {}, {handle:f.handle});
+    await turn.afterTurn('completed');
+    assert.deepEqual(actions, ['prepare', 'complete']);
+  });
+}
+
+test('an incomplete scan cannot present a partial explicit file delivery as complete', async t => {
+  const f = workspace(t); f.write('report.md', '# Report');
+  const original = f.handle.outputSnapshotAsync;
+  f.handle.outputSnapshotAsync = async () => ({...await original(), truncated:true});
+  await assert.rejects(delivery.capture(f.handle, 'completed', {}, {requiresFiles:true}), /扫描.*不完整/);
+});
+
+test('completed journal recovers a generated file with preserved old mtime without uploading unrelated old files', async t => {
+  const f = workspace(t), journal = require('../main/conversation/file-change-journal');
+  const since = Date.now() - 1000;
+  f.write('unrelated.md', '# Historical', 1000);
+  const before = await journal.snapshot(f.cwd);
+  f.write('winter-poem.md', '# Winter poem', 1000);
+  const changes = journal.compare(before, await journal.snapshot(f.cwd), {turnId:'turn'});
+  f.handle.outputSnapshotAsync = async () => ({
+    ...outputs.withJournal(await outputs.scanAsync(f.cwd, since, since, changes), changes), fileChanges: changes,
+  });
+  const payload = await delivery.capture(f.handle, 'completed');
+  assert.deepEqual(payload?.files.map(x => x.name), ['winter-poem.md']);
+  assert.equal(Buffer.from(payload.files[0].data, 'base64').toString(), '# Winter poem');
+});
+
+test('journal-authorized capture rejects replacement content even when size and mtime are preserved', async t => {
+  const f = workspace(t), journal = require('../main/conversation/file-change-journal');
+  const since = Date.now() - 1000, before = await journal.snapshot(f.cwd);
+  f.write('report.md', '# First', 1000);
+  const changes = journal.compare(before, await journal.snapshot(f.cwd), {turnId:'turn'});
+  f.handle.outputSnapshotAsync = async () => ({
+    ...outputs.withJournal(await outputs.scanAsync(f.cwd, since, since, changes), changes), fileChanges: changes,
+  });
+  f.write('report.md', '# Other', 1000);
+  await assert.rejects(delivery.capture(f.handle, 'completed'), /变化|更新/);
+});
+
 function workspace(t) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'soduwork-task-delivery-'));
   t.after(() => fs.rmSync(cwd, {recursive:true, force:true}));
@@ -17,6 +80,27 @@ function workspace(t) {
   };
   return {cwd, handle, write, since:value=>{turnSince=value;}};
 }
+
+test('a completed turn captures the standalone JSON result after an unsuccessful bash attempt', async t => {
+  const f = workspace(t), bytes = JSON.stringify({ title: 'Spring', paragraphs: ['Synthetic prose'] });
+  f.write('spring-parallel-prose.json', bytes);
+  f.write('previous-prose.json', '{"historical":true}', Date.now() - 10000);
+  f.write('package-lock.json', '{}');
+  f.write('credentials.json', '{"token":"synthetic-only"}');
+  f.write('.soduwork/evidence/bash-result.json', '{"exitCode":1}');
+  f.handle.snapshot = () => ({ status: 'idle', tools: [
+    { name: 'bash', state: 'error', isError: true, args: { command: 'missing-fixture-command' }, result: 'Command exited with code 1' },
+    { name: 'write', state: 'done', isError: false, args: { path: 'spring-parallel-prose.json', content: bytes } },
+  ], messages: [
+    { role: 'user', content: [{ type: 'text', text: 'Generate spring-parallel-prose.json.' }] },
+    { role: 'toolResult', toolName: 'bash', isError: true, content: [{ type: 'text', text: 'Command exited with code 1' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'Created the requested JSON file.' }] },
+  ] });
+  const payload = await delivery.capture(f.handle, 'completed', {}, { requiresFiles: true });
+  assert.equal(payload.outcome, 'completed');
+  assert.deepEqual(payload.files.map(item => [item.name, item.category]), [['spring-parallel-prose.json', 'primary']]);
+  assert.equal(Buffer.from(payload.files[0].data, 'base64').toString(), bytes);
+});
 
 test('task delivery uses the asynchronous turn boundary and captures website dependencies without verification screenshots', async t => {
   const f = workspace(t);
@@ -70,6 +154,7 @@ test('a changed dependency revises its unchanged entry but an unchanged prior de
   assert(!payload.files.some(x=>x.name==='obsolete.md'));
   f.since(now + 10000);
   assert.equal(await delivery.capture(f.handle, 'completed'), null);
+  await assert.rejects(delivery.capture(f.handle, 'completed', {}, {requiresFiles:true}), /未采集到.*交付文件/);
 });
 
 test('local result cards and task transport agree on an entry changed only through CSS', async t => {
@@ -177,4 +262,44 @@ test('stylesheet URL tokenization ignores nested data content, comments and stri
   const refs = require('../main/conversation/stylesheet-references').references;
   assert.deepEqual(refs(`/* url(fake.png) */ .a{content:"url(fake2.png)";background:url("data:image/svg+xml,<svg filter='url(%23n)'/>")} @import "theme.css"; .b{src:url(font.woff2);background:url('hero image.png')}`),
     ['data:image/svg+xml,<svg filter=\'url(%23n)\'/>', 'theme.css', 'font.woff2', 'hero image.png']);
+});
+
+test('website delivery follows quoted CSS imports separated by comments', async t => {
+  const f = workspace(t);
+  f.write('site/index.html', '<link rel="stylesheet" href="main.css">');
+  f.write('site/main.css', '@import/* generated theme */ "theme.css";');
+  f.write('site/theme.css', 'body{background:url(bg.png)}');
+  f.write('site/bg.png', Buffer.from([137,80,78,71]));
+  const payload = await delivery.capture(f.handle, 'completed');
+  assert.deepEqual(payload.files.map(row => row.name).sort(),
+    ['site/bg.png', 'site/index.html', 'site/main.css', 'site/theme.css']);
+  const refs = require('../main/conversation/stylesheet-references').references;
+  assert.deepEqual(refs('@import /* one */ /* two */ "a.css"; /* @import "fake.css"; */'), ['a.css']);
+  assert.deepEqual(refs('@import /* unclosed'), []);
+});
+
+test('stylesheet URL tokenization preserves literal comment-like paths', () => {
+  const refs = require('../main/conversation/stylesheet-references').references;
+  for (const [css, expected] of [
+    ['url(/*comment*/image.png)', '/*comment*/image.png'],
+    ['url( \t/*comment*/image.png )', '/*comment*/image.png'],
+    ['url(/*one*//*two*/image.png)', '/*one*//*two*/image.png'],
+    ['url(/*unfinished-image.png)', '/*unfinished-image.png'],
+    ['url(images/*comment*/image.png)', 'images/*comment*/image.png'],
+    ['url("/*comment*/image.png")', '/*comment*/image.png'],
+    ['@import/* import comment */url(/*literal*/theme.css)', '/*literal*/theme.css'],
+  ]) assert.deepEqual(refs(css), [expected], css);
+  assert.deepEqual(refs('@import/* comment */url( theme.css );'), ['theme.css']);
+});
+
+for (const [label, css, dependency] of [
+  ['image', 'body{background-image:url(/*comment*/image.png)}', 'image.png'],
+  ['import', '@import/* import comment */url(/*literal*/theme.css);', 'theme.css'],
+]) test('website delivery rejects a literal comment-like ' + label + ' URL instead of stripping it', async t => {
+  const f = workspace(t);
+  f.write('site/index.html', '<link rel="stylesheet" href="main.css">');
+  f.write('site/main.css', css);
+  f.write('site/' + dependency, dependency.endsWith('.css') ? 'body{color:purple}' : Buffer.from([137,80,78,71]));
+  await assert.rejects(delivery.capture(f.handle, 'completed'), /不适合交付的路径/);
+  assert.equal(fs.readFileSync(path.join(f.cwd, 'site/main.css'), 'utf8'), css);
 });

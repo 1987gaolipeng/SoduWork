@@ -2,6 +2,121 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { attachmentUrl, latestDeliveryAttachments, prepare, request } = require('../main/pi-session/task-input');
 
+test('native prepare distinguishes inferred defaults from legacy manual policy and terminal receipts', async t => {
+ const cases = [
+  [{}, {}, 'infer'],
+  [{executionSubmissionMode:'manual'}, {}, undefined],
+  [{executionSubmissionMode:'manual'}, {submissionMode:''}, 'infer'],
+  [{executionSubmissionChoice:'infer',executionSubmissionMode:'auto'}, {}, undefined],
+  [{}, {submissionMode:'manual'}, undefined],
+  [{}, {dispatchInstructions:{note:'',submissionMode:'default'}}, 'infer'],
+  [{}, {dispatchInstructions:{note:'',submissionMode:'manual'}}, undefined],
+  [{}, {agentId:'runner:r',submissionMode:''}, undefined],
+ ];
+ for (const [routing, requested, expected] of cases) {
+  const calls=[];
+  t.mock.method(global,'fetch',async(url,options)=>{
+   if(url.endsWith('/tasks/t'))return Response.json({id:'t',workRouting:routing});
+   if(url.endsWith('/attachments'))return Response.json([]);
+   const body=JSON.parse(options.body); calls.push(body);
+   return Response.json({turn:{state:'queued'},task:{id:'t',workRouting:{...routing,
+    ...(body.submissionChoice ? {executionSubmissionChoice:body.submissionChoice} : {})}}});
+  });
+  const input=await prepare({hub:'http://fixture'},'t','chat','turn','',requested);
+  await input.beforeTurn();await input.afterTurn('completed');await input.beforeRetry();
+  assert.equal(calls[0].submissionChoice,expected);
+  assert.equal(calls.at(-1).submissionChoice,expected);
+  assert.ok(calls.filter(row=>row.action!=='prepare').every(row=>!Object.hasOwn(row,'submissionChoice')));
+ }
+});
+
+test('explicit inferred choice requires Hub acknowledgement before execution', async t => {
+ const calls=[];
+ t.mock.method(global,'fetch',async(url,options)=>{
+  if(url.endsWith('/tasks/t'))return Response.json({id:'t'});
+  if(url.endsWith('/attachments'))return Response.json([]);
+  calls.push(JSON.parse(options.body));
+  return Response.json({turn:{state:'queued'},task:{id:'t'}});
+ });
+ await assert.rejects(prepare({hub:'http://fixture'},'t','chat','turn','',{submissionMode:''}), /服务端未确认本次提交方式/);
+ assert.deepEqual(calls.map(row=>row.action),['prepare','cancel']);
+});
+
+test('failed durable completion write retries frozen bytes without recapture or changing outcome', async t => {
+ const delivery=require('../main/pi-session/task-delivery.cjs');
+ let captures=0, failed=false; const finishes=[];
+ t.mock.method(delivery,'capture',async()=>{captures++;return {files:[{data:'frozen'}]};});
+ t.mock.method(global,'fetch',async(url)=>Response.json(url.endsWith('/attachments')?[]:
+  url.endsWith('/tasks/t')?{id:'t'}:{turn:{state:'queued'},task:{id:'t'}}));
+ const record=()=>({pending:false});
+ record.finish=async(scope,body,options)=>{
+  finishes.push(structuredClone({scope,body,options}));
+  if(body.action==='complete'&&!failed){failed=true;throw Error('disk temporarily unavailable');}
+  return {pending:false};
+ };
+ const input=await prepare({hub:'http://fixture'},'t','chat','turn','',{},
+  {startReceipts:{forTask:()=>record}});
+ await assert.rejects(input.afterTurn('completed'), /disk temporarily unavailable/);
+ await input.afterTurn('failed');
+ assert.equal(captures,1);
+ assert.deepEqual(finishes.map(row=>row.body.action),['wait','complete','complete']);
+ assert.equal(finishes[0].body.deliveryIssue.code,'capture_pending');
+ assert.deepEqual(finishes[1],finishes[2]);
+});
+
+test('capture failure closes the failed delivery attempt and allows an explicit retry with a new turn', async t => {
+ let captures=0; const finishes=[];
+ let state='', activeTurn=''; const identity={hub:'http://fixture'};
+ t.mock.method(require('../main/pi-session/task-delivery.cjs'),'capture',async()=>{captures++;throw Error('Missing required result');});
+ t.mock.method(global,'fetch',async(url,options)=>{
+  if(url.endsWith('/attachments'))return Response.json([]);
+  if(url.endsWith('/tasks/t'))return Response.json({id:'t'});
+  const body=JSON.parse(options.body);
+  if(body.action==='prepare'){
+   if(['queued','running','waiting'].includes(state))return Response.json({detail:'Turn remains active'},{status:409});
+   state='queued';activeTurn=body.turnId;
+  } else state=({start:'running',wait:'waiting',fail:'failed'})[body.action]||state;
+  return Response.json({turn:{state},task:{id:'t'}});
+ });
+ const record=()=>({pending:false});
+ record.finish=async(scope,body)=>{
+  finishes.push(body);await request(identity,'/tasks/t/conversation-turn',{...scope,...body,executor:'native'});
+  return{pending:false};
+ };
+ const input=await prepare(identity,'t','chat','turn','',{},
+  {startReceipts:{forTask:()=>record}});
+ await input.beforeTurn();
+ await assert.rejects(input.afterTurn('completed'),/Missing required result/);
+ await input.afterTurn('failed');
+ assert.equal(captures,1);
+ assert.deepEqual(finishes.map(row=>[row.action,row.deliveryIssue.code]),
+  [['wait','capture_pending'],['fail','capture_failed']]);
+ await input.beforeRetry();
+ assert.equal(state,'queued');assert.match(activeTurn,/^recovery-/);assert.notEqual(activeTurn,'turn');
+ assert.equal(captures,1,'explicit retry admission does not execute or recapture');
+});
+
+test('a resumed no-file waiting turn captures final output and duplicate completion stays idempotent', async t => {
+ let captures=0, failWrite=true; const finishes=[];
+ t.mock.method(require('../main/pi-session/task-delivery.cjs'),'capture',async()=>++captures===1?null:{files:[{data:String(captures)}]});
+ t.mock.method(global,'fetch',async(url)=>Response.json(url.endsWith('/attachments')?[]:
+  url.endsWith('/tasks/t')?{id:'t'}:{turn:{state:'queued'},task:{id:'t'}}));
+ const record=()=>({pending:false});
+ record.finish=async(_scope,body,options)=>{
+  if(failWrite){failWrite=false;throw Error('Temporary disk failure');}
+  finishes.push({body,options});return{pending:true};
+ };
+ const input=await prepare({hub:'http://fixture'},'t','chat','turn','',{},
+  {startReceipts:{forTask:()=>record}});
+ await assert.rejects(input.afterTurn('waiting'),/Temporary disk failure/);
+ await input.afterTurn('failed');
+ await input.afterTurn('completed');
+ await input.afterTurn('completed');
+ assert.equal(captures,2);
+ assert.deepEqual(finishes.map(row=>row.body.action),['wait','wait','complete']);
+ assert.equal(finishes.at(-1).options.delivery.files[0].data,'2');
+});
+
 test('rework of a dispatched task keeps its Runner workspace even after an old native follow-up', async t => {
  const context = require('../main/conversation/requirement-context');
  const delivery = require('../main/pi-session/task-delivery.cjs');
@@ -63,7 +178,7 @@ test('offline successful execution keeps its result and replays start then compl
  assert.deepEqual(calls, ['prepare', 'start']);
  service.dispose(); online = true;
  const restarted = create(options); t.after(() => restarted.dispose()); await restarted.flush();
- assert.deepEqual(calls, ['prepare', 'start', 'started', 'complete']); assert.equal(state, 'completed');
+ assert.deepEqual(calls, ['prepare', 'start', 'started', 'wait', 'complete']); assert.equal(state, 'completed');
  assert.equal(fs.readdirSync(path.join(root, 'task-start-receipts')).filter(name => name.endsWith('.json')).length, 0);
 });
 
@@ -104,7 +219,7 @@ test('native receipts distinguish queue admission, actual start and a fresh retr
  assert.notEqual(retry,'first'); assert.match(retry,/^recovery-/);
  await input.beforeTurn(); await input.onStarted(); await input.afterTurn('completed');
  const retryCalls=calls.filter(row=>row.turnId===retry);
- assert.deepEqual(retryCalls.map(row=>row.action),['prepare','start','started','complete']);
+ assert.deepEqual(retryCalls.map(row=>row.action),['prepare','start','started','wait','complete']);
  assert.ok(retryCalls.every(row=>row.conversationId==='chat'&&row.executor==='native'));
 });
 

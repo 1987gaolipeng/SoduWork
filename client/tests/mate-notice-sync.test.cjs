@@ -45,6 +45,67 @@ const message = (changes = {}) => ({ id: 'server-1', messageId: 'client-1', send
   senderName: '发件人', recipientName: '接收人', text: '完整需求说明', kind: 'task_assignment', taskId: 'task-1',
   createdAt: 100, status: 'accepted', deliveredAt: null, readAt: null, attachments: [], ...changes });
 
+test('verified updates enter the inbox once per version across status replays and restarts', async () => {
+  const ready = { state: 'downloaded', phase: 'ready', targetVersion: '1.13.18' };
+  function watch(f, initial) {
+    let emit;
+    f.ctx.soduWorkAPI = { clientUpdateStatus: async () => initial, onClientUpdateStatus: fn => { emit = fn; } };
+    f.ctx.watchClientUpdateNotices();
+    return emit;
+  }
+  const f = fixture(), emit = watch(f, { state: 'idle' });
+  for (const [state, phase] of [['downloading', 'downloading'], ['downloaded', 'verifying'], ['failed', 'failed']]) {
+    emit({ ...ready, state, phase });
+  }
+  assert.equal(f.unread(), 0);
+  for (let i = 0; i < 3; i++) emit(ready);
+  assert.equal(f.unread(), 1);
+  assert.match(f.all()[0].text, /1\.13\.18.*已下载并通过校验/);
+  await f.sync.markLocalRead(f.all()[0].id);
+  const reopened = fixture({ values: f.values }), replay = watch(reopened, ready);
+  await Promise.resolve();
+  assert.equal(reopened.all().length, 1);
+  assert.equal(reopened.unread(), 0);
+  await reopened.clear();
+  replay(ready);
+  assert.equal(reopened.all().length, 0);
+  replay({ ...ready, targetVersion: '1.13.19' });
+  assert.equal(reopened.unread(), 1);
+  const manual = { state: 'manual', targetVersion: '1.13.20' };
+  replay(manual);
+  reopened.event({ type: 'notice', text: 'Manual upgrade', kind: 'client_update',
+    noticeEventId: 'client_update_manual_1.13.20' });
+  assert.equal(reopened.unread(), 2);
+  assert.match(reopened.all()[0].text, /手动安装/);
+});
+
+test('sender receipts retain shared files across status updates and refreshes without reviving cleared receipts', async () => {
+  const attachments = [{ id: 'shared-file', name: '程序员笑话.txt', size: 42 }];
+  const item = message({ senderId: 'user-a', recipientId: 'user-b', kind:'mate_message', attachments });
+  const f = fixture({ sent: [item] });
+  for (const status of ['accepted', 'delivered', 'read']) {
+    item.status = status;
+    await f.sync.refresh('sent');
+    const receipt = f.sync.rows('received').find(row => row.kind === 'mate_receipt');
+    assert.equal(receipt.receiptStatus, status);
+    assert.deepEqual(JSON.parse(JSON.stringify(receipt.attachments)), attachments);
+    assert.equal(receipt.attachments[0].url, undefined, 'files use freshly authorized metadata when opened');
+    assert.equal(receipt.ownerId, 'user-a');
+    assert.equal(f.sync.rows('sent')[0].attachments.length, 1);
+  }
+  const reopened = fixture({ values:f.values, sent:[item] });
+  await reopened.sync.refresh('sent');
+  assert.equal(reopened.sync.rows('received')[0].attachments[0].id, 'shared-file');
+  await reopened.clear();
+  await reopened.sync.refresh('sent');
+  assert.equal(reopened.sync.rows('received').length, 0);
+  assert.equal(reopened.sync.rows('sent')[0].attachments.length, 1);
+  reopened.scope('third-user');
+  await reopened.sync.refresh('sent');
+  assert.equal(reopened.sync.rows('received').length, 0);
+  assert.equal(reopened.sync.rows('sent').length, 0);
+});
+
 test('both production renderers load durable notice storage before reconciliation', () => {
   for (const name of ['desk.html', 'index.html']) {
     const html = fs.readFileSync(path.join(__dirname, '..', name), 'utf8');

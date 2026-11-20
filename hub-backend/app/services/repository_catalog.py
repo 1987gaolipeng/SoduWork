@@ -19,6 +19,7 @@ from .. import automation_models as am, models, repository_issue_models  # regis
 from ..connectors import get_connector
 from . import code_creds, resource_leases, scm_support
 from .workdirs import validate_repo_local_dir
+from ..timestamps import iso_utc
 
 
 def _text(value, limit: int) -> str:
@@ -54,7 +55,7 @@ def _catalog_api(row: am.ScmRepository) -> dict:
         "defaultBranch": row.default_branch, "visibility": row.visibility,
         "archived": bool(row.archived), "active": bool(row.active),
         "fingerprint": row.fingerprint,
-        "lastSeenAt": row.last_seen_at.isoformat() if row.last_seen_at else None,
+        "lastSeenAt": iso_utc(row.last_seen_at) if row.last_seen_at else None,
     }
 
 

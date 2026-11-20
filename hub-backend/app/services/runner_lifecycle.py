@@ -83,6 +83,17 @@ async def run_until_stopped(runner):
             # Device authorization belongs to this Runner lifetime. Drain its
             # cancellation cleanup before daemon threads disappear at exit.
             from . import codex_login_flow
-            if not await asyncio.to_thread(codex_login_flow.shutdown):
-                logging.getLogger(__name__).warning(
-                    "Codex authorization cleanup exceeded the Runner shutdown deadline")
+            try:
+                if not await asyncio.to_thread(codex_login_flow.shutdown):
+                    logging.getLogger(__name__).warning(
+                        "Codex authorization cleanup exceeded the Runner shutdown deadline")
+            finally:
+                rejections = list(getattr(runner, "_rpc_rejections", ()))
+                for task in rejections:
+                    task.cancel()
+                await asyncio.gather(*rejections, return_exceptions=True)
+                # Remote worker pools belong to the process, not a WebSocket
+                # connection: reconnecting must not retire live session calls.
+                workers = getattr(runner, "_network_workers", None)
+                if workers is not None:
+                    workers.close()

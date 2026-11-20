@@ -72,6 +72,34 @@ class CodexModeCompatibilityTests(unittest.TestCase):
         self.assertNotIn("fixture-secret", env["NODE_OPTIONS"])
         self.assertNotIn("fixture-secret", env["CODEX_CONFIG"])
 
+    def test_managed_codex_compacts_against_the_selected_model_window(self):
+        from app.services import acp_agents
+        cases = (({"contextWindow": 32000}, 32000),
+                 ({"context_window": "64k"}, 64000),
+                 ({"model": "deepseek-chat"}, 64000), ({}, 128000))
+        for overrides, expected in cases:
+            with self.subTest(overrides=overrides):
+                env = {"CODEX_CONFIG": '{"model_context_window":1000000}'}
+                model = {"base": "http://127.0.0.1:1/v1", "key": "fixture-secret",
+                         "model": "unknown-managed-model", **overrides}
+                original = dict(model)
+                acp_agents.inject_llm_env("codex-harness", env, model)
+                config = json.loads(env["CODEX_CONFIG"])
+                self.assertEqual(config["model_context_window"], expected)
+                self.assertEqual(config["model_auto_compact_token_limit"], expected * 4 // 5)
+                self.assertEqual(config["model"], model["model"])
+                self.assertTrue(config["disable_response_storage"])
+                self.assertNotIn("fixture-secret", env["CODEX_CONFIG"])
+                self.assertEqual(model, original)
+
+    def test_personal_codex_does_not_inherit_managed_compaction_configuration(self):
+        from app.services import acp_agents
+        env = {}
+        acp_agents.inject_llm_env("codex", env, {
+            "base": "http://127.0.0.1:1/v1", "key": "fixture-secret",
+            "model": "managed", "contextWindow": 64000})
+        self.assertNotIn("CODEX_CONFIG", env)
+
 
 class CodexPermissionInputsTests(unittest.TestCase):
     def setUp(self):

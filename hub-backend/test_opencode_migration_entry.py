@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 
 from app.services import acp_bridge, local_base, local_ctx, local_process, local_stream
 from app.services import opencode_session_migration as migration
+from app.services.opencode_runtime_config import OpenCodeEnvironmentError
 
 
 class OpenCodeMigrationEntryTests(unittest.TestCase):
@@ -208,6 +209,20 @@ class OpenCodeAcpMigrationEntryTests(unittest.TestCase):
         self.launch.assert_not_called()
         self.assertEqual(bridge.session_id, "ses_owned")
 
+    def test_acp_environment_failure_preserves_safe_diagnostic_before_launch(self):
+        reason = "OpenCode's private and personal data directories must be separate."
+        runtime_config = acp_bridge.opencode_runtime_config
+        bridge = acp_bridge.AcpBridge(["fixture-opencode", "acp"], self.folder,
+                                     "opencode", "workspace", session_id="ses_owned")
+        with patch.object(runtime_config, "prepare_environment", side_effect=
+                          runtime_config.OpenCodeEnvironmentError(reason)):
+            with self.assertRaises(acp_bridge.BridgeError) as failure:
+                bridge.start()
+        self.assertEqual(str(failure.exception), reason)
+        self.migrate.assert_not_called()
+        self.launch.assert_not_called()
+        self.assertEqual(bridge.session_id, "ses_owned")
+
     def test_other_acp_agents_keep_their_environment_and_session(self):
         bridge = acp_bridge.AcpBridge(["fixture-qwen", "--acp"], self.folder,
                                      "qwen", "workspace", session_id="qwen-owned")
@@ -261,12 +276,187 @@ class OpenCodeCompactionMigrationTests(unittest.TestCase):
         self.relay.assert_not_called()
         self.launch.assert_not_called()
 
+    def test_near_full_environment_guard_cannot_become_a_lossy_handoff(self):
+        reason = "The managed OpenCode storage is not isolated"
+        with patch.object(local_ctx, "_free_port", return_value=12345), \
+                patch.object(local_ctx, "_env_for", side_effect=OpenCodeEnvironmentError(reason)), \
+                patch.object(local_ctx.subprocess, "Popen") as native_server:
+            result = local_ctx.prepare_resume(self.ref, "follow up", {})
+        self.assertEqual(result, {"ok": False, "error": reason})
+        self.assertEqual(self.run["state"], "failed")
+        self.assertEqual(self.run["cliSid"], "ses_owned")
+        self.relay.assert_not_called()
+        self.launch.assert_not_called()
+        native_server.assert_not_called()
+
+    def test_overflow_environment_guard_cannot_replace_the_original_history(self):
+        self.run["state"] = "running"
+        reason = "The managed OpenCode storage is not isolated"
+        with patch.object(local_ctx, "_free_port", return_value=12345), \
+                patch.object(local_ctx, "_env_for", side_effect=OpenCodeEnvironmentError(reason)), \
+                patch.object(local_ctx.subprocess, "Popen") as native_server:
+            self.assertFalse(local_ctx._recover_overflow(self.ref))
+        self.assertEqual(self.run["cliSid"], "ses_owned")
+        local_ctx._note.assert_any_call(self.ref, reason)
+        self.relay.assert_not_called()
+        self.launch.assert_not_called()
+        native_server.assert_not_called()
+
     def test_stop_during_compaction_migration_does_not_start_native_server(self):
         with patch.object(migration, "migrate_session", side_effect=lambda *args: self.run.update(stopping=True)), \
              patch.object(local_ctx.subprocess, "Popen") as native_server:
             self.assertFalse(local_ctx._oc_compact(self.run))
         native_server.assert_not_called()
         self.assertEqual(self.run["cliSid"], "ses_owned")
+
+    def test_acknowledged_stop_wins_over_migration_failure_during_resume(self):
+        def stop_and_fail(*args):
+            self.assertEqual(local_stream.stop_sync({}, self.ref), {"ok": True, "stopped": True})
+            raise migration.OpenCodeSessionMigrationError("Unsupported legacy schema")
+
+        with patch.object(local_ctx, "_free_port", return_value=12345), \
+             patch.object(local_stream, "_save_meta"), \
+             patch("app.services.access_broker.close"), \
+             patch.object(migration, "migrate_session", side_effect=stop_and_fail), \
+             patch.object(local_ctx.subprocess, "Popen") as native_server:
+            result = local_ctx.prepare_resume(self.ref, "follow up", {})
+        self.assertEqual(result, {"ok": True, "stopped": True})
+        self.assertEqual(self.run["state"], "stopped")
+        self.assertFalse(self.run["stopping"])
+        self.assertFalse(self.run["contextCompacting"])
+        self.assertEqual(self.run["cfg"], {})
+        self.assertEqual(self.run["cliSid"], "ses_owned")
+        native_server.assert_not_called()
+        self.relay.assert_not_called()
+        self.launch.assert_not_called()
+        with patch.object(local_stream, "_STORE", self.folder):
+            self.assertEqual(local_stream.forget_sync({}, self.ref), {"ok": True, "forgotten": True})
+
+    def test_acknowledged_stop_wins_over_migration_failure_during_overflow(self):
+        self.run["state"] = "running"
+
+        def stop_and_fail(*args):
+            self.assertEqual(local_stream.stop_sync({}, self.ref), {"ok": True, "stopped": True})
+            raise migration.OpenCodeSessionMigrationError("Unsupported legacy schema")
+
+        with patch.dict(local_base._PROFILES["opencode"], {"compact": stop_and_fail}), \
+             patch.object(local_stream, "_save_meta"), \
+             patch("app.services.access_broker.close"):
+            self.assertTrue(local_ctx._recover_overflow(self.ref))
+        self.assertEqual(self.run["state"], "stopped")
+        self.assertFalse(self.run["stopping"])
+        self.assertFalse(self.run["contextCompacting"])
+        self.assertEqual(self.run["cliSid"], "ses_owned")
+        self.relay.assert_not_called()
+        self.launch.assert_not_called()
+
+    def test_replaced_execution_during_resume_compaction_keeps_successor_state(self):
+        for replace_run in (False, True):
+            for fails in (False, True):
+                with self.subTest(replace_run=replace_run, fails=fails):
+                    self.run.update(state="done", stopping=False, _workerIdentity=object())
+                    local_base._RUNS[self.ref] = self.run
+                    successor = self.run.copy() if replace_run else self.run
+                    expected = {}
+
+                    def replace(*args):
+                        successor.update(state="running", stopping=True, contextCompacting=True,
+                                         _workerIdentity=object(), cliSid="ses_successor",
+                                         cfg={"successor": True})
+                        local_base._RUNS[self.ref] = successor
+                        expected.update(successor)
+                        if fails:
+                            raise migration.OpenCodeSessionMigrationError("Unsupported legacy schema")
+                        return False
+
+                    with patch.dict(local_base._PROFILES["opencode"], {"compact": replace}):
+                        result = local_ctx.prepare_resume(self.ref, "follow up", {})
+                    self.assertEqual(result, {"ok": True, "stopped": True})
+                    self.assertIs(local_base._RUNS[self.ref], successor)
+                    self.assertEqual(successor, expected)
+                    self.relay.assert_not_called()
+                    self.launch.assert_not_called()
+
+    def test_replaced_execution_during_binary_probe_cannot_compact_or_fail_its_successor(self):
+        for replace_run in (False, True):
+            for missing in (False, True):
+                with self.subTest(replace_run=replace_run, missing=missing):
+                    self.run.update(state="done", stopping=False, _workerIdentity=object())
+                    local_base._RUNS[self.ref] = self.run
+                    successor = self.run.copy() if replace_run else self.run
+                    expected = {}
+                    compact = Mock(return_value=True)
+                    local_ctx._note.reset_mock()
+                    local_ctx._save_meta.reset_mock()
+
+                    def replace_during_probe():
+                        successor.update(state="running", stopping=False, contextCompacting=False,
+                                         _workerIdentity=object(), cliSid="ses_successor",
+                                         cfg={"successor": True}, tokens={"input": 100})
+                        local_base._RUNS[self.ref] = successor
+                        expected.update(successor)
+                        return None if missing else "fixture-opencode"
+
+                    with patch.dict(local_base._PROFILES["opencode"], {
+                            "bin": replace_during_probe, "compact": compact}):
+                        result = local_ctx.prepare_resume(self.ref, "old follow up", {})
+                    self.assertEqual(result, {"ok": True, "stopped": True})
+                    self.assertIs(local_base._RUNS[self.ref], successor)
+                    self.assertEqual(successor, expected)
+                    compact.assert_not_called()
+                    local_ctx._note.assert_not_called()
+                    local_ctx._save_meta.assert_not_called()
+                    self.relay.assert_not_called()
+                    self.launch.assert_not_called()
+
+    def test_replaced_execution_before_overflow_compaction_cannot_be_compacted(self):
+        original_compact = local_ctx._try_compact
+        for replace_run in (False, True):
+            with self.subTest(replace_run=replace_run):
+                self.run.update(state="running", stopping=False, overflowTried=0, _workerIdentity=object())
+                local_base._RUNS[self.ref] = self.run
+                successor = self.run.copy() if replace_run else self.run
+                expected = {}
+                compact = Mock(return_value=True)
+                local_ctx._note.reset_mock()
+                local_ctx._save_meta.reset_mock()
+
+                def replace_before_compaction(*args, **kwargs):
+                    successor.update(state="running", stopping=False, contextCompacting=False,
+                                     _workerIdentity=object(), cliSid="ses_successor",
+                                     cfg={"successor": True}, tokens={"input": 100})
+                    local_base._RUNS[self.ref] = successor
+                    expected.update(successor)
+                    return original_compact(*args, **kwargs)
+
+                with patch.dict(local_base._PROFILES["opencode"], {"compact": compact}), \
+                        patch.object(local_ctx, "_try_compact", side_effect=replace_before_compaction):
+                    self.assertTrue(local_ctx._recover_overflow(self.ref))
+                self.assertEqual(successor, expected)
+                compact.assert_not_called()
+                local_ctx._note.assert_not_called()
+                local_ctx._save_meta.assert_not_called()
+                self.relay.assert_not_called()
+                self.launch.assert_not_called()
+
+    def test_replaced_execution_during_overflow_failure_cannot_receive_old_diagnostic(self):
+        self.run.update(state="running", _workerIdentity=object())
+        successor = self.run.copy()
+        expected = {}
+
+        def replace_and_fail(*args):
+            successor.update(state="running", stopping=True, contextCompacting=True,
+                             _workerIdentity=object(), cliSid="ses_successor", cfg={"successor": True})
+            local_base._RUNS[self.ref] = successor
+            expected.update(successor)
+            raise migration.OpenCodeSessionMigrationError("Unsupported legacy schema")
+
+        with patch.dict(local_base._PROFILES["opencode"], {"compact": replace_and_fail}):
+            self.assertTrue(local_ctx._recover_overflow(self.ref))
+        self.assertEqual(successor, expected)
+        self.assertNotIn("Unsupported legacy schema", [call.args[1] for call in local_ctx._note.call_args_list])
+        self.relay.assert_not_called()
+        self.launch.assert_not_called()
 
 
 if __name__ == "__main__":

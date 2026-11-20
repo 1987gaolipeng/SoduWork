@@ -27,6 +27,8 @@ const SCAN_CAP = MAX_FILES + 1;       // Scan one extra entry to distinguish an 
 const MAX_DEPTH = 3;
 const IO_LIMIT = 16;
 const pendingScans = new Map();
+const journalIds = new WeakMap();
+let nextJournalId = 0;
 const ioQueue = [];
 let activeIO = 0;
 
@@ -52,7 +54,7 @@ function _skip(name) {
 
 /* Synchronous compatibility entry for legacy API users and tests. Main-process requests use
    scanAsync: the result cap does not bound visits to older workspace files. */
-function collect(dir, since, depth, out) {
+function collect(dir, since, depth, out, changed) {
   if (depth > MAX_DEPTH || out.length >= SCAN_CAP) return out;
   let entries;
   try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { return out; }
@@ -70,18 +72,18 @@ function collect(dir, since, depth, out) {
     // Compare at the same precision as stored output timestamps. Filesystem
     // conversion can report an exact millisecond as e.g. 123.999 instead of 124.
     const at = Math.round(st.mtimeMs);
-    if (since && at < since) continue;
+    if (since && at < since && !changed?.has(full)) continue;
     out.push({ path: full, name, size: st.size, at });
   }
   for (const ent of entries) {
     if (out.length >= SCAN_CAP) break;
     if (!ent.isDirectory() || _skip(ent.name) || SKIP_DIRS.has(ent.name)) continue;
-    collect(path.join(dir, ent.name), since, depth + 1, out);
+    collect(path.join(dir, ent.name), since, depth + 1, out, changed);
   }
   return out;
 }
 
-async function collectAsync(dir, since, depth, out) {
+async function collectAsync(dir, since, depth, out, changed) {
   if (depth > MAX_DEPTH || out.length >= SCAN_CAP) return out;
   let entries;
   try { entries = await fileIO(() => fs.promises.readdir(dir, { withFileTypes: true })); }
@@ -93,7 +95,7 @@ async function collectAsync(dir, since, depth, out) {
       try {
         const st = await fileIO(() => fs.promises.stat(full));
         const at = Math.round(st.mtimeMs);
-        if (since && at < since) return null;
+        if (since && at < since && !changed?.has(full)) return null;
         return { path: full, name: ent.name, size: st.size, at };
       } catch (_) { return null; }
     }));
@@ -105,14 +107,27 @@ async function collectAsync(dir, since, depth, out) {
   for (const ent of entries) {
     if (out.length >= SCAN_CAP) break;
     if (!ent.isDirectory() || _skip(ent.name) || SKIP_DIRS.has(ent.name)) continue;
-    await collectAsync(path.join(dir, ent.name), since, depth + 1, out);
+    await collectAsync(path.join(dir, ent.name), since, depth + 1, out, changed);
   }
   return out;
 }
 
 /* List outputs newest first using since as the session-start boundary. */
-function scan(cwd, since, turnSince) {
-  return scanned(cwd, since, turnSince, cwd ? collect(cwd, Number(since) || 0, 0, []) : []);
+function journalCandidates(cwd, journal, canonicalRoot) {
+  // Only a complete content comparison can extend the time-filtered inventory.
+  // The regular walk still enforces directory, depth, symlink and count limits.
+  if (!cwd || !journal || journal.truncated || !canonicalRoot ||
+      path.resolve(journal.cwd || '') !== canonicalRoot) return new Set();
+  return new Set((journal.files || []).filter(row =>
+    ['created', 'modified', 'renamed'].includes(row.action) && row.after?.exists &&
+    row.after.path === row.path && /^[a-f0-9]{64}$/.test(row.after.hash || '')
+  ).map(row => path.join(cwd, row.path)));
+}
+
+function scan(cwd, since, turnSince, journal) {
+  let root;
+  if (cwd && journal) { try { root = (fs.realpathSync.native || fs.realpathSync)(cwd); } catch (_) { /* No recovery outside a verified root. */ } }
+  return scanned(cwd, since, turnSince, cwd ? collect(cwd, Number(since) || 0, 0, [], journalCandidates(cwd, journal, root)) : []);
 }
 
 function scanned(cwd, since, turnSince, out) {
@@ -135,13 +150,17 @@ function scanned(cwd, since, turnSince, out) {
   return { files, truncated, delivery, ...scope };
 }
 
-function scanAsync(cwd, since, turnSince) {
+function scanAsync(cwd, since, turnSince, journal) {
   const scopeSince = Number(since) || 0, scopeTurn = Number(turnSince) || 0;
-  const key = JSON.stringify([cwd || '', scopeSince, scopeTurn]);
+  if (journal && !journalIds.has(journal)) journalIds.set(journal, ++nextJournalId);
+  const key = JSON.stringify([cwd || '', scopeSince, scopeTurn, journal ? journalIds.get(journal) : 0]);
   if (pendingScans.has(key)) return pendingScans.get(key);
   // Only share in-flight work, never stale file contents or a failed scan.
-  const request = (async () => scanned(cwd, scopeSince, scopeTurn,
-    cwd ? await collectAsync(cwd, scopeSince, 0, []) : []))()
+  const request = (async () => {
+    const root = cwd && journal ? await fileIO(() => fs.promises.realpath(cwd)).catch(() => '') : '';
+    return scanned(cwd, scopeSince, scopeTurn,
+      cwd ? await collectAsync(cwd, scopeSince, 0, [], journalCandidates(cwd, journal, root)) : []);
+  })()
     .finally(() => { if (pendingScans.get(key) === request) pendingScans.delete(key); });
   pendingScans.set(key, request);
   return request;
@@ -153,6 +172,7 @@ function list(cwd, since, turnSince) { return scan(cwd, since, turnSince).files;
 // at the turn boundary. A completed content journal provides stronger evidence
 // for an already indexed file, without broadening the time window or file scope.
 function withJournal(scanned, journal) {
+  if (!journal || journal.truncated) return scanned;
   const changed = new Map((journal?.files || []).filter(row =>
     ['created', 'modified', 'renamed'].includes(row.action) && row.after?.exists &&
     row.after.path === row.path).map(row => [row.path, row.after]));

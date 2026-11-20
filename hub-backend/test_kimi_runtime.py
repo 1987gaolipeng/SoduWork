@@ -14,6 +14,56 @@ from unittest.mock import patch
 from app.services import acp_agents, kimi_runtime, runner_sources
 
 
+class KimiModelBudgetTests(unittest.TestCase):
+    def test_selected_model_limits_replace_inherited_limits_without_mutating_inputs(self):
+        inherited = {
+            "KIMI_MODEL_MAX_CONTEXT_SIZE": "262144",
+            "KIMI_MODEL_MAX_OUTPUT_SIZE": "65536",
+            "KIMI_MODEL_MAX_COMPLETION_TOKENS": "65536",
+            "KIMI_MODEL_API_KEY": "stale-synthetic-key",
+        }
+        llm = {"base": "http://127.0.0.1:1/v1", "model": "synthetic-small-model",
+               "key": "fresh-synthetic-key", "contextWindow": 32768, "maxOutputTokens": 4096}
+        original = dict(llm)
+        with patch.dict(os.environ, inherited):
+            env = dict(os.environ)
+            acp_agents.inject_llm_env("kimi", env, llm)
+            self.assertEqual(env["KIMI_MODEL_MAX_CONTEXT_SIZE"], "32768")
+            self.assertEqual(env["KIMI_MODEL_MAX_OUTPUT_SIZE"], "4096")
+            self.assertEqual(env["KIMI_MODEL_MAX_COMPLETION_TOKENS"], "4096")
+            self.assertEqual(env["KIMI_MODEL_API_KEY"], "fresh-synthetic-key")
+            for name, value in inherited.items():
+                self.assertEqual(os.environ[name], value)
+        self.assertEqual(llm, original)
+
+    def test_context_uses_shared_catalog_and_safe_default_without_an_output_override(self):
+        for model, expected in (("deepseek-chat", 64000), ("synthetic-model", 128000)):
+            with self.subTest(model=model):
+                env = {"KIMI_MODEL_MAX_OUTPUT_SIZE": "1024",
+                       "KIMI_MODEL_MAX_COMPLETION_TOKENS": "1024"}
+                acp_agents.inject_llm_env("kimi", env, {
+                    "base": "http://127.0.0.1:1/v1", "model": model,
+                    "localOnly": True,
+                })
+                self.assertEqual(env["KIMI_MODEL_MAX_CONTEXT_SIZE"], str(expected))
+                self.assertNotIn("KIMI_MODEL_MAX_OUTPUT_SIZE", env)
+                self.assertNotIn("KIMI_MODEL_MAX_COMPLETION_TOKENS", env)
+                self.assertEqual(env["KIMI_MODEL_API_KEY"], "soduwork-anonymous-local")
+
+    def test_output_cap_is_validated_and_never_exceeds_the_model_window(self):
+        for limit, expected in ((16384, "8192"), (True, None), (-1, None), ("4096", None)):
+            with self.subTest(limit=limit):
+                env = {}
+                acp_agents.inject_llm_env("kimi", env, {
+                    "base": "http://127.0.0.1:1/v1", "model": "synthetic-model",
+                    "key": "synthetic-key", "contextWindow": 8192,
+                    "maxOutputTokens": limit,
+                })
+                self.assertEqual(env["KIMI_MODEL_MAX_CONTEXT_SIZE"], "8192")
+                self.assertEqual(env.get("KIMI_MODEL_MAX_OUTPUT_SIZE"), expected)
+                self.assertEqual(env.get("KIMI_MODEL_MAX_COMPLETION_TOKENS"), expected)
+
+
 class KimiOutcomeTests(unittest.TestCase):
     def test_environment_is_isolated_and_packaged(self):
         env = {"NODE_OPTIONS": "--require=unrelated.cjs"}

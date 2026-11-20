@@ -143,6 +143,30 @@ function executionReviewFixture(bind) {
       acceptanceExecutionSession: true, acceptanceMode: mode, approvalId: 'pending-review',...options }) };
 }
 
+test('a cached previous review cannot clear the newly opened acceptance context', async () => {
+ const f=executionReviewFixture();
+ f.ctx._collabTasks.get(f.task.id).trace={approvals:[{id:'old-review',action:'review',status:'rejected'}]};
+ let finish;
+ f.window.SoduWorkAPI.taskTrace=()=>new Promise(resolve=>finish=resolve);
+ assert.equal(await f.open('auto'),true);
+ await new Promise(setImmediate);
+ assert.equal(f.ctx._sessionOptions.acceptanceExecutionSession,true);
+ assert.equal(f.ctx._sessionOptions.approvalId,'pending-review');
+ finish({approvals:[{id:'pending-review',action:'review',status:'pending'}]});
+ await new Promise(setImmediate);
+ assert.equal(f.ctx._sessionOptions.acceptanceMode,'auto');
+});
+
+test('scoped acceptance clears only when its own approval is terminal', () => {
+ const window={}; vm.runInNewContext(source,{window});
+ const resolved=window.ChatTaskController.acceptanceResolution;
+ for (const status of ['approved','rejected','cancelled','revoked']) {
+  assert.equal(resolved({}, {approvals:[{id:'old',action:'review',status}]}, 'current'),false);
+  assert.equal(resolved({}, {approvals:[{id:'current',action:'review',status}]}, 'current'),true);
+ }
+ assert.equal(resolved({}, {approvals:[{id:'current',action:'review',status:'pending',myDecision:{decision:'approve'}}]}, 'current'),false);
+});
+
 const timeline=()=>({schemaVersion:1,revision:'revision-a',executionContextIncluded:true,rows:[
   {id:'original',kind:'requirement',at:null,text:'Original request: blue background'},
   {id:'supplement',kind:'supplement',at:'2026-11-14T01:00:00Z',text:'Supplement: red background'},

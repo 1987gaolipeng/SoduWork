@@ -22,6 +22,7 @@ from ..services.task_dispatch_context import (
     _attach_dev_flow, _attach_skills, _fill_repo_wire, _settle_work_dir,
     _aio_thread, _link_task_repo, _stale_runner_hint, _push_task,
 )
+from ..timestamps import iso_utc
 
 router = APIRouter(prefix="/api/v1", tags=["tasks"])
 log = logging.getLogger("uvicorn.error")
@@ -222,7 +223,7 @@ async def get_delivery_state(
         "blockers": truth.get("blockers") or [],
         "approvals": approvals,
         "outputContract": contract,
-        "reviewedAt": task.reviewed_at.isoformat() if task.reviewed_at else None,
+        "reviewedAt": iso_utc(task.reviewed_at) if task.reviewed_at else None,
         "engineering": {
             "projectId": getattr(task, "project_id", None),
             "repoId": str(getattr(task, "repo_id", "") or "").strip(),
@@ -1923,7 +1924,7 @@ async def submit_task_for_review(
     """
     from ..services import release_control
     from ..services import task_requirements
-    from ..services import task_access
+    from ..services import task_notifications
     from ..services import task_events as ev
 
     # Serialize manual submission with execution starts and approval decisions.
@@ -1968,10 +1969,12 @@ async def submit_task_for_review(
         }, actor=who)
     ev.record(session, tid, "artifact.submitted_for_review",
               {"requestId": request.id, "versionId": artifact.id, "note": note}, actor=who)
+    # Commit the notification with the review, but deliver it outside this HTTP
+    # request. Slow devices must not turn an accepted submission into a timeout.
+    task_notifications.enqueue(session, task, "task.updated")
     await session.commit()
     await session.refresh(task)
     api = await svc.task_to_api_live(session, task)
-    await task_access.publish_task(session, task, "task.updated", api)
     return {"ok": True, "request": release_control.request_api(request), "task": api}
 
 

@@ -59,7 +59,12 @@ class BuildTests(unittest.TestCase):
                 patch.object(build, 'run', side_effect=run):
             build.package_native(self.ctx, 'linux', self.root)
             settings.assert_called_once()
-        self.assertEqual([args[0] for args in events], ['npm', 'npm', 'sign', 'node'])
+        signed = events.index(('sign',))
+        frozen = next(i for i, args in enumerate(events)
+                      if any(str(arg).endswith('check_runner_tls_bundle.py') for arg in args))
+        inventory = next(i for i, args in enumerate(events) if 'inventory' in args)
+        self.assertLess(frozen, signed)
+        self.assertLess(signed, inventory)
         self.assertIn('inventory', events[-1])
 
     def test_linux_public_build_without_key_fails_before_dependency_preparation(self):
@@ -137,20 +142,23 @@ console.log(JSON.stringify({ selected: selectRelease('x64'), official: RELEASE.x
         self.assertEqual(selection['selected']['sha256'], selection['official']['sha256'])
         self.assertRegex(selection['selected']['sha256'], r'^[a-f0-9]{64}$')
 
-    def test_macos_checks_tls_behavior_and_frozen_ca_before_inventory(self):
-        with patch.object(build, 'ROOT', self.root), patch.object(build, 'prepare_python'), \
-                patch.object(build.platform, 'system', return_value='Darwin'), \
-                patch.object(build.platform, 'machine', return_value='arm64'), \
-                patch.object(build, 'run') as run:
-            build.package_native(self.ctx, 'macos-arm64', self.root, validation=True)
-        commands = [tuple(map(str, call.args)) for call in run.call_args_list]
-        tls = next(i for i, args in enumerate(commands) if 'test_runner_tls' in args)
-        frozen = next(i for i, args in enumerate(commands)
-                      if any(arg.endswith('check_runner_tls_bundle.py') for arg in args))
-        inventory = next(i for i, args in enumerate(commands) if 'inventory' in args)
-        self.assertLess(tls, frozen)
-        self.assertLess(frozen, inventory)
-        self.assertEqual(commands[frozen][-1], str(self.root / 'client/runner/soduwork-runner'))
+    def test_all_platforms_check_tls_and_native_verifier_before_inventory(self):
+        for shard, host, arch in (('macos-arm64', 'Darwin', 'arm64'), ('macos-x64', 'Darwin', 'x86_64'),
+                                  ('windows', 'Windows', 'AMD64'), ('linux', 'Linux', 'x86_64')):
+            with self.subTest(shard=shard), patch.object(build, 'ROOT', self.root), \
+                    patch.object(build, 'prepare_python'), patch.object(build.shutil, 'which', return_value='fixture-tool'), \
+                    patch.object(build.platform, 'system', return_value=host), \
+                    patch.object(build.platform, 'machine', return_value=arch), patch.object(build, 'run') as run:
+                build.package_native(self.ctx, shard, self.root, validation=True)
+            commands = [tuple(map(str, call.args)) for call in run.call_args_list]
+            tls = next(i for i, args in enumerate(commands) if 'test_runner_tls' in args)
+            frozen = next(i for i, args in enumerate(commands)
+                          if any(arg.endswith('check_runner_tls_bundle.py') for arg in args))
+            inventory = next(i for i, args in enumerate(commands) if 'inventory' in args)
+            self.assertLess(tls, frozen)
+            self.assertLess(frozen, inventory)
+            binary = 'soduwork-runner.exe' if shard == 'windows' else 'soduwork-runner'
+            self.assertEqual(commands[frozen][-1], str(self.root / 'client/runner' / binary))
 
     def test_postgres_refuses_non_fixture_databases_before_running_commands(self):
         for url in ['postgresql+asyncpg://user:fixture@db.example.test/soduwork_ci',

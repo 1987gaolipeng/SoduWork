@@ -552,6 +552,14 @@
             node.dataset.messageOwner === _messageOwner(Number(match[1]))) finalReplies.add(Number(match[1]));
       });
     }
+    // A terminal marker belongs to its original turn even after a later reply.
+    // Partial output must not become a completed delivery when history reopens.
+    for (const index of finalReplies) {
+      const absolute = ctx._snap.history?.messageIndices?.[index] ??
+        ((Number(ctx._snap.history?.messageStart) || 0) + index);
+      if ((ctx._snap.turnMetrics || []).some(row => row.outcome &&
+          absolute >= row.fromMessage && absolute <= row.toMessage)) finalReplies.delete(index);
+    }
     const summaryTurns = turnSummary?.prepare(ctx._snap, finalReplies) || new Map();
     const shownSummaries = new Set();
     const appendSummary = index => {
@@ -924,7 +932,7 @@
     else _updateScrollButton(scrollState);
 
     ChatTools.paintSendButton(el, busy, ctx._messageAttachments, ctx._stopState,
-      st === 'streaming' || execution.running === true || qualityBusy, ctx._sendState);
+      ['streaming', 'queued'].includes(st) || execution.running === true || qualityBusy, ctx._sendState);
 
     if (ctx._snap.modelSelection) ctx._model = ctx._snap.modelSelection.activeModel;
     if (ctx._composerControls) ctx._composerControls.render();

@@ -27,10 +27,14 @@ function create(ctx) {
     if (ctx.opts?.resumedConversation) return ctx.pluginOutputSince || 0;
     return ctx.startedAt;
   }
-  function completedOutputs(scanned) {
+  function completedJournal() {
     const journal = ctx.completedOutputJournal;
     return journal && journal.startedAt === ctx.run.startedAt && journal.changes === ctx.handle.fileChanges
-      ? require('./outputs').withJournal(scanned, journal.changes) : scanned;
+      ? journal.changes : null;
+  }
+  function completedOutputs(scanned) {
+    const journal = completedJournal();
+    return journal ? require('./outputs').withJournal(scanned, journal) : scanned;
   }
   return {
 ref: ctx.ref,
@@ -59,13 +63,13 @@ outputs() {
     },
 outputSnapshot() {
       const since = outputsSince();
-      return { ...completedOutputs(require('./outputs').scan(ctx.effectiveCwd, since, ctx.run.startedAt || 0)),
+      return { ...completedOutputs(require('./outputs').scan(ctx.effectiveCwd, since, ctx.run.startedAt || 0, completedJournal())),
         pluginSince: ctx.pluginOutputSince, pluginValidation: require('./plugin-generation-gate.cjs').records(ctx.handle), fileChanges: ctx.handle.fileChanges || null };
     },
 async outputSnapshotAsync() {
       const since = outputsSince();
       const turnSince = ctx.run.startedAt || 0, fileChanges = ctx.handle.fileChanges || null;
-      const scanned = await require('./outputs').scanAsync(ctx.effectiveCwd, since, turnSince);
+      const scanned = await require('./outputs').scanAsync(ctx.effectiveCwd, since, turnSince, completedJournal());
       if ((ctx.run.startedAt || 0) !== turnSince || (ctx.handle.fileChanges || null) !== fileChanges)
         throw Error('当前轮次的成果已变化，请刷新后重试');
       return { ...completedOutputs(scanned), pluginSince: ctx.pluginOutputSince, pluginValidation: require('./plugin-generation-gate.cjs').records(ctx.handle), fileChanges };
@@ -196,7 +200,8 @@ historyRow(existingSnapshot) {
         collaboration: Boolean((ctx.handle.taskIds || []).length || ctx.handle.taskRef),
         at: ctx.updatedAt, count: (snap.messages || []).length,
         state: ctx.failedLastTurn || ctx.qualityPhase === 'blocked' ? 'failed' :
-          ((ctx.inFlight || ctx.turnQueue.size()) && snap.status !== 'waiting-user' ? 'running' : _presenceState(snap.status)),
+          ((ctx.inFlight || ctx.turnQueue.size()) && snap.status !== 'waiting-user' ? 'running' :
+            require('./turn-outcome').historyState(snap) || _presenceState(snap.status)),
         status: snap.status, live: true,
       };
     },
@@ -315,8 +320,11 @@ disableGoal() {
       ctx._emit({ kind: 'goal-disabled' });
       return { ok: true, snapshot: ctx._snapshot() };
     },
-cancel() {
+cancel(options = {}) {
       if (stopPromise) return stopPromise;
+      if (options.userInitiated === true && !ctx.turnQueue.active()?.options.controlled) {
+        require('./turn-outcome').userStopped(ctx);
+      }
       ctx.resourceActivation.cancel();
       ctx.immediate.cancel();
       ctx.liveAccess.cancel();

@@ -165,6 +165,13 @@ function _status(value) {
   return 'idle';
 }
 
+function _executionTime(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null;
+  // Native Runner metadata uses epoch seconds. Accept millisecond snapshots
+  // from existing callers, but publish one millisecond clock to the renderer.
+  return Math.min(Date.now(), value > 0 && value < 1e11 ? Math.round(value * 1000) : value);
+}
+
 function _localFiles(items) {
   return (Array.isArray(items) ? items : []).map((item) => {
     const source = String(item && (item.path || item.stagedPath) || '');
@@ -290,13 +297,21 @@ function _snapshot(state) {
   const validating = Boolean((state.pluginGenerationActive || state.pluginGenerationPreparing) &&
     !state.goalPaused && !state.cancelRequested && (state.status === 'idle' ||
       state.pluginGenerationPreparing && state.status === 'aborted'));
-  const executing = state.status === 'streaming' || validating;
-  const running = executing || state.status === 'queued' || Boolean(state.pendingPermissions?.length);
+  const waitingForStart = (state.status === 'streaming' || state.status === 'queued') &&
+    (state.status === 'queued' || state.executionStartedAt === 0);
+  const executing = state.status === 'streaming' && !waitingForStart || validating;
+  const running = executing || Boolean(state.pendingPermissions?.length);
+  const occupied = running || waitingForStart;
   const now = Date.now();
-  const elapsed = state.startedAt ? Math.max(0, (state.turnEndedAt || now) - state.startedAt) : 0;
+  const executionStart = state.executionStartedAt;
+  const elapsedStart = executionStart === null ? state.startedAt : executionStart;
+  const elapsed = elapsedStart ? Math.max(0, (state.turnEndedAt || now) - elapsedStart) : 0;
+  const queueWaitMs = state.submittedAt && executionStart !== null
+    ? Math.max(0, (executionStart || state.turnEndedAt || now) - state.submittedAt) : null;
   const active = state.tools.find((tool) => tool.state === 'running') || null;
   const latestProgressAt = Math.max(
-    Number(state.lastActivityAt || state.startedAt || now),
+    Number(state.lastActivityAt || elapsedStart || now),
+    Number(executionStart || 0),
     Number(active && (active.lastProgressAt || active.startedAt) || 0),
   );
   const idleMs = executing ? Math.max(0, now - latestProgressAt) : 0;
@@ -352,12 +367,18 @@ function _snapshot(state) {
     execution: {
       configured: state.goalVisible,
       visible: state.goalVisible,
-      active: running,
+      active: occupied,
       stopped: state.status === 'aborted' && !state.goalPaused,
       running,
       step: state.taskGoal?.steps ?? state.step,
       maxSteps: state.taskGoal?.maxSteps ?? Number(state.maxSteps || 0),
       elapsedMs: state.taskGoal?.elapsedMs ?? elapsed,
+      ...(state.taskGoal ? { elapsedObservedAt: state.taskGoalElapsedAt || null } : {}),
+      executionStartedAt: executionStart,
+      submittedAt: state.submittedAt || null,
+      waitingForStart,
+      queueWaitMs,
+      startupWaitSince: state.startupWaitSince || null,
       budgetMs: state.taskGoal?.budgetMs ?? Math.max(0, Number(state.budgetMinutes || 0) * 60000),
       paused: state.goalPaused,
       limitRequest: state.goalLimit ? { ...state.goalLimit,
@@ -373,7 +394,7 @@ function _snapshot(state) {
       queueClass: String(state.queueClass || ''),
       longRunning: Boolean(executing && active &&
         now - Number(active.startedAt || now) >= toolGuard.SOFT_NOTICE_MS),
-      stalled: Boolean(executing && state.startedAt &&
+      stalled: Boolean(executing && elapsedStart &&
         idleMs >= toolGuard.STALL_NOTICE_MS),
       idleMs,
       tool: active ? {
@@ -398,9 +419,9 @@ function _snapshot(state) {
       harness: {
         schemaVersion: 1,
         runId: state.runnerRef,
-        node: state.status === 'queued' ? 'queue' : (executing ? 'execute' : 'deliver'),
+        node: state.status === 'queued' ? 'queue' : (waitingForStart ? 'prepare' : (executing ? 'execute' : 'deliver')),
         phase: state.goalPaused ? 'paused' : state.goalVisible && state.taskGoal ? state.taskGoal.status : state.status === 'queued' ? 'queued' :
-          (executing ? 'working' : (state.status === 'idle' ? 'completed' : 'blocked')),
+          (waitingForStart ? 'starting' : (executing ? 'working' : (state.status === 'idle' ? 'completed' : 'blocked'))),
         state: state.status,
         decision: '', reason: state.statusText,
         attempts: state.round, iteration: state.taskGoal?.steps ?? state.step,
@@ -559,7 +580,8 @@ async function createRunnerHandle(request, defaults, initialSession) {
     completion: null,
     runtimeError: '',
     protocolIssue: null,
-    seq: 0, step: 0, round: 1, startedAt: 0, updatedAt: Date.now(), lastActivityAt: 0,
+    seq: 0, step: 0, round: 1, startedAt: 0, submittedAt: 0, executionStartedAt: null, startupWaitSince: 0,
+    updatedAt: Date.now(), lastActivityAt: 0,
     started: resumeNative, dispatchReady: resumeNative,
     cancelRequested: false, manualStopRequested: false, stopSent: false,
     queuePosition: 0, queueClass: '', turnSerial: 0,
@@ -700,6 +722,33 @@ async function createRunnerHandle(request, defaults, initialSession) {
   }
 
   const messageStream = require('./runner-messages').create(state, redact);
+  let pendingUserEcho = null;
+  let lastConfirmedAdmissionKey = '';
+
+  function bindUserEcho(key, options) {
+    const row = turnQueue.active()?.runnerUserMessage;
+    pendingUserEcho = row && options.recordUser !== false ? { key, previousKey: lastConfirmedAdmissionKey, row } : null;
+  }
+
+  function acknowledgeUserEcho(item, text) {
+    if (!pendingUserEcho) return false;
+    const { key, previousKey, row } = pendingUserEcho;
+    const sentAt = messageTime.epoch(item.sentAt);
+    const id = String(item.submissionId || '').slice(0, 128);
+    if (id && row.submissionId && id !== row.submissionId) return false;
+    if (sentAt && sentAt !== row.sentAt) return false;
+    if (item.admissionKey !== key && !(id && id === row.submissionId)) {
+      // Older Runners omit the key or stamp a comment before advancing the
+      // admission. Require the original timestamp for a previous-key echo.
+      if (item.admissionKey && (item.admissionKey !== previousKey || !sentAt)) return false;
+      if (_text(row.text, 50000) !== text) return false;
+    }
+    pendingUserEcho = null;
+    lastConfirmedAdmissionKey = key;
+    row.runnerPersisted = true;
+    if (id && !row.submissionId) row.submissionId = id;
+    return true;
+  }
 
   function appendItem(item) {
     const kind = String(item.kind || '');
@@ -758,14 +807,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
       messageStream.finish();
       state.startedAt = Math.max(state.startedAt || 0, eventAt);
       state.turnEndedAt = 0;
-      const existing = state.messages.find((row) => row.role === 'user' &&
-        row.text === rawText && !row.runnerPersisted);
-      if (existing) {
-        existing.runnerPersisted = true;
-        existing.sentAt = existing.sentAt || messageTime.epoch(item.sentAt) || messageTime.epoch(item.at);
-        if (!existing.submissionId && item.submissionId) existing.submissionId = String(item.submissionId).slice(0, 128);
-        return;
-      }
+      if (acknowledgeUserEcho(item, rawText)) return;
       const plugins = publicPluginBadges(item.plugins);
       // New user events record the effective selection, including an explicit
       // empty selection. Replaying only nonempty badges would undo a clear.
@@ -1019,10 +1061,16 @@ async function createRunnerHandle(request, defaults, initialSession) {
         }
         return;
       }
+      if (data.admissionKey) lastConfirmedAdmissionKey = data.admissionKey;
       const recovered = state.recoveryRequired;
       state.reconnectSince = 0;
       state.reconnectAttempts = 0;
-      if (Number(data.executionStartedAt) > 0) void turnQueue.markStarted();
+      // A running admission can still be preparing the native process. Only
+      // the executor's timestamp starts model execution and its visible clock.
+      state.executionStartedAt = _executionTime(data.executionStartedAt) ?? (data.status === 'queued' ? 0 : null);
+      if (data.status === 'queued') state.startupWaitSince = 0;
+      else if (state.executionStartedAt === 0) state.startupWaitSince ||= Date.now();
+      if (state.executionStartedAt > 0) void turnQueue.markStarted();
       if (data.authorizationRequired && !readOnly) {
         const authorization = await runtime.rpc('job.authorize', {
           ref: state.runnerRef,
@@ -1157,7 +1205,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
         state.statusText = '等待权限确认';
       } else if (state.status === 'queued') {
         state.statusText = state.queuePosition > 0
-          ? '\u6392\u961f\u4e2d \u00b7 \u524d\u9762 ' + state.queuePosition + ' \u9879'
+          ? '\u6392\u961f\u4e2d \u00b7 \u7b2c ' + state.queuePosition + ' \u9879'
           : '\u6392\u961f\u4e2d';
       } else if (state.runtimeError && state.status !== 'streaming') {
         state.status = 'unreachable';
@@ -1245,24 +1293,29 @@ async function createRunnerHandle(request, defaults, initialSession) {
   function appendUser(text, attachments, plugins, sentAt, submissionId) {
     const badges = publicPluginBadges(plugins);
     if (badges.length) state.activePluginIds = _pluginIds(badges);
-    const previous = turnQueue.active()?.options[resumedUser];
+    const active = turnQueue.active();
+    const previous = active?.options[resumedUser];
     if (previous && state.messages.includes(previous)) {
+      active.runnerUserMessage = previous;
       previous.plugins = badges;
       return;
     }
     const id = String(submissionId || '').trim().slice(0, 128);
-    state.messages.push({ role: 'user', text, sentAt: messageTime.epoch(sentAt) || Date.now(),
+    const row = { role: 'user', text: redact(text), sentAt: messageTime.epoch(sentAt) || Date.now(),
       ...(id ? { submissionId: id } : {}),
       attachments: Array.isArray(attachments) ? attachments : [], plugins: badges,
-      runnerPersisted: false });
+      runnerPersisted: false };
+    state.messages.push(row);
+    if (active) active.runnerUserMessage = row;
   }
 
   function dispatch(text, attachments, turnOptions) {
     const generation = beginSubmission();
     const turnPolicy = state.nextAccessPolicy || state.accessPolicy;
     const next = turnOptions || {};
-    const dispatchedGoal = taskGoalSupported && !next.controlled &&
-      (state.taskGoalContract || taskGoal.fromText(text));
+    // Only a goal explicitly configured through session options may create a
+    // persistent Runner loop. Ordinary task wording must remain ordinary chat.
+    const dispatchedGoal = taskGoalSupported && !next.controlled && state.taskGoalContract;
     if (dispatchedGoal) taskGoal.activate(state, dispatchedGoal);
     state.cancelRequested = false;
     state.manualStopRequested = false;
@@ -1271,11 +1324,16 @@ async function createRunnerHandle(request, defaults, initialSession) {
     state.goalLimit = null;
     state.started = true;
     state.unconfirmedAdmissionKey = 'dispatch:' + state.runnerRef;
+    bindUserEcho(state.unconfirmedAdmissionKey, next);
     state.status = 'streaming';
     state.statusText = state.intent === 'goal'
       ? displayName + ' 正在理解并开始工作…' : displayName + ' 正在理解你的问题…';
     messageStream.finish();
     state.startedAt = Date.now();
+    state.submittedAt = state.startedAt;
+    state.executionStartedAt = 0;
+    state.startupWaitSince = state.startedAt;
+    state.queuePosition = 0;
     state.turnEndedAt = 0;
     state.runtimeError = '';
     state.protocolIssue = null;
@@ -1350,7 +1408,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
       state.queueClass = String(data.queueClass || '');
       if (state.status === 'queued') {
         state.statusText = state.queuePosition > 0
-          ? '\u6392\u961f\u4e2d \u00b7 \u524d\u9762 ' + state.queuePosition + ' \u9879'
+          ? '\u6392\u961f\u4e2d \u00b7 \u7b2c ' + state.queuePosition + ' \u9879'
           : '\u6392\u961f\u4e2d';
       }
       poll();
@@ -1381,9 +1439,6 @@ async function createRunnerHandle(request, defaults, initialSession) {
     const generation = beginSubmission();
     const turnPolicy = state.nextAccessPolicy || state.accessPolicy;
     const next = turnOptions || {};
-    const nextGoal = taskGoalSupported && !repairing && !next.controlled && !next.taskGoalControl &&
-      (!state.goalVisible || state.taskGoal?.status === 'completed') ? taskGoal.fromText(text) : null;
-    if (nextGoal) taskGoal.activate(state, nextGoal);
     state.status = 'streaming';
     state.cancelRequested = false;
     state.manualStopRequested = false;
@@ -1394,7 +1449,13 @@ async function createRunnerHandle(request, defaults, initialSession) {
       ? '已收到，' + displayName + ' 将按顺序继续…'
       : '已收到，' + displayName + ' 正在理解这句话…';
     messageStream.finish();
-    if (!repairing) state.startedAt = Date.now();
+    if (!repairing) {
+      state.startedAt = Date.now();
+      state.submittedAt = state.startedAt;
+      state.executionStartedAt = 0;
+      state.startupWaitSince = state.startedAt;
+      state.queuePosition = 0;
+    }
     state.turnEndedAt = 0;
     emit('started');
     state.runtimeError = '';
@@ -1406,11 +1467,11 @@ async function createRunnerHandle(request, defaults, initialSession) {
     state.turnSerial += 1;
     const turnId = 'turn:' + state.alias + ':' + state.turnSerial + ':' + Date.now().toString(36);
     state.unconfirmedAdmissionKey = 'comment:' + turnId;
+    bindUserEcho(state.unconfirmedAdmissionKey, next);
     const taskContext = taskJournal.context();
     const dispatchedEffort = state.agentExecution?.reasoningEffort || '';
     runtime.rpc('job.comment', {
       ref: state.runnerRef, text, turnId,
-      ...(nextGoal ? { taskGoal: nextGoal } : {}),
       ...(taskGoalSupported && !repairing && next.taskGoalControl ? { taskGoalControl: next.taskGoalControl } : {}),
       ...(executionModelId(state.model) !== state.lastExecutionModelId || adapterId === 'codex' && dispatchedEffort !== state.lastExecutionReasoningEffort
         ? { executionSelection: { agentId: adapterId, modelName: executionModelId(state.model), reasoningEffort: dispatchedEffort } } : {}),
@@ -1453,7 +1514,7 @@ async function createRunnerHandle(request, defaults, initialSession) {
         state.queueClass = String(data.queueClass || state.queueClass || '');
         if (state.status === 'queued') {
           state.statusText = state.queuePosition > 0
-            ? '\u6392\u961f\u4e2d \u00b7 \u524d\u9762 ' + state.queuePosition + ' \u9879'
+            ? '\u6392\u961f\u4e2d \u00b7 \u7b2c ' + state.queuePosition + ' \u9879'
             : '\u6392\u961f\u4e2d';
         }
         if (state.timer) clearTimeout(state.timer);
@@ -1596,6 +1657,10 @@ async function createRunnerHandle(request, defaults, initialSession) {
     // Resolve the conversation's current selection at dequeue. Every turn
     // obtains its own grant; queued or cancelled drafts cannot change it early.
     const requested = pluginTurn.requestedIds(next.options);
+    // Main-process admission can freeze an inherited selection for app/MCP
+    // isolation. Keep that snapshot rather than borrowing another queued turn.
+    const capturedInheritance = next.options.inheritedPluginSelection === true;
+    const inheritedPlugins = (!requested.length || capturedInheritance) && next.options.clearPluginSelection !== true;
     if (next.options.clearPluginSelection === true) {
       state.activePluginIds = [];
     }
@@ -1608,6 +1673,25 @@ async function createRunnerHandle(request, defaults, initialSession) {
       if (next.options.controlled) return next.options.controlled.execute(handle, next.text, next.attachments);
       const send = () => {
         if (state.disposed || state.cancelRequested || state.goalPaused || next.stopRequested) return { ok: true, cancelled: true };
+        if (inheritedPlugins && !next.options.internal && !next.options.controlled && !next.options.taskId &&
+            !handle.taskRef && !handle.taskIds?.length && !next.options.goalMode && !state.goalVisible &&
+            !state.taskGoalContract && state.intent !== 'goal' && next.options.source !== 'automation' &&
+            !handle.appPluginId && !opts.appContext) {
+          try {
+            const inheritedIds = capturedInheritance ? requested : state.activePluginIds;
+            const retained = require('../personal-plugins').pruneUnavailableInherited(app, inheritedIds);
+            if (retained.length !== inheritedIds.length) {
+              // Record even an empty selection before any later model/provider
+              // failure; replay must not revive a deleted plugin from old turns.
+              taskJournal.append(state.seq, { kind: 'plugin-selection', pluginIds: retained });
+              state.activePluginIds = retained;
+            }
+            next.options = { ...next.options, pluginIds: retained };
+          } catch (error) {
+            return { ok: false, failureKind: 'plugin-grant', retrySafe: true,
+              reason: '插件没能在发送前完成授权：' + String(error?.message || error) };
+          }
+        }
         if (state.model.historicalLocal) throw Error('原本地模型已删除或不可用，请先选择一个当前可用模型后再发送');
         const byteAttachments = (Array.isArray(next.attachments) ? next.attachments : []).some(item =>
           item && item.data != null && !path.isAbsolute(String(item.path || item.stagedPath || '')));

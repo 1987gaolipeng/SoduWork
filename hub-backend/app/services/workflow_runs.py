@@ -15,6 +15,7 @@ from .task_access import publish_owner
 from . import (release_control, resource_leases, task_code_targets, task_events,
                workflow_context, workflow_contracts, workflow_diagnostics,
                plugin_ui_contracts)
+from .workflow_contracts import stored_rework_policy
 from .workflow_route_policy import (
     execution_preferences, _execution_layer, normalize_binding_execution, execution_route,
 )
@@ -96,10 +97,10 @@ async def run_api(session: AsyncSession, run: am.WorkflowRun) -> dict:
             if row.node_type == "human_review" and request_id:
                 request = await session.get(am.ApprovalRequest, request_id)
                 definition = definitions.get(row.node_key) or {}
-                retry_from = str(dict(dict(definition.get("config") or {}).get(
-                    "onReject") or {}).get("retryFrom") or "")
+                policy = stored_rework_policy(definition.get("config") or {}, "onReject")
+                retry_from = policy.get("retryFrom")
                 if not (request and request.status == "rejected"
-                        and row.state == "rework" and retry_from):
+                        and row.state == "rework" and retry_from in definitions):
                     continue
             retryable_ids.add(row.id)
     events = list((await session.execute(select(am.WorkflowEvent).where(
@@ -293,8 +294,8 @@ async def _retry_failed_gate(session: AsyncSession, run: am.WorkflowRun, actor: 
         review = dict(dict(source.output or {}).get("review") or {})
         if str(review.get("verdict") or "") != "changes_requested":
             raise ValueError("这次 AI 审查没有可恢复的返修结论")
-        policy = dict(dict(definition.get("config") or {}).get("onFailure") or {})
-        retry_from = str(policy.get("retryFrom") or "")
+        policy = stored_rework_policy(definition.get("config") or {}, "onFailure")
+        retry_from = policy.get("retryFrom")
         if not retry_from:
             raise ValueError("当前插件没有为 AI 审查配置返修入口")
         context = dict(run.context or {})
@@ -348,12 +349,13 @@ async def _retry_failed_gate(session: AsyncSession, run: am.WorkflowRun, actor: 
     if source.node_type == "human_review" and (source.output or {}).get("requestId"):
         request = await session.get(
             am.ApprovalRequest, str((source.output or {}).get("requestId") or ""))
-        on_reject = dict(dict(definition.get("config") or {}).get("onReject") or {})
-        retry_from = str(on_reject.get("retryFrom") or "")
+        on_reject = stored_rework_policy(definition.get("config") or {}, "onReject")
+        retry_from = on_reject.get("retryFrom")
         # Recover older rejections blocked by historical retry counters.
         # Resume the requested rework node without reopening or changing the human decision.
-        if request and request.status == "rejected" and source.state == "rework" and retry_from:
-            nodes = list(dict(version.workflow or {}).get("nodes") or [])
+        nodes = list(dict(version.workflow or {}).get("nodes") or [])
+        if (request and request.status == "rejected" and source.state == "rework"
+                and retry_from in {node["key"] for node in nodes}):
             affected, changed = {retry_from}, True
             while changed:
                 changed = False
@@ -834,8 +836,8 @@ def _continuation_rework_feedback(
     from . import workflow_engine
 
     for definition in reversed(nodes):
-        policy = dict(dict(definition.get("config") or {}).get("onFailure") or {})
-        if str(policy.get("retryFrom") or "").strip() != target:
+        policy = stored_rework_policy(definition.get("config") or {}, "onFailure")
+        if policy.get("retryFrom") != target:
             continue
         source = source_latest.get(str(definition.get("key") or ""))
         if source is None or source.state not in {"failed", "rework"}:

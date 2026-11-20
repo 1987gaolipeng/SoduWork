@@ -86,7 +86,7 @@ test('an otherwise valid signed manifest is rejected when isolated public trust 
     fs.rmSync(root, { recursive: true, force: true });
   });
   fs.mkdirSync(path.join(root, 'main'));
-  for (const file of ['distribution.cjs', 'hub-endpoint.cjs']) {
+  for (const file of ['distribution.cjs', 'hub-endpoint.cjs', 'default-hub.cjs']) {
     fs.copyFileSync(path.join(__dirname, '../main', file), path.join(root, 'main', file));
   }
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify(require('../package.json')));
@@ -98,8 +98,9 @@ test('an otherwise valid signed manifest is rejected when isolated public trust 
 
 for (const isPackaged of [false, true]) test(`self-hosted ${isPackaged ? 'packaged' : 'source'} clients persist an editable Hub`, t => {
   const app = appFixture(t, isPackaged);
-  assert.deepEqual(endpoint.initialize(app, {}), { hub: 'https://service.soduwork.ai', editable: true, internalTest: false });
-  for (const hub of ['http://127.0.0.1:18989', 'https://hub.example.test']) {
+  const defaultHub = isPackaged ? 'https://service.soduwork.ai' : 'http://127.0.0.1:18989';
+  assert.deepEqual(endpoint.initialize(app, {}), { hub: defaultHub, editable: true, internalTest: false });
+  for (const hub of ['http://127.0.0.1:18990', 'https://service.soduwork.ai', 'https://hub.example.test']) {
     assert.equal(endpoint.prepare(app, hub).ok, true);
     assert.equal(endpoint.initialize(app, {}).hub, hub);
   }

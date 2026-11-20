@@ -19,6 +19,7 @@ _COUNTERS = (
     "duration_ms", "cost_microusd",
 )
 from .usage_values import _QUALITY_RANK, _number, normalize_usage
+from ..timestamps import iso_utc
 
 def _dt(value: Any) -> datetime:
     if isinstance(value, datetime):
@@ -165,7 +166,7 @@ def to_api(row: models.AIUsageEvent) -> dict:
             "costMicrousd": int(row.cost_microusd or 0),
         },
         "quality": row.quality,
-        "occurredAt": row.occurred_at.isoformat() if row.occurred_at else "",
+        "occurredAt": iso_utc(row.occurred_at) if row.occurred_at else "",
     }
 
 

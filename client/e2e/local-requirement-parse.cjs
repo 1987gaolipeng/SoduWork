@@ -39,7 +39,7 @@ fs.mkdirSync(profile);
 app.setAppPath(client); app.setPath('userData', profile); app.disableHardwareAcceleration();
 if (process.platform === 'darwin') app.commandLine.appendSwitch('use-mock-keychain');
 app.on('window-all-closed', () => {});
-const report = { ok: false, cases: [], boundary: 'Real Electron process, production preload, parser IPC, api.js, model resolver and safeStorage. macOS uses the Chromium test keychain. Authentication and non-streaming inference use synthetic TCP fixtures; the renderer is a minimal test page, not product-modal or production-model acceptance.' };
+const report = { ok: false, platform: process.platform, arch: process.arch, cases: [], boundary: 'Real Electron process, production preload, parser IPC, api.js, model resolver and safeStorage. macOS uses the Chromium test keychain. Authentication and non-streaming inference use synthetic TCP fixtures; the renderer is a minimal test page, not product-modal or production-model acceptance.' };
 const hubRequests = [], providerRequests = [], fixtureErrors = [];
 const privateKey = crypto.randomBytes(24).toString('hex');
 let win, hubServer, providerServer, hub, providerUrl, responseMode = 'success', account = '';
@@ -76,17 +76,25 @@ app.whenReady().then(async () => {
       assert.equal(request.url, '/private-parser/v1/chat/completions');
       assert.equal(body.stream, false); assert.equal(Array.isArray(body.messages), true);
       assert.equal(body.messages[0].role, 'system'); assert.equal(body.messages[1].role, 'user');
-      if (responseMode !== 'timeout') {
+      if (!['timeout', 'explicit-budget'].includes(responseMode)) {
         assert.ok(body.messages[0].content.includes('Output language: ' + expectedLanguage + '.'));
         assert.match(body.messages[0].content, /Keep JSON keys, enum values, dates, proper names, identifiers, and literal quotations unchanged/);
       }
       assert.equal(Object.hasOwn(body, 'tools'), false);
       assert.ok(['private-parser-wire', 'private-parser-keyed-wire'].includes(body.model));
       assert.equal(request.headers.authorization, body.model === 'private-parser-wire' ? undefined : 'Bearer ' + privateKey);
-      providerRequests.push({ model: body.model, mode: responseMode });
+      const tokenField = body.model === 'private-parser-wire' ? 'max_tokens' : 'max_completion_tokens';
+      assert.equal(Object.hasOwn(body, tokenField === 'max_tokens' ? 'max_completion_tokens' : 'max_tokens'), false);
+      assert.equal(body.reasoning_effort, undefined, 'always-thinking models cannot be forced off');
+      const outputBudget = body[tokenField];
+      assert.ok(Number.isSafeInteger(outputBudget));
+      providerRequests.push({ model: body.model, mode: responseMode, tokenField, outputBudget });
       if (responseMode === 'timeout') return;
       if (responseMode === 'error') return reply(response, { error: {
         message: 'private-parser-wire ' + privateKey + ' ' + providerUrl } }, 503);
+      // Reasoning may exhaust a small completion budget before any final text.
+      if (outputBudget < 4096) return reply(response, { choices: [{ message: {
+        content: '', reasoning_content: 'Private fixture reasoning' }, finish_reason: 'length' }] });
       const text = responseMode === 'invalid' ? '{"unexpected":"not a requirement"}' : responseMode === 'locale'
         ? JSON.stringify({ title: 'Review Project 星河', note: 'Prepare the release for Project 星河. Preserve "原文引用".',
           checklist: ['Confirm release readiness'], priority: 'normal', kind: 'requirement', due: '2026-12-01', tags: ['release'] }) : JSON.stringify({
@@ -119,7 +127,9 @@ app.whenReady().then(async () => {
     { id: 'private-parser', baseUrl: providerUrl, authMode: 'none' },
     { id: 'private-keyed', baseUrl: providerUrl, authMode: 'key' }],
   models: [{ providerId: 'private-parser', name: 'private-parser-wire' },
-    { providerId: 'private-keyed', name: 'private-parser-keyed-wire' }], keys: { 'private-keyed': privateKey } });
+    { providerId: 'private-keyed', name: 'private-parser-keyed-wire', config: {
+      maxOutputTokens: 8192, reasoning: true, thinkingMode: 'always', thinkingFormat: 'openai',
+      supportsReasoningEffort: true } }], keys: { 'private-keyed': privateKey } });
   const [localRef, keyedRef] = catalog.myModels.map(row => row.id);
   require('../main/pi-session/ipc').install({ app, ipcMain, BrowserWindow, identityOf, sendIdentityOf: identityOf,
     capabilityGrantsOf: () => [], authorizeAI: require('../main/conversation/quota-admission.cjs').create({ app, identityOf }) });
@@ -146,14 +156,34 @@ app.whenReady().then(async () => {
   assert.equal((await auth.login(app, { hub, account: 'synthetic-parser-owner', password: 'synthetic-password',
     workRoot: root, name: 'Private parser E2E', platform: process.platform })).ok, true);
   for (const kind of ['requirement', 'automation']) {
+    const before = providerRequests.length;
     const result = await parse(localRef, kind);
     assert.equal(result.title, 'Local parsed draft', JSON.stringify(result));
     assert.match(result.note, /Keep every original requirement/);
     assert.deepEqual(result.checklist, ['Keep local constraints']);
+    assert.equal(providerRequests.length, before + 1, 'extraction sends only one provider request');
+    assert.equal(providerRequests.at(-1).outputBudget, 16384);
     mark('Production api.js ' + kind + ' parsing reaches the keyless private provider through real IPC');
   }
-  assert.equal((await parse(keyedRef)).title, 'Local parsed draft');
-  mark('Key-authenticated private parsing sends the credential only to its configured provider');
+  for (const kind of ['requirement', 'automation']) {
+    const before = providerRequests.length;
+    assert.equal((await parse(keyedRef, kind)).title, 'Local parsed draft');
+    assert.equal(providerRequests.length, before + 1);
+    assert.equal(providerRequests.at(-1).outputBudget, 8192);
+    assert.equal(providerRequests.at(-1).tokenField, 'max_completion_tokens');
+  }
+  mark('Key-authenticated reasoning extraction uses its configured budget and accepted token field for both draft types');
+  responseMode = 'explicit-budget';
+  const beforeLimited = providerRequests.length;
+  const limited = await js(`soduWorkAPI.conversationSession.localRequirementParse({model:${JSON.stringify(keyedRef)},
+    input:'Original requirement',instructions:'Only JSON',requestId:'private-parser-explicit-budget',maxOutputTokens:128})`);
+  assert.equal(limited.ok, false);
+  assert.equal(limited.code, 'APP_AI_OUTPUT_LIMIT');
+  assert.equal(limited.text, undefined);
+  assert.equal(providerRequests.length, beforeLimited + 1, 'a truncated result must not be retried');
+  assert.equal(providerRequests.at(-1).outputBudget, 128);
+  assert.equal(JSON.stringify(limited).includes('Private fixture reasoning'), false);
+  mark('Explicit smaller native budgets remain effective and reasoning-only truncation reports the limit without retrying');
   expectedLanguage = 'English'; responseMode = 'locale';
   await js("SoduWorkI18n.setLocale('en-US', {persist:false,broadcast:false})");
   const english = await parse(localRef, 'requirement', '请整理 Project 星河，保留“原文引用”，于 2026-12-01 完成。');

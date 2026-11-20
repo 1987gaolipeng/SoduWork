@@ -24,6 +24,8 @@ _ANSI = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 _IDLE_LIMIT_S = int(os.environ.get("SODUWORK_LOCAL_IDLE_LIMIT_S") or 15 * 60)
 _HARD_LIMIT_S = int(os.environ.get("SODUWORK_LOCAL_HARD_LIMIT_S") or 8 * 3600)
 _TIMEOUT_S = _HARD_LIMIT_S          # Compatibility alias for older callers.
+_LAUNCH_TREE_UNCONFIRMED = "execution_launch_cleanup_unconfirmed"
+_LAUNCH_TREE_UNCONFIRMED_ERROR = "执行主进程已退出，但子进程清理仍未确认，请检查这条会话的剩余执行进程"
 
 # Use a configurable context-window estimate when the gateway cannot report the real limit.
 # Label estimates in the UI and replace them with observed limits when overflow errors provide one.
@@ -493,6 +495,7 @@ _PERSIST_KEYS += ("conversationMode", "turnStartSeq", "admissionKey", "reasoning
 _PERSIST_KEYS += ("goalContract", "goalState", "goalUserPending", "goalTurnOwned")
 _PERSIST_KEYS += ("turnEndIdentity", "admissionStartSeq")
 _PERSIST_KEYS += ("usageReceipts", "modelLocalOnly", "activeUsageOwner")
+_PERSIST_KEYS += ("eventDestination",)
 
 
 def _save_meta(ref: str) -> None:
@@ -508,6 +511,8 @@ def _save_meta(ref: str) -> None:
         if run.get("cli") == "codex":
             run["codexTransport"] = (run.get("cfg") or {}).get(_account_acp.TRANSPORT_KEY, run.get("codexTransport") or "")
         data = {k: run.get(k) for k in _PERSIST_KEYS}
+        if "eventDestination" not in run:
+            data.pop("eventDestination", None)
         # Keep snapshot and replacement in one ordered critical section.
         data["ref"] = ref
         try:
@@ -744,6 +749,10 @@ def _reclaim_missing() -> dict:
         except Exception:  # noqa: BLE001
             continue
         run = {k: meta.get(k) for k in _PERSIST_KEYS}
+        if "eventDestination" not in meta:
+            run.pop("eventDestination", None)
+        from .runner_event_scope import restore_destination
+        restored_destination = restore_destination(run, ref)
         # Older archives seeded this exact placeholder before the first request.
         if run.get("tokens") == {"input": 0, "output": 0, "total": 0}:
             run["tokens"] = {}
@@ -777,6 +786,15 @@ def _reclaim_missing() -> dict:
             if ref in _RUNS:
                 continue
             _RUNS[ref] = run
+        if restored_destination:
+            _save_meta(ref)
+        if run.get('state') == 'running' and run.get('failureKind') == _LAUNCH_TREE_UNCONFIRMED:
+            # A dead host cannot prove that its previously unverified children
+            # exited. Restart must retain this session's admission fence.
+            run.update(detached=True, stopping=True, error=_LAUNCH_TREE_UNCONFIRMED_ERROR)
+            n_live += 1
+            _save_meta(ref)
+            continue
         if run.get("state") == "running" and run.get("accessPolicy"):
             # The approval token and session grants deliberately die with the
             # Runner. Stop this new-contract process before offering resume;

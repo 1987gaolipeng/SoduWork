@@ -84,7 +84,8 @@ function buildTargets({ root, platform, env, run, prepare, architectures, hostAr
     beforePackage();
     const signed = identity && notarizeEnabled(env);
     const dmgPath = signed ? path.join(client, 'dist', `SoduWork-${candidateVersion(env, root)}-mac-${arch}.dmg`) : '';
-    run(process.execPath, [path.join(client, 'node_modules/electron-builder/cli.js'), '--mac', '--' + arch, '--publish', 'never',
+    run(process.execPath, [path.join(client, 'node_modules/electron-builder/cli.js'),
+      '--config', 'scripts/public-build-config.cjs', '--mac', '--' + arch, '--publish', 'never',
       ...signingArguments(env),
       ...(signed ? ['--config.mac.hardenedRuntime=true', '--config.afterSign=scripts/notarize-macos.cjs'] : [])],
     { env, cwd: client, stdio: 'inherit' });

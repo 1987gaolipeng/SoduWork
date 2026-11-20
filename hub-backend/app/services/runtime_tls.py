@@ -7,11 +7,8 @@ from pathlib import Path
 import ssl
 import urllib.request
 
-import certifi
-
-
 def client_context() -> ssl.SSLContext:
-    """Use explicit CA overrides exclusively, otherwise supplement default roots."""
+    """Use native system trust unless an explicit CA override replaces it."""
     # Empty values mean no override. Do not strip paths: whitespace can be
     # part of a filename and an invalid explicit path must fail closed.
     cafile = os.environ.get("SSL_CERT_FILE") or None
@@ -25,10 +22,11 @@ def client_context() -> ssl.SSLContext:
         # Supplying either override must not silently add other trust anchors.
         context = ssl.create_default_context(cafile=cafile, capath=capath)
     else:
-        context = ssl.create_default_context()
-        # Frozen OpenSSL can retain absent build-machine CA paths. certifi is
-        # bundled with the Runner and supplements roots available at runtime.
-        context.load_verify_locations(cafile=certifi.where())
+        import truststore
+
+        # Delegate to the installed OS verifier. A missing verifier or rejected
+        # certificate must fail closed, without retrying with bundled roots.
+        context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.set_alpn_protocols(["http/1.1"])
     return context
 

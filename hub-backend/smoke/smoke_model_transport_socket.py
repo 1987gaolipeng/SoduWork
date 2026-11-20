@@ -7,6 +7,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import unittest
 from unittest.mock import patch
 
+import httpx
+
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -33,6 +35,68 @@ async def worker(url):
 
 
 class SocketTests(IsolatedDatabase):
+    async def test_cancelled_header_handoffs_do_not_exhaust_real_single_connection_pool(self):
+        peers, closed = [], asyncio.Queue()
+
+        async def serve(reader, writer):
+            peers.append(asyncio.current_task())
+            try:
+                await reader.readuntil(b"\r\n\r\n")
+                # Leave the body open so only explicit response reclamation can
+                # free this connection. The next request has just one pool slot.
+                writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n")
+                await writer.drain()
+                await reader.read()
+                closed.put_nowait(True)
+            finally:
+                writer.close()
+                await writer.wait_closed()
+
+        server = await asyncio.start_server(serve, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        conf = {**CONF, "base": f"http://127.0.0.1:{port}"}
+        try:
+            async with httpx.AsyncClient(limits=httpx.Limits(max_connections=1), trust_env=False) as http:
+                with patch.object(transport, "_client", return_value=http):
+                    for _ in range(6):
+                        lease = await self.acquire()
+                        joining, release = asyncio.Event(), asyncio.Event()
+
+                        class PausedWatcher(asyncio.Event):
+                            async def wait(self):
+                                try:
+                                    return await super().wait()
+                                finally:
+                                    joining.set()
+                                    await release.wait()
+
+                        lease.lost = PausedWatcher()
+                        with patch.object(runtime, "acquire", return_value=lease):
+                            opening = self.spawn(transport.open_response(conf, "/responses", None))
+                            try:
+                                await asyncio.wait_for(joining.wait(), 2)
+                                opening.cancel()
+                                release.set()
+                                with self.assertRaises(asyncio.CancelledError):
+                                    await asyncio.wait_for(opening, 2)
+                                await asyncio.wait_for(closed.get(), 2)
+                                self.assertEqual((await runtime.snapshot())["running"], 0)
+                            finally:
+                                release.set()
+                                if not opening.done():
+                                    opening.cancel()
+                                await asyncio.gather(opening, return_exceptions=True)
+                    # A normal request must still obtain the sole pool slot.
+                    response = await asyncio.wait_for(transport.open_response(conf, "/responses", None), 2)
+                    await response.aclose()
+                    await asyncio.wait_for(closed.get(), 2)
+        finally:
+            server.close()
+            await server.wait_closed()
+            for peer in peers:
+                peer.cancel()
+            await asyncio.gather(*peers, return_exceptions=True)
+
     async def test_real_socket_stalled_stream_cancels_without_blocking_loop(self):
         closed = asyncio.Event()
         peers = []

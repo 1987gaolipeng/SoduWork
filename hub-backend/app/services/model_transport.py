@@ -13,6 +13,7 @@ from fastapi import HTTPException
 
 from . import model_runtime
 from .model_errors import UpstreamError
+from .model_runtime_transaction import finish_cleanup
 
 log = logging.getLogger("uvicorn.error")
 _clients = weakref.WeakKeyDictionary()
@@ -237,6 +238,11 @@ async def open_response(conf, path, body, *, stream=False, timeout=None):
         raise
     except (httpx.TimeoutException, TimeoutError) as exc:
         outcome = "timeout"
+        # Distinguish a locally exhausted connection pool from a slow model.
+        # Exception text can contain request data; only log its type and timing.
+        log.warning("[model-transport] request timeout endpoint=%s error=%s openMs=%.1f",
+                    locals().get("endpoint", "<unbuilt>"), type(exc).__name__,
+                    (time.perf_counter() - opened_at) * 1000)
         raise UpstreamError(504, "", "等待模型响应超时，请稍后重试") from exc
     except httpx.HTTPError as exc:
         log.warning("[model-transport] request failed endpoint=%s error=%s detail=%s",
@@ -272,17 +278,25 @@ async def until_disconnect(request, operation):
         if disconnect in done:
             raise HTTPException(499, "客户端已断开连接")
         result = await work
+        stopping = True
+        disconnect.cancel()
+        with anyio.CancelScope(shield=True):
+            await asyncio.gather(disconnect, return_exceptions=True)
+        # The last await must precede handoff, or a cancellation can orphan an
+        # opened Response while both this wrapper and its caller disclaim it.
         delivered = True
         return result
     finally:
         stopping = True
-        work.cancel()
-        disconnect.cancel()
-        with anyio.CancelScope(shield=True):
+        async def reclaim():
+            work.cancel()
+            disconnect.cancel()
             await asyncio.gather(work, disconnect, return_exceptions=True)
             # A response can arrive in the same event-loop tick as disconnect.
-            if not delivered and work.done() and not work.cancelled():
+            if not work.cancelled():
                 result = None if work.exception() else work.result()
                 if isinstance(result, Response):
                     result.outcome = "cancelled"
                     await result.aclose()
+        if not delivered:
+            await finish_cleanup(reclaim())

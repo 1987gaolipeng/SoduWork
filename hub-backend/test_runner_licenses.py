@@ -38,20 +38,31 @@ class RunnerLicenseTest(unittest.TestCase):
             runpy.run_path(str(ROOT / "hub-backend/runner.spec"), init_globals=namespace)
         metadata = [(Path(source), target) for source, target in captured["datas"] if ".dist-info" in target]
         self.assertTrue(metadata)
-        for prefix in ("websockets-", "pyyaml-", "pg8000-", "pymysql-", "pymongo-", "redis-", "cryptography-", "certifi-"):
+        for prefix in ("websockets-", "pyyaml-", "pg8000-", "pymysql-", "pymongo-", "redis-", "cryptography-", "truststore-"):
             matches = [source for source, target in metadata if target.lower().startswith(prefix)]
             self.assertTrue(matches, prefix)
             self.assertTrue(any(p.is_file() and any(word in p.name.lower() for word in ("license", "copying"))
                                 for source in matches for p in source.rglob("*")), prefix)
         self.assertIn((str(ROOT / "LICENSE"), "third-party"), captured["datas"])
-        self.assertTrue(any(Path(source).name == "cacert.pem" and target == "certifi"
-                            for source, target in captured["datas"]))
-        captured.clear()
-        with patch.dict("os.environ", {"SODUWORK_INTERNAL_BUILD": "1"}), \
-                patch("PyInstaller.utils.hooks.collect_data_files", return_value=[]):
-            with self.assertRaisesRegex(RuntimeError, "Runner CA bundle is missing"):
-                runpy.run_path(str(ROOT / "hub-backend/runner.spec"), init_globals=namespace)
-        self.assertFalse(captured, "missing CA data must stop before Analysis")
+
+    @unittest.skipUnless(importlib.util.find_spec("PyInstaller"),
+                         "archive checker requires the Runner build environment")
+    def test_frozen_runner_requires_platform_native_verifier_modules(self):
+        from types import SimpleNamespace
+        from scripts.check_runner_tls_bundle import check
+        for platform, backend in (("darwin", "_macos"), ("win32", "_windows"), ("linux", "_openssl")):
+            required = {"truststore", "truststore._api", "truststore." + backend,
+                        "app.services.runner_tls", "app.services.runtime_tls"}
+            for missing in (None, *sorted(required)):
+                modules = required - {missing}
+                archive = SimpleNamespace(open_embedded_archive=lambda name: SimpleNamespace(toc=modules))
+                with self.subTest(platform=platform, missing=missing), patch(
+                        "scripts.check_runner_tls_bundle.CArchiveReader", return_value=archive):
+                    if missing is None:
+                        check("fixture-runner", platform=platform)
+                    else:
+                        with self.assertRaisesRegex(AssertionError, "native system trust verifier"):
+                            check("fixture-runner", platform=platform)
 
     def test_project_license_changes_invalidate_runner_freshness(self):
         self.assertIn(ROOT / "LICENSE", runner_sources.build_inputs(ROOT / "hub-backend", ROOT))

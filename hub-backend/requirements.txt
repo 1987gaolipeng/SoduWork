@@ -25,8 +25,8 @@ python-docx>=1.1,<2
 openpyxl>=3.1,<4
 python-pptx>=1.0,<2
 httpx>=0.28,<0.29
-# MPL-2.0: keep source and frozen Runner HTTPS trust aligned.
-certifi==2026.10.23
+# MIT: use installed OS trust for Runner WSS, gateway HTTPS and downloads.
+truststore==0.10.5
 Pillow>=13.0,<14
 PyJWT[crypto]>=2.10,<3
 # Require the patched release even when upgrading a Hub-only installation.

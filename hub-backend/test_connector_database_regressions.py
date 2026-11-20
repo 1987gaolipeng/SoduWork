@@ -94,6 +94,34 @@ class DatabaseRegressions(unittest.TestCase):
         self.assertIs(options["auth_plugin_map"]["caching_sha2_password"], CachingSha2Authentication)
         self.assertFalse(options["local_infile"])
 
+    def test_sql_remote_tls_requires_explicit_opt_out(self):
+        for kind, prefix, driver, option in (("postgres", "PG", "pg8000.dbapi.connect", "ssl_context"),
+                                             ("mysql", "MYSQL", "pymysql.connect", "ssl")):
+            env = {prefix + "_HOST": "db.example.com", prefix + "_DATABASE": "fixture",
+                   prefix + "_USER": "reader", prefix + "_PASSWORD": "fixture"}
+            for setting in ({}, {"DISABLE_TLS": ""}, {"DISABLE_TLS": "false"}, {"DISABLE_TLS": "true"}):
+                with self.subTest(kind=kind, setting=setting), patch(driver) as connect:
+                    _, values = db.config(spec(kind, **env, **setting))
+                    db.connect(kind, values, 3)
+                    options = connect.call_args.kwargs
+                    if setting.get("DISABLE_TLS") == "true":
+                        if kind == "postgres":
+                            self.assertIs(options[option], False)
+                        else:
+                            self.assertIsNone(options[option])
+                            self.assertTrue(options["ssl_disabled"])
+                    else:
+                        self.assertTrue(options[option].check_hostname)
+
+    def test_mongo_remote_tls_opt_out_applies_to_direct_and_srv_connections(self):
+        for srv in ("true", "false"):
+            for setting in ("true", "false"):
+                with self.subTest(srv=srv, setting=setting), patch("pymongo.MongoClient") as client:
+                    _, values = db.config(spec("mongodb", MONGO_HOST="mongo.example.com", MONGO_DATABASE="fixture",
+                                               MONGO_SRV=srv, DISABLE_TLS=setting))
+                    with extra._mongo_connection(values, 3):
+                        self.assertEqual(client.call_args.kwargs["tls"], setting == "false")
+
 
 if __name__ == "__main__":
     unittest.main()

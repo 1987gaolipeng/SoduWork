@@ -55,6 +55,7 @@ function fixture(options = {}) {
     workspace(value) { workspace = value; },
     location(value) { location = value; },
     owner(value, event = false) { owner = value; if (event) listeners.get('soduwork-data-scope-changed')?.(); },
+    emit(event) { listeners.get(event)?.(); },
     unavailable(kind, value = false) { if (kind === 'runtime') runtimeResult = value; else modelResult = value; },
     delay(kind, value) { if (kind === 'runtime') runtimeWait = value; else modelWait = value; },
     async use(agent, model, effort = '', thinking = '') {
@@ -63,6 +64,58 @@ function fixture(options = {}) {
   };
 }
 const pair = (adapterId, modelName, reasoningEffort = '', thinkingLevel = '') => ({ adapterId, modelName, reasoningEffort, thinkingLevel });
+
+for (const workspace of ['temporary', 'explicit', 'remembered']) {
+  test(`same-account auth refresh preserves the unsent runtime and model in a ${workspace} workspace`, async () => {
+    const f = fixture();
+    if (workspace === 'temporary') f.workspace({ direct: false, dir: '' });
+    if (workspace === 'remembered') await f.use('qwen', 'previously-used');
+    await f.pref.begin({ newSession: true });
+    f.choose('codex', 'unsent-model', 'high', 'medium');
+    const saved = [...f.saved.entries()];
+    for (const event of ['soduwork-device-auth', 'soduwork-device-auth', 'soduwork-data-scope-changed']) {
+      f.emit(event); await flush();
+      assert.deepEqual(f.state(), pair('codex', 'unsent-model', 'high', 'medium'));
+      assert.equal(await f.pref.ready(), true);
+      assert.deepEqual([...f.saved.entries()], saved, 'refresh must not persist an unsent choice');
+    }
+  });
+}
+
+test('same-account auth refresh does not restart an in-flight directory restoration', async () => {
+  const f = fixture(); await f.use('qwen', 'saved');
+  const delayed = deferred(); f.delay('runtime', delayed.promise);
+  const restoring = f.pref.begin(); await flush();
+  try {
+    f.emit('soduwork-device-auth'); f.emit('soduwork-device-auth'); await flush();
+    assert.equal(f.calls.filter(call => call.kind === 'runtime').length, 1);
+  } finally { delayed.resolve(); }
+  await restoring;
+  assert.equal(await f.pref.ready(), true);
+  assert.deepEqual(f.state(), pair('qwen', 'saved'));
+});
+
+test('auth and scope events still restore the new account pair once when ownership changes', async () => {
+  const f = fixture(); await f.use('qwen', 'account-a');
+  f.owner('https://hub-a/device-a/account-b'); await f.use('codex', 'account-b');
+  f.owner('https://hub-a/device-a/account-a'); await f.pref.begin();
+  f.choose('qwen', 'unsent-a'); const calls = f.calls.length;
+  f.owner('https://hub-a/device-a/account-b');
+  f.emit('soduwork-data-scope-changed'); f.emit('soduwork-device-auth'); await flush();
+  assert.deepEqual(f.state(), pair('codex', 'account-b'));
+  assert.equal(f.calls.length - calls, 2, 'one runtime restore and one model restore');
+  f.owner('https://hub-a/device-a/account-c'); f.emit('soduwork-device-auth'); await flush();
+  assert.deepEqual(f.state(), pair('pi', 'default'), 'a new account cannot inherit another account draft');
+});
+
+test('auth refresh cannot reactivate directory restoration after leaving the new-chat composer', async () => {
+  const f = fixture(); await f.use('qwen', 'saved');
+  f.pref.stop(); f.choose('codex', 'historical-conversation');
+  f.owner('https://hub-a/device-a/account-b');
+  f.emit('soduwork-device-auth'); f.emit('soduwork-data-scope-changed'); await flush();
+  assert.deepEqual(f.state(), pair('codex', 'historical-conversation'));
+  assert.equal(f.pref.capture(), null);
+});
 
 test('directory preferences persist a complete successfully used pair across renderer restarts', async () => {
   const f = fixture();

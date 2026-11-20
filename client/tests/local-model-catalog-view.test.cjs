@@ -30,9 +30,9 @@ function fixture(catalog = localCatalog()) {
   return { context, messages, evaluate,
     detail: (id = 'local-fixture') => evaluate(`_mdDetailHtml(_mdProvider(${JSON.stringify(id)}))`),
     nav: (id = 'local-fixture') => evaluate(`_mdNavItemHtml(_mdProvider(${JSON.stringify(id)}))`),
-    apply({ provider = 'local-fixture', original, name, label = name, connected = true }) {
+    apply({ provider = 'local-fixture', original, name, label = name, connected = true, fields = {} }) {
       if (original) evaluate(`_mdDrafts.set(${JSON.stringify(provider)}, {original:${JSON.stringify(original)}});`);
-      const values = { '[data-padd]': name, '[data-paddtype]': 'chat', '[data-mdlabel]': label };
+      const values = { '[data-padd]': name, '[data-paddtype]': 'chat', '[data-mdlabel]': label, ...fields };
       context.editor = { isConnected: connected, dataset: { mdeditor: provider }, querySelector: selector => ({ value: values[selector] || '' }) };
       evaluate('_mdApplyModel(editor)');
     } };
@@ -112,6 +112,38 @@ test('editing a local model without changing its ID does not collide with its sa
   assert.equal(f.evaluate('_mdMyModels[0].label'), 'Edited local label');
   assert.match(f.detail(), /Edited local label/);
   assert.equal(rows(f.detail()), 1);
+});
+
+test('applying an explicit thinking preset preserves aliases and budgets and survives the editor mode transition', () => {
+  const catalog = localCatalog(['gateway-model']);
+  catalog.myModels[0].config = { thinkingMode: 'auto', maxOutputTokens: 32768 };
+  const before = JSON.stringify(catalog), f = fixture(catalog);
+  f.apply({ original: 'gateway-model', name: 'gateway-model', label: 'Private display name', fields: {
+    '[data-paddthinking]': 'always', '[data-mdfield="thinkingPreset"]': 'glm-5.3',
+    '[data-mdfield="thinkingFormat"]': 'zai', '[data-mdfield="supportsReasoningEffort"]': 'yes',
+    '[data-mdfield="maxOutputTokens"]': '32768',
+  } });
+  assert.deepEqual(f.messages, []);
+  const model = JSON.parse(f.evaluate('JSON.stringify(_mdMyModels[0])'));
+  assert.equal(model.name, 'gateway-model');
+  assert.equal(model.label, 'Private display name');
+  assert.equal(model.config.thinkingMode, 'always');
+  assert.equal(model.config.thinkingFormat, 'zai');
+  assert.equal(model.config.maxOutputTokens, 32768);
+  assert.deepEqual(model.config.thinkingLevelMap, { off: null, minimal: null, low: 'low', medium: null, high: 'high', xhigh: null, max: 'max' });
+  assert.equal(JSON.stringify(catalog), before, 'Applying edits does not mutate the saved catalog');
+});
+
+test('invalid preset edits keep the saved model and its custom policy intact', () => {
+  const catalog = localCatalog(['gateway-model']);
+  catalog.myModels[0].config = { thinkingMode: 'controllable', thinkingFormat: 'qwen', thinkingLevelMap: { off: 'none', high: 'high' } };
+  const before = JSON.stringify(catalog.myModels), f = fixture(catalog);
+  f.apply({ original: 'gateway-model', name: 'gateway-model', fields: {
+    '[data-paddthinking]': 'always', '[data-mdfield="thinkingPreset"]': 'glm-5.3',
+    '[data-mdfield="maxOutputTokens"]': '1',
+  } });
+  assert.match(f.messages[0], /Token/);
+  assert.equal(f.evaluate('JSON.stringify(_mdMyModels)'), before);
 });
 
 test('renaming a local model replaces its visible ID and leaves no stale read-only row', () => {

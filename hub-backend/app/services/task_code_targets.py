@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am
 from .. import models
+from ..timestamps import iso_utc
 
 
 def _payload(task: models.Task, repo: models.Repo) -> dict:
@@ -117,5 +118,5 @@ def api(row: am.TaskCodeTarget | None) -> dict:
         "repoName": row.repo_name, "scm": row.scm, "gitUrl": row.git_url,
         "baseBranch": row.base_branch, "targetBranch": row.target_branch,
         "localDir": row.local_dir, "fingerprint": row.fingerprint,
-        "capturedAt": row.captured_at.isoformat() if row.captured_at else None,
+        "capturedAt": iso_utc(row.captured_at) if row.captured_at else None,
     }

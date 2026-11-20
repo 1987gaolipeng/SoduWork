@@ -135,10 +135,8 @@ class RunnerHandshakeTests(unittest.IsolatedAsyncioTestCase):
     async def test_timeout_closes_connection_and_retries_same_identity_before_reporting(self):
         await self.check_reconnection("ws://fixture.invalid/api/v1/runner")
 
-    async def test_macos_reconnect_passes_verified_tls_context_on_every_attempt(self):
-        from app.services import runner_tls
-        with patch.object(runner_tls, "sys", SimpleNamespace(platform="darwin")):
-            await self.check_reconnection("wss://fixture.invalid/api/v1/runner")
+    async def test_secure_reconnect_passes_verified_tls_context_on_every_attempt(self):
+        await self.check_reconnection("wss://fixture.invalid/api/v1/runner")
 
     async def check_reconnection(self, url):
         wires = [Wire(), Wire(['{"op":"welcome","caps":["bin1"]}'])]

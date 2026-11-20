@@ -161,11 +161,22 @@ def inject_llm_env(key: str, env: dict, llm: dict, *, mode: str = "work") -> Non
     if not (base and model and (secret or local_only)):
         return
     if key == "kimi":
+        from . import context_window, runtime_images
         # Kimi's plain KIMI_API_KEY is a config-file key, not a shell override.
         # Its temporary provider contract is the KIMI_MODEL_* environment family.
         for name in list(env):
             if name.startswith("KIMI_MODEL_"):
                 env.pop(name, None)
+        # Native compaction otherwise assumes 262144 tokens even for a smaller
+        # managed model. Keep its threshold aligned with the Runner's window.
+        window = context_window.resolve(llm)["contextWindow"]
+        env["KIMI_MODEL_MAX_CONTEXT_SIZE"] = str(window)
+        output = runtime_images.model_fields(llm).get("maxOutputTokens")
+        if output is not None:
+            # The native model limit also sizes compaction requests; the explicit
+            # per-call override prevents an old native setting from winning.
+            env["KIMI_MODEL_MAX_OUTPUT_SIZE"] = str(min(output, window))
+            env["KIMI_MODEL_MAX_COMPLETION_TOKENS"] = str(min(output, window))
         env["KIMI_MODEL_PROVIDER_TYPE"] = "anthropic" if llm.get("kind") == "anthropic" else "openai"
         env["KIMI_CODE_NO_AUTO_UPDATE"] = "1"
         env["KIMI_DISABLE_TELEMETRY"] = "1"
@@ -207,6 +218,8 @@ def inject_llm_env(key: str, env: dict, llm: dict, *, mode: str = "work") -> Non
         from . import dsh_gateway
         dsh_gateway.inject_env(env, llm)
     elif key == "codex-harness":
+        from . import context_window
+        context_limit = context_window.resolve(llm)["contextWindow"]
         # The managed adapter resolves its own compatible native dependency.
         # Host overrides and debug logging must not route it to a personal CLI
         # or persist the per-turn enterprise gateway credential.
@@ -235,6 +248,10 @@ def inject_llm_env(key: str, env: dict, llm: dict, *, mode: str = "work") -> Non
             CODEX_CONFIG=json.dumps({
                 "model": model,
                 "model_provider": "custom-gateway",
+                # Unknown gateway model names must not inherit the native
+                # default model's larger window and postpone compaction.
+                "model_context_window": context_limit,
+                "model_auto_compact_token_limit": context_limit * 4 // 5,
                 # SoduWork owns the durable event archive; do not ask an enterprise
                 # gateway to retain remote Responses state as well.
                 "disable_response_storage": True,

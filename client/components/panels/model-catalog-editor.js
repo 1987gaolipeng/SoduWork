@@ -124,6 +124,7 @@ function _mdBindModels(box) {
       const field = editor.querySelector(selector); if (field) field.value = value;
     }
     if (restored?.advanced) editor.querySelector('.md-cap-advanced')?.setAttribute('open', '');
+    ModelCapabilitiesUI.bindThinking(editor, restored?.thinkingCustom);
     function capture(event) {
       if (!editor.isConnected || !_mdCanEdit(_mdProvider(pid))) return;
       const fields = {};
@@ -133,6 +134,7 @@ function _mdBindModels(box) {
       });
       const previous = _mdDrafts.get(pid) || {};
       _mdDrafts.set(pid, { ...previous, open: editor.open, fields,
+        thinkingCustom: ModelCapabilitiesUI.thinkingDraft(editor),
         changed: !!(previous.changed || event?.type === 'input' || event?.type === 'change'),
         advanced: !!editor.querySelector('.md-cap-advanced')?.open });
     }
@@ -186,11 +188,6 @@ function _mdApplyModel(editor) {
     let config, ctxWindow;
     if (modality === 'chat') {
       ({ config, ctxWindow } = ModelCapabilitiesUI.read(editor, old));
-      config.thinkingMode = value('[data-paddthinking]') || 'auto';
-      // Changing a thinking declaration must clear incompatible derived values.
-      if (config.thinkingMode !== old?.config?.thinkingMode) {
-        delete config.reasoning; delete config.thinkingAlwaysOn; delete config.thinkingLevelMap;
-      }
     } else {
       const endpointPath = value('[data-paddpath]'), statusPath = value('[data-paddstatus]'), resultPath = value('[data-paddresult]');
       if (!endpointPath.startsWith('/')) throw Error('生成接口路径要以 / 开头');

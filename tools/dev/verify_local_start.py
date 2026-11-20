@@ -111,7 +111,15 @@ def stop(child, base):
     raise AssertionError("Hub is still serving after the launcher exited")
 
 
-def desktop_ready(child, state, previous_pid=None):
+def desktop_run_ids(state):
+    journal = desktop_profile(state) / 'diagnostics/lifecycle.jsonl'
+    if not journal.is_file():
+        return set()
+    entries = [json.loads(line) for line in journal.read_text(encoding='utf-8').splitlines() if line]
+    return {row['runId'] for row in entries if row.get('runId')}
+
+
+def desktop_ready(child, state, previous_runs=()):
     journal = desktop_profile(state) / 'diagnostics/lifecycle.jsonl'
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
@@ -119,12 +127,12 @@ def desktop_ready(child, state, previous_pid=None):
             raise AssertionError(f'Desktop session stopped; see {child.launcher_log} and {state / "desktop.log"}')
         if journal.is_file():
             entries = [json.loads(line) for line in journal.read_text(encoding='utf-8').splitlines() if line]
-            # Read only events after the previous launch, including when older PIDs are reused.
-            previous = [index for index, row in enumerate(entries)
-                        if row['event'] == 'ready' and row.get('pid') == previous_pid]
-            current = entries[previous[-1] + 1:] if previous else entries
+            # The caller snapshots run IDs before starting the new desktop. PIDs
+            # can be reused, and readiness may be logged before this wait begins.
+            current = [row for row in entries if row.get('runId')
+                       and row['runId'] not in previous_runs]
             ready = [row for row in current if row['event'] == 'ready'
-                     and row.get('pid') != previous_pid and process_alive(row['pid'])]
+                     and process_alive(row['pid'])]
             if ready:
                 latest = ready[-1]
                 assert not any(row['event'] in ('uncaught-exception-monitor', 'unhandled-rejection')
@@ -187,15 +195,18 @@ def verify(*, desktop=False, temp_root: Path | None = None):
     if desktop and sys.platform == 'darwin':
         print('Desktop fixture uses a mock native Keychain; real Keychain access is not verified.', flush=True)
     try:
-        # The launcher must survive incomplete first setup without a default account.
-        failed, failed_log = start(state, port, "short")
-        assert failed.wait(timeout=30) == 1
-        failed_log.close()
+        # Cold preparation completes before the first password is validated.
+        begin = time.monotonic()
+        child, output = start(state, port, "short", desktop=desktop)
+        assert child.wait(timeout=1200) == 1
+        assert "Choose an administrator password of 12-128" in Path(child.launcher_log).read_text(
+            encoding="utf-8", errors="replace")
+        output.close()
+        child = output = None
         assert not (state / "soduwork.db").exists()
         checks.append("failed-first-password-resumes")
 
         child, output = start(state, port, password, desktop=desktop)
-        begin = time.monotonic()
         wait_ready(child, base, state)
         checks.append("clean-venv-npm-build-migrations-ready")
         desktop_pid = desktop_ready(child, state) if desktop else None
@@ -266,11 +277,12 @@ def verify(*, desktop=False, temp_root: Path | None = None):
             assert db.execute("SELECT COUNT(*) FROM app_user").fetchone()[0] == 1
             assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0]
 
+        previous_runs = desktop_run_ids(state) if desktop else ()
         child, output = start(state, port, desktop=desktop)
         begin = time.monotonic()
         wait_ready(child, base, state, timeout=90)
         if desktop:
-            desktop_pid = desktop_ready(child, state, previous_pid=desktop_pid)
+            desktop_pid = desktop_ready(child, state, previous_runs=previous_runs)
         print(f"Repeat startup: {time.monotonic() - begin:.1f}s", flush=True)
         assert request(base, "/api/v1/admin/me", token=token)["id"] == login["user"]["id"]
         assert request(base, "/api/v1/admin/tasks/" + task["id"], token=token)["title"] == task["title"]

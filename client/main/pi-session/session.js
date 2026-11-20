@@ -237,6 +237,7 @@ function _historyIndex(app) {
   if (!index) {
     index = createArchiveHistory({ root, project(s, entries) {
       const binding = _taskBindingFromEntries(entries);
+      const archivedState = s.archivedTurnState || historyState.archivedTurnState(entries);
       return {
         id: s.id, path: s.path, cwd: s.cwd || '', usedHarnesses: s.usedHarnesses || [],
         title: s.workOwner ? s.name || '工作记录' : sessionHelpers.repairPersistedTitle(
@@ -247,6 +248,10 @@ function _historyIndex(app) {
         taskIds: binding.taskIds, taskBindings: binding.taskBindings, activeTaskId: binding.activeTaskId,
         collaboration: Boolean(binding.taskId), createdAt: +new Date(s.createdAt || s.modified),
         at: +new Date(s.modified), count: s.messageCount || 0,
+        // Metadata refresh must not overwrite a separately recorded failure
+        // with a completed projection from an older successful answer.
+        ...(archivedState !== 'idle' ? { state: archivedState === 'interrupted' ? 'interrupted'
+          : historyState.presenceState(archivedState) } : {}),
       };
     } });
     _historyIndexes.set(root, index);

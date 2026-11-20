@@ -5,6 +5,8 @@ import copy
 import time
 from urllib.parse import urlsplit
 
+PRIVACY_MARKER = "_modelMetadataPrivate"
+
 
 def capture(run: dict, cfg: dict) -> None:
     llm = dict((cfg or {}).get("llm") or {})
@@ -145,12 +147,14 @@ def public_snapshot(value: dict, run: dict) -> dict:
     private = private_model(run)
     model_keys = {"model", "modelName", "modelRef", "modelId", "localModel"}
 
-    def clean(item, path=()):
+    def clean(item, path=(), inherited_private=private, inherited_source_private=False):
         if isinstance(item, dict):
+            source_private = inherited_source_private or item.get(PRIVACY_MARKER) is True
+            private = inherited_private or source_private
             runtime_event = (len(path) in {2, 3} and path[-2] == "items" and
                              isinstance(path[-1], int) and path[0] in {"items", "data"})
             local_event = item.get("localModelMetadata") is True or private and runtime_event
-            excluded = {"usageReceipts", "quotaUsageToken", "localModelMetadata", "_terminal"}
+            excluded = {"usageReceipts", "quotaUsageToken", "localModelMetadata", "_terminal", PRIVACY_MARKER}
             if local_event:
                 excluded.update({"usage", "tokens", "cost", "ctxPct", "ctxWindow", "ctxWindowKnown"})
             result = {}
@@ -161,10 +165,10 @@ def public_snapshot(value: dict, run: dict) -> dict:
                     result[key] = copy.deepcopy(field)
                 elif private and key in model_keys:
                     result[key] = ""
-                elif key == "error" and field and private and run:
+                elif key == "error" and field and private and (run or source_private):
                     result[key] = "Local model execution failed; inspect the device model settings."
                 else:
-                    result[key] = clean(field, path + (key,))
+                    result[key] = clean(field, path + (key,), private, source_private)
             if path in {(), ("data",)}:
                 if "usage" in result:
                     result["usage"] = public_usage(run)
@@ -175,7 +179,8 @@ def public_snapshot(value: dict, run: dict) -> dict:
                             result[key] = empty
             return result
         if isinstance(item, list):
-            return [clean(field, path + (index,)) for index, field in enumerate(item)]
+            return [clean(field, path + (index,), inherited_private, inherited_source_private)
+                    for index, field in enumerate(item)]
         return item
 
     return clean(value)

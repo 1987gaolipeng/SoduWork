@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, ".")
+os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 
 from app.services import runner_release, update_nudges  # noqa: E402
 
@@ -64,6 +66,7 @@ async def main() -> int:
     with patch("app.realtime.hub.publish", new=AsyncMock(side_effect=fake_publish)):
         ok(await update_nudges.nudge_stale_client("d1", "1.2.0", "1.12.2", now=1000.0),
            "老客户端连上来提醒升级")
+        event_id = sent[-1][1]["noticeEventId"]
         ok("1.2.0" in sent[-1][1]["text"] and "1.12.2" in sent[-1][1]["text"]
            and "手动" in sent[-1][1]["text"],
            "话术带当前/最新版本与『这次要手动装』的说明", sent[-1][1]["text"])
@@ -72,6 +75,10 @@ async def main() -> int:
         ok(await update_nudges.nudge_stale_client("d1", "1.2.0", "1.12.2",
                                                   now=1000.0 + 25 * 3600),
            "窗口过了再提醒")
+        ok(sent[-1][1]["noticeEventId"] == event_id, "重连和多窗口投递复用同一版本标识")
+        for version in ("1.12.81", "1.13.17"):
+            ok(not await update_nudges.nudge_stale_client("auto", version, "1.13.18"),
+               "能够在线升级的客户端不接收手动安装提醒")
         ok(not await update_nudges.nudge_stale_client("d2", "1.12.2", "1.12.2"),
            "已是最新不提醒")
         ok(not await update_nudges.nudge_stale_client("d3", "", "1.12.2"),

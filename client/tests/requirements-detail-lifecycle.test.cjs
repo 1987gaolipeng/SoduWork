@@ -70,6 +70,46 @@ function fixture(overrides = {}) {
     content: () => active().querySelector('.rq-detail-content')};
 }
 
+test('notification detail loads pending approvals without requiring the board to have opened', async () => {
+ const f=fixture({getTask:async id=>({...task(id),status:'doing',canReview:true})});
+ let loaded=false;
+ f.context.TaskApprovalInbox={refresh:async()=>{loaded=true;}};
+ f.context.RequirementsBoard.context=()=>({approvals:new Map(loaded ? [['a',
+  {id:'review-a',taskId:'a',action:'review',status:'pending'}]] : [])});
+ f.context.TaskTraceApproval={html:rows=>'current-review:'+rows[0].id,bind(){}};
+ await f.api.open('a');
+ assert.equal(loaded,true);
+ assert.match(f.content().innerHTML,/current-review:review-a/);
+});
+
+test('closing a notification drawer while approvals load prevents late resurrection', async () => {
+ const f=fixture(), pending=deferred();
+ f.context.TaskApprovalInbox={refresh:()=>pending.promise};
+ const opening=f.api.open('a');
+ f.api.close(true);
+ pending.resolve();await opening;
+ assert.equal(f.active(),undefined);
+});
+
+test('notification approval read failure remains visible alongside requirement facts', async () => {
+ const f=fixture();
+ f.context.TaskApprovalInbox={refresh:async()=>{throw Error('offline');}};
+ await f.api.open('a');
+ assert.match(f.content().innerHTML,/Requirement a/);
+ assert.match(f.active().querySelector('[data-rq-error]').textContent,/验收状态暂时无法读取/);
+});
+
+test('the existing task-update bridge refreshes a notification drawer without changing its approval id', async () => {
+ let value={...task('a'),status:'doing'};
+ const f=fixture({getTask:async()=>value});
+ await f.api.open('a');
+ value={...value,workRouting:{executionSubmissionMode:'manual',conversationTurn:{state:'completed'}}};
+ f.context.document.querySelector=()=>f.active();
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../components/panels/panels-detail.js'),'utf8'),f.context);
+ await f.context.refreshOpenDetail('a');
+ assert.match(f.content().innerHTML,/待提交验收/);
+});
+
 test('acceptance summary export uses the displayed requirement version and reports native results beside its action', async () => {
   const f = fixture({ getTask: async id => ({ ...task(id), requirementVersion: 4 }) });
   const pending = deferred(), calls = [];
@@ -227,6 +267,61 @@ test('no-delivery work exposes manual submission in More even with a stale auto 
   }), submitTaskReview: async () => ({ok: true})});
   await f.api.open('manual-no-output');
   assert.match(f.active().querySelector('.rq-detail-footer').innerHTML, /data-rq-submit-review>提交验收/);
+});
+
+test('a completed manual turn shows waiting for submission rather than processing', async () => {
+  const f = fixture({getTask: async id => ({...task(id), status:'doing', requirementStage:'delivering',
+    canSubmitReview:true, workRouting:{executionSubmissionMode:'manual', conversationTurn:{state:'completed'}},
+  })});
+  await f.api.open('manual-completed');
+  assert.match(f.content().innerHTML, /待提交验收/);
+});
+
+test('completed delivery shows submission, synchronization or blocked state to every execution viewer', async () => {
+  for (const [mode, issue, expected] of [
+    ['manual', undefined, '待提交验收'],
+    ['auto', undefined, '交付待处理'],
+    ['auto', {code:'sync_pending',reason:'Waiting for server receipt'}, '成果待同步'],
+    ['auto', {code:'invalid_primary',reason:'Primary file failed validation <unsafe>'}, '交付受阻'],
+  ]) {
+    const value = {...task('delivery'), status:'doing', canSubmitReview:false,
+      workRouting:{executionSubmissionMode:mode,conversationTurn:{state:'completed',deliveryIssue:issue}}};
+    const f = fixture({getTask:async()=>value});
+    await f.api.open('delivery');
+    assert.match(f.content().innerHTML, new RegExp('rq-delivery-state [^" ]+">' + expected));
+    assert.doesNotMatch(f.active().querySelector('.rq-detail-footer').innerHTML, /data-rq-submit-review/);
+    if (issue) {
+      assert.match(f.content().innerHTML, new RegExp(issue.reason.replace('<unsafe>', '&lt;unsafe&gt;')));
+      assert.equal(Requirements.blocked(value), issue.code !== 'sync_pending');
+    }
+    assert.equal(Requirements.nextStep(value).text, Requirements.deliveryProgress(value)?.guidance || issue?.reason || expected);
+    value.requirementStage = 'reviewing';
+    await f.api.refresh('delivery');
+    assert.match(f.content().innerHTML, /rq-delivery-state is-ready">待验收/);
+  }
+});
+
+test('unavailable creator blocks acceptance visibly without granting another viewer review', async () => {
+  const value = {...task('review'), status:'doing', requirementStage:'reviewing', canReview:false,
+    workRouting:{conversationTurn:{state:'completed', deliveryIssue:{code:'review_unassigned',reason:'Restore the creator account to continue acceptance'}}}};
+  const f = fixture({getTask:async()=>value});
+  await f.api.open('review');
+  assert.match(f.content().innerHTML, /rq-delivery-state is-stalled">验收受阻/);
+  assert.match(f.content().innerHTML, /Restore the creator account/);
+  assert.match(f.content().innerHTML, /role="status">请恢复需求创建人账号后重试验收/);
+  assert.equal(Requirements.blocked(value), true);
+  assert.doesNotMatch(f.content().innerHTML, /data-rq-approval-card/);
+});
+
+test('an existing review takes precedence over a completed manual receipt before stage refresh', async () => {
+  const value = {...task('review'), status:'doing', canSubmitReview:false, canReview:false,
+    workRouting:{executionSubmissionMode:'manual', conversationTurn:{state:'completed'}}};
+  const f = fixture({getTask:async()=>value});
+  f.context.RequirementsBoard.context = () => ({approvals:new Map([['review',
+    {id:'pending',action:'review',status:'pending',taskId:'review'}]])});
+  await f.api.open('review');
+  assert.match(f.content().innerHTML, /rq-delivery-state is-ready">待验收/);
+  assert.doesNotMatch(f.content().innerHTML, /待提交验收/);
 });
 
 test('contract kind without deliverables still exposes manual completion', async () => {

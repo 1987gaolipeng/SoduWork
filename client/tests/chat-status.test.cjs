@@ -4,6 +4,89 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const status = require('../components/panels/panels-chat-status.js');
 
+test('Runner queue waiting is visible without claiming model work or carrying wait into execution', () => {
+  const originalNow = Date.now;
+  let now = 1792810800000;
+  const submittedAt = now;
+  Date.now = () => now;
+  const current = { ref: 'runner-queued', pendingSentAt: submittedAt,
+    snap: { status: 'queued', statusText: '排队中 · 第 2 项', messages: [{role:'user',sentAt:submittedAt}],
+      execution: { running:false,waitingForStart:true,executionStartedAt:0,submittedAt,
+        elapsedMs:0,queueWaitMs:0,queuePosition:2 } } };
+  const view = status.createThinking(() => current);
+  try {
+    view.syncThinkingClock(status.runtimeBusy(current.snap, '', 0));
+    now += 808000;
+    assert.equal(status.work(current.snap), '排队中 · 第 2 项');
+    assert.match(view.metricsHtml(true), /排队中.*13m 28s/);
+    assert.doesNotMatch(view.metricsHtml(true), /处理中|tokens/);
+    assert.doesNotMatch(view.statusHtml(true), /理解|思考|团队协作/);
+    current.snap.status = 'streaming';
+    current.snap.execution.startupWaitSince = now;
+    assert.equal(status.work(current.snap), '等待启动');
+    assert.match(view.metricsHtml(true), /等待启动.*data-thinking-elapsed>0s</);
+    now += 90000;
+    assert.match(status.work(current.snap), /执行环境启动时间较长，可停止后检查底座状态/);
+    assert.match(view.metricsHtml(true), /等待启动.*1m 30s/);
+    current.snap.execution = { running:true,waitingForStart:false,executionStartedAt:now,
+      submittedAt,elapsedMs:0,queueWaitMs:808000 };
+    view.syncThinkingClock(true);
+    assert.match(view.metricsHtml(true), /处理中.*data-thinking-elapsed>0s</);
+    now += 7000;
+    assert.match(view.metricsHtml(true), /data-thinking-elapsed>7s</);
+    current.snap.status = 'idle';
+    current.snap.execution.running = false;
+    current.snap.execution.elapsedMs = 7000;
+    view.syncThinkingClock(false);
+    now += 86400000;
+    assert.match(view.metricsHtml(false), /已处理.*data-thinking-elapsed>7s</);
+  } finally { view.stopThinkingClock(); Date.now = originalNow; }
+});
+
+test('restored Runner queue timing remains unknown without an accepted timestamp', () => {
+  const current = {ref:'restored-queued',snap:{status:'queued',execution:{running:false,
+    waitingForStart:true,executionStartedAt:0,submittedAt:null,queueWaitMs:null,queuePosition:0}}};
+  const view = status.createThinking(() => current);
+  try {
+    view.syncThinkingClock(true);
+    assert.equal(status.work(current.snap), '排队中');
+    assert.match(view.metricsHtml(true), /排队中.*data-thinking-elapsed>未记录</);
+    assert.doesNotMatch(view.metricsHtml(true), /处理中|tokens/);
+  } finally { view.stopThinkingClock(); }
+});
+
+test('Runner goal execution keeps cumulative time across native turns and freezes while paused', () => {
+  const originalNow = Date.now;
+  let now = 1792810800000;
+  Date.now = () => now;
+  const current = {ref:'cumulative-goal',snap:{status:'streaming',taskGoal:{status:'working'},
+    execution:{configured:true,running:true,executionStartedAt:now-7000,elapsedMs:120000,elapsedObservedAt:now}}};
+  const view = status.createThinking(() => current);
+  try {
+    view.syncThinkingClock(true);
+    assert.match(view.metricsHtml(true), /data-thinking-elapsed>2m 00s</);
+    now += 7000;
+    assert.match(view.metricsHtml(true), /data-thinking-elapsed>2m 07s</);
+    current.snap.taskGoal.status = 'paused';
+    current.snap.status = 'idle';
+    Object.assign(current.snap.execution,{running:false,elapsedMs:127000,elapsedObservedAt:now});
+    view.syncThinkingClock(false);
+    now += 900000;
+    assert.match(view.metricsHtml(false), /data-thinking-elapsed>2m 07s</);
+    current.snap.taskGoal.status = 'working';
+    current.snap.status = 'streaming';
+    Object.assign(current.snap.execution,{running:true,executionStartedAt:now,elapsedObservedAt:now});
+    view.syncThinkingClock(true);
+    assert.match(view.metricsHtml(true), /data-thinking-elapsed>2m 07s</);
+    now += 3000;
+    assert.match(view.metricsHtml(true), /data-thinking-elapsed>2m 10s</);
+    current.snap.status = 'queued';
+    Object.assign(current.snap.execution,{running:false,waitingForStart:true,submittedAt:now,executionStartedAt:0});
+    assert.match(view.metricsHtml(true), /排队中.*data-thinking-elapsed>0s</);
+    assert.doesNotMatch(view.metricsHtml(true), /处理中|2m/);
+  } finally {view.stopThinkingClock();Date.now=originalNow;}
+});
+
 test('paused queues do not claim thinking; an active ordinary turn and a new send still do', () => {
   const snapshot = {status:'unreachable',execution:{running:false,queue:[],turnQueue:{paused:true}}};
   assert.equal(status.runtimeBusy(snapshot, '', 0), false);

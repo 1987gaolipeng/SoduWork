@@ -6,6 +6,19 @@ const path = require('node:path');
 const processRoles = new Set(['process', 'evidence', 'verification', 'input', 'internal']);
 const normalize = value => String(value || '').replace(/\\/g, '/').normalize('NFC');
 function text(message) {
+  if (message?.role === 'assistant') {
+    if (message.done === false || message.errorMessage ||
+        /^(?:tool_?use|tool_?calls?|error|aborted|cancelled|canceled|length|max_tokens)$/i.test(message.stopReason || '') ||
+        message.scope && !['normal', 'goal-final'].includes(message.scope)) return '';
+    // Pi and Runner snapshots carry visible replies in blocks; their text
+    // field can be empty. Only the final prose after the last tool call is a
+    // delivery declaration, never thinking, tool arguments or progress text.
+    if (Array.isArray(message.blocks) && message.blocks.length) {
+      const lastTool = message.blocks.findLastIndex(block => block?.kind === 'toolcall');
+      const final = message.blocks.slice(lastTool + 1).filter(block => block?.kind === 'text');
+      return final.some(block => block.done === false) ? '' : final.map(block => block.text || '').join('\n');
+    }
+  }
   if (typeof message?.text === 'string') return message.text;
   if (typeof message?.content === 'string') return message.content;
   return Array.isArray(message?.content) ? message.content.map(part => part.text || '').join('\n') : '';
@@ -71,4 +84,4 @@ function select(cwd, delivery, snapshot) {
   }
   return { ...delivery, items };
 }
-module.exports = { select, turn, requestsCaptures, processRoles };
+module.exports = { select, turn, mentioned, requestsCaptures, processRoles };

@@ -21,7 +21,7 @@ app.disableHardwareAcceleration();
 const runtime = require('../../main/runner-runtime');
 runtime.install({ app, ipcMain, identityOf: () => ({
   hub: fixture.hub, clientId: fixture.clientId, secret: fixture.secret,
-}) });
+}), sessionOf: () => fixture.session });
 const snapshots = [];
 let window;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
