@@ -70,7 +70,7 @@ def _sqlite_path(url: URL) -> Path:
 
 def _sqlite_integrity(path: Path) -> None:
     try:
-        with closing(sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)) as connection:
+        with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
             row = connection.execute("PRAGMA integrity_check").fetchone()
     except sqlite3.Error as exc:
         raise BackupError(f"SQLite backup cannot be opened: {exc}") from exc
@@ -80,7 +80,7 @@ def _sqlite_integrity(path: Path) -> None:
 
 def _sqlite_revision(path: Path) -> str:
     try:
-        with closing(sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)) as connection:
+        with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
             row = connection.execute("SELECT version_num FROM alembic_version").fetchone()
             return str(row[0] if row else "")
     except sqlite3.Error:
