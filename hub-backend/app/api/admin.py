@@ -19,7 +19,7 @@ from ..config import get_settings
 from ..services.catalog_names import DuplicateName
 from ..pagination import PageQuery
 from ..db import get_session
-from ..deps import current_user, has_perm, require_perm
+from ..deps import current_user, has_perm, require_any_perm, require_perm
 from ..models import Attachment, Client, Role, Task, TaskEvent, User
 from ..permissions import ALL_KEYS, PERMISSIONS
 from ..realtime import hub
@@ -1743,9 +1743,15 @@ async def my_inbox(user: User = Depends(current_user), session: AsyncSession = D
 
 @router.post("/me/inbox/{tid}/claim")
 async def claim_my_inbox_task(
-    tid: str, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)
+    tid: str,
+    user: User = Depends(require_any_perm("task.view", "task.dispatch")),
+    session: AsyncSession = Depends(get_session),
 ):
-    """Claim an inbox task for the current client, matching the desktop claim action."""
+    """Claim an inbox task for the current client, matching the desktop claim action.
+
+    Claiming is a task-handling action, so it requires at least one task permission; the
+    desktop claim path stays on the device-side API and is unaffected.
+    """
     r = await inbox_svc.claim_for_user(session, user, tid)
     if not r.get("ok"):
         code = {"already_claimed": 409, "not_found": 404}.get(r.get("reason"), 400)
