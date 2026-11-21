@@ -92,7 +92,7 @@ export default {
   "选择 GitLab": "Select GitLab",
   "用于读取的代码账号": "Code account used for reading",
   "还没有可用代码源": "No code sources available",
-  "请先在「系统集成」接入 GitLab，然后回到这里同步仓库目录。": "Connect GitLab in System integrations, then return to sync the repository catalog.",
+  "请先在「系统集成」接入 GitLab 或 GitHub，然后回到这里同步仓库目录。": "Connect GitLab or GitHub in System integrations, then return to sync the repository catalog.",
   "搜索仓库名称或路径": "Search repository name or path",
   "选择代码账号后点击“同步目录”。": "Choose a code account and click Sync catalog.",
   "请联系平台管理员同步企业仓库目录。": "Contact the platform administrator to sync the enterprise repository catalog.",

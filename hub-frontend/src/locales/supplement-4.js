@@ -141,6 +141,7 @@ export default {
   "正在添加…": "Adding…",
   "添加到项目": "Add to project",
   "选择 GitLab…": "Select GitLab…",
+  "选择代码源…": "Select a source…",
   "· 在线": "· Online",
   "在项目中的名称": "Name in the project",
   "工程类型": "Project type",
