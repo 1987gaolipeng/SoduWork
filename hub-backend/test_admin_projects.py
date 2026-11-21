@@ -336,6 +336,32 @@ class AdminProjectRouterTests(unittest.IsolatedAsyncioTestCase):
                                      json={"name": "C:/display-name", "localDir": ""})
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["localDir"], "")
+    async def test_repo_update_preserves_custom_dev_flow_steps(self):
+        """Updating a repository must keep customized development-flow steps.
+
+        devFlow.steps is a list of {key, title, detail} dicts. update_repo used to
+        stringify every override field before normalize(), which turned the list into
+        a Python repr string and silently discarded all customized steps on save.
+        """
+        steps = [
+            {"key": "s0", "title": "拉取基线", "detail": "从 {base} 拉取干净副本"},
+            {"key": "s1", "title": "QA 自定义步骤", "detail": "执行 {task} 的验证并留证"},
+        ]
+        created = await self.request("POST", "/projects/project/repos",
+                                     json={"name": "Flow", "devFlow": {"steps": steps}})
+        self.assertEqual(created.status_code, 200, created.text)
+        rid = created.json()["id"]
+        self.assertEqual(created.json()["devFlow"]["steps"], steps)
+        updated = await self.request("PUT", "/repos/" + rid, json={
+            "devFlow": {"steps": steps, "extra": "改完要跑迁移检查"}})
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(updated.json()["devFlow"]["steps"], steps)
+        self.assertEqual(updated.json()["devFlow"]["extra"], "改完要跑迁移检查")
+        # An empty steps list keeps inheriting the default flow: nothing is stored,
+        # so the API response omits the key entirely instead of persisting a string.
+        inherited = await self.request("PUT", "/repos/" + rid, json={"devFlow": {"steps": []}})
+        self.assertEqual(inherited.status_code, 200, inherited.text)
+        self.assertEqual(inherited.json()["devFlow"].get("steps", []), [])
 
 
 if __name__ == "__main__":
