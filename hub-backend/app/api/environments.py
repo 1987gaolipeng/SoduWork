@@ -20,7 +20,8 @@ def _bad(error: ValueError) -> HTTPException:
         return HTTPException(status_code=422, detail=str(error))
     if isinstance(error, svc.InvalidEnvironmentTier):
         return HTTPException(status_code=400, detail=str(error), headers={"X-Error-Code": "hub.input.tier"})
-    return HTTPException(status_code=400 if isinstance(error, policy_svc.InvalidPolicyInput) else 409,
+    return HTTPException(status_code=400 if isinstance(error, (
+        policy_svc.InvalidPolicyInput, svc.InvalidSecretReferenceOrg)) else 409,
                          detail=str(error))
 
 
