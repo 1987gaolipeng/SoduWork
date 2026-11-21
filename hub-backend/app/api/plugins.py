@@ -484,9 +484,13 @@ async def trust_version(
             session, version,
             confirm_without_evaluation=bool(body.get("confirmWithoutEvaluation")))
         if not gate["ok"]:
+            blockers = list(gate.get("blockers") or [])
+            if not blockers and gate.get("state") == "ready":
+                blockers = ["%s：等待发布评审" % (c.get("name") or c.get("key") or "用例")
+                            for c in gate.get("cases") or [] if not c.get("ok")]
             raise HTTPException(
                 status_code=409,
-                detail="发布评测尚未通过：" + "；".join(gate.get("blockers") or []))
+                detail="发布评测尚未通过：" + "；".join(blockers))
         # Evaluation helpers may commit their own results. Reacquire the
         # transition lock after those prerequisites, before trust/history change.
         await plugin_lifecycle_notifications.lock_plugin(session, plugin)
