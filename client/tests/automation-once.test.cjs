@@ -267,6 +267,30 @@ test('spoken calendar schedules retain the same selections in the draft and crea
   }
 });
 
+test('evening midnight reserves the next day at 00:00 instead of noon', () => {
+  const {proposalOf, bodyOf, validate} = runtime();
+  for (const [phrase, runAt] of [
+    ['今晚12点提醒我交报告', '2026-10-15T16:00:00.000Z'],
+    ['明晚12点生成日报', '2026-10-16T16:00:00.000Z'],
+    ['2026年10月20日晚上12点执行一次', '2026-10-20T16:00:00.000Z'],
+    ['后天午夜12点生成日报', '2026-10-17T16:00:00.000Z'],
+  ]) {
+    const draft = proposalOf({}, phrase, {timeZone:'Asia/Shanghai'});
+    assert.equal(draft.every, 'once', phrase);
+    assert.equal(validate(draft), '', phrase);
+    assert.equal(bodyOf(draft).runAt, runAt, phrase);
+  }
+  for (const phrase of ['每天晚上12点生成日报', '每天半夜12点生成日报', '每周日晚上12点生成日报']) {
+    const draft = proposalOf({}, phrase, {timeZone:'Asia/Shanghai'});
+    assert.equal(draft.atHour, 0, phrase);
+    assert.equal(validate(draft), '', phrase);
+  }
+  for (const [phrase, runAt] of [
+    ['今天中午12点执行一次', '2026-10-15T04:00:00.000Z'],
+    ['今天下午12点执行一次', '2026-10-15T04:00:00.000Z'],
+  ]) assert.equal(bodyOf(proposalOf({}, phrase, {timeZone:'Asia/Shanghai'})).runAt, runAt, phrase);
+});
+
 test('invalid selections require clarification and refinements replace the old calendar settings', () => {
   const {proposalOf, validate} = runtime();
   const daily = proposalOf({}, '每天九点半生成报告');

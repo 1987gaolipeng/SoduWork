@@ -187,14 +187,18 @@
     return parts.length === 2 ? (parts[0] ? digits[parts[0]] : 1)*10 + (parts[1] ? digits[parts[1]] : 0) : digits[raw];
   }
   function clock(text) {
-    const found = text.match(/(凌晨|早上|上午|中午|下午|傍晚|晚上)?\s*([\d零一二两三四五六七八九十]{1,3})\s*([:：点时])\s*(半|一刻|三刻|整|[\d零一二两三四五六七八九十]{1,3})?\s*分?/);
+    const found = text.match(/(凌晨|早上|上午|中午|下午|傍晚|午夜|半夜|晚上)?\s*([\d零一二两三四五六七八九十]{1,3})\s*([:：点时])\s*(半|一刻|三刻|整|[\d零一二两三四五六七八九十]{1,3})?\s*分?/);
     if (!found) return null;
     let hour = cnNumber(found[2]);
     const token = found[4] || '0', minute = ({半:30,一刻:15,三刻:45,整:0})[token] ?? cnNumber(token);
     if (/下午|傍晚|晚上/.test(found[1]) && hour < 12) hour += 12;
     if (/凌晨|早上|上午/.test(found[1]) && hour === 12) hour = 0;
     if (found[1] === '中午' && hour < 11) hour += 12;
-    return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59 ? {atHour:hour,atMinute:minute} : {invalid:true};
+    // “晚上12点/午夜12点”是当天结束处的那个零点，不是次日中午。
+    const endOfDay = /傍晚|午夜|半夜|晚上/.test(found[1]) && hour === 12;
+    if (endOfDay) hour = 0;
+    if (!(hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59)) return {invalid:true};
+    return endOfDay ? {atHour:hour,atMinute:minute,endOfDay:true} : {atHour:hour,atMinute:minute};
   }
   // Resolve durations against the originating message, never the time an async
   // parser completes. Keep this instant when a later turn only changes the work.
@@ -357,8 +361,8 @@
     const time = clock(text);
     // A bare clock in a reply inherits the requested afternoon; an explicit period wins.
     if (!recurring && !oneTime && time && !time.invalid && prior.timingIssue === afternoonPrompt && time.atHour > 0 && time.atHour < 12 &&
-        !/(?:凌晨|早上|上午|中午|下午|傍晚|晚上)|\d\s*[:：]/.test(text)) time.atHour += 12;
-    if (time && !time.invalid) Object.assign(next,time, {timingIssue:''});
+        !/(?:凌晨|早上|上午|中午|下午|傍晚|午夜|半夜|晚上)|\d\s*[:：]/.test(text)) time.atHour += 12;
+    if (time && !time.invalid) Object.assign(next,{atHour:time.atHour,atMinute:time.atMinute}, {timingIssue:''});
     else if (time?.invalid) Object.assign(next, {atHour:null, atMinute:null, timingIssue:'执行时间无效，请填写0至23点、0至59分'});
     else if (next.every === 'daily' && /(?:每天|每日|天天)\s*下午/.test(text))
       Object.assign(next, {atHour:null, atMinute:null, timingIssue:afternoonPrompt});
@@ -385,6 +389,14 @@
       const offset = firstDate === relative ? /大后天/.test(relative[0]) ? 3 : /后天/.test(relative[0]) ? 2 : /明|tomorrow/i.test(relative[0]) ? 1 : 0 :
         (week[1] === '下周' ? 7 : 0) + Math.min(6,'一二三四五六日天'.indexOf(week[2])) - ((day.getUTCDay()+6)%7);
       day.setUTCDate(day.getUTCDate()+offset); date = day.toISOString().slice(0,10);
+    }
+    // A clock reading of "晚上12点/午夜12点" is the midnight that ends the
+    // referenced day, so the one-off instant belongs to the next date. Skip
+    // impossible dates; those must stay invalid instead of rolling into March.
+    if (time?.endOfDay && date && cleanDate(date)) {
+      const rollover = new Date(date + 'T12:00:00Z');
+      rollover.setUTCDate(rollover.getUTCDate() + 1);
+      date = rollover.toISOString().slice(0, 10);
     }
     // A newly requested one-off without an explicit clock stays incomplete.
     const when = time && !time.invalid ? pad(time.atHour)+':'+pad(time.atMinute) : old ? old.slice(11) : '';
