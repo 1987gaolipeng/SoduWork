@@ -92,6 +92,14 @@ async def sync_repositories(
 ):
     client_id = str(body.get("clientId") or "")
     await _client_in_scope(session, user, client_id)
+    integration = await session.get(am.Integration, integration_id)
+    if integration is None:
+        raise HTTPException(status_code=404, detail="Integration not found")
+    scope = await _scope(session, user)
+    if scope is not None:
+        int_org = str((integration.config or {}).get("orgId") or "")
+        if int_org not in scope:
+            raise HTTPException(status_code=403, detail="Integration is outside your organization scope")
     try:
         result = await catalog.sync_integration(session, integration_id,
                                                 client_id=client_id)
@@ -111,6 +119,15 @@ async def save_pull_account(
     session: AsyncSession = Depends(get_session),
 ):
     """Store the source's backend pull credentials: username and password or token."""
+    integration = await session.get(am.Integration, integration_id)
+    if integration is None:
+        raise HTTPException(status_code=404, detail="Integration not found")
+    scope = await _scope(session, user)
+    if scope is not None:
+        int_org = str((integration.config or {}).get("orgId") or "")
+        requested_org = str(body.get("orgId") or "")
+        if int_org not in scope or (requested_org and requested_org not in scope):
+            raise HTTPException(status_code=403, detail="Integration is outside your organization scope")
     try:
         await catalog.set_pull_account(
             session, integration_id,
