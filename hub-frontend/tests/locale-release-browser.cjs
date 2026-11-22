@@ -108,6 +108,8 @@ app.whenReady().then(async () => {
     { id: 'english-first', preferences: ['en-US', 'zh-TW'], saved: null, expected: 'en-US', remapped: false },
     { id: 'actual-fallback', preferences: ['zh-TW'], saved: null, expected: 'zh-CN', remapped: true },
     { id: 'legacy-traditional', preferences: ['en-US'], saved: 'zh-TW', expected: 'zh-CN', remapped: true },
+    { id: 'legacy-kr-preference', preferences: ['kr', 'ja-JP'], saved: null, expected: 'ko-KR', remapped: false },
+    { id: 'legacy-kr-profile', preferences: ['zh-TW'], saved: 'kr', expected: 'ko-KR', remapped: false },
   ]) {
     await load(item.preferences, item.saved)
     const snapshot = await noticeSnapshot()

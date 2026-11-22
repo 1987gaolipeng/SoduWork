@@ -146,6 +146,22 @@ test('a legacy stored language alias remains authoritative without profile conve
   })
 })
 
+test('the established kr browser alias keeps Korean ahead of later Japanese preferences', async () => {
+  await withSettings({ languages: ['kr', 'ja-JP'] }, ({ locale, notices }) => {
+    assert.equal(locale.normalizeLocale('kr'), 'ko-KR')
+    assert.equal(locale.getLocale(), 'ko-KR', 'adding notice metadata must not change the established detector')
+    assert.equal(notices().length, 0)
+  })
+})
+
+test('a legacy stored kr tag keeps its established Korean language without conversion', async () => {
+  await withSettings({ stored: 'kr', languages: ['zh-TW'] }, ({ locale, profile, notices }) => {
+    assert.equal(locale.getLocale(), 'ko-KR')
+    assert.equal(profile.get('soduwork.locale'), 'kr')
+    assert.equal(notices().length, 0)
+  })
+})
+
 test('a cross-tab explicit Simplified choice clears the mounted fallback notice', async () => {
   await withSettings({}, ({ locale, profile, notices, listeners }) => {
     assert.equal(notices().length, 1)
