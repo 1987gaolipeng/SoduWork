@@ -251,7 +251,12 @@ async def from_client(
         workflow_run_id = ""
         node_run_id = ""
     from .model_quota import reported_scope
-    raw_usage = dict(payload.get("usage") or {})
+    raw = payload.get("usage")
+    if raw is not None and not isinstance(raw, dict):
+        # Field-level validation message: a non-object usage must not leak the
+        # raw dict() traceback through the API's str(exc) echo.
+        raise ValueError("usage 必须是对象，包含 input_tokens/output_tokens 等用量字段")
+    raw_usage = dict(raw or {})
     validate_reported_usage(raw_usage)
     values = {
         "quota_scope": reported_scope(client, payload),
