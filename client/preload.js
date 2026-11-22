@@ -352,7 +352,7 @@ const soduWorkBridge = {
   runtimeForm: () => { try { return ipcRenderer.sendSync('runtime-form'); } catch (e) { return 'packaged'; } },
   deviceAuthBootstrap: (payload) => timedPageInvoke('device-auth-bootstrap', payload || {}),
   deviceAuthMigrateLegacy: payload => timedPageInvoke('device-auth-migrate-legacy', payload),
-  clientDomainRead: (domain, scope) => timedPageInvoke('client-domain-read', domain, scope),
+  clientDomainRead: (domain, scope, fresh) => timedPageInvoke('client-domain-read', domain, scope, fresh === true),
   clientDomainInvalidate: (domain, scope) => ipcRenderer.invoke('client-domain-invalidate', domain, scope),
   onClientDomainChanged: callback => {
     const handler = (_event, value) => callback(value);

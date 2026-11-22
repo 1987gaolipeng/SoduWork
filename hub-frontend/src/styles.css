@@ -58,6 +58,7 @@ button{font-family:inherit}
 .nav{display:flex;flex-direction:column;gap:2px;padding:6px 10px;overflow-y:auto;flex:1}
 .nav-label{font-size:max(var(--font-min-readable, 14.5px), 12px);letter-spacing:1.2px;text-transform:uppercase;color:var(--ink-3);padding:14px 10px 6px;font-weight:600}
 .nav-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:var(--radius-sm);color:var(--ink-2);cursor:pointer;font-weight:500;font-size:max(var(--font-min-readable, 14.5px), 13.5px);border:none;background:none;text-align:left;width:100%;transition:background .13s,color .13s}
+.nav-item{text-decoration:none}
 .nav-item:hover{background:var(--surface-2);color:var(--ink)}
 .nav-item.active{background:var(--accent-soft);color:var(--accent)}
 .nav-item .ico{width:17px;height:17px;flex-shrink:0;display:flex;color:currentColor}

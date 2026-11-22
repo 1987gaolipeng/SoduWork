@@ -1,5 +1,12 @@
 (function (global) {
   const messages = {
+    "还没有可用于对话的模型。": "No chat model is available yet.",
+    "打开模型目录": "Open model catalog",
+    "当前模型不可用，请选择可用模型。": "This model is unavailable. Choose an available model.",
+    "当前执行底座不可用。": "The selected agent runtime is unavailable.",
+    "设置执行底座": "Configure runtimes",
+    "暂时无法确认对话配置。": "Chat readiness could not be checked.",
+    "重新检查": "Check again",
     "设置已在其他窗口更新，请核对后重新保存。": "Settings changed in another window. Review them before saving again.",
     "hub.input.pages": "Choose one pagination mode: limit/offset or page/pageSize.",
     "hub.input.inbox": "Team inbox tasks have no recipient. To send a task to someone, assign it to a member.",

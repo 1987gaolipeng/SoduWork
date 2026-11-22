@@ -6,6 +6,8 @@ Command examples use `sh start.sh` on macOS/Linux. On Windows, use `.\start.cmd`
 
 Hub provides identity, authorization, execution governance, plugins, shared materials, and desktop connectivity. It uses FastAPI and asynchronous SQLAlchemy with PostgreSQL; local development can use SQLite.
 
+The first-chat checklist combines the available model catalog with the signed-in administrator’s latest desktop report. The device sends two readiness flags for its runtime and model selection. After five minutes without a fresh report, the Hub shows those steps as awaiting the desktop.
+
 ## Start locally
 
 For a first session, use `sh start.sh` from the repository root; it creates an isolated database, environment, and administrator.

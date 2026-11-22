@@ -9,6 +9,8 @@ FastAPI + SQLAlchemy(async) + PostgreSQL（本地开发可回退 SQLite）。
 
 模块职责与状态归属见[首版范围](../docs/release-scope.md)。
 
+首次对话清单根据可用模型目录和当前管理员最近一次桌面端报告显示进度。设备上报底座和模型选择是否就绪。五分钟内未收到新报告时，Hub 会将这两步显示为等待桌面端报告。
+
 ## 快速开始（本地 SQLite，零配置）
 
 ```bash

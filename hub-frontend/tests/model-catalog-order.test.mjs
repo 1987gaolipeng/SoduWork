@@ -11,12 +11,12 @@ const initial = [provider('builtin-a', 'A builtin', true), provider('custom-z', 
   provider('builtin-off', 'A disabled', true, false), provider('custom-a', 'A custom', false),
   provider('custom-off', 'Z disabled', false, false)]
 
-async function mount(t, catalog, { api = {}, ...options } = {}) {
+async function mount(t, catalog, { api = {}, takeNav = () => null, ...options } = {}) {
   const page = await createComponentHarness(new URL('../src/screens/ModelCatalog.jsx', import.meta.url), {
     ...options,
     dependencies: {
       '../api.js': { api: { modelCatalog: async () => structuredClone(catalog), ...api } },
-      '../ui.jsx': { Modal: () => null, SelectMenu: () => null, Confirm: () => null,
+      '../ui.jsx': { takeNav, Modal: () => null, SelectMenu: () => null, Confirm: () => null,
         Icon: () => null, Loading: () => null, ErrorState: () => null, toast() {} },
       './LlmSettings.jsx': { __esModule: true, default: () => null }, './ModelRuntime.jsx': { __esModule: true, default: Runtime },
       './model-catalog-actions.css': {}, './model-capabilities.css': {},
@@ -30,6 +30,22 @@ async function mount(t, catalog, { api = {}, ...options } = {}) {
 const order = page => page.nodes(node => node.type === 'article').map(node => node.key)
 const buttons = (page, area) => page.nodes(node => node.type === 'button', area)
 const labelMatches = label => button => renderToStaticMarkup(button).includes(label)
+
+test('first chat shortcuts open the requested action for the same administrator and current service', async t => {
+  const target = { ...provider('service', 'Service', false), baseUrl: 'https://service.example/v1', keySet: true }
+  for (const [action, account, enabled, expected] of [
+    ['provider', 'owner', true, 'ProviderForm'], ['model', 'owner', true, 'ModelForm'],
+    ['discover', 'owner', true, 'DiscoverForm'], ['model', 'other', true, null], ['model', 'owner', false, null],
+  ]) {
+    const catalog = { providers: [{ ...target, enabled }], models: [] }
+    const page = await mount(t, catalog, { props: { me: { id: 'owner' } },
+      takeNav: screen => screen === 'models' && { firstChat: action, accountId: account, providerId: target.id } })
+    const forms = page.nodes(n => ['ProviderForm', 'ModelForm', 'DiscoverForm'].includes(n.type?.name))
+    assert.equal(forms[0]?.type.name || null, expected)
+    if (action === 'model' && expected) assert.equal(forms[0].props.providerId, target.id)
+    if (action === 'discover') assert.equal(forms[0].props.provider.id, target.id)
+  }
+})
 
 test('the provider form tests current draft credentials and discards results after edits', async t => {
   const requests = []

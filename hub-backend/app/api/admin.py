@@ -57,20 +57,21 @@ from ..services import device_auth
 from ..services import device_connections
 from ..services import environment_service
 from .input_validation import parse_integer
+from .first_chat import REPORT_KEY
 
 log = logging.getLogger("uvicorn.error")
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 settings = get_settings()
 
-# Local model services are owned by the desktop client and must never be exposed
-# through administrative device APIs or changed by an administrator.
-_CLIENT_LOCAL_MODEL_KEYS = frozenset(("modelProviders",))
+# Device-owned model settings and first-chat reports stay out of generic
+# administrative device reads and patches.
+_CLIENT_PRIVATE_CONFIG_KEYS = frozenset(("modelProviders", REPORT_KEY))
 
 
 def _admin_client_config(value) -> dict:
     """Return the administrative configuration view without client-local model data."""
     config = dict(value or {}) if isinstance(value, dict) else {}
-    for key in _CLIENT_LOCAL_MODEL_KEYS:
+    for key in _CLIENT_PRIVATE_CONFIG_KEYS:
         config.pop(key, None)
     return config
 
@@ -623,12 +624,11 @@ async def paged_clients(
     keyword = q.strip().lower()
     search = []
     if keyword:
-        like = f"%{keyword}%"
         search = [or_(
-            func.lower(func.coalesce(Client.name, "")).like(like),
-            func.lower(Client.id).like(like),
-            func.lower(func.coalesce(User.display_name, "")).like(like),
-            func.lower(func.coalesce(User.username, "")).like(like),
+            func.lower(func.coalesce(Client.name, "")).contains(keyword, autoescape=True),
+            func.lower(Client.id).contains(keyword, autoescape=True),
+            func.lower(func.coalesce(User.display_name, "")).contains(keyword, autoescape=True),
+            func.lower(func.coalesce(User.username, "")).contains(keyword, autoescape=True),
         )]
 
     total = int(await session.scalar(
@@ -2314,10 +2314,11 @@ async def client_push(
             patch = {}
         if not isinstance(patch, dict):
             raise HTTPException(status_code=400, detail="config.patch 必须是对象")
-        forbidden = sorted(_CLIENT_LOCAL_MODEL_KEYS.intersection(patch))
+        forbidden = sorted(_CLIENT_PRIVATE_CONFIG_KEYS.intersection(patch))
         if forbidden:
             raise HTTPException(status_code=403,
-                                detail="本地模型配置由客户端管理，后台不能读取或修改")
+                                detail="本地模型配置由客户端管理，后台不能读取或修改" if "modelProviders" in forbidden
+                                else "首聊状态由客户端报告")
         from ..services import model_config_guard
         await model_config_guard.personal(session, c, allow_patch=True)
         c.config = {**(c.config or {}), **patch}

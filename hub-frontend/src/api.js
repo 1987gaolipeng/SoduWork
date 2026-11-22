@@ -408,6 +408,7 @@ export const api = {
       ...(options.execution && { execution: options.execution }) }),
   /* Separate provider credentials from models; secrets are write-only. */
   modelCatalog: () => call('GET', '/admin/model-catalog'),
+  firstChatReadiness: () => call('GET', '/admin/first-chat-readiness'),
   testModelProviderConnection: (body) => call('POST', '/admin/model-providers/test-connection', body),
   checkModelCapabilities: (body) => call('POST', '/admin/model-capabilities/check', body, 140000),
   saveModelProvider: (pid, b) => call('PUT', '/admin/model-providers/' + encodeURIComponent(pid), b),

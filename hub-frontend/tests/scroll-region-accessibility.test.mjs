@@ -43,6 +43,7 @@ async function mountScreen(t, name) {
     dependencies: {
       '../api.js': { api, can: () => true },
       './requirement-governance.js': requirementGovernance,
+      './FirstChatChecklist.jsx': 'FirstChatChecklist',
       './operations-copy.js': operationsCopy,
       './OperationsApprovalQueue.jsx': 'ApprovalQueue', './OperationsFailures.jsx': 'OperationsFailures',
       './PluginRunDialogs.jsx': { RunDrawer: 'RunDrawer' },

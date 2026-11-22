@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
 import httpx
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -14,7 +14,7 @@ from app import automation_models, models
 from app.db import Base, get_session
 from app.deps import current_client, current_user
 from app.library_models import LibraryFolder, LibraryItem
-from app.api import admin, approvals, clients, deliveries, environments, library, runner_ws, tasks, usage, work_catalog
+from app.api import admin, approvals, clients, deliveries, environments, first_chat, library, runner_ws, tasks, usage, work_catalog
 from app.permissions import ALL_KEYS
 
 
@@ -44,8 +44,8 @@ class HubContractTests(unittest.IsolatedAsyncioTestCase):
                              (("file-a", "row-0"), ("file-b", "row-0"), ("private", "row-1"))])
             await session.commit()
         self.user._perms = set(ALL_KEYS)
-        api = FastAPI()
-        for router in (admin.router, approvals.router, clients.router, deliveries.router, environments.router,
+        api = self.app = FastAPI()
+        for router in (admin.router, approvals.router, clients.router, deliveries.router, environments.router, first_chat.router,
                        library.router, runner_ws.router, tasks.router, usage.router, work_catalog.admin_router):
             api.include_router(router)
 
@@ -64,6 +64,41 @@ class HubContractTests(unittest.IsolatedAsyncioTestCase):
         response = await self.http.request(method, path, **kwargs)
         self.assertEqual(response.status_code, expected, (method, path, response.status_code))
         return response.json()
+
+    async def test_first_chat_uses_current_models_and_only_the_signed_in_accounts_recent_report(self):
+        async def reporting_device(session=Depends(get_session)):
+            return await session.get(models.Client, self.device.id)
+
+        self.app.dependency_overrides[current_client] = reporting_device
+        async with self.sessions() as session, session.begin():
+            device = await session.get(models.Client, self.device.id)
+            device.platform = "linux/x64"
+            device.config = {"theme": "light"}
+            session.add(models.ModelProvider(id="service", name="Fixture", base_url="https://fixture.invalid/v1",
+                                             api_key="fixture-key", enabled=True))
+            session.add(models.ModelDef(id="image-only", provider_id="service", name="picture", modality="image"))
+        expected = {"providerReady": True, "chatModelReady": False, "runtimeReady": None, "modelReady": None}
+        self.assertEqual(await self.request("GET", "admin/first-chat-readiness"), expected)
+        async with self.sessions() as session, session.begin():
+            session.add(models.ModelDef(id="chat-model", provider_id="service", name="chat", modality="chat"))
+        expected["chatModelReady"] = True
+        await self.request("PUT", "first-chat-readiness", 422, json={"runtimeReady": "true", "modelReady": True})
+        await self.request("PUT", "first-chat-readiness", json={"runtimeReady": True, "modelReady": False})
+        self.assertEqual(await self.request("GET", "admin/first-chat-readiness"),
+                         {**expected, "runtimeReady": True, "modelReady": False})
+        with patch.object(first_chat, "time", return_value=first_chat.time() + first_chat.REPORT_TTL + 1):
+            self.assertEqual(await self.request("GET", "admin/first-chat-readiness"), expected)
+        async with self.sessions() as session, session.begin():
+            device = await session.get(models.Client, self.device.id)
+            self.assertEqual(admin._admin_client_config(device.config), {"theme": "light"})
+            device.auth_version += 1
+        self.assertEqual(await self.request("GET", "admin/first-chat-readiness"), expected)
+        await self.request("PUT", "first-chat-readiness", json={"runtimeReady": True, "modelReady": True})
+        self.user.id = "row-1"
+        self.assertEqual(await self.request("GET", "admin/first-chat-readiness"), expected)
+        self.user.is_super = False
+        self.user._perms = set()
+        await self.request("GET", "admin/first-chat-readiness", 403)
 
     async def test_delete_distinguishes_missing_resources_from_in_use(self):
         for resource in ("orgs", "roles"):
@@ -111,6 +146,26 @@ class HubContractTests(unittest.IsolatedAsyncioTestCase):
         self.user.is_super = False
         limited = await self.request("GET", "admin/users?limit=1")
         self.assertEqual(([user["id"] for user in limited["items"]], limited["total"]), (["row-0"], 1))
+
+    async def test_device_search_treats_keywords_as_literal_substrings(self):
+        async with self.sessions() as session:
+            (await session.get(models.Client, "row-0")).name = "Win_01"
+            (await session.get(models.Client, "row-1")).name = "WinX01"
+            (await session.get(models.User, "row-1")).display_name = "ops%team"
+            (await session.get(models.User, "row-2")).username = r"hq\admin"
+            session.add(models.Client(id="dev_special", user_ref="row-2", auth_state="active"))
+            await session.commit()
+        for route in ("admin/clients", "admin/client-inventory"):
+            for term, ids in ((" WIN_01 ", ["row-0"]), ("%", ["row-1"]),
+                              ("dev_", ["dev_special"]), ("a%", []),
+                              ("\\", ["row-2", "dev_special"])):
+                with self.subTest(route=route, term=term):
+                    page = await self.request("GET", route, params={"paged": "true", "q": term})
+                    self.assertEqual(page["total"], len(ids))
+                    self.assertCountEqual([row["id"] for row in page["items"]], ids)
+        self.user.is_super = False
+        page = await self.request("GET", "admin/clients", params={"paged": "true", "q": "%"})
+        self.assertEqual((page["total"], page["items"]), (0, []))
 
     async def test_library_pages_cross_folder_boundary(self):
         with patch("app.api.library.library_read_cache.ensure_ready", new_callable=AsyncMock):

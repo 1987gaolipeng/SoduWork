@@ -1,3 +1,4 @@
+import firstChat from './first-chat.js'
 import audit from './audit.js'
 import automationTemplates from './automation-templates.js'
 import quotaManagement from './quota-management.js'
@@ -32,4 +33,4 @@ import part0 from './messages-1.js'
 import part1 from './messages-2.js'
 import part2 from './messages-3.js'
 import part3 from './messages-4.js'
-export const messages = Object.assign({}, audit, automationTemplates, part0, part1, part2, part3, supplement0, supplement1, supplement2, supplement3, supplement4, runtime, adminUiFollowup, modelCapabilities, modelDiscovery, orgMemory, requirementGovernance, requirementCollaboration, publicPages, pluginAccess, pluginLocales, cloudRunnerManagement, connectorManagement, repositoryIssueSync, mailSettings, quotaManagement, accessCatalog, operationsOverview, governanceOverview, insightsMetrics, usageCenter, modelRuntimeOverview, capabilityCatalog, legalDocuments)
+export const messages = Object.assign({}, firstChat, audit, automationTemplates, part0, part1, part2, part3, supplement0, supplement1, supplement2, supplement3, supplement4, runtime, adminUiFollowup, modelCapabilities, modelDiscovery, orgMemory, requirementGovernance, requirementCollaboration, publicPages, pluginAccess, pluginLocales, cloudRunnerManagement, connectorManagement, repositoryIssueSync, mailSettings, quotaManagement, accessCatalog, operationsOverview, governanceOverview, insightsMetrics, usageCenter, modelRuntimeOverview, capabilityCatalog, legalDocuments)

@@ -5,7 +5,7 @@ import { createComponentHarness } from './helpers/react-harness.mjs'
 import { setLocale } from '../src/i18n.js'
 
 const Modal = () => null, SelectMenu = () => null
-const ui = { Modal, SelectMenu, Confirm: () => null, Icon: () => null, Loading: () => null, ErrorState: () => null, toast() {} }
+const ui = { Modal, SelectMenu, takeNav: () => null, Confirm: () => null, Icon: () => null, Loading: () => null, ErrorState: () => null, toast() {} }
 const capabilities = { CAPABILITY_LABELS: { imageInput: '图片输入', toolCalling: '工具调用', streaming: '流式输出' },
   CAPABILITY_STATES: { unknown: '未确认', supported: '支持', unsupported: '不支持' }, CapabilityBadges() {}, ModelCapabilityStatus() {} }
 function children(value) {

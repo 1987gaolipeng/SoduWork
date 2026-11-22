@@ -295,18 +295,35 @@ class AssignBody(BaseModel):
 
 # Organization roles and users.
 
+def _org_sort(value: object) -> int:
+    """Preserve decimal-string clients without coercing booleans or floats."""
+    if isinstance(value, str):
+        import re
+        text = value.strip()
+        if re.fullmatch(r"[+-]?[0-9]+", text):
+            digits = text.lstrip("+-").lstrip("0") or "0"
+            if len(digits) <= 10:
+                value = int(digits) * (-1 if text.startswith("-") else 1)
+    if type(value) is not int or not -(2**31) <= value <= 2**31 - 1:
+        raise ValueError("sort must be an integer between -2147483648 and 2147483647")
+    return value
+
+
+OrgSort = Annotated[int, Field(ge=-(2**31), le=2**31 - 1), BeforeValidator(_org_sort)]
+
+
 class OrgCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")
     name: AdminName
     parentId: Optional[str] = None
-    sort: int = 0
+    sort: OrgSort = 0
 
 
 class OrgUpdate(BaseModel):
     model_config = ConfigDict(extra="ignore")
     name: Optional[AdminName] = None
     parentId: Optional[str] = None
-    sort: Optional[int] = None
+    sort: Optional[OrgSort] = None
 
 
 class RoleCreate(BaseModel):

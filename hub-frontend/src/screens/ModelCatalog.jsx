@@ -2,7 +2,7 @@ import { translateText as tx, localeMap, useLocale, serverMessage } from '../i18
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState, useId } from 'react'
 import { api } from '../api.js'
 import { useViewportHeight } from '../viewport-height.js'
-import { Loading, ErrorState, Icon, Modal, Confirm, toast, SelectMenu } from '../ui.jsx'
+import { Loading, ErrorState, Icon, Modal, Confirm, toast, SelectMenu, takeNav, navTo } from '../ui.jsx'
 import LlmSettings from './LlmSettings.jsx'
 import ModelRuntime from './ModelRuntime.jsx'
 import './model-catalog-actions.css'
@@ -47,7 +47,7 @@ function checkRevision(provider, model) {
   return JSON.stringify([provider.revision, model.revision, model.configRevision])
 }
 
-export default function ModelCatalog() {
+export default function ModelCatalog({ me }) {
   const viewportRef = useViewportHeight()
   const listRef = useRef(null)
   const bindList = useCallback(element => {
@@ -56,6 +56,11 @@ export default function ModelCatalog() {
   }, [viewportRef])
   const uiLocale = useLocale();
   const [d, setD] = useState(null)
+  const [guide] = useState(() => {
+    const nav = takeNav('models')
+    return me?.id && nav?.accountId === me.id ? nav : null
+  })
+  const openedGuide = useRef(false)
   const [editP, setEditP] = useState(null)     // provider | 'new'
   const [addM, setAddM] = useState(null)       // {providerId, model?}
   const [del, setDel] = useState(null)         // {kind:'p'|'m', id, name}
@@ -79,6 +84,19 @@ export default function ModelCatalog() {
   const activeLoad = useRef(null)
   const firstChecks = useRef(new Map())
   const checkQueue = useRef(Promise.resolve())
+  useEffect(() => {
+    if (!guide || openedGuide.current || me?.id !== guide.accountId) return
+    if (guide.firstChat === 'provider') {
+      openedGuide.current = true
+      setEditP('new')
+    } else if (d && ['model', 'discover'].includes(guide.firstChat)) {
+      openedGuide.current = true
+      const p = d.providers.find(p => p.id === guide.providerId && p.enabled && p.baseUrl && p.keySet)
+      if (!p) toast(tx('所选服务已停用或配置不完整，请重新选择。'))
+      else if (guide.firstChat === 'model') setAddM({ providerId: p.id, provider: p })
+      else setDiscover(p)
+    }
+  }, [d, guide, me?.id])
   const load = () => {
     setError(null)
     const request = api.modelCatalog()
@@ -198,6 +216,7 @@ export default function ModelCatalog() {
 
   return (
     <div className="model-catalog">
+      {guide && <button type="button" className="btn first-chat-reopen" onClick={() => navTo('overview')}>{tx('返回首次对话清单')}</button>}
       <ModelRuntime providers={providers} models={models}
         catalogCounts={d ? { providers: providers.length, models: models.length } : null} catalogSummary={
         <section className="model-catalog-summary model-runtime-dimension" aria-label={tx("目录配置")} aria-busy={!d && !error}>

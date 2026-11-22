@@ -936,11 +936,11 @@
     var current = domainScope();
     return value && value.hub === current.hub && value.clientId === current.clientId && value.userId === current.userId;
   }
-  async function domainRead(domain, path) {
+  async function domainRead(domain, path, fresh = false) {
     var bridge = global.soduWorkAPI, scope = domainScope();
     if (!bridge?.clientDomainRead || !scope.userId) return jfetch(path);
     var auth = requestAuth();
-    var result = await bridge.clientDomainRead(domain, scope);
+    var result = await bridge.clientDomainRead(domain, scope, fresh);
     if (!sameDomainScope(scope)) throw staleTaskScope();
     if (result?.code === 'DOMAIN_POLL_FALLBACK') return jfetch(path);
     // A local snapshot or replayed backoff error does not prove current reachability.
@@ -1299,6 +1299,12 @@
     connectHub: connectHub,
     normalizeHub: normalizeHub,
     taskStorageKey: taskStorageKey,
+    async reportFirstChatReadiness(scope, runtimeReady, modelReady) {
+      if (!hasValidDeviceSession() || !_clientUser || scope !== taskStorageKey('ops')) return false;
+      await jfetch('/first-chat-readiness', { method: 'PUT', taskScope: scope, sessionRead: true,
+        body: JSON.stringify({ runtimeReady, modelReady }) });
+      return true;
+    },
     adoptVerifiedTaskOperations: adoptVerifiedTaskOperations,
 
     /*
@@ -1679,7 +1685,8 @@
       localCatalog = localCatalog || { providers: [], usable: [], myModels: [], mediaUsable: {} };
       var r, managedCatalogUnavailable = false;
       try {
-        r = await domainRead('models', '/my-models');
+        if (!sameDomainScope(scope)) throw staleTaskScope();
+        r = await domainRead('models', '/my-models', options?.fresh === true);
         if (r?.ok === false) throw new Error('Hub 模型目录暂时无法读取');
         managedCatalogUnavailable = !Array.isArray(r?.usable);
       }

@@ -1,7 +1,7 @@
 import { getLocale, translateText as tx, localeMap, useLocale } from '../i18n.js'
 import React, { useState, useEffect, useId } from 'react'
 import { orgOptions } from '../org-options.js'
-import { api } from '../api.js'
+import { api, getUser } from '../api.js'
 import { FilterInput, FilterSelect } from '../FilterControls.jsx'
 import { useViewportHeight } from '../viewport-height.js'
 import { useAsync, Loading, Icon, Modal, Confirm, toast, SelectMenu } from '../ui.jsx'
@@ -17,8 +17,21 @@ export default function Users() {
   const orgs = useAsync(() => api.orgs())
   const roles = useAsync(() => api.roles())
   const [edit, setEdit] = useState(null)
-  const [q, setQ] = useState('')
-  const [dept, setDept] = useState('')
+  const user = getUser()
+  const account = user?.id || user?.username
+  const [{ q, dept }, setFilters] = useState(() => {
+    const saved = window.history.state?.usersFilters
+    return account && saved?.account === account && typeof saved.q === 'string' && typeof saved.dept === 'string'
+      ? saved : { q: '', dept: '' }
+  })
+  function changeFilters(next) {
+    setFilters(next)
+    if (account) {
+      // Keep searches on this history entry so copying the URL shares only the page.
+      try { window.history.replaceState({ ...window.history.state, usersFilters: { ...next, account } }, '') }
+      catch { /* Filtering still works when the browser limits history writes. */ }
+    }
+  }
   if (users.loading || orgs.loading || roles.loading) return <Loading />
   const ul = users.data || [], ol = orgs.data || [], rl = roles.data || []
   const orgName = (id) => { const o = ol.find((x) => x.id === id); return o ? o.name : '—' }
@@ -39,9 +52,9 @@ export default function Users() {
         <div className="stat"><div className="sv">{ul.length - active}</div><div className="sl"><span className="sd" style={{ background: 'var(--offline)' }} />{tx("已停用")}</div></div>
       </div>
       <div className="admin-filterbar">
-        <FilterInput aria-label={tx("搜索姓名或账号")} value={q} onChange={(e) => setQ(e.target.value)} placeholder={tx("搜索姓名 / 账号")} />
+        <FilterInput aria-label={tx("搜索姓名或账号")} value={q} onChange={(e) => changeFilters({ q: e.target.value, dept })} placeholder={tx("搜索姓名 / 账号")} />
         <div className="admin-filter-options">
-          <FilterSelect className="f-sel" aria-label={tx("所属部门")} value={dept} onChange={(e) => setDept(e.target.value)}>
+          <FilterSelect className="f-sel" aria-label={tx("所属部门")} value={dept} onChange={(e) => changeFilters({ q, dept: e.target.value })}>
             <option value="">{tx("全部部门")}</option>
             {orgOptions(ol).map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
           </FilterSelect>
