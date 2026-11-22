@@ -80,6 +80,11 @@ async def configuration(user: User = Depends(require_perm("quota.manage")),
 async def save_configuration(body: CatalogUpdate,
                              user: User = Depends(require_perm("quota.manage")),
                              session: AsyncSession = Depends(get_session)):
+    # The plan/model catalog is a platform-level directory: a scoped quota.manage in a
+    # sub-department must not be able to rewrite it for the whole instance (#1027).
+    if not user.is_super:
+        raise HTTPException(status_code=403,
+                            detail="平台级套餐与额度目录仅超级管理员可修改")
     row = await lock_setting(session, qp.CATALOG_KEY)
     old = qp.catalog_from(row.value)
     if old["revision"] != body.revision:
