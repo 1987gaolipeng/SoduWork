@@ -173,6 +173,9 @@ async def delete_ai_schedule(sid: str, user: User = Depends(require_perm("task.d
 async def list_ai_schedule_runs(sid: str, limit: int = 20,
                                 user: User = Depends(require_perm("task.dispatch")),
                                 session: AsyncSession = Depends(get_session)):
+    # README contracts limit as 1-200; 0 or negatives must not act as "unlimited".
+    if not 1 <= limit <= 200:
+        raise HTTPException(422, "limit 只允许 1-200")
     from .admin import _sch_api, _sch_apply, _scoped_ai_schedule
 
     from ..models import AiSchedule
