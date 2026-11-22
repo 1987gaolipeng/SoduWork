@@ -5,6 +5,14 @@ import './list-pager.css'
 export default function ListPager({ page, pages, total, unit = tx('条'), onChange, label = tx('列表分页'),
   pageSize, onPageSizeChange, disabled = false }) {
   useLocale()
+  const jumpRef = React.useRef(null)
+  // Sync the jump input when page changes externally, without recreating it
+  // (a key={page} input would be remounted on every page change and wipe
+  // whatever the user is still typing).
+  React.useEffect(() => {
+    const input = jumpRef.current
+    if (input && document.activeElement !== input) input.value = String(page)
+  }, [page])
   if (pages <= 1 && !onPageSizeChange) return null
   function jump(event) {
     event.preventDefault()
@@ -24,7 +32,7 @@ export default function ListPager({ page, pages, total, unit = tx('条'), onChan
       {onPageSizeChange && <>
         <button type="button" disabled={disabled || page >= pages} onClick={() => onChange(pages)}>{tx('最后一页')}</button>
         <form onSubmit={jump}>
-          <label>{tx('页码')}<input key={page} name="pageNumber" type="number" min={1} max={pages}
+          <label>{tx('页码')}<input ref={jumpRef} name="pageNumber" type="number" min={1} max={pages}
             defaultValue={page} required disabled={disabled || pages <= 1} /></label>
           <button type="submit" disabled={disabled || pages <= 1}>{tx('跳转')}</button>
         </form>
