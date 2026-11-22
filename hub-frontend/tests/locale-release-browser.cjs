@@ -32,6 +32,11 @@ async function pickLocale(value) {
   await js(`(()=>{const label=${JSON.stringify({ 'zh-CN': '简体中文', 'en-US': 'English', 'ja-JP': '日本語', 'ko-KR': '한국어' }[value])};const option=[...document.querySelectorAll('.profile-menu [role=option]')].find(el=>el.textContent.trim()===label);if(!option)throw Error('Missing language option');option.click()})()`)
   await until(`document.documentElement.lang===${JSON.stringify(value)}`, 'selected locale')
 }
+async function noticeSnapshot() {
+  if (!await js('!!document.querySelector(".profile-menu .locale-language-select")')) await js('document.querySelector(".side-foot").click()')
+  await until('!!document.querySelector(".profile-menu .locale-language-select")', 'language settings')
+  return js('({locale:document.documentElement.lang,stored:localStorage.getItem("soduwork.locale"),notices:[...document.querySelectorAll(".profile-menu .locale-remap-note")].map(node=>node.textContent)})')
+}
 let origin
 app.whenReady().then(async () => {
   server = http.createServer((req, res) => {
@@ -95,6 +100,44 @@ app.whenReady().then(async () => {
   }
   mode = 'ok'; await load(['zh-CN'], 'ko-KR')
   assert.equal(await js('document.documentElement.lang'), 'ko-KR')
+  for (const item of [
+    { id: 'saved-english', preferences: ['zh-TW'], saved: 'en-US', expected: 'en-US', remapped: false },
+    { id: 'saved-japanese', preferences: ['zh-HK'], saved: 'ja-JP', expected: 'ja-JP', remapped: false },
+    { id: 'saved-korean', preferences: ['zh-Hant'], saved: 'ko-KR', expected: 'ko-KR', remapped: false },
+    { id: 'saved-simplified', preferences: ['zh-TW'], saved: 'zh-CN', expected: 'zh-CN', remapped: false },
+    { id: 'english-first', preferences: ['en-US', 'zh-TW'], saved: null, expected: 'en-US', remapped: false },
+    { id: 'actual-fallback', preferences: ['zh-TW'], saved: null, expected: 'zh-CN', remapped: true },
+    { id: 'legacy-traditional', preferences: ['en-US'], saved: 'zh-TW', expected: 'zh-CN', remapped: true },
+  ]) {
+    await load(item.preferences, item.saved)
+    const snapshot = await noticeSnapshot()
+    assert.equal(snapshot.locale, item.expected)
+    assert.equal(snapshot.stored, item.saved, 'reading a profile must not rewrite its language')
+    assert.equal(snapshot.notices.length, item.remapped ? 1 : 0, item.id)
+    if (item.remapped) assert.ok(snapshot.notices[0].includes('简体中文'))
+    results.push({ fallbackCase: item.id, ...snapshot })
+    if (item.id === 'saved-english' || item.id === 'actual-fallback') {
+      fs.writeFileSync(path.join(output, item.id + '.png'), (await win.webContents.capturePage()).toPNG())
+    }
+  }
+  for (const selected of ['en-US', 'zh-CN']) {
+    await load(['zh-TW'])
+    assert.equal((await noticeSnapshot()).notices.length, 1)
+    await js('document.querySelector(".side-foot").click()')
+    await pickLocale(selected)
+    await until('!document.querySelector(".profile-menu .locale-remap-note")', 'explicit choice clears fallback')
+    const chosen = await noticeSnapshot()
+    assert.equal(chosen.locale, selected)
+    assert.equal(chosen.stored, selected)
+    assert.equal(chosen.notices.length, 0)
+    await win.reload()
+    await until('!!document.querySelector(".cr-list")', 'reload after explicit fallback choice')
+    const reloaded = await noticeSnapshot()
+    assert.equal(reloaded.locale, selected)
+    assert.equal(reloaded.stored, selected)
+    assert.equal(reloaded.notices.length, 0)
+    results.push({ explicitFallbackChoice: selected, chosen, reloaded })
+  }
   assert.ok(notesRequests >= 12)
   assert.deepEqual(errors, [])
   assert.ok(requests.every(row => row.method === 'GET'))
