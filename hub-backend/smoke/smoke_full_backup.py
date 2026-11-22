@@ -151,6 +151,10 @@ with tempfile.TemporaryDirectory(prefix="soduwork-full-unlistable-") as root_nam
     real_scandir = _os.scandir
 
     def denying_scandir(path, *args, **kwargs):
+        # shutil.rmtree on Linux calls os.scandir with an int file descriptor
+        # during temp-dir cleanup; only intercept real path arguments (#1203).
+        if not isinstance(path, (str, _os.PathLike)):
+            return real_scandir(path, *args, **kwargs)
         if Path(path).name == "receipts":
             raise PermissionError(5, "Access denied.", str(path))
         return real_scandir(path, *args, **kwargs)
