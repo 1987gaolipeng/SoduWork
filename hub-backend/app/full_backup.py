@@ -231,7 +231,8 @@ def _safe_symlink_target(relative: str, target: str) -> None:
 
 
 def _snapshot_source(name: str, root: Path, blob_root: Path,
-                     entries: list[dict[str, Any]]) -> dict[str, Any]:
+                     entries: list[dict[str, Any]], *, staging_dir: Path | None = None) -> dict[str, Any]:
+    """Inventory one source, pruning this backup's workspace if it is nested in the source."""
     start = len(entries)
     total = 0
     empty_dirs: list[str] = []
@@ -247,6 +248,9 @@ def _snapshot_source(name: str, root: Path, blob_root: Path,
             current_path = Path(current)
             for directory in list(dirs):
                 link = current_path / directory
+                if link == staging_dir:
+                    dirs.remove(directory)
+                    continue
                 if link.is_symlink():
                     dirs.remove(directory)
                     relative = link.relative_to(root).as_posix()
@@ -369,7 +373,7 @@ def create_bundle(*, database_url: str, sources: Iterable[str], output: str | Pa
         entries: list[dict[str, Any]] = []
         source_meta = [_snapshot_source("database", database_root, blob_root, entries)]
         for name, path in parsed_sources:
-            source_meta.append(_snapshot_source(name, path, blob_root, entries))
+            source_meta.append(_snapshot_source(name, path, blob_root, entries, staging_dir=temporary))
         blob_meta = [{"sha256": path.name, "size": path.stat().st_size}
                      for path in sorted(blob_root.iterdir()) if not path.name.startswith(".")]
         manifest = {
