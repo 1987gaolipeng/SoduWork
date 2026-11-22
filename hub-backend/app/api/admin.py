@@ -1870,6 +1870,14 @@ async def test_alert_config(
 ):
     """Send a real test notification to the configured destination."""
     from ..services import notify
+    from ..services import client_access
+    # Rate-limit test sends: one per 30s per user, so the external webhook cannot be flooded (#1041).
+    try:
+        await email_auth._take_limit(session, f"alert-test:user:{user.id}", 1, 30, email_auth.now())
+    except client_access.ClientAccessError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc),
+                            headers={"Retry-After": str(exc.meta.get("retryAfter", 30))}) from exc
+    await session.commit()
     sent = await notify.alert(
         session, "这是一条测试告警：配好了，交付出事时会用这个通道叫人。")
     return {"ok": bool(sent),
