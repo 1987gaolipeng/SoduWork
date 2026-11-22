@@ -697,7 +697,7 @@ async def update_binding(
         raise HTTPException(status_code=404, detail="插件绑定不存在")
     plugin = await _plugin(session, user, binding.plugin_id)
     scope = await _scope(session, user)
-    if scope is not None and binding.org_id is not None and binding.org_id not in scope:
+    if scope is not None and (binding.org_id is None or binding.org_id not in scope):
         raise HTTPException(status_code=403, detail="这个绑定不在你的组织范围内")
     before = {"enabled": binding.enabled, "versionId": binding.version_id,
               "projectId": binding.project_id}
