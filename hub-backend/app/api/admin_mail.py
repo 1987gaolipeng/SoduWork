@@ -30,6 +30,10 @@ async def settings(_user: User = Depends(require_perm("identity.manage")),
 @router.put("/mail-settings")
 async def save(body: dict = Body(default_factory=dict), user: User = Depends(require_perm("identity.manage")),
                session: AsyncSession = Depends(get_session)):
+    # Platform-level mail settings are super-administrator territory (#1025): sub-department
+    # accounts with the permission key must not rewrite global SMTP settings.
+    if not user.is_super:
+        raise HTTPException(status_code=403, detail="平台级邮件设置仅超级管理员可修改")
     try:
         result = await mail.save_settings(session, body)
         await session.commit()
