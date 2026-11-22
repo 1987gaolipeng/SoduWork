@@ -193,6 +193,8 @@ _CAP_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{0,63}$")
 
 
 def _items(value, *, limit: int, length: int) -> list[str]:
+    if value is not None and not isinstance(value, (list, tuple)):
+        raise ValueError("列表字段须为数组")
     out: list[str] = []
     for raw in value or []:
         item = str(raw or "").strip()[:length]
@@ -204,6 +206,8 @@ def _items(value, *, limit: int, length: int) -> list[str]:
 
 
 def _contract(value) -> dict:
+    if value is not None and not isinstance(value, dict):
+        raise ValueError("outputContract 须为对象")
     raw = dict(value or {})
     return {
         "kind": str(raw.get("kind") or "artifact").strip()[:40] or "artifact",
