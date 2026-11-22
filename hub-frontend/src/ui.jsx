@@ -334,7 +334,10 @@ export function ToastHost() {
     return () => { window.removeEventListener('soduwork-hub-toast', h); clearTimeout(timer) }
   }, [])
   if (!msg) return null
-  return <div className="toast">{msg}</div>
+  // Screen readers announce toasts only when the container exposes live-region
+  // semantics; plain text is invisible to assistive technology.
+  const is_error = typeof msg === 'string' && /失败|错误|Error|error/.test(msg)
+  return <div className="toast" role={is_error ? "alert" : "status"} aria-live={is_error ? "assertive" : "polite"}>{msg}</div>
 }
 
 /* Data-loading hook. */
