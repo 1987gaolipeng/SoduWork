@@ -483,8 +483,8 @@ export function BoxPick({ clients, selected, onToggle, onSet }) {
       <div className="bp-bar">
         <div className="searchbox sm filter-input"><Icon name="search" /><input ref={searchRef} aria-label={tx("搜索 SoduWork")} value={q} onChange={(e) => setQ(e.target.value)} placeholder={tx("搜索 SoduWork…")} />{q && <button type="button" className="filter-clear" aria-label={tx("清空搜索 SoduWork")} title={tx("清空")} onClick={() => { setQ(''); searchRef.current?.focus() }}>×</button>}</div>
         <span className="muted xsm">{tx("已选 ")}{selected.length}</span>
-        {onSet && <a className="bp-act" onClick={() => onSet(onlineIds)}>{tx("全选在线")}</a>}
-        {onSet && selected.length > 0 && <a className="bp-act" onClick={() => onSet([])}>{tx("清空")}</a>}
+        {onSet && <button type="button" className="bp-act" onClick={() => onSet(onlineIds)}>{tx("全选在线")}</button>}
+        {onSet && selected.length > 0 && <button type="button" className="bp-act" onClick={() => onSet([])}>{tx("清空")}</button>}
       </div>
       <div className="box-pick scroll">
         {shown.length === 0 && <span className="muted">{tx("无匹配 SoduWork")}</span>}
