@@ -241,7 +241,18 @@ def _snapshot_source(name: str, root: Path, blob_root: Path,
         files = [(root.name, root)]
     else:
         files: list[tuple[str, Path]] = []
-        for current, dirs, names in os.walk(root, followlinks=False):
+        def _on_walk_error(error: OSError) -> None:
+            # A directory that cannot be listed must fail the backup (#1203):
+            # silently skipping it would drop real files from the manifest
+            # while create/verify/extract all report success.
+            try:
+                relative = Path(error.filename).relative_to(root).as_posix()
+            except (ValueError, TypeError, AttributeError):
+                relative = str(getattr(error, "filename", "") or root)
+            raise FullBackupError(
+                f"Backup source '{name}' cannot be scanned: {relative}"
+                f" ({getattr(error, 'strerror', None) or error})") from error
+        for current, dirs, names in os.walk(root, followlinks=False, onerror=_on_walk_error):
             dirs.sort()
             names.sort()
             current_path = Path(current)
