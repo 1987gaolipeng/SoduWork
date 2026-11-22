@@ -81,7 +81,7 @@ async def request(cid: str, body: dict = Body(...), client=Depends(current_clien
             or body.get("operation") not in OPERATIONS or not isinstance(body.get("args"), dict)
             or not isinstance(body.get("requestId"), str)
             or not re.fullmatch(r"[a-zA-Z0-9_-]{8,80}", body["requestId"])
-            or len(json.dumps(body).encode()) > 512_000):
+            or len(json.dumps(body, ensure_ascii=False).encode()) > 512_000):
         raise HTTPException(422, "操作内容不正确")
     uid = owner(client)
     _, runner = await resolve(session, client, cid)
