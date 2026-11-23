@@ -248,8 +248,22 @@ def _codex_bin() -> str | None:
             native = os.path.join("@openai", f"codex-{system}-{arch}")
             cands.extend(os.path.join(base, "vendor", triple, "bin", exe) for base in (
                 os.path.join(package, "node_modules", native), os.path.join(root, native), package))
-    return _real_bin(cands, [exe, "codex"], exclude=lambda path:
+    selected = _real_bin(cands, [exe, "codex"], exclude=lambda path:
                      _WIN and "\\windowsapps\\openai.codex_" in os.path.normpath(path).replace("/", "\\").lower())
+    if selected or system != "darwin":
+        return selected
+    # macOS GUI processes can inherit a PATH without the standalone CLI's bin directory.
+    from .agent_installation import known_bin_dirs
+    directories = list(known_bin_dirs())
+    home = os.path.expanduser("~")
+    if os.path.isabs(home):
+        pnpm = os.path.join(home, "Library", "pnpm")
+        directories.extend([os.path.join(pnpm, "bin"), pnpm, os.path.join(home, ".bun", "bin")])
+    for directory in directories:
+        candidate = os.path.join(directory, exe)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
 
 
 def _codex_args(sid: str, mode: str, ws: str | None, cfg: dict | None = None,

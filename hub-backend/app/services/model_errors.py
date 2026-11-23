@@ -60,6 +60,43 @@ def billing_message(diagnostic: dict) -> str:
             "），请检查供应商账单、API Key 类型和接口地址；重试不会恢复额度")
 
 
+_GENERIC_FORBIDDEN = re.compile(
+    r"(?:(?:http\s+)?403|(?:(?:http\s+)?403\s*[:：-]?\s*)?"
+    r"(?:forbidden|request[ _-]rejected|request[ _-]denied|upstream_error|模型请求被拒绝))[.!。]?", re.I)
+_ACCESS_REFUSAL = re.compile(
+    r"credential|api[ _-]?key|authenticat|unauthori[sz]ed|permission|policy|access[ _-]denied|"
+    r"not (?:allowed|authori[sz]ed)|quota|balance|billing|content[ _-]filter|safety|"
+    r"凭据|密钥|权限|配额|额度|余额|无权|未授权|策略|内容审核", re.I)
+
+
+def forbidden_category(body: str) -> str:
+    """Only a complete, recognized neutral response qualifies as a generic refusal."""
+    raw = body.strip()
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        payload = raw
+    if isinstance(payload, dict):
+        if "error" in payload and set(payload) - {"error", "request_id", "requestId"}:
+            return "unclassified"
+        error = payload.get("error", payload)
+        if isinstance(error, dict):
+            values = [str(error[k]).strip() for k in ("code", "type", "status", "message", "detail")
+                      if error.get(k) is not None]
+            if _ACCESS_REFUSAL.search(" ".join(values)):
+                return "restricted"
+            if set(error) - {"code", "type", "status", "message", "detail", "request_id", "requestId"}:
+                return "unclassified"
+            return "generic" if values and all(_GENERIC_FORBIDDEN.fullmatch(v) for v in values) else "unclassified"
+        payload = error
+    if isinstance(payload, str):
+        if _ACCESS_REFUSAL.search(payload):
+            return "restricted"
+        if _GENERIC_FORBIDDEN.fullmatch(payload):
+            return "generic"
+    return "unclassified"
+
+
 def refusal_category(status: int, body: str) -> str:
     """Return an allowlisted log category without assuming every 429 is throttling."""
     if billing_diagnostic(body):

@@ -61,6 +61,35 @@ function statusOf(source, payload, error) {
   return Number(match && match.slice(1).find(Boolean) || LEGACY_CAPACITY_STATUS.get(source) || 0);
 }
 
+const NEUTRAL_403 = /^(?:(?:http\s+)?403|(?:(?:http\s+)?403\b\s*[:：-]?\s*)?(?:forbidden|request[ _-]rejected|request[ _-]denied|upstream_error|status code \(no body\)|模型请求被拒绝)[.!。]?)$/i;
+function neutralForbiddenBody(payload) {
+  if (!payload || Array.isArray(payload)) return false;
+  const wrapped = Object.hasOwn(payload, 'error');
+  if (wrapped && Object.keys(payload).some(k => !['error', 'request_id', 'requestId'].includes(k))) return false;
+  const err = wrapped ? payload.error : payload;
+  if (typeof err === 'string') return NEUTRAL_403.test(err.trim());
+  if (!err || typeof err !== 'object' || Array.isArray(err)) return false;
+  let matched = false;
+  for (const [key, field] of Object.entries(err)) {
+    if (key === 'request_id' || key === 'requestId') continue;
+    if (!['status', 'statusCode', 'code', 'type', 'message', 'detail'].includes(key)) return false;
+    if (field == null) continue;
+    if (field !== 403 && !(typeof field === 'string' && NEUTRAL_403.test(field.trim()))) return false;
+    matched = true;
+  }
+  return matched;
+}
+
+function neutralForbidden(value, raw) {
+  if (value && typeof value === 'object' && !(value instanceof Error)) return neutralForbiddenBody(value);
+  if (value instanceof Error && value.error !== undefined && !neutralForbiddenBody({ error: value.error })) return false;
+  if (NEUTRAL_403.test(raw)) return true;
+  // SDK strings may prefix a JSON envelope with a status. Read the whole body.
+  const body = raw.replace(/^(?:http\s+)?403\b\s*[:：-]?\s*/i, '');
+  if (!body.startsWith('{')) return false;
+  try { return neutralForbiddenBody(JSON.parse(body)); } catch { return false; }
+}
+
 function describe(value, afterToolResult = false) {
   const raw = textOf(value).trim();
   const source = classificationText(raw);
@@ -92,6 +121,7 @@ function describe(value, afterToolResult = false) {
     [400,403,404,413,422].includes(status) || (status === 401 && !authExpired);
   const retryable = authExpired || (!permanent && (transient || proxy && status === 0));
 
+  let genericForbidden = false, hubGenericForbidden = false;
   let publicText = '';
   const privateResponse = PRIVATE_RESPONSE_RE.test(raw) || Boolean(payload && !(payload instanceof Error));
   if (billing || outputLimit || proxy || status || transient || privateResponse) {
@@ -107,6 +137,13 @@ function describe(value, afterToolResult = false) {
     } else if (IMAGE_REJECTION_RE.test(combined)) {
       publicText = '当前模型不接受图片输入，请切换支持图片的模型或启用视觉适配';
     } else if (status === 403) {
+      const classifiedCode = error?.code && !['403', 'forbidden', 'request_rejected', 'upstream_error'].includes(String(error.code).toLowerCase());
+      const specific = /(?:credential|api[ _-]?key|unauthori[sz]ed|permission|not (?:allowed|authori[sz]ed)|access denied|authentication|denied by policy|(?:invalid|expired|missing)[ _-](?:token|signature)|unsupported|rate[ _-]?limit|quota|balance|billing|model[_ -]not[_ -]found|insufficient|content[_ -]filter|凭据|密钥|权限|配额|额度|余额|无权|未授权|安全策略|策略拦截)/i;
+      const notice = String(error?.message || source);
+      hubGenericForbidden = /^(?:403\s+)?HTTP 403：模型请求被拒绝 \[soduwork-refusal:generic\] \[soduwork-trace:[a-f0-9]{32}\](?: Retry after [\d.]+ seconds\.)?$/i.test(notice) &&
+        (!error?.refusalCategory || error.refusalCategory === 'generic');
+      genericForbidden = !classifiedCode && !specific.test(combined) &&
+        (hubGenericForbidden || neutralForbidden(value, raw));
       publicText = afterToolResult ? '工具已完成，请求模型继续生成时被拒绝' : '模型请求被拒绝';
     } else if (status === 401) {
       publicText = authExpired ? '模型服务拒绝了当前凭据或模型权限' :
@@ -124,6 +161,8 @@ function describe(value, afterToolResult = false) {
   }
   if (publicText && diagnosticId) publicText += ' [soduwork-trace:' + diagnosticId + ']';
   return { raw, payload, type, status, proxy, transient, authExpired, retryable, publicText,
+    ...(genericForbidden ? { genericForbidden: true } : {}),
+    ...(genericForbidden && hubGenericForbidden ? { hubGenericForbidden: true } : {}),
     ...(diagnosticId ? { diagnosticId } : {}),
     ...(billing ? { code: 'upstream_billing_error', providerCode } : {}),
     ...(outputLimit ? { code: 'output_token_limit_exceeded' } : {}) };

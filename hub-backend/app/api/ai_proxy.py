@@ -433,6 +433,14 @@ def _proxy_error(exc, *, responses=False):
     payload = json.loads(result.body)
     trace = str(getattr(exc, "diagnostic_id", ""))
     headers = {}
+    if exc.status == 403 and payload["error"]["code"] == 403:
+        category = getattr(exc, "forbidden_category", "unclassified")
+        if category not in ("generic", "restricted"):
+            category = "unclassified"
+        # Older SDKs discard custom fields. Retain the same bounded category
+        # in error.message in both the JSON response and the SSE error frame.
+        payload["error"]["refusalCategory"] = category
+        payload["error"]["message"] = f"HTTP 403：模型请求被拒绝 [soduwork-refusal:{category}]"
     if re.fullmatch(r"[a-f0-9]{32}", trace):
         payload["error"]["diagnosticId"] = trace
         payload["error"]["message"] += f" [soduwork-trace:{trace}]"
