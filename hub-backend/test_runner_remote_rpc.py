@@ -3,12 +3,14 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import contextvars
 import json
+from pathlib import Path
+import tempfile
 import threading
 import unittest
 from unittest.mock import patch
 
 import runner_main
-from app.services import agent_setup, ai_local, local_base, local_stream, runner_local_rpc, runner_turn_selection
+from app.services import agent_setup, ai_local, ai_remote, local_base, local_stream, runner_local_rpc, runner_turn_selection
 from app.services.runner_admission import AdmissionQueue
 
 
@@ -55,6 +57,43 @@ class RemoteRpcTests(unittest.IsolatedAsyncioTestCase):
         self.machine._admission_wake = asyncio.Event()
         self.machine._ensure_admission_loop = lambda: None
         self.machine.work_root, self.machine.capability_grants = "", None
+
+    async def test_status_preview_preserves_runner_fields_without_packaging_or_git_writes(self):
+        self.admission_fixture()
+        with tempfile.TemporaryDirectory() as folder:
+            for name in ("a.html", "b.html", "c.html"):
+                (Path(folder) / name).write_text("<h1>Fixture</h1>", encoding="utf-8")
+            ref = "preview-ref"
+            run = {"ref": ref, "ws": folder, "state": "done", "cli": "pi", "artifactMode": "mixed",
+                   "round": 2, "segment": 3, "gitDelivery": {"head": "recorded-head"},
+                   "lines": [{"kind": "say", "text": "Final text"}]}
+            with patch.dict(ai_local._RUNS, {ref: run}), \
+                    patch.object(ai_local, "_bundle_artifact", side_effect=AssertionError("Unexpected ZIP write")), \
+                    patch.object(ai_local, "_git_delivery", side_effect=AssertionError("Unexpected Git capture")):
+                await self.machine._queue_message({"op": "job.info", "id": "preview", "ref": ref,
+                                                   "statusPreview": True}, self.machine.ws)
+                reply = await self.reply("preview")
+                self.assertTrue(reply["ok"], reply)
+                status = reply["data"]
+                self.assertEqual((status["round"], status["segment"], status["finalText"]), (2, 3, "Final text"))
+                self.assertEqual(status["gitHead"], "recorded-head")
+                self.assertCountEqual([a["filename"] for a in status["attachments"]], ["a.html", "b.html", "c.html"])
+                self.assertNotIn("artDropped", run)
+
+    def test_status_preview_reads_older_runners_via_job_info(self):
+        from types import SimpleNamespace
+        machine = SimpleNamespace(host="fixture-host")
+        previous = {"taskStatus": "queued", "done": False, "queued": True, "queuePosition": 2}
+        with patch.dict(ai_remote._WHERE, clear=True), \
+                patch.object(ai_remote, "_runner_of_ref", side_effect=AssertionError("Unexpected job discovery")), \
+                patch.object(ai_remote.runner_hub, "get", return_value=machine), \
+                patch.object(ai_remote.runner_hub, "call_sync", return_value={"ok": True, "data": previous}) as rpc:
+            self.assertEqual(ai_remote.preview_status_sync("run-1", runner_id="", detailed=False), {})
+            self.assertFalse(ai_remote.preview_status_sync("run-1", runner_id="", detailed=True)["ok"])
+            rpc.assert_not_called()
+            status = ai_remote.preview_status_sync("run-1", runner_id="node-1", detailed=True)
+        rpc.assert_called_once_with(machine, "job.info", {"ref": "run-1", "statusPreview": True}, timeout=30)
+        self.assertEqual((status["status"], status["host"], status["queuePosition"]), ("queued", "fixture-host", 2))
 
     async def test_real_agent_discovery_cannot_block_other_session_status_stop_or_ping(self):
         self.admission_fixture()

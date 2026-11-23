@@ -248,7 +248,7 @@ test('Runner continuation ignores old completion and publishes only its admitted
         assert.match(body.messageId, /^task-/);
         return { ok: true, delivery: 'accepted', admissionKey: key };
       }
-      if (url.includes('/ai-status?')) return { done: true };
+      if (url.endsWith('/ai-status')) return { done: true };
       assert.match(url, /ai-session\?ref=original/);
       reads++;
       return reads === 1
@@ -264,8 +264,32 @@ test('Runner continuation ignores old completion and publishes only its admitted
   assert.equal(result.ok, true);
   assert.deepEqual(messages.map(row => row[1]), ['Revise', 'Revised output']);
   assert.equal(reads, 2);
-  assert.ok(calls.at(-1).url.endsWith('/ai-status?ref=original'));
+  assert.deepEqual(calls.at(-1), { url: '/tasks/t/ai-status', body: { ref: 'original' } });
   assert.equal(calls.filter(row => row.url.endsWith('/ai-dispatch')).length, 0);
+});
+
+test('only a Hub without the POST route falls back to the same ref-pinned collection', async () => {
+  const { collect } = require('../main/conversation/runner-output-sync.cjs');
+  const route = '/tasks/t';
+  for (const status of [405, 401, 403, 404, 409, 502, undefined]) {
+    const calls = [];
+    const error = Object.assign(Error('Fixture response'), { status });
+    const result = collect(async (path, body) => {
+      calls.push({ path, body });
+      if (body) throw error;
+      return { done: true };
+    }, route, 'runner:original');
+    if (status === 405) {
+      assert.deepEqual(await result, { done: true });
+      assert.deepEqual(calls, [
+        { path: '/tasks/t/ai-status', body: { ref: 'runner:original' } },
+        { path: '/tasks/t/ai-status?ref=runner%3Aoriginal', body: undefined },
+      ]);
+    } else {
+      await assert.rejects(result, reason => reason === error);
+      assert.equal(calls.length, 1);
+    }
+  }
 });
 
 test('uncertain continuation retries the same message and immutable attachment bytes', async t => {
@@ -296,7 +320,7 @@ test('completed revision retries delivery reconciliation without dispatching ano
       if (url.endsWith('/ai-say')) {
         sends.push(body); return { delivery: 'accepted', admissionKey: 'comment:revision' };
       }
-      if (url.includes('/ai-status?')) {
+      if (url.endsWith('/ai-status')) {
         if (++reconciliations === 1) throw Error('Delivery temporarily unavailable');
         return { done: true };
       }

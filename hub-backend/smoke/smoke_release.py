@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import os
 import sys
+from unittest.mock import AsyncMock, patch
 
 DB = os.path.abspath(".smoke-release.db")
 for suffix in ("", "-shm", "-wal"):
@@ -22,7 +23,7 @@ from app import automation_models as am  # noqa: E402
 from app import models  # noqa: E402
 from app.api import release as release_api, tasks as task_api  # noqa: E402
 from app.db import SessionLocal, engine, init_db  # noqa: E402
-from app.services import (ai_remote, code_delivery, deployments, environment_service,  # noqa: E402
+from app.services import (ai_exec, ai_remote, code_delivery, deployments, environment_service,  # noqa: E402
                           gate_contract, git_ops, preflight_evidence, rbac, release_control)
 
 ok = fail = 0
@@ -578,18 +579,46 @@ async def main():
                 id="pv-release-active", plugin_id=workflow_plugin.id, version="1.0.0",
                 checksum="release-active", trust_state="approved", enabled=True,
                 workflow={"nodes": []})
+            status_task = models.Task(
+                id="t-release-status", owner_client_id=box.id, title="Runner delivery status",
+                created_by=creator.id, project_id=project.id, repo_id=gateway_repo.id, status="doing")
+            dispatch = models.TaskEvent(task_id=status_task.id, kind=ai_exec.EV_DISPATCHED,
+                                        detail={"ref": "status-run", "runnerId": "r-status"})
             workflow_run = am.WorkflowRun(
-                id="run-release-active", task_id=gateway_task.id,
+                id="run-release-active", task_id=status_task.id,
                 plugin_id=workflow_plugin.id, plugin_version_id=workflow_version.id,
                 state="running")
-            s.add_all([workflow_plugin, workflow_version, workflow_run])
+            s.add_all([status_task, dispatch, workflow_plugin, workflow_version, workflow_run])
             await s.commit()
             chk("活动插件流程会接管候选发现与审批时机",
-                await code_delivery.managed_by_active_workflow(s, gateway_task.id))
-            workflow_run.state = "succeeded"
-            await s.commit()
-            chk("插件结束后普通代码交付兼容链恢复",
-                not await code_delivery.managed_by_active_workflow(s, gateway_task.id))
+                await code_delivery.managed_by_active_workflow(s, status_task.id))
+            runner_result = {"ok": True, "gitRemoteBranch": "origin/feature/ready",
+                             "gitBranch": "local-only", "gitHead": "abc1234"}
+            with (
+                patch.object(ai_exec, "preview_status_sync", return_value={"done": True}),
+                patch.object(ai_exec, "runner_info_sync", return_value={"done": True}),
+                patch.object(ai_exec, "status_sync", return_value=runner_result),
+                patch.object(ai_exec, "session_sync", return_value={"ok": False}),
+                patch.object(code_delivery, "check", AsyncMock(return_value={
+                    "stage": "committed", "applies": True, "delivered": False})) as discover,
+            ):
+                await task_api.ai_status_task(status_task.id, box, s)
+                await task_api.sync_ai_status_task(status_task.id, "status-run", box, s)
+                chk("Polling and synchronization preserve the active plugin's quality gate",
+                    discover.await_count == 0)
+                workflow_run.state = "succeeded"
+                await s.commit()
+                chk("插件结束后普通代码交付兼容链恢复",
+                    not await code_delivery.managed_by_active_workflow(s, status_task.id))
+                await task_api.ai_status_task(status_task.id, box, s)
+                chk("Polling a finished direct execution does not discover a release",
+                    discover.await_count == 0)
+                await task_api.sync_ai_status_task(status_task.id, "status-run", box, s)
+                expected_route = {"provider": "runner", "runnerId": "r-status", "ref": "status-run"}
+                chk("Terminal synchronization discovers delivery using the Runner's remote branch and commit",
+                    discover.await_count == 1 and discover.await_args.kwargs == {
+                        "who": "SoduWork", "branch_hint": "origin/feature/ready",
+                        "head_hint": "abc1234", "scm_hint": expected_route}, discover.await_args)
         finally:
             (git_ops.ensure_server_repo, git_ops.find_task_branch,
              git_ops.branch_commits, git_ops.merge_to) = (
@@ -600,14 +629,6 @@ async def main():
             "merge_approved" not in sweep_src and "merge_to" not in sweep_src)
         chk("★★后台巡检跳过由活动插件掌控的任务",
             "managed_by_active_workflow" in sweep_src, sweep_src)
-        status_src = inspect.getsource(task_api.ai_status_task)
-        chk("★★客户端普通状态轮询不会绕过插件质量门提前创建审批",
-            "managedByWorkflow" in status_src
-            and "not code[\"managedByWorkflow\"]" in status_src, status_src)
-        chk("★★直派代码任务用 Runner 回传的远端分支和提交指纹发现交付",
-            "gitRemoteBranch" in status_src and "branch_hint=" in status_src
-            and "head_hint=" in status_src and "scm_hint=" in status_src,
-            status_src)
         chk("background sweep keeps runner remote branch, commit and SCM route",
             "status_sync" in sweep_src and "gitRemoteBranch" in sweep_src
             and "branch_hint=" in sweep_src and "head_hint=" in sweep_src
