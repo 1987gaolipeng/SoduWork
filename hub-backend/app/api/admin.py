@@ -2317,12 +2317,14 @@ async def list_audit(
 @router.get("/audit/export.csv")
 async def export_audit(
     filters: dict = Depends(_audit_filters),
+    limit: Annotated[int | None, Query(ge=0, le=2**63-1)] = None,
     offset: Annotated[int, Query(ge=0, le=2**63-1)] = 0,
     user: User = Depends(require_perm("audit.view")),
     session: AsyncSession = Depends(get_session),
 ):
-    """Download matching events from the offset in the same order and scope as the audit list."""
-    chunks = await audit.export_csv(session, user, settings.soduwork_env.strip().lower(), offset=offset, **filters)
+    """Download matching events after the offset. Omit limit for all matches or use zero for headers only."""
+    chunks = await audit.export_csv(session, user, settings.soduwork_env.strip().lower(),
+                                    limit=limit, offset=offset, **filters)
     return StreamingResponse(chunks, media_type="text/csv", headers={
         "Content-Disposition": 'attachment; filename="audit-log.csv"',
         "Cache-Control": "no-store",
