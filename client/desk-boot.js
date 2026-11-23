@@ -42,7 +42,11 @@
     if (/\b404\b|not.?found/i.test(m)) return fallback || '没找到，可能已被改动';
     if (/\b413\b|too large/i.test(m)) return '文件太大了';
     if (detail) return detail.slice(0, 240);
-    if ((e && e.status) && m && !/^HTTP\s+\d+$/i.test(m)) return m.slice(0, 240);
+    const message = e && typeof e.message === 'string' ? e.message.trim() : '';
+    if (message && !/^HTTP\s+\d+$/i.test(message) &&
+        ((e && e.status) || /系统安全存储不可用|本地模型配置/.test(message))) {
+      return message.slice(0, 240);
+    }
     return fallback || '操作没成功，稍后再试';
   };
   /*
