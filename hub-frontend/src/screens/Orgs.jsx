@@ -144,32 +144,32 @@ export default function Orgs() {
     await reload()
   }
 
-  function TreeNode({ org, depth = 0 }) {
-  const uiLocale = useLocale();
+  function renderTreeNode(org, depth = 0) {
     if (!visibleIds.has(org.id)) return null
     const childRows = (byParent[org.id] || []).filter((child) => visibleIds.has(child.id))
     const open = isOpen(org.id)
-    return <div className="og-tree-node">
+    return <div className="og-tree-node" key={org.id}>
       <div className={'og-tree-row' + (selected && selected.id === org.id ? ' selected' : '')}
         style={{ '--tree-depth': depth }} role="treeitem" tabIndex="0" aria-level={depth + 1}
         aria-selected={Boolean(selected && selected.id === org.id)}
         aria-expanded={childRows.length ? Boolean(open) : undefined}
         onClick={() => setSelectedId(org.id)}
         onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
+          if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
             event.preventDefault()
             setSelectedId(org.id)
           }
         }}>
-        <button className={'og-tree-toggle' + (childRows.length ? (open ? ' open' : '') : ' leaf')}
-          aria-label={open ? tx("收起子部门") : tx("展开子部门")} onClick={(event) => { event.stopPropagation(); childRows.length && toggle(org.id) }}>
+        {childRows.length ? <button type="button" className={'og-tree-toggle' + (open ? ' open' : '')}
+          aria-expanded={Boolean(open)} aria-label={open ? tx("收起子部门") : tx("展开子部门")}
+          onClick={(event) => { event.stopPropagation(); toggle(org.id) }}>
           <Icon name="chevron" />
-        </button>
+        </button> : <span className="og-tree-toggle leaf" aria-hidden="true" />}
         <span className="og-tree-mark"><Icon name="building" /></span>
         <span className="og-tree-name" title={org.name}>{org.name}</span>
       </div>
       {childRows.length > 0 && open && <div className="og-tree-children">
-        {childRows.map((child) => <TreeNode key={child.id} org={child} depth={depth + 1} />)}
+        {childRows.map((child) => renderTreeNode(child, depth + 1))}
       </div>}
     </div>
   }
@@ -199,7 +199,7 @@ export default function Orgs() {
         <div className="og-tree" role="tree">
           {roots.length === 0
             ? <div className="og-tree-empty"><Icon name="building" /><b>{tx("还没有组织")}</b><span>{tx("创建第一个顶级部门后开始搭建组织。")}</span></div>
-            : roots.map((root) => <TreeNode key={root.id} org={root} />)}
+            : roots.map((root) => renderTreeNode(root))}
           {roots.length > 0 && visibleIds.size === 0 && <div className="og-tree-empty"><Icon name="search" /><b>{tx("没有匹配的部门")}</b><span>{tx("换一个关键词继续查找。")}</span></div>}
         </div>
       </aside>
