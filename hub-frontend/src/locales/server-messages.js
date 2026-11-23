@@ -1,5 +1,6 @@
 // Only reviewed server message keys are translated; parameters remain business data.
 export const serverMessages = {
+  'plugin.import.storage_failed': ["无法保存插件包。请检查 Hub 数据目录的可用空间、写入权限，以及文件系统是否支持原子文件操作。", "Could not save the plugin package. Check free space, write permissions and support for atomic file operations in the Hub data directory.", "プラグインパッケージを保存できません。Hub データディレクトリの空き容量と書き込み権限を確認し、ファイルシステムがアトミックなファイル操作に対応しているか確認してください。", "플러그인 패키지를 저장할 수 없습니다. Hub 데이터 디렉터리의 여유 공간과 쓰기 권한을 확인하고 파일 시스템이 원자적 파일 작업을 지원하는지 확인하세요."],
   'hub.input.pages': ["请选择一种分页方式：limit/offset 或 page/pageSize", "Choose one pagination mode: limit/offset or page/pageSize.", "ページ指定には limit/offset または page/pageSize のどちらかを使用してください。", "limit/offset 또는 page/pageSize 중 한 가지 페이지 지정 방식만 사용하세요."],
   'hub.input.inbox': ["团队收件箱任务不指定接收人；要交给个人，请使用成员指派", "Team inbox tasks have no recipient. To send a task to someone, assign it to a member.", "チームの受信箱に入れるタスクには宛先を指定できません。個人に送る場合はメンバーに割り当ててください。", "팀 수신함에 넣을 작업에는 수신자를 지정할 수 없습니다. 개인에게 보내려면 팀원에게 할당하세요."],
   'hub.input.tier': ["环境层级不受支持", "This environment tier is not supported.", "この環境レベルには対応していません。", "지원하지 않는 환경 등급입니다."],

@@ -149,13 +149,24 @@ class ImportRollbackTests(unittest.IsolatedAsyncioTestCase):
         rejected = plugin_drafts.build({"template": "method", "key": "business", "name": "Business",
                                         "version": "2.0.0", "description": "Second version",
                                         "instructions": "Check progress and submit a report."})
+        blocked = plugin_drafts.build({"template": "method", "key": "blocked", "name": "Blocked",
+                                      "version": "1.0.0", "description": "Storage failure",
+                                      "instructions": "Check progress and submit a report."})
+        blocked_dir = self.packages / plugin_packages.parse(blocked)["manifest"]["key"]
+        blocked_dir.touch()
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://fixture") as http:
             response = await http.post("/api/v1/admin/plugins/bulk-import", data={"rightsConfirmed": "true"},
                                        files=[("files", ("rejected.zip", rejected)),
+                                              ("files", ("blocked.zip", blocked)),
                                               ("files", ("accepted.zip", self.data))])
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
-        self.assertEqual((body["imported"], body["failed"]), (1, 1))
+        self.assertEqual((body["imported"], body["failed"]), (1, 2))
         self.assertEqual(body["items"][0]["error"], "archive commit failed")
-        archive, = self.archives()
+        failure = body["items"][1]
+        self.assertEqual(failure["filename"], "blocked.zip")
+        self.assertEqual(failure["errorMessage"]["key"], "plugin.import.storage_failed")
+        self.assertNotIn(str(self.packages), failure["error"])
+        self.assertTrue(body["items"][2]["ok"])
+        archive, = self.archives() - {blocked_dir}
         self.assertEqual(archive.read_bytes(), self.data)

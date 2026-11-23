@@ -117,8 +117,8 @@ async def login(body: AdminLogin, request: Request, session: AsyncSession = Depe
         except client_access.ClientAccessError as exc:
             raise HTTPException(status_code=exc.status, detail=str(exc),
                                 headers={"Retry-After": str(exc.meta["retryAfter"])}) from exc
-        authenticated = bool(user and user.is_active and not user.account_deleted_at
-                             and verify_password(body.pw, user.password_hash))
+        valid_password = bool(user and not user.account_deleted_at and verify_password(body.pw, user.password_hash))
+        authenticated = valid_password and user.is_active
         if authenticated:
             # Only failed attempts consume the account and peer budgets.
             await reservation.rollback()
@@ -126,6 +126,8 @@ async def login(body: AdminLogin, request: Request, session: AsyncSession = Depe
             audit.add(session, None, "admin.login.failed", "user", user.id if user else None)
     if not authenticated:
         await session.commit()
+        if valid_password:
+            raise HTTPException(status_code=403, detail="账号已停用")
         raise HTTPException(status_code=401, detail="账号或密码不正确")
     user.last_login_at = datetime.now(timezone.utc)
     await session.commit()
@@ -370,8 +372,8 @@ async def delete_role(rid: str,
 
 @router.get("/users", dependencies=[Depends(require_perm("user.manage"))])
 async def list_users(user: User = Depends(current_user), session: AsyncSession = Depends(get_session),
-                    window: PageQuery = None):
-    return await rbac.list_users(session, await rbac.scope_org_ids(session, user), page=window)
+                    window: PageQuery = None, isActive: bool | None = None):
+    return await rbac.list_users(session, await rbac.scope_org_ids(session, user), page=window, is_active=isActive)
 
 
 @router.post("/users")
@@ -1856,7 +1858,10 @@ async def create_subordinate_task(
     if target is None:
         raise HTTPException(status_code=404, detail="用户不存在")
     await _assert_user_in_scope(session, user, target)
-    if not (body.get("title") or "").strip():
+    title = body.get("title")
+    if title is not None and not isinstance(title, str):
+        raise HTTPException(status_code=422, detail="需求标题须为字符串")
+    if not (title or "").strip():
         raise HTTPException(status_code=400, detail="请填需求标题")
     boxes = await _user_box_ids(session, uid)
     if not boxes:
@@ -1866,7 +1871,7 @@ async def create_subordinate_task(
     # Inbox rejection requests rework; mandatory acceptance gates require a plugin workflow.
     leader_name = user.display_name or user.username
     data = {
-        "title": body.get("title"),
+        "title": title,
         "note": body.get("note") or "",
         "status": "todo",
         "urgent": body.get("urgent"),
@@ -1904,13 +1909,16 @@ async def create_inbox_task(
 ):
     """Dispatch to a scoped department's inbox for later member claiming."""
     org_id = body.get("orgId") or user.org_id
-    if not (body.get("title") or "").strip():
+    title = body.get("title")
+    if title is not None and not isinstance(title, str):
+        raise HTTPException(status_code=422, detail="需求标题须为字符串")
+    if not (title or "").strip():
         raise HTTPException(status_code=400, detail="请填需求标题")
     if not org_id:
         raise HTTPException(status_code=400, detail="请选择目标团队/部门")
     await _assert_org_in_scope(session, user, org_id)
     payload = {
-        "title": body.get("title"), "note": body.get("note") or "",
+        "title": title, "note": body.get("note") or "",
         "priority": body.get("priority") or "normal", "due": body.get("due"),
         "tags": body.get("tags") or [], "urgent": body.get("urgent"), "important": body.get("important"),
         "domainId": body.get("domainId") or "", "source": "平台派团队 · " + (user.display_name or user.username),
