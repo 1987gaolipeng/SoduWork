@@ -96,8 +96,8 @@ async def sync_repositories(
     if integration is None:
         raise HTTPException(status_code=404, detail="Integration not found")
     scope = await _scope(session, user)
-    if scope is not None:
-        int_org = str((integration.config or {}).get("orgId") or "")
+    int_org = str((integration.config or {}).get("orgId") or "")
+    if scope is not None and int_org:
         if int_org not in scope:
             raise HTTPException(status_code=403, detail="Integration is outside your organization scope")
     try:
