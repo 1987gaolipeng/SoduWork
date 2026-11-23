@@ -57,6 +57,10 @@ def _agent_detail(requested_id: str, picked: dict | None = None) -> dict:
         "assigneeCli": _CLI_NAMES.get(cli_key, cli)[:80],
         "runnerId": str(selected.get("runnerId") or "")[:80],
         "runnerBootId": str(selected.get("runnerBootId") or "")[:64],
+        **({"runnerClientId": str(selected.get("clientId") or ""),
+            "runnerOrgId": str(selected.get("orgId") or ""),
+            "runnerOwnerUserId": str(selected.get("runnerOwnerUserId") or "")}
+           if selected.get("dispatchIntentAt") else {}),
         "host": str(selected.get("host") or "")[:180],
         "selection": dict(selected.get("selection") or {}),
     }
@@ -96,7 +100,6 @@ async def pin_runner_route(session: AsyncSession, task_id: str, attempt_id: str,
     latest.detail = {**latest.detail, **_agent_detail(latest.detail.get("requestedId") or "", picked),
                      "phase": "dispatch", "phaseName": PHASE_NAMES["dispatch"],
                      "dispatchIntentAt": stamp, "awaitingDispatchReply": True,
-                     "runnerClientId": str(picked.get("clientId") or ""),
                      "admissionKey": "dispatch:" + latest.detail["expectedRef"]}
     return True
 
@@ -222,8 +225,7 @@ def uncertain(session: AsyncSession, task_id: str, actor: str, attempt_id: str,
         **_agent_detail(requested_id, picked),
     }
     if (picked or {}).get("dispatchIntentAt"):
-        detail.update(dispatchIntentAt=picked["dispatchIntentAt"], runnerClientId=str(picked.get("clientId") or ""),
-                      admissionKey="dispatch:" + detail["expectedRef"])
+        detail.update(dispatchIntentAt=picked["dispatchIntentAt"], admissionKey="dispatch:" + detail["expectedRef"])
         if picked.get("lastRunnerReplyAt"):
             detail["lastRunnerReplyAt"] = picked["lastRunnerReplyAt"]
     task_events.record(session, task_id, ai_exec.EV_DISPATCH_UNCERTAIN, detail, actor=actor)

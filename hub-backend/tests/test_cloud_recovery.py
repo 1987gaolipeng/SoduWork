@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import os
 import threading
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -29,7 +30,7 @@ class CloudRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.engine = create_async_engine("sqlite+aiosqlite:///" + self.temp.name.replace("\\", "/") + "/test.db")
         tables = {model.__table__ for model in (
             models.User, models.Client, models.Task, models.TaskEvent, models.Attachment,
-            Handoff, am.ExecutionSession, am.ResourceLease)}
+            Handoff, am.ExecutionSession, am.ResourceLease, am.RunnerNode)}
         pending = list(tables)
         while pending:
             for foreign_key in pending.pop().foreign_keys:
@@ -42,6 +43,7 @@ class CloudRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         self.stack = ExitStack()
         self.stack.enter_context(patch.object(cloud_recovery, "SessionLocal", self.sessions))
+        self.stack.enter_context(patch.object(dispatch_reconcile, "SessionLocal", self.sessions))
         self.stack.enter_context(patch.object(terminal_recovery, "SessionLocal", self.sessions))
         self.stack.enter_context(patch.object(handoffs, "destination", AsyncMock(return_value={
             "runnerId": "cloud", "runnerBootId": "boot", "name": "Cloud", "host": "fixture"})))
@@ -158,8 +160,17 @@ class CloudRecoveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_durable_same_boot_negative_reuses_original_dispatch_identity(self):
         row_id, tid = await self.seed(phase="committing", event=ai_exec.EV_DISPATCH_STARTED)
-        with patch.object(dispatch_reconcile, "probe", AsyncMock(return_value={
-                "state": "not-started", "admissionDurable": True, "observedBootId": "boot"})), \
+        async with self.sessions() as session:
+            session.add(am.RunnerNode(id="cloud", owner_user_id="owner"))
+            await session.commit()
+
+        async def negative(op, payload, timeout):
+            return {"ok": True, "data": {**payload, "has": False, "persisted": False,
+                    "inflight": False, "admissionDurable": True, "bootId": "boot"}}
+
+        runner = SimpleNamespace(id="cloud", boot_id="boot", client_id="", owner_user_id="owner",
+                                 caps=["admit1"], alive=lambda: True, call=negative)
+        with patch.object(dispatch_reconcile.runner_hub, "get", return_value=runner), \
              patch.object(task_dispatch, "dispatch", AsyncMock(side_effect=self.accepted)) as dispatch:
             self.assertEqual((await cloud_recovery.recover_submissions()).get("dispatched"), 1)
             self.assertEqual(dispatch.await_count, 1)

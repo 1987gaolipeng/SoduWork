@@ -406,8 +406,27 @@ async def _allowed(session: AsyncSession, runner, task: models.Task, *, ref: str
         node = await session.get(am.RunnerNode, runner.id)
         handoff = await conversation_handoffs.dispatch_record(session, task.id)
         if (node is None or node.owner_user_id != personal_owner or node.auth_state == "revoked"
-                or node.management_state in {"retired", "pending_setup"}
-                or handoff is None or handoff.owner_user_id != personal_owner
+                or node.management_state in {"retired", "pending_setup"}):
+            return False
+        if handoff is None:
+            # A direct personal-cloud dispatch has its own durable task/Runner/ref grant.
+            from . import ai_exec, task_access
+            client = await session.get(models.Client, task.owner_client_id)
+            if (not task_access.is_owner(task, client) or client.auth_state != "active"
+                    or client.user_ref != personal_owner):
+                return False
+            dispatch_kinds = (ai_exec.EV_DISPATCH_STARTED, ai_exec.EV_DISPATCH_UNCERTAIN,
+                              ai_exec.EV_DISPATCH_FAILED, *ai_exec.KINDS_DISPATCHED)
+            event = await session.scalar(select(models.TaskEvent).where(
+                models.TaskEvent.task_id == task.id, models.TaskEvent.kind.in_(dispatch_kinds)
+            ).order_by(models.TaskEvent.at.desc(), models.TaskEvent.id.desc()).limit(1))
+            if event is None or event.kind == ai_exec.EV_DISPATCH_FAILED:
+                return False
+            detail = event.detail or {}
+            return bool(ref and (detail.get("ref") or detail.get("expectedRef")) == ref
+                        and detail.get("runnerId") == runner.id
+                        and detail.get("runnerOwnerUserId", personal_owner) == personal_owner)
+        if (handoff.owner_user_id != personal_owner
                 or handoff.owner_client_id != task.owner_client_id
                 or handoff.phase not in {"committing", "committed"}):
             return False

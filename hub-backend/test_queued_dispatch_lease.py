@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 from fastapi import FastAPI
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
@@ -74,6 +75,21 @@ class QueueLeaseTests(unittest.IsolatedAsyncioTestCase):
 
     async def sweep(self, seconds, *, connected=()):
         await leases.sweep(now=self.start + timedelta(seconds=seconds), connected=connected)
+
+    async def status_client(self):
+        app = FastAPI()
+        app.include_router(tasks.router)
+        app.include_router(admin.router)
+
+        async def db():
+            async with self.sessions() as session:
+                yield session
+
+        app.dependency_overrides[get_session] = db
+        app.dependency_overrides[current_client] = lambda: self.owner
+        app.dependency_overrides[current_user] = lambda: SimpleNamespace(is_super=True, _perms={"task.view"})
+        return await self.enterAsyncContext(httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                                              base_url="http://fixture"))
 
     async def test_exact_probe_boundary_and_healthy_queue_outlives_lease(self):
         await self.seed(admissionKey="")  # Older snapshots may have an empty turn-correlation field.
@@ -232,19 +248,7 @@ class QueueLeaseTests(unittest.IsolatedAsyncioTestCase):
             await session.commit()
         self.route.return_value = None
         await self.sweep(90)
-        app = FastAPI()
-        app.include_router(tasks.router)
-        app.include_router(admin.router)
-
-        async def db():
-            async with self.sessions() as session:
-                yield session
-
-        app.dependency_overrides[get_session] = db
-        app.dependency_overrides[current_client] = lambda: self.owner
-        app.dependency_overrides[current_user] = lambda: SimpleNamespace(is_super=True, _perms={"task.view"})
-        http = await self.enterAsyncContext(httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
-                                                              base_url="http://fixture"))
+        http = await self.status_client()
         employee, operator = "/api/v1/tasks/task/ai-status", "/api/v1/admin/tasks/task/ai-status"
 
         async def both():
@@ -301,6 +305,61 @@ class QueueLeaseTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((await http.get(employee, params={"ref": "work"})).status_code, 409)
                 self.assertEqual((await http.get(employee, params={"ref": "next"})).status_code, 502)
         transport.assert_not_called()
+
+    async def test_queued_heartbeat_renews_lease_while_original_dispatch_reply_is_outstanding(self):
+        intent = datetime.now(timezone.utc) - timedelta(seconds=92)
+        ref = "awaiting-reply"
+        async with self.sessions() as session:
+            session.add(models.TaskEvent(task_id="task", kind=ai_exec.EV_DISPATCH_STARTED, actor="fixture",
+                        at=intent, detail={"dispatchIntentAt": intent.isoformat(), "awaitingDispatchReply": True,
+                        "attemptId": "attempt", "expectedRef": ref, "admissionKey": "dispatch:" + ref,
+                        "runnerId": self.runner.id, "runnerClientId": self.runner.client_id,
+                        "runnerBootId": self.runner.boot_id}))
+            await session.commit()
+        async with self.sessions() as session:
+            updates = await execution_sessions.ingest_runner_snapshots(session, self.runner, [{
+                "ref": ref, "taskId": "task", "round": 1, "state": "queued", "queued": True,
+                "admissionKey": "dispatch:" + ref, "turnCorrelationVersion": 1, "queuePosition": 2,
+            }])
+            await session.commit()
+            self.assertEqual(len(updates), 1)
+            row = await session.scalar(select(am.ExecutionSession).where(am.ExecutionSession.ref == ref))
+            heartbeat_at = datetime.fromisoformat(row.metadata_["queueLeaseCheckedAt"])
+            row_id = row.id
+        self.route.return_value = None
+        self.enterContext(patch.object(leases.runner_hub, "online", return_value=[]))
+        http = await self.status_client()
+        for seconds in (0, 89.999999, 90):
+            now = heartbeat_at + timedelta(seconds=seconds)
+            with patch.object(dispatch_reconcile, "status_for_uncertain", partial(dispatch_reconcile.status_for_uncertain, now=now)):
+                device, operator = await asyncio.gather(http.get("/api/v1/tasks/task/ai-status"),
+                                                       http.get("/api/v1/admin/tasks/task/ai-status"))
+            self.assertEqual((device.status_code, operator.status_code), (200, 200))
+            for status in (device.json()["runner"], operator.json()):
+                self.assertEqual(status.get("queueLeaseReason"), "no_runner_ack" if seconds == 90 else None, status)
+
+        for field, value in (("task_id", "other-task"), ("ref", "previous-attempt"), ("runner_id", "other-runner"),
+                             ("runner_client_id", "other-owner"), ("state", "done"), ("round", 2),
+                             ("admissionKey", "comment:later-turn")):
+            with self.subTest(field=field):
+                async with self.sessions() as session:
+                    row = await session.get(am.ExecutionSession, row_id)
+                    if field in {"round", "admissionKey"}:
+                        row.metadata_ = {**row.metadata_, field: value}
+                    else:
+                        setattr(row, field, value)
+                    await session.flush()
+                    status = await dispatch_reconcile.status_for_uncertain(session, "task", now=heartbeat_at)
+                    self.assertEqual(status.get("queueLeaseReason"), "no_runner_ack", status)
+
+        async with self.sessions() as session:
+            candidate, = await dispatch_reconcile.candidates(session, now=heartbeat_at)
+            attention_at = heartbeat_at + timedelta(seconds=dispatch_reconcile.ATTENTION_AFTER_SECONDS)
+            for offset, expected in ((-1, "pending"), (0, "attention")):
+                action, _ = await dispatch_reconcile.apply_probe(
+                    session, candidate, {"state": "ambiguous", "reason": "offline"},
+                    now=attention_at + timedelta(microseconds=offset))
+                self.assertEqual(action, expected)
 
 
 if __name__ == "__main__":

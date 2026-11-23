@@ -90,6 +90,8 @@ async def _safe_started_replay(session, row, latest, now):
     current = await _latest_dispatch(session, row.task_id)
     if current is None or current.id != latest.id or current.kind != ai_exec.EV_DISPATCH_STARTED:
         return False
+    if not await dispatch_reconcile.probe_result_current(session, candidate, result):
+        return False
     task_events.record(session, row.task_id, ai_exec.EV_DISPATCH_FAILED, {
         **detail, "retryable": True, "confirmedNotStarted": True,
         "summary": "原执行机确认尚未接收；将使用相同派发编号恢复",

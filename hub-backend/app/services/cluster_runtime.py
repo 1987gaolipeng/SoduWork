@@ -6,8 +6,8 @@ import logging
 import time
 import uuid
 
-from .cluster_bus import bus, ClusterUnavailable, RunnerOwnerChanged
-from . import runner_hub
+from . import queued_dispatch_lease, runner_hub
+from .cluster_bus import ClusterUnavailable, RunnerOwnerChanged, bus
 
 _REMOTE = {}
 _LOCAL_INVENTORY = {}
@@ -270,6 +270,7 @@ async def on_snapshot(peers):
             if current:
                 _end_terms(current)
             current = _REMOTE[rid] = RemoteRunner(node, info)
+            queued_dispatch_lease.runner_connected(current)
         else:
             current.update(info)
         current.inventory_revision = reference["revision"]

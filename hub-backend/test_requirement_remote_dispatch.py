@@ -29,7 +29,7 @@ from app.api import tasks
 from app.db import get_session
 from app.deps import current_client
 from app.services import (ai_exec, ai_remote, conversation_handoffs, dispatch_attempts,
-                          dispatch_identity, dispatch_reconcile, runner_hub, task_dispatch,
+                          dispatch_identity, dispatch_reconcile, execution_sessions, runner_hub, task_dispatch,
                           task_execution_options)
 from test_unified_requirements import _schema_template
 
@@ -91,6 +91,7 @@ class RequirementRemoteDispatchTests(unittest.IsolatedAsyncioTestCase):
 
         self.patches = [
             patch.dict(runner_hub._RUNNERS, {"cloud": self.runner}, clear=True),
+            patch.object(dispatch_reconcile, "SessionLocal", self.sessions),
             patch("app.services.execution_host_policy.get_settings",
                   return_value=type("Settings", (), {"cloud_execution_runner_ids": "",
                                                        "hub_local_execution_enabled": False})()),
@@ -159,12 +160,29 @@ class RequirementRemoteDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 409, response.text)
         self.assertFalse(self.calls)
 
+    async def test_personal_direct_grant_survives_artifacts_and_expires_on_new_dispatch(self):
+        response = await self.post()
+        self.assertEqual(response.status_code, 200, response.text)
+        ref = response.json()["issueId"]
+        async with self.sessions() as session:
+            now = datetime.now(timezone.utc) + timedelta(seconds=1)
+            session.add(models.TaskEvent(task_id="r3", kind=ai_exec.EV_ARTIFACTS, at=now, detail={"ref": ref}))
+            await session.flush()
+            snapshot = {"taskId": "r3", "ref": ref, "state": "running", "round": 2, "seq": 1}
+            updates = await execution_sessions.ingest_runner_snapshots(session, self.runner, [snapshot])
+            self.assertEqual(updates[0]["session"]["round"], 2)
+            session.add(models.TaskEvent(task_id="r3", kind=ai_exec.EV_DISPATCH_STARTED,
+                        at=now + timedelta(seconds=1), detail={"expectedRef": "next-execution"}))
+            await session.flush()
+            self.assertFalse(await execution_sessions.ingest_runner_snapshots(session, self.runner, [snapshot]))
+
     async def test_lost_ack_recovers_the_exact_admission_without_restarting_it(self):
         from runner_main import Runner
 
         with tempfile.TemporaryDirectory() as root, patch(
                 "app.services.local_base._data_root", return_value=root):
             runtime = Runner("http://fixture", "", "", "cloud", work_root=root)
+            self.runner.boot_id = runtime.boot_id
             journal = runtime._admission._journal
             try:
                 def lose_ack(cfg, task, files, picked, extra):
@@ -230,6 +248,52 @@ class RequirementRemoteDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertFalse(response.json()["pending"])
         self.assertEqual(response.json()["state"], "queued")
+
+    async def test_standalone_probe_uses_current_organization_and_registration(self):
+        self.runner.owner_user_id = ""
+        self.runner.boot_id = "original"
+        attempt = uuid.uuid4().hex
+        ref = dispatch_identity.execution_ref(attempt)
+        now = datetime.now(timezone.utc) + timedelta(minutes=1)
+        async with self.sessions() as session:
+            node = await session.get(am.RunnerNode, self.runner.id)
+            node.owner_user_id = None
+            session.add(models.OrgUnit(id="new-team", name="New team"))
+            session.add(models.TaskEvent(task_id="r3", kind=ai_exec.EV_DISPATCH_UNCERTAIN,
+                detail={"attemptId": attempt, "expectedRef": ref, "runnerId": self.runner.id,
+                        "runnerClientId": "", "runnerBootId": self.runner.boot_id}))
+            await session.commit()
+            candidate, = await dispatch_reconcile.candidates(session, now=now)
+
+        for exists in (True, False):
+            with self.subTest(exists=exists):
+                data = {"has": exists, "persisted": exists, "inflight": False, "bootId": self.runner.boot_id}
+                with patch.object(self.runner, "call", AsyncMock(return_value={"ok": True, "data": data})) as rpc:
+                    result = await dispatch_reconcile.probe(candidate)
+                    self.assertEqual(result["state"], "confirmed" if exists else "not-started")
+                    async with self.sessions() as session:
+                        node = await session.get(am.RunnerNode, self.runner.id)
+                        node.org_id = "new-team"
+                        await session.commit()
+                        action, _ = await dispatch_reconcile.apply_probe(session, candidate, result)
+                        self.assertEqual(action, "stale")
+                        self.assertEqual((await dispatch_reconcile._latest_state(session, "r3")).kind,
+                                         ai_exec.EV_DISPATCH_UNCERTAIN)
+                        await session.rollback()
+                    # The registry update can precede the next Runner heartbeat.
+                    self.assertEqual((await dispatch_reconcile.probe(candidate))["state"], "ambiguous")
+                    self.runner.org_id = "new-team"
+                    self.assertEqual((await dispatch_reconcile.probe(candidate))["state"], "ambiguous")
+                    rpc.assert_awaited_once()
+                    async with self.sessions() as session:
+                        node = await session.get(am.RunnerNode, self.runner.id)
+                        node.org_id = "team"
+                        await session.commit()
+                        self.runner.org_id = "team"
+                        self.runner.boot_id = "replacement"
+                        action, _ = await dispatch_reconcile.apply_probe(session, candidate, result)
+                        self.assertEqual(action, "stale")
+                        self.runner.boot_id = "original"
 
     async def test_hub_interrupted_after_routing_reconciles_without_resending(self):
         self.runner.boot_id = "original-boot"
@@ -298,8 +362,12 @@ class RequirementRemoteDispatchTests(unittest.IsolatedAsyncioTestCase):
                 now = datetime.now(timezone.utc) + timedelta(seconds=91)
                 async with self.sessions() as session:
                     item, = await dispatch_reconcile.candidates(session, now=now)
-                    await dispatch_reconcile.apply_probe(session, item, {"state": "confirmed",
-                        "receipt": {"state": "queued", "queuePosition": 3, "queueClass": "task"}}, now=now)
+                    data = {"has": True, "persisted": True, "ref": item.expected_ref,
+                            "admissionKey": "dispatch:" + item.expected_ref, "state": "queued",
+                            "queuePosition": 3, "queueClass": "task"}
+                    with patch.object(self.runner, "call", AsyncMock(return_value={"ok": True, "data": data})):
+                        result = await dispatch_reconcile.probe(item)
+                    await dispatch_reconcile.apply_probe(session, item, result, now=now)
                     await session.commit()
             finally:
                 release.set()

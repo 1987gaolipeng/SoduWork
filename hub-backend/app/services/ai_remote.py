@@ -209,7 +209,7 @@ def resolve_assignee_sync(cfg: dict, aid: str, atype: str = "") -> dict | None:
         return None
     for a in list_assignees_sync(cfg)["agents"]:
         if a["id"] == aid:
-            return a
+            return {**a, "runnerOwnerUserId": str(getattr(r, "owner_user_id", "") or "")}
     return None
 
 
@@ -344,7 +344,9 @@ def dispatch_sync(cfg: dict, t, files: list | None = None,
         return {"ok": False, "error": "那台执行机不在线了（%s）" % (rid or "没指定")}
     if (assignee or {}).get("dispatchIntentAt") and (
             str(assignee.get("runnerBootId") or "") != str(getattr(r, "boot_id", "") or "")
-            or str(assignee.get("clientId") or "") != str(r.client_id or "")):
+            or str(assignee.get("clientId") or "") != str(r.client_id or "")
+            or str(assignee.get("orgId") or "") != str(r.org_id or "")
+            or str(assignee.get("runnerOwnerUserId") or "") != str(getattr(r, "owner_user_id", "") or "")):
         return {"ok": False, "code": "RUNNER_ROUTE_CHANGED", "retryable": True,
                 "error": "执行机连接已更换，请刷新后重新安排执行"}
     if not runner_hub.can_dispatch(r):

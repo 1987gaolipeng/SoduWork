@@ -24,6 +24,7 @@ from sqlalchemy import and_, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from .. import automation_models as am
 from .. import models
 from ..db import SessionLocal
 from . import (
@@ -31,6 +32,7 @@ from . import (
     ai_remote,
     execution_sessions,
     notify,
+    runner_access_policy,
     runner_hub,
     task_events,
     task_status,
@@ -147,6 +149,34 @@ def admission_receipt(data: dict, ref: str) -> dict:
     return receipt
 
 
+def _registration(runner):
+    return (runner, *(str(getattr(runner, key, "") or "")
+                      for key in ("boot_id", "client_id", "owner_user_id", "org_id")))
+
+
+async def _probe_allowed(session, candidate, runner, *, lock=False):
+    if lock:
+        await runner_access_policy.acquire_runner_policy_lock(session, candidate.runner_id)
+    task = await session.get(models.Task, candidate.task_id, populate_existing=True)
+    node = await session.get(am.RunnerNode, candidate.runner_id, with_for_update=lock, populate_existing=True)
+    if task is None or runner_access_policy.denial(node, runner, "job.has"):
+        return False
+    for field, attr in (("runnerClientId", "client_id"), ("runnerOrgId", "org_id"),
+                        ("runnerOwnerUserId", "owner_user_id")):
+        if field in candidate.detail and candidate.detail[field] != str(getattr(runner, attr, "") or ""):
+            return False
+    return await execution_sessions._allowed(session, runner, task, ref=candidate.expected_ref)
+
+
+async def probe_result_current(session, candidate, result):
+    """Recheck the responding connection and its current grant before recording its evidence."""
+    runner = runner_hub.get(candidate.runner_id)
+    if runner is None or result.get("_registration") != _registration(runner):
+        return False
+    allowed = await _probe_allowed(session, candidate, runner, lock=True)
+    return allowed and runner_hub.get(candidate.runner_id) is runner and result["_registration"] == _registration(runner)
+
+
 async def probe(candidate: Candidate) -> dict:
     """Ask the exact Runner for read-only evidence about one deterministic ref."""
     if not candidate.runner_id or not candidate.expected_ref:
@@ -154,10 +184,18 @@ async def probe(candidate: Candidate) -> dict:
     runner = runner_hub.get(candidate.runner_id)
     if runner is None or not runner.alive():
         return {"state": "ambiguous", "reason": "offline", "runnerOnline": False}
-    current_boot = str(getattr(runner, "boot_id", "") or "")
-    if ("runnerClientId" in candidate.detail
-            and str(getattr(runner, "client_id", "") or "") != candidate.detail["runnerClientId"]):
+    registration = _registration(runner)
+    async with SessionLocal() as session:
+        allowed = await _probe_allowed(session, candidate, runner)
+    if not allowed or runner_hub.get(candidate.runner_id) is not runner or _registration(runner) != registration:
         return {"state": "ambiguous", "reason": "route-changed", "runnerOnline": True}
+    result = await _probe_runner(candidate, runner)
+    result["_registration"] = registration
+    return result
+
+
+async def _probe_runner(candidate, runner):
+    current_boot = str(getattr(runner, "boot_id", "") or "")
     try:
         reply = await runner.call(
             "job.has", {"ref": candidate.expected_ref,
@@ -237,6 +275,26 @@ def _same_attempt(event, candidate: Candidate) -> bool:
             and str(detail.get("expectedRef") or "") == candidate.expected_ref)
 
 
+async def _ack_overdue(session, task_id, detail, first_at, now, seconds):
+    cutoff = now - timedelta(seconds=seconds)
+    last_ack = _stamp(detail.get("lastRunnerReplyAt"), first_at)
+    if last_ack > cutoff:
+        return False
+    # Queued heartbeats may arrive while the original dispatch RPC is still waiting.
+    # The session holds the Hub's receipt time even if the Runner has since disconnected.
+    from ..automation_models import ExecutionSession
+    ref = detail.get("expectedRef") or ""
+    receipt = select(ExecutionSession.metadata_).where(
+        ExecutionSession.task_id == task_id, ExecutionSession.ref == ref,
+        ExecutionSession.runner_id == detail.get("runnerId"), ExecutionSession.state == "queued")
+    if "runnerClientId" in detail:
+        receipt = receipt.where(ExecutionSession.runner_client_id == detail["runnerClientId"])
+    meta = await session.scalar(receipt) or {}
+    if meta.get("round", 1) == 1 and meta.get("admissionKey") in (None, "", "dispatch:" + ref):
+        last_ack = max(last_ack, _stamp(meta.get("queueLeaseCheckedAt"), last_ack))
+    return last_ack <= cutoff
+
+
 async def status_for_uncertain(session: AsyncSession, task_id: str, *, now: datetime | None = None) -> dict:
     """Expose an overdue first ACK without fabricating a Runner execution session."""
     from .queued_dispatch_lease import LEASE_SECONDS
@@ -247,12 +305,12 @@ async def status_for_uncertain(session: AsyncSession, task_id: str, *, now: date
     if (latest.kind != ai_exec.EV_DISPATCH_UNCERTAIN and
             (latest.kind != ai_exec.EV_DISPATCH_STARTED or not detail.get("awaitingDispatchReply"))):
         return {}
-    if not detail.get("runnerId") or not detail.get("expectedRef"):
+    ref = detail.get("expectedRef")
+    if not detail.get("runnerId") or not ref:
         return {}
-    last_ack = _stamp(detail.get("lastRunnerReplyAt"), _first_uncertain(detail, latest.at))
-    if _utc(now) - last_ack < timedelta(seconds=LEASE_SECONDS):
-        return {"ref": detail["expectedRef"]}
-    return {"ref": detail["expectedRef"], "queueLeaseStatus": "unconfirmed", "queueLeaseReason": "no_runner_ack"}
+    if not await _ack_overdue(session, task_id, detail, _first_uncertain(detail, latest.at), _utc(now), LEASE_SECONDS):
+        return {"ref": ref}
+    return {"ref": ref, "queueLeaseStatus": "unconfirmed", "queueLeaseReason": "no_runner_ack"}
 
 
 def _runner_cli(detail: dict) -> str:
@@ -280,6 +338,9 @@ async def apply_probe(session: AsyncSession, candidate: Candidate, result: dict,
     detail = dict(latest.detail or {})
     observed_boot = str(result.get("observedBootId") or "")
     state = str(result.get("state") or "ambiguous")
+    if (state in {"confirmed", "not-started"} or result.get("keyedInflight")) and not await probe_result_current(
+            session, candidate, result):
+        return "stale", task
 
     if state == "confirmed":
         cli = _runner_cli(detail)
@@ -338,8 +399,8 @@ async def apply_probe(session: AsyncSession, candidate: Candidate, result: dict,
     if result.get("keyedInflight"):
         detail["lastRunnerReplyAt"] = _iso(now)
     latest.detail = {**detail, "lastProbeAt": _iso(now)}
-    if ((now - _stamp(detail.get("lastRunnerReplyAt"), first_at)).total_seconds() >= ATTENTION_AFTER_SECONDS
-            and not bool(detail.get("attentionRaised"))):
+    if not detail.get("attentionRaised") and await _ack_overdue(
+            session, task.id, detail, first_at, now, ATTENTION_AFTER_SECONDS):
         online = bool(result.get("runnerOnline"))
         reason = str(result.get("reason") or "")
         if reason == "offline":
