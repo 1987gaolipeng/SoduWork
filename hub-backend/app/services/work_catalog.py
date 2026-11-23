@@ -508,7 +508,10 @@ async def save_profession(
     from uuid import uuid4
 
     if current is not None:
-        if current.is_system or not current.org_id or current.org_id != org_id or body.get("orgId", org_id) != org_id:
+        # System profiles and org-less profiles are off-limits; moving a profile to
+        # another org is allowed here — the API layer validates the target org and
+        # the operator's scope (via _target_org) before calling this service.
+        if current.is_system or not current.org_id:
             raise ValueError("只能修改本组织的职业画像")
         if "dataSource" in body and body["dataSource"] != current.data_source:
             raise ValueError("请通过数据来源管理修改来源")
@@ -536,6 +539,9 @@ async def save_profession(
         raise ValueError("当前组织已经有同名职业画像")
     row = current or models.Position(
         id="pos_" + uuid4().hex[:12], org_id=org_id, is_system=False)
+    # org_id equals the row's org on plain updates; a different value moves the
+    # profile to the target org (uniqueness already checked against that org).
+    row.org_id = org_id
     parent = await session.get(models.OrgUnit, org_id, populate_existing=True) if org_id else None
     if parent and parent.is_archived:
         raise ValueError("请先恢复所属部门")
@@ -704,8 +710,19 @@ async def save_scenario(
             raise ScenarioKeyConflict("这个场景标识已经存在")
     else:
         row = current
+        # Moving an entry to another org (or renaming its key) must respect the
+        # target org's unique keys; the DB constraint alone would surface as 500.
+        duplicate = await session.scalar(select(models.WorkScenario.id).where(
+            models.WorkScenario.org_id == org_id,
+            models.WorkScenario.key == values["key"],
+            models.WorkScenario.id != row.id,
+        ).limit(1))
+        if duplicate is not None:
+            raise ScenarioKeyConflict("这个场景标识已经存在")
         for field, value in values.items():
             setattr(row, field, value)
+        # Support moving an existing scenario to another org.
+        row.org_id = org_id
     await session.commit()
     await session.refresh(row)
     return row
