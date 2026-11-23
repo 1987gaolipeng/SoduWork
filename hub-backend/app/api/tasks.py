@@ -327,25 +327,9 @@ async def list_repos_for_box(
     """List project repositories without credentials. Return relative localDir values; each device
     resolves its own absolute workspace path.
     """
-    from sqlalchemy import or_, select as _sel
-
-    from ..models import Project, Repo
-    from ..services import inbox as inbox_svc
-    u, scope = await inbox_svc._me_scope(session, client)
-    q = _sel(Project).where(Project.status == "active")
-    q = q.where(or_(Project.org_id.in_(scope), Project.org_id.is_(None))) if scope \
-        else q.where(Project.org_id.is_(None))
-    projs = {p.id: p for p in (await session.execute(q)).scalars().all()}
-    if not projs:
-        return {"repos": []}
-    rows = (await session.execute(
-        _sel(Repo).where(Repo.project_id.in_(list(projs.keys()))).order_by(Repo.created_at)
-    )).scalars().all()
-    return {"repos": [{"id": r.id, "projectId": r.project_id,
-                       "projectName": projs[r.project_id].name if r.project_id in projs else "",
-                       "name": r.name, "kind": r.kind, "gitUrl": r.git_url,
-                       "branch": r.default_branch, "localDir": r.local_dir,
-                       "note": r.note} for r in rows]}
+    from ..services.task_execution_options import _visible_repos
+    _, repos = await _visible_repos(session, client)
+    return {"repos": repos}
 
 
 @router.get("/daily-report")

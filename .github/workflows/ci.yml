@@ -222,9 +222,7 @@ jobs:
         working-directory: hub-backend
       - name: Check for new lint violations in the pull request
         if: github.event_name == 'pull_request'
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: python scripts/check_changed_lint.py "$BASE_SHA"
+        run: python scripts/check_changed_lint.py HEAD^1
         working-directory: hub-backend
       - name: Report Hub type errors
         continue-on-error: true

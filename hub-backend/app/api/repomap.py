@@ -7,6 +7,7 @@ from ..db import get_session
 from ..deps import require_perm
 from ..models import Integration, Project, Repo, RepoBinding, Task, User
 from ..services import audit, rbac
+from ..services.business_records import business_visible
 
 router = APIRouter(prefix="/api/v1/admin", tags=["repo-map"])
 
@@ -189,7 +190,9 @@ async def pending(
         if len(g["samples"]) < 3:
             g["samples"].append({"id": t.id, "title": t.title})
     # Include available SoduWork repositories so the mapping form needs no additional request.
-    repos = (await session.execute(select(Repo))).scalars().all()
+    available_projects = select(Project.id).where(business_visible(Project))
+    repos = (await session.execute(select(Repo).where(
+        business_visible(Repo), Repo.project_id.is_(None) | Repo.project_id.in_(available_projects)))).scalars().all()
     visible_repos = [repo for repo in repos
                      if await _repo_in_scope(session, scope, repo)]
     return {"items": sorted(groups.values(), key=lambda x: -x["count"]), "total": len(stuck),

@@ -92,7 +92,7 @@
 .og-tree-row{
   position:relative;
   display:grid;
-  grid-template-columns:20px 28px minmax(0,1fr);
+  grid-template-columns:20px 22px minmax(0,1fr) auto;
   align-items:center;
   gap:6px;
   min-height:38px;

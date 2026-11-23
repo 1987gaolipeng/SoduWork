@@ -106,7 +106,8 @@ async def automation_overview(
     probes.
     """
     scope = await _scope(session, user)
-    project_q = select(models.Project)
+    from ..services.business_records import business_visible
+    project_q = select(models.Project).where(business_visible(models.Project))
     if scope is not None:
         project_q = project_q.where(
             models.Project.org_id.in_(scope or {"__none__"}) |
@@ -115,7 +116,7 @@ async def automation_overview(
         project_q.order_by(models.Project.created_at.desc()))).scalars().all())
     project_ids = {x.id for x in projects}
     repos = list((await session.execute(select(models.Repo).where(
-        models.Repo.project_id.in_(project_ids or {"__none__"})
+        business_visible(models.Repo), models.Repo.project_id.in_(project_ids or {"__none__"})
     ))).scalars().all())
     repo_ids = {x.id for x in repos}
     targets = list((await session.execute(select(am.DeploymentTarget).where(

@@ -210,6 +210,61 @@ class AdminProjectRouterTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(await session.scalar(select(models.AuditLog.id).where(
                 models.AuditLog.action == "project.update")))
 
+    async def test_test_creator_project_and_repository_mappings_stay_out_of_business_lists(self):
+        from app.api import repositories
+        self.app.include_router(repositories.router)
+        async with self.sessions() as session:
+            manager = await session.get(models.User, "manager")
+            manager.is_test_account = True
+            session.add(am.ScmRepository(id="catalog", integration_id="fixture", org_id="child",
+                provider="gitlab", external_id="1", full_name="fixture/repo", display_name="Repo",
+                clone_url="https://git.example.test/repo.git", default_branch="main"))
+            await session.commit()
+        created = await self.request("POST", "/projects", json={
+            "name": "Test owner project", "ownerUserId": "owner", "dataSource": "business"})
+        self.assertEqual(created.status_code, 200, created.text)
+        pid = created.json()["id"]
+        self.assertEqual(created.json()["dataSource"], "test")
+        self.assertEqual({p["id"] for p in (await self.request("GET", "/projects")).json()}, {"project"})
+        managed = (await self.request("GET", "/projects?includeManaged=true")).json()
+        self.assertEqual({p["id"] for p in managed}, {"project", pid})
+        self.assertEqual(next(p for p in managed if p["id"] == "project")["dataSource"], "legacy")
+
+        async with self.sessions() as session:
+            (await session.get(models.User, "manager")).is_test_account = False
+            await session.commit()
+        project_repos = "/projects/" + pid + "/repos"
+        manual = await self.request("POST", project_repos, json={"name": "Manual"})
+        mapped = await self.request("POST", project_repos + "/from-catalog", json={"catalogId": "catalog"})
+        for response in (manual, mapped):
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["dataSource"], "test")
+        copied = await self.request("POST", "/repos/" + mapped.json()["id"] + "/copy",
+                                    json={"projectId": "project", "branch": "copy"})
+        self.assertEqual(copied.status_code, 200, copied.text)
+        self.assertEqual(copied.json()["dataSource"], "test")
+        async with self.sessions() as session:
+            # Before source labels existed, the mapping could predate the review of its parent.
+            (await session.get(models.Repo, mapped.json()["id"])).data_source = "legacy"
+            await session.commit()
+        historical = await self.request("POST", "/repos/" + mapped.json()["id"] + "/copy",
+                                        json={"projectId": "project", "branch": "historical"})
+        self.assertEqual(historical.json()["dataSource"], "test")
+        for path, count in ((project_repos, 2), ("/projects/project/repos", 2)):
+            self.assertEqual((await self.request("GET", path)).json(), [])
+            self.assertEqual(len((await self.request("GET", path + "?includeManaged=true")).json()), count)
+        async with self.sessions() as session:
+            (await session.get(models.Project, pid)).is_archived = True
+            await session.commit()
+        for path, body in (
+            (project_repos, {"name": "New mapping"}),
+            (project_repos + "/from-catalog", {"catalogId": "catalog", "branch": "new"}),
+            ("/repos/" + copied.json()["id"] + "/copy", {"projectId": pid, "branch": "to-archive"}),
+            ("/repos/" + mapped.json()["id"] + "/copy", {"projectId": "project", "branch": "from-archive"}),
+        ):
+            blocked = await self.request("POST", path, json=body)
+            self.assertEqual(blocked.status_code, 409, blocked.text)
+
     async def test_owner_change_reroutes_when_two_distinct_approvers_remain(self):
         request_id = await self._open_merge_approval("manager")
 

@@ -1,5 +1,13 @@
 // Only reviewed server message keys are translated; parameters remain business data.
 export const serverMessages = {
+  "catalog.department.in_use": ["请先迁移部门成员或一并归档下属部门", "Move department members first, and include active child departments in the archive.", "先に所属メンバーを移動し、有効な子部門も一緒にアーカイブしてください。", "먼저 소속 구성원을 이동하고 활성 하위 부서도 함께 보관하세요."],
+  "catalog.department.restore_parent": ["请先恢复上级部门", "Restore the parent department first.", "先に上位部門を復元してください。", "상위 부서를 먼저 복원하세요."],
+  "catalog.department.classify_children": ["请将未归档的非测试下属部门一并标记为测试", "Include unarchived non-test child departments when marking a department as test data.", "アーカイブされていない非テストの子部門も一緒にテストに分類してください。", "보관되지 않은 비테스트 하위 부서도 함께 테스트로 분류하세요."],
+  "catalog.source.test_actor": ["测试账号不能将记录标记为正式数据", "Test accounts cannot mark records as business data.", "テストアカウントは業務データに分類できません。", "테스트 계정은 업무 데이터로 분류할 수 없습니다."],
+  "catalog.source.parent": ["请先核对上级记录的数据来源", "Review the source of the parent record first.", "先に親レコードの出所を確認してください。", "상위 레코드의 출처를 먼저 확인하세요."],
+  "catalog.selection.missing": ["所选记录已不存在", "A selected record no longer exists.", "選択したレコードは存在しません。", "선택한 레코드가 더 이상 존재하지 않습니다."],
+  "catalog.scope.repo": ["仓库不属于所选项目", "The repository does not belong to the selected project.", "このリポジトリは選択したプロジェクトに属していません。", "저장소가 선택한 프로젝트에 속하지 않습니다."],
+  "catalog.scope.profile": ["只能管理本组织创建的职业画像", "Only profiles created by this department can be managed here.", "ここで管理できるのは、この部門で作成した職業プロフィールだけです。", "여기에서는 이 부서가 만든 직무 프로필만 관리할 수 있습니다."],
   'plugin.import.storage_failed': ["无法保存插件包。请检查 Hub 数据目录的可用空间、写入权限，以及文件系统是否支持原子文件操作。", "Could not save the plugin package. Check free space, write permissions and support for atomic file operations in the Hub data directory.", "プラグインパッケージを保存できません。Hub データディレクトリの空き容量と書き込み権限を確認し、ファイルシステムがアトミックなファイル操作に対応しているか確認してください。", "플러그인 패키지를 저장할 수 없습니다. Hub 데이터 디렉터리의 여유 공간과 쓰기 권한을 확인하고 파일 시스템이 원자적 파일 작업을 지원하는지 확인하세요."],
   'hub.input.pages': ["请选择一种分页方式：limit/offset 或 page/pageSize", "Choose one pagination mode: limit/offset or page/pageSize.", "ページ指定には limit/offset または page/pageSize のどちらかを使用してください。", "limit/offset 또는 page/pageSize 중 한 가지 페이지 지정 방식만 사용하세요."],
   'hub.input.inbox': ["团队收件箱任务不指定接收人；要交给个人，请使用成员指派", "Team inbox tasks have no recipient. To send a task to someone, assign it to a member.", "チームの受信箱に入れるタスクには宛先を指定できません。個人に送る場合はメンバーに割り当ててください。", "팀 수신함에 넣을 작업에는 수신자를 지정할 수 없습니다. 개인에게 보내려면 팀원에게 할당하세요."],

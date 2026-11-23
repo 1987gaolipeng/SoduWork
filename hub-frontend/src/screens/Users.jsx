@@ -23,7 +23,7 @@ export default function Users() {
   const uiLocale = useLocale();
   const listRef = useViewportHeight()
   const users = useAsync(() => api.users())
-  const orgs = useAsync(() => api.orgs())
+  const orgs = useAsync(() => api.orgs(true))
   const roles = useAsync(() => api.roleOptions())
   const [edit, setEdit] = useState(null)
   const user = getUser()
@@ -78,6 +78,8 @@ export default function Users() {
   const stateHints = { inactive: tx("停用且无登录记录"), disabled: tx("停用且有登录记录") }
   const selectedIds = new Set(selected)
   const selectedRows = filtered.filter(u => selectedIds.has(u.id))
+  const moveChoices = orgOptions(ol.filter(o => !o.isArchived &&
+    (o.dataSource !== 'test' || selectedRows.every(u => u.isTestAccount === true))))
   const count = selectedRows.length
   const tooMany = count > 200
   const protectedSelection = selectedRows.some(u => u.isSuper || u.id === user?.id || u.username === user?.username)
@@ -138,7 +140,7 @@ export default function Users() {
         <button className="btn btn-ghost" disabled={tooMany || protectedSelection} onClick={() => beginBatch(tx("批量停用"), tx("确认停用所选账号？"), { isActive: false })}>{tx("批量停用")}</button>
         <SelectMenu className="f-sel" searchable aria-label={tx("目标部门")} value={targetOrg} onChange={e => setTargetOrg(e.target.value)}>
           <option value="">{tx("目标部门")}</option>
-          {orgChoices.map(o => <option key={o.id} value={o.id} data-path={o.path}>{o.label}</option>)}
+          {moveChoices.map(o => <option key={o.id} value={o.id} data-path={o.path}>{o.label}</option>)}
         </SelectMenu>
         <button className="btn btn-ghost" disabled={tooMany || !targetOrg} onClick={() => beginBatch(tx("批量更改部门"), tx("确认将所选账号移至「{0}」？", [orgChoices.find(o => o.id === targetOrg)?.path]), { orgId: targetOrg })}>{tx("批量更改部门")}</button>
         {tooMany && <span className="admin-access-note" role="status">{tx("每次最多处理 200 个账号，请缩小筛选范围或取消部分选择。")}</span>}
@@ -201,7 +203,11 @@ function UserEditor({ user, orgs, roles, onClose, onDone }) {
   const initialKind = user ? (user.isTestAccount == null ? '' : String(user.isTestAccount)) : 'false'
   const [accountKind, setAccountKind] = useState(initialKind)
   const [posSel, setPosSel] = useState(user ? (user.positions || []) : [])
-  const [posCat, setPosCat] = useState([])
+  const [positionCatalog, setPositionCatalog] = useState(null)
+  const [positionRetry, setPositionRetry] = useState(0)
+  const currentCatalog = positionCatalog?.orgId === orgId ? positionCatalog : null
+  const posCat = currentCatalog?.rows || []
+  const positionsReady = Array.isArray(currentCatalog?.rows)
   const [positionSearch, setPositionSearch] = useState('')
   const positionTerm = positionSearch.trim().toLocaleLowerCase()
   const visiblePositions = posCat.filter(p => !positionTerm ||
@@ -211,7 +217,15 @@ function UserEditor({ user, orgs, roles, onClose, onDone }) {
   const [domStatus, setDomStatus] = useState('loading')
   const [mgrOpen, setMgrOpen] = useState(false)
   const [busy, setBusy] = useState(false)
-  const opts = orgOptions(orgs)
+  const opts = orgOptions(orgs.filter(org => org.id === user?.orgId ||
+    (!org.isArchived && (org.dataSource !== 'test' || accountKind === 'true'))))
+  function changeAccountKind(value) {
+    setAccountKind(value)
+    if (value !== 'true' && orgId !== user?.orgId && orgs.some(org => org.id === orgId && org.dataSource === 'test')) {
+      setOrgId('')
+      setPosSel([])
+    }
+  }
   const nm = displayName || username || '?'
   const loadDomains = () => {
     setDomStatus('loading')
@@ -227,9 +241,23 @@ function UserEditor({ user, orgs, roles, onClose, onDone }) {
   const unavailableDomains = domStatus === 'ready'
     ? [...new Set(domSel)].filter((id) => !domCat.some((d) => d.id === id)) : []
   useEffect(() => {
-    api.positions().then((p) => setPosCat(p || [])).catch(() => setPosCat([]))
     loadDomains()
   }, [])
+  useEffect(() => {
+    if (!orgId) return
+    let current = true
+    setPositionCatalog(null)
+    api.positions(orgId).then(rows => {
+      if (!current) return
+      if (!Array.isArray(rows)) throw new Error('Invalid profession catalog')
+      setPositionCatalog({ orgId, rows })
+      if (orgId !== user?.orgId) {
+        const assignable = new Set(rows.map(row => row.id))
+        setPosSel(selected => selected.filter(id => assignable.has(id)))
+      }
+    }).catch(() => { if (current) setPositionCatalog({ orgId, error: true }) })
+    return () => { current = false }
+  }, [orgId, positionRetry, user?.orgId])
   const togglePos = (id) => setPosSel((a) => a.includes(id) ? a.filter((x) => x !== id) : [...a, id])
   const toggleDom = (id) => setDomSel((a) => a.includes(id) ? a.filter((x) => x !== id) : [...a, id])
 
@@ -246,7 +274,9 @@ function UserEditor({ user, orgs, roles, onClose, onDone }) {
       const marker = accountKind === '' ? null : accountKind === 'true'
       if (isNew) await api.createUser({ username: username.trim(), password, displayName: displayName.trim(), orgId, roleId: roleId || null, positions: posSel, domains: domSel, isTestAccount: marker })
       else {
-        const body = { displayName: displayName.trim(), orgId, roleId: roleId || null, isActive, positions: posSel, domains: domSel }
+        const body = { displayName: displayName.trim(), orgId, roleId: roleId || null, isActive, domains: domSel }
+        const original = user.positions || []
+        if (orgId !== user.orgId || posSel.length !== original.length || posSel.some(id => !original.includes(id))) body.positions = posSel
         if (accountKind !== initialKind) body.isTestAccount = marker
         if (password) body.password = password
         await api.updateUser(user.id, body)
@@ -260,7 +290,7 @@ function UserEditor({ user, orgs, roles, onClose, onDone }) {
     <Modal title={isNew ? tx("新建用户") : tx("编辑用户")} icon="users" draft={[username, displayName, password, orgId, roleId, isActive, accountKind, [...posSel].sort(), [...domSel].sort()]} onClose={onClose}
       foot={dismiss => <>
         <button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button>
-        <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : tx("保存")}</button>
+        <button className="btn btn-primary" disabled={busy || (orgId !== user?.orgId && posSel.length > 0 && !positionsReady)} onClick={save}>{busy ? tx("保存中…") : tx("保存")}</button>
       </>}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 2 }}>
         {isNew
@@ -295,17 +325,23 @@ function UserEditor({ user, orgs, roles, onClose, onDone }) {
         </div>
       </div>
       <div><label className="f-lbl" id={`${formId}-kind-label`} htmlFor={`${formId}-kind`}>{tx("账号标识")}</label>
-        <SelectMenu id={`${formId}-kind`} aria-labelledby={`${formId}-kind-label`} className="f-in" value={accountKind} onChange={e => setAccountKind(e.target.value)}>
+        <SelectMenu id={`${formId}-kind`} aria-labelledby={`${formId}-kind-label`} className="f-in" value={accountKind} onChange={e => changeAccountKind(e.target.value)}>
           <option value="false">{tx("正式账号")}</option><option value="true">{tx("测试账号")}</option><option value="">{tx("未指定（按账号名称提示）")}</option>
         </SelectMenu>
       </div>
       <div><div className="f-lbl" id={`${formId}-positions-label`}>{tx("职业画像（可多选，用于理解需求与推荐工作场景，不授予系统权限）")}</div>
-        <input type="search" className="f-in" aria-label={tx("搜索职业画像")} placeholder={tx("搜索职业画像")} value={positionSearch} onChange={e => setPositionSearch(e.target.value)} />
+        <input type="search" className="f-in" disabled={!orgId} aria-label={tx("搜索职业画像")} placeholder={tx("搜索职业画像")} value={positionSearch} onChange={e => setPositionSearch(e.target.value)} />
         <div className="posgrid" role="group" aria-labelledby={`${formId}-positions-label`}>
-          {posCat.length === 0 && <span className="muted" style={{ fontSize: 14.5 }}>{tx("暂无职业画像")}</span>}
+          {!orgId && <span className="muted">{tx("请选择所属部门")}</span>}
+          {orgId && !currentCatalog && <span className="muted" role="status">{tx("加载中…")}</span>}
+          {currentCatalog?.error && <span className="muted" role="status">{tx("职业画像加载失败")} <button type="button" className="linkbtn" onClick={() => setPositionRetry(n => n + 1)}>{tx("重试")}</button></span>}
+          {positionsReady && posCat.length === 0 && <span className="muted">{tx("暂无职业画像")}</span>}
           {posCat.length > 0 && !visiblePositions.length && <span className="muted" role="status">{tx("没有匹配的职业画像")}</span>}
           {visiblePositions.map((p) => (
             <button type="button" key={p.id} className={'poschip' + (posSel.includes(p.id) ? ' on' : '')} aria-pressed={posSel.includes(p.id)} onClick={() => togglePos(p.id)}>{tx(p.name)}</button>
+          ))}
+          {positionsReady && orgId === user?.orgId && posSel.filter(id => !posCat.some(p => p.id === id)).map(id => (
+            <button type="button" key={id} className="poschip on" aria-pressed={true} onClick={() => togglePos(id)}>{tx("已分配但不可选：{0}", [id])}</button>
           ))}
         </div>
       </div>
