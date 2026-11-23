@@ -610,7 +610,22 @@ class AccountPrivacyTests(unittest.IsolatedAsyncioTestCase):
             response = await self.http.post("/api/v1/admin/login", json={"user": username, "pass": password})
             self.assertEqual(response.status_code, 401, response.text)
 
-    async def test_email_change_wrong_code_and_legacy_collision_preserve_proofs(self):
+    async def test_unchanged_email_consumes_verified_proofs_and_keeps_session(self):
+        email = "person@example.test"
+        proof = await self.challenge("change_email", email)
+        token = await self.verify("change_email")
+        response = await self.call("POST", "/me/email-change", {
+            **proof, "email": email, "verificationToken": token})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "EMAIL_UNCHANGED")
+        async with SessionLocal() as session:
+            self.assertIsNotNone((await session.get(EmailChallenge, proof["challengeId"])).consumed_at)
+            grant = await session.scalar(select(AccountActionGrant).where(
+                AccountActionGrant.token_hash == hashlib.sha256(token.encode()).hexdigest()))
+            self.assertIsNotNone(grant.consumed_at)
+        self.assertEqual((await self.call("GET", "/me")).status_code, 200)
+
+    async def test_email_change_legacy_address_conflict_consumes_verified_proofs(self):
         async with SessionLocal() as session:
             session.add(User(id="legacy-email-owner", username="claimed@example.test", is_active=True))
             await session.commit()
@@ -625,13 +640,13 @@ class AccountPrivacyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(collision.json()["detail"]["code"], "EMAIL_UNAVAILABLE")
         async with SessionLocal() as session:
             self.assertEqual((await session.get(User, self.uid)).email_normalized, "person@example.test")
-            self.assertIsNone((await session.get(EmailChallenge, proof["challengeId"])).consumed_at)
+            self.assertIsNotNone((await session.get(EmailChallenge, proof["challengeId"])).consumed_at)
             grant = await session.scalar(select(AccountActionGrant).where(AccountActionGrant.token_hash == hashlib.sha256(token.encode()).hexdigest()))
-            self.assertIsNone(grant.consumed_at)
+            self.assertIsNotNone(grant.consumed_at)
             self.assertEqual((await session.get(Client, "email-device-1")).user_ref, self.uid)
-            await session.delete(await session.get(User, "legacy-email-owner"))
-            await session.commit()
-        changed = await self.call("POST", "/me/email-change", {**proof, "email": "claimed@example.test", "verificationToken": token})
+        proof = await self.challenge("change_email", "available@example.test")
+        token = await self.verify("change_email")
+        changed = await self.call("POST", "/me/email-change", {**proof, "email": "available@example.test", "verificationToken": token})
         self.assertEqual(changed.status_code, 200, changed.text)
 
     async def test_email_change_rejects_wrong_purpose_and_other_device_grants(self):
@@ -663,9 +678,9 @@ class AccountPrivacyTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await session.get(User, other["user"]["id"])).email_normalized, "other@example.test")
             self.assertEqual((await session.get(Client, "email-device-1")).user_ref, self.uid)
             self.assertEqual((await session.get(Client, "email-device-2")).user_ref, other["user"]["id"])
-            self.assertIsNone((await session.get(EmailChallenge, proof["challengeId"])).consumed_at)
+            self.assertIsNotNone((await session.get(EmailChallenge, proof["challengeId"])).consumed_at)
             grant = await session.scalar(select(AccountActionGrant).where(AccountActionGrant.token_hash == hashlib.sha256(token.encode()).hexdigest()))
-            self.assertIsNone(grant.consumed_at)
+            self.assertIsNotNone(grant.consumed_at)
 
     async def test_email_change_audit_failure_rolls_back_address_proofs_and_devices(self):
         proof = await self.challenge("change_email", "new@example.test")
