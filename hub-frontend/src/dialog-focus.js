@@ -43,7 +43,7 @@ function focus(element) { element?.focus({ preventScroll: true }) }
 
 function initialTarget(entry) {
   const { root, initialFocus } = entry
-  const autofocus = [...root.querySelectorAll('[autofocus]')].find(available)
+  const autofocus = [...root.querySelectorAll('[autofocus], [data-dialog-autofocus]')].find(available)
   if (autofocus) return autofocus
   // React autoFocus may focus a control without retaining an autofocus attribute.
   if (root.contains(initialFocus) && available(initialFocus)) return initialFocus

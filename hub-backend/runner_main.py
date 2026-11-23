@@ -889,6 +889,16 @@ class Runner:
                 str(result.get("error") or "Agent launch failed"), result)
         self._admission_wake.set()
 
+    def _admission_load(self) -> dict:
+        from app.services import ai_local
+        from app.services.runner_event_scope import is_local
+        with ai_local._LOCK:
+            running_refs = {ref for ref, run in ai_local._RUNS.items() if run.get("state") == "running"}
+            local_refs = {ref for ref, run in ai_local._RUNS.items() if is_local(run, ref)}
+        return {"active": _busy_count() + self._admission.starting_count(),
+                "blocked_refs": running_refs, "hub_blocked": getattr(self, "_outbox_blocked", False),
+                "local_refs": local_refs}
+
     async def _admission_loop(self) -> None:
         from app.services import ai_local
         await asyncio.to_thread(ai_local.reclaim)
@@ -904,17 +914,8 @@ class Runner:
             self._resource_snapshot = resource
             self.max_concurrent = resource.limit
             while True:
-                from app.services import ai_local
-                from app.services.runner_event_scope import is_local
-                with ai_local._LOCK:
-                    running_refs = {ref for ref, run in ai_local._RUNS.items()
-                                    if run.get("state") == "running"}
-                    local_refs = {ref for ref, run in ai_local._RUNS.items() if is_local(run, ref)}
-                active = _busy_count() + self._admission.starting_count()
                 item = self._admission.claim_next(
-                    active, resource.limit,
-                    resource.can_start, blocked_refs=running_refs,
-                    hub_blocked=getattr(self, "_outbox_blocked", False), local_refs=local_refs)
+                    limit=resource.limit, can_start=resource.can_start, **self._admission_load())
                 if item is None:
                     break
                 task = asyncio.create_task(self._run_admitted(item))
@@ -958,6 +959,8 @@ class Runner:
                 "data": metrics,
             }
         runner_local_rpc.admission_recorded()
+        if operation == "dispatch" and reason == "accepted":
+            log.info("dispatch accepted ref=%s queuePosition=%d", ref, self._admission.position(item.key))
         if reason == "duplicate":
             original = dict(item.payload or {})
             keep = {
@@ -1818,25 +1821,23 @@ class Runner:
                 str(m.get("decision") or ""), m.get("policyRevision"), m.get("optionId"))
             return {"ok": bool(result.get("ok")), "data": result,
                     "error": result.get("error", ""), "code": result.get("code", "")}
-        if op == "job.status":
+        if op in {"job.status", "job.info"}:
             ref = str(m.get("ref") or "")
             item = self._admission.latest_for_ref(ref, include_terminal=True)
             with ai_local._LOCK:
                 local_exists = ref in ai_local._RUNS
             if runner_admission.owns_status(item, local_exists):
-                return {"ok": True, "data": runner_admission.status_data(
-                    item, self._admission.position(item.key))}
-            data = await runner_local_rpc.to_thread(ai_local.status_sync, {}, ref)
-            return {"ok": True, "data": remote_snapshot(data, ref)}
-        if op == "job.info":
-            ref = str(m.get("ref") or "")
-            item = self._admission.latest_for_ref(ref, include_terminal=True)
-            with ai_local._LOCK:
-                local_exists = ref in ai_local._RUNS
-            if runner_admission.owns_status(item, local_exists):
-                return {"ok": True, "data": runner_admission.info_data(
-                    item, self._admission.position(item.key))}
-            data = await runner_local_rpc.to_thread(ai_local.runner_info_sync, {}, ref)
+                snapshot = runner_admission.status_data if op == "job.status" else runner_admission.info_data
+                data = snapshot(item, self._admission.position(item.key))
+                if item.state == "queued":
+                    resource = self._resource_budget.snapshot()
+                    reason = self._admission.wait_reason(
+                        item, limit=resource.limit, can_start=resource.can_start, **self._admission_load())
+                    if reason:
+                        data["waitReason"] = reason
+                return {"ok": True, "data": data}
+            reader = ai_local.status_sync if op == "job.status" else ai_local.runner_info_sync
+            data = await runner_local_rpc.to_thread(reader, {}, ref)
             return {"ok": True, "data": remote_snapshot(data, ref)}
         if op == "job.authorize":
             # Model credentials may be refreshed only by this desktop's private

@@ -1,6 +1,6 @@
 import { translateText as tx, localeMap, useLocale } from '../i18n.js'
 import { createRefreshLoop } from '../polling.js'
-import React, { useCallback, useRef, useState, useEffect } from 'react'
+import React, { useCallback, useMemo, useRef, useState, useEffect } from 'react'
 import { api, can } from '../api.js'
 import { FilterInput, FilterSelect } from '../FilterControls.jsx'
 import ListPager from '../ListPager.jsx'
@@ -57,7 +57,7 @@ function Pager({ page, total, onChange }) {
 
 function DeviceFleet() {
   const listRef = useViewportHeight(180)
-  const uiLocale = useLocale();
+  useLocale()
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -68,7 +68,10 @@ function DeviceFleet() {
   const [draft, setDraft] = useState('')
   const [composing, setComposing] = useState(false)
   const [q, setQ] = useState('')
+  const [sort, setSort] = useState({})
+  const [exporting, setExporting] = useState(false)
   const requestSeq = useRef(0)
+  const filters = useMemo(() => ({ state, form, q, ...sort }), [state, form, q, sort])
 
   useEffect(() => {
     if (composing) return undefined
@@ -80,28 +83,46 @@ function DeviceFleet() {
     const seq = ++requestSeq.current
     if (!quiet) setLoading(true)
     try {
-      const next = await api.clientsPage({ page, pageSize: PAGE_SIZE, state, form, q })
+      const next = await api.clientsPage({ ...filters, page, pageSize: PAGE_SIZE })
       if (seq !== requestSeq.current) return
-      setData(next)
+      setData({ ...next, filters })
       setError('')
     } catch (e) {
       if (seq !== requestSeq.current) return
       setError(e.message || tx("终端数据没有加载出来"))
     }
-    if (!quiet && seq === requestSeq.current) setLoading(false)
-  }, [page, q, state, form])
+    if (seq === requestSeq.current) setLoading(false)
+  }, [page, filters])
 
   useEffect(() => {
     let alive = true
     const run = async (quiet) => { if (alive) await load(quiet) }
     run(false)
     const timer = setInterval(() => run(true), 15000)
-    return () => { alive = false; clearInterval(timer) }
+    return () => { alive = false; requestSeq.current++; clearInterval(timer) }
   }, [load])
 
   const items = (data && data.items) || []
+  function toggleSort(key) {
+    setPage(1)
+    setSort(previous => {
+      const descending = previous.sortBy === key ? previous.sortDir === 'asc' : key === 'lastSeen'
+      return { sortBy: key, sortDir: descending ? 'desc' : 'asc' }
+    })
+  }
+
+  async function exportCsv() {
+    setExporting(true)
+    try {
+      await api.exportClients(filters)
+    } catch (e) {
+      toast(e.message)
+    } finally {
+      setExporting(false)
+    }
+  }
   const counts = (data && data.counts) || { all: 0, online: 0, offline: 0, pending: 0, mobile: 0 }
-  const filters = [['all', tx("全部终端")], ['online', tx("在线")],
+  const stateOptions = [['all', tx("全部终端")], ['online', tx("在线")],
     ['offline', tx("离线")], ['pending', tx("待激活")]]
   /* Manage desktop and mobile clients through the shared device identity list. */
   const isMobile = (p) => /^(android|ios|harmony)|^mobile$/i.test(String(p || ''))
@@ -124,21 +145,36 @@ function DeviceFleet() {
       <div className="admin-filter-options">
       <label className="admin-filter-field en-state-filter"><span>{tx("终端状态")}</span><FilterSelect
         aria-label={tx("终端状态")} value={state} resetValue="all" onChange={(e) => { setState(e.target.value); setPage(1) }}>
-        {filters.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+        {stateOptions.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
       </FilterSelect></label>
       <label className="admin-filter-field en-form-filter"><span>{tx("终端形态")}</span><FilterSelect
         aria-label={tx("终端形态")} value={form} resetValue="all" onChange={(e) => { setForm(e.target.value); setPage(1) }}>
         {[['all', tx("全部形态")], ['desktop', tx("桌面端")], ['mobile', tx("移动端")]].map(([key, label]) => <option key={key} value={key}>{label}</option>)}
       </FilterSelect></label>
+      <button type="button" className="btn btn-ghost xs en-export-btn" onClick={exportCsv}
+        disabled={exporting || loading || !!error || !data?.total || composing || draft.trim() !== q}>
+        {exporting ? tx("正在导出…") : tx("导出 CSV")}
+      </button>
       </div>
     </div>
-    {error && !data && <div className="en-state bad"><Icon name="alert" /><div><b>{tx("终端数据没有加载出来")}</b><span>{error}</span></div>
+    {error && <div className="en-state bad" role="alert"><Icon name="alert" /><div><b>{tx("终端数据没有加载出来")}</b><span>{error}</span></div>
       <button className="btn btn-ghost xs" onClick={() => load(false)}>{tx("重试")}</button></div>}
     {loading && !data && <div className="en-state"><span className="en-spinner" /><div><b>{tx("正在读取终端")}</b><span>{tx("只加载当前筛选和当前页")}</span></div></div>}
     {data && !items.length && <div className="en-empty"><Icon name="monitor" /><b>{tx("没有符合条件的终端")}</b>
       <span>{counts.all ? tx("换一个筛选条件或清空搜索词。") : tx("启动 SoduWork 客户端后，终端会自动登记到这里。")}</span></div>}
-    {!!items.length && <div ref={listRef} className="en-table-wrap admin-viewport-list" tabIndex={0} role="region" aria-label={tx("员工终端")}><table className="en-table">
-      <thead><tr><th>{tx("终端")}</th><th>{tx("归属成员")}</th><th>{tx("连接状态")}</th><th>{tx("设备身份")}</th><th>{tx("系统 / 版本")}</th><th>{tx("最后心跳")}</th><th className="admin-action-heading">{tx("操作")}</th></tr></thead>
+    {!!items.length && <div ref={listRef} className="en-table-wrap admin-viewport-list" tabIndex={0} role="region" aria-label={tx("员工终端")}><table className="en-table" aria-busy={loading}>
+      <thead><tr>
+        {[['name', tx("终端")], ['owner', tx("归属成员")], ['online', tx("连接状态")], ['auth', tx("设备身份")], ['platform', tx("系统 / 版本")], ['lastSeen', tx("最后心跳")]].map(([key, label]) => {
+          const active = data.filters.sortBy === key
+          const ascending = data.filters.sortDir === 'asc'
+          return <th key={key} scope="col" aria-sort={active ? (ascending ? 'ascending' : 'descending') : undefined}>
+            <button type="button" className={'en-th-sort' + (active ? ' is-active' : '')} onClick={() => toggleSort(key)}>
+              {label}<span className="en-th-arrow" aria-hidden="true">{active ? (ascending ? '↑' : '↓') : '↕'}</span>
+            </button>
+          </th>
+        })}
+        <th className="admin-action-heading">{tx("操作")}</th>
+      </tr></thead>
       <tbody>{items.map((c) => {
         const auth = authState(c.authState)
         const name = c.ownerName || tx("未分配")
@@ -316,13 +352,13 @@ function ClientDetail({ client, onClose, onChanged }) {
   const saveDisabled = busy === 'owner' || (!owner && ownerUnchanged) || (ownerUnchanged && auth.key === 'active')
   return (
     <>
-      <Modal wide className="client-detail-modal" onClose={onClose}
+      <Modal dirty={Boolean(notice) || !ownerUnchanged} wide className="client-detail-modal" onClose={onClose}
         title={<span className="client-detail-heading"><span className="cli"><span className="ava">{(client.name || client.id).slice(0, 1)}</span><span className="nm">{client.name || client.id}</span></span>
           <span className={'status-dot ' + (client.online ? 'on' : 'off')}><i />{client.online ? tx("在线") : tx("离线")}</span></span>}
-        foot={<>
+        foot={dismiss => <>
           {can('client.update') && <button className="btn btn-primary" disabled={busy === 'update'} onClick={() => setConfirm({ title: tx("升级完整客户端"), text: client.online ? tx("系统会创建可追踪的升级任务，客户端下载并校验完整安装包后，由用户确认重启安装。确定下发？") : tx("设备当前离线。升级任务会持久排队，设备下次上线后自动领取，不会丢失。确定排队？"), confirmText: tx("确认升级"), run: requestUpdate })} title={tx("升级完整客户端")}><Icon name="external" />{tx("升级客户端")}</button>}
           {can('client.control') && <button className="btn btn-ghost" disabled={busy === 'reload'} onClick={() => setConfirm({ text: tx("将强制该 SoduWork 立即刷新，会打断用户正在做的事。确定？"), run: () => push({ type: 'command', action: 'reload' }, 'reload') })}><Icon name="refresh" />{tx("强制刷新")}</button>}
-          <button className="btn btn-ghost" onClick={onClose}>{tx("关闭")}</button>
+          <button className="btn btn-ghost" onClick={dismiss}>{tx("关闭")}</button>
         </>}>
           {!d && <div className="muted">{tx("加载中…")}</div>}
           <div className={'device-auth-panel ' + auth.key}>

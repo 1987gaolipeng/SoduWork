@@ -289,6 +289,8 @@ def item_from_attachment(row) -> dict:
         "sha256": str(meta.get("sha256") or ""),
         "contentType": str(getattr(row, "content_type", "") or "application/octet-stream"),
         "role": role, "category": category,
+        **({"requestedOutput": True} if meta.get("requestedOutput") is True else {}),
+        **({"replaces": meta["replaces"]} if isinstance(meta.get("replaces"), list) and meta["replaces"] else {}),
         "sourceRef": str(getattr(row, "source_ref", "") or ""),
         **({"round": round_no} if round_no else {}),
         "url": "/attachments/" + str(getattr(row, "id", "") or ""),

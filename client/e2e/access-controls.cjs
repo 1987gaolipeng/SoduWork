@@ -23,7 +23,7 @@ async function click(decision) {
 app.whenReady().then(async () => {
   win = new BrowserWindow({ show: false, width: 800, height: 660, webPreferences: {
     preload: path.resolve(__dirname, '../preload.js'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
-  fixture = await require('./fixtures/access-sdk.cjs').create(root);
+  fixture = await require('./fixtures/access-sdk.cjs').create(root, 'standard', undefined, { builtinTools: ['read', 'write', 'edit', 'bash'] });
   const handle = { attachedWindow: win, cwd: fixture.workspace, answerUi: value => fixture.access.broker.answer(value),
     snapshot: () => ({ ...fixture.access.snapshot(), accessControl: { supported: true, canChangeDuringSession: true,
       modes: ['standard','readonly','full'] } }),
@@ -67,7 +67,7 @@ app.whenReady().then(async () => {
   await win.webContents.executeJavaScript('draw('+JSON.stringify(request)+',"en-US")');
   const approvalText = await win.webContents.executeJavaScript('document.body.innerText');
   assert.match(approvalText, /Allow modifying this file\?/);
-  assert.doesNotMatch(approvalText, /Allow for chat/);
+  assert.match(approvalText, /Allow for chat/);
   assert.match(approvalText, /Allow once/);
   fs.writeFileSync(path.join(out,'approval-en.png'),(await win.webContents.capturePage()).toPNG());
   await click('once'); await turn; assert.equal(fs.readFileSync(outside,'utf8'),'approved');
@@ -77,13 +77,24 @@ app.whenReady().then(async () => {
   win.setSize(390,660);await win.webContents.executeJavaScript('draw('+JSON.stringify(request)+',"zh-CN")');await delay(100);
   assert.equal(await win.webContents.executeJavaScript('document.documentElement.scrollWidth<=innerWidth'),true);
   fs.writeFileSync(path.join(out,'approval-zh-small.png'),(await win.webContents.capturePage()).toPNG());
-  assert.equal(await win.webContents.executeJavaScript('document.querySelector("[data-ui-value=session]")===null'), true);
-  // Keep regression coverage for older clients' grants through the existing IPC.
-  await win.webContents.executeJavaScript('soduWorkAPI.conversationSession.answerUi("access-e2e",'+JSON.stringify({...request,decision:'session'})+')');await turn;
+  await click('session'); await turn;
   await fixture.send('write',{path:outside,content:'session grant'});assert.equal(fixture.access.broker.pending().length,0);
   await fixture.send('write',{path:outside,content:'session grant changed'});assert.equal(fixture.access.broker.pending().length,0);
   assert.equal(fs.readFileSync(outside,'utf8'),'session grant changed');
-  report.cases.push('session grant UI removed; existing backend grants remain compatible; Chinese small window fits');
+  report.cases.push('an explicit session choice covers repeated writes to the same file; new targets still prompt');
+  const command = { command: 'echo checked >> approval-check.txt' };
+  turn = fixture.send('bash', command); request = await pending();
+  await win.webContents.executeJavaScript('draw(' + JSON.stringify(request) + ')');
+  await click('session'); await turn;
+  await fixture.send('bash', command);
+  assert.ok(fs.existsSync(path.join(fixture.workspace, 'approval-check.txt')), JSON.stringify(fixture.session.messages.filter(x => x.role === 'toolResult').at(-1)?.content));
+  assert.equal(fs.readFileSync(path.join(fixture.workspace, 'approval-check.txt'), 'utf8').trim().split(/\r?\n/).length, 2);
+  turn = fixture.send('bash', { command: 'echo changed >> approval-check.txt' }); request = await pending();
+  await win.webContents.executeJavaScript('draw(' + JSON.stringify(request) + ')');
+  await click('deny'); await turn;
+  assert.doesNotMatch(fs.readFileSync(path.join(fixture.workspace, 'approval-check.txt'), 'utf8'), /changed/);
+  assert.equal(fixture.access.policy.mode, 'standard');
+  report.cases.push('two matching shell commands run after one scoped approval; a changed command asks again');
   const cancelled = path.join(root, 'outside-cancel.txt');
   turn=fixture.send('write',{path:cancelled,content:'cancelled'});await pending();await fixture.session.abort();await turn;
   assert.equal(fs.readFileSync(outside,'utf8'),'session grant changed');assert.equal(fs.existsSync(cancelled),false);assert.equal(fixture.access.broker.pending().length,0);
@@ -92,16 +103,16 @@ app.whenReady().then(async () => {
   report.cases.push('stop while waiting denies write; following turn works');
   const fullTarget = path.join(root, 'full-access.txt');
   turn = fixture.send('write', { path: fullTarget, content: 'full consent' }); request = await pending();
-  for (const lang of ['zh-CN', 'en-US']) {
+  for (const lang of ['zh-CN', 'en-US', 'ja-JP', 'ko-KR']) {
     win.setSize(390, 660);
     await win.webContents.executeJavaScript('draw(' + JSON.stringify(request) + ',' + JSON.stringify(lang) +
       ',{ref:"access-e2e",fullRevision:' + fixture.access.policy.revision + '})');
     await delay(100);
     assert.equal(await win.webContents.executeJavaScript('document.documentElement.scrollWidth<=innerWidth'), true);
-    assert.equal(await win.webContents.executeJavaScript('document.querySelector("[data-ui-value=full]").textContent'), lang === 'zh-CN' ? '始终允许' : 'Always allow');
-    const group = await win.webContents.executeJavaScript('(()=>{const g=document.querySelector(".nask-btns"),buttons=[...g.children],r=buttons.map(b=>b.getBoundingClientRect());return{order:buttons.map(b=>b.dataset.uiValue),sameRow:r.every(x=>Math.abs(x.top-r[0].top)<1&&Math.abs(x.height-r[0].height)<1),gap:getComputedStyle(g).gap,overflow:g.scrollWidth>g.clientWidth+1}})()');
-    assert.deepEqual(group.order, ['deny', 'once', 'full']);
-    assert.equal(group.sameRow, true); assert.equal(group.gap, '8px'); assert.equal(group.overflow, false);
+    assert.equal(await win.webContents.executeJavaScript('document.querySelector("[data-ui-value=full]").textContent'), { 'zh-CN': '完全访问', 'en-US': 'Full access', 'ja-JP': 'フルアクセス', 'ko-KR': '전체 액세스' }[lang]);
+    const group = await win.webContents.executeJavaScript('(()=>{const g=document.querySelector(".nask-btns"),buttons=[...g.children],r=buttons.map(b=>b.getBoundingClientRect());return{order:buttons.map(b=>b.dataset.uiValue),rows:new Set(r.map(x=>Math.round(x.top))).size,gap:getComputedStyle(g).gap,overflow:g.scrollWidth>g.clientWidth+1}})()');
+    assert.deepEqual(group.order, ['deny', 'once', 'session', 'full']);
+    assert.equal(group.rows, 2); assert.equal(group.gap, '8px'); assert.equal(group.overflow, false);
     const fullStyle = await win.webContents.executeJavaScript('(()=>{const b=document.querySelector("[data-ui-value=full]"),s=getComputedStyle(b);return {background:s.backgroundColor,color:s.color}})()');
     assert.equal(fullStyle.background, 'rgb(24, 24, 27)'); assert.equal(fullStyle.color, 'rgb(255, 255, 255)');
     fs.writeFileSync(path.join(out, 'approval-full-' + lang + '.png'), (await win.webContents.capturePage()).toPNG());
@@ -113,8 +124,13 @@ app.whenReady().then(async () => {
   assert.equal(fs.existsSync(fullTarget), false); assert.equal(fixture.access.broker.pending().length, 1);
   assert.equal(await win.webContents.executeJavaScript('document.querySelector("[data-ui-value=once]").disabled'), false);
   await click('full'); dialog = await dialogReady();
+  dialog.showInactive(); dialog.hide();
+  for (let i = 0; i < 50 && !dialog.isDestroyed(); i++) await delay(20);
+  assert.equal(dialog.isDestroyed(), true, 'hiding the native prompt should cancel the outstanding consent');
+  assert.equal(fixture.access.policy.mode, 'standard');
+  await click('full'); dialog = await dialogReady();
   await clickConsent(dialog, '#consentAcknowledged'); await clickConsent(dialog, '#consentAllow'); await turn;
-  assert.equal(fullConfirmations, 2); assert.equal(fixture.access.policy.mode, 'full');
+  assert.equal(fullConfirmations, 3); assert.equal(fixture.access.policy.mode, 'full');
   assert.equal(fs.readFileSync(fullTarget, 'utf8'), 'full consent');
   await fixture.send('write', { path: path.join(root, 'full-next.txt'), content: 'no repeat approval' });
   assert.equal(fixture.access.broker.pending().length, 0);

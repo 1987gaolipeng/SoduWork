@@ -355,12 +355,15 @@ async def chain_status(session: AsyncSession, task: models.Task) -> dict:
     states = []
     pending_acceptance = []
     acceptance_rejected = []
+    acceptance_withdrawn = []
     for env in sorted(envs.values(), key=lambda x: (x.sort, x.created_at)):
         policy = environment_service.promotion_policy(env.promotion_policy)
         succeeded = await _environment_succeeded(session, task, artifact.id, env.id)
         acceptance = await _acceptance_request(session, artifact.id, env.id) \
             if policy.get("requiresAcceptance") else None
-        if acceptance and acceptance.status in {"rejected", "cancelled"}:
+        if acceptance and acceptance.status == "cancelled" and (acceptance.context or {}).get("withdrawnBy"):
+            acceptance_withdrawn.append(env.name)
+        elif acceptance and acceptance.status in {"rejected", "cancelled"}:
             acceptance_rejected.append(env.name)
         acceptance_state = acceptance.status if acceptance else (
             "not_required" if not policy.get("requiresAcceptance") else "not_started")
@@ -377,7 +380,10 @@ async def chain_status(session: AsyncSession, task: models.Task) -> dict:
         states.append(state)
     error = ""
     kind = ""
-    if failed:
+    if acceptance_withdrawn:
+        error = f"{acceptance_withdrawn[0]}验收审批已撤回，继续前需要重新发起审批"
+        kind = "escalation"
+    elif failed:
         error = failed[-1].error or "环境发布失败或已回滚"
         kind = _failure_kind(failed)
     elif acceptance_rejected:

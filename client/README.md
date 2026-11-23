@@ -6,6 +6,8 @@ Command examples use `sh start.sh` on macOS/Linux. On Windows, use `.\start.cmd`
 
 The desktop uses Electron and native HTML/CSS/JavaScript. The React management UI is a separate application.
 
+Before your first message, the composer checks the selected runtime and chat model. Use the action beside a missing setting, then return to your draft. The Hub overview can open runtime and model settings in the installed desktop app. While the composer is open, it reports whether those selections are ready for the signed-in account.
+
 ## Build a different default Hub
 
 Normal builds still default to `https://service.soduwork.ai`. To build for another

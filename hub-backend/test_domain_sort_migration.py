@@ -145,6 +145,8 @@ class DomainSortMigrationTests(unittest.TestCase):
                 with engine.begin() as connection:
                     Domain.__table__.create(connection)
                     AuditLog.__table__.create(connection)
+                    connection.exec_driver_sql("CREATE TABLE task (id VARCHAR(36) PRIMARY KEY)")
+                    connection.exec_driver_sql("CREATE TABLE app_user (id TEXT PRIMARY KEY)")
                     connection.exec_driver_sql("CREATE TABLE alembic_version (version_num VARCHAR(64) PRIMARY KEY)")
                     connection.exec_driver_sql("INSERT INTO alembic_version VALUES ('0090_requirement_creator')")
                     self.insert_domain(connection, "valid", 9)

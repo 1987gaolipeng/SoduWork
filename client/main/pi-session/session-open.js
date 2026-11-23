@@ -166,7 +166,7 @@ async function open(opts) {
   // removed from the personal model catalog; retry once with the current default and clear
   // the stale selection for future resumes.
   const canRecoverStaleModel = Boolean(opts.resumePath || opts.resumedConversation) &&
-    prep?.code !== 'LOCAL_AGENT_DEFAULT_UNAVAILABLE';
+    !prep?.providerPinned && prep?.code !== 'LOCAL_AGENT_DEFAULT_UNAVAILABLE';
   // Some older Hub releases returned a successful default configuration even
   // when the requested historical model had already been retired. Treat a
   // different returned model as stale in a resumed conversation so the same

@@ -109,7 +109,8 @@ function describe(value, afterToolResult = false) {
     } else if (status === 403) {
       publicText = afterToolResult ? '工具已完成，请求模型继续生成时被拒绝' : '模型请求被拒绝';
     } else if (status === 401) {
-      publicText = '模型服务拒绝了当前凭据或模型权限';
+      publicText = authExpired ? '模型服务拒绝了当前凭据或模型权限' :
+        '模型服务拒绝了当前凭据或模型权限。个人服务请在「我的模型」检查个人 Key，企业服务请联系管理员核对模型授权';
     } else if (status === 404) {
       publicText = '模型服务地址或模型不存在';
     } else if (status === 429) {

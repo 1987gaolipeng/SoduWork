@@ -44,6 +44,9 @@ check("manifest covers smoke files and explicitly registered unittest entries",
 check("release profile is deterministic-only", scripts_for("release") == RELEASE_SMOKES)
 check("extended profile includes release and extended checks",
       scripts_for("extended") == RELEASE_SMOKES + EXTENDED_SMOKES)
+for profile in ("release", "extended"):
+    check("documented SQLite upgrade regression runs exactly once in " + profile,
+          scripts_for(profile).count("test_release_schema_history.py") == 1)
 check("live profile never pulls offline checks in implicitly", scripts_for("live") == LIVE_SMOKES)
 check("every tier is non-empty", all((RELEASE_SMOKES, EXTENDED_SMOKES, LIVE_SMOKES)))
 with tempfile.TemporaryDirectory(prefix="soduwork-misplaced-smoke-") as temporary:

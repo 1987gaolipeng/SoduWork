@@ -60,9 +60,14 @@ Run backend checks in its dedicated environment:
 ```sh
 cd hub-backend
 python3 -m pip install -r requirements-test.txt
+python3 -m ruff check app
+python3 scripts/check_changed_lint.py origin/main
+python3 -m mypy app
 python3 quality_gate.py --list
 python3 quality_gate.py --profile release --scope backend
 ```
+
+Use the target branch or base commit available in your Git checkout for the lint comparison. CI blocks on application-wide Ruff checks and on new Pyflakes, import-order and style findings in pull requests. The mypy step reports the application's current type errors and allows the backend tests to run.
 
 The full offline gate takes time. Start with the registered checks relevant to your change. `live` checks connect to real services or models and require your own isolated environment; they are outside default offline validation.
 

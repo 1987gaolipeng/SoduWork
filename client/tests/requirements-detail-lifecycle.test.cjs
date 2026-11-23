@@ -132,6 +132,18 @@ test('acceptance summary cannot be exported from a requirement-only view', async
   f.click('[data-rq-export-summary]');
 });
 
+test('an assigned review-only reader sees the pending approval without requesting execution materials', async () => {
+  let materialReads = 0;
+  const f = fixture({getTask:async id=>({...task(id),status:'doing',requirementStage:'reviewing',canViewExecution:false,canReview:true}),
+    listAttachments:async()=>{materialReads++;return [];}});
+  f.context.RequirementsBoard.context=()=>({approvals:new Map([['restricted',{id:'gate',action:'review',status:'pending'}]])});
+  f.context.TaskTraceApproval={html:rows=>'Assigned approval '+rows[0].id, bind(){}};
+  await f.api.open('restricted');
+  assert.match(f.content().innerHTML, /Assigned approval gate/);
+  assert.doesNotMatch(f.content().innerHTML, /rq-detail-materials|data-rq-execution|data-rq-export-summary/);
+  assert.equal(materialReads, 0);
+});
+
 test('summary export pins the visible approval and suppresses receipts after a same-task version refresh', async () => {
   let version = 4;
   const f = fixture({ getTask: async id => ({ ...task(id), requirementVersion: version }) });
@@ -338,6 +350,27 @@ function submitReviewClick(f, button = {disabled: false, isConnected: true}) {
     selector.split(',').includes('[data-rq-submit-review]') ? button : null}});
   return button;
 }
+
+test('review preflight names the recipient and blocks submission until Hub finds one', async () => {
+  let submits = 0;
+  const row = {...task('unassigned'), status:'doing', canSubmitReview:true,
+    reviewSubmission:{ok:false, candidates:[], reason:'创建人 <Ada> 已停用，请联系管理员。', canAssign:false}};
+  const f = fixture({getTask:async()=>row, submitTaskReview:async()=>{submits++; return {ok:true};}});
+  await f.api.open(row.id);
+  assert.match(f.content().innerHTML, /创建人 &lt;Ada&gt; 已停用/);
+  assert.doesNotMatch(f.content().innerHTML, /data-rq-review-picker/);
+  assert.match(f.active().querySelector('.rq-detail-footer').innerHTML, /data-rq-submit-review[^>]*disabled/);
+  submitReviewClick(f);
+  await new Promise(setImmediate);
+  assert.equal(submits, 0);
+  row.reviewSubmission = {ok:true, candidates:[{userId:'bob', userName:'<Bob>'}], reason:'', canAssign:true};
+  await f.api.refresh(row.id);
+  assert.match(f.content().innerHTML, /&lt;Bob&gt;/);
+  assert.match(f.content().innerHTML, /data-rq-review-picker/);
+  submitReviewClick(f);
+  await new Promise(setImmediate);
+  assert.equal(submits, 1);
+});
 
 for (const already of [false, true]) test(`manual review ${already ? 'retry receipt' : 'success'} closes its drawer before board refresh`, async () => {
   const receipt = deferred(), refreshed = deferred(), submissions = [], reads = [];

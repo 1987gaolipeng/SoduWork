@@ -112,14 +112,15 @@ def issue_session(client: Client) -> tuple[str, int]:
     return token, SESSION_TTL_SECONDS
 
 
-def issue_proxy_ticket(client: Client, *, quota_runtime: str = "", quota_binding: str = "") -> tuple[str, int]:
+def issue_proxy_ticket(client: Client, *, quota_runtime: str = "", quota_binding: str = "",
+                       provider_id: str = "") -> tuple[str, int]:
     if client.auth_state != "active" or not client.user_ref:
         raise DeviceAuthError("这台 SoduWork 还没有被管理员激活", 403)
     from .model_quota import managed_runtime
     runtime = managed_runtime(quota_runtime)
     token = sign_claims(
         {"cid": client.id, "uid": client.user_ref, "ver": int(client.auth_version or 1),
-         **({"quotaRuntime": runtime, "quotaBinding": quota_binding}
+         **({"quotaRuntime": runtime, "quotaBinding": quota_binding, "providerId": provider_id}
             if runtime and quota_binding else {})},
         ttl_seconds=AGENT_TTL_SECONDS,
         token_type="ai-proxy",
@@ -252,6 +253,7 @@ async def client_from_proxy_ticket(session: AsyncSession, token: str) -> Client:
         client = await _load_verified_client(session, principal, include_quota=True)
         client._proxy_quota_runtime = claims.get("quotaRuntime", "") if claims.get("quotaBinding") else ""
         client._proxy_quota_binding = claims.get("quotaBinding", "")
+        client._proxy_provider_id = claims.get("providerId", "")
         return client
     claims = verify_claims(token, token_type="ai-proxy")
     if not claims:
@@ -262,6 +264,7 @@ async def client_from_proxy_ticket(session: AsyncSession, token: str) -> Client:
     if client is not None:
         client._proxy_quota_runtime = claims.get("quotaRuntime", "") if claims.get("quotaBinding") else ""
         client._proxy_quota_binding = claims.get("quotaBinding", "")
+        client._proxy_provider_id = claims.get("providerId", "")
     return client
 
 
