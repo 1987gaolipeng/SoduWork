@@ -198,6 +198,9 @@ class HandoffTests(unittest.IsolatedAsyncioTestCase):
             async with db.SessionLocal() as session:
                 user = await session.get(models.User, "owner")
                 user.is_super = False
+                # Resume the handoff workflow with the original standalone registration.
+                node = await session.get(RunnerNode, self.runner.id)
+                node.client_id = self.runner.client_id
                 await session.commit()
         for field, value in (("personalPlugins", ["local-plugin"]), ("requiredSkills", ["computer-use"]),
                              ("requiredSkills", ["missing-skill"]), ("model", "invalid model"), ("workDir", "C:/unsafe")):
