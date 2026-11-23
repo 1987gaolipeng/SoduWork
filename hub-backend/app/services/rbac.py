@@ -382,8 +382,10 @@ async def list_users(session: AsyncSession, scope: set[str] | None, *, page: Pag
     if scope is not None:
         q = q.where(models.User.org_id.in_(scope or {"__none__"}))
     users, total = await select_rows(session, q, page)
-    from . import client_access
-    quotas = await client_access.user_quotas(session, [u.id for u in users])
+    # Merged view (issue #935): an effective assignment wins admission and the
+    # quota page, so user lists must show the same numbers instead of the legacy
+    # override alone. Entries carry quotaSource so callers can label the origin.
+    quotas = await client_access.effective_quotas(session, [u.id for u in users])
     items = [user_to_api(u, token_quota=quotas.get(u.id, {"mode": "inherit", "limit": 0})) for u in users]
     return list_result(items, total)
 
@@ -446,8 +448,12 @@ async def update_user(session: AsyncSession, uid: str, patch: dict) -> dict | No
         return None
     apply_user_patch(u, patch)
     if patch.get("tokenQuota") is not None:
-        quota = await client_access.save_user_quota(session, uid, patch["tokenQuota"])
-    else:
+        await client_access.save_user_quota(session, uid, patch["tokenQuota"])
+    # The stored override never applies while an effective assignment exists
+    # (admission reads the assignment). Surface the effective numbers instead
+    # of silently acknowledging a patch that admission ignores.
+    quota = (await client_access.effective_quotas(session, [uid])).get(uid)
+    if quota is None or quota.get("quotaSource") != "assignment":
         quota = (await client_access.user_quotas(session, [uid])).get(uid)
     await session.commit()
     await session.refresh(u)
