@@ -67,6 +67,35 @@
     const date = new Date(text + 'T00:00:00Z');
     return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== text ? '' : text;
   }
+  function followingDate(value) {
+    if (!cleanDate(value)) return value;
+    const day = new Date(value + 'T12:00:00Z');
+    day.setUTCDate(day.getUTCDate() + 1);
+    return day.toISOString().split('T')[0];
+  }
+  function rollRecurringMidnight(next) {
+    // Keep the named evening in the editable draft for subsequent chat edits.
+    // Hub receives only the actual execution calendar.
+    const {weekday, weekdays, monthDays, monthDayPolicy, startDate, endDate} = next;
+    next.midnightCalendar = {weekday, weekdays, monthDays, monthDayPolicy, startDate, endDate};
+    if (next.every === 'weekly') {
+      const days = cleanList(weekdays?.length ? weekdays : weekday, 1, 7);
+      next.weekdays = days.map(day => day % 7 + 1).sort((a, b) => a - b);
+      next.weekday = next.weekdays[0];
+    } else if (next.every === 'monthly') {
+      const days = cleanList(monthDays, 1, 31);
+      if (monthDayPolicy === 'last_day' && days.length === 1 && days[0] === 31) {
+        next.monthDays = [1];
+        next.monthDayPolicy = 'skip';
+      } else {
+        // A numbered evening on or after the 28th can end in another month.
+        // A fixed list cannot express that for all month lengths.
+        next.monthDays = days.some(day => day >= 28) ? [] : days.map(day => day + 1);
+      }
+    }
+    if (startDate) next.startDate = followingDate(startDate);
+    if (endDate) next.endDate = followingDate(endDate);
+  }
   function customDateTime(raw) {
     const match = String(raw || '').match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?(Z)?$/i);
     if (!match || Number(match[1]) < 100) return false;
@@ -165,7 +194,8 @@
       if (value.every === 'weekly' && !cleanList(value.weekdays, 1, 7).length && !cleanList(value.weekday, 1, 7).length)
         return '请选择至少一个星期';
       if (value.every === 'monthly' && !cleanList(value.monthDays, 1, 31).length)
-        return '请选择至少一个月度日期';
+        return value.midnightCalendar?.monthDays?.some(day => day >= 28)
+          ? '月底跨日后的执行日期因月份而异，请选择实际执行日期' : '请选择至少一个月度日期';
       if (value.every === 'monthly' && !['skip', 'last_day'].includes(value.monthDayPolicy || 'skip'))
         return '月度无效日期处理方式无效';
       return '';
@@ -293,7 +323,7 @@
         continuation = property || (continuation && Boolean(line) && /^[ \t]/.test(rawLines[index]));
         return continuation;
       });
-      return { ...previous, timingIssue: '', every: 'custom', customRule: ruleLines.join('\n'),
+      return { ...previous, midnightCalendar:null, timingIssue: '', every: 'custom', customRule: ruleLines.join('\n'),
         runAt: null, relativeTiming:null, timeZone: previous?.timeZone || 'Asia/Shanghai' };
     }
     text = timingText(text).split(/[，,。；;\n]/).map(clause => {
@@ -311,6 +341,9 @@
       return work < 0 ? clause : clause.slice(0,first+work) + (trailing && trailing.index > first+work ? ' ' + trailing[1] : '');
     }).join('，');
     const prior = previous || {}, next = {every:'',atHour:null,atMinute:null,weekday:1,...prior};
+    const calendar = prior.midnightCalendar;
+    if (calendar && prior.every !== 'once') Object.assign(next, calendar);
+    if (calendar) next.midnightCalendar = null;
     const zone = /北京时间/.test(text) ? 'Asia/Shanghai' : /\bUTC\b/.test(text) ? 'UTC' :
       prior.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai';
     next.timeZone = zone;
@@ -375,12 +408,16 @@
       if (range && ['daily','weekly','monthly','hourly'].includes(next.every)) {
         Object.assign(next, monthWindowDates(range, now, zone));
       }
+      if (['daily','weekly','monthly'].includes(next.every) &&
+          (time ? time.endOfDay : calendar && !next.timingIssue)) {
+        rollRecurringMidnight(next);
+      }
       next.runAt = null; next.relativeTiming = null; return next;
     }
-    if (!explicit && !relative && !week && !time && prior.every === 'once') return next;
+    if (!explicit && !relative && !week && !time && prior.every === 'once') return {...next, midnightCalendar:calendar};
     next.relativeTiming = null;
     const old = localMinute(prior.runAt,zone);
-    let date = prior.every === 'once' && old ? old.slice(0,10) : '';
+    let date = prior.every === 'once' ? calendar?.date || old.slice(0,10) : '';
     const today = localInput(new Date(now).toISOString(),zone).slice(0,10);
     const firstDate = [explicit,relative,week].filter(Boolean).sort((a,b) => a.index-b.index)[0];
     if (firstDate && firstDate === explicit) date = `${explicit[1] || explicit[4] || today.slice(0,4)}-${pad(explicit[2] || explicit[5])}-${pad(explicit[3] || explicit[6])}`;
@@ -393,10 +430,9 @@
     // A clock reading of "晚上12点/午夜12点" is the midnight that ends the
     // referenced day, so the one-off instant belongs to the next date. Skip
     // impossible dates; those must stay invalid instead of rolling into March.
-    if (time?.endOfDay && date && cleanDate(date)) {
-      const rollover = new Date(date + 'T12:00:00Z');
-      rollover.setUTCDate(rollover.getUTCDate() + 1);
-      date = rollover.toISOString().slice(0, 10);
+    if ((time ? time.endOfDay : calendar?.date) && date) {
+      next.midnightCalendar = {date};
+      date = followingDate(date);
     }
     // A newly requested one-off without an explicit clock stays incomplete.
     const when = time && !time.invalid ? pad(time.atHour)+':'+pad(time.atMinute) : old ? old.slice(11) : '';
