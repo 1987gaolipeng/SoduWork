@@ -311,6 +311,27 @@ class RequirementRemoteDispatchTests(unittest.IsolatedAsyncioTestCase):
                 models.TaskEvent.kind.in_(ai_exec.KINDS_DISPATCH_STATE)))).all()
             self.assertCountEqual(events, [ai_exec.EV_DISPATCH_STARTED, ai_exec.EV_DISPATCHED])
 
+    async def test_only_errors_after_the_route_commit_can_have_an_unknown_ack(self):
+        with patch.object(dispatch_attempts, "pin_runner_route", side_effect=RuntimeError("write failed")), \
+                patch.object(ai_remote, "dispatch_sync") as send:
+            before = await self.post()
+            self.assertEqual(before.status_code, 502, before.text)
+            send.assert_not_called()
+        async with self.sessions() as session:
+            event = await dispatch_reconcile._latest_state(session, "r3")
+            self.assertEqual(event.kind, ai_exec.EV_DISPATCH_FAILED)
+
+        with patch.object(ai_remote, "dispatch_sync", side_effect=RuntimeError("reply processing failed")) as send:
+            after = await self.post()
+            self.assertEqual(after.status_code, 200, after.text)
+            self.assertTrue(after.json()["pending"])
+            repeated = await self.post()
+            self.assertEqual(repeated.json()["issueId"], after.json()["issueId"])
+            send.assert_called_once()
+        async with self.sessions() as session:
+            event = await dispatch_reconcile._latest_state(session, "r3")
+            self.assertEqual((event.kind, event.detail["runnerId"]), (ai_exec.EV_DISPATCH_UNCERTAIN, "cloud"))
+
     async def test_offline_selected_target_never_falls_back_to_another_runner(self):
         async with self.sessions() as session:
             session.add(am.RunnerNode(id="alternative", client_id="desktop", org_id="team"))

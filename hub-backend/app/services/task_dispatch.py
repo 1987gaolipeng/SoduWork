@@ -358,11 +358,20 @@ async def dispatch(tid, body, client, session, *, actor=None):
         # acquires its own lock; the durable attempt above still fences retries.
         # The transport rechecks current ownership and policy before sending.
         await session.commit()
-        r = await _aio.to_thread(ai_exec.dispatch_sync, ctx, t, files, picked, extra)
     except HTTPException:
         raise
     except Exception as error:  # noqa: BLE001
-        await _fail("dispatch", "Runner 启动 Agent 失败：" + str(error), 502)
+        await session.rollback()
+        await _fail("dispatch", "准备派活失败：" + str(error), 502)
+    try:
+        r = await _aio.to_thread(ai_exec.dispatch_sync, ctx, t, files, picked, extra)
+    except Exception as error:  # An adapter can fail after the Runner accepted the request.
+        if not picked.get("dispatchIntentAt"):
+            if isinstance(error, HTTPException):
+                raise
+            await _fail("dispatch", "Runner 启动 Agent 失败：" + str(error), 502)
+        r = {"ok": False, "uncertain": True, "code": "RUNNER_ACK_UNKNOWN",
+             "error": "执行机回执处理异常：" + type(error).__name__}
     confirmed_event = None
     if picked.get("dispatchIntentAt"):
         # A read-only probe or heartbeat can confirm this attempt while the HTTP
