@@ -87,7 +87,7 @@ class QueueLeaseTests(unittest.IsolatedAsyncioTestCase):
 
         app.dependency_overrides[get_session] = db
         app.dependency_overrides[current_client] = lambda: self.owner
-        app.dependency_overrides[current_user] = lambda: SimpleNamespace(is_super=True, _perms={"task.view"})
+        app.dependency_overrides[current_user] = lambda: SimpleNamespace(is_super=True, _perms={"task.view", "task.dispatch"})
         return await self.enterAsyncContext(httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                                                               base_url="http://fixture"))
 
@@ -268,15 +268,16 @@ class QueueLeaseTests(unittest.IsolatedAsyncioTestCase):
         self.enterContext(patch.dict(ai_remote._WHERE, {"work": self.runner.id}, clear=True))
 
         def live(_runner, operation, data, timeout):
-            self.assertEqual(data, {"ref": "work"})
-            self.assertIn(operation, {"job.status", "job.info"})
+            self.assertIs(_runner, self.runner)
+            self.assertEqual(operation, "job.info")
             return {"ok": True, "data": {"ok": True, "taskStatus": "queued", "state": "queued", "queued": True}}
 
         transport = self.enterContext(patch.object(leases.runner_hub, "call_sync", side_effect=live))
         for status in await both():
             self.assertTrue(status.get("queued"), status)
             self.assertNotIn("queueLeaseReason", status)
-        self.assertGreaterEqual(transport.call_count, 3)
+        self.assertCountEqual([call.args[2] for call in transport.call_args_list],
+                              [{"ref": "work"}, {"ref": "work", "statusPreview": True}])
 
         # Late readers must not expose an older queued warning after terminal telemetry.
         async with self.sessions() as session:
@@ -304,6 +305,9 @@ class QueueLeaseTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(status.get("queueLeaseReason"), "no_runner_ack" if age == 90 else None)
                 self.assertEqual((await http.get(employee, params={"ref": "work"})).status_code, 409)
                 self.assertEqual((await http.get(employee, params={"ref": "next"})).status_code, 502)
+                for path in (employee, operator):
+                    self.assertEqual((await http.post(path, json={"ref": "work"})).status_code, 409)
+                    self.assertEqual((await http.post(path, json={"ref": "next"})).status_code, 502)
         transport.assert_not_called()
 
     async def test_queued_heartbeat_renews_lease_while_original_dispatch_reply_is_outstanding(self):

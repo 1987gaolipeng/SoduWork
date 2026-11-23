@@ -593,15 +593,35 @@ def git_merge_sync(route: dict, payload: dict) -> dict:
     return dict(result.get("data") or {})
 
 
-def runner_info_sync(cfg: dict, ref: str) -> dict:
-    r = _runner_of_ref(ref)
+def _read_runner_info(r, ref: str, *, status_preview: bool = False) -> dict:
     if r is None:
         return {}
-    res = runner_hub.call_sync(r, "job.info", {"ref": ref}, timeout=30)
+    payload = {"ref": ref, **({"statusPreview": True} if status_preview else {})}
+    res = runner_hub.call_sync(r, "job.info", payload, timeout=30)
     d = dict((res.get("data") or {}) if res.get("ok") else {})
     if d:
-        d["device"] = r.host
+        d["host" if status_preview else "device"] = r.host
     return d
+
+
+def runner_info_sync(cfg: dict, ref: str) -> dict:
+    return _read_runner_info(_runner_of_ref(ref), ref)
+
+
+def preview_status_sync(ref: str, *, runner_id: str, detailed: bool) -> dict:
+    # Earlier Runners ignore statusPreview and return their ordinary read-only job info.
+    r = runner_hub.get(runner_id) if runner_id else _cached_runner(ref)
+    data = _read_runner_info(r, ref, status_preview=detailed)
+    if not detailed:
+        return data
+    if not data:
+        return {"ok": False, "error": "问不到状态"}
+    if "status" not in data and "taskStatus" in data:
+        return {"ok": True, "status": data["taskStatus"], "running": data["taskStatus"] == "running",
+                "done": bool(data.get("done")), "error": data.get("error", ""),
+                **{key: data[key] for key in ("queued", "queuePosition", "queueClass", "waitReason") if key in data},
+                "host": data.get("host", "")}
+    return data
 
 
 async def read_session(ref: str, since: int = 0, limit: int = 400, *, runner_id: str = "") -> dict:

@@ -10,6 +10,7 @@
     '任务收起啦': "Issues collapsed", '任务打开~': "Issues expanded", '休息': 'Resting', '打起精神': 'Ready to work', '兴奋工作中': 'Working enthusiastically',
     '把任务事实整理成可读、可追溯的个人与团队总结': "Turn issue records into clear, traceable personal and team summaries", '复制全文': 'Copy full text', '更新简报': 'Update brief',
     '这个周期还没有可回溯的任务记录。': "No traceable issue records for this period.", '有进展': 'Progress recorded', '本周期办结，未单独填写进展说明。': 'Completed this period, without a separate progress note.',
+    '本周期没有新增进展，仍列入待办。': 'Still open, with no progress recorded this period.',
     '事实已经就绪，可以生成简报': 'Records are ready to generate a brief', '这个周期还没有工作事实': 'No work records for this period',
     'SoduWork 会依据任务进展、完成记录和当前待办整理，不需要从空白文档开始写。': "SoduWork uses issue progress, completion records and pending work to draft your brief.",
     '在任务详情里记录真实进展，完成任务后也会自动成为简报素材。': "Record progress in issue details. Completed issues also become source material for briefs.",

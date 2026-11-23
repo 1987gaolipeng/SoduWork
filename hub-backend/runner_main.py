@@ -1837,11 +1837,12 @@ class Runner:
                     "error": result.get("error", ""), "code": result.get("code", "")}
         if op in {"job.status", "job.info"}:
             ref = str(m.get("ref") or "")
+            preview = op == "job.info" and m.get("statusPreview") is True
             item = self._admission.latest_for_ref(ref, include_terminal=True)
             with ai_local._LOCK:
                 local_exists = ref in ai_local._RUNS
             if runner_admission.owns_status(item, local_exists):
-                snapshot = runner_admission.status_data if op == "job.status" else runner_admission.info_data
+                snapshot = runner_admission.status_data if op == "job.status" or preview else runner_admission.info_data
                 data = snapshot(item, self._admission.position(item.key))
                 if item.state == "queued":
                     resource = self._resource_budget.snapshot()
@@ -1850,8 +1851,11 @@ class Runner:
                     if reason:
                         data["waitReason"] = reason
                 return {"ok": True, "data": data}
-            reader = ai_local.status_sync if op == "job.status" else ai_local.runner_info_sync
-            data = await runner_local_rpc.to_thread(reader, {}, ref)
+            if preview:
+                data = await runner_local_rpc.to_thread(ai_local.status_sync, {}, ref, read_only=True)
+            else:
+                reader = ai_local.status_sync if op == "job.status" else ai_local.runner_info_sync
+                data = await runner_local_rpc.to_thread(reader, {}, ref)
             return {"ok": True, "data": remote_snapshot(data, ref)}
         if op == "job.authorize":
             # Model credentials may be refreshed only by this desktop's private
