@@ -255,6 +255,34 @@ async def delete_org(
 
 # Roles.
 
+async def _check_role_grant(session: AsyncSession, actor: User, *, permission: str,
+                            role_id: str | None = None, proposed: list[str] | None = None) -> Role | None:
+    # Acquire role locks in a stable order for concurrent grants and edits.
+    role_ids = {key for key in (role_id, None if actor.is_super else actor.role_id) if key}
+    roles = {key: await rbac.lock_role_reference(session, key) for key in sorted(role_ids)}
+    target = roles.get(role_id)
+    if not actor.is_super:
+        own = roles.get(actor.role_id)
+        allowed = set(own.permissions or []) if own else set()
+        # The role service reports unknown requested keys as a validation error.
+        required = {permission} | (set(proposed or ()) & set(ALL_KEYS))
+        if target is not None:
+            required.update(target.permissions or [])
+        if not required.issubset(allowed):
+            raise HTTPException(status_code=403, detail="不能管理超出自己权限范围的角色")
+    return target
+
+
+def _check_self_authority(actor: User, target: User, *, role_changed: bool = False,
+                          org_id: str | None = None, active: bool | None = None) -> None:
+    if actor.is_super or actor.id != target.id:
+        return
+    if role_changed or (org_id is not None and org_id != target.org_id) or (
+        active is not None and active != target.is_active
+    ):
+        raise HTTPException(status_code=403, detail="不能更改自己的角色、部门或启用状态")
+
+
 @router.get("/roles")
 async def list_roles(user: User = Depends(current_user), session: AsyncSession = Depends(get_session),
                     window: PageQuery = None):
@@ -265,6 +293,8 @@ async def list_roles(user: User = Depends(current_user), session: AsyncSession =
 async def create_role(body: RoleCreate,
                       user: User = Depends(require_perm("role.manage")),
                       session: AsyncSession = Depends(get_session)):
+    await _lock_user_targets(session, user, [])
+    await _check_role_grant(session, user, permission="role.manage", proposed=body.permissions)
     try:
         result = await rbac.create_role(session, body.name, body.permissions)
     except DuplicateName as exc:
@@ -280,6 +310,8 @@ async def create_role(body: RoleCreate,
 async def update_role(rid: str, body: RoleUpdate,
                       user: User = Depends(require_perm("role.manage")),
                       session: AsyncSession = Depends(get_session)):
+    await _lock_user_targets(session, user, [])
+    await _check_role_grant(session, user, permission="role.manage", role_id=rid, proposed=body.permissions)
     try:
         r = await rbac.update_role(session, rid, body.name, body.permissions)
     except DuplicateName as exc:
@@ -330,7 +362,9 @@ async def create_user(
     await _lock_user_targets(session, user, [])
     await rbac.lock_org_tree(session, shared=True)
     await _assert_org_in_scope(session, user, body.orgId)
-    if body.roleId and await rbac.lock_role_reference(session, body.roleId) is None:
+    if body.roleId and await _check_role_grant(
+        session, user, permission="user.manage", role_id=body.roleId,
+    ) is None:
         raise HTTPException(status_code=400, detail="角色不存在")
     if body.domains:
         domain_ids = {str(value) for value in body.domains}
@@ -422,6 +456,7 @@ async def batch_update_users(
         if target.account_deleted_at:
             raise HTTPException(status_code=400, detail="不能修改已注销的账号")
         _check_deactivation(user, target, body.isActive)
+        _check_self_authority(user, target, org_id=body.orgId, active=body.isActive)
         if body.isActive is not None and target.is_active != body.isActive:
             changes.append((target, {"isActive": body.isActive}))
         if body.orgId is not None and target.org_id != body.orgId:
@@ -458,9 +493,14 @@ async def update_user(
     if body.orgId is not None:
         await _assert_org_in_scope(session, user, body.orgId)
         await _require_existing_org(session, body.orgId)
+    _check_deactivation(user, target, body.isActive)
+    _check_self_authority(user, target, org_id=body.orgId, active=body.isActive,
+                          role_changed="roleId" in body.model_fields_set and (body.roleId or None) != target.role_id)
     # An empty roleId is the legacy form used by clients to clear a role.
     # Validate non-empty assignments while preserving that clearing behavior.
-    if body.roleId and await rbac.lock_role_reference(session, body.roleId) is None:
+    if body.roleId and await _check_role_grant(
+        session, user, permission="user.manage", role_id=body.roleId,
+    ) is None:
         raise HTTPException(status_code=400, detail="角色不存在")
     if body.domains is not None:
         domain_ids = {str(value) for value in body.domains}
@@ -469,7 +509,6 @@ async def update_user(
         missing = sorted(domain_ids - found)
         if missing:
             raise HTTPException(status_code=400, detail="业务域不存在：" + ", ".join(missing))
-    _check_deactivation(user, target, body.isActive)
     was_active = bool(target.is_active)
     patch = body.model_dump(exclude_none=True)
     # Explicit null clears the role; omitting the field preserves it.
