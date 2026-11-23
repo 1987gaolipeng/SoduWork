@@ -42,7 +42,8 @@ class RunnerSnapshotTests(unittest.IsolatedAsyncioTestCase):
             for token, revision, expect_wake in (("a", "1", True), ("a", "2", False), ("b", "3", True)):
                 info = {"runnerId": "r1", "clusterToken": token}
                 redis.mget.side_effect = [[token.encode()], [runtime.bus.codec.encode(info)]]
-                await runtime.on_snapshot({"peer": {"runners": [{**info, "revision": revision}]}})
+                peers = {"peer": {"runners": [{**info, "revision": revision}]}}
+                await runtime.on_snapshot(peers, on_runner_connected=lease.runner_connected)
                 self.assertEqual(runtime._REMOTE["r1"].cluster_token, token)
                 self.assertEqual(wake.is_set(), expect_wake)
                 self.assertEqual(lease._connected, {"r1"} if expect_wake else set())

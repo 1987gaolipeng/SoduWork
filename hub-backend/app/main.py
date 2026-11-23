@@ -127,7 +127,8 @@ async def lifespan(app: FastAPI):
     # Use an event-loop watchdog to capture stacks during prolonged blocking.
     # Event-loop stalls can disrupt Runner heartbeats and desktop connectivity.
     # Runtime stack evidence identifies blocking work that static inspection may miss.
-    await cluster_runtime.start()
+    from .services import queued_dispatch_lease
+    await cluster_runtime.start(on_runner_connected=queued_dispatch_lease.runner_connected)
     from .services import automation_inbox_events, cloud_sync_notifications, client_domain_events
     automation_inbox_events.start()
     cloud_sync_notifications.start()
@@ -140,7 +141,6 @@ async def lifespan(app: FastAPI):
         cloud_recovery,
         dispatch_reconcile,
         pty_term,
-        queued_dispatch_lease,
         repository_catalog,
         repository_issue_worker,
     )
