@@ -106,8 +106,8 @@ async def login(body: AdminLogin, request: Request, session: AsyncSession = Depe
         except client_access.ClientAccessError as exc:
             raise HTTPException(status_code=exc.status, detail=str(exc),
                                 headers={"Retry-After": str(exc.meta["retryAfter"])}) from exc
-        authenticated = bool(user and user.is_active and not user.account_deleted_at
-                             and verify_password(body.pw, user.password_hash))
+        valid_password = bool(user and not user.account_deleted_at and verify_password(body.pw, user.password_hash))
+        authenticated = valid_password and user.is_active
         if authenticated:
             # Only failed attempts consume the account and peer budgets.
             await reservation.rollback()
@@ -115,6 +115,8 @@ async def login(body: AdminLogin, request: Request, session: AsyncSession = Depe
             audit.add(session, None, "admin.login.failed", "user", user.id if user else None)
     if not authenticated:
         await session.commit()
+        if valid_password:
+            raise HTTPException(status_code=403, detail="账号已停用")
         raise HTTPException(status_code=401, detail="账号或密码不正确")
     user.last_login_at = datetime.now(timezone.utc)
     await session.commit()

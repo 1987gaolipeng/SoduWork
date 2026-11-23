@@ -124,7 +124,7 @@ async function authenticatedData(path, options, timeout = REQUEST_TIMEOUT, consu
   // Old successes and errors must not update a different account's view.
   if (generation !== authGeneration) throw authenticationChanged()
   const { res, data } = response
-  if (res.status === 401) {
+  if (res.status === 401 && path !== '/admin/login') {
     setToken(''); setUser(null)
     window.dispatchEvent(new Event('soduwork-hub-unauth'))
     throw new Error(tx("登录已失效，请重新登录"))
