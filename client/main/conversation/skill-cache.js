@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { fetchWithDeviceAuthRetry } = require('../device-auth-request');
+const { readResponse, TOO_LARGE } = require('../library-binary.cjs');
 const zlib = require('zlib');
 const frontmatter = require('./skill-frontmatter');
 
@@ -294,12 +295,10 @@ async function fetchBundle(identity, names, timeoutMs = 10000, fetchImpl = globa
     if (response.status === 204) return { ok: true, data: null, checksum: '' };
     if (response.status === 409) return { ok: false, blocked: true, reason: await _conflictReason(response, names) };
     if (!response.ok) return { ok: false, reason: '同步 Skill 失败（HTTP ' + response.status + '）' };
-    const length = Number(response.headers.get('content-length') || 0);
-    if (length > MAX_BYTES) return { ok: false, reason: 'Skill 包超过 30MB' };
-    const data = Buffer.from(await response.arrayBuffer());
-    if (data.length > MAX_BYTES) return { ok: false, reason: 'Skill 包超过 30MB' };
+    const data = await readResponse(response, MAX_BYTES);
     return { ok: true, data, checksum: String(response.headers.get('x-soduwork-skill-sha256') || '') };
   } catch (error) {
+    if (error?.message === TOO_LARGE) return { ok: false, reason: 'Skill 包超过 30MB' };
     return { ok: false, reason: error && error.name === 'AbortError' ? '同步 Skill 超时' : '暂时无法同步 Skill' };
   } finally { clearTimeout(timer); }
 }
