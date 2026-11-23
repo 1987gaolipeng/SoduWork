@@ -58,8 +58,10 @@
         (appChat ? '<button type="button" class="nchat-head-icon" data-app-chat-new title="新建对话" aria-label="新建对话"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>' : '') +
         '<section class="nchat-summary" id="nchatSummary" data-chat-summary-pop aria-label="本次工作" hidden>' +
           '<header><b>本次工作</b><span data-chat-summary-count></span>' +
+            '<button type="button" class="nchat-summary-files" data-wb-files title="打开文件面板（Ctrl+Shift+O）" hidden>打开文件面板</button>' +
             '<button type="button" class="nchat-summary-close" data-chat-summary-close aria-label="关闭成果摘要" title="关闭成果摘要">' + ICONS.close + '</button></header>' +
           '<div data-chat-summary-body></div>' +
+          '<details class="nchat-read-log nchat-changes" data-chat-changes hidden><summary><b>本轮修改</b> <small></small></summary><div></div></details>' +
           '<details class="nchat-read-log" data-chat-read-log><summary>文件读取记录</summary>' +
             '<label>按路径筛选<input type="search" data-chat-read-filter></label>' +
             '<p data-chat-read-location><span>会话工作目录</span> <code data-chat-read-cwd data-user-content></code></p><ol reversed data-chat-read-results></ol>' +
@@ -87,8 +89,7 @@
     } else if (!summaryExpanded && total > live.length + shown.length) {
       html += '<button type="button" class="nchat-summary-more" data-chat-summary-expand>查看全部 ' + total + ' 项</button>';
     }
-    if (!html && changes.length) html = '<button type="button" data-wb-tool="' + esc(changes[changes.length - 1].id) +
-      '"><span class="nchat-summary-file">改</span><b>本轮修改</b><small>' + changes.length + ' 处</small></button>';
+    if (!html && changes.length) return '';
     return html || '<div class="nchat-summary-empty">成果、运行页面和变更会集中显示在这里。</div>';
   }
 
@@ -127,7 +128,9 @@
     cwd.parentElement.hidden = !workspace.dir;
   }
 
-  function resetReadLog() {
+  function resetSummaryLogs() {
+    const changes = root?.querySelector('[data-chat-changes]');
+    if (changes) changes.open = false;
     readLimit = READ_PAGE_SIZE;
     const panel = root?.querySelector('[data-chat-read-log]');
     if (!panel) return;
@@ -179,6 +182,22 @@
     }
     if (pop) {
       pop.hidden = !summaryOpen;
+      const filesButton = pop.querySelector('[data-wb-files]');
+      if (filesButton) filesButton.hidden = !workbench.canOpenFiles;
+      const changesPanel = pop.querySelector('[data-chat-changes]');
+      if (changesPanel) {
+        const { changes = [], files = [], services = [] } = workbench.summary || {};
+        changesPanel.hidden = !changes.length || !!(files.length || services.length);
+        if (changesPanel.hidden) changesPanel.open = false;
+        if (summaryOpen && !changesPanel.hidden) {
+          const count = changesPanel.querySelector('small');
+          const text = changes.length + ' 处';
+          if (count.textContent !== text) count.textContent = text;
+        }
+        const list = changesPanel.querySelector('div');
+        const html = summaryOpen && changesPanel.open ? global.ChatWorkspaceInfo.changeRows(changes) : '';
+        if (list._changesHtml !== html) { list.innerHTML = html; list._changesHtml = html; }
+      }
       paintReadLog(pop.querySelector('[data-chat-read-log]'), context?.snapshot);
       const count = pop.querySelector('[data-chat-summary-count]');
       const body = pop.querySelector('[data-chat-summary-body]');
@@ -195,6 +214,7 @@
     if (!root || root.dataset.chatChromeBound) { paint(); return; }
     root.dataset.chatChromeBound = '1';
     const readPanel = root.querySelector('[data-chat-read-log]');
+    root.querySelector('[data-chat-changes]')?.addEventListener('toggle', paint);
     if (readPanel) {
       const refresh = () => paintReadLog(readPanel, getContext?.()?.snapshot);
       readPanel.addEventListener('toggle', refresh);
@@ -240,7 +260,7 @@
     });
     root.addEventListener('click', (event) => {
       const hit = event.target.closest('[data-chat-menu],[data-chat-rename],[data-chat-cloud],[data-chat-cloud-status],[data-chat-execution],[data-chat-open-location],[data-chat-summary],[data-chat-summary-close],[data-chat-pane],[data-chat-summary-expand],' +
-        '[data-chat-open-file],[data-wb-file],[data-wb-service],[data-wb-tool]');
+        '[data-chat-open-file],[data-wb-file],[data-wb-files],[data-wb-service],[data-wb-tool]');
       if (!hit) return;
       if (hit.hasAttribute('data-chat-menu')) {
         if (!sessionId) return;
@@ -281,7 +301,7 @@
         paint();
         return;
       }
-      if (hit.hasAttribute('data-wb-file') || hit.hasAttribute('data-wb-service') || hit.hasAttribute('data-wb-tool')) {
+      if (hit.hasAttribute('data-wb-file') || hit.hasAttribute('data-wb-files') || hit.hasAttribute('data-wb-service') || hit.hasAttribute('data-wb-tool')) {
         summaryOpen = false;
         global.setTimeout(paint, 0);
         return;
@@ -369,7 +389,7 @@
     if (!value) return;
     const id = String(value);
     if (id !== sessionId) {
-      resetReadLog();
+      resetSummaryLogs();
       titleMenuOpen = false;
       if (renameDialog) renameDialog.dismiss(false);
     }
@@ -409,7 +429,7 @@
   function workbenchState(next) { workbench = { ...workbench, ...(next || {}) }; paint(); }
   function openSummary() { summaryOpen = true; paint(); }
   function reset() {
-    resetReadLog();
+    resetSummaryLogs();
     if (renameDialog) renameDialog.dismiss(false);
     if (unbindDocument) unbindDocument();
     unbindDocument = null; titleMenuOpen = false;

@@ -82,6 +82,16 @@
 .nchat-read-log [hidden]{display:none}
 .nchat-summary .nchat-summary-close{display:grid;place-items:center;flex:none;width:28px;height:28px;padding:5px;cursor:pointer}
 .nchat-summary-close svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round}
+.nchat-summary .nchat-summary-files{display:block;flex:none;width:auto;padding:4px 7px;color:var(--accent);font:inherit}
+.nchat-summary .nchat-summary-files[hidden],.nchat-summary .nchat-changes[hidden],.nchat-summary>[data-chat-summary-body]:empty{display:none}
+.nchat-changes summary small{color:var(--ink-5);font-weight:400}
+.ncw-change-list>.ncw-change-row,.nchat-changes .ncw-change-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;
+  align-items:center;gap:8px;width:100%;padding:6px;border:0;border-radius:6px;background:transparent;color:var(--ink-2);text-align:start;font:inherit}
+.ncw-change-row b{display:flex;overflow:hidden;white-space:nowrap;font-weight:500}
+.ncw-change-row b span,.ncw-change-row b strong{overflow:hidden;text-overflow:ellipsis}
+.ncw-change-row b strong{flex:none;max-width:100%;font-weight:inherit}
+.ncw-change-row span,.ncw-change-row small{color:var(--ink-5);font-size:inherit}
+.ncw-change-list>.ncw-change-row:hover{background:var(--bg-2)}
 .nchat-summary button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 @media(min-width:960px){
   .nchat.ncw-open .nchat-summary{right:calc(100% - max(320px,var(--nchat-w)) + 8px);max-width:calc(max(320px,var(--nchat-w)) - 16px)}
