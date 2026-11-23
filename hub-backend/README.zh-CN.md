@@ -285,6 +285,8 @@ python3 e2e_runner_tls.py --output /absolute/evidence/directory
 
 ## API 概览
 
+AI 代理的图片和视频生成接口按媒体类型接收创作参数，例如图片尺寸或视频时长。模型配置的 `defaults` 优先于请求参数。供应商专用参数可以在模型目录的 `defaults` 中设置。代理会忽略未识别的请求字段。
+
 通过 `POST /api/v1/usage/events` 上报用量时，省略 `occurredAt` 表示使用 Hub 收到事件的时间。上报历史事件时可填写 ISO 8601 时间戳。没有时区偏移的时间戳按 UTC 解释。如果任一事件的时间戳无效，Hub 返回 HTTP 422，整批事件均不入账。 例如，不带偏移量的 16:30 对应北京时间次日 00:30。若要上报北京时间 16:30，请带上 `+08:00`。
 
 省略 `sourceType` 时使用 `chat`。允许的类型为 `chat`、`task`、`workflow`、`automation` 和 `system`，使用所列的小写拼写。任务和工作流上报须关联本设备拥有或当前账号获派的任务。无效类型返回 HTTP 422。每条回执均包含已入账的累计计数，以及 `created`（新建）、`updated`（计数增长）或 `duplicate`（计数没有增长）状态。

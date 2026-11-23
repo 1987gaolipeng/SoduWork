@@ -93,6 +93,22 @@ router = APIRouter(prefix="/api/v1/ai-proxy", tags=["ai-proxy"])
 
 # Client proxy URL prefix; keep client/main.js consistent when changing it.
 PROXY_PATH = "/api/v1/ai-proxy/v1"
+_MEDIA_REQUEST_FIELDS = {
+    "image": {
+        "prompt", "image", "n", "size", "quality", "style", "background",
+        "output_format", "output_compression", "response_format", "seed", "negative_prompt",
+    },
+    "video": {
+        "input_reference", "size", "quality", "style", "resolution", "fps", "seed", "voice",
+    },
+}
+# Providers use different names for the same video option. A configured value
+# owns the option regardless of which spelling the provider accepts.
+_VIDEO_FIELD_ALIASES = (
+    {"prompt", "content"}, {"duration", "seconds"}, {"ratio", "aspect_ratio", "aspectRatio"},
+    {"generate_audio", "generateAudio"}, {"camera_fixed", "cameraFixed"},
+    {"negative_prompt", "negativePrompt"},
+)
 IMAGE_INPUT_REJECTION = re.compile(
     r"(?:image|vision|multimodal|图片|图像|多模态).{0,80}"
     r"(?:not supported|unsupported|rejected|拒绝|不支持|上限|数量|超限|maximum|limit)"
@@ -700,10 +716,15 @@ async def _generate_media(
         return _err(400, f"模型「{conf['model']}」当前不支持这条媒体生成通道")
 
     config = model_catalog.model_config(conf.get("config"), modality)
-    payload = dict(config.get("defaults") or {})
-    payload.update(body)
+    defaults = config["defaults"]
+    allowed = _MEDIA_REQUEST_FIELDS[modality]
+    if modality == "video":
+        for aliases in _VIDEO_FIELD_ALIASES:
+            if aliases.isdisjoint(defaults):
+                allowed = allowed | aliases
+    payload = {key: body[key] for key in allowed if key in body}
+    payload.update(defaults)
     payload["model"] = conf["model"]
-    payload.pop("stream", None)
     endpoint = config["endpointPath"]
     log.info("[ai-proxy:%s] %s -> %s (%s)", modality, client.id,
              conf["model"], conf.get("provider") or "")
