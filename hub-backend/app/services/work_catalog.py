@@ -8,6 +8,8 @@ import re
 from typing import Iterable
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am
@@ -643,6 +645,7 @@ async def validate_scenario(
         "sort": max(0, min(sort, 9999)),
     }
 
+
 class ScenarioKeyConflict(ValueError):
     """This organization already has a scenario with the requested key."""
 
@@ -654,18 +657,23 @@ async def save_scenario(
     current: models.WorkScenario | None = None,
 ) -> models.WorkScenario:
     values = await validate_scenario(session, body, org_id, current)
-    query = select(models.WorkScenario).where(models.WorkScenario.key == values["key"])
-    query = query.where(
-        models.WorkScenario.org_id.is_(None) if org_id is None
-        else models.WorkScenario.org_id == org_id)
-    duplicate = (await session.execute(query)).scalar_one_or_none()
-    if duplicate is not None and (current is None or duplicate.id != current.id):
-        raise ScenarioKeyConflict("这个场景标识已经存在")
-    row = current or models.WorkScenario(org_id=org_id, key=values["key"])
-    for field, value in values.items():
-        setattr(row, field, value)
     if current is None:
-        session.add(row)
+        # Platform scenarios have a NULL organization, outside the unique constraint.
+        if org_id is None and await session.scalar(select(models.WorkScenario.id).where(
+            models.WorkScenario.org_id.is_(None), models.WorkScenario.key == values["key"],
+        ).limit(1)):
+            raise ScenarioKeyConflict("这个场景标识已经存在")
+        insert = pg_insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
+        statement = insert(models.WorkScenario).values(org_id=org_id, **values).on_conflict_do_nothing(
+            index_elements=["org_id", "key"],
+        ).returning(models.WorkScenario)
+        row = await session.scalar(statement)
+        if row is None:
+            raise ScenarioKeyConflict("这个场景标识已经存在")
+    else:
+        row = current
+        for field, value in values.items():
+            setattr(row, field, value)
     await session.commit()
     await session.refresh(row)
     return row
