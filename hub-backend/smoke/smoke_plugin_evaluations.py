@@ -280,11 +280,25 @@ async def main():
             check("contract-complete evaluation is ready for one-step release review",
                   not gate["ok"] and gate["readyForApproval"]
                   and gate["readyCount"] == 1, gate)
-            accepted = await plugin_evaluations.accept_ready_with_release_review(
+            async with SessionLocal() as competing:
+                stale = await competing.get(am.PluginEvaluationRun, run.id)
+                await competing.commit()
+                accepted = await plugin_evaluations.accept_ready_with_release_review(
+                    session, version, USER)
+                try:
+                    await plugin_evaluations.review(competing, stale, "failed", "second reviewer")
+                except ValueError:
+                    pass
+                else:
+                    check("a stale reviewer cannot replace the release verdict", False)
+                await competing.refresh(stale)
+                check("first reviewer and verdict remain final",
+                      stale.verdict == "passed" and stale.reviewed_by == USER)
+            accepted_again = await plugin_evaluations.accept_ready_with_release_review(
                 session, version, USER)
             gate = await plugin_evaluations.publication_gate(session, version)
             check("version review accepts ready evidence and opens publication gate",
-                  accepted == 1 and gate["ok"] and gate["passedCount"] == 1, gate)
+                  accepted == 1 and accepted_again == 0 and gate["ok"] and gate["passedCount"] == 1, gate)
 
             state["done"] = False
             rerun = await plugin_evaluations.start(
