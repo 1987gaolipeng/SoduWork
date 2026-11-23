@@ -386,6 +386,7 @@ RELEASE_SMOKES = tuple(sorted((
     "test_model_gateway_diagnostics.py",
     "test_task_parse_keepalive.py",
     "test_mcp_import_preview.py",
+    "test_mcp_management.py",
     "smoke/smoke_work_reports.py",
     "smoke/smoke_workdirs.py",
     "smoke/smoke_workflow_adoption.py",
