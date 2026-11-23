@@ -932,6 +932,9 @@
   function domainScope() {
     return { hub: base().replace(/\/+$/, ''), clientId: device(), userId: String(_clientUser?.id || '') };
   }
+  function failedModelScope() {
+    return JSON.stringify([_registrationEpoch, _deviceAuthState, taskStorageKey('ops')]);
+  }
   function sameDomainScope(value) {
     var current = domainScope();
     return value && value.hub === current.hub && value.clientId === current.clientId && value.userId === current.userId;
@@ -1860,6 +1863,49 @@
         body: JSON.stringify({ providerId: providerId }) });
       mark(true); return r;
     },
+    // A chat failure belongs to the configuration that served its request.
+    // Re-resolve on click so neither a new selection nor a replacement catalog
+    // row can inherit the original user's permission to run a probe.
+    failedModelScope,
+    async inspectFailedModel(target, options = {}) {
+      var scope = domainScope(), owner = failedModelScope();
+      if (_deviceAuthState !== 'active' || !scope.userId || !target.scope) return { state: 'account' };
+      var bytes = new TextEncoder().encode(JSON.stringify([scope.hub, scope.clientId, scope.userId]));
+      var hash = Array.from(new Uint8Array(await global.crypto.subtle.digest('SHA-256', bytes)),
+        byte => byte.toString(16).padStart(2, '0')).join('');
+      if (hash !== target.scope || failedModelScope() !== owner) return { state: 'account' };
+      if (!target.model || !target.local && !target.provider) return { state: 'unversioned' };
+      var catalog = target.local ? await this.localModels() : await jfetch('/my-models', { cache: 'no-store', signal: options.signal });
+      if (failedModelScope() !== owner) return { state: 'account' };
+      if (catalog?.ok === false || !Array.isArray(catalog?.providers)) return { state: 'unavailable' };
+      var rows = target.local ? catalog.myModels : catalog.usable;
+      var row = (rows || []).find(item => (item.localOnly === true) === target.local && (target.local
+        ? item.id === target.model : item.providerId === target.provider && item.name === target.model));
+      if (!row) return { state: 'changed' };
+      var provider = catalog.providers.find(item => item.id === row.providerId);
+      if (!provider) return { state: 'changed' };
+      if (target.revision && target.revision !== row.configRevision) return { state: 'changed' };
+      var labels = { service: provider.name || provider.id, model: row.name };
+      if (!target.local && provider.personal !== true) return { ...labels, state: 'managed' };
+      if (!target.revision) return { ...labels, state: 'unversioned' };
+      if (!options.check) return { ...labels, state: 'ready' };
+      options.signal?.throwIfAborted();
+      var requestId = target.local && options.signal ? global.crypto.randomUUID() : '';
+      var cancel = () => global.soduWorkAPI?.localModels?.cancelCapabilities?.({ modelRef: target.model, requestId })?.catch(() => {});
+      if (requestId) options.signal.addEventListener('abort', cancel, { once: true });
+      var report;
+      try {
+        report = await this.checkMyModelCapabilities({ providerId: row.providerId, model: row.name,
+          localOnly: target.local, ...(target.local ? { expectedModelRef: target.model, requestId } : {}),
+          expectedConfigRevision: target.revision, checks: ['connection', 'streaming', 'toolCalling'] },
+          { signal: options.signal, failureOwner: owner });
+      } finally {
+        if (requestId) options.signal.removeEventListener('abort', cancel);
+      }
+      if (failedModelScope() !== owner) return { state: 'account' };
+      if (!report?.checks) return { ...labels, state: 'failed' };
+      return { ...labels, state: 'ready', report };
+    },
     async checkMyModelCapabilities(body, options) {
       body = body || {};
       options?.signal?.throwIfAborted();
@@ -1868,12 +1914,14 @@
       var localCatalog = await localModelCatalog();
       options?.signal?.throwIfAborted();
       if (!sameDomainScope(scope)) throw staleTaskScope();
+      if (options?.failureOwner && options.failureOwner !== failedModelScope()) throw staleTaskScope();
       var nativeId = deviceProviderId(body.providerId);
       var localProvider = (localCatalog?.providers || []).find(row => row?.id === nativeId);
       if (deviceProvider(body.providerId) || body.localOnly === true) {
         if (!localProvider) throw new Error('本地模型服务已不可用，请刷新目录后重试');
         var localModel = (localCatalog?.myModels || []).find(row => row.providerId === nativeId && row.name === String(body.model || '').trim());
-        if (!localModel) throw new Error('本地模型不存在或已不可用，请刷新目录后重试');
+        if (!localModel || body.expectedModelRef && body.expectedModelRef !== localModel.id)
+          throw new Error('本地模型不存在或已不可用，请刷新目录后重试');
         if (body.expectedConfigRevision && body.expectedConfigRevision !== localModel.configRevision)
           throw new Error('模型配置在检测期间已变更，请重新检测');
         if (typeof local?.checkCapabilities !== 'function') throw new Error('当前客户端尚未提供本机能力检测，请更新客户端');
@@ -1888,6 +1936,7 @@
       if (!sameDomainScope(scope)) throw staleTaskScope();
       requirePersonalProvider(body.providerId, await managedModelOwners(scope, options?.signal));
       options?.signal?.throwIfAborted();
+      if (options?.failureOwner && options.failureOwner !== failedModelScope()) throw staleTaskScope();
       var result = await jfetch('/my-models/capabilities/check', { method: 'POST',
         body: JSON.stringify({ providerId: body.providerId, model: body.model,
           ...(body.expectedConfigRevision ? { expectedConfigRevision: body.expectedConfigRevision } : {}),

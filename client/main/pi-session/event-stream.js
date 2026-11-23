@@ -351,6 +351,7 @@ function beginTurn(state, running = true) {
   state.lastStopReason = '';
   state.rawStopReason = '';
   state.lastAssistantError = '';
+  state.lastModelFailure = null;
   state.lastErrorAfterToolResult = false;
   state.incompleteReason = '';
   /*
@@ -485,6 +486,12 @@ function apply(state, ev) {
       state.lastStopReason = msg.stopReason;
       state.rawStopReason = msg.rawStopReason;
       state.lastAssistantError = msg.errorMessage;
+      state.lastModelFailure = null;
+      if (msg.stopReason === 'error' && ev.modelFailureTarget) {
+        const info = modelErrors.describe(msg.errorMessage);
+        state.lastModelFailure = { ...ev.modelFailureTarget, phase: ev.modelRequestPhase,
+          status: info.status, ...(info.diagnosticId ? { trace: info.diagnosticId } : {}) };
+      }
       if (m.usage) {
         state.usageRevision = (state.usageRevision || 0) + 1;
         // Pi's custom model registration uses unknown (zero) prices. Its SDK

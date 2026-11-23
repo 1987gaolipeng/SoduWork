@@ -16,7 +16,7 @@ import httpx
 from fastapi import HTTPException
 
 from . import model_runtime
-from .model_errors import UpstreamError, refusal_category
+from .model_errors import UpstreamError, forbidden_category, refusal_category
 from .model_runtime_transaction import finish_cleanup
 
 log = logging.getLogger("uvicorn.error")
@@ -258,6 +258,9 @@ async def open_response(conf, path, body, *, stream=False, timeout=None):
             finally:
                 await wrapped.aclose()
             error = UpstreamError(response.status_code, raw.decode("utf-8", "replace"))
+            if response.status_code == 403:
+                # A partial upstream body cannot establish a neutral refusal.
+                error.forbidden_category = forbidden_category(error.body) if len(raw) < 4000 else "unclassified"
             error.diagnostic_id = uuid.uuid4().hex
             error.upstream_request_id = _upstream_request_id(response.headers, str(conf.get("key") or ""))
             retry = _retry_after(response.headers.get("retry-after", ""))

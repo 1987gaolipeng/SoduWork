@@ -330,6 +330,12 @@
 .nbad{display:none;align-items:center;gap:12px;border:1px solid color-mix(in srgb,var(--s-bad,#d64f4f) 30%,transparent);
   background:color-mix(in srgb,var(--s-bad,#d64f4f) 6%,var(--bg-0));border-radius:10px;
   padding:10px 13px;font-size:max(var(--font-min-readable, 14.5px), 12.5px);line-height:1.75;color:var(--ink-2)}
+.nmodel-failure{display:grid;gap:6px;border:1px solid var(--line);border-radius:10px;padding:12px 14px;color:var(--ink-2);overflow-wrap:anywhere}
+.nmodel-failure>button{justify-self:start;padding:5px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--accent);cursor:pointer}
+.nmodel-failure>button:disabled{opacity:.65;cursor:wait}
+.nmodel-failure .md-cap-report dl{display:grid;gap:8px}
+.nmodel-failure .md-cap-report dd{margin:0}
+.nmodel-failure .md-cap-report small{display:block;color:var(--ink-3)}
 .nbad.show{display:flex}.nbad-copy{min-width:0;flex:1}
 .nbad>button{appearance:none;flex:none;height:30px;padding:0 11px;border:1px solid color-mix(in srgb,var(--s-bad,#d64f4f) 26%,var(--line));
   border-radius:8px;background:var(--bg-0);color:var(--ink-2);font:inherit;font-size:max(var(--font-min-readable, 14.5px), 11.5px);cursor:pointer}
