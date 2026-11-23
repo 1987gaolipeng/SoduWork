@@ -12,7 +12,8 @@ const FALLBACK = 'en-US'
 const FALLBACKS = Object.freeze({ 'zh-CN': 'zh-CN', 'en-US': 'en-US', 'ja-JP': 'en-US', 'ko-KR': 'en-US' })
 const subscribers = new Set()
 const missing = new Set()
-let locale = readLocale()
+const SERVER_SELECTION = Object.freeze({ locale: FALLBACK, remapped: false })
+let localeSelection = Object.freeze(readLocaleSelection())
 
 // Accepts tags, not just the four exact values: `zh`, `ZH-hans-sg`, `zh_CN`,
 // `ja`, `ko` all resolve deterministically. ICU-dependent parsing is avoided so
@@ -67,16 +68,19 @@ function browserPreferences() {
 // Order: the user's saved pick wins, then the browser preference list, then the
 // single `language` value, then the documented fallback. Unsupported tags are
 // skipped so a later supported entry in the list still wins.
-export function detectLocale({ stored, languages, language } = {}) {
+export function detectLocaleSelection({ stored, languages, language } = {}) {
   const saved = String(stored ?? '').trim()
-  if (saved) return normalizeLocale(saved)
+  if (saved) return normalizeLocaleWithRemap(saved)
   for (const tag of [...(Array.isArray(languages) ? languages : []), language]) {
     const text = String(tag ?? '').trim()
     if (!text) continue
-    const resolved = normalizeLocale(text)
-    if (resolved !== FALLBACK || text.toLowerCase().startsWith('en')) return resolved
+    const resolved = normalizeLocaleWithRemap(text)
+    if (resolved.locale !== FALLBACK || text.toLowerCase().startsWith('en')) return resolved
   }
-  return FALLBACK
+  return { locale: FALLBACK, remapped: false }
+}
+export function detectLocale(preferences) {
+  return detectLocaleSelection(preferences).locale
 }
 
 // Browser preference alone, or null when no browser locale is available.
@@ -88,12 +92,13 @@ export function browserLocale() {
 
 // A language the user saved explicitly always wins; otherwise follow the
 // browser so a first-time Chinese user does not land on an English console.
-function readLocale() {
+function readLocaleSelection() {
   let stored = ''
   try { stored = String(localStorage.getItem(STORAGE_KEY) || '') } catch { /* Private browsing or Node without storage. */ }
-  return detectLocale({ stored, ...browserPreferences() })
+  return detectLocaleSelection({ stored, ...browserPreferences() })
 }
-export function getLocale() { return locale }
+export function getLocale() { return localeSelection.locale }
+export function getLocaleSelection() { return localeSelection }
 export function subscribeLocale(listener) {
   subscribers.add(listener)
   return () => subscribers.delete(listener)
@@ -101,10 +106,15 @@ export function subscribeLocale(listener) {
 export function useLocale() {
   return useSyncExternalStore(subscribeLocale, getLocale, () => FALLBACK)
 }
+export function useLocaleSelection() {
+  return useSyncExternalStore(subscribeLocale, getLocaleSelection, () => SERVER_SELECTION)
+}
 export function setLocale(value) {
   const next = normalizeLocale(value)
-  const changed = next !== locale
-  locale = next
+  // Saving an explicit choice ends browser fallback, even when its locale code
+  // already matches the displayed Simplified Chinese language.
+  const changed = next !== localeSelection.locale || localeSelection.remapped
+  if (changed) localeSelection = Object.freeze({ locale: next, remapped: false })
   try { localStorage.setItem(STORAGE_KEY, next) } catch { /* Private browsing can deny storage. */ }
   if (typeof document !== 'undefined') document.documentElement.lang = next
   if (changed) {
@@ -187,4 +197,4 @@ export function getMissingTranslations() { return [...missing].sort() }
 if (typeof window !== 'undefined') window.addEventListener('storage', event => {
   if (event.key === STORAGE_KEY) setLocale(event.newValue)
 })
-if (typeof document !== 'undefined') document.documentElement.lang = locale
+if (typeof document !== 'undefined') document.documentElement.lang = localeSelection.locale

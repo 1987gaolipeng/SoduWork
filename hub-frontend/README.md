@@ -16,6 +16,10 @@ Before deleting a custom model service, review its model list and the visible me
 
 Service cards adapt from one to four columns according to the available content width. View opens model details in a dialog without resizing or rearranging the service grid. Add, discover and configure actions remain visible; enable/disable and deletion are in the More popover, with the existing deletion confirmation retained.
 
+## Interface language
+
+A saved language takes precedence over the first supported browser preference, with English as the final fallback. A Traditional Chinese preference currently uses Simplified Chinese and shows a notice only when that preference supplied the effective fallback. Choosing any supported language, including the displayed Simplified Chinese option, saves an explicit choice and clears the notice. Reloading respects that choice. Reading an existing profile does not rewrite its stored language tags or other settings.
+
 ## Handling approvals and failed runs
 
 In Operations, open the pending human review count to see the requests in your scope. The queue shows how long each request has waited and, when your role allows, its requirement, version and remaining reviewers. A request is marked overdue at its deadline or after 24 hours if it has no deadline. An assigned reviewer can vote or transfer an eligible assignment with permission for that gate. Request and requirement creators with approval permission can withdraw pending requests. Super administrators can manage withdrawals and transfers. Withdrawing a request stops the linked gate and requires a fresh approval before work can continue. Delivery acceptance stays with the requirement creator.
