@@ -313,8 +313,8 @@ async def delete_role(rid: str,
 
 @router.get("/users", dependencies=[Depends(require_perm("user.manage"))])
 async def list_users(user: User = Depends(current_user), session: AsyncSession = Depends(get_session),
-                    window: PageQuery = None):
-    return await rbac.list_users(session, await rbac.scope_org_ids(session, user), page=window)
+                    window: PageQuery = None, isActive: bool | None = None):
+    return await rbac.list_users(session, await rbac.scope_org_ids(session, user), page=window, is_active=isActive)
 
 
 @router.post("/users")
