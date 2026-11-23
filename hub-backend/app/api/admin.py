@@ -159,8 +159,13 @@ async def _assert_org_in_scope(session: AsyncSession, user: User, org_id: str | 
 
 
 async def _require_existing_org(session: AsyncSession, org_id: str):
-    if org_id and await session.get(models.OrgUnit, org_id) is None:
+    if not org_id:
+        return
+    org = await session.get(models.OrgUnit, org_id, populate_existing=True)
+    if org is None:
         raise HTTPException(status_code=400, detail="部门不存在")
+    if org.is_archived:
+        raise HTTPException(status_code=409, detail="该部门已归档")
 
 
 async def _assert_user_in_scope(session: AsyncSession, user: User, target: User):
@@ -183,6 +188,8 @@ def _org_mutation_error(exc: rbac.OrgMutationError) -> HTTPException:
     status, message = {
         "out_of_scope": (403, "只能在自己管辖的部门内操作"),
         "parent_not_found": (400, "上级部门不存在"),
+        "archived_parent": (409, "上级部门已归档"),
+        "archived_org": (409, "请先恢复已归档的部门"),
         "cycle": (400, "部门不能移动到自身或下级部门"),
         "invalid_name": (400, "部门名称须为 1 至 64 个字符"),
         "duplicate_name": (409, "同级部门已使用这个名称"),
@@ -194,8 +201,11 @@ def _org_mutation_error(exc: rbac.OrgMutationError) -> HTTPException:
 
 @router.get("/orgs")
 async def list_orgs(user: User = Depends(current_user), session: AsyncSession = Depends(get_session),
-                    window: PageQuery = None):
-    return await rbac.list_orgs(session, await rbac.scope_org_ids(session, user), page=window)
+                    window: PageQuery = None, includeManaged: bool = False):
+    if includeManaged and not any(has_perm(user, key) for key in ("org.manage", "user.manage", "work.catalog.manage")):
+        raise HTTPException(status_code=403, detail="无该操作权限")
+    return await rbac.list_orgs(session, await rbac.scope_org_ids(session, user), page=window,
+                               include_managed=includeManaged)
 
 
 @router.post("/orgs")
@@ -203,14 +213,13 @@ async def create_org(
     body: OrgCreate, user: User = Depends(require_perm("org.manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    scope = await rbac.scope_org_ids(session, user)
     try:
         created = await rbac.create_org(
-            session, body.name, body.parentId, body.sort, scope=scope)
+            session, body.name, body.parentId, body.sort, actor=user, data_source=body.dataSource)
     except rbac.OrgMutationError as exc:
         raise _org_mutation_error(exc) from exc
     await audit.log(session, user, "org.create", "org", created["id"],
-                    created["name"], {"parentId": created.get("parentId")})
+                    created["name"], {"parentId": created.get("parentId"), "dataSource": created["dataSource"]})
     return created
 
 
@@ -220,10 +229,9 @@ async def update_org(
     user: User = Depends(require_perm("org.manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    scope = await rbac.scope_org_ids(session, user)
     try:
         r = await rbac.update_org(
-            session, oid, body.name, body.parentId, body.sort, scope=scope)
+            session, oid, body.name, body.parentId, body.sort, actor=user)
     except rbac.OrgMutationError as exc:
         raise _org_mutation_error(exc) from exc
     if r is None:
@@ -239,9 +247,8 @@ async def delete_org(
     oid: str, user: User = Depends(require_perm("org.manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    scope = await rbac.scope_org_ids(session, user)
     try:
-        r = await rbac.delete_org(session, oid, scope=scope)
+        r = await rbac.delete_org(session, oid, actor=user)
     except rbac.OrgMutationError as exc:
         raise _org_mutation_error(exc) from exc
     if not r["ok"]:
@@ -519,10 +526,11 @@ async def update_user(
     target_org_id = body.orgId if body.orgId is not None else target.org_id
     try:
         await rbac.validate_user_domains(session, body.domains)
-        if body.positions is not None or body.orgId is not None:
+        if body.positions is not None or target_org_id != target.org_id:
             patch["positions"] = await work_catalog.validate_profession_ids(
                 session, target_org_id,
-                body.positions if body.positions is not None else target.positions)
+                body.positions if body.positions is not None else target.positions,
+                retained=target.positions if target_org_id == target.org_id else ())
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     client_ids = await _revoke_user_devices(session, [uid] if was_active and body.isActive is False else [])
@@ -543,7 +551,13 @@ async def update_user(
 async def list_positions(
     user: User = Depends(current_user),
     session: AsyncSession = Depends(get_session),
+    org_id: Annotated[str, Query(alias="orgId")] = "",
 ):
+    if org_id:
+        await _assert_org_in_scope(session, user, org_id)
+        await _require_existing_org(session, org_id)
+        return [work_catalog.profession_api(row, inherited=row.org_id != org_id)
+                for row in await work_catalog.profession_rows(session, org_id)]
     return await rbac.list_positions(
         session, await rbac.scope_org_ids(session, user))
 
@@ -554,13 +568,14 @@ async def create_position(
     user: User = Depends(require_perm("work.catalog.manage")),
     session: AsyncSession = Depends(get_session),
 ):
+    await rbac.lock_org_tree(session, shared=True)
     org_id = str(body.get("orgId") or user.org_id or "")
     if not org_id:
         raise HTTPException(status_code=400, detail="请先选择所属组织")
     await _assert_org_in_scope(session, user, org_id)
     await _require_existing_org(session, org_id)
     try:
-        row = await work_catalog.save_profession(session, body, org_id)
+        row = await work_catalog.save_profession(session, body, org_id, actor=user)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     result = work_catalog.profession_api(row)
@@ -576,6 +591,7 @@ async def update_position(
     user: User = Depends(require_perm("work.catalog.manage")),
     session: AsyncSession = Depends(get_session),
 ):
+    await rbac.lock_org_tree(session, shared=True)
     row = await session.get(models.Position, pid)
     if row is None:
         raise HTTPException(status_code=404, detail="职业画像不存在")
@@ -584,7 +600,7 @@ async def update_position(
     await _assert_org_in_scope(session, user, row.org_id)
     try:
         row = await work_catalog.save_profession(
-            session, body, row.org_id, row)
+            session, body, row.org_id, row, actor=user)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     result = work_catalog.profession_api(row)
@@ -1357,16 +1373,18 @@ async def list_all_repos(user: User = Depends(require_perm("task.view")),
     """List repositories across projects, including project names for the schedule selector."""
     from ..models import Project, Repo
     from ..services import rbac
+    from ..services.business_records import business_visible
     scope = await rbac.scope_org_ids(session, user)
-    repo_q = select(Repo).order_by(Repo.created_at)
-    project_q = select(Project)
+    repo_q = select(Repo).where(business_visible(Repo)).order_by(Repo.created_at)
+    project_q = select(Project).where(business_visible(Project))
     if scope is not None:
         allowed = scope or {"__none__"}
         repo_q = repo_q.where((Repo.org_id.in_(allowed)) | Repo.org_id.is_(None))
         project_q = project_q.where((Project.org_id.in_(allowed)) | Project.org_id.is_(None))
     rows = (await session.execute(repo_q)).scalars().all()
     pnames = {p.id: p.name for p in (await session.execute(project_q)).scalars().all()}
-    return [{**_repo_api(r), "projectName": pnames.get(r.project_id, "")} for r in rows]
+    return [{**_repo_api(r), "projectName": pnames.get(r.project_id, "")}
+            for r in rows if not r.project_id or r.project_id in pnames]
 router.include_router(schedule_router)
 
 

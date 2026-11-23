@@ -25,6 +25,7 @@ from .api import model_capabilities as model_capabilities_api
 from .api import jiyong_data
 from .api import config as config_api
 from .api import retired_endpoints, operations, plugin_activity, plugin_client_catalog, plugin_client_runs, plugin_permissions, plugin_publishers, plugins, release, reports, repositories, repository_issues, runner_ws, task_mcp, task_options, tasks, term, trace, usage, ws
+from .api import business_records
 from .api import work_catalog as work_catalog_api
 from .api import im as im_api
 from .config import get_settings
@@ -366,7 +367,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 for _r in (cloud_execution_sync.router, legal_documents.router, legal_documents.admin_router, account_profile.router, account_profile.admin_router, admin_mail.router, client_email_auth.router, account_conversations.router, conversation_projects.router, remote_screen.router, im_api.router, admin_cloud_runners.router, cloud_environments.router, cloud_conversations.router, conversation_handoffs.router, session_memory.router, memory_records.router, memory_records.admin_router, client_auth.router, clients.router, tasks.router, retired_endpoints.router, task_options.router, approvals.router, delivery.router, aidesk.router, config_api.router,
-           admin.router, quotas.router, model_runtime_api.router, model_capabilities_api.router, work_catalog_api.router, work_catalog_api.admin_router,
+           admin.router, business_records.router, quotas.router, model_runtime_api.router, model_capabilities_api.router, work_catalog_api.router, work_catalog_api.admin_router,
            release.router, environments.router, repomap.router, repositories.router, repository_issues.router, attachments.router, ingest.router,
            library.router, deliveries.router,
            plugins.router, plugins.run_router, plugin_publishers.router, plugin_client_catalog.router, plugin_client_runs.router, plugin_activity.router, plugin_permissions.router, plugin_permissions.admin_router, updates.router, download.router,

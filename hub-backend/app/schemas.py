@@ -340,6 +340,7 @@ class OrgCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")
     name: AdminName
     parentId: Optional[str] = None
+    dataSource: Literal["business", "test"] | None = None
     sort: OrgSort = 0
 
 

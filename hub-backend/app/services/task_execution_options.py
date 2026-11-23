@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import models
 from ..agent_catalog import AGENTS
+from .business_records import business_visible
 from . import (agent_execution_options, agent_naming, ai_exec, conversation_handoffs,
                execution_capabilities, inbox, model_catalog, plugin_installations,
                plugin_service, task_access, task_assignment, work_catalog)
@@ -21,33 +22,29 @@ _CLI_LABELS = {key: row["displayName"] for key, row in AGENTS.items()}
 
 
 async def _visible_repos(
-    session: AsyncSession, client: models.Client
+    session: AsyncSession, client: models.Client, retained_repo_id: str = ""
 ) -> tuple[models.User | None, list[dict]]:
     me, scope = await inbox._me_scope(session, client)
-    query = select(models.Project).where(models.Project.status == "active")
-    query = query.where(or_(
-        models.Project.org_id.in_(scope), models.Project.org_id.is_(None)
-    )) if scope else query.where(models.Project.org_id.is_(None))
-    projects = {
-        row.id: row for row in
-        (await session.execute(query)).scalars().all()
-    }
-    if not projects:
-        return me, []
-    rows = list((await session.execute(select(models.Repo).where(
-        models.Repo.project_id.in_(list(projects))
-    ).order_by(models.Repo.created_at))).scalars().all())
+    visible = business_visible(models.Project) & business_visible(models.Repo)
+    if retained_repo_id:
+        # An existing task keeps its assigned repository if the catalog later archives it.
+        visible = or_(visible, models.Repo.id == retained_repo_id)
+    query = select(models.Repo, models.Project.name).join(models.Project, models.Project.id == models.Repo.project_id)
+    query = query.where(models.Project.status == "active", visible,
+        or_(models.Project.org_id.in_(scope or ()), models.Project.org_id.is_(None)),
+        or_(models.Repo.org_id.in_(scope or ()), models.Repo.org_id.is_(None)))
+    rows = (await session.execute(query.order_by(models.Repo.created_at))).all()
     return me, [{
         "id": row.id,
         "projectId": row.project_id,
-        "projectName": projects[row.project_id].name,
+        "projectName": project_name,
         "name": row.name,
         "kind": row.kind,
         "gitUrl": row.git_url,
         "branch": row.default_branch,
         "localDir": row.local_dir,
         "note": row.note,
-    } for row in rows]
+    } for row, project_name in rows]
 
 
 async def installed_workflows(
@@ -283,7 +280,7 @@ async def build(
         })
         request["repoId"] = str(request.get("repoId") or task.repo_id or "")
 
-    me, repos = await _visible_repos(session, client)
+    me, repos = await _visible_repos(session, client, task.repo_id if task else "")
     locked_project = str(task.project_id or "") if task is not None else ""
     if locked_project:
         repos = [item for item in repos if item["projectId"] == locked_project]
