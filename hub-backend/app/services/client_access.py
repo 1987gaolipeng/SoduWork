@@ -15,8 +15,8 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..auth import ACCOUNT_PASSWORD_MAX, ACCOUNT_PASSWORD_MIN
 from ..models import AIUsageDaily, AIUsageEvent, AppSetting, OrgUnit, Role, User
-
 
 POLICY_KEY = "client_auth_policy_v1"
 USER_QUOTA_PREFIX = "client_token_quota:"
@@ -65,19 +65,19 @@ def normalize_account(value: str) -> str:
 
 def validate_password(value: str, *, new_account: bool = False) -> str:
     password = str(value or "")
-    if not password:
+    if not password or password.isspace():
         raise ClientAccessError(
             "\u8bf7\u8f93\u5165\u5bc6\u7801",
             code="PASSWORD_REQUIRED",
             status=422,
         )
-    if new_account and not 8 <= len(password) <= 128:
+    if new_account and len(password) < ACCOUNT_PASSWORD_MIN:
         raise ClientAccessError(
             "\u9996\u6b21\u6ce8\u518c\u5bc6\u7801\u81f3\u5c11 8 \u4f4d",
             code="PASSWORD_TOO_SHORT",
             status=422,
         )
-    if len(password) > 128:
+    if len(password) > ACCOUNT_PASSWORD_MAX:
         raise ClientAccessError(
             "\u5bc6\u7801\u957f\u5ea6\u4e0d\u80fd\u8d85\u8fc7 128 \u4f4d",
             code="PASSWORD_INVALID",

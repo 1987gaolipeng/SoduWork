@@ -90,6 +90,7 @@ async def admin_catalog(
     catalog.update({
         "targetOrgId": target,
         "workflows": [{
+            "id": row["id"],
             "key": row.get("key") or "",
             "name": row.get("name") or row.get("key") or "",
             "description": row.get("description") or "",

@@ -218,8 +218,9 @@
     const action = moveAction(task, next);
     if (action === 'assign') { await global.RequirementAssignment?.open(id); return; }
     if (!action) { notify('执行和交付状态由实际进度更新，请在需求详情中安排或验收。'); return; }
-    if (action === 'submit-review' && typeof global.SoduWorkAPI?.submitTaskReview !== 'function') {
-      notify('当前客户端不支持提交验收，请更新后重试。'); return;
+    if (action === 'submit-review') {
+      // Both the menu and a drop open the same fresh recipient preview before submission.
+      await global.RequirementsDetail.open(id, {reviewSubmission:true}); return;
     }
     if (action === 'review' && typeof global.SoduWorkAPI?.reviewTask !== 'function') {
       notify('当前客户端不支持验收，请更新后重试。'); return;
@@ -253,9 +254,12 @@
       if (decision.settled) { await refresh(); return; }
       if (decision.blocked) { notify('需求状态已变化，看板已刷新。'); await refresh(); return; }
       if (decision.action === 'assign') { await global.RequirementAssignment?.open(id); return; }
+      if (decision.action === 'review' && latest?.canViewExecution === false) {
+        // Review-only assignees decide through their approval, which exposes its fixed evidence.
+        await global.RequirementsDetail.open(id); return;
+      }
       if (decision.action === 'triage') await global.SoduWorkAPI.patchTask(id, decision.patch);
-      else if (decision.action === 'submit-review') await global.SoduWorkAPI.submitTaskReview(id);
-      else await global.SoduWorkAPI.reviewTask(id);
+      else if (decision.action === 'review') await global.SoduWorkAPI.reviewTask(id);
       if (request === epoch && key === storageKey()) await refresh();
     } catch (error) {
       if (request === epoch && key === storageKey()) {

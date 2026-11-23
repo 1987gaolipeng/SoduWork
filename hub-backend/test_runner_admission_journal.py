@@ -235,6 +235,67 @@ class JournalTests(unittest.TestCase):
         self.assertEqual(restored.ref, item.ref)
 
 
+class AdmissionStatusTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        from app.services import local_base
+        from runner_main import Runner
+        storage = self.enterContext(tempfile.TemporaryDirectory())
+        with patch.object(local_base, "_data_root", return_value=storage):
+            self.runner = Runner("http://127.0.0.1:1", "", "device", "runner", work_root=storage)
+        self.queue = self.runner._admission
+        self.addCleanup(self.queue._journal.close)
+
+    async def test_only_first_durable_dispatch_logs_its_ref_and_position(self):
+        from app.services import dispatch_identity
+        message = {"op": "job.dispatch", "dispatchId": "private-business-id", "brief": "private prompt"}
+        ref = dispatch_identity.execution_ref(message["dispatchId"])
+        with patch.object(self.runner, "_ensure_admission_loop"), patch("runner_main._capability_gate", return_value=None):
+            with self.assertLogs("runner", level="INFO") as logged:
+                first = await self.runner._job(message)
+                replay = await self.runner._job(message)
+        self.assertEqual([record.getMessage() for record in logged.records],
+                         [f"dispatch accepted ref={ref} queuePosition=1"])
+        self.assertEqual(first["data"]["queuePosition"], 1)
+        self.assertTrue(replay["data"]["duplicate"])
+        self.assertEqual(AdmissionQueue(journal=self.queue._journal).get("dispatch:" + ref).ref, ref)
+
+    async def test_status_and_info_report_only_the_current_admission_gate(self):
+        from app.services import ai_local
+        item = self.queue.submit("dispatch:first", "first", MANUAL, "dispatch", {})[2]
+        resource = SimpleNamespace(limit=2, can_start=False)
+        self.enterContext(patch.object(self.runner._resource_budget, "snapshot", return_value=resource))
+        busy = self.enterContext(patch("runner_main._busy_count", return_value=0))
+        self.enterContext(patch.dict(ai_local._RUNS, {}, clear=True))
+
+        async def check(reason=None):
+            for op in ("job.status", "job.info"):
+                data = (await self.runner._job({"op": op, "ref": item.ref}))["data"]
+                if reason is None:
+                    self.assertNotIn("waitReason", data, op)
+                else:
+                    self.assertEqual(data.get("waitReason"), reason, op)
+
+        await check("resource_pressure")
+        resource.can_start = True
+        await check()
+        busy.return_value = 1  # Only the slot reserved for interactive work is free.
+        await check("execution_slot")
+        self.runner._outbox_blocked = True
+        await check()
+        self.runner._outbox_blocked = False
+        ai_local._RUNS[item.ref] = {"state": "running"}
+        await check()
+        ai_local._RUNS.clear()
+        self.queue.submit("chat", "other", INTERACTIVE, "comment", {})
+        await check()
+        self.queue.finish("chat", "completed")
+        self.assertEqual(self.queue.claim_next(0, 2, True).key, item.key)
+        resource.can_start = False
+        await check()
+        self.queue.finish(item.key, "completed")
+        await check()
+
+
 class ConcurrentCommentTests(unittest.IsolatedAsyncioTestCase):
     async def test_same_id_different_input_cannot_both_pass_async_validation(self):
         from app.services import local_base, runner_comments, runner_turn_selection

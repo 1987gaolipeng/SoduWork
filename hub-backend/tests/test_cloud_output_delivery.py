@@ -36,7 +36,7 @@ class GitContextTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(cloud_code_delivery.repository(text), "")
 
     async def test_dispatch_uses_existing_git_workflow_in_a_task_owned_workspace_and_returns_summary_metadata(self):
-        row = SimpleNamespace(id="handoff", task_id="task-123", owner_client_id="device",
+        row = SimpleNamespace(id="handoff", task_id="task-123", owner_client_id="device", owner_user_id="owner",
                               options={"instruction": "修复登录 https://git.example.invalid/team/app.git", "inputs": []})
         files, context = await cloud_conversations.dispatch_inputs(None, row, {})
         self.assertEqual(files, [])
@@ -52,7 +52,7 @@ class GitContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("task-123", context["brief"])
 
     async def test_non_code_dispatch_retains_plain_instruction_and_no_git_side_effect_request(self):
-        row = SimpleNamespace(id="handoff", task_id="task", owner_client_id="device",
+        row = SimpleNamespace(id="handoff", task_id="task", owner_client_id="device", owner_user_id="owner",
                               options={"instruction": "分析 https://github.com/acme/project", "inputs": []})
         files, context = await cloud_conversations.dispatch_inputs(None, row, {})
         self.assertEqual(context["brief"], row.options["instruction"])
@@ -123,8 +123,9 @@ class RequirementReviewTests(AttachmentOriginTests):
         await self.session.commit()
 
     async def pull(self, *, name="output/result.txt", settle=True, done=True, **status):
+        revision = status.get("round", 1)
         remote = SimpleNamespace(PREFIX=artifact_ingest.REMOTE_PREFIX,
-                                 fetch_attachment_for_sync=Mock(return_value=b"verified result"))
+                                 fetch_attachment_for_sync=Mock(return_value=f"Verified revision {revision}".encode()))
         with patch.object(artifact_ingest, "last_dispatch_event", AsyncMock(return_value=None)), \
              patch.object(artifact_ingest, "_by_ref_async", AsyncMock(return_value=remote)), \
              patch.object(artifact_ingest, "_cfg_of", return_value={}), \
@@ -260,7 +261,7 @@ class RequirementReviewTests(AttachmentOriginTests):
                 next(row.artifact_version_id for row in reviews if row.status == "pending"))
             self.assertEqual(latest.manifest["primary"][0]["round"], index)
             self.assertEqual(latest.manifest["primary"][0]["sha256"],
-                             hashlib.sha256(b"verified result").hexdigest())
+                             hashlib.sha256(f"Verified revision {index}".encode()).hexdigest())
 
     async def test_legacy_native_rejection_requires_admission_before_restored_runner_collection(self):
         from datetime import datetime, timezone
@@ -343,7 +344,7 @@ class RequirementReviewTests(AttachmentOriginTests):
         from app.services import release_control
         await self.pull()
         await self.reject_current()
-        await self.pull(name="output/revised.txt", settle=False, round=2)
+        await self.pull(name="output/result-v2.txt", settle=False, round=2)
         await release_control.ensure_current_output(self.session, self.task, source_ref="execution", who="executor")
         self.assertEqual(sorted(row.status for row in await self.reviews()), ["pending", "rejected"])
 

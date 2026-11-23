@@ -497,9 +497,11 @@ async def save_profession(
     raw_name = body.get("name", current.name if current else "")
     if raw_name is not None and not isinstance(raw_name, str):
         raise ValueError("职位名称必须是字符串")
-    name = (raw_name or "").strip()[:48]
+    name = (raw_name or "").strip()
     if not name:
         raise ValueError("请填写职业名称")
+    if len(name) > 48:
+        raise ValueError("职位名称不能超过 48 个字符")
     query = select(models.Position).where(
         models.Position.org_id.is_(None) if org_id is None
         else models.Position.org_id == org_id,
@@ -522,9 +524,13 @@ async def save_profession(
     row.category = category
     row.description = str(body.get(
         "description", current.description if current else "") or "").strip()[:400]
-    row.competencies = _items(
-        body.get("competencies", current.competencies if current else []),
-        limit=30, length=80)
+    try:
+        competencies = _items(
+            body.get("competencies", current.competencies if current else []),
+            limit=30, length=80)
+    except (TypeError, ValueError) as error:
+        raise ValueError("competencies 必须是数组") from error
+    row.competencies = competencies
     try:
         sort = int(body.get("sort", current.sort if current else 0) or 0)
     except (TypeError, ValueError):
@@ -554,18 +560,18 @@ async def delete_profession(session: AsyncSession, row: models.Position) -> str:
     return ""
 
 
-async def validate_profession_ids(
-    session: AsyncSession, org_id: str | None, value
-) -> list[str]:
-    """Normalize profile IDs and reject references outside the current organization inheritance
-    scope.
-    """
+def check_profession_ids(value, visible_positions: set[str]) -> list[str]:
     position_ids = _items(value, limit=100, length=36)
-    visible_positions = {
-        row.id for row in await profession_rows(session, org_id)}
     if any(item not in visible_positions for item in position_ids):
         raise ValueError("职业画像不属于当前员工所在组织")
     return position_ids
+
+
+async def validate_profession_ids(
+    session: AsyncSession, org_id: str | None, value
+) -> list[str]:
+    visible_positions = {row.id for row in await profession_rows(session, org_id)}
+    return check_profession_ids(value, visible_positions)
 
 
 async def validate_scenario(

@@ -1,0 +1,11 @@
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E71", "E72", "E74", "E9", "F", "W"]
+# The PR comparison also checks these rules against the base revision.
+ignore = ["F401", "F811", "F841", "W293"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true

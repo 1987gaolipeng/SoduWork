@@ -1,20 +1,23 @@
 """Exercise list and write contracts on the Hub HTTP routes against isolated SQLite."""
+import csv
+import io
 import os
+from datetime import datetime, timedelta, timezone
 import unittest
 from unittest.mock import AsyncMock, patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
 import httpx
-from fastapi import FastAPI
-from sqlalchemy import func, select
+from fastapi import Depends, FastAPI
+from sqlalchemy import event, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app import automation_models, models
 from app.db import Base, get_session
 from app.deps import current_client, current_user
 from app.library_models import LibraryFolder, LibraryItem
-from app.api import admin, approvals, clients, deliveries, environments, library, runner_ws, tasks, usage, work_catalog
+from app.api import admin, approvals, clients, deliveries, environments, first_chat, library, runner_ws, tasks, usage, work_catalog
 from app.permissions import ALL_KEYS
 
 
@@ -44,8 +47,8 @@ class HubContractTests(unittest.IsolatedAsyncioTestCase):
                              (("file-a", "row-0"), ("file-b", "row-0"), ("private", "row-1"))])
             await session.commit()
         self.user._perms = set(ALL_KEYS)
-        api = FastAPI()
-        for router in (admin.router, approvals.router, clients.router, deliveries.router, environments.router,
+        api = self.app = FastAPI()
+        for router in (admin.router, approvals.router, clients.router, deliveries.router, environments.router, first_chat.router,
                        library.router, runner_ws.router, tasks.router, usage.router, work_catalog.admin_router):
             api.include_router(router)
 
@@ -64,6 +67,41 @@ class HubContractTests(unittest.IsolatedAsyncioTestCase):
         response = await self.http.request(method, path, **kwargs)
         self.assertEqual(response.status_code, expected, (method, path, response.status_code))
         return response.json()
+
+    async def test_first_chat_uses_current_models_and_only_the_signed_in_accounts_recent_report(self):
+        async def reporting_device(session=Depends(get_session)):
+            return await session.get(models.Client, self.device.id)
+
+        self.app.dependency_overrides[current_client] = reporting_device
+        async with self.sessions() as session, session.begin():
+            device = await session.get(models.Client, self.device.id)
+            device.platform = "linux/x64"
+            device.config = {"theme": "light"}
+            session.add(models.ModelProvider(id="service", name="Fixture", base_url="https://fixture.invalid/v1",
+                                             api_key="fixture-key", enabled=True))
+            session.add(models.ModelDef(id="image-only", provider_id="service", name="picture", modality="image"))
+        expected = {"providerReady": True, "chatModelReady": False, "runtimeReady": None, "modelReady": None}
+        self.assertEqual(await self.request("GET", "admin/first-chat-readiness"), expected)
+        async with self.sessions() as session, session.begin():
+            session.add(models.ModelDef(id="chat-model", provider_id="service", name="chat", modality="chat"))
+        expected["chatModelReady"] = True
+        await self.request("PUT", "first-chat-readiness", 422, json={"runtimeReady": "true", "modelReady": True})
+        await self.request("PUT", "first-chat-readiness", json={"runtimeReady": True, "modelReady": False})
+        self.assertEqual(await self.request("GET", "admin/first-chat-readiness"),
+                         {**expected, "runtimeReady": True, "modelReady": False})
+        with patch.object(first_chat, "time", return_value=first_chat.time() + first_chat.REPORT_TTL + 1):
+            self.assertEqual(await self.request("GET", "admin/first-chat-readiness"), expected)
+        async with self.sessions() as session, session.begin():
+            device = await session.get(models.Client, self.device.id)
+            self.assertEqual(admin._admin_client_config(device.config), {"theme": "light"})
+            device.auth_version += 1
+        self.assertEqual(await self.request("GET", "admin/first-chat-readiness"), expected)
+        await self.request("PUT", "first-chat-readiness", json={"runtimeReady": True, "modelReady": True})
+        self.user.id = "row-1"
+        self.assertEqual(await self.request("GET", "admin/first-chat-readiness"), expected)
+        self.user.is_super = False
+        self.user._perms = set()
+        await self.request("GET", "admin/first-chat-readiness", 403)
 
     async def test_delete_distinguishes_missing_resources_from_in_use(self):
         for resource in ("orgs", "roles"):
@@ -112,6 +150,164 @@ class HubContractTests(unittest.IsolatedAsyncioTestCase):
         limited = await self.request("GET", "admin/users?limit=1")
         self.assertEqual(([user["id"] for user in limited["items"]], limited["total"]), (["row-0"], 1))
 
+    async def test_receipt_pages_use_task_visibility_and_stable_event_order(self):
+        stamp = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        async with self.sessions() as session:
+            session.add(models.Client(id="unassigned-device", user_ref=None))
+            await session.flush()
+            session.add_all([
+                models.Task(id="unassigned", owner_client_id="unassigned-device", title="Unassigned device"),
+                models.Task(id="own", owner_client_id="row-0", title="Current task", status="done"),
+                models.Task(id="other", owner_client_id="row-1", title="Other task"),
+            ])
+            await session.flush()
+            session.add_all([
+                models.TaskEvent(id="0", task_id="unassigned", kind="receipt", at=stamp),
+                models.TaskEvent(id="a", task_id="own", kind="receipt", detail={"title": "Snapshot"}, at=stamp),
+                models.TaskEvent(id="b", task_id="other", kind="receipt", at=stamp),
+                models.TaskEvent(id="c", task_id="own", kind="receipt", at=stamp),
+                models.TaskEvent(id="d", task_id="deleted", kind="receipt", at=stamp),
+                models.TaskEvent(id="e", task_id="own", kind="comment", at=stamp),
+            ])
+            await session.commit()
+
+        path = "admin/receipts"
+        unrestricted = await self.request("GET", path)
+        self.assertEqual([row["id"] for row in unrestricted], ["d", "c", "b", "a", "0"])
+        self.assertEqual(unrestricted[0]["status"], "")
+
+        self.user.is_super = False
+        first = await self.request("GET", path, params={"limit": 1})
+        second = await self.request("GET", path, params={"limit": 1, "offset": 1})
+        self.assertEqual([(row["id"], row["title"], row["status"]) for row in first + second],
+                         [("c", "Current task", "done"), ("a", "Snapshot", "done")])
+        self.assertEqual([r["id"] for r in await self.request("GET", path, params={"offset": 2})], ["0"])
+        self.assertEqual(await self.request("GET", path, params={"limit": 0}), [])
+        for params in ({"limit": -1}, {"offset": -1}, {"offset": 2**63}):
+            await self.request("GET", path, 422, params=params)
+
+    async def test_receipt_queries_clamp_large_limits_in_the_database(self):
+        async with self.sessions() as session:
+            session.add_all(models.TaskEvent(id=f"r-{i}", task_id="removed", kind="receipt")
+                            for i in range(205))
+            await session.commit()
+        statements = []
+
+        def capture(conn, cursor, statement, parameters, context, executemany):
+            if "FROM task_event" in statement:
+                statements.append(statement)
+
+        event.listen(self.engine.sync_engine, "before_cursor_execute", capture)
+        self.addCleanup(event.remove, self.engine.sync_engine, "before_cursor_execute", capture)
+        self.assertEqual(len(await self.request("GET", "admin/receipts")), 50)
+        self.assertEqual(len(await self.request("GET", "admin/receipts?limit=1000")), 200)
+        self.assertEqual(len(statements), 2)
+        self.assertTrue(all("LIMIT" in statement for statement in statements))
+
+    async def test_client_inventory_sort_applies_before_pagination(self):
+        now = datetime.now(timezone.utc)
+        async with self.sessions() as session:
+            for key, name, owner, state, platform, version, seen in (
+                ("sort-a", "Zulu", "row-1", "revoked", "darwin", "2", now - timedelta(days=1)),
+                ("sort-b", "ALPHA", None, "active", "Linux", "5", now + timedelta(minutes=5)),
+                ("sort-c", "alpha", "row-2", "pending", "macOS", "1", None),
+            ):
+                device = models.Client(id=key, name=name, user_ref=owner, auth_state=state,
+                                       platform=platform, app_version=version, last_seen_at=seen)
+                session.add(device)
+            await session.commit()
+
+        # Names differing only by case tie on the device ID; Darwin and macOS
+        # share a displayed platform, so their ordering falls back to version.
+        orders = {
+            "name": ("bca", "abc"), "owner": ("bac", "cab"), "online": ("bac", "acb"),
+            "auth": ("bca", "acb"), "platform": ("bca", "acb"), "lastSeen": ("abc", "bac"),
+        }
+        for key, (asc, desc) in orders.items():
+            for direction, expected in (("asc", asc), ("desc", desc)):
+                with self.subTest(key=key, direction=direction):
+                    params = {"q": "sort-", "sortBy": key, "sortDir": direction, "pageSize": 2}
+                    first = await self.request("GET", "admin/clients", params={**params, "paged": 1})
+                    next_page = await self.request("GET", "admin/client-inventory", params={**params, "page": 2})
+                    self.assertEqual(first["total"], 3)
+                    self.assertEqual([item["id"] for item in first["items"] + next_page["items"]],
+                                     ["sort-" + suffix for suffix in expected])
+        for endpoint in ("admin/client-inventory", "admin/client-inventory/export.csv"):
+            for invalid in ({"sortBy": "other"}, {"sortDir": "other"}):
+                await self.request("GET", endpoint, expected=422, params=invalid)
+
+    async def test_client_inventory_csv_matches_scoped_filtered_order_across_batches(self):
+        self.user.is_super = False
+        self.user._perms = {"client.view"}
+        seen = datetime(2024, 6, 15, 12, 34, 56, tzinfo=timezone.utc)
+        special_name = '=Fleet, "one"\nsecond line'
+        async with self.sessions() as session:
+            member = await session.get(models.User, "row-0")
+            member.display_name = "  +Manager"
+            for i in range(405):
+                session.add(models.Client(id=f"fleet-{i:03}", name=special_name if i == 0 else "Fleet",
+                                          user_ref="row-0" if i % 2 == 0 else None, platform="Android",
+                                          app_version="1.2.3", last_seen_at=seen + timedelta(minutes=i)))
+            # Each of these violates exactly one of scope, form, state or search.
+            session.add_all([
+                models.Client(id="fleet-other-org", user_ref="row-1", platform="Android"),
+                models.Client(id="fleet-desktop", platform="Linux"),
+                models.Client(id="fleet-online", platform="Android",
+                              last_seen_at=datetime.now(timezone.utc) + timedelta(minutes=5)),
+                models.Client(id="unmatched", platform="Android"),
+            ])
+            await session.commit()
+
+        filters = {"state": "offline", "form": "mobile", "q": "fleet", "sortBy": "lastSeen", "sortDir": "desc"}
+        expected_ids = [f"fleet-{i:03}" for i in reversed(range(405))]
+        listed = []
+        for page in range(1, 6):
+            part = await self.request("GET", "admin/clients", params={**filters, "paged": 1, "page": page, "pageSize": 100})
+            self.assertEqual(part["total"], len(expected_ids))
+            listed.extend(item["id"] for item in part["items"])
+        self.assertEqual(listed, expected_ids)
+
+        endpoint = "admin/client-inventory/export.csv"
+        response = await self.http.get(endpoint, params=filters)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.content.startswith(b"\xef\xbb\xbf"))
+        self.assertTrue(response.headers["content-type"].startswith("text/csv"))
+        self.assertIn("attachment;", response.headers["content-disposition"])
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        records = list(csv.DictReader(io.StringIO(response.content.decode("utf-8-sig"), newline="")))
+        self.assertEqual([row["id"] for row in records], listed)
+        self.assertEqual(records[-1], {
+            "id": "fleet-000", "name": "'" + special_name, "ownerName": "'  +Manager",
+            "connectionState": "offline", "authState": "pending", "platform": "Android",
+            "version": "1.2.3", "lastSeen": seen.isoformat(),
+        })
+        empty = await self.http.get(endpoint, params={**filters, "q": "not-found"})
+        self.assertEqual(empty.status_code, 200)
+        self.assertEqual(len(empty.content.decode("utf-8-sig").splitlines()), 1)
+        self.user._perms = set()
+        for path in ("admin/client-inventory", endpoint):
+            await self.request("GET", path, expected=403)
+
+    async def test_device_search_treats_keywords_as_literal_substrings(self):
+        async with self.sessions() as session:
+            (await session.get(models.Client, "row-0")).name = "Win_01"
+            (await session.get(models.Client, "row-1")).name = "WinX01"
+            (await session.get(models.User, "row-1")).display_name = "ops%team"
+            (await session.get(models.User, "row-2")).username = r"hq\admin"
+            session.add(models.Client(id="dev_special", user_ref="row-2", auth_state="active"))
+            await session.commit()
+        for route in ("admin/clients", "admin/client-inventory"):
+            for term, ids in ((" WIN_01 ", ["row-0"]), ("%", ["row-1"]),
+                              ("dev_", ["dev_special"]), ("a%", []),
+                              ("\\", ["row-2", "dev_special"])):
+                with self.subTest(route=route, term=term):
+                    page = await self.request("GET", route, params={"paged": "true", "q": term})
+                    self.assertEqual(page["total"], len(ids))
+                    self.assertCountEqual([row["id"] for row in page["items"]], ids)
+        self.user.is_super = False
+        page = await self.request("GET", "admin/clients", params={"paged": "true", "q": "%"})
+        self.assertEqual((page["total"], page["items"]), (0, []))
+
     async def test_library_pages_cross_folder_boundary(self):
         with patch("app.api.library.library_read_cache.ensure_ready", new_callable=AsyncMock):
             first = await self.request("GET", "library?scope=all&limit=2")
@@ -142,6 +338,21 @@ class HubContractTests(unittest.IsolatedAsyncioTestCase):
             stored = (await session.scalars(select(models.TaskComment.body))).all()
             self.assertEqual(stored, ["x" * 4000])
 
+    async def test_workflow_guide_targets_effective_plugin_in_selected_org(self):
+        async with self.sessions() as session:
+            for plugin_id, org_id, enabled in (
+                ("platform-flow", None, True), ("local-flow", "row-0", False),
+            ):
+                session.add(automation_models.Plugin(id=plugin_id, org_id=org_id,
+                                                     key="shared-flow", name="Flow", enabled=enabled))
+            await session.commit()
+
+        for org_id, plugin_id, enabled in (("row-0", "local-flow", False), ("row-1", "platform-flow", True)):
+            with self.subTest(org_id=org_id):
+                catalog = await self.request("GET", "admin/work-catalog", params={"orgId": org_id})
+                matches = [row for row in catalog["workflows"] if row["key"] == "shared-flow"]
+                self.assertEqual([(row["id"], row["enabled"]) for row in matches], [(plugin_id, enabled)])
+
     async def test_catalog_and_environment_inputs(self):
         for body in ({"name": "fixture", "type": "unlisted"},
                      {"name": "fixture", "type": "generic", "config": {"baseUrl": "unsupported://example.invalid"}}):
@@ -155,6 +366,21 @@ class HubContractTests(unittest.IsolatedAsyncioTestCase):
         await self.request("PATCH", f"admin/environments/{env['id']}", 400, json={"tier": "unlisted"})
         await self.request("POST", "admin/work-catalog/professions", 400,
                            json={"orgId": "row-0", "name": "Analyst", "category": "unlisted"})
+
+    async def test_profession_writes_identify_invalid_competencies(self):
+        for path in ("admin/work-catalog/professions", "admin/positions"):
+            with self.subTest(path=path):
+                profile = {"orgId": "row-0", "name": path.rsplit("/", 1)[-1]}
+                rejected = await self.request("POST", path, 400, json={**profile, "competencies": 12345})
+                self.assertEqual(rejected["detail"], "competencies 必须是数组")
+                created = await self.request("POST", path, json={**profile, "competencies": ["Planning"]})
+                endpoint = f"{path}/{created['id']}"
+                rejected = await self.request("PATCH", endpoint, 400, json={"competencies": 12345})
+                self.assertEqual(rejected["detail"], "competencies 必须是数组")
+                unchanged = await self.request("PATCH", endpoint, json={"description": "Updated profile"})
+                self.assertEqual(unchanged["competencies"], ["Planning"])
+                updated = await self.request("PATCH", endpoint, json={"competencies": ["Writing"]})
+                self.assertEqual(updated["competencies"], ["Writing"])
 
     async def test_users_and_positions_require_an_existing_department(self):
         body = {"username": "candidate", "password": "example-password", "orgId": "missing"}

@@ -3,3 +3,5 @@
 -r requirements.txt
 # Keep the recipe checker on the same version as requirements-runner-build.txt.
 pyinstaller==6.21.0
+ruff==0.17.6
+mypy==2.4.1

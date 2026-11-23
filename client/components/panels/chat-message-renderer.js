@@ -374,7 +374,10 @@
     if (kind?.summaryOnly) return '<div class="ntool ' + t.state + '" data-tool-node="' + ctx.esc(t.id) + '">' +
       '<div class="ntool-head ntool-summary">' + (global.ChatTools?.icon ? ChatTools.icon(t) : '') +
       '<span class="ntool-name">' + ctx.esc(kind.title) + '</span>' +
-      '<span class="ntool-args"' + (kind.localizedSub ? '' : ' data-user-content') + '>' + (kind.subHtml || ctx.esc(kind.sub || '')) + '</span></div></div>';
+      '<span class="ntool-args"' + (kind.localizedSub ? '' : ' data-user-content') + '>' + (kind.subHtml || ctx.esc(kind.sub || '')) + '</span>' +
+      (kind.recordAvailable ? '<button type="button" class="ntool-record-link" data-command-record="' + ctx.esc(t.id) +
+        '" data-command-owner="' + ctx.esc(ChatTools.recordOwner(ctx)) + '">' +
+        (global.SoduWorkI18n?.html('查看执行记录', '查看执行记录') || '查看执行记录') + '</button>' : '') + '</div></div>';
     if (kind) {
       /* Open write/edit cards in the data-tool-side pane rather than inline. */
       return '<div class="ntool ' + t.state + (open && !kind.readSnapshot ? ' open' : '') + '"' + (kind.side ? ' data-tool-side="1"' : '') + ' data-tool-node="' + ctx.esc(t.id) + '">' +

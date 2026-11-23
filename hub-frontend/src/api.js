@@ -157,6 +157,7 @@ async function download(path, filename, timeout = 120000) {
 }
 
 export const api = {
+  publicLegalDocuments: () => call('GET', '/client-auth/legal-documents'),
   legalDocument: kind => call('GET', '/admin/legal-documents/' + encodeURIComponent(kind)),
   saveLegalDraft: (kind, body) => call('PUT', '/admin/legal-documents/' + encodeURIComponent(kind) + '/draft', body),
   publishLegalDocument: (kind, body) => call('POST', '/admin/legal-documents/' + encodeURIComponent(kind) + '/publish', body),
@@ -179,6 +180,10 @@ export const api = {
   me: () => call('GET', '/admin/me'),
   authProviders: () => call('GET', '/auth/providers'),
   operationsOverview: () => call('GET', '/admin/operations/overview'),
+  operationsApprovals: (limit, offset) => call('GET', '/admin/operations/approvals?' + new URLSearchParams({ limit, offset })),
+  approvalTransferOptions: (id, fromUserId) => call('GET', '/admin/operations/approvals/' + encodeURIComponent(id)
+    + '/transfer-options?' + new URLSearchParams({ fromUserId })),
+  updateOperationsApproval: (id, action, body) => call('POST', '/admin/operations/approvals/' + encodeURIComponent(id) + '/' + action, body),
   operationsInsights: () => call('GET', '/admin/operations/insights'),
   identityProviders: () => call('GET', '/admin/identity-providers'),
   createIdentityProvider: (b) => call('POST', '/admin/identity-providers', b),
@@ -198,6 +203,7 @@ export const api = {
   deleteRole: (id) => call('DELETE', '/admin/roles/' + id),
   // Users.
   users: () => call('GET', '/admin/users'),
+  batchUpdateUsers: (b) => call('POST', '/admin/users/batch', b),
   createUser: (b) => call('POST', '/admin/users', b),
   updateUser: (id, b) => call('PATCH', '/admin/users/' + id, b),
   // Occupational profiles describe work without granting permissions; scenarios link intent, capabilities, workflows, and delivery criteria.
@@ -235,11 +241,14 @@ export const api = {
 
   // Task overview and execution network.
   tasks: (query = '') => call('GET', '/admin/tasks' + query),
+  taskDetail: (id) => call('GET', '/admin/tasks/' + encodeURIComponent(id)),
   clients: () => call('GET', '/admin/clients'),
   clientsPage: (p = {}) => call('GET', '/admin/clients?' + new URLSearchParams({
     paged: 'true', page: p.page || 1, pageSize: p.pageSize || 25,
     state: p.state || 'all', form: p.form || 'all', q: p.q || '',
+    ...(p.sortBy ? { sortBy: p.sortBy, sortDir: p.sortDir || 'asc' } : {}),
   }).toString()),
+  exportClients: filters => download('/admin/client-inventory/export.csv?' + new URLSearchParams(filters), 'soduwork-clients.csv'),
   clientAuthPolicy: () => call('GET', '/admin/client-auth-policy'),
   saveClientAuthPolicy: (b) => call('PUT', '/admin/client-auth-policy', b),
   teamModuleScope: () => call('GET', '/admin/team-module-scope'),
@@ -399,14 +408,18 @@ export const api = {
   // Workflow retries retain server approval and permission checks.
   retryRunGate: (runId, nodeKey = '', options = {}) => call(
     'POST', '/admin/plugin-runs/' + encodeURIComponent(runId) + '/retry-gate',
-    { nodeKey, resumeRework: !!options.resumeRework }),
+    { nodeKey, resumeRework: !!options.resumeRework, sourceNodeId: options.sourceNodeId,
+      ...(options.execution && { execution: options.execution }) }),
   /* Separate provider credentials from models; secrets are write-only. */
   modelCatalog: () => call('GET', '/admin/model-catalog'),
+  firstChatReadiness: () => call('GET', '/admin/first-chat-readiness'),
   testModelProviderConnection: (body) => call('POST', '/admin/model-providers/test-connection', body),
   checkModelCapabilities: (body) => call('POST', '/admin/model-capabilities/check', body, 140000),
   saveModelProvider: (pid, b) => call('PUT', '/admin/model-providers/' + encodeURIComponent(pid), b),
   discoverModels: (pid) => call('POST', '/admin/model-providers/' + encodeURIComponent(pid) + '/discover', {}, 30000),
-  deleteModelProvider: (pid, revision) => call('DELETE', '/admin/model-providers/' + encodeURIComponent(pid) + '?expectedRevision=' + encodeURIComponent(revision)),
+  modelProviderDeletionImpact: pid => call('GET', '/admin/model-providers/' + encodeURIComponent(pid) + '/deletion-impact'),
+  deleteModelProvider: (pid, expectedRevision, expectedImpact, confirmId) => call('DELETE',
+    '/admin/model-providers/' + encodeURIComponent(pid) + '?' + new URLSearchParams({ expectedRevision, expectedImpact, confirmId })),
   saveModelDef: (b) => call('PUT', '/admin/model-defs', b),
   deleteModelDef: (mid, revision) => call('DELETE', '/admin/model-defs/' + encodeURIComponent(mid) + '?expectedRevision=' + encodeURIComponent(revision)),
   modelRuntime: () => call('GET', '/admin/model-runtime'),

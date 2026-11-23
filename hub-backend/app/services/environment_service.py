@@ -52,17 +52,17 @@ async def _assert_promotion_graph(session: AsyncSession, row: am.Environment) ->
     requires = promotion_policy(row.promotion_policy).get("requires") or []
     missing = [k for k in requires if k not in existing_keys]
     if missing:
-        raise ValueError(f"前置环境不存在：{', '.join(missing)}")
+        raise BusinessConflict(f"前置环境不存在：{', '.join(missing)}")
     graph = {x.key: list(promotion_policy(x.promotion_policy).get("requires") or [])
              for x in rows}
     graph[row.key] = requires
     if row.key in graph[row.key]:
-        raise ValueError("环境不能依赖自己")
+        raise BusinessConflict("环境不能依赖自己")
     visiting, visited = set(), set()
 
     def visit(key: str) -> None:
         if key in visiting:
-            raise ValueError("环境推进关系存在循环依赖")
+            raise BusinessConflict("环境推进关系存在循环依赖")
         if key in visited or key not in graph:
             return
         visiting.add(key)
@@ -327,6 +327,10 @@ class InvalidEnvironmentTier(ValueError):
     """The requested deployment tier is outside the catalog."""
 
 
+class BusinessConflict(ValueError):
+    """The operation conflicts with existing data or rules (e.g., circular dependency)."""
+
+
 async def _environment_selector(session: AsyncSession, value, org_id: str | None) -> dict:
     selector = _selector(value)
     if not selector["tags"]:
@@ -367,7 +371,8 @@ async def save_environment(session: AsyncSession, body: dict, row: am.Environmen
         org_id = body.get("orgId") or None
         if await session.scalar(select(func.count(am.Environment.id)).where(
                 am.Environment.key == key, am.Environment.org_id == org_id)):
-            raise ValueError("环境标识已经存在")
+            from .catalog_names import DuplicateName
+            raise DuplicateName("环境标识已经存在")
         row = am.Environment(key=key, name=_text(body.get("name"), 80) or key,
                              tier=tier, org_id=org_id)
         session.add(row)
@@ -377,7 +382,8 @@ async def save_environment(session: AsyncSession, body: dict, row: am.Environmen
         if await session.scalar(select(func.count(am.Environment.id)).where(
                 am.Environment.key == key, am.Environment.org_id == row.org_id,
                 am.Environment.id != row.id)):
-            raise ValueError("环境标识已经存在")
+            from .catalog_names import DuplicateName
+            raise DuplicateName("环境标识已经存在")
         old_key = row.key
         row.key = key
         # Update promotion chains that reference the old key
@@ -392,7 +398,10 @@ async def save_environment(session: AsyncSession, body: dict, row: am.Environmen
                 new_reqs = [k if k != old_key else key for k in reqs]
                 other.promotion_policy = {**pp, "requires": new_reqs}
     if "name" in body:
-        row.name = _text(body.get("name"), 80) or row.name
+        name = str(body.get("name") or "").strip()
+        if len(name) > 80:
+            raise ValueError("环境名称不能超过 80 个字符")
+        row.name = name or row.name
     if "tier" in body:
         row.tier = tier or "custom"
     if "description" in body:
@@ -626,7 +635,8 @@ async def save_target(session: AsyncSession, body: dict, row: am.DeploymentTarge
                       ) -> am.DeploymentTarget:
     repo_id = _text(body.get("repoId") if row is None else body.get("repoId", row.repo_id), 36)
     env_id = _text(body.get("environmentId") if row is None else body.get("environmentId", row.environment_id), 36)
-    repo_row = await session.get(models.Repo, repo_id)
+    from .repository_catalog import lock_deployment_repository
+    repo_row = await lock_deployment_repository(session, repo_id)
     if not repo_row:
         raise ValueError("代码仓库不存在")
     env_row = await session.get(am.Environment, env_id)

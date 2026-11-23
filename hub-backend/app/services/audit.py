@@ -4,8 +4,6 @@
 best-effort standalone behavior. Super administrators see all entries and
 other administrators see actors in their department subtree.
 """
-import csv
-import io
 import json
 from datetime import datetime, timezone
 
@@ -13,6 +11,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import models
+from ..csv_export import csv_chunks
 from ..pagination import Page, select_rows
 from ..schemas import _ms
 from ..timestamps import iso_utc
@@ -76,39 +75,19 @@ async def list_audit(session: AsyncSession, user, action: str | None = None,
     return {"total": total, "items": [_to_api(a) for a in rows]}
 
 
-def _csv_cell(value):
-    # Spreadsheets evaluate formula prefixes even when CSV quotes the field.
-    if isinstance(value, str) and (value.startswith(("\t", "\r", "\n")) or
-                                   value.lstrip().startswith(("=", "+", "-", "@"))):
-        return "'" + value
-    return value
-
-
 async def export_csv(session, user, environment, **filters):
     query = await _audit_query(session, user, **filters)
     rows = await session.stream_scalars(query.execution_options(yield_per=400))
+    fields = ("id", "at", "actorId", "actorName", "action", "targetType", "targetId",
+              "targetLabel", "detail", "hubEnvironment")
 
-    async def chunks():
-        out = io.StringIO(newline="")
-        writer = csv.writer(out)
-        fields = ("id", "at", "actorId", "actorName", "action", "targetType", "targetId",
-                  "targetLabel", "detail", "hubEnvironment")
-        try:
-            writer.writerow(fields)
-            yield "\ufeff" + out.getvalue()
-            async for batch in rows.partitions(400):
-                out.seek(0)
-                out.truncate()
-                for row in batch:
-                    item = _to_api(row)
-                    item.update(at=iso_utc(row.at), actorId=row.actor_id, hubEnvironment=environment,
-                                detail=json.dumps(item["detail"], ensure_ascii=False))
-                    writer.writerow(_csv_cell(item[key]) for key in fields)
-                yield out.getvalue()
-        finally:
-            await rows.close()
+    def values(row):
+        item = _to_api(row)
+        item.update(at=iso_utc(row.at), actorId=row.actor_id, hubEnvironment=environment,
+                    detail=json.dumps(item["detail"], ensure_ascii=False))
+        return (item[key] for key in fields)
 
-    return chunks()
+    return csv_chunks(rows, fields, values)
 
 
 async def list_plugin_activity(session: AsyncSession, user, binding_ids,

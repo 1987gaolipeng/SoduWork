@@ -11,6 +11,8 @@ import time
 
 from .config import get_settings
 
+ACCOUNT_PASSWORD_MIN = 8
+ACCOUNT_PASSWORD_MAX = 128
 _ITER = 200_000
 
 
@@ -21,7 +23,7 @@ def hash_password(pw: str) -> str:
 
 
 def verify_password(pw: str, stored: str) -> bool:
-    if not pw:
+    if not pw or not ACCOUNT_PASSWORD_MIN <= len(pw) <= ACCOUNT_PASSWORD_MAX or pw.isspace():
         return False
     try:
         scheme, iter_s, salt_hex, hash_hex = (stored or "").split("$")

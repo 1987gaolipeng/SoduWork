@@ -14,7 +14,7 @@ export function allowanceDraft(value = {}) {
   }
 }
 
-function tokenNumber(value) {
+export function tokenNumber(value) {
   if (value === null || typeof value === 'boolean' || (typeof value === 'string' && !value.trim())) return null
   const number = Number(value)
   return Number.isSafeInteger(number) && number >= 0 && number <= MAX_TOKENS ? number : null

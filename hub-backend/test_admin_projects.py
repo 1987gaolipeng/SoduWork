@@ -91,6 +91,25 @@ class AdminProjectRouterTests(unittest.IsolatedAsyncioTestCase):
         await self.http.aclose()
         await self.engine.dispose()
 
+    async def test_project_name_validation_on_create_and_rename(self):
+        for invalid in ("P\u202eroject", "First\nLast", 123):
+            with self.subTest(invalid=invalid):
+                body = {"name": invalid}
+                created = await self.request("POST", "/projects", json={**body, "ownerUserId": "owner"})
+                renamed = await self.request("PUT", "/projects/project", json=body)
+                self.assertEqual(created.status_code, 422, created.text)
+                self.assertEqual(renamed.status_code, 422, renamed.text)
+        async with self.sessions() as session:
+            project = await session.get(models.Project, "project")
+            self.assertEqual(project.name, "Project")
+            project.name = "Legacy\u202ename"
+            await session.commit()
+        edited = await self.request("PUT", "/projects/project", json={"desc": "First\nSecond"})
+        self.assertEqual(edited.status_code, 200, edited.text)
+        self.assertEqual(edited.json()["name"], "Legacy\u202ename")
+        renamed = await self.request("PUT", "/projects/project", json={"name": "  مشروع جديد  "})
+        self.assertEqual(renamed.json()["name"], "مشروع جديد")
+
     async def test_creation_and_rename_reject_duplicate_names_within_owner_org(self):
         base = {"name": "Project", "ownerUserId": "owner"}
         for extra, status in (({"key": "ignored"}, 422), ({}, 409)):

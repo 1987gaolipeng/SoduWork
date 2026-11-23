@@ -89,7 +89,8 @@ def execution_route(run_context: dict, binding_config: dict, node_config: dict,
     declaration.
     """
     context = dict(run_context or {})
-    manual = _execution_layer(dict(context.get("executionOverrides") or {}).get(str(node_key or "")))
+    manual_override = dict(context.get("executionOverrides") or {}).get(str(node_key or "")) or {}
+    manual = _execution_layer(manual_override)
     runtime = execution_preferences(context.get("execution"))
     binding = _execution_layer(binding_config)
     node = _execution_layer(node_config)
@@ -110,6 +111,7 @@ def execution_route(run_context: dict, binding_config: dict, node_config: dict,
     return {
         "agentKind": agent_kind,
         "model": str(pick("model")),
+        **({"modelSource": "catalog"} if manual_override.get("modelSource") == "catalog" else {}),
         "fallbackMode": str(pick("fallbackMode", "best-effort")),
         "reasoningEffort": reasoning_effort,
         "runnerTags": list(pick("runnerTags", []) or []),
