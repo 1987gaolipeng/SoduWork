@@ -84,6 +84,12 @@ Replace the example domain with your own. For an existing instance, stop it, cha
 
 Connect the desktop to this Hub URL. Users supply model and connector authorization. Agents do not automatically execute in the management container: register a separate Runner for cloud execution; the client's Runner handles local execution. The management container runs as a non-root user without a Docker socket mount or automatic access to host SSH credentials.
 
+### Enable WeCom bot conversations
+
+With a public HTTPS origin configured, set `"imEnabled": true` in this instance's private `deployment.json` and run `python3 ops/self-host/deploy.py up --no-build` with the same data directory. This enables the Hub's remote conversation service and worker. For a Hub running directly from source, set `IM_ENABLED=true` in the Hub environment, configure `HUB_PUBLIC_URL` and `CONNECTOR_OAUTH_KEY`, and restart the Hub.
+
+In the desktop Connectors page, refresh **Remote conversations**, connect a **WeCom internal application**, and copy the callback URL to the application's message reception settings. Verify and enable the application, link a task and its execution computer, then send the one-time pairing command in the application's direct chat. Send a short task and check that its reply arrives in the same chat.
+
 ## Updates, backups, and rollback
 
 Before an upgrade, stop dispatching work, wait for current tasks, and back up the database and all business-file volumes. Separately preserve private configuration and the current source version. Restore the database and library from a consistent point in time.

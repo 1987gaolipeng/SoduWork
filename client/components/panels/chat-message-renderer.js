@@ -10,6 +10,7 @@
   const uiText = value => global.SoduWorkI18n?.translateText?.(value) || value;
   const pluginBadges = global.ChatMessagePlugins?.create(ctx, () => { liveStreamShape = null; _render(); });
   const turnSummary = global.ChatTurnSummary?.create(ctx);
+  const modelFailure = global.ChatModelFailure?.create(ctx, _render);
   const { _ctxText, _tokenText, _ctxHtml } = global.ChatContextMeter.create(ctx);
   const { _releaseScrollFollow, _ensureScrollFollow, _nearBottom, _followLatest, _updateScrollButton, _captureReadingAnchor, _restoreReadingAnchor, _preserveReadingPosition } = global.ChatScrollFollow.create(ctx);
   const markdown = global.ChatMarkdown.create(ctx, () => {
@@ -74,6 +75,7 @@
     acceptance.reset();
     approvalMarkup = '';
     turnSummary?.reset();
+    modelFailure?.reset();
   }
 
   const CARET = '<svg class="nthink-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>';
@@ -817,6 +819,7 @@
      * Display both unreachable errors and runs producing no output, including invalid or
      * unauthorized models rejected upstream without retries.
      */
+    parts.push(modelFailure?.html(runtimeFailed && !quotaBlocked && ctx._snap.completion?.modelFailure) || '');
     const pluginAuthorizationBlocked = Boolean(ctx._pluginAuthorization &&
       ['missing', 'readOnlyConflicts', 'unsupported'].some(key =>
         Array.isArray(ctx._pluginAuthorization[key]) && ctx._pluginAuthorization[key].length));
@@ -836,7 +839,7 @@
       (sessionOpenFailure ?
         '<button type="button" data-session-retry>' + uiText('重新打开会话') + '</button>' :
        execution.modelRecovery && execution.modelRecovery.available && ctx._ref ?
-        '<button type="button" data-model-retry="' + ctx.esc(execution.modelRecovery.id) + '">' + uiText('恢复这一轮') + '</button>' :
+        '<button type="button" data-model-retry="' + ctx.esc(execution.modelRecovery.id) + '">' + uiText(execution.modelRecovery.mode === 'text-summary' ? '切换模型并总结已有结果' : '恢复这一轮') + '</button>' :
         ctx._retryDraft && ctx._pluginAuthorization?.missing?.length
           ? '<button type="button" data-plugin-new-session>' + uiText('新建会话并继续') + '</button>'
           : ctx._retryDraft && !pluginAuthorizationBlocked
@@ -871,6 +874,7 @@
     outputScope = nextOutputScope;
     if (global.ChatTools && ChatTools.patchList) ChatTools.patchList(list, messageHtml, { preserveDeco: Boolean(carriedCards) });
     else list.innerHTML = messageHtml;
+    modelFailure?.bind(list);
     ctx._workCards?.paint?.();
     if (carriedCards && global.ChatDecorateCarry) ChatDecorateCarry.reconcile(list, ctx._outs, carriedCards, deliverySnapshot);
     finishThinkingFold?.();

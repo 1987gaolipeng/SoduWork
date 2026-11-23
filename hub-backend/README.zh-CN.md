@@ -280,6 +280,8 @@ python3 e2e_runner_tls.py --output /absolute/evidence/directory
 
 在 `/api/v1` 下，`admin/users`、`admin/orgs`、`admin/roles`、`admin/domains`、`tasks` 和 `schedules` 在省略分页参数时保留原有数组。传入 `limit`（1–200）或 `offset`（从 0 开始）即可获取 `{items, total}`。只传偏移量时每页默认 50 条。总数按当前身份可见的记录计算，偏移量超过末尾会返回空页。
 
+`GET /api/v1/admin/ai-schedules/{sid}/runs` 默认返回最近 20 条运行记录。整数参数 `limit` 可取 1 至 200，越界返回 HTTP 422。
+
 需要固定响应结构时，使用 `GET /api/v1/admin/client-inventory`。每次响应都包含 `items`、`total`、`counts`、`page`、`pageSize` 和 `offset`。可使用 `page` 和 `pageSize`（1–100，默认 25），或使用 `offset` 和 `limit`。旧的 `admin/clients` 调用仍可获取原有数组，也可通过 `paged=1` 获取对象。
 
 资料库同样支持可选的条数和偏移量，先排列文件夹，再排列文件。返回体保留独立的 `folders` 和 `items` 数组，分页时提供两者合计的 `total`。审批和交付列表接受正整数条数和从 0 开始的偏移量。

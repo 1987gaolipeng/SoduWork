@@ -610,7 +610,7 @@ def run_to_api(run) -> dict:
 
 async def list_runs(session: AsyncSession, schedule_id: str, *,
                     owner_client_id: str = "", owner_user_id: str | None = None,
-                    limit: int = 20) -> list[dict]:
+                    limit: int = 20, max_limit: int = 100) -> list[dict]:
     await reconcile_runs(session, schedule_id=schedule_id,
                          owner_client_id=owner_client_id, owner_user_id=owner_user_id)
     q = select(models.AiScheduleRun).where(
@@ -622,7 +622,7 @@ async def list_runs(session: AsyncSession, schedule_id: str, *,
                     else models.AiScheduleRun.owner_user_id.is_(None))
     rows = list((await session.execute(
         q.order_by(models.AiScheduleRun.started_at.desc()).limit(
-            max(1, min(100, int(limit or 20)))))).scalars().all())
+            max(1, min(max_limit, int(limit or 20)))))).scalars().all())
     return [run_to_api(item) for item in rows]
 
 

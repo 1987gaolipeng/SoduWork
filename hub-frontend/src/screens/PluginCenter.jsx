@@ -239,7 +239,7 @@ export default function PluginCenter({ setupContext, onNavigate }) {
   }
   function chooseBulkFiles() {
     const input = document.createElement('input')
-    input.type = 'file'; input.multiple = true; input.accept = '.soduwork-plugin,.soduwork-plugin,.soduwork-plugin,.zip'
+    input.type = 'file'; input.multiple = true; input.accept = '.soduwork-plugin,.zip'
     input.addEventListener('change', () => {
       const files = Array.from(input.files || []).slice(0, 30)
       if (files.length) setBulkImport({ files })

@@ -355,12 +355,15 @@ function _agPresentation(a, ak) {
     && a.key === 'codex' && a.loginAvailable === true;
   const primaryAction = login ? 'login' : ['missing', 'setup', 'disabled', 'broken'].includes(state) ? 'install'
     : canProbe ? 'probe' : state === 'unknown' ? 'refresh' : 'details';
-  const primaryLabel = { missing: '装上', setup: '准备组件', disabled: '启用', broken: '修复安装',
+  const missingAdapter = state === 'missing' && a.key === 'dsh';
+  const primaryLabel = { missing: missingAdapter ? '安装适配器' : '装上', setup: '准备组件', disabled: '启用', broken: '修复安装',
     nollm: '选择模型', unauthed: login ? '连接 Codex' : '查看登录说明', unknown: '重新探测' }[state] || '测一下';
-  const reason = state === 'bad' ? _agMessage(null, '已安装，实际测试未通过。请查看下方测试结果并处理后重试。')
+  const reason = missingAdapter ? _agTx(a.desktopAppDetected === true
+    ? '已检测到 DeepSeek Harness App。安装 dsh-acp 适配器后即可配置执行。' : '未找到命令行适配器 dsh-acp。')
+    : state === 'bad' ? _agMessage(null, '已安装，实际测试未通过。请查看下方测试结果并处理后重试。')
     : state === 'broken' ? issue || _agMessage(a.whyMessage || a.why, '安装组件无法正常启动，请修复后重试。')
     : state === 'unknown' ? _agMessage(null, '状态暂时无法识别，请重新探测。') : _agMessage(a.whyMessage || a.why, issue || '');
-  return { state, label: info.t, tone: info.tone || state, reason, issue, installed, canProbe,
+  return { state, missingAdapter, label: missingAdapter ? '缺少适配器' : info.t, tone: info.tone || state, reason, issue, installed, canProbe,
     primaryAction, primaryLabel, probe, probeCurrent };
 }
 
@@ -456,7 +459,7 @@ function _agRowHtml(a, m) {
   const ak = (rid ? rid + '~' : '') + a.key;   /* Drawer identity includes the machine because runtimes can exist on several machines. */
   const status = _agPresentation(a, ak), s = status.state, p = status.probe;
   const displayName = _agCopy(a, 'name', a.name || a.key);
-  const blurb = _agCopy(a, 'blurb', a.blurb || '');
+  const blurb = status.missingAdapter ? status.reason : _agCopy(a, 'blurb', a.blurb || '');
   const busy = _agJobs[ak]?.state === 'running';
   const bundled = !!a.bundled;
   const bot = window.AgentBrand
@@ -616,6 +619,8 @@ function _agBodyHtml(a, s, ak) {
   return '<div class="ag-row-b" id="ag-body-' + esc(ak) + '" role="region">' +
     '<div class="cfg-result is-' + status.tone + '"><span class="cfg-result-dot"></span>' +
       '<div><b>' + status.label + '</b><span>' + esc(why) + '</span></div></div>' +
+    (status.missingAdapter && a.desktopAppDetected !== true ? '<div class="ag-note">' +
+      esc(_agTx('如果你已安装 DeepSeek Harness App，还需安装命令行适配器，SoduWork 才能调用它。')) + '</div>' : '') +
     (status.issue && status.issue !== why ? '<div class="ag-note">' + esc(status.issue) + '</div>' : '') +
     (warn && !status.installed ? '<div class="ag-note">' + esc(warn) + '</div>' : '') +
     /* Group model settings with configuration instructions in the drawer. */

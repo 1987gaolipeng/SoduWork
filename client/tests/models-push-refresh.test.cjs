@@ -92,3 +92,47 @@ test('foreground load failures and the user retry keep their existing visible be
   assert.equal(f.eval('_mdData.revision'), 3); assert.equal(f.eval('_mdLoadState'), 'ready');
   assert.doesNotMatch(f.box.innerHTML, /data-md-load-error/);
 });
+
+test('Hub outage with local results offers a catalog retry even when no Hub provider is listed', async () => {
+  const f = fixture();
+  const pending = f.context._mdLoad();
+  await settle();
+  const partial = catalog(1);
+  partial.providers[0].localOnly = true;
+  f.requests.shift().resolve({ ...partial, managedCatalogUnavailable: true });
+  await pending;
+  assert.match(f.box.innerHTML, /Hub 模型清单暂时无法读取/);
+  assert.match(f.box.innerHTML, /data-mdretrycatalog/);
+  const retry = f.context._mdRetryCatalog();
+  await settle(); f.requests.shift().resolve(catalog(2)); await retry;
+  assert.doesNotMatch(f.box.innerHTML, /Hub 模型清单暂时无法读取/);
+});
+
+test('a late provider probe cannot publish another account’s connection result or discovered catalog', async () => {
+  const f = fixture(); await f.load();
+  f.eval("_mdData.providers[0].authMode = 'none'");
+  let resolve;
+  f.context.SoduWorkAPI.testMyModel = () => new Promise(done => { resolve = done; });
+  const pending = f.context._mdDoTest({ getAttribute: () => 'personal' });
+  await settle();
+  f.scope('hub/device/bob');
+  resolve({ ok: true, models: ['alice-private'] });
+  await settle();
+  const reads = f.requests.splice(0);
+  for (const read of reads) read.resolve(catalog(2));
+  await pending;
+  assert.equal(reads.length, 0);
+  assert.notEqual(f.eval('_mdTest.personal?.state'), 'ok');
+});
+
+test('a catalog retry preserves edits made while recovery is in flight', async () => {
+  const f = fixture(); await f.load();
+  const retry = f.context._mdRetryCatalog();
+  await settle();
+  const key = f.box.querySelector('[data-pkey="personal"]');
+  key.value = 'synthetic-draft'; key.fire('input');
+  f.requests.shift().resolve(catalog(2)); await retry;
+  assert.equal(f.eval('_mdKeyEdits.personal'), 'synthetic-draft');
+  assert.equal(f.eval('_mdDirty'), true);
+  assert.equal(f.eval('_mdData.revision'), 1);
+});
