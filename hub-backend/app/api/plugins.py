@@ -7,6 +7,7 @@ import json
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,16 +15,37 @@ from .. import automation_models as am
 from ..db import get_session
 from ..deps import has_perm, require_any_perm, require_perm
 from ..models import Task, User
-from ..services import (audit, plugin_audience, plugin_evaluations,
-                        plugin_governance, plugin_marketplace, plugin_mcp_gateway,
-                        plugin_lifecycle_notifications,
-                        plugin_packages, plugin_rollout, plugin_service, plugin_signatures,
-                        plugin_starter, rbac,
-                        workflow_control, workflow_engine)
+from ..services import (
+    audit,
+    plugin_audience,
+    plugin_evaluations,
+    plugin_governance,
+    plugin_lifecycle_notifications,
+    plugin_marketplace,
+    plugin_mcp_gateway,
+    plugin_packages,
+    plugin_rollout,
+    plugin_service,
+    plugin_signatures,
+    plugin_starter,
+    rbac,
+    workflow_control,
+    workflow_engine,
+)
 from .scope import task_or_404, visible_clients
 
 router = APIRouter(prefix="/api/v1/admin/plugins", tags=["plugins"])
 run_router = APIRouter(prefix="/api/v1/admin", tags=["plugin-runs"])
+
+
+class PluginVersionTrustRequest(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+    trusted: bool = Field(validation_alias=AliasChoices("trusted", "enabled"),
+                          description="Trust decision. The admin console sends this as enabled.")
+    reason: str | None = Field(default=None, validation_alias=AliasChoices("reason", "note"),
+                               description="Review reason. The admin console sends this as note.")
+    confirmWithoutEvaluation: bool = False
 
 
 def _conflict(error: ValueError) -> HTTPException:
@@ -457,7 +479,7 @@ async def trust_version_publisher_candidate(
 @router.post("/versions/{version_id}/trust")
 async def trust_version(
     version_id: str,
-    body: dict = Body(default_factory=dict),
+    body: PluginVersionTrustRequest,
     user: User = Depends(require_perm("plugin.manage")),
     session: AsyncSession = Depends(get_session),
 ):
@@ -469,12 +491,12 @@ async def trust_version(
         raise HTTPException(status_code=403, detail="系统级插件只能由超级管理员审批")
     await plugin_lifecycle_notifications.lock_plugin(session, plugin)
     await session.refresh(version)
-    enabled = bool(body.get("enabled"))
+    enabled = body.trusted
     previous_state = str(version.trust_state or "quarantined")
     was_enabled = bool(version.enabled)
     decision = ("approve" if enabled else
                 "reject" if previous_state == "quarantined" else "revoke")
-    note = str(body.get("note") or "").strip()[:1200]
+    note = (body.reason or "").strip()[:1200]
     if not note and decision == "reject":
         note = "管理员退回修改"
     elif not note and decision == "revoke":
@@ -486,7 +508,7 @@ async def trust_version(
             session, version, str(user.id))
         gate = await plugin_evaluations.publication_gate(
             session, version,
-            confirm_without_evaluation=bool(body.get("confirmWithoutEvaluation")))
+            confirm_without_evaluation=body.confirmWithoutEvaluation)
         if not gate["ok"]:
             blockers = list(gate.get("blockers") or [])
             if not blockers and gate.get("state") == "ready":
