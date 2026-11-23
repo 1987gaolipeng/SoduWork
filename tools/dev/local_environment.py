@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 from functools import lru_cache
+import math
 import os
 from pathlib import Path
 import shutil
@@ -40,6 +41,31 @@ class StartupError(RuntimeError):
 
 class DiskFullError(StartupError):
     """A storage failure that must not be replaced with download advice."""
+
+
+def electron_download_timeout() -> float:
+    """Electron download deadline in seconds; honor ELECTRON_DOWNLOAD_TIMEOUT.
+
+    docs/getting-started.md documents this variable as a way for slow
+    connections to raise the 600-second deadline, so read it at use time
+    instead of relying on the module constant. Invalid values fail loudly
+    rather than being silently ignored.
+    """
+    raw = os.environ.get('ELECTRON_DOWNLOAD_TIMEOUT', '').strip()
+    if not raw:
+        return float(ELECTRON_DOWNLOAD_TIMEOUT)
+    try:
+        value = float(raw)
+    except ValueError:
+        raise StartupError(
+            'ELECTRON_DOWNLOAD_TIMEOUT must be a positive number of seconds; '
+            'got a non-numeric value'
+        ) from None
+    if not math.isfinite(value) or value <= 0:
+        raise StartupError(
+            'ELECTRON_DOWNLOAD_TIMEOUT must be a positive, finite number of seconds'
+        )
+    return value
 
 
 def command_failure(message: str, log: Path, offset: int) -> StartupError:
@@ -498,7 +524,7 @@ def prepare_desktop(state: Path, log: Path) -> Path:
                 run([node, str(client / 'scripts/install-electron.cjs')], cwd=client, log=log,
                     label='[Desktop] 下载桌面运行环境 / Downloading the Electron runtime',
                     env=electron_install_environment(cache_env),
-                    timeout=ELECTRON_DOWNLOAD_TIMEOUT)
+                    timeout=electron_download_timeout())
             except DiskFullError:
                 raise
             except StartupError as exc:

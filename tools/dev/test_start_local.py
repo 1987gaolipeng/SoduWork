@@ -1655,6 +1655,35 @@ class LocalStartupTests(unittest.TestCase):
         self.assertEqual(calls[-1][0], ['node', str(client / 'scripts/install-electron.cjs')])
         self.assertFalse((self.state / 'desktop-dependencies.sha256').exists())
 
+    def test_desktop_download_honors_timeout_environment_override(self):
+        client = self.state / 'application/client'
+        client.mkdir(parents=True)
+        (client / 'package-lock.json').write_text('{}')
+        calls = []
+        def run(command, **kwargs):
+            calls.append((command, kwargs))
+            if command[0] == 'node':
+                raise build.StartupError('Download fixture timed out')
+        with patch.object(build, 'check_dependencies', return_value=('node', 'npm')), \
+                patch.object(build, 'run', side_effect=run), patch.dict(os.environ, {
+                    'DISPLAY': ':fixture', 'ELECTRON_DOWNLOAD_TIMEOUT': '123',
+                }), redirect_stdout(io.StringIO()):
+            with self.assertRaises(build.StartupError):
+                build.prepare_desktop(self.state, self.state / 'startup.log')
+        self.assertEqual(calls[-1][1]['timeout'], 123.0)
+
+    def test_electron_download_timeout_rejects_invalid_values(self):
+        with patch.dict(os.environ, {'ELECTRON_DOWNLOAD_TIMEOUT': 'not-a-number'}):
+            with self.assertRaisesRegex(build.StartupError, 'positive number'):
+                build.electron_download_timeout()
+        for invalid in ('0', '-5', 'nan', 'inf'):
+            with self.subTest(invalid=invalid), \
+                    patch.dict(os.environ, {'ELECTRON_DOWNLOAD_TIMEOUT': invalid}):
+                with self.assertRaisesRegex(build.StartupError, 'positive, finite'):
+                    build.electron_download_timeout()
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(build.electron_download_timeout(), build.ELECTRON_DOWNLOAD_TIMEOUT)
+
     def test_desktop_failure_is_reported_and_a_normal_quit_returns(self):
         from unittest.mock import Mock
         server = Mock(); server.poll.return_value = None
