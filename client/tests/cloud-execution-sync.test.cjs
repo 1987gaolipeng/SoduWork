@@ -115,6 +115,88 @@ async function fixture(t, rows = [remote()]) {
     intercept: value => { intercept = value; } };
 }
 
+async function queueFixture(t, metadata = {}) {
+  const row = remote();
+  row.execution = { ...row.execution, status: 'queued', ...metadata };
+  const f = await fixture(t, [row]);
+  const page = () => ({ ...row.execution, ok: true, last: 0, seq: 0,
+    persistedThrough: 0, hasMore: false, items: [] });
+  f.intercept((_who, route) => {
+    if (route.startsWith('/cloud-execution-sync/')) return { conversation: row,
+      page: page(), messages: [], approvals: [], attachments: [] };
+    if (route.includes('/ai-session')) return page();
+  });
+  const cloud = f.controller();
+  assert.equal((await cloud.synchronization.tick()).ok, true);
+  const id = (await cloud.history()).chats[0].id;
+  const view = await cloud.reopen(id, 'queued-cloud-view');
+  f.views.push(view);
+  return { ...f, row, cloud, view };
+}
+
+async function statusRenderer() {
+  const module = { exports: {} };
+  require('node:vm').runInNewContext(await fs.readFile(
+    path.join(__dirname, '../components/panels/panels-chat-status.js'), 'utf8'),
+  { module, window: {} });
+  return module.exports;
+}
+
+for (const metadata of [{}, { queued: true, queuePosition: 3, queueClass: 'task' }])
+  test('queued cloud mirrors retain waiting state and optional position without claiming execution ' +
+    (metadata.queuePosition ? 'with diagnostics' : 'from a legacy reply'), async t => {
+    const f = await queueFixture(t, metadata), status = await statusRenderer();
+    const snapshot = f.view.snapshot();
+    assert.equal(snapshot.status, 'queued');
+    assert.equal(snapshot.execution.running, false);
+    assert.equal(snapshot.execution.queuePosition || 0, metadata.queuePosition || 0);
+    assert.equal(status.runtimeBusy(snapshot), true, 'Queued work remains occupied');
+    assert.equal(snapshot.deliveryPending, true);
+    const label = status.work(snapshot);
+    assert.equal(label, metadata.queuePosition ? '排队中 · 第 3 项' : '排队中');
+    const metrics = status.createThinking(() => ({ snap: snapshot })).metricsHtml(true);
+    assert.match(metrics, /data-thinking-label>排队中</);
+    assert.doesNotMatch(metrics, /处理中|tokens/);
+    assert.equal(f.calls.some(call => /ai-dispatch|ai-say|ai-stop/.test(call.route)), false);
+  });
+
+test('queue receipt warnings and stale timing clear when the same cloud execution starts or finishes', async t => {
+  let now = Date.UTC(2026, 9, 30, 1, 2);
+  t.mock.method(Date, 'now', () => now);
+  const start = now - 120000;
+  const f = await queueFixture(t, { queuePosition: 3, queueClass: 'task', round: 2,
+    queueLeaseStatus: 'unconfirmed', queueLeaseReason: 'no_runner_ack',
+    startedAt: new Date(start).toISOString(), finishedAt: new Date(start + 65000).toISOString() });
+  let snapshot = f.view.snapshot();
+  assert.equal(snapshot.status, 'queued');
+  assert.equal(snapshot.execution.queueLeaseStatus, 'unconfirmed');
+  assert.equal(snapshot.execution.queueLeaseReason, 'no_runner_ack');
+  assert.match(snapshot.statusText, /排队回执尚未确认/);
+  assert.equal(snapshot.execution.elapsedMs, null, 'An older start does not charge queue wait as execution');
+  assert.equal(snapshot.execution.startedAt, 0);
+
+  f.row.execution = { ...f.row.execution, status: 'running', startedAt: new Date(now - 14000).toISOString(),
+    finishedAt: '', queuePosition: 0 };
+  assert.equal((await f.cloud.synchronization.tick()).ok, true);
+  snapshot = f.view.snapshot();
+  assert.equal(snapshot.status, 'streaming');
+  assert.equal(snapshot.execution.running, true);
+  assert.equal(snapshot.execution.elapsedMs, 14000);
+  assert.equal(snapshot.statusText, '', 'Stale queue metadata cannot retain its warning during execution');
+  assert.equal(snapshot.execution.queueLeaseStatus, undefined);
+
+  f.row.execution = { ...f.row.execution, status: 'done',
+    finishedAt: new Date(now + 51000).toISOString() };
+  assert.equal((await f.cloud.synchronization.tick()).ok, true);
+  now += 3600000;
+  snapshot = f.view.snapshot();
+  assert.equal(snapshot.status, 'idle');
+  assert.equal(snapshot.execution.running, false);
+  assert.equal(snapshot.execution.elapsedMs, 65000);
+  assert.equal(snapshot.execution.queueLeaseReason, undefined);
+  assert.equal(f.calls.some(call => /ai-dispatch|ai-say|ai-stop/.test(call.route)), false);
+});
+
 test('cold start discovers, persists and reopens cloud work without opening a view or starting a local runtime', async t => {
   const f = await fixture(t), cloud = f.controller();
   assert.equal((await cloud.history()).chats.length, 0);

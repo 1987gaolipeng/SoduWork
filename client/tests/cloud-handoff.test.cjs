@@ -360,3 +360,21 @@ test('cloud handoff replaces stale local duration with remote turn timestamps', 
   assert.equal(execution.stopKind, undefined);
   assert.equal(execution.turnQueue, undefined);
 });
+
+test('an owned queued handoff stays cancellable without claiming the remote Agent has started', async t => {
+  const f = await fixture(t);
+  f.remotePage = { ok: true, ref: 'run-1', status: 'queued', queuePosition: 2, queueClass: 'task',
+    round: 1, last: 0, items: [] };
+  await f.cloud.confirm(f.handle, await f.input());
+  for (let attempt = 0; attempt < 30 && !f.observations; attempt++)
+    await new Promise(resolve => setTimeout(resolve, 10));
+  assert.ok(f.observations, 'The original handoff must have received its Runner snapshot');
+  const snapshot = f.handle.snapshot();
+  assert.equal(snapshot.status, 'queued');
+  assert.equal(snapshot.execution.running, false);
+  assert.equal(snapshot.execution.queuePosition, 2);
+  assert.equal(snapshot.execution.elapsedMs, null);
+  assert.equal((await f.handle.cancel()).ok, true);
+  assert.equal(f.stops, 1, 'Stop targets the existing remote execution');
+  assert.equal(f.starts, 1, 'Reading queue status does not dispatch another task');
+});
