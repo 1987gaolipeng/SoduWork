@@ -300,6 +300,11 @@ function diffBody(tab) {
 
 function tabBody(tab) {
     if (!tab) return '';
+    if (tab.kind === 'command-record') {
+      const receipt = (text, fallback) => text ? '<pre data-user-content>' + ctx.esc(text) + '</pre>' : '<pre>' + fallback + '</pre>';
+      return '<section class="ncw-command-record"><h3>命令</h3>' + receipt(tab.record.input, '未记录') +
+        '<h3>输出</h3>' + receipt(tab.record.output, '（没有输出）') + '</section>';
+    }
     if (tab.kind === 'files') return ctx.filesHtml();
     if (tab.kind === 'browser' && tab.mediaType) {
       const media = tab.mediaType === 'video'
