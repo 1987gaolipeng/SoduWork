@@ -8,7 +8,8 @@ from fastapi import APIRouter, Body, Depends, Query, Response
 from .. import models
 from ..db import get_session
 from ..deps import current_client, require_perm, without_device_heartbeat
-from ..services import audit, memory_records as svc
+from ..services import audit
+from ..services import memory_records as svc
 
 router = APIRouter(prefix="/api/v1/memories", tags=["memory-records"])
 admin_router = APIRouter(prefix="/api/v1/admin/org-memory", tags=["admin-org-memory"])
