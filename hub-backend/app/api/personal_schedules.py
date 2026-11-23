@@ -223,17 +223,13 @@ async def delete_my_schedule(sid: str, client: Client = Depends(current_client),
 async def my_schedule_runs(sid: str, limit: int = 20,
                            client: Client = Depends(current_client),
                            session: AsyncSession = Depends(get_session)):
-    """List recent executions with status reconciled against authoritative task and workflow state.
-
-    """
+    """List the account's stored receipts for this schedule."""
+    from ..services import schedules as sch
     from .tasks import _my_sch
 
-    from ..services import schedules as sch
-    from ..services import schedule_conversations as conversations
     await _my_sch(session, sid, client)
     items = await sch.list_runs(session, sid,
                                owner_user_id=str(client.user_ref or ""), limit=limit)
-    await session.commit()
     return {"items": items}
 
 

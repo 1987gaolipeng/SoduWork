@@ -42,6 +42,7 @@ from .schedule_run_contracts import (
 log = logging.getLogger("uvicorn.error")
 _SCHEDULE_OWNER = resource_leases.default_owner("schedule")
 _SCHEDULE_LEASE_SECONDS = 10 * 60
+_RECONCILE_BATCH_SIZE = 200
 CLOUD_PROTOCOL = 'soduwork.cloud-automation/v1'
 
 
@@ -459,24 +460,22 @@ async def execute_one(session: AsyncSession, s, trigger: str = "timer",
 
 async def reconcile_runs(session: AsyncSession, *, schedule_id: str = "",
                          owner_client_id: str = "", owner_user_id: str | None = None,
-                         limit: int = 200) -> list:
-    """Reconcile active ordinary-conversation receipts without task truth."""
+                         after_id: str = "", limit: int = _RECONCILE_BATCH_SIZE) -> list:
+    """Settle expired devices and reconcile one page of outstanding receipts."""
     from . import schedule_device_liveness
     await schedule_device_liveness.reconcile_expired(
         session, schedule_id=schedule_id, owner_client_id=owner_client_id,
         owner_user_id=owner_user_id, limit=limit)
-    cloud_mode = models.AiScheduleRun.receipt["executionMode"].as_string() == CLOUD_PROTOCOL
-    damaged_cloud = cloud_mode & (
+    execution_mode = models.AiScheduleRun.receipt["executionMode"].as_string()
+    damaged_cloud = (execution_mode == CLOUD_PROTOCOL) & (
         models.AiScheduleRun.receipt["migratedFrom"].as_string() == "legacy-task-workflow")
-    state_filter = or_(models.AiScheduleRun.state.in_(RUN_ACTIVE), damaged_cloud)
-    # Include every old task/workflow-linked row when a schedule's history is
-    # opened. It is migrated below in one place, so the UI never exposes a
-    # retired task status or attempts to recover the old workflow.
-    legacy_links = or_(models.AiScheduleRun.workflow_run_id != "",
-                       models.AiScheduleRun.task_id != "")
-    if schedule_id:
-        state_filter = or_(state_filter, legacy_links)
-    q = select(models.AiScheduleRun).where(state_filter)
+    # Terminal legacy receipts also need migration. A valid cloud task link
+    # survives settlement, and old receipts may have no executionMode field.
+    legacy_links = execution_mode.is_distinct_from(CLOUD_PROTOCOL) & or_(
+        models.AiScheduleRun.workflow_run_id != "", models.AiScheduleRun.task_id != "")
+    q = select(models.AiScheduleRun).where(
+        models.AiScheduleRun.id > after_id,
+        or_(models.AiScheduleRun.state.in_(RUN_ACTIVE), damaged_cloud, legacy_links))
     if schedule_id:
         q = q.where(models.AiScheduleRun.schedule_id == schedule_id)
     if owner_client_id:
@@ -484,9 +483,9 @@ async def reconcile_runs(session: AsyncSession, *, schedule_id: str = "",
     if owner_user_id is not None:
         q = q.where(models.AiScheduleRun.owner_user_id == owner_user_id if owner_user_id
                     else models.AiScheduleRun.owner_user_id.is_(None))
-    active = list((await session.execute(
-        q.order_by(models.AiScheduleRun.started_at.desc()).limit(
-            max(1, min(500, int(limit or 200)))).execution_options(populate_existing=True))).scalars().all())
+    batch_size = max(1, min(500, int(limit or _RECONCILE_BATCH_SIZE)))
+    q = q.order_by(models.AiScheduleRun.id).limit(batch_size).execution_options(populate_existing=True)
+    active = list((await session.scalars(q)).all())
     if not active:
         return active
     now = datetime.now(timezone.utc)
@@ -611,8 +610,6 @@ def run_to_api(run) -> dict:
 async def list_runs(session: AsyncSession, schedule_id: str, *,
                     owner_client_id: str = "", owner_user_id: str | None = None,
                     limit: int = 20, max_limit: int = 100) -> list[dict]:
-    await reconcile_runs(session, schedule_id=schedule_id,
-                         owner_client_id=owner_client_id, owner_user_id=owner_user_id)
     q = select(models.AiScheduleRun).where(
         models.AiScheduleRun.schedule_id == schedule_id)
     if owner_client_id:
@@ -742,11 +739,13 @@ async def run_one(session: AsyncSession, s, who: str = "SoduWork（定时）",
         session, s, client, repo, schedule_run_id, adapter, personal)
 
 
-async def tick(session: AsyncSession) -> dict:
+async def tick(session: AsyncSession, *, after_run_id: str = "") -> dict:
     """Reconcile receipts and claim each due occurrence on exactly one Hub instance."""
     try:
-        await reconcile_runs(session)
+        page = await reconcile_runs(session, after_id=after_run_id)
+        next_id = page[-1].id if len(page) == _RECONCILE_BATCH_SIZE else ""
         await session.commit()
+        after_run_id = next_id
     except Exception:  # Receipt projection failure must not suppress unrelated due work.
         log.exception("自动化执行记录对账失败，继续检查到期计划")
         await session.rollback()
@@ -827,4 +826,4 @@ async def tick(session: AsyncSession) -> dict:
             log.warning("自动化启动失败「%s」：%s", s.title, s.last_error)
             await _notify_failure(session, s, out)
     return {"checked": len(schedule_ids), "fired": fired,
-            "contended": contended, "deduplicated": deduplicated}
+            "contended": contended, "deduplicated": deduplicated, "nextRunId": after_run_id}
