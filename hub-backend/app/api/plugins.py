@@ -140,8 +140,10 @@ async def bulk_import_plugins(
         except (ValueError, RuntimeError) as exc:
             await session.rollback()
             await session.refresh(user)
-            results.append({"filename": filename, "ok": False,
-                            "error": str(exc)[:500]})
+            result = {"filename": filename, "ok": False, "error": str(exc)[:500]}
+            if isinstance(exc, plugin_service.PackageStorageError):
+                result["errorMessage"] = {"key": "plugin.import.storage_failed", "fallback": str(exc)}
+            results.append(result)
     imported = sum(1 for item in results if item["ok"])
     await audit.log(
         session, user, "plugin.bulk_import", "plugin_catalog", "external",

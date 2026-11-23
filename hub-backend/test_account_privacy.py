@@ -553,6 +553,16 @@ class AccountPrivacyTests(unittest.IsolatedAsyncioTestCase):
         async with SessionLocal() as session:
             self.assertEqual((await session.get(User, self.uid)).username, "person@example.test")
 
+    async def test_disabled_admin_login_reports_restriction_only_with_valid_credentials(self):
+        async with SessionLocal.begin() as session:
+            user = await session.get(User, self.uid)
+            user.is_active = False
+        path = "/api/v1/admin/login"
+        for password, expected in (("Original-password-123", 403), ("mistyped", 401)):
+            response = await self.http.post(path, json={"user": "person@example.test", "pass": password})
+            self.assertEqual(response.status_code, expected)
+            self.assertNotIn("token", response.json())
+
     async def test_admin_login_charges_only_failures_and_honors_shared_budgets(self):
         account_key = email_auth._digest("account-rate\0admin-login-account:id:" + self.uid)
         peer_key = email_auth._digest("account-rate\0admin-login-ip:127.0.0.1")
