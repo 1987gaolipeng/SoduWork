@@ -1,5 +1,7 @@
 """Departmental repository binding policy and the normal pending-to-mapped workflow."""
 
+from types import SimpleNamespace
+
 from fastapi import HTTPException
 from sqlalchemy import select
 
@@ -7,6 +9,7 @@ from test_user_role_updates import AdminUserTestCase
 
 from app import models
 from app.api import repomap
+from app.services import deployments, environment_service
 
 
 class RepositoryBindingScope(AdminUserTestCase):
@@ -75,6 +78,30 @@ class RepositoryBindingScope(AdminUserTestCase):
             self.assertEqual((await session.get(models.Task, "manual")).repo_id, "existing")
         removed = await self.request("DELETE", path + "/" + first.json()["id"])
         self.assertTrue(removed.json()["ok"])
+
+    async def test_mapped_import_selects_its_target_and_scoped_reference(self):
+        body = {"integrationId": "source", "externalRepo": "Product", "repoId": "repo"}
+        response = await self.request("POST", "/repo-bindings", json=body)
+        self.assertEqual(response.status_code, 200, response.text)
+        async with self.sessions() as session:
+            task = await session.get(models.Task, "project")
+            repo = await session.get(models.Repo, task.repo_id)
+            env = await environment_service.save_environment(session, {
+                "orgId": repo.org_id, "key": "preview", "name": "Preview", "tier": "dev",
+            })
+            ref = await environment_service.save_secret_ref(session, {
+                "name": "Preview token", "provider": "runner-env", "locator": "PREVIEW_FIXTURE", "orgId": repo.org_id,
+            })
+            target = await environment_service.save_target(session, {
+                "repoId": repo.id, "environmentId": env.id, "name": "Preview", "provider": "runner-command",
+                "config": {"argv": ["deploy", "preview"]}, "secretRefs": {"PREVIEW": ref.id},
+            })
+            selected = await deployments._targets(session, task, env.id)
+            self.assertEqual([row.id for row in selected], [target.id])
+            spec = await deployments._spec(session, SimpleNamespace(id="preview-run", commit_sha="abc"),
+                                           env, selected[0], repo, task)
+            self.assertEqual(spec["repoId"], repo.id)
+            self.assertEqual(spec["secrets"], [{"env": "PREVIEW", "provider": "runner-env", "locator": "PREVIEW_FIXTURE"}])
 
     async def test_orphan_policy_and_platform_cleanup(self):
         async with self.sessions.begin() as session:
