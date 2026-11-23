@@ -270,11 +270,27 @@ async def delete_org(
     except rbac.OrgMutationError as exc:
         raise _org_mutation_error(exc) from exc
     if not r["ok"]:
-        msg = {"has_children": "该部门下还有子部门", "has_users": "该部门下还有用户", "not_found": "部门不存在"}
+        # Actionable messages: the count plus where and what to do, so the user can
+        # fix the blocking reference and retry without support.
+        templates = {
+            "has_children": "该部门下还有 {count} 个子部门，请先删除或移动子部门后再删除该部门",
+            "has_users": "该部门下还有 {count} 个用户，请先在“用户管理”页把用户调整到其他部门后再删除",
+            "has_positions": "该部门下还有 {count} 个岗位（职业画像），请先在“组织治理 → 工作目录”页转移或删除后再删除",
+            "has_scenarios": "该部门下还有 {count} 个工作场景，请先在“组织治理 → 工作目录”页转移或删除后再删除",
+            "has_projects": "该部门下还有 {count} 个项目，请先在“项目治理”页把项目转移到其他部门后再删除",
+            "has_repos": "该部门下还有 {count} 个工程仓库（跟随所属项目），请先在“项目治理”页处理所属项目后再删除",
+            "has_default_org": "有 {count} 个登录接入方式把该部门设为新用户默认部门，请先在“接入策略”页更换默认部门后再删除",
+        }
         reason = r["reason"]
-        raise HTTPException(status_code=404 if reason == "not_found" else 400, detail=msg.get(reason, "无法删除"),
+        template = templates.get(reason)
+        detail = template.format(count=r["count"]) if template and r.get("count") is not None else {
+            "has_children": "该部门下还有子部门", "has_users": "该部门下还有用户", "not_found": "部门不存在"}.get(reason, "无法删除")
+        raise HTTPException(status_code=404 if reason == "not_found" else 400, detail=detail,
                             headers={"X-Error-Code": f"org.delete.{reason}"})
-    await audit.log(session, user, "org.delete", "org", oid, r.get("name", ""), {})
+    # Physical delete: keep parent/sort in the audit entry so an accidental delete
+    # can be reconstructed.
+    await audit.log(session, user, "org.delete", "org", oid, r.get("name", ""),
+                    {"parent_id": r.get("parent_id"), "sort": r.get("sort")})
     return r
 
 

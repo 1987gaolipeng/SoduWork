@@ -281,7 +281,9 @@ async def main() -> None:
             await work_catalog_api.update_profession(
                 active["id"], {"orgId": root.id, "enabled": True}, user, session)
         except HTTPException as error:
-            ok(error.status_code == 400, "unexpected HTTP status on a mismatched catalog write")
+            # 400: legacy service-level mismatch check; 403: _target_org scope rejection —
+            # both mean the cross-org write is refused.
+            ok(error.status_code in (400, 403), "unexpected HTTP status on a mismatched catalog write")
         else:
             raise AssertionError("inherited profession was changed from another catalog")
         for org_state in ("archived", "test"):

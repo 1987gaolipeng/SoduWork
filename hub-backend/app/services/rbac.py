@@ -298,13 +298,33 @@ async def delete_org(
     scope = await scope_org_ids(session, actor)
     if scope is not None and oid not in scope:
         raise OrgMutationError("out_of_scope")
+    # The delete is physical (repo convention: no soft-delete column), so every soft
+    # org reference (no foreign keys) must block first. Return counts so callers can
+    # show actionable messages; success also carries parent/sort so an accidental
+    # delete can be reconstructed from the audit entry.
     child = await session.scalar(select(func.count()).select_from(models.OrgUnit).where(models.OrgUnit.parent_id == oid))
     if child:
-        return {"ok": False, "reason": "has_children"}
+        return {"ok": False, "reason": "has_children", "count": int(child)}
     users = await session.scalar(select(func.count()).select_from(models.User).where(models.User.org_id == oid))
     if users:
-        return {"ok": False, "reason": "has_users"}
-    deleted = {"id": o.id, "name": o.name}
+        return {"ok": False, "reason": "has_users", "count": int(users)}
+    positions = await session.scalar(select(func.count()).select_from(models.Position).where(models.Position.org_id == oid))
+    if positions:
+        return {"ok": False, "reason": "has_positions", "count": int(positions)}
+    scenarios = await session.scalar(select(func.count()).select_from(models.WorkScenario).where(models.WorkScenario.org_id == oid))
+    if scenarios:
+        return {"ok": False, "reason": "has_scenarios", "count": int(scenarios)}
+    projects = await session.scalar(select(func.count()).select_from(models.Project).where(models.Project.org_id == oid))
+    if projects:
+        return {"ok": False, "reason": "has_projects", "count": int(projects)}
+    repos = await session.scalar(select(func.count()).select_from(models.Repo).where(models.Repo.org_id == oid))
+    if repos:
+        return {"ok": False, "reason": "has_repos", "count": int(repos)}
+    default_orgs = await session.scalar(
+        select(func.count()).select_from(models.IdentityProvider).where(models.IdentityProvider.default_org_id == oid))
+    if default_orgs:
+        return {"ok": False, "reason": "has_default_org", "count": int(default_orgs)}
+    deleted = {"id": o.id, "name": o.name, "parent_id": o.parent_id, "sort": o.sort}
     await session.delete(o)
     await session.commit()
     return {"ok": True, **deleted}

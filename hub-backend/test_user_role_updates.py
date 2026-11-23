@@ -428,5 +428,105 @@ class UserDepartmentConcurrencyTests(AdminUserTestCase):
                 self.assertEqual((await session.get(models.User, saved.json()["id"])).org_id, org_id)
 
 
+class OrgDeleteGuardTests(AdminUserTestCase):
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        from app.api import work_catalog
+        self.app.include_router(work_catalog.admin_router)
+
+    async def test_delete_blocks_on_each_soft_reference_and_reports_counts(self):
+        async with self.sessions() as session:
+            session.add(models.OrgUnit(id="guard", name="Guard"))
+            session.add_all([
+                models.Position(id="pos-guard", name="Guard pos", org_id="guard"),
+                models.WorkScenario(id="scene-guard", org_id="guard", key="k", name="Guard scene"),
+                models.Project(id="proj-guard", name="Guard project", org_id="guard"),
+                models.Repo(id="repo-guard", project_id="proj-guard", name="Guard repo", org_id="guard"),
+                models.IdentityProvider(id="idp-guard", key="guard-idp", name="Guard idp", default_org_id="guard"),
+            ])
+            await session.commit()
+        expectations = [
+            ("pos-guard", models.Position, "has_positions"),
+            ("scene-guard", models.WorkScenario, "has_scenarios"),
+            ("proj-guard", models.Project, "has_projects"),
+            ("repo-guard", models.Repo, "has_repos"),
+            ("idp-guard", models.IdentityProvider, "has_default_org"),
+        ]
+        for row_id, model, reason in expectations:
+            r = await self.request("DELETE", "/orgs/guard", who="super")
+            self.assertEqual(r.status_code, 400, r.text)
+            self.assertEqual(r.headers["X-Error-Code"], "org.delete." + reason, r.text)
+            self.assertIn("1", r.json()["detail"])
+            async with self.sessions() as session:
+                await session.delete(await session.get(model, row_id))
+                await session.commit()
+        r = await self.request("DELETE", "/orgs/guard", who="super")
+        self.assertEqual(r.status_code, 200, r.text)
+
+    async def test_delete_returns_reconstructable_snapshot(self):
+        async with self.sessions() as session:
+            session.add(models.OrgUnit(id="empty", name="Empty", parent_id="team", sort=7))
+            await session.commit()
+        r = await self.request("DELETE", "/orgs/empty", who="super")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["parent_id"], "team")
+        self.assertEqual(r.json()["sort"], 7)
+        async with self.sessions() as session:
+            self.assertIsNone(await session.get(models.OrgUnit, "empty"))
+
+    async def test_profession_and_scenario_move_between_orgs(self):
+        async with self.sessions() as session:
+            session.add_all([models.OrgUnit(id="dest", name="Dest"),
+                             models.Position(id="pos-move", name="Mover", org_id="team"),
+                             models.WorkScenario(id="scene-move", org_id="team", key="scene-key", name="Mover scene",
+                                                 intent_hints=["方案"],
+                                                 output_contract={"kind": "artifact", "summary": "s",
+                                                                  "deliverables": ["d"], "acceptance": ["a"]})])
+            await session.commit()
+        for kind, row_id in (("professions", "pos-move"), ("scenarios", "scene-move")):
+            r = await self.request("PATCH", "/work-catalog/" + kind + "/" + row_id,
+                                   who="super", json={"orgId": "dest"})
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertEqual(r.json().get("orgId"), "dest", r.text)
+        async with self.sessions() as session:
+            self.assertEqual((await session.get(models.Position, "pos-move")).org_id, "dest")
+            self.assertEqual((await session.get(models.WorkScenario, "scene-move")).org_id, "dest")
+
+    async def test_profession_transfer_rejects_unknown_org_and_keeps_org_when_omitted(self):
+        async with self.sessions() as session:
+            session.add(models.Position(id="pos-scope", name="Scoped", org_id="team"))
+            await session.commit()
+        r = await self.request("PATCH", "/work-catalog/professions/pos-scope",
+                               who="super", json={"orgId": "missing"})
+        self.assertEqual(r.status_code, 404, r.text)
+        r = await self.request("PATCH", "/work-catalog/professions/pos-scope", who="super", json={"name": "Scoped2"})
+        self.assertEqual(r.status_code, 200, r.text)
+        async with self.sessions() as session:
+            self.assertEqual((await session.get(models.Position, "pos-scope")).org_id, "team")
+
+    async def test_project_create_adopts_optional_org_and_update_moves_repos(self):
+        r = await self.request("POST", "/projects", who="super",
+                               json={"name": "Scoped project", "ownerUserId": "target", "orgId": "outside"})
+        self.assertEqual(r.status_code, 200, r.text)
+        pid = r.json()["id"]
+        async with self.sessions() as session:
+            self.assertEqual((await session.get(models.Project, pid)).org_id, "outside")
+            session.add(models.Repo(id="repo-move", project_id=pid, name="R", org_id="outside"))
+            await session.commit()
+        r = await self.request("PUT", "/projects/" + pid, who="super", json={"orgId": "team"})
+        self.assertEqual(r.status_code, 200, r.text)
+        async with self.sessions() as session:
+            self.assertEqual((await session.get(models.Project, pid)).org_id, "team")
+            self.assertEqual((await session.get(models.Repo, "repo-move")).org_id, "team")
+
+    async def test_project_create_without_org_keeps_owner_default(self):
+        r = await self.request("POST", "/projects", who="super",
+                               json={"name": "Legacy project", "ownerUserId": "target"})
+        self.assertEqual(r.status_code, 200, r.text)
+        pid = r.json()["id"]
+        async with self.sessions() as session:
+            self.assertEqual((await session.get(models.Project, pid)).org_id, "child")
+
+
 if __name__ == "__main__":
     unittest.main()

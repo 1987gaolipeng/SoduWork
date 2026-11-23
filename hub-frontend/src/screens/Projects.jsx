@@ -66,9 +66,9 @@ function Field({ label, note, children, wide }) {
   return <label className={'pg-field' + (wide ? ' wide' : '')}><span>{label}</span>{children}{note && <small>{note}</small>}</label>
 }
 
-function ProjectModal({ project, owners, onClose, onSave }) {
+function ProjectModal({ project, owners, orgs, onClose, onSave }) {
   const uiLocale = useLocale();
-  const [form, setForm] = useState(project || { name: '', group: '', desc: '', repoUrl: '', ownerUserId: '' })
+  const [form, setForm] = useState(project ? { ...project, orgId: project.orgId || '' } : { name: '', group: '', desc: '', repoUrl: '', ownerUserId: '', orgId: '' })
   const [busy, setBusy] = useState(false); const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
   async function save() {
     if (!form.name.trim()) return toast(tx("请填写项目名称"))
@@ -79,6 +79,7 @@ function ProjectModal({ project, owners, onClose, onSave }) {
       payload.ownerUserId = form.ownerUserId
       if (form.dataSource) payload.dataSource = form.dataSource
     }
+    if (form.orgId) payload.orgId = form.orgId
     setBusy(true); try { await onSave(payload) } catch (e) { toast(tx("项目没有保存：") + e.message) } finally { setBusy(false) }
   }
   return <Modal scope="project-governance" title={project ? tx("编辑项目信息") : tx("新建项目")} icon="box" wide draft={[form.name || '', form.group || '', form.desc || '', form.repoUrl || '', form.ownerUserId || '', form.dataSource || '']} onClose={onClose} foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button><button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : project ? tx("保存项目") : tx("创建项目")}</button></>}>
@@ -88,6 +89,7 @@ function ProjectModal({ project, owners, onClose, onSave }) {
       <Field label={tx("业务分组")}><input className="f-in" value={form.group || ''} onChange={set('group')} placeholder={tx("例如：内部产品")} /></Field>
       {!project && <SourceField value={form.dataSource || ''} onChange={dataSource => setForm({ ...form, dataSource: dataSource || undefined })} />}
       {!project && <Field label={tx("项目负责人")} wide><SelectMenu className="f-in" value={form.ownerUserId || ''} onChange={set('ownerUserId')}><option value="">{tx("选择负责人…")}</option>{owners.map((o) => <option value={o.id} key={o.id}>{o.name}{o.username ? ` · ${o.username}` : ''}</option>)}</SelectMenu></Field>}
+      {(orgs || []).length > 1 && <Field label={tx("所属组织")} wide><SelectMenu className="f-in" value={form.orgId || ''} onChange={set('orgId')}><option value="">{tx("默认负责人组织")}</option>{orgs.map((o) => <option value={o.id} key={o.id}>{o.name}</option>)}</SelectMenu></Field>}
       <Field label={tx("项目说明")} wide><textarea className="f-in" rows="3" value={form.desc || ''} onChange={set('desc')} placeholder={tx("说明项目服务对象、业务目标与交付边界")} /></Field>
       <Field label={tx("主代码地址（可选）")} note={tx("多个代码仓库请在项目详情中分别登记")} wide><input className="f-in" value={form.repoUrl || ''} onChange={set('repoUrl')} placeholder="https://gitlab.example.com/team/project" /></Field>
     </div>
@@ -373,7 +375,7 @@ function ProjectOverview({ project, repos, owners, repoStatus, onReload, onTab }
   </div>
 }
 
-function ProjectDetail({ pid, clients, owners, projects, onBack, onChanged }) {
+function ProjectDetail({ pid, clients, owners, orgs, projects, onBack, onChanged }) {
   const uiLocale = useLocale();
   const [project, setProject] = useState(null); const [allRepos, setRepos] = useState([]); const [reposLoading, setReposLoading] = useState(true); const [error, setError] = useState(false); const [tab, setTab] = useState('overview'); const [taskOpen, setTaskOpen] = useState(false); const [editOpen, setEditOpen] = useState(false); const [confirmDel, setConfirmDel] = useState(false); const snapshot = useRef('')
   const [reposError, setReposError] = useState(false)
@@ -400,7 +402,7 @@ function ProjectDetail({ pid, clients, owners, projects, onBack, onChanged }) {
       <div className="pg-detail-topline"><button className="pg-back" onClick={onBack}><Icon name="chevron-left" />{tx("返回项目列表")}</button><LiveDot /></div>
       <div className="pg-detail-identity">
         <div className="pg-project-mark"><Icon name="box" /></div>
-        <div className="pg-detail-title"><div className="pg-detail-name"><h2>{project.name}</h2><RecordSource row={project} /><span className="pg-detail-state">{statusLabel}</span></div><div className="pg-detail-meta"><span>{project.group || tx("未分组")}</span><span>{tx("负责人 · ")}{project.ownerName || tx("待指定")}</span></div></div>
+        <div className="pg-detail-title"><div className="pg-detail-name"><h2>{project.name}</h2><RecordSource row={project} /><span className="pg-detail-state">{statusLabel}</span></div><div className="pg-detail-meta"><span>{project.group || tx("未分组")}</span>{project.orgName ? <span>{project.orgName}</span> : null}<span>{tx("负责人 · ")}{project.ownerName || tx("待指定")}</span></div></div>
         <div className="pg-detail-actions"><button className="btn btn-ghost btn-sm" onClick={() => { loadProject(); loadRepos() }}><Icon name="refresh" />{tx("刷新")}</button>{can('task.dispatch') && <><button className="btn btn-ghost btn-sm" onClick={() => setEditOpen(true)}><Icon name="pencil" />{tx("编辑项目")}</button><button className="admin-text-action danger" onClick={() => setConfirmDel(true)}>{tx("删除项目")}</button></>}</div>
       </div>
       <p className="pg-detail-description">{project.desc || tx("尚未补充项目说明")}</p>
@@ -415,7 +417,7 @@ function ProjectDetail({ pid, clients, owners, projects, onBack, onChanged }) {
       {tab === 'link' && <AiProjectLink pid={pid} current={project.extProjectId} onSaved={async (value) => { await api.updateProject(pid, { extProjectId: value }); loadProject(); onChanged() }} />}
     </main>
     {taskOpen && <AddTaskModal pid={pid} tasks={project.tasks} clients={clients} onClose={() => setTaskOpen(false)} onDone={() => { setTaskOpen(false); loadProject(); onChanged() }} />}
-    {editOpen && <ProjectModal project={project} owners={owners} onClose={() => setEditOpen(false)} onSave={saveProject} />}
+    {editOpen && <ProjectModal project={project} owners={owners} orgs={orgs} onClose={() => setEditOpen(false)} onSave={saveProject} />}
     {confirmDel && <Confirm title={tx("删除项目")} text={tx("确定删除「{0}」？项目内需求会保留，只解除项目归属。", [project.name])} danger confirmText={tx("删除项目")} onConfirm={async () => { await api.deleteProject(pid); setConfirmDel(false); onChanged(); onBack() }} onClose={() => setConfirmDel(false)} />}
   </div>
 }
@@ -425,7 +427,7 @@ function ProjectRow({ project, checkbox, onOpen }) {
   const pct = project.total ? Math.round(project.done / project.total * 100) : 0; const state = !project.total ? tx("尚未开始") : pct === 100 ? tx("已完成") : project.done ? tx("推进中") : tx("待启动")
   return <article className="pg-project-row">
     {checkbox || <span className={'pg-project-avatar state-' + (pct === 100 ? 'done' : project.done ? 'active' : 'idle')}><Icon name="box" /></span>}
-    <div className="pg-project-name"><div><b>{project.name}</b><span>{project.group || tx("未分组")}</span></div><p><RecordSource row={project} /> {project.desc || tx("尚未补充项目说明")}</p></div>
+    <div className="pg-project-name"><div><b>{project.name}</b><span>{[project.group || tx("未分组"), project.orgName].filter(Boolean).join(' · ')}</span></div><p><RecordSource row={project} /> {project.desc || tx("尚未补充项目说明")}</p></div>
     <div className="pg-owner-cell"><b title={tx("负责人")}>{project.ownerName || tx("待指定")}</b></div>
     <div className="pg-progress-cell"><div><span>{project.done} / {project.total}{tx(" 项完成")}</span><b>{pct}%</b></div><i aria-label={tx("需求交付进度")}><em style={{ width: pct + '%' }} /></i></div>
     <span className={'pg-project-state ' + (pct === 100 ? 'done' : '')}><i />{state}</span>
@@ -439,7 +441,7 @@ function ProjectRow({ project, checkbox, onOpen }) {
 export default function Projects() {
   const listRef = useViewportHeight(180)
   const uiLocale = useLocale();
-  const projects = useAsync(() => api.projects(true), AUTO); const clients = useAsync(() => api.clients().catch(() => []), AUTO); const owners = useAsync(() => api.projectOwners().catch(() => []), AUTO)
+  const projects = useAsync(() => api.projects(true), AUTO); const clients = useAsync(() => api.clients().catch(() => []), AUTO); const owners = useAsync(() => api.projectOwners().catch(() => []), AUTO); const orgs = useAsync(() => api.orgs().catch(() => []), AUTO)
   const [open, setOpen] = useState(null); const [creating, setCreating] = useState(false); const [query, setQuery] = useState(''); const [group, setGroup] = useState('all')
   const list = projects.data || []; const people = owners.data || []; const groups = [...new Set(list.map((p) => (p.group || '').trim() || tx("未分组")))].sort((a, b) => (a === tx("未分组")) - (b === tx("未分组")))
   const keyword = query.trim().toLowerCase(); const matchingProjects = list.filter((p) => (group === 'all' || (p.group || tx("未分组")) === group) && (!keyword || [p.name, p.desc, p.group, p.ownerName].some((x) => String(x || '').toLowerCase().includes(keyword))))
@@ -447,7 +449,7 @@ export default function Projects() {
   const shown = matchingProjects.filter(records.matches)
   if (projects.loading) return <Loading />
   if (projects.error && !projects.data) return <ErrorState onRetry={projects.reload} />
-  if (open) return <ProjectDetail pid={open} clients={clients.data || []} owners={people} projects={list} onBack={() => setOpen(null)} onChanged={projects.reload} />
+  if (open) return <ProjectDetail pid={open} clients={clients.data || []} owners={people} orgs={orgs.data || []} projects={list} onBack={() => setOpen(null)} onChanged={projects.reload} />
   async function create(form) { const r = await api.createProject(form); setCreating(false); await projects.reload(); setOpen(r.id); toast(tx("项目已创建，继续登记代码仓库")) }
   return <div className="project-governance pg-index">
     <section className="admin-filterbar pg-index-filters" aria-label={tx("项目筛选")}>
@@ -463,6 +465,6 @@ export default function Projects() {
     </section>
     {records.toolbar}
     <section ref={listRef} className="pg-ledger admin-viewport-list" tabIndex={0} aria-label={tx("项目与仓库")}><header><span>{tx("项目")}</span><span>{tx("负责人")}</span><span>{tx("需求交付进度")}</span><span>{tx("状态")}</span><span>{tx("操作")}</span></header>{shown.length ? shown.map((p) => <ProjectRow key={p.id} project={p} checkbox={records.checkbox(p)} onOpen={() => setOpen(p.id)} />) : <EmptyPanel icon="search" title={tx("没有匹配的项目")} text={tx("调整搜索关键词或项目分组后再试。")} />}</section>
-    {creating && <ProjectModal owners={people} onClose={() => setCreating(false)} onSave={create} />}
+    {creating && <ProjectModal owners={people} orgs={orgs.data || []} onClose={() => setCreating(false)} onSave={create} />}
   </div>
 }

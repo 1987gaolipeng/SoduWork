@@ -299,10 +299,10 @@ export default function WorkCatalog({ me }) {
         </section>
       )}
 
-      {edit && edit.kind === 'profession' && <ProfessionEditor row={edit.row} orgId={orgId}
+      {edit && edit.kind === 'profession' && <ProfessionEditor row={edit.row} orgId={orgId} orgs={orgs}
         onClose={() => setEdit(null)} onDone={async () => { setEdit(null); await load() }} />}
       {edit && edit.kind === 'scenario' && <ScenarioEditor row={edit.row} copy={edit.copy}
-        orgId={orgId} professions={professions.filter(item =>
+        orgId={orgId} orgs={orgs} professions={professions.filter(item =>
           (!item.isArchived && item.dataSource !== 'test') || (!edit.copy && edit.row?.positionIds?.includes(item.id)))}
         workflows={workflows} noEnabledWorkflows={!!catalog && !enabledWorkflowCount}
         onClose={() => setEdit(null)} onDone={async () => { setEdit(null); await load() }} />}
@@ -313,20 +313,21 @@ export default function WorkCatalog({ me }) {
   )
 }
 
-function ProfessionEditor({ row, orgId, onClose, onDone }) {
+function ProfessionEditor({ row, orgId, orgs, onClose, onDone }) {
   const uiLocale = useLocale();
   const [name, setName] = useState(row ? row.name : '')
   const [category, setCategory] = useState(row ? row.category : '')
   const [description, setDescription] = useState(row ? row.description : '')
   const [competencies, setCompetencies] = useState(joinLines(row && row.competencies))
   const [dataSource, setDataSource] = useState('')
+  const [targetOrgId, setTargetOrgId] = useState(row ? (row.orgId || orgId) : orgId)
   const [busy, setBusy] = useState(false)
 
   async function save() {
     if (!name.trim()) { toast(tx("请填写职业名称")); return }
     setBusy(true)
     try {
-      const body = { orgId, name: name.trim(), category: category.trim(),
+      const body = { orgId: targetOrgId, name: name.trim(), category: category.trim(),
         description: description.trim(), competencies: lines(competencies) }
       if (!row && dataSource) body.dataSource = dataSource
       if (row) await api.updateProfession(row.id, body)
@@ -338,10 +339,14 @@ function ProfessionEditor({ row, orgId, onClose, onDone }) {
   }
 
   return (
-    <Modal draft={{ name, category, description, competencies, dataSource }} title={row ? tx("编辑职业画像") : tx("新建职业画像")} icon="users" onClose={onClose} wide
+    <Modal draft={{ name, category, description, competencies, dataSource, targetOrgId }} title={row ? tx("编辑职业画像") : tx("新建职业画像")} icon="users" onClose={onClose} wide
       foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button>
         <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : tx("保存职业")}</button></>}>
       <div className="wc-form-note">{tx("职业画像回答“这个员工长期擅长什么”，不改变他的系统权限。一个员工可以选择多个职业。")}</div>
+      {(orgs || []).length > 1 && <label className="wc-field"><span>{tx("所属组织")}</span>
+        <SelectMenu className="f-in" value={targetOrgId} onChange={(event) => setTargetOrgId(event.target.value)}>
+          {orgs.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </SelectMenu></label>}
       {!row && <SourceField value={dataSource} onChange={setDataSource} />}
       <div className="wc-form-two">
         <label><span>{tx("职业名称")}</span><input className="f-in" value={name} onChange={(event) => setName(event.target.value)} placeholder={tx("例如：解决方案顾问")} /></label>
@@ -355,7 +360,7 @@ function ProfessionEditor({ row, orgId, onClose, onDone }) {
   )
 }
 
-function ScenarioEditor({ row, copy, orgId, professions, workflows, noEnabledWorkflows, onClose, onDone }) {
+function ScenarioEditor({ row, copy, orgId, orgs, professions, workflows, noEnabledWorkflows, onClose, onDone }) {
   const uiLocale = useLocale();
   const source = row || {}
   const [name, setName] = useState(source.name || '')
@@ -373,6 +378,7 @@ function ScenarioEditor({ row, copy, orgId, professions, workflows, noEnabledWor
   const [deliverables, setDeliverables] = useState(joinLines(contract.deliverables))
   const [acceptance, setAcceptance] = useState(joinLines(contract.acceptance))
   const [enabled, setEnabled] = useState(source.enabled !== false)
+  const [targetOrgId, setTargetOrgId] = useState(row && !copy ? (source.orgId || orgId) : orgId)
   const [busy, setBusy] = useState(false)
   const editing = !!row && !copy && row.orgId === orgId && !row.isSystem
   const workflow = workflows.find((item) => item.key === pluginKey)
@@ -402,7 +408,7 @@ function ScenarioEditor({ row, copy, orgId, professions, workflows, noEnabledWor
     setBusy(true)
     try {
       const body = {
-        orgId, key, name: name.trim(), category: category.trim(),
+        orgId: targetOrgId, key, name: name.trim(), category: category.trim(),
         description: description.trim(), positionIds,
         intentHints: lines(hints), requiredCapabilities: lines(capabilities),
         defaultPluginKey: pluginKey, enabled,
@@ -419,11 +425,15 @@ function ScenarioEditor({ row, copy, orgId, professions, workflows, noEnabledWor
 
   return (
     <Modal draft={{ name, category, description, positionIds: [...positionIds].sort(), hints, capabilities,
-        pluginKey, kind, summary, deliverables, acceptance, enabled }} title={copy ? tx("按企业调整场景") : (editing ? tx("编辑工作场景") : tx("新建工作场景"))}
+        pluginKey, kind, summary, deliverables, acceptance, enabled, targetOrgId }} title={copy ? tx("按企业调整场景") : (editing ? tx("编辑工作场景") : tx("新建工作场景"))}
       icon="sitemap" onClose={onClose} wide
       foot={dismiss => <><button className="btn btn-ghost" onClick={dismiss}>{tx("取消")}</button>
         <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : tx("保存场景")}</button></>}>
       <div className="wc-form-note">{tx("场景描述“一类工作怎样才算交付”。需求创建时会自动匹配，人仍可在确认卡中改选。")}</div>
+      {(orgs || []).length > 1 && <label className="wc-field"><span>{tx("所属组织")}</span>
+        <SelectMenu className="f-in" value={targetOrgId} onChange={(event) => setTargetOrgId(event.target.value)}>
+          {orgs.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </SelectMenu></label>}
       <div className="wc-form-two">
         <label><span>{tx("场景名称")}</span><input className="f-in" value={name} onChange={(event) => setName(event.target.value)} placeholder={tx("例如：客户方案编制")} /></label>
         <label><span>{tx("场景类别")}</span><input className="f-in" value={category} onChange={(event) => setCategory(event.target.value)} placeholder={tx("例如：方案与咨询")} /></label>

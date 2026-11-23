@@ -26,7 +26,7 @@ router = APIRouter()
 async def list_projects(user: User = Depends(require_perm("task.view")), session: AsyncSession = Depends(get_session),
                         includeManaged: bool = False):
     """List scoped projects with completed and total task counts."""
-    from ..models import Project
+    from ..models import OrgUnit, Project
     from ..schemas import _ms
     scope = await rbac.scope_org_ids(session, user)   # None leaves superusers unrestricted.
     query = select(Project)
@@ -38,6 +38,10 @@ async def list_projects(user: User = Depends(require_perm("task.view")), session
     owner_ids = {str(p.owner_user_id) for p in projs if p.owner_user_id}
     owners = {u.id: u for u in (await session.execute(select(User).where(
         User.id.in_(owner_ids or {"__none__"})
+    ))).scalars().all()}
+    org_ids = {p.org_id for p in projs if p.org_id}
+    org_names = {o.id: o.name for o in (await session.execute(select(OrgUnit).where(
+        OrgUnit.id.in_(org_ids or {"__none__"})
     ))).scalars().all()}
     active = Task.archived_at.is_(None) & (Task.status != "cancel")
     counts = {pid: (int(total), int(done), int(closed)) for pid, total, done, closed in
@@ -55,6 +59,7 @@ async def list_projects(user: User = Depends(require_perm("task.view")), session
                     "group": getattr(p, "group", "") or "", "repoUrl": getattr(p, "repo_url", "") or "",
                     "extProjectId": getattr(p, "ext_project_id", "") or "",
                     "ownerUserId": p.owner_user_id or "",
+                    "orgId": p.org_id or "", "orgName": org_names.get(p.org_id or "", ""),
                     "ownerName": ((owners[p.owner_user_id].display_name or
                                    owners[p.owner_user_id].username)
                                   if p.owner_user_id in owners else ""),
@@ -120,12 +125,21 @@ async def create_project(body: dict = Body(default_factory=dict),
                          user: User = Depends(require_perm("task.dispatch")),
                          session: AsyncSession = Depends(get_session)):
     from ..models import OrgUnit, Project
-    unknown = sorted(set(body) - {"name", "desc", "group", "repoUrl", "ownerUserId", "dataSource"})
+    unknown = sorted(set(body) - {"name", "desc", "group", "repoUrl", "ownerUserId", "orgId", "dataSource"})
     if unknown:
         raise HTTPException(status_code=422, detail="未知字段：" + ", ".join(unknown))
     name = _project_name(body.get("name"))
     owner = await _project_owner(session, user, str(body.get("ownerUserId") or ""))
-    org_id = owner.org_id or user.org_id
+    # Optional org adoption: explicit orgId wins (validated), otherwise keep the
+    # legacy default of owner's org falling back to the creator's org.
+    offered_org = str(body.get("orgId") or "").strip()
+    if offered_org:
+        from .admin import _assert_org_in_scope, _require_existing_org
+        await _require_existing_org(session, offered_org)
+        await _assert_org_in_scope(session, user, offered_org)
+        org_id = offered_org
+    else:
+        org_id = owner.org_id or user.org_id
     parent = await session.get(OrgUnit, org_id) if org_id else None
     await _available_project_name(session, name, org_id)
     p = Project(name=name, desc=body.get("desc") or "", org_id=org_id,
@@ -175,6 +189,15 @@ async def update_project(pid: str, body: dict = Body(default_factory=dict),
     if "ownerUserId" in body:
         owner = await _project_owner(session, user, str(body.get("ownerUserId") or ""))
     next_org = old_org or (owner.org_id if owner else None)
+    repos_moved = 0
+    explicit_org = "orgId" in body
+    if explicit_org:
+        from .admin import _require_existing_org
+        next_org = str(body.get("orgId") or "").strip()
+        if not next_org:
+            raise HTTPException(status_code=400, detail="请选择项目所属组织")
+        await _require_existing_org(session, next_org)
+        await _assert_org_in_scope(session, user, next_org)
     name = _project_name(body["name"]) if "name" in body else p.name
     if name != p.name or next_org != old_org:
         if not name:
@@ -198,6 +221,16 @@ async def update_project(pid: str, body: dict = Body(default_factory=dict),
             setattr(p, f, str(body.get(k) or "").strip())
     if not p.name:
         raise HTTPException(status_code=400, detail="请填工程名")
+    # Explicit org change: repos follow their project so the permission boundary
+    # (org-scoped repo access) stays consistent.
+    if explicit_org and next_org != old_org:
+        p.org_id = next_org
+        moved = list((await session.execute(select(Repo).where(
+            Repo.project_id == p.id, Repo.org_id != next_org
+        ))).scalars().all())
+        for repo in moved:
+            repo.org_id = next_org
+        repos_moved = len(moved)
     rerouted = {"requests": 0, "assignments": 0, "skipped": 0}
     if owner is not None and owner.id != old_owner:
         from ..services import approval_routing
@@ -213,7 +246,7 @@ async def update_project(pid: str, body: dict = Body(default_factory=dict),
                     {"extProjectId": p.ext_project_id, "ownerUserId": p.owner_user_id,
                      "previousOwnerUserId": old_owner, "pendingRerouted": rerouted,
                      "previousOrgId": old_org or "", "orgId": p.org_id or "",
-                     "migratedRepos": migrated_repos})
+                     "migratedRepos": migrated_repos, "reposMoved": repos_moved})
     current_owner = owner or (await session.get(User, p.owner_user_id) if p.owner_user_id else None)
     return {"id": p.id, "name": p.name, "desc": p.desc, "group": p.group, **record_fields(p),
             "repoUrl": p.repo_url, "extProjectId": p.ext_project_id,
@@ -430,14 +463,14 @@ async def delete_repo(rid: str, user: User = Depends(require_perm("task.dispatch
 async def project_detail(pid: str, user: User = Depends(require_perm("task.view")),
                          session: AsyncSession = Depends(get_session)):
     """Return project details and task dependencies, status, and owners for the dependency graph."""
-    from .admin import _assert_org_in_scope
-
-    from ..models import Project
+    from ..models import OrgUnit, Project
     from ..services.boxes import box_owner_names
+    from .admin import _assert_org_in_scope
     p = await session.get(Project, pid)
     if p is None:
         raise HTTPException(status_code=404, detail="工程不存在")
     await _assert_org_in_scope(session, user, p.org_id)
+    org_row = await session.get(OrgUnit, p.org_id) if p.org_id else None
     ts = (await session.execute(select(Task).where(Task.project_id == pid).order_by(Task.created_at))).scalars().all()
     box_names = await box_owner_names(session, [t.owner_client_id for t in ts])
     tasks_out = []
@@ -452,6 +485,7 @@ async def project_detail(pid: str, user: User = Depends(require_perm("task.view"
             "group": getattr(p, "group", "") or "", "repoUrl": getattr(p, "repo_url", "") or "",
             "extProjectId": getattr(p, "ext_project_id", "") or "",
             "ownerUserId": p.owner_user_id or "",
+            "orgId": p.org_id or "", "orgName": (org_row.name if org_row else ""),
             "ownerName": ((owner.display_name or owner.username) if owner else ""),
             "tasks": tasks_out}
 
