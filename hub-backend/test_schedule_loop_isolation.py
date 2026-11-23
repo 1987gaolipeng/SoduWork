@@ -45,9 +45,9 @@ class ScheduleLoopTests(unittest.IsolatedAsyncioTestCase):
                         await blocked.wait()
                     return {}
 
-                async def timer(_session):
+                async def timer(_session, *, after_run_id):
                     fired.set()
-                    return {"fired": 1}
+                    return {"fired": 1, "nextRunId": ""}
 
                 with patch.object(db, "SessionLocal", lambda: Context([])), \
                      patch.object(config, "get_settings", return_value=SimpleNamespace(delivery_sweep_seconds=120)), \
@@ -70,22 +70,24 @@ class ScheduleLoopTests(unittest.IsolatedAsyncioTestCase):
     async def test_failed_timer_iteration_retries_and_shutdown_propagates(self):
         loop = importlib.import_module("app.services.schedule_loop")
         exits = []
-        tick = AsyncMock(side_effect=[RuntimeError("isolated timer error"), {"fired": 0}])
-        sleep = AsyncMock(side_effect=[None, asyncio.CancelledError])
+        tick = AsyncMock(side_effect=[{"fired": 0, "nextRunId": "last-run"},
+                                      RuntimeError("isolated timer error"), {"fired": 0, "nextRunId": ""}])
+        sleep = AsyncMock(side_effect=[None, None, asyncio.CancelledError])
         with patch.object(db, "SessionLocal", lambda: Context(exits)), \
              patch.object(config, "get_settings", return_value=SimpleNamespace(delivery_sweep_seconds=120)), \
              patch.object(schedules, "tick", tick), patch.object(loop.asyncio, "sleep", sleep):
             with self.assertRaises(asyncio.CancelledError):
                 await loop.tick_loop()
-        self.assertEqual(tick.await_count, 2)
-        self.assertEqual(exits, [RuntimeError, None])
+        self.assertEqual([call.kwargs["after_run_id"] for call in tick.await_args_list],
+                         ["", "last-run", "last-run"])
+        self.assertEqual(exits, [None, RuntimeError, None])
 
     async def test_shutdown_cancels_inflight_tick_and_closes_its_session(self):
         loop = importlib.import_module("app.services.schedule_loop")
         started, blocked = asyncio.Event(), asyncio.Event()
         exits = []
 
-        async def tick(_session):
+        async def tick(_session, *, after_run_id):
             started.set()
             await blocked.wait()
 
@@ -194,7 +196,9 @@ class ScheduleTickIsolationTests(unittest.IsolatedAsyncioTestCase):
         await self.session.commit()
         with patch.object(schedules, "reconcile_runs", AsyncMock(side_effect=RuntimeError("isolated receipt failure"))), \
              patch.object(schedules, "run_one", AsyncMock(return_value={"ok": True})) as dispatch:
-            self.assertEqual((await schedules.tick(self.session))["fired"], 1)
+            result = await schedules.tick(self.session, after_run_id="last-committed-run")
+        self.assertEqual(result["fired"], 1)
+        self.assertEqual(result["nextRunId"], "last-committed-run")
         self.assertEqual(dispatch.await_count, 1)
 
     async def _periodic_pre_dispatch_failure(self, every, failure, retry=False):

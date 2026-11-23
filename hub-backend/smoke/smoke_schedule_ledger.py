@@ -39,13 +39,13 @@ async def main():
     async with SessionLocal() as session:
         schedule = models.AiSchedule(
             id="schedule-ledger", title="巡检", owner_client_id="client-ledger",
-            assignee_id="local:pi", created_by_name="测试用户")
+            assignee_id="local:pi", created_by_name="测试用户", enabled=False)
         done_task = models.Task(
             id="task-done", owner_client_id="client-ledger", title="已完成巡检",
             status="done", actual_end_at=now)
         direct_run = models.AiScheduleRun(
             id="run-direct", schedule_id=schedule.id, owner_client_id="client-ledger",
-            task_id=done_task.id, trigger="timer", state="running",
+            task_id=done_task.id, trigger="timer", state="succeeded",
             started_at=now - timedelta(seconds=65), receipt={"mode": "direct"})
         flow_task = models.Task(
             id="task-flow", owner_client_id="client-ledger", title="失败的发布", status="doing")
@@ -58,14 +58,20 @@ async def main():
             task_id=flow_task.id, workflow_run_id=workflow.id, trigger="manual",
             state="running", started_at=now - timedelta(seconds=20),
             receipt={"mode": "plugin"})
+        cloud_run = models.AiScheduleRun(
+            id="run-cloud", schedule_id=schedule.id, owner_client_id="client-ledger",
+            task_id=done_task.id, state="succeeded", finished_at=now,
+            receipt={"executionMode": schedules.CLOUD_PROTOCOL})
         client = models.Client(id="client-ledger")
-        session.add_all([client, schedule, done_task, direct_run, flow_task, workflow, flow_run])
+        session.add_all([client, schedule, done_task, direct_run, flow_task, workflow, flow_run, cloud_run])
         await session.commit()
 
+        await schedules.tick(session)
         items = await schedules.list_runs(
             session, schedule.id, owner_client_id="client-ledger", limit=20)
-        await session.commit()
         by_id = {item["id"]: item for item in items}
+        ok(by_id["run-cloud"]["receipt"] == {"executionMode": schedules.CLOUD_PROTOCOL}
+           and cloud_run.task_id == done_task.id, "settled cloud receipt was rewritten")
         for run_id in ("run-direct", "run-flow"):
             row = by_id[run_id]
             ok(row["state"] == "failed", "legacy work must not masquerade as a conversation")
@@ -77,8 +83,10 @@ async def main():
         ok(by_id["run-direct"]["durationSeconds"] >= 65, "stable duration lost")
         workflow.state = "succeeded"
         await session.commit()
+        await schedules.tick(session)
         again = await schedules.list_runs(session, schedule.id, owner_client_id=client.id)
-        ok(all(row["state"] == "failed" for row in again), "legacy workflow resurrected a retired receipt")
+        ok({row["id"] for row in again if row["state"] == "failed"} == {"run-direct", "run-flow"},
+           "legacy workflow resurrected a retired receipt")
 
         native = models.AiScheduleRun(id="run-chat", schedule_id=schedule.id,
             owner_client_id=client.id, trigger="manual", state="starting",
