@@ -17,7 +17,7 @@ from app import automation_models, models
 from app.db import Base, get_session
 from app.deps import current_client, current_user
 from app.library_models import LibraryFolder, LibraryItem
-from app.api import admin, approvals, clients, deliveries, environments, first_chat, library, runner_ws, tasks, usage, work_catalog
+from app.api import admin, approvals, clients, deliveries, environments, first_chat, library, quotas, runner_ws, tasks, usage, work_catalog
 from app.permissions import ALL_KEYS
 
 
@@ -68,6 +68,34 @@ class HubContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, expected, (method, path, response.status_code))
         return response.json()
 
+    async def test_directory_reads_follow_admin_and_selector_permissions(self):
+        self.user.is_super = False
+        self.user._perms = set()
+        async with self.sessions() as session, session.begin():
+            child = await session.get(models.OrgUnit, "row-1")
+            child.parent_id = self.user.org_id
+        own = await self.request("GET", "admin/orgs?limit=1")
+        self.assertEqual(([row["id"] for row in own["items"]], own["total"]), (["row-0"], 1))
+        for path in ("roles", "permissions", "domains", "role-options"):
+            await self.request("GET", "admin/" + path, 403)
+        for permission in ("user.manage", "identity.manage", "client.assign"):
+            self.user._perms = {permission}
+            options = await self.request("GET", "admin/role-options")
+            self.assertEqual(len(options), 3)
+            self.assertTrue(all(set(row) == {"id", "name"} for row in options))
+            await self.request("GET", "admin/roles", 403)
+        self.user._perms = {"user.manage"}
+        self.assertEqual((await self.request("GET", "admin/orgs?limit=1"))["total"], 2)
+        self.assertEqual(len(await self.request("GET", "admin/domains")), 3)
+        self.user._perms = {"task.dispatch"}
+        self.assertEqual((await self.request("GET", "admin/domains?limit=1"))["total"], 3)
+        self.user._perms = {"role.manage"}
+        self.assertTrue(all("permissions" in role for role in await self.request("GET", "admin/roles")))
+        await self.request("GET", "admin/permissions")
+        self.user._perms = set()
+        self.user.org_id = None
+        self.assertEqual(await self.request("GET", "admin/orgs?limit=1"), {"items": [], "total": 0})
+
     async def test_first_chat_uses_current_models_and_only_the_signed_in_accounts_recent_report(self):
         async def reporting_device(session=Depends(get_session)):
             return await session.get(models.Client, self.device.id)
@@ -117,6 +145,25 @@ class HubContractTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(field, result["detail"])
         await self.request("POST", "admin/deployment-targets", expected=404,
                            json={"repoId": "missing", "environmentId": "staging"})
+
+    async def test_account_status_filters_before_pagination_and_keeps_legacy_lists(self):
+        self.app.include_router(quotas.router)
+        async with self.sessions() as session, session.begin():
+            member = await session.get(models.User, "row-1")
+            member.is_active = False
+        for path in ("admin/users", "admin/quotas/members"):
+            with self.subTest(path=path):
+                legacy = await self.request("GET", path)
+                self.assertEqual(len(legacy if isinstance(legacy, list) else legacy["items"]), 3)
+                disabled = await self.request("GET", path + "?isActive=false&limit=1")
+                self.assertEqual(disabled["total"], 1)
+                self.assertEqual([(u["id"], u["isActive"]) for u in disabled["items"]], [("row-1", False)])
+                active = await self.request("GET", path + "?isActive=true&limit=1&offset=1")
+                self.assertEqual(active["total"], 2)
+                self.assertEqual(len(active["items"]), 1)
+                self.assertTrue(active["items"][0]["isActive"])
+        result = await self.request("GET", "admin/quotas/members?q=row-1&isActive=true")
+        self.assertEqual((result["items"], result["total"]), ([], 0))
 
     async def test_admin_and_device_list_windows(self):
         for i in range(2):

@@ -221,7 +221,7 @@ async def _available_org_name(session: AsyncSession, name: str, parent_id: str |
 async def list_orgs(session: AsyncSession, scope: set[str] | None, *, page: Page | None = None):
     q = select(models.OrgUnit).order_by(models.OrgUnit.sort, models.OrgUnit.created_at, models.OrgUnit.id)
     if scope is not None:
-        q = q.where(models.OrgUnit.id.in_(scope or {"__none__"}))
+        q = q.where(models.OrgUnit.id.in_(scope))
     rows, total = await select_rows(session, q, page)
     return list_result([org_to_api(o) for o in rows], total)
 
@@ -363,8 +363,10 @@ async def delete_role(session: AsyncSession, rid: str) -> dict:
 
 # Users.
 
-async def list_users(session: AsyncSession, scope: set[str] | None, *, page: Page | None = None):
+async def list_users(session: AsyncSession, scope: set[str] | None, *, page: Page | None = None, is_active: bool | None = None):
     q = select(models.User).order_by(models.User.created_at, models.User.id)
+    if is_active is not None:
+        q = q.where(models.User.is_active.is_(is_active))
     if scope is not None:
         q = q.where(models.User.org_id.in_(scope or {"__none__"}))
     users, total = await select_rows(session, q, page)

@@ -188,12 +188,56 @@ class UserRoleUpdateTests(AdminUserTestCase):
             self.assertIs(response.json()["isTestAccount"], expected)
 
     async def test_role_can_be_replaced_and_assigned_after_clearing(self):
+        async with self.sessions.begin() as session:
+            role = await session.get(models.Role, "manager")
+            role.permissions = ["user.manage", "task.view"]
         for role_id in ("reader", None, "manager"):
             with self.subTest(role_id=role_id):
                 updated = await self.request("PATCH", "/users/target", json={"roleId": role_id})
                 self.assertEqual(updated.status_code, 200, updated.text)
                 self.assertEqual(updated.json()["roleId"], role_id)
                 await self.assert_stored_role("target", role_id)
+
+    async def test_delegate_can_create_and_edit_a_role_within_their_authority(self):
+        async with self.sessions.begin() as session:
+            role = await session.get(models.Role, "manager")
+            role.permissions = ["role.manage", "task.view"]
+        created = await self.request("POST", "/roles", json={"name": "Reviewer", "permissions": ["task.view"]})
+        self.assertEqual(created.status_code, 200, created.text)
+        rid = created.json()["id"]
+        renamed = await self.request("PATCH", "/roles/" + rid, json={"name": "Release reviewer"})
+        self.assertEqual(renamed.status_code, 200, renamed.text)
+        self.assertEqual(renamed.json()["permissions"], ["task.view"])
+        invalid = await self.request("PATCH", "/roles/" + rid, json={"permissions": ["unknown.permission"]})
+        self.assertEqual(invalid.status_code, 400, invalid.text)
+
+    async def test_delegation_policy_uses_current_locked_role_permissions(self):
+        from fastapi import HTTPException
+        async with self.sessions() as session:
+            actor = await session.get(models.User, "actor")
+            reader = await session.get(models.Role, "reader")
+            manager = await session.get(models.Role, "manager")
+            reader.permissions = ["user.manage"]
+            await session.commit()
+            result = await admin._check_role_grant(session, actor, permission="user.manage", role_id="reader")
+            self.assertEqual(result.id, reader.id)
+            with self.assertRaises(HTTPException) as denied:
+                await admin._check_role_grant(session, actor, permission="user.manage", proposed=["audit.view"])
+            self.assertEqual(denied.exception.status_code, 403)
+            manager.permissions = []
+            await session.commit()
+            with self.assertRaises(HTTPException):
+                await admin._check_role_grant(session, actor, permission="user.manage", role_id="reader")
+
+    async def test_self_authority_policy_allows_noop_edits(self):
+        from fastapi import HTTPException
+        async with self.sessions() as session:
+            actor = await session.get(models.User, "actor")
+            admin._check_self_authority(actor, actor, role_changed=False, org_id=actor.org_id, active=True)
+            for args in ({"role_changed": True}, {"org_id": "child"}, {"active": False}):
+                with self.subTest(args=args), self.assertRaises(HTTPException) as denied:
+                    admin._check_self_authority(actor, actor, **args)
+                self.assertEqual(denied.exception.status_code, 403)
 
     async def test_existing_token_loses_permissions_after_role_is_cleared(self):
         allowed = await self.request("GET", "/users", who="target")

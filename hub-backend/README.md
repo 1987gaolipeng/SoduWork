@@ -37,6 +37,18 @@ Direct development uses local configuration and data; keep it separate from real
 
 API documentation: **http://127.0.0.1:9080/docs**. Health check: `GET /healthz`.
 
+### Read-only automation
+
+Use the configured Hub address. The local development example below uses port 9080. The health check is public. To list the projects visible to an account, obtain its bearer token through `POST /api/v1/admin/login` and provide it in `HUB_TOKEN` through your environment or CI secret store. The account needs the `task.view` permission.
+
+```sh
+HUB_URL=http://127.0.0.1:9080
+curl --fail --silent --show-error "$HUB_URL/healthz"
+curl --fail --silent --show-error -H "Authorization: Bearer $HUB_TOKEN" "$HUB_URL/api/v1/admin/projects"
+```
+
+The projects response is a JSON array. An empty array means the account can see no projects. HTTP 401 means the token is missing, invalid or expired. HTTP 403 means the signed-in account lacks the required permission.
+
 ## Diagnosing queued dispatches
 
 When the Runner first accepts a dispatch, its log records the execution reference and queue position.
@@ -350,7 +362,9 @@ The check verifies the packaged native verifier, real TLS with a disposable trus
 
 ## API and trust boundaries
 
-When posting usage to `POST /api/v1/usage/events`, omit `occurredAt` to use the time the Hub receives the event. Supply an ISO 8601 timestamp to report an earlier instant. The Hub interprets a timestamp without an offset as UTC. If an event has an invalid timestamp, the Hub returns HTTP 422 before recording any event in the batch.
+When posting usage to `POST /api/v1/usage/events`, omit `occurredAt` to use the time the Hub receives the event. Supply an ISO 8601 timestamp to report an earlier instant. The Hub interprets a timestamp without an offset as UTC. If an event has an invalid timestamp, the Hub returns HTTP 422 before recording any event in the batch. For example, 16:30 without an offset is 00:30 the next day in Beijing. Include `+08:00` to report 16:30 Beijing time.
+
+Omitting `sourceType` selects `chat`. Supported categories are `chat`, `task`, `workflow`, `automation` and `system`. Use the lowercase names as shown. Task and workflow reports require a task the device owns or its account is assigned. Invalid categories return HTTP 422. Each event receipt includes the cumulative stored counters and a `status` of `created`, `updated` (a counter increased), or `duplicate` (no counter increased).
 
 - Devices enroll with `POST /api/v1/clients/enroll`, then use a short-lived device session. Device long-term keys remain in the Electron main process; Hub stores only their digest.
 - Business requests use `Authorization: Device <session>`. WebSocket connectivity uses the same short-lived session at `/api/v1/ws`.

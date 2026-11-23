@@ -293,6 +293,20 @@ async def deployments(chk, actor):
         id="approval-plugin-cancel", task_id=cancel_task.id,
         artifact_version_id=cancel_artifact.id, action="uat",
         environment_id=cancel_env.id, status="pending")
+    finished_node = am.NodeRun(
+        id="node-finished-cancel", run_id=cancel_run.id, node_key="review",
+        node_type="review", state="succeeded", attempt=1, idempotency_key="finished-cancel",
+        output={"requestId": "finished-approval"})
+    def approval(key, context):
+        return am.ApprovalRequest(id=key, task_id=cancel_task.id,
+                                  artifact_version_id=cancel_artifact.id,
+                                  action="review", status="pending", context=context)
+    owned = approval("context-approval", {"workflowRunId": cancel_run.id})
+    node_owned = approval("node-approval", {"nodeRunId": cancel_node.id})
+    legacy = approval("finished-approval", {})
+    unrelated = approval("foreign-approval", {"workflowRunId": "another-run"})
+    unrelated.action, unrelated.environment_id = "uat", cancel_env.id
+    session.add_all([finished_node, owned, node_owned, legacy, unrelated])
     session.add_all([cancel_task, cancel_artifact, cancel_env, cancel_run, cancel_node,
                      cancel_approval, succeeded_deployment, queued_deployment])
     await session.commit()
@@ -307,6 +321,12 @@ async def deployments(chk, actor):
         cancelled["ok"] and cancel_run.state == "cancelled"
         and cancel_node.state == "cancelled" and cancel_approval.status == "cancelled"
         and queued_deployment.state == "cancelled", cancelled)
+    for row in (owned, node_owned, legacy, unrelated, finished_node):
+        await session.refresh(row)
+    chk("Cancellation uses run ownership across node states and preserves unrelated approvals",
+        all(row.status == "cancelled" for row in (owned, node_owned, legacy))
+        and unrelated.status == "pending" and finished_node.state == "succeeded"
+        and cancelled["cancelledApprovals"] == 4, cancelled)
     chk("结束最后一个活动流程会把任务恢复为待处理，避免永远显示进行中",
         cancel_task.status == "todo" and cancelled.get("taskReopened") is True,
         {"status": cancel_task.status, "cancel": cancelled})
@@ -318,6 +338,8 @@ async def deployments(chk, actor):
     await session.refresh(cancel_run)
     chk("空白结束原因会落成可读审计说明",
         bool(dict(cancel_run.output or {}).get("cancellation", {}).get("reason")))
+    unrelated.status = "revoked"
+    await session.commit()
     fresh_approval = await release_control.ensure_request(
         session, cancel_task, cancel_artifact, "uat", cancel_env.id)
     await session.commit()

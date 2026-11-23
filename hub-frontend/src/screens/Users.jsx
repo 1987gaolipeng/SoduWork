@@ -24,7 +24,7 @@ export default function Users() {
   const listRef = useViewportHeight()
   const users = useAsync(() => api.users())
   const orgs = useAsync(() => api.orgs())
-  const roles = useAsync(() => api.roles())
+  const roles = useAsync(() => api.roleOptions())
   const [edit, setEdit] = useState(null)
   const user = getUser()
   const account = user?.id || user?.username

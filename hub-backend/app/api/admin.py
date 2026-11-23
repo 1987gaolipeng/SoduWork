@@ -2,12 +2,23 @@
 device management. Superusers see all records; other users see their department subtree and
 unassigned devices. Client.user_ref determines device ownership.
 """
-from typing import Annotated
-from datetime import date as calendar_date, datetime, timedelta, timezone
+import hashlib
 import logging
 import uuid
+from datetime import date as calendar_date
+from datetime import datetime, timedelta, timezone
+from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import StreamingResponse
 from pydantic import AwareDatetime
 from sqlalchemy import case, func, or_, select, update
@@ -17,12 +28,10 @@ from .. import models
 from ..auth import sign_token, verify_password
 from ..config import get_settings
 from ..csv_export import csv_chunks
-from ..timestamps import iso_utc
-from ..services.catalog_names import DuplicateName
-from ..pagination import PageQuery
 from ..db import get_session
-from ..deps import current_user, has_perm, require_perm
+from ..deps import current_user, has_perm, require_any_perm, require_perm
 from ..models import Attachment, Client, Role, Task, TaskEvent, User
+from ..pagination import PageQuery
 from ..permissions import ALL_KEYS, PERMISSIONS
 from ..realtime import hub
 from ..schemas import (
@@ -40,27 +49,31 @@ from ..schemas import (
     UserBatchUpdate,
     UserCreate,
     UserUpdate,
+    attachment_role,
     attachment_to_api,
     client_to_api,
     task_to_api,
 )
-
 from ..services import aggregation as agg
-from ..services import audit
-from ..services.task_access import publish_owner
+from ..services import (
+    audit,
+    client_access,
+    device_auth,
+    device_connections,
+    email_auth,
+    poller,
+    rbac,
+    storage,
+    work_catalog,
+)
+from ..services import environment_service as environment_service
 from ..services import inbox as inbox_svc
-from ..services import poller
-from ..services import rbac
-from ..services import email_auth
-from ..services import client_access
-from ..services import storage
 from ..services import tasks as svc
-from ..services import work_catalog
-from ..services import device_auth
-from ..services import device_connections
-from ..services import environment_service
-from .input_validation import parse_integer
+from ..services.catalog_names import DuplicateName
+from ..services.task_access import publish_owner
+from ..timestamps import iso_utc
 from .first_chat import REPORT_KEY
+from .input_validation import parse_integer
 
 log = logging.getLogger("uvicorn.error")
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
@@ -106,8 +119,8 @@ async def login(body: AdminLogin, request: Request, session: AsyncSession = Depe
         except client_access.ClientAccessError as exc:
             raise HTTPException(status_code=exc.status, detail=str(exc),
                                 headers={"Retry-After": str(exc.meta["retryAfter"])}) from exc
-        authenticated = bool(user and user.is_active and not user.account_deleted_at
-                             and verify_password(body.pw, user.password_hash))
+        valid_password = bool(user and not user.account_deleted_at and verify_password(body.pw, user.password_hash))
+        authenticated = valid_password and user.is_active
         if authenticated:
             # Only failed attempts consume the account and peer budgets.
             await reservation.rollback()
@@ -115,6 +128,8 @@ async def login(body: AdminLogin, request: Request, session: AsyncSession = Depe
             audit.add(session, None, "admin.login.failed", "user", user.id if user else None)
     if not authenticated:
         await session.commit()
+        if valid_password:
+            raise HTTPException(status_code=403, detail="账号已停用")
         raise HTTPException(status_code=401, detail="账号或密码不正确")
     user.last_login_at = datetime.now(timezone.utc)
     await session.commit()
@@ -195,7 +210,11 @@ def _org_mutation_error(exc: rbac.OrgMutationError) -> HTTPException:
 @router.get("/orgs")
 async def list_orgs(user: User = Depends(current_user), session: AsyncSession = Depends(get_session),
                     window: PageQuery = None):
-    return await rbac.list_orgs(session, await rbac.scope_org_ids(session, user), page=window)
+    if not user.is_super and not getattr(user, "_perms", set()):
+        scope = {user.org_id} if user.org_id else set()
+    else:
+        scope = await rbac.scope_org_ids(session, user)
+    return await rbac.list_orgs(session, scope, page=window)
 
 
 @router.post("/orgs")
@@ -255,16 +274,56 @@ async def delete_org(
 
 # Roles.
 
+async def _check_role_grant(session: AsyncSession, actor: User, *, permission: str,
+                            role_id: str | None = None, proposed: list[str] | None = None) -> Role | None:
+    # Acquire role locks in a stable order for concurrent grants and edits.
+    role_ids = {key for key in (role_id, None if actor.is_super else actor.role_id) if key}
+    roles = {key: await rbac.lock_role_reference(session, key) for key in sorted(role_ids)}
+    target = roles.get(role_id)
+    if not actor.is_super:
+        own = roles.get(actor.role_id)
+        allowed = set(own.permissions or []) if own else set()
+        # The role service reports unknown requested keys as a validation error.
+        required = {permission} | (set(proposed or ()) & set(ALL_KEYS))
+        if target is not None:
+            required.update(target.permissions or [])
+        if not required.issubset(allowed):
+            raise HTTPException(status_code=403, detail="不能管理超出自己权限范围的角色")
+    return target
+
+
+def _check_self_authority(actor: User, target: User, *, role_changed: bool = False,
+                          org_id: str | None = None, active: bool | None = None) -> None:
+    if actor.is_super or actor.id != target.id:
+        return
+    if role_changed or (org_id is not None and org_id != target.org_id) or (
+        active is not None and active != target.is_active
+    ):
+        raise HTTPException(status_code=403, detail="不能更改自己的角色、部门或启用状态")
+
+
 @router.get("/roles")
-async def list_roles(user: User = Depends(current_user), session: AsyncSession = Depends(get_session),
+async def list_roles(user: User = Depends(require_perm("role.manage")), session: AsyncSession = Depends(get_session),
                     window: PageQuery = None):
     return await rbac.list_roles(session, page=window)
+
+
+@router.get("/role-options")
+async def role_options(
+    user: User = Depends(require_any_perm("user.manage", "identity.manage", "client.assign")),
+    session: AsyncSession = Depends(get_session),
+):
+    """Role names for account and identity settings."""
+    rows = await session.execute(select(Role.id, Role.name).order_by(Role.created_at, Role.id))
+    return [{"id": role_id, "name": name} for role_id, name in rows]
 
 
 @router.post("/roles")
 async def create_role(body: RoleCreate,
                       user: User = Depends(require_perm("role.manage")),
                       session: AsyncSession = Depends(get_session)):
+    await _lock_user_targets(session, user, [])
+    await _check_role_grant(session, user, permission="role.manage", proposed=body.permissions)
     try:
         result = await rbac.create_role(session, body.name, body.permissions)
     except DuplicateName as exc:
@@ -280,6 +339,8 @@ async def create_role(body: RoleCreate,
 async def update_role(rid: str, body: RoleUpdate,
                       user: User = Depends(require_perm("role.manage")),
                       session: AsyncSession = Depends(get_session)):
+    await _lock_user_targets(session, user, [])
+    await _check_role_grant(session, user, permission="role.manage", role_id=rid, proposed=body.permissions)
     try:
         r = await rbac.update_role(session, rid, body.name, body.permissions)
     except DuplicateName as exc:
@@ -313,8 +374,8 @@ async def delete_role(rid: str,
 
 @router.get("/users", dependencies=[Depends(require_perm("user.manage"))])
 async def list_users(user: User = Depends(current_user), session: AsyncSession = Depends(get_session),
-                    window: PageQuery = None):
-    return await rbac.list_users(session, await rbac.scope_org_ids(session, user), page=window)
+                    window: PageQuery = None, isActive: bool | None = None):
+    return await rbac.list_users(session, await rbac.scope_org_ids(session, user), page=window, is_active=isActive)
 
 
 @router.post("/users")
@@ -330,7 +391,9 @@ async def create_user(
     await _lock_user_targets(session, user, [])
     await rbac.lock_org_tree(session, shared=True)
     await _assert_org_in_scope(session, user, body.orgId)
-    if body.roleId and await rbac.lock_role_reference(session, body.roleId) is None:
+    if body.roleId and await _check_role_grant(
+        session, user, permission="user.manage", role_id=body.roleId,
+    ) is None:
         raise HTTPException(status_code=400, detail="角色不存在")
     if body.domains:
         domain_ids = {str(value) for value in body.domains}
@@ -422,6 +485,7 @@ async def batch_update_users(
         if target.account_deleted_at:
             raise HTTPException(status_code=400, detail="不能修改已注销的账号")
         _check_deactivation(user, target, body.isActive)
+        _check_self_authority(user, target, org_id=body.orgId, active=body.isActive)
         if body.isActive is not None and target.is_active != body.isActive:
             changes.append((target, {"isActive": body.isActive}))
         if body.orgId is not None and target.org_id != body.orgId:
@@ -458,9 +522,14 @@ async def update_user(
     if body.orgId is not None:
         await _assert_org_in_scope(session, user, body.orgId)
         await _require_existing_org(session, body.orgId)
+    _check_deactivation(user, target, body.isActive)
+    _check_self_authority(user, target, org_id=body.orgId, active=body.isActive,
+                          role_changed="roleId" in body.model_fields_set and (body.roleId or None) != target.role_id)
     # An empty roleId is the legacy form used by clients to clear a role.
     # Validate non-empty assignments while preserving that clearing behavior.
-    if body.roleId and await rbac.lock_role_reference(session, body.roleId) is None:
+    if body.roleId and await _check_role_grant(
+        session, user, permission="user.manage", role_id=body.roleId,
+    ) is None:
         raise HTTPException(status_code=400, detail="角色不存在")
     if body.domains is not None:
         domain_ids = {str(value) for value in body.domains}
@@ -469,7 +538,6 @@ async def update_user(
         missing = sorted(domain_ids - found)
         if missing:
             raise HTTPException(status_code=400, detail="业务域不存在：" + ", ".join(missing))
-    _check_deactivation(user, target, body.isActive)
     was_active = bool(target.is_active)
     patch = body.model_dump(exclude_none=True)
     # Explicit null clears the role; omitting the field preserves it.
@@ -572,10 +640,10 @@ async def delete_position(
                     pid, row.name, {})
     return {"ok": True}
 
-# Responsibility catalog: readable by authenticated users; mutations require user.manage.
+# Responsibility domains support user management and dispatch.
 
 @router.get("/domains")
-async def list_domains(user: User = Depends(current_user), session: AsyncSession = Depends(get_session),
+async def list_domains(user: User = Depends(require_any_perm("user.manage", "task.dispatch")), session: AsyncSession = Depends(get_session),
                     window: PageQuery = None):
     return await rbac.list_domains(session, page=window)
 
@@ -1055,7 +1123,8 @@ async def generate_daily_reports(
     await audit.log(session, user, "report.generate", "report", uid or None, day,
                     {"made": made, "skipped": skipped, "teams": len(teams), "date": day})
     return {"date": day, "made": made, "skipped": skipped,
-            "total": len(targets), "teamReports": len(teams)}
+            "total": len(targets), "teamReports": len(teams),
+            "details": [tdr.to_api(report) for report in teams]}
 
 
 @router.post("/team-daily-reports/{report_id}/confirm")
@@ -1122,7 +1191,7 @@ async def upload_task_attachment(
     ct = file.content_type or "application/octet-stream"
     # The column default is applied at flush; the storage key needs the id now.
     a = Attachment(id=str(uuid.uuid4()), task_id=tid, filename=fn, content_type=ct, size=len(data),
-                   uploaded_by="admin:" + user.id)
+                   uploaded_by="admin:" + user.id, evidence_meta={"sha256": hashlib.sha256(data).hexdigest()})
     a.storage_key = f"att/{tid}/{a.id}/{fn}"
     a.backend = storage.put(a.storage_key, data, ct)
     session.add(a)
@@ -1132,6 +1201,34 @@ async def upload_task_attachment(
                     {"taskId": tid, "size": len(data),
                      "contentType": ct[:120]})
     return attachment_to_api(a)
+
+
+@router.delete("/tasks/{tid}/attachments/{aid}")
+async def withdraw_task_attachment(
+    tid: str, aid: str, user: User = Depends(require_perm("task.dispatch")), session: AsyncSession = Depends(get_session),
+):
+    from ..services import gate_contract
+    from .attachments import remove_unreferenced_object
+
+    task = await _assert_task_in_scope(session, user, tid)
+    row = await session.scalar(select(Attachment).where(Attachment.task_id == tid, Attachment.id == aid).with_for_update())
+    if row is None:
+        raise HTTPException(404, "附件不存在")
+    meta = row.evidence_meta or {}
+    owner = meta.get("ownerUserId")
+    owns_upload = owner == user.id if owner else row.uploaded_by in {"admin:" + user.id, "user:" + user.id}
+    if not (user.is_super or task.owner_user_id == user.id or owns_upload):
+        raise HTTPException(403, "无权撤回该附件")
+    if attachment_role(row) != "input" or row.source_ref or row.workflow_run_id or row.node_run_id or meta.get("cloudRequestId"):
+        raise HTTPException(409, "只能撤回普通需求输入附件")
+    if await gate_contract.references_attachment(session, row):
+        raise HTTPException(409, "附件已被固定版本或审批引用，不能撤回")
+    storage_key, backend = row.storage_key, row.backend
+    await session.delete(row)
+    audit.add(session, user, "task.attachment.delete", "attachment", aid, row.filename, {"taskId": tid})
+    await session.commit()
+    await remove_unreferenced_object(session, aid, storage_key, backend)
+    return {"ok": True}
 
 
 @router.get("/tasks/{tid}")
@@ -1792,7 +1889,10 @@ async def create_subordinate_task(
     if target is None:
         raise HTTPException(status_code=404, detail="用户不存在")
     await _assert_user_in_scope(session, user, target)
-    if not (body.get("title") or "").strip():
+    title = body.get("title")
+    if title is not None and not isinstance(title, str):
+        raise HTTPException(status_code=422, detail="需求标题须为字符串")
+    if not (title or "").strip():
         raise HTTPException(status_code=400, detail="请填需求标题")
     boxes = await _user_box_ids(session, uid)
     if not boxes:
@@ -1802,7 +1902,7 @@ async def create_subordinate_task(
     # Inbox rejection requests rework; mandatory acceptance gates require a plugin workflow.
     leader_name = user.display_name or user.username
     data = {
-        "title": body.get("title"),
+        "title": title,
         "note": body.get("note") or "",
         "status": "todo",
         "urgent": body.get("urgent"),
@@ -1840,13 +1940,16 @@ async def create_inbox_task(
 ):
     """Dispatch to a scoped department's inbox for later member claiming."""
     org_id = body.get("orgId") or user.org_id
-    if not (body.get("title") or "").strip():
+    title = body.get("title")
+    if title is not None and not isinstance(title, str):
+        raise HTTPException(status_code=422, detail="需求标题须为字符串")
+    if not (title or "").strip():
         raise HTTPException(status_code=400, detail="请填需求标题")
     if not org_id:
         raise HTTPException(status_code=400, detail="请选择目标团队/部门")
     await _assert_org_in_scope(session, user, org_id)
     payload = {
-        "title": body.get("title"), "note": body.get("note") or "",
+        "title": title, "note": body.get("note") or "",
         "priority": body.get("priority") or "normal", "due": body.get("due"),
         "tags": body.get("tags") or [], "urgent": body.get("urgent"), "important": body.get("important"),
         "domainId": body.get("domainId") or "", "source": "平台派团队 · " + (user.display_name or user.username),
@@ -2153,22 +2256,52 @@ async def admin_ai_status_task(
     user: User = Depends(require_perm("task.view")),
     session: AsyncSession = Depends(get_session),
 ):
-    """Read the latest dispatched execution's state and import available outputs."""
+    """Read live execution state and the outputs already collected by the Hub."""
     import asyncio as _aio
 
     from ..services import ai_exec
-    await _assert_task_in_scope(session, user, tid)
+    task = await _assert_task_in_scope(session, user, tid)
     ev = await ai_exec.last_dispatch_event(session, tid)   # Recognize historical multica.* events as well.
     if ev is None:
         return {"dispatched": False}
     d = ev.detail or {}
     ctx = await ai_exec.load(session)
-    s = await _aio.to_thread(ai_exec.status_sync, ctx, d.get("ref") or d.get("issueId", ""))
-    # Import available outputs idempotently: avoid duplicate attachments and unchanged URL events.
-    # Check output existence directly; running status is not a reliable prerequisite.
-    if s.get("ok") and (s.get("attachments") or s.get("artifactUrl")):
-        s["pulled"] = await ai_exec.pull_artifacts(session, tid, ctx, s, d.get("ref") or d.get("issueId", ""))
-    return {"dispatched": True, "identifier": d.get("identifier", ""), "url": d.get("url", ""), **s}
+    ref = d.get("ref") or d.get("issueId", "")
+    status = await _aio.to_thread(ai_exec.preview_status_sync, ctx, ref, d)
+    if status.get("ok") and "attachments" not in status:
+        attachments = (await session.execute(select(Attachment.id, Attachment.filename).where(
+            Attachment.task_id == tid, Attachment.source_ref == ref,
+            Attachment.role.in_(("output", "evidence", "supporting")))
+            .order_by(Attachment.filename, Attachment.id))).all()
+        status = {**status, "attachments": [{"id": aid, "filename": name} for aid, name in attachments]}
+    return {"dispatched": True, "ref": ref, "identifier": d.get("identifier", ""), "url": d.get("url", ""),
+            **status, "artifactUrl": status.get("artifactUrl") or task.artifact_url or ""}
+
+
+@router.post("/tasks/{tid}/ai-status")
+async def admin_sync_ai_status_task(
+    tid: str, ref: str = Body(..., embed=True, min_length=1, strict=True),
+    user: User = Depends(require_perm("task.dispatch")), session: AsyncSession = Depends(get_session),
+):
+    """Collect the specified dispatch's available outputs within the administrator's scope."""
+    import asyncio as _aio
+
+    from ..services import ai_exec
+    task = await _assert_task_in_scope(session, user, tid)
+    ev = await ai_exec.last_dispatch_event(session, tid)
+    detail = (ev.detail or {}) if ev else {}
+    if ref != (detail.get("ref") or detail.get("issueId", "")):
+        raise HTTPException(409, "原执行会话已变化，请刷新需求后重试")
+    ctx = await ai_exec.load(session)
+    result = await _aio.to_thread(ai_exec.status_sync, ctx, ref)
+    if not result.get("ok"):
+        raise HTTPException(502, "交付结果暂未同步，请恢复本轮重试")
+    if result.get("attachments") or result.get("artifactUrl"):
+        result["pulled"] = await ai_exec.pull_artifacts(session, tid, ctx, result, ref)
+    pulled = result.get("pulled") or {}
+    await audit.log(session, user, "task.execution.sync", "task", tid, task.title,
+                    {"ref": ref, "files": pulled.get("files", 0), "hasArtifactUrl": bool(pulled.get("url"))})
+    return {"dispatched": True, "identifier": detail.get("identifier", ""), "url": detail.get("url", ""), **result}
 
 
 # Integrations, bindings, and unassigned records.

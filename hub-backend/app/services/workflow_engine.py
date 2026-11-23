@@ -460,7 +460,8 @@ def _when_matches(node: dict, latest: dict[str, am.NodeRun]) -> bool:
     if not when:
         return True
     source = latest.get(str(when.get("node") or ""))
-    return source is not None and (source.output or {}).get("value") == when.get("equals")
+    return (source is not None and source.state == "succeeded" and "value" in (source.output or {})
+            and source.output["value"] == when.get("equals"))
 
 
 async def _schedule(session: AsyncSession, run: am.WorkflowRun) -> None:
@@ -511,7 +512,7 @@ async def _schedule_locked(session: AsyncSession, run_id: str) -> None:
                 # An explicitly authorized rework receives its own one-time allowance independent of earlier infrastructure retries.
                 if current.state != "rework" or int(rework_budget.get(key) or 0) <= 0:
                     continue
-            deps = [latest.get(x) for x in (node.get("dependsOn") or [])]
+            deps = [latest.get(x) for x in workflow_contracts.direct_dependencies(node)]
             if any(x is None or x.state not in _DONE for x in deps):
                 continue
             attempt = (current.attempt + 1) if current else 1
@@ -557,11 +558,19 @@ async def _schedule_locked(session: AsyncSession, run_id: str) -> None:
                                            and int(rework_budget.get(n["key"]) or 0) > 0))]
     notify_failed: dict | None = None
     notify_failed_task = None
+    failure_reason = ""
+    if not failed and not run.current_nodes:
+        # Installed versions may predate validation of implicit condition edges.
+        # Surface an unsatisfiable graph instead of polling the run indefinitely.
+        try:
+            workflow_contracts.validate_dependency_graph(nodes)
+        except ValueError as error:
+            failed = [node for node in nodes if node["key"] not in latest]
+            failure_reason = str(error)
     if failed:
         failed_node = failed[0]
-        failed_row = latest[failed_node["key"]]
         run.state, run.error, run.finished_at = (
-            "failed", failed_row.error or "自动返修次数已用完", _now())
+            "failed", failure_reason or latest[failed_node["key"]].error or "自动返修次数已用完", _now())
         _event(session, run.id, "run.failed", detail={"error": run.error})
         # Persist workflow failures on the task timeline as well as internal engine history.
         # Push the changed state to clients.
@@ -1106,7 +1115,7 @@ def _descendants(nodes: list[dict], root: str) -> set[str]:
     while changed:
         changed = False
         for node in nodes:
-            if node["key"] not in affected and affected.intersection(node.get("dependsOn") or []):
+            if node["key"] not in affected and affected.intersection(workflow_contracts.direct_dependencies(node)):
                 affected.add(node["key"])
                 changed = True
     return affected
