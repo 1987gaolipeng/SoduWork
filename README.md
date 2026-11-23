@@ -14,6 +14,8 @@
 
 **Multi-harness · Multi-agent · Self-hosted**
 
+<img src="docs/assets/soduwork-demo.gif" alt="SoduWork product demo" width="100%" />
+
 Works with Pi · OpenCode · DeepSeek Harness · Qwen Code · Kimi Code · Codex Harness · Codex
 
 **Run from source**
