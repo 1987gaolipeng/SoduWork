@@ -1792,7 +1792,10 @@ async def create_subordinate_task(
     if target is None:
         raise HTTPException(status_code=404, detail="用户不存在")
     await _assert_user_in_scope(session, user, target)
-    if not (body.get("title") or "").strip():
+    title = body.get("title")
+    if title is not None and not isinstance(title, str):
+        raise HTTPException(status_code=422, detail="需求标题须为字符串")
+    if not (title or "").strip():
         raise HTTPException(status_code=400, detail="请填需求标题")
     boxes = await _user_box_ids(session, uid)
     if not boxes:
@@ -1802,7 +1805,7 @@ async def create_subordinate_task(
     # Inbox rejection requests rework; mandatory acceptance gates require a plugin workflow.
     leader_name = user.display_name or user.username
     data = {
-        "title": body.get("title"),
+        "title": title,
         "note": body.get("note") or "",
         "status": "todo",
         "urgent": body.get("urgent"),
@@ -1840,13 +1843,16 @@ async def create_inbox_task(
 ):
     """Dispatch to a scoped department's inbox for later member claiming."""
     org_id = body.get("orgId") or user.org_id
-    if not (body.get("title") or "").strip():
+    title = body.get("title")
+    if title is not None and not isinstance(title, str):
+        raise HTTPException(status_code=422, detail="需求标题须为字符串")
+    if not (title or "").strip():
         raise HTTPException(status_code=400, detail="请填需求标题")
     if not org_id:
         raise HTTPException(status_code=400, detail="请选择目标团队/部门")
     await _assert_org_in_scope(session, user, org_id)
     payload = {
-        "title": body.get("title"), "note": body.get("note") or "",
+        "title": title, "note": body.get("note") or "",
         "priority": body.get("priority") or "normal", "due": body.get("due"),
         "tags": body.get("tags") or [], "urgent": body.get("urgent"), "important": body.get("important"),
         "domainId": body.get("domainId") or "", "source": "平台派团队 · " + (user.display_name or user.username),
