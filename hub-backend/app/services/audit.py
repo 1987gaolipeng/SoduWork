@@ -77,9 +77,9 @@ async def list_audit(session: AsyncSession, user, action: str | None = None,
     return {"total": total, "items": [_to_api(a) for a in rows]}
 
 
-async def export_csv(session, user, environment, *, offset=0, **filters):
+async def export_csv(session, user, environment, *, limit=None, offset=0, **filters):
     query = await _audit_query(session, user, **filters)
-    rows = await session.stream_scalars(query.offset(offset).execution_options(yield_per=400))
+    rows = await session.stream_scalars(query.offset(offset).limit(limit).execution_options(yield_per=400))
     fields = ("id", "at", "actorId", "actorName", "action", "targetType", "targetId",
               "targetLabel", "detail", "hubEnvironment")
 
