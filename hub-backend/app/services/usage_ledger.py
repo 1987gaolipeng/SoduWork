@@ -247,10 +247,10 @@ class InvalidUsageSource(ValueError):
 async def prepare_client_event(
     session: AsyncSession, client: models.Client, payload: dict,
 ) -> tuple[str, dict]:
-    category = payload.get("sourceType", "chat")
-    source_type = category.lower() if isinstance(category, str) else ""
-    if source_type not in {"chat", "task", "workflow", "automation", "system"}:
-        raise InvalidUsageSource("sourceType must be one of: chat, task, workflow, automation, system")
+    allowed_sources = ("chat", "task", "workflow", "automation", "system")
+    source_type = payload.get("sourceType", "chat")
+    if source_type not in allowed_sources:
+        raise InvalidUsageSource("sourceType must be one of: " + ", ".join(allowed_sources))
     source_id = str(payload.get("sourceId") or payload.get("conversationId") or "")[:180]
     reported_key = str(payload.get("idempotencyKey") or source_id)[:180]
     if not reported_key:

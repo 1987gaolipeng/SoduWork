@@ -352,7 +352,7 @@ The check verifies the packaged native verifier, real TLS with a disposable trus
 
 When posting usage to `POST /api/v1/usage/events`, omit `occurredAt` to use the time the Hub receives the event. Supply an ISO 8601 timestamp to report an earlier instant. The Hub interprets a timestamp without an offset as UTC. If an event has an invalid timestamp, the Hub returns HTTP 422 before recording any event in the batch. For example, 16:30 without an offset is 00:30 the next day in Beijing. Include `+08:00` to report 16:30 Beijing time.
 
-Omitting `sourceType` selects `chat`. Supported categories are `chat`, `task`, `workflow`, `automation` and `system`, case-insensitively. Task and workflow reports require a task the device owns or its account is assigned. Invalid categories return HTTP 422. Each event receipt includes the cumulative stored counters and a `status` of `created`, `updated` (a counter increased), or `duplicate` (no counter increased).
+Omitting `sourceType` selects `chat`. Supported categories are `chat`, `task`, `workflow`, `automation` and `system`. Use the lowercase names as shown. Task and workflow reports require a task the device owns or its account is assigned. Invalid categories return HTTP 422. Each event receipt includes the cumulative stored counters and a `status` of `created`, `updated` (a counter increased), or `duplicate` (no counter increased).
 
 - Devices enroll with `POST /api/v1/clients/enroll`, then use a short-lived device session. Device long-term keys remain in the Electron main process; Hub stores only their digest.
 - Business requests use `Authorization: Device <session>`. WebSocket connectivity uses the same short-lived session at `/api/v1/ws`.

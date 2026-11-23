@@ -103,7 +103,7 @@ class TokenQuotaTests(unittest.IsolatedAsyncioTestCase):
     async def test_usage_source_types_are_explicit_and_batch_validation_is_atomic(self):
         route = "/api/v1/usage/events"
         event = {"sourceId": "sample", "usage": {"input": 1}}
-        for value in ("admin", "bogus", "", None, 1, [], {}):
+        for value in ("admin", "bogus", "CHAT", "", None, 1, [], {}):
             response = await self.http.post(route, headers=self.headers, json={"events": [
                 event, {**event, "sourceType": value}]})
             self.assertEqual(response.status_code, 422, response.text)
@@ -118,12 +118,11 @@ class TokenQuotaTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(await session.scalar(select(models.AIUsageDaily.id)))
             session.add(models.Task(id="assigned", title="Sample", assignee_user_id=self.user.id))
             await session.commit()
-        for value, expected in (("CHAT", "chat"), ("system", "system"), ("automation", "automation"),
-                                ("task", "task"), ("workflow", "workflow")):
+        for value in ("chat", "system", "automation", "task", "workflow"):
             response = await self.http.post(route, headers=self.headers, json={
                 **event, "sourceId": value, "sourceType": value, "taskId": "assigned"})
             self.assertEqual(response.status_code, 200, response.text)
-            self.assertEqual(response.json()["events"][0]["sourceType"], expected)
+            self.assertEqual(response.json()["events"][0]["sourceType"], value)
 
     async def test_usage_timestamps_are_validated_before_recording_a_batch(self):
         route = "/api/v1/usage/events"
