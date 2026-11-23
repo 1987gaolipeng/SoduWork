@@ -511,13 +511,16 @@ class OrgDeleteGuardTests(AdminUserTestCase):
         pid = r.json()["id"]
         async with self.sessions() as session:
             self.assertEqual((await session.get(models.Project, pid)).org_id, "outside")
-            session.add(models.Repo(id="repo-move", project_id=pid, name="R", org_id="outside"))
+            session.add_all([models.Repo(id="repo-move", project_id=pid, name="R", org_id="outside"),
+                             models.Repo(id="repo-legacy", project_id=pid, name="Legacy", org_id=None)])
             await session.commit()
         r = await self.request("PUT", "/projects/" + pid, who="super", json={"orgId": "team"})
         self.assertEqual(r.status_code, 200, r.text)
         async with self.sessions() as session:
             self.assertEqual((await session.get(models.Project, pid)).org_id, "team")
             self.assertEqual((await session.get(models.Repo, "repo-move")).org_id, "team")
+            # Legacy repos with a NULL org follow the project too (NULL != 'x' is NULL in SQL).
+            self.assertEqual((await session.get(models.Repo, "repo-legacy")).org_id, "team")
 
     async def test_project_create_without_org_keeps_owner_default(self):
         r = await self.request("POST", "/projects", who="super",

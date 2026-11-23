@@ -226,7 +226,8 @@ async def update_project(pid: str, body: dict = Body(default_factory=dict),
     if explicit_org and next_org != old_org:
         p.org_id = next_org
         moved = list((await session.execute(select(Repo).where(
-            Repo.project_id == p.id, Repo.org_id != next_org
+            Repo.project_id == p.id,
+            or_(Repo.org_id.is_(None), Repo.org_id != next_org)
         ))).scalars().all())
         for repo in moved:
             repo.org_id = next_org
