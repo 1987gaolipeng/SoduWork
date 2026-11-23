@@ -272,7 +272,8 @@ function create({ app, session, identityOf = () => require('./requirement-contex
     // account-authorized cloud original in the cloud directory.
     const remote = original.cloud || original.accountProjection;
     if (!remote && original.nativeSessionStarted === false && !String(original.title || '').trim() &&
-        !(Number(original.count) > 0) && !(snapshot?.messages || []).length && !handle.inFlight?.() &&
+        !(Number(original.count) > 0) && !(snapshot?.messages || []).length &&
+        (!handle.inFlight?.() || (snapshot.runtimeSwitching && original.state === 'idle')) &&
         !original.workOnly && !original.taskId && !(original.taskIds || []).length &&
         !original.runtimeUnavailable) return;
     const id = remote ? capturedCopyId(identity?.hub, accountId(identity), original.id) : original.id;
