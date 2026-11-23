@@ -2,11 +2,13 @@
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import automation_models as am, models
+from .. import automation_models as am
+from .. import models
 from ..db import get_session
 from ..deps import require_perm
 from ..models import User
-from ..services import audit, rbac, repository_catalog as catalog
+from ..services import audit, rbac
+from ..services import repository_catalog as catalog
 from ..services.business_records import record_fields
 from ..services.resource_leases import LeaseBusy as resource_busy
 from ..services.workdirs import InvalidRepositoryDirectory

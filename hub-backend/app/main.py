@@ -12,30 +12,83 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .api import admin, agents, ai_proxy, aidesk, approvals, attachments, capabilities, client_updates, client_release_notes, clients, delivery, download, environments, evolution, identity, ingest, library, repomap, updates
-from .api import admin_cloud_runners, client_auth, cloud_environments, cloud_conversations, conversation_handoffs, deliveries, memory_records, session_memory
-from .api import account_profile, admin_mail, client_email_auth, quotas, legal_documents
-from .api import remote_screen
-from .api import conversation_projects
-from .api import account_conversations
-from .api import conversation_content_migrations
-from .api import cloud_execution_sync, first_chat, personal_conversation_relay
-from .api import model_runtime as model_runtime_api
-from .api import model_capabilities as model_capabilities_api
-from .api import jiyong_data
+from .api import (
+    account_conversations,
+    account_profile,
+    admin,
+    admin_cloud_runners,
+    admin_mail,
+    agents,
+    ai_proxy,
+    aidesk,
+    approvals,
+    attachments,
+    business_records,
+    capabilities,
+    client_auth,
+    client_email_auth,
+    client_release_notes,
+    client_updates,
+    clients,
+    cloud_conversations,
+    cloud_environments,
+    cloud_execution_sync,
+    conversation_content_migrations,
+    conversation_handoffs,
+    conversation_projects,
+    deliveries,
+    delivery,
+    download,
+    environments,
+    evolution,
+    first_chat,
+    identity,
+    ingest,
+    jiyong_data,
+    legal_documents,
+    library,
+    memory_records,
+    operations,
+    personal_conversation_relay,
+    plugin_activity,
+    plugin_client_catalog,
+    plugin_client_runs,
+    plugin_permissions,
+    plugin_publishers,
+    plugins,
+    quotas,
+    release,
+    remote_screen,
+    repomap,
+    reports,
+    repositories,
+    repository_issues,
+    retired_endpoints,
+    runner_ws,
+    session_memory,
+    task_mcp,
+    task_options,
+    tasks,
+    term,
+    trace,
+    updates,
+    usage,
+    ws,
+)
 from .api import config as config_api
-from .api import retired_endpoints, operations, plugin_activity, plugin_client_catalog, plugin_client_runs, plugin_permissions, plugin_publishers, plugins, release, reports, repositories, repository_issues, runner_ws, task_mcp, task_options, tasks, term, trace, usage, ws
-from .api import business_records
-from .api import work_catalog as work_catalog_api
 from .api import im as im_api
+from .api import model_capabilities as model_capabilities_api
+from .api import model_runtime as model_runtime_api
+from .api import work_catalog as work_catalog_api
 from .config import get_settings
 from .db import SessionLocal, init_db
 from .log_safety import install_log_redaction
 from .models import TaskOwnershipChanged
-from .services import rbac, work_catalog as work_catalog_service
+from .services import rbac
+from .services import work_catalog as work_catalog_service
 from .services.database_telemetry import DatabaseTimingMiddleware
-from .services.shared_auth_cache import AuthCacheUnavailable
 from .services.poller import poller_loop
+from .services.shared_auth_cache import AuthCacheUnavailable
 
 settings = get_settings()
 install_log_redaction()

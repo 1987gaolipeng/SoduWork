@@ -15,13 +15,13 @@ from datetime import datetime, timezone
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import automation_models as am, models, repository_issue_models  # register catalog subscription metadata
+from .. import automation_models as am
+from .. import models, repository_issue_models  # noqa: F401 - register catalog subscription metadata
 from ..connectors import get_connector
+from ..timestamps import iso_utc
 from . import code_creds, resource_leases, scm_support
 from .business_records import creation_source
 from .workdirs import validate_repo_local_dir
-from ..timestamps import iso_utc
-
 
 SYNC_LEASE_SECONDS = 1800
 

@@ -14,9 +14,9 @@ from sqlalchemy.exc import IntegrityError
 from .. import models
 from ..log_safety import redact_log_text
 from ..session_memory_models import SessionMemory
+from ..timestamps import iso_utc
 from . import inbox, task_access
 from .business_records import business_visible
-from ..timestamps import iso_utc
 
 FIELD_LIMITS = {"summary": 6000, "goal": 3000, "decisions": 3000,
                 "constraints": 3000, "pending": 3000, "outcomes": 3000}

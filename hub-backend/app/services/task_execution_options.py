@@ -12,10 +12,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import models
 from ..agent_catalog import AGENTS
+from . import (
+    agent_execution_options,
+    agent_naming,
+    ai_exec,
+    conversation_handoffs,
+    execution_capabilities,
+    inbox,
+    model_catalog,
+    plugin_installations,
+    plugin_service,
+    task_access,
+    task_assignment,
+    work_catalog,
+)
 from .business_records import business_visible
-from . import (agent_execution_options, agent_naming, ai_exec, conversation_handoffs,
-               execution_capabilities, inbox, model_catalog, plugin_installations,
-               plugin_service, task_access, task_assignment, work_catalog)
 
 _CLI_ORDER = {key: row.get("order", 999) for key, row in AGENTS.items()}
 _CLI_LABELS = {key: row["displayName"] for key, row in AGENTS.items()}
