@@ -145,7 +145,7 @@ export function Icon({ name, ...rest }) {
  * Controlled dropdown preserves select value/onChange semantics while rendering options
  * in-page for consistent styling.
  */
-export function SelectMenu({ value, onChange, children, className = '', disabled = false, autoFocus = false, style, id, 'aria-label': ariaLabel, 'aria-labelledby': ariaLabelledBy, 'aria-describedby': ariaDescribedBy, required = false, placeholder = tx("请选择"), clearable = false, resetValue = '', clearLabel, searchable = false, searchPlaceholder = tx("搜索部门名称或路径") }) {
+export function SelectMenu({ value, onChange, children, className = '', disabled = false, autoFocus = false, style, id, 'aria-label': ariaLabel, 'aria-labelledby': ariaLabelledBy, 'aria-describedby': ariaDescribedBy, required = false, placeholder = tx("请选择"), clearable = false, resetValue = '', clearLabel, searchable = false, searchPlaceholder = tx("搜索部门名称或路径"), emptyText = tx("没有匹配的部门") }) {
   const uiLocale = useLocale();
   const listboxId = React.useId()
   const [open, setOpen] = useState(false)
@@ -301,7 +301,7 @@ export function SelectMenu({ value, onChange, children, className = '', disabled
           {query.trim() && option.path && <small>{option.path}</small>}
         </button>)}
       </div>
-      {searchable && !visibleOptions.length && <div className="select-menu-empty" role="status">{tx("没有匹配的部门")}</div>}
+      {searchable && !visibleOptions.length && <div className="select-menu-empty" role="status">{emptyText}</div>}
     </div>}
 
   </div>
