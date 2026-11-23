@@ -245,6 +245,21 @@ class AdmissionStatusTests(unittest.IsolatedAsyncioTestCase):
         self.queue = self.runner._admission
         self.addCleanup(self.queue._journal.close)
 
+    def test_budget_logs_changes_in_start_permission_under_critical_pressure(self):
+        budget = self.runner._resource_budget
+        sample = {"cpuPercent": 100, "memoryTotalBytes": 16 * 1024 ** 3,
+                  "memoryAvailableBytes": 8 * 1024 ** 3}
+        budget.sampler = lambda: sample
+        with patch("app.services.runner_admission.time.monotonic", side_effect=[100, 101, 102, 103, 104]), \
+                self.assertLogs("app.services.runner_admission", level="INFO") as captured:
+            for available in (8 * 1024 ** 3,) * 3 + (64 * 1024 ** 2,) * 2:
+                sample["memoryAvailableBytes"] = available
+                budget.snapshot(force=True)
+        messages = [record.getMessage() for record in captured.records]
+        self.assertEqual(len(messages), 3, messages)
+        for message, allowed in zip(messages, (False, True, False)):
+            self.assertIn(f"pressure=critical canStart={allowed} limit=1", message)
+
     async def test_only_first_durable_dispatch_logs_its_ref_and_position(self):
         from app.services import dispatch_identity
         message = {"op": "job.dispatch", "dispatchId": "private-business-id", "brief": "private prompt"}
