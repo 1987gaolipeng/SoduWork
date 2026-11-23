@@ -2288,12 +2288,13 @@ def _audit_filters(action: str | None = None, actor: str | None = None,
 @router.get("/audit")
 async def list_audit(
     filters: dict = Depends(_audit_filters),
-    limit: Annotated[int, Query(ge=0)] = 50, offset: Annotated[int, Query(le=2**63-1)] = 0,
+    limit: Annotated[int, Query(ge=0)] = 50,
+    offset: Annotated[int, Query(ge=0, le=2**63-1)] = 0,
     user: User = Depends(require_perm("audit.view")),
     session: AsyncSession = Depends(get_session),
 ):
     """List audit events for actors in the department subtree; superusers see all events."""
-    result = await audit.list_audit(session, user, limit=min(limit, 200), offset=max(offset, 0), **filters)
+    result = await audit.list_audit(session, user, limit=min(limit, 200), offset=offset, **filters)
     return {**result, "environment": settings.soduwork_env.strip().lower()}
 
 

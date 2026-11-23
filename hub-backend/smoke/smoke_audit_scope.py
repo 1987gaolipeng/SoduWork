@@ -111,6 +111,11 @@ async def main() -> None:
               listing.get("total") == matching and
               [r["id"] for r in listing.get("items", [])] == ["fixture-004", "fixture-003"])
         check("列表注明当前 Hub 环境", listing.get("environment") == admin.settings.soduwork_env.strip().lower())
+        for invalid_offset in (-1, 2**63):
+            invalid = await client.get("audit", params={**params, "offset": invalid_offset}, headers=headers)
+            check(f"The audit list rejects offset {invalid_offset} at the query field",
+                  invalid.status_code == 422 and
+                  any(error["loc"] == ["query", "offset"] for error in invalid.json()["detail"]))
         response = await client.get("audit", params={**params, "actor": child_actor.id}, headers=headers)
         check("可按操作者 ID 查询", response.json().get("total") == matching)
         response = await client.get("audit", params={**params, "actor": "%"}, headers=headers)

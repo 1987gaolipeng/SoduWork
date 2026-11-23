@@ -643,6 +643,10 @@ async def validate_scenario(
         "sort": max(0, min(sort, 9999)),
     }
 
+class ScenarioKeyConflict(ValueError):
+    """This organization already has a scenario with the requested key."""
+
+
 async def save_scenario(
     session: AsyncSession,
     body: dict,
@@ -656,7 +660,7 @@ async def save_scenario(
         else models.WorkScenario.org_id == org_id)
     duplicate = (await session.execute(query)).scalar_one_or_none()
     if duplicate is not None and (current is None or duplicate.id != current.id):
-        raise ValueError("这个场景标识已经存在")
+        raise ScenarioKeyConflict("这个场景标识已经存在")
     row = current or models.WorkScenario(org_id=org_id, key=values["key"])
     for field, value in values.items():
         setattr(row, field, value)
