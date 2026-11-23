@@ -1136,7 +1136,8 @@ async def generate_daily_reports(
     await audit.log(session, user, "report.generate", "report", uid or None, day,
                     {"made": made, "skipped": skipped, "teams": len(teams), "date": day})
     return {"date": day, "made": made, "skipped": skipped,
-            "total": len(targets), "teamReports": len(teams)}
+            "total": len(targets), "teamReports": len(teams),
+            "details": [tdr.to_api(report) for report in teams]}
 
 
 @router.post("/team-daily-reports/{report_id}/confirm")
@@ -2242,22 +2243,52 @@ async def admin_ai_status_task(
     user: User = Depends(require_perm("task.view")),
     session: AsyncSession = Depends(get_session),
 ):
-    """Read the latest dispatched execution's state and import available outputs."""
+    """Read live execution state and the outputs already collected by the Hub."""
     import asyncio as _aio
 
     from ..services import ai_exec
-    await _assert_task_in_scope(session, user, tid)
+    task = await _assert_task_in_scope(session, user, tid)
     ev = await ai_exec.last_dispatch_event(session, tid)   # Recognize historical multica.* events as well.
     if ev is None:
         return {"dispatched": False}
     d = ev.detail or {}
     ctx = await ai_exec.load(session)
-    s = await _aio.to_thread(ai_exec.status_sync, ctx, d.get("ref") or d.get("issueId", ""))
-    # Import available outputs idempotently: avoid duplicate attachments and unchanged URL events.
-    # Check output existence directly; running status is not a reliable prerequisite.
-    if s.get("ok") and (s.get("attachments") or s.get("artifactUrl")):
-        s["pulled"] = await ai_exec.pull_artifacts(session, tid, ctx, s, d.get("ref") or d.get("issueId", ""))
-    return {"dispatched": True, "identifier": d.get("identifier", ""), "url": d.get("url", ""), **s}
+    ref = d.get("ref") or d.get("issueId", "")
+    status = await _aio.to_thread(ai_exec.preview_status_sync, ctx, ref, d)
+    if status.get("ok") and "attachments" not in status:
+        attachments = (await session.execute(select(Attachment.id, Attachment.filename).where(
+            Attachment.task_id == tid, Attachment.source_ref == ref,
+            Attachment.role.in_(("output", "evidence", "supporting")))
+            .order_by(Attachment.filename, Attachment.id))).all()
+        status = {**status, "attachments": [{"id": aid, "filename": name} for aid, name in attachments]}
+    return {"dispatched": True, "ref": ref, "identifier": d.get("identifier", ""), "url": d.get("url", ""),
+            **status, "artifactUrl": status.get("artifactUrl") or task.artifact_url or ""}
+
+
+@router.post("/tasks/{tid}/ai-status")
+async def admin_sync_ai_status_task(
+    tid: str, ref: str = Body(..., embed=True, min_length=1, strict=True),
+    user: User = Depends(require_perm("task.dispatch")), session: AsyncSession = Depends(get_session),
+):
+    """Collect the specified dispatch's available outputs within the administrator's scope."""
+    import asyncio as _aio
+
+    from ..services import ai_exec
+    task = await _assert_task_in_scope(session, user, tid)
+    ev = await ai_exec.last_dispatch_event(session, tid)
+    detail = (ev.detail or {}) if ev else {}
+    if ref != (detail.get("ref") or detail.get("issueId", "")):
+        raise HTTPException(409, "原执行会话已变化，请刷新需求后重试")
+    ctx = await ai_exec.load(session)
+    result = await _aio.to_thread(ai_exec.status_sync, ctx, ref)
+    if not result.get("ok"):
+        raise HTTPException(502, "交付结果暂未同步，请恢复本轮重试")
+    if result.get("attachments") or result.get("artifactUrl"):
+        result["pulled"] = await ai_exec.pull_artifacts(session, tid, ctx, result, ref)
+    pulled = result.get("pulled") or {}
+    await audit.log(session, user, "task.execution.sync", "task", tid, task.title,
+                    {"ref": ref, "files": pulled.get("files", 0), "hasArtifactUrl": bool(pulled.get("url"))})
+    return {"dispatched": True, "identifier": detail.get("identifier", ""), "url": detail.get("url", ""), **result}
 
 
 # Integrations, bindings, and unassigned records.

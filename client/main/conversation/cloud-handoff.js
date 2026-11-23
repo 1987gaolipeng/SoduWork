@@ -747,10 +747,13 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
         const artifactsKey = live.ref + ':' + page.status + ':' + watch.cursor;
         if (['done', 'completed', 'failed', 'stopped'].includes(page.status) && !watch.more &&
             watch.artifactsKey !== artifactsKey) {
-          // The existing status endpoint collects Runner files into authorized
-          // task attachments. Reading the transcript alone never does that.
-          const settled = details ? { artifactUrl: details.conversation?.artifactUrl } :
-            await request(current, '/tasks/' + encodeURIComponent(live.taskId) + '/ai-status');
+          // Legacy handoffs reconcile the exact finished execution once. A
+          // read-only projection only consults already collected task outputs.
+          const settled = details || live.remoteProjection
+            ? { artifactUrl: details?.conversation?.artifactUrl }
+            : await require('./runner-output-sync.cjs').collect(
+              (route, body) => request(current, route, body ? json(body) : undefined),
+              '/tasks/' + encodeURIComponent(live.taskId), live.ref);
           await identity(live);
           if (settled?.deliveryKind === 'code' || read(handle.sessionId)?.codeDelivery) {
             await save({ ...read(handle.sessionId), deliveryPresentation: 'summary', codeDelivery: {

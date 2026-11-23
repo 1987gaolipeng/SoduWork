@@ -1432,7 +1432,27 @@ async def ai_status_task(
     session: AsyncSession = Depends(get_session),
     ref: str = "",
 ):
-    """Behavior and constraints for this operation."""
+    """Read execution and persisted delivery state without running collection."""
+    t = await _view_task(session, client, tid)
+    return await _execution_status(session, t, client, ref, sync=False)
+
+
+@router.post("/tasks/{tid}/ai-status")
+async def sync_ai_status_task(
+    tid: str, ref: str = Body(..., embed=True, min_length=1, strict=True),
+    client: Client = Depends(current_client), session: AsyncSession = Depends(get_session),
+):
+    """Reconcile outputs for the exact execution that this client can continue."""
+    from ..services.cloud_execution_sync import require_account_cloud_task
+    t = await require_account_cloud_task(session, client, tid, optional=True)
+    if t is None:
+        t = await _view_task(session, client, tid)
+    if not task_access.can_continue_execution(t, client):
+        raise HTTPException(403, "当前账号只能查看此执行会话")
+    return await _execution_status(session, t, client, ref, sync=True)
+
+
+async def _execution_status(session, t, client, ref, *, sync):
     import asyncio as _aio
 
     from sqlalchemy import func as _f
@@ -1440,33 +1460,34 @@ async def ai_status_task(
     from ..models import Attachment
     from ..services import ai_exec
     from ..services import code_delivery as cd
-    t = await _view_task(session, client, tid)
+    tid = t.id
     ev_row = await ai_exec.last_dispatch_event(session, tid)   # Recognize historical multica.* events.
     if ev_row is None:
         if ref:
             raise HTTPException(409, "原执行会话已变化，请刷新需求后重试")
         return {"done": False, "dispatched": False}
     ctx = await ai_exec.load(session)
-    runner = {}
     d = ev_row.detail or {}
     if ref and ref != str(d.get("ref") or d.get("issueId") or ""):
         raise HTTPException(409, "原执行会话已变化，请刷新需求后重试")
-    require_snapshot = bool(ref)
+    pinned = bool(ref)
     ref = d.get("ref") or d.get("issueId", "")
-    s = await _aio.to_thread(ai_exec.status_sync, ctx, ref)
-    if require_snapshot and not s.get("ok"):
-        # A continuation must not acknowledge delivery using stale task files
-        # when its authoritative Runner snapshot could not be read.
-        raise HTTPException(502, "交付结果暂未同步，请恢复本轮重试")
-    if s.get("ok") and (s.get("attachments") or s.get("artifactUrl")):
-        await ai_exec.pull_artifacts(session, tid, ctx, s, ref)   # Reuse the administrative path's idempotent artifact import.
-        await session.refresh(t)
     # Expose the execution machine and workspace so missing outputs can be investigated.
-    runner = await _aio.to_thread(ai_exec.runner_info_sync, ctx, ref)
+    runner = (await _aio.to_thread(ai_exec.runner_info_sync, ctx, ref) if sync
+              else await _aio.to_thread(ai_exec.preview_status_sync, ctx, ref, d, detailed=False))
+    if sync:
+        s = await _aio.to_thread(ai_exec.status_sync, ctx, ref)
+        if not s.get("ok"):
+            raise HTTPException(502, "交付结果暂未同步，请恢复本轮重试")
+        if s.get("attachments") or s.get("artifactUrl"):
+            await ai_exec.pull_artifacts(session, tid, ctx, s, ref)
+            await session.refresh(t)
+    elif pinned and not runner:
+        raise HTTPException(502, "交付结果暂未同步，请恢复本轮重试")
     # Collect final usage even when no console viewer or heartbeat has observed the local run.
     # Read the completed session snapshot and persist its usage idempotently.
     # Usage accounting must not depend on whether someone opened the live session view.
-    if runner.get("done"):
+    if sync and runner.get("done"):
         try:
             from ..services import execution_sessions as _es
             _live = await _aio.to_thread(ai_exec.session_sync, ctx, ref, 10 ** 9)
@@ -1481,7 +1502,7 @@ async def ai_status_task(
     code["applies"] = (await cd.repo_for(session, t)) is not None
     code["delivered"] = code["applies"] and await cd.is_delivered(session, t, code)
     code["managedByWorkflow"] = await cd.managed_by_active_workflow(session, tid)
-    if (code["applies"] and not code["managedByWorkflow"]
+    if (sync and code["applies"] and not code["managedByWorkflow"]
             and runner.get("done") and code["stage"] != "merged"):
         try:
             scm_hint = ({"provider": "runner", "runnerId": str(d.get("runnerId") or ""),
