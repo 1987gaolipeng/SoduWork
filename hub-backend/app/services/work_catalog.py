@@ -16,7 +16,6 @@ from .. import automation_models as am
 from .. import models
 from .agent_naming import cli_from_name
 
-
 PROFILE_DEFINITIONS = [
     {"id": "p_solution", "name": "方案顾问", "category": "方案与咨询", "sort": 1,
      "description": "理解业务目标，组织调研、约束、方案与汇报材料。",
