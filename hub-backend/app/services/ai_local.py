@@ -824,7 +824,7 @@ def _bundle_artifact(run: dict, entries: list[tuple[str, float]]) -> dict | None
 
 
 
-def status_sync(cfg: dict, ref: str) -> dict:
+def status_sync(cfg: dict, ref: str, *, read_only: bool = False) -> dict:
     from . import local_task_goal
     with _LOCK:
         run = _RUNS.get(ref)
@@ -845,15 +845,19 @@ def status_sync(cfg: dict, ref: str) -> dict:
             by_path[str(rel).replace("\\", "/")] = (rel, mtime)
         entries = sorted(by_path.values(), key=lambda item: (-(item[1] or 0), item[0]))
     files = [rel for rel, _m in entries]
-    bundle = _bundle_artifact(run, entries) if entries else None
+    bundle = _bundle_artifact(run, entries) if entries and not read_only else None
     room = _ART_CAP - (1 if bundle else 0)
     shown = files[:max(0, room)]
     hidden = max(0, len(files) - len(shown))
-    with _LOCK:
-        run["artDropped"] = 0 if bundle else hidden
+    dropped = 0 if bundle else hidden
+    if not read_only:
+        with _LOCK:
+            run["artDropped"] = dropped
     # Office/files tasks have no branch delivery. Running Git in their temp folders
     # only adds latency and used to trigger the Runner worker-pool storm.
-    git_delivery = _git_delivery(run) if artifact_mode in {"git", "mixed"} else {}
+    git_delivery: dict = {}
+    if artifact_mode in {"git", "mixed"}:
+        git_delivery = (run.get("gitDelivery") or {}) if read_only else _git_delivery(run)
     from . import workspace_guard
     guard = workspace_guard.evaluate(run["ws"], run.get("workspaceGuard"))
     says = [str(item.get("full") or item.get("text") or "").strip()
@@ -889,7 +893,7 @@ def status_sync(cfg: dict, ref: str) -> dict:
         # Preserve website directory structure so extracted HTML can resolve styles and assets.
         "attachments": attachments,
         # Report the number of outputs omitted by the cap.
-        "artifactsDropped": int(run.get("artDropped") or 0),
+        "artifactsDropped": dropped,
         "artifactsBundled": int(bundle.get("files") or 0) if bundle else 0,
         "artifactsHidden": hidden if bundle else 0,
         "artifactUrl": "",
