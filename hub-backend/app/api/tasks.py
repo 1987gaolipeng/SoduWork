@@ -1478,6 +1478,14 @@ async def _execution_status(session, t, client, ref, *, sync):
     from ..services import code_delivery as cd
     tid = t.id
     ev_row = await ai_exec.last_dispatch_event(session, tid)   # Recognize historical multica.* events.
+    from ..services.dispatch_reconcile import status_for_uncertain
+    pending = await status_for_uncertain(session, tid)
+    if pending:
+        if ref:
+            if ref != pending["ref"]:
+                raise HTTPException(409, "原执行会话已变化，请刷新需求后重试")
+            raise HTTPException(502, "交付结果暂未同步，请稍后恢复本轮重试")
+        return {"done": False, "dispatched": True, "runner": pending}
     if ev_row is None:
         if ref:
             raise HTTPException(409, "原执行会话已变化，请刷新需求后重试")
@@ -1500,6 +1508,9 @@ async def _execution_status(session, t, client, ref, *, sync):
             await session.refresh(t)
     elif pinned and not runner:
         raise HTTPException(502, "交付结果暂未同步，请恢复本轮重试")
+    elif not (runner.get("taskStatus") or runner.get("done")):
+        from ..services.queued_dispatch_lease import status_for_task
+        runner.update(await status_for_task(session, tid, ref))
     # Collect final usage even when no console viewer or heartbeat has observed the local run.
     # Read the completed session snapshot and persist its usage idempotently.
     # Usage accounting must not depend on whether someone opened the live session view.

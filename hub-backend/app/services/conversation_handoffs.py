@@ -492,7 +492,8 @@ async def refresh(session, row):
                         row.phase, row.error = "prepared", "执行机已确认未启动，可重试或撤销交接"
                         row.receipt = {}
                     await session.commit()
-                elif probed.get("state") == "confirmed":
+                elif probed.get("state") == "confirmed" and await dispatch_reconcile.probe_result_current(
+                        session, candidate, probed):
                     # The Hub may have died between RPC acceptance and writing
                     # its receipt. A positive exact-ref probe repairs that gap.
                     task = await session.get(Task, row.task_id)

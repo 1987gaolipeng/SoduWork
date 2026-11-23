@@ -2260,7 +2260,11 @@ async def admin_ai_status_task(
     import asyncio as _aio
 
     from ..services import ai_exec
+    from ..services.dispatch_reconcile import status_for_uncertain
     task = await _assert_task_in_scope(session, user, tid)
+    pending = await status_for_uncertain(session, tid)
+    if pending:
+        return {"dispatched": True, "done": False, **pending}
     ev = await ai_exec.last_dispatch_event(session, tid)   # Recognize historical multica.* events as well.
     if ev is None:
         return {"dispatched": False}
@@ -2268,6 +2272,9 @@ async def admin_ai_status_task(
     ctx = await ai_exec.load(session)
     ref = d.get("ref") or d.get("issueId", "")
     status = await _aio.to_thread(ai_exec.preview_status_sync, ctx, ref, d)
+    if not (status.get("ok") or status.get("done")):
+        from ..services.queued_dispatch_lease import status_for_task
+        status.update(await status_for_task(session, tid, ref))
     if status.get("ok") and "attachments" not in status:
         attachments = (await session.execute(select(Attachment.id, Attachment.filename).where(
             Attachment.task_id == tid, Attachment.source_ref == ref,
@@ -2287,7 +2294,13 @@ async def admin_sync_ai_status_task(
     import asyncio as _aio
 
     from ..services import ai_exec
+    from ..services.dispatch_reconcile import status_for_uncertain
     task = await _assert_task_in_scope(session, user, tid)
+    pending = await status_for_uncertain(session, tid)
+    if pending:
+        if ref != pending["ref"]:
+            raise HTTPException(409, "原执行会话已变化，请刷新需求后重试")
+        raise HTTPException(502, "交付结果暂未同步，请恢复本轮重试")
     ev = await ai_exec.last_dispatch_event(session, tid)
     detail = (ev.detail or {}) if ev else {}
     if ref != (detail.get("ref") or detail.get("issueId", "")):

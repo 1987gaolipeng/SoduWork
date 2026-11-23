@@ -55,7 +55,22 @@ When the Runner first accepts a dispatch, its log records the execution referenc
 While it is queued, `GET /api/v1/tasks/{tid}/ai-status` can return `runner.waitReason`.
 `resource_pressure` means the Runner's resource budget is blocking new starts.
 `execution_slot` means all slots available to this work are occupied.
+The Runner pauses new starts when memory use reaches 92% or reported available memory falls below 768 MiB.
+With enough reported memory, CPU readings at or above 95% spanning at least one second allow one task at a time.
+A reading below 95% resets that interval. Memory pressure takes precedence even while CPU use stays high.
 The field is optional. Poll the same task to see the current reason or its transition to running.
+
+For a direct dispatch, the Hub checks the original Runner's durable queue receipt using the
+execution reference and admission key. A matching receipt or per-task heartbeat renews the
+90-second lease, including while memory pressure keeps the task queued. If the Hub loses
+confirmation, the next lease check reports `queueLeaseStatus=unconfirmed` and
+`queueLeaseReason=no_runner_ack`. Device ai-status puts these fields under `runner`; admin
+ai-status returns them at the top level. Reconnecting the Runner triggers a check of its
+persisted queue. Keep the original dispatch while confirmation is pending to avoid duplicate work.
+
+While resource pressure blocks queued work, the Runner periodically logs CPU use, available
+memory and queue depth. A second process opening the same queue exits and reports the last
+registered owner's PID and Runner boot ID.
 
 ## Desktop-local Runner event recovery
 

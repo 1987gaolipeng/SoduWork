@@ -7,17 +7,17 @@ restart. Unit callers may omit storage; scheduling rules remain identical.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
 import ctypes
-from ctypes import wintypes
 import hashlib
 import json
+import logging
 import os
 import platform
 import threading
 import time
+from ctypes import wintypes
+from dataclasses import dataclass, field, replace
 from typing import Callable
-
 
 INTERACTIVE = "interactive"
 MANUAL = "task"
@@ -29,6 +29,8 @@ DEFAULT_TASK_CAPACITY = 100
 MIN_CONCURRENCY = 1
 MAX_CONCURRENCY = 20
 _GIB = 1024 ** 3
+_CPU_CONFIRM_SECONDS = 1.0
+log = logging.getLogger(__name__)
 
 
 def standard_state(value) -> str:
@@ -186,10 +188,11 @@ class AdaptiveResourceBudget:
         self._lock = threading.Lock()
         self._snapshot = ResourceSnapshot(limit=1, cpu_count=max(1, os.cpu_count() or 1))
         self._sampled_mono = 0.0
+        self._high_cpu_since: float | None = None
 
     def snapshot(self, force: bool = False) -> ResourceSnapshot:
-        now = time.monotonic()
         with self._lock:
+            now = time.monotonic()
             if not force and self._sampled_mono and now - self._sampled_mono < self.cache_seconds:
                 return self._snapshot
             try:
@@ -207,13 +210,24 @@ class AdaptiveResourceBudget:
             memory_slots = (max(1, min(MAX_CONCURRENCY, available // int(1.25 * _GIB)))
                             if available else MAX_CONCURRENCY)
             limit = max(1, min(self.ceiling, cpu_slots, memory_slots))
+            if cpu < 95.0:
+                self._high_cpu_since = None
+            elif self._high_cpu_since is None:
+                self._high_cpu_since = now
             pressure, can_start = "normal", True
-            if cpu >= 95.0 or memory >= 92.0 or (available and available < int(0.75 * _GIB)):
+            if memory >= 92.0 or (available and available < int(0.75 * _GIB)):
                 pressure, can_start, limit = "critical", False, 1
+            elif self._high_cpu_since is not None:
+                pressure, limit = "critical", 1
+                can_start = available > 0 and now - self._high_cpu_since >= _CPU_CONFIRM_SECONDS
             elif cpu >= 82.0 or memory >= 84.0 or (available and available < int(1.5 * _GIB)):
                 pressure, limit = "busy", max(1, limit // 2)
             elif cpu >= 70.0 or memory >= 76.0:
                 pressure, limit = "busy", max(1, (limit * 3) // 4)
+            if (pressure, can_start) != (self._snapshot.pressure, self._snapshot.can_start):
+                level = logging.WARNING if pressure == "critical" else logging.INFO
+                log.log(level, "admission: pressure=%s canStart=%s limit=%d cpu=%.1f%% memory=%.1f%% availableMiB=%d",
+                        pressure, can_start, limit, cpu, memory, available // (1024 ** 2))
             self._snapshot = ResourceSnapshot(
                 cpu_percent=cpu, memory_percent=memory, memory_available=available,
                 cpu_count=cpu_count, limit=limit, pressure=pressure,

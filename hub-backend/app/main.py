@@ -127,7 +127,8 @@ async def lifespan(app: FastAPI):
     # Use an event-loop watchdog to capture stacks during prolonged blocking.
     # Event-loop stalls can disrupt Runner heartbeats and desktop connectivity.
     # Runtime stack evidence identifies blocking work that static inspection may miss.
-    await cluster_runtime.start()
+    from .services import queued_dispatch_lease
+    await cluster_runtime.start(on_runner_connected=queued_dispatch_lease.runner_connected)
     from .services import automation_inbox_events, cloud_sync_notifications, client_domain_events
     automation_inbox_events.start()
     cloud_sync_notifications.start()
@@ -135,7 +136,15 @@ async def lifespan(app: FastAPI):
     from .services import loop_watch
     watch = loop_watch.start()
 
-    from .services import cloud_recovery, cloud_message_recovery, dispatch_reconcile, pty_term, repository_catalog, repository_issue_worker
+    from .services import (
+        cloud_message_recovery,
+        cloud_recovery,
+        dispatch_reconcile,
+        pty_term,
+        repository_catalog,
+        repository_issue_worker,
+    )
+
     term_sweep = _spawn_bg(pty_term.sweep_loop(), "term_sweep")  # Reap idle terminals.
     # Periodic report generation can be disabled while manual generation remains available.
     # REPORT_AUTO=false disables scheduling without disabling generation endpoints.
@@ -162,6 +171,7 @@ async def lifespan(app: FastAPI):
         ("repository_catalog", repository_catalog.sync_loop),
         ("repository_issues", repository_issue_worker.tick_loop),
         ("dispatch_reconcile", dispatch_reconcile.tick_loop),
+        ("queued_dispatch_lease", queued_dispatch_lease.tick_loop),
         ("cloud_recovery", cloud_recovery.tick_loop),
         ("cloud_messages", cloud_message_recovery.tick_loop),
         ("rework_retry", task_rework.retry_loop),
