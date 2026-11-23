@@ -26,6 +26,11 @@ from .plugin_bindings import (
     public_inputs, public_workflow_node, available_bindings,
 )
 
+
+class PackageStorageError(RuntimeError):
+    """The Hub could not persist the uploaded archive."""
+
+
 def _ms(dt):
     from .release_control import _ms as stamp
     return stamp(dt)
@@ -405,7 +410,13 @@ async def install(session: AsyncSession, data: bytes, user, org_id: str | None =
             session, version, mode, selected_users, org_id=org_id, created_by=uid,
             org_unit_ids=selected_orgs)
         await session.flush()
-        path = plugin_packages.store(parsed, version_id=version_id)
+        try:
+            path = plugin_packages.store(parsed, version_id=version_id)
+        except OSError as exc:
+            raise PackageStorageError(
+                "Could not save the plugin package. Check free space, write permissions "
+                "and support for atomic file operations in the Hub data directory."
+            ) from exc
         version.package_path = path
         await session.commit()
     except BaseException as exc:
