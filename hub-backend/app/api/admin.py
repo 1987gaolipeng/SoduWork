@@ -2,12 +2,22 @@
 device management. Superusers see all records; other users see their department subtree and
 unassigned devices. Client.user_ref determines device ownership.
 """
-from typing import Annotated
-from datetime import date as calendar_date, datetime, timedelta, timezone
 import logging
 import uuid
+from datetime import date as calendar_date
+from datetime import datetime, timedelta, timezone
+from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import StreamingResponse
 from pydantic import AwareDatetime
 from sqlalchemy import case, func, or_, select, update
@@ -17,12 +27,10 @@ from .. import models
 from ..auth import sign_token, verify_password
 from ..config import get_settings
 from ..csv_export import csv_chunks
-from ..timestamps import iso_utc
-from ..services.catalog_names import DuplicateName
-from ..pagination import PageQuery
 from ..db import get_session
-from ..deps import current_user, has_perm, require_perm
+from ..deps import current_user, has_perm, require_any_perm, require_perm
 from ..models import Attachment, Client, Role, Task, TaskEvent, User
+from ..pagination import PageQuery
 from ..permissions import ALL_KEYS, PERMISSIONS
 from ..realtime import hub
 from ..schemas import (
@@ -44,23 +52,26 @@ from ..schemas import (
     client_to_api,
     task_to_api,
 )
-
 from ..services import aggregation as agg
-from ..services import audit
-from ..services.task_access import publish_owner
+from ..services import (
+    audit,
+    client_access,
+    device_auth,
+    device_connections,
+    email_auth,
+    poller,
+    rbac,
+    storage,
+    work_catalog,
+)
+from ..services import environment_service as environment_service
 from ..services import inbox as inbox_svc
-from ..services import poller
-from ..services import rbac
-from ..services import email_auth
-from ..services import client_access
-from ..services import storage
 from ..services import tasks as svc
-from ..services import work_catalog
-from ..services import device_auth
-from ..services import device_connections
-from ..services import environment_service
-from .input_validation import parse_integer
+from ..services.catalog_names import DuplicateName
+from ..services.task_access import publish_owner
+from ..timestamps import iso_utc
 from .first_chat import REPORT_KEY
+from .input_validation import parse_integer
 
 log = logging.getLogger("uvicorn.error")
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
@@ -195,7 +206,11 @@ def _org_mutation_error(exc: rbac.OrgMutationError) -> HTTPException:
 @router.get("/orgs")
 async def list_orgs(user: User = Depends(current_user), session: AsyncSession = Depends(get_session),
                     window: PageQuery = None):
-    return await rbac.list_orgs(session, await rbac.scope_org_ids(session, user), page=window)
+    if not user.is_super and not getattr(user, "_perms", set()):
+        scope = {user.org_id} if user.org_id else set()
+    else:
+        scope = await rbac.scope_org_ids(session, user)
+    return await rbac.list_orgs(session, scope, page=window)
 
 
 @router.post("/orgs")
@@ -256,9 +271,19 @@ async def delete_org(
 # Roles.
 
 @router.get("/roles")
-async def list_roles(user: User = Depends(current_user), session: AsyncSession = Depends(get_session),
+async def list_roles(user: User = Depends(require_perm("role.manage")), session: AsyncSession = Depends(get_session),
                     window: PageQuery = None):
     return await rbac.list_roles(session, page=window)
+
+
+@router.get("/role-options")
+async def role_options(
+    user: User = Depends(require_any_perm("user.manage", "identity.manage", "client.assign")),
+    session: AsyncSession = Depends(get_session),
+):
+    """Role names for account and identity settings."""
+    rows = await session.execute(select(Role.id, Role.name).order_by(Role.created_at, Role.id))
+    return [{"id": role_id, "name": name} for role_id, name in rows]
 
 
 @router.post("/roles")
@@ -572,10 +597,10 @@ async def delete_position(
                     pid, row.name, {})
     return {"ok": True}
 
-# Responsibility catalog: readable by authenticated users; mutations require user.manage.
+# Responsibility domains support user management and dispatch.
 
 @router.get("/domains")
-async def list_domains(user: User = Depends(current_user), session: AsyncSession = Depends(get_session),
+async def list_domains(user: User = Depends(require_any_perm("user.manage", "task.dispatch")), session: AsyncSession = Depends(get_session),
                     window: PageQuery = None):
     return await rbac.list_domains(session, page=window)
 
