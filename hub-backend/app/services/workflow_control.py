@@ -3,14 +3,14 @@ from __future__ import annotations
 
 import asyncio
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import automation_models as am, models
-from .task_access import publish_owner
+from .. import automation_models as am
+from .. import models
 from . import ai_exec, task_events
+from .task_access import publish_owner
 from .workflow_runs import _event, _ms, _now
-
 
 LOCK = asyncio.Lock()
 _ACTIVE = {"queued", "dispatching", "running", "waiting_human", "waiting_external"}
@@ -41,10 +41,22 @@ def _owned_refs(nodes: list[am.NodeRun]) -> tuple[set[str], set[tuple[str, str]]
 
 async def _mark_cancelled(session: AsyncSession, run: am.WorkflowRun, actor: str,
                           reason: str) -> tuple[dict, list[dict], models.Task | None]:
-    active_nodes = list((await session.execute(select(am.NodeRun).where(
-        am.NodeRun.run_id == run.id, am.NodeRun.state.in_(tuple(_ACTIVE))
-    ))).scalars().all())
-    request_ids, acceptance_refs, deployment_ids = _owned_refs(active_nodes)
+    nodes = list((await session.scalars(select(am.NodeRun).where(
+        am.NodeRun.run_id == run.id))).all())
+    active_nodes = [node for node in nodes if node.state in _ACTIVE]
+    node_ids = {node.id for node in nodes}
+    request_ids, acceptance_refs, _ = _owned_refs(nodes)
+    _, _, deployment_ids = _owned_refs(active_nodes)
+    # Old deployment approvals have no run ID. Use their artifact/environment pair
+    # only when another live workflow does not also reference that resource.
+    if acceptance_refs or request_ids:
+        siblings = (await session.scalars(select(am.NodeRun).join(
+            am.WorkflowRun, am.WorkflowRun.id == am.NodeRun.run_id).where(
+                am.WorkflowRun.task_id == run.task_id, am.WorkflowRun.id != run.id,
+                am.WorkflowRun.state.in_(_ACTIVE)))).all()
+        sibling_requests, sibling_acceptance, _ = _owned_refs(siblings)
+        request_ids -= sibling_requests
+        acceptance_refs -= sibling_acceptance
     executor_refs = []
     for node in active_nodes:
         executor = dict(node.executor or {})
@@ -68,14 +80,25 @@ async def _mark_cancelled(session: AsyncSession, run: am.WorkflowRun, actor: str
         am.ApprovalRequest.task_id == run.task_id,
         am.ApprovalRequest.status == "pending"
     ))).scalars().all())
-    cancelled_approvals = 0
+    owned = []
     for request in pending:
-        linked = request.id in request_ids or (
-            (request.artifact_version_id, request.environment_id) in acceptance_refs
-            and request.action in {"uat", "deploy"})
+        context = request.context or {}
+        if context.get("workflowRunId"):
+            linked = context["workflowRunId"] == run.id
+        elif context.get("nodeRunId"):
+            linked = context["nodeRunId"] in node_ids
+        else:
+            linked = request.id in request_ids or (
+                request.action in {"uat", "deploy"} and
+                (request.artifact_version_id, request.environment_id) in acceptance_refs)
         if linked:
-            request.status, request.resolved_at = "cancelled", _now()
-            cancelled_approvals += 1
+            owned.append(request.id)
+    cancelled_approvals = 0
+    if owned:
+        changed = await session.execute(update(am.ApprovalRequest).where(
+            am.ApprovalRequest.id.in_(owned), am.ApprovalRequest.status == "pending"
+        ).values(status="cancelled", resolved_at=_now()).returning(am.ApprovalRequest.id))
+        cancelled_approvals = len(changed.all())
 
     cancelled_deployments = running_deployments = 0
     if deployment_ids:

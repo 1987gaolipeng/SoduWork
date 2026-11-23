@@ -664,6 +664,8 @@ async def decide(session: AsyncSession, task: models.Task, actor, *, action: str
                     continue_existing_merge = True
                 elif artifact.kind == "code":
                     await ensure_request(session, task, artifact, "merge", context={
+                        **{key: req.context[key] for key in ("workflowRunId", "nodeRunId")
+                           if (req.context or {}).get(key)},
                         "summary": f"合并 {artifact.branch} → {artifact.target}",
                         "commit": artifact.commit_sha,
                     })
