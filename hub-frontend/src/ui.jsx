@@ -346,16 +346,24 @@ export function takeNav(screen) {
 /* ---------- toast ---------- */
 export function toast(msg) { window.dispatchEvent(new CustomEvent('soduwork-hub-toast', { detail: msg })) }
 export function ToastHost() {
-  const uiLocale = useLocale();
-  const [msg, setMsg] = useState(null)
+  const [notice, setNotice] = useState(null)
   useEffect(() => {
     let timer
-    const h = (e) => { setMsg(e.detail); clearTimeout(timer); timer = setTimeout(() => setMsg(null), 2400) }
-    window.addEventListener('soduwork-hub-toast', h)
-    return () => { window.removeEventListener('soduwork-hub-toast', h); clearTimeout(timer) }
+    let sequence = 0
+    const handleToast = event => {
+      setNotice({ id: ++sequence, message: event.detail })
+      clearTimeout(timer)
+      timer = setTimeout(() => setNotice(null), 2400)
+    }
+    window.addEventListener('soduwork-hub-toast', handleToast)
+    return () => {
+      window.removeEventListener('soduwork-hub-toast', handleToast)
+      clearTimeout(timer)
+    }
   }, [])
-  if (!msg) return null
-  return <div className="toast">{msg}</div>
+  return <div role="status" aria-live="polite" aria-atomic="true">
+    {notice && <div className="toast" key={notice.id}>{notice.message}</div>}
+  </div>
 }
 
 /* Data-loading hook. */
