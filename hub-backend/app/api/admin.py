@@ -2,12 +2,22 @@
 device management. Superusers see all records; other users see their department subtree and
 unassigned devices. Client.user_ref determines device ownership.
 """
-from typing import Annotated
-from datetime import date as calendar_date, datetime, timedelta, timezone
 import logging
 import uuid
+from datetime import date as calendar_date
+from datetime import datetime, timedelta, timezone
+from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import StreamingResponse
 from pydantic import AwareDatetime
 from sqlalchemy import case, func, or_, select, update
@@ -17,12 +27,10 @@ from .. import models
 from ..auth import sign_token, verify_password
 from ..config import get_settings
 from ..csv_export import csv_chunks
-from ..timestamps import iso_utc
-from ..services.catalog_names import DuplicateName
-from ..pagination import PageQuery
 from ..db import get_session
-from ..deps import current_user, has_perm, require_perm
+from ..deps import current_user, has_perm, require_any_perm, require_perm
 from ..models import Attachment, Client, Role, Task, TaskEvent, User
+from ..pagination import PageQuery
 from ..permissions import ALL_KEYS, PERMISSIONS
 from ..realtime import hub
 from ..schemas import (
@@ -44,23 +52,26 @@ from ..schemas import (
     client_to_api,
     task_to_api,
 )
-
 from ..services import aggregation as agg
-from ..services import audit
-from ..services.task_access import publish_owner
+from ..services import (
+    audit,
+    client_access,
+    device_auth,
+    device_connections,
+    email_auth,
+    poller,
+    rbac,
+    storage,
+    work_catalog,
+)
+from ..services import environment_service as environment_service
 from ..services import inbox as inbox_svc
-from ..services import poller
-from ..services import rbac
-from ..services import email_auth
-from ..services import client_access
-from ..services import storage
 from ..services import tasks as svc
-from ..services import work_catalog
-from ..services import device_auth
-from ..services import device_connections
-from ..services import environment_service
-from .input_validation import parse_integer
+from ..services.catalog_names import DuplicateName
+from ..services.task_access import publish_owner
+from ..timestamps import iso_utc
 from .first_chat import REPORT_KEY
+from .input_validation import parse_integer
 
 log = logging.getLogger("uvicorn.error")
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
@@ -195,7 +206,11 @@ def _org_mutation_error(exc: rbac.OrgMutationError) -> HTTPException:
 @router.get("/orgs")
 async def list_orgs(user: User = Depends(current_user), session: AsyncSession = Depends(get_session),
                     window: PageQuery = None):
-    return await rbac.list_orgs(session, await rbac.scope_org_ids(session, user), page=window)
+    if not user.is_super and not getattr(user, "_perms", set()):
+        scope = {user.org_id} if user.org_id else set()
+    else:
+        scope = await rbac.scope_org_ids(session, user)
+    return await rbac.list_orgs(session, scope, page=window)
 
 
 @router.post("/orgs")
@@ -255,16 +270,56 @@ async def delete_org(
 
 # Roles.
 
+async def _check_role_grant(session: AsyncSession, actor: User, *, permission: str,
+                            role_id: str | None = None, proposed: list[str] | None = None) -> Role | None:
+    # Acquire role locks in a stable order for concurrent grants and edits.
+    role_ids = {key for key in (role_id, None if actor.is_super else actor.role_id) if key}
+    roles = {key: await rbac.lock_role_reference(session, key) for key in sorted(role_ids)}
+    target = roles.get(role_id)
+    if not actor.is_super:
+        own = roles.get(actor.role_id)
+        allowed = set(own.permissions or []) if own else set()
+        # The role service reports unknown requested keys as a validation error.
+        required = {permission} | (set(proposed or ()) & set(ALL_KEYS))
+        if target is not None:
+            required.update(target.permissions or [])
+        if not required.issubset(allowed):
+            raise HTTPException(status_code=403, detail="不能管理超出自己权限范围的角色")
+    return target
+
+
+def _check_self_authority(actor: User, target: User, *, role_changed: bool = False,
+                          org_id: str | None = None, active: bool | None = None) -> None:
+    if actor.is_super or actor.id != target.id:
+        return
+    if role_changed or (org_id is not None and org_id != target.org_id) or (
+        active is not None and active != target.is_active
+    ):
+        raise HTTPException(status_code=403, detail="不能更改自己的角色、部门或启用状态")
+
+
 @router.get("/roles")
-async def list_roles(user: User = Depends(current_user), session: AsyncSession = Depends(get_session),
+async def list_roles(user: User = Depends(require_perm("role.manage")), session: AsyncSession = Depends(get_session),
                     window: PageQuery = None):
     return await rbac.list_roles(session, page=window)
+
+
+@router.get("/role-options")
+async def role_options(
+    user: User = Depends(require_any_perm("user.manage", "identity.manage", "client.assign")),
+    session: AsyncSession = Depends(get_session),
+):
+    """Role names for account and identity settings."""
+    rows = await session.execute(select(Role.id, Role.name).order_by(Role.created_at, Role.id))
+    return [{"id": role_id, "name": name} for role_id, name in rows]
 
 
 @router.post("/roles")
 async def create_role(body: RoleCreate,
                       user: User = Depends(require_perm("role.manage")),
                       session: AsyncSession = Depends(get_session)):
+    await _lock_user_targets(session, user, [])
+    await _check_role_grant(session, user, permission="role.manage", proposed=body.permissions)
     try:
         result = await rbac.create_role(session, body.name, body.permissions)
     except DuplicateName as exc:
@@ -280,6 +335,8 @@ async def create_role(body: RoleCreate,
 async def update_role(rid: str, body: RoleUpdate,
                       user: User = Depends(require_perm("role.manage")),
                       session: AsyncSession = Depends(get_session)):
+    await _lock_user_targets(session, user, [])
+    await _check_role_grant(session, user, permission="role.manage", role_id=rid, proposed=body.permissions)
     try:
         r = await rbac.update_role(session, rid, body.name, body.permissions)
     except DuplicateName as exc:
@@ -330,7 +387,9 @@ async def create_user(
     await _lock_user_targets(session, user, [])
     await rbac.lock_org_tree(session, shared=True)
     await _assert_org_in_scope(session, user, body.orgId)
-    if body.roleId and await rbac.lock_role_reference(session, body.roleId) is None:
+    if body.roleId and await _check_role_grant(
+        session, user, permission="user.manage", role_id=body.roleId,
+    ) is None:
         raise HTTPException(status_code=400, detail="角色不存在")
     if body.domains:
         domain_ids = {str(value) for value in body.domains}
@@ -422,6 +481,7 @@ async def batch_update_users(
         if target.account_deleted_at:
             raise HTTPException(status_code=400, detail="不能修改已注销的账号")
         _check_deactivation(user, target, body.isActive)
+        _check_self_authority(user, target, org_id=body.orgId, active=body.isActive)
         if body.isActive is not None and target.is_active != body.isActive:
             changes.append((target, {"isActive": body.isActive}))
         if body.orgId is not None and target.org_id != body.orgId:
@@ -458,9 +518,14 @@ async def update_user(
     if body.orgId is not None:
         await _assert_org_in_scope(session, user, body.orgId)
         await _require_existing_org(session, body.orgId)
+    _check_deactivation(user, target, body.isActive)
+    _check_self_authority(user, target, org_id=body.orgId, active=body.isActive,
+                          role_changed="roleId" in body.model_fields_set and (body.roleId or None) != target.role_id)
     # An empty roleId is the legacy form used by clients to clear a role.
     # Validate non-empty assignments while preserving that clearing behavior.
-    if body.roleId and await rbac.lock_role_reference(session, body.roleId) is None:
+    if body.roleId and await _check_role_grant(
+        session, user, permission="user.manage", role_id=body.roleId,
+    ) is None:
         raise HTTPException(status_code=400, detail="角色不存在")
     if body.domains is not None:
         domain_ids = {str(value) for value in body.domains}
@@ -469,7 +534,6 @@ async def update_user(
         missing = sorted(domain_ids - found)
         if missing:
             raise HTTPException(status_code=400, detail="业务域不存在：" + ", ".join(missing))
-    _check_deactivation(user, target, body.isActive)
     was_active = bool(target.is_active)
     patch = body.model_dump(exclude_none=True)
     # Explicit null clears the role; omitting the field preserves it.
@@ -572,10 +636,10 @@ async def delete_position(
                     pid, row.name, {})
     return {"ok": True}
 
-# Responsibility catalog: readable by authenticated users; mutations require user.manage.
+# Responsibility domains support user management and dispatch.
 
 @router.get("/domains")
-async def list_domains(user: User = Depends(current_user), session: AsyncSession = Depends(get_session),
+async def list_domains(user: User = Depends(require_any_perm("user.manage", "task.dispatch")), session: AsyncSession = Depends(get_session),
                     window: PageQuery = None):
     return await rbac.list_domains(session, page=window)
 
@@ -2348,12 +2412,14 @@ async def list_audit(
 @router.get("/audit/export.csv")
 async def export_audit(
     filters: dict = Depends(_audit_filters),
+    limit: Annotated[int | None, Query(ge=0, le=2**63-1)] = None,
     offset: Annotated[int, Query(ge=0, le=2**63-1)] = 0,
     user: User = Depends(require_perm("audit.view")),
     session: AsyncSession = Depends(get_session),
 ):
-    """Download matching events from the offset in the same order and scope as the audit list."""
-    chunks = await audit.export_csv(session, user, settings.soduwork_env.strip().lower(), offset=offset, **filters)
+    """Download matching events after the offset. Omit limit for all matches or use zero for headers only."""
+    chunks = await audit.export_csv(session, user, settings.soduwork_env.strip().lower(),
+                                    limit=limit, offset=offset, **filters)
     return StreamingResponse(chunks, media_type="text/csv", headers={
         "Content-Disposition": 'attachment; filename="audit-log.csv"',
         "Cache-Control": "no-store",
