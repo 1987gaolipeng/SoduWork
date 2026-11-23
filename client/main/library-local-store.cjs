@@ -25,7 +25,10 @@ async function copyLegacyTree(source, target, guard) {
   catch (error) { if (error.code === 'ENOENT') return false; throw error; }
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw error('LOCAL_LIBRARY_UNSAFE_PATH', '旧资料库目录包含链接或不是目录');
   await io.mkdir(target, { recursive: true, mode: 0o700 }); guard();
-  for (const entry of await io.readdir(source, { withFileTypes: true })) {
+  const entries = await io.readdir(source, { withFileTypes: true });
+  // load() treats the root index as completion, so publish it after all objects.
+  entries.sort((a, b) => Number(a.name === 'index.json') - Number(b.name === 'index.json'));
+  for (const entry of entries) {
     guard();
     const from = path.join(source, entry.name), to = path.join(target, entry.name);
     if (entry.isDirectory()) await copyLegacyTree(from, to, guard);

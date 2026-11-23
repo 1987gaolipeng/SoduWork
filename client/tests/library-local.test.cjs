@@ -463,6 +463,49 @@ test('the first work-directory access migrates the legacy userData library witho
   assert.equal(Buffer.from((await f.call('readBinary', { id: listed.items[0].id })).data, 'base64').toString(), 'legacy bytes');
 });
 
+test('a failed legacy object copy is retried before the library migration is considered complete', async t => {
+  const f = fixture(t);
+  const store = require('../main/library-local-store.cjs').create(f.deps.app, OWNER_A, () => {});
+  const { execute } = require('../main/library-local-actions.cjs');
+  const originals = [];
+  for (const name of ['first.txt', 'second.txt']) {
+    const bytes = 'original legacy bytes for ' + name;
+    const { item } = await store.run(index => execute(store, index, 'upload', { name, dataBase64: data(bytes) }));
+    originals.push({ item, bytes });
+  }
+  const legacy = path.join(f.root, 'library', 'accounts', OWNER_A);
+  fs.mkdirSync(path.dirname(legacy), { recursive: true });
+  fs.renameSync(store.root, legacy);
+  const sourceIndex = fs.readFileSync(path.join(legacy, 'index.json'));
+  let copiedObject, objectCopies = 0;
+  const copy = fsp.copyFile, failure = Object.assign(Error('destination disk full'), { code: 'ENOSPC' });
+  const fault = t.mock.method(fsp, 'copyFile', async (from, to, flags) => {
+    if (from.startsWith(path.join(legacy, 'objects') + path.sep)) {
+      if (++objectCopies === 2) throw failure;
+      copiedObject = to;
+    }
+    return copy(from, to, flags);
+  });
+  await assert.rejects(f.call('list', { scope: 'all' }), error => error === failure);
+  const prematurelyPublished = fs.existsSync(path.join(f.account(), 'index.json'));
+  fault.mock.restore();
+  const past = new Date('2020-01-01T00:00:00Z');
+  fs.utimesSync(copiedObject, past, past);
+  f.install();
+  const listed = await f.call('list', { scope: 'all' });
+  assert.deepEqual(listed.items.map(item => item.id).sort(), originals.map(row => row.item.id).sort());
+  for (const { item, bytes } of originals) {
+    const binary = await f.call('readBinary', { id: item.id });
+    assert.notEqual(binary.ok, false, JSON.stringify(binary));
+    assert.equal(Buffer.from(binary.data, 'base64').toString(), bytes);
+    const sourceObject = JSON.parse(sourceIndex).items.find(row => row.id === item.id)._object;
+    assert.equal(fs.readFileSync(path.join(legacy, sourceObject), 'utf8'), bytes);
+  }
+  assert.equal(fs.statSync(copiedObject).mtimeMs, past.getTime(), 'completed objects are reused on retry');
+  assert.equal(prematurelyPublished, false, 'the index must not mark a partial migration complete');
+  assert.deepEqual(fs.readFileSync(path.join(legacy, 'index.json')), sourceIndex);
+});
+
 test('trash retains bytes, restores to root after folder deletion, and purges only deleted files', async t => {
   const f = fixture(t), folder = (await f.call('createFolder', { name: '临时' })).folder;
   const item = (await create(f, { folderId: folder.id })).item;
