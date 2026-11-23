@@ -17,7 +17,7 @@ export default function IdentityCenter() {
   const listRef = useViewportHeight(180)
   const uiLocale = useLocale();
   const query = useAsync(async () => {
-    const [providers, orgs, roles] = await Promise.all([api.identityProviders(), api.orgs(), api.roles()])
+    const [providers, orgs, roles] = await Promise.all([api.identityProviders(), api.orgs(), api.roleOptions()])
     return { providers: providers.items || [], orgs: orgs || [], roles: roles || [] }
   }, [])
   const [editing, setEditing] = useState(null)

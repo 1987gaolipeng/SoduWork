@@ -221,7 +221,7 @@ async def _available_org_name(session: AsyncSession, name: str, parent_id: str |
 async def list_orgs(session: AsyncSession, scope: set[str] | None, *, page: Page | None = None):
     q = select(models.OrgUnit).order_by(models.OrgUnit.sort, models.OrgUnit.created_at, models.OrgUnit.id)
     if scope is not None:
-        q = q.where(models.OrgUnit.id.in_(scope or {"__none__"}))
+        q = q.where(models.OrgUnit.id.in_(scope))
     rows, total = await select_rows(session, q, page)
     return list_result([org_to_api(o) for o in rows], total)
 

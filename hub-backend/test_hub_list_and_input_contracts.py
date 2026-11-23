@@ -68,6 +68,34 @@ class HubContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, expected, (method, path, response.status_code))
         return response.json()
 
+    async def test_directory_reads_follow_admin_and_selector_permissions(self):
+        self.user.is_super = False
+        self.user._perms = set()
+        async with self.sessions() as session, session.begin():
+            child = await session.get(models.OrgUnit, "row-1")
+            child.parent_id = self.user.org_id
+        own = await self.request("GET", "admin/orgs?limit=1")
+        self.assertEqual(([row["id"] for row in own["items"]], own["total"]), (["row-0"], 1))
+        for path in ("roles", "permissions", "domains", "role-options"):
+            await self.request("GET", "admin/" + path, 403)
+        for permission in ("user.manage", "identity.manage", "client.assign"):
+            self.user._perms = {permission}
+            options = await self.request("GET", "admin/role-options")
+            self.assertEqual(len(options), 3)
+            self.assertTrue(all(set(row) == {"id", "name"} for row in options))
+            await self.request("GET", "admin/roles", 403)
+        self.user._perms = {"user.manage"}
+        self.assertEqual((await self.request("GET", "admin/orgs?limit=1"))["total"], 2)
+        self.assertEqual(len(await self.request("GET", "admin/domains")), 3)
+        self.user._perms = {"task.dispatch"}
+        self.assertEqual((await self.request("GET", "admin/domains?limit=1"))["total"], 3)
+        self.user._perms = {"role.manage"}
+        self.assertTrue(all("permissions" in role for role in await self.request("GET", "admin/roles")))
+        await self.request("GET", "admin/permissions")
+        self.user._perms = set()
+        self.user.org_id = None
+        self.assertEqual(await self.request("GET", "admin/orgs?limit=1"), {"items": [], "total": 0})
+
     async def test_first_chat_uses_current_models_and_only_the_signed_in_accounts_recent_report(self):
         async def reporting_device(session=Depends(get_session)):
             return await session.get(models.Client, self.device.id)
@@ -381,6 +409,19 @@ class HubContractTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(unchanged["competencies"], ["Planning"])
                 updated = await self.request("PATCH", endpoint, json={"competencies": ["Writing"]})
                 self.assertEqual(updated["competencies"], ["Writing"])
+
+    async def test_existing_scenario_key_returns_conflict_in_its_organization(self):
+        route = "admin/work-catalog/scenarios"
+        body = {"orgId": "row-0", "key": "review", "name": "First review", "enabled": False}
+        first = await self.request("POST", route, json=body)
+        duplicate = await self.request("POST", route, 409, json={**body, "key": " REVIEW ", "name": "Second review"})
+        self.assertEqual(duplicate["detail"], "这个场景标识已经存在")
+        catalog = await self.request("GET", "admin/work-catalog?orgId=row-0")
+        matching = [item for item in catalog["scenarios"] if item["key"] == "review"]
+        self.assertEqual([(item["id"], item["name"]) for item in matching], [(first["id"], "First review")])
+        other = await self.request("POST", route, json={**body, "orgId": "row-1"})
+        self.assertNotEqual(other["id"], first["id"])
+        await self.request("POST", route, 400, json={**body, "key": "bad key"})
 
     async def test_users_and_positions_require_an_existing_department(self):
         body = {"username": "candidate", "password": "example-password", "orgId": "missing"}

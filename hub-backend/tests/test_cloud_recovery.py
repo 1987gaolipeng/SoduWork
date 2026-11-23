@@ -148,6 +148,19 @@ class CloudRecoveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("不会重复派发", row.error)
         self.assertEqual((await cloud_recovery.recover_submissions())["candidates"], 0)
 
+    async def test_legacy_committing_receipts_reconcile_without_authorizing_replay(self):
+        committed, _ = await self.seed("old-receipt", submitted=False, phase="committing",
+                                       event=ai_exec.EV_DISPATCHED)
+        pending, _ = await self.seed("old-unknown", submitted=False, phase="committing")
+        with patch.object(task_dispatch, "dispatch", AsyncMock()) as dispatch:
+            counts = await cloud_recovery.recover_submissions()
+            self.assertEqual(counts.get("confirmed"), 1)
+            self.assertEqual(counts.get("pending"), 1)
+            dispatch.assert_not_awaited()
+        async with self.sessions() as session:
+            self.assertEqual((await session.get(Handoff, committed)).phase, "committed")
+            self.assertEqual((await session.get(Handoff, pending)).phase, "committing")
+
     async def test_changed_device_owner_blocks_unattended_dispatch(self):
         await self.seed()
         async with self.sessions() as session:

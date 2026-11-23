@@ -291,13 +291,20 @@ async send(text, turnAttachments, sendOptions) {
         // Native recovery remains part of the original logical submission.
         if (!(turn.internal && turn.runtimeRecovery) || !ctx.run.pluginGenerationTurn) ctx.run.pluginGenerationTurn = {};
         const pluginGenerationTurn = ctx.run.pluginGenerationTurn;
-        const permissionRevision = ctx.accessPolicy?.revision;
-        const repairCancelled = () => interrupted() || ctx.closed || ctx.goalCancelled ||
-          ctx.liveAccess.changing() || Boolean(ctx.accessChanges.pending()) || ctx.accessPolicy?.revision !== permissionRevision;
+        const startingPolicy = ctx.accessPolicy;
+        const startingSession = ctx.piSession;
+        const samePermissions = () => ctx.accessPolicy?.revision === startingPolicy?.revision;
+        const approvedInPlace = () => startingPolicy?.mode === 'standard' && ctx.accessPolicy?.mode === 'full' &&
+          ctx.piSession === startingSession && ctx.accessPolicy.workspaceRoot === startingPolicy.workspaceRoot &&
+          ctx.accessPolicy.revision === startingPolicy.revision + 1;
+        const turnInterrupted = () => interrupted() || ctx.closed || ctx.goalCancelled ||
+          ctx.liveAccess.changing() || Boolean(ctx.accessChanges.pending());
+        const repairCancelled = () => turnInterrupted() || !samePermissions();
         pluginGate = await require('./plugin-generation-gate.cjs').begin({
           handle: ctx.handle, app: ctx.opts.app, identity: ctx.identity, logicalOwner: pluginGenerationTurn,
           selectedPluginIds: effectivePluginIds,
-          cancelled: () => repairCancelled() || Boolean(ctx.run.stopReason),
+          cancelled: () => turnInterrupted() || Boolean(ctx.run.stopReason) || (!samePermissions() && !approvedInPlace()),
+          validationAllowed: samePermissions,
           pauseConfirmed: () => Boolean(ctx.limitRequest) && !repairCancelled(),
           changed: () => ctx._emit({ kind: 'plugin-validation' }),
           repair: async prompt => {

@@ -35,7 +35,7 @@ export default function ClientAccessPolicy() {
       const [policy, orgList, roleList] = await Promise.all([
         api.clientAuthPolicy(),
         api.orgs().catch(() => []),
-        api.roles().catch(() => []),
+        api.roleOptions().catch(() => []),
       ])
       setForm({ ...EMPTY, ...(policy || {}) })
       setOrgs(Array.isArray(orgList) ? orgList : [])

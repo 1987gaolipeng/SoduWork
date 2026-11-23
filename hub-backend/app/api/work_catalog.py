@@ -169,6 +169,8 @@ async def create_scenario(
     target = await _target_org(session, user, body.get("orgId"))
     try:
         row = await work_catalog.save_scenario(session, body, target)
+    except work_catalog.ScenarioKeyConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     except ValueError as error:
         raise _value_error(error) from error
     result = work_catalog.scenario_api(row)

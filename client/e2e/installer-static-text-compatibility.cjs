@@ -72,7 +72,7 @@ async function main() {
   assert.equal(details.staticTextDifferences.length, 1);
   assert.equal(details.staticTextDifferences[0].path, 'resources/shell/etc/package-versions.txt');
   assert.equal(details.staticTextDifferences[0].filesystemSize, original.length + 4096);
-  assert.match(await fs.readFile(path.join(installed, '.soduwork-update.log'), 'utf8'), /verification-policy=bootstrap-existence-only/);
+  assert.match(await fs.readFile(path.join(installed, '.soduwork-update.log'), 'utf8'), /payload-verification-summary .* static-text-differences=1 /);
   const launchOutput = path.join(root, 'launched-after-static-text-' + Date.now() + '.json');
   const launchCode = await run(path.join(installed, executableName + '.exe'), [], {
     SODUWORK_UPDATE_E2E_PROFILE: path.join(root, 'profile'), SODUWORK_UPDATE_E2E_OUTPUT: launchOutput,
