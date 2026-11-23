@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import os
 import tempfile
-from unittest.mock import AsyncMock, call, patch
+from unittest.mock import AsyncMock, call
 
 _root = tempfile.TemporaryDirectory(prefix='soduwork-smoke-execution-context-http-')
 os.environ['DATABASE_URL'] = (
@@ -27,7 +27,7 @@ from app import models  # noqa: E402
 from app.api import tasks as tasks_api  # noqa: E402
 from app.db import SessionLocal, engine, init_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.services import ai_exec, device_auth, model_catalog, zero_work_route  # noqa: E402
+from app.services import ai_exec, device_auth, zero_work_route  # noqa: E402
 
 
 USER = 'u-smoke-execution-context-http'
@@ -207,8 +207,7 @@ async def main() -> None:
                       getattr(task, 'status', '') == 'doing',
                       getattr(task, 'status', ''))
 
-            # Use the real authenticated request, durable task and dispatch code;
-            # replace only the shared model catalog and external Agent boundary.
+            # Exercise the real authenticated request, catalog and durable task with a synthetic Agent.
             async def dispatch_case(cli, model, **extra):
                 created = await client.post('/api/v1/tasks', headers=headers(),
                     json={'title': 'Model route ' + cli})
@@ -233,38 +232,54 @@ async def main() -> None:
                 selected.enabled = True
                 await session.commit()
 
-            async def catalog(_session, _client, wanted=''):
-                if wanted == 'removed-model':
-                    return {}
-                return {'model': wanted or 'fixture-default',
-                        'base': 'https://fixture.invalid/v1', 'key': 'fixture-key'}
+            async with SessionLocal() as session:
+                session.add_all([
+                    models.ModelDef(id='context-fixture:chosen-model', provider_id='context-fixture',
+                                    name='chosen-model', enabled=True),
+                    models.ModelProvider(id='other-fixture', base_url='https://fixture.invalid/v1',
+                                         api_key='second-fixture-key', enabled=True),
+                    models.ModelDef(id='other-fixture:chosen-model', provider_id='other-fixture',
+                                    name='chosen-model', enabled=True),
+                ])
+                await session.commit()
 
-            with patch.object(model_catalog, 'resolve', new=catalog):
-                for cli in ['pi', 'opencode', 'qwen', 'codex-harness', 'dsh']:
-                    response, _ = await dispatch_case(cli, 'chosen-model')
-                    wire = provider.calls[-1]
-                    check('HTTP ' + cli + ' receives selected model and full provider',
-                          response.status_code == 200
-                          and wire['cfg'].get('llm', {}).get('model') == 'chosen-model'
-                          and wire['cfg'].get('llm', {}).get('base') == 'https://fixture.invalid/v1'
-                          and wire['extra'].get('agentExecution', {}).get('kind') == 'local:' + cli,
-                          response.status_code)
-                response, _ = await dispatch_case('codex', 'gpt-5-codex', reasoningEffort='high')
+            for cli in ['pi', 'opencode', 'qwen', 'codex-harness', 'dsh']:
+                saved = await client.put('/api/v1/agent-setup/model', headers=headers(), json={
+                    'key': cli, 'model': 'chosen-model', 'providerId': 'other-fixture'})
+                # Exercise both inheritance and an explicitly repeated wire model name.
+                response, _ = await dispatch_case(cli, '' if cli == 'pi' else 'chosen-model')
                 wire = provider.calls[-1]
-                check('HTTP native Codex receives native options without shared model service',
-                      response.status_code == 200 and 'llm' not in wire['cfg']
-                      and wire['extra'].get('agentExecution') == {
-                          'kind': 'local:codex', 'model': 'gpt-5-codex', 'reasoningEffort': 'high'},
-                      response.status_code)
-                count = len(provider.calls)
-                response, task_id = await dispatch_case('qwen', 'removed-model')
-                check('HTTP missing explicit model refuses dispatch without fallback',
-                      response.status_code == 409 and len(provider.calls) == count
-                      and response.json().get('detail', {}).get('phase') == 'configuration', response.text)
-                async with SessionLocal() as session:
-                    rejected = await session.get(models.Task, task_id)
-                    check('Rejected model leaves the task available for corrected dispatch',
-                          rejected.status == 'todo', rejected.status)
+                llm = wire['cfg'].get('llm') or {}
+                check('HTTP ' + cli + ' receives selected model and full provider',
+                      saved.status_code == 200 and response.status_code == 200
+                      and llm.get('model') == 'chosen-model' and llm.get('key') == 'second-fixture-key'
+                      and llm.get('base') == 'https://fixture.invalid/v1'
+                      and wire['extra'].get('agentExecution', {}).get('kind') == 'local:' + cli,
+                      (saved.status_code, response.status_code))
+
+            async with SessionLocal() as session:
+                (await session.get(models.ModelProvider, 'other-fixture')).enabled = False
+                await session.commit()
+            count = len(provider.calls)
+            response, _ = await dispatch_case('pi', '')
+            check('HTTP unavailable pinned provider does not dispatch to a same-name model',
+                  response.status_code == 409 and len(provider.calls) == count, response.status_code)
+            response, _ = await dispatch_case('codex', 'gpt-5-codex', reasoningEffort='high')
+            wire = provider.calls[-1]
+            check('HTTP native Codex receives native options without shared model service',
+                  response.status_code == 200 and 'llm' not in wire['cfg']
+                  and wire['extra'].get('agentExecution') == {
+                      'kind': 'local:codex', 'model': 'gpt-5-codex', 'reasoningEffort': 'high'},
+                  response.status_code)
+            count = len(provider.calls)
+            response, task_id = await dispatch_case('qwen', 'removed-model')
+            check('HTTP missing explicit model refuses dispatch without fallback',
+                  response.status_code == 409 and len(provider.calls) == count
+                  and response.json().get('detail', {}).get('phase') == 'configuration', response.text)
+            async with SessionLocal() as session:
+                rejected = await session.get(models.Task, task_id)
+                check('Rejected model leaves the task available for corrected dispatch',
+                      rejected.status == 'todo', rejected.status)
 
     finally:
         ai_exec.load = old['load']

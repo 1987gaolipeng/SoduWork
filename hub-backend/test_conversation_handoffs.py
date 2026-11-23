@@ -205,9 +205,16 @@ class HandoffTests(unittest.IsolatedAsyncioTestCase):
                 response = await self.prepare("rejected-" + str(len(str(value))), **{field: value})
                 self.assertIn(response.status_code, [400, 409], response.text)
         with self.subTest("unknown abort fences late upload"):
-            aborted = await self.http.post("/api/v1/conversation-handoffs/late/abort")
-            self.assertEqual(aborted.json()["phase"], "aborted", aborted.text)
-            self.assertEqual((await self.prepare("late")).json()["phase"], "aborted")
+            async with db.SessionLocal() as session:
+                before = set((await session.scalars(select(models.Task.id))).all())
+            path = "/api/v1/conversation-handoffs/late"
+            retries = await asyncio.gather(self.http.post(path + "/abort"), self.http.post(path + "/abort"))
+            for response in [*retries, await self.prepare("late"), await self.http.get(path)]:
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json()["phase"], "aborted")
+                self.assertEqual(response.json()["taskId"], "")
+            async with db.SessionLocal() as session:
+                self.assertEqual(set((await session.scalars(select(models.Task.id))).all()), before)
         with self.subTest("abort wins an already in-flight prepare"):
             entered, release = asyncio.Event(), asyncio.Event()
             actual_destination = svc.destination

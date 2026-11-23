@@ -1,7 +1,10 @@
 """Release history and real recommendation DDL must work on PostgreSQL too."""
 import importlib.util
 import io
+import os
 from pathlib import Path
+import subprocess
+import sys
 import unittest
 
 from alembic.config import Config
@@ -28,6 +31,13 @@ class ReleaseSchemaHistoryTests(unittest.TestCase):
         for item in self.scripts().walk_revisions():
             with self.subTest(revision=item.revision):
                 self.assertLessEqual(len(item.revision), 64)
+
+    def test_documented_sqlite_upgrade_reaches_current_head_and_preserves_old_data(self):
+        result = subprocess.run(
+            [sys.executable, '-B', str(ROOT / 'tests/unified_requirements_upgrade.py'), '--sqlite'],
+            cwd=ROOT, env=os.environ.copy(), capture_output=True, text=True, timeout=120)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('PASS: complete Alembic chain, old data, private context, persistent source ACL, replay', result.stdout)
 
     def test_recommendation_migration_compiles_a_boolean_default_for_each_database(self):
         file = ROOT / 'migrations/versions/0063_plugin_recommendation_surface.py'

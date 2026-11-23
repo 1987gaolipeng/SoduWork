@@ -60,6 +60,16 @@ class AdminNameTests(unittest.IsolatedAsyncioTestCase):
             if route != "integrations":
                 self.assertEqual((await self.http.patch(path, json={"name": "  新名称 "})).json()["name"], "新名称")
 
+    async def test_control_characters_cannot_be_stored_in_organization_names(self):
+        org = await self.create_org("قسم الأبحاث")
+        for control in ("\0", "\x1b", "\n", "\x85", "\u2028", "\u202e", "\u2067"):
+            with self.subTest(control=repr(control)):
+                body = {"name": f"First{control}Last"}
+                self.assertEqual((await self.http.post("orgs", json=body)).status_code, 422)
+                self.assertEqual((await self.http.patch(f"orgs/{org}", json=body)).status_code, 422)
+        async with self.sessions() as session:
+            self.assertEqual(list(await session.scalars(select(models.OrgUnit.name))), ["قسم الأبحاث"])
+
     async def test_rename_and_move_check_the_destination_before_writing(self):
         first = await self.create_org("One")
         second = await self.create_org("Two")

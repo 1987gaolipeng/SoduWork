@@ -249,9 +249,29 @@ class LocalRequirementDeliveryTests(unittest.IsolatedAsyncioTestCase):
             await session.commit()
         with patch.object(task_access.hub, "publish", new=AsyncMock()) as send:
             self.assertTrue(await task_notifications.run_once(self.sessions))
-            self.assertEqual([(call.args[0], call.kwargs["user_id"]) for call in send.await_args_list], [("owner", "owner")])
-            self.assertEqual(send.await_args.args[1]["task"]["requirementStage"], "reviewing")
+            self.assertEqual([(call.args[0], call.kwargs["user_id"], call.args[1]["type"])
+                              for call in send.await_args_list],
+                             [("owner", "owner", "task.updated"), ("owner", "owner", "notice")])
+            self.assertEqual(send.await_args_list[0].args[1]["task"]["requirementStage"], "reviewing")
         self.assertFalse(await task_notifications.run_once(self.sessions))
+
+    async def test_submission_notice_goes_to_the_fallback_reviewer(self):
+        from app.services import task_access, task_notifications
+        tid = await self.create_running("manual")
+        self.assertEqual((await self.deliver(tid)).status_code, 200)
+        async with self.sessions() as session:
+            task = await session.get(models.Task, tid)
+            task.created_by = None
+            task.requester_user_id = "peer"
+            await session.execute(delete(models.TaskNotificationOutbox))
+            await session.commit()
+        submitted = await self.call("POST", "tasks/" + tid + "/submit-review", json={})
+        self.assertEqual(submitted.status_code, 200, submitted.text)
+        with patch.object(task_access.hub, "publish", new=AsyncMock()) as send:
+            self.assertTrue(await task_notifications.run_once(self.sessions))
+            notices = [(call.args[0], call.kwargs["user_id"]) for call in send.await_args_list
+                       if call.args[1]["type"] == "notice"]
+            self.assertEqual(notices, [("peer", "peer")])
 
     async def test_manual_submission_and_notification_are_atomic_when_outbox_storage_fails(self):
         tid = await self.create_running("manual")
@@ -302,7 +322,8 @@ class LocalRequirementDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(delivered.status_code, 200, delivered.text)
         denied = await self.call("POST", "tasks/" + tid + "/submit-review", json={})
         self.assertEqual(denied.status_code, 409, denied.text)
-        self.assertIn("当前只能分配给 0 人", denied.json()["detail"])
+        self.assertIn("未记录创建人", denied.json()["detail"])
+        self.assertIn("管理员", denied.json()["detail"])
         async with self.sessions() as session:
             self.assertIsNone((await session.get(models.Task, tid)).created_by)
             self.assertIsNone(await session.scalar(select(am.ApprovalAssignment.id)))

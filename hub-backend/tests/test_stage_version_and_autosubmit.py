@@ -192,7 +192,7 @@ class AutoSubmitTests(unittest.IsolatedAsyncioTestCase):
             await session.__aexit__(None, None, None)
             await engine.dispose()
 
-    async def test_requester_alone_cannot_receive_review_without_creator(self):
+    async def test_requester_receives_auto_review_without_creator(self):
         engine, sessions, session, task = await self._prepared()
         try:
             task.created_by = None
@@ -206,13 +206,34 @@ class AutoSubmitTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([row.status for row in requests], ["pending"])
             assignments = (await session.scalars(select(am.ApprovalAssignment).where(
                 am.ApprovalAssignment.request_id == requests[0].id))).all()
-            self.assertEqual(assignments, [])
+            self.assertEqual([row.user_id for row in assignments], [task.requester_user_id])
             kinds = (await session.scalars(select(models.TaskEvent.kind).where(
                 models.TaskEvent.task_id == task.id))).all()
-            self.assertIn("approval.unassigned", kinds)
-            self.assertNotIn("artifact.submitted_for_review", kinds)
-            self.assertEqual(task.work_routing["conversationTurn"]["deliveryIssue"]["code"], "review_unassigned")
-            self.assertIn("管理员", task.work_routing["conversationTurn"]["deliveryIssue"]["reason"])
+            self.assertNotIn("approval.unassigned", kinds)
+            self.assertIn("artifact.submitted_for_review", kinds)
+            self.assertNotIn("deliveryIssue", task.work_routing["conversationTurn"])
+        finally:
+            await session.__aexit__(None, None, None)
+            await engine.dispose()
+
+    async def test_retry_unassigned_delivery_uses_repaired_policy_on_the_same_ticket(self):
+        engine, sessions, session, task = await self._prepared()
+        try:
+            task.created_by = task.requester_user_id = None
+            await session.commit()
+            await conversation_turns.deliver_artifacts(session, task, conversation_id="conv-1", turn_id="turn-1",
+                files=[("review.md", b"Complete report", "text/markdown")])
+            request = (await session.scalars(select(am.ApprovalRequest))).one()
+            self.assertEqual((await task_service.task_to_api_live(session, task))["requirementStage"], "delivering")
+            session.add(am.ApprovalPolicy(id=release_control.POLICY_REVIEW, key="review", name="Review",
+                rules={"approvers": [{"type": "user", "ids": ["u-requester"]}]}))
+            preview = await release_control.preview_review_routing(session, task)
+            self.assertEqual([row["userId"] for row in preview["candidates"]], ["u-requester"])
+            artifact = await session.get(am.ArtifactVersion, request.artifact_version_id)
+            retry = await release_control.ensure_request(session, task, artifact, "review")
+            self.assertEqual(retry.id, request.id)
+            self.assertEqual((await session.scalars(select(am.ApprovalAssignment.user_id))).all(), ["u-requester"])
+            self.assertEqual((await task_service.task_to_api_live(session, task))["requirementStage"], "reviewing")
         finally:
             await session.__aexit__(None, None, None)
             await engine.dispose()
@@ -231,6 +252,9 @@ class AutoSubmitTests(unittest.IsolatedAsyncioTestCase):
             current = task.work_routing["conversationTurn"]
             issue = dict(current["deliveryIssue"])
             self.assertEqual(issue.get("artifactVersionId"), request.artifact_version_id)
+            self.assertIn(creator.display_name, issue["reason"])
+            self.assertIn("已停用", issue["reason"])
+            self.assertEqual((await task_service.task_to_api_live(session, task))["requirementStage"], "delivering")
             creator.is_active = True
             for existing_assignment in (False, True):
                 with self.subTest(existing_assignment=existing_assignment):
@@ -239,6 +263,7 @@ class AutoSubmitTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual([row.user_id for row in rows], [creator.id])
                     self.assertNotIn("deliveryIssue", task.work_routing["conversationTurn"])
                     self.assertEqual(request.status, "pending")
+                    self.assertEqual((await task_service.task_to_api_live(session, task))["requirementStage"], "reviewing")
                     await session.commit()
         finally:
             await session.__aexit__(None, None, None)

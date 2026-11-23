@@ -447,7 +447,8 @@ def public(row):
                       name=(target["runnerName"] or target["host"] or target["runnerId"]) +
                       " · " + agent.get("displayName", active["agentId"]))
 
-    return {"ok": True, "transferId": row.transfer_id, "taskId": row.task_id,
+    task_id = "" if row.phase == "aborted" and row.task_id == row.id else row.task_id
+    return {"ok": True, "transferId": row.transfer_id, "taskId": task_id,
             "accepted": bool(row.submitted_at),
             "acceptedAt": iso_utc(row.submitted_at) if row.submitted_at else "",
             "phase": row.phase, "status": receipt.get("state") or row.phase,
@@ -600,7 +601,22 @@ async def abort(session, client, transfer_id):
     row_id = identity(client.id, transfer_id)
     row = await session.get(Handoff, row_id)
     if not row:
-        raise HTTPException(404, "交接记录不存在")
+        # Reserve this transfer before prepare can publish a task. The internal
+        # fence key is distinct from the task ID allocated by prepare.
+        row = Handoff(id=row_id, owner_client_id=client.id, owner_user_id=user.id,
+                      transfer_id=transfer_id, task_id=row_id, phase="aborted",
+                      request_hash="", options={}, source={})
+        session.add(row)
+        try:
+            await session.commit()
+            return public(row)
+        except IntegrityError:
+            # A concurrent prepare or retry inserted the same transfer first.
+            await session.rollback()
+            await session.refresh(client)
+            row = await get(session, client, transfer_id)
+    if row.owner_user_id != client.user_ref:
+        raise HTTPException(403, "设备归属已变更")
     if row.phase == "aborted":
         return public(row)
     changed = await session.execute(update(Handoff).where(
@@ -610,9 +626,10 @@ async def abort(session, client, transfer_id):
         from .cloud_sync_notifications import mark
         mark(session, row.task_id, owner=row.owner_user_id)
     await session.commit()
-    if not changed.rowcount:
+    current = await get(session, client, transfer_id)
+    if not changed.rowcount and current.phase != "aborted":
         raise HTTPException(409, "云端已开始接管或尚在核对回执，不能恢复本地执行")
-    return public(await get(session, client, transfer_id))
+    return public(current)
 
 
 async def dispatch_record(session, task_id):

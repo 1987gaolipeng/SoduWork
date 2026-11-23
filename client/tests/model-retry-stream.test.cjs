@@ -40,6 +40,21 @@ function deny(response) {
   response.end(JSON.stringify({ error: { message: denial } }));
 }
 
+test('A conversation shows personal and company credential guidance when the model service returns HTTP 401', async t => {
+  const f = await fixture(t);
+  f.reply(() => ({ respond(response) {
+    response.writeHead(401, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ error: { message: denial } }));
+  } }));
+  await f.handle.submit('验证模型凭据提示。').completion;
+  const snapshot = f.handle.snapshot();
+  assert.equal(f.requests.length, 1);
+  assert.equal(snapshot.completion.retryable, false);
+  assert.match(snapshot.completion.error, /「我的模型」.*个人 Key.*企业服务.*管理员.*HTTP 401/);
+  assert.ok(snapshot.statusText.includes(snapshot.completion.error));
+  assert.doesNotMatch(snapshot.statusText, /synthetic-|fixture\.invalid/);
+});
+
 test('initial HTTP 403 returns one neutral error without tools or retries', async t => {
   const f = await fixture(t);
   f.reply(() => ({ respond: deny }));

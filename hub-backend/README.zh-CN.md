@@ -9,6 +9,8 @@ FastAPI + SQLAlchemy(async) + PostgreSQL（本地开发可回退 SQLite）。
 
 模块职责与状态归属见[首版范围](../docs/release-scope.md)。
 
+首次对话清单根据可用模型目录和当前管理员最近一次桌面端报告显示进度。设备上报底座和模型选择是否就绪。五分钟内未收到新报告时，Hub 会将这两步显示为等待桌面端报告。
+
 ## 快速开始（本地 SQLite，零配置）
 
 ```bash
@@ -21,6 +23,14 @@ python3 -m venv .venv
 ```
 
 打开 http://127.0.0.1:9080/docs 查看 API 文档，健康检查为 `GET /healthz`。
+
+## 排查派活排队
+
+Runner 首次接收派活时会在日志中记录执行引用和队列位置。任务排队期间，
+`GET /api/v1/tasks/{tid}/ai-status` 可返回 `runner.waitReason`。
+`resource_pressure` 表示资源准入策略暂停启动新任务。
+`execution_slot` 表示这项工作可用的执行槽已被占用。
+该字段为可选项。再次查询同一任务即可看到当前等待原因或已开始执行的状态。
 
 ## 桌面本地 Runner 事件恢复
 
@@ -252,6 +262,8 @@ python3 e2e_runner_tls.py --output /absolute/evidence/directory
 
 ## API 概览
 
+通过 `POST /api/v1/usage/events` 上报用量时，省略 `occurredAt` 表示使用 Hub 收到事件的时间。上报历史事件时可填写 ISO 8601 时间戳。没有时区偏移的时间戳按 UTC 解释。如果任一事件的时间戳无效，Hub 返回 HTTP 422，整批事件均不入账。
+
 - 客户端契约（设备登记 → 管理员激活 → 短期 `Device` 会话；长期设备密钥在 Hub 只存摘要）
   - `GET/POST /api/v1/tasks`、`GET/PATCH/DELETE /api/v1/tasks/{id}`
   - `POST /api/v1/tasks/batch-update`、`POST /api/v1/tasks/clear-done`（只清 done）
@@ -351,3 +363,7 @@ python3 e2e_dsh_private_probe.py \
 ```
 
 此显式检查使用生产私有探测作业和 ACP 桥接、实际安装的适配器与运行时，以及合成本机回环模型。先重现旧安装路径错误，再要求修正路径后出现真实模型请求并由 Agent 返回预期响应。检查使用可清理的用户目录、状态和临时目录，阻止 Node 连接非回环地址，并清理自身子进程；不会安装或更新依赖，也不使用真实凭据，不覆盖桌面界面、生产 Hub 或模型服务行为。由于需要已有原生安装，请在离线质量门禁之外单独运行。
+
+## 删除模型服务
+
+持有 `integration.manage` 权限时，通过 `GET /api/v1/admin/model-providers/{id}/deletion-impact` 获取服务版本、影响清单版本、子模型及可见的已保存模型选择。成员名称需要 `user.manage`，需求标题需要 `task.view`，两者均遵守部门可见范围。调用已有的 `DELETE /api/v1/admin/model-providers/{id}` 时，以 `expectedRevision`、`expectedImpact` 传入预览返回的版本，另以 `confirmId` 传入完整服务 ID。旧版请求未预览会返回 HTTP 428。遇到 HTTP 409 时，应重新获取清单并再次确认。内置服务禁止删除。
