@@ -66,7 +66,7 @@
     autoPreviewed: false, autoPreviewKey: '',
     active: '', files: [], summaryFiles: [], changes: [], services: [], tabs: [], states: Object.create(null),
     signature: '', seq: 0, epoch: 0, previewKey: '', previewText: '', previewError: '', previewLoading: false,
-    fileChanges: null, editor: null, editorDrafts: Object.create(null), editorDirty: false,
+    fileChanges: null, editor: null, editorDrafts: Object.create(null),
     observer: null, visibilityObserver: null, unlisten: null, unlistenElement: null, nativeShown: '', nativePending: false, frame: 0, nativeRequest: 0,
   };
   const READ_IMAGE_CACHE_BYTES = 64 * 1024 * 1024, READ_IMAGE_CACHE_TABS = 4;
@@ -281,9 +281,8 @@
     // change links still use the editor/diff surface.
     const deliverablePreview = file.primary !== false && ['web', 'markdown', 'image', 'video', 'pdf'].includes(kind);
     const editorFile = !deliverablePreview && (isCodeFile(file) || (kind === 'markdown' && Boolean(change)));
-    const tabKind = editorFile && kind === 'markdown' ? 'text' : kind;
     return addTab({ key: 'file:' + workScope() + ':' + id,
-      kind: tabKind, label: kind === 'web' ? file.title || file.name : file.name, file,
+      kind, label: kind === 'web' ? file.title || file.name : file.name, file,
       // A newly created source file has no meaningful "before" side; open it
       // directly in CodeMirror. Existing edits still open in Diff by default.
       view: editorFile ? (change && change.action !== 'created' ? 'diff' : 'code') : 'preview' }, activate);
@@ -497,9 +496,8 @@
     WB.manualClosed = false;
     if (!WB.open) { resetSplit(WB.root); WB.open = true; }
     const change = fileChangeFor(file);
-    const editorFile = isCodeFile(file) || Boolean(change) || kind === 'text';
     addTab({ key: 'file:' + workScope() + ':' + fileKey(file),
-      kind: editorFile && kind === 'markdown' ? 'text' : kind, label: file.name, file,
+      kind, label: file.name, file,
       view: change && change.action !== 'created' ? 'diff' : 'code', autoPreview: false }, true);
     paint();
     return true;
@@ -940,7 +938,7 @@
       active: '', files: [], summaryFiles: [], changes: [], services: [],
       tabs: [], states: Object.create(null), signature: '', previewKey: '', previewText: '', previewError: '',
       previewRequest: null, cloudOpenRequest: null, openingTaskFiles: new Set(),
-      previewLoading: false, fileChanges: null, editor: null, editorDrafts: Object.create(null), editorDirty: false,
+      previewLoading: false, fileChanges: null, editor: null, editorDrafts: Object.create(null),
       nativeShown: '', nativePending: false, frame: 0, ...keep,
     });
     if (previousRoot) {
