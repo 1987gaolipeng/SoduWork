@@ -24,6 +24,18 @@ python3 -m venv .venv
 
 打开 http://127.0.0.1:9080/docs 查看 API 文档，健康检查为 `GET /healthz`。
 
+### 自动化只读查询
+
+脚本应连接配置中的 Hub 地址。以下本地开发示例使用 9080 端口。健康检查允许匿名访问。查询账号可见的项目时，通过 `POST /api/v1/admin/login` 获取该账号的访问令牌，由环境变量或 CI 密钥存储提供 `HUB_TOKEN`。账号需要 `task.view` 权限。
+
+```sh
+HUB_URL=http://127.0.0.1:9080
+curl --fail --silent --show-error "$HUB_URL/healthz"
+curl --fail --silent --show-error -H "Authorization: Bearer $HUB_TOKEN" "$HUB_URL/api/v1/admin/projects"
+```
+
+项目响应是 JSON 数组。空数组表示该账号没有可见项目。HTTP 401 表示令牌缺失、无效或已过期，HTTP 403 表示已登录账号缺少所需权限。
+
 ## 排查派活排队
 
 Runner 首次接收派活时会在日志中记录执行引用和队列位置。任务排队期间，
