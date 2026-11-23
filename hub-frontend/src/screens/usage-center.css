@@ -26,15 +26,13 @@
 .ugc-inline-error { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 8px; background: var(--crit-soft); color: var(--crit); font-size: max(var(--font-min-readable, 14.5px), 12px); overflow-wrap: anywhere; }
 .ugc-inline-error svg { width: 15px; height: 15px; flex-shrink: 0; }
 
-/* Four readable measures, including the previously buried cost total. */
-.ugc-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-sm); }
+.ugc-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-sm); }
 .ugc-metric { display: flex; min-width: 0; flex-direction: column; padding: 18px 20px; border-right: 1px solid var(--line-2); }
 .ugc-metric:last-child { border-right: 0; }
 .ugc-metric-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .ugc-metric-head > span { color: var(--ink-2); font-size: max(var(--font-min-readable, 14.5px), 12px); font-weight: 550; }
 .ugc-metric-head > i { display: grid; width: 28px; height: 28px; flex-shrink: 0; place-items: center; border-radius: 8px; background: var(--accent-soft); color: var(--accent-2); }
 .ugc-metric-head svg { width: 15px; height: 15px; }
-.ugc-metric.cost .ugc-metric-head > i { background: var(--warn-soft); color: var(--warn); }
 .ugc-metric-value { display: flex; min-height: 50px; flex-wrap: wrap; align-items: baseline; gap: 7px; margin-top: 10px; }
 .ugc-metric-value b { color: var(--ink); font: 650 32px/1.2 var(--display); letter-spacing: -.04em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .ugc-metric-value > span { color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); }
@@ -54,7 +52,6 @@
 
 /* Wide daily chart uses the full selected window, never clips 90 days to 30. */
 .ugc-trend-panel { --chart-color: var(--accent); display: flex; flex-direction: column; }
-.ugc-trend-panel.is-cost { --chart-color: var(--warn); }
 .ugc-chart-tabs { border-color: var(--line-2); }
 .ugc-chart-tabs button { padding: 5px 9px; font-size: max(var(--font-min-readable, 14.5px), 12px); }
 .ugc-trend-summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 18px 20px 8px; color: var(--ink-3); font-size: max(var(--font-min-readable, 14.5px), 12px); }
@@ -184,7 +181,7 @@
 .ugc-error button { padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--accent-2); font: 14.5px var(--sans); cursor: pointer; }
 .usage-governance :is(button, select, [tabindex]):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; box-shadow: none; }
 .ugc-skeleton { display: flex; flex-direction: column; gap: 20px; }
-.ugc-sk-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; }
+.ugc-sk-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; }
 .ugc-sk-panels { display: grid; grid-template-columns: 1.7fr 1fr; gap: 20px; }
 .ugc-skeleton span { display: block; height: 154px; border-radius: 12px; background: linear-gradient(100deg, var(--surface-2) 20%, var(--surface) 50%, var(--surface-2) 80%); background-size: 240% 100%; animation: ugc-shimmer 1.4s ease infinite; }
 .ugc-sk-panels span { height: 390px; }
@@ -209,6 +206,7 @@
 }
 @media (max-width: 900px) {
   .ugc-metrics, .ugc-sk-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ugc-metric:last-child, .ugc-sk-metrics > :last-child { grid-column: 1 / -1; }
   .ugc-metric:nth-child(2) { border-right: 0; }
   .ugc-metric:nth-child(-n+2) { border-bottom: 1px solid var(--line-2); }
   .ugc-filterbar label { flex: 1 1 180px; }
