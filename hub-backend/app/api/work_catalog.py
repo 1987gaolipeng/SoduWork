@@ -106,9 +106,10 @@ async def create_profession(
     user: models.User = Depends(require_perm("work.catalog.manage")),
     session: AsyncSession = Depends(get_session),
 ):
+    await rbac.lock_org_tree(session, shared=True)
     target = await _target_org(session, user, body.get("orgId"))
     try:
-        row = await work_catalog.save_profession(session, body, target)
+        row = await work_catalog.save_profession(session, body, target, actor=user)
     except ValueError as error:
         raise _value_error(error) from error
     result = work_catalog.profession_api(row)
@@ -124,6 +125,7 @@ async def update_profession(
     user: models.User = Depends(require_perm("work.catalog.manage")),
     session: AsyncSession = Depends(get_session),
 ):
+    await rbac.lock_org_tree(session, shared=True)
     row = await session.get(models.Position, profession_id)
     if row is None:
         raise HTTPException(status_code=404, detail="职业画像不存在")
@@ -132,7 +134,7 @@ async def update_profession(
     await _target_org(session, user, row.org_id)
     try:
         row = await work_catalog.save_profession(
-            session, body, row.org_id, row)
+            session, body, row.org_id, row, actor=user)
     except ValueError as error:
         raise _value_error(error) from error
     result = work_catalog.profession_api(row)

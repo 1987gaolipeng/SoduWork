@@ -76,6 +76,7 @@ class HubContractTests(unittest.IsolatedAsyncioTestCase):
             child.parent_id = self.user.org_id
         own = await self.request("GET", "admin/orgs?limit=1")
         self.assertEqual(([row["id"] for row in own["items"]], own["total"]), (["row-0"], 1))
+        await self.request("GET", "admin/orgs?includeManaged=true", 403)
         for path in ("roles", "permissions", "domains", "role-options"):
             await self.request("GET", "admin/" + path, 403)
         for permission in ("user.manage", "identity.manage", "client.assign"):
@@ -87,7 +88,13 @@ class HubContractTests(unittest.IsolatedAsyncioTestCase):
         self.user._perms = {"user.manage"}
         self.assertEqual((await self.request("GET", "admin/orgs?limit=1"))["total"], 2)
         self.assertEqual(len(await self.request("GET", "admin/domains")), 3)
+        async with self.sessions() as session, session.begin():
+            child = await session.get(models.OrgUnit, "row-1")
+            child.data_source = "test"
+        self.assertEqual((await self.request("GET", "admin/orgs?limit=1"))["total"], 1)
+        self.assertEqual((await self.request("GET", "admin/orgs?includeManaged=true&limit=1"))["total"], 2)
         self.user._perms = {"task.dispatch"}
+        await self.request("GET", "admin/orgs?includeManaged=true", 403)
         self.assertEqual((await self.request("GET", "admin/domains?limit=1"))["total"], 3)
         self.user._perms = {"role.manage"}
         self.assertTrue(all("permissions" in role for role in await self.request("GET", "admin/roles")))

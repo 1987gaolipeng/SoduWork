@@ -18,7 +18,8 @@ async function mountCatalog(me = { orgId: 'org-home' }) {
   const page = await createComponentHarness(new URL('../src/screens/WorkCatalog.jsx', import.meta.url), {
     props: { me },
     dependencies: {
-      '../api.js': { api: {
+      '../BusinessRecords.jsx': { useBusinessRecords: () => ({ matches: () => true }) },
+      '../api.js': { can: () => true, api: {
         orgs: async () => orgs,
         workCatalog(orgId) {
           let resolve, reject
@@ -71,6 +72,7 @@ test('workflow setup uses plugin permission and preserves the editor when leavin
     exportName: 'WorkflowGuide', privateExports: ['WorkflowGuide'], props,
     dependencies: {
       '../api.js': { can: key => permitted && key === 'plugin.manage' },
+      '../BusinessRecords.jsx': {},
       '../ui.jsx': { navTo: (...args) => destinations.push(args) },
       '../FilterControls.jsx': {}, './work-catalog.css': {},
     },
@@ -105,6 +107,7 @@ test('scenario editor checks only selected workflows and saves valid selections'
     props: { orgId: row.orgId, row, workflows, professions: [], onDone() {} },
     dependencies: {
       '../api.js': { api: { updateWorkScenario: async (id, body) => writes.push([id, body.defaultPluginKey]) } },
+      '../BusinessRecords.jsx': {},
       '../FilterControls.jsx': {}, '../ui.jsx': { Modal: 'Modal', SelectMenu: 'SelectMenu', toast: text => notices.push(text) },
       './work-catalog.css': {},
     },

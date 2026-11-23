@@ -377,6 +377,8 @@ The check verifies the packaged native verifier, real TLS with a disposable trus
 
 ## API and trust boundaries
 
+The AI proxy's image and video generation routes accept options for the selected media type, such as image size or video duration. A value in the model's configured `defaults` takes precedence over a request option. To set a provider-specific parameter, add it to the model's `defaults` in the catalog. The proxy ignores unrecognized request fields.
+
 When posting usage to `POST /api/v1/usage/events`, omit `occurredAt` to use the time the Hub receives the event. Supply an ISO 8601 timestamp to report an earlier instant. The Hub interprets a timestamp without an offset as UTC. If an event has an invalid timestamp, the Hub returns HTTP 422 before recording any event in the batch. For example, 16:30 without an offset is 00:30 the next day in Beijing. Include `+08:00` to report 16:30 Beijing time.
 
 Omitting `sourceType` selects `chat`. Supported categories are `chat`, `task`, `workflow`, `automation` and `system`. Use the lowercase names as shown. Task and workflow reports require a task the device owns or its account is assigned. Invalid categories return HTTP 422. Each event receipt includes the cumulative stored counters and a `status` of `created`, `updated` (a counter increased), or `duplicate` (no counter increased).

@@ -228,6 +228,57 @@ async def batch_user_audits(client, actor, headers):
     return {("POST", path)}
 
 
+async def catalog_batch_audits(client, actor, headers):
+    """Only credit routes whose HTTP mutations and per-target audits actually persist."""
+    cases = (
+        ("projects", models.Project, "", {"org_id": "org-security-a"}),
+        ("repositories", models.Repo, "audit-projects-1", {"project_id": "audit-projects-1"}),
+        ("orgs", models.OrgUnit, "", {}),
+        ("professions", models.Position, "org-security-a", {"org_id": "org-security-a"}),
+    )
+    verified = set()
+    for resource, model, scope_id, fields in cases:
+        path = f"/api/v1/admin/business-records/{resource}"
+        ids = [f"audit-{resource}-{suffix}" for suffix in (1, 2)]
+        async with SessionLocal() as session:
+            session.add_all([model(id=uid, name=uid, data_source="legacy", **fields) for uid in ids])
+            await session.commit()
+
+        before = {"dataSource": "legacy", "isArchived": False}
+        passed_route = True
+        for action, after in (
+            ("test", {"dataSource": "test", "isArchived": False}),
+            ("business", {"dataSource": "business", "isArchived": False}),
+            ("archive", {"dataSource": "business", "isArchived": True}),
+            ("restore", {"dataSource": "business", "isArchived": False}),
+        ):
+            audit_ids = set()
+            body = {"ids": ids, "action": action, "scopeId": scope_id}
+            for changed in (len(ids), 0):
+                response = await client.post(path, headers=headers, json=body)
+                async with SessionLocal() as session:
+                    rows = (await session.scalars(select(model).where(model.id.in_(ids)))).all()
+                    events = (await session.scalars(select(models.AuditLog).where(
+                        models.AuditLog.target_id.in_(ids), models.AuditLog.action == "catalog." + action))).all()
+                event_ids = {event.id for event in events}
+                ok = (response.status_code == 200 and response.json() == {"changed": changed}
+                      and {row.id for row in rows} == set(ids)
+                      and all((row.data_source, row.is_archived) == (after["dataSource"], after["isArchived"])
+                              for row in rows)
+                      and len(events) == len(ids) and {event.target_id for event in events} == set(ids)
+                      and all(event.actor_id == actor and event.target_type == model.__tablename__
+                              and event.target_label == event.target_id
+                              and event.detail == {"before": before, "after": after} for event in events)
+                      and (changed > 0 or event_ids == audit_ids))
+                check(f"{resource} {action} ({changed} changed) persists state and one audit per change", ok)
+                passed_route = passed_route and ok
+                audit_ids = event_ids
+            before = after
+        if passed_route:
+            verified.add(("POST", path))
+    return verified
+
+
 def audit_contract(verified) -> None:
     missing = []
     seen_exemptions = set()
@@ -371,7 +422,6 @@ async def main() -> None:
     ) as client:
         verified = await approval_audits(client, super_user.id, super_headers)
         verified.update(await batch_user_audits(client, super_user.id, super_headers))
-        audit_contract(verified)
         denied = await client.post(
             "/api/v1/admin/orgs", headers=ordinary_headers,
             json={"name": "越权新部门", "parentId": "org-security-a"})
@@ -602,6 +652,11 @@ async def main() -> None:
               and all(action in actions for action in (
                   "binding.upsert", "task.assign", "binding.delete", "integration.create",
                   "integration.update", "integration.token.rotate")), actions)
+
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://soduwork.test") as client:
+        verified.update(await catalog_batch_audits(client, super_user.id, super_headers))
+    audit_contract(verified)
 
 
 async def run() -> None:
