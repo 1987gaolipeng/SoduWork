@@ -11,7 +11,7 @@ const { readMaterials } = require('../main/conversation/material-reader.cjs');
 let directory, file, digest;
 const bytes = 48 * 1024 * 1024;
 before(() => {
-  directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sodu-material-text-'));
+  directory = fs.mkdtempSync(path.join(os.tmpdir(), 'material-text-'));
   file = path.join(directory, 'application.log');
   const chunk = Buffer.from('ordinary application log entry\n'.repeat(4096));
   const hash = crypto.createHash('sha256');
