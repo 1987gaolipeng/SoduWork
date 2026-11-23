@@ -13,6 +13,7 @@ RELEASE_SMOKES = tuple(sorted((
     "test_alert_channel_settings.py",
     "test_plugin_import_rollback.py",
     "test_repository_deployment_target_integrity.py",
+    "test_memory_records.py",
     "test_org_memory_automatic.py",
     "test_org_sort_validation.py",
     "test_template_catalog_revision.py",
