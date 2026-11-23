@@ -565,6 +565,10 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
     const artifactUrl = String(record.artifactUrl || watch?.artifactUrl || snapshot?.execution?.artifactUrl || snapshot?.artifactUrl || '').trim();
     const cachedDelivery = record.syncState?.ref === record.ref && Number.isSafeInteger(remote?.persistedThrough) &&
       record.syncState.cursor >= remote.persistedThrough && record.syncArtifactsPending === false;
+    const queued = remote?.status === 'queued';
+    const running = ['running', 'dispatching'].includes(remote?.status);
+    const queuePosition = Number(remote?.queuePosition);
+    const queueUnconfirmed = queued && remote?.queueLeaseStatus === 'unconfirmed';
     return { ...snapshot, ...(artifactUrl ? { artifactUrl } : {}),
       ...(record.codeDelivery ? { codeDelivery: record.codeDelivery, deliveryMode: 'git' } : {}), cloudHandoff: handoff,
       ...(record.phase === 'committed' ? {
@@ -576,16 +580,22 @@ function create({ app, identityOf, request = http, workspace = portable, notify 
         adapterId, displayName: target?.displayName || adapterId,
         executionSelectionPending: Boolean(record.pendingExecutionSelection),
         modelSelection: { name: model, model: { id: model, name: model, label: model || '执行机默认模型' } },
-        status: ['running', 'queued', 'dispatching'].includes(remote?.status) ? 'streaming'
+        status: queued ? 'queued' : running ? 'streaming'
           : remote?.status === 'failed' ? 'error' : 'idle',
         statusText: watch?.error || (record.syncArtifactError ? require('./cloud-execution-sync').ARTIFACT_RETRY_MESSAGE : '') ||
           (remote?.historyGap ? require('./cloud-execution-sync').HISTORY_GAP_MESSAGE : '') ||
-          ((record.cloudMessages || []).length ? '消息已保存，正在等待执行机确认，请勿重复发送。' : ''),
+          ((record.cloudMessages || []).length ? '消息已保存，正在等待执行机确认，请勿重复发送。'
+            : queueUnconfirmed ? '排队回执尚未确认，已有任务已保留；请先核对执行机，避免重复安排。' : ''),
         queue: [], queued: 0, pendingUi: null, pendingPermissions: [],
         cloudApprovals: record.cloudApprovals || [],
         cloudMessages: record.cloudMessages || [],
         accessControl: { ...snapshot.accessControl, supported: false, canChangeDuringSession: false },
-        execution: { ...require('./cloud-timing').project(remote), ...(artifactUrl ? { artifactUrl } : {}), running: ['running', 'queued', 'dispatching'].includes(remote?.status), stopped: remote?.status === 'stopped', queue: [],
+        execution: { ...require('./cloud-timing').project(remote), ...(artifactUrl ? { artifactUrl } : {}),
+          running, active: queued || running, queued,
+          queuePosition: queued && Number.isSafeInteger(queuePosition) && queuePosition > 0 ? queuePosition : 0,
+          queueClass: queued ? String(remote?.queueClass || '') : '',
+          ...(queueUnconfirmed ? { queueLeaseStatus: 'unconfirmed', queueLeaseReason: String(remote.queueLeaseReason || '') } : {}),
+          stopped: remote?.status === 'stopped', queue: [],
           configured: false, visible: false, quality: null, harness: null,
           cloud: true, taskId: record.taskId, runId: record.ref },
       } : {}) };

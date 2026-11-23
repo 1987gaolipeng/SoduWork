@@ -126,7 +126,7 @@ async function queueFixture(t, metadata = {}) {
       page: page(), messages: [], approvals: [], attachments: [] };
     if (route.includes('/ai-session')) return page();
   });
-  const cloud = f.controller();
+  const cloud = f.controller({ interval: 10 });
   assert.equal((await cloud.synchronization.tick()).ok, true);
   const id = (await cloud.history()).chats[0].id;
   const view = await cloud.reopen(id, 'queued-cloud-view');
@@ -140,6 +140,17 @@ async function statusRenderer() {
     path.join(__dirname, '../components/panels/panels-chat-status.js'), 'utf8'),
   { module, window: {} });
   return module.exports;
+}
+
+async function observedState(view, state) {
+  // The active view has its own production poll; a directory scan is not
+  // an acknowledgment that this poll has received the new snapshot.
+  for (let attempt = 0; attempt < 400; attempt++) {
+    const snapshot = view.snapshot();
+    if (snapshot.status === state) return snapshot;
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  assert.fail('The active cloud view did not receive ' + state);
 }
 
 for (const metadata of [{}, { queued: true, queuePosition: 3, queueClass: 'task' }])
@@ -178,16 +189,17 @@ test('queue receipt warnings and stale timing clear when the same cloud executio
   f.row.execution = { ...f.row.execution, status: 'running', startedAt: new Date(now - 14000).toISOString(),
     finishedAt: '', queuePosition: 0 };
   assert.equal((await f.cloud.synchronization.tick()).ok, true);
-  snapshot = f.view.snapshot();
+  snapshot = await observedState(f.view, 'streaming');
   assert.equal(snapshot.status, 'streaming');
   assert.equal(snapshot.execution.running, true);
   assert.equal(snapshot.execution.elapsedMs, 14000);
   assert.equal(snapshot.statusText, '', 'Stale queue metadata cannot retain its warning during execution');
   assert.equal(snapshot.execution.queueLeaseStatus, undefined);
 
-  f.row.execution = { ...f.row.execution, status: 'done',
-    finishedAt: new Date(now + 51000).toISOString() };
+  now += 51000;
+  f.row.execution = { ...f.row.execution, status: 'done', finishedAt: new Date(now).toISOString() };
   assert.equal((await f.cloud.synchronization.tick()).ok, true);
+  await observedState(f.view, 'idle');
   now += 3600000;
   snapshot = f.view.snapshot();
   assert.equal(snapshot.status, 'idle');
