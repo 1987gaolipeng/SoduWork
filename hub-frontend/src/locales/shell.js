@@ -1,5 +1,6 @@
 export const dictionary = {
   "zh-CN": {
+    "login.restricted": "账号已停用或登录受限，请联系管理员。",
     "plugin.recommend.action": "推荐",
     "plugin.recommend.edit": "编辑推荐",
     "plugin.type.app": "应用",
@@ -73,6 +74,7 @@ export const dictionary = {
     "sub.client-releases": "上传已签名安装包、启用或停用各平台版本"
   },
   "en-US": {
+    "login.restricted": "This account is disabled or sign-in is restricted. Contact your administrator.",
     "plugin.recommend.action": "Recommend",
     "plugin.recommend.edit": "Edit",
     "plugin.type.app": "App",
@@ -146,6 +148,7 @@ export const dictionary = {
     "sub.client-releases": "Upload signed installers and enable or disable platform versions"
   },
   "ja-JP": {
+    "login.restricted": "アカウントが停止されているか、ログインが制限されています。管理者にお問い合わせください。",
     "plugin.recommend.action": "おすすめ",
     "plugin.recommend.edit": "編集",
     "plugin.type.app": "アプリ",
@@ -219,6 +222,7 @@ export const dictionary = {
     "sub.client-releases": "署名済みインストーラーをアップロードし、各プラットフォームのバージョンを有効化または無効化"
   },
   "ko-KR": {
+    "login.restricted": "계정이 비활성화되었거나 로그인이 제한되었습니다. 관리자에게 문의하세요.",
     "plugin.recommend.action": "추천",
     "plugin.recommend.edit": "편집",
     "plugin.type.app": "앱",
