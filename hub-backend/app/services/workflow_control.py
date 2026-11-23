@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am
 from .. import models
-from . import ai_exec, task_events
+from . import ai_exec, artifact_version_guard, task_events
 from .task_access import publish_owner
 from .workflow_runs import _event, _ms, _now
 
@@ -41,6 +41,12 @@ def _owned_refs(nodes: list[am.NodeRun]) -> tuple[set[str], set[tuple[str, str]]
 
 async def _mark_cancelled(session: AsyncSession, run: am.WorkflowRun, actor: str,
                           reason: str) -> tuple[dict, list[dict], models.Task | None]:
+    task = await session.get(models.Task, run.task_id)
+    if task is not None:
+        # The scheduler locks the run before changing its task. Votes lock the task
+        # before the approval and can create a successor gate in that transaction.
+        await artifact_version_guard.lock_task(session, run.task_id)
+        await session.refresh(task)
     nodes = list((await session.scalars(select(am.NodeRun).where(
         am.NodeRun.run_id == run.id))).all())
     active_nodes = [node for node in nodes if node.state in _ACTIVE]
@@ -115,7 +121,6 @@ async def _mark_cancelled(session: AsyncSession, run: am.WorkflowRun, actor: str
                 # cancel/rollback contract it is safer to retain its independent state machine.
                 running_deployments += 1
 
-    task = await session.get(models.Task, run.task_id)
     another_run = (await session.execute(select(am.WorkflowRun.id).where(
         am.WorkflowRun.task_id == run.task_id,
         am.WorkflowRun.id != run.id,
@@ -178,7 +183,8 @@ async def cancel_run(session: AsyncSession, run: am.WorkflowRun, *, actor: str,
         # The asyncio lock covers the normal one-process deployment.  FOR UPDATE also makes
         # cancellation atomic when an enterprise later runs multiple API workers.
         locked = (await session.execute(select(am.WorkflowRun).where(
-            am.WorkflowRun.id == run.id).with_for_update())).scalar_one_or_none()
+            am.WorkflowRun.id == run.id).with_for_update()
+            .execution_options(populate_existing=True))).scalar_one_or_none()
         if locked is None:
             raise ValueError("插件运行不存在")
         run = locked
