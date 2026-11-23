@@ -346,6 +346,17 @@ async def branches(session: AsyncSession, row: am.ScmRepository, *,
     return sorted({str(value).strip() for value in values or [] if str(value).strip()})
 
 
+async def lock_deployment_repository(session: AsyncSession, rid: str) -> models.Repo | None:
+    """Serialize deployment-target writes and repository deletion until commit."""
+    if session.get_bind().dialect.name == "sqlite":
+        # SQLite ignores FOR UPDATE. Reserve its writer without changing business fields.
+        query = update(models.Repo).where(models.Repo.id == rid).values(id=models.Repo.id).returning(models.Repo)
+    else:
+        query = select(models.Repo).where(models.Repo.id == rid).with_for_update()
+    # Route-level scope checks may already have populated the identity map.
+    return await session.scalar(query.execution_options(populate_existing=True, synchronize_session=False))
+
+
 async def lock_mapping_project(session: AsyncSession, pid: str) -> models.Project | None:
     """Serialize repository additions with project deletion until commit.
 

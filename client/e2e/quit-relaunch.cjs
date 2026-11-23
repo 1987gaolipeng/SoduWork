@@ -90,6 +90,7 @@ if (typeof electron === 'string') {
     const source = fs.readFileSync(path.join(__dirname, '../main.js'), 'utf8');
     const handler = source.slice(source.indexOf("  app.on('second-instance'"), source.indexOf('  _fileOpen.fromCommand'));
     require('node:vm').runInNewContext(handler, { app, _quitRelaunch: state, _fileOpenModule: files,
+      _firstChatLinks: require('../main/first-chat-links.cjs'),
       _linuxStartup: { focusRecovery: () => false },
       _fileOpen: { enqueue: () => { record('enqueue-exiting'); return 0; } },
       openDeskWindow: () => record('open-workspace'), console });

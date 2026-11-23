@@ -329,7 +329,7 @@ cancel(options = {}) {
       ctx.immediate.cancel();
       ctx.liveAccess.cancel();
       ctx.access?.broker.cancel();
-      if (ctx.imageController) ctx.imageController.abort();
+      if (ctx.directModelController) ctx.directModelController.abort();
       ctx.modelRecovery.clear();
       const active = ctx.turnQueue.active();
       if (active && active.options.controlled) {
@@ -390,6 +390,12 @@ updateQueue(id, action, value) {
         if (ctx.closed || ctx.inFlight || ctx.turnQueue.active() || ctx.acc.state.pendingUi) return { ok: false, reason: '当前执行尚未结束，请稍后重试' };
         const recovery = ctx.modelRecovery.view();
         if (recovery?.id !== id) return { ok: false, reason: '这轮状态已变化，请刷新后确认' };
+        if (recovery.mode === 'text-summary') {
+          const selected = ctx.modelSelection.view();
+          if (!selected.name || !selected.model.id || selected.model.id === recovery.failedModelName ||
+              selected.model.modality === 'image' || selected.model.unavailable)
+            return { ok: false, reason: '请先选择其他对话模型，再总结已有结果' };
+        }
         if (recovery?.requiresModelChange && recovery.failedModelName === ctx.modelSelection.capture()) {
           return { ok: false, reason: '当前模型仍不可用，请先切换到可用模型后再恢复这一轮' };
         }
@@ -427,7 +433,7 @@ close() {
       ctx.liveAccess.close();
       ctx.accessChanges.close();
       ctx.access?.broker.close();
-      if (ctx.imageController) ctx.imageController.abort();
+      if (ctx.directModelController) ctx.directModelController.abort();
       ctx.closed = true;
       // Optional conversation services (memory, telemetry, etc.) may attach
       // listeners to the public handle. Release them before disposing Pi so a

@@ -635,7 +635,8 @@ async def save_target(session: AsyncSession, body: dict, row: am.DeploymentTarge
                       ) -> am.DeploymentTarget:
     repo_id = _text(body.get("repoId") if row is None else body.get("repoId", row.repo_id), 36)
     env_id = _text(body.get("environmentId") if row is None else body.get("environmentId", row.environment_id), 36)
-    repo_row = await session.get(models.Repo, repo_id)
+    from .repository_catalog import lock_deployment_repository
+    repo_row = await lock_deployment_repository(session, repo_id)
     if not repo_row:
         raise ValueError("代码仓库不存在")
     env_row = await session.get(am.Environment, env_id)

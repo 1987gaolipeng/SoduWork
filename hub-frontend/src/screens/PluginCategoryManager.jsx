@@ -142,9 +142,9 @@ export default function PluginCategoryManager({ open, onClose, onSaved }) {
 
   if (!open) return null
   return <>
-    <Modal scope="plugin-page" wide title={LABEL.title} icon="sitemap" onClose={onClose}
-    foot={<>
-      <button type="button" className="btn btn-ghost" onClick={onClose}>{LABEL.close}</button>
+    <Modal dirty={changed} scope="plugin-page" wide title={LABEL.title} icon="sitemap" onClose={onClose}
+    foot={dismiss => <>
+      <button type="button" className="btn btn-ghost" onClick={dismiss}>{LABEL.close}</button>
       <button type="button" className="btn btn-primary" disabled={!loaded || loading || saving || !changed || Boolean(validation)} onClick={save}>
         {saving ? LABEL.saving : LABEL.save}
       </button>

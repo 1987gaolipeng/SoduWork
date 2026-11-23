@@ -70,3 +70,72 @@ test('runner installation OS dropdown selects the matching generated command', a
   page.act(() => osSelect().props.onChange({ target: { value: 'windows' } }))
   assert.ok(command().includes('windows-fixture-command'))
 })
+
+test('employee device sort and export use the same filtered inventory across pages', async (t) => {
+  const requests = []
+  const downloads = []
+  const api = {
+    async clientsPage(query) {
+      requests.push(query)
+      if (query.sortBy === 'owner') throw new Error('Inventory unavailable')
+      const id = query.sortBy ? 'from-another-page' : 'initial-device'
+      return { items: [{ id }], total: 30, counts: { all: 30 } }
+    },
+    async exportClients(filters) { downloads.push(filters) },
+  }
+  const page = await createComponentHarness(new URL('../src/screens/Clients.jsx', import.meta.url), {
+    exportName: 'DeviceFleet', privateExports: ['DeviceFleet'],
+    dependencies: {
+      '../client-appearance.js': appearance,
+      '../api.js': { api, can: () => true },
+      '../FilterControls.jsx': { FilterInput: 'FilterInput', FilterSelect: 'FilterSelect' },
+      '../ListPager.jsx': 'ListPager',
+      '../ui.jsx': { Icon: 'Icon', Modal: 'Modal', toast() {}, Confirm: 'Confirm', SelectMenu: 'SelectMenu' },
+      './RunnerBoard.jsx': 'RunnerBoard', './ClientAccessPolicy.jsx': 'ClientAccessPolicy',
+      './MailSettings.jsx': 'MailSettings', './client-updates.css': {}, './execution-network.css': {},
+    },
+  })
+  t.after(() => page.unmount())
+  await page.flush()
+
+  const columns = () => page.nodes(node => node.type === 'th')
+  const headers = () => page.nodes(node => node.type === 'button' && /en-th-sort/.test(node.props.className))
+  assert.equal(headers().length, 6)
+  assert.ok(columns().every(th => th.props['aria-sort'] === undefined))
+
+  const stateFilter = page.nodes(node => node.type === 'FilterSelect')[0]
+  page.act(() => stateFilter.props.onChange({ target: { value: 'offline' } }))
+  const pager = page.nodes(node => node.type?.name === 'Pager')[0]
+  page.act(() => pager.props.onChange(2))
+  await page.flush()
+  assert.equal(requests.at(-1).page, 2)
+
+  page.act(() => headers()[5].props.onClick())
+  await page.flush()
+  const filters = { state: 'offline', form: 'all', q: '', sortBy: 'lastSeen', sortDir: 'desc' }
+  assert.deepEqual(requests.at(-1), { ...filters, page: 1, pageSize: 25 })
+  assert.equal(columns()[5].props['aria-sort'], 'descending')
+  assert.ok(page.nodes(node => node.props.title === 'from-another-page').length)
+
+  const exportButton = page.nodes(node => node.type === 'button' && /en-export-btn/.test(node.props.className))[0]
+  assert.equal(exportButton.props.disabled, false)
+  await exportButton.props.onClick()
+  assert.deepEqual(downloads, [filters])
+
+  page.act(() => headers()[5].props.onClick())
+  await page.flush()
+  assert.equal(columns()[5].props['aria-sort'], 'ascending')
+  assert.equal(requests.at(-1).sortDir, 'asc')
+  page.act(() => headers()[0].props.onClick())
+  await page.flush()
+  assert.equal(columns()[5].props['aria-sort'], undefined)
+  assert.equal(columns()[0].props['aria-sort'], 'ascending')
+  assert.equal(requests.at(-1).sortBy, 'name')
+
+  page.act(() => headers()[1].props.onClick())
+  await page.flush()
+  assert.equal(columns()[0].props['aria-sort'], 'ascending', 'a failed refresh keeps the displayed order')
+  assert.equal(columns()[1].props['aria-sort'], undefined)
+  assert.ok(page.nodes(node => node.props.role === 'alert').length)
+  assert.ok(page.nodes(node => /en-export-btn/.test(node.props.className))[0].props.disabled)
+})

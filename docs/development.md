@@ -60,9 +60,14 @@ node --test tests/*.test.mjs
 ```sh
 cd hub-backend
 python3 -m pip install -r requirements-test.txt
+python3 -m ruff check app
+python3 scripts/check_changed_lint.py origin/main
+python3 -m mypy app
 python3 quality_gate.py --list
 python3 quality_gate.py --profile release --scope backend
 ```
+
+增量 lint 使用本地 Git 中的目标分支或基线提交。CI 要求全应用 Ruff 检查通过，并拦截 PR 中新增的 Pyflakes、导入顺序和代码风格问题。mypy 报告当前应用的类型错误，后续后端测试仍会运行。
 
 完整离线门禁耗时较长；日常修改先运行清单中对应的检查。`live` 检查连接真实服务或模型，需要自行准备隔离环境，不包含在默认离线验证中。
 

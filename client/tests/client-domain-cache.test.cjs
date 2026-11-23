@@ -118,6 +118,11 @@ test('model metadata is shared only under its confirmed topic and invalidation r
   f.confirm(true); await read(); assert.equal(f.calls(), 2);
   model = 'second'; await f.cache.invalidate('models', f.scope());
   assert.equal((await read()).usable[0].name, 'second');
+  model = 'first-chat';
+  const before = f.calls();
+  await Promise.all([1, 2].map(() => f.cache.read('models', f.scope(), undefined, true)));
+  assert.equal((await read()).usable[0].name, 'first-chat', 'the chat sees the composer’s fresh directory');
+  assert.equal(f.calls(), before + 1, 'concurrent fresh reads share the request and update the cache');
 });
 test('configuration keeps its exact shape and personal caches cannot cross devices', async t => {
   const f = fixture(t, async () => ({theme: 'dark', dockVisible: false}));

@@ -112,10 +112,10 @@ function RoleEditor({ role, catalog, onClose, onDone }) {
   }
 
   return (
-    <Modal title={readOnly ? tx("查看权限") : role ? tx("编辑角色") : tx("新建角色")} icon="shield" wide onClose={onClose}
-      foot={<>
+    <Modal title={readOnly ? tx("查看权限") : role ? tx("编辑角色") : tx("新建角色")} icon="shield" wide draft={readOnly ? undefined : [name, [...keys].sort()]} onClose={onClose}
+      foot={dismiss => <>
         <span className="muted" style={{ fontSize: 14.5, marginRight: 'auto' }}>{tx("已选 ")}{keys.size} / {catalog.length}{tx(" 项权限")}</span>
-        <button className="btn btn-ghost" onClick={onClose}>{readOnly ? tx("关闭") : tx("取消")}</button>
+        <button className="btn btn-ghost" onClick={dismiss}>{readOnly ? tx("关闭") : tx("取消")}</button>
         {!readOnly && <button className="btn btn-primary" disabled={busy} onClick={save}>{busy ? tx("保存中…") : tx("保存")}</button>}
       </>}>
       {readOnly ? <div><b>{role.name}</b><p>{tx("内置角色的名称和权限只读。可通过自定义角色授予其他权限。")}</p></div>

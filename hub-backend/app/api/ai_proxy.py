@@ -46,6 +46,11 @@ async def _resolve_catalog(session, client, model_name="", modality="chat", *, a
     narrow test double. Keep that supported while the real resolver receives
     the already-admitted rows and avoids a second provider/model query.
     """
+    ticket_provider = getattr(client, "_proxy_provider_id", "") if modality == "chat" else ""
+    if ticket_provider and available is not None:
+        available = [row for row in available if row.get("providerId") == ticket_provider]
+        if not available or (model_name and not any(row["name"] == model_name for row in available)):
+            raise HTTPException(409, "模型凭据已变化，请重新选择模型后继续")
     resolver = model_catalog.resolve
     try:
         parameters = inspect.signature(resolver).parameters.values()
@@ -428,6 +433,14 @@ def _proxy_error(exc, *, responses=False):
     payload = json.loads(result.body)
     trace = str(getattr(exc, "diagnostic_id", ""))
     headers = {}
+    if exc.status == 403 and payload["error"]["code"] == 403:
+        category = getattr(exc, "forbidden_category", "unclassified")
+        if category not in ("generic", "restricted"):
+            category = "unclassified"
+        # Older SDKs discard custom fields. Retain the same bounded category
+        # in error.message in both the JSON response and the SSE error frame.
+        payload["error"]["refusalCategory"] = category
+        payload["error"]["message"] = f"HTTP 403：模型请求被拒绝 [soduwork-refusal:{category}]"
     if re.fullmatch(r"[a-f0-9]{32}", trace):
         payload["error"]["diagnosticId"] = trace
         payload["error"]["message"] += f" [soduwork-trace:{trace}]"
@@ -519,29 +532,34 @@ async def proxy_config(
                 "reason": "此底座不使用企业模型配置，请检查执行底座"}
     # Match controlled dispatch: explicit choice > Agent preference > company
     # default. A removed preference is an actionable error, never a silent swap.
-    want = str(model or "").strip() or (
-        "" if custom_acp or ignore_preference else model_catalog.agent_model(client, cli)
-    )
+    want, provider = model_catalog.agent_choice(client, cli, model)
+    # History recovery may discard an obsolete name-only preference. A provider
+    # selection also identifies the account being billed and must survive recovery.
+    if custom_acp or (ignore_preference and not provider):
+        want, provider = str(model or "").strip(), ""
     # Signed proxy tickets and usage receipts bind funding to this exact runtime.
     client._proxy_quota_runtime = cli
     usable = await model_catalog.usable(session, client)
+    pinned_error = {"providerPinned": True} if provider else {}
+    if provider:
+        usable = [row for row in usable if row.get("providerId") == provider]
     if want and not any(item["name"] == want for item in usable):
-        return {"ok": False, "path": PROXY_PATH,
+        return {"ok": False, "path": PROXY_PATH, **pinned_error,
                 "reason": f"你选择的模型「{want}」现在不可用，请重新选择"}
     conf = await _resolve_catalog(session, client, want, available=usable)
     if not conf:
-        return {"ok": False, "path": PROXY_PATH,
+        return {"ok": False, "path": PROXY_PATH, **pinned_error,
                 "reason": "还没有可用的模型：去「我的模型」配一把自己的密钥，或让管理员配好共享模型服务"}
     if conf.get("kind") != "openai-compat":
         return {"ok": False, "path": PROXY_PATH, "code": "unsupported_model_protocol",
-                "protocol": conf.get("kind"), "supportedProtocols": ["openai-compat"],
+                **pinned_error, "protocol": conf.get("kind"), "supportedProtocols": ["openai-compat"],
                 "reason": _protocol_guidance(conf)}
     hit = next((m for m in usable if m["name"] == conf["model"]), {})
     image_models = await model_catalog.usable(session, client, "image")
     video_models = await model_catalog.usable(session, client, "video")
     from ..services import model_quota
     proxy_key, expires_in = device_auth.issue_proxy_ticket(client, quota_runtime=cli,
-        quota_binding=model_quota.binding(conf))
+        quota_binding=model_quota.binding(conf), provider_id=provider)
     mcp_key, mcp_expires_in = device_auth.issue_mcp_ticket(client)
     image_routing = model_catalog.normalize_image_routing(conf.get("imageRouting"))
     # Catalog values may come from an administrator-edited JSON payload. Keep

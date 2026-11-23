@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_session
 from ..deps import require_perm
 from ..models import Task, User
-from ..schemas import task_to_api
+from ..schemas import task_to_api, validate_name_characters
 from ..services import audit, catalog_names, rbac
 from ..services import tasks as svc
 from ..services.repository_catalog import lock_mapping_project
@@ -88,6 +88,20 @@ async def _project_owner(session: AsyncSession, actor: User, owner_id: str) -> U
     return owner
 
 
+def _project_name(value):
+    if value is None:
+        value = ""
+    if not isinstance(value, str):
+        raise HTTPException(status_code=422, detail="Project name must be a string")
+    try:
+        name = validate_name_characters(value.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not name:
+        raise HTTPException(status_code=400, detail="请填工程名")
+    return name
+
+
 async def _available_project_name(session, name, org_id, exclude_id=None):
     from ..models import Project
     try:
@@ -105,9 +119,7 @@ async def create_project(body: dict = Body(default_factory=dict),
     unknown = sorted(set(body) - {"name", "desc", "group", "repoUrl", "ownerUserId"})
     if unknown:
         raise HTTPException(status_code=422, detail="未知字段：" + ", ".join(unknown))
-    name = (body.get("name") or "").strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="请填工程名")
+    name = _project_name(body.get("name"))
     owner = await _project_owner(session, user, str(body.get("ownerUserId") or ""))
     org_id = owner.org_id or user.org_id
     await _available_project_name(session, name, org_id)
@@ -157,7 +169,7 @@ async def update_project(pid: str, body: dict = Body(default_factory=dict),
     if "ownerUserId" in body:
         owner = await _project_owner(session, user, str(body.get("ownerUserId") or ""))
     next_org = old_org or (owner.org_id if owner else None)
-    name = str(body.get("name") or "").strip() if "name" in body else p.name
+    name = _project_name(body["name"]) if "name" in body else p.name
     if name != p.name or next_org != old_org:
         if not name:
             raise HTTPException(status_code=400, detail="请填工程名")
@@ -173,7 +185,8 @@ async def update_project(pid: str, body: dict = Body(default_factory=dict),
                 for repo in legacy_repos:
                     repo.org_id = p.org_id
                 migrated_repos = len(legacy_repos)
-    for k, f in (("name", "name"), ("desc", "desc"), ("group", "group"),
+    p.name = name
+    for k, f in (("desc", "desc"), ("group", "group"),
                  ("repoUrl", "repo_url"), ("extProjectId", "ext_project_id")):
         if k in body:
             setattr(p, f, str(body.get(k) or "").strip())
@@ -384,10 +397,13 @@ async def update_repo(rid: str, body: dict = Body(default_factory=dict),
 @router.delete("/repos/{rid}")
 async def delete_repo(rid: str, user: User = Depends(require_perm("task.dispatch")),
                       session: AsyncSession = Depends(get_session)):
-    from ..models import Repo
-    r = await session.get(Repo, rid)
+    from ..automation_models import DeploymentTarget
+    from ..services.repository_catalog import lock_deployment_repository
+    r = await lock_deployment_repository(session, rid)
     if r is None:
         return {"ok": True}
+    if await session.scalar(select(DeploymentTarget.id).where(DeploymentTarget.repo_id == rid).limit(1)):
+        raise HTTPException(status_code=409, detail="该仓库仍有关联的部署目标，请先改绑或移除部署目标。")
     name = r.name
     await session.delete(r)
     await session.commit()

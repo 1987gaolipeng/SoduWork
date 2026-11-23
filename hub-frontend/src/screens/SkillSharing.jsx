@@ -82,14 +82,14 @@ function ReviewDialog({ item, onClose, onReviewed }) {
     } catch (err) { setError(err.message) }
     finally { setBusy(false) }
   }
-  return <div className="skill-review"><Modal scope="skill-review" wide title={tx("审核 Skill · ") + item.name} onClose={onClose}
-    foot={<><button className="btn btn-ghost" disabled={busy || !data.data} onClick={() => download()}>{tx("下载完整包")}</button>
+  return <div className="skill-review"><Modal dirty={Boolean(note)} scope="skill-review" wide title={tx("审核 Skill · ") + item.name} onClose={onClose}
+    foot={dismiss => <><button className="btn btn-ghost" disabled={busy || !data.data} onClick={() => download()}>{tx("下载完整包")}</button>
       <span className="ml-auto" />
       {current.status === 'pending' ? <>
         <button className="btn btn-ghost" disabled={busy || !note.trim()} onClick={() => review('reject')}>{tx("退回修改")}</button>
         <button className="btn btn-primary" disabled={busy || !confirmed || !data.data}
           onClick={() => review('approve')}>{busy ? tx("正在处理…") : tx("审核并发布")}</button>
-      </> : <button className="btn btn-ghost" onClick={onClose}>{tx("完成")}</button>}</>}>
+      </> : <button className="btn btn-ghost" onClick={dismiss}>{tx("完成")}</button>}</>}>
     {data.error ? <ErrorState msg={data.error.message} onRetry={data.reload} /> : !data.data ? <Loading /> : <>
       <div className="skill-review-meta"><span>{data.data.fileCount}{tx(" 个文件")}</span>
         <code title={item.checksum}>{tx("版本 ")}{item.checksum.slice(0, 12)}</code>

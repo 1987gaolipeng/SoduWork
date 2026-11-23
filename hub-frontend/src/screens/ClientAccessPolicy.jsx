@@ -85,7 +85,7 @@ export default function ClientAccessPolicy() {
 
       <div className="cap-grid cap-login-grid">
         <article className="cap-card">
-          <div className="cap-card-title"><span><Icon name="user" /></span><div><h3>{tx("员工注册")}</h3>
+          <div className="cap-card-title"><span><Icon name="users" /></span><div><h3>{tx("员工注册")}</h3>
             <p>{tx("使用邮箱验证码完成注册，并设置登录密码。")}</p></div></div>
           <Switch checked={form.allowSelfRegistration}
             onChange={(value) => setForm((old) => ({ ...old, allowSelfRegistration: value }))}

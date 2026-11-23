@@ -628,13 +628,13 @@ async def generate_video(session: AsyncSession, client: models.Client, arguments
         if stored:
             raise
         # Save only an error category; never persist provider bodies or secrets.
-        async def release():
+        async def release(error: BaseException):
             await session.rollback()
             await video_jobs.change(session, job, meta={
-                "status": "failed" if isinstance(exc, VideoJobFailed) else "interrupted",
-                "leaseUntil": 0, "lastError": type(exc).__name__,
+                "status": "failed" if isinstance(error, VideoJobFailed) else "interrupted",
+                "leaseUntil": 0, "lastError": type(error).__name__,
             })
-        finishing = asyncio.create_task(release())
+        finishing = asyncio.create_task(release(exc))
         try:
             await asyncio.shield(finishing)
         except asyncio.CancelledError:

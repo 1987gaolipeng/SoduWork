@@ -8,12 +8,13 @@ import re
 from typing import Iterable
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import automation_models as am
 from .. import models
 from .agent_naming import cli_from_name
-
 
 PROFILE_DEFINITIONS = [
     {"id": "p_solution", "name": "方案顾问", "category": "方案与咨询", "sort": 1,
@@ -524,9 +525,13 @@ async def save_profession(
     row.category = category
     row.description = str(body.get(
         "description", current.description if current else "") or "").strip()[:400]
-    row.competencies = _items(
-        body.get("competencies", current.competencies if current else []),
-        limit=30, length=80)
+    try:
+        competencies = _items(
+            body.get("competencies", current.competencies if current else []),
+            limit=30, length=80)
+    except (TypeError, ValueError) as error:
+        raise ValueError("competencies 必须是数组") from error
+    row.competencies = competencies
     try:
         sort = int(body.get("sort", current.sort if current else 0) or 0)
     except (TypeError, ValueError):
@@ -556,18 +561,18 @@ async def delete_profession(session: AsyncSession, row: models.Position) -> str:
     return ""
 
 
-async def validate_profession_ids(
-    session: AsyncSession, org_id: str | None, value
-) -> list[str]:
-    """Normalize profile IDs and reject references outside the current organization inheritance
-    scope.
-    """
+def check_profession_ids(value, visible_positions: set[str]) -> list[str]:
     position_ids = _items(value, limit=100, length=36)
-    visible_positions = {
-        row.id for row in await profession_rows(session, org_id)}
     if any(item not in visible_positions for item in position_ids):
         raise ValueError("职业画像不属于当前员工所在组织")
     return position_ids
+
+
+async def validate_profession_ids(
+    session: AsyncSession, org_id: str | None, value
+) -> list[str]:
+    visible_positions = {row.id for row in await profession_rows(session, org_id)}
+    return check_profession_ids(value, visible_positions)
 
 
 async def validate_scenario(
@@ -639,6 +644,11 @@ async def validate_scenario(
         "sort": max(0, min(sort, 9999)),
     }
 
+
+class ScenarioKeyConflict(ValueError):
+    """This organization already has a scenario with the requested key."""
+
+
 async def save_scenario(
     session: AsyncSession,
     body: dict,
@@ -646,18 +656,23 @@ async def save_scenario(
     current: models.WorkScenario | None = None,
 ) -> models.WorkScenario:
     values = await validate_scenario(session, body, org_id, current)
-    query = select(models.WorkScenario).where(models.WorkScenario.key == values["key"])
-    query = query.where(
-        models.WorkScenario.org_id.is_(None) if org_id is None
-        else models.WorkScenario.org_id == org_id)
-    duplicate = (await session.execute(query)).scalar_one_or_none()
-    if duplicate is not None and (current is None or duplicate.id != current.id):
-        raise ValueError("这个场景标识已经存在")
-    row = current or models.WorkScenario(org_id=org_id, key=values["key"])
-    for field, value in values.items():
-        setattr(row, field, value)
     if current is None:
-        session.add(row)
+        # Platform scenarios have a NULL organization, outside the unique constraint.
+        if org_id is None and await session.scalar(select(models.WorkScenario.id).where(
+            models.WorkScenario.org_id.is_(None), models.WorkScenario.key == values["key"],
+        ).limit(1)):
+            raise ScenarioKeyConflict("这个场景标识已经存在")
+        insert = pg_insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
+        statement = insert(models.WorkScenario).values(org_id=org_id, **values).on_conflict_do_nothing(
+            index_elements=["org_id", "key"],
+        ).returning(models.WorkScenario)
+        row = await session.scalar(statement)
+        if row is None:
+            raise ScenarioKeyConflict("这个场景标识已经存在")
+    else:
+        row = current
+        for field, value in values.items():
+            setattr(row, field, value)
     await session.commit()
     await session.refresh(row)
     return row

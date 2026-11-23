@@ -73,14 +73,14 @@ async send(text, turnAttachments, sendOptions) {
         }
         ctx.inFlight = true;
         ctx.failedLastTurn = false;
-        ctx.imageController = new AbortController();
+        ctx.directModelController = new AbortController();
         runControl.resetTurn(ctx.run, true);
         ctx.displayTitle = ctx.displayTitle || titleForTurn(rawText);
         ctx.updatedAt = Date.now();
         try {
           await ctx.beginTurnJournal(turn);
           const result = await require('./image-turn').generate({ handle: ctx.handle, identity: ctx.identity, choice: imageChoice,
-            text: rawText, submissionId: turn.submissionId, signal: ctx.imageController.signal,
+            text: rawText, submissionId: turn.submissionId, signal: ctx.directModelController.signal,
             push: ev => ctx.acc.push(ev), emit: ctx._emit });
           ctx.failedLastTurn = !result.ok;
           return (deliveryResult = result);
@@ -89,7 +89,7 @@ async send(text, turnAttachments, sendOptions) {
           await ctx.finishTurnJournal();
           const capture = ctx._captureDirectDelivery(turn, deliveryResult);
           if (capture) await capture;
-          ctx.imageController = null; ctx.inFlight = false;
+          ctx.directModelController = null; ctx.inFlight = false;
           ctx._emit({ kind: 'turn-finished' }); queueMicrotask(ctx._drainTurns);
         }
       }

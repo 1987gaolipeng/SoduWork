@@ -1,5 +1,8 @@
 (function (global) {
   const messages = {
+    "请管理员在 Hub 启用 IM_ENABLED 并重启服务。自托管部署请在 deployment.json 中设置 imEnabled 为 true，重新启动后在此刷新。": "Ask your administrator to enable IM_ENABLED and restart the Hub. For a self-hosted deployment, set imEnabled to true in deployment.json, restart the instance, then refresh here.",
+    "机器人聊天设置": "Bot chat settings",
+    "尚未启用机器人聊天，请联系管理员开启手机远程对话。": "Bot chat is off. Ask your administrator to enable remote conversations.",
     "授权对话和插件使用企业微信，远程发送任务指令请在「手机远程对话」中连接机器人并绑定任务": "Authorize chats and plugins to use WeCom. To send task instructions, connect a bot and link a task under Remote conversations.",
     "手机远程对话": "Remote conversations",
     "绑定任务": "Link a task",
