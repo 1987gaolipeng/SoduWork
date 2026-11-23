@@ -564,11 +564,14 @@ async def _spec(session: AsyncSession, run: am.DeploymentRun,
                 env: am.Environment, target: am.DeploymentTarget, repo: models.Repo,
                 task: models.Task) -> dict:
     descriptors = []
-    for env_name, ref_id in dict(target.secret_refs or {}).items():
-        ref = await session.get(am.SecretReference, str(ref_id))
-        if ref is None or not ref.enabled:
-            raise ValueError(f"密钥引用不可用：{ref_id}")
-        descriptors.append({"env": str(env_name), "provider": ref.provider, "locator": ref.locator})
+    if target.secret_refs:
+        repo_org = await session.scalar(select(models.Repo.org_id).where(models.Repo.id == target.repo_id))
+        task_org = await environment_service.task_org_id(session, task)
+        for env_name, ref_id in target.secret_refs.items():
+            ref = environment_service.require_target_secret(
+                await session.get(am.SecretReference, str(ref_id), populate_existing=True),
+                str(ref_id), repo_org, task_org)
+            descriptors.append({"env": str(env_name), "provider": ref.provider, "locator": ref.locator})
     cfg = dict(target.config or {})
     checks = [*list(env.health_checks or []), *list(target.health_checks or [])]
     rollback = environment_service.effective_rollback(env, target)
