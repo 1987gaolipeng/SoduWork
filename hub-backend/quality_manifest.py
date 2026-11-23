@@ -325,6 +325,7 @@ RELEASE_SMOKES = tuple(sorted((
     "smoke/smoke_script_tool.py",
     "smoke/smoke_server_image.py",
     "smoke/smoke_session_memory_http.py",
+    "test_memory_records.py",
     "smoke/smoke_skill_scan_async.py",
     "smoke/smoke_skills.py",
     "smoke/smoke_smart_route.py",
