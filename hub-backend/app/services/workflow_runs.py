@@ -38,7 +38,7 @@ def node_api(n: am.NodeRun, definition: dict | None = None,
     definition = dict(definition or {})
     return {"id": n.id, "runId": n.run_id, "key": n.node_key, "type": n.node_type,
             "name": str(definition.get("name") or n.node_key),
-            "dependsOn": list(definition.get("dependsOn") or []),
+            "dependsOn": workflow_contracts.direct_dependencies(definition),
             "inputs": list(definition.get("inputs") or []),
             "outputs": list(definition.get("outputs") or []),
             "capabilities": dict(definition.get("capabilities") or {}),
@@ -75,7 +75,7 @@ async def run_api(session: AsyncSession, run: am.WorkflowRun) -> dict:
                    for x in (dict((version.workflow if version else {}) or {}).get("nodes") or [])}
     workflow = [{"key": key, "name": str(item.get("name") or key),
                  "type": str(item.get("type") or ""),
-                 "dependsOn": list(item.get("dependsOn") or []),
+                 "dependsOn": workflow_contracts.direct_dependencies(item),
                  "inputs": list(item.get("inputs") or []),
                  "outputs": list(item.get("outputs") or []),
                  "capabilities": dict(item.get("capabilities") or {})}
@@ -368,7 +368,7 @@ async def _retry_failed_gate(session: AsyncSession, run: am.WorkflowRun, actor: 
                 for item in nodes:
                     key = str(item.get("key") or "")
                     if key and key not in affected \
-                            and affected.intersection(item.get("dependsOn") or []):
+                            and affected.intersection(workflow_contracts.direct_dependencies(item)):
                         affected.add(key)
                         changed = True
             context = dict(run.context or {})
@@ -392,7 +392,7 @@ async def _retry_failed_gate(session: AsyncSession, run: am.WorkflowRun, actor: 
             await session.commit()
             return source
         raise ValueError("人工审阅已经产生处理记录，不能用重试绕过人的决定")
-    dependency_keys = [str(key) for key in (definition.get("dependsOn") or [])]
+    dependency_keys = [str(key) for key in workflow_contracts.direct_dependencies(definition)]
     deps = [latest.get(key) for key in dependency_keys]
     recovered_dependencies: list[dict] = []
     # Restore fixed commits only for code gates.
@@ -691,6 +691,7 @@ async def _start_unlocked(session: AsyncSession, task: models.Task, binding: am.
     if entrypoints.get(entrypoint, default) is False:
         label = "自动化" if entrypoint == "automation" else "需求"
         raise ValueError(f"这个能力包没有开放{label}入口")
+    workflow_contracts.validate_dependency_graph((version.workflow or {}).get("nodes") or [])
     inputs = _validate_workflow_inputs(version.manifest or {}, inputs or {})
     active = (await session.execute(select(am.WorkflowRun).where(
         am.WorkflowRun.task_id == task.id,
@@ -804,7 +805,7 @@ def _ancestor_keys(nodes: list[dict], target_key: str) -> set[str]:
     def visit(key: str, stack: set[str]) -> None:
         if key in stack:
             raise ValueError("新版插件的依赖关系存在循环")
-        for dependency in by_key[key].get("dependsOn") or []:
+        for dependency in workflow_contracts.direct_dependencies(by_key[key]):
             dependency = str(dependency or "")
             if dependency not in by_key:
                 raise ValueError("新版插件的依赖节点不完整")

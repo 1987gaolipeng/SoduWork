@@ -169,6 +169,37 @@ def delivery_mode(node: dict | None, has_repo: bool) -> str:
     return "git" if has_repo else "files"
 
 
+def direct_dependencies(node: dict) -> list[str]:
+    deps = list(node.get("dependsOn") or [])
+    when = (node.get("config") or {}).get("when")
+    if (isinstance(when, dict) and isinstance(when.get("node"), str)
+            and when["node"] and when["node"] not in deps):
+        deps.append(when["node"])
+    return deps
+
+
+def validate_dependency_graph(nodes: list[dict]) -> None:
+    keys = {n["key"] for n in nodes}
+    deps = {n["key"]: set(direct_dependencies(n)) for n in nodes}
+    for key, values in deps.items():
+        missing = values - keys
+        if missing:
+            raise ValueError(f"节点 {key} 依赖不存在的节点：{', '.join(sorted(missing))}")
+        if key in values:
+            raise ValueError(f"节点 {key} 不能依赖自己")
+    ready = [key for key, values in deps.items() if not values]
+    seen = []
+    while ready:
+        key = ready.pop(0)
+        seen.append(key)
+        for other, values in deps.items():
+            values.discard(key)
+            if not values and other not in seen and other not in ready:
+                ready.append(other)
+    if len(seen) != len(nodes):
+        raise ValueError("首版插件工作流必须是无环图；返工请用节点 retry 策略表达")
+
+
 def dependency_keys(workflow: dict | None, node: dict | None) -> list[str]:
     """Return the transitive upstream nodes in workflow order.
 
@@ -179,7 +210,7 @@ def dependency_keys(workflow: dict | None, node: dict | None) -> list[str]:
     nodes = [dict(item) for item in dict(workflow or {}).get("nodes") or []
              if isinstance(item, dict)]
     by_key = {str(item.get("key") or ""): item for item in nodes}
-    pending = [str(key or "") for key in dict(node or {}).get("dependsOn") or []]
+    pending = [str(key or "") for key in direct_dependencies(node or {})]
     found: set[str] = set()
     while pending:
         key = pending.pop()
@@ -187,7 +218,7 @@ def dependency_keys(workflow: dict | None, node: dict | None) -> list[str]:
             continue
         found.add(key)
         parent = by_key.get(key) or {}
-        pending.extend(str(value or "") for value in parent.get("dependsOn") or [])
+        pending.extend(str(value or "") for value in direct_dependencies(parent))
     return [str(item.get("key") or "") for item in nodes
             if str(item.get("key") or "") in found]
 
